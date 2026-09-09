@@ -15,6 +15,8 @@ export const STALE_ROTATION_SUPERSESSION_PREPARATION_KIND = "PRODUCTION_STALE_PE
 export const STALE_ROTATION_SUPERSESSION_AUTHORIZATION_KIND = "PRODUCTION_STALE_PENDING_ROTATION_SUPERSESSION";
 export const STALE_ROTATION_SUPERSESSION_OPERATION = "PRODUCTION_STALE_PENDING_ROTATION_SUPERSESSION";
 export const STALE_ROTATION_SUPERSESSION_CONSUMPTION_KIND = "PRODUCTION_STALE_PENDING_ROTATION_SUPERSESSION_CONSUMPTION";
+export const STALE_ROTATION_SUPERSESSION_REPLACEMENT_RESERVATION_KIND = "PRODUCTION_STALE_PENDING_ROTATION_SUPERSESSION_REPLACEMENT_RESERVATION";
+export const STALE_ROTATION_SUPERSESSION_EXECUTION_START_KIND = "PRODUCTION_STALE_PENDING_ROTATION_SUPERSESSION_EXECUTION_START";
 export const STALE_ROTATION_SUPERSESSION_WORKFLOW_REF = "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-stale-rotation-supersession.yml@refs/heads/main";
 export const STALE_ROTATION_SUPERSESSION_WORKFLOW_PATH = ".github/workflows/authorize-production-stale-rotation-supersession.yml";
 export const STALE_ROTATION_SUPERSESSION_ARTIFACT_NAME = "production-stale-rotation-supersession-authorization";
@@ -104,7 +106,8 @@ export function createStaleRotationSupersessionPreparation({ discovery, publicat
   return Object.freeze({ ...body, preparationSha256: staleRotationSupersessionSha256(body) });
 }
 
-export function assertStaleRotationSupersessionPreparation(value, { sourceSha, now = new Date() } = {}) {
+export function assertStaleRotationSupersessionPreparation(value, { sourceSha, now = new Date(), validationMode = "start" } = {}) {
+  if (!["start", "continuation"].includes(validationMode)) fail("Supersession preparation validation mode is invalid.");
   const fields = ["schemaVersion", "kind", "operation", "environment", "accountId", "region", "sourceSha", "staleSourceSha", "staleRotationId", "replacementRotationId", "publication", "liveBackend", "stageBState", "resources", "predecessorSlotIdentities", "currentPredecessorIdentitySha256", "selectorIdentitiesSha256", "materialJournalIdentity", "materialJournalFileSha256", "writePlan", "writePlanSha256", "preparedAt", "expiresAt", "preparationSha256"];
   exactKeys(value, fields, "Supersession preparation");
   if (value.schemaVersion !== 1 || value.kind !== STALE_ROTATION_SUPERSESSION_PREPARATION_KIND || value.operation !== STALE_ROTATION_SUPERSESSION_OPERATION || value.environment !== "production" || value.accountId !== "368992683803" || value.region !== "eu-west-2" || value.sourceSha !== sourceSha || !SHA40.test(sourceSha || "")) fail("Supersession preparation identity is invalid.");
@@ -121,7 +124,7 @@ export function assertStaleRotationSupersessionPreparation(value, { sourceSha, n
   if (!SHA256.test(preparationSha256 || "") || staleRotationSupersessionSha256(body) !== preparationSha256 || value.writePlanSha256 !== staleRotationSupersessionSha256(assertWritePlan(value.writePlan, value.resources))) fail("Supersession preparation hash or write plan is invalid.");
   for (const field of ["currentPredecessorIdentitySha256", "selectorIdentitiesSha256", "materialJournalIdentity", "materialJournalFileSha256"]) if (!SHA256.test(value[field] || "")) fail(`Supersession preparation ${field} is invalid.`);
   const prepared = date(value.preparedAt, "Supersession preparedAt"); const expires = date(value.expiresAt, "Supersession expiresAt"); const current = now instanceof Date ? now : new Date(now);
-  if (expires.getTime() - prepared.getTime() !== STALE_ROTATION_SUPERSESSION_MAX_AGE_MS || current < prepared || current > expires) fail("Supersession preparation is expired or not yet valid.");
+  if (expires.getTime() - prepared.getTime() !== STALE_ROTATION_SUPERSESSION_MAX_AGE_MS || current < prepared || (validationMode === "start" && current > expires)) fail("Supersession preparation is expired or not yet valid.");
   return value;
 }
 
@@ -157,8 +160,9 @@ function assertAuthorizationBindings(value, preparation) {
   if (value.sourceSha !== preparation.sourceSha || value.preparationSha256 !== preparation.preparationSha256 || value.staleRotationId !== preparation.staleRotationId || value.staleSourceSha !== preparation.staleSourceSha || value.replacementRotationId !== preparation.replacementRotationId || value.materialJournalIdentity !== preparation.materialJournalIdentity || value.writePlanSha256 !== preparation.writePlanSha256 || value.publicationIdentitySha256 !== preparation.publication.identitySha256 || canonical(value.imageDigests) !== canonical(preparation.publication.imageDigests) || value.liveBackendIdentitySha256 !== preparation.liveBackend.identitySha256 || canonical(value.stageBState) !== canonical(preparation.stageBState) || value.requiredReviewer !== "T-ej2003" || value.authorizationConsumed !== false) fail("Supersession authorization is bound to a different prepared transaction.");
 }
 
-export function assertApprovedStaleRotationSupersessionAuthorization(value, preparation, { sourceSha, materialJournalFileSha256, now = new Date() } = {}) {
-  const checked = assertStaleRotationSupersessionPreparation(preparation, { sourceSha, now });
+export function assertApprovedStaleRotationSupersessionAuthorization(value, preparation, { sourceSha, materialJournalFileSha256, now = new Date(), validationMode = "start" } = {}) {
+  const current = now instanceof Date ? now : new Date(now);
+  const checked = assertStaleRotationSupersessionPreparation(preparation, { sourceSha, now: current, validationMode });
   exactKeys(value, ["schemaVersion", "kind", "operation", "sourceSha", "preparationSha256", "staleRotationId", "staleSourceSha", "replacementRotationId", "materialJournalIdentity", "writePlanSha256", "publicationIdentitySha256", "imageDigests", "liveBackendIdentitySha256", "stageBState", "requiredReviewer", "authorizationConsumed", "authorizationStatus", "approvalStatus", "approvedBy", "approvedAt", "protectedEnvironmentApprovalEvidence", "protectedEnvironmentApprovalEvidenceSha256", "authorizationSha256"], "Approved supersession authorization");
   if (!value || value.authorizationStatus !== "APPROVED" || value.approvalStatus !== "APPROVED" || value.approvedBy !== "T-ej2003" || !value.approvedAt || value.authorizationConsumed !== false) fail("Supersession authorization is not exactly approved and unconsumed.");
   const { authorizationSha256, ...body } = value;
@@ -166,7 +170,7 @@ export function assertApprovedStaleRotationSupersessionAuthorization(value, prep
   assertAuthorizationBindings(value, checked);
   if (materialJournalFileSha256 !== checked.materialJournalFileSha256) fail("Supersession material journal differs from the approved preparation.");
   assertProductionEnvironmentApprovalIdentity(value.protectedEnvironmentApprovalEvidence, { sourceSha, repository: STALE_ROTATION_SUPERSESSION_REPOSITORY });
-  assertProductionEnvironmentApprovalFreshness(value.protectedEnvironmentApprovalEvidence, { now });
+  if (validationMode === "start") assertProductionEnvironmentApprovalFreshness(value.protectedEnvironmentApprovalEvidence, { now: current });
   if (value.protectedEnvironmentApprovalEvidence.workflowRef !== STALE_ROTATION_SUPERSESSION_WORKFLOW_REF || value.protectedEnvironmentApprovalEvidenceSha256 !== value.protectedEnvironmentApprovalEvidence.evidenceSha256 || value.protectedEnvironmentApprovalEvidence.actualApproval?.userLogin !== value.approvedBy) fail("Supersession protected-environment approval binding is invalid.");
   return value;
 }
@@ -178,7 +182,8 @@ export function assertStaleRotationSupersessionAuthorizationProvenance(value, { 
   return value;
 }
 
-export async function resolveStaleRotationSupersessionAuthorizationArtifact({ workflowRunId, workflowRunAttempt, sourceSha, preparation, run = createProductionGithubCommandRunner(), now = new Date() } = {}) {
+export async function resolveStaleRotationSupersessionAuthorizationArtifact({ workflowRunId, workflowRunAttempt, sourceSha, preparation, run = createProductionGithubCommandRunner(), now = new Date(), validationMode = "start" } = {}) {
+  if (!["start", "continuation"].includes(validationMode)) fail("Supersession authorization validation mode is invalid.");
   if (!/^[1-9][0-9]*$/.test(String(workflowRunId || "")) || !/^[1-9][0-9]*$/.test(String(workflowRunAttempt || "")) || !SHA40.test(sourceSha || "")) fail("Supersession authorization workflow coordinates are invalid.");
   const workflow = parseGithubJson(run, ["api", `repos/${STALE_ROTATION_SUPERSESSION_REPOSITORY}/actions/runs/${workflowRunId}`], "Supersession authorization workflow");
   if (String(workflow.id) !== String(workflowRunId) || workflow.repository?.full_name !== STALE_ROTATION_SUPERSESSION_REPOSITORY || workflow.head_repository?.full_name !== STALE_ROTATION_SUPERSESSION_REPOSITORY || workflow.path !== STALE_ROTATION_SUPERSESSION_WORKFLOW_PATH || workflow.event !== "workflow_dispatch" || workflow.head_sha !== sourceSha || workflow.status !== "completed" || workflow.conclusion !== "success" || String(workflow.run_attempt) !== String(workflowRunAttempt)) fail("Supersession authorization workflow provenance is not authentic.");
@@ -194,7 +199,7 @@ export async function resolveStaleRotationSupersessionAuthorizationArtifact({ wo
   if (authorizationBytes.length === 0 || authorizationBytes.length > 1024 * 1024) fail("Supersession authorization artifact payload size is invalid.");
   let authorization;
   try { authorization = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(authorizationBytes)); } catch { fail("Supersession authorization artifact payload is malformed."); }
-  assertApprovedStaleRotationSupersessionAuthorization(authorization, preparation, { sourceSha, materialJournalFileSha256: preparation?.materialJournalFileSha256, now });
+  assertApprovedStaleRotationSupersessionAuthorization(authorization, preparation, { sourceSha, materialJournalFileSha256: preparation?.materialJournalFileSha256, now, validationMode });
   const environment = parseGithubJson(run, ["api", `repos/${STALE_ROTATION_SUPERSESSION_REPOSITORY}/environments/production`], "Supersession authorization environment");
   const approvals = parseGithubJson(run, ["api", `repos/${STALE_ROTATION_SUPERSESSION_REPOSITORY}/actions/runs/${workflowRunId}/approvals`], "Supersession authorization approvals");
   const actual = (Array.isArray(approvals) ? approvals : []).flatMap((approval) => approval?.state === "approved" ? (approval.environments || []).filter((item) => item?.id === environment.id && item?.name === "production").map(() => ({ state: "approved", environmentId: environment.id, environmentName: "production", userId: approval.user?.id, userLogin: approval.user?.login })) : []);
@@ -205,6 +210,56 @@ export async function resolveStaleRotationSupersessionAuthorizationArtifact({ wo
   const provenance = Object.freeze({ ...provenanceBody, provenanceSha256: staleRotationSupersessionSha256(provenanceBody) });
   assertStaleRotationSupersessionAuthorizationProvenance(provenance, { authorization, sourceSha });
   return Object.freeze({ workflow, artifact: matches[0], authorization, provenance });
+}
+
+export function createStaleRotationSupersessionReplacementReservation({ sourceSha, staleSourceSha, staleRotationId, publicationIdentitySha256, replacementRotationId, transactionDirectory } = {}) {
+  if (!SHA40.test(sourceSha || "") || !SHA40.test(staleSourceSha || "") || !ROTATION.test(staleRotationId || "") || !SHA256.test(publicationIdentitySha256 || "") || !ROTATION.test(replacementRotationId || "") || typeof transactionDirectory !== "string" || !transactionDirectory) fail("Supersession replacement reservation inputs are invalid.");
+  const body = { schemaVersion: 1, kind: STALE_ROTATION_SUPERSESSION_REPLACEMENT_RESERVATION_KIND, sourceSha, staleSourceSha, staleRotationId, publicationIdentitySha256, replacementRotationId, transactionDirectoryIdentitySha256: staleRotationSupersessionSha256(transactionDirectory) };
+  return Object.freeze({ ...body, reservationSha256: staleRotationSupersessionSha256(body) });
+}
+
+export function assertStaleRotationSupersessionReplacementReservation(value, expected = {}) {
+  exactKeys(value, ["schemaVersion", "kind", "sourceSha", "staleSourceSha", "staleRotationId", "publicationIdentitySha256", "replacementRotationId", "transactionDirectoryIdentitySha256", "reservationSha256"], "Supersession replacement reservation");
+  const { reservationSha256, ...body } = value;
+  if (value.schemaVersion !== 1 || value.kind !== STALE_ROTATION_SUPERSESSION_REPLACEMENT_RESERVATION_KIND || !SHA40.test(value.sourceSha || "") || !SHA40.test(value.staleSourceSha || "") || !ROTATION.test(value.staleRotationId || "") || !SHA256.test(value.publicationIdentitySha256 || "") || !ROTATION.test(value.replacementRotationId || "") || !SHA256.test(value.transactionDirectoryIdentitySha256 || "") || !SHA256.test(reservationSha256 || "") || staleRotationSupersessionSha256(body) !== reservationSha256) fail("Supersession replacement reservation is invalid.");
+  const bindings = ["sourceSha", "staleSourceSha", "staleRotationId", "publicationIdentitySha256"];
+  if (bindings.some((key) => expected[key] !== undefined && value[key] !== expected[key]) || (expected.transactionDirectory && value.transactionDirectoryIdentitySha256 !== staleRotationSupersessionSha256(expected.transactionDirectory))) fail("Supersession replacement reservation is bound to another transaction.");
+  return value;
+}
+
+const transactionStartBody = ({ authorization, authorizationProvenance, preparation, startedAt }) => ({
+  schemaVersion: 1,
+  kind: STALE_ROTATION_SUPERSESSION_EXECUTION_START_KIND,
+  sourceSha: preparation.sourceSha,
+  staleSourceSha: preparation.staleSourceSha,
+  staleRotationId: preparation.staleRotationId,
+  replacementRotationId: preparation.replacementRotationId,
+  preparationSha256: preparation.preparationSha256,
+  authorizationSha256: authorization.authorizationSha256,
+  authorizationProvenanceSha256: authorizationProvenance.provenanceSha256,
+  materialJournalIdentity: preparation.materialJournalIdentity,
+  materialJournalFileSha256: preparation.materialJournalFileSha256,
+  writePlanSha256: preparation.writePlanSha256,
+  publicationIdentitySha256: preparation.publication.identitySha256,
+  liveBackendIdentitySha256: preparation.liveBackend.identitySha256,
+  stageBState: preparation.stageBState,
+  startedAt: date(startedAt, "Supersession execution startedAt").toISOString(),
+});
+
+export function createStaleRotationSupersessionExecutionStart({ authorization, authorizationProvenance, preparation, startedAt = new Date().toISOString() } = {}) {
+  assertStaleRotationSupersessionAuthorizationProvenance(authorizationProvenance, { authorization, sourceSha: preparation?.sourceSha });
+  assertApprovedStaleRotationSupersessionAuthorization(authorization, preparation, { sourceSha: preparation?.sourceSha, materialJournalFileSha256: preparation?.materialJournalFileSha256, now: startedAt, validationMode: "start" });
+  const body = transactionStartBody({ authorization, authorizationProvenance, preparation, startedAt });
+  return Object.freeze({ ...body, executionStartSha256: staleRotationSupersessionSha256(body) });
+}
+
+export function assertStaleRotationSupersessionExecutionStart(value, { authorization, authorizationProvenance, preparation } = {}) {
+  exactKeys(value, ["schemaVersion", "kind", "sourceSha", "staleSourceSha", "staleRotationId", "replacementRotationId", "preparationSha256", "authorizationSha256", "authorizationProvenanceSha256", "materialJournalIdentity", "materialJournalFileSha256", "writePlanSha256", "publicationIdentitySha256", "liveBackendIdentitySha256", "stageBState", "startedAt", "executionStartSha256"], "Supersession execution start");
+  assertStaleRotationSupersessionAuthorizationProvenance(authorizationProvenance, { authorization, sourceSha: preparation?.sourceSha });
+  const { executionStartSha256, ...body } = value;
+  if (value.schemaVersion !== 1 || value.kind !== STALE_ROTATION_SUPERSESSION_EXECUTION_START_KIND || !SHA256.test(executionStartSha256 || "") || staleRotationSupersessionSha256(body) !== executionStartSha256 || canonical(body) !== canonical(transactionStartBody({ authorization, authorizationProvenance, preparation, startedAt: value.startedAt }))) fail("Supersession execution start is not bound to the authenticated transaction.");
+  assertApprovedStaleRotationSupersessionAuthorization(authorization, preparation, { sourceSha: preparation?.sourceSha, materialJournalFileSha256: preparation?.materialJournalFileSha256, now: value.startedAt, validationMode: "start" });
+  return value;
 }
 
 export function createStaleRotationSupersessionConsumption({ authorization, authorizationProvenance, preparation, supersessionEvidenceSha256, rotationBindingSha256, consumedAt = new Date().toISOString() } = {}) {

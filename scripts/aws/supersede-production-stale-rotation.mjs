@@ -8,7 +8,7 @@ import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mj
 import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-cutover-production-adapters.mjs";
 import { supersedeStalePendingRotation, bootstrapInitialDualSlotRotation, finalizeStaleRotationSupersessionMaterialJournal } from "./production-initial-dual-slot-bootstrap.mjs";
 import { readStageBPrivateFileBytes, writeStageBPrivateFileAtomicExclusive } from "./stage-b-artifact-contract.mjs";
-import { assertApprovedStaleRotationSupersessionAuthorization, assertStaleRotationSupersessionAuthorizationProvenance, assertStaleRotationSupersessionConsumption, assertStaleRotationSupersessionPreparation, createStaleRotationSupersessionConsumption, createStaleRotationSupersessionPreparation, deriveStaleRotationReplacementId, resolveStaleRotationSupersessionAuthorizationArtifact, staleRotationSupersessionSha256 } from "./production-stale-rotation-supersession-contract.mjs";
+import { assertApprovedStaleRotationSupersessionAuthorization, assertStaleRotationSupersessionAuthorizationProvenance, assertStaleRotationSupersessionConsumption, assertStaleRotationSupersessionExecutionStart, assertStaleRotationSupersessionPreparation, assertStaleRotationSupersessionReplacementReservation, createStaleRotationSupersessionConsumption, createStaleRotationSupersessionExecutionStart, createStaleRotationSupersessionPreparation, createStaleRotationSupersessionReplacementReservation, deriveStaleRotationReplacementId, resolveStaleRotationSupersessionAuthorizationArtifact, staleRotationSupersessionSha256 } from "./production-stale-rotation-supersession-contract.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const accepted = new Set(["mode", "stale-source-sha", "stale-rotation-id", "source-sha", "publication", "live-backend", "stage-b-state", "authorization-workflow-run-id", "authorization-workflow-run-attempt", "preparation-sha256"]);
@@ -33,6 +33,7 @@ const readJson = (filePath, label) => {
 };
 const transactionDirectory = ({ sourceSha, staleRotationId, homeDirectory = os.homedir() }) => path.join(homeDirectory, ".mscqr", "production-cutover", "stale-rotation-supersession", sourceSha, staleRotationId);
 const imageDigest = (taskDefinition) => String(taskDefinition?.taskDefinition?.containerDefinitions?.find(({ name }) => name === "backend")?.image || "").split("@").at(-1);
+const now = (value) => value instanceof Date ? value : new Date(value || Date.now());
 export const createStaleRotationSecretsManagerSender = (run) => async (command) => {
   const input = command?.input || {};
   const common = ["secretsmanager"];
@@ -66,25 +67,37 @@ export async function runCli(argv = process.argv.slice(2), deps = {}) {
   const preparationFile = path.join(directory, "preparation.json");
   const evidenceFile = path.join(directory, "supersession.json");
   const consumptionFile = path.join(directory, "consumption.json");
+  const replacementReservationFile = path.join(directory, "replacement-id-reservation.json");
+  const executionStartFile = path.join(directory, "execution-start.json");
   const mode = values.get("mode");
   if (mode === "prepare") {
     const publication = readJson(required(values, "publication"), "Stale supersession publication identity").value;
     const liveBackend = readJson(required(values, "live-backend"), "Stale supersession live backend identity").value;
     const stageBState = readJson(required(values, "stage-b-state"), "Stale supersession Stage-B state identity").value;
     if (liveBackend.taskDefinitionArn !== service.taskDefinition || liveBackend.imageDigest !== imageDigest(taskDefinition)) throw new Error("Live backend changed before stale supersession preparation.");
-    const rotationId = deriveStaleRotationReplacementId({ sourceSha, staleRotationId, publicationIdentitySha256: publication.identitySha256 });
+    const existingReservation = lstatSync(replacementReservationFile, { throwIfNoEntry: false })
+      ? assertStaleRotationSupersessionReplacementReservation(readJson(replacementReservationFile, "Stale rotation supersession replacement reservation").value, { sourceSha, staleSourceSha, staleRotationId, publicationIdentitySha256: publication.identitySha256, transactionDirectory: directory })
+      : null;
+    const reservation = existingReservation || createStaleRotationSupersessionReplacementReservation({ sourceSha, staleSourceSha, staleRotationId, publicationIdentitySha256: publication.identitySha256, replacementRotationId: deriveStaleRotationReplacementId({ sourceSha, staleRotationId, publicationIdentitySha256: publication.identitySha256, now: now(typeof deps.now === "function" ? deps.now() : deps.now) }), transactionDirectory: directory });
+    if (!existingReservation) writeStageBPrivateFileAtomicExclusive({ filePath: replacementReservationFile, bytes: Buffer.from(`${JSON.stringify(reservation, null, 2)}\n`), repositoryRoot: ROOT, label: "Stale rotation supersession replacement reservation" });
+    const rotationId = reservation.replacementRotationId;
     const result = await supersedeStalePendingRotation({ send, taskDefinition, sourceSha, staleSourceSha, rotationId, staleRotationId, proveDescendant, outputFile: evidenceFile, repositoryRoot: ROOT, mode: "prepare" });
+    deps.afterPrepareDiscovery?.({ reservation, result });
     const preparation = createStaleRotationSupersessionPreparation({ discovery: result.preparationInput, publication, liveBackend, stageBState });
     writeStageBPrivateFileAtomicExclusive({ filePath: preparationFile, bytes: Buffer.from(`${JSON.stringify(preparation, null, 2)}\n`), repositoryRoot: ROOT, label: "Stale rotation supersession preparation" });
     return { mode, sourceSha, staleRotationId, rotationId, preparationFile, preparationSha256: preparation.preparationSha256, writes: 0, authorizationStatus: "NOT_CREATED" };
   }
+  const executionNow = now(typeof deps.now === "function" ? deps.now() : deps.now);
+  const executionStartCapture = lstatSync(executionStartFile, { throwIfNoEntry: false }) ? readJson(executionStartFile, "Stale rotation supersession execution start") : null;
+  const validationMode = executionStartCapture ? "continuation" : "start";
   const preparationCapture = readJson(preparationFile, "Stale rotation supersession preparation");
   if (preparationCapture.sha256 !== required(values, "preparation-sha256")) throw new Error("Stale rotation supersession preparation file changed after authorization.");
-  const preparation = assertStaleRotationSupersessionPreparation(preparationCapture.value, { sourceSha });
+  const preparation = assertStaleRotationSupersessionPreparation(preparationCapture.value, { sourceSha, now: executionNow, validationMode });
   if (preparation.staleSourceSha !== staleSourceSha || preparation.staleRotationId !== staleRotationId || preparation.liveBackend.taskDefinitionArn !== service.taskDefinition || preparation.liveBackend.imageDigest !== imageDigest(taskDefinition)) throw new Error("Live/source supersession topology changed after authorization.");
-  const authenticated = await (deps.resolveAuthorization || resolveStaleRotationSupersessionAuthorizationArtifact)({ workflowRunId: required(values, "authorization-workflow-run-id"), workflowRunAttempt: required(values, "authorization-workflow-run-attempt"), sourceSha, preparation, run: deps.githubRun, now: deps.now || new Date() });
+  const authenticated = await (deps.resolveAuthorization || resolveStaleRotationSupersessionAuthorizationArtifact)({ workflowRunId: required(values, "authorization-workflow-run-id"), workflowRunAttempt: required(values, "authorization-workflow-run-attempt"), sourceSha, preparation, run: deps.githubRun, now: executionNow, validationMode });
   const { authorization, provenance: authorizationProvenance } = authenticated;
   assertStaleRotationSupersessionAuthorizationProvenance(authorizationProvenance, { authorization, sourceSha });
+  const executionStart = executionStartCapture ? assertStaleRotationSupersessionExecutionStart(executionStartCapture.value, { authorization, authorizationProvenance, preparation }) : null;
   const finalizeJournal = deps.finalizeJournal || finalizeStaleRotationSupersessionMaterialJournal;
   if (lstatSync(consumptionFile, { throwIfNoEntry: false })) {
     const consumption = assertStaleRotationSupersessionConsumption(readJson(consumptionFile, "Stale rotation supersession consumption").value, { authorization, authorizationProvenance, preparation });
@@ -99,10 +112,16 @@ export async function runCli(argv = process.argv.slice(2), deps = {}) {
   }
   const result = await supersedeStalePendingRotation({
     send, taskDefinition, sourceSha, staleSourceSha, rotationId: preparation.replacementRotationId, staleRotationId, proveDescendant, outputFile: evidenceFile, repositoryRoot: ROOT, mode: "execute",
-    authorizeWritePlan: (discovery) => {
+    authorizeWritePlan: (discovery, { completedWriteCount } = {}) => {
       const recomputed = createStaleRotationSupersessionPreparation({ discovery, publication: preparation.publication, liveBackend: preparation.liveBackend, stageBState: preparation.stageBState, preparedAt: preparation.preparedAt });
       if (recomputed.preparationSha256 !== preparation.preparationSha256 || staleRotationSupersessionSha256(discovery.writePlan) !== preparation.writePlanSha256) throw new Error("Final supersession topology differs from the approved preparation.");
-      assertApprovedStaleRotationSupersessionAuthorization(authorization, preparation, { sourceSha, materialJournalFileSha256: discovery.materialJournalFileSha256 });
+      assertApprovedStaleRotationSupersessionAuthorization(authorization, preparation, { sourceSha, materialJournalFileSha256: discovery.materialJournalFileSha256, now: executionNow, validationMode });
+      if (validationMode === "continuation" && (!Number.isSafeInteger(completedWriteCount) || completedWriteCount < 1 || completedWriteCount > 7)) throw new Error("Expired stale rotation supersession has no authenticated write prefix to continue.");
+      if (!executionStart) {
+        const start = createStaleRotationSupersessionExecutionStart({ authorization, authorizationProvenance, preparation, startedAt: executionNow.toISOString() });
+        writeStageBPrivateFileAtomicExclusive({ filePath: executionStartFile, bytes: Buffer.from(`${JSON.stringify(start, null, 2)}\n`), repositoryRoot: ROOT, label: "Stale rotation supersession execution start" });
+        deps.afterExecutionStart?.({ start });
+      }
       return true;
     },
   });

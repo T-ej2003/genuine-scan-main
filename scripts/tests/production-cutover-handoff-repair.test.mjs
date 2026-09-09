@@ -200,6 +200,33 @@ async function staleSupersessionCliFixture(homeDirectory) {
   return { argv, authorization, client, deps, directory, evidenceFile, preparation, provenance, sender, store };
 }
 
+function staleSupersessionPreparationInputs(directory) {
+  const publication = { runId: "34287838722", artifactSha256: "1".repeat(64), identitySha256: "2".repeat(64), imageDigests: { backend: `sha256:${"3".repeat(64)}`, worker: `sha256:${"4".repeat(64)}`, rlsExecutor: `sha256:${"5".repeat(64)}`, rlsCanary: `sha256:${"6".repeat(64)}` } };
+  const liveBackend = { taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:52", imageDigest: `sha256:${"7".repeat(64)}`, identitySha256: "8".repeat(64) };
+  const stageBState = { lineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", serial: 104, stateSha256: "9".repeat(64) };
+  const files = Object.fromEntries(Object.entries({ publication, liveBackend, stageBState }).map(([name, value]) => {
+    const file = path.join(directory, `${name}.json`);
+    writeFileSync(file, `${JSON.stringify(value)}\n`, { mode: 0o600 });
+    return [name, file];
+  }));
+  return { publication, liveBackend, stageBState, files };
+}
+
+function staleSupersessionPrepareCliFixture(homeDirectory) {
+  const store = rotationStore();
+  const sender = rotationSender(store);
+  const inputs = staleSupersessionPreparationInputs(homeDirectory);
+  const client = { assertCredentialIdentity: async () => true, send: sender.send };
+  const run = (args) => {
+    if (args[0] === "ecs" && args[1] === "describe-services") return JSON.stringify({ services: [{ taskDefinition: inputs.liveBackend.taskDefinitionArn }] });
+    if (args[0] === "ecs" && args[1] === "describe-task-definition") return JSON.stringify({ taskDefinition: { ...staleTaskDefinition.taskDefinition, containerDefinitions: staleTaskDefinition.taskDefinition.containerDefinitions.map((container) => ({ ...container, image: container.name === "backend" ? `repository@${inputs.liveBackend.imageDigest}` : container.image })) } });
+    throw new Error(`unexpected CLI call ${args.join(" ")}`);
+  };
+  const argv = ["--mode", "prepare", "--source-sha", sourceSha, "--stale-source-sha", staleSourceSha, "--stale-rotation-id", staleRotationId, "--publication", inputs.files.publication, "--live-backend", inputs.files.liveBackend, "--stage-b-state", inputs.files.stageBState];
+  const deps = { homeDirectory, readProtectedMain: () => true, proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === staleSourceSha && descendantSha === sourceSha, run, client };
+  return { argv, deps, sender, store, inputs, directory: path.join(homeDirectory, ".mscqr", "production-cutover", "stale-rotation-supersession", sourceSha, staleRotationId) };
+}
+
 async function githubAuthorizationFixture(authorization, overrides = {}) {
   const zip = new JSZip();
   zip.file("authorization.json", `${JSON.stringify(overrides.authorization || authorization, null, 2)}\n`);
@@ -434,7 +461,7 @@ test("terminal receipt makes material-journal cleanup resumable without replayin
     assert.ok(lstatSync(receipt));
     assert.ok(lstatSync(journal));
     assert.equal(fixture.sender.writes, 7);
-    const recovered = await runStaleSupersessionCli(fixture.argv, fixture.deps);
+    const recovered = await runStaleSupersessionCli(fixture.argv, { ...fixture.deps, now: new Date(new Date(fixture.preparation.expiresAt).getTime() + 1000) });
     assert.equal(recovered.terminalCleanupRecovered, true);
     assert.equal(recovered.writes, 0);
     assert.equal(fixture.sender.writes, 7);
@@ -495,6 +522,73 @@ test("journal cleanup failure is safely retried after terminal consumption", asy
     const recovered = await runStaleSupersessionCli(fixture.argv, fixture.deps);
     assert.equal(recovered.terminalCleanupRecovered, true);
     assert.equal(fixture.sender.writes, 7);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("an authenticated in-time start permits only its exact post-TTL prefix continuation", async () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-post-ttl-prefix-"));
+  try {
+    const fixture = await staleSupersessionCliFixture(home);
+    const fresh = new Date(new Date(fixture.authorization.approvedAt).getTime() + 1000);
+    const expired = new Date(new Date(fixture.preparation.expiresAt).getTime() + 1000);
+    let prefixWrites = 0;
+    const prefixClient = { assertCredentialIdentity: fixture.client.assertCredentialIdentity, send: async (command) => {
+      const response = await fixture.sender.send(command);
+      if (command.constructor.name === "PutSecretValueCommand" && ++prefixWrites === 3) throw new Error("injected crash after prefix");
+      return response;
+    } };
+    await assert.rejects(() => runStaleSupersessionCli(fixture.argv, { ...fixture.deps, client: prefixClient, now: fresh }), /injected crash after prefix/);
+    assert.equal(prefixWrites, 3);
+    assert.ok(lstatSync(path.join(fixture.directory, "execution-start.json")));
+    const resumed = await runStaleSupersessionCli(fixture.argv, { ...fixture.deps, now: expired });
+    assert.equal(resumed.writes, 4);
+    assert.equal(fixture.sender.writes, 7);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("expired stale supersession cannot begin, cannot fake a prefix, and can terminalize an authenticated all-new transition", async () => {
+  const zeroHome = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-expired-zero-"));
+  const terminalHome = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-expired-terminal-"));
+  try {
+    const zero = await staleSupersessionCliFixture(zeroHome);
+    const expired = new Date(new Date(zero.preparation.expiresAt).getTime() + 1000);
+    await assert.rejects(() => runStaleSupersessionCli(zero.argv, { ...zero.deps, now: expired }), /expired/);
+    assert.equal(zero.sender.writes, 0);
+
+    const forgedPrefix = await staleSupersessionCliFixture(mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-expired-forged-prefix-")));
+    const fresh = new Date(new Date(forgedPrefix.authorization.approvedAt).getTime() + 1000);
+    let writes = 0;
+    await assert.rejects(() => runStaleSupersessionCli(forgedPrefix.argv, { ...forgedPrefix.deps, now: fresh, client: { assertCredentialIdentity: forgedPrefix.client.assertCredentialIdentity, send: async (command) => {
+      const response = await forgedPrefix.sender.send(command);
+      if (command.constructor.name === "PutSecretValueCommand" && ++writes === 2) throw new Error("injected prefix");
+      return response;
+    } } }), /injected prefix/);
+    rmSync(path.join(forgedPrefix.directory, "execution-start.json"));
+    await assert.rejects(() => runStaleSupersessionCli(forgedPrefix.argv, { ...forgedPrefix.deps, now: new Date(new Date(forgedPrefix.preparation.expiresAt).getTime() + 1000) }), /expired/);
+    assert.equal(forgedPrefix.sender.writes, 2);
+    rmSync(path.dirname(forgedPrefix.directory), { recursive: true, force: true });
+
+    const terminal = await staleSupersessionCliFixture(terminalHome);
+    const terminalFresh = new Date(new Date(terminal.authorization.approvedAt).getTime() + 1000);
+    await assert.rejects(() => runStaleSupersessionCli(terminal.argv, { ...terminal.deps, now: terminalFresh, afterBootstrap: () => { throw new Error("injected post-seven crash"); } }), /injected post-seven crash/);
+    const complete = await runStaleSupersessionCli(terminal.argv, { ...terminal.deps, now: new Date(new Date(terminal.preparation.expiresAt).getTime() + 1000) });
+    assert.equal(complete.writes, 0);
+    assert.equal(terminal.sender.writes, 7);
+  } finally { rmSync(zeroHome, { recursive: true, force: true }); rmSync(terminalHome, { recursive: true, force: true }); }
+});
+
+test("replacement-ID reservation survives preparation crashes without regenerating material", async () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-preparation-resume-"));
+  try {
+    const fixture = staleSupersessionPrepareCliFixture(home);
+    await assert.rejects(() => runStaleSupersessionCli(fixture.argv, { ...fixture.deps, now: new Date("2026-09-09T00:00:00.000Z"), afterPrepareDiscovery: () => { throw new Error("injected crash after journal"); } }), /injected crash after journal/);
+    const reservation = JSON.parse(readFileSync(path.join(fixture.directory, "replacement-id-reservation.json")));
+    const journal = path.join(fixture.directory, "supersession.json.material");
+    const materialSha = digest(readFileSync(journal));
+    const retry = await runStaleSupersessionCli(fixture.argv, { ...fixture.deps, now: new Date("2026-09-09T00:01:00.000Z") });
+    assert.equal(retry.rotationId, reservation.replacementRotationId);
+    assert.equal(digest(readFileSync(journal)), materialSha);
+    assert.equal(fixture.sender.writes, 0);
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 

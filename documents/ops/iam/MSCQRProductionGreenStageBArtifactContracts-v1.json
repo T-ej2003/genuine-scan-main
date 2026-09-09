@@ -172,6 +172,25 @@
       "rollback": "remove-committed-or-restore-backups"
     },
     {
+      "id": "stale-rotation-supersession-replacement-reservation",
+      "kind": "file",
+      "producer": "scripts/aws/supersede-production-stale-rotation.mjs:runCli --mode prepare",
+      "consumers": [
+        "scripts/aws/supersede-production-stale-rotation.mjs",
+        "scripts/aws/production-stale-rotation-supersession-contract.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "stale-rotation-supersession-replacement-reservation",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
       "id": "stale-rotation-supersession-material-journal",
       "kind": "file",
       "producer": "scripts/aws/production-initial-dual-slot-bootstrap.mjs:supersedeStalePendingRotation --mode prepare",
@@ -229,6 +248,25 @@
       "hashBound": true,
       "externalProducer": true,
       "atomicGroup": "stale-rotation-supersession-authorization",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "stale-rotation-supersession-execution-start",
+      "kind": "file",
+      "producer": "scripts/aws/supersede-production-stale-rotation.mjs:runCli --mode execute",
+      "consumers": [
+        "scripts/aws/supersede-production-stale-rotation.mjs",
+        "scripts/aws/production-stale-rotation-supersession-contract.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "stale-rotation-supersession-execution-start",
       "allOrNone": true,
       "rollback": "remove-committed-or-restore-backups"
     },
