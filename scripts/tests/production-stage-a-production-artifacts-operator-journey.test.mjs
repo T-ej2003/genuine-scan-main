@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from "../aws/production-github-environment-approval.mjs";
-import { buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifactsBucketPolicyPredecessor, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation, buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection, buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation, createStageAProductionArtifactsReconciliationPrepareEvidence, STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY, stageAProductionArtifactsPolicySha256 } from "../aws/production-stage-a-control-plane.mjs";
+import { buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifactsBucketPolicyPredecessor, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation, buildStageAProductionArtifactsBucketPolicyWithRecoveryListBucketBootstrap, buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection, buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation, createStageAProductionArtifactsReconciliationPrepareEvidence, STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY, stageAProductionArtifactsPolicySha256 } from "../aws/production-stage-a-control-plane.mjs";
 import { createStageAProductionArtifactsRecoveryAuthorization as createRecoveryAuthorization, createStageAProductionArtifactsRecoveryAttemptEvidence, createStageAProductionArtifactsRecoveryCompletionEvidence, createStageAProductionArtifactsContinuationRebindAuthorization, createStageAProductionArtifactsReconciliationAuthorization, STAGE_A_PRODUCTION_ARTIFACTS_CONTINUATION_REBIND_OPERATION, STAGE_A_PRODUCTION_ARTIFACTS_CONTINUATION_REBIND_WORKFLOW_REF, STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_OPERATION } from "../aws/production-stage-a-production-artifacts-recovery-governance.mjs";
 import { assertStageAProductionArtifactsJournalRetention, createStageARecoveryRootCommandRunner, runStageAProductionArtifactsRecovery } from "../aws/run-production-stage-a-production-artifacts-recovery.mjs";
 import { createStageAProductionArtifactsJournalResult, createStageAProductionArtifactsPostApplyEvidence, createStageAProductionArtifactsReservation, STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_OPERATION } from "../aws/production-stage-a-production-artifacts-journal.mjs";
@@ -15,6 +15,8 @@ const sourceSha = "a".repeat(40); const lineage = "02afb75a-f902-ab8a-f4c1-751d4
 const governedExecutableManifestSha256 = "9".repeat(64);
 const historicalTransition = Object.freeze({ predecessorPolicySha256: stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicyPredecessor()), desiredPolicySha256: stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicy()) });
 const reservationTransition = Object.freeze({ predecessorPolicySha256: stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicy()), desiredPolicySha256: stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation()) });
+const bootstrapTransition = Object.freeze({ predecessorPolicySha256: stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation()), desiredPolicySha256: stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicyWithRecoveryListBucketBootstrap()) });
+const providerReadonlyTransition = Object.freeze({ predecessorPolicySha256: stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicyWithRecoveryListBucketBootstrap()), desiredPolicySha256: stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection()) });
 const reverseReservationTransition = Object.freeze({ predecessorPolicySha256: stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection()), desiredPolicySha256: stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation()) });
 const createStageAProductionArtifactsRecoveryAuthorization = (input) => createRecoveryAuthorization({ ...input, governedExecutableManifestSha256, transition: historicalTransition });
 const unchangedGovernedSource = () => governedExecutableManifestSha256;
@@ -430,9 +432,9 @@ test("B-to-C release 403 with an unverifiable root fallback fails before any wri
   assert.equal(attemptWrites, 0); assert.equal(policyWrites, 0);
 });
 
-test("current governed transition installs the ProviderReadOnly journal durability boundary once", async () => {
-  const authorization = createRecoveryAuthorization({ sourceSha, preState: state, protectedEnvironmentApprovalEvidence: approval(PRODUCTION_ENVIRONMENT_APPROVAL.stageAProductionArtifactsRecoveryWorkflowRef, "219"), verificationRef: "provider-readonly-journal", governedExecutableManifestSha256 });
-  let livePolicy = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation(); let policyWrites = 0; let attempt; let completion;
+test("A-prime to B installs the ProviderReadOnly journal durability boundary once", async () => {
+  const authorization = createRecoveryAuthorization({ sourceSha, preState: state, protectedEnvironmentApprovalEvidence: approval(PRODUCTION_ENVIRONMENT_APPROVAL.stageAProductionArtifactsRecoveryWorkflowRef, "219"), verificationRef: "provider-readonly-journal", governedExecutableManifestSha256, transition: providerReadonlyTransition });
+  let livePolicy = buildStageAProductionArtifactsBucketPolicyWithRecoveryListBucketBootstrap(); let policyWrites = 0; let attempt; let completion;
   const releaseRun = (args) => args[1] === "get-caller-identity" ? releaseIdentity : JSON.stringify({ Policy: JSON.stringify(livePolicy) });
   const rootRun = (args) => {
     if (args[1] === "get-caller-identity") return rootIdentity;
@@ -446,6 +448,38 @@ test("current governed transition installs the ProviderReadOnly journal durabili
   assert.equal((await runStageAProductionArtifactsRecovery(input)).putBucketPolicyCount, 1);
   assert.equal((await runStageAProductionArtifactsRecovery(input)).putBucketPolicyCount, 0);
   assert.equal(policyWrites, 1);
+});
+
+test("A to A-prime uses the pre-existing root journal, then A-prime to B uses the scoped release journal", async () => {
+  let livePolicy = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation(); let writes = 0;
+  const attempts = new Map(); const completions = new Map(); const rootReads = []; const releaseReads = [];
+  const rootJournal = {
+    readRecoveryAttempt: (sha) => { rootReads.push(sha); return attempts.get(sha) && { bytes: attempts.get(sha) }; },
+    writeRecoveryAttempt: ({ recoveryAuthorizationSha256, bytes }) => { attempts.set(recoveryAuthorizationSha256, bytes); return { key: "root-attempt" }; },
+    readRecoveryCompletion: (sha) => completions.get(sha) && { bytes: completions.get(sha) },
+    writeRecoveryCompletion: ({ recoveryAuthorizationSha256, bytes }) => { completions.set(recoveryAuthorizationSha256, bytes); return { key: "completion" }; },
+  };
+  const releaseJournal = {
+    readRecoveryAttempt: (sha) => { releaseReads.push(sha); return attempts.get(sha) && { bytes: attempts.get(sha) }; },
+    writeRecoveryAttempt: ({ recoveryAuthorizationSha256, bytes }) => { attempts.set(recoveryAuthorizationSha256, bytes); return { key: "release-attempt" }; },
+    readRecoveryCompletion: rootJournal.readRecoveryCompletion,
+    writeRecoveryCompletion: rootJournal.writeRecoveryCompletion,
+  };
+  const rootRun = (args) => {
+    if (args[1] === "get-caller-identity") return rootIdentity;
+    if (args[1] === "get-bucket-versioning") return JSON.stringify({ Status: "Enabled" });
+    if (args[1] === "get-bucket-lifecycle-configuration") throw new Error("NoSuchLifecycleConfiguration");
+    if (args[1] === "put-bucket-policy") { writes += 1; livePolicy = writes === 1 ? buildStageAProductionArtifactsBucketPolicyWithRecoveryListBucketBootstrap() : buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection(); return ""; }
+    throw new Error(`unexpected root ${args[1]}`);
+  };
+  const releaseRun = (args) => args[1] === "get-caller-identity" ? releaseIdentity : JSON.stringify({ Policy: JSON.stringify(livePolicy) });
+  const common = { sourceSha, readStateIdentity: async () => state, terraformStateLock, rootRun, releaseRun, readProtectedSource: source, journal: releaseJournal, recoveryJournal: releaseJournal, rootRecoveryJournal: rootJournal, sign: () => Buffer.from("signature").toString("base64"), verify: () => true };
+  for (const [workflowRunId, transition] of [["221", bootstrapTransition], ["222", providerReadonlyTransition]]) {
+    const authorization = createRecoveryAuthorization({ sourceSha, preState: state, protectedEnvironmentApprovalEvidence: approval(PRODUCTION_ENVIRONMENT_APPROVAL.stageAProductionArtifactsRecoveryWorkflowRef, workflowRunId), verificationRef: transition === bootstrapTransition ? "bootstrap" : "provider", governedExecutableManifestSha256, transition });
+    await runStageAProductionArtifactsRecovery({ ...common, workflowRunId, workflowRunAttempt: "1", resolveAuthorization: () => ({ authorization }) });
+  }
+  assert.equal(writes, 2); assert.equal(rootReads.length, 1); assert.equal(releaseReads.length, 1);
+  assert.deepEqual(livePolicy, buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection());
 });
 
 test("post-write continuation locks only after authenticated P2 evidence", async () => {

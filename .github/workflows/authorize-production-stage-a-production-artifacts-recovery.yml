@@ -7,6 +7,7 @@ on:
       state_lineage: { description: Exact pre-recovery Stage-A state lineage, required: true, type: string }
       state_serial: { description: Exact pre-recovery Stage-A state serial, required: true, type: string }
       state_sha256: { description: Exact pre-recovery Stage-A raw-state SHA256, required: true, type: string }
+      transition: { description: Exact reviewed transition, required: true, type: choice, options: [A_TO_A_PRIME, A_PRIME_TO_B, B_TO_C] }
       verification_ref: { description: Human-controlled recovery verification reference, required: true, type: string }
 
 permissions: { actions: read, contents: read }
@@ -41,12 +42,13 @@ jobs:
           STATE_LINEAGE: "${{ inputs.state_lineage }}"
           STATE_SERIAL: "${{ inputs.state_serial }}"
           STATE_SHA256: "${{ inputs.state_sha256 }}"
+          TRANSITION: "${{ inputs.transition }}"
           VERIFICATION_REF: "${{ inputs.verification_ref }}"
         run: |
           set -euo pipefail
           d="$RUNNER_TEMP/stage-a-production-artifacts-recovery"; install -d -m 700 "$d"
           node scripts/aws/production-github-environment-approval.mjs --output "$d/environment-approval.json" --repository "$GITHUB_REPOSITORY" --environment production --source-sha "$SOURCE_SHA" --workflow-ref "$GITHUB_WORKFLOW_REF" --event-name "$GITHUB_EVENT_NAME" --workflow-run-id "$GITHUB_RUN_ID" --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" --execution-actor "$GITHUB_ACTOR" --require-actual-approval
-          node scripts/aws/authorize-production-stage-a-production-artifacts-recovery.mjs --source-sha "$SOURCE_SHA" --state-lineage "$STATE_LINEAGE" --state-serial "$STATE_SERIAL" --state-sha256 "$STATE_SHA256" --verification-ref "$VERIFICATION_REF" --environment-approval "$d/environment-approval.json" --output "$d/authorization.json"
+          node scripts/aws/authorize-production-stage-a-production-artifacts-recovery.mjs --source-sha "$SOURCE_SHA" --state-lineage "$STATE_LINEAGE" --state-serial "$STATE_SERIAL" --state-sha256 "$STATE_SHA256" --transition "$TRANSITION" --verification-ref "$VERIFICATION_REF" --environment-approval "$d/environment-approval.json" --output "$d/authorization.json"
       - uses: actions/upload-artifact@v4
         with:
           name: stage-a-production-artifacts-recovery-authorization

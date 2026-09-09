@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createProductionAwsCommandRunner, createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
-import { createTerraformStageAAdapter, buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifactsBucketPolicyPredecessor, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation, buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection, buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation, resolveStageAProductionArtifactsBucketPolicyTransition, stageAProductionArtifactsPolicySemanticallyEqual } from "./production-stage-a-control-plane.mjs";
+import { createTerraformStageAAdapter, buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifactsBucketPolicyPredecessor, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation, buildStageAProductionArtifactsBucketPolicyWithRecoveryListBucketBootstrap, buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection, buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation, resolveStageAProductionArtifactsBucketPolicyTransition, stageAProductionArtifactsPolicySemanticallyEqual } from "./production-stage-a-control-plane.mjs";
 import { PRODUCTION_ACTIVATION_LIFECYCLE } from "./production-green-stage-b-contract.mjs";
 import { createStageATerraformBackendLock, STAGE_A_TERRAFORM_BACKEND } from "./production-stage-a-root-drop-orphan-recovery.mjs";
 import { parseAuthenticatedStateBytes } from "./generate-production-green-stage-a-prerequisites.mjs";
@@ -111,10 +111,11 @@ export async function runStageAProductionArtifactsRecovery({ sourceSha, recovery
   const before = readPolicy(releaseRun); const predecessorLive = samePolicy(before, transition.predecessor); const desiredLive = samePolicy(before, transition.desired);
   if (!predecessorLive && !desiredLive) throw new Error("Stage A production-artifacts live policy is neither the exact predecessor nor desired policy.");
   const reservationTransition = samePolicy(transition.predecessor, buildStageAProductionArtifactsBucketPolicy()) && samePolicy(transition.desired, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation());
-  const providerReadonlyTransition = samePolicy(transition.predecessor, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation()) && samePolicy(transition.desired, buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection());
+  const bootstrapTransition = samePolicy(transition.predecessor, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation()) && samePolicy(transition.desired, buildStageAProductionArtifactsBucketPolicyWithRecoveryListBucketBootstrap());
+  const providerReadonlyTransition = samePolicy(transition.predecessor, buildStageAProductionArtifactsBucketPolicyWithRecoveryListBucketBootstrap()) && samePolicy(transition.desired, buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection());
   const reverseReservationTransition = samePolicy(transition.predecessor, buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection()) && samePolicy(transition.desired, buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation());
-  if (!historicalTransition && !reservationTransition && !providerReadonlyTransition && !reverseReservationTransition) throw new Error("Stage A production-artifacts recovery transition is unsupported.");
-  const attemptJournal = historicalTransition ? rootRecoveryJournal : recoveryJournal;
+  if (!historicalTransition && !reservationTransition && !bootstrapTransition && !providerReadonlyTransition && !reverseReservationTransition) throw new Error("Stage A production-artifacts recovery transition is unsupported.");
+  const attemptJournal = historicalTransition || bootstrapTransition ? rootRecoveryJournal : recoveryJournal;
   const completionJournal = journal;
   const decode = (record, label) => { if (!record) return null; try { return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(record.bytes)); } catch { throw new Error(`${label} is malformed.`); } };
   const readCompletion = (reader) => { try { return reader.readRecoveryCompletion(authorization.authorizationSha256); } catch (error) {

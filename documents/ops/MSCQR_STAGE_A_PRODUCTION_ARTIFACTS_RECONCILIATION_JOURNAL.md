@@ -9,19 +9,26 @@ journal.
 
 ## Bootstrap order
 
-The predecessor bucket policy (`P0`) cannot be updated by the ordinary
-release-deployer. A protected-environment recovery authorization therefore
-binds one root-operated `PutBucketPolicy` from `P0` directly to the final
-policy (`P2`). `P2` contains the existing rebaseline-evidence rules plus the
-isolated journal rules. There is no `P0 -> P1 -> P2` sequence.
+The historic predecessor bucket policy (`P0`) cannot be updated by the
+ordinary release-deployer. Its retained recovery is source-bound and
+root-operated. The current reservation-bearing state is a distinct policy
+state (`A`); current production recovery must follow the explicit
+`A -> A_PRIME -> B` graph below and cannot normalize directly to `B`.
 
-The reviewed reservation-retirement transition is exact and composable:
-`A` (reservation-bearing) moves to `B` by adding the six ProviderReadOnly
-journal protections, then `B` moves to `C` by removing only the six obsolete
-`InitialActivationLifecycle` reservation statements. `C` retains every
-ProviderReadOnly protection and is its own exact-complete state. The resolver
-rejects partial removal, protection downgrade, additional statement changes,
-and arbitrary bucket-policy replacements.
+The reviewed policy graph is exact and composable. `A` is reservation-bearing
+but cannot classify the absence of a recovery attempt under S3's permission
+semantics. `A_PRIME` is `A` plus one `s3:ListBucket` Allow for the exact
+release-deployer role, exact production-artifacts bucket, and only
+`production-stage-a-production-artifacts-reconciliation/recovery/*`. The
+root-operated, source-bound `A -> A_PRIME` recovery uses the already readable
+root journal; it never needs the permission it installs. `A_PRIME -> B` then
+adds the ProviderReadOnly journal protections, including the reconciler's
+equally scoped absence probe. `B -> C` removes only the six obsolete
+InitialActivationLifecycle reservation statements. `C` retains both scoped
+ListBucket protections and every ProviderReadOnly durability protection. The
+resolver rejects a direct `A -> B` execution, partial removal, protection
+downgrade, additional statement changes, and arbitrary bucket-policy
+replacements.
 
 The recovery runner requires the exact clean protected checkout, authorization,
 state identity, and predecessor before it creates a root-attested conditional
@@ -66,7 +73,10 @@ The only namespace is:
 `production-stage-a-production-artifacts-reconciliation/<reconciliation-authorization-sha256>/`
 
 The release-deployer receives only `s3:GetObject` and `s3:PutObject` with
-`s3:if-none-match = *` on that prefix. The resource policy denies
+`s3:if-none-match = *` on that prefix, plus `s3:ListBucket` only for the
+exact recovery child namespace needed to distinguish an absent attempt from
+an authorization failure. The list probe uses the exact requested key and
+`--max-keys 1`; it is not bucket enumeration. The resource policy denies
 nonconditional writes, writes by every other principal, `DeleteObject`, and
 `DeleteObjectVersion`. No list permission, overwrite, or cross-Stage-B access
 is used.

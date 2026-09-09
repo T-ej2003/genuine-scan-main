@@ -65,14 +65,14 @@ test("fresh recovery authorization binds the exact deployed-to-reservation polic
   assert.doesNotThrow(() => assertStageAProductionArtifactsRecoveryAuthorization(authorization, { sourceSha, preState }));
 });
 
-test("production recovery authorizer remains on the reservation-bearing transition until reconciler migration", () => {
+test("production recovery authorizer binds the explicit bootstrap transition", () => {
   const transition = currentStageAProductionArtifactsBucketPolicyTransition();
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-a-current-authorizer-"));
   const source = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   const approvalPath = path.join(directory, "approval.json"); const outputPath = path.join(directory, "authorization.json");
   fs.writeFileSync(approvalPath, JSON.stringify(approval(STAGE_A_PRODUCTION_ARTIFACTS_RECOVERY_WORKFLOW_REF, source)));
   try {
-    authorizeStageAProductionArtifactsRecovery(["--source-sha", source, "--state-lineage", preState.lineage, "--state-serial", String(preState.serial), "--state-sha256", preState.stateSha256, "--verification-ref", "current-transition", "--environment-approval", approvalPath, "--output", outputPath]);
+    authorizeStageAProductionArtifactsRecovery(["--source-sha", source, "--state-lineage", preState.lineage, "--state-serial", String(preState.serial), "--state-sha256", preState.stateSha256, "--transition", "A_TO_A_PRIME", "--verification-ref", "current-transition", "--environment-approval", approvalPath, "--output", outputPath]);
     const authorization = JSON.parse(fs.readFileSync(outputPath, "utf8"));
     assert.equal(authorization.predecessorPolicySha256, transition.predecessorPolicySha256);
     assert.equal(authorization.desiredPolicySha256, transition.desiredPolicySha256);

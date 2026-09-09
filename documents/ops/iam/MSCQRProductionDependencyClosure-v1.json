@@ -44,6 +44,26 @@
     },
     {
       "sourceFile": "scripts/aws/production-stage-a-production-artifacts-journal.mjs",
+      "action": "s3:ListBucket",
+      "capabilityId": "stage-a-artifacts-journal-list-absence",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+      ],
+      "reachableMode": [
+        "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY",
+        "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-stage-a-production-artifacts-journal.mjs",
       "action": "s3:PutObject",
       "capabilityId": "stage-a-artifacts-journal-conditional-create",
       "identity": "RELEASE_DEPLOYER",
@@ -69,6 +89,25 @@
       "identity": "ROOT_OPERATOR",
       "resources": [
         "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-stage-a-production-artifacts-reconciliation/*"
+      ],
+      "reachableMode": [
+        "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-stage-a-production-artifacts-journal.mjs",
+      "action": "s3:ListBucket",
+      "capabilityId": "stage-a-artifacts-recovery-root-journal-list-absence",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
       ],
       "reachableMode": [
         "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY"
@@ -1793,6 +1832,25 @@
       "identity": "INITIAL_ACTIVATION_RECONCILER",
       "resources": [
         "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-provider-readonly-policy-reconciliation/*"
+      ],
+      "reachableMode": [
+        "PROVIDER_READONLY_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "INITIAL_ACTIVATION_RECONCILER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "action": "s3:ListBucket",
+      "capabilityId": "provider-readonly-reconciliation-list-journal-absence",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
       ],
       "reachableMode": [
         "PROVIDER_READONLY_POLICY_RECONCILIATION"
