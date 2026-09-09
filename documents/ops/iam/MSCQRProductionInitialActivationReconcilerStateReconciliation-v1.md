@@ -119,7 +119,9 @@ exception is documented below.
 Only after the authorization run is successful and human-approved, dispatch
 the dedicated execution workflow. It decodes and hashes the exact preparation
 and saved-plan bytes, then applies that saved refresh-only plan through the
-bootstrap OIDC role. It never regenerates a plan.
+bootstrap OIDC role. It never regenerates a plan. GitHub authorization and
+artifact reads run through the restricted GitHub evidence executor, which does
+not receive the workflow's AWS credentials.
 
 ```sh
 gh workflow run execute-production-initial-activation-reconciler-state-reconciliation.yml \

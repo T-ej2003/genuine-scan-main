@@ -5,10 +5,12 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
+import { createProductionGithubCommandRunner } from "../aws/production-credential-source-contract.mjs";
 import { ensureStageBPrivateFile, readStageBPrivateFileBytes } from "../aws/stage-b-artifact-contract.mjs";
 import { assertExactReconcilerRefreshOnlyPlan, assertExactStateSuccessor, assertReconcilerStateReconciliationAuthorization, assertReconcilerStateReconciliationResult, createReconcilerStateReconciliationAuthorization, createReconcilerStateReconciliationPreparation, createReconcilerStateReconciliationRecoveryAuthorization, createReconcilerStateReconciliationRecoveryPreparation, executeReconcilerStateReconciliation, executeReconcilerStateReconciliationRecovery, RECONCILER_STATE_RECONCILIATION as CONTRACT } from "../aws/production-initial-activation-reconciler-state-reconciliation.mjs";
 import { assertInstallationPlan } from "../aws/production-initial-activation-reconciler-installation-contract.mjs";
 import { canonicalJson } from "../aws/production-green-stage-b-contract.mjs";
+import { resolveReconcilerStateReconciliationAuthorization } from "../aws/reconcile-production-initial-activation-reconciler-state.mjs";
 
 const sourceSha = "a".repeat(40); const now = new Date("2026-09-09T12:00:00.000Z");
 const hash = (value) => crypto.createHash("sha256").update(value).digest("hex");
@@ -54,6 +56,32 @@ test("private-file normalization failures fail closed", () => {
     assert.throws(() => ensureStageBPrivateFile({ filePath, repositoryRoot: process.cwd(), normalize: true, label: "State reconciliation saved plan", fsOps }), /chmod denied/);
     assert.throws(() => readStageBPrivateFileBytes({ filePath, repositoryRoot: process.cwd(), label: "State reconciliation saved plan" }), /0600/);
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("authorization retrieval isolates GitHub evidence reads from AWS credentials", () => {
+  const archive = Buffer.from("fixture-authorization-archive"); const observed = []; const authorization = { fixture: "authorization" }; let workflowPath = CONTRACT.authorizationWorkflowPath; let artifactName = CONTRACT.authorizationArtifactName; let filename = CONTRACT.authorizationFilename;
+  const githubRun = createProductionGithubCommandRunner({
+    env: {
+      PATH: process.env.PATH, GH_TOKEN: "fixture-github-token", AWS_ACCESS_KEY_ID: "fixture-aws-access-key", AWS_SECRET_ACCESS_KEY: "fixture-aws-secret", AWS_SESSION_TOKEN: "fixture-aws-session", AWS_SECURITY_TOKEN: "fixture-aws-security-token", AWS_PROFILE: "fixture-profile", AWS_ROLE_ARN: "arn:aws:iam::368992683803:role/fixture", AWS_WEB_IDENTITY_TOKEN_FILE: "/tmp/fixture-web-identity",
+    },
+    exec: (file, args, options) => {
+      observed.push({ file, args, env: options.env });
+      if (file === "unzip") return args[0] === "-Z1" ? `${filename}\n` : JSON.stringify(authorization);
+      if (args.at(-1).endsWith("/zip")) return archive;
+      if (args.at(-1).endsWith("/artifacts")) return JSON.stringify({ artifacts: [{ id: 456, name: artifactName, expired: false, digest: `sha256:${hash(archive)}`, workflow_run: { id: 123, head_sha: sourceSha, repository_id: 7 } }] });
+      return JSON.stringify({ id: 123, repository: { id: 7, full_name: CONTRACT.repository }, head_repository: { full_name: CONTRACT.repository }, path: workflowPath, event: "workflow_dispatch", head_sha: sourceSha, status: "completed", conclusion: "success", run_attempt: 1 });
+    },
+  });
+  const preparation = { fixture: "preparation" };
+  assert.deepEqual(resolveReconcilerStateReconciliationAuthorization({ workflowRunId: "123", workflowRunAttempt: "1", sourceSha, preparation, githubRun, assertAuthorization: (value, prepared, options) => { assert.deepEqual(value, authorization); assert.equal(prepared, preparation); assert.equal(options.sourceSha, sourceSha); } }), authorization);
+  workflowPath = CONTRACT.recoveryAuthorizationWorkflowPath; artifactName = CONTRACT.recoveryAuthorizationArtifactName; filename = CONTRACT.recoveryAuthorizationFilename;
+  assert.deepEqual(resolveReconcilerStateReconciliationAuthorization({ workflowRunId: "123", workflowRunAttempt: "1", sourceSha, preparation, githubRun, workflowPath, artifactName, filename, assertAuthorization: (value) => assert.deepEqual(value, authorization) }), authorization);
+  for (const call of observed.filter(({ file }) => file === "gh")) {
+    for (const key of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN", "AWS_PROFILE", "AWS_ROLE_ARN", "AWS_WEB_IDENTITY_TOKEN_FILE"]) assert.equal(call.env[key], undefined);
+    assert.equal(call.env.GH_TOKEN, "fixture-github-token");
+  }
+  assert.throws(() => githubRun("gh", ["api", `repos/${CONTRACT.repository}/issues`]), /reviewed read-only/);
+  assert.throws(() => githubRun("gh", ["api", `repos/${CONTRACT.repository}/actions/runs/123`, "--method", "POST"]), /reviewed read-only/);
 });
 
 test("accepts only the authenticated two-field refresh-only drift", () => {
@@ -221,10 +249,13 @@ test("state-reconciliation runbook documents the current prepare-authorize-execu
 test("quality gate reaches every PR reconciliation production contract", () => {
   const suite = JSON.parse(fs.readFileSync("package.json", "utf8")).scripts["test:production-initial-activation-reconciler"];
   const qualityGate = fs.readFileSync(".github/workflows/quality-gate.yml", "utf8");
+  const resolver = fs.readFileSync("scripts/aws/reconcile-production-initial-activation-reconciler-state.mjs", "utf8");
   assert.match(suite, /scripts\/tests\/production-initial-activation-reconciler-state-reconciliation\.test\.mjs/);
   assert.match(suite, /scripts\/tests\/production-credential-source-contract\.test\.mjs/);
   assert.match(suite, /scripts\/tests\/production-github-environment-approval\.test\.mjs/);
   assert.match(qualityGate, /npm run test:production-initial-activation-reconciler/);
+  assert.doesNotMatch(resolver, /exec\("gh"/);
+  assert.equal([...resolver.matchAll(/githubRun: deps\.githubRun \|\| createProductionGithubCommandRunner\(\)/g)].length, 3);
 });
 
 test("reconciliation workflows consume every required dispatch input", () => {
