@@ -202,3 +202,24 @@ test("state-reconciliation runbook documents the current prepare-authorize-execu
   assert.match(runbook, new RegExp(`${CONTRACT.maxAgeMs / 1000} seconds`));
   assert.match(runbook, /saved_plan_base64/); assert.match(runbook, /terraform refresh|terraform state push|normal `terraform apply`/);
 });
+
+test("quality gate reaches every PR reconciliation production contract", () => {
+  const suite = JSON.parse(fs.readFileSync("package.json", "utf8")).scripts["test:production-initial-activation-reconciler"];
+  const qualityGate = fs.readFileSync(".github/workflows/quality-gate.yml", "utf8");
+  assert.match(suite, /scripts\/tests\/production-initial-activation-reconciler-state-reconciliation\.test\.mjs/);
+  assert.match(suite, /scripts\/tests\/production-credential-source-contract\.test\.mjs/);
+  assert.match(suite, /scripts\/tests\/production-github-environment-approval\.test\.mjs/);
+  assert.match(qualityGate, /npm run test:production-initial-activation-reconciler/);
+});
+
+test("reconciliation workflows consume every required dispatch input", () => {
+  for (const workflow of [
+    ".github/workflows/authorize-production-initial-activation-reconciler-state-reconciliation.yml",
+    ".github/workflows/execute-production-initial-activation-reconciler-state-reconciliation.yml",
+    ".github/workflows/authorize-production-initial-activation-reconciler-state-reconciliation-recovery.yml",
+    ".github/workflows/execute-production-initial-activation-reconciler-state-reconciliation-recovery.yml",
+  ]) {
+    const text = fs.readFileSync(workflow, "utf8");
+    for (const [, input] of text.matchAll(/^      (\w+): \{ description: .*required: true,/gm)) assert.match(text.slice(text.indexOf("jobs:")), new RegExp(`inputs\\.${input}`));
+  }
+});
