@@ -1,0 +1,86 @@
+import assert from "node:assert/strict";
+import crypto from "node:crypto";
+import fs from "node:fs";
+import test from "node:test";
+import { createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
+import { assertExactReconcilerRefreshOnlyPlan, assertExactStateSuccessor, assertReconcilerStateReconciliationAuthorization, createReconcilerStateReconciliationAuthorization, createReconcilerStateReconciliationPreparation, executeReconcilerStateReconciliation, RECONCILER_STATE_RECONCILIATION as CONTRACT } from "../aws/production-initial-activation-reconciler-state-reconciliation.mjs";
+import { assertInstallationPlan } from "../aws/production-initial-activation-reconciler-installation-contract.mjs";
+
+const sourceSha = "a".repeat(40); const now = new Date("2026-09-09T12:00:00.000Z");
+const hash = (value) => crypto.createHash("sha256").update(value).digest("hex");
+const state = (serial, attachmentCount, policyArns) => Buffer.from(JSON.stringify({ version: 4, terraform_version: "1.15.8", serial, lineage: "state-lineage", outputs: {}, resources: [
+  { mode: "managed", type: "aws_iam_policy", name: "reconciler", instances: [{ attributes: { attachment_count: attachmentCount, name: "MSCQRProductionInitialActivationPolicyReconciler" } }] },
+  { mode: "managed", type: "aws_iam_role", name: "reconciler", instances: [{ attributes: { managed_policy_arns: policyArns, name: "mscqr-production-initial-activation-policy-reconciler" } }] },
+  { mode: "managed", type: "aws_iam_role_policy_attachment", name: "reconciler", instances: [{ attributes: { role: "mscqr-production-initial-activation-policy-reconciler", policy_arn: CONTRACT.policyArn } }] },
+] }));
+const before = state(1, 0, []); const after = state(2, 1, [CONTRACT.policyArn]);
+const refreshPlan = () => ({ format_version: "1.2", terraform_version: "1.15.8", errored: false, complete: true, applyable: true, resource_changes: [], resource_drift: [
+  { address: "aws_iam_policy.reconciler", change: { actions: ["update"], before: { attachment_count: 0, name: "MSCQRProductionInitialActivationPolicyReconciler" }, after: { attachment_count: 1, name: "MSCQRProductionInitialActivationPolicyReconciler" }, before_unknown: {}, after_unknown: {}, before_sensitive: {}, after_sensitive: {} } },
+  { address: "aws_iam_role.reconciler", change: { actions: ["update"], before: { managed_policy_arns: [], name: "mscqr-production-initial-activation-policy-reconciler" }, after: { managed_policy_arns: [CONTRACT.policyArn], name: "mscqr-production-initial-activation-policy-reconciler" }, before_unknown: {}, after_unknown: {}, before_sensitive: {}, after_sensitive: {} } },
+] });
+const topology = { roles: ["mscqr-production-initial-activation-policy-reconciler"], users: [], groups: [] };
+const object = { versionId: "exact-version", etag: "exact-etag" };
+const approval = () => createProductionEnvironmentApprovalEvidence({ environmentConfig: { id: 8, name: "production-initial-activation-reconciler-bootstrap", can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{ type: "User", reviewer: { id: 3, login: "reviewer" } }] }] }, repository: "T-ej2003/genuine-scan-main", environment: "production-initial-activation-reconciler-bootstrap", sourceSha, workflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-initial-activation-reconciler-state-reconciliation.yml@refs/heads/main", eventName: "workflow_dispatch", workflowRunId: "100", workflowRunAttempt: "1", executionActor: "operator", observedAt: now.toISOString(), actualApproval: { state: "approved", environmentId: 8, environmentName: "production-initial-activation-reconciler-bootstrap", userId: 3, userLogin: "reviewer" } });
+const prepared = () => createReconcilerStateReconciliationPreparation({ sourceSha, stateBytes: before, stateObject: object, attachmentTopology: topology, planBytes: Buffer.from("saved-refresh-plan"), planJson: refreshPlan(), preparedAt: now.toISOString() });
+const normalPlan = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-initial-activation-reconciler-plan-update.json", "utf8"));
+
+test("accepts only the authenticated two-field refresh-only drift", () => {
+  assert.deepEqual(assertExactReconcilerRefreshOnlyPlan(refreshPlan()).resourceDrift, CONTRACT.drift);
+  const extra = refreshPlan(); extra.resource_drift[0].change.after.name = "drift";
+  assert.throws(() => assertExactReconcilerRefreshOnlyPlan(extra), /outside/);
+  const wrongBefore = refreshPlan(); wrongBefore.resource_drift[0].change.before.attachment_count = 1;
+  assert.throws(() => assertExactReconcilerRefreshOnlyPlan(wrongBefore), /value/);
+  const actionable = refreshPlan(); actionable.resource_changes = [{ change: { actions: ["create"] } }];
+  assert.throws(() => assertExactReconcilerRefreshOnlyPlan(actionable), /actionable/);
+});
+
+test("preparation and authorization bind source, state identity, plan, topology, VersionId and ETag", () => {
+  const preparation = prepared(); const authorization = createReconcilerStateReconciliationAuthorization({ preparation, approval: approval(), now });
+  assert.doesNotThrow(() => assertReconcilerStateReconciliationAuthorization(authorization, preparation, { sourceSha, now }));
+  assert.throws(() => createReconcilerStateReconciliationPreparation({ sourceSha, stateBytes: before, stateObject: { ...object, etag: "other" }, attachmentTopology: { ...topology, users: ["user"] }, planBytes: Buffer.from("saved-refresh-plan"), planJson: refreshPlan(), preparedAt: now.toISOString() }), /topology/);
+  assert.throws(() => assertReconcilerStateReconciliationAuthorization({ ...authorization, savedPlanSha256: "b".repeat(64) }, preparation, { sourceSha, now }), /binding/);
+  assert.throws(() => createReconcilerStateReconciliationPreparation({ sourceSha, stateBytes: before, stateObject: object, attachmentTopology: { ...topology, roles: ["wrong-role"] }, planBytes: Buffer.from("saved-refresh-plan"), planJson: refreshPlan(), preparedAt: now.toISOString() }), /topology/);
+});
+
+test("exact successor is the only accepted post-state", () => {
+  assert.equal(assertExactStateSuccessor({ beforeBytes: before, afterBytes: after }).serial, 2);
+  const unexpected = state(2, 1, ["arn:aws:iam::368992683803:policy/unrelated"]);
+  assert.throws(() => assertExactStateSuccessor({ beforeBytes: before, afterBytes: unexpected }), /outside|fields/);
+});
+
+test("execution applies the saved refresh-only plan once, then requires the strict clean normal plan", () => {
+  const preparation = prepared(); const authorization = createReconcilerStateReconciliationAuthorization({ preparation, approval: approval(), now }); let applies = 0;
+  const result = executeReconcilerStateReconciliation({ sourceSha, preparation, authorization, planBytes: Buffer.from("saved-refresh-plan"), planJson: refreshPlan(), beforeStateBytes: before, beforeObject: object, beforeTopology: topology, applySavedPlan: (bytes) => { applies += 1; assert.equal(hash(bytes), preparation.savedPlanSha256); }, readPostSnapshot: () => ({ bytes: after, object: { versionId: "successor-version", etag: "successor-etag" } }), readPostTopology: () => topology, renderNormalPlan: () => normalPlan, reauthenticateSource: () => true, verifyPostconditions: () => true, now });
+  assert.equal(applies, 1); assert.equal(result.remoteIamMutationCount, 0); assert.equal(result.refreshOnlyApplyCount, 1);
+  assert.throws(() => assertInstallationPlan(refreshPlan()), /envelope/);
+});
+
+test("authenticated successor replay performs zero refresh-only applies", () => {
+  const preparation = prepared(); const authorization = createReconcilerStateReconciliationAuthorization({ preparation, approval: approval(), now }); let applies = 0;
+  const result = executeReconcilerStateReconciliation({ sourceSha, preparation, authorization, planBytes: Buffer.from("saved-refresh-plan"), planJson: refreshPlan(), beforeStateBytes: after, beforeObject: { versionId: "successor-version", etag: "successor-etag" }, beforeTopology: topology, applySavedPlan: () => { applies += 1; }, readPostSnapshot: () => ({ bytes: after, object: { versionId: "successor-version", etag: "successor-etag" } }), readPostTopology: () => topology, renderNormalPlan: () => normalPlan, reauthenticateSource: () => true, verifyPostconditions: () => true, now });
+  assert.equal(result.status, "ALREADY_COMPLETE"); assert.equal(applies, 0);
+});
+
+test("final CAS mismatch, authorization substitution, and ambiguous post-state fail closed before or after zero retry", () => {
+  const preparation = prepared(); const authorization = createReconcilerStateReconciliationAuthorization({ preparation, approval: approval(), now }); let applies = 0;
+  const common = { sourceSha, preparation, authorization, planBytes: Buffer.from("saved-refresh-plan"), planJson: refreshPlan(), beforeStateBytes: before, beforeObject: { ...object, versionId: "wrong" }, beforeTopology: topology, applySavedPlan: () => { applies += 1; }, readPostSnapshot: () => ({ bytes: before, object }), readPostTopology: () => topology, renderNormalPlan: () => normalPlan, reauthenticateSource: () => true, verifyPostconditions: () => true, now };
+  assert.throws(() => executeReconcilerStateReconciliation(common), /predecessor|successor/); assert.equal(applies, 0);
+  const mismatch = { ...common, beforeObject: object, authorization: { ...authorization, sourceSha: "b".repeat(40) } };
+  assert.throws(() => executeReconcilerStateReconciliation(mismatch), /binding/); assert.equal(applies, 0);
+});
+
+test("saved-plan substitution, stale authorization, and an unknown apply outcome never permit a retry", () => {
+  const preparation = prepared(); const authorization = createReconcilerStateReconciliationAuthorization({ preparation, approval: approval(), now }); let applies = 0;
+  const common = { sourceSha, preparation, authorization, planBytes: Buffer.from("saved-refresh-plan"), planJson: refreshPlan(), beforeStateBytes: before, beforeObject: object, beforeTopology: topology, applySavedPlan: () => { applies += 1; throw new Error("transport lost"); }, readPostSnapshot: () => ({ bytes: before, object }), readPostTopology: () => topology, renderNormalPlan: () => normalPlan, reauthenticateSource: () => true, verifyPostconditions: () => true, now };
+  assert.throws(() => executeReconcilerStateReconciliation({ ...common, planBytes: Buffer.from("substituted-plan") }), /saved plan/); assert.equal(applies, 0);
+  assert.throws(() => executeReconcilerStateReconciliation({ ...common, now: new Date(now.getTime() + CONTRACT.maxAgeMs + 1) }), /stale/); assert.equal(applies, 0);
+  assert.throws(() => executeReconcilerStateReconciliation(common), (error) => error.mutationOutcome === "AMBIGUOUS"); assert.equal(applies, 1);
+});
+
+test("post-refresh verification rejects a dirty normal plan and unchanged backend object identity", () => {
+  const preparation = prepared(); const authorization = createReconcilerStateReconciliationAuthorization({ preparation, approval: approval(), now }); let applies = 0;
+  const common = { sourceSha, preparation, authorization, planBytes: Buffer.from("saved-refresh-plan"), planJson: refreshPlan(), beforeStateBytes: before, beforeObject: object, beforeTopology: topology, applySavedPlan: () => { applies += 1; }, readPostSnapshot: () => ({ bytes: after, object: { ...object } }), readPostTopology: () => topology, renderNormalPlan: () => normalPlan, reauthenticateSource: () => true, verifyPostconditions: () => true, now };
+  assert.throws(() => executeReconcilerStateReconciliation(common), /object identity/); assert.equal(applies, 1);
+  const dirty = refreshPlan(); dirty.resource_changes = [{ address: "aws_iam_role.reconciler", change: { actions: ["update"] } }];
+  assert.throws(() => executeReconcilerStateReconciliation({ ...common, readPostSnapshot: () => ({ bytes: after, object: { versionId: "successor-version", etag: "successor-etag" } }), renderNormalPlan: () => dirty }), /envelope|exact policy update/); assert.equal(applies, 2);
+});

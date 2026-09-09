@@ -25,7 +25,7 @@ const exactFields = (value, names, label) => {
 const bootstrapPermissions = () => readSourceJson(INSTALLATION_BOOTSTRAP.permissionsPath);
 const bootstrapPermissionsPredecessor = () => {
   const desired = bootstrapPermissions();
-  return { ...desired, Statement: desired.Statement.filter(({ Sid }) => Sid !== "UpdateExactReconcilerPolicyVersion") };
+  return { ...desired, Statement: desired.Statement.filter(({ Sid }) => !["ReadExactProductionArtifactsBucketPolicy", "ReadOwnExactBootstrapInlinePolicy"].includes(Sid)) };
 };
 
 export const INSTALLATION_BOOTSTRAP = Object.freeze({
@@ -82,6 +82,11 @@ export function assertBootstrapRole(role) {
   if (canonicalJson(normalizeIamPolicyDocument(role.AssumeRolePolicyDocument, "bootstrap trust policy")) !== canonicalJson(readSourceJson(INSTALLATION_BOOTSTRAP.trustPath))) throw new Error("Bootstrap role trust is not exact.");
   assertTags(role.Tags);
   return role;
+}
+
+export function assertBootstrapPermissionsDocument(document) {
+  if (canonicalJson(normalizeIamPolicyDocument(document, "bootstrap permissions policy")) !== canonicalJson(bootstrapPermissions())) throw new Error("Bootstrap role permissions are not exact.");
+  return document;
 }
 
 export function discoverBootstrapRole({ run } = {}) {

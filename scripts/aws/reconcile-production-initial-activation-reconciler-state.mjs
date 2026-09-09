@@ -1,0 +1,95 @@
+#!/usr/bin/env node
+import crypto from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { createProductionAwsCommandRunner, createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import { assertStageBArtifactPath, ensureStageBPrivateDirectory, readBoundStageBPrivateJson, readStageBPrivateFileBytes, writeStageBPrivateFileExclusive } from "./stage-b-artifact-contract.mjs";
+import { assertProtectedCheckout, discoverInstallationPredecessor } from "./prepare-production-initial-activation-reconciler-installation.mjs";
+import { INSTALLATION, assertInstallationInitializedBackendMetadata, assertInstallationPlan, classifyInstallationStatePullError } from "./production-initial-activation-reconciler-installation-contract.mjs";
+import { INSTALLATION_BOOTSTRAP, assertBootstrapPermissionsDocument, discoverBootstrapRole } from "./production-initial-activation-reconciler-bootstrap.mjs";
+import { PRODUCTION_AWS_CREDENTIAL_SOURCE as SOURCES } from "./production-credential-source-contract.mjs";
+import { buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection, stageAProductionArtifactsPolicySemanticallyEqual } from "./production-stage-a-control-plane.mjs";
+import { RECONCILER_STATE_RECONCILIATION as CONTRACT, assertCanonicalAttachmentTopology, assertExactReconcilerRefreshOnlyPlan, assertReconcilerStateReconciliationAuthorization, createReconcilerStateReconciliationPreparation, executeReconcilerStateReconciliation } from "./production-initial-activation-reconciler-state-reconciliation.mjs";
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const required = (argv, name) => { const i = argv.indexOf(name); const value = i < 0 ? undefined : argv[i + 1]; if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
+const option = (argv, name) => { const i = argv.indexOf(name); return i < 0 ? undefined : argv[i + 1]; };
+const json = (run, args) => JSON.parse(run([...args, "--output", "json", "--no-cli-pager"]));
+const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
+const exactArgs = (argv, allowed) => {
+  const seen = new Set();
+  for (let i = 0; i < argv.length; i += 2) if (!allowed.has(argv[i]) || seen.has(argv[i]) || !argv[i + 1] || argv[i + 1].startsWith("--")) throw new Error("State reconciliation CLI arguments are not exact."); else seen.add(argv[i]);
+};
+const topology = (run) => {
+  const pages = []; let marker;
+  do { const page = json(run, ["iam", "list-entities-for-policy", "--policy-arn", CONTRACT.policyArn, "--no-paginate", ...(marker ? ["--marker", marker] : [])]); if (!Array.isArray(page.PolicyRoles) || !Array.isArray(page.PolicyUsers) || !Array.isArray(page.PolicyGroups) || typeof page.IsTruncated !== "boolean") throw new Error("Reconciler policy attachment response is malformed."); pages.push(page); marker = page.Marker; if (page.IsTruncated && (!marker || pages.slice(0, -1).some((value) => value.Marker === marker))) throw new Error("Reconciler policy attachment pagination is invalid."); } while (pages.at(-1).IsTruncated);
+  return assertCanonicalAttachmentTopology({ roles: pages.flatMap((page) => page.PolicyRoles.map(({ RoleName }) => RoleName)), users: pages.flatMap((page) => page.PolicyUsers.map(({ UserName }) => UserName)), groups: pages.flatMap((page) => page.PolicyGroups.map(({ GroupName }) => GroupName)) });
+};
+const stateObject = (run) => { const value = json(run, ["s3api", "head-object", "--bucket", CONTRACT.backend.bucket, "--key", CONTRACT.backend.key, "--expected-bucket-owner", CONTRACT.account]); return { versionId: value.VersionId, etag: value.ETag }; };
+const stableState = ({ exec, env, run }) => {
+  const before = stateObject(run); const bytes = pull({ exec, env }); const after = stateObject(run);
+  if (JSON.stringify(before) !== JSON.stringify(after)) throw new Error("Terraform state changed while its S3 identity was being authenticated.");
+  return Object.freeze({ bytes, object: after });
+};
+const stateB = (run) => { const policy = JSON.parse(json(run, ["s3api", "get-bucket-policy", "--bucket", "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"]).Policy); if (!stageAProductionArtifactsPolicySemanticallyEqual(policy, buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection())) throw new Error("State reconciliation requires canonical State B."); };
+const bootstrapPolicy = (run) => assertBootstrapPermissionsDocument(json(run, ["iam", "get-role-policy", "--role-name", INSTALLATION_BOOTSTRAP.roleName, "--policy-name", INSTALLATION_BOOTSTRAP.inlinePolicyName]).PolicyDocument);
+const init = ({ exec, env, data }) => {
+  exec("terraform", [`-chdir=${path.join(root, CONTRACT.terraformRoot)}`, "init", "-input=false", `-backend-config=bucket=${CONTRACT.backend.bucket}`, `-backend-config=key=${CONTRACT.backend.key}`, `-backend-config=region=${CONTRACT.backend.region}`, `-backend-config=encrypt=${CONTRACT.backend.encrypt}`, `-backend-config=use_lockfile=${CONTRACT.backend.useLockfile}`], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  const metadata = JSON.parse(readStageBPrivateFileBytes({ filePath: path.join(data, "terraform.tfstate"), repositoryRoot: root, label: "State reconciliation backend metadata" }).bytes.toString("utf8")); assertInstallationInitializedBackendMetadata(metadata.backend);
+};
+const pull = ({ exec, env }) => { try { return Buffer.from(exec("terraform", [`-chdir=${path.join(root, CONTRACT.terraformRoot)}`, "state", "pull"], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })); } catch (error) { return classifyInstallationStatePullError(error); } };
+const render = ({ exec, env, planPath }) => JSON.parse(exec("terraform", [`-chdir=${path.join(root, CONTRACT.terraformRoot)}`, "show", "-json", planPath], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
+const resolveAuthorization = ({ workflowRunId, workflowRunAttempt, sourceSha, preparation, exec = execFileSync }) => {
+  if (!/^[1-9][0-9]*$/.test(workflowRunId || "") || !/^[1-9][0-9]*$/.test(workflowRunAttempt || "")) throw new Error("State reconciliation authorization coordinates are invalid.");
+  const gh = (args, options = {}) => exec("gh", args, { cwd: root, encoding: Object.hasOwn(options, "encoding") ? options.encoding : "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024 });
+  const workflow = JSON.parse(gh(["api", `repos/${CONTRACT.repository}/actions/runs/${workflowRunId}`]));
+  if (String(workflow.id) !== workflowRunId || workflow.repository?.full_name !== CONTRACT.repository || workflow.head_repository?.full_name !== CONTRACT.repository || workflow.path !== CONTRACT.authorizationWorkflowPath || workflow.event !== "workflow_dispatch" || workflow.head_sha !== sourceSha || workflow.status !== "completed" || workflow.conclusion !== "success" || String(workflow.run_attempt) !== workflowRunAttempt) throw new Error("State reconciliation authorization workflow provenance is invalid.");
+  const artifacts = JSON.parse(gh(["api", `repos/${CONTRACT.repository}/actions/runs/${workflowRunId}/artifacts`])); const matches = (artifacts.artifacts || []).filter((artifact) => artifact.name === CONTRACT.authorizationArtifactName && artifact.expired === false && String(artifact.workflow_run?.id) === workflowRunId && artifact.workflow_run?.head_sha === sourceSha && artifact.workflow_run?.repository_id === workflow.repository.id && /^sha256:[a-f0-9]{64}$/.test(artifact.digest || ""));
+  if (matches.length !== 1) throw new Error("State reconciliation authorization artifact identity is invalid.");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-state-auth-"));
+  try {
+    const archive = path.join(directory, "authorization.zip"); const bytes = Buffer.from(gh(["api", `repos/${CONTRACT.repository}/actions/artifacts/${matches[0].id}/zip`], { encoding: null }));
+    if (`sha256:${sha256(bytes)}` !== matches[0].digest) throw new Error("State reconciliation authorization artifact digest is invalid.");
+    fs.writeFileSync(archive, bytes, { flag: "wx", mode: 0o600 }); if (String(gh(["api", `repos/${CONTRACT.repository}/actions/artifacts/${matches[0].id}`])).length < 2) throw new Error("State reconciliation artifact disappeared.");
+    if (String(exec("unzip", ["-Z1", archive], { encoding: "utf8" })).trim() !== CONTRACT.authorizationFilename) throw new Error("State reconciliation authorization archive contents are invalid.");
+    const authorization = JSON.parse(exec("unzip", ["-p", archive, CONTRACT.authorizationFilename], { encoding: "utf8" })); assertReconcilerStateReconciliationAuthorization(authorization, preparation, { sourceSha }); return authorization;
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+};
+
+export function runReconcilerStateReconciliation(argv = process.argv.slice(2), deps = {}) {
+  const mode = required(argv, "--mode"); if (!["prepare", "execute"].includes(mode)) throw new Error("--mode must be prepare or execute.");
+  exactArgs(argv, new Set(mode === "prepare" ? ["--mode", "--source-sha", "--admin-profile", "--terraform-data-dir", "--saved-plan-out", "--preparation-out"] : ["--mode", "--source-sha", "--terraform-data-dir", "--preparation", "--preparation-file-sha256", "--authorization-workflow-run-id", "--authorization-workflow-run-attempt", "--saved-plan", "--saved-plan-sha256", "--result-out"]));
+  const sourceSha = required(argv, "--source-sha"); const exec = deps.exec || execFileSync; assertProtectedCheckout({ sourceSha, repositoryRoot: root, exec });
+  const data = path.resolve(required(argv, "--terraform-data-dir")); ensureStageBPrivateDirectory({ directory: data, repositoryRoot: root, create: true, label: "State reconciliation Terraform data directory" });
+  const env = mode === "prepare" ? { ...createProductionAwsCredentialEnvironment({ credentialSource: SOURCES.NAMED_PROFILE, profile: required(argv, "--admin-profile") }), TF_DATA_DIR: data } : { ...createProductionAwsCredentialEnvironment({ credentialSource: SOURCES.GITHUB_OIDC_INITIAL_ACTIVATION_BOOTSTRAP, env: deps.env || process.env }), TF_DATA_DIR: data, TF_WORKSPACE: "default" };
+  const run = deps.run || createProductionAwsCommandRunner({ credentialSource: mode === "prepare" ? SOURCES.NAMED_PROFILE : SOURCES.GITHUB_OIDC_INITIAL_ACTIVATION_BOOTSTRAP, ...(mode === "prepare" ? { profile: required(argv, "--admin-profile") } : { env: deps.env || process.env }) });
+  if (mode === "prepare") {
+    if (json(run, ["sts", "get-caller-identity"]).Arn !== "arn:aws:iam::368992683803:root") throw new Error("State reconciliation preparation requires root.");
+    stateB(run); if (discoverBootstrapRole({ run }).classification !== "EXACT_COMPLETE") throw new Error("State reconciliation requires the canonical bootstrap policy."); if (discoverInstallationPredecessor({ run }).classification !== "EXACT_UPDATE") throw new Error("State reconciliation requires the exact managed-policy predecessor.");
+    init({ exec, env, data }); const predecessor = stableState({ exec, env, run }); const attached = topology(run);
+    const saved = assertStageBArtifactPath({ artifactPath: path.resolve(required(argv, "--saved-plan-out")), repositoryRoot: root, label: "State reconciliation saved plan", allowExisting: false });
+    exec("terraform", [`-chdir=${path.join(root, CONTRACT.terraformRoot)}`, "plan", "-refresh-only", "-input=false", "-lock=false", "-out", saved], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    const bytes = readStageBPrivateFileBytes({ filePath: saved, repositoryRoot: root, label: "State reconciliation saved plan" }).bytes; const plan = render({ exec, env, planPath: saved }); assertExactReconcilerRefreshOnlyPlan(plan);
+    const afterPlan = stableState({ exec, env, run });
+    if (!afterPlan.bytes.equals(predecessor.bytes) || JSON.stringify(afterPlan.object) !== JSON.stringify(predecessor.object)) throw new Error("State changed during read-only reconciliation preparation.");
+    const prep = createReconcilerStateReconciliationPreparation({ sourceSha, stateBytes: predecessor.bytes, stateObject: predecessor.object, attachmentTopology: attached, planBytes: bytes, planJson: plan });
+    const output = assertStageBArtifactPath({ artifactPath: path.resolve(required(argv, "--preparation-out")), repositoryRoot: root, label: "State reconciliation preparation", allowExisting: false }); ensureStageBPrivateDirectory({ directory: path.dirname(output), repositoryRoot: root, label: "State reconciliation preparation directory" }); writeStageBPrivateFileExclusive({ filePath: output, bytes: Buffer.from(`${JSON.stringify(prep, null, 2)}\n`), repositoryRoot: root, label: "State reconciliation preparation" });
+    return Object.freeze({ mode, preparation: prep, savedPlanPath: saved, awsWriteCount: 0 });
+  }
+  const environment = deps.env || process.env;
+  if (environment.GITHUB_ACTIONS !== "true" || environment.GITHUB_REPOSITORY !== CONTRACT.repository || environment.GITHUB_WORKFLOW_REF !== `${CONTRACT.repository}/${CONTRACT.executionWorkflowPath}@refs/heads/main` || environment.GITHUB_EVENT_NAME !== "workflow_dispatch" || environment.GITHUB_RUN_ATTEMPT !== "1") throw new Error("State reconciliation execution is workflow-only.");
+  const preparation = readBoundStageBPrivateJson({ filePath: path.resolve(required(argv, "--preparation")), expectedSha256: required(argv, "--preparation-file-sha256"), repositoryRoot: root, label: "State reconciliation preparation" });
+  const authorization = (deps.resolveAuthorization || resolveAuthorization)({ workflowRunId: required(argv, "--authorization-workflow-run-id"), workflowRunAttempt: required(argv, "--authorization-workflow-run-attempt"), sourceSha, preparation, exec });
+  const identity = json(run, ["sts", "get-caller-identity"]); if (!new RegExp(`^arn:aws:sts::${CONTRACT.account}:assumed-role/${CONTRACT.bootstrapRoleArn.split("/").at(-1)}/[^/]+$`).test(identity.Arn || "")) throw new Error("State reconciliation requires the exact bootstrap role.");
+  init({ exec, env, data }); const savedPath = path.resolve(required(argv, "--saved-plan")); const planBytes = readStageBPrivateFileBytes({ filePath: savedPath, repositoryRoot: root, label: "State reconciliation saved plan" }).bytes; if (sha256(planBytes) !== required(argv, "--saved-plan-sha256")) throw new Error("State reconciliation supplied saved-plan digest is invalid."); const planJson = render({ exec, env, planPath: savedPath });
+  stateB(run); bootstrapPolicy(run); if (discoverInstallationPredecessor({ run }).classification !== "EXACT_UPDATE") throw new Error("State reconciliation live prerequisite changed before execution.");
+  const predecessor = stableState({ exec, env, run }); const reauth = () => assertProtectedCheckout({ sourceSha, repositoryRoot: root, exec });
+  const normal = () => { const planPath = path.join(path.dirname(savedPath), `.post-refresh-${crypto.randomUUID()}.tfplan`); try { exec("terraform", [`-chdir=${path.join(root, CONTRACT.terraformRoot)}`, "plan", "-input=false", "-lock=false", "-out", planPath], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }); return render({ exec, env, planPath }); } finally { fs.rmSync(planPath, { force: true }); } };
+  const verifyPostconditions = () => { reauth(); stateB(run); bootstrapPolicy(run); if (discoverInstallationPredecessor({ run }).classification !== "EXACT_UPDATE") throw new Error("State reconciliation live prerequisite changed after refresh-only apply."); };
+  const result = executeReconcilerStateReconciliation({ sourceSha, preparation, authorization, planBytes, planJson, beforeStateBytes: predecessor.bytes, beforeObject: predecessor.object, beforeTopology: topology(run), applySavedPlan: (bytes) => { const staged = path.join(path.dirname(savedPath), `.authorized-${crypto.randomUUID()}.tfplan`); try { fs.writeFileSync(staged, bytes, { flag: "wx", mode: 0o600 }); exec("terraform", [`-chdir=${path.join(root, CONTRACT.terraformRoot)}`, "apply", "-input=false", "-lock-timeout=60s", staged], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }); } finally { fs.rmSync(staged, { force: true }); } }, readPostSnapshot: () => stableState({ exec, env, run }), readPostTopology: () => topology(run), renderNormalPlan: normal, reauthenticateSource: reauth, verifyPostconditions });
+  const output = assertStageBArtifactPath({ artifactPath: path.resolve(required(argv, "--result-out")), repositoryRoot: root, label: "State reconciliation result", allowExisting: false }); ensureStageBPrivateDirectory({ directory: path.dirname(output), repositoryRoot: root, label: "State reconciliation result directory" }); writeStageBPrivateFileExclusive({ filePath: output, bytes: Buffer.from(`${JSON.stringify(result, null, 2)}\n`), repositoryRoot: root, label: "State reconciliation result" }); return result;
+}
+if (import.meta.url === pathToFileURL(process.argv[1] || "").href) { try { process.stdout.write(`${JSON.stringify(runReconcilerStateReconciliation(), null, 2)}\n`); } catch (error) { process.stderr.write(`${error.message}\n`); process.exitCode = 1; } }

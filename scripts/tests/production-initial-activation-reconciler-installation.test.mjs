@@ -550,11 +550,13 @@ test("bootstrap role trust and permissions are exact and non-administrative", ()
   assert.doesNotMatch(serialized, /AdministratorAccess|PowerUserAccess|"iam:\*"|"s3:\*"/);
   assert.doesNotMatch(serialized, /UpdateAssumeRolePolicy|PutRolePolicy|CreateUser|CreateAccessKey/);
   assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "UpdateExactReconcilerPolicyVersion"), { Sid: "UpdateExactReconcilerPolicyVersion", Effect: "Allow", Action: "iam:CreatePolicyVersion", Resource: INITIAL_ACTIVATION_RECONCILER.policyArn });
+  assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "ReadExactProductionArtifactsBucketPolicy"), { Sid: "ReadExactProductionArtifactsBucketPolicy", Effect: "Allow", Action: "s3:GetBucketPolicy", Resource: "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an" });
+  assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "ReadOwnExactBootstrapInlinePolicy"), { Sid: "ReadOwnExactBootstrapInlinePolicy", Effect: "Allow", Action: "iam:GetRolePolicy", Resource: INSTALLATION_BOOTSTRAP.roleArn });
   const mutations = policy.Statement.flatMap((statement) => (Array.isArray(statement.Action) ? statement.Action : [statement.Action])).filter((action) => /^(iam:(Create|Attach|Tag)|s3:(Put|Delete))/.test(action));
   assert.deepEqual(mutations.sort(), ["iam:AttachRolePolicy", "iam:CreatePolicy", "iam:CreatePolicyVersion", "iam:CreateRole", "iam:TagPolicy", "iam:TagRole", "s3:DeleteObject", "s3:PutObject"].sort());
   assert.match(serialized, new RegExp(INITIAL_ACTIVATION_RECONCILER.roleArn));
   assert.match(serialized, new RegExp(INITIAL_ACTIVATION_RECONCILER.policyArn));
-  assert.doesNotMatch(serialized, new RegExp(`${INSTALLATION_BOOTSTRAP.roleArn}(?:"|/)`));
+  assert.deepEqual(policy.Statement.filter(({ Resource }) => JSON.stringify(Resource).includes(INSTALLATION_BOOTSTRAP.roleArn)), [{ Sid: "ReadOwnExactBootstrapInlinePolicy", Effect: "Allow", Action: "iam:GetRolePolicy", Resource: INSTALLATION_BOOTSTRAP.roleArn }]);
   assert.notEqual(trustPolicy.Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:sub"], "repo:T-ej2003/genuine-scan-main:environment:production");
 });
 
@@ -675,7 +677,7 @@ test("root bootstrap upgrades only its exact predecessor inline policy", () => {
   const authorization = createBootstrapAuthorization({ sourceSha, approval: bootstrapApproval, authorizedAt: now.toISOString() });
   const trustPolicy = JSON.parse(fs.readFileSync(INSTALLATION_BOOTSTRAP.trustPath, "utf8"));
   const desiredPolicy = JSON.parse(fs.readFileSync(INSTALLATION_BOOTSTRAP.permissionsPath, "utf8"));
-  let inline = { ...desiredPolicy, Statement: desiredPolicy.Statement.filter(({ Sid }) => Sid !== "UpdateExactReconcilerPolicyVersion") };
+  let inline = { ...desiredPolicy, Statement: desiredPolicy.Statement.filter(({ Sid }) => !["ReadExactProductionArtifactsBucketPolicy", "ReadOwnExactBootstrapInlinePolicy"].includes(Sid)) };
   let puts = 0;
   const run = (args) => {
     if (args[0] === "sts") return JSON.stringify({ Arn: INSTALLATION_BOOTSTRAP.administratorArn });
@@ -736,6 +738,8 @@ test("installation and bootstrap workflows share the one non-cancelling producti
   for (const file of [
     ".github/workflows/authorize-production-initial-activation-policy-reconciler-bootstrap.yml",
     ".github/workflows/authorize-production-initial-activation-policy-reconciler-installation.yml",
+    ".github/workflows/authorize-production-initial-activation-reconciler-state-reconciliation.yml",
+    ".github/workflows/execute-production-initial-activation-reconciler-state-reconciliation.yml",
     ".github/workflows/release-gate.yml",
   ]) {
     const workflow = fs.readFileSync(file, "utf8");
@@ -757,7 +761,7 @@ test("installation and bootstrap workflows share the one non-cancelling producti
   assert.match(bootstrapWorkflow, /group: production-deploy/);
   assert.match(bootstrapWorkflow, /--require-actual-approval/);
   const workflowFiles = fs.readdirSync(".github/workflows").filter((file) => file.endsWith(".yml") || file.endsWith(".yaml"));
-  const allowedBootstrapEnvironmentUsers = new Set(["authorize-production-initial-activation-policy-reconciler-bootstrap.yml", "authorize-production-initial-activation-policy-reconciler-installation.yml"]);
+  const allowedBootstrapEnvironmentUsers = new Set(["authorize-production-initial-activation-policy-reconciler-bootstrap.yml", "authorize-production-initial-activation-policy-reconciler-installation.yml", "authorize-production-initial-activation-reconciler-state-reconciliation.yml", "execute-production-initial-activation-reconciler-state-reconciliation.yml"]);
   const otherBootstrapUsers = workflowFiles.filter((file) => !allowedBootstrapEnvironmentUsers.has(file))
     .filter((file) => fs.readFileSync(path.join(".github/workflows", file), "utf8").includes(`environment: ${INSTALLATION_BOOTSTRAP.environment}`));
   assert.deepEqual(otherBootstrapUsers, []);

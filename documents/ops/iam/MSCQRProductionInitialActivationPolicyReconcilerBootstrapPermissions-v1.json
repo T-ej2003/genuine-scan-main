@@ -25,6 +25,18 @@
       ]
     },
     {
+      "Sid": "ReadExactProductionArtifactsBucketPolicy",
+      "Effect": "Allow",
+      "Action": "s3:GetBucketPolicy",
+      "Resource": "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+    },
+    {
+      "Sid": "ReadOwnExactBootstrapInlinePolicy",
+      "Effect": "Allow",
+      "Action": "iam:GetRolePolicy",
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler-bootstrap"
+    },
+    {
       "Sid": "WriteEncryptedExactBackendObjects",
       "Effect": "Allow",
       "Action": "s3:PutObject",
