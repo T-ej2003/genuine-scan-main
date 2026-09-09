@@ -6,8 +6,10 @@ import {
   buildStageAProductionArtifactsBucketPolicy,
   buildStageAProductionArtifactsBucketPolicyPredecessor,
   buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation,
+  buildStageAProductionArtifactsBucketPolicyWithRecoveryListBucketBootstrap,
   buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection,
   buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation,
+  assertStageAProductionArtifactsExecutableTransition,
   canonicalizeStageAProductionArtifactsPolicy,
   resolveStageAProductionArtifactsBucketPolicyTransition,
   stageAProductionArtifactsPolicySemanticallyEqual,
@@ -19,6 +21,14 @@ import { assertStageAProductionArtifactsRecoverySourceCompatibility, stageAProdu
 const desired = buildStageAProductionArtifactsBucketPolicy();
 const clone = () => structuredClone(desired);
 const statement = (value, sid) => value.Statement.find((entry) => entry.Sid === sid);
+const allowsExactList = ({ policy, principal, bucket, prefix }) => policy.Statement.some((entry) => entry.Effect === "Allow" && entry.Action === "s3:ListBucket" && entry.Resource === bucket && entry.Principal?.AWS === principal && (entry.Condition?.StringLike?.["s3:prefix"] || []).some((pattern) => pattern.endsWith("*") ? prefix.startsWith(pattern.slice(0, -1)) : prefix === pattern));
+const values = (value) => Array.isArray(value) ? value : [value];
+const matches = (value, actual) => values(value).includes(actual);
+const resourceMatches = (value, actual) => values(value).some((pattern) => pattern.endsWith("*") ? actual.startsWith(pattern.slice(0, -1)) : pattern === actual);
+const conditionMatches = (condition, context) => Object.entries(condition || {}).every(([operator, entries]) => Object.entries(entries).every(([key, value]) => operator === "StringEquals" ? matches(value, context[key]) : operator === "StringNotEquals" ? !matches(value, context[key]) : false));
+const policyMatches = (entry, { principal, action, resource, context }) => matches(entry.Action, action) && resourceMatches(entry.Resource, resource) && (entry.Principal === "*" || entry.Principal?.AWS === "*" || matches(entry.Principal?.AWS, principal)) && conditionMatches(entry.Condition, { ...context, "aws:PrincipalArn": principal });
+const explicitlyDenied = (policy, request) => policy.Statement.some((entry) => entry.Effect === "Deny" && policyMatches(entry, request));
+const explicitlyAllowed = (policy, request) => policy.Statement.some((entry) => entry.Effect === "Allow" && policyMatches(entry, request));
 
 test("Stage-A policy canonicalization preserves the historical desired hash and accepts AWS singleton readback", () => {
   const live = clone();
@@ -50,7 +60,7 @@ test("ProviderReadOnly-protected retirement removes exactly the six obsolete res
   assert.deepEqual(transition.predecessor, predecessor);
   assert.deepEqual(transition.desired, target);
   for (const statement of target.Statement) assert.deepEqual(statement, predecessor.Statement.find(({ Sid }) => Sid === statement.Sid));
-  for (const sid of ["AllowInitialActivationReconcilerReadProviderReadonlyReconciliation", "DenyOtherPrincipalsProviderReadonlyReconciliationReads", "AllowInitialActivationReconcilerConditionalProviderReadonlyReconciliationCreate", "DenyNonConditionalProviderReadonlyReconciliationWrites", "DenyOtherPrincipalsProviderReadonlyReconciliationWrites", "DenyProviderReadonlyReconciliationDeletion"]) assert.ok(targetSids.has(sid));
+  for (const sid of ["AllowReleaseDeployerListStageAProductionArtifactsRecovery", "AllowInitialActivationReconcilerListProviderReadonlyReconciliation", "AllowInitialActivationReconcilerReadProviderReadonlyReconciliation", "DenyOtherPrincipalsProviderReadonlyReconciliationReads", "AllowInitialActivationReconcilerConditionalProviderReadonlyReconciliationCreate", "DenyNonConditionalProviderReadonlyReconciliationWrites", "DenyOtherPrincipalsProviderReadonlyReconciliationWrites", "DenyProviderReadonlyReconciliationDeletion"]) assert.ok(targetSids.has(sid));
   assert.notEqual(stageAProductionArtifactsPolicySha256(target), stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicy()));
   assert.throws(() => resolveStageAProductionArtifactsBucketPolicyTransition({
     predecessorPolicySha256: stageAProductionArtifactsPolicySha256(predecessor),
@@ -58,25 +68,53 @@ test("ProviderReadOnly-protected retirement removes exactly the six obsolete res
   }), /not exact or reviewed/);
 });
 
-test("Stage-A reservation and ProviderReadOnly transitions compose only as A to B to C", () => {
+test("Stage-A reservation and ProviderReadOnly transitions compose only as A to A-prime to B to C", () => {
   const A = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
+  const APrime = buildStageAProductionArtifactsBucketPolicyWithRecoveryListBucketBootstrap();
   const B = buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection();
   const C = buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation();
   const transition = (predecessor, desired) => resolveStageAProductionArtifactsBucketPolicyTransition({ predecessorPolicySha256: stageAProductionArtifactsPolicySha256(predecessor), desiredPolicySha256: stageAProductionArtifactsPolicySha256(desired) });
-  assert.deepEqual(transition(A, B), { predecessor: A, desired: B });
+  assert.deepEqual(transition(A, APrime), { predecessor: A, desired: APrime });
+  assert.deepEqual(transition(APrime, B), { predecessor: APrime, desired: B });
   assert.deepEqual(transition(B, C), { predecessor: B, desired: C });
   assert.deepEqual(transition(C, C), { predecessor: C, desired: C });
+  assert.throws(() => transition(A, B), /not exact or reviewed/);
   assert.throws(() => transition(A, C), /not exact or reviewed/);
   assert.throws(() => transition(B, buildStageAProductionArtifactsBucketPolicy()), /not exact or reviewed/);
   assert.throws(() => transition({ ...B, Statement: B.Statement.slice(1) }, C), /not exact or reviewed/);
+  assert.deepEqual(assertStageAProductionArtifactsExecutableTransition({ predecessorPolicySha256: stageAProductionArtifactsPolicySha256(A), desiredPolicySha256: stageAProductionArtifactsPolicySha256(APrime) }), { predecessor: A, desired: APrime });
+  assert.deepEqual(assertStageAProductionArtifactsExecutableTransition({ predecessorPolicySha256: stageAProductionArtifactsPolicySha256(APrime), desiredPolicySha256: stageAProductionArtifactsPolicySha256(B) }), { predecessor: APrime, desired: B });
+  assert.throws(() => assertStageAProductionArtifactsExecutableTransition({ predecessorPolicySha256: stageAProductionArtifactsPolicySha256(B), desiredPolicySha256: stageAProductionArtifactsPolicySha256(C) }), /non-executable/);
 });
 
-test("current transition adds only the six immutable ProviderReadOnly journal protections", () => {
+test("Terraform's current Stage-A desired policy retains reservations, so State C stays classification-only", () => {
+  const terraform = fs.readFileSync("infra/aws/terraform/production-green-stage-a/main.tf", "utf8");
+  for (const sid of [
+    "AllowRootOperatorReadInitialActivationPolicyReconciliationReservations",
+    "DenyOtherPrincipalsInitialActivationPolicyReconciliationReservationReads",
+    "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationCreate",
+    "DenyNonConditionalInitialActivationPolicyReconciliationReservationWrites",
+    "DenyOtherPrincipalsInitialActivationPolicyReconciliationReservationWrites",
+    "DenyInitialActivationPolicyReconciliationReservationDeletion",
+  ]) assert.match(terraform, new RegExp(`Sid = \"${sid}\"`));
+  const B = buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection();
+  const C = buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation();
+  assert.notEqual(stageAProductionArtifactsPolicySha256(B), stageAProductionArtifactsPolicySha256(C));
+  assert.throws(() => assertStageAProductionArtifactsExecutableTransition({ predecessorPolicySha256: stageAProductionArtifactsPolicySha256(B), desiredPolicySha256: stageAProductionArtifactsPolicySha256(C) }), /non-executable/);
+  assert.throws(() => assertStageAProductionArtifactsExecutableTransition({ predecessorPolicySha256: stageAProductionArtifactsPolicySha256(C), desiredPolicySha256: stageAProductionArtifactsPolicySha256(C) }), /non-executable/);
+});
+
+test("bootstrap adds only exact Stage-A recovery absence detection and B adds ProviderReadOnly protection", () => {
   const predecessor = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
+  const bootstrap = buildStageAProductionArtifactsBucketPolicyWithRecoveryListBucketBootstrap();
   const desired = buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection();
-  const transition = resolveStageAProductionArtifactsBucketPolicyTransition({ predecessorPolicySha256: stageAProductionArtifactsPolicySha256(predecessor), desiredPolicySha256: stageAProductionArtifactsPolicySha256(desired) });
-  const predecessorSids = new Set(predecessor.Statement.map(({ Sid }) => Sid));
+  const bootstrapTransition = resolveStageAProductionArtifactsBucketPolicyTransition({ predecessorPolicySha256: stageAProductionArtifactsPolicySha256(predecessor), desiredPolicySha256: stageAProductionArtifactsPolicySha256(bootstrap) });
+  assert.deepEqual(bootstrap.Statement.filter(({ Sid }) => !new Set(predecessor.Statement.map(({ Sid }) => Sid)).has(Sid)), [{ Sid: "AllowReleaseDeployerListStageAProductionArtifactsRecovery", Effect: "Allow", Principal: { AWS: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer" }, Action: "s3:ListBucket", Resource: "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an", Condition: { StringLike: { "s3:prefix": ["production-stage-a-production-artifacts-reconciliation/recovery/*"] } } }]);
+  assert.deepEqual(bootstrapTransition, { predecessor, desired: bootstrap });
+  const transition = resolveStageAProductionArtifactsBucketPolicyTransition({ predecessorPolicySha256: stageAProductionArtifactsPolicySha256(bootstrap), desiredPolicySha256: stageAProductionArtifactsPolicySha256(desired) });
+  const predecessorSids = new Set(bootstrap.Statement.map(({ Sid }) => Sid));
   assert.deepEqual(desired.Statement.filter(({ Sid }) => !predecessorSids.has(Sid)).map(({ Sid }) => Sid), [
+    "AllowInitialActivationReconcilerListProviderReadonlyReconciliation",
     "AllowInitialActivationReconcilerReadProviderReadonlyReconciliation",
     "DenyOtherPrincipalsProviderReadonlyReconciliationReads",
     "AllowInitialActivationReconcilerConditionalProviderReadonlyReconciliationCreate",
@@ -84,7 +122,34 @@ test("current transition adds only the six immutable ProviderReadOnly journal pr
     "DenyOtherPrincipalsProviderReadonlyReconciliationWrites",
     "DenyProviderReadonlyReconciliationDeletion",
   ]);
-  assert.deepEqual(transition, { predecessor, desired });
+  assert.deepEqual(transition, { predecessor: bootstrap, desired });
+});
+
+test("A-prime ListBucket allows only the canonical recovery namespace", () => {
+  const policy = buildStageAProductionArtifactsBucketPolicyWithRecoveryListBucketBootstrap();
+  const request = { policy, principal: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer", bucket: "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an" };
+  assert.equal(allowsExactList({ ...request, prefix: "production-stage-a-production-artifacts-reconciliation/recovery/a/attempt.json" }), true);
+  for (const prefix of ["production-stage-a-production-artifacts-reconciliation/other/attempt.json", "production-provider-readonly-policy-reconciliation/a/reservation.json", ""]) assert.equal(allowsExactList({ ...request, prefix }), false);
+  assert.equal(allowsExactList({ ...request, bucket: "arn:aws:s3:::other", prefix: "production-stage-a-production-artifacts-reconciliation/recovery/a/attempt.json" }), false);
+});
+
+test("State A requires the root-read and release-write bootstrap split without weakening its explicit deny", () => {
+  const A = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
+  const APrime = buildStageAProductionArtifactsBucketPolicyWithRecoveryListBucketBootstrap();
+  const bucket = "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an";
+  const prefix = "production-stage-a-production-artifacts-reconciliation/recovery/";
+  const attempt = `${bucket}/${prefix}${"a".repeat(64)}/attempt.json`;
+  const root = "arn:aws:iam::368992683803:root";
+  const release = "arn:aws:iam::368992683803:role/mscqr-production-release-deployer";
+  const conditionalWrite = { action: "s3:PutObject", resource: attempt, context: { "s3:if-none-match": "*" } };
+  assert.equal(explicitlyDenied(A, { ...conditionalWrite, principal: root }), true);
+  assert.equal(explicitlyAllowed(A, { ...conditionalWrite, principal: release }), true);
+  assert.equal(explicitlyDenied(A, { ...conditionalWrite, principal: release }), false);
+  assert.equal(explicitlyDenied(A, { principal: root, action: "s3:GetObject", resource: attempt, context: {} }), false);
+  assert.equal(allowsExactList({ policy: A, principal: release, bucket, prefix: `${prefix}${"a".repeat(64)}/attempt.json` }), false);
+  assert.equal(explicitlyAllowed(APrime, { ...conditionalWrite, principal: release }), true);
+  assert.equal(explicitlyDenied(APrime, { ...conditionalWrite, principal: release }), false);
+  assert.ok(statement(A, "DenyOtherPrincipalsStageAProductionArtifactsReconciliationWrites"));
 });
 
 test("IAM grammar singleton forms are normalized only at their grammar positions", () => {

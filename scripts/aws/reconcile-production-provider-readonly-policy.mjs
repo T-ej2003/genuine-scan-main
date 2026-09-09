@@ -47,11 +47,17 @@ export function readProviderReadonlyLiveState(run) {
   };
 }
 
-const s3Read = (run, key) => {
+export const readProviderReadonlyJournalObject = (run, key) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-provider-readonly-journal-")); const output = path.join(directory, "record.json");
   try {
     try { run(["s3api", "get-object", "--bucket", PROVIDER_READONLY_RECONCILIATION.journalBucket, "--key", key, "--output", "json", "--no-cli-pager", output]); }
-    catch (error) { if (/NoSuchKey|NotFound|404/i.test(`${error.message || ""}\n${error.stderr || ""}`)) return null; throw error; }
+    catch (error) {
+      if (/NoSuchKey|NotFound|404/i.test(`${error.message || ""}\n${error.stderr || ""}`)) return null;
+      if (!/AccessDenied|403/i.test(`${error.message || ""}\n${error.stderr || ""}`)) throw error;
+      const listing = JSON.parse(run(["s3api", "list-objects-v2", "--bucket", PROVIDER_READONLY_RECONCILIATION.journalBucket, "--prefix", key, "--max-keys", "1", "--output", "json", "--no-cli-pager"]));
+      if (listing?.KeyCount === 0 && (listing.Contents === undefined || Array.isArray(listing.Contents) && listing.Contents.length === 0)) return null;
+      throw error;
+    }
     return fs.readFileSync(output);
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 };
@@ -98,7 +104,7 @@ export async function runProviderReadonlyReconciliation(argv = process.argv.slic
   const run = deps.awsRun || createProviderReadonlyCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_POLICY_RECONCILER, env: environment });
   const arn = json(run, ["sts", "get-caller-identity"])?.Arn;
   if (!new RegExp(`^arn:aws:sts::${PROVIDER_READONLY_RECONCILIATION.account}:assumed-role/${PROVIDER_READONLY_RECONCILIATION.executorRoleName}/[^/]+$`).test(arn || "")) throw new Error("ProviderReadOnly mutation requires the exact reconciler role.");
-  const journal = deps.journal || createProviderReadonlyJournal({ read: async (key) => s3Read(run, key), create: async (key, bytes) => s3Create(run, key, bytes) });
+  const journal = deps.journal || createProviderReadonlyJournal({ read: async (key) => readProviderReadonlyJournalObject(run, key), create: async (key, bytes) => s3Create(run, key, bytes) });
   const reauthenticateSource = () => {
     const current = (deps.readProtectedCheckout || readStageBProtectedMainCheckout)({ cwd: root, expectedSourceSha: sourceSha, requireCanonicalRepository: true });
     if (current.toolingSha !== sourceSha) throw new Error("ProviderReadOnly source changed after authorization.");

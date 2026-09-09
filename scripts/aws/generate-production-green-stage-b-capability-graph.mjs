@@ -163,6 +163,7 @@ const PROVIDER_READONLY_RECONCILIATION_CAPABILITIES = Object.freeze([
   ["provider-readonly-reconciliation-list-policy-versions", "iam:ListPolicyVersions", [PROVIDER_READONLY_RECONCILIATION.policyArn], false],
   ["provider-readonly-reconciliation-list-policy-entities", "iam:ListEntitiesForPolicy", [PROVIDER_READONLY_RECONCILIATION.policyArn], false],
   ["provider-readonly-reconciliation-read-journal", "s3:GetObject", [`arn:aws:s3:::${PROVIDER_READONLY_RECONCILIATION.journalBucket}/${PROVIDER_READONLY_RECONCILIATION.journalPrefix}*`], false],
+  ["provider-readonly-reconciliation-list-journal-absence", "s3:ListBucket", [`arn:aws:s3:::${PROVIDER_READONLY_RECONCILIATION.journalBucket}`], false],
   ["provider-readonly-reconciliation-write-journal", "s3:PutObject", [`arn:aws:s3:::${PROVIDER_READONLY_RECONCILIATION.journalBucket}/${PROVIDER_READONLY_RECONCILIATION.journalPrefix}*`], true],
   ["provider-readonly-reconciliation-create-policy-version", "iam:CreatePolicyVersion", [PROVIDER_READONLY_RECONCILIATION.policyArn], true],
 ]);
@@ -178,11 +179,13 @@ const STAGE_A_PRODUCTION_ARTIFACTS_CAPABILITIES = Object.freeze([
   ["stage-a-artifacts-recovery-release-read-policy", "stage-a-production-artifacts-policy-recovery", "RELEASE_DEPLOYER", "s3:GetBucketPolicy", [`arn:aws:s3:::${PRODUCTION_ACTIVATION_LIFECYCLE.bucket}`], false, "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs"],
   ["stage-a-artifacts-recovery-release-read-raw-state", "stage-a-production-artifacts-policy-recovery", "RELEASE_DEPLOYER", "s3:GetObject", [stageATerraformStateArn], false, "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs"],
   ["stage-a-artifacts-recovery-root-journal-read", "stage-a-production-artifacts-policy-recovery", "ROOT_OPERATOR", "s3:GetObject", [PRODUCTION_ACTIVATION_LIFECYCLE.stageAProductionArtifactsReconciliationArn], false, "scripts/aws/production-stage-a-production-artifacts-journal.mjs"],
+  ["stage-a-artifacts-recovery-root-journal-list-absence", "stage-a-production-artifacts-policy-recovery", "ROOT_OPERATOR", "s3:ListBucket", [`arn:aws:s3:::${PRODUCTION_ACTIVATION_LIFECYCLE.bucket}`], false, "scripts/aws/production-stage-a-production-artifacts-journal.mjs"],
   ["stage-a-artifacts-recovery-root-journal-conditional-create", "stage-a-production-artifacts-policy-recovery", "ROOT_OPERATOR", "s3:PutObject", [PRODUCTION_ACTIVATION_LIFECYCLE.stageAProductionArtifactsReconciliationArn], true, "scripts/aws/production-stage-a-production-artifacts-journal.mjs"],
   ["stage-a-artifacts-recovery-root-sign", "stage-a-production-artifacts-policy-recovery", "ROOT_OPERATOR", "kms:Sign", [ROOT_ATTESTATION_KEY_ALIAS_ARN], true, "scripts/aws/production-root-attestation-signer.mjs"],
   ["stage-a-artifacts-recovery-release-lock-acquire", "stage-a-production-artifacts-policy-recovery", "RELEASE_DEPLOYER", "s3:PutObject", [STAGE_A_TERRAFORM_LOCK_ARN], true, "scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs"],
   ["stage-a-artifacts-recovery-release-lock-release", "stage-a-production-artifacts-policy-recovery", "RELEASE_DEPLOYER", "s3:DeleteObject", [STAGE_A_TERRAFORM_LOCK_ARN], true, "scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs"],
   ["stage-a-artifacts-journal-read", "stage-a-production-artifacts-state-reconciliation", "RELEASE_DEPLOYER", "s3:GetObject", [PRODUCTION_ACTIVATION_LIFECYCLE.stageAProductionArtifactsReconciliationArn], false, "scripts/aws/production-stage-a-production-artifacts-journal.mjs"],
+  ["stage-a-artifacts-journal-list-absence", "stage-a-production-artifacts-state-reconciliation", "RELEASE_DEPLOYER", "s3:ListBucket", [`arn:aws:s3:::${PRODUCTION_ACTIVATION_LIFECYCLE.bucket}`], false, "scripts/aws/production-stage-a-production-artifacts-journal.mjs"],
   ["stage-a-artifacts-journal-conditional-create", "stage-a-production-artifacts-state-reconciliation", "RELEASE_DEPLOYER", "s3:PutObject", [PRODUCTION_ACTIVATION_LIFECYCLE.stageAProductionArtifactsReconciliationArn], true, "scripts/aws/production-stage-a-production-artifacts-journal.mjs"],
   ["stage-a-artifacts-reconciliation-release-identify", "stage-a-production-artifacts-state-reconciliation", "RELEASE_DEPLOYER", "sts:GetCallerIdentity", ["*"], false, "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs"],
   ["stage-a-artifacts-reconciliation-root-identify", "stage-a-production-artifacts-state-reconciliation", "ROOT_OPERATOR", "sts:GetCallerIdentity", ["*"], false, "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs"],
@@ -411,9 +414,10 @@ export function discoverAwsCliActions() {
     for (const match of source.matchAll(pattern)) {
       const service = match[1] === "s3api" ? "s3" : match[1];
       const operation = match[2].split("-").map((part) => part[0].toUpperCase() + part.slice(1)).join("").replaceAll("Db", "DB").replaceAll("Vpc", "VPC").replaceAll("Url", "URL");
-      const action = service === "ecs" && operation === "Wait" ? "ecs:DescribeServices"
+      const action = service === "s3" && operation === "ListObjectsV2" ? "s3:ListBucket"
+        : service === "ecs" && operation === "Wait" ? "ecs:DescribeServices"
         : `${service}:${service === "lambda" && operation === "Invoke" ? "InvokeFunction" : operation}`;
-      if (sourceFile === "scripts/aws/production-stage-a-production-artifacts-journal.mjs" && ["s3:GetObject", "s3:PutObject"].includes(action)) {
+      if (sourceFile === "scripts/aws/production-stage-a-production-artifacts-journal.mjs" && ["s3:GetObject", "s3:ListBucket", "s3:PutObject"].includes(action)) {
         calls.push({ sourceFile, action, identity: "RELEASE_DEPLOYER" }, { sourceFile, action, identity: "ROOT_OPERATOR" });
       } else if (sourceFile === "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs") {
         calls.push(...classifyStageARecoveryAwsCliAction({ action, source, offset: match.index }).map((entry) => ({ sourceFile, action, ...entry })));
@@ -438,7 +442,7 @@ export function discoverAwsCliActions() {
       } else if (sourceFile === "scripts/aws/production-provider-readonly-policy-reconciliation.mjs") {
         throw new Error("ProviderReadOnly reconciliation core must not issue AWS commands outside its target-locked runner.");
       } else if (sourceFile === "scripts/aws/reconcile-production-provider-readonly-policy.mjs") {
-        const id = ({ "sts:GetCallerIdentity": "provider-readonly-reconciliation-identify", "iam:GetPolicy": "provider-readonly-reconciliation-read-policy", "iam:GetPolicyVersion": "provider-readonly-reconciliation-read-policy-version", "iam:ListPolicyVersions": "provider-readonly-reconciliation-list-policy-versions", "iam:ListEntitiesForPolicy": "provider-readonly-reconciliation-list-policy-entities", "s3:GetObject": "provider-readonly-reconciliation-read-journal", "s3:PutObject": "provider-readonly-reconciliation-write-journal", "iam:CreatePolicyVersion": "provider-readonly-reconciliation-create-policy-version" })[action];
+        const id = ({ "sts:GetCallerIdentity": "provider-readonly-reconciliation-identify", "iam:GetPolicy": "provider-readonly-reconciliation-read-policy", "iam:GetPolicyVersion": "provider-readonly-reconciliation-read-policy-version", "iam:ListPolicyVersions": "provider-readonly-reconciliation-list-policy-versions", "iam:ListEntitiesForPolicy": "provider-readonly-reconciliation-list-policy-entities", "s3:GetObject": "provider-readonly-reconciliation-read-journal", "s3:ListBucket": "provider-readonly-reconciliation-list-journal-absence", "s3:PutObject": "provider-readonly-reconciliation-write-journal", "iam:CreatePolicyVersion": "provider-readonly-reconciliation-create-policy-version" })[action];
         if (!id) throw new Error("ProviderReadOnly reconciliation uses an unreviewed AWS action.");
         const capability = PROVIDER_READONLY_RECONCILIATION_CAPABILITIES.find(([candidate]) => candidate === id);
         const executorCall = { sourceFile, sourceFunction: id, phase: "provider-readonly-policy-reconciliation", identity: "INITIAL_ACTIVATION_RECONCILER", action, resources: capability[2], capabilityId: id };
@@ -644,9 +648,9 @@ export function assertStageBDeploymentCapabilityGraph(graph = readJson(CAPABILIT
   if (!graph.capabilities.some(({ identity, action, resources }) => identity === "ECS_EXEC_VERIFIER_OPERATOR" && action === "ecs:ExecuteCommand" && resources.includes(`arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/*`))) throw new Error("Dedicated ECS Exec operator capability is absent.");
   const rootDropSigning = graph.capabilities.find(({ id }) => id === "root-drop-sign-evidence");
   if (!rootDropSigning || rootDropSigning.phase !== "root-drop-evidence-signing" || rootDropSigning.identity !== "ROOT_OPERATOR" || rootDropSigning.sourceFile !== "scripts/aws/produce-production-root-drop-evidence.mjs" || rootDropSigning.action !== "kms:Sign" || JSON.stringify(rootDropSigning.resources) !== JSON.stringify([ROOT_DROP_SIGNING_KEY_ARN])) throw new Error("Root-drop signing capability is not exact.");
-  for (const [id, action, mutation] of [["stage-a-artifacts-recovery-root-journal-read", "s3:GetObject", false], ["stage-a-artifacts-recovery-root-journal-conditional-create", "s3:PutObject", true]]) {
+  for (const [id, action, resources, mutation] of [["stage-a-artifacts-recovery-root-journal-read", "s3:GetObject", [PRODUCTION_ACTIVATION_LIFECYCLE.stageAProductionArtifactsReconciliationArn], false], ["stage-a-artifacts-recovery-root-journal-list-absence", "s3:ListBucket", [`arn:aws:s3:::${PRODUCTION_ACTIVATION_LIFECYCLE.bucket}`], false], ["stage-a-artifacts-recovery-root-journal-conditional-create", "s3:PutObject", [PRODUCTION_ACTIVATION_LIFECYCLE.stageAProductionArtifactsReconciliationArn], true]]) {
     const capability = graph.capabilities.find(({ id: candidate }) => candidate === id);
-    if (!capability || capability.phase !== "stage-a-production-artifacts-policy-recovery" || capability.identity !== "ROOT_OPERATOR" || capability.sourceFile !== "scripts/aws/production-stage-a-production-artifacts-journal.mjs" || capability.action !== action || capability.mutation !== mutation || JSON.stringify(capability.resources) !== JSON.stringify([PRODUCTION_ACTIVATION_LIFECYCLE.stageAProductionArtifactsReconciliationArn])) throw new Error("Stage-A root journal capability boundary is not exact.");
+    if (!capability || capability.phase !== "stage-a-production-artifacts-policy-recovery" || capability.identity !== "ROOT_OPERATOR" || capability.sourceFile !== "scripts/aws/production-stage-a-production-artifacts-journal.mjs" || capability.action !== action || capability.mutation !== mutation || JSON.stringify(capability.resources) !== JSON.stringify(resources)) throw new Error("Stage-A root journal capability boundary is not exact.");
   }
   for (const [id, action, mutation, sid] of [
     ["initial-activation-policy-reconciliation-root-read-reservation", "s3:GetObject", false, "AllowRootOperatorReadInitialActivationPolicyReconciliationReservations"],

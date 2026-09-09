@@ -60,7 +60,7 @@ const ROLE_DESCRIPTION = "GitHub OIDC-only writer for the exact InitialActivatio
 const POLICY_DESCRIPTION = "Exact readback and CreatePolicyVersion capability for InitialActivationLifecycle reconciliation.";
 export const installationPermissionsPredecessor = () => {
   const desired = sourceJson(`${INSTALLATION.terraformRoot}/permissions-policy.json`);
-  const added = new Set(["ReadExactProviderReadOnlyPolicy", "CreateExactProviderReadOnlyPolicyVersion", "ReadExactProviderReadOnlyReconciliationJournal", "PersistExactProviderReadOnlyReconciliationJournal"]);
+  const added = new Set(["ReadExactProviderReadOnlyPolicy", "CreateExactProviderReadOnlyPolicyVersion", "ListExactProviderReadOnlyReconciliationJournal", "ReadExactProviderReadOnlyReconciliationJournal", "PersistExactProviderReadOnlyReconciliationJournal"]);
   return { ...desired, Statement: desired.Statement.filter(({ Sid }) => !added.has(Sid)) };
 };
 const EXPECTED_PROVIDER_CONFIGURATION = Object.freeze({

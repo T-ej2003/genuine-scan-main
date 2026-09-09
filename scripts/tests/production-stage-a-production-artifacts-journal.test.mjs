@@ -35,6 +35,17 @@ function memoryS3() {
   return { run, calls, objects };
 }
 
+function deniedReadS3({ listing = { KeyCount: 0 } } = {}) {
+  const calls = [];
+  const run = (args) => {
+    calls.push([...args]);
+    if (args[1] === "get-object") { const error = new Error("AccessDenied"); error.stderr = "AccessDenied"; throw error; }
+    if (args[1] === "list-objects-v2") return JSON.stringify(listing);
+    throw new Error(`unexpected S3 journal operation ${args[1]}`);
+  };
+  return { run, calls };
+}
+
 test("Stage A reconciliation journal atomically reserves once and never overwrites or deletes", async () => {
   const s3 = memoryS3(); const journal = createStageAProductionArtifactsJournal({ run: s3.run });
   const attempts = await Promise.allSettled([Promise.resolve().then(() => journal.reserve(identity)), Promise.resolve().then(() => journal.reserve(identity))]);
@@ -74,4 +85,22 @@ test("Stage A reconciliation journal reads only the authorization-derived exact 
   assert.equal(bucket, "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an");
   assert.equal(key, `production-stage-a-production-artifacts-reconciliation/${identity.authorizationSha256}/reservation.json`);
   for (const substituted of ["x".repeat(64), `${identity.authorizationSha256}0`]) assert.throws(() => journal.readReservation(substituted), /journal key/);
+});
+
+test("Stage A recovery absence is classified only through an exact-key scoped ListBucket probe", () => {
+  const s3 = deniedReadS3(); const journal = createStageAProductionArtifactsJournal({ run: s3.run }); const authorizationSha256 = "9".repeat(64);
+  assert.equal(journal.readRecoveryAttempt(authorizationSha256), null);
+  const list = s3.calls.at(-1);
+  assert.deepEqual(list.slice(0, 2), ["s3api", "list-objects-v2"]);
+  assert.equal(list[list.indexOf("--bucket") + 1], "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an");
+  assert.equal(list[list.indexOf("--prefix") + 1], `production-stage-a-production-artifacts-reconciliation/recovery/${authorizationSha256}/attempt.json`);
+  assert.equal(list[list.indexOf("--max-keys") + 1], "1");
+});
+
+test("Stage A recovery refuses to treat access denial or a sibling object as absence", () => {
+  const authorizationSha256 = "9".repeat(64);
+  for (const listing of [{ KeyCount: 1, Contents: [{ Key: "sibling" }] }, { KeyCount: 0, Contents: [{ Key: "impossible" }] }]) {
+    const s3 = deniedReadS3({ listing }); const journal = createStageAProductionArtifactsJournal({ run: s3.run });
+    assert.throws(() => journal.readRecoveryAttempt(authorizationSha256), /AccessDenied/);
+  }
 });

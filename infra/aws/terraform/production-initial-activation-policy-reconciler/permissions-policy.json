@@ -51,6 +51,17 @@
       "Resource": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
     },
     {
+      "Sid": "ListExactProviderReadOnlyReconciliationJournal",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": "production-provider-readonly-policy-reconciliation/*"
+        }
+      }
+    },
+    {
       "Sid": "ReadExactProviderReadOnlyReconciliationJournal",
       "Effect": "Allow",
       "Action": "s3:GetObject",

@@ -24,6 +24,7 @@
     { "action": "iam:ListPolicyVersions", "resource": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly", "mutation": false },
     { "action": "iam:ListEntitiesForPolicy", "resource": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly", "mutation": false },
     { "action": "iam:CreatePolicyVersion", "resource": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly", "mutation": true },
+    { "action": "s3:ListBucket", "resource": "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an", "mutation": false },
     { "action": "s3:GetObject", "resource": "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-provider-readonly-policy-reconciliation/*", "mutation": false },
     { "action": "s3:PutObject", "resource": "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-provider-readonly-policy-reconciliation/*", "mutation": true }
   ],

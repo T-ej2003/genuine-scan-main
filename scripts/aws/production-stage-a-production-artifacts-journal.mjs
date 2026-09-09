@@ -99,7 +99,13 @@ function readObject({ run, key }) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-a-journal-")); const output = path.join(directory, "record.json");
   try {
     try { run(["s3api", "get-object", "--bucket", PRODUCTION_ACTIVATION_LIFECYCLE.bucket, "--key", key, "--output", "json", "--no-cli-pager", output]); }
-    catch (error) { if (/NoSuchKey|NotFound|404/i.test(`${error.message || ""}\n${error.stderr || ""}`)) return null; throw error; }
+    catch (error) {
+      if (/NoSuchKey|NotFound|404/i.test(`${error.message || ""}\n${error.stderr || ""}`)) return null;
+      if (!/AccessDenied|403/i.test(`${error.message || ""}\n${error.stderr || ""}`)) throw error;
+      const listing = JSON.parse(run(["s3api", "list-objects-v2", "--bucket", PRODUCTION_ACTIVATION_LIFECYCLE.bucket, "--prefix", key, "--max-keys", "1", "--output", "json", "--no-cli-pager"]));
+      if (listing?.KeyCount === 0 && (listing.Contents === undefined || Array.isArray(listing.Contents) && listing.Contents.length === 0)) return null;
+      throw error;
+    }
     return fs.readFileSync(output);
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 }

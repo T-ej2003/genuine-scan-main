@@ -80,6 +80,15 @@ export const STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY = Object.freeze({
   type: "aws_s3_bucket_policy",
   bucket: PRODUCTION_ACTIVATION_LIFECYCLE.bucket,
 });
+export const STAGE_A_PRODUCTION_ARTIFACTS_TRANSITION = Object.freeze({
+  A_TO_A_PRIME: "A_TO_A_PRIME",
+  A_PRIME_TO_B: "A_PRIME_TO_B",
+  B_TO_C: "B_TO_C",
+});
+export const STAGE_A_PRODUCTION_ARTIFACTS_EXECUTABLE_TRANSITIONS = Object.freeze([
+  STAGE_A_PRODUCTION_ARTIFACTS_TRANSITION.A_TO_A_PRIME,
+  STAGE_A_PRODUCTION_ARTIFACTS_TRANSITION.A_PRIME_TO_B,
+]);
 // `terraform providers schema -json` from the locked Terraform 1.15.8 / AWS 6.56.0 envelope.
 export const STAGE_A_LOCKED_AWS_RESOURCE_STATE_SCHEMA_VERSIONS = Object.freeze({
   [STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.address]: 0,
@@ -121,12 +130,14 @@ export function buildStageAProductionArtifactsBucketPolicy() {
   };
 }
 export function buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection() {
-  const predecessor = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
+  const predecessor = buildStageAProductionArtifactsBucketPolicyWithRecoveryListBucketBootstrap();
   const journal = [PRODUCTION_ACTIVATION_LIFECYCLE.providerReadonlyPolicyReconciliationArn];
+  const bucket = `arn:aws:s3:::${PRODUCTION_ACTIVATION_LIFECYCLE.bucket}`;
   return {
     ...predecessor,
     Statement: [
       ...predecessor.Statement,
+      { Sid: "AllowInitialActivationReconcilerListProviderReadonlyReconciliation", Effect: "Allow", Principal: { AWS: PRODUCTION_ACTIVATION_LIFECYCLE.initialActivationPolicyReconcilerRoleArn }, Action: "s3:ListBucket", Resource: bucket, Condition: { StringLike: { "s3:prefix": [`${PRODUCTION_ACTIVATION_LIFECYCLE.providerReadonlyPolicyReconciliationPrefix}*`] } } },
       { Sid: "AllowInitialActivationReconcilerReadProviderReadonlyReconciliation", Effect: "Allow", Principal: { AWS: PRODUCTION_ACTIVATION_LIFECYCLE.initialActivationPolicyReconcilerRoleArn }, Action: "s3:GetObject", Resource: journal },
       { Sid: "DenyOtherPrincipalsProviderReadonlyReconciliationReads", Effect: "Deny", Principal: "*", Action: "s3:GetObject", Resource: journal, Condition: { StringNotEquals: { "aws:PrincipalArn": PRODUCTION_ACTIVATION_LIFECYCLE.initialActivationPolicyReconcilerRoleArn } } },
       { Sid: "AllowInitialActivationReconcilerConditionalProviderReadonlyReconciliationCreate", Effect: "Allow", Principal: { AWS: PRODUCTION_ACTIVATION_LIFECYCLE.initialActivationPolicyReconcilerRoleArn }, Action: "s3:PutObject", Resource: journal, Condition: { StringEquals: { "s3:if-none-match": "*", "s3:x-amz-server-side-encryption": "AES256" } } },
@@ -154,6 +165,49 @@ export function buildStageAProductionArtifactsBucketPolicyWithInitialActivationR
   };
 }
 
+export function buildStageAProductionArtifactsBucketPolicyWithRecoveryListBucketBootstrap() {
+  const predecessor = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
+  return {
+    ...predecessor,
+    Statement: [
+      ...predecessor.Statement,
+      { Sid: "AllowReleaseDeployerListStageAProductionArtifactsRecovery", Effect: "Allow", Principal: { AWS: PRODUCTION_ACTIVATION_LIFECYCLE.releaseRoleArn }, Action: "s3:ListBucket", Resource: `arn:aws:s3:::${PRODUCTION_ACTIVATION_LIFECYCLE.bucket}`, Condition: { StringLike: { "s3:prefix": [`${PRODUCTION_ACTIVATION_LIFECYCLE.stageAProductionArtifactsReconciliationPrefix}recovery/*`] } } },
+    ],
+  };
+}
+
+export function stageAProductionArtifactsRecoveryListBucketBootstrapTransition() {
+  const predecessor = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
+  const desired = buildStageAProductionArtifactsBucketPolicyWithRecoveryListBucketBootstrap();
+  return Object.freeze({ predecessor, desired, predecessorPolicySha256: stageAProductionArtifactsPolicySha256(predecessor), desiredPolicySha256: stageAProductionArtifactsPolicySha256(desired) });
+}
+
+export function stageAProductionArtifactsProviderReadonlyJournalTransition() {
+  const predecessor = buildStageAProductionArtifactsBucketPolicyWithRecoveryListBucketBootstrap();
+  const desired = buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection();
+  return Object.freeze({ predecessor, desired, predecessorPolicySha256: stageAProductionArtifactsPolicySha256(predecessor), desiredPolicySha256: stageAProductionArtifactsPolicySha256(desired) });
+}
+
+export function stageAProductionArtifactsRecoveryTransition(transitionId) {
+  if (transitionId === STAGE_A_PRODUCTION_ARTIFACTS_TRANSITION.A_TO_A_PRIME) return stageAProductionArtifactsRecoveryListBucketBootstrapTransition();
+  if (transitionId === STAGE_A_PRODUCTION_ARTIFACTS_TRANSITION.A_PRIME_TO_B) return stageAProductionArtifactsProviderReadonlyJournalTransition();
+  if (transitionId === STAGE_A_PRODUCTION_ARTIFACTS_TRANSITION.B_TO_C) return stageAProductionArtifactsInitialActivationReservationRetirementTransition();
+  throw new Error("Stage A production-artifacts recovery transition identifier is not allowlisted.");
+}
+
+export function stageAProductionArtifactsExecutableRecoveryTransition(transitionId) {
+  if (!STAGE_A_PRODUCTION_ARTIFACTS_EXECUTABLE_TRANSITIONS.includes(transitionId)) throw new Error("Stage A production-artifacts transition is non-executable until Terraform State-C alignment is reviewed.");
+  return stageAProductionArtifactsRecoveryTransition(transitionId);
+}
+
+export function assertStageAProductionArtifactsExecutableTransition(transition) {
+  const resolved = resolveStageAProductionArtifactsBucketPolicyTransition(transition);
+  const retired = buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation();
+  const stateC = stageAProductionArtifactsPolicySha256(retired);
+  if (stageAProductionArtifactsPolicySha256(resolved.predecessor) === stateC || stageAProductionArtifactsPolicySha256(resolved.desired) === stateC) throw new Error("Stage A production-artifacts transition is non-executable until Terraform State-C alignment is reviewed.");
+  return resolved;
+}
+
 export function buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation() {
   const protectedPolicy = buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection();
   const reservationSids = new Set([
@@ -175,12 +229,14 @@ export function stageAProductionArtifactsInitialActivationReservationRetirementT
 
 export function resolveStageAProductionArtifactsBucketPolicyTransition({ predecessorPolicySha256, desiredPolicySha256 } = {}) {
   const reservationPolicy = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
+  const bootstrapPolicy = buildStageAProductionArtifactsBucketPolicyWithRecoveryListBucketBootstrap();
   const providerReadonlyPolicy = buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection();
   const retiredPolicy = buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation();
   const transitions = [
     [buildStageAProductionArtifactsBucketPolicyPredecessor(), buildStageAProductionArtifactsBucketPolicy()],
     [buildStageAProductionArtifactsBucketPolicy(), reservationPolicy],
-    [reservationPolicy, providerReadonlyPolicy],
+    [reservationPolicy, bootstrapPolicy],
+    [bootstrapPolicy, providerReadonlyPolicy],
     [providerReadonlyPolicy, retiredPolicy],
     [retiredPolicy, retiredPolicy],
   ];
@@ -190,9 +246,7 @@ export function resolveStageAProductionArtifactsBucketPolicyTransition({ predece
 }
 
 export function currentStageAProductionArtifactsBucketPolicyTransition() {
-  const predecessor = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
-  const desired = buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection();
-  return Object.freeze({ predecessor, desired, predecessorPolicySha256: stageAProductionArtifactsPolicySha256(predecessor), desiredPolicySha256: stageAProductionArtifactsPolicySha256(desired) });
+  return stageAProductionArtifactsRecoveryListBucketBootstrapTransition();
 }
 const STAGE_A_CHECKER_PUBLICATION_PREDECESSOR = Object.freeze({
   Version: "2012-10-17",

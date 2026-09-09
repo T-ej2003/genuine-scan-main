@@ -9,7 +9,7 @@ import JSZip from "jszip";
 import { canonicalJson } from "../aws/production-green-stage-b-contract.mjs";
 import { createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
 import { PROVIDER_READONLY_RECONCILIATION as CONTRACT, assertProviderReadonlyAuthorization, authenticateProviderReadonlyLiveState, createProviderReadonlyAuthorization, createProviderReadonlyJournal, createProviderReadonlyPreparation, executeProviderReadonlyReconciliation, providerReadonlyOperationId, providerReadonlyProductionSleep, readProviderReadonlyDesiredPolicy, resolveProviderReadonlyAuthorizationArtifact } from "../aws/production-provider-readonly-policy-reconciliation.mjs";
-import { readProviderReadonlyLiveState, runProviderReadonlyReconciliation } from "../aws/reconcile-production-provider-readonly-policy.mjs";
+import { readProviderReadonlyJournalObject, readProviderReadonlyLiveState, runProviderReadonlyReconciliation } from "../aws/reconcile-production-provider-readonly-policy.mjs";
 
 const sourceSha = "a".repeat(40);
 const now = new Date("2026-09-09T10:00:00.000Z");
@@ -35,6 +35,26 @@ const mixedPostState = () => postState({ versions: state().versions });
 const operationBindings = (prep) => ({ sourceSha: prep.sourceSha, currentDefaultVersionId: prep.currentDefaultVersionId, currentDefaultDocumentSha256: prep.currentDefaultDocumentSha256, desiredDocumentSha256: prep.desiredDocumentSha256, versionInventorySha256: prep.versionInventorySha256, attachmentTopologySha256: prep.attachmentTopologySha256 });
 const journalIdentity = (kind, prep, auth, prov, createdAt = prep.createdAt) => ({ schemaVersion: 1, kind, operationId: prep.operationId, sourceSha: prep.sourceSha, account: prep.account, targetPolicyArn: prep.targetPolicyArn, sourcePolicySha256: prep.sourcePolicySha256, preparationSha256: prep.preparationSha256, authorizationSha256: auth.authorizationSha256, authorizationProvenanceSha256: prov.provenanceSha256, currentDefaultVersionId: prep.currentDefaultVersionId, currentDefaultDocumentSha256: prep.currentDefaultDocumentSha256, desiredDocumentSha256: prep.desiredDocumentSha256, semanticDeltaSha256: prep.semanticDeltaSha256, versionInventorySha256: prep.versionInventorySha256, attachmentTopologySha256: prep.attachmentTopologySha256, expectedWritePlanSha256: prep.expectedWritePlanSha256, createdAt });
 const workflowEnvironment = { GITHUB_ACTIONS: "true", GITHUB_REPOSITORY: "T-ej2003/genuine-scan-main", GITHUB_WORKFLOW_REF: CONTRACT.executionWorkflowRef, GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_RUN_ATTEMPT: "1", AWS_ACCESS_KEY_ID: "fixture", AWS_SECRET_ACCESS_KEY: "fixture", AWS_SESSION_TOKEN: "fixture" };
+
+test("ProviderReadOnly journal absence needs an exact-key ListBucket probe and never accepts generic access denial", () => {
+  const key = `${CONTRACT.journalPrefix}${"a".repeat(64)}/reservation.json`; const calls = [];
+  const absent = (args) => {
+    calls.push(args);
+    if (args[1] === "get-object") { const error = new Error("AccessDenied"); error.stderr = "403"; throw error; }
+    if (args[1] === "list-objects-v2") return JSON.stringify({ KeyCount: 0 });
+    throw new Error(`unexpected ${args[1]}`);
+  };
+  assert.equal(readProviderReadonlyJournalObject(absent, key), null);
+  const list = calls.at(-1);
+  assert.equal(list[list.indexOf("--bucket") + 1], CONTRACT.journalBucket);
+  assert.equal(list[list.indexOf("--prefix") + 1], key);
+  assert.equal(list[list.indexOf("--max-keys") + 1], "1");
+  const denied = (args) => {
+    if (args[1] === "get-object") { const error = new Error("AccessDenied"); error.stderr = "403"; throw error; }
+    return JSON.stringify({ KeyCount: 1, Contents: [{ Key: `${CONTRACT.journalPrefix}sibling` }] });
+  };
+  assert.throws(() => readProviderReadonlyJournalObject(denied, key), /AccessDenied/);
+});
 
 async function githubAuthorization(auth, change = {}) {
   const zip = new JSZip(); zip.file(CONTRACT.authorizationFilename, `${JSON.stringify(change.authorization || auth, null, 2)}\n`);
@@ -426,8 +446,10 @@ test("executor policy is exact and grants no deletion, default setter, or arbitr
   assert.equal(targetCreate.length, 1);
   for (const forbidden of ["iam:DeletePolicyVersion", "iam:SetDefaultPolicyVersion", "iam:CreatePolicy", "iam:AttachRolePolicy", "iam:*"]) assert.equal(actions.includes(forbidden), false);
   const readJournal = policy.Statement.find(({ Sid }) => Sid === "ReadExactProviderReadOnlyReconciliationJournal");
+  const listJournal = policy.Statement.find(({ Sid }) => Sid === "ListExactProviderReadOnlyReconciliationJournal");
   const writeJournal = policy.Statement.find(({ Sid }) => Sid === "PersistExactProviderReadOnlyReconciliationJournal");
   assert.equal(readJournal.Action, "s3:GetObject");
+  assert.deepEqual(listJournal, { Sid: "ListExactProviderReadOnlyReconciliationJournal", Effect: "Allow", Action: "s3:ListBucket", Resource: `arn:aws:s3:::${CONTRACT.journalBucket}`, Condition: { StringLike: { "s3:prefix": `${CONTRACT.journalPrefix}*` } } });
   assert.equal(writeJournal.Action, "s3:PutObject");
   assert.deepEqual(writeJournal.Condition, { StringEquals: { "s3:if-none-match": "*", "s3:x-amz-server-side-encryption": "AES256" } });
   assert.equal(readJournal.Resource, `arn:aws:s3:::${CONTRACT.journalBucket}/${CONTRACT.journalPrefix}*`);

@@ -969,7 +969,7 @@
         "sid": "PublishExactStageBApproval",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "ff4422515f8d8e3950eeb652be648be67c0cf304c28361f7af5d8d28fb9e42e2"
+        "expectedPolicySha256": "6e70443088c335810b83e1b43c47f6e089e3bced916a23a61efa5c11eea5734a"
       },
       "required": true,
       "mutation": true
@@ -1556,7 +1556,7 @@
         "sid": "CreateExactInitialActivationLifecyclePolicyVersion",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "91f3988ccdd360ab2b1857428ffe6f55ebc31045b7b97cbcd1fdd0db9ebdc4d6"
+        "expectedPolicySha256": "e29d3adf15f6437e8e15dbb3e18fd68eb1869e083fa5125a47d0e25e3cc81313"
       },
       "required": true,
       "mutation": true
@@ -1585,7 +1585,7 @@
         "sid": "IdentifyCurrentSession",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "91f3988ccdd360ab2b1857428ffe6f55ebc31045b7b97cbcd1fdd0db9ebdc4d6"
+        "expectedPolicySha256": "e29d3adf15f6437e8e15dbb3e18fd68eb1869e083fa5125a47d0e25e3cc81313"
       },
       "required": true,
       "mutation": false
@@ -1614,7 +1614,7 @@
         "sid": "ReadExactInitialActivationLifecyclePolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "91f3988ccdd360ab2b1857428ffe6f55ebc31045b7b97cbcd1fdd0db9ebdc4d6"
+        "expectedPolicySha256": "e29d3adf15f6437e8e15dbb3e18fd68eb1869e083fa5125a47d0e25e3cc81313"
       },
       "required": true,
       "mutation": false
@@ -1643,7 +1643,7 @@
         "sid": "ReadExactInitialActivationLifecyclePolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "91f3988ccdd360ab2b1857428ffe6f55ebc31045b7b97cbcd1fdd0db9ebdc4d6"
+        "expectedPolicySha256": "e29d3adf15f6437e8e15dbb3e18fd68eb1869e083fa5125a47d0e25e3cc81313"
       },
       "required": true,
       "mutation": false
@@ -1672,7 +1672,7 @@
         "sid": "ReadExactInitialActivationLifecyclePolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "91f3988ccdd360ab2b1857428ffe6f55ebc31045b7b97cbcd1fdd0db9ebdc4d6"
+        "expectedPolicySha256": "e29d3adf15f6437e8e15dbb3e18fd68eb1869e083fa5125a47d0e25e3cc81313"
       },
       "required": true,
       "mutation": false
@@ -1701,7 +1701,7 @@
         "sid": "ReadExactInitialActivationReleaseRole",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "91f3988ccdd360ab2b1857428ffe6f55ebc31045b7b97cbcd1fdd0db9ebdc4d6"
+        "expectedPolicySha256": "e29d3adf15f6437e8e15dbb3e18fd68eb1869e083fa5125a47d0e25e3cc81313"
       },
       "required": true,
       "mutation": false
@@ -1730,7 +1730,7 @@
         "sid": "ReadExactInitialActivationLifecyclePolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "91f3988ccdd360ab2b1857428ffe6f55ebc31045b7b97cbcd1fdd0db9ebdc4d6"
+        "expectedPolicySha256": "e29d3adf15f6437e8e15dbb3e18fd68eb1869e083fa5125a47d0e25e3cc81313"
       },
       "required": true,
       "mutation": false
@@ -1759,7 +1759,7 @@
         "sid": "ReadExactInitialActivationReleaseRole",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "91f3988ccdd360ab2b1857428ffe6f55ebc31045b7b97cbcd1fdd0db9ebdc4d6"
+        "expectedPolicySha256": "e29d3adf15f6437e8e15dbb3e18fd68eb1869e083fa5125a47d0e25e3cc81313"
       },
       "required": true,
       "mutation": false
@@ -9697,7 +9697,7 @@
         "sid": "CreateExactProviderReadOnlyPolicyVersion",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "91f3988ccdd360ab2b1857428ffe6f55ebc31045b7b97cbcd1fdd0db9ebdc4d6"
+        "expectedPolicySha256": "e29d3adf15f6437e8e15dbb3e18fd68eb1869e083fa5125a47d0e25e3cc81313"
       },
       "required": true,
       "mutation": true
@@ -9726,7 +9726,7 @@
         "sid": "IdentifyCurrentSession",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "91f3988ccdd360ab2b1857428ffe6f55ebc31045b7b97cbcd1fdd0db9ebdc4d6"
+        "expectedPolicySha256": "e29d3adf15f6437e8e15dbb3e18fd68eb1869e083fa5125a47d0e25e3cc81313"
       },
       "required": true,
       "mutation": false
@@ -9761,6 +9761,35 @@
       "mutation": false
     },
     {
+      "id": "provider-readonly-reconciliation-list-journal-absence",
+      "phase": "provider-readonly-policy-reconciliation",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "sourceFunction": "provider-readonly-reconciliation-list-journal-absence",
+      "action": "s3:ListBucket",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      },
+      "classification": "GITHUB_OIDC_IAM_POLICY_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-initial-activation-policy-reconciler/permissions-policy.json",
+        "sid": "ListExactProviderReadOnlyReconciliationJournal",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+        "expectedVersion": "installed",
+        "expectedPolicySha256": "e29d3adf15f6437e8e15dbb3e18fd68eb1869e083fa5125a47d0e25e3cc81313"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
       "id": "provider-readonly-reconciliation-list-policy-entities",
       "phase": "provider-readonly-policy-reconciliation",
       "identity": "INITIAL_ACTIVATION_RECONCILER",
@@ -9784,7 +9813,7 @@
         "sid": "ReadExactProviderReadOnlyPolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "91f3988ccdd360ab2b1857428ffe6f55ebc31045b7b97cbcd1fdd0db9ebdc4d6"
+        "expectedPolicySha256": "e29d3adf15f6437e8e15dbb3e18fd68eb1869e083fa5125a47d0e25e3cc81313"
       },
       "required": true,
       "mutation": false
@@ -9842,7 +9871,7 @@
         "sid": "ReadExactProviderReadOnlyPolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "91f3988ccdd360ab2b1857428ffe6f55ebc31045b7b97cbcd1fdd0db9ebdc4d6"
+        "expectedPolicySha256": "e29d3adf15f6437e8e15dbb3e18fd68eb1869e083fa5125a47d0e25e3cc81313"
       },
       "required": true,
       "mutation": false
@@ -9900,7 +9929,7 @@
         "sid": "ReadExactProviderReadOnlyReconciliationJournal",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "91f3988ccdd360ab2b1857428ffe6f55ebc31045b7b97cbcd1fdd0db9ebdc4d6"
+        "expectedPolicySha256": "e29d3adf15f6437e8e15dbb3e18fd68eb1869e083fa5125a47d0e25e3cc81313"
       },
       "required": true,
       "mutation": false
@@ -9929,7 +9958,7 @@
         "sid": "ReadExactProviderReadOnlyPolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "91f3988ccdd360ab2b1857428ffe6f55ebc31045b7b97cbcd1fdd0db9ebdc4d6"
+        "expectedPolicySha256": "e29d3adf15f6437e8e15dbb3e18fd68eb1869e083fa5125a47d0e25e3cc81313"
       },
       "required": true,
       "mutation": false
@@ -9987,7 +10016,7 @@
         "sid": "ReadExactProviderReadOnlyPolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "91f3988ccdd360ab2b1857428ffe6f55ebc31045b7b97cbcd1fdd0db9ebdc4d6"
+        "expectedPolicySha256": "e29d3adf15f6437e8e15dbb3e18fd68eb1869e083fa5125a47d0e25e3cc81313"
       },
       "required": true,
       "mutation": false
@@ -10045,7 +10074,7 @@
         "sid": "PersistExactProviderReadOnlyReconciliationJournal",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "91f3988ccdd360ab2b1857428ffe6f55ebc31045b7b97cbcd1fdd0db9ebdc4d6"
+        "expectedPolicySha256": "e29d3adf15f6437e8e15dbb3e18fd68eb1869e083fa5125a47d0e25e3cc81313"
       },
       "required": true,
       "mutation": true
@@ -12377,6 +12406,37 @@
       "mutation": true
     },
     {
+      "id": "stage-a-artifacts-journal-list-absence",
+      "phase": "stage-a-production-artifacts-state-reconciliation",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-stage-a-production-artifacts-journal.mjs",
+      "sourceFunction": "stage-a-artifacts-journal-list-absence",
+      "action": "s3:ListBucket",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "bucket": "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "stage-a-artifacts-journal-list-absence-authenticated"
+      ],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-a/main.tf",
+        "sid": "stage-a-artifacts-journal-list-absence",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
       "id": "stage-a-artifacts-journal-read",
       "phase": "stage-a-production-artifacts-state-reconciliation",
       "identity": "RELEASE_DEPLOYER",
@@ -12894,6 +12954,35 @@
       },
       "required": true,
       "mutation": true
+    },
+    {
+      "id": "stage-a-artifacts-recovery-root-journal-list-absence",
+      "phase": "stage-a-production-artifacts-policy-recovery",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-stage-a-production-artifacts-journal.mjs",
+      "sourceFunction": "stage-a-artifacts-recovery-root-journal-list-absence",
+      "action": "s3:ListBucket",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "bucket": "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+      },
+      "classification": "ROOT_GOVERNED_RECOVERY_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-a/main.tf",
+        "sid": "stage-a-artifacts-recovery-root-journal-list-absence",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
     },
     {
       "id": "stage-a-artifacts-recovery-root-journal-read",
@@ -13757,6 +13846,16 @@
     },
     {
       "sourceFile": "scripts/aws/production-stage-a-production-artifacts-journal.mjs",
+      "action": "s3:ListBucket",
+      "identity": "RELEASE_DEPLOYER"
+    },
+    {
+      "sourceFile": "scripts/aws/production-stage-a-production-artifacts-journal.mjs",
+      "action": "s3:ListBucket",
+      "identity": "ROOT_OPERATOR"
+    },
+    {
+      "sourceFile": "scripts/aws/production-stage-a-production-artifacts-journal.mjs",
       "action": "s3:PutObject",
       "identity": "RELEASE_DEPLOYER"
     },
@@ -13894,6 +13993,17 @@
         "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-provider-readonly-policy-reconciliation/*"
       ],
       "capabilityId": "provider-readonly-reconciliation-read-journal"
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "sourceFunction": "provider-readonly-reconciliation-list-journal-absence",
+      "phase": "provider-readonly-policy-reconciliation",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "action": "s3:ListBucket",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+      ],
+      "capabilityId": "provider-readonly-reconciliation-list-journal-absence"
     },
     {
       "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
