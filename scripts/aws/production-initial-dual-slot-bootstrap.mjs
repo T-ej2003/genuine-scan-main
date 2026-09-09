@@ -1,8 +1,8 @@
 import { createHash, createPublicKey } from "node:crypto";
 import { createRequire } from "node:module";
-import { lstatSync, readFileSync, unlinkSync } from "node:fs";
+import { lstatSync, unlinkSync } from "node:fs";
 import path from "node:path";
-import { ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFileAtomic, writeStageBPrivateFileAtomicExclusive } from "./stage-b-artifact-contract.mjs";
+import { ensureStageBPrivateDirectory, readStageBPrivateFileBytes, writeStageBPrivateFileAtomic, writeStageBPrivateFileAtomicExclusive } from "./stage-b-artifact-contract.mjs";
 import { rotationBindingsToTaskBindings } from "./production-cutover-runtime-bootstrap.mjs";
 import {
   assertProductionStaleSupersessionPredecessor,
@@ -79,24 +79,24 @@ function assertPendingMaterial(material) {
   return material;
 }
 
-function readMaterialJournal(filePath, sourceSha, rotationId) {
+function readMaterialJournal(filePath, sourceSha, rotationId, repositoryRoot) {
   const stat = lstatSync(filePath, { throwIfNoEntry: false });
   if (!stat) return null;
-  if (!stat.isFile() || (stat.mode & 0o077) !== 0) throw new Error("Replacement material journal must be a private regular file.");
+  const captured = readStageBPrivateFileBytes({ filePath: path.resolve(filePath), repositoryRoot, label: "Replacement material journal" });
   let journal;
-  try { journal = JSON.parse(readFileSync(filePath, "utf8")); } catch { throw new Error("Replacement material journal is malformed."); }
+  try { journal = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(captured.bytes)); } catch { throw new Error("Replacement material journal is malformed."); }
   if (journal.schemaVersion !== 1 || journal.sourceSha !== sourceSha || journal.rotationId !== rotationId) throw new Error("Replacement material journal identity does not match the requested transition.");
   return assertPendingMaterial(journal.material);
 }
 
 function writeMaterialJournal(filePath, sourceSha, rotationId, material, repositoryRoot) {
-  const existing = readMaterialJournal(filePath, sourceSha, rotationId);
+  const existing = readMaterialJournal(filePath, sourceSha, rotationId, repositoryRoot);
   if (existing) return existing;
   writeStageBPrivateFileAtomicExclusive({ filePath, bytes: Buffer.from(`${JSON.stringify({ schemaVersion: 1, sourceSha, rotationId, material })}\n`), repositoryRoot, label: "Replacement material journal" });
   return material;
 }
 
-async function recoverInitialPendingMaterial({ send, resources, sourceSha, rotationId, materialFile, repositoryRoot }) {
+async function recoverInitialPendingMaterial({ send, resources, sourceSha, rotationId, materialFile, repositoryRoot, requireExisting = false }) {
   const pendingSlots = ["jwtPending", "qrPrivatePending", "qrPublicPending"];
   const existing = {};
   for (const slot of pendingSlots) {
@@ -107,7 +107,8 @@ async function recoverInitialPendingMaterial({ send, resources, sourceSha, rotat
     }
   }
   const present = pendingSlots.filter((slot) => existing[slot]).length;
-  const journal = readMaterialJournal(materialFile, sourceSha, rotationId);
+  if (requireExisting && present !== pendingSlots.length) throw new Error("Governed supersession bootstrap requires every prepared pending value to exist.");
+  const journal = readMaterialJournal(materialFile, sourceSha, rotationId, repositoryRoot);
   if (present > 0 && present < pendingSlots.length && !journal) throw new Error("Initial rotation has a partial pending prefix without authenticated replacement material.");
   if (present === pendingSlots.length) {
     const expected = {
@@ -129,11 +130,11 @@ function exactArn(response, expectedName) {
   return response.ARN;
 }
 
-async function describeOrCreate({ send, name }) {
+async function describeOrCreate({ send, name, requireExisting = false }) {
   try {
     return { response: await send(new DescribeSecretCommand({ SecretId: name })), created: false };
   } catch (error) {
-    if (!notFound(error)) throw new Error(`Secret resource lookup failed for ${name}.`);
+    if (!notFound(error) || requireExisting) throw new Error(`Secret resource lookup failed for ${name}.`);
     const response = await send(new CreateSecretCommand({
       Name: name,
       Description: "MSCQR production dual-slot rotation resource",
@@ -152,9 +153,13 @@ function parseStoredValue(response, name) {
   return parsed;
 }
 
-async function ensureValue({ send, arn, name, expected, rotationId, allowPendingResume = false }) {
+async function ensureValue({ send, arn, name, expected, rotationId, allowPendingResume = false, requireExisting = false, expectedPayloadSha256 }) {
   try {
     const existing = parseStoredValue(await send(new GetSecretValueCommand({ SecretId: arn })), name);
+    if (requireExisting) {
+      if (!/^[a-f0-9]{64}$/.test(expectedPayloadSha256 || "") || canonicalSha256(existing) !== expectedPayloadSha256 || JSON.stringify(existing) !== JSON.stringify(expected)) throw new Error(`${name} differs from the authenticated supersession write plan.`);
+      return { material: existing, wrote: false };
+    }
     if (allowPendingResume) {
       if (existing.rotationId !== rotationId || existing.sourceSha !== expected.sourceSha || existing.family !== expected.family || existing.slot !== expected.slot || !existing.materialFingerprint || existing.materialFingerprint !== fingerprint(existing.value)) {
         throw new Error(`${name} contains inconsistent pending-migration metadata.`);
@@ -164,7 +169,7 @@ async function ensureValue({ send, arn, name, expected, rotationId, allowPending
     if (JSON.stringify(existing) !== JSON.stringify(expected)) throw new Error(`${name} contains inconsistent initial-migration metadata.`);
     return { material: existing, wrote: false };
   } catch (error) {
-    if (!notFound(error)) throw error;
+    if (!notFound(error) || requireExisting) throw error;
     await send(new PutSecretValueCommand({ SecretId: arn, SecretString: JSON.stringify(expected) }));
     return { material: expected, wrote: true };
   }
@@ -351,7 +356,7 @@ export function verifyLiveInitialDualSlotBindingWithRunner({ run, bindings, prov
   return Object.freeze({ ...body, bindingSha256: canonicalSha256(bindings), originSha256: canonicalSha256(body) });
 }
 
-export async function bootstrapInitialDualSlotRotation({ send, taskDefinition, sourceSha, rotationId, legacyBindings, supersessionEvidence, supersessionPredecessor, outputFile, repositoryRoot = process.cwd() } = {}) {
+export async function bootstrapInitialDualSlotRotation({ send, taskDefinition, sourceSha, rotationId, legacyBindings, supersessionEvidence, supersessionPredecessor, outputFile, repositoryRoot = process.cwd(), requireExisting = false, requiredWritePlan } = {}) {
   if (typeof send !== "function") throw new Error("Initial dual-slot bootstrap Secrets Manager sender is required.");
   if (!SHA40.test(sourceSha || "") || !ROTATION_ID.test(rotationId || "")) throw new Error("Initial dual-slot source/rotation identity is invalid.");
   if (typeof outputFile !== "string" || !outputFile) throw new Error("Initial dual-slot rotation binding output is required.");
@@ -368,33 +373,35 @@ export async function bootstrapInitialDualSlotRotation({ send, taskDefinition, s
   const resources = {};
   const created = [];
   for (const [slot, name] of Object.entries(INITIAL_DUAL_SLOT_NAMES)) {
-    const result = await describeOrCreate({ send, name });
+    const result = await describeOrCreate({ send, name, requireExisting });
     resources[slot] = exactArn(result.response, name);
     if (result.created) created.push(slot);
   }
   if (checkedSupersessionEvidence && Object.entries(resources).some(([slot, arn]) => checkedSupersessionEvidence.resources[slot]?.arn !== arn)) throw new Error("Stale-supersession evidence resources do not match the initial binding topology.");
+  if (requireExisting && (!Array.isArray(requiredWritePlan) || requiredWritePlan.length !== STALE_ROTATION_SUPERSESSION_WRITE_ORDER.length || requiredWritePlan.some((entry, index) => entry?.slot !== STALE_ROTATION_SUPERSESSION_WRITE_ORDER[index] || entry.secretArn !== resources[entry.slot] || !/^[a-f0-9]{64}$/.test(entry.payloadSha256 || "")))) throw new Error("Governed supersession bootstrap requires the exact approved seven-write plan.");
+  const writePlanBySlot = new Map((requiredWritePlan || []).map((entry) => [entry.slot, entry]));
   const existingMaterial = {};
   let secretValueWrites = 0;
   ensureStageBPrivateDirectory({ directory: path.dirname(path.resolve(outputFile)), repositoryRoot, create: true, normalize: true, label: "Replacement material journal directory" });
   const materialFile = materialFileFor(outputFile);
-  const material = await recoverInitialPendingMaterial({ send, resources, sourceSha, rotationId, materialFile, repositoryRoot });
+  const material = await recoverInitialPendingMaterial({ send, resources, sourceSha, rotationId, materialFile, repositoryRoot, requireExisting });
   const payloads = pendingPayloads({ rotationId, material });
   for (const payload of Object.values(payloads)) payload.sourceSha = sourceSha;
   if (checkedSupersessionPredecessor) for (const payload of Object.values(payloads)) payload.supersessionPredecessorIdentitySha256 = checkedSupersessionPredecessor.predecessorIdentitySha256;
-  const ensure = async (options) => {
-    const result = await ensureValue({ send, ...options });
+  const ensure = async (slot, options) => {
+    const result = await ensureValue({ send, ...options, requireExisting, expectedPayloadSha256: writePlanBySlot.get(slot)?.payloadSha256 });
     secretValueWrites += result.wrote ? 1 : 0;
     return result.material;
   };
-  existingMaterial.jwtPending = await ensure({ arn: resources.jwtPending, name: "JWT pending", expected: payloads.jwtPending, rotationId, allowPendingResume: true });
-  existingMaterial.qrPrivatePending = await ensure({ arn: resources.qrPrivatePending, name: "QR private pending", expected: payloads.qrPrivatePending, rotationId, allowPendingResume: true });
+  existingMaterial.jwtPending = await ensure("jwtPending", { arn: resources.jwtPending, name: "JWT pending", expected: payloads.jwtPending, rotationId, allowPendingResume: true });
+  existingMaterial.qrPrivatePending = await ensure("qrPrivatePending", { arn: resources.qrPrivatePending, name: "QR private pending", expected: payloads.qrPrivatePending, rotationId, allowPendingResume: true });
   let qrPublicExpected = payloads.qrPublicPending;
   if (existingMaterial.qrPrivatePending.value) {
     let derivedPublic;
     try { derivedPublic = createPublicKey(existingMaterial.qrPrivatePending.value).export({ format: "pem", type: "spki" }); } catch { throw new Error("QR pending private material is malformed."); }
     qrPublicExpected = { ...payloads.qrPublicPending, keyVersion: sha256(derivedPublic).slice(0, 16), materialFingerprint: fingerprint(derivedPublic), value: derivedPublic };
   }
-  existingMaterial.qrPublicPending = await ensure({ arn: resources.qrPublicPending, name: "QR public pending", expected: qrPublicExpected, rotationId, allowPendingResume: true });
+  existingMaterial.qrPublicPending = await ensure("qrPublicPending", { arn: resources.qrPublicPending, name: "QR public pending", expected: qrPublicExpected, rotationId, allowPendingResume: true });
   if (existingMaterial.qrPrivatePending.value && existingMaterial.qrPublicPending.value) {
     let derivedPublic;
     try { derivedPublic = createPublicKey(existingMaterial.qrPrivatePending.value).export({ format: "pem", type: "spki" }); } catch { throw new Error("QR pending private material is malformed."); }
@@ -403,10 +410,10 @@ export async function bootstrapInitialDualSlotRotation({ send, taskDefinition, s
     }
   }
   const handoff = checkedSupersessionPredecessor ? { supersessionPredecessorIdentitySha256: checkedSupersessionPredecessor.predecessorIdentitySha256 } : {};
-  await ensure({ arn: resources.jwtPrevious, name: "JWT previous", expected: { ...emptySlot("jwt_secrets", "empty", sourceSha), ...handoff }, rotationId });
-  await ensure({ arn: resources.qrPublicPrevious, name: "QR public previous", expected: { ...emptySlot("qr_signing_keys", "empty", sourceSha), ...handoff }, rotationId });
-  await ensure({ arn: resources.qrCurrentVersion, name: "QR current key version", expected: { ...versionSlot(baseline.qrCurrentVersion, "current", sourceSha), ...handoff }, rotationId });
-  await ensure({ arn: resources.qrPreviousVersion, name: "QR previous key version", expected: { ...versionSlot("", "previous-empty", sourceSha), ...handoff }, rotationId });
+  await ensure("jwtPrevious", { arn: resources.jwtPrevious, name: "JWT previous", expected: { ...emptySlot("jwt_secrets", "empty", sourceSha), ...handoff }, rotationId });
+  await ensure("qrPublicPrevious", { arn: resources.qrPublicPrevious, name: "QR public previous", expected: { ...emptySlot("qr_signing_keys", "empty", sourceSha), ...handoff }, rotationId });
+  await ensure("qrCurrentVersion", { arn: resources.qrCurrentVersion, name: "QR current key version", expected: { ...versionSlot(baseline.qrCurrentVersion, "current", sourceSha), ...handoff }, rotationId });
+  await ensure("qrPreviousVersion", { arn: resources.qrPreviousVersion, name: "QR previous key version", expected: { ...versionSlot("", "previous-empty", sourceSha), ...handoff }, rotationId });
   const bindings = {
     schemaVersion: checkedSupersessionPredecessor ? 3 : 2,
     kind: INITIAL_DUAL_SLOT_ROTATION_BINDINGS_KIND,
@@ -433,8 +440,8 @@ export async function bootstrapInitialDualSlotRotation({ send, taskDefinition, s
   const output = JSON.stringify(bindings, null, 2) + "\n";
   const existingOutput = lstatSync(outputFile, { throwIfNoEntry: false });
   if (existingOutput) {
-    ensureStageBPrivateFile({ filePath: outputFile, repositoryRoot, label: "Initial dual-slot rotation bindings" });
-    if (readFileSync(outputFile, "utf8") !== output) throw new Error("Existing initial dual-slot binding manifest does not match the verified topology.");
+    const captured = readStageBPrivateFileBytes({ filePath: path.resolve(outputFile), repositoryRoot, label: "Initial dual-slot rotation bindings" });
+    if (captured.bytes.toString("utf8") !== output) throw new Error("Existing initial dual-slot binding manifest does not match the verified topology.");
     if (lstatSync(materialFile, { throwIfNoEntry: false })) unlinkSync(materialFile);
     return { valid: true, bindings, bindingFile: path.resolve(outputFile), evidenceSha256: sha256(output), created, secretResourceCount: Object.keys(INITIAL_DUAL_SLOT_NAMES).length, secretValueWrites, pendingMaterialGenerated: true };
   }
@@ -469,8 +476,7 @@ function assertRotationVersionTopology(response, name) {
 function readExistingSupersessionEvidence({ outputFile, repositoryRoot, sourceSha, staleSourceSha, rotationId, staleRotationId, resources, transitionVersionId }) {
   const stat = lstatSync(outputFile, { throwIfNoEntry: false });
   if (!stat) return null;
-  ensureStageBPrivateFile({ filePath: outputFile, repositoryRoot, label: "Stale rotation supersession evidence" });
-  const bytes = readFileSync(outputFile);
+  const { bytes } = readStageBPrivateFileBytes({ filePath: path.resolve(outputFile), repositoryRoot, label: "Stale rotation supersession evidence" });
   let evidence;
   try { evidence = JSON.parse(bytes.toString("utf8")); } catch { throw new Error("Existing stale rotation supersession evidence is malformed."); }
   const expectedResources = Object.fromEntries(Object.entries(resources).map(([slot, arn]) => [slot, { arn, versionId: transitionVersionId(slot), stages: ["AWSCURRENT"] }]));
@@ -575,7 +581,7 @@ export async function supersedeStalePendingRotation({ send, taskDefinition, sour
   if (existingEvidence && !allNew) throw new Error("Existing stale rotation supersession evidence conflicts with a non-converged secret topology.");
   ensureStageBPrivateDirectory({ directory: path.dirname(path.resolve(outputFile)), repositoryRoot, create: true, label: "Stale rotation supersession transaction directory" });
   const materialFile = materialFileFor(outputFile);
-  const journalMaterial = readMaterialJournal(materialFile, sourceSha, rotationId);
+  const journalMaterial = readMaterialJournal(materialFile, sourceSha, rotationId, repositoryRoot);
   if (allNew && existingEvidence && !journalMaterial) throw new Error("Stale rotation supersession authorization is already durably consumed by the completed transition.");
   if (allNew && !existingEvidence && !journalMaterial) throw new Error("All-new stale rotation supersession replay is missing its authenticated replacement material journal.");
   const material = allNew
@@ -623,14 +629,34 @@ export async function supersedeStalePendingRotation({ send, taskDefinition, sour
     predecessorSlotIdentities: Object.freeze(structuredClone(slotIdentities)),
     currentPredecessor: predecessor,
     materialJournalFile: path.resolve(materialFile),
-    materialJournalFileSha256: sha256(readFileSync(materialFile)),
+    materialJournalFileSha256: readStageBPrivateFileBytes({ filePath: materialFile, repositoryRoot, label: "Replacement material journal" }).sha256,
     writePlan,
   });
   if (mode === "prepare") return { valid: true, transition: "SUPERSEDE_STALE_PENDING_PREPARED", writes: 0, completedWriteCount: newSlots.length, preparationInput, predecessor, sourceSha, staleSourceSha, rotationId, staleRotationId, resources };
+  const assertCurrentMutationTopology = async (writeIndex) => {
+    for (const [slot, name] of Object.entries(INITIAL_DUAL_SLOT_NAMES)) {
+      const described = await send(new DescribeSecretCommand({ SecretId: resources[slot] }));
+      if (described?.ARN !== resources[slot]) throw new Error(`Rotation supersession ${slot} resource changed before write ${writeIndex + 1}.`);
+      const stages = assertRotationVersionTopology(described, name);
+      const transitioned = states[slot] === "NEW_AUTHENTICATED" || replacementOrder.indexOf(slot) < writeIndex;
+      const expectedCurrent = transitioned ? transitionVersionId(slot) : currentVersionIds[slot];
+      const observedCurrent = Object.entries(stages).find(([, labels]) => labels.includes("AWSCURRENT"))?.[0];
+      if (observedCurrent !== expectedCurrent) throw new Error(`Rotation supersession ${slot} topology changed before write ${writeIndex + 1}.`);
+      if (transitioned && JSON.stringify(stages[logicalPredecessors[slot].versionId]) !== '["AWSPREVIOUS"]') throw new Error(`Rotation supersession ${slot} predecessor changed before write ${writeIndex + 1}.`);
+    }
+    for (const [name, expected] of Object.entries(predecessor.current)) {
+      const described = await send(new DescribeSecretCommand({ SecretId: expected.secretArn }));
+      if (described?.ARN !== expected.secretArn || described.VersionIdsToStages?.[expected.versionId]?.includes("AWSCURRENT") !== true) throw new Error(`Rotation supersession current ${name} predecessor changed before write ${writeIndex + 1}.`);
+    }
+  };
   const versionIds = {};
+  if (newSlots.length > 0 && (typeof authorizeWritePlan !== "function" || await authorizeWritePlan(preparationInput, { completedWriteCount: newSlots.length, existingPrefix: true, remainingWriteCount: replacementOrder.length - newSlots.length }) !== true)) throw new Error("Approved stale rotation supersession authorization is required for the authenticated write prefix.");
   for (const [writeIndex, slot] of replacementOrder.entries()) {
     if (states[slot] === "NEW_AUTHENTICATED") { versionIds[slot] = currentVersionIds[slot]; continue; }
-    if (typeof authorizeWritePlan !== "function" || await authorizeWritePlan(preparationInput, { completedWriteCount: newSlots.length, slot, writeIndex, remainingWriteCount: replacementOrder.length - writeIndex }) !== true) throw new Error("Approved stale rotation supersession authorization is required before PutSecretValue.");
+    if (typeof authorizeWritePlan !== "function" || await authorizeWritePlan(preparationInput, { completedWriteCount: writeIndex, slot, writeIndex, remainingWriteCount: replacementOrder.length - writeIndex }) !== true) throw new Error("Approved stale rotation supersession authorization is required before PutSecretValue.");
+    // The target topology is the last remote observation before its write;
+    // slower cross-service authorization CAS checks run immediately above.
+    await assertCurrentMutationTopology(writeIndex);
     const value = replacement[slot];
     const response = await send(new PutSecretValueCommand({ SecretId: resources[slot], ClientRequestToken: sha256(`${sourceSha}:${rotationId}:${slot}`), SecretString: JSON.stringify(value) }));
     if (response?.VersionId !== transitionVersionId(slot)) throw new Error(`Rotation supersession returned an unexpected version for ${slot}.`);
@@ -666,7 +692,7 @@ export async function supersedeStalePendingRotation({ send, taskDefinition, sour
 
 export function finalizeStaleRotationSupersessionMaterialJournal({ outputFile, expectedFileSha256, repositoryRoot = process.cwd() } = {}) {
   const materialFile = materialFileFor(outputFile);
-  const authenticated = ensureStageBPrivateFile({ filePath: materialFile, repositoryRoot, label: "Replacement material journal" });
+  const authenticated = readStageBPrivateFileBytes({ filePath: materialFile, repositoryRoot, label: "Replacement material journal" });
   if (!/^[a-f0-9]{64}$/.test(expectedFileSha256 || "") || authenticated.sha256 !== expectedFileSha256) throw new Error("Replacement material journal differs from the consumed supersession transaction.");
   unlinkSync(materialFile);
   return true;

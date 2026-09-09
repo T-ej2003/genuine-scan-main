@@ -166,7 +166,7 @@ function requireVerifier(callerArn) {
   return callerArn;
 }
 
-function parseArtifact(artifactBytes, { imageReleaseSha, artifactSha256 }) {
+export function parseStageBImagePublicationArtifact(artifactBytes, { imageReleaseSha, artifactSha256 }) {
   if (sha256(artifactBytes) !== artifactSha256) throw new Error("Canonical image artifact SHA256 does not match the approved digest.");
   const records = artifactBytes.toString("utf8").trim().split(/\n/).filter(Boolean).map((line) => JSON.parse(line));
   if (records.length !== Object.keys(SERVICES).length || new Set(records.map((record) => record.service)).size !== records.length) {
@@ -302,7 +302,7 @@ export function generateImageEvidence({ artifactBytes, publicationSourceSha, cur
   if (!Number.isFinite(observedAtMs)) throw new Error("Image evidence observation timestamp is malformed.");
   assertStageBImagePublicationIdentity(publicationIdentity, { expectedPublicationSourceSha: publicationSourceSha, expectedReleaseSha: imageReleaseSha, canonicalArtifactSha256: artifactSha256 });
   if (String(publicationIdentity.workflowRunId) !== String(workflowRunId)) throw new Error("Image evidence publication identity is bound to a different workflow run.");
-  const artifactImages = parseArtifact(artifactBytes, { imageReleaseSha, artifactSha256 });
+  const artifactImages = parseStageBImagePublicationArtifact(artifactBytes, { imageReleaseSha, artifactSha256 });
   const repositoryEvidence = requireRepositoryEvidence(repositories, [...new Set(artifactImages.map(({ repository }) => repository))], observedAt);
   const images = artifactImages.map((image) => {
     const live = describe(image.repository, image.tag);
