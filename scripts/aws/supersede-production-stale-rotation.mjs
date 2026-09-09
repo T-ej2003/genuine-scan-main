@@ -78,9 +78,13 @@ export async function runCli(argv = process.argv.slice(2), deps = {}) {
     const caller = JSON.parse(run(["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"]));
     if (caller.Account !== "368992683803" || !/^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\/[^/]+$/.test(caller.Arn || "")) throw new Error("Secrets Manager mutation client caller identity is outside the reviewed account/principal contract.");
   }
-  const service = JSON.parse(run(["ecs", "describe-services", "--cluster", "mscqr-prod-euw2-main", "--services", "mscqr-backend-servi-euw2", "--output", "json", "--no-cli-pager"])).services?.[0];
-  if (!service?.taskDefinition) throw new Error("Current production task definition is unavailable.");
-  const taskDefinition = JSON.parse(run(["ecs", "describe-task-definition", "--task-definition", service.taskDefinition, "--include", "TAGS", "--output", "json", "--no-cli-pager"]));
+  const readLiveBackend = () => {
+    const service = JSON.parse(run(["ecs", "describe-services", "--cluster", "mscqr-prod-euw2-main", "--services", "mscqr-backend-servi-euw2", "--output", "json", "--no-cli-pager"])).services?.[0];
+    if (!service?.taskDefinition) throw new Error("Current production task definition is unavailable.");
+    const taskDefinition = JSON.parse(run(["ecs", "describe-task-definition", "--task-definition", service.taskDefinition, "--include", "TAGS", "--output", "json", "--no-cli-pager"]));
+    return { service, taskDefinition };
+  };
+  const { service, taskDefinition } = readLiveBackend();
   const staleSourceSha = required(values, "stale-source-sha");
   const staleRotationId = required(values, "stale-rotation-id");
   const directory = transactionDirectory({ sourceSha, staleRotationId, homeDirectory: deps.homeDirectory });
@@ -111,9 +115,11 @@ export async function runCli(argv = process.argv.slice(2), deps = {}) {
     deps.afterPrepareDiscovery?.({ reservation, result });
     const preparationFor = (preparedAt) => createStaleRotationSupersessionPreparation({ discovery: result.preparationInput, publication, liveBackend, stageBState, preparedAt });
     if (existingPreparation) {
-      const rebound = preparationFor(existingPreparation.preparedAt);
-      if (rebound.preparationSha256 !== existingPreparation.preparationSha256 || !preparationCapture.bytes.equals(privateJsonBytes(existingPreparation))) throw new Error("Existing stale rotation supersession preparation differs from current authenticated topology.");
-      if (prepareNow <= new Date(existingPreparation.expiresAt)) return { mode, sourceSha, staleRotationId, rotationId, preparationFile, preparationSha256: existingPreparation.preparationSha256, writes: 0, authorizationStatus: "NOT_CREATED", preparationReused: true };
+      if (prepareNow <= new Date(existingPreparation.expiresAt)) {
+        const rebound = preparationFor(existingPreparation.preparedAt);
+        if (rebound.preparationSha256 !== existingPreparation.preparationSha256 || !preparationCapture.bytes.equals(privateJsonBytes(existingPreparation))) throw new Error("Existing stale rotation supersession preparation differs from current authenticated topology.");
+        return { mode, sourceSha, staleRotationId, rotationId, preparationFile, preparationSha256: existingPreparation.preparationSha256, writes: 0, authorizationStatus: "NOT_CREATED", preparationReused: true };
+      }
       if (result.completedWriteCount !== 0) throw new Error("Expired stale rotation supersession preparation cannot refresh after mutation has started.");
       const executionStartCapture = lstatSync(executionStartFile, { throwIfNoEntry: false }) ? readJson(executionStartFile, "Stale rotation supersession execution start") : null;
       if (executionStartCapture) {
@@ -139,6 +145,8 @@ export async function runCli(argv = process.argv.slice(2), deps = {}) {
   const authenticated = await (deps.resolveAuthorization || resolveStaleRotationSupersessionAuthorizationArtifact)({ workflowRunId: required(values, "authorization-workflow-run-id"), workflowRunAttempt: required(values, "authorization-workflow-run-attempt"), sourceSha, preparation, run: deps.githubRun, now: executionNow, validationMode });
   const { authorization, provenance: authorizationProvenance } = authenticated;
   assertStaleRotationSupersessionAuthorizationProvenance(authorizationProvenance, { authorization, sourceSha });
+  const postAuthorizationLiveBackend = readLiveBackend();
+  if (preparation.liveBackend.taskDefinitionArn !== postAuthorizationLiveBackend.service.taskDefinition || preparation.liveBackend.imageDigest !== imageDigest(postAuthorizationLiveBackend.taskDefinition)) throw new Error("Live backend changed after stale rotation supersession authorization.");
   const executionStart = executionStartCapture ? assertStaleRotationSupersessionExecutionStart(executionStartCapture.value, { authorization, authorizationProvenance, preparation }) : null;
   const finalizeJournal = deps.finalizeJournal || finalizeStaleRotationSupersessionMaterialJournal;
   if (lstatSync(consumptionFile, { throwIfNoEntry: false })) {

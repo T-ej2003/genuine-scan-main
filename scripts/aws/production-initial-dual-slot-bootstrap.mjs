@@ -627,10 +627,10 @@ export async function supersedeStalePendingRotation({ send, taskDefinition, sour
     writePlan,
   });
   if (mode === "prepare") return { valid: true, transition: "SUPERSEDE_STALE_PENDING_PREPARED", writes: 0, completedWriteCount: newSlots.length, preparationInput, predecessor, sourceSha, staleSourceSha, rotationId, staleRotationId, resources };
-  if (typeof authorizeWritePlan !== "function" || await authorizeWritePlan(preparationInput, { completedWriteCount: newSlots.length }) !== true) throw new Error("Approved stale rotation supersession authorization is required before PutSecretValue.");
   const versionIds = {};
-  for (const slot of replacementOrder) {
+  for (const [writeIndex, slot] of replacementOrder.entries()) {
     if (states[slot] === "NEW_AUTHENTICATED") { versionIds[slot] = currentVersionIds[slot]; continue; }
+    if (typeof authorizeWritePlan !== "function" || await authorizeWritePlan(preparationInput, { completedWriteCount: newSlots.length, slot, writeIndex, remainingWriteCount: replacementOrder.length - writeIndex }) !== true) throw new Error("Approved stale rotation supersession authorization is required before PutSecretValue.");
     const value = replacement[slot];
     const response = await send(new PutSecretValueCommand({ SecretId: resources[slot], ClientRequestToken: sha256(`${sourceSha}:${rotationId}:${slot}`), SecretString: JSON.stringify(value) }));
     if (response?.VersionId !== transitionVersionId(slot)) throw new Error(`Rotation supersession returned an unexpected version for ${slot}.`);
