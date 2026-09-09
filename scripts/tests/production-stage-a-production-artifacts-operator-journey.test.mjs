@@ -15,7 +15,7 @@ const sourceSha = "a".repeat(40); const lineage = "02afb75a-f902-ab8a-f4c1-751d4
 const governedExecutableManifestSha256 = "9".repeat(64);
 const historicalTransition = Object.freeze({ predecessorPolicySha256: stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicyPredecessor()), desiredPolicySha256: stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicy()) });
 const reservationTransition = Object.freeze({ predecessorPolicySha256: stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicy()), desiredPolicySha256: stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation()) });
-const reverseReservationTransition = Object.freeze({ predecessorPolicySha256: stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation()), desiredPolicySha256: stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation()) });
+const reverseReservationTransition = Object.freeze({ predecessorPolicySha256: stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection()), desiredPolicySha256: stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation()) });
 const createStageAProductionArtifactsRecoveryAuthorization = (input) => createRecoveryAuthorization({ ...input, governedExecutableManifestSha256, transition: historicalTransition });
 const unchangedGovernedSource = () => governedExecutableManifestSha256;
 const state = { lineage, serial: 35, stateSha256 };
@@ -81,7 +81,7 @@ test("durable recovery attempt consumes mutation authority across failures and n
 
 test("reverse reservation cleanup cannot rewrite after an ambiguous attempt", async () => {
   const authorization = createRecoveryAuthorization({ sourceSha, preState: state, protectedEnvironmentApprovalEvidence: approval(PRODUCTION_ENVIRONMENT_APPROVAL.stageAProductionArtifactsRecoveryWorkflowRef, "507"), verificationRef: "reverse-ambiguous", governedExecutableManifestSha256, transition: reverseReservationTransition });
-  let attempt; let puts = 0; const predecessor = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
+  let attempt; let puts = 0; const predecessor = buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection();
   const releaseRun = (args) => args[1] === "get-caller-identity" ? releaseIdentity : JSON.stringify({ Policy: JSON.stringify(predecessor) });
   const rootRun = (args) => {
     if (args[1] === "get-caller-identity") return rootIdentity;
@@ -103,7 +103,7 @@ test("reverse reservation cleanup cannot rewrite after an ambiguous attempt", as
 
 test("reverse reservation cleanup accepts only the exact target policy", async () => {
   const authorization = createRecoveryAuthorization({ sourceSha, preState: state, protectedEnvironmentApprovalEvidence: approval(PRODUCTION_ENVIRONMENT_APPROVAL.stageAProductionArtifactsRecoveryWorkflowRef, "508"), verificationRef: "reverse-success", governedExecutableManifestSha256, transition: reverseReservationTransition });
-  let live = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation(); let puts = 0; let completion;
+  let live = buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection(); let puts = 0; let completion;
   const releaseRun = (args) => args[1] === "get-caller-identity" ? releaseIdentity : JSON.stringify({ Policy: JSON.stringify(live) });
   const rootRun = (args) => {
     if (args[1] === "get-caller-identity") return rootIdentity;

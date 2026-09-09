@@ -112,7 +112,7 @@ export async function runStageAProductionArtifactsRecovery({ sourceSha, recovery
   if (!predecessorLive && !desiredLive) throw new Error("Stage A production-artifacts live policy is neither the exact predecessor nor desired policy.");
   const reservationTransition = samePolicy(transition.predecessor, buildStageAProductionArtifactsBucketPolicy()) && samePolicy(transition.desired, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation());
   const providerReadonlyTransition = samePolicy(transition.predecessor, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation()) && samePolicy(transition.desired, buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection());
-  const reverseReservationTransition = samePolicy(transition.predecessor, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation()) && samePolicy(transition.desired, buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation());
+  const reverseReservationTransition = samePolicy(transition.predecessor, buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection()) && samePolicy(transition.desired, buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation());
   if (!historicalTransition && !reservationTransition && !providerReadonlyTransition && !reverseReservationTransition) throw new Error("Stage A production-artifacts recovery transition is unsupported.");
   const attemptJournal = historicalTransition ? rootRecoveryJournal : recoveryJournal;
   const completionJournal = journal;

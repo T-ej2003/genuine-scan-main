@@ -155,22 +155,34 @@ export function buildStageAProductionArtifactsBucketPolicyWithInitialActivationR
 }
 
 export function buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation() {
-  return buildStageAProductionArtifactsBucketPolicy();
+  const protectedPolicy = buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection();
+  const reservationSids = new Set([
+    "AllowRootOperatorReadInitialActivationPolicyReconciliationReservations",
+    "DenyOtherPrincipalsInitialActivationPolicyReconciliationReservationReads",
+    "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationCreate",
+    "DenyNonConditionalInitialActivationPolicyReconciliationReservationWrites",
+    "DenyOtherPrincipalsInitialActivationPolicyReconciliationReservationWrites",
+    "DenyInitialActivationPolicyReconciliationReservationDeletion",
+  ]);
+  return { ...protectedPolicy, Statement: protectedPolicy.Statement.filter(({ Sid }) => !reservationSids.has(Sid)) };
 }
 
 export function stageAProductionArtifactsInitialActivationReservationRetirementTransition() {
-  const predecessor = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
+  const predecessor = buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection();
   const desired = buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation();
   return Object.freeze({ predecessor, desired, predecessorPolicySha256: stageAProductionArtifactsPolicySha256(predecessor), desiredPolicySha256: stageAProductionArtifactsPolicySha256(desired) });
 }
 
 export function resolveStageAProductionArtifactsBucketPolicyTransition({ predecessorPolicySha256, desiredPolicySha256 } = {}) {
-  const preProviderReadonly = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
+  const reservationPolicy = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
+  const providerReadonlyPolicy = buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection();
+  const retiredPolicy = buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation();
   const transitions = [
     [buildStageAProductionArtifactsBucketPolicyPredecessor(), buildStageAProductionArtifactsBucketPolicy()],
-    [buildStageAProductionArtifactsBucketPolicy(), buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation()],
-    [preProviderReadonly, buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection()],
-    [preProviderReadonly, buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation()],
+    [buildStageAProductionArtifactsBucketPolicy(), reservationPolicy],
+    [reservationPolicy, providerReadonlyPolicy],
+    [providerReadonlyPolicy, retiredPolicy],
+    [retiredPolicy, retiredPolicy],
   ];
   const transition = transitions.find(([predecessor, desired]) => stageAProductionArtifactsPolicySha256(predecessor) === predecessorPolicySha256 && stageAProductionArtifactsPolicySha256(desired) === desiredPolicySha256);
   if (!transition) throw new Error("Stage A production-artifacts bucket-policy transition is not exact or reviewed.");
