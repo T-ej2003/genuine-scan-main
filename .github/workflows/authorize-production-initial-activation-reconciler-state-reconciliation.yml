@@ -1,0 +1,66 @@
+name: Authorize initial-activation reconciler Terraform state reconciliation
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha: { description: Exact protected-main source SHA, required: true, type: string }
+      preparation_base64: { description: Exact prepared state-reconciliation artifact, required: true, type: string }
+      preparation_sha256: { description: SHA256 of the preparation bytes, required: true, type: string }
+
+permissions: { actions: read, contents: read }
+concurrency: { group: production-deploy, cancel-in-progress: false }
+
+jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    environment: production-initial-activation-reconciler-bootstrap
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Authenticate protected source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          test "$GITHUB_REPOSITORY" = T-ej2003/genuine-scan-main
+          test "$SOURCE_SHA" = "$(gh api repos/$GITHUB_REPOSITORY/branches/main --jq .commit.sha)"
+          test "$SOURCE_SHA" = "$(git rev-parse HEAD)"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+      - name: Decode exact preparation and capture approval
+        id: approval
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          PREPARATION_BASE64: ${{ inputs.preparation_base64 }}
+          PREPARATION_SHA256: ${{ inputs.preparation_sha256 }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          umask 077; d="$RUNNER_TEMP/reconciler-state-reconciliation"; install -d -m 700 "$d"
+          printf '%s' "$PREPARATION_BASE64" | base64 --decode > "$d/preparation.json"
+          test "$(sha256sum "$d/preparation.json" | awk '{print $1}')" = "$PREPARATION_SHA256"
+          node scripts/aws/production-github-environment-approval.mjs --output "$d/approval.json" --repository "$GITHUB_REPOSITORY" --environment production-initial-activation-reconciler-bootstrap --source-sha "$SOURCE_SHA" --workflow-ref "$GITHUB_WORKFLOW_REF" --event-name "$GITHUB_EVENT_NAME" --workflow-run-id "$GITHUB_RUN_ID" --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" --execution-actor "$GITHUB_ACTOR" --require-actual-approval
+          echo "sha256=$(sha256sum "$d/approval.json" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+      - name: Produce exact authorization
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          PREPARATION_SHA256: ${{ inputs.preparation_sha256 }}
+          APPROVAL_SHA256: ${{ steps.approval.outputs.sha256 }}
+        run: |
+          set -euo pipefail; d="$RUNNER_TEMP/reconciler-state-reconciliation"
+          node scripts/aws/authorize-production-initial-activation-reconciler-state-reconciliation.mjs --authorize --source-sha "$SOURCE_SHA" --preparation "$d/preparation.json" --preparation-file-sha256 "$PREPARATION_SHA256" --environment-approval "$d/approval.json" --environment-approval-file-sha256 "$APPROVAL_SHA256" --output "$d/authorization.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-initial-activation-reconciler-state-reconciliation-authorization
+          path: ${{ runner.temp }}/reconciler-state-reconciliation/authorization.json
+          if-no-files-found: error
+          retention-days: 30

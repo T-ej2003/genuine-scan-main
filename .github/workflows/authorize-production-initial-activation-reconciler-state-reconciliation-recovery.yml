@@ -1,0 +1,58 @@
+name: Authorize initial-activation reconciler state reconciliation recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha: { description: Exact protected-main source SHA, required: true, type: string }
+      recovery_preparation_base64: { description: Exact zero-write recovery preparation, required: true, type: string }
+      recovery_preparation_sha256: { description: SHA256 of recovery preparation bytes, required: true, type: string }
+
+permissions: { actions: read, contents: read }
+concurrency: { group: production-deploy, cancel-in-progress: false }
+
+jobs:
+  authorize-recovery:
+    runs-on: ubuntu-latest
+    environment: production-initial-activation-reconciler-bootstrap
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Authenticate protected source and create private recovery inputs
+        id: approval
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          RECOVERY_PREPARATION_BASE64: ${{ inputs.recovery_preparation_base64 }}
+          RECOVERY_PREPARATION_SHA256: ${{ inputs.recovery_preparation_sha256 }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_RUN_ATTEMPT" = 1; test "$GITHUB_REPOSITORY" = T-ej2003/genuine-scan-main
+          test "$SOURCE_SHA" = "$(gh api repos/$GITHUB_REPOSITORY/branches/main --jq .commit.sha)"; test "$SOURCE_SHA" = "$(git rev-parse HEAD)"; test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          umask 077; d="$RUNNER_TEMP/reconciler-state-reconciliation-recovery"; install -d -m 700 "$d"
+          printf '%s' "$RECOVERY_PREPARATION_BASE64" | base64 --decode > "$d/recovery-preparation.json"
+          test "$(sha256sum "$d/recovery-preparation.json" | awk '{print $1}')" = "$RECOVERY_PREPARATION_SHA256"
+          node scripts/aws/production-github-environment-approval.mjs --output "$d/approval.json" --repository "$GITHUB_REPOSITORY" --environment production-initial-activation-reconciler-bootstrap --source-sha "$SOURCE_SHA" --workflow-ref "$GITHUB_WORKFLOW_REF" --event-name "$GITHUB_EVENT_NAME" --workflow-run-id "$GITHUB_RUN_ID" --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" --execution-actor "$GITHUB_ACTOR" --require-actual-approval
+          echo "sha256=$(sha256sum "$d/approval.json" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+      - name: Produce zero-write recovery authorization
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          RECOVERY_PREPARATION_SHA256: ${{ inputs.recovery_preparation_sha256 }}
+          APPROVAL_SHA256: ${{ steps.approval.outputs.sha256 }}
+        run: |
+          set -euo pipefail; d="$RUNNER_TEMP/reconciler-state-reconciliation-recovery"
+          node scripts/aws/authorize-production-initial-activation-reconciler-state-reconciliation-recovery.mjs --authorize-recovery --source-sha "$SOURCE_SHA" --recovery-preparation "$d/recovery-preparation.json" --recovery-preparation-file-sha256 "$RECOVERY_PREPARATION_SHA256" --environment-approval "$d/approval.json" --environment-approval-file-sha256 "$APPROVAL_SHA256" --output "$d/recovery-authorization.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-initial-activation-reconciler-state-reconciliation-recovery-authorization
+          path: ${{ runner.temp }}/reconciler-state-reconciliation-recovery/recovery-authorization.json
+          if-no-files-found: error
+          retention-days: 30

@@ -10,10 +10,11 @@ import { INSTALLATION, INSTALLATION_BACKEND, assertInstallationAuthorization, as
 import { executeInstallation, runInstallCli } from "../aws/install-production-initial-activation-reconciler.mjs";
 import { discoverInstallationPredecessor, runPrepareCli } from "../aws/prepare-production-initial-activation-reconciler-installation.mjs";
 import { INITIAL_ACTIVATION_RECONCILER } from "../aws/verify-production-initial-activation-policy-reconciler.mjs";
-import { INSTALLATION_BOOTSTRAP, assertBootstrapAuthorization, createBootstrapAuthorization, discoverBootstrapRole, installBootstrapRole, resolveBootstrapAuthorization, runBootstrapCli } from "../aws/production-initial-activation-reconciler-bootstrap.mjs";
+import { INSTALLATION_BOOTSTRAP, assertBootstrapAuthorization, createBootstrapAuthorization, createBootstrapPreparation, discoverBootstrapRole, installBootstrapRole, resolveBootstrapAuthorization, runBootstrapCli } from "../aws/production-initial-activation-reconciler-bootstrap.mjs";
 
 const sourceSha = "a".repeat(40);
 const now = new Date("2026-09-05T12:00:00.000Z");
+const bootstrapPreparation = (classification = "ABSENT", predecessorPolicySha256 = null) => createBootstrapPreparation({ sourceSha, predecessor: { classification, predecessorPolicySha256 } });
 const trust = fs.readFileSync("infra/aws/terraform/production-initial-activation-policy-reconciler/trust-policy.json", "utf8");
 const permissions = fs.readFileSync("infra/aws/terraform/production-initial-activation-policy-reconciler/permissions-policy.json", "utf8");
 const capability = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionInitialActivationPolicyReconcilerInstallation-v1.json", "utf8"));
@@ -550,11 +551,13 @@ test("bootstrap role trust and permissions are exact and non-administrative", ()
   assert.doesNotMatch(serialized, /AdministratorAccess|PowerUserAccess|"iam:\*"|"s3:\*"/);
   assert.doesNotMatch(serialized, /UpdateAssumeRolePolicy|PutRolePolicy|CreateUser|CreateAccessKey/);
   assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "UpdateExactReconcilerPolicyVersion"), { Sid: "UpdateExactReconcilerPolicyVersion", Effect: "Allow", Action: "iam:CreatePolicyVersion", Resource: INITIAL_ACTIVATION_RECONCILER.policyArn });
+  assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "ReadExactProductionArtifactsBucketPolicy"), { Sid: "ReadExactProductionArtifactsBucketPolicy", Effect: "Allow", Action: "s3:GetBucketPolicy", Resource: "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an" });
+  assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "ReadOwnExactBootstrapInlinePolicy"), { Sid: "ReadOwnExactBootstrapInlinePolicy", Effect: "Allow", Action: "iam:GetRolePolicy", Resource: INSTALLATION_BOOTSTRAP.roleArn });
   const mutations = policy.Statement.flatMap((statement) => (Array.isArray(statement.Action) ? statement.Action : [statement.Action])).filter((action) => /^(iam:(Create|Attach|Tag)|s3:(Put|Delete))/.test(action));
   assert.deepEqual(mutations.sort(), ["iam:AttachRolePolicy", "iam:CreatePolicy", "iam:CreatePolicyVersion", "iam:CreateRole", "iam:TagPolicy", "iam:TagRole", "s3:DeleteObject", "s3:PutObject"].sort());
   assert.match(serialized, new RegExp(INITIAL_ACTIVATION_RECONCILER.roleArn));
   assert.match(serialized, new RegExp(INITIAL_ACTIVATION_RECONCILER.policyArn));
-  assert.doesNotMatch(serialized, new RegExp(`${INSTALLATION_BOOTSTRAP.roleArn}(?:"|/)`));
+  assert.deepEqual(policy.Statement.filter(({ Resource }) => JSON.stringify(Resource).includes(INSTALLATION_BOOTSTRAP.roleArn)), [{ Sid: "ReadOwnExactBootstrapInlinePolicy", Effect: "Allow", Action: "iam:GetRolePolicy", Resource: INSTALLATION_BOOTSTRAP.roleArn }]);
   assert.notEqual(trustPolicy.Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:sub"], "repo:T-ej2003/genuine-scan-main:environment:production");
 });
 
@@ -624,7 +627,7 @@ test("EXACT_UPDATE ambiguous recovery requires the authorized post-state semanti
 });
 
 test("one-time root bootstrap is exact, resumable, and ambiguity never advances", () => {
-  const authorization = createBootstrapAuthorization({ sourceSha, approval: bootstrapApproval, authorizedAt: now.toISOString() });
+  const authorization = createBootstrapAuthorization({ sourceSha, preparation: bootstrapPreparation(), approval: bootstrapApproval, authorizedAt: now.toISOString() });
   assert.doesNotThrow(() => assertBootstrapAuthorization(authorization, { sourceSha, now }));
   const trustPolicy = JSON.parse(fs.readFileSync(INSTALLATION_BOOTSTRAP.trustPath, "utf8"));
   const permissionPolicy = JSON.parse(fs.readFileSync(INSTALLATION_BOOTSTRAP.permissionsPath, "utf8"));
@@ -644,7 +647,7 @@ test("one-time root bootstrap is exact, resumable, and ambiguity never advances"
   };
   const result = installBootstrapRole({ run, authorization, sourceSha, now });
   assert.deepEqual(result, { status: "COMPLETE", createRoleCount: 1, putRolePolicyCount: 1, recovered: false });
-  assert.deepEqual(installBootstrapRole({ run, authorization, sourceSha, now }), { status: "COMPLETE", createRoleCount: 0, putRolePolicyCount: 0, recovered: false });
+  assert.throws(() => installBootstrapRole({ run, authorization, sourceSha, now }), /predecessor changed/);
   assert.equal(calls.filter((call) => call === "create-role").length, 1);
   assert.equal(calls.filter((call) => call === "put-role-policy").length, 1);
 
@@ -660,22 +663,23 @@ test("one-time root bootstrap is exact, resumable, and ambiguity never advances"
 
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-bootstrap-result-"));
   const resultPath = path.join(directory, "result.json");
+  const completeAuthorization = createBootstrapAuthorization({ sourceSha, preparation: createBootstrapPreparation({ sourceSha, predecessor: discoverBootstrapRole({ run }) }), approval: bootstrapApproval, authorizedAt: now.toISOString() });
   const cliResult = runBootstrapCli(["--execute", "--source-sha", sourceSha, "--authorization-workflow-run-id", "200", "--authorization-workflow-run-attempt", "1", "--admin-profile", "mscqr-production-root", "--result", resultPath], {
     exec: (_command, args) => args[0] === "status" ? "" : sourceSha,
-    resolveAuthorization: () => authorization,
+    resolveAuthorization: () => completeAuthorization,
     run,
     now,
   });
   assert.equal(cliResult.status, "COMPLETE");
-  assert.equal(JSON.parse(fs.readFileSync(resultPath, "utf8")).authorizationSha256, authorization.authorizationSha256);
+  assert.equal(JSON.parse(fs.readFileSync(resultPath, "utf8")).authorizationSha256, completeAuthorization.authorizationSha256);
   fs.rmSync(directory, { recursive: true, force: true });
 });
 
 test("root bootstrap upgrades only its exact predecessor inline policy", () => {
-  const authorization = createBootstrapAuthorization({ sourceSha, approval: bootstrapApproval, authorizedAt: now.toISOString() });
+  const authorization = createBootstrapAuthorization({ sourceSha, preparation: bootstrapPreparation("EXACT_PREDECESSOR_GENERATION_2", "da875e515ee4139d05180cf6bebbe51c4b7eb95ae4185e47a4e4c5df6b07a612"), approval: bootstrapApproval, authorizedAt: now.toISOString() });
   const trustPolicy = JSON.parse(fs.readFileSync(INSTALLATION_BOOTSTRAP.trustPath, "utf8"));
   const desiredPolicy = JSON.parse(fs.readFileSync(INSTALLATION_BOOTSTRAP.permissionsPath, "utf8"));
-  let inline = { ...desiredPolicy, Statement: desiredPolicy.Statement.filter(({ Sid }) => Sid !== "UpdateExactReconcilerPolicyVersion") };
+  let inline = { ...desiredPolicy, Statement: desiredPolicy.Statement.filter(({ Sid }) => !["ReadExactProductionArtifactsBucketPolicy", "ReadOwnExactBootstrapInlinePolicy"].includes(Sid)) };
   let puts = 0;
   const run = (args) => {
     if (args[0] === "sts") return JSON.stringify({ Arn: INSTALLATION_BOOTSTRAP.administratorArn });
@@ -686,14 +690,78 @@ test("root bootstrap upgrades only its exact predecessor inline policy", () => {
     if (args[1] === "put-role-policy") { puts += 1; inline = desiredPolicy; return ""; }
     throw new Error(`unexpected bootstrap update call ${args.join(" ")}`);
   };
-  assert.equal(discoverBootstrapRole({ run }).classification, "EXACT_PREDECESSOR");
+  assert.equal(discoverBootstrapRole({ run }).classification, "EXACT_PREDECESSOR_GENERATION_2");
   assert.deepEqual(installBootstrapRole({ run, authorization, sourceSha, now }), { status: "COMPLETE", createRoleCount: 0, putRolePolicyCount: 1, recovered: false });
   assert.equal(puts, 1);
   assert.equal(discoverBootstrapRole({ run }).classification, "EXACT_COMPLETE");
 });
 
+test("bootstrap accepts only both exact historical predecessors and binds authorization to the observed generation", () => {
+  const trustPolicy = JSON.parse(fs.readFileSync(INSTALLATION_BOOTSTRAP.trustPath, "utf8"));
+  const desired = JSON.parse(fs.readFileSync(INSTALLATION_BOOTSTRAP.permissionsPath, "utf8"));
+  const generation1 = structuredClone(desired); generation1.Statement = generation1.Statement.filter(({ Sid }) => !["UpdateExactReconcilerPolicyVersion", "ReadExactProductionArtifactsBucketPolicy", "ReadOwnExactBootstrapInlinePolicy"].includes(Sid));
+  const generation2 = structuredClone(desired); generation2.Statement = generation2.Statement.filter(({ Sid }) => !["ReadExactProductionArtifactsBucketPolicy", "ReadOwnExactBootstrapInlinePolicy"].includes(Sid));
+  let inline = generation1; let puts = 0;
+  const run = (args) => {
+    if (args[0] === "sts") return JSON.stringify({ Arn: INSTALLATION_BOOTSTRAP.administratorArn });
+    if (args[1] === "get-role") return JSON.stringify({ Role: { Arn: INSTALLATION_BOOTSTRAP.roleArn, RoleName: INSTALLATION_BOOTSTRAP.roleName, Path: "/", Description: INSTALLATION_BOOTSTRAP.roleDescription, MaxSessionDuration: 3600, AssumeRolePolicyDocument: trustPolicy, Tags: Object.entries(INSTALLATION_BOOTSTRAP.tags).map(([Key, Value]) => ({ Key, Value })) } });
+    if (args[1] === "list-attached-role-policies") return JSON.stringify({ AttachedPolicies: [] });
+    if (args[1] === "list-role-policies") return JSON.stringify({ PolicyNames: [INSTALLATION_BOOTSTRAP.inlinePolicyName] });
+    if (args[1] === "get-role-policy") return JSON.stringify({ PolicyDocument: inline });
+    if (args[1] === "put-role-policy") { puts += 1; inline = desired; return ""; }
+    throw new Error(`unexpected bootstrap call ${args.join(" ")}`);
+  };
+  assert.deepEqual(discoverBootstrapRole({ run }), { classification: "EXACT_PREDECESSOR_GENERATION_1", predecessorPolicySha256: "cf78ea2f03a38912b6989499403961db3f915a55f5cd25acf924132e23de64c1" });
+  const generation1Authorization = createBootstrapAuthorization({ sourceSha, preparation: bootstrapPreparation("EXACT_PREDECESSOR_GENERATION_1", "cf78ea2f03a38912b6989499403961db3f915a55f5cd25acf924132e23de64c1"), approval: bootstrapApproval, authorizedAt: now.toISOString() });
+  assert.equal(installBootstrapRole({ run, authorization: generation1Authorization, sourceSha, now }).putRolePolicyCount, 1);
+  assert.equal(discoverBootstrapRole({ run }).classification, "EXACT_COMPLETE");
+  inline = generation2;
+  assert.deepEqual(discoverBootstrapRole({ run }), { classification: "EXACT_PREDECESSOR_GENERATION_2", predecessorPolicySha256: "da875e515ee4139d05180cf6bebbe51c4b7eb95ae4185e47a4e4c5df6b07a612" });
+  assert.throws(() => installBootstrapRole({ run, authorization: generation1Authorization, sourceSha, now }), /predecessor changed/); assert.equal(puts, 1);
+  for (const mutate of [
+    (policy) => { policy.Statement[0].Action = "s3:GetObject"; },
+    (policy) => { policy.Statement[0].Resource = "arn:aws:s3:::unexpected"; },
+    (policy) => { policy.Statement.push({ Sid: "Unexpected", Effect: "Allow", Action: "iam:*", Resource: "*" }); },
+    (policy) => { policy.Statement = policy.Statement.filter(({ Sid }) => Sid !== "ReadExactBackendObjects"); },
+  ]) { inline = structuredClone(generation1); mutate(inline); assert.throws(() => discoverBootstrapRole({ run }), /not exact/); }
+});
+
+test("bootstrap prepares and replays EXACT_COMPLETE only as the exact zero-write state", () => {
+  const trustPolicy = JSON.parse(fs.readFileSync(INSTALLATION_BOOTSTRAP.trustPath, "utf8"));
+  const desired = JSON.parse(fs.readFileSync(INSTALLATION_BOOTSTRAP.permissionsPath, "utf8"));
+  const generation2 = structuredClone(desired); generation2.Statement = generation2.Statement.filter(({ Sid }) => !["ReadExactProductionArtifactsBucketPolicy", "ReadOwnExactBootstrapInlinePolicy"].includes(Sid));
+  let inline = desired; let puts = 0;
+  const run = (args) => {
+    if (args[0] === "sts") return JSON.stringify({ Arn: INSTALLATION_BOOTSTRAP.administratorArn });
+    if (args[1] === "get-role") return JSON.stringify({ Role: { Arn: INSTALLATION_BOOTSTRAP.roleArn, RoleName: INSTALLATION_BOOTSTRAP.roleName, Path: "/", Description: INSTALLATION_BOOTSTRAP.roleDescription, MaxSessionDuration: 3600, AssumeRolePolicyDocument: trustPolicy, Tags: Object.entries(INSTALLATION_BOOTSTRAP.tags).map(([Key, Value]) => ({ Key, Value })) } });
+    if (args[1] === "list-attached-role-policies") return JSON.stringify({ AttachedPolicies: [] });
+    if (args[1] === "list-role-policies") return JSON.stringify({ PolicyNames: [INSTALLATION_BOOTSTRAP.inlinePolicyName] });
+    if (args[1] === "get-role-policy") return JSON.stringify({ PolicyDocument: inline });
+    if (args[1] === "put-role-policy") { puts += 1; inline = desired; return ""; }
+    throw new Error(`unexpected bootstrap call ${args.join(" ")}`);
+  };
+  const complete = discoverBootstrapRole({ run });
+  assert.equal(complete.classification, "EXACT_COMPLETE");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-bootstrap-complete-preparation-"));
+  const preparationPath = path.join(directory, "preparation.json");
+  const preparedByCli = runBootstrapCli(["--prepare", "--source-sha", sourceSha, "--admin-profile", "mscqr-production-root", "--output", preparationPath], { exec: (_command, args) => args[0] === "status" ? "" : sourceSha, run });
+  assert.deepEqual(preparedByCli.predecessorClassification, "EXACT_COMPLETE");
+  assert.equal(JSON.parse(fs.readFileSync(preparationPath, "utf8")).predecessorPolicySha256, complete.predecessorPolicySha256);
+  fs.rmSync(directory, { recursive: true, force: true });
+  const completeAuthorization = createBootstrapAuthorization({ sourceSha, preparation: createBootstrapPreparation({ sourceSha, predecessor: complete }), approval: bootstrapApproval, authorizedAt: now.toISOString() });
+  assert.deepEqual(completeAuthorization.maxAwsMutations, {});
+  assert.deepEqual(installBootstrapRole({ run, authorization: completeAuthorization, sourceSha, now }), { status: "COMPLETE", createRoleCount: 0, putRolePolicyCount: 0, recovered: false });
+  assert.equal(puts, 0);
+  inline = generation2;
+  assert.throws(() => installBootstrapRole({ run, authorization: completeAuthorization, sourceSha, now }), /predecessor changed/);
+  const generation2Authorization = createBootstrapAuthorization({ sourceSha, preparation: bootstrapPreparation("EXACT_PREDECESSOR_GENERATION_2", "da875e515ee4139d05180cf6bebbe51c4b7eb95ae4185e47a4e4c5df6b07a612"), approval: bootstrapApproval, authorizedAt: now.toISOString() });
+  inline = desired;
+  assert.throws(() => installBootstrapRole({ run, authorization: generation2Authorization, sourceSha, now }), /predecessor changed/);
+  assert.equal(puts, 0);
+});
+
 test("root bootstrap accepts only canonical GitHub run, approval, and artifact provenance", () => {
-  const authorization = createBootstrapAuthorization({ sourceSha, approval: bootstrapApproval, authorizedAt: now.toISOString() });
+  const authorization = createBootstrapAuthorization({ sourceSha, preparation: bootstrapPreparation(), approval: bootstrapApproval, authorizedAt: now.toISOString() });
   const archive = Buffer.from("bootstrap-authorization-archive");
   const workflow = { id: 200, repository: { id: 1, full_name: INSTALLATION_BOOTSTRAP.repository }, head_repository: { full_name: INSTALLATION_BOOTSTRAP.repository }, path: INSTALLATION_BOOTSTRAP.workflowPath, event: "workflow_dispatch", head_sha: sourceSha, status: "completed", conclusion: "success", run_attempt: 1, actor: { login: "operator" } };
   const artifact = { id: 12, name: INSTALLATION_BOOTSTRAP.artifactName, expired: false, workflow_run: { id: 200, head_sha: sourceSha, repository_id: 1 }, digest: `sha256:${crypto.createHash("sha256").update(archive).digest("hex")}` };
@@ -718,7 +786,7 @@ test("root bootstrap accepts only canonical GitHub run, approval, and artifact p
 });
 
 test("bootstrap topology and authorization drift fail closed", () => {
-  const authorization = createBootstrapAuthorization({ sourceSha, approval: bootstrapApproval, authorizedAt: now.toISOString() });
+  const authorization = createBootstrapAuthorization({ sourceSha, preparation: bootstrapPreparation(), approval: bootstrapApproval, authorizedAt: now.toISOString() });
   assert.throws(() => assertBootstrapAuthorization({ ...authorization, roleArn: "arn:aws:iam::368992683803:role/other" }, { sourceSha, now }), /binding/);
   assert.throws(() => assertBootstrapAuthorization({ ...authorization, sourceHashes: { ...authorization.sourceHashes, trustPolicySha256: "0".repeat(64) } }, { sourceSha, now }), /binding/);
   const role = { Arn: INSTALLATION_BOOTSTRAP.roleArn, RoleName: INSTALLATION_BOOTSTRAP.roleName, Path: "/", Description: INSTALLATION_BOOTSTRAP.roleDescription, MaxSessionDuration: 3600, AssumeRolePolicyDocument: JSON.parse(fs.readFileSync(INSTALLATION_BOOTSTRAP.trustPath)), Tags: Object.entries(INSTALLATION_BOOTSTRAP.tags).map(([Key, Value]) => ({ Key, Value })) };
@@ -736,6 +804,10 @@ test("installation and bootstrap workflows share the one non-cancelling producti
   for (const file of [
     ".github/workflows/authorize-production-initial-activation-policy-reconciler-bootstrap.yml",
     ".github/workflows/authorize-production-initial-activation-policy-reconciler-installation.yml",
+    ".github/workflows/authorize-production-initial-activation-reconciler-state-reconciliation.yml",
+    ".github/workflows/execute-production-initial-activation-reconciler-state-reconciliation.yml",
+    ".github/workflows/authorize-production-initial-activation-reconciler-state-reconciliation-recovery.yml",
+    ".github/workflows/execute-production-initial-activation-reconciler-state-reconciliation-recovery.yml",
     ".github/workflows/release-gate.yml",
   ]) {
     const workflow = fs.readFileSync(file, "utf8");
@@ -757,13 +829,28 @@ test("installation and bootstrap workflows share the one non-cancelling producti
   assert.match(bootstrapWorkflow, /group: production-deploy/);
   assert.match(bootstrapWorkflow, /--require-actual-approval/);
   const workflowFiles = fs.readdirSync(".github/workflows").filter((file) => file.endsWith(".yml") || file.endsWith(".yaml"));
-  const allowedBootstrapEnvironmentUsers = new Set(["authorize-production-initial-activation-policy-reconciler-bootstrap.yml", "authorize-production-initial-activation-policy-reconciler-installation.yml"]);
+  const allowedBootstrapEnvironmentUsers = new Set(["authorize-production-initial-activation-policy-reconciler-bootstrap.yml", "authorize-production-initial-activation-policy-reconciler-installation.yml", "authorize-production-initial-activation-reconciler-state-reconciliation.yml", "execute-production-initial-activation-reconciler-state-reconciliation.yml", "authorize-production-initial-activation-reconciler-state-reconciliation-recovery.yml", "execute-production-initial-activation-reconciler-state-reconciliation-recovery.yml"]);
   const otherBootstrapUsers = workflowFiles.filter((file) => !allowedBootstrapEnvironmentUsers.has(file))
     .filter((file) => fs.readFileSync(path.join(".github/workflows", file), "utf8").includes(`environment: ${INSTALLATION_BOOTSTRAP.environment}`));
   assert.deepEqual(otherBootstrapUsers, []);
   const trustPolicy = JSON.parse(fs.readFileSync(INSTALLATION_BOOTSTRAP.trustPath, "utf8"));
   const trustedSubject = trustPolicy.Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:sub"];
   assert.equal(trustedSubject, `repo:${INSTALLATION.repository}:environment:${INSTALLATION.environment}`);
+});
+
+test("bootstrap authorization creates its decoded preparation privately in the consuming step", () => {
+  const workflow = fs.readFileSync(".github/workflows/authorize-production-initial-activation-policy-reconciler-bootstrap.yml", "utf8");
+  assert.match(workflow, /set -euo pipefail\n\s+umask 077\n\s+workdir=.*initial-activation-bootstrap[\s\S]*base64 --decode > "\$workdir\/preparation\.json"/);
+  assert.match(workflow, /--preparation "\$RUNNER_TEMP\/initial-activation-bootstrap\/preparation\.json"/);
+});
+
+test("bootstrap runbook documents the required prepare-to-authorize workflow contract", () => {
+  const runbook = fs.readFileSync("documents/ops/iam/MSCQR_PRODUCTION_INITIAL_ACTIVATION_RECONCILER_BOOTSTRAP.md", "utf8");
+  const workflow = fs.readFileSync(".github/workflows/authorize-production-initial-activation-policy-reconciler-bootstrap.yml", "utf8");
+  const requiredInputs = [...workflow.matchAll(/^\s{6}(\w+): \{ description: .*required: true,/gm)].map((match) => match[1]);
+  assert.deepEqual(requiredInputs, ["source_sha", "preparation_base64", "preparation_sha256"]);
+  assert.match(runbook, /production:initial-activation-reconciler:bootstrap -- --prepare/);
+  for (const input of requiredInputs) assert.match(runbook, new RegExp(`-f ${input}=`));
 });
 
 test("terraform show failure always removes the unique render copy", () => {

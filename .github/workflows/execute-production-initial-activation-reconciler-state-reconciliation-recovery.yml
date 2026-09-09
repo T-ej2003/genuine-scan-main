@@ -1,0 +1,64 @@
+name: Complete initial-activation reconciler state reconciliation recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha: { description: Exact protected-main source SHA, required: true, type: string }
+      recovery_preparation_base64: { description: Exact zero-write recovery preparation, required: true, type: string }
+      recovery_preparation_sha256: { description: SHA256 of recovery preparation bytes, required: true, type: string }
+      recovery_authorization_workflow_run_id: { description: Completed recovery authorization workflow run ID, required: true, type: string }
+      recovery_authorization_workflow_run_attempt: { description: Recovery authorization workflow run attempt, required: true, type: string }
+
+permissions: { actions: read, contents: read, id-token: write }
+concurrency: { group: production-deploy, cancel-in-progress: false }
+
+jobs:
+  complete-recovery:
+    runs-on: ubuntu-latest
+    environment: production-initial-activation-reconciler-bootstrap
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.8
+          terraform_wrapper: false
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Authenticate protected source and create private recovery input
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          RECOVERY_PREPARATION_BASE64: ${{ inputs.recovery_preparation_base64 }}
+          RECOVERY_PREPARATION_SHA256: ${{ inputs.recovery_preparation_sha256 }}
+        run: |
+          set -euo pipefail; test "$GITHUB_RUN_ATTEMPT" = 1; test "$GITHUB_REPOSITORY" = T-ej2003/genuine-scan-main; test "$SOURCE_SHA" = "$(gh api repos/$GITHUB_REPOSITORY/branches/main --jq .commit.sha)"; test "$SOURCE_SHA" = "$(git rev-parse HEAD)"; test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          umask 077; d="$RUNNER_TEMP/reconciler-state-reconciliation-recovery"; install -d -m 700 "$d"
+          printf '%s' "$RECOVERY_PREPARATION_BASE64" | base64 --decode > "$d/recovery-preparation.json"; test "$(sha256sum "$d/recovery-preparation.json" | awk '{print $1}')" = "$RECOVERY_PREPARATION_SHA256"
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: eu-west-2
+          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler-bootstrap
+      - name: Verify exact successor without Terraform apply
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          RECOVERY_PREPARATION_SHA256: ${{ inputs.recovery_preparation_sha256 }}
+          AUTHORIZATION_RUN_ID: ${{ inputs.recovery_authorization_workflow_run_id }}
+          AUTHORIZATION_RUN_ATTEMPT: ${{ inputs.recovery_authorization_workflow_run_attempt }}
+        run: |
+          set -euo pipefail; d="$RUNNER_TEMP/reconciler-state-reconciliation-recovery"; install -d -m 700 "$d/terraform-data"
+          node scripts/aws/reconcile-production-initial-activation-reconciler-state.mjs --mode recovery-execute --source-sha "$SOURCE_SHA" --terraform-data-dir "$d/terraform-data" --recovery-preparation "$d/recovery-preparation.json" --recovery-preparation-file-sha256 "$RECOVERY_PREPARATION_SHA256" --recovery-authorization-workflow-run-id "$AUTHORIZATION_RUN_ID" --recovery-authorization-workflow-run-attempt "$AUTHORIZATION_RUN_ATTEMPT" --result-out "$d/recovery-result.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: production-initial-activation-reconciler-state-reconciliation-recovery-result
+          path: ${{ runner.temp }}/reconciler-state-reconciliation-recovery/recovery-result.json
+          if-no-files-found: error
+          retention-days: 90

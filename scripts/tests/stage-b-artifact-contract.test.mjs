@@ -126,6 +126,7 @@ test("Stage-A reconciliation approval artifacts are complete and privacy-bound",
 
 test("initial-activation reconciler installation artifacts form a closed private chain", () => {
   const expected = {
+    "initial-activation-reconciler-bootstrap-preparation": [".github/workflows/authorize-production-initial-activation-policy-reconciler-bootstrap.yml", "scripts/aws/production-initial-activation-reconciler-bootstrap.mjs"],
     "initial-activation-reconciler-bootstrap-authorization": ["scripts/aws/production-initial-activation-reconciler-bootstrap.mjs"],
     "initial-activation-reconciler-bootstrap-result": ["documents/ops/iam/MSCQR_PRODUCTION_INITIAL_ACTIVATION_RECONCILER_BOOTSTRAP.md"],
     "initial-activation-reconciler-installation-saved-plan": [".github/workflows/authorize-production-initial-activation-policy-reconciler-installation.yml", "scripts/aws/prepare-production-initial-activation-reconciler-installation.mjs", "scripts/aws/install-production-initial-activation-reconciler.mjs"],
@@ -137,9 +138,27 @@ test("initial-activation reconciler installation artifacts form a closed private
   for (const [id, consumers] of Object.entries(expected)) {
     const artifact = STAGE_B_ARTIFACT_CONTRACTS.find((candidate) => candidate.id === id);
     assert.deepEqual(artifact?.consumers, consumers);
+    if (id === "initial-activation-reconciler-bootstrap-preparation") {
+      assert.equal(artifact?.producer, "scripts/aws/production-initial-activation-reconciler-bootstrap.mjs:runBootstrapCli --prepare");
+      assert.equal(artifact?.atomic, true); assert.equal(artifact?.overwrite, false);
+    }
     assert.equal(artifact?.directoryMode, "0700"); assert.equal(artifact?.fileMode, "0600"); assert.equal(artifact?.outsideRepository, true); assert.equal(artifact?.symlink, "reject"); assert.equal(artifact?.hashBound, true);
     assert.deepEqual(canonicalStageBArtifactContracts().artifacts.find((candidate) => candidate.id === id)?.consumers, consumers);
   }
+});
+
+test("bootstrap preparation is a registered exact-byte private handoff", () => {
+  const artifact = STAGE_B_ARTIFACT_CONTRACTS.find(({ id }) => id === "initial-activation-reconciler-bootstrap-preparation");
+  assert.deepEqual(artifact, {
+    id: "initial-activation-reconciler-bootstrap-preparation", kind: "file", producer: "scripts/aws/production-initial-activation-reconciler-bootstrap.mjs:runBootstrapCli --prepare",
+    consumers: [".github/workflows/authorize-production-initial-activation-policy-reconciler-bootstrap.yml", "scripts/aws/production-initial-activation-reconciler-bootstrap.mjs"],
+    directoryMode: "0700", fileMode: "0600", symlink: "reject", outsideRepository: true, atomic: true, overwrite: false, hashBound: true,
+  });
+  const bootstrap = fs.readFileSync("scripts/aws/production-initial-activation-reconciler-bootstrap.mjs", "utf8");
+  const workflow = fs.readFileSync(".github/workflows/authorize-production-initial-activation-policy-reconciler-bootstrap.yml", "utf8");
+  assert.match(bootstrap, /writeStageBPrivateFilesAtomic\([\s\S]*label: "Bootstrap preparation"/);
+  assert.match(bootstrap, /readBoundStageBPrivateJson\([\s\S]*expectedSha256: required\(argv, "--preparation-sha256"\)/);
+  assert.match(workflow, /base64 --decode > "\$workdir\/preparation\.json"[\s\S]*sha256sum "\$workdir\/preparation\.json"/);
 });
 
 test("initial-activation lifecycle reconciliation artifacts are registered", () => {

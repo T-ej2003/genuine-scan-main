@@ -23,6 +23,8 @@ export const PRODUCTION_ENVIRONMENT_APPROVAL = Object.freeze({
   providerReadonlyPolicyReconciliationWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-provider-readonly-policy-reconciliation.yml@refs/heads/main",
   installationWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-initial-activation-policy-reconciler-installation.yml@refs/heads/main",
   installationBootstrapWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-initial-activation-policy-reconciler-bootstrap.yml@refs/heads/main",
+  reconcilerStateReconciliationWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-initial-activation-reconciler-state-reconciliation.yml@refs/heads/main",
+  reconcilerStateReconciliationRecoveryWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-initial-activation-reconciler-state-reconciliation-recovery.yml@refs/heads/main",
   installationBootstrapEnvironment: "production-initial-activation-reconciler-bootstrap",
   eventName: "workflow_dispatch",
   maxAgeMs: 30 * 60 * 1000,
@@ -43,9 +45,11 @@ const approvedWorkflowRefs = new Set([
   PRODUCTION_ENVIRONMENT_APPROVAL.providerReadonlyPolicyReconciliationWorkflowRef,
   PRODUCTION_ENVIRONMENT_APPROVAL.installationWorkflowRef,
   PRODUCTION_ENVIRONMENT_APPROVAL.installationBootstrapWorkflowRef,
+  PRODUCTION_ENVIRONMENT_APPROVAL.reconcilerStateReconciliationWorkflowRef,
+  PRODUCTION_ENVIRONMENT_APPROVAL.reconcilerStateReconciliationRecoveryWorkflowRef,
 ]);
 
-const environmentForWorkflow = (workflowRef) => [PRODUCTION_ENVIRONMENT_APPROVAL.installationBootstrapWorkflowRef, PRODUCTION_ENVIRONMENT_APPROVAL.installationWorkflowRef].includes(workflowRef)
+const environmentForWorkflow = (workflowRef) => [PRODUCTION_ENVIRONMENT_APPROVAL.installationBootstrapWorkflowRef, PRODUCTION_ENVIRONMENT_APPROVAL.installationWorkflowRef, PRODUCTION_ENVIRONMENT_APPROVAL.reconcilerStateReconciliationWorkflowRef, PRODUCTION_ENVIRONMENT_APPROVAL.reconcilerStateReconciliationRecoveryWorkflowRef].includes(workflowRef)
   ? PRODUCTION_ENVIRONMENT_APPROVAL.installationBootstrapEnvironment
   : PRODUCTION_ENVIRONMENT_APPROVAL.environment;
 
