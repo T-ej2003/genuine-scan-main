@@ -801,6 +801,12 @@ test("installation and bootstrap workflows share the one non-cancelling producti
   assert.equal(trustedSubject, `repo:${INSTALLATION.repository}:environment:${INSTALLATION.environment}`);
 });
 
+test("bootstrap authorization creates its decoded preparation privately in the consuming step", () => {
+  const workflow = fs.readFileSync(".github/workflows/authorize-production-initial-activation-policy-reconciler-bootstrap.yml", "utf8");
+  assert.match(workflow, /set -euo pipefail\n\s+umask 077\n\s+workdir=.*initial-activation-bootstrap[\s\S]*base64 --decode > "\$workdir\/preparation\.json"/);
+  assert.match(workflow, /--preparation "\$RUNNER_TEMP\/initial-activation-bootstrap\/preparation\.json"/);
+});
+
 test("terraform show failure always removes the unique render copy", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-install-render-cleanup-"));
   fs.chmodSync(directory, 0o700);

@@ -49,6 +49,7 @@ jobs:
           PREPARATION_SHA256: ${{ inputs.preparation_sha256 }}
         run: |
           set -euo pipefail
+          umask 077
           workdir="$RUNNER_TEMP/initial-activation-bootstrap"
           install -d -m 700 "$workdir"
           printf '%s' "$PREPARATION_BASE64" | base64 --decode > "$workdir/preparation.json"
