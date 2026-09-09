@@ -79,6 +79,29 @@ test("exact successor is the only accepted post-state", () => {
   assert.throws(() => assertExactStateSuccessor({ beforeBytes: before, afterBytes: unexpected }), /outside|fields/);
 });
 
+test("replay and post-apply require the complete authorized successor state", () => {
+  const preparation = prepared(); const authorization = createReconcilerStateReconciliationAuthorization({ preparation, approval: approval(), now });
+  const corruptions = [
+    (value) => { value.outputs.changed = { value: "unexpected", type: "string" }; },
+    (value) => { value.outputs = { changed: { value: "unexpected", type: "string" } }; },
+    (value) => { value.resources[0].instances[0].attributes.name = "unexpected"; },
+    (value) => { value.resources.push({ mode: "managed", type: "aws_iam_user", name: "unexpected", instances: [{ attributes: { name: "unexpected" } }] }); },
+    (value) => { value.resources.pop(); },
+    (value) => { value.serial = 3; },
+  ];
+  for (const mutate of corruptions) {
+    const candidate = JSON.parse(after); mutate(candidate); const bytes = Buffer.from(JSON.stringify(candidate)); let applies = 0;
+    const common = { sourceSha, preparation, authorization, planBytes: Buffer.from("saved-refresh-plan"), planJson: refreshPlan(), beforeStateBytes: bytes, beforeObject: { versionId: "successor-version", etag: "successor-etag" }, beforeTopology: topology, applySavedPlan: () => { applies += 1; }, readPostSnapshot: () => ({ bytes, object: { versionId: "successor-version", etag: "successor-etag" } }), readPostTopology: () => topology, renderNormalPlan: () => normalPlan, reauthenticateSource: () => true, verifyPostconditions: () => true, now };
+    assert.throws(() => executeReconcilerStateReconciliation(common), /exact authorized successor|not exact/); assert.equal(applies, 0);
+    assert.throws(() => executeReconcilerStateReconciliation({ ...common, beforeStateBytes: before, beforeObject: object }), /outside the exact allowance|exact authorized successor|not exact|successor identity/); assert.equal(applies, 1);
+  }
+});
+
+test("refresh-only output changes are rejected for the exact two-field reconciliation", () => {
+  const changed = refreshPlan(); changed.output_changes = { unexpected: { actions: ["update"] } };
+  assert.throws(() => assertExactReconcilerRefreshOnlyPlan(changed), /output/);
+});
+
 test("execution applies the saved refresh-only plan once, then requires the strict clean normal plan", () => {
   const preparation = prepared(); const authorization = createReconcilerStateReconciliationAuthorization({ preparation, approval: approval(), now }); let applies = 0;
   const result = executeReconcilerStateReconciliation({ sourceSha, preparation, authorization, planBytes: Buffer.from("saved-refresh-plan"), planJson: refreshPlan(), beforeStateBytes: before, beforeObject: object, beforeTopology: topology, applySavedPlan: (bytes) => { applies += 1; assert.equal(hash(bytes), preparation.savedPlanSha256); }, readPostSnapshot: () => ({ bytes: after, object: { versionId: "successor-version", etag: "successor-etag" } }), readPostTopology: () => topology, renderNormalPlan: () => normalPlan, reauthenticateSource: () => true, verifyPostconditions: () => true, now });

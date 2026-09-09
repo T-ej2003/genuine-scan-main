@@ -4,6 +4,8 @@ on:
   workflow_dispatch:
     inputs:
       source_sha: { description: Exact protected-main source SHA, required: true, type: string }
+      preparation_base64: { description: Exact root-authenticated bootstrap preparation, required: true, type: string }
+      preparation_sha256: { description: SHA256 of the bootstrap preparation bytes, required: true, type: string }
 
 permissions:
   actions: read
@@ -43,10 +45,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ inputs.source_sha }}
+          PREPARATION_BASE64: ${{ inputs.preparation_base64 }}
+          PREPARATION_SHA256: ${{ inputs.preparation_sha256 }}
         run: |
           set -euo pipefail
           workdir="$RUNNER_TEMP/initial-activation-bootstrap"
           install -d -m 700 "$workdir"
+          printf '%s' "$PREPARATION_BASE64" | base64 --decode > "$workdir/preparation.json"
+          test "$(sha256sum "$workdir/preparation.json" | awk '{print $1}')" = "$PREPARATION_SHA256"
           node scripts/aws/production-github-environment-approval.mjs \
             --output "$workdir/environment-approval.json" \
             --repository "$GITHUB_REPOSITORY" --environment production-initial-activation-reconciler-bootstrap \
@@ -59,10 +65,13 @@ jobs:
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
           APPROVAL_SHA256: ${{ steps.approval.outputs.sha256 }}
+          PREPARATION_SHA256: ${{ inputs.preparation_sha256 }}
         run: |
           set -euo pipefail
           node scripts/aws/production-initial-activation-reconciler-bootstrap.mjs --authorize \
             --source-sha "$SOURCE_SHA" \
+            --preparation "$RUNNER_TEMP/initial-activation-bootstrap/preparation.json" \
+            --preparation-sha256 "$PREPARATION_SHA256" \
             --environment-approval "$RUNNER_TEMP/initial-activation-bootstrap/environment-approval.json" \
             --environment-approval-sha256 "$APPROVAL_SHA256" \
             --output "$RUNNER_TEMP/initial-activation-bootstrap/bootstrap-authorization.json"
