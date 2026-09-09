@@ -450,6 +450,12 @@ export function buildStageBDeploymentCapabilityGraph() {
   const manifest = readJson(manifestPath); const policies = sourcePolicies(); const probesByAction = new Map();
   assertProductionReleaseOidcSourceContract(manifest);
   for (const probe of RELEASE_READ_PROBES) probesByAction.set(probe.action, [...(probesByAction.get(probe.action) || []), probe.id]);
+  const probeIdsFor = (entry) => (probesByAction.get(entry.action) || []).filter((id) => {
+    if (entry.action !== "ecr:DescribeImages") return true;
+    const args = RELEASE_READ_PROBES.find((probe) => probe.id === id)?.args || [];
+    const repository = args[args.indexOf("--repository-name") + 1];
+    return entry.resources.some((resource) => resource.endsWith(`:repository/${repository}`));
+  });
   for (const probe of [
     { id: "audit-service-details", action: "ecs:DescribeServices" },
     { id: "audit-task-details", action: "ecs:DescribeTasks" },
@@ -471,7 +477,7 @@ export function buildStageBDeploymentCapabilityGraph() {
     identity: forbidden ? "ADMINISTRATOR" : "RELEASE_DEPLOYER", executor: forbidden ? "iam-simulator" : ["recovery", "recovery-read"].includes(entry.phase) ? "aws-cli" : "terraform-or-aws-cli", sourceFile: manifestPath,
     sourceFunction: entry.id, action: entry.action, resources: entry.resources, context: entry.context || [], classification: classification(entry, forbidden),
     probe: forbidden ? "administrator-simulation" : probesByAction.has(entry.action) ? "direct" : entry.phase === "apply" ? "plan-derived-simulation" : "administrator-simulation",
-    probeIds: probesByAction.get(entry.action) || [], policy: authority(entry, forbidden, policies), required: true, mutation: ["apply", "recovery"].includes(entry.phase) || forbidden,
+    probeIds: probeIdsFor(entry), policy: authority(entry, forbidden, policies), required: true, mutation: ["apply", "recovery"].includes(entry.phase) || forbidden,
   })));
   const checkerCapabilities = manifest.checkerRequired.map((entry) => ({
     id: `checker-${entry.id}`, phase: "approval-publication", identity: "INDEPENDENT_CHECKER", executor: "aws-cli", sourceFile: manifestPath,

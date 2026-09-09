@@ -9,6 +9,7 @@ import { STAGE_B_BROKER_POLICY } from "./stage-b-deployment-contract.mjs";
 import { ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import { CHECKER_SOURCE_ROLE_NAME, assertRoleATrustResponse } from "./production-checker-chain-contract.mjs";
 import { assertEcrRepositoryPolicyResponse, isEcrRepositoryPolicyNotFound } from "./production-ecs-runtime-consumability.mjs";
+import { STAGE_B_PLAN_IMAGE_BINDINGS } from "./production-green-stage-b-image-evidence.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const IDENTITY_CAPABILITY_MATRIX_PATH = "documents/ops/iam/MSCQRProductionGreenStageBDeploymentCapabilities-v1.json";
@@ -24,6 +25,7 @@ const canaryRoles = [
   "mscqr-production-full-rls-green-read-only-canary-task",
 ];
 const logGroups = ["backend", "canary", "worker", "read-only-canary"].map((name) => `arn:aws:logs:${STAGE_B.region}:${STAGE_B.account}:log-group:/ecs/mscqr-production/rls-green-${name}`);
+export const RELEASE_DIGEST_VERIFICATION_REPOSITORIES = Object.freeze([...new Set(Object.values(STAGE_B_PLAN_IMAGE_BINDINGS).map(({ repository }) => repository))].sort());
 
 export const RELEASE_READ_PROBES = Object.freeze([
   ["caller", "sts:GetCallerIdentity", ["sts", "get-caller-identity"]],
@@ -41,6 +43,7 @@ export const RELEASE_READ_PROBES = Object.freeze([
   ["recovery-backend-revisions", "ecs:ListTaskDefinitions", ["ecs", "list-task-definitions", "--family-prefix", "mscqr-production-rls-green-backend-candidate", "--status", "ACTIVE", "--sort", "DESC"]],
   ["backend-health-recovery-images", "ecr:DescribeImages", ["ecr", "describe-images", "--repository-name", "mscqr-backend", "--max-results", "1"]],
   ["backend-health-recovery-repository", "ecr:DescribeRepositories", ["ecr", "describe-repositories", "--repository-names", "mscqr-backend"]],
+  ...RELEASE_DIGEST_VERIFICATION_REPOSITORIES.filter((name) => name !== "mscqr-backend").map((name) => [`stage-b-publication-${name}-images`, "ecr:DescribeImages", ["ecr", "describe-images", "--repository-name", name, "--max-results", "1"]]),
   ...["mscqr-backend", "mscqr-web", "mscqr-worker"].map((name) => [`runtime-${name}-repository-policy`, "ecr:GetRepositoryPolicy", ["ecr", "get-repository-policy", "--repository-name", name]]),
   ["backend-health-recovery-service-deployments", "ecs:ListServiceDeployments", ["ecs", "list-service-deployments", "--cluster", STAGE_B.clusterArn, "--service", "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2"]],
   ["audit-broker", "lambda:GetFunctionConfiguration", ["lambda", "get-function-configuration", "--function-name", STAGE_B.brokerFunctionArn]],

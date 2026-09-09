@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import crypto from "node:crypto";
 import {
+  RELEASE_DIGEST_VERIFICATION_REPOSITORIES,
   RELEASE_READ_PROBES,
   readIdentityCapabilityMatrix,
   runReleaseReadPreflight,
@@ -157,7 +158,7 @@ test("Stage B release readiness requires the completed Stage A contract", () => 
 test("generated capability graph is exhaustive, deterministic, and identity-exact", () => {
   const first = buildStageBDeploymentCapabilityGraph(); const second = buildStageBDeploymentCapabilityGraph();
   assert.deepEqual(first, second);
-  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 46, capabilities: 384, uniqueActions: 134, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
+  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 46, capabilities: 385, uniqueActions: 134, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
   assert(first.capabilities.every(({ identity }) => first.identities.includes(identity)));
   assert(first.capabilities.every(({ id }, index) => first.capabilities.findIndex((item) => item.id === id) === index));
   assert(first.capabilities.some(({ identity, action }) => identity === "ECS_EXEC_VERIFIER_OPERATOR" && action === "ecs:ExecuteCommand"));
@@ -215,6 +216,7 @@ test("generated capability graph is exhaustive, deterministic, and identity-exac
       && capability.resources[0] === "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend"
       && capability.policy.sourceFile === "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json"));
   }
+  assert.deepEqual(first.capabilities.find(({ id }) => id === "manifest-stage-b-publication-worker-describe-images").probeIds, ["stage-b-publication-mscqr-worker-images"]);
   assert(first.sourceScan.some(({ sourceFile, action }) => sourceFile === "scripts/aws/recover-production-backend-health.mjs" && action === "ecs:RegisterTaskDefinition"));
   assert(first.sourceScan.some(({ sourceFile, action }) => sourceFile === "scripts/aws/recover-production-backend-health.mjs" && action === "ecs:UpdateService"));
   assert(first.sourceScan.some(({ sourceFile, action }) => sourceFile === "scripts/aws/recover-production-backend-health.mjs" && action === "ecr:DescribeImages"));
@@ -277,6 +279,21 @@ test("backend recovery ECR probes are exact read-only repository calls", () => {
   ]);
 });
 
+test("release digest probes derive from the canonical Stage B publication repositories", () => {
+  assert(RELEASE_READ_PROBES.some(({ id, action, args }) => id === "stage-b-publication-mscqr-worker-images"
+    && action === "ecr:DescribeImages" && args.includes("mscqr-worker")));
+  assert.equal(RELEASE_READ_PROBES.some(({ action, args }) => action === "ecr:DescribeImages" && args.includes("mscqr-web")), false);
+});
+
+test("worker publication ECR denial blocks the release preflight before mutation", () => {
+  const report = runReleaseReadPreflight({ outputDirectory: temp(), run: (args, probe) => {
+    if (probe.id === "stage-b-publication-mscqr-worker-images") throw new Error("AccessDenied");
+    return allowed(args);
+  } });
+  assert.equal(report.status, "blocked");
+  assert.deepEqual(report.failed, [{ id: "stage-b-publication-mscqr-worker-images", action: "ecr:DescribeImages", classification: "AccessDenied" }]);
+});
+
 test("release preflight aggregates independent read denials and never simulates IAM", () => {
   const calls = []; const directory = temp();
   const report = runReleaseReadPreflight({ outputDirectory: directory, run: (args, probe) => {
@@ -292,14 +309,14 @@ test("release preflight aggregates independent read denials and never simulates 
 });
 
 test("backend recovery ECR denial blocks the release preflight before mutation", () => {
-  for (const deniedAction of ["ecr:DescribeImages", "ecr:DescribeRepositories"]) {
+  for (const [deniedId, deniedAction] of [["backend-health-recovery-images", "ecr:DescribeImages"], ["backend-health-recovery-repository", "ecr:DescribeRepositories"]]) {
     const report = runReleaseReadPreflight({ outputDirectory: temp(), run: (args, probe) => {
-      if (probe.action === deniedAction) throw new Error("AccessDenied");
+      if (probe.id === deniedId) throw new Error("AccessDenied");
       return allowed(args);
     } });
     assert.equal(report.status, "blocked");
     assert.deepEqual(report.failed.filter(({ action }) => action === deniedAction), [{
-      id: deniedAction === "ecr:DescribeImages" ? "backend-health-recovery-images" : "backend-health-recovery-repository",
+      id: deniedId,
       action: deniedAction,
       classification: "AccessDenied",
     }]);
