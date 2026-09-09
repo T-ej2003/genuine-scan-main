@@ -1207,6 +1207,25 @@
       "rollback": "remove-committed-or-restore-backups"
     },
     {
+      "id": "initial-activation-reconciler-bootstrap-preparation",
+      "kind": "file",
+      "producer": "scripts/aws/production-initial-activation-reconciler-bootstrap.mjs:runBootstrapCli --prepare",
+      "consumers": [
+        ".github/workflows/authorize-production-initial-activation-policy-reconciler-bootstrap.yml",
+        "scripts/aws/production-initial-activation-reconciler-bootstrap.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "initial-activation-reconciler-bootstrap-preparation",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
       "id": "initial-activation-reconciler-bootstrap-authorization",
       "kind": "file",
       "producer": ".github/workflows/authorize-production-initial-activation-policy-reconciler-bootstrap.yml",
