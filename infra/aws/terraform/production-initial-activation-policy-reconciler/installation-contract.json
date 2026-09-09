@@ -11,7 +11,7 @@
     "iam:AttachRolePolicy": 1,
     "iam:UpdateAssumeRolePolicy": 0,
     "iam:PutRolePolicy": 0,
-    "iam:CreatePolicyVersion": 0
+    "iam:CreatePolicyVersion": 1
   },
   "exactResources": [
     "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler",

@@ -22,9 +22,10 @@ export function executeInstallation({ sourceSha, preparation, authorization, pla
   if (executionRoleArn !== INSTALLATION.executionRoleArn) throw new Error("Installation workflow role identity is not exact.");
   const semantics = assertInstallationPlan(planJson);
   if (canonicalJson(semantics) !== canonicalJson(preparation.planSemantics)) throw new Error("Rendered saved-plan semantics differ from the authorized preparation.");
-  if (livePredecessor !== "ABSENT" && livePredecessor !== "EXACT_PARTIAL" && livePredecessor !== "EXACT_COMPLETE") throw new Error("Installation live predecessor is not a supported exact state.");
+  if (!["ABSENT", "EXACT_PARTIAL", "EXACT_UPDATE", "EXACT_COMPLETE"].includes(livePredecessor)) throw new Error("Installation live predecessor is not a supported exact state.");
   if (livePredecessor === "ABSENT" && semantics.resourceChangeCount !== INSTALLATION.expectedAddresses.length) throw new Error("First-install plan mutation scope is not exact.");
   if (livePredecessor === "EXACT_PARTIAL" && semantics.resourceChangeCount < 1) throw new Error("Partial-install plan mutation scope is not exact.");
+  if (livePredecessor === "EXACT_UPDATE" && (semantics.updateCount !== 1 || semantics.changedAddresses[0] !== "aws_iam_policy.reconciler")) throw new Error("Policy-update installation scope is not exact.");
   if (livePredecessor !== preparation.livePredecessor || JSON.stringify(livePredecessorAddresses) !== JSON.stringify(preparation.livePredecessorAddresses)) throw new Error("Installation live predecessor changed after preparation.");
   const beforeStateBytes = readState?.();
   const beforeState = stateIdentity(beforeStateBytes);
@@ -32,6 +33,7 @@ export function executeInstallation({ sourceSha, preparation, authorization, pla
   if (livePredecessor === "EXACT_COMPLETE" && (!beforeState.stateExists || semantics.resourceChangeCount !== 0)) throw new Error("Exact-complete replay requires an authenticated state and no-op plan.");
   if (livePredecessor === "EXACT_COMPLETE") assertInstallationStateResources(beforeStateBytes);
   if (livePredecessor === "EXACT_PARTIAL") assertInstallationStateResources(beforeStateBytes, { requiredAddresses: livePredecessorAddresses });
+  if (livePredecessor === "EXACT_UPDATE") assertInstallationStateResources(beforeStateBytes);
   const output = assertStageBArtifactPath({ artifactPath: resultPath, repositoryRoot: root, label: "Installation result", allowExisting: false });
   ensureStageBPrivateDirectory({ directory: path.dirname(output), repositoryRoot: root, create: true, label: "Installation result directory" });
   if (livePredecessor === "EXACT_COMPLETE") {

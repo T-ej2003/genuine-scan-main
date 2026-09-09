@@ -2,8 +2,8 @@
 
 Generated from the permission manifest, reviewed source policies, release probes, canonical recovery, zero-registration forward recovery, publisher policy, Terraform runtime policy actions, and the production path. Do not edit generated capability rows manually.
 
-- Phases: 46
-- Capability nodes: 385
+- Phases: 47
+- Capability nodes: 398
 - Unique AWS actions: 134
 - Identities: GITHUB_IMAGE_PUBLISHER, ADMINISTRATOR, ROOT_OPERATOR, BOOTSTRAP_OPERATOR, RELEASE_DEPLOYER, INDEPENDENT_CHECKER, ECS_EXEC_VERIFIER_OPERATOR, SERVICE_RUNTIME, INITIAL_ACTIVATION_RECONCILER
 
@@ -55,3 +55,4 @@ Generated from the permission manifest, reviewed source policies, release probes
 | 44 | stage-a-production-artifacts-policy-recovery | `scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs` |
 | 45 | stage-a-production-artifacts-state-reconciliation | `scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs` |
 | 46 | initial-activation-lifecycle-policy-reconciliation | `scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs` |
+| 47 | provider-readonly-policy-reconciliation | `scripts/aws/reconcile-production-provider-readonly-policy.mjs` |

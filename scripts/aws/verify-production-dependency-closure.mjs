@@ -23,6 +23,8 @@ const ROOT_ATTESTATION_KEY = "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-pro
 const PRODUCTION_ARTIFACTS_BUCKET = "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an";
 const STAGE_A_RECONCILIATION_JOURNAL = `${PRODUCTION_ARTIFACTS_BUCKET}/production-stage-a-production-artifacts-reconciliation/*`;
 const STAGE_A_TERRAFORM_STATE_ARN = `${STAGE_B_TERRAFORM_BACKEND.bucketArn}/${STAGE_A_TERRAFORM_BACKEND.key}`;
+const PROVIDER_READONLY_POLICY = "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly";
+const PROVIDER_READONLY_JOURNAL = `${PRODUCTION_ARTIFACTS_BUCKET}/production-provider-readonly-policy-reconciliation/*`;
 
 const CALLS = Object.freeze([
   ["scripts/aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs", "sts:GetCallerIdentity", "stage-a-artifacts-reconciliation-release-identify", ["*"]],
@@ -100,6 +102,19 @@ const CALLS = Object.freeze([
   ["scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs", "iam:ListAttachedRolePolicies", "initial-activation-policy-reconciliation-root-read-policy-attachment", ["arn:aws:iam::368992683803:role/mscqr-production-release-deployer"], "INITIAL_ACTIVATION_RECONCILER"],
   ["scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs", "iam:ListEntitiesForPolicy", "initial-activation-policy-reconciliation-root-list-policy-entities", ["arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"], "INITIAL_ACTIVATION_RECONCILER"],
   ["scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs", "iam:CreatePolicyVersion", "initial-activation-policy-reconciliation-root-create-policy-version", ["arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"], "INITIAL_ACTIVATION_RECONCILER"],
+  ["scripts/aws/reconcile-production-provider-readonly-policy.mjs", "sts:GetCallerIdentity", "provider-readonly-reconciliation-identify", ["*"], "INITIAL_ACTIVATION_RECONCILER"],
+  ["scripts/aws/reconcile-production-provider-readonly-policy.mjs", "sts:GetCallerIdentity", "provider-readonly-reconciliation-identify-prepare", ["*"], "ROOT_OPERATOR"],
+  ["scripts/aws/reconcile-production-provider-readonly-policy.mjs", "iam:GetPolicy", "provider-readonly-reconciliation-read-policy", [PROVIDER_READONLY_POLICY], "INITIAL_ACTIVATION_RECONCILER"],
+  ["scripts/aws/reconcile-production-provider-readonly-policy.mjs", "iam:GetPolicy", "provider-readonly-reconciliation-read-policy-prepare", [PROVIDER_READONLY_POLICY], "ROOT_OPERATOR"],
+  ["scripts/aws/reconcile-production-provider-readonly-policy.mjs", "iam:GetPolicyVersion", "provider-readonly-reconciliation-read-policy-version", [PROVIDER_READONLY_POLICY], "INITIAL_ACTIVATION_RECONCILER"],
+  ["scripts/aws/reconcile-production-provider-readonly-policy.mjs", "iam:GetPolicyVersion", "provider-readonly-reconciliation-read-policy-version-prepare", [PROVIDER_READONLY_POLICY], "ROOT_OPERATOR"],
+  ["scripts/aws/reconcile-production-provider-readonly-policy.mjs", "iam:ListPolicyVersions", "provider-readonly-reconciliation-list-policy-versions", [PROVIDER_READONLY_POLICY], "INITIAL_ACTIVATION_RECONCILER"],
+  ["scripts/aws/reconcile-production-provider-readonly-policy.mjs", "iam:ListPolicyVersions", "provider-readonly-reconciliation-list-policy-versions-prepare", [PROVIDER_READONLY_POLICY], "ROOT_OPERATOR"],
+  ["scripts/aws/reconcile-production-provider-readonly-policy.mjs", "iam:ListEntitiesForPolicy", "provider-readonly-reconciliation-list-policy-entities", [PROVIDER_READONLY_POLICY], "INITIAL_ACTIVATION_RECONCILER"],
+  ["scripts/aws/reconcile-production-provider-readonly-policy.mjs", "iam:ListEntitiesForPolicy", "provider-readonly-reconciliation-list-policy-entities-prepare", [PROVIDER_READONLY_POLICY], "ROOT_OPERATOR"],
+  ["scripts/aws/reconcile-production-provider-readonly-policy.mjs", "s3:GetObject", "provider-readonly-reconciliation-read-journal", [PROVIDER_READONLY_JOURNAL], "INITIAL_ACTIVATION_RECONCILER"],
+  ["scripts/aws/reconcile-production-provider-readonly-policy.mjs", "s3:PutObject", "provider-readonly-reconciliation-write-journal", [PROVIDER_READONLY_JOURNAL], "INITIAL_ACTIVATION_RECONCILER"],
+  ["scripts/aws/reconcile-production-provider-readonly-policy.mjs", "iam:CreatePolicyVersion", "provider-readonly-reconciliation-create-policy-version", [PROVIDER_READONLY_POLICY], "INITIAL_ACTIVATION_RECONCILER"],
 ].flatMap((entry) => entry[0] === "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs" && entry[1] !== "iam:CreatePolicyVersion"
   ? [entry, [entry[0], entry[1], entry[2].replace("-root-", "-prepare-"), entry[3], "ROOT_OPERATOR"]] : [entry])
   .map(([sourceFile, action, capabilityId, resources, identity = "RELEASE_DEPLOYER", sourceFunction]) => Object.freeze({ sourceFile, action, capabilityId, identity, resources: Object.freeze(resources), ...(sourceFunction ? { sourceFunction } : {}) })));
@@ -108,6 +123,7 @@ const stageARootVerifierCapability = (capabilityId) => ["release-root-attestatio
 const STAGE_A_RECOVERY_MODE = "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY";
 const STAGE_A_RECONCILIATION_MODE = "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION";
 const INITIAL_ACTIVATION_POLICY_RECONCILIATION_MODE = "INITIAL_ACTIVATION_POLICY_RECONCILIATION";
+const PROVIDER_READONLY_POLICY_RECONCILIATION_MODE = "PROVIDER_READONLY_POLICY_RECONCILIATION";
 const STAGE_A_CAPABILITY_MODES = Object.freeze({
   "stage-a-artifacts-recovery-root-identify": [STAGE_A_RECOVERY_MODE],
   "stage-a-artifacts-recovery-root-read-versioning": [STAGE_A_RECOVERY_MODE],
@@ -142,6 +158,7 @@ const stageACapabilitiesFor = (mode) => Object.entries(STAGE_A_CAPABILITY_MODES)
 
 const MODE_CAPABILITIES = Object.freeze({
   [INITIAL_ACTIVATION_POLICY_RECONCILIATION_MODE]: CALLS.filter(({ sourceFile }) => sourceFile === "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs").map(({ capabilityId }) => capabilityId),
+  [PROVIDER_READONLY_POLICY_RECONCILIATION_MODE]: CALLS.filter(({ sourceFile }) => sourceFile === "scripts/aws/reconcile-production-provider-readonly-policy.mjs").map(({ capabilityId }) => capabilityId),
   NORMAL: ["manifest-backend-health-recovery-describe-images", "manifest-backend-health-recovery-runtime-repository-policy", "normal-activation-release-describe-candidate", "normal-activation-release-describe-service", "normal-activation-release-list-tasks", "normal-activation-release-describe-tasks", "normal-activation-release-update-service"],
   BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME: ["manifest-backend-health-recovery-describe-images", "manifest-backend-health-recovery-describe-repositories", "manifest-reference-audit-ecs-service-details", "manifest-reference-audit-ecs-task-definitions", "manifest-reference-audit-ecs-tasks", "manifest-reference-audit-ecs-task-details", "manifest-backend-health-recovery-list-service-deployments", "manifest-backend-health-recovery-describe-service-deployments", "manifest-backend-health-recovery-describe-service-revisions", "manifest-artifact-signing-bootstrap-describe-secret", "manifest-artifact-signing-bootstrap-get-secret-value", "manifest-backend-health-recovery-runtime-get-role", "manifest-backend-health-recovery-runtime-list-inline", "manifest-backend-health-recovery-runtime-get-inline", "manifest-backend-health-recovery-runtime-list-attached", "manifest-backend-health-recovery-runtime-get-managed", "manifest-backend-health-recovery-runtime-get-managed-version", "manifest-backend-health-recovery-runtime-describe-secrets", "manifest-backend-health-recovery-runtime-get-secret-values", "manifest-backend-health-recovery-runtime-list-secret-versions", "manifest-backend-health-recovery-runtime-secret-resource-policy", "manifest-backend-health-recovery-runtime-repository-policy", "manifest-refresh-stage-a-provider-log-groups", "manifest-refresh-stage-a-storage-approval-key-describe", "manifest-refresh-stage-a-storage-approval-key-policy", "release-verify-signature", "manifest-backend-health-recovery-register-legacy-task-definition", "manifest-backend-health-recovery-update-service", "release-root-attestation-verify", "release-root-attestation-describe-key", "release-root-attestation-read-key-policy", "release-root-attestation-read-key-tags"],
   [STAGE_A_RECOVERY_MODE]: stageACapabilitiesFor(STAGE_A_RECOVERY_MODE),
@@ -261,6 +278,7 @@ export function buildProductionDependencyClosure() {
       STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY: "the governed P0-to-P2 production-artifacts recovery uses its exact root/release journal, policy, lock, and attestation boundaries",
       STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION: "the independently authorized exact refresh-only plan uses its exact release journal, live-policy read, Stage-A state object, and canonical outer lock boundary",
       INITIAL_ACTIVATION_POLICY_RECONCILIATION: "root performs read-only preparation; the purpose-bound INITIAL_ACTIVATION_RECONCILER GitHub Actions OIDC principal (arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler) publishes only the exact InitialActivationLifecycle managed-policy version after production environment approval",
+      PROVIDER_READONLY_POLICY_RECONCILIATION: "root performs exact target read-only preparation; independently approved execution uses the allowlisted reconciler and conditional S3 journal to publish at most one exact ProviderReadOnly managed-policy version",
       ROTATION_OVERLAP: "the source-owned overlap candidate builder derives the complete runtime dependency graph before its governed registration",
       ROTATION_CLEANUP: "cleanup activates an already authenticated overlap/cleanup candidate and registers nothing",
       ROLLBACK_RECONCILIATION: "rollback viability uses immutable image/resource identity and performs no candidate registration",
@@ -271,7 +289,7 @@ export function buildProductionDependencyClosure() {
 }
 
 export function assertChangedAwsCallClosure(scanned, graph) {
-  const identityBound = (sourceFile) => ["scripts/aws/production-stage-a-production-artifacts-journal.mjs", "scripts/aws/production-root-attestation-signer.mjs", "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "scripts/aws/production-initial-activation-policy-reconciliation.mjs", "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs"].includes(sourceFile);
+  const identityBound = (sourceFile) => ["scripts/aws/production-stage-a-production-artifacts-journal.mjs", "scripts/aws/production-root-attestation-signer.mjs", "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "scripts/aws/production-initial-activation-policy-reconciliation.mjs", "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs", "scripts/aws/reconcile-production-provider-readonly-policy.mjs"].includes(sourceFile);
   const key = ({ sourceFile, action, identity = "RELEASE_DEPLOYER", sourceFunction = "", capabilityId = "" }) => `${sourceFile}\t${action}\t${identityBound(sourceFile) ? identity : ""}\t${capabilityId.endsWith("-read-raw-state") ? sourceFunction : ""}`;
   const callKeys = new Set(CALLS.map(key));
   const normalized = scanned.map(({ sourceFile, action, identity, sourceFunction, capabilityId }) => {
@@ -304,6 +322,7 @@ export function assertChangedAwsCallClosure(scanned, graph) {
       ? ["NORMAL", "ROTATION_OVERLAP", "ROTATION_CLEANUP"]
       : contract.sourceFile.endsWith("production-normal-backend-activation.mjs") ? ["NORMAL"]
       : contract.sourceFile.endsWith("run-production-initial-activation-lifecycle-policy-reconciliation.mjs") || contract.sourceFile.endsWith("production-initial-activation-policy-reconciliation.mjs") ? [INITIAL_ACTIVATION_POLICY_RECONCILIATION_MODE] : ["BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"];
+    if (contract.sourceFile.endsWith("reconcile-production-provider-readonly-policy.mjs")) return { ...contract, reachableMode: [PROVIDER_READONLY_POLICY_RECONCILIATION_MODE], executionPrincipal: contract.identity, sourcePolicyPresent: true, generatedManifestPresent: true, capabilityGraphPresent: true, administratorPreflightPresent: true, runtimePreflightPresent: true, negativeTestPresent: true };
     return { ...contract, reachableMode, executionPrincipal: contract.identity, sourcePolicyPresent: true, generatedManifestPresent: true, capabilityGraphPresent: true, administratorPreflightPresent: true, runtimePreflightPresent: true, negativeTestPresent: true };
   });
 }

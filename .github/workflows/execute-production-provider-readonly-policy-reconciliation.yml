@@ -1,0 +1,93 @@
+name: Execute production ProviderReadOnly policy reconciliation
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha: { description: Protected main source SHA, required: true, type: string }
+      preparation_json_base64: { description: Exact preparation artifact, required: true, type: string }
+      preparation_file_sha256: { description: Exact preparation file SHA256, required: true, type: string }
+      authorization_workflow_run_id: { description: Completed authorization workflow run ID, required: true, type: string }
+      authorization_workflow_run_attempt: { description: Authorization workflow run attempt, required: true, type: string }
+
+permissions:
+  actions: read
+  contents: read
+  id-token: write
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  execute:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Authenticate exact protected source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "T-ej2003/genuine-scan-main"
+          test "$GITHUB_RUN_ATTEMPT" = "1"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)" = "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Reauthenticate source after dependency installation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          test "$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)" = "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+      - name: Decode exact preparation
+        env:
+          PREPARATION_JSON_BASE64: ${{ inputs.preparation_json_base64 }}
+          PREPARATION_FILE_SHA256: ${{ inputs.preparation_file_sha256 }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$RUNNER_TEMP/provider-readonly"
+          printf '%s' "$PREPARATION_JSON_BASE64" | base64 --decode > "$RUNNER_TEMP/provider-readonly/preparation.json"
+          chmod 600 "$RUNNER_TEMP/provider-readonly/preparation.json"
+          test "$(sha256sum "$RUNNER_TEMP/provider-readonly/preparation.json" | awk '{print $1}')" = "$PREPARATION_FILE_SHA256"
+      - name: Configure exact reconciler credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: eu-west-2
+          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler
+      - name: Execute exact authorized reconciliation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          PREPARATION_FILE_SHA256: ${{ inputs.preparation_file_sha256 }}
+          AUTHORIZATION_WORKFLOW_RUN_ID: ${{ inputs.authorization_workflow_run_id }}
+          AUTHORIZATION_WORKFLOW_RUN_ATTEMPT: ${{ inputs.authorization_workflow_run_attempt }}
+        run: |
+          set -euo pipefail
+          node scripts/aws/reconcile-production-provider-readonly-policy.mjs --mode execute \
+            --source-sha "$SOURCE_SHA" \
+            --preparation "$RUNNER_TEMP/provider-readonly/preparation.json" \
+            --preparation-file-sha256 "$PREPARATION_FILE_SHA256" \
+            --authorization-workflow-run-id "$AUTHORIZATION_WORKFLOW_RUN_ID" \
+            --authorization-workflow-run-attempt "$AUTHORIZATION_WORKFLOW_RUN_ATTEMPT" \
+            --result-out "$RUNNER_TEMP/provider-readonly/result.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: production-provider-readonly-policy-reconciliation-result
+          path: ${{ runner.temp }}/provider-readonly/result.json
+          if-no-files-found: error
+          retention-days: 90

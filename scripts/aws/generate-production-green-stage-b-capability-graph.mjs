@@ -17,6 +17,7 @@ import { PRODUCTION_RELEASE_ROLE_ARN, assertProductionReleaseOidcSourceContract 
 import { NORMAL_ACTIVATION } from "./production-normal-backend-activation-policy.mjs";
 import { INITIAL_ACTIVATION_POLICY_RECONCILIATION } from "./production-initial-activation-policy-reconciliation.mjs";
 import { INITIAL_ACTIVATION_RECONCILER } from "./verify-production-initial-activation-policy-reconciler.mjs";
+import { PROVIDER_READONLY_RECONCILIATION } from "./production-provider-readonly-policy-reconciliation.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const CAPABILITY_GRAPH_PATH = "documents/ops/iam/MSCQRProductionGreenStageBDeploymentCapabilities-v1.json";
@@ -56,6 +57,8 @@ const awsCliSourceFiles = [
   "scripts/aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs",
   "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs",
   "scripts/aws/production-initial-activation-policy-reconciliation.mjs",
+  "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+  "scripts/aws/production-provider-readonly-policy-reconciliation.mjs",
 ];
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const readJson = (file) => JSON.parse(fs.readFileSync(path.join(root, file), "utf8"));
@@ -109,6 +112,7 @@ const PHASES = Object.freeze([
   ["stage-a-production-artifacts-policy-recovery", "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs"],
   ["stage-a-production-artifacts-state-reconciliation", "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs"],
   ["initial-activation-lifecycle-policy-reconciliation", "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs"],
+  ["provider-readonly-policy-reconciliation", "scripts/aws/reconcile-production-provider-readonly-policy.mjs"],
 ]);
 
 const NORMAL_ACTIVATION_CAPABILITIES = Object.freeze([
@@ -150,6 +154,17 @@ const INITIAL_ACTIVATION_POLICY_RECONCILIATION_CAPABILITIES = Object.freeze([
   ["initial-activation-policy-reconciliation-root-read-policy-attachment", "iam:ListAttachedRolePolicies", [INITIAL_ACTIVATION_POLICY_RECONCILIATION.releaseRoleArn], false],
   ["initial-activation-policy-reconciliation-root-list-policy-entities", "iam:ListEntitiesForPolicy", [INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn], false],
   ["initial-activation-policy-reconciliation-root-create-policy-version", "iam:CreatePolicyVersion", [INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn], true],
+]);
+
+const PROVIDER_READONLY_RECONCILIATION_CAPABILITIES = Object.freeze([
+  ["provider-readonly-reconciliation-identify", "sts:GetCallerIdentity", ["*"], false],
+  ["provider-readonly-reconciliation-read-policy", "iam:GetPolicy", [PROVIDER_READONLY_RECONCILIATION.policyArn], false],
+  ["provider-readonly-reconciliation-read-policy-version", "iam:GetPolicyVersion", [PROVIDER_READONLY_RECONCILIATION.policyArn], false],
+  ["provider-readonly-reconciliation-list-policy-versions", "iam:ListPolicyVersions", [PROVIDER_READONLY_RECONCILIATION.policyArn], false],
+  ["provider-readonly-reconciliation-list-policy-entities", "iam:ListEntitiesForPolicy", [PROVIDER_READONLY_RECONCILIATION.policyArn], false],
+  ["provider-readonly-reconciliation-read-journal", "s3:GetObject", [`arn:aws:s3:::${PROVIDER_READONLY_RECONCILIATION.journalBucket}/${PROVIDER_READONLY_RECONCILIATION.journalPrefix}*`], false],
+  ["provider-readonly-reconciliation-write-journal", "s3:PutObject", [`arn:aws:s3:::${PROVIDER_READONLY_RECONCILIATION.journalBucket}/${PROVIDER_READONLY_RECONCILIATION.journalPrefix}*`], true],
+  ["provider-readonly-reconciliation-create-policy-version", "iam:CreatePolicyVersion", [PROVIDER_READONLY_RECONCILIATION.policyArn], true],
 ]);
 
 const STAGE_A_PRODUCTION_ARTIFACTS_CAPABILITIES = Object.freeze([
@@ -420,6 +435,15 @@ export function discoverAwsCliActions() {
         const call = { sourceFile, sourceFunction: id, phase: "initial-activation-lifecycle-policy-reconciliation", identity: "INITIAL_ACTIVATION_RECONCILER", action, resources: INITIAL_ACTIVATION_POLICY_RECONCILIATION_CAPABILITIES.find(([candidate]) => candidate === id)[2], capabilityId: id };
         calls.push(call);
         if (sharedRead) calls.push({ ...call, identity: "ROOT_OPERATOR", sourceFunction: id.replace("-root-", "-prepare-"), capabilityId: id.replace("-root-", "-prepare-") });
+      } else if (sourceFile === "scripts/aws/production-provider-readonly-policy-reconciliation.mjs") {
+        throw new Error("ProviderReadOnly reconciliation core must not issue AWS commands outside its target-locked runner.");
+      } else if (sourceFile === "scripts/aws/reconcile-production-provider-readonly-policy.mjs") {
+        const id = ({ "sts:GetCallerIdentity": "provider-readonly-reconciliation-identify", "iam:GetPolicy": "provider-readonly-reconciliation-read-policy", "iam:GetPolicyVersion": "provider-readonly-reconciliation-read-policy-version", "iam:ListPolicyVersions": "provider-readonly-reconciliation-list-policy-versions", "iam:ListEntitiesForPolicy": "provider-readonly-reconciliation-list-policy-entities", "s3:GetObject": "provider-readonly-reconciliation-read-journal", "s3:PutObject": "provider-readonly-reconciliation-write-journal", "iam:CreatePolicyVersion": "provider-readonly-reconciliation-create-policy-version" })[action];
+        if (!id) throw new Error("ProviderReadOnly reconciliation uses an unreviewed AWS action.");
+        const capability = PROVIDER_READONLY_RECONCILIATION_CAPABILITIES.find(([candidate]) => candidate === id);
+        const executorCall = { sourceFile, sourceFunction: id, phase: "provider-readonly-policy-reconciliation", identity: "INITIAL_ACTIVATION_RECONCILER", action, resources: capability[2], capabilityId: id };
+        calls.push(executorCall);
+        if (["sts:GetCallerIdentity", "iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions", "iam:ListEntitiesForPolicy"].includes(action)) calls.push({ ...executorCall, identity: "ROOT_OPERATOR", sourceFunction: `${id}-prepare`, capabilityId: `${id}-prepare` });
       } else {
         calls.push(sourceFile === "scripts/aws/produce-production-root-drop-evidence.mjs" && action === "kms:Sign"
           ? { sourceFile, sourceFunction: "produce-production-root-drop-evidence", phase: "root-drop-evidence-signing", identity: "ROOT_OPERATOR", action, resources: [ROOT_DROP_SIGNING_KEY_ARN], capabilityId: "root-drop-sign-evidence" }
@@ -530,6 +554,11 @@ export function buildStageBDeploymentCapabilityGraph() {
     const id = capability.id.replace("-root-", "-prepare-");
     return { ...capability, id, sourceFunction: id, identity: "ROOT_OPERATOR", executor: "aws-cli", context: { ...capability.context, executionMode: "PREPARATION", principalArn: "arn:aws:iam::368992683803:root" }, classification: "ADMIN_DIRECT_READ", policy: { sourceFile: capability.sourceFile, sid: id, livePolicyArn: null, expectedVersion: "protected-main-source", expectedPolicySha256: null } };
   });
+  const providerReadonlyReconciliation = PROVIDER_READONLY_RECONCILIATION_CAPABILITIES.map(([id, action, resources, mutation]) => ({
+    id, phase: "provider-readonly-policy-reconciliation", identity: "INITIAL_ACTIVATION_RECONCILER", executor: "aws-cli", sourceFile: "scripts/aws/reconcile-production-provider-readonly-policy.mjs", sourceFunction: id, action, resources,
+    context: { account: STAGE_B.account, region: STAGE_B.region, targetPolicyArn: PROVIDER_READONLY_RECONCILIATION.policyArn }, classification: mutation ? "GITHUB_OIDC_IAM_POLICY_RECONCILIATION" : "GITHUB_OIDC_IAM_POLICY_READ", probe: "structural", probeIds: [], policy: assertInitialActivationReconcilerAuthority({ action, resources }), required: true, mutation,
+  }));
+  const providerReadonlyPreparation = providerReadonlyReconciliation.filter(({ action }) => ["sts:GetCallerIdentity", "iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions", "iam:ListEntitiesForPolicy"].includes(action)).map((capability) => ({ ...capability, id: `${capability.id}-prepare`, sourceFunction: `${capability.id}-prepare`, identity: "ROOT_OPERATOR", classification: "ADMIN_DIRECT_READ", policy: { sourceFile: capability.sourceFile, sid: `${capability.id}-prepare`, livePolicyArn: null, expectedVersion: "protected-main-source", expectedPolicySha256: null } }));
   const stageABackendPolicySid = Object.freeze({
     "stage-a-artifacts-reconciliation-terraform-read-bucket-location": "ReadExactStageABackendBucketLocation",
     "stage-a-artifacts-reconciliation-release-read-raw-state": "ReadExactStageAStateForHandoff",
@@ -563,7 +592,7 @@ export function buildStageBDeploymentCapabilityGraph() {
   });
   const runtime = terraformRuntimeActions().map((action) => ({ id: `runtime-${action.replace(/[^A-Za-z0-9]+/g, "-").toLowerCase()}`, phase: "runtime-activation-boundary", identity: "SERVICE_RUNTIME", executor: "lambda-or-ecs-role", sourceFile: terraformPath, sourceFunction: "generated runtime IAM policy", action, resources: ["terraform-derived-runtime-resource"], context: {}, classification: "SERVICE_RUNTIME_ACTION", probe: "structural", policy: { sourceFile: terraformPath, sid: "terraform-generated", livePolicyArn: "created-or-updated-by-stage-b", expectedVersion: "saved-plan", expectedPolicySha256: null }, required: false, mutation: !/^(?:ecr:|kms:Verify|secretsmanager:Get|s3:Get)/.test(action) }));
   const runtimeAdmin = RUNTIME_ADMIN_CAPABILITIES.map(([id, phase, action, resources, mutation]) => ({ id, phase, identity: "ADMINISTRATOR", executor: "aws-cli", sourceFile: phase === "runtime-consumability-convergence" ? "scripts/aws/converge-production-ecs-runtime-policy.mjs" : "scripts/aws/prepare-production-ecs-runtime-consumability.mjs", sourceFunction: id, action, resources, context: { account: STAGE_B.account, region: STAGE_B.region }, classification: mutation ? "ADMIN_IAM_OR_SIGNING_MUTATION" : "ADMIN_RUNTIME_CLOSURE_READ", probe: action === "iam:SimulatePrincipalPolicy" ? "administrator-simulation" : "administrator-live-read", probeIds: [], policy: { sourceFile: phase === "runtime-consumability-convergence" ? "scripts/aws/converge-production-ecs-runtime-policy.mjs" : "scripts/aws/production-ecs-runtime-consumability.mjs", sid: id, livePolicyArn: null, expectedVersion: "protected-main-source", expectedPolicySha256: null }, required: true, mutation }));
-  const capabilities = [...fixed, ...normalActivation, ...initialActivationPolicyReconciliation, ...initialActivationPreparation, ...stageAProductionArtifacts, ROOT_DROP_SIGNING, ...rootAttestationRelease, ...recovery, ...forwardRecovery, ...publisher, ...manifestCapabilities, ...checkerCapabilities, ...operatorCapabilities, ...runtimeAdmin, ...runtime].sort((a, b) => a.id.localeCompare(b.id));
+  const capabilities = [...fixed, ...normalActivation, ...initialActivationPolicyReconciliation, ...initialActivationPreparation, ...providerReadonlyReconciliation, ...providerReadonlyPreparation, ...stageAProductionArtifacts, ROOT_DROP_SIGNING, ...rootAttestationRelease, ...recovery, ...forwardRecovery, ...publisher, ...manifestCapabilities, ...checkerCapabilities, ...operatorCapabilities, ...runtimeAdmin, ...runtime].sort((a, b) => a.id.localeCompare(b.id));
   return {
     schemaVersion: 1, deployment: "production-green-stage-b", account: "368992683803", region: "eu-west-2",
     phases: PHASES.map(([id, sourceFile], index) => ({ order: index + 1, id, sourceFile })),

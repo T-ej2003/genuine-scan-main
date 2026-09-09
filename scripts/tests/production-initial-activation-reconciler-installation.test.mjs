@@ -6,7 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { PRODUCTION_ENVIRONMENT_APPROVAL, createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
 import { createProductionGithubCommandRunner } from "../aws/production-credential-source-contract.mjs";
-import { INSTALLATION, INSTALLATION_BACKEND, assertInstallationAuthorization, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationPreparation, assertInstallationStateResources, classifyInstallationStatePullError, createInstallationAuthorization, createInstallationPreparation, stateIdentity } from "../aws/production-initial-activation-reconciler-installation-contract.mjs";
+import { INSTALLATION, INSTALLATION_BACKEND, assertInstallationAuthorization, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationPreparation, assertInstallationStateResources, classifyInstallationStatePullError, createInstallationAuthorization, createInstallationPreparation, installationPermissionsPredecessor, stateIdentity } from "../aws/production-initial-activation-reconciler-installation-contract.mjs";
 import { executeInstallation, runInstallCli } from "../aws/install-production-initial-activation-reconciler.mjs";
 import { discoverInstallationPredecessor, runPrepareCli } from "../aws/prepare-production-initial-activation-reconciler-installation.mjs";
 import { INITIAL_ACTIVATION_RECONCILER } from "../aws/verify-production-initial-activation-policy-reconciler.mjs";
@@ -42,12 +42,13 @@ const bootstrapApproval = createProductionEnvironmentApprovalEvidence({
 const preparation = createInstallationPreparation({ sourceSha, state: stateIdentity(undefined), livePredecessor: "ABSENT", livePredecessorAddresses: [], planJson: plan, planBytes, preparedAt: now.toISOString() });
 const authorization = createInstallationAuthorization({ preparation, preparationArtifactSha256: preparation.preparationArtifactSha256, protectedEnvironmentApprovalEvidence: approval, sourceSha });
 const completePlan = fixture("complete");
+const updatePlan = fixture("update");
 const completePlanBytes = Buffer.from("exact-saved-noop-plan");
 const completePreparation = createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(installedState)), livePredecessor: "EXACT_COMPLETE", livePredecessorAddresses: allAddresses, planJson: completePlan, planBytes: completePlanBytes, preparedAt: now.toISOString() });
 const completeAuthorization = createInstallationAuthorization({ preparation: completePreparation, preparationArtifactSha256: completePreparation.preparationArtifactSha256, protectedEnvironmentApprovalEvidence: approval, sourceSha });
 const reconcilerTags = Object.entries(INITIAL_ACTIVATION_RECONCILER.tags).map(([Key, Value]) => ({ Key, Value }));
 
-const discoveryRun = ({ role = true, policy = true, attached = [{ PolicyArn: INITIAL_ACTIVATION_RECONCILER.policyArn }], inline = [], entities = [{ PolicyRoles: [{ RoleName: INITIAL_ACTIVATION_RECONCILER.roleName }], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }], policyPages } = {}) => (args) => {
+const discoveryRun = ({ role = true, policy = true, document = JSON.parse(permissions), versions = [{ VersionId: "v1", IsDefaultVersion: true }], attached = [{ PolicyArn: INITIAL_ACTIVATION_RECONCILER.policyArn }], inline = [], entities = [{ PolicyRoles: [{ RoleName: INITIAL_ACTIVATION_RECONCILER.roleName }], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }], policyPages } = {}) => (args) => {
   if (args[0] === "sts") return JSON.stringify({ Arn: "arn:aws:iam::368992683803:root" });
   if (args[1] === "get-open-id-connect-provider") return JSON.stringify({ Url: "token.actions.githubusercontent.com", ClientIDList: ["sts.amazonaws.com"] });
   if (args[1] === "get-role") { if (!role) throw Object.assign(new Error("NoSuchEntity"), { stderr: "NoSuchEntity" }); return JSON.stringify({ Role: { Arn: INITIAL_ACTIVATION_RECONCILER.roleArn, RoleName: INITIAL_ACTIVATION_RECONCILER.roleName, Path: "/", Description: INITIAL_ACTIVATION_RECONCILER.roleDescription, Tags: reconcilerTags, MaxSessionDuration: 3600, AssumeRolePolicyDocument: JSON.parse(trust), ...(typeof role === "object" ? role : {}) } }); }
@@ -56,7 +57,8 @@ const discoveryRun = ({ role = true, policy = true, attached = [{ PolicyArn: INI
     const pages = policyPages || [{ Policies: policy ? [{ Arn: INITIAL_ACTIVATION_RECONCILER.policyArn, PolicyName: INITIAL_ACTIVATION_RECONCILER.policyName }] : [], IsTruncated: false }];
     return JSON.stringify(pages[args.includes("--marker") ? 1 : 0]);
   }
-  if (args[1] === "get-policy-version") return JSON.stringify({ PolicyVersion: { Document: JSON.parse(permissions) } });
+  if (args[1] === "get-policy-version") return JSON.stringify({ PolicyVersion: { Document: document } });
+  if (args[1] === "list-policy-versions") return JSON.stringify({ Versions: versions });
   if (args[1] === "list-attached-role-policies") return JSON.stringify({ AttachedPolicies: attached });
   if (args[1] === "list-role-policies") return JSON.stringify({ PolicyNames: inline });
   if (args[1] === "list-entities-for-policy") return JSON.stringify(entities[args.includes("--marker") ? 1 : 0]);
@@ -366,7 +368,7 @@ test("installation capability is purpose-bound and cannot consume the runtime ta
   assert.equal(capability.terraformVersion, INSTALLATION.terraformVersion);
   assert.equal(capability.concurrencyGroup, "production-deploy");
   assert.deepEqual(capability.resources, INSTALLATION.expectedAddresses);
-  assert.equal(capability.maxAwsMutations["iam:CreatePolicyVersion"], 0);
+  assert.equal(capability.maxAwsMutations["iam:CreatePolicyVersion"], 1);
   assert.match(capability.postcondition, /canonical-read-only-reconciler-verifier/);
 });
 
@@ -437,7 +439,7 @@ test("first-install attachment permits only its exact computed policy reference"
 });
 
 test("saved plans bind the exact provider, resource configuration, and no-provisioner boundary", () => {
-  for (const canonicalPlan of [plan, ...partialPlans, completePlan]) assert.doesNotThrow(() => assertInstallationPlan(canonicalPlan));
+  for (const canonicalPlan of [plan, ...partialPlans, completePlan, updatePlan]) assert.doesNotThrow(() => assertInstallationPlan(canonicalPlan));
   for (const mutate of [
     (candidate) => { candidate.terraform_version = "1.15.7"; },
     (candidate) => { candidate.format_version = "1.1"; },
@@ -502,8 +504,9 @@ test("IAM paths and every security-relevant desired value are exact for create a
   }
 });
 
-test("updates, deletes, replacements, reads, and unexpected no-ops fail closed", () => {
-  for (const actions of [["update"], ["delete"], ["delete", "create"], ["create", "delete"], ["read"]]) {
+test("only the exact reconciler-policy update is accepted; all other updates and destructive actions fail closed", () => {
+  assert.equal(assertInstallationPlan(updatePlan).updateCount, 1);
+  for (const actions of [["delete"], ["delete", "create"], ["create", "delete"], ["read"]]) {
     const changed = structuredClone(completePlan);
     changed.resource_changes[0].change.actions = actions;
     assert.throws(() => assertInstallationPlan(changed), /resource action/);
@@ -544,9 +547,10 @@ test("bootstrap role trust and permissions are exact and non-administrative", ()
   const policy = JSON.parse(fs.readFileSync(INSTALLATION_BOOTSTRAP.permissionsPath, "utf8"));
   const serialized = JSON.stringify(policy);
   assert.doesNotMatch(serialized, /AdministratorAccess|PowerUserAccess|"iam:\*"|"s3:\*"/);
-  assert.doesNotMatch(serialized, /CreatePolicyVersion|UpdateAssumeRolePolicy|PutRolePolicy|CreateUser|CreateAccessKey/);
+  assert.doesNotMatch(serialized, /UpdateAssumeRolePolicy|PutRolePolicy|CreateUser|CreateAccessKey/);
+  assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "UpdateExactReconcilerPolicyVersion"), { Sid: "UpdateExactReconcilerPolicyVersion", Effect: "Allow", Action: "iam:CreatePolicyVersion", Resource: INITIAL_ACTIVATION_RECONCILER.policyArn });
   const mutations = policy.Statement.flatMap((statement) => (Array.isArray(statement.Action) ? statement.Action : [statement.Action])).filter((action) => /^(iam:(Create|Attach|Tag)|s3:(Put|Delete))/.test(action));
-  assert.deepEqual(mutations.sort(), ["iam:AttachRolePolicy", "iam:CreatePolicy", "iam:CreateRole", "iam:TagPolicy", "iam:TagRole", "s3:DeleteObject", "s3:PutObject"].sort());
+  assert.deepEqual(mutations.sort(), ["iam:AttachRolePolicy", "iam:CreatePolicy", "iam:CreatePolicyVersion", "iam:CreateRole", "iam:TagPolicy", "iam:TagRole", "s3:DeleteObject", "s3:PutObject"].sort());
   assert.match(serialized, new RegExp(INITIAL_ACTIVATION_RECONCILER.roleArn));
   assert.match(serialized, new RegExp(INITIAL_ACTIVATION_RECONCILER.policyArn));
   assert.doesNotMatch(serialized, new RegExp(`${INSTALLATION_BOOTSTRAP.roleArn}(?:"|/)`));
@@ -563,8 +567,29 @@ test("bootstrap and installation implementation modules have an exact command de
     ...commands("scripts/aws/prepare-production-initial-activation-reconciler-installation.mjs"),
     ...commands("scripts/aws/verify-production-initial-activation-policy-reconciler.mjs"),
   ])].sort(), [
-    "iam:get-open-id-connect-provider", "iam:get-policy", "iam:get-policy-version", "iam:get-role", "iam:list-attached-role-policies", "iam:list-entities-for-policy", "iam:list-policies", "iam:list-role-policies", "sts:get-caller-identity",
+    "iam:get-open-id-connect-provider", "iam:get-policy", "iam:get-policy-version", "iam:get-role", "iam:list-attached-role-policies", "iam:list-entities-for-policy", "iam:list-policies", "iam:list-policy-versions", "iam:list-role-policies", "sts:get-caller-identity",
   ]);
+});
+
+test("exact predecessor executor policy is the only governed update and five versions fail closed", () => {
+  assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ document: installationPermissionsPredecessor() }) }).classification, "EXACT_UPDATE");
+  assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ document: installationPermissionsPredecessor(), versions: [1, 2, 3, 4, 5].map((id) => ({ VersionId: `v${id}`, IsDefaultVersion: id === 1 })) }) }).classification, "UNEXPECTED");
+  const semantics = assertInstallationPlan(updatePlan);
+  const prepared = createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(installedState)), livePredecessor: "EXACT_UPDATE", livePredecessorAddresses: allAddresses, planJson: updatePlan, planBytes, preparedAt: now.toISOString() });
+  assert.equal(semantics.updateCount, 1);
+  assert.deepEqual(semantics.changedAddresses, ["aws_iam_policy.reconciler"]);
+  assert.doesNotThrow(() => assertInstallationPreparation(prepared, { sourceSha, planBytes }));
+});
+
+test("executor-policy upgrade applies only the authenticated saved update plan", () => {
+  const prepared = createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(installedState)), livePredecessor: "EXACT_UPDATE", livePredecessorAddresses: allAddresses, planJson: updatePlan, planBytes, preparedAt: now.toISOString() });
+  const authorized = createInstallationAuthorization({ preparation: prepared, preparationArtifactSha256: prepared.preparationArtifactSha256, protectedEnvironmentApprovalEvidence: approval, sourceSha });
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-install-exact-update-"));
+  let applies = 0;
+  const result = executeInstallation({ sourceSha, preparation: prepared, authorization: authorized, planBytes, planJson: updatePlan, executionRoleArn: INSTALLATION.executionRoleArn, livePredecessor: "EXACT_UPDATE", livePredecessorAddresses: allAddresses, applySavedPlan: () => { applies += 1; }, verifyInstalled: () => true, readState: () => Buffer.from(installedState), resultPath: path.join(directory, "result.json"), now });
+  assert.equal(applies, 1);
+  assert.equal(result.applyCount, 1);
+  fs.rmSync(directory, { recursive: true, force: true });
 });
 
 test("one-time root bootstrap is exact, resumable, and ambiguity never advances", () => {
@@ -613,6 +638,27 @@ test("one-time root bootstrap is exact, resumable, and ambiguity never advances"
   assert.equal(cliResult.status, "COMPLETE");
   assert.equal(JSON.parse(fs.readFileSync(resultPath, "utf8")).authorizationSha256, authorization.authorizationSha256);
   fs.rmSync(directory, { recursive: true, force: true });
+});
+
+test("root bootstrap upgrades only its exact predecessor inline policy", () => {
+  const authorization = createBootstrapAuthorization({ sourceSha, approval: bootstrapApproval, authorizedAt: now.toISOString() });
+  const trustPolicy = JSON.parse(fs.readFileSync(INSTALLATION_BOOTSTRAP.trustPath, "utf8"));
+  const desiredPolicy = JSON.parse(fs.readFileSync(INSTALLATION_BOOTSTRAP.permissionsPath, "utf8"));
+  let inline = { ...desiredPolicy, Statement: desiredPolicy.Statement.filter(({ Sid }) => Sid !== "UpdateExactReconcilerPolicyVersion") };
+  let puts = 0;
+  const run = (args) => {
+    if (args[0] === "sts") return JSON.stringify({ Arn: INSTALLATION_BOOTSTRAP.administratorArn });
+    if (args[1] === "get-role") return JSON.stringify({ Role: { Arn: INSTALLATION_BOOTSTRAP.roleArn, RoleName: INSTALLATION_BOOTSTRAP.roleName, Path: "/", Description: INSTALLATION_BOOTSTRAP.roleDescription, MaxSessionDuration: 3600, AssumeRolePolicyDocument: trustPolicy, Tags: Object.entries(INSTALLATION_BOOTSTRAP.tags).map(([Key, Value]) => ({ Key, Value })) } });
+    if (args[1] === "list-attached-role-policies") return JSON.stringify({ AttachedPolicies: [] });
+    if (args[1] === "list-role-policies") return JSON.stringify({ PolicyNames: [INSTALLATION_BOOTSTRAP.inlinePolicyName] });
+    if (args[1] === "get-role-policy") return JSON.stringify({ PolicyDocument: inline });
+    if (args[1] === "put-role-policy") { puts += 1; inline = desiredPolicy; return ""; }
+    throw new Error(`unexpected bootstrap update call ${args.join(" ")}`);
+  };
+  assert.equal(discoverBootstrapRole({ run }).classification, "EXACT_PREDECESSOR");
+  assert.deepEqual(installBootstrapRole({ run, authorization, sourceSha, now }), { status: "COMPLETE", createRoleCount: 0, putRolePolicyCount: 1, recovered: false });
+  assert.equal(puts, 1);
+  assert.equal(discoverBootstrapRole({ run }).classification, "EXACT_COMPLETE");
 });
 
 test("root bootstrap accepts only canonical GitHub run, approval, and artifact provenance", () => {

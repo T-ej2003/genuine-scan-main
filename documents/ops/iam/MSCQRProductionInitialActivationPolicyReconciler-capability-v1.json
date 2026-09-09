@@ -18,7 +18,14 @@
     { "action": "iam:ListEntitiesForPolicy", "resource": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle", "mutation": false },
     { "action": "iam:GetRole", "resource": "arn:aws:iam::368992683803:role/mscqr-production-release-deployer", "mutation": false },
     { "action": "iam:ListAttachedRolePolicies", "resource": "arn:aws:iam::368992683803:role/mscqr-production-release-deployer", "mutation": false },
-    { "action": "iam:CreatePolicyVersion", "resource": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle", "mutation": true }
+    { "action": "iam:CreatePolicyVersion", "resource": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle", "mutation": true },
+    { "action": "iam:GetPolicy", "resource": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly", "mutation": false },
+    { "action": "iam:GetPolicyVersion", "resource": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly", "mutation": false },
+    { "action": "iam:ListPolicyVersions", "resource": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly", "mutation": false },
+    { "action": "iam:ListEntitiesForPolicy", "resource": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly", "mutation": false },
+    { "action": "iam:CreatePolicyVersion", "resource": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly", "mutation": true },
+    { "action": "s3:GetObject", "resource": "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-provider-readonly-policy-reconciliation/*", "mutation": false },
+    { "action": "s3:PutObject", "resource": "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-provider-readonly-policy-reconciliation/*", "mutation": true }
   ],
   "installation": {
     "authority": "GitHub production-environment OIDC bootstrap role",
@@ -36,7 +43,8 @@
     "runtimeSelfInstallation": false,
     "executionPerformedInThisSource": true,
     "terraformApplyMaxCount": 1,
-    "targetPolicyCreatePolicyVersionMaxCount": 0
+    "targetPolicyCreatePolicyVersionMaxCount": 0,
+    "executorPolicyCreatePolicyVersionMaxCount": 1
   },
   "bootstrap": {
     "depth": 1,
@@ -50,6 +58,11 @@
       "iam:PutRolePolicy": 1
     },
     "administratorAccess": false,
+    "executorPolicyUpdateAuthority": {
+      "action": "iam:CreatePolicyVersion",
+      "resource": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+      "maxCount": 1
+    },
     "runtimeSelfInstallation": false
   }
 }

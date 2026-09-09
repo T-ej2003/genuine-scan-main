@@ -7,7 +7,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createProductionAwsCommandRunner, createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, ensureStageBPrivateFile, readStageBPrivateFileBytes, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
-import { INSTALLATION, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationStateResources, classifyInstallationStatePullError, createInstallationPreparation, stateIdentity } from "./production-initial-activation-reconciler-installation-contract.mjs";
+import { INSTALLATION, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationStateResources, classifyInstallationStatePullError, createInstallationPreparation, installationPermissionsPredecessor, stateIdentity } from "./production-initial-activation-reconciler-installation-contract.mjs";
 import { INITIAL_ACTIVATION_RECONCILER, assertInitialActivationReconcilerPolicyMetadata, assertInitialActivationReconcilerRoleMetadata, readPolicyEntities, verifyInitialActivationPolicyReconciler } from "./verify-production-initial-activation-policy-reconciler.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -64,10 +64,17 @@ export function discoverInstallationPredecessor({ run, expectedCallerArn } = {})
   let roleExact = !role;
   if (role) try { assertInitialActivationReconcilerRoleMetadata(role); roleExact = true; } catch { roleExact = false; }
   let policyExact = !policy;
+  let policyNeedsUpdate = false;
   if (policy) {
     try {
       const version = runJson(run, ["iam", "get-policy-version", "--policy-arn", INSTALLATION.policyArn, "--version-id", policy.DefaultVersionId]).PolicyVersion;
-      assertInitialActivationReconcilerPolicyMetadata(policy, version?.Document);
+      try { assertInitialActivationReconcilerPolicyMetadata(policy, version?.Document); }
+      catch {
+        assertInitialActivationReconcilerPolicyMetadata(policy, version?.Document, { expectedDocument: installationPermissionsPredecessor() });
+        const versions = runJson(run, ["iam", "list-policy-versions", "--policy-arn", INSTALLATION.policyArn]).Versions;
+        if (!Array.isArray(versions) || versions.length < 1 || versions.length > 4 || versions.filter(({ IsDefaultVersion }) => IsDefaultVersion).length !== 1 || !versions.some(({ VersionId, IsDefaultVersion }) => VersionId === policy.DefaultVersionId && IsDefaultVersion)) throw new Error("Initial-activation reconciler policy version inventory cannot accept the exact update.");
+        policyNeedsUpdate = true;
+      }
       policyExact = true;
     } catch { policyExact = false; }
   }
@@ -83,6 +90,13 @@ export function discoverInstallationPredecessor({ run, expectedCallerArn } = {})
       if (entities.roles.length !== 0 || entities.users.length !== 0 || entities.groups.length !== 0) return predecessor("UNEXPECTED", existingAddresses);
     }
     return predecessor("EXACT_PARTIAL", existingAddresses);
+  }
+  if (policyNeedsUpdate) {
+    const attached = runJson(run, ["iam", "list-attached-role-policies", "--role-name", INSTALLATION.roleArn.split("/").at(-1)]).AttachedPolicies;
+    const inline = runJson(run, ["iam", "list-role-policies", "--role-name", INSTALLATION.roleArn.split("/").at(-1)]).PolicyNames;
+    const entities = readPolicyEntities(run);
+    if (!Array.isArray(attached) || attached.length !== 1 || attached[0]?.PolicyArn !== INSTALLATION.policyArn || !Array.isArray(inline) || inline.length !== 0 || entities.users.length || entities.groups.length || entities.roles.length !== 1 || entities.roles[0]?.RoleName !== INSTALLATION.roleArn.split("/").at(-1)) return predecessor("UNEXPECTED", existingAddresses);
+    return predecessor("EXACT_UPDATE", INSTALLATION.expectedAddresses);
   }
   try {
     verifyInitialActivationPolicyReconciler({ run, ...(expectedCallerArn ? { expectedCallerArn } : {}) });

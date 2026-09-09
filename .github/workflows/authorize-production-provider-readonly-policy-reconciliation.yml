@@ -1,0 +1,92 @@
+name: Authorize production ProviderReadOnly policy reconciliation
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha: { description: Protected main source SHA, required: true, type: string }
+      preparation_json_base64: { description: Exact preparation artifact, required: true, type: string }
+      preparation_file_sha256: { description: Exact preparation file SHA256, required: true, type: string }
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Authenticate exact protected source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "T-ej2003/genuine-scan-main"
+          test "$GITHUB_RUN_ATTEMPT" = "1"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)" = "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Reauthenticate source after dependency installation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          test "$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)" = "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+      - name: Decode exact preparation
+        env:
+          PREPARATION_JSON_BASE64: ${{ inputs.preparation_json_base64 }}
+          PREPARATION_FILE_SHA256: ${{ inputs.preparation_file_sha256 }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$RUNNER_TEMP/provider-readonly"
+          printf '%s' "$PREPARATION_JSON_BASE64" | base64 --decode > "$RUNNER_TEMP/provider-readonly/preparation.json"
+          chmod 600 "$RUNNER_TEMP/provider-readonly/preparation.json"
+          test "$(sha256sum "$RUNNER_TEMP/provider-readonly/preparation.json" | awk '{print $1}')" = "$PREPARATION_FILE_SHA256"
+      - name: Authenticate independent protected-environment approval
+        id: approval
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          node scripts/aws/production-github-environment-approval.mjs \
+            --output "$RUNNER_TEMP/provider-readonly/environment-approval.json" \
+            --repository "$GITHUB_REPOSITORY" --environment production --source-sha "$SOURCE_SHA" \
+            --workflow-ref "$GITHUB_WORKFLOW_REF" --event-name "$GITHUB_EVENT_NAME" \
+            --workflow-run-id "$GITHUB_RUN_ID" --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --execution-actor "$GITHUB_ACTOR" --require-actual-approval
+          echo "sha256=$(sha256sum "$RUNNER_TEMP/provider-readonly/environment-approval.json" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+      - name: Produce exact authorization
+        env:
+          PREPARATION_FILE_SHA256: ${{ inputs.preparation_file_sha256 }}
+          APPROVAL_SHA256: ${{ steps.approval.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          node scripts/aws/authorize-production-provider-readonly-policy-reconciliation.mjs --authorize \
+            --preparation "$RUNNER_TEMP/provider-readonly/preparation.json" --preparation-file-sha256 "$PREPARATION_FILE_SHA256" \
+            --environment-approval "$RUNNER_TEMP/provider-readonly/environment-approval.json" --environment-approval-file-sha256 "$APPROVAL_SHA256" \
+            --output "$RUNNER_TEMP/provider-readonly/authorization.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-provider-readonly-policy-reconciliation-authorization
+          path: ${{ runner.temp }}/provider-readonly/authorization.json
+          if-no-files-found: error
+          retention-days: 30

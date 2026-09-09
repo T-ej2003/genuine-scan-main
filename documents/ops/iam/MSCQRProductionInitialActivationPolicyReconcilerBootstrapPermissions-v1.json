@@ -74,6 +74,12 @@
       "Resource": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler"
     },
     {
+      "Sid": "UpdateExactReconcilerPolicyVersion",
+      "Effect": "Allow",
+      "Action": "iam:CreatePolicyVersion",
+      "Resource": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler"
+    },
+    {
       "Sid": "InventoryReservedPolicyName",
       "Effect": "Allow",
       "Action": "iam:ListPolicies",

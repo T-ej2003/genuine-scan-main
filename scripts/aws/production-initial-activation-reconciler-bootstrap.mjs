@@ -22,6 +22,11 @@ const noSuchEntity = (error) => /\bNoSuchEntity(?:Exception)?\b/.test(`${error?.
 const exactFields = (value, names, label) => {
   if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).sort().join(",") !== [...names].sort().join(",")) throw new Error(`${label} fields are not exact.`);
 };
+const bootstrapPermissions = () => readSourceJson(INSTALLATION_BOOTSTRAP.permissionsPath);
+const bootstrapPermissionsPredecessor = () => {
+  const desired = bootstrapPermissions();
+  return { ...desired, Statement: desired.Statement.filter(({ Sid }) => Sid !== "UpdateExactReconcilerPolicyVersion") };
+};
 
 export const INSTALLATION_BOOTSTRAP = Object.freeze({
   schemaVersion: 1,
@@ -88,8 +93,10 @@ export function discoverBootstrapRole({ run } = {}) {
   if (!Array.isArray(attached) || attached.length !== 0 || !Array.isArray(inline) || inline.some((name) => name !== INSTALLATION_BOOTSTRAP.inlinePolicyName) || inline.length > 1) throw new Error("Bootstrap role policy topology is unexpected.");
   if (inline.length === 0) return Object.freeze({ classification: "EXACT_PARTIAL" });
   const document = runJson(run, ["iam", "get-role-policy", "--role-name", INSTALLATION_BOOTSTRAP.roleName, "--policy-name", INSTALLATION_BOOTSTRAP.inlinePolicyName]).PolicyDocument;
-  if (canonicalJson(normalizeIamPolicyDocument(document, "bootstrap permissions policy")) !== canonicalJson(readSourceJson(INSTALLATION_BOOTSTRAP.permissionsPath))) throw new Error("Bootstrap role permissions are not exact.");
-  return Object.freeze({ classification: "EXACT_COMPLETE" });
+  const normalized = normalizeIamPolicyDocument(document, "bootstrap permissions policy");
+  if (canonicalJson(normalized) === canonicalJson(bootstrapPermissions())) return Object.freeze({ classification: "EXACT_COMPLETE" });
+  if (canonicalJson(normalized) === canonicalJson(bootstrapPermissionsPredecessor())) return Object.freeze({ classification: "EXACT_PREDECESSOR" });
+  throw new Error("Bootstrap role permissions are not exact.");
 }
 
 const parseGithubJson = (githubRun, args, label) => { try { return JSON.parse(githubRun("gh", args)); } catch { throw new Error(`${label} is malformed or unavailable.`); } };
@@ -141,7 +148,7 @@ export function installBootstrapRole({ run, authorization, sourceSha, now = new 
     }
     before = discoverBootstrapRole({ run });
     if (before.classification !== "EXACT_PARTIAL") throw new Error("Bootstrap role create did not converge to the exact partial state.");
-  }
+  } else if (before.classification !== "EXACT_PARTIAL" && before.classification !== "EXACT_PREDECESSOR") throw new Error("Bootstrap role predecessor is not eligible for the exact policy update.");
   try {
     run(["iam", "put-role-policy", "--role-name", INSTALLATION_BOOTSTRAP.roleName, "--policy-name", INSTALLATION_BOOTSTRAP.inlinePolicyName, "--policy-document", `file://${path.join(root, INSTALLATION_BOOTSTRAP.permissionsPath)}`, "--no-cli-pager"]);
     putRolePolicyCount = 1;

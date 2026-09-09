@@ -13,6 +13,17 @@
       "Resource": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"
     },
     {
+      "Sid": "ReadExactProviderReadOnlyPolicy",
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetPolicy",
+        "iam:GetPolicyVersion",
+        "iam:ListPolicyVersions",
+        "iam:ListEntitiesForPolicy"
+      ],
+      "Resource": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+    },
+    {
       "Sid": "ReadExactInitialActivationReleaseRole",
       "Effect": "Allow",
       "Action": [
@@ -32,6 +43,30 @@
       "Effect": "Allow",
       "Action": "iam:CreatePolicyVersion",
       "Resource": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"
+    },
+    {
+      "Sid": "CreateExactProviderReadOnlyPolicyVersion",
+      "Effect": "Allow",
+      "Action": "iam:CreatePolicyVersion",
+      "Resource": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+    },
+    {
+      "Sid": "ReadExactProviderReadOnlyReconciliationJournal",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-provider-readonly-policy-reconciliation/*"
+    },
+    {
+      "Sid": "PersistExactProviderReadOnlyReconciliationJournal",
+      "Effect": "Allow",
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-provider-readonly-policy-reconciliation/*",
+      "Condition": {
+        "StringEquals": {
+          "s3:if-none-match": "*",
+          "s3:x-amz-server-side-encryption": "AES256"
+        }
+      }
     }
   ]
 }

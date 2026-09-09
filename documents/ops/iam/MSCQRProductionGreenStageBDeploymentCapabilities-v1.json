@@ -233,6 +233,11 @@
       "order": 46,
       "id": "initial-activation-lifecycle-policy-reconciliation",
       "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs"
+    },
+    {
+      "order": 47,
+      "id": "provider-readonly-policy-reconciliation",
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs"
     }
   ],
   "identities": [
@@ -1551,7 +1556,7 @@
         "sid": "CreateExactInitialActivationLifecyclePolicyVersion",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "5c81002f1277694603118ed8765e53991831d6c3215dbf00b5fd6c12ea5db825"
+        "expectedPolicySha256": "91f3988ccdd360ab2b1857428ffe6f55ebc31045b7b97cbcd1fdd0db9ebdc4d6"
       },
       "required": true,
       "mutation": true
@@ -1580,7 +1585,7 @@
         "sid": "IdentifyCurrentSession",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "5c81002f1277694603118ed8765e53991831d6c3215dbf00b5fd6c12ea5db825"
+        "expectedPolicySha256": "91f3988ccdd360ab2b1857428ffe6f55ebc31045b7b97cbcd1fdd0db9ebdc4d6"
       },
       "required": true,
       "mutation": false
@@ -1609,7 +1614,7 @@
         "sid": "ReadExactInitialActivationLifecyclePolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "5c81002f1277694603118ed8765e53991831d6c3215dbf00b5fd6c12ea5db825"
+        "expectedPolicySha256": "91f3988ccdd360ab2b1857428ffe6f55ebc31045b7b97cbcd1fdd0db9ebdc4d6"
       },
       "required": true,
       "mutation": false
@@ -1638,7 +1643,7 @@
         "sid": "ReadExactInitialActivationLifecyclePolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "5c81002f1277694603118ed8765e53991831d6c3215dbf00b5fd6c12ea5db825"
+        "expectedPolicySha256": "91f3988ccdd360ab2b1857428ffe6f55ebc31045b7b97cbcd1fdd0db9ebdc4d6"
       },
       "required": true,
       "mutation": false
@@ -1667,7 +1672,7 @@
         "sid": "ReadExactInitialActivationLifecyclePolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "5c81002f1277694603118ed8765e53991831d6c3215dbf00b5fd6c12ea5db825"
+        "expectedPolicySha256": "91f3988ccdd360ab2b1857428ffe6f55ebc31045b7b97cbcd1fdd0db9ebdc4d6"
       },
       "required": true,
       "mutation": false
@@ -1696,7 +1701,7 @@
         "sid": "ReadExactInitialActivationReleaseRole",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "5c81002f1277694603118ed8765e53991831d6c3215dbf00b5fd6c12ea5db825"
+        "expectedPolicySha256": "91f3988ccdd360ab2b1857428ffe6f55ebc31045b7b97cbcd1fdd0db9ebdc4d6"
       },
       "required": true,
       "mutation": false
@@ -1725,7 +1730,7 @@
         "sid": "ReadExactInitialActivationLifecyclePolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "5c81002f1277694603118ed8765e53991831d6c3215dbf00b5fd6c12ea5db825"
+        "expectedPolicySha256": "91f3988ccdd360ab2b1857428ffe6f55ebc31045b7b97cbcd1fdd0db9ebdc4d6"
       },
       "required": true,
       "mutation": false
@@ -1754,7 +1759,7 @@
         "sid": "ReadExactInitialActivationReleaseRole",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "5c81002f1277694603118ed8765e53991831d6c3215dbf00b5fd6c12ea5db825"
+        "expectedPolicySha256": "91f3988ccdd360ab2b1857428ffe6f55ebc31045b7b97cbcd1fdd0db9ebdc4d6"
       },
       "required": true,
       "mutation": false
@@ -9669,6 +9674,383 @@
       "mutation": true
     },
     {
+      "id": "provider-readonly-reconciliation-create-policy-version",
+      "phase": "provider-readonly-policy-reconciliation",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "sourceFunction": "provider-readonly-reconciliation-create-policy-version",
+      "action": "iam:CreatePolicyVersion",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      },
+      "classification": "GITHUB_OIDC_IAM_POLICY_RECONCILIATION",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-initial-activation-policy-reconciler/permissions-policy.json",
+        "sid": "CreateExactProviderReadOnlyPolicyVersion",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+        "expectedVersion": "installed",
+        "expectedPolicySha256": "91f3988ccdd360ab2b1857428ffe6f55ebc31045b7b97cbcd1fdd0db9ebdc4d6"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "provider-readonly-reconciliation-identify",
+      "phase": "provider-readonly-policy-reconciliation",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "sourceFunction": "provider-readonly-reconciliation-identify",
+      "action": "sts:GetCallerIdentity",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      },
+      "classification": "GITHUB_OIDC_IAM_POLICY_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-initial-activation-policy-reconciler/permissions-policy.json",
+        "sid": "IdentifyCurrentSession",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+        "expectedVersion": "installed",
+        "expectedPolicySha256": "91f3988ccdd360ab2b1857428ffe6f55ebc31045b7b97cbcd1fdd0db9ebdc4d6"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "provider-readonly-reconciliation-identify-prepare",
+      "phase": "provider-readonly-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "sourceFunction": "provider-readonly-reconciliation-identify-prepare",
+      "action": "sts:GetCallerIdentity",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+        "sid": "provider-readonly-reconciliation-identify-prepare",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "provider-readonly-reconciliation-list-policy-entities",
+      "phase": "provider-readonly-policy-reconciliation",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "sourceFunction": "provider-readonly-reconciliation-list-policy-entities",
+      "action": "iam:ListEntitiesForPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      },
+      "classification": "GITHUB_OIDC_IAM_POLICY_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-initial-activation-policy-reconciler/permissions-policy.json",
+        "sid": "ReadExactProviderReadOnlyPolicy",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+        "expectedVersion": "installed",
+        "expectedPolicySha256": "91f3988ccdd360ab2b1857428ffe6f55ebc31045b7b97cbcd1fdd0db9ebdc4d6"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "provider-readonly-reconciliation-list-policy-entities-prepare",
+      "phase": "provider-readonly-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "sourceFunction": "provider-readonly-reconciliation-list-policy-entities-prepare",
+      "action": "iam:ListEntitiesForPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+        "sid": "provider-readonly-reconciliation-list-policy-entities-prepare",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "provider-readonly-reconciliation-list-policy-versions",
+      "phase": "provider-readonly-policy-reconciliation",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "sourceFunction": "provider-readonly-reconciliation-list-policy-versions",
+      "action": "iam:ListPolicyVersions",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      },
+      "classification": "GITHUB_OIDC_IAM_POLICY_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-initial-activation-policy-reconciler/permissions-policy.json",
+        "sid": "ReadExactProviderReadOnlyPolicy",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+        "expectedVersion": "installed",
+        "expectedPolicySha256": "91f3988ccdd360ab2b1857428ffe6f55ebc31045b7b97cbcd1fdd0db9ebdc4d6"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "provider-readonly-reconciliation-list-policy-versions-prepare",
+      "phase": "provider-readonly-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "sourceFunction": "provider-readonly-reconciliation-list-policy-versions-prepare",
+      "action": "iam:ListPolicyVersions",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+        "sid": "provider-readonly-reconciliation-list-policy-versions-prepare",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "provider-readonly-reconciliation-read-journal",
+      "phase": "provider-readonly-policy-reconciliation",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "sourceFunction": "provider-readonly-reconciliation-read-journal",
+      "action": "s3:GetObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-provider-readonly-policy-reconciliation/*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      },
+      "classification": "GITHUB_OIDC_IAM_POLICY_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-initial-activation-policy-reconciler/permissions-policy.json",
+        "sid": "ReadExactProviderReadOnlyReconciliationJournal",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+        "expectedVersion": "installed",
+        "expectedPolicySha256": "91f3988ccdd360ab2b1857428ffe6f55ebc31045b7b97cbcd1fdd0db9ebdc4d6"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "provider-readonly-reconciliation-read-policy",
+      "phase": "provider-readonly-policy-reconciliation",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "sourceFunction": "provider-readonly-reconciliation-read-policy",
+      "action": "iam:GetPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      },
+      "classification": "GITHUB_OIDC_IAM_POLICY_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-initial-activation-policy-reconciler/permissions-policy.json",
+        "sid": "ReadExactProviderReadOnlyPolicy",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+        "expectedVersion": "installed",
+        "expectedPolicySha256": "91f3988ccdd360ab2b1857428ffe6f55ebc31045b7b97cbcd1fdd0db9ebdc4d6"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "provider-readonly-reconciliation-read-policy-prepare",
+      "phase": "provider-readonly-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "sourceFunction": "provider-readonly-reconciliation-read-policy-prepare",
+      "action": "iam:GetPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+        "sid": "provider-readonly-reconciliation-read-policy-prepare",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "provider-readonly-reconciliation-read-policy-version",
+      "phase": "provider-readonly-policy-reconciliation",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "sourceFunction": "provider-readonly-reconciliation-read-policy-version",
+      "action": "iam:GetPolicyVersion",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      },
+      "classification": "GITHUB_OIDC_IAM_POLICY_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-initial-activation-policy-reconciler/permissions-policy.json",
+        "sid": "ReadExactProviderReadOnlyPolicy",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+        "expectedVersion": "installed",
+        "expectedPolicySha256": "91f3988ccdd360ab2b1857428ffe6f55ebc31045b7b97cbcd1fdd0db9ebdc4d6"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "provider-readonly-reconciliation-read-policy-version-prepare",
+      "phase": "provider-readonly-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "sourceFunction": "provider-readonly-reconciliation-read-policy-version-prepare",
+      "action": "iam:GetPolicyVersion",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+        "sid": "provider-readonly-reconciliation-read-policy-version-prepare",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "provider-readonly-reconciliation-write-journal",
+      "phase": "provider-readonly-policy-reconciliation",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "sourceFunction": "provider-readonly-reconciliation-write-journal",
+      "action": "s3:PutObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-provider-readonly-policy-reconciliation/*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      },
+      "classification": "GITHUB_OIDC_IAM_POLICY_RECONCILIATION",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-initial-activation-policy-reconciler/permissions-policy.json",
+        "sid": "PersistExactProviderReadOnlyReconciliationJournal",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+        "expectedVersion": "installed",
+        "expectedPolicySha256": "91f3988ccdd360ab2b1857428ffe6f55ebc31045b7b97cbcd1fdd0db9ebdc4d6"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
       "id": "publisher-DenyNonPublishingProductionActions-ecs-",
       "phase": "image-workflow-dispatch",
       "identity": "GITHUB_IMAGE_PUBLISHER",
@@ -13402,6 +13784,149 @@
     {
       "sourceFile": "scripts/aws/publish-production-green-stage-b-approval.mjs",
       "action": "sts:GetCallerIdentity"
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "sourceFunction": "provider-readonly-reconciliation-create-policy-version",
+      "phase": "provider-readonly-policy-reconciliation",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "action": "iam:CreatePolicyVersion",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      ],
+      "capabilityId": "provider-readonly-reconciliation-create-policy-version"
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "sourceFunction": "provider-readonly-reconciliation-read-policy",
+      "phase": "provider-readonly-policy-reconciliation",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "action": "iam:GetPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      ],
+      "capabilityId": "provider-readonly-reconciliation-read-policy"
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "sourceFunction": "provider-readonly-reconciliation-read-policy-prepare",
+      "phase": "provider-readonly-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "iam:GetPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      ],
+      "capabilityId": "provider-readonly-reconciliation-read-policy-prepare"
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "sourceFunction": "provider-readonly-reconciliation-read-policy-version",
+      "phase": "provider-readonly-policy-reconciliation",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "action": "iam:GetPolicyVersion",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      ],
+      "capabilityId": "provider-readonly-reconciliation-read-policy-version"
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "sourceFunction": "provider-readonly-reconciliation-read-policy-version-prepare",
+      "phase": "provider-readonly-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "iam:GetPolicyVersion",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      ],
+      "capabilityId": "provider-readonly-reconciliation-read-policy-version-prepare"
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "sourceFunction": "provider-readonly-reconciliation-list-policy-entities",
+      "phase": "provider-readonly-policy-reconciliation",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "action": "iam:ListEntitiesForPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      ],
+      "capabilityId": "provider-readonly-reconciliation-list-policy-entities"
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "sourceFunction": "provider-readonly-reconciliation-list-policy-entities-prepare",
+      "phase": "provider-readonly-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "iam:ListEntitiesForPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      ],
+      "capabilityId": "provider-readonly-reconciliation-list-policy-entities-prepare"
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "sourceFunction": "provider-readonly-reconciliation-list-policy-versions",
+      "phase": "provider-readonly-policy-reconciliation",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "action": "iam:ListPolicyVersions",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      ],
+      "capabilityId": "provider-readonly-reconciliation-list-policy-versions"
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "sourceFunction": "provider-readonly-reconciliation-list-policy-versions-prepare",
+      "phase": "provider-readonly-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "iam:ListPolicyVersions",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      ],
+      "capabilityId": "provider-readonly-reconciliation-list-policy-versions-prepare"
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "sourceFunction": "provider-readonly-reconciliation-read-journal",
+      "phase": "provider-readonly-policy-reconciliation",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "action": "s3:GetObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-provider-readonly-policy-reconciliation/*"
+      ],
+      "capabilityId": "provider-readonly-reconciliation-read-journal"
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "sourceFunction": "provider-readonly-reconciliation-write-journal",
+      "phase": "provider-readonly-policy-reconciliation",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "action": "s3:PutObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-provider-readonly-policy-reconciliation/*"
+      ],
+      "capabilityId": "provider-readonly-reconciliation-write-journal"
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "sourceFunction": "provider-readonly-reconciliation-identify",
+      "phase": "provider-readonly-policy-reconciliation",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "action": "sts:GetCallerIdentity",
+      "resources": [
+        "*"
+      ],
+      "capabilityId": "provider-readonly-reconciliation-identify"
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "sourceFunction": "provider-readonly-reconciliation-identify-prepare",
+      "phase": "provider-readonly-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "sts:GetCallerIdentity",
+      "resources": [
+        "*"
+      ],
+      "capabilityId": "provider-readonly-reconciliation-identify-prepare"
     },
     {
       "sourceFile": "scripts/aws/recover-production-backend-health.mjs",

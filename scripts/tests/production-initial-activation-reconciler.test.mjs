@@ -55,7 +55,7 @@ test("runtime policy has exact target mutation and readback-only companion actio
   const create = policy.Statement.find(({ Sid }) => Sid === "CreateExactInitialActivationLifecyclePolicyVersion");
   assert.deepEqual(create, { Sid: "CreateExactInitialActivationLifecyclePolicyVersion", Effect: "Allow", Action: "iam:CreatePolicyVersion", Resource: INITIAL_ACTIVATION_RECONCILER.targetPolicyArn });
   for (const action of ["iam:CreatePolicy", "iam:DeletePolicy", "iam:DeletePolicyVersion", "iam:SetDefaultPolicyVersion", "iam:AttachRolePolicy", "iam:DetachRolePolicy", "iam:PutRolePolicy", "iam:DeleteRolePolicy", "iam:UpdateAssumeRolePolicy", "iam:CreateRole", "iam:DeleteRole"]) assert.equal(actions.includes(action), false, action);
-  assert.deepEqual(actions.sort(), ["iam:CreatePolicyVersion", "iam:GetPolicy", "iam:GetPolicyVersion", "iam:GetRole", "iam:ListAttachedRolePolicies", "iam:ListEntitiesForPolicy", "iam:ListPolicyVersions", "sts:GetCallerIdentity"].sort());
+  assert.deepEqual(actions.sort(), ["iam:CreatePolicyVersion", "iam:CreatePolicyVersion", "iam:GetPolicy", "iam:GetPolicy", "iam:GetPolicyVersion", "iam:GetPolicyVersion", "iam:GetRole", "iam:ListAttachedRolePolicies", "iam:ListEntitiesForPolicy", "iam:ListEntitiesForPolicy", "iam:ListPolicyVersions", "iam:ListPolicyVersions", "s3:GetObject", "s3:PutObject", "sts:GetCallerIdentity"].sort());
   assert.equal(policy.Statement.find(({ Sid }) => Sid === "ReadExactInitialActivationReleaseRole").Resource, INITIAL_ACTIVATION_RECONCILER.releaseRoleArn);
 });
 
@@ -68,7 +68,7 @@ test("Terraform root owns only the purpose-bound role, policy, and attachment", 
   assert.equal(backend.productionExecutionEnabled, true);
   assert.equal(backend.rootApplyRequired, false);
   assert.equal(installation.administratorBoundary, "GitHub production-environment OIDC session for mscqr-production-initial-activation-policy-reconciler-bootstrap");
-  assert.deepEqual(installation.maxAwsMutations, { "iam:CreateRole": 1, "iam:CreatePolicy": 1, "iam:AttachRolePolicy": 1, "iam:UpdateAssumeRolePolicy": 0, "iam:PutRolePolicy": 0, "iam:CreatePolicyVersion": 0 });
+  assert.deepEqual(installation.maxAwsMutations, { "iam:CreateRole": 1, "iam:CreatePolicy": 1, "iam:AttachRolePolicy": 1, "iam:UpdateAssumeRolePolicy": 0, "iam:PutRolePolicy": 0, "iam:CreatePolicyVersion": 1 });
   assert.equal(installation.executionPerformedInThisSource, true);
   assert.equal(installation.terraformVersion, "1.15.8");
   assert.equal(installation.concurrencyGroup, "production-deploy");
@@ -135,15 +135,21 @@ test("capability contract defines the role and records the PR #448 runtime migra
   assert.equal(capability.pr448RuntimeMigrated, true);
   assert.equal(capability.roleArn, INITIAL_ACTIVATION_RECONCILER.roleArn);
   assert.equal(capability.oidcSubject, "repo:T-ej2003/genuine-scan-main:environment:production");
-  assert.deepEqual(capability.capabilities.filter(({ mutation }) => mutation), [{ action: "iam:CreatePolicyVersion", resource: INITIAL_ACTIVATION_RECONCILER.targetPolicyArn, mutation: true }]);
+  assert.deepEqual(capability.capabilities.filter(({ mutation }) => mutation), [
+    { action: "iam:CreatePolicyVersion", resource: INITIAL_ACTIVATION_RECONCILER.targetPolicyArn, mutation: true },
+    { action: "iam:CreatePolicyVersion", resource: "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly", mutation: true },
+    { action: "s3:PutObject", resource: "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-provider-readonly-policy-reconciliation/*", mutation: true },
+  ]);
   assert.equal(capability.installation.runtimeSelfInstallation, false);
   assert.equal(capability.installation.executionPerformedInThisSource, true);
   assert.equal(capability.installation.executorRoleArn, "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler-bootstrap");
   assert.equal(capability.installation.concurrencyGroup, "production-deploy");
   assert.equal(capability.installation.terraformApplyMaxCount, 1);
   assert.equal(capability.installation.targetPolicyCreatePolicyVersionMaxCount, 0);
+  assert.equal(capability.installation.executorPolicyCreatePolicyVersionMaxCount, 1);
   assert.deepEqual(capability.bootstrap.maxAwsMutations, { "iam:CreateRole": 1, "iam:PutRolePolicy": 1 });
   assert.equal(capability.bootstrap.depth, 1);
   assert.equal(capability.bootstrap.administratorAccess, false);
+  assert.deepEqual(capability.bootstrap.executorPolicyUpdateAuthority, { action: "iam:CreatePolicyVersion", resource: INITIAL_ACTIVATION_RECONCILER.policyArn, maxCount: 1 });
   for (const sourceFile of [...capability.installation.sourceFiles, capability.bootstrap.sourceFile]) assert.equal(fs.existsSync(sourceFile), true);
 });
