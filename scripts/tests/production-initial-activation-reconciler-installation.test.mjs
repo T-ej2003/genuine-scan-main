@@ -806,6 +806,8 @@ test("installation and bootstrap workflows share the one non-cancelling producti
     ".github/workflows/authorize-production-initial-activation-policy-reconciler-installation.yml",
     ".github/workflows/authorize-production-initial-activation-reconciler-state-reconciliation.yml",
     ".github/workflows/execute-production-initial-activation-reconciler-state-reconciliation.yml",
+    ".github/workflows/authorize-production-initial-activation-reconciler-state-reconciliation-recovery.yml",
+    ".github/workflows/execute-production-initial-activation-reconciler-state-reconciliation-recovery.yml",
     ".github/workflows/release-gate.yml",
   ]) {
     const workflow = fs.readFileSync(file, "utf8");
@@ -827,7 +829,7 @@ test("installation and bootstrap workflows share the one non-cancelling producti
   assert.match(bootstrapWorkflow, /group: production-deploy/);
   assert.match(bootstrapWorkflow, /--require-actual-approval/);
   const workflowFiles = fs.readdirSync(".github/workflows").filter((file) => file.endsWith(".yml") || file.endsWith(".yaml"));
-  const allowedBootstrapEnvironmentUsers = new Set(["authorize-production-initial-activation-policy-reconciler-bootstrap.yml", "authorize-production-initial-activation-policy-reconciler-installation.yml", "authorize-production-initial-activation-reconciler-state-reconciliation.yml", "execute-production-initial-activation-reconciler-state-reconciliation.yml"]);
+  const allowedBootstrapEnvironmentUsers = new Set(["authorize-production-initial-activation-policy-reconciler-bootstrap.yml", "authorize-production-initial-activation-policy-reconciler-installation.yml", "authorize-production-initial-activation-reconciler-state-reconciliation.yml", "execute-production-initial-activation-reconciler-state-reconciliation.yml", "authorize-production-initial-activation-reconciler-state-reconciliation-recovery.yml", "execute-production-initial-activation-reconciler-state-reconciliation-recovery.yml"]);
   const otherBootstrapUsers = workflowFiles.filter((file) => !allowedBootstrapEnvironmentUsers.has(file))
     .filter((file) => fs.readFileSync(path.join(".github/workflows", file), "utf8").includes(`environment: ${INSTALLATION_BOOTSTRAP.environment}`));
   assert.deepEqual(otherBootstrapUsers, []);

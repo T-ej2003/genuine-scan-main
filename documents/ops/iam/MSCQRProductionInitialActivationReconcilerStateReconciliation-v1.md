@@ -108,10 +108,11 @@ test "$authorization_run_attempt" = 1
 
 The preparation is valid for **1800 seconds (30 minutes)** from the
 preparation artifact's `createdAt` timestamp. Authorization and execution both
-verify this deadline. If it expires, source changes, or any bound artifact
-changes, stop and create a fresh preparation with a fresh authorization; never
-replace only one bound artifact or reuse an authorization from an older
-preparation.
+verify this deadline. If it expires before the backend is the exact successor,
+or if source or any bound artifact changes, stop and create a fresh preparation
+with a fresh authorization; never replace only one bound artifact or reuse an
+authorization from an older preparation. The exact-successor-only recovery
+exception is documented below.
 
 ### 5. Execute exactly the authorized saved plan
 
@@ -147,6 +148,80 @@ fresh normal installation plan must report `resource_drift=[]` with only
 
 If preparation fails, investigate read-only and prepare fresh. If source,
 predecessor-state CAS, or additional Terraform drift changes, stop. If an
-execution result is ambiguous, use the canonical replay/recovery path: an
-`EXACT_SUCCESSOR` can complete with zero additional state mutation, while an
-`UNKNOWN` state fails closed. Never blindly repeat refresh-only apply.
+execution result is ambiguous, do not blindly repeat refresh-only apply.
+
+## Expired exact-successor recovery
+
+Normal execution remains valid for **1800 seconds (30 minutes)** only. If the
+original execution may have applied the saved plan but its result was lost and
+the original preparation has expired, recovery is available only when the
+backend is the exact full successor of that original transaction. A
+`PREDECESSOR` requires a fresh normal preparation and authorization; an
+`UNKNOWN` state stops fail-closed. Recovery never reruns `terraform apply`.
+
+Keep the original preparation file and its exact authorization run identity.
+With a current protected-main checkout and a new private work directory, make
+the read-only recovery preparation:
+
+```sh
+original_preparation="<original-preparation.json>"
+original_preparation_sha256="$(sha256_file "$original_preparation")"
+original_authorization_run_id="<original-authorization-run-id>"
+original_authorization_run_attempt="<original-authorization-run-attempt>"
+recovery_preparation="$workdir/recovery-preparation.json"
+
+npm run production:initial-activation-reconciler:state-reconcile -- --mode recovery-prepare \
+  --source-sha "$source_sha" \
+  --admin-profile mscqr-production-root \
+  --terraform-data-dir "$workdir/terraform-data" \
+  --original-preparation "$original_preparation" \
+  --original-preparation-file-sha256 "$original_preparation_sha256" \
+  --original-authorization-workflow-run-id "$original_authorization_run_id" \
+  --original-authorization-workflow-run-attempt "$original_authorization_run_attempt" \
+  --recovery-preparation-out "$recovery_preparation" >/dev/null
+
+recovery_preparation_sha256="$(sha256_file "$recovery_preparation")"
+recovery_preparation_base64="$(base64 < "$recovery_preparation" | tr -d '\n')"
+```
+
+The recovery preparation authenticates the historical source-bound
+transaction, the original approval and saved-plan digest, the current source's
+compatible reconciliation contract, the exact full backend successor, and
+unchanged live IAM. It is itself valid for 1800 seconds. Request a new,
+separate protected-environment authorization; it authorizes readback only.
+
+```sh
+gh workflow run authorize-production-initial-activation-reconciler-state-reconciliation-recovery.yml \
+  --ref main \
+  -f source_sha="$source_sha" \
+  -f recovery_preparation_base64="$recovery_preparation_base64" \
+  -f recovery_preparation_sha256="$recovery_preparation_sha256"
+
+recovery_authorization_run_id="<fresh-recovery-authorization-run-id>"
+gh run watch "$recovery_authorization_run_id" --exit-status
+recovery_authorization_run_attempt="$(gh run view "$recovery_authorization_run_id" --json attempt,conclusion --jq '.attempt')"
+test "$(gh run view "$recovery_authorization_run_id" --json conclusion --jq '.conclusion')" = success
+```
+
+After human approval, complete the recovery with its dedicated workflow. It
+cannot accept a saved plan and performs zero refresh-only applies, Terraform
+state mutations, IAM mutations, or state-object replacement. It rechecks the
+exact successor and live IAM, then requires the same read-only normal plan:
+`resource_drift=[]` and only `aws_iam_policy.reconciler:update` pending.
+The workflow invokes the canonical `--mode recovery-execute` entrypoint; do
+not run that entrypoint outside the protected workflow.
+
+```sh
+gh workflow run execute-production-initial-activation-reconciler-state-reconciliation-recovery.yml \
+  --ref main \
+  -f source_sha="$source_sha" \
+  -f recovery_preparation_base64="$recovery_preparation_base64" \
+  -f recovery_preparation_sha256="$recovery_preparation_sha256" \
+  -f recovery_authorization_workflow_run_id="$recovery_authorization_run_id" \
+  -f recovery_authorization_workflow_run_attempt="$recovery_authorization_run_attempt"
+```
+
+Recovery is not a bypass for the original approval: it requires the original
+authenticated preparation and authorization plus a fresh recovery approval.
+Stop after the recovery result; the later reconciler policy update remains a
+separate governed operation.

@@ -32,6 +32,10 @@ export const RECONCILER_STATE_RECONCILIATION = Object.freeze({
   executionWorkflowPath: ".github/workflows/execute-production-initial-activation-reconciler-state-reconciliation.yml",
   authorizationArtifactName: "production-initial-activation-reconciler-state-reconciliation-authorization",
   authorizationFilename: "authorization.json",
+  recoveryAuthorizationWorkflowPath: ".github/workflows/authorize-production-initial-activation-reconciler-state-reconciliation-recovery.yml",
+  recoveryExecutionWorkflowPath: ".github/workflows/execute-production-initial-activation-reconciler-state-reconciliation-recovery.yml",
+  recoveryAuthorizationArtifactName: "production-initial-activation-reconciler-state-reconciliation-recovery-authorization",
+  recoveryAuthorizationFilename: "recovery-authorization.json",
   maxAgeMs: 30 * 60 * 1000,
   drift: Object.freeze([
     Object.freeze({ address: "aws_iam_policy.reconciler", field: "attachment_count", before: 0, after: 1 }),
@@ -67,8 +71,23 @@ const exactDrift = (entry, expected) => {
   const before = entry.change.before; const after = entry.change.after;
   if (!before || !after || before[expected.field] === undefined || after[expected.field] === undefined || canonicalJson(before[expected.field]) !== canonicalJson(expected.before) || canonicalJson(after[expected.field]) !== canonicalJson(expected.after)) throw new Error("Refresh-only plan drift value is not exact.");
   const restBefore = { ...before }; const restAfter = { ...after }; delete restBefore[expected.field]; delete restAfter[expected.field];
-  if (canonicalJson(restBefore) !== canonicalJson(restAfter) || Object.keys(entry.change.before_unknown || {}).length || Object.keys(entry.change.after_unknown || {}).length || Object.keys(entry.change.before_sensitive || {}).length || Object.keys(entry.change.after_sensitive || {}).length || entry.change.replace_paths?.length) throw new Error("Refresh-only plan drift changes fields outside the exact allowance.");
+  if (canonicalJson(restBefore) !== canonicalJson(restAfter) || Object.keys(entry.change.before_unknown || {}).length || Object.keys(entry.change.after_unknown || {}).length || entry.change.replace_paths?.length) throw new Error("Refresh-only plan drift changes fields outside the exact allowance.");
+  assertExactSensitivityStructure(entry.change.before_sensitive === undefined ? {} : entry.change.before_sensitive, entry.change.after_sensitive === undefined ? {} : entry.change.after_sensitive);
 };
+
+const assertSensitivityTree = (value) => {
+  if (value === false) return;
+  if (value === true) throw new Error("Refresh-only plan contains a sensitive value.");
+  if (Array.isArray(value)) return value.forEach(assertSensitivityTree);
+  if (value && typeof value === "object") return Object.values(value).forEach(assertSensitivityTree);
+  throw new Error("Refresh-only plan sensitivity metadata is malformed.");
+};
+
+export function assertExactSensitivityStructure(before, after) {
+  if (canonicalJson(before) !== canonicalJson(after)) throw new Error("Refresh-only plan sensitivity metadata changed.");
+  assertSensitivityTree(before);
+  return before;
+}
 
 export function assertExactReconcilerRefreshOnlyPlan(plan) {
   if (!plan || plan.format_version !== "1.2" || plan.terraform_version !== INSTALLATION.terraformVersion || plan.errored !== false || plan.complete !== true || plan.applyable !== true || !Array.isArray(plan.resource_drift)) throw new Error("Refresh-only plan envelope is invalid.");
@@ -88,11 +107,22 @@ export function assertCanonicalAttachmentTopology(value) {
 }
 
 export function assertStateObject(value, state) {
-  exact(value, ["versionId", "etag"], "Terraform backend object identity");
-  if (typeof value.versionId !== "string" || !value.versionId || typeof value.etag !== "string" || !value.etag) throw new Error("Terraform backend VersionId or ETag is missing.");
+  assertStateObjectIdentity(value);
   const checked = normalizedState(state);
   return Object.freeze({ ...checked.identity, versionId: value.versionId, etag: value.etag });
 }
+
+const assertStateObjectIdentity = (value) => {
+  exact(value, ["versionId", "etag"], "Terraform backend object identity");
+  if (typeof value.versionId !== "string" || !value.versionId || typeof value.etag !== "string" || !value.etag) throw new Error("Terraform backend VersionId or ETag is missing.");
+  return value;
+};
+const assertBoundStateIdentity = (value, label) => {
+  exact(value, ["stateExists", "lineage", "serial", "stateSha256", "versionId", "etag"], label);
+  if (value.stateExists !== true || typeof value.lineage !== "string" || !value.lineage || !Number.isSafeInteger(value.serial) || value.serial < 0 || !SHA256.test(value.stateSha256 || "")) throw new Error(`${label} is invalid.`);
+  if (typeof value.versionId !== "string" || !value.versionId || typeof value.etag !== "string" || !value.etag) throw new Error(`${label} object identity is invalid.`);
+  return value;
+};
 
 const preparationFields = ["schemaVersion", "kind", "operation", "sourceSha", "account", "terraformRoot", "backend", "policyArn", "bootstrapRoleArn", "predecessorState", "successorStateSha256", "attachmentTopology", "attachmentTopologySha256", "drift", "driftSha256", "savedPlanSha256", "savedPlanByteLength", "planSemantics", "createdAt", "expiresAt", "preparationSha256"];
 export function createReconcilerStateReconciliationPreparation({ sourceSha, stateBytes, stateObject, attachmentTopology, planBytes, planJson, preparedAt = new Date().toISOString() } = {}) {
@@ -132,6 +162,51 @@ export function assertReconcilerStateReconciliationAuthorization(value, preparat
   assertProductionEnvironmentApprovalIdentity(value.protectedEnvironmentApprovalEvidence, { sourceSha, repository: PRODUCTION_ENVIRONMENT_APPROVAL.repository });
   if (!allowExpired) assertProductionEnvironmentApprovalFreshness(value.protectedEnvironmentApprovalEvidence, { now });
   if (value.protectedEnvironmentApprovalEvidence.workflowRef !== workflowRef(RECONCILER_STATE_RECONCILIATION.authorizationWorkflowPath) || value.protectedEnvironmentApprovalEvidenceSha256 !== value.protectedEnvironmentApprovalEvidence.evidenceSha256 || value.approvedBy !== value.protectedEnvironmentApprovalEvidence.actualApproval?.userLogin) throw new Error("State reconciliation approval provenance is invalid.");
+  return value;
+}
+
+const recoveryPreparationFields = ["schemaVersion", "kind", "operation", "sourceSha", "originalSourceSha", "originalPreparationSha256", "originalAuthorizationSha256", "originalAuthorizationWorkflowRunId", "originalAuthorizationWorkflowRunAttempt", "predecessorState", "successorStateSha256", "successorStateObject", "savedPlanSha256", "driftSha256", "attachmentTopology", "createdAt", "expiresAt", "recoveryPreparationSha256"];
+const recoveryAuthorizationFields = ["schemaVersion", "kind", "operation", "sourceSha", "recoveryPreparationSha256", "originalPreparationSha256", "originalAuthorizationSha256", "successorStateSha256", "successorStateObject", "maxAwsMutations", "approvedBy", "protectedEnvironmentApprovalEvidence", "protectedEnvironmentApprovalEvidenceSha256", "recoveryAuthorizationSha256"];
+const recoveryCompatibility = (preparation) => preparation?.operation === RECONCILER_STATE_RECONCILIATION.operation && preparation?.account === RECONCILER_STATE_RECONCILIATION.account && preparation?.terraformRoot === RECONCILER_STATE_RECONCILIATION.terraformRoot && canonicalJson(preparation?.backend) === canonicalJson(RECONCILER_STATE_RECONCILIATION.backend) && preparation?.policyArn === RECONCILER_STATE_RECONCILIATION.policyArn && preparation?.bootstrapRoleArn === RECONCILER_STATE_RECONCILIATION.bootstrapRoleArn && canonicalJson(preparation?.drift) === canonicalJson(RECONCILER_STATE_RECONCILIATION.drift);
+
+export function createReconcilerStateReconciliationRecoveryPreparation({ sourceSha, originalPreparation, originalAuthorization, originalAuthorizationWorkflowRunId, originalAuthorizationWorkflowRunAttempt, stateBytes, stateObject, attachmentTopology, preparedAt = new Date().toISOString() } = {}) {
+  if (!SHA40.test(sourceSha || "") || !/^[1-9][0-9]*$/.test(String(originalAuthorizationWorkflowRunId || "")) || !/^[1-9][0-9]*$/.test(String(originalAuthorizationWorkflowRunAttempt || ""))) throw new Error("State reconciliation recovery coordinates are invalid.");
+  const original = assertReconcilerStateReconciliationPreparation(originalPreparation, { sourceSha: originalPreparation?.sourceSha, allowExpired: true });
+  if (!recoveryCompatibility(original)) throw new Error("State reconciliation recovery source contract is incompatible.");
+  const authorization = assertReconcilerStateReconciliationAuthorization(originalAuthorization, original, { sourceSha: original.sourceSha, allowExpired: true });
+  if (authorization.authorizationSha256 !== originalAuthorization.authorizationSha256 || authorization.preparationSha256 !== original.preparationSha256 || authorization.savedPlanSha256 !== original.savedPlanSha256 || authorization.protectedEnvironmentApprovalEvidence.workflowRunId !== String(originalAuthorizationWorkflowRunId) || authorization.protectedEnvironmentApprovalEvidence.workflowRunAttempt !== String(originalAuthorizationWorkflowRunAttempt)) throw new Error("State reconciliation original authorization is invalid.");
+  const successor = assertAuthorizedExactStateSuccessor({ stateBytes, stateObject, preparation: original });
+  const topology = assertCanonicalAttachmentTopology(attachmentTopology);
+  const created = iso(preparedAt, "State reconciliation recovery preparation timestamp");
+  const body = { schemaVersion: 1, kind: "PRODUCTION_INITIAL_ACTIVATION_RECONCILER_STATE_RECONCILIATION_RECOVERY_PREPARATION", operation: RECONCILER_STATE_RECONCILIATION.operation, sourceSha, originalSourceSha: original.sourceSha, originalPreparationSha256: original.preparationSha256, originalAuthorizationSha256: authorization.authorizationSha256, originalAuthorizationWorkflowRunId: String(originalAuthorizationWorkflowRunId), originalAuthorizationWorkflowRunAttempt: String(originalAuthorizationWorkflowRunAttempt), predecessorState: original.predecessorState, successorStateSha256: successor.successorStateSha256, successorStateObject: assertStateObject(stateObject, stateBytes), savedPlanSha256: original.savedPlanSha256, driftSha256: original.driftSha256, attachmentTopology: topology, createdAt: created.toISOString(), expiresAt: new Date(created.getTime() + RECONCILER_STATE_RECONCILIATION.maxAgeMs).toISOString() };
+  return Object.freeze({ ...body, recoveryPreparationSha256: sha256(body) });
+}
+
+export function assertReconcilerStateReconciliationRecoveryPreparation(value, { sourceSha, now = new Date() } = {}) {
+  exact(value, recoveryPreparationFields, "State reconciliation recovery preparation"); const { recoveryPreparationSha256, ...body } = value;
+  if (value.schemaVersion !== 1 || value.kind !== "PRODUCTION_INITIAL_ACTIVATION_RECONCILER_STATE_RECONCILIATION_RECOVERY_PREPARATION" || value.operation !== RECONCILER_STATE_RECONCILIATION.operation || value.sourceSha !== sourceSha || !SHA40.test(value.sourceSha || "") || !SHA40.test(value.originalSourceSha || "") || !SHA256.test(value.originalPreparationSha256 || "") || !SHA256.test(value.originalAuthorizationSha256 || "") || !/^[1-9][0-9]*$/.test(value.originalAuthorizationWorkflowRunId || "") || !/^[1-9][0-9]*$/.test(value.originalAuthorizationWorkflowRunAttempt || "") || !SHA256.test(value.successorStateSha256 || "") || !SHA256.test(value.savedPlanSha256 || "") || !SHA256.test(value.driftSha256 || "") || canonicalJson(assertCanonicalAttachmentTopology(value.attachmentTopology)) !== canonicalJson(value.attachmentTopology) || value.recoveryPreparationSha256 !== sha256(body)) throw new Error("State reconciliation recovery preparation binding is invalid.");
+  assertBoundStateIdentity(value.predecessorState, "State reconciliation recovery predecessor state");
+  assertBoundStateIdentity(value.successorStateObject, "State reconciliation recovery successor state");
+  if (value.successorStateObject.lineage !== value.predecessorState.lineage || value.successorStateObject.serial !== value.predecessorState.serial + 1 || value.successorStateObject.versionId === value.predecessorState.versionId || value.successorStateObject.etag === value.predecessorState.etag) throw new Error("State reconciliation recovery successor identity is invalid.");
+  const created = iso(value.createdAt, "State reconciliation recovery preparation creation timestamp"); const expires = iso(value.expiresAt, "State reconciliation recovery preparation expiry timestamp");
+  if (expires.getTime() - created.getTime() !== RECONCILER_STATE_RECONCILIATION.maxAgeMs || now < created || now > expires) throw new Error("State reconciliation recovery preparation is stale.");
+  return value;
+}
+
+export function createReconcilerStateReconciliationRecoveryAuthorization({ recoveryPreparation, approval, now = new Date() } = {}) {
+  const prepared = assertReconcilerStateReconciliationRecoveryPreparation(recoveryPreparation, { sourceSha: recoveryPreparation?.sourceSha, now });
+  assertProductionEnvironmentApprovalIdentity(approval, { sourceSha: prepared.sourceSha, repository: RECONCILER_STATE_RECONCILIATION.repository }); assertProductionEnvironmentApprovalFreshness(approval, { now });
+  if (approval.workflowRef !== workflowRef(RECONCILER_STATE_RECONCILIATION.recoveryAuthorizationWorkflowPath)) throw new Error("State reconciliation recovery requires its dedicated workflow.");
+  const approvedBy = assertProductionEnvironmentActualReviewer(approval, { sourceSha: prepared.sourceSha, repository: RECONCILER_STATE_RECONCILIATION.repository, executionActor: approval.executionActor });
+  const body = { schemaVersion: 1, kind: "PRODUCTION_INITIAL_ACTIVATION_RECONCILER_STATE_RECONCILIATION_RECOVERY_AUTHORIZATION", operation: prepared.operation, sourceSha: prepared.sourceSha, recoveryPreparationSha256: prepared.recoveryPreparationSha256, originalPreparationSha256: prepared.originalPreparationSha256, originalAuthorizationSha256: prepared.originalAuthorizationSha256, successorStateSha256: prepared.successorStateSha256, successorStateObject: prepared.successorStateObject, maxAwsMutations: {}, approvedBy, protectedEnvironmentApprovalEvidence: approval, protectedEnvironmentApprovalEvidenceSha256: approval.evidenceSha256 };
+  return Object.freeze({ ...body, recoveryAuthorizationSha256: sha256(body) });
+}
+
+export function assertReconcilerStateReconciliationRecoveryAuthorization(value, recoveryPreparation, { sourceSha, now = new Date() } = {}) {
+  exact(value, recoveryAuthorizationFields, "State reconciliation recovery authorization"); const prepared = assertReconcilerStateReconciliationRecoveryPreparation(recoveryPreparation, { sourceSha, now }); const { recoveryAuthorizationSha256, ...body } = value;
+  if (value.schemaVersion !== 1 || value.kind !== "PRODUCTION_INITIAL_ACTIVATION_RECONCILER_STATE_RECONCILIATION_RECOVERY_AUTHORIZATION" || value.operation !== prepared.operation || value.sourceSha !== prepared.sourceSha || value.recoveryPreparationSha256 !== prepared.recoveryPreparationSha256 || value.originalPreparationSha256 !== prepared.originalPreparationSha256 || value.originalAuthorizationSha256 !== prepared.originalAuthorizationSha256 || value.successorStateSha256 !== prepared.successorStateSha256 || canonicalJson(value.successorStateObject) !== canonicalJson(prepared.successorStateObject) || canonicalJson(value.maxAwsMutations) !== canonicalJson({}) || value.protectedEnvironmentApprovalEvidenceSha256 !== value.protectedEnvironmentApprovalEvidence?.evidenceSha256 || value.recoveryAuthorizationSha256 !== sha256(body)) throw new Error("State reconciliation recovery authorization binding is invalid.");
+  assertProductionEnvironmentApprovalIdentity(value.protectedEnvironmentApprovalEvidence, { sourceSha, repository: RECONCILER_STATE_RECONCILIATION.repository }); assertProductionEnvironmentApprovalFreshness(value.protectedEnvironmentApprovalEvidence, { now });
+  if (value.protectedEnvironmentApprovalEvidence.workflowRef !== workflowRef(RECONCILER_STATE_RECONCILIATION.recoveryAuthorizationWorkflowPath) || value.approvedBy !== value.protectedEnvironmentApprovalEvidence.actualApproval?.userLogin) throw new Error("State reconciliation recovery approval provenance is invalid.");
   return value;
 }
 
@@ -198,4 +273,13 @@ export function executeReconcilerStateReconciliation({ sourceSha, preparation, a
   verifyPostconditions();
   const normal = assertExactPostRefreshNormalPlan(renderNormalPlan());
   return Object.freeze({ status: "COMPLETE", refreshOnlyApplyCount: 1, terraformStateMutationCount: 1, remoteIamMutationCount: 0, postState: { ...successor, versionId: object.versionId, etag: object.etag }, normalPlan: normal });
+}
+
+export function executeReconcilerStateReconciliationRecovery({ sourceSha, recoveryPreparation, recoveryAuthorization, stateBytes, stateObject, attachmentTopology, renderNormalPlan, reauthenticateSource, verifyPostconditions, now = new Date() } = {}) {
+  if (![renderNormalPlan, reauthenticateSource, verifyPostconditions].every((value) => typeof value === "function")) throw new Error("State reconciliation recovery adapters are required.");
+  const prepared = assertReconcilerStateReconciliationRecoveryPreparation(recoveryPreparation, { sourceSha, now }); assertReconcilerStateReconciliationRecoveryAuthorization(recoveryAuthorization, prepared, { sourceSha, now });
+  if (canonicalJson(assertStateObject(stateObject, stateBytes)) !== canonicalJson(prepared.successorStateObject) || canonicalJson(assertCanonicalAttachmentTopology(attachmentTopology)) !== canonicalJson(prepared.attachmentTopology)) throw new Error("State reconciliation recovery live state changed.");
+  const successor = assertReplaySuccessor({ stateBytes, stateObject, preparation: { predecessorState: prepared.predecessorState, successorStateSha256: prepared.successorStateSha256 } });
+  reauthenticateSource(); verifyPostconditions(); const normal = assertExactPostRefreshNormalPlan(renderNormalPlan());
+  return Object.freeze({ status: "RECOVERED_COMPLETE", refreshOnlyApplyCount: 0, terraformStateMutationCount: 0, remoteIamMutationCount: 0, postState: { ...successor, versionId: stateObject.versionId, etag: stateObject.etag }, normalPlan: normal });
 }

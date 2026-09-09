@@ -6,8 +6,9 @@ import path from "node:path";
 import test from "node:test";
 import { createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
 import { ensureStageBPrivateFile, readStageBPrivateFileBytes } from "../aws/stage-b-artifact-contract.mjs";
-import { assertExactReconcilerRefreshOnlyPlan, assertExactStateSuccessor, assertReconcilerStateReconciliationAuthorization, createReconcilerStateReconciliationAuthorization, createReconcilerStateReconciliationPreparation, executeReconcilerStateReconciliation, RECONCILER_STATE_RECONCILIATION as CONTRACT } from "../aws/production-initial-activation-reconciler-state-reconciliation.mjs";
+import { assertExactReconcilerRefreshOnlyPlan, assertExactStateSuccessor, assertReconcilerStateReconciliationAuthorization, createReconcilerStateReconciliationAuthorization, createReconcilerStateReconciliationPreparation, createReconcilerStateReconciliationRecoveryAuthorization, createReconcilerStateReconciliationRecoveryPreparation, executeReconcilerStateReconciliation, executeReconcilerStateReconciliationRecovery, RECONCILER_STATE_RECONCILIATION as CONTRACT } from "../aws/production-initial-activation-reconciler-state-reconciliation.mjs";
 import { assertInstallationPlan } from "../aws/production-initial-activation-reconciler-installation-contract.mjs";
+import { canonicalJson } from "../aws/production-green-stage-b-contract.mjs";
 
 const sourceSha = "a".repeat(40); const now = new Date("2026-09-09T12:00:00.000Z");
 const hash = (value) => crypto.createHash("sha256").update(value).digest("hex");
@@ -23,7 +24,7 @@ const refreshPlan = () => ({ format_version: "1.2", terraform_version: "1.15.8",
 ] });
 const topology = { roles: ["mscqr-production-initial-activation-policy-reconciler"], users: [], groups: [] };
 const object = { versionId: "exact-version", etag: "exact-etag" };
-const approval = () => createProductionEnvironmentApprovalEvidence({ environmentConfig: { id: 8, name: "production-initial-activation-reconciler-bootstrap", can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{ type: "User", reviewer: { id: 3, login: "reviewer" } }] }] }, repository: "T-ej2003/genuine-scan-main", environment: "production-initial-activation-reconciler-bootstrap", sourceSha, workflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-initial-activation-reconciler-state-reconciliation.yml@refs/heads/main", eventName: "workflow_dispatch", workflowRunId: "100", workflowRunAttempt: "1", executionActor: "operator", observedAt: now.toISOString(), actualApproval: { state: "approved", environmentId: 8, environmentName: "production-initial-activation-reconciler-bootstrap", userId: 3, userLogin: "reviewer" } });
+const approval = ({ observedAt = now, workflowPath = CONTRACT.authorizationWorkflowPath, runId = "100" } = {}) => createProductionEnvironmentApprovalEvidence({ environmentConfig: { id: 8, name: "production-initial-activation-reconciler-bootstrap", can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{ type: "User", reviewer: { id: 3, login: "reviewer" } }] }] }, repository: "T-ej2003/genuine-scan-main", environment: "production-initial-activation-reconciler-bootstrap", sourceSha, workflowRef: `T-ej2003/genuine-scan-main/${workflowPath}@refs/heads/main`, eventName: "workflow_dispatch", workflowRunId: runId, workflowRunAttempt: "1", executionActor: "operator", observedAt: observedAt.toISOString(), actualApproval: { state: "approved", environmentId: 8, environmentName: "production-initial-activation-reconciler-bootstrap", userId: 3, userLogin: "reviewer" } });
 const prepared = () => createReconcilerStateReconciliationPreparation({ sourceSha, stateBytes: before, stateObject: object, attachmentTopology: topology, planBytes: Buffer.from("saved-refresh-plan"), planJson: refreshPlan(), preparedAt: now.toISOString() });
 const normalPlan = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-initial-activation-reconciler-plan-update.json", "utf8"));
 
@@ -63,6 +64,19 @@ test("accepts only the authenticated two-field refresh-only drift", () => {
   assert.throws(() => assertExactReconcilerRefreshOnlyPlan(wrongBefore), /value/);
   const actionable = refreshPlan(); actionable.resource_changes = [{ change: { actions: ["create"] } }];
   assert.throws(() => assertExactReconcilerRefreshOnlyPlan(actionable), /actionable/);
+});
+
+test("refresh-only sensitivity metadata permits exact false-only Terraform structures", () => {
+  for (const sensitivity of [false, {}, { tags: {}, tags_all: {} }, { nested: { values: [false, { leaf: false }] } }]) {
+    const plan = refreshPlan(); for (const entry of plan.resource_drift) entry.change.before_sensitive = entry.change.after_sensitive = sensitivity;
+    assert.doesNotThrow(() => assertExactReconcilerRefreshOnlyPlan(plan));
+  }
+  for (const sensitivity of [{ secret: true }, { nested: { secret: true } }, { values: [false, true] }]) {
+    const plan = refreshPlan(); for (const entry of plan.resource_drift) entry.change.before_sensitive = entry.change.after_sensitive = sensitivity;
+    assert.throws(() => assertExactReconcilerRefreshOnlyPlan(plan), /sensitive/);
+  }
+  const mismatch = refreshPlan(); mismatch.resource_drift[0].change.before_sensitive = { tags: {} }; mismatch.resource_drift[0].change.after_sensitive = { tags_all: {} };
+  assert.throws(() => assertExactReconcilerRefreshOnlyPlan(mismatch), /sensitivity metadata changed/);
 });
 
 test("preparation and authorization bind source, state identity, plan, topology, VersionId and ETag", () => {
@@ -131,6 +145,30 @@ test("saved-plan substitution, stale authorization, and an unknown apply outcome
   assert.throws(() => executeReconcilerStateReconciliation(common), (error) => error.mutationOutcome === "AMBIGUOUS"); assert.equal(applies, 1);
 });
 
+test("expired exact successor requires fresh zero-write recovery authorization", () => {
+  const old = new Date(now.getTime() - CONTRACT.maxAgeMs - 1); const original = createReconcilerStateReconciliationPreparation({ sourceSha, stateBytes: before, stateObject: object, attachmentTopology: topology, planBytes: Buffer.from("saved-refresh-plan"), planJson: refreshPlan(), preparedAt: old.toISOString() });
+  const originalAuthorization = createReconcilerStateReconciliationAuthorization({ preparation: original, approval: approval({ observedAt: old }), now: old }); const successorObject = { versionId: "successor-version", etag: "successor-etag" };
+  assert.throws(() => executeReconcilerStateReconciliation({ sourceSha, preparation: original, authorization: originalAuthorization, planBytes: Buffer.from("saved-refresh-plan"), planJson: refreshPlan(), beforeStateBytes: after, beforeObject: successorObject, beforeTopology: topology, applySavedPlan: () => assert.fail("expired authorization must not apply"), readPostSnapshot: () => assert.fail("expired authorization must not read"), readPostTopology: () => topology, renderNormalPlan: () => normalPlan, reauthenticateSource: () => true, verifyPostconditions: () => true, now }), /stale/);
+  const recoveryPreparation = createReconcilerStateReconciliationRecoveryPreparation({ sourceSha, originalPreparation: original, originalAuthorization, originalAuthorizationWorkflowRunId: "100", originalAuthorizationWorkflowRunAttempt: "1", stateBytes: after, stateObject: successorObject, attachmentTopology: topology, preparedAt: now.toISOString() });
+  assert.throws(() => createReconcilerStateReconciliationRecoveryPreparation({ sourceSha, originalPreparation: original, originalAuthorization, originalAuthorizationWorkflowRunId: "101", originalAuthorizationWorkflowRunAttempt: "1", stateBytes: after, stateObject: successorObject, attachmentTopology: topology, preparedAt: now.toISOString() }), /original authorization/);
+  const { preparationSha256, ...incompatibleBody } = original; const incompatiblePreparation = { ...incompatibleBody, terraformRoot: "other", preparationSha256: hash(canonicalJson({ ...incompatibleBody, terraformRoot: "other" })) };
+  assert.throws(() => createReconcilerStateReconciliationRecoveryPreparation({ sourceSha, originalPreparation: incompatiblePreparation, originalAuthorization, originalAuthorizationWorkflowRunId: "100", originalAuthorizationWorkflowRunAttempt: "1", stateBytes: after, stateObject: successorObject, attachmentTopology: topology, preparedAt: now.toISOString() }), /binding|incompatible/);
+  const recoveryAuthorization = createReconcilerStateReconciliationRecoveryAuthorization({ recoveryPreparation, approval: approval({ workflowPath: CONTRACT.recoveryAuthorizationWorkflowPath, runId: "200" }), now });
+  const result = executeReconcilerStateReconciliationRecovery({ sourceSha, recoveryPreparation, recoveryAuthorization, stateBytes: after, stateObject: successorObject, attachmentTopology: topology, applySavedPlan: () => assert.fail("recovery cannot reach apply"), renderNormalPlan: () => normalPlan, reauthenticateSource: () => true, verifyPostconditions: () => true, now });
+  assert.equal(result.status, "RECOVERED_COMPLETE"); assert.equal(result.refreshOnlyApplyCount, 0); assert.equal(result.terraformStateMutationCount, 0); assert.equal(result.remoteIamMutationCount, 0); assert.deepEqual(recoveryAuthorization.maxAwsMutations, {});
+  assert.throws(() => executeReconcilerStateReconciliationRecovery({ sourceSha, recoveryPreparation, recoveryAuthorization: { ...recoveryAuthorization, originalPreparationSha256: "b".repeat(64) }, stateBytes: after, stateObject: successorObject, attachmentTopology: topology, renderNormalPlan: () => normalPlan, reauthenticateSource: () => true, verifyPostconditions: () => true, now }), /binding/);
+  assert.throws(() => createReconcilerStateReconciliationRecoveryPreparation({ sourceSha, originalPreparation: original, originalAuthorization, originalAuthorizationWorkflowRunId: "100", originalAuthorizationWorkflowRunAttempt: "1", stateBytes: before, stateObject: object, attachmentTopology: topology, preparedAt: now.toISOString() }), /exact authorized successor/);
+});
+
+test("recovery rejects every merely similar or later state", () => {
+  const old = new Date(now.getTime() - CONTRACT.maxAgeMs - 1); const original = createReconcilerStateReconciliationPreparation({ sourceSha, stateBytes: before, stateObject: object, attachmentTopology: topology, planBytes: Buffer.from("saved-refresh-plan"), planJson: refreshPlan(), preparedAt: old.toISOString() }); const originalAuthorization = createReconcilerStateReconciliationAuthorization({ preparation: original, approval: approval({ observedAt: old }), now: old }); const successorObject = { versionId: "successor-version", etag: "successor-etag" };
+  const recoveryPreparation = createReconcilerStateReconciliationRecoveryPreparation({ sourceSha, originalPreparation: original, originalAuthorization, originalAuthorizationWorkflowRunId: "100", originalAuthorizationWorkflowRunAttempt: "1", stateBytes: after, stateObject: successorObject, attachmentTopology: topology, preparedAt: now.toISOString() }); const recoveryAuthorization = createReconcilerStateReconciliationRecoveryAuthorization({ recoveryPreparation, approval: approval({ workflowPath: CONTRACT.recoveryAuthorizationWorkflowPath, runId: "200" }), now });
+  for (const mutate of [(value) => { value.outputs.unrelated = { value: "changed" }; }, (value) => { value.resources[0].instances[0].attributes.name = "changed"; }, (value) => { value.resources.push({ mode: "managed", type: "aws_iam_user", name: "later", instances: [{ attributes: { name: "later" } }] }); }, (value) => { value.serial = 3; }]) {
+    const candidate = JSON.parse(after); mutate(candidate);
+    assert.throws(() => executeReconcilerStateReconciliationRecovery({ sourceSha, recoveryPreparation, recoveryAuthorization, stateBytes: Buffer.from(JSON.stringify(candidate)), stateObject: successorObject, attachmentTopology: topology, renderNormalPlan: () => normalPlan, reauthenticateSource: () => true, verifyPostconditions: () => true, now }), /exact authorized successor|live state changed/);
+  }
+});
+
 test("post-refresh verification rejects a dirty normal plan and unchanged backend object identity", () => {
   const preparation = prepared(); const authorization = createReconcilerStateReconciliationAuthorization({ preparation, approval: approval(), now }); let applies = 0;
   const common = { sourceSha, preparation, authorization, planBytes: Buffer.from("saved-refresh-plan"), planJson: refreshPlan(), beforeStateBytes: before, beforeObject: object, beforeTopology: topology, applySavedPlan: () => { applies += 1; }, readPostSnapshot: () => ({ bytes: after, object: { ...object } }), readPostTopology: () => topology, renderNormalPlan: () => normalPlan, reauthenticateSource: () => true, verifyPostconditions: () => true, now };
@@ -146,6 +184,8 @@ test("state-reconciliation runbook documents the current prepare-authorize-execu
   const requiredInputs = (workflow) => [...fs.readFileSync(workflow, "utf8").matchAll(/^\s{6}(\w+): \{ description: .*required: true,/gm)].map((match) => match[1]);
   const authorizationWorkflow = ".github/workflows/authorize-production-initial-activation-reconciler-state-reconciliation.yml";
   const executionWorkflow = ".github/workflows/execute-production-initial-activation-reconciler-state-reconciliation.yml";
+  const recoveryAuthorizationWorkflow = ".github/workflows/authorize-production-initial-activation-reconciler-state-reconciliation-recovery.yml";
+  const recoveryExecutionWorkflow = ".github/workflows/execute-production-initial-activation-reconciler-state-reconciliation-recovery.yml";
   assert.match(runbook, new RegExp(`${preparationScript} -- --mode prepare`));
   assert.match(runbook, /--terraform-data-dir/); assert.match(runbook, /--saved-plan-out/); assert.match(runbook, /--preparation-out/);
   for (const [workflow, command] of [[authorizationWorkflow, "authorize-production-initial-activation-reconciler-state-reconciliation.yml"], [executionWorkflow, "execute-production-initial-activation-reconciler-state-reconciliation.yml"]]) {
@@ -153,6 +193,12 @@ test("state-reconciliation runbook documents the current prepare-authorize-execu
     for (const input of requiredInputs(workflow)) assert.match(runbook, new RegExp(`-f ${input}=`));
   }
   assert.match(runbook, /authorization_run_id/); assert.match(runbook, /authorization_run_attempt/);
+  assert.match(runbook, /--mode recovery-prepare/); assert.match(runbook, /--mode recovery-execute/);
+  for (const [workflow, command] of [[recoveryAuthorizationWorkflow, "authorize-production-initial-activation-reconciler-state-reconciliation-recovery.yml"], [recoveryExecutionWorkflow, "execute-production-initial-activation-reconciler-state-reconciliation-recovery.yml"]]) {
+    assert.ok(runbook.includes(command));
+    for (const input of requiredInputs(workflow)) assert.match(runbook, new RegExp(`-f ${input}=`));
+  }
+  assert.match(runbook, /original_authorization_run_id/); assert.match(runbook, /original_authorization_run_attempt/); assert.match(runbook, /recovery_authorization_run_id/); assert.match(runbook, /recovery_authorization_run_attempt/);
   assert.match(runbook, new RegExp(`${CONTRACT.maxAgeMs / 1000} seconds`));
   assert.match(runbook, /saved_plan_base64/); assert.match(runbook, /terraform refresh|terraform state push|normal `terraform apply`/);
 });

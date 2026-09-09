@@ -1420,6 +1420,66 @@
       "rollback": "remove-committed-or-restore-backups"
     },
     {
+      "id": "initial-activation-reconciler-state-reconciliation-recovery-preparation",
+      "kind": "file",
+      "producer": "scripts/aws/reconcile-production-initial-activation-reconciler-state.mjs:runReconcilerStateReconciliation --mode recovery-prepare",
+      "consumers": [
+        ".github/workflows/authorize-production-initial-activation-reconciler-state-reconciliation-recovery.yml",
+        ".github/workflows/execute-production-initial-activation-reconciler-state-reconciliation-recovery.yml",
+        "scripts/aws/authorize-production-initial-activation-reconciler-state-reconciliation-recovery.mjs",
+        "scripts/aws/reconcile-production-initial-activation-reconciler-state.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "initial-activation-reconciler-state-reconciliation-recovery-preparation",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "initial-activation-reconciler-state-reconciliation-recovery-authorization",
+      "kind": "file",
+      "producer": ".github/workflows/authorize-production-initial-activation-reconciler-state-reconciliation-recovery.yml",
+      "consumers": [
+        ".github/workflows/execute-production-initial-activation-reconciler-state-reconciliation-recovery.yml",
+        "scripts/aws/reconcile-production-initial-activation-reconciler-state.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "externalProducer": true,
+      "atomicGroup": "initial-activation-reconciler-state-reconciliation-recovery-authorization",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "initial-activation-reconciler-state-reconciliation-recovery-result",
+      "kind": "file",
+      "producer": "scripts/aws/reconcile-production-initial-activation-reconciler-state.mjs:runReconcilerStateReconciliation --mode recovery-execute",
+      "consumers": [
+        ".github/workflows/execute-production-initial-activation-reconciler-state-reconciliation-recovery.yml",
+        "documents/ops/iam/MSCQRProductionInitialActivationReconcilerStateReconciliation-v1.md"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "initial-activation-reconciler-state-reconciliation-recovery-result",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
       "id": "initial-activation-lifecycle-policy-reconciliation-authorization",
       "kind": "file",
       "producer": ".github/workflows/authorize-production-initial-activation-lifecycle-policy-reconciliation.yml",
