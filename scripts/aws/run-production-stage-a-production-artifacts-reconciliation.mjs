@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createProductionAwsCommandRunner, createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { ensureStageBPrivateDirectory, readStageBPrivateFileBytes, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import { createRootAttestationKmsVerifier } from "./production-root-attestation-key.mjs";
-import { assertStageAProductionArtifactsReconciliationPrepareEvidence, createStageAProductionArtifactsReconciliationAuthorization as createCoreAuthorization, createTerraformStageAAdapter, prepareStageAProductionArtifactsStateReconciliation, resolveStageAProductionArtifactsBucketPolicyTransition, runStageAProductionArtifactsStateReconciliation, stageAProductionArtifactsPolicySha256 } from "./production-stage-a-control-plane.mjs";
+import { assertStageAProductionArtifactsExecutableTransition, assertStageAProductionArtifactsReconciliationPrepareEvidence, createStageAProductionArtifactsReconciliationAuthorization as createCoreAuthorization, createTerraformStageAAdapter, prepareStageAProductionArtifactsStateReconciliation, resolveStageAProductionArtifactsBucketPolicyTransition, runStageAProductionArtifactsStateReconciliation, stageAProductionArtifactsPolicySha256 } from "./production-stage-a-control-plane.mjs";
 import { createStageATerraformBackendLock, STAGE_A_TERRAFORM_BACKEND } from "./production-stage-a-root-drop-orphan-recovery.mjs";
 import { assertStageATerraformVariables, STAGE_A_REQUIRED_TERRAFORM_VARIABLE_KEYS } from "./recover-production-green-stage-a-root-drop-orphan.mjs";
 import { buildRecoveryTerraformEnvironment } from "./recover-stage-b-backend-task-definition.mjs";
@@ -64,6 +64,7 @@ const authenticateRecovery = async ({ sourceSha, recoverySourceSha = sourceSha, 
   assertStageAProductionArtifactsRecoveryAuthorization(recovery.authorization, { sourceSha: recoverySourceSha, preState });
   if (!allowAdvancedState && (currentState?.lineage !== preState.lineage || currentState?.serial !== preState.serial || currentState?.stateSha256 !== preState.stateSha256)) throw new Error("Stage A production-artifacts reconciliation state changed before preparation.");
   const completionEvidence = readCompletion(journal, recovery.authorization, verifySignature);
+  assertStageAProductionArtifactsExecutableTransition(completionEvidence.completion);
   let continuationRebindAuthorization;
   if (source.head !== recoverySourceSha) {
     if (!continuationRebindWorkflowRunId || !continuationRebindWorkflowRunAttempt) throw new Error("Stage A production-artifacts reconciliation requires an externally authenticated continuation rebind.");

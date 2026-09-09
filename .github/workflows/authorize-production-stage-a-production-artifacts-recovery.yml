@@ -7,7 +7,7 @@ on:
       state_lineage: { description: Exact pre-recovery Stage-A state lineage, required: true, type: string }
       state_serial: { description: Exact pre-recovery Stage-A state serial, required: true, type: string }
       state_sha256: { description: Exact pre-recovery Stage-A raw-state SHA256, required: true, type: string }
-      transition: { description: Exact reviewed transition, required: true, type: choice, options: [A_TO_A_PRIME, A_PRIME_TO_B, B_TO_C] }
+      transition: { description: Exact executable transition, required: true, type: choice, options: [A_TO_A_PRIME, A_PRIME_TO_B] }
       verification_ref: { description: Human-controlled recovery verification reference, required: true, type: string }
 
 permissions: { actions: read, contents: read }

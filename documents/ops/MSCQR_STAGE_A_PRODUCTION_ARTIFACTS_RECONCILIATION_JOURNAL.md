@@ -30,6 +30,12 @@ resolver rejects a direct `A -> B` execution, partial removal, protection
 downgrade, additional statement changes, and arbitrary bucket-policy
 replacements.
 
+`C` is classification-only in the current contract. It cannot be selected by
+the authorization workflow or executed by the recovery runner because
+Terraform's canonical desired bucket policy remains `B`. Enabling `B -> C`
+requires a separately reviewed Terraform State-C alignment; otherwise a later
+ordinary Terraform plan would restore the retired reservation statements.
+
 The recovery runner requires the exact clean protected checkout, authorization,
 state identity, and predecessor before it creates a root-attested conditional
 `recovery/<authorization-sha256>/attempt.json` record. It then performs the one
@@ -60,8 +66,8 @@ plus authenticated attempt permits completion only; unexpected state fails close
 The outer lock and existing immutable journal are reused. No new object namespace,
 lock, principal, or authorization format is introduced. The retirement transition
 begins only from the ProviderReadOnly-protected reservation-bearing policy and
-cannot produce an unprotected successor. It remains dormant until the #448
-reconciler runtime migration is complete. Existing
+cannot produce an unprotected successor, but remains non-executable until
+Terraform's desired state is intentionally migrated to `C`. Existing
 refresh-only state reconciliation and normal no-op closure remain unchanged.
 Tests cover failure before/after marker persistence, lost response, failed readback,
 post-write process loss, repeated invocation, and mutation-only CLI retry settings.

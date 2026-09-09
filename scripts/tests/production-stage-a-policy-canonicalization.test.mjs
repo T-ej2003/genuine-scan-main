@@ -9,6 +9,7 @@ import {
   buildStageAProductionArtifactsBucketPolicyWithRecoveryListBucketBootstrap,
   buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection,
   buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation,
+  assertStageAProductionArtifactsExecutableTransition,
   canonicalizeStageAProductionArtifactsPolicy,
   resolveStageAProductionArtifactsBucketPolicyTransition,
   stageAProductionArtifactsPolicySemanticallyEqual,
@@ -74,6 +75,26 @@ test("Stage-A reservation and ProviderReadOnly transitions compose only as A to 
   assert.throws(() => transition(A, C), /not exact or reviewed/);
   assert.throws(() => transition(B, buildStageAProductionArtifactsBucketPolicy()), /not exact or reviewed/);
   assert.throws(() => transition({ ...B, Statement: B.Statement.slice(1) }, C), /not exact or reviewed/);
+  assert.deepEqual(assertStageAProductionArtifactsExecutableTransition({ predecessorPolicySha256: stageAProductionArtifactsPolicySha256(A), desiredPolicySha256: stageAProductionArtifactsPolicySha256(APrime) }), { predecessor: A, desired: APrime });
+  assert.deepEqual(assertStageAProductionArtifactsExecutableTransition({ predecessorPolicySha256: stageAProductionArtifactsPolicySha256(APrime), desiredPolicySha256: stageAProductionArtifactsPolicySha256(B) }), { predecessor: APrime, desired: B });
+  assert.throws(() => assertStageAProductionArtifactsExecutableTransition({ predecessorPolicySha256: stageAProductionArtifactsPolicySha256(B), desiredPolicySha256: stageAProductionArtifactsPolicySha256(C) }), /non-executable/);
+});
+
+test("Terraform's current Stage-A desired policy retains reservations, so State C stays classification-only", () => {
+  const terraform = fs.readFileSync("infra/aws/terraform/production-green-stage-a/main.tf", "utf8");
+  for (const sid of [
+    "AllowRootOperatorReadInitialActivationPolicyReconciliationReservations",
+    "DenyOtherPrincipalsInitialActivationPolicyReconciliationReservationReads",
+    "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationCreate",
+    "DenyNonConditionalInitialActivationPolicyReconciliationReservationWrites",
+    "DenyOtherPrincipalsInitialActivationPolicyReconciliationReservationWrites",
+    "DenyInitialActivationPolicyReconciliationReservationDeletion",
+  ]) assert.match(terraform, new RegExp(`Sid = \"${sid}\"`));
+  const B = buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection();
+  const C = buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation();
+  assert.notEqual(stageAProductionArtifactsPolicySha256(B), stageAProductionArtifactsPolicySha256(C));
+  assert.throws(() => assertStageAProductionArtifactsExecutableTransition({ predecessorPolicySha256: stageAProductionArtifactsPolicySha256(B), desiredPolicySha256: stageAProductionArtifactsPolicySha256(C) }), /non-executable/);
+  assert.throws(() => assertStageAProductionArtifactsExecutableTransition({ predecessorPolicySha256: stageAProductionArtifactsPolicySha256(C), desiredPolicySha256: stageAProductionArtifactsPolicySha256(C) }), /non-executable/);
 });
 
 test("bootstrap adds only exact Stage-A recovery absence detection and B adds ProviderReadOnly protection", () => {

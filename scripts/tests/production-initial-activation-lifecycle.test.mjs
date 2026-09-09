@@ -198,6 +198,8 @@ test("source policy and bucket policy enforce only exact conditional lifecycle o
   assert.match(terraform, /StringNotEquals\s*=\s*\{\s*"s3:if-none-match"\s*=\s*"\*"\s*\}/);
   assert.match(terraform, /DenyActivationLifecycleDeletion[\s\S]*s3:DeleteObjectVersion/);
   assert.match(bucketPolicy, /AllowInitialActivationReconcilerConditionalProviderReadonlyReconciliationCreate[\s\S]*s3:if-none-match[\s\S]*s3:x-amz-server-side-encryption[\s\S]*AES256/);
+  assert.match(bucketPolicy, /AllowReleaseDeployerListStageAProductionArtifactsRecovery[\s\S]*Action = "s3:ListBucket"[\s\S]*Resource = var\.receipt_bucket_arn[\s\S]*production-stage-a-production-artifacts-reconciliation\/recovery\/\*/);
+  assert.match(bucketPolicy, /AllowInitialActivationReconcilerListProviderReadonlyReconciliation[\s\S]*Action = "s3:ListBucket"[\s\S]*Resource = var\.receipt_bucket_arn[\s\S]*production-provider-readonly-policy-reconciliation\/\*/);
   assert.match(bucketPolicy, /DenyOtherPrincipalsProviderReadonlyReconciliationWrites[\s\S]*aws:PrincipalArn[\s\S]*mscqr-production-initial-activation-policy-reconciler/);
   assert.match(bucketPolicy, /DenyProviderReadonlyReconciliationDeletion[\s\S]*s3:DeleteObject[\s\S]*s3:DeleteObjectVersion/);
   assert.deepEqual([...bucketPolicy.matchAll(/Sid = "([^"]+)"/g)].map(([, sid]) => sid), [
@@ -222,6 +224,8 @@ test("source policy and bucket policy enforce only exact conditional lifecycle o
     "DenyNonConditionalInitialActivationPolicyReconciliationReservationWrites",
     "DenyOtherPrincipalsInitialActivationPolicyReconciliationReservationWrites",
     "DenyInitialActivationPolicyReconciliationReservationDeletion",
+    "AllowReleaseDeployerListStageAProductionArtifactsRecovery",
+    "AllowInitialActivationReconcilerListProviderReadonlyReconciliation",
     "AllowInitialActivationReconcilerReadProviderReadonlyReconciliation",
     "DenyOtherPrincipalsProviderReadonlyReconciliationReads",
     "AllowInitialActivationReconcilerConditionalProviderReadonlyReconciliationCreate",

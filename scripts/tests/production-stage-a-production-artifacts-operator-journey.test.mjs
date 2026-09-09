@@ -81,42 +81,34 @@ test("durable recovery attempt consumes mutation authority across failures and n
   }
 });
 
-test("reverse reservation cleanup cannot rewrite after an ambiguous attempt", async () => {
-  const authorization = createRecoveryAuthorization({ sourceSha, preState: state, protectedEnvironmentApprovalEvidence: approval(PRODUCTION_ENVIRONMENT_APPROVAL.stageAProductionArtifactsRecoveryWorkflowRef, "507"), verificationRef: "reverse-ambiguous", governedExecutableManifestSha256, transition: reverseReservationTransition });
-  let attempt; let puts = 0; const predecessor = buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection();
-  const releaseRun = (args) => args[1] === "get-caller-identity" ? releaseIdentity : JSON.stringify({ Policy: JSON.stringify(predecessor) });
-  const rootRun = (args) => {
-    if (args[1] === "get-caller-identity") return rootIdentity;
-    if (args[1] === "get-bucket-versioning") return JSON.stringify({ Status: "Enabled" });
-    if (args[1] === "get-bucket-lifecycle-configuration") throw Error("NoSuchLifecycleConfiguration");
-    if (args[1] === "put-bucket-policy") { puts += 1; throw Error("ambiguous transport failure"); }
-    throw Error(`unexpected root ${args[1]}`);
-  };
-  const journal = {
-    readRecoveryAttempt: () => attempt && { bytes: attempt }, readRecoveryCompletion: () => null,
-    writeRecoveryAttempt: ({ bytes }) => { attempt = bytes; return { key: "attempt" }; },
-    writeRecoveryCompletion: () => { throw Error("must not complete"); },
-  };
-  const input = { sourceSha, workflowRunId: "507", workflowRunAttempt: "1", rootRun, releaseRun, readStateIdentity: async () => state, terraformStateLock, readProtectedSource: source, resolveAuthorization: () => ({ authorization }), journal, recoveryJournal: journal, sign: () => Buffer.from("signature").toString("base64"), verify: () => true };
-  await assert.rejects(() => runStageAProductionArtifactsRecovery(input), /PREDECESSOR_LIVE_EXACT/);
-  await assert.rejects(() => runStageAProductionArtifactsRecovery(input), /MUTATION_ATTEMPT_STARTED/);
-  assert.equal(puts, 1);
+test("manual and stale B-to-C authorizations fail before any AWS call, signature, or bucket-policy write", async () => {
+  const authorization = createRecoveryAuthorization({ sourceSha, preState: state, protectedEnvironmentApprovalEvidence: approval(PRODUCTION_ENVIRONMENT_APPROVAL.stageAProductionArtifactsRecoveryWorkflowRef, "507"), verificationRef: "retire", governedExecutableManifestSha256, transition: reverseReservationTransition });
+  let awsCalls = 0; let signatures = 0;
+  const journal = { readRecoveryAttempt: () => null, readRecoveryCompletion: () => null, writeRecoveryAttempt: () => { throw Error("must not write attempt"); }, writeRecoveryCompletion: () => { throw Error("must not write completion"); } };
+  const input = { sourceSha, workflowRunId: "507", workflowRunAttempt: "1", rootRun: () => { awsCalls += 1; throw Error("must not call root"); }, releaseRun: () => { awsCalls += 1; throw Error("must not call release"); }, readStateIdentity: async () => state, terraformStateLock, readProtectedSource: source, resolveAuthorization: () => ({ authorization }), journal, recoveryJournal: journal, sign: () => { signatures += 1; return Buffer.from("signature").toString("base64"); }, verify: () => true };
+  await assert.rejects(() => runStageAProductionArtifactsRecovery(input), /non-executable/);
+  await assert.rejects(() => runStageAProductionArtifactsRecovery(input), /non-executable/);
+  assert.equal(awsCalls, 0); assert.equal(signatures, 0);
 });
 
-test("reverse reservation cleanup accepts only the exact target policy", async () => {
-  const authorization = createRecoveryAuthorization({ sourceSha, preState: state, protectedEnvironmentApprovalEvidence: approval(PRODUCTION_ENVIRONMENT_APPROVAL.stageAProductionArtifactsRecoveryWorkflowRef, "508"), verificationRef: "reverse-success", governedExecutableManifestSha256, transition: reverseReservationTransition });
-  let live = buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection(); let puts = 0; let completion;
-  const releaseRun = (args) => args[1] === "get-caller-identity" ? releaseIdentity : JSON.stringify({ Policy: JSON.stringify(live) });
-  const rootRun = (args) => {
-    if (args[1] === "get-caller-identity") return rootIdentity;
-    if (args[1] === "get-bucket-versioning") return JSON.stringify({ Status: "Enabled" });
-    if (args[1] === "get-bucket-lifecycle-configuration") throw Error("NoSuchLifecycleConfiguration");
-    if (args[1] === "put-bucket-policy") { puts += 1; live = buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation(); return ""; }
-    throw Error(`unexpected root ${args[1]}`);
-  };
-  const journal = { readRecoveryAttempt: () => null, readRecoveryCompletion: () => completion && { bytes: completion }, writeRecoveryAttempt: () => ({ key: "attempt" }), writeRecoveryCompletion: ({ bytes }) => { completion = bytes; return { key: "completion", sha256: "a".repeat(64) }; } };
-  const result = await runStageAProductionArtifactsRecovery({ sourceSha, workflowRunId: "508", workflowRunAttempt: "1", rootRun, releaseRun, readStateIdentity: async () => state, terraformStateLock, readProtectedSource: source, resolveAuthorization: () => ({ authorization }), journal, recoveryJournal: journal, sign: () => Buffer.from("signature").toString("base64"), verify: () => true });
-  assert.equal(result.recovered, true); assert.equal(puts, 1); assert.equal(JSON.parse(completion).desiredPolicySha256, reverseReservationTransition.desiredPolicySha256);
+test("a historical B-to-C completion cannot resume into refresh-only reconciliation", async () => {
+  const authorization = createRecoveryAuthorization({ sourceSha, preState: state, protectedEnvironmentApprovalEvidence: approval(PRODUCTION_ENVIRONMENT_APPROVAL.stageAProductionArtifactsRecoveryWorkflowRef, "508"), verificationRef: "retire-resume", governedExecutableManifestSha256, transition: reverseReservationTransition });
+  let rootCalls = 0; let completionReads = 0; let liveReads = 0;
+  await assert.rejects(() => runStageAProductionArtifactsReconciliation({
+    sourceSha,
+    recoveryWorkflowRunId: "508",
+    recoveryWorkflowRunAttempt: "1",
+    reconciliationWorkflowRunId: "509",
+    reconciliationWorkflowRunAttempt: "1",
+    releaseRun: (args) => { assert.equal(args[1], "get-caller-identity"); return releaseIdentity; },
+    rootRun: () => { rootCalls += 1; throw Error("must not authenticate root"); },
+    adapter: { readStateIdentity: async () => state, readProductionArtifactsPolicy: async () => { liveReads += 1; return buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation(); } },
+    readProtectedSource: source,
+    resolveAuthorization: () => ({ authorization }),
+    journal: { readRecoveryCompletion: () => { completionReads += 1; throw Error("must not read completion"); } },
+    verifySignature: () => true,
+  }), /non-executable/);
+  assert.equal(rootCalls, 0); assert.equal(completionReads, 0); assert.equal(liveReads, 0);
 });
 
 const policyResource = (policy) => ({ bucket: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket, expected_bucket_owner: null, id: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket, policy: JSON.stringify(policy), region: "eu-west-2" });
@@ -386,7 +378,7 @@ test("recovery attempt persistence uses the release writer and gates the root po
   assert.equal(policyWrites, 0); assert.equal(completionWrites, 0); assert.equal(rootAttemptWrites, 0);
 });
 
-test("B-to-C first run authenticates release 403 absence through the exact-key root fallback", async () => {
+test("reservation-to-A first run authenticates release 403 absence through the exact-key root fallback", async () => {
   let livePolicy = buildStageAProductionArtifactsBucketPolicy(); let policyWrites = 0; let attemptWrites = 0; let completionWrites = 0; const events = [];
   const authorization = createRecoveryAuthorization({ sourceSha, preState: state, protectedEnvironmentApprovalEvidence: approval(PRODUCTION_ENVIRONMENT_APPROVAL.stageAProductionArtifactsRecoveryWorkflowRef, "204"), verificationRef: "release-403-root-absence", governedExecutableManifestSha256, transition: reservationTransition });
   const denied = () => { const error = new Error("AccessDenied"); error.stderr = "403"; throw error; };
@@ -407,7 +399,7 @@ test("B-to-C first run authenticates release 403 absence through the exact-key r
   const rootJournal = {
     readRecoveryAttempt: (sha) => { events.push(["root-read", sha]); return null; },
     readRecoveryCompletion: () => null,
-    writeRecoveryAttempt: () => { throw new Error("root must not write B-to-C attempt"); },
+    writeRecoveryAttempt: () => { throw new Error("root must not write reservation-to-A attempt"); },
   };
   const result = await runStageAProductionArtifactsRecovery({ sourceSha, workflowRunId: "204", workflowRunAttempt: "1", rootRun, releaseRun, readStateIdentity: async () => state, terraformStateLock, readProtectedSource: source, resolveAuthorization: () => ({ authorization }), journal: releaseJournal, recoveryJournal: releaseJournal, rootRecoveryJournal: rootJournal, sign: () => Buffer.from("signature").toString("base64"), verify: () => true });
   assert.equal(result.putBucketPolicyCount, 1); assert.equal(policyWrites, 1); assert.equal(attemptWrites, 1); assert.equal(completionWrites, 1);
@@ -415,7 +407,7 @@ test("B-to-C first run authenticates release 403 absence through the exact-key r
   assert.equal(releaseRead[1], authorization.authorizationSha256); assert.equal(rootRead[1], releaseRead[1]); assert.ok(events.indexOf(rootRead) < events.indexOf(releaseWrite)); assert.ok(events.indexOf(releaseWrite) < events.indexOf("policy-write"));
 });
 
-test("B-to-C release 403 with an unverifiable root fallback fails before any write", async () => {
+test("reservation-to-A release 403 with an unverifiable root fallback fails before any write", async () => {
   let policyWrites = 0; let attemptWrites = 0;
   const authorization = createRecoveryAuthorization({ sourceSha, preState: state, protectedEnvironmentApprovalEvidence: approval(PRODUCTION_ENVIRONMENT_APPROVAL.stageAProductionArtifactsRecoveryWorkflowRef, "205"), verificationRef: "release-403-root-failure", governedExecutableManifestSha256, transition: reservationTransition });
   const denied = () => { const error = new Error("AccessDenied"); error.stderr = "403"; throw error; };

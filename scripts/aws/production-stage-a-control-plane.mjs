@@ -85,6 +85,10 @@ export const STAGE_A_PRODUCTION_ARTIFACTS_TRANSITION = Object.freeze({
   A_PRIME_TO_B: "A_PRIME_TO_B",
   B_TO_C: "B_TO_C",
 });
+export const STAGE_A_PRODUCTION_ARTIFACTS_EXECUTABLE_TRANSITIONS = Object.freeze([
+  STAGE_A_PRODUCTION_ARTIFACTS_TRANSITION.A_TO_A_PRIME,
+  STAGE_A_PRODUCTION_ARTIFACTS_TRANSITION.A_PRIME_TO_B,
+]);
 // `terraform providers schema -json` from the locked Terraform 1.15.8 / AWS 6.56.0 envelope.
 export const STAGE_A_LOCKED_AWS_RESOURCE_STATE_SCHEMA_VERSIONS = Object.freeze({
   [STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.address]: 0,
@@ -189,6 +193,19 @@ export function stageAProductionArtifactsRecoveryTransition(transitionId) {
   if (transitionId === STAGE_A_PRODUCTION_ARTIFACTS_TRANSITION.A_PRIME_TO_B) return stageAProductionArtifactsProviderReadonlyJournalTransition();
   if (transitionId === STAGE_A_PRODUCTION_ARTIFACTS_TRANSITION.B_TO_C) return stageAProductionArtifactsInitialActivationReservationRetirementTransition();
   throw new Error("Stage A production-artifacts recovery transition identifier is not allowlisted.");
+}
+
+export function stageAProductionArtifactsExecutableRecoveryTransition(transitionId) {
+  if (!STAGE_A_PRODUCTION_ARTIFACTS_EXECUTABLE_TRANSITIONS.includes(transitionId)) throw new Error("Stage A production-artifacts transition is non-executable until Terraform State-C alignment is reviewed.");
+  return stageAProductionArtifactsRecoveryTransition(transitionId);
+}
+
+export function assertStageAProductionArtifactsExecutableTransition(transition) {
+  const resolved = resolveStageAProductionArtifactsBucketPolicyTransition(transition);
+  const retired = buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation();
+  const stateC = stageAProductionArtifactsPolicySha256(retired);
+  if (stageAProductionArtifactsPolicySha256(resolved.predecessor) === stateC || stageAProductionArtifactsPolicySha256(resolved.desired) === stateC) throw new Error("Stage A production-artifacts transition is non-executable until Terraform State-C alignment is reviewed.");
+  return resolved;
 }
 
 export function buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation() {
