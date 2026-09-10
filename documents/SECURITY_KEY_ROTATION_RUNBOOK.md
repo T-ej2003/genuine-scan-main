@@ -376,6 +376,13 @@ exact authenticated-overlap initial-activation contract after upstream gate
 sanity and before the deploy job. A successful source-only push check can
 therefore never authorize production deployment by itself.
 
+Authenticated initial activation is explicitly dispatched as the
+`authenticated-initial-overlap` Release Train lifecycle. It validates the
+exact overlap candidate and the named pre-rotation release contract; generic
+manual, post-rotation, scheduled-security, and release-candidate validation
+remain strict. Release Gate independently repeats the overlap binding before
+any production mutation.
+
 After a real rotation, run the strict checks without changing their threshold:
 
 ```bash

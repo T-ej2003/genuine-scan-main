@@ -2,6 +2,43 @@ name: Deployment Audit
 
 on:
   workflow_dispatch:
+    inputs:
+      release_lifecycle:
+        description: "Strict release validation or exact authenticated initial-overlap validation."
+        required: false
+        type: choice
+        options:
+          - strict
+          - authenticated-initial-overlap
+        default: strict
+      target_sha:
+        description: "Exact protected source SHA for authenticated initial overlap."
+        required: false
+        type: string
+      rotation_id:
+        description: "Exact authenticated-overlap rotation ID."
+        required: false
+        type: string
+      rotation_state_json:
+        description: "Exact redacted authenticated-overlap coordinator state."
+        required: false
+        type: string
+      rotation_state_sha256:
+        description: "SHA-256 of the exact rotation state bytes."
+        required: false
+        type: string
+      rotation_task_definition_arn:
+        description: "Exact authenticated-overlap backend task definition ARN."
+        required: false
+        type: string
+      rotation_image_digest:
+        description: "Exact authenticated-overlap backend image digest."
+        required: false
+        type: string
+      rotation_deployment_sha:
+        description: "Exact authenticated-overlap deployment SHA."
+        required: false
+        type: string
   push:
     branches:
       - main
@@ -54,14 +91,40 @@ jobs:
           PROVENANCE_BACKFILL_EVIDENCE_REF: ${{ vars.RC_PROVENANCE_BACKFILL_EVIDENCE_REF }}
           SECRET_ROTATION_EVIDENCE_REF: ${{ vars.RC_SECRET_ROTATION_EVIDENCE_REF }}
           INCIDENT_DRILL_EVIDENCE_REF: ${{ vars.RC_INCIDENT_DRILL_EVIDENCE_REF }}
+          RELEASE_LIFECYCLE: ${{ inputs.release_lifecycle || 'strict' }}
+          TARGET_SHA: ${{ inputs.target_sha }}
+          ROTATION_ID: ${{ inputs.rotation_id }}
+          ROTATION_STATE_JSON: ${{ inputs.rotation_state_json }}
+          ROTATION_STATE_SHA256: ${{ inputs.rotation_state_sha256 }}
+          ROTATION_TASK_DEFINITION_ARN: ${{ inputs.rotation_task_definition_arn }}
+          ROTATION_IMAGE_DIGEST: ${{ inputs.rotation_image_digest }}
+          ROTATION_DEPLOYMENT_SHA: ${{ inputs.rotation_deployment_sha }}
         run: |
+          set -euo pipefail
           # Main pushes are source validation until a governed production
           # release explicitly invokes the strict gate.
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
-            npm run verify:release
-          else
-            npm run verify:release:source
-          fi
+          if [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ]; then npm run verify:release:source; exit 0; fi
+          case "$RELEASE_LIFECYCLE" in
+            strict)
+              npm run verify:release
+              ;;
+            authenticated-initial-overlap)
+              for name in TARGET_SHA ROTATION_ID ROTATION_STATE_JSON ROTATION_STATE_SHA256 ROTATION_TASK_DEFINITION_ARN ROTATION_IMAGE_DIGEST ROTATION_DEPLOYMENT_SHA; do
+                test -n "${!name:-}" || { echo "::error::${name} is required for authenticated initial overlap."; exit 1; }
+              done
+              test "$TARGET_SHA" = "$GITHUB_SHA"
+              state_file="$RUNNER_TEMP/authenticated-initial-overlap-state.json"
+              trap 'rm -f "$state_file"' EXIT
+              printf '%s' "$ROTATION_STATE_JSON" > "$state_file"
+              chmod 600 "$state_file"
+              node scripts/aws/manage-production-initial-activation-lifecycle.mjs \
+                --mode validate-candidate --state-file "$state_file" --state-sha256 "$ROTATION_STATE_SHA256" \
+                --source-sha "$TARGET_SHA" --rotation-id "$ROTATION_ID" --deployment-sha "$ROTATION_DEPLOYMENT_SHA" \
+                --task-definition "$ROTATION_TASK_DEFINITION_ARN" --image-digest "$ROTATION_IMAGE_DIGEST"
+              npm run verify:release:pre-rotation
+              ;;
+            *) echo "::error::Unsupported release lifecycle: $RELEASE_LIFECYCLE"; exit 1 ;;
+          esac
 
   audit:
     needs: quality-gates
