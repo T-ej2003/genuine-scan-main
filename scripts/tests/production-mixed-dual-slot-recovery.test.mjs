@@ -17,12 +17,12 @@ const approval = () => createProductionEnvironmentApprovalEvidence({ environment
 const preparationFileSha256 = "d".repeat(64);
 const authorized = (preparation) => createMixedDualSlotRecoveryAuthorization({ preparation, preparationFileSha256, protectedEnvironmentApprovalEvidence: approval(), reason: "Normalize exact mixed unused topology", approverRole: "production-independent-checker", verificationRef: "recovery-1", now });
 
-function fakeSecrets({ failAfter = null } = {}) {
-  const states = new Map(MIXED_DUAL_SLOT_RECOVERY_ORDER.map((slot) => [MIXED_DUAL_SLOT_PREDECESSOR[slot].arn, { slot, labels: ["AWSCURRENT"] }])); let writes = 0; const controls = { failAfter };
+function fakeSecrets({ failAfter = null, postWriteLag = 0 } = {}) {
+  const states = new Map(MIXED_DUAL_SLOT_RECOVERY_ORDER.map((slot) => [MIXED_DUAL_SLOT_PREDECESSOR[slot].arn, { slot, labels: ["AWSCURRENT"] }])); let writes = 0; const controls = { failAfter, postWriteLag };
   const send = async (command) => { const input = command.input; const state = states.get(input.SecretId); if (!state) throw new Error("unknown secret"); const expected = MIXED_DUAL_SLOT_PREDECESSOR[state.slot];
-    if (command.constructor.name === "DescribeSecretCommand") return { ARN: input.SecretId, ...(state.omitTopology ? {} : { VersionIdsToStages: state.topology || (state.labels.length ? { [expected.versionId]: state.labels } : {}) }) };
+    if (command.constructor.name === "DescribeSecretCommand") { if (state.removeAfterReads === 0) { state.labels = []; state.removeAfterReads = null; } const result = { ARN: input.SecretId, ...(state.omitTopology ? {} : { VersionIdsToStages: state.topology || (state.labels.length ? { [expected.versionId]: state.labels } : {}) }) }; if (state.removeAfterReads > 0) state.removeAfterReads -= 1; return result; }
     if (command.constructor.name === "GetSecretValueCommand") { if (state.missingValue) throw Object.assign(new Error("missing version"), { name: "ResourceNotFoundException" }); return { VersionId: expected.versionId, SecretString: JSON.stringify(fixturePayload(state.slot)) }; }
-    if (command.constructor.name === "UpdateSecretVersionStageCommand") { if (controls.failAfter === writes) throw new Error("injected interruption"); writes += 1; state.labels = []; return {}; }
+    if (command.constructor.name === "UpdateSecretVersionStageCommand") { if (controls.failAfter === writes) throw new Error("injected interruption"); writes += 1; if (controls.postWriteLag) state.removeAfterReads = controls.postWriteLag; else state.labels = []; return {}; }
     throw new Error(`unexpected ${command.constructor.name}`);
   };
   return { send, states, controls, writes: () => writes };
@@ -81,6 +81,22 @@ test("a completed unlabeled version omitted from DescribeSecret resumes as exact
   const result = await executeMixedDualSlotRecovery({ send: fixture.send, preparation, sourceSha, authorization: authorized(preparation), payloadHash, now });
   assert.equal(result.stageLabelMutations, 6);
   assert.equal(fixture.writes(), 6);
+});
+
+test("an acknowledged label removal waits for bounded exact-prefix convergence", async () => {
+  const preparation = buildMixedDualSlotRecoveryPreparation({ sourceSha, predecessor: exactPredecessor(), preparedAt: "2026-09-10T00:00:00.000Z" });
+  const lagged = fakeSecrets({ postWriteLag: 1 }); let sleeps = 0;
+  const result = await executeMixedDualSlotRecovery({ send: lagged.send, preparation, sourceSha, authorization: authorized(preparation), payloadHash, now, sleep: async () => { sleeps += 1; } });
+  assert.equal(result.stageLabelMutations, 7);
+  assert.equal(lagged.writes(), 7);
+  assert.equal(sleeps, 7);
+  const stuck = fakeSecrets({ postWriteLag: 6 });
+  await assert.rejects(() => executeMixedDualSlotRecovery({ send: stuck.send, preparation, sourceSha, authorization: authorized(preparation), payloadHash, now, sleep: async () => {} }), /did not converge/);
+  assert.equal(stuck.writes(), 1);
+  const foreign = fakeSecrets({ postWriteLag: 1 });
+  foreign.states.get(MIXED_DUAL_SLOT_PREDECESSOR.jwtPending.arn).topology = { [MIXED_DUAL_SLOT_PREDECESSOR.jwtPending.versionId]: ["AWSCURRENT"], attacker: ["AWSPREVIOUS"] };
+  await assert.rejects(() => executeMixedDualSlotRecovery({ send: foreign.send, preparation, sourceSha, authorization: authorized(preparation), payloadHash, now, sleep: async () => {} }), /topology|staging/);
+  assert.equal(foreign.writes(), 0);
 });
 
 test("wrong authorization, non-contiguous progress, and any predecessor drift fail closed", async () => {

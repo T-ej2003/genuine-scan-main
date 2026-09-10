@@ -8,6 +8,8 @@ const { UpdateSecretVersionStageCommand, DescribeSecretCommand, GetSecretValueCo
 
 const canonical = (value) => Array.isArray(value) ? `[${value.map(canonical).join(",")}]` : value && typeof value === "object" ? `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}` : JSON.stringify(value);
 const sha256 = (value) => createHash("sha256").update(canonical(value)).digest("hex");
+const CONVERGENCE_DELAYS_MS = Object.freeze([100, 200, 400, 800, 1_000]);
+const sleepForConvergence = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const exactProgress = (topology, versionId, slot) => {
   topology ??= {};
   if (!topology || typeof topology !== "object" || Array.isArray(topology)) throw new Error(`Mixed recovery ${slot} version topology is not exact.`);
@@ -53,9 +55,19 @@ export async function classifyMixedDualSlotRecoveryProgress({ send, payloadHash 
   return observed.filter(Boolean).length;
 }
 
+async function awaitExactProgress({ expected, observe, sleep }) {
+  for (let attempt = 0; attempt <= CONVERGENCE_DELAYS_MS.length; attempt += 1) {
+    const completed = await observe();
+    if (completed === expected) return;
+    if (completed !== expected - 1) throw new Error("Mixed recovery post-mutation topology is not the prior or expected exact prefix.");
+    if (attempt < CONVERGENCE_DELAYS_MS.length) await sleep(CONVERGENCE_DELAYS_MS[attempt]);
+  }
+  throw new Error(`Mixed recovery stage-label mutation did not converge after ${CONVERGENCE_DELAYS_MS.length + 1} read-only observations.`);
+}
+
 // Each successful mutation removes only AWSCURRENT from the authenticated unused slot version.
 // A retry is safe only for the exact contiguous completed prefix; any other topology fails closed.
-export async function executeMixedDualSlotRecovery({ send, preparation, preparationFileSha256, sourceSha, authorization, payloadHash, now = new Date(), reauthenticate = async () => {} } = {}) {
+export async function executeMixedDualSlotRecovery({ send, preparation, preparationFileSha256, sourceSha, authorization, payloadHash, now = new Date(), reauthenticate = async () => {}, sleep = sleepForConvergence } = {}) {
   const checked = assertMixedDualSlotRecoveryPreparation(preparation, { sourceSha });
   preparationFileSha256 ||= authorization?.preparationFileSha256;
   const authenticate = async (allowExpiredResume) => { assertMixedDualSlotRecoveryAuthorization(authorization, { preparation: checked, preparationFileSha256, sourceSha, now, allowExpiredResume }); await reauthenticate({ preparation: checked, authorization }); };
@@ -69,8 +81,7 @@ export async function executeMixedDualSlotRecovery({ send, preparation, preparat
     if (await classifyMixedDualSlotRecoveryProgress({ send, payloadHash }) !== completed) throw new Error("Mixed recovery topology changed before mutation.");
     await send(new UpdateSecretVersionStageCommand({ SecretId: entry.secretArn, VersionStage: "AWSCURRENT", RemoveFromVersionId: entry.versionId }));
     completed += 1;
-    await authenticate(true);
-    if (await classifyMixedDualSlotRecoveryProgress({ send, payloadHash }) !== completed) throw new Error("Mixed recovery topology changed during mutation.");
+    await awaitExactProgress({ expected: completed, sleep, observe: async () => { await authenticate(true); return classifyMixedDualSlotRecoveryProgress({ send, payloadHash }); } });
   }
   if (await classifyMixedDualSlotRecoveryProgress({ send, payloadHash }) !== 7) throw new Error("Mixed recovery post-state is not exact.");
   return Object.freeze({ valid: true, writes: 0, stageLabelMutations: completed - initialCompleted, postState: "SEVEN_EXISTING_RESOURCES_WITHOUT_AWSCURRENT" });
