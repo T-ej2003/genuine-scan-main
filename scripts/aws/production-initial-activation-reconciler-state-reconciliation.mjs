@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import { canonicalJson } from "./production-green-stage-b-contract.mjs";
 import { INSTALLATION, assertInstallationPlan, assertInstallationStateResources, stateIdentity } from "./production-initial-activation-reconciler-installation-contract.mjs";
 import { PRODUCTION_ENVIRONMENT_APPROVAL, assertProductionEnvironmentActualReviewer, assertProductionEnvironmentApprovalFreshness, assertProductionEnvironmentApprovalIdentity } from "./production-github-environment-approval.mjs";
@@ -6,6 +8,8 @@ import { PRODUCTION_ENVIRONMENT_APPROVAL, assertProductionEnvironmentActualRevie
 const SHA40 = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const sha256 = (value) => crypto.createHash("sha256").update(Buffer.isBuffer(value) ? value : Buffer.from(canonicalJson(value))).digest("hex");
+const sourceRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
+const permissionsPolicyOutput = Object.freeze({ name: "permissions_policy_sha256", after: crypto.createHash("sha256").update(fs.readFileSync(path.join(sourceRoot, `${INSTALLATION.terraformRoot}/permissions-policy.json`))).digest("hex") });
 const exact = (value, fields, label) => {
   if (!value || typeof value !== "object" || Array.isArray(value) || canonicalJson(Object.keys(value).sort()) !== canonicalJson([...fields].sort())) throw new Error(`${label} schema is invalid.`);
   return value;
@@ -41,6 +45,7 @@ export const RECONCILER_STATE_RECONCILIATION = Object.freeze({
     Object.freeze({ address: "aws_iam_policy.reconciler", field: "attachment_count", before: 0, after: 1 }),
     Object.freeze({ address: "aws_iam_role.reconciler", field: "managed_policy_arns", before: Object.freeze([]), after: Object.freeze([INSTALLATION.policyArn]) }),
   ]),
+  outputReconciliation: permissionsPolicyOutput,
 });
 
 const workflowRef = (path) => `${PRODUCTION_ENVIRONMENT_APPROVAL.repository}/${path}@refs/heads/main`;
@@ -59,11 +64,12 @@ const normalizedState = (bytes) => {
   stateResource(state, "aws_iam_role_policy_attachment.reconciler");
   return { identity, state };
 };
-const exactSuccessorState = (beforeBytes) => {
+const exactSuccessorState = (beforeBytes, semantics) => {
   const before = normalizedState(beforeBytes); const expected = structuredClone(before.state);
   expected.serial += 1;
   stateResource(expected, "aws_iam_policy.reconciler").instances[0].attributes.attachment_count = 1;
   stateResource(expected, "aws_iam_role.reconciler").instances[0].attributes.managed_policy_arns = [RECONCILER_STATE_RECONCILIATION.policyArn];
+  expected.outputs[semantics.outputReconciliation.name].value = semantics.outputReconciliation.after;
   return expected;
 };
 const exactDrift = (entry, expected) => {
@@ -89,15 +95,31 @@ export function assertExactSensitivityStructure(before, after) {
   return before;
 }
 
-export function assertExactReconcilerRefreshOnlyPlan(plan) {
+const outputTransitionFields = ["name", "actions", "before", "after", "sensitive", "unknown"];
+const assertExactOutputReconciliation = (plan, stateBytes, expectedBefore) => {
+  const changes = Object.entries(plan.output_changes || {});
+  const nonNoop = changes.filter(([, change]) => canonicalJson(change?.actions) !== canonicalJson(["no-op"]));
+  if (nonNoop.length !== 1) throw new Error("Refresh-only plan output reconciliation is not exact.");
+  const [name, change] = nonNoop[0]; const beforeOutput = normalizedState(stateBytes).state.outputs?.[name]?.value;
+  if (name !== RECONCILER_STATE_RECONCILIATION.outputReconciliation.name || canonicalJson(change?.actions) !== canonicalJson(["update"]) || typeof change?.before !== "string" || change.before !== (expectedBefore ?? beforeOutput) || change.after !== RECONCILER_STATE_RECONCILIATION.outputReconciliation.after || change.before_sensitive !== false || change.after_sensitive !== false || change.before_unknown !== false || change.after_unknown !== false) throw new Error("Refresh-only plan output reconciliation is not exact.");
+  return Object.freeze({ name, actions: ["update"], before: change.before, after: change.after, sensitive: false, unknown: false });
+};
+const assertPlanSemantics = (value) => {
+  exact(value, ["resourceDrift", "refreshOnly", "terraformResourceAddCount", "terraformResourceChangeCount", "terraformResourceDestroyCount", "exactTwoFieldDrift", "outputDrift", "outputReconciliation"], "State reconciliation plan semantics");
+  exact(value.outputReconciliation, outputTransitionFields, "State reconciliation output reconciliation");
+  if (canonicalJson(value.resourceDrift) !== canonicalJson(RECONCILER_STATE_RECONCILIATION.drift) || value.refreshOnly !== true || value.terraformResourceAddCount !== 0 || value.terraformResourceChangeCount !== 0 || value.terraformResourceDestroyCount !== 0 || value.exactTwoFieldDrift !== true || value.outputDrift !== true || value.outputReconciliation.name !== RECONCILER_STATE_RECONCILIATION.outputReconciliation.name || canonicalJson(value.outputReconciliation.actions) !== canonicalJson(["update"]) || !SHA256.test(value.outputReconciliation.before || "") || value.outputReconciliation.after !== RECONCILER_STATE_RECONCILIATION.outputReconciliation.after || value.outputReconciliation.sensitive !== false || value.outputReconciliation.unknown !== false) throw new Error("State reconciliation plan semantics are invalid.");
+  return value;
+};
+
+export function assertExactReconcilerRefreshOnlyPlan(plan, { stateBytes, expectedOutputBefore } = {}) {
   if (!plan || plan.format_version !== "1.2" || plan.terraform_version !== INSTALLATION.terraformVersion || plan.errored !== false || plan.complete !== true || plan.applyable !== true || !Array.isArray(plan.resource_drift)) throw new Error("Refresh-only plan envelope is invalid.");
   if (plan.resource_changes !== undefined && (!Array.isArray(plan.resource_changes) || plan.resource_changes.some(({ change }) => ![["no-op"], ["read"]].some((actions) => canonicalJson(change?.actions) === canonicalJson(actions))))) throw new Error("Refresh-only plan contains an actionable resource operation.");
-  if (plan.output_changes && Object.values(plan.output_changes).some(({ actions }) => actions && canonicalJson(actions) !== canonicalJson(["no-op"]))) throw new Error("Refresh-only plan changes an output.");
+  if (!Buffer.isBuffer(stateBytes)) throw new Error("Refresh-only plan requires the authenticated predecessor state.");
   if (plan.resource_drift.length !== RECONCILER_STATE_RECONCILIATION.drift.length) throw new Error("Refresh-only plan drift count is not exact.");
   const byAddress = new Map(plan.resource_drift.map((entry) => [entry?.address, entry]));
   if (byAddress.size !== RECONCILER_STATE_RECONCILIATION.drift.length) throw new Error("Refresh-only plan drift addresses are duplicated.");
   for (const expected of RECONCILER_STATE_RECONCILIATION.drift) exactDrift(byAddress.get(expected.address), expected);
-  return Object.freeze({ resourceDrift: RECONCILER_STATE_RECONCILIATION.drift, refreshOnly: true, terraformResourceAddCount: 0, terraformResourceChangeCount: 0, terraformResourceDestroyCount: 0, exactTwoFieldDrift: true, outputDrift: false });
+  return Object.freeze(assertPlanSemantics({ resourceDrift: RECONCILER_STATE_RECONCILIATION.drift, refreshOnly: true, terraformResourceAddCount: 0, terraformResourceChangeCount: 0, terraformResourceDestroyCount: 0, exactTwoFieldDrift: true, outputDrift: true, outputReconciliation: assertExactOutputReconciliation(plan, stateBytes, expectedOutputBefore) }));
 }
 
 export function assertCanonicalAttachmentTopology(value) {
@@ -129,17 +151,17 @@ export function createReconcilerStateReconciliationPreparation({ sourceSha, stat
   if (!SHA40.test(sourceSha || "")) throw new Error("State reconciliation source SHA is invalid.");
   const predecessorState = assertStateObject(stateObject, stateBytes);
   const topology = assertCanonicalAttachmentTopology(attachmentTopology);
-  const semantics = assertExactReconcilerRefreshOnlyPlan(planJson);
+  const semantics = assertExactReconcilerRefreshOnlyPlan(planJson, { stateBytes });
   if (!Buffer.isBuffer(planBytes) || !planBytes.length) throw new Error("Refresh-only saved plan is required.");
   const created = iso(preparedAt, "State reconciliation preparation timestamp");
-  const body = { schemaVersion: 1, kind: "PRODUCTION_INITIAL_ACTIVATION_RECONCILER_STATE_RECONCILIATION_PREPARATION", operation: RECONCILER_STATE_RECONCILIATION.operation, sourceSha, account: RECONCILER_STATE_RECONCILIATION.account, terraformRoot: RECONCILER_STATE_RECONCILIATION.terraformRoot, backend: RECONCILER_STATE_RECONCILIATION.backend, policyArn: RECONCILER_STATE_RECONCILIATION.policyArn, bootstrapRoleArn: RECONCILER_STATE_RECONCILIATION.bootstrapRoleArn, predecessorState, successorStateSha256: sha256(exactSuccessorState(stateBytes)), attachmentTopology: topology, attachmentTopologySha256: sha256(topology), drift: RECONCILER_STATE_RECONCILIATION.drift, driftSha256: sha256(RECONCILER_STATE_RECONCILIATION.drift), savedPlanSha256: sha256(planBytes), savedPlanByteLength: planBytes.length, planSemantics: semantics, createdAt: created.toISOString(), expiresAt: new Date(created.getTime() + RECONCILER_STATE_RECONCILIATION.maxAgeMs).toISOString() };
+  const body = { schemaVersion: 1, kind: "PRODUCTION_INITIAL_ACTIVATION_RECONCILER_STATE_RECONCILIATION_PREPARATION", operation: RECONCILER_STATE_RECONCILIATION.operation, sourceSha, account: RECONCILER_STATE_RECONCILIATION.account, terraformRoot: RECONCILER_STATE_RECONCILIATION.terraformRoot, backend: RECONCILER_STATE_RECONCILIATION.backend, policyArn: RECONCILER_STATE_RECONCILIATION.policyArn, bootstrapRoleArn: RECONCILER_STATE_RECONCILIATION.bootstrapRoleArn, predecessorState, successorStateSha256: sha256(exactSuccessorState(stateBytes, semantics)), attachmentTopology: topology, attachmentTopologySha256: sha256(topology), drift: RECONCILER_STATE_RECONCILIATION.drift, driftSha256: sha256(RECONCILER_STATE_RECONCILIATION.drift), savedPlanSha256: sha256(planBytes), savedPlanByteLength: planBytes.length, planSemantics: semantics, createdAt: created.toISOString(), expiresAt: new Date(created.getTime() + RECONCILER_STATE_RECONCILIATION.maxAgeMs).toISOString() };
   return Object.freeze({ ...body, preparationSha256: sha256(body) });
 }
 export function assertReconcilerStateReconciliationPreparation(value, { sourceSha, now = new Date(), allowExpired = false } = {}) {
   exact(value, preparationFields, "State reconciliation preparation");
   const { preparationSha256, ...body } = value;
-  const expectedSemantics = { resourceDrift: RECONCILER_STATE_RECONCILIATION.drift, refreshOnly: true, terraformResourceAddCount: 0, terraformResourceChangeCount: 0, terraformResourceDestroyCount: 0, exactTwoFieldDrift: true, outputDrift: false };
-  if (value.schemaVersion !== 1 || value.kind !== "PRODUCTION_INITIAL_ACTIVATION_RECONCILER_STATE_RECONCILIATION_PREPARATION" || value.operation !== RECONCILER_STATE_RECONCILIATION.operation || value.sourceSha !== sourceSha || !SHA40.test(sourceSha || "") || value.account !== RECONCILER_STATE_RECONCILIATION.account || value.terraformRoot !== RECONCILER_STATE_RECONCILIATION.terraformRoot || canonicalJson(value.backend) !== canonicalJson(RECONCILER_STATE_RECONCILIATION.backend) || value.policyArn !== RECONCILER_STATE_RECONCILIATION.policyArn || value.bootstrapRoleArn !== RECONCILER_STATE_RECONCILIATION.bootstrapRoleArn || !value.predecessorState?.stateExists || !SHA256.test(value.predecessorState.stateSha256 || "") || !SHA256.test(value.successorStateSha256 || "") || !Number.isSafeInteger(value.predecessorState.serial) || typeof value.predecessorState.lineage !== "string" || !value.predecessorState.versionId || !value.predecessorState.etag || canonicalJson(value.drift) !== canonicalJson(RECONCILER_STATE_RECONCILIATION.drift) || value.driftSha256 !== sha256(value.drift) || value.attachmentTopologySha256 !== sha256(assertCanonicalAttachmentTopology(value.attachmentTopology)) || !SHA256.test(value.savedPlanSha256 || "") || !Number.isSafeInteger(value.savedPlanByteLength) || value.savedPlanByteLength < 1 || canonicalJson(value.planSemantics) !== canonicalJson(expectedSemantics) || value.preparationSha256 !== sha256(body)) throw new Error("State reconciliation preparation binding is invalid.");
+  if (value.schemaVersion !== 1 || value.kind !== "PRODUCTION_INITIAL_ACTIVATION_RECONCILER_STATE_RECONCILIATION_PREPARATION" || value.operation !== RECONCILER_STATE_RECONCILIATION.operation || value.sourceSha !== sourceSha || !SHA40.test(sourceSha || "") || value.account !== RECONCILER_STATE_RECONCILIATION.account || value.terraformRoot !== RECONCILER_STATE_RECONCILIATION.terraformRoot || canonicalJson(value.backend) !== canonicalJson(RECONCILER_STATE_RECONCILIATION.backend) || value.policyArn !== RECONCILER_STATE_RECONCILIATION.policyArn || value.bootstrapRoleArn !== RECONCILER_STATE_RECONCILIATION.bootstrapRoleArn || !value.predecessorState?.stateExists || !SHA256.test(value.predecessorState.stateSha256 || "") || !SHA256.test(value.successorStateSha256 || "") || !Number.isSafeInteger(value.predecessorState.serial) || typeof value.predecessorState.lineage !== "string" || !value.predecessorState.versionId || !value.predecessorState.etag || canonicalJson(value.drift) !== canonicalJson(RECONCILER_STATE_RECONCILIATION.drift) || value.driftSha256 !== sha256(value.drift) || value.attachmentTopologySha256 !== sha256(assertCanonicalAttachmentTopology(value.attachmentTopology)) || !SHA256.test(value.savedPlanSha256 || "") || !Number.isSafeInteger(value.savedPlanByteLength) || value.savedPlanByteLength < 1 || value.preparationSha256 !== sha256(body)) throw new Error("State reconciliation preparation binding is invalid.");
+  assertPlanSemantics(value.planSemantics);
   const created = iso(value.createdAt, "State reconciliation preparation creation timestamp"); const expires = iso(value.expiresAt, "State reconciliation preparation expiry timestamp");
   if (expires.getTime() - created.getTime() !== RECONCILER_STATE_RECONCILIATION.maxAgeMs || (!allowExpired && (now < created || now > expires))) throw new Error("State reconciliation preparation is stale.");
   return value;
@@ -184,8 +206,8 @@ export function createReconcilerStateReconciliationRecoveryPreparation({ sourceS
 
 export function assertReconcilerStateReconciliationRecoveryPreparation(value, { sourceSha, now = new Date() } = {}) {
   exact(value, recoveryPreparationFields, "State reconciliation recovery preparation"); const { recoveryPreparationSha256, ...body } = value;
-  const expectedSemantics = { resourceDrift: RECONCILER_STATE_RECONCILIATION.drift, refreshOnly: true, terraformResourceAddCount: 0, terraformResourceChangeCount: 0, terraformResourceDestroyCount: 0, exactTwoFieldDrift: true, outputDrift: false };
-  if (value.schemaVersion !== 1 || value.kind !== "PRODUCTION_INITIAL_ACTIVATION_RECONCILER_STATE_RECONCILIATION_RECOVERY_PREPARATION" || value.operation !== RECONCILER_STATE_RECONCILIATION.operation || value.sourceSha !== sourceSha || !SHA40.test(value.sourceSha || "") || !SHA40.test(value.originalSourceSha || "") || !SHA256.test(value.originalPreparationSha256 || "") || !SHA256.test(value.originalAuthorizationSha256 || "") || !/^[1-9][0-9]*$/.test(value.originalAuthorizationWorkflowRunId || "") || !/^[1-9][0-9]*$/.test(value.originalAuthorizationWorkflowRunAttempt || "") || !SHA256.test(value.successorStateSha256 || "") || !SHA256.test(value.savedPlanSha256 || "") || canonicalJson(value.planSemantics) !== canonicalJson(expectedSemantics) || !SHA256.test(value.driftSha256 || "") || canonicalJson(assertCanonicalAttachmentTopology(value.attachmentTopology)) !== canonicalJson(value.attachmentTopology) || value.recoveryPreparationSha256 !== sha256(body)) throw new Error("State reconciliation recovery preparation binding is invalid.");
+  if (value.schemaVersion !== 1 || value.kind !== "PRODUCTION_INITIAL_ACTIVATION_RECONCILER_STATE_RECONCILIATION_RECOVERY_PREPARATION" || value.operation !== RECONCILER_STATE_RECONCILIATION.operation || value.sourceSha !== sourceSha || !SHA40.test(value.sourceSha || "") || !SHA40.test(value.originalSourceSha || "") || !SHA256.test(value.originalPreparationSha256 || "") || !SHA256.test(value.originalAuthorizationSha256 || "") || !/^[1-9][0-9]*$/.test(value.originalAuthorizationWorkflowRunId || "") || !/^[1-9][0-9]*$/.test(value.originalAuthorizationWorkflowRunAttempt || "") || !SHA256.test(value.successorStateSha256 || "") || !SHA256.test(value.savedPlanSha256 || "") || !SHA256.test(value.driftSha256 || "") || canonicalJson(assertCanonicalAttachmentTopology(value.attachmentTopology)) !== canonicalJson(value.attachmentTopology) || value.recoveryPreparationSha256 !== sha256(body)) throw new Error("State reconciliation recovery preparation binding is invalid.");
+  assertPlanSemantics(value.planSemantics);
   assertBoundStateIdentity(value.predecessorState, "State reconciliation recovery predecessor state");
   assertBoundStateIdentity(value.successorStateObject, "State reconciliation recovery successor state");
   if (value.successorStateObject.lineage !== value.predecessorState.lineage || value.successorStateObject.serial !== value.predecessorState.serial + 1 || value.successorStateObject.versionId === value.predecessorState.versionId || value.successorStateObject.etag === value.predecessorState.etag) throw new Error("State reconciliation recovery successor identity is invalid.");
@@ -211,10 +233,10 @@ export function assertReconcilerStateReconciliationRecoveryAuthorization(value, 
   return value;
 }
 
-export function assertExactStateSuccessor({ beforeBytes, afterBytes }) {
+export function assertExactStateSuccessor({ beforeBytes, afterBytes, planSemantics }) {
   const before = normalizedState(beforeBytes); const after = normalizedState(afterBytes);
   if (after.identity.lineage !== before.identity.lineage || after.identity.serial !== before.identity.serial + 1 || after.identity.stateSha256 === before.identity.stateSha256) throw new Error("State reconciliation successor identity is invalid.");
-  if (canonicalJson(after.state) !== canonicalJson(exactSuccessorState(beforeBytes))) throw new Error("State reconciliation successor changes fields outside the exact allowance.");
+  if (canonicalJson(after.state) !== canonicalJson(exactSuccessorState(beforeBytes, assertPlanSemantics(planSemantics)))) throw new Error("State reconciliation successor changes fields outside the exact allowance.");
   const policy = stateResource(after.state, "aws_iam_policy.reconciler").instances[0].attributes;
   const role = stateResource(after.state, "aws_iam_role.reconciler").instances[0].attributes;
   if (policy.attachment_count !== 1 || canonicalJson(role.managed_policy_arns) !== canonicalJson([RECONCILER_STATE_RECONCILIATION.policyArn])) throw new Error("State reconciliation successor fields are not exact.");
@@ -227,7 +249,7 @@ const assertReplaySuccessor = ({ stateBytes, stateObject, preparation }) => {
   assertInstallationStateResources(stateBytes); return { ...identity, successorStateSha256: sha256(state) };
 };
 const assertAuthorizedExactStateSuccessor = ({ beforeBytes, stateBytes, stateObject, preparation }) => {
-  const successor = beforeBytes ? assertExactStateSuccessor({ beforeBytes, afterBytes: stateBytes }) : assertReplaySuccessor({ stateBytes, stateObject, preparation });
+  const successor = beforeBytes ? assertExactStateSuccessor({ beforeBytes, afterBytes: stateBytes, planSemantics: preparation.planSemantics }) : assertReplaySuccessor({ stateBytes, stateObject, preparation });
   if (successor.successorStateSha256 !== preparation.successorStateSha256) throw new Error("State reconciliation state is not the exact authorized successor.");
   return successor;
 };
@@ -267,7 +289,7 @@ export function executeReconcilerStateReconciliation({ sourceSha, preparation, a
   if (![applySavedPlan, readPostSnapshot, readPostTopology, renderNormalPlan, reauthenticateSource, verifyPostconditions].every((value) => typeof value === "function")) throw new Error("State reconciliation execution adapters are required.");
   assertReconcilerStateReconciliationAuthorization(authorization, preparation, { sourceSha, now });
   if (sha256(planBytes) !== preparation.savedPlanSha256 || !Number.isSafeInteger(planBytes?.length) || planBytes.length !== preparation.savedPlanByteLength) throw new Error("State reconciliation saved plan changed after authorization.");
-  const planSemantics = assertExactReconcilerRefreshOnlyPlan(planJson);
+  const planSemantics = assertExactReconcilerRefreshOnlyPlan(planJson, { stateBytes: beforeStateBytes, expectedOutputBefore: preparation.planSemantics.outputReconciliation.before });
   if (canonicalJson(planSemantics) !== canonicalJson(preparation.planSemantics)) throw new Error("State reconciliation plan semantics changed after authorization.");
   const complete = (result) => Object.freeze(assertReconcilerStateReconciliationResult({ ...result, planSemantics }, { preparation }));
   const currentObject = assertStateObject(beforeObject, beforeStateBytes);
