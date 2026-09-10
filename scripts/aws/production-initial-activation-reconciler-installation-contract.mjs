@@ -23,7 +23,7 @@ export const INSTALLATION = Object.freeze({
   authorizationWorkflowPath: ".github/workflows/authorize-production-initial-activation-policy-reconciler-installation.yml",
   authorizationArtifactName: "production-initial-activation-policy-reconciler-installation-authorization",
   expectedAddresses: Object.freeze(["aws_iam_role.reconciler", "aws_iam_policy.reconciler", "aws_iam_role_policy_attachment.reconciler", "aws_iam_role.mixed_recovery", "aws_iam_policy.mixed_recovery", "aws_iam_role_policy_attachment.mixed_recovery"]),
-  maxAwsMutations: Object.freeze({ "iam:CreateRole": 2, "iam:CreatePolicy": 2, "iam:AttachRolePolicy": 2, "iam:UpdateAssumeRolePolicy": 0, "iam:PutRolePolicy": 0, "iam:CreatePolicyVersion": 2 }),
+  maxAwsMutations: Object.freeze({ "iam:CreateRole": 2, "iam:CreatePolicy": 2, "iam:AttachRolePolicy": 2, "iam:UpdateAssumeRolePolicy": 1, "iam:PutRolePolicy": 0, "iam:CreatePolicyVersion": 2 }),
 });
 
 export const INSTALLATION_BACKEND = Object.freeze({ type: "s3", bucket: INSTALLATION.backend.bucket, key: INSTALLATION.backend.key, region: INSTALLATION.backend.region, encrypt: INSTALLATION.backend.encrypt, use_lockfile: INSTALLATION.backend.useLockfile, workspace: INSTALLATION.backend.workspace });
@@ -37,6 +37,7 @@ const sourceFile = (relative) => path.join(sourceRoot, relative);
 const sourceJson = (relative) => JSON.parse(read(sourceFile(relative)));
 const sourceHashes = () => Object.freeze({
   trustPolicySha256: sha256(read(sourceFile(`${INSTALLATION.terraformRoot}/trust-policy.json`))),
+  mixedRecoveryTrustPolicySha256: sha256(read(sourceFile(`${INSTALLATION.terraformRoot}/mixed-recovery-trust-policy.json`))),
   permissionsPolicySha256: sha256(read(sourceFile(`${INSTALLATION.terraformRoot}/permissions-policy.json`))),
   mixedRecoveryPermissionsPolicySha256: sha256(read(sourceFile(`${INSTALLATION.terraformRoot}/mixed-recovery-permissions-policy.json`))),
   installationContractSha256: sha256(read(sourceFile(`${INSTALLATION.terraformRoot}/installation-contract.json`))),
@@ -63,7 +64,7 @@ const ROLE_DESCRIPTION = "GitHub OIDC-only writer for the exact InitialActivatio
 const POLICY_DESCRIPTION = "Exact readback and CreatePolicyVersion capability for InitialActivationLifecycle reconciliation.";
 const MIXED_RECOVERY_ROLE_NAME = "mscqr-production-mixed-dual-slot-recovery-executor";
 const MIXED_RECOVERY_POLICY_NAME = "MSCQRProductionMixedDualSlotRecoveryExecutor";
-const MIXED_RECOVERY_ROLE_DESCRIPTION = "GitHub production-environment executor for the exact mixed dual-slot topology recovery.";
+const MIXED_RECOVERY_ROLE_DESCRIPTION = "GitHub workflow-dedicated environment executor for the exact mixed dual-slot topology recovery.";
 const MIXED_RECOVERY_POLICY_DESCRIPTION = "Exact readback and AWSCURRENT-removal capability for mixed dual-slot topology recovery.";
 const MIXED_RECOVERY_TAGS = Object.freeze({ ...EXPECTED_TAGS, Component: "mixed-dual-slot-topology-recovery" });
 export const installationPermissionsPredecessor = () => {
@@ -86,6 +87,7 @@ const EXPECTED_OUTPUT_CONFIGURATION = Object.freeze({
   mixed_recovery_permissions_policy_sha256: { expression: { references: ["path.module"] } },
   mixed_recovery_policy_arn: { expression: { references: ["aws_iam_policy.mixed_recovery.arn", "aws_iam_policy.mixed_recovery"] } },
   mixed_recovery_role_arn: { expression: { references: ["aws_iam_role.mixed_recovery.arn", "aws_iam_role.mixed_recovery"] } },
+  mixed_recovery_trust_policy_sha256: { expression: { references: ["path.module"] } },
   permissions_policy_sha256: { expression: { references: ["path.module"] } },
   policy_arn: { expression: { references: ["aws_iam_policy.reconciler.arn", "aws_iam_policy.reconciler"] } },
   policy_name: { expression: { references: ["aws_iam_policy.reconciler.name", "aws_iam_policy.reconciler"] } },
@@ -192,7 +194,7 @@ export function assertInstallationPlan(plan) {
   for (const entry of changes) {
     const action = JSON.stringify(entry.change?.actions);
     const update = action === JSON.stringify(["update"]);
-    if (entry.mode !== "managed" || ![JSON.stringify(["create"]), JSON.stringify(["no-op"]), JSON.stringify(["update"])].includes(action) || update && entry.address !== "aws_iam_policy.reconciler") throw new Error("Installation plan contains an unreviewed resource action.");
+    if (entry.mode !== "managed" || ![JSON.stringify(["create"]), JSON.stringify(["no-op"]), JSON.stringify(["update"])].includes(action) || update && !["aws_iam_policy.reconciler", "aws_iam_role.mixed_recovery"].includes(entry.address)) throw new Error("Installation plan contains an unreviewed resource action.");
     const expectedType = entry.address.startsWith("aws_iam_role_policy_attachment.") ? "aws_iam_role_policy_attachment" : entry.address.startsWith("aws_iam_role.") ? "aws_iam_role" : "aws_iam_policy";
     const expectedName = entry.address.endsWith(".mixed_recovery") ? "mixed_recovery" : "reconciler";
     if (entry.type !== expectedType || entry.name !== expectedName || entry.provider_name !== "registry.terraform.io/hashicorp/aws") throw new Error("Installation plan resource identity is not exact.");
@@ -210,7 +212,8 @@ export function assertInstallationPlan(plan) {
         if (!before || before.arn !== INSTALLATION.policyArn || canonicalJson(policyValue(before.policy, "Installation plan predecessor permissions policy")) !== canonicalJson(installationPermissionsPredecessor()) || canonicalJson({ ...before, policy: after.policy }) !== canonicalJson(after)) throw new Error("Installation plan policy update predecessor is not exact.");
       }
     } else if (entry.address === "aws_iam_role.mixed_recovery") {
-      if (after.name !== MIXED_RECOVERY_ROLE_NAME || after.path !== "/" || after.description !== MIXED_RECOVERY_ROLE_DESCRIPTION || after.force_detach_policies !== false || after.max_session_duration !== 3600 || after.permissions_boundary !== null || canonicalJson(after.tags) !== canonicalJson(MIXED_RECOVERY_TAGS) || canonicalJson(after.tags_all) !== canonicalJson(MIXED_RECOVERY_TAGS) || canonicalJson(policyValue(after.assume_role_policy, "Mixed recovery trust policy")) !== canonicalJson(sourceJson(`${INSTALLATION.terraformRoot}/trust-policy.json`)) || !create && after.arn !== INSTALLATION.mixedRecoveryRoleArn) throw new Error("Mixed recovery installation role contract is not exact.");
+      if (after.name !== MIXED_RECOVERY_ROLE_NAME || after.path !== "/" || after.description !== MIXED_RECOVERY_ROLE_DESCRIPTION || after.force_detach_policies !== false || after.max_session_duration !== 3600 || after.permissions_boundary !== null || canonicalJson(after.tags) !== canonicalJson(MIXED_RECOVERY_TAGS) || canonicalJson(after.tags_all) !== canonicalJson(MIXED_RECOVERY_TAGS) || canonicalJson(policyValue(after.assume_role_policy, "Mixed recovery trust policy")) !== canonicalJson(sourceJson(`${INSTALLATION.terraformRoot}/mixed-recovery-trust-policy.json`)) || !create && after.arn !== INSTALLATION.mixedRecoveryRoleArn) throw new Error("Mixed recovery installation role contract is not exact.");
+      if (update && canonicalJson({ ...entry.change.before, assume_role_policy: after.assume_role_policy }) !== canonicalJson(after)) throw new Error("Mixed recovery trust update predecessor is not exact.");
     } else if (entry.address === "aws_iam_policy.mixed_recovery") {
       if (after.name !== MIXED_RECOVERY_POLICY_NAME || after.path !== "/" || after.description !== MIXED_RECOVERY_POLICY_DESCRIPTION || after.delay_after_policy_creation_in_ms !== null || canonicalJson(after.tags) !== canonicalJson(MIXED_RECOVERY_TAGS) || canonicalJson(after.tags_all) !== canonicalJson(MIXED_RECOVERY_TAGS) || canonicalJson(policyValue(after.policy, "Mixed recovery permissions policy")) !== canonicalJson(sourceJson(`${INSTALLATION.terraformRoot}/mixed-recovery-permissions-policy.json`)) || !create && after.arn !== INSTALLATION.mixedRecoveryPolicyArn) throw new Error("Mixed recovery installation policy contract is not exact.");
     } else if (entry.address === "aws_iam_role_policy_attachment.reconciler") {
@@ -303,16 +306,17 @@ export function createInstallationPreparation({ sourceSha, state, livePredecesso
   if (!state || typeof state.stateExists !== "boolean") throw new Error("Installation predecessor state identity is required.");
   if (livePredecessor === "EXACT_PARTIAL" && !state.stateExists) throw new Error("Partial installation requires an authenticated Terraform state predecessor.");
   if (state.stateExists ? (Object.keys(state).sort().join(",") !== "lineage,serial,stateExists,stateSha256" || typeof state.lineage !== "string" || !Number.isSafeInteger(state.serial) || !SHA256.test(state.stateSha256 || "")) : Object.keys(state).length !== 1) throw new Error("Installation predecessor state identity is malformed.");
-  if (!["ABSENT", "EXACT_PARTIAL", "EXACT_UPDATE", "EXACT_EXPANSION", "EXACT_COMPLETE"].includes(livePredecessor)) throw new Error("Installation live predecessor classification is invalid.");
+  if (!["ABSENT", "EXACT_PARTIAL", "EXACT_UPDATE", "EXACT_TRUST_UPDATE", "EXACT_EXPANSION", "EXACT_COMPLETE"].includes(livePredecessor)) throw new Error("Installation live predecessor classification is invalid.");
   if (livePredecessor === "UNEXPECTED") throw new Error("Unexpected installation predecessor must fail closed.");
   if (!Array.isArray(livePredecessorAddresses) || new Set(livePredecessorAddresses).size !== livePredecessorAddresses.length || livePredecessorAddresses.some((address) => !INSTALLATION.expectedAddresses.includes(address)) || JSON.stringify(livePredecessorAddresses) !== JSON.stringify([...livePredecessorAddresses].sort())) throw new Error("Installation live predecessor resource set is invalid.");
   const semantics = assertInstallationPlan(planJson);
   if (livePredecessor === "ABSENT" && (semantics.createCount !== INSTALLATION.expectedAddresses.length || semantics.noOpCount !== 0)
     || livePredecessor === "EXACT_PARTIAL" && (semantics.createCount < 1 || semantics.createCount >= INSTALLATION.expectedAddresses.length || semantics.noOpCount !== INSTALLATION.expectedAddresses.length - semantics.createCount)
     || livePredecessor === "EXACT_UPDATE" && (semantics.createCount !== 0 || semantics.updateCount !== 1 || semantics.changedAddresses[0] !== "aws_iam_policy.reconciler" || semantics.noOpCount !== INSTALLATION.expectedAddresses.length - 1)
+    || livePredecessor === "EXACT_TRUST_UPDATE" && (semantics.createCount !== 0 || semantics.updateCount !== 1 || semantics.changedAddresses[0] !== "aws_iam_role.mixed_recovery" || semantics.noOpCount !== INSTALLATION.expectedAddresses.length - 1)
     || livePredecessor === "EXACT_EXPANSION" && (semantics.createCount !== 3 || semantics.updateCount > 1 || semantics.updateCount === 1 && !semantics.changedAddresses.includes("aws_iam_policy.reconciler") || semantics.noOpCount !== 3 - semantics.updateCount)
     || livePredecessor === "EXACT_COMPLETE" && (semantics.createCount !== 0 || semantics.updateCount !== 0 || semantics.noOpCount !== INSTALLATION.expectedAddresses.length)
-    || JSON.stringify(livePredecessorAddresses) !== JSON.stringify(["EXACT_UPDATE", "EXACT_EXPANSION"].includes(livePredecessor) ? (livePredecessor === "EXACT_UPDATE" ? [...INSTALLATION.expectedAddresses].sort() : ["aws_iam_policy.reconciler", "aws_iam_role.reconciler", "aws_iam_role_policy_attachment.reconciler"].sort()) : semantics.noOpAddresses)) throw new Error("Installation plan does not match the authenticated live predecessor.");
+    || JSON.stringify(livePredecessorAddresses) !== JSON.stringify(["EXACT_UPDATE", "EXACT_TRUST_UPDATE", "EXACT_EXPANSION"].includes(livePredecessor) ? (["EXACT_UPDATE", "EXACT_TRUST_UPDATE"].includes(livePredecessor) ? [...INSTALLATION.expectedAddresses].sort() : ["aws_iam_policy.reconciler", "aws_iam_role.reconciler", "aws_iam_role_policy_attachment.reconciler"].sort()) : semantics.noOpAddresses)) throw new Error("Installation plan does not match the authenticated live predecessor.");
   if (!Buffer.isBuffer(planBytes) || planBytes.length < 1) throw new Error("Saved Terraform plan bytes are required.");
   const body = {
     schemaVersion: INSTALLATION.schemaVersion, kind: "PRODUCTION_INITIAL_ACTIVATION_POLICY_RECONCILER_INSTALLATION_PREPARATION", operation: INSTALLATION.operation,
@@ -342,10 +346,11 @@ export function assertInstallationPreparation(value, { sourceSha, planBytes } = 
     || ![0, 1].includes(value.planSemantics.updateCount) || value.planSemantics.deleteCount !== 0 || value.planSemantics.replaceCount !== 0
     || value.planSemantics.changedAddresses.length !== value.planSemantics.resourceChangeCount || JSON.stringify(value.planSemantics.changedAddresses) !== JSON.stringify([...value.planSemantics.changedAddresses].sort()) || value.planSemantics.changedAddresses.some((address) => !INSTALLATION.expectedAddresses.includes(address))
     || value.planSemantics.noOpAddresses.length !== value.planSemantics.noOpCount || JSON.stringify(value.planSemantics.noOpAddresses) !== JSON.stringify([...value.planSemantics.noOpAddresses].sort()) || value.planSemantics.noOpAddresses.some((address) => !INSTALLATION.expectedAddresses.includes(address))
-    || JSON.stringify(value.livePredecessorAddresses) !== JSON.stringify(value.livePredecessor === "EXACT_UPDATE" ? [...INSTALLATION.expectedAddresses].sort() : value.livePredecessor === "EXACT_EXPANSION" ? ["aws_iam_policy.reconciler", "aws_iam_role.reconciler", "aws_iam_role_policy_attachment.reconciler"].sort() : value.planSemantics.noOpAddresses)
+    || JSON.stringify(value.livePredecessorAddresses) !== JSON.stringify(["EXACT_UPDATE", "EXACT_TRUST_UPDATE"].includes(value.livePredecessor) ? [...INSTALLATION.expectedAddresses].sort() : value.livePredecessor === "EXACT_EXPANSION" ? ["aws_iam_policy.reconciler", "aws_iam_role.reconciler", "aws_iam_role_policy_attachment.reconciler"].sort() : value.planSemantics.noOpAddresses)
     || value.livePredecessor === "ABSENT" && value.planSemantics.createCount !== INSTALLATION.expectedAddresses.length
     || value.livePredecessor === "EXACT_PARTIAL" && (value.planSemantics.createCount < 1 || value.planSemantics.createCount >= INSTALLATION.expectedAddresses.length)
     || value.livePredecessor === "EXACT_UPDATE" && (value.planSemantics.updateCount !== 1 || value.planSemantics.changedAddresses[0] !== "aws_iam_policy.reconciler")
+    || value.livePredecessor === "EXACT_TRUST_UPDATE" && (value.planSemantics.updateCount !== 1 || value.planSemantics.changedAddresses[0] !== "aws_iam_role.mixed_recovery")
     || value.livePredecessor === "EXACT_EXPANSION" && (value.planSemantics.createCount !== 3 || value.planSemantics.updateCount > 1 || value.planSemantics.updateCount === 1 && !value.planSemantics.changedAddresses.includes("aws_iam_policy.reconciler"))
     || value.livePredecessor === "EXACT_COMPLETE" && value.planSemantics.resourceChangeCount !== 0) throw new Error("Installation preparation plan semantics are not exact.");
   return value;

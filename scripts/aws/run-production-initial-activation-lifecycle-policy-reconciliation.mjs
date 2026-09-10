@@ -60,8 +60,7 @@ export function readInitialActivationLifecyclePolicyLiveState(run) {
     marker = page.Marker;
   }
   if (policy?.Arn !== INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn || role?.Arn !== INITIAL_ACTIVATION_POLICY_RECONCILIATION.releaseRoleArn || !Array.isArray(versions)) throw new Error("Initial activation lifecycle policy live read is malformed.");
-  const policyVersionIds = versions.map(({ VersionId }) => VersionId).sort((left, right) => Number(left.slice(1)) - Number(right.slice(1)));
-  return { policyArn: policy.Arn, defaultVersionId, document: version?.Document, policyVersionIds, policyVersionCount: versions.length, releaseRolePolicyArns: attached.map(({ PolicyArn }) => PolicyArn).sort(), targetPolicyRoles: entityPages.flatMap(({ PolicyRoles }) => PolicyRoles.map(({ RoleName }) => RoleName)).sort(), targetPolicyUsers: entityPages.flatMap(({ PolicyUsers }) => PolicyUsers.map(({ UserName }) => UserName)).sort(), targetPolicyGroups: entityPages.flatMap(({ PolicyGroups }) => PolicyGroups.map(({ GroupName }) => GroupName)).sort(), permissionsBoundaryUsageCount: policy.PermissionsBoundaryUsageCount };
+  return { policyArn: policy.Arn, defaultVersionId, document: version?.Document, policyVersionCount: versions.length, releaseRolePolicyArns: attached.map(({ PolicyArn }) => PolicyArn).sort(), targetPolicyRoles: entityPages.flatMap(({ PolicyRoles }) => PolicyRoles.map(({ RoleName }) => RoleName)).sort(), targetPolicyUsers: entityPages.flatMap(({ PolicyUsers }) => PolicyUsers.map(({ UserName }) => UserName)).sort(), targetPolicyGroups: entityPages.flatMap(({ PolicyGroups }) => PolicyGroups.map(({ GroupName }) => GroupName)).sort(), permissionsBoundaryUsageCount: policy.PermissionsBoundaryUsageCount };
 }
 
 export function runInitialActivationLifecyclePolicyReconciliation(argv = process.argv.slice(2), deps = {}) {

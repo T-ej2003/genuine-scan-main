@@ -179,6 +179,15 @@ const MIXED_DUAL_SLOT_RECOVERY_IAM_PREFLIGHT_CAPABILITIES = Object.freeze([
   ["mixed-recovery-iam-preflight-read-resource-policy", "secretsmanager:GetResourcePolicy", MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES],
 ]);
 
+const MIXED_DUAL_SLOT_RECOVERY_EXECUTION_CAPABILITIES = Object.freeze([
+  ["mixed-recovery-executor-identify", "sts:GetCallerIdentity", ["*"], "scripts/aws/run-production-mixed-dual-slot-topology-recovery.mjs"],
+  ["mixed-recovery-executor-describe-service", "ecs:DescribeServices", ["*"], "scripts/aws/run-production-mixed-dual-slot-topology-recovery.mjs"],
+  ["mixed-recovery-executor-describe-task-definition", "ecs:DescribeTaskDefinition", ["*"], "scripts/aws/run-production-mixed-dual-slot-topology-recovery.mjs"],
+  ["mixed-recovery-executor-describe-secret", "secretsmanager:DescribeSecret", MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, "scripts/aws/recover-production-mixed-dual-slot-topology.mjs"],
+  ["mixed-recovery-executor-get-secret-value", "secretsmanager:GetSecretValue", MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, "scripts/aws/recover-production-mixed-dual-slot-topology.mjs"],
+  ["mixed-recovery-remove-awscurrent", "secretsmanager:UpdateSecretVersionStage", MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, "scripts/aws/recover-production-mixed-dual-slot-topology.mjs"],
+]);
+
 const STAGE_A_PRODUCTION_ARTIFACTS_CAPABILITIES = Object.freeze([
   ["initial-activation-policy-reconciliation-root-read-reservation", "initial-activation-lifecycle", "ROOT_OPERATOR", "s3:GetObject", [PRODUCTION_ACTIVATION_LIFECYCLE.initialActivationPolicyReconciliationReservationArn], false, "infra/aws/terraform/production-green-stage-a/main.tf"],
   ["initial-activation-policy-reconciliation-root-conditional-create-reservation", "initial-activation-lifecycle", "ROOT_OPERATOR", "s3:PutObject", [PRODUCTION_ACTIVATION_LIFECYCLE.initialActivationPolicyReconciliationReservationArn], true, "infra/aws/terraform/production-green-stage-a/main.tf"],
@@ -300,7 +309,7 @@ const FORWARD_RECOVERY_CAPABILITIES = Object.freeze([
 ]);
 
 const PHASE_CAPABILITY_REQUIREMENTS = Object.freeze({
-  "mixed-dual-slot-recovery-execution": ["mixed-recovery-remove-awscurrent"],
+  "mixed-dual-slot-recovery-execution": MIXED_DUAL_SLOT_RECOVERY_EXECUTION_CAPABILITIES.map(([id]) => id),
   "canonical-backend-recovery": RECOVERY_CAPABILITIES.map(([id]) => id),
   "backend-health-recovery": [
     "manifest-backend-health-recovery-list-service-deployments",
@@ -356,6 +365,13 @@ export function assertInitialActivationReconcilerAuthority({ action, resources }
     expectedVersion: "installed",
     expectedPolicySha256: sha256(fs.readFileSync(path.join(root, INITIAL_ACTIVATION_RECONCILER_POLICY_SOURCE))),
   };
+}
+
+function assertMixedRecoveryExecutorAuthority({ action, resources } = {}, policy = readJson(MIXED_DUAL_SLOT_RECOVERY_EXECUTION_POLICY_PATH)) {
+  const statement = policy.Statement?.find((candidate) => candidate.Effect === "Allow" && asArray(candidate.Action).includes(action)
+    && resources.every((resource) => asArray(candidate.Resource).includes(resource)));
+  if (!statement) throw new Error(`Mixed recovery executor policy does not authorize ${action} on the exact resource set.`);
+  return { sourceFile: MIXED_DUAL_SLOT_RECOVERY_EXECUTION_POLICY_PATH, sid: statement.Sid, livePolicyArn: MIXED_DUAL_SLOT_RECOVERY_EXECUTION_POLICY_ARN, expectedVersion: "terraform-managed", expectedPolicySha256: sha256(fs.readFileSync(path.join(root, MIXED_DUAL_SLOT_RECOVERY_EXECUTION_POLICY_PATH))) };
 }
 
 function operatorAuthority(entry, forbidden) {
@@ -491,6 +507,7 @@ export function discoverAwsCliActions() {
   const mixedRecoverySource = fs.readFileSync(path.join(root, mixedRecoverySourceFile), "utf8");
   if (!/await send\(new UpdateSecretVersionStageCommand\(\{ SecretId: entry\.secretArn, VersionStage: "AWSCURRENT", RemoveFromVersionId: entry\.versionId \}\)\)/.test(mixedRecoverySource)) throw new Error("Mixed recovery mutation call is outside its reviewed execution context.");
   calls.push({ sourceFile: mixedRecoverySourceFile, sourceFunction: "executeMixedDualSlotRecovery", phase: "mixed-dual-slot-recovery-execution", identity: "MIXED_RECOVERY_EXECUTOR", action: "secretsmanager:UpdateSecretVersionStage", resources: [...MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES], capabilityId: "mixed-recovery-remove-awscurrent" });
+  for (const [capabilityId, action, resources, sourceFile] of MIXED_DUAL_SLOT_RECOVERY_EXECUTION_CAPABILITIES.slice(0, -1)) calls.push({ sourceFile, sourceFunction: capabilityId, phase: "mixed-dual-slot-recovery-execution", identity: "MIXED_RECOVERY_EXECUTOR", action, resources: [...resources], capabilityId });
   const mixedRecoveryRunnerSourceFile = "scripts/aws/run-production-mixed-dual-slot-topology-recovery.mjs";
   const mixedRecoveryRunnerSource = fs.readFileSync(path.join(root, mixedRecoveryRunnerSourceFile), "utf8");
   if (!/createMixedDualSlotRecoveryIamAttestation\(\{ preflight: iamCapabilityPreflight, sign: createRootAttestationKmsSigner\(\{ run: rootRun \}\) \}\)/.test(mixedRecoveryRunnerSource)) throw new Error("Mixed recovery IAM-attestation signing call is outside its reviewed preparation context.");
@@ -593,11 +610,11 @@ export function buildStageBDeploymentCapabilityGraph() {
     context: { account: STAGE_B.account, region: STAGE_B.region, targetRoleArn: MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN }, classification: "ADMIN_DIRECT_READ", probe: action === "iam:SimulatePrincipalPolicy" ? "administrator-simulation" : "administrator-live-read", probeIds: [],
     policy: { sourceFile: "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs", sid: id, livePolicyArn: null, expectedVersion: "protected-main-source", expectedPolicySha256: null }, required: true, mutation: false,
   }));
-  const mixedRecoveryMutation = {
-    id: "mixed-recovery-remove-awscurrent", phase: "mixed-dual-slot-recovery-execution", identity: "MIXED_RECOVERY_EXECUTOR", executor: "aws-sdk", sourceFile: "scripts/aws/recover-production-mixed-dual-slot-topology.mjs", sourceFunction: "executeMixedDualSlotRecovery", action: "secretsmanager:UpdateSecretVersionStage", resources: [...MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES],
-    context: { account: STAGE_B.account, region: STAGE_B.region, operation: "PRODUCTION_MIXED_DUAL_SLOT_TOPOLOGY_RECOVERY", mutationCountMaximum: 7 }, classification: "MIXED_DUAL_SLOT_RECOVERY_MUTATION", probe: "administrator-simulation", probeIds: [],
-    policy: { sourceFile: MIXED_DUAL_SLOT_RECOVERY_EXECUTION_POLICY_PATH, sid: "RemoveExactRecoveryAwscurrentLabels", livePolicyArn: MIXED_DUAL_SLOT_RECOVERY_EXECUTION_POLICY_ARN, expectedVersion: "terraform-managed", expectedPolicySha256: null }, required: true, mutation: true,
-  };
+  const mixedRecoveryExecution = MIXED_DUAL_SLOT_RECOVERY_EXECUTION_CAPABILITIES.map(([id, action, resources, sourceFile]) => ({
+    id, phase: "mixed-dual-slot-recovery-execution", identity: "MIXED_RECOVERY_EXECUTOR", executor: "aws-sdk", sourceFile, sourceFunction: id === "mixed-recovery-remove-awscurrent" ? "executeMixedDualSlotRecovery" : id, action, resources: [...resources],
+    context: { account: STAGE_B.account, region: STAGE_B.region, operation: "PRODUCTION_MIXED_DUAL_SLOT_TOPOLOGY_RECOVERY", mutationCountMaximum: 7 }, classification: action === "secretsmanager:UpdateSecretVersionStage" ? "MIXED_DUAL_SLOT_RECOVERY_MUTATION" : "MIXED_DUAL_SLOT_RECOVERY_READ", probe: "administrator-simulation", probeIds: [],
+    policy: assertMixedRecoveryExecutorAuthority({ action, resources }), required: true, mutation: action === "secretsmanager:UpdateSecretVersionStage",
+  }));
   const mixedRecoveryIamAttestationSigning = {
     id: "mixed-recovery-iam-attestation-sign", phase: "mixed-dual-slot-recovery-iam-preflight", identity: "ROOT_OPERATOR", executor: "aws-cli", sourceFile: "scripts/aws/run-production-mixed-dual-slot-topology-recovery.mjs", sourceFunction: "prepareMixedDualSlotRecoveryIamAttestation", action: "kms:Sign", resources: [ROOT_ATTESTATION_KEY_ALIAS_ARN],
     context: { account: STAGE_B.account, region: STAGE_B.region, operation: "PRODUCTION_MIXED_DUAL_SLOT_TOPOLOGY_RECOVERY" }, classification: "ROOT_GOVERNED_ATTESTATION_SIGNING", probe: "structural", probeIds: [],
@@ -636,7 +653,7 @@ export function buildStageBDeploymentCapabilityGraph() {
   });
   const runtime = terraformRuntimeActions().map((action) => ({ id: `runtime-${action.replace(/[^A-Za-z0-9]+/g, "-").toLowerCase()}`, phase: "runtime-activation-boundary", identity: "SERVICE_RUNTIME", executor: "lambda-or-ecs-role", sourceFile: terraformPath, sourceFunction: "generated runtime IAM policy", action, resources: ["terraform-derived-runtime-resource"], context: {}, classification: "SERVICE_RUNTIME_ACTION", probe: "structural", policy: { sourceFile: terraformPath, sid: "terraform-generated", livePolicyArn: "created-or-updated-by-stage-b", expectedVersion: "saved-plan", expectedPolicySha256: null }, required: false, mutation: !/^(?:ecr:|kms:Verify|secretsmanager:Get|s3:Get)/.test(action) }));
   const runtimeAdmin = RUNTIME_ADMIN_CAPABILITIES.map(([id, phase, action, resources, mutation]) => ({ id, phase, identity: "ADMINISTRATOR", executor: "aws-cli", sourceFile: phase === "runtime-consumability-convergence" ? "scripts/aws/converge-production-ecs-runtime-policy.mjs" : "scripts/aws/prepare-production-ecs-runtime-consumability.mjs", sourceFunction: id, action, resources, context: { account: STAGE_B.account, region: STAGE_B.region }, classification: mutation ? "ADMIN_IAM_OR_SIGNING_MUTATION" : "ADMIN_RUNTIME_CLOSURE_READ", probe: action === "iam:SimulatePrincipalPolicy" ? "administrator-simulation" : "administrator-live-read", probeIds: [], policy: { sourceFile: phase === "runtime-consumability-convergence" ? "scripts/aws/converge-production-ecs-runtime-policy.mjs" : "scripts/aws/production-ecs-runtime-consumability.mjs", sid: id, livePolicyArn: null, expectedVersion: "protected-main-source", expectedPolicySha256: null }, required: true, mutation }));
-  const capabilities = [...fixed, ...normalActivation, ...initialActivationPolicyReconciliation, ...initialActivationPreparation, ...providerReadonlyReconciliation, ...providerReadonlyPreparation, ...mixedRecoveryIamPreflight, mixedRecoveryIamAttestationSigning, mixedRecoveryMutation, ...stageAProductionArtifacts, ROOT_DROP_SIGNING, ...rootAttestationRelease, ...recovery, ...forwardRecovery, ...publisher, ...manifestCapabilities, ...checkerCapabilities, ...operatorCapabilities, ...runtimeAdmin, ...runtime].sort((a, b) => a.id.localeCompare(b.id));
+  const capabilities = [...fixed, ...normalActivation, ...initialActivationPolicyReconciliation, ...initialActivationPreparation, ...providerReadonlyReconciliation, ...providerReadonlyPreparation, ...mixedRecoveryIamPreflight, mixedRecoveryIamAttestationSigning, ...mixedRecoveryExecution, ...stageAProductionArtifacts, ROOT_DROP_SIGNING, ...rootAttestationRelease, ...recovery, ...forwardRecovery, ...publisher, ...manifestCapabilities, ...checkerCapabilities, ...operatorCapabilities, ...runtimeAdmin, ...runtime].sort((a, b) => a.id.localeCompare(b.id));
   return {
     schemaVersion: 1, deployment: "production-green-stage-b", account: "368992683803", region: "eu-west-2",
     phases: PHASES.map(([id, sourceFile], index) => ({ order: index + 1, id, sourceFile })),

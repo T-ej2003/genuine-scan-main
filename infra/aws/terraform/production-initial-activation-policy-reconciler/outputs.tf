@@ -33,3 +33,7 @@ output "mixed_recovery_policy_arn" {
 output "mixed_recovery_permissions_policy_sha256" {
   value = filesha256("${path.module}/mixed-recovery-permissions-policy.json")
 }
+
+output "mixed_recovery_trust_policy_sha256" {
+  value = filesha256("${path.module}/mixed-recovery-trust-policy.json")
+}

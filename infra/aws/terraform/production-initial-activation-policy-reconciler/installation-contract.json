@@ -9,7 +9,7 @@
     "iam:CreateRole": 2,
     "iam:CreatePolicy": 2,
     "iam:AttachRolePolicy": 2,
-    "iam:UpdateAssumeRolePolicy": 0,
+    "iam:UpdateAssumeRolePolicy": 1,
     "iam:PutRolePolicy": 0,
     "iam:CreatePolicyVersion": 2
   },

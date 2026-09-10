@@ -22,7 +22,7 @@ jobs:
   execute:
     name: Execute or resume exact seven-slot recovery
     runs-on: ubuntu-latest
-    environment: production
+    environment: production-mixed-dual-slot-recovery
     steps:
       - uses: actions/checkout@v4
         with:

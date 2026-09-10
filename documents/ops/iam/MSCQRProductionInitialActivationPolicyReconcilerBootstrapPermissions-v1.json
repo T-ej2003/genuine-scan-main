@@ -85,6 +85,12 @@
       "Resource": "arn:aws:iam::368992683803:role/mscqr-production-mixed-dual-slot-recovery-executor"
     },
     {
+      "Sid": "UpdateExactMixedRecoveryRoleTrust",
+      "Effect": "Allow",
+      "Action": "iam:UpdateAssumeRolePolicy",
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-mixed-dual-slot-recovery-executor"
+    },
+    {
       "Sid": "ReadExactReconcilerPolicy",
       "Effect": "Allow",
       "Action": [

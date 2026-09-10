@@ -32,6 +32,11 @@
         "sensitive": false,
         "type": "string",
         "value": "495ac0cf14ecee0a1b6f4ff0079827a3da31ef6fa0700b69cba5068bfa91fc8c"
+      },
+      "mixed_recovery_trust_policy_sha256": {
+        "sensitive": false,
+        "type": "string",
+        "value": "651ababed0769294bc5df8034f5be31f5010307a37b4899653ac91e252e3cc97"
       }
     },
     "root_module": {
@@ -400,9 +405,9 @@
         ],
         "before": {
           "arn": "arn:aws:iam::368992683803:role/mscqr-production-mixed-dual-slot-recovery-executor",
-          "assume_role_policy": "{\"Statement\":[{\"Action\":\"sts:AssumeRoleWithWebIdentity\",\"Condition\":{\"StringEquals\":{\"token.actions.githubusercontent.com:aud\":\"sts.amazonaws.com\",\"token.actions.githubusercontent.com:sub\":\"repo:T-ej2003/genuine-scan-main:environment:production\"}},\"Effect\":\"Allow\",\"Principal\":{\"Federated\":\"arn:aws:iam::368992683803:oidc-provider/token.actions.githubusercontent.com\"},\"Sid\":\"GitHubOidcProductionEnvironmentOnly\"}],\"Version\":\"2012-10-17\"}",
+          "assume_role_policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Sid\":\"ExactProtectedRecoveryEnvironmentOnly\",\"Effect\":\"Allow\",\"Principal\":{\"Federated\":\"arn:aws:iam::368992683803:oidc-provider/token.actions.githubusercontent.com\"},\"Action\":\"sts:AssumeRoleWithWebIdentity\",\"Condition\":{\"StringEquals\":{\"token.actions.githubusercontent.com:aud\":\"sts.amazonaws.com\",\"token.actions.githubusercontent.com:sub\":\"repo:T-ej2003/genuine-scan-main:environment:production-mixed-dual-slot-recovery\"}}}]}",
           "create_date": "2026-09-05T00:00:00Z",
-          "description": "GitHub production-environment executor for the exact mixed dual-slot topology recovery.",
+          "description": "GitHub workflow-dedicated environment executor for the exact mixed dual-slot topology recovery.",
           "force_detach_policies": false,
           "id": "mscqr-production-mixed-dual-slot-recovery-executor",
           "inline_policy": [],
@@ -430,9 +435,9 @@
         },
         "after": {
           "arn": "arn:aws:iam::368992683803:role/mscqr-production-mixed-dual-slot-recovery-executor",
-          "assume_role_policy": "{\"Statement\":[{\"Action\":\"sts:AssumeRoleWithWebIdentity\",\"Condition\":{\"StringEquals\":{\"token.actions.githubusercontent.com:aud\":\"sts.amazonaws.com\",\"token.actions.githubusercontent.com:sub\":\"repo:T-ej2003/genuine-scan-main:environment:production\"}},\"Effect\":\"Allow\",\"Principal\":{\"Federated\":\"arn:aws:iam::368992683803:oidc-provider/token.actions.githubusercontent.com\"},\"Sid\":\"GitHubOidcProductionEnvironmentOnly\"}],\"Version\":\"2012-10-17\"}",
+          "assume_role_policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Sid\":\"ExactProtectedRecoveryEnvironmentOnly\",\"Effect\":\"Allow\",\"Principal\":{\"Federated\":\"arn:aws:iam::368992683803:oidc-provider/token.actions.githubusercontent.com\"},\"Action\":\"sts:AssumeRoleWithWebIdentity\",\"Condition\":{\"StringEquals\":{\"token.actions.githubusercontent.com:aud\":\"sts.amazonaws.com\",\"token.actions.githubusercontent.com:sub\":\"repo:T-ej2003/genuine-scan-main:environment:production-mixed-dual-slot-recovery\"}}}]}",
           "create_date": "2026-09-05T00:00:00Z",
-          "description": "GitHub production-environment executor for the exact mixed dual-slot topology recovery.",
+          "description": "GitHub workflow-dedicated environment executor for the exact mixed dual-slot topology recovery.",
           "force_detach_policies": false,
           "id": "mscqr-production-mixed-dual-slot-recovery-executor",
           "inline_policy": [],
@@ -598,6 +603,11 @@
         "trust_policy_sha256": {
           "sensitive": false,
           "value": "495ac0cf14ecee0a1b6f4ff0079827a3da31ef6fa0700b69cba5068bfa91fc8c",
+          "type": "string"
+        },
+        "mixed_recovery_trust_policy_sha256": {
+          "sensitive": false,
+          "value": "651ababed0769294bc5df8034f5be31f5010307a37b4899653ac91e252e3cc97",
           "type": "string"
         }
       },
@@ -795,6 +805,13 @@
               "aws_iam_role.mixed_recovery"
             ]
           }
+        },
+        "mixed_recovery_trust_policy_sha256": {
+          "expression": {
+            "references": [
+              "path.module"
+            ]
+          }
         }
       },
       "resources": [
@@ -920,7 +937,7 @@
               ]
             },
             "description": {
-              "constant_value": "GitHub production-environment executor for the exact mixed dual-slot topology recovery."
+              "constant_value": "GitHub workflow-dedicated environment executor for the exact mixed dual-slot topology recovery."
             },
             "max_session_duration": {
               "constant_value": 3600

@@ -20,10 +20,10 @@
     "iam:CreateRole": 2,
     "iam:CreatePolicy": 2,
     "iam:AttachRolePolicy": 2,
-    "iam:UpdateAssumeRolePolicy": 0,
+    "iam:UpdateAssumeRolePolicy": 1,
     "iam:PutRolePolicy": 0,
     "iam:CreatePolicyVersion": 2
   },
-  "replay": "exact-complete-live-topology-is-zero-apply; exact legacy reconciler topology expands only by the dedicated mixed-recovery role, policy, and attachment; five-version or unexpected state fails closed",
+  "replay": "exact-complete-live-topology-is-zero-apply; the exact prior mixed-recovery trust has one source-bound trust-only update; exact legacy reconciler topology expands only by the dedicated mixed-recovery role, policy, and attachment; five-version or unexpected state fails closed",
   "postcondition": "canonical-read-only verification passes for both the reconciler and the dedicated mixed-recovery executor"
 }

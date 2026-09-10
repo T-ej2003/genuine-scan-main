@@ -29,10 +29,10 @@ export const MIXED_RECOVERY_EXECUTOR = Object.freeze({
   roleArn: "arn:aws:iam::368992683803:role/mscqr-production-mixed-dual-slot-recovery-executor",
   policyName: "MSCQRProductionMixedDualSlotRecoveryExecutor",
   policyArn: "arn:aws:iam::368992683803:policy/MSCQRProductionMixedDualSlotRecoveryExecutor",
-  trustPath: INITIAL_ACTIVATION_RECONCILER.trustPath,
+  trustPath: "infra/aws/terraform/production-initial-activation-policy-reconciler/mixed-recovery-trust-policy.json",
   permissionsPath: "infra/aws/terraform/production-initial-activation-policy-reconciler/mixed-recovery-permissions-policy.json",
   path: "/",
-  roleDescription: "GitHub production-environment executor for the exact mixed dual-slot topology recovery.",
+  roleDescription: "GitHub workflow-dedicated environment executor for the exact mixed dual-slot topology recovery.",
   policyDescription: "Exact readback and AWSCURRENT-removal capability for mixed dual-slot topology recovery.",
   tags: Object.freeze({ ...INITIAL_ACTIVATION_RECONCILER.tags, Component: "mixed-dual-slot-topology-recovery" }),
 });
@@ -92,9 +92,9 @@ export function readPolicyEntities(run, policyArn = INITIAL_ACTIVATION_RECONCILE
   return { roles, users, groups };
 }
 
-export function assertMixedRecoveryExecutorRoleMetadata(role) {
+export function assertMixedRecoveryExecutorRoleMetadata(role, { expectedTrust = readJson(MIXED_RECOVERY_EXECUTOR.trustPath) } = {}) {
   if (role?.Arn !== MIXED_RECOVERY_EXECUTOR.roleArn || role?.RoleName !== MIXED_RECOVERY_EXECUTOR.roleName || role?.Path !== "/" || role?.Description !== MIXED_RECOVERY_EXECUTOR.roleDescription || role?.MaxSessionDuration !== 3600 || Object.hasOwn(role, "PermissionsBoundary")) throw new Error("Mixed recovery executor role metadata is not exact.");
-  exactJson(decodeAwsDocument(role.AssumeRolePolicyDocument, "mixed recovery trust policy"), readJson(MIXED_RECOVERY_EXECUTOR.trustPath), "mixed recovery trust policy");
+  exactJson(decodeAwsDocument(role.AssumeRolePolicyDocument, "mixed recovery trust policy"), expectedTrust, "mixed recovery trust policy");
   const tagObject = Object.fromEntries((role.Tags || []).map(({ Key, Value }) => [Key, Value])); exactJson(tagObject, MIXED_RECOVERY_EXECUTOR.tags, "mixed recovery role tags");
   return role;
 }

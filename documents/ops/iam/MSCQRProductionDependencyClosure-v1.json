@@ -260,6 +260,118 @@
       "negativeTestPresent": true
     },
     {
+      "sourceFile": "scripts/aws/run-production-mixed-dual-slot-topology-recovery.mjs",
+      "action": "sts:GetCallerIdentity",
+      "capabilityId": "mixed-recovery-executor-identify",
+      "identity": "MIXED_RECOVERY_EXECUTOR",
+      "resources": [
+        "*"
+      ],
+      "sourceFunction": "mixed-recovery-executor-identify",
+      "reachableMode": [
+        "MIXED_DUAL_SLOT_RECOVERY"
+      ],
+      "executionPrincipal": "MIXED_RECOVERY_EXECUTOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-mixed-dual-slot-topology-recovery.mjs",
+      "action": "ecs:DescribeServices",
+      "capabilityId": "mixed-recovery-executor-describe-service",
+      "identity": "MIXED_RECOVERY_EXECUTOR",
+      "resources": [
+        "*"
+      ],
+      "sourceFunction": "mixed-recovery-executor-describe-service",
+      "reachableMode": [
+        "MIXED_DUAL_SLOT_RECOVERY"
+      ],
+      "executionPrincipal": "MIXED_RECOVERY_EXECUTOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-mixed-dual-slot-topology-recovery.mjs",
+      "action": "ecs:DescribeTaskDefinition",
+      "capabilityId": "mixed-recovery-executor-describe-task-definition",
+      "identity": "MIXED_RECOVERY_EXECUTOR",
+      "resources": [
+        "*"
+      ],
+      "sourceFunction": "mixed-recovery-executor-describe-task-definition",
+      "reachableMode": [
+        "MIXED_DUAL_SLOT_RECOVERY"
+      ],
+      "executionPrincipal": "MIXED_RECOVERY_EXECUTOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/recover-production-mixed-dual-slot-topology.mjs",
+      "action": "secretsmanager:DescribeSecret",
+      "capabilityId": "mixed-recovery-executor-describe-secret",
+      "identity": "MIXED_RECOVERY_EXECUTOR",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-pending-1CnWMp",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-private-pending-LZhc54",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-pending-uB3P1Q",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2"
+      ],
+      "sourceFunction": "mixed-recovery-executor-describe-secret",
+      "reachableMode": [
+        "MIXED_DUAL_SLOT_RECOVERY"
+      ],
+      "executionPrincipal": "MIXED_RECOVERY_EXECUTOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/recover-production-mixed-dual-slot-topology.mjs",
+      "action": "secretsmanager:GetSecretValue",
+      "capabilityId": "mixed-recovery-executor-get-secret-value",
+      "identity": "MIXED_RECOVERY_EXECUTOR",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-pending-1CnWMp",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-private-pending-LZhc54",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-pending-uB3P1Q",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2"
+      ],
+      "sourceFunction": "mixed-recovery-executor-get-secret-value",
+      "reachableMode": [
+        "MIXED_DUAL_SLOT_RECOVERY"
+      ],
+      "executionPrincipal": "MIXED_RECOVERY_EXECUTOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
       "sourceFile": "scripts/aws/recover-production-mixed-dual-slot-topology.mjs",
       "action": "secretsmanager:UpdateSecretVersionStage",
       "capabilityId": "mixed-recovery-remove-awscurrent",

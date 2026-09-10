@@ -16,6 +16,7 @@ const sourceSha = "a".repeat(40);
 const now = new Date("2026-09-05T12:00:00.000Z");
 const bootstrapPreparation = (classification = "ABSENT", predecessorPolicySha256 = null) => createBootstrapPreparation({ sourceSha, predecessor: { classification, predecessorPolicySha256 } });
 const trust = fs.readFileSync("infra/aws/terraform/production-initial-activation-policy-reconciler/trust-policy.json", "utf8");
+const mixedTrust = fs.readFileSync("infra/aws/terraform/production-initial-activation-policy-reconciler/mixed-recovery-trust-policy.json", "utf8");
 const permissions = fs.readFileSync("infra/aws/terraform/production-initial-activation-policy-reconciler/permissions-policy.json", "utf8");
 const mixedPermissions = fs.readFileSync("infra/aws/terraform/production-initial-activation-policy-reconciler/mixed-recovery-permissions-policy.json", "utf8");
 const capability = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionInitialActivationPolicyReconcilerInstallation-v1.json", "utf8"));
@@ -49,6 +50,10 @@ const preparation = createInstallationPreparation({ sourceSha, state: stateIdent
 const authorization = createInstallationAuthorization({ preparation, preparationArtifactSha256: preparation.preparationArtifactSha256, protectedEnvironmentApprovalEvidence: approval, sourceSha });
 const completePlan = fixture("complete");
 const updatePlan = fixture("update");
+const trustUpdatePlan = structuredClone(completePlan);
+const trustUpdateChange = trustUpdatePlan.resource_changes.find(({ address }) => address === "aws_iam_role.mixed_recovery").change;
+trustUpdateChange.actions = ["update"];
+trustUpdateChange.before = { ...trustUpdateChange.after, assume_role_policy: JSON.stringify(JSON.parse(trust)) };
 const updatePostState = JSON.stringify({ version: 4, terraform_version: "1.15.8", serial: 2, lineage: "first-install-lineage", outputs: {}, resources: updatePlan.resource_changes.map((entry) => ({ mode: entry.mode, type: entry.type, name: entry.name, provider: 'provider["registry.terraform.io/hashicorp/aws"]', instances: [{ schema_version: 0, attributes: entry.address === "aws_iam_policy.mixed_recovery" ? { ...entry.change.after, arn: MIXED_RECOVERY_EXECUTOR.policyArn, id: MIXED_RECOVERY_EXECUTOR.policyArn } : entry.change.after, sensitive_attributes: [] }] })) });
 const completePlanBytes = Buffer.from("exact-saved-noop-plan");
 const completePreparation = createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(installedState)), livePredecessor: "EXACT_COMPLETE", livePredecessorAddresses: allAddresses, planJson: completePlan, planBytes: completePlanBytes, preparedAt: now.toISOString() });
@@ -57,7 +62,8 @@ const reconcilerTags = Object.entries(INITIAL_ACTIVATION_RECONCILER.tags).map(([
 const mixedTags = Object.entries(MIXED_RECOVERY_EXECUTOR.tags).map(([Key, Value]) => ({ Key, Value }));
 const legacyBootstrapPolicy = (generation) => {
   const value = JSON.parse(fs.readFileSync(INSTALLATION_BOOTSTRAP.permissionsPath, "utf8"));
-  const mixedSids = new Set(["ReadExactMixedRecoveryRole", "ReadExactMixedRecoveryPolicy", "CreateExactMixedRecoveryRole", "CreateExactMixedRecoveryPolicy", "AttachExactMixedRecoveryPolicyToRole"]);
+  if (generation === 4) { value.Statement = value.Statement.filter(({ Sid }) => Sid !== "UpdateExactMixedRecoveryRoleTrust"); return value; }
+  const mixedSids = new Set(["ReadExactMixedRecoveryRole", "UpdateExactMixedRecoveryRoleTrust", "ReadExactMixedRecoveryPolicy", "CreateExactMixedRecoveryRole", "CreateExactMixedRecoveryPolicy", "AttachExactMixedRecoveryPolicyToRole"]);
   const omitted = generation === 1 ? new Set(["UpdateExactReconcilerPolicyVersion", "ReadExactProductionArtifactsBucketPolicy", "ReadOwnExactBootstrapInlinePolicy"]) : generation === 2 ? new Set(["ReadExactProductionArtifactsBucketPolicy", "ReadOwnExactBootstrapInlinePolicy"]) : new Set();
   value.Statement = value.Statement.filter(({ Sid }) => !mixedSids.has(Sid) && !omitted.has(Sid));
   const update = value.Statement.find(({ Sid }) => Sid === "UpdateExactReconcilerPolicyVersion");
@@ -68,7 +74,7 @@ const legacyBootstrapPolicy = (generation) => {
 const discoveryRun = ({ role = true, policy = true, mixedRole = Boolean(role && policy), mixedPolicy = Boolean(role && policy), document = JSON.parse(permissions), versions = [{ VersionId: "v1", IsDefaultVersion: true }], attached = [{ PolicyArn: INITIAL_ACTIVATION_RECONCILER.policyArn }], inline = [], entities = [{ PolicyRoles: [{ RoleName: INITIAL_ACTIVATION_RECONCILER.roleName }], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }], mixedAttached = [{ PolicyArn: MIXED_RECOVERY_EXECUTOR.policyArn }], mixedInline = [], mixedEntities = [{ PolicyRoles: [{ RoleName: MIXED_RECOVERY_EXECUTOR.roleName }], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }], policyPages } = {}) => (args) => {
   if (args[0] === "sts") return JSON.stringify({ Arn: "arn:aws:iam::368992683803:root" });
   if (args[1] === "get-open-id-connect-provider") return JSON.stringify({ Url: "token.actions.githubusercontent.com", ClientIDList: ["sts.amazonaws.com"] });
-  if (args[1] === "get-role") { const requested = args[args.indexOf("--role-name") + 1]; const mixed = requested === MIXED_RECOVERY_EXECUTOR.roleName; const value = mixed ? mixedRole : role; const contract = mixed ? MIXED_RECOVERY_EXECUTOR : INITIAL_ACTIVATION_RECONCILER; if (!value) throw Object.assign(new Error("NoSuchEntity"), { stderr: "NoSuchEntity" }); return JSON.stringify({ Role: { Arn: contract.roleArn, RoleName: contract.roleName, Path: "/", Description: contract.roleDescription, Tags: mixed ? mixedTags : reconcilerTags, MaxSessionDuration: 3600, AssumeRolePolicyDocument: JSON.parse(trust), ...(typeof value === "object" ? value : {}) } }); }
+  if (args[1] === "get-role") { const requested = args[args.indexOf("--role-name") + 1]; const mixed = requested === MIXED_RECOVERY_EXECUTOR.roleName; const value = mixed ? mixedRole : role; const contract = mixed ? MIXED_RECOVERY_EXECUTOR : INITIAL_ACTIVATION_RECONCILER; if (!value) throw Object.assign(new Error("NoSuchEntity"), { stderr: "NoSuchEntity" }); return JSON.stringify({ Role: { Arn: contract.roleArn, RoleName: contract.roleName, Path: "/", Description: contract.roleDescription, Tags: mixed ? mixedTags : reconcilerTags, MaxSessionDuration: 3600, AssumeRolePolicyDocument: JSON.parse(mixed ? mixedTrust : trust), ...(typeof value === "object" ? value : {}) } }); }
   if (args[1] === "get-policy") { const requested = args[args.indexOf("--policy-arn") + 1]; const mixed = requested === MIXED_RECOVERY_EXECUTOR.policyArn; const value = mixed ? mixedPolicy : policy; const contract = mixed ? MIXED_RECOVERY_EXECUTOR : INITIAL_ACTIVATION_RECONCILER; if (!value) throw Object.assign(new Error("NoSuchEntity"), { stderr: "NoSuchEntity" }); return JSON.stringify({ Policy: { Arn: contract.policyArn, PolicyName: contract.policyName, Path: "/", Description: contract.policyDescription, Tags: mixed ? mixedTags : reconcilerTags, DefaultVersionId: "v1", PermissionsBoundaryUsageCount: 0, ...(typeof value === "object" ? value : {}) } }); }
   if (args[1] === "list-policies") {
     const pages = policyPages || [{ Policies: [...(policy ? [{ Arn: INITIAL_ACTIVATION_RECONCILER.policyArn, PolicyName: INITIAL_ACTIVATION_RECONCILER.policyName }] : []), ...(mixedPolicy ? [{ Arn: MIXED_RECOVERY_EXECUTOR.policyArn, PolicyName: MIXED_RECOVERY_EXECUTOR.policyName }] : [])], IsTruncated: false }];
@@ -521,8 +527,11 @@ test("IAM paths and every security-relevant desired value are exact for create a
   }
 });
 
-test("only the exact reconciler-policy update is accepted; all other updates and destructive actions fail closed", () => {
+test("only the exact reconciler-policy or mixed-recovery trust update is accepted; all other updates fail closed", () => {
   assert.equal(assertInstallationPlan(updatePlan).updateCount, 1);
+  assert.deepEqual(assertInstallationPlan(trustUpdatePlan).changedAddresses, ["aws_iam_role.mixed_recovery"]);
+  const substituted = structuredClone(trustUpdatePlan); substituted.resource_changes.find(({ address }) => address === "aws_iam_role.mixed_recovery").change.before.description = "substituted";
+  assert.throws(() => assertInstallationPlan(substituted), /trust update predecessor/);
   for (const actions of [["delete"], ["delete", "create"], ["create", "delete"], ["read"]]) {
     const changed = structuredClone(completePlan);
     changed.resource_changes[0].change.actions = actions;
@@ -531,6 +540,18 @@ test("only the exact reconciler-policy update is accepted; all other updates and
   const unexpected = structuredClone(completePlan);
   unexpected.resource_changes[0].address = "aws_iam_policy.other";
   assert.throws(() => assertInstallationPlan(unexpected), /unreviewed|missing/);
+});
+
+test("installed legacy recovery trust is one exact authorized Terraform update", () => {
+  const oldTrustRole = { AssumeRolePolicyDocument: JSON.parse(trust) };
+  assert.deepEqual(discoverInstallationPredecessor({ run: discoveryRun({ mixedRole: oldTrustRole }) }), { classification: "EXACT_TRUST_UPDATE", existingAddresses: allAddresses });
+  const bytes = Buffer.from("exact-trust-update-plan");
+  const prepared = createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(installedState)), livePredecessor: "EXACT_TRUST_UPDATE", livePredecessorAddresses: allAddresses, planJson: trustUpdatePlan, planBytes: bytes, preparedAt: now.toISOString() });
+  const authorized = createInstallationAuthorization({ preparation: prepared, preparationArtifactSha256: prepared.preparationArtifactSha256, protectedEnvironmentApprovalEvidence: approval, sourceSha });
+  const postState = JSON.stringify({ version: 4, terraform_version: "1.15.8", serial: 2, lineage: "first-install-lineage", outputs: {}, resources: trustUpdatePlan.resource_changes.map((entry) => ({ mode: entry.mode, type: entry.type, name: entry.name, provider: 'provider["registry.terraform.io/hashicorp/aws"]', instances: [{ schema_version: 0, attributes: entry.address === "aws_iam_policy.mixed_recovery" ? { ...entry.change.after, arn: MIXED_RECOVERY_EXECUTOR.policyArn, id: MIXED_RECOVERY_EXECUTOR.policyArn } : entry.change.after, sensitive_attributes: [] }] })) });
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-install-trust-update-")); let reads = 0;
+  const result = executeInstallation({ sourceSha, preparation: prepared, authorization: authorized, planBytes: bytes, planJson: trustUpdatePlan, executionRoleArn: INSTALLATION.executionRoleArn, livePredecessor: "EXACT_TRUST_UPDATE", livePredecessorAddresses: allAddresses, applySavedPlan: () => {}, verifyInstalled: () => true, readState: () => Buffer.from(reads++ ? postState : installedState), resultPath: path.join(directory, "result.json"), now });
+  assert.equal(result.applyCount, 1); fs.rmSync(directory, { recursive: true, force: true });
 });
 
 test("production apply uses native Terraform state locking", () => {
@@ -564,12 +585,13 @@ test("bootstrap role trust and permissions are exact and non-administrative", ()
   const policy = JSON.parse(fs.readFileSync(INSTALLATION_BOOTSTRAP.permissionsPath, "utf8"));
   const serialized = JSON.stringify(policy);
   assert.doesNotMatch(serialized, /AdministratorAccess|PowerUserAccess|"iam:\*"|"s3:\*"/);
-  assert.doesNotMatch(serialized, /UpdateAssumeRolePolicy|PutRolePolicy|CreateUser|CreateAccessKey/);
+  assert.doesNotMatch(serialized, /PutRolePolicy|CreateUser|CreateAccessKey/);
+  assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "UpdateExactMixedRecoveryRoleTrust"), { Sid: "UpdateExactMixedRecoveryRoleTrust", Effect: "Allow", Action: "iam:UpdateAssumeRolePolicy", Resource: MIXED_RECOVERY_EXECUTOR.roleArn });
   assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "UpdateExactReconcilerPolicyVersion"), { Sid: "UpdateExactReconcilerPolicyVersion", Effect: "Allow", Action: "iam:CreatePolicyVersion", Resource: [INITIAL_ACTIVATION_RECONCILER.policyArn, MIXED_RECOVERY_EXECUTOR.policyArn] });
   assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "ReadExactProductionArtifactsBucketPolicy"), { Sid: "ReadExactProductionArtifactsBucketPolicy", Effect: "Allow", Action: "s3:GetBucketPolicy", Resource: "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an" });
   assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "ReadOwnExactBootstrapInlinePolicy"), { Sid: "ReadOwnExactBootstrapInlinePolicy", Effect: "Allow", Action: "iam:GetRolePolicy", Resource: INSTALLATION_BOOTSTRAP.roleArn });
-  const mutations = policy.Statement.flatMap((statement) => (Array.isArray(statement.Action) ? statement.Action : [statement.Action])).filter((action) => /^(iam:(Create|Attach|Tag)|s3:(Put|Delete))/.test(action));
-  assert.deepEqual(mutations.sort(), ["iam:AttachRolePolicy", "iam:AttachRolePolicy", "iam:CreatePolicy", "iam:CreatePolicy", "iam:CreatePolicyVersion", "iam:CreateRole", "iam:CreateRole", "iam:TagPolicy", "iam:TagPolicy", "iam:TagRole", "iam:TagRole", "s3:DeleteObject", "s3:PutObject"].sort());
+  const mutations = policy.Statement.flatMap((statement) => (Array.isArray(statement.Action) ? statement.Action : [statement.Action])).filter((action) => /^(iam:(Create|Attach|Tag|Update)|s3:(Put|Delete))/.test(action));
+  assert.deepEqual(mutations.sort(), ["iam:AttachRolePolicy", "iam:AttachRolePolicy", "iam:CreatePolicy", "iam:CreatePolicy", "iam:CreatePolicyVersion", "iam:CreateRole", "iam:CreateRole", "iam:TagPolicy", "iam:TagPolicy", "iam:TagRole", "iam:TagRole", "iam:UpdateAssumeRolePolicy", "s3:DeleteObject", "s3:PutObject"].sort());
   assert.match(serialized, new RegExp(INITIAL_ACTIVATION_RECONCILER.roleArn));
   assert.match(serialized, new RegExp(INITIAL_ACTIVATION_RECONCILER.policyArn));
   assert.match(serialized, new RegExp(MIXED_RECOVERY_EXECUTOR.roleArn));
@@ -722,6 +744,7 @@ test("bootstrap accepts only exact historical predecessors and binds authorizati
   const generation1 = legacyBootstrapPolicy(1);
   const generation2 = legacyBootstrapPolicy(2);
   const generation3 = legacyBootstrapPolicy(3);
+  const generation4 = legacyBootstrapPolicy(4);
   let inline = generation1; let puts = 0;
   const run = (args) => {
     if (args[0] === "sts") return JSON.stringify({ Arn: INSTALLATION_BOOTSTRAP.administratorArn });
@@ -743,6 +766,11 @@ test("bootstrap accepts only exact historical predecessors and binds authorizati
   assert.deepEqual(discoverBootstrapRole({ run }), { classification: "EXACT_PREDECESSOR_GENERATION_3", predecessorPolicySha256: "f7750b66517cc245fa54dc805ea21a33c975399e04ea97a8c6f0c21e16b0c263" });
   const generation3Authorization = createBootstrapAuthorization({ sourceSha, preparation: bootstrapPreparation("EXACT_PREDECESSOR_GENERATION_3", "f7750b66517cc245fa54dc805ea21a33c975399e04ea97a8c6f0c21e16b0c263"), approval: bootstrapApproval, authorizedAt: now.toISOString() });
   assert.equal(installBootstrapRole({ run, authorization: generation3Authorization, sourceSha, now }).putRolePolicyCount, 1);
+  assert.equal(discoverBootstrapRole({ run }).classification, "EXACT_COMPLETE");
+  inline = generation4;
+  assert.deepEqual(discoverBootstrapRole({ run }), { classification: "EXACT_PREDECESSOR_GENERATION_4", predecessorPolicySha256: "51be4b3bf73dc72f9e929a03c10057c2132f7d2898e4cae22b398f49bffa8acd" });
+  const generation4Authorization = createBootstrapAuthorization({ sourceSha, preparation: bootstrapPreparation("EXACT_PREDECESSOR_GENERATION_4", "51be4b3bf73dc72f9e929a03c10057c2132f7d2898e4cae22b398f49bffa8acd"), approval: bootstrapApproval, authorizedAt: now.toISOString() });
+  assert.equal(installBootstrapRole({ run, authorization: generation4Authorization, sourceSha, now }).putRolePolicyCount, 1);
   assert.equal(discoverBootstrapRole({ run }).classification, "EXACT_COMPLETE");
   for (const mutate of [
     (policy) => { policy.Statement[0].Action = "s3:GetObject"; },

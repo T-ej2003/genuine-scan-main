@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -22,7 +22,12 @@ const authorization = createMixedDualSlotRecoveryAuthorization({ preparation, pr
 test("protected workflows expose only canonical artifact coordinates and gate credentials before mutation", () => {
   const authorize = readFileSync(path.join(root, ".github/workflows/authorize-production-mixed-dual-slot-topology-recovery.yml"), "utf8");
   const execute = readFileSync(path.join(root, ".github/workflows/execute-production-mixed-dual-slot-topology-recovery.yml"), "utf8");
-  for (const workflow of [authorize, execute]) { assert.match(workflow, /environment: production/); assert.doesNotMatch(workflow.match(/inputs:[\s\S]*?\npermissions:/)?.[0] || "", /secret_arn|version_id|payload_hash|rotation_id|historical_source|mutation_(?:count|plan|order)|predecessor_manifest/); }
+  const executionEnvironment = JSON.parse(readFileSync(path.join(root, "infra/aws/terraform/production-initial-activation-policy-reconciler/mixed-recovery-github-environment-contract.json"), "utf8"));
+  assert.deepEqual(executionEnvironment, { name: "production-mixed-dual-slot-recovery", deploymentBranches: "protected-main-only", requiredReviewers: false, preventSelfReview: false, forbidUnprotectedBranchesAndTags: true, forbiddenSecrets: ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"], requiresEnvironmentSecrets: false, activation: "operator-configured; not managed by Terraform" });
+  assert.match(authorize, /environment: production/);
+  assert.match(execute, /environment: production-mixed-dual-slot-recovery/);
+  assert.equal(readdirSync(path.join(root, ".github/workflows")).filter((file) => readFileSync(path.join(root, ".github/workflows", file), "utf8").includes("environment: production-mixed-dual-slot-recovery")).length, 1);
+  for (const workflow of [authorize, execute]) assert.doesNotMatch(workflow.match(/inputs:[\s\S]*?\npermissions:/)?.[0] || "", /secret_arn|version_id|payload_hash|rotation_id|historical_source|mutation_(?:count|plan|order)|predecessor_manifest/);
   assert.match(authorize, /--require-actual-approval/); assert.doesNotMatch(authorize, /configure-aws-credentials|UpdateSecretVersionStage|PutSecretValue|DeleteSecret/);
   assert.match(authorize, /name: Verify effective recovery IAM capability/);
   assert.match(authorize, /needs: preflight/);
@@ -30,7 +35,8 @@ test("protected workflows expose only canonical artifact coordinates and gate cr
   assert.match(authorize, /verify-production-mixed-dual-slot-recovery-iam-attestation\.mjs/);
   assert.match(authorize, /iam_preflight_attestation_base64/);
   for (const workflow of [authorize, execute]) { assert.match(workflow, /source-before\.sha256/); assert.match(workflow, /source-after\.sha256/); assert.match(workflow, /cmp --silent/); assert.match(workflow, /chmod 600 "\$workdir\/preparation\.json"/); }
-  assert.ok(execute.indexOf("environment: production") < execute.indexOf("configure-aws-credentials") && execute.indexOf("configure-aws-credentials") < execute.indexOf("run-production-mixed-dual-slot-topology-recovery.mjs --execute"));
+  assert.ok(execute.indexOf("environment: production-mixed-dual-slot-recovery") < execute.indexOf("configure-aws-credentials") && execute.indexOf("configure-aws-credentials") < execute.indexOf("run-production-mixed-dual-slot-topology-recovery.mjs --execute"));
+  assert.match(readFileSync(path.join(root, "infra/aws/terraform/production-initial-activation-policy-reconciler/mixed-recovery-trust-policy.json"), "utf8"), /repo:T-ej2003\/genuine-scan-main:environment:production-mixed-dual-slot-recovery/);
   assert.match(execute, /secretsmanager:UpdateSecretVersionStage/); assert.doesNotMatch(execute, /secretsmanager:(?:PutSecretValue|CreateSecret|DeleteSecret)/);
   assert.match(execute, /role-to-assume: arn:aws:iam::368992683803:role\/mscqr-production-mixed-dual-slot-recovery-executor/);
   assert.doesNotMatch(execute, /role-to-assume: arn:aws:iam::368992683803:role\/mscqr-production-release-deployer/);

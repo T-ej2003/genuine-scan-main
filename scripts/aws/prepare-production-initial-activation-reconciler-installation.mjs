@@ -115,8 +115,10 @@ export function discoverInstallationPredecessor({ run, expectedCallerArn } = {})
   const reconcilerAddresses = ["aws_iam_policy.reconciler", "aws_iam_role.reconciler", "aws_iam_role_policy_attachment.reconciler"];
   if (reconcilerUnattached) return !mixedRole && !mixedPolicy ? predecessor("EXACT_PARTIAL", existingAddresses) : predecessor("UNEXPECTED", existingAddresses);
   if (!mixedRole && !mixedPolicy) return predecessor("EXACT_EXPANSION", reconcilerAddresses);
-  let mixedRoleExact = !mixedRole; let mixedPolicyExact = !mixedPolicy;
-  if (mixedRole) try { assertMixedRecoveryExecutorRoleMetadata(mixedRole); mixedRoleExact = true; } catch { mixedRoleExact = false; }
+  let mixedRoleExact = !mixedRole; let mixedRoleNeedsTrustUpdate = false; let mixedPolicyExact = !mixedPolicy;
+  if (mixedRole) try { assertMixedRecoveryExecutorRoleMetadata(mixedRole); mixedRoleExact = true; } catch {
+    try { assertMixedRecoveryExecutorRoleMetadata(mixedRole, { expectedTrust: JSON.parse(fs.readFileSync(path.join(root, INITIAL_ACTIVATION_RECONCILER.trustPath), "utf8")) }); mixedRoleExact = true; mixedRoleNeedsTrustUpdate = true; } catch { mixedRoleExact = false; }
+  }
   if (mixedPolicy) try { const version = runJson(run, ["iam", "get-policy-version", "--policy-arn", MIXED_RECOVERY_EXECUTOR.policyArn, "--version-id", mixedPolicy.DefaultVersionId]).PolicyVersion; assertMixedRecoveryExecutorPolicyMetadata(mixedPolicy, version?.Document); mixedPolicyExact = true; } catch { mixedPolicyExact = false; }
   if (!mixedRoleExact || !mixedPolicyExact) return predecessor("UNEXPECTED", existingAddresses);
   if (!mixedRole || !mixedPolicy) {
@@ -132,7 +134,10 @@ export function discoverInstallationPredecessor({ run, expectedCallerArn } = {})
   const mixedInline = runJson(run, ["iam", "list-role-policies", "--role-name", MIXED_RECOVERY_EXECUTOR.roleName]).PolicyNames;
   const mixedEntities = readPolicyEntities(run, MIXED_RECOVERY_EXECUTOR.policyArn);
   const mixedComplete = Array.isArray(mixedAttached) && mixedAttached.length === 1 && mixedAttached[0]?.PolicyArn === MIXED_RECOVERY_EXECUTOR.policyArn && Array.isArray(mixedInline) && mixedInline.length === 0 && mixedEntities.roles.length === 1 && mixedEntities.roles[0]?.RoleName === MIXED_RECOVERY_EXECUTOR.roleName && mixedEntities.users.length === 0 && mixedEntities.groups.length === 0;
-  if (mixedComplete) { verifyInitialActivationPolicyReconciler({ run, ...(expectedCallerArn ? { expectedCallerArn } : {}) }); return predecessor("EXACT_COMPLETE", INSTALLATION.expectedAddresses); }
+  if (mixedComplete) {
+    if (mixedRoleNeedsTrustUpdate) return predecessor("EXACT_TRUST_UPDATE", INSTALLATION.expectedAddresses);
+    verifyInitialActivationPolicyReconciler({ run, ...(expectedCallerArn ? { expectedCallerArn } : {}) }); return predecessor("EXACT_COMPLETE", INSTALLATION.expectedAddresses);
+  }
   const mixedUnattached = Array.isArray(mixedAttached) && mixedAttached.length === 0 && Array.isArray(mixedInline) && mixedInline.length === 0 && mixedEntities.roles.length === 0 && mixedEntities.users.length === 0 && mixedEntities.groups.length === 0;
   return mixedUnattached ? predecessor("EXACT_PARTIAL", [...existingAddresses, ...reconcilerAddresses, "aws_iam_role_policy_attachment.reconciler"].filter((value, index, values) => values.indexOf(value) === index)) : predecessor("UNEXPECTED", existingAddresses);
 }

@@ -22,10 +22,11 @@ export function executeInstallation({ sourceSha, preparation, authorization, pla
   if (executionRoleArn !== INSTALLATION.executionRoleArn) throw new Error("Installation workflow role identity is not exact.");
   const semantics = assertInstallationPlan(planJson);
   if (canonicalJson(semantics) !== canonicalJson(preparation.planSemantics)) throw new Error("Rendered saved-plan semantics differ from the authorized preparation.");
-  if (!["ABSENT", "EXACT_PARTIAL", "EXACT_UPDATE", "EXACT_EXPANSION", "EXACT_COMPLETE"].includes(livePredecessor)) throw new Error("Installation live predecessor is not a supported exact state.");
+  if (!["ABSENT", "EXACT_PARTIAL", "EXACT_UPDATE", "EXACT_TRUST_UPDATE", "EXACT_EXPANSION", "EXACT_COMPLETE"].includes(livePredecessor)) throw new Error("Installation live predecessor is not a supported exact state.");
   if (livePredecessor === "ABSENT" && semantics.resourceChangeCount !== INSTALLATION.expectedAddresses.length) throw new Error("First-install plan mutation scope is not exact.");
   if (livePredecessor === "EXACT_PARTIAL" && semantics.resourceChangeCount < 1) throw new Error("Partial-install plan mutation scope is not exact.");
   if (livePredecessor === "EXACT_UPDATE" && (semantics.updateCount !== 1 || semantics.changedAddresses[0] !== "aws_iam_policy.reconciler")) throw new Error("Policy-update installation scope is not exact.");
+  if (livePredecessor === "EXACT_TRUST_UPDATE" && (semantics.updateCount !== 1 || semantics.changedAddresses[0] !== "aws_iam_role.mixed_recovery")) throw new Error("Trust-update installation scope is not exact.");
   if (livePredecessor === "EXACT_EXPANSION" && (semantics.createCount !== 3 || semantics.updateCount > 1 || semantics.changedAddresses.some((address) => !["aws_iam_policy.reconciler", "aws_iam_policy.mixed_recovery", "aws_iam_role.mixed_recovery", "aws_iam_role_policy_attachment.mixed_recovery"].includes(address)))) throw new Error("Dedicated-role expansion scope is not exact.");
   if (livePredecessor !== preparation.livePredecessor || JSON.stringify(livePredecessorAddresses) !== JSON.stringify(preparation.livePredecessorAddresses)) throw new Error("Installation live predecessor changed after preparation.");
   const beforeStateBytes = readState?.();
@@ -34,7 +35,7 @@ export function executeInstallation({ sourceSha, preparation, authorization, pla
   if (livePredecessor === "EXACT_COMPLETE" && (!beforeState.stateExists || semantics.resourceChangeCount !== 0)) throw new Error("Exact-complete replay requires an authenticated state and no-op plan.");
   if (livePredecessor === "EXACT_COMPLETE") assertInstallationStateResources(beforeStateBytes);
   if (livePredecessor === "EXACT_PARTIAL") assertInstallationStateResources(beforeStateBytes, { requiredAddresses: livePredecessorAddresses });
-  if (livePredecessor === "EXACT_UPDATE") assertInstallationStateResources(beforeStateBytes);
+  if (["EXACT_UPDATE", "EXACT_TRUST_UPDATE"].includes(livePredecessor)) assertInstallationStateResources(beforeStateBytes);
   if (livePredecessor === "EXACT_EXPANSION") assertInstallationStateResources(beforeStateBytes, { requiredAddresses: livePredecessorAddresses });
   const output = assertStageBArtifactPath({ artifactPath: resultPath, repositoryRoot: root, label: "Installation result", allowExisting: false });
   ensureStageBPrivateDirectory({ directory: path.dirname(output), repositoryRoot: root, create: true, label: "Installation result directory" });
@@ -57,11 +58,11 @@ export function executeInstallation({ sourceSha, preparation, authorization, pla
     try {
       verifyInstalled();
       const recoveredStateBytes = readState?.();
-      recoveredState = ["EXACT_UPDATE", "EXACT_EXPANSION"].includes(livePredecessor)
+      recoveredState = ["EXACT_UPDATE", "EXACT_TRUST_UPDATE", "EXACT_EXPANSION"].includes(livePredecessor)
         ? assertInstallationAuthorizedPostState(recoveredStateBytes, { predecessorState: beforeState, planSemantics: semantics })
         : assertInstallationStateResources(recoveredStateBytes);
     } catch (recoveryError) {
-      if (["EXACT_UPDATE", "EXACT_EXPANSION"].includes(livePredecessor)) {
+      if (["EXACT_UPDATE", "EXACT_TRUST_UPDATE", "EXACT_EXPANSION"].includes(livePredecessor)) {
         recoveryError.recoveryClassification ||= "UNEXPECTED_TERRAFORM_STATE_DRIFT";
         throw recoveryError;
       }
@@ -73,7 +74,7 @@ export function executeInstallation({ sourceSha, preparation, authorization, pla
   }
   verifyInstalled();
   const stateAfterBytes = readState?.();
-  const stateAfter = ["EXACT_UPDATE", "EXACT_EXPANSION"].includes(livePredecessor)
+  const stateAfter = ["EXACT_UPDATE", "EXACT_TRUST_UPDATE", "EXACT_EXPANSION"].includes(livePredecessor)
     ? assertInstallationAuthorizedPostState(stateAfterBytes, { predecessorState: beforeState, planSemantics: semantics })
     : assertInstallationStateResources(stateAfterBytes);
   const result = { kind: "PRODUCTION_INITIAL_ACTIVATION_POLICY_RECONCILER_INSTALLATION_RESULT", schemaVersion: 1, operation: INSTALLATION.operation, sourceSha, authorizationArtifactSha256: authorization.authorizationArtifactSha256, status: "COMPLETE", applyCount: 1, targetPolicyCreatePolicyVersionCount: 0, verifier: "PASS", state: stateAfter, completedAt: new Date().toISOString() };

@@ -6,6 +6,7 @@ import { INITIAL_ACTIVATION_RECONCILER, MIXED_RECOVERY_EXECUTOR, verifyInitialAc
 
 const root = "infra/aws/terraform/production-initial-activation-policy-reconciler";
 const trust = JSON.parse(fs.readFileSync(`${root}/trust-policy.json`, "utf8"));
+const mixedTrust = JSON.parse(fs.readFileSync(`${root}/mixed-recovery-trust-policy.json`, "utf8"));
 const policy = JSON.parse(fs.readFileSync(`${root}/permissions-policy.json`, "utf8"));
 const mixedPolicy = JSON.parse(fs.readFileSync(`${root}/mixed-recovery-permissions-policy.json`, "utf8"));
 const terraform = fs.readFileSync(`${root}/main.tf`, "utf8");
@@ -17,13 +18,13 @@ const reorder = (value) => Array.isArray(value) ? value.map(reorder) : (value &&
 const tags = Object.entries(INITIAL_ACTIVATION_RECONCILER.tags).map(([Key, Value]) => ({ Key, Value }));
 const mixedTags = Object.entries(MIXED_RECOVERY_EXECUTOR.tags).map(([Key, Value]) => ({ Key, Value }));
 
-const commands = ({ provider = {}, role = {}, policyMetadata = {}, version = policy, encodeRole = true, encodeVersion = true, attached = [{ PolicyArn: INITIAL_ACTIVATION_RECONCILER.policyArn }], inline = [], entities = [{ PolicyRoles: [{ RoleName: INITIAL_ACTIVATION_RECONCILER.roleName }], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }] } = {}) => {
+const commands = ({ provider = {}, role = {}, mixedRole = {}, policyMetadata = {}, version = policy, encodeRole = true, encodeVersion = true, attached = [{ PolicyArn: INITIAL_ACTIVATION_RECONCILER.policyArn }], inline = [], entities = [{ PolicyRoles: [{ RoleName: INITIAL_ACTIVATION_RECONCILER.roleName }], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }] } = {}) => {
   const calls = [];
   const run = (args) => {
     calls.push(args);
     if (args[0] === "sts") return JSON.stringify({ Arn: "arn:aws:iam::368992683803:root" });
     if (args[0] === "iam" && args[1] === "get-open-id-connect-provider") return JSON.stringify({ Url: "token.actions.githubusercontent.com", ClientIDList: ["sts.amazonaws.com"], ...provider });
-    if (args[0] === "iam" && args[1] === "get-role") { const mixed = args[args.indexOf("--role-name") + 1] === MIXED_RECOVERY_EXECUTOR.roleName; return JSON.stringify({ Role: { Arn: mixed ? MIXED_RECOVERY_EXECUTOR.roleArn : INITIAL_ACTIVATION_RECONCILER.roleArn, RoleName: mixed ? MIXED_RECOVERY_EXECUTOR.roleName : INITIAL_ACTIVATION_RECONCILER.roleName, Path: "/", Description: mixed ? MIXED_RECOVERY_EXECUTOR.roleDescription : INITIAL_ACTIVATION_RECONCILER.roleDescription, Tags: mixed ? mixedTags : tags, MaxSessionDuration: 3600, AssumeRolePolicyDocument: encodeRole ? encoded(trust) : trust, ...(!mixed ? role : {}) } }); }
+    if (args[0] === "iam" && args[1] === "get-role") { const mixed = args[args.indexOf("--role-name") + 1] === MIXED_RECOVERY_EXECUTOR.roleName; const roleTrust = mixed ? mixedTrust : trust; return JSON.stringify({ Role: { Arn: mixed ? MIXED_RECOVERY_EXECUTOR.roleArn : INITIAL_ACTIVATION_RECONCILER.roleArn, RoleName: mixed ? MIXED_RECOVERY_EXECUTOR.roleName : INITIAL_ACTIVATION_RECONCILER.roleName, Path: "/", Description: mixed ? MIXED_RECOVERY_EXECUTOR.roleDescription : INITIAL_ACTIVATION_RECONCILER.roleDescription, Tags: mixed ? mixedTags : tags, MaxSessionDuration: 3600, AssumeRolePolicyDocument: encodeRole ? encoded(roleTrust) : roleTrust, ...(mixed ? mixedRole : role) } }); }
     if (args[0] === "iam" && args[1] === "get-policy") { const mixed = args[args.indexOf("--policy-arn") + 1] === MIXED_RECOVERY_EXECUTOR.policyArn; return JSON.stringify({ Policy: { Arn: mixed ? MIXED_RECOVERY_EXECUTOR.policyArn : INITIAL_ACTIVATION_RECONCILER.policyArn, PolicyName: mixed ? MIXED_RECOVERY_EXECUTOR.policyName : INITIAL_ACTIVATION_RECONCILER.policyName, Path: "/", Description: mixed ? MIXED_RECOVERY_EXECUTOR.policyDescription : INITIAL_ACTIVATION_RECONCILER.policyDescription, Tags: mixed ? mixedTags : tags, DefaultVersionId: "v1", PermissionsBoundaryUsageCount: 0, ...(!mixed ? policyMetadata : {}) } }); }
     if (args[0] === "iam" && args[1] === "get-policy-version") { const mixed = args[args.indexOf("--policy-arn") + 1] === MIXED_RECOVERY_EXECUTOR.policyArn; const document = mixed ? mixedPolicy : version; return JSON.stringify({ PolicyVersion: { Document: encodeVersion ? encoded(document) : document } }); }
     if (args[0] === "iam" && args[1] === "list-attached-role-policies") { const mixed = args[args.indexOf("--role-name") + 1] === MIXED_RECOVERY_EXECUTOR.roleName; return JSON.stringify({ AttachedPolicies: mixed ? [{ PolicyArn: MIXED_RECOVERY_EXECUTOR.policyArn }] : attached }); }
@@ -53,6 +54,18 @@ test("trust is exactly production GitHub OIDC and excludes local principals", ()
   assert.doesNotMatch(JSON.stringify(trust), /bootstrap|release-deployer|mfa|pull_request|refs\/heads/i);
 });
 
+test("mixed recovery trust admits only its workflow-dedicated protected environment", () => {
+  assert.deepEqual(mixedTrust.Statement[0].Condition.StringEquals, {
+    "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+    "token.actions.githubusercontent.com:sub": "repo:T-ej2003/genuine-scan-main:environment:production-mixed-dual-slot-recovery",
+  });
+  const workflow = fs.readFileSync(".github/workflows/execute-production-mixed-dual-slot-topology-recovery.yml", "utf8");
+  assert.match(workflow, /environment: production-mixed-dual-slot-recovery/);
+  assert.equal(fs.readdirSync(".github/workflows").filter((file) => fs.readFileSync(`.github/workflows/${file}`, "utf8").includes("environment: production-mixed-dual-slot-recovery")).length, 1);
+  assert.notDeepEqual(mixedTrust, trust);
+  assert.throws(() => verifyInitialActivationPolicyReconciler(commands({ mixedRole: { AssumeRolePolicyDocument: trust } })), /mixed recovery trust policy/);
+});
+
 test("runtime policy has exact target mutation and readback-only companion actions", () => {
   const actions = policy.Statement.flatMap(({ Action }) => Array.isArray(Action) ? Action : [Action]);
   const create = policy.Statement.find(({ Sid }) => Sid === "CreateExactInitialActivationLifecyclePolicyVersion");
@@ -72,7 +85,7 @@ test("Terraform root owns only the purpose-bound role, policy, and attachment", 
   assert.equal(backend.productionExecutionEnabled, true);
   assert.equal(backend.rootApplyRequired, false);
   assert.equal(installation.administratorBoundary, "GitHub production-environment OIDC session for mscqr-production-initial-activation-policy-reconciler-bootstrap");
-  assert.deepEqual(installation.maxAwsMutations, { "iam:CreateRole": 2, "iam:CreatePolicy": 2, "iam:AttachRolePolicy": 2, "iam:UpdateAssumeRolePolicy": 0, "iam:PutRolePolicy": 0, "iam:CreatePolicyVersion": 2 });
+  assert.deepEqual(installation.maxAwsMutations, { "iam:CreateRole": 2, "iam:CreatePolicy": 2, "iam:AttachRolePolicy": 2, "iam:UpdateAssumeRolePolicy": 1, "iam:PutRolePolicy": 0, "iam:CreatePolicyVersion": 2 });
   assert.equal(installation.executionPerformedInThisSource, true);
   assert.equal(installation.terraformVersion, "1.15.8");
   assert.equal(installation.concurrencyGroup, "production-deploy");

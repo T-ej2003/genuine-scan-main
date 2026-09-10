@@ -13,9 +13,9 @@ locals {
 
 resource "aws_iam_role" "mixed_recovery" {
   name                 = local.mixed_recovery_role_name
-  description          = "GitHub production-environment executor for the exact mixed dual-slot topology recovery."
+  description          = "GitHub workflow-dedicated environment executor for the exact mixed dual-slot topology recovery."
   max_session_duration = 3600
-  assume_role_policy   = file("${path.module}/trust-policy.json")
+  assume_role_policy   = file("${path.module}/mixed-recovery-trust-policy.json")
   tags                 = merge(local.tags, { Component = "mixed-dual-slot-topology-recovery" })
 
   lifecycle {

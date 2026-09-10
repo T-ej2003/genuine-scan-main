@@ -8018,6 +8018,168 @@
       "mutation": true
     },
     {
+      "id": "mixed-recovery-executor-describe-secret",
+      "phase": "mixed-dual-slot-recovery-execution",
+      "identity": "MIXED_RECOVERY_EXECUTOR",
+      "executor": "aws-sdk",
+      "sourceFile": "scripts/aws/recover-production-mixed-dual-slot-topology.mjs",
+      "sourceFunction": "mixed-recovery-executor-describe-secret",
+      "action": "secretsmanager:DescribeSecret",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-pending-1CnWMp",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-private-pending-LZhc54",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-pending-uB3P1Q",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "operation": "PRODUCTION_MIXED_DUAL_SLOT_TOPOLOGY_RECOVERY",
+        "mutationCountMaximum": 7
+      },
+      "classification": "MIXED_DUAL_SLOT_RECOVERY_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-initial-activation-policy-reconciler/mixed-recovery-permissions-policy.json",
+        "sid": "ReadExactRecoverySecrets",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionMixedDualSlotRecoveryExecutor",
+        "expectedVersion": "terraform-managed",
+        "expectedPolicySha256": "e311c572c578113d3f02ef748043d469419ea30553d88f45f3b2778dbad03525"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "mixed-recovery-executor-describe-service",
+      "phase": "mixed-dual-slot-recovery-execution",
+      "identity": "MIXED_RECOVERY_EXECUTOR",
+      "executor": "aws-sdk",
+      "sourceFile": "scripts/aws/run-production-mixed-dual-slot-topology-recovery.mjs",
+      "sourceFunction": "mixed-recovery-executor-describe-service",
+      "action": "ecs:DescribeServices",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "operation": "PRODUCTION_MIXED_DUAL_SLOT_TOPOLOGY_RECOVERY",
+        "mutationCountMaximum": 7
+      },
+      "classification": "MIXED_DUAL_SLOT_RECOVERY_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-initial-activation-policy-reconciler/mixed-recovery-permissions-policy.json",
+        "sid": "ReadExactRecoveryPredecessor",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionMixedDualSlotRecoveryExecutor",
+        "expectedVersion": "terraform-managed",
+        "expectedPolicySha256": "e311c572c578113d3f02ef748043d469419ea30553d88f45f3b2778dbad03525"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "mixed-recovery-executor-describe-task-definition",
+      "phase": "mixed-dual-slot-recovery-execution",
+      "identity": "MIXED_RECOVERY_EXECUTOR",
+      "executor": "aws-sdk",
+      "sourceFile": "scripts/aws/run-production-mixed-dual-slot-topology-recovery.mjs",
+      "sourceFunction": "mixed-recovery-executor-describe-task-definition",
+      "action": "ecs:DescribeTaskDefinition",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "operation": "PRODUCTION_MIXED_DUAL_SLOT_TOPOLOGY_RECOVERY",
+        "mutationCountMaximum": 7
+      },
+      "classification": "MIXED_DUAL_SLOT_RECOVERY_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-initial-activation-policy-reconciler/mixed-recovery-permissions-policy.json",
+        "sid": "ReadExactRecoveryPredecessor",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionMixedDualSlotRecoveryExecutor",
+        "expectedVersion": "terraform-managed",
+        "expectedPolicySha256": "e311c572c578113d3f02ef748043d469419ea30553d88f45f3b2778dbad03525"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "mixed-recovery-executor-get-secret-value",
+      "phase": "mixed-dual-slot-recovery-execution",
+      "identity": "MIXED_RECOVERY_EXECUTOR",
+      "executor": "aws-sdk",
+      "sourceFile": "scripts/aws/recover-production-mixed-dual-slot-topology.mjs",
+      "sourceFunction": "mixed-recovery-executor-get-secret-value",
+      "action": "secretsmanager:GetSecretValue",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-pending-1CnWMp",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-private-pending-LZhc54",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-pending-uB3P1Q",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "operation": "PRODUCTION_MIXED_DUAL_SLOT_TOPOLOGY_RECOVERY",
+        "mutationCountMaximum": 7
+      },
+      "classification": "MIXED_DUAL_SLOT_RECOVERY_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-initial-activation-policy-reconciler/mixed-recovery-permissions-policy.json",
+        "sid": "ReadExactRecoverySecrets",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionMixedDualSlotRecoveryExecutor",
+        "expectedVersion": "terraform-managed",
+        "expectedPolicySha256": "e311c572c578113d3f02ef748043d469419ea30553d88f45f3b2778dbad03525"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "mixed-recovery-executor-identify",
+      "phase": "mixed-dual-slot-recovery-execution",
+      "identity": "MIXED_RECOVERY_EXECUTOR",
+      "executor": "aws-sdk",
+      "sourceFile": "scripts/aws/run-production-mixed-dual-slot-topology-recovery.mjs",
+      "sourceFunction": "mixed-recovery-executor-identify",
+      "action": "sts:GetCallerIdentity",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "operation": "PRODUCTION_MIXED_DUAL_SLOT_TOPOLOGY_RECOVERY",
+        "mutationCountMaximum": 7
+      },
+      "classification": "MIXED_DUAL_SLOT_RECOVERY_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-initial-activation-policy-reconciler/mixed-recovery-permissions-policy.json",
+        "sid": "IdentifyExactRecoverySession",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionMixedDualSlotRecoveryExecutor",
+        "expectedVersion": "terraform-managed",
+        "expectedPolicySha256": "e311c572c578113d3f02ef748043d469419ea30553d88f45f3b2778dbad03525"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
       "id": "mixed-recovery-iam-attestation-sign",
       "phase": "mixed-dual-slot-recovery-iam-preflight",
       "identity": "ROOT_OPERATOR",
@@ -8199,7 +8361,7 @@
         "sid": "RemoveExactRecoveryAwscurrentLabels",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionMixedDualSlotRecoveryExecutor",
         "expectedVersion": "terraform-managed",
-        "expectedPolicySha256": null
+        "expectedPolicySha256": "e311c572c578113d3f02ef748043d469419ea30553d88f45f3b2778dbad03525"
       },
       "required": true,
       "mutation": true
@@ -14328,6 +14490,40 @@
     },
     {
       "sourceFile": "scripts/aws/recover-production-mixed-dual-slot-topology.mjs",
+      "sourceFunction": "mixed-recovery-executor-describe-secret",
+      "phase": "mixed-dual-slot-recovery-execution",
+      "identity": "MIXED_RECOVERY_EXECUTOR",
+      "action": "secretsmanager:DescribeSecret",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-pending-1CnWMp",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-private-pending-LZhc54",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-pending-uB3P1Q",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2"
+      ],
+      "capabilityId": "mixed-recovery-executor-describe-secret"
+    },
+    {
+      "sourceFile": "scripts/aws/recover-production-mixed-dual-slot-topology.mjs",
+      "sourceFunction": "mixed-recovery-executor-get-secret-value",
+      "phase": "mixed-dual-slot-recovery-execution",
+      "identity": "MIXED_RECOVERY_EXECUTOR",
+      "action": "secretsmanager:GetSecretValue",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-pending-1CnWMp",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-private-pending-LZhc54",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-pending-uB3P1Q",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2"
+      ],
+      "capabilityId": "mixed-recovery-executor-get-secret-value"
+    },
+    {
+      "sourceFile": "scripts/aws/recover-production-mixed-dual-slot-topology.mjs",
       "sourceFunction": "executeMixedDualSlotRecovery",
       "phase": "mixed-dual-slot-recovery-execution",
       "identity": "MIXED_RECOVERY_EXECUTOR",
@@ -14526,6 +14722,28 @@
     },
     {
       "sourceFile": "scripts/aws/run-production-mixed-dual-slot-topology-recovery.mjs",
+      "sourceFunction": "mixed-recovery-executor-describe-service",
+      "phase": "mixed-dual-slot-recovery-execution",
+      "identity": "MIXED_RECOVERY_EXECUTOR",
+      "action": "ecs:DescribeServices",
+      "resources": [
+        "*"
+      ],
+      "capabilityId": "mixed-recovery-executor-describe-service"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-mixed-dual-slot-topology-recovery.mjs",
+      "sourceFunction": "mixed-recovery-executor-describe-task-definition",
+      "phase": "mixed-dual-slot-recovery-execution",
+      "identity": "MIXED_RECOVERY_EXECUTOR",
+      "action": "ecs:DescribeTaskDefinition",
+      "resources": [
+        "*"
+      ],
+      "capabilityId": "mixed-recovery-executor-describe-task-definition"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-mixed-dual-slot-topology-recovery.mjs",
       "sourceFunction": "prepareMixedDualSlotRecoveryIamAttestation",
       "phase": "mixed-dual-slot-recovery-iam-preflight",
       "identity": "ROOT_OPERATOR",
@@ -14534,6 +14752,17 @@
         "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation"
       ],
       "capabilityId": "mixed-recovery-iam-attestation-sign"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-mixed-dual-slot-topology-recovery.mjs",
+      "sourceFunction": "mixed-recovery-executor-identify",
+      "phase": "mixed-dual-slot-recovery-execution",
+      "identity": "MIXED_RECOVERY_EXECUTOR",
+      "action": "sts:GetCallerIdentity",
+      "resources": [
+        "*"
+      ],
+      "capabilityId": "mixed-recovery-executor-identify"
     },
     {
       "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
