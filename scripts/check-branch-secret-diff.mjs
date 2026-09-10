@@ -2,8 +2,16 @@ import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES } from "./aws/production-mixed-dual-slot-recovery-contract.mjs";
 
 const repoRoot = process.cwd();
+const generatedRecoveryCapabilityDocuments = new Set([
+  "documents/ops/iam/MSCQRProductionDependencyClosure-v1.json",
+  "documents/ops/iam/MSCQRProductionGreenStageBDeploymentCapabilities-v1.json",
+]);
+const reviewedRecoveryResources = new Set(MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES);
+const isCanonicalGeneratedRecoveryDocument = (relativePath) => generatedRecoveryCapabilityDocuments.has(relativePath)
+  || /^scripts\/tests\/fixtures\/production-initial-activation-reconciler-plan-(?:absent|complete|partial-policy|partial-role|partial-unattached|update)\.json$/.test(relativePath);
 
 const readGitOutput = (args) =>
   execFileSync("git", args, {
@@ -107,7 +115,10 @@ export const scanAddedDiff = (diff, relativePath) => {
     rule.regex.lastIndex = 0;
     let match = rule.regex.exec(contents);
     while (match) {
-      findings.push({ file: relativePath, line: contents.slice(0, match.index).split("\n").length, rule: rule.name, message: rule.message });
+      const generatedRecoveryResource = rule.name === "Committed Secrets Manager ARN"
+        && isCanonicalGeneratedRecoveryDocument(relativePath)
+        && reviewedRecoveryResources.has(match[0].replace(/\\+$/, ""));
+      if (!generatedRecoveryResource) findings.push({ file: relativePath, line: contents.slice(0, match.index).split("\n").length, rule: rule.name, message: rule.message });
       match = rule.regex.exec(contents);
     }
   }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
-import { MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN, MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION, MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, assertMixedDualSlotRecoveryIamPreflight } from "../aws/production-mixed-dual-slot-recovery-contract.mjs";
+import { MIXED_DUAL_SLOT_RECOVERY_EXECUTION_POLICY_ARN, MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN, MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION, MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, assertMixedDualSlotRecoveryIamPreflight } from "../aws/production-mixed-dual-slot-recovery-contract.mjs";
 import { readMixedDualSlotRecoveryIamCapabilityPreflight } from "../aws/preflight-production-mixed-dual-slot-recovery-iam.mjs";
 import { assertMixedDualSlotRecoveryIamAttestation, createMixedDualSlotRecoveryIamAttestation } from "../aws/production-mixed-dual-slot-recovery-iam-attestation.mjs";
 import { createPinnedRootAttestationVerifier, ROOT_ATTESTATION_KEY_ALIAS_ARN, ROOT_ATTESTATION_SIGNING_ALGORITHM } from "../aws/production-root-attestation-key.mjs";
@@ -23,12 +23,16 @@ const runner = ({ caller = { Account: "368992683803", Arn: "arn:aws:iam::3689926
   throw new Error(`unexpected ${operation}`);
 };
 
-test("canonical release policy grants only seven exact recovery label mutations", () => {
-  const policy = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionInitialActivationLifecycle-v1.json", "utf8"));
-  const statement = policy.Statement.find(({ Sid }) => Sid === "RecoverExactMixedDualSlotTopology");
-  assert.deepEqual(statement, { Sid: "RecoverExactMixedDualSlotTopology", Effect: "Allow", Action: MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION, Resource: [...MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES] });
+test("dedicated executor policy grants only seven exact label mutations and shared release role has no grant", () => {
+  const policy = JSON.parse(fs.readFileSync("infra/aws/terraform/production-initial-activation-policy-reconciler/mixed-recovery-permissions-policy.json", "utf8"));
+  const statement = policy.Statement.find(({ Sid }) => Sid === "RemoveExactRecoveryAwscurrentLabels");
+  assert.deepEqual(statement, { Sid: "RemoveExactRecoveryAwscurrentLabels", Effect: "Allow", Action: MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION, Resource: [...MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES] });
+  const shared = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionInitialActivationLifecycle-v1.json", "utf8"));
+  assert.equal(shared.Statement.some(({ Effect, Action }) => Effect === "Allow" && [Action].flat().includes(MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION)), false);
   const actions = policy.Statement.flatMap(({ Action }) => Array.isArray(Action) ? Action : [Action]);
   for (const forbidden of ["secretsmanager:PutSecretValue", "secretsmanager:CreateSecret", "secretsmanager:DeleteSecret", "secretsmanager:UpdateSecret"]) assert.equal(actions.includes(forbidden), false);
+  assert.equal(MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN.endsWith("/mscqr-production-mixed-dual-slot-recovery-executor"), true);
+  assert.equal(MIXED_DUAL_SLOT_RECOVERY_EXECUTION_POLICY_ARN.endsWith("/MSCQRProductionMixedDualSlotRecoveryExecutor"), true);
 });
 
 test("effective-capability preflight requires all seven exact allows", () => {

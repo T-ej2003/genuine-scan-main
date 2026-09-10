@@ -37,11 +37,11 @@ const CALLS = Object.freeze([
   ["scripts/aws/production-stage-a-production-artifacts-journal.mjs", "s3:PutObject", "stage-a-artifacts-recovery-root-journal-conditional-create", [STAGE_A_RECONCILIATION_JOURNAL], "ROOT_OPERATOR"],
   ["scripts/aws/production-root-attestation-signer.mjs", "kms:Sign", "stage-a-artifacts-recovery-root-sign", [ROOT_ATTESTATION_KEY], "ROOT_OPERATOR"],
   ["scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs", "sts:GetCallerIdentity", "mixed-recovery-iam-preflight-identify", ["*"], "ROOT_OPERATOR"],
-  ["scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs", "iam:GetRole", "mixed-recovery-iam-preflight-read-role", ["arn:aws:iam::368992683803:role/mscqr-production-release-deployer"], "ROOT_OPERATOR"],
-  ["scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs", "iam:SimulatePrincipalPolicy", "mixed-recovery-iam-preflight-simulate", ["arn:aws:iam::368992683803:role/mscqr-production-release-deployer"], "ROOT_OPERATOR"],
+  ["scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs", "iam:GetRole", "mixed-recovery-iam-preflight-read-role", ["arn:aws:iam::368992683803:role/mscqr-production-mixed-dual-slot-recovery-executor"], "ROOT_OPERATOR"],
+  ["scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs", "iam:SimulatePrincipalPolicy", "mixed-recovery-iam-preflight-simulate", ["arn:aws:iam::368992683803:role/mscqr-production-mixed-dual-slot-recovery-executor"], "ROOT_OPERATOR"],
   ["scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs", "secretsmanager:GetResourcePolicy", "mixed-recovery-iam-preflight-read-resource-policy", MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, "ROOT_OPERATOR"],
   ["scripts/aws/run-production-mixed-dual-slot-topology-recovery.mjs", "kms:Sign", "mixed-recovery-iam-attestation-sign", [ROOT_ATTESTATION_KEY], "ROOT_OPERATOR"],
-  ["scripts/aws/recover-production-mixed-dual-slot-topology.mjs", "secretsmanager:UpdateSecretVersionStage", "mixed-recovery-remove-awscurrent", MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, "RELEASE_DEPLOYER"],
+  ["scripts/aws/recover-production-mixed-dual-slot-topology.mjs", "secretsmanager:UpdateSecretVersionStage", "mixed-recovery-remove-awscurrent", MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, "MIXED_RECOVERY_EXECUTOR"],
   ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "s3:GetBucketPolicy", "stage-a-artifacts-reconciliation-release-read-policy", [PRODUCTION_ARTIFACTS_BUCKET]],
   ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "sts:GetCallerIdentity", "stage-a-artifacts-reconciliation-release-identify", ["*"]],
   ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "sts:GetCallerIdentity", "stage-a-artifacts-reconciliation-root-identify", ["*"], "ROOT_OPERATOR", "stage-a-artifacts-reconciliation-root-identify"],
@@ -304,7 +304,7 @@ export function buildProductionDependencyClosure() {
 }
 
 export function assertChangedAwsCallClosure(scanned, graph) {
-  const identityBound = (sourceFile) => ["scripts/aws/production-stage-a-production-artifacts-journal.mjs", "scripts/aws/production-root-attestation-signer.mjs", "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "scripts/aws/production-initial-activation-policy-reconciliation.mjs", "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs", "scripts/aws/reconcile-production-provider-readonly-policy.mjs"].includes(sourceFile);
+  const identityBound = (sourceFile) => ["scripts/aws/production-stage-a-production-artifacts-journal.mjs", "scripts/aws/production-root-attestation-signer.mjs", "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "scripts/aws/production-initial-activation-policy-reconciliation.mjs", "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs", "scripts/aws/reconcile-production-provider-readonly-policy.mjs", "scripts/aws/recover-production-mixed-dual-slot-topology.mjs"].includes(sourceFile);
   const key = ({ sourceFile, action, identity = "RELEASE_DEPLOYER", sourceFunction = "", capabilityId = "" }) => `${sourceFile}\t${action}\t${identityBound(sourceFile) ? identity : ""}\t${capabilityId.endsWith("-read-raw-state") ? sourceFunction : ""}`;
   const callKeys = new Set(CALLS.map(key));
   const normalized = scanned.map(({ sourceFile, action, identity, sourceFunction, capabilityId }) => {

@@ -24,6 +24,18 @@ export const INITIAL_ACTIVATION_RECONCILER = Object.freeze({
   policyDescription: "Exact readback and CreatePolicyVersion capability for InitialActivationLifecycle reconciliation.",
   tags: Object.freeze({ ManagedBy: "Terraform", Environment: "production", Component: "initial-activation-policy-reconciliation", Stack: "production-initial-activation-policy-reconciler" }),
 });
+export const MIXED_RECOVERY_EXECUTOR = Object.freeze({
+  roleName: "mscqr-production-mixed-dual-slot-recovery-executor",
+  roleArn: "arn:aws:iam::368992683803:role/mscqr-production-mixed-dual-slot-recovery-executor",
+  policyName: "MSCQRProductionMixedDualSlotRecoveryExecutor",
+  policyArn: "arn:aws:iam::368992683803:policy/MSCQRProductionMixedDualSlotRecoveryExecutor",
+  trustPath: INITIAL_ACTIVATION_RECONCILER.trustPath,
+  permissionsPath: "infra/aws/terraform/production-initial-activation-policy-reconciler/mixed-recovery-permissions-policy.json",
+  path: "/",
+  roleDescription: "GitHub production-environment executor for the exact mixed dual-slot topology recovery.",
+  policyDescription: "Exact readback and AWSCURRENT-removal capability for mixed dual-slot topology recovery.",
+  tags: Object.freeze({ ...INITIAL_ACTIVATION_RECONCILER.tags, Component: "mixed-dual-slot-topology-recovery" }),
+});
 
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 const readJson = (relativePath) => JSON.parse(fs.readFileSync(path.join(root, relativePath), "utf8"));
@@ -60,14 +72,14 @@ export function assertInitialActivationReconcilerPolicyMetadata(policy, document
   return policy;
 }
 
-export function readPolicyEntities(run) {
+export function readPolicyEntities(run, policyArn = INITIAL_ACTIVATION_RECONCILER.policyArn) {
   const roles = [];
   const users = [];
   const groups = [];
   let marker;
   const seenMarkers = new Set();
   for (;;) {
-    const response = json(run, ["iam", "list-entities-for-policy", "--policy-arn", INITIAL_ACTIVATION_RECONCILER.policyArn, "--no-paginate", ...(marker ? ["--marker", marker] : [])]);
+    const response = json(run, ["iam", "list-entities-for-policy", "--policy-arn", policyArn, "--no-paginate", ...(marker ? ["--marker", marker] : [])]);
     if (!Array.isArray(response.PolicyRoles) || !Array.isArray(response.PolicyUsers) || !Array.isArray(response.PolicyGroups) || typeof response.IsTruncated !== "boolean") throw new Error("Initial-activation reconciler policy entity response is malformed.");
     roles.push(...response.PolicyRoles);
     users.push(...response.PolicyUsers);
@@ -78,6 +90,31 @@ export function readPolicyEntities(run) {
     marker = response.Marker;
   }
   return { roles, users, groups };
+}
+
+export function assertMixedRecoveryExecutorRoleMetadata(role) {
+  if (role?.Arn !== MIXED_RECOVERY_EXECUTOR.roleArn || role?.RoleName !== MIXED_RECOVERY_EXECUTOR.roleName || role?.Path !== "/" || role?.Description !== MIXED_RECOVERY_EXECUTOR.roleDescription || role?.MaxSessionDuration !== 3600 || Object.hasOwn(role, "PermissionsBoundary")) throw new Error("Mixed recovery executor role metadata is not exact.");
+  exactJson(decodeAwsDocument(role.AssumeRolePolicyDocument, "mixed recovery trust policy"), readJson(MIXED_RECOVERY_EXECUTOR.trustPath), "mixed recovery trust policy");
+  const tagObject = Object.fromEntries((role.Tags || []).map(({ Key, Value }) => [Key, Value])); exactJson(tagObject, MIXED_RECOVERY_EXECUTOR.tags, "mixed recovery role tags");
+  return role;
+}
+
+export function assertMixedRecoveryExecutorPolicyMetadata(policy, document) {
+  if (policy?.Arn !== MIXED_RECOVERY_EXECUTOR.policyArn || policy?.PolicyName !== MIXED_RECOVERY_EXECUTOR.policyName || policy?.Path !== "/" || policy?.Description !== MIXED_RECOVERY_EXECUTOR.policyDescription || !/^v[1-9][0-9]*$/.test(policy?.DefaultVersionId || "") || policy?.PermissionsBoundaryUsageCount !== 0) throw new Error("Mixed recovery executor policy metadata is not exact.");
+  exactJson(decodeAwsDocument(document, "mixed recovery permissions policy"), readJson(MIXED_RECOVERY_EXECUTOR.permissionsPath), "mixed recovery permissions policy");
+  const policyTags = Object.fromEntries((policy.Tags || []).map(({ Key, Value }) => [Key, Value])); exactJson(policyTags, MIXED_RECOVERY_EXECUTOR.tags, "mixed recovery policy tags");
+  return policy;
+}
+
+export function verifyMixedRecoveryExecutor({ run } = {}) {
+  const role = json(run, ["iam", "get-role", "--role-name", MIXED_RECOVERY_EXECUTOR.roleName]).Role; assertMixedRecoveryExecutorRoleMetadata(role);
+  const policy = json(run, ["iam", "get-policy", "--policy-arn", MIXED_RECOVERY_EXECUTOR.policyArn]).Policy;
+  const version = json(run, ["iam", "get-policy-version", "--policy-arn", MIXED_RECOVERY_EXECUTOR.policyArn, "--version-id", policy.DefaultVersionId]).PolicyVersion; assertMixedRecoveryExecutorPolicyMetadata(policy, version?.Document);
+  const attached = json(run, ["iam", "list-attached-role-policies", "--role-name", MIXED_RECOVERY_EXECUTOR.roleName]).AttachedPolicies;
+  const inline = json(run, ["iam", "list-role-policies", "--role-name", MIXED_RECOVERY_EXECUTOR.roleName]).PolicyNames;
+  const entities = readPolicyEntities(run, MIXED_RECOVERY_EXECUTOR.policyArn);
+  if (!Array.isArray(attached) || attached.length !== 1 || attached[0]?.PolicyArn !== MIXED_RECOVERY_EXECUTOR.policyArn || !Array.isArray(inline) || inline.length !== 0 || entities.roles.length !== 1 || entities.roles[0]?.RoleName !== MIXED_RECOVERY_EXECUTOR.roleName || entities.users.length || entities.groups.length) throw new Error("Mixed recovery executor attachment topology is not exact.");
+  return Object.freeze({ roleArn: role.Arn, policyArn: policy.Arn, defaultVersionId: policy.DefaultVersionId });
 }
 
 export function verifyInitialActivationPolicyReconciler({ run, expectedCallerArn = "arn:aws:iam::368992683803:root" } = {}) {
@@ -97,7 +134,8 @@ export function verifyInitialActivationPolicyReconciler({ run, expectedCallerArn
   if (!Array.isArray(inline) || inline.length !== 0) throw new Error("Initial-activation reconciler must not have inline policies.");
   const entities = readPolicyEntities(run);
   if (entities.roles.length !== 1 || entities.roles[0]?.RoleName !== INITIAL_ACTIVATION_RECONCILER.roleName || entities.users.length !== 0 || entities.groups.length !== 0) throw new Error("Initial-activation reconciler policy entity topology is not exact.");
-  return Object.freeze({ roleArn: role.Arn, policyArn: policy.Arn, defaultVersionId: policy.DefaultVersionId, trustPolicySha256: sha256(readBytes(INITIAL_ACTIVATION_RECONCILER.trustPath)), permissionsPolicySha256: sha256(readBytes(INITIAL_ACTIVATION_RECONCILER.permissionsPath)), targetPolicyArn: INITIAL_ACTIVATION_RECONCILER.targetPolicyArn, releaseRoleArn: INITIAL_ACTIVATION_RECONCILER.releaseRoleArn, policyRoleCount: entities.roles.length, policyUserCount: entities.users.length, policyGroupCount: entities.groups.length, permissionsBoundaryUsageCount: policy.PermissionsBoundaryUsageCount, roleDefinedInSource: true, pr448RuntimeMigrated: true });
+  const mixedRecoveryExecutor = verifyMixedRecoveryExecutor({ run });
+  return Object.freeze({ roleArn: role.Arn, policyArn: policy.Arn, defaultVersionId: policy.DefaultVersionId, trustPolicySha256: sha256(readBytes(INITIAL_ACTIVATION_RECONCILER.trustPath)), permissionsPolicySha256: sha256(readBytes(INITIAL_ACTIVATION_RECONCILER.permissionsPath)), targetPolicyArn: INITIAL_ACTIVATION_RECONCILER.targetPolicyArn, releaseRoleArn: INITIAL_ACTIVATION_RECONCILER.releaseRoleArn, policyRoleCount: entities.roles.length, policyUserCount: entities.users.length, policyGroupCount: entities.groups.length, permissionsBoundaryUsageCount: policy.PermissionsBoundaryUsageCount, mixedRecoveryExecutor, roleDefinedInSource: true, pr448RuntimeMigrated: true });
 }
 
 const required = (argv, name) => { const index = argv.indexOf(name); const value = index < 0 ? undefined : argv[index + 1]; if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };

@@ -26,7 +26,8 @@ Preparation is read-only and writes one private preparation file. Authorization
 is produced only by `authorize-production-mixed-dual-slot-topology-recovery.yml`
 after the protected `production` environment reviewer approves the exact file
 hash. Before that approval is requested, preparation requires an administrator
-IAM simulation proving that `mscqr-production-release-deployer` can perform
+IAM simulation proving that the dedicated
+`mscqr-production-mixed-dual-slot-recovery-executor` can perform
 `UpdateSecretVersionStage` on all seven exact ARNs, and readback proving each
 exact secret has no resource policy that could override that identity result.
 The administrator signs that exact preflight with the root-attestation KMS key;
@@ -44,11 +45,14 @@ every `UpdateSecretVersionStage` call. Its inline AWS session policy allows
 only readback plus that mutation against the seven exact ARNs—never create,
 delete, or value-write APIs.
 
-The base capability is owned by the existing
-`MSCQRProductionInitialActivationLifecycle` managed policy and remains attached
-only to the release-deployer role. Its exact source statement and the execution
-workflow's inline session policy must both allow the action; the session policy
-is a restriction and cannot grant a missing base-role capability.
+The base capability is owned by the Terraform-managed
+`MSCQRProductionMixedDualSlotRecoveryExecutor` policy, attached only to the
+dedicated executor role. The shared release-deployer lifecycle policy explicitly
+denies this mutation. The dedicated base policy and the execution workflow's
+inline session policy must both allow the exact seven-resource action; the
+session policy remains a restriction and cannot grant a missing base-role
+capability. The existing protected reconciler installation transaction creates
+and verifies the dedicated role, policy, and attachment before recovery approval.
 
 A fresh approval is required to start at 0/7. If execution is interrupted, the
 same exact authorization may resume an authenticated 1/7 through 6/7 prefix.

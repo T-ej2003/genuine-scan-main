@@ -32,6 +32,8 @@ test("protected workflows expose only canonical artifact coordinates and gate cr
   for (const workflow of [authorize, execute]) { assert.match(workflow, /source-before\.sha256/); assert.match(workflow, /source-after\.sha256/); assert.match(workflow, /cmp --silent/); assert.match(workflow, /chmod 600 "\$workdir\/preparation\.json"/); }
   assert.ok(execute.indexOf("environment: production") < execute.indexOf("configure-aws-credentials") && execute.indexOf("configure-aws-credentials") < execute.indexOf("run-production-mixed-dual-slot-topology-recovery.mjs --execute"));
   assert.match(execute, /secretsmanager:UpdateSecretVersionStage/); assert.doesNotMatch(execute, /secretsmanager:(?:PutSecretValue|CreateSecret|DeleteSecret)/);
+  assert.match(execute, /role-to-assume: arn:aws:iam::368992683803:role\/mscqr-production-mixed-dual-slot-recovery-executor/);
+  assert.doesNotMatch(execute, /role-to-assume: arn:aws:iam::368992683803:role\/mscqr-production-release-deployer/);
   assert.match(execute, /execute-production-mixed-dual-slot-topology-recovery\.yml@refs\/heads\/main/);
   assert.match(execute, /concurrency:\s+group: production-mixed-dual-slot-topology-recovery\s+cancel-in-progress: false/);
   for (const arn of Object.values(MIXED_DUAL_SLOT_PREDECESSOR).map(({ arn }) => arn)) assert.match(execute, new RegExp(arn.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));

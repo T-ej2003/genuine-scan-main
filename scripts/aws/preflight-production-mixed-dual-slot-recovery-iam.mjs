@@ -18,7 +18,7 @@ const restriction = (result, detail, field) => {
 export function readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now = new Date(), run = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "default", region: "eu-west-2" }) } = {}) {
   const caller = parse(run, ["sts", "get-caller-identity"]);
   if (caller.Account !== "368992683803" || caller.Arn !== "arn:aws:iam::368992683803:root") throw new Error("Mixed recovery IAM preflight requires the exact administrator identity.");
-  const role = parse(run, ["iam", "get-role", "--role-name", "mscqr-production-release-deployer"]).Role;
+  const role = parse(run, ["iam", "get-role", "--role-name", "mscqr-production-mixed-dual-slot-recovery-executor"]).Role;
   if (role?.Arn !== MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN || role.PermissionsBoundary) throw new Error("Mixed recovery execution role or permissions boundary changed.");
   const resourcePolicies = MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES.map((resource) => {
     const response = parse(run, ["secretsmanager", "get-resource-policy", "--secret-id", resource]);

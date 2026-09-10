@@ -38,14 +38,14 @@
       "scripts/aws/prepare-production-initial-activation-reconciler-installation.mjs",
       "scripts/aws/verify-production-initial-activation-policy-reconciler.mjs"
     ],
-    "maxCreateRole": 1,
-    "maxCreatePolicy": 1,
-    "maxAttachRolePolicy": 1,
+    "maxCreateRole": 2,
+    "maxCreatePolicy": 2,
+    "maxAttachRolePolicy": 2,
     "runtimeSelfInstallation": false,
     "executionPerformedInThisSource": true,
     "terraformApplyMaxCount": 1,
     "targetPolicyCreatePolicyVersionMaxCount": 0,
-    "executorPolicyCreatePolicyVersionMaxCount": 1
+    "executorPolicyCreatePolicyVersionMaxCount": 2
   },
   "bootstrap": {
     "depth": 1,
@@ -61,8 +61,11 @@
     "administratorAccess": false,
     "executorPolicyUpdateAuthority": {
       "action": "iam:CreatePolicyVersion",
-      "resource": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
-      "maxCount": 1
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+        "arn:aws:iam::368992683803:policy/MSCQRProductionMixedDualSlotRecoveryExecutor"
+      ],
+      "maxCount": 2
     },
     "runtimeSelfInstallation": false
   }

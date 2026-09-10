@@ -14,16 +14,15 @@ const VERSION = /^v[1-9][0-9]*$/;
 const repository = PRODUCTION_ENVIRONMENT_APPROVAL.repository;
 
 export const INITIAL_ACTIVATION_POLICY_RECONCILIATION = Object.freeze({
-  schemaVersion: 2,
+  schemaVersion: 1,
   operation: "PRODUCTION_INITIAL_ACTIVATION_LIFECYCLE_POLICY_RECONCILIATION",
   policyName: "MSCQRProductionInitialActivationLifecycle",
   policyArn: "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
   releaseRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer",
   sourcePath: "documents/ops/iam/MSCQRProductionInitialActivationLifecycle-v1.json",
-  predecessorVersionId: "v2",
-  desiredVersionId: "v3",
-  predecessorPolicySha256: "7e9eef0b5dd5c089f4734a43cbc40ed963078dc500828c2e592cc07f04c6d564",
-  desiredPolicySha256: "c6f917d8e246bc5b4bcdf3ea189f21128e23639aa1d9643b795d4f0cedf42134",
+  predecessorVersionId: "v1",
+  predecessorPolicySha256: "2a90146c8fc8f6062198650134c0e92724cc4dd69720bde629fd0752e4432c71",
+  desiredPolicySha256: "7e9eef0b5dd5c089f4734a43cbc40ed963078dc500828c2e592cc07f04c6d564",
   maxCreatePolicyVersionCount: 1,
   maxPolicyVersionsBeforeCreate: 4,
   workflowPath: ".github/workflows/authorize-production-initial-activation-lifecycle-policy-reconciliation.yml",
@@ -44,10 +43,10 @@ export function readInitialActivationLifecycleDesiredPolicy({ repositoryRoot = r
 }
 
 const expectedReleaseRolePolicyArns = () => sourcePolicyEvidence().map(({ arn }) => arn).sort();
-const stateFields = ["policyArn", "defaultVersionId", "document", "policyVersionIds", "policyVersionCount", "releaseRolePolicyArns", "targetPolicyRoles", "targetPolicyUsers", "targetPolicyGroups", "permissionsBoundaryUsageCount"];
+const stateFields = ["policyArn", "defaultVersionId", "document", "policyVersionCount", "releaseRolePolicyArns", "targetPolicyRoles", "targetPolicyUsers", "targetPolicyGroups", "permissionsBoundaryUsageCount"];
 export function assertInitialActivationLifecyclePolicyState(value, { desired = readInitialActivationLifecycleDesiredPolicy() } = {}) {
   exact(value, stateFields, "Initial activation lifecycle live policy state");
-  if (value.policyArn !== INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn || !VERSION.test(value.defaultVersionId || "") || !Array.isArray(value.policyVersionIds) || value.policyVersionIds.length !== value.policyVersionCount || value.policyVersionIds.some((versionId, index) => !VERSION.test(versionId) || value.policyVersionIds.indexOf(versionId) !== index) || !Number.isSafeInteger(value.policyVersionCount) || value.policyVersionCount < 1 || value.policyVersionCount > 5 || !Number.isSafeInteger(value.permissionsBoundaryUsageCount) || value.permissionsBoundaryUsageCount !== 0 || ![value.releaseRolePolicyArns, value.targetPolicyRoles, value.targetPolicyUsers, value.targetPolicyGroups].every(Array.isArray)) throw new Error("Initial activation lifecycle live policy identity is invalid.");
+  if (value.policyArn !== INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn || !VERSION.test(value.defaultVersionId || "") || !Number.isSafeInteger(value.policyVersionCount) || value.policyVersionCount < 1 || value.policyVersionCount > 5 || !Number.isSafeInteger(value.permissionsBoundaryUsageCount) || value.permissionsBoundaryUsageCount !== 0 || ![value.releaseRolePolicyArns, value.targetPolicyRoles, value.targetPolicyUsers, value.targetPolicyGroups].every(Array.isArray)) throw new Error("Initial activation lifecycle live policy identity is invalid.");
   const releaseRolePolicyArns = [...value.releaseRolePolicyArns].sort();
   const targetPolicyRoles = [...value.targetPolicyRoles].sort();
   const targetPolicyUsers = [...value.targetPolicyUsers].sort();
@@ -58,13 +57,13 @@ export function assertInitialActivationLifecyclePolicyState(value, { desired = r
   const policySha256 = sha(document);
   const releaseRolePolicySetSha256 = sha({ releaseRolePolicyArns });
   const targetPolicyEntityBoundarySha256 = sha({ targetPolicyRoles, targetPolicyUsers, targetPolicyGroups, permissionsBoundaryUsageCount: 0 });
-  const predecessor = value.defaultVersionId === INITIAL_ACTIVATION_POLICY_RECONCILIATION.predecessorVersionId && policySha256 === INITIAL_ACTIVATION_POLICY_RECONCILIATION.predecessorPolicySha256 && JSON.stringify(value.policyVersionIds) === JSON.stringify(["v1", "v2"]);
-  const alreadyDesired = policySha256 === desired.policySha256 && value.defaultVersionId === INITIAL_ACTIVATION_POLICY_RECONCILIATION.desiredVersionId && JSON.stringify(value.policyVersionIds) === JSON.stringify(["v1", "v2", "v3"]);
+  const predecessor = value.defaultVersionId === INITIAL_ACTIVATION_POLICY_RECONCILIATION.predecessorVersionId && policySha256 === INITIAL_ACTIVATION_POLICY_RECONCILIATION.predecessorPolicySha256;
+  const alreadyDesired = policySha256 === desired.policySha256 && value.defaultVersionId !== INITIAL_ACTIVATION_POLICY_RECONCILIATION.predecessorVersionId;
   if (!predecessor && !alreadyDesired) throw new Error("Initial activation lifecycle live policy is neither the authenticated predecessor nor the exact desired policy.");
   return Object.freeze({ ...value, document, releaseRolePolicyArns, targetPolicyRoles, targetPolicyUsers, targetPolicyGroups, policySha256, releaseRolePolicySetSha256, targetPolicyEntityBoundarySha256, status: alreadyDesired ? "ALREADY_RECONCILED" : "AUTHENTICATED_PREDECESSOR" });
 }
 
-const authorizationFields = ["schemaVersion", "kind", "environment", "operation", "sourceSha", "targetPolicyArn", "predecessorDefaultVersionId", "predecessorPolicySha256", "predecessorPolicyVersionIds", "desiredPolicySha256", "desiredPolicySourcePath", "policyVersionCount", "releaseRolePolicySetSha256", "targetPolicyEntityBoundarySha256", "expectedAction", "setAsDefault", "maxCreatePolicyVersionCount", "maxSetDefaultPolicyVersionCount", "maxDeletePolicyVersionCount", "maxPolicyAttachmentMutations", "executionPrincipal", "protectedEnvironmentApprovalEvidence", "protectedEnvironmentApprovalEvidenceSha256", "authorizationSha256"];
+const authorizationFields = ["schemaVersion", "kind", "environment", "operation", "sourceSha", "targetPolicyArn", "predecessorDefaultVersionId", "predecessorPolicySha256", "desiredPolicySha256", "desiredPolicySourcePath", "policyVersionCount", "releaseRolePolicySetSha256", "targetPolicyEntityBoundarySha256", "expectedAction", "setAsDefault", "maxCreatePolicyVersionCount", "maxSetDefaultPolicyVersionCount", "maxDeletePolicyVersionCount", "maxPolicyAttachmentMutations", "executionPrincipal", "protectedEnvironmentApprovalEvidence", "protectedEnvironmentApprovalEvidenceSha256", "authorizationSha256"];
 export function createInitialActivationLifecyclePolicyReconciliationAuthorization({ sourceSha, liveState, protectedEnvironmentApprovalEvidence, desired = readInitialActivationLifecycleDesiredPolicy(), now = new Date() } = {}) {
   requireSha40(sourceSha, "sourceSha");
   if (desired?.sourcePath !== INITIAL_ACTIVATION_POLICY_RECONCILIATION.sourcePath || desired?.policySha256 !== INITIAL_ACTIVATION_POLICY_RECONCILIATION.desiredPolicySha256 || sha(desired?.document) !== desired.policySha256) throw new Error("Initial activation lifecycle desired policy must be the exact tracked protected-source document.");
@@ -77,7 +76,7 @@ export function createInitialActivationLifecyclePolicyReconciliationAuthorizatio
   if (state.policyVersionCount > INITIAL_ACTIVATION_POLICY_RECONCILIATION.maxPolicyVersionsBeforeCreate) throw new Error("Initial activation lifecycle policy version capacity requires pruning and is not authorized.");
   const body = {
     schemaVersion: INITIAL_ACTIVATION_POLICY_RECONCILIATION.schemaVersion, kind: "PRODUCTION_INITIAL_ACTIVATION_LIFECYCLE_POLICY_RECONCILIATION_AUTHORIZATION", environment: "production", operation: INITIAL_ACTIVATION_POLICY_RECONCILIATION.operation, sourceSha,
-    targetPolicyArn: INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn, predecessorDefaultVersionId: state.defaultVersionId, predecessorPolicySha256: state.policySha256, predecessorPolicyVersionIds: state.policyVersionIds, desiredPolicySha256: desired.policySha256, desiredPolicySourcePath: desired.sourcePath, policyVersionCount: state.policyVersionCount, releaseRolePolicySetSha256: state.releaseRolePolicySetSha256, targetPolicyEntityBoundarySha256: state.targetPolicyEntityBoundarySha256,
+    targetPolicyArn: INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn, predecessorDefaultVersionId: state.defaultVersionId, predecessorPolicySha256: state.policySha256, desiredPolicySha256: desired.policySha256, desiredPolicySourcePath: desired.sourcePath, policyVersionCount: state.policyVersionCount, releaseRolePolicySetSha256: state.releaseRolePolicySetSha256, targetPolicyEntityBoundarySha256: state.targetPolicyEntityBoundarySha256,
     expectedAction: "iam:CreatePolicyVersion", setAsDefault: true, maxCreatePolicyVersionCount: 1, maxSetDefaultPolicyVersionCount: 0, maxDeletePolicyVersionCount: 0, maxPolicyAttachmentMutations: 0, executionPrincipal: "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler",
     protectedEnvironmentApprovalEvidence, protectedEnvironmentApprovalEvidenceSha256: protectedEnvironmentApprovalEvidence.evidenceSha256,
   };
@@ -87,11 +86,11 @@ export function createInitialActivationLifecyclePolicyReconciliationAuthorizatio
 export function assertInitialActivationLifecyclePolicyReconciliationAuthorization(value, { sourceSha, now = new Date() } = {}) {
   exact(value, authorizationFields, "Initial activation lifecycle policy authorization");
   const { authorizationSha256, ...body } = value;
-  if (value.schemaVersion !== 2 || value.kind !== "PRODUCTION_INITIAL_ACTIVATION_LIFECYCLE_POLICY_RECONCILIATION_AUTHORIZATION" || value.environment !== "production" || value.operation !== INITIAL_ACTIVATION_POLICY_RECONCILIATION.operation || value.sourceSha !== sourceSha || !SHA256.test(authorizationSha256 || "") || sha(body) !== authorizationSha256) throw new Error("Initial activation lifecycle policy authorization identity is invalid.");
+  if (value.schemaVersion !== 1 || value.kind !== "PRODUCTION_INITIAL_ACTIVATION_LIFECYCLE_POLICY_RECONCILIATION_AUTHORIZATION" || value.environment !== "production" || value.operation !== INITIAL_ACTIVATION_POLICY_RECONCILIATION.operation || value.sourceSha !== sourceSha || !SHA256.test(authorizationSha256 || "") || sha(body) !== authorizationSha256) throw new Error("Initial activation lifecycle policy authorization identity is invalid.");
   assertProductionEnvironmentApprovalIdentity(value.protectedEnvironmentApprovalEvidence, { sourceSha, repository });
   if (value.protectedEnvironmentApprovalEvidence.schemaVersion !== 3) throw new Error("Initial activation lifecycle policy authorization requires authenticated GitHub approval evidence.");
   assertProductionEnvironmentApprovalFreshness(value.protectedEnvironmentApprovalEvidence, { now });
-  if (value.protectedEnvironmentApprovalEvidence.workflowRef !== `${repository}/${INITIAL_ACTIVATION_POLICY_RECONCILIATION.workflowPath}@refs/heads/main` || value.protectedEnvironmentApprovalEvidenceSha256 !== value.protectedEnvironmentApprovalEvidence.evidenceSha256 || value.targetPolicyArn !== INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn || value.predecessorDefaultVersionId !== INITIAL_ACTIVATION_POLICY_RECONCILIATION.predecessorVersionId || value.predecessorPolicySha256 !== INITIAL_ACTIVATION_POLICY_RECONCILIATION.predecessorPolicySha256 || JSON.stringify(value.predecessorPolicyVersionIds) !== JSON.stringify(["v1", "v2"]) || value.desiredPolicySha256 !== INITIAL_ACTIVATION_POLICY_RECONCILIATION.desiredPolicySha256 || value.desiredPolicySourcePath !== INITIAL_ACTIVATION_POLICY_RECONCILIATION.sourcePath || value.policyVersionCount !== 2 || !SHA256.test(value.releaseRolePolicySetSha256 || "") || !SHA256.test(value.targetPolicyEntityBoundarySha256 || "") || value.expectedAction !== "iam:CreatePolicyVersion" || value.setAsDefault !== true || value.maxCreatePolicyVersionCount !== 1 || value.maxSetDefaultPolicyVersionCount !== 0 || value.maxDeletePolicyVersionCount !== 0 || value.maxPolicyAttachmentMutations !== 0 || value.executionPrincipal !== "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler") throw new Error("Initial activation lifecycle policy authorization bindings are invalid.");
+  if (value.protectedEnvironmentApprovalEvidence.workflowRef !== `${repository}/${INITIAL_ACTIVATION_POLICY_RECONCILIATION.workflowPath}@refs/heads/main` || value.protectedEnvironmentApprovalEvidenceSha256 !== value.protectedEnvironmentApprovalEvidence.evidenceSha256 || value.targetPolicyArn !== INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn || value.predecessorDefaultVersionId !== INITIAL_ACTIVATION_POLICY_RECONCILIATION.predecessorVersionId || value.predecessorPolicySha256 !== INITIAL_ACTIVATION_POLICY_RECONCILIATION.predecessorPolicySha256 || value.desiredPolicySha256 !== INITIAL_ACTIVATION_POLICY_RECONCILIATION.desiredPolicySha256 || value.desiredPolicySourcePath !== INITIAL_ACTIVATION_POLICY_RECONCILIATION.sourcePath || !Number.isSafeInteger(value.policyVersionCount) || value.policyVersionCount < 1 || value.policyVersionCount > 4 || !SHA256.test(value.releaseRolePolicySetSha256 || "") || !SHA256.test(value.targetPolicyEntityBoundarySha256 || "") || value.expectedAction !== "iam:CreatePolicyVersion" || value.setAsDefault !== true || value.maxCreatePolicyVersionCount !== 1 || value.maxSetDefaultPolicyVersionCount !== 0 || value.maxDeletePolicyVersionCount !== 0 || value.maxPolicyAttachmentMutations !== 0 || value.executionPrincipal !== "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler") throw new Error("Initial activation lifecycle policy authorization bindings are invalid.");
   return value;
 }
 
@@ -129,7 +128,7 @@ const isTransientConvergenceSnapshot = (value, before, authorization, desired, e
   const predecessorDocument = policySha256 === before.policySha256;
   const desiredDocument = policySha256 === desired.policySha256;
   const predecessorDefault = value.defaultVersionId === before.defaultVersionId;
-  const desiredDefault = value.defaultVersionId === INITIAL_ACTIVATION_POLICY_RECONCILIATION.desiredVersionId && (!expectedVersionId || value.defaultVersionId === expectedVersionId);
+  const desiredDefault = value.defaultVersionId !== before.defaultVersionId && (!expectedVersionId || value.defaultVersionId === expectedVersionId);
   const plausibleNewDefault = desiredDefault || (!expectedVersionId && value.defaultVersionId !== before.defaultVersionId);
   const oldCount = value.policyVersionCount === before.policyVersionCount;
   const newCount = value.policyVersionCount === before.policyVersionCount + 1;
@@ -171,11 +170,11 @@ export function executeInitialActivationLifecyclePolicyReconciliation({ authoriz
   const before = assertInitialActivationLifecyclePolicyState(readLiveState(), { desired });
   if (before.releaseRolePolicySetSha256 !== authorization.releaseRolePolicySetSha256 || before.targetPolicyEntityBoundarySha256 !== authorization.targetPolicyEntityBoundarySha256) throw new Error("Initial activation lifecycle policy attachment state changed since authorization.");
   if (before.status === "ALREADY_RECONCILED") return Object.freeze({ status: "ALREADY_RECONCILED", createPolicyVersionCount: 0, postState: before });
-  if (before.defaultVersionId !== authorization.predecessorDefaultVersionId || before.policySha256 !== authorization.predecessorPolicySha256 || JSON.stringify(before.policyVersionIds) !== JSON.stringify(authorization.predecessorPolicyVersionIds) || before.policyVersionCount !== authorization.policyVersionCount || before.policyVersionCount > 4) throw new Error("Initial activation lifecycle policy predecessor CAS changed since authorization.");
+  if (before.defaultVersionId !== authorization.predecessorDefaultVersionId || before.policySha256 !== authorization.predecessorPolicySha256 || before.policyVersionCount !== authorization.policyVersionCount || before.policyVersionCount > 4) throw new Error("Initial activation lifecycle policy predecessor CAS changed since authorization.");
   const latest = assertInitialActivationLifecyclePolicyState(readLiveState(), { desired });
   if (latest.releaseRolePolicySetSha256 !== authorization.releaseRolePolicySetSha256 || latest.targetPolicyEntityBoundarySha256 !== authorization.targetPolicyEntityBoundarySha256) throw new Error("Initial activation lifecycle policy topology changed before mutation.");
   if (latest.status === "ALREADY_RECONCILED") return Object.freeze({ status: "ALREADY_RECONCILED", createPolicyVersionCount: 0, postState: latest });
-  if (latest.defaultVersionId !== authorization.predecessorDefaultVersionId || latest.policySha256 !== authorization.predecessorPolicySha256 || JSON.stringify(latest.policyVersionIds) !== JSON.stringify(authorization.predecessorPolicyVersionIds) || latest.policyVersionCount !== authorization.policyVersionCount) throw new Error("Initial activation lifecycle policy predecessor CAS changed before mutation.");
+  if (latest.defaultVersionId !== authorization.predecessorDefaultVersionId || latest.policySha256 !== authorization.predecessorPolicySha256 || latest.policyVersionCount !== authorization.policyVersionCount) throw new Error("Initial activation lifecycle policy predecessor CAS changed before mutation.");
   assertProductionEnvironmentApprovalFreshness(authorization.protectedEnvironmentApprovalEvidence, { now: readClock() });
   let response;
   try { response = createPolicyVersion({ PolicyArn: INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn, PolicyDocument: desired.document, SetAsDefault: true }); }
@@ -191,6 +190,6 @@ export function executeInitialActivationLifecyclePolicyReconciliation({ authoriz
 export function buildInitialActivationLifecyclePolicyReconciliationResult({ authorization, outcome } = {}) {
   if (!outcome || !["RECONCILED", "COMPLETED_BY_READBACK", "ALREADY_RECONCILED"].includes(outcome.status)) throw new Error("Initial activation lifecycle policy result outcome is invalid.");
   const body = { schemaVersion: 1, kind: "PRODUCTION_INITIAL_ACTIVATION_LIFECYCLE_POLICY_RECONCILIATION_RESULT", operation: INITIAL_ACTIVATION_POLICY_RECONCILIATION.operation, sourceSha: authorization?.sourceSha, targetPolicyArn: authorization?.targetPolicyArn, authorizationSha256: authorization?.authorizationSha256, predecessorDefaultVersionId: authorization?.predecessorDefaultVersionId, predecessorPolicySha256: authorization?.predecessorPolicySha256, desiredPolicySha256: authorization?.desiredPolicySha256, status: outcome.status, createPolicyVersionCount: outcome.createPolicyVersionCount, postDefaultVersionId: outcome.postState?.defaultVersionId, postPolicySha256: outcome.postState?.policySha256, postReleaseRolePolicySetSha256: outcome.postState?.releaseRolePolicySetSha256, postTargetPolicyEntityBoundarySha256: outcome.postState?.targetPolicyEntityBoundarySha256 };
-  if (!SHA40.test(body.sourceSha || "") || body.targetPolicyArn !== INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn || !SHA256.test(body.authorizationSha256 || "") || body.predecessorDefaultVersionId !== INITIAL_ACTIVATION_POLICY_RECONCILIATION.predecessorVersionId || body.predecessorPolicySha256 !== INITIAL_ACTIVATION_POLICY_RECONCILIATION.predecessorPolicySha256 || body.desiredPolicySha256 !== INITIAL_ACTIVATION_POLICY_RECONCILIATION.desiredPolicySha256 || body.postDefaultVersionId !== INITIAL_ACTIVATION_POLICY_RECONCILIATION.desiredVersionId || body.postPolicySha256 !== INITIAL_ACTIVATION_POLICY_RECONCILIATION.desiredPolicySha256 || !SHA256.test(body.postReleaseRolePolicySetSha256 || "") || !SHA256.test(body.postTargetPolicyEntityBoundarySha256 || "") || ![0, 1].includes(body.createPolicyVersionCount)) throw new Error("Initial activation lifecycle policy result bindings are invalid.");
+  if (!SHA40.test(body.sourceSha || "") || body.targetPolicyArn !== INITIAL_ACTIVATION_POLICY_RECONCILIATION.policyArn || !SHA256.test(body.authorizationSha256 || "") || body.predecessorDefaultVersionId !== INITIAL_ACTIVATION_POLICY_RECONCILIATION.predecessorVersionId || body.predecessorPolicySha256 !== INITIAL_ACTIVATION_POLICY_RECONCILIATION.predecessorPolicySha256 || body.desiredPolicySha256 !== INITIAL_ACTIVATION_POLICY_RECONCILIATION.desiredPolicySha256 || !VERSION.test(body.postDefaultVersionId || "") || body.postPolicySha256 !== INITIAL_ACTIVATION_POLICY_RECONCILIATION.desiredPolicySha256 || !SHA256.test(body.postReleaseRolePolicySetSha256 || "") || !SHA256.test(body.postTargetPolicyEntityBoundarySha256 || "") || ![0, 1].includes(body.createPolicyVersionCount)) throw new Error("Initial activation lifecycle policy result bindings are invalid.");
   return Object.freeze({ ...body, resultSha256: sha(body) });
 }

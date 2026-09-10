@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import test from "node:test";
-import { INITIAL_ACTIVATION_RECONCILER, verifyInitialActivationPolicyReconciler } from "../aws/verify-production-initial-activation-policy-reconciler.mjs";
+import { INITIAL_ACTIVATION_RECONCILER, MIXED_RECOVERY_EXECUTOR, verifyInitialActivationPolicyReconciler } from "../aws/verify-production-initial-activation-policy-reconciler.mjs";
 
 const root = "infra/aws/terraform/production-initial-activation-policy-reconciler";
 const trust = JSON.parse(fs.readFileSync(`${root}/trust-policy.json`, "utf8"));
 const policy = JSON.parse(fs.readFileSync(`${root}/permissions-policy.json`, "utf8"));
+const mixedPolicy = JSON.parse(fs.readFileSync(`${root}/mixed-recovery-permissions-policy.json`, "utf8"));
 const terraform = fs.readFileSync(`${root}/main.tf`, "utf8");
 const backend = JSON.parse(fs.readFileSync(`${root}/state-backend-contract.json`, "utf8"));
 const installation = JSON.parse(fs.readFileSync(`${root}/installation-contract.json`, "utf8"));
@@ -14,6 +15,7 @@ const capability = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProduction
 const encoded = (value) => encodeURIComponent(JSON.stringify(value));
 const reorder = (value) => Array.isArray(value) ? value.map(reorder) : (value && typeof value === "object" ? Object.fromEntries(Object.entries(value).reverse().map(([key, nested]) => [key, reorder(nested)])) : value);
 const tags = Object.entries(INITIAL_ACTIVATION_RECONCILER.tags).map(([Key, Value]) => ({ Key, Value }));
+const mixedTags = Object.entries(MIXED_RECOVERY_EXECUTOR.tags).map(([Key, Value]) => ({ Key, Value }));
 
 const commands = ({ provider = {}, role = {}, policyMetadata = {}, version = policy, encodeRole = true, encodeVersion = true, attached = [{ PolicyArn: INITIAL_ACTIVATION_RECONCILER.policyArn }], inline = [], entities = [{ PolicyRoles: [{ RoleName: INITIAL_ACTIVATION_RECONCILER.roleName }], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }] } = {}) => {
   const calls = [];
@@ -21,12 +23,13 @@ const commands = ({ provider = {}, role = {}, policyMetadata = {}, version = pol
     calls.push(args);
     if (args[0] === "sts") return JSON.stringify({ Arn: "arn:aws:iam::368992683803:root" });
     if (args[0] === "iam" && args[1] === "get-open-id-connect-provider") return JSON.stringify({ Url: "token.actions.githubusercontent.com", ClientIDList: ["sts.amazonaws.com"], ...provider });
-    if (args[0] === "iam" && args[1] === "get-role") return JSON.stringify({ Role: { Arn: INITIAL_ACTIVATION_RECONCILER.roleArn, RoleName: INITIAL_ACTIVATION_RECONCILER.roleName, Path: "/", Description: INITIAL_ACTIVATION_RECONCILER.roleDescription, Tags: tags, MaxSessionDuration: 3600, AssumeRolePolicyDocument: encodeRole ? encoded(trust) : trust, ...role } });
-    if (args[0] === "iam" && args[1] === "get-policy") return JSON.stringify({ Policy: { Arn: INITIAL_ACTIVATION_RECONCILER.policyArn, PolicyName: INITIAL_ACTIVATION_RECONCILER.policyName, Path: "/", Description: INITIAL_ACTIVATION_RECONCILER.policyDescription, Tags: tags, DefaultVersionId: "v1", PermissionsBoundaryUsageCount: 0, ...policyMetadata } });
-    if (args[0] === "iam" && args[1] === "get-policy-version") return JSON.stringify({ PolicyVersion: { Document: encodeVersion ? encoded(version) : version } });
-    if (args[0] === "iam" && args[1] === "list-attached-role-policies") return JSON.stringify({ AttachedPolicies: attached });
+    if (args[0] === "iam" && args[1] === "get-role") { const mixed = args[args.indexOf("--role-name") + 1] === MIXED_RECOVERY_EXECUTOR.roleName; return JSON.stringify({ Role: { Arn: mixed ? MIXED_RECOVERY_EXECUTOR.roleArn : INITIAL_ACTIVATION_RECONCILER.roleArn, RoleName: mixed ? MIXED_RECOVERY_EXECUTOR.roleName : INITIAL_ACTIVATION_RECONCILER.roleName, Path: "/", Description: mixed ? MIXED_RECOVERY_EXECUTOR.roleDescription : INITIAL_ACTIVATION_RECONCILER.roleDescription, Tags: mixed ? mixedTags : tags, MaxSessionDuration: 3600, AssumeRolePolicyDocument: encodeRole ? encoded(trust) : trust, ...(!mixed ? role : {}) } }); }
+    if (args[0] === "iam" && args[1] === "get-policy") { const mixed = args[args.indexOf("--policy-arn") + 1] === MIXED_RECOVERY_EXECUTOR.policyArn; return JSON.stringify({ Policy: { Arn: mixed ? MIXED_RECOVERY_EXECUTOR.policyArn : INITIAL_ACTIVATION_RECONCILER.policyArn, PolicyName: mixed ? MIXED_RECOVERY_EXECUTOR.policyName : INITIAL_ACTIVATION_RECONCILER.policyName, Path: "/", Description: mixed ? MIXED_RECOVERY_EXECUTOR.policyDescription : INITIAL_ACTIVATION_RECONCILER.policyDescription, Tags: mixed ? mixedTags : tags, DefaultVersionId: "v1", PermissionsBoundaryUsageCount: 0, ...(!mixed ? policyMetadata : {}) } }); }
+    if (args[0] === "iam" && args[1] === "get-policy-version") { const mixed = args[args.indexOf("--policy-arn") + 1] === MIXED_RECOVERY_EXECUTOR.policyArn; const document = mixed ? mixedPolicy : version; return JSON.stringify({ PolicyVersion: { Document: encodeVersion ? encoded(document) : document } }); }
+    if (args[0] === "iam" && args[1] === "list-attached-role-policies") { const mixed = args[args.indexOf("--role-name") + 1] === MIXED_RECOVERY_EXECUTOR.roleName; return JSON.stringify({ AttachedPolicies: mixed ? [{ PolicyArn: MIXED_RECOVERY_EXECUTOR.policyArn }] : attached }); }
     if (args[0] === "iam" && args[1] === "list-role-policies") return JSON.stringify({ PolicyNames: inline });
     if (args[0] === "iam" && args[1] === "list-entities-for-policy") {
+      if (args[args.indexOf("--policy-arn") + 1] === MIXED_RECOVERY_EXECUTOR.policyArn) return JSON.stringify({ PolicyRoles: [{ RoleName: MIXED_RECOVERY_EXECUTOR.roleName }], PolicyUsers: [], PolicyGroups: [], IsTruncated: false });
       const page = entities[args.includes("--marker") ? 1 : 0];
       if (!page) throw new Error("unexpected entity page");
       return JSON.stringify(page);
@@ -69,7 +72,7 @@ test("Terraform root owns only the purpose-bound role, policy, and attachment", 
   assert.equal(backend.productionExecutionEnabled, true);
   assert.equal(backend.rootApplyRequired, false);
   assert.equal(installation.administratorBoundary, "GitHub production-environment OIDC session for mscqr-production-initial-activation-policy-reconciler-bootstrap");
-  assert.deepEqual(installation.maxAwsMutations, { "iam:CreateRole": 1, "iam:CreatePolicy": 1, "iam:AttachRolePolicy": 1, "iam:UpdateAssumeRolePolicy": 0, "iam:PutRolePolicy": 0, "iam:CreatePolicyVersion": 1 });
+  assert.deepEqual(installation.maxAwsMutations, { "iam:CreateRole": 2, "iam:CreatePolicy": 2, "iam:AttachRolePolicy": 2, "iam:UpdateAssumeRolePolicy": 0, "iam:PutRolePolicy": 0, "iam:CreatePolicyVersion": 2 });
   assert.equal(installation.executionPerformedInThisSource, true);
   assert.equal(installation.terraformVersion, "1.15.8");
   assert.equal(installation.concurrencyGroup, "production-deploy");
@@ -147,10 +150,10 @@ test("capability contract defines the role and records the PR #448 runtime migra
   assert.equal(capability.installation.concurrencyGroup, "production-deploy");
   assert.equal(capability.installation.terraformApplyMaxCount, 1);
   assert.equal(capability.installation.targetPolicyCreatePolicyVersionMaxCount, 0);
-  assert.equal(capability.installation.executorPolicyCreatePolicyVersionMaxCount, 1);
+  assert.equal(capability.installation.executorPolicyCreatePolicyVersionMaxCount, 2);
   assert.deepEqual(capability.bootstrap.maxAwsMutations, { "iam:CreateRole": 1, "iam:PutRolePolicy": 1 });
   assert.equal(capability.bootstrap.depth, 1);
   assert.equal(capability.bootstrap.administratorAccess, false);
-  assert.deepEqual(capability.bootstrap.executorPolicyUpdateAuthority, { action: "iam:CreatePolicyVersion", resource: INITIAL_ACTIVATION_RECONCILER.policyArn, maxCount: 1 });
+  assert.deepEqual(capability.bootstrap.executorPolicyUpdateAuthority, { action: "iam:CreatePolicyVersion", resources: [INITIAL_ACTIVATION_RECONCILER.policyArn, MIXED_RECOVERY_EXECUTOR.policyArn], maxCount: 2 });
   for (const sourceFile of [...capability.installation.sourceFiles, capability.bootstrap.sourceFile]) assert.equal(fs.existsSync(sourceFile), true);
 });

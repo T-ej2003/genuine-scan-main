@@ -16,7 +16,9 @@ export const MIXED_DUAL_SLOT_RECOVERY_ARTIFACT = "production-mixed-dual-slot-top
 export const MIXED_DUAL_SLOT_RECOVERY_POST_STATE = "SEVEN_EXISTING_RESOURCES_WITHOUT_AWSCURRENT";
 export const MIXED_DUAL_SLOT_RECOVERY_MAX_AGE_MS = PRODUCTION_ENVIRONMENT_APPROVAL.maxAgeMs;
 export const MIXED_DUAL_SLOT_RECOVERY_IAM_PREFLIGHT_KIND = "PRODUCTION_MIXED_DUAL_SLOT_TOPOLOGY_RECOVERY_IAM_PREFLIGHT";
-export const MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN = "arn:aws:iam::368992683803:role/mscqr-production-release-deployer";
+export const MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN = "arn:aws:iam::368992683803:role/mscqr-production-mixed-dual-slot-recovery-executor";
+export const MIXED_DUAL_SLOT_RECOVERY_EXECUTION_POLICY_ARN = "arn:aws:iam::368992683803:policy/MSCQRProductionMixedDualSlotRecoveryExecutor";
+export const MIXED_DUAL_SLOT_RECOVERY_EXECUTION_POLICY_PATH = "infra/aws/terraform/production-initial-activation-policy-reconciler/mixed-recovery-permissions-policy.json";
 export const MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION = "secretsmanager:UpdateSecretVersionStage";
 export const MIXED_DUAL_SLOT_RECOVERY_LIVE_PREDECESSOR = Object.freeze({
   cluster: "mscqr-prod-euw2-main", service: "mscqr-backend-servi-euw2",

@@ -47,7 +47,7 @@ test("complete production dependency closure is exact across modes and failure p
     ["secretsmanager:GetResourcePolicy", "ROOT_OPERATOR"],
   ]);
   assert.deepEqual(report.newAwsCalls.filter(({ capabilityId }) => capabilityId === "mixed-recovery-remove-awscurrent").map(({ action, resources, identity, reachableMode }) => [action, resources, identity, reachableMode]), [
-    ["secretsmanager:UpdateSecretVersionStage", graph().capabilities.find(({ id }) => id === "mixed-recovery-remove-awscurrent").resources, "RELEASE_DEPLOYER", ["MIXED_DUAL_SLOT_RECOVERY"]],
+    ["secretsmanager:UpdateSecretVersionStage", graph().capabilities.find(({ id }) => id === "mixed-recovery-remove-awscurrent").resources, "MIXED_RECOVERY_EXECUTOR", ["MIXED_DUAL_SLOT_RECOVERY"]],
   ]);
   assert.deepEqual(report.newAwsCalls.filter(({ capabilityId }) => capabilityId === "mixed-recovery-iam-attestation-sign").map(({ action, resources, identity, reachableMode }) => [action, resources, identity, reachableMode]), [
     ["kms:Sign", ["arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation"], "ROOT_OPERATOR", ["MIXED_DUAL_SLOT_RECOVERY"]],

@@ -21,3 +21,15 @@ output "trust_policy_sha256" {
 output "permissions_policy_sha256" {
   value = filesha256("${path.module}/permissions-policy.json")
 }
+
+output "mixed_recovery_role_arn" {
+  value = aws_iam_role.mixed_recovery.arn
+}
+
+output "mixed_recovery_policy_arn" {
+  value = aws_iam_policy.mixed_recovery.arn
+}
+
+output "mixed_recovery_permissions_policy_sha256" {
+  value = filesha256("${path.module}/mixed-recovery-permissions-policy.json")
+}
