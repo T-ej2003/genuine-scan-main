@@ -101,7 +101,7 @@ const assertExactOutputReconciliation = (plan, stateBytes, expectedBefore) => {
   const nonNoop = changes.filter(([, change]) => canonicalJson(change?.actions) !== canonicalJson(["no-op"]));
   if (nonNoop.length !== 1) throw new Error("Refresh-only plan output reconciliation is not exact.");
   const [name, change] = nonNoop[0]; const beforeOutput = normalizedState(stateBytes).state.outputs?.[name]?.value;
-  if (name !== RECONCILER_STATE_RECONCILIATION.outputReconciliation.name || canonicalJson(change?.actions) !== canonicalJson(["update"]) || typeof change?.before !== "string" || change.before !== (expectedBefore ?? beforeOutput) || change.after !== RECONCILER_STATE_RECONCILIATION.outputReconciliation.after || change.before_sensitive !== false || change.after_sensitive !== false || change.before_unknown !== false || change.after_unknown !== false) throw new Error("Refresh-only plan output reconciliation is not exact.");
+  if (name !== RECONCILER_STATE_RECONCILIATION.outputReconciliation.name || canonicalJson(change?.actions) !== canonicalJson(["update"]) || typeof change?.before !== "string" || change.before !== (expectedBefore ?? beforeOutput) || change.after !== RECONCILER_STATE_RECONCILIATION.outputReconciliation.after || change.before_sensitive !== false || change.after_sensitive !== false || (Object.hasOwn(change, "before_unknown") && change.before_unknown !== false) || change.after_unknown !== false) throw new Error("Refresh-only plan output reconciliation is not exact.");
   return Object.freeze({ name, actions: ["update"], before: change.before, after: change.after, sensitive: false, unknown: false });
 };
 const assertPlanSemantics = (value) => {

@@ -144,10 +144,25 @@ test("replay and post-apply require the complete authorized successor state", ()
 });
 
 test("refresh-only output reconciliation is exact and fail-closed", () => {
+  const fixture = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-initial-activation-reconciler-plan-update.json", "utf8")).output_changes.permissions_policy_sha256;
+  assert.equal(Object.hasOwn(fixture, "before_unknown"), false);
+  assert.equal(fixture.after_unknown, false);
+  const omittedBeforeUnknown = refreshPlan(); delete omittedBeforeUnknown.output_changes.permissions_policy_sha256.before_unknown;
+  assert.doesNotThrow(() => assertExactReconcilerRefreshOnlyPlan(omittedBeforeUnknown, { stateBytes: before }));
+  const falseBeforeUnknown = refreshPlan(); falseBeforeUnknown.output_changes.permissions_policy_sha256.before_unknown = false;
+  assert.doesNotThrow(() => assertExactReconcilerRefreshOnlyPlan(falseBeforeUnknown, { stateBytes: before }));
+  const trueBeforeUnknown = refreshPlan(); trueBeforeUnknown.output_changes.permissions_policy_sha256.before_unknown = true;
+  assert.throws(() => assertExactReconcilerRefreshOnlyPlan(trueBeforeUnknown, { stateBytes: before }), /output/);
+  for (const malformed of ["false", 0]) {
+    const malformedBeforeUnknown = refreshPlan(); malformedBeforeUnknown.output_changes.permissions_policy_sha256.before_unknown = malformed;
+    assert.throws(() => assertExactReconcilerRefreshOnlyPlan(malformedBeforeUnknown, { stateBytes: before }), /output/);
+  }
   const wrongName = refreshPlan(); wrongName.output_changes = { unexpected: { ...wrongName.output_changes.permissions_policy_sha256 } };
   assert.throws(() => assertExactReconcilerRefreshOnlyPlan(wrongName, { stateBytes: before }), /output/);
   const wrongBefore = refreshPlan(); wrongBefore.output_changes.permissions_policy_sha256.before = "b".repeat(64);
   assert.throws(() => assertExactReconcilerRefreshOnlyPlan(wrongBefore, { stateBytes: before }), /output/);
+  const missingBefore = refreshPlan(); delete missingBefore.output_changes.permissions_policy_sha256.before_unknown; delete missingBefore.output_changes.permissions_policy_sha256.before;
+  assert.throws(() => assertExactReconcilerRefreshOnlyPlan(missingBefore, { stateBytes: before }), /output/);
   const wrongAfter = refreshPlan(); wrongAfter.output_changes.permissions_policy_sha256.after = "b".repeat(64);
   assert.throws(() => assertExactReconcilerRefreshOnlyPlan(wrongAfter, { stateBytes: before }), /output/);
   const extra = refreshPlan(); extra.output_changes.extra = { ...extra.output_changes.permissions_policy_sha256, actions: ["update"] };
