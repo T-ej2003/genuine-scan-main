@@ -3,25 +3,25 @@ import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { MIXED_DUAL_SLOT_PREDECESSOR, MIXED_DUAL_SLOT_PREDECESSOR_CANONICAL_ID, MIXED_DUAL_SLOT_RECOVERY_LIVE_PREDECESSOR, MIXED_DUAL_SLOT_RECOVERY_ORDER, assertMixedDualSlotPredecessor, assertMixedDualSlotRecoveryAuthorization, buildMixedDualSlotRecoveryPreparation, createMixedDualSlotRecoveryAuthorization } from "../aws/production-mixed-dual-slot-recovery-contract.mjs";
+import { MIXED_DUAL_SLOT_PREDECESSOR, MIXED_DUAL_SLOT_PREDECESSOR_CANONICAL_ID, MIXED_DUAL_SLOT_RECOVERY_LIVE_PREDECESSOR, MIXED_DUAL_SLOT_RECOVERY_ORDER, MIXED_DUAL_SLOT_RETAINED_HISTORY, assertMixedDualSlotPredecessor, assertMixedDualSlotRecoveryAuthorization, buildMixedDualSlotRecoveryPreparation, createMixedDualSlotRecoveryAuthorization } from "../aws/production-mixed-dual-slot-recovery-contract.mjs";
 import { executeMixedDualSlotRecovery, prepareMixedDualSlotRecovery } from "../aws/recover-production-mixed-dual-slot-topology.mjs";
 import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from "../aws/production-github-environment-approval.mjs";
-import { bootstrapInitialDualSlotRotation, INITIAL_DUAL_SLOT_NAMES } from "../aws/production-initial-dual-slot-bootstrap.mjs";
+import { bootstrapInitialDualSlotRotation, INITIAL_DUAL_SLOT_NAMES, verifyLiveInitialDualSlotBindingWithRunner } from "../aws/production-initial-dual-slot-bootstrap.mjs";
 
 const sourceSha = "a".repeat(40);
 const now = new Date("2026-09-10T00:05:00.000Z");
-const fixturePayload = (slot) => { const e = MIXED_DUAL_SLOT_PREDECESSOR[slot]; return { family: "fixture", value: "redacted", rotationId: e.rotationId, slot: e.slot, ...(e.sourceSha ? { sourceSha: e.sourceSha } : {}), ...(e.materialFingerprint ? { materialFingerprint: e.materialFingerprint } : {}), ...(e.keyVersion ? { keyVersion: e.keyVersion } : {}), ...(slot.includes("Pending") ? { supersessionPredecessorIdentitySha256: "x" } : {}) }; };
-const payloadHash = (_payload, slot) => MIXED_DUAL_SLOT_PREDECESSOR[slot].payloadSha256;
+const fixturePayload = (identity) => Object.fromEntries(identity.schemaKeys.map((key) => [key, ({ family: "fixture", value: "redacted", rotationId: identity.rotationId, slot: identity.slot, sourceSha: identity.sourceSha, materialFingerprint: identity.materialFingerprint, keyVersion: identity.keyVersion, materialType: "fresh-generated", initialMigration: true, supersessionPredecessorIdentitySha256: "x" })[key]]));
+const payloadHash = (payload, slot, identity = "current") => payload?.value === "redacted" ? identity === "retainedPrevious" ? MIXED_DUAL_SLOT_RETAINED_HISTORY[slot].payloadSha256 : MIXED_DUAL_SLOT_PREDECESSOR[slot].payloadSha256 : "f".repeat(64);
 const exactPredecessor = () => structuredClone(MIXED_DUAL_SLOT_PREDECESSOR);
 const approval = () => createProductionEnvironmentApprovalEvidence({ environmentConfig: { name: "production", id: 17, can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{ type: "User", reviewer: { id: 7, login: "checker" } }] }] }, repository: "T-ej2003/genuine-scan-main", environment: "production", sourceSha, workflowRef: PRODUCTION_ENVIRONMENT_APPROVAL.mixedDualSlotRecoveryAuthorizationWorkflowRef, eventName: "workflow_dispatch", workflowRunId: "123456", workflowRunAttempt: "1", executionActor: "operator", observedAt: "2026-09-10T00:00:00.000Z", actualApproval: { state: "approved", environmentId: 17, environmentName: "production", userId: 7, userLogin: "checker" } });
 const preparationFileSha256 = "d".repeat(64);
 const authorized = (preparation) => createMixedDualSlotRecoveryAuthorization({ preparation, preparationFileSha256, protectedEnvironmentApprovalEvidence: approval(), reason: "Normalize exact mixed unused topology", approverRole: "production-independent-checker", verificationRef: "recovery-1", now });
 
 function fakeSecrets({ failAfter = null, postWriteLag = 0 } = {}) {
-  const states = new Map(MIXED_DUAL_SLOT_RECOVERY_ORDER.map((slot) => [MIXED_DUAL_SLOT_PREDECESSOR[slot].arn, { slot, labels: ["AWSCURRENT"] }])); let writes = 0; const controls = { failAfter, postWriteLag };
+  const states = new Map(MIXED_DUAL_SLOT_RECOVERY_ORDER.map((slot) => [MIXED_DUAL_SLOT_PREDECESSOR[slot].arn, { slot, labels: ["AWSCURRENT"], previousLabels: ["AWSPREVIOUS"], previousPayload: fixturePayload(MIXED_DUAL_SLOT_RETAINED_HISTORY[slot]) }])); let writes = 0; const controls = { failAfter, postWriteLag };
   const send = async (command) => { const input = command.input; const state = states.get(input.SecretId); if (!state) throw new Error("unknown secret"); const expected = MIXED_DUAL_SLOT_PREDECESSOR[state.slot];
-    if (command.constructor.name === "DescribeSecretCommand") { if (state.removeAfterReads === 0) { state.labels = []; state.removeAfterReads = null; } const result = { ARN: input.SecretId, ...(state.omitTopology ? {} : { VersionIdsToStages: state.topology || (state.labels.length ? { [expected.versionId]: state.labels } : {}) }) }; if (state.removeAfterReads > 0) state.removeAfterReads -= 1; return result; }
-    if (command.constructor.name === "GetSecretValueCommand") { if (state.missingValue) throw Object.assign(new Error("missing version"), { name: "ResourceNotFoundException" }); return { VersionId: expected.versionId, SecretString: JSON.stringify(fixturePayload(state.slot)) }; }
+    if (command.constructor.name === "DescribeSecretCommand") { if (state.removeAfterReads === 0) { state.labels = []; state.removeAfterReads = null; } const result = { ARN: input.SecretId, VersionIdsToStages: state.topology || { ...(state.labels.length ? { [expected.versionId]: state.labels } : {}), ...(state.previousLabels.length ? { [expected.retainedPrevious.versionId]: state.previousLabels } : {}) } }; if (state.removeAfterReads > 0) state.removeAfterReads -= 1; return result; }
+    if (command.constructor.name === "GetSecretValueCommand") { const retained = input.VersionId === expected.retainedPrevious.versionId; if (state.missingValue && !retained || state.missingPrevious && retained) throw Object.assign(new Error("missing version"), { name: "ResourceNotFoundException" }); const identity = retained ? expected.retainedPrevious : expected; return { VersionId: identity.versionId, SecretString: JSON.stringify(retained ? state.previousPayload : fixturePayload(identity)) }; }
     if (command.constructor.name === "UpdateSecretVersionStageCommand") { if (controls.failAfter === writes) throw new Error("injected interruption"); writes += 1; if (controls.postWriteLag) state.removeAfterReads = controls.postWriteLag; else state.labels = []; return {}; }
     throw new Error(`unexpected ${command.constructor.name}`);
   };
@@ -29,17 +29,23 @@ function fakeSecrets({ failAfter = null, postWriteLag = 0 } = {}) {
 }
 
 function handoffSecrets() {
-  const states = new Map(MIXED_DUAL_SLOT_RECOVERY_ORDER.map((slot) => [MIXED_DUAL_SLOT_PREDECESSOR[slot].arn, { slot, labels: ["AWSCURRENT"], current: fixturePayload(slot) }])); const calls = [];
+  const states = new Map(MIXED_DUAL_SLOT_RECOVERY_ORDER.map((slot) => [MIXED_DUAL_SLOT_PREDECESSOR[slot].arn, { slot, labels: ["AWSCURRENT"], previousLabels: ["AWSPREVIOUS"], current: fixturePayload(MIXED_DUAL_SLOT_PREDECESSOR[slot]), previous: fixturePayload(MIXED_DUAL_SLOT_RETAINED_HISTORY[slot]) }])); const calls = [];
   const stateFor = (id) => states.get(id) || [...states.entries()].find(([arn]) => arn.includes(`:secret:${id}-`))?.[1];
   const arnFor = (state) => MIXED_DUAL_SLOT_PREDECESSOR[state.slot].arn;
   const send = async (command) => { const name = command.constructor.name; const input = command.input; const state = stateFor(input.SecretId); calls.push({ name, input: { ...input, SecretString: input.SecretString ? "[redacted]" : undefined } }); if (!state) throw Object.assign(new Error("not found"), { name: "ResourceNotFoundException" }); const expected = MIXED_DUAL_SLOT_PREDECESSOR[state.slot];
-    if (name === "DescribeSecretCommand") return { Name: Object.values(INITIAL_DUAL_SLOT_NAMES)[Object.keys(INITIAL_DUAL_SLOT_NAMES).indexOf(state.slot)], ARN: arnFor(state), VersionIdsToStages: { ...(state.labels.length ? { [expected.versionId]: state.labels } : {}), ...(state.next ? { next: ["AWSCURRENT"] } : {}) } };
-    if (name === "GetSecretValueCommand") { if (input.VersionId === expected.versionId || !input.VersionId && state.labels.includes("AWSCURRENT")) return { VersionId: expected.versionId, SecretString: JSON.stringify(fixturePayload(state.slot)) }; if (!input.VersionId && state.next) return { VersionId: "next", SecretString: state.next }; throw Object.assign(new Error("no current version"), { name: "ResourceNotFoundException" }); }
+    if (name === "DescribeSecretCommand") return { Name: Object.values(INITIAL_DUAL_SLOT_NAMES)[Object.keys(INITIAL_DUAL_SLOT_NAMES).indexOf(state.slot)], ARN: arnFor(state), VersionIdsToStages: { ...(state.labels.length ? { [expected.versionId]: state.labels } : {}), [expected.retainedPrevious.versionId]: state.previousLabels, ...(state.next ? { next: ["AWSCURRENT"] } : {}) } };
+    if (name === "GetSecretValueCommand") { if (input.VersionId === expected.retainedPrevious.versionId) return { VersionId: expected.retainedPrevious.versionId, SecretString: JSON.stringify(state.previous) }; if (input.VersionId === expected.versionId || !input.VersionId && state.labels.includes("AWSCURRENT")) return { VersionId: expected.versionId, SecretString: JSON.stringify(state.current) }; if (!input.VersionId && state.next) return { VersionId: "next", SecretString: state.next }; throw Object.assign(new Error("no current version"), { name: "ResourceNotFoundException" }); }
     if (name === "UpdateSecretVersionStageCommand") { state.labels = []; return {}; }
     if (name === "PutSecretValueCommand") { state.next = input.SecretString; return { ARN: arnFor(state), VersionId: "next" }; }
     throw new Error(`unexpected ${name}`);
   };
-  return { send, calls, states };
+  const runner = (mutate = (value) => value) => (args) => {
+    const command = args[2]; const id = args[args.indexOf("--secret-id") + 1]; const versionId = args.includes("--version-id") ? args[args.indexOf("--version-id") + 1] : undefined; const state = stateFor(id); if (!state) throw new Error("not found"); const expected = MIXED_DUAL_SLOT_PREDECESSOR[state.slot];
+    if (command === "describe-secret") return JSON.stringify(mutate({ Name: Object.values(INITIAL_DUAL_SLOT_NAMES)[Object.keys(INITIAL_DUAL_SLOT_NAMES).indexOf(state.slot)], ARN: arnFor(state), VersionIdsToStages: { [expected.retainedPrevious.versionId]: state.previousLabels, ...(state.next ? { next: ["AWSCURRENT"] } : {}) } }, { state, expected, command, versionId }));
+    if (command === "get-secret-value") { const retained = versionId === expected.retainedPrevious.versionId; return JSON.stringify(mutate({ VersionId: retained ? expected.retainedPrevious.versionId : "next", SecretString: retained ? JSON.stringify(state.previous) : state.next }, { state, expected, command, versionId })); }
+    throw new Error(`unexpected ${command}`);
+  };
+  return { send, calls, states, runner };
 }
 
 const liveTaskDefinition = { taskDefinition: { taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:52", containerDefinitions: [{ name: "backend", image: "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:b55ffef21cd794a1fefb0f0da3b56e70a727d44818a9d0a5f1c26d3e1d2e1b3e", environment: [{ name: "QR_SIGN_ACTIVE_KEY_VERSION", value: "2026-04-20" }], secrets: [{ name: "JWT_SECRET", valueFrom: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/jwt-wBQNqk" }, { name: "QR_SIGN_PRIVATE_KEY", valueFrom: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_private_key-BcQFPO:value::" }, { name: "QR_SIGN_PUBLIC_KEY", valueFrom: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_public_key-v7Xeex:value::" }] }] } };
@@ -52,6 +58,7 @@ test("admission accepts only the immutable seven-slot predecessor", () => {
     arn: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:wrong", versionId: "f".repeat(64), stagingLabels: [], payloadSha256: "f".repeat(64), schemaKeys: ["wrong"], sourceSha: "f".repeat(40), rotationId: "rotation-wrong", slot: "wrong", materialFingerprint: "wrong", keyVersion: "wrong",
   };
   for (const slot of MIXED_DUAL_SLOT_RECOVERY_ORDER) for (const [field, replacement] of Object.entries(mutations)) { const altered = exactPredecessor(); altered[slot][field] = replacement; assert.throws(() => assertMixedDualSlotPredecessor(altered), /exact admitted/, `${slot}.${field}`); }
+  for (const slot of MIXED_DUAL_SLOT_RECOVERY_ORDER) for (const [field, replacement] of Object.entries(mutations)) { const altered = exactPredecessor(); altered[slot].retainedPrevious[field] = replacement; assert.throws(() => assertMixedDualSlotPredecessor(altered), /exact admitted/, `${slot}.retainedPrevious.${field}`); }
   for (const slot of MIXED_DUAL_SLOT_RECOVERY_ORDER.filter((name) => MIXED_DUAL_SLOT_PREDECESSOR[name].sourceSha)) { const altered = exactPredecessor(); altered[slot].sourceSha = null; assert.throws(() => assertMixedDualSlotPredecessor(altered), /exact admitted/, `${slot}.missingSourceSha`); }
   const missing = exactPredecessor(); delete missing.jwtPending; assert.throws(() => assertMixedDualSlotPredecessor(missing), /schema/);
   assert.throws(() => assertMixedDualSlotPredecessor({ ...exactPredecessor(), extra: exactPredecessor().jwtPending }), /schema/);
@@ -69,6 +76,7 @@ test("all seven label-removal interruption boundaries resume without duplicate m
     const resumed = await executeMixedDualSlotRecovery({ send: interrupted.send, preparation, sourceSha, authorization, payloadHash, now });
     assert.equal(resumed.stageLabelMutations, 7 - boundary);
     assert.equal(interrupted.writes(), 7);
+    for (const state of interrupted.states.values()) assert.deepEqual(state.previousLabels, ["AWSPREVIOUS"]);
   }
 });
 
@@ -140,6 +148,11 @@ test("authorization binds the exact operation, source, preparation and immutable
   const preparation = buildMixedDualSlotRecoveryPreparation({ sourceSha, predecessor: exactPredecessor(), preparedAt: "2026-09-10T00:00:00.000Z" }); const authorization = authorized(preparation);
   assert.doesNotThrow(() => assertMixedDualSlotRecoveryAuthorization(authorization, { preparation, preparationFileSha256, sourceSha, now }));
   for (const changed of [{ operation: "PRODUCTION_DUAL_SLOT_REBASELINE" }, { sourceSha: "f".repeat(40) }, { preparationSha256: "f".repeat(64) }, { preparationFileSha256: "f".repeat(64) }, { predecessorCanonicalId: "f".repeat(64) }, { initialCompletedStageLabelMutations: 1 }, { maximumRemainingStageLabelMutations: 6 }, { postStateCanonicalId: "f".repeat(64) }, { mutationPlanSha256: "f".repeat(64) }, { historicalRotationId: "rotation-wrong" }, { historicalSourceSha: "f".repeat(40) }, { expectedStageLabelMutations: 6 }]) assert.throws(() => assertMixedDualSlotRecoveryAuthorization({ ...authorization, ...changed }, { preparation, sourceSha, now }), /authorization/);
+  const oldPredecessor = Object.fromEntries(Object.entries(preparation.predecessor).map(([slot, identity]) => { const { retainedPrevious: _retainedPrevious, ...old } = identity; return [slot, old]; }));
+  const oldPreparation = { ...preparation, schemaVersion: 1, predecessor: oldPredecessor }; delete oldPreparation.retainedHistoryCanonicalId;
+  assert.throws(() => assertMixedDualSlotRecoveryAuthorization(authorization, { preparation: oldPreparation, sourceSha, now }), /schema|preparation/);
+  const oldAuthorization = { ...authorization, schemaVersion: 1 }; delete oldAuthorization.retainedHistoryCanonicalId;
+  assert.throws(() => assertMixedDualSlotRecoveryAuthorization(oldAuthorization, { preparation, sourceSha, now }), /schema|authorization/);
 });
 
 test("preparation binds healthy :52 legacy selectors outside all recovery targets", () => {
@@ -163,26 +176,56 @@ test("per-mutation CAS rejects immutable, label, version and non-contiguous drif
     const fixture = fakeSecrets(); let checks = 0;
     await assert.rejects(() => executeMixedDualSlotRecovery({ send: fixture.send, preparation, sourceSha, authorization, payloadHash, now, reauthenticate: async () => { checks += 1; if (checks === 2 + boundary * 2) fixture.states.get(MIXED_DUAL_SLOT_PREDECESSOR.qrPreviousVersion.arn).topology = { [MIXED_DUAL_SLOT_PREDECESSOR.qrPreviousVersion.versionId]: ["AWSCURRENT"], attacker: ["AWSPREVIOUS"] }; } }), /topology/);
   }
+  for (const boundary of [0, 1, 3, 6]) {
+    const fixture = fakeSecrets(); let checks = 0;
+    await assert.rejects(() => executeMixedDualSlotRecovery({ send: fixture.send, preparation, sourceSha, authorization, payloadHash, now, reauthenticate: async () => { checks += 1; if (checks === 2 + boundary * 2) fixture.states.get(MIXED_DUAL_SLOT_PREDECESSOR.qrPreviousVersion.arn).previousPayload.value = "substituted"; } }), /exact admitted/);
+  }
   for (const topology of [{ [MIXED_DUAL_SLOT_PREDECESSOR.jwtPending.versionId]: ["AWSCURRENT", "AWSPREVIOUS"] }, { moved: ["AWSCURRENT"] }]) {
     const fixture = fakeSecrets(); fixture.states.get(MIXED_DUAL_SLOT_PREDECESSOR.jwtPending.arn).topology = topology;
     await assert.rejects(() => executeMixedDualSlotRecovery({ send: fixture.send, preparation, sourceSha, authorization, payloadHash, now }), /topology|staging/);
   }
   const missing = fakeSecrets(); missing.states.get(MIXED_DUAL_SLOT_PREDECESSOR.jwtPending.arn).missingValue = true;
   await assert.rejects(() => executeMixedDualSlotRecovery({ send: missing.send, preparation, sourceSha, authorization, payloadHash, now }), /missing version/);
+  for (const topology of [
+    { [MIXED_DUAL_SLOT_PREDECESSOR.jwtPending.versionId]: ["AWSCURRENT"] },
+    { [MIXED_DUAL_SLOT_PREDECESSOR.jwtPending.versionId]: ["AWSCURRENT"], [MIXED_DUAL_SLOT_RETAINED_HISTORY.jwtPending.versionId]: ["AWSCURRENT"] },
+    { [MIXED_DUAL_SLOT_PREDECESSOR.jwtPending.versionId]: ["AWSCURRENT"], attacker: ["AWSPREVIOUS"] },
+    { [MIXED_DUAL_SLOT_PREDECESSOR.jwtPending.versionId]: ["AWSCURRENT"], [MIXED_DUAL_SLOT_RETAINED_HISTORY.jwtPending.versionId]: ["AWSPREVIOUS"], attacker: ["AWSPENDING"] },
+    { [MIXED_DUAL_SLOT_PREDECESSOR.jwtPending.versionId]: ["AWSCURRENT", "AWSPENDING"], [MIXED_DUAL_SLOT_RETAINED_HISTORY.jwtPending.versionId]: ["AWSPREVIOUS"] },
+    { [MIXED_DUAL_SLOT_PREDECESSOR.jwtPending.versionId]: ["AWSCURRENT"], [MIXED_DUAL_SLOT_RETAINED_HISTORY.jwtPending.versionId]: ["AWSPREVIOUS", "AWSPENDING"] },
+  ]) {
+    const altered = fakeSecrets(); altered.states.get(MIXED_DUAL_SLOT_PREDECESSOR.jwtPending.arn).topology = topology;
+    await assert.rejects(() => executeMixedDualSlotRecovery({ send: altered.send, preparation, sourceSha, authorization, payloadHash, now }), /topology|staging/);
+  }
+  const missingPrevious = fakeSecrets(); missingPrevious.states.get(MIXED_DUAL_SLOT_PREDECESSOR.jwtPending.arn).missingPrevious = true;
+  await assert.rejects(() => executeMixedDualSlotRecovery({ send: missingPrevious.send, preparation, sourceSha, authorization, payloadHash, now }), /missing version/);
 });
 
 test("exact authorized recovery hands T1 to the real initial bootstrap for its ordinary seven writes", async () => {
   const original = handoffSecrets(); const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-mixed-handoff-"));
+  const retainedHash = (payload, slot) => payload?.value === "redacted" ? MIXED_DUAL_SLOT_RETAINED_HISTORY[slot].payloadSha256 : "f".repeat(64);
   try {
-    await assert.rejects(() => bootstrapInitialDualSlotRotation({ send: original.send, taskDefinition: liveTaskDefinition, sourceSha, rotationId: "rotation-fresh-initial", outputFile: path.join(directory, "original.json") }), /malformed|inconsistent|key pair/);
+    await assert.rejects(() => bootstrapInitialDualSlotRotation({ send: original.send, taskDefinition: liveTaskDefinition, sourceSha, rotationId: "rotation-fresh-initial", outputFile: path.join(directory, "original.json"), retainedHistoryPayloadHash: retainedHash }), /malformed|inconsistent|key pair/);
     const fixture = handoffSecrets(); const preparation = buildMixedDualSlotRecoveryPreparation({ sourceSha, predecessor: exactPredecessor(), preparedAt: "2026-09-10T00:00:00.000Z" });
     const recovered = await executeMixedDualSlotRecovery({ send: fixture.send, preparation, sourceSha, authorization: authorized(preparation), payloadHash, now });
     assert.equal(recovered.stageLabelMutations, 7);
-    const bootstrapped = await bootstrapInitialDualSlotRotation({ send: fixture.send, taskDefinition: liveTaskDefinition, sourceSha, rotationId: "rotation-fresh-initial", outputFile: path.join(directory, "bindings.json") });
+    assert.equal(recovered.predecessorCanonicalId, preparation.predecessorCanonicalId);
+    assert.equal(recovered.retainedHistoryCanonicalId, preparation.retainedHistoryCanonicalId);
+    assert.equal(recovered.postStateCanonicalId, preparation.postStateCanonicalId);
+    const bootstrapped = await bootstrapInitialDualSlotRotation({ send: fixture.send, taskDefinition: liveTaskDefinition, sourceSha, rotationId: "rotation-fresh-initial", outputFile: path.join(directory, "bindings.json"), retainedHistoryPayloadHash: retainedHash });
     assert.equal(bootstrapped.created.length, 0); assert.equal(bootstrapped.secretValueWrites, 7);
     assert.equal(fixture.calls.filter(({ name }) => name === "PutSecretValueCommand").length, 7);
     assert.equal(fixture.calls.filter(({ name }) => name === "CreateSecretCommand" || name === "DeleteSecretCommand").length, 0);
     assert.equal(bootstrapped.bindings.jwt.currentSecretId, "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/jwt-wBQNqk");
     assert.equal(bootstrapped.bindings.qr.publicCurrentSecretId, "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_public_key-v7Xeex");
+    assert.equal(bootstrapped.bindings.schemaVersion, 4);
+    assert.deepEqual(bootstrapped.bindings.retainedHistory, MIXED_DUAL_SLOT_RETAINED_HISTORY);
+    const origin = verifyLiveInitialDualSlotBindingWithRunner({ run: fixture.runner(), bindings: bootstrapped.bindings, retainedHistoryPayloadHash: retainedHash });
+    assert.equal(origin.retainedHistoryCanonicalId, bootstrapped.bindings.retainedHistoryCanonicalId);
+    for (const mutate of [
+      (value, context) => context.command === "describe-secret" && context.state.slot === "jwtPending" ? { ...value, VersionIdsToStages: { ...value.VersionIdsToStages, [context.expected.retainedPrevious.versionId]: ["AWSPREVIOUS", "AWSPENDING"] } } : value,
+      (value, context) => context.command === "describe-secret" && context.state.slot === "jwtPending" ? { ...value, VersionIdsToStages: { ...value.VersionIdsToStages, attacker: ["AWSPREVIOUS"] } } : value,
+      (value, context) => context.command === "get-secret-value" && context.state.slot === "jwtPending" && context.versionId === context.expected.retainedPrevious.versionId ? { ...value, SecretString: JSON.stringify({ ...context.state.previous, value: "substituted" }) } : value,
+    ]) assert.throws(() => verifyLiveInitialDualSlotBindingWithRunner({ run: fixture.runner(mutate), bindings: bootstrapped.bindings, retainedHistoryPayloadHash: retainedHash }), /retained-history/);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });

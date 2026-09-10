@@ -31,7 +31,10 @@ test("protected workflows expose only canonical artifact coordinates and gate cr
 
 test("production entrypoint has no operator-selectable verification seams", () => {
   const cli = readFileSync(path.join(root, "scripts/aws/run-production-mixed-dual-slot-topology-recovery.mjs"), "utf8");
+  const bootstrapCli = readFileSync(path.join(root, "scripts/aws/bootstrap-production-initial-dual-slot.mjs"), "utf8");
+  const runtimeCli = readFileSync(path.join(root, "scripts/aws/prepare-production-cutover-runtime.mjs"), "utf8");
   assert.doesNotMatch(cli, /--(?:authorize|assert-predecessor|payload-hash|send|aws-callback)/);
+  assert.doesNotMatch(`${bootstrapCli}\n${runtimeCli}`, /retainedHistoryPayloadHash/);
   assert.match(cli, /GITHUB_WORKFLOW_REF !== EXECUTION_WORKFLOW_REF/);
   assert.match(cli, /resolveMixedDualSlotRecoveryAuthorizationArtifact/);
   assert.match(cli, /readStageBProtectedMainCheckout/);

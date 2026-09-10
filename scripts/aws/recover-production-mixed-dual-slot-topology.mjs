@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
-import { MIXED_DUAL_SLOT_RECOVERY_ORDER, MIXED_DUAL_SLOT_PREDECESSOR, assertMixedDualSlotPredecessor, assertMixedDualSlotRecoveryAuthorization, assertMixedDualSlotRecoveryPreparation, buildMixedDualSlotRecoveryPreparation } from "./production-mixed-dual-slot-recovery-contract.mjs";
+import { MIXED_DUAL_SLOT_PREDECESSOR_CANONICAL_ID, MIXED_DUAL_SLOT_RECOVERY_ORDER, MIXED_DUAL_SLOT_RECOVERY_POST_STATE_CANONICAL_ID, MIXED_DUAL_SLOT_RETAINED_HISTORY_CANONICAL_ID, MIXED_DUAL_SLOT_PREDECESSOR, assertMixedDualSlotPredecessor, assertMixedDualSlotRecoveryAuthorization, assertMixedDualSlotRecoveryPreparation, buildMixedDualSlotRecoveryPreparation } from "./production-mixed-dual-slot-recovery-contract.mjs";
 
 const require = createRequire(new URL("../../backend/package.json", import.meta.url));
 const { UpdateSecretVersionStageCommand, DescribeSecretCommand, GetSecretValueCommand } = require("@aws-sdk/client-secrets-manager");
@@ -15,11 +15,15 @@ const sleepForConvergence = (milliseconds) => new Promise((resolve) => setTimeou
 const exactProgress = (topology, versionId, slot) => {
   topology ??= {};
   if (!topology || typeof topology !== "object" || Array.isArray(topology)) throw new Error(`Mixed recovery ${slot} version topology is not exact.`);
-  const versionIds = Object.keys(topology);
-  if (versionIds.length === 0) return true;
-  if (JSON.stringify(versionIds) === JSON.stringify([versionId]) && JSON.stringify(topology[versionId]) === JSON.stringify(["AWSCURRENT"])) return false;
+  const retained = MIXED_DUAL_SLOT_PREDECESSOR[slot].retainedPrevious;
+  const completed = { [retained.versionId]: ["AWSPREVIOUS"] };
+  const pending = { [versionId]: ["AWSCURRENT"], ...completed };
+  if (canonical(topology) === canonical(completed)) return true;
+  if (canonical(topology) === canonical(pending)) return false;
   throw new Error(`Mixed recovery ${slot} staging topology is not an exact predecessor or completed recovery state.`);
 };
+
+const safeIdentity = (payload, expected, payloadHash, slot, stagingLabels) => ({ arn: expected.arn, versionId: expected.versionId, stagingLabels, payloadSha256: payloadHash(payload, slot), schemaKeys: Object.keys(payload || {}).sort(), sourceSha: payload?.sourceSha ?? null, rotationId: payload?.rotationId ?? null, slot: payload?.slot, materialFingerprint: payload?.materialFingerprint ?? null, keyVersion: payload?.keyVersion ?? null });
 
 async function readMixedDualSlotRecoveryState({ send, payloadHash = sha256 } = {}) {
   const observed = {};
@@ -31,7 +35,10 @@ async function readMixedDualSlotRecoveryState({ send, payloadHash = sha256 } = {
     progress.push(exactProgress(topology, expected.versionId, slot));
     const value = await send(new GetSecretValueCommand({ SecretId: expected.arn, VersionId: expected.versionId }));
     let payload; try { payload = JSON.parse(value?.SecretString || ""); } catch { throw new Error(`Mixed predecessor ${slot} payload is malformed.`); }
-    observed[slot] = { arn: described?.ARN, versionId: value?.VersionId, stagingLabels: ["AWSCURRENT"], payloadSha256: payloadHash(payload, slot), schemaKeys: Object.keys(payload || {}).sort(), sourceSha: payload?.sourceSha ?? null, rotationId: payload?.rotationId, slot: payload?.slot, materialFingerprint: payload?.materialFingerprint ?? null, keyVersion: payload?.keyVersion ?? null };
+    const retained = expected.retainedPrevious;
+    const previousValue = await send(new GetSecretValueCommand({ SecretId: expected.arn, VersionId: retained.versionId }));
+    let previousPayload; try { previousPayload = JSON.parse(previousValue?.SecretString || ""); } catch { throw new Error(`Mixed predecessor ${slot} retained payload is malformed.`); }
+    observed[slot] = { ...safeIdentity(payload, { ...expected, arn: described?.ARN, versionId: value?.VersionId }, (candidate) => payloadHash(candidate, slot, "current"), slot, ["AWSCURRENT"]), retainedPrevious: safeIdentity(previousPayload, { ...retained, arn: described?.ARN, versionId: previousValue?.VersionId }, (candidate) => payloadHash(candidate, slot, "retainedPrevious"), slot, ["AWSPREVIOUS"]) };
   }
   const predecessor = assertMixedDualSlotPredecessor(observed);
   if (progress.some((done, index) => !done && progress.slice(index + 1).some(Boolean))) throw new Error("Mixed recovery partial state is not an authenticated contiguous prefix.");
@@ -83,5 +90,5 @@ export async function executeMixedDualSlotRecovery({ send, preparation, preparat
     await awaitExactProgress({ expected: completed, sleep, observe: async () => { await authenticate(true); return classifyMixedDualSlotRecoveryProgress({ send, payloadHash }); } });
   }
   if (await classifyMixedDualSlotRecoveryProgress({ send, payloadHash }) !== 7) throw new Error("Mixed recovery post-state is not exact.");
-  return Object.freeze({ valid: true, writes: 0, stageLabelMutations: completed - initialCompleted, postState: "SEVEN_EXISTING_RESOURCES_WITHOUT_AWSCURRENT" });
+  return Object.freeze({ valid: true, writes: 0, stageLabelMutations: completed - initialCompleted, predecessorCanonicalId: MIXED_DUAL_SLOT_PREDECESSOR_CANONICAL_ID, retainedHistoryCanonicalId: MIXED_DUAL_SLOT_RETAINED_HISTORY_CANONICAL_ID, postState: "SEVEN_EXISTING_RESOURCES_WITHOUT_AWSCURRENT", postStateCanonicalId: MIXED_DUAL_SLOT_RECOVERY_POST_STATE_CANONICAL_ID });
 }
