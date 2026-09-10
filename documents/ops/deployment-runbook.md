@@ -29,7 +29,7 @@ of `production-image-authorization.mjs`; the workflow authenticates it again):
 
 `git_ref=main` is valid only when `target_sha` is the currently resolved main
 SHA. An older supported target must use an existing exact
-`refs/tags/<name>` ref which resolves to that SHA; commit-valued dispatch refs
+`refs/tags/release-*` or `refs/tags/v*` ref which resolves to that SHA; commit-valued dispatch refs
 are intentionally rejected.
 
 ```bash

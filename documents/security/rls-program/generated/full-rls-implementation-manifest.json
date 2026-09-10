@@ -15,7 +15,7 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "12cafc064512a5d91f4b4ec4d9b4786e5609705dac88b1715458ba6035e46dac",
+  "sourceContractSha256": "b818e305ca23bc9687c1a666acc52f0ae8a44a23989af484e48d0aebfa8d8143",
   "migrationSetDigest": "6642442a81cd98c7a132d241fa98e50ae231510896c9da67ab70d86b050d02db",
   "sourceContractInputs": [
     {
@@ -244,7 +244,7 @@
     },
     {
       "path": ".github/workflows/release-train.yml",
-      "sha256": "f4027a303d10b3f269ca0c0e27b3feae12fd4a21e35898734f2040f4a09279d0"
+      "sha256": "7830994ad18df5c78c205084945b3d2002b9ff02a7d78e85aaceae546df43949"
     },
     {
       "path": "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
@@ -336,7 +336,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:12cafc064512a5d91f4b4ec4d9b4786e5609705dac88b1715458ba6035e46dac",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:b818e305ca23bc9687c1a666acc52f0ae8a44a23989af484e48d0aebfa8d8143",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,

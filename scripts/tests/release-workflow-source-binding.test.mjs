@@ -37,7 +37,8 @@ function apiFor({ targetSha = current, observedSha = targetSha, freshRuns = 1, r
 test("only main or an explicit tag is a legal workflow_dispatch ref", () => {
   assert.equal(assertWorkflowDispatchRef("main"), "main");
   assert.equal(assertWorkflowDispatchRef("refs/tags/release-2026-09-10"), "refs/tags/release-2026-09-10");
-  for (const ref of [current, "feature/release", "refs/heads/main", "", "refs/tags/"]) assert.throws(() => assertWorkflowDispatchRef(ref), /main or an explicit/);
+  assert.equal(assertWorkflowDispatchRef("refs/tags/v1.2.3"), "refs/tags/v1.2.3");
+  for (const ref of [current, "feature/release", "refs/heads/main", "", "refs/tags/", "refs/tags/rollback-foo"]) assert.throws(() => assertWorkflowDispatchRef(ref), /main or an explicit/);
 });
 
 test("current main and an older tag target dispatch only a run bound to the selected SHA", async () => {
@@ -70,6 +71,7 @@ test("a main advance, wrong source, mutable ref movement, and ambiguous correlat
 test("Release Train resolves an exact dispatch ref and uses source-bound dispatch for every gate", () => {
   const train = readFileSync(".github/workflows/release-train.yml", "utf8");
   assert.match(train, /git_ref must be main or an explicit refs\/tags/);
+  assert.match(train, /refs\/tags\/\(release-\|v\)/);
   assert.match(train, /dispatch ref must resolve exactly to target_sha/);
   assert.match(train, /--workflow "\$workflow_file" --ref "\$DISPATCH_REF" --target-sha "\$TARGET_SHA"/);
   assert.match(train, /--workflow release-gate\.yml --ref "\$DISPATCH_REF" --target-sha "\$TARGET_SHA"/);

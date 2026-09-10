@@ -172,7 +172,7 @@ test("pre-rotation pushes use source validation while explicit production runs s
   assert.match(securityStep, /GITHUB_EVENT_NAME.*schedule/);
   assert.match(securityStep, /GITHUB_EVENT_NAME.*workflow_dispatch/);
   assert.match(securityStep, /verify:ci:security:source/);
-  assert.match(securityStep, /verify:ci:security\n/);
+  assert.match(securityStep, /verify:ci:security(?:;|\n)/);
   assert.doesNotMatch(securityStep, /GITHUB_REF.*refs\/heads\/main/);
 
   const deploymentStep = deploymentAudit.slice(deploymentAudit.indexOf("- name: Run full release validation"));

@@ -37,6 +37,10 @@ test("only the exact initial-overlap route selects the pre-rotation release cont
   assert.doesNotMatch(audit, /verify:release \|\| true|SKIP_ROTATION_CHECK|continue-on-error/);
   assert.match(train, /required_workflows=\(quality-gate\.yml secret-scan\.yml deployment-audit\.yml auth-security-tests\.yml release-candidate-gate\.yml\)/);
   assert.match(train, /required_workflows=\(quality-gate\.yml secret-scan\.yml deployment-audit\.yml auth-security-tests\.yml\)/);
+  const qualityGate = read(".github/workflows/quality-gate.yml");
+  for (const input of overlapInputs) assert.ok(inputs(qualityGate)[input], `Quality Gate input ${input} is required by the route`);
+  assert.match(qualityGate, /authenticated-initial-overlap\)[\s\S]*manage-production-initial-activation-lifecycle\.mjs[\s\S]*verify:ci:security:source/);
+  assert.match(qualityGate, /test "\$TARGET_SHA" = "\$GITHUB_SHA"/);
 });
 
 test("Release Gate remains the independent strict production mutation boundary", () => {

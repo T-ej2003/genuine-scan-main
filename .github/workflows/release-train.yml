@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       git_ref:
-        description: "Exact dispatch ref: main for its current head, or refs/tags/<name> for an older supported target."
+        description: "Exact dispatch ref: main for its current head, or refs/tags/release-* / refs/tags/v* for an older supported target."
         required: false
         type: string
         default: main
@@ -89,8 +89,8 @@ jobs:
               ref_sha="$(git rev-parse origin/main^{commit})"
               ;;
             refs/tags/*)
-              if ! [[ "$target_ref" =~ ^refs/tags/[A-Za-z0-9][A-Za-z0-9._/-]*$ ]]; then
-                echo "::error::Release Train tag ref is invalid."
+              if ! [[ "$target_ref" =~ ^refs/tags/(release-|v)[A-Za-z0-9][A-Za-z0-9._/-]*$ ]]; then
+                echo "::error::Release Train tag ref must use the release-* or v* evidence-enforced namespace."
                 exit 1
               fi
               git fetch --no-tags origin "$target_ref:$target_ref"
@@ -169,8 +169,6 @@ jobs:
                 --source-sha "$TARGET_SHA" --authorization "$authorization_file" --authorization-sha256 "$NORMAL_IMAGE_AUTHORIZATION_SHA256"
               rm -f "$state_file" "$authorization_file"
               trap - EXIT
-              # Release Candidate's explicit-dispatch route is post-rotation strict.
-              # Its source-bound push check remains independently required by Release Gate.
               required_workflows=(quality-gate.yml secret-scan.yml deployment-audit.yml auth-security-tests.yml)
               ;;
             *)
@@ -183,7 +181,7 @@ jobs:
             echo "Triggering ${workflow_file} for ${TARGET_SHA}"
             inputs_file="$RUNNER_TEMP/${workflow_file}.inputs.json"
             trap 'rm -f "$inputs_file"' EXIT
-            if [ "$workflow_file" = "deployment-audit.yml" ]; then
+            if [ "$workflow_file" = "deployment-audit.yml" ] || { [ "$workflow_file" = "quality-gate.yml" ] && [ "$RELEASE_LIFECYCLE" = "authenticated-initial-overlap" ]; }; then
               node --input-type=module - "$inputs_file" <<'NODE'
               import fs from "node:fs";
               const values = Object.fromEntries([

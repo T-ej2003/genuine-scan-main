@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 
 const SHA = /^[a-f0-9]{40}$/;
 const WORKFLOW = /^[A-Za-z0-9][A-Za-z0-9._-]*\.ya?ml$/;
-const TAG_REF = /^refs\/tags\/[A-Za-z0-9][A-Za-z0-9._/-]*$/;
+const TAG_REF = /^refs\/tags\/(release-|v)[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 const isMain = import.meta.url === pathToFileURL(process.argv[1] || "").href;
 
 export function assertWorkflowDispatchRef(ref) {
