@@ -387,6 +387,47 @@
       "rollback": "remove-committed-or-restore-backups"
     },
     {
+      "id": "mixed-dual-slot-recovery-preparation",
+      "kind": "file",
+      "producer": "scripts/aws/run-production-mixed-dual-slot-topology-recovery.mjs:--prepare",
+      "consumers": [
+        ".github/workflows/authorize-production-mixed-dual-slot-topology-recovery.yml",
+        ".github/workflows/execute-production-mixed-dual-slot-topology-recovery.yml",
+        "scripts/aws/authorize-production-mixed-dual-slot-topology-recovery.mjs",
+        "scripts/aws/run-production-mixed-dual-slot-topology-recovery.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "mixed-dual-slot-recovery-preparation",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "mixed-dual-slot-recovery-authorization",
+      "kind": "file",
+      "producer": ".github/workflows/authorize-production-mixed-dual-slot-topology-recovery.yml",
+      "consumers": [
+        "scripts/aws/production-mixed-dual-slot-recovery-contract.mjs",
+        "scripts/aws/run-production-mixed-dual-slot-topology-recovery.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "externalProducer": true,
+      "atomicGroup": "mixed-dual-slot-recovery-authorization",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
       "id": "dual-slot-rebaseline-durable-evidence-submission",
       "kind": "file",
       "producer": "scripts/aws/produce-production-dual-slot-rebaseline-durable-evidence.mjs",
