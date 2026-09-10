@@ -1,5 +1,14 @@
 # Security Key Rotation Runbook
 
+### Source-bound Release Train dispatch
+
+`workflow_dispatch` accepts a branch or tag ref, not a commit SHA. A normal
+Release Train may use `git_ref=main` only when `target_sha` is that ref's
+current resolved SHA. To release an older supported main commit, use an
+existing exact `refs/tags/<name>` ref that resolves to the requested SHA. The
+train dispatches every required gate and Release Gate at that ref, then
+authenticates each returned run's `head_sha` against the selected target.
+
 This runbook covers the rotating backend secret families used by the app:
 
 - `JWT_SECRET_CURRENT` / `JWT_SECRET_PREVIOUS`

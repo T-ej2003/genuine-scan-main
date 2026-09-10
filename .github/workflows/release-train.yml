@@ -4,12 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       git_ref:
-        description: "Main branch ref to release. Use main for the normal production train."
+        description: "Exact dispatch ref: main for its current head, or refs/tags/<name> for an older supported target."
         required: false
         type: string
         default: main
       target_sha:
-        description: "Optional exact main-branch commit SHA. Defaults to git_ref HEAD."
+        description: "Optional exact main-branch commit SHA. It must equal the resolved immutable dispatch ref."
         required: false
         type: string
       release_lifecycle:
@@ -81,14 +81,41 @@ jobs:
         run: |
           set -euo pipefail
 
-          git fetch --prune origin main
           target_ref="${INPUT_GIT_REF:-main}"
+          git fetch --prune origin main
+          case "$target_ref" in
+            main)
+              dispatch_ref=main
+              ref_sha="$(git rev-parse origin/main^{commit})"
+              ;;
+            refs/tags/*)
+              if ! [[ "$target_ref" =~ ^refs/tags/[A-Za-z0-9][A-Za-z0-9._/-]*$ ]]; then
+                echo "::error::Release Train tag ref is invalid."
+                exit 1
+              fi
+              git fetch --no-tags origin "$target_ref:$target_ref"
+              dispatch_ref="$target_ref"
+              ref_sha="$(git rev-parse "$target_ref^{commit}")"
+              ;;
+            *)
+              echo "::error::Release Train git_ref must be main or an explicit refs/tags/<name> ref."
+              exit 1
+              ;;
+          esac
 
           if [ -n "${INPUT_TARGET_SHA:-}" ]; then
-            target_sha="$INPUT_TARGET_SHA"
-            git cat-file -e "${target_sha}^{commit}"
+            if ! [[ "$INPUT_TARGET_SHA" =~ ^[a-f0-9]{40}$ ]]; then
+              echo "::error::Release Train target_sha must be a full lowercase commit SHA."
+              exit 1
+            fi
+            target_sha="$(git rev-parse "${INPUT_TARGET_SHA}^{commit}")"
           else
-            target_sha="$(git rev-parse "${target_ref}^{commit}")"
+            target_sha="$ref_sha"
+          fi
+
+          if [ "$target_sha" != "$ref_sha" ]; then
+            echo "::error::Release Train dispatch ref must resolve exactly to target_sha; use main only for its current head or an exact refs/tags/<name> ref for an older supported target."
+            exit 1
           fi
 
           if ! git merge-base --is-ancestor "$target_sha" origin/main; then
@@ -97,6 +124,7 @@ jobs:
           fi
 
           echo "target_ref=$target_ref" >> "$GITHUB_OUTPUT"
+          echo "dispatch_ref=$dispatch_ref" >> "$GITHUB_OUTPUT"
           echo "target_sha=$target_sha" >> "$GITHUB_OUTPUT"
           echo "Release Train target ref: $target_ref"
           echo "Release Train target SHA: $target_sha"
@@ -105,6 +133,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TARGET_SHA: ${{ steps.resolve.outputs.target_sha }}
+          DISPATCH_REF: ${{ steps.resolve.outputs.dispatch_ref }}
           RELEASE_LIFECYCLE: ${{ inputs.release_lifecycle }}
           NORMAL_IMAGE_AUTHORIZATION_JSON: ${{ inputs.normal_image_authorization_json }}
           NORMAL_IMAGE_AUTHORIZATION_SHA256: ${{ inputs.normal_image_authorization_sha256 }}
@@ -120,7 +149,6 @@ jobs:
           case "$RELEASE_LIFECYCLE" in
             strict)
               required_workflows=(quality-gate.yml secret-scan.yml deployment-audit.yml auth-security-tests.yml release-candidate-gate.yml)
-              deployment_audit_args=()
               ;;
             authenticated-initial-overlap)
               for name in ROTATION_ID ROTATION_STATE_JSON ROTATION_STATE_SHA256 ROTATION_TASK_DEFINITION_ARN ROTATION_IMAGE_DIGEST ROTATION_DEPLOYMENT_SHA; do
@@ -144,11 +172,6 @@ jobs:
               # Release Candidate's explicit-dispatch route is post-rotation strict.
               # Its source-bound push check remains independently required by Release Gate.
               required_workflows=(quality-gate.yml secret-scan.yml deployment-audit.yml auth-security-tests.yml)
-              deployment_audit_args=(
-                -f release_lifecycle=authenticated-initial-overlap -f target_sha="$TARGET_SHA"
-                -f rotation_id="$ROTATION_ID" -f rotation_state_json="$ROTATION_STATE_JSON" -f rotation_state_sha256="$ROTATION_STATE_SHA256"
-                -f rotation_task_definition_arn="$ROTATION_TASK_DEFINITION_ARN" -f rotation_image_digest="$ROTATION_IMAGE_DIGEST" -f rotation_deployment_sha="$ROTATION_DEPLOYMENT_SHA"
-              )
               ;;
             *)
               echo "::error::Unsupported release lifecycle: $RELEASE_LIFECYCLE"
@@ -158,12 +181,27 @@ jobs:
 
           for workflow_file in "${required_workflows[@]}"; do
             echo "Triggering ${workflow_file} for ${TARGET_SHA}"
-            args=()
-            if [ "$workflow_file" = "deployment-audit.yml" ]; then args=("${deployment_audit_args[@]}"); fi
-            gh workflow run "$workflow_file" --ref "${GIT_REF:-main}" "${args[@]}" || {
-              echo "::error::Unable to dispatch ${workflow_file} for ${TARGET_SHA}. Confirm the workflow has workflow_dispatch and the SHA is reachable on main."
-              exit 1
-            }
+            inputs_file="$RUNNER_TEMP/${workflow_file}.inputs.json"
+            trap 'rm -f "$inputs_file"' EXIT
+            if [ "$workflow_file" = "deployment-audit.yml" ]; then
+              node --input-type=module - "$inputs_file" <<'NODE'
+              import fs from "node:fs";
+              const values = Object.fromEntries([
+                ["release_lifecycle", process.env.RELEASE_LIFECYCLE], ["target_sha", process.env.TARGET_SHA],
+                ["rotation_id", process.env.ROTATION_ID], ["rotation_state_json", process.env.ROTATION_STATE_JSON],
+                ["rotation_state_sha256", process.env.ROTATION_STATE_SHA256], ["rotation_task_definition_arn", process.env.ROTATION_TASK_DEFINITION_ARN],
+                ["rotation_image_digest", process.env.ROTATION_IMAGE_DIGEST], ["rotation_deployment_sha", process.env.ROTATION_DEPLOYMENT_SHA],
+              ].filter(([, value]) => value !== undefined && value !== ""));
+              fs.writeFileSync(process.argv[2], JSON.stringify(values), { mode: 0o600 });
+              NODE
+            else
+              printf '{}' > "$inputs_file"
+              chmod 600 "$inputs_file"
+            fi
+            node scripts/github/dispatch-source-bound-workflow.mjs \
+              --workflow "$workflow_file" --ref "$DISPATCH_REF" --target-sha "$TARGET_SHA" --inputs-file "$inputs_file"
+            rm -f "$inputs_file"
+            trap - EXIT
           done
 
       - name: Wait for required workflow gates
@@ -185,6 +223,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TARGET_REF: ${{ steps.resolve.outputs.target_ref }}
+          DISPATCH_REF: ${{ steps.resolve.outputs.dispatch_ref }}
           TARGET_SHA: ${{ steps.resolve.outputs.target_sha }}
           NORMAL_IMAGE_AUTHORIZATION_JSON: ${{ inputs.normal_image_authorization_json }}
           NORMAL_IMAGE_AUTHORIZATION_SHA256: ${{ inputs.normal_image_authorization_sha256 }}
@@ -211,21 +250,23 @@ jobs:
 
           echo "All required gates passed for ${TARGET_SHA}."
           echo "Triggering release-gate.yml for exact target SHA ${TARGET_SHA}."
-          overlap_args=()
-          if [ "$RELEASE_LIFECYCLE" = "authenticated-initial-overlap" ]; then
-            overlap_args=(
-              -f rotation_id="$ROTATION_ID" -f rotation_state_json="$ROTATION_STATE_JSON" -f rotation_state_sha256="$ROTATION_STATE_SHA256"
-              -f rotation_task_definition_arn="$ROTATION_TASK_DEFINITION_ARN" -f rotation_image_digest="$ROTATION_IMAGE_DIGEST" -f rotation_deployment_sha="$ROTATION_DEPLOYMENT_SHA"
-            )
-          fi
-          gh workflow run release-gate.yml \
-            --ref "${GIT_REF:-main}" \
-            -f git_ref="$TARGET_REF" \
-            -f target_sha="$TARGET_SHA" \
-            -f release_train_run_id="$GITHUB_RUN_ID" \
-            -f preserve_current_frontend=true \
-            -f normal_image_authorization_json="$NORMAL_IMAGE_AUTHORIZATION_JSON" \
-            -f normal_image_authorization_sha256="$NORMAL_IMAGE_AUTHORIZATION_SHA256" \
-            "${overlap_args[@]}"
+          inputs_file="$RUNNER_TEMP/release-gate.inputs.json"
+          trap 'rm -f "$inputs_file"' EXIT
+          node --input-type=module - "$inputs_file" <<'NODE'
+          import fs from "node:fs";
+          const values = Object.fromEntries([
+            ["git_ref", process.env.TARGET_REF], ["target_sha", process.env.TARGET_SHA], ["release_train_run_id", process.env.GITHUB_RUN_ID],
+            ["preserve_current_frontend", "true"], ["normal_image_authorization_json", process.env.NORMAL_IMAGE_AUTHORIZATION_JSON],
+            ["normal_image_authorization_sha256", process.env.NORMAL_IMAGE_AUTHORIZATION_SHA256],
+            ["rotation_id", process.env.ROTATION_ID], ["rotation_state_json", process.env.ROTATION_STATE_JSON],
+            ["rotation_state_sha256", process.env.ROTATION_STATE_SHA256], ["rotation_task_definition_arn", process.env.ROTATION_TASK_DEFINITION_ARN],
+            ["rotation_image_digest", process.env.ROTATION_IMAGE_DIGEST], ["rotation_deployment_sha", process.env.ROTATION_DEPLOYMENT_SHA],
+          ].filter(([, value]) => value !== undefined && value !== ""));
+          fs.writeFileSync(process.argv[2], JSON.stringify(values), { mode: 0o600 });
+          NODE
+          node scripts/github/dispatch-source-bound-workflow.mjs \
+            --workflow release-gate.yml --ref "$DISPATCH_REF" --target-sha "$TARGET_SHA" --inputs-file "$inputs_file"
+          rm -f "$inputs_file"
+          trap - EXIT
 
           echo "Final action: release-gate.yml dispatched for ${TARGET_SHA}. Release Train does not deploy directly."

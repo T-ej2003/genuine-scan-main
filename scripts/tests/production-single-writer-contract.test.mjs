@@ -19,7 +19,7 @@ test("release-gate is the only enabled production mutation writer", () => {
   assert.doesNotMatch(legacyText, /configure-aws-credentials|AWS_ACCESS_KEY_ID|terraform apply|register-task-definition|update-service|deregister-task-definition/i);
   assert.doesNotMatch(productionReadinessText, /configure-aws-credentials|AWS_ACCESS_KEY_ID|terraform apply|register-task-definition|update-service|deregister-task-definition/i);
   assert.doesNotMatch(releaseTrainText, /terraform apply|register-task-definition|update-service|deregister-task-definition/i);
-  assert.match(releaseTrainText, /gh workflow run release-gate\.yml/);
+  assert.match(releaseTrainText, /dispatch-source-bound-workflow\.mjs[\s\\]*--workflow release-gate\.yml/);
 });
 
 test("the canonical writer keeps job-scoped OIDC permission", () => {

@@ -27,6 +27,11 @@ After all three pass for the exact target SHA, it dispatches `release-gate.yml` 
 Operator command (the authorization file must be the canonical private output
 of `production-image-authorization.mjs`; the workflow authenticates it again):
 
+`git_ref=main` is valid only when `target_sha` is the currently resolved main
+SHA. An older supported target must use an existing exact
+`refs/tags/<name>` ref which resolves to that SHA; commit-valued dispatch refs
+are intentionally rejected.
+
 ```bash
 authorization_json="$(jq -c . < "$NORMAL_IMAGE_AUTHORIZATION_FILE")"
 authorization_sha256="$(printf '%s' "$authorization_json" | shasum -a 256 | awk '{print $1}')"
