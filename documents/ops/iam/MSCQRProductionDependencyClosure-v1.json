@@ -241,6 +241,25 @@
       "negativeTestPresent": true
     },
     {
+      "sourceFile": "scripts/aws/run-production-mixed-dual-slot-topology-recovery.mjs",
+      "action": "kms:Sign",
+      "capabilityId": "mixed-recovery-iam-attestation-sign",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation"
+      ],
+      "reachableMode": [
+        "MIXED_DUAL_SLOT_RECOVERY"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
       "sourceFile": "scripts/aws/recover-production-mixed-dual-slot-topology.mjs",
       "action": "secretsmanager:UpdateSecretVersionStage",
       "capabilityId": "mixed-recovery-remove-awscurrent",

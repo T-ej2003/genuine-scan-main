@@ -8017,6 +8017,35 @@
       "mutation": true
     },
     {
+      "id": "mixed-recovery-iam-attestation-sign",
+      "phase": "mixed-dual-slot-recovery-iam-preflight",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-mixed-dual-slot-topology-recovery.mjs",
+      "sourceFunction": "prepareMixedDualSlotRecoveryIamAttestation",
+      "action": "kms:Sign",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "operation": "PRODUCTION_MIXED_DUAL_SLOT_TOPOLOGY_RECOVERY"
+      },
+      "classification": "ROOT_GOVERNED_ATTESTATION_SIGNING",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-root-attestation-key.mjs",
+        "sid": "AccountAdministration",
+        "livePolicyArn": "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation",
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
       "id": "mixed-recovery-iam-preflight-identify",
       "phase": "mixed-dual-slot-recovery-iam-preflight",
       "identity": "ROOT_OPERATOR",
@@ -14493,6 +14522,17 @@
         "*"
       ],
       "capabilityId": "initial-activation-policy-reconciliation-prepare-identify"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-mixed-dual-slot-topology-recovery.mjs",
+      "sourceFunction": "prepareMixedDualSlotRecoveryIamAttestation",
+      "phase": "mixed-dual-slot-recovery-iam-preflight",
+      "identity": "ROOT_OPERATOR",
+      "action": "kms:Sign",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation"
+      ],
+      "capabilityId": "mixed-recovery-iam-attestation-sign"
     },
     {
       "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
