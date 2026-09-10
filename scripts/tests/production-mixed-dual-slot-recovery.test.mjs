@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { MIXED_DUAL_SLOT_PREDECESSOR, MIXED_DUAL_SLOT_PREDECESSOR_CANONICAL_ID, MIXED_DUAL_SLOT_RECOVERY_LIVE_PREDECESSOR, MIXED_DUAL_SLOT_RECOVERY_ORDER, assertMixedDualSlotPredecessor, assertMixedDualSlotRecoveryAuthorization, buildMixedDualSlotRecoveryPreparation, createMixedDualSlotRecoveryAuthorization } from "../aws/production-mixed-dual-slot-recovery-contract.mjs";
-import { executeMixedDualSlotRecovery } from "../aws/recover-production-mixed-dual-slot-topology.mjs";
+import { executeMixedDualSlotRecovery, prepareMixedDualSlotRecovery } from "../aws/recover-production-mixed-dual-slot-topology.mjs";
 import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from "../aws/production-github-environment-approval.mjs";
 import { bootstrapInitialDualSlotRotation, INITIAL_DUAL_SLOT_NAMES } from "../aws/production-initial-dual-slot-bootstrap.mjs";
 
@@ -72,6 +72,31 @@ test("all seven label-removal interruption boundaries resume without duplicate m
   }
 });
 
+test("preparation authenticates and binds every exact contiguous recovery prefix", async () => {
+  for (let boundary = 0; boundary <= 7; boundary += 1) {
+    const fixture = fakeSecrets();
+    for (const slot of MIXED_DUAL_SLOT_RECOVERY_ORDER.slice(0, boundary)) fixture.states.get(MIXED_DUAL_SLOT_PREDECESSOR[slot].arn).labels = [];
+    const preparation = await prepareMixedDualSlotRecovery({ send: fixture.send, sourceSha, payloadHash, now: new Date("2026-09-10T00:00:00.000Z") });
+    assert.equal(preparation.initialCompletedStageLabelMutations, boundary);
+    assert.equal(preparation.maximumRemainingStageLabelMutations, 7 - boundary);
+    const result = await executeMixedDualSlotRecovery({ send: fixture.send, preparation, sourceSha, authorization: authorized(preparation), payloadHash, now });
+    assert.equal(result.stageLabelMutations, 7 - boundary);
+    assert.equal(fixture.writes(), 7 - boundary);
+  }
+  const noncontiguous = fakeSecrets();
+  noncontiguous.states.get(MIXED_DUAL_SLOT_PREDECESSOR.qrPrivatePending.arn).labels = [];
+  await assert.rejects(() => prepareMixedDualSlotRecovery({ send: noncontiguous.send, sourceSha, payloadHash, now }), /contiguous prefix/);
+});
+
+test("execution never regresses behind its authorization-bound prepared prefix", async () => {
+  const fixture = fakeSecrets();
+  for (const slot of MIXED_DUAL_SLOT_RECOVERY_ORDER.slice(0, 2)) fixture.states.get(MIXED_DUAL_SLOT_PREDECESSOR[slot].arn).labels = [];
+  const preparation = await prepareMixedDualSlotRecovery({ send: fixture.send, sourceSha, payloadHash, now: new Date("2026-09-10T00:00:00.000Z") });
+  fixture.states.get(MIXED_DUAL_SLOT_PREDECESSOR.qrPrivatePending.arn).labels = ["AWSCURRENT"];
+  await assert.rejects(() => executeMixedDualSlotRecovery({ send: fixture.send, preparation, sourceSha, authorization: authorized(preparation), payloadHash, now }), /predates/);
+  assert.equal(fixture.writes(), 0);
+});
+
 test("a completed unlabeled version omitted from DescribeSecret resumes as exact progress", async () => {
   const fixture = fakeSecrets();
   const preparation = buildMixedDualSlotRecoveryPreparation({ sourceSha, predecessor: exactPredecessor(), preparedAt: "2026-09-10T00:00:00.000Z" });
@@ -114,7 +139,7 @@ test("wrong authorization, non-contiguous progress, and any predecessor drift fa
 test("authorization binds the exact operation, source, preparation and immutable plan", () => {
   const preparation = buildMixedDualSlotRecoveryPreparation({ sourceSha, predecessor: exactPredecessor(), preparedAt: "2026-09-10T00:00:00.000Z" }); const authorization = authorized(preparation);
   assert.doesNotThrow(() => assertMixedDualSlotRecoveryAuthorization(authorization, { preparation, preparationFileSha256, sourceSha, now }));
-  for (const changed of [{ operation: "PRODUCTION_DUAL_SLOT_REBASELINE" }, { sourceSha: "f".repeat(40) }, { preparationSha256: "f".repeat(64) }, { preparationFileSha256: "f".repeat(64) }, { predecessorCanonicalId: "f".repeat(64) }, { postStateCanonicalId: "f".repeat(64) }, { mutationPlanSha256: "f".repeat(64) }, { historicalRotationId: "rotation-wrong" }, { historicalSourceSha: "f".repeat(40) }, { expectedStageLabelMutations: 6 }]) assert.throws(() => assertMixedDualSlotRecoveryAuthorization({ ...authorization, ...changed }, { preparation, sourceSha, now }), /authorization/);
+  for (const changed of [{ operation: "PRODUCTION_DUAL_SLOT_REBASELINE" }, { sourceSha: "f".repeat(40) }, { preparationSha256: "f".repeat(64) }, { preparationFileSha256: "f".repeat(64) }, { predecessorCanonicalId: "f".repeat(64) }, { initialCompletedStageLabelMutations: 1 }, { maximumRemainingStageLabelMutations: 6 }, { postStateCanonicalId: "f".repeat(64) }, { mutationPlanSha256: "f".repeat(64) }, { historicalRotationId: "rotation-wrong" }, { historicalSourceSha: "f".repeat(40) }, { expectedStageLabelMutations: 6 }]) assert.throws(() => assertMixedDualSlotRecoveryAuthorization({ ...authorization, ...changed }, { preparation, sourceSha, now }), /authorization/);
 });
 
 test("preparation binds healthy :52 legacy selectors outside all recovery targets", () => {
