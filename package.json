@@ -101,6 +101,7 @@
     "stage-b:bootstrap-initial-dual-slot": "node scripts/aws/bootstrap-production-initial-dual-slot.mjs",
     "stage-b:rebaseline-dual-slot": "node scripts/aws/rebaseline-production-dual-slot.mjs",
     "stage-b:authorize-dual-slot-rebaseline": "node scripts/aws/authorize-production-dual-slot-rebaseline.mjs",
+    "stage-b:mixed-dual-slot-recovery": "node scripts/aws/run-production-mixed-dual-slot-topology-recovery.mjs",
     "stage-b:bootstrap-artifact-signing": "node scripts/aws/bootstrap-production-artifact-signing.mjs",
     "stage-b:supersede-stale-rotation": "node scripts/aws/supersede-production-stale-rotation.mjs",
     "stage-b:authorize-stale-rotation-supersession": "node scripts/aws/authorize-production-stale-rotation-supersession.mjs",

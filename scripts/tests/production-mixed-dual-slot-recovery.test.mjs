@@ -1,0 +1,133 @@
+import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { MIXED_DUAL_SLOT_PREDECESSOR, MIXED_DUAL_SLOT_PREDECESSOR_CANONICAL_ID, MIXED_DUAL_SLOT_RECOVERY_LIVE_PREDECESSOR, MIXED_DUAL_SLOT_RECOVERY_ORDER, assertMixedDualSlotPredecessor, assertMixedDualSlotRecoveryAuthorization, buildMixedDualSlotRecoveryPreparation, createMixedDualSlotRecoveryAuthorization } from "../aws/production-mixed-dual-slot-recovery-contract.mjs";
+import { executeMixedDualSlotRecovery } from "../aws/recover-production-mixed-dual-slot-topology.mjs";
+import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from "../aws/production-github-environment-approval.mjs";
+import { bootstrapInitialDualSlotRotation, INITIAL_DUAL_SLOT_NAMES } from "../aws/production-initial-dual-slot-bootstrap.mjs";
+
+const sourceSha = "a".repeat(40);
+const now = new Date("2026-09-10T00:05:00.000Z");
+const fixturePayload = (slot) => { const e = MIXED_DUAL_SLOT_PREDECESSOR[slot]; return { family: "fixture", value: "redacted", rotationId: e.rotationId, slot: e.slot, ...(e.sourceSha ? { sourceSha: e.sourceSha } : {}), ...(e.materialFingerprint ? { materialFingerprint: e.materialFingerprint } : {}), ...(e.keyVersion ? { keyVersion: e.keyVersion } : {}), ...(slot.includes("Pending") ? { supersessionPredecessorIdentitySha256: "x" } : {}) }; };
+const payloadHash = (_payload, slot) => MIXED_DUAL_SLOT_PREDECESSOR[slot].payloadSha256;
+const exactPredecessor = () => structuredClone(MIXED_DUAL_SLOT_PREDECESSOR);
+const approval = () => createProductionEnvironmentApprovalEvidence({ environmentConfig: { name: "production", id: 17, can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{ type: "User", reviewer: { id: 7, login: "checker" } }] }] }, repository: "T-ej2003/genuine-scan-main", environment: "production", sourceSha, workflowRef: PRODUCTION_ENVIRONMENT_APPROVAL.mixedDualSlotRecoveryAuthorizationWorkflowRef, eventName: "workflow_dispatch", workflowRunId: "123456", workflowRunAttempt: "1", executionActor: "operator", observedAt: "2026-09-10T00:00:00.000Z", actualApproval: { state: "approved", environmentId: 17, environmentName: "production", userId: 7, userLogin: "checker" } });
+const preparationFileSha256 = "d".repeat(64);
+const authorized = (preparation) => createMixedDualSlotRecoveryAuthorization({ preparation, preparationFileSha256, protectedEnvironmentApprovalEvidence: approval(), reason: "Normalize exact mixed unused topology", approverRole: "production-independent-checker", verificationRef: "recovery-1", now });
+
+function fakeSecrets({ failAfter = null } = {}) {
+  const states = new Map(MIXED_DUAL_SLOT_RECOVERY_ORDER.map((slot) => [MIXED_DUAL_SLOT_PREDECESSOR[slot].arn, { slot, labels: ["AWSCURRENT"] }])); let writes = 0; const controls = { failAfter };
+  const send = async (command) => { const input = command.input; const state = states.get(input.SecretId); if (!state) throw new Error("unknown secret"); const expected = MIXED_DUAL_SLOT_PREDECESSOR[state.slot];
+    if (command.constructor.name === "DescribeSecretCommand") return { ARN: input.SecretId, VersionIdsToStages: state.topology || (state.labels.length ? { [expected.versionId]: state.labels } : {}) };
+    if (command.constructor.name === "GetSecretValueCommand") { if (state.missingValue) throw Object.assign(new Error("missing version"), { name: "ResourceNotFoundException" }); return { VersionId: expected.versionId, SecretString: JSON.stringify(fixturePayload(state.slot)) }; }
+    if (command.constructor.name === "UpdateSecretVersionStageCommand") { if (controls.failAfter === writes) throw new Error("injected interruption"); writes += 1; state.labels = []; return {}; }
+    throw new Error(`unexpected ${command.constructor.name}`);
+  };
+  return { send, states, controls, writes: () => writes };
+}
+
+function handoffSecrets() {
+  const states = new Map(MIXED_DUAL_SLOT_RECOVERY_ORDER.map((slot) => [MIXED_DUAL_SLOT_PREDECESSOR[slot].arn, { slot, labels: ["AWSCURRENT"], current: fixturePayload(slot) }])); const calls = [];
+  const stateFor = (id) => states.get(id) || [...states.entries()].find(([arn]) => arn.includes(`:secret:${id}-`))?.[1];
+  const arnFor = (state) => MIXED_DUAL_SLOT_PREDECESSOR[state.slot].arn;
+  const send = async (command) => { const name = command.constructor.name; const input = command.input; const state = stateFor(input.SecretId); calls.push({ name, input: { ...input, SecretString: input.SecretString ? "[redacted]" : undefined } }); if (!state) throw Object.assign(new Error("not found"), { name: "ResourceNotFoundException" }); const expected = MIXED_DUAL_SLOT_PREDECESSOR[state.slot];
+    if (name === "DescribeSecretCommand") return { Name: Object.values(INITIAL_DUAL_SLOT_NAMES)[Object.keys(INITIAL_DUAL_SLOT_NAMES).indexOf(state.slot)], ARN: arnFor(state), VersionIdsToStages: { ...(state.labels.length ? { [expected.versionId]: state.labels } : {}), ...(state.next ? { next: ["AWSCURRENT"] } : {}) } };
+    if (name === "GetSecretValueCommand") { if (input.VersionId === expected.versionId || !input.VersionId && state.labels.includes("AWSCURRENT")) return { VersionId: expected.versionId, SecretString: JSON.stringify(fixturePayload(state.slot)) }; if (!input.VersionId && state.next) return { VersionId: "next", SecretString: state.next }; throw Object.assign(new Error("no current version"), { name: "ResourceNotFoundException" }); }
+    if (name === "UpdateSecretVersionStageCommand") { state.labels = []; return {}; }
+    if (name === "PutSecretValueCommand") { state.next = input.SecretString; return { ARN: arnFor(state), VersionId: "next" }; }
+    throw new Error(`unexpected ${name}`);
+  };
+  return { send, calls, states };
+}
+
+const liveTaskDefinition = { taskDefinition: { taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:52", containerDefinitions: [{ name: "backend", image: "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:b55ffef21cd794a1fefb0f0da3b56e70a727d44818a9d0a5f1c26d3e1d2e1b3e", environment: [{ name: "QR_SIGN_ACTIVE_KEY_VERSION", value: "2026-04-20" }], secrets: [{ name: "JWT_SECRET", valueFrom: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/jwt-wBQNqk" }, { name: "QR_SIGN_PRIVATE_KEY", valueFrom: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_private_key-BcQFPO:value::" }, { name: "QR_SIGN_PUBLIC_KEY", valueFrom: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_public_key-v7Xeex:value::" }] }] } };
+
+test("admission accepts only the immutable seven-slot predecessor", () => {
+  assert.equal(MIXED_DUAL_SLOT_RECOVERY_ORDER.length, 7);
+  assert.match(MIXED_DUAL_SLOT_PREDECESSOR_CANONICAL_ID, /^[a-f0-9]{64}$/);
+  assert.doesNotThrow(() => assertMixedDualSlotPredecessor(exactPredecessor()));
+  const mutations = {
+    arn: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:wrong", versionId: "f".repeat(64), stagingLabels: [], payloadSha256: "f".repeat(64), schemaKeys: ["wrong"], sourceSha: "f".repeat(40), rotationId: "rotation-wrong", slot: "wrong", materialFingerprint: "wrong", keyVersion: "wrong",
+  };
+  for (const slot of MIXED_DUAL_SLOT_RECOVERY_ORDER) for (const [field, replacement] of Object.entries(mutations)) { const altered = exactPredecessor(); altered[slot][field] = replacement; assert.throws(() => assertMixedDualSlotPredecessor(altered), /exact admitted/, `${slot}.${field}`); }
+  for (const slot of MIXED_DUAL_SLOT_RECOVERY_ORDER.filter((name) => MIXED_DUAL_SLOT_PREDECESSOR[name].sourceSha)) { const altered = exactPredecessor(); altered[slot].sourceSha = null; assert.throws(() => assertMixedDualSlotPredecessor(altered), /exact admitted/, `${slot}.missingSourceSha`); }
+  const missing = exactPredecessor(); delete missing.jwtPending; assert.throws(() => assertMixedDualSlotPredecessor(missing), /schema/);
+  assert.throws(() => assertMixedDualSlotPredecessor({ ...exactPredecessor(), extra: exactPredecessor().jwtPending }), /schema/);
+});
+
+test("all seven label-removal interruption boundaries resume without duplicate mutations", async () => {
+  const preparation = buildMixedDualSlotRecoveryPreparation({ sourceSha, predecessor: exactPredecessor(), preparedAt: "2026-09-10T00:00:00.000Z" });
+  const authorization = authorized(preparation);
+  assert.equal(preparation.predecessorCanonicalId, MIXED_DUAL_SLOT_PREDECESSOR_CANONICAL_ID);
+  for (let boundary = 0; boundary < 7; boundary += 1) {
+    const interrupted = fakeSecrets({ failAfter: boundary });
+    await assert.rejects(() => executeMixedDualSlotRecovery({ send: interrupted.send, preparation, sourceSha, authorization, payloadHash, now }), /injected interruption/);
+    assert.equal(interrupted.writes(), boundary);
+    interrupted.controls.failAfter = null;
+    const resumed = await executeMixedDualSlotRecovery({ send: interrupted.send, preparation, sourceSha, authorization, payloadHash, now });
+    assert.equal(resumed.stageLabelMutations, 7 - boundary);
+    assert.equal(interrupted.writes(), 7);
+  }
+});
+
+test("wrong authorization, non-contiguous progress, and any predecessor drift fail closed", async () => {
+  const fixture = fakeSecrets(); const preparation = buildMixedDualSlotRecoveryPreparation({ sourceSha, predecessor: exactPredecessor(), preparedAt: "2026-09-10T00:00:00.000Z" });
+  const authorization = authorized(preparation);
+  await assert.rejects(() => executeMixedDualSlotRecovery({ send: fixture.send, preparation, sourceSha, authorization: { ...authorization, operation: "PRODUCTION_DUAL_SLOT_REBASELINE" }, payloadHash, now }), /authorization/);
+  fixture.states.get(MIXED_DUAL_SLOT_PREDECESSOR.jwtPending.arn).labels = [];
+  fixture.states.get(MIXED_DUAL_SLOT_PREDECESSOR.qrPublicPending.arn).labels = [];
+  await assert.rejects(() => executeMixedDualSlotRecovery({ send: fixture.send, preparation, sourceSha, authorization, payloadHash, now }), /contiguous prefix/);
+});
+
+test("authorization binds the exact operation, source, preparation and immutable plan", () => {
+  const preparation = buildMixedDualSlotRecoveryPreparation({ sourceSha, predecessor: exactPredecessor(), preparedAt: "2026-09-10T00:00:00.000Z" }); const authorization = authorized(preparation);
+  assert.doesNotThrow(() => assertMixedDualSlotRecoveryAuthorization(authorization, { preparation, preparationFileSha256, sourceSha, now }));
+  for (const changed of [{ operation: "PRODUCTION_DUAL_SLOT_REBASELINE" }, { sourceSha: "f".repeat(40) }, { preparationSha256: "f".repeat(64) }, { preparationFileSha256: "f".repeat(64) }, { predecessorCanonicalId: "f".repeat(64) }, { postStateCanonicalId: "f".repeat(64) }, { mutationPlanSha256: "f".repeat(64) }, { historicalRotationId: "rotation-wrong" }, { historicalSourceSha: "f".repeat(40) }, { expectedStageLabelMutations: 6 }]) assert.throws(() => assertMixedDualSlotRecoveryAuthorization({ ...authorization, ...changed }, { preparation, sourceSha, now }), /authorization/);
+});
+
+test("preparation binds healthy :52 legacy selectors outside all recovery targets", () => {
+  const preparation = buildMixedDualSlotRecoveryPreparation({ sourceSha, predecessor: exactPredecessor(), preparedAt: "2026-09-10T00:00:00.000Z" });
+  assert.equal(MIXED_DUAL_SLOT_RECOVERY_LIVE_PREDECESSOR.taskDefinition.endsWith("mscqr-backend:52"), true);
+  assert.equal(MIXED_DUAL_SLOT_RECOVERY_LIVE_PREDECESSOR.legacySecretArns.some((arn) => preparation.mutationPlan.some(({ secretArn }) => secretArn === arn)), false);
+  assert.throws(() => buildMixedDualSlotRecoveryPreparation({ sourceSha, predecessor: exactPredecessor(), livePredecessor: { ...MIXED_DUAL_SLOT_RECOVERY_LIVE_PREDECESSOR, legacySecretArns: [MIXED_DUAL_SLOT_PREDECESSOR.jwtPending.arn] }, preparedAt: "2026-09-10T00:00:00.000Z" }), /live predecessor/);
+});
+
+test("freshness blocks a stale start while the same exact authorization can finish only an exact prefix", async () => {
+  const preparation = buildMixedDualSlotRecoveryPreparation({ sourceSha, predecessor: exactPredecessor(), preparedAt: "2026-09-10T00:00:00.000Z" }); const authorization = authorized(preparation); const staleNow = new Date("2026-09-10T01:00:00.000Z");
+  await assert.rejects(() => executeMixedDualSlotRecovery({ send: fakeSecrets().send, preparation, sourceSha, authorization, payloadHash, now: staleNow }), /stale/);
+  const partial = fakeSecrets(); partial.states.get(MIXED_DUAL_SLOT_PREDECESSOR.jwtPending.arn).labels = [];
+  const resumed = await executeMixedDualSlotRecovery({ send: partial.send, preparation, sourceSha, authorization, payloadHash, now: staleNow }); assert.equal(resumed.stageLabelMutations, 6);
+  const replay = await executeMixedDualSlotRecovery({ send: partial.send, preparation, sourceSha, authorization, payloadHash, now: staleNow }); assert.equal(replay.stageLabelMutations, 0);
+});
+
+test("per-mutation CAS rejects immutable, label, version and non-contiguous drift", async () => {
+  const preparation = buildMixedDualSlotRecoveryPreparation({ sourceSha, predecessor: exactPredecessor(), preparedAt: "2026-09-10T00:00:00.000Z" }); const authorization = authorized(preparation);
+  for (const boundary of [0, 1, 3, 6]) {
+    const fixture = fakeSecrets(); let checks = 0;
+    await assert.rejects(() => executeMixedDualSlotRecovery({ send: fixture.send, preparation, sourceSha, authorization, payloadHash, now, reauthenticate: async () => { checks += 1; if (checks === 2 + boundary * 2) fixture.states.get(MIXED_DUAL_SLOT_PREDECESSOR.qrPreviousVersion.arn).topology = { [MIXED_DUAL_SLOT_PREDECESSOR.qrPreviousVersion.versionId]: ["AWSCURRENT"], attacker: ["AWSPREVIOUS"] }; } }), /topology/);
+  }
+  for (const topology of [{ [MIXED_DUAL_SLOT_PREDECESSOR.jwtPending.versionId]: ["AWSCURRENT", "AWSPREVIOUS"] }, { moved: ["AWSCURRENT"] }]) {
+    const fixture = fakeSecrets(); fixture.states.get(MIXED_DUAL_SLOT_PREDECESSOR.jwtPending.arn).topology = topology;
+    await assert.rejects(() => executeMixedDualSlotRecovery({ send: fixture.send, preparation, sourceSha, authorization, payloadHash, now }), /topology|staging/);
+  }
+  const missing = fakeSecrets(); missing.states.get(MIXED_DUAL_SLOT_PREDECESSOR.jwtPending.arn).missingValue = true;
+  await assert.rejects(() => executeMixedDualSlotRecovery({ send: missing.send, preparation, sourceSha, authorization, payloadHash, now }), /missing version/);
+});
+
+test("exact authorized recovery hands T1 to the real initial bootstrap for its ordinary seven writes", async () => {
+  const original = handoffSecrets(); const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-mixed-handoff-"));
+  try {
+    await assert.rejects(() => bootstrapInitialDualSlotRotation({ send: original.send, taskDefinition: liveTaskDefinition, sourceSha, rotationId: "rotation-fresh-initial", outputFile: path.join(directory, "original.json") }), /malformed|inconsistent|key pair/);
+    const fixture = handoffSecrets(); const preparation = buildMixedDualSlotRecoveryPreparation({ sourceSha, predecessor: exactPredecessor(), preparedAt: "2026-09-10T00:00:00.000Z" });
+    const recovered = await executeMixedDualSlotRecovery({ send: fixture.send, preparation, sourceSha, authorization: authorized(preparation), payloadHash, now });
+    assert.equal(recovered.stageLabelMutations, 7);
+    const bootstrapped = await bootstrapInitialDualSlotRotation({ send: fixture.send, taskDefinition: liveTaskDefinition, sourceSha, rotationId: "rotation-fresh-initial", outputFile: path.join(directory, "bindings.json") });
+    assert.equal(bootstrapped.created.length, 0); assert.equal(bootstrapped.secretValueWrites, 7);
+    assert.equal(fixture.calls.filter(({ name }) => name === "PutSecretValueCommand").length, 7);
+    assert.equal(fixture.calls.filter(({ name }) => name === "CreateSecretCommand" || name === "DeleteSecretCommand").length, 0);
+    assert.equal(bootstrapped.bindings.jwt.currentSecretId, "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/jwt-wBQNqk");
+    assert.equal(bootstrapped.bindings.qr.publicCurrentSecretId, "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_public_key-v7Xeex");
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
