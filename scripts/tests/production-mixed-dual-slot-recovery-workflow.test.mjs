@@ -5,12 +5,13 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { MIXED_DUAL_SLOT_PREDECESSOR, MIXED_DUAL_SLOT_RECOVERY_ARTIFACT, assertMixedDualSlotRecoveryAuthorization, buildMixedDualSlotRecoveryPreparation, createMixedDualSlotRecoveryAuthorization, resolveMixedDualSlotRecoveryAuthorizationArtifact } from "../aws/production-mixed-dual-slot-recovery-contract.mjs";
+import { MIXED_DUAL_SLOT_PREDECESSOR, MIXED_DUAL_SLOT_RECOVERY_ARTIFACT, MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN, MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION, MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, assertMixedDualSlotRecoveryAuthorization, buildMixedDualSlotRecoveryIamPreflight, buildMixedDualSlotRecoveryPreparation, createMixedDualSlotRecoveryAuthorization, resolveMixedDualSlotRecoveryAuthorizationArtifact } from "../aws/production-mixed-dual-slot-recovery-contract.mjs";
 import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from "../aws/production-github-environment-approval.mjs";
 
 const root = path.resolve(new URL(".", import.meta.url).pathname, "../..");
 const sourceSha = "a".repeat(40); const observedAt = "2026-09-10T00:00:00.000Z"; const now = new Date("2026-09-10T00:05:00.000Z");
-const preparation = buildMixedDualSlotRecoveryPreparation({ sourceSha, predecessor: structuredClone(MIXED_DUAL_SLOT_PREDECESSOR), preparedAt: observedAt });
+const iamCapabilityPreflight = buildMixedDualSlotRecoveryIamPreflight({ sourceSha, principalArn: MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN, action: MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION, resources: [...MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES], evaluations: MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES.map((resource) => ({ action: MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION, resource, decision: "allowed", missingContextValues: [], organizationsAllowed: true, permissionsBoundaryAllowed: null })), observedAt });
+const preparation = buildMixedDualSlotRecoveryPreparation({ sourceSha, predecessor: structuredClone(MIXED_DUAL_SLOT_PREDECESSOR), iamCapabilityPreflight, preparedAt: observedAt });
 const preparationFileSha256 = "d".repeat(64);
 const approvalFor = (workflowRef) => createProductionEnvironmentApprovalEvidence({ environmentConfig: { name: "production", id: 17, can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{ type: "User", reviewer: { id: 7, login: "checker" } }] }] }, repository: "T-ej2003/genuine-scan-main", environment: "production", sourceSha, workflowRef, eventName: "workflow_dispatch", workflowRunId: "123456", workflowRunAttempt: "1", executionActor: "operator", observedAt, actualApproval: { state: "approved", environmentId: 17, environmentName: "production", userId: 7, userLogin: "checker" } });
 const evidence = approvalFor(PRODUCTION_ENVIRONMENT_APPROVAL.mixedDualSlotRecoveryAuthorizationWorkflowRef);
@@ -21,6 +22,10 @@ test("protected workflows expose only canonical artifact coordinates and gate cr
   const execute = readFileSync(path.join(root, ".github/workflows/execute-production-mixed-dual-slot-topology-recovery.yml"), "utf8");
   for (const workflow of [authorize, execute]) { assert.match(workflow, /environment: production/); assert.doesNotMatch(workflow.match(/inputs:[\s\S]*?\npermissions:/)?.[0] || "", /secret_arn|version_id|payload_hash|rotation_id|historical_source|mutation_(?:count|plan|order)|predecessor_manifest/); }
   assert.match(authorize, /--require-actual-approval/); assert.doesNotMatch(authorize, /configure-aws-credentials|UpdateSecretVersionStage|PutSecretValue|DeleteSecret/);
+  assert.match(authorize, /name: Verify effective recovery IAM capability/);
+  assert.match(authorize, /needs: preflight/);
+  assert.ok(authorize.indexOf("Verify effective recovery IAM capability") < authorize.indexOf("environment: production"));
+  assert.match(authorize, /verify-production-mixed-dual-slot-recovery-preparation\.mjs/);
   for (const workflow of [authorize, execute]) { assert.match(workflow, /source-before\.sha256/); assert.match(workflow, /source-after\.sha256/); assert.match(workflow, /cmp --silent/); assert.match(workflow, /chmod 600 "\$workdir\/preparation\.json"/); }
   assert.ok(execute.indexOf("environment: production") < execute.indexOf("configure-aws-credentials") && execute.indexOf("configure-aws-credentials") < execute.indexOf("run-production-mixed-dual-slot-topology-recovery.mjs --execute"));
   assert.match(execute, /secretsmanager:UpdateSecretVersionStage/); assert.doesNotMatch(execute, /secretsmanager:(?:PutSecretValue|CreateSecret|DeleteSecret)/);

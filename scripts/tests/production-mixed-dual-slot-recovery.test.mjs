@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { MIXED_DUAL_SLOT_PREDECESSOR, MIXED_DUAL_SLOT_PREDECESSOR_CANONICAL_ID, MIXED_DUAL_SLOT_RECOVERY_LIVE_PREDECESSOR, MIXED_DUAL_SLOT_RECOVERY_ORDER, MIXED_DUAL_SLOT_RETAINED_HISTORY, assertMixedDualSlotPredecessor, assertMixedDualSlotRecoveryAuthorization, buildMixedDualSlotRecoveryPreparation, createMixedDualSlotRecoveryAuthorization } from "../aws/production-mixed-dual-slot-recovery-contract.mjs";
+import { MIXED_DUAL_SLOT_PREDECESSOR, MIXED_DUAL_SLOT_PREDECESSOR_CANONICAL_ID, MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN, MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION, MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, MIXED_DUAL_SLOT_RECOVERY_LIVE_PREDECESSOR, MIXED_DUAL_SLOT_RECOVERY_ORDER, MIXED_DUAL_SLOT_RETAINED_HISTORY, assertMixedDualSlotPredecessor, assertMixedDualSlotRecoveryAuthorization, buildMixedDualSlotRecoveryIamPreflight, buildMixedDualSlotRecoveryPreparation, createMixedDualSlotRecoveryAuthorization } from "../aws/production-mixed-dual-slot-recovery-contract.mjs";
 import { executeMixedDualSlotRecovery, prepareMixedDualSlotRecovery } from "../aws/recover-production-mixed-dual-slot-topology.mjs";
 import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from "../aws/production-github-environment-approval.mjs";
 import { bootstrapInitialDualSlotRotation, INITIAL_DUAL_SLOT_NAMES, verifyLiveInitialDualSlotBindingWithRunner } from "../aws/production-initial-dual-slot-bootstrap.mjs";
@@ -15,6 +15,7 @@ const payloadHash = (payload, slot, identity = "current") => payload?.value === 
 const exactPredecessor = () => structuredClone(MIXED_DUAL_SLOT_PREDECESSOR);
 const approval = () => createProductionEnvironmentApprovalEvidence({ environmentConfig: { name: "production", id: 17, can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{ type: "User", reviewer: { id: 7, login: "checker" } }] }] }, repository: "T-ej2003/genuine-scan-main", environment: "production", sourceSha, workflowRef: PRODUCTION_ENVIRONMENT_APPROVAL.mixedDualSlotRecoveryAuthorizationWorkflowRef, eventName: "workflow_dispatch", workflowRunId: "123456", workflowRunAttempt: "1", executionActor: "operator", observedAt: "2026-09-10T00:00:00.000Z", actualApproval: { state: "approved", environmentId: 17, environmentName: "production", userId: 7, userLogin: "checker" } });
 const preparationFileSha256 = "d".repeat(64);
+const iamPreflight = () => buildMixedDualSlotRecoveryIamPreflight({ sourceSha, principalArn: MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN, action: MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION, resources: [...MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES], evaluations: MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES.map((resource) => ({ action: MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION, resource, decision: "allowed", missingContextValues: [], organizationsAllowed: true, permissionsBoundaryAllowed: null })), observedAt: "2026-09-10T00:00:00.000Z" });
 const authorized = (preparation) => createMixedDualSlotRecoveryAuthorization({ preparation, preparationFileSha256, protectedEnvironmentApprovalEvidence: approval(), reason: "Normalize exact mixed unused topology", approverRole: "production-independent-checker", verificationRef: "recovery-1", now });
 
 function fakeSecrets({ failAfter = null, postWriteLag = 0 } = {}) {
@@ -65,7 +66,7 @@ test("admission accepts only the immutable seven-slot predecessor", () => {
 });
 
 test("all seven label-removal interruption boundaries resume without duplicate mutations", async () => {
-  const preparation = buildMixedDualSlotRecoveryPreparation({ sourceSha, predecessor: exactPredecessor(), preparedAt: "2026-09-10T00:00:00.000Z" });
+  const preparation = buildMixedDualSlotRecoveryPreparation({ sourceSha, predecessor: exactPredecessor(), iamCapabilityPreflight: iamPreflight(), preparedAt: "2026-09-10T00:00:00.000Z" });
   const authorization = authorized(preparation);
   assert.equal(preparation.predecessorCanonicalId, MIXED_DUAL_SLOT_PREDECESSOR_CANONICAL_ID);
   for (let boundary = 0; boundary < 7; boundary += 1) {
@@ -84,7 +85,7 @@ test("preparation authenticates and binds every exact contiguous recovery prefix
   for (let boundary = 0; boundary <= 7; boundary += 1) {
     const fixture = fakeSecrets();
     for (const slot of MIXED_DUAL_SLOT_RECOVERY_ORDER.slice(0, boundary)) fixture.states.get(MIXED_DUAL_SLOT_PREDECESSOR[slot].arn).labels = [];
-    const preparation = await prepareMixedDualSlotRecovery({ send: fixture.send, sourceSha, payloadHash, now: new Date("2026-09-10T00:00:00.000Z") });
+    const preparation = await prepareMixedDualSlotRecovery({ send: fixture.send, sourceSha, payloadHash, iamCapabilityPreflight: iamPreflight(), now: new Date("2026-09-10T00:00:00.000Z") });
     assert.equal(preparation.initialCompletedStageLabelMutations, boundary);
     assert.equal(preparation.maximumRemainingStageLabelMutations, 7 - boundary);
     const result = await executeMixedDualSlotRecovery({ send: fixture.send, preparation, sourceSha, authorization: authorized(preparation), payloadHash, now });
@@ -93,13 +94,13 @@ test("preparation authenticates and binds every exact contiguous recovery prefix
   }
   const noncontiguous = fakeSecrets();
   noncontiguous.states.get(MIXED_DUAL_SLOT_PREDECESSOR.qrPrivatePending.arn).labels = [];
-  await assert.rejects(() => prepareMixedDualSlotRecovery({ send: noncontiguous.send, sourceSha, payloadHash, now }), /contiguous prefix/);
+  await assert.rejects(() => prepareMixedDualSlotRecovery({ send: noncontiguous.send, sourceSha, payloadHash, iamCapabilityPreflight: iamPreflight(), now }), /contiguous prefix/);
 });
 
 test("execution never regresses behind its authorization-bound prepared prefix", async () => {
   const fixture = fakeSecrets();
   for (const slot of MIXED_DUAL_SLOT_RECOVERY_ORDER.slice(0, 2)) fixture.states.get(MIXED_DUAL_SLOT_PREDECESSOR[slot].arn).labels = [];
-  const preparation = await prepareMixedDualSlotRecovery({ send: fixture.send, sourceSha, payloadHash, now: new Date("2026-09-10T00:00:00.000Z") });
+  const preparation = await prepareMixedDualSlotRecovery({ send: fixture.send, sourceSha, payloadHash, iamCapabilityPreflight: iamPreflight(), now: new Date("2026-09-10T00:00:00.000Z") });
   fixture.states.get(MIXED_DUAL_SLOT_PREDECESSOR.qrPrivatePending.arn).labels = ["AWSCURRENT"];
   await assert.rejects(() => executeMixedDualSlotRecovery({ send: fixture.send, preparation, sourceSha, authorization: authorized(preparation), payloadHash, now }), /predates/);
   assert.equal(fixture.writes(), 0);
@@ -107,7 +108,7 @@ test("execution never regresses behind its authorization-bound prepared prefix",
 
 test("a completed unlabeled version omitted from DescribeSecret resumes as exact progress", async () => {
   const fixture = fakeSecrets();
-  const preparation = buildMixedDualSlotRecoveryPreparation({ sourceSha, predecessor: exactPredecessor(), preparedAt: "2026-09-10T00:00:00.000Z" });
+  const preparation = buildMixedDualSlotRecoveryPreparation({ sourceSha, predecessor: exactPredecessor(), iamCapabilityPreflight: iamPreflight(), preparedAt: "2026-09-10T00:00:00.000Z" });
   const completed = fixture.states.get(MIXED_DUAL_SLOT_PREDECESSOR.jwtPending.arn);
   completed.labels = [];
   completed.omitTopology = true;
@@ -117,7 +118,7 @@ test("a completed unlabeled version omitted from DescribeSecret resumes as exact
 });
 
 test("an acknowledged label removal waits for bounded exact-prefix convergence", async () => {
-  const preparation = buildMixedDualSlotRecoveryPreparation({ sourceSha, predecessor: exactPredecessor(), preparedAt: "2026-09-10T00:00:00.000Z" });
+  const preparation = buildMixedDualSlotRecoveryPreparation({ sourceSha, predecessor: exactPredecessor(), iamCapabilityPreflight: iamPreflight(), preparedAt: "2026-09-10T00:00:00.000Z" });
   const lagged = fakeSecrets({ postWriteLag: 1 }); let sleeps = 0;
   const result = await executeMixedDualSlotRecovery({ send: lagged.send, preparation, sourceSha, authorization: authorized(preparation), payloadHash, now, sleep: async () => { sleeps += 1; } });
   assert.equal(result.stageLabelMutations, 7);
@@ -136,7 +137,7 @@ test("an acknowledged label removal waits for bounded exact-prefix convergence",
 });
 
 test("wrong authorization, non-contiguous progress, and any predecessor drift fail closed", async () => {
-  const fixture = fakeSecrets(); const preparation = buildMixedDualSlotRecoveryPreparation({ sourceSha, predecessor: exactPredecessor(), preparedAt: "2026-09-10T00:00:00.000Z" });
+  const fixture = fakeSecrets(); const preparation = buildMixedDualSlotRecoveryPreparation({ sourceSha, predecessor: exactPredecessor(), iamCapabilityPreflight: iamPreflight(), preparedAt: "2026-09-10T00:00:00.000Z" });
   const authorization = authorized(preparation);
   await assert.rejects(() => executeMixedDualSlotRecovery({ send: fixture.send, preparation, sourceSha, authorization: { ...authorization, operation: "PRODUCTION_DUAL_SLOT_REBASELINE" }, payloadHash, now }), /authorization/);
   fixture.states.get(MIXED_DUAL_SLOT_PREDECESSOR.jwtPending.arn).labels = [];
@@ -145,7 +146,7 @@ test("wrong authorization, non-contiguous progress, and any predecessor drift fa
 });
 
 test("authorization binds the exact operation, source, preparation and immutable plan", () => {
-  const preparation = buildMixedDualSlotRecoveryPreparation({ sourceSha, predecessor: exactPredecessor(), preparedAt: "2026-09-10T00:00:00.000Z" }); const authorization = authorized(preparation);
+  const preparation = buildMixedDualSlotRecoveryPreparation({ sourceSha, predecessor: exactPredecessor(), iamCapabilityPreflight: iamPreflight(), preparedAt: "2026-09-10T00:00:00.000Z" }); const authorization = authorized(preparation);
   assert.doesNotThrow(() => assertMixedDualSlotRecoveryAuthorization(authorization, { preparation, preparationFileSha256, sourceSha, now }));
   for (const changed of [{ operation: "PRODUCTION_DUAL_SLOT_REBASELINE" }, { sourceSha: "f".repeat(40) }, { preparationSha256: "f".repeat(64) }, { preparationFileSha256: "f".repeat(64) }, { predecessorCanonicalId: "f".repeat(64) }, { initialCompletedStageLabelMutations: 1 }, { maximumRemainingStageLabelMutations: 6 }, { postStateCanonicalId: "f".repeat(64) }, { mutationPlanSha256: "f".repeat(64) }, { historicalRotationId: "rotation-wrong" }, { historicalSourceSha: "f".repeat(40) }, { expectedStageLabelMutations: 6 }]) assert.throws(() => assertMixedDualSlotRecoveryAuthorization({ ...authorization, ...changed }, { preparation, sourceSha, now }), /authorization/);
   const oldPredecessor = Object.fromEntries(Object.entries(preparation.predecessor).map(([slot, identity]) => { const { retainedPrevious: _retainedPrevious, ...old } = identity; return [slot, old]; }));
@@ -156,14 +157,14 @@ test("authorization binds the exact operation, source, preparation and immutable
 });
 
 test("preparation binds healthy :52 legacy selectors outside all recovery targets", () => {
-  const preparation = buildMixedDualSlotRecoveryPreparation({ sourceSha, predecessor: exactPredecessor(), preparedAt: "2026-09-10T00:00:00.000Z" });
+  const preparation = buildMixedDualSlotRecoveryPreparation({ sourceSha, predecessor: exactPredecessor(), iamCapabilityPreflight: iamPreflight(), preparedAt: "2026-09-10T00:00:00.000Z" });
   assert.equal(MIXED_DUAL_SLOT_RECOVERY_LIVE_PREDECESSOR.taskDefinition.endsWith("mscqr-backend:52"), true);
   assert.equal(MIXED_DUAL_SLOT_RECOVERY_LIVE_PREDECESSOR.legacySecretArns.some((arn) => preparation.mutationPlan.some(({ secretArn }) => secretArn === arn)), false);
-  assert.throws(() => buildMixedDualSlotRecoveryPreparation({ sourceSha, predecessor: exactPredecessor(), livePredecessor: { ...MIXED_DUAL_SLOT_RECOVERY_LIVE_PREDECESSOR, legacySecretArns: [MIXED_DUAL_SLOT_PREDECESSOR.jwtPending.arn] }, preparedAt: "2026-09-10T00:00:00.000Z" }), /live predecessor/);
+  assert.throws(() => buildMixedDualSlotRecoveryPreparation({ sourceSha, predecessor: exactPredecessor(), iamCapabilityPreflight: iamPreflight(), livePredecessor: { ...MIXED_DUAL_SLOT_RECOVERY_LIVE_PREDECESSOR, legacySecretArns: [MIXED_DUAL_SLOT_PREDECESSOR.jwtPending.arn] }, preparedAt: "2026-09-10T00:00:00.000Z" }), /live predecessor/);
 });
 
 test("freshness blocks a stale start while the same exact authorization can finish only an exact prefix", async () => {
-  const preparation = buildMixedDualSlotRecoveryPreparation({ sourceSha, predecessor: exactPredecessor(), preparedAt: "2026-09-10T00:00:00.000Z" }); const authorization = authorized(preparation); const staleNow = new Date("2026-09-10T01:00:00.000Z");
+  const preparation = buildMixedDualSlotRecoveryPreparation({ sourceSha, predecessor: exactPredecessor(), iamCapabilityPreflight: iamPreflight(), preparedAt: "2026-09-10T00:00:00.000Z" }); const authorization = authorized(preparation); const staleNow = new Date("2026-09-10T01:00:00.000Z");
   await assert.rejects(() => executeMixedDualSlotRecovery({ send: fakeSecrets().send, preparation, sourceSha, authorization, payloadHash, now: staleNow }), /stale/);
   const partial = fakeSecrets(); partial.states.get(MIXED_DUAL_SLOT_PREDECESSOR.jwtPending.arn).labels = [];
   const resumed = await executeMixedDualSlotRecovery({ send: partial.send, preparation, sourceSha, authorization, payloadHash, now: staleNow }); assert.equal(resumed.stageLabelMutations, 6);
@@ -171,7 +172,7 @@ test("freshness blocks a stale start while the same exact authorization can fini
 });
 
 test("per-mutation CAS rejects immutable, label, version and non-contiguous drift", async () => {
-  const preparation = buildMixedDualSlotRecoveryPreparation({ sourceSha, predecessor: exactPredecessor(), preparedAt: "2026-09-10T00:00:00.000Z" }); const authorization = authorized(preparation);
+  const preparation = buildMixedDualSlotRecoveryPreparation({ sourceSha, predecessor: exactPredecessor(), iamCapabilityPreflight: iamPreflight(), preparedAt: "2026-09-10T00:00:00.000Z" }); const authorization = authorized(preparation);
   for (const boundary of [0, 1, 3, 6]) {
     const fixture = fakeSecrets(); let checks = 0;
     await assert.rejects(() => executeMixedDualSlotRecovery({ send: fixture.send, preparation, sourceSha, authorization, payloadHash, now, reauthenticate: async () => { checks += 1; if (checks === 2 + boundary * 2) fixture.states.get(MIXED_DUAL_SLOT_PREDECESSOR.qrPreviousVersion.arn).topology = { [MIXED_DUAL_SLOT_PREDECESSOR.qrPreviousVersion.versionId]: ["AWSCURRENT"], attacker: ["AWSPREVIOUS"] }; } }), /topology/);
@@ -206,7 +207,7 @@ test("exact authorized recovery hands T1 to the real initial bootstrap for its o
   const retainedHash = (payload, slot) => payload?.value === "redacted" ? MIXED_DUAL_SLOT_RETAINED_HISTORY[slot].payloadSha256 : "f".repeat(64);
   try {
     await assert.rejects(() => bootstrapInitialDualSlotRotation({ send: original.send, taskDefinition: liveTaskDefinition, sourceSha, rotationId: "rotation-fresh-initial", outputFile: path.join(directory, "original.json"), retainedHistoryPayloadHash: retainedHash }), /malformed|inconsistent|key pair/);
-    const fixture = handoffSecrets(); const preparation = buildMixedDualSlotRecoveryPreparation({ sourceSha, predecessor: exactPredecessor(), preparedAt: "2026-09-10T00:00:00.000Z" });
+    const fixture = handoffSecrets(); const preparation = buildMixedDualSlotRecoveryPreparation({ sourceSha, predecessor: exactPredecessor(), iamCapabilityPreflight: iamPreflight(), preparedAt: "2026-09-10T00:00:00.000Z" });
     const recovered = await executeMixedDualSlotRecovery({ send: fixture.send, preparation, sourceSha, authorization: authorized(preparation), payloadHash, now });
     assert.equal(recovered.stageLabelMutations, 7);
     assert.equal(recovered.predecessorCanonicalId, preparation.predecessorCanonicalId);

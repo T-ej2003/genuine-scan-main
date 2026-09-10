@@ -238,6 +238,11 @@
       "order": 47,
       "id": "provider-readonly-policy-reconciliation",
       "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs"
+    },
+    {
+      "order": 48,
+      "id": "mixed-dual-slot-recovery-iam-preflight",
+      "sourceFile": "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs"
     }
   ],
   "identities": [
@@ -1251,7 +1256,7 @@
         "sid": "CreateExactActivationLifecycleConditionally",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e9eef0b5dd5c089f4734a43cbc40ed963078dc500828c2e592cc07f04c6d564"
+        "expectedPolicySha256": "c6f917d8e246bc5b4bcdf3ea189f21128e23639aa1d9643b795d4f0cedf42134"
       },
       "required": true,
       "mutation": true
@@ -1281,7 +1286,7 @@
         "sid": "CreateExactActivationLifecycleConditionally",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e9eef0b5dd5c089f4734a43cbc40ed963078dc500828c2e592cc07f04c6d564"
+        "expectedPolicySha256": "c6f917d8e246bc5b4bcdf3ea189f21128e23639aa1d9643b795d4f0cedf42134"
       },
       "required": true,
       "mutation": true
@@ -1821,7 +1826,7 @@
         "sid": "ReadExactActivationLifecycle",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e9eef0b5dd5c089f4734a43cbc40ed963078dc500828c2e592cc07f04c6d564"
+        "expectedPolicySha256": "c6f917d8e246bc5b4bcdf3ea189f21128e23639aa1d9643b795d4f0cedf42134"
       },
       "required": true,
       "mutation": false
@@ -1854,7 +1859,7 @@
         "sid": "ReadExactActivationLifecycle",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e9eef0b5dd5c089f4734a43cbc40ed963078dc500828c2e592cc07f04c6d564"
+        "expectedPolicySha256": "c6f917d8e246bc5b4bcdf3ea189f21128e23639aa1d9643b795d4f0cedf42134"
       },
       "required": true,
       "mutation": false
@@ -2034,7 +2039,7 @@
         "sid": "ApplyCompleteProductionArtifactsBucketPolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e9eef0b5dd5c089f4734a43cbc40ed963078dc500828c2e592cc07f04c6d564"
+        "expectedPolicySha256": "c6f917d8e246bc5b4bcdf3ea189f21128e23639aa1d9643b795d4f0cedf42134"
       },
       "required": true,
       "mutation": true
@@ -5709,7 +5714,7 @@
         "sid": "ReadCompleteProductionArtifactsBucketPolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e9eef0b5dd5c089f4734a43cbc40ed963078dc500828c2e592cc07f04c6d564"
+        "expectedPolicySha256": "c6f917d8e246bc5b4bcdf3ea189f21128e23639aa1d9643b795d4f0cedf42134"
       },
       "required": true,
       "mutation": false
@@ -8005,6 +8010,93 @@
       },
       "required": true,
       "mutation": true
+    },
+    {
+      "id": "mixed-recovery-iam-preflight-identify",
+      "phase": "mixed-dual-slot-recovery-iam-preflight",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs",
+      "sourceFunction": "mixed-recovery-iam-preflight-identify",
+      "action": "sts:GetCallerIdentity",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetRoleArn": "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "administrator-live-read",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs",
+        "sid": "mixed-recovery-iam-preflight-identify",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "mixed-recovery-iam-preflight-read-role",
+      "phase": "mixed-dual-slot-recovery-iam-preflight",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs",
+      "sourceFunction": "mixed-recovery-iam-preflight-read-role",
+      "action": "iam:GetRole",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetRoleArn": "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "administrator-live-read",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs",
+        "sid": "mixed-recovery-iam-preflight-read-role",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "mixed-recovery-iam-preflight-simulate",
+      "phase": "mixed-dual-slot-recovery-iam-preflight",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs",
+      "sourceFunction": "mixed-recovery-iam-preflight-simulate",
+      "action": "iam:SimulatePrincipalPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetRoleArn": "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs",
+        "sid": "mixed-recovery-iam-preflight-simulate",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
     },
     {
       "id": "normal-activation-admin-describe-candidate",
@@ -10601,7 +10693,7 @@
         "sid": "CreateExactRebaselineEvidenceConditionally",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e9eef0b5dd5c089f4734a43cbc40ed963078dc500828c2e592cc07f04c6d564"
+        "expectedPolicySha256": "c6f917d8e246bc5b4bcdf3ea189f21128e23639aa1d9643b795d4f0cedf42134"
       },
       "required": true,
       "mutation": true
@@ -10634,7 +10726,7 @@
         "sid": "ReadExactRebaselineEvidence",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e9eef0b5dd5c089f4734a43cbc40ed963078dc500828c2e592cc07f04c6d564"
+        "expectedPolicySha256": "c6f917d8e246bc5b4bcdf3ea189f21128e23639aa1d9643b795d4f0cedf42134"
       },
       "required": true,
       "mutation": false
@@ -13444,6 +13536,39 @@
     {
       "sourceFile": "scripts/aws/generate-production-green-stage-a-prerequisites.mjs",
       "action": "rds:DescribeDBInstances"
+    },
+    {
+      "sourceFile": "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs",
+      "sourceFunction": "mixed-recovery-iam-preflight-read-role",
+      "phase": "mixed-dual-slot-recovery-iam-preflight",
+      "identity": "ROOT_OPERATOR",
+      "action": "iam:GetRole",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
+      ],
+      "capabilityId": "mixed-recovery-iam-preflight-read-role"
+    },
+    {
+      "sourceFile": "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs",
+      "sourceFunction": "mixed-recovery-iam-preflight-simulate",
+      "phase": "mixed-dual-slot-recovery-iam-preflight",
+      "identity": "ROOT_OPERATOR",
+      "action": "iam:SimulatePrincipalPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
+      ],
+      "capabilityId": "mixed-recovery-iam-preflight-simulate"
+    },
+    {
+      "sourceFile": "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs",
+      "sourceFunction": "mixed-recovery-iam-preflight-identify",
+      "phase": "mixed-dual-slot-recovery-iam-preflight",
+      "identity": "ROOT_OPERATOR",
+      "action": "sts:GetCallerIdentity",
+      "resources": [
+        "*"
+      ],
+      "capabilityId": "mixed-recovery-iam-preflight-identify"
     },
     {
       "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",

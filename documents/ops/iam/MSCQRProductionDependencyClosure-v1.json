@@ -159,6 +159,63 @@
       "negativeTestPresent": true
     },
     {
+      "sourceFile": "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs",
+      "action": "sts:GetCallerIdentity",
+      "capabilityId": "mixed-recovery-iam-preflight-identify",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "*"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs",
+      "action": "iam:GetRole",
+      "capabilityId": "mixed-recovery-iam-preflight-read-role",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs",
+      "action": "iam:SimulatePrincipalPolicy",
+      "capabilityId": "mixed-recovery-iam-preflight-simulate",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
       "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
       "action": "s3:GetBucketPolicy",
       "capabilityId": "stage-a-artifacts-reconciliation-release-read-policy",

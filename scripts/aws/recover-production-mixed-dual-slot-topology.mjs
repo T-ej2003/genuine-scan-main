@@ -51,9 +51,9 @@ export async function readMixedDualSlotPredecessor({ send, payloadHash = sha256 
   return state.predecessor;
 }
 
-export async function prepareMixedDualSlotRecovery({ send, sourceSha, livePredecessor, now = new Date(), payloadHash } = {}) {
+export async function prepareMixedDualSlotRecovery({ send, sourceSha, livePredecessor, iamCapabilityPreflight, now = new Date(), payloadHash } = {}) {
   const state = await readMixedDualSlotRecoveryState({ send, payloadHash });
-  return buildMixedDualSlotRecoveryPreparation({ sourceSha, predecessor: state.predecessor, initialCompletedStageLabelMutations: state.completed, livePredecessor, preparedAt: now.toISOString() });
+  return buildMixedDualSlotRecoveryPreparation({ sourceSha, predecessor: state.predecessor, iamCapabilityPreflight, initialCompletedStageLabelMutations: state.completed, livePredecessor, preparedAt: now.toISOString() });
 }
 
 export async function classifyMixedDualSlotRecoveryProgress({ send, payloadHash = sha256 } = {}) {

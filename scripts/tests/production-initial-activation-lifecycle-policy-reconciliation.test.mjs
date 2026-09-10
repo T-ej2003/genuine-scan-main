@@ -14,7 +14,7 @@ import { sourcePolicyEvidence } from "../aws/validate-production-green-stage-b-p
 
 const sourceSha = "a".repeat(40);
 const desired = readInitialActivationLifecycleDesiredPolicy();
-const predecessor = { Version: "2012-10-17", Statement: desired.document.Statement.slice(0, 4).concat(desired.document.Statement.slice(8)) };
+const predecessor = { Version: "2012-10-17", Statement: desired.document.Statement.filter(({ Sid }) => Sid !== "RecoverExactMixedDualSlotTopology") };
 const approval = (observedAt = new Date().toISOString()) => createProductionEnvironmentApprovalEvidence({
   environmentConfig: { id: 1, name: "production", can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 2, login: "reviewer" } }] }] },
   repository: "T-ej2003/genuine-scan-main", environment: "production", sourceSha,
@@ -22,7 +22,7 @@ const approval = (observedAt = new Date().toISOString()) => createProductionEnvi
   actualApproval: { state: "approved", environmentId: 1, environmentName: "production", userId: 2, userLogin: "reviewer" },
 });
 const releaseRolePolicyArns = sourcePolicyEvidence().map(({ arn }) => arn).sort();
-const state = (overrides = {}) => ({ policyArn: CONTRACT.policyArn, defaultVersionId: "v1", document: predecessor, policyVersionCount: 1, releaseRolePolicyArns, targetPolicyRoles: ["mscqr-production-release-deployer"], targetPolicyUsers: [], targetPolicyGroups: [], permissionsBoundaryUsageCount: 0, ...overrides });
+const state = (overrides = {}) => ({ policyArn: CONTRACT.policyArn, defaultVersionId: "v2", document: predecessor, policyVersionCount: 2, releaseRolePolicyArns, targetPolicyRoles: ["mscqr-production-release-deployer"], targetPolicyUsers: [], targetPolicyGroups: [], permissionsBoundaryUsageCount: 0, ...overrides });
 const authorization = (live = state()) => createInitialActivationLifecyclePolicyReconciliationAuthorization({ sourceSha, liveState: live, protectedEnvironmentApprovalEvidence: approval(), desired });
 const executeInitialActivationLifecyclePolicyReconciliation = (input) => executeCore(input);
 
@@ -47,7 +47,7 @@ test("production mutation subprocess forces one CLI attempt without contaminatin
     const run = createInitialActivationReconciliationCommandRunner({ credentialSource: "github-oidc-initial-activation-bootstrap", env, exec: (file, args, options) => { calls.push({ file, args, env: options.env }); return "{}"; } });
     run(["iam", "get-policy", "--policy-arn", CONTRACT.policyArn]);
     run(["iam", "create-policy-version", "--policy-arn", CONTRACT.policyArn, "--policy-document", JSON.stringify(desired.document), "--set-as-default"]);
-    run(["iam", "get-policy-version", "--policy-arn", CONTRACT.policyArn, "--version-id", "v2"]);
+    run(["iam", "get-policy-version", "--policy-arn", CONTRACT.policyArn, "--version-id", "v3"]);
     assert.equal(calls.length, 3);
     assert.equal(calls[1].file, "aws"); assert.equal(calls[1].env.AWS_MAX_ATTEMPTS, "1");
     assert.equal(calls[0].env.AWS_MAX_ATTEMPTS, undefined); assert.deepEqual(calls[2].env, calls[0].env);
@@ -60,7 +60,7 @@ test("exact predecessor authorizes only the fixed target and exact tracked desir
   assert.equal(value.expectedAction, "iam:CreatePolicyVersion"); assert.equal(value.setAsDefault, true);
   assert.deepEqual([value.maxCreatePolicyVersionCount, value.maxSetDefaultPolicyVersionCount, value.maxDeletePolicyVersionCount, value.maxPolicyAttachmentMutations], [1, 0, 0, 0]);
   assert.doesNotThrow(() => assertInitialActivationLifecyclePolicyReconciliationAuthorization(value, { sourceSha }));
-  for (const changed of [{ sourceSha: "b".repeat(40) }, { targetPolicyArn: "arn:aws:iam::368992683803:policy/other" }, { predecessorDefaultVersionId: "v2" }, { predecessorPolicySha256: "b".repeat(64) }, { desiredPolicySha256: "b".repeat(64) }, { expectedAction: "iam:SetDefaultPolicyVersion" }, { setAsDefault: false }, { maxDeletePolicyVersionCount: 1 }]) {
+  for (const changed of [{ sourceSha: "b".repeat(40) }, { targetPolicyArn: "arn:aws:iam::368992683803:policy/other" }, { predecessorDefaultVersionId: "v1" }, { predecessorPolicySha256: "b".repeat(64) }, { desiredPolicySha256: "b".repeat(64) }, { expectedAction: "iam:SetDefaultPolicyVersion" }, { setAsDefault: false }, { maxDeletePolicyVersionCount: 1 }]) {
     const candidate = { ...value, ...changed }; const { authorizationSha256, ...body } = candidate; candidate.authorizationSha256 = canonicalSha256(body);
     assert.throws(() => assertInitialActivationLifecyclePolicyReconciliationAuthorization(candidate, { sourceSha }), /authorization/);
   }
@@ -80,9 +80,9 @@ test("production reconciliation is workflow-only under the live purpose-bound OI
 
 test("live policy validation keeps the complete release-role set separate from the target policy entity boundary", () => {
   assert.equal(assertInitialActivationLifecyclePolicyState(state(), { desired }).status, "AUTHENTICATED_PREDECESSOR");
-  assert.equal(assertInitialActivationLifecyclePolicyState(state({ document: desired.document, defaultVersionId: "v2" }), { desired }).status, "ALREADY_RECONCILED");
+  assert.equal(assertInitialActivationLifecyclePolicyState(state({ document: desired.document, defaultVersionId: "v3", policyVersionCount: 3 }), { desired }).status, "ALREADY_RECONCILED");
   for (const changed of [
-    { policyArn: "arn:aws:iam::368992683803:policy/unrelated" }, { defaultVersionId: "v2" },
+    { policyArn: "arn:aws:iam::368992683803:policy/unrelated" }, { defaultVersionId: "v1" },
     { document: { ...predecessor, Statement: [...predecessor.Statement, { Sid: "extra", Effect: "Allow", Action: "*", Resource: "*" }] } },
     { document: "not-json" }, { releaseRolePolicyArns: releaseRolePolicyArns.slice(1) }, { releaseRolePolicyArns: [...releaseRolePolicyArns, "arn:aws:iam::368992683803:policy/other"] }, { targetPolicyRoles: [] }, { targetPolicyRoles: ["mscqr-production-release-deployer", "other-role"] }, { targetPolicyUsers: ["other-user"] }, { targetPolicyGroups: ["other-group"] }, { permissionsBoundaryUsageCount: 1 },
   ]) assert.throws(() => assertInitialActivationLifecyclePolicyState(state(changed), { desired }));
@@ -93,9 +93,9 @@ test("live policy validation keeps the complete release-role set separate from t
 test("policy-centric entity discovery consumes every page and fails closed on incomplete evidence", () => {
   const run = (args) => {
     const operation = args.slice(0, 2).join(" "); const marker = args.includes("--marker") ? args.at(-1) : undefined;
-    if (operation === "iam get-policy") return JSON.stringify({ Policy: { Arn: CONTRACT.policyArn, DefaultVersionId: "v1", PermissionsBoundaryUsageCount: 0 } });
+    if (operation === "iam get-policy") return JSON.stringify({ Policy: { Arn: CONTRACT.policyArn, DefaultVersionId: "v2", PermissionsBoundaryUsageCount: 0 } });
     if (operation === "iam get-policy-version") return JSON.stringify({ PolicyVersion: { Document: predecessor } });
-    if (operation === "iam list-policy-versions") return JSON.stringify({ Versions: [{ VersionId: "v1" }] });
+    if (operation === "iam list-policy-versions") return JSON.stringify({ Versions: [{ VersionId: "v1" }, { VersionId: "v2" }] });
     if (operation === "iam get-role") return JSON.stringify({ Role: { Arn: CONTRACT.releaseRoleArn } });
     if (operation === "iam list-attached-role-policies") return JSON.stringify(marker ? { AttachedPolicies: releaseRolePolicyArns.slice(4).map((PolicyArn) => ({ PolicyArn })), IsTruncated: false } : { AttachedPolicies: releaseRolePolicyArns.slice(0, 4).map((PolicyArn) => ({ PolicyArn })), IsTruncated: true, Marker: "attached-next" });
     if (operation === "iam list-entities-for-policy") return JSON.stringify(marker ? { PolicyRoles: [{ RoleName: "mscqr-production-release-deployer" }], PolicyUsers: [], PolicyGroups: [], IsTruncated: false } : { PolicyRoles: [], PolicyUsers: [], PolicyGroups: [], IsTruncated: true, Marker: "entities-next" });
@@ -121,12 +121,12 @@ test("policy-centric entity discovery consumes every page and fails closed on in
   for (const failure of transientErrors) for (const failures of [["get-policy"], ["get-policy-version"], ["list-policy-versions"], ["get-role"], ["list-attached-role-policies"], ["list-entities-for-policy"], ["get-policy", "get-role", "list-entities-for-policy"], Array(6).fill("get-policy")]) {
     let creates = 0; let retries = 0;
     const pending = [...failures];
-    const execute = () => executeCore({ authorization: authorization(), sourceSha, desired, sleep: () => { retries += 1; }, createPolicyVersion: () => { creates += 1; return { PolicyVersion: { VersionId: "v2" } }; }, readLiveState: () => readInitialActivationLifecyclePolicyLiveState((args) => {
+    const execute = () => executeCore({ authorization: authorization(), sourceSha, desired, sleep: () => { retries += 1; }, createPolicyVersion: () => { creates += 1; return { PolicyVersion: { VersionId: "v3" } }; }, readLiveState: () => readInitialActivationLifecyclePolicyLiveState((args) => {
       if (creates && args[1] === pending[0]) { pending.shift(); throw Object.assign(new Error("Command failed: aws iam read"), failure); }
       const response = JSON.parse(run(args));
-      if (creates && args[1] === "get-policy") response.Policy.DefaultVersionId = "v2";
+      if (creates && args[1] === "get-policy") response.Policy.DefaultVersionId = "v3";
       if (creates && args[1] === "get-policy-version") response.PolicyVersion.Document = desired.document;
-      if (creates && args[1] === "list-policy-versions") response.Versions.push({ VersionId: "v2" });
+      if (creates && args[1] === "list-policy-versions") response.Versions.push({ VersionId: "v3" });
       return JSON.stringify(response);
     }) });
     if (failures.length === 6) assert.throws(execute, /did not converge/);
@@ -143,7 +143,7 @@ test("policy-centric entity discovery consumes every page and fails closed on in
   }
   for (const stderr of ["timeout", "HTTP 500", "AccessDenied NoSuchEntity", ...diagnostics.map((value) => `untrusted prefix ${value}`), ...diagnostics.map((value) => value.replace("iam.amazonaws.com", "evil.example")), "SSL validation failed for https://iam.amazonaws.com/", "An error occurred (AccessDenied) when calling the GetPolicyVersion operation: NoSuchEntity"]) {
     let creates = 0; let observations = 0;
-    assert.throws(() => executeCore({ authorization: authorization(), sourceSha, desired, sleep: () => assert.fail("non-transient retry"), createPolicyVersion: () => { creates += 1; return { PolicyVersion: { VersionId: "v2" } }; }, readLiveState: () => {
+    assert.throws(() => executeCore({ authorization: authorization(), sourceSha, desired, sleep: () => assert.fail("non-transient retry"), createPolicyVersion: () => { creates += 1; return { PolicyVersion: { VersionId: "v3" } }; }, readLiveState: () => {
       if (!creates) return readInitialActivationLifecyclePolicyLiveState(run);
       observations += 1;
       return readInitialActivationLifecyclePolicyLiveState((args) => { if (args[1] === "get-policy-version") throw Object.assign(new Error("CLI failed"), { stderr }); return run(args); });
@@ -167,13 +167,13 @@ test("policy-centric entity discovery consumes every page and fails closed on in
           assert.equal(args[args.indexOf("--policy-arn") + 1], CONTRACT.policyArn);
           assert.deepEqual(JSON.parse(args[args.indexOf("--policy-document") + 1]), desired.document); assert.ok(args.includes("--set-as-default"));
           if (ambiguous) throw Object.assign(new Error("response lost"), { stderr: diagnostics[2] });
-          return JSON.stringify({ PolicyVersion: { VersionId: "v2" } });
+          return JSON.stringify({ PolicyVersion: { VersionId: "v3" } });
         }
         if (creates && args[1] === "get-role" && transientReads++ === 0) throw Object.assign(new Error("Command failed: aws iam get-role"), { stderr: Buffer.from(diagnostics[3]), status: 255 });
         const response = JSON.parse(run(args));
-        if (creates && args[1] === "get-policy") response.Policy.DefaultVersionId = "v2";
+        if (creates && args[1] === "get-policy") response.Policy.DefaultVersionId = "v3";
         if (creates && args[1] === "get-policy-version") response.PolicyVersion.Document = desired.document;
-        if (creates && args[1] === "list-policy-versions") response.Versions.push({ VersionId: "v2" });
+        if (creates && args[1] === "list-policy-versions") response.Versions.push({ VersionId: "v3" });
         return JSON.stringify(response);
       } });
       const result = runInitialActivationLifecyclePolicyReconciliation(["--execute", "--source-sha", sourceSha, "--authorization", authPath, "--authorization-file-sha256", crypto.createHash("sha256").update(authBytes).digest("hex"), "--result-out", output], { env, readProtectedCheckout: () => ({ toolingSha: sourceSha }), run: cli });
@@ -211,7 +211,7 @@ test("approval valid at the write boundary permits exactly one transition", () =
   const writeTime = new Date(new Date(observedAt).getTime() + PRODUCTION_ENVIRONMENT_APPROVAL.maxAgeMs);
   const value = createInitialActivationLifecyclePolicyReconciliationAuthorization({ sourceSha, liveState: state(), protectedEnvironmentApprovalEvidence: approval(observedAt), desired, now: entryTime });
   let live = state(); let clockReads = 0; let creates = 0;
-  const result = executeInitialActivationLifecyclePolicyReconciliation({ authorization: value, sourceSha, desired, now: () => [entryTime, writeTime][clockReads++], readLiveState: () => live, createPolicyVersion: () => { creates += 1; live = state({ defaultVersionId: "v2", document: desired.document, policyVersionCount: 2 }); return { PolicyVersion: { VersionId: "v2" } }; } });
+  const result = executeInitialActivationLifecyclePolicyReconciliation({ authorization: value, sourceSha, desired, now: () => [entryTime, writeTime][clockReads++], readLiveState: () => live, createPolicyVersion: () => { creates += 1; live = state({ defaultVersionId: "v3", document: desired.document, policyVersionCount: 3 }); return { PolicyVersion: { VersionId: "v3" } }; } });
   assert.equal(result.status, "RECONCILED"); assert.equal(clockReads, 2); assert.equal(creates, 1);
 });
 
@@ -228,7 +228,7 @@ test("result destination is fully preflighted before entering the mutation execu
   const authSha = crypto.createHash("sha256").update(authBytes).digest("hex");
   const roleArn = "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler";
   let executorCalls = 0;
-  const deps = { env: { GITHUB_ACTIONS: "true", GITHUB_REPOSITORY: "T-ej2003/genuine-scan-main", GITHUB_WORKFLOW_REF: `${"T-ej2003/genuine-scan-main"}/${CONTRACT.workflowPath}@refs/heads/main`, GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_RUN_ID: "1", GITHUB_RUN_ATTEMPT: "1", GITHUB_ACTOR: "operator" }, readProtectedCheckout: () => ({ toolingSha: sourceSha }), run: () => JSON.stringify({ Arn: `arn:aws:sts::368992683803:assumed-role/${roleArn.split("/").at(-1)}/session` }), executeReconciliation: () => { executorCalls += 1; return { status: "ALREADY_RECONCILED", createPolicyVersionCount: 0, postState: assertInitialActivationLifecyclePolicyState(state({ document: desired.document, defaultVersionId: "v2" }), { desired }) }; } };
+  const deps = { env: { GITHUB_ACTIONS: "true", GITHUB_REPOSITORY: "T-ej2003/genuine-scan-main", GITHUB_WORKFLOW_REF: `${"T-ej2003/genuine-scan-main"}/${CONTRACT.workflowPath}@refs/heads/main`, GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_RUN_ID: "1", GITHUB_RUN_ATTEMPT: "1", GITHUB_ACTOR: "operator" }, readProtectedCheckout: () => ({ toolingSha: sourceSha }), run: () => JSON.stringify({ Arn: `arn:aws:sts::368992683803:assumed-role/${roleArn.split("/").at(-1)}/session` }), executeReconciliation: () => { executorCalls += 1; return { status: "ALREADY_RECONCILED", createPolicyVersionCount: 0, postState: assertInitialActivationLifecyclePolicyState(state({ document: desired.document, defaultVersionId: "v3" }), { desired }) }; } };
   const baseArgs = (resultOut) => ["--execute", "--source-sha", sourceSha, "--authorization", authPath, "--authorization-file-sha256", authSha, ...(resultOut === undefined ? [] : ["--result-out", resultOut])];
   const invoke = (args) => runInitialActivationLifecyclePolicyReconciliation(args, deps);
   for (const Arn of ["arn:aws:iam::368992683803:root", "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/session", "arn:aws:sts::111111111111:assumed-role/mscqr-production-initial-activation-policy-reconciler/session"]) assert.throws(() => runInitialActivationLifecyclePolicyReconciliation(baseArgs(path.join(directory, "wrong-role.json")), { ...deps, run: () => JSON.stringify({ Arn }) }), /exact OIDC reconciler/);
@@ -261,7 +261,7 @@ test("one atomic CreatePolicyVersion transitions the exact predecessor and prese
   let live = state(); let creates = 0;
   const result = executeInitialActivationLifecyclePolicyReconciliation({ authorization: authorization(), sourceSha, desired, readLiveState: () => live, createPolicyVersion: (request) => {
     creates += 1; assert.deepEqual(request, { PolicyArn: CONTRACT.policyArn, PolicyDocument: desired.document, SetAsDefault: true });
-    live = state({ defaultVersionId: "v2", document: desired.document, policyVersionCount: 2 }); return { PolicyVersion: { VersionId: "v2" } };
+    live = state({ defaultVersionId: "v3", document: desired.document, policyVersionCount: 3 }); return { PolicyVersion: { VersionId: "v3" } };
   } });
   assert.equal(result.status, "RECONCILED"); assert.equal(result.createPolicyVersionCount, 1); assert.equal(creates, 1);
   const replay = executeInitialActivationLifecyclePolicyReconciliation({ authorization: authorization(), sourceSha, desired, readLiveState: () => live, createPolicyVersion: () => { creates += 1; throw new Error("must not create"); } });
@@ -274,52 +274,52 @@ test("execution rejects every non-equivalent pre or post mutation state and neve
   const cases = [
     { name: "wrong source", source: "b".repeat(40), live: state(), matcher: /identity/ },
     { name: "unexpected pre drift", source: sourceSha, live: state({ document: { ...predecessor, Statement: [] } }), matcher: /neither/ },
-    { name: "wrong version", source: sourceSha, live: state({ defaultVersionId: "v2" }), matcher: /neither/ },
+    { name: "wrong version", source: sourceSha, live: state({ defaultVersionId: "v3" }), matcher: /neither/ },
     { name: "wrong policy arn", source: sourceSha, live: state({ policyArn: "arn:aws:iam::368992683803:policy/nope" }), matcher: /identity/ },
   ];
   for (const item of cases) assert.throws(() => executeInitialActivationLifecyclePolicyReconciliation({ authorization: authorization(), sourceSha: item.source, desired, readLiveState: () => item.live, createPolicyVersion: () => { throw new Error("write prohibited"); } }), item.matcher);
   for (const after of [
     state({ defaultVersionId: "v1", document: desired.document, policyVersionCount: 2 }),
-    state({ defaultVersionId: "v2", document: predecessor, policyVersionCount: 2 }),
-    state({ defaultVersionId: "v2", document: desired.document, policyVersionCount: 2, targetPolicyRoles: ["mscqr-production-release-deployer", "other-role"] }),
+    state({ defaultVersionId: "v3", document: predecessor, policyVersionCount: 2 }),
+    state({ defaultVersionId: "v3", document: desired.document, policyVersionCount: 3, targetPolicyRoles: ["mscqr-production-release-deployer", "other-role"] }),
   ]) {
     let reads = 0;
-    assert.throws(() => executeInitialActivationLifecyclePolicyReconciliation({ authorization: authorization(), sourceSha, desired, readLiveState: () => (++reads === 1 ? state() : after), createPolicyVersion: () => ({ PolicyVersion: { VersionId: "v2" } }) }));
+    assert.throws(() => executeInitialActivationLifecyclePolicyReconciliation({ authorization: authorization(), sourceSha, desired, readLiveState: () => (++reads === 1 ? state() : after), createPolicyVersion: () => ({ PolicyVersion: { VersionId: "v3" } }) }));
   }
 });
 
 test("ambiguous successful create converges by exact desired readback without a second version", () => {
   let live = state(); let creates = 0;
   const outcome = executeInitialActivationLifecyclePolicyReconciliation({ authorization: authorization(), sourceSha, desired, readLiveState: () => live, createPolicyVersion: () => {
-    creates += 1; live = state({ defaultVersionId: "v2", document: desired.document, policyVersionCount: 2 }); throw new Error("transport response lost");
+    creates += 1; live = state({ defaultVersionId: "v3", document: desired.document, policyVersionCount: 3 }); throw new Error("transport response lost");
   } });
   assert.equal(outcome.status, "COMPLETED_BY_READBACK"); assert.equal(outcome.createPolicyVersionCount, 1); assert.equal(creates, 1);
 });
 
 test("IAM convergence accepts temporary predecessor visibility, bounds polling, and rejects unexpected state", () => {
-  const value = authorization(); let reads = 0; const sleeps = []; const states = [state(), state(), state(), state(), state(), state({ defaultVersionId: "v2", document: desired.document, policyVersionCount: 2 })];
-  const result = waitForInitialActivationLifecyclePolicyConvergence({ readLiveState: () => states[reads++], before: assertInitialActivationLifecyclePolicyState(state(), { desired }), authorization: value, desired, expectedVersionId: "v2", sleep: (milliseconds) => sleeps.push(milliseconds) });
+  const value = authorization(); let reads = 0; const sleeps = []; const states = [state(), state(), state(), state(), state(), state({ defaultVersionId: "v3", document: desired.document, policyVersionCount: 3 })];
+  const result = waitForInitialActivationLifecyclePolicyConvergence({ readLiveState: () => states[reads++], before: assertInitialActivationLifecyclePolicyState(state(), { desired }), authorization: value, desired, expectedVersionId: "v3", sleep: (milliseconds) => sleeps.push(milliseconds) });
   assert.equal(result.status, "ALREADY_RECONCILED"); assert.deepEqual(sleeps, [100, 200, 400, 800, 1000]); assert.equal(reads, 6);
-  assert.throws(() => waitForInitialActivationLifecyclePolicyConvergence({ readLiveState: () => state({ defaultVersionId: "v2", document: desired.document, policyVersionCount: 3 }), before: assertInitialActivationLifecyclePolicyState(state(), { desired }), authorization: value, desired, expectedVersionId: "v2", sleep: () => {} }), /unexpected default version/);
+  assert.throws(() => waitForInitialActivationLifecyclePolicyConvergence({ readLiveState: () => state({ defaultVersionId: "v3", document: desired.document, policyVersionCount: 4 }), before: assertInitialActivationLifecyclePolicyState(state(), { desired }), authorization: value, desired, expectedVersionId: "v3", sleep: () => {} }), /unexpected default version/);
 });
 
 test("IAM convergence retries only the authenticated transient policy-version read failure", () => {
   let reads = 0; const sleeps = [];
   const result = waitForInitialActivationLifecyclePolicyConvergence({ readLiveState: () => {
     if (reads++ < 2) { const error = new Error("NoSuchEntity"); error.code = INITIAL_ACTIVATION_TRANSIENT_POLICY_VERSION_READ; throw error; }
-    return state({ defaultVersionId: "v2", document: desired.document, policyVersionCount: 2 });
-  }, before: assertInitialActivationLifecyclePolicyState(state(), { desired }), authorization: authorization(), desired, expectedVersionId: "v2", sleep: (milliseconds) => sleeps.push(milliseconds) });
+    return state({ defaultVersionId: "v3", document: desired.document, policyVersionCount: 3 });
+  }, before: assertInitialActivationLifecyclePolicyState(state(), { desired }), authorization: authorization(), desired, expectedVersionId: "v3", sleep: (milliseconds) => sleeps.push(milliseconds) });
   assert.equal(result.status, "ALREADY_RECONCILED"); assert.equal(reads, 3); assert.deepEqual(sleeps, [100, 200]);
 });
 
 test("IAM convergence retries authenticated partially converged snapshots", () => {
   const value = authorization(); const before = assertInitialActivationLifecyclePolicyState(state(), { desired }); const sleeps = []; let reads = 0;
   const snapshots = [
-    state({ defaultVersionId: "v2", document: desired.document, policyVersionCount: 1 }),
-    state({ defaultVersionId: "v1", document: predecessor, policyVersionCount: 2 }),
-    state({ defaultVersionId: "v2", document: desired.document, policyVersionCount: 2 }),
+    state({ defaultVersionId: "v3", document: desired.document, policyVersionCount: 2 }),
+    state({ defaultVersionId: "v2", document: predecessor, policyVersionCount: 3 }),
+    state({ defaultVersionId: "v3", document: desired.document, policyVersionCount: 3 }),
   ];
-  const result = waitForInitialActivationLifecyclePolicyConvergence({ readLiveState: () => snapshots[reads++], before, authorization: value, desired, expectedVersionId: "v2", sleep: (milliseconds) => sleeps.push(milliseconds) });
+  const result = waitForInitialActivationLifecyclePolicyConvergence({ readLiveState: () => snapshots[reads++], before, authorization: value, desired, expectedVersionId: "v3", sleep: (milliseconds) => sleeps.push(milliseconds) });
   assert.equal(result.status, "ALREADY_RECONCILED"); assert.equal(reads, 3); assert.deepEqual(sleeps, [100, 200]);
 });
 
@@ -339,11 +339,11 @@ test("all snapshot operations retry only recognized read errors after one mutati
     for (const operation of operations) {
       let creates = 0; let reads = 0; let sleeps = 0;
       const transient = !["AccessDenied", "ValidationError", "MalformedPolicyDocument", "500", "UnknownError"].includes(code);
-      const run = () => executeCore({ authorization: authorization(), sourceSha, desired, sleep: () => { sleeps += 1; }, createPolicyVersion: () => { creates += 1; return { PolicyVersion: { VersionId: "v2" } }; }, readLiveState: () => {
+      const run = () => executeCore({ authorization: authorization(), sourceSha, desired, sleep: () => { sleeps += 1; }, createPolicyVersion: () => { creates += 1; return { PolicyVersion: { VersionId: "v3" } }; }, readLiveState: () => {
         reads += 1;
         if (!creates) return state();
         if (reads === 3) throw Object.assign(new Error("Command failed: aws"), { stderr: Buffer.from(`An error occurred (${code}) when calling the ${operation} operation (reached max retries: 2): service error`) });
-        return state({ defaultVersionId: "v2", document: desired.document, policyVersionCount: 2 });
+        return state({ defaultVersionId: "v3", document: desired.document, policyVersionCount: 3 });
       } });
       if (transient) assert.equal(run().status, "RECONCILED"); else assert.throws(run);
       assert.equal(creates, 1); assert.equal(reads, transient ? 4 : 3); assert.equal(sleeps, transient ? 1 : 0);
@@ -354,11 +354,11 @@ test("all snapshot operations retry only recognized read errors after one mutati
 test("successive read failures and exhaustion never retry the mutation or bypass pre-mutation CAS", () => {
   for (const failureCount of [3, 6]) {
     let creates = 0; let reads = 0; let sleeps = 0;
-    const run = () => executeCore({ authorization: authorization(), sourceSha, desired, sleep: () => { sleeps += 1; }, createPolicyVersion: () => { creates += 1; return { PolicyVersion: { VersionId: "v2" } }; }, readLiveState: () => {
+    const run = () => executeCore({ authorization: authorization(), sourceSha, desired, sleep: () => { sleeps += 1; }, createPolicyVersion: () => { creates += 1; return { PolicyVersion: { VersionId: "v3" } }; }, readLiveState: () => {
       reads += 1;
       if (!creates) return state();
       if (reads <= failureCount + 2) throw Object.assign(new Error("service unavailable"), { code: "ServiceUnavailable" });
-      return state({ defaultVersionId: "v2", document: desired.document, policyVersionCount: 2 });
+      return state({ defaultVersionId: "v3", document: desired.document, policyVersionCount: 3 });
     } });
     if (failureCount === 3) assert.equal(run().status, "RECONCILED"); else assert.throws(run, /did not converge/);
     assert.equal(creates, 1); assert.equal(sleeps, failureCount === 3 ? 3 : 5);
@@ -370,6 +370,6 @@ test("successive read failures and exhaustion never retry the mutation or bypass
 
 test("IAM convergence exhaustion never authorizes a second policy version", () => {
   const value = authorization(); let creates = 0; const sleeps = [];
-  assert.throws(() => executeInitialActivationLifecyclePolicyReconciliation({ authorization: value, sourceSha, desired, readLiveState: () => state(), sleep: (milliseconds) => sleeps.push(milliseconds), createPolicyVersion: () => { creates += 1; return { PolicyVersion: { VersionId: "v2" } }; } }), /did not converge/);
+  assert.throws(() => executeInitialActivationLifecyclePolicyReconciliation({ authorization: value, sourceSha, desired, readLiveState: () => state(), sleep: (milliseconds) => sleeps.push(milliseconds), createPolicyVersion: () => { creates += 1; return { PolicyVersion: { VersionId: "v3" } }; } }), /did not converge/);
   assert.equal(creates, 1); assert.deepEqual(sleeps, [100, 200, 400, 800, 1000]);
 });

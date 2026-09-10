@@ -25,7 +25,12 @@ closed. Preparation, authorization, and execution remain separate operations.
 Preparation is read-only and writes one private preparation file. Authorization
 is produced only by `authorize-production-mixed-dual-slot-topology-recovery.yml`
 after the protected `production` environment reviewer approves the exact file
-hash. Execution is available only through
+hash. Before that approval is requested, preparation requires an administrator
+IAM simulation proving that `mscqr-production-release-deployer` can perform
+`UpdateSecretVersionStage` on all seven exact ARNs. An unprotected workflow job
+authenticates the fresh, source-bound seven-result preflight before the protected
+authorization job becomes eligible; deny, indeterminate, wrong-principal,
+permissions-boundary, missing, or substituted results fail closed. Execution is available only through
 `execute-production-mixed-dual-slot-topology-recovery.yml` on protected main;
 that job reauthenticates the authorization artifact, source, :52 predecessor,
 all fourteen payload identities, and the exact contiguous prefix before and
@@ -33,6 +38,12 @@ after
 every `UpdateSecretVersionStage` call. Its inline AWS session policy allows
 only readback plus that mutation against the seven exact ARNs—never create,
 delete, or value-write APIs.
+
+The base capability is owned by the existing
+`MSCQRProductionInitialActivationLifecycle` managed policy and remains attached
+only to the release-deployer role. Its exact source statement and the execution
+workflow's inline session policy must both allow the action; the session policy
+is a restriction and cannot grant a missing base-role capability.
 
 A fresh approval is required to start at 0/7. If execution is interrupted, the
 same exact authorization may resume an authenticated 1/7 through 6/7 prefix.

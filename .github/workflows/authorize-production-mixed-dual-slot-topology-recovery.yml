@@ -15,8 +15,44 @@ permissions:
   actions: read
 
 jobs:
+  preflight:
+    name: Verify effective recovery IAM capability
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Authenticate protected source
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "T-ej2003/genuine-scan-main"
+          test "$SOURCE_SHA" = "$(gh api repos/T-ej2003/genuine-scan-main/branches/main --jq .commit.sha)"
+          test "$SOURCE_SHA" = "$(git rev-parse HEAD)"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+      - uses: actions/setup-node@v6
+        with: { node-version: 24, cache: npm }
+      - run: npm ci
+      - name: Authenticate preparation IAM preflight before approval
+        env:
+          PREPARATION_BASE64: ${{ inputs.preparation_base64 }}
+          PREPARATION_FILE_SHA256: ${{ inputs.preparation_file_sha256 }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          workdir="$RUNNER_TEMP/mixed-recovery"; install -d -m 700 "$workdir"
+          printf '%s' "$PREPARATION_BASE64" | base64 --decode > "$workdir/preparation.json"
+          chmod 600 "$workdir/preparation.json"
+          node scripts/aws/verify-production-mixed-dual-slot-recovery-preparation.mjs \
+            --source-sha "$SOURCE_SHA" --preparation "$workdir/preparation.json" \
+            --preparation-file-sha256 "$PREPARATION_FILE_SHA256"
   authorize:
     name: Authorize exact seven-slot recovery
+    needs: preflight
     runs-on: ubuntu-latest
     environment: production
     steps:
