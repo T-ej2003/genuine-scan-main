@@ -5,6 +5,7 @@ import test from "node:test";
 import yaml from "js-yaml";
 
 import { validateRotationEvidenceFreshness } from "../security/rotation-evidence-contract.mjs";
+import { requiredWorkflowFiles, usesLifecycleInputs } from "../github/release-lifecycle-contract.mjs";
 
 const read = (file) => readFileSync(file, "utf8");
 const train = read(".github/workflows/release-train.yml");
@@ -35,8 +36,12 @@ test("only the exact initial-overlap route selects the pre-rotation release cont
   assert.match(audit, /strict\)\s+npm run verify:release/);
   assert.match(audit, /authenticated-initial-overlap\)[\s\S]*npm run verify:release:pre-rotation/);
   assert.doesNotMatch(audit, /verify:release \|\| true|SKIP_ROTATION_CHECK|continue-on-error/);
-  assert.match(train, /required_workflows=\(quality-gate\.yml secret-scan\.yml deployment-audit\.yml auth-security-tests\.yml release-candidate-gate\.yml\)/);
-  assert.match(train, /required_workflows=\(quality-gate\.yml secret-scan\.yml deployment-audit\.yml auth-security-tests\.yml\)/);
+  assert.deepEqual(requiredWorkflowFiles("strict"), ["quality-gate.yml", "secret-scan.yml", "deployment-audit.yml", "auth-security-tests.yml", "release-candidate-gate.yml"]);
+  assert.deepEqual(requiredWorkflowFiles("authenticated-initial-overlap"), ["quality-gate.yml", "secret-scan.yml", "deployment-audit.yml", "auth-security-tests.yml"]);
+  for (const workflowFile of requiredWorkflowFiles("strict")) assert.equal(usesLifecycleInputs("strict", workflowFile), false, `${workflowFile} must receive no new inputs on strict historical targets`);
+  assert.equal(usesLifecycleInputs("authenticated-initial-overlap", "deployment-audit.yml"), true);
+  assert.throws(() => requiredWorkflowFiles("unknown"), /Unsupported release lifecycle/);
+  assert.match(train, /release-lifecycle-contract\.mjs --lifecycle/);
   const qualityGate = read(".github/workflows/quality-gate.yml");
   for (const input of overlapInputs) assert.ok(inputs(qualityGate)[input], `Quality Gate input ${input} is required by the route`);
   assert.match(qualityGate, /authenticated-initial-overlap\)[\s\S]*manage-production-initial-activation-lifecycle\.mjs[\s\S]*verify:ci:security:source/);
@@ -44,6 +49,13 @@ test("only the exact initial-overlap route selects the pre-rotation release cont
 });
 
 test("Release Gate remains the independent strict production mutation boundary", () => {
+  assert.deepEqual(inputs(gate).release_lifecycle.options, ["strict", "authenticated-initial-overlap"]);
+  assert.ok(inputs(gate).required_gate_run_ids_json);
+  assert.match(gate, /release-lifecycle-contract\.mjs --lifecycle/);
+  assert.match(gate, /EXPECTED_WORKFLOW_RUN_IDS_JSON/);
+  assert.match(gate, /Normal Release Gate requires the exact workflow-run IDs dispatched by its Release Train/);
+  assert.match(gate, /Authenticated initial overlap is valid only for normal Release Gate mode/);
+  assert.match(gate, /Strict normal releases must not supply authenticated-initial-overlap bindings/);
   assert.match(gate, /normal\)[\s\S]*npm run check:rotation-evidence-freshness/);
   assert.match(gate, /manage-production-initial-activation-lifecycle\.mjs[\s\S]*--mode validate-candidate/);
   assert.match(gate, /Authenticate normal release image authorization/);

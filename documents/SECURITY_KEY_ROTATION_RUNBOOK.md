@@ -12,6 +12,16 @@ Release Gate is deliberately different: its control-plane workflow always runs
 from protected `main`, while its independently authenticated `target_sha` and
 target ref identify the source being deployed.
 
+Release lifecycle routing is fail-closed. Strict releases dispatch every
+target-source gate with `{}` inputs, preserving older tagged workflow schemas
+and their strict validation. `authenticated-initial-overlap` is accepted only
+when the selected source declares its lifecycle-aware Quality Gate and
+Deployment Audit inputs; it dispatches those two workflows with the exact
+overlap binding. The strict Release Candidate Gate is intentionally absent
+from that pre-rotation route because its manual/tag contract requires completed
+rotation freshness; both Release Train and Release Gate use the same canonical
+gate list and bind the exact freshly dispatched run IDs.
+
 This runbook covers the rotating backend secret families used by the app:
 
 - `JWT_SECRET_CURRENT` / `JWT_SECRET_PREVIOUS`

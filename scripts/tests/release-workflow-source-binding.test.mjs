@@ -90,6 +90,11 @@ test("Release Train resolves an exact dispatch ref and uses source-bound dispatc
   assert.match(train, /dispatch ref must resolve exactly to target_sha/);
   assert.match(train, /--workflow "\$workflow_file" --ref "\$DISPATCH_REF" --target-sha "\$TARGET_SHA"/);
   assert.match(train, /dispatch-protected-main-release-gate\.mjs[\s\S]*--target-ref "\$TARGET_REF" --target-sha "\$TARGET_SHA"/);
+  assert.match(train, /assert-authenticated-initial-overlap-workflow-schema\.mjs --revision "\$TARGET_SHA"/);
+  assert.match(train, /printf '\{\}' > "\$inputs_file"/);
+  assert.match(train, /REQUIRED_GATE_RUN_IDS_JSON/);
+  assert.match(gate, /required_gate_run_ids_json/);
+  assert.match(gate, /Normal Release Gate requires the exact workflow-run IDs dispatched by its Release Train/);
   assert.doesNotMatch(train, /gh workflow run/);
   assert.match(gate, /Release Gate itself always runs from protected main/);
   assert.match(gate, /Historical production deploy targets require a release-\* or v\* tag ref/);

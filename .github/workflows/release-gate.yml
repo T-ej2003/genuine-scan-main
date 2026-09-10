@@ -16,6 +16,18 @@ on:
         description: "Release Train run ID that dispatched this gate"
         required: false
         type: string
+      release_lifecycle:
+        description: "Release lifecycle authenticated by the Release Train."
+        required: false
+        type: choice
+        options:
+          - strict
+          - authenticated-initial-overlap
+        default: strict
+      required_gate_run_ids_json:
+        description: "Exact workflow-run IDs dispatched and authenticated by the Release Train."
+        required: false
+        type: string
       preserve_current_frontend:
         description: "Keep the currently deployed frontend task definition during a backend/RLS activation."
         required: false
@@ -193,17 +205,32 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TARGET_SHA: ${{ steps.resolve.outputs.deploy_sha }}
-          TARGET_EVENTS: ${{ inputs.release_mode == 'normal' && 'push,workflow_dispatch' || 'push' }}
-          REQUIRED_WORKFLOW_FILES: quality-gate.yml,secret-scan.yml,deployment-audit.yml,auth-security-tests.yml,release-candidate-gate.yml
+          TARGET_EVENTS: ${{ inputs.release_mode == 'normal' && 'workflow_dispatch' || 'push' }}
+          RELEASE_MODE: ${{ inputs.release_mode }}
+          RELEASE_LIFECYCLE: ${{ inputs.release_lifecycle }}
+          EXPECTED_WORKFLOW_RUN_IDS_JSON: ${{ inputs.required_gate_run_ids_json }}
           MAX_ATTEMPTS: 1
           POLL_SECONDS: 0
         run: |
           set -euo pipefail
+          if [ "$RELEASE_MODE" != "normal" ] && [ "$RELEASE_LIFECYCLE" != "strict" ]; then
+            echo "::error::Authenticated initial overlap is valid only for normal Release Gate mode."
+            exit 1
+          fi
+          if [ "$RELEASE_MODE" = "normal" ] && [ -z "${EXPECTED_WORKFLOW_RUN_IDS_JSON:-}" ]; then
+            echo "::error::Normal Release Gate requires the exact workflow-run IDs dispatched by its Release Train."
+            exit 1
+          fi
+          export REQUIRED_WORKFLOW_FILES="$(node scripts/github/release-lifecycle-contract.mjs --lifecycle "$RELEASE_LIFECYCLE")"
+          if [ "$RELEASE_LIFECYCLE" = "authenticated-initial-overlap" ]; then
+            node scripts/github/assert-authenticated-initial-overlap-workflow-schema.mjs --revision "$TARGET_SHA"
+          fi
           node scripts/github/check-required-workflow-gates.mjs
 
       - name: Validate production release lifecycle mode
         env:
           RELEASE_MODE: ${{ inputs.release_mode }}
+          RELEASE_LIFECYCLE: ${{ inputs.release_lifecycle }}
           SOURCE_SHA: ${{ steps.resolve.outputs.deploy_sha }}
           ROTATION_ID: ${{ inputs.rotation_id }}
           ROTATION_STATE_JSON: ${{ inputs.rotation_state_json }}
@@ -247,7 +274,19 @@ jobs:
               for name in "${overlap_values[@]}"; do
                 if [ -n "${!name:-}" ]; then overlap_present=1; fi
               done
-              if [ "$overlap_present" -eq 1 ]; then
+              case "$RELEASE_LIFECYCLE" in
+                strict)
+                  if [ "$overlap_present" -ne 0 ]; then
+                    echo "::error::Strict normal releases must not supply authenticated-initial-overlap bindings."
+                    exit 1
+                  fi
+                  npm run check:rotation-evidence-freshness
+                  ;;
+                authenticated-initial-overlap)
+                  if [ "$overlap_present" -ne 1 ]; then
+                    echo "::error::Authenticated initial overlap requires the complete exact overlap binding."
+                    exit 1
+                  fi
                 for name in "${overlap_values[@]}"; do
                   if [ -z "${!name:-}" ]; then
                     echo "::error::${name} is required for authenticated-overlap initial activation."
@@ -266,9 +305,9 @@ jobs:
                   --deployment-sha "$ROTATION_DEPLOYMENT_SHA" \
                   --task-definition "$ROTATION_TASK_DEFINITION_ARN" \
                   --image-digest "$ROTATION_IMAGE_DIGEST"
-              else
-                npm run check:rotation-evidence-freshness
-              fi
+                  ;;
+                *) echo "::error::Unsupported release lifecycle: $RELEASE_LIFECYCLE"; exit 1 ;;
+              esac
               ;;
             backend-health-recovery)
               for name in BACKEND_RECOVERY_CURRENT_TASK_DEFINITION_ARN BACKEND_RECOVERY_IMAGE_DIGEST BACKEND_RECOVERY_EVIDENCE_BUNDLE_GZIP_BASE64 BACKEND_RECOVERY_EVIDENCE_BUNDLE_SHA256; do

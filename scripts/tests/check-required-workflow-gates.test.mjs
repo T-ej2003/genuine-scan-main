@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   buildGateEntries,
   evaluateGateState,
+  parseExpectedWorkflowRunIds,
   selectMatchingRun,
 } from "../github/check-required-workflow-gates.mjs";
 
@@ -15,6 +16,8 @@ const targetEvents = ["push", "workflow_dispatch"];
 function run(overrides = {}) {
   return {
     id: 1001,
+    workflow_id: 99,
+    path: ".github/workflows/quality-gate.yml",
     event: "push",
     head_sha: targetSha,
     head_branch: "main",
@@ -31,8 +34,8 @@ function payloads() {
     requiredWorkflowFiles.map((workflowFile, index) => [
       workflowFile,
       {
-        workflow: { path: `.github/workflows/${workflowFile}` },
-        runs: [run({ id: 1000 + index, html_url: `https://github.example/run/${1000 + index}` })],
+        workflow: { id: 99, path: `.github/workflows/${workflowFile}` },
+        runs: [run({ id: 1000 + index, path: `.github/workflows/${workflowFile}`, html_url: `https://github.example/run/${1000 + index}` })],
       },
     ]),
   );
@@ -71,8 +74,8 @@ test("missing deployment-audit.yml is reported as workflow missing", () => {
 test("workflow exists but wrong SHA stays pending with diagnostics", () => {
   const workflowPayloads = payloads();
   workflowPayloads["deployment-audit.yml"] = {
-    workflow: { path: ".github/workflows/deployment-audit.yml" },
-    runs: [run({ head_sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" })],
+    workflow: { id: 99, path: ".github/workflows/deployment-audit.yml" },
+    runs: [run({ path: ".github/workflows/deployment-audit.yml", head_sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" })],
   };
 
   const result = state(workflowPayloads);
@@ -86,8 +89,8 @@ test("workflow exists but wrong SHA stays pending with diagnostics", () => {
 test("failed workflow blocks the gate", () => {
   const workflowPayloads = payloads();
   workflowPayloads["secret-scan.yml"] = {
-    workflow: { path: ".github/workflows/secret-scan.yml" },
-    runs: [run({ conclusion: "failure", html_url: "https://github.example/run/fail" })],
+    workflow: { id: 99, path: ".github/workflows/secret-scan.yml" },
+    runs: [run({ path: ".github/workflows/secret-scan.yml", conclusion: "failure", html_url: "https://github.example/run/fail" })],
   };
 
   const result = state(workflowPayloads);
@@ -100,8 +103,8 @@ test("failed workflow blocks the gate", () => {
 test("skipped workflow blocks the gate", () => {
   const workflowPayloads = payloads();
   workflowPayloads["quality-gate.yml"] = {
-    workflow: { path: ".github/workflows/quality-gate.yml" },
-    runs: [run({ conclusion: "skipped" })],
+    workflow: { id: 99, path: ".github/workflows/quality-gate.yml" },
+    runs: [run({ path: ".github/workflows/quality-gate.yml", conclusion: "skipped" })],
   };
 
   const result = state(workflowPayloads);
@@ -121,6 +124,23 @@ test("manual workflow_dispatch run matching the target SHA passes", () => {
   );
 
   assert.equal(selected.id, 2);
+});
+
+test("an exact dispatched run map rejects stale, missing, and unexpected workflow runs", () => {
+  const expectedWorkflowRunIds = parseExpectedWorkflowRunIds(JSON.stringify({
+    "quality-gate.yml": "1000", "secret-scan.yml": "1001", "deployment-audit.yml": "1002",
+  }), requiredWorkflowFiles);
+  const result = evaluateGateState(buildGateEntries({ requiredWorkflowFiles, workflowPayloads: payloads(), targetSha, targetEvents, expectedWorkflowRunIds }));
+  assert.equal(result.ok, true);
+  const stale = payloads();
+  stale["quality-gate.yml"].runs[0].id = 999;
+  assert.equal(evaluateGateState(buildGateEntries({ requiredWorkflowFiles, workflowPayloads: stale, targetSha, targetEvents, expectedWorkflowRunIds })).ok, false);
+  for (const value of ["{}", JSON.stringify({ "quality-gate.yml": "1000" }), JSON.stringify({ ...expectedWorkflowRunIds, "other.yml": "4" })]) {
+    assert.throws(() => parseExpectedWorkflowRunIds(value, requiredWorkflowFiles), /EXPECTED_WORKFLOW_RUN_IDS_JSON/);
+  }
+  const wrongWorkflow = payloads();
+  wrongWorkflow["quality-gate.yml"].runs[0].path = ".github/workflows/secret-scan.yml";
+  assert.equal(evaluateGateState(buildGateEntries({ requiredWorkflowFiles, workflowPayloads: wrongWorkflow, targetSha, targetEvents, expectedWorkflowRunIds })).ok, false);
 });
 
 test("deployment audit keeps scanners blocking while skipping unsupported private-user CodeQL upload", () => {
