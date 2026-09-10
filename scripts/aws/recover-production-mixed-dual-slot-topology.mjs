@@ -9,6 +9,7 @@ const { UpdateSecretVersionStageCommand, DescribeSecretCommand, GetSecretValueCo
 const canonical = (value) => Array.isArray(value) ? `[${value.map(canonical).join(",")}]` : value && typeof value === "object" ? `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}` : JSON.stringify(value);
 const sha256 = (value) => createHash("sha256").update(canonical(value)).digest("hex");
 const exactProgress = (topology, versionId, slot) => {
+  topology ??= {};
   if (!topology || typeof topology !== "object" || Array.isArray(topology)) throw new Error(`Mixed recovery ${slot} version topology is not exact.`);
   const versionIds = Object.keys(topology);
   if (versionIds.length === 0) return true;

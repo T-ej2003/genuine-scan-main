@@ -20,7 +20,7 @@ const authorized = (preparation) => createMixedDualSlotRecoveryAuthorization({ p
 function fakeSecrets({ failAfter = null } = {}) {
   const states = new Map(MIXED_DUAL_SLOT_RECOVERY_ORDER.map((slot) => [MIXED_DUAL_SLOT_PREDECESSOR[slot].arn, { slot, labels: ["AWSCURRENT"] }])); let writes = 0; const controls = { failAfter };
   const send = async (command) => { const input = command.input; const state = states.get(input.SecretId); if (!state) throw new Error("unknown secret"); const expected = MIXED_DUAL_SLOT_PREDECESSOR[state.slot];
-    if (command.constructor.name === "DescribeSecretCommand") return { ARN: input.SecretId, VersionIdsToStages: state.topology || (state.labels.length ? { [expected.versionId]: state.labels } : {}) };
+    if (command.constructor.name === "DescribeSecretCommand") return { ARN: input.SecretId, ...(state.omitTopology ? {} : { VersionIdsToStages: state.topology || (state.labels.length ? { [expected.versionId]: state.labels } : {}) }) };
     if (command.constructor.name === "GetSecretValueCommand") { if (state.missingValue) throw Object.assign(new Error("missing version"), { name: "ResourceNotFoundException" }); return { VersionId: expected.versionId, SecretString: JSON.stringify(fixturePayload(state.slot)) }; }
     if (command.constructor.name === "UpdateSecretVersionStageCommand") { if (controls.failAfter === writes) throw new Error("injected interruption"); writes += 1; state.labels = []; return {}; }
     throw new Error(`unexpected ${command.constructor.name}`);
@@ -70,6 +70,17 @@ test("all seven label-removal interruption boundaries resume without duplicate m
     assert.equal(resumed.stageLabelMutations, 7 - boundary);
     assert.equal(interrupted.writes(), 7);
   }
+});
+
+test("a completed unlabeled version omitted from DescribeSecret resumes as exact progress", async () => {
+  const fixture = fakeSecrets();
+  const preparation = buildMixedDualSlotRecoveryPreparation({ sourceSha, predecessor: exactPredecessor(), preparedAt: "2026-09-10T00:00:00.000Z" });
+  const completed = fixture.states.get(MIXED_DUAL_SLOT_PREDECESSOR.jwtPending.arn);
+  completed.labels = [];
+  completed.omitTopology = true;
+  const result = await executeMixedDualSlotRecovery({ send: fixture.send, preparation, sourceSha, authorization: authorized(preparation), payloadHash, now });
+  assert.equal(result.stageLabelMutations, 6);
+  assert.equal(fixture.writes(), 6);
 });
 
 test("wrong authorization, non-contiguous progress, and any predecessor drift fail closed", async () => {
