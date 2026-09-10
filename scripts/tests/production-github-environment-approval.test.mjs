@@ -85,12 +85,22 @@ test("tamper, wrong bindings, and stale environment evidence fail closed", () =>
     [valid, { ...context, environment: "staging" }, /protected recovery run/],
     [valid, { ...context, sourceSha: "a".repeat(40) }, /protected recovery run/],
     [valid, { ...context, workflowRef: "T-ej2003/genuine-scan-main/.github/workflows/other.yml@refs/heads/main" }, /protected recovery run/],
+    [valid, { ...context, workflowRef: "T-ej2003/genuine-scan-main/.github/workflows/release-gate.yml@refs/tags/release-2026-09-10" }, /protected recovery run/],
+    [valid, { ...context, workflowRef: "T-ej2003/genuine-scan-main/.github/workflows/release-gate.yml@refs/tags/v1.2.3" }, /protected recovery run/],
     [valid, { ...context, eventName: "push" }, /protected recovery run/],
     [valid, { ...context, githubActions: "false" }, /protected recovery run/],
     [valid, { ...context, workflowRunId: "124" }, /protected recovery run/],
     [valid, { ...context, executionActor: "mallory" }, /protected recovery run/],
     [evidence({ observedAt: new Date(now.getTime() - 31 * 60 * 1000).toISOString() }), context, /stale/],
   ]) assert.throws(() => assertProductionEnvironmentApprovalEvidence(changedEvidence, changedContext), pattern);
+});
+
+test("only the protected-main Release Gate workflow identity can create production approval evidence", () => {
+  for (const workflowRef of [
+    "T-ej2003/genuine-scan-main/.github/workflows/release-gate.yml@refs/tags/release-2026-09-10",
+    "T-ej2003/genuine-scan-main/.github/workflows/release-gate.yml@refs/tags/v1.2.3",
+    "T-ej2003/genuine-scan-main/.github/workflows/other.yml@refs/heads/main",
+  ]) assert.throws(() => evidence({ workflowRef }), /source or workflow identity/);
 });
 
 test("workflow-shaped private directory publishes consumable evidence without touching its runner parent", async (t) => {

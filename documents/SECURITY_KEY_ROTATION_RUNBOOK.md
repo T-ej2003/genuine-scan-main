@@ -1,5 +1,27 @@
 # Security Key Rotation Runbook
 
+### Source-bound Release Train dispatch
+
+`workflow_dispatch` accepts a branch or tag ref, not a commit SHA. A normal
+Release Train may use `git_ref=main` only when `target_sha` is that ref's
+current resolved SHA. To release an older supported main commit, use an
+existing exact `refs/tags/release-*` or `refs/tags/v*` ref that resolves to the requested SHA. The
+train dispatches source-validation gates at that ref, then authenticates each
+returned audit run's `head_sha` against the selected target.
+Release Gate is deliberately different: its control-plane workflow always runs
+from protected `main`, while its independently authenticated `target_sha` and
+target ref identify the source being deployed.
+
+Release lifecycle routing is fail-closed. Strict releases dispatch every
+target-source gate with `{}` inputs, preserving older tagged workflow schemas
+and their strict validation. `authenticated-initial-overlap` is accepted only
+when the selected source declares its lifecycle-aware Quality Gate and
+Deployment Audit inputs; it dispatches those two workflows with the exact
+overlap binding. The strict Release Candidate Gate is intentionally absent
+from that pre-rotation route because its manual/tag contract requires completed
+rotation freshness; both Release Train and Release Gate use the same canonical
+gate list and bind the exact freshly dispatched run IDs.
+
 This runbook covers the rotating backend secret families used by the app:
 
 - `JWT_SECRET_CURRENT` / `JWT_SECRET_PREVIOUS`
@@ -375,6 +397,13 @@ The production `release-gate` repeats either strict final freshness or the
 exact authenticated-overlap initial-activation contract after upstream gate
 sanity and before the deploy job. A successful source-only push check can
 therefore never authorize production deployment by itself.
+
+Authenticated initial activation is explicitly dispatched as the
+`authenticated-initial-overlap` Release Train lifecycle. It validates the
+exact overlap candidate and the named pre-rotation release contract; generic
+manual, post-rotation, scheduled-security, and release-candidate validation
+remain strict. Release Gate independently repeats the overlap binding before
+any production mutation.
 
 After a real rotation, run the strict checks without changing their threshold:
 

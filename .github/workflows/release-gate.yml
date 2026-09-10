@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       git_ref:
-        description: "Main-branch ref used by Release Train"
+        description: "Deployment target ref selected by Release Train; Release Gate itself always runs from protected main."
         required: false
         type: string
         default: main
@@ -14,6 +14,18 @@ on:
         type: string
       release_train_run_id:
         description: "Release Train run ID that dispatched this gate"
+        required: false
+        type: string
+      release_lifecycle:
+        description: "Release lifecycle authenticated by the Release Train."
+        required: false
+        type: choice
+        options:
+          - strict
+          - authenticated-initial-overlap
+        default: strict
+      required_gate_run_ids_json:
+        description: "Exact workflow-run IDs dispatched and authenticated by the Release Train."
         required: false
         type: string
       preserve_current_frontend:
@@ -125,17 +137,58 @@ jobs:
         env:
           INPUT_GIT_REF: ${{ inputs.git_ref }}
           INPUT_TARGET_SHA: ${{ inputs.target_sha }}
+          RELEASE_TRAIN_RUN_ID: ${{ inputs.release_train_run_id }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
 
           deploy_ref="${INPUT_GIT_REF:-main}"
           git fetch --prune origin main
 
+          case "$deploy_ref" in
+            main)
+              ref_sha="$(git rev-parse origin/main^{commit})"
+              ;;
+            refs/tags/*)
+              if ! [[ "$deploy_ref" =~ ^refs/tags/(release-|v)[A-Za-z0-9][A-Za-z0-9._/-]*$ ]]; then
+                echo "::error::Historical production deploy targets require a release-* or v* tag ref."
+                exit 1
+              fi
+              git fetch --no-tags origin "$deploy_ref:$deploy_ref"
+              ref_sha="$(git rev-parse "${deploy_ref}^{commit}")"
+              ;;
+            *)
+              echo "::error::Production deploy target ref must be main or an explicit evidence-enforced release tag."
+              exit 1
+              ;;
+          esac
+
           if [ -n "${INPUT_TARGET_SHA:-}" ]; then
+            if ! [[ "$INPUT_TARGET_SHA" =~ ^[a-f0-9]{40}$ ]]; then
+              echo "::error::Production deploy target SHA must be a full lowercase commit SHA."
+              exit 1
+            fi
             deploy_sha="$INPUT_TARGET_SHA"
             git cat-file -e "${deploy_sha}^{commit}"
+            if [[ "$deploy_ref" == refs/tags/* ]] && [ "$deploy_sha" != "$ref_sha" ]; then
+              echo "::error::Historical deployment target SHA must equal its exact release tag."
+              exit 1
+            fi
+            if [ "$deploy_ref" = "main" ] && [ "$deploy_sha" != "$ref_sha" ]; then
+              if ! [[ "$RELEASE_TRAIN_RUN_ID" =~ ^[1-9][0-9]*$ ]]; then
+                echo "::error::A main target retained across a main advance requires its exact Release Train run identity."
+                exit 1
+              fi
+              node --input-type=module - <<'NODE'
+              const response = await fetch(`https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.RELEASE_TRAIN_RUN_ID}`, { headers: { Accept: "application/vnd.github+json", Authorization: `Bearer ${process.env.GITHUB_TOKEN}`, "X-GitHub-Api-Version": "2022-11-28" } });
+              if (!response.ok) throw new Error(`Unable to authenticate Release Train target identity (${response.status}).`);
+              const run = await response.json();
+              if (run.repository?.full_name !== process.env.GITHUB_REPOSITORY || run.head_repository?.full_name !== process.env.GITHUB_REPOSITORY || run.path !== ".github/workflows/release-train.yml" || run.event !== "workflow_dispatch" || run.head_branch !== "main" || run.head_sha !== process.env.INPUT_TARGET_SHA || !["in_progress", "completed"].includes(run.status)) throw new Error("Release Train does not authenticate the retained main deployment target.");
+              NODE
+            fi
           else
-            deploy_sha="$(git rev-parse "${deploy_ref}^{commit}")"
+            deploy_sha="$ref_sha"
           fi
 
           if ! git merge-base --is-ancestor "$deploy_sha" origin/main; then
@@ -152,17 +205,32 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TARGET_SHA: ${{ steps.resolve.outputs.deploy_sha }}
-          TARGET_EVENTS: ${{ inputs.release_mode == 'normal' && 'push,workflow_dispatch' || 'push' }}
-          REQUIRED_WORKFLOW_FILES: quality-gate.yml,secret-scan.yml,deployment-audit.yml,auth-security-tests.yml,release-candidate-gate.yml
+          TARGET_EVENTS: ${{ inputs.release_mode == 'normal' && 'workflow_dispatch' || 'push' }}
+          RELEASE_MODE: ${{ inputs.release_mode }}
+          RELEASE_LIFECYCLE: ${{ inputs.release_lifecycle }}
+          EXPECTED_WORKFLOW_RUN_IDS_JSON: ${{ inputs.required_gate_run_ids_json }}
           MAX_ATTEMPTS: 1
           POLL_SECONDS: 0
         run: |
           set -euo pipefail
+          if [ "$RELEASE_MODE" != "normal" ] && [ "$RELEASE_LIFECYCLE" != "strict" ]; then
+            echo "::error::Authenticated initial overlap is valid only for normal Release Gate mode."
+            exit 1
+          fi
+          if [ "$RELEASE_MODE" = "normal" ] && [ -z "${EXPECTED_WORKFLOW_RUN_IDS_JSON:-}" ]; then
+            echo "::error::Normal Release Gate requires the exact workflow-run IDs dispatched by its Release Train."
+            exit 1
+          fi
+          export REQUIRED_WORKFLOW_FILES="$(node scripts/github/release-lifecycle-contract.mjs --lifecycle "$RELEASE_LIFECYCLE")"
+          if [ "$RELEASE_LIFECYCLE" = "authenticated-initial-overlap" ]; then
+            node scripts/github/assert-authenticated-initial-overlap-workflow-schema.mjs --revision "$TARGET_SHA"
+          fi
           node scripts/github/check-required-workflow-gates.mjs
 
       - name: Validate production release lifecycle mode
         env:
           RELEASE_MODE: ${{ inputs.release_mode }}
+          RELEASE_LIFECYCLE: ${{ inputs.release_lifecycle }}
           SOURCE_SHA: ${{ steps.resolve.outputs.deploy_sha }}
           ROTATION_ID: ${{ inputs.rotation_id }}
           ROTATION_STATE_JSON: ${{ inputs.rotation_state_json }}
@@ -206,7 +274,19 @@ jobs:
               for name in "${overlap_values[@]}"; do
                 if [ -n "${!name:-}" ]; then overlap_present=1; fi
               done
-              if [ "$overlap_present" -eq 1 ]; then
+              case "$RELEASE_LIFECYCLE" in
+                strict)
+                  if [ "$overlap_present" -ne 0 ]; then
+                    echo "::error::Strict normal releases must not supply authenticated-initial-overlap bindings."
+                    exit 1
+                  fi
+                  npm run check:rotation-evidence-freshness
+                  ;;
+                authenticated-initial-overlap)
+                  if [ "$overlap_present" -ne 1 ]; then
+                    echo "::error::Authenticated initial overlap requires the complete exact overlap binding."
+                    exit 1
+                  fi
                 for name in "${overlap_values[@]}"; do
                   if [ -z "${!name:-}" ]; then
                     echo "::error::${name} is required for authenticated-overlap initial activation."
@@ -225,9 +305,9 @@ jobs:
                   --deployment-sha "$ROTATION_DEPLOYMENT_SHA" \
                   --task-definition "$ROTATION_TASK_DEFINITION_ARN" \
                   --image-digest "$ROTATION_IMAGE_DIGEST"
-              else
-                npm run check:rotation-evidence-freshness
-              fi
+                  ;;
+                *) echo "::error::Unsupported release lifecycle: $RELEASE_LIFECYCLE"; exit 1 ;;
+              esac
               ;;
             backend-health-recovery)
               for name in BACKEND_RECOVERY_CURRENT_TASK_DEFINITION_ARN BACKEND_RECOVERY_IMAGE_DIGEST BACKEND_RECOVERY_EVIDENCE_BUNDLE_GZIP_BASE64 BACKEND_RECOVERY_EVIDENCE_BUNDLE_SHA256; do

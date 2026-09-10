@@ -172,7 +172,7 @@ test("pre-rotation pushes use source validation while explicit production runs s
   assert.match(securityStep, /GITHUB_EVENT_NAME.*schedule/);
   assert.match(securityStep, /GITHUB_EVENT_NAME.*workflow_dispatch/);
   assert.match(securityStep, /verify:ci:security:source/);
-  assert.match(securityStep, /verify:ci:security\n/);
+  assert.match(securityStep, /verify:ci:security(?:;|\n)/);
   assert.doesNotMatch(securityStep, /GITHUB_REF.*refs\/heads\/main/);
 
   const deploymentStep = deploymentAudit.slice(deploymentAudit.indexOf("- name: Run full release validation"));
@@ -214,7 +214,9 @@ test("release gate keeps normal strictness and admits only governed transition m
   assert.match(releaseGate, /default: normal/);
   assert.doesNotMatch(releaseGate, /expert_override/);
   assert.doesNotMatch(releaseTrain, /expert_override/);
-  assert.match(releaseGate, /TARGET_EVENTS: \$\{\{ inputs\.release_mode == 'normal' && 'push,workflow_dispatch' \|\| 'push' \}\}/);
+  assert.match(releaseGate, /TARGET_EVENTS: \$\{\{ inputs\.release_mode == 'normal' && 'workflow_dispatch' \|\| 'push' \}\}/);
+  assert.match(releaseGate, /EXPECTED_WORKFLOW_RUN_IDS_JSON: \$\{\{ inputs\.required_gate_run_ids_json \}\}/);
+  assert.match(releaseGate, /Authenticated initial overlap is valid only for normal Release Gate mode/);
   assert.match(releaseGate, /inputs\.release_mode == 'rotation-overlap' \|\| inputs\.release_mode == 'rotation-cleanup'[\s\S]*run-production-cutover\.mjs/);
   assert.match(releaseGate, /ENABLE_EXECUTE_COMMAND: "true"/);
   assert.match(releaseGate, /inputs\.release_mode == 'normal'[\s\S]*Authenticate normal release image authorization/);

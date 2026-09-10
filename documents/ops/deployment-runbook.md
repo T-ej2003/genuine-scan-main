@@ -27,6 +27,19 @@ After all three pass for the exact target SHA, it dispatches `release-gate.yml` 
 Operator command (the authorization file must be the canonical private output
 of `production-image-authorization.mjs`; the workflow authenticates it again):
 
+`git_ref=main` is valid only when `target_sha` is the currently resolved main
+SHA. An older supported target must use an existing exact
+`refs/tags/release-*` or `refs/tags/v*` ref which resolves to that SHA; commit-valued dispatch refs
+are intentionally rejected.
+
+Deployment Audit runs at the selected target source. Release Gate always runs
+from protected `main`; it receives that target ref and SHA as independently
+validated deployment inputs.
+
+Release Train records the exact workflow-run IDs it dispatches. Release Gate
+independently re-authenticates that same lifecycle-specific gate set, so a
+retained successful run cannot satisfy a new release transaction.
+
 ```bash
 authorization_json="$(jq -c . < "$NORMAL_IMAGE_AUTHORIZATION_FILE")"
 authorization_sha256="$(printf '%s' "$authorization_json" | shasum -a 256 | awk '{print $1}')"
@@ -37,18 +50,10 @@ gh workflow run release-train.yml --ref main \
   -f normal_image_authorization_sha256="$authorization_sha256"
 ```
 
-Direct normal Release Gate dispatch must carry the same exact authorization,
-frontend-preservation, source, and Release Train run bindings:
-
-```bash
-gh workflow run release-gate.yml --ref main \
-  -f git_ref=main \
-  -f target_sha=<main_sha> \
-  -f release_train_run_id=<release_train_run_id> \
-  -f preserve_current_frontend=true \
-  -f normal_image_authorization_json="$authorization_json" \
-  -f normal_image_authorization_sha256="$authorization_sha256"
-```
+Normal Release Gate is not a standalone operator command. It accepts only the
+exact source, authorization, Release Train run, and freshly dispatched
+lifecycle gate-run map that Release Train transports. Start normal releases
+through Release Train; a direct Gate dispatch is fail-closed.
 
 DR automation work should happen on `aws-dr-finish` or an approved feature branch, not directly on `main`.
 

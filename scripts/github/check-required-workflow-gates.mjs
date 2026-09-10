@@ -15,6 +15,10 @@ export function runMatchesTarget(run, { targetSha, targetEvents }) {
   return run?.head_sha === targetSha && targetEvents.includes(run?.event);
 }
 
+export function runMatchesWorkflow(run, workflow) {
+  return Boolean(workflow) && run?.path === workflow.path && String(run?.workflow_id) === String(workflow.id);
+}
+
 export function selectMatchingRun(runs, options) {
   return [...(runs || [])]
     .filter((run) => runMatchesTarget(run, options))
@@ -27,12 +31,24 @@ export function summarizeRun(run) {
   return `${run.status}${conclusion} run_id=${run.id} event=${run.event} sha=${run.head_sha}`;
 }
 
-export function buildGateEntries({ requiredWorkflowFiles, workflowPayloads, targetSha, targetEvents }) {
+export function parseExpectedWorkflowRunIds(value, requiredWorkflowFiles) {
+  if (!value) return null;
+  let parsed;
+  try { parsed = JSON.parse(value); } catch { throw new Error("EXPECTED_WORKFLOW_RUN_IDS_JSON must be valid JSON."); }
+  if (!parsed || Object.getPrototypeOf(parsed) !== Object.prototype || Object.keys(parsed).length !== requiredWorkflowFiles.length || requiredWorkflowFiles.some((workflow) => !/^[1-9][0-9]*$/.test(String(parsed[workflow] || "")))) throw new Error("EXPECTED_WORKFLOW_RUN_IDS_JSON must contain exactly one positive run ID for every required workflow.");
+  if (Object.keys(parsed).some((workflow) => !requiredWorkflowFiles.includes(workflow))) throw new Error("EXPECTED_WORKFLOW_RUN_IDS_JSON contains an unexpected workflow.");
+  return Object.fromEntries(Object.entries(parsed).map(([workflow, runId]) => [workflow, String(runId)]));
+}
+
+export function buildGateEntries({ requiredWorkflowFiles, workflowPayloads, targetSha, targetEvents, expectedWorkflowRunIds = null }) {
   return requiredWorkflowFiles.map((workflowFile) => {
     const payload = workflowPayloads[workflowFile] || {};
     const workflow = payload.workflow || null;
     const runs = payload.runs || [];
-    const run = selectMatchingRun(runs, { targetSha, targetEvents });
+    const compatibleRuns = runs.filter((candidate) => runMatchesWorkflow(candidate, workflow));
+    const run = expectedWorkflowRunIds
+      ? compatibleRuns.find((candidate) => String(candidate?.id) === expectedWorkflowRunIds[workflowFile] && runMatchesTarget(candidate, { targetSha, targetEvents })) || null
+      : selectMatchingRun(compatibleRuns, { targetSha, targetEvents });
     const latestRuns = runs.slice(0, 5).map((item) => ({
       id: item.id,
       event: item.event,
@@ -102,6 +118,7 @@ function requireEnv(env) {
     requiredWorkflowFiles,
     maxAttempts,
     pollSeconds,
+    expectedWorkflowRunIds: parseExpectedWorkflowRunIds(env.EXPECTED_WORKFLOW_RUN_IDS_JSON, requiredWorkflowFiles),
   };
 }
 
@@ -128,11 +145,15 @@ function githubClient({ owner, repo, token }) {
   };
 }
 
-async function readWorkflowPayload(githubJson, workflowFile, targetSha) {
+async function readWorkflowPayload(githubJson, workflowFile, targetSha, expectedRunId) {
   const encodedFile = encodeURIComponent(workflowFile);
   const workflow = await githubJson(`/actions/workflows/${encodedFile}`, { allow404: true });
   if (!workflow) return { workflow: null, runs: [] };
 
+  if (expectedRunId) {
+    const run = await githubJson(`/actions/runs/${expectedRunId}`, { allow404: true });
+    return { workflow, runs: run ? [run] : [] };
+  }
   const params = new URLSearchParams({
     head_sha: targetSha,
     per_page: "100",
@@ -151,7 +172,7 @@ async function readGateState(config) {
   const workflowPayloadPairs = await Promise.all(
     config.requiredWorkflowFiles.map(async (workflowFile) => [
       workflowFile,
-      await readWorkflowPayload(githubJson, workflowFile, config.targetSha),
+      await readWorkflowPayload(githubJson, workflowFile, config.targetSha, config.expectedWorkflowRunIds?.[workflowFile]),
     ]),
   );
   const workflowPayloads = Object.fromEntries(workflowPayloadPairs);
@@ -161,6 +182,7 @@ async function readGateState(config) {
       workflowPayloads,
       targetSha: config.targetSha,
       targetEvents: config.targetEvents,
+      expectedWorkflowRunIds: config.expectedWorkflowRunIds,
     }),
   );
 }

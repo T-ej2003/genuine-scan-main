@@ -236,6 +236,7 @@
     "security:release-gate": "git diff --check && npm --prefix backend run build && node backend/tests/accessControlIsolation.test.js && node backend/tests/tenantIsolationExtended.test.js && node backend/tests/securityResponseSurface.test.js && node backend/tests/securityRouteSurface.test.js && node scripts/check-prisma-scope-guardrails.mjs && node --test scripts/tests/prisma-scope-guardrails.test.mjs && npm --prefix backend run test:trust-critical:compiled && npm run typecheck && npm run build && npm run lint:security-scope",
     "verify:release": "npm run verify:guardrails && npm run check:release-evidence-refs && npm run typecheck && npm run build && npm run test:trust-critical && npm test && npm --prefix backend run prisma:generate && (cd backend && npm test)",
     "verify:release:source": "npm run verify:guardrails:source && npm run check:release-evidence-refs && npm run typecheck && npm run build && npm run test:trust-critical && npm test && npm --prefix backend run prisma:generate && (cd backend && npm test)",
+    "verify:release:pre-rotation": "npm run verify:release:source",
     "rls:integration-check": "./scripts/local/rls-integration-check.sh",
     "rls:production-ready": "node scripts/rls/local-production-readiness.mjs",
     "rf7:contract-inventory": "node scripts/release/generate-rf7-contract-inventory.mjs",
