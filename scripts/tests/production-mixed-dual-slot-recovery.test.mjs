@@ -90,9 +90,12 @@ test("an acknowledged label removal waits for bounded exact-prefix convergence",
   assert.equal(result.stageLabelMutations, 7);
   assert.equal(lagged.writes(), 7);
   assert.equal(sleeps, 7);
-  const stuck = fakeSecrets({ postWriteLag: 6 });
-  await assert.rejects(() => executeMixedDualSlotRecovery({ send: stuck.send, preparation, sourceSha, authorization: authorized(preparation), payloadHash, now, sleep: async () => {} }), /did not converge/);
+  const longLag = fakeSecrets({ postWriteLag: 10 });
+  assert.equal((await executeMixedDualSlotRecovery({ send: longLag.send, preparation, sourceSha, authorization: authorized(preparation), payloadHash, now, sleep: async () => {} })).stageLabelMutations, 7);
+  const stuck = fakeSecrets({ postWriteLag: 11 }); const delays = [];
+  await assert.rejects(() => executeMixedDualSlotRecovery({ send: stuck.send, preparation, sourceSha, authorization: authorized(preparation), payloadHash, now, sleep: async (milliseconds) => { delays.push(milliseconds); } }), /did not converge/);
   assert.equal(stuck.writes(), 1);
+  assert.equal(delays.reduce((total, milliseconds) => total + milliseconds, 0), 300_000);
   const foreign = fakeSecrets({ postWriteLag: 1 });
   foreign.states.get(MIXED_DUAL_SLOT_PREDECESSOR.jwtPending.arn).topology = { [MIXED_DUAL_SLOT_PREDECESSOR.jwtPending.versionId]: ["AWSCURRENT"], attacker: ["AWSPREVIOUS"] };
   await assert.rejects(() => executeMixedDualSlotRecovery({ send: foreign.send, preparation, sourceSha, authorization: authorized(preparation), payloadHash, now, sleep: async () => {} }), /topology|staging/);

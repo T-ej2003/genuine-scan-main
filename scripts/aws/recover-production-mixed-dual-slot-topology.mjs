@@ -8,7 +8,9 @@ const { UpdateSecretVersionStageCommand, DescribeSecretCommand, GetSecretValueCo
 
 const canonical = (value) => Array.isArray(value) ? `[${value.map(canonical).join(",")}]` : value && typeof value === "object" ? `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}` : JSON.stringify(value);
 const sha256 = (value) => createHash("sha256").update(canonical(value)).digest("hex");
-const CONVERGENCE_DELAYS_MS = Object.freeze([100, 200, 400, 800, 1_000]);
+// Secrets Manager is eventually consistent and does not publish a propagation SLA.
+// Bound each reviewed label transition to five minutes without ever accepting a third state.
+const CONVERGENCE_DELAYS_MS = Object.freeze([1_000, 2_000, 4_000, 8_000, 15_000, 30_000, 60_000, 60_000, 60_000, 60_000]);
 const sleepForConvergence = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const exactProgress = (topology, versionId, slot) => {
   topology ??= {};
