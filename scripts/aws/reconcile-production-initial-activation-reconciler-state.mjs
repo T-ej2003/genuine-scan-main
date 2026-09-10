@@ -75,7 +75,7 @@ export function runReconcilerStateReconciliation(argv = process.argv.slice(2), d
     const saved = assertStageBArtifactPath({ artifactPath: path.resolve(required(argv, "--saved-plan-out")), repositoryRoot: root, label: "State reconciliation saved plan", allowExisting: false });
     exec("terraform", [`-chdir=${path.join(root, CONTRACT.terraformRoot)}`, "plan", "-refresh-only", "-input=false", "-lock=false", "-out", saved], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
     ensureStageBPrivateFile({ filePath: saved, repositoryRoot: root, normalize: true, label: "State reconciliation saved plan" });
-    const bytes = readStageBPrivateFileBytes({ filePath: saved, repositoryRoot: root, label: "State reconciliation saved plan" }).bytes; const plan = render({ exec, env, planPath: saved }); assertExactReconcilerRefreshOnlyPlan(plan);
+    const bytes = readStageBPrivateFileBytes({ filePath: saved, repositoryRoot: root, label: "State reconciliation saved plan" }).bytes; const plan = render({ exec, env, planPath: saved }); assertExactReconcilerRefreshOnlyPlan(plan, { stateBytes: predecessor.bytes });
     const afterPlan = stableState({ exec, env, run });
     if (!afterPlan.bytes.equals(predecessor.bytes) || JSON.stringify(afterPlan.object) !== JSON.stringify(predecessor.object)) throw new Error("State changed during read-only reconciliation preparation.");
     const prep = createReconcilerStateReconciliationPreparation({ sourceSha, stateBytes: predecessor.bytes, stateObject: predecessor.object, attachmentTopology: attached, planBytes: bytes, planJson: plan });

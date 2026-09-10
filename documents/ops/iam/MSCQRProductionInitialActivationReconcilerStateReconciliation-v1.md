@@ -13,7 +13,7 @@ The bootstrap role has two additional read-only prerequisites: `s3:GetBucketPoli
 
 Bootstrap-policy installation now prepares and authorizes the exact observed predecessor generation. Only the two tracked historical documents and the current canonical document are recognized; an authorization for one predecessor generation cannot mutate another.
 
-The operation rejects normal Terraform actions, IAM mutations, added drift, output drift, state substitution, authorization substitution, and post-state changes outside those two fields. Replay and ambiguous-write recovery require the complete prepared successor state, not merely the refreshed attachment fields. It verifies the live IAM attachment remains unchanged, then generates a fresh normal installation plan and requires the existing strict installation validator to observe no `resource_drift` and exactly the already-reviewed `aws_iam_policy.reconciler` update. It never executes that update.
+The operation rejects normal Terraform actions, IAM mutations, added drift, state substitution, authorization substitution, and post-state changes outside its exact contract. It permits one and only one output reconciliation: `permissions_policy_sha256` must update from the authenticated predecessor-state output to the SHA-256 of the protected-source `permissions-policy.json`. The output must be non-sensitive, known, and use the exact `update` action; every other output transition remains rejected. Replay and ambiguous-write recovery require the complete prepared successor state, including this output, not merely the refreshed attachment fields. It verifies the live IAM attachment remains unchanged, then generates a fresh normal installation plan and requires the existing strict installation validator to observe no `resource_drift` and exactly the already-reviewed `aws_iam_policy.reconciler` update. It never executes that update.
 
 ## Governed operator sequence
 
@@ -143,7 +143,8 @@ Every successful result has the same authenticated shape: `status`,
 `planSemantics` is copied from the validated refresh-only plan and must show
 the exact two-field drift, `terraformResourceAddCount=0`,
 `terraformResourceChangeCount=0`, `terraformResourceDestroyCount=0`,
-`exactTwoFieldDrift=true`, and `outputDrift=false`. `normalPlan` is the
+`exactTwoFieldDrift=true`, `outputDrift=true`, and the exact authenticated
+`outputReconciliation` for `permissions_policy_sha256`. `normalPlan` is the
 validated read-only installation plan: `resource_drift=[]`, zero creates,
 deletes, and replacements, and exactly one update at
 `aws_iam_policy.reconciler` (all other expected resources are `no-op`).

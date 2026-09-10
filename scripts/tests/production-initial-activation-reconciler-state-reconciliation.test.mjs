@@ -14,16 +14,17 @@ import { resolveReconcilerStateReconciliationAuthorization } from "../aws/reconc
 
 const sourceSha = "a".repeat(40); const now = new Date("2026-09-09T12:00:00.000Z");
 const hash = (value) => crypto.createHash("sha256").update(value).digest("hex");
-const state = (serial, attachmentCount, policyArns) => Buffer.from(JSON.stringify({ version: 4, terraform_version: "1.15.8", serial, lineage: "state-lineage", outputs: {}, resources: [
+const output = Object.freeze({ before: "a".repeat(64), after: CONTRACT.outputReconciliation.after });
+const state = (serial, attachmentCount, policyArns, permissionsPolicySha256 = output.before) => Buffer.from(JSON.stringify({ version: 4, terraform_version: "1.15.8", serial, lineage: "state-lineage", outputs: { permissions_policy_sha256: { value: permissionsPolicySha256, type: "string" } }, resources: [
   { mode: "managed", type: "aws_iam_policy", name: "reconciler", instances: [{ attributes: { attachment_count: attachmentCount, name: "MSCQRProductionInitialActivationPolicyReconciler" } }] },
   { mode: "managed", type: "aws_iam_role", name: "reconciler", instances: [{ attributes: { managed_policy_arns: policyArns, name: "mscqr-production-initial-activation-policy-reconciler" } }] },
   { mode: "managed", type: "aws_iam_role_policy_attachment", name: "reconciler", instances: [{ attributes: { role: "mscqr-production-initial-activation-policy-reconciler", policy_arn: CONTRACT.policyArn } }] },
 ] }));
-const before = state(1, 0, []); const after = state(2, 1, [CONTRACT.policyArn]);
+const before = state(1, 0, []); const after = state(2, 1, [CONTRACT.policyArn], output.after);
 const refreshPlan = () => ({ format_version: "1.2", terraform_version: "1.15.8", errored: false, complete: true, applyable: true, resource_changes: [], resource_drift: [
   { address: "aws_iam_policy.reconciler", change: { actions: ["update"], before: { attachment_count: 0, name: "MSCQRProductionInitialActivationPolicyReconciler" }, after: { attachment_count: 1, name: "MSCQRProductionInitialActivationPolicyReconciler" }, before_unknown: {}, after_unknown: {}, before_sensitive: {}, after_sensitive: {} } },
   { address: "aws_iam_role.reconciler", change: { actions: ["update"], before: { managed_policy_arns: [], name: "mscqr-production-initial-activation-policy-reconciler" }, after: { managed_policy_arns: [CONTRACT.policyArn], name: "mscqr-production-initial-activation-policy-reconciler" }, before_unknown: {}, after_unknown: {}, before_sensitive: {}, after_sensitive: {} } },
-] });
+], output_changes: { permissions_policy_sha256: { actions: ["update"], before: output.before, after: output.after, before_sensitive: false, after_sensitive: false, before_unknown: false, after_unknown: false } } });
 const topology = { roles: ["mscqr-production-initial-activation-policy-reconciler"], users: [], groups: [] };
 const object = { versionId: "exact-version", etag: "exact-etag" };
 const approval = ({ observedAt = now, workflowPath = CONTRACT.authorizationWorkflowPath, runId = "100" } = {}) => createProductionEnvironmentApprovalEvidence({ environmentConfig: { id: 8, name: "production-initial-activation-reconciler-bootstrap", can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{ type: "User", reviewer: { id: 3, login: "reviewer" } }] }] }, repository: "T-ej2003/genuine-scan-main", environment: "production-initial-activation-reconciler-bootstrap", sourceSha, workflowRef: `T-ej2003/genuine-scan-main/${workflowPath}@refs/heads/main`, eventName: "workflow_dispatch", workflowRunId: runId, workflowRunAttempt: "1", executionActor: "operator", observedAt: observedAt.toISOString(), actualApproval: { state: "approved", environmentId: 8, environmentName: "production-initial-activation-reconciler-bootstrap", userId: 3, userLogin: "reviewer" } });
@@ -84,27 +85,27 @@ test("authorization retrieval isolates GitHub evidence reads from AWS credential
   assert.throws(() => githubRun("gh", ["api", `repos/${CONTRACT.repository}/actions/runs/123`, "--method", "POST"]), /reviewed read-only/);
 });
 
-test("accepts only the authenticated two-field refresh-only drift", () => {
-  assert.deepEqual(assertExactReconcilerRefreshOnlyPlan(refreshPlan()).resourceDrift, CONTRACT.drift);
+test("accepts only the authenticated two-field refresh-only drift and exact output reconciliation", () => {
+  assert.deepEqual(assertExactReconcilerRefreshOnlyPlan(refreshPlan(), { stateBytes: before }).resourceDrift, CONTRACT.drift);
   const extra = refreshPlan(); extra.resource_drift[0].change.after.name = "drift";
-  assert.throws(() => assertExactReconcilerRefreshOnlyPlan(extra), /outside/);
+  assert.throws(() => assertExactReconcilerRefreshOnlyPlan(extra, { stateBytes: before }), /outside/);
   const wrongBefore = refreshPlan(); wrongBefore.resource_drift[0].change.before.attachment_count = 1;
-  assert.throws(() => assertExactReconcilerRefreshOnlyPlan(wrongBefore), /value/);
+  assert.throws(() => assertExactReconcilerRefreshOnlyPlan(wrongBefore, { stateBytes: before }), /value/);
   const actionable = refreshPlan(); actionable.resource_changes = [{ change: { actions: ["create"] } }];
-  assert.throws(() => assertExactReconcilerRefreshOnlyPlan(actionable), /actionable/);
+  assert.throws(() => assertExactReconcilerRefreshOnlyPlan(actionable, { stateBytes: before }), /actionable/);
 });
 
 test("refresh-only sensitivity metadata permits exact false-only Terraform structures", () => {
   for (const sensitivity of [false, {}, { tags: {}, tags_all: {} }, { nested: { values: [false, { leaf: false }] } }]) {
     const plan = refreshPlan(); for (const entry of plan.resource_drift) entry.change.before_sensitive = entry.change.after_sensitive = sensitivity;
-    assert.doesNotThrow(() => assertExactReconcilerRefreshOnlyPlan(plan));
+    assert.doesNotThrow(() => assertExactReconcilerRefreshOnlyPlan(plan, { stateBytes: before }));
   }
   for (const sensitivity of [{ secret: true }, { nested: { secret: true } }, { values: [false, true] }]) {
     const plan = refreshPlan(); for (const entry of plan.resource_drift) entry.change.before_sensitive = entry.change.after_sensitive = sensitivity;
-    assert.throws(() => assertExactReconcilerRefreshOnlyPlan(plan), /sensitive/);
+    assert.throws(() => assertExactReconcilerRefreshOnlyPlan(plan, { stateBytes: before }), /sensitive/);
   }
   const mismatch = refreshPlan(); mismatch.resource_drift[0].change.before_sensitive = { tags: {} }; mismatch.resource_drift[0].change.after_sensitive = { tags_all: {} };
-  assert.throws(() => assertExactReconcilerRefreshOnlyPlan(mismatch), /sensitivity metadata changed/);
+  assert.throws(() => assertExactReconcilerRefreshOnlyPlan(mismatch, { stateBytes: before }), /sensitivity metadata changed/);
 });
 
 test("preparation and authorization bind source, state identity, plan, topology, VersionId and ETag", () => {
@@ -116,9 +117,12 @@ test("preparation and authorization bind source, state identity, plan, topology,
 });
 
 test("exact successor is the only accepted post-state", () => {
-  assert.equal(assertExactStateSuccessor({ beforeBytes: before, afterBytes: after }).serial, 2);
+  const semantics = assertExactReconcilerRefreshOnlyPlan(refreshPlan(), { stateBytes: before });
+  assert.equal(assertExactStateSuccessor({ beforeBytes: before, afterBytes: after, planSemantics: semantics }).serial, 2);
   const unexpected = state(2, 1, ["arn:aws:iam::368992683803:policy/unrelated"]);
-  assert.throws(() => assertExactStateSuccessor({ beforeBytes: before, afterBytes: unexpected }), /outside|fields/);
+  assert.throws(() => assertExactStateSuccessor({ beforeBytes: before, afterBytes: unexpected, planSemantics: semantics }), /outside|fields/);
+  const wrongOutput = state(2, 1, [CONTRACT.policyArn], "b".repeat(64));
+  assert.throws(() => assertExactStateSuccessor({ beforeBytes: before, afterBytes: wrongOutput, planSemantics: semantics }), /outside|fields/);
 });
 
 test("replay and post-apply require the complete authorized successor state", () => {
@@ -139,9 +143,38 @@ test("replay and post-apply require the complete authorized successor state", ()
   }
 });
 
-test("refresh-only output changes are rejected for the exact two-field reconciliation", () => {
-  const changed = refreshPlan(); changed.output_changes = { unexpected: { actions: ["update"] } };
-  assert.throws(() => assertExactReconcilerRefreshOnlyPlan(changed), /output/);
+test("refresh-only output reconciliation is exact and fail-closed", () => {
+  const fixture = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-initial-activation-reconciler-plan-update.json", "utf8")).output_changes.permissions_policy_sha256;
+  assert.equal(Object.hasOwn(fixture, "before_unknown"), false);
+  assert.equal(fixture.after_unknown, false);
+  const omittedBeforeUnknown = refreshPlan(); delete omittedBeforeUnknown.output_changes.permissions_policy_sha256.before_unknown;
+  assert.doesNotThrow(() => assertExactReconcilerRefreshOnlyPlan(omittedBeforeUnknown, { stateBytes: before }));
+  const falseBeforeUnknown = refreshPlan(); falseBeforeUnknown.output_changes.permissions_policy_sha256.before_unknown = false;
+  assert.doesNotThrow(() => assertExactReconcilerRefreshOnlyPlan(falseBeforeUnknown, { stateBytes: before }));
+  const trueBeforeUnknown = refreshPlan(); trueBeforeUnknown.output_changes.permissions_policy_sha256.before_unknown = true;
+  assert.throws(() => assertExactReconcilerRefreshOnlyPlan(trueBeforeUnknown, { stateBytes: before }), /output/);
+  for (const malformed of ["false", 0]) {
+    const malformedBeforeUnknown = refreshPlan(); malformedBeforeUnknown.output_changes.permissions_policy_sha256.before_unknown = malformed;
+    assert.throws(() => assertExactReconcilerRefreshOnlyPlan(malformedBeforeUnknown, { stateBytes: before }), /output/);
+  }
+  const wrongName = refreshPlan(); wrongName.output_changes = { unexpected: { ...wrongName.output_changes.permissions_policy_sha256 } };
+  assert.throws(() => assertExactReconcilerRefreshOnlyPlan(wrongName, { stateBytes: before }), /output/);
+  const wrongBefore = refreshPlan(); wrongBefore.output_changes.permissions_policy_sha256.before = "b".repeat(64);
+  assert.throws(() => assertExactReconcilerRefreshOnlyPlan(wrongBefore, { stateBytes: before }), /output/);
+  const missingBefore = refreshPlan(); delete missingBefore.output_changes.permissions_policy_sha256.before_unknown; delete missingBefore.output_changes.permissions_policy_sha256.before;
+  assert.throws(() => assertExactReconcilerRefreshOnlyPlan(missingBefore, { stateBytes: before }), /output/);
+  const wrongAfter = refreshPlan(); wrongAfter.output_changes.permissions_policy_sha256.after = "b".repeat(64);
+  assert.throws(() => assertExactReconcilerRefreshOnlyPlan(wrongAfter, { stateBytes: before }), /output/);
+  const extra = refreshPlan(); extra.output_changes.extra = { ...extra.output_changes.permissions_policy_sha256, actions: ["update"] };
+  assert.throws(() => assertExactReconcilerRefreshOnlyPlan(extra, { stateBytes: before }), /output/);
+  const sensitive = refreshPlan(); sensitive.output_changes.permissions_policy_sha256.after_sensitive = true;
+  assert.throws(() => assertExactReconcilerRefreshOnlyPlan(sensitive, { stateBytes: before }), /output/);
+  const unknown = refreshPlan(); unknown.output_changes.permissions_policy_sha256.after_unknown = true;
+  assert.throws(() => assertExactReconcilerRefreshOnlyPlan(unknown, { stateBytes: before }), /output/);
+  const created = refreshPlan(); created.output_changes.permissions_policy_sha256.actions = ["create"];
+  assert.throws(() => assertExactReconcilerRefreshOnlyPlan(created, { stateBytes: before }), /output/);
+  const deleted = refreshPlan(); deleted.output_changes.permissions_policy_sha256.actions = ["delete"];
+  assert.throws(() => assertExactReconcilerRefreshOnlyPlan(deleted, { stateBytes: before }), /output/);
 });
 
 test("execution applies the saved refresh-only plan once, then requires the strict clean normal plan", () => {
@@ -197,7 +230,7 @@ test("expired exact successor requires fresh zero-write recovery authorization",
   assert.throws(() => createReconcilerStateReconciliationRecoveryPreparation({ sourceSha, originalPreparation: incompatiblePreparation, originalAuthorization, originalAuthorizationWorkflowRunId: "100", originalAuthorizationWorkflowRunAttempt: "1", stateBytes: after, stateObject: successorObject, attachmentTopology: topology, preparedAt: now.toISOString() }), /binding|incompatible/);
   const recoveryAuthorization = createReconcilerStateReconciliationRecoveryAuthorization({ recoveryPreparation, approval: approval({ workflowPath: CONTRACT.recoveryAuthorizationWorkflowPath, runId: "200" }), now });
   const result = executeReconcilerStateReconciliationRecovery({ sourceSha, recoveryPreparation, recoveryAuthorization, stateBytes: after, stateObject: successorObject, attachmentTopology: topology, applySavedPlan: () => assert.fail("recovery cannot reach apply"), renderNormalPlan: () => normalPlan, reauthenticateSource: () => true, verifyPostconditions: () => true, now });
-  assert.equal(result.status, "RECOVERED_COMPLETE"); assert.equal(result.refreshOnlyApplyCount, 0); assert.equal(result.terraformStateMutationCount, 0); assert.equal(result.remoteIamMutationCount, 0); assert.doesNotThrow(() => assertReconcilerStateReconciliationResult(result, { preparation: recoveryPreparation })); assert.equal(result.planSemantics.outputDrift, false); assert.equal(result.normalPlan.updateCount, 1); assert.deepEqual(recoveryAuthorization.maxAwsMutations, {});
+  assert.equal(result.status, "RECOVERED_COMPLETE"); assert.equal(result.refreshOnlyApplyCount, 0); assert.equal(result.terraformStateMutationCount, 0); assert.equal(result.remoteIamMutationCount, 0); assert.doesNotThrow(() => assertReconcilerStateReconciliationResult(result, { preparation: recoveryPreparation })); assert.equal(result.planSemantics.outputDrift, true); assert.equal(result.normalPlan.updateCount, 1); assert.deepEqual(recoveryAuthorization.maxAwsMutations, {});
   assert.throws(() => executeReconcilerStateReconciliationRecovery({ sourceSha, recoveryPreparation, recoveryAuthorization: { ...recoveryAuthorization, originalPreparationSha256: "b".repeat(64) }, stateBytes: after, stateObject: successorObject, attachmentTopology: topology, renderNormalPlan: () => normalPlan, reauthenticateSource: () => true, verifyPostconditions: () => true, now }), /binding/);
   assert.throws(() => createReconcilerStateReconciliationRecoveryPreparation({ sourceSha, originalPreparation: original, originalAuthorization, originalAuthorizationWorkflowRunId: "100", originalAuthorizationWorkflowRunAttempt: "1", stateBytes: before, stateObject: object, attachmentTopology: topology, preparedAt: now.toISOString() }), /exact authorized successor/);
 });
@@ -243,7 +276,7 @@ test("state-reconciliation runbook documents the current prepare-authorize-execu
   assert.match(runbook, /original_authorization_run_id/); assert.match(runbook, /original_authorization_run_attempt/); assert.match(runbook, /recovery_authorization_run_id/); assert.match(runbook, /recovery_authorization_run_attempt/);
   assert.match(runbook, new RegExp(`${CONTRACT.maxAgeMs / 1000} seconds`));
   assert.match(runbook, /saved_plan_base64/); assert.match(runbook, /terraform refresh|terraform state push|normal `terraform apply`/);
-  for (const field of ["planSemantics", "exactTwoFieldDrift", "outputDrift", "normalPlan", "COMPLETE", "ALREADY_COMPLETE", "COMPLETED_BY_READBACK", "RECOVERED_COMPLETE", "terraformStateMutationCount"]) assert.match(runbook, new RegExp(field));
+  for (const field of ["planSemantics", "exactTwoFieldDrift", "outputDrift", "outputReconciliation", "normalPlan", "COMPLETE", "ALREADY_COMPLETE", "COMPLETED_BY_READBACK", "RECOVERED_COMPLETE", "terraformStateMutationCount"]) assert.match(runbook, new RegExp(field));
 });
 
 test("quality gate reaches every PR reconciliation production contract", () => {
