@@ -243,6 +243,11 @@
       "order": 48,
       "id": "mixed-dual-slot-recovery-iam-preflight",
       "sourceFile": "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs"
+    },
+    {
+      "order": 49,
+      "id": "mixed-dual-slot-recovery-execution",
+      "sourceFile": "scripts/aws/recover-production-mixed-dual-slot-topology.mjs"
     }
   ],
   "identities": [
@@ -8134,6 +8139,42 @@
       "mutation": false
     },
     {
+      "id": "mixed-recovery-remove-awscurrent",
+      "phase": "mixed-dual-slot-recovery-execution",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-sdk",
+      "sourceFile": "scripts/aws/recover-production-mixed-dual-slot-topology.mjs",
+      "sourceFunction": "executeMixedDualSlotRecovery",
+      "action": "secretsmanager:UpdateSecretVersionStage",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-pending-1CnWMp",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-private-pending-LZhc54",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-pending-uB3P1Q",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "operation": "PRODUCTION_MIXED_DUAL_SLOT_TOPOLOGY_RECOVERY",
+        "mutationCountMaximum": 7
+      },
+      "classification": "MIXED_DUAL_SLOT_RECOVERY_MUTATION",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionInitialActivationLifecycle-v1.json",
+        "sid": "RecoverExactMixedDualSlotTopology",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
+        "expectedVersion": "v3",
+        "expectedPolicySha256": "c6f917d8e246bc5b4bcdf3ea189f21128e23639aa1d9643b795d4f0cedf42134"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
       "id": "normal-activation-admin-describe-candidate",
       "phase": "administrator-normal-backend-activation-convergence",
       "identity": "ADMINISTRATOR",
@@ -14254,6 +14295,23 @@
     {
       "sourceFile": "scripts/aws/recover-production-backend-health.mjs",
       "action": "sts:GetCallerIdentity"
+    },
+    {
+      "sourceFile": "scripts/aws/recover-production-mixed-dual-slot-topology.mjs",
+      "sourceFunction": "executeMixedDualSlotRecovery",
+      "phase": "mixed-dual-slot-recovery-execution",
+      "identity": "RELEASE_DEPLOYER",
+      "action": "secretsmanager:UpdateSecretVersionStage",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-pending-1CnWMp",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-private-pending-LZhc54",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-pending-uB3P1Q",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2"
+      ],
+      "capabilityId": "mixed-recovery-remove-awscurrent"
     },
     {
       "sourceFile": "scripts/aws/recover-stage-b-backend-task-definition.mjs",

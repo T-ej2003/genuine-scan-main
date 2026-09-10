@@ -40,6 +40,7 @@ const CALLS = Object.freeze([
   ["scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs", "iam:GetRole", "mixed-recovery-iam-preflight-read-role", ["arn:aws:iam::368992683803:role/mscqr-production-release-deployer"], "ROOT_OPERATOR"],
   ["scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs", "iam:SimulatePrincipalPolicy", "mixed-recovery-iam-preflight-simulate", ["arn:aws:iam::368992683803:role/mscqr-production-release-deployer"], "ROOT_OPERATOR"],
   ["scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs", "secretsmanager:GetResourcePolicy", "mixed-recovery-iam-preflight-read-resource-policy", MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, "ROOT_OPERATOR"],
+  ["scripts/aws/recover-production-mixed-dual-slot-topology.mjs", "secretsmanager:UpdateSecretVersionStage", "mixed-recovery-remove-awscurrent", MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, "RELEASE_DEPLOYER"],
   ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "s3:GetBucketPolicy", "stage-a-artifacts-reconciliation-release-read-policy", [PRODUCTION_ARTIFACTS_BUCKET]],
   ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "sts:GetCallerIdentity", "stage-a-artifacts-reconciliation-release-identify", ["*"]],
   ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "sts:GetCallerIdentity", "stage-a-artifacts-reconciliation-root-identify", ["*"], "ROOT_OPERATOR", "stage-a-artifacts-reconciliation-root-identify"],
@@ -132,6 +133,7 @@ const STAGE_A_RECOVERY_MODE = "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY";
 const STAGE_A_RECONCILIATION_MODE = "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION";
 const INITIAL_ACTIVATION_POLICY_RECONCILIATION_MODE = "INITIAL_ACTIVATION_POLICY_RECONCILIATION";
 const PROVIDER_READONLY_POLICY_RECONCILIATION_MODE = "PROVIDER_READONLY_POLICY_RECONCILIATION";
+const MIXED_DUAL_SLOT_RECOVERY_MODE = "MIXED_DUAL_SLOT_RECOVERY";
 const STAGE_A_CAPABILITY_MODES = Object.freeze({
   "stage-a-artifacts-recovery-root-identify": [STAGE_A_RECOVERY_MODE],
   "stage-a-artifacts-recovery-root-read-versioning": [STAGE_A_RECOVERY_MODE],
@@ -169,6 +171,7 @@ const stageACapabilitiesFor = (mode) => Object.entries(STAGE_A_CAPABILITY_MODES)
 const MODE_CAPABILITIES = Object.freeze({
   [INITIAL_ACTIVATION_POLICY_RECONCILIATION_MODE]: CALLS.filter(({ sourceFile }) => sourceFile === "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs").map(({ capabilityId }) => capabilityId),
   [PROVIDER_READONLY_POLICY_RECONCILIATION_MODE]: CALLS.filter(({ sourceFile }) => sourceFile === "scripts/aws/reconcile-production-provider-readonly-policy.mjs").map(({ capabilityId }) => capabilityId),
+  [MIXED_DUAL_SLOT_RECOVERY_MODE]: ["mixed-recovery-remove-awscurrent"],
   NORMAL: ["manifest-backend-health-recovery-describe-images", "manifest-backend-health-recovery-runtime-repository-policy", "normal-activation-release-describe-candidate", "normal-activation-release-describe-service", "normal-activation-release-list-tasks", "normal-activation-release-describe-tasks", "normal-activation-release-update-service"],
   BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME: ["manifest-backend-health-recovery-describe-images", "manifest-backend-health-recovery-describe-repositories", "manifest-reference-audit-ecs-service-details", "manifest-reference-audit-ecs-task-definitions", "manifest-reference-audit-ecs-tasks", "manifest-reference-audit-ecs-task-details", "manifest-backend-health-recovery-list-service-deployments", "manifest-backend-health-recovery-describe-service-deployments", "manifest-backend-health-recovery-describe-service-revisions", "manifest-artifact-signing-bootstrap-describe-secret", "manifest-artifact-signing-bootstrap-get-secret-value", "manifest-backend-health-recovery-runtime-get-role", "manifest-backend-health-recovery-runtime-list-inline", "manifest-backend-health-recovery-runtime-get-inline", "manifest-backend-health-recovery-runtime-list-attached", "manifest-backend-health-recovery-runtime-get-managed", "manifest-backend-health-recovery-runtime-get-managed-version", "manifest-backend-health-recovery-runtime-describe-secrets", "manifest-backend-health-recovery-runtime-get-secret-values", "manifest-backend-health-recovery-runtime-list-secret-versions", "manifest-backend-health-recovery-runtime-secret-resource-policy", "manifest-backend-health-recovery-runtime-repository-policy", "manifest-refresh-stage-a-provider-log-groups", "manifest-refresh-stage-a-storage-approval-key-describe", "manifest-refresh-stage-a-storage-approval-key-policy", "release-verify-signature", "manifest-backend-health-recovery-register-legacy-task-definition", "manifest-backend-health-recovery-update-service", "release-root-attestation-verify", "release-root-attestation-describe-key", "release-root-attestation-read-key-policy", "release-root-attestation-read-key-tags"],
   [STAGE_A_RECOVERY_MODE]: stageACapabilitiesFor(STAGE_A_RECOVERY_MODE),
@@ -289,6 +292,7 @@ export function buildProductionDependencyClosure() {
       STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION: "the independently authorized exact refresh-only plan uses its exact release journal, live-policy read, Stage-A state object, and canonical outer lock boundary",
       INITIAL_ACTIVATION_POLICY_RECONCILIATION: "root performs read-only preparation; the purpose-bound INITIAL_ACTIVATION_RECONCILER GitHub Actions OIDC principal (arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler) publishes only the exact InitialActivationLifecycle managed-policy version after production environment approval",
       PROVIDER_READONLY_POLICY_RECONCILIATION: "root performs exact target read-only preparation; independently approved execution uses the allowlisted reconciler and conditional S3 journal to publish at most one exact ProviderReadOnly managed-policy version",
+      MIXED_DUAL_SLOT_RECOVERY: "the protected recovery executor removes only AWSCURRENT from the seven exact reviewed historical versions under the source-bound capability and authorization contracts",
       ROTATION_OVERLAP: "the source-owned overlap candidate builder derives the complete runtime dependency graph before its governed registration",
       ROTATION_CLEANUP: "cleanup activates an already authenticated overlap/cleanup candidate and registers nothing",
       ROLLBACK_RECONCILIATION: "rollback viability uses immutable image/resource identity and performs no candidate registration",
@@ -317,7 +321,9 @@ export function assertChangedAwsCallClosure(scanned, graph) {
     const stageAModes = STAGE_A_CAPABILITY_MODES[contract.capabilityId];
     const resourcesCompatible = stageAModes ? same(capability?.resources, contract.resources) : contract.resources.every((resource) => capability?.resources?.includes(resource)
       || (resource === SERVICE && capability?.resources?.includes("arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/*")));
-    const releaseProbe = contract.identity !== "RELEASE_DEPLOYER" || ["direct", "direct-live-read"].includes(capability?.probe) && capability?.probeIds?.length;
+    const releaseProbe = contract.identity !== "RELEASE_DEPLOYER"
+      || ["direct", "direct-live-read"].includes(capability?.probe) && capability?.probeIds?.length
+      || contract.capabilityId === "mixed-recovery-remove-awscurrent" && capability?.probe === "administrator-simulation";
     if (!capability || capability.action !== contract.action || capability.identity !== contract.identity || !resourcesCompatible
       || !capability.policy?.sourceFile || !releaseProbe || stageAModes && capability.mutation !== STAGE_A_MUTATING_CAPABILITIES.has(contract.capabilityId)) {
       throw new Error(`Production AWS call lacks exact IAM/capability/preflight closure: ${contract.sourceFile} ${contract.action}.`);
@@ -331,6 +337,7 @@ export function assertChangedAwsCallClosure(scanned, graph) {
       : contract.sourceFile.endsWith("deploy-ecs-service.sh")
       ? ["NORMAL", "ROTATION_OVERLAP", "ROTATION_CLEANUP"]
       : contract.sourceFile.endsWith("production-normal-backend-activation.mjs") ? ["NORMAL"]
+      : contract.sourceFile.endsWith("recover-production-mixed-dual-slot-topology.mjs") ? [MIXED_DUAL_SLOT_RECOVERY_MODE]
       : contract.sourceFile.endsWith("run-production-initial-activation-lifecycle-policy-reconciliation.mjs") || contract.sourceFile.endsWith("production-initial-activation-policy-reconciliation.mjs") ? [INITIAL_ACTIVATION_POLICY_RECONCILIATION_MODE] : ["BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"];
     if (contract.sourceFile.endsWith("reconcile-production-provider-readonly-policy.mjs")) return { ...contract, reachableMode: [PROVIDER_READONLY_POLICY_RECONCILIATION_MODE], executionPrincipal: contract.identity, sourcePolicyPresent: true, generatedManifestPresent: true, capabilityGraphPresent: true, administratorPreflightPresent: true, runtimePreflightPresent: true, negativeTestPresent: true };
     return { ...contract, reachableMode, executionPrincipal: contract.identity, sourcePolicyPresent: true, generatedManifestPresent: true, capabilityGraphPresent: true, administratorPreflightPresent: true, runtimePreflightPresent: true, negativeTestPresent: true };
