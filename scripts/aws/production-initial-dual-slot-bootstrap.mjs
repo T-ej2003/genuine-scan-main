@@ -13,6 +13,7 @@ import {
 } from "../security/production-initial-migration-source-advance.mjs";
 import { deriveLegacyRotationBaseline } from "./production-legacy-rotation-baseline.mjs";
 import { assertCompletedRebaselinePayload, generateRebaselineMaterial, PARTIAL_REBASELINE_RECOVERY_ORIGINAL_SOURCE_SHA, fingerprint as secureFingerprint } from "./production-dual-slot-rebaseline-contract.mjs";
+import { MIXED_DUAL_SLOT_RECOVERY_ORDER, MIXED_DUAL_SLOT_RETAINED_HISTORY, MIXED_DUAL_SLOT_RETAINED_HISTORY_CANONICAL_ID } from "./production-mixed-dual-slot-recovery-contract.mjs";
 
 export { deriveLegacyRotationBaseline } from "./production-legacy-rotation-baseline.mjs";
 
@@ -238,18 +239,21 @@ export function assertInitialDualSlotBindings(bindings) {
   const refs = [bindings?.jwt?.currentSecretId, bindings?.jwt?.previousSecretId, bindings?.jwt?.pendingSecretId, bindings?.qr?.privateCurrentSecretId, bindings?.qr?.privatePendingSecretId, bindings?.qr?.publicCurrentSecretId, bindings?.qr?.publicPreviousSecretId, bindings?.qr?.publicPendingSecretId, bindings?.qr?.currentKeyVersionSecretId, bindings?.qr?.previousKeyVersionSecretId];
   if (refs.some((value) => !SECRET_ARN.test(String(value || ""))) || new Set(refs).size !== refs.length) throw new Error("Initial dual-slot bindings must contain distinct production secret ARNs.");
   if (!VERSION.test(bindings?.qr?.previousKeyVersion || "")) throw new Error("Initial dual-slot previous QR key version is invalid.");
-  if (![2, 3].includes(bindings?.schemaVersion) || bindings?.kind !== INITIAL_DUAL_SLOT_ROTATION_BINDINGS_KIND || bindings?.producer !== INITIAL_DUAL_SLOT_ROTATION_BINDINGS_PRODUCER || !SHA40.test(bindings?.sourceSha || "") || !ROTATION_ID.test(bindings?.rotationId || "")) throw new Error("Initial dual-slot identity binding is invalid.");
+  if (![2, 3, 4].includes(bindings?.schemaVersion) || bindings?.kind !== INITIAL_DUAL_SLOT_ROTATION_BINDINGS_KIND || bindings?.producer !== INITIAL_DUAL_SLOT_ROTATION_BINDINGS_PRODUCER || !SHA40.test(bindings?.sourceSha || "") || !ROTATION_ID.test(bindings?.rotationId || "")) throw new Error("Initial dual-slot identity binding is invalid.");
   if (bindings.schemaVersion === 3) {
     const evidence = assertProductionSupersessionEvidence(bindings.supersessionEvidence);
     assertProductionStaleSupersessionPredecessor(bindings.supersessionPredecessor, { sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, supersessionEvidence: evidence });
   } else if (bindings.supersessionEvidence !== undefined || bindings.supersessionPredecessor !== undefined) throw new Error("Ordinary initial bindings cannot carry stale-supersession authority.");
+  if (bindings.schemaVersion === 4) {
+    if (canonical(bindings.retainedHistory) !== canonical(MIXED_DUAL_SLOT_RETAINED_HISTORY) || bindings.retainedHistoryCanonicalId !== MIXED_DUAL_SLOT_RETAINED_HISTORY_CANONICAL_ID) throw new Error("Initial dual-slot retained-history binding is invalid.");
+  } else if (bindings.retainedHistory !== undefined || bindings.retainedHistoryCanonicalId !== undefined) throw new Error("Only exact recovery handoff bindings may carry retained history.");
   if (bindings?.ecs && JSON.stringify(bindings.ecs) !== JSON.stringify(rotationBindingsToTaskBindings(bindings))) throw new Error("Initial dual-slot ECS bindings do not match the canonical SDK bindings.");
   return true;
 }
 
 function assertInitialBindingSchemaClosed(bindings) {
   const exact = (value, keys, label) => { if (!value || typeof value !== "object" || Array.isArray(value) || JSON.stringify(Object.keys(value).sort()) !== JSON.stringify([...keys].sort())) throw new Error(`${label} schema is not closed.`); };
-  exact(bindings, ["schemaVersion", "kind", "producer", "sourceSha", "rotationId", "legacy", "jwt", "qr", "ecs", ...(bindings.schemaVersion === 3 ? ["supersessionEvidence", "supersessionPredecessor"] : [])], "Initial dual-slot bindings");
+  exact(bindings, ["schemaVersion", "kind", "producer", "sourceSha", "rotationId", "legacy", "jwt", "qr", "ecs", ...(bindings.schemaVersion === 3 ? ["supersessionEvidence", "supersessionPredecessor"] : []), ...(bindings.schemaVersion === 4 ? ["retainedHistory", "retainedHistoryCanonicalId"] : [])], "Initial dual-slot bindings");
   exact(bindings.legacy, ["jwtCurrent", "qrPrivateCurrent", "qrPublicCurrent", "qrCurrentVersion"], "Initial dual-slot legacy bindings");
   exact(bindings.jwt, ["currentSecretId", "previousSecretId", "pendingSecretId"], "Initial dual-slot JWT bindings");
   exact(bindings.qr, ["privateCurrentSecretId", "privatePendingSecretId", "publicCurrentSecretId", "publicPreviousSecretId", "publicPendingSecretId", "currentKeyVersionSecretId", "previousKeyVersionSecretId", "previousKeyVersion", "pendingKeyVersion"], "Initial dual-slot QR bindings");
@@ -295,13 +299,46 @@ function assertSchemaV3PreviousPayload(slot, payload, identity) {
   if (canonicalSha256(payload) !== identity.payloadSha256 || (payload.materialFingerprint || null) !== identity.materialFingerprint || (payload.keyVersion || null) !== identity.keyVersion) throw new Error(`Initial ${slot} supersession predecessor payload is not authenticated.`);
 }
 
-export function verifyLiveInitialDualSlotBindingWithRunner({ run, bindings, proveDescendant } = {}) {
+function retainedHistoryPayloadIdentity(slot, arn, versionId, payload, payloadHash = canonicalSha256) {
+  return { arn, versionId, stagingLabels: ["AWSPREVIOUS"], payloadSha256: payloadHash(payload, slot), schemaKeys: Object.keys(payload || {}).sort(), sourceSha: payload?.sourceSha ?? null, rotationId: payload?.rotationId ?? null, slot: payload?.slot, materialFingerprint: payload?.materialFingerprint ?? null, keyVersion: payload?.keyVersion ?? null };
+}
+
+function assertSchemaV4SlotTopology(described, slot, retainedHistory) {
+  const previous = retainedHistory[slot];
+  const labelled = Object.entries(described.VersionIdsToStages || {}).filter(([, labels]) => Array.isArray(labels) && labels.length);
+  const current = labelled.filter(([, labels]) => JSON.stringify(labels) === '["AWSCURRENT"]');
+  if (labelled.length !== 2 || current.length !== 1 || current[0][0] === previous.versionId || canonical(labelled.find(([versionId]) => versionId === previous.versionId)?.[1]) !== canonical(["AWSPREVIOUS"])) throw new Error(`Initial ${slot} retained-history version topology is not authenticated.`);
+  return { currentVersionId: current[0][0], previousVersionId: previous.versionId };
+}
+
+async function authenticateMixedRecoveryRetainedHistory({ send, resources, descriptions, payloadHash }) {
+  const hasPrevious = Object.values(descriptions).some(({ VersionIdsToStages = {} }) => Object.values(VersionIdsToStages).some((labels) => labels?.includes("AWSPREVIOUS")));
+  if (!hasPrevious) return undefined;
+  const observed = {};
+  for (const slot of MIXED_DUAL_SLOT_RECOVERY_ORDER) {
+    const expected = MIXED_DUAL_SLOT_RETAINED_HISTORY[slot];
+    const described = descriptions[slot];
+    if (resources[slot] !== expected.arn || described?.ARN !== expected.arn) throw new Error(`Initial ${slot} retained-history resource is not authenticated.`);
+    const labelled = Object.entries(described.VersionIdsToStages || {}).filter(([, labels]) => Array.isArray(labels) && labels.length);
+    const previous = labelled.filter(([, labels]) => labels.includes("AWSPREVIOUS"));
+    if (previous.length !== 1 || previous[0][0] !== expected.versionId || JSON.stringify(previous[0][1]) !== '["AWSPREVIOUS"]' || labelled.some(([versionId, labels]) => versionId !== expected.versionId && JSON.stringify(labels) !== '["AWSCURRENT"]') || labelled.filter(([, labels]) => labels.includes("AWSCURRENT")).length > 1) throw new Error(`Initial ${slot} retained-history topology is not exact.`);
+    const response = await send(new GetSecretValueCommand({ SecretId: expected.arn, VersionId: expected.versionId }));
+    if (response?.VersionId !== expected.versionId || typeof response.SecretString !== "string") throw new Error(`Initial ${slot} retained-history version is not authenticated.`);
+    let payload; try { payload = JSON.parse(response.SecretString); } catch { throw new Error(`Initial ${slot} retained-history payload is malformed.`); }
+    observed[slot] = retainedHistoryPayloadIdentity(slot, described.ARN, response.VersionId, payload, payloadHash);
+    if (canonical(observed[slot]) !== canonical(expected)) throw new Error(`Initial ${slot} retained-history payload identity is not authenticated.`);
+  }
+  return Object.freeze(observed);
+}
+
+export function verifyLiveInitialDualSlotBindingWithRunner({ run, bindings, proveDescendant, retainedHistoryPayloadHash } = {}) {
   if (typeof run !== "function") throw new Error("Initial binding origin verification runner is required.");
   assertInitialBindingSchemaClosed(bindings);
   assertInitialDualSlotBindings(bindings);
   const resources = { jwtPrevious: bindings.jwt.previousSecretId, jwtPending: bindings.jwt.pendingSecretId, qrPrivatePending: bindings.qr.privatePendingSecretId, qrPublicPrevious: bindings.qr.publicPreviousSecretId, qrPublicPending: bindings.qr.publicPendingSecretId, qrCurrentVersion: bindings.qr.currentKeyVersionSecretId, qrPreviousVersion: bindings.qr.previousKeyVersionSecretId };
   let evidence;
   let predecessor;
+  const retainedHistory = bindings.schemaVersion === 4 ? bindings.retainedHistory : undefined;
   if (bindings.schemaVersion === 3) {
     evidence = assertProductionSupersessionEvidence(bindings.supersessionEvidence);
     predecessor = assertProductionStaleSupersessionPredecessor(bindings.supersessionPredecessor, { sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, supersessionEvidence: evidence });
@@ -315,6 +352,8 @@ export function verifyLiveInitialDualSlotBindingWithRunner({ run, bindings, prov
     if (described.Name !== name || described.ARN !== arn || !described.VersionIdsToStages) throw new Error(`Initial ${slot} resource identity is not authenticated.`);
     const { currentVersionId: versionId, previousVersionId } = predecessor
       ? assertSchemaV3SlotTopology(described, slot, evidence, predecessor)
+      : retainedHistory
+        ? assertSchemaV4SlotTopology(described, slot, retainedHistory)
       : (() => {
         if (Object.keys(described.VersionIdsToStages).length !== 1) throw new Error(`Initial ${slot} resource identity is not authenticated.`);
         const [[currentVersionId, stages]] = Object.entries(described.VersionIdsToStages);
@@ -331,7 +370,8 @@ export function verifyLiveInitialDualSlotBindingWithRunner({ run, bindings, prov
       if (previous.VersionId !== previousVersionId || typeof previous.SecretString !== "string") throw new Error(`Initial ${slot} predecessor version is not authenticated.`);
       let previousPayload;
       try { previousPayload = JSON.parse(previous.SecretString); } catch { throw new Error(`Initial ${slot} predecessor payload is malformed.`); }
-      assertSchemaV3PreviousPayload(slot, previousPayload, predecessor.slotIdentities[slot]);
+      if (predecessor) assertSchemaV3PreviousPayload(slot, previousPayload, predecessor.slotIdentities[slot]);
+      else if (canonical(retainedHistoryPayloadIdentity(slot, arn, previousVersionId, previousPayload, retainedHistoryPayloadHash)) !== canonical(retainedHistory[slot])) throw new Error(`Initial ${slot} retained-history payload is not authenticated.`);
     }
   }
   if (observedSlots.qrPrivatePending.keyVersion && observedSlots.qrPrivatePending.keyVersion !== observedSlots.qrPublicPending.keyVersion) throw new Error("Initial QR pending payload identities are inconsistent.");
@@ -352,11 +392,11 @@ export function verifyLiveInitialDualSlotBindingWithRunner({ run, bindings, prov
     assertPendingMaterial({ jwt: payloads.jwt.value, qrPrivate: payloads.qrPrivate.value, qrPublic: payloads.qrPublic.value, qrKeyVersion: payloads.qrPublic.keyVersion });
     supersessionPredecessorIdentitySha256 = predecessor.predecessorIdentitySha256;
   }
-  const body = { schemaVersion: 1, kind: "PRODUCTION_INITIAL_DUAL_SLOT_BINDING_ORIGIN", producer: INITIAL_DUAL_SLOT_ROTATION_BINDINGS_PRODUCER, sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, resources, observedSlots, ...(supersessionPredecessorIdentitySha256 ? { supersessionPredecessorIdentitySha256 } : {}) };
+  const body = { schemaVersion: 1, kind: "PRODUCTION_INITIAL_DUAL_SLOT_BINDING_ORIGIN", producer: INITIAL_DUAL_SLOT_ROTATION_BINDINGS_PRODUCER, sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, resources, observedSlots, ...(supersessionPredecessorIdentitySha256 ? { supersessionPredecessorIdentitySha256 } : {}), ...(retainedHistory ? { retainedHistoryCanonicalId: MIXED_DUAL_SLOT_RETAINED_HISTORY_CANONICAL_ID } : {}) };
   return Object.freeze({ ...body, bindingSha256: canonicalSha256(bindings), originSha256: canonicalSha256(body) });
 }
 
-export async function bootstrapInitialDualSlotRotation({ send, taskDefinition, sourceSha, rotationId, legacyBindings, supersessionEvidence, supersessionPredecessor, outputFile, repositoryRoot = process.cwd(), requireExisting = false, requiredWritePlan } = {}) {
+export async function bootstrapInitialDualSlotRotation({ send, taskDefinition, sourceSha, rotationId, legacyBindings, supersessionEvidence, supersessionPredecessor, outputFile, repositoryRoot = process.cwd(), requireExisting = false, requiredWritePlan, retainedHistoryPayloadHash } = {}) {
   if (typeof send !== "function") throw new Error("Initial dual-slot bootstrap Secrets Manager sender is required.");
   if (!SHA40.test(sourceSha || "") || !ROTATION_ID.test(rotationId || "")) throw new Error("Initial dual-slot source/rotation identity is invalid.");
   if (typeof outputFile !== "string" || !outputFile) throw new Error("Initial dual-slot rotation binding output is required.");
@@ -371,12 +411,15 @@ export async function bootstrapInitialDualSlotRotation({ send, taskDefinition, s
     if (canonical(observed.predecessor) !== canonical(checkedSupersessionPredecessor)) throw new Error("Live stale-supersession predecessor changed before binding generation.");
   }
   const resources = {};
+  const descriptions = {};
   const created = [];
   for (const [slot, name] of Object.entries(INITIAL_DUAL_SLOT_NAMES)) {
     const result = await describeOrCreate({ send, name, requireExisting });
     resources[slot] = exactArn(result.response, name);
+    descriptions[slot] = result.response;
     if (result.created) created.push(slot);
   }
+  const retainedHistory = checkedSupersessionEvidence ? undefined : await authenticateMixedRecoveryRetainedHistory({ send, resources, descriptions, payloadHash: retainedHistoryPayloadHash });
   if (checkedSupersessionEvidence && Object.entries(resources).some(([slot, arn]) => checkedSupersessionEvidence.resources[slot]?.arn !== arn)) throw new Error("Stale-supersession evidence resources do not match the initial binding topology.");
   if (requireExisting && (!Array.isArray(requiredWritePlan) || requiredWritePlan.length !== STALE_ROTATION_SUPERSESSION_WRITE_ORDER.length || requiredWritePlan.some((entry, index) => entry?.slot !== STALE_ROTATION_SUPERSESSION_WRITE_ORDER[index] || entry.secretArn !== resources[entry.slot] || !/^[a-f0-9]{64}$/.test(entry.payloadSha256 || "")))) throw new Error("Governed supersession bootstrap requires the exact approved seven-write plan.");
   const writePlanBySlot = new Map((requiredWritePlan || []).map((entry) => [entry.slot, entry]));
@@ -415,13 +458,14 @@ export async function bootstrapInitialDualSlotRotation({ send, taskDefinition, s
   await ensure("qrCurrentVersion", { arn: resources.qrCurrentVersion, name: "QR current key version", expected: { ...versionSlot(baseline.qrCurrentVersion, "current", sourceSha), ...handoff }, rotationId });
   await ensure("qrPreviousVersion", { arn: resources.qrPreviousVersion, name: "QR previous key version", expected: { ...versionSlot("", "previous-empty", sourceSha), ...handoff }, rotationId });
   const bindings = {
-    schemaVersion: checkedSupersessionPredecessor ? 3 : 2,
+    schemaVersion: checkedSupersessionPredecessor ? 3 : retainedHistory ? 4 : 2,
     kind: INITIAL_DUAL_SLOT_ROTATION_BINDINGS_KIND,
     producer: INITIAL_DUAL_SLOT_ROTATION_BINDINGS_PRODUCER,
     sourceSha,
     rotationId,
     legacy: baseline,
     ...(checkedSupersessionPredecessor ? { supersessionEvidence: checkedSupersessionEvidence, supersessionPredecessor: checkedSupersessionPredecessor } : {}),
+    ...(retainedHistory ? { retainedHistory, retainedHistoryCanonicalId: MIXED_DUAL_SLOT_RETAINED_HISTORY_CANONICAL_ID } : {}),
     jwt: { currentSecretId: baseline.jwtCurrent, previousSecretId: resources.jwtPrevious, pendingSecretId: resources.jwtPending },
     qr: {
       privateCurrentSecretId: baseline.qrPrivateCurrent,
