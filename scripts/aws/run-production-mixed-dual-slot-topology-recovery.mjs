@@ -8,6 +8,8 @@ import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.m
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, readStageBPrivateFileBytes, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import { MIXED_DUAL_SLOT_RECOVERY_LIVE_PREDECESSOR, MIXED_DUAL_SLOT_RECOVERY_ORDER, MIXED_DUAL_SLOT_PREDECESSOR, assertMixedDualSlotRecoveryPreparation, resolveMixedDualSlotRecoveryAuthorizationArtifact } from "./production-mixed-dual-slot-recovery-contract.mjs";
 import { readMixedDualSlotRecoveryIamCapabilityPreflight } from "./preflight-production-mixed-dual-slot-recovery-iam.mjs";
+import { createMixedDualSlotRecoveryIamAttestation } from "./production-mixed-dual-slot-recovery-iam-attestation.mjs";
+import { createRootAttestationKmsSigner } from "./production-root-attestation-signer.mjs";
 import { executeMixedDualSlotRecovery, prepareMixedDualSlotRecovery } from "./recover-production-mixed-dual-slot-topology.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -62,12 +64,16 @@ async function main(argv = process.argv.slice(2)) {
   protectedSource(sourceSha);
   const { secrets, sts } = clients(mode); await assertReleaseDeployer(sts);
   if (mode === "--prepare") {
-    const iamCapabilityPreflight = readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha });
+    const rootRun = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "default", region: "eu-west-2" });
+    const iamCapabilityPreflight = readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, run: rootRun });
+    const iamCapabilityAttestation = createMixedDualSlotRecoveryIamAttestation({ preflight: iamCapabilityPreflight, sign: createRootAttestationKmsSigner({ run: rootRun }) });
     const preparation = await prepareMixedDualSlotRecovery({ send: (command) => secrets.send(command), sourceSha, livePredecessor: readLivePredecessor(), iamCapabilityPreflight });
     const output = assertStageBArtifactPath({ artifactPath: path.resolve(required(argv, "--output")), repositoryRoot: root, label: "Mixed recovery preparation", allowExisting: false });
+    const iamAttestationOutput = assertStageBArtifactPath({ artifactPath: `${output}.iam-attestation.json`, repositoryRoot: root, label: "Mixed recovery IAM attestation", allowExisting: false });
     ensureStageBPrivateDirectory({ directory: path.dirname(output), repositoryRoot: root, label: "Mixed recovery preparation directory" });
     writeStageBPrivateFileAtomic({ filePath: output, bytes: Buffer.from(`${JSON.stringify(preparation, null, 2)}\n`), repositoryRoot: root, label: "Mixed recovery preparation" });
-    return { status: "PREPARED", preparationSha256: preparation.preparationSha256, output };
+    writeStageBPrivateFileAtomic({ filePath: iamAttestationOutput, bytes: Buffer.from(`${JSON.stringify(iamCapabilityAttestation, null, 2)}\n`), repositoryRoot: root, label: "Mixed recovery IAM attestation" });
+    return { status: "PREPARED", preparationSha256: preparation.preparationSha256, output, iamAttestationOutput };
   }
   if (process.env.GITHUB_ACTIONS !== "true" || process.env.GITHUB_WORKFLOW_REF !== EXECUTION_WORKFLOW_REF || process.env.GITHUB_SHA !== sourceSha) throw new Error("Mixed recovery execution is restricted to its protected-main execution workflow.");
   const captured = readStageBPrivateFileBytes({ filePath: required(argv, "--preparation"), repositoryRoot: root, label: "Mixed recovery preparation" });

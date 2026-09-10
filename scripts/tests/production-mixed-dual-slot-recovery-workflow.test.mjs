@@ -7,6 +7,7 @@ import path from "node:path";
 import test from "node:test";
 import { MIXED_DUAL_SLOT_PREDECESSOR, MIXED_DUAL_SLOT_RECOVERY_ARTIFACT, MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN, MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION, MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, assertMixedDualSlotRecoveryAuthorization, buildMixedDualSlotRecoveryIamPreflight, buildMixedDualSlotRecoveryPreparation, createMixedDualSlotRecoveryAuthorization, resolveMixedDualSlotRecoveryAuthorizationArtifact } from "../aws/production-mixed-dual-slot-recovery-contract.mjs";
 import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from "../aws/production-github-environment-approval.mjs";
+import { createMixedDualSlotRecoveryIamAttestation } from "../aws/production-mixed-dual-slot-recovery-iam-attestation.mjs";
 
 const root = path.resolve(new URL(".", import.meta.url).pathname, "../..");
 const sourceSha = "a".repeat(40); const observedAt = "2026-09-10T00:00:00.000Z"; const now = new Date("2026-09-10T00:05:00.000Z");
@@ -15,7 +16,8 @@ const preparation = buildMixedDualSlotRecoveryPreparation({ sourceSha, predecess
 const preparationFileSha256 = "d".repeat(64);
 const approvalFor = (workflowRef) => createProductionEnvironmentApprovalEvidence({ environmentConfig: { name: "production", id: 17, can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{ type: "User", reviewer: { id: 7, login: "checker" } }] }] }, repository: "T-ej2003/genuine-scan-main", environment: "production", sourceSha, workflowRef, eventName: "workflow_dispatch", workflowRunId: "123456", workflowRunAttempt: "1", executionActor: "operator", observedAt, actualApproval: { state: "approved", environmentId: 17, environmentName: "production", userId: 7, userLogin: "checker" } });
 const evidence = approvalFor(PRODUCTION_ENVIRONMENT_APPROVAL.mixedDualSlotRecoveryAuthorizationWorkflowRef);
-const authorization = createMixedDualSlotRecoveryAuthorization({ preparation, preparationFileSha256, protectedEnvironmentApprovalEvidence: evidence, reason: "Exact mixed topology recovery", approverRole: "production-independent-checker", verificationRef: "recovery-1", now });
+const iamCapabilityAttestation = createMixedDualSlotRecoveryIamAttestation({ preflight: iamCapabilityPreflight, sign: () => "c2ln", now });
+const authorization = createMixedDualSlotRecoveryAuthorization({ preparation, preparationFileSha256, iamCapabilityAttestation, iamCapabilityAttestationFileSha256: "e".repeat(64), verifyIamCapabilityAttestation: () => true, protectedEnvironmentApprovalEvidence: evidence, reason: "Exact mixed topology recovery", approverRole: "production-independent-checker", verificationRef: "recovery-1", now });
 
 test("protected workflows expose only canonical artifact coordinates and gate credentials before mutation", () => {
   const authorize = readFileSync(path.join(root, ".github/workflows/authorize-production-mixed-dual-slot-topology-recovery.yml"), "utf8");
@@ -25,7 +27,8 @@ test("protected workflows expose only canonical artifact coordinates and gate cr
   assert.match(authorize, /name: Verify effective recovery IAM capability/);
   assert.match(authorize, /needs: preflight/);
   assert.ok(authorize.indexOf("Verify effective recovery IAM capability") < authorize.indexOf("environment: production"));
-  assert.match(authorize, /verify-production-mixed-dual-slot-recovery-preparation\.mjs/);
+  assert.match(authorize, /verify-production-mixed-dual-slot-recovery-iam-attestation\.mjs/);
+  assert.match(authorize, /iam_preflight_attestation_base64/);
   for (const workflow of [authorize, execute]) { assert.match(workflow, /source-before\.sha256/); assert.match(workflow, /source-after\.sha256/); assert.match(workflow, /cmp --silent/); assert.match(workflow, /chmod 600 "\$workdir\/preparation\.json"/); }
   assert.ok(execute.indexOf("environment: production") < execute.indexOf("configure-aws-credentials") && execute.indexOf("configure-aws-credentials") < execute.indexOf("run-production-mixed-dual-slot-topology-recovery.mjs --execute"));
   assert.match(execute, /secretsmanager:UpdateSecretVersionStage/); assert.doesNotMatch(execute, /secretsmanager:(?:PutSecretValue|CreateSecret|DeleteSecret)/);
@@ -49,7 +52,8 @@ test("production entrypoint has no operator-selectable verification seams", () =
 
 test("authorization rejects other workflows and resolver authenticates exact run, archive and attempt", () => {
   assert.doesNotThrow(() => assertMixedDualSlotRecoveryAuthorization(authorization, { preparation, preparationFileSha256, sourceSha, now }));
-  assert.throws(() => createMixedDualSlotRecoveryAuthorization({ preparation, preparationFileSha256, protectedEnvironmentApprovalEvidence: approvalFor(PRODUCTION_ENVIRONMENT_APPROVAL.dualSlotRebaselineWorkflowRef), reason: "x", approverRole: "x", verificationRef: "x", now }), /dedicated protected workflow identity/i);
+  assert.throws(() => createMixedDualSlotRecoveryAuthorization({ preparation, preparationFileSha256, iamCapabilityAttestation, iamCapabilityAttestationFileSha256: "e".repeat(64), verifyIamCapabilityAttestation: () => false, protectedEnvironmentApprovalEvidence: evidence, reason: "x", approverRole: "x", verificationRef: "x", now }), /authenticated exact capability proof/i);
+  assert.throws(() => createMixedDualSlotRecoveryAuthorization({ preparation, preparationFileSha256, iamCapabilityAttestation, iamCapabilityAttestationFileSha256: "e".repeat(64), verifyIamCapabilityAttestation: () => true, protectedEnvironmentApprovalEvidence: approvalFor(PRODUCTION_ENVIRONMENT_APPROVAL.dualSlotRebaselineWorkflowRef), reason: "x", approverRole: "x", verificationRef: "x", now }), /dedicated protected workflow identity/i);
   const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-mixed-auth-test-")); const json = path.join(directory, "authorization.json"); const archive = path.join(directory, "authorization.zip");
   try {
     writeFileSync(json, `${JSON.stringify(authorization)}\n`); execFileSync("zip", ["-q", "-j", archive, json]); const bytes = readFileSync(archive); const digest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;

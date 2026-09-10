@@ -3,6 +3,8 @@ import fs from "node:fs";
 import test from "node:test";
 import { MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN, MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION, MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, assertMixedDualSlotRecoveryIamPreflight } from "../aws/production-mixed-dual-slot-recovery-contract.mjs";
 import { readMixedDualSlotRecoveryIamCapabilityPreflight } from "../aws/preflight-production-mixed-dual-slot-recovery-iam.mjs";
+import { assertMixedDualSlotRecoveryIamAttestation, createMixedDualSlotRecoveryIamAttestation } from "../aws/production-mixed-dual-slot-recovery-iam-attestation.mjs";
+import { createPinnedRootAttestationVerifier, ROOT_ATTESTATION_KEY_ALIAS_ARN, ROOT_ATTESTATION_SIGNING_ALGORITHM } from "../aws/production-root-attestation-key.mjs";
 
 const sourceSha = "a".repeat(40);
 const observedAt = new Date("2026-09-10T00:00:00.000Z");
@@ -77,4 +79,25 @@ test("preflight canonical identity rejects wildcard, missing, extra and stale su
     { resourcePolicies: preflight.resourcePolicies.map((value, index) => index ? value : { ...value, resourcePolicyAccess: "UNVERIFIED" }) },
   ]) assert.throws(() => assertMixedDualSlotRecoveryIamPreflight({ ...preflight, ...changed }, { sourceSha }), /identity|hash|resource policy/);
   assert.throws(() => assertMixedDualSlotRecoveryIamPreflight(preflight, { sourceSha, now: new Date("2026-09-10T01:00:00.000Z"), requireFresh: true }), /stale/);
+});
+
+test("root-signed capability attestation binds the exact live preflight before approval", () => {
+  const preflight = readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now: observedAt, run: runner() });
+  const attestation = createMixedDualSlotRecoveryIamAttestation({ preflight, now: new Date("2026-09-10T00:05:00.000Z"), sign: ({ digest, keyArn, signingAlgorithm }) => {
+    assert.equal(digest.length, 32);
+    assert.equal(keyArn, ROOT_ATTESTATION_KEY_ALIAS_ARN); assert.equal(signingAlgorithm, ROOT_ATTESTATION_SIGNING_ALGORITHM); return "c2ln";
+  } });
+  assert.doesNotThrow(() => assertMixedDualSlotRecoveryIamAttestation(attestation, { preflight, sourceSha, now: new Date("2026-09-10T00:05:00.000Z"), verify: () => true }));
+  for (const changed of [{ preflightSha256: "f".repeat(64) }, { sourceSha: "b".repeat(40) }, { resources: ["*"] }]) assert.throws(() => assertMixedDualSlotRecoveryIamAttestation({ ...attestation, ...changed }, { preflight, sourceSha, now: new Date("2026-09-10T00:05:00.000Z"), verify: () => true }), /authenticated exact capability proof/);
+  assert.throws(() => assertMixedDualSlotRecoveryIamAttestation({ ...attestation, signatureBase64: "YmFk" }, { preflight, sourceSha, now: new Date("2026-09-10T00:05:00.000Z"), verify: ({ signature }) => signature.toString("base64") === "c2ln" }), /authenticated exact capability proof/);
+  assert.throws(() => assertMixedDualSlotRecoveryIamAttestation(attestation, { preflight, sourceSha, now: new Date("2026-09-10T00:05:00.000Z"), verify: () => false }), /authenticated exact capability proof/);
+});
+
+test("pinned root verifier is fail closed and invokes exact RSA-PSS verification", () => {
+  let args;
+  const verify = createPinnedRootAttestationVerifier({ execute: (_command, captured) => { args = captured; } });
+  assert.equal(verify({ keyArn: ROOT_ATTESTATION_KEY_ALIAS_ARN, signingAlgorithm: ROOT_ATTESTATION_SIGNING_ALGORITHM, digest: Buffer.alloc(32), signature: Buffer.from("sig") }), true);
+  assert.deepEqual(args.slice(0, 5), ["pkeyutl", "-verify", "-pubin", "-keyform", "DER"]);
+  assert.equal(verify({ keyArn: "wrong", signingAlgorithm: ROOT_ATTESTATION_SIGNING_ALGORITHM, digest: Buffer.alloc(32), signature: Buffer.from("sig") }), false);
+  assert.equal(createPinnedRootAttestationVerifier({ execute: () => { throw new Error("invalid"); } })({ keyArn: ROOT_ATTESTATION_KEY_ALIAS_ARN, signingAlgorithm: ROOT_ATTESTATION_SIGNING_ALGORITHM, digest: Buffer.alloc(32), signature: Buffer.from("sig") }), false);
 });

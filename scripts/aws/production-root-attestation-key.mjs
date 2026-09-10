@@ -1,9 +1,11 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 
 export const ROOT_ATTESTATION_KEY_ALIAS_ARN = "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation";
 export const ROOT_ATTESTATION_SIGNING_ALGORITHM = "RSASSA_PSS_SHA_256";
+export const ROOT_ATTESTATION_PUBLIC_KEY_DER_BASE64 = "MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAo0AyA/OQnI06IjD6ID0bOhzHHfM3jTJBXIjoO2OxexYQOfvGv/Qfes7XjHy+caOdauOELKAPXVvMNcwKQeC+ka5VEJ7vhRSCmLudvUEIv0Z2iOblzv8aoch7Y7iQdZD/GiKuDkLHO9IQvyMQ6XhPnqiFwygFVrcztLij4sBqEuGPTgxzv0c34U0tYP7bBmQRLPOQhYOLaCJCZcPQDpuQSHdrN5cBVUE4vp0KSbWGv7COKOUZMkM9GVq9TaE3gHS/EwKuT/gbv7w5kCwFdGU2CZcI74PsZtQEyngJQ/89ObNnFswSxy6w1hRDknTGKp9KZVdZogNklOorRHKiywVDJg6nlij1SRsc1lKR7OKyB+bwosmpG6NjSGFxbYnbLlEMbGN+ByN7TCFQScYxL4QHlviGcRqx+McpxgXd54r/rcIOhW9tCDE3goaHYNA/5fzRms59xajrHQ7F7TZfT2+f9IAHw8FWlU32M/ddDkwzzPXx+S/OUqgs0Ao/cPmlFomfAgMBAAE=";
 export const ROOT_ATTESTATION_KEY_DESCRIPTION = "Root-only MSCQR production evidence attestation key";
 export const ROOT_ATTESTATION_SIGNER_ARN = "arn:aws:iam::368992683803:root";
 export const ROOT_ATTESTATION_VERIFY_ROLE_ARN = "arn:aws:iam::368992683803:role/mscqr-production-release-deployer";
@@ -66,5 +68,17 @@ export function createRootAttestationKmsVerifier({ run } = {}) {
     if (keyArn !== ROOT_ATTESTATION_KEY_ALIAS_ARN || signingAlgorithm !== ROOT_ATTESTATION_SIGNING_ALGORITHM || !Buffer.isBuffer(digest) || !Buffer.isBuffer(signature)) return false;
     const immutableKeyArn = authenticateRootAttestationKey({ run });
     return withBytes("mscqr-root-attestation-verify-", { digest, signature }, ({ digest: digestFile, signature: signatureFile }) => awsJsonObject(run(["kms", "verify", "--key-id", immutableKeyArn, "--message", `fileb://${digestFile}`, "--message-type", "DIGEST", "--signature", `fileb://${signatureFile}`, "--signing-algorithm", signingAlgorithm, "--output", "json", "--no-cli-pager"]), "Root attestation KMS verification response").SignatureValid === true);
+  };
+}
+
+export function createPinnedRootAttestationVerifier({ execute = execFileSync } = {}) {
+  return ({ keyArn, signingAlgorithm, digest, signature } = {}) => {
+    if (keyArn !== ROOT_ATTESTATION_KEY_ALIAS_ARN || signingAlgorithm !== ROOT_ATTESTATION_SIGNING_ALGORITHM || !Buffer.isBuffer(digest) || digest.length !== 32 || !Buffer.isBuffer(signature) || signature.length === 0) return false;
+    return withBytes("mscqr-root-attestation-offline-", { publicKey: Buffer.from(ROOT_ATTESTATION_PUBLIC_KEY_DER_BASE64, "base64"), digest, signature }, ({ publicKey, digest: digestFile, signature: signatureFile }) => {
+      try {
+        execute("openssl", ["pkeyutl", "-verify", "-pubin", "-keyform", "DER", "-inkey", publicKey, "-in", digestFile, "-sigfile", signatureFile, "-pkeyopt", "digest:sha256", "-pkeyopt", "rsa_padding_mode:pss", "-pkeyopt", "rsa_pss_saltlen:32"], { stdio: "ignore" });
+        return true;
+      } catch { return false; }
+    });
   };
 }

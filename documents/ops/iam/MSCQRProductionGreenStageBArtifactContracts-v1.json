@@ -408,6 +408,26 @@
       "rollback": "remove-committed-or-restore-backups"
     },
     {
+      "id": "mixed-dual-slot-recovery-iam-attestation",
+      "kind": "file",
+      "producer": "scripts/aws/run-production-mixed-dual-slot-topology-recovery.mjs:--prepare",
+      "consumers": [
+        ".github/workflows/authorize-production-mixed-dual-slot-topology-recovery.yml",
+        "scripts/aws/authorize-production-mixed-dual-slot-topology-recovery.mjs",
+        "scripts/aws/verify-production-mixed-dual-slot-recovery-iam-attestation.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "mixed-dual-slot-recovery-iam-attestation",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
       "id": "mixed-dual-slot-recovery-authorization",
       "kind": "file",
       "producer": ".github/workflows/authorize-production-mixed-dual-slot-topology-recovery.yml",

@@ -167,7 +167,7 @@
         "*"
       ],
       "reachableMode": [
-        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+        "MIXED_DUAL_SLOT_RECOVERY"
       ],
       "executionPrincipal": "ROOT_OPERATOR",
       "sourcePolicyPresent": true,
@@ -186,7 +186,7 @@
         "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
       ],
       "reachableMode": [
-        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+        "MIXED_DUAL_SLOT_RECOVERY"
       ],
       "executionPrincipal": "ROOT_OPERATOR",
       "sourcePolicyPresent": true,
@@ -205,7 +205,7 @@
         "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
       ],
       "reachableMode": [
-        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+        "MIXED_DUAL_SLOT_RECOVERY"
       ],
       "executionPrincipal": "ROOT_OPERATOR",
       "sourcePolicyPresent": true,
@@ -230,7 +230,7 @@
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2"
       ],
       "reachableMode": [
-        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+        "MIXED_DUAL_SLOT_RECOVERY"
       ],
       "executionPrincipal": "ROOT_OPERATOR",
       "sourcePolicyPresent": true,
