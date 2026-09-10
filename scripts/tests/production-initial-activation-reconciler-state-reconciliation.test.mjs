@@ -23,7 +23,7 @@ const state = (serial, attachmentCount, policyArns, permissionsPolicySha256 = ou
 const before = state(1, 0, []); const after = state(2, 1, [CONTRACT.policyArn], output.after);
 const refreshPlan = () => ({ format_version: "1.2", terraform_version: "1.15.8", errored: false, complete: true, applyable: true, resource_changes: [], resource_drift: [
   { address: "aws_iam_policy.reconciler", change: { actions: ["update"], before: { attachment_count: 0, name: "MSCQRProductionInitialActivationPolicyReconciler" }, after: { attachment_count: 1, name: "MSCQRProductionInitialActivationPolicyReconciler" }, before_unknown: {}, after_unknown: {}, before_sensitive: {}, after_sensitive: {} } },
-  { address: "aws_iam_role.reconciler", change: { actions: ["update"], before: { managed_policy_arns: [], name: "mscqr-production-initial-activation-policy-reconciler" }, after: { managed_policy_arns: [CONTRACT.policyArn], name: "mscqr-production-initial-activation-policy-reconciler" }, before_unknown: {}, after_unknown: {}, before_sensitive: {}, after_sensitive: {} } },
+  { address: "aws_iam_role.reconciler", change: { actions: ["update"], before: { managed_policy_arns: [], name: "mscqr-production-initial-activation-policy-reconciler" }, after: { managed_policy_arns: [CONTRACT.policyArn], name: "mscqr-production-initial-activation-policy-reconciler" }, before_unknown: {}, after_unknown: {}, before_sensitive: { managed_policy_arns: [] }, after_sensitive: { managed_policy_arns: [false] } } },
 ], output_changes: { permissions_policy_sha256: { actions: ["update"], before: output.before, after: output.after, before_sensitive: false, after_sensitive: false, before_unknown: false, after_unknown: false } } });
 const topology = { roles: ["mscqr-production-initial-activation-policy-reconciler"], users: [], groups: [] };
 const object = { versionId: "exact-version", etag: "exact-etag" };
@@ -97,15 +97,32 @@ test("accepts only the authenticated two-field refresh-only drift and exact outp
 
 test("refresh-only sensitivity metadata permits exact false-only Terraform structures", () => {
   for (const sensitivity of [false, {}, { tags: {}, tags_all: {} }, { nested: { values: [false, { leaf: false }] } }]) {
-    const plan = refreshPlan(); for (const entry of plan.resource_drift) entry.change.before_sensitive = entry.change.after_sensitive = sensitivity;
+    const plan = refreshPlan(); plan.resource_drift[0].change.before_sensitive = plan.resource_drift[0].change.after_sensitive = sensitivity;
     assert.doesNotThrow(() => assertExactReconcilerRefreshOnlyPlan(plan, { stateBytes: before }));
   }
   for (const sensitivity of [{ secret: true }, { nested: { secret: true } }, { values: [false, true] }]) {
-    const plan = refreshPlan(); for (const entry of plan.resource_drift) entry.change.before_sensitive = entry.change.after_sensitive = sensitivity;
+    const plan = refreshPlan(); plan.resource_drift[0].change.before_sensitive = plan.resource_drift[0].change.after_sensitive = sensitivity;
     assert.throws(() => assertExactReconcilerRefreshOnlyPlan(plan, { stateBytes: before }), /sensitive/);
   }
   const mismatch = refreshPlan(); mismatch.resource_drift[0].change.before_sensitive = { tags: {} }; mismatch.resource_drift[0].change.after_sensitive = { tags_all: {} };
   assert.throws(() => assertExactReconcilerRefreshOnlyPlan(mismatch, { stateBytes: before }), /sensitivity metadata changed/);
+});
+
+test("managed-policy sensitivity masks match the exact approved collection values", () => {
+  assert.doesNotThrow(() => assertExactReconcilerRefreshOnlyPlan(refreshPlan(), { stateBytes: before }));
+  const role = (plan) => plan.resource_drift.find(({ address }) => address === "aws_iam_role.reconciler").change;
+  for (const mutate of [
+    (change) => { change.after_sensitive.managed_policy_arns = [true]; },
+    (change) => { change.before_sensitive.managed_policy_arns = [false]; },
+    (change) => { change.after_sensitive.managed_policy_arns = []; },
+    (change) => { change.after_sensitive.managed_policy_arns = [false, false]; },
+    (change) => { change.after_sensitive.managed_policy_arns = ["false"]; },
+    (change) => { change.after_sensitive.managed_policy_arns = [0]; },
+    (change) => { change.after_sensitive.managed_policy_arns = [null]; },
+    (change) => { change.after_sensitive.managed_policy_arns = [{ nested: true }]; },
+    (change) => { change.after.managed_policy_arns = [CONTRACT.policyArn, CONTRACT.policyArn]; },
+    (change) => { change.after.managed_policy_arns = ["arn:aws:iam::368992683803:policy/wrong"]; },
+  ]) { const plan = refreshPlan(); mutate(role(plan)); assert.throws(() => assertExactReconcilerRefreshOnlyPlan(plan, { stateBytes: before }), /sensitivity|value/); }
 });
 
 test("preparation and authorization bind source, state identity, plan, topology, VersionId and ETag", () => {

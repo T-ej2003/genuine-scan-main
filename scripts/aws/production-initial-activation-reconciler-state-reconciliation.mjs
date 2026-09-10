@@ -78,9 +78,28 @@ const exactDrift = (entry, expected) => {
   if (!before || !after || before[expected.field] === undefined || after[expected.field] === undefined || canonicalJson(before[expected.field]) !== canonicalJson(expected.before) || canonicalJson(after[expected.field]) !== canonicalJson(expected.after)) throw new Error("Refresh-only plan drift value is not exact.");
   const restBefore = { ...before }; const restAfter = { ...after }; delete restBefore[expected.field]; delete restAfter[expected.field];
   if (canonicalJson(restBefore) !== canonicalJson(restAfter) || Object.keys(entry.change.before_unknown || {}).length || Object.keys(entry.change.after_unknown || {}).length || entry.change.replace_paths?.length) throw new Error("Refresh-only plan drift changes fields outside the exact allowance.");
-  assertExactSensitivityStructure(entry.change.before_sensitive === undefined ? {} : entry.change.before_sensitive, entry.change.after_sensitive === undefined ? {} : entry.change.after_sensitive);
+  const beforeSensitivity = entry.change.before_sensitive === undefined ? {} : entry.change.before_sensitive;
+  const afterSensitivity = entry.change.after_sensitive === undefined ? {} : entry.change.after_sensitive;
+  if (expected.address === "aws_iam_role.reconciler" && expected.field === "managed_policy_arns") {
+    const split = (mask, value) => {
+      if (!mask || typeof mask !== "object" || Array.isArray(mask) || !Object.hasOwn(mask, expected.field)) throw new Error("Refresh-only plan managed-policy sensitivity metadata is malformed.");
+      const rest = { ...mask }; const fieldMask = rest[expected.field]; delete rest[expected.field]; assertFalseOnlySensitivityMask(value, fieldMask); return rest;
+    };
+    assertExactSensitivityStructure(split(beforeSensitivity, before[expected.field]), split(afterSensitivity, after[expected.field]));
+  } else assertExactSensitivityStructure(beforeSensitivity, afterSensitivity);
 };
 
+const assertFalseOnlySensitivityMask = (value, mask) => {
+  if (Array.isArray(value)) {
+    if (!Array.isArray(mask) || mask.length !== value.length) throw new Error("Refresh-only plan sensitivity metadata is structurally incompatible.");
+    return value.forEach((item, index) => assertFalseOnlySensitivityMask(item, mask[index]));
+  }
+  if (value && typeof value === "object") {
+    if (!mask || typeof mask !== "object" || Array.isArray(mask) || Object.keys(mask).some((key) => !Object.hasOwn(value, key))) throw new Error("Refresh-only plan sensitivity metadata is structurally incompatible.");
+    return Object.entries(mask).forEach(([key, child]) => assertFalseOnlySensitivityMask(value[key], child));
+  }
+  if (mask !== false) throw new Error("Refresh-only plan contains a sensitive or malformed value.");
+};
 const assertSensitivityTree = (value) => {
   if (value === false) return;
   if (value === true) throw new Error("Refresh-only plan contains a sensitive value.");

@@ -15,6 +15,8 @@ Bootstrap-policy installation now prepares and authorizes the exact observed pre
 
 The operation rejects normal Terraform actions, IAM mutations, added drift, state substitution, authorization substitution, and post-state changes outside its exact contract. It permits one and only one output reconciliation: `permissions_policy_sha256` must update from the authenticated predecessor-state output to the SHA-256 of the protected-source `permissions-policy.json`. The output must be non-sensitive, known, and use the exact `update` action; every other output transition remains rejected. Replay and ambiguous-write recovery require the complete prepared successor state, including this output, not merely the refreshed attachment fields. It verifies the live IAM attachment remains unchanged, then generates a fresh normal installation plan and requires the existing strict installation validator to observe no `resource_drift` and exactly the already-reviewed `aws_iam_policy.reconciler` update. It never executes that update.
 
+Terraform represents the approved `managed_policy_arns` collection sensitivity mask against each value shape: the empty predecessor is `[]`, while the one-element successor is `[false]`. The reconciliation validates each mask against its corresponding exact collection and rejects truthy, malformed, or cardinality-incompatible leaves; all unrelated sensitivity metadata remains exact-equal.
+
 ## Governed operator sequence
 
 This is the only supported path. Do not use `terraform refresh`, `terraform
