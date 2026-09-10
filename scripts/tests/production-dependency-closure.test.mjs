@@ -39,11 +39,12 @@ test("complete production dependency closure is exact across modes and failure p
     ["scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs", "s3:PutObject", "stage-a-artifacts-recovery-release-lock-acquire"],
     ["scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs", "s3:DeleteObject", "stage-a-artifacts-recovery-release-lock-release"],
   ]);
-  assert.equal(report.newAwsCalls.length, 42 + stageAAdditions.length + 15 + 14 + 3); // baseline, Stage-A, policy reconciliation, ProviderReadOnly, and recovery IAM preflight calls
+  assert.equal(report.newAwsCalls.length, 42 + stageAAdditions.length + 15 + 14 + 4); // baseline, Stage-A, policy reconciliation, ProviderReadOnly, and recovery IAM preflight calls
   assert.deepEqual(report.newAwsCalls.filter(({ capabilityId }) => capabilityId?.startsWith("mixed-recovery-iam-preflight-")).map(({ action, identity }) => [action, identity]), [
     ["sts:GetCallerIdentity", "ROOT_OPERATOR"],
     ["iam:GetRole", "ROOT_OPERATOR"],
     ["iam:SimulatePrincipalPolicy", "ROOT_OPERATOR"],
+    ["secretsmanager:GetResourcePolicy", "ROOT_OPERATOR"],
   ]);
   assert.equal(report.newAwsCalls.filter(({ capabilityId }) => capabilityId?.startsWith("initial-activation-policy-reconciliation-root-")).every(({ identity }) => identity === "INITIAL_ACTIVATION_RECONCILER"), true);
   assert.deepEqual(report.newAwsCalls.filter(({ capabilityId }) => capabilityId?.startsWith("stage-a-artifacts-recovery-release-lock-")).map(({ action, resources, identity }) => [action, resources, identity]), [

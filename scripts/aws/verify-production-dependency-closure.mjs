@@ -8,6 +8,7 @@ import { CAPABILITY_GRAPH_PATH, assertStageBDeploymentCapabilityGraph, discoverA
 import { canonicalizeJson } from "./validate-production-green-stage-b-permissions.mjs";
 import { STAGE_A_TERRAFORM_BACKEND, STAGE_A_TERRAFORM_LOCK_ARN } from "./production-stage-a-root-drop-orphan-recovery.mjs";
 import { STAGE_B_TERRAFORM_BACKEND } from "./stage-b-terraform-backend-contract.mjs";
+import { MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES } from "./production-mixed-dual-slot-recovery-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const PRODUCTION_DEPENDENCY_CLOSURE_PATH = "documents/ops/iam/MSCQRProductionDependencyClosure-v1.json";
@@ -38,6 +39,7 @@ const CALLS = Object.freeze([
   ["scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs", "sts:GetCallerIdentity", "mixed-recovery-iam-preflight-identify", ["*"], "ROOT_OPERATOR"],
   ["scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs", "iam:GetRole", "mixed-recovery-iam-preflight-read-role", ["arn:aws:iam::368992683803:role/mscqr-production-release-deployer"], "ROOT_OPERATOR"],
   ["scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs", "iam:SimulatePrincipalPolicy", "mixed-recovery-iam-preflight-simulate", ["arn:aws:iam::368992683803:role/mscqr-production-release-deployer"], "ROOT_OPERATOR"],
+  ["scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs", "secretsmanager:GetResourcePolicy", "mixed-recovery-iam-preflight-read-resource-policy", MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, "ROOT_OPERATOR"],
   ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "s3:GetBucketPolicy", "stage-a-artifacts-reconciliation-release-read-policy", [PRODUCTION_ARTIFACTS_BUCKET]],
   ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "sts:GetCallerIdentity", "stage-a-artifacts-reconciliation-release-identify", ["*"]],
   ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "sts:GetCallerIdentity", "stage-a-artifacts-reconciliation-root-identify", ["*"], "ROOT_OPERATOR", "stage-a-artifacts-reconciliation-root-identify"],

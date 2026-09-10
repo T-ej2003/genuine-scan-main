@@ -7,10 +7,13 @@ import { readMixedDualSlotRecoveryIamCapabilityPreflight } from "../aws/prefligh
 const sourceSha = "a".repeat(40);
 const observedAt = new Date("2026-09-10T00:00:00.000Z");
 const allowed = (resource) => ({ EvalActionName: MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION, EvalResourceName: resource, EvalDecision: "allowed", MatchedStatements: [{}], MissingContextValues: [], OrganizationsDecisionDetail: { AllowedByOrganizations: true } });
-const runner = ({ caller = { Account: "368992683803", Arn: "arn:aws:iam::368992683803:root" }, role = { Arn: MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN }, results = MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES.map(allowed) } = {}) => (args) => {
+const runner = ({ caller = { Account: "368992683803", Arn: "arn:aws:iam::368992683803:root" }, role = { Arn: MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN }, results = MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES.map(allowed), resourcePolicies = Object.fromEntries(MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES.map((resource) => [resource, null])) } = {}) => (args) => {
   const operation = args.slice(0, 2).join(" ");
   if (operation === "sts get-caller-identity") return JSON.stringify(caller);
   if (operation === "iam get-role") return JSON.stringify({ Role: role });
+  if (operation === "secretsmanager get-resource-policy") {
+    const resource = args.at(-1); return JSON.stringify({ ARN: resource, ResourcePolicy: resourcePolicies[resource] ?? null });
+  }
   if (operation === "iam simulate-principal-policy") {
     const resources = args.slice(args.indexOf("--resource-arns") + 1); assert.equal(resources.length, 1);
     return JSON.stringify({ EvaluationResults: results.filter(({ EvalResourceName }) => EvalResourceName === resources[0]) });
@@ -34,6 +37,16 @@ test("effective-capability preflight requires all seven exact allows", () => {
     const denied = MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES.map(allowed); denied[index] = { ...denied[index], EvalDecision: "implicitDeny" };
     assert.throws(() => readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now: observedAt, run: runner({ results: denied }) }), new RegExp(`resource ${index + 1}`));
   }
+});
+
+test("effective-capability preflight authenticates every exact secret resource policy", () => {
+  const denied = JSON.stringify({ Version: "2012-10-17", Statement: [{ Effect: "Deny", Principal: "*", Action: MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION, Resource: "*" }] });
+  for (const resource of MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES) {
+    assert.throws(() => readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now: observedAt, run: runner({ resourcePolicies: { [resource]: denied } }) }), /unsupported/);
+  }
+  assert.throws(() => readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now: observedAt, run: (args) => {
+    const result = runner()(args); return args.slice(0, 2).join(" ") === "secretsmanager get-resource-policy" ? JSON.stringify({ ARN: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:wrong", ResourcePolicy: null }) : result;
+  } }), /identity changed/);
 });
 
 test("effective-capability preflight rejects identity, scope, deny, boundary and indeterminate drift", () => {
@@ -60,6 +73,8 @@ test("preflight canonical identity rejects wildcard, missing, extra and stale su
     { resources: preflight.resources.slice(0, 6) },
     { resources: [...preflight.resources, "arn:aws:secretsmanager:eu-west-2:368992683803:secret:arbitrary"] },
     { rolePermissionsBoundary: "arn:aws:iam::368992683803:policy/boundary" },
-  ]) assert.throws(() => assertMixedDualSlotRecoveryIamPreflight({ ...preflight, ...changed }, { sourceSha }), /identity|hash/);
+    { resourcePolicies: preflight.resourcePolicies.slice(0, 6) },
+    { resourcePolicies: preflight.resourcePolicies.map((value, index) => index ? value : { ...value, resourcePolicyAccess: "UNVERIFIED" }) },
+  ]) assert.throws(() => assertMixedDualSlotRecoveryIamPreflight({ ...preflight, ...changed }, { sourceSha }), /identity|hash|resource policy/);
   assert.throws(() => assertMixedDualSlotRecoveryIamPreflight(preflight, { sourceSha, now: new Date("2026-09-10T01:00:00.000Z"), requireFresh: true }), /stale/);
 });
