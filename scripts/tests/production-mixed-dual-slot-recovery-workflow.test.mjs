@@ -21,7 +21,7 @@ test("protected workflows expose only canonical artifact coordinates and gate cr
   const execute = readFileSync(path.join(root, ".github/workflows/execute-production-mixed-dual-slot-topology-recovery.yml"), "utf8");
   for (const workflow of [authorize, execute]) { assert.match(workflow, /environment: production/); assert.doesNotMatch(workflow.match(/inputs:[\s\S]*?\npermissions:/)?.[0] || "", /secret_arn|version_id|payload_hash|rotation_id|historical_source|mutation_(?:count|plan|order)|predecessor_manifest/); }
   assert.match(authorize, /--require-actual-approval/); assert.doesNotMatch(authorize, /configure-aws-credentials|UpdateSecretVersionStage|PutSecretValue|DeleteSecret/);
-  for (const workflow of [authorize, execute]) { assert.match(workflow, /source-before\.sha256/); assert.match(workflow, /source-after\.sha256/); assert.match(workflow, /cmp --silent/); }
+  for (const workflow of [authorize, execute]) { assert.match(workflow, /source-before\.sha256/); assert.match(workflow, /source-after\.sha256/); assert.match(workflow, /cmp --silent/); assert.match(workflow, /chmod 600 "\$workdir\/preparation\.json"/); }
   assert.ok(execute.indexOf("environment: production") < execute.indexOf("configure-aws-credentials") && execute.indexOf("configure-aws-credentials") < execute.indexOf("run-production-mixed-dual-slot-topology-recovery.mjs --execute"));
   assert.match(execute, /secretsmanager:UpdateSecretVersionStage/); assert.doesNotMatch(execute, /secretsmanager:(?:PutSecretValue|CreateSecret|DeleteSecret)/);
   assert.match(execute, /execute-production-mixed-dual-slot-topology-recovery\.yml@refs\/heads\/main/);

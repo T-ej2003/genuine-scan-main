@@ -64,6 +64,7 @@ jobs:
           set -euo pipefail
           workdir="$RUNNER_TEMP/mixed-recovery"
           printf '%s' "$PREPARATION_BASE64" | base64 --decode > "$workdir/preparation.json"
+          chmod 600 "$workdir/preparation.json"
           test "$(sha256sum "$workdir/preparation.json" | awk '{print $1}')" = "$PREPARATION_FILE_SHA256"
       - uses: aws-actions/configure-aws-credentials@v6
         with:
