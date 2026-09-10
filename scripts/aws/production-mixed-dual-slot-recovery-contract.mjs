@@ -19,6 +19,7 @@ export const MIXED_DUAL_SLOT_RECOVERY_IAM_PREFLIGHT_KIND = "PRODUCTION_MIXED_DUA
 export const MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN = "arn:aws:iam::368992683803:role/mscqr-production-mixed-dual-slot-recovery-executor";
 export const MIXED_DUAL_SLOT_RECOVERY_EXECUTION_POLICY_ARN = "arn:aws:iam::368992683803:policy/MSCQRProductionMixedDualSlotRecoveryExecutor";
 export const MIXED_DUAL_SLOT_RECOVERY_EXECUTION_POLICY_PATH = "infra/aws/terraform/production-initial-activation-policy-reconciler/mixed-recovery-permissions-policy.json";
+export const MIXED_DUAL_SLOT_RECOVERY_EXECUTION_TRUST_PATH = "infra/aws/terraform/production-initial-activation-policy-reconciler/mixed-recovery-trust-policy.json";
 export const MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION = "secretsmanager:UpdateSecretVersionStage";
 export const MIXED_DUAL_SLOT_RECOVERY_LIVE_PREDECESSOR = Object.freeze({
   cluster: "mscqr-prod-euw2-main", service: "mscqr-backend-servi-euw2",
@@ -63,20 +64,29 @@ export const MIXED_DUAL_SLOT_RETAINED_HISTORY = Object.freeze({
 export const MIXED_DUAL_SLOT_RETAINED_HISTORY_CANONICAL_ID = mixedDualSlotRecoverySha256(MIXED_DUAL_SLOT_RETAINED_HISTORY);
 export const MIXED_DUAL_SLOT_PREDECESSOR = Object.freeze(Object.fromEntries(Object.entries(predecessor).map(([slot, value]) => [slot, Object.freeze({ ...value, rotationId: MIXED_DUAL_SLOT_RECOVERY_ROTATION, retainedPrevious: MIXED_DUAL_SLOT_RETAINED_HISTORY[slot] })])));
 export const MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES = Object.freeze(MIXED_DUAL_SLOT_RECOVERY_ORDER.map((slot) => MIXED_DUAL_SLOT_PREDECESSOR[slot].arn));
+export const MIXED_DUAL_SLOT_RECOVERY_IAM_CAPABILITIES = Object.freeze([
+  { action: "sts:GetCallerIdentity", resources: Object.freeze(["*"]) },
+  { action: "ecs:DescribeServices", resources: Object.freeze(["*"]) },
+  { action: "ecs:DescribeTaskDefinition", resources: Object.freeze(["*"]) },
+  { action: "secretsmanager:DescribeSecret", resources: MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES },
+  { action: "secretsmanager:GetSecretValue", resources: MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES },
+  { action: MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION, resources: MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES },
+]);
 export const MIXED_DUAL_SLOT_PREDECESSOR_CANONICAL_ID = mixedDualSlotRecoverySha256(MIXED_DUAL_SLOT_PREDECESSOR);
 export const MIXED_DUAL_SLOT_RECOVERY_POST_STATE_CANONICAL_ID = mixedDualSlotRecoverySha256(Object.fromEntries(MIXED_DUAL_SLOT_RECOVERY_ORDER.map((slot) => [slot, { ...MIXED_DUAL_SLOT_PREDECESSOR[slot], stagingLabels: [] }])));
 
-const preflightFields = ["schemaVersion", "kind", "operation", "sourceSha", "principalArn", "action", "resources", "rolePermissionsBoundary", "resourcePolicies", "evaluations", "observedAt", "preflightSha256"];
+const preflightFields = ["schemaVersion", "kind", "operation", "sourceSha", "principalArn", "action", "resources", "roleTrustPolicySha256", "rolePermissionsBoundary", "resourcePolicies", "evaluations", "observedAt", "preflightSha256"];
 export function assertMixedDualSlotRecoveryIamPreflight(value, { sourceSha, now = new Date(), requireFresh = false } = {}) {
   exactKeys(value, preflightFields, "Mixed recovery IAM preflight");
-  if (value.schemaVersion !== 2 || value.kind !== MIXED_DUAL_SLOT_RECOVERY_IAM_PREFLIGHT_KIND || value.operation !== MIXED_DUAL_SLOT_RECOVERY_OPERATION || value.sourceSha !== sourceSha || value.principalArn !== MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN || value.action !== MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION || value.rolePermissionsBoundary !== null || canonical(value.resources) !== canonical(MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES) || !Array.isArray(value.resourcePolicies) || value.resourcePolicies.length !== 7 || !Array.isArray(value.evaluations) || value.evaluations.length !== 7) fail("Mixed recovery IAM preflight identity is invalid.");
+  const expectedEvaluations = MIXED_DUAL_SLOT_RECOVERY_IAM_CAPABILITIES.flatMap(({ action, resources }) => resources.map((resource) => ({ action, resource })));
+  if (value.schemaVersion !== 3 || value.kind !== MIXED_DUAL_SLOT_RECOVERY_IAM_PREFLIGHT_KIND || value.operation !== MIXED_DUAL_SLOT_RECOVERY_OPERATION || value.sourceSha !== sourceSha || value.principalArn !== MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN || value.action !== MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION || !SHA256.test(value.roleTrustPolicySha256 || "") || value.rolePermissionsBoundary !== null || canonical(value.resources) !== canonical(MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES) || !Array.isArray(value.resourcePolicies) || value.resourcePolicies.length !== 7 || !Array.isArray(value.evaluations) || value.evaluations.length !== expectedEvaluations.length) fail("Mixed recovery IAM preflight identity is invalid.");
   for (const [index, policy] of value.resourcePolicies.entries()) {
     exactKeys(policy, ["resource", "resourcePolicySha256", "resourcePolicyAccess"], `Mixed recovery resource policy ${index + 1}`);
     if (policy.resource !== MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES[index] || policy.resourcePolicyAccess !== "NO_RESOURCE_POLICY" || policy.resourcePolicySha256 !== mixedDualSlotRecoverySha256(null)) fail(`Mixed recovery resource policy is not safely absent for resource ${index + 1}.`);
   }
   for (const [index, evaluation] of value.evaluations.entries()) {
     exactKeys(evaluation, ["action", "resource", "decision", "missingContextValues", "organizationsAllowed", "permissionsBoundaryAllowed"], `Mixed recovery IAM preflight evaluation ${index + 1}`);
-    if (evaluation.action !== MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION || evaluation.resource !== MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES[index] || evaluation.decision !== "allowed" || canonical(evaluation.missingContextValues) !== "[]" || evaluation.organizationsAllowed === false || evaluation.permissionsBoundaryAllowed === false || ![true, null].includes(evaluation.organizationsAllowed) || ![true, null].includes(evaluation.permissionsBoundaryAllowed)) fail(`Mixed recovery IAM capability is not allowed for resource ${index + 1}.`);
+    if (evaluation.action !== expectedEvaluations[index].action || evaluation.resource !== expectedEvaluations[index].resource || evaluation.decision !== "allowed" || canonical(evaluation.missingContextValues) !== "[]" || evaluation.organizationsAllowed === false || evaluation.permissionsBoundaryAllowed === false || ![true, null].includes(evaluation.organizationsAllowed) || ![true, null].includes(evaluation.permissionsBoundaryAllowed)) fail(`Mixed recovery IAM capability is not allowed for evaluation ${index + 1}.`);
   }
   const observedAt = Date.parse(value.observedAt); const age = now.getTime() - observedAt;
   if (!Number.isFinite(observedAt) || new Date(observedAt).toISOString() !== value.observedAt || requireFresh && (age < 0 || age > MIXED_DUAL_SLOT_RECOVERY_MAX_AGE_MS)) fail("Mixed recovery IAM preflight is stale or malformed.");
@@ -85,8 +95,8 @@ export function assertMixedDualSlotRecoveryIamPreflight(value, { sourceSha, now 
   return value;
 }
 
-export function buildMixedDualSlotRecoveryIamPreflight({ sourceSha, principalArn, action, resources, rolePermissionsBoundary = null, resourcePolicies, evaluations, observedAt } = {}) {
-  const body = { schemaVersion: 2, kind: MIXED_DUAL_SLOT_RECOVERY_IAM_PREFLIGHT_KIND, operation: MIXED_DUAL_SLOT_RECOVERY_OPERATION, sourceSha, principalArn, action, resources, rolePermissionsBoundary, resourcePolicies, evaluations, observedAt };
+export function buildMixedDualSlotRecoveryIamPreflight({ sourceSha, principalArn, action, resources, roleTrustPolicySha256, rolePermissionsBoundary = null, resourcePolicies, evaluations, observedAt } = {}) {
+  const body = { schemaVersion: 3, kind: MIXED_DUAL_SLOT_RECOVERY_IAM_PREFLIGHT_KIND, operation: MIXED_DUAL_SLOT_RECOVERY_OPERATION, sourceSha, principalArn, action, resources, roleTrustPolicySha256, rolePermissionsBoundary, resourcePolicies, evaluations, observedAt };
   const value = { ...body, preflightSha256: mixedDualSlotRecoverySha256(body) };
   return Object.freeze(structuredClone(assertMixedDualSlotRecoveryIamPreflight(value, { sourceSha })));
 }

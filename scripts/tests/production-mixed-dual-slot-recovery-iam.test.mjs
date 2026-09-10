@@ -1,15 +1,17 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
-import { MIXED_DUAL_SLOT_RECOVERY_EXECUTION_POLICY_ARN, MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN, MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION, MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, assertMixedDualSlotRecoveryIamPreflight } from "../aws/production-mixed-dual-slot-recovery-contract.mjs";
+import { MIXED_DUAL_SLOT_RECOVERY_EXECUTION_POLICY_ARN, MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN, MIXED_DUAL_SLOT_RECOVERY_EXECUTION_TRUST_PATH, MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION, MIXED_DUAL_SLOT_RECOVERY_IAM_CAPABILITIES, MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, assertMixedDualSlotRecoveryIamPreflight } from "../aws/production-mixed-dual-slot-recovery-contract.mjs";
 import { readMixedDualSlotRecoveryIamCapabilityPreflight } from "../aws/preflight-production-mixed-dual-slot-recovery-iam.mjs";
 import { assertMixedDualSlotRecoveryIamAttestation, createMixedDualSlotRecoveryIamAttestation } from "../aws/production-mixed-dual-slot-recovery-iam-attestation.mjs";
 import { createPinnedRootAttestationVerifier, ROOT_ATTESTATION_KEY_ALIAS_ARN, ROOT_ATTESTATION_SIGNING_ALGORITHM } from "../aws/production-root-attestation-key.mjs";
 
 const sourceSha = "a".repeat(40);
 const observedAt = new Date("2026-09-10T00:00:00.000Z");
-const allowed = (resource) => ({ EvalActionName: MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION, EvalResourceName: "arn:${Partition}:secretsmanager:${Region}:${Account}:secret:${SecretId}", EvalDecision: "allowed", MatchedStatements: [{}], MissingContextValues: [], OrganizationsDecisionDetail: { AllowedByOrganizations: true }, ResourceSpecificResults: [{ EvalResourceName: resource, EvalResourceDecision: "allowed", MissingContextValues: [] }] });
-const runner = ({ caller = { Account: "368992683803", Arn: "arn:aws:iam::368992683803:root" }, role = { Arn: MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN }, results = MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES.map(allowed), resourcePolicies = Object.fromEntries(MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES.map((resource) => [resource, null])) } = {}) => (args) => {
+const trust = JSON.parse(fs.readFileSync(MIXED_DUAL_SLOT_RECOVERY_EXECUTION_TRUST_PATH, "utf8"));
+const allowed = (action, resource) => ({ EvalActionName: action, EvalResourceName: resource === "*" ? "*" : "arn:${Partition}:secretsmanager:${Region}:${Account}:secret:${SecretId}", EvalDecision: "allowed", MatchedStatements: [{}], MissingContextValues: [], OrganizationsDecisionDetail: { AllowedByOrganizations: true }, ResourceSpecificResults: [{ EvalResourceName: resource, EvalResourceDecision: "allowed", MissingContextValues: [] }] });
+const allAllowed = () => MIXED_DUAL_SLOT_RECOVERY_IAM_CAPABILITIES.flatMap(({ action, resources }) => resources.map((resource) => allowed(action, resource)));
+const runner = ({ caller = { Account: "368992683803", Arn: "arn:aws:iam::368992683803:root" }, role = { Arn: MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN, AssumeRolePolicyDocument: trust }, results = allAllowed(), resourcePolicies = Object.fromEntries(MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES.map((resource) => [resource, null])) } = {}) => (args) => {
   const operation = args.slice(0, 2).join(" ");
   if (operation === "sts get-caller-identity") return JSON.stringify(caller);
   if (operation === "iam get-role") return JSON.stringify({ Role: role });
@@ -17,8 +19,9 @@ const runner = ({ caller = { Account: "368992683803", Arn: "arn:aws:iam::3689926
     const resource = args.at(-1); return JSON.stringify({ ARN: resource, ResourcePolicy: resourcePolicies[resource] ?? null });
   }
   if (operation === "iam simulate-principal-policy") {
+    const action = args[args.indexOf("--action-names") + 1];
     const resources = args.slice(args.indexOf("--resource-arns") + 1); assert.equal(resources.length, 1);
-    return JSON.stringify({ EvaluationResults: results.filter(({ ResourceSpecificResults }) => ResourceSpecificResults?.some(({ EvalResourceName }) => EvalResourceName === resources[0])) });
+    return JSON.stringify({ EvaluationResults: results.filter((result) => result.EvalActionName === action && result.ResourceSpecificResults?.some(({ EvalResourceName }) => EvalResourceName === resources[0])) });
   }
   throw new Error(`unexpected ${operation}`);
 };
@@ -37,11 +40,18 @@ test("dedicated executor policy grants only seven exact label mutations and shar
 
 test("effective-capability preflight requires all seven exact allows", () => {
   const preflight = readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now: observedAt, run: runner() });
-  assert.equal(preflight.evaluations.length, 7);
+  assert.equal(preflight.evaluations.length, 24);
   assert.doesNotThrow(() => assertMixedDualSlotRecoveryIamPreflight(preflight, { sourceSha, now: new Date("2026-09-10T00:05:00.000Z"), requireFresh: true }));
   for (let index = 0; index < 7; index += 1) {
-    const denied = MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES.map(allowed); denied[index] = { ...denied[index], EvalDecision: "implicitDeny", ResourceSpecificResults: [{ ...denied[index].ResourceSpecificResults[0], EvalResourceDecision: "implicitDeny" }] };
-    assert.throws(() => readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now: observedAt, run: runner({ results: denied }) }), new RegExp(`resource ${index + 1}`));
+    const denied = allAllowed(); const target = denied.findIndex(({ EvalActionName, ResourceSpecificResults }) => EvalActionName === MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION && ResourceSpecificResults[0].EvalResourceName === MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES[index]); denied[target] = { ...denied[target], EvalDecision: "implicitDeny", ResourceSpecificResults: [{ ...denied[target].ResourceSpecificResults[0], EvalResourceDecision: "implicitDeny" }] };
+    assert.throws(() => readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now: observedAt, run: runner({ results: denied }) }), /capability/);
+  }
+});
+
+test("effective-capability preflight requires every executor read and mutation", () => {
+  for (const [index] of allAllowed().entries()) {
+    const denied = allAllowed(); denied[index] = { ...denied[index], EvalDecision: "implicitDeny", ResourceSpecificResults: [{ ...denied[index].ResourceSpecificResults[0], EvalResourceDecision: "implicitDeny" }] };
+    assert.throws(() => readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now: observedAt, run: runner({ results: denied }) }), /capability/);
   }
 });
 
@@ -58,25 +68,27 @@ test("effective-capability preflight authenticates every exact secret resource p
 test("effective-capability preflight rejects identity, scope, deny, boundary and indeterminate drift", () => {
   assert.throws(() => readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now: observedAt, run: runner({ caller: { Account: "368992683803", Arn: "arn:aws:iam::368992683803:user/operator" } }) }), /administrator identity/);
   assert.throws(() => readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now: observedAt, run: runner({ role: { Arn: "arn:aws:iam::368992683803:role/wrong" } }) }), /role or permissions boundary/);
-  assert.throws(() => readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now: observedAt, run: runner({ role: { Arn: MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN, PermissionsBoundary: { PermissionsBoundaryArn: "arn:aws:iam::368992683803:policy/boundary" } } }) }), /permissions boundary/);
+  assert.throws(() => readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now: observedAt, run: runner({ role: { Arn: MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN, AssumeRolePolicyDocument: trust, PermissionsBoundary: { PermissionsBoundaryArn: "arn:aws:iam::368992683803:policy/boundary" } } }) }), /permissions boundary/);
+  assert.throws(() => readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now: observedAt, run: runner({ role: { Arn: MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN, AssumeRolePolicyDocument: { ...trust, Version: "2008-10-17" } } }) }), /role trust/);
+  const first = allAllowed()[0];
   for (const results of [
-    MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES.slice(1).map(allowed),
-    [allowed(MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES[0]), ...MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES.map(allowed)],
-    MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES.map((resource, index) => index ? allowed(resource) : { ...allowed(resource), EvalActionName: "secretsmanager:PutSecretValue" }),
-    MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES.map((resource, index) => index ? allowed(resource) : { ...allowed(resource), EvalDecision: "explicitDeny", ResourceSpecificResults: [{ ...allowed(resource).ResourceSpecificResults[0], EvalResourceDecision: "explicitDeny" }] }),
-    MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES.map((resource, index) => index ? allowed(resource) : { ...allowed(resource), MissingContextValues: ["aws:PrincipalTag/Unexpected"] }),
-    MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES.map((resource, index) => index ? allowed(resource) : { ...allowed(resource), PermissionsBoundaryDecisionDetail: { AllowedByPermissionsBoundary: false } }),
-    MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES.map((resource, index) => index ? allowed(resource) : { ...allowed(resource), OrganizationsDecisionDetail: { AllowedByOrganizations: false } }),
+    allAllowed().slice(1),
+    [...allAllowed(), first],
+    [{ ...first, EvalActionName: "secretsmanager:PutSecretValue" }, ...allAllowed().slice(1)],
+    [{ ...first, EvalDecision: "explicitDeny", ResourceSpecificResults: [{ ...first.ResourceSpecificResults[0], EvalResourceDecision: "explicitDeny" }] }, ...allAllowed().slice(1)],
+    [{ ...first, MissingContextValues: ["aws:PrincipalTag/Unexpected"] }, ...allAllowed().slice(1)],
+    [{ ...first, PermissionsBoundaryDecisionDetail: { AllowedByPermissionsBoundary: false } }, ...allAllowed().slice(1)],
+    [{ ...first, OrganizationsDecisionDetail: { AllowedByOrganizations: false } }, ...allAllowed().slice(1)],
   ]) assert.throws(() => readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now: observedAt, run: runner({ results }) }), /count|action|resource|capability/);
 });
 
 test("effective-capability preflight requires the sole exact AWS per-resource result", () => {
-  const first = allowed(MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES[0]);
+  const first = allAllowed()[0];
   for (const changed of [
     { ResourceSpecificResults: undefined },
     { ResourceSpecificResults: [] },
     { ResourceSpecificResults: [first.ResourceSpecificResults[0], first.ResourceSpecificResults[0]] },
-    { ResourceSpecificResults: [{ ...first.ResourceSpecificResults[0], EvalResourceName: `${MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES[0]}-wrong` }] },
+    { ResourceSpecificResults: [{ ...first.ResourceSpecificResults[0], EvalResourceName: "arn:aws:iam::368992683803:role/wrong" }] },
     { ResourceSpecificResults: [{ ...first.ResourceSpecificResults[0], EvalResourceDecision: "implicitDeny" }] },
     { ResourceSpecificResults: [{ ...first.ResourceSpecificResults[0], MissingContextValues: ["aws:PrincipalTag/Unexpected"] }] },
     { ResourceSpecificResults: [{ ...first.ResourceSpecificResults[0], MissingContextValues: "" }] },
@@ -85,7 +97,7 @@ test("effective-capability preflight requires the sole exact AWS per-resource re
     { MissingContextValues: "" },
     { PermissionsBoundaryDecisionDetail: {} },
   ]) {
-    const results = MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES.map(allowed); results[0] = { ...first, ...changed };
+    const results = allAllowed(); results[0] = { ...first, ...changed };
     assert.throws(() => readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now: observedAt, run: runner({ results }) }), /count|action|resource|capability|malformed/);
   }
 });
@@ -98,6 +110,7 @@ test("preflight canonical identity rejects wildcard, missing, extra and stale su
     { resources: ["*"] },
     { resources: preflight.resources.slice(0, 6) },
     { resources: [...preflight.resources, "arn:aws:secretsmanager:eu-west-2:368992683803:secret:arbitrary"] },
+    { roleTrustPolicySha256: "f".repeat(64) },
     { rolePermissionsBoundary: "arn:aws:iam::368992683803:policy/boundary" },
     { resourcePolicies: preflight.resourcePolicies.slice(0, 6) },
     { resourcePolicies: preflight.resourcePolicies.map((value, index) => index ? value : { ...value, resourcePolicyAccess: "UNVERIFIED" }) },

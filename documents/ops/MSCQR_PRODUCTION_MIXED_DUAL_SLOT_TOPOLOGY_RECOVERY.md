@@ -27,13 +27,15 @@ is produced only by `authorize-production-mixed-dual-slot-topology-recovery.yml`
 after the protected `production` environment reviewer approves the exact file
 hash. Before that approval is requested, preparation requires an administrator
 IAM simulation proving that the dedicated
-`mscqr-production-mixed-dual-slot-recovery-executor` can perform
-`UpdateSecretVersionStage` on all seven exact ARNs, and readback proving each
-exact secret has no resource policy that could override that identity result.
+`mscqr-production-mixed-dual-slot-recovery-executor` has its exact source trust
+and can perform its STS identity read, both ECS predecessor reads, and all
+`DescribeSecret`, `GetSecretValue`, and `UpdateSecretVersionStage` calls on the
+seven exact ARNs. Readback also proves each exact secret has no resource policy
+that could override those identity results.
 The administrator signs that exact preflight with the root-attestation KMS key;
 the preparation command emits the signature as a separate private sidecar. An
 unprotected workflow job verifies the signature with the protected-source-pinned
-public key and authenticates the fresh, source-bound seven-result preflight before
+public key and authenticates the fresh, source-bound 24-result preflight before
 the protected
 authorization job becomes eligible; deny, indeterminate, wrong-principal,
 permissions-boundary, missing, or substituted results fail closed. Execution is available only through
