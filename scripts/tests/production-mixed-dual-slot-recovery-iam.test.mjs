@@ -8,7 +8,7 @@ import { createPinnedRootAttestationVerifier, ROOT_ATTESTATION_KEY_ALIAS_ARN, RO
 
 const sourceSha = "a".repeat(40);
 const observedAt = new Date("2026-09-10T00:00:00.000Z");
-const allowed = (resource) => ({ EvalActionName: MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION, EvalResourceName: resource, EvalDecision: "allowed", MatchedStatements: [{}], MissingContextValues: [], OrganizationsDecisionDetail: { AllowedByOrganizations: true } });
+const allowed = (resource) => ({ EvalActionName: MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION, EvalResourceName: "arn:${Partition}:secretsmanager:${Region}:${Account}:secret:${SecretId}", EvalDecision: "allowed", MatchedStatements: [{}], MissingContextValues: [], OrganizationsDecisionDetail: { AllowedByOrganizations: true }, ResourceSpecificResults: [{ EvalResourceName: resource, EvalResourceDecision: "allowed", MissingContextValues: [] }] });
 const runner = ({ caller = { Account: "368992683803", Arn: "arn:aws:iam::368992683803:root" }, role = { Arn: MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN }, results = MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES.map(allowed), resourcePolicies = Object.fromEntries(MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES.map((resource) => [resource, null])) } = {}) => (args) => {
   const operation = args.slice(0, 2).join(" ");
   if (operation === "sts get-caller-identity") return JSON.stringify(caller);
@@ -18,7 +18,7 @@ const runner = ({ caller = { Account: "368992683803", Arn: "arn:aws:iam::3689926
   }
   if (operation === "iam simulate-principal-policy") {
     const resources = args.slice(args.indexOf("--resource-arns") + 1); assert.equal(resources.length, 1);
-    return JSON.stringify({ EvaluationResults: results.filter(({ EvalResourceName }) => EvalResourceName === resources[0]) });
+    return JSON.stringify({ EvaluationResults: results.filter(({ ResourceSpecificResults }) => ResourceSpecificResults?.some(({ EvalResourceName }) => EvalResourceName === resources[0])) });
   }
   throw new Error(`unexpected ${operation}`);
 };
@@ -36,7 +36,7 @@ test("effective-capability preflight requires all seven exact allows", () => {
   assert.equal(preflight.evaluations.length, 7);
   assert.doesNotThrow(() => assertMixedDualSlotRecoveryIamPreflight(preflight, { sourceSha, now: new Date("2026-09-10T00:05:00.000Z"), requireFresh: true }));
   for (let index = 0; index < 7; index += 1) {
-    const denied = MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES.map(allowed); denied[index] = { ...denied[index], EvalDecision: "implicitDeny" };
+    const denied = MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES.map(allowed); denied[index] = { ...denied[index], EvalDecision: "implicitDeny", ResourceSpecificResults: [{ ...denied[index].ResourceSpecificResults[0], EvalResourceDecision: "implicitDeny" }] };
     assert.throws(() => readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now: observedAt, run: runner({ results: denied }) }), new RegExp(`resource ${index + 1}`));
   }
 });
@@ -59,11 +59,31 @@ test("effective-capability preflight rejects identity, scope, deny, boundary and
     MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES.slice(1).map(allowed),
     [allowed(MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES[0]), ...MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES.map(allowed)],
     MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES.map((resource, index) => index ? allowed(resource) : { ...allowed(resource), EvalActionName: "secretsmanager:PutSecretValue" }),
-    MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES.map((resource, index) => index ? allowed(resource) : { ...allowed(resource), EvalDecision: "explicitDeny" }),
+    MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES.map((resource, index) => index ? allowed(resource) : { ...allowed(resource), EvalDecision: "explicitDeny", ResourceSpecificResults: [{ ...allowed(resource).ResourceSpecificResults[0], EvalResourceDecision: "explicitDeny" }] }),
     MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES.map((resource, index) => index ? allowed(resource) : { ...allowed(resource), MissingContextValues: ["aws:PrincipalTag/Unexpected"] }),
     MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES.map((resource, index) => index ? allowed(resource) : { ...allowed(resource), PermissionsBoundaryDecisionDetail: { AllowedByPermissionsBoundary: false } }),
     MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES.map((resource, index) => index ? allowed(resource) : { ...allowed(resource), OrganizationsDecisionDetail: { AllowedByOrganizations: false } }),
   ]) assert.throws(() => readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now: observedAt, run: runner({ results }) }), /count|action|resource|capability/);
+});
+
+test("effective-capability preflight requires the sole exact AWS per-resource result", () => {
+  const first = allowed(MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES[0]);
+  for (const changed of [
+    { ResourceSpecificResults: undefined },
+    { ResourceSpecificResults: [] },
+    { ResourceSpecificResults: [first.ResourceSpecificResults[0], first.ResourceSpecificResults[0]] },
+    { ResourceSpecificResults: [{ ...first.ResourceSpecificResults[0], EvalResourceName: `${MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES[0]}-wrong` }] },
+    { ResourceSpecificResults: [{ ...first.ResourceSpecificResults[0], EvalResourceDecision: "implicitDeny" }] },
+    { ResourceSpecificResults: [{ ...first.ResourceSpecificResults[0], MissingContextValues: ["aws:PrincipalTag/Unexpected"] }] },
+    { ResourceSpecificResults: [{ ...first.ResourceSpecificResults[0], MissingContextValues: "" }] },
+    { ResourceSpecificResults: [{ ...first.ResourceSpecificResults[0], PermissionsBoundaryDecisionDetail: { AllowedByPermissionsBoundary: false } }] },
+    { ResourceSpecificResults: [{ ...first.ResourceSpecificResults[0], OrganizationsDecisionDetail: {} }] },
+    { MissingContextValues: "" },
+    { PermissionsBoundaryDecisionDetail: {} },
+  ]) {
+    const results = MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES.map(allowed); results[0] = { ...first, ...changed };
+    assert.throws(() => readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now: observedAt, run: runner({ results }) }), /count|action|resource|capability|malformed/);
+  }
 });
 
 test("preflight canonical identity rejects wildcard, missing, extra and stale substitutions", () => {
