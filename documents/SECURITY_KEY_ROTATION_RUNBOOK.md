@@ -6,8 +6,11 @@
 Release Train may use `git_ref=main` only when `target_sha` is that ref's
 current resolved SHA. To release an older supported main commit, use an
 existing exact `refs/tags/release-*` or `refs/tags/v*` ref that resolves to the requested SHA. The
-train dispatches every required gate and Release Gate at that ref, then
-authenticates each returned run's `head_sha` against the selected target.
+train dispatches source-validation gates at that ref, then authenticates each
+returned audit run's `head_sha` against the selected target.
+Release Gate is deliberately different: its control-plane workflow always runs
+from protected `main`, while its independently authenticated `target_sha` and
+target ref identify the source being deployed.
 
 This runbook covers the rotating backend secret families used by the app:
 

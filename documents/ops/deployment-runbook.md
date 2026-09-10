@@ -32,6 +32,10 @@ SHA. An older supported target must use an existing exact
 `refs/tags/release-*` or `refs/tags/v*` ref which resolves to that SHA; commit-valued dispatch refs
 are intentionally rejected.
 
+Deployment Audit runs at the selected target source. Release Gate always runs
+from protected `main`; it receives that target ref and SHA as independently
+validated deployment inputs.
+
 ```bash
 authorization_json="$(jq -c . < "$NORMAL_IMAGE_AUTHORIZATION_FILE")"
 authorization_sha256="$(printf '%s' "$authorization_json" | shasum -a 256 | awk '{print $1}')"

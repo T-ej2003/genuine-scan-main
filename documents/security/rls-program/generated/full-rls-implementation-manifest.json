@@ -15,7 +15,7 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "b818e305ca23bc9687c1a666acc52f0ae8a44a23989af484e48d0aebfa8d8143",
+  "sourceContractSha256": "922a55a15ad95a3487dc8406d5e6e2d95d2814f365d5cf7345a617b9cb990862",
   "migrationSetDigest": "6642442a81cd98c7a132d241fa98e50ae231510896c9da67ab70d86b050d02db",
   "sourceContractInputs": [
     {
@@ -240,11 +240,11 @@
     },
     {
       "path": ".github/workflows/release-gate.yml",
-      "sha256": "0f04443593eca36f7c4742e9a949320a318e1dd8039bf1b4fba232155e7d8e32"
+      "sha256": "4e2a0faeaf0f4406db117c7e37cea569b3f4f8862835a081a3225205dce3c7ba"
     },
     {
       "path": ".github/workflows/release-train.yml",
-      "sha256": "7830994ad18df5c78c205084945b3d2002b9ff02a7d78e85aaceae546df43949"
+      "sha256": "15fd926d0f27e4960b7bc521c8d82f66758c22bf873efd53956e49052f925387"
     },
     {
       "path": "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
@@ -336,7 +336,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:b818e305ca23bc9687c1a666acc52f0ae8a44a23989af484e48d0aebfa8d8143",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:922a55a15ad95a3487dc8406d5e6e2d95d2814f365d5cf7345a617b9cb990862",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,

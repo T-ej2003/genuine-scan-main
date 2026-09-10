@@ -221,7 +221,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TARGET_REF: ${{ steps.resolve.outputs.target_ref }}
-          DISPATCH_REF: ${{ steps.resolve.outputs.dispatch_ref }}
           TARGET_SHA: ${{ steps.resolve.outputs.target_sha }}
           NORMAL_IMAGE_AUTHORIZATION_JSON: ${{ inputs.normal_image_authorization_json }}
           NORMAL_IMAGE_AUTHORIZATION_SHA256: ${{ inputs.normal_image_authorization_sha256 }}
@@ -262,8 +261,8 @@ jobs:
           ].filter(([, value]) => value !== undefined && value !== ""));
           fs.writeFileSync(process.argv[2], JSON.stringify(values), { mode: 0o600 });
           NODE
-          node scripts/github/dispatch-source-bound-workflow.mjs \
-            --workflow release-gate.yml --ref "$DISPATCH_REF" --target-sha "$TARGET_SHA" --inputs-file "$inputs_file"
+          node scripts/github/dispatch-protected-main-release-gate.mjs \
+            --target-ref "$TARGET_REF" --target-sha "$TARGET_SHA" --inputs-file "$inputs_file"
           rm -f "$inputs_file"
           trap - EXIT
 

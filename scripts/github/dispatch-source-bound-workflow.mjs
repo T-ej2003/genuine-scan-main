@@ -24,12 +24,20 @@ export function selectSourceBoundRun({ beforeRunIds, runs, targetSha, workflowPa
   throw new Error(`Dispatched workflow source is not the selected target SHA (${targetSha}); observed ${observed}.`);
 }
 
-export async function dispatchSourceBoundWorkflow({ repository, token, workflow, ref, targetSha, inputs = {}, fetchImpl = fetch, sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)), attempts = 20, pollMilliseconds = 1500 } = {}) {
+export function selectProtectedMainReleaseGateRun({ beforeRunIds, runs, workflowPath, workflowId, repository }) {
+  const fresh = (runs || []).filter((run) => !beforeRunIds.has(String(run.id)) && run?.event === "workflow_dispatch");
+  if (fresh.length === 0) return null;
+  const exact = fresh.filter((run) => SHA.test(run?.head_sha || "") && run?.head_branch === "main" && run?.path === workflowPath && String(run?.workflow_id) === String(workflowId) && run?.repository?.full_name === repository && run?.head_repository?.full_name === repository && String(run?.run_attempt) === "1");
+  if (exact.length === 1 && fresh.length === 1) return exact[0];
+  if (exact.length > 1) throw new Error("Protected-main Release Gate dispatch correlation is ambiguous.");
+  const observed = fresh.map((run) => `${run.id}:${run.head_branch || "missing"}:${run.head_sha || "missing"}:${run.path || "missing"}`).join(", ");
+  throw new Error(`Release Gate did not execute from protected main; observed ${observed}.`);
+}
+
+async function dispatchWorkflow({ repository, token, workflow, ref, inputs = {}, selectRun, fetchImpl = fetch, sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)), attempts = 20, pollMilliseconds = 1500 } = {}) {
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository || "")) throw new Error("GitHub repository must be owner/name.");
   if (!token) throw new Error("GitHub token is required for source-bound workflow dispatch.");
   if (!WORKFLOW.test(workflow || "")) throw new Error("Workflow filename is invalid.");
-  assertWorkflowDispatchRef(ref);
-  if (!SHA.test(targetSha || "")) throw new Error("Workflow target SHA must be a full commit SHA.");
   if (Object.getPrototypeOf(inputs) !== Object.prototype || Object.values(inputs).some((value) => typeof value !== "string")) throw new Error("Workflow dispatch inputs must be a plain object of strings.");
 
   const repositoryBase = `https://api.github.com/repos/${repository}`;
@@ -55,16 +63,29 @@ export async function dispatchSourceBoundWorkflow({ repository, token, workflow,
   const dispatched = await request(`${workflowBase}/dispatches`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ref, inputs, return_run_details: true }) });
   if (dispatched?.workflow_run_id) {
     const run = await request(`${repositoryBase}/actions/runs/${dispatched.workflow_run_id}`);
-    return selectSourceBoundRun({ beforeRunIds, runs: [run], targetSha, workflowPath, workflowId: workflowMetadata.id, repository }) || (() => { throw new Error("Returned workflow run is not a fresh workflow_dispatch candidate."); })();
+    return selectRun({ beforeRunIds, runs: [run], workflowPath, workflowId: workflowMetadata.id, repository }) || (() => { throw new Error("Returned workflow run is not a fresh workflow_dispatch candidate."); })();
   }
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const runs = await request(`${workflowBase}/runs?event=workflow_dispatch&per_page=100`);
-    const selected = selectSourceBoundRun({ beforeRunIds, runs: runs.workflow_runs, targetSha, workflowPath, workflowId: workflowMetadata.id, repository });
+    const selected = selectRun({ beforeRunIds, runs: runs.workflow_runs, workflowPath, workflowId: workflowMetadata.id, repository });
     if (selected) return selected;
     if (attempt + 1 < attempts) await sleep(pollMilliseconds);
   }
-  throw new Error(`No source-bound workflow run became visible for ${workflow} at ${targetSha}.`);
+  throw new Error(`No authenticated workflow run became visible for ${workflow}.`);
+}
+
+export async function dispatchSourceBoundWorkflow({ repository, token, workflow, ref, targetSha, inputs = {}, ...options } = {}) {
+  assertWorkflowDispatchRef(ref);
+  if (!SHA.test(targetSha || "")) throw new Error("Workflow target SHA must be a full commit SHA.");
+  return dispatchWorkflow({ repository, token, workflow, ref, inputs, ...options, selectRun: (context) => selectSourceBoundRun({ ...context, targetSha }) });
+}
+
+export async function dispatchProtectedMainReleaseGate({ repository, token, targetSha, targetRef, inputs = {}, ...options } = {}) {
+  if (!SHA.test(targetSha || "")) throw new Error("Release Gate deployment target SHA must be a full commit SHA.");
+  assertWorkflowDispatchRef(targetRef);
+  if (inputs.target_sha !== targetSha || inputs.git_ref !== targetRef) throw new Error("Release Gate control-plane dispatch inputs are not bound to the deployment target.");
+  return dispatchWorkflow({ repository, token, workflow: "release-gate.yml", ref: "main", inputs, ...options, selectRun: selectProtectedMainReleaseGateRun });
 }
 
 function parseArgs(args) {
