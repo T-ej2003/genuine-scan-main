@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
-import { MIXED_DUAL_SLOT_RECOVERY_EXECUTION_POLICY_ARN, MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN, MIXED_DUAL_SLOT_RECOVERY_EXECUTION_TRUST_PATH, MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION, MIXED_DUAL_SLOT_RECOVERY_IAM_CAPABILITIES, MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, MIXED_DUAL_SLOT_RECOVERY_OIDC_PROVIDER_ARN, assertMixedDualSlotRecoveryIamPreflight } from "../aws/production-mixed-dual-slot-recovery-contract.mjs";
-import { readMixedDualSlotRecoveryIamCapabilityPreflight } from "../aws/preflight-production-mixed-dual-slot-recovery-iam.mjs";
+import { MIXED_DUAL_SLOT_RECOVERY_EXECUTION_POLICY_ARN, MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN, MIXED_DUAL_SLOT_RECOVERY_EXECUTION_TRUST_PATH, MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION, MIXED_DUAL_SLOT_RECOVERY_IAM_CAPABILITIES, MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, MIXED_DUAL_SLOT_RECOVERY_OIDC_PROVIDER_ARN, assertMixedDualSlotRecoveryIamPreflight, readMixedDualSlotRecoveryGithubEnvironmentGuard } from "../aws/production-mixed-dual-slot-recovery-contract.mjs";
+import { readMixedDualSlotRecoveryIamCapabilityPreflight as readPreflight } from "../aws/preflight-production-mixed-dual-slot-recovery-iam.mjs";
 import { assertMixedDualSlotRecoveryIamAttestation, createMixedDualSlotRecoveryIamAttestation } from "../aws/production-mixed-dual-slot-recovery-iam-attestation.mjs";
 import { createPinnedRootAttestationVerifier, ROOT_ATTESTATION_KEY_ALIAS_ARN, ROOT_ATTESTATION_SIGNING_ALGORITHM } from "../aws/production-root-attestation-key.mjs";
 
@@ -11,6 +11,10 @@ const observedAt = new Date("2026-09-10T00:00:00.000Z");
 const trust = JSON.parse(fs.readFileSync(MIXED_DUAL_SLOT_RECOVERY_EXECUTION_TRUST_PATH, "utf8"));
 const allowed = (action, resource) => ({ EvalActionName: action, EvalResourceName: resource === "*" ? "*" : "arn:${Partition}:secretsmanager:${Region}:${Account}:secret:${SecretId}", EvalDecision: "allowed", MatchedStatements: [{}], MissingContextValues: [], OrganizationsDecisionDetail: { AllowedByOrganizations: true }, ResourceSpecificResults: [{ EvalResourceName: resource, EvalResourceDecision: "allowed", MissingContextValues: [] }] });
 const allAllowed = () => MIXED_DUAL_SLOT_RECOVERY_IAM_CAPABILITIES.flatMap(({ action, resources }) => resources.map((resource) => allowed(action, resource)));
+const environment = { id: 9, name: "production-mixed-dual-slot-recovery", deployment_branch_policy: { protected_branches: false, custom_branch_policies: true }, protection_rules: [] };
+const branchPolicies = [{ id: 10, name: "main", type: "branch" }];
+const githubRunner = ({ environmentConfig = environment, policies = branchPolicies } = {}) => (_command, args) => JSON.stringify(args[1].endsWith("/deployment-branch-policies") ? [{ total_count: policies.length, branch_policies: policies }] : environmentConfig);
+const readMixedDualSlotRecoveryIamCapabilityPreflight = (options) => readPreflight({ ...options, githubRun: githubRunner() });
 const runner = ({ caller = { Account: "368992683803", Arn: "arn:aws:iam::368992683803:root" }, role = { Arn: MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN, AssumeRolePolicyDocument: trust }, results = allAllowed(), resourcePolicies = Object.fromEntries(MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES.map((resource) => [resource, null])) } = {}) => (args) => {
   const operation = args.slice(0, 2).join(" ");
   if (operation === "sts get-caller-identity") return JSON.stringify(caller);
@@ -70,6 +74,19 @@ test("effective-capability preflight authenticates the live GitHub OIDC provider
   for (const provider of [{ Url: "wrong.example.com", ClientIDList: ["sts.amazonaws.com"] }, { Url: "token.actions.githubusercontent.com", ClientIDList: ["other"] }, { Url: "token.actions.githubusercontent.com", ClientIDList: ["sts.amazonaws.com", "other"] }, { Url: "token.actions.githubusercontent.com", ClientIDList: null }]) assert.throws(() => readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now: observedAt, run: (args) => args.slice(0, 2).join(" ") === "iam get-open-id-connect-provider" ? JSON.stringify(provider) : runner()(args) }), /OIDC provider/);
 });
 
+test("effective-capability preflight authenticates the exact live protected-main-only GitHub environment", () => {
+  const preflight = readPreflight({ sourceSha, now: observedAt, run: runner(), githubRun: githubRunner() });
+  assert.deepEqual(preflight.githubEnvironmentGuard, { environmentId: 9, environmentName: "production-mixed-dual-slot-recovery", deploymentBranchPolicy: { protectedBranches: false, customBranchPolicies: true }, branchPolicyId: 10, branchPolicyName: "main", branchPolicyType: "branch", protectionRules: [] });
+  for (const [environmentConfig, policies] of [
+    [{ ...environment, name: "wrong" }, branchPolicies],
+    [{ ...environment, deployment_branch_policy: { protected_branches: true, custom_branch_policies: false } }, branchPolicies],
+    [{ ...environment, protection_rules: [{ type: "wait_timer" }] }, branchPolicies],
+    [environment, []],
+    [environment, [...branchPolicies, { id: 11, name: "release-*", type: "tag" }]],
+    [environment, [{ id: 10, name: "release-*", type: "tag" }]],
+  ]) assert.throws(() => readMixedDualSlotRecoveryGithubEnvironmentGuard({ run: githubRunner({ environmentConfig, policies }) }), /protected-main-only/);
+});
+
 test("effective-capability preflight authenticates every exact secret resource policy", () => {
   const denied = JSON.stringify({ Version: "2012-10-17", Statement: [{ Effect: "Deny", Principal: "*", Action: MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION, Resource: "*" }] });
   for (const resource of MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES) {
@@ -119,8 +136,8 @@ test("effective-capability preflight requires the sole exact AWS per-resource re
 
 test("preflight canonical identity rejects wildcard, missing, extra and stale substitutions", () => {
   const preflight = readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now: observedAt, run: runner() });
-  const legacyPreflight = structuredClone(preflight); delete legacyPreflight.oidcProviderGuard;
-  assert.throws(() => assertMixedDualSlotRecoveryIamPreflight({ ...legacyPreflight, schemaVersion: 4 }, { sourceSha }), /schema/);
+  const legacyPreflight = structuredClone(preflight); delete legacyPreflight.githubEnvironmentGuard;
+  assert.throws(() => assertMixedDualSlotRecoveryIamPreflight({ ...legacyPreflight, schemaVersion: 5 }, { sourceSha }), /schema/);
   for (const changed of [
     { principalArn: "arn:aws:iam::368992683803:role/wrong" },
     { action: "secretsmanager:*" },
@@ -130,6 +147,7 @@ test("preflight canonical identity rejects wildcard, missing, extra and stale su
     { roleTrustPolicySha256: "f".repeat(64) },
     { rolePermissionsBoundary: "arn:aws:iam::368992683803:policy/boundary" },
     { oidcProviderGuard: { providerArn: MIXED_DUAL_SLOT_RECOVERY_OIDC_PROVIDER_ARN, url: "token.actions.githubusercontent.com", audience: "other" } },
+    { githubEnvironmentGuard: { ...preflight.githubEnvironmentGuard, branchPolicyName: "release-*" } },
     { organizationsGuard: { accountId: "368992683803", status: "IN_ORGANIZATION", evidence: "unverified" } },
     { resourcePolicies: preflight.resourcePolicies.slice(0, 6) },
     { resourcePolicies: preflight.resourcePolicies.map((value, index) => index ? value : { ...value, resourcePolicyAccess: "UNVERIFIED" }) },

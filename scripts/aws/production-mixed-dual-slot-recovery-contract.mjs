@@ -21,6 +21,7 @@ export const MIXED_DUAL_SLOT_RECOVERY_EXECUTION_POLICY_ARN = "arn:aws:iam::36899
 export const MIXED_DUAL_SLOT_RECOVERY_EXECUTION_POLICY_PATH = "infra/aws/terraform/production-initial-activation-policy-reconciler/mixed-recovery-permissions-policy.json";
 export const MIXED_DUAL_SLOT_RECOVERY_EXECUTION_TRUST_PATH = "infra/aws/terraform/production-initial-activation-policy-reconciler/mixed-recovery-trust-policy.json";
 export const MIXED_DUAL_SLOT_RECOVERY_OIDC_PROVIDER_ARN = "arn:aws:iam::368992683803:oidc-provider/token.actions.githubusercontent.com";
+export const MIXED_DUAL_SLOT_RECOVERY_GITHUB_ENVIRONMENT = "production-mixed-dual-slot-recovery";
 export const MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION = "secretsmanager:UpdateSecretVersionStage";
 export const MIXED_DUAL_SLOT_RECOVERY_LIVE_PREDECESSOR = Object.freeze({
   cluster: "mscqr-prod-euw2-main", service: "mscqr-backend-servi-euw2",
@@ -76,13 +77,29 @@ export const MIXED_DUAL_SLOT_RECOVERY_IAM_CAPABILITIES = Object.freeze([
 export const MIXED_DUAL_SLOT_PREDECESSOR_CANONICAL_ID = mixedDualSlotRecoverySha256(MIXED_DUAL_SLOT_PREDECESSOR);
 export const MIXED_DUAL_SLOT_RECOVERY_POST_STATE_CANONICAL_ID = mixedDualSlotRecoverySha256(Object.fromEntries(MIXED_DUAL_SLOT_RECOVERY_ORDER.map((slot) => [slot, { ...MIXED_DUAL_SLOT_PREDECESSOR[slot], stagingLabels: [] }])));
 
-const preflightFields = ["schemaVersion", "kind", "operation", "sourceSha", "principalArn", "action", "resources", "roleTrustPolicySha256", "rolePermissionsBoundary", "oidcProviderGuard", "organizationsGuard", "resourcePolicies", "evaluations", "observedAt", "preflightSha256"];
+const environmentGuardFields = ["environmentId", "environmentName", "deploymentBranchPolicy", "branchPolicyId", "branchPolicyName", "branchPolicyType", "protectionRules"];
+export function readMixedDualSlotRecoveryGithubEnvironmentGuard({ run } = {}) {
+  if (typeof run !== "function") fail("Mixed recovery GitHub environment guard requires the canonical GitHub runner.");
+  const endpoint = `repos/${MIXED_DUAL_SLOT_RECOVERY_REPOSITORY}/environments/${MIXED_DUAL_SLOT_RECOVERY_GITHUB_ENVIRONMENT}`;
+  const environment = JSON.parse(run("gh", ["api", endpoint]));
+  const policies = JSON.parse(run("gh", ["api", `${endpoint}/deployment-branch-policies`, "--paginate", "--slurp"]));
+  const branches = policies.flatMap((page) => page?.branch_policies || []);
+  const guard = { environmentId: environment?.id, environmentName: environment?.name, deploymentBranchPolicy: { protectedBranches: environment?.deployment_branch_policy?.protected_branches, customBranchPolicies: environment?.deployment_branch_policy?.custom_branch_policies }, branchPolicyId: branches[0]?.id, branchPolicyName: branches[0]?.name, branchPolicyType: branches[0]?.type, protectionRules: environment?.protection_rules || [] };
+  exactKeys(guard, environmentGuardFields, "Mixed recovery GitHub environment guard");
+  exactKeys(guard.deploymentBranchPolicy, ["protectedBranches", "customBranchPolicies"], "Mixed recovery GitHub deployment branch policy");
+  if (!Number.isInteger(guard.environmentId) || guard.environmentId < 1 || guard.environmentName !== MIXED_DUAL_SLOT_RECOVERY_GITHUB_ENVIRONMENT || canonical(guard.deploymentBranchPolicy) !== canonical({ protectedBranches: false, customBranchPolicies: true }) || branches.length !== 1 || !Number.isInteger(guard.branchPolicyId) || guard.branchPolicyId < 1 || guard.branchPolicyName !== "main" || guard.branchPolicyType !== "branch" || canonical(guard.protectionRules) !== "[]") fail("Mixed recovery GitHub environment is not the exact protected-main-only execution boundary.");
+  return Object.freeze(structuredClone(guard));
+}
+
+const preflightFields = ["schemaVersion", "kind", "operation", "sourceSha", "principalArn", "action", "resources", "roleTrustPolicySha256", "rolePermissionsBoundary", "oidcProviderGuard", "githubEnvironmentGuard", "organizationsGuard", "resourcePolicies", "evaluations", "observedAt", "preflightSha256"];
 export function assertMixedDualSlotRecoveryIamPreflight(value, { sourceSha, now = new Date(), requireFresh = false } = {}) {
   exactKeys(value, preflightFields, "Mixed recovery IAM preflight");
   const expectedEvaluations = MIXED_DUAL_SLOT_RECOVERY_IAM_CAPABILITIES.flatMap(({ action, resources }) => resources.map((resource) => ({ action, resource })));
   exactKeys(value.oidcProviderGuard, ["providerArn", "url", "audience"], "Mixed recovery OIDC provider guard");
+  exactKeys(value.githubEnvironmentGuard, environmentGuardFields, "Mixed recovery GitHub environment guard");
+  exactKeys(value.githubEnvironmentGuard.deploymentBranchPolicy, ["protectedBranches", "customBranchPolicies"], "Mixed recovery GitHub deployment branch policy");
   exactKeys(value.organizationsGuard, ["accountId", "status", "evidence"], "Mixed recovery Organizations guard");
-  if (value.schemaVersion !== 5 || value.kind !== MIXED_DUAL_SLOT_RECOVERY_IAM_PREFLIGHT_KIND || value.operation !== MIXED_DUAL_SLOT_RECOVERY_OPERATION || value.sourceSha !== sourceSha || value.principalArn !== MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN || value.action !== MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION || !SHA256.test(value.roleTrustPolicySha256 || "") || value.rolePermissionsBoundary !== null || canonical(value.oidcProviderGuard) !== canonical({ providerArn: MIXED_DUAL_SLOT_RECOVERY_OIDC_PROVIDER_ARN, url: "token.actions.githubusercontent.com", audience: "sts.amazonaws.com" }) || canonical(value.organizationsGuard) !== canonical({ accountId: "368992683803", status: "NOT_IN_ORGANIZATION", evidence: "AWSOrganizationsNotInUseException" }) || canonical(value.resources) !== canonical(MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES) || !Array.isArray(value.resourcePolicies) || value.resourcePolicies.length !== 7 || !Array.isArray(value.evaluations) || value.evaluations.length !== expectedEvaluations.length) fail("Mixed recovery IAM preflight identity is invalid.");
+  if (value.schemaVersion !== 6 || value.kind !== MIXED_DUAL_SLOT_RECOVERY_IAM_PREFLIGHT_KIND || value.operation !== MIXED_DUAL_SLOT_RECOVERY_OPERATION || value.sourceSha !== sourceSha || value.principalArn !== MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN || value.action !== MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION || !SHA256.test(value.roleTrustPolicySha256 || "") || value.rolePermissionsBoundary !== null || canonical(value.oidcProviderGuard) !== canonical({ providerArn: MIXED_DUAL_SLOT_RECOVERY_OIDC_PROVIDER_ARN, url: "token.actions.githubusercontent.com", audience: "sts.amazonaws.com" }) || value.githubEnvironmentGuard.environmentName !== MIXED_DUAL_SLOT_RECOVERY_GITHUB_ENVIRONMENT || !Number.isInteger(value.githubEnvironmentGuard.environmentId) || value.githubEnvironmentGuard.environmentId < 1 || canonical(value.githubEnvironmentGuard.deploymentBranchPolicy) !== canonical({ protectedBranches: false, customBranchPolicies: true }) || !Number.isInteger(value.githubEnvironmentGuard.branchPolicyId) || value.githubEnvironmentGuard.branchPolicyId < 1 || value.githubEnvironmentGuard.branchPolicyName !== "main" || value.githubEnvironmentGuard.branchPolicyType !== "branch" || canonical(value.githubEnvironmentGuard.protectionRules) !== "[]" || canonical(value.organizationsGuard) !== canonical({ accountId: "368992683803", status: "NOT_IN_ORGANIZATION", evidence: "AWSOrganizationsNotInUseException" }) || canonical(value.resources) !== canonical(MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES) || !Array.isArray(value.resourcePolicies) || value.resourcePolicies.length !== 7 || !Array.isArray(value.evaluations) || value.evaluations.length !== expectedEvaluations.length) fail("Mixed recovery IAM preflight identity is invalid.");
   for (const [index, policy] of value.resourcePolicies.entries()) {
     exactKeys(policy, ["resource", "resourcePolicySha256", "resourcePolicyAccess"], `Mixed recovery resource policy ${index + 1}`);
     if (policy.resource !== MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES[index] || policy.resourcePolicyAccess !== "NO_RESOURCE_POLICY" || policy.resourcePolicySha256 !== mixedDualSlotRecoverySha256(null)) fail(`Mixed recovery resource policy is not safely absent for resource ${index + 1}.`);
@@ -98,8 +115,8 @@ export function assertMixedDualSlotRecoveryIamPreflight(value, { sourceSha, now 
   return value;
 }
 
-export function buildMixedDualSlotRecoveryIamPreflight({ sourceSha, principalArn, action, resources, roleTrustPolicySha256, rolePermissionsBoundary = null, oidcProviderGuard, organizationsGuard, resourcePolicies, evaluations, observedAt } = {}) {
-  const body = { schemaVersion: 5, kind: MIXED_DUAL_SLOT_RECOVERY_IAM_PREFLIGHT_KIND, operation: MIXED_DUAL_SLOT_RECOVERY_OPERATION, sourceSha, principalArn, action, resources, roleTrustPolicySha256, rolePermissionsBoundary, oidcProviderGuard, organizationsGuard, resourcePolicies, evaluations, observedAt };
+export function buildMixedDualSlotRecoveryIamPreflight({ sourceSha, principalArn, action, resources, roleTrustPolicySha256, rolePermissionsBoundary = null, oidcProviderGuard, githubEnvironmentGuard, organizationsGuard, resourcePolicies, evaluations, observedAt } = {}) {
+  const body = { schemaVersion: 6, kind: MIXED_DUAL_SLOT_RECOVERY_IAM_PREFLIGHT_KIND, operation: MIXED_DUAL_SLOT_RECOVERY_OPERATION, sourceSha, principalArn, action, resources, roleTrustPolicySha256, rolePermissionsBoundary, oidcProviderGuard, githubEnvironmentGuard, organizationsGuard, resourcePolicies, evaluations, observedAt };
   const value = { ...body, preflightSha256: mixedDualSlotRecoverySha256(body) };
   return Object.freeze(structuredClone(assertMixedDualSlotRecoveryIamPreflight(value, { sourceSha })));
 }

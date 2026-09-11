@@ -4,7 +4,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { createProductionAwsCommandRunner, createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import { createProductionAwsCommandRunner, createProductionAwsCredentialEnvironment, createProductionGithubCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import { readMixedDualSlotRecoveryGithubEnvironmentGuard } from "./production-mixed-dual-slot-recovery-contract.mjs";
 import { canonicalJson } from "./production-green-stage-b-contract.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, readBoundStageBPrivateJson, readStageBPrivateFileBytes, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { INSTALLATION, assertFreshInstallationAuthorization, assertInstallationAuthorizedPostState, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationPreparation, assertInstallationStateResources, classifyInstallationStatePullError, stateIdentity } from "./production-initial-activation-reconciler-installation-contract.mjs";
@@ -104,6 +105,7 @@ export function runInstallCli(argv = process.argv.slice(2), deps = {}) {
   const planBeforeAuthorization = readStageBPrivateFileBytes({ filePath: planPath, repositoryRoot: root, label: "Installation saved Terraform plan" });
   if (planBeforeAuthorization.sha256 !== planFileSha256) throw new Error("Installation saved plan transport digest is invalid.");
   const run = deps.run || createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_INITIAL_ACTIVATION_BOOTSTRAP, env: deps.env || process.env });
+  readMixedDualSlotRecoveryGithubEnvironmentGuard({ run: deps.githubRun || createProductionGithubCommandRunner({ env: workflowEnvironment }) });
   const identity = JSON.parse(run(["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"]));
   if (!new RegExp(`^arn:aws:sts::368992683803:assumed-role/${INSTALLATION.executionRoleArn.split("/").at(-1)}/[^/]+$`).test(identity?.Arn || "")) throw new Error("Installation requires the exact workflow-only bootstrap role session.");
   const backendArgs = [`-backend-config=bucket=${INSTALLATION.backend.bucket}`, `-backend-config=key=${INSTALLATION.backend.key}`, `-backend-config=region=${INSTALLATION.backend.region}`, `-backend-config=encrypt=${INSTALLATION.backend.encrypt}`, `-backend-config=use_lockfile=${INSTALLATION.backend.useLockfile}`];

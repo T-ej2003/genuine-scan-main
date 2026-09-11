@@ -29,7 +29,12 @@ hash. Before that approval is requested, preparation requires an administrator
 IAM simulation proving that the dedicated
 `mscqr-production-mixed-dual-slot-recovery-executor` has its exact source trust,
 the live GitHub OIDC provider retains the exact URL and STS audience, and the
-role can perform its STS identity read, both ECS predecessor reads, and all
+live `production-mixed-dual-slot-recovery` environment exists with no protection
+rules and exactly one custom deployment branch policy for `main`. The same
+environment check runs before the Terraform installation plan and again before
+its apply, so an absent, auto-created, tag-enabled, or otherwise broadened
+environment cannot install or satisfy the role trust. The preflight also proves
+the role can perform its STS identity read, both ECS predecessor reads, and all
 `DescribeSecret`, `GetSecretValue`, and `UpdateSecretVersionStage` calls on the
 seven exact ARNs. Readback also proves each exact secret has no resource policy
 that could override those identity results, and an independent Organizations

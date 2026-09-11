@@ -33,7 +33,10 @@ topology; substituted or unrelated IAM resources remain fail closed.
 The dedicated environment is operator-configured from
 `mixed-recovery-github-environment-contract.json`; only the execution workflow
 uses it, so the supported OIDC `sub` claim isolates the mutation role without
-relying on unsupported token claims.
+relying on unsupported token claims. Installation preparation and execution
+both read the live environment and require exactly one custom deployment branch
+policy for `main`, with no protection rules; the signed recovery IAM preflight
+binds the observed environment and branch-policy identities.
 
 Installation is performed only by the protected production-environment workflow
 using the exact OIDC bootstrap role documented in

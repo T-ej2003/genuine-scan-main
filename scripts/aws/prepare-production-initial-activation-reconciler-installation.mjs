@@ -5,7 +5,8 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { createProductionAwsCommandRunner, createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import { createProductionAwsCommandRunner, createProductionAwsCredentialEnvironment, createProductionGithubCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import { readMixedDualSlotRecoveryGithubEnvironmentGuard } from "./production-mixed-dual-slot-recovery-contract.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, ensureStageBPrivateFile, readStageBPrivateFileBytes, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { INSTALLATION, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationStateResources, classifyInstallationStatePullError, createInstallationPreparation, installationPermissionsPredecessor, stateIdentity } from "./production-initial-activation-reconciler-installation-contract.mjs";
 import { INITIAL_ACTIVATION_RECONCILER, MIXED_RECOVERY_EXECUTOR, assertInitialActivationReconcilerPolicyMetadata, assertInitialActivationReconcilerRoleMetadata, assertMixedRecoveryExecutorPolicyMetadata, assertMixedRecoveryExecutorRoleMetadata, readPolicyEntities, verifyInitialActivationPolicyReconciler } from "./verify-production-initial-activation-policy-reconciler.mjs";
@@ -198,6 +199,7 @@ export function runPrepareCli(argv = process.argv.slice(2), deps = {}) {
   assertProtectedCheckout({ sourceSha, repositoryRoot: root, exec: deps.exec || execFileSync });
   ensureStageBPrivateDirectory({ directory: path.dirname(outputPath), repositoryRoot: root, create: true, label: "Installation preparation directory" });
   const run = deps.run || createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile });
+  readMixedDualSlotRecoveryGithubEnvironmentGuard({ run: deps.githubRun || createProductionGithubCommandRunner() });
   const livePredecessor = discoverInstallationPredecessor({ run });
   if (livePredecessor.classification === "UNEXPECTED") throw new Error("Live installation topology is unexpected.");
   const outputDir = path.dirname(outputPath);

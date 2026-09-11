@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-cutover-production-adapters.mjs";
+import { createProductionGithubCommandRunner } from "./production-credential-source-contract.mjs";
 import { assertResourcePolicyAllowsRuntime } from "./production-ecs-runtime-consumability.mjs";
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
-import { MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN, MIXED_DUAL_SLOT_RECOVERY_EXECUTION_TRUST_PATH, MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION, MIXED_DUAL_SLOT_RECOVERY_IAM_CAPABILITIES, MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, MIXED_DUAL_SLOT_RECOVERY_OIDC_PROVIDER_ARN, buildMixedDualSlotRecoveryIamPreflight, mixedDualSlotRecoverySha256 } from "./production-mixed-dual-slot-recovery-contract.mjs";
+import { MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN, MIXED_DUAL_SLOT_RECOVERY_EXECUTION_TRUST_PATH, MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION, MIXED_DUAL_SLOT_RECOVERY_IAM_CAPABILITIES, MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, MIXED_DUAL_SLOT_RECOVERY_OIDC_PROVIDER_ARN, buildMixedDualSlotRecoveryIamPreflight, mixedDualSlotRecoverySha256, readMixedDualSlotRecoveryGithubEnvironmentGuard } from "./production-mixed-dual-slot-recovery-contract.mjs";
 
 const parse = (run, args) => JSON.parse(run(args));
 const missingContext = (result) => {
@@ -17,7 +18,7 @@ const restriction = (result, detail, field) => {
   return result[detail][field];
 };
 
-export function readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now = new Date(), run = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "default", region: "eu-west-2" }) } = {}) {
+export function readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now = new Date(), run = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "default", region: "eu-west-2" }), githubRun = createProductionGithubCommandRunner() } = {}) {
   const caller = parse(run, ["sts", "get-caller-identity"]);
   if (caller.Account !== "368992683803" || caller.Arn !== "arn:aws:iam::368992683803:root") throw new Error("Mixed recovery IAM preflight requires the exact administrator identity.");
   let organizationsGuard;
@@ -32,6 +33,7 @@ export function readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now
   const provider = parse(run, ["iam", "get-open-id-connect-provider", "--open-id-connect-provider-arn", MIXED_DUAL_SLOT_RECOVERY_OIDC_PROVIDER_ARN]);
   if (provider?.Url !== "token.actions.githubusercontent.com" || !Array.isArray(provider.ClientIDList) || provider.ClientIDList.length !== 1 || provider.ClientIDList[0] !== "sts.amazonaws.com") throw new Error("Mixed recovery GitHub Actions OIDC provider URL or audience changed.");
   const oidcProviderGuard = { providerArn: MIXED_DUAL_SLOT_RECOVERY_OIDC_PROVIDER_ARN, url: provider.Url, audience: "sts.amazonaws.com" };
+  const githubEnvironmentGuard = readMixedDualSlotRecoveryGithubEnvironmentGuard({ run: githubRun });
   const role = parse(run, ["iam", "get-role", "--role-name", "mscqr-production-mixed-dual-slot-recovery-executor"]).Role;
   if (role?.Arn !== MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN || role.PermissionsBoundary) throw new Error("Mixed recovery execution role or permissions boundary changed.");
   const expectedTrust = JSON.parse(fs.readFileSync(MIXED_DUAL_SLOT_RECOVERY_EXECUTION_TRUST_PATH, "utf8"));
@@ -58,5 +60,5 @@ export function readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now
     const permissionsBoundaryAllowed = permissionsBoundary.includes(false) ? false : permissionsBoundary.includes(true) ? true : null;
     return { action: result.EvalActionName, resource: resourceResult.EvalResourceName, decision: resourceResult.EvalResourceDecision, missingContextValues, organizationsAllowed, permissionsBoundaryAllowed };
   }));
-  return buildMixedDualSlotRecoveryIamPreflight({ sourceSha, principalArn: role.Arn, action: MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION, resources: [...MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES], roleTrustPolicySha256, rolePermissionsBoundary: null, oidcProviderGuard, organizationsGuard, resourcePolicies, evaluations, observedAt: now.toISOString() });
+  return buildMixedDualSlotRecoveryIamPreflight({ sourceSha, principalArn: role.Arn, action: MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION, resources: [...MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES], roleTrustPolicySha256, rolePermissionsBoundary: null, oidcProviderGuard, githubEnvironmentGuard, organizationsGuard, resourcePolicies, evaluations, observedAt: now.toISOString() });
 }

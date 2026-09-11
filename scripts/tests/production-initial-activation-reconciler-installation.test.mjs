@@ -14,6 +14,7 @@ import { INSTALLATION_BOOTSTRAP, assertBootstrapAuthorization, createBootstrapAu
 
 const sourceSha = "a".repeat(40);
 const now = new Date("2026-09-05T12:00:00.000Z");
+const githubRun = (_command, args) => JSON.stringify(args[1].endsWith("/deployment-branch-policies") ? [{ total_count: 1, branch_policies: [{ id: 10, name: "main", type: "branch" }] }] : { id: 9, name: "production-mixed-dual-slot-recovery", deployment_branch_policy: { protected_branches: false, custom_branch_policies: true }, protection_rules: [] });
 const bootstrapPreparation = (classification = "ABSENT", predecessorPolicySha256 = null) => createBootstrapPreparation({ sourceSha, predecessor: { classification, predecessorPolicySha256 } });
 const trust = fs.readFileSync("infra/aws/terraform/production-initial-activation-policy-reconciler/trust-policy.json", "utf8");
 const mixedTrust = fs.readFileSync("infra/aws/terraform/production-initial-activation-policy-reconciler/mixed-recovery-trust-policy.json", "utf8");
@@ -257,13 +258,13 @@ test("realistic absent first install reaches only the mocked exact saved-plan ap
     return discoveryRun()(args);
   };
   const args = ["--execute", "--source-sha", sourceSha, "--preparation", preparationPath, "--preparation-file-sha256", crypto.createHash("sha256").update(preparationBytes).digest("hex"), "--authorization", authorizationPath, "--authorization-file-sha256", crypto.createHash("sha256").update(authorizationBytes).digest("hex"), "--plan", planPath, "--plan-file-sha256", crypto.createHash("sha256").update(planBytes).digest("hex"), "--result", resultPath, "--terraform-data-dir", terraformDataDir];
-  assert.throws(() => runInstallCli(args, { exec, run, now }), /only inside/);
+  assert.throws(() => runInstallCli(args, { exec, run, githubRun, now }), /only inside/);
   assert.equal(applies, 0);
   const workflowEnv = { HOME: os.homedir(), PATH: process.env.PATH, AWS_ACCESS_KEY_ID: "session", AWS_SECRET_ACCESS_KEY: "session", AWS_SESSION_TOKEN: "session", GITHUB_ACTIONS: "true", GITHUB_REPOSITORY: INSTALLATION.repository, GITHUB_WORKFLOW_REF: PRODUCTION_ENVIRONMENT_APPROVAL.installationWorkflowRef, GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_RUN_ID: "100", GITHUB_RUN_ATTEMPT: "1", GITHUB_ACTOR: "operator" };
-  assert.throws(() => runInstallCli(args, { exec, run, now, env: workflowEnv }), /lock timeout/);
+  assert.throws(() => runInstallCli(args, { exec, run, githubRun, now, env: workflowEnv }), /lock timeout/);
   assert.equal(fs.existsSync(appliedPaths[0]), false);
   failApply = false;
-  const result = runInstallCli(args, { exec, run, now, env: workflowEnv });
+  const result = runInstallCli(args, { exec, run, githubRun, now, env: workflowEnv });
   assert.equal(applies, 2);
   assert.notEqual(appliedPaths[0], appliedPaths[1]);
   assert.equal(fs.existsSync(appliedPaths[1]), false);
@@ -334,7 +335,7 @@ test("real exact-complete plan traverses the CLI contract and performs zero appl
   const assumedArn = `arn:aws:sts::368992683803:assumed-role/${INSTALLATION.executionRoleArn.split("/").at(-1)}/run`;
   const run = (args) => args[0] === "sts" ? JSON.stringify({ Arn: assumedArn }) : discoveryRun()(args);
   const workflowEnv = { HOME: os.homedir(), PATH: process.env.PATH, AWS_ACCESS_KEY_ID: "session", AWS_SECRET_ACCESS_KEY: "session", AWS_SESSION_TOKEN: "session", GITHUB_ACTIONS: "true", GITHUB_REPOSITORY: INSTALLATION.repository, GITHUB_WORKFLOW_REF: PRODUCTION_ENVIRONMENT_APPROVAL.installationWorkflowRef, GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_RUN_ID: "100", GITHUB_RUN_ATTEMPT: "1", GITHUB_ACTOR: "operator" };
-  const result = runInstallCli(["--execute", "--source-sha", sourceSha, "--preparation", preparationPath, "--preparation-file-sha256", crypto.createHash("sha256").update(preparationBytes).digest("hex"), "--authorization", authorizationPath, "--authorization-file-sha256", crypto.createHash("sha256").update(authorizationBytes).digest("hex"), "--plan", planPath, "--plan-file-sha256", crypto.createHash("sha256").update(completePlanBytes).digest("hex"), "--result", resultPath, "--terraform-data-dir", terraformDataDir], { exec, run, now, env: workflowEnv });
+  const result = runInstallCli(["--execute", "--source-sha", sourceSha, "--preparation", preparationPath, "--preparation-file-sha256", crypto.createHash("sha256").update(preparationBytes).digest("hex"), "--authorization", authorizationPath, "--authorization-file-sha256", crypto.createHash("sha256").update(authorizationBytes).digest("hex"), "--plan", planPath, "--plan-file-sha256", crypto.createHash("sha256").update(completePlanBytes).digest("hex"), "--result", resultPath, "--terraform-data-dir", terraformDataDir], { exec, run, githubRun, now, env: workflowEnv });
   assert.equal(result.applyCount, 0);
   assert.equal(applies, 0);
   fs.rmSync(directory, { recursive: true, force: true });
@@ -396,7 +397,7 @@ test("first-install preparation normalizes Terraform's canonical empty state sen
     if (args.includes("show")) return JSON.stringify(plan);
     throw new Error(`unexpected command: ${command} ${args.join(" ")}`);
   };
-  const prepared = runPrepareCli(["--prepare", "--source-sha", sourceSha, "--admin-profile", "mscqr-production-root", "--output", outputPath, "--terraform-data-dir", terraformDataDir, "--state-absent"], { exec, run: discoveryRun({ role: false, policy: false }) });
+  const prepared = runPrepareCli(["--prepare", "--source-sha", sourceSha, "--admin-profile", "mscqr-production-root", "--output", outputPath, "--terraform-data-dir", terraformDataDir, "--state-absent"], { exec, githubRun, run: discoveryRun({ role: false, policy: false }) });
   assert.equal(prepared.predecessorState.stateExists, false);
   assert.equal(Object.hasOwn(prepared.predecessorState, "lineage"), false);
   assert.equal(Object.hasOwn(prepared.predecessorState, "serial"), false);
@@ -466,7 +467,7 @@ test("generated preparation normalizes Terraform outputs before private reads", 
     if (args.includes("show")) return JSON.stringify(plan);
     throw new Error(`unexpected command: ${command} ${args.join(" ")}`);
   };
-  const prepared = runPrepareCli(["--prepare", "--source-sha", sourceSha, "--admin-profile", "mscqr-production-root", "--output", outputPath, "--terraform-data-dir", terraformDataDir, "--state-absent"], { exec, run: discoveryRun({ role: false, policy: false }) });
+  const prepared = runPrepareCli(["--prepare", "--source-sha", sourceSha, "--admin-profile", "mscqr-production-root", "--output", outputPath, "--terraform-data-dir", terraformDataDir, "--state-absent"], { exec, githubRun, run: discoveryRun({ role: false, policy: false }) });
   assert.equal(prepared.livePredecessor, "ABSENT");
   assert.equal(fs.statSync(path.join(terraformDataDir, "terraform.tfstate")).mode & 0o777, 0o600);
   assert.equal(fs.statSync(path.join(directory, "installation.tfplan")).mode & 0o777, 0o600);
@@ -591,6 +592,10 @@ test("production apply uses native Terraform state locking", () => {
   assert.match(source, /"apply",[^\n]*"-lock-timeout=60s"/);
   assert.match(preparationSource, /-backend-config=use_lockfile=\$\{INSTALLATION\.backend\.useLockfile\}/);
   assert.doesNotMatch(preparationSource, /"init",[^\n]*"-lock=false"/);
+  assert.match(source, /readMixedDualSlotRecoveryGithubEnvironmentGuard/);
+  assert.match(preparationSource, /readMixedDualSlotRecoveryGithubEnvironmentGuard/);
+  assert.ok(preparationSource.indexOf("readMixedDualSlotRecoveryGithubEnvironmentGuard") < preparationSource.indexOf("discoverInstallationPredecessor({ run })"));
+  assert.ok(source.indexOf("readMixedDualSlotRecoveryGithubEnvironmentGuard") < source.indexOf("const backendArgs ="));
 });
 
 test("authorization workflow passes dynamic values through environment variables, never shell interpolation", () => {
@@ -983,7 +988,7 @@ test("terraform show failure always removes the unique render copy", () => {
     if (args.includes("show")) throw new Error("terraform show failed");
     throw new Error(`unexpected command ${command} ${args.join(" ")}`);
   };
-  assert.throws(() => runPrepareCli(["--prepare", "--source-sha", sourceSha, "--admin-profile", "mscqr-production-root", "--output", path.join(directory, "preparation.json"), "--terraform-data-dir", terraformDataDir, "--plan", savedPlan, "--state-absent"], { exec, run: discoveryRun({ role: false, policy: false }) }), /terraform show failed/);
+  assert.throws(() => runPrepareCli(["--prepare", "--source-sha", sourceSha, "--admin-profile", "mscqr-production-root", "--output", path.join(directory, "preparation.json"), "--terraform-data-dir", terraformDataDir, "--plan", savedPlan, "--state-absent"], { exec, githubRun, run: discoveryRun({ role: false, policy: false }) }), /terraform show failed/);
   assert.equal(fs.readdirSync(directory).some((name) => name.includes("render.tfplan")), false);
   fs.rmSync(directory, { recursive: true, force: true });
 });
