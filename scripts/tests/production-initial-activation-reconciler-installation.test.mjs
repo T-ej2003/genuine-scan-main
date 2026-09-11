@@ -573,6 +573,13 @@ test("IAM role permissions-boundary absence accepts only canonical Terraform nul
     const missing = structuredClone(plan);
     delete missing.resource_changes.find((entry) => entry.address === address).change.after.permissions_boundary;
     assert.throws(() => assertInstallationPlan(missing), /contract/);
+    for (const value of [null, ""]) {
+      const unknown = structuredClone(plan);
+      const resource = unknown.resource_changes.find((entry) => entry.address === address);
+      resource.change.after.permissions_boundary = value;
+      resource.change.after_unknown.permissions_boundary = true;
+      assert.throws(() => assertInstallationPlan(unknown), /contract/);
+    }
   }
 });
 
