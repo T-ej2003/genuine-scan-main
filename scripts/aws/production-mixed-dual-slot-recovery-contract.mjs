@@ -78,13 +78,16 @@ export const MIXED_DUAL_SLOT_PREDECESSOR_CANONICAL_ID = mixedDualSlotRecoverySha
 export const MIXED_DUAL_SLOT_RECOVERY_POST_STATE_CANONICAL_ID = mixedDualSlotRecoverySha256(Object.fromEntries(MIXED_DUAL_SLOT_RECOVERY_ORDER.map((slot) => [slot, { ...MIXED_DUAL_SLOT_PREDECESSOR[slot], stagingLabels: [] }])));
 
 const environmentGuardFields = ["environmentId", "environmentName", "deploymentBranchPolicy", "branchPolicyCount", "branchPolicyId", "branchPolicyName", "branchPolicyType", "protectionRules", "customProtectionRuleCount", "environmentSecretCount"];
-export function readMixedDualSlotRecoveryGithubEnvironmentGuard({ run } = {}) {
+export function readMixedDualSlotRecoveryGithubEnvironmentGuard({ run, privilegedRun } = {}) {
   if (typeof run !== "function") fail("Mixed recovery GitHub environment guard requires the canonical GitHub runner.");
+  if (typeof privilegedRun !== "function") fail("Mixed recovery GitHub environment guard requires the dedicated environment-read credential.");
   const endpoint = `repos/${MIXED_DUAL_SLOT_RECOVERY_REPOSITORY}/environments/${MIXED_DUAL_SLOT_RECOVERY_GITHUB_ENVIRONMENT}`;
   const environment = JSON.parse(run("gh", ["api", endpoint]));
   const policies = JSON.parse(run("gh", ["api", `${endpoint}/deployment-branch-policies`, "--paginate", "--slurp"]));
   const customProtectionRules = JSON.parse(run("gh", ["api", `${endpoint}/deployment_protection_rules`]));
-  const secrets = JSON.parse(run("gh", ["api", `${endpoint}/secrets`]));
+  // Environment-secret inventory requires Environments:read, which the ordinary
+  // Actions token cannot provide. Never fall back to that token for this CAS read.
+  const secrets = JSON.parse(privilegedRun("gh", ["api", `${endpoint}/secrets`]));
   if (!Array.isArray(policies) || policies.length !== 1 || policies[0]?.total_count !== 1 || !Array.isArray(policies[0]?.branch_policies)) fail("Mixed recovery GitHub environment is not the exact protected-main-only execution boundary.");
   const branches = policies[0].branch_policies;
   const protectionRules = environment?.protection_rules;

@@ -261,10 +261,14 @@ test("realistic absent first install reaches only the mocked exact saved-plan ap
   assert.throws(() => runInstallCli(args, { exec, run, githubRun, now }), /only inside/);
   assert.equal(applies, 0);
   const workflowEnv = { HOME: os.homedir(), PATH: process.env.PATH, AWS_ACCESS_KEY_ID: "session", AWS_SECRET_ACCESS_KEY: "session", AWS_SESSION_TOKEN: "session", GITHUB_ACTIONS: "true", GITHUB_REPOSITORY: INSTALLATION.repository, GITHUB_WORKFLOW_REF: PRODUCTION_ENVIRONMENT_APPROVAL.installationWorkflowRef, GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_RUN_ID: "100", GITHUB_RUN_ATTEMPT: "1", GITHUB_ACTOR: "operator" };
-  assert.throws(() => runInstallCli(args, { exec, run, githubRun, now, env: workflowEnv }), /lock timeout/);
+  assert.throws(() => runInstallCli(args, { exec, run, githubRun, now, env: workflowEnv }), /MSCQR_MIXED_DUAL_SLOT_ENVIRONMENT_READ_TOKEN/);
+  assert.equal(applies, 0);
+  workflowEnv.MSCQR_MIXED_DUAL_SLOT_ENVIRONMENT_READ_TOKEN = "fixture-short-lived-app-token";
+  assert.throws(() => runInstallCli(args, { exec, run, githubRun, privilegedGithubRun: githubRun, now, env: workflowEnv }), /lock timeout/);
   assert.equal(fs.existsSync(appliedPaths[0]), false);
   failApply = false;
-  const result = runInstallCli(args, { exec, run, githubRun, now, env: workflowEnv });
+  workflowEnv.MSCQR_MIXED_DUAL_SLOT_ENVIRONMENT_READ_TOKEN = "fixture-short-lived-app-token";
+  const result = runInstallCli(args, { exec, run, githubRun, privilegedGithubRun: githubRun, now, env: workflowEnv });
   assert.equal(applies, 2);
   assert.notEqual(appliedPaths[0], appliedPaths[1]);
   assert.equal(fs.existsSync(appliedPaths[1]), false);
@@ -334,8 +338,8 @@ test("real exact-complete plan traverses the CLI contract and performs zero appl
   };
   const assumedArn = `arn:aws:sts::368992683803:assumed-role/${INSTALLATION.executionRoleArn.split("/").at(-1)}/run`;
   const run = (args) => args[0] === "sts" ? JSON.stringify({ Arn: assumedArn }) : discoveryRun()(args);
-  const workflowEnv = { HOME: os.homedir(), PATH: process.env.PATH, AWS_ACCESS_KEY_ID: "session", AWS_SECRET_ACCESS_KEY: "session", AWS_SESSION_TOKEN: "session", GITHUB_ACTIONS: "true", GITHUB_REPOSITORY: INSTALLATION.repository, GITHUB_WORKFLOW_REF: PRODUCTION_ENVIRONMENT_APPROVAL.installationWorkflowRef, GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_RUN_ID: "100", GITHUB_RUN_ATTEMPT: "1", GITHUB_ACTOR: "operator" };
-  const result = runInstallCli(["--execute", "--source-sha", sourceSha, "--preparation", preparationPath, "--preparation-file-sha256", crypto.createHash("sha256").update(preparationBytes).digest("hex"), "--authorization", authorizationPath, "--authorization-file-sha256", crypto.createHash("sha256").update(authorizationBytes).digest("hex"), "--plan", planPath, "--plan-file-sha256", crypto.createHash("sha256").update(completePlanBytes).digest("hex"), "--result", resultPath, "--terraform-data-dir", terraformDataDir], { exec, run, githubRun, now, env: workflowEnv });
+  const workflowEnv = { HOME: os.homedir(), PATH: process.env.PATH, AWS_ACCESS_KEY_ID: "session", AWS_SECRET_ACCESS_KEY: "session", AWS_SESSION_TOKEN: "session", GITHUB_ACTIONS: "true", GITHUB_REPOSITORY: INSTALLATION.repository, GITHUB_WORKFLOW_REF: PRODUCTION_ENVIRONMENT_APPROVAL.installationWorkflowRef, GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_RUN_ID: "100", GITHUB_RUN_ATTEMPT: "1", GITHUB_ACTOR: "operator", MSCQR_MIXED_DUAL_SLOT_ENVIRONMENT_READ_TOKEN: "fixture-short-lived-app-token" };
+  const result = runInstallCli(["--execute", "--source-sha", sourceSha, "--preparation", preparationPath, "--preparation-file-sha256", crypto.createHash("sha256").update(preparationBytes).digest("hex"), "--authorization", authorizationPath, "--authorization-file-sha256", crypto.createHash("sha256").update(authorizationBytes).digest("hex"), "--plan", planPath, "--plan-file-sha256", crypto.createHash("sha256").update(completePlanBytes).digest("hex"), "--result", resultPath, "--terraform-data-dir", terraformDataDir], { exec, run, githubRun, privilegedGithubRun: githubRun, now, env: workflowEnv });
   assert.equal(result.applyCount, 0);
   assert.equal(applies, 0);
   fs.rmSync(directory, { recursive: true, force: true });
@@ -635,6 +639,19 @@ test("authorization workflow passes dynamic values through environment variables
   const applyStep = workflow.match(/- name: Apply the exact authorized saved plan once[\s\S]*?(?=\n      - uses: actions\/upload-artifact)/)?.[0];
   assert.ok(applyStep);
   assert.match(applyStep, /GH_TOKEN: \$\{\{ github\.token \}\}/);
+  assert.match(applyStep, /MSCQR_MIXED_DUAL_SLOT_ENVIRONMENT_READ_TOKEN: \$\{\{ steps\.environment-read-token\.outputs\.token \}\}/);
+  const appTokenStep = workflow.match(/- name: Mint scoped environment-read token[\s\S]*?(?=\n      - name: Apply the exact authorized saved plan once)/)?.[0];
+  assert.ok(appTokenStep);
+  assert.match(appTokenStep, /actions\/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349/);
+  assert.match(appTokenStep, /app-id: \$\{\{ vars\.MSCQR_MIXED_DUAL_SLOT_ENVIRONMENT_READ_APP_ID \}\}/);
+  assert.match(appTokenStep, /private-key: \$\{\{ secrets\.MSCQR_MIXED_DUAL_SLOT_ENVIRONMENT_READ_APP_PRIVATE_KEY \}\}/);
+  assert.match(appTokenStep, /owner: T-ej2003\n\s+repositories: genuine-scan-main\n\s+permission-environments: read\n\s+skip-token-revoke: false/);
+  assert.doesNotMatch(appTokenStep, /permission-(?:administration|actions|contents|secrets):|permission-environments: write/);
+  const artifactStep = workflow.match(/- uses: actions\/upload-artifact@v4[\s\S]*$/)?.[0];
+  assert.ok(artifactStep);
+  assert.doesNotMatch(artifactStep, /environment-read-token|outputs\.token/);
+  const installer = fs.readFileSync("scripts/aws/install-production-initial-activation-reconciler.mjs", "utf8");
+  assert.match(installer, /delete workflowEnvironment\[ENVIRONMENT_READ_TOKEN\]/);
 });
 
 test("bootstrap role trust and permissions are exact and non-administrative", () => {
