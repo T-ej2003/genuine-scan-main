@@ -31,7 +31,10 @@ IAM simulation proving that the dedicated
 and can perform its STS identity read, both ECS predecessor reads, and all
 `DescribeSecret`, `GetSecretValue`, and `UpdateSecretVersionStage` calls on the
 seven exact ARNs. Readback also proves each exact secret has no resource policy
-that could override those identity results.
+that could override those identity results, and an independent Organizations
+read proves the production account has no applicable SCP layer. An account in
+an Organization, an unreadable Organizations state, or any SCP ambiguity fails
+before protected approval because role policy simulation cannot prove SCPs.
 The administrator signs that exact preflight with the root-attestation KMS key;
 the preparation command emits the signature as a separate private sidecar. An
 unprotected workflow job verifies the signature with the protected-source-pinned

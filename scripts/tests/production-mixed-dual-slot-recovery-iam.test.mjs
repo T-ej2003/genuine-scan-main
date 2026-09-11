@@ -14,6 +14,7 @@ const allAllowed = () => MIXED_DUAL_SLOT_RECOVERY_IAM_CAPABILITIES.flatMap(({ ac
 const runner = ({ caller = { Account: "368992683803", Arn: "arn:aws:iam::368992683803:root" }, role = { Arn: MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN, AssumeRolePolicyDocument: trust }, results = allAllowed(), resourcePolicies = Object.fromEntries(MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES.map((resource) => [resource, null])) } = {}) => (args) => {
   const operation = args.slice(0, 2).join(" ");
   if (operation === "sts get-caller-identity") return JSON.stringify(caller);
+  if (operation === "organizations describe-organization") throw Object.assign(new Error("AWSOrganizationsNotInUseException"), { stderr: "AWSOrganizationsNotInUseException" });
   if (operation === "iam get-role") return JSON.stringify({ Role: role });
   if (operation === "secretsmanager get-resource-policy") {
     const resource = args.at(-1); return JSON.stringify({ ARN: resource, ResourcePolicy: resourcePolicies[resource] ?? null });
@@ -53,6 +54,13 @@ test("effective-capability preflight requires every executor read and mutation",
     const denied = allAllowed(); denied[index] = { ...denied[index], EvalDecision: "implicitDeny", ResourceSpecificResults: [{ ...denied[index].ResourceSpecificResults[0], EvalResourceDecision: "implicitDeny" }] };
     assert.throws(() => readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now: observedAt, run: runner({ results: denied }) }), /capability/);
   }
+});
+
+test("effective-capability preflight independently proves that no SCP layer applies", () => {
+  assert.throws(() => readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now: observedAt, run: (args) => args.slice(0, 2).join(" ") === "organizations describe-organization" ? JSON.stringify({ Organization: { Id: "o-example" } }) : runner()(args) }), /cannot authenticate the effective SCP layer/);
+  assert.throws(() => readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now: observedAt, run: (args) => { if (args.slice(0, 2).join(" ") === "organizations describe-organization") throw Object.assign(new Error("AccessDeniedException"), { stderr: "AccessDeniedException" }); return runner()(args); } }), /AccessDeniedException/);
+  const preflight = readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now: observedAt, run: runner() });
+  assert.deepEqual(preflight.organizationsGuard, { accountId: "368992683803", status: "NOT_IN_ORGANIZATION", evidence: "AWSOrganizationsNotInUseException" });
 });
 
 test("effective-capability preflight authenticates every exact secret resource policy", () => {
@@ -112,6 +120,7 @@ test("preflight canonical identity rejects wildcard, missing, extra and stale su
     { resources: [...preflight.resources, "arn:aws:secretsmanager:eu-west-2:368992683803:secret:arbitrary"] },
     { roleTrustPolicySha256: "f".repeat(64) },
     { rolePermissionsBoundary: "arn:aws:iam::368992683803:policy/boundary" },
+    { organizationsGuard: { accountId: "368992683803", status: "IN_ORGANIZATION", evidence: "unverified" } },
     { resourcePolicies: preflight.resourcePolicies.slice(0, 6) },
     { resourcePolicies: preflight.resourcePolicies.map((value, index) => index ? value : { ...value, resourcePolicyAccess: "UNVERIFIED" }) },
   ]) assert.throws(() => assertMixedDualSlotRecoveryIamPreflight({ ...preflight, ...changed }, { sourceSha }), /identity|hash|resource policy/);

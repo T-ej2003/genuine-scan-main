@@ -25,6 +25,11 @@ to the workflow-dedicated `production-mixed-dual-slot-recovery` environment
 subject. Five-version or any other state blocks before apply because no
 deletion or generic trust-update rule exists.
 
+Interrupted installation and executor-policy expansion are resumable from each
+exact Terraform prefix. Every present reconciler or mixed-recovery role,
+policy, and attachment must retain its canonical metadata and attachment
+topology; substituted or unrelated IAM resources remain fail closed.
+
 The dedicated environment is operator-configured from
 `mixed-recovery-github-environment-contract.json`; only the execution workflow
 uses it, so the supported OIDC `sub` claim isolates the mutation role without

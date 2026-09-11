@@ -136,6 +136,36 @@ test("discovery reaches exact-complete only through the canonical verifier topol
   } }), /endpoint not found/);
 });
 
+test("discovery admits every exact mixed-resource prefix during first installation", () => {
+  const absentReconciler = { role: false, policy: false, attached: [], entities: [{ PolicyRoles: [], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }] };
+  assert.deepEqual(discoverInstallationPredecessor({ run: discoveryRun({ ...absentReconciler, mixedRole: true, mixedPolicy: false, mixedAttached: [] }) }), { classification: "EXACT_PARTIAL", existingAddresses: ["aws_iam_role.mixed_recovery"] });
+  assert.deepEqual(discoverInstallationPredecessor({ run: discoveryRun({ ...absentReconciler, mixedRole: false, mixedPolicy: true, mixedEntities: [{ PolicyRoles: [], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }] }) }), { classification: "EXACT_PARTIAL", existingAddresses: ["aws_iam_policy.mixed_recovery"] });
+  assert.deepEqual(discoverInstallationPredecessor({ run: discoveryRun({ ...absentReconciler, mixedRole: true, mixedPolicy: true, mixedAttached: [], mixedEntities: [{ PolicyRoles: [], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }] }) }), { classification: "EXACT_PARTIAL", existingAddresses: ["aws_iam_policy.mixed_recovery", "aws_iam_role.mixed_recovery"] });
+  assert.deepEqual(discoverInstallationPredecessor({ run: discoveryRun({ ...absentReconciler, mixedRole: true, mixedPolicy: true }) }), { classification: "EXACT_PARTIAL", existingAddresses: ["aws_iam_policy.mixed_recovery", "aws_iam_role.mixed_recovery", "aws_iam_role_policy_attachment.mixed_recovery"] });
+  assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ ...absentReconciler, mixedRole: { AssumeRolePolicyDocument: JSON.parse(trust) }, mixedPolicy: false, mixedAttached: [] }) }).classification, "UNEXPECTED");
+});
+
+test("discovery resumes exact executor-policy expansion prefixes", () => {
+  const predecessorPolicy = installationPermissionsPredecessor();
+  assert.deepEqual(discoverInstallationPredecessor({ run: discoveryRun({ document: predecessorPolicy, mixedRole: true, mixedPolicy: false, mixedAttached: [] }) }), { classification: "EXACT_EXPANSION", existingAddresses: ["aws_iam_policy.reconciler", "aws_iam_role.mixed_recovery", "aws_iam_role.reconciler", "aws_iam_role_policy_attachment.reconciler"] });
+  assert.deepEqual(discoverInstallationPredecessor({ run: discoveryRun({ document: predecessorPolicy, mixedRole: false, mixedPolicy: true, mixedEntities: [{ PolicyRoles: [], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }] }) }), { classification: "EXACT_EXPANSION", existingAddresses: ["aws_iam_policy.mixed_recovery", "aws_iam_policy.reconciler", "aws_iam_role.reconciler", "aws_iam_role_policy_attachment.reconciler"] });
+  assert.deepEqual(discoverInstallationPredecessor({ run: discoveryRun({ document: predecessorPolicy, mixedAttached: [], mixedEntities: [{ PolicyRoles: [], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }] }) }), { classification: "EXACT_EXPANSION", existingAddresses: ["aws_iam_policy.mixed_recovery", "aws_iam_policy.reconciler", "aws_iam_role.mixed_recovery", "aws_iam_role.reconciler", "aws_iam_role_policy_attachment.reconciler"] });
+  assert.deepEqual(discoverInstallationPredecessor({ run: discoveryRun({ document: predecessorPolicy }) }), { classification: "EXACT_UPDATE", existingAddresses: allAddresses });
+  assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ document: predecessorPolicy, mixedRole: { AssumeRolePolicyDocument: JSON.parse(trust) } }) }).classification, "UNEXPECTED");
+  const reconcilerAddresses = allAddresses.filter((address) => address.endsWith(".reconciler"));
+  for (const present of [["aws_iam_role.mixed_recovery"], ["aws_iam_policy.mixed_recovery"], ["aws_iam_policy.mixed_recovery", "aws_iam_role.mixed_recovery"]]) {
+    const prefixPlan = structuredClone(updatePlan);
+    for (const address of present) prefixPlan.resource_changes.find((entry) => entry.address === address).change = structuredClone(completePlan.resource_changes.find((entry) => entry.address === address).change);
+    if (present.includes("aws_iam_policy.mixed_recovery")) {
+      const attachment = prefixPlan.resource_changes.find((entry) => entry.address === "aws_iam_role_policy_attachment.mixed_recovery").change;
+      attachment.after.policy_arn = MIXED_RECOVERY_EXECUTOR.policyArn;
+      delete attachment.after_unknown.policy_arn;
+    }
+    const addresses = [...reconcilerAddresses, ...present].sort();
+    assert.doesNotThrow(() => createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(legacyInstalledState)), livePredecessor: "EXACT_EXPANSION", livePredecessorAddresses: addresses, planJson: prefixPlan, planBytes, preparedAt: now.toISOString() }));
+  }
+});
+
 test("authorization is source, plan, workflow role and environment bound", () => {
   assert.doesNotThrow(() => assertInstallationAuthorization(authorization, { sourceSha, preparation }));
   const prettyFileSha256 = crypto.createHash("sha256").update(`${JSON.stringify(preparation, null, 2)}\n`).digest("hex");

@@ -179,6 +179,25 @@
     },
     {
       "sourceFile": "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs",
+      "action": "organizations:DescribeOrganization",
+      "capabilityId": "mixed-recovery-iam-preflight-read-organization",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "*"
+      ],
+      "reachableMode": [
+        "MIXED_DUAL_SLOT_RECOVERY"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs",
       "action": "iam:GetRole",
       "capabilityId": "mixed-recovery-iam-preflight-read-role",
       "identity": "ROOT_OPERATOR",

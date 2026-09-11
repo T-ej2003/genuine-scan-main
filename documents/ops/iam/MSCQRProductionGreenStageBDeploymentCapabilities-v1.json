@@ -8238,6 +8238,35 @@
       "mutation": false
     },
     {
+      "id": "mixed-recovery-iam-preflight-read-organization",
+      "phase": "mixed-dual-slot-recovery-iam-preflight",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs",
+      "sourceFunction": "mixed-recovery-iam-preflight-read-organization",
+      "action": "organizations:DescribeOrganization",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetRoleArn": "arn:aws:iam::368992683803:role/mscqr-production-mixed-dual-slot-recovery-executor"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "administrator-live-read",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs",
+        "sid": "mixed-recovery-iam-preflight-read-organization",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
       "id": "mixed-recovery-iam-preflight-read-resource-policy",
       "phase": "mixed-dual-slot-recovery-iam-preflight",
       "identity": "ROOT_OPERATOR",
@@ -13826,6 +13855,17 @@
         "arn:aws:iam::368992683803:role/mscqr-production-mixed-dual-slot-recovery-executor"
       ],
       "capabilityId": "mixed-recovery-iam-preflight-simulate"
+    },
+    {
+      "sourceFile": "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs",
+      "sourceFunction": "mixed-recovery-iam-preflight-read-organization",
+      "phase": "mixed-dual-slot-recovery-iam-preflight",
+      "identity": "ROOT_OPERATOR",
+      "action": "organizations:DescribeOrganization",
+      "resources": [
+        "*"
+      ],
+      "capabilityId": "mixed-recovery-iam-preflight-read-organization"
     },
     {
       "sourceFile": "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs",

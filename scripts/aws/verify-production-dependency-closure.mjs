@@ -37,6 +37,7 @@ const CALLS = Object.freeze([
   ["scripts/aws/production-stage-a-production-artifacts-journal.mjs", "s3:PutObject", "stage-a-artifacts-recovery-root-journal-conditional-create", [STAGE_A_RECONCILIATION_JOURNAL], "ROOT_OPERATOR"],
   ["scripts/aws/production-root-attestation-signer.mjs", "kms:Sign", "stage-a-artifacts-recovery-root-sign", [ROOT_ATTESTATION_KEY], "ROOT_OPERATOR"],
   ["scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs", "sts:GetCallerIdentity", "mixed-recovery-iam-preflight-identify", ["*"], "ROOT_OPERATOR"],
+  ["scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs", "organizations:DescribeOrganization", "mixed-recovery-iam-preflight-read-organization", ["*"], "ROOT_OPERATOR"],
   ["scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs", "iam:GetRole", "mixed-recovery-iam-preflight-read-role", ["arn:aws:iam::368992683803:role/mscqr-production-mixed-dual-slot-recovery-executor"], "ROOT_OPERATOR"],
   ["scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs", "iam:SimulatePrincipalPolicy", "mixed-recovery-iam-preflight-simulate", ["arn:aws:iam::368992683803:role/mscqr-production-mixed-dual-slot-recovery-executor"], "ROOT_OPERATOR"],
   ["scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs", "secretsmanager:GetResourcePolicy", "mixed-recovery-iam-preflight-read-resource-policy", MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, "ROOT_OPERATOR"],
