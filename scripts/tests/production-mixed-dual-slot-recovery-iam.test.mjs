@@ -9,7 +9,7 @@ import { createPinnedRootAttestationVerifier, ROOT_ATTESTATION_KEY_ALIAS_ARN, RO
 const sourceSha = "a".repeat(40);
 const observedAt = new Date("2026-09-10T00:00:00.000Z");
 const trust = JSON.parse(fs.readFileSync(MIXED_DUAL_SLOT_RECOVERY_EXECUTION_TRUST_PATH, "utf8"));
-const allowed = (action, resource) => ({ EvalActionName: action, EvalResourceName: resource === "*" ? "*" : "arn:${Partition}:secretsmanager:${Region}:${Account}:secret:${SecretId}", EvalDecision: "allowed", MatchedStatements: [{}], MissingContextValues: [], OrganizationsDecisionDetail: { AllowedByOrganizations: true }, ResourceSpecificResults: [{ EvalResourceName: resource, EvalResourceDecision: "allowed", MissingContextValues: [] }] });
+const allowed = (action, resource) => ({ EvalActionName: action, EvalResourceName: resource === "*" ? "*" : "arn:${Partition}:secretsmanager:${Region}:${Account}:secret:${SecretId}", EvalDecision: "allowed", MatchedStatements: [{}], MissingContextValues: [], OrganizationsDecisionDetail: { AllowedByOrganizations: true }, ...(resource === "*" ? {} : { ResourceSpecificResults: [{ EvalResourceName: resource, EvalResourceDecision: "allowed", MissingContextValues: [] }] }) });
 const allAllowed = () => MIXED_DUAL_SLOT_RECOVERY_IAM_CAPABILITIES.flatMap(({ action, resources }) => resources.map((resource) => allowed(action, resource)));
 const environment = { id: 9, name: "production-mixed-dual-slot-recovery", deployment_branch_policy: { protected_branches: false, custom_branch_policies: true }, protection_rules: [] };
 const branchPolicies = [{ id: 10, name: "main", type: "branch" }];
@@ -29,7 +29,7 @@ const runner = ({ caller = { Account: "368992683803", Arn: "arn:aws:iam::3689926
   if (operation === "iam simulate-principal-policy") {
     const action = args[args.indexOf("--action-names") + 1];
     const resources = args.slice(args.indexOf("--resource-arns") + 1); assert.equal(resources.length, 1);
-    return JSON.stringify({ EvaluationResults: results.filter((result) => result.EvalActionName === action && result.ResourceSpecificResults?.some(({ EvalResourceName }) => EvalResourceName === resources[0])) });
+    return JSON.stringify({ EvaluationResults: results.filter((result) => result.EvalActionName === action && (resources[0] === "*" ? result.EvalResourceName === "*" : result.ResourceSpecificResults?.some(({ EvalResourceName }) => EvalResourceName === resources[0]))) });
   }
   throw new Error(`unexpected ${operation}`);
 };
@@ -58,9 +58,37 @@ test("effective-capability preflight requires all seven exact allows", () => {
 
 test("effective-capability preflight requires every executor read and mutation", () => {
   for (const [index] of allAllowed().entries()) {
-    const denied = allAllowed(); denied[index] = { ...denied[index], EvalDecision: "implicitDeny", ResourceSpecificResults: [{ ...denied[index].ResourceSpecificResults[0], EvalResourceDecision: "implicitDeny" }] };
+    const denied = allAllowed(); denied[index] = { ...denied[index], EvalDecision: "implicitDeny", ...(denied[index].ResourceSpecificResults ? { ResourceSpecificResults: [{ ...denied[index].ResourceSpecificResults[0], EvalResourceDecision: "implicitDeny" }] } : {}) };
     assert.throws(() => readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now: observedAt, run: runner({ results: denied }) }), /capability/);
   }
+});
+
+test("effective-capability preflight validates wildcard actions from the exact top-level result", () => {
+  const wildcardIndex = allAllowed().findIndex(({ EvalResourceName }) => EvalResourceName === "*");
+  for (const changed of [
+    { EvalDecision: "implicitDeny" },
+    { EvalDecision: "explicitDeny" },
+    { EvalResourceName: "arn:aws:ecs:eu-west-2:368992683803:service/wrong" },
+    { EvalActionName: "ecs:UpdateService" },
+    { ResourceSpecificResults: [{ EvalResourceName: "*", EvalResourceDecision: "allowed", MissingContextValues: [] }] },
+  ]) {
+    const results = allAllowed(); results[wildcardIndex] = { ...results[wildcardIndex], ...changed };
+    assert.throws(() => readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now: observedAt, run: runner({ results }) }), /count|action|resource|wildcard|capability/);
+  }
+  const omittedOptional = allAllowed(); delete omittedOptional[wildcardIndex].MissingContextValues; delete omittedOptional[wildcardIndex].OrganizationsDecisionDetail;
+  assert.doesNotThrow(() => readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now: observedAt, run: runner({ results: omittedOptional }) }));
+  assert.doesNotThrow(() => readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now: observedAt, run: runner() }));
+});
+
+test("every simulated action has one explicit AWS response-shape contract", () => {
+  assert.deepEqual(MIXED_DUAL_SLOT_RECOVERY_IAM_CAPABILITIES.map(({ action, resources }) => [action, resources[0] === "*" ? "WILDCARD_TOP_LEVEL" : "EXACT_RESOURCE_SET", resources.length]), [
+    ["sts:GetCallerIdentity", "WILDCARD_TOP_LEVEL", 1],
+    ["ecs:DescribeServices", "WILDCARD_TOP_LEVEL", 1],
+    ["ecs:DescribeTaskDefinition", "WILDCARD_TOP_LEVEL", 1],
+    ["secretsmanager:DescribeSecret", "EXACT_RESOURCE_SET", 7],
+    ["secretsmanager:GetSecretValue", "EXACT_RESOURCE_SET", 7],
+    ["secretsmanager:UpdateSecretVersionStage", "EXACT_RESOURCE_SET", 7],
+  ]);
 });
 
 test("effective-capability preflight independently proves that no SCP layer applies", () => {
@@ -118,7 +146,7 @@ test("effective-capability preflight rejects identity, scope, deny, boundary and
     allAllowed().slice(1),
     [...allAllowed(), first],
     [{ ...first, EvalActionName: "secretsmanager:PutSecretValue" }, ...allAllowed().slice(1)],
-    [{ ...first, EvalDecision: "explicitDeny", ResourceSpecificResults: [{ ...first.ResourceSpecificResults[0], EvalResourceDecision: "explicitDeny" }] }, ...allAllowed().slice(1)],
+    [{ ...first, EvalDecision: "explicitDeny" }, ...allAllowed().slice(1)],
     [{ ...first, MissingContextValues: ["aws:PrincipalTag/Unexpected"] }, ...allAllowed().slice(1)],
     [{ ...first, PermissionsBoundaryDecisionDetail: { AllowedByPermissionsBoundary: false } }, ...allAllowed().slice(1)],
     [{ ...first, OrganizationsDecisionDetail: { AllowedByOrganizations: false } }, ...allAllowed().slice(1)],
@@ -126,7 +154,7 @@ test("effective-capability preflight rejects identity, scope, deny, boundary and
 });
 
 test("effective-capability preflight requires the sole exact AWS per-resource result", () => {
-  const first = allAllowed()[0];
+  const baseline = allAllowed(); const resultIndex = baseline.findIndex(({ ResourceSpecificResults }) => ResourceSpecificResults); const first = baseline[resultIndex];
   for (const changed of [
     { ResourceSpecificResults: undefined },
     { ResourceSpecificResults: [] },
@@ -140,7 +168,7 @@ test("effective-capability preflight requires the sole exact AWS per-resource re
     { MissingContextValues: "" },
     { PermissionsBoundaryDecisionDetail: {} },
   ]) {
-    const results = allAllowed(); results[0] = { ...first, ...changed };
+    const results = allAllowed(); results[resultIndex] = { ...first, ...changed };
     assert.throws(() => readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now: observedAt, run: runner({ results }) }), /count|action|resource|capability|malformed/);
   }
 });

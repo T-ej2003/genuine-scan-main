@@ -55,15 +55,20 @@ export function readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now
     if (!Array.isArray(response.EvaluationResults) || response.EvaluationResults.length !== 1) throw new Error("Mixed recovery IAM simulation result count is not exact.");
     const result = response.EvaluationResults[0];
     if (!result || result.EvalActionName !== action) throw new Error("Mixed recovery IAM simulation action or resource changed.");
-    if (!Array.isArray(result.ResourceSpecificResults) || result.ResourceSpecificResults.length !== 1) throw new Error("Mixed recovery IAM simulation per-resource result count is not exact.");
-    const resourceResult = result.ResourceSpecificResults[0];
-    if (resourceResult?.EvalResourceName !== resource || result.EvalDecision !== resourceResult.EvalResourceDecision) throw new Error("Mixed recovery IAM simulation action or resource changed.");
-    const missingContextValues = [...missingContext(result), ...missingContext(resourceResult)];
-    const organizations = [result, resourceResult].map((value) => restriction(value, "OrganizationsDecisionDetail", "AllowedByOrganizations"));
-    const permissionsBoundary = [result, resourceResult].map((value) => restriction(value, "PermissionsBoundaryDecisionDetail", "AllowedByPermissionsBoundary"));
+    let evaluated = result;
+    if (resource === "*") {
+      if (result.EvalResourceName !== "*" || result.ResourceSpecificResults !== undefined && (!Array.isArray(result.ResourceSpecificResults) || result.ResourceSpecificResults.length !== 0)) throw new Error("Mixed recovery IAM simulation wildcard result is not exact.");
+    } else {
+      if (!Array.isArray(result.ResourceSpecificResults) || result.ResourceSpecificResults.length !== 1) throw new Error("Mixed recovery IAM simulation per-resource result count is not exact.");
+      evaluated = result.ResourceSpecificResults[0];
+      if (evaluated?.EvalResourceName !== resource || result.EvalDecision !== evaluated.EvalResourceDecision) throw new Error("Mixed recovery IAM simulation action or resource changed.");
+    }
+    const missingContextValues = [...missingContext(result), ...(evaluated === result ? [] : missingContext(evaluated))];
+    const organizations = [result, ...(evaluated === result ? [] : [evaluated])].map((value) => restriction(value, "OrganizationsDecisionDetail", "AllowedByOrganizations"));
+    const permissionsBoundary = [result, ...(evaluated === result ? [] : [evaluated])].map((value) => restriction(value, "PermissionsBoundaryDecisionDetail", "AllowedByPermissionsBoundary"));
     const organizationsAllowed = organizations.includes(false) ? false : organizations.includes(true) ? true : null;
     const permissionsBoundaryAllowed = permissionsBoundary.includes(false) ? false : permissionsBoundary.includes(true) ? true : null;
-    return { action: result.EvalActionName, resource: resourceResult.EvalResourceName, decision: resourceResult.EvalResourceDecision, missingContextValues, organizationsAllowed, permissionsBoundaryAllowed };
+    return { action: result.EvalActionName, resource: evaluated.EvalResourceName, decision: resource === "*" ? result.EvalDecision : evaluated.EvalResourceDecision, missingContextValues, organizationsAllowed, permissionsBoundaryAllowed };
   }));
   return buildMixedDualSlotRecoveryIamPreflight({ sourceSha, principalArn: role.Arn, action: MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION, resources: [...MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES], roleTrustPolicySha256, rolePermissionsBoundary: null, oidcProviderGuard, githubEnvironmentGuard, organizationsGuard, secretEncryptionGuards, resourcePolicies, evaluations, observedAt: now.toISOString() });
 }
