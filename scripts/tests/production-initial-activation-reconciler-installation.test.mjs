@@ -10,7 +10,7 @@ import { INSTALLATION, INSTALLATION_BACKEND, assertInstallationAuthorization, as
 import { executeInstallation, runInstallCli } from "../aws/install-production-initial-activation-reconciler.mjs";
 import { discoverInstallationPredecessor, runPrepareCli } from "../aws/prepare-production-initial-activation-reconciler-installation.mjs";
 import { INITIAL_ACTIVATION_RECONCILER, MIXED_RECOVERY_EXECUTOR } from "../aws/verify-production-initial-activation-policy-reconciler.mjs";
-import { INSTALLATION_BOOTSTRAP, assertBootstrapAuthorization, createBootstrapAuthorization, createBootstrapPreparation, discoverBootstrapRole, installBootstrapRole, resolveBootstrapAuthorization, runBootstrapCli } from "../aws/production-initial-activation-reconciler-bootstrap.mjs";
+import { INSTALLATION_BOOTSTRAP, assertBootstrapAuthorization, assertBootstrapPermissionsDocument, createBootstrapAuthorization, createBootstrapPreparation, discoverBootstrapRole, installBootstrapRole, resolveBootstrapAuthorization, runBootstrapCli } from "../aws/production-initial-activation-reconciler-bootstrap.mjs";
 
 const sourceSha = "a".repeat(40);
 const now = new Date("2026-09-05T12:00:00.000Z");
@@ -63,6 +63,8 @@ const reconcilerTags = Object.entries(INITIAL_ACTIVATION_RECONCILER.tags).map(([
 const mixedTags = Object.entries(MIXED_RECOVERY_EXECUTOR.tags).map(([Key, Value]) => ({ Key, Value }));
 const legacyBootstrapPolicy = (generation) => {
   const value = JSON.parse(fs.readFileSync(INSTALLATION_BOOTSTRAP.permissionsPath, "utf8"));
+  if (generation >= 3) value.Statement.find(({ Sid }) => Sid === "ReadOwnExactBootstrapInlinePolicy").Action = "iam:GetRolePolicy";
+  if (generation === 5) return value;
   if (generation === 4) { value.Statement = value.Statement.filter(({ Sid }) => Sid !== "UpdateExactMixedRecoveryRoleTrust"); return value; }
   const mixedSids = new Set(["ReadExactMixedRecoveryRole", "UpdateExactMixedRecoveryRoleTrust", "ReadExactMixedRecoveryPolicy", "CreateExactMixedRecoveryRole", "CreateExactMixedRecoveryPolicy", "AttachExactMixedRecoveryPolicyToRole"]);
   const omitted = generation === 1 ? new Set(["UpdateExactReconcilerPolicyVersion", "ReadExactProductionArtifactsBucketPolicy", "ReadOwnExactBootstrapInlinePolicy"]) : generation === 2 ? new Set(["ReadExactProductionArtifactsBucketPolicy", "ReadOwnExactBootstrapInlinePolicy"]) : new Set();
@@ -669,15 +671,50 @@ test("bootstrap role trust and permissions are exact and non-administrative", ()
   assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "UpdateExactMixedRecoveryRoleTrust"), { Sid: "UpdateExactMixedRecoveryRoleTrust", Effect: "Allow", Action: "iam:UpdateAssumeRolePolicy", Resource: MIXED_RECOVERY_EXECUTOR.roleArn });
   assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "UpdateExactReconcilerPolicyVersion"), { Sid: "UpdateExactReconcilerPolicyVersion", Effect: "Allow", Action: "iam:CreatePolicyVersion", Resource: [INITIAL_ACTIVATION_RECONCILER.policyArn, MIXED_RECOVERY_EXECUTOR.policyArn] });
   assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "ReadExactProductionArtifactsBucketPolicy"), { Sid: "ReadExactProductionArtifactsBucketPolicy", Effect: "Allow", Action: "s3:GetBucketPolicy", Resource: "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an" });
-  assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "ReadOwnExactBootstrapInlinePolicy"), { Sid: "ReadOwnExactBootstrapInlinePolicy", Effect: "Allow", Action: "iam:GetRolePolicy", Resource: INSTALLATION_BOOTSTRAP.roleArn });
+  assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "ReadOwnExactBootstrapInlinePolicy"), { Sid: "ReadOwnExactBootstrapInlinePolicy", Effect: "Allow", Action: ["iam:GetRole", "iam:GetRolePolicy", "iam:ListAttachedRolePolicies", "iam:ListRolePolicies"], Resource: INSTALLATION_BOOTSTRAP.roleArn });
   const mutations = policy.Statement.flatMap((statement) => (Array.isArray(statement.Action) ? statement.Action : [statement.Action])).filter((action) => /^(iam:(Create|Attach|Tag|Update)|s3:(Put|Delete))/.test(action));
   assert.deepEqual(mutations.sort(), ["iam:AttachRolePolicy", "iam:AttachRolePolicy", "iam:CreatePolicy", "iam:CreatePolicy", "iam:CreatePolicyVersion", "iam:CreateRole", "iam:CreateRole", "iam:TagPolicy", "iam:TagPolicy", "iam:TagRole", "iam:TagRole", "iam:UpdateAssumeRolePolicy", "s3:DeleteObject", "s3:PutObject"].sort());
   assert.match(serialized, new RegExp(INITIAL_ACTIVATION_RECONCILER.roleArn));
   assert.match(serialized, new RegExp(INITIAL_ACTIVATION_RECONCILER.policyArn));
   assert.match(serialized, new RegExp(MIXED_RECOVERY_EXECUTOR.roleArn));
   assert.match(serialized, new RegExp(MIXED_RECOVERY_EXECUTOR.policyArn));
-  assert.deepEqual(policy.Statement.filter(({ Resource }) => JSON.stringify(Resource).includes(INSTALLATION_BOOTSTRAP.roleArn)), [{ Sid: "ReadOwnExactBootstrapInlinePolicy", Effect: "Allow", Action: "iam:GetRolePolicy", Resource: INSTALLATION_BOOTSTRAP.roleArn }]);
+  assert.deepEqual(policy.Statement.filter(({ Resource }) => JSON.stringify(Resource).includes(INSTALLATION_BOOTSTRAP.roleArn)), [{ Sid: "ReadOwnExactBootstrapInlinePolicy", Effect: "Allow", Action: ["iam:GetRole", "iam:GetRolePolicy", "iam:ListAttachedRolePolicies", "iam:ListRolePolicies"], Resource: INSTALLATION_BOOTSTRAP.roleArn }]);
   assert.notEqual(trustPolicy.Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:sub"], "repo:T-ej2003/genuine-scan-main:environment:production");
+});
+
+test("bootstrap policy covers the exact complete-state execution read set without broadening", () => {
+  const policy = JSON.parse(fs.readFileSync(INSTALLATION_BOOTSTRAP.permissionsPath, "utf8"));
+  const statement = (sid) => policy.Statement.find((value) => value.Sid === sid);
+  const predecessor = legacyBootstrapPolicy(5);
+  const before = predecessor.Statement.find(({ Sid }) => Sid === "ReadOwnExactBootstrapInlinePolicy");
+  const after = statement("ReadOwnExactBootstrapInlinePolicy");
+  const beforeActions = Array.isArray(before.Action) ? before.Action : [before.Action];
+  assert.deepEqual(after, { Sid: "ReadOwnExactBootstrapInlinePolicy", Effect: "Allow", Action: ["iam:GetRole", "iam:GetRolePolicy", "iam:ListAttachedRolePolicies", "iam:ListRolePolicies"], Resource: INSTALLATION_BOOTSTRAP.roleArn });
+  assert.deepEqual(after.Action.filter((action) => !beforeActions.includes(action)), ["iam:GetRole", "iam:ListAttachedRolePolicies", "iam:ListRolePolicies"]);
+  assert.deepEqual(beforeActions.filter((action) => !after.Action.includes(action)), []);
+  assert.deepEqual(statement("ReadOidcProvider"), { Sid: "ReadOidcProvider", Effect: "Allow", Action: "iam:GetOpenIDConnectProvider", Resource: INITIAL_ACTIVATION_RECONCILER.oidcProviderArn });
+  assert.deepEqual(statement("ReadExactReconcilerRole"), { Sid: "ReadExactReconcilerRole", Effect: "Allow", Action: ["iam:GetRole", "iam:ListAttachedRolePolicies", "iam:ListRolePolicies", "iam:ListRoleTags"], Resource: INITIAL_ACTIVATION_RECONCILER.roleArn });
+  assert.deepEqual(statement("ReadExactMixedRecoveryRole"), { Sid: "ReadExactMixedRecoveryRole", Effect: "Allow", Action: ["iam:GetRole", "iam:ListAttachedRolePolicies", "iam:ListRolePolicies", "iam:ListRoleTags"], Resource: MIXED_RECOVERY_EXECUTOR.roleArn });
+  assert.deepEqual(statement("ReadExactReconcilerPolicy"), { Sid: "ReadExactReconcilerPolicy", Effect: "Allow", Action: ["iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListEntitiesForPolicy", "iam:ListPolicyTags", "iam:ListPolicyVersions"], Resource: INITIAL_ACTIVATION_RECONCILER.policyArn });
+  assert.deepEqual(statement("ReadExactMixedRecoveryPolicy"), { Sid: "ReadExactMixedRecoveryPolicy", Effect: "Allow", Action: ["iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListEntitiesForPolicy", "iam:ListPolicyTags", "iam:ListPolicyVersions"], Resource: MIXED_RECOVERY_EXECUTOR.policyArn });
+  assert.deepEqual(statement("InventoryReservedPolicyName"), { Sid: "InventoryReservedPolicyName", Effect: "Allow", Action: "iam:ListPolicies", Resource: "*" });
+  assert.deepEqual(statement("ReadExactBackendPrefix"), { Sid: "ReadExactBackendPrefix", Effect: "Allow", Action: "s3:ListBucket", Resource: INSTALLATION_BACKEND.bucket ? `arn:aws:s3:::${INSTALLATION_BACKEND.bucket}` : undefined, Condition: { StringEquals: { "s3:prefix": [INSTALLATION_BACKEND.key, `${INSTALLATION_BACKEND.key}.tflock`] } } });
+  assert.deepEqual(statement("ReadExactBackendObjects"), { Sid: "ReadExactBackendObjects", Effect: "Allow", Action: "s3:GetObject", Resource: [`arn:aws:s3:::${INSTALLATION_BACKEND.bucket}/${INSTALLATION_BACKEND.key}`, `arn:aws:s3:::${INSTALLATION_BACKEND.bucket}/${INSTALLATION_BACKEND.key}.tflock`] });
+  assert.deepEqual(statement("ReadExactProductionArtifactsBucketPolicy"), { Sid: "ReadExactProductionArtifactsBucketPolicy", Effect: "Allow", Action: "s3:GetBucketPolicy", Resource: "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an" });
+  assert.doesNotMatch(JSON.stringify(after), /secretsmanager:|iam:(?:PutRolePolicy|DeleteRolePolicy|AttachRolePolicy|DetachRolePolicy|UpdateRole|CreateRole|DeleteRole|PassRole)/);
+  for (const mutate of [
+    (value) => { value.Statement.find(({ Sid }) => Sid === "ReadOwnExactBootstrapInlinePolicy").Action = ["iam:GetRolePolicy", "iam:ListAttachedRolePolicies", "iam:ListRolePolicies"]; },
+    (value) => { value.Statement.find(({ Sid }) => Sid === "ReadOwnExactBootstrapInlinePolicy").Action = ["iam:GetRole", "iam:GetRolePolicy", "iam:ListRolePolicies"]; },
+    (value) => { value.Statement.find(({ Sid }) => Sid === "ReadOwnExactBootstrapInlinePolicy").Action = ["iam:GetRole", "iam:GetRolePolicy", "iam:ListAttachedRolePolicies"]; },
+    (value) => { value.Statement.find(({ Sid }) => Sid === "ReadOwnExactBootstrapInlinePolicy").Resource = "*"; },
+    (value) => { value.Statement.find(({ Sid }) => Sid === "ReadOwnExactBootstrapInlinePolicy").Resource = "arn:aws:iam::368992683803:role/*"; },
+    (value) => { value.Statement.find(({ Sid }) => Sid === "ReadOwnExactBootstrapInlinePolicy").Resource = INITIAL_ACTIVATION_RECONCILER.roleArn; },
+    (value) => { value.Statement.find(({ Sid }) => Sid === "ReadOwnExactBootstrapInlinePolicy").Action = "iam:*"; },
+    (value) => { value.Statement.find(({ Sid }) => Sid === "ReadOwnExactBootstrapInlinePolicy").Action.push("iam:PutRolePolicy"); },
+    (value) => { value.Statement.find(({ Sid }) => Sid === "ReadOwnExactBootstrapInlinePolicy").Resource = [INSTALLATION_BOOTSTRAP.roleArn, INITIAL_ACTIVATION_RECONCILER.roleArn]; },
+    (value) => { value.Statement.find(({ Sid }) => Sid === "ReadExactBackendObjects").Resource = "arn:aws:s3:::*"; },
+    (value) => { value.Statement.push({ Sid: "UnexpectedSecrets", Effect: "Allow", Action: "secretsmanager:PutSecretValue", Resource: "*" }); },
+  ]) { const candidate = structuredClone(policy); mutate(candidate); assert.throws(() => assertBootstrapPermissionsDocument(candidate)); }
 });
 
 test("bootstrap and installation implementation modules have an exact command dependency closure", () => {
@@ -869,6 +906,7 @@ test("bootstrap accepts only exact historical predecessors and binds authorizati
   const generation2 = legacyBootstrapPolicy(2);
   const generation3 = legacyBootstrapPolicy(3);
   const generation4 = legacyBootstrapPolicy(4);
+  const generation5 = legacyBootstrapPolicy(5);
   let inline = generation1; let puts = 0;
   const run = (args) => {
     if (args[0] === "sts") return JSON.stringify({ Arn: INSTALLATION_BOOTSTRAP.administratorArn });
@@ -895,6 +933,11 @@ test("bootstrap accepts only exact historical predecessors and binds authorizati
   assert.deepEqual(discoverBootstrapRole({ run }), { classification: "EXACT_PREDECESSOR_GENERATION_4", predecessorPolicySha256: "51be4b3bf73dc72f9e929a03c10057c2132f7d2898e4cae22b398f49bffa8acd" });
   const generation4Authorization = createBootstrapAuthorization({ sourceSha, preparation: bootstrapPreparation("EXACT_PREDECESSOR_GENERATION_4", "51be4b3bf73dc72f9e929a03c10057c2132f7d2898e4cae22b398f49bffa8acd"), approval: bootstrapApproval, authorizedAt: now.toISOString() });
   assert.equal(installBootstrapRole({ run, authorization: generation4Authorization, sourceSha, now }).putRolePolicyCount, 1);
+  assert.equal(discoverBootstrapRole({ run }).classification, "EXACT_COMPLETE");
+  inline = generation5;
+  assert.deepEqual(discoverBootstrapRole({ run }), { classification: "EXACT_PREDECESSOR_GENERATION_5", predecessorPolicySha256: "5c2fb0e2c8d5a61f7ee9327bfca879872cc8f0d31d57b4d6f2c819c67d65fbf6" });
+  const generation5Authorization = createBootstrapAuthorization({ sourceSha, preparation: bootstrapPreparation("EXACT_PREDECESSOR_GENERATION_5", "5c2fb0e2c8d5a61f7ee9327bfca879872cc8f0d31d57b4d6f2c819c67d65fbf6"), approval: bootstrapApproval, authorizedAt: now.toISOString() });
+  assert.equal(installBootstrapRole({ run, authorization: generation5Authorization, sourceSha, now }).putRolePolicyCount, 1);
   assert.equal(discoverBootstrapRole({ run }).classification, "EXACT_COMPLETE");
   for (const mutate of [
     (policy) => { policy.Statement[0].Action = "s3:GetObject"; },
