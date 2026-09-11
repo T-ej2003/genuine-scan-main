@@ -22,7 +22,7 @@ jobs:
   execute:
     name: Execute or resume exact seven-slot recovery
     runs-on: ubuntu-latest
-    environment: production
+    environment: production-mixed-dual-slot-recovery
     steps:
       - uses: actions/checkout@v4
         with:
@@ -68,7 +68,7 @@ jobs:
           test "$(sha256sum "$workdir/preparation.json" | awk '{print $1}')" = "$PREPARATION_FILE_SHA256"
       - uses: aws-actions/configure-aws-credentials@v6
         with:
-          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-release-deployer
+          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-mixed-dual-slot-recovery-executor
           aws-region: eu-west-2
           inline-session-policy: >-
             {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["sts:GetCallerIdentity","ecs:DescribeServices","ecs:DescribeTaskDefinition"],"Resource":"*"},{"Effect":"Allow","Action":["secretsmanager:DescribeSecret","secretsmanager:GetSecretValue","secretsmanager:UpdateSecretVersionStage"],"Resource":["arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-pending-1CnWMp","arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-private-pending-LZhc54","arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-pending-uB3P1Q","arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj","arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX","arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE","arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2"]}]}

@@ -37,6 +37,16 @@ test("branch secret diff parses unified hunks rather than diff-looking source te
   assert.deepEqual(addedLinesFromUnifiedDiff(["diff --git a/a b/a", "--- a/a", "+++ b/a", "Binary files a/a and b/a differ"].join("\n")), []);
 });
 
+test("branch secret diff permits only reviewed recovery ARNs in canonical generated capability documents", () => {
+  const reviewed = ["arn", "aws", "secretsmanager", "eu-west-2", "368992683803", "secret:mscqr/prod/rotation/jwt-pending-1CnWMp"].join(":");
+  const generated = "documents/ops/iam/MSCQRProductionDependencyClosure-v1.json";
+  assert.equal(scanAddedDiff(unified(reviewed), generated).length, 0);
+  assert.equal(scanAddedDiff(unified(reviewed), "scripts/tests/fixtures/production-initial-activation-reconciler-plan-absent.json").length, 0);
+  assert.equal(scanAddedDiff(unified(`{\"policy\":\"${reviewed}\\\"}`), "scripts/tests/fixtures/production-initial-activation-reconciler-plan-absent.json").length, 0);
+  assert.equal(scanAddedDiff(unified(reviewed), "documents/ops/runbook.md").length, 1);
+  assert.equal(scanAddedDiff(unified(`${reviewed}-substitute`), generated).length, 1);
+});
+
 test("branch secret diff forces Git text hunks for NUL-containing protected files", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-secret-diff-"));
   const git = (args) => execFileSync("git", ["-C", directory, ...args], { encoding: "utf8" });

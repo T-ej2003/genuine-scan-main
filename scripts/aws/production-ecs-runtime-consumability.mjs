@@ -145,7 +145,7 @@ function loggingPolicyAuthorizations(role, policyDocuments, claims) {
     positivePolicySha256: authority.policySha256, identityPolicyDenyAnalysis: "NO_INTERSECTING_DENY", permissionsBoundary: "ABSENT" });
 }
 
-function assertResourcePolicyAllowsRuntime({ policy, principalArn, action, resource, label }) {
+export function assertResourcePolicyAllowsRuntime({ policy, principalArn, action, resource, label }) {
   if (!policy) return { resourcePolicySha256: canonicalSha256(null), resourcePolicyAccess: "NO_RESOURCE_POLICY" };
   secretsManagerPolicyStatements(policy, label);
   throw new Error(`${label} is unsupported for production runtime authorization and fails closed.`);

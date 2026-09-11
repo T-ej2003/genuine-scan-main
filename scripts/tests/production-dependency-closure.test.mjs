@@ -39,7 +39,29 @@ test("complete production dependency closure is exact across modes and failure p
     ["scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs", "s3:PutObject", "stage-a-artifacts-recovery-release-lock-acquire"],
     ["scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs", "s3:DeleteObject", "stage-a-artifacts-recovery-release-lock-release"],
   ]);
-  assert.equal(report.newAwsCalls.length, 42 + stageAAdditions.length + 15 + 14); // baseline, Stage-A, initial-activation, and ProviderReadOnly calls
+  assert.equal(report.newAwsCalls.length, 42 + stageAAdditions.length + 15 + 14 + 7 + 1 + 6); // baseline, Stage-A, policy reconciliation, ProviderReadOnly, recovery IAM preflight, attestation signing, and exact executor calls
+  assert.deepEqual(report.newAwsCalls.filter(({ capabilityId }) => capabilityId?.startsWith("mixed-recovery-iam-preflight-")).map(({ action, identity }) => [action, identity]), [
+    ["sts:GetCallerIdentity", "ROOT_OPERATOR"],
+    ["organizations:DescribeOrganization", "ROOT_OPERATOR"],
+    ["iam:GetOpenIDConnectProvider", "ROOT_OPERATOR"],
+    ["iam:GetRole", "ROOT_OPERATOR"],
+    ["iam:SimulatePrincipalPolicy", "ROOT_OPERATOR"],
+    ["secretsmanager:DescribeSecret", "ROOT_OPERATOR"],
+    ["secretsmanager:GetResourcePolicy", "ROOT_OPERATOR"],
+  ]);
+  assert.deepEqual(report.newAwsCalls.filter(({ capabilityId }) => capabilityId === "mixed-recovery-remove-awscurrent").map(({ action, resources, identity, reachableMode }) => [action, resources, identity, reachableMode]), [
+    ["secretsmanager:UpdateSecretVersionStage", graph().capabilities.find(({ id }) => id === "mixed-recovery-remove-awscurrent").resources, "MIXED_RECOVERY_EXECUTOR", ["MIXED_DUAL_SLOT_RECOVERY"]],
+  ]);
+  assert.deepEqual(report.newAwsCalls.filter(({ capabilityId }) => capabilityId?.startsWith("mixed-recovery-executor-")).map(({ capabilityId, action }) => [capabilityId, action]), [
+    ["mixed-recovery-executor-identify", "sts:GetCallerIdentity"],
+    ["mixed-recovery-executor-describe-service", "ecs:DescribeServices"],
+    ["mixed-recovery-executor-describe-task-definition", "ecs:DescribeTaskDefinition"],
+    ["mixed-recovery-executor-describe-secret", "secretsmanager:DescribeSecret"],
+    ["mixed-recovery-executor-get-secret-value", "secretsmanager:GetSecretValue"],
+  ]);
+  assert.deepEqual(report.newAwsCalls.filter(({ capabilityId }) => capabilityId === "mixed-recovery-iam-attestation-sign").map(({ action, resources, identity, reachableMode }) => [action, resources, identity, reachableMode]), [
+    ["kms:Sign", ["arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation"], "ROOT_OPERATOR", ["MIXED_DUAL_SLOT_RECOVERY"]],
+  ]);
   assert.equal(report.newAwsCalls.filter(({ capabilityId }) => capabilityId?.startsWith("initial-activation-policy-reconciliation-root-")).every(({ identity }) => identity === "INITIAL_ACTIVATION_RECONCILER"), true);
   assert.deepEqual(report.newAwsCalls.filter(({ capabilityId }) => capabilityId?.startsWith("stage-a-artifacts-recovery-release-lock-")).map(({ action, resources, identity }) => [action, resources, identity]), [
     ["s3:PutObject", ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"], "RELEASE_DEPLOYER"],
@@ -86,7 +108,8 @@ test("complete production dependency closure is exact across modes and failure p
   assert.deepEqual(new Set(Object.keys(report.runtimeModeClosure)), new Set(Object.keys(report.modes)));
   for (const { capabilityId, reachableMode } of report.newAwsCalls) for (const mode of reachableMode) assert.notEqual(report.modes[mode], undefined, `${capabilityId} is reachable from undeclared ${mode}`);
   assert.equal(report.runtimeDependencies.some(({ id }) => id === "ecs-final-candidate-runtime-consumability"), true);
-  assert.deepEqual(new Set(Object.keys(report.runtimeModeClosure)), new Set(["NORMAL", "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME", "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY", "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION", "INITIAL_ACTIVATION_POLICY_RECONCILIATION", "PROVIDER_READONLY_POLICY_RECONCILIATION", "ROTATION_OVERLAP", "ROTATION_CLEANUP", "ROLLBACK_RECONCILIATION", "POST_DEPLOY_VERIFY"]));
+  assert.deepEqual(new Set(Object.keys(report.runtimeModeClosure)), new Set(["NORMAL", "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME", "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY", "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION", "INITIAL_ACTIVATION_POLICY_RECONCILIATION", "PROVIDER_READONLY_POLICY_RECONCILIATION", "MIXED_DUAL_SLOT_RECOVERY", "ROTATION_OVERLAP", "ROTATION_CLEANUP", "ROLLBACK_RECONCILIATION", "POST_DEPLOY_VERIFY"]));
+  for (const id of ["mixed-recovery-iam-preflight-identify", "mixed-recovery-iam-preflight-read-role", "mixed-recovery-iam-preflight-simulate", "mixed-recovery-iam-preflight-read-resource-policy", "mixed-recovery-iam-attestation-sign", "mixed-recovery-executor-identify", "mixed-recovery-executor-describe-service", "mixed-recovery-executor-describe-task-definition", "mixed-recovery-executor-describe-secret", "mixed-recovery-executor-get-secret-value", "mixed-recovery-remove-awscurrent"]) assert.deepEqual(report.newAwsCalls.find(({ capabilityId }) => capabilityId === id)?.reachableMode, ["MIXED_DUAL_SLOT_RECOVERY"]);
   assert.equal(report.newAwsCalls.filter(({ capabilityId, reachableMode }) => capabilityId?.startsWith("stage-a-artifacts-recovery-") && !reachableMode.includes("STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY")).length, 0);
   assert.equal(report.newAwsCalls.filter(({ capabilityId, reachableMode }) => (capabilityId?.startsWith("stage-a-artifacts-journal-") || capabilityId?.startsWith("stage-a-artifacts-reconciliation-")) && !reachableMode.includes("STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION")).length, 0);
   const rootVerifierModes = report.newAwsCalls.filter(({ capabilityId }) => ["release-root-attestation-verify", "release-root-attestation-describe-key", "release-root-attestation-read-key-policy", "release-root-attestation-read-key-tags"].includes(capabilityId));

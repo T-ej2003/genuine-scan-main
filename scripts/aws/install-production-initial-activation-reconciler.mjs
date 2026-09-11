@@ -4,7 +4,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { createProductionAwsCommandRunner, createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import { createProductionAwsCommandRunner, createProductionAwsCredentialEnvironment, createProductionGithubCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import { readMixedDualSlotRecoveryGithubEnvironmentGuard } from "./production-mixed-dual-slot-recovery-contract.mjs";
 import { canonicalJson } from "./production-green-stage-b-contract.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, readBoundStageBPrivateJson, readStageBPrivateFileBytes, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { INSTALLATION, assertFreshInstallationAuthorization, assertInstallationAuthorizedPostState, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationPreparation, assertInstallationStateResources, classifyInstallationStatePullError, stateIdentity } from "./production-initial-activation-reconciler-installation-contract.mjs";
@@ -22,10 +23,12 @@ export function executeInstallation({ sourceSha, preparation, authorization, pla
   if (executionRoleArn !== INSTALLATION.executionRoleArn) throw new Error("Installation workflow role identity is not exact.");
   const semantics = assertInstallationPlan(planJson);
   if (canonicalJson(semantics) !== canonicalJson(preparation.planSemantics)) throw new Error("Rendered saved-plan semantics differ from the authorized preparation.");
-  if (!["ABSENT", "EXACT_PARTIAL", "EXACT_UPDATE", "EXACT_COMPLETE"].includes(livePredecessor)) throw new Error("Installation live predecessor is not a supported exact state.");
+  if (!["ABSENT", "EXACT_PARTIAL", "EXACT_UPDATE", "EXACT_TRUST_UPDATE", "EXACT_EXPANSION", "EXACT_COMPLETE"].includes(livePredecessor)) throw new Error("Installation live predecessor is not a supported exact state.");
   if (livePredecessor === "ABSENT" && semantics.resourceChangeCount !== INSTALLATION.expectedAddresses.length) throw new Error("First-install plan mutation scope is not exact.");
   if (livePredecessor === "EXACT_PARTIAL" && semantics.resourceChangeCount < 1) throw new Error("Partial-install plan mutation scope is not exact.");
   if (livePredecessor === "EXACT_UPDATE" && (semantics.updateCount !== 1 || semantics.changedAddresses[0] !== "aws_iam_policy.reconciler")) throw new Error("Policy-update installation scope is not exact.");
+  if (livePredecessor === "EXACT_TRUST_UPDATE" && (semantics.updateCount !== 1 || semantics.changedAddresses[0] !== "aws_iam_role.mixed_recovery")) throw new Error("Trust-update installation scope is not exact.");
+  if (livePredecessor === "EXACT_EXPANSION" && (semantics.createCount < 1 || semantics.createCount > 3 || semantics.updateCount > 1 || semantics.updateCount === 1 && !semantics.changedAddresses.includes("aws_iam_policy.reconciler") || semantics.changedAddresses.some((address) => !["aws_iam_policy.reconciler", "aws_iam_policy.mixed_recovery", "aws_iam_role.mixed_recovery", "aws_iam_role_policy_attachment.mixed_recovery"].includes(address)))) throw new Error("Dedicated-role expansion scope is not exact.");
   if (livePredecessor !== preparation.livePredecessor || JSON.stringify(livePredecessorAddresses) !== JSON.stringify(preparation.livePredecessorAddresses)) throw new Error("Installation live predecessor changed after preparation.");
   const beforeStateBytes = readState?.();
   const beforeState = stateIdentity(beforeStateBytes);
@@ -33,7 +36,8 @@ export function executeInstallation({ sourceSha, preparation, authorization, pla
   if (livePredecessor === "EXACT_COMPLETE" && (!beforeState.stateExists || semantics.resourceChangeCount !== 0)) throw new Error("Exact-complete replay requires an authenticated state and no-op plan.");
   if (livePredecessor === "EXACT_COMPLETE") assertInstallationStateResources(beforeStateBytes);
   if (livePredecessor === "EXACT_PARTIAL") assertInstallationStateResources(beforeStateBytes, { requiredAddresses: livePredecessorAddresses });
-  if (livePredecessor === "EXACT_UPDATE") assertInstallationStateResources(beforeStateBytes);
+  if (["EXACT_UPDATE", "EXACT_TRUST_UPDATE"].includes(livePredecessor)) assertInstallationStateResources(beforeStateBytes);
+  if (livePredecessor === "EXACT_EXPANSION") assertInstallationStateResources(beforeStateBytes, { requiredAddresses: livePredecessorAddresses });
   const output = assertStageBArtifactPath({ artifactPath: resultPath, repositoryRoot: root, label: "Installation result", allowExisting: false });
   ensureStageBPrivateDirectory({ directory: path.dirname(output), repositoryRoot: root, create: true, label: "Installation result directory" });
   if (livePredecessor === "EXACT_COMPLETE") {
@@ -55,11 +59,11 @@ export function executeInstallation({ sourceSha, preparation, authorization, pla
     try {
       verifyInstalled();
       const recoveredStateBytes = readState?.();
-      recoveredState = livePredecessor === "EXACT_UPDATE"
+      recoveredState = ["EXACT_UPDATE", "EXACT_TRUST_UPDATE", "EXACT_EXPANSION"].includes(livePredecessor)
         ? assertInstallationAuthorizedPostState(recoveredStateBytes, { predecessorState: beforeState, planSemantics: semantics })
         : assertInstallationStateResources(recoveredStateBytes);
     } catch (recoveryError) {
-      if (livePredecessor === "EXACT_UPDATE") {
+      if (["EXACT_UPDATE", "EXACT_TRUST_UPDATE", "EXACT_EXPANSION"].includes(livePredecessor)) {
         recoveryError.recoveryClassification ||= "UNEXPECTED_TERRAFORM_STATE_DRIFT";
         throw recoveryError;
       }
@@ -71,7 +75,7 @@ export function executeInstallation({ sourceSha, preparation, authorization, pla
   }
   verifyInstalled();
   const stateAfterBytes = readState?.();
-  const stateAfter = livePredecessor === "EXACT_UPDATE"
+  const stateAfter = ["EXACT_UPDATE", "EXACT_TRUST_UPDATE", "EXACT_EXPANSION"].includes(livePredecessor)
     ? assertInstallationAuthorizedPostState(stateAfterBytes, { predecessorState: beforeState, planSemantics: semantics })
     : assertInstallationStateResources(stateAfterBytes);
   const result = { kind: "PRODUCTION_INITIAL_ACTIVATION_POLICY_RECONCILER_INSTALLATION_RESULT", schemaVersion: 1, operation: INSTALLATION.operation, sourceSha, authorizationArtifactSha256: authorization.authorizationArtifactSha256, status: "COMPLETE", applyCount: 1, targetPolicyCreatePolicyVersionCount: 0, verifier: "PASS", state: stateAfter, completedAt: new Date().toISOString() };
@@ -101,6 +105,7 @@ export function runInstallCli(argv = process.argv.slice(2), deps = {}) {
   const planBeforeAuthorization = readStageBPrivateFileBytes({ filePath: planPath, repositoryRoot: root, label: "Installation saved Terraform plan" });
   if (planBeforeAuthorization.sha256 !== planFileSha256) throw new Error("Installation saved plan transport digest is invalid.");
   const run = deps.run || createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_INITIAL_ACTIVATION_BOOTSTRAP, env: deps.env || process.env });
+  readMixedDualSlotRecoveryGithubEnvironmentGuard({ run: deps.githubRun || createProductionGithubCommandRunner({ env: workflowEnvironment }) });
   const identity = JSON.parse(run(["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"]));
   if (!new RegExp(`^arn:aws:sts::368992683803:assumed-role/${INSTALLATION.executionRoleArn.split("/").at(-1)}/[^/]+$`).test(identity?.Arn || "")) throw new Error("Installation requires the exact workflow-only bootstrap role session.");
   const backendArgs = [`-backend-config=bucket=${INSTALLATION.backend.bucket}`, `-backend-config=key=${INSTALLATION.backend.key}`, `-backend-config=region=${INSTALLATION.backend.region}`, `-backend-config=encrypt=${INSTALLATION.backend.encrypt}`, `-backend-config=use_lockfile=${INSTALLATION.backend.useLockfile}`];

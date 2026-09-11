@@ -1,9 +1,12 @@
 # Initial-activation policy reconciler IAM root
 
 This isolated Terraform root owns only the purpose-bound
-`mscqr-production-initial-activation-policy-reconciler` role, its exact managed
-policy, and their attachment. The role trusts only GitHub Actions OIDC for the
-protected `production` environment. It has no MFA, user, release-deployer,
+`mscqr-production-initial-activation-policy-reconciler` and
+`mscqr-production-mixed-dual-slot-recovery-executor` roles, their exact managed
+policies, and their attachments. The recovery role trust additionally requires
+the OIDC subject of the workflow-dedicated protected
+`production-mixed-dual-slot-recovery` environment. It has no MFA, user,
+release-deployer,
 Stage-A, Stage-B, image-publisher, self-installation, or policy-management
 capability.
 
@@ -15,11 +18,25 @@ not grant `SetDefaultPolicyVersion`, version deletion, attachment, trust, role,
 or policy creation actions, and neither entrypoint accepts an arbitrary policy
 ARN or document.
 
-An existing installation is upgraded only through the same protected
-bootstrap and saved-plan workflow: the bootstrap inline policy gains
-`iam:CreatePolicyVersion` solely on this reconciler policy, and the plan accepts
-only the exact predecessor-to-source policy update. Five-version state blocks
-before apply because no deletion rule exists.
+An existing installation is upgraded only through the same protected bootstrap
+and saved-plan workflow. The plan accepts the exact policy predecessor or one
+trust-only update from the reviewed shared-production-environment predecessor
+to the workflow-dedicated `production-mixed-dual-slot-recovery` environment
+subject. Five-version or any other state blocks before apply because no
+deletion or generic trust-update rule exists.
+
+Interrupted installation and executor-policy expansion are resumable from each
+exact Terraform prefix. Every present reconciler or mixed-recovery role,
+policy, and attachment must retain its canonical metadata and attachment
+topology; substituted or unrelated IAM resources remain fail closed.
+
+The dedicated environment is operator-configured from
+`mixed-recovery-github-environment-contract.json`; only the execution workflow
+uses it, so the supported OIDC `sub` claim isolates the mutation role without
+relying on unsupported token claims. Installation preparation and execution
+both read the live environment and require exactly one custom deployment branch
+policy for `main`, with no protection rules; the signed recovery IAM preflight
+binds the observed environment and branch-policy identities.
 
 Installation is performed only by the protected production-environment workflow
 using the exact OIDC bootstrap role documented in

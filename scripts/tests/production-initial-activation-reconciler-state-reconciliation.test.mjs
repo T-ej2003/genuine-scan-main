@@ -19,6 +19,9 @@ const state = (serial, attachmentCount, policyArns, permissionsPolicySha256 = ou
   { mode: "managed", type: "aws_iam_policy", name: "reconciler", instances: [{ attributes: { attachment_count: attachmentCount, name: "MSCQRProductionInitialActivationPolicyReconciler" } }] },
   { mode: "managed", type: "aws_iam_role", name: "reconciler", instances: [{ attributes: { managed_policy_arns: policyArns, name: "mscqr-production-initial-activation-policy-reconciler" } }] },
   { mode: "managed", type: "aws_iam_role_policy_attachment", name: "reconciler", instances: [{ attributes: { role: "mscqr-production-initial-activation-policy-reconciler", policy_arn: CONTRACT.policyArn } }] },
+  { mode: "managed", type: "aws_iam_policy", name: "mixed_recovery", instances: [{ attributes: { name: "MSCQRProductionMixedDualSlotRecoveryExecutor" } }] },
+  { mode: "managed", type: "aws_iam_role", name: "mixed_recovery", instances: [{ attributes: { name: "mscqr-production-mixed-dual-slot-recovery-executor" } }] },
+  { mode: "managed", type: "aws_iam_role_policy_attachment", name: "mixed_recovery", instances: [{ attributes: { role: "mscqr-production-mixed-dual-slot-recovery-executor", policy_arn: "arn:aws:iam::368992683803:policy/MSCQRProductionMixedDualSlotRecoveryExecutor" } }] },
 ] }));
 const before = state(1, 0, []); const after = state(2, 1, [CONTRACT.policyArn], output.after);
 const refreshPlan = () => ({ format_version: "1.2", terraform_version: "1.15.8", errored: false, complete: true, applyable: true, resource_changes: [], resource_drift: [
@@ -29,7 +32,10 @@ const topology = { roles: ["mscqr-production-initial-activation-policy-reconcile
 const object = { versionId: "exact-version", etag: "exact-etag" };
 const approval = ({ observedAt = now, workflowPath = CONTRACT.authorizationWorkflowPath, runId = "100" } = {}) => createProductionEnvironmentApprovalEvidence({ environmentConfig: { id: 8, name: "production-initial-activation-reconciler-bootstrap", can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{ type: "User", reviewer: { id: 3, login: "reviewer" } }] }] }, repository: "T-ej2003/genuine-scan-main", environment: "production-initial-activation-reconciler-bootstrap", sourceSha, workflowRef: `T-ej2003/genuine-scan-main/${workflowPath}@refs/heads/main`, eventName: "workflow_dispatch", workflowRunId: runId, workflowRunAttempt: "1", executionActor: "operator", observedAt: observedAt.toISOString(), actualApproval: { state: "approved", environmentId: 8, environmentName: "production-initial-activation-reconciler-bootstrap", userId: 3, userLogin: "reviewer" } });
 const prepared = () => createReconcilerStateReconciliationPreparation({ sourceSha, stateBytes: before, stateObject: object, attachmentTopology: topology, planBytes: Buffer.from("saved-refresh-plan"), planJson: refreshPlan(), preparedAt: now.toISOString() });
-const normalPlan = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-initial-activation-reconciler-plan-update.json", "utf8"));
+const updatePlan = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-initial-activation-reconciler-plan-update.json", "utf8"));
+const normalPlan = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-initial-activation-reconciler-plan-complete.json", "utf8"));
+normalPlan.resource_changes[normalPlan.resource_changes.findIndex(({ address }) => address === "aws_iam_policy.reconciler")] = updatePlan.resource_changes.find(({ address }) => address === "aws_iam_policy.reconciler");
+normalPlan.output_changes = updatePlan.output_changes;
 
 test("Terraform-generated backend metadata and saved plans are normalized before private reads", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-state-reconciliation-modes-"));

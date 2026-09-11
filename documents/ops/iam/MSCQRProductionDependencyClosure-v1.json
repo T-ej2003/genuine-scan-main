@@ -159,6 +159,307 @@
       "negativeTestPresent": true
     },
     {
+      "sourceFile": "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs",
+      "action": "sts:GetCallerIdentity",
+      "capabilityId": "mixed-recovery-iam-preflight-identify",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "*"
+      ],
+      "reachableMode": [
+        "MIXED_DUAL_SLOT_RECOVERY"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs",
+      "action": "organizations:DescribeOrganization",
+      "capabilityId": "mixed-recovery-iam-preflight-read-organization",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "*"
+      ],
+      "reachableMode": [
+        "MIXED_DUAL_SLOT_RECOVERY"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs",
+      "action": "iam:GetOpenIDConnectProvider",
+      "capabilityId": "mixed-recovery-iam-preflight-read-oidc-provider",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:iam::368992683803:oidc-provider/token.actions.githubusercontent.com"
+      ],
+      "reachableMode": [
+        "MIXED_DUAL_SLOT_RECOVERY"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs",
+      "action": "iam:GetRole",
+      "capabilityId": "mixed-recovery-iam-preflight-read-role",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-mixed-dual-slot-recovery-executor"
+      ],
+      "reachableMode": [
+        "MIXED_DUAL_SLOT_RECOVERY"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs",
+      "action": "iam:SimulatePrincipalPolicy",
+      "capabilityId": "mixed-recovery-iam-preflight-simulate",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-mixed-dual-slot-recovery-executor"
+      ],
+      "reachableMode": [
+        "MIXED_DUAL_SLOT_RECOVERY"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs",
+      "action": "secretsmanager:DescribeSecret",
+      "capabilityId": "mixed-recovery-iam-preflight-describe-secret",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-pending-1CnWMp",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-private-pending-LZhc54",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-pending-uB3P1Q",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2"
+      ],
+      "reachableMode": [
+        "MIXED_DUAL_SLOT_RECOVERY"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs",
+      "action": "secretsmanager:GetResourcePolicy",
+      "capabilityId": "mixed-recovery-iam-preflight-read-resource-policy",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-pending-1CnWMp",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-private-pending-LZhc54",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-pending-uB3P1Q",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2"
+      ],
+      "reachableMode": [
+        "MIXED_DUAL_SLOT_RECOVERY"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-mixed-dual-slot-topology-recovery.mjs",
+      "action": "kms:Sign",
+      "capabilityId": "mixed-recovery-iam-attestation-sign",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-root-attestation"
+      ],
+      "reachableMode": [
+        "MIXED_DUAL_SLOT_RECOVERY"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-mixed-dual-slot-topology-recovery.mjs",
+      "action": "sts:GetCallerIdentity",
+      "capabilityId": "mixed-recovery-executor-identify",
+      "identity": "MIXED_RECOVERY_EXECUTOR",
+      "resources": [
+        "*"
+      ],
+      "sourceFunction": "mixed-recovery-executor-identify",
+      "reachableMode": [
+        "MIXED_DUAL_SLOT_RECOVERY"
+      ],
+      "executionPrincipal": "MIXED_RECOVERY_EXECUTOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-mixed-dual-slot-topology-recovery.mjs",
+      "action": "ecs:DescribeServices",
+      "capabilityId": "mixed-recovery-executor-describe-service",
+      "identity": "MIXED_RECOVERY_EXECUTOR",
+      "resources": [
+        "*"
+      ],
+      "sourceFunction": "mixed-recovery-executor-describe-service",
+      "reachableMode": [
+        "MIXED_DUAL_SLOT_RECOVERY"
+      ],
+      "executionPrincipal": "MIXED_RECOVERY_EXECUTOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-mixed-dual-slot-topology-recovery.mjs",
+      "action": "ecs:DescribeTaskDefinition",
+      "capabilityId": "mixed-recovery-executor-describe-task-definition",
+      "identity": "MIXED_RECOVERY_EXECUTOR",
+      "resources": [
+        "*"
+      ],
+      "sourceFunction": "mixed-recovery-executor-describe-task-definition",
+      "reachableMode": [
+        "MIXED_DUAL_SLOT_RECOVERY"
+      ],
+      "executionPrincipal": "MIXED_RECOVERY_EXECUTOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/recover-production-mixed-dual-slot-topology.mjs",
+      "action": "secretsmanager:DescribeSecret",
+      "capabilityId": "mixed-recovery-executor-describe-secret",
+      "identity": "MIXED_RECOVERY_EXECUTOR",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-pending-1CnWMp",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-private-pending-LZhc54",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-pending-uB3P1Q",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2"
+      ],
+      "sourceFunction": "mixed-recovery-executor-describe-secret",
+      "reachableMode": [
+        "MIXED_DUAL_SLOT_RECOVERY"
+      ],
+      "executionPrincipal": "MIXED_RECOVERY_EXECUTOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/recover-production-mixed-dual-slot-topology.mjs",
+      "action": "secretsmanager:GetSecretValue",
+      "capabilityId": "mixed-recovery-executor-get-secret-value",
+      "identity": "MIXED_RECOVERY_EXECUTOR",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-pending-1CnWMp",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-private-pending-LZhc54",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-pending-uB3P1Q",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2"
+      ],
+      "sourceFunction": "mixed-recovery-executor-get-secret-value",
+      "reachableMode": [
+        "MIXED_DUAL_SLOT_RECOVERY"
+      ],
+      "executionPrincipal": "MIXED_RECOVERY_EXECUTOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/recover-production-mixed-dual-slot-topology.mjs",
+      "action": "secretsmanager:UpdateSecretVersionStage",
+      "capabilityId": "mixed-recovery-remove-awscurrent",
+      "identity": "MIXED_RECOVERY_EXECUTOR",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-pending-1CnWMp",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-private-pending-LZhc54",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-pending-uB3P1Q",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2"
+      ],
+      "reachableMode": [
+        "MIXED_DUAL_SLOT_RECOVERY"
+      ],
+      "executionPrincipal": "MIXED_RECOVERY_EXECUTOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
       "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
       "action": "s3:GetBucketPolicy",
       "capabilityId": "stage-a-artifacts-reconciliation-release-read-policy",
@@ -1959,6 +2260,7 @@
   "modes": {
     "INITIAL_ACTIVATION_POLICY_RECONCILIATION": "PASS",
     "PROVIDER_READONLY_POLICY_RECONCILIATION": "PASS",
+    "MIXED_DUAL_SLOT_RECOVERY": "PASS",
     "NORMAL": "PASS",
     "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME": "PASS",
     "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY": "PASS",
@@ -1975,6 +2277,7 @@
     "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION": "the independently authorized exact refresh-only plan uses its exact release journal, live-policy read, Stage-A state object, and canonical outer lock boundary",
     "INITIAL_ACTIVATION_POLICY_RECONCILIATION": "root performs read-only preparation; the purpose-bound INITIAL_ACTIVATION_RECONCILER GitHub Actions OIDC principal (arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler) publishes only the exact InitialActivationLifecycle managed-policy version after production environment approval",
     "PROVIDER_READONLY_POLICY_RECONCILIATION": "root performs exact target read-only preparation; independently approved execution uses the allowlisted reconciler and conditional S3 journal to publish at most one exact ProviderReadOnly managed-policy version",
+    "MIXED_DUAL_SLOT_RECOVERY": "the protected recovery executor removes only AWSCURRENT from the seven exact reviewed historical versions under the source-bound capability and authorization contracts",
     "ROTATION_OVERLAP": "the source-owned overlap candidate builder derives the complete runtime dependency graph before its governed registration",
     "ROTATION_CLEANUP": "cleanup activates an already authenticated overlap/cleanup candidate and registers nothing",
     "ROLLBACK_RECONCILIATION": "rollback viability uses immutable image/resource identity and performs no candidate registration",

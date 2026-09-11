@@ -25,7 +25,32 @@ closed. Preparation, authorization, and execution remain separate operations.
 Preparation is read-only and writes one private preparation file. Authorization
 is produced only by `authorize-production-mixed-dual-slot-topology-recovery.yml`
 after the protected `production` environment reviewer approves the exact file
-hash. Execution is available only through
+hash. Before that approval is requested, preparation requires an administrator
+IAM simulation proving that the dedicated
+`mscqr-production-mixed-dual-slot-recovery-executor` has its exact source trust,
+the live GitHub OIDC provider retains the exact URL and STS audience, and the
+live `production-mixed-dual-slot-recovery` environment exists with no protection
+rules and exactly one custom deployment branch policy for `main`. The same
+environment check runs before the Terraform installation plan and again before
+its apply, so an absent, auto-created, tag-enabled, or otherwise broadened
+environment cannot install or satisfy the role trust. The preflight also proves
+the role can perform its STS identity read, both ECS predecessor reads, and all
+`DescribeSecret`, `GetSecretValue`, and `UpdateSecretVersionStage` calls on the
+seven exact ARNs. Readback also proves each exact secret has no resource policy
+that could override those identity results and still uses the AWS-managed
+Secrets Manager encryption key; a customer-managed key fails closed because
+the executor has no reviewed `kms:Decrypt` grant. An independent Organizations
+read proves the production account has no applicable SCP layer. An account in
+an Organization, an unreadable Organizations state, or any SCP ambiguity fails
+before protected approval because role policy simulation cannot prove SCPs.
+The administrator signs that exact preflight with the root-attestation KMS key;
+the preparation command emits the signature as a separate private sidecar. An
+unprotected workflow job verifies the signature with the protected-source-pinned
+public key and authenticates the fresh, source-bound 24-result preflight plus
+the seven exact encryption guards before
+the protected
+authorization job becomes eligible; deny, indeterminate, wrong-principal,
+permissions-boundary, missing, or substituted results fail closed. Execution is available only through
 `execute-production-mixed-dual-slot-topology-recovery.yml` on protected main;
 that job reauthenticates the authorization artifact, source, :52 predecessor,
 all fourteen payload identities, and the exact contiguous prefix before and
@@ -33,6 +58,15 @@ after
 every `UpdateSecretVersionStage` call. Its inline AWS session policy allows
 only readback plus that mutation against the seven exact ARNs—never create,
 delete, or value-write APIs.
+
+The base capability is owned by the Terraform-managed
+`MSCQRProductionMixedDualSlotRecoveryExecutor` policy, attached only to the
+dedicated executor role. The shared release-deployer lifecycle policy explicitly
+denies this mutation. The dedicated base policy and the execution workflow's
+inline session policy must both allow the exact seven-resource action; the
+session policy remains a restriction and cannot grant a missing base-role
+capability. The existing protected reconciler installation transaction creates
+and verifies the dedicated role, policy, and attachment before recovery approval.
 
 A fresh approval is required to start at 0/7. If execution is interrupted, the
 same exact authorization may resume an authenticated 1/7 through 6/7 prefix.

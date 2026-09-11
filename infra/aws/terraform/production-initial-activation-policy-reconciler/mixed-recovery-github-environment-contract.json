@@ -1,0 +1,14 @@
+{
+  "name": "production-mixed-dual-slot-recovery",
+  "deploymentBranches": "protected-main-only",
+  "requiredReviewers": false,
+  "preventSelfReview": false,
+  "forbidUnprotectedBranchesAndTags": true,
+  "forbiddenSecrets": [
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN"
+  ],
+  "requiresEnvironmentSecrets": false,
+  "activation": "operator-configured; not managed by Terraform"
+}

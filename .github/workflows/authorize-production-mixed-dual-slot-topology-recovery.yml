@@ -6,6 +6,8 @@ on:
       source_sha: { description: Exact protected-main source SHA, required: true, type: string }
       preparation_base64: { description: Exact private preparation bytes, required: true, type: string }
       preparation_file_sha256: { description: Exact private preparation file SHA256, required: true, type: string }
+      iam_preflight_attestation_base64: { description: Exact root-signed IAM capability attestation bytes, required: true, type: string }
+      iam_preflight_attestation_file_sha256: { description: Exact IAM capability attestation file SHA256, required: true, type: string }
       reason: { description: Operation-specific recovery reason, required: true, type: string }
       approver_role: { description: Independent approver role, required: true, type: string }
       verification_ref: { description: Verification reference, required: true, type: string }
@@ -15,8 +17,50 @@ permissions:
   actions: read
 
 jobs:
+  preflight:
+    name: Verify effective recovery IAM capability
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Authenticate protected source
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "T-ej2003/genuine-scan-main"
+          test "$SOURCE_SHA" = "$(gh api repos/T-ej2003/genuine-scan-main/branches/main --jq .commit.sha)"
+          test "$SOURCE_SHA" = "$(git rev-parse HEAD)"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+      - uses: actions/setup-node@v6
+        with: { node-version: 24, cache: npm }
+      - run: npm ci
+      - name: Authenticate preparation IAM preflight before approval
+        env:
+          PREPARATION_BASE64: ${{ inputs.preparation_base64 }}
+          PREPARATION_FILE_SHA256: ${{ inputs.preparation_file_sha256 }}
+          IAM_ATTESTATION_BASE64: ${{ inputs.iam_preflight_attestation_base64 }}
+          IAM_ATTESTATION_FILE_SHA256: ${{ inputs.iam_preflight_attestation_file_sha256 }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          workdir="$RUNNER_TEMP/mixed-recovery"; install -d -m 700 "$workdir"
+          printf '%s' "$PREPARATION_BASE64" | base64 --decode > "$workdir/preparation.json"
+          chmod 600 "$workdir/preparation.json"
+          printf '%s' "$IAM_ATTESTATION_BASE64" | base64 --decode > "$workdir/iam-attestation.json"
+          chmod 600 "$workdir/iam-attestation.json"
+          node scripts/aws/verify-production-mixed-dual-slot-recovery-iam-attestation.mjs \
+            --source-sha "$SOURCE_SHA" --preparation "$workdir/preparation.json" \
+            --preparation-file-sha256 "$PREPARATION_FILE_SHA256" \
+            --iam-preflight-attestation "$workdir/iam-attestation.json" \
+            --iam-preflight-attestation-file-sha256 "$IAM_ATTESTATION_FILE_SHA256"
   authorize:
     name: Authorize exact seven-slot recovery
+    needs: preflight
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -54,11 +98,16 @@ jobs:
         env:
           PREPARATION_BASE64: ${{ inputs.preparation_base64 }}
           PREPARATION_FILE_SHA256: ${{ inputs.preparation_file_sha256 }}
+          IAM_ATTESTATION_BASE64: ${{ inputs.iam_preflight_attestation_base64 }}
+          IAM_ATTESTATION_FILE_SHA256: ${{ inputs.iam_preflight_attestation_file_sha256 }}
         run: |
           set -euo pipefail
           workdir="$RUNNER_TEMP/mixed-recovery"
           printf '%s' "$PREPARATION_BASE64" | base64 --decode > "$workdir/preparation.json"
           chmod 600 "$workdir/preparation.json"
+          printf '%s' "$IAM_ATTESTATION_BASE64" | base64 --decode > "$workdir/iam-attestation.json"
+          chmod 600 "$workdir/iam-attestation.json"
+          test "$(sha256sum "$workdir/iam-attestation.json" | awk '{print $1}')" = "$IAM_ATTESTATION_FILE_SHA256"
           test "$(sha256sum "$workdir/preparation.json" | awk '{print $1}')" = "$PREPARATION_FILE_SHA256"
       - name: Authenticate protected environment approval
         id: approval
@@ -78,6 +127,7 @@ jobs:
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
           PREPARATION_FILE_SHA256: ${{ inputs.preparation_file_sha256 }}
+          IAM_ATTESTATION_FILE_SHA256: ${{ inputs.iam_preflight_attestation_file_sha256 }}
           APPROVAL_SHA256: ${{ steps.approval.outputs.sha256 }}
           REASON: ${{ inputs.reason }}
           APPROVER_ROLE: ${{ inputs.approver_role }}
@@ -88,6 +138,8 @@ jobs:
             --output "$RUNNER_TEMP/mixed-recovery/authorization.json" \
             --source-sha "$SOURCE_SHA" --preparation "$RUNNER_TEMP/mixed-recovery/preparation.json" \
             --preparation-file-sha256 "$PREPARATION_FILE_SHA256" \
+            --iam-preflight-attestation "$RUNNER_TEMP/mixed-recovery/iam-attestation.json" \
+            --iam-preflight-attestation-file-sha256 "$IAM_ATTESTATION_FILE_SHA256" \
             --environment-approval "$RUNNER_TEMP/mixed-recovery/environment-approval.json" \
             --environment-approval-sha256 "$APPROVAL_SHA256" --reason "$REASON" \
             --approver-role "$APPROVER_ROLE" --verification-ref "$VERIFICATION_REF"
