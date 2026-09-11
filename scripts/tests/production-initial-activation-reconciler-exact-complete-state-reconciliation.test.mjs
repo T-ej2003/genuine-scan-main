@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import test from "node:test";
 import { createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
-import { INSTALLATION } from "../aws/production-initial-activation-reconciler-installation-contract.mjs";
+import { INSTALLATION, assertInstallationPlan } from "../aws/production-initial-activation-reconciler-installation-contract.mjs";
 import { EXACT_COMPLETE_STATE_RECONCILIATION as CONTRACT, assertExactCompleteCleanNormalPlan, assertExactCompleteRefreshOnlyPlan, assertExactCompleteStateReconciliationPreparation, assertExactCompleteStateSuccessor, assertExactMixedRecoveryAttachmentTopology, createExactCompleteStateReconciliationAuthorization, createExactCompleteStateReconciliationPreparation, createExactCompleteStateReconciliationRecoveryAuthorization, createExactCompleteStateReconciliationRecoveryPreparation, executeExactCompleteStateReconciliation, executeExactCompleteStateReconciliationRecovery } from "../aws/production-initial-activation-reconciler-exact-complete-state-reconciliation.mjs";
 import { exactSavedRefreshOnlyPlanApplyArgs } from "../aws/reconcile-production-initial-activation-exact-complete-state.mjs";
 
@@ -29,16 +29,25 @@ const prepared = () => createExactCompleteStateReconciliationPreparation({ sourc
 
 test("admits only the exact two mixed-recovery state drifts with no actionable operation", () => {
   assert.deepEqual(assertExactCompleteRefreshOnlyPlan(refreshPlan()).resourceDrift, CONTRACT.drift);
+  for (const resourceChanges of [undefined, []]) { const plan = refreshPlan(); if (resourceChanges === undefined) delete plan.resource_changes; else plan.resource_changes = resourceChanges; assert.doesNotThrow(() => assertExactCompleteRefreshOnlyPlan(plan)); }
+  const normal = structuredClone(completePlan); delete normal.resource_changes; assert.throws(() => assertInstallationPlan(normal));
   for (const mutate of [
+    (plan) => { delete plan.resource_drift; },
+    (plan) => { plan.resource_drift = []; },
     (plan) => { plan.resource_drift.pop(); },
+    (plan) => { plan.resource_drift.shift(); },
     (plan) => { plan.resource_drift.push(structuredClone(plan.resource_drift[0])); },
+    (plan) => { plan.resource_drift.push({ address: "aws_iam_role.reconciler", change: structuredClone(plan.resource_drift[0].change) }); },
     (plan) => { plan.resource_drift[0].address = "aws_iam_policy.reconciler"; },
+    (plan) => { delete plan.resource_drift[0].change.after.attachment_count; plan.resource_drift[0].change.after.unreviewed = 1; },
     (plan) => { plan.resource_drift[0].change.after.attachment_count = 2; },
     (plan) => { plan.resource_drift[1].change.after.managed_policy_arns = ["arn:aws:iam::368992683803:policy/other"]; },
     (plan) => { plan.resource_drift[1].change.after.managed_policy_arns.push(CONTRACT.policyArn); },
-    (plan) => { plan.resource_changes[0].change.actions = ["update"]; },
     (plan) => { plan.output_changes = { changed: { actions: ["update"] } }; },
   ]) { const plan = refreshPlan(); mutate(plan); assert.throws(() => assertExactCompleteRefreshOnlyPlan(plan)); }
+  for (const value of [null, {}, "", false, 0]) { const plan = refreshPlan(); plan.resource_changes = value; assert.throws(() => assertExactCompleteRefreshOnlyPlan(plan)); }
+  for (const changes of [[null], [{}]]) { const plan = refreshPlan(); plan.resource_changes = changes; assert.throws(() => assertExactCompleteRefreshOnlyPlan(plan)); }
+  for (const actions of [["create"], ["update"], ["delete"], ["replace"], ["delete", "create"], ["create", "delete"], ["read"]]) { const plan = refreshPlan(); plan.resource_changes[0].change.actions = actions; assert.throws(() => assertExactCompleteRefreshOnlyPlan(plan)); }
 });
 
 test("requires the exact successor and an authenticated clean second normal plan", () => {
@@ -62,6 +71,14 @@ test("executes only one refresh-only state update and never exposes an AWS mutat
   assert.equal(refreshes, 1); assert.equal(result.remoteIamMutationCount, 0); assert.equal(result.terraformStateMutationCount, 1); assert.equal(result.normalPlan.resourceChangeCount, 0);
   assert.throws(() => executeExactCompleteStateReconciliation({ sourceSha, preparation, authorization, planBytes: Buffer.from("different-saved-plan"), planJson: refreshPlan(), beforeStateBytes: before, beforeObject: object, beforeTopology: topology, applyRefreshOnlyPlan: () => assert.fail("must not apply an unbound plan"), readPostSnapshot: () => ({ bytes: after, object }), readPostTopology: () => topology, renderNormalPlan: cleanNormalPlan, reauthenticateSource: () => true, verifyLive: () => true, now }));
   assert.throws(() => executeExactCompleteStateReconciliation({ sourceSha, preparation, authorization, planBytes: Buffer.from("exact-refresh-only-plan"), planJson: refreshPlan(), beforeStateBytes: before, beforeObject: object, beforeTopology: { roles: [CONTRACT.roleName, "extra"], users: [], groups: [] }, applyRefreshOnlyPlan: () => assert.fail("must not refresh"), readPostSnapshot: () => ({ bytes: after, object }), readPostTopology: () => topology, renderNormalPlan: cleanNormalPlan, reauthenticateSource: () => true, verifyLive: () => true, now }));
+});
+
+test("constructs and executes the exact transaction from Terraform's omitted resource_changes refresh-only shape", () => {
+  const plan = refreshPlan(); delete plan.resource_changes;
+  const preparation = createExactCompleteStateReconciliationPreparation({ sourceSha, stateBytes: before, stateObject: object, attachmentTopology: topology, planBytes: Buffer.from("omitted-resource-changes-refresh-only-plan"), planJson: plan, preparedAt: now.toISOString() });
+  const authorization = createExactCompleteStateReconciliationAuthorization({ preparation, approval, now }); let refreshes = 0;
+  const result = executeExactCompleteStateReconciliation({ sourceSha, preparation, authorization, planBytes: Buffer.from("omitted-resource-changes-refresh-only-plan"), planJson: plan, beforeStateBytes: before, beforeObject: object, beforeTopology: topology, applyRefreshOnlyPlan: () => { refreshes += 1; }, readPostSnapshot: () => ({ bytes: after, object: { versionId: "after-version", etag: "after-etag" } }), readPostTopology: () => topology, renderNormalPlan: cleanNormalPlan, reauthenticateSource: () => true, verifyLive: () => true, now });
+  assert.equal(refreshes, 1); assert.equal(result.remoteIamMutationCount, 0); assert.equal(result.terraformStateMutationCount, 1); assert.equal(result.normalPlan.resourceChangeCount, 0);
 });
 
 test("replays only the exact authorized successor without another Terraform apply", () => {
