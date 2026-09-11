@@ -33,7 +33,12 @@
     {
       "Sid": "ReadOwnExactBootstrapInlinePolicy",
       "Effect": "Allow",
-      "Action": "iam:GetRolePolicy",
+      "Action": [
+        "iam:GetRole",
+        "iam:GetRolePolicy",
+        "iam:ListAttachedRolePolicies",
+        "iam:ListRolePolicies"
+      ],
       "Resource": "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler-bootstrap"
     },
     {
