@@ -67,7 +67,7 @@ test("effective-capability preflight independently proves that no SCP layer appl
 test("effective-capability preflight authenticates the live GitHub OIDC provider", () => {
   const preflight = readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now: observedAt, run: runner() });
   assert.deepEqual(preflight.oidcProviderGuard, { providerArn: MIXED_DUAL_SLOT_RECOVERY_OIDC_PROVIDER_ARN, url: "token.actions.githubusercontent.com", audience: "sts.amazonaws.com" });
-  for (const provider of [{ Url: "wrong.example.com", ClientIDList: ["sts.amazonaws.com"] }, { Url: "token.actions.githubusercontent.com", ClientIDList: ["other"] }, { Url: "token.actions.githubusercontent.com", ClientIDList: null }]) assert.throws(() => readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now: observedAt, run: (args) => args.slice(0, 2).join(" ") === "iam get-open-id-connect-provider" ? JSON.stringify(provider) : runner()(args) }), /OIDC provider/);
+  for (const provider of [{ Url: "wrong.example.com", ClientIDList: ["sts.amazonaws.com"] }, { Url: "token.actions.githubusercontent.com", ClientIDList: ["other"] }, { Url: "token.actions.githubusercontent.com", ClientIDList: ["sts.amazonaws.com", "other"] }, { Url: "token.actions.githubusercontent.com", ClientIDList: null }]) assert.throws(() => readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now: observedAt, run: (args) => args.slice(0, 2).join(" ") === "iam get-open-id-connect-provider" ? JSON.stringify(provider) : runner()(args) }), /OIDC provider/);
 });
 
 test("effective-capability preflight authenticates every exact secret resource policy", () => {
