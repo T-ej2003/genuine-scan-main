@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { canonicalJson } from "./production-green-stage-b-contract.mjs";
-import { INSTALLATION, assertInstallationPlan, assertInstallationStateResources, stateIdentity } from "./production-initial-activation-reconciler-installation-contract.mjs";
+import { INSTALLATION, assertInstallationPlan, assertInstallationPlanConfiguration, assertInstallationStateResources, stateIdentity } from "./production-initial-activation-reconciler-installation-contract.mjs";
 import { PRODUCTION_ENVIRONMENT_APPROVAL, assertProductionEnvironmentActualReviewer, assertProductionEnvironmentApprovalFreshness, assertProductionEnvironmentApprovalIdentity } from "./production-github-environment-approval.mjs";
 
 const SHA40 = /^[a-f0-9]{40}$/;
@@ -85,9 +85,15 @@ const assertExactDrift = (entry, expected) => {
 
 export function assertExactCompleteRefreshOnlyPlan(plan) {
   if (!plan || plan.format_version !== "1.2" || plan.terraform_version !== INSTALLATION.terraformVersion || plan.errored !== false || plan.complete !== true || plan.applyable !== true || !Array.isArray(plan.resource_drift)) throw new Error("Exact-complete refresh-only plan envelope is invalid.");
-  const clean = structuredClone(plan); clean.resource_drift = [];
-  const normal = assertInstallationPlan(clean);
-  if (normal.resourceChangeCount !== 0 || normal.createCount || normal.updateCount || normal.deleteCount || normal.replaceCount || normal.noOpCount !== INSTALLATION.expectedAddresses.length) throw new Error("Exact-complete refresh-only plan contains an actionable Terraform resource operation.");
+  assertInstallationPlanConfiguration(plan);
+  if (plan.resource_changes !== undefined) {
+    if (!Array.isArray(plan.resource_changes)) throw new Error("Exact-complete refresh-only plan resource_changes is malformed.");
+    if (plan.resource_changes.length) {
+      const clean = structuredClone(plan); clean.resource_drift = [];
+      const normal = assertInstallationPlan(clean);
+      if (normal.resourceChangeCount !== 0 || normal.createCount || normal.updateCount || normal.deleteCount || normal.replaceCount || normal.noOpCount !== INSTALLATION.expectedAddresses.length) throw new Error("Exact-complete refresh-only plan contains an actionable Terraform resource operation.");
+    }
+  }
   if (Object.values(plan.output_changes || {}).some((change) => canonicalJson(change?.actions) !== canonicalJson(["no-op"]))) throw new Error("Exact-complete refresh-only plan contains an output mutation.");
   if (plan.resource_drift.length !== EXACT_COMPLETE_STATE_RECONCILIATION.drift.length) throw new Error("Exact-complete refresh-only plan drift count is not exact.");
   const drift = new Map(plan.resource_drift.map((entry) => [entry?.address, entry]));

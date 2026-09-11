@@ -169,9 +169,7 @@ export function classifyInstallationStatePullError(error) {
   throw error;
 }
 
-export function assertInstallationPlan(plan) {
-  if (!plan || typeof plan !== "object" || !Array.isArray(plan.resource_changes)) throw new Error("Installation Terraform plan JSON is malformed.");
-  if (plan.format_version !== "1.2" || plan.terraform_version !== INSTALLATION.terraformVersion || plan.errored !== false || plan.complete !== true || plan.applyable !== true || plan.resource_drift !== undefined && plan.resource_drift !== null && (!Array.isArray(plan.resource_drift) || plan.resource_drift.length !== 0)) throw new Error("Installation Terraform plan envelope is not exact.");
+export function assertInstallationPlanConfiguration(plan) {
   if (!plan.configuration || Object.keys(plan.configuration).sort().join(",") !== "provider_config,root_module") throw new Error("Installation Terraform configuration boundary is not exact.");
   if (canonicalJson(plan.configuration?.provider_config) !== canonicalJson(EXPECTED_PROVIDER_CONFIGURATION)) throw new Error("Installation plan provider configuration is not exact.");
   const rootModule = plan.configuration?.root_module;
@@ -182,6 +180,13 @@ export function assertInstallationPlan(plan) {
   for (const configured of rootModule.resources) {
     if (!configured?.address || canonicalJson(configured) !== canonicalJson(EXPECTED_RESOURCE_CONFIGURATION[configured.address])) throw new Error("Installation plan resource configuration, provider binding, or provisioner boundary is not exact.");
   }
+  return rootModule;
+}
+
+export function assertInstallationPlan(plan) {
+  if (!plan || typeof plan !== "object" || !Array.isArray(plan.resource_changes)) throw new Error("Installation Terraform plan JSON is malformed.");
+  if (plan.format_version !== "1.2" || plan.terraform_version !== INSTALLATION.terraformVersion || plan.errored !== false || plan.complete !== true || plan.applyable !== true || plan.resource_drift !== undefined && plan.resource_drift !== null && (!Array.isArray(plan.resource_drift) || plan.resource_drift.length !== 0)) throw new Error("Installation Terraform plan envelope is not exact.");
+  const rootModule = assertInstallationPlanConfiguration(plan);
   const changes = plan.resource_changes;
   if (changes.length !== INSTALLATION.expectedAddresses.length) throw new Error("Installation plan resource count is not exact.");
   const addresses = changes.map((entry) => entry?.address);
