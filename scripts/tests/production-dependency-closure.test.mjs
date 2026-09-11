@@ -39,13 +39,14 @@ test("complete production dependency closure is exact across modes and failure p
     ["scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs", "s3:PutObject", "stage-a-artifacts-recovery-release-lock-acquire"],
     ["scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs", "s3:DeleteObject", "stage-a-artifacts-recovery-release-lock-release"],
   ]);
-  assert.equal(report.newAwsCalls.length, 42 + stageAAdditions.length + 15 + 14 + 6 + 1 + 6); // baseline, Stage-A, policy reconciliation, ProviderReadOnly, recovery IAM preflight, attestation signing, and exact executor calls
+  assert.equal(report.newAwsCalls.length, 42 + stageAAdditions.length + 15 + 14 + 7 + 1 + 6); // baseline, Stage-A, policy reconciliation, ProviderReadOnly, recovery IAM preflight, attestation signing, and exact executor calls
   assert.deepEqual(report.newAwsCalls.filter(({ capabilityId }) => capabilityId?.startsWith("mixed-recovery-iam-preflight-")).map(({ action, identity }) => [action, identity]), [
     ["sts:GetCallerIdentity", "ROOT_OPERATOR"],
     ["organizations:DescribeOrganization", "ROOT_OPERATOR"],
     ["iam:GetOpenIDConnectProvider", "ROOT_OPERATOR"],
     ["iam:GetRole", "ROOT_OPERATOR"],
     ["iam:SimulatePrincipalPolicy", "ROOT_OPERATOR"],
+    ["secretsmanager:DescribeSecret", "ROOT_OPERATOR"],
     ["secretsmanager:GetResourcePolicy", "ROOT_OPERATOR"],
   ]);
   assert.deepEqual(report.newAwsCalls.filter(({ capabilityId }) => capabilityId === "mixed-recovery-remove-awscurrent").map(({ action, resources, identity, reachableMode }) => [action, resources, identity, reachableMode]), [

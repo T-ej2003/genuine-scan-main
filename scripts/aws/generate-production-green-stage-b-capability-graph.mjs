@@ -178,6 +178,7 @@ const MIXED_DUAL_SLOT_RECOVERY_IAM_PREFLIGHT_CAPABILITIES = Object.freeze([
   ["mixed-recovery-iam-preflight-read-oidc-provider", "iam:GetOpenIDConnectProvider", ["arn:aws:iam::368992683803:oidc-provider/token.actions.githubusercontent.com"]],
   ["mixed-recovery-iam-preflight-read-role", "iam:GetRole", [MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN]],
   ["mixed-recovery-iam-preflight-simulate", "iam:SimulatePrincipalPolicy", [MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN]],
+  ["mixed-recovery-iam-preflight-describe-secret", "secretsmanager:DescribeSecret", MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES],
   ["mixed-recovery-iam-preflight-read-resource-policy", "secretsmanager:GetResourcePolicy", MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES],
 ]);
 
@@ -479,7 +480,7 @@ export function discoverAwsCliActions() {
         calls.push(executorCall);
         if (["sts:GetCallerIdentity", "iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions", "iam:ListEntitiesForPolicy"].includes(action)) calls.push({ ...executorCall, identity: "ROOT_OPERATOR", sourceFunction: `${id}-prepare`, capabilityId: `${id}-prepare` });
       } else if (sourceFile === "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs") {
-        const id = ({ "sts:GetCallerIdentity": "mixed-recovery-iam-preflight-identify", "organizations:DescribeOrganization": "mixed-recovery-iam-preflight-read-organization", "iam:GetOpenIDConnectProvider": "mixed-recovery-iam-preflight-read-oidc-provider", "iam:GetRole": "mixed-recovery-iam-preflight-read-role", "iam:SimulatePrincipalPolicy": "mixed-recovery-iam-preflight-simulate", "secretsmanager:GetResourcePolicy": "mixed-recovery-iam-preflight-read-resource-policy" })[action];
+        const id = ({ "sts:GetCallerIdentity": "mixed-recovery-iam-preflight-identify", "organizations:DescribeOrganization": "mixed-recovery-iam-preflight-read-organization", "iam:GetOpenIDConnectProvider": "mixed-recovery-iam-preflight-read-oidc-provider", "iam:GetRole": "mixed-recovery-iam-preflight-read-role", "iam:SimulatePrincipalPolicy": "mixed-recovery-iam-preflight-simulate", "secretsmanager:DescribeSecret": "mixed-recovery-iam-preflight-describe-secret", "secretsmanager:GetResourcePolicy": "mixed-recovery-iam-preflight-read-resource-policy" })[action];
         if (!id) throw new Error("Mixed recovery IAM preflight uses an unreviewed AWS action.");
         const resources = MIXED_DUAL_SLOT_RECOVERY_IAM_PREFLIGHT_CAPABILITIES.find(([candidate]) => candidate === id)[2];
         calls.push({ sourceFile, sourceFunction: id, phase: "mixed-dual-slot-recovery-iam-preflight", identity: "ROOT_OPERATOR", action, resources, capabilityId: id });

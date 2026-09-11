@@ -40,6 +40,11 @@ export function readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now
   const liveTrust = normalizeIamPolicyDocument(role.AssumeRolePolicyDocument, "mixed recovery execution role trust");
   const roleTrustPolicySha256 = mixedDualSlotRecoverySha256(liveTrust);
   if (roleTrustPolicySha256 !== mixedDualSlotRecoverySha256(expectedTrust)) throw new Error("Mixed recovery execution role trust changed.");
+  const secretEncryptionGuards = MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES.map((resource) => {
+    const response = parse(run, ["secretsmanager", "describe-secret", "--secret-id", resource]);
+    if (response?.ARN !== resource || response.KmsKeyId != null) throw new Error(`Mixed recovery secret encryption changed for ${resource}.`);
+    return { resource, kmsKeyId: null, encryption: "AWS_MANAGED" };
+  });
   const resourcePolicies = MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES.map((resource) => {
     const response = parse(run, ["secretsmanager", "get-resource-policy", "--secret-id", resource]);
     if (response?.ARN !== resource) throw new Error(`Mixed recovery secret resource-policy identity changed for ${resource}.`);
@@ -60,5 +65,5 @@ export function readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now
     const permissionsBoundaryAllowed = permissionsBoundary.includes(false) ? false : permissionsBoundary.includes(true) ? true : null;
     return { action: result.EvalActionName, resource: resourceResult.EvalResourceName, decision: resourceResult.EvalResourceDecision, missingContextValues, organizationsAllowed, permissionsBoundaryAllowed };
   }));
-  return buildMixedDualSlotRecoveryIamPreflight({ sourceSha, principalArn: role.Arn, action: MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION, resources: [...MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES], roleTrustPolicySha256, rolePermissionsBoundary: null, oidcProviderGuard, githubEnvironmentGuard, organizationsGuard, resourcePolicies, evaluations, observedAt: now.toISOString() });
+  return buildMixedDualSlotRecoveryIamPreflight({ sourceSha, principalArn: role.Arn, action: MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION, resources: [...MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES], roleTrustPolicySha256, rolePermissionsBoundary: null, oidcProviderGuard, githubEnvironmentGuard, organizationsGuard, secretEncryptionGuards, resourcePolicies, evaluations, observedAt: now.toISOString() });
 }

@@ -607,6 +607,9 @@ test("authorization workflow passes dynamic values through environment variables
   assert.match(authorizationStep, /PREPARATION_ARTIFACT_BASE64: \$\{\{ inputs\.preparation_artifact_base64 \}\}/);
   assert.match(shell, /printf '%s' "\$PREPARATION_ARTIFACT_BASE64"/);
   assert.match(shell, /--environment-approval-sha256 "\$ENVIRONMENT_APPROVAL_SHA256"/);
+  const applyStep = workflow.match(/- name: Apply the exact authorized saved plan once[\s\S]*?(?=\n      - uses: actions\/upload-artifact)/)?.[0];
+  assert.ok(applyStep);
+  assert.match(applyStep, /GH_TOKEN: \$\{\{ github\.token \}\}/);
 });
 
 test("bootstrap role trust and permissions are exact and non-administrative", () => {

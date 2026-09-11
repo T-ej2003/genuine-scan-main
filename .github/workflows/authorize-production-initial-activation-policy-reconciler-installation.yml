@@ -104,6 +104,7 @@ jobs:
           terraform_wrapper: false
       - name: Apply the exact authorized saved plan once
         env:
+          GH_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ inputs.source_sha }}
           PREPARATION_SHA256: ${{ inputs.preparation_artifact_sha256 }}
           AUTHORIZATION_SHA256: ${{ steps.authorization.outputs.sha256 }}

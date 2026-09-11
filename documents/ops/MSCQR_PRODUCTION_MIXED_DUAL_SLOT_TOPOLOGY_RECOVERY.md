@@ -37,14 +37,17 @@ environment cannot install or satisfy the role trust. The preflight also proves
 the role can perform its STS identity read, both ECS predecessor reads, and all
 `DescribeSecret`, `GetSecretValue`, and `UpdateSecretVersionStage` calls on the
 seven exact ARNs. Readback also proves each exact secret has no resource policy
-that could override those identity results, and an independent Organizations
+that could override those identity results and still uses the AWS-managed
+Secrets Manager encryption key; a customer-managed key fails closed because
+the executor has no reviewed `kms:Decrypt` grant. An independent Organizations
 read proves the production account has no applicable SCP layer. An account in
 an Organization, an unreadable Organizations state, or any SCP ambiguity fails
 before protected approval because role policy simulation cannot prove SCPs.
 The administrator signs that exact preflight with the root-attestation KMS key;
 the preparation command emits the signature as a separate private sidecar. An
 unprotected workflow job verifies the signature with the protected-source-pinned
-public key and authenticates the fresh, source-bound 24-result preflight before
+public key and authenticates the fresh, source-bound 24-result preflight plus
+the seven exact encryption guards before
 the protected
 authorization job becomes eligible; deny, indeterminate, wrong-principal,
 permissions-boundary, missing, or substituted results fail closed. Execution is available only through
