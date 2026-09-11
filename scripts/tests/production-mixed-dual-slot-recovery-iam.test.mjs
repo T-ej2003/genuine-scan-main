@@ -11,10 +11,10 @@ const observedAt = new Date("2026-09-10T00:00:00.000Z");
 const trust = JSON.parse(fs.readFileSync(MIXED_DUAL_SLOT_RECOVERY_EXECUTION_TRUST_PATH, "utf8"));
 const allowed = (action, resource) => ({ EvalActionName: action, EvalResourceName: resource === "*" ? "*" : "arn:${Partition}:secretsmanager:${Region}:${Account}:secret:${SecretId}", EvalDecision: "allowed", MatchedStatements: [{}], MissingContextValues: [], OrganizationsDecisionDetail: { AllowedByOrganizations: true }, ...(resource === "*" ? {} : { ResourceSpecificResults: [{ EvalResourceName: resource, EvalResourceDecision: "allowed", MissingContextValues: [] }] }) });
 const allAllowed = () => MIXED_DUAL_SLOT_RECOVERY_IAM_CAPABILITIES.flatMap(({ action, resources }) => resources.map((resource) => allowed(action, resource)));
-const environment = { id: 9, name: "production-mixed-dual-slot-recovery", deployment_branch_policy: { protected_branches: false, custom_branch_policies: true }, protection_rules: [] };
+const environment = { id: 9, name: "production-mixed-dual-slot-recovery", deployment_branch_policy: { protected_branches: false, custom_branch_policies: true }, protection_rules: [{ type: "branch_policy" }], wait_timer: null };
 const branchPolicies = [{ id: 10, name: "main", type: "branch" }];
 const secretEncryptionGuards = MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES.map((resource) => ({ resource, kmsKeyId: null, encryption: "AWS_MANAGED" }));
-const githubRunner = ({ environmentConfig = environment, policies = branchPolicies } = {}) => (_command, args) => JSON.stringify(args[1].endsWith("/deployment-branch-policies") ? [{ total_count: policies.length, branch_policies: policies }] : environmentConfig);
+const githubRunner = ({ environmentConfig = environment, policies = branchPolicies, policyCount = policies.length, customProtectionRules = [], customProtectionRuleCount = customProtectionRules.length, secrets = [], secretCount = secrets.length } = {}) => (_command, args) => JSON.stringify(args[1].endsWith("/deployment-branch-policies") ? [{ total_count: policyCount, branch_policies: policies }] : args[1].endsWith("/deployment_protection_rules") ? { total_count: customProtectionRuleCount, custom_deployment_protection_rules: customProtectionRules } : args[1].endsWith("/secrets") ? { total_count: secretCount, secrets } : environmentConfig);
 const readMixedDualSlotRecoveryIamCapabilityPreflight = (options) => readPreflight({ ...options, githubRun: githubRunner() });
 const runner = ({ caller = { Account: "368992683803", Arn: "arn:aws:iam::368992683803:root" }, role = { Arn: MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN, AssumeRolePolicyDocument: trust }, results = allAllowed(), resourcePolicies = Object.fromEntries(MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES.map((resource) => [resource, null])), secretMetadata = Object.fromEntries(MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES.map((resource) => [resource, { ARN: resource }])) } = {}) => (args) => {
   const operation = args.slice(0, 2).join(" ");
@@ -106,15 +106,26 @@ test("effective-capability preflight authenticates the live GitHub OIDC provider
 
 test("effective-capability preflight authenticates the exact live protected-main-only GitHub environment", () => {
   const preflight = readPreflight({ sourceSha, now: observedAt, run: runner(), githubRun: githubRunner() });
-  assert.deepEqual(preflight.githubEnvironmentGuard, { environmentId: 9, environmentName: "production-mixed-dual-slot-recovery", deploymentBranchPolicy: { protectedBranches: false, customBranchPolicies: true }, branchPolicyId: 10, branchPolicyName: "main", branchPolicyType: "branch", protectionRules: [] });
+  assert.deepEqual(preflight.githubEnvironmentGuard, { environmentId: 9, environmentName: "production-mixed-dual-slot-recovery", deploymentBranchPolicy: { protectedBranches: false, customBranchPolicies: true }, branchPolicyCount: 1, branchPolicyId: 10, branchPolicyName: "main", branchPolicyType: "branch", protectionRules: [{ type: "branch_policy" }], waitTimer: 0, customProtectionRuleCount: 0, environmentSecretCount: 0 });
+  const legacyGuard = structuredClone(preflight.githubEnvironmentGuard); delete legacyGuard.customProtectionRuleCount;
+  assert.throws(() => assertMixedDualSlotRecoveryIamPreflight({ ...preflight, githubEnvironmentGuard: legacyGuard }, { sourceSha }), /schema/);
   for (const [environmentConfig, policies] of [
     [{ ...environment, name: "wrong" }, branchPolicies],
-    [{ ...environment, deployment_branch_policy: { protected_branches: true, custom_branch_policies: false } }, branchPolicies],
-    [{ ...environment, protection_rules: [{ type: "wait_timer" }] }, branchPolicies],
+    [{ ...environment, deployment_branch_policy: { protected_branches: true, custom_branch_policies: true } }, branchPolicies],
+    [{ ...environment, deployment_branch_policy: { protected_branches: false, custom_branch_policies: false } }, branchPolicies],
+    [{ ...environment, protection_rules: [] }, branchPolicies],
+    [{ ...environment, protection_rules: [{ type: "branch_policy" }, { type: "branch_policy" }] }, branchPolicies],
+    [{ ...environment, protection_rules: [{ type: "branch_policy" }, { type: "required_reviewers" }] }, branchPolicies],
+    [{ ...environment, protection_rules: [{ type: "branch_policy" }, { type: "wait_timer" }] }, branchPolicies],
+    [{ ...environment, protection_rules: [{ type: "unexpected" }] }, branchPolicies],
+    [{ ...environment, wait_timer: 1 }, branchPolicies],
+    [{ ...environment, wait_timer: undefined }, branchPolicies],
     [environment, []],
     [environment, [...branchPolicies, { id: 11, name: "release-*", type: "tag" }]],
     [environment, [{ id: 10, name: "release-*", type: "tag" }]],
+    [environment, [{ id: 10, name: "main", type: "tag" }]],
   ]) assert.throws(() => readMixedDualSlotRecoveryGithubEnvironmentGuard({ run: githubRunner({ environmentConfig, policies }) }), /protected-main-only/);
+  for (const options of [{ policyCount: 2 }, { customProtectionRules: [{ id: 11 }] }, { customProtectionRuleCount: 1 }, { secrets: [{ name: "unexpected" }] }, { secretCount: 1 }]) assert.throws(() => readMixedDualSlotRecoveryGithubEnvironmentGuard({ run: githubRunner(options) }), /protected-main-only/);
 });
 
 test("effective-capability preflight authenticates every exact secret resource policy", () => {
