@@ -126,8 +126,27 @@ test("effective-capability preflight authenticates the exact live protected-main
     [environment, [...branchPolicies, { id: 11, name: "release-*", type: "tag" }]],
     [environment, [{ id: 10, name: "release-*", type: "tag" }]],
     [environment, [{ id: 10, name: "main", type: "tag" }]],
-  ]) assert.throws(() => readMixedDualSlotRecoveryGithubEnvironmentGuard({ run: githubRunner({ environmentConfig, policies }) }), /protected-main-only/);
-  for (const options of [{ policyCount: 2 }, { customProtectionRules: [{ id: 11 }] }, { customProtectionRuleCount: 1 }, { secrets: [{ name: "unexpected" }] }, { secretCount: 1 }]) assert.throws(() => readMixedDualSlotRecoveryGithubEnvironmentGuard({ run: githubRunner(options) }), /protected-main-only/);
+  ]) assert.throws(() => readMixedDualSlotRecoveryGithubEnvironmentGuard({ run: githubRunner({ environmentConfig, policies }), privilegedRun: githubRunner({ environmentConfig, policies }) }), /protected-main-only/);
+  for (const options of [{ policyCount: 2 }, { customProtectionRules: [{ id: 11 }] }, { customProtectionRuleCount: 1 }, { secrets: [{ name: "unexpected" }] }, { secretCount: 1 }]) assert.throws(() => readMixedDualSlotRecoveryGithubEnvironmentGuard({ run: githubRunner(options), privilegedRun: githubRunner(options) }), /protected-main-only/);
+});
+
+test("environment-secret CAS uses only the dedicated privileged runner", () => {
+  const ordinaryCalls = [];
+  const privilegedCalls = [];
+  const ordinary = (_command, args) => {
+    ordinaryCalls.push(args[1]);
+    if (args[1].endsWith("/secrets")) throw new Error("ordinary token must never read environment secrets");
+    return githubRunner()(_command, args);
+  };
+  const privileged = (_command, args) => {
+    privilegedCalls.push(args[1]);
+    return githubRunner()(_command, args);
+  };
+  assert.deepEqual(readMixedDualSlotRecoveryGithubEnvironmentGuard({ run: ordinary, privilegedRun: privileged }).environmentSecretCount, 0);
+  assert.equal(ordinaryCalls.some((endpoint) => endpoint.endsWith("/secrets")), false);
+  assert.deepEqual(privilegedCalls, ["repos/T-ej2003/genuine-scan-main/environments/production-mixed-dual-slot-recovery/secrets"]);
+  assert.throws(() => readMixedDualSlotRecoveryGithubEnvironmentGuard({ run: ordinary }), /dedicated environment-read credential/);
+  assert.throws(() => readMixedDualSlotRecoveryGithubEnvironmentGuard({ run: ordinary, privilegedRun: () => { throw new Error("HTTP 403"); } }), /HTTP 403/);
 });
 
 test("effective-capability preflight authenticates every exact secret resource policy", () => {

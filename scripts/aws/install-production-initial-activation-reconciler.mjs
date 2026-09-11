@@ -17,6 +17,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 const option = (argv, name) => { const index = argv.indexOf(name); return index < 0 ? undefined : argv[index + 1]; };
 const required = (argv, name) => { const value = option(argv, name); if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
+const requiredEnvironment = (env, name) => { const value = env?.[name]; if (typeof value !== "string" || !value) throw new Error(`${name} is required.`); return value; };
+const ENVIRONMENT_READ_TOKEN = "MSCQR_MIXED_DUAL_SLOT_ENVIRONMENT_READ_TOKEN";
 export function executeInstallation({ sourceSha, preparation, authorization, planBytes, planJson, executionRoleArn = INSTALLATION.executionRoleArn, livePredecessor, livePredecessorAddresses, applySavedPlan, verifyInstalled, readState, resultPath, now = new Date() } = {}) {
   assertInstallationPreparation(preparation, { sourceSha, planBytes });
   assertFreshInstallationAuthorization(authorization, { sourceSha, preparation, now });
@@ -96,6 +98,8 @@ export function runInstallCli(argv = process.argv.slice(2), deps = {}) {
   const terraformDataDir = path.resolve(required(argv, "--terraform-data-dir"));
   const workflowEnvironment = deps.env || process.env;
   if (workflowEnvironment.GITHUB_ACTIONS !== "true" || workflowEnvironment.GITHUB_REPOSITORY !== INSTALLATION.repository || workflowEnvironment.GITHUB_WORKFLOW_REF !== PRODUCTION_ENVIRONMENT_APPROVAL.installationWorkflowRef || workflowEnvironment.GITHUB_EVENT_NAME !== "workflow_dispatch") throw new Error("Installation mutation is reachable only inside the canonical protected GitHub workflow.");
+  const environmentReadToken = requiredEnvironment(workflowEnvironment, ENVIRONMENT_READ_TOKEN);
+  delete workflowEnvironment[ENVIRONMENT_READ_TOKEN];
   const terraformEnvironment = { ...createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_INITIAL_ACTIVATION_BOOTSTRAP, env: workflowEnvironment }), TF_DATA_DIR: terraformDataDir, TF_WORKSPACE: "default" };
   const exec = deps.exec || execFileSync;
   assertProtectedCheckout({ sourceSha, repositoryRoot: root, exec });
@@ -105,7 +109,9 @@ export function runInstallCli(argv = process.argv.slice(2), deps = {}) {
   const planBeforeAuthorization = readStageBPrivateFileBytes({ filePath: planPath, repositoryRoot: root, label: "Installation saved Terraform plan" });
   if (planBeforeAuthorization.sha256 !== planFileSha256) throw new Error("Installation saved plan transport digest is invalid.");
   const run = deps.run || createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_INITIAL_ACTIVATION_BOOTSTRAP, env: deps.env || process.env });
-  readMixedDualSlotRecoveryGithubEnvironmentGuard({ run: deps.githubRun || createProductionGithubCommandRunner({ env: workflowEnvironment }) });
+  const githubRun = deps.githubRun || createProductionGithubCommandRunner({ env: workflowEnvironment });
+  const privilegedGithubRun = deps.privilegedGithubRun || createProductionGithubCommandRunner({ env: { PATH: workflowEnvironment.PATH, GH_TOKEN: environmentReadToken } });
+  readMixedDualSlotRecoveryGithubEnvironmentGuard({ run: githubRun, privilegedRun: privilegedGithubRun });
   const identity = JSON.parse(run(["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"]));
   if (!new RegExp(`^arn:aws:sts::368992683803:assumed-role/${INSTALLATION.executionRoleArn.split("/").at(-1)}/[^/]+$`).test(identity?.Arn || "")) throw new Error("Installation requires the exact workflow-only bootstrap role session.");
   const backendArgs = [`-backend-config=bucket=${INSTALLATION.backend.bucket}`, `-backend-config=key=${INSTALLATION.backend.key}`, `-backend-config=region=${INSTALLATION.backend.region}`, `-backend-config=encrypt=${INSTALLATION.backend.encrypt}`, `-backend-config=use_lockfile=${INSTALLATION.backend.useLockfile}`];

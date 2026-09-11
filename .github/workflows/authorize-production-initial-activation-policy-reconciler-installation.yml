@@ -102,9 +102,20 @@ jobs:
         with:
           terraform_version: 1.15.8
           terraform_wrapper: false
+      - name: Mint scoped environment-read token
+        id: environment-read-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        with:
+          app-id: ${{ vars.MSCQR_MIXED_DUAL_SLOT_ENVIRONMENT_READ_APP_ID }}
+          private-key: ${{ secrets.MSCQR_MIXED_DUAL_SLOT_ENVIRONMENT_READ_APP_PRIVATE_KEY }}
+          owner: T-ej2003
+          repositories: genuine-scan-main
+          permission-environments: read
+          skip-token-revoke: false
       - name: Apply the exact authorized saved plan once
         env:
           GH_TOKEN: ${{ github.token }}
+          MSCQR_MIXED_DUAL_SLOT_ENVIRONMENT_READ_TOKEN: ${{ steps.environment-read-token.outputs.token }}
           SOURCE_SHA: ${{ inputs.source_sha }}
           PREPARATION_SHA256: ${{ inputs.preparation_artifact_sha256 }}
           AUTHORIZATION_SHA256: ${{ steps.authorization.outputs.sha256 }}

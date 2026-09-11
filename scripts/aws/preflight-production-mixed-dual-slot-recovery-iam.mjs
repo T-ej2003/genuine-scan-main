@@ -33,7 +33,7 @@ export function readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now
   const provider = parse(run, ["iam", "get-open-id-connect-provider", "--open-id-connect-provider-arn", MIXED_DUAL_SLOT_RECOVERY_OIDC_PROVIDER_ARN]);
   if (provider?.Url !== "token.actions.githubusercontent.com" || !Array.isArray(provider.ClientIDList) || provider.ClientIDList.length !== 1 || provider.ClientIDList[0] !== "sts.amazonaws.com") throw new Error("Mixed recovery GitHub Actions OIDC provider URL or audience changed.");
   const oidcProviderGuard = { providerArn: MIXED_DUAL_SLOT_RECOVERY_OIDC_PROVIDER_ARN, url: provider.Url, audience: "sts.amazonaws.com" };
-  const githubEnvironmentGuard = readMixedDualSlotRecoveryGithubEnvironmentGuard({ run: githubRun });
+  const githubEnvironmentGuard = readMixedDualSlotRecoveryGithubEnvironmentGuard({ run: githubRun, privilegedRun: githubRun });
   const role = parse(run, ["iam", "get-role", "--role-name", "mscqr-production-mixed-dual-slot-recovery-executor"]).Role;
   if (role?.Arn !== MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN || role.PermissionsBoundary) throw new Error("Mixed recovery execution role or permissions boundary changed.");
   const expectedTrust = JSON.parse(fs.readFileSync(MIXED_DUAL_SLOT_RECOVERY_EXECUTION_TRUST_PATH, "utf8"));
