@@ -14,7 +14,7 @@ import { INSTALLATION_BOOTSTRAP, assertBootstrapAuthorization, createBootstrapAu
 
 const sourceSha = "a".repeat(40);
 const now = new Date("2026-09-05T12:00:00.000Z");
-const githubRun = (_command, args) => JSON.stringify(args[1].endsWith("/deployment-branch-policies") ? [{ total_count: 1, branch_policies: [{ id: 10, name: "main", type: "branch" }] }] : args[1].endsWith("/deployment_protection_rules") ? { total_count: 0, custom_deployment_protection_rules: [] } : args[1].endsWith("/secrets") ? { total_count: 0, secrets: [] } : { id: 9, name: "production-mixed-dual-slot-recovery", deployment_branch_policy: { protected_branches: false, custom_branch_policies: true }, protection_rules: [{ type: "branch_policy" }], wait_timer: null });
+const githubRun = (_command, args) => JSON.stringify(args[1].endsWith("/deployment-branch-policies") ? [{ total_count: 1, branch_policies: [{ id: 10, name: "main", type: "branch" }] }] : args[1].endsWith("/deployment_protection_rules") ? { total_count: 0, custom_deployment_protection_rules: [] } : args[1].endsWith("/secrets") ? { total_count: 0, secrets: [] } : { id: 9, name: "production-mixed-dual-slot-recovery", deployment_branch_policy: { protected_branches: false, custom_branch_policies: true }, protection_rules: [{ type: "branch_policy" }] });
 const bootstrapPreparation = (classification = "ABSENT", predecessorPolicySha256 = null) => createBootstrapPreparation({ sourceSha, predecessor: { classification, predecessorPolicySha256 } });
 const trust = fs.readFileSync("infra/aws/terraform/production-initial-activation-policy-reconciler/trust-policy.json", "utf8");
 const mixedTrust = fs.readFileSync("infra/aws/terraform/production-initial-activation-policy-reconciler/mixed-recovery-trust-policy.json", "utf8");
