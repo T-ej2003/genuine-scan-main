@@ -32,6 +32,10 @@ export const EXACT_COMPLETE_STATE_RECONCILIATION = Object.freeze({
   executionWorkflowPath: ".github/workflows/execute-production-initial-activation-exact-complete-state-reconciliation.yml",
   authorizationArtifactName: "production-initial-activation-exact-complete-state-reconciliation-authorization",
   authorizationFilename: "authorization.json",
+  recoveryAuthorizationWorkflowPath: ".github/workflows/authorize-production-initial-activation-exact-complete-state-reconciliation-recovery.yml",
+  recoveryExecutionWorkflowPath: ".github/workflows/execute-production-initial-activation-exact-complete-state-reconciliation-recovery.yml",
+  recoveryAuthorizationArtifactName: "production-initial-activation-exact-complete-state-reconciliation-recovery-authorization",
+  recoveryAuthorizationFilename: "recovery-authorization.json",
   maxAgeMs: 30 * 60 * 1000,
   drift: Object.freeze([
     Object.freeze({ address: "aws_iam_policy.mixed_recovery", field: "attachment_count", before: 0, after: 1 }),
@@ -131,13 +135,13 @@ export function createExactCompleteStateReconciliationPreparation({ sourceSha, s
   const body = { schemaVersion: 1, kind: "PRODUCTION_INITIAL_ACTIVATION_EXACT_COMPLETE_STATE_RECONCILIATION_PREPARATION", operation: EXACT_COMPLETE_STATE_RECONCILIATION.operation, sourceSha, account: EXACT_COMPLETE_STATE_RECONCILIATION.account, terraformRoot: EXACT_COMPLETE_STATE_RECONCILIATION.terraformRoot, backend: EXACT_COMPLETE_STATE_RECONCILIATION.backend, roleArn: EXACT_COMPLETE_STATE_RECONCILIATION.roleArn, policyArn: EXACT_COMPLETE_STATE_RECONCILIATION.policyArn, bootstrapRoleArn: EXACT_COMPLETE_STATE_RECONCILIATION.bootstrapRoleArn, predecessorState, successorStateSha256: sha256(exactSuccessor(stateBytes)), attachmentTopology: topology, attachmentTopologySha256: sha256(topology), drift: EXACT_COMPLETE_STATE_RECONCILIATION.drift, driftSha256: sha256(EXACT_COMPLETE_STATE_RECONCILIATION.drift), savedPlanSha256: sha256(planBytes), savedPlanByteLength: planBytes.length, planSemantics, createdAt: created.toISOString(), expiresAt: new Date(created.getTime() + EXACT_COMPLETE_STATE_RECONCILIATION.maxAgeMs).toISOString() };
   return Object.freeze({ ...body, preparationSha256: sha256(body) });
 }
-export function assertExactCompleteStateReconciliationPreparation(value, { sourceSha, now = new Date() } = {}) {
+export function assertExactCompleteStateReconciliationPreparation(value, { sourceSha, now = new Date(), allowExpired = false } = {}) {
   exact(value, preparationFields, "Exact-complete state reconciliation preparation"); const { preparationSha256, ...body } = value;
   if (value.schemaVersion !== 1 || value.kind !== "PRODUCTION_INITIAL_ACTIVATION_EXACT_COMPLETE_STATE_RECONCILIATION_PREPARATION" || value.operation !== EXACT_COMPLETE_STATE_RECONCILIATION.operation || value.sourceSha !== sourceSha || !SHA40.test(sourceSha || "") || value.account !== EXACT_COMPLETE_STATE_RECONCILIATION.account || value.terraformRoot !== EXACT_COMPLETE_STATE_RECONCILIATION.terraformRoot || canonicalJson(value.backend) !== canonicalJson(EXACT_COMPLETE_STATE_RECONCILIATION.backend) || value.roleArn !== EXACT_COMPLETE_STATE_RECONCILIATION.roleArn || value.policyArn !== EXACT_COMPLETE_STATE_RECONCILIATION.policyArn || value.bootstrapRoleArn !== EXACT_COMPLETE_STATE_RECONCILIATION.bootstrapRoleArn || !value.predecessorState?.stateExists || !SHA256.test(value.predecessorState.stateSha256 || "") || !Number.isSafeInteger(value.predecessorState.serial) || value.predecessorState.serial < 0 || typeof value.predecessorState.lineage !== "string" || !value.predecessorState.lineage || !SHA256.test(value.successorStateSha256 || "") || typeof value.predecessorState.versionId !== "string" || !value.predecessorState.versionId || typeof value.predecessorState.etag !== "string" || !value.predecessorState.etag || canonicalJson(value.drift) !== canonicalJson(EXACT_COMPLETE_STATE_RECONCILIATION.drift) || value.driftSha256 !== sha256(value.drift) || value.attachmentTopologySha256 !== sha256(assertExactMixedRecoveryAttachmentTopology(value.attachmentTopology)) || !SHA256.test(value.savedPlanSha256 || "") || !Number.isSafeInteger(value.savedPlanByteLength) || value.savedPlanByteLength < 1 || value.preparationSha256 !== sha256(body)) throw new Error("Exact-complete state reconciliation preparation binding is invalid.");
   exact(value.predecessorState, ["stateExists", "lineage", "serial", "stateSha256", "versionId", "etag"], "Exact-complete state reconciliation predecessor state");
   if (canonicalJson(value.planSemantics) !== canonicalJson({ resourceDrift: EXACT_COMPLETE_STATE_RECONCILIATION.drift, refreshOnly: true, terraformResourceAddCount: 0, terraformResourceChangeCount: 0, terraformResourceDestroyCount: 0 })) throw new Error("Exact-complete state reconciliation plan semantics are invalid.");
   const created = iso(value.createdAt, "Exact-complete state reconciliation preparation creation timestamp"); const expires = iso(value.expiresAt, "Exact-complete state reconciliation preparation expiry timestamp");
-  if (expires.getTime() - created.getTime() !== EXACT_COMPLETE_STATE_RECONCILIATION.maxAgeMs || now < created || now > expires) throw new Error("Exact-complete state reconciliation preparation is stale.");
+  if (expires.getTime() - created.getTime() !== EXACT_COMPLETE_STATE_RECONCILIATION.maxAgeMs || (!allowExpired && (now < created || now > expires))) throw new Error("Exact-complete state reconciliation preparation is stale.");
   return value;
 }
 
@@ -150,11 +154,61 @@ export function createExactCompleteStateReconciliationAuthorization({ preparatio
   const body = { schemaVersion: 1, kind: "PRODUCTION_INITIAL_ACTIVATION_EXACT_COMPLETE_STATE_RECONCILIATION_AUTHORIZATION", operation: checked.operation, sourceSha: checked.sourceSha, preparationSha256: checked.preparationSha256, savedPlanSha256: checked.savedPlanSha256, predecessorState: checked.predecessorState, driftSha256: checked.driftSha256, approvedBy, protectedEnvironmentApprovalEvidence: approval, protectedEnvironmentApprovalEvidenceSha256: approval.evidenceSha256 };
   return Object.freeze({ ...body, authorizationSha256: sha256(body) });
 }
-export function assertExactCompleteStateReconciliationAuthorization(value, preparation, { sourceSha, now = new Date() } = {}) {
-  exact(value, authorizationFields, "Exact-complete state reconciliation authorization"); const prepared = assertExactCompleteStateReconciliationPreparation(preparation, { sourceSha, now }); const { authorizationSha256, ...body } = value;
+export function assertExactCompleteStateReconciliationAuthorization(value, preparation, { sourceSha, now = new Date(), allowExpired = false } = {}) {
+  exact(value, authorizationFields, "Exact-complete state reconciliation authorization"); const prepared = assertExactCompleteStateReconciliationPreparation(preparation, { sourceSha, now, allowExpired }); const { authorizationSha256, ...body } = value;
   if (value.schemaVersion !== 1 || value.kind !== "PRODUCTION_INITIAL_ACTIVATION_EXACT_COMPLETE_STATE_RECONCILIATION_AUTHORIZATION" || value.operation !== prepared.operation || value.sourceSha !== prepared.sourceSha || value.preparationSha256 !== prepared.preparationSha256 || value.savedPlanSha256 !== prepared.savedPlanSha256 || canonicalJson(value.predecessorState) !== canonicalJson(prepared.predecessorState) || value.driftSha256 !== prepared.driftSha256 || !SHA256.test(authorizationSha256 || "") || authorizationSha256 !== sha256(body)) throw new Error("Exact-complete state reconciliation authorization binding is invalid.");
-  assertProductionEnvironmentApprovalIdentity(value.protectedEnvironmentApprovalEvidence, { sourceSha, repository: EXACT_COMPLETE_STATE_RECONCILIATION.repository }); assertProductionEnvironmentApprovalFreshness(value.protectedEnvironmentApprovalEvidence, { now });
+  assertProductionEnvironmentApprovalIdentity(value.protectedEnvironmentApprovalEvidence, { sourceSha, repository: EXACT_COMPLETE_STATE_RECONCILIATION.repository }); if (!allowExpired) assertProductionEnvironmentApprovalFreshness(value.protectedEnvironmentApprovalEvidence, { now });
   if (value.protectedEnvironmentApprovalEvidence.workflowRef !== workflowRef(EXACT_COMPLETE_STATE_RECONCILIATION.authorizationWorkflowPath) || value.protectedEnvironmentApprovalEvidenceSha256 !== value.protectedEnvironmentApprovalEvidence.evidenceSha256 || value.approvedBy !== value.protectedEnvironmentApprovalEvidence.actualApproval?.userLogin) throw new Error("Exact-complete state reconciliation approval provenance is invalid.");
+  return value;
+}
+
+const recoveryPreparationFields = ["schemaVersion", "kind", "operation", "sourceSha", "originalSourceSha", "originalPreparationSha256", "originalAuthorizationSha256", "originalAuthorizationWorkflowRunId", "originalAuthorizationWorkflowRunAttempt", "predecessorState", "successorStateSha256", "successorStateObject", "attachmentTopology", "attachmentTopologySha256", "createdAt", "expiresAt", "recoveryPreparationSha256"];
+const recoveryAuthorizationFields = ["schemaVersion", "kind", "operation", "sourceSha", "recoveryPreparationSha256", "originalPreparationSha256", "originalAuthorizationSha256", "successorStateSha256", "successorStateObject", "maxAwsMutations", "approvedBy", "protectedEnvironmentApprovalEvidence", "protectedEnvironmentApprovalEvidenceSha256", "recoveryAuthorizationSha256"];
+const assertBoundState = (value, label) => {
+  exact(value, ["stateExists", "lineage", "serial", "stateSha256", "versionId", "etag"], label);
+  if (value.stateExists !== true || typeof value.lineage !== "string" || !value.lineage || !Number.isSafeInteger(value.serial) || value.serial < 0 || !SHA256.test(value.stateSha256 || "") || typeof value.versionId !== "string" || !value.versionId || typeof value.etag !== "string" || !value.etag) throw new Error(`${label} is invalid.`);
+  return value;
+};
+const assertExactAuthorizedSuccessor = ({ stateBytes, stateObject, preparation }) => {
+  const successor = assertStateObject(stateObject, stateBytes);
+  if (sha256(JSON.parse(Buffer.from(stateBytes).toString("utf8"))) !== preparation.successorStateSha256 || successor.lineage !== preparation.predecessorState.lineage || successor.serial !== preparation.predecessorState.serial + 1 || successor.versionId === preparation.predecessorState.versionId || successor.etag === preparation.predecessorState.etag) throw new Error("Exact-complete state reconciliation successor is not the authorized state.");
+  return successor;
+};
+
+export function createExactCompleteStateReconciliationRecoveryPreparation({ sourceSha, originalPreparation, originalAuthorization, originalAuthorizationWorkflowRunId, originalAuthorizationWorkflowRunAttempt, stateBytes, stateObject, attachmentTopology, preparedAt = new Date().toISOString() } = {}) {
+  if (!SHA40.test(sourceSha || "") || !/^[1-9][0-9]*$/.test(String(originalAuthorizationWorkflowRunId || "")) || !/^[1-9][0-9]*$/.test(String(originalAuthorizationWorkflowRunAttempt || ""))) throw new Error("Exact-complete state reconciliation recovery coordinates are invalid.");
+  const original = assertExactCompleteStateReconciliationPreparation(originalPreparation, { sourceSha: originalPreparation?.sourceSha, allowExpired: true });
+  const authorization = assertExactCompleteStateReconciliationAuthorization(originalAuthorization, original, { sourceSha: original.sourceSha, allowExpired: true });
+  if (authorization.protectedEnvironmentApprovalEvidence.workflowRunId !== String(originalAuthorizationWorkflowRunId) || authorization.protectedEnvironmentApprovalEvidence.workflowRunAttempt !== String(originalAuthorizationWorkflowRunAttempt)) throw new Error("Exact-complete state reconciliation original authorization is invalid.");
+  const successor = assertExactAuthorizedSuccessor({ stateBytes, stateObject, preparation: original }); const topology = assertExactMixedRecoveryAttachmentTopology(attachmentTopology); const created = iso(preparedAt, "Exact-complete state reconciliation recovery preparation timestamp");
+  const body = { schemaVersion: 1, kind: "PRODUCTION_INITIAL_ACTIVATION_EXACT_COMPLETE_STATE_RECONCILIATION_RECOVERY_PREPARATION", operation: EXACT_COMPLETE_STATE_RECONCILIATION.operation, sourceSha, originalSourceSha: original.sourceSha, originalPreparationSha256: original.preparationSha256, originalAuthorizationSha256: authorization.authorizationSha256, originalAuthorizationWorkflowRunId: String(originalAuthorizationWorkflowRunId), originalAuthorizationWorkflowRunAttempt: String(originalAuthorizationWorkflowRunAttempt), predecessorState: original.predecessorState, successorStateSha256: original.successorStateSha256, successorStateObject: successor, attachmentTopology: topology, attachmentTopologySha256: sha256(topology), createdAt: created.toISOString(), expiresAt: new Date(created.getTime() + EXACT_COMPLETE_STATE_RECONCILIATION.maxAgeMs).toISOString() };
+  return Object.freeze({ ...body, recoveryPreparationSha256: sha256(body) });
+}
+
+export function assertExactCompleteStateReconciliationRecoveryPreparation(value, { sourceSha, now = new Date() } = {}) {
+  exact(value, recoveryPreparationFields, "Exact-complete state reconciliation recovery preparation"); const { recoveryPreparationSha256, ...body } = value;
+  if (value.schemaVersion !== 1 || value.kind !== "PRODUCTION_INITIAL_ACTIVATION_EXACT_COMPLETE_STATE_RECONCILIATION_RECOVERY_PREPARATION" || value.operation !== EXACT_COMPLETE_STATE_RECONCILIATION.operation || value.sourceSha !== sourceSha || !SHA40.test(value.sourceSha || "") || !SHA40.test(value.originalSourceSha || "") || !SHA256.test(value.originalPreparationSha256 || "") || !SHA256.test(value.originalAuthorizationSha256 || "") || !/^[1-9][0-9]*$/.test(value.originalAuthorizationWorkflowRunId || "") || !/^[1-9][0-9]*$/.test(value.originalAuthorizationWorkflowRunAttempt || "") || !SHA256.test(value.successorStateSha256 || "") || value.attachmentTopologySha256 !== sha256(assertExactMixedRecoveryAttachmentTopology(value.attachmentTopology)) || value.recoveryPreparationSha256 !== sha256(body)) throw new Error("Exact-complete state reconciliation recovery preparation binding is invalid.");
+  assertBoundState(value.predecessorState, "Exact-complete state reconciliation recovery predecessor state"); const successor = assertBoundState(value.successorStateObject, "Exact-complete state reconciliation recovery successor state");
+  if (successor.lineage !== value.predecessorState.lineage || successor.serial !== value.predecessorState.serial + 1 || successor.versionId === value.predecessorState.versionId || successor.etag === value.predecessorState.etag) throw new Error("Exact-complete state reconciliation recovery successor is invalid.");
+  const created = iso(value.createdAt, "Exact-complete state reconciliation recovery preparation creation timestamp"); const expires = iso(value.expiresAt, "Exact-complete state reconciliation recovery preparation expiry timestamp");
+  if (expires.getTime() - created.getTime() !== EXACT_COMPLETE_STATE_RECONCILIATION.maxAgeMs || now < created || now > expires) throw new Error("Exact-complete state reconciliation recovery preparation is stale.");
+  return value;
+}
+
+export function createExactCompleteStateReconciliationRecoveryAuthorization({ recoveryPreparation, approval, now = new Date() } = {}) {
+  const prepared = assertExactCompleteStateReconciliationRecoveryPreparation(recoveryPreparation, { sourceSha: recoveryPreparation?.sourceSha, now });
+  assertProductionEnvironmentApprovalIdentity(approval, { sourceSha: prepared.sourceSha, repository: EXACT_COMPLETE_STATE_RECONCILIATION.repository }); assertProductionEnvironmentApprovalFreshness(approval, { now });
+  if (approval.workflowRef !== workflowRef(EXACT_COMPLETE_STATE_RECONCILIATION.recoveryAuthorizationWorkflowPath)) throw new Error("Exact-complete state reconciliation recovery requires its dedicated workflow.");
+  const approvedBy = assertProductionEnvironmentActualReviewer(approval, { sourceSha: prepared.sourceSha, repository: EXACT_COMPLETE_STATE_RECONCILIATION.repository, executionActor: approval.executionActor });
+  const body = { schemaVersion: 1, kind: "PRODUCTION_INITIAL_ACTIVATION_EXACT_COMPLETE_STATE_RECONCILIATION_RECOVERY_AUTHORIZATION", operation: prepared.operation, sourceSha: prepared.sourceSha, recoveryPreparationSha256: prepared.recoveryPreparationSha256, originalPreparationSha256: prepared.originalPreparationSha256, originalAuthorizationSha256: prepared.originalAuthorizationSha256, successorStateSha256: prepared.successorStateSha256, successorStateObject: prepared.successorStateObject, maxAwsMutations: {}, approvedBy, protectedEnvironmentApprovalEvidence: approval, protectedEnvironmentApprovalEvidenceSha256: approval.evidenceSha256 };
+  return Object.freeze({ ...body, recoveryAuthorizationSha256: sha256(body) });
+}
+
+export function assertExactCompleteStateReconciliationRecoveryAuthorization(value, recoveryPreparation, { sourceSha, now = new Date() } = {}) {
+  exact(value, recoveryAuthorizationFields, "Exact-complete state reconciliation recovery authorization"); const prepared = assertExactCompleteStateReconciliationRecoveryPreparation(recoveryPreparation, { sourceSha, now }); const { recoveryAuthorizationSha256, ...body } = value;
+  if (value.schemaVersion !== 1 || value.kind !== "PRODUCTION_INITIAL_ACTIVATION_EXACT_COMPLETE_STATE_RECONCILIATION_RECOVERY_AUTHORIZATION" || value.operation !== prepared.operation || value.sourceSha !== prepared.sourceSha || value.recoveryPreparationSha256 !== prepared.recoveryPreparationSha256 || value.originalPreparationSha256 !== prepared.originalPreparationSha256 || value.originalAuthorizationSha256 !== prepared.originalAuthorizationSha256 || value.successorStateSha256 !== prepared.successorStateSha256 || canonicalJson(value.successorStateObject) !== canonicalJson(prepared.successorStateObject) || canonicalJson(value.maxAwsMutations) !== canonicalJson({}) || value.protectedEnvironmentApprovalEvidenceSha256 !== value.protectedEnvironmentApprovalEvidence?.evidenceSha256 || value.recoveryAuthorizationSha256 !== sha256(body)) throw new Error("Exact-complete state reconciliation recovery authorization binding is invalid.");
+  assertProductionEnvironmentApprovalIdentity(value.protectedEnvironmentApprovalEvidence, { sourceSha, repository: EXACT_COMPLETE_STATE_RECONCILIATION.repository }); assertProductionEnvironmentApprovalFreshness(value.protectedEnvironmentApprovalEvidence, { now });
+  if (value.protectedEnvironmentApprovalEvidence.workflowRef !== workflowRef(EXACT_COMPLETE_STATE_RECONCILIATION.recoveryAuthorizationWorkflowPath) || value.approvedBy !== value.protectedEnvironmentApprovalEvidence.actualApproval?.userLogin) throw new Error("Exact-complete state reconciliation recovery approval provenance is invalid.");
   return value;
 }
 
@@ -181,4 +235,13 @@ export function executeExactCompleteStateReconciliation({ sourceSha, preparation
   try { applyRefreshOnlyPlan(planBytes); }
   catch (error) { try { return complete("COMPLETED_BY_READBACK", readPostSnapshot(), 1); } catch { error.mutationOutcome = "AMBIGUOUS"; throw error; } }
   return complete("COMPLETE", readPostSnapshot(), 1);
+}
+
+export function executeExactCompleteStateReconciliationRecovery({ sourceSha, recoveryPreparation, recoveryAuthorization, stateBytes, stateObject, attachmentTopology, renderNormalPlan, reauthenticateSource, verifyLive, now = new Date() } = {}) {
+  if (![renderNormalPlan, reauthenticateSource, verifyLive].every((value) => typeof value === "function")) throw new Error("Exact-complete state reconciliation recovery adapters are required.");
+  const prepared = assertExactCompleteStateReconciliationRecoveryPreparation(recoveryPreparation, { sourceSha, now }); assertExactCompleteStateReconciliationRecoveryAuthorization(recoveryAuthorization, prepared, { sourceSha, now });
+  const successor = assertExactAuthorizedSuccessor({ stateBytes, stateObject, preparation: prepared });
+  if (canonicalJson(successor) !== canonicalJson(prepared.successorStateObject) || canonicalJson(assertExactMixedRecoveryAttachmentTopology(attachmentTopology)) !== canonicalJson(prepared.attachmentTopology)) throw new Error("Exact-complete state reconciliation recovery live state changed.");
+  reauthenticateSource(); verifyLive(); const normalPlan = assertExactCompleteCleanNormalPlan(renderNormalPlan());
+  return Object.freeze({ status: "RECOVERED_COMPLETE", refreshOnlyApplyCount: 0, terraformStateMutationCount: 0, remoteIamMutationCount: 0, planSemantics: { resourceDrift: [], refreshOnly: false, terraformResourceAddCount: 0, terraformResourceChangeCount: 0, terraformResourceDestroyCount: 0 }, postState: { ...successor, successorStateSha256: prepared.successorStateSha256 }, normalPlan });
 }
