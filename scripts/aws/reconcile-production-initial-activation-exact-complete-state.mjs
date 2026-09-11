@@ -1,0 +1,91 @@
+#!/usr/bin/env node
+import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { createProductionAwsCommandRunner, createProductionAwsCredentialEnvironment, createProductionGithubCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE as SOURCES } from "./production-credential-source-contract.mjs";
+import { assertStageBArtifactPath, ensureStageBPrivateDirectory, ensureStageBPrivateFile, readBoundStageBPrivateJson, readStageBPrivateFileBytes, writeStageBPrivateFileExclusive } from "./stage-b-artifact-contract.mjs";
+import { assertProtectedCheckout, discoverInstallationPredecessor } from "./prepare-production-initial-activation-reconciler-installation.mjs";
+import { INSTALLATION, assertInstallationInitializedBackendMetadata, classifyInstallationStatePullError } from "./production-initial-activation-reconciler-installation-contract.mjs";
+import { INSTALLATION_BOOTSTRAP, assertBootstrapPermissionsDocument, discoverBootstrapRole } from "./production-initial-activation-reconciler-bootstrap.mjs";
+import { buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection, stageAProductionArtifactsPolicySemanticallyEqual } from "./production-stage-a-control-plane.mjs";
+import { verifyInitialActivationPolicyReconciler } from "./verify-production-initial-activation-policy-reconciler.mjs";
+import { EXACT_COMPLETE_STATE_RECONCILIATION as CONTRACT, assertExactCompleteRefreshOnlyPlan, assertExactCompleteStateReconciliationAuthorization, assertExactMixedRecoveryAttachmentTopology, createExactCompleteStateReconciliationPreparation, executeExactCompleteStateReconciliation } from "./production-initial-activation-reconciler-exact-complete-state-reconciliation.mjs";
+import { resolveReconcilerStateReconciliationAuthorization } from "./reconcile-production-initial-activation-reconciler-state.mjs";
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const required = (argv, name) => { const index = argv.indexOf(name); const value = index < 0 ? undefined : argv[index + 1]; if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
+const json = (run, args) => JSON.parse(run([...args, "--output", "json", "--no-cli-pager"]));
+const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
+const exactArgs = (argv, allowed) => {
+  const seen = new Set();
+  for (let index = 0; index < argv.length; index += 2) if (!allowed.has(argv[index]) || seen.has(argv[index]) || !argv[index + 1] || argv[index + 1].startsWith("--")) throw new Error("Exact-complete state reconciliation CLI arguments are not exact."); else seen.add(argv[index]);
+};
+const topology = (run) => {
+  const page = json(run, ["iam", "list-entities-for-policy", "--policy-arn", CONTRACT.policyArn, "--no-paginate"]);
+  if (!Array.isArray(page.PolicyRoles) || !Array.isArray(page.PolicyUsers) || !Array.isArray(page.PolicyGroups) || page.IsTruncated !== false) throw new Error("Exact-complete mixed recovery attachment response is malformed.");
+  return assertExactMixedRecoveryAttachmentTopology({ roles: page.PolicyRoles.map(({ RoleName }) => RoleName), users: page.PolicyUsers.map(({ UserName }) => UserName), groups: page.PolicyGroups.map(({ GroupName }) => GroupName) });
+};
+const stateObject = (run) => {
+  const value = json(run, ["s3api", "head-object", "--bucket", CONTRACT.backend.bucket, "--key", CONTRACT.backend.key, "--expected-bucket-owner", CONTRACT.account]);
+  return { versionId: value.VersionId, etag: value.ETag };
+};
+const pull = ({ exec, env }) => { try { return Buffer.from(exec("terraform", [`-chdir=${path.join(root, CONTRACT.terraformRoot)}`, "state", "pull"], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })); } catch (error) { return classifyInstallationStatePullError(error); } };
+const stableState = ({ exec, env, run }) => {
+  const before = stateObject(run); const bytes = pull({ exec, env }); const after = stateObject(run);
+  if (!bytes || JSON.stringify(before) !== JSON.stringify(after)) throw new Error("Exact-complete Terraform state changed while its S3 identity was being authenticated.");
+  return Object.freeze({ bytes, object: after });
+};
+const stateB = (run) => {
+  const policy = JSON.parse(json(run, ["s3api", "get-bucket-policy", "--bucket", "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"]).Policy);
+  if (!stageAProductionArtifactsPolicySemanticallyEqual(policy, buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection())) throw new Error("Exact-complete state reconciliation requires canonical State B.");
+};
+const bootstrapPolicy = (run) => assertBootstrapPermissionsDocument(json(run, ["iam", "get-role-policy", "--role-name", INSTALLATION_BOOTSTRAP.roleName, "--policy-name", INSTALLATION_BOOTSTRAP.inlinePolicyName]).PolicyDocument);
+const init = ({ exec, env, data }) => {
+  exec("terraform", [`-chdir=${path.join(root, CONTRACT.terraformRoot)}`, "init", "-input=false", `-backend-config=bucket=${CONTRACT.backend.bucket}`, `-backend-config=key=${CONTRACT.backend.key}`, `-backend-config=region=${CONTRACT.backend.region}`, `-backend-config=encrypt=${CONTRACT.backend.encrypt}`, `-backend-config=use_lockfile=${CONTRACT.backend.useLockfile}`], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  ensureStageBPrivateFile({ filePath: path.join(data, "terraform.tfstate"), repositoryRoot: root, normalize: true, label: "Exact-complete state reconciliation backend metadata" });
+  const metadata = JSON.parse(readStageBPrivateFileBytes({ filePath: path.join(data, "terraform.tfstate"), repositoryRoot: root, label: "Exact-complete state reconciliation backend metadata" }).bytes.toString("utf8")); assertInstallationInitializedBackendMetadata(metadata.backend);
+};
+const render = ({ exec, env, planPath }) => JSON.parse(exec("terraform", [`-chdir=${path.join(root, CONTRACT.terraformRoot)}`, "show", "-json", planPath], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
+const assertExactPredecessor = (run, expectedCallerArn) => {
+  if (discoverBootstrapRole({ run }).classification !== "EXACT_COMPLETE" || discoverInstallationPredecessor({ run, ...(expectedCallerArn ? { expectedCallerArn } : {}) }).classification !== "EXACT_COMPLETE") throw new Error("Exact-complete state reconciliation requires the exact live installation predecessor.");
+  verifyInitialActivationPolicyReconciler({ run, ...(expectedCallerArn ? { expectedCallerArn } : {}) });
+};
+export const exactSavedRefreshOnlyPlanApplyArgs = (savedPlanPath) => ["apply", "-input=false", "-lock-timeout=60s", savedPlanPath];
+
+export function runExactCompleteStateReconciliation(argv = process.argv.slice(2), deps = {}) {
+  const mode = required(argv, "--mode"); if (!["prepare", "execute"].includes(mode)) throw new Error("--mode must be prepare or execute.");
+  const prepare = mode === "prepare";
+  exactArgs(argv, new Set(prepare ? ["--mode", "--source-sha", "--admin-profile", "--terraform-data-dir", "--saved-plan-out", "--preparation-out"] : ["--mode", "--source-sha", "--terraform-data-dir", "--preparation", "--preparation-file-sha256", "--authorization-workflow-run-id", "--authorization-workflow-run-attempt", "--saved-plan", "--saved-plan-sha256", "--result-out"]));
+  const sourceSha = required(argv, "--source-sha"); const exec = deps.exec || execFileSync; assertProtectedCheckout({ sourceSha, repositoryRoot: root, exec });
+  const data = path.resolve(required(argv, "--terraform-data-dir")); ensureStageBPrivateDirectory({ directory: data, repositoryRoot: root, create: true, label: "Exact-complete state reconciliation Terraform data directory" });
+  const env = prepare ? { ...createProductionAwsCredentialEnvironment({ credentialSource: SOURCES.NAMED_PROFILE, profile: required(argv, "--admin-profile") }), TF_DATA_DIR: data } : { ...createProductionAwsCredentialEnvironment({ credentialSource: SOURCES.GITHUB_OIDC_INITIAL_ACTIVATION_BOOTSTRAP, env: deps.env || process.env }), TF_DATA_DIR: data, TF_WORKSPACE: "default" };
+  const run = deps.run || createProductionAwsCommandRunner({ credentialSource: prepare ? SOURCES.NAMED_PROFILE : SOURCES.GITHUB_OIDC_INITIAL_ACTIVATION_BOOTSTRAP, ...(prepare ? { profile: required(argv, "--admin-profile") } : { env: deps.env || process.env }) });
+  if (prepare) {
+    if (json(run, ["sts", "get-caller-identity"]).Arn !== `arn:aws:iam::${CONTRACT.account}:root`) throw new Error("Exact-complete state reconciliation preparation requires root.");
+    stateB(run); assertExactPredecessor(run); init({ exec, env, data }); const predecessor = stableState({ exec, env, run }); const attached = topology(run);
+    const saved = assertStageBArtifactPath({ artifactPath: path.resolve(required(argv, "--saved-plan-out")), repositoryRoot: root, label: "Exact-complete refresh-only saved plan", allowExisting: false });
+    exec("terraform", [`-chdir=${path.join(root, CONTRACT.terraformRoot)}`, "plan", "-refresh-only", "-input=false", "-lock=false", "-out", saved], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }); ensureStageBPrivateFile({ filePath: saved, repositoryRoot: root, normalize: true, label: "Exact-complete refresh-only saved plan" });
+    const bytes = readStageBPrivateFileBytes({ filePath: saved, repositoryRoot: root, label: "Exact-complete refresh-only saved plan" }).bytes; const plan = render({ exec, env, planPath: saved }); assertExactCompleteRefreshOnlyPlan(plan);
+    const after = stableState({ exec, env, run }); if (!after.bytes.equals(predecessor.bytes) || JSON.stringify(after.object) !== JSON.stringify(predecessor.object)) throw new Error("Terraform state changed during exact-complete state reconciliation preparation.");
+    const preparation = createExactCompleteStateReconciliationPreparation({ sourceSha, stateBytes: predecessor.bytes, stateObject: predecessor.object, attachmentTopology: attached, planBytes: bytes, planJson: plan });
+    const output = assertStageBArtifactPath({ artifactPath: path.resolve(required(argv, "--preparation-out")), repositoryRoot: root, label: "Exact-complete state reconciliation preparation", allowExisting: false }); ensureStageBPrivateDirectory({ directory: path.dirname(output), repositoryRoot: root, label: "Exact-complete state reconciliation preparation directory" }); writeStageBPrivateFileExclusive({ filePath: output, bytes: Buffer.from(`${JSON.stringify(preparation, null, 2)}\n`), repositoryRoot: root, label: "Exact-complete state reconciliation preparation" });
+    return Object.freeze({ mode, preparation, savedPlanPath: saved, awsWriteCount: 0 });
+  }
+  const workflowEnv = deps.env || process.env;
+  if (workflowEnv.GITHUB_ACTIONS !== "true" || workflowEnv.GITHUB_REPOSITORY !== CONTRACT.repository || workflowEnv.GITHUB_WORKFLOW_REF !== `${CONTRACT.repository}/${CONTRACT.executionWorkflowPath}@refs/heads/main` || workflowEnv.GITHUB_EVENT_NAME !== "workflow_dispatch" || workflowEnv.GITHUB_RUN_ATTEMPT !== "1") throw new Error("Exact-complete state reconciliation execution is workflow-only.");
+  const preparation = readBoundStageBPrivateJson({ filePath: path.resolve(required(argv, "--preparation")), expectedSha256: required(argv, "--preparation-file-sha256"), repositoryRoot: root, label: "Exact-complete state reconciliation preparation" });
+  const authorization = (deps.resolveAuthorization || resolveReconcilerStateReconciliationAuthorization)({ workflowRunId: required(argv, "--authorization-workflow-run-id"), workflowRunAttempt: required(argv, "--authorization-workflow-run-attempt"), sourceSha, preparation, workflowPath: CONTRACT.authorizationWorkflowPath, artifactName: CONTRACT.authorizationArtifactName, filename: CONTRACT.authorizationFilename, assertAuthorization: assertExactCompleteStateReconciliationAuthorization, githubRun: deps.githubRun || createProductionGithubCommandRunner() });
+  const identity = json(run, ["sts", "get-caller-identity"]); if (!new RegExp(`^arn:aws:sts::${CONTRACT.account}:assumed-role/${CONTRACT.bootstrapRoleArn.split("/").at(-1)}/[^/]+$`).test(identity.Arn || "")) throw new Error("Exact-complete state reconciliation requires the exact bootstrap role.");
+  init({ exec, env, data }); stateB(run); bootstrapPolicy(run); assertExactPredecessor(run, identity.Arn);
+  const saved = assertStageBArtifactPath({ artifactPath: path.resolve(required(argv, "--saved-plan")), repositoryRoot: root, label: "Exact-complete refresh-only saved plan" }); ensureStageBPrivateFile({ filePath: saved, repositoryRoot: root, normalize: true, label: "Exact-complete refresh-only saved plan" }); const plan = readStageBPrivateFileBytes({ filePath: saved, repositoryRoot: root, label: "Exact-complete refresh-only saved plan" }); if (sha256(plan.bytes) !== required(argv, "--saved-plan-sha256")) throw new Error("Exact-complete refresh-only saved plan digest is invalid.");
+  const before = stableState({ exec, env, run }); const reauthenticateSource = () => assertProtectedCheckout({ sourceSha, repositoryRoot: root, exec });
+  const normal = () => { const planPath = path.join(path.dirname(saved), `.exact-complete-normal-${crypto.randomUUID()}.tfplan`); try { exec("terraform", [`-chdir=${path.join(root, CONTRACT.terraformRoot)}`, "plan", "-input=false", "-lock=false", "-out", planPath], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }); ensureStageBPrivateFile({ filePath: planPath, repositoryRoot: root, normalize: true, label: "Exact-complete post-reconciliation normal plan" }); return render({ exec, env, planPath }); } finally { fs.rmSync(planPath, { force: true }); } };
+  const apply = (bytes) => { const staged = path.join(path.dirname(saved), `.authorized-exact-complete-${crypto.randomUUID()}.tfplan`); try { fs.writeFileSync(staged, bytes, { flag: "wx", mode: 0o600 }); exec("terraform", [`-chdir=${path.join(root, CONTRACT.terraformRoot)}`, ...exactSavedRefreshOnlyPlanApplyArgs(staged)], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }); } finally { fs.rmSync(staged, { force: true }); } };
+  const verifyLive = () => { reauthenticateSource(); stateB(run); bootstrapPolicy(run); assertExactPredecessor(run, identity.Arn); };
+  const result = executeExactCompleteStateReconciliation({ sourceSha, preparation, authorization, planBytes: plan.bytes, planJson: render({ exec, env, planPath: saved }), beforeStateBytes: before.bytes, beforeObject: before.object, beforeTopology: topology(run), applyRefreshOnlyPlan: apply, readPostSnapshot: () => stableState({ exec, env, run }), readPostTopology: () => topology(run), renderNormalPlan: normal, reauthenticateSource, verifyLive });
+  const output = assertStageBArtifactPath({ artifactPath: path.resolve(required(argv, "--result-out")), repositoryRoot: root, label: "Exact-complete state reconciliation result", allowExisting: false }); ensureStageBPrivateDirectory({ directory: path.dirname(output), repositoryRoot: root, label: "Exact-complete state reconciliation result directory" }); writeStageBPrivateFileExclusive({ filePath: output, bytes: Buffer.from(`${JSON.stringify(result, null, 2)}\n`), repositoryRoot: root, label: "Exact-complete state reconciliation result" }); return result;
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1] || "").href) { try { process.stdout.write(`${JSON.stringify(runExactCompleteStateReconciliation(), null, 2)}\n`); } catch (error) { process.stderr.write(`${error.message}\n`); process.exitCode = 1; } }

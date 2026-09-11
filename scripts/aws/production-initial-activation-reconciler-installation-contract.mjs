@@ -293,7 +293,9 @@ export function assertInstallationAuthorizedPostState(rawBytes, { predecessorSta
     if (change.address === "aws_iam_policy.reconciler" && (attributes.arn !== INSTALLATION.policyArn || attributes.id !== INSTALLATION.policyArn) || change.address === "aws_iam_policy.mixed_recovery" && (attributes.arn !== INSTALLATION.mixedRecoveryPolicyArn || attributes.id !== INSTALLATION.mixedRecoveryPolicyArn)) throw new Error("Installation Terraform post-state policy identity is not exact.");
     for (const [field, expected] of Object.entries(change.after)) {
       const actual = attributes[field];
-      const equal = field === "policy"
+      const equal = field === "permissions_boundary"
+        ? hasKnownNoPermissionsBoundary(expected) && hasKnownNoPermissionsBoundary(actual)
+        : field === "policy"
         ? canonicalJson(policyValue(actual, "Installation Terraform post-state permissions policy")) === canonicalJson(policyValue(expected, "Installation authorized permissions policy"))
         : canonicalJson(actual) === canonicalJson(expected);
       if (!equal) throw new Error(`Installation Terraform post-state ${change.address}.${field} does not match the authorized desired state.`);

@@ -778,6 +778,20 @@ test("EXACT_EXPANSION ambiguous recovery requires the authorized post-state sema
   assert.doesNotThrow(() => assertInstallationAuthorizedPostState(Buffer.from(updatePostState), { predecessorState: prepared.predecessorState, planSemantics: prepared.planSemantics }));
 });
 
+test("post-state permissions-boundary absence accepts only Terraform null or empty string", () => {
+  const prepared = createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(legacyInstalledState)), livePredecessor: "EXACT_EXPANSION", livePredecessorAddresses: allAddresses.filter((address) => address.endsWith(".reconciler")), planJson: updatePlan, planBytes, preparedAt: now.toISOString() });
+  for (const value of [null, ""]) {
+    const candidate = JSON.parse(updatePostState);
+    for (const resource of candidate.resources.filter(({ type }) => type === "aws_iam_role")) resource.instances[0].attributes.permissions_boundary = value;
+    assert.doesNotThrow(() => assertInstallationAuthorizedPostState(Buffer.from(JSON.stringify(candidate)), { predecessorState: prepared.predecessorState, planSemantics: prepared.planSemantics }));
+  }
+  for (const value of [" ", "arn:aws:iam::368992683803:policy/other", false, 0, [], {}]) {
+    const candidate = JSON.parse(updatePostState);
+    candidate.resources.find(({ type, name }) => type === "aws_iam_role" && name === "mixed_recovery").instances[0].attributes.permissions_boundary = value;
+    assert.throws(() => assertInstallationAuthorizedPostState(Buffer.from(JSON.stringify(candidate)), { predecessorState: prepared.predecessorState, planSemantics: prepared.planSemantics }), /permissions_boundary/);
+  }
+});
+
 test("one-time root bootstrap is exact, resumable, and ambiguity never advances", () => {
   const authorization = createBootstrapAuthorization({ sourceSha, preparation: bootstrapPreparation(), approval: bootstrapApproval, authorizedAt: now.toISOString() });
   assert.doesNotThrow(() => assertBootstrapAuthorization(authorization, { sourceSha, now }));
@@ -993,7 +1007,7 @@ test("installation and bootstrap workflows share the one non-cancelling producti
   assert.match(bootstrapWorkflow, /group: production-deploy/);
   assert.match(bootstrapWorkflow, /--require-actual-approval/);
   const workflowFiles = fs.readdirSync(".github/workflows").filter((file) => file.endsWith(".yml") || file.endsWith(".yaml"));
-  const allowedBootstrapEnvironmentUsers = new Set(["authorize-production-initial-activation-policy-reconciler-bootstrap.yml", "authorize-production-initial-activation-policy-reconciler-installation.yml", "authorize-production-initial-activation-reconciler-state-reconciliation.yml", "execute-production-initial-activation-reconciler-state-reconciliation.yml", "authorize-production-initial-activation-reconciler-state-reconciliation-recovery.yml", "execute-production-initial-activation-reconciler-state-reconciliation-recovery.yml"]);
+  const allowedBootstrapEnvironmentUsers = new Set(["authorize-production-initial-activation-policy-reconciler-bootstrap.yml", "authorize-production-initial-activation-policy-reconciler-installation.yml", "authorize-production-initial-activation-reconciler-state-reconciliation.yml", "execute-production-initial-activation-reconciler-state-reconciliation.yml", "authorize-production-initial-activation-reconciler-state-reconciliation-recovery.yml", "execute-production-initial-activation-reconciler-state-reconciliation-recovery.yml", "authorize-production-initial-activation-exact-complete-state-reconciliation.yml", "execute-production-initial-activation-exact-complete-state-reconciliation.yml"]);
   const otherBootstrapUsers = workflowFiles.filter((file) => !allowedBootstrapEnvironmentUsers.has(file))
     .filter((file) => fs.readFileSync(path.join(".github/workflows", file), "utf8").includes(`environment: ${INSTALLATION_BOOTSTRAP.environment}`));
   assert.deepEqual(otherBootstrapUsers, []);

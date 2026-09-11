@@ -1,0 +1,66 @@
+name: Execute exact-complete initial-activation Terraform state reconciliation
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha: { description: Exact protected-main source SHA, required: true, type: string }
+      preparation_base64: { description: Exact prepared state-only reconciliation artifact, required: true, type: string }
+      preparation_sha256: { description: SHA256 of preparation bytes, required: true, type: string }
+      saved_plan_base64: { description: Exact refresh-only saved plan, required: true, type: string }
+      saved_plan_sha256: { description: SHA256 of saved plan bytes, required: true, type: string }
+      authorization_workflow_run_id: { description: Completed authorization workflow run ID, required: true, type: string }
+      authorization_workflow_run_attempt: { description: Authorization workflow run attempt, required: true, type: string }
+
+permissions: { actions: read, contents: read, id-token: write }
+concurrency: { group: production-deploy, cancel-in-progress: false }
+
+jobs:
+  execute:
+    runs-on: ubuntu-latest
+    environment: production-initial-activation-reconciler-bootstrap
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.8
+          terraform_wrapper: false
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Authenticate protected source and decode exact inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          PREPARATION_BASE64: ${{ inputs.preparation_base64 }}
+          PREPARATION_SHA256: ${{ inputs.preparation_sha256 }}
+          PLAN_BASE64: ${{ inputs.saved_plan_base64 }}
+          PLAN_SHA256: ${{ inputs.saved_plan_sha256 }}
+        run: |
+          set -euo pipefail; test "$GITHUB_RUN_ATTEMPT" = 1; test "$GITHUB_REPOSITORY" = T-ej2003/genuine-scan-main; test "$SOURCE_SHA" = "$(gh api repos/$GITHUB_REPOSITORY/branches/main --jq .commit.sha)"; test "$SOURCE_SHA" = "$(git rev-parse HEAD)"; test -z "$(git status --porcelain=v1 --untracked-files=all)"; umask 077; d="$RUNNER_TEMP/exact-complete-state-reconciliation"; install -d -m 700 "$d"; printf '%s' "$PREPARATION_BASE64" | base64 --decode > "$d/preparation.json"; test "$(sha256sum "$d/preparation.json" | awk '{print $1}')" = "$PREPARATION_SHA256"; printf '%s' "$PLAN_BASE64" | base64 --decode > "$d/refresh.tfplan"; test "$(sha256sum "$d/refresh.tfplan" | awk '{print $1}')" = "$PLAN_SHA256"
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: eu-west-2
+          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler-bootstrap
+      - name: Apply only the exact authorized refresh-only plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          PREPARATION_SHA256: ${{ inputs.preparation_sha256 }}
+          PLAN_SHA256: ${{ inputs.saved_plan_sha256 }}
+          AUTHORIZATION_RUN_ID: ${{ inputs.authorization_workflow_run_id }}
+          AUTHORIZATION_RUN_ATTEMPT: ${{ inputs.authorization_workflow_run_attempt }}
+        run: |
+          set -euo pipefail; d="$RUNNER_TEMP/exact-complete-state-reconciliation"; install -d -m 700 "$d/terraform-data"; node scripts/aws/reconcile-production-initial-activation-exact-complete-state.mjs --mode execute --source-sha "$SOURCE_SHA" --terraform-data-dir "$d/terraform-data" --preparation "$d/preparation.json" --preparation-file-sha256 "$PREPARATION_SHA256" --authorization-workflow-run-id "$AUTHORIZATION_RUN_ID" --authorization-workflow-run-attempt "$AUTHORIZATION_RUN_ATTEMPT" --saved-plan "$d/refresh.tfplan" --saved-plan-sha256 "$PLAN_SHA256" --result-out "$d/result.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: production-initial-activation-exact-complete-state-reconciliation-result
+          path: ${{ runner.temp }}/exact-complete-state-reconciliation/result.json
+          if-no-files-found: error
+          retention-days: 90
