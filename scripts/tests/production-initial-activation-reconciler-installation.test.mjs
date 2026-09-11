@@ -668,6 +668,36 @@ test("executor-policy upgrade applies only the authenticated saved update plan",
   fs.rmSync(directory, { recursive: true, force: true });
 });
 
+test("executor applies every authenticated partial dedicated-role expansion", () => {
+  const reconcilerAddresses = allAddresses.filter((address) => address.endsWith(".reconciler"));
+  for (const present of [["aws_iam_role.mixed_recovery"], ["aws_iam_policy.mixed_recovery"], ["aws_iam_policy.mixed_recovery", "aws_iam_role.mixed_recovery"]]) {
+    const prefixPlan = structuredClone(updatePlan);
+    for (const address of present) prefixPlan.resource_changes.find((entry) => entry.address === address).change = structuredClone(completePlan.resource_changes.find((entry) => entry.address === address).change);
+    if (present.includes("aws_iam_policy.mixed_recovery")) {
+      const attachment = prefixPlan.resource_changes.find((entry) => entry.address === "aws_iam_role_policy_attachment.mixed_recovery").change;
+      attachment.after.policy_arn = MIXED_RECOVERY_EXECUTOR.policyArn;
+      delete attachment.after_unknown.policy_arn;
+    }
+    const addresses = [...reconcilerAddresses, ...present].sort();
+    const predecessor = JSON.parse(updatePostState);
+    predecessor.serial = 1;
+    predecessor.resources = predecessor.resources.filter((resource) => addresses.includes(`${resource.type}.${resource.name}`));
+    const postState = JSON.stringify({ ...JSON.parse(updatePostState), resources: prefixPlan.resource_changes.map((entry) => ({ mode: entry.mode, type: entry.type, name: entry.name, provider: 'provider["registry.terraform.io/hashicorp/aws"]', instances: [{ schema_version: 0, attributes: entry.address === "aws_iam_policy.mixed_recovery" ? { ...entry.change.after, arn: MIXED_RECOVERY_EXECUTOR.policyArn, id: MIXED_RECOVERY_EXECUTOR.policyArn } : entry.change.after, sensitive_attributes: [] }] })) });
+    const prefixBytes = Buffer.from(`partial-expansion-${present.join("-")}`);
+    const prepared = createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(JSON.stringify(predecessor))), livePredecessor: "EXACT_EXPANSION", livePredecessorAddresses: addresses, planJson: prefixPlan, planBytes: prefixBytes, preparedAt: now.toISOString() });
+    const authorized = createInstallationAuthorization({ preparation: prepared, preparationArtifactSha256: prepared.preparationArtifactSha256, protectedEnvironmentApprovalEvidence: approval, sourceSha });
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-install-partial-expansion-"));
+    let reads = 0; let applies = 0;
+    try {
+      const result = executeInstallation({ sourceSha, preparation: prepared, authorization: authorized, planBytes: prefixBytes, planJson: prefixPlan, executionRoleArn: INSTALLATION.executionRoleArn, livePredecessor: "EXACT_EXPANSION", livePredecessorAddresses: addresses, applySavedPlan: () => { applies += 1; }, verifyInstalled: () => true, readState: () => Buffer.from(reads++ === 0 ? JSON.stringify(predecessor) : postState), resultPath: path.join(directory, "result.json"), now });
+      assert.equal(result.applyCount, 1);
+      assert.equal(applies, 1);
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  }
+});
+
 test("EXACT_EXPANSION ambiguous recovery requires the authorized post-state semantics", () => {
   const legacyAddresses = allAddresses.filter((address) => address.endsWith(".reconciler"));
   const prepared = createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(legacyInstalledState)), livePredecessor: "EXACT_EXPANSION", livePredecessorAddresses: legacyAddresses, planJson: updatePlan, planBytes, preparedAt: now.toISOString() });
