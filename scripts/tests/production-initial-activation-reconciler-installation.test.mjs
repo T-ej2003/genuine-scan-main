@@ -558,6 +558,31 @@ test("IAM paths and every security-relevant desired value are exact for create a
   }
 });
 
+test("IAM role permissions-boundary absence accepts only canonical Terraform null or empty-string representations", () => {
+  for (const address of ["aws_iam_role.reconciler", "aws_iam_role.mixed_recovery"]) {
+    for (const value of [null, ""]) {
+      const canonical = structuredClone(plan);
+      canonical.resource_changes.find((entry) => entry.address === address).change.after.permissions_boundary = value;
+      assert.doesNotThrow(() => assertInstallationPlan(canonical));
+    }
+    for (const value of ["arn:aws:iam::368992683803:policy/other", "not-an-arn", " ", false, 0, [], {}]) {
+      const changed = structuredClone(plan);
+      changed.resource_changes.find((entry) => entry.address === address).change.after.permissions_boundary = value;
+      assert.throws(() => assertInstallationPlan(changed), /contract/);
+    }
+    const missing = structuredClone(plan);
+    delete missing.resource_changes.find((entry) => entry.address === address).change.after.permissions_boundary;
+    assert.throws(() => assertInstallationPlan(missing), /contract/);
+    for (const value of [null, ""]) {
+      const unknown = structuredClone(plan);
+      const resource = unknown.resource_changes.find((entry) => entry.address === address);
+      resource.change.after.permissions_boundary = value;
+      resource.change.after_unknown.permissions_boundary = true;
+      assert.throws(() => assertInstallationPlan(unknown), /contract/);
+    }
+  }
+});
+
 test("only the exact reconciler-policy or mixed-recovery trust update is accepted; all other updates fail closed", () => {
   assert.equal(assertInstallationPlan(updatePlan).updateCount, 1);
   assert.deepEqual(assertInstallationPlan(trustUpdatePlan).changedAddresses, ["aws_iam_role.mixed_recovery"]);
