@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
-import { MIXED_DUAL_SLOT_RECOVERY_EXECUTION_POLICY_ARN, MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN, MIXED_DUAL_SLOT_RECOVERY_EXECUTION_TRUST_PATH, MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION, MIXED_DUAL_SLOT_RECOVERY_IAM_CAPABILITIES, MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, assertMixedDualSlotRecoveryIamPreflight } from "../aws/production-mixed-dual-slot-recovery-contract.mjs";
+import { MIXED_DUAL_SLOT_RECOVERY_EXECUTION_POLICY_ARN, MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN, MIXED_DUAL_SLOT_RECOVERY_EXECUTION_TRUST_PATH, MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION, MIXED_DUAL_SLOT_RECOVERY_IAM_CAPABILITIES, MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, MIXED_DUAL_SLOT_RECOVERY_OIDC_PROVIDER_ARN, assertMixedDualSlotRecoveryIamPreflight } from "../aws/production-mixed-dual-slot-recovery-contract.mjs";
 import { readMixedDualSlotRecoveryIamCapabilityPreflight } from "../aws/preflight-production-mixed-dual-slot-recovery-iam.mjs";
 import { assertMixedDualSlotRecoveryIamAttestation, createMixedDualSlotRecoveryIamAttestation } from "../aws/production-mixed-dual-slot-recovery-iam-attestation.mjs";
 import { createPinnedRootAttestationVerifier, ROOT_ATTESTATION_KEY_ALIAS_ARN, ROOT_ATTESTATION_SIGNING_ALGORITHM } from "../aws/production-root-attestation-key.mjs";
@@ -15,6 +15,7 @@ const runner = ({ caller = { Account: "368992683803", Arn: "arn:aws:iam::3689926
   const operation = args.slice(0, 2).join(" ");
   if (operation === "sts get-caller-identity") return JSON.stringify(caller);
   if (operation === "organizations describe-organization") throw Object.assign(new Error("AWSOrganizationsNotInUseException"), { stderr: "AWSOrganizationsNotInUseException" });
+  if (operation === "iam get-open-id-connect-provider") return JSON.stringify({ Url: "token.actions.githubusercontent.com", ClientIDList: ["sts.amazonaws.com"] });
   if (operation === "iam get-role") return JSON.stringify({ Role: role });
   if (operation === "secretsmanager get-resource-policy") {
     const resource = args.at(-1); return JSON.stringify({ ARN: resource, ResourcePolicy: resourcePolicies[resource] ?? null });
@@ -61,6 +62,12 @@ test("effective-capability preflight independently proves that no SCP layer appl
   assert.throws(() => readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now: observedAt, run: (args) => { if (args.slice(0, 2).join(" ") === "organizations describe-organization") throw Object.assign(new Error("AccessDeniedException"), { stderr: "AccessDeniedException" }); return runner()(args); } }), /AccessDeniedException/);
   const preflight = readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now: observedAt, run: runner() });
   assert.deepEqual(preflight.organizationsGuard, { accountId: "368992683803", status: "NOT_IN_ORGANIZATION", evidence: "AWSOrganizationsNotInUseException" });
+});
+
+test("effective-capability preflight authenticates the live GitHub OIDC provider", () => {
+  const preflight = readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now: observedAt, run: runner() });
+  assert.deepEqual(preflight.oidcProviderGuard, { providerArn: MIXED_DUAL_SLOT_RECOVERY_OIDC_PROVIDER_ARN, url: "token.actions.githubusercontent.com", audience: "sts.amazonaws.com" });
+  for (const provider of [{ Url: "wrong.example.com", ClientIDList: ["sts.amazonaws.com"] }, { Url: "token.actions.githubusercontent.com", ClientIDList: ["other"] }, { Url: "token.actions.githubusercontent.com", ClientIDList: null }]) assert.throws(() => readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now: observedAt, run: (args) => args.slice(0, 2).join(" ") === "iam get-open-id-connect-provider" ? JSON.stringify(provider) : runner()(args) }), /OIDC provider/);
 });
 
 test("effective-capability preflight authenticates every exact secret resource policy", () => {
@@ -112,6 +119,8 @@ test("effective-capability preflight requires the sole exact AWS per-resource re
 
 test("preflight canonical identity rejects wildcard, missing, extra and stale substitutions", () => {
   const preflight = readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now: observedAt, run: runner() });
+  const legacyPreflight = structuredClone(preflight); delete legacyPreflight.oidcProviderGuard;
+  assert.throws(() => assertMixedDualSlotRecoveryIamPreflight({ ...legacyPreflight, schemaVersion: 4 }, { sourceSha }), /schema/);
   for (const changed of [
     { principalArn: "arn:aws:iam::368992683803:role/wrong" },
     { action: "secretsmanager:*" },
@@ -120,6 +129,7 @@ test("preflight canonical identity rejects wildcard, missing, extra and stale su
     { resources: [...preflight.resources, "arn:aws:secretsmanager:eu-west-2:368992683803:secret:arbitrary"] },
     { roleTrustPolicySha256: "f".repeat(64) },
     { rolePermissionsBoundary: "arn:aws:iam::368992683803:policy/boundary" },
+    { oidcProviderGuard: { providerArn: MIXED_DUAL_SLOT_RECOVERY_OIDC_PROVIDER_ARN, url: "token.actions.githubusercontent.com", audience: "other" } },
     { organizationsGuard: { accountId: "368992683803", status: "IN_ORGANIZATION", evidence: "unverified" } },
     { resourcePolicies: preflight.resourcePolicies.slice(0, 6) },
     { resourcePolicies: preflight.resourcePolicies.map((value, index) => index ? value : { ...value, resourcePolicyAccess: "UNVERIFIED" }) },

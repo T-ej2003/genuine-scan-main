@@ -3,7 +3,7 @@ import fs from "node:fs";
 import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-cutover-production-adapters.mjs";
 import { assertResourcePolicyAllowsRuntime } from "./production-ecs-runtime-consumability.mjs";
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
-import { MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN, MIXED_DUAL_SLOT_RECOVERY_EXECUTION_TRUST_PATH, MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION, MIXED_DUAL_SLOT_RECOVERY_IAM_CAPABILITIES, MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, buildMixedDualSlotRecoveryIamPreflight, mixedDualSlotRecoverySha256 } from "./production-mixed-dual-slot-recovery-contract.mjs";
+import { MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN, MIXED_DUAL_SLOT_RECOVERY_EXECUTION_TRUST_PATH, MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION, MIXED_DUAL_SLOT_RECOVERY_IAM_CAPABILITIES, MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, MIXED_DUAL_SLOT_RECOVERY_OIDC_PROVIDER_ARN, buildMixedDualSlotRecoveryIamPreflight, mixedDualSlotRecoverySha256 } from "./production-mixed-dual-slot-recovery-contract.mjs";
 
 const parse = (run, args) => JSON.parse(run(args));
 const missingContext = (result) => {
@@ -29,6 +29,9 @@ export function readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now
     if (!/AWSOrganizationsNotInUseException/.test(message)) throw error;
     organizationsGuard = { accountId: caller.Account, status: "NOT_IN_ORGANIZATION", evidence: "AWSOrganizationsNotInUseException" };
   }
+  const provider = parse(run, ["iam", "get-open-id-connect-provider", "--open-id-connect-provider-arn", MIXED_DUAL_SLOT_RECOVERY_OIDC_PROVIDER_ARN]);
+  if (provider?.Url !== "token.actions.githubusercontent.com" || !Array.isArray(provider.ClientIDList) || !provider.ClientIDList.includes("sts.amazonaws.com")) throw new Error("Mixed recovery GitHub Actions OIDC provider URL or audience changed.");
+  const oidcProviderGuard = { providerArn: MIXED_DUAL_SLOT_RECOVERY_OIDC_PROVIDER_ARN, url: provider.Url, audience: "sts.amazonaws.com" };
   const role = parse(run, ["iam", "get-role", "--role-name", "mscqr-production-mixed-dual-slot-recovery-executor"]).Role;
   if (role?.Arn !== MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN || role.PermissionsBoundary) throw new Error("Mixed recovery execution role or permissions boundary changed.");
   const expectedTrust = JSON.parse(fs.readFileSync(MIXED_DUAL_SLOT_RECOVERY_EXECUTION_TRUST_PATH, "utf8"));
@@ -55,5 +58,5 @@ export function readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, now
     const permissionsBoundaryAllowed = permissionsBoundary.includes(false) ? false : permissionsBoundary.includes(true) ? true : null;
     return { action: result.EvalActionName, resource: resourceResult.EvalResourceName, decision: resourceResult.EvalResourceDecision, missingContextValues, organizationsAllowed, permissionsBoundaryAllowed };
   }));
-  return buildMixedDualSlotRecoveryIamPreflight({ sourceSha, principalArn: role.Arn, action: MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION, resources: [...MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES], roleTrustPolicySha256, rolePermissionsBoundary: null, organizationsGuard, resourcePolicies, evaluations, observedAt: now.toISOString() });
+  return buildMixedDualSlotRecoveryIamPreflight({ sourceSha, principalArn: role.Arn, action: MIXED_DUAL_SLOT_RECOVERY_IAM_ACTION, resources: [...MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES], roleTrustPolicySha256, rolePermissionsBoundary: null, oidcProviderGuard, organizationsGuard, resourcePolicies, evaluations, observedAt: now.toISOString() });
 }

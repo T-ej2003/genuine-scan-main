@@ -27,8 +27,9 @@ is produced only by `authorize-production-mixed-dual-slot-topology-recovery.yml`
 after the protected `production` environment reviewer approves the exact file
 hash. Before that approval is requested, preparation requires an administrator
 IAM simulation proving that the dedicated
-`mscqr-production-mixed-dual-slot-recovery-executor` has its exact source trust
-and can perform its STS identity read, both ECS predecessor reads, and all
+`mscqr-production-mixed-dual-slot-recovery-executor` has its exact source trust,
+the live GitHub OIDC provider retains the exact URL and STS audience, and the
+role can perform its STS identity read, both ECS predecessor reads, and all
 `DescribeSecret`, `GetSecretValue`, and `UpdateSecretVersionStage` calls on the
 seven exact ARNs. Readback also proves each exact secret has no resource policy
 that could override those identity results, and an independent Organizations

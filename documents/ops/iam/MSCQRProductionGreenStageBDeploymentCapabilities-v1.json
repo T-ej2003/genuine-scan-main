@@ -8238,6 +8238,35 @@
       "mutation": false
     },
     {
+      "id": "mixed-recovery-iam-preflight-read-oidc-provider",
+      "phase": "mixed-dual-slot-recovery-iam-preflight",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs",
+      "sourceFunction": "mixed-recovery-iam-preflight-read-oidc-provider",
+      "action": "iam:GetOpenIDConnectProvider",
+      "resources": [
+        "arn:aws:iam::368992683803:oidc-provider/token.actions.githubusercontent.com"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetRoleArn": "arn:aws:iam::368992683803:role/mscqr-production-mixed-dual-slot-recovery-executor"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "administrator-live-read",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs",
+        "sid": "mixed-recovery-iam-preflight-read-oidc-provider",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
       "id": "mixed-recovery-iam-preflight-read-organization",
       "phase": "mixed-dual-slot-recovery-iam-preflight",
       "identity": "ROOT_OPERATOR",
@@ -13833,6 +13862,17 @@
     {
       "sourceFile": "scripts/aws/generate-production-green-stage-a-prerequisites.mjs",
       "action": "rds:DescribeDBInstances"
+    },
+    {
+      "sourceFile": "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs",
+      "sourceFunction": "mixed-recovery-iam-preflight-read-oidc-provider",
+      "phase": "mixed-dual-slot-recovery-iam-preflight",
+      "identity": "ROOT_OPERATOR",
+      "action": "iam:GetOpenIDConnectProvider",
+      "resources": [
+        "arn:aws:iam::368992683803:oidc-provider/token.actions.githubusercontent.com"
+      ],
+      "capabilityId": "mixed-recovery-iam-preflight-read-oidc-provider"
     },
     {
       "sourceFile": "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs",
