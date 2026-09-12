@@ -97,12 +97,14 @@ function writeMaterialJournal(filePath, sourceSha, rotationId, material, reposit
   return material;
 }
 
-async function recoverInitialPendingMaterial({ send, resources, sourceSha, rotationId, materialFile, repositoryRoot, requireExisting = false }) {
+async function recoverInitialPendingMaterial({ send, resources, sourceSha, rotationId, materialFile, repositoryRoot, requireExisting = false, recoveryHandoff }) {
   const pendingSlots = ["jwtPending", "qrPrivatePending", "qrPublicPending"];
   const existing = {};
   for (const slot of pendingSlots) {
     try {
-      existing[slot] = parseStoredValue(await send(new GetSecretValueCommand({ SecretId: resources[slot] })), `${slot} pending`);
+      const response = await send(new GetSecretValueCommand({ SecretId: resources[slot] }));
+      if (typeof recoveryHandoff?.[slot]?.current?.versionId === "string" && response?.VersionId === recoveryHandoff[slot].current.versionId) continue;
+      existing[slot] = parseStoredValue(response, `${slot} pending`);
     } catch (error) {
       if (!notFound(error)) throw error;
     }
@@ -154,9 +156,15 @@ function parseStoredValue(response, name) {
   return parsed;
 }
 
-async function ensureValue({ send, arn, name, expected, rotationId, allowPendingResume = false, requireExisting = false, expectedPayloadSha256 }) {
+async function ensureValue({ send, arn, name, expected, rotationId, allowPendingResume = false, requireExisting = false, expectedPayloadSha256, ignoreCurrentVersionId }) {
   try {
-    const existing = parseStoredValue(await send(new GetSecretValueCommand({ SecretId: arn })), name);
+    const response = await send(new GetSecretValueCommand({ SecretId: arn }));
+    if (typeof ignoreCurrentVersionId === "string" && response?.VersionId === ignoreCurrentVersionId) {
+      if (requireExisting) throw new Error(`${name} does not contain the authenticated supersession write.`);
+      await send(new PutSecretValueCommand({ SecretId: arn, SecretString: JSON.stringify(expected) }));
+      return { material: expected, wrote: true };
+    }
+    const existing = parseStoredValue(response, name);
     if (requireExisting) {
       if (!/^[a-f0-9]{64}$/.test(expectedPayloadSha256 || "") || canonicalSha256(existing) !== expectedPayloadSha256 || JSON.stringify(existing) !== JSON.stringify(expected)) throw new Error(`${name} differs from the authenticated supersession write plan.`);
       return { material: existing, wrote: false };
@@ -328,7 +336,7 @@ async function authenticateMixedRecoveryRetainedHistory({ send, resources, descr
     if (canonical(topology) === canonical(untouched)) bootstrapProgress.push(false);
     else {
       const fresh = Object.entries(topology || {}).filter(([versionId, labels]) => versionId !== expected.current.versionId && versionId !== expected.previous.versionId && canonical(labels) === canonical(["AWSCURRENT"]));
-      if (!topology || typeof topology !== "object" || Array.isArray(topology) || Object.keys(topology).length !== 3 || fresh.length !== 1 || canonical(topology[expected.current.versionId]) !== canonical(["AWSPREVIOUS"]) || canonical(topology[expected.previous.versionId]) !== canonical([])) throw new Error(`Initial ${slot} AWS-legal recovery topology is not an authenticated bootstrap prefix.`);
+      if (!topology || typeof topology !== "object" || Array.isArray(topology) || Object.keys(topology).length !== 2 || fresh.length !== 1 || canonical(topology[expected.current.versionId]) !== canonical(["AWSPREVIOUS"]) || topology[expected.previous.versionId] !== undefined) throw new Error(`Initial ${slot} AWS-legal recovery topology is not an authenticated bootstrap prefix.`);
       bootstrapProgress.push(true);
     }
     const current = await send(new GetSecretValueCommand({ SecretId: expected.current.arn, VersionId: expected.current.versionId }));
@@ -388,6 +396,15 @@ export function verifyLiveInitialDualSlotBindingWithRunner({ run, bindings, prov
       if (predecessor) assertSchemaV3PreviousPayload(slot, previousPayload, predecessor.slotIdentities[slot]);
       else if (canonical(retainedHistoryPayloadIdentity(slot, arn, previousVersionId, previousPayload, retainedHistoryPayloadHash)) !== canonical(retainedHistory[slot])) throw new Error(`Initial ${slot} retained-history payload is not authenticated.`);
     }
+    if (bindings.recoveryHandoff) {
+      const handoffPrevious = bindings.recoveryHandoff[slot].previous;
+      if (described.VersionIdsToStages[handoffPrevious.versionId] !== undefined) throw new Error(`Initial ${slot} AWS-legal recovery handoff topology is not authenticated.`);
+      const handoff = runnerJson(run, ["aws", "secretsmanager", "get-secret-value", "--secret-id", arn, "--version-id", handoffPrevious.versionId], `Initial ${slot} AWS-legal recovery handoff value`);
+      if (handoff.VersionId !== handoffPrevious.versionId || typeof handoff.SecretString !== "string") throw new Error(`Initial ${slot} AWS-legal recovery handoff version is not authenticated.`);
+      let handoffPayload;
+      try { handoffPayload = JSON.parse(handoff.SecretString); } catch { throw new Error(`Initial ${slot} AWS-legal recovery handoff payload is malformed.`); }
+      if (canonical(retainedHistoryPayloadIdentity(slot, arn, handoffPrevious.versionId, handoffPayload, retainedHistoryPayloadHash, [])) !== canonical({ ...handoffPrevious, stagingLabels: [] })) throw new Error(`Initial ${slot} AWS-legal recovery handoff payload is not authenticated.`);
+    }
   }
   if (observedSlots.qrPrivatePending.keyVersion && observedSlots.qrPrivatePending.keyVersion !== observedSlots.qrPublicPending.keyVersion) throw new Error("Initial QR pending payload identities are inconsistent.");
   let supersessionPredecessorIdentitySha256;
@@ -443,12 +460,12 @@ export async function bootstrapInitialDualSlotRotation({ send, taskDefinition, s
   let secretValueWrites = 0;
   ensureStageBPrivateDirectory({ directory: path.dirname(path.resolve(outputFile)), repositoryRoot, create: true, normalize: true, label: "Replacement material journal directory" });
   const materialFile = materialFileFor(outputFile);
-  const material = await recoverInitialPendingMaterial({ send, resources, sourceSha, rotationId, materialFile, repositoryRoot, requireExisting });
+  const material = await recoverInitialPendingMaterial({ send, resources, sourceSha, rotationId, materialFile, repositoryRoot, requireExisting, recoveryHandoff: recoveryHandoff?.recoveryHandoff });
   const payloads = pendingPayloads({ rotationId, material });
   for (const payload of Object.values(payloads)) payload.sourceSha = sourceSha;
   if (checkedSupersessionPredecessor) for (const payload of Object.values(payloads)) payload.supersessionPredecessorIdentitySha256 = checkedSupersessionPredecessor.predecessorIdentitySha256;
   const ensure = async (slot, options) => {
-    const result = await ensureValue({ send, ...options, requireExisting, expectedPayloadSha256: writePlanBySlot.get(slot)?.payloadSha256 });
+    const result = await ensureValue({ send, ...options, requireExisting, expectedPayloadSha256: writePlanBySlot.get(slot)?.payloadSha256, ignoreCurrentVersionId: recoveryHandoff?.recoveryHandoff?.[slot]?.current.versionId });
     secretValueWrites += result.wrote ? 1 : 0;
     return result.material;
   };
