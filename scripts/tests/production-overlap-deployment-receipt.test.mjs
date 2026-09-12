@@ -7,7 +7,7 @@ import { buildProductionOverlapDeploymentReceipt, assertProductionOverlapDeploym
 import { runPostOverlapVerification, runProductionCutoverOverlapControlPlane } from "../aws/production-cutover-control-plane.mjs";
 import { buildOverlapReadinessEvidence } from "../aws/produce-production-overlap-readiness-evidence.mjs";
 import { READY_FOR_OVERLAP_DEPLOYMENT_STAGES } from "../aws/production-overlap-readiness-contract.mjs";
-import { assertVerifierContinuationReceiptBindings } from "../aws/verify-production-cutover-overlap.mjs";
+import { assertVerifierContinuationReceiptBindings, collectPostDeploymentOnboardingCredentials } from "../aws/verify-production-cutover-overlap.mjs";
 
 const sourceSha = "a".repeat(40);
 const rotationId = "rotation-20260829015311-765c8a16";
@@ -24,6 +24,16 @@ const boundarySteps = () => [
   { name: "Deploy rotation transition backend ECS service", status: "completed", conclusion: "success" },
   { name: "Upload overlap deployment receipt", status: "completed", conclusion: "success", started_at: "2026-09-01T10:01:00.000Z", completed_at: "2026-09-01T10:01:10.000Z" },
 ];
+
+test("post-deployment onboarding credentials are hidden, complete, and unavailable before that continuation", async () => {
+  const prompts = [];
+  const values = ["admin@example.invalid", "admin-password", "tenant@example.invalid", "tenant-password"];
+  const credentials = await collectPostDeploymentOnboardingCredentials({ prompt: async (request) => { prompts.push(request.prompt); return values.shift(); } });
+  assert.deepEqual(prompts, ["Production strict-onboarding administrator email: ", "Production strict-onboarding administrator password: ", "Production strict-onboarding tenant-canary email: ", "Production strict-onboarding tenant-canary password: "]);
+  assert.deepEqual(credentials, { email: "admin@example.invalid", password: "admin-password", tenantEmail: "tenant@example.invalid", tenantPassword: "tenant-password" });
+  await assert.rejects(() => collectPostDeploymentOnboardingCredentials({ prompt: async () => "" }), /MSCQR_ONBOARDING_EMAIL entry failed/);
+  await assert.rejects(() => collectPostDeploymentOnboardingCredentials({ prompt: async () => undefined }), /MSCQR_ONBOARDING_EMAIL entry failed/);
+});
 
 test("deployment receipt binds the exact authorized stable overlap deployment", () => {
   const value = receipt();

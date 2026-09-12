@@ -27,7 +27,7 @@ test("operator handoff refuses non-interactive execution before prompting or spa
   assert.equal(spawns, 0);
 });
 
-test("operator handoff collects exactly five hidden pre-launch inputs and leaves verifier MFA JIT", async () => {
+test("prepare-overlap collects only its verifier input and excludes post-deployment credentials", async () => {
   const prompts = [];
   let spawned;
   const output = [];
@@ -41,7 +41,7 @@ test("operator handoff collects exactly five hidden pre-launch inputs and leaves
   });
   assert.equal(result.exitCode, 0);
   assert.equal(result.signal, null);
-  assert.deepEqual(prompts.map(({ prompt }) => prompt), ["Production verifier MFA serial: ", "Production strict-onboarding administrator email: ", "Production strict-onboarding administrator password: ", "Production strict-onboarding tenant-canary email: ", "Production strict-onboarding tenant-canary password: "]);
+  assert.deepEqual(prompts.map(({ prompt }) => prompt), ["Production verifier MFA serial: "]);
   assert.equal(prompts.some(({ prompt }) => /MFA code|MFA_BOOTSTRAP|onboarding MFA|tenant-canary MFA/.test(prompt)), false);
   assert.deepEqual(spawned.options.stdio, "inherit");
   assert.deepEqual(spawned.args.slice(0, 3), ["scripts/aws/run-production-cutover.mjs", "--mode", "prepare-overlap"]);
@@ -51,15 +51,15 @@ test("operator handoff collects exactly five hidden pre-launch inputs and leaves
   assert.equal(spawned.environment.HOME, "/operator");
   assert.equal(spawned.environment.GH_TOKEN, undefined);
   assert.equal(spawned.environment.GITHUB_TOKEN, undefined);
-  for (const [name, value] of Object.entries(values)) assert.equal(spawned.environment[name], value);
-  assert.equal(JSON.stringify(spawned.args).includes(values.MSCQR_ONBOARDING_PASSWORD), false);
+  assert.equal(spawned.environment.MSCQR_VERIFIER_MFA_SERIAL, values.MSCQR_VERIFIER_MFA_SERIAL);
+  for (const name of ["MSCQR_ONBOARDING_EMAIL", "MSCQR_ONBOARDING_PASSWORD", "MSCQR_CANARY_ORDINARY_EMAIL", "MSCQR_CANARY_ORDINARY_PASSWORD", "MSCQR_ONBOARDING_MFA_CODE"]) assert.equal(spawned.environment[name], undefined);
+  for (const value of Object.values(values).slice(1)) assert.equal(JSON.stringify(spawned).includes(value), false);
   assert.deepEqual(output, []);
 });
 
 test("operator handoff fails closed before a child exists for empty or malformed input", async () => {
   let spawns = 0;
   await assert.rejects(() => runProductionCutoverOperator({ argv, stdin: { isTTY: true }, stdout: { isTTY: true }, prompt: async () => "", spawnChild: () => { spawns += 1; } }), /MSCQR_VERIFIER_MFA_SERIAL entry failed/);
-  await assert.rejects(() => runProductionCutoverOperator({ argv, stdin: { isTTY: true }, stdout: { isTTY: true }, prompt: async (request) => request.prompt.includes("administrator password") ? "" : inputFor(request.prompt), spawnChild: () => { spawns += 1; } }), /MSCQR_ONBOARDING_PASSWORD entry failed/);
   await assert.rejects(() => runProductionCutoverOperator({ argv, stdin: { isTTY: true }, stdout: { isTTY: true }, prompt: async (request) => request.prompt.includes("verifier MFA serial") ? "123456" : inputFor(request.prompt), spawnChild: () => { spawns += 1; } }), /MSCQR_VERIFIER_MFA_SERIAL entry failed/);
   await assert.rejects(() => runProductionCutoverOperator({ argv, stdin: { isTTY: true }, stdout: { isTTY: true }, prompt: async () => { throw new Error("fixture-sensitive-value"); }, spawnChild: () => { spawns += 1; } }), (error) => error.message === "Interactive MSCQR_VERIFIER_MFA_SERIAL entry failed." && !error.message.includes("fixture-sensitive-value"));
   assert.equal(spawns, 0);
@@ -69,7 +69,7 @@ test("operator handoff preserves the child exit outcome and clears its child-onl
   let invocation;
   const result = await runProductionCutoverOperator({ argv, stdin: { isTTY: true }, stdout: { isTTY: true }, prompt: async (request) => inputFor(request.prompt), spawnChild: childThatExits({ code: 17, capture: (value) => { invocation = value; } }) });
   assert.deepEqual(result, { exitCode: 17, signal: null });
-  for (const name of Object.keys(values)) assert.equal(invocation.options.env[name], undefined);
+  assert.equal(invocation.options.env.MSCQR_VERIFIER_MFA_SERIAL, undefined);
 });
 
 test("operator handoff reports a child signal for the CLI to propagate", async () => {
@@ -91,5 +91,7 @@ test("operator handoff accepts only the exact non-secret runtime argument contra
   assert.throws(() => parseProductionCutoverOperatorArgs(["--mode", "production", ...argv.slice(2)]), /runtime identity/);
   assert.throws(() => parseProductionCutoverOperatorArgs(["--mode", "unknown", ...argv.slice(2)]), /runtime identity/);
   assert.throws(() => parseProductionCutoverOperatorArgs([...argv, "--extra", "value"]), /exactly five/);
-  assert.throws(() => buildProductionCutoverChildEnvironment({ inputs: { ...values, MSCQR_ONBOARDING_PASSWORD: "" } }), /incomplete/);
+  assert.throws(() => buildProductionCutoverChildEnvironment({ inputs: { ...values, MSCQR_VERIFIER_MFA_SERIAL: "" } }), /incomplete/);
+  const environment = buildProductionCutoverChildEnvironment({ inputs: values });
+  for (const name of ["MSCQR_ONBOARDING_EMAIL", "MSCQR_ONBOARDING_PASSWORD", "MSCQR_CANARY_ORDINARY_EMAIL", "MSCQR_CANARY_ORDINARY_PASSWORD"]) assert.equal(environment[name], undefined);
 });

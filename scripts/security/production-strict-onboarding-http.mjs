@@ -64,11 +64,12 @@ export function createCookieAuthenticatedRequest({ baseUrl, fetchImpl = fetch } 
   return { request, cookieJar };
 }
 
-export function createStrictHttpOnboardingAdapter({ baseUrl, paths, credentials, getMfaCode, tenantCredentials, getTenantMfaCode, runtimeReadback, ecsExecEvidence, rotationStateReadback, rotationFixtureFile, fetchImpl = fetch } = {}) {
+export function createStrictHttpOnboardingAdapter({ baseUrl, paths, credentials, getMfaCode, tenantCredentials, getTenantMfaCode, runtimeReadback, ecsExecEvidence, rotationStateReadback, rotationFixtureFile, expectedRotationStatePhase = "overlap-deploy-required", fetchImpl = fetch } = {}) {
   if (!/^https:\/\//.test(String(baseUrl || ""))) throw new Error("Strict onboarding base URL must use HTTPS.");
   const reviewedPaths = assertOnboardingPaths(paths);
   if (REQUIRED_PATHS.some((name) => typeof reviewedPaths[name] !== "string" || !reviewedPaths[name])) throw new Error("Strict onboarding endpoint map is incomplete.");
   if (typeof runtimeReadback !== "function" || typeof ecsExecEvidence !== "function" || typeof rotationStateReadback !== "function") throw new Error("Strict onboarding runtime evidence adapters are required.");
+  if (!new Set(["overlap-deploy-required", "verified"]).has(expectedRotationStatePhase)) throw new Error("Strict onboarding rotation state phase is invalid.");
   const { request } = createCookieAuthenticatedRequest({ baseUrl, fetchImpl });
   let tenantRequest;
   let tenantAuthenticated = false;
@@ -152,7 +153,7 @@ export function createStrictHttpOnboardingAdapter({ baseUrl, paths, credentials,
       artifactHistoricalRuntimeVerify: async () => proofCheck("artifactHistoricalRuntimeVerify"),
       rotationState: async () => {
         const readback = await rotationStateReadback({ rotationId });
-        return readback?.sha256 === rotationStateSha256 && readback.state?.rotationId === rotationId && readback.state?.phase === "overlap-deploy-required";
+        return readback?.sha256 === rotationStateSha256 && readback.state?.rotationId === rotationId && readback.state?.phase === expectedRotationStatePhase;
       },
     },
     });
