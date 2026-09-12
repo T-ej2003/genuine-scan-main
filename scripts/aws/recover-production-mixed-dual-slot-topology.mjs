@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
-import { MIXED_DUAL_SLOT_PREDECESSOR_CANONICAL_ID, MIXED_DUAL_SLOT_RECOVERY_ORDER, MIXED_DUAL_SLOT_RECOVERY_POST_STATE_CANONICAL_ID, MIXED_DUAL_SLOT_RETAINED_HISTORY_CANONICAL_ID, MIXED_DUAL_SLOT_PREDECESSOR, assertMixedDualSlotPredecessor, assertMixedDualSlotRecoveryAuthorization, assertMixedDualSlotRecoveryPreparation, buildMixedDualSlotRecoveryPreparation } from "./production-mixed-dual-slot-recovery-contract.mjs";
+import { MIXED_DUAL_SLOT_PREDECESSOR_CANONICAL_ID, MIXED_DUAL_SLOT_RECOVERY_ORDER, MIXED_DUAL_SLOT_RECOVERY_POST_STATE, MIXED_DUAL_SLOT_RECOVERY_POST_STATE_CANONICAL_ID, MIXED_DUAL_SLOT_RECOVERY_SUCCESSOR_CANONICAL_ID, MIXED_DUAL_SLOT_RETAINED_HISTORY_CANONICAL_ID, MIXED_DUAL_SLOT_PREDECESSOR, MIXED_DUAL_SLOT_RECOVERY_SUCCESSOR, assertMixedDualSlotPredecessor, assertMixedDualSlotRecoverySuccessor, assertMixedDualSlotRecoveryAuthorization, assertMixedDualSlotRecoveryPreparation, buildMixedDualSlotRecoveryPreparation } from "./production-mixed-dual-slot-recovery-contract.mjs";
 
 const require = createRequire(new URL("../../backend/package.json", import.meta.url));
 const { UpdateSecretVersionStageCommand, DescribeSecretCommand, GetSecretValueCommand } = require("@aws-sdk/client-secrets-manager");
@@ -12,12 +12,13 @@ const sha256 = (value) => createHash("sha256").update(canonical(value)).digest("
 // Bound each reviewed label transition to five minutes without ever accepting a third state.
 const CONVERGENCE_DELAYS_MS = Object.freeze([1_000, 2_000, 4_000, 8_000, 15_000, 30_000, 60_000, 60_000, 60_000, 60_000]);
 const sleepForConvergence = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
-const exactProgress = (topology, versionId, slot) => {
+const exactProgress = (topology, slot) => {
   topology ??= {};
   if (!topology || typeof topology !== "object" || Array.isArray(topology)) throw new Error(`Mixed recovery ${slot} version topology is not exact.`);
-  const retained = MIXED_DUAL_SLOT_PREDECESSOR[slot].retainedPrevious;
-  const completed = { [retained.versionId]: ["AWSPREVIOUS"] };
-  const pending = { [versionId]: ["AWSCURRENT"], ...completed };
+  const predecessor = MIXED_DUAL_SLOT_PREDECESSOR[slot];
+  const successor = MIXED_DUAL_SLOT_RECOVERY_SUCCESSOR[slot];
+  const pending = { [predecessor.versionId]: ["AWSCURRENT"], [predecessor.retainedPrevious.versionId]: ["AWSPREVIOUS"] };
+  const completed = { [successor.current.versionId]: ["AWSCURRENT"], [successor.previous.versionId]: ["AWSPREVIOUS"] };
   if (canonical(topology) === canonical(completed)) return true;
   if (canonical(topology) === canonical(pending)) return false;
   throw new Error(`Mixed recovery ${slot} staging topology is not an exact predecessor or completed recovery state.`);
@@ -32,17 +33,25 @@ async function readMixedDualSlotRecoveryState({ send, payloadHash = sha256 } = {
     const expected = MIXED_DUAL_SLOT_PREDECESSOR[slot];
     const described = await send(new DescribeSecretCommand({ SecretId: expected.arn }));
     const topology = described?.VersionIdsToStages;
-    progress.push(exactProgress(topology, expected.versionId, slot));
+    progress.push(exactProgress(topology, slot));
     const value = await send(new GetSecretValueCommand({ SecretId: expected.arn, VersionId: expected.versionId }));
     let payload; try { payload = JSON.parse(value?.SecretString || ""); } catch { throw new Error(`Mixed predecessor ${slot} payload is malformed.`); }
     const retained = expected.retainedPrevious;
     const previousValue = await send(new GetSecretValueCommand({ SecretId: expected.arn, VersionId: retained.versionId }));
     let previousPayload; try { previousPayload = JSON.parse(previousValue?.SecretString || ""); } catch { throw new Error(`Mixed predecessor ${slot} retained payload is malformed.`); }
     observed[slot] = { ...safeIdentity(payload, { ...expected, arn: described?.ARN, versionId: value?.VersionId }, (candidate) => payloadHash(candidate, slot, "current"), slot, ["AWSCURRENT"]), retainedPrevious: safeIdentity(previousPayload, { ...retained, arn: described?.ARN, versionId: previousValue?.VersionId }, (candidate) => payloadHash(candidate, slot, "retainedPrevious"), slot, ["AWSPREVIOUS"]) };
+    const successor = MIXED_DUAL_SLOT_RECOVERY_SUCCESSOR[slot];
+    observed.successor ??= {};
+    observed.successor[slot] = {
+      current: safeIdentity(previousPayload, { ...successor.current, arn: described?.ARN, versionId: previousValue?.VersionId }, (candidate) => payloadHash(candidate, slot, "retainedPrevious"), slot, ["AWSCURRENT"]),
+      previous: safeIdentity(payload, { ...successor.previous, arn: described?.ARN, versionId: value?.VersionId }, (candidate) => payloadHash(candidate, slot, "current"), slot, ["AWSPREVIOUS"]),
+    };
   }
+  const successor = observed.successor; delete observed.successor;
   const predecessor = assertMixedDualSlotPredecessor(observed);
+  assertMixedDualSlotRecoverySuccessor(successor);
   if (progress.some((done, index) => !done && progress.slice(index + 1).some(Boolean))) throw new Error("Mixed recovery partial state is not an authenticated contiguous prefix.");
-  return Object.freeze({ predecessor, completed: progress.filter(Boolean).length });
+  return Object.freeze({ predecessor, successor, completed: progress.filter(Boolean).length });
 }
 
 export async function readMixedDualSlotPredecessor({ send, payloadHash = sha256 } = {}) {
@@ -70,7 +79,8 @@ async function awaitExactProgress({ expected, observe, sleep }) {
   throw new Error(`Mixed recovery stage-label mutation did not converge after ${CONVERGENCE_DELAYS_MS.length + 1} read-only observations.`);
 }
 
-// Each successful mutation removes only AWSCURRENT from the authenticated unused slot version.
+// AWS requires AWSCURRENT to move to another existing version. Each mutation moves
+// it to the exact reviewed retained version and authenticates AWS's AWSPREVIOUS swap.
 // A retry is safe only for the exact contiguous completed prefix; any other topology fails closed.
 export async function executeMixedDualSlotRecovery({ send, preparation, preparationFileSha256, sourceSha, authorization, payloadHash, now = new Date(), reauthenticate = async () => {}, sleep = sleepForConvergence } = {}) {
   const checked = assertMixedDualSlotRecoveryPreparation(preparation, { sourceSha });
@@ -85,10 +95,10 @@ export async function executeMixedDualSlotRecovery({ send, preparation, preparat
     // continue only from the immutable contiguous prefix it itself established.
     await authenticate(completed > 0);
     if (await classifyMixedDualSlotRecoveryProgress({ send, payloadHash }) !== completed) throw new Error("Mixed recovery topology changed before mutation.");
-    await send(new UpdateSecretVersionStageCommand({ SecretId: entry.secretArn, VersionStage: "AWSCURRENT", RemoveFromVersionId: entry.versionId }));
+    await send(new UpdateSecretVersionStageCommand({ SecretId: entry.secretArn, VersionStage: "AWSCURRENT", MoveToVersionId: entry.moveToVersionId, RemoveFromVersionId: entry.removeFromVersionId }));
     completed += 1;
     await awaitExactProgress({ expected: completed, sleep, observe: async () => { await authenticate(true); return classifyMixedDualSlotRecoveryProgress({ send, payloadHash }); } });
   }
   if (await classifyMixedDualSlotRecoveryProgress({ send, payloadHash }) !== 7) throw new Error("Mixed recovery post-state is not exact.");
-  return Object.freeze({ valid: true, writes: 0, stageLabelMutations: completed - initialCompleted, predecessorCanonicalId: MIXED_DUAL_SLOT_PREDECESSOR_CANONICAL_ID, retainedHistoryCanonicalId: MIXED_DUAL_SLOT_RETAINED_HISTORY_CANONICAL_ID, postState: "SEVEN_EXISTING_RESOURCES_WITHOUT_AWSCURRENT", postStateCanonicalId: MIXED_DUAL_SLOT_RECOVERY_POST_STATE_CANONICAL_ID });
+  return Object.freeze({ valid: true, writes: 0, updateSecretVersionStageCalls: completed - initialCompleted, awscurrentMoves: completed - initialCompleted, awspreviousMoves: completed - initialCompleted, predecessorCanonicalId: MIXED_DUAL_SLOT_PREDECESSOR_CANONICAL_ID, retainedHistoryCanonicalId: MIXED_DUAL_SLOT_RETAINED_HISTORY_CANONICAL_ID, successorCanonicalId: MIXED_DUAL_SLOT_RECOVERY_SUCCESSOR_CANONICAL_ID, postState: MIXED_DUAL_SLOT_RECOVERY_POST_STATE, postStateCanonicalId: MIXED_DUAL_SLOT_RECOVERY_POST_STATE_CANONICAL_ID });
 }

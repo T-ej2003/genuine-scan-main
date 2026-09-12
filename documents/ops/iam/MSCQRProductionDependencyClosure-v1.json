@@ -437,7 +437,7 @@
     {
       "sourceFile": "scripts/aws/recover-production-mixed-dual-slot-topology.mjs",
       "action": "secretsmanager:UpdateSecretVersionStage",
-      "capabilityId": "mixed-recovery-remove-awscurrent",
+      "capabilityId": "mixed-recovery-move-awscurrent",
       "identity": "MIXED_RECOVERY_EXECUTOR",
       "resources": [
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-pending-1CnWMp",

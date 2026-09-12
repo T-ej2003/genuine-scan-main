@@ -1,4 +1,4 @@
-name: Authorize production mixed dual-slot topology recovery
+name: Authorize production mixed dual-slot AWS-legal topology recovery
 
 on:
   workflow_dispatch:
@@ -59,7 +59,7 @@ jobs:
             --iam-preflight-attestation "$workdir/iam-attestation.json" \
             --iam-preflight-attestation-file-sha256 "$IAM_ATTESTATION_FILE_SHA256"
   authorize:
-    name: Authorize exact seven-slot recovery
+    name: Authorize exact seven-slot AWSCURRENT moves and AWSPREVIOUS swaps
     needs: preflight
     runs-on: ubuntu-latest
     environment: production

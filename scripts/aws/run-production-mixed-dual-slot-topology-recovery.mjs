@@ -83,7 +83,7 @@ async function main(argv = process.argv.slice(2)) {
   const resolved = resolveMixedDualSlotRecoveryAuthorizationArtifact({ workflowRunId: required(argv, "--authorization-run-id"), workflowRunAttempt: required(argv, "--authorization-run-attempt"), sourceSha, preparation, preparationFileSha256: captured.sha256 });
   const reauthenticate = async () => { protectedSource(sourceSha); readLivePredecessor(); };
   const result = await executeMixedDualSlotRecovery({ send: (command) => secrets.send(command), preparation, preparationFileSha256: captured.sha256, sourceSha, authorization: resolved.authorization, reauthenticate });
-  return { status: result.stageLabelMutations === 0 ? "COMPLETED_CONSUMED" : "COMPLETED", authorizationSha256: resolved.authorization.authorizationSha256, ...result };
+  return { status: result.updateSecretVersionStageCalls === 0 ? "COMPLETED_CONSUMED" : "COMPLETED", authorizationSha256: resolved.authorization.authorizationSha256, ...result };
 }
 
 process.stdout.write(`${JSON.stringify(await main(), null, 2)}\n`);

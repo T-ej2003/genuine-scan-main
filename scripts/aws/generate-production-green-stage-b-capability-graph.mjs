@@ -188,7 +188,7 @@ const MIXED_DUAL_SLOT_RECOVERY_EXECUTION_CAPABILITIES = Object.freeze([
   ["mixed-recovery-executor-describe-task-definition", "ecs:DescribeTaskDefinition", ["*"], "scripts/aws/run-production-mixed-dual-slot-topology-recovery.mjs"],
   ["mixed-recovery-executor-describe-secret", "secretsmanager:DescribeSecret", MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, "scripts/aws/recover-production-mixed-dual-slot-topology.mjs"],
   ["mixed-recovery-executor-get-secret-value", "secretsmanager:GetSecretValue", MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, "scripts/aws/recover-production-mixed-dual-slot-topology.mjs"],
-  ["mixed-recovery-remove-awscurrent", "secretsmanager:UpdateSecretVersionStage", MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, "scripts/aws/recover-production-mixed-dual-slot-topology.mjs"],
+  ["mixed-recovery-move-awscurrent", "secretsmanager:UpdateSecretVersionStage", MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, "scripts/aws/recover-production-mixed-dual-slot-topology.mjs"],
 ]);
 
 const STAGE_A_PRODUCTION_ARTIFACTS_CAPABILITIES = Object.freeze([
@@ -508,8 +508,8 @@ export function discoverAwsCliActions() {
   if (reconciliationSource.includes('readRawBackendStateIdentity: () => readRawTerraformStateIdentity(releaseRun)')) calls.push({ sourceFile: "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", sourceFunction: "stage-a-artifacts-reconciliation-release-read-raw-state", phase: "stage-a-production-artifacts-state-reconciliation", identity: "RELEASE_DEPLOYER", action: "s3:GetObject", resources: [stageATerraformStateArn], capabilityId: "stage-a-artifacts-reconciliation-release-read-raw-state" });
   const mixedRecoverySourceFile = "scripts/aws/recover-production-mixed-dual-slot-topology.mjs";
   const mixedRecoverySource = fs.readFileSync(path.join(root, mixedRecoverySourceFile), "utf8");
-  if (!/await send\(new UpdateSecretVersionStageCommand\(\{ SecretId: entry\.secretArn, VersionStage: "AWSCURRENT", RemoveFromVersionId: entry\.versionId \}\)\)/.test(mixedRecoverySource)) throw new Error("Mixed recovery mutation call is outside its reviewed execution context.");
-  calls.push({ sourceFile: mixedRecoverySourceFile, sourceFunction: "executeMixedDualSlotRecovery", phase: "mixed-dual-slot-recovery-execution", identity: "MIXED_RECOVERY_EXECUTOR", action: "secretsmanager:UpdateSecretVersionStage", resources: [...MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES], capabilityId: "mixed-recovery-remove-awscurrent" });
+  if (!/await send\(new UpdateSecretVersionStageCommand\(\{ SecretId: entry\.secretArn, VersionStage: "AWSCURRENT", MoveToVersionId: entry\.moveToVersionId, RemoveFromVersionId: entry\.removeFromVersionId \}\)\)/.test(mixedRecoverySource)) throw new Error("Mixed recovery AWS-legal move call is outside its reviewed execution context.");
+  calls.push({ sourceFile: mixedRecoverySourceFile, sourceFunction: "executeMixedDualSlotRecovery", phase: "mixed-dual-slot-recovery-execution", identity: "MIXED_RECOVERY_EXECUTOR", action: "secretsmanager:UpdateSecretVersionStage", resources: [...MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES], capabilityId: "mixed-recovery-move-awscurrent" });
   for (const [capabilityId, action, resources, sourceFile] of MIXED_DUAL_SLOT_RECOVERY_EXECUTION_CAPABILITIES.slice(0, -1)) calls.push({ sourceFile, sourceFunction: capabilityId, phase: "mixed-dual-slot-recovery-execution", identity: "MIXED_RECOVERY_EXECUTOR", action, resources: [...resources], capabilityId });
   const mixedRecoveryRunnerSourceFile = "scripts/aws/run-production-mixed-dual-slot-topology-recovery.mjs";
   const mixedRecoveryRunnerSource = fs.readFileSync(path.join(root, mixedRecoveryRunnerSourceFile), "utf8");
@@ -614,7 +614,7 @@ export function buildStageBDeploymentCapabilityGraph() {
     policy: { sourceFile: "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs", sid: id, livePolicyArn: null, expectedVersion: "protected-main-source", expectedPolicySha256: null }, required: true, mutation: false,
   }));
   const mixedRecoveryExecution = MIXED_DUAL_SLOT_RECOVERY_EXECUTION_CAPABILITIES.map(([id, action, resources, sourceFile]) => ({
-    id, phase: "mixed-dual-slot-recovery-execution", identity: "MIXED_RECOVERY_EXECUTOR", executor: "aws-sdk", sourceFile, sourceFunction: id === "mixed-recovery-remove-awscurrent" ? "executeMixedDualSlotRecovery" : id, action, resources: [...resources],
+    id, phase: "mixed-dual-slot-recovery-execution", identity: "MIXED_RECOVERY_EXECUTOR", executor: "aws-sdk", sourceFile, sourceFunction: id === "mixed-recovery-move-awscurrent" ? "executeMixedDualSlotRecovery" : id, action, resources: [...resources],
     context: { account: STAGE_B.account, region: STAGE_B.region, operation: "PRODUCTION_MIXED_DUAL_SLOT_TOPOLOGY_RECOVERY", mutationCountMaximum: 7 }, classification: action === "secretsmanager:UpdateSecretVersionStage" ? "MIXED_DUAL_SLOT_RECOVERY_MUTATION" : "MIXED_DUAL_SLOT_RECOVERY_READ", probe: "administrator-simulation", probeIds: [],
     policy: assertMixedRecoveryExecutorAuthority({ action, resources }), required: true, mutation: action === "secretsmanager:UpdateSecretVersionStage",
   }));
@@ -687,7 +687,7 @@ export function assertStageBDeploymentCapabilityGraph(graph = readJson(CAPABILIT
   const forwardCapabilities = graph.capabilities.filter(({ phase }) => phase === "existing-revision-forward-recovery");
   if (forwardCapabilities.some(({ action, identity, sourceFile }) => identity !== "RELEASE_DEPLOYER" || sourceFile !== "scripts/aws/forward-recover-stage-b-existing-revision.mjs" || ["ecs:RegisterTaskDefinition", "ecs:DeregisterTaskDefinition", "ecs:UpdateService", "iam:PutRolePolicy", "iam:AttachRolePolicy"].includes(action))) throw new Error("Forward recovery capability boundary is broader than zero-registration Terraform import.");
   if (graph.capabilities.some(({ identity, action }) => identity === "RELEASE_DEPLOYER" && action === "iam:SimulatePrincipalPolicy")) throw new Error("Release-deployer cannot own IAM simulation.");
-  const mixedRecoveryMutation = graph.capabilities.filter(({ id }) => id === "mixed-recovery-remove-awscurrent");
+  const mixedRecoveryMutation = graph.capabilities.filter(({ id }) => id === "mixed-recovery-move-awscurrent");
   if (mixedRecoveryMutation.length !== 1 || mixedRecoveryMutation[0].identity !== "MIXED_RECOVERY_EXECUTOR" || mixedRecoveryMutation[0].action !== "secretsmanager:UpdateSecretVersionStage" || JSON.stringify(mixedRecoveryMutation[0].resources) !== JSON.stringify(MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES) || mixedRecoveryMutation[0].policy?.sid !== "RemoveExactRecoveryAwscurrentLabels" || mixedRecoveryMutation[0].policy?.livePolicyArn !== MIXED_DUAL_SLOT_RECOVERY_EXECUTION_POLICY_ARN || mixedRecoveryMutation[0].mutation !== true) throw new Error("Mixed recovery mutation capability is absent or not exact.");
   const mixedRecoveryIamAttestationSigning = graph.capabilities.filter(({ id }) => id === "mixed-recovery-iam-attestation-sign");
   if (mixedRecoveryIamAttestationSigning.length !== 1 || mixedRecoveryIamAttestationSigning[0].identity !== "ROOT_OPERATOR" || mixedRecoveryIamAttestationSigning[0].action !== "kms:Sign" || JSON.stringify(mixedRecoveryIamAttestationSigning[0].resources) !== JSON.stringify([ROOT_ATTESTATION_KEY_ALIAS_ARN]) || mixedRecoveryIamAttestationSigning[0].policy?.sid !== "AccountAdministration" || mixedRecoveryIamAttestationSigning[0].mutation !== true) throw new Error("Mixed recovery IAM-attestation signing capability is absent or not exact.");
