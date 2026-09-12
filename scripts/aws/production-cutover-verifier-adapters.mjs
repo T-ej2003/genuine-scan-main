@@ -8,7 +8,7 @@ import { canonicalJson } from "./production-green-stage-b-contract.mjs";
 import { createConditionalMfaResolvers, createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-cutover-production-adapters.mjs";
 import { createLazyProductionVerifierEcsAdapter, productionOverlapRuntimeProofCommand } from "./production-cutover-verifier-primitives.mjs";
 import { createProductionRotationPrepareAdapter } from "./production-rotation-prepare-adapter.mjs";
-import { readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
+import { readBoundStageBPrivateJson, readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
 import { createStrictHttpOnboardingAdapter } from "../security/production-strict-onboarding-http.mjs";
 import { assertOnboardingPaths } from "../security/production-onboarding-contract.mjs";
 
