@@ -1,4 +1,4 @@
-name: Execute production mixed dual-slot topology recovery
+name: Execute production mixed dual-slot AWS-legal topology recovery
 
 on:
   workflow_dispatch:
@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   execute:
-    name: Execute or resume exact seven-slot recovery
+    name: Execute or resume exact seven-slot AWSCURRENT moves and AWSPREVIOUS swaps
     runs-on: ubuntu-latest
     environment: production-mixed-dual-slot-recovery
     steps:

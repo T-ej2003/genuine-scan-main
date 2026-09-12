@@ -10,16 +10,19 @@ envelope-hash, schema, source-presence, rotation, slot, fingerprint, and
 key-version differences fail before mutation; arbitrary retained history is
 not accepted.
 
-Recovery removes `AWSCURRENT` from those seven unused rotation-slot versions
-only. It does not write, delete, or expose secret values; it does not touch
-the legacy secrets selected by `mscqr-backend:52`; and it never promotes the
-historical pending material. The seven reviewed versions become unlabelled;
-the seven older authenticated versions retain `AWSPREVIOUS` unchanged.
+AWS cannot leave a secret without `AWSCURRENT`. Recovery therefore performs
+one exact `UpdateSecretVersionStage` move per slot: it moves `AWSCURRENT` from
+the reviewed current version to the one reviewed retained version. AWS then
+automatically moves `AWSPREVIOUS` to the former current version. The exact
+from/to identities and both before/after stage sets are preparation- and
+authorization-bound for every slot. It does not write, delete, or expose
+secret values and does not touch the legacy secrets selected by
+`mscqr-backend:52`.
 
 The resulting state is the existing initial bootstrap's admissible predecessor.
 The bootstrap then creates its ordinary source-bound seven fresh
 values. Recovery retries may continue only from an exact contiguous prefix of
-the seven authenticated label removals; any other partial topology fails
+the seven authenticated AWS label swaps; any other partial topology fails
 closed. Preparation, authorization, and execution remain separate operations.
 
 Preparation is read-only and writes one private preparation file. Authorization
@@ -74,9 +77,10 @@ If protected main advances, a new preparation and approval bind the observed
 exact prefix and maximum remaining mutations; execution cannot regress behind
 that prepared prefix. Non-contiguous or altered state is rejected. At 7/7,
 replay is classified as complete and performs no mutation. The bootstrap
-accepts T1 because no slot has an `AWSCURRENT` value and every retained
-`AWSPREVIOUS` identity is the exact reviewed one. It still generates and writes
-all fresh source-bound T2 material itself, and its live-origin verification
-requires those same retained identities beside the new `AWSCURRENT` versions.
-The recovery neither creates nor promotes cryptographic
-material and is not a general migration API.
+accepts T1 only when each slot has the exact AWS-legal swap: the retained
+reviewed version is `AWSCURRENT` and the former current version is
+`AWSPREVIOUS`. It then writes all fresh source-bound T2 material itself; AWS
+moves `AWSPREVIOUS` to the T1 current version as part of those ordinary writes.
+Its live-origin verification binds both the recovery handoff and the retained
+history. The recovery neither creates nor alters cryptographic material and is
+not a general migration API.
