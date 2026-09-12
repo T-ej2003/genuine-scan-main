@@ -20,6 +20,7 @@ test("rotation-overlap has one governed production entrypoint", () => {
   const verifier = readFileSync("scripts/aws/verify-production-cutover-overlap.mjs", "utf8");
   const verifierAdapters = readFileSync("scripts/aws/production-cutover-verifier-adapters.mjs", "utf8");
   assert.match(verifier, /runPostOverlapVerification/);
+  assert.match(verifier, /produceOnboardingEvidence/);
   assert.match(verifier, /createProductionVerifierOnlyAdapters/);
   assert.doesNotMatch(verifier, /createProductionCutoverRuntimeComposition|createProductionCutoverAdapters/);
   assert.match(verifierAdapters, /INHERITED_ECS_EXEC_VERIFIER_SESSION/);

@@ -343,8 +343,9 @@ test("strict onboarding adapter uses the cookie and CSRF boundary on its real pr
     getTenantMfaCode: () => "654321",
     runtimeReadback: async () => ({ imageDigest: digest, serviceStable: true, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskMarker: true }),
     ecsExecEvidence: async () => ({ valid: true, proof }),
-    rotationStateReadback: async () => ({ state: { rotationId: "rotation-test-1", phase: "overlap-deploy-required" }, sha256: "b".repeat(64) }),
+    rotationStateReadback: async () => ({ state: { rotationId: "rotation-test-1", phase: "verified" }, sha256: "b".repeat(64) }),
     rotationFixtureFile,
+    expectedRotationStatePhase: "verified",
     fetchImpl,
   });
   assert.equal(mfaReads, 0);
@@ -375,8 +376,9 @@ test("strict onboarding adapter uses the cookie and CSRF boundary on its real pr
     getTenantMfaCode: () => "654321",
     runtimeReadback: async () => ({ imageDigest: digest, serviceStable: true, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskMarker: true }),
     ecsExecEvidence: async () => ({ valid: true, proof }),
-    rotationStateReadback: async () => ({ state: { rotationId: "rotation-test-1", phase: "overlap-deploy-required" }, sha256: "b".repeat(64) }),
+    rotationStateReadback: async () => ({ state: { rotationId: "rotation-test-1", phase: "verified" }, sha256: "b".repeat(64) }),
     rotationFixtureFile,
+    expectedRotationStatePhase: "verified",
     fetchImpl,
   });
   await assert.rejects(() => missingCredentials({ sourceSha: "a".repeat(40), imageDigest: digest, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskArn, rotationId: "rotation-test-1", rotationStateSha256: "b".repeat(64), rotationFixtureSha256 }), /Mandatory onboarding check failed: superAdminLogin/);
@@ -390,8 +392,9 @@ test("strict onboarding adapter uses the cookie and CSRF boundary on its real pr
     getTenantMfaCode: () => "654321",
     runtimeReadback: async () => ({ imageDigest: digest, serviceStable: true, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskMarker: true }),
     ecsExecEvidence: async () => ({ valid: true, proof }),
-    rotationStateReadback: async () => ({ state: { rotationId: "rotation-test-1", phase: "overlap-deploy-required" }, sha256: "c".repeat(64) }),
+    rotationStateReadback: async () => ({ state: { rotationId: "rotation-test-1", phase: "verified" }, sha256: "c".repeat(64) }),
     rotationFixtureFile,
+    expectedRotationStatePhase: "verified",
     fetchImpl,
   });
   await assert.rejects(() => staleRotationState({ sourceSha: "a".repeat(40), imageDigest: digest, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskArn, rotationId: "rotation-test-1", rotationStateSha256: "b".repeat(64), rotationFixtureSha256 }), /Mandatory onboarding check failed: rotationState/);
@@ -404,8 +407,9 @@ test("strict onboarding adapter uses the cookie and CSRF boundary on its real pr
     getMfaCode: () => currentMfaCode,
     runtimeReadback: async () => ({ imageDigest: digest, serviceStable: true, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskMarker: true }),
     ecsExecEvidence: async () => ({ valid: true, proof }),
-    rotationStateReadback: async () => ({ state: { rotationId: "rotation-test-1", phase: "overlap-deploy-required" }, sha256: "b".repeat(64) }),
+    rotationStateReadback: async () => ({ state: { rotationId: "rotation-test-1", phase: "verified" }, sha256: "b".repeat(64) }),
     rotationFixtureFile,
+    expectedRotationStatePhase: "verified",
     fetchImpl,
   });
   await assert.rejects(() => missing({ sourceSha: "a".repeat(40), imageDigest: digest, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskArn, rotationId: "rotation-test-1", rotationStateSha256: "b".repeat(64), rotationFixtureSha256 }), /Mandatory onboarding check failed: superAdminLogin/);

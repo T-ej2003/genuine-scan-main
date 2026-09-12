@@ -5,10 +5,12 @@ import { establishInheritedVerifierIdentity, createAwsStsRunner } from "./produc
 import { ECS_EXEC_OPERATOR_TASK_TAG_KEY, ECS_EXEC_OPERATOR_TASK_TAG_VALUE } from "./production-ecs-exec-operator-contract.mjs";
 import { assertSelectedTargetTask, assertTaskBelongsToExactPrimaryDeployment, selectTargetTask } from "./ecs-exec-target-selection.mjs";
 import { canonicalJson } from "./production-green-stage-b-contract.mjs";
-import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-cutover-production-adapters.mjs";
+import { createConditionalMfaResolvers, createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-cutover-production-adapters.mjs";
 import { createLazyProductionVerifierEcsAdapter, productionOverlapRuntimeProofCommand } from "./production-cutover-verifier-primitives.mjs";
 import { createProductionRotationPrepareAdapter } from "./production-rotation-prepare-adapter.mjs";
 import { readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
+import { createStrictHttpOnboardingAdapter } from "../security/production-strict-onboarding-http.mjs";
+import { assertOnboardingPaths } from "../security/production-onboarding-contract.mjs";
 
 const ACCOUNT = "368992683803";
 const REGION = "eu-west-2";
@@ -28,6 +30,7 @@ export function createProductionVerifierOnlyAdapters({ config, sourceSha, rotati
   const run = createCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_ECS_EXEC_VERIFIER_SESSION });
   const verifierSts = createStsRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_ECS_EXEC_VERIFIER_SESSION });
   let verifierSession;
+  let latestEcsExecProof;
   const requireVerifierSession = () => {
     if (!verifierSession) throw new Error("Verifier session must be established before verifier-owned operations.");
     return verifierSession;
@@ -42,6 +45,12 @@ export function createProductionVerifierOnlyAdapters({ config, sourceSha, rotati
     fixtureFile: config.rotationFixtureFile,
     runtimeProofFile: config.overlapRuntimeProofFile,
   });
+  const runtimeReadback = async ({ imageDigest, taskDefinitionArn, taskArn }) => {
+    const service = await ecs.describeService();
+    const described = await ecs.describeTasks({ taskArns: [taskArn], includeTags: true });
+    const task = assertSelectedTargetTask({ task: described.tasks?.[0], expectedClusterArn: CLUSTER_ARN, expectedTaskDefinitionArn: taskDefinitionArn, expectedImageDigest: imageDigest, serviceName: SERVICE, containerName: CONTAINER, expectedTaskTagKey: ECS_EXEC_OPERATOR_TASK_TAG_KEY, expectedTaskTagValue: ECS_EXEC_OPERATOR_TASK_TAG_VALUE });
+    return { serviceStable: service?.status === "ACTIVE" && service.runningCount === service.desiredCount && service.pendingCount === 0, taskDefinitionArn: task.taskDefinitionArn, imageDigest: task.containers.find(({ name }) => name === CONTAINER)?.imageDigest, taskMarker: true };
+  };
   return Object.freeze({
     identities: {
       establish: async () => {
@@ -76,7 +85,8 @@ export function createProductionVerifierOnlyAdapters({ config, sourceSha, rotati
         const expected = { rotationId: proofRotationId, phase: "overlap", deploymentSha: config.rotationDeploymentSha || proofSourceSha, healthReleaseGitSha: proofSourceSha, targetTaskArn: task.taskArn, selectedTaskArn: task.taskArn, matchingTaskCount: 1, targetTaskDefinitionArn: task.taskDefinitionArn, targetImageDigest: imageDigest, expectedReleaseSha: proofSourceSha, targetService: SERVICE, targetCluster: CLUSTER, targetDeploymentId: primary.id };
         for (const [field, value] of Object.entries(expected)) if (proof[field] !== value) throw new Error(`Persisted overlap runtime proof ${field} binding is wrong.`);
         if (proof.artifactCurrentRuntimeVerify !== true || proof.artifactHistoricalRuntimeVerify !== true) throw new Error("Persisted overlap runtime proof is incomplete.");
-        return { valid: true, evidenceRef: `ecs-exec:${taskArn}`, evidenceSha256: sha256(Buffer.from(canonicalJson(proof))), proof, resumed: true };
+        latestEcsExecProof = { valid: true, evidenceRef: `ecs-exec:${taskArn}`, evidenceSha256: sha256(Buffer.from(canonicalJson(proof))), proof, resumed: true };
+        return latestEcsExecProof;
       }
       const transcript = await ecs.executeCommand({ taskArn, container: CONTAINER, inputFile: config.runtimeProofFixtureFile, command: productionOverlapRuntimeProofCommand({ sourceSha: proofSourceSha, rotationId: proofRotationId, deploymentSha: config.rotationDeploymentSha, healthUrl: config.rotationHealthUrl || `${config.onboardingBaseUrl}/api/health`, invocationRef: config.runtimeInvocationRef }) });
       const fixtureAfter = readStageBPrivateFileBytes({ filePath: config.runtimeProofFixtureFile, repositoryRoot: process.cwd(), label: "Rotation runtime fixture" });
@@ -84,7 +94,31 @@ export function createProductionVerifierOnlyAdapters({ config, sourceSha, rotati
       const proof = extractMarkedJson(transcript, "MSCQR_PROOF_BEGIN", "MSCQR_PROOF_END");
       if (proof.rotationId !== proofRotationId || proof.phase !== "overlap" || proof.deploymentSha !== (config.rotationDeploymentSha || proofSourceSha) || proof.healthReleaseGitSha !== proofSourceSha || proof.artifactCurrentRuntimeVerify !== true || proof.artifactHistoricalRuntimeVerify !== true) throw new Error("ECS Exec runtime proof is not bound to the exact deployment.");
       const boundProof = { ...proof, targetTaskArn: task.taskArn, selectedTaskArn: task.taskArn, matchingTaskCount: 1, targetTaskDefinitionArn: task.taskDefinitionArn, targetImageDigest: imageDigest, expectedReleaseSha: proofSourceSha, targetService: SERVICE, targetCluster: CLUSTER, targetDeploymentId: primary.id };
-      return { valid: true, evidenceRef: `ecs-exec:${taskArn}`, evidenceSha256: sha256(Buffer.from(canonicalJson(boundProof))), proof: boundProof };
+      latestEcsExecProof = { valid: true, evidenceRef: `ecs-exec:${taskArn}`, evidenceSha256: sha256(Buffer.from(canonicalJson(boundProof))), proof: boundProof };
+      return latestEcsExecProof;
+    } },
+    onboarding: { run: async ({ credentials, sourceSha: expectedSourceSha, imageDigest, taskDefinitionArn, taskArn, rotationId: expectedRotationId, rotationStateSha256, rotationFixtureSha256 }) => {
+      if (!credentials || ["email", "password", "tenantEmail", "tenantPassword"].some((name) => typeof credentials[name] !== "string" || !credentials[name])) throw new Error("Post-deployment strict-onboarding credentials are incomplete.");
+      const onboardingPaths = assertOnboardingPaths(readBoundStageBPrivateJson({ filePath: config.onboardingPathsFile, expectedSha256: config.onboardingPathsSha256, label: "Onboarding path manifest" }));
+      if (canonicalJson(onboardingPaths) !== canonicalJson(config.onboardingPaths)) throw new Error("Onboarding path manifest diverges from the authenticated runtime config.");
+      const conditionalMfa = createConditionalMfaResolvers();
+      const rotationStateReadback = async () => {
+        const captured = readStageBPrivateFileBytes({ filePath: config.rotationStateFile, repositoryRoot: process.cwd(), label: "Persisted rotation state" });
+        return { state: JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(captured.bytes)), sha256: captured.sha256 };
+      };
+      return createStrictHttpOnboardingAdapter({
+        baseUrl: config.onboardingBaseUrl,
+        paths: onboardingPaths,
+        credentials: { email: credentials.email, password: credentials.password },
+        getMfaCode: conditionalMfa.getOnboardingMfaCode,
+        tenantCredentials: { email: credentials.tenantEmail, password: credentials.tenantPassword },
+        getTenantMfaCode: conditionalMfa.getTenantMfaCode,
+        runtimeReadback,
+        ecsExecEvidence: async () => latestEcsExecProof || { valid: false },
+        rotationStateReadback,
+        rotationFixtureFile: config.rotationFixtureFile,
+        expectedRotationStatePhase: "verified",
+      })({ sourceSha: expectedSourceSha, imageDigest, taskDefinitionArn, taskArn, rotationId: expectedRotationId, rotationStateSha256, rotationFixtureSha256 });
     } },
   });
 }

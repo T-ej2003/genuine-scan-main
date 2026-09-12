@@ -136,7 +136,7 @@ test("verifier-only composition constructs no release-owned adapter or command r
     createCommandRunner: (options) => { calls.push(options); return () => ""; },
     createStsRunner: () => ({ getCallerIdentity: async () => verifierArn, getVerifierSession: () => session }),
   });
-  assert.deepEqual(Object.keys(adapters).sort(), ["ecsExec", "identities", "postDeploy", "rotationPrepare"]);
+  assert.deepEqual(Object.keys(adapters).sort(), ["ecsExec", "identities", "onboarding", "postDeploy", "rotationPrepare"]);
   const identity = await adapters.identities.establish();
   assert.equal(identity.verifier.callerArn, verifierArn);
   assert.deepEqual(calls, [{ credentialSource: "inherited-ecs-exec-verifier-session" }]);

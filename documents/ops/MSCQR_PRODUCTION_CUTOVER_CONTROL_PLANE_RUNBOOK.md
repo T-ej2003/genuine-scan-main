@@ -66,7 +66,7 @@ It never creates rotation state or the rotation fixture. Those remain outputs of
 `--prepare` phase. The command emits one exact `stage-b:run-cutover-operator -- --mode prepare-overlap` command only after all
 pre-MFA inputs are valid. The `prepare-overlap` launcher obtains only the verifier MFA device ARN
 from the controlling terminal with echo disabled, then invokes the governed entrypoint without
-putting it in command arguments, files, or evidence. Strict-onboarding administrator and tenant-canary credentials belong only to the later full post-deployment control-plane invocation; the pre-MFA bootstrap does not collect them or onboarding MFA. The onboarding
+putting it in command arguments, files, or evidence. Strict-onboarding administrator and tenant-canary credentials are collected only by `stage-b:verify-overlap` after the independently authorized deployment reaches `VERIFIED_OVERLAP`; the pre-MFA bootstrap does not collect them or onboarding MFA. The onboarding
 adapter reads `MSCQR_ONBOARDING_MFA_CODE` only after the live login response enters the MFA challenge
 boundary; the code is never written to rotation config, manifests, command lines, or evidence.
 The rotation config's logical `qr.previousKeyVersion` must equal the live task's
