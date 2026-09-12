@@ -8424,7 +8424,7 @@
       "mutation": false
     },
     {
-      "id": "mixed-recovery-remove-awscurrent",
+      "id": "mixed-recovery-move-awscurrent",
       "phase": "mixed-dual-slot-recovery-execution",
       "identity": "MIXED_RECOVERY_EXECUTOR",
       "executor": "aws-sdk",
@@ -14669,7 +14669,7 @@
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE",
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2"
       ],
-      "capabilityId": "mixed-recovery-remove-awscurrent"
+      "capabilityId": "mixed-recovery-move-awscurrent"
     },
     {
       "sourceFile": "scripts/aws/recover-stage-b-backend-task-definition.mjs",
