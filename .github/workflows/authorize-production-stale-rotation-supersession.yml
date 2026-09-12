@@ -38,6 +38,7 @@ jobs:
           git ls-files -z > "$RUNNER_TEMP/protected-source-files.zlist"
           while IFS= read -r -d '' file; do sha256sum -- "$file"; done < "$RUNNER_TEMP/protected-source-files.zlist" > "$RUNNER_TEMP/protected-source.sha256"
       - run: npm ci
+      - run: npm --prefix backend ci
       - name: Re-authenticate protected source after dependency installation
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
