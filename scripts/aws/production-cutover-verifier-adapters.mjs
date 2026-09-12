@@ -51,6 +51,10 @@ export function createProductionVerifierOnlyAdapters({ config, sourceSha, rotati
     const task = assertSelectedTargetTask({ task: described.tasks?.[0], expectedClusterArn: CLUSTER_ARN, expectedTaskDefinitionArn: taskDefinitionArn, expectedImageDigest: imageDigest, serviceName: SERVICE, containerName: CONTAINER, expectedTaskTagKey: ECS_EXEC_OPERATOR_TASK_TAG_KEY, expectedTaskTagValue: ECS_EXEC_OPERATOR_TASK_TAG_VALUE });
     return { serviceStable: service?.status === "ACTIVE" && service.runningCount === service.desiredCount && service.pendingCount === 0, taskDefinitionArn: task.taskDefinitionArn, imageDigest: task.containers.find(({ name }) => name === CONTAINER)?.imageDigest, taskMarker: true };
   };
+  const bindPersistedEcsExecProof = (proof) => {
+    if (!proof || proof.rotationId !== rotationId || proof.phase !== "overlap" || proof.deploymentSha !== (config.rotationDeploymentSha || sourceSha) || proof.healthReleaseGitSha !== sourceSha || typeof proof.targetTaskArn !== "string" || proof.artifactCurrentRuntimeVerify !== true || proof.artifactHistoricalRuntimeVerify !== true) throw new Error("Persisted ECS Exec proof is not bound to this verifier continuation.");
+    latestEcsExecProof = { valid: true, evidenceRef: `ecs-exec:${proof.targetTaskArn}`, evidenceSha256: sha256(Buffer.from(canonicalJson(proof))), proof, resumed: true };
+  };
   return Object.freeze({
     identities: {
       establish: async () => {
@@ -97,7 +101,7 @@ export function createProductionVerifierOnlyAdapters({ config, sourceSha, rotati
       latestEcsExecProof = { valid: true, evidenceRef: `ecs-exec:${taskArn}`, evidenceSha256: sha256(Buffer.from(canonicalJson(boundProof))), proof: boundProof };
       return latestEcsExecProof;
     } },
-    onboarding: { run: async ({ credentials, sourceSha: expectedSourceSha, imageDigest, taskDefinitionArn, taskArn, rotationId: expectedRotationId, rotationStateSha256, rotationFixtureSha256 }) => {
+    onboarding: { bindPersistedEcsExecProof, run: async ({ credentials, sourceSha: expectedSourceSha, imageDigest, taskDefinitionArn, taskArn, rotationId: expectedRotationId, rotationStateSha256, rotationFixtureSha256 }) => {
       if (!credentials || ["email", "password", "tenantEmail", "tenantPassword"].some((name) => typeof credentials[name] !== "string" || !credentials[name])) throw new Error("Post-deployment strict-onboarding credentials are incomplete.");
       const onboardingPaths = assertOnboardingPaths(readBoundStageBPrivateJson({ filePath: config.onboardingPathsFile, expectedSha256: config.onboardingPathsSha256, label: "Onboarding path manifest" }));
       if (canonicalJson(onboardingPaths) !== canonicalJson(config.onboardingPaths)) throw new Error("Onboarding path manifest diverges from the authenticated runtime config.");

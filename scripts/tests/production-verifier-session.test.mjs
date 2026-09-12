@@ -137,6 +137,9 @@ test("verifier-only composition constructs no release-owned adapter or command r
     createStsRunner: () => ({ getCallerIdentity: async () => verifierArn, getVerifierSession: () => session }),
   });
   assert.deepEqual(Object.keys(adapters).sort(), ["ecsExec", "identities", "onboarding", "postDeploy", "rotationPrepare"]);
+  assert.equal(typeof adapters.onboarding.bindPersistedEcsExecProof, "function");
+  adapters.onboarding.bindPersistedEcsExecProof({ rotationId: "rotation-20260829015311-765c8a16", phase: "overlap", deploymentSha: "a".repeat(40), healthReleaseGitSha: "a".repeat(40), targetTaskArn: "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/task", artifactCurrentRuntimeVerify: true, artifactHistoricalRuntimeVerify: true });
+  assert.throws(() => adapters.onboarding.bindPersistedEcsExecProof({ rotationId: "wrong", phase: "overlap" }), /not bound/);
   const identity = await adapters.identities.establish();
   assert.equal(identity.verifier.callerArn, verifierArn);
   assert.deepEqual(calls, [{ credentialSource: "inherited-ecs-exec-verifier-session" }]);
