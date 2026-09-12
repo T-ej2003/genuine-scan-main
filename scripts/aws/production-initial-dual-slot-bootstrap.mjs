@@ -318,12 +318,19 @@ async function authenticateMixedRecoveryRetainedHistory({ send, resources, descr
   const hasPrevious = Object.values(descriptions).some(({ VersionIdsToStages = {} }) => Object.values(VersionIdsToStages).some((labels) => labels?.includes("AWSPREVIOUS")));
   if (!hasPrevious) return undefined;
   const observed = {};
+  const bootstrapProgress = [];
   for (const slot of MIXED_DUAL_SLOT_RECOVERY_ORDER) {
     const expected = MIXED_DUAL_SLOT_RECOVERY_SUCCESSOR[slot];
     const described = descriptions[slot];
     if (resources[slot] !== expected.current.arn || described?.ARN !== expected.current.arn) throw new Error(`Initial ${slot} AWS-legal recovery resource is not authenticated.`);
-    const labelled = Object.entries(described.VersionIdsToStages || {}).filter(([, labels]) => Array.isArray(labels) && labels.length);
-    if (canonical(Object.fromEntries(labelled)) !== canonical({ [expected.current.versionId]: ["AWSCURRENT"], [expected.previous.versionId]: ["AWSPREVIOUS"] })) throw new Error(`Initial ${slot} AWS-legal recovery topology is not exact.`);
+    const topology = described.VersionIdsToStages;
+    const untouched = { [expected.current.versionId]: ["AWSCURRENT"], [expected.previous.versionId]: ["AWSPREVIOUS"] };
+    if (canonical(topology) === canonical(untouched)) bootstrapProgress.push(false);
+    else {
+      const fresh = Object.entries(topology || {}).filter(([versionId, labels]) => versionId !== expected.current.versionId && versionId !== expected.previous.versionId && canonical(labels) === canonical(["AWSCURRENT"]));
+      if (!topology || typeof topology !== "object" || Array.isArray(topology) || Object.keys(topology).length !== 3 || fresh.length !== 1 || canonical(topology[expected.current.versionId]) !== canonical(["AWSPREVIOUS"]) || canonical(topology[expected.previous.versionId]) !== canonical([])) throw new Error(`Initial ${slot} AWS-legal recovery topology is not an authenticated bootstrap prefix.`);
+      bootstrapProgress.push(true);
+    }
     const current = await send(new GetSecretValueCommand({ SecretId: expected.current.arn, VersionId: expected.current.versionId }));
     const previous = await send(new GetSecretValueCommand({ SecretId: expected.previous.arn, VersionId: expected.previous.versionId }));
     if (current?.VersionId !== expected.current.versionId || previous?.VersionId !== expected.previous.versionId || typeof current.SecretString !== "string" || typeof previous.SecretString !== "string") throw new Error(`Initial ${slot} AWS-legal recovery version is not authenticated.`);
@@ -335,6 +342,7 @@ async function authenticateMixedRecoveryRetainedHistory({ send, resources, descr
     };
     if (canonical(observed[slot]) !== canonical(expected)) throw new Error(`Initial ${slot} AWS-legal recovery payload identity is not authenticated.`);
   }
+  if (bootstrapProgress.some((completed, index) => !completed && bootstrapProgress.slice(index + 1).some(Boolean))) throw new Error("Initial AWS-legal recovery bootstrap prefix is not contiguous.");
   return Object.freeze({ recoveryHandoff: Object.freeze(observed), recoveryHandoffCanonicalId: MIXED_DUAL_SLOT_RECOVERY_SUCCESSOR_CANONICAL_ID, retainedHistory: MIXED_DUAL_SLOT_RETAINED_HISTORY, retainedHistoryCanonicalId: MIXED_DUAL_SLOT_RETAINED_HISTORY_CANONICAL_ID });
 }
 

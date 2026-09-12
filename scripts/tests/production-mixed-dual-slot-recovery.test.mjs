@@ -231,3 +231,24 @@ test("exact authorized recovery hands T1 to the real initial bootstrap for its o
     ]) assert.throws(() => verifyLiveInitialDualSlotBindingWithRunner({ run: fixture.runner(mutate), bindings: bootstrapped.bindings, retainedHistoryPayloadHash: retainedHash }), /retained-history/);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
+
+test("bootstrap resumes only an exact contiguous fresh-write prefix from AWS-legal T1", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-mixed-bootstrap-prefix-"));
+  const retainedHash = (payload, slot) => payload?.value !== "redacted" ? "f".repeat(64) : payload.materialType || payload.initialMigration ? MIXED_DUAL_SLOT_RETAINED_HISTORY[slot].payloadSha256 : MIXED_DUAL_SLOT_PREDECESSOR[slot].payloadSha256;
+  try {
+    const preparation = buildMixedDualSlotRecoveryPreparation({ sourceSha, predecessor: exactPredecessor(), iamCapabilityPreflight: iamPreflight(), preparedAt: "2026-09-10T00:00:00.000Z" });
+    for (let boundary = 1; boundary < 7; boundary += 1) {
+      const fixture = handoffSecrets();
+      await executeMixedDualSlotRecovery({ send: fixture.send, preparation, sourceSha, authorization: authorized(preparation), payloadHash, now });
+      let writes = 0;
+      await assert.rejects(() => bootstrapInitialDualSlotRotation({ send: async (command) => { if (command.constructor.name === "PutSecretValueCommand" && writes++ === boundary) throw new Error("interrupted bootstrap"); return fixture.send(command); }, taskDefinition: liveTaskDefinition, sourceSha, rotationId: `rotation-fresh-prefix-${boundary}`, outputFile: path.join(directory, `bindings-${boundary}.json`), retainedHistoryPayloadHash: retainedHash }), /interrupted bootstrap/);
+      const resumed = await bootstrapInitialDualSlotRotation({ send: fixture.send, taskDefinition: liveTaskDefinition, sourceSha, rotationId: `rotation-fresh-prefix-${boundary}`, outputFile: path.join(directory, `bindings-${boundary}.json`), retainedHistoryPayloadHash: retainedHash });
+      assert.equal(resumed.secretValueWrites, 7 - boundary);
+      assert.equal(fixture.calls.filter(({ name }) => name === "PutSecretValueCommand").length, 7);
+    }
+    const noncontiguous = handoffSecrets();
+    await executeMixedDualSlotRecovery({ send: noncontiguous.send, preparation, sourceSha, authorization: authorized(preparation), payloadHash, now });
+    const middle = noncontiguous.states.get(MIXED_DUAL_SLOT_PREDECESSOR.qrPrivatePending.arn); middle.labels = []; middle.previousLabels = ["AWSPREVIOUS"]; middle.next = "{}";
+    await assert.rejects(() => bootstrapInitialDualSlotRotation({ send: noncontiguous.send, taskDefinition: liveTaskDefinition, sourceSha, rotationId: "rotation-fresh-noncontiguous", outputFile: path.join(directory, "noncontiguous.json"), retainedHistoryPayloadHash: retainedHash }), /prefix is not contiguous/);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
