@@ -6,15 +6,19 @@ import { assertVerifierMfaSerial } from "./establish-production-ecs-exec-verifie
 
 const SHA1 = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
-const REQUIRED_INPUTS = Object.freeze([
-  Object.freeze({ name: "MSCQR_VERIFIER_MFA_SERIAL", prompt: "Production verifier MFA serial: ", validate: (value) => { try { assertVerifierMfaSerial(value); return true; } catch { return false; } } }),
-  Object.freeze({ name: "MSCQR_ONBOARDING_EMAIL", prompt: "Production strict-onboarding administrator email: ", validate: (value) => Boolean(value) }),
-  Object.freeze({ name: "MSCQR_ONBOARDING_PASSWORD", prompt: "Production strict-onboarding administrator password: ", validate: (value) => Boolean(value) }),
-  Object.freeze({ name: "MSCQR_CANARY_ORDINARY_EMAIL", prompt: "Production strict-onboarding tenant-canary email: ", validate: (value) => Boolean(value) }),
-  Object.freeze({ name: "MSCQR_CANARY_ORDINARY_PASSWORD", prompt: "Production strict-onboarding tenant-canary password: ", validate: (value) => Boolean(value) }),
-]);
+const INPUTS_BY_MODE = Object.freeze({
+  "prepare-overlap": Object.freeze([
+    Object.freeze({ name: "MSCQR_VERIFIER_MFA_SERIAL", prompt: "Production verifier MFA serial: ", validate: (value) => { try { assertVerifierMfaSerial(value); return true; } catch { return false; } } }),
+  ]),
+});
 const SAFE_PARENT_ENVIRONMENT = Object.freeze(["HOME", "PATH", "TMPDIR", "TERM", "LANG", "LC_ALL", "LC_CTYPE", "NODE_EXTRA_CA_CERTS"]);
 const CHILD_SCRIPT = "scripts/aws/run-production-cutover.mjs";
+
+const inputsForMode = (mode) => {
+  const inputs = INPUTS_BY_MODE[mode];
+  if (!inputs) throw new Error("Production cutover operator input phase is unsupported.");
+  return inputs;
+};
 
 export function parseProductionCutoverOperatorArgs(argv = []) {
   const expected = new Set(["--mode", "--config", "--config-sha256", "--source-sha", "--rotation-id"]);
@@ -30,10 +34,11 @@ export function parseProductionCutoverOperatorArgs(argv = []) {
   return Object.freeze(values);
 }
 
-export function buildProductionCutoverChildEnvironment({ parentEnvironment = process.env, inputs } = {}) {
-  if (!inputs || REQUIRED_INPUTS.some(({ name }) => typeof inputs[name] !== "string" || !inputs[name])) throw new Error("Production cutover operator inputs are incomplete.");
+export function buildProductionCutoverChildEnvironment({ parentEnvironment = process.env, inputs, mode = "prepare-overlap" } = {}) {
+  const requiredInputs = inputsForMode(mode);
+  if (!inputs || requiredInputs.some(({ name }) => typeof inputs[name] !== "string" || !inputs[name])) throw new Error("Production cutover operator inputs are incomplete.");
   const environment = Object.fromEntries(SAFE_PARENT_ENVIRONMENT.filter((name) => typeof parentEnvironment[name] === "string" && parentEnvironment[name]).map((name) => [name, parentEnvironment[name]]));
-  for (const { name } of REQUIRED_INPUTS) environment[name] = inputs[name];
+  for (const { name } of requiredInputs) environment[name] = inputs[name];
   return environment;
 }
 
@@ -41,10 +46,11 @@ export async function runProductionCutoverOperator({ argv = process.argv.slice(2
   if (!stdin?.isTTY || !stdout?.isTTY) throw new Error("Production cutover operator launcher requires an interactive trusted terminal.");
   if (typeof prompt !== "function" || typeof spawnChild !== "function") throw new Error("Production cutover operator launcher dependencies are invalid.");
   const runtime = parseProductionCutoverOperatorArgs(argv);
+  const requiredInputs = inputsForMode(runtime["--mode"]);
   const inputs = {};
   let childEnvironment;
   try {
-    for (const { name, prompt: promptText, validate } of REQUIRED_INPUTS) {
+    for (const { name, prompt: promptText, validate } of requiredInputs) {
       let supplied;
       try {
         supplied = await prompt({ prompt: promptText, validate, errorMessage: `Interactive ${name} entry failed.` });
@@ -55,9 +61,9 @@ export async function runProductionCutoverOperator({ argv = process.argv.slice(2
       if (!validate(input)) throw new Error(`Interactive ${name} entry failed.`);
       inputs[name] = input;
     }
-    childEnvironment = buildProductionCutoverChildEnvironment({ parentEnvironment, inputs });
+    childEnvironment = buildProductionCutoverChildEnvironment({ parentEnvironment, inputs, mode: runtime["--mode"] });
     const child = spawnChild(childExecutable, [CHILD_SCRIPT, "--mode", runtime["--mode"], "--config", runtime["--config"], "--config-sha256", runtime["--config-sha256"], "--source-sha", runtime["--source-sha"], "--rotation-id", runtime["--rotation-id"]], { cwd, env: childEnvironment, stdio: "inherit" });
-    for (const { name } of REQUIRED_INPUTS) {
+    for (const { name } of requiredInputs) {
       delete inputs[name];
       delete childEnvironment[name];
     }
@@ -69,7 +75,7 @@ export async function runProductionCutoverOperator({ argv = process.argv.slice(2
     });
     return { exitCode: result.signal ? 1 : Number.isInteger(result.code) ? result.code : 1, signal: result.signal || null };
   } finally {
-    for (const { name } of REQUIRED_INPUTS) {
+    for (const { name } of requiredInputs) {
       delete inputs[name];
       if (childEnvironment) delete childEnvironment[name];
     }

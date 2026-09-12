@@ -317,6 +317,8 @@ test("strict onboarding adapter uses the cookie and CSRF boundary on its real pr
   const fetchImpl = async (url, options) => {
     requests.push({ url, options });
     if (url.endsWith("/api/auth/login")) {
+      const credentials = JSON.parse(options.body);
+      if (!credentials.email || !credentials.password) return response(401, {});
       const tenant = options.body?.includes("tenant@example.invalid");
       if (tenant) tenantLoginObserved = true;
       return response(200, { data: { auth: { sessionStage: "MFA_BOOTSTRAP" }, user: tenant ? { role: "LICENSEE_ADMIN", licenseeId: "tenant-licensee" } : { role: "PLATFORM_SUPER_ADMIN", licenseeId: null } } }, ["aq_access=access; Path=/", "aq_refresh=refresh; Path=/", "aq_db_session=session; Path=/", "aq_csrf=csrf; Path=/"]);
@@ -362,6 +364,22 @@ test("strict onboarding adapter uses the cookie and CSRF boundary on its real pr
   assert.equal(qrRequests[0].options.headers["x-mscqr-verification-token"], "synthetic-qr-fixture-token");
   assert.notEqual(qrRequests[0].options.headers["x-mscqr-verification-token"], qrRequests[1].options.headers["x-mscqr-verification-token"]);
   assert.ok(requests.some(({ url, options }) => url.includes("/api/licensees/") && tenantLoginObserved && options.headers.Cookie.includes("aq_access=access")));
+  assert.ok(requests.some(({ url, options }) => url.endsWith("/api/auth/login") && options.body.includes("admin@example.invalid") && options.body.includes("fixture-password")));
+  assert.ok(requests.some(({ url, options }) => url.endsWith("/api/auth/login") && options.body.includes("tenant@example.invalid") && options.body.includes("tenant-fixture-password")));
+
+  const missingCredentials = createStrictHttpOnboardingAdapter({
+    baseUrl: "https://fixture.example", paths,
+    credentials: {},
+    getMfaCode: () => "000000",
+    tenantCredentials: { email: "tenant@example.invalid", password: "tenant-fixture-password" },
+    getTenantMfaCode: () => "654321",
+    runtimeReadback: async () => ({ imageDigest: digest, serviceStable: true, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskMarker: true }),
+    ecsExecEvidence: async () => ({ valid: true, proof }),
+    rotationStateReadback: async () => ({ state: { rotationId: "rotation-test-1", phase: "overlap-deploy-required" }, sha256: "b".repeat(64) }),
+    rotationFixtureFile,
+    fetchImpl,
+  });
+  await assert.rejects(() => missingCredentials({ sourceSha: "a".repeat(40), imageDigest: digest, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskArn, rotationId: "rotation-test-1", rotationStateSha256: "b".repeat(64), rotationFixtureSha256 }), /Mandatory onboarding check failed: superAdminLogin/);
 
   const staleRotationState = createStrictHttpOnboardingAdapter({
     baseUrl: "https://fixture.example",
