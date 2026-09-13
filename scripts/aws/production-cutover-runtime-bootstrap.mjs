@@ -481,6 +481,7 @@ export function prepareProductionCutoverRuntime({
       rotationDeploymentSha: protectedSha,
       runtimeInvocationRef: approvalConfig.verificationRef,
       releaseProfile: "mscqr-production-release-deployer",
+      bootstrapProfile: "mscqr-production-bootstrap-operator",
       verifierProfile: "mscqr-production-ecs-exec-verifier",
     };
     assertNoSecretMaterial(staticBindings, "Generated cutover runtime config");
