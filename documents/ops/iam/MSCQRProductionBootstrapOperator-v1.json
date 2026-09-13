@@ -24,6 +24,17 @@
       }
     },
     {
+      "Sid": "AssumeStageBPublisherBootstrapRoleOnlyWithMfa",
+      "Effect": "Allow",
+      "Action": "sts:AssumeRole",
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-stage-b-publisher-bootstrap",
+      "Condition": {
+        "Bool": {
+          "aws:MultiFactorAuthPresent": "true"
+        }
+      }
+    },
+    {
       "Sid": "ReadOwnMfaState",
       "Effect": "Allow",
       "Action": [
