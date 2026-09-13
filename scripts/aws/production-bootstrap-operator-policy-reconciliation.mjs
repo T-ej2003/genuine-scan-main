@@ -11,6 +11,7 @@ import { createProductionAwsCommandRunner, createProductionGithubCommandRunner, 
 import { PRODUCTION_ENVIRONMENT_APPROVAL, assertProductionEnvironmentActualReviewer, assertProductionEnvironmentApprovalEvidence, assertProductionEnvironmentApprovalFreshness, assertProductionEnvironmentApprovalIdentity, createProductionEnvironmentApprovalEvidence } from "./production-github-environment-approval.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, readBoundStageBPrivateJson, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertProtectedCheckout } from "./prepare-production-initial-activation-reconciler-installation.mjs";
+import { ECS_EXEC_OPERATOR_BOOTSTRAP_MFA_SERIAL_ARN } from "./production-ecs-exec-operator-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const sha256 = (value) => crypto.createHash("sha256").update(Buffer.isBuffer(value) ? value : Buffer.from(canonicalJson(value))).digest("hex");
@@ -22,6 +23,7 @@ const exactKeys = (value, keys, label) => {
 const required = (argv, name) => { const index = argv.indexOf(name); const value = index < 0 ? undefined : argv[index + 1]; if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
 const requiredSha = (value, label) => { if (!/^[a-f0-9]{40}$/.test(value || "")) throw new Error(`${label} must be an exact source SHA.`); return value; };
 const parseGithubJson = (run, args, label) => { try { return JSON.parse(run("gh", args)); } catch { throw new Error(`${label} is malformed or unavailable.`); } };
+const noSuchEntity = (error) => /\bNoSuchEntity(?:Exception)?\b/.test(`${error?.stderr || ""} ${error?.message || ""}`);
 
 export const BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION = Object.freeze({
   schemaVersion: 1,
@@ -59,9 +61,10 @@ export function readBootstrapOperatorDesiredPolicy({ repositoryRoot = root } = {
 }
 
 export function authenticateBootstrapOperatorLiveState(value, { desired = readBootstrapOperatorDesiredPolicy(), allowPostState = true } = {}) {
-  exactKeys(value, ["user", "attachedPolicies", "inlinePolicyNames", "groups", "document"], "Bootstrap operator live state");
+  exactKeys(value, ["user", "attachedPolicies", "inlinePolicyNames", "groups", "consoleLoginPresent", "accessKeys", "mfaDevices", "document"], "Bootstrap operator live state");
   if (value.user?.Arn !== BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn || value.user?.UserName !== BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userName || value.user?.Path !== "/" || Object.hasOwn(value.user, "PermissionsBoundary")) throw new Error("Bootstrap operator user identity is unexpected.");
   if (!Array.isArray(value.attachedPolicies) || value.attachedPolicies.length || !Array.isArray(value.groups) || value.groups.length || canonicalJson(value.inlinePolicyNames) !== canonicalJson([BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.inlinePolicyName])) throw new Error("Bootstrap operator policy topology is unexpected.");
+  if (value.consoleLoginPresent !== false || !Array.isArray(value.accessKeys) || value.accessKeys.length || canonicalJson(value.mfaDevices) !== canonicalJson([{ UserName: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userName, SerialNumber: ECS_EXEC_OPERATOR_BOOTSTRAP_MFA_SERIAL_ARN }])) throw new Error("Bootstrap operator credential topology is unexpected.");
   const document = normalizeIamPolicyDocument(value.document, "bootstrap operator live policy");
   const documentSha256 = sha256(document);
   const pre = documentSha256 === desired.predecessorPolicySha256;
@@ -76,8 +79,13 @@ export function readBootstrapOperatorLiveState({ run } = {}) {
   const attachedPolicies = runJson(run, ["iam", "list-attached-user-policies", "--user-name", BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userName]).AttachedPolicies;
   const inlinePolicyNames = runJson(run, ["iam", "list-user-policies", "--user-name", BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userName]).PolicyNames;
   const groups = runJson(run, ["iam", "list-groups-for-user", "--user-name", BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userName]).Groups;
+  const accessKeys = runJson(run, ["iam", "list-access-keys", "--user-name", BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userName]).AccessKeyMetadata;
+  const mfaDevices = runJson(run, ["iam", "list-mfa-devices", "--user-name", BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userName]).MFADevices?.map(({ UserName, SerialNumber }) => ({ UserName, SerialNumber }));
+  let consoleLoginPresent;
+  try { runJson(run, ["iam", "get-login-profile", "--user-name", BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userName]); consoleLoginPresent = true; }
+  catch (error) { if (!noSuchEntity(error)) throw error; consoleLoginPresent = false; }
   const document = runJson(run, ["iam", "get-user-policy", "--user-name", BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userName, "--policy-name", BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.inlinePolicyName]).PolicyDocument;
-  return authenticateBootstrapOperatorLiveState({ user, attachedPolicies, inlinePolicyNames, groups, document });
+  return authenticateBootstrapOperatorLiveState({ user, attachedPolicies, inlinePolicyNames, groups, consoleLoginPresent, accessKeys, mfaDevices, document });
 }
 
 const preparationBody = ({ sourceSha, state, preparedAt }) => ({

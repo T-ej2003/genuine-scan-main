@@ -13,8 +13,8 @@ import { MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES } from "./production-mixed-dual-
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const PRODUCTION_DEPENDENCY_CLOSURE_PATH = "documents/ops/iam/MSCQRProductionDependencyClosure-v1.json";
 const BASE_PROTECTED_SHA = "e35c0bd0447eff85ec78ab46b18ab2d2e018cbcb";
-const BASE_CALL_COUNT = 105;
-const BASE_CALL_SHA256 = "6375adfa99abc59a847b125a2654e7b5224a7fa80302364ec61a0c6a1a8875fe";
+const BASE_CALL_COUNT = 108;
+const BASE_CALL_SHA256 = "bccd81abafc0187bb3fa2095213d07886c2935d41a2a5f7780027dfe2c6d2621";
 const SERVICE = "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2";
 const REPOSITORY = "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend";
 const RUNTIME_REPOSITORIES = [REPOSITORY, "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-web", "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker"];

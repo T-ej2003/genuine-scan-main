@@ -183,6 +183,9 @@ const BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION_CAPABILITIES = Object.freeze([
   ["bootstrap-operator-policy-reconciliation-list-attached", "iam:ListAttachedUserPolicies", [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn], false],
   ["bootstrap-operator-policy-reconciliation-list-inline", "iam:ListUserPolicies", [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn], false],
   ["bootstrap-operator-policy-reconciliation-list-groups", "iam:ListGroupsForUser", [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn], false],
+  ["bootstrap-operator-policy-reconciliation-list-access-keys", "iam:ListAccessKeys", [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn], false],
+  ["bootstrap-operator-policy-reconciliation-list-mfa-devices", "iam:ListMFADevices", [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn], false],
+  ["bootstrap-operator-policy-reconciliation-read-login-profile", "iam:GetLoginProfile", [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn], false],
   ["bootstrap-operator-policy-reconciliation-read-inline", "iam:GetUserPolicy", [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn], false],
   ["bootstrap-operator-policy-reconciliation-write-inline", "iam:PutUserPolicy", [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn], true],
 ]);
@@ -480,7 +483,7 @@ export function discoverAwsCliActions() {
       : new RegExp(`\\[\\s*["'](${serviceNames})["']\\s*,\\s*["']([a-z0-9-]+)["']`, "g");
     for (const match of source.matchAll(pattern)) {
       const service = match[1] === "s3api" ? "s3" : match[1];
-      const operation = match[2].split("-").map((part) => part[0].toUpperCase() + part.slice(1)).join("").replaceAll("Db", "DB").replaceAll("Vpc", "VPC").replaceAll("Url", "URL").replace("OpenIdConnect", "OpenIDConnect");
+      const operation = match[2].split("-").map((part) => part[0].toUpperCase() + part.slice(1)).join("").replaceAll("Db", "DB").replaceAll("Vpc", "VPC").replaceAll("Url", "URL").replace("Mfa", "MFA").replace("OpenIdConnect", "OpenIDConnect");
       const action = service === "s3" && operation === "ListObjectsV2" ? "s3:ListBucket"
         : service === "ecs" && operation === "Wait" ? "ecs:DescribeServices"
         : `${service}:${service === "lambda" && operation === "Invoke" ? "InvokeFunction" : operation}`;
@@ -516,7 +519,7 @@ export function discoverAwsCliActions() {
         calls.push(executorCall);
         if (["sts:GetCallerIdentity", "iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions", "iam:ListEntitiesForPolicy"].includes(action)) calls.push({ ...executorCall, identity: "ROOT_OPERATOR", sourceFunction: `${id}-prepare`, capabilityId: `${id}-prepare` });
       } else if (sourceFile === "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs") {
-        const id = ({ "sts:GetCallerIdentity": "bootstrap-operator-policy-reconciliation-identify", "iam:GetUser": "bootstrap-operator-policy-reconciliation-read-user", "iam:ListAttachedUserPolicies": "bootstrap-operator-policy-reconciliation-list-attached", "iam:ListUserPolicies": "bootstrap-operator-policy-reconciliation-list-inline", "iam:ListGroupsForUser": "bootstrap-operator-policy-reconciliation-list-groups", "iam:GetUserPolicy": "bootstrap-operator-policy-reconciliation-read-inline", "iam:PutUserPolicy": "bootstrap-operator-policy-reconciliation-write-inline" })[action];
+        const id = ({ "sts:GetCallerIdentity": "bootstrap-operator-policy-reconciliation-identify", "iam:GetUser": "bootstrap-operator-policy-reconciliation-read-user", "iam:ListAttachedUserPolicies": "bootstrap-operator-policy-reconciliation-list-attached", "iam:ListUserPolicies": "bootstrap-operator-policy-reconciliation-list-inline", "iam:ListGroupsForUser": "bootstrap-operator-policy-reconciliation-list-groups", "iam:ListAccessKeys": "bootstrap-operator-policy-reconciliation-list-access-keys", "iam:ListMFADevices": "bootstrap-operator-policy-reconciliation-list-mfa-devices", "iam:GetLoginProfile": "bootstrap-operator-policy-reconciliation-read-login-profile", "iam:GetUserPolicy": "bootstrap-operator-policy-reconciliation-read-inline", "iam:PutUserPolicy": "bootstrap-operator-policy-reconciliation-write-inline" })[action];
         const capability = BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION_CAPABILITIES.find(([candidate]) => candidate === id);
         if (!id || !capability) throw new Error("Bootstrap operator reconciliation uses an unreviewed AWS action.");
         calls.push({ sourceFile, sourceFunction: id, phase: "bootstrap-operator-policy-reconciliation", identity: "ROOT_OPERATOR", action, resources: capability[2], capabilityId: id });

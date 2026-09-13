@@ -1020,6 +1020,34 @@
       "mutation": false
     },
     {
+      "id": "bootstrap-operator-policy-reconciliation-list-access-keys",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "bootstrap-operator-policy-reconciliation-list-access-keys",
+      "action": "iam:ListAccessKeys",
+      "resources": [
+        "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      ],
+      "context": {
+        "account": "368992683803",
+        "targetUserArn": "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+        "sid": "bootstrap-operator-policy-reconciliation-list-access-keys",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
       "id": "bootstrap-operator-policy-reconciliation-list-attached",
       "phase": "bootstrap-operator-policy-reconciliation",
       "identity": "ROOT_OPERATOR",
@@ -1104,6 +1132,34 @@
       "mutation": false
     },
     {
+      "id": "bootstrap-operator-policy-reconciliation-list-mfa-devices",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "bootstrap-operator-policy-reconciliation-list-mfa-devices",
+      "action": "iam:ListMFADevices",
+      "resources": [
+        "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      ],
+      "context": {
+        "account": "368992683803",
+        "targetUserArn": "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+        "sid": "bootstrap-operator-policy-reconciliation-list-mfa-devices",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
       "id": "bootstrap-operator-policy-reconciliation-read-inline",
       "phase": "bootstrap-operator-policy-reconciliation",
       "identity": "ROOT_OPERATOR",
@@ -1124,6 +1180,34 @@
       "policy": {
         "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
         "sid": "bootstrap-operator-policy-reconciliation-read-inline",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "bootstrap-operator-policy-reconciliation-read-login-profile",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "bootstrap-operator-policy-reconciliation-read-login-profile",
+      "action": "iam:GetLoginProfile",
+      "resources": [
+        "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      ],
+      "context": {
+        "account": "368992683803",
+        "targetUserArn": "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+        "sid": "bootstrap-operator-policy-reconciliation-read-login-profile",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
         "expectedPolicySha256": null
@@ -14251,6 +14335,17 @@
     },
     {
       "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "bootstrap-operator-policy-reconciliation-read-login-profile",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "iam:GetLoginProfile",
+      "resources": [
+        "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      ],
+      "capabilityId": "bootstrap-operator-policy-reconciliation-read-login-profile"
+    },
+    {
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
       "sourceFunction": "bootstrap-operator-policy-reconciliation-read-user",
       "phase": "bootstrap-operator-policy-reconciliation",
       "identity": "ROOT_OPERATOR",
@@ -14273,6 +14368,17 @@
     },
     {
       "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "bootstrap-operator-policy-reconciliation-list-access-keys",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "iam:ListAccessKeys",
+      "resources": [
+        "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      ],
+      "capabilityId": "bootstrap-operator-policy-reconciliation-list-access-keys"
+    },
+    {
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
       "sourceFunction": "bootstrap-operator-policy-reconciliation-list-attached",
       "phase": "bootstrap-operator-policy-reconciliation",
       "identity": "ROOT_OPERATOR",
@@ -14292,6 +14398,17 @@
         "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
       ],
       "capabilityId": "bootstrap-operator-policy-reconciliation-list-groups"
+    },
+    {
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "bootstrap-operator-policy-reconciliation-list-mfa-devices",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "iam:ListMFADevices",
+      "resources": [
+        "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      ],
+      "capabilityId": "bootstrap-operator-policy-reconciliation-list-mfa-devices"
     },
     {
       "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",

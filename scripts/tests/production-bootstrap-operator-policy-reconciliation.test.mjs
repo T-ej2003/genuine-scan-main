@@ -10,7 +10,7 @@ import {
   readBootstrapOperatorDesiredPolicy,
   reconcileBootstrapOperatorPolicy,
 } from "../aws/production-bootstrap-operator-policy-reconciliation.mjs";
-import { assertEcsExecOperatorTrustDocument } from "../aws/production-ecs-exec-operator-contract.mjs";
+import { assertEcsExecOperatorTrustDocument, ECS_EXEC_OPERATOR_BOOTSTRAP_MFA_SERIAL_ARN } from "../aws/production-ecs-exec-operator-contract.mjs";
 
 const sourceSha = "a".repeat(40);
 const now = new Date("2026-09-14T12:00:00.000Z");
@@ -20,12 +20,12 @@ const approval = createProductionEnvironmentApprovalEvidence({
   repository: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.repository, environment: "production", sourceSha,
   workflowRef: PRODUCTION_ENVIRONMENT_APPROVAL.bootstrapOperatorPolicyReconciliationWorkflowRef, eventName: "workflow_dispatch", workflowRunId: "100", workflowRunAttempt: "1", executionActor: "operator", observedAt: now.toISOString(), actualApproval: { state: "approved", environmentId: 7, environmentName: "production", userId: 3, userLogin: "reviewer" },
 });
-const live = (document) => ({ user: { Arn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn, UserName: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userName, Path: "/" }, attachedPolicies: [], inlinePolicyNames: [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.inlinePolicyName], groups: [], document });
+const live = (document, credentialTopology = {}) => ({ user: { Arn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn, UserName: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userName, Path: "/" }, attachedPolicies: [], inlinePolicyNames: [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.inlinePolicyName], groups: [], consoleLoginPresent: false, accessKeys: [], mfaDevices: [{ UserName: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userName, SerialNumber: ECS_EXEC_OPERATOR_BOOTSTRAP_MFA_SERIAL_ARN }], ...credentialTopology, document });
 const authorized = () => {
   const preparation = createBootstrapOperatorPolicyPreparation({ sourceSha, liveState: live(desired.predecessorDocument), preparedAt: now.toISOString() });
   return createBootstrapOperatorPolicyAuthorization({ sourceSha, preparation, protectedEnvironmentApprovalEvidence: approval, authorizedAt: now.toISOString() });
 };
-const runner = (initial) => {
+const runner = (initial, credentialTopology = {}) => {
   let document = structuredClone(initial); let writes = 0;
   const run = (args) => {
     if (args[0] === "sts") return JSON.stringify({ Arn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.administratorArn });
@@ -33,6 +33,12 @@ const runner = (initial) => {
     if (args[1] === "list-attached-user-policies") return JSON.stringify({ AttachedPolicies: [] });
     if (args[1] === "list-user-policies") return JSON.stringify({ PolicyNames: [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.inlinePolicyName] });
     if (args[1] === "list-groups-for-user") return JSON.stringify({ Groups: [] });
+    if (args[1] === "list-access-keys") return JSON.stringify({ AccessKeyMetadata: credentialTopology.accessKeys || [] });
+    if (args[1] === "list-mfa-devices") return JSON.stringify({ MFADevices: credentialTopology.mfaDevices || live(document).mfaDevices });
+    if (args[1] === "get-login-profile") {
+      if (credentialTopology.consoleLoginPresent) return JSON.stringify({ LoginProfile: { UserName: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userName } });
+      throw Object.assign(new Error("NoSuchEntity"), { stderr: "NoSuchEntity" });
+    }
     if (args[1] === "get-user-policy") return JSON.stringify({ PolicyDocument: document });
     if (args[1] === "put-user-policy") { writes += 1; document = structuredClone(desired.document); return ""; }
     throw new Error(`unexpected command: ${args.join(" ")}`);
@@ -85,6 +91,20 @@ test("missing verifier capability, malformed policy topology, and unrelated role
   assert.throws(() => authenticateBootstrapOperatorLiveState(live(extraRole)), /unexpected drift/);
   assert.throws(() => authenticateBootstrapOperatorLiveState({ ...live(desired.predecessorDocument), attachedPolicies: [{ PolicyArn: "arn:aws:iam::368992683803:policy/unexpected" }] }), /topology/);
   assert.throws(() => createBootstrapOperatorPolicyPreparation({ sourceSha, liveState: live(desired.document), preparedAt: now.toISOString() }), /unexpected drift|predecessor/);
+});
+
+test("governed reconciliation fails closed on a console password, access key, or incorrect MFA topology", () => {
+  for (const credentialTopology of [
+    { consoleLoginPresent: true },
+    { accessKeys: [{ AccessKeyId: "AKIAEXAMPLE", Status: "Active" }] },
+    { mfaDevices: [] },
+    { mfaDevices: [{ UserName: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userName, SerialNumber: "arn:aws:iam::368992683803:mfa/unreviewed" }] },
+  ]) {
+    assert.throws(() => authenticateBootstrapOperatorLiveState(live(desired.predecessorDocument, credentialTopology)), /credential topology/);
+    const fixture = runner(desired.predecessorDocument, credentialTopology);
+    assert.throws(() => reconcileBootstrapOperatorPolicy({ run: fixture.run, authorization: authorized(), sourceSha, now }), /credential topology/);
+    assert.equal(fixture.writes(), 0);
+  }
 });
 
 test("authorization workflow remains actions-read only and produces a source-bound authorization", () => {
