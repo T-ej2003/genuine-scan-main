@@ -710,7 +710,19 @@ export async function supersedeStalePendingRotation({ send, taskDefinition, sour
     materialJournalFileSha256: readStageBPrivateFileBytes({ filePath: materialFile, repositoryRoot, label: "Replacement material journal" }).sha256,
     writePlan,
   });
-  if (mode === "prepare") return { valid: true, transition: "SUPERSEDE_STALE_PENDING_PREPARED", writes: 0, completedWriteCount: newSlots.length, preparationInput, predecessor, sourceSha, staleSourceSha, rotationId, staleRotationId, resources };
+  const evidenceCore = {
+    schemaVersion: 1,
+    transition: "SUPERSEDE_STALE_PENDING",
+    sourceSha,
+    staleSourceSha,
+    rotationId,
+    staleRotationId,
+    generatedAt: new Date().toISOString(),
+    resources: expectedEvidenceResources,
+    predecessorSlotIdentities: slotIdentities,
+  };
+  const evidence = { ...evidenceCore, evidenceIdentitySha256: productionSupersessionEvidenceIdentity(evidenceCore) };
+  if (mode === "prepare") return { valid: true, transition: "SUPERSEDE_STALE_PENDING_PREPARED", writes: 0, completedWriteCount: newSlots.length, preparationInput, predecessor, evidence: existingEvidence?.evidence || evidence, sourceSha, staleSourceSha, rotationId, staleRotationId, resources };
   const assertCurrentMutationTopology = async (writeIndex) => {
     for (const [slot, name] of Object.entries(INITIAL_DUAL_SLOT_NAMES)) {
       const described = await send(new DescribeSecretCommand({ SecretId: resources[slot] }));
@@ -750,18 +762,6 @@ export async function supersedeStalePendingRotation({ send, taskDefinition, sour
     const readback = parseStoredValue(response, name);
     if (JSON.stringify(readback) !== JSON.stringify(replacement[slot])) throw new Error(`Rotation supersession readback is not bound to the new ${slot} identity.`);
   }
-  const evidenceCore = {
-    schemaVersion: 1,
-    transition: "SUPERSEDE_STALE_PENDING",
-    sourceSha,
-    staleSourceSha,
-    rotationId,
-    staleRotationId,
-    generatedAt: new Date().toISOString(),
-    resources: expectedEvidenceResources,
-    predecessorSlotIdentities: slotIdentities,
-  };
-  const evidence = { ...evidenceCore, evidenceIdentitySha256: productionSupersessionEvidenceIdentity(evidenceCore) };
   const bytes = Buffer.from(`${JSON.stringify(evidence, null, 2)}\n`);
   const persisted = existingEvidence || writeStageBPrivateFileAtomic({ filePath: outputFile, bytes, repositoryRoot, label: "Stale rotation supersession evidence" });
   const returnedEvidence = existingEvidence?.evidence || evidence;

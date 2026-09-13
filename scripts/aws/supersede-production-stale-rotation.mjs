@@ -14,7 +14,8 @@ import { readStageBTerraformStateIdentity } from "./stage-b-terraform-backend-co
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const SHA40 = /^[a-f0-9]{40}$/;
 const ROTATION_ID = /^[A-Za-z0-9._-]{8,128}$/;
-const accepted = new Set(["mode", "stale-source-sha", "stale-rotation-id", "source-sha", "publication", "live-backend", "stage-b-state", "authorization-workflow-run-id", "authorization-workflow-run-attempt", "preparation-sha256"]);
+const HISTORICAL_FINALIZATION_MODE = "finalize-historical";
+const accepted = new Set(["mode", "stale-source-sha", "stale-rotation-id", "source-sha", "publication", "live-backend", "stage-b-state", "authorization-workflow-run-id", "authorization-workflow-run-attempt", "preparation-sha256", "tooling-sha", "transaction-source-sha", "transaction-preparation-sha256", "preparation-file-sha256"]);
 const parse = (argv) => {
   const values = new Map();
   for (let index = 0; index < argv.length; index += 2) {
@@ -22,7 +23,7 @@ const parse = (argv) => {
     if (!accepted.has(key) || !argv[index + 1] || argv[index + 1].startsWith("--") || values.has(key)) throw new Error(`Invalid or duplicate argument: ${argv[index] || "<missing>"}`);
     values.set(key, argv[index + 1]);
   }
-  if (!values.has("mode") || !["prepare", "execute"].includes(values.get("mode"))) throw new Error("--mode prepare or --mode execute is required; there is no mutating default.");
+  if (!values.has("mode") || !["prepare", "execute", HISTORICAL_FINALIZATION_MODE].includes(values.get("mode"))) throw new Error("--mode prepare, --mode execute, or --mode finalize-historical is required; there is no mutating default.");
   return values;
 };
 const required = (values, name) => {
@@ -77,8 +78,104 @@ export const createStaleRotationSecretsManagerSender = (run) => async (command) 
   throw new Error("Unsupported stale-supersession Secrets Manager operation.");
 };
 
+export const createStaleRotationReadOnlySecretsManagerSender = (run) => async (command) => {
+  const input = command?.input || {};
+  const common = ["secretsmanager"];
+  if (command.constructor.name === "DescribeSecretCommand") return JSON.parse(run([...common, "describe-secret", "--secret-id", input.SecretId, "--output", "json", "--no-cli-pager"]));
+  if (command.constructor.name === "GetSecretValueCommand") return JSON.parse(run([...common, "get-secret-value", "--secret-id", input.SecretId, ...(typeof input.VersionId === "string" && input.VersionId ? ["--version-id", input.VersionId] : []), "--output", "json", "--no-cli-pager"]));
+  throw new Error("Historical stale-supersession finalization permits only DescribeSecret and GetSecretValue.");
+};
+
+const assertHistoricalFinalizationArguments = (values) => {
+  const expected = new Set(["mode", "tooling-sha", "transaction-source-sha", "stale-source-sha", "stale-rotation-id", "transaction-preparation-sha256", "preparation-file-sha256", "authorization-workflow-run-id", "authorization-workflow-run-attempt"]);
+  if ([...values.keys()].some((key) => !expected.has(key))) throw new Error("Historical stale-supersession finalization arguments are not exact.");
+  return Object.fromEntries([...expected].map((key) => [key, required(values, key)]));
+};
+
+async function finalizeHistoricalStaleRotation(values, deps) {
+  const args = assertHistoricalFinalizationArguments(values);
+  if (!SHA40.test(args["tooling-sha"]) || !SHA40.test(args["transaction-source-sha"]) || !SHA40.test(args["stale-source-sha"]) || !/^[a-f0-9]{64}$/.test(args["transaction-preparation-sha256"]) || !/^[a-f0-9]{64}$/.test(args["preparation-file-sha256"]) || !/^[1-9][0-9]*$/.test(args["authorization-workflow-run-id"]) || args["authorization-workflow-run-attempt"] !== "1") throw new Error("Historical stale-supersession finalization identity is invalid.");
+  const toolingSha = args["tooling-sha"];
+  const sourceSha = args["transaction-source-sha"];
+  const staleSourceSha = args["stale-source-sha"];
+  const staleRotationId = args["stale-rotation-id"];
+  if (sourceSha === toolingSha || sourceSha === staleSourceSha || !ROTATION_ID.test(staleRotationId)) throw new Error("Historical stale-supersession finalization source identity is invalid.");
+  const gitRun = deps.gitRun || ((gitArgs) => execFileSync("git", gitArgs, { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
+  (deps.readProtectedMain || readStageBProtectedMainCheckout)({ run: gitRun, cwd: ROOT, expectedSourceSha: toolingSha, requireCanonicalRepository: true });
+  const proveDescendant = deps.proveDescendant || (({ ancestorSha, descendantSha }) => { try { gitRun(["cat-file", "-e", `${ancestorSha}^{commit}`]); gitRun(["merge-base", "--is-ancestor", ancestorSha, descendantSha]); return true; } catch { return false; } });
+  const createRunner = deps.createProductionCommandRunner || createProductionCommandRunner;
+  const run = deps.run || createRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer" });
+  const client = deps.client;
+  const readOnlySend = async (command) => {
+    if (!["DescribeSecretCommand", "GetSecretValueCommand"].includes(command?.constructor?.name)) throw new Error("Historical stale-supersession finalization forbids Secrets Manager mutation commands.");
+    return client ? client.send(command) : createStaleRotationReadOnlySecretsManagerSender(run)(command);
+  };
+  if (client) await client.assertCredentialIdentity();
+  else {
+    const caller = JSON.parse(run(["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"]));
+    if (caller.Account !== "368992683803" || !/^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\/[^/]+$/.test(caller.Arn || "")) throw new Error("Historical stale-supersession finalization caller identity is outside the reviewed account/principal contract.");
+  }
+  const readLiveBackend = () => {
+    const service = JSON.parse(run(["ecs", "describe-services", "--cluster", "mscqr-prod-euw2-main", "--services", "mscqr-backend-servi-euw2", "--output", "json", "--no-cli-pager"])).services?.[0];
+    if (!service?.taskDefinition) throw new Error("Current production task definition is unavailable.");
+    const taskDefinition = JSON.parse(run(["ecs", "describe-task-definition", "--task-definition", service.taskDefinition, "--include", "TAGS", "--output", "json", "--no-cli-pager"]));
+    return { service, taskDefinition };
+  };
+  const directory = transactionDirectory({ sourceSha, staleRotationId, homeDirectory: deps.homeDirectory });
+  ensureStageBPrivateDirectory({ directory, repositoryRoot: ROOT, create: true, label: "Historical stale rotation supersession transaction directory" });
+  const preparationFile = path.join(directory, "preparation.json");
+  const evidenceFile = path.join(directory, "supersession.json");
+  const bindingFile = path.join(directory, "rotation-bindings.json");
+  const consumptionFile = path.join(directory, "consumption.json");
+  const preparationCapture = readJson(preparationFile, "Historical stale rotation supersession preparation");
+  if (preparationCapture.sha256 !== args["preparation-file-sha256"]) throw new Error("Historical stale rotation supersession preparation file changed.");
+  const preparation = assertStaleRotationSupersessionPreparation(preparationCapture.value, { sourceSha, now: now(typeof deps.now === "function" ? deps.now() : deps.now), validationMode: "continuation" });
+  if (preparation.preparationSha256 !== args["transaction-preparation-sha256"] || preparation.staleSourceSha !== staleSourceSha || preparation.staleRotationId !== staleRotationId) throw new Error("Historical stale rotation supersession preparation identity is invalid.");
+  const authenticated = await (deps.resolveAuthorization || resolveStaleRotationSupersessionAuthorizationArtifact)({ workflowRunId: args["authorization-workflow-run-id"], workflowRunAttempt: args["authorization-workflow-run-attempt"], sourceSha, preparation, run: deps.githubRun, now: now(typeof deps.now === "function" ? deps.now() : deps.now), validationMode: "continuation" });
+  const { authorization, provenance: authorizationProvenance } = authenticated;
+  assertStaleRotationSupersessionAuthorizationProvenance(authorizationProvenance, { authorization, sourceSha });
+  const executionStart = assertStaleRotationSupersessionExecutionStart(readJson(path.join(directory, "execution-start.json"), "Historical stale rotation supersession execution start").value, { authorization, authorizationProvenance, preparation });
+  const liveBackend = readLiveBackend();
+  if (preparation.liveBackend.taskDefinitionArn !== liveBackend.service.taskDefinition || preparation.liveBackend.imageDigest !== imageDigest(liveBackend.taskDefinition)) throw new Error("Live backend changed before historical stale rotation supersession finalization.");
+  let evidenceCapture = lstatSync(evidenceFile, { throwIfNoEntry: false })
+    ? readJson(evidenceFile, "Historical stale rotation supersession evidence")
+    : null;
+  const existingConsumption = lstatSync(consumptionFile, { throwIfNoEntry: false });
+  const existingBinding = lstatSync(bindingFile, { throwIfNoEntry: false });
+  if (existingConsumption && (!existingBinding || !evidenceCapture)) throw new Error("Historical stale rotation supersession consumption is missing its authenticated receipts.");
+  let terminal;
+  let binding;
+  if (existingConsumption) {
+    binding = readJson(bindingFile, "Historical stale rotation supersession binding");
+    assertInitialDualSlotBindings(binding.value);
+    terminal = { predecessor: binding.value.supersessionPredecessor };
+  } else {
+    terminal = await supersedeStalePendingRotation({ send: readOnlySend, taskDefinition: liveBackend.taskDefinition, sourceSha, staleSourceSha, rotationId: preparation.replacementRotationId, staleRotationId, proveDescendant, outputFile: evidenceFile, repositoryRoot: ROOT, mode: "prepare" });
+    if (terminal.completedWriteCount !== 7 || staleRotationSupersessionSha256(terminal.preparationInput.writePlan) !== preparation.writePlanSha256) throw new Error("Historical stale rotation supersession is not the exact completed seven-write transaction.");
+    if (!evidenceCapture) {
+      writeStageBPrivateFileAtomicExclusive({ filePath: evidenceFile, bytes: privateJsonBytes(terminal.evidence), repositoryRoot: ROOT, label: "Historical stale rotation supersession evidence" });
+      evidenceCapture = readJson(evidenceFile, "Historical stale rotation supersession evidence");
+    }
+  }
+  const generatedBinding = await bootstrapInitialDualSlotRotation({ send: readOnlySend, taskDefinition: liveBackend.taskDefinition, sourceSha, rotationId: preparation.replacementRotationId, supersessionEvidence: evidenceCapture.value, supersessionPredecessor: terminal.predecessor, outputFile: bindingFile, repositoryRoot: ROOT, requireExisting: true, requiredWritePlan: preparation.writePlan });
+  if (generatedBinding.secretValueWrites !== 0 || generatedBinding.created.length !== 0) throw new Error("Historical stale rotation supersession finalization attempted a secret mutation.");
+  binding = readJson(bindingFile, "Historical stale rotation supersession binding");
+  assertInitialDualSlotBindings(binding.value);
+  if (binding.value.sourceSha !== sourceSha || binding.value.rotationId !== preparation.replacementRotationId || JSON.stringify(binding.value.supersessionEvidence) !== JSON.stringify(evidenceCapture.value)) throw new Error("Historical stale rotation supersession binding does not match the authenticated transaction.");
+  if (existingConsumption) {
+    const consumption = assertStaleRotationSupersessionConsumption(readJson(consumptionFile, "Historical stale rotation supersession consumption").value, { authorization, authorizationProvenance, preparation });
+    if (consumption.supersessionEvidenceSha256 !== evidenceCapture.sha256 || consumption.rotationBindingSha256 !== binding.sha256) throw new Error("Historical stale rotation supersession consumption does not match authenticated receipts.");
+  } else {
+    const consumption = createStaleRotationSupersessionConsumption({ authorization, authorizationProvenance, preparation, supersessionEvidenceSha256: evidenceCapture.sha256, rotationBindingSha256: binding.sha256 });
+    writeStageBPrivateFileAtomicExclusive({ filePath: consumptionFile, bytes: privateJsonBytes(consumption), repositoryRoot: ROOT, label: "Historical stale rotation supersession consumption" });
+  }
+  if (lstatSync(`${evidenceFile}.material`, { throwIfNoEntry: false })) (deps.finalizeJournal || finalizeStaleRotationSupersessionMaterialJournal)({ outputFile: evidenceFile, expectedFileSha256: preparation.materialJournalFileSha256, repositoryRoot: ROOT });
+  return { mode: HISTORICAL_FINALIZATION_MODE, toolingSha, sourceSha, staleRotationId, rotationId: preparation.replacementRotationId, preparationSha256: preparation.preparationSha256, authorizationSha256: authorization.authorizationSha256, authorizationConsumed: true, bindingFile, consumptionFile, writes: 0, executionStartSha256: executionStart.executionStartSha256 };
+}
+
 export async function runCli(argv = process.argv.slice(2), deps = {}) {
   const values = parse(argv);
+  if (values.get("mode") === HISTORICAL_FINALIZATION_MODE) return finalizeHistoricalStaleRotation(values, deps);
   const gitRun = deps.gitRun || ((args) => execFileSync("git", args, { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
   const sourceSha = required(values, "source-sha");
   // Authenticate the exact bytes being executed before any credential source
