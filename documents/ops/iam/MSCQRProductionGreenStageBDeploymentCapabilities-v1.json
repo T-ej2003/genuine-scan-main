@@ -246,11 +246,16 @@
     },
     {
       "order": 49,
+      "id": "bootstrap-operator-policy-reconciliation",
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs"
+    },
+    {
+      "order": 50,
       "id": "mixed-dual-slot-recovery-iam-preflight",
       "sourceFile": "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs"
     },
     {
-      "order": 50,
+      "order": 51,
       "id": "mixed-dual-slot-recovery-execution",
       "sourceFile": "scripts/aws/recover-production-mixed-dual-slot-topology.mjs"
     }
@@ -1004,7 +1009,7 @@
       "probe": "structural",
       "probeIds": [],
       "policy": {
-        "sourceFile": "documents/ops/iam/MSCQRProductionBootstrapOperator-v1.json",
+        "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
         "sid": "bootstrap-operator-policy-reconciliation-identify",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
@@ -1032,7 +1037,7 @@
       "probe": "structural",
       "probeIds": [],
       "policy": {
-        "sourceFile": "documents/ops/iam/MSCQRProductionBootstrapOperator-v1.json",
+        "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
         "sid": "bootstrap-operator-policy-reconciliation-list-attached",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
@@ -1060,7 +1065,7 @@
       "probe": "structural",
       "probeIds": [],
       "policy": {
-        "sourceFile": "documents/ops/iam/MSCQRProductionBootstrapOperator-v1.json",
+        "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
         "sid": "bootstrap-operator-policy-reconciliation-list-groups",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
@@ -1088,7 +1093,7 @@
       "probe": "structural",
       "probeIds": [],
       "policy": {
-        "sourceFile": "documents/ops/iam/MSCQRProductionBootstrapOperator-v1.json",
+        "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
         "sid": "bootstrap-operator-policy-reconciliation-list-inline",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
@@ -1116,7 +1121,7 @@
       "probe": "structural",
       "probeIds": [],
       "policy": {
-        "sourceFile": "documents/ops/iam/MSCQRProductionBootstrapOperator-v1.json",
+        "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
         "sid": "bootstrap-operator-policy-reconciliation-read-inline",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
@@ -1144,7 +1149,7 @@
       "probe": "structural",
       "probeIds": [],
       "policy": {
-        "sourceFile": "documents/ops/iam/MSCQRProductionBootstrapOperator-v1.json",
+        "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
         "sid": "bootstrap-operator-policy-reconciliation-read-user",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
@@ -1172,7 +1177,7 @@
       "probe": "structural",
       "probeIds": [],
       "policy": {
-        "sourceFile": "documents/ops/iam/MSCQRProductionBootstrapOperator-v1.json",
+        "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
         "sid": "bootstrap-operator-policy-reconciliation-write-inline",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",

@@ -118,6 +118,7 @@ const PHASES = Object.freeze([
   ["stage-a-production-artifacts-state-reconciliation", "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs"],
   ["initial-activation-lifecycle-policy-reconciliation", "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs"],
   ["provider-readonly-policy-reconciliation", "scripts/aws/reconcile-production-provider-readonly-policy.mjs"],
+  ["bootstrap-operator-policy-reconciliation", "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs"],
   ["mixed-dual-slot-recovery-iam-preflight", "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs"],
   ["mixed-dual-slot-recovery-execution", "scripts/aws/recover-production-mixed-dual-slot-topology.mjs"],
 ]);
@@ -629,7 +630,7 @@ export function buildStageBDeploymentCapabilityGraph() {
   const providerReadonlyPreparation = providerReadonlyReconciliation.filter(({ action }) => ["sts:GetCallerIdentity", "iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions", "iam:ListEntitiesForPolicy"].includes(action)).map((capability) => ({ ...capability, id: `${capability.id}-prepare`, sourceFunction: `${capability.id}-prepare`, identity: "ROOT_OPERATOR", classification: "ADMIN_DIRECT_READ", policy: { sourceFile: capability.sourceFile, sid: `${capability.id}-prepare`, livePolicyArn: null, expectedVersion: "protected-main-source", expectedPolicySha256: null } }));
   const bootstrapOperatorPolicyReconciliation = BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION_CAPABILITIES.map(([id, action, resources, mutation]) => ({
     id, phase: "bootstrap-operator-policy-reconciliation", identity: "ROOT_OPERATOR", executor: "aws-cli", sourceFile: "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs", sourceFunction: id, action, resources,
-    context: { account: STAGE_B.account, targetUserArn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn }, classification: mutation ? "ROOT_GOVERNED_IAM_POLICY_RECONCILIATION" : "ADMIN_DIRECT_READ", probe: "structural", probeIds: [], policy: { sourceFile: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.sourcePath, sid: id, livePolicyArn: null, expectedVersion: "protected-main-source", expectedPolicySha256: null }, required: true, mutation,
+    context: { account: STAGE_B.account, targetUserArn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn }, classification: mutation ? "ROOT_GOVERNED_IAM_POLICY_RECONCILIATION" : "ADMIN_DIRECT_READ", probe: "structural", probeIds: [], policy: { sourceFile: "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs", sid: id, livePolicyArn: null, expectedVersion: "protected-main-source", expectedPolicySha256: null }, required: true, mutation,
   }));
   const mixedRecoveryIamPreflight = MIXED_DUAL_SLOT_RECOVERY_IAM_PREFLIGHT_CAPABILITIES.map(([id, action, resources]) => ({
     id, phase: "mixed-dual-slot-recovery-iam-preflight", identity: "ROOT_OPERATOR", executor: "aws-cli", sourceFile: "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs", sourceFunction: id, action, resources,

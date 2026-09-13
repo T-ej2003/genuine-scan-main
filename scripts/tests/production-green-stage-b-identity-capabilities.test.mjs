@@ -153,7 +153,7 @@ test("identity matrix assigns IAM simulation only to administrator", () => {
   assert(matrix.calls.some(({ identity, action }) => identity === "ADMINISTRATOR" && action === "iam:SimulatePrincipalPolicy"));
   assert(!matrix.calls.some(({ identity, action }) => identity === "RELEASE_DEPLOYER" && action === "iam:SimulatePrincipalPolicy"));
   assert(matrix.calls.some(({ identity, action }) => identity === "ROOT_OPERATOR" && action === "iam:SimulatePrincipalPolicy"));
-  assert.equal(matrix.phases.length, 50);
+  assert.equal(matrix.phases.length, 51);
 });
 
 test("Stage B release readiness requires the completed Stage A contract", () => {
@@ -165,7 +165,7 @@ test("Stage B release readiness requires the completed Stage A contract", () => 
 test("generated capability graph is exhaustive, deterministic, and identity-exact", () => {
   const first = buildStageBDeploymentCapabilityGraph(); const second = buildStageBDeploymentCapabilityGraph();
   assert.deepEqual(first, second);
-  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 50, capabilities: 423, uniqueActions: 143, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
+  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 51, capabilities: 423, uniqueActions: 143, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
   assert(first.capabilities.every(({ identity }) => first.identities.includes(identity)));
   assert(first.capabilities.every(({ id }, index) => first.capabilities.findIndex((item) => item.id === id) === index));
   assert(first.capabilities.some(({ identity, action }) => identity === "ECS_EXEC_VERIFIER_OPERATOR" && action === "ecs:ExecuteCommand"));
@@ -182,6 +182,9 @@ test("generated capability graph is exhaustive, deterministic, and identity-exac
   assert.equal(providerReadonlyCapabilities.length, 9);
   assert(providerReadonlyCapabilities.every(({ context }) => context.targetPolicyArn === "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"));
   assert.equal(first.capabilities.filter(({ identity, phase }) => identity === "ROOT_OPERATOR" && phase === "provider-readonly-policy-reconciliation").length, 5);
+  const bootstrapOperatorReconciliation = first.capabilities.filter(({ phase }) => phase === "bootstrap-operator-policy-reconciliation");
+  assert.equal(bootstrapOperatorReconciliation.length, 7);
+  assert(bootstrapOperatorReconciliation.every(({ identity, policy }) => identity === "ROOT_OPERATOR" && policy.sourceFile === "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs"));
   const targetBound = structuredClone(first); targetBound.capabilities.find(({ identity }) => identity === "INITIAL_ACTIVATION_RECONCILER").policy.livePolicyArn = "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle";
   assert.throws(() => assertStageBDeploymentCapabilityGraph(targetBound), /stale or incomplete/);
   const reconcilerPolicy = JSON.parse(fs.readFileSync("infra/aws/terraform/production-initial-activation-policy-reconciler/permissions-policy.json", "utf8"));
