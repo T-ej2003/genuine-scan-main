@@ -208,7 +208,11 @@ test("REAL_BOOTSTRAP_TO_CONSTRUCTOR generates config without future state or fix
     assert.match(result.config.stageARoot, /production-green-stage-a$/);
     assert.match(result.config.stageAPlanSha256, /^[a-f0-9]{64}$/);
     assert.equal(result.config.expectedRoleArn, "arn:aws:iam::368992683803:role/mscqr-production-release-deployer");
+    assert.equal(result.config.bootstrapProfile, "mscqr-production-bootstrap-operator");
+    assert.equal(result.config.verifierProfile, "mscqr-production-ecs-exec-verifier");
     assert.equal(result.config.overlapTaskInput.secretBindings.ARTIFACT_SIGN_ACTIVE_KEY_VERSION.includes("artifact-signing"), true);
+    assert.equal(JSON.stringify(result.config).includes("MSCQR_VERIFIER_MFA_SERIAL"), false);
+    assert.equal(JSON.stringify(result.config).includes("MSCQR_VERIFIER_MFA_CODE"), false);
     assert.doesNotMatch(readFileSync(result.configPath, "utf8"), /PRIVATE KEY|SecretString|fixture-password|123456/);
   } finally {
     rmSync(path.join(repositoryRoot, "documents/ops/iam/MSCQRProductionGreenStageBArtifactSigningBindings.runtime.json"), { force: true });
