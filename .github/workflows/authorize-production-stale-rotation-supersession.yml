@@ -74,6 +74,7 @@ jobs:
           echo "sha256=$(sha256sum "$RUNNER_TEMP/stale-supersession/environment-approval.json" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
       - name: Produce approved exact authorization
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           PREPARATION_FILE_SHA256: ${{ inputs.preparation_file_sha256 }}
           APPROVAL_SHA256: ${{ steps.approval.outputs.sha256 }}
         run: |
