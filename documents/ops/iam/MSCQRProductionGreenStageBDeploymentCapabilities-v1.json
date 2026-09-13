@@ -913,21 +913,22 @@
       "sourceFunction": "bootstrap-assume-verifier",
       "action": "sts:AssumeRole",
       "resources": [
-        "reviewed-exact-resource"
+        "arn:aws:iam::368992683803:role/mscqr-production-ecs-exec-verifier"
       ],
       "context": {
         "account": "368992683803",
-        "region": "eu-west-2"
+        "region": "eu-west-2",
+        "mfaRequired": true
       },
       "classification": "BOOTSTRAP_SESSION",
       "probe": "structural",
       "probeIds": [],
       "policy": {
-        "sourceFile": "scripts/aws/establish-production-ecs-exec-verifier-session.mjs",
-        "sid": "identity-boundary",
-        "livePolicyArn": null,
-        "expectedVersion": "source-bound",
-        "expectedPolicySha256": null
+        "sourceFile": "documents/ops/iam/MSCQRProductionBootstrapOperator-v1.json",
+        "sid": "AssumeEcsExecVerifierRoleOnlyWithMfa",
+        "livePolicyArn": "inline-user-policy:arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator/MSCQRProductionBootstrapOperator",
+        "expectedVersion": "governed-inline-policy",
+        "expectedPolicySha256": "6194a46a5ef8c4e14c753804bd44e8a1977e14f201e08b33ce226e97e609244c"
       },
       "required": true,
       "mutation": false

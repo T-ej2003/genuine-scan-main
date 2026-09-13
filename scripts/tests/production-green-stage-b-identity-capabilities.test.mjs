@@ -11,7 +11,8 @@ import {
   runReleaseReadPreflight,
 } from "../aws/production-green-stage-b-identity-capabilities.mjs";
 import { STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_STATE_IDENTITY_VERSION, stageAStateSemanticSha256 } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
-import { assertInitialActivationReconcilerAuthority, assertStageBAwsCallCoverage, assertStageBDeploymentCapabilityGraph, buildStageBDeploymentCapabilityGraph, classifyStageARecoveryAwsCliAction, discoverAwsCliActions } from "../aws/generate-production-green-stage-b-capability-graph.mjs";
+import { assertBootstrapOperatorVerifierAuthority, assertInitialActivationReconcilerAuthority, assertStageBAwsCallCoverage, assertStageBDeploymentCapabilityGraph, buildStageBDeploymentCapabilityGraph, classifyStageARecoveryAwsCliAction, discoverAwsCliActions } from "../aws/generate-production-green-stage-b-capability-graph.mjs";
+import { BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION } from "../aws/production-bootstrap-operator-policy-reconciliation.mjs";
 import { assertStageBAdministratorEvidenceIdentity, buildPermissionReportBinding, canonicalizeJson, PERMISSION_REPORT_BINDING_DOMAIN, PERMISSION_REPORT_BINDING_SCHEMA_VERSION, PERMISSION_REPORT_HASH_DOMAIN, PERMISSION_REPORT_SIGNING_ALGORITHM, PERMISSION_REPORT_SIGNING_KEY_ARN, PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION, runPermissionPreflight, signedPermissionReportBindingSha256, sourcePolicyEvidence } from "../aws/validate-production-green-stage-b-permissions.mjs";
 import { runProductionPreflightCli } from "../aws/run-production-green-stage-b-preflight.mjs";
 import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "../aws/production-cutover-production-adapters.mjs";
@@ -154,6 +155,28 @@ test("identity matrix assigns IAM simulation only to administrator", () => {
   assert(!matrix.calls.some(({ identity, action }) => identity === "RELEASE_DEPLOYER" && action === "iam:SimulatePrincipalPolicy"));
   assert(matrix.calls.some(({ identity, action }) => identity === "ROOT_OPERATOR" && action === "iam:SimulatePrincipalPolicy"));
   assert.equal(matrix.phases.length, 51);
+});
+
+test("bootstrap verifier capability is bound to its exact MFA-gated inline-policy statement", () => {
+  const graph = buildStageBDeploymentCapabilityGraph();
+  const capability = graph.capabilities.find(({ id }) => id === "bootstrap-assume-verifier");
+  assert.deepEqual(capability && [capability.action, capability.resources, capability.policy.sourceFile, capability.policy.sid, capability.context.mfaRequired], ["sts:AssumeRole", [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.verifierRoleArn], BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.sourcePath, "AssumeEcsExecVerifierRoleOnlyWithMfa", true]);
+  assert.doesNotMatch(JSON.stringify(capability), /reviewed-exact-resource/);
+  const policy = JSON.parse(fs.readFileSync(BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.sourcePath, "utf8"));
+  assert.doesNotThrow(() => assertBootstrapOperatorVerifierAuthority(policy));
+  for (const resources of [["reviewed-exact-resource"], [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.releaseRoleArn]]) {
+    const changed = structuredClone(graph); changed.capabilities.find(({ id }) => id === "bootstrap-assume-verifier").resources = resources;
+    assert.throws(() => assertStageBDeploymentCapabilityGraph(changed), /stale or incomplete/);
+  }
+  for (const mutate of [
+    (value) => { value.Statement = value.Statement.filter(({ Sid }) => Sid !== "AssumeEcsExecVerifierRoleOnlyWithMfa"); },
+    (value) => { value.Statement.find(({ Sid }) => Sid === "AssumeEcsExecVerifierRoleOnlyWithMfa").Action = "sts:GetCallerIdentity"; },
+    (value) => { value.Statement.find(({ Sid }) => Sid === "AssumeEcsExecVerifierRoleOnlyWithMfa").Resource = "*"; },
+    (value) => { delete value.Statement.find(({ Sid }) => Sid === "AssumeEcsExecVerifierRoleOnlyWithMfa").Condition; },
+  ]) {
+    const changed = structuredClone(policy); mutate(changed);
+    assert.throws(() => assertBootstrapOperatorVerifierAuthority(changed), /exact MFA-gated target set/);
+  }
 });
 
 test("Stage B release readiness requires the completed Stage A contract", () => {

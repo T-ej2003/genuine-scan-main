@@ -51,10 +51,23 @@ test("bootstrap policy adds only MFA-gated verifier assumption while retaining t
   assert.equal(desired.document.Statement.some(({ Action }) => JSON.stringify(Action).includes("ecs:") || JSON.stringify(Action).includes("secretsmanager:")), false);
   assert.equal(permitsAssumeRole({ roleArn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.releaseRoleArn, mfa: true }), true);
   assert.equal(permitsAssumeRole({ roleArn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.verifierRoleArn, mfa: true }), true);
+  assert.equal(permitsAssumeRole({ roleArn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.publisherBootstrapRoleArn, mfa: true }), true);
+  assert.equal(permitsAssumeRole({ roleArn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.releaseRoleArn, mfa: false }), false);
   assert.equal(permitsAssumeRole({ roleArn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.verifierRoleArn, mfa: false }), false);
+  assert.equal(permitsAssumeRole({ roleArn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.publisherBootstrapRoleArn, mfa: false }), false);
   assert.equal(permitsAssumeRole({ roleArn: "arn:aws:iam::368992683803:role/unrelated", mfa: true }), false);
   const trust = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQR_PRODUCTION_ECS_EXEC_OPERATOR_TRUST_POLICY.json", "utf8"));
   assert.doesNotThrow(() => assertEcsExecOperatorTrustDocument(trust));
+});
+
+test("RLS operator contract and canonical policy enumerate the same three MFA-gated targets", () => {
+  const contract = JSON.parse(fs.readFileSync("documents/security/rls-program/production-full-rls-executor-contract.json", "utf8"));
+  const requirement = contract.stageAOperatorPath.bootstrapOperatorRequirements.find((value) => value.startsWith("only sts:AssumeRole"));
+  const targets = desired.document.Statement.filter(({ Action }) => Action === "sts:AssumeRole").map(({ Resource }) => Resource).sort();
+  assert.deepEqual(targets, [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.releaseRoleArn, BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.verifierRoleArn, BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.publisherBootstrapRoleArn].sort());
+  assert.equal(targets.every((target) => requirement.includes(target)), true);
+  assert.equal(requirement.includes("*"), false);
+  assert.equal(desired.document.Statement.filter(({ Action }) => Action === "sts:AssumeRole").every((statement) => statement.Condition?.Bool?.["aws:MultiFactorAuthPresent"] === "true"), true);
 });
 
 test("governed reconciliation accepts only the exact predecessor and converges with one PutUserPolicy", () => {

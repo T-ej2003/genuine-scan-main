@@ -33,6 +33,7 @@ const stageAReleaseS3ContractPath = "documents/ops/iam/MSCQRProductionGreenStage
 const stageATerraformStateArn = `${STAGE_B_TERRAFORM_BACKEND.bucketArn}/${STAGE_A_TERRAFORM_BACKEND.key}`;
 const STAGE_A_RECOVERY_RAW_STATE_READ_COMMAND = '["s3api", "get-object", "--bucket", STAGE_A_TERRAFORM_BACKEND.bucket, "--key", STAGE_A_TERRAFORM_BACKEND.key, "--expected-bucket-owner", "368992683803", output]';
 const rootAttestationPolicyPath = "infra/aws/terraform/production-green-stage-b-publisher-bootstrap/main.tf";
+const bootstrapOperatorPolicyPath = BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.sourcePath;
 const awsCliSourceFiles = [
   "scripts/plan-production-green-stage-b.mjs", "scripts/apply-production-green-stage-b.mjs",
   "scripts/aws/create-production-green-stage-b-approval.mjs", "scripts/aws/generate-production-green-stage-a-prerequisites.mjs",
@@ -352,6 +353,26 @@ function sourcePolicies() {
   return RELEASE_POLICY_SOURCES.map((policy) => ({ ...policy, document: readJson(policy.sourcePath), sourceSha256: sha256(Buffer.from(canonicalizeJson(readJson(policy.sourcePath)))) }));
 }
 
+export function assertBootstrapOperatorVerifierAuthority(policy = readJson(bootstrapOperatorPolicyPath)) {
+  const assumeRoleStatements = policy?.Statement?.filter((statement) => statement.Effect === "Allow" && asArray(statement.Action).includes("sts:AssumeRole")) || [];
+  const expected = [
+    ["AssumeReleaseRoleOnlyWithMfa", BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.releaseRoleArn],
+    ["AssumeEcsExecVerifierRoleOnlyWithMfa", BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.verifierRoleArn],
+    ["AssumeStageBPublisherBootstrapRoleOnlyWithMfa", BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.publisherBootstrapRoleArn],
+  ];
+  if (assumeRoleStatements.length !== expected.length || expected.some(([sid, resource]) => {
+    const statement = assumeRoleStatements.find((candidate) => candidate.Sid === sid);
+    return !statement || canonicalizeJson(statement) !== canonicalizeJson({ Sid: sid, Effect: "Allow", Action: "sts:AssumeRole", Resource: resource, Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } });
+  })) throw new Error("Bootstrap operator AssumeRole policy is not the reviewed exact MFA-gated target set.");
+  return {
+    sourceFile: bootstrapOperatorPolicyPath,
+    sid: "AssumeEcsExecVerifierRoleOnlyWithMfa",
+    livePolicyArn: `inline-user-policy:${BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn}/${BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.inlinePolicyName}`,
+    expectedVersion: "governed-inline-policy",
+    expectedPolicySha256: sha256(Buffer.from(canonicalizeJson(policy))),
+  };
+}
+
 function authority(entry, forbidden, policies) {
   for (const policy of policies) for (const statement of policy.document.Statement || []) {
     const actions = asArray(statement.Action);
@@ -605,7 +626,13 @@ export function buildStageBDeploymentCapabilityGraph() {
     sourceFile: publisherPolicyPath, sourceFunction: statement.Sid, action, resources: asArray(statement.Resource), context: statement.Condition || {}, classification: statement.Effect === "Deny" ? "FORBIDDEN" : "GITHUB_IMAGE_MUTATION",
     probe: "structural", policy: { sourceFile: publisherPolicyPath, sid: statement.Sid, livePolicyArn: "github-oidc-role-policy", expectedVersion: "protected-main-source", expectedPolicySha256: sha256(Buffer.from(canonicalizeJson(readJson(publisherPolicyPath)))) }, required: true, mutation: statement.Effect !== "Deny",
   })));
-  const fixed = FIXED.map(([id, phase, identity, action, actionClass, sourceFile]) => ({ id, phase, identity, executor: sourceFile.endsWith(".yml") ? "github-actions" : "aws-cli", sourceFile, sourceFunction: id, action, resources: id === "admin-release-oidc-identify" ? ["*"] : id.startsWith("admin-release-oidc-trust-") ? [PRODUCTION_RELEASE_ROLE_ARN] : ["release-verify-signature", "admin-image-evidence-describe-key", "admin-image-evidence-read-key-policy", "admin-image-evidence-read-key-tags", "admin-verify-image-evidence"].includes(id) ? [IMAGE_EVIDENCE_SIGNING_KEY_ARN] : ["reviewed-exact-resource"], context: { account: "368992683803", region: "eu-west-2" }, classification: actionClass, probe: actionClass === "RELEASE_DIRECT_READ" ? "direct" : actionClass === "ADMIN_SIMULATION" ? "administrator-simulation" : "structural", probeIds: probesByAction.get(action) || [], policy: { sourceFile: identity === "RELEASE_DEPLOYER" ? manifestPath : sourceFile, sid: "identity-boundary", livePolicyArn: identity === "RELEASE_DEPLOYER" ? "signed-administrator-evidence" : null, expectedVersion: "source-bound", expectedPolicySha256: null }, required: true, mutation: ["ADMIN_SIGN", "ADMIN_IAM_MUTATION", "GITHUB_IMAGE_MUTATION"].includes(actionClass) }));
+  const fixed = FIXED.map(([id, phase, identity, action, actionClass, sourceFile]) => {
+    const verifier = id === "bootstrap-assume-verifier";
+    return { id, phase, identity, executor: sourceFile.endsWith(".yml") ? "github-actions" : "aws-cli", sourceFile, sourceFunction: id, action,
+      resources: verifier ? [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.verifierRoleArn] : id === "admin-release-oidc-identify" ? ["*"] : id.startsWith("admin-release-oidc-trust-") ? [PRODUCTION_RELEASE_ROLE_ARN] : ["release-verify-signature", "admin-image-evidence-describe-key", "admin-image-evidence-read-key-policy", "admin-image-evidence-read-key-tags", "admin-verify-image-evidence"].includes(id) ? [IMAGE_EVIDENCE_SIGNING_KEY_ARN] : ["reviewed-exact-resource"],
+      context: { account: "368992683803", region: "eu-west-2", ...(verifier ? { mfaRequired: true } : {}) }, classification: actionClass, probe: actionClass === "RELEASE_DIRECT_READ" ? "direct" : actionClass === "ADMIN_SIMULATION" ? "administrator-simulation" : "structural", probeIds: probesByAction.get(action) || [],
+      policy: verifier ? assertBootstrapOperatorVerifierAuthority() : { sourceFile: identity === "RELEASE_DEPLOYER" ? manifestPath : sourceFile, sid: "identity-boundary", livePolicyArn: identity === "RELEASE_DEPLOYER" ? "signed-administrator-evidence" : null, expectedVersion: "source-bound", expectedPolicySha256: null }, required: true, mutation: ["ADMIN_SIGN", "ADMIN_IAM_MUTATION", "GITHUB_IMAGE_MUTATION"].includes(actionClass) };
+  });
   const normalActivation = NORMAL_ACTIVATION_CAPABILITIES.map(([id, phase, identity, action, resources, mutation]) => {
     const policy = identity === "ADMINISTRATOR" || action === "ecs:UpdateService"
       ? { sourceFile: "scripts/aws/production-normal-backend-activation-policy.mjs", sid: id, livePolicyArn: action === "ecs:UpdateService" ? NORMAL_ACTIVATION.policyArn : null, expectedVersion: "state-derived-exact-revision", expectedPolicySha256: null }
