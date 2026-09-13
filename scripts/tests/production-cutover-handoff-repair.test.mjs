@@ -819,6 +819,21 @@ test("historical finalization separates protected tooling from the completed tra
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
+test("historical finalization reconstructs only missing evidence after the authenticated seventh write", async () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-historical-missing-evidence-"));
+  try {
+    const fixture = await historicalFinalizationFixture(home);
+    unlinkSync(fixture.evidenceFile);
+    assert.ok(lstatSync(`${fixture.evidenceFile}.material`));
+    const result = await runStaleSupersessionCli(historicalFinalizationArgs(fixture), historicalFinalizationDeps(fixture));
+    assert.equal(result.writes, 0);
+    assert.equal(fixture.sender.writes, 7);
+    assert.ok(lstatSync(fixture.evidenceFile));
+    assert.ok(lstatSync(path.join(fixture.directory, "rotation-bindings.json")));
+    assert.ok(lstatSync(path.join(fixture.directory, "consumption.json")));
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
 test("historical finalization rejects mismatched tooling or contradictory historical artifacts before a write", async () => {
   const home = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-historical-finalization-reject-"));
   const prepareHome = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-historical-normal-prepare-"));

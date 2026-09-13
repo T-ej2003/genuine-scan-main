@@ -137,10 +137,12 @@ async function finalizeHistoricalStaleRotation(values, deps) {
   const executionStart = assertStaleRotationSupersessionExecutionStart(readJson(path.join(directory, "execution-start.json"), "Historical stale rotation supersession execution start").value, { authorization, authorizationProvenance, preparation });
   const liveBackend = readLiveBackend();
   if (preparation.liveBackend.taskDefinitionArn !== liveBackend.service.taskDefinition || preparation.liveBackend.imageDigest !== imageDigest(liveBackend.taskDefinition)) throw new Error("Live backend changed before historical stale rotation supersession finalization.");
-  const evidenceCapture = readJson(evidenceFile, "Historical stale rotation supersession evidence");
+  let evidenceCapture = lstatSync(evidenceFile, { throwIfNoEntry: false })
+    ? readJson(evidenceFile, "Historical stale rotation supersession evidence")
+    : null;
   const existingConsumption = lstatSync(consumptionFile, { throwIfNoEntry: false });
   const existingBinding = lstatSync(bindingFile, { throwIfNoEntry: false });
-  if (existingConsumption && !existingBinding) throw new Error("Historical stale rotation supersession consumption exists without its binding.");
+  if (existingConsumption && (!existingBinding || !evidenceCapture)) throw new Error("Historical stale rotation supersession consumption is missing its authenticated receipts.");
   let terminal;
   let binding;
   if (existingConsumption) {
@@ -150,6 +152,10 @@ async function finalizeHistoricalStaleRotation(values, deps) {
   } else {
     terminal = await supersedeStalePendingRotation({ send: readOnlySend, taskDefinition: liveBackend.taskDefinition, sourceSha, staleSourceSha, rotationId: preparation.replacementRotationId, staleRotationId, proveDescendant, outputFile: evidenceFile, repositoryRoot: ROOT, mode: "prepare" });
     if (terminal.completedWriteCount !== 7 || staleRotationSupersessionSha256(terminal.preparationInput.writePlan) !== preparation.writePlanSha256) throw new Error("Historical stale rotation supersession is not the exact completed seven-write transaction.");
+    if (!evidenceCapture) {
+      writeStageBPrivateFileAtomicExclusive({ filePath: evidenceFile, bytes: privateJsonBytes(terminal.evidence), repositoryRoot: ROOT, label: "Historical stale rotation supersession evidence" });
+      evidenceCapture = readJson(evidenceFile, "Historical stale rotation supersession evidence");
+    }
   }
   const generatedBinding = await bootstrapInitialDualSlotRotation({ send: readOnlySend, taskDefinition: liveBackend.taskDefinition, sourceSha, rotationId: preparation.replacementRotationId, supersessionEvidence: evidenceCapture.value, supersessionPredecessor: terminal.predecessor, outputFile: bindingFile, repositoryRoot: ROOT, requireExisting: true, requiredWritePlan: preparation.writePlan });
   if (generatedBinding.secretValueWrites !== 0 || generatedBinding.created.length !== 0) throw new Error("Historical stale rotation supersession finalization attempted a secret mutation.");
