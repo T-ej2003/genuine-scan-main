@@ -421,8 +421,9 @@ test("stale supersession authorization rejects altered plan, journal, reviewer, 
   assert.doesNotMatch(body, /accepted.*output-directory/);
   const workflow = readFileSync(".github/workflows/authorize-production-stale-rotation-supersession.yml", "utf8");
   assert.match(workflow, /environment: production/);
-  assert.match(workflow, /actions: read/);
+  assert.match(workflow, /permissions:\n  contents: read\n  actions: read\n\njobs:/);
   assert.match(workflow, /- run: npm ci\n\s+- run: npm --prefix backend ci\n\s+- name: Re-authenticate protected source after dependency installation/);
+  assert.match(workflow, /- name: Produce approved exact authorization\n\s+env:\n\s+GITHUB_TOKEN: \$\{\{ github\.token \}\}\n\s+PREPARATION_FILE_SHA256:/);
   assert.doesNotMatch(workflow, /PutSecretValue|secretsmanager:|aws-actions\/configure-aws-credentials/);
 });
 
