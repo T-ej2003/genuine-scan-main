@@ -72,7 +72,7 @@ export const createStaleRotationSecretsManagerSender = (run) => async (command) 
   const input = command?.input || {};
   const common = ["secretsmanager"];
   if (command.constructor.name === "DescribeSecretCommand") return JSON.parse(run([...common, "describe-secret", "--secret-id", input.SecretId, "--output", "json", "--no-cli-pager"]));
-  if (command.constructor.name === "GetSecretValueCommand") return JSON.parse(run([...common, "get-secret-value", "--secret-id", input.SecretId, "--version-id", input.VersionId, "--output", "json", "--no-cli-pager"]));
+  if (command.constructor.name === "GetSecretValueCommand") return JSON.parse(run([...common, "get-secret-value", "--secret-id", input.SecretId, ...(typeof input.VersionId === "string" && input.VersionId ? ["--version-id", input.VersionId] : []), "--output", "json", "--no-cli-pager"]));
   if (command.constructor.name === "PutSecretValueCommand") return JSON.parse(run([...common, "put-secret-value", "--secret-id", input.SecretId, "--client-request-token", input.ClientRequestToken, "--secret-string", "file:///dev/stdin", "--output", "json", "--no-cli-pager"], { input: input.SecretString }));
   throw new Error("Unsupported stale-supersession Secrets Manager operation.");
 };
