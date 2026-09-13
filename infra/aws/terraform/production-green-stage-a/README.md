@@ -22,7 +22,8 @@ be the staging state bucket or the production artifact bucket. The immediate
 operator path is MFA-gated `mscqr-production-bootstrap-operator` assuming the
 external `mscqr-production-release-deployer` role for no more than one hour.
 The bootstrap user has no console password or standing access key and may only
-assume that role plus the separate MFA-gated ECS Exec verifier role; a temporary
+assume that role, the separate MFA-gated ECS Exec verifier role, and the
+MFA-gated `mscqr-production-stage-b-publisher-bootstrap` role; a temporary
 access key is permitted solely to obtain the MFA STS session and must be deleted
 before Terraform runs. Root, the checker,
 GitHub deploy, and application/runtime roles cannot assume the release role.

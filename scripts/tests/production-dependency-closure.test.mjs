@@ -39,7 +39,19 @@ test("complete production dependency closure is exact across modes and failure p
     ["scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs", "s3:PutObject", "stage-a-artifacts-recovery-release-lock-acquire"],
     ["scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs", "s3:DeleteObject", "stage-a-artifacts-recovery-release-lock-release"],
   ]);
-  assert.equal(report.newAwsCalls.length, 42 + stageAAdditions.length + 15 + 14 + 7 + 7 + 1 + 6); // baseline, Stage-A, policy reconciliation, ProviderReadOnly, bootstrap-user reconciliation, recovery IAM preflight, attestation signing, and exact executor calls
+  assert.equal(report.newAwsCalls.length, 42 + stageAAdditions.length + 15 + 14 + 10 + 7 + 1 + 6); // baseline, Stage-A, policy reconciliation, ProviderReadOnly, bootstrap-user reconciliation, recovery IAM preflight, attestation signing, and exact executor calls
+  assert.deepEqual(report.newAwsCalls.filter(({ capabilityId }) => capabilityId?.startsWith("bootstrap-operator-policy-reconciliation-")).map(({ capabilityId, action, resources, identity, reachableMode }) => [capabilityId, action, resources, identity, reachableMode]), [
+    ["bootstrap-operator-policy-reconciliation-identify", "sts:GetCallerIdentity", ["*"], "ROOT_OPERATOR", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],
+    ["bootstrap-operator-policy-reconciliation-read-user", "iam:GetUser", ["arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"], "ROOT_OPERATOR", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],
+    ["bootstrap-operator-policy-reconciliation-list-attached", "iam:ListAttachedUserPolicies", ["arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"], "ROOT_OPERATOR", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],
+    ["bootstrap-operator-policy-reconciliation-list-inline", "iam:ListUserPolicies", ["arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"], "ROOT_OPERATOR", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],
+    ["bootstrap-operator-policy-reconciliation-list-groups", "iam:ListGroupsForUser", ["arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"], "ROOT_OPERATOR", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],
+    ["bootstrap-operator-policy-reconciliation-list-access-keys", "iam:ListAccessKeys", ["arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"], "ROOT_OPERATOR", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],
+    ["bootstrap-operator-policy-reconciliation-list-mfa-devices", "iam:ListMFADevices", ["arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"], "ROOT_OPERATOR", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],
+    ["bootstrap-operator-policy-reconciliation-read-login-profile", "iam:GetLoginProfile", ["arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"], "ROOT_OPERATOR", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],
+    ["bootstrap-operator-policy-reconciliation-read-inline", "iam:GetUserPolicy", ["arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"], "ROOT_OPERATOR", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],
+    ["bootstrap-operator-policy-reconciliation-write-inline", "iam:PutUserPolicy", ["arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"], "ROOT_OPERATOR", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],
+  ]);
   assert.deepEqual(report.newAwsCalls.filter(({ capabilityId }) => capabilityId?.startsWith("mixed-recovery-iam-preflight-")).map(({ action, identity }) => [action, identity]), [
     ["sts:GetCallerIdentity", "ROOT_OPERATOR"],
     ["organizations:DescribeOrganization", "ROOT_OPERATOR"],
