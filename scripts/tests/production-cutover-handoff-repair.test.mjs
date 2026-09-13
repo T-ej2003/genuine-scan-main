@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { constants, createHash, generateKeyPairSync, sign, verify } from "node:crypto";
-import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
@@ -22,7 +22,7 @@ import { validateRotationTransition } from "../security/check-production-rotatio
 import { assertProductionStaleSupersessionPredecessor, productionStaleSupersessionPredecessorIdentity } from "../security/production-initial-migration-source-advance.mjs";
 import { createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
 import { assertApprovedStaleRotationSupersessionAuthorization, assertStaleRotationSupersessionConsumption, createApprovedStaleRotationSupersessionAuthorization, createPendingStaleRotationSupersessionAuthorization, createStaleRotationSupersessionConsumption, createStaleRotationSupersessionExecutionStart, createStaleRotationSupersessionPreparation, resolveStaleRotationSupersessionAuthorizationArtifact, resolveStaleRotationSupersessionPublication, staleRotationSupersessionSha256 } from "../aws/production-stale-rotation-supersession-contract.mjs";
-import { createStaleRotationSecretsManagerSender, runCli as runStaleSupersessionCli } from "../aws/supersede-production-stale-rotation.mjs";
+import { createStaleRotationReadOnlySecretsManagerSender, createStaleRotationSecretsManagerSender, runCli as runStaleSupersessionCli } from "../aws/supersede-production-stale-rotation.mjs";
 import { runCli as runStaleSupersessionAuthorizationCli } from "../aws/authorize-production-stale-rotation-supersession.mjs";
 import { buildStageBImagePublicationIdentity, publicationIdentitySha256 } from "../aws/stage-b-image-publication-identity.mjs";
 
@@ -30,6 +30,7 @@ const sourceSha = "8".repeat(40);
 const staleSourceSha = "e".repeat(40);
 const rotationId = "rotation-new-20260817";
 const staleRotationId = "rotation-old-20260812";
+const historicalToolingSha = "c".repeat(40);
 const arn = (name) => `arn:aws:secretsmanager:eu-west-2:368992683803:secret:${name}-AbCd12`;
 const digest = (value) => createHash("sha256").update(value).digest("hex");
 const requireBackend = createRequire(path.resolve("backend/package.json"));
@@ -215,6 +216,35 @@ async function staleSupersessionCliFixture(homeDirectory) {
   const deps = { homeDirectory, readProtectedMain: () => true, proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === staleSourceSha && descendantSha === sourceSha, run, client, readStageBState: () => stageBState, resolveAuthorization: async () => ({ authorization, provenance }) };
   return { argv, authorization, client, deps, directory, evidenceFile, preparation, provenance, sender, store, setLiveBackend: (value) => { currentLiveBackend = value; } };
 }
+
+const historicalFinalizationArgs = (fixture, overrides = {}) => Object.entries({
+  mode: "finalize-historical",
+  "tooling-sha": historicalToolingSha,
+  "transaction-source-sha": sourceSha,
+  "stale-source-sha": staleSourceSha,
+  "stale-rotation-id": staleRotationId,
+  "transaction-preparation-sha256": fixture.preparation.preparationSha256,
+  "preparation-file-sha256": digest(readFileSync(path.join(fixture.directory, "preparation.json"))),
+  "authorization-workflow-run-id": "123",
+  "authorization-workflow-run-attempt": "1",
+  ...overrides,
+}).flatMap(([key, value]) => [`--${key}`, value]);
+
+async function historicalFinalizationFixture(homeDirectory) {
+  const fixture = await staleSupersessionCliFixture(homeDirectory);
+  await assert.rejects(() => runStaleSupersessionCli(fixture.argv, { ...fixture.deps, afterBootstrap: () => { throw new Error("injected post-binding interruption"); } }), /injected post-binding interruption/);
+  unlinkSync(path.join(fixture.directory, "rotation-bindings.json"));
+  return fixture;
+}
+
+const historicalFinalizationDeps = (fixture, overrides = {}) => ({
+  ...fixture.deps,
+  readProtectedMain: ({ expectedSourceSha }) => {
+    if (expectedSourceSha !== historicalToolingSha) throw new Error("historical tooling SHA is not protected main");
+    return true;
+  },
+  ...overrides,
+});
 
 function staleSupersessionPreparationInputs(directory) {
   const publication = publicationFixture().publication;
@@ -415,7 +445,7 @@ test("stale supersession authorization rejects altered plan, journal, reviewer, 
   await assert.rejects(() => runStaleSupersessionCli(["--mode", "execute", "--output-directory", "/tmp/alternate"]), /Invalid or duplicate argument/);
   await assert.rejects(() => runStaleSupersessionCli(["--mode", "execute", "--authorization", "/tmp/fabricated.json"]), /Invalid or duplicate argument/);
   const body = readFileSync("scripts/aws/supersede-production-stale-rotation.mjs", "utf8");
-  assert.match(body, /--mode prepare or --mode execute is required/);
+  assert.match(body, /--mode prepare, --mode execute, or --mode finalize-historical is required/);
   assert.match(body, /os\.userInfo\(\)\.homedir/);
   assert.doesNotMatch(body, /os\.homedir\(\)/);
   assert.doesNotMatch(body, /accepted.*output-directory/);
@@ -760,6 +790,70 @@ test("all seven authenticated writes resume through terminal receipt without reg
     assert.equal(completed.authorizationConsumed, true);
     assert.equal(fixture.sender.writes, 7);
     assert.equal(lstatSync(`${fixture.evidenceFile}.material`, { throwIfNoEntry: false }), undefined);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("historical finalization separates protected tooling from the completed transaction and cannot write secrets", async () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-historical-finalization-"));
+  try {
+    const fixture = await historicalFinalizationFixture(home);
+    const commands = [];
+    const result = await runStaleSupersessionCli(historicalFinalizationArgs(fixture), historicalFinalizationDeps(fixture, {
+      client: { assertCredentialIdentity: fixture.client.assertCredentialIdentity, send: async (command) => { commands.push(command.constructor.name); return fixture.sender.send(command); } },
+    }));
+    assert.equal(result.mode, "finalize-historical");
+    assert.equal(result.toolingSha, historicalToolingSha);
+    assert.equal(result.sourceSha, sourceSha);
+    assert.equal(result.writes, 0);
+    assert.equal(fixture.sender.writes, 7);
+    assert.ok(lstatSync(path.join(fixture.directory, "rotation-bindings.json")));
+    assert.ok(lstatSync(path.join(fixture.directory, "consumption.json")));
+    assert.equal(commands.includes("PutSecretValueCommand"), false);
+    assert.equal(commands.includes("CreateSecretCommand"), false);
+    assert.equal(commands.includes("DeleteSecretCommand"), false);
+    assert.equal(commands.includes("UpdateSecretCommand"), false);
+    assert.equal(commands.includes("UpdateSecretVersionStageCommand"), false);
+    const repeated = await runStaleSupersessionCli(historicalFinalizationArgs(fixture), historicalFinalizationDeps(fixture));
+    assert.equal(repeated.writes, 0);
+    assert.equal(fixture.sender.writes, 7);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("historical finalization rejects mismatched tooling or contradictory historical artifacts before a write", async () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-historical-finalization-reject-"));
+  const prepareHome = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-historical-normal-prepare-"));
+  try {
+    const fixture = await historicalFinalizationFixture(home);
+    await assert.rejects(() => runStaleSupersessionCli(fixture.argv, { ...fixture.deps, readProtectedMain: () => { throw new Error("normal execute source mismatch"); } }), /normal execute source mismatch/);
+    const prepare = staleSupersessionPrepareCliFixture(prepareHome);
+    await assert.rejects(() => runStaleSupersessionCli(prepare.argv, { ...prepare.deps, readProtectedMain: () => { throw new Error("normal prepare source mismatch"); } }), /normal prepare source mismatch/);
+    await assert.rejects(() => runStaleSupersessionCli(historicalFinalizationArgs(fixture), historicalFinalizationDeps(fixture, { readProtectedMain: () => { throw new Error("tooling source mismatch"); } })), /tooling source mismatch/);
+    const preparationPath = path.join(fixture.directory, "preparation.json");
+    const preparation = JSON.parse(readFileSync(preparationPath));
+    preparation.sourceSha = historicalToolingSha;
+    writeFileSync(preparationPath, `${JSON.stringify(preparation, null, 2)}\n`, { mode: 0o600 });
+    await assert.rejects(() => runStaleSupersessionCli(historicalFinalizationArgs(fixture), historicalFinalizationDeps(fixture)), /preparation.*identity|preparation.*hash/i);
+    assert.equal(fixture.sender.writes, 7);
+  } finally { rmSync(home, { recursive: true, force: true }); rmSync(prepareHome, { recursive: true, force: true }); }
+});
+
+test("historical finalization fails closed on a write command and a non-terminal prefix", async () => {
+  const calls = [];
+  const readOnly = createStaleRotationReadOnlySecretsManagerSender((args) => { calls.push(args); return JSON.stringify({}); });
+  const { PutSecretValueCommand } = requireBackend("@aws-sdk/client-secrets-manager");
+  await assert.rejects(() => readOnly(new PutSecretValueCommand({ SecretId: arn("mscqr/prod/rotation/jwt_pending"), SecretString: "forbidden" })), /permits only/);
+  assert.equal(calls.length, 0);
+  const home = mkdtempSync(path.join(os.tmpdir(), "mscqr-stale-historical-prefix-"));
+  try {
+    const fixture = await staleSupersessionCliFixture(home);
+    let writes = 0;
+    await assert.rejects(() => runStaleSupersessionCli(fixture.argv, { ...fixture.deps, client: { assertCredentialIdentity: fixture.client.assertCredentialIdentity, send: async (command) => {
+      const response = await fixture.sender.send(command);
+      if (command.constructor.name === "PutSecretValueCommand" && ++writes === 3) throw new Error("injected three-write interruption");
+      return response;
+    } } }), /injected three-write interruption/);
+    await assert.rejects(() => runStaleSupersessionCli(historicalFinalizationArgs(fixture), historicalFinalizationDeps(fixture)), /evidence|completed|transaction/i);
+    assert.equal(fixture.sender.writes, 3);
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
