@@ -2201,6 +2201,139 @@
       "administratorPreflightPresent": true,
       "runtimePreflightPresent": true,
       "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "action": "sts:GetCallerIdentity",
+      "capabilityId": "bootstrap-operator-policy-reconciliation-identify",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "*"
+      ],
+      "reachableMode": [
+        "BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "action": "iam:GetUser",
+      "capabilityId": "bootstrap-operator-policy-reconciliation-read-user",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      ],
+      "reachableMode": [
+        "BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "action": "iam:ListAttachedUserPolicies",
+      "capabilityId": "bootstrap-operator-policy-reconciliation-list-attached",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      ],
+      "reachableMode": [
+        "BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "action": "iam:ListUserPolicies",
+      "capabilityId": "bootstrap-operator-policy-reconciliation-list-inline",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      ],
+      "reachableMode": [
+        "BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "action": "iam:ListGroupsForUser",
+      "capabilityId": "bootstrap-operator-policy-reconciliation-list-groups",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      ],
+      "reachableMode": [
+        "BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "action": "iam:GetUserPolicy",
+      "capabilityId": "bootstrap-operator-policy-reconciliation-read-inline",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      ],
+      "reachableMode": [
+        "BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "action": "iam:PutUserPolicy",
+      "capabilityId": "bootstrap-operator-policy-reconciliation-write-inline",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      ],
+      "reachableMode": [
+        "BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
     }
   ],
   "counters": {
@@ -2260,6 +2393,7 @@
   "modes": {
     "INITIAL_ACTIVATION_POLICY_RECONCILIATION": "PASS",
     "PROVIDER_READONLY_POLICY_RECONCILIATION": "PASS",
+    "BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION": "PASS",
     "MIXED_DUAL_SLOT_RECOVERY": "PASS",
     "NORMAL": "PASS",
     "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME": "PASS",
@@ -2277,6 +2411,7 @@
     "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION": "the independently authorized exact refresh-only plan uses its exact release journal, live-policy read, Stage-A state object, and canonical outer lock boundary",
     "INITIAL_ACTIVATION_POLICY_RECONCILIATION": "root performs read-only preparation; the purpose-bound INITIAL_ACTIVATION_RECONCILER GitHub Actions OIDC principal (arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler) publishes only the exact InitialActivationLifecycle managed-policy version after production environment approval",
     "PROVIDER_READONLY_POLICY_RECONCILIATION": "root performs exact target read-only preparation; independently approved execution uses the allowlisted reconciler and conditional S3 journal to publish at most one exact ProviderReadOnly managed-policy version",
+    "BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION": "root readback and protected authorization permit one exact MFA-gated verifier-role AssumeRole addition to the bootstrap user's sole inline policy; no verifier operational permission is granted directly",
     "MIXED_DUAL_SLOT_RECOVERY": "the protected recovery executor removes only AWSCURRENT from the seven exact reviewed historical versions under the source-bound capability and authorization contracts",
     "ROTATION_OVERLAP": "the source-owned overlap candidate builder derives the complete runtime dependency graph before its governed registration",
     "ROTATION_CLEANUP": "cleanup activates an already authenticated overlap/cleanup candidate and registers nothing",

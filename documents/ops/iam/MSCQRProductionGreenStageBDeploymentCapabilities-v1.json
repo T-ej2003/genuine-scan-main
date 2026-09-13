@@ -66,186 +66,191 @@
     },
     {
       "order": 13,
+      "id": "verifier-role-assumption",
+      "sourceFile": "scripts/aws/establish-production-ecs-exec-verifier-session.mjs"
+    },
+    {
+      "order": 14,
       "id": "release-role-assumption",
       "sourceFile": "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_INFRASTRUCTURE_RUNBOOK.md"
     },
     {
-      "order": 14,
+      "order": 15,
       "id": "release-direct-read-preflight",
       "sourceFile": "scripts/aws/run-production-green-stage-b-preflight.mjs"
     },
     {
-      "order": 15,
+      "order": 16,
       "id": "release-preflight-checker-trust-attestation",
       "sourceFile": "scripts/aws/production-release-preflight-checker-attestation.mjs"
     },
     {
-      "order": 16,
+      "order": 17,
       "id": "backend-config-generation",
       "sourceFile": "scripts/aws/generate-production-green-stage-b-backend-config.mjs"
     },
     {
-      "order": 17,
+      "order": 18,
       "id": "terraform-initialization",
       "sourceFile": "scripts/aws/run-production-green-stage-b-preflight.mjs"
     },
     {
-      "order": 18,
+      "order": 19,
       "id": "backend-metadata-validation",
       "sourceFile": "scripts/aws/stage-b-terraform-backend-contract.mjs"
     },
     {
-      "order": 19,
+      "order": 20,
       "id": "workspace-validation",
       "sourceFile": "scripts/aws/stage-b-terraform-workspace.mjs"
     },
     {
-      "order": 20,
+      "order": 21,
       "id": "canonical-backend-recovery",
       "sourceFile": "scripts/aws/recover-stage-b-backend-task-definition.mjs"
     },
     {
-      "order": 21,
+      "order": 22,
       "id": "backend-health-recovery",
       "sourceFile": "scripts/aws/recover-production-backend-health.mjs"
     },
     {
-      "order": 22,
+      "order": 23,
       "id": "runtime-consumability-evidence",
       "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs"
     },
     {
-      "order": 23,
+      "order": 24,
       "id": "runtime-consumability-convergence",
       "sourceFile": "scripts/aws/converge-production-ecs-runtime-policy.mjs"
     },
     {
-      "order": 24,
+      "order": 25,
       "id": "existing-revision-forward-recovery",
       "sourceFile": "scripts/aws/forward-recover-stage-b-existing-revision.mjs"
     },
     {
-      "order": 25,
+      "order": 26,
       "id": "stage-b-state-pull",
       "sourceFile": "scripts/aws/run-production-green-stage-b-preflight.mjs"
     },
     {
-      "order": 26,
+      "order": 27,
       "id": "stage-a-state-read",
       "sourceFile": "scripts/aws/run-production-green-stage-b-preflight.mjs"
     },
     {
-      "order": 27,
+      "order": 28,
       "id": "stage-a-handoff-generation",
       "sourceFile": "scripts/aws/generate-production-green-stage-a-prerequisites.mjs"
     },
     {
-      "order": 28,
+      "order": 29,
       "id": "root-drop-evidence-signing",
       "sourceFile": "scripts/aws/produce-production-root-drop-evidence.mjs"
     },
     {
-      "order": 29,
+      "order": 30,
       "id": "tfvars-generation",
       "sourceFile": "scripts/aws/generate-production-green-stage-b-tfvars.mjs"
     },
     {
-      "order": 30,
+      "order": 31,
       "id": "refresh-only",
       "sourceFile": "scripts/refresh-production-green-stage-b.mjs"
     },
     {
-      "order": 31,
+      "order": 32,
       "id": "saved-plan-generation",
       "sourceFile": "scripts/plan-production-green-stage-b.mjs"
     },
     {
-      "order": 32,
+      "order": 33,
       "id": "plan-json-canonicalization",
       "sourceFile": "scripts/plan-production-green-stage-b.mjs"
     },
     {
-      "order": 33,
+      "order": 34,
       "id": "reference-audit",
       "sourceFile": "scripts/aws/generate-production-green-stage-b-reference-audit.mjs"
     },
     {
-      "order": 34,
+      "order": 35,
       "id": "plan-bound-permission-report",
       "sourceFile": "scripts/aws/validate-production-green-stage-b-permissions.mjs"
     },
     {
-      "order": 35,
+      "order": 36,
       "id": "production-closure",
       "sourceFile": "scripts/aws/validate-stage-b-deployment-closure.mjs"
     },
     {
-      "order": 36,
+      "order": 37,
       "id": "validator",
       "sourceFile": "scripts/plan-production-green-stage-b.mjs"
     },
     {
-      "order": 37,
+      "order": 38,
       "id": "wrapper-verify-only",
       "sourceFile": "scripts/apply-production-green-stage-b.mjs"
     },
     {
-      "order": 38,
+      "order": 39,
       "id": "wrapper-apply",
       "sourceFile": "scripts/apply-production-green-stage-b.mjs"
     },
     {
-      "order": 39,
+      "order": 40,
       "id": "post-apply-verification",
       "sourceFile": "scripts/aws/verify-production-green-stage-b-ecs-observations.mjs"
     },
     {
-      "order": 40,
+      "order": 41,
       "id": "runtime-activation-boundary",
       "sourceFile": "scripts/aws/create-production-green-stage-b-approval.mjs"
     },
     {
-      "order": 41,
+      "order": 42,
       "id": "normal-backend-activation",
       "sourceFile": "scripts/aws/production-normal-backend-activation.mjs"
     },
     {
-      "order": 42,
+      "order": 43,
       "id": "initial-activation-lifecycle",
       "sourceFile": "scripts/aws/manage-production-initial-activation-lifecycle.mjs"
     },
     {
-      "order": 43,
+      "order": 44,
       "id": "dual-slot-rebaseline-durable-evidence",
       "sourceFile": "scripts/aws/persist-production-dual-slot-rebaseline-durable-evidence.mjs"
     },
     {
-      "order": 44,
+      "order": 45,
       "id": "stage-a-production-artifacts-policy-recovery",
       "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs"
     },
     {
-      "order": 45,
+      "order": 46,
       "id": "stage-a-production-artifacts-state-reconciliation",
       "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs"
     },
     {
-      "order": 46,
+      "order": 47,
       "id": "initial-activation-lifecycle-policy-reconciliation",
       "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs"
     },
     {
-      "order": 47,
+      "order": 48,
       "id": "provider-readonly-policy-reconciliation",
       "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs"
     },
     {
-      "order": 48,
+      "order": 49,
       "id": "mixed-dual-slot-recovery-iam-preflight",
       "sourceFile": "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs"
     },
     {
-      "order": 49,
+      "order": 50,
       "id": "mixed-dual-slot-recovery-execution",
       "sourceFile": "scripts/aws/recover-production-mixed-dual-slot-topology.mjs"
     }
@@ -895,6 +900,34 @@
       "mutation": false
     },
     {
+      "id": "bootstrap-assume-verifier",
+      "phase": "verifier-role-assumption",
+      "identity": "BOOTSTRAP_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/establish-production-ecs-exec-verifier-session.mjs",
+      "sourceFunction": "bootstrap-assume-verifier",
+      "action": "sts:AssumeRole",
+      "resources": [
+        "reviewed-exact-resource"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "BOOTSTRAP_SESSION",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/establish-production-ecs-exec-verifier-session.mjs",
+        "sid": "identity-boundary",
+        "livePolicyArn": null,
+        "expectedVersion": "source-bound",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
       "id": "bootstrap-identify",
       "phase": "bootstrap-mfa-session",
       "identity": "BOOTSTRAP_OPERATOR",
@@ -951,6 +984,202 @@
       },
       "required": true,
       "mutation": false
+    },
+    {
+      "id": "bootstrap-operator-policy-reconciliation-identify",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "bootstrap-operator-policy-reconciliation-identify",
+      "action": "sts:GetCallerIdentity",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "targetUserArn": "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionBootstrapOperator-v1.json",
+        "sid": "bootstrap-operator-policy-reconciliation-identify",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "bootstrap-operator-policy-reconciliation-list-attached",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "bootstrap-operator-policy-reconciliation-list-attached",
+      "action": "iam:ListAttachedUserPolicies",
+      "resources": [
+        "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      ],
+      "context": {
+        "account": "368992683803",
+        "targetUserArn": "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionBootstrapOperator-v1.json",
+        "sid": "bootstrap-operator-policy-reconciliation-list-attached",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "bootstrap-operator-policy-reconciliation-list-groups",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "bootstrap-operator-policy-reconciliation-list-groups",
+      "action": "iam:ListGroupsForUser",
+      "resources": [
+        "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      ],
+      "context": {
+        "account": "368992683803",
+        "targetUserArn": "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionBootstrapOperator-v1.json",
+        "sid": "bootstrap-operator-policy-reconciliation-list-groups",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "bootstrap-operator-policy-reconciliation-list-inline",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "bootstrap-operator-policy-reconciliation-list-inline",
+      "action": "iam:ListUserPolicies",
+      "resources": [
+        "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      ],
+      "context": {
+        "account": "368992683803",
+        "targetUserArn": "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionBootstrapOperator-v1.json",
+        "sid": "bootstrap-operator-policy-reconciliation-list-inline",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "bootstrap-operator-policy-reconciliation-read-inline",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "bootstrap-operator-policy-reconciliation-read-inline",
+      "action": "iam:GetUserPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      ],
+      "context": {
+        "account": "368992683803",
+        "targetUserArn": "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionBootstrapOperator-v1.json",
+        "sid": "bootstrap-operator-policy-reconciliation-read-inline",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "bootstrap-operator-policy-reconciliation-read-user",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "bootstrap-operator-policy-reconciliation-read-user",
+      "action": "iam:GetUser",
+      "resources": [
+        "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      ],
+      "context": {
+        "account": "368992683803",
+        "targetUserArn": "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionBootstrapOperator-v1.json",
+        "sid": "bootstrap-operator-policy-reconciliation-read-user",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "bootstrap-operator-policy-reconciliation-write-inline",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "bootstrap-operator-policy-reconciliation-write-inline",
+      "action": "iam:PutUserPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      ],
+      "context": {
+        "account": "368992683803",
+        "targetUserArn": "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      },
+      "classification": "ROOT_GOVERNED_IAM_POLICY_RECONCILIATION",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionBootstrapOperator-v1.json",
+        "sid": "bootstrap-operator-policy-reconciliation-write-inline",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": true
     },
     {
       "id": "checker-publish-stage-b-approval",
@@ -14013,6 +14242,83 @@
     {
       "sourceFile": "scripts/aws/produce-production-root-drop-evidence.mjs",
       "action": "sts:GetCallerIdentity"
+    },
+    {
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "bootstrap-operator-policy-reconciliation-read-user",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "iam:GetUser",
+      "resources": [
+        "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      ],
+      "capabilityId": "bootstrap-operator-policy-reconciliation-read-user"
+    },
+    {
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "bootstrap-operator-policy-reconciliation-read-inline",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "iam:GetUserPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      ],
+      "capabilityId": "bootstrap-operator-policy-reconciliation-read-inline"
+    },
+    {
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "bootstrap-operator-policy-reconciliation-list-attached",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "iam:ListAttachedUserPolicies",
+      "resources": [
+        "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      ],
+      "capabilityId": "bootstrap-operator-policy-reconciliation-list-attached"
+    },
+    {
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "bootstrap-operator-policy-reconciliation-list-groups",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "iam:ListGroupsForUser",
+      "resources": [
+        "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      ],
+      "capabilityId": "bootstrap-operator-policy-reconciliation-list-groups"
+    },
+    {
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "bootstrap-operator-policy-reconciliation-list-inline",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "iam:ListUserPolicies",
+      "resources": [
+        "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      ],
+      "capabilityId": "bootstrap-operator-policy-reconciliation-list-inline"
+    },
+    {
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "bootstrap-operator-policy-reconciliation-write-inline",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "iam:PutUserPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      ],
+      "capabilityId": "bootstrap-operator-policy-reconciliation-write-inline"
+    },
+    {
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "bootstrap-operator-policy-reconciliation-identify",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "sts:GetCallerIdentity",
+      "resources": [
+        "*"
+      ],
+      "capabilityId": "bootstrap-operator-policy-reconciliation-identify"
     },
     {
       "sourceFile": "scripts/aws/production-checker-chain-contract.mjs",

@@ -1,0 +1,36 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AssumeReleaseRoleOnlyWithMfa",
+      "Effect": "Allow",
+      "Action": "sts:AssumeRole",
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-release-deployer",
+      "Condition": {
+        "Bool": {
+          "aws:MultiFactorAuthPresent": "true"
+        }
+      }
+    },
+    {
+      "Sid": "AssumeEcsExecVerifierRoleOnlyWithMfa",
+      "Effect": "Allow",
+      "Action": "sts:AssumeRole",
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-ecs-exec-verifier",
+      "Condition": {
+        "Bool": {
+          "aws:MultiFactorAuthPresent": "true"
+        }
+      }
+    },
+    {
+      "Sid": "ReadOwnMfaState",
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetUser",
+        "iam:ListMFADevices"
+      ],
+      "Resource": "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+    }
+  ]
+}
