@@ -165,6 +165,7 @@ export const recordAuthSessionRiskSignal = async (
       expiresAt: Date;
       maxAttempts: number;
     } | null;
+    blockedLogin?: boolean;
     requestId: string;
   },
   db: AuthQueryClient
@@ -186,6 +187,7 @@ export const recordAuthSessionRiskSignal = async (
       ${input.challenge?.sessionBindingHash || null},
       ${input.challenge?.expiresAt || null}::timestamp without time zone,
       ${input.challenge?.maxAttempts || null}::integer,
+      ${Boolean(input.blockedLogin)},
       ${input.requestId}
     )
   `;

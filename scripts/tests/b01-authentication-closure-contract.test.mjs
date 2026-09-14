@@ -56,6 +56,26 @@ test("login challenge and risk policies are exact and actor-bound", () => {
     assert.match(selectPolicy, /IN \('mfa-challenge-read','mfa-challenge-fail','mfa-challenge-complete'\)/);
   }
   assert.match(policies, /'AUTH_MFA_SUCCESS','AUTH_MFA_LOGIN_COMPLETE'/);
+  const auditOutboxPolicy = policies.split("\n").find((line) =>
+    line.includes('CREATE POLICY "b01_auth_closure_auditlogoutbox_insert"')
+  );
+  assert(auditOutboxPolicy, "authentication closure audit outbox INSERT policy missing");
+  assert.match(auditOutboxPolicy, /login-risk-block-audit/);
+  assert.match(auditOutboxPolicy, /payload->>'action'='AUTH_LOGIN_BLOCKED_RISK'/);
+  assert.match(auditOutboxPolicy, /"requestId"=current_setting\('app\.auth_closure_request_id',true\)/);
+  assert.match(auditOutboxPolicy, /"initiatingUserId"=current_setting\('app\.auth_closure_user_id',true\)/);
+  assert.match(auditOutboxPolicy, /"initiatingActorRoleSnapshot" IN \('SUPER_ADMIN','PLATFORM_SUPER_ADMIN'\)/);
+  assert.match(auditOutboxPolicy, /payload->'details'->>'riskScore'=current_setting\('app\.auth_closure_risk_score',true\)/);
+  assert.match(auditOutboxPolicy, /payload->'details'->>'riskLevel'=current_setting\('app\.auth_closure_risk_level',true\)/);
+  assert.match(auditOutboxPolicy, /"jobType"='AUDIT_LOG_RECOVERY'/);
+  assert.match(auditOutboxPolicy, /"requestId"~'\^\[0-9a-f\]/);
+  assert.match(auditOutboxPolicy, /"payloadDigest"=encode\(sha256\(convert_to\(payload::text,'UTF8'\)\),'hex'\)/);
+  assert.match(auditOutboxPolicy, /"idempotencyKey"=encode\(sha256\(convert_to\('AUDIT_LOG_RECOVERY:'\|\|"requestId"\|\|':'\|\|"payloadDigest",'UTF8'\)\),'hex'\)/);
+  assert.doesNotMatch(auditOutboxPolicy, /payload->>'action'\s+IN\s+\([^)]*AUTH_LOGIN_BLOCKED_RISK/);
+  assert.match(source, /actor\.role NOT IN \('SUPER_ADMIN','PLATFORM_SUPER_ADMIN'\)/);
+  assert.match(source, /IF p_blocked_login THEN[\s\S]*?INSERT INTO public\."AuditLogOutbox"/);
+  assert.match(source, /audit_request_id:=gen_random_uuid\(\)::text/);
+  assert.match(source, /audit_payload_digest:=encode\(sha256\(convert_to\(audit_payload::text,'UTF8'\)\),'hex'\)/);
   const webauthnPolicies = policies.split("\n").filter((line) =>
     line.includes('CREATE POLICY "b01_auth_closure_authwebauthnchallenge_')
   );

@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='89f29b368afc843ae9f006196a65ea44e465a476b51421aec518adaed51a7852'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:89f29b368afc843ae9f006196a65ea44e465a476b51421aec518adaed51a7852'
+    AND source_contract_sha256='c5c6ae322904118002860b136fb225053f7d2cf36098578f3732b62f60ffc6bc'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:c5c6ae322904118002860b136fb225053f7d2cf36098578f3732b62f60ffc6bc'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:89f29b368afc843ae9f006196a65ea44e465a476b51421aec518adaed51a7852')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:c5c6ae322904118002860b136fb225053f7d2cf36098578f3732b62f60ffc6bc')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -2405,17 +2405,19 @@ BEGIN
 END
 $fn$;
 
+DROP FUNCTION IF EXISTS app_rls.record_auth_session_risk_signal(integer,text,text[],text,text,timestamp without time zone,text,text,text,timestamp without time zone,integer,text);
 CREATE OR REPLACE FUNCTION app_rls.record_auth_session_risk_signal(
   p_risk_score integer,p_risk_level text,p_reasons text[],p_ip_hash text,p_user_agent_hash text,p_recorded_at timestamp without time zone,
   p_password_hash text,p_challenge_ticket_hash text,p_challenge_session_hash text,p_challenge_expires_at timestamp without time zone,
-  p_challenge_max_attempts integer,p_request_id text
+  p_challenge_max_attempts integer,p_blocked_login boolean,p_request_id text
 ) RETURNS TABLE("recorded" boolean,"challengeCreated" boolean)
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
-DECLARE user_id text := current_setting('app.b01_preauth_user_id',true); challenge_id text; wants_challenge boolean := p_challenge_ticket_hash IS NOT NULL;
+DECLARE user_id text := current_setting('app.b01_preauth_user_id',true); actor record; challenge_id text; wants_challenge boolean := p_challenge_ticket_hash IS NOT NULL;
+        audit_payload jsonb; audit_request_id text; audit_payload_digest text; audit_idempotency_key text;
 BEGIN
   IF user_id='' OR p_risk_score NOT BETWEEN 0 AND 100 OR p_risk_level NOT IN ('LOW','MEDIUM','HIGH','CRITICAL')
      OR cardinality(p_reasons)>12 OR p_recorded_at IS NULL OR abs(extract(epoch FROM (p_recorded_at-clock_timestamp())))>300
-     OR p_request_id IS NULL OR length(p_request_id) NOT BETWEEN 1 AND 128
+     OR p_blocked_login IS NULL OR p_request_id IS NULL OR length(p_request_id) NOT BETWEEN 1 AND 128
      OR (p_password_hash IS NOT NULL AND p_password_hash !~ '^\$argon2(id|i|d)\$')
      OR wants_challenge IS DISTINCT FROM (p_challenge_session_hash IS NOT NULL AND p_challenge_expires_at IS NOT NULL AND p_challenge_max_attempts IS NOT NULL)
      OR (wants_challenge AND (p_challenge_ticket_hash !~ '^([0-9a-f]{12}:)?[a-f0-9]{64}$' OR p_challenge_session_hash !~ '^([0-9a-f]{12}:)?[a-f0-9]{64}$'
@@ -2426,10 +2428,30 @@ BEGIN
   PERFORM set_config('app.auth_closure_request_id',p_request_id,true);
   UPDATE public."User" u SET "failedLoginAttempts"=0,"lockedUntil"=NULL,"lastLoginAt"=p_recorded_at,"updatedAt"=p_recorded_at,
     "passwordHash"=coalesce(p_password_hash,u."passwordHash")
-    WHERE u.id=user_id AND u."isActive" AND u.status='ACTIVE'::public."UserStatus" AND u."disabledAt" IS NULL AND u."deletedAt" IS NULL;
+    WHERE u.id=user_id AND u."isActive" AND u.status='ACTIVE'::public."UserStatus" AND u."disabledAt" IS NULL AND u."deletedAt" IS NULL
+    RETURNING u.role::text,u."orgId",u."licenseeId" INTO actor;
   IF NOT FOUND THEN RAISE EXCEPTION 'AUTH_LOGIN_RISK_DENIED' USING ERRCODE='42501'; END IF;
   INSERT INTO public."AuthSessionRiskSignal"(id,"userId","riskScore","riskLevel",reasons,"ipHash","userAgentHash","createdAt")
   VALUES (gen_random_uuid()::text,user_id,p_risk_score,p_risk_level::public."AuthRiskLevel",p_reasons,p_ip_hash,p_user_agent_hash,p_recorded_at);
+  IF p_blocked_login THEN
+    IF wants_challenge OR actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') THEN
+      RAISE EXCEPTION 'AUTH_LOGIN_RISK_DENIED' USING ERRCODE='42501';
+    END IF;
+    PERFORM set_config('app.auth_closure_operation','login-risk-block-audit',true),
+            set_config('app.auth_closure_organization_id',coalesce(actor."orgId",''),true),
+            set_config('app.auth_closure_licensee_id',coalesce(actor."licenseeId",''),true),
+            set_config('app.auth_closure_risk_score',p_risk_score::text,true),
+            set_config('app.auth_closure_risk_level',p_risk_level,true);
+    audit_payload:=jsonb_build_object('userId',user_id,'orgId',actor."orgId",'licenseeId',actor."licenseeId",'action','AUTH_LOGIN_BLOCKED_RISK','entityType','User','entityId',user_id,
+      'details',jsonb_build_object('riskScore',p_risk_score,'riskLevel',p_risk_level,'reasons',p_reasons,'userAgentHash',p_user_agent_hash),'ipHash',p_ip_hash);
+    audit_request_id:=gen_random_uuid()::text;
+    audit_payload_digest:=encode(sha256(convert_to(audit_payload::text,'UTF8')),'hex');
+    audit_idempotency_key:=encode(sha256(convert_to('AUDIT_LOG_RECOVERY:'||audit_request_id||':'||audit_payload_digest,'UTF8')),'hex');
+    PERFORM set_config('app.auth_closure_request_id',audit_request_id,true);
+    INSERT INTO public."AuditLogOutbox"(id,payload,"jobType","requestId","payloadDigest","idempotencyKey","organizationId","licenseeId","initiatingUserId","initiatingActorRoleSnapshot","expiresAt","updatedAt") VALUES (
+      gen_random_uuid()::text,audit_payload,'AUDIT_LOG_RECOVERY',audit_request_id,audit_payload_digest,audit_idempotency_key,
+      actor."orgId",actor."licenseeId",user_id,actor.role,p_recorded_at+interval '1 day',p_recorded_at);
+  END IF;
   IF wants_challenge THEN
     challenge_id:=gen_random_uuid()::text;
     PERFORM set_config('app.auth_closure_operation','login-mfa-challenge',true),set_config('app.auth_closure_challenge_id',challenge_id,true),
@@ -3437,7 +3459,7 @@ REVOKE ALL ON FUNCTION app_rls.find_refresh_token_by_id(text,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.revoke_refresh_token_by_id(text,text,text,timestamp without time zone) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.require_recent_mfa_session(text,timestamp without time zone,integer) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.load_recent_auth_session_risk_inputs(integer) FROM PUBLIC;
-REVOKE ALL ON FUNCTION app_rls.record_auth_session_risk_signal(integer,text,text[],text,text,timestamp without time zone,text,text,text,timestamp without time zone,integer,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.record_auth_session_risk_signal(integer,text,text[],text,text,timestamp without time zone,text,text,text,timestamp without time zone,integer,boolean,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.create_refresh_token(text,text,text,timestamp without time zone,text,text,timestamp without time zone,timestamp without time zone,timestamp without time zone) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.load_authenticated_password_actor() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.list_active_refresh_tokens(text,timestamp without time zone) FROM PUBLIC;
@@ -3469,7 +3491,7 @@ REVOKE ALL ON FUNCTION app_rls.delete_admin_webauthn_credential(text,timestamp w
 
 GRANT EXECUTE ON FUNCTION app_rls.create_refresh_token(text,text,text,timestamp without time zone,text,text,timestamp without time zone,timestamp without time zone,timestamp without time zone) TO "mscqr_rls_cert_preauth";
 GRANT EXECUTE ON FUNCTION app_rls.load_recent_auth_session_risk_inputs(integer) TO "mscqr_rls_cert_preauth";
-GRANT EXECUTE ON FUNCTION app_rls.record_auth_session_risk_signal(integer,text,text[],text,text,timestamp without time zone,text,text,text,timestamp without time zone,integer,text) TO "mscqr_rls_cert_preauth";
+GRANT EXECUTE ON FUNCTION app_rls.record_auth_session_risk_signal(integer,text,text[],text,text,timestamp without time zone,text,text,text,timestamp without time zone,integer,boolean,text) TO "mscqr_rls_cert_preauth";
 GRANT EXECUTE ON FUNCTION app_rls.begin_admin_totp_enrollment(text,text,text,text,text[],timestamp without time zone,timestamp without time zone) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.change_authenticated_password(text,text,timestamp without time zone) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.complete_admin_mfa_challenge(text,text,text,timestamp without time zone,text,text) TO "mscqr_rls_cert_app";

@@ -20,6 +20,9 @@ process.env.ADMIN_LOGIN_MFA_CYCLE_DAYS = "28";
 let prismaUser = null;
 let auditEvents = [];
 let riskWrites = [];
+let riskBlocked = false;
+let riskWriteError = null;
+let ordinaryAuditWrites = 0;
 
 const prismaMock = {
   user: {
@@ -72,6 +75,7 @@ mockModule("services/auth/refreshTokenService.js", {
 
 mockModule("services/auditService.js", {
   createAuditLog: async (entry) => {
+    ordinaryAuditWrites += 1;
     auditEvents.push(entry);
     return null;
   },
@@ -89,9 +93,9 @@ mockModule("services/auth/sessionRiskService.js", {
     if (failMfaStatusRead) throw new Error("MFA_STATUS_UNAVAILABLE");
     return {
       score: 10,
-      riskLevel: "LOW",
-      reasons: ["Known device"],
-      shouldBlock: false,
+      riskLevel: riskBlocked ? "CRITICAL" : "LOW",
+      reasons: [riskBlocked ? "Untrusted network" : "Known device"],
+      shouldBlock: riskBlocked,
       actorState: {
         userId: prismaUser.id, email: prismaUser.email, name: prismaUser.name, role: prismaUser.role,
         legacyLicenseeId: null, legacyOrganizationId: null, emailVerifiedAt: prismaUser.emailVerifiedAt,
@@ -104,7 +108,9 @@ mockModule("services/auth/sessionRiskService.js", {
     };
   },
   persistAuthSessionRisk: async (input) => {
+    if (riskWriteError) throw riskWriteError;
     riskWrites.push(input);
+    if (input.blockedLogin) auditEvents.push({ action: "AUTH_LOGIN_BLOCKED_RISK" });
     return { recorded: true, challengeCreated: Boolean(input.challenge) };
   },
 });
@@ -137,6 +143,7 @@ mockModule("services/auth/authenticatedSessionCapabilityService.js", {
 });
 
 const { loginWithPassword } = require("../dist/services/auth/authService");
+const { normalizeAuthError } = require("../dist/controllers/authControllerShared");
 
 const baseUser = {
   id: "admin-1",
@@ -177,6 +184,47 @@ const run = async () => {
     "session should carry the previous verified-at timestamp when login MFA is still fresh"
   );
   assert.equal(riskWrites.length, 1, "recent MFA login should record one database-bound risk result");
+
+  riskBlocked = true;
+  auditEvents = [];
+  riskWrites = [];
+  ordinaryAuditWrites = 0;
+  let blockedError;
+  try {
+    await loginWithPassword({
+      email: prismaUser.email,
+      password: "correct-password",
+      ipHash: "blocked-ip-hash",
+      userAgent: "blocked-agent",
+      requestId: "blocked-admin-risk-login",
+    });
+  } catch (error) {
+    blockedError = error;
+  }
+  assert.match(String(blockedError?.message || ""), /High-risk login blocked/);
+  assert.deepEqual(normalizeAuthError(blockedError), {
+    status: 403,
+    error: "High-risk login blocked. Try from a trusted network or contact administrator.",
+  });
+  assert.equal(riskWrites.length, 1);
+  assert.equal(riskWrites[0].blockedLogin, true, "blocked risk must request the governed audit write");
+  assert.deepEqual(auditEvents.map(({ action }) => action), ["AUTH_LOGIN_BLOCKED_RISK"]);
+  assert.equal(ordinaryAuditWrites, 0, "blocked risk must not use the ordinary Prisma audit client");
+
+  riskWriteError = new Error("AUTH_LOGIN_BLOCKED_RISK_AUDIT_FAILED");
+  await assert.rejects(
+    loginWithPassword({
+      email: prismaUser.email,
+      password: "correct-password",
+      ipHash: "blocked-ip-hash",
+      userAgent: "blocked-agent",
+      requestId: "blocked-admin-risk-audit-failure",
+    }),
+    /AUTH_LOGIN_BLOCKED_RISK_AUDIT_FAILED/,
+    "mandatory audit failure must fail the blocked-login transaction closed",
+  );
+  riskWriteError = null;
+  riskBlocked = false;
 
   mockedMfaStatus = {
     enabled: true,
