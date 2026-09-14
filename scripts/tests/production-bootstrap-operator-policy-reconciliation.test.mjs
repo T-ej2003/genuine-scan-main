@@ -98,6 +98,13 @@ test("governed reconciliation retries only stale or transient IAM post-write rea
   }
 });
 
+test("post-write convergence exhaustion never repeats the authorized IAM mutation", () => {
+  const fixture = runner(desired.predecessorDocument, {}, { stalePostWriteReads: 4 }); const waits = [];
+  assert.throws(() => reconcileBootstrapOperatorPolicy({ run: fixture.run, authorization: authorized(), sourceSha, now, sleep: (milliseconds) => waits.push(milliseconds) }), /did not converge/);
+  assert.equal(fixture.writes(), 1);
+  assert.deepEqual(waits, [100, 200, 400]);
+});
+
 test("missing verifier capability, malformed policy topology, and unrelated roles fail closed", () => {
   const extraRole = structuredClone(desired.document);
   extraRole.Statement.find(({ Sid }) => Sid === "AssumeEcsExecVerifierRoleOnlyWithMfa").Resource = "arn:aws:iam::368992683803:role/unrelated";
