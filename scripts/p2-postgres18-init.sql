@@ -1,6 +1,7 @@
+-- Model the production broker without PostgreSQL 18's automatic CREATEROLE ADMIN memberships.
 CREATE ROLE "certification-administrator"
   LOGIN
-  NOSUPERUSER
+  SUPERUSER
   CREATEDB
   CREATEROLE
   NOINHERIT

@@ -348,6 +348,33 @@ test("generated package assigns every artifact to one exact executor phase", () 
   assert.match(publisher, /rls-executor\) printf 'production-rls-executor'/);
 });
 
+test("installer and RLS verifiers require the same nine SET-only memberships", () => {
+  const roles = fs.readFileSync(path.join(root, "scripts/rls/sql/generated/10-roles.sql"), "utf8");
+  const installerParents = [...roles.matchAll(/^GRANT "([^"]+)" TO "certification-administrator" WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;$/gm)]
+    .map((match) => match[1]).sort();
+  assert.equal(installerParents.length, 9);
+  const verifierFiles = [
+    "15-migration-preflight.sql",
+    "11-ownership-grants.sql",
+    "20-context-helpers.sql",
+    "21-runtime-grants.sql",
+    "30-policies.sql",
+    "40-post-apply-verification.sql",
+    "90-clean-room-role-cleanup.sql",
+  ];
+  for (const name of verifierFiles) {
+    const sql = fs.readFileSync(path.join(root, "scripts/rls/sql/generated", name), "utf8");
+    const verifierParents = [...sql.match(/parent\.rolname IN \(([^)]+)\)/)[1].matchAll(/'([^']+)'/g)]
+      .map((match) => match[1]).sort();
+    assert.deepEqual(verifierParents, installerParents);
+    assert.match(sql, /pg_auth_members[\s\S]*?\)<>9/);
+    assert.match(sql, /m\.admin_option OR m\.inherit_option OR NOT m\.set_option/);
+    assert.match(sql, /NOT m\.admin_option AND NOT m\.inherit_option AND m\.set_option\)<>1/);
+    assert.doesNotMatch(sql, /pg_auth_members[\s\S]*?\)<>18/);
+    assert.doesNotMatch(sql, /m\.admin_option AND NOT m\.inherit_option AND NOT m\.set_option/);
+  }
+});
+
 test("reduced surface has no prematurely enabled protected workflow", () => {
   const allowlist = readJson("essential-workflow-allowlist.json");
   const shutdown = readJson("unsupported-workflow-shutdown.json");
