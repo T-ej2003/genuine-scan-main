@@ -120,6 +120,7 @@ export const persistAuthSessionRisk = (
       expiresAt: Date;
       maxAttempts: number;
     } | null;
+    blockedLogin?: boolean;
   },
   risk: Awaited<ReturnType<typeof assessAuthSessionRisk>>,
   db: Pick<Prisma.TransactionClient, "$queryRaw">
@@ -133,4 +134,5 @@ export const persistAuthSessionRisk = (
   requestId: input.requestId,
   passwordHash: input.passwordHash,
   challenge: input.challenge,
+  blockedLogin: Boolean(input.blockedLogin),
 }, db);

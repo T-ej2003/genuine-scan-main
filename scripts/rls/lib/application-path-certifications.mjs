@@ -37,6 +37,7 @@ export const applicationPathCertificationFamilies = [
       MSCQR_B01_AUTH_CLOSURE_BOOTSTRAP_URL: "bootstrap",
       MSCQR_B01_AUTH_CLOSURE_PREAUTH_URL: "preauth",
       MSCQR_B01_AUTH_CLOSURE_APP_URL: "app",
+      MSCQR_B01_AUTH_CLOSURE_WORKER_URL: "worker",
     },
   },
   {

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "deploymentModel": "clean-room-blue-green",
-  "sourceContractSha256": "89f29b368afc843ae9f006196a65ea44e465a476b51421aec518adaed51a7852",
+  "sourceContractSha256": "c5c6ae322904118002860b136fb225053f7d2cf36098578f3732b62f60ffc6bc",
   "migrationSetDigest": "6642442a81cd98c7a132d241fa98e50ae231510896c9da67ab70d86b050d02db",
   "sourceContractInputs": [
     {
@@ -74,11 +74,11 @@
     },
     {
       "path": "scripts/rls/lib/application-path-certifications.mjs",
-      "sha256": "8a202c915125a7879a0fd0da2cc17fd6fa26ff150ac1c1448ff774e8d610a33a"
+      "sha256": "c71070f4d8be64ae70ebad643b39242f72fe2c37a0a23bce4715f73152d166df"
     },
     {
       "path": "scripts/rls/lib/named-sql-function-contracts.mjs",
-      "sha256": "143aa928b9670614cd69687b2102092980f377db9a83c822bc5a68a0880f7b71"
+      "sha256": "bae087860b0a630429c1272c5e084afd360125c900d8c5a499b00b3b166f3ccb"
     },
     {
       "path": "scripts/rls/lib/restricted-owner-projection-contract.mjs",
@@ -282,7 +282,7 @@
     },
     {
       "path": "backend/tests/rls-wave-b/b01/authenticationClosurePostgres18.test.js",
-      "sha256": "962e95850511eabecc2aa81c6ce6394f80d8f0b9bb0d7e5cdfac24cca8687429"
+      "sha256": "c181f3d57b17f6e6e26d3d043d208a1b36c5df7a6293bef2c3386321b329976f"
     },
     {
       "path": "backend/tests/riskAnalyticsApplicationPathPostgres18.test.js",
@@ -2641,7 +2641,7 @@
         "authentication-release-boundary"
       ],
       "scopeType": "security-definer-owner-and-capability-or-live-login-subject",
-      "scopePredicate": "((current_user='mscqr_rls_cert_auth_owner' AND current_setting('app.auth_closure_user_id',true)<>'' AND current_setting('app.auth_closure_user_id',true)=current_setting('app.b01_preauth_user_id',true)) AND current_setting('app.auth_closure_operation',true) IN ('login-mfa-challenge','login-session-create') AND payload->>'userId'=current_setting('app.auth_closure_user_id',true) AND payload->>'action' IN ('AUTH_MFA_CHALLENGE_ISSUED','AUTH_LOGIN_SUCCESS','AUTH_LOGIN_SUCCESS_RECENT_ADMIN_MFA')) OR ((current_user='mscqr_rls_cert_auth_owner' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.auth_closure_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.auth_closure_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" auth_session WHERE auth_session.id=current_setting('app.auth_closure_session_id',true) AND auth_session.\"userId\"=current_setting('app.auth_closure_user_id',true) AND auth_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND auth_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND auth_session.\"sessionCapabilityRevokedAt\" IS NULL AND auth_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND auth_session.\"revokedAt\" IS NULL AND auth_session.\"expiresAt\">clock_timestamp())) AND (((current_setting('app.auth_closure_operation',true) IN ('profile-update','password-change','mfa-enrollment-complete','mfa-disable','mfa-challenge-create','mfa-challenge-fail','mfa-challenge-complete','mfa-webauthn-registration-complete','mfa-webauthn-delete') AND payload->>'action' IN ('AUTH_PROFILE_UPDATED','AUTH_PASSWORD_CHANGED','AUTH_MFA_ENROLLED','AUTH_MFA_REPLACED','AUTH_MFA_DISABLED','AUTH_MFA_CHALLENGE_ISSUED','AUTH_MFA_CHALLENGE_EXPIRED','AUTH_MFA_FAILURE','AUTH_MFA_TOO_MANY_ATTEMPTS','AUTH_MFA_BACKUP_CODE_USED','AUTH_MFA_SUCCESS','AUTH_MFA_LOGIN_COMPLETE','AUTH_WEBAUTHN_ENROLLED','AUTH_WEBAUTHN_CREDENTIAL_REMOVED')) OR (current_setting('app.auth_closure_operation',true)='authenticated-session-create' AND payload->>'action' IN ('AUTH_LOGIN_SUCCESS','AUTH_LOGIN_SUCCESS_RECENT_ADMIN_MFA'))) OR (current_setting('app.auth_closure_operation',true)='manufacturer-scope-read' AND payload->>'action' IN ('MANUFACTURER_BOOTSTRAP_READ','MANUFACTURER_SCOPE_SWITCH'))) AND payload->>'userId'=current_setting('app.auth_closure_user_id',true))",
+      "scopePredicate": "((current_user='mscqr_rls_cert_auth_owner' AND current_setting('app.auth_closure_user_id',true)<>'' AND current_setting('app.auth_closure_user_id',true)=current_setting('app.b01_preauth_user_id',true)) AND ((current_setting('app.auth_closure_operation',true) IN ('login-mfa-challenge','login-session-create') AND payload->>'action' IN ('AUTH_MFA_CHALLENGE_ISSUED','AUTH_LOGIN_SUCCESS','AUTH_LOGIN_SUCCESS_RECENT_ADMIN_MFA')) OR (current_setting('app.auth_closure_operation',true)='login-risk-block-audit' AND payload->>'action'='AUTH_LOGIN_BLOCKED_RISK' AND payload->>'entityType'='User' AND payload->>'entityId'=current_setting('app.auth_closure_user_id',true) AND payload->'details'->>'riskScore'=current_setting('app.auth_closure_risk_score',true) AND payload->'details'->>'riskLevel'=current_setting('app.auth_closure_risk_level',true) AND \"jobType\"='AUDIT_LOG_RECOVERY' AND \"requestId\"=current_setting('app.auth_closure_request_id',true) AND \"requestId\"~'^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' AND \"payloadDigest\"=encode(sha256(convert_to(payload::text,'UTF8')),'hex') AND \"idempotencyKey\"=encode(sha256(convert_to('AUDIT_LOG_RECOVERY:'||\"requestId\"||':'||\"payloadDigest\",'UTF8')),'hex') AND \"organizationId\" IS NOT DISTINCT FROM nullif(current_setting('app.auth_closure_organization_id',true),'') AND \"licenseeId\" IS NOT DISTINCT FROM nullif(current_setting('app.auth_closure_licensee_id',true),'') AND \"initiatingUserId\"=current_setting('app.auth_closure_user_id',true) AND \"initiatingActorRoleSnapshot\" IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN'))) AND payload->>'userId'=current_setting('app.auth_closure_user_id',true)) OR ((current_user='mscqr_rls_cert_auth_owner' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.auth_closure_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.auth_closure_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" auth_session WHERE auth_session.id=current_setting('app.auth_closure_session_id',true) AND auth_session.\"userId\"=current_setting('app.auth_closure_user_id',true) AND auth_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND auth_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND auth_session.\"sessionCapabilityRevokedAt\" IS NULL AND auth_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND auth_session.\"revokedAt\" IS NULL AND auth_session.\"expiresAt\">clock_timestamp())) AND (((current_setting('app.auth_closure_operation',true) IN ('profile-update','password-change','mfa-enrollment-complete','mfa-disable','mfa-challenge-create','mfa-challenge-fail','mfa-challenge-complete','mfa-webauthn-registration-complete','mfa-webauthn-delete') AND payload->>'action' IN ('AUTH_PROFILE_UPDATED','AUTH_PASSWORD_CHANGED','AUTH_MFA_ENROLLED','AUTH_MFA_REPLACED','AUTH_MFA_DISABLED','AUTH_MFA_CHALLENGE_ISSUED','AUTH_MFA_CHALLENGE_EXPIRED','AUTH_MFA_FAILURE','AUTH_MFA_TOO_MANY_ATTEMPTS','AUTH_MFA_BACKUP_CODE_USED','AUTH_MFA_SUCCESS','AUTH_MFA_LOGIN_COMPLETE','AUTH_WEBAUTHN_ENROLLED','AUTH_WEBAUTHN_CREDENTIAL_REMOVED')) OR (current_setting('app.auth_closure_operation',true)='authenticated-session-create' AND payload->>'action' IN ('AUTH_LOGIN_SUCCESS','AUTH_LOGIN_SUCCESS_RECENT_ADMIN_MFA'))) OR (current_setting('app.auth_closure_operation',true)='manufacturer-scope-read' AND payload->>'action' IN ('MANUFACTURER_BOOTSTRAP_READ','MANUFACTURER_SCOPE_SWITCH'))) AND payload->>'userId'=current_setting('app.auth_closure_user_id',true))",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:b01-change-authenticated-password:AuditLogOutbox:INSERT",
@@ -11379,55 +11379,55 @@
       "key": "owner",
       "name": "mscqr_rls_cert_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:89f29b368afc843ae9f006196a65ea44e465a476b51421aec518adaed51a7852"
+      "marker": "mscqr-full-rls-clean-room:certification:c5c6ae322904118002860b136fb225053f7d2cf36098578f3732b62f60ffc6bc"
     },
     {
       "key": "authOwner",
       "name": "mscqr_rls_cert_auth_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:89f29b368afc843ae9f006196a65ea44e465a476b51421aec518adaed51a7852"
+      "marker": "mscqr-full-rls-clean-room:certification:c5c6ae322904118002860b136fb225053f7d2cf36098578f3732b62f60ffc6bc"
     },
     {
       "key": "app",
       "name": "mscqr_rls_cert_app",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:89f29b368afc843ae9f006196a65ea44e465a476b51421aec518adaed51a7852"
+      "marker": "mscqr-full-rls-clean-room:certification:c5c6ae322904118002860b136fb225053f7d2cf36098578f3732b62f60ffc6bc"
     },
     {
       "key": "read",
       "name": "mscqr_rls_cert_read",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:89f29b368afc843ae9f006196a65ea44e465a476b51421aec518adaed51a7852"
+      "marker": "mscqr-full-rls-clean-room:certification:c5c6ae322904118002860b136fb225053f7d2cf36098578f3732b62f60ffc6bc"
     },
     {
       "key": "preauth",
       "name": "mscqr_rls_cert_preauth",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:89f29b368afc843ae9f006196a65ea44e465a476b51421aec518adaed51a7852"
+      "marker": "mscqr-full-rls-clean-room:certification:c5c6ae322904118002860b136fb225053f7d2cf36098578f3732b62f60ffc6bc"
     },
     {
       "key": "worker",
       "name": "mscqr_rls_cert_worker",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:89f29b368afc843ae9f006196a65ea44e465a476b51421aec518adaed51a7852"
+      "marker": "mscqr-full-rls-clean-room:certification:c5c6ae322904118002860b136fb225053f7d2cf36098578f3732b62f60ffc6bc"
     },
     {
       "key": "scheduled",
       "name": "mscqr_rls_cert_scheduled",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:89f29b368afc843ae9f006196a65ea44e465a476b51421aec518adaed51a7852"
+      "marker": "mscqr-full-rls-clean-room:certification:c5c6ae322904118002860b136fb225053f7d2cf36098578f3732b62f60ffc6bc"
     },
     {
       "key": "operator",
       "name": "mscqr_rls_cert_operator",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:89f29b368afc843ae9f006196a65ea44e465a476b51421aec518adaed51a7852"
+      "marker": "mscqr-full-rls-clean-room:certification:c5c6ae322904118002860b136fb225053f7d2cf36098578f3732b62f60ffc6bc"
     },
     {
       "key": "migration",
       "name": "mscqr_rls_cert_migration",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:89f29b368afc843ae9f006196a65ea44e465a476b51421aec518adaed51a7852"
+      "marker": "mscqr-full-rls-clean-room:certification:c5c6ae322904118002860b136fb225053f7d2cf36098578f3732b62f60ffc6bc"
     }
   ]
 }

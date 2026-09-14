@@ -12,7 +12,6 @@ import {
   revokeAllUserRefreshTokens,
   revokeRefreshTokenById,
 } from "./refreshTokenService";
-import { createAuditLog } from "../auditService";
 import { queueAuditLogOutbox } from "../auditLogOutboxService";
 import { assessAuthSessionRisk, persistAuthSessionRisk } from "./sessionRiskService";
 import { resolveManufacturerSessionScope } from "../manufacturerScopeService";
@@ -650,23 +649,8 @@ export const loginWithPassword = async (input: {
   if (risk.shouldBlock && isPlatformSuperAdminRole(user.role)) {
     await preAuthPrisma.$transaction(async (tx) => {
       await bindPasswordSubject(tx);
-      await persistAuthSessionRisk({ ipHash: input.ipHash, userAgent: input.userAgent, requestId: input.requestId }, risk, tx);
+      await persistAuthSessionRisk({ ipHash: input.ipHash, userAgent: input.userAgent, requestId: input.requestId, blockedLogin: true }, risk, tx);
     });
-    await createAuditLog({
-      userId: user.id,
-      licenseeId: user.licenseeId || undefined,
-      orgId: user.orgId || undefined,
-      action: "AUTH_LOGIN_BLOCKED_RISK",
-      entityType: "User",
-      entityId: user.id,
-      details: {
-        riskScore: risk.score,
-        riskLevel: risk.riskLevel,
-        reasons: risk.reasons,
-      },
-      ipHash: input.ipHash || undefined,
-      userAgent: input.userAgent || undefined,
-    } as any);
     throw new Error("High-risk login blocked. Try from a trusted network or contact administrator.");
   }
 

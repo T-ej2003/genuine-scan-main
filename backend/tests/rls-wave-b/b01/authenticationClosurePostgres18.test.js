@@ -35,7 +35,7 @@ const denied = (raw, sql, pattern = /permission denied|AUTH_SESSION_CAPABILITY_D
 const loginSession = (preauth, tokenHash, requestId, mfa = false) => last(preauth, `BEGIN;
   SELECT id FROM app_auth.lookup_password_user('auth-a@example.invalid');
   SELECT "actorState"->>'userId' FROM app_rls.load_recent_auth_session_risk_inputs(5);
-  SELECT "recorded" FROM app_rls.record_auth_session_risk_signal(10,'LOW',ARRAY['KNOWN_DEVICE'],NULL,NULL,transaction_timestamp()::timestamp,NULL,NULL,NULL,NULL,NULL,'${requestId}');
+  SELECT "recorded" FROM app_rls.record_auth_session_risk_signal(10,'LOW',ARRAY['KNOWN_DEVICE'],NULL,NULL,transaction_timestamp()::timestamp,NULL,NULL,NULL,NULL,NULL,false,'${requestId}');
   SELECT id FROM app_rls.create_refresh_token('${ids.userA}','${ids.orgA}','${tokenHash}',(transaction_timestamp()+interval '1 day')::timestamp,NULL,'focused-postgres18',transaction_timestamp()::timestamp,${mfa ? "transaction_timestamp()::timestamp" : "NULL"},transaction_timestamp()::timestamp);
   COMMIT;`);
 
@@ -45,13 +45,17 @@ async function main() {
   const bootstrap = process.env.MSCQR_B01_AUTH_CLOSURE_BOOTSTRAP_URL;
   const preauth = process.env.MSCQR_B01_AUTH_CLOSURE_PREAUTH_URL;
   const app = process.env.MSCQR_B01_AUTH_CLOSURE_APP_URL;
-  for (const url of [bootstrap, preauth, app]) connection(url);
+  const worker = process.env.MSCQR_B01_AUTH_CLOSURE_WORKER_URL;
+  for (const url of [bootstrap, preauth, app, worker]) connection(url);
   assert.equal(Number(last(bootstrap, "select current_setting('server_version_num')::int / 10000")), 18);
 
   for (const table of ["User", "RefreshToken", "AuthSessionRiskSignal", "MfaLoginChallenge", "AuthWebAuthnChallenge"]) {
     denied(app, `SELECT * FROM public."${table}" LIMIT 1`);
     denied(preauth, `SELECT * FROM public."${table}" LIMIT 1`);
   }
+  denied(app, `INSERT INTO public."AuditLog" (id,action,"entityType") VALUES (gen_random_uuid()::text,'AUTH_LOGIN_BLOCKED_RISK','User')`);
+  denied(app, `INSERT INTO public."AuditLogOutbox" (id,payload,"updatedAt") VALUES (gen_random_uuid()::text,'{"action":"AUTH_LOGIN_BLOCKED_RISK"}'::jsonb,now())`);
+  denied(preauth, `INSERT INTO public."AuditLogOutbox" (id,payload,"updatedAt") VALUES (gen_random_uuid()::text,'{"action":"AUTH_LOGIN_BLOCKED_RISK"}'::jsonb,now())`);
   denied(app, `SELECT app_rls.install_actor_context('${ids.userA}','LICENSEE_ADMIN','${ids.orgA}','${ids.licenseeA}','','password-verified','forged','auth-me')`);
   assert.equal(last(app, `BEGIN; SELECT set_config('app.user_id','${ids.userA}',true),set_config('app.organization_id','${ids.orgA}',true),set_config('app.licensee_id','${ids.licenseeA}',true),set_config('app.auth_session_verified','1',true); SELECT count(id) FROM public."User"; ROLLBACK`), "0");
 
@@ -71,7 +75,26 @@ async function main() {
   assert.match(primaryId, /^[0-9a-f-]{36}$/i);
   assert.equal(last(bootstrap, `SELECT count(*) FROM public."AuthSessionRiskSignal" WHERE "userId"='${ids.userA}'`), "1");
   assert.equal(last(bootstrap, `SELECT count(*) FROM public."AuthSessionRiskSignal" WHERE "userId"='${ids.userB}'`), "0");
-  assert.equal(last(preauth, `BEGIN; SELECT id FROM app_auth.lookup_password_user('auth-a@example.invalid'); SELECT "challengeCreated" FROM app_rls.record_auth_session_risk_signal(30,'MEDIUM',ARRAY['MFA_REQUIRED'],NULL,NULL,transaction_timestamp()::timestamp,NULL,'${hash("d")}','${hash("e")}',(transaction_timestamp()+interval '5 minutes')::timestamp,5,'auth-mfa-challenge'); COMMIT`), "t");
+  denied(preauth, `SELECT "recorded" FROM app_rls.record_auth_session_risk_signal(90,'CRITICAL',ARRAY['UNTRUSTED_NETWORK'],NULL,NULL,transaction_timestamp()::timestamp,NULL,NULL,NULL,NULL,NULL,true,'missing-password-subject')`, /AUTH_LOGIN_RISK_DENIED/);
+  psql(bootstrap, `UPDATE public."User" SET role='PLATFORM_SUPER_ADMIN',"orgId"=NULL,"licenseeId"=NULL WHERE id='${ids.userA}'`);
+  assert.equal(last(preauth, `BEGIN; SELECT id FROM app_auth.lookup_password_user('auth-a@example.invalid'); SELECT "recorded" FROM app_rls.record_auth_session_risk_signal(90,'CRITICAL',ARRAY['UNTRUSTED_NETWORK'],'${hash("blocked-ip")}','${hash("blocked-agent")}',transaction_timestamp()::timestamp,NULL,NULL,NULL,NULL,NULL,true,'blocked-admin-risk'); COMMIT`), "t");
+  const blockedRiskWhere = `"initiatingUserId"='${ids.userA}' AND "initiatingActorRoleSnapshot"='PLATFORM_SUPER_ADMIN' AND "jobType"='AUDIT_LOG_RECOVERY' AND "requestId"~'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' AND "payloadDigest"=encode(sha256(convert_to(payload::text,'UTF8')),'hex') AND "idempotencyKey"=encode(sha256(convert_to('AUDIT_LOG_RECOVERY:'||"requestId"||':'||"payloadDigest",'UTF8')),'hex') AND payload->>'action'='AUTH_LOGIN_BLOCKED_RISK' AND payload->>'entityType'='User' AND payload->>'entityId'='${ids.userA}' AND payload->'details'->>'riskLevel'='CRITICAL'`;
+  assert.equal(last(bootstrap, `SELECT count(*) FROM public."AuditLogOutbox" WHERE ${blockedRiskWhere}`), "1");
+  psql(bootstrap, `UPDATE public."AuditLogOutbox" SET status='SENT' WHERE payload->>'action'<>'AUTH_LOGIN_BLOCKED_RISK'`);
+  const blockedRiskClaim = JSON.parse(last(worker, `SELECT row_to_json(claim)::text FROM app_rls.claim_audit_log_outbox_slice(transaction_timestamp()::timestamp,1) claim`));
+  assert.match(blockedRiskClaim.id, /^[0-9a-f-]{36}$/i);
+  assert.match(blockedRiskClaim.requestId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  assert.match(blockedRiskClaim.payloadDigest, /^[0-9a-f]{64}$/);
+  assert.match(blockedRiskClaim.idempotencyKey, /^[0-9a-f]{64}$/);
+  assert.equal(JSON.parse(last(worker, `SELECT row_to_json(result)::text FROM app_rls.consume_audit_log_outbox('${blockedRiskClaim.id}','${blockedRiskClaim.payloadDigest}',transaction_timestamp()::timestamp) result`)).replayed, false);
+  assert.equal(last(bootstrap, `SELECT count(*) FROM public."AuditLog" WHERE "userId"='${ids.userA}' AND action='AUTH_LOGIN_BLOCKED_RISK' AND "entityType"='User' AND "entityId"='${ids.userA}' AND details->>'riskLevel'='CRITICAL'`), "1");
+  const blockedRiskCount = last(bootstrap, `SELECT count(*) FROM public."AuditLogOutbox" WHERE ${blockedRiskWhere}`);
+  denied(preauth, `BEGIN; SELECT id FROM app_auth.lookup_password_user('auth-a@example.invalid'); SELECT "recorded" FROM app_rls.record_auth_session_risk_signal(90,'CRITICAL',ARRAY['UNTRUSTED_NETWORK'],NULL,NULL,transaction_timestamp()::timestamp,NULL,NULL,NULL,NULL,NULL,true,'blocked-admin-risk-rollback'); SELECT 1/0; COMMIT`, /division by zero/);
+  assert.equal(last(bootstrap, `SELECT count(*) FROM public."AuditLogOutbox" WHERE ${blockedRiskWhere}`), blockedRiskCount);
+  psql(bootstrap, `UPDATE public."User" SET role='LICENSEE_ADMIN',"orgId"='${ids.orgA}',"licenseeId"='${ids.licenseeA}' WHERE id='${ids.userA}'`);
+  denied(preauth, `BEGIN; SELECT id FROM app_auth.lookup_password_user('auth-a@example.invalid'); SELECT "recorded" FROM app_rls.record_auth_session_risk_signal(90,'CRITICAL',ARRAY['UNTRUSTED_NETWORK'],NULL,NULL,transaction_timestamp()::timestamp,NULL,NULL,NULL,NULL,NULL,true,'blocked-non-platform-risk'); COMMIT`, /AUTH_LOGIN_RISK_DENIED/);
+  assert.equal(last(bootstrap, `SELECT count(*) FROM public."AuditLogOutbox" WHERE payload->>'action'='AUTH_LOGIN_BLOCKED_RISK'`), blockedRiskCount);
+  assert.equal(last(preauth, `BEGIN; SELECT id FROM app_auth.lookup_password_user('auth-a@example.invalid'); SELECT "challengeCreated" FROM app_rls.record_auth_session_risk_signal(30,'MEDIUM',ARRAY['MFA_REQUIRED'],NULL,NULL,transaction_timestamp()::timestamp,NULL,'${hash("d")}','${hash("e")}',(transaction_timestamp()+interval '5 minutes')::timestamp,5,false,'auth-mfa-challenge'); COMMIT`), "t");
   assert.equal(last(bootstrap, `SELECT count(*) FROM public."MfaLoginChallenge" WHERE "userId"='${ids.userA}' AND "ticketHash"='${hash("d")}' AND "consumedAt" IS NULL AND "expiresAt">now()`), "1");
   assert.equal(last(bootstrap, `SELECT count(*) FROM public."MfaLoginChallenge" WHERE "userId"='${ids.userB}'`), "0");
 
