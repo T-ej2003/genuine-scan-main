@@ -196,7 +196,7 @@ test("legacy exact-complete authorization includes every reachable reservation a
   assert.equal(expiredOwned.reservationWrites(), 1);
   assert.equal(expiredOwned.tagWrites(), 1);
   const concurrent = runner(desired.predecessorDocument, { accessKeys: legacyAccessKeys, reservation: { schemaVersion: 2, kind: "PRODUCTION_BOOTSTRAP_OPERATOR_LEGACY_MFA_TRANSITION_RESERVATION", authorizationSha256: authorization.authorizationSha256, expiresAt: authorization.preparation.expiresAt, executionId: "11111111-1111-4111-8111-111111111111", leaseExpiresAt: new Date(now.getTime() + 60_000).toISOString() } });
-  assert.throws(() => reconcileBootstrapOperatorPolicy({ run: concurrent.run, authorization, sourceSha, now, verifyLiveBinding: () => authorization.preparation.legacyRotationBindingOrigin }), /active executor/);
+  assert.throws(() => reconcileBootstrapOperatorPolicy({ run: concurrent.run, authorization, sourceSha, now, verifyLiveBinding: () => authorization.preparation.legacyRotationBindingOrigin }), /active executor|predecessor changed/);
   assert.equal(concurrent.writes(), 0);
   assert.equal(concurrent.tagWrites(), 0);
   const completed = runner(desired.document, { accessKeys: legacyAccessKeys, tags: [{ Key: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.legacyTransitionConsumptionTagKey, Value: `completed:${authorization.authorizationSha256}` }] });
@@ -245,29 +245,29 @@ test("the source-bound legacy MFA transition requires the exact historical bindi
   assert.deepEqual(authorization.preparation.expectedWritePlan.map(({ action }) => action), ["s3:PutObject", "iam:TagUser", "iam:PutUserPolicy", "iam:TagUser"]);
   assert.doesNotMatch(JSON.stringify(authorization), /key-a|key-b/);
   const fixture = runner(desired.predecessorDocument, { accessKeys: legacyAccessKeys });
-  assert.deepEqual(reconcileBootstrapOperatorPolicy({ run: fixture.run, authorization, sourceSha, proveDescendant: () => true, verifyLiveBinding: () => legacyBindingOrigin(), now }), { status: "COMPLETE", iamPutUserPolicyCount: 1, iamTagUserCount: 2, s3PutObjectCount: 1, recovered: false });
+  assert.deepEqual(reconcileBootstrapOperatorPolicy({ run: fixture.run, authorization, sourceSha, proveDescendant: () => true, verifyLiveBinding: () => legacyBindingOrigin(), now, clock: () => now }), { status: "COMPLETE", iamPutUserPolicyCount: 1, iamTagUserCount: 2, s3PutObjectCount: 1, recovered: false });
   assert.equal(fixture.writes(), 1);
   assert.equal(fixture.tagWrites(), 2);
   assert.equal(fixture.reservationWrites(), 1);
 
   const reservation = [{ Key: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.legacyTransitionConsumptionTagKey, Value: `reserved:${authorization.authorizationSha256}:${authorization.preparation.expiresAt}` }];
   const interrupted = runner(desired.predecessorDocument, { accessKeys: legacyAccessKeys, tags: reservation });
-  assert.deepEqual(reconcileBootstrapOperatorPolicy({ run: interrupted.run, authorization, sourceSha, proveDescendant: () => true, verifyLiveBinding: () => legacyBindingOrigin(), now }), { status: "COMPLETE", iamPutUserPolicyCount: 1, iamTagUserCount: 1, s3PutObjectCount: 1, recovered: false });
+  assert.deepEqual(reconcileBootstrapOperatorPolicy({ run: interrupted.run, authorization, sourceSha, proveDescendant: () => true, verifyLiveBinding: () => legacyBindingOrigin(), now, clock: () => now }), { status: "COMPLETE", iamPutUserPolicyCount: 1, iamTagUserCount: 1, s3PutObjectCount: 1, recovered: false });
   assert.equal(interrupted.writes(), 1);
   assert.equal(interrupted.tagWrites(), 1);
 
   const postWriteInterruption = runner(desired.document, { accessKeys: legacyAccessKeys, tags: reservation });
-  assert.deepEqual(reconcileBootstrapOperatorPolicy({ run: postWriteInterruption.run, authorization, sourceSha, proveDescendant: () => true, verifyLiveBinding: () => legacyBindingOrigin(), now }), { status: "COMPLETE", iamPutUserPolicyCount: 0, iamTagUserCount: 1, s3PutObjectCount: 1, recovered: true });
+  assert.deepEqual(reconcileBootstrapOperatorPolicy({ run: postWriteInterruption.run, authorization, sourceSha, proveDescendant: () => true, verifyLiveBinding: () => legacyBindingOrigin(), now, clock: () => now }), { status: "COMPLETE", iamPutUserPolicyCount: 0, iamTagUserCount: 1, s3PutObjectCount: 1, recovered: true });
   assert.equal(postWriteInterruption.writes(), 0);
   assert.equal(postWriteInterruption.tagWrites(), 1);
 
   const completedReplay = runner(desired.document, { accessKeys: legacyAccessKeys, tags: fixture.tags() });
-  assert.deepEqual(reconcileBootstrapOperatorPolicy({ run: completedReplay.run, authorization, sourceSha, proveDescendant: () => true, verifyLiveBinding: () => legacyBindingOrigin(), now }), { status: "COMPLETE", iamPutUserPolicyCount: 0, iamTagUserCount: 0, s3PutObjectCount: 0, recovered: true });
+  assert.deepEqual(reconcileBootstrapOperatorPolicy({ run: completedReplay.run, authorization, sourceSha, proveDescendant: () => true, verifyLiveBinding: () => legacyBindingOrigin(), now, clock: () => now }), { status: "COMPLETE", iamPutUserPolicyCount: 0, iamTagUserCount: 0, s3PutObjectCount: 0, recovered: true });
   assert.equal(completedReplay.writes(), 0);
   assert.equal(completedReplay.tagWrites(), 0);
 
   const expiredReservation = runner(desired.predecessorDocument, { accessKeys: legacyAccessKeys, tags: [{ Key: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.legacyTransitionConsumptionTagKey, Value: `reserved:${"e".repeat(64)}:${new Date(now.getTime() - 1).toISOString()}` }] });
-  assert.deepEqual(reconcileBootstrapOperatorPolicy({ run: expiredReservation.run, authorization, sourceSha, proveDescendant: () => true, verifyLiveBinding: () => legacyBindingOrigin(), now }), { status: "COMPLETE", iamPutUserPolicyCount: 1, iamTagUserCount: 2, s3PutObjectCount: 1, recovered: false });
+  assert.deepEqual(reconcileBootstrapOperatorPolicy({ run: expiredReservation.run, authorization, sourceSha, proveDescendant: () => true, verifyLiveBinding: () => legacyBindingOrigin(), now, clock: () => now }), { status: "COMPLETE", iamPutUserPolicyCount: 1, iamTagUserCount: 2, s3PutObjectCount: 1, recovered: false });
   assert.equal(expiredReservation.writes(), 1);
   assert.equal(expiredReservation.tagWrites(), 2);
 
@@ -311,7 +311,7 @@ test("legacy transition reserves atomically before IAM mutation and only replace
   assert.equal(active.reservationWrites(), 0);
 
   const expired = runner(desired.predecessorDocument, { accessKeys: legacyAccessKeys, reservation: { schemaVersion: 1, kind: "PRODUCTION_BOOTSTRAP_OPERATOR_LEGACY_MFA_TRANSITION_RESERVATION", authorizationSha256: "e".repeat(64), expiresAt: new Date(now.getTime() - 1).toISOString() } });
-  assert.deepEqual(reconcileBootstrapOperatorPolicy({ run: expired.run, authorization, sourceSha, proveDescendant: () => true, verifyLiveBinding: () => legacyBindingOrigin(), now }), { status: "COMPLETE", iamPutUserPolicyCount: 1, iamTagUserCount: 2, s3PutObjectCount: 1, recovered: false });
+  assert.deepEqual(reconcileBootstrapOperatorPolicy({ run: expired.run, authorization, sourceSha, proveDescendant: () => true, verifyLiveBinding: () => legacyBindingOrigin(), now, clock: () => now }), { status: "COMPLETE", iamPutUserPolicyCount: 1, iamTagUserCount: 2, s3PutObjectCount: 1, recovered: false });
   const replacement = expired.commands().find((args) => args[0] === "s3api" && args[1] === "put-object");
   assert.equal(replacement.includes("--if-match"), true);
   assert.equal(replacement.includes("--if-none-match"), false);
