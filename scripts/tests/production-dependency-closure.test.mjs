@@ -3,6 +3,7 @@ import fs from "node:fs";
 import test from "node:test";
 import { CAPABILITY_GRAPH_PATH, discoverAwsCliActions } from "../aws/generate-production-green-stage-b-capability-graph.mjs";
 import { assertChangedAwsCallClosure, assertNoUnknownRollbackDependency, assertRollbackSemanticBoundary, assertStageAProductionArtifactsCapabilityClosure, buildProductionDependencyClosure } from "../aws/verify-production-dependency-closure.mjs";
+import { MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES } from "../aws/production-mixed-dual-slot-recovery-contract.mjs";
 
 const graph = () => JSON.parse(fs.readFileSync(CAPABILITY_GRAPH_PATH, "utf8"));
 
@@ -39,7 +40,13 @@ test("complete production dependency closure is exact across modes and failure p
     ["scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs", "s3:PutObject", "stage-a-artifacts-recovery-release-lock-acquire"],
     ["scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs", "s3:DeleteObject", "stage-a-artifacts-recovery-release-lock-release"],
   ]);
-  assert.equal(report.newAwsCalls.length, 42 + stageAAdditions.length + 15 + 14 + 10 + 7 + 1 + 6); // baseline, Stage-A, policy reconciliation, ProviderReadOnly, bootstrap-user reconciliation, recovery IAM preflight, attestation signing, and exact executor calls
+  assert.equal(report.newAwsCalls.length, 42 + stageAAdditions.length + 15 + 14 + 21 + 7 + 1 + 6); // baseline, Stage-A, policy reconciliation, ProviderReadOnly, bootstrap-user preparation/authorization/reconciliation, recovery IAM preflight, attestation signing, and exact executor calls
+  assert.deepEqual(report.newAwsCalls.filter(({ capabilityId }) => capabilityId?.startsWith("bootstrap-operator-policy-authorization-")).map(({ capabilityId, action, resources, identity, reachableMode }) => [capabilityId, action, resources, identity, reachableMode]), [
+    ["bootstrap-operator-policy-authorization-identify", "sts:GetCallerIdentity", ["*"], "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],
+    ["bootstrap-operator-policy-authorization-read-transition-consumption", "iam:ListUserTags", ["arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"], "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],
+    ["bootstrap-operator-policy-authorization-read-initial-overlap-secrets", "secretsmanager:DescribeSecret", MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],
+    ["bootstrap-operator-policy-authorization-read-initial-overlap-values", "secretsmanager:GetSecretValue", MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],
+  ]);
   assert.deepEqual(report.newAwsCalls.filter(({ capabilityId }) => capabilityId?.startsWith("bootstrap-operator-policy-reconciliation-")).map(({ capabilityId, action, resources, identity, reachableMode }) => [capabilityId, action, resources, identity, reachableMode]), [
     ["bootstrap-operator-policy-reconciliation-identify", "sts:GetCallerIdentity", ["*"], "ROOT_OPERATOR", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],
     ["bootstrap-operator-policy-reconciliation-read-user", "iam:GetUser", ["arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"], "ROOT_OPERATOR", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],
@@ -50,7 +57,14 @@ test("complete production dependency closure is exact across modes and failure p
     ["bootstrap-operator-policy-reconciliation-list-mfa-devices", "iam:ListMFADevices", ["arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"], "ROOT_OPERATOR", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],
     ["bootstrap-operator-policy-reconciliation-read-login-profile", "iam:GetLoginProfile", ["arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"], "ROOT_OPERATOR", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],
     ["bootstrap-operator-policy-reconciliation-read-inline", "iam:GetUserPolicy", ["arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"], "ROOT_OPERATOR", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],
+    ["bootstrap-operator-policy-reconciliation-read-transition-consumption", "iam:ListUserTags", ["arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"], "ROOT_OPERATOR", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],
+    ["bootstrap-operator-policy-reconciliation-read-initial-overlap-secrets", "secretsmanager:DescribeSecret", graph().capabilities.find(({ id }) => id === "bootstrap-operator-policy-reconciliation-read-initial-overlap-secrets").resources, "ROOT_OPERATOR", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],
+    ["bootstrap-operator-policy-reconciliation-read-initial-overlap-values", "secretsmanager:GetSecretValue", graph().capabilities.find(({ id }) => id === "bootstrap-operator-policy-reconciliation-read-initial-overlap-values").resources, "ROOT_OPERATOR", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],
     ["bootstrap-operator-policy-reconciliation-write-inline", "iam:PutUserPolicy", ["arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"], "ROOT_OPERATOR", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],
+    ["bootstrap-operator-policy-reconciliation-consume-transition", "iam:TagUser", ["arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"], "ROOT_OPERATOR", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],
+    ["bootstrap-operator-policy-reconciliation-read-reservation", "s3:GetObject", ["arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-initial-activation-lifecycle-policy-reconciliation/reservations/bootstrap-operator-legacy-mfa-transition.json"], "ROOT_OPERATOR", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],
+    ["bootstrap-operator-policy-reconciliation-create-reservation", "s3:PutObject", ["arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-initial-activation-lifecycle-policy-reconciliation/reservations/bootstrap-operator-legacy-mfa-transition.json"], "ROOT_OPERATOR", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],
+    ["bootstrap-operator-policy-reconciliation-replace-expired-reservation", "s3:PutObject", ["arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-initial-activation-lifecycle-policy-reconciliation/reservations/bootstrap-operator-legacy-mfa-transition.json"], "ROOT_OPERATOR", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],
   ]);
   assert.deepEqual(report.newAwsCalls.filter(({ capabilityId }) => capabilityId?.startsWith("mixed-recovery-iam-preflight-")).map(({ action, identity }) => [action, identity]), [
     ["sts:GetCallerIdentity", "ROOT_OPERATOR"],

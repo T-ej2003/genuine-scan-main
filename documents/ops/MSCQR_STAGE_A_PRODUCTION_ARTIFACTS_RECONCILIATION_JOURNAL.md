@@ -25,7 +25,7 @@ root journal only to authenticate an absent attempt. State A then requires the
 release-deployer to conditionally create that immutable attempt because its
 explicit write deny excludes every other principal. `A_PRIME -> B` then
 adds the ProviderReadOnly journal protections, including the reconciler's
-equally scoped absence probe. `B -> C` removes only the six obsolete
+equally scoped absence probe. `B -> C` removes only the seven obsolete
 InitialActivationLifecycle reservation statements. `C` retains both scoped
 ListBucket protections and every ProviderReadOnly durability protection. The
 resolver rejects a direct `A -> B` execution, partial removal, protection

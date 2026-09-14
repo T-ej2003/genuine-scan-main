@@ -6,6 +6,7 @@ import {
   buildStageAProductionArtifactsBucketPolicy,
   buildStageAProductionArtifactsBucketPolicyPredecessor,
   buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation,
+  buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservationPredecessor,
   buildStageAProductionArtifactsBucketPolicyWithRecoveryListBucketBootstrap,
   buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection,
   buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation,
@@ -39,7 +40,7 @@ test("Stage-A policy canonicalization preserves the historical desired hash and 
   assert.equal(canonicalizeStageAProductionArtifactsPolicy(live).Statement.length, desired.Statement.length);
 });
 
-test("ProviderReadOnly-protected retirement removes exactly the six obsolete reservation statements", () => {
+test("ProviderReadOnly-protected retirement removes exactly the seven obsolete reservation statements", () => {
   const predecessor = buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection();
   const target = buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation();
   const transition = resolveStageAProductionArtifactsBucketPolicyTransition({
@@ -52,11 +53,12 @@ test("ProviderReadOnly-protected retirement removes exactly the six obsolete res
     "AllowRootOperatorReadInitialActivationPolicyReconciliationReservations",
     "DenyOtherPrincipalsInitialActivationPolicyReconciliationReservationReads",
     "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationCreate",
-    "DenyNonConditionalInitialActivationPolicyReconciliationReservationWrites",
+    "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationReplace",
+    "DenyUnconditionalInitialActivationPolicyReconciliationReservationWrites",
     "DenyOtherPrincipalsInitialActivationPolicyReconciliationReservationWrites",
     "DenyInitialActivationPolicyReconciliationReservationDeletion",
   ]);
-  assert.equal(removed.length, 6);
+  assert.equal(removed.length, 7);
   assert.deepEqual(transition.predecessor, predecessor);
   assert.deepEqual(transition.desired, target);
   for (const statement of target.Statement) assert.deepEqual(statement, predecessor.Statement.find(({ Sid }) => Sid === statement.Sid));
@@ -87,13 +89,27 @@ test("Stage-A reservation and ProviderReadOnly transitions compose only as A to 
   assert.throws(() => assertStageAProductionArtifactsExecutableTransition({ predecessorPolicySha256: stageAProductionArtifactsPolicySha256(B), desiredPolicySha256: stageAProductionArtifactsPolicySha256(C) }), /non-executable/);
 });
 
+test("installed six-statement reservation policy upgrades only to the canonical replacement guard", () => {
+  const oldReservation = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservationPredecessor();
+  const reservation = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation();
+  const transition = resolveStageAProductionArtifactsBucketPolicyTransition({
+    predecessorPolicySha256: stageAProductionArtifactsPolicySha256(oldReservation),
+    desiredPolicySha256: stageAProductionArtifactsPolicySha256(reservation),
+  });
+  assert.deepEqual(transition, { predecessor: oldReservation, desired: reservation });
+  assert.equal(oldReservation.Statement.some(({ Sid }) => Sid === "DenyNonConditionalInitialActivationPolicyReconciliationReservationWrites"), true);
+  assert.equal(reservation.Statement.some(({ Sid }) => Sid === "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationReplace"), true);
+  assert.equal(reservation.Statement.some(({ Sid }) => Sid === "DenyUnconditionalInitialActivationPolicyReconciliationReservationWrites"), true);
+});
+
 test("Terraform's current Stage-A desired policy retains reservations, so State C stays classification-only", () => {
   const terraform = fs.readFileSync("infra/aws/terraform/production-green-stage-a/main.tf", "utf8");
   for (const sid of [
     "AllowRootOperatorReadInitialActivationPolicyReconciliationReservations",
     "DenyOtherPrincipalsInitialActivationPolicyReconciliationReservationReads",
     "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationCreate",
-    "DenyNonConditionalInitialActivationPolicyReconciliationReservationWrites",
+    "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationReplace",
+    "DenyUnconditionalInitialActivationPolicyReconciliationReservationWrites",
     "DenyOtherPrincipalsInitialActivationPolicyReconciliationReservationWrites",
     "DenyInitialActivationPolicyReconciliationReservationDeletion",
   ]) assert.match(terraform, new RegExp(`Sid = \"${sid}\"`));

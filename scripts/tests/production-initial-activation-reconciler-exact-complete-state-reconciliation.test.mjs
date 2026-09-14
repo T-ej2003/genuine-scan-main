@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
+import { currentInstallationPlan } from "./fixtures/production-initial-activation-reconciler-plan-current.mjs";
 import test from "node:test";
 import { createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
 import { INSTALLATION, assertInstallationPlan } from "../aws/production-initial-activation-reconciler-installation-contract.mjs";
@@ -8,7 +9,7 @@ import { EXACT_COMPLETE_STATE_RECONCILIATION as CONTRACT, assertExactCompleteCle
 import { exactSavedRefreshOnlyPlanApplyArgs } from "../aws/reconcile-production-initial-activation-exact-complete-state.mjs";
 
 const sourceSha = "a".repeat(40); const now = new Date("2026-09-11T12:00:00.000Z");
-const completePlan = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-initial-activation-reconciler-plan-complete.json", "utf8"));
+const completePlan = currentInstallationPlan(JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-initial-activation-reconciler-plan-complete.json", "utf8")));
 const state = (serial, attachmentCount, policyArns) => Buffer.from(JSON.stringify({ version: 4, terraform_version: "1.15.8", serial, lineage: "exact-complete-lineage", outputs: {}, resources: INSTALLATION.expectedAddresses.map((address) => {
   const [type, name] = address.split("."); const attributes = name === "mixed_recovery" && type === "aws_iam_policy" ? { name: "MSCQRProductionMixedDualSlotRecoveryExecutor", attachment_count: attachmentCount } : name === "mixed_recovery" && type === "aws_iam_role" ? { name: "mscqr-production-mixed-dual-slot-recovery-executor", managed_policy_arns: policyArns } : { name };
   return { mode: "managed", type, name, instances: [{ attributes }] };

@@ -10,6 +10,7 @@ on:
 permissions:
   actions: read
   contents: read
+  id-token: write
 
 concurrency:
   group: production-deploy
@@ -18,7 +19,7 @@ concurrency:
 jobs:
   authorize:
     runs-on: ubuntu-latest
-    environment: production
+    environment: production-bootstrap-operator-policy-authorization
     steps:
       - uses: actions/checkout@v6
         with:
@@ -30,6 +31,7 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm --prefix backend ci --ignore-scripts --no-audit --no-fund
       - name: Authenticate exact protected source
         env:
           GH_TOKEN: ${{ github.token }}
@@ -60,11 +62,18 @@ jobs:
           set -euo pipefail
           node scripts/aws/production-github-environment-approval.mjs \
             --output "$RUNNER_TEMP/bootstrap-operator-policy/environment-approval.json" \
-            --repository "$GITHUB_REPOSITORY" --environment production --source-sha "$SOURCE_SHA" \
+            --repository "$GITHUB_REPOSITORY" --environment production-bootstrap-operator-policy-authorization --source-sha "$SOURCE_SHA" \
             --workflow-ref "$GITHUB_WORKFLOW_REF" --event-name "$GITHUB_EVENT_NAME" \
             --workflow-run-id "$GITHUB_RUN_ID" --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \
             --execution-actor "$GITHUB_ACTOR" --require-actual-approval
           echo "sha256=$(sha256sum "$RUNNER_TEMP/bootstrap-operator-policy/environment-approval.json" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+      - name: Configure exact read-only authorization credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-bootstrap-operator-policy-authorizer
+          aws-region: eu-west-2
+          inline-session-policy: >-
+            {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"sts:GetCallerIdentity","Resource":"*"},{"Effect":"Allow","Action":"iam:ListUserTags","Resource":"arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"},{"Effect":"Allow","Action":["secretsmanager:DescribeSecret","secretsmanager:GetSecretValue"],"Resource":["arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-pending-1CnWMp","arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-private-pending-LZhc54","arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-pending-uB3P1Q","arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj","arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX","arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE","arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2"]}]}
       - name: Produce exact authorization
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}

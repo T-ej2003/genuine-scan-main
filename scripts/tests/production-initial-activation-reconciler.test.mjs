@@ -2,13 +2,15 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import test from "node:test";
-import { INITIAL_ACTIVATION_RECONCILER, MIXED_RECOVERY_EXECUTOR, verifyInitialActivationPolicyReconciler } from "../aws/verify-production-initial-activation-policy-reconciler.mjs";
+import { BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER, INITIAL_ACTIVATION_RECONCILER, MIXED_RECOVERY_EXECUTOR, verifyInitialActivationPolicyReconciler } from "../aws/verify-production-initial-activation-policy-reconciler.mjs";
 
 const root = "infra/aws/terraform/production-initial-activation-policy-reconciler";
 const trust = JSON.parse(fs.readFileSync(`${root}/trust-policy.json`, "utf8"));
 const mixedTrust = JSON.parse(fs.readFileSync(`${root}/mixed-recovery-trust-policy.json`, "utf8"));
+const authorizerTrust = JSON.parse(fs.readFileSync(`${root}/bootstrap-operator-policy-authorizer-trust-policy.json`, "utf8"));
 const policy = JSON.parse(fs.readFileSync(`${root}/permissions-policy.json`, "utf8"));
 const mixedPolicy = JSON.parse(fs.readFileSync(`${root}/mixed-recovery-permissions-policy.json`, "utf8"));
+const authorizerPermissions = JSON.parse(fs.readFileSync(`${root}/bootstrap-operator-policy-authorizer-permissions-policy.json`, "utf8"));
 const terraform = fs.readFileSync(`${root}/main.tf`, "utf8");
 const backend = JSON.parse(fs.readFileSync(`${root}/state-backend-contract.json`, "utf8"));
 const installation = JSON.parse(fs.readFileSync(`${root}/installation-contract.json`, "utf8"));
@@ -17,21 +19,22 @@ const encoded = (value) => encodeURIComponent(JSON.stringify(value));
 const reorder = (value) => Array.isArray(value) ? value.map(reorder) : (value && typeof value === "object" ? Object.fromEntries(Object.entries(value).reverse().map(([key, nested]) => [key, reorder(nested)])) : value);
 const tags = Object.entries(INITIAL_ACTIVATION_RECONCILER.tags).map(([Key, Value]) => ({ Key, Value }));
 const mixedTags = Object.entries(MIXED_RECOVERY_EXECUTOR.tags).map(([Key, Value]) => ({ Key, Value }));
+const authorizerTags = [{ Key: "ManagedBy", Value: "Terraform" }, { Key: "Environment", Value: "production" }, { Key: "Component", Value: "bootstrap-operator-policy-authorization" }, { Key: "Stack", Value: "production-initial-activation-policy-reconciler" }];
 
-const commands = ({ provider = {}, role = {}, mixedRole = {}, policyMetadata = {}, version = policy, encodeRole = true, encodeVersion = true, attached = [{ PolicyArn: INITIAL_ACTIVATION_RECONCILER.policyArn }], inline = [], entities = [{ PolicyRoles: [{ RoleName: INITIAL_ACTIVATION_RECONCILER.roleName }], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }] } = {}) => {
+const commands = ({ provider = {}, role = {}, mixedRole = {}, authorizerRole = {}, policyMetadata = {}, version = policy, encodeRole = true, encodeVersion = true, attached = [{ PolicyArn: INITIAL_ACTIVATION_RECONCILER.policyArn }], inline = [], entities = [{ PolicyRoles: [{ RoleName: INITIAL_ACTIVATION_RECONCILER.roleName }], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }] } = {}) => {
   const calls = [];
   const run = (args) => {
     calls.push(args);
     if (args[0] === "sts") return JSON.stringify({ Arn: "arn:aws:iam::368992683803:root" });
     if (args[0] === "iam" && args[1] === "get-open-id-connect-provider") return JSON.stringify({ Url: "token.actions.githubusercontent.com", ClientIDList: ["sts.amazonaws.com"], ...provider });
-    if (args[0] === "iam" && args[1] === "get-role") { const mixed = args[args.indexOf("--role-name") + 1] === MIXED_RECOVERY_EXECUTOR.roleName; const roleTrust = mixed ? mixedTrust : trust; return JSON.stringify({ Role: { Arn: mixed ? MIXED_RECOVERY_EXECUTOR.roleArn : INITIAL_ACTIVATION_RECONCILER.roleArn, RoleName: mixed ? MIXED_RECOVERY_EXECUTOR.roleName : INITIAL_ACTIVATION_RECONCILER.roleName, Path: "/", Description: mixed ? MIXED_RECOVERY_EXECUTOR.roleDescription : INITIAL_ACTIVATION_RECONCILER.roleDescription, Tags: mixed ? mixedTags : tags, MaxSessionDuration: 3600, AssumeRolePolicyDocument: encodeRole ? encoded(roleTrust) : roleTrust, ...(mixed ? mixedRole : role) } }); }
-    if (args[0] === "iam" && args[1] === "get-policy") { const mixed = args[args.indexOf("--policy-arn") + 1] === MIXED_RECOVERY_EXECUTOR.policyArn; return JSON.stringify({ Policy: { Arn: mixed ? MIXED_RECOVERY_EXECUTOR.policyArn : INITIAL_ACTIVATION_RECONCILER.policyArn, PolicyName: mixed ? MIXED_RECOVERY_EXECUTOR.policyName : INITIAL_ACTIVATION_RECONCILER.policyName, Path: "/", Description: mixed ? MIXED_RECOVERY_EXECUTOR.policyDescription : INITIAL_ACTIVATION_RECONCILER.policyDescription, Tags: mixed ? mixedTags : tags, DefaultVersionId: "v1", PermissionsBoundaryUsageCount: 0, ...(!mixed ? policyMetadata : {}) } }); }
-    if (args[0] === "iam" && args[1] === "get-policy-version") { const mixed = args[args.indexOf("--policy-arn") + 1] === MIXED_RECOVERY_EXECUTOR.policyArn; const document = mixed ? mixedPolicy : version; return JSON.stringify({ PolicyVersion: { Document: encodeVersion ? encoded(document) : document } }); }
-    if (args[0] === "iam" && args[1] === "list-attached-role-policies") { const mixed = args[args.indexOf("--role-name") + 1] === MIXED_RECOVERY_EXECUTOR.roleName; return JSON.stringify({ AttachedPolicies: mixed ? [{ PolicyArn: MIXED_RECOVERY_EXECUTOR.policyArn }] : attached }); }
+    if (args[0] === "iam" && args[1] === "get-role") { const requested = args[args.indexOf("--role-name") + 1]; const mixed = requested === MIXED_RECOVERY_EXECUTOR.roleName; const authorizer = requested === BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.roleName; const roleTrust = authorizer ? authorizerTrust : mixed ? mixedTrust : trust; const contract = authorizer ? BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER : mixed ? MIXED_RECOVERY_EXECUTOR : INITIAL_ACTIVATION_RECONCILER; return JSON.stringify({ Role: { Arn: contract.roleArn, RoleName: contract.roleName, Path: "/", Description: contract.roleDescription, Tags: authorizer ? authorizerTags : mixed ? mixedTags : tags, MaxSessionDuration: 3600, AssumeRolePolicyDocument: encodeRole ? encoded(roleTrust) : roleTrust, ...(authorizer ? authorizerRole : mixed ? mixedRole : role) } }); }
+    if (args[0] === "iam" && args[1] === "get-policy") { const requested = args[args.indexOf("--policy-arn") + 1]; const authorizer = requested === BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.policyArn; const mixed = requested === MIXED_RECOVERY_EXECUTOR.policyArn; const contract = authorizer ? BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER : mixed ? MIXED_RECOVERY_EXECUTOR : INITIAL_ACTIVATION_RECONCILER; return JSON.stringify({ Policy: { Arn: contract.policyArn, PolicyName: contract.policyName, Path: "/", Description: contract.policyDescription, Tags: authorizer ? authorizerTags : mixed ? mixedTags : tags, DefaultVersionId: "v1", PermissionsBoundaryUsageCount: 0, ...(!authorizer && !mixed ? policyMetadata : {}) } }); }
+    if (args[0] === "iam" && args[1] === "get-policy-version") { const requested = args[args.indexOf("--policy-arn") + 1]; const authorizer = requested === BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.policyArn; const mixed = requested === MIXED_RECOVERY_EXECUTOR.policyArn; const document = authorizer ? authorizerPermissions : mixed ? mixedPolicy : version; return JSON.stringify({ PolicyVersion: { Document: encodeVersion ? encoded(document) : document } }); }
+    if (args[0] === "iam" && args[1] === "list-attached-role-policies") { const requested = args[args.indexOf("--role-name") + 1]; const authorizer = requested === BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.roleName; const mixed = requested === MIXED_RECOVERY_EXECUTOR.roleName; return JSON.stringify({ AttachedPolicies: authorizer ? [{ PolicyArn: BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.policyArn }] : mixed ? [{ PolicyArn: MIXED_RECOVERY_EXECUTOR.policyArn }] : attached }); }
     if (args[0] === "iam" && args[1] === "list-role-policies") return JSON.stringify({ PolicyNames: inline });
     if (args[0] === "iam" && args[1] === "list-entities-for-policy") {
       if (args[args.indexOf("--policy-arn") + 1] === MIXED_RECOVERY_EXECUTOR.policyArn) return JSON.stringify({ PolicyRoles: [{ RoleName: MIXED_RECOVERY_EXECUTOR.roleName }], PolicyUsers: [], PolicyGroups: [], IsTruncated: false });
-      const page = entities[args.includes("--marker") ? 1 : 0];
+      const requested = args[args.indexOf("--policy-arn") + 1]; const page = requested === BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.policyArn ? { PolicyRoles: [{ RoleName: BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.roleName }], PolicyUsers: [], PolicyGroups: [], IsTruncated: false } : entities[args.includes("--marker") ? 1 : 0];
       if (!page) throw new Error("unexpected entity page");
       return JSON.stringify(page);
     }
@@ -66,12 +69,19 @@ test("mixed recovery trust admits only its workflow-dedicated protected environm
   assert.throws(() => verifyInitialActivationPolicyReconciler(commands({ mixedRole: { AssumeRolePolicyDocument: trust } })), /mixed recovery trust policy/);
 });
 
+test("bootstrap-operator policy authorizer trust is workflow-dedicated", () => {
+  assert.equal(authorizerTrust.Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:sub"], "repo:T-ej2003/genuine-scan-main:environment:production-bootstrap-operator-policy-authorization");
+  assert.notDeepEqual(authorizerTrust, trust);
+  assert.throws(() => verifyInitialActivationPolicyReconciler(commands({ authorizerRole: { AssumeRolePolicyDocument: trust } })), /bootstrap-operator authorizer trust policy/);
+});
+
 test("runtime policy has exact target mutation and readback-only companion actions", () => {
   const actions = policy.Statement.flatMap(({ Action }) => Array.isArray(Action) ? Action : [Action]);
   const create = policy.Statement.find(({ Sid }) => Sid === "CreateExactInitialActivationLifecyclePolicyVersion");
   assert.deepEqual(create, { Sid: "CreateExactInitialActivationLifecyclePolicyVersion", Effect: "Allow", Action: "iam:CreatePolicyVersion", Resource: INITIAL_ACTIVATION_RECONCILER.targetPolicyArn });
   for (const action of ["iam:CreatePolicy", "iam:DeletePolicy", "iam:DeletePolicyVersion", "iam:SetDefaultPolicyVersion", "iam:AttachRolePolicy", "iam:DetachRolePolicy", "iam:PutRolePolicy", "iam:DeleteRolePolicy", "iam:UpdateAssumeRolePolicy", "iam:CreateRole", "iam:DeleteRole"]) assert.equal(actions.includes(action), false, action);
   assert.deepEqual(actions.sort(), ["iam:CreatePolicyVersion", "iam:CreatePolicyVersion", "iam:GetPolicy", "iam:GetPolicy", "iam:GetPolicyVersion", "iam:GetPolicyVersion", "iam:GetRole", "iam:ListAttachedRolePolicies", "iam:ListEntitiesForPolicy", "iam:ListEntitiesForPolicy", "iam:ListPolicyVersions", "iam:ListPolicyVersions", "s3:GetObject", "s3:ListBucket", "s3:PutObject", "sts:GetCallerIdentity"].sort());
+  assert.equal(policy.Statement.some(({ Sid }) => ["ReadExactInitialDualSlotBindingForBootstrapOperatorAuthorization", "ReadBootstrapOperatorTransitionConsumption"].includes(Sid)), false);
   assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "ListExactProviderReadOnlyReconciliationJournal"), { Sid: "ListExactProviderReadOnlyReconciliationJournal", Effect: "Allow", Action: "s3:ListBucket", Resource: "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an", Condition: { StringLike: { "s3:prefix": "production-provider-readonly-policy-reconciliation/*" } } });
   assert.equal(policy.Statement.find(({ Sid }) => Sid === "ReadExactInitialActivationReleaseRole").Resource, INITIAL_ACTIVATION_RECONCILER.releaseRoleArn);
 });

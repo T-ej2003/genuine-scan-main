@@ -66,3 +66,31 @@ resource "aws_iam_role_policy_attachment" "reconciler" {
   role       = aws_iam_role.reconciler.name
   policy_arn = aws_iam_policy.reconciler.arn
 }
+
+resource "aws_iam_role" "bootstrap_operator_policy_authorizer" {
+  name                 = "mscqr-production-bootstrap-operator-policy-authorizer"
+  description          = "GitHub OIDC-only read-only authorizer for the exact bootstrap-operator legacy transition."
+  max_session_duration = 3600
+  assume_role_policy   = file("${path.module}/bootstrap-operator-policy-authorizer-trust-policy.json")
+  tags                 = merge(local.tags, { Component = "bootstrap-operator-policy-authorization" })
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "aws_iam_policy" "bootstrap_operator_policy_authorizer" {
+  name        = "MSCQRProductionBootstrapOperatorPolicyAuthorizer"
+  description = "Exact read-only binding verification for bootstrap-operator policy authorization."
+  policy      = file("${path.module}/bootstrap-operator-policy-authorizer-permissions-policy.json")
+  tags        = merge(local.tags, { Component = "bootstrap-operator-policy-authorization" })
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "bootstrap_operator_policy_authorizer" {
+  role       = aws_iam_role.bootstrap_operator_policy_authorizer.name
+  policy_arn = aws_iam_policy.bootstrap_operator_policy_authorizer.arn
+}

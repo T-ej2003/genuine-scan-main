@@ -270,6 +270,7 @@
     "ECS_EXEC_VERIFIER_OPERATOR",
     "SERVICE_RUNTIME",
     "INITIAL_ACTIVATION_RECONCILER",
+    "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER",
     "MIXED_RECOVERY_EXECUTOR"
   ],
   "capabilities": [
@@ -1022,6 +1023,194 @@
       "mutation": false
     },
     {
+      "id": "bootstrap-operator-policy-authorization-identify",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER",
+      "executor": "github-actions",
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "bootstrap-operator-policy-authorization-identify",
+      "action": "sts:GetCallerIdentity",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "targetUserArn": "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator",
+        "executionMode": "PROTECTED_AUTHORIZATION",
+        "principalArn": "arn:aws:iam::368992683803:role/mscqr-production-bootstrap-operator-policy-authorizer"
+      },
+      "classification": "GITHUB_OIDC_AUTHORIZATION_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-initial-activation-policy-reconciler/bootstrap-operator-policy-authorizer-permissions-policy.json",
+        "sid": "IdentifyCurrentSession",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionBootstrapOperatorPolicyAuthorizer",
+        "expectedVersion": "installed",
+        "expectedPolicySha256": "9cf1647cb5ace232948547559b9a3b050c3c1ec8396d82b69c03a931bde601ed"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "bootstrap-operator-policy-authorization-read-initial-overlap-secrets",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER",
+      "executor": "github-actions",
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "verifyLiveInitialDualSlotBindingWithRunner",
+      "action": "secretsmanager:DescribeSecret",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-pending-1CnWMp",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-private-pending-LZhc54",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-pending-uB3P1Q",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2"
+      ],
+      "context": {
+        "account": "368992683803",
+        "targetUserArn": "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator",
+        "executionMode": "PROTECTED_AUTHORIZATION",
+        "principalArn": "arn:aws:iam::368992683803:role/mscqr-production-bootstrap-operator-policy-authorizer"
+      },
+      "classification": "GITHUB_OIDC_AUTHORIZATION_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-initial-activation-policy-reconciler/bootstrap-operator-policy-authorizer-permissions-policy.json",
+        "sid": "ReadExactInitialDualSlotBindingForBootstrapOperatorAuthorization",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionBootstrapOperatorPolicyAuthorizer",
+        "expectedVersion": "installed",
+        "expectedPolicySha256": "9cf1647cb5ace232948547559b9a3b050c3c1ec8396d82b69c03a931bde601ed"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "bootstrap-operator-policy-authorization-read-initial-overlap-values",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER",
+      "executor": "github-actions",
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "verifyLiveInitialDualSlotBindingWithRunner",
+      "action": "secretsmanager:GetSecretValue",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-pending-1CnWMp",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-private-pending-LZhc54",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-pending-uB3P1Q",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2"
+      ],
+      "context": {
+        "account": "368992683803",
+        "targetUserArn": "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator",
+        "executionMode": "PROTECTED_AUTHORIZATION",
+        "principalArn": "arn:aws:iam::368992683803:role/mscqr-production-bootstrap-operator-policy-authorizer"
+      },
+      "classification": "GITHUB_OIDC_AUTHORIZATION_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-initial-activation-policy-reconciler/bootstrap-operator-policy-authorizer-permissions-policy.json",
+        "sid": "ReadExactInitialDualSlotBindingForBootstrapOperatorAuthorization",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionBootstrapOperatorPolicyAuthorizer",
+        "expectedVersion": "installed",
+        "expectedPolicySha256": "9cf1647cb5ace232948547559b9a3b050c3c1ec8396d82b69c03a931bde601ed"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "bootstrap-operator-policy-authorization-read-transition-consumption",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER",
+      "executor": "github-actions",
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "readLegacyTransitionConsumption",
+      "action": "iam:ListUserTags",
+      "resources": [
+        "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      ],
+      "context": {
+        "account": "368992683803",
+        "targetUserArn": "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator",
+        "executionMode": "PROTECTED_AUTHORIZATION",
+        "principalArn": "arn:aws:iam::368992683803:role/mscqr-production-bootstrap-operator-policy-authorizer"
+      },
+      "classification": "GITHUB_OIDC_AUTHORIZATION_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-initial-activation-policy-reconciler/bootstrap-operator-policy-authorizer-permissions-policy.json",
+        "sid": "ReadBootstrapOperatorTransitionConsumption",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionBootstrapOperatorPolicyAuthorizer",
+        "expectedVersion": "installed",
+        "expectedPolicySha256": "9cf1647cb5ace232948547559b9a3b050c3c1ec8396d82b69c03a931bde601ed"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "bootstrap-operator-policy-reconciliation-consume-transition",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "bootstrap-operator-policy-reconciliation-consume-transition",
+      "action": "iam:TagUser",
+      "resources": [
+        "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      ],
+      "context": {
+        "account": "368992683803",
+        "targetUserArn": "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      },
+      "classification": "ROOT_GOVERNED_IAM_POLICY_RECONCILIATION",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+        "sid": "bootstrap-operator-policy-reconciliation-consume-transition",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "bootstrap-operator-policy-reconciliation-create-reservation",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "bootstrap-operator-policy-reconciliation-create-reservation",
+      "action": "s3:PutObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-initial-activation-lifecycle-policy-reconciliation/reservations/bootstrap-operator-legacy-mfa-transition.json"
+      ],
+      "context": {
+        "account": "368992683803",
+        "targetUserArn": "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      },
+      "classification": "ROOT_GOVERNED_IAM_POLICY_RECONCILIATION",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-a/main.tf",
+        "sid": "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationCreate",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
       "id": "bootstrap-operator-policy-reconciliation-identify",
       "phase": "bootstrap-operator-policy-reconciliation",
       "identity": "ROOT_OPERATOR",
@@ -1190,6 +1379,74 @@
       "mutation": false
     },
     {
+      "id": "bootstrap-operator-policy-reconciliation-read-initial-overlap-secrets",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "verifyLiveInitialDualSlotBindingWithRunner",
+      "action": "secretsmanager:DescribeSecret",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-pending-1CnWMp",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-private-pending-LZhc54",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-pending-uB3P1Q",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2"
+      ],
+      "context": {
+        "account": "368992683803",
+        "targetUserArn": "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+        "sid": "bootstrap-operator-policy-reconciliation-read-initial-overlap-secrets",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "bootstrap-operator-policy-reconciliation-read-initial-overlap-values",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "verifyLiveInitialDualSlotBindingWithRunner",
+      "action": "secretsmanager:GetSecretValue",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-pending-1CnWMp",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-private-pending-LZhc54",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-pending-uB3P1Q",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2"
+      ],
+      "context": {
+        "account": "368992683803",
+        "targetUserArn": "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+        "sid": "bootstrap-operator-policy-reconciliation-read-initial-overlap-values",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
       "id": "bootstrap-operator-policy-reconciliation-read-inline",
       "phase": "bootstrap-operator-policy-reconciliation",
       "identity": "ROOT_OPERATOR",
@@ -1246,6 +1503,62 @@
       "mutation": false
     },
     {
+      "id": "bootstrap-operator-policy-reconciliation-read-reservation",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "bootstrap-operator-policy-reconciliation-read-reservation",
+      "action": "s3:GetObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-initial-activation-lifecycle-policy-reconciliation/reservations/bootstrap-operator-legacy-mfa-transition.json"
+      ],
+      "context": {
+        "account": "368992683803",
+        "targetUserArn": "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-a/main.tf",
+        "sid": "AllowRootOperatorReadInitialActivationPolicyReconciliationReservations",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "bootstrap-operator-policy-reconciliation-read-transition-consumption",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "readLegacyTransitionConsumption",
+      "action": "iam:ListUserTags",
+      "resources": [
+        "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      ],
+      "context": {
+        "account": "368992683803",
+        "targetUserArn": "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+        "sid": "bootstrap-operator-policy-reconciliation-read-transition-consumption",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
       "id": "bootstrap-operator-policy-reconciliation-read-user",
       "phase": "bootstrap-operator-policy-reconciliation",
       "identity": "ROOT_OPERATOR",
@@ -1272,6 +1585,34 @@
       },
       "required": true,
       "mutation": false
+    },
+    {
+      "id": "bootstrap-operator-policy-reconciliation-replace-expired-reservation",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "bootstrap-operator-policy-reconciliation-replace-expired-reservation",
+      "action": "s3:PutObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-initial-activation-lifecycle-policy-reconciliation/reservations/bootstrap-operator-legacy-mfa-transition.json"
+      ],
+      "context": {
+        "account": "368992683803",
+        "targetUserArn": "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      },
+      "classification": "ROOT_GOVERNED_IAM_POLICY_RECONCILIATION",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-a/main.tf",
+        "sid": "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationReplace",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": true
     },
     {
       "id": "bootstrap-operator-policy-reconciliation-write-inline",
@@ -1329,7 +1670,7 @@
         "sid": "PublishExactStageBApproval",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "6e70443088c335810b83e1b43c47f6e089e3bced916a23a61efa5c11eea5734a"
+        "expectedPolicySha256": "3f1308d1eed733549c80de427783b7ef0bbc8371d48caab8d6e636e8ba0f5e58"
       },
       "required": true,
       "mutation": true
@@ -14453,6 +14794,28 @@
     },
     {
       "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "readLegacyTransitionConsumption",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "iam:ListUserTags",
+      "resources": [
+        "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      ],
+      "capabilityId": "bootstrap-operator-policy-reconciliation-read-transition-consumption"
+    },
+    {
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "readLegacyTransitionConsumption",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER",
+      "action": "iam:ListUserTags",
+      "resources": [
+        "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      ],
+      "capabilityId": "bootstrap-operator-policy-authorization-read-transition-consumption"
+    },
+    {
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
       "sourceFunction": "bootstrap-operator-policy-reconciliation-write-inline",
       "phase": "bootstrap-operator-policy-reconciliation",
       "identity": "ROOT_OPERATOR",
@@ -14461,6 +14824,129 @@
         "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
       ],
       "capabilityId": "bootstrap-operator-policy-reconciliation-write-inline"
+    },
+    {
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "bootstrap-operator-policy-reconciliation-consume-transition",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "iam:TagUser",
+      "resources": [
+        "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      ],
+      "capabilityId": "bootstrap-operator-policy-reconciliation-consume-transition"
+    },
+    {
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "bootstrap-operator-policy-reconciliation-read-reservation",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "s3:GetObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-initial-activation-lifecycle-policy-reconciliation/reservations/bootstrap-operator-legacy-mfa-transition.json"
+      ],
+      "capabilityId": "bootstrap-operator-policy-reconciliation-read-reservation"
+    },
+    {
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "bootstrap-operator-policy-reconciliation-create-reservation",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "s3:PutObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-initial-activation-lifecycle-policy-reconciliation/reservations/bootstrap-operator-legacy-mfa-transition.json"
+      ],
+      "capabilityId": "bootstrap-operator-policy-reconciliation-create-reservation"
+    },
+    {
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "bootstrap-operator-policy-reconciliation-replace-expired-reservation",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "s3:PutObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-initial-activation-lifecycle-policy-reconciliation/reservations/bootstrap-operator-legacy-mfa-transition.json"
+      ],
+      "capabilityId": "bootstrap-operator-policy-reconciliation-replace-expired-reservation"
+    },
+    {
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "verifyLiveInitialDualSlotBindingWithRunner",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "secretsmanager:DescribeSecret",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-pending-1CnWMp",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-private-pending-LZhc54",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-pending-uB3P1Q",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2"
+      ],
+      "capabilityId": "bootstrap-operator-policy-reconciliation-read-initial-overlap-secrets"
+    },
+    {
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "verifyLiveInitialDualSlotBindingWithRunner",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER",
+      "action": "secretsmanager:DescribeSecret",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-pending-1CnWMp",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-private-pending-LZhc54",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-pending-uB3P1Q",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2"
+      ],
+      "capabilityId": "bootstrap-operator-policy-authorization-read-initial-overlap-secrets"
+    },
+    {
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "verifyLiveInitialDualSlotBindingWithRunner",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "secretsmanager:GetSecretValue",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-pending-1CnWMp",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-private-pending-LZhc54",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-pending-uB3P1Q",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2"
+      ],
+      "capabilityId": "bootstrap-operator-policy-reconciliation-read-initial-overlap-values"
+    },
+    {
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "verifyLiveInitialDualSlotBindingWithRunner",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER",
+      "action": "secretsmanager:GetSecretValue",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-pending-1CnWMp",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-private-pending-LZhc54",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-pending-uB3P1Q",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2"
+      ],
+      "capabilityId": "bootstrap-operator-policy-authorization-read-initial-overlap-values"
+    },
+    {
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "sourceFunction": "bootstrap-operator-policy-authorization-identify",
+      "phase": "bootstrap-operator-policy-reconciliation",
+      "identity": "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER",
+      "action": "sts:GetCallerIdentity",
+      "resources": [
+        "*"
+      ],
+      "capabilityId": "bootstrap-operator-policy-authorization-identify"
     },
     {
       "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
