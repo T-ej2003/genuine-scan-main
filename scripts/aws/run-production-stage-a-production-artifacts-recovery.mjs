@@ -30,7 +30,7 @@ const readContinuationChangedFiles = ({ ancestorSha, descendantSha }) => {
 
 export function selectStageAProductionArtifactsRecoveryJournals({ historicalTransition = false, legacyReservationTransition = false, bootstrapTransition = false, recoveryJournal, rootRecoveryJournal } = {}) {
   const attemptReader = historicalTransition || legacyReservationTransition || bootstrapTransition ? rootRecoveryJournal : recoveryJournal;
-  const attemptWriter = bootstrapTransition ? recoveryJournal : attemptReader;
+  const attemptWriter = historicalTransition ? rootRecoveryJournal : recoveryJournal;
   return Object.freeze({ attemptReader, attemptWriter });
 }
 
@@ -122,9 +122,8 @@ export async function runStageAProductionArtifactsRecovery({ sourceSha, recovery
   const providerReadonlyTransition = samePolicy(transition.predecessor, buildStageAProductionArtifactsBucketPolicyWithRecoveryListBucketBootstrap()) && samePolicy(transition.desired, buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection());
   const reverseReservationTransition = samePolicy(transition.predecessor, buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection()) && samePolicy(transition.desired, buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation());
   if (!historicalTransition && !reservationTransition && !legacyReservationTransition && !bootstrapTransition && !providerReadonlyTransition && !reverseReservationTransition) throw new Error("Stage A production-artifacts recovery transition is unsupported.");
-  // State A permits only the release-deployer to create reconciliation records.
-  // Historical, legacy, and bootstrap transitions use the root journal for their
-  // attempt boundary; the bootstrap transition alone writes through release.
+  // State A permits only the release-deployer to create migration records;
+  // historical A-to-B retains its root-owned attempt boundary.
   const { attemptReader, attemptWriter } = selectStageAProductionArtifactsRecoveryJournals({ historicalTransition, legacyReservationTransition, bootstrapTransition, recoveryJournal, rootRecoveryJournal });
   const completionJournal = journal;
   const decode = (record, label) => { if (!record) return null; try { return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(record.bytes)); } catch { throw new Error(`${label} is malformed.`); } };

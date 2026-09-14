@@ -165,6 +165,13 @@ test("State A requires the root-read and release-write bootstrap split without w
   assert.equal(explicitlyDenied(A, { principal: root, action: "s3:GetObject", resource: attempt, context: {} }), false);
   assert.equal(explicitlyAllowed(A, { principal: root, action: "s3:PutObject", resource: legacyReservation, context: { "s3:if-match": "etag" } }), true);
   assert.equal(explicitlyDenied(A, { principal: root, action: "s3:PutObject", resource: `${bucket}/production-initial-activation-lifecycle-policy-reconciliation/reservations/other.json`, context: { "s3:if-match": "etag" } }), true);
+  const replacementDeny = statement(A, "DenyNonTargetInitialActivationPolicyReconciliationReservationReplacements");
+  for (const resource of [
+    `${bucket}/production-activation-lifecycle/claim.json`,
+    `${bucket}/production-dual-slot-rebaseline-evidence/a.json`,
+    `${bucket}/production-stage-a-production-artifacts-reconciliation/a.json`,
+    `${bucket}/production-provider-readonly-policy-reconciliation/a.json`,
+  ]) assert.equal(policyMatches(replacementDeny, { principal: root, action: "s3:PutObject", resource, context: { "s3:if-match": "etag" } }), false);
   assert.equal(allowsExactList({ policy: A, principal: release, bucket, prefix: `${prefix}${"a".repeat(64)}/attempt.json` }), false);
   assert.equal(explicitlyAllowed(APrime, { ...conditionalWrite, principal: release }), true);
   assert.equal(explicitlyDenied(APrime, { ...conditionalWrite, principal: release }), false);

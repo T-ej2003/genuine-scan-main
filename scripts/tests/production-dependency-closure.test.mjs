@@ -176,7 +176,7 @@ test("Stage A production-artifacts mode closure is tuple-exact and omission-proo
   const selected = (flags) => selectStageAProductionArtifactsRecoveryJournals({ ...flags, recoveryJournal: releaseJournal, rootRecoveryJournal: rootJournal });
   assert.deepEqual(selected({ historicalTransition: true }), { attemptReader: rootJournal, attemptWriter: rootJournal }, "historical transition uses the root attempt journal");
   assert.deepEqual(selected({ bootstrapTransition: true }), { attemptReader: rootJournal, attemptWriter: releaseJournal }, "bootstrap transition reads root and writes release");
-  assert.deepEqual(selected({ legacyReservationTransition: true }), { attemptReader: rootJournal, attemptWriter: rootJournal }, "legacy predecessor-to-reservation uses root journal");
+  assert.deepEqual(selected({ legacyReservationTransition: true }), { attemptReader: rootJournal, attemptWriter: releaseJournal }, "legacy predecessor-to-reservation reads root and writes release");
   assert.deepEqual(selected({}), { attemptReader: releaseJournal, attemptWriter: releaseJournal }, "normal recovery uses release journal");
   assert.deepEqual(selected({ legacyReservationTransition: true, bootstrapTransition: true }), { attemptReader: rootJournal, attemptWriter: releaseJournal }, "bootstrap writer precedence is explicit");
   assert.match(recoverySource, /const completionJournal = journal/);

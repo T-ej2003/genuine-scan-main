@@ -154,6 +154,16 @@ export function buildStageAProductionArtifactsBucketPolicyWithInitialActivationR
   const current = buildStageAProductionArtifactsBucketPolicy();
   const reservations = [PRODUCTION_ACTIVATION_LIFECYCLE.initialActivationPolicyReconciliationReservationArn];
   const legacyReservation = [`arn:aws:s3:::${PRODUCTION_ACTIVATION_LIFECYCLE.bucket}/${PRODUCTION_ACTIVATION_LIFECYCLE.initialActivationPolicyReconciliationReservationPrefix}bootstrap-operator-legacy-mfa-transition.json`];
+  // IAM has no PutObject key-prefix condition. Exclude every other canonical
+  // object namespace so the inverse deny is limited to reservation objects;
+  // unknown paths remain denied fail-closed.
+  const nonReservationObjects = [
+    PRODUCTION_ACTIVATION_LIFECYCLE.claimArn,
+    PRODUCTION_ACTIVATION_LIFECYCLE.completionArn,
+    PRODUCTION_ACTIVATION_LIFECYCLE.rebaselineEvidenceArn,
+    PRODUCTION_ACTIVATION_LIFECYCLE.stageAProductionArtifactsReconciliationArn,
+    PRODUCTION_ACTIVATION_LIFECYCLE.providerReadonlyPolicyReconciliationArn,
+  ];
   return {
     ...current,
     Statement: [
@@ -163,7 +173,7 @@ export function buildStageAProductionArtifactsBucketPolicyWithInitialActivationR
       { Sid: "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationCreate", Effect: "Allow", Principal: { AWS: PRODUCTION_ACTIVATION_LIFECYCLE.rootOperatorArn }, Action: "s3:PutObject", Resource: reservations, Condition: { StringEquals: { "s3:if-none-match": "*" } } },
       { Sid: "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationReplace", Effect: "Allow", Principal: { AWS: PRODUCTION_ACTIVATION_LIFECYCLE.rootOperatorArn }, Action: "s3:PutObject", Resource: legacyReservation, Condition: { Null: { "s3:if-match": "false" } } },
       { Sid: "DenyUnconditionalInitialActivationPolicyReconciliationReservationWrites", Effect: "Deny", Principal: "*", Action: "s3:PutObject", Resource: reservations, Condition: { Null: { "s3:if-none-match": "true", "s3:if-match": "true" } } },
-      { Sid: "DenyNonTargetInitialActivationPolicyReconciliationReservationReplacements", Effect: "Deny", Principal: "*", Action: "s3:PutObject", NotResource: legacyReservation, Condition: { StringNotEquals: { "s3:if-none-match": "*" } } },
+      { Sid: "DenyNonTargetInitialActivationPolicyReconciliationReservationReplacements", Effect: "Deny", Principal: "*", Action: "s3:PutObject", NotResource: [...nonReservationObjects, ...legacyReservation], Condition: { StringNotEquals: { "s3:if-none-match": "*" } } },
       { Sid: "DenyOtherPrincipalsInitialActivationPolicyReconciliationReservationWrites", Effect: "Deny", Principal: "*", Action: "s3:PutObject", Resource: reservations, Condition: { StringNotEquals: { "aws:PrincipalArn": PRODUCTION_ACTIVATION_LIFECYCLE.rootOperatorArn } } },
       { Sid: "DenyInitialActivationPolicyReconciliationReservationDeletion", Effect: "Deny", Principal: "*", Action: ["s3:DeleteObject", "s3:DeleteObjectVersion"], Resource: reservations },
     ],
