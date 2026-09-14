@@ -25,6 +25,10 @@ const authorized = () => {
   const preparation = createBootstrapOperatorPolicyPreparation({ sourceSha, liveState: live(desired.predecessorDocument), preparedAt: now.toISOString() });
   return createBootstrapOperatorPolicyAuthorization({ sourceSha, preparation, protectedEnvironmentApprovalEvidence: approval, authorizedAt: now.toISOString() });
 };
+const recoveredAuthorization = () => {
+  const preparation = createBootstrapOperatorPolicyPreparation({ sourceSha, liveState: live(desired.document), preparedAt: now.toISOString() });
+  return createBootstrapOperatorPolicyAuthorization({ sourceSha, preparation, protectedEnvironmentApprovalEvidence: approval, authorizedAt: now.toISOString() });
+};
 const runner = (initial, credentialTopology = {}, { stalePostWriteReads = 0, transientPostWriteReads = 0 } = {}) => {
   let document = structuredClone(initial); let writes = 0; let staleReads = 0; let transientReads = 0;
   const run = (args) => {
@@ -105,12 +109,27 @@ test("post-write convergence exhaustion never repeats the authorized IAM mutatio
   assert.deepEqual(waits, BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.postWriteReadDelaysMs);
 });
 
+test("fresh exact-complete recovery authorization finalizes without another IAM mutation", () => {
+  const authorization = recoveredAuthorization(); const fixture = runner(desired.document);
+  assert.equal(authorization.preparation.predecessorClassification, "EXACT_COMPLETE");
+  assert.deepEqual(authorization.preparation.expectedWritePlan, []);
+  assert.deepEqual(authorization.maxAwsMutations, {});
+  assert.deepEqual(reconcileBootstrapOperatorPolicy({ run: fixture.run, authorization, sourceSha, now }), { status: "COMPLETE", iamPutUserPolicyCount: 0, recovered: true });
+  assert.equal(fixture.writes(), 0);
+  const predecessor = runner(desired.predecessorDocument);
+  assert.throws(() => reconcileBootstrapOperatorPolicy({ run: predecessor.run, authorization, sourceSha, now }), /predecessor changed/);
+  assert.equal(predecessor.writes(), 0);
+  const expired = runner(desired.predecessorDocument);
+  assert.throws(() => reconcileBootstrapOperatorPolicy({ run: expired.run, authorization: authorized(), sourceSha, now: new Date(now.getTime() + BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.maxAgeMs + 1) }), /not exact or fresh/);
+  assert.equal(expired.writes(), 0);
+});
+
 test("missing verifier capability, malformed policy topology, and unrelated roles fail closed", () => {
   const extraRole = structuredClone(desired.document);
   extraRole.Statement.find(({ Sid }) => Sid === "AssumeEcsExecVerifierRoleOnlyWithMfa").Resource = "arn:aws:iam::368992683803:role/unrelated";
   assert.throws(() => authenticateBootstrapOperatorLiveState(live(extraRole)), /unexpected drift/);
   assert.throws(() => authenticateBootstrapOperatorLiveState({ ...live(desired.predecessorDocument), attachedPolicies: [{ PolicyArn: "arn:aws:iam::368992683803:policy/unexpected" }] }), /topology/);
-  assert.throws(() => createBootstrapOperatorPolicyPreparation({ sourceSha, liveState: live(desired.document), preparedAt: now.toISOString() }), /unexpected drift|predecessor/);
+  assert.doesNotThrow(() => createBootstrapOperatorPolicyPreparation({ sourceSha, liveState: live(desired.document), preparedAt: now.toISOString() }));
 });
 
 test("governed reconciliation fails closed on a console password, access key, or incorrect MFA topology", () => {
