@@ -783,7 +783,7 @@ const exactManagedRoleStateSql = `
 // authenticated RDS production catalogs instead expose one rdsadmin-granted SET-only row.
 const rdsPlatformIdentitySql = targetEnvironment === "production"
   ? `(EXISTS (SELECT 1 FROM pg_roles WHERE rolname='rdsadmin' AND rolsuper)
-      AND EXISTS (SELECT 1 FROM pg_roles r WHERE r.rolname='rds_superuser' AND NOT r.rolsuper AND NOT r.rolcanlogin AND pg_has_role(current_user,r.oid,'MEMBER')))`
+      AND EXISTS (SELECT 1 FROM pg_roles r WHERE r.rolname='rds_superuser' AND NOT r.rolsuper AND NOT r.rolcanlogin AND pg_has_role(${lit(administrativeExecutorRole)},r.oid,'MEMBER')))`
   : "false";
 const standardPostgres18PlatformIdentitySql = `(EXISTS (SELECT 1 FROM pg_roles WHERE oid=10 AND rolsuper)
       AND NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname IN ('rdsadmin','rds_superuser')))`;

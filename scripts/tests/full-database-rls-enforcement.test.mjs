@@ -376,7 +376,8 @@ test("installer, verifier, and cleanup share fail-closed platform membership con
 
   const generator = fs.readFileSync(path.join(root, "scripts/rls/generate-clean-room-rls-sql.mjs"), "utf8");
   assert.equal(generator.match(/exactManagedMembershipStateSqlFor\(/g)?.length, 2);
-  assert.match(generator, /targetEnvironment === "production"[\s\S]*rolname='rdsadmin' AND rolsuper[\s\S]*rolname='rds_superuser'[\s\S]*pg_has_role\(current_user,r\.oid,'MEMBER'\)/);
+  assert.match(generator, /targetEnvironment === "production"[\s\S]*rolname='rdsadmin' AND rolsuper[\s\S]*rolname='rds_superuser'[\s\S]*pg_has_role\(\$\{lit\(administrativeExecutorRole\)\},r\.oid,'MEMBER'\)/);
+  assert.doesNotMatch(generator, /pg_has_role\(current_user,r\.oid,'MEMBER'\)/);
   assert.match(generator, /roleSpecs\.length\}[\s\S]*grantor\.rolname<>'rdsadmin' OR m\.admin_option OR m\.inherit_option OR NOT m\.set_option/);
   assert.match(generator, /grantor\.rolname='rdsadmin' AND NOT m\.admin_option AND NOT m\.inherit_option AND m\.set_option\)<>1/);
   assert.match(generator, /roleSpecs\.length \* 2\}/);
