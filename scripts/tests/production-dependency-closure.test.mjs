@@ -4,6 +4,7 @@ import test from "node:test";
 import { CAPABILITY_GRAPH_PATH, discoverAwsCliActions } from "../aws/generate-production-green-stage-b-capability-graph.mjs";
 import { assertChangedAwsCallClosure, assertNoUnknownRollbackDependency, assertRollbackSemanticBoundary, assertStageAProductionArtifactsCapabilityClosure, buildProductionDependencyClosure } from "../aws/verify-production-dependency-closure.mjs";
 import { MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES } from "../aws/production-mixed-dual-slot-recovery-contract.mjs";
+import { selectStageAProductionArtifactsRecoveryJournals } from "../aws/run-production-stage-a-production-artifacts-recovery.mjs";
 
 const graph = () => JSON.parse(fs.readFileSync(CAPABILITY_GRAPH_PATH, "utf8"));
 
@@ -170,8 +171,14 @@ test("Stage A production-artifacts mode closure is tuple-exact and omission-proo
     assert.throws(() => assertStageAProductionArtifactsCapabilityClosure(report.newAwsCalls, changed), /capability tuple is incomplete/);
   }
   const recoverySource = fs.readFileSync("scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "utf8");
-  assert.match(recoverySource, /const attemptReader = historicalTransition \|\| bootstrapTransition \? rootRecoveryJournal : recoveryJournal/);
-  assert.match(recoverySource, /const attemptWriter = bootstrapTransition \? recoveryJournal : attemptReader/);
+  assert.match(recoverySource, /selectStageAProductionArtifactsRecoveryJournals/);
+  const releaseJournal = { name: "release" }; const rootJournal = { name: "root" };
+  const selected = (flags) => selectStageAProductionArtifactsRecoveryJournals({ ...flags, recoveryJournal: releaseJournal, rootRecoveryJournal: rootJournal });
+  assert.deepEqual(selected({ historicalTransition: true }), { attemptReader: rootJournal, attemptWriter: rootJournal }, "historical transition uses the root attempt journal");
+  assert.deepEqual(selected({ bootstrapTransition: true }), { attemptReader: rootJournal, attemptWriter: releaseJournal }, "bootstrap transition reads root and writes release");
+  assert.deepEqual(selected({ legacyReservationTransition: true }), { attemptReader: rootJournal, attemptWriter: rootJournal }, "legacy predecessor-to-reservation uses root journal");
+  assert.deepEqual(selected({}), { attemptReader: releaseJournal, attemptWriter: releaseJournal }, "normal recovery uses release journal");
+  assert.deepEqual(selected({ legacyReservationTransition: true, bootstrapTransition: true }), { attemptReader: rootJournal, attemptWriter: releaseJournal }, "bootstrap writer precedence is explicit");
   assert.match(recoverySource, /const completionJournal = journal/);
   assert.match(recoverySource, /existingCompletionReader = predecessorLive \? rootRecoveryJournal : completionJournal/);
   assert.match(recoverySource, /recoveryJournal: createStageAProductionArtifactsJournal\(\{ run: releaseRun \}\)/);

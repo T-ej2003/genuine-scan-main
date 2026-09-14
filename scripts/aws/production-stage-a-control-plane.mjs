@@ -153,6 +153,7 @@ export function buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJo
 export function buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation() {
   const current = buildStageAProductionArtifactsBucketPolicy();
   const reservations = [PRODUCTION_ACTIVATION_LIFECYCLE.initialActivationPolicyReconciliationReservationArn];
+  const legacyReservation = [`arn:aws:s3:::${PRODUCTION_ACTIVATION_LIFECYCLE.bucket}/${PRODUCTION_ACTIVATION_LIFECYCLE.initialActivationPolicyReconciliationReservationPrefix}bootstrap-operator-legacy-mfa-transition.json`];
   return {
     ...current,
     Statement: [
@@ -160,8 +161,9 @@ export function buildStageAProductionArtifactsBucketPolicyWithInitialActivationR
       { Sid: "AllowRootOperatorReadInitialActivationPolicyReconciliationReservations", Effect: "Allow", Principal: { AWS: PRODUCTION_ACTIVATION_LIFECYCLE.rootOperatorArn }, Action: "s3:GetObject", Resource: reservations },
       { Sid: "DenyOtherPrincipalsInitialActivationPolicyReconciliationReservationReads", Effect: "Deny", Principal: "*", Action: "s3:GetObject", Resource: reservations, Condition: { StringNotEquals: { "aws:PrincipalArn": PRODUCTION_ACTIVATION_LIFECYCLE.rootOperatorArn } } },
       { Sid: "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationCreate", Effect: "Allow", Principal: { AWS: PRODUCTION_ACTIVATION_LIFECYCLE.rootOperatorArn }, Action: "s3:PutObject", Resource: reservations, Condition: { StringEquals: { "s3:if-none-match": "*" } } },
-      { Sid: "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationReplace", Effect: "Allow", Principal: { AWS: PRODUCTION_ACTIVATION_LIFECYCLE.rootOperatorArn }, Action: "s3:PutObject", Resource: reservations, Condition: { Null: { "s3:if-match": "false" } } },
+      { Sid: "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationReplace", Effect: "Allow", Principal: { AWS: PRODUCTION_ACTIVATION_LIFECYCLE.rootOperatorArn }, Action: "s3:PutObject", Resource: legacyReservation, Condition: { Null: { "s3:if-match": "false" } } },
       { Sid: "DenyUnconditionalInitialActivationPolicyReconciliationReservationWrites", Effect: "Deny", Principal: "*", Action: "s3:PutObject", Resource: reservations, Condition: { Null: { "s3:if-none-match": "true", "s3:if-match": "true" } } },
+      { Sid: "DenyNonTargetInitialActivationPolicyReconciliationReservationReplacements", Effect: "Deny", Principal: "*", Action: "s3:PutObject", NotResource: legacyReservation, Condition: { StringNotEquals: { "s3:if-none-match": "*" } } },
       { Sid: "DenyOtherPrincipalsInitialActivationPolicyReconciliationReservationWrites", Effect: "Deny", Principal: "*", Action: "s3:PutObject", Resource: reservations, Condition: { StringNotEquals: { "aws:PrincipalArn": PRODUCTION_ACTIVATION_LIFECYCLE.rootOperatorArn } } },
       { Sid: "DenyInitialActivationPolicyReconciliationReservationDeletion", Effect: "Deny", Principal: "*", Action: ["s3:DeleteObject", "s3:DeleteObjectVersion"], Resource: reservations },
     ],

@@ -28,6 +28,12 @@ const readContinuationChangedFiles = ({ ancestorSha, descendantSha }) => {
   return [...new Set([...ancestor.keys(), ...descendant.keys()])].filter((file) => ancestor.get(file) !== descendant.get(file)).sort();
 };
 
+export function selectStageAProductionArtifactsRecoveryJournals({ historicalTransition = false, legacyReservationTransition = false, bootstrapTransition = false, recoveryJournal, rootRecoveryJournal } = {}) {
+  const attemptReader = historicalTransition || legacyReservationTransition || bootstrapTransition ? rootRecoveryJournal : recoveryJournal;
+  const attemptWriter = bootstrapTransition ? recoveryJournal : attemptReader;
+  return Object.freeze({ attemptReader, attemptWriter });
+}
+
 function readPolicy(run) {
   const encoded = awsJson(run, ["s3api", "get-bucket-policy", "--bucket", PRODUCTION_ACTIVATION_LIFECYCLE.bucket]);
   return JSON.parse(encoded.Policy);
@@ -117,10 +123,9 @@ export async function runStageAProductionArtifactsRecovery({ sourceSha, recovery
   const reverseReservationTransition = samePolicy(transition.predecessor, buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection()) && samePolicy(transition.desired, buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation());
   if (!historicalTransition && !reservationTransition && !legacyReservationTransition && !bootstrapTransition && !providerReadonlyTransition && !reverseReservationTransition) throw new Error("Stage A production-artifacts recovery transition is unsupported.");
   // State A permits only the release-deployer to create reconciliation records.
-  // Bootstrap needs root solely to classify an absent attempt before its scoped
-  // ListBucket permission exists; the immutable attempt itself stays release-owned.
-  const attemptReader = historicalTransition || legacyReservationTransition || bootstrapTransition ? rootRecoveryJournal : recoveryJournal;
-  const attemptWriter = bootstrapTransition ? recoveryJournal : attemptReader;
+  // Historical, legacy, and bootstrap transitions use the root journal for their
+  // attempt boundary; the bootstrap transition alone writes through release.
+  const { attemptReader, attemptWriter } = selectStageAProductionArtifactsRecoveryJournals({ historicalTransition, legacyReservationTransition, bootstrapTransition, recoveryJournal, rootRecoveryJournal });
   const completionJournal = journal;
   const decode = (record, label) => { if (!record) return null; try { return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(record.bytes)); } catch { throw new Error(`${label} is malformed.`); } };
   const readCompletion = (reader) => { try { return reader.readRecoveryCompletion(authorization.authorizationSha256); } catch (error) {

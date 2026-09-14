@@ -23,6 +23,9 @@ locals {
   initial_activation_policy_reconciliation_reservation_object_arns = [
     "${var.receipt_bucket_arn}/production-initial-activation-lifecycle-policy-reconciliation/reservations/*"
   ]
+  initial_activation_policy_reconciliation_legacy_transition_reservation_object_arns = [
+    "${var.receipt_bucket_arn}/production-initial-activation-lifecycle-policy-reconciliation/reservations/bootstrap-operator-legacy-mfa-transition.json"
+  ]
   provider_readonly_policy_reconciliation_object_arns = [
     "${var.receipt_bucket_arn}/production-provider-readonly-policy-reconciliation/*"
   ]
@@ -49,8 +52,9 @@ resource "aws_s3_bucket_policy" "production_artifacts" {
     { Sid = "AllowRootOperatorReadInitialActivationPolicyReconciliationReservations", Effect = "Allow", Principal = { AWS = "arn:aws:iam::368992683803:root" }, Action = "s3:GetObject", Resource = local.initial_activation_policy_reconciliation_reservation_object_arns },
     { Sid = "DenyOtherPrincipalsInitialActivationPolicyReconciliationReservationReads", Effect = "Deny", Principal = "*", Action = "s3:GetObject", Resource = local.initial_activation_policy_reconciliation_reservation_object_arns, Condition = { StringNotEquals = { "aws:PrincipalArn" = "arn:aws:iam::368992683803:root" } } },
     { Sid = "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationCreate", Effect = "Allow", Principal = { AWS = "arn:aws:iam::368992683803:root" }, Action = "s3:PutObject", Resource = local.initial_activation_policy_reconciliation_reservation_object_arns, Condition = { StringEquals = { "s3:if-none-match" = "*" } } },
-    { Sid = "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationReplace", Effect = "Allow", Principal = { AWS = "arn:aws:iam::368992683803:root" }, Action = "s3:PutObject", Resource = local.initial_activation_policy_reconciliation_reservation_object_arns, Condition = { Null = { "s3:if-match" = "false" } } },
+    { Sid = "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationReplace", Effect = "Allow", Principal = { AWS = "arn:aws:iam::368992683803:root" }, Action = "s3:PutObject", Resource = local.initial_activation_policy_reconciliation_legacy_transition_reservation_object_arns, Condition = { Null = { "s3:if-match" = "false" } } },
     { Sid = "DenyUnconditionalInitialActivationPolicyReconciliationReservationWrites", Effect = "Deny", Principal = "*", Action = "s3:PutObject", Resource = local.initial_activation_policy_reconciliation_reservation_object_arns, Condition = { Null = { "s3:if-none-match" = "true", "s3:if-match" = "true" } } },
+    { Sid = "DenyNonTargetInitialActivationPolicyReconciliationReservationReplacements", Effect = "Deny", Principal = "*", Action = "s3:PutObject", NotResource = local.initial_activation_policy_reconciliation_legacy_transition_reservation_object_arns, Condition = { StringNotEquals = { "s3:if-none-match" = "*" } } },
     { Sid = "DenyOtherPrincipalsInitialActivationPolicyReconciliationReservationWrites", Effect = "Deny", Principal = "*", Action = "s3:PutObject", Resource = local.initial_activation_policy_reconciliation_reservation_object_arns, Condition = { StringNotEquals = { "aws:PrincipalArn" = "arn:aws:iam::368992683803:root" } } },
     { Sid = "DenyInitialActivationPolicyReconciliationReservationDeletion", Effect = "Deny", Principal = "*", Action = ["s3:DeleteObject", "s3:DeleteObjectVersion"], Resource = local.initial_activation_policy_reconciliation_reservation_object_arns },
     { Sid = "AllowReleaseDeployerListStageAProductionArtifactsRecovery", Effect = "Allow", Principal = { AWS = var.release_role_arn }, Action = "s3:ListBucket", Resource = var.receipt_bucket_arn, Condition = { StringLike = { "s3:prefix" = ["production-stage-a-production-artifacts-reconciliation/recovery/*"] } } },

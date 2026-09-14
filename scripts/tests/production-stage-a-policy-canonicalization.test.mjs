@@ -26,8 +26,8 @@ const allowsExactList = ({ policy, principal, bucket, prefix }) => policy.Statem
 const values = (value) => Array.isArray(value) ? value : [value];
 const matches = (value, actual) => values(value).includes(actual);
 const resourceMatches = (value, actual) => values(value).some((pattern) => pattern.endsWith("*") ? actual.startsWith(pattern.slice(0, -1)) : pattern === actual);
-const conditionMatches = (condition, context) => Object.entries(condition || {}).every(([operator, entries]) => Object.entries(entries).every(([key, value]) => operator === "StringEquals" ? matches(value, context[key]) : operator === "StringNotEquals" ? !matches(value, context[key]) : false));
-const policyMatches = (entry, { principal, action, resource, context }) => matches(entry.Action, action) && resourceMatches(entry.Resource, resource) && (entry.Principal === "*" || entry.Principal?.AWS === "*" || matches(entry.Principal?.AWS, principal)) && conditionMatches(entry.Condition, { ...context, "aws:PrincipalArn": principal });
+const conditionMatches = (condition, context) => Object.entries(condition || {}).every(([operator, entries]) => Object.entries(entries).every(([key, value]) => operator === "StringEquals" ? matches(value, context[key]) : operator === "StringNotEquals" ? !matches(value, context[key]) : operator === "Null" ? (context[key] === undefined) === (value === "true") : false));
+const policyMatches = (entry, { principal, action, resource, context }) => matches(entry.Action, action) && (entry.Resource ? resourceMatches(entry.Resource, resource) : !resourceMatches(entry.NotResource, resource)) && (entry.Principal === "*" || entry.Principal?.AWS === "*" || matches(entry.Principal?.AWS, principal)) && conditionMatches(entry.Condition, { ...context, "aws:PrincipalArn": principal });
 const explicitlyDenied = (policy, request) => policy.Statement.some((entry) => entry.Effect === "Deny" && policyMatches(entry, request));
 const explicitlyAllowed = (policy, request) => policy.Statement.some((entry) => entry.Effect === "Allow" && policyMatches(entry, request));
 
@@ -155,6 +155,7 @@ test("State A requires the root-read and release-write bootstrap split without w
   const bucket = "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an";
   const prefix = "production-stage-a-production-artifacts-reconciliation/recovery/";
   const attempt = `${bucket}/${prefix}${"a".repeat(64)}/attempt.json`;
+  const legacyReservation = `${bucket}/production-initial-activation-lifecycle-policy-reconciliation/reservations/bootstrap-operator-legacy-mfa-transition.json`;
   const root = "arn:aws:iam::368992683803:root";
   const release = "arn:aws:iam::368992683803:role/mscqr-production-release-deployer";
   const conditionalWrite = { action: "s3:PutObject", resource: attempt, context: { "s3:if-none-match": "*" } };
@@ -162,6 +163,8 @@ test("State A requires the root-read and release-write bootstrap split without w
   assert.equal(explicitlyAllowed(A, { ...conditionalWrite, principal: release }), true);
   assert.equal(explicitlyDenied(A, { ...conditionalWrite, principal: release }), false);
   assert.equal(explicitlyDenied(A, { principal: root, action: "s3:GetObject", resource: attempt, context: {} }), false);
+  assert.equal(explicitlyAllowed(A, { principal: root, action: "s3:PutObject", resource: legacyReservation, context: { "s3:if-match": "etag" } }), true);
+  assert.equal(explicitlyDenied(A, { principal: root, action: "s3:PutObject", resource: `${bucket}/production-initial-activation-lifecycle-policy-reconciliation/reservations/other.json`, context: { "s3:if-match": "etag" } }), true);
   assert.equal(allowsExactList({ policy: A, principal: release, bucket, prefix: `${prefix}${"a".repeat(64)}/attempt.json` }), false);
   assert.equal(explicitlyAllowed(APrime, { ...conditionalWrite, principal: release }), true);
   assert.equal(explicitlyDenied(APrime, { ...conditionalWrite, principal: release }), false);
