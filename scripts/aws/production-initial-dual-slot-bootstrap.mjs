@@ -262,7 +262,7 @@ export function assertInitialDualSlotBindings(bindings) {
   return true;
 }
 
-function assertInitialBindingSchemaClosed(bindings) {
+export function assertInitialBindingSchemaClosed(bindings) {
   const exact = (value, keys, label) => { if (!value || typeof value !== "object" || Array.isArray(value) || JSON.stringify(Object.keys(value).sort()) !== JSON.stringify([...keys].sort())) throw new Error(`${label} schema is not closed.`); };
   exact(bindings, ["schemaVersion", "kind", "producer", "sourceSha", "rotationId", "legacy", "jwt", "qr", "ecs", ...(bindings.schemaVersion === 3 ? ["supersessionEvidence", "supersessionPredecessor"] : []), ...([4, 5].includes(bindings.schemaVersion) ? ["retainedHistory", "retainedHistoryCanonicalId"] : []), ...(bindings.schemaVersion === 5 ? ["recoveryHandoff", "recoveryHandoffCanonicalId"] : [])], "Initial dual-slot bindings");
   exact(bindings.legacy, ["jwtCurrent", "qrPrivateCurrent", "qrPublicCurrent", "qrCurrentVersion"], "Initial dual-slot legacy bindings");
@@ -407,6 +407,7 @@ export function verifyLiveInitialDualSlotBindingWithRunner({ run, bindings, prov
     }
   }
   if (observedSlots.qrPrivatePending.keyVersion && observedSlots.qrPrivatePending.keyVersion !== observedSlots.qrPublicPending.keyVersion) throw new Error("Initial QR pending payload identities are inconsistent.");
+  if (observedSlots.qrPublicPending.keyVersion !== bindings.qr.pendingKeyVersion) throw new Error("Initial QR pending key version does not match the authenticated live binding.");
   let supersessionPredecessorIdentitySha256;
   if (predecessor) {
     const payloads = {};

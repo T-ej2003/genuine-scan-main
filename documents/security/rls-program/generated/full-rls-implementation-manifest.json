@@ -15,7 +15,7 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "e25924be4da58352005e2f53bc331493a70e0ba8b5307098532c7545259d1d08",
+  "sourceContractSha256": "d23e6381953507f22f6f5aab100372492c38fb6c30f3303f20ac9ad26c827af7",
   "migrationSetDigest": "6642442a81cd98c7a132d241fa98e50ae231510896c9da67ab70d86b050d02db",
   "sourceContractInputs": [
     {
@@ -136,7 +136,7 @@
     },
     {
       "path": "documents/security/rls-program/production-full-rls-executor-contract.json",
-      "sha256": "7fbc145d3a3ece59f0f116cd8023bd7fa68829e49cf077a7365ee00f3a00d21d"
+      "sha256": "d309cd4f6e4df75076c61221e77324e09ac1bdb7171489fb84bd85dfb5351ace"
     },
     {
       "path": "infra/terraform/staging-api/lambda/database-role-executor-broker/index.mjs",
@@ -336,7 +336,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:e25924be4da58352005e2f53bc331493a70e0ba8b5307098532c7545259d1d08",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:d23e6381953507f22f6f5aab100372492c38fb6c30f3303f20ac9ad26c827af7",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,

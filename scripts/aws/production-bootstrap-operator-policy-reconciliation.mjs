@@ -12,7 +12,7 @@ import { PRODUCTION_ENVIRONMENT_APPROVAL, assertProductionEnvironmentActualRevie
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, readBoundStageBPrivateJson, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertProtectedCheckout } from "./prepare-production-initial-activation-reconciler-installation.mjs";
 import { ECS_EXEC_OPERATOR_BOOTSTRAP_MFA_SERIAL_ARN } from "./production-ecs-exec-operator-contract.mjs";
-import { assertInitialDualSlotBindings, verifyLiveInitialDualSlotBindingWithRunner } from "./production-initial-dual-slot-bootstrap.mjs";
+import { assertInitialBindingSchemaClosed, assertInitialDualSlotBindings, verifyLiveInitialDualSlotBindingWithRunner } from "./production-initial-dual-slot-bootstrap.mjs";
 import { MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES } from "./production-mixed-dual-slot-recovery-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -62,11 +62,15 @@ export const BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION = Object.freeze({
 export const LEGACY_BOOTSTRAP_TRANSITION_KIND = "LEGACY_BOOTSTRAP_MFA_TRANSITION";
 export const LEGACY_BOOTSTRAP_TRANSITION_ROTATION_ID = "rotation-20260913011819-98b062c4";
 export const LEGACY_BOOTSTRAP_TRANSITION_SOURCE_SHA = "054d1adce8a477df362719f5b7b70c98483cedc7";
+export const LEGACY_BOOTSTRAP_TRANSITION_ROTATION_BINDINGS_FILE_SHA256 = "49013c088ca4e9b9093e566f88d90589acff6e085823f39d45977d0342e88bc7";
+export const LEGACY_BOOTSTRAP_TRANSITION_SUPERSESSION_GENERATED_AT = "2026-09-13T01:38:21.459Z";
 export const LEGACY_BOOTSTRAP_MFA_TRANSITION = Object.freeze({
   kind: LEGACY_BOOTSTRAP_TRANSITION_KIND,
   releaseLifecycle: "authenticated-initial-overlap",
   rotationId: LEGACY_BOOTSTRAP_TRANSITION_ROTATION_ID,
   historicalTransactionSourceSha: LEGACY_BOOTSTRAP_TRANSITION_SOURCE_SHA,
+  rotationBindingsFileSha256: LEGACY_BOOTSTRAP_TRANSITION_ROTATION_BINDINGS_FILE_SHA256,
+  supersessionGeneratedAt: LEGACY_BOOTSTRAP_TRANSITION_SUPERSESSION_GENERATED_AT,
   accessKeyCount: 2,
   accessKeyStatus: "Active",
   accessKeyCreatedAt: Object.freeze(["2026-07-29T19:28:57.000Z", "2026-07-29T19:31:58.000Z"]),
@@ -75,7 +79,7 @@ export const LEGACY_BOOTSTRAP_MFA_TRANSITION = Object.freeze({
 
 const legacyTransition = (value) => {
   try { exactKeys(value, ["kind", "rotationBindingsFileSha256"], "Legacy bootstrap MFA transition"); } catch { return false; }
-  return value.kind === LEGACY_BOOTSTRAP_TRANSITION_KIND && /^[a-f0-9]{64}$/.test(value.rotationBindingsFileSha256);
+  return value.kind === LEGACY_BOOTSTRAP_TRANSITION_KIND && value.rotationBindingsFileSha256 === LEGACY_BOOTSTRAP_TRANSITION_ROTATION_BINDINGS_FILE_SHA256;
 };
 const legacyAccessKeyCreatedAt = (accessKeys) => accessKeys.map(({ CreateDate }) => new Date(CreateDate).toISOString()).sort();
 const readLegacyTransitionConsumption = (run) => {
@@ -158,7 +162,11 @@ const assertOwnedUnexpiredLegacyTransitionReservation = (run, authorization, now
 };
 const initialOverlapResources = (bindings) => ({ jwtPrevious: bindings.jwt.previousSecretId, jwtPending: bindings.jwt.pendingSecretId, qrPrivatePending: bindings.qr.privatePendingSecretId, qrPublicPrevious: bindings.qr.publicPreviousSecretId, qrPublicPending: bindings.qr.publicPendingSecretId, qrCurrentVersion: bindings.qr.currentKeyVersionSecretId, qrPreviousVersion: bindings.qr.previousKeyVersionSecretId });
 const assertLegacyBootstrapMfaTransitionStaticBinding = (bindings, transition) => {
-  if (!legacyTransition(transition) || bindings?.schemaVersion === 3 || assertInitialDualSlotBindings(bindings) !== true || canonicalJson(Object.values(initialOverlapResources(bindings)).sort()) !== canonicalJson([...MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES].sort()) || bindings.sourceSha !== LEGACY_BOOTSTRAP_TRANSITION_SOURCE_SHA || bindings.rotationId !== LEGACY_BOOTSTRAP_TRANSITION_ROTATION_ID) throw new Error("Legacy bootstrap MFA transition is not bound to the reviewed initial-overlap resources.");
+  if (!legacyTransition(transition) || bindings?.schemaVersion !== 3) throw new Error("Legacy bootstrap MFA transition is not bound to the reviewed finalized supersession.");
+  assertInitialBindingSchemaClosed(bindings);
+  const current = bindings.supersessionPredecessor?.current;
+  const legacy = { jwtCurrent: bindings.jwt.currentSecretId, qrPrivateCurrent: bindings.qr.privateCurrentSecretId, qrPublicCurrent: bindings.qr.publicCurrentSecretId, qrCurrentVersion: bindings.qr.previousKeyVersion };
+  if (assertInitialDualSlotBindings(bindings) !== true || canonicalJson(Object.values(initialOverlapResources(bindings)).sort()) !== canonicalJson([...MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES].sort()) || bindings.sourceSha !== LEGACY_BOOTSTRAP_TRANSITION_SOURCE_SHA || bindings.rotationId !== LEGACY_BOOTSTRAP_TRANSITION_ROTATION_ID || bindings.supersessionEvidence.generatedAt !== LEGACY_BOOTSTRAP_TRANSITION_SUPERSESSION_GENERATED_AT || canonicalJson(bindings.legacy) !== canonicalJson(legacy) || current?.jwt?.secretArn !== bindings.jwt.currentSecretId || current?.qrPrivate?.secretArn !== bindings.qr.privateCurrentSecretId || current?.qrPublic?.secretArn !== bindings.qr.publicCurrentSecretId || bindings.supersessionPredecessor.runtimeQrVersionLabel !== bindings.qr.previousKeyVersion) throw new Error("Legacy bootstrap MFA transition is not bound to the reviewed initial-overlap resources.");
   return bindings;
 };
 const legacyBindingOrigin = (origin, bindings, transition) => {
@@ -179,8 +187,9 @@ export function assertLegacyBootstrapMfaTransitionBinding(bindings, transition, 
   if (!legacyBindingOrigin(origin, bindings, transition)) throw new Error("Legacy bootstrap MFA transition is not bound to the authenticated initial-overlap rotation.");
   return bindings;
 }
-export function verifyLegacyBootstrapMfaTransitionBinding({ run, bindings, transition, proveDescendant, verifyLiveBinding = verifyLiveInitialDualSlotBindingWithRunner } = {}) {
+export function verifyLegacyBootstrapMfaTransitionBinding({ run, bindings, transition, currentSourceSha, proveDescendant, verifyLiveBinding = verifyLiveInitialDualSlotBindingWithRunner } = {}) {
   assertLegacyBootstrapMfaTransitionStaticBinding(bindings, transition);
+  if (typeof proveDescendant !== "function" || proveDescendant({ ancestorSha: bindings.sourceSha, descendantSha: requiredSha(currentSourceSha, "Legacy bootstrap MFA transition current source SHA") }) !== true) throw new Error("Legacy bootstrap MFA transition current source is not descended from the authenticated historical transaction.");
   const origin = verifyLiveBinding({ run, bindings, proveDescendant });
   assertLegacyBootstrapMfaTransitionBinding(bindings, transition, origin);
   return origin;
@@ -306,7 +315,7 @@ export function authenticateBootstrapOperatorAuthorizationLiveState({ run, prepa
   if (typeof principalArn !== "string" || !principalArn.startsWith(expectedPrefix) || principalArn.length === expectedPrefix.length) throw new Error("Bootstrap operator authorization requires the exact protected OIDC reconciler role.");
   if (prepared.credentialState === LEGACY_BOOTSTRAP_TRANSITION_KIND) {
     assertLegacyTransitionAvailable(run, now);
-    const liveOrigin = verifyLegacyBootstrapMfaTransitionBinding({ run: (args) => run(args.slice(1)), bindings: prepared.legacyRotationBindings, transition: prepared.transition, proveDescendant, verifyLiveBinding });
+    const liveOrigin = verifyLegacyBootstrapMfaTransitionBinding({ run: (args) => run(args.slice(1)), bindings: prepared.legacyRotationBindings, transition: prepared.transition, currentSourceSha: sourceSha, proveDescendant, verifyLiveBinding });
     if (canonicalJson(liveOrigin) !== canonicalJson(prepared.legacyRotationBindingOrigin)) throw new Error("Bootstrap operator authorization live initial-overlap binding changed after preparation.");
   }
   return Object.freeze({ principalArn, liveInitialOverlapBindingReverified: prepared.credentialState === LEGACY_BOOTSTRAP_TRANSITION_KIND });
@@ -341,7 +350,7 @@ export function reconcileBootstrapOperatorPolicy({ run, authorization, sourceSha
   let ownedReservation;
   const before = readBootstrapOperatorLiveState({ run, transition });
   if (transition) {
-    const liveOrigin = verifyLegacyBootstrapMfaTransitionBinding({ run: (args) => run(args.slice(1)), bindings: authorization.preparation.legacyRotationBindings, transition, proveDescendant, verifyLiveBinding });
+    const liveOrigin = verifyLegacyBootstrapMfaTransitionBinding({ run: (args) => run(args.slice(1)), bindings: authorization.preparation.legacyRotationBindings, transition, currentSourceSha: sourceSha, proveDescendant, verifyLiveBinding });
     if (canonicalJson(liveOrigin) !== canonicalJson(authorization.preparation.legacyRotationBindingOrigin)) throw new Error("Bootstrap operator execution live initial-overlap binding changed after authorization.");
     marker = readLegacyTransitionConsumption(run);
     if (marker?.state === "COMPLETED" && marker.authorizationSha256 !== authorization.authorizationSha256) throw new Error("Legacy bootstrap MFA transition was consumed by a different authorization.");
@@ -435,7 +444,7 @@ export function runBootstrapOperatorPolicyReconciliationCli(argv = process.argv.
     if (transition) {
       assertLegacyTransitionAvailable(run, deps.now || new Date());
       const proveDescendant = ({ ancestorSha, descendantSha }) => { try { (deps.exec || execFileSync)("git", ["merge-base", "--is-ancestor", ancestorSha, descendantSha], { cwd: root, stdio: "ignore" }); return true; } catch { return false; } };
-      legacyRotationBindingOrigin = verifyLegacyBootstrapMfaTransitionBinding({ run: (args) => run(args.slice(1)), bindings: legacyRotationBindings, transition, proveDescendant });
+      legacyRotationBindingOrigin = verifyLegacyBootstrapMfaTransitionBinding({ run: (args) => run(args.slice(1)), bindings: legacyRotationBindings, transition, currentSourceSha: sourceSha, proveDescendant });
     }
     const preparation = createBootstrapOperatorPolicyPreparation({ sourceSha, liveState: readBootstrapOperatorLiveState({ run, transition }), transition, legacyRotationBindings, legacyRotationBindingOrigin, preparedAt: (deps.now || new Date()).toISOString() });
     const output = assertStageBArtifactPath({ artifactPath: path.resolve(required(argv, "--output")), repositoryRoot: root, label: "Bootstrap operator preparation", allowExisting: false });

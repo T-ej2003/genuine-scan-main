@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import test from "node:test";
 import { PRODUCTION_ENVIRONMENT_APPROVAL, createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
@@ -7,6 +8,8 @@ import {
   BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION,
   LEGACY_BOOTSTRAP_MFA_TRANSITION,
   LEGACY_BOOTSTRAP_TRANSITION_KIND,
+  LEGACY_BOOTSTRAP_TRANSITION_ROTATION_BINDINGS_FILE_SHA256,
+  LEGACY_BOOTSTRAP_TRANSITION_SUPERSESSION_GENERATED_AT,
   LEGACY_BOOTSTRAP_TRANSITION_ROTATION_ID,
   LEGACY_BOOTSTRAP_TRANSITION_SOURCE_SHA,
   assertLegacyBootstrapMfaTransitionBinding,
@@ -19,6 +22,9 @@ import {
   verifyLegacyBootstrapMfaTransitionBinding,
 } from "../aws/production-bootstrap-operator-policy-reconciliation.mjs";
 import { assertEcsExecOperatorTrustDocument, ECS_EXEC_OPERATOR_BOOTSTRAP_MFA_SERIAL_ARN } from "../aws/production-ecs-exec-operator-contract.mjs";
+import { rotationBindingsToTaskBindings } from "../aws/production-cutover-runtime-bootstrap.mjs";
+import { canonicalJson } from "../aws/production-green-stage-b-contract.mjs";
+import { productionStaleSupersessionPredecessorIdentity, productionSupersessionEvidenceIdentity, productionSupersessionVersionId } from "../security/production-initial-migration-source-advance.mjs";
 
 const sourceSha = "a".repeat(40);
 const now = new Date("2026-09-14T12:00:00.000Z");
@@ -42,28 +48,52 @@ const legacyAccessKeys = Object.freeze([
   { AccessKeyId: "key-b", Status: "Active", CreateDate: "2026-07-29T19:31:58Z" },
 ]);
 const legacyAuthorized = () => {
-  const transition = { kind: LEGACY_BOOTSTRAP_TRANSITION_KIND, rotationBindingsFileSha256: "b".repeat(64) };
+  const transition = { kind: LEGACY_BOOTSTRAP_TRANSITION_KIND, rotationBindingsFileSha256: LEGACY_BOOTSTRAP_TRANSITION_ROTATION_BINDINGS_FILE_SHA256 };
   const preparation = createBootstrapOperatorPolicyPreparation({ sourceSha, liveState: live(desired.predecessorDocument, { accessKeys: legacyAccessKeys }), transition, legacyRotationBindings: legacyBindings(), legacyRotationBindingOrigin: legacyBindingOrigin(), preparedAt: now.toISOString() });
   return createBootstrapOperatorPolicyAuthorization({ sourceSha, preparation, protectedEnvironmentApprovalEvidence: approval, authorizedAt: now.toISOString() });
 };
 const legacyRecoveredAuthorization = (credentialTopology = {}) => {
-  const transition = { kind: LEGACY_BOOTSTRAP_TRANSITION_KIND, rotationBindingsFileSha256: "b".repeat(64) };
+  const transition = { kind: LEGACY_BOOTSTRAP_TRANSITION_KIND, rotationBindingsFileSha256: LEGACY_BOOTSTRAP_TRANSITION_ROTATION_BINDINGS_FILE_SHA256 };
   const preparation = createBootstrapOperatorPolicyPreparation({ sourceSha, liveState: live(desired.document, { accessKeys: legacyAccessKeys }), transition, legacyRotationBindings: legacyBindings(), legacyRotationBindingOrigin: legacyBindingOrigin(), preparedAt: now.toISOString() });
   return createBootstrapOperatorPolicyAuthorization({ sourceSha, preparation, protectedEnvironmentApprovalEvidence: approval, authorizedAt: now.toISOString() });
 };
 const legacyBindings = () => {
   const [jwtPending, qrPrivatePending, qrPublicPending, jwtPrevious, qrPublicPrevious, qrCurrentVersion, qrPreviousVersion] = MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES;
-  return {
-    schemaVersion: 2, kind: "PRODUCTION_INITIAL_DUAL_SLOT_ROTATION_BINDINGS", producer: "scripts/aws/production-initial-dual-slot-bootstrap.mjs:bootstrapInitialDualSlotRotation",
-    sourceSha: LEGACY_BOOTSTRAP_TRANSITION_SOURCE_SHA, rotationId: LEGACY_BOOTSTRAP_TRANSITION_ROTATION_ID,
-    jwt: { currentSecretId: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/jwt-wBQNqk", previousSecretId: jwtPrevious, pendingSecretId: jwtPending },
-    qr: { privateCurrentSecretId: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_private_key-BcQFPO", privatePendingSecretId: qrPrivatePending, publicCurrentSecretId: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_public_key-v7Xeex", publicPreviousSecretId: qrPublicPrevious, publicPendingSecretId: qrPublicPending, currentKeyVersionSecretId: qrCurrentVersion, previousKeyVersionSecretId: qrPreviousVersion, previousKeyVersion: "legacy-current" },
+  const resources = { jwtPending, qrPrivatePending, qrPublicPending, jwtPrevious, qrPublicPrevious, qrCurrentVersion, qrPreviousVersion };
+  const predecessorSlotIdentities = Object.fromEntries(Object.entries(resources).map(([slot, secretArn]) => [slot, { secretArn, versionId: `previous-${slot}`, payloadSha256: createHash("sha256").update(`previous-${slot}`).digest("hex"), materialFingerprint: null, keyVersion: null }]));
+  const supersessionEvidence = {
+    schemaVersion: 1, transition: "SUPERSEDE_STALE_PENDING", sourceSha: LEGACY_BOOTSTRAP_TRANSITION_SOURCE_SHA, staleSourceSha: "1".repeat(40), rotationId: LEGACY_BOOTSTRAP_TRANSITION_ROTATION_ID, staleRotationId: "rotation-stale-predecessor", generatedAt: LEGACY_BOOTSTRAP_TRANSITION_SUPERSESSION_GENERATED_AT,
+    resources: Object.fromEntries(Object.entries(resources).map(([slot, arn]) => [slot, { arn, versionId: productionSupersessionVersionId(LEGACY_BOOTSTRAP_TRANSITION_SOURCE_SHA, LEGACY_BOOTSTRAP_TRANSITION_ROTATION_ID, slot), stages: ["AWSCURRENT"] }])),
+    predecessorSlotIdentities,
   };
+  supersessionEvidence.evidenceIdentitySha256 = productionSupersessionEvidenceIdentity(supersessionEvidence);
+  const supersessionPredecessor = {
+    schemaVersion: 1, kind: "PRODUCTION_STALE_SUPERSESSION_PREDECESSOR", sourceSha: LEGACY_BOOTSTRAP_TRANSITION_SOURCE_SHA, rotationId: LEGACY_BOOTSTRAP_TRANSITION_ROTATION_ID, staleSourceSha: supersessionEvidence.staleSourceSha, staleRotationId: supersessionEvidence.staleRotationId, supersessionEvidenceIdentitySha256: supersessionEvidence.evidenceIdentitySha256, runtimeQrVersionLabel: "legacy-current", currentRotationId: "rotation-current-predecessor",
+    current: {
+      jwt: { secretArn: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/jwt-wBQNqk", versionId: "current-jwt-version", rotationId: "rotation-current-predecessor", family: "jwt_secrets", slot: "current", materialFingerprint: "1".repeat(16) },
+      qrPrivate: { secretArn: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_private_key-BcQFPO", versionId: "current-private-version", rotationId: "rotation-current-predecessor", family: "qr_signing_keys", slot: "current-private", keyVersion: "current-key", materialFingerprint: "2".repeat(16) },
+      qrPublic: { secretArn: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_public_key-v7Xeex", versionId: "current-public-version", rotationId: "rotation-current-predecessor", family: "qr_signing_keys", slot: "current-public", keyVersion: "current-key", materialFingerprint: "3".repeat(16) },
+    },
+    slotIdentities: predecessorSlotIdentities,
+  };
+  supersessionPredecessor.predecessorIdentitySha256 = productionStaleSupersessionPredecessorIdentity(supersessionPredecessor);
+  const bindings = {
+    schemaVersion: 3, kind: "PRODUCTION_INITIAL_DUAL_SLOT_ROTATION_BINDINGS", producer: "scripts/aws/production-initial-dual-slot-bootstrap.mjs:bootstrapInitialDualSlotRotation",
+    sourceSha: LEGACY_BOOTSTRAP_TRANSITION_SOURCE_SHA, rotationId: LEGACY_BOOTSTRAP_TRANSITION_ROTATION_ID,
+    legacy: { jwtCurrent: supersessionPredecessor.current.jwt.secretArn, qrPrivateCurrent: supersessionPredecessor.current.qrPrivate.secretArn, qrPublicCurrent: supersessionPredecessor.current.qrPublic.secretArn, qrCurrentVersion: supersessionPredecessor.runtimeQrVersionLabel },
+    jwt: { currentSecretId: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/jwt-wBQNqk", previousSecretId: jwtPrevious, pendingSecretId: jwtPending },
+    qr: { privateCurrentSecretId: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_private_key-BcQFPO", privatePendingSecretId: qrPrivatePending, publicCurrentSecretId: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_public_key-v7Xeex", publicPreviousSecretId: qrPublicPrevious, publicPendingSecretId: qrPublicPending, currentKeyVersionSecretId: qrCurrentVersion, previousKeyVersionSecretId: qrPreviousVersion, previousKeyVersion: "legacy-current", pendingKeyVersion: "pending-key" },
+    supersessionEvidence,
+    supersessionPredecessor,
+  };
+  bindings.ecs = rotationBindingsToTaskBindings(bindings);
+  return bindings;
 };
 const legacyBindingOrigin = (bindings = legacyBindings()) => {
   const resources = { jwtPrevious: bindings.jwt.previousSecretId, jwtPending: bindings.jwt.pendingSecretId, qrPrivatePending: bindings.qr.privatePendingSecretId, qrPublicPrevious: bindings.qr.publicPreviousSecretId, qrPublicPending: bindings.qr.publicPendingSecretId, qrCurrentVersion: bindings.qr.currentKeyVersionSecretId, qrPreviousVersion: bindings.qr.previousKeyVersionSecretId };
-  const body = { schemaVersion: 1, kind: "PRODUCTION_INITIAL_DUAL_SLOT_BINDING_ORIGIN", producer: bindings.producer, sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, resources, observedSlots: Object.fromEntries(Object.entries(resources).map(([slot, arn]) => [slot, { arn, versionId: `version-${slot}`, stages: ["AWSCURRENT"] }])) };
-  return { ...body, bindingSha256: "3f8ac6e924cf1669a2e534e7299df6193bc83f169a466f4ce217435fc8146c76", originSha256: "84c8cea1c0d1d7f98071ce0567b972bd4bbaf273f275c2ed25c361aabfabc101" };
+  const body = { schemaVersion: 1, kind: "PRODUCTION_INITIAL_DUAL_SLOT_BINDING_ORIGIN", producer: bindings.producer, sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, resources, observedSlots: Object.fromEntries(Object.entries(resources).map(([slot, arn]) => [slot, { arn, versionId: `version-${slot}`, stages: ["AWSCURRENT"] }])), supersessionPredecessorIdentitySha256: bindings.supersessionPredecessor.predecessorIdentitySha256 };
+  const hash = (value) => createHash("sha256").update(Buffer.from(canonicalJson(value))).digest("hex");
+  return { ...body, bindingSha256: hash(bindings), originSha256: hash(body) };
 };
 const runner = (initial, credentialTopology = {}, { stalePostWriteReads = 0, transientPostWriteReads = 0 } = {}) => {
   let document = structuredClone(initial); let writes = 0; let tagWrites = 0; let reservationWrites = 0; const commands = []; let tags = structuredClone(credentialTopology.tags || []); let reservation = credentialTopology.reservation ? structuredClone(credentialTopology.reservation) : null; let reservationVersion = 0; let staleReads = 0; let transientReads = 0;
@@ -184,23 +214,23 @@ test("legacy exact-complete authorization includes every reachable reservation a
   assert.deepEqual(authorization.preparation.expectedWritePlan.map(({ action }) => action), ["s3:PutObject", "iam:TagUser"]);
   assert.deepEqual(authorization.maxAwsMutations, { "s3:PutObject": 1, "iam:TagUser": 1 });
   const fixture = runner(desired.document, { accessKeys: legacyAccessKeys });
-  assert.deepEqual(reconcileBootstrapOperatorPolicy({ run: fixture.run, authorization, sourceSha, now, verifyLiveBinding: () => authorization.preparation.legacyRotationBindingOrigin }), { status: "COMPLETE", iamPutUserPolicyCount: 0, iamTagUserCount: 1, s3PutObjectCount: 1, recovered: true });
+  assert.deepEqual(reconcileBootstrapOperatorPolicy({ run: fixture.run, authorization, sourceSha, now, proveDescendant: () => true, verifyLiveBinding: () => authorization.preparation.legacyRotationBindingOrigin }), { status: "COMPLETE", iamPutUserPolicyCount: 0, iamTagUserCount: 1, s3PutObjectCount: 1, recovered: true });
   assert.equal(fixture.reservationWrites(), 1);
   assert.equal(fixture.tagWrites(), 1);
   const owned = runner(desired.document, { accessKeys: legacyAccessKeys, reservation: { schemaVersion: 2, kind: "PRODUCTION_BOOTSTRAP_OPERATOR_LEGACY_MFA_TRANSITION_RESERVATION", authorizationSha256: authorization.authorizationSha256, expiresAt: authorization.preparation.expiresAt, executionId: "11111111-1111-4111-8111-111111111111", leaseExpiresAt: new Date(now.getTime() + 60_000).toISOString() } });
-  assert.throws(() => reconcileBootstrapOperatorPolicy({ run: owned.run, authorization, sourceSha, now, verifyLiveBinding: () => authorization.preparation.legacyRotationBindingOrigin }), /active executor/);
+  assert.throws(() => reconcileBootstrapOperatorPolicy({ run: owned.run, authorization, sourceSha, now, proveDescendant: () => true, verifyLiveBinding: () => authorization.preparation.legacyRotationBindingOrigin }), /active executor/);
   assert.equal(owned.reservationWrites(), 0);
   assert.equal(owned.tagWrites(), 0);
   const expiredOwned = runner(desired.document, { accessKeys: legacyAccessKeys, reservation: { schemaVersion: 2, kind: "PRODUCTION_BOOTSTRAP_OPERATOR_LEGACY_MFA_TRANSITION_RESERVATION", authorizationSha256: authorization.authorizationSha256, expiresAt: authorization.preparation.expiresAt, executionId: "11111111-1111-4111-8111-111111111111", leaseExpiresAt: new Date(now.getTime() - 1).toISOString() } });
-  assert.deepEqual(reconcileBootstrapOperatorPolicy({ run: expiredOwned.run, authorization, sourceSha, now, verifyLiveBinding: () => authorization.preparation.legacyRotationBindingOrigin }), { status: "COMPLETE", iamPutUserPolicyCount: 0, iamTagUserCount: 1, s3PutObjectCount: 1, recovered: true });
+  assert.deepEqual(reconcileBootstrapOperatorPolicy({ run: expiredOwned.run, authorization, sourceSha, now, proveDescendant: () => true, verifyLiveBinding: () => authorization.preparation.legacyRotationBindingOrigin }), { status: "COMPLETE", iamPutUserPolicyCount: 0, iamTagUserCount: 1, s3PutObjectCount: 1, recovered: true });
   assert.equal(expiredOwned.reservationWrites(), 1);
   assert.equal(expiredOwned.tagWrites(), 1);
   const concurrent = runner(desired.predecessorDocument, { accessKeys: legacyAccessKeys, reservation: { schemaVersion: 2, kind: "PRODUCTION_BOOTSTRAP_OPERATOR_LEGACY_MFA_TRANSITION_RESERVATION", authorizationSha256: authorization.authorizationSha256, expiresAt: authorization.preparation.expiresAt, executionId: "11111111-1111-4111-8111-111111111111", leaseExpiresAt: new Date(now.getTime() + 60_000).toISOString() } });
-  assert.throws(() => reconcileBootstrapOperatorPolicy({ run: concurrent.run, authorization, sourceSha, now, verifyLiveBinding: () => authorization.preparation.legacyRotationBindingOrigin }), /active executor|predecessor changed/);
+  assert.throws(() => reconcileBootstrapOperatorPolicy({ run: concurrent.run, authorization, sourceSha, now, proveDescendant: () => true, verifyLiveBinding: () => authorization.preparation.legacyRotationBindingOrigin }), /active executor|predecessor changed/);
   assert.equal(concurrent.writes(), 0);
   assert.equal(concurrent.tagWrites(), 0);
   const completed = runner(desired.document, { accessKeys: legacyAccessKeys, tags: [{ Key: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.legacyTransitionConsumptionTagKey, Value: `completed:${authorization.authorizationSha256}` }] });
-  assert.deepEqual(reconcileBootstrapOperatorPolicy({ run: completed.run, authorization, sourceSha, now, verifyLiveBinding: () => authorization.preparation.legacyRotationBindingOrigin }), { status: "COMPLETE", iamPutUserPolicyCount: 0, iamTagUserCount: 0, s3PutObjectCount: 0, recovered: true });
+  assert.deepEqual(reconcileBootstrapOperatorPolicy({ run: completed.run, authorization, sourceSha, now, proveDescendant: () => true, verifyLiveBinding: () => authorization.preparation.legacyRotationBindingOrigin }), { status: "COMPLETE", iamPutUserPolicyCount: 0, iamTagUserCount: 0, s3PutObjectCount: 0, recovered: true });
   assert.equal(completed.reservationWrites(), 0);
   assert.equal(completed.tagWrites(), 0);
 });
@@ -229,11 +259,30 @@ test("governed reconciliation fails closed on a console password, access key, or
 
 test("the source-bound legacy MFA transition requires the exact historical binding and does not serialize raw key identifiers", () => {
   assert.deepEqual(BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.maxAwsMutations, { "iam:PutUserPolicy": 1, "iam:TagUser": 2, "s3:PutObject": 1 });
-  const transition = { kind: LEGACY_BOOTSTRAP_TRANSITION_KIND, rotationBindingsFileSha256: "b".repeat(64) };
+  const transition = { kind: LEGACY_BOOTSTRAP_TRANSITION_KIND, rotationBindingsFileSha256: LEGACY_BOOTSTRAP_TRANSITION_ROTATION_BINDINGS_FILE_SHA256 };
   assert.doesNotThrow(() => assertLegacyBootstrapMfaTransitionBinding(legacyBindings(), transition, legacyBindingOrigin()));
   assert.throws(() => assertLegacyBootstrapMfaTransitionBinding(legacyBindings(), transition), /not bound/);
-  assert.throws(() => assertLegacyBootstrapMfaTransitionBinding({ ...legacyBindings(), rotationId: "rotation-wrong" }, transition, legacyBindingOrigin()), /not bound/);
-  assert.throws(() => assertLegacyBootstrapMfaTransitionBinding({ ...legacyBindings(), schemaVersion: 3, supersessionEvidence: {}, supersessionPredecessor: {} }, transition, legacyBindingOrigin()), /not bound/);
+  assert.throws(() => assertLegacyBootstrapMfaTransitionBinding({ ...legacyBindings(), rotationId: "rotation-wrong" }, transition, legacyBindingOrigin()), /authenticated transition|not bound/);
+  const schema2 = structuredClone(legacyBindings()); schema2.schemaVersion = 2; delete schema2.supersessionEvidence; delete schema2.supersessionPredecessor;
+  assert.throws(() => assertLegacyBootstrapMfaTransitionBinding(schema2, transition, legacyBindingOrigin()), /finalized supersession/);
+  assert.throws(() => assertLegacyBootstrapMfaTransitionBinding(legacyBindings(), { ...transition, rotationBindingsFileSha256: "b".repeat(64) }, legacyBindingOrigin()), /not bound/);
+  for (const mutate of [
+    (bindings) => { bindings.supersessionEvidence.evidenceIdentitySha256 = "0".repeat(64); },
+    (bindings) => { delete bindings.supersessionEvidence; },
+    (bindings) => { bindings.supersessionPredecessor.predecessorIdentitySha256 = "0".repeat(64); },
+    (bindings) => { bindings.supersessionEvidence.resources.jwtPending.versionId = "substituted-version"; },
+    (bindings) => { bindings.supersessionEvidence.generatedAt = "2026-09-13T01:38:21.460Z"; },
+    (bindings) => { bindings.jwt.currentSecretId = "arn:aws:secretsmanager:eu-west-2:368992683803:secret:legacy-substitute"; },
+    (bindings) => { bindings.qr.privateCurrentSecretId = "arn:aws:secretsmanager:eu-west-2:368992683803:secret:legacy-substitute"; },
+    (bindings) => { bindings.qr.publicCurrentSecretId = "arn:aws:secretsmanager:eu-west-2:368992683803:secret:legacy-substitute"; },
+    (bindings) => { bindings.qr.previousKeyVersion = "substituted-version"; },
+    (bindings) => { bindings.jwt.pendingSecretId = "arn:aws:secretsmanager:eu-west-2:368992683803:secret:legacy-substitute"; },
+    (bindings) => { delete bindings.jwt.pendingSecretId; },
+    (bindings) => { bindings.jwt.extraSecretId = MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES[0]; },
+  ]) {
+    const altered = structuredClone(legacyBindings()); mutate(altered);
+    assert.throws(() => assertLegacyBootstrapMfaTransitionBinding(altered, transition, legacyBindingOrigin(altered)));
+  }
   assert.throws(() => assertLegacyBootstrapMfaTransitionBinding(legacyBindings(), transition, { ...legacyBindingOrigin(), originSha256: "0".repeat(64) }), /not bound/);
   assert.throws(() => assertLegacyBootstrapMfaTransitionBinding(legacyBindings(), transition, { ...legacyBindingOrigin(), unexpected: true }), /not bound/);
   const authorization = legacyAuthorized();
@@ -289,12 +338,13 @@ test("the source-bound legacy MFA transition requires the exact historical bindi
 });
 
 test("legacy binding resources are rejected before any AWS read and are reverified before IAM mutation", () => {
-  const transition = { kind: LEGACY_BOOTSTRAP_TRANSITION_KIND, rotationBindingsFileSha256: "b".repeat(64) };
+  const transition = { kind: LEGACY_BOOTSTRAP_TRANSITION_KIND, rotationBindingsFileSha256: LEGACY_BOOTSTRAP_TRANSITION_ROTATION_BINDINGS_FILE_SHA256 };
   const substituted = legacyBindings();
   substituted.jwt.pendingSecretId = "arn:aws:secretsmanager:eu-west-2:368992683803:secret:legacy-substitute";
   let reads = 0;
-  assert.throws(() => verifyLegacyBootstrapMfaTransitionBinding({ bindings: substituted, transition, proveDescendant: () => true, verifyLiveBinding: () => { reads += 1; } }), /reviewed initial-overlap resources/);
+  assert.throws(() => verifyLegacyBootstrapMfaTransitionBinding({ bindings: substituted, transition, currentSourceSha: sourceSha, proveDescendant: () => true, verifyLiveBinding: () => { reads += 1; } }), /reviewed initial-overlap resources|authenticated transition/);
   assert.equal(reads, 0);
+  assert.throws(() => verifyLegacyBootstrapMfaTransitionBinding({ bindings: legacyBindings(), transition, currentSourceSha: sourceSha, proveDescendant: () => false, verifyLiveBinding: () => legacyBindingOrigin() }), /not descended/);
 
   const authorization = legacyAuthorized();
   const fixture = runner(desired.predecessorDocument, { accessKeys: legacyAccessKeys });

@@ -10,7 +10,7 @@ import { assertRootDropEvidence, buildRootDropEvidence, buildRootDropPayload, ca
 import { assertAuthenticatedCurrentStageBState, assertPostApplyStageAPlanRecovery, producePostApplyStageAPlanRecovery, readAuthenticatedStageARecoverySources } from "../aws/production-stage-a-recovery-evidence.mjs";
 import { assertStageAStateContract, STAGE_A_STATE_IDENTITY_VERSION, stageAStateSemanticSha256 } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
 import { bootstrapInitialDualSlotRotation, createInitialDualSlotSecretsManagerClient, finalizeStaleRotationSupersessionMaterialJournal, generatePendingMaterial, INITIAL_DUAL_SLOT_NAMES, supersedeStalePendingRotation, verifyLiveInitialDualSlotBindingWithRunner } from "../aws/production-initial-dual-slot-bootstrap.mjs";
-import { buildProductionRotationConfig } from "../aws/production-cutover-runtime-bootstrap.mjs";
+import { buildProductionRotationConfig, rotationBindingsToTaskBindings } from "../aws/production-cutover-runtime-bootstrap.mjs";
 import { buildRebaselinePayloads, PARTIAL_REBASELINE_RECOVERY_ORIGINAL_SOURCE_SHA } from "../aws/production-dual-slot-rebaseline-contract.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { fixtureInput, sourceSha as rehearsalSourceSha } from "./production-cutover-rehearsal.test.mjs";
@@ -1666,6 +1666,10 @@ test("production-shaped stale supersession bootstraps a distinct canonical rotat
     substitutedBinding.supersessionPredecessor.current.jwt.materialFingerprint = "0".repeat(16);
     substitutedBinding.supersessionPredecessor.predecessorIdentitySha256 = productionStaleSupersessionPredecessorIdentity(substitutedBinding.supersessionPredecessor);
     assert.throws(() => verifyLiveInitialDualSlotBindingWithRunner({ run: originRunner(store), bindings: substitutedBinding, proveDescendant: () => true }), /stale-supersession predecessor/);
+    const substitutedPendingKeyVersion = structuredClone(binding.bindings);
+    substitutedPendingKeyVersion.qr.pendingKeyVersion = "substituted-key-version";
+    substitutedPendingKeyVersion.ecs = rotationBindingsToTaskBindings(substitutedPendingKeyVersion);
+    assert.throws(() => verifyLiveInitialDualSlotBindingWithRunner({ run: originRunner(store), bindings: substitutedPendingKeyVersion, proveDescendant: () => true }), /pending key version/);
     const directConfig = buildProductionRotationConfig({
       sourceSha: currentProtectedDescendant,
       rotationId: freshRotationId,
