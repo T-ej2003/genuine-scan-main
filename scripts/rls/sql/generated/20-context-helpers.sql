@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='c5c6ae322904118002860b136fb225053f7d2cf36098578f3732b62f60ffc6bc'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:c5c6ae322904118002860b136fb225053f7d2cf36098578f3732b62f60ffc6bc'
+    AND source_contract_sha256='45286276014bc427513ea1ac2f2fba24626d290a631460f0b6bf5c4ede9ff641'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:45286276014bc427513ea1ac2f2fba24626d290a631460f0b6bf5c4ede9ff641'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:c5c6ae322904118002860b136fb225053f7d2cf36098578f3732b62f60ffc6bc')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:45286276014bc427513ea1ac2f2fba24626d290a631460f0b6bf5c4ede9ff641')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -13522,6 +13522,133 @@ END $$;
 SET ROLE "mscqr_rls_cert_owner";
 REVOKE CREATE ON SCHEMA app_rls FROM "mscqr_rls_cert_auth_owner";
 RESET ROLE;
+DO $$ BEGIN
+  IF NOT pg_has_role(session_user,'mscqr_rls_cert_owner','SET') THEN RAISE EXCEPTION 'administrative executor lacks SET authority for mscqr_rls_cert_owner'; END IF;
+END $$;
+SET ROLE "mscqr_rls_cert_owner";
+CREATE OR REPLACE FUNCTION app_ops.session_c04_assert_context(
+  required_purpose text,
+  required_assurance text,
+  identity_class text,
+  allowed_environments text[]
+)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+  login_role text := session_user;
+  environment text := current_setting('app.operator_environment', true);
+BEGIN
+  IF current_setting('app.context_installed', true) IS DISTINCT FROM '1'
+     OR current_setting('app.purpose', true) IS DISTINCT FROM required_purpose
+     OR current_setting('app.auth_assurance', true) IS DISTINCT FROM required_assurance
+     OR current_setting('app.request_id', true) !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+     OR NOT environment = ANY(allowed_environments) THEN
+    RAISE EXCEPTION 'SESSION_C04_INVALID_CONTEXT';
+  END IF;
+
+  IF identity_class = 'operator' AND login_role !~ '^mscqr_(dev|staging|prod)_operator$'
+     AND login_role <> 'mscqr_rls_wave_c_operator' THEN
+    RAISE EXCEPTION 'SESSION_C04_WRONG_RUNTIME_IDENTITY';
+  ELSIF identity_class = 'breakglass' AND login_role !~ '^mscqr_prod_breakglass_[a-z0-9_]+$'
+     AND login_role <> 'mscqr_rls_wave_c_breakglass' THEN
+    RAISE EXCEPTION 'SESSION_C04_WRONG_RUNTIME_IDENTITY';
+  ELSIF identity_class = 'migration' AND login_role <> 'mscqr_rls_cert_migration' THEN
+    RAISE EXCEPTION 'SESSION_C04_WRONG_RUNTIME_IDENTITY';
+  END IF;
+  IF (login_role ~ '^mscqr_dev_(operator|migration)$' AND environment <> 'development')
+     OR (login_role ~ '^mscqr_staging_(operator|migration)$' AND environment <> 'staging')
+     OR (login_role ~ '^mscqr_prod_(operator|migration)$' AND environment <> 'production')
+     OR (login_role ~ '^mscqr_prod_breakglass_' AND environment <> 'production') THEN
+    RAISE EXCEPTION 'SESSION_C04_WRONG_ENVIRONMENT';
+  END IF;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_ops.session_c04_audit(
+  actor_id text,
+  action_name text,
+  entity_type text,
+  entity_id text,
+  details jsonb
+)
+RETURNS text
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE audit_id text := gen_random_uuid()::text;
+BEGIN
+  INSERT INTO public."AuditLog" (id,"userId",action,"entityType","entityId",details)
+  VALUES (
+    audit_id,
+    CASE WHEN EXISTS (SELECT 1 FROM public."User" WHERE id=actor_id) THEN actor_id ELSE NULL END,
+    action_name,entity_type,entity_id,
+    COALESCE(details,'{}'::jsonb) || jsonb_build_object(
+      'actorId',actor_id,'runtimeIdentity',session_user,'purpose',current_setting('app.purpose',true),
+      'requestId',current_setting('app.request_id',true),'immutableAttribution',true
+    )
+  );
+  INSERT INTO public."SecurityEventOutbox" (id,"eventType",payload,"updatedAt")
+  VALUES (gen_random_uuid()::text,'OPERATOR_PROCEDURE_AUDIT',jsonb_build_object(
+    'auditEventId',audit_id,'action',action_name,'entityType',entity_type,'entityId',entity_id
+  ),transaction_timestamp());
+  RETURN audit_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_ops.bootstrap_configured_super_admin(p_email text,p_password_hash text,p_name text,p_auto_verify boolean)
+RETURNS TABLE(status text,user_id uuid,email text,role text,auto_verified boolean,reason text,audit_event_id uuid)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+  existing_id text;
+  existing_email text;
+  existing_role text;
+  created_id text;
+  audit_id text;
+BEGIN
+  PERFORM app_ops.session_c04_assert_context('bootstrap-configured-super-admin','system-verified','migration',ARRAY['development','staging','production']);
+  PERFORM set_config('app.bootstrap_email',lower(btrim(p_email)),true);
+  PERFORM pg_advisory_xact_lock(723425101);
+  SELECT u.id,u.email,u.role::text INTO existing_id,existing_email,existing_role
+    FROM public."User" u
+   WHERE u.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
+     AND u."deletedAt" IS NULL
+     AND NOT (
+       u.id='174619c3-aabe-4096-a97d-886603ad825e'
+       AND u.role='PLATFORM_SUPER_ADMIN'
+       AND u.metadata->>'managedBy'='production-green-pretraffic-canary-v1'
+     )
+   ORDER BY u."createdAt",u.id LIMIT 1;
+  IF FOUND THEN
+    audit_id:=app_ops.session_c04_audit(NULL,'AUTH_SUPER_ADMIN_BOOTSTRAP_SKIPPED_EXISTING','User',existing_id,jsonb_build_object('migrationOnly',true));
+    RETURN QUERY SELECT 'skipped_existing',existing_id::uuid,existing_email,existing_role,NULL::boolean,NULL::text,audit_id::uuid;
+    RETURN;
+  END IF;
+  SELECT u.id,u.email,u.role::text INTO existing_id,existing_email,existing_role FROM public."User" u WHERE lower(u.email)=lower(p_email);
+  IF FOUND THEN
+    audit_id:=app_ops.session_c04_audit(NULL,'AUTH_SUPER_ADMIN_BOOTSTRAP_BLOCKED','User',existing_id,jsonb_build_object('reason','configured email belongs to another account','migrationOnly',true));
+    RETURN QUERY SELECT 'blocked',NULL::uuid,existing_email,NULL::text,NULL::boolean,'Configured bootstrap email already belongs to a non-super-admin account.',audit_id::uuid;
+    RETURN;
+  END IF;
+  created_id:=gen_random_uuid()::text;
+  INSERT INTO public."User" (id,email,"passwordHash",name,role,status,"isActive","emailVerifiedAt","updatedAt") VALUES
+    (created_id,lower(btrim(p_email)),p_password_hash,btrim(p_name),'SUPER_ADMIN','ACTIVE',true,CASE WHEN p_auto_verify THEN transaction_timestamp() ELSE NULL END,transaction_timestamp());
+  audit_id:=app_ops.session_c04_audit(NULL,'AUTH_SUPER_ADMIN_BOOTSTRAPPED','User',created_id,jsonb_build_object('autoVerified',p_auto_verify,'migrationOnly',true));
+  RETURN QUERY SELECT 'created',created_id::uuid,lower(btrim(p_email)),'SUPER_ADMIN',p_auto_verify,NULL::text,audit_id::uuid;
+END;
+$$;
+REVOKE ALL ON FUNCTION app_ops.session_c04_assert_context(text,text,text,text[]) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_ops.session_c04_audit(text,text,text,text,jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_ops.bootstrap_configured_super_admin(text,text,text,boolean) FROM PUBLIC;
+GRANT USAGE ON SCHEMA app_ops TO "mscqr_rls_cert_migration";
+GRANT EXECUTE ON FUNCTION app_ops.bootstrap_configured_super_admin(text,text,text,boolean) TO "mscqr_rls_cert_migration";
+RESET ROLE;
 INSERT INTO mscqr_rls_install.expected_routine(
   schema_name,routine_name,identity_arguments,result_type,routine_kind,owner_name,language_name,volatility,
   security_definer,leakproof,strict,parallel_mode,configuration,source_body,acl_rows
@@ -13540,6 +13667,6 @@ FROM pg_proc p
 JOIN pg_namespace n ON n.oid=p.pronamespace
 JOIN pg_roles owner_role ON owner_role.oid=p.proowner
 JOIN pg_language l ON l.oid=p.prolang
-WHERE n.nspname IN ('app_rls','app_auth','app_public');
+WHERE n.nspname IN ('app_rls','app_auth','app_public','app_ops');
 UPDATE mscqr_rls_install.state SET phase='context-helpers-installed' WHERE singleton;
 COMMIT;

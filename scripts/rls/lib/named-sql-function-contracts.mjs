@@ -74,6 +74,8 @@ const b03AuthenticatedSource = "backend/src/rls-waves/session-b/b03/b03Authentic
 const b03AuthenticatedRollback = "backend/src/rls-waves/session-b/b03/b03AuthenticatedRollback.sql";
 const operationalReadSource = "backend/src/rls-waves/session-a/operationalReadBoundaries.sql";
 const operationalReadRollback = "backend/src/rls-waves/session-a/operationalReadBoundariesRollback.sql";
+const operatorProcedureSource = "backend/src/rls-waves/session-c/c04/bootstrapConfiguredSuperAdmin.sql";
+const operatorProcedureRollback = "backend/src/rls-waves/session-c/c04/operatorProceduresRollback.sql";
 const administrationSource = "backend/src/rls-waves/session-c/c01/administration.sql";
 const administrationRollback = "backend/src/rls-waves/session-c/c01/administrationRollback.sql";
 const qrSystemSource = "backend/src/rls-waves/session-c/c01/qrSystem.sql";
@@ -1161,6 +1163,24 @@ const operationalContract = ({id,name,signature,returnType,identityArguments,tab
 // A function is production-reviewed only when its deployable definition,
 // contract, rollback and exact table-command evidence live together here.
 export const NAMED_SQL_FUNCTION_CONTRACTS = Object.freeze([
+  {
+    id: "c04-bootstrap-configured-super-admin", schema: "app_ops", name: "bootstrap_configured_super_admin",
+    signature: "text,text,text,boolean", returnType: "TABLE(status text, user_id uuid, email text, role text, auto_verified boolean, reason text, audit_event_id uuid)",
+    identityArguments: "p_email text, p_password_hash text, p_name text, p_auto_verify boolean",
+    definitionLocation: operatorProcedureSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed",
+    security: {
+      mode: "SECURITY DEFINER", ownerIdentity: "identity-owner", ownerRole: "owner",
+      searchPath: "pg_catalog,public", publicExecute: "revoked", runtimeExecuteGrantees: ["migration"],
+      rollbackDefinition: operatorProcedureRollback, deploymentPhase: "session-c-c04-initial-admin-bootstrap",
+    },
+    tableCommands: [["User", "SELECT"], ["User", "INSERT"], ["AuditLog", "INSERT"], ["SecurityEventOutbox", "INSERT"]],
+    context: "Creates the one configured initial SUPER_ADMIN only under the deployment migration identity and records mandatory operator audit evidence.",
+    canonicalWorkflowIds: ["workflow-cli-backend-scripts-create-super-admin-js"],
+    repositoryCallers: ["backend/src/rls-waves/session-c/operatorProcedureService.ts:bootstrapConfiguredSuperAdmin"],
+    inputAuthority: "deployment-only configured email, Argon2 password hash and fixed SUPER_ADMIN topology",
+    outputColumns: ["status", "user_id", "email", "role", "auto_verified", "reason", "audit_event_id"],
+    disposableProbes: ["production-full-rls-package-postgres18"],
+  },
   publicContract({id:"customer-session-issue",name:"issue_customer_auth_session",signature:"text,text,text,text,text,timestamp without time zone,timestamp without time zone,text",returnType:"TABLE(accepted boolean)",tableCommands:[["CustomerAuthSession","INSERT"],["AuditLog","INSERT"],["SecurityEventOutbox","INSERT"]],workflow:"workflow-http-backend-src-controllers-verify-auth-handlers-ts-verify-customer-email-otp",caller:"backend/src/services/customerVerifyDatabaseSessionService.ts:registerCustomerVerifyDatabaseSession",outputColumns:["accepted"]}),
   publicContract({id:"customer-session-read",name:"read_customer_auth_session",signature:"text,timestamp without time zone,text",returnType:"TABLE(customerUserId text, customerEmail text, authStrength text, authProvider text)",tableCommands:[["CustomerAuthSession","SELECT"],["CustomerAuthSession","UPDATE"]],workflow:"workflow-http-backend-src-controllers-verify-auth-handlers-ts-get-customer-verify-auth-session",caller:"backend/src/services/customerVerifyDatabaseSessionService.ts:readCustomerVerifyDatabaseSession",outputColumns:["customerUserId","customerEmail","authStrength","authProvider"]}),
   publicContract({id:"customer-session-revoke",name:"revoke_customer_auth_session",signature:"text,timestamp without time zone,text",returnType:"TABLE(revoked boolean)",tableCommands:[["CustomerAuthSession","SELECT"],["CustomerAuthSession","UPDATE"],["AuditLog","INSERT"],["SecurityEventOutbox","INSERT"]],workflow:"workflow-http-backend-src-controllers-verify-auth-handlers-ts-logout-customer-verify-session",caller:"backend/src/services/customerVerifyDatabaseSessionService.ts:revokeCustomerVerifyDatabaseSession",outputColumns:["revoked"]}),

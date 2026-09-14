@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='c5c6ae322904118002860b136fb225053f7d2cf36098578f3732b62f60ffc6bc'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:c5c6ae322904118002860b136fb225053f7d2cf36098578f3732b62f60ffc6bc'
+    AND source_contract_sha256='45286276014bc427513ea1ac2f2fba24626d290a631460f0b6bf5c4ede9ff641'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:45286276014bc427513ea1ac2f2fba24626d290a631460f0b6bf5c4ede9ff641'
     AND administrator_role='certification-administrator'
 
     AND phase='roles-created'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:c5c6ae322904118002860b136fb225053f7d2cf36098578f3732b62f60ffc6bc')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:45286276014bc427513ea1ac2f2fba24626d290a631460f0b6bf5c4ede9ff641')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -359,6 +359,7 @@ RESET ROLE;
 CREATE SCHEMA app_rls AUTHORIZATION "mscqr_rls_cert_owner";
 CREATE SCHEMA app_auth AUTHORIZATION "mscqr_rls_cert_auth_owner";
 CREATE SCHEMA app_public AUTHORIZATION "mscqr_rls_cert_auth_owner";
+CREATE SCHEMA app_ops AUTHORIZATION "mscqr_rls_cert_owner";
 REVOKE SELECT ON TABLE mscqr_rls_install.state FROM "mscqr_rls_cert_migration";
 REVOKE USAGE ON SCHEMA mscqr_rls_install FROM "mscqr_rls_cert_migration";
 DO $$ BEGIN

@@ -156,6 +156,13 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
     for (const file of ["admin-ownership.sql", "runtime-policy.sql", "verification.sql"]) {
       psql(greenUrl, ["-q", "-f", path.join(sqlRoot, file)], file);
     }
+    const migrationPassword = "synthetic-migration-password";
+    psql(greenUrl, ["-q", "-c", `ALTER ROLE "${new URL(migrationUrl).username}" PASSWORD '${migrationPassword}'`], "migration credential provisioning");
+    const connectableMigrationUrl = new URL(migrationUrl); connectableMigrationUrl.password = migrationPassword;
+    const bootstrapContext = "SELECT set_config('app.auth_assurance','system-verified',true),set_config('app.operator_environment','production',true),set_config('app.request_id','00000000-0000-4000-8000-000000000099',true),set_config('app.purpose','bootstrap-configured-super-admin',true),set_config('app.context_installed','1',true)";
+    assert.equal(scalar(connectableMigrationUrl, `BEGIN;${bootstrapContext};SELECT status FROM app_ops.bootstrap_configured_super_admin('administration@mscqr.com','synthetic-argon2id-hash','MSCQR Administration',true);COMMIT`, "initial administrator bootstrap"), "created");
+    assert.equal(scalar(connectableMigrationUrl, `BEGIN;${bootstrapContext};SELECT status||':'||email||':'||role FROM app_ops.bootstrap_configured_super_admin('administration@mscqr.com','synthetic-argon2id-hash','MSCQR Administration',true);COMMIT`, "duplicate administrator bootstrap"), "skipped_existing:administration@mscqr.com:SUPER_ADMIN");
+    assert.throws(() => scalar(greenUrl, `BEGIN;SET LOCAL ROLE "mscqr_prd_rls_phase2_app";${bootstrapContext};SELECT status FROM app_ops.bootstrap_configured_super_admin('administration@mscqr.com','synthetic-argon2id-hash','MSCQR Administration',true);COMMIT`, "ordinary application bootstrap"), /permission denied/);
     assert(Number(scalar(greenUrl, "SELECT count(*) FROM pg_class WHERE relrowsecurity AND relforcerowsecurity", "forced RLS")) > 0);
     assert(Number(scalar(greenUrl, "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname IN ('app_auth','app_rls')", "restricted functions")) > 0);
     assert.equal(

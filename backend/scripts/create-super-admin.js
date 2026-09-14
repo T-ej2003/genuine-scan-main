@@ -1,79 +1,27 @@
-const path = require("path");
-require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
-
-const { PrismaClient, UserRole, UserStatus } = require("@prisma/client");
-const argon2 = require("argon2");
-
-const prisma = new PrismaClient();
+const { PrismaClient } = require("@prisma/client");
+const { bootstrapConfiguredSuperAdmin } = require("../dist/services/auth/superAdminBootstrapService");
 
 async function main() {
-  const [emailArg, passwordArg, nameArg] = process.argv.slice(2);
-
-  const email = String(emailArg || "").trim().toLowerCase();
-  const password = String(passwordArg || "").trim();
-  const name = String(nameArg || email.split("@")[0] || "Super Admin").trim();
-
-  if (!email || !password) {
-    console.log("Usage: node scripts/create-super-admin.js <email> <password> [name]");
-    process.exit(1);
+  const databaseUrl = String(process.env.SUPER_ADMIN_BOOTSTRAP_DATABASE_URL || "").trim();
+  if (!databaseUrl) throw new Error("SUPER_ADMIN_BOOTSTRAP_DATABASE_URL is required.");
+  if (!String(process.env.SUPER_ADMIN_BOOTSTRAP_PASSWORD || "")) {
+    throw new Error("SUPER_ADMIN_BOOTSTRAP_PASSWORD is required.");
   }
-
-  if (password.length < 12) {
-    console.error("Password must be at least 12 characters.");
-    process.exit(1);
+  process.env.SUPER_ADMIN_BOOTSTRAP_ENABLED = "true";
+  const migration = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
+  try {
+    const result = await bootstrapConfiguredSuperAdmin(migration);
+    if (result.status !== "created") {
+      throw new Error("Configured super-admin bootstrap was rejected.");
+    }
+    console.log(JSON.stringify({ status: result.status, email: result.email, role: "SUPER_ADMIN" }));
+  } finally {
+    await migration.$disconnect();
   }
-
-  const passwordHash = await argon2.hash(password, {
-    type: argon2.argon2id,
-    memoryCost: 19456,
-    timeCost: 2,
-    parallelism: 1,
-  });
-  const verifiedAt = new Date();
-
-  const existing = await prisma.user.findUnique({ where: { email } });
-  if (existing) {
-    const updated = await prisma.user.update({
-      where: { email },
-      data: {
-        name,
-        role: UserRole.SUPER_ADMIN,
-        passwordHash,
-        status: UserStatus.ACTIVE,
-        isActive: true,
-        deletedAt: null,
-        disabledAt: null,
-        emailVerifiedAt: existing.emailVerifiedAt || verifiedAt,
-      },
-      select: { id: true, email: true, name: true, role: true },
-    });
-    console.log("Updated user to SUPER_ADMIN:", updated);
-    return;
-  }
-
-  const created = await prisma.user.create({
-    data: {
-      email,
-      passwordHash,
-      name,
-      role: UserRole.SUPER_ADMIN,
-      status: UserStatus.ACTIVE,
-      isActive: true,
-      deletedAt: null,
-      disabledAt: null,
-      emailVerifiedAt: verifiedAt,
-    },
-    select: { id: true, email: true, name: true, role: true },
-  });
-
-  console.log("Created SUPER_ADMIN:", created);
 }
 
 main()
-  .catch((e) => {
-    console.error("Create super admin failed:", e);
+  .catch(() => {
+    console.error("Create super admin failed.");
     process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
   });

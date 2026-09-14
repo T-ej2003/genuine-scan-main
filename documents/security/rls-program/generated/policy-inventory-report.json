@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "count": 347,
+  "count": 351,
   "rows": [
     {
       "tableId": "table-action-idempotency-key",
@@ -1050,6 +1050,29 @@
       "route": "GET /api/audit/logs",
       "certificationStatus": "pending",
       "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-audit-log",
+      "table": "AuditLog",
+      "policyName": "full_rls_initial_admin_bootstrap_auditlog_insert",
+      "command": "INSERT",
+      "actors": [
+        "deployment-migration"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "bootstrap-configured-super-admin"
+      ],
+      "scopeType": "deployment-only-migration-identity-and-configured-email",
+      "scopePredicate": "(current_user='mscqr_rls_cert_owner' AND session_user='mscqr_rls_cert_migration' AND current_setting('app.context_installed',true)='1' AND current_setting('app.purpose',true)='bootstrap-configured-super-admin' AND current_setting('app.auth_assurance',true)='system-verified' AND current_setting('app.bootstrap_email',true)<>'' AND \"userId\" IS NULL AND \"action\" IN ('AUTH_SUPER_ADMIN_BOOTSTRAPPED','AUTH_SUPER_ADMIN_BOOTSTRAP_SKIPPED_EXISTING','AUTH_SUPER_ADMIN_BOOTSTRAP_BLOCKED') AND \"entityType\"='User')",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:c04-bootstrap-configured-super-admin:AuditLog:INSERT"
+      ],
+      "workflowId": "workflow-cli-backend-scripts-create-super-admin-js",
+      "route": "deployment-only CLI",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
     },
     {
       "tableId": "table-audit-log",
@@ -8334,6 +8357,29 @@
     {
       "tableId": "table-security-event-outbox",
       "table": "SecurityEventOutbox",
+      "policyName": "full_rls_initial_admin_bootstrap_securityeventoutbox_insert",
+      "command": "INSERT",
+      "actors": [
+        "deployment-migration"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "bootstrap-configured-super-admin"
+      ],
+      "scopeType": "deployment-only-migration-identity-and-configured-email",
+      "scopePredicate": "(current_user='mscqr_rls_cert_owner' AND session_user='mscqr_rls_cert_migration' AND current_setting('app.context_installed',true)='1' AND current_setting('app.purpose',true)='bootstrap-configured-super-admin' AND current_setting('app.auth_assurance',true)='system-verified' AND current_setting('app.bootstrap_email',true)<>'' AND \"eventType\"='OPERATOR_PROCEDURE_AUDIT' AND payload->>'action' IN ('AUTH_SUPER_ADMIN_BOOTSTRAPPED','AUTH_SUPER_ADMIN_BOOTSTRAP_SKIPPED_EXISTING','AUTH_SUPER_ADMIN_BOOTSTRAP_BLOCKED'))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:c04-bootstrap-configured-super-admin:SecurityEventOutbox:INSERT"
+      ],
+      "workflowId": "workflow-cli-backend-scripts-create-super-admin-js",
+      "route": "deployment-only CLI",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-security-event-outbox",
+      "table": "SecurityEventOutbox",
       "policyName": "printing_lifecycle_securityeventoutbox_insert",
       "command": "INSERT",
       "actors": [
@@ -9445,6 +9491,52 @@
       ],
       "workflowId": null,
       "route": "C03 exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-user",
+      "table": "User",
+      "policyName": "full_rls_initial_admin_bootstrap_user_insert",
+      "command": "INSERT",
+      "actors": [
+        "deployment-migration"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "bootstrap-configured-super-admin"
+      ],
+      "scopeType": "deployment-only-migration-identity-and-configured-email",
+      "scopePredicate": "(current_user='mscqr_rls_cert_owner' AND session_user='mscqr_rls_cert_migration' AND current_setting('app.context_installed',true)='1' AND current_setting('app.purpose',true)='bootstrap-configured-super-admin' AND current_setting('app.auth_assurance',true)='system-verified' AND current_setting('app.bootstrap_email',true)<>'' AND lower(\"email\")=current_setting('app.bootstrap_email',true) AND \"role\"='SUPER_ADMIN' AND \"status\"='ACTIVE' AND \"isActive\" AND \"orgId\" IS NULL AND \"licenseeId\" IS NULL)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:c04-bootstrap-configured-super-admin:User:INSERT"
+      ],
+      "workflowId": "workflow-cli-backend-scripts-create-super-admin-js",
+      "route": "deployment-only CLI",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-user",
+      "table": "User",
+      "policyName": "full_rls_initial_admin_bootstrap_user_select",
+      "command": "SELECT",
+      "actors": [
+        "deployment-migration"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "bootstrap-configured-super-admin"
+      ],
+      "scopeType": "deployment-only-migration-identity-and-configured-email",
+      "scopePredicate": "(current_user='mscqr_rls_cert_owner' AND session_user='mscqr_rls_cert_migration' AND current_setting('app.context_installed',true)='1' AND current_setting('app.purpose',true)='bootstrap-configured-super-admin' AND current_setting('app.auth_assurance',true)='system-verified' AND current_setting('app.bootstrap_email',true)<>'' AND (\"role\" IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR lower(\"email\")=current_setting('app.bootstrap_email',true)))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:c04-bootstrap-configured-super-admin:User:SELECT"
+      ],
+      "workflowId": "workflow-cli-backend-scripts-create-super-admin-js",
+      "route": "deployment-only CLI",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },

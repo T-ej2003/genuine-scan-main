@@ -59,16 +59,42 @@ Update runtime values before first boot:
   - `JWT_SECRET`
   - `CORS_ORIGIN`
   - `PUBLIC_*_WEB_BASE_URL`
-  - `SUPER_ADMIN_EMAIL=administration@mscqr.com`
-  - `SUPER_ADMIN_BOOTSTRAP_ENABLED=true` for first production boot only
-  - `SUPER_ADMIN_BOOTSTRAP_PASSWORD=<long unique first-login password>`
-  - `SUPER_ADMIN_BOOTSTRAP_AUTO_VERIFY=true` so the initial configured super admin can sign in before SMTP verification is proven
+  - Do not place the initial super-admin password or deployment database URL in this runtime file. The one-time deployment-only bootstrap below supplies them separately.
   - `SMTP_HOST=mail.privateemail.com`
   - `SMTP_PORT=465` with `SMTP_SECURE=true` for Namecheap Private Email, or `SMTP_PORT=587` with `SMTP_SECURE=false` and `SMTP_REQUIRE_TLS=true` for STARTTLS troubleshooting
   - `SMTP_USER=<full mailbox>`, `SMTP_PASS=<mailbox password or app password>`, and `SMTP_FROM=<authorized mscqr.com sender>`
   - `EMAIL_DOMAIN=mscqr.com`
 
-## 5. First boot (HTTP mode)
+## 5. Provision the deployment-only migration credential, bootstrap the initial administrator, and start (HTTP mode)
+
+Before starting the ordinary backend, complete the canonical RLS package phases through `full-rls-role-provision` and `full-rls-role-verify`. The existing production RLS executor generates the login password for `mscqr_prd_rls_phase2_migration` and writes its TLS database URL only to the exact Secrets Manager handle `mscqr/production/rls-green/phase2/database-url/migration`; it never embeds that credential in generated SQL or runtime configuration.
+
+On the deployment host, use the existing instance/task role that is already allowed to read that exact handle. Capture it directly into the one-shot process environment; do not echo it, add it to an `.env` file, or substitute the ordinary application `DATABASE_URL`. The silent prompt keeps the initial credential out of shell history and command output; the process stores only its Argon2id hash.
+
+```bash
+read -rsp "Initial administration@mscqr.com password: " SUPER_ADMIN_BOOTSTRAP_PASSWORD
+echo
+export SUPER_ADMIN_BOOTSTRAP_PASSWORD
+export SUPER_ADMIN_BOOTSTRAP_DATABASE_URL="$(aws secretsmanager get-secret-value \
+  --region eu-west-2 \
+  --secret-id mscqr/production/rls-green/phase2/database-url/migration \
+  --version-stage AWSCURRENT \
+  --query SecretString \
+  --output text)"
+export SUPER_ADMIN_EMAIL='administration@mscqr.com'
+export SUPER_ADMIN_NAME='MSCQR Administration'
+export SUPER_ADMIN_BOOTSTRAP_AUTO_VERIFY='true'
+docker compose run --rm --no-deps \
+  -e SUPER_ADMIN_BOOTSTRAP_PASSWORD \
+  -e SUPER_ADMIN_BOOTSTRAP_DATABASE_URL \
+  -e SUPER_ADMIN_EMAIL \
+  -e SUPER_ADMIN_NAME \
+  -e SUPER_ADMIN_BOOTSTRAP_AUTO_VERIFY \
+  backend npm run auth:bootstrap-super-admin
+unset SUPER_ADMIN_BOOTSTRAP_PASSWORD SUPER_ADMIN_BOOTSTRAP_DATABASE_URL SUPER_ADMIN_EMAIL SUPER_ADMIN_NAME SUPER_ADMIN_BOOTSTRAP_AUTO_VERIFY
+```
+
+The command succeeds only when it creates the first super-admin. It refuses an existing super-admin or a conflicting configured email. After it succeeds, start the runtime containers; ordinary backend startup never receives the migration identity.
 
 Start app before TLS cert exists. Frontend container will use HTTP config automatically.
 
@@ -77,15 +103,7 @@ docker compose --profile worker up -d --build redis backend worker frontend
 docker compose ps
 ```
 
-After the first successful super admin login and MFA setup, remove the bootstrap secret and disable the startup bootstrap:
-
-```bash
-# in backend/.env
-SUPER_ADMIN_BOOTSTRAP_ENABLED=false
-SUPER_ADMIN_BOOTSTRAP_PASSWORD=
-```
-
-Then restart the backend container.
+After the first successful login, change the initial password through the normal account flow and complete MFA enrollment. The deployment-only bootstrap variables were already removed from the operator shell and are not runtime configuration.
 
 Verify HTTP:
 

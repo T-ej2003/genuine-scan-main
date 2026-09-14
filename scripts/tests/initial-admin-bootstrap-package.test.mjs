@@ -1,0 +1,46 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+
+const generated = fs.readFileSync("scripts/rls/sql/generated/20-context-helpers.sql", "utf8");
+const ownership = fs.readFileSync("scripts/rls/sql/generated/11-ownership-grants.sql", "utf8");
+const verifier = fs.readFileSync("scripts/rls/sql/generated/40-post-apply-verification.sql", "utf8");
+const policies = fs.readFileSync("scripts/rls/sql/generated/30-policies.sql", "utf8");
+const source = fs.readFileSync("backend/src/rls-waves/session-c/c04/bootstrapConfiguredSuperAdmin.sql", "utf8");
+const cli = fs.readFileSync("backend/scripts/create-super-admin.js", "utf8");
+const runtime = fs.readFileSync("backend/src/index.ts", "utf8");
+const backendPackage = JSON.parse(fs.readFileSync("backend/package.json", "utf8"));
+const deployment = fs.readFileSync("documents/AWS_EC2_DEPLOY_MSCQR.md", "utf8");
+
+assert.match(ownership, /CREATE SCHEMA app_ops AUTHORIZATION "mscqr_rls_cert_owner"/);
+assert.match(generated, /CREATE OR REPLACE FUNCTION app_ops\.bootstrap_configured_super_admin\(p_email text,p_password_hash text,p_name text,p_auto_verify boolean\)/);
+assert.match(generated, /SECURITY DEFINER\s+SET search_path = pg_catalog, public/);
+assert.match(generated, /REVOKE ALL ON FUNCTION app_ops\.bootstrap_configured_super_admin\(text,text,text,boolean\) FROM PUBLIC/);
+assert.match(generated, /GRANT EXECUTE ON FUNCTION app_ops\.bootstrap_configured_super_admin\(text,text,text,boolean\) TO "mscqr_rls_cert_migration"/);
+assert.doesNotMatch(generated, /GRANT EXECUTE ON FUNCTION app_ops\.bootstrap_configured_super_admin[^\n]+mscqr_rls_cert_(?:app|preauth|operator)/);
+assert.match(verifier, /'app_ops'::text,'bootstrap_configured_super_admin'::text/);
+assert.match(source, /pg_advisory_xact_lock\(723425101\)/);
+assert.match(source, /u\.role IN \('SUPER_ADMIN','PLATFORM_SUPER_ADMIN'\)/);
+assert.match(source, /u\.id='174619c3-aabe-4096-a97d-886603ad825e'[\s\S]+u\.metadata->>'managedBy'='production-green-pretraffic-canary-v1'/);
+assert.match(source, /set_config\('app\.bootstrap_email',lower\(btrim\(p_email\)\),true\)/);
+assert.match(source, /'SUPER_ADMIN','ACTIVE',true/);
+assert.doesNotMatch(source.slice(source.indexOf("CREATE OR REPLACE FUNCTION app_ops.bootstrap_configured_super_admin")), /%ROWTYPE|SELECT \*/);
+
+assert.match(cli, /SUPER_ADMIN_BOOTSTRAP_DATABASE_URL/);
+assert.match(cli, /SUPER_ADMIN_BOOTSTRAP_PASSWORD is required/);
+assert.doesNotMatch(cli, /randomBytes|SUPER_ADMIN_BOOTSTRAP_PASSWORD\s*=/);
+assert.match(cli, /bootstrapConfiguredSuperAdmin\(migration\)/);
+assert.doesNotMatch(cli, /prisma\.user\.(?:create|update|upsert)/);
+assert.doesNotMatch(runtime, /bootstrapConfiguredSuperAdmin/);
+assert.equal((policies.match(/CREATE POLICY "full_rls_initial_admin_bootstrap_/g) || []).length, 4);
+assert.match(policies, /session_user='mscqr_rls_cert_migration'/);
+assert.match(policies, /current_setting\('app\.bootstrap_email',true\)/);
+assert.equal(backendPackage.scripts["auth:bootstrap-super-admin"], "node scripts/create-super-admin.js");
+assert.match(deployment, /npm run auth:bootstrap-super-admin/);
+assert.match(deployment, /full-rls-role-provision/);
+assert.match(deployment, /full-rls-role-verify/);
+assert.match(deployment, /mscqr\/production\/rls-green\/phase2\/database-url\/migration/);
+assert.match(deployment, /aws secretsmanager get-secret-value/);
+assert.doesNotMatch(deployment, /<deployment-only migration database URL>/);
+assert.ok(deployment.indexOf("npm run auth:bootstrap-super-admin") < deployment.indexOf("docker compose --profile worker up"));
+
+console.log("initial admin bootstrap package contract tests passed");

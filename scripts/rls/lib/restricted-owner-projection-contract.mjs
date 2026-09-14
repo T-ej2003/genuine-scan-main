@@ -4,7 +4,7 @@ import path from "node:path";
 export const RESTRICTED_OWNER_SOURCE_EXCLUSIONS = Object.freeze([
   {
     path: "backend/src/rls-waves/session-c/c04/operatorProcedures.sql",
-    reason: "operator-only source is not registered in the runtime named-function inventory or generated package",
+    reason: "operator-only procedures remain outside the package; the generator extracts only the explicitly projection-safe initial-admin bootstrap functions",
   },
 ]);
 
