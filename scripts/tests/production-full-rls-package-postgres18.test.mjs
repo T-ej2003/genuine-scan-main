@@ -112,6 +112,9 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
       "--local-disposable-approval-public-key", publicKeyPath,
       "--local-disposable-approval-confirm", "MSCQR_RUN_LOCAL_PRODUCTION_PACKAGE_CERTIFICATION",
     ], { env: { NODE_ENV: "test" }, label: "production package generation" });
+    const migrationPreflightSql = fs.readFileSync(path.join(sqlRoot, "15-migration-preflight.sql"), "utf8");
+    assert.match(migrationPreflightSql, /pg_has_role\('mscqr_prod_admin',r\.oid,'MEMBER'\)/);
+    assert.doesNotMatch(migrationPreflightSql, /pg_has_role\(current_user,r\.oid,'MEMBER'\)/);
 
     psql(maintenanceUrl, ["-q", "-c", `CREATE ROLE "${administrator}" LOGIN NOINHERIT NOSUPERUSER CREATEDB CREATEROLE NOREPLICATION NOBYPASSRLS`], "create administrator");
     psql(databaseUrl(adminUrl, adminUrl.pathname.slice(1), administrator), ["-q", "-c", `CREATE DATABASE "${targetDatabase}" OWNER "${administrator}" TEMPLATE template0`], "create green database");

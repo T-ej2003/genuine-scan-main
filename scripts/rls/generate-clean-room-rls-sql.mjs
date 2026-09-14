@@ -779,12 +779,31 @@ const exactManagedRoleStateSql = `
   IF (SELECT count(*) FROM pg_roles WHERE rolname IN (${managedRoleList}))<>${roleSpecs.length}
      OR EXISTS (SELECT 1 FROM pg_roles r JOIN (VALUES ${roleValuesSql}) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>${lit(roleMarker)})
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;`;
-const exactManagedMembershipStateSql = `
-  IF (SELECT count(*) FROM pg_auth_members m JOIN pg_roles parent ON parent.oid=m.roleid WHERE parent.rolname IN (${managedRoleList}))<>${roleSpecs.length * 2}
-     OR EXISTS (SELECT 1 FROM pg_auth_members m JOIN pg_roles parent ON parent.oid=m.roleid JOIN pg_roles member ON member.oid=m.member WHERE parent.rolname IN (${managedRoleList}) AND (member.rolname<>${lit(administrativeExecutorRole)} OR m.inherit_option OR (m.admin_option=m.set_option)))
-     OR EXISTS (SELECT 1 FROM pg_roles parent WHERE parent.rolname IN (${managedRoleList}) AND ((SELECT count(*) FROM pg_auth_members m JOIN pg_roles member ON member.oid=m.member WHERE m.roleid=parent.oid AND member.rolname=${lit(administrativeExecutorRole)} AND m.admin_option AND NOT m.inherit_option AND NOT m.set_option)<>1 OR (SELECT count(*) FROM pg_auth_members m JOIN pg_roles member ON member.oid=m.member JOIN pg_roles grantor ON grantor.oid=m.grantor WHERE m.roleid=parent.oid AND member.rolname=${lit(administrativeExecutorRole)} AND grantor.rolname=${lit(administrativeExecutorRole)} AND NOT m.admin_option AND NOT m.inherit_option AND m.set_option)<>1))
-     OR EXISTS (SELECT 1 FROM pg_auth_members m JOIN pg_roles member ON member.oid=m.member WHERE member.rolname IN (${managedRoleList}))
-  THEN RAISE EXCEPTION 'managed role membership topology drifted'; END IF;`;
+// PostgreSQL 18 records both its bootstrap-superuser ADMIN grant and the package's SET grant;
+// authenticated RDS production catalogs instead expose one rdsadmin-granted SET-only row.
+const rdsPlatformIdentitySql = targetEnvironment === "production"
+  ? `(EXISTS (SELECT 1 FROM pg_roles WHERE rolname='rdsadmin' AND rolsuper)
+      AND EXISTS (SELECT 1 FROM pg_roles r WHERE r.rolname='rds_superuser' AND NOT r.rolsuper AND NOT r.rolcanlogin AND pg_has_role(${lit(administrativeExecutorRole)},r.oid,'MEMBER')))`
+  : "false";
+const standardPostgres18PlatformIdentitySql = `(EXISTS (SELECT 1 FROM pg_roles WHERE oid=10 AND rolsuper)
+      AND NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname IN ('rdsadmin','rds_superuser')))`;
+const exactManagedMembershipStateSqlFor = (memberSql, error) => `
+  IF ${rdsPlatformIdentitySql} THEN
+    IF (SELECT count(*) FROM pg_auth_members m JOIN pg_roles parent ON parent.oid=m.roleid WHERE parent.rolname IN (${managedRoleList}))<>${roleSpecs.length}
+       OR EXISTS (SELECT 1 FROM pg_auth_members m JOIN pg_roles parent ON parent.oid=m.roleid JOIN pg_roles member ON member.oid=m.member JOIN pg_roles grantor ON grantor.oid=m.grantor WHERE parent.rolname IN (${managedRoleList}) AND (member.rolname<>${memberSql} OR grantor.rolname<>'rdsadmin' OR m.admin_option OR m.inherit_option OR NOT m.set_option))
+       OR EXISTS (SELECT 1 FROM pg_roles parent WHERE parent.rolname IN (${managedRoleList}) AND (SELECT count(*) FROM pg_auth_members m JOIN pg_roles member ON member.oid=m.member JOIN pg_roles grantor ON grantor.oid=m.grantor WHERE m.roleid=parent.oid AND member.rolname=${memberSql} AND grantor.rolname='rdsadmin' AND NOT m.admin_option AND NOT m.inherit_option AND m.set_option)<>1)
+       OR EXISTS (SELECT 1 FROM pg_auth_members m JOIN pg_roles member ON member.oid=m.member WHERE member.rolname IN (${managedRoleList}))
+    THEN RAISE EXCEPTION '${error}'; END IF;
+  ELSIF ${standardPostgres18PlatformIdentitySql} THEN
+    IF (SELECT count(*) FROM pg_auth_members m JOIN pg_roles parent ON parent.oid=m.roleid WHERE parent.rolname IN (${managedRoleList}))<>${roleSpecs.length * 2}
+       OR EXISTS (SELECT 1 FROM pg_auth_members m JOIN pg_roles parent ON parent.oid=m.roleid JOIN pg_roles member ON member.oid=m.member JOIN pg_roles grantor ON grantor.oid=m.grantor WHERE parent.rolname IN (${managedRoleList}) AND (member.rolname<>${memberSql} OR m.inherit_option OR NOT ((grantor.oid=10 AND grantor.rolsuper AND m.admin_option AND NOT m.set_option) OR (grantor.rolname=${memberSql} AND NOT m.admin_option AND m.set_option))))
+       OR EXISTS (SELECT 1 FROM pg_roles parent WHERE parent.rolname IN (${managedRoleList}) AND ((SELECT count(*) FROM pg_auth_members m JOIN pg_roles member ON member.oid=m.member JOIN pg_roles grantor ON grantor.oid=m.grantor WHERE m.roleid=parent.oid AND member.rolname=${memberSql} AND grantor.oid=10 AND grantor.rolsuper AND m.admin_option AND NOT m.inherit_option AND NOT m.set_option)<>1 OR (SELECT count(*) FROM pg_auth_members m JOIN pg_roles member ON member.oid=m.member JOIN pg_roles grantor ON grantor.oid=m.grantor WHERE m.roleid=parent.oid AND member.rolname=${memberSql} AND grantor.rolname=${memberSql} AND NOT m.admin_option AND NOT m.inherit_option AND m.set_option)<>1))
+       OR EXISTS (SELECT 1 FROM pg_auth_members m JOIN pg_roles member ON member.oid=m.member WHERE member.rolname IN (${managedRoleList}))
+    THEN RAISE EXCEPTION '${error}'; END IF;
+  ELSE
+    RAISE EXCEPTION 'managed role membership platform identity is ambiguous';
+  END IF;`;
+const exactManagedMembershipStateSql = exactManagedMembershipStateSqlFor(lit(administrativeExecutorRole), "managed role membership topology drifted");
 const requirePackagePhaseSql = (phase, label, { administrator = true } = {}) => `
   ${administrator ? `IF current_user<>${lit(administrativeExecutorRole)} THEN RAISE EXCEPTION '${label} requires the reviewed brokered administrator'; END IF;` : ""}
   IF current_database() !~ ${lit(candidateDatabasePattern)} THEN RAISE EXCEPTION '${label} is bound to the reviewed green database'; END IF;
@@ -2728,11 +2747,7 @@ DO $$ DECLARE existing_count integer; rec record; BEGIN
   IF existing_count NOT IN (0,${roleSpecs.length}) THEN RAISE EXCEPTION 'partial managed-role set is not a package-created clean-room state'; END IF;
   IF existing_count=0 THEN RETURN; END IF;
   IF EXISTS (SELECT 1 FROM pg_roles r JOIN (VALUES ${roleValuesSql}) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>${lit(roleMarker)}) THEN RAISE EXCEPTION 'role cleanup refuses an unmarked or drifted role'; END IF;
-  IF (SELECT count(*) FROM pg_auth_members m JOIN pg_roles parent ON parent.oid=m.roleid JOIN pg_roles member ON member.oid=m.member WHERE parent.rolname IN (${managedRoleList}))<>${roleSpecs.length * 2}
-     OR EXISTS (SELECT 1 FROM pg_auth_members m JOIN pg_roles parent ON parent.oid=m.roleid JOIN pg_roles member ON member.oid=m.member WHERE parent.rolname IN (${managedRoleList}) AND (member.rolname<>current_user OR m.inherit_option OR (m.admin_option=m.set_option)))
-     OR EXISTS (SELECT 1 FROM pg_roles parent WHERE parent.rolname IN (${managedRoleList}) AND ((SELECT count(*) FROM pg_auth_members m JOIN pg_roles member ON member.oid=m.member WHERE m.roleid=parent.oid AND member.rolname=current_user AND m.admin_option AND NOT m.inherit_option AND NOT m.set_option)<>1 OR (SELECT count(*) FROM pg_auth_members m JOIN pg_roles member ON member.oid=m.member JOIN pg_roles grantor ON grantor.oid=m.grantor WHERE m.roleid=parent.oid AND member.rolname=current_user AND grantor.rolname=current_user AND NOT m.admin_option AND NOT m.inherit_option AND m.set_option)<>1))
-     OR EXISTS (SELECT 1 FROM pg_auth_members m JOIN pg_roles member ON member.oid=m.member WHERE member.rolname IN (${managedRoleList}))
-  THEN RAISE EXCEPTION 'role cleanup refuses unexpected managed-role membership'; END IF;
+${exactManagedMembershipStateSqlFor("current_user", "role cleanup refuses unexpected managed-role membership")}
   FOR rec IN SELECT rolname FROM pg_roles WHERE rolname IN (${managedRoleList}) ORDER BY rolname LOOP EXECUTE format('REVOKE %I FROM %I',rec.rolname,current_user); END LOOP;
   FOR rec IN SELECT rolname FROM pg_roles WHERE rolname IN (${managedRoleList}) ORDER BY CASE WHEN rolname IN (${lit(roleNames.owner)},${lit(roleNames.authOwner)}) THEN 1 ELSE 0 END,rolname LOOP EXECUTE format('DROP ROLE %I',rec.rolname); END LOOP;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname IN (${managedRoleList})) THEN RAISE EXCEPTION 'package-created managed-role cleanup left residue'; END IF;

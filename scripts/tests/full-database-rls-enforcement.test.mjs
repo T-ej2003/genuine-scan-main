@@ -348,6 +348,46 @@ test("generated package assigns every artifact to one exact executor phase", () 
   assert.match(publisher, /rls-executor\) printf 'production-rls-executor'/);
 });
 
+test("installer, verifier, and cleanup share fail-closed platform membership contracts", () => {
+  const roles = fs.readFileSync(path.join(root, "scripts/rls/sql/generated/10-roles.sql"), "utf8");
+  const installerParents = [...roles.matchAll(/^GRANT "([^"]+)" TO "certification-administrator" WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;$/gm)]
+    .map((match) => match[1]).sort();
+  assert.equal(installerParents.length, 9);
+  const verifierFiles = [
+    "15-migration-preflight.sql",
+    "11-ownership-grants.sql",
+    "20-context-helpers.sql",
+    "21-runtime-grants.sql",
+    "30-policies.sql",
+    "40-post-apply-verification.sql",
+    "90-clean-room-role-cleanup.sql",
+  ];
+  for (const name of verifierFiles) {
+    const sql = fs.readFileSync(path.join(root, "scripts/rls/sql/generated", name), "utf8");
+    const administrator = name === "90-clean-room-role-cleanup.sql" ? "current_user" : "'certification-administrator'";
+    const verifierParents = [...sql.match(/parent\.rolname IN \(([^)]+)\)/)[1].matchAll(/'([^']+)'/g)]
+      .map((match) => match[1]).sort();
+    assert.deepEqual(verifierParents, installerParents);
+    assert.match(sql, /pg_auth_members[\s\S]*?\)<>18/);
+    assert.match(sql, /grantor\.oid=10 AND grantor\.rolsuper AND m\.admin_option AND NOT m\.inherit_option AND NOT m\.set_option\)<>1/);
+    assert.match(sql, new RegExp(`grantor\\.rolname=${administrator} AND NOT m\\.admin_option AND NOT m\\.inherit_option AND m\\.set_option\\)<>1`));
+    assert.match(sql, /managed role membership platform identity is ambiguous/);
+  }
+
+  const generator = fs.readFileSync(path.join(root, "scripts/rls/generate-clean-room-rls-sql.mjs"), "utf8");
+  assert.equal(generator.match(/exactManagedMembershipStateSqlFor\(/g)?.length, 2);
+  assert.match(generator, /targetEnvironment === "production"[\s\S]*rolname='rdsadmin' AND rolsuper[\s\S]*rolname='rds_superuser'[\s\S]*pg_has_role\(\$\{lit\(administrativeExecutorRole\)\},r\.oid,'MEMBER'\)/);
+  assert.doesNotMatch(generator, /pg_has_role\(current_user,r\.oid,'MEMBER'\)/);
+  assert.match(generator, /roleSpecs\.length\}[\s\S]*grantor\.rolname<>'rdsadmin' OR m\.admin_option OR m\.inherit_option OR NOT m\.set_option/);
+  assert.match(generator, /grantor\.rolname='rdsadmin' AND NOT m\.admin_option AND NOT m\.inherit_option AND m\.set_option\)<>1/);
+  assert.match(generator, /roleSpecs\.length \* 2\}/);
+  assert.match(generator, /exactManagedMembershipStateSqlFor\("current_user", "role cleanup refuses unexpected managed-role membership"\)/);
+
+  const init = fs.readFileSync(path.join(root, "scripts/p2-postgres18-init.sql"), "utf8");
+  assert.match(init, /LOGIN\s+NOSUPERUSER\s+CREATEDB\s+CREATEROLE/);
+  assert.doesNotMatch(init, /\bSUPERUSER\b/);
+});
+
 test("reduced surface has no prematurely enabled protected workflow", () => {
   const allowlist = readJson("essential-workflow-allowlist.json");
   const shutdown = readJson("unsupported-workflow-shutdown.json");
