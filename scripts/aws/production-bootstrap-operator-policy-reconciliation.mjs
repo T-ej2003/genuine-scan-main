@@ -24,6 +24,8 @@ const required = (argv, name) => { const index = argv.indexOf(name); const value
 const requiredSha = (value, label) => { if (!/^[a-f0-9]{40}$/.test(value || "")) throw new Error(`${label} must be an exact source SHA.`); return value; };
 const parseGithubJson = (run, args, label) => { try { return JSON.parse(run("gh", args)); } catch { throw new Error(`${label} is malformed or unavailable.`); } };
 const noSuchEntity = (error) => /\bNoSuchEntity(?:Exception)?\b/.test(`${error?.stderr || ""} ${error?.message || ""}`);
+const bootstrapOperatorPolicyReconciliationSleep = (milliseconds) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+const isTransientBootstrapOperatorRead = (error) => /\b(?:Throttling|ThrottlingException|TooManyRequestsException|RequestLimitExceeded|ServiceUnavailable|ServiceUnavailableException|ServiceFailure|InternalFailure|InternalError)\b/.test(`${error?.code || ""} ${error?.name || ""} ${error?.stderr || ""} ${error?.message || ""}`);
 
 export const BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION = Object.freeze({
   schemaVersion: 1,
@@ -45,6 +47,7 @@ export const BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION = Object.freeze({
   authorizationFilename: "authorization.json",
   maxAgeMs: 30 * 60 * 1000,
   maxAwsMutations: Object.freeze({ "iam:PutUserPolicy": 1 }),
+  postWriteReadDelaysMs: Object.freeze([100, 200, 400]),
 });
 
 export function readBootstrapOperatorDesiredPolicy({ repositoryRoot = root } = {}) {
@@ -88,6 +91,25 @@ export function readBootstrapOperatorLiveState({ run } = {}) {
   return authenticateBootstrapOperatorLiveState({ user, attachedPolicies, inlinePolicyNames, groups, consoleLoginPresent, accessKeys, mfaDevices, document });
 }
 
+const readBootstrapOperatorPostWriteState = ({ run, sleep = bootstrapOperatorPolicyReconciliationSleep } = {}) => {
+  let transient;
+  for (let attempt = 0; attempt <= BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.postWriteReadDelaysMs.length; attempt += 1) {
+    try {
+      const state = readBootstrapOperatorLiveState({ run });
+      if (state.status === "EXACT_COMPLETE") return state;
+    } catch (error) {
+      if (!isTransientBootstrapOperatorRead(error)) throw error;
+      transient = error;
+    }
+    if (attempt < BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.postWriteReadDelaysMs.length) {
+      const milliseconds = BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.postWriteReadDelaysMs[attempt];
+      if (!Number.isSafeInteger(milliseconds) || milliseconds <= 0 || milliseconds > 1000) throw new Error("Bootstrap operator policy convergence delay is invalid.");
+      sleep(milliseconds);
+    }
+  }
+  throw new Error("Bootstrap operator policy readback did not converge to the exact authorized post-state.", { cause: transient });
+};
+
 const preparationBody = ({ sourceSha, state, preparedAt }) => ({
   schemaVersion: 1, kind: "PRODUCTION_BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION_PREPARATION", operation: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.operation,
   sourceSha, userArn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn, inlinePolicyName: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.inlinePolicyName,
@@ -129,7 +151,7 @@ export function assertBootstrapOperatorPolicyAuthorization(value, { sourceSha, n
   return value;
 }
 
-export function reconcileBootstrapOperatorPolicy({ run, authorization, sourceSha, now = new Date() } = {}) {
+export function reconcileBootstrapOperatorPolicy({ run, authorization, sourceSha, now = new Date(), sleep } = {}) {
   assertBootstrapOperatorPolicyAuthorization(authorization, { sourceSha, now, allowExpired: true });
   const before = readBootstrapOperatorLiveState({ run });
   if (before.status === "EXACT_COMPLETE") return Object.freeze({ status: "COMPLETE", iamPutUserPolicyCount: 0, recovered: true });
@@ -137,10 +159,11 @@ export function reconcileBootstrapOperatorPolicy({ run, authorization, sourceSha
   try {
     run(["iam", "put-user-policy", "--user-name", BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userName, "--policy-name", BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.inlinePolicyName, "--policy-document", `file://${path.join(root, BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.sourcePath)}`, "--no-cli-pager"]);
   } catch (error) {
-    if (readBootstrapOperatorLiveState({ run }).status !== "EXACT_COMPLETE") throw error;
+    try { readBootstrapOperatorPostWriteState({ run, sleep }); }
+    catch { throw error; }
     return Object.freeze({ status: "COMPLETE", iamPutUserPolicyCount: 1, recovered: true });
   }
-  if (readBootstrapOperatorLiveState({ run }).status !== "EXACT_COMPLETE") throw new Error("Bootstrap operator policy readback is not exact.");
+  readBootstrapOperatorPostWriteState({ run, sleep });
   return Object.freeze({ status: "COMPLETE", iamPutUserPolicyCount: 1, recovered: false });
 }
 

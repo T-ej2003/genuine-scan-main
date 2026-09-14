@@ -25,8 +25,8 @@ const authorized = () => {
   const preparation = createBootstrapOperatorPolicyPreparation({ sourceSha, liveState: live(desired.predecessorDocument), preparedAt: now.toISOString() });
   return createBootstrapOperatorPolicyAuthorization({ sourceSha, preparation, protectedEnvironmentApprovalEvidence: approval, authorizedAt: now.toISOString() });
 };
-const runner = (initial, credentialTopology = {}) => {
-  let document = structuredClone(initial); let writes = 0;
+const runner = (initial, credentialTopology = {}, { stalePostWriteReads = 0, transientPostWriteReads = 0 } = {}) => {
+  let document = structuredClone(initial); let writes = 0; let staleReads = 0; let transientReads = 0;
   const run = (args) => {
     if (args[0] === "sts") return JSON.stringify({ Arn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.administratorArn });
     if (args[1] === "get-user") return JSON.stringify({ User: live(document).user });
@@ -39,7 +39,10 @@ const runner = (initial, credentialTopology = {}) => {
       if (credentialTopology.consoleLoginPresent) return JSON.stringify({ LoginProfile: { UserName: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userName } });
       throw Object.assign(new Error("NoSuchEntity"), { stderr: "NoSuchEntity" });
     }
-    if (args[1] === "get-user-policy") return JSON.stringify({ PolicyDocument: document });
+    if (args[1] === "get-user-policy") {
+      if (writes && transientReads++ < transientPostWriteReads) throw Object.assign(new Error("ThrottlingException"), { stderr: "ThrottlingException" });
+      return JSON.stringify({ PolicyDocument: writes && staleReads++ < stalePostWriteReads ? initial : document });
+    }
     if (args[1] === "put-user-policy") { writes += 1; document = structuredClone(desired.document); return ""; }
     throw new Error(`unexpected command: ${args.join(" ")}`);
   };
@@ -83,6 +86,16 @@ test("governed reconciliation accepts only the exact predecessor and converges w
   assert.deepEqual(result, { status: "COMPLETE", iamPutUserPolicyCount: 1, recovered: false });
   assert.equal(fixture.writes(), 1);
   assert.equal(authenticateBootstrapOperatorLiveState(live(fixture.document())).status, "EXACT_COMPLETE");
+});
+
+test("governed reconciliation retries only stale or transient IAM post-write readback", () => {
+  for (const options of [{ stalePostWriteReads: 2 }, { transientPostWriteReads: 2 }]) {
+    const fixture = runner(desired.predecessorDocument, {}, options); const waits = [];
+    const result = reconcileBootstrapOperatorPolicy({ run: fixture.run, authorization: authorized(), sourceSha, now, sleep: (milliseconds) => waits.push(milliseconds) });
+    assert.deepEqual(result, { status: "COMPLETE", iamPutUserPolicyCount: 1, recovered: false });
+    assert.equal(fixture.writes(), 1);
+    assert.deepEqual(waits, [100, 200]);
+  }
 });
 
 test("missing verifier capability, malformed policy topology, and unrelated roles fail closed", () => {
