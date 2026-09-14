@@ -47,7 +47,7 @@ export const BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION = Object.freeze({
   authorizationFilename: "authorization.json",
   maxAgeMs: 30 * 60 * 1000,
   maxAwsMutations: Object.freeze({ "iam:PutUserPolicy": 1 }),
-  postWriteReadDelaysMs: Object.freeze([100, 200, 400]),
+  postWriteReadDelaysMs: Object.freeze([250, 500, 1000, 2000, 4000]),
 });
 
 export function readBootstrapOperatorDesiredPolicy({ repositoryRoot = root } = {}) {
@@ -103,7 +103,7 @@ const readBootstrapOperatorPostWriteState = ({ run, sleep = bootstrapOperatorPol
     }
     if (attempt < BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.postWriteReadDelaysMs.length) {
       const milliseconds = BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.postWriteReadDelaysMs[attempt];
-      if (!Number.isSafeInteger(milliseconds) || milliseconds <= 0 || milliseconds > 1000) throw new Error("Bootstrap operator policy convergence delay is invalid.");
+      if (!Number.isSafeInteger(milliseconds) || milliseconds <= 0 || milliseconds > 5000) throw new Error("Bootstrap operator policy convergence delay is invalid.");
       sleep(milliseconds);
     }
   }

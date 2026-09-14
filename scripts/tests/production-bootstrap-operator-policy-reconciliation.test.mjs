@@ -94,15 +94,15 @@ test("governed reconciliation retries only stale or transient IAM post-write rea
     const result = reconcileBootstrapOperatorPolicy({ run: fixture.run, authorization: authorized(), sourceSha, now, sleep: (milliseconds) => waits.push(milliseconds) });
     assert.deepEqual(result, { status: "COMPLETE", iamPutUserPolicyCount: 1, recovered: false });
     assert.equal(fixture.writes(), 1);
-    assert.deepEqual(waits, [100, 200]);
+    assert.deepEqual(waits, BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.postWriteReadDelaysMs.slice(0, 2));
   }
 });
 
 test("post-write convergence exhaustion never repeats the authorized IAM mutation", () => {
-  const fixture = runner(desired.predecessorDocument, {}, { stalePostWriteReads: 4 }); const waits = [];
+  const fixture = runner(desired.predecessorDocument, {}, { stalePostWriteReads: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.postWriteReadDelaysMs.length + 1 }); const waits = [];
   assert.throws(() => reconcileBootstrapOperatorPolicy({ run: fixture.run, authorization: authorized(), sourceSha, now, sleep: (milliseconds) => waits.push(milliseconds) }), /did not converge/);
   assert.equal(fixture.writes(), 1);
-  assert.deepEqual(waits, [100, 200, 400]);
+  assert.deepEqual(waits, BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.postWriteReadDelaysMs);
 });
 
 test("missing verifier capability, malformed policy topology, and unrelated roles fail closed", () => {
