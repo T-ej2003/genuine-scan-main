@@ -8,6 +8,8 @@ import {
   BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION,
   LEGACY_BOOTSTRAP_MFA_TRANSITION,
   LEGACY_BOOTSTRAP_TRANSITION_KIND,
+  LEGACY_BOOTSTRAP_TRANSITION_ROTATION_BINDINGS_FILE_SHA256,
+  LEGACY_BOOTSTRAP_TRANSITION_SUPERSESSION_GENERATED_AT,
   LEGACY_BOOTSTRAP_TRANSITION_ROTATION_ID,
   LEGACY_BOOTSTRAP_TRANSITION_SOURCE_SHA,
   assertLegacyBootstrapMfaTransitionBinding,
@@ -46,12 +48,12 @@ const legacyAccessKeys = Object.freeze([
   { AccessKeyId: "key-b", Status: "Active", CreateDate: "2026-07-29T19:31:58Z" },
 ]);
 const legacyAuthorized = () => {
-  const transition = { kind: LEGACY_BOOTSTRAP_TRANSITION_KIND, rotationBindingsFileSha256: "b".repeat(64) };
+  const transition = { kind: LEGACY_BOOTSTRAP_TRANSITION_KIND, rotationBindingsFileSha256: LEGACY_BOOTSTRAP_TRANSITION_ROTATION_BINDINGS_FILE_SHA256 };
   const preparation = createBootstrapOperatorPolicyPreparation({ sourceSha, liveState: live(desired.predecessorDocument, { accessKeys: legacyAccessKeys }), transition, legacyRotationBindings: legacyBindings(), legacyRotationBindingOrigin: legacyBindingOrigin(), preparedAt: now.toISOString() });
   return createBootstrapOperatorPolicyAuthorization({ sourceSha, preparation, protectedEnvironmentApprovalEvidence: approval, authorizedAt: now.toISOString() });
 };
 const legacyRecoveredAuthorization = (credentialTopology = {}) => {
-  const transition = { kind: LEGACY_BOOTSTRAP_TRANSITION_KIND, rotationBindingsFileSha256: "b".repeat(64) };
+  const transition = { kind: LEGACY_BOOTSTRAP_TRANSITION_KIND, rotationBindingsFileSha256: LEGACY_BOOTSTRAP_TRANSITION_ROTATION_BINDINGS_FILE_SHA256 };
   const preparation = createBootstrapOperatorPolicyPreparation({ sourceSha, liveState: live(desired.document, { accessKeys: legacyAccessKeys }), transition, legacyRotationBindings: legacyBindings(), legacyRotationBindingOrigin: legacyBindingOrigin(), preparedAt: now.toISOString() });
   return createBootstrapOperatorPolicyAuthorization({ sourceSha, preparation, protectedEnvironmentApprovalEvidence: approval, authorizedAt: now.toISOString() });
 };
@@ -60,7 +62,7 @@ const legacyBindings = () => {
   const resources = { jwtPending, qrPrivatePending, qrPublicPending, jwtPrevious, qrPublicPrevious, qrCurrentVersion, qrPreviousVersion };
   const predecessorSlotIdentities = Object.fromEntries(Object.entries(resources).map(([slot, secretArn]) => [slot, { secretArn, versionId: `previous-${slot}`, payloadSha256: createHash("sha256").update(`previous-${slot}`).digest("hex"), materialFingerprint: null, keyVersion: null }]));
   const supersessionEvidence = {
-    schemaVersion: 1, transition: "SUPERSEDE_STALE_PENDING", sourceSha: LEGACY_BOOTSTRAP_TRANSITION_SOURCE_SHA, staleSourceSha: "1".repeat(40), rotationId: LEGACY_BOOTSTRAP_TRANSITION_ROTATION_ID, staleRotationId: "rotation-stale-predecessor", generatedAt: "2026-09-13T01:18:19.000Z",
+    schemaVersion: 1, transition: "SUPERSEDE_STALE_PENDING", sourceSha: LEGACY_BOOTSTRAP_TRANSITION_SOURCE_SHA, staleSourceSha: "1".repeat(40), rotationId: LEGACY_BOOTSTRAP_TRANSITION_ROTATION_ID, staleRotationId: "rotation-stale-predecessor", generatedAt: LEGACY_BOOTSTRAP_TRANSITION_SUPERSESSION_GENERATED_AT,
     resources: Object.fromEntries(Object.entries(resources).map(([slot, arn]) => [slot, { arn, versionId: productionSupersessionVersionId(LEGACY_BOOTSTRAP_TRANSITION_SOURCE_SHA, LEGACY_BOOTSTRAP_TRANSITION_ROTATION_ID, slot), stages: ["AWSCURRENT"] }])),
     predecessorSlotIdentities,
   };
@@ -257,17 +259,23 @@ test("governed reconciliation fails closed on a console password, access key, or
 
 test("the source-bound legacy MFA transition requires the exact historical binding and does not serialize raw key identifiers", () => {
   assert.deepEqual(BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.maxAwsMutations, { "iam:PutUserPolicy": 1, "iam:TagUser": 2, "s3:PutObject": 1 });
-  const transition = { kind: LEGACY_BOOTSTRAP_TRANSITION_KIND, rotationBindingsFileSha256: "b".repeat(64) };
+  const transition = { kind: LEGACY_BOOTSTRAP_TRANSITION_KIND, rotationBindingsFileSha256: LEGACY_BOOTSTRAP_TRANSITION_ROTATION_BINDINGS_FILE_SHA256 };
   assert.doesNotThrow(() => assertLegacyBootstrapMfaTransitionBinding(legacyBindings(), transition, legacyBindingOrigin()));
   assert.throws(() => assertLegacyBootstrapMfaTransitionBinding(legacyBindings(), transition), /not bound/);
   assert.throws(() => assertLegacyBootstrapMfaTransitionBinding({ ...legacyBindings(), rotationId: "rotation-wrong" }, transition, legacyBindingOrigin()), /authenticated transition|not bound/);
   const schema2 = structuredClone(legacyBindings()); schema2.schemaVersion = 2; delete schema2.supersessionEvidence; delete schema2.supersessionPredecessor;
   assert.throws(() => assertLegacyBootstrapMfaTransitionBinding(schema2, transition, legacyBindingOrigin()), /finalized supersession/);
+  assert.throws(() => assertLegacyBootstrapMfaTransitionBinding(legacyBindings(), { ...transition, rotationBindingsFileSha256: "b".repeat(64) }, legacyBindingOrigin()), /not bound/);
   for (const mutate of [
     (bindings) => { bindings.supersessionEvidence.evidenceIdentitySha256 = "0".repeat(64); },
     (bindings) => { delete bindings.supersessionEvidence; },
     (bindings) => { bindings.supersessionPredecessor.predecessorIdentitySha256 = "0".repeat(64); },
     (bindings) => { bindings.supersessionEvidence.resources.jwtPending.versionId = "substituted-version"; },
+    (bindings) => { bindings.supersessionEvidence.generatedAt = "2026-09-13T01:38:21.460Z"; },
+    (bindings) => { bindings.jwt.currentSecretId = "arn:aws:secretsmanager:eu-west-2:368992683803:secret:legacy-substitute"; },
+    (bindings) => { bindings.qr.privateCurrentSecretId = "arn:aws:secretsmanager:eu-west-2:368992683803:secret:legacy-substitute"; },
+    (bindings) => { bindings.qr.publicCurrentSecretId = "arn:aws:secretsmanager:eu-west-2:368992683803:secret:legacy-substitute"; },
+    (bindings) => { bindings.qr.previousKeyVersion = "substituted-version"; },
     (bindings) => { bindings.jwt.pendingSecretId = "arn:aws:secretsmanager:eu-west-2:368992683803:secret:legacy-substitute"; },
     (bindings) => { delete bindings.jwt.pendingSecretId; },
     (bindings) => { bindings.jwt.extraSecretId = MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES[0]; },
@@ -330,7 +338,7 @@ test("the source-bound legacy MFA transition requires the exact historical bindi
 });
 
 test("legacy binding resources are rejected before any AWS read and are reverified before IAM mutation", () => {
-  const transition = { kind: LEGACY_BOOTSTRAP_TRANSITION_KIND, rotationBindingsFileSha256: "b".repeat(64) };
+  const transition = { kind: LEGACY_BOOTSTRAP_TRANSITION_KIND, rotationBindingsFileSha256: LEGACY_BOOTSTRAP_TRANSITION_ROTATION_BINDINGS_FILE_SHA256 };
   const substituted = legacyBindings();
   substituted.jwt.pendingSecretId = "arn:aws:secretsmanager:eu-west-2:368992683803:secret:legacy-substitute";
   let reads = 0;

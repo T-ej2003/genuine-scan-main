@@ -407,6 +407,7 @@ export function verifyLiveInitialDualSlotBindingWithRunner({ run, bindings, prov
     }
   }
   if (observedSlots.qrPrivatePending.keyVersion && observedSlots.qrPrivatePending.keyVersion !== observedSlots.qrPublicPending.keyVersion) throw new Error("Initial QR pending payload identities are inconsistent.");
+  if (observedSlots.qrPublicPending.keyVersion !== bindings.qr.pendingKeyVersion) throw new Error("Initial QR pending key version does not match the authenticated live binding.");
   let supersessionPredecessorIdentitySha256;
   if (predecessor) {
     const payloads = {};
