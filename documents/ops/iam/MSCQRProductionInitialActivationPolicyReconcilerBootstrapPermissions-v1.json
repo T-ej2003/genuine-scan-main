@@ -90,10 +90,27 @@
       "Resource": "arn:aws:iam::368992683803:role/mscqr-production-mixed-dual-slot-recovery-executor"
     },
     {
+      "Sid": "ReadExactBootstrapOperatorPolicyAuthorizerRole",
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetRole",
+        "iam:ListAttachedRolePolicies",
+        "iam:ListRolePolicies",
+        "iam:ListRoleTags"
+      ],
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-bootstrap-operator-policy-authorizer"
+    },
+    {
       "Sid": "UpdateExactMixedRecoveryRoleTrust",
       "Effect": "Allow",
       "Action": "iam:UpdateAssumeRolePolicy",
       "Resource": "arn:aws:iam::368992683803:role/mscqr-production-mixed-dual-slot-recovery-executor"
+    },
+    {
+      "Sid": "UpdateExactBootstrapOperatorPolicyAuthorizerRoleTrust",
+      "Effect": "Allow",
+      "Action": "iam:UpdateAssumeRolePolicy",
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-bootstrap-operator-policy-authorizer"
     },
     {
       "Sid": "ReadExactReconcilerPolicy",
@@ -118,6 +135,18 @@
         "iam:ListPolicyVersions"
       ],
       "Resource": "arn:aws:iam::368992683803:policy/MSCQRProductionMixedDualSlotRecoveryExecutor"
+    },
+    {
+      "Sid": "ReadExactBootstrapOperatorPolicyAuthorizerPolicy",
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetPolicy",
+        "iam:GetPolicyVersion",
+        "iam:ListEntitiesForPolicy",
+        "iam:ListPolicyTags",
+        "iam:ListPolicyVersions"
+      ],
+      "Resource": "arn:aws:iam::368992683803:policy/MSCQRProductionBootstrapOperatorPolicyAuthorizer"
     },
     {
       "Sid": "UpdateExactReconcilerPolicyVersion",
@@ -203,6 +232,40 @@
       }
     },
     {
+      "Sid": "CreateExactBootstrapOperatorPolicyAuthorizerRole",
+      "Effect": "Allow",
+      "Action": ["iam:CreateRole", "iam:TagRole"],
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-bootstrap-operator-policy-authorizer",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/ManagedBy": "Terraform",
+          "aws:RequestTag/Environment": "production",
+          "aws:RequestTag/Component": "bootstrap-operator-policy-authorization",
+          "aws:RequestTag/Stack": "production-initial-activation-policy-reconciler"
+        },
+        "ForAllValues:StringEquals": {
+          "aws:TagKeys": ["ManagedBy", "Environment", "Component", "Stack"]
+        }
+      }
+    },
+    {
+      "Sid": "CreateExactBootstrapOperatorPolicyAuthorizerPolicy",
+      "Effect": "Allow",
+      "Action": ["iam:CreatePolicy", "iam:TagPolicy"],
+      "Resource": "arn:aws:iam::368992683803:policy/MSCQRProductionBootstrapOperatorPolicyAuthorizer",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/ManagedBy": "Terraform",
+          "aws:RequestTag/Environment": "production",
+          "aws:RequestTag/Component": "bootstrap-operator-policy-authorization",
+          "aws:RequestTag/Stack": "production-initial-activation-policy-reconciler"
+        },
+        "ForAllValues:StringEquals": {
+          "aws:TagKeys": ["ManagedBy", "Environment", "Component", "Stack"]
+        }
+      }
+    },
+    {
       "Sid": "AttachExactPolicyToExactRole",
       "Effect": "Allow",
       "Action": "iam:AttachRolePolicy",
@@ -221,6 +284,17 @@
       "Condition": {
         "ArnEquals": {
           "iam:PolicyARN": "arn:aws:iam::368992683803:policy/MSCQRProductionMixedDualSlotRecoveryExecutor"
+        }
+      }
+    },
+    {
+      "Sid": "AttachExactBootstrapOperatorPolicyAuthorizerPolicyToRole",
+      "Effect": "Allow",
+      "Action": "iam:AttachRolePolicy",
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-bootstrap-operator-policy-authorizer",
+      "Condition": {
+        "ArnEquals": {
+          "iam:PolicyARN": "arn:aws:iam::368992683803:policy/MSCQRProductionBootstrapOperatorPolicyAuthorizer"
         }
       }
     }

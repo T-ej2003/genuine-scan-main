@@ -9,7 +9,7 @@ Both objects are created with S3 `PutObject` and the exact `If-None-Match: *` va
 
 ## Current reservation boundary (migration pending)
 
-The independently authenticated root operator currently has a separate, operation-specific single-writer boundary at `production-initial-activation-lifecycle-policy-reconciliation/reservations/<transition-sha256>.json`. The six associated Stage-A bucket-policy statements (root read and conditional-write permissions plus the protective read/write/deletion denies) remain current until the reviewed #448 reconciler migration is merged, verified, and followed by its separately authorized retirement transition. The reservation prefix is therefore still an active governed coordination boundary in the current protected-main state.
+The independently authenticated root operator currently has a separate, operation-specific single-writer boundary at `production-initial-activation-lifecycle-policy-reconciliation/reservations/<transition-sha256>.json`. The seven associated Stage-A bucket-policy statements (root read, conditional create/replace permissions, and the protective read/write/deletion denies) remain current until the reviewed #448 reconciler migration is merged, verified, and followed by its separately authorized retirement transition. The reservation prefix is therefore still an active governed coordination boundary in the current protected-main state.
 
 ## Prepared reconciler migration
 

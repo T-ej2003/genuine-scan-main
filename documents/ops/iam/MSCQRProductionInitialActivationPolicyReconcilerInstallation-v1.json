@@ -14,16 +14,19 @@
     "aws_iam_role_policy_attachment.reconciler",
     "aws_iam_role.mixed_recovery",
     "aws_iam_policy.mixed_recovery",
-    "aws_iam_role_policy_attachment.mixed_recovery"
+    "aws_iam_role_policy_attachment.mixed_recovery",
+    "aws_iam_role.bootstrap_operator_policy_authorizer",
+    "aws_iam_policy.bootstrap_operator_policy_authorizer",
+    "aws_iam_role_policy_attachment.bootstrap_operator_policy_authorizer"
   ],
   "maxAwsMutations": {
-    "iam:CreateRole": 2,
-    "iam:CreatePolicy": 2,
-    "iam:AttachRolePolicy": 2,
+    "iam:CreateRole": 3,
+    "iam:CreatePolicy": 3,
+    "iam:AttachRolePolicy": 3,
     "iam:UpdateAssumeRolePolicy": 1,
     "iam:PutRolePolicy": 0,
     "iam:CreatePolicyVersion": 2
   },
-  "replay": "exact-complete-live-topology-is-zero-apply; the exact prior mixed-recovery trust has one source-bound trust-only update; exact legacy reconciler topology expands only by the dedicated mixed-recovery role, policy, and attachment; five-version or unexpected state fails closed",
-  "postcondition": "canonical-read-only verification passes for both the reconciler and the dedicated mixed-recovery executor"
+  "replay": "exact-complete-live-topology-is-zero-apply; the exact prior mixed-recovery trust has one source-bound trust-only update; exact legacy reconciler topology expands only by the dedicated mixed-recovery and bootstrap-operator policy-authorizer roles, policies, and attachments; five-version or unexpected state fails closed",
+  "postcondition": "canonical-read-only verification passes for the reconciler, dedicated mixed-recovery executor, and bootstrap-operator policy authorizer"
 }

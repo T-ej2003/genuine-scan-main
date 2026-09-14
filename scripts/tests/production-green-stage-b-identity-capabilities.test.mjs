@@ -11,8 +11,9 @@ import {
   runReleaseReadPreflight,
 } from "../aws/production-green-stage-b-identity-capabilities.mjs";
 import { STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_STATE_IDENTITY_VERSION, stageAStateSemanticSha256 } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
-import { assertBootstrapOperatorAssumeRoleAuthority, assertBootstrapOperatorVerifierAuthority, assertInitialActivationReconcilerAuthority, assertStageBAwsCallCoverage, assertStageBDeploymentCapabilityGraph, buildStageBDeploymentCapabilityGraph, classifyStageARecoveryAwsCliAction, discoverAwsCliActions } from "../aws/generate-production-green-stage-b-capability-graph.mjs";
+import { assertBootstrapOperatorAssumeRoleAuthority, assertBootstrapOperatorVerifierAuthority, assertBootstrapOperatorPolicyAuthorizerAuthority, assertInitialActivationReconcilerAuthority, assertStageBAwsCallCoverage, assertStageBDeploymentCapabilityGraph, buildStageBDeploymentCapabilityGraph, classifyStageARecoveryAwsCliAction, discoverAwsCliActions } from "../aws/generate-production-green-stage-b-capability-graph.mjs";
 import { BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION } from "../aws/production-bootstrap-operator-policy-reconciliation.mjs";
+import { MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES } from "../aws/production-mixed-dual-slot-recovery-contract.mjs";
 import { assertStageBAdministratorEvidenceIdentity, buildPermissionReportBinding, canonicalizeJson, PERMISSION_REPORT_BINDING_DOMAIN, PERMISSION_REPORT_BINDING_SCHEMA_VERSION, PERMISSION_REPORT_HASH_DOMAIN, PERMISSION_REPORT_SIGNING_ALGORITHM, PERMISSION_REPORT_SIGNING_KEY_ARN, PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION, runPermissionPreflight, signedPermissionReportBindingSha256, sourcePolicyEvidence } from "../aws/validate-production-green-stage-b-permissions.mjs";
 import { runProductionPreflightCli } from "../aws/run-production-green-stage-b-preflight.mjs";
 import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "../aws/production-cutover-production-adapters.mjs";
@@ -196,7 +197,12 @@ test("Stage B release readiness requires the completed Stage A contract", () => 
 test("generated capability graph is exhaustive, deterministic, and identity-exact", () => {
   const first = buildStageBDeploymentCapabilityGraph(); const second = buildStageBDeploymentCapabilityGraph();
   assert.deepEqual(first, second);
-  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 51, capabilities: 427, uniqueActions: 146, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
+  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 51, capabilities: 438, uniqueActions: 148, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
+  const bootstrapAuthorization = first.capabilities.filter(({ id }) => id.startsWith("bootstrap-operator-policy-authorization-"));
+  assert.equal(bootstrapAuthorization.length, 4);
+  assert.equal(bootstrapAuthorization.every(({ identity, mutation, policy }) => identity === "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER" && mutation === false && policy.sourceFile === BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.authorizationPolicyPath), true);
+  for (const capability of bootstrapAuthorization) assert.deepEqual(capability.policy, assertBootstrapOperatorPolicyAuthorizerAuthority(capability));
+  assert.deepEqual(bootstrapAuthorization.filter(({ action }) => action.startsWith("secretsmanager:")).map(({ resources }) => resources), [MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES]);
   assert(first.capabilities.every(({ identity }) => first.identities.includes(identity)));
   assert(first.capabilities.every(({ id }, index) => first.capabilities.findIndex((item) => item.id === id) === index));
   assert(first.capabilities.some(({ identity, action }) => identity === "ECS_EXEC_VERIFIER_OPERATOR" && action === "ecs:ExecuteCommand"));
@@ -214,8 +220,19 @@ test("generated capability graph is exhaustive, deterministic, and identity-exac
   assert(providerReadonlyCapabilities.every(({ context }) => context.targetPolicyArn === "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"));
   assert.equal(first.capabilities.filter(({ identity, phase }) => identity === "ROOT_OPERATOR" && phase === "provider-readonly-policy-reconciliation").length, 5);
   const bootstrapOperatorReconciliation = first.capabilities.filter(({ phase }) => phase === "bootstrap-operator-policy-reconciliation");
-  assert.equal(bootstrapOperatorReconciliation.length, 10);
-  assert(bootstrapOperatorReconciliation.every(({ identity, policy }) => identity === "ROOT_OPERATOR" && policy.sourceFile === "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs"));
+  assert.equal(bootstrapOperatorReconciliation.length, 21);
+  assert(bootstrapOperatorReconciliation.filter(({ id }) => id.startsWith("bootstrap-operator-policy-reconciliation-")).every(({ id, identity, policy }) => identity === "ROOT_OPERATOR" && (id.includes("reservation") ? policy.sourceFile === "infra/aws/terraform/production-green-stage-a/main.tf" : policy.sourceFile === "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs")));
+  assert.deepEqual(bootstrapOperatorReconciliation.filter(({ id }) => id.includes("reservation")).map(({ id, policy }) => [id, policy.sid]), [
+    ["bootstrap-operator-policy-reconciliation-create-reservation", "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationCreate"],
+    ["bootstrap-operator-policy-reconciliation-read-reservation", "AllowRootOperatorReadInitialActivationPolicyReconciliationReservations"],
+    ["bootstrap-operator-policy-reconciliation-replace-expired-reservation", "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationReplace"],
+  ]);
+  for (const [id, action] of [["bootstrap-operator-policy-reconciliation-read-initial-overlap-secrets", "secretsmanager:DescribeSecret"], ["bootstrap-operator-policy-reconciliation-read-initial-overlap-values", "secretsmanager:GetSecretValue"]]) {
+    const capability = bootstrapOperatorReconciliation.find(({ id: candidate }) => candidate === id);
+    assert.deepEqual(capability?.resources, MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES);
+    assert.equal(capability?.action, action);
+    assert.equal(capability?.sourceFunction, "verifyLiveInitialDualSlotBindingWithRunner");
+  }
   const targetBound = structuredClone(first); targetBound.capabilities.find(({ identity }) => identity === "INITIAL_ACTIVATION_RECONCILER").policy.livePolicyArn = "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle";
   assert.throws(() => assertStageBDeploymentCapabilityGraph(targetBound), /stale or incomplete/);
   const reconcilerPolicy = JSON.parse(fs.readFileSync("infra/aws/terraform/production-initial-activation-policy-reconciler/permissions-policy.json", "utf8"));

@@ -38,9 +38,9 @@
       "scripts/aws/prepare-production-initial-activation-reconciler-installation.mjs",
       "scripts/aws/verify-production-initial-activation-policy-reconciler.mjs"
     ],
-    "maxCreateRole": 2,
-    "maxCreatePolicy": 2,
-    "maxAttachRolePolicy": 2,
+    "maxCreateRole": 3,
+    "maxCreatePolicy": 3,
+    "maxAttachRolePolicy": 3,
     "runtimeSelfInstallation": false,
     "executionPerformedInThisSource": true,
     "terraformApplyMaxCount": 1,

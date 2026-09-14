@@ -4,7 +4,7 @@ import { createHash, generateKeyPairSync } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { assertStageAPlan, buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifactsBucketPolicyPredecessor, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation, buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection, createTerraformStageAAdapter, runStageAControlPlane, STAGE_A_CHECKER_POLICY, STAGE_A_CHECKER_PUBLICATION_POLICY, STAGE_A_CHECKER_ROLE_TRUST, STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY } from "../aws/production-stage-a-control-plane.mjs";
+import { assertStageAPlan, buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifactsBucketPolicyPredecessor, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservationPredecessor, buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection, createTerraformStageAAdapter, runStageAControlPlane, STAGE_A_CHECKER_POLICY, STAGE_A_CHECKER_PUBLICATION_POLICY, STAGE_A_CHECKER_ROLE_TRUST, STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY } from "../aws/production-stage-a-control-plane.mjs";
 import { describeStageAIngress } from "../aws/production-cutover-production-adapters.mjs";
 import { assertTransitionMatrix, buildTransitionMatrix, PRODUCTION_CUTOVER_MODE, runGovernedOverlapDeployment, runProductionCutoverControlPlane } from "../aws/production-cutover-control-plane.mjs";
 import { persistOverlapReadinessEvidence } from "../aws/produce-production-overlap-readiness-evidence.mjs";
@@ -242,6 +242,9 @@ test("Stage A admits only the exact production-artifacts bucket policy lifecycle
   const intentionalReservationUpdate = assertStageAPlan(stageAPlan({ artifactsBucketPolicy: artifactsBucketPolicyChange({ actions: ["update"], beforePolicy: buildStageAProductionArtifactsBucketPolicy() }) }), inputs);
   assert.equal(intentionalReservationUpdate.recoveryRequired, true);
   assert.equal(intentionalReservationUpdate.executionDisposition, "RECOVERY_REQUIRED");
+  const installedReservationUpdate = assertStageAPlan(stageAPlan({ artifactsBucketPolicy: artifactsBucketPolicyChange({ actions: ["update"], beforePolicy: buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservationPredecessor() }) }), inputs);
+  assert.equal(installedReservationUpdate.recoveryRequired, true);
+  assert.equal(installedReservationUpdate.executionDisposition, "RECOVERY_REQUIRED");
   assert.throws(() => assertStageAPlan(stageAPlan({ artifactsBucketPolicy: { ...exactUpdate, address: "aws_s3_bucket_policy.unrelated" } }), inputs));
   for (const actions of [["update", "create"], ["replace"], ["delete"]]) {
     assert.throws(() => assertStageAPlan(stageAPlan({ artifactsBucketPolicy: artifactsBucketPolicyChange({ actions, beforePolicy: buildStageAProductionArtifactsBucketPolicyPredecessor() }) }), inputs));
@@ -301,7 +304,8 @@ test("Stage A admits only the exact production-artifacts bucket policy lifecycle
     "AllowRootOperatorReadInitialActivationPolicyReconciliationReservations",
     "DenyOtherPrincipalsInitialActivationPolicyReconciliationReservationReads",
     "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationCreate",
-    "DenyNonConditionalInitialActivationPolicyReconciliationReservationWrites",
+    "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationReplace",
+    "DenyUnconditionalInitialActivationPolicyReconciliationReservationWrites",
     "DenyOtherPrincipalsInitialActivationPolicyReconciliationReservationWrites",
     "DenyInitialActivationPolicyReconciliationReservationDeletion",
   ]) {

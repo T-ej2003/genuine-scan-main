@@ -27,7 +27,7 @@ const CREDENTIAL_REDIRECT_KEYS = Object.freeze([
 ]);
 const SAFE_PROCESS_KEYS = Object.freeze(["HOME", "PATH", "TMPDIR", "TERM", "LANG", "LC_ALL", "LC_CTYPE", "NODE_EXTRA_CA_CERTS"]);
 const GITHUB_AUTH_KEYS = Object.freeze(["GH_TOKEN", "GITHUB_TOKEN"]);
-const GITHUB_ENVIRONMENT_ENDPOINTS = Object.freeze(["production", "production-initial-activation-reconciler-bootstrap", "production-mixed-dual-slot-recovery"]);
+const GITHUB_ENVIRONMENT_ENDPOINTS = Object.freeze(["production", "production-initial-activation-reconciler-bootstrap", "production-mixed-dual-slot-recovery", "production-bootstrap-operator-policy-authorization"]);
 
 const copy = (source, keys) => Object.fromEntries(keys.filter((key) => typeof source?.[key] === "string" && source[key]).map((key) => [key, source[key]]));
 const required = (env, key) => {

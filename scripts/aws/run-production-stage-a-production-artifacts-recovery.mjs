@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createProductionAwsCommandRunner, createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
-import { assertStageAProductionArtifactsExecutableTransition, createTerraformStageAAdapter, buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifactsBucketPolicyPredecessor, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation, buildStageAProductionArtifactsBucketPolicyWithRecoveryListBucketBootstrap, buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection, buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation, resolveStageAProductionArtifactsBucketPolicyTransition, stageAProductionArtifactsPolicySemanticallyEqual } from "./production-stage-a-control-plane.mjs";
+import { assertStageAProductionArtifactsExecutableTransition, createTerraformStageAAdapter, buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifactsBucketPolicyPredecessor, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservationPredecessor, buildStageAProductionArtifactsBucketPolicyWithRecoveryListBucketBootstrap, buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection, buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation, resolveStageAProductionArtifactsBucketPolicyTransition, stageAProductionArtifactsPolicySemanticallyEqual } from "./production-stage-a-control-plane.mjs";
 import { PRODUCTION_ACTIVATION_LIFECYCLE } from "./production-green-stage-b-contract.mjs";
 import { createStageATerraformBackendLock, STAGE_A_TERRAFORM_BACKEND } from "./production-stage-a-root-drop-orphan-recovery.mjs";
 import { parseAuthenticatedStateBytes } from "./generate-production-green-stage-a-prerequisites.mjs";
@@ -27,6 +27,12 @@ const readContinuationChangedFiles = ({ ancestorSha, descendantSha }) => {
   const ancestor = changed(ancestorSha); const descendant = changed(descendantSha);
   return [...new Set([...ancestor.keys(), ...descendant.keys()])].filter((file) => ancestor.get(file) !== descendant.get(file)).sort();
 };
+
+export function selectStageAProductionArtifactsRecoveryJournals({ historicalTransition = false, legacyReservationTransition = false, bootstrapTransition = false, recoveryJournal, rootRecoveryJournal } = {}) {
+  const attemptReader = historicalTransition || legacyReservationTransition || bootstrapTransition ? rootRecoveryJournal : recoveryJournal;
+  const attemptWriter = historicalTransition ? rootRecoveryJournal : recoveryJournal;
+  return Object.freeze({ attemptReader, attemptWriter });
+}
 
 function readPolicy(run) {
   const encoded = awsJson(run, ["s3api", "get-bucket-policy", "--bucket", PRODUCTION_ACTIVATION_LIFECYCLE.bucket]);
@@ -111,15 +117,14 @@ export async function runStageAProductionArtifactsRecovery({ sourceSha, recovery
   const before = readPolicy(releaseRun); const predecessorLive = samePolicy(before, transition.predecessor); const desiredLive = samePolicy(before, transition.desired);
   if (!predecessorLive && !desiredLive) throw new Error("Stage A production-artifacts live policy is neither the exact predecessor nor desired policy.");
   const reservationTransition = samePolicy(transition.predecessor, buildStageAProductionArtifactsBucketPolicy()) && samePolicy(transition.desired, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation());
+  const legacyReservationTransition = samePolicy(transition.predecessor, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservationPredecessor()) && samePolicy(transition.desired, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation());
   const bootstrapTransition = samePolicy(transition.predecessor, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation()) && samePolicy(transition.desired, buildStageAProductionArtifactsBucketPolicyWithRecoveryListBucketBootstrap());
   const providerReadonlyTransition = samePolicy(transition.predecessor, buildStageAProductionArtifactsBucketPolicyWithRecoveryListBucketBootstrap()) && samePolicy(transition.desired, buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection());
   const reverseReservationTransition = samePolicy(transition.predecessor, buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection()) && samePolicy(transition.desired, buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation());
-  if (!historicalTransition && !reservationTransition && !bootstrapTransition && !providerReadonlyTransition && !reverseReservationTransition) throw new Error("Stage A production-artifacts recovery transition is unsupported.");
-  // State A permits only the release-deployer to create reconciliation records.
-  // Bootstrap needs root solely to classify an absent attempt before its scoped
-  // ListBucket permission exists; the immutable attempt itself stays release-owned.
-  const attemptReader = historicalTransition || bootstrapTransition ? rootRecoveryJournal : recoveryJournal;
-  const attemptWriter = bootstrapTransition ? recoveryJournal : attemptReader;
+  if (!historicalTransition && !reservationTransition && !legacyReservationTransition && !bootstrapTransition && !providerReadonlyTransition && !reverseReservationTransition) throw new Error("Stage A production-artifacts recovery transition is unsupported.");
+  // State A permits only the release-deployer to create migration records;
+  // historical A-to-B retains its root-owned attempt boundary.
+  const { attemptReader, attemptWriter } = selectStageAProductionArtifactsRecoveryJournals({ historicalTransition, legacyReservationTransition, bootstrapTransition, recoveryJournal, rootRecoveryJournal });
   const completionJournal = journal;
   const decode = (record, label) => { if (!record) return null; try { return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(record.bytes)); } catch { throw new Error(`${label} is malformed.`); } };
   const readCompletion = (reader) => { try { return reader.readRecoveryCompletion(authorization.authorizationSha256); } catch (error) {

@@ -36,6 +36,18 @@ export const MIXED_RECOVERY_EXECUTOR = Object.freeze({
   policyDescription: "Exact readback and AWSCURRENT-removal capability for mixed dual-slot topology recovery.",
   tags: Object.freeze({ ...INITIAL_ACTIVATION_RECONCILER.tags, Component: "mixed-dual-slot-topology-recovery" }),
 });
+export const BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER = Object.freeze({
+  roleName: "mscqr-production-bootstrap-operator-policy-authorizer",
+  roleArn: "arn:aws:iam::368992683803:role/mscqr-production-bootstrap-operator-policy-authorizer",
+  policyName: "MSCQRProductionBootstrapOperatorPolicyAuthorizer",
+  policyArn: "arn:aws:iam::368992683803:policy/MSCQRProductionBootstrapOperatorPolicyAuthorizer",
+  trustPath: "infra/aws/terraform/production-initial-activation-policy-reconciler/bootstrap-operator-policy-authorizer-trust-policy.json",
+  permissionsPath: "infra/aws/terraform/production-initial-activation-policy-reconciler/bootstrap-operator-policy-authorizer-permissions-policy.json",
+  path: "/",
+  roleDescription: "GitHub OIDC-only read-only authorizer for the exact bootstrap-operator legacy transition.",
+  policyDescription: "Exact read-only binding verification for bootstrap-operator policy authorization.",
+  tags: Object.freeze({ ...INITIAL_ACTIVATION_RECONCILER.tags, Component: "bootstrap-operator-policy-authorization" }),
+});
 
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 const readJson = (relativePath) => JSON.parse(fs.readFileSync(path.join(root, relativePath), "utf8"));
@@ -117,6 +129,33 @@ export function verifyMixedRecoveryExecutor({ run } = {}) {
   return Object.freeze({ roleArn: role.Arn, policyArn: policy.Arn, defaultVersionId: policy.DefaultVersionId });
 }
 
+export function assertBootstrapOperatorPolicyAuthorizerRoleMetadata(role, { expectedTrust } = {}) {
+  if (role?.Arn !== BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.roleArn || role?.RoleName !== BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.roleName || role?.Path !== "/" || role?.Description !== BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.roleDescription || role?.MaxSessionDuration !== 3600 || Object.hasOwn(role, "PermissionsBoundary")) throw new Error("Bootstrap-operator policy authorizer role metadata is not exact.");
+  exactJson(decodeAwsDocument(role.AssumeRolePolicyDocument, "bootstrap-operator authorizer trust policy"), expectedTrust === undefined ? readJson(BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.trustPath) : expectedTrust, "bootstrap-operator authorizer trust policy");
+  exactJson(Object.fromEntries((role.Tags || []).map(({ Key, Value }) => [Key, Value])), BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.tags, "bootstrap-operator authorizer role tags");
+  return role;
+}
+
+export function assertBootstrapOperatorPolicyAuthorizerPolicyMetadata(policy, document) {
+  if (policy?.Arn !== BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.policyArn || policy?.PolicyName !== BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.policyName || policy?.Path !== "/" || policy?.Description !== BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.policyDescription || !/^v[1-9][0-9]*$/.test(policy?.DefaultVersionId || "") || policy?.PermissionsBoundaryUsageCount !== 0) throw new Error("Bootstrap-operator policy authorizer managed-policy metadata is not exact.");
+  exactJson(decodeAwsDocument(document, "bootstrap-operator authorizer permissions policy"), readJson(BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.permissionsPath), "bootstrap-operator authorizer permissions policy");
+  exactJson(Object.fromEntries((policy.Tags || []).map(({ Key, Value }) => [Key, Value])), BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.tags, "bootstrap-operator authorizer policy tags");
+  return policy;
+}
+
+export function verifyBootstrapOperatorPolicyAuthorizer({ run } = {}) {
+  const role = json(run, ["iam", "get-role", "--role-name", BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.roleName]).Role;
+  assertBootstrapOperatorPolicyAuthorizerRoleMetadata(role);
+  const policy = json(run, ["iam", "get-policy", "--policy-arn", BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.policyArn]).Policy;
+  const version = json(run, ["iam", "get-policy-version", "--policy-arn", BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.policyArn, "--version-id", policy?.DefaultVersionId]).PolicyVersion;
+  assertBootstrapOperatorPolicyAuthorizerPolicyMetadata(policy, version?.Document);
+  const attached = json(run, ["iam", "list-attached-role-policies", "--role-name", BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.roleName]).AttachedPolicies;
+  const inline = json(run, ["iam", "list-role-policies", "--role-name", BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.roleName]).PolicyNames;
+  const entities = readPolicyEntities(run, BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.policyArn);
+  if (!Array.isArray(attached) || attached.length !== 1 || attached[0]?.PolicyArn !== BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.policyArn || !Array.isArray(inline) || inline.length || entities.roles.length !== 1 || entities.roles[0]?.RoleName !== BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.roleName || entities.users.length || entities.groups.length) throw new Error("Bootstrap-operator policy authorizer attachment topology is not exact.");
+  return Object.freeze({ roleArn: role.Arn, policyArn: policy.Arn, defaultVersionId: policy.DefaultVersionId });
+}
+
 export function verifyInitialActivationPolicyReconciler({ run, expectedCallerArn = "arn:aws:iam::368992683803:root" } = {}) {
   if (typeof run !== "function") throw new Error("An explicit AWS runner is required.");
   const identity = json(run, ["sts", "get-caller-identity"]);
@@ -135,7 +174,8 @@ export function verifyInitialActivationPolicyReconciler({ run, expectedCallerArn
   const entities = readPolicyEntities(run);
   if (entities.roles.length !== 1 || entities.roles[0]?.RoleName !== INITIAL_ACTIVATION_RECONCILER.roleName || entities.users.length !== 0 || entities.groups.length !== 0) throw new Error("Initial-activation reconciler policy entity topology is not exact.");
   const mixedRecoveryExecutor = verifyMixedRecoveryExecutor({ run });
-  return Object.freeze({ roleArn: role.Arn, policyArn: policy.Arn, defaultVersionId: policy.DefaultVersionId, trustPolicySha256: sha256(readBytes(INITIAL_ACTIVATION_RECONCILER.trustPath)), permissionsPolicySha256: sha256(readBytes(INITIAL_ACTIVATION_RECONCILER.permissionsPath)), targetPolicyArn: INITIAL_ACTIVATION_RECONCILER.targetPolicyArn, releaseRoleArn: INITIAL_ACTIVATION_RECONCILER.releaseRoleArn, policyRoleCount: entities.roles.length, policyUserCount: entities.users.length, policyGroupCount: entities.groups.length, permissionsBoundaryUsageCount: policy.PermissionsBoundaryUsageCount, mixedRecoveryExecutor, roleDefinedInSource: true, pr448RuntimeMigrated: true });
+  const bootstrapOperatorPolicyAuthorizer = verifyBootstrapOperatorPolicyAuthorizer({ run });
+  return Object.freeze({ roleArn: role.Arn, policyArn: policy.Arn, defaultVersionId: policy.DefaultVersionId, trustPolicySha256: sha256(readBytes(INITIAL_ACTIVATION_RECONCILER.trustPath)), permissionsPolicySha256: sha256(readBytes(INITIAL_ACTIVATION_RECONCILER.permissionsPath)), targetPolicyArn: INITIAL_ACTIVATION_RECONCILER.targetPolicyArn, releaseRoleArn: INITIAL_ACTIVATION_RECONCILER.releaseRoleArn, policyRoleCount: entities.roles.length, policyUserCount: entities.users.length, policyGroupCount: entities.groups.length, permissionsBoundaryUsageCount: policy.PermissionsBoundaryUsageCount, mixedRecoveryExecutor, bootstrapOperatorPolicyAuthorizer, roleDefinedInSource: true, pr448RuntimeMigrated: true });
 }
 
 const required = (argv, name) => { const index = argv.indexOf(name); const value = index < 0 ? undefined : argv[index + 1]; if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };

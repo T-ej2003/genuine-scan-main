@@ -179,6 +179,7 @@ const PROVIDER_READONLY_RECONCILIATION_CAPABILITIES = Object.freeze([
 
 const BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION_CAPABILITIES = Object.freeze([
   ["bootstrap-operator-policy-reconciliation-identify", "sts:GetCallerIdentity", ["*"], false],
+  ["bootstrap-operator-policy-authorization-identify", "sts:GetCallerIdentity", ["*"], false],
   ["bootstrap-operator-policy-reconciliation-read-user", "iam:GetUser", [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn], false],
   ["bootstrap-operator-policy-reconciliation-list-attached", "iam:ListAttachedUserPolicies", [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn], false],
   ["bootstrap-operator-policy-reconciliation-list-inline", "iam:ListUserPolicies", [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn], false],
@@ -187,7 +188,17 @@ const BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION_CAPABILITIES = Object.freeze([
   ["bootstrap-operator-policy-reconciliation-list-mfa-devices", "iam:ListMFADevices", [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn], false],
   ["bootstrap-operator-policy-reconciliation-read-login-profile", "iam:GetLoginProfile", [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn], false],
   ["bootstrap-operator-policy-reconciliation-read-inline", "iam:GetUserPolicy", [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn], false],
+  ["bootstrap-operator-policy-reconciliation-read-transition-consumption", "iam:ListUserTags", [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn], false],
+  ["bootstrap-operator-policy-authorization-read-transition-consumption", "iam:ListUserTags", [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn], false],
+  ["bootstrap-operator-policy-reconciliation-read-initial-overlap-secrets", "secretsmanager:DescribeSecret", MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, false],
+  ["bootstrap-operator-policy-reconciliation-read-initial-overlap-values", "secretsmanager:GetSecretValue", MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, false],
+  ["bootstrap-operator-policy-authorization-read-initial-overlap-secrets", "secretsmanager:DescribeSecret", MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, false],
+  ["bootstrap-operator-policy-authorization-read-initial-overlap-values", "secretsmanager:GetSecretValue", MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, false],
   ["bootstrap-operator-policy-reconciliation-write-inline", "iam:PutUserPolicy", [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn], true],
+  ["bootstrap-operator-policy-reconciliation-consume-transition", "iam:TagUser", [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn], true],
+  ["bootstrap-operator-policy-reconciliation-read-reservation", "s3:GetObject", [`arn:aws:s3:::${PRODUCTION_ACTIVATION_LIFECYCLE.bucket}/${BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.legacyTransitionReservationKey}`], false],
+  ["bootstrap-operator-policy-reconciliation-create-reservation", "s3:PutObject", [`arn:aws:s3:::${PRODUCTION_ACTIVATION_LIFECYCLE.bucket}/${BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.legacyTransitionReservationKey}`], true],
+  ["bootstrap-operator-policy-reconciliation-replace-expired-reservation", "s3:PutObject", [`arn:aws:s3:::${PRODUCTION_ACTIVATION_LIFECYCLE.bucket}/${BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.legacyTransitionReservationKey}`], true],
 ]);
 
 const MIXED_DUAL_SLOT_RECOVERY_IAM_PREFLIGHT_CAPABILITIES = Object.freeze([
@@ -402,6 +413,7 @@ function authority(entry, forbidden, policies) {
 }
 
 const INITIAL_ACTIVATION_RECONCILER_POLICY_SOURCE = INITIAL_ACTIVATION_RECONCILER.permissionsPath;
+const BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER_POLICY_SOURCE = BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.authorizationPolicyPath;
 
 export function assertInitialActivationReconcilerAuthority({ action, resources } = {}, policy = readJson(INITIAL_ACTIVATION_RECONCILER_POLICY_SOURCE)) {
   if (!action || !Array.isArray(resources) || !policy || !Array.isArray(policy.Statement)) throw new Error("Initial activation reconciler permissions policy is malformed.");
@@ -415,6 +427,21 @@ export function assertInitialActivationReconcilerAuthority({ action, resources }
     livePolicyArn: INITIAL_ACTIVATION_RECONCILER.policyArn,
     expectedVersion: "installed",
     expectedPolicySha256: sha256(fs.readFileSync(path.join(root, INITIAL_ACTIVATION_RECONCILER_POLICY_SOURCE))),
+  };
+}
+
+export function assertBootstrapOperatorPolicyAuthorizerAuthority({ action, resources } = {}, policy = readJson(BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER_POLICY_SOURCE)) {
+  if (!action || !Array.isArray(resources) || !policy || !Array.isArray(policy.Statement)) throw new Error("Bootstrap operator policy authorizer permissions policy is malformed.");
+  const statement = policy.Statement.find((candidate) => candidate.Effect === "Allow"
+    && asArray(candidate.Action).includes(action)
+    && resources.every((resource) => asArray(candidate.Resource).some((allowed) => allowed === resource)));
+  if (!statement) throw new Error(`Bootstrap operator policy authorizer permissions policy does not authorize ${action} on the exact resource set.`);
+  return {
+    sourceFile: BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER_POLICY_SOURCE,
+    sid: statement.Sid,
+    livePolicyArn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.authorizationPolicyArn,
+    expectedVersion: "installed",
+    expectedPolicySha256: sha256(fs.readFileSync(path.join(root, BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER_POLICY_SOURCE))),
   };
 }
 
@@ -528,10 +555,13 @@ export function discoverAwsCliActions() {
         calls.push(executorCall);
         if (["sts:GetCallerIdentity", "iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions", "iam:ListEntitiesForPolicy"].includes(action)) calls.push({ ...executorCall, identity: "ROOT_OPERATOR", sourceFunction: `${id}-prepare`, capabilityId: `${id}-prepare` });
       } else if (sourceFile === "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs") {
-        const id = ({ "sts:GetCallerIdentity": "bootstrap-operator-policy-reconciliation-identify", "iam:GetUser": "bootstrap-operator-policy-reconciliation-read-user", "iam:ListAttachedUserPolicies": "bootstrap-operator-policy-reconciliation-list-attached", "iam:ListUserPolicies": "bootstrap-operator-policy-reconciliation-list-inline", "iam:ListGroupsForUser": "bootstrap-operator-policy-reconciliation-list-groups", "iam:ListAccessKeys": "bootstrap-operator-policy-reconciliation-list-access-keys", "iam:ListMFADevices": "bootstrap-operator-policy-reconciliation-list-mfa-devices", "iam:GetLoginProfile": "bootstrap-operator-policy-reconciliation-read-login-profile", "iam:GetUserPolicy": "bootstrap-operator-policy-reconciliation-read-inline", "iam:PutUserPolicy": "bootstrap-operator-policy-reconciliation-write-inline" })[action];
+        const authorizationIdentityRead = action === "sts:GetCallerIdentity" && match.index > source.indexOf("export function authenticateBootstrapOperatorAuthorizationLiveState(") && match.index < source.indexOf("const AUTHORIZATION_KEYS");
+        const legacyReservationCreateStart = source.indexOf('if (condition === "CREATE") run(["s3api", "put-object"');
+        const legacyReservationReplaceStart = source.indexOf('else run(["s3api", "put-object"');
+        const id = authorizationIdentityRead ? "bootstrap-operator-policy-authorization-identify" : action === "s3:PutObject" ? (match.index === legacyReservationCreateStart + 'if (condition === "CREATE") run('.length ? "bootstrap-operator-policy-reconciliation-create-reservation" : match.index === legacyReservationReplaceStart + 'else run('.length ? "bootstrap-operator-policy-reconciliation-replace-expired-reservation" : null) : ({ "sts:GetCallerIdentity": "bootstrap-operator-policy-reconciliation-identify", "iam:GetUser": "bootstrap-operator-policy-reconciliation-read-user", "iam:ListAttachedUserPolicies": "bootstrap-operator-policy-reconciliation-list-attached", "iam:ListUserPolicies": "bootstrap-operator-policy-reconciliation-list-inline", "iam:ListGroupsForUser": "bootstrap-operator-policy-reconciliation-list-groups", "iam:ListAccessKeys": "bootstrap-operator-policy-reconciliation-list-access-keys", "iam:ListMFADevices": "bootstrap-operator-policy-reconciliation-list-mfa-devices", "iam:GetLoginProfile": "bootstrap-operator-policy-reconciliation-read-login-profile", "iam:GetUserPolicy": "bootstrap-operator-policy-reconciliation-read-inline", "iam:ListUserTags": "bootstrap-operator-policy-reconciliation-read-transition-consumption", "iam:TagUser": "bootstrap-operator-policy-reconciliation-consume-transition", "iam:PutUserPolicy": "bootstrap-operator-policy-reconciliation-write-inline", "s3:GetObject": "bootstrap-operator-policy-reconciliation-read-reservation" })[action];
         const capability = BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION_CAPABILITIES.find(([candidate]) => candidate === id);
         if (!id || !capability) throw new Error("Bootstrap operator reconciliation uses an unreviewed AWS action.");
-        calls.push({ sourceFile, sourceFunction: id, phase: "bootstrap-operator-policy-reconciliation", identity: "ROOT_OPERATOR", action, resources: capability[2], capabilityId: id });
+        calls.push({ sourceFile, sourceFunction: action === "iam:ListUserTags" ? "readLegacyTransitionConsumption" : id, phase: "bootstrap-operator-policy-reconciliation", identity: authorizationIdentityRead ? "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER" : "ROOT_OPERATOR", action, resources: capability[2], capabilityId: id });
       } else if (sourceFile === "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs") {
         const id = ({ "sts:GetCallerIdentity": "mixed-recovery-iam-preflight-identify", "organizations:DescribeOrganization": "mixed-recovery-iam-preflight-read-organization", "iam:GetOpenIDConnectProvider": "mixed-recovery-iam-preflight-read-oidc-provider", "iam:GetRole": "mixed-recovery-iam-preflight-read-role", "iam:SimulatePrincipalPolicy": "mixed-recovery-iam-preflight-simulate", "secretsmanager:DescribeSecret": "mixed-recovery-iam-preflight-describe-secret", "secretsmanager:GetResourcePolicy": "mixed-recovery-iam-preflight-read-resource-policy" })[action];
         if (!id) throw new Error("Mixed recovery IAM preflight uses an unreviewed AWS action.");
@@ -544,6 +574,16 @@ export function discoverAwsCliActions() {
       }
     }
   }
+  const bootstrapOperatorReconciliationSource = fs.readFileSync(path.join(root, "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs"), "utf8");
+  const legacyVerifierStart = bootstrapOperatorReconciliationSource.indexOf("export function verifyLegacyBootstrapMfaTransitionBinding(");
+  const legacyVerifierStaticCheck = bootstrapOperatorReconciliationSource.indexOf("assertLegacyBootstrapMfaTransitionStaticBinding(bindings, transition);", legacyVerifierStart);
+  const legacyVerifierLiveRead = bootstrapOperatorReconciliationSource.indexOf("const origin = verifyLiveBinding({ run, bindings, proveDescendant });", legacyVerifierStart);
+  if (legacyVerifierStart < 0 || legacyVerifierStaticCheck < legacyVerifierStart || legacyVerifierLiveRead < legacyVerifierStaticCheck || bootstrapOperatorReconciliationSource.split("verifyLegacyBootstrapMfaTransitionBinding({").length - 1 < 4) throw new Error("Bootstrap operator reconciliation no longer validates exact resources before independently authenticating the initial-overlap binding in preparation, authorization, and execution.");
+  for (const [action, capabilityId] of [["secretsmanager:DescribeSecret", "bootstrap-operator-policy-reconciliation-read-initial-overlap-secrets"], ["secretsmanager:GetSecretValue", "bootstrap-operator-policy-reconciliation-read-initial-overlap-values"]]) {
+    calls.push({ sourceFile: "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs", sourceFunction: "verifyLiveInitialDualSlotBindingWithRunner", phase: "bootstrap-operator-policy-reconciliation", identity: "ROOT_OPERATOR", action, resources: [...MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES], capabilityId });
+    calls.push({ sourceFile: "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs", sourceFunction: "verifyLiveInitialDualSlotBindingWithRunner", phase: "bootstrap-operator-policy-reconciliation", identity: "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER", action, resources: [...MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES], capabilityId: capabilityId.replace("reconciliation-read", "authorization-read") });
+  }
+  calls.push({ sourceFile: "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs", sourceFunction: "readLegacyTransitionConsumption", phase: "bootstrap-operator-policy-reconciliation", identity: "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER", action: "iam:ListUserTags", resources: [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn], capabilityId: "bootstrap-operator-policy-authorization-read-transition-consumption" });
   calls.push(
     { sourceFile: "scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs", action: "s3:PutObject" },
     { sourceFile: "scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs", action: "s3:DeleteObject" },
@@ -667,10 +707,18 @@ export function buildStageBDeploymentCapabilityGraph() {
     context: { account: STAGE_B.account, region: STAGE_B.region, targetPolicyArn: PROVIDER_READONLY_RECONCILIATION.policyArn }, classification: mutation ? "GITHUB_OIDC_IAM_POLICY_RECONCILIATION" : "GITHUB_OIDC_IAM_POLICY_READ", probe: "structural", probeIds: [], policy: assertInitialActivationReconcilerAuthority({ action, resources }), required: true, mutation,
   }));
   const providerReadonlyPreparation = providerReadonlyReconciliation.filter(({ action }) => ["sts:GetCallerIdentity", "iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions", "iam:ListEntitiesForPolicy"].includes(action)).map((capability) => ({ ...capability, id: `${capability.id}-prepare`, sourceFunction: `${capability.id}-prepare`, identity: "ROOT_OPERATOR", classification: "ADMIN_DIRECT_READ", policy: { sourceFile: capability.sourceFile, sid: `${capability.id}-prepare`, livePolicyArn: null, expectedVersion: "protected-main-source", expectedPolicySha256: null } }));
-  const bootstrapOperatorPolicyReconciliation = BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION_CAPABILITIES.map(([id, action, resources, mutation]) => ({
-    id, phase: "bootstrap-operator-policy-reconciliation", identity: "ROOT_OPERATOR", executor: "aws-cli", sourceFile: "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs", sourceFunction: id, action, resources,
-    context: { account: STAGE_B.account, targetUserArn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn }, classification: mutation ? "ROOT_GOVERNED_IAM_POLICY_RECONCILIATION" : "ADMIN_DIRECT_READ", probe: "structural", probeIds: [], policy: { sourceFile: "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs", sid: id, livePolicyArn: null, expectedVersion: "protected-main-source", expectedPolicySha256: null }, required: true, mutation,
-  }));
+  const bootstrapOperatorPolicyReconciliation = BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION_CAPABILITIES.map(([id, action, resources, mutation]) => {
+    const authorization = id.startsWith("bootstrap-operator-policy-authorization-");
+    const reservationSid = ({
+      "bootstrap-operator-policy-reconciliation-read-reservation": "AllowRootOperatorReadInitialActivationPolicyReconciliationReservations",
+      "bootstrap-operator-policy-reconciliation-create-reservation": "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationCreate",
+      "bootstrap-operator-policy-reconciliation-replace-expired-reservation": "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationReplace",
+    })[id];
+    return {
+      id, phase: "bootstrap-operator-policy-reconciliation", identity: authorization ? "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER" : "ROOT_OPERATOR", executor: authorization ? "github-actions" : "aws-cli", sourceFile: "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs", sourceFunction: id.includes("read-initial-overlap") ? "verifyLiveInitialDualSlotBindingWithRunner" : id.includes("transition-consumption") ? "readLegacyTransitionConsumption" : id, action, resources,
+      context: { account: STAGE_B.account, targetUserArn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn, ...(authorization ? { executionMode: "PROTECTED_AUTHORIZATION", principalArn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.authorizationRoleArn } : {}) }, classification: authorization ? "GITHUB_OIDC_AUTHORIZATION_READ" : mutation ? "ROOT_GOVERNED_IAM_POLICY_RECONCILIATION" : "ADMIN_DIRECT_READ", probe: "structural", probeIds: [], policy: authorization ? assertBootstrapOperatorPolicyAuthorizerAuthority({ action, resources }) : reservationSid ? { sourceFile: "infra/aws/terraform/production-green-stage-a/main.tf", sid: reservationSid, livePolicyArn: null, expectedVersion: "protected-main-source", expectedPolicySha256: null } : { sourceFile: "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs", sid: id, livePolicyArn: null, expectedVersion: "protected-main-source", expectedPolicySha256: null }, required: true, mutation,
+    };
+  });
   const mixedRecoveryIamPreflight = MIXED_DUAL_SLOT_RECOVERY_IAM_PREFLIGHT_CAPABILITIES.map(([id, action, resources]) => ({
     id, phase: "mixed-dual-slot-recovery-iam-preflight", identity: "ROOT_OPERATOR", executor: "aws-cli", sourceFile: "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs", sourceFunction: id, action, resources,
     context: { account: STAGE_B.account, region: STAGE_B.region, targetRoleArn: MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN }, classification: "ADMIN_DIRECT_READ", probe: action === "iam:SimulatePrincipalPolicy" ? "administrator-simulation" : "administrator-live-read", probeIds: [],
@@ -723,7 +771,7 @@ export function buildStageBDeploymentCapabilityGraph() {
   return {
     schemaVersion: 1, deployment: "production-green-stage-b", account: "368992683803", region: "eu-west-2",
     phases: PHASES.map(([id, sourceFile], index) => ({ order: index + 1, id, sourceFile })),
-    identities: ["GITHUB_IMAGE_PUBLISHER", "ADMINISTRATOR", "ROOT_OPERATOR", "BOOTSTRAP_OPERATOR", "RELEASE_DEPLOYER", "INDEPENDENT_CHECKER", "ECS_EXEC_VERIFIER_OPERATOR", "SERVICE_RUNTIME", "INITIAL_ACTIVATION_RECONCILER", "MIXED_RECOVERY_EXECUTOR"], capabilities,
+    identities: ["GITHUB_IMAGE_PUBLISHER", "ADMINISTRATOR", "ROOT_OPERATOR", "BOOTSTRAP_OPERATOR", "RELEASE_DEPLOYER", "INDEPENDENT_CHECKER", "ECS_EXEC_VERIFIER_OPERATOR", "SERVICE_RUNTIME", "INITIAL_ACTIVATION_RECONCILER", "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER", "MIXED_RECOVERY_EXECUTOR"], capabilities,
     directProbes: [...RELEASE_READ_PROBES.map(({ id, action }) => ({ id, action })),
       { id: "audit-service-details", action: "ecs:DescribeServices" },
       { id: "audit-task-details", action: "ecs:DescribeTasks" },

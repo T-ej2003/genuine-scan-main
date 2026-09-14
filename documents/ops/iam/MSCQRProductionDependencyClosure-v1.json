@@ -2223,6 +2223,25 @@
     },
     {
       "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "action": "sts:GetCallerIdentity",
+      "capabilityId": "bootstrap-operator-policy-authorization-identify",
+      "identity": "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER",
+      "resources": [
+        "*"
+      ],
+      "reachableMode": [
+        "BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
       "action": "iam:GetUser",
       "capabilityId": "bootstrap-operator-policy-reconciliation-read-user",
       "identity": "ROOT_OPERATOR",
@@ -2375,11 +2394,231 @@
     },
     {
       "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "action": "iam:ListUserTags",
+      "capabilityId": "bootstrap-operator-policy-reconciliation-read-transition-consumption",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      ],
+      "sourceFunction": "readLegacyTransitionConsumption",
+      "reachableMode": [
+        "BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "action": "iam:ListUserTags",
+      "capabilityId": "bootstrap-operator-policy-authorization-read-transition-consumption",
+      "identity": "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER",
+      "resources": [
+        "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      ],
+      "sourceFunction": "readLegacyTransitionConsumption",
+      "reachableMode": [
+        "BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "action": "secretsmanager:DescribeSecret",
+      "capabilityId": "bootstrap-operator-policy-reconciliation-read-initial-overlap-secrets",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-pending-1CnWMp",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-private-pending-LZhc54",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-pending-uB3P1Q",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2"
+      ],
+      "sourceFunction": "verifyLiveInitialDualSlotBindingWithRunner",
+      "reachableMode": [
+        "BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "action": "secretsmanager:GetSecretValue",
+      "capabilityId": "bootstrap-operator-policy-reconciliation-read-initial-overlap-values",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-pending-1CnWMp",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-private-pending-LZhc54",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-pending-uB3P1Q",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2"
+      ],
+      "sourceFunction": "verifyLiveInitialDualSlotBindingWithRunner",
+      "reachableMode": [
+        "BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "action": "secretsmanager:DescribeSecret",
+      "capabilityId": "bootstrap-operator-policy-authorization-read-initial-overlap-secrets",
+      "identity": "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-pending-1CnWMp",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-private-pending-LZhc54",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-pending-uB3P1Q",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2"
+      ],
+      "sourceFunction": "verifyLiveInitialDualSlotBindingWithRunner",
+      "reachableMode": [
+        "BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "action": "secretsmanager:GetSecretValue",
+      "capabilityId": "bootstrap-operator-policy-authorization-read-initial-overlap-values",
+      "identity": "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-pending-1CnWMp",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-private-pending-LZhc54",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-pending-uB3P1Q",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2"
+      ],
+      "sourceFunction": "verifyLiveInitialDualSlotBindingWithRunner",
+      "reachableMode": [
+        "BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
       "action": "iam:PutUserPolicy",
       "capabilityId": "bootstrap-operator-policy-reconciliation-write-inline",
       "identity": "ROOT_OPERATOR",
       "resources": [
         "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      ],
+      "reachableMode": [
+        "BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "action": "iam:TagUser",
+      "capabilityId": "bootstrap-operator-policy-reconciliation-consume-transition",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"
+      ],
+      "reachableMode": [
+        "BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "action": "s3:GetObject",
+      "capabilityId": "bootstrap-operator-policy-reconciliation-read-reservation",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-initial-activation-lifecycle-policy-reconciliation/reservations/bootstrap-operator-legacy-mfa-transition.json"
+      ],
+      "reachableMode": [
+        "BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "action": "s3:PutObject",
+      "capabilityId": "bootstrap-operator-policy-reconciliation-create-reservation",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-initial-activation-lifecycle-policy-reconciliation/reservations/bootstrap-operator-legacy-mfa-transition.json"
+      ],
+      "reachableMode": [
+        "BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "action": "s3:PutObject",
+      "capabilityId": "bootstrap-operator-policy-reconciliation-replace-expired-reservation",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-initial-activation-lifecycle-policy-reconciliation/reservations/bootstrap-operator-legacy-mfa-transition.json"
       ],
       "reachableMode": [
         "BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"

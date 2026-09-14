@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
+import { currentInstallationPlan, currentInstallationState } from "./fixtures/production-initial-activation-reconciler-plan-current.mjs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -15,14 +16,14 @@ import { resolveReconcilerStateReconciliationAuthorization } from "../aws/reconc
 const sourceSha = "a".repeat(40); const now = new Date("2026-09-09T12:00:00.000Z");
 const hash = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const output = Object.freeze({ before: "a".repeat(64), after: CONTRACT.outputReconciliation.after });
-const state = (serial, attachmentCount, policyArns, permissionsPolicySha256 = output.before) => Buffer.from(JSON.stringify({ version: 4, terraform_version: "1.15.8", serial, lineage: "state-lineage", outputs: { permissions_policy_sha256: { value: permissionsPolicySha256, type: "string" } }, resources: [
+const state = (serial, attachmentCount, policyArns, permissionsPolicySha256 = output.before) => Buffer.from(currentInstallationState(JSON.stringify({ version: 4, terraform_version: "1.15.8", serial, lineage: "state-lineage", outputs: { permissions_policy_sha256: { value: permissionsPolicySha256, type: "string" } }, resources: [
   { mode: "managed", type: "aws_iam_policy", name: "reconciler", instances: [{ attributes: { attachment_count: attachmentCount, name: "MSCQRProductionInitialActivationPolicyReconciler" } }] },
   { mode: "managed", type: "aws_iam_role", name: "reconciler", instances: [{ attributes: { managed_policy_arns: policyArns, name: "mscqr-production-initial-activation-policy-reconciler" } }] },
   { mode: "managed", type: "aws_iam_role_policy_attachment", name: "reconciler", instances: [{ attributes: { role: "mscqr-production-initial-activation-policy-reconciler", policy_arn: CONTRACT.policyArn } }] },
   { mode: "managed", type: "aws_iam_policy", name: "mixed_recovery", instances: [{ attributes: { name: "MSCQRProductionMixedDualSlotRecoveryExecutor" } }] },
   { mode: "managed", type: "aws_iam_role", name: "mixed_recovery", instances: [{ attributes: { name: "mscqr-production-mixed-dual-slot-recovery-executor" } }] },
   { mode: "managed", type: "aws_iam_role_policy_attachment", name: "mixed_recovery", instances: [{ attributes: { role: "mscqr-production-mixed-dual-slot-recovery-executor", policy_arn: "arn:aws:iam::368992683803:policy/MSCQRProductionMixedDualSlotRecoveryExecutor" } }] },
-] }));
+] })));
 const before = state(1, 0, []); const after = state(2, 1, [CONTRACT.policyArn], output.after);
 const refreshPlan = () => ({ format_version: "1.2", terraform_version: "1.15.8", errored: false, complete: true, applyable: true, resource_changes: [], resource_drift: [
   { address: "aws_iam_policy.reconciler", change: { actions: ["update"], before: { attachment_count: 0, name: "MSCQRProductionInitialActivationPolicyReconciler" }, after: { attachment_count: 1, name: "MSCQRProductionInitialActivationPolicyReconciler" }, before_unknown: {}, after_unknown: {}, before_sensitive: {}, after_sensitive: {} } },
@@ -32,8 +33,8 @@ const topology = { roles: ["mscqr-production-initial-activation-policy-reconcile
 const object = { versionId: "exact-version", etag: "exact-etag" };
 const approval = ({ observedAt = now, workflowPath = CONTRACT.authorizationWorkflowPath, runId = "100" } = {}) => createProductionEnvironmentApprovalEvidence({ environmentConfig: { id: 8, name: "production-initial-activation-reconciler-bootstrap", can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{ type: "User", reviewer: { id: 3, login: "reviewer" } }] }] }, repository: "T-ej2003/genuine-scan-main", environment: "production-initial-activation-reconciler-bootstrap", sourceSha, workflowRef: `T-ej2003/genuine-scan-main/${workflowPath}@refs/heads/main`, eventName: "workflow_dispatch", workflowRunId: runId, workflowRunAttempt: "1", executionActor: "operator", observedAt: observedAt.toISOString(), actualApproval: { state: "approved", environmentId: 8, environmentName: "production-initial-activation-reconciler-bootstrap", userId: 3, userLogin: "reviewer" } });
 const prepared = () => createReconcilerStateReconciliationPreparation({ sourceSha, stateBytes: before, stateObject: object, attachmentTopology: topology, planBytes: Buffer.from("saved-refresh-plan"), planJson: refreshPlan(), preparedAt: now.toISOString() });
-const updatePlan = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-initial-activation-reconciler-plan-update.json", "utf8"));
-const normalPlan = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-initial-activation-reconciler-plan-complete.json", "utf8"));
+const updatePlan = currentInstallationPlan(JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-initial-activation-reconciler-plan-update.json", "utf8")));
+const normalPlan = currentInstallationPlan(JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-initial-activation-reconciler-plan-complete.json", "utf8")));
 normalPlan.resource_changes[normalPlan.resource_changes.findIndex(({ address }) => address === "aws_iam_policy.reconciler")] = updatePlan.resource_changes.find(({ address }) => address === "aws_iam_policy.reconciler");
 normalPlan.output_changes = updatePlan.output_changes;
 

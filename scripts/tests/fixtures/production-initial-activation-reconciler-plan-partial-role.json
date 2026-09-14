@@ -6,7 +6,7 @@
       "permissions_policy_sha256": {
         "sensitive": false,
         "type": "string",
-        "value": "5c81002f1277694603118ed8765e53991831d6c3215dbf00b5fd6c12ea5db825"
+        "value": "d12b7275caf3603b6ee7b7dcebd12d45e808133e01955c6420e37a87417f9b75"
       },
       "policy_arn": {
         "sensitive": false
@@ -154,7 +154,7 @@
           "description": "Exact readback and CreatePolicyVersion capability for InitialActivationLifecycle reconciliation.",
           "name": "MSCQRProductionInitialActivationPolicyReconciler",
           "path": "/",
-          "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Sid\":\"ReadExactInitialActivationLifecyclePolicy\",\"Effect\":\"Allow\",\"Action\":[\"iam:GetPolicy\",\"iam:GetPolicyVersion\",\"iam:ListPolicyVersions\",\"iam:ListEntitiesForPolicy\"],\"Resource\":\"arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle\"},{\"Sid\":\"ReadExactProviderReadOnlyPolicy\",\"Effect\":\"Allow\",\"Action\":[\"iam:GetPolicy\",\"iam:GetPolicyVersion\",\"iam:ListPolicyVersions\",\"iam:ListEntitiesForPolicy\"],\"Resource\":\"arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly\"},{\"Sid\":\"ReadExactInitialActivationReleaseRole\",\"Effect\":\"Allow\",\"Action\":[\"iam:GetRole\",\"iam:ListAttachedRolePolicies\"],\"Resource\":\"arn:aws:iam::368992683803:role/mscqr-production-release-deployer\"},{\"Sid\":\"IdentifyCurrentSession\",\"Effect\":\"Allow\",\"Action\":\"sts:GetCallerIdentity\",\"Resource\":\"*\"},{\"Sid\":\"CreateExactInitialActivationLifecyclePolicyVersion\",\"Effect\":\"Allow\",\"Action\":\"iam:CreatePolicyVersion\",\"Resource\":\"arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle\"},{\"Sid\":\"CreateExactProviderReadOnlyPolicyVersion\",\"Effect\":\"Allow\",\"Action\":\"iam:CreatePolicyVersion\",\"Resource\":\"arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly\"},{\"Sid\":\"ListExactProviderReadOnlyReconciliationJournal\",\"Effect\":\"Allow\",\"Action\":\"s3:ListBucket\",\"Resource\":\"arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an\",\"Condition\":{\"StringLike\":{\"s3:prefix\":\"production-provider-readonly-policy-reconciliation/*\"}}},{\"Sid\":\"ReadExactProviderReadOnlyReconciliationJournal\",\"Effect\":\"Allow\",\"Action\":\"s3:GetObject\",\"Resource\":\"arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-provider-readonly-policy-reconciliation/*\"},{\"Sid\":\"PersistExactProviderReadOnlyReconciliationJournal\",\"Effect\":\"Allow\",\"Action\":\"s3:PutObject\",\"Resource\":\"arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-provider-readonly-policy-reconciliation/*\",\"Condition\":{\"StringEquals\":{\"s3:if-none-match\":\"*\",\"s3:x-amz-server-side-encryption\":\"AES256\"}}}]}",
+          "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Sid\":\"ReadExactInitialActivationLifecyclePolicy\",\"Effect\":\"Allow\",\"Action\":[\"iam:GetPolicy\",\"iam:GetPolicyVersion\",\"iam:ListPolicyVersions\",\"iam:ListEntitiesForPolicy\"],\"Resource\":\"arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle\"},{\"Sid\":\"ReadExactProviderReadOnlyPolicy\",\"Effect\":\"Allow\",\"Action\":[\"iam:GetPolicy\",\"iam:GetPolicyVersion\",\"iam:ListPolicyVersions\",\"iam:ListEntitiesForPolicy\"],\"Resource\":\"arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly\"},{\"Sid\":\"ReadExactInitialActivationReleaseRole\",\"Effect\":\"Allow\",\"Action\":[\"iam:GetRole\",\"iam:ListAttachedRolePolicies\"],\"Resource\":\"arn:aws:iam::368992683803:role/mscqr-production-release-deployer\"},{\"Sid\":\"IdentifyCurrentSession\",\"Effect\":\"Allow\",\"Action\":\"sts:GetCallerIdentity\",\"Resource\":\"*\"},{\"Sid\":\"ReadExactInitialDualSlotBindingForBootstrapOperatorAuthorization\",\"Effect\":\"Allow\",\"Action\":[\"secretsmanager:DescribeSecret\",\"secretsmanager:GetSecretValue\"],\"Resource\":[\"arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-pending-1CnWMp\",\"arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-private-pending-LZhc54\",\"arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-pending-uB3P1Q\",\"arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj\",\"arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX\",\"arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE\",\"arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2\"]},{\"Sid\":\"ReadBootstrapOperatorTransitionConsumption\",\"Effect\":\"Allow\",\"Action\":\"iam:ListUserTags\",\"Resource\":\"arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator\"},{\"Sid\":\"CreateExactInitialActivationLifecyclePolicyVersion\",\"Effect\":\"Allow\",\"Action\":\"iam:CreatePolicyVersion\",\"Resource\":\"arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle\"},{\"Sid\":\"CreateExactProviderReadOnlyPolicyVersion\",\"Effect\":\"Allow\",\"Action\":\"iam:CreatePolicyVersion\",\"Resource\":\"arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly\"},{\"Sid\":\"ListExactProviderReadOnlyReconciliationJournal\",\"Effect\":\"Allow\",\"Action\":\"s3:ListBucket\",\"Resource\":\"arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an\",\"Condition\":{\"StringLike\":{\"s3:prefix\":\"production-provider-readonly-policy-reconciliation/*\"}}},{\"Sid\":\"ReadExactProviderReadOnlyReconciliationJournal\",\"Effect\":\"Allow\",\"Action\":\"s3:GetObject\",\"Resource\":\"arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-provider-readonly-policy-reconciliation/*\"},{\"Sid\":\"PersistExactProviderReadOnlyReconciliationJournal\",\"Effect\":\"Allow\",\"Action\":\"s3:PutObject\",\"Resource\":\"arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-provider-readonly-policy-reconciliation/*\",\"Condition\":{\"StringEquals\":{\"s3:if-none-match\":\"*\",\"s3:x-amz-server-side-encryption\":\"AES256\"}}}]}",
           "tags": {
             "Component": "initial-activation-policy-reconciliation",
             "Environment": "production",
@@ -434,7 +434,7 @@
         "create"
       ],
       "before": null,
-      "after": "5c81002f1277694603118ed8765e53991831d6c3215dbf00b5fd6c12ea5db825",
+      "after": "d12b7275caf3603b6ee7b7dcebd12d45e808133e01955c6420e37a87417f9b75",
       "after_unknown": false,
       "before_sensitive": false,
       "after_sensitive": false
@@ -496,7 +496,7 @@
       "outputs": {
         "permissions_policy_sha256": {
           "sensitive": false,
-          "value": "5c81002f1277694603118ed8765e53991831d6c3215dbf00b5fd6c12ea5db825",
+          "value": "d12b7275caf3603b6ee7b7dcebd12d45e808133e01955c6420e37a87417f9b75",
           "type": "string"
         },
         "policy_name": {
