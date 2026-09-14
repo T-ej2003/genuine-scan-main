@@ -12,8 +12,7 @@ import {
 } from "../aws/production-green-stage-b-identity-capabilities.mjs";
 import { STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_STATE_IDENTITY_VERSION, stageAStateSemanticSha256 } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
 import { assertBootstrapOperatorAssumeRoleAuthority, assertBootstrapOperatorVerifierAuthority, assertBootstrapOperatorPolicyAuthorizerAuthority, assertInitialActivationReconcilerAuthority, assertStageBAwsCallCoverage, assertStageBDeploymentCapabilityGraph, buildStageBDeploymentCapabilityGraph, classifyStageARecoveryAwsCliAction, discoverAwsCliActions } from "../aws/generate-production-green-stage-b-capability-graph.mjs";
-import { BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION } from "../aws/production-bootstrap-operator-policy-reconciliation.mjs";
-import { MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES } from "../aws/production-mixed-dual-slot-recovery-contract.mjs";
+import { BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION, LEGACY_BOOTSTRAP_TRANSITION_SECRET_READ_RESOURCES } from "../aws/production-bootstrap-operator-policy-reconciliation.mjs";
 import { assertStageBAdministratorEvidenceIdentity, buildPermissionReportBinding, canonicalizeJson, PERMISSION_REPORT_BINDING_DOMAIN, PERMISSION_REPORT_BINDING_SCHEMA_VERSION, PERMISSION_REPORT_HASH_DOMAIN, PERMISSION_REPORT_SIGNING_ALGORITHM, PERMISSION_REPORT_SIGNING_KEY_ARN, PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION, runPermissionPreflight, signedPermissionReportBindingSha256, sourcePolicyEvidence } from "../aws/validate-production-green-stage-b-permissions.mjs";
 import { runProductionPreflightCli } from "../aws/run-production-green-stage-b-preflight.mjs";
 import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "../aws/production-cutover-production-adapters.mjs";
@@ -202,7 +201,20 @@ test("generated capability graph is exhaustive, deterministic, and identity-exac
   assert.equal(bootstrapAuthorization.length, 4);
   assert.equal(bootstrapAuthorization.every(({ identity, mutation, policy }) => identity === "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER" && mutation === false && policy.sourceFile === BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.authorizationPolicyPath), true);
   for (const capability of bootstrapAuthorization) assert.deepEqual(capability.policy, assertBootstrapOperatorPolicyAuthorizerAuthority(capability));
-  assert.deepEqual(bootstrapAuthorization.filter(({ action }) => action.startsWith("secretsmanager:")).map(({ resources }) => resources), [MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES]);
+  assert.deepEqual(bootstrapAuthorization.filter(({ action }) => action.startsWith("secretsmanager:")).map(({ resources }) => resources), [LEGACY_BOOTSTRAP_TRANSITION_SECRET_READ_RESOURCES, LEGACY_BOOTSTRAP_TRANSITION_SECRET_READ_RESOURCES]);
+  const authorizerPolicy = JSON.parse(fs.readFileSync(BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.authorizationPolicyPath, "utf8"));
+  const secretCapability = bootstrapAuthorization.find(({ action }) => action === "secretsmanager:DescribeSecret");
+  for (const mutate of [
+    (statement) => { statement.Resource.push("arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/unreviewed"); },
+    (statement) => { statement.Resource[7] = "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/substituted-jwt"; },
+    (statement) => { statement.Resource[8] = "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/substituted-private"; },
+    (statement) => { statement.Resource[9] = "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/substituted-public"; },
+    (statement) => { statement.Resource = "*"; },
+    (statement) => { statement.Action.push("secretsmanager:PutSecretValue"); },
+  ]) {
+    const altered = structuredClone(authorizerPolicy); mutate(altered.Statement.find(({ Sid }) => Sid === "ReadExactInitialDualSlotBindingForBootstrapOperatorAuthorization"));
+    assert.throws(() => assertBootstrapOperatorPolicyAuthorizerAuthority(secretCapability, altered), /does not authorize/);
+  }
   assert(first.capabilities.every(({ identity }) => first.identities.includes(identity)));
   assert(first.capabilities.every(({ id }, index) => first.capabilities.findIndex((item) => item.id === id) === index));
   assert(first.capabilities.some(({ identity, action }) => identity === "ECS_EXEC_VERIFIER_OPERATOR" && action === "ecs:ExecuteCommand"));
@@ -229,7 +241,7 @@ test("generated capability graph is exhaustive, deterministic, and identity-exac
   ]);
   for (const [id, action] of [["bootstrap-operator-policy-reconciliation-read-initial-overlap-secrets", "secretsmanager:DescribeSecret"], ["bootstrap-operator-policy-reconciliation-read-initial-overlap-values", "secretsmanager:GetSecretValue"]]) {
     const capability = bootstrapOperatorReconciliation.find(({ id: candidate }) => candidate === id);
-    assert.deepEqual(capability?.resources, MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES);
+    assert.deepEqual(capability?.resources, LEGACY_BOOTSTRAP_TRANSITION_SECRET_READ_RESOURCES);
     assert.equal(capability?.action, action);
     assert.equal(capability?.sourceFunction, "verifyLiveInitialDualSlotBindingWithRunner");
   }

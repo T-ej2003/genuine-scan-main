@@ -18,7 +18,7 @@ import { NORMAL_ACTIVATION } from "./production-normal-backend-activation-policy
 import { INITIAL_ACTIVATION_POLICY_RECONCILIATION } from "./production-initial-activation-policy-reconciliation.mjs";
 import { INITIAL_ACTIVATION_RECONCILER } from "./verify-production-initial-activation-policy-reconciler.mjs";
 import { PROVIDER_READONLY_RECONCILIATION } from "./production-provider-readonly-policy-reconciliation.mjs";
-import { BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION } from "./production-bootstrap-operator-policy-reconciliation.mjs";
+import { BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION, LEGACY_BOOTSTRAP_TRANSITION_SECRET_READ_RESOURCES } from "./production-bootstrap-operator-policy-reconciliation.mjs";
 import { MIXED_DUAL_SLOT_RECOVERY_EXECUTION_POLICY_ARN, MIXED_DUAL_SLOT_RECOVERY_EXECUTION_POLICY_PATH, MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN, MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES } from "./production-mixed-dual-slot-recovery-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -190,10 +190,10 @@ const BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION_CAPABILITIES = Object.freeze([
   ["bootstrap-operator-policy-reconciliation-read-inline", "iam:GetUserPolicy", [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn], false],
   ["bootstrap-operator-policy-reconciliation-read-transition-consumption", "iam:ListUserTags", [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn], false],
   ["bootstrap-operator-policy-authorization-read-transition-consumption", "iam:ListUserTags", [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn], false],
-  ["bootstrap-operator-policy-reconciliation-read-initial-overlap-secrets", "secretsmanager:DescribeSecret", MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, false],
-  ["bootstrap-operator-policy-reconciliation-read-initial-overlap-values", "secretsmanager:GetSecretValue", MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, false],
-  ["bootstrap-operator-policy-authorization-read-initial-overlap-secrets", "secretsmanager:DescribeSecret", MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, false],
-  ["bootstrap-operator-policy-authorization-read-initial-overlap-values", "secretsmanager:GetSecretValue", MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, false],
+  ["bootstrap-operator-policy-reconciliation-read-initial-overlap-secrets", "secretsmanager:DescribeSecret", LEGACY_BOOTSTRAP_TRANSITION_SECRET_READ_RESOURCES, false],
+  ["bootstrap-operator-policy-reconciliation-read-initial-overlap-values", "secretsmanager:GetSecretValue", LEGACY_BOOTSTRAP_TRANSITION_SECRET_READ_RESOURCES, false],
+  ["bootstrap-operator-policy-authorization-read-initial-overlap-secrets", "secretsmanager:DescribeSecret", LEGACY_BOOTSTRAP_TRANSITION_SECRET_READ_RESOURCES, false],
+  ["bootstrap-operator-policy-authorization-read-initial-overlap-values", "secretsmanager:GetSecretValue", LEGACY_BOOTSTRAP_TRANSITION_SECRET_READ_RESOURCES, false],
   ["bootstrap-operator-policy-reconciliation-write-inline", "iam:PutUserPolicy", [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn], true],
   ["bootstrap-operator-policy-reconciliation-consume-transition", "iam:TagUser", [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn], true],
   ["bootstrap-operator-policy-reconciliation-read-reservation", "s3:GetObject", [`arn:aws:s3:::${PRODUCTION_ACTIVATION_LIFECYCLE.bucket}/${BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.legacyTransitionReservationKey}`], false],
@@ -432,9 +432,10 @@ export function assertInitialActivationReconcilerAuthority({ action, resources }
 
 export function assertBootstrapOperatorPolicyAuthorizerAuthority({ action, resources } = {}, policy = readJson(BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER_POLICY_SOURCE)) {
   if (!action || !Array.isArray(resources) || !policy || !Array.isArray(policy.Statement)) throw new Error("Bootstrap operator policy authorizer permissions policy is malformed.");
+  const expectedActions = action.startsWith("secretsmanager:") ? ["secretsmanager:DescribeSecret", "secretsmanager:GetSecretValue"] : [action];
   const statement = policy.Statement.find((candidate) => candidate.Effect === "Allow"
-    && asArray(candidate.Action).includes(action)
-    && resources.every((resource) => asArray(candidate.Resource).some((allowed) => allowed === resource)));
+    && canonicalizeJson([...asArray(candidate.Action)].sort()) === canonicalizeJson([...expectedActions].sort())
+    && canonicalizeJson([...asArray(candidate.Resource)].sort()) === canonicalizeJson([...resources].sort()));
   if (!statement) throw new Error(`Bootstrap operator policy authorizer permissions policy does not authorize ${action} on the exact resource set.`);
   return {
     sourceFile: BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER_POLICY_SOURCE,
@@ -580,8 +581,8 @@ export function discoverAwsCliActions() {
   const legacyVerifierLiveRead = bootstrapOperatorReconciliationSource.indexOf("const origin = verifyLiveBinding({ run, bindings, proveDescendant });", legacyVerifierStart);
   if (legacyVerifierStart < 0 || legacyVerifierStaticCheck < legacyVerifierStart || legacyVerifierLiveRead < legacyVerifierStaticCheck || bootstrapOperatorReconciliationSource.split("verifyLegacyBootstrapMfaTransitionBinding({").length - 1 < 4) throw new Error("Bootstrap operator reconciliation no longer validates exact resources before independently authenticating the initial-overlap binding in preparation, authorization, and execution.");
   for (const [action, capabilityId] of [["secretsmanager:DescribeSecret", "bootstrap-operator-policy-reconciliation-read-initial-overlap-secrets"], ["secretsmanager:GetSecretValue", "bootstrap-operator-policy-reconciliation-read-initial-overlap-values"]]) {
-    calls.push({ sourceFile: "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs", sourceFunction: "verifyLiveInitialDualSlotBindingWithRunner", phase: "bootstrap-operator-policy-reconciliation", identity: "ROOT_OPERATOR", action, resources: [...MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES], capabilityId });
-    calls.push({ sourceFile: "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs", sourceFunction: "verifyLiveInitialDualSlotBindingWithRunner", phase: "bootstrap-operator-policy-reconciliation", identity: "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER", action, resources: [...MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES], capabilityId: capabilityId.replace("reconciliation-read", "authorization-read") });
+    calls.push({ sourceFile: "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs", sourceFunction: "verifyLiveInitialDualSlotBindingWithRunner", phase: "bootstrap-operator-policy-reconciliation", identity: "ROOT_OPERATOR", action, resources: [...LEGACY_BOOTSTRAP_TRANSITION_SECRET_READ_RESOURCES], capabilityId });
+    calls.push({ sourceFile: "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs", sourceFunction: "verifyLiveInitialDualSlotBindingWithRunner", phase: "bootstrap-operator-policy-reconciliation", identity: "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER", action, resources: [...LEGACY_BOOTSTRAP_TRANSITION_SECRET_READ_RESOURCES], capabilityId: capabilityId.replace("reconciliation-read", "authorization-read") });
   }
   calls.push({ sourceFile: "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs", sourceFunction: "readLegacyTransitionConsumption", phase: "bootstrap-operator-policy-reconciliation", identity: "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER", action: "iam:ListUserTags", resources: [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn], capabilityId: "bootstrap-operator-policy-authorization-read-transition-consumption" });
   calls.push(

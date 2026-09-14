@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import test from "node:test";
 import { PRODUCTION_ENVIRONMENT_APPROVAL, createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
-import { MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES } from "../aws/production-mixed-dual-slot-recovery-contract.mjs";
+import { MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, MIXED_DUAL_SLOT_RECOVERY_LIVE_PREDECESSOR } from "../aws/production-mixed-dual-slot-recovery-contract.mjs";
 import {
   BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION,
   LEGACY_BOOTSTRAP_MFA_TRANSITION,
@@ -12,6 +12,7 @@ import {
   LEGACY_BOOTSTRAP_TRANSITION_ROTATION_BINDINGS_FILE_SHA256,
   LEGACY_BOOTSTRAP_TRANSITION_SUPERSESSION_GENERATED_AT,
   LEGACY_BOOTSTRAP_TRANSITION_ROTATION_ID,
+  LEGACY_BOOTSTRAP_TRANSITION_SECRET_READ_RESOURCES,
   LEGACY_BOOTSTRAP_TRANSITION_SOURCE_SHA,
   assertLegacyBootstrapMfaTransitionBinding,
   authenticateBootstrapOperatorAuthorizationLiveState,
@@ -398,6 +399,8 @@ test("legacy binding resources are rejected before any AWS read and are reverifi
   assert.throws(() => verifyLegacyBootstrapMfaTransitionBinding({ bindings: substituted, transition, currentSourceSha: sourceSha, proveDescendant: () => true, verifyLiveBinding: () => { reads += 1; } }), /reviewed initial-overlap resources|authenticated transition/);
   assert.equal(reads, 0);
   assert.throws(() => verifyLegacyBootstrapMfaTransitionBinding({ bindings: legacyBindings(), transition, currentSourceSha: sourceSha, proveDescendant: () => false, verifyLiveBinding: () => legacyBindingOrigin() }), /not descended/);
+  assert.throws(() => verifyLegacyBootstrapMfaTransitionBinding({ bindings: legacyBindings(), transition, currentSourceSha: sourceSha, proveDescendant: () => true, run: () => { throw new Error("AccessDenied"); } }), /AWS read failed/);
+  assert.throws(() => verifyLegacyBootstrapMfaTransitionBinding({ bindings: legacyBindings(), transition, currentSourceSha: sourceSha, proveDescendant: () => true, run: () => "not-json" }), /not valid JSON/);
 
   const authorization = legacyAuthorized();
   const fixture = runner(desired.predecessorDocument, { accessKeys: legacyAccessKeys });
@@ -474,12 +477,26 @@ test("authorization workflow uses exact read-only OIDC authority and produces a 
   assert.match(workflow, /inline-session-policy:[\s\S]*secretsmanager:DescribeSecret[\s\S]*secretsmanager:GetSecretValue/);
   assert.match(workflow, /iam:ListUserTags[\s\S]*arn:aws:iam::368992683803:user\/mscqr-production-bootstrap-operator/);
   assert.doesNotMatch(workflow, /secretsmanager:(?:Put|Create|Delete|Update)|iam:(?:Put|Tag|Untag|Create|Update|Delete)|ecs:(?:Update|Register|Deregister)|pull-requests: write|packages: write/);
-  for (const arn of MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES) assert.match(workflow, new RegExp(arn.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  const inlinePolicy = JSON.parse(workflow.match(/inline-session-policy: >-\n\s+(\{.*\})/)?.[1] || "null");
+  const inlineRead = inlinePolicy.Statement.find(({ Action }) => Array.isArray(Action) && Action.includes("secretsmanager:DescribeSecret"));
+  assert.deepEqual(LEGACY_BOOTSTRAP_TRANSITION_SECRET_READ_RESOURCES, [...MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, ...MIXED_DUAL_SLOT_RECOVERY_LIVE_PREDECESSOR.legacySecretArns]);
+  assert.equal(new Set(LEGACY_BOOTSTRAP_TRANSITION_SECRET_READ_RESOURCES).size, 10);
+  const bindings = legacyBindings();
+  const verifierResources = [...Object.values(legacyBindingOrigin(bindings).resources), ...Object.values(bindings.supersessionPredecessor.current).map(({ secretArn }) => secretArn)];
+  assert.deepEqual(new Set(verifierResources), new Set(LEGACY_BOOTSTRAP_TRANSITION_SECRET_READ_RESOURCES));
+  assert.deepEqual(inlineRead, { Effect: "Allow", Action: ["secretsmanager:DescribeSecret", "secretsmanager:GetSecretValue"], Resource: [...LEGACY_BOOTSTRAP_TRANSITION_SECRET_READ_RESOURCES] });
   const reconcilerPolicy = JSON.parse(fs.readFileSync("infra/aws/terraform/production-initial-activation-policy-reconciler/permissions-policy.json", "utf8"));
   assert.equal(reconcilerPolicy.Statement.some(({ Action }) => JSON.stringify(Action).includes("secretsmanager:") || JSON.stringify(Action).includes("iam:ListUserTags")), false);
   const authorizerPolicy = JSON.parse(fs.readFileSync(BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.authorizationPolicyPath, "utf8"));
   const read = authorizerPolicy.Statement.find(({ Sid }) => Sid === "ReadExactInitialDualSlotBindingForBootstrapOperatorAuthorization");
-  assert.deepEqual(read, { Sid: "ReadExactInitialDualSlotBindingForBootstrapOperatorAuthorization", Effect: "Allow", Action: ["secretsmanager:DescribeSecret", "secretsmanager:GetSecretValue"], Resource: [...MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES] });
+  assert.deepEqual(read, { Sid: "ReadExactInitialDualSlotBindingForBootstrapOperatorAuthorization", Effect: "Allow", Action: ["secretsmanager:DescribeSecret", "secretsmanager:GetSecretValue"], Resource: [...LEGACY_BOOTSTRAP_TRANSITION_SECRET_READ_RESOURCES] });
+  for (const policy of [inlinePolicy, authorizerPolicy]) {
+    const statements = policy.Statement.filter(({ Action }) => JSON.stringify(Action).includes("secretsmanager:"));
+    assert.equal(statements.length, 1);
+    assert.deepEqual(statements[0].Action, ["secretsmanager:DescribeSecret", "secretsmanager:GetSecretValue"]);
+    assert.deepEqual(statements[0].Resource, [...LEGACY_BOOTSTRAP_TRANSITION_SECRET_READ_RESOURCES]);
+    assert.equal(statements[0].Resource.some((resource) => resource.includes("*")), false);
+  }
   assert.deepEqual(authorizerPolicy.Statement.find(({ Sid }) => Sid === "ReadBootstrapOperatorTransitionConsumption"), { Sid: "ReadBootstrapOperatorTransitionConsumption", Effect: "Allow", Action: "iam:ListUserTags", Resource: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn });
   const authorization = authorized();
   assert.equal(authorization.sourceSha, sourceSha);

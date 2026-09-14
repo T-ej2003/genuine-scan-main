@@ -272,9 +272,9 @@ export function assertInitialBindingSchemaClosed(bindings) {
 }
 
 function runnerJson(run, args, label) {
-  let value;
-  try { value = JSON.parse(String(run(args))); } catch { throw new Error(`${label} is not valid JSON.`); }
-  return value;
+  let raw;
+  try { raw = String(run(args)); } catch { throw new Error(`${label} AWS read failed.`); }
+  try { return JSON.parse(raw); } catch { throw new Error(`${label} is not valid JSON.`); }
 }
 
 function assertInitialLivePayload(slot, payload, bindings) {
