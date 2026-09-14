@@ -262,6 +262,7 @@ const FIXED = Object.freeze([
   ["bootstrap-mfa", "bootstrap-mfa-session", "BOOTSTRAP_OPERATOR", "sts:GetSessionToken", "BOOTSTRAP_SESSION", "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_INFRASTRUCTURE_RUNBOOK.md"],
   ["bootstrap-assume-release", "release-role-assumption", "BOOTSTRAP_OPERATOR", "sts:AssumeRole", "BOOTSTRAP_SESSION", "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_INFRASTRUCTURE_RUNBOOK.md"],
   ["bootstrap-assume-verifier", "verifier-role-assumption", "BOOTSTRAP_OPERATOR", "sts:AssumeRole", "BOOTSTRAP_SESSION", "scripts/aws/establish-production-ecs-exec-verifier-session.mjs"],
+  ["bootstrap-assume-publisher-bootstrap", "image-workflow-dispatch", "BOOTSTRAP_OPERATOR", "sts:AssumeRole", "BOOTSTRAP_SESSION", "infra/aws/terraform/production-green-stage-b-publisher-bootstrap/README.md"],
   ["publisher-oidc", "image-workflow-dispatch", "GITHUB_IMAGE_PUBLISHER", "sts:AssumeRoleWithWebIdentity", "GITHUB_IMAGE_MUTATION", ".github/workflows/production-green-stage-b-image-build.yml"],
   ["release-verify-signature", "release-direct-read-preflight", "RELEASE_DEPLOYER", "kms:Verify", "RELEASE_DIRECT_READ", "scripts/aws/run-production-green-stage-b-preflight.mjs"],
   ["release-identify", "release-direct-read-preflight", "RELEASE_DEPLOYER", "sts:GetCallerIdentity", "RELEASE_DIRECT_READ", "scripts/aws/run-production-green-stage-b-preflight.mjs"],
@@ -356,24 +357,32 @@ function sourcePolicies() {
   return RELEASE_POLICY_SOURCES.map((policy) => ({ ...policy, document: readJson(policy.sourcePath), sourceSha256: sha256(Buffer.from(canonicalizeJson(readJson(policy.sourcePath)))) }));
 }
 
-export function assertBootstrapOperatorVerifierAuthority(policy = readJson(bootstrapOperatorPolicyPath)) {
+const BOOTSTRAP_OPERATOR_ASSUME_ROLE_AUTHORITIES = Object.freeze({
+  "bootstrap-assume-release": Object.freeze({ sid: "AssumeReleaseRoleOnlyWithMfa", resource: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.releaseRoleArn }),
+  "bootstrap-assume-verifier": Object.freeze({ sid: "AssumeEcsExecVerifierRoleOnlyWithMfa", resource: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.verifierRoleArn }),
+  "bootstrap-assume-publisher-bootstrap": Object.freeze({ sid: "AssumeStageBPublisherBootstrapRoleOnlyWithMfa", resource: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.publisherBootstrapRoleArn }),
+});
+
+export function assertBootstrapOperatorAssumeRoleAuthority(capabilityId, policy = readJson(bootstrapOperatorPolicyPath)) {
+  const authority = BOOTSTRAP_OPERATOR_ASSUME_ROLE_AUTHORITIES[capabilityId];
+  if (!authority) throw new Error("Bootstrap operator AssumeRole capability is unknown.");
   const assumeRoleStatements = policy?.Statement?.filter((statement) => statement.Effect === "Allow" && asArray(statement.Action).includes("sts:AssumeRole")) || [];
-  const expected = [
-    ["AssumeReleaseRoleOnlyWithMfa", BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.releaseRoleArn],
-    ["AssumeEcsExecVerifierRoleOnlyWithMfa", BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.verifierRoleArn],
-    ["AssumeStageBPublisherBootstrapRoleOnlyWithMfa", BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.publisherBootstrapRoleArn],
-  ];
-  if (assumeRoleStatements.length !== expected.length || expected.some(([sid, resource]) => {
+  const expected = Object.values(BOOTSTRAP_OPERATOR_ASSUME_ROLE_AUTHORITIES);
+  if (assumeRoleStatements.length !== expected.length || expected.some(({ sid, resource }) => {
     const statement = assumeRoleStatements.find((candidate) => candidate.Sid === sid);
     return !statement || canonicalizeJson(statement) !== canonicalizeJson({ Sid: sid, Effect: "Allow", Action: "sts:AssumeRole", Resource: resource, Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } });
   })) throw new Error("Bootstrap operator AssumeRole policy is not the reviewed exact MFA-gated target set.");
   return {
     sourceFile: bootstrapOperatorPolicyPath,
-    sid: "AssumeEcsExecVerifierRoleOnlyWithMfa",
+    sid: authority.sid,
     livePolicyArn: `inline-user-policy:${BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn}/${BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.inlinePolicyName}`,
     expectedVersion: "governed-inline-policy",
     expectedPolicySha256: sha256(Buffer.from(canonicalizeJson(policy))),
   };
+}
+
+export function assertBootstrapOperatorVerifierAuthority(policy = readJson(bootstrapOperatorPolicyPath)) {
+  return assertBootstrapOperatorAssumeRoleAuthority("bootstrap-assume-verifier", policy);
 }
 
 function authority(entry, forbidden, policies) {
@@ -630,11 +639,11 @@ export function buildStageBDeploymentCapabilityGraph() {
     probe: "structural", policy: { sourceFile: publisherPolicyPath, sid: statement.Sid, livePolicyArn: "github-oidc-role-policy", expectedVersion: "protected-main-source", expectedPolicySha256: sha256(Buffer.from(canonicalizeJson(readJson(publisherPolicyPath)))) }, required: true, mutation: statement.Effect !== "Deny",
   })));
   const fixed = FIXED.map(([id, phase, identity, action, actionClass, sourceFile]) => {
-    const verifier = id === "bootstrap-assume-verifier";
+    const bootstrapAssumeRole = Object.hasOwn(BOOTSTRAP_OPERATOR_ASSUME_ROLE_AUTHORITIES, id);
     return { id, phase, identity, executor: sourceFile.endsWith(".yml") ? "github-actions" : "aws-cli", sourceFile, sourceFunction: id, action,
-      resources: verifier ? [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.verifierRoleArn] : id === "admin-release-oidc-identify" ? ["*"] : id.startsWith("admin-release-oidc-trust-") ? [PRODUCTION_RELEASE_ROLE_ARN] : ["release-verify-signature", "admin-image-evidence-describe-key", "admin-image-evidence-read-key-policy", "admin-image-evidence-read-key-tags", "admin-verify-image-evidence"].includes(id) ? [IMAGE_EVIDENCE_SIGNING_KEY_ARN] : ["reviewed-exact-resource"],
-      context: { account: "368992683803", region: "eu-west-2", ...(verifier ? { mfaRequired: true } : {}) }, classification: actionClass, probe: actionClass === "RELEASE_DIRECT_READ" ? "direct" : actionClass === "ADMIN_SIMULATION" ? "administrator-simulation" : "structural", probeIds: probesByAction.get(action) || [],
-      policy: verifier ? assertBootstrapOperatorVerifierAuthority() : { sourceFile: identity === "RELEASE_DEPLOYER" ? manifestPath : sourceFile, sid: "identity-boundary", livePolicyArn: identity === "RELEASE_DEPLOYER" ? "signed-administrator-evidence" : null, expectedVersion: "source-bound", expectedPolicySha256: null }, required: true, mutation: ["ADMIN_SIGN", "ADMIN_IAM_MUTATION", "GITHUB_IMAGE_MUTATION"].includes(actionClass) };
+      resources: bootstrapAssumeRole ? [BOOTSTRAP_OPERATOR_ASSUME_ROLE_AUTHORITIES[id].resource] : id === "admin-release-oidc-identify" ? ["*"] : id.startsWith("admin-release-oidc-trust-") ? [PRODUCTION_RELEASE_ROLE_ARN] : ["release-verify-signature", "admin-image-evidence-describe-key", "admin-image-evidence-read-key-policy", "admin-image-evidence-read-key-tags", "admin-verify-image-evidence"].includes(id) ? [IMAGE_EVIDENCE_SIGNING_KEY_ARN] : ["reviewed-exact-resource"],
+      context: { account: "368992683803", region: "eu-west-2", ...(bootstrapAssumeRole ? { mfaRequired: true } : {}) }, classification: actionClass, probe: actionClass === "RELEASE_DIRECT_READ" ? "direct" : actionClass === "ADMIN_SIMULATION" ? "administrator-simulation" : "structural", probeIds: probesByAction.get(action) || [],
+      policy: bootstrapAssumeRole ? assertBootstrapOperatorAssumeRoleAuthority(id) : { sourceFile: identity === "RELEASE_DEPLOYER" ? manifestPath : sourceFile, sid: "identity-boundary", livePolicyArn: identity === "RELEASE_DEPLOYER" ? "signed-administrator-evidence" : null, expectedVersion: "source-bound", expectedPolicySha256: null }, required: true, mutation: ["ADMIN_SIGN", "ADMIN_IAM_MUTATION", "GITHUB_IMAGE_MUTATION"].includes(actionClass) };
   });
   const normalActivation = NORMAL_ACTIVATION_CAPABILITIES.map(([id, phase, identity, action, resources, mutation]) => {
     const policy = identity === "ADMINISTRATOR" || action === "ecs:UpdateService"

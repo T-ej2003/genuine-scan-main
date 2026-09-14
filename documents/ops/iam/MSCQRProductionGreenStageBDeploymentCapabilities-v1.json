@@ -877,6 +877,35 @@
       "mutation": true
     },
     {
+      "id": "bootstrap-assume-publisher-bootstrap",
+      "phase": "image-workflow-dispatch",
+      "identity": "BOOTSTRAP_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "infra/aws/terraform/production-green-stage-b-publisher-bootstrap/README.md",
+      "sourceFunction": "bootstrap-assume-publisher-bootstrap",
+      "action": "sts:AssumeRole",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-stage-b-publisher-bootstrap"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "mfaRequired": true
+      },
+      "classification": "BOOTSTRAP_SESSION",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionBootstrapOperator-v1.json",
+        "sid": "AssumeStageBPublisherBootstrapRoleOnlyWithMfa",
+        "livePolicyArn": "inline-user-policy:arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator/MSCQRProductionBootstrapOperator",
+        "expectedVersion": "governed-inline-policy",
+        "expectedPolicySha256": "6194a46a5ef8c4e14c753804bd44e8a1977e14f201e08b33ce226e97e609244c"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
       "id": "bootstrap-assume-release",
       "phase": "release-role-assumption",
       "identity": "BOOTSTRAP_OPERATOR",
@@ -885,21 +914,22 @@
       "sourceFunction": "bootstrap-assume-release",
       "action": "sts:AssumeRole",
       "resources": [
-        "reviewed-exact-resource"
+        "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
       ],
       "context": {
         "account": "368992683803",
-        "region": "eu-west-2"
+        "region": "eu-west-2",
+        "mfaRequired": true
       },
       "classification": "BOOTSTRAP_SESSION",
       "probe": "structural",
       "probeIds": [],
       "policy": {
-        "sourceFile": "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_INFRASTRUCTURE_RUNBOOK.md",
-        "sid": "identity-boundary",
-        "livePolicyArn": null,
-        "expectedVersion": "source-bound",
-        "expectedPolicySha256": null
+        "sourceFile": "documents/ops/iam/MSCQRProductionBootstrapOperator-v1.json",
+        "sid": "AssumeReleaseRoleOnlyWithMfa",
+        "livePolicyArn": "inline-user-policy:arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator/MSCQRProductionBootstrapOperator",
+        "expectedVersion": "governed-inline-policy",
+        "expectedPolicySha256": "6194a46a5ef8c4e14c753804bd44e8a1977e14f201e08b33ce226e97e609244c"
       },
       "required": true,
       "mutation": false

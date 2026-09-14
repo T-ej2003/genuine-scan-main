@@ -11,7 +11,7 @@ import {
   runReleaseReadPreflight,
 } from "../aws/production-green-stage-b-identity-capabilities.mjs";
 import { STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_STATE_IDENTITY_VERSION, stageAStateSemanticSha256 } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
-import { assertBootstrapOperatorVerifierAuthority, assertInitialActivationReconcilerAuthority, assertStageBAwsCallCoverage, assertStageBDeploymentCapabilityGraph, buildStageBDeploymentCapabilityGraph, classifyStageARecoveryAwsCliAction, discoverAwsCliActions } from "../aws/generate-production-green-stage-b-capability-graph.mjs";
+import { assertBootstrapOperatorAssumeRoleAuthority, assertBootstrapOperatorVerifierAuthority, assertInitialActivationReconcilerAuthority, assertStageBAwsCallCoverage, assertStageBDeploymentCapabilityGraph, buildStageBDeploymentCapabilityGraph, classifyStageARecoveryAwsCliAction, discoverAwsCliActions } from "../aws/generate-production-green-stage-b-capability-graph.mjs";
 import { BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION } from "../aws/production-bootstrap-operator-policy-reconciliation.mjs";
 import { assertStageBAdministratorEvidenceIdentity, buildPermissionReportBinding, canonicalizeJson, PERMISSION_REPORT_BINDING_DOMAIN, PERMISSION_REPORT_BINDING_SCHEMA_VERSION, PERMISSION_REPORT_HASH_DOMAIN, PERMISSION_REPORT_SIGNING_ALGORITHM, PERMISSION_REPORT_SIGNING_KEY_ARN, PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION, runPermissionPreflight, signedPermissionReportBindingSha256, sourcePolicyEvidence } from "../aws/validate-production-green-stage-b-permissions.mjs";
 import { runProductionPreflightCli } from "../aws/run-production-green-stage-b-preflight.mjs";
@@ -157,15 +157,22 @@ test("identity matrix assigns IAM simulation only to administrator", () => {
   assert.equal(matrix.phases.length, 51);
 });
 
-test("bootstrap verifier capability is bound to its exact MFA-gated inline-policy statement", () => {
+test("bootstrap AssumeRole capabilities are bound to their exact MFA-gated inline-policy statements", () => {
   const graph = buildStageBDeploymentCapabilityGraph();
-  const capability = graph.capabilities.find(({ id }) => id === "bootstrap-assume-verifier");
-  assert.deepEqual(capability && [capability.action, capability.resources, capability.policy.sourceFile, capability.policy.sid, capability.context.mfaRequired], ["sts:AssumeRole", [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.verifierRoleArn], BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.sourcePath, "AssumeEcsExecVerifierRoleOnlyWithMfa", true]);
-  assert.doesNotMatch(JSON.stringify(capability), /reviewed-exact-resource/);
+  const expected = [
+    ["bootstrap-assume-release", BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.releaseRoleArn, "AssumeReleaseRoleOnlyWithMfa"],
+    ["bootstrap-assume-verifier", BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.verifierRoleArn, "AssumeEcsExecVerifierRoleOnlyWithMfa"],
+    ["bootstrap-assume-publisher-bootstrap", BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.publisherBootstrapRoleArn, "AssumeStageBPublisherBootstrapRoleOnlyWithMfa"],
+  ];
+  for (const [id, resource, sid] of expected) {
+    const capability = graph.capabilities.find((value) => value.id === id);
+    assert.deepEqual(capability && [capability.action, capability.resources, capability.policy.sourceFile, capability.policy.sid, capability.context.mfaRequired], ["sts:AssumeRole", [resource], BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.sourcePath, sid, true]);
+    assert.doesNotMatch(JSON.stringify(capability), /reviewed-exact-resource/);
+  }
   const policy = JSON.parse(fs.readFileSync(BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.sourcePath, "utf8"));
   assert.doesNotThrow(() => assertBootstrapOperatorVerifierAuthority(policy));
-  for (const resources of [["reviewed-exact-resource"], [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.releaseRoleArn]]) {
-    const changed = structuredClone(graph); changed.capabilities.find(({ id }) => id === "bootstrap-assume-verifier").resources = resources;
+  for (const [id] of expected) for (const resources of [["reviewed-exact-resource"], ["arn:aws:iam::368992683803:role/unrelated"]]) {
+    const changed = structuredClone(graph); changed.capabilities.find((value) => value.id === id).resources = resources;
     assert.throws(() => assertStageBDeploymentCapabilityGraph(changed), /stale or incomplete/);
   }
   for (const mutate of [
@@ -177,6 +184,7 @@ test("bootstrap verifier capability is bound to its exact MFA-gated inline-polic
     const changed = structuredClone(policy); mutate(changed);
     assert.throws(() => assertBootstrapOperatorVerifierAuthority(changed), /exact MFA-gated target set/);
   }
+  for (const [id] of expected) assert.doesNotThrow(() => assertBootstrapOperatorAssumeRoleAuthority(id, policy));
 });
 
 test("Stage B release readiness requires the completed Stage A contract", () => {
@@ -188,7 +196,7 @@ test("Stage B release readiness requires the completed Stage A contract", () => 
 test("generated capability graph is exhaustive, deterministic, and identity-exact", () => {
   const first = buildStageBDeploymentCapabilityGraph(); const second = buildStageBDeploymentCapabilityGraph();
   assert.deepEqual(first, second);
-  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 51, capabilities: 426, uniqueActions: 146, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
+  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 51, capabilities: 427, uniqueActions: 146, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
   assert(first.capabilities.every(({ identity }) => first.identities.includes(identity)));
   assert(first.capabilities.every(({ id }, index) => first.capabilities.findIndex((item) => item.id === id) === index));
   assert(first.capabilities.some(({ identity, action }) => identity === "ECS_EXEC_VERIFIER_OPERATOR" && action === "ecs:ExecuteCommand"));
