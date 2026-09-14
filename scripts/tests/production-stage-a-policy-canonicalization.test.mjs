@@ -40,7 +40,7 @@ test("Stage-A policy canonicalization preserves the historical desired hash and 
   assert.equal(canonicalizeStageAProductionArtifactsPolicy(live).Statement.length, desired.Statement.length);
 });
 
-test("ProviderReadOnly-protected retirement removes exactly the seven obsolete reservation statements", () => {
+test("ProviderReadOnly-protected retirement removes exactly the eight obsolete reservation statements", () => {
   const predecessor = buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection();
   const target = buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation();
   const transition = resolveStageAProductionArtifactsBucketPolicyTransition({
@@ -55,10 +55,11 @@ test("ProviderReadOnly-protected retirement removes exactly the seven obsolete r
     "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationCreate",
     "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationReplace",
     "DenyUnconditionalInitialActivationPolicyReconciliationReservationWrites",
+    "DenyNonTargetInitialActivationPolicyReconciliationReservationReplacements",
     "DenyOtherPrincipalsInitialActivationPolicyReconciliationReservationWrites",
     "DenyInitialActivationPolicyReconciliationReservationDeletion",
   ]);
-  assert.equal(removed.length, 7);
+  assert.equal(removed.length, 8);
   assert.deepEqual(transition.predecessor, predecessor);
   assert.deepEqual(transition.desired, target);
   for (const statement of target.Statement) assert.deepEqual(statement, predecessor.Statement.find(({ Sid }) => Sid === statement.Sid));
@@ -110,6 +111,7 @@ test("Terraform's current Stage-A desired policy retains reservations, so State 
     "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationCreate",
     "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationReplace",
     "DenyUnconditionalInitialActivationPolicyReconciliationReservationWrites",
+    "DenyNonTargetInitialActivationPolicyReconciliationReservationReplacements",
     "DenyOtherPrincipalsInitialActivationPolicyReconciliationReservationWrites",
     "DenyInitialActivationPolicyReconciliationReservationDeletion",
   ]) assert.match(terraform, new RegExp(`Sid = \"${sid}\"`));
@@ -172,6 +174,7 @@ test("State A requires the root-read and release-write bootstrap split without w
     `${bucket}/production-stage-a-production-artifacts-reconciliation/a.json`,
     `${bucket}/production-provider-readonly-policy-reconciliation/a.json`,
   ]) assert.equal(policyMatches(replacementDeny, { principal: root, action: "s3:PutObject", resource, context: { "s3:if-match": "etag" } }), false);
+  assert.equal(explicitlyDenied(A, { principal: "arn:aws:iam::368992683803:role/mscqr-production-stage-b-read-only-canary", action: "s3:PutObject", resource: `${bucket}/incident-attachment.bin`, context: { "s3:if-match": "etag" } }), false);
   assert.equal(allowsExactList({ policy: A, principal: release, bucket, prefix: `${prefix}${"a".repeat(64)}/attempt.json` }), false);
   assert.equal(explicitlyAllowed(APrime, { ...conditionalWrite, principal: release }), true);
   assert.equal(explicitlyDenied(APrime, { ...conditionalWrite, principal: release }), false);
