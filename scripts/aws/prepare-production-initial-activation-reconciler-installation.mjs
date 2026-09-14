@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createProductionAwsCommandRunner, createProductionAwsCredentialEnvironment, createProductionGithubCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { readMixedDualSlotRecoveryGithubEnvironmentGuard } from "./production-mixed-dual-slot-recovery-contract.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, ensureStageBPrivateFile, readStageBPrivateFileBytes, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
-import { INSTALLATION, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationStateResources, classifyInstallationStatePullError, createInstallationPreparation, installationPermissionsPredecessor, stateIdentity } from "./production-initial-activation-reconciler-installation-contract.mjs";
+import { INSTALLATION, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationStateResources, bootstrapOperatorPolicyAuthorizerPermissionsPredecessor, classifyInstallationStatePullError, createInstallationPreparation, installationPermissionsPredecessor, stateIdentity } from "./production-initial-activation-reconciler-installation-contract.mjs";
 import { BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER, INITIAL_ACTIVATION_RECONCILER, MIXED_RECOVERY_EXECUTOR, assertBootstrapOperatorPolicyAuthorizerPolicyMetadata, assertBootstrapOperatorPolicyAuthorizerRoleMetadata, assertInitialActivationReconcilerPolicyMetadata, assertInitialActivationReconcilerRoleMetadata, assertMixedRecoveryExecutorPolicyMetadata, assertMixedRecoveryExecutorRoleMetadata, readPolicyEntities, verifyInitialActivationPolicyReconciler } from "./verify-production-initial-activation-policy-reconciler.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -99,13 +99,19 @@ export function discoverInstallationPredecessor({ run, expectedCallerArn } = {})
   if (mixedPolicy) try { const version = runJson(run, ["iam", "get-policy-version", "--policy-arn", MIXED_RECOVERY_EXECUTOR.policyArn, "--version-id", mixedPolicy.DefaultVersionId]).PolicyVersion; assertMixedRecoveryExecutorPolicyMetadata(mixedPolicy, version?.Document); mixedPolicyExact = true; } catch { mixedPolicyExact = false; }
   if (!mixedRoleExact || !mixedPolicyExact) return predecessor("UNEXPECTED", existingAddresses);
   let authorizerRoleExact = !authorizerRole; let authorizerRoleNeedsTrustUpdate = false;
-  let authorizerPolicyExact = !authorizerPolicy;
+  let authorizerPolicyExact = !authorizerPolicy; let authorizerPolicyNeedsUpdate = false;
   if (authorizerRole) try { assertBootstrapOperatorPolicyAuthorizerRoleMetadata(authorizerRole); authorizerRoleExact = true; } catch {
     try { assertBootstrapOperatorPolicyAuthorizerRoleMetadata(authorizerRole, { expectedTrust: JSON.parse(fs.readFileSync(path.join(root, INITIAL_ACTIVATION_RECONCILER.trustPath), "utf8")) }); authorizerRoleExact = true; authorizerRoleNeedsTrustUpdate = true; } catch { authorizerRoleExact = false; }
   }
   if (authorizerPolicy) try {
     const version = runJson(run, ["iam", "get-policy-version", "--policy-arn", BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.policyArn, "--version-id", authorizerPolicy.DefaultVersionId]).PolicyVersion;
-    assertBootstrapOperatorPolicyAuthorizerPolicyMetadata(authorizerPolicy, version?.Document);
+    try { assertBootstrapOperatorPolicyAuthorizerPolicyMetadata(authorizerPolicy, version?.Document); }
+    catch {
+      assertBootstrapOperatorPolicyAuthorizerPolicyMetadata(authorizerPolicy, version?.Document, { expectedDocument: bootstrapOperatorPolicyAuthorizerPermissionsPredecessor() });
+      const versions = runJson(run, ["iam", "list-policy-versions", "--policy-arn", BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.policyArn]).Versions;
+      if (!Array.isArray(versions) || versions.length < 1 || versions.length > 4 || versions.filter(({ IsDefaultVersion }) => IsDefaultVersion).length !== 1 || !versions.some(({ VersionId, IsDefaultVersion }) => VersionId === authorizerPolicy.DefaultVersionId && IsDefaultVersion)) throw new Error("Bootstrap-operator authorizer policy version inventory cannot accept the exact update.");
+      authorizerPolicyNeedsUpdate = true;
+    }
     authorizerPolicyExact = true;
   } catch { authorizerPolicyExact = false; }
   if (!authorizerRoleExact || !authorizerPolicyExact) return predecessor("UNEXPECTED", existingAddresses);
@@ -122,6 +128,7 @@ export function discoverInstallationPredecessor({ run, expectedCallerArn } = {})
   const authorizerComplete = Boolean(authorizerRole && authorizerPolicy) && Array.isArray(authorizerAttached) && authorizerAttached.length === 1 && authorizerAttached[0]?.PolicyArn === BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.policyArn && Array.isArray(authorizerInline) && authorizerInline.length === 0 && authorizerEntities.roles.length === 1 && authorizerEntities.roles[0]?.RoleName === BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.roleName && authorizerEntities.users.length === 0 && authorizerEntities.groups.length === 0;
   const authorizerUnattached = Array.isArray(authorizerAttached) && authorizerAttached.length === 0 && Array.isArray(authorizerInline) && authorizerInline.length === 0 && authorizerEntities.roles.length === 0 && authorizerEntities.users.length === 0 && authorizerEntities.groups.length === 0;
   if (!authorizerComplete && !authorizerUnattached || authorizerRoleNeedsTrustUpdate && (!role || !policy || policyNeedsUpdate || !mixedComplete || mixedRoleNeedsTrustUpdate || !authorizerComplete)) return predecessor("UNEXPECTED", existingAddresses);
+  if ([policyNeedsUpdate, mixedRoleNeedsTrustUpdate, authorizerRoleNeedsTrustUpdate, authorizerPolicyNeedsUpdate].filter(Boolean).length > 1) return predecessor("UNEXPECTED", existingAddresses);
   const authorizerAddresses = [authorizerRole && "aws_iam_role.bootstrap_operator_policy_authorizer", authorizerPolicy && "aws_iam_policy.bootstrap_operator_policy_authorizer", authorizerComplete && "aws_iam_role_policy_attachment.bootstrap_operator_policy_authorizer"].filter(Boolean);
   if (!role || !policy) {
     if (role) {
@@ -153,8 +160,8 @@ export function discoverInstallationPredecessor({ run, expectedCallerArn } = {})
   if (reconcilerUnattached) return predecessor("EXACT_PARTIAL", [...existingAddresses, ...mixedAddresses, ...authorizerAddresses].filter((value, index, values) => values.indexOf(value) === index));
   if (!mixedRole && !mixedPolicy) return predecessor("EXACT_EXPANSION", [...reconcilerAddresses, ...authorizerAddresses].sort());
   if (mixedComplete) {
-    if (mixedRoleNeedsTrustUpdate && authorizerRoleNeedsTrustUpdate) return predecessor("UNEXPECTED", existingAddresses);
     if (authorizerRoleNeedsTrustUpdate) return predecessor("EXACT_AUTHORIZER_TRUST_UPDATE", [...INSTALLATION.expectedAddresses]);
+    if (authorizerPolicyNeedsUpdate) return predecessor("EXACT_AUTHORIZER_POLICY_UPDATE", [...INSTALLATION.expectedAddresses]);
     if (mixedRoleNeedsTrustUpdate) return predecessor("EXACT_TRUST_UPDATE", [...INSTALLATION.expectedAddresses]);
     if (!authorizerComplete) return predecessor("EXACT_EXPANSION", [...reconcilerAddresses, ...mixedAddresses, ...authorizerAddresses].sort());
     verifyInitialActivationPolicyReconciler({ run, ...(expectedCallerArn ? { expectedCallerArn } : {}) }); return predecessor("EXACT_COMPLETE", INSTALLATION.expectedAddresses);

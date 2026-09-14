@@ -136,9 +136,9 @@ export function assertBootstrapOperatorPolicyAuthorizerRoleMetadata(role, { expe
   return role;
 }
 
-export function assertBootstrapOperatorPolicyAuthorizerPolicyMetadata(policy, document) {
+export function assertBootstrapOperatorPolicyAuthorizerPolicyMetadata(policy, document, { expectedDocument } = {}) {
   if (policy?.Arn !== BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.policyArn || policy?.PolicyName !== BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.policyName || policy?.Path !== "/" || policy?.Description !== BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.policyDescription || !/^v[1-9][0-9]*$/.test(policy?.DefaultVersionId || "") || policy?.PermissionsBoundaryUsageCount !== 0) throw new Error("Bootstrap-operator policy authorizer managed-policy metadata is not exact.");
-  exactJson(decodeAwsDocument(document, "bootstrap-operator authorizer permissions policy"), readJson(BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.permissionsPath), "bootstrap-operator authorizer permissions policy");
+  exactJson(decodeAwsDocument(document, "bootstrap-operator authorizer permissions policy"), expectedDocument === undefined ? readJson(BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.permissionsPath) : expectedDocument, "bootstrap-operator authorizer permissions policy");
   exactJson(Object.fromEntries((policy.Tags || []).map(({ Key, Value }) => [Key, Value])), BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.tags, "bootstrap-operator authorizer policy tags");
   return policy;
 }
