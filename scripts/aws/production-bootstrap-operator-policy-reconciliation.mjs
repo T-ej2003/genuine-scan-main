@@ -64,6 +64,7 @@ export const LEGACY_BOOTSTRAP_TRANSITION_ROTATION_ID = "rotation-20260913011819-
 export const LEGACY_BOOTSTRAP_TRANSITION_SOURCE_SHA = "054d1adce8a477df362719f5b7b70c98483cedc7";
 export const LEGACY_BOOTSTRAP_TRANSITION_ROTATION_BINDINGS_FILE_SHA256 = "49013c088ca4e9b9093e566f88d90589acff6e085823f39d45977d0342e88bc7";
 export const LEGACY_BOOTSTRAP_TRANSITION_SUPERSESSION_GENERATED_AT = "2026-09-13T01:38:21.459Z";
+export const LEGACY_BOOTSTRAP_TRANSITION_LIVE_PREDECESSOR_POLICY_SHA256 = "bd4764ea853548d4cff8814113fb846ac203dfdeb1c6de5e6825e02e9f4c4f00";
 export const LEGACY_BOOTSTRAP_MFA_TRANSITION = Object.freeze({
   kind: LEGACY_BOOTSTRAP_TRANSITION_KIND,
   releaseLifecycle: "authenticated-initial-overlap",
@@ -71,6 +72,7 @@ export const LEGACY_BOOTSTRAP_MFA_TRANSITION = Object.freeze({
   historicalTransactionSourceSha: LEGACY_BOOTSTRAP_TRANSITION_SOURCE_SHA,
   rotationBindingsFileSha256: LEGACY_BOOTSTRAP_TRANSITION_ROTATION_BINDINGS_FILE_SHA256,
   supersessionGeneratedAt: LEGACY_BOOTSTRAP_TRANSITION_SUPERSESSION_GENERATED_AT,
+  livePredecessorPolicySha256: LEGACY_BOOTSTRAP_TRANSITION_LIVE_PREDECESSOR_POLICY_SHA256,
   accessKeyCount: 2,
   accessKeyStatus: "Active",
   accessKeyCreatedAt: Object.freeze(["2026-07-29T19:28:57.000Z", "2026-07-29T19:31:58.000Z"]),
@@ -212,7 +214,10 @@ export function readBootstrapOperatorDesiredPolicy({ repositoryRoot = root } = {
   ];
   if (document.Version !== "2012-10-17" || !Array.isArray(document.Statement) || document.Statement.length !== expected.length || expected.some((statement) => canonicalJson(document.Statement.find(({ Sid }) => Sid === statement.Sid)) !== canonicalJson(statement))) throw new Error("Bootstrap operator source policy is not the reviewed exact document.");
   const predecessorDocument = { Version: "2012-10-17", Statement: document.Statement.filter(({ Sid }) => Sid !== "AssumeEcsExecVerifierRoleOnlyWithMfa") };
-  return Object.freeze({ document, predecessorDocument, sourcePolicySha256: sha256(document), predecessorPolicySha256: sha256(predecessorDocument) });
+  const legacyLivePredecessorDocument = { Version: "2012-10-17", Statement: document.Statement.filter(({ Sid }) => !["AssumeEcsExecVerifierRoleOnlyWithMfa", "AssumeStageBPublisherBootstrapRoleOnlyWithMfa"].includes(Sid)) };
+  const legacyLivePredecessorPolicySha256 = sha256(legacyLivePredecessorDocument);
+  if (legacyLivePredecessorPolicySha256 !== LEGACY_BOOTSTRAP_TRANSITION_LIVE_PREDECESSOR_POLICY_SHA256) throw new Error("Bootstrap operator legacy live predecessor is not the authenticated production policy.");
+  return Object.freeze({ document, predecessorDocument, legacyLivePredecessorDocument, sourcePolicySha256: sha256(document), predecessorPolicySha256: sha256(predecessorDocument), legacyLivePredecessorPolicySha256 });
 }
 
 export function authenticateBootstrapOperatorLiveState(value, { desired = readBootstrapOperatorDesiredPolicy(), allowPostState = true, transition } = {}) {
@@ -223,9 +228,10 @@ export function authenticateBootstrapOperatorLiveState(value, { desired = readBo
   const document = normalizeIamPolicyDocument(value.document, "bootstrap operator live policy");
   const documentSha256 = sha256(document);
   const pre = documentSha256 === desired.predecessorPolicySha256;
+  const legacyPre = legacyTransition(transition) && documentSha256 === desired.legacyLivePredecessorPolicySha256;
   const post = allowPostState && documentSha256 === desired.sourcePolicySha256;
-  if (!pre && !post) throw new Error("Bootstrap operator policy contains unexpected drift.");
-  return Object.freeze({ ...value, document, documentSha256, credentialState, status: post ? "EXACT_COMPLETE" : "EXACT_PREDECESSOR" });
+  if (!pre && !legacyPre && !post) throw new Error("Bootstrap operator policy contains unexpected drift.");
+  return Object.freeze({ ...value, document, documentSha256, credentialState, status: post ? "EXACT_COMPLETE" : legacyPre ? "EXACT_LEGACY_LIVE_PREDECESSOR" : "EXACT_PREDECESSOR" });
 }
 
 const authenticatePreparationLiveState = (value, transition) => {
@@ -270,12 +276,17 @@ const readBootstrapOperatorPostWriteState = ({ run, transition, sleep = bootstra
   throw new Error("Bootstrap operator policy readback did not converge to the exact authorized post-state.", { cause: transient });
 };
 
-const writePlan = (state, transition) => [
-  ...(legacyTransition(transition) && ["EXACT_PREDECESSOR", "EXACT_COMPLETE"].includes(state.status) ? [{ action: "s3:PutObject", resource: `${PRODUCTION_ACTIVATION_LIFECYCLE.bucket}/${BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.legacyTransitionReservationKey}`, condition: "IF_NONE_MATCH_OR_EXACT_ETAG" }] : []),
-  ...(legacyTransition(transition) && state.status === "EXACT_PREDECESSOR" ? [{ action: "iam:TagUser", userArn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn, tagKey: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.legacyTransitionConsumptionTagKey, valueBinding: "RESERVED_AUTHORIZATION_SHA256_AND_EXPIRY" }] : []),
-  ...(state.status === "EXACT_PREDECESSOR" ? [{ action: "iam:PutUserPolicy", userArn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn, inlinePolicyName: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.inlinePolicyName, policySha256: readBootstrapOperatorDesiredPolicy().sourcePolicySha256 }] : []),
-  ...(legacyTransition(transition) ? [{ action: "iam:TagUser", userArn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn, tagKey: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.legacyTransitionConsumptionTagKey, valueBinding: "COMPLETED_AUTHORIZATION_SHA256" }] : []),
-];
+const predecessorStatus = (status) => ["EXACT_PREDECESSOR", "EXACT_LEGACY_LIVE_PREDECESSOR"].includes(status);
+const writePlan = (state, transition) => {
+  const desired = readBootstrapOperatorDesiredPolicy();
+  const addedStatements = predecessorStatus(state.status) ? desired.document.Statement.filter(({ Sid }) => !state.document.Statement.some((statement) => statement.Sid === Sid)) : [];
+  return [
+    ...(legacyTransition(transition) && (predecessorStatus(state.status) || state.status === "EXACT_COMPLETE") ? [{ action: "s3:PutObject", resource: `${PRODUCTION_ACTIVATION_LIFECYCLE.bucket}/${BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.legacyTransitionReservationKey}`, condition: "IF_NONE_MATCH_OR_EXACT_ETAG" }] : []),
+    ...(legacyTransition(transition) && predecessorStatus(state.status) ? [{ action: "iam:TagUser", userArn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn, tagKey: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.legacyTransitionConsumptionTagKey, valueBinding: "RESERVED_AUTHORIZATION_SHA256_AND_EXPIRY" }] : []),
+    ...(predecessorStatus(state.status) ? [{ action: "iam:PutUserPolicy", userArn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn, inlinePolicyName: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.inlinePolicyName, policySha256: desired.sourcePolicySha256, addedStatements }] : []),
+    ...(legacyTransition(transition) ? [{ action: "iam:TagUser", userArn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn, tagKey: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.legacyTransitionConsumptionTagKey, valueBinding: "COMPLETED_AUTHORIZATION_SHA256" }] : []),
+  ];
+};
 const preparationBody = ({ sourceSha, state, preparedAt, transition, legacyRotationBindings, legacyRotationBindingOrigin }) => ({
   schemaVersion: 1, kind: "PRODUCTION_BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION_PREPARATION", operation: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.operation,
   sourceSha, userArn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn, inlinePolicyName: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.inlinePolicyName,
@@ -292,7 +303,7 @@ export function createBootstrapOperatorPolicyPreparation({ sourceSha, liveState,
   requiredSha(sourceSha, "Bootstrap operator preparation source SHA");
   if (transition !== undefined) assertLegacyBootstrapMfaTransitionBinding(legacyRotationBindings, transition, legacyRotationBindingOrigin);
   const state = authenticatePreparationLiveState(liveState, transition);
-  if (!["EXACT_PREDECESSOR", "EXACT_COMPLETE"].includes(state.status)) throw new Error("Bootstrap operator preparation requires an exact governed policy state.");
+  if (!predecessorStatus(state.status) && state.status !== "EXACT_COMPLETE") throw new Error("Bootstrap operator preparation requires an exact governed policy state.");
   const body = preparationBody({ sourceSha, state, preparedAt, transition, legacyRotationBindings, legacyRotationBindingOrigin });
   return Object.freeze({ ...body, preparationSha256: sha256(body) });
 }
@@ -300,7 +311,7 @@ export function assertBootstrapOperatorPolicyPreparation(value, { sourceSha, now
   exactKeys(value, PREPARATION_KEYS, "Bootstrap operator preparation");
   const desired = readBootstrapOperatorDesiredPolicy(); const { preparationSha256, ...body } = value;
   const created = new Date(value.createdAt); const expires = new Date(value.expiresAt);
-  const state = value.predecessorClassification === "EXACT_PREDECESSOR" ? { status: "EXACT_PREDECESSOR", documentSha256: desired.predecessorPolicySha256 } : value.predecessorClassification === "EXACT_COMPLETE" ? { status: "EXACT_COMPLETE", documentSha256: desired.sourcePolicySha256 } : null;
+  const state = value.predecessorClassification === "EXACT_PREDECESSOR" ? { status: "EXACT_PREDECESSOR", document: desired.predecessorDocument, documentSha256: desired.predecessorPolicySha256 } : value.predecessorClassification === "EXACT_LEGACY_LIVE_PREDECESSOR" ? { status: "EXACT_LEGACY_LIVE_PREDECESSOR", document: desired.legacyLivePredecessorDocument, documentSha256: desired.legacyLivePredecessorPolicySha256 } : value.predecessorClassification === "EXACT_COMPLETE" ? { status: "EXACT_COMPLETE", document: desired.document, documentSha256: desired.sourcePolicySha256 } : null;
   const transitionValid = value.credentialState === "ZERO_PERMANENT_ACCESS_KEYS" ? value.transition === null && value.legacyRotationBindings === null && value.legacyRotationBindingOrigin === null : value.credentialState === LEGACY_BOOTSTRAP_TRANSITION_KIND && (() => { try { assertLegacyBootstrapMfaTransitionBinding(value.legacyRotationBindings, value.transition, value.legacyRotationBindingOrigin); return true; } catch { return false; } })();
   const expectedState = state && { ...state, credentialState: value.credentialState };
   if (!state || !transitionValid || value.schemaVersion !== 1 || value.kind !== "PRODUCTION_BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION_PREPARATION" || value.operation !== BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.operation || value.sourceSha !== sourceSha || value.userArn !== BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn || value.inlinePolicyName !== BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.inlinePolicyName || value.predecessorPolicySha256 !== state.documentSha256 || value.successorPolicySha256 !== desired.sourcePolicySha256 || value.expectedWritePlanSha256 !== sha256(value.expectedWritePlan) || canonicalJson(value.expectedWritePlan) !== canonicalJson(preparationBody({ sourceSha, state: expectedState, preparedAt: value.createdAt, transition: value.transition, legacyRotationBindings: value.legacyRotationBindings, legacyRotationBindingOrigin: value.legacyRotationBindingOrigin }).expectedWritePlan) || preparationSha256 !== sha256(body) || !Number.isFinite(created.getTime()) || created.toISOString() !== value.createdAt || !Number.isFinite(expires.getTime()) || expires.toISOString() !== value.expiresAt || expires.getTime() - created.getTime() !== BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.maxAgeMs || (!allowExpired && now.getTime() > expires.getTime())) throw new Error("Bootstrap operator preparation is not exact or fresh.");
@@ -357,7 +368,7 @@ export function reconcileBootstrapOperatorPolicy({ run, authorization, sourceSha
     if (marker?.state === "RESERVED" && marker.authorizationSha256 !== authorization.authorizationSha256 && new Date(marker.expiresAt).getTime() >= now.getTime()) throw new Error("Legacy bootstrap MFA transition is reserved by another active authorization.");
   }
   if (before.status === "EXACT_COMPLETE") {
-    const sameTransitionResume = transition && marker?.state === "RESERVED" && marker.authorizationSha256 === authorization.authorizationSha256 && authorization.preparation.predecessorClassification === "EXACT_PREDECESSOR" && before.documentSha256 === authorization.preparation.successorPolicySha256;
+    const sameTransitionResume = transition && marker?.state === "RESERVED" && marker.authorizationSha256 === authorization.authorizationSha256 && predecessorStatus(authorization.preparation.predecessorClassification) && before.documentSha256 === authorization.preparation.successorPolicySha256;
     const freshComplete = authorization.preparation.predecessorClassification === "EXACT_COMPLETE" && before.documentSha256 === authorization.preparation.predecessorPolicySha256;
     const completedReplay = transition && marker?.state === "COMPLETED" && marker.authorizationSha256 === authorization.authorizationSha256 && before.documentSha256 === authorization.preparation.successorPolicySha256;
     if (!sameTransitionResume && !freshComplete && !completedReplay) throw new Error("Bootstrap operator completed state differs from the authorized transaction.");
@@ -371,7 +382,7 @@ export function reconcileBootstrapOperatorPolicy({ run, authorization, sourceSha
     }
     return Object.freeze({ status: "COMPLETE", iamPutUserPolicyCount: 0, ...(transition ? { iamTagUserCount, s3PutObjectCount } : {}), recovered: true });
   }
-  if (authorization.preparation.predecessorClassification !== "EXACT_PREDECESSOR" || before.status !== "EXACT_PREDECESSOR" || before.documentSha256 !== authorization.preparation.predecessorPolicySha256) throw new Error("Bootstrap operator predecessor changed after authorization.");
+  if (!predecessorStatus(authorization.preparation.predecessorClassification) || before.status !== authorization.preparation.predecessorClassification || before.documentSha256 !== authorization.preparation.predecessorPolicySha256) throw new Error("Bootstrap operator predecessor changed after authorization.");
   if (transition) {
     if (marker?.state === "COMPLETED") throw new Error("Legacy bootstrap MFA transition has already been consumed.");
     ownedReservation = acquireLegacyTransitionReservation(run, authorization, now);
