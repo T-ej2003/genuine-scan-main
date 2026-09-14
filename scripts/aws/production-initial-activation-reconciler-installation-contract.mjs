@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { canonicalJson } from "./production-green-stage-b-contract.mjs";
 import { BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER, INITIAL_ACTIVATION_RECONCILER } from "./verify-production-initial-activation-policy-reconciler.mjs";
+import { MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES } from "./production-mixed-dual-slot-recovery-contract.mjs";
 import { PRODUCTION_ENVIRONMENT_APPROVAL, assertProductionEnvironmentApprovalEvidence, assertProductionEnvironmentApprovalIdentity } from "./production-github-environment-approval.mjs";
 
 export const INSTALLATION = Object.freeze({
@@ -81,6 +82,10 @@ export const installationPermissionsPredecessor = () => {
   const desired = sourceJson(`${INSTALLATION.terraformRoot}/permissions-policy.json`);
   const readOnlyAuthorizer = sourceJson(`${INSTALLATION.terraformRoot}/bootstrap-operator-policy-authorizer-permissions-policy.json`);
   return { ...desired, Statement: [...desired.Statement, ...readOnlyAuthorizer.Statement.filter(({ Sid }) => Sid !== "IdentifyCurrentSession")] };
+};
+export const bootstrapOperatorPolicyAuthorizerPermissionsPredecessor = () => {
+  const desired = sourceJson(`${INSTALLATION.terraformRoot}/bootstrap-operator-policy-authorizer-permissions-policy.json`);
+  return { ...desired, Statement: desired.Statement.map((statement) => statement.Sid === "ReadExactInitialDualSlotBindingForBootstrapOperatorAuthorization" ? { ...statement, Resource: [...MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES] } : statement) };
 };
 const EXPECTED_PROVIDER_CONFIGURATION = Object.freeze({
   aws: {
@@ -222,7 +227,7 @@ export function assertInstallationPlan(plan) {
   for (const entry of changes) {
     const action = JSON.stringify(entry.change?.actions);
     const update = action === JSON.stringify(["update"]);
-    if (entry.mode !== "managed" || ![JSON.stringify(["create"]), JSON.stringify(["no-op"]), JSON.stringify(["update"])].includes(action) || update && !["aws_iam_policy.reconciler", "aws_iam_role.mixed_recovery", "aws_iam_role.bootstrap_operator_policy_authorizer"].includes(entry.address)) throw new Error("Installation plan contains an unreviewed resource action.");
+    if (entry.mode !== "managed" || ![JSON.stringify(["create"]), JSON.stringify(["no-op"]), JSON.stringify(["update"])].includes(action) || update && !["aws_iam_policy.reconciler", "aws_iam_role.mixed_recovery", "aws_iam_role.bootstrap_operator_policy_authorizer", "aws_iam_policy.bootstrap_operator_policy_authorizer"].includes(entry.address)) throw new Error("Installation plan contains an unreviewed resource action.");
     const expectedType = entry.address.startsWith("aws_iam_role_policy_attachment.") ? "aws_iam_role_policy_attachment" : entry.address.startsWith("aws_iam_role.") ? "aws_iam_role" : "aws_iam_policy";
     const expectedName = entry.address.endsWith(".mixed_recovery") ? "mixed_recovery" : entry.address.endsWith(".bootstrap_operator_policy_authorizer") ? "bootstrap_operator_policy_authorizer" : "reconciler";
     if (entry.type !== expectedType || entry.name !== expectedName || entry.provider_name !== "registry.terraform.io/hashicorp/aws") throw new Error("Installation plan resource identity is not exact.");
@@ -252,6 +257,10 @@ export function assertInstallationPlan(plan) {
       }
     } else if (entry.address === "aws_iam_policy.bootstrap_operator_policy_authorizer") {
       if (after.name !== AUTHORIZER_POLICY_NAME || after.path !== "/" || after.description !== AUTHORIZER_POLICY_DESCRIPTION || after.delay_after_policy_creation_in_ms !== null || canonicalJson(after.tags) !== canonicalJson(AUTHORIZER_TAGS) || canonicalJson(after.tags_all) !== canonicalJson(AUTHORIZER_TAGS) || canonicalJson(policyValue(after.policy, "Authorizer permissions policy")) !== canonicalJson(sourceJson(`${INSTALLATION.terraformRoot}/bootstrap-operator-policy-authorizer-permissions-policy.json`)) || !create && after.arn !== INSTALLATION.bootstrapOperatorPolicyAuthorizerPolicyArn) throw new Error("Authorizer policy contract is not exact.");
+      if (update) {
+        const before = entry.change.before;
+        if (!before || before.arn !== INSTALLATION.bootstrapOperatorPolicyAuthorizerPolicyArn || canonicalJson(policyValue(before.policy, "Authorizer predecessor permissions policy")) !== canonicalJson(bootstrapOperatorPolicyAuthorizerPermissionsPredecessor()) || canonicalJson({ ...before, policy: after.policy }) !== canonicalJson(after)) throw new Error("Authorizer policy update predecessor is not exact.");
+      }
     } else if (entry.address === "aws_iam_role_policy_attachment.reconciler") {
       const policyArnKnown = !policyCreated && after.policy_arn === INSTALLATION.policyArn && entry.change.after_unknown?.policy_arn === undefined;
       const policyArnComputed = policyCreated && !Object.hasOwn(after, "policy_arn") && entry.change.after_unknown?.policy_arn === true;
@@ -348,7 +357,7 @@ export function createInstallationPreparation({ sourceSha, state, livePredecesso
   if (!state || typeof state.stateExists !== "boolean") throw new Error("Installation predecessor state identity is required.");
   if (livePredecessor === "EXACT_PARTIAL" && !state.stateExists) throw new Error("Partial installation requires an authenticated Terraform state predecessor.");
   if (state.stateExists ? (Object.keys(state).sort().join(",") !== "lineage,serial,stateExists,stateSha256" || typeof state.lineage !== "string" || !Number.isSafeInteger(state.serial) || !SHA256.test(state.stateSha256 || "")) : Object.keys(state).length !== 1) throw new Error("Installation predecessor state identity is malformed.");
-  if (!["ABSENT", "EXACT_PARTIAL", "EXACT_UPDATE", "EXACT_TRUST_UPDATE", "EXACT_AUTHORIZER_TRUST_UPDATE", "EXACT_EXPANSION", "EXACT_COMPLETE"].includes(livePredecessor)) throw new Error("Installation live predecessor classification is invalid.");
+  if (!["ABSENT", "EXACT_PARTIAL", "EXACT_UPDATE", "EXACT_TRUST_UPDATE", "EXACT_AUTHORIZER_TRUST_UPDATE", "EXACT_AUTHORIZER_POLICY_UPDATE", "EXACT_EXPANSION", "EXACT_COMPLETE"].includes(livePredecessor)) throw new Error("Installation live predecessor classification is invalid.");
   if (livePredecessor === "UNEXPECTED") throw new Error("Unexpected installation predecessor must fail closed.");
   if (!Array.isArray(livePredecessorAddresses) || new Set(livePredecessorAddresses).size !== livePredecessorAddresses.length || livePredecessorAddresses.some((address) => !INSTALLATION.expectedAddresses.includes(address)) || JSON.stringify(livePredecessorAddresses) !== JSON.stringify([...livePredecessorAddresses].sort())) throw new Error("Installation live predecessor resource set is invalid.");
   const semantics = assertInstallationPlan(planJson);
@@ -358,9 +367,10 @@ export function createInstallationPreparation({ sourceSha, state, livePredecesso
     || livePredecessor === "EXACT_UPDATE" && (semantics.createCount !== 0 || semantics.updateCount !== 1 || semantics.changedAddresses[0] !== "aws_iam_policy.reconciler" || semantics.noOpCount !== INSTALLATION.expectedAddresses.length - 1)
     || livePredecessor === "EXACT_TRUST_UPDATE" && (semantics.createCount !== 0 || semantics.updateCount !== 1 || semantics.changedAddresses[0] !== "aws_iam_role.mixed_recovery" || semantics.noOpCount !== INSTALLATION.expectedAddresses.length - 1)
     || livePredecessor === "EXACT_AUTHORIZER_TRUST_UPDATE" && (semantics.createCount !== 0 || semantics.updateCount !== 1 || semantics.changedAddresses[0] !== "aws_iam_role.bootstrap_operator_policy_authorizer" || semantics.noOpCount !== INSTALLATION.expectedAddresses.length - 1)
+    || livePredecessor === "EXACT_AUTHORIZER_POLICY_UPDATE" && (semantics.createCount !== 0 || semantics.updateCount !== 1 || semantics.changedAddresses[0] !== "aws_iam_policy.bootstrap_operator_policy_authorizer" || semantics.noOpCount !== INSTALLATION.expectedAddresses.length - 1)
     || livePredecessor === "EXACT_EXPANSION" && (semantics.createCount < 1 || semantics.createCount > 6 || semantics.updateCount > 1 || semantics.updateCount === 1 && !semantics.changedAddresses.includes("aws_iam_policy.reconciler") || semantics.noOpCount !== INSTALLATION.expectedAddresses.length - semantics.createCount - semantics.updateCount)
     || livePredecessor === "EXACT_COMPLETE" && (semantics.createCount !== 0 || semantics.updateCount !== 0 || semantics.noOpCount !== INSTALLATION.expectedAddresses.length)
-    || JSON.stringify(livePredecessorAddresses) !== JSON.stringify(["EXACT_UPDATE", "EXACT_TRUST_UPDATE", "EXACT_AUTHORIZER_TRUST_UPDATE"].includes(livePredecessor) ? [...INSTALLATION.expectedAddresses].sort() : livePredecessor === "EXACT_EXPANSION" ? planPredecessorAddresses : semantics.noOpAddresses)) throw new Error("Installation plan does not match the authenticated live predecessor.");
+    || JSON.stringify(livePredecessorAddresses) !== JSON.stringify(["EXACT_UPDATE", "EXACT_TRUST_UPDATE", "EXACT_AUTHORIZER_TRUST_UPDATE", "EXACT_AUTHORIZER_POLICY_UPDATE"].includes(livePredecessor) ? [...INSTALLATION.expectedAddresses].sort() : livePredecessor === "EXACT_EXPANSION" ? planPredecessorAddresses : semantics.noOpAddresses)) throw new Error("Installation plan does not match the authenticated live predecessor.");
   if (!Buffer.isBuffer(planBytes) || planBytes.length < 1) throw new Error("Saved Terraform plan bytes are required.");
   const body = {
     schemaVersion: INSTALLATION.schemaVersion, kind: "PRODUCTION_INITIAL_ACTIVATION_POLICY_RECONCILER_INSTALLATION_PREPARATION", operation: INSTALLATION.operation,
@@ -391,12 +401,13 @@ export function assertInstallationPreparation(value, { sourceSha, planBytes } = 
     || ![0, 1].includes(value.planSemantics.updateCount) || value.planSemantics.deleteCount !== 0 || value.planSemantics.replaceCount !== 0
     || value.planSemantics.changedAddresses.length !== value.planSemantics.resourceChangeCount || JSON.stringify(value.planSemantics.changedAddresses) !== JSON.stringify([...value.planSemantics.changedAddresses].sort()) || value.planSemantics.changedAddresses.some((address) => !INSTALLATION.expectedAddresses.includes(address))
     || value.planSemantics.noOpAddresses.length !== value.planSemantics.noOpCount || JSON.stringify(value.planSemantics.noOpAddresses) !== JSON.stringify([...value.planSemantics.noOpAddresses].sort()) || value.planSemantics.noOpAddresses.some((address) => !INSTALLATION.expectedAddresses.includes(address))
-    || JSON.stringify(value.livePredecessorAddresses) !== JSON.stringify(["EXACT_UPDATE", "EXACT_TRUST_UPDATE", "EXACT_AUTHORIZER_TRUST_UPDATE"].includes(value.livePredecessor) ? [...INSTALLATION.expectedAddresses].sort() : value.livePredecessor === "EXACT_EXPANSION" ? planPredecessorAddresses : value.planSemantics.noOpAddresses)
+    || JSON.stringify(value.livePredecessorAddresses) !== JSON.stringify(["EXACT_UPDATE", "EXACT_TRUST_UPDATE", "EXACT_AUTHORIZER_TRUST_UPDATE", "EXACT_AUTHORIZER_POLICY_UPDATE"].includes(value.livePredecessor) ? [...INSTALLATION.expectedAddresses].sort() : value.livePredecessor === "EXACT_EXPANSION" ? planPredecessorAddresses : value.planSemantics.noOpAddresses)
     || value.livePredecessor === "ABSENT" && value.planSemantics.createCount !== INSTALLATION.expectedAddresses.length
     || value.livePredecessor === "EXACT_PARTIAL" && (value.planSemantics.createCount < 1 || value.planSemantics.createCount >= INSTALLATION.expectedAddresses.length)
     || value.livePredecessor === "EXACT_UPDATE" && (value.planSemantics.updateCount !== 1 || value.planSemantics.changedAddresses[0] !== "aws_iam_policy.reconciler")
     || value.livePredecessor === "EXACT_TRUST_UPDATE" && (value.planSemantics.updateCount !== 1 || value.planSemantics.changedAddresses[0] !== "aws_iam_role.mixed_recovery")
     || value.livePredecessor === "EXACT_AUTHORIZER_TRUST_UPDATE" && (value.planSemantics.updateCount !== 1 || value.planSemantics.changedAddresses[0] !== "aws_iam_role.bootstrap_operator_policy_authorizer")
+    || value.livePredecessor === "EXACT_AUTHORIZER_POLICY_UPDATE" && (value.planSemantics.updateCount !== 1 || value.planSemantics.changedAddresses[0] !== "aws_iam_policy.bootstrap_operator_policy_authorizer")
     || value.livePredecessor === "EXACT_EXPANSION" && (value.planSemantics.createCount < 1 || value.planSemantics.createCount > 6 || value.planSemantics.updateCount > 1 || value.planSemantics.updateCount === 1 && !value.planSemantics.changedAddresses.includes("aws_iam_policy.reconciler"))
     || value.livePredecessor === "EXACT_COMPLETE" && value.planSemantics.resourceChangeCount !== 0) throw new Error("Installation preparation plan semantics are not exact.");
   return value;

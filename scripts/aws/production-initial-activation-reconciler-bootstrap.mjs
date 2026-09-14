@@ -34,6 +34,7 @@ const bootstrapPermissionsPredecessors = () => {
     document.Statement = document.Statement.filter(({ Sid }) => ![...(omitExpansion ? expansionSids : []), ...(omitAuthorizer ? authorizerSids : []), ...omittedSids].includes(Sid));
     const update = document.Statement.find(({ Sid }) => Sid === "UpdateExactReconcilerPolicyVersion");
     if (update && omitExpansion) update.Resource = "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler";
+    else if (update) update.Resource = [].concat(update.Resource).filter((resource) => resource !== "arn:aws:iam::368992683803:policy/MSCQRProductionBootstrapOperatorPolicyAuthorizer");
     mutate?.(document);
     if (canonicalSha256(document) !== sha256) throw new Error(`Bootstrap predecessor ${generation} source document drifted.`);
     return Object.freeze({ generation, document, sha256 });
@@ -46,6 +47,7 @@ const bootstrapPermissionsPredecessors = () => {
     exact("GENERATION_5", [], "5c2fb0e2c8d5a61f7ee9327bfca879872cc8f0d31d57b4d6f2c819c67d65fbf6", false, previousSelfRead),
     exact("GENERATION_6", [], "1ca47a092f12de79dbbac8ba2c27170426ac0e69dc631250046051882beccbeb", false, undefined, true),
     exact("GENERATION_7", ["UpdateExactBootstrapOperatorPolicyAuthorizerRoleTrust"], ["48ccc2d48ec24774", "ce9c7309ff8d5f8b", "894ef1f8928063a9f", "4acda55ae2e1a46"].join(""), false, undefined, false),
+    exact("GENERATION_8", [], "716551f9dfebb1dae8898e4b3adf3b381814065d08c173e303f8c3cb1f6e8234", false, undefined, false),
   ]);
 };
 
@@ -79,7 +81,7 @@ const PREPARATION_FIELDS = new Set(["schemaVersion", "kind", "operation", "sourc
 const AUTH_FIELDS = new Set(["schemaVersion", "kind", "operation", "repository", "environment", "sourceSha", "administratorArn", "roleArn", "roleName", "inlinePolicyName", "sourceHashes", "maxAwsMutations", "preparation", "preparationSha256", "approval", "approvalSha256", "authorizedAt", "authorizationSha256"]);
 
 export function createBootstrapPreparation({ sourceSha, predecessor } = {}) {
-  if (!/^[a-f0-9]{40}$/.test(sourceSha || "") || !predecessor || !["ABSENT", "EXACT_PARTIAL", "EXACT_PREDECESSOR_GENERATION_1", "EXACT_PREDECESSOR_GENERATION_2", "EXACT_PREDECESSOR_GENERATION_3", "EXACT_PREDECESSOR_GENERATION_4", "EXACT_PREDECESSOR_GENERATION_5", "EXACT_PREDECESSOR_GENERATION_6", "EXACT_PREDECESSOR_GENERATION_7", "EXACT_COMPLETE"].includes(predecessor.classification)) throw new Error("Bootstrap preparation predecessor is invalid.");
+  if (!/^[a-f0-9]{40}$/.test(sourceSha || "") || !predecessor || !["ABSENT", "EXACT_PARTIAL", "EXACT_PREDECESSOR_GENERATION_1", "EXACT_PREDECESSOR_GENERATION_2", "EXACT_PREDECESSOR_GENERATION_3", "EXACT_PREDECESSOR_GENERATION_4", "EXACT_PREDECESSOR_GENERATION_5", "EXACT_PREDECESSOR_GENERATION_6", "EXACT_PREDECESSOR_GENERATION_7", "EXACT_PREDECESSOR_GENERATION_8", "EXACT_COMPLETE"].includes(predecessor.classification)) throw new Error("Bootstrap preparation predecessor is invalid.");
   const policySha256 = predecessor.predecessorPolicySha256 || null;
   const policyBound = predecessor.classification.startsWith("EXACT_PREDECESSOR_") || predecessor.classification === "EXACT_COMPLETE";
   if ((policyBound && !/^[a-f0-9]{64}$/.test(policySha256 || "")) || (!policyBound && policySha256 !== null)) throw new Error("Bootstrap preparation predecessor binding is invalid.");
@@ -224,7 +226,7 @@ export function runBootstrapCli(argv = process.argv.slice(2), deps = {}) {
     const run = deps.run || createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: required(argv, "--admin-profile") });
     if (runJson(run, ["sts", "get-caller-identity"]).Arn !== INSTALLATION_BOOTSTRAP.administratorArn) throw new Error("Bootstrap preparation requires the exact root administrator.");
     const predecessor = discoverBootstrapRole({ run });
-    if (!["ABSENT", "EXACT_PARTIAL", "EXACT_PREDECESSOR_GENERATION_1", "EXACT_PREDECESSOR_GENERATION_2", "EXACT_PREDECESSOR_GENERATION_3", "EXACT_PREDECESSOR_GENERATION_4", "EXACT_PREDECESSOR_GENERATION_5", "EXACT_PREDECESSOR_GENERATION_6", "EXACT_PREDECESSOR_GENERATION_7", "EXACT_COMPLETE"].includes(predecessor.classification)) throw new Error("Bootstrap preparation predecessor is not eligible.");
+    if (!["ABSENT", "EXACT_PARTIAL", "EXACT_PREDECESSOR_GENERATION_1", "EXACT_PREDECESSOR_GENERATION_2", "EXACT_PREDECESSOR_GENERATION_3", "EXACT_PREDECESSOR_GENERATION_4", "EXACT_PREDECESSOR_GENERATION_5", "EXACT_PREDECESSOR_GENERATION_6", "EXACT_PREDECESSOR_GENERATION_7", "EXACT_PREDECESSOR_GENERATION_8", "EXACT_COMPLETE"].includes(predecessor.classification)) throw new Error("Bootstrap preparation predecessor is not eligible.");
     const preparation = createBootstrapPreparation({ sourceSha, predecessor });
     const output = assertStageBArtifactPath({ artifactPath: path.resolve(required(argv, "--output")), repositoryRoot: root, label: "Bootstrap preparation", allowExisting: false });
     ensureStageBPrivateDirectory({ directory: path.dirname(output), repositoryRoot: root, create: true, label: "Bootstrap preparation directory" });

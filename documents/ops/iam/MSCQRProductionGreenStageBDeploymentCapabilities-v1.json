@@ -1047,7 +1047,7 @@
         "sid": "IdentifyCurrentSession",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionBootstrapOperatorPolicyAuthorizer",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "9cf1647cb5ace232948547559b9a3b050c3c1ec8396d82b69c03a931bde601ed"
+        "expectedPolicySha256": "dd6b936c1c691d334471d5a6d8fed5c660bd1f459a94be4b9bf2d95f1fafc588"
       },
       "required": true,
       "mutation": false
@@ -1067,7 +1067,10 @@
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj",
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX",
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE",
-        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2"
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/jwt-wBQNqk",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_private_key-BcQFPO",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_public_key-v7Xeex"
       ],
       "context": {
         "account": "368992683803",
@@ -1083,7 +1086,7 @@
         "sid": "ReadExactInitialDualSlotBindingForBootstrapOperatorAuthorization",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionBootstrapOperatorPolicyAuthorizer",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "9cf1647cb5ace232948547559b9a3b050c3c1ec8396d82b69c03a931bde601ed"
+        "expectedPolicySha256": "dd6b936c1c691d334471d5a6d8fed5c660bd1f459a94be4b9bf2d95f1fafc588"
       },
       "required": true,
       "mutation": false
@@ -1103,7 +1106,10 @@
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj",
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX",
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE",
-        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2"
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/jwt-wBQNqk",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_private_key-BcQFPO",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_public_key-v7Xeex"
       ],
       "context": {
         "account": "368992683803",
@@ -1119,7 +1125,7 @@
         "sid": "ReadExactInitialDualSlotBindingForBootstrapOperatorAuthorization",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionBootstrapOperatorPolicyAuthorizer",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "9cf1647cb5ace232948547559b9a3b050c3c1ec8396d82b69c03a931bde601ed"
+        "expectedPolicySha256": "dd6b936c1c691d334471d5a6d8fed5c660bd1f459a94be4b9bf2d95f1fafc588"
       },
       "required": true,
       "mutation": false
@@ -1149,7 +1155,7 @@
         "sid": "ReadBootstrapOperatorTransitionConsumption",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionBootstrapOperatorPolicyAuthorizer",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "9cf1647cb5ace232948547559b9a3b050c3c1ec8396d82b69c03a931bde601ed"
+        "expectedPolicySha256": "dd6b936c1c691d334471d5a6d8fed5c660bd1f459a94be4b9bf2d95f1fafc588"
       },
       "required": true,
       "mutation": false
@@ -1393,7 +1399,10 @@
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj",
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX",
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE",
-        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2"
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/jwt-wBQNqk",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_private_key-BcQFPO",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_public_key-v7Xeex"
       ],
       "context": {
         "account": "368992683803",
@@ -1427,7 +1436,10 @@
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj",
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX",
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE",
-        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2"
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/jwt-wBQNqk",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_private_key-BcQFPO",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_public_key-v7Xeex"
       ],
       "context": {
         "account": "368992683803",
@@ -14882,7 +14894,10 @@
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj",
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX",
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE",
-        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2"
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/jwt-wBQNqk",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_private_key-BcQFPO",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_public_key-v7Xeex"
       ],
       "capabilityId": "bootstrap-operator-policy-reconciliation-read-initial-overlap-secrets"
     },
@@ -14899,7 +14914,10 @@
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj",
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX",
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE",
-        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2"
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/jwt-wBQNqk",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_private_key-BcQFPO",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_public_key-v7Xeex"
       ],
       "capabilityId": "bootstrap-operator-policy-authorization-read-initial-overlap-secrets"
     },
@@ -14916,7 +14934,10 @@
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj",
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX",
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE",
-        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2"
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/jwt-wBQNqk",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_private_key-BcQFPO",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_public_key-v7Xeex"
       ],
       "capabilityId": "bootstrap-operator-policy-reconciliation-read-initial-overlap-values"
     },
@@ -14933,7 +14954,10 @@
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj",
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX",
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE",
-        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2"
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/jwt-wBQNqk",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_private_key-BcQFPO",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_public_key-v7Xeex"
       ],
       "capabilityId": "bootstrap-operator-policy-authorization-read-initial-overlap-values"
     },

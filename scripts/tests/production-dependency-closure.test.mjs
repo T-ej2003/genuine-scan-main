@@ -3,7 +3,7 @@ import fs from "node:fs";
 import test from "node:test";
 import { CAPABILITY_GRAPH_PATH, discoverAwsCliActions } from "../aws/generate-production-green-stage-b-capability-graph.mjs";
 import { assertChangedAwsCallClosure, assertNoUnknownRollbackDependency, assertRollbackSemanticBoundary, assertStageAProductionArtifactsCapabilityClosure, buildProductionDependencyClosure } from "../aws/verify-production-dependency-closure.mjs";
-import { MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES } from "../aws/production-mixed-dual-slot-recovery-contract.mjs";
+import { LEGACY_BOOTSTRAP_TRANSITION_SECRET_READ_RESOURCES } from "../aws/production-bootstrap-operator-policy-reconciliation.mjs";
 import { selectStageAProductionArtifactsRecoveryJournals } from "../aws/run-production-stage-a-production-artifacts-recovery.mjs";
 
 const graph = () => JSON.parse(fs.readFileSync(CAPABILITY_GRAPH_PATH, "utf8"));
@@ -45,8 +45,8 @@ test("complete production dependency closure is exact across modes and failure p
   assert.deepEqual(report.newAwsCalls.filter(({ capabilityId }) => capabilityId?.startsWith("bootstrap-operator-policy-authorization-")).map(({ capabilityId, action, resources, identity, reachableMode }) => [capabilityId, action, resources, identity, reachableMode]), [
     ["bootstrap-operator-policy-authorization-identify", "sts:GetCallerIdentity", ["*"], "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],
     ["bootstrap-operator-policy-authorization-read-transition-consumption", "iam:ListUserTags", ["arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"], "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],
-    ["bootstrap-operator-policy-authorization-read-initial-overlap-secrets", "secretsmanager:DescribeSecret", MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],
-    ["bootstrap-operator-policy-authorization-read-initial-overlap-values", "secretsmanager:GetSecretValue", MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],
+    ["bootstrap-operator-policy-authorization-read-initial-overlap-secrets", "secretsmanager:DescribeSecret", LEGACY_BOOTSTRAP_TRANSITION_SECRET_READ_RESOURCES, "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],
+    ["bootstrap-operator-policy-authorization-read-initial-overlap-values", "secretsmanager:GetSecretValue", LEGACY_BOOTSTRAP_TRANSITION_SECRET_READ_RESOURCES, "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],
   ]);
   assert.deepEqual(report.newAwsCalls.filter(({ capabilityId }) => capabilityId?.startsWith("bootstrap-operator-policy-reconciliation-")).map(({ capabilityId, action, resources, identity, reachableMode }) => [capabilityId, action, resources, identity, reachableMode]), [
     ["bootstrap-operator-policy-reconciliation-identify", "sts:GetCallerIdentity", ["*"], "ROOT_OPERATOR", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],

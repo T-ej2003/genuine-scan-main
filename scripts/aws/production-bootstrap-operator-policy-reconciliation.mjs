@@ -13,7 +13,7 @@ import { assertStageBArtifactPath, ensureStageBPrivateDirectory, readBoundStageB
 import { assertProtectedCheckout } from "./prepare-production-initial-activation-reconciler-installation.mjs";
 import { ECS_EXEC_OPERATOR_BOOTSTRAP_MFA_SERIAL_ARN } from "./production-ecs-exec-operator-contract.mjs";
 import { assertInitialBindingSchemaClosed, assertInitialDualSlotBindings, verifyLiveInitialDualSlotBindingWithRunner } from "./production-initial-dual-slot-bootstrap.mjs";
-import { MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES } from "./production-mixed-dual-slot-recovery-contract.mjs";
+import { MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, MIXED_DUAL_SLOT_RECOVERY_LIVE_PREDECESSOR } from "./production-mixed-dual-slot-recovery-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const sha256 = (value) => crypto.createHash("sha256").update(Buffer.isBuffer(value) ? value : Buffer.from(canonicalJson(value))).digest("hex");
@@ -65,6 +65,10 @@ export const LEGACY_BOOTSTRAP_TRANSITION_SOURCE_SHA = "054d1adce8a477df362719f5b
 export const LEGACY_BOOTSTRAP_TRANSITION_ROTATION_BINDINGS_FILE_SHA256 = "49013c088ca4e9b9093e566f88d90589acff6e085823f39d45977d0342e88bc7";
 export const LEGACY_BOOTSTRAP_TRANSITION_SUPERSESSION_GENERATED_AT = "2026-09-13T01:38:21.459Z";
 export const LEGACY_BOOTSTRAP_TRANSITION_LIVE_PREDECESSOR_POLICY_SHA256 = "bd4764ea853548d4cff8814113fb846ac203dfdeb1c6de5e6825e02e9f4c4f00";
+export const LEGACY_BOOTSTRAP_TRANSITION_SECRET_READ_RESOURCES = Object.freeze([
+  ...MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES,
+  ...MIXED_DUAL_SLOT_RECOVERY_LIVE_PREDECESSOR.legacySecretArns,
+]);
 export const LEGACY_BOOTSTRAP_MFA_TRANSITION = Object.freeze({
   kind: LEGACY_BOOTSTRAP_TRANSITION_KIND,
   releaseLifecycle: "authenticated-initial-overlap",

@@ -154,7 +154,8 @@
       "Action": "iam:CreatePolicyVersion",
       "Resource": [
         "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
-        "arn:aws:iam::368992683803:policy/MSCQRProductionMixedDualSlotRecoveryExecutor"
+        "arn:aws:iam::368992683803:policy/MSCQRProductionMixedDualSlotRecoveryExecutor",
+        "arn:aws:iam::368992683803:policy/MSCQRProductionBootstrapOperatorPolicyAuthorizer"
       ]
     },
     {
