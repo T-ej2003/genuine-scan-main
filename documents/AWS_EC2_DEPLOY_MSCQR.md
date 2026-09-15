@@ -96,6 +96,7 @@ export SUPER_ADMIN_BOOTSTRAP_DATABASE_URL="$(aws secretsmanager get-secret-value
 export SUPER_ADMIN_EMAIL='administration@mscqr.com'
 export SUPER_ADMIN_NAME='MSCQR Administration'
 export SUPER_ADMIN_BOOTSTRAP_AUTO_VERIFY='true'
+docker compose build backend
 docker compose run --rm --no-deps \
   -e SUPER_ADMIN_BOOTSTRAP_PASSWORD \
   -e SUPER_ADMIN_BOOTSTRAP_DATABASE_URL \

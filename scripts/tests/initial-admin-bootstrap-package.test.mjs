@@ -65,6 +65,7 @@ assert.ok(bootstrapSection.indexOf("full-rls-admin-bootstrap") < bootstrapSectio
 assert.ok(bootstrapSection.indexOf("full-rls-runtime-policy") < bootstrapSection.indexOf("npm run auth:bootstrap-super-admin"));
 assert.ok(bootstrapSection.indexOf("full-rls-verification") < bootstrapSection.indexOf("npm run auth:bootstrap-super-admin"));
 assert.ok(bootstrapSection.indexOf("full-rls-application-canary") < bootstrapSection.indexOf("npm run auth:bootstrap-super-admin"));
+assert.ok(bootstrapSection.indexOf("docker compose build backend") < bootstrapSection.indexOf("npm run auth:bootstrap-super-admin"));
 assert.ok(deployment.indexOf("npm run auth:bootstrap-super-admin") < deployment.indexOf("docker compose --profile worker up"));
 assert.doesNotMatch(runtimeExample, /^SUPER_ADMIN_BOOTSTRAP_(?:ENABLED|PASSWORD|AUTO_VERIFY)=/m);
 
