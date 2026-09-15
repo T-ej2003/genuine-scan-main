@@ -41,10 +41,25 @@ test("the canonical release-preflight producer is real, source-bound, and artifa
   assert.deepEqual(workflow.permissions, { actions: "read", contents: "read", "id-token": "write" });
   assert.equal(workflow.jobs.produce.environment, "production");
   assert.match(source, /produce-production-green-stage-b-release-preflight\.mjs/);
-  assert.match(source, /release-gate\.yml/); assert.match(source, /production-green-stage-b-image-authorization/);
+  assert.match(source, /produce-production-green-stage-b-state-reconciliation-image-authorization\.yml/); assert.match(source, /production-green-stage-b-state-reconciliation-image-authorization/);
+  assert.doesNotMatch(source, /release-gate\.yml/);
   assert.match(source, /conclusion.*success/); assert.match(source, /expired.*false/); assert.match(source, /sha256sum/);
   assert.match(source, /unzip -Z1.*image-authorization\.json/); assert.match(source, /install -m 600/);
   assert.doesNotMatch(source, /authorization_base64|raw filesystem path/);
+});
+
+test("state-only image-authorization producer is protected, independently authenticates its payload, and cannot deploy", () => {
+  const name = "produce-production-green-stage-b-state-reconciliation-image-authorization.yml";
+  const workflow = parse(name); const source = read(name);
+  assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), ["image_authorization_base64", "image_authorization_sha256", "source_sha"]);
+  assert.deepEqual(workflow.permissions, { contents: "read", "id-token": "write" });
+  assert.equal(workflow.concurrency.group, "production-deploy"); assert.equal(workflow.concurrency["cancel-in-progress"], false);
+  assert.equal(workflow.jobs.produce.environment, "production");
+  assert.match(source, /GITHUB_RUN_ATTEMPT/); assert.match(source, /git fetch --no-tags origin main/);
+  assert.match(source, /IMAGE_AUTHORIZATION_SHA256/); assert.match(source, /base64 --decode/); assert.match(source, /test "\$\{#IMAGE_AUTHORIZATION_BASE64\}" -le 32768/);
+  assert.match(source, /verify-production-release-image-authorization\.mjs/); assert.match(source, /github-oidc-release-deployer/);
+  assert.match(source, /production-green-stage-b-state-reconciliation-image-authorization/); assert.match(source, /retention-days: 1/);
+  assert.doesNotMatch(source, /terraform|ecs|apply-production|publish-ecs-images|kms:Sign|release-gate\.yml/);
 });
 
 test("reconciliation readers authenticate and consume private JSON directly", () => {

@@ -4,10 +4,10 @@ on:
   workflow_dispatch:
     inputs:
       source_sha: { description: Exact protected-main source SHA, required: true, type: string }
-      image_authorization_workflow_run_id: { description: Successful Release Gate run that published the image authorization artifact, required: true, type: string }
-      image_authorization_workflow_run_attempt: { description: Release Gate workflow run attempt, required: true, type: string }
-      image_authorization_artifact_id: { description: Exact image-authorization artifact ID, required: true, type: string }
-      image_authorization_artifact_digest: { description: Exact GitHub artifact digest, required: true, type: string }
+      image_authorization_workflow_run_id: { description: Successful state-reconciliation image-authorization producer run ID, required: true, type: string }
+      image_authorization_workflow_run_attempt: { description: State-reconciliation image-authorization producer run attempt, required: true, type: string }
+      image_authorization_artifact_id: { description: Exact state-reconciliation image-authorization artifact ID, required: true, type: string }
+      image_authorization_artifact_digest: { description: Exact state-reconciliation image-authorization artifact digest, required: true, type: string }
       tfvars_sha256: { description: SHA-256 of the original Stage-B tfvars bytes, required: true, type: string }
       binding_sha256: { description: SHA-256 of the original Stage-B binding bytes, required: true, type: string }
 
@@ -27,7 +27,7 @@ jobs:
       - uses: actions/setup-node@v6
         with: { node-version: 24, cache: npm }
       - run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: Download and authenticate the exact Release Gate image authorization
+      - name: Download and authenticate the exact state-reconciliation image authorization
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
           IMAGE_RUN: ${{ inputs.image_authorization_workflow_run_id }}
@@ -41,13 +41,13 @@ jobs:
           test "$IMAGE_ATTEMPT" = 1
           [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ && "$IMAGE_RUN" =~ ^[0-9]+$ && "$IMAGE_ARTIFACT" =~ ^[0-9]+$ && "$IMAGE_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
           run="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$IMAGE_RUN")"
-          test "$(jq -r .path <<<"$run")" = .github/workflows/release-gate.yml
+          test "$(jq -r .path <<<"$run")" = .github/workflows/produce-production-green-stage-b-state-reconciliation-image-authorization.yml
           test "$(jq -r .head_sha <<<"$run")" = "$SOURCE_SHA"
           test "$(jq -r .event <<<"$run")" = workflow_dispatch
           test "$(jq -r .run_attempt <<<"$run")" = "$IMAGE_ATTEMPT"
           test "$(jq -r .conclusion <<<"$run")" = success
           artifacts="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$IMAGE_RUN/artifacts")"
-          test "$(jq '[.artifacts[] | select((.id|tostring) == $id and .name == "production-green-stage-b-image-authorization" and .expired == false)] | length' --arg id "$IMAGE_ARTIFACT" <<<"$artifacts")" = 1
+          test "$(jq '[.artifacts[] | select((.id|tostring) == $id and .name == "production-green-stage-b-state-reconciliation-image-authorization" and .expired == false)] | length' --arg id "$IMAGE_ARTIFACT" <<<"$artifacts")" = 1
           test "$(jq -r '[.artifacts[] | select((.id|tostring) == $id) | .digest] | .[0]' --arg id "$IMAGE_ARTIFACT" <<<"$artifacts")" = "$IMAGE_DIGEST"
           d="$RUNNER_TEMP/stage-b-release-preflight"; umask 077; install -d -m 700 "$d"
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$IMAGE_ARTIFACT/zip" > "$d/image-authorization-artifact.zip"
