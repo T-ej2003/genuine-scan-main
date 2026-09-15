@@ -78,6 +78,14 @@ set -euo pipefail
 aws sts get-caller-identity >/dev/null
 IFS= read -rsp "Initial administration@mscqr.com password: " SUPER_ADMIN_BOOTSTRAP_PASSWORD
 echo
+IFS= read -rsp "Confirm initial administration@mscqr.com password: " SUPER_ADMIN_BOOTSTRAP_PASSWORD_CONFIRM
+echo
+if [ "$SUPER_ADMIN_BOOTSTRAP_PASSWORD" != "$SUPER_ADMIN_BOOTSTRAP_PASSWORD_CONFIRM" ]; then
+  unset SUPER_ADMIN_BOOTSTRAP_PASSWORD SUPER_ADMIN_BOOTSTRAP_PASSWORD_CONFIRM
+  printf '%s\n' 'Initial administrator passwords do not match.' >&2
+  exit 1
+fi
+unset SUPER_ADMIN_BOOTSTRAP_PASSWORD_CONFIRM
 export SUPER_ADMIN_BOOTSTRAP_PASSWORD
 export SUPER_ADMIN_BOOTSTRAP_DATABASE_URL="$(aws secretsmanager get-secret-value \
   --region eu-west-2 \
