@@ -10,6 +10,7 @@ const cli = fs.readFileSync("backend/scripts/create-super-admin.js", "utf8");
 const runtime = fs.readFileSync("backend/src/index.ts", "utf8");
 const backendPackage = JSON.parse(fs.readFileSync("backend/package.json", "utf8"));
 const deployment = fs.readFileSync("documents/AWS_EC2_DEPLOY_MSCQR.md", "utf8");
+const runtimeExample = fs.readFileSync("backend/.env.example", "utf8");
 
 assert.match(ownership, /CREATE SCHEMA app_ops AUTHORIZATION "mscqr_rls_cert_owner"/);
 assert.match(generated, /CREATE OR REPLACE FUNCTION app_ops\.bootstrap_configured_super_admin\(p_email text,p_password_hash text,p_name text,p_auto_verify boolean\)/);
@@ -42,6 +43,8 @@ assert.match(deployment, /full-rls-role-provision/);
 assert.match(deployment, /full-rls-role-verify/);
 assert.match(deployment, /full-rls-admin-ownership/);
 assert.match(deployment, /full-rls-runtime-policy/);
+assert.match(deployment, /full-rls-verification/);
+assert.match(deployment, /full-rls-application-canary/);
 assert.match(deployment, /mscqr\/production\/rls-green\/phase2\/database-url\/migration/);
 assert.match(deployment, /secretsmanager:GetSecretValue/);
 assert.match(deployment, /attach a deployment-only instance profile/);
@@ -60,6 +63,9 @@ assert.doesNotMatch(deployment, /<deployment-only migration database URL>/);
 const bootstrapSection = deployment.slice(deployment.indexOf("## 5. Provision the deployment-only migration credential"));
 assert.ok(bootstrapSection.indexOf("full-rls-admin-bootstrap") < bootstrapSection.indexOf("full-rls-role-provision"));
 assert.ok(bootstrapSection.indexOf("full-rls-runtime-policy") < bootstrapSection.indexOf("npm run auth:bootstrap-super-admin"));
+assert.ok(bootstrapSection.indexOf("full-rls-verification") < bootstrapSection.indexOf("npm run auth:bootstrap-super-admin"));
+assert.ok(bootstrapSection.indexOf("full-rls-application-canary") < bootstrapSection.indexOf("npm run auth:bootstrap-super-admin"));
 assert.ok(deployment.indexOf("npm run auth:bootstrap-super-admin") < deployment.indexOf("docker compose --profile worker up"));
+assert.doesNotMatch(runtimeExample, /^SUPER_ADMIN_BOOTSTRAP_(?:ENABLED|PASSWORD|AUTO_VERIFY)=/m);
 
 console.log("initial admin bootstrap package contract tests passed");
