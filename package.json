@@ -77,6 +77,7 @@
     "stage-b:readiness:check": "node scripts/aws/check-stage-b-production-readiness.mjs",
     "stage-b:refresh-only": "node scripts/refresh-production-green-stage-b.mjs",
     "stage-b:state-reconcile": "node scripts/aws/reconcile-production-green-stage-b-state.mjs",
+    "stage-b:produce-prerequisites": "node scripts/aws/produce-production-green-stage-b-prerequisite-bundle.mjs",
     "stage-b:generate-backend-config": "node scripts/aws/generate-production-green-stage-b-backend-config.mjs",
     "stage-b:capability-graph:generate": "node scripts/aws/generate-production-green-stage-b-capability-graph.mjs --write && node scripts/aws/verify-production-dependency-closure.mjs --write",
     "stage-b:capability-graph:verify": "node scripts/aws/generate-production-green-stage-b-capability-graph.mjs && node scripts/aws/verify-production-dependency-closure.mjs",

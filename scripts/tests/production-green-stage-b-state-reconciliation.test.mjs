@@ -13,7 +13,9 @@ const cleanPlan = () => ({ format_version: "1.2", terraform_version: "1.15.8", e
 const options = () => ({ sourceSha, stateIdentity: state, tfvarsSha256: digest, bindingSha256: digest });
 const approval = () => createProductionEnvironmentApprovalEvidence({ environmentConfig: { id: 1, name: "production", can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 2, login: "reviewer" } }] }] }, repository: CONTRACT.repository, environment: "production", sourceSha, workflowRef: `${CONTRACT.repository}/${CONTRACT.authorizationWorkflowPath}@refs/heads/main`, eventName: "workflow_dispatch", workflowRunId: "99", workflowRunAttempt: "1", executionActor: "operator", observedAt: now.toISOString(), actualApproval: { state: "approved", environmentId: 1, environmentName: "production", userId: 2, userLogin: "reviewer" } });
 const bytes = Buffer.from("reviewed-refresh-only-plan");
-const prepare = () => createStageBStateReconciliationPreparation({ sourceSha, ticketId: "CHG-20260915-001", stateIdentity: state, tfvarsSha256: digest, bindingSha256: digest, preflightSha256: digest, planBytes: bytes, planJson: plan(), normalPlan: sourcePlan(), createdAt: now.toISOString() });
+const closure = { runtimeTfvarsSha256: digest, runtimeBindingSha256: digest, runtimeMaterializationSha256: digest, prerequisiteManifestSha256: digest, brokerPackageSha256: digest, brokerManifestSha256: digest, stageAInputSha256: digest, stageAStateBackupSha256: digest, prerequisiteProducerWorkflowRunId: "123", prerequisiteProducerWorkflowRunAttempt: "1", prerequisiteBundleArtifactId: "456", prerequisiteBundleArtifactDigest: `sha256:${"d".repeat(64)}` };
+const execBindings = () => ({ tfvarsSha256: digest, bindingSha256: digest, preflightSha256: digest, ...closure });
+const prepare = () => createStageBStateReconciliationPreparation({ sourceSha, ticketId: "CHG-20260915-001", stateIdentity: state, tfvarsSha256: digest, bindingSha256: digest, preflightSha256: digest, ...closure, planBytes: bytes, planJson: plan(), normalPlan: sourcePlan(), createdAt: now.toISOString() });
 
 test("exact ten-address refresh-only plan is the only accepted state transition", () => {
   assert.deepEqual(assertExactStageBRefreshOnlyPlan(plan(), options()), { refreshOnly: true, remoteResourceMutationCount: 0, stateRecordChangeCount: 10, addresses: CONTRACT.addresses });
@@ -68,22 +70,27 @@ test("preparation and protected-environment authorization bind every irreversibl
 test("execution consumes exactly one approved refresh-only state transition", () => {
   const preparation = prepare(); const authorization = createStageBStateReconciliationAuthorization({ preparation, approval: approval(), now });
   let current = { ...state }; let applies = 0;
-  const result = executeStageBStateReconciliation({ sourceSha, preparation, authorization, bindings: { tfvarsSha256: digest, bindingSha256: digest, preflightSha256: digest }, planBytes: bytes, planJson: plan(), readState: () => current, applyRefreshOnlyPlan: () => { applies += 1; current = { ...current, serial: current.serial + 1, stateSha256: "c".repeat(64) }; }, renderRefreshClosurePlan: cleanPlan, renderNormalClosurePlan: cleanPlan, reauthenticateSource: () => {}, now });
+  const result = executeStageBStateReconciliation({ sourceSha, preparation, authorization, bindings: execBindings(), planBytes: bytes, planJson: plan(), readState: () => current, applyRefreshOnlyPlan: () => { applies += 1; current = { ...current, serial: current.serial + 1, stateSha256: "c".repeat(64) }; }, renderRefreshClosurePlan: cleanPlan, renderNormalClosurePlan: cleanPlan, reauthenticateSource: () => {}, now });
   assert.equal(applies, 1); assert.equal(result.remoteResourceMutationCount, 0); assert.equal(result.terraformStateMutationCount, 1);
-  assert.throws(() => executeStageBStateReconciliation({ sourceSha, preparation, authorization, bindings: { tfvarsSha256: digest, bindingSha256: digest, preflightSha256: digest }, planBytes: bytes, planJson: plan(), readState: () => current, applyRefreshOnlyPlan: () => { applies += 1; }, renderRefreshClosurePlan: cleanPlan, renderNormalClosurePlan: cleanPlan, reauthenticateSource: () => {}, now }), /CAS/);
+  assert.throws(() => executeStageBStateReconciliation({ sourceSha, preparation, authorization, bindings: execBindings(), planBytes: bytes, planJson: plan(), readState: () => current, applyRefreshOnlyPlan: () => { applies += 1; }, renderRefreshClosurePlan: cleanPlan, renderNormalClosurePlan: cleanPlan, reauthenticateSource: () => {}, now }), /CAS/);
 });
 
 test("execution rejects substituted bound inputs, stale plan, and non-clean closure", () => {
   const preparation = prepare(); const authorization = createStageBStateReconciliationAuthorization({ preparation, approval: approval(), now });
   const common = { sourceSha, preparation, authorization, planBytes: bytes, planJson: plan(), readState: () => state, applyRefreshOnlyPlan: () => {}, renderRefreshClosurePlan: cleanPlan, renderNormalClosurePlan: cleanPlan, reauthenticateSource: () => {}, now };
-  assert.throws(() => executeStageBStateReconciliation({ ...common, bindings: { tfvarsSha256: "c".repeat(64), bindingSha256: digest, preflightSha256: digest } }));
-  assert.throws(() => executeStageBStateReconciliation({ ...common, bindings: { tfvarsSha256: digest, bindingSha256: digest, preflightSha256: digest }, planBytes: Buffer.from("substituted") }));
+  assert.throws(() => executeStageBStateReconciliation({ ...common, bindings: { ...execBindings(), tfvarsSha256: "c".repeat(64) } }));
+  assert.throws(() => executeStageBStateReconciliation({ ...common, bindings: execBindings(), planBytes: Buffer.from("substituted") }));
   const unclean = cleanPlan(); unclean.resource_changes = [{ change: { actions: ["update"] } }];
   assert.throws(() => assertCleanStageBNormalPlan(unclean, { sourceSha }));
 });
 
 test("apply error is resolved only by exact successor readback", () => {
   const preparation = prepare(); const authorization = createStageBStateReconciliationAuthorization({ preparation, approval: approval(), now }); let current = { ...state };
-  const result = executeStageBStateReconciliation({ sourceSha, preparation, authorization, bindings: { tfvarsSha256: digest, bindingSha256: digest, preflightSha256: digest }, planBytes: bytes, planJson: plan(), readState: () => current, applyRefreshOnlyPlan: () => { current = { ...current, serial: 105, stateSha256: "c".repeat(64) }; throw new Error("transport lost"); }, renderRefreshClosurePlan: cleanPlan, renderNormalClosurePlan: cleanPlan, reauthenticateSource: () => {}, now });
+  const result = executeStageBStateReconciliation({ sourceSha, preparation, authorization, bindings: execBindings(), planBytes: bytes, planJson: plan(), readState: () => current, applyRefreshOnlyPlan: () => { current = { ...current, serial: 105, stateSha256: "c".repeat(64) }; throw new Error("transport lost"); }, renderRefreshClosurePlan: cleanPlan, renderNormalClosurePlan: cleanPlan, reauthenticateSource: () => {}, now });
   assert.equal(result.status, "state-write-completed-postverify");
+});
+
+test("post-write closure failure retains the exact committed successor", () => {
+  const preparation = prepare(); const authorization = createStageBStateReconciliationAuthorization({ preparation, approval: approval(), now }); let current = { ...state };
+  assert.throws(() => executeStageBStateReconciliation({ sourceSha, preparation, authorization, bindings: execBindings(), planBytes: bytes, planJson: plan(), readState: () => current, applyRefreshOnlyPlan: () => { current = { ...current, serial: 105, stateSha256: "c".repeat(64) }; }, renderRefreshClosurePlan: () => { throw new Error("temporary closure read failure"); }, renderNormalClosurePlan: cleanPlan, reauthenticateSource: () => {}, now }), (error) => error.reconciliationResult?.status === "state-write-completed-postverify-failed" && error.reconciliationResult.successorState.serial === 105);
 });

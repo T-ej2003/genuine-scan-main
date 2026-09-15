@@ -51,8 +51,18 @@ jobs:
           test "$(jq '[.artifacts[] | select(.name == "production-green-stage-b-state-reconciliation-preparation" and .expired == false)] | length' <<<"$artifacts")" = 1
           artifact="$(jq -r '.artifacts[] | select(.name == "production-green-stage-b-state-reconciliation-preparation" and .expired == false) | .id' <<<"$artifacts")"; digest="$(jq -r '.artifacts[] | select(.name == "production-green-stage-b-state-reconciliation-preparation" and .expired == false) | .digest' <<<"$artifacts")"
           [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]; gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact/zip" > "$d/preparation.zip"; test "sha256:$(sha256sum "$d/preparation.zip" | awk '{print $1}')" = "$digest"
-          test "$(unzip -Z1 "$d/preparation.zip")" = preparation-bundle.zip; unzip -p "$d/preparation.zip" preparation-bundle.zip > "$d/preparation-bundle.zip"; test "$(unzip -Z1 "$d/preparation-bundle.zip" | sort)" = $'binding.json\npreparation.json\nrefresh.tfplan\nrelease-preflight.json\nstage-b.tfvars'
-          for f in preparation.json refresh.tfplan stage-b.tfvars binding.json release-preflight.json; do unzip -p "$d/preparation-bundle.zip" "$f" > "$d/$f"; done
+          test "$(unzip -Z1 "$d/preparation.zip")" = preparation-bundle.zip; unzip -p "$d/preparation.zip" preparation-bundle.zip > "$d/preparation-bundle.zip"; test "$(unzip -Z1 "$d/preparation-bundle.zip" | sort)" = $'binding.json\npreparation.json\nprerequisite-bundle.zip\nrefresh.tfplan\nrelease-preflight.json\nstage-b.tfvars'
+          for f in preparation.json refresh.tfplan stage-b.tfvars binding.json release-preflight.json prerequisite-bundle.zip; do unzip -p "$d/preparation-bundle.zip" "$f" > "$d/$f"; done
+          producer_run="$(jq -r .prerequisiteProducerWorkflowRunId "$d/preparation.json")"; producer_attempt="$(jq -r .prerequisiteProducerWorkflowRunAttempt "$d/preparation.json")"; producer_artifact="$(jq -r .prerequisiteBundleArtifactId "$d/preparation.json")"; producer_digest="$(jq -r .prerequisiteBundleArtifactDigest "$d/preparation.json")"
+          test "$producer_attempt" = 1; test "$producer_run" != null; test "$producer_artifact" != null; [[ "$producer_digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+          producer_run_json="$(gh api repos/$GITHUB_REPOSITORY/actions/runs/$producer_run)"
+          test "$(jq -r .path <<<"$producer_run_json")" = .github/workflows/produce-production-green-stage-b-prerequisite-bundle.yml
+          test "$(jq -r .head_sha <<<"$producer_run_json")" = "$SOURCE_SHA"; test "$(jq -r .event <<<"$producer_run_json")" = workflow_dispatch; test "$(jq -r .run_attempt <<<"$producer_run_json")" = "$producer_attempt"; test "$(jq -r .conclusion <<<"$producer_run_json")" = success
+          producer_artifacts="$(gh api repos/$GITHUB_REPOSITORY/actions/runs/$producer_run/artifacts)"
+          test "$(jq '[.artifacts[] | select(.name == "production-green-stage-b-state-reconciliation-prerequisites" and .expired == false and (.id|tostring) == $id)] | length' --arg id "$producer_artifact" <<<"$producer_artifacts")" = 1
+          test "$(jq -r '[.artifacts[] | select((.id|tostring) == $id) | .digest] | .[0]' --arg id "$producer_artifact" <<<"$producer_artifacts")" = "$producer_digest"
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$producer_artifact/zip" > "$d/producer-artifact.zip"; test "sha256:$(sha256sum "$d/producer-artifact.zip" | awk '{print $1}')" = "$producer_digest"; test "$(unzip -Z1 "$d/producer-artifact.zip")" = prerequisite-bundle.zip
+          install -m 600 /dev/null "$d/prerequisite-bundle.zip"; unzip -p "$d/producer-artifact.zip" prerequisite-bundle.zip > "$d/prerequisite-bundle.zip"
       - name: Download authenticated authorization artifact
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
@@ -83,7 +93,7 @@ jobs:
         run: |
           set -euo pipefail
           d="$RUNNER_TEMP/stage-b-state-reconciliation"
-          node scripts/aws/reconcile-production-green-stage-b-state.mjs --mode execute --source-sha "$SOURCE_SHA" --tfvars "$d/stage-b.tfvars" --binding-report "$d/binding.json" --release-preflight "$d/release-preflight.json" --terraform-data-dir "$d/terraform-data" --saved-plan "$d/refresh.tfplan" --saved-plan-sha256 "$(sha256sum "$d/refresh.tfplan" | awk '{print $1}')" --preparation "$d/preparation.json" --preparation-file-sha256 "$(sha256sum "$d/preparation.json" | awk '{print $1}')" --authorization "$d/authorization.json" --result-out "$d/result.json"
+          node scripts/aws/reconcile-production-green-stage-b-state.mjs --mode execute --source-sha "$SOURCE_SHA" --tfvars "$d/stage-b.tfvars" --binding-report "$d/binding.json" --release-preflight "$d/release-preflight.json" --prerequisite-bundle "$d/prerequisite-bundle.zip" --prerequisite-producer-workflow-run-id "$(jq -r .prerequisiteProducerWorkflowRunId "$d/preparation.json")" --prerequisite-producer-workflow-run-attempt "$(jq -r .prerequisiteProducerWorkflowRunAttempt "$d/preparation.json")" --terraform-data-dir "$d/terraform-data" --saved-plan "$d/refresh.tfplan" --saved-plan-sha256 "$(sha256sum "$d/refresh.tfplan" | awk '{print $1}')" --preparation "$d/preparation.json" --preparation-file-sha256 "$(sha256sum "$d/preparation.json" | awk '{print $1}')" --authorization "$d/authorization.json" --result-out "$d/result.json"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

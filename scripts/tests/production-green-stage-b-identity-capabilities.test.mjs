@@ -201,11 +201,11 @@ test("runtime S3 Get and List actions are classified as read-only", () => {
 test("generated capability graph is exhaustive, deterministic, and identity-exact", () => {
   const first = buildStageBDeploymentCapabilityGraph(); const second = buildStageBDeploymentCapabilityGraph();
   assert.deepEqual(first, second);
-  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 52, capabilities: 446, uniqueActions: 148, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
+  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 52, capabilities: 494, uniqueActions: 148, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
   const stateReconciliation = first.capabilities.filter(({ phase }) => phase === "stage-b-exact-refresh-only-state-reconciliation");
-  assert.equal(stateReconciliation.length, 7);
+  assert.equal(stateReconciliation.length, 55);
   assert.equal(stateReconciliation.every(({ identity, executor, sourceFile }) => identity === "RELEASE_DEPLOYER" && executor === "terraform" && sourceFile === "scripts/aws/reconcile-production-green-stage-b-state.mjs"), true);
-  assert.equal(stateReconciliation.filter(({ classification }) => classification === "TERRAFORM_STATE_ONLY_MUTATION").every(({ mutation }) => mutation === false), true);
+  assert.equal(stateReconciliation.filter(({ classification }) => classification === "TERRAFORM_STATE_ONLY_MUTATION").every(({ mutation }) => mutation === true), true);
   const bootstrapAuthorization = first.capabilities.filter(({ id }) => id.startsWith("bootstrap-operator-policy-authorization-"));
   assert.equal(bootstrapAuthorization.length, 4);
   assert.equal(bootstrapAuthorization.every(({ identity, mutation, policy }) => identity === "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER" && mutation === false && policy.sourceFile === BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.authorizationPolicyPath), true);

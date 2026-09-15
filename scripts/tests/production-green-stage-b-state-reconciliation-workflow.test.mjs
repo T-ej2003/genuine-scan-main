@@ -32,3 +32,17 @@ test("Stage B state reconciliation workflows are protected, artifact-bound, and 
   assert.match(source, /install -m 600 \/dev\/null "\$d\/authorization\.json"/);
   assert.doesNotMatch(source, /saved_plan_base64|preparation_base64|tfvars_base64/);
 });
+
+test("the prerequisite producer is a single source-bound four-member producer", () => {
+  const name = "produce-production-green-stage-b-prerequisite-bundle.yml";
+  const workflow = parse(name); const source = read(name); const producer = fs.readFileSync(path.join(root, "scripts/aws/produce-production-green-stage-b-prerequisite-bundle.mjs"), "utf8");
+  assert.deepEqual(Object.keys(workflow.on), ["workflow_dispatch"]);
+  assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), ["source_sha", "ticket_id"]);
+  assert.deepEqual(workflow.permissions, { actions: "read", contents: "read", "id-token": "write" });
+  assert.equal(workflow.jobs.produce.environment, "production");
+  assert.match(source, /produce-production-green-stage-b-prerequisite-bundle\.mjs --source-sha/);
+  assert.match(source, /production-green-stage-b-state-reconciliation-prerequisites/);
+  assert.match(source, /prerequisite-bundle\.zip/);
+  assert.match(source, /GITHUB_RUN_ATTEMPT/); assert.match(producer, /GITHUB_WORKFLOW_REF/); assert.match(producer, /GITHUB_RUN_ATTEMPT/);
+  assert.doesNotMatch(source, /(?:tfvars|binding|release_preflight|saved_plan|preparation)_base64|raw filesystem|artifact_id/);
+});

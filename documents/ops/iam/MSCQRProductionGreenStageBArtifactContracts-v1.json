@@ -729,6 +729,45 @@
       "rollback": "remove-committed-or-restore-backups"
     },
     {
+      "id": "stage-b-prerequisite-bundle",
+      "kind": "file",
+      "producer": "scripts/aws/produce-production-green-stage-b-prerequisite-bundle.mjs:produceStageBPrerequisiteBundle",
+      "consumers": [
+        "scripts/aws/reconcile-production-green-stage-b-state.mjs",
+        ".github/workflows/prepare-production-green-stage-b-state-reconciliation.yml",
+        ".github/workflows/execute-production-green-stage-b-state-reconciliation.yml"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "externalProducer": true,
+      "atomicGroup": "stage-b-prerequisite-bundle",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "stage-b-runtime-materialization",
+      "kind": "file",
+      "producer": "scripts/aws/stage-b-prerequisite-bundle.mjs:writeStageBRuntimeMaterialization",
+      "consumers": [
+        "scripts/aws/reconcile-production-green-stage-b-state.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "stage-b-runtime-materialization",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
       "id": "tfvars",
       "kind": "file",
       "producer": "scripts/aws/generate-production-green-stage-b-tfvars.mjs:writeAtomicPair",
