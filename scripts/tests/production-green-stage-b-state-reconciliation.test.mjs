@@ -99,6 +99,12 @@ test("apply error is resolved only by exact successor readback", () => {
   assert.equal(result.status, "state-write-completed-postverify");
 });
 
+test("apply failure with exact predecessor readback is a durable zero-mutation result", () => {
+  const preparation = prepare(); const authorization = createStageBStateReconciliationAuthorization({ preparation, approval: approval(), now }); let current = { ...state };
+  const result = executeStageBStateReconciliation({ sourceSha, preparation, authorization, bindings: execBindings(), planBytes: bytes, planJson: plan(), readState: () => current, applyRefreshOnlyPlan: () => { throw new Error("lock acquisition failed"); }, renderRefreshClosurePlan: cleanPlan, renderNormalClosurePlan: cleanPlan, reauthenticateSource: () => {}, now });
+  assert.equal(result.status, "state-write-not-committed"); assert.equal(result.successorState.serial, 104); assert.equal(result.remainingExpectedStateObservations, null); assert.equal(result.sourceToLiveIamSemanticDifferences, null); assert.equal(result.newUnexpectedDriftCount, null); assert.equal(result.remoteResourceMutationCount, 0); assert.equal(result.terraformStateMutationCount, 0);
+});
+
 test("post-write closure failure retains the exact committed successor without false clean claims", () => {
   const preparation = prepare(); const authorization = createStageBStateReconciliationAuthorization({ preparation, approval: approval(), now }); let current = { ...state };
   assert.throws(() => executeStageBStateReconciliation({ sourceSha, preparation, authorization, bindings: execBindings(), planBytes: bytes, planJson: plan(), readState: () => current, applyRefreshOnlyPlan: () => { current = { ...current, serial: 105, stateSha256: "c".repeat(64) }; }, renderRefreshClosurePlan: () => { throw new Error("temporary closure read failure"); }, renderNormalClosurePlan: cleanPlan, reauthenticateSource: () => {}, now }), (error) => error.reconciliationResult?.status === "state-write-completed-postverify-failed" && error.reconciliationResult.successorState.serial === 105 && error.reconciliationResult.remainingExpectedStateObservations === null && error.reconciliationResult.sourceToLiveIamSemanticDifferences === null && error.reconciliationResult.newUnexpectedDriftCount === null && error.reconciliationResult.remoteResourceMutationCount === 0 && error.reconciliationResult.terraformStateMutationCount === 1);

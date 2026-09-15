@@ -164,7 +164,7 @@ export function executeStageBStateReconciliation({ sourceSha, preparation, autho
   if (!Buffer.isBuffer(planBytes) || sha256(planBytes) !== prepared.refreshOnlyPlanSha256 || sha256(planJson) !== prepared.refreshOnlyPlanJsonSha256 || !equal(assertExactStageBRefreshOnlyPlan(planJson, { sourceSha, stateIdentity: prepared.predecessorState, tfvarsSha256: bindings.tfvarsSha256, bindingSha256: bindings.bindingSha256, expectedPolicyValueHashes: prepared.reviewedPolicyValueHashes }), prepared.planSemantics)) throw new Error("Stage B state reconciliation saved plan changed after authorization.");
   const before = readState();
   if (!equal(before, prepared.predecessorState)) throw new Error("Stage B state reconciliation CAS failed.");
-  const result = (status, successorState) => { const postVerificationFailed = status === "state-write-completed-postverify-failed"; return Object.freeze({ schemaVersion: 1, kind: "PRODUCTION_GREEN_STAGE_B_STATE_RECONCILIATION_RESULT", status, sourceSha, authorizationSha256: authorization.authorizationSha256, predecessorState: before, successorState, remainingExpectedStateObservations: postVerificationFailed ? null : 0, sourceToLiveIamSemanticDifferences: postVerificationFailed ? null : 0, newUnexpectedDriftCount: postVerificationFailed ? null : 0, remoteResourceMutationCount: 0, terraformStateMutationCount: 1 }); };
+  const result = (status, successorState, terraformStateMutationCount = 1) => { const cleanClosureProven = status === "complete" || status === "state-write-completed-postverify"; return Object.freeze({ schemaVersion: 1, kind: "PRODUCTION_GREEN_STAGE_B_STATE_RECONCILIATION_RESULT", status, sourceSha, authorizationSha256: authorization.authorizationSha256, predecessorState: before, successorState, remainingExpectedStateObservations: cleanClosureProven ? 0 : null, sourceToLiveIamSemanticDifferences: cleanClosureProven ? 0 : null, newUnexpectedDriftCount: cleanClosureProven ? 0 : null, remoteResourceMutationCount: 0, terraformStateMutationCount }); };
   const successor = () => {
     const after = readState();
     if (after.lineage !== before.lineage || after.serial !== before.serial + 1 || after.stateSha256 === before.stateSha256) throw new Error("Stage B state reconciliation successor is not exact.");
@@ -183,7 +183,7 @@ export function executeStageBStateReconciliation({ sourceSha, preparation, autho
   };
   reauthenticateSource();
   try { applyRefreshOnlyPlan(planBytes); } catch (error) {
-    try { return complete("state-write-completed-postverify"); }
+    try { const after = readState(); if (equal(after, before)) return result("state-write-not-committed", after, 0); return complete("state-write-completed-postverify"); }
     catch (verificationError) {
       if (verificationError.reconciliationResult) throw verificationError;
       error.mutationOutcome = "AMBIGUOUS"; throw error;
