@@ -21,10 +21,14 @@ function guardrailBranchLines(source) {
   return { pullRequest: lines.slice(start + 1, otherwise), dispatch: lines.slice(otherwise + 1, end) };
 }
 
-function hasOnlyExactGuardrailCommand(lines, command) {
-  const commands = lines
+function executableLines(lines) {
+  return lines
     .map((line) => line.trim().replace(/\s+/g, " "))
-    .filter((line) => line.startsWith("npm run verify:guardrails"));
+    .filter((line) => line && !line.startsWith("#"));
+}
+
+function hasOnlyExactGuardrailCommand(lines, command) {
+  const commands = executableLines(lines);
   return commands.length === 1 && commands[0] === command;
 }
 

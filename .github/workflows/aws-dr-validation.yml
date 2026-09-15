@@ -57,9 +57,13 @@ jobs:
             npm run verify:guardrails:source
           else
             npm run verify:guardrails
-            npm run check:documents
-            npm run check:aws-dr-safety
           fi
+
+      - name: Validate dispatch DR safety contracts
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          npm run check:documents
+          npm run check:aws-dr-safety
 
       - name: Validate DR-specific static contracts
         if: ${{ github.event_name == 'workflow_dispatch' || steps.scope.outputs.dr_relevant == 'true' }}

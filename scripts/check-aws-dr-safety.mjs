@@ -734,7 +734,14 @@ if (/pull_request:[\s\S]*?\n\s+paths:/.test(drValidationWorkflow)) {
     message: "Required validate workflow must not use a pull_request paths filter.",
   });
 }
-for (const expected of ["  validate:", "Detect DR-relevant change scope", "steps.scope.outputs.dr_relevant"]) {
+for (const expected of [
+  "  validate:",
+  "Detect DR-relevant change scope",
+  "steps.scope.outputs.dr_relevant",
+  "Validate dispatch DR safety contracts",
+  "npm run check:documents",
+  "npm run check:aws-dr-safety",
+]) {
   if (!drValidationWorkflow.includes(expected)) {
     findings.push({
       repoPath: drValidationWorkflowPath,
