@@ -34,7 +34,7 @@
     "check:staging-runtime-secret-sync": "node scripts/check-staging-runtime-secret-sync.mjs",
     "plan:staging-terraform": "node scripts/plan-staging-terraform.mjs",
     "apply:staging-terraform": "node scripts/apply-staging-terraform.mjs",
-    "check:aws-dr-safety": "node scripts/check-aws-dr-safety.mjs",
+    "check:aws-dr-safety": "node scripts/tests/aws-dr-validation-contract.test.mjs && node scripts/check-aws-dr-safety.mjs",
     "check:asg-compose-interpolation": "node scripts/dr/check-asg-compose-interpolation.mjs",
     "check:asg-multi-instance-readiness": "node scripts/dr/check-asg-multi-instance-readiness.mjs",
     "check:minio-decommission-readiness": "node scripts/dr/check-minio-decommission-readiness.mjs",

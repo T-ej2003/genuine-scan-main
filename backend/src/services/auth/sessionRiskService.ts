@@ -9,7 +9,8 @@ import type { Prisma } from "@prisma/client";
 
 const parseIntEnv = (key: string, fallback: number) => {
   const raw = Number(String(process.env[key] || "").trim());
-  return Number.isFinite(raw) ? Math.floor(raw) : fallback;
+  const normalized = Math.floor(raw);
+  return Number.isFinite(raw) && normalized > 0 ? normalized : fallback;
 };
 
 const toRiskLevel = (score: number): AuthRiskLevel => {

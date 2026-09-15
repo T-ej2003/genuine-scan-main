@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { extractGuardrailRunBlock, guardrailRunBlockIsCanonical } from "./lib/aws-dr-validation-contract.mjs";
 
 const root = process.cwd();
 const scanRoots = [".github/workflows", "scripts", "ops/deploy", "documents/ops"];
@@ -682,6 +683,7 @@ for (const scanRoot of scanRoots) {
 }
 
 const packageJsonPath = path.join(root, "package.json");
+const drValidationWorkflowPath = ".github/workflows/aws-dr-validation.yml";
 const africaDnsPlanPath = path.join(root, africaDnsPlanScript);
 if (!fs.existsSync(africaDnsPlanPath)) {
   findings.push({
@@ -722,6 +724,38 @@ if (fs.existsSync(packageJsonPath)) {
       message: "package.json must expose ops:route53-africa-dns-plan for Cape Town Africa DNS planning.",
     });
   }
+}
+
+const drValidationWorkflow = fs.readFileSync(path.join(root, drValidationWorkflowPath), "utf8");
+if (/pull_request:[\s\S]*?\n\s+paths:/.test(drValidationWorkflow)) {
+  findings.push({
+    repoPath: drValidationWorkflowPath,
+    line: 1,
+    message: "Required validate workflow must not use a pull_request paths filter.",
+  });
+}
+for (const expected of [
+  "  validate:",
+  "Detect DR-relevant change scope",
+  "steps.scope.outputs.dr_relevant",
+  "Validate dispatch DR safety contracts",
+  "npm run check:documents",
+  "npm run check:aws-dr-safety",
+]) {
+  if (!drValidationWorkflow.includes(expected)) {
+    findings.push({
+      repoPath: drValidationWorkflowPath,
+      line: 1,
+      message: `Required validate workflow contract is missing ${expected}.`,
+    });
+  }
+}
+if (!guardrailRunBlockIsCanonical(extractGuardrailRunBlock(drValidationWorkflow))) {
+  findings.push({
+    repoPath: drValidationWorkflowPath,
+    line: 1,
+    message: "Required validate workflow guardrail step must be the canonical fail-closed event-selection program.",
+  });
 }
 
 if (findings.length > 0) {
