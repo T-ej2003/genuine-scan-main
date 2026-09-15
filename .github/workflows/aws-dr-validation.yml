@@ -4,19 +4,11 @@ on:
   pull_request:
     branches:
       - main
-    paths:
-      - "documents/ops/**"
-      - "scripts/**"
-      - "ops/deploy/**"
-      - "ops/aws/**"
-      - "backend/Dockerfile"
-      - "package.json"
-      - "package-lock.json"
-      - ".github/workflows/**"
   workflow_dispatch:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   validate:
@@ -41,15 +33,38 @@ jobs:
             npm install
           fi
 
+      - name: Detect DR-relevant change scope
+        id: scope
+        uses: actions/github-script@v8
+        with:
+          script: |
+            if (context.eventName !== "pull_request") {
+              core.setOutput("dr_relevant", "true");
+              return;
+            }
+            const prefixes = ["documents/ops/", "scripts/", "ops/deploy/", "ops/aws/", ".github/workflows/"];
+            const exact = new Set(["backend/Dockerfile", "package.json", "package-lock.json"]);
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+              per_page: 100,
+            });
+            core.setOutput("dr_relevant", String(files.some(({ filename }) => exact.has(filename) || prefixes.some((prefix) => filename.startsWith(prefix)))));
+
       - name: Validate DR guardrails
         run: |
           if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
             npm run verify:guardrails:source
           else
             npm run verify:guardrails
+            npm run check:documents
+            npm run check:aws-dr-safety
           fi
-          npm run check:documents
-          npm run check:aws-dr-safety
+
+      - name: Validate DR-specific static contracts
+        if: ${{ github.event_name == 'workflow_dispatch' || steps.scope.outputs.dr_relevant == 'true' }}
+        run: |
           /bin/sh -n scripts/deploy-standby.sh
           /bin/sh -n scripts/health-check-regions.sh
           for file in scripts/dr/*.sh; do
@@ -62,11 +77,13 @@ jobs:
           git diff --check
 
       - name: Install Ansible safely for syntax checks
+        if: ${{ github.event_name == 'workflow_dispatch' || steps.scope.outputs.dr_relevant == 'true' }}
         run: |
           python3 -m pip install --user ansible-core
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Validate Ansible standby playbooks
+        if: ${{ github.event_name == 'workflow_dispatch' || steps.scope.outputs.dr_relevant == 'true' }}
         run: |
           ansible-inventory -i ops/deploy/inventory.example.ini --list
           ansible-playbook -i ops/deploy/inventory.example.ini ops/deploy/bootstrap-standby.yml --syntax-check

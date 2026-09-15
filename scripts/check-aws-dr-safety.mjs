@@ -682,6 +682,7 @@ for (const scanRoot of scanRoots) {
 }
 
 const packageJsonPath = path.join(root, "package.json");
+const drValidationWorkflowPath = ".github/workflows/aws-dr-validation.yml";
 const africaDnsPlanPath = path.join(root, africaDnsPlanScript);
 if (!fs.existsSync(africaDnsPlanPath)) {
   findings.push({
@@ -720,6 +721,30 @@ if (fs.existsSync(packageJsonPath)) {
       repoPath: "package.json",
       line: 1,
       message: "package.json must expose ops:route53-africa-dns-plan for Cape Town Africa DNS planning.",
+    });
+  }
+}
+
+const drValidationWorkflow = fs.readFileSync(path.join(root, drValidationWorkflowPath), "utf8");
+if (/pull_request:[\s\S]*?\n\s+paths:/.test(drValidationWorkflow)) {
+  findings.push({
+    repoPath: drValidationWorkflowPath,
+    line: 1,
+    message: "Required validate workflow must not use a pull_request paths filter.",
+  });
+}
+for (const expected of [
+  "  validate:",
+  "npm run verify:guardrails:source",
+  "npm run verify:guardrails",
+  "Detect DR-relevant change scope",
+  "steps.scope.outputs.dr_relevant",
+]) {
+  if (!drValidationWorkflow.includes(expected)) {
+    findings.push({
+      repoPath: drValidationWorkflowPath,
+      line: 1,
+      message: `Required validate workflow contract is missing ${expected}.`,
     });
   }
 }
