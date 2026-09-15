@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "deploymentModel": "clean-room-blue-green",
-  "sourceContractSha256": "c5c6ae322904118002860b136fb225053f7d2cf36098578f3732b62f60ffc6bc",
+  "sourceContractSha256": "a86be73b0ea416a1c17f4ecfa356db98ab65d9238384c5618e7679f332d170fd",
   "migrationSetDigest": "6642442a81cd98c7a132d241fa98e50ae231510896c9da67ab70d86b050d02db",
   "sourceContractInputs": [
     {
@@ -18,11 +18,11 @@
     },
     {
       "path": "documents/security/rls-program/runtime-identities.json",
-      "sha256": "fc049f55fc74d47cfe3c0136c0431afb4c8375d7b2caa81284918d874bfc9898"
+      "sha256": "bf7a7438f3ff9779a78df0cb0796237d1a2e20fc204f08e92fc2cf999428894b"
     },
     {
       "path": "documents/security/rls-program/object-ownership-chain.json",
-      "sha256": "11dd203aec40efc8e5eb656cc0da1d2bea36c181cb57f41df79b99b8d76cc294"
+      "sha256": "08c33de9d5d468f8c6214202e48c418d88c65c2c1681fc192fcf80de21127077"
     },
     {
       "path": "documents/security/rls-program/essential-workflow-allowlist.json",
@@ -46,7 +46,7 @@
     },
     {
       "path": "scripts/rls/generate-clean-room-rls-sql.mjs",
-      "sha256": "21f30c05649ca92c61992b82e22a7e75778752128873132ce2a5ef79564427e3"
+      "sha256": "b0a9f1b6b2d2ddcc9f8d6286beda2669803f1e818cd6e6fa02a389a629e86c7b"
     },
     {
       "path": "scripts/rls/verify-full-rls-package.mjs",
@@ -62,7 +62,7 @@
     },
     {
       "path": "scripts/rls/lib/clean-room-source-contract.mjs",
-      "sha256": "9e68596a17302ad5626d38ca343d0daeea0282986839fe6a50fa8d18128b856e"
+      "sha256": "13fc293a6681661d45b73c205ff2fa517382b36a741488527f5e51b1f37d59ab"
     },
     {
       "path": "scripts/rls/lib/program-inventory.mjs",
@@ -78,11 +78,11 @@
     },
     {
       "path": "scripts/rls/lib/named-sql-function-contracts.mjs",
-      "sha256": "bae087860b0a630429c1272c5e084afd360125c900d8c5a499b00b3b166f3ccb"
+      "sha256": "9dd0f4884268d7e3f33ddff7902780f36a4751ea32c28436da00a0c6785890f1"
     },
     {
       "path": "scripts/rls/lib/restricted-owner-projection-contract.mjs",
-      "sha256": "c7671091b2abf04e1947558107a4fd0b9e45f0eca9e72f3643e6b3a38dc8520c"
+      "sha256": "fa1d980209a39fa6e979dca07bba8b209d4ded52c20094dc044cf91cf430041f"
     },
     {
       "path": "backend/Dockerfile",
@@ -279,6 +279,18 @@
     {
       "path": "backend/src/rls-waves/session-c/c01/qrSystemRollback.sql",
       "sha256": "c8e614df73b97baad766204b07a7f94aac5ffec3ebbfbdf73d39ce80620c2bb8"
+    },
+    {
+      "path": "backend/src/rls-waves/session-c/c04/operatorProcedures.sql",
+      "sha256": "6d53811f942c677ca7e1157d7f16aa736539b8002ccf818c635f09f2f800f377"
+    },
+    {
+      "path": "backend/src/rls-waves/session-c/c04/operatorProceduresRollback.sql",
+      "sha256": "47d2250c69a140a739970fffe608ac7d069794a0db161c02074d03cc728d3ef3"
+    },
+    {
+      "path": "backend/src/rls-waves/session-c/c04/bootstrapConfiguredSuperAdmin.sql",
+      "sha256": "ba465bbbe8637085de055692d606b71dbd6081f1adba3e23d3bf956baac808d3"
     },
     {
       "path": "backend/tests/rls-wave-b/b01/authenticationClosurePostgres18.test.js",
@@ -2318,6 +2330,29 @@
       "route": "GET /api/audit/logs",
       "certificationStatus": "pending",
       "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-audit-log",
+      "table": "AuditLog",
+      "policyName": "full_rls_initial_admin_bootstrap_auditlog_insert",
+      "command": "INSERT",
+      "actors": [
+        "deployment-migration"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "bootstrap-configured-super-admin"
+      ],
+      "scopeType": "deployment-only-migration-identity-and-configured-email",
+      "scopePredicate": "(current_user='mscqr_rls_cert_owner' AND session_user='mscqr_rls_cert_migration' AND current_setting('app.context_installed',true)='1' AND current_setting('app.purpose',true)='bootstrap-configured-super-admin' AND current_setting('app.auth_assurance',true)='system-verified' AND current_setting('app.bootstrap_email',true)<>'' AND \"userId\" IS NULL AND \"action\" IN ('AUTH_SUPER_ADMIN_BOOTSTRAPPED','AUTH_SUPER_ADMIN_BOOTSTRAP_SKIPPED_EXISTING','AUTH_SUPER_ADMIN_BOOTSTRAP_BLOCKED') AND \"entityType\"='User')",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:c04-bootstrap-configured-super-admin:AuditLog:INSERT"
+      ],
+      "workflowId": "workflow-cli-backend-scripts-create-super-admin-js",
+      "route": "deployment-only CLI",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
     },
     {
       "tableId": "table-audit-log",
@@ -9602,6 +9637,29 @@
     {
       "tableId": "table-security-event-outbox",
       "table": "SecurityEventOutbox",
+      "policyName": "full_rls_initial_admin_bootstrap_securityeventoutbox_insert",
+      "command": "INSERT",
+      "actors": [
+        "deployment-migration"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "bootstrap-configured-super-admin"
+      ],
+      "scopeType": "deployment-only-migration-identity-and-configured-email",
+      "scopePredicate": "(current_user='mscqr_rls_cert_owner' AND session_user='mscqr_rls_cert_migration' AND current_setting('app.context_installed',true)='1' AND current_setting('app.purpose',true)='bootstrap-configured-super-admin' AND current_setting('app.auth_assurance',true)='system-verified' AND current_setting('app.bootstrap_email',true)<>'' AND \"eventType\"='OPERATOR_PROCEDURE_AUDIT' AND payload->>'action' IN ('AUTH_SUPER_ADMIN_BOOTSTRAPPED','AUTH_SUPER_ADMIN_BOOTSTRAP_SKIPPED_EXISTING','AUTH_SUPER_ADMIN_BOOTSTRAP_BLOCKED'))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:c04-bootstrap-configured-super-admin:SecurityEventOutbox:INSERT"
+      ],
+      "workflowId": "workflow-cli-backend-scripts-create-super-admin-js",
+      "route": "deployment-only CLI",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-security-event-outbox",
+      "table": "SecurityEventOutbox",
       "policyName": "printing_lifecycle_securityeventoutbox_insert",
       "command": "INSERT",
       "actors": [
@@ -10719,6 +10777,52 @@
     {
       "tableId": "table-user",
       "table": "User",
+      "policyName": "full_rls_initial_admin_bootstrap_user_insert",
+      "command": "INSERT",
+      "actors": [
+        "deployment-migration"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "bootstrap-configured-super-admin"
+      ],
+      "scopeType": "deployment-only-migration-identity-and-configured-email",
+      "scopePredicate": "(current_user='mscqr_rls_cert_owner' AND session_user='mscqr_rls_cert_migration' AND current_setting('app.context_installed',true)='1' AND current_setting('app.purpose',true)='bootstrap-configured-super-admin' AND current_setting('app.auth_assurance',true)='system-verified' AND current_setting('app.bootstrap_email',true)<>'' AND lower(\"email\")=current_setting('app.bootstrap_email',true) AND \"role\"='SUPER_ADMIN' AND \"status\"='ACTIVE' AND \"isActive\" AND \"orgId\" IS NULL AND \"licenseeId\" IS NULL)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:c04-bootstrap-configured-super-admin:User:INSERT"
+      ],
+      "workflowId": "workflow-cli-backend-scripts-create-super-admin-js",
+      "route": "deployment-only CLI",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-user",
+      "table": "User",
+      "policyName": "full_rls_initial_admin_bootstrap_user_select",
+      "command": "SELECT",
+      "actors": [
+        "deployment-migration"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "bootstrap-configured-super-admin"
+      ],
+      "scopeType": "deployment-only-migration-identity-and-configured-email",
+      "scopePredicate": "(current_user='mscqr_rls_cert_owner' AND session_user='mscqr_rls_cert_migration' AND current_setting('app.context_installed',true)='1' AND current_setting('app.purpose',true)='bootstrap-configured-super-admin' AND current_setting('app.auth_assurance',true)='system-verified' AND current_setting('app.bootstrap_email',true)<>'' AND (\"role\" IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR lower(\"email\")=current_setting('app.bootstrap_email',true)))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:c04-bootstrap-configured-super-admin:User:SELECT"
+      ],
+      "workflowId": "workflow-cli-backend-scripts-create-super-admin-js",
+      "route": "deployment-only CLI",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-user",
+      "table": "User",
       "policyName": "full_rls_internal_authowner_user_select",
       "name": "full_rls_internal_authowner_user_select",
       "command": "SELECT",
@@ -11379,55 +11483,55 @@
       "key": "owner",
       "name": "mscqr_rls_cert_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:c5c6ae322904118002860b136fb225053f7d2cf36098578f3732b62f60ffc6bc"
+      "marker": "mscqr-full-rls-clean-room:certification:a86be73b0ea416a1c17f4ecfa356db98ab65d9238384c5618e7679f332d170fd"
     },
     {
       "key": "authOwner",
       "name": "mscqr_rls_cert_auth_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:c5c6ae322904118002860b136fb225053f7d2cf36098578f3732b62f60ffc6bc"
+      "marker": "mscqr-full-rls-clean-room:certification:a86be73b0ea416a1c17f4ecfa356db98ab65d9238384c5618e7679f332d170fd"
     },
     {
       "key": "app",
       "name": "mscqr_rls_cert_app",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:c5c6ae322904118002860b136fb225053f7d2cf36098578f3732b62f60ffc6bc"
+      "marker": "mscqr-full-rls-clean-room:certification:a86be73b0ea416a1c17f4ecfa356db98ab65d9238384c5618e7679f332d170fd"
     },
     {
       "key": "read",
       "name": "mscqr_rls_cert_read",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:c5c6ae322904118002860b136fb225053f7d2cf36098578f3732b62f60ffc6bc"
+      "marker": "mscqr-full-rls-clean-room:certification:a86be73b0ea416a1c17f4ecfa356db98ab65d9238384c5618e7679f332d170fd"
     },
     {
       "key": "preauth",
       "name": "mscqr_rls_cert_preauth",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:c5c6ae322904118002860b136fb225053f7d2cf36098578f3732b62f60ffc6bc"
+      "marker": "mscqr-full-rls-clean-room:certification:a86be73b0ea416a1c17f4ecfa356db98ab65d9238384c5618e7679f332d170fd"
     },
     {
       "key": "worker",
       "name": "mscqr_rls_cert_worker",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:c5c6ae322904118002860b136fb225053f7d2cf36098578f3732b62f60ffc6bc"
+      "marker": "mscqr-full-rls-clean-room:certification:a86be73b0ea416a1c17f4ecfa356db98ab65d9238384c5618e7679f332d170fd"
     },
     {
       "key": "scheduled",
       "name": "mscqr_rls_cert_scheduled",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:c5c6ae322904118002860b136fb225053f7d2cf36098578f3732b62f60ffc6bc"
+      "marker": "mscqr-full-rls-clean-room:certification:a86be73b0ea416a1c17f4ecfa356db98ab65d9238384c5618e7679f332d170fd"
     },
     {
       "key": "operator",
       "name": "mscqr_rls_cert_operator",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:c5c6ae322904118002860b136fb225053f7d2cf36098578f3732b62f60ffc6bc"
+      "marker": "mscqr-full-rls-clean-room:certification:a86be73b0ea416a1c17f4ecfa356db98ab65d9238384c5618e7679f332d170fd"
     },
     {
       "key": "migration",
       "name": "mscqr_rls_cert_migration",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:c5c6ae322904118002860b136fb225053f7d2cf36098578f3732b62f60ffc6bc"
+      "marker": "mscqr-full-rls-clean-room:certification:a86be73b0ea416a1c17f4ecfa356db98ab65d9238384c5618e7679f332d170fd"
     }
   ]
 }

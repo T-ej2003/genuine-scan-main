@@ -42,6 +42,14 @@ const readContractSources = (contracts, replacements = []) =>
     })
     .filter(Boolean)
     .join("\n\n");
+const extractSqlFunction = (source, name) => {
+  const start = source.indexOf(`CREATE OR REPLACE FUNCTION app_ops.${name}(`);
+  const nextFunction = source.indexOf("\nCREATE OR REPLACE FUNCTION ", start + 1);
+  const revocations = source.indexOf("\nREVOKE ALL ON FUNCTION", start + 1);
+  const end = nextFunction === -1 ? revocations : nextFunction;
+  if (start === -1 || end === -1) throw new Error(`Missing canonical app_ops.${name} definition`);
+  return source.slice(start, end).trim();
+};
 const mergeOwnerPolicies = (entries) => [...entries.reduce((groups, [table, command, predicate]) => {
   const key = `${table}:${command}`;
   const group = groups.get(key) || { table, command, predicates: [] };
@@ -214,6 +222,16 @@ for (const [key, name] of Object.entries(roleNames)) {
   if (!identityFor(key) || name.length > 63) throw new Error(`No valid clean-room role contract for ${identityKeys[key]}`);
 }
 const roleSpecs = Object.keys(identityKeys).map((key) => ({ key, name: roleNames[key], login: identityFor(key)?.loginExpectation === "LOGIN" }));
+const operatorProcedureSource = fs.readFileSync(path.join(repoRoot, "backend/src/rls-waves/session-c/c04/operatorProcedures.sql"), "utf8");
+const bootstrapConfiguredSuperAdminSource = fs.readFileSync(path.join(repoRoot, "backend/src/rls-waves/session-c/c04/bootstrapConfiguredSuperAdmin.sql"), "utf8");
+const bootstrapFunctionSource = [
+  extractSqlFunction(operatorProcedureSource, "session_c04_assert_context").replace(
+    "ELSIF identity_class = 'migration' AND login_role !~ '^mscqr_(dev|staging|prod)_migration$'\n     AND login_role <> 'mscqr_rls_wave_c_migration' THEN",
+    `ELSIF identity_class = 'migration' AND login_role <> ${lit(roleNames.migration)} THEN`,
+  ),
+  extractSqlFunction(operatorProcedureSource, "session_c04_audit"),
+  extractSqlFunction(bootstrapConfiguredSuperAdminSource, "bootstrap_configured_super_admin"),
+].join("\n\n");
 const roleValuesSql = roleSpecs.map((role) => `(${lit(role.name)}, ${role.login})`).join(",\n    ");
 const managedRoleList = roleSpecs.map((role) => lit(role.name)).join(", ");
 const administrativeExecutorRoles = {
@@ -270,6 +288,9 @@ const b03AuthenticatedContracts = validateNamedSqlFunctionContracts().filter((co
 );
 const operationalReadContracts = validateNamedSqlFunctionContracts().filter((contract) =>
   contract.security.deploymentPhase === "session-a-operational-read"
+);
+const initialAdminBootstrapContracts = validateNamedSqlFunctionContracts().filter((contract) =>
+  contract.security.deploymentPhase === "session-c-c04-initial-admin-bootstrap"
 );
 const b01FunctionSource = b01Contracts.length
   ? fs.readFileSync(path.join(repoRoot, b01Contracts[0].definitionLocation), "utf8").replaceAll("{{AUTH_OWNER}}", q(roleNames.authOwner))
@@ -882,6 +903,7 @@ ${resetRole}
 CREATE SCHEMA app_rls AUTHORIZATION ${q(roleNames.owner)};
 CREATE SCHEMA app_auth AUTHORIZATION ${q(roleNames.authOwner)};
 CREATE SCHEMA app_public AUTHORIZATION ${q(roleNames.authOwner)};
+CREATE SCHEMA app_ops AUTHORIZATION ${q(roleNames.owner)};
 REVOKE SELECT ON TABLE mscqr_rls_install.state FROM ${q(roleNames.migration)};
 REVOKE USAGE ON SCHEMA mscqr_rls_install FROM ${q(roleNames.migration)};
 ${ownerDefaultPrivilegeHardeningSql}
@@ -1679,6 +1701,14 @@ ${resetRole}
 ${setRole(roleNames.owner)}
 REVOKE CREATE ON SCHEMA app_rls FROM ${q(roleNames.authOwner)};
 ${resetRole}` : ""}
+${setRole(roleNames.owner)}
+${bootstrapFunctionSource}
+REVOKE ALL ON FUNCTION app_ops.session_c04_assert_context(text,text,text,text[]) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_ops.session_c04_audit(text,text,text,text,jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_ops.bootstrap_configured_super_admin(text,text,text,boolean) FROM PUBLIC;
+GRANT USAGE ON SCHEMA app_ops TO ${q(roleNames.migration)};
+GRANT EXECUTE ON FUNCTION app_ops.bootstrap_configured_super_admin(text,text,text,boolean) TO ${q(roleNames.migration)};
+${resetRole}
 INSERT INTO mscqr_rls_install.expected_routine(
   schema_name,routine_name,identity_arguments,result_type,routine_kind,owner_name,language_name,volatility,
   security_definer,leakproof,strict,parallel_mode,configuration,source_body,acl_rows
@@ -1697,7 +1727,7 @@ FROM pg_proc p
 JOIN pg_namespace n ON n.oid=p.pronamespace
 JOIN pg_roles owner_role ON owner_role.oid=p.proowner
 JOIN pg_language l ON l.oid=p.prolang
-WHERE n.nspname IN ('app_rls','app_auth','app_public');
+WHERE n.nspname IN ('app_rls','app_auth','app_public','app_ops');
 UPDATE mscqr_rls_install.state SET phase='context-helpers-installed' WHERE singleton;
 `;
 
@@ -2012,6 +2042,19 @@ for (const policy of internalPolicies) {
   policyStatements.push(`CREATE POLICY ${q(policy.name)} ON public.${q(policy.table)} AS PERMISSIVE FOR ${policy.command} TO ${q(roleNames[policy.roleKey] || roleNames.owner)} ${clause};`);
   policyStatements.push(`COMMENT ON POLICY ${q(policy.name)} ON public.${q(policy.table)} IS ${lit(JSON.stringify({ sourceCommandRuleIds: policy.sourceCommandRuleIds, actors: policy.actors, assurance: policy.assurance, purpose: policy.purpose, scope: policy.scopeType, ...(policy.workflowIds ? { workflowIds: policy.workflowIds } : {}) }))};`);
 }
+const bootstrapPolicyBase = `current_user=${lit(roleNames.owner)} AND session_user=${lit(roleNames.migration)} AND current_setting('app.context_installed',true)='1' AND current_setting('app.purpose',true)='bootstrap-configured-super-admin' AND current_setting('app.auth_assurance',true)='system-verified' AND current_setting('app.bootstrap_email',true)<>''`;
+const bootstrapPolicies = [
+  ["User", "SELECT", `(${bootstrapPolicyBase} AND (${q("role")} IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR lower(${q("email")})=current_setting('app.bootstrap_email',true)))`],
+  ["User", "INSERT", `(${bootstrapPolicyBase} AND lower(${q("email")})=current_setting('app.bootstrap_email',true) AND ${q("role")}='SUPER_ADMIN' AND ${q("status")}='ACTIVE' AND ${q("isActive")} AND ${q("orgId")} IS NULL AND ${q("licenseeId")} IS NULL)`],
+  ["AuditLog", "INSERT", `(${bootstrapPolicyBase} AND ${q("userId")} IS NULL AND ${q("action")} IN ('AUTH_SUPER_ADMIN_BOOTSTRAPPED','AUTH_SUPER_ADMIN_BOOTSTRAP_SKIPPED_EXISTING','AUTH_SUPER_ADMIN_BOOTSTRAP_BLOCKED') AND ${q("entityType")}='User')`],
+  ["SecurityEventOutbox", "INSERT", `(${bootstrapPolicyBase} AND ${q("eventType")}='OPERATOR_PROCEDURE_AUDIT' AND payload->>'action' IN ('AUTH_SUPER_ADMIN_BOOTSTRAPPED','AUTH_SUPER_ADMIN_BOOTSTRAP_SKIPPED_EXISTING','AUTH_SUPER_ADMIN_BOOTSTRAP_BLOCKED'))`],
+];
+for (const [table, command, predicate] of bootstrapPolicies) {
+  const name = `full_rls_initial_admin_bootstrap_${table.toLowerCase()}_${command.toLowerCase()}`;
+  const clause = command === "INSERT" ? `WITH CHECK ${predicate}` : `USING ${predicate}`;
+  policyStatements.push(`CREATE POLICY ${q(name)} ON public.${q(table)} AS PERMISSIVE FOR ${command} TO ${q(roleNames.owner)} ${clause};`);
+  policyStatements.push(`COMMENT ON POLICY ${q(name)} ON public.${q(table)} IS ${lit(JSON.stringify({ boundary: "initial-super-admin-bootstrap", ownerIdentity: "identity-table-owner", scope: "deployment-only migration identity and configured email" }))};`);
+}
 for (const [table, command, predicate] of b01TablePolicies) {
   const policyName = shortName("b01", table, command);
   const clause = command === "INSERT" ? `WITH CHECK ${predicate}` : command === "UPDATE" ? `USING ${predicate} WITH CHECK ${predicate}` : `USING ${predicate}`;
@@ -2278,6 +2321,9 @@ const expectedRoutineIdentities = [
   ["app_public", "require_customer_auth_session", "p_capability text, p_checked_at timestamp without time zone, p_request_id text, p_operation text"],
   ["app_public", "public_verify_write_evidence", "p_action text, p_entity_type text, p_entity_id text, p_licensee_id text, p_details jsonb, p_recorded_at timestamp without time zone, p_request_id text"],
   ["app_public", "record_qr_verification", "p_qr_id text, p_proof_class text, p_outcome_code text, p_scanned_at timestamp without time zone, p_request_id text, p_actor_ip_hash text, p_actor_device_hash text"],
+  ["app_ops", "session_c04_assert_context", "required_purpose text, required_assurance text, identity_class text, allowed_environments text[]"],
+  ["app_ops", "session_c04_audit", "actor_id text, action_name text, entity_type text, entity_id text, details jsonb"],
+  ["app_ops", "bootstrap_configured_super_admin", "p_email text, p_password_hash text, p_name text, p_auto_verify boolean"],
   ...[...b01Contracts, ...preAuthContracts, ...authenticatedSessionContracts, ...authenticationClosureContracts, ...c03Contracts, ...administrationContracts, ...qrSystemContracts, ...printingLifecycleContracts, ...publicVerificationContracts, ...scheduledContracts, ...outboxContracts, ...b03AuthenticatedContracts, ...operationalReadContracts].map((contract) => [contract.schema, contract.name, contract.identityArguments]),
 ];
 const routineIdentityColumns = [{ name: "schema_name", type: "text" }, { name: "routine_name", type: "text" }, { name: "identity_arguments", type: "text" }];
@@ -2305,6 +2351,23 @@ const policyInventory = [
     table: policy.table,
     policyName: policy.name,
     ...policy,
+  })),
+  ...bootstrapPolicies.map(([table, command, predicate]) => ({
+    tableId: tables.find((entry) => entry.physicalTable === table)?.id,
+    table,
+    policyName: `full_rls_initial_admin_bootstrap_${table.toLowerCase()}_${command.toLowerCase()}`,
+    command,
+    actors: ["deployment-migration"],
+    assurance: "source-rule-specific",
+    purpose: ["bootstrap-configured-super-admin"],
+    scopeType: "deployment-only-migration-identity-and-configured-email",
+    scopePredicate: predicate,
+    columns: [],
+    sourceCommandRuleIds: contractEvidenceFor(initialAdminBootstrapContracts, table, command),
+    workflowId: "workflow-cli-backend-scripts-create-super-admin-js",
+    route: "deployment-only CLI",
+    certificationStatus: "pending",
+    internalHelperOnly: true,
   })),
   ...b01TablePolicies.map(([table, command, predicate]) => ({
     tableId: tables.find((entry) => entry.physicalTable === table)?.id,
@@ -2547,6 +2610,7 @@ const expectedSchemaAclRows = [
   ["app_auth", roleNames.preauth, roleNames.authOwner, "USAGE", false],
   ["app_auth", roleNames.app, roleNames.authOwner, "USAGE", false],
   ["app_public", roleNames.preauth, roleNames.authOwner, "USAGE", false],
+  ["app_ops", roleNames.migration, roleNames.owner, "USAGE", false],
 ];
 const schemaAclColumns = aclColumns.filter(({ name }) => name !== "object_name");
 const expectedSchemaAclSelect = expectedRowsSelect(expectedSchemaAclRows, schemaAclColumns);
@@ -2555,7 +2619,7 @@ FROM pg_namespace n
 CROSS JOIN LATERAL aclexplode(COALESCE(n.nspacl,acldefault('n',n.nspowner))) acl
 LEFT JOIN pg_roles grantee ON grantee.oid=acl.grantee
 JOIN pg_roles grantor ON grantor.oid=acl.grantor
-WHERE n.nspname IN ('public','app_rls','app_auth','app_public','mscqr_rls_install') AND acl.grantee<>n.nspowner`;
+WHERE n.nspname IN ('public','app_rls','app_auth','app_public','app_ops','mscqr_rls_install') AND acl.grantee<>n.nspowner`;
 const currentTableAclSelect = `SELECT n.nspname AS schema_name,c.relname AS object_name,COALESCE(grantee.rolname,'PUBLIC') AS grantee_name,grantor.rolname AS grantor_name,acl.privilege_type,acl.is_grantable
 FROM pg_class c
 JOIN pg_namespace n ON n.oid=c.relnamespace
@@ -2598,7 +2662,7 @@ FROM pg_proc p
 JOIN pg_namespace n ON n.oid=p.pronamespace
 JOIN pg_roles owner_role ON owner_role.oid=p.proowner
 JOIN pg_language l ON l.oid=p.prolang
-WHERE n.nspname IN ('app_rls','app_auth','app_public')`;
+WHERE n.nspname IN ('app_rls','app_auth','app_public','app_ops')`;
 const currentPolicySelect = `SELECT n.nspname,c.relname,p.polname,p.polpermissive,p.polcmd::text,
   ARRAY(SELECT COALESCE(role_name.rolname,'PUBLIC') FROM unnest(p.polroles) role_oid LEFT JOIN pg_roles role_name ON role_name.oid=role_oid ORDER BY COALESCE(role_name.rolname,'PUBLIC')),
   p.polqual::text,p.polwithcheck::text,obj_description(p.oid,'pg_policy')
@@ -2620,7 +2684,7 @@ ${requirePackagePhaseSql("policies-installed", "verification")}
   IF EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace JOIN pg_roles r ON r.oid=c.relowner WHERE n.nspname='public' AND c.relname IN (${targetTableList}) AND r.rolname<>${lit(roleNames.owner)}) THEN RAISE EXCEPTION 'application table ownership drifted'; END IF;
   IF EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace JOIN pg_roles r ON r.oid=c.relowner WHERE n.nspname='public' AND c.relname='_prisma_migrations' AND r.rolname<>${lit(roleNames.migration)}) THEN RAISE EXCEPTION 'Prisma migration ledger ownership drifted'; END IF;
   IF EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace JOIN pg_roles r ON r.oid=t.typowner WHERE n.nspname='public' AND t.typtype='e' AND r.rolname<>${lit(roleNames.owner)}) THEN RAISE EXCEPTION 'Prisma enum ownership drifted'; END IF;
-  IF EXISTS (SELECT 1 FROM pg_namespace n JOIN pg_roles r ON r.oid=n.nspowner WHERE (n.nspname IN ('public','app_rls') AND r.rolname<>${lit(roleNames.owner)}) OR (n.nspname IN ('app_auth','app_public') AND r.rolname<>${lit(roleNames.authOwner)}) OR (n.nspname='mscqr_rls_install' AND r.rolname<>${lit(administrativeExecutorRole)})) THEN RAISE EXCEPTION 'clean-room schema ownership drifted'; END IF;
+  IF EXISTS (SELECT 1 FROM pg_namespace n JOIN pg_roles r ON r.oid=n.nspowner WHERE (n.nspname IN ('public','app_rls','app_ops') AND r.rolname<>${lit(roleNames.owner)}) OR (n.nspname IN ('app_auth','app_public') AND r.rolname<>${lit(roleNames.authOwner)}) OR (n.nspname='mscqr_rls_install' AND r.rolname<>${lit(administrativeExecutorRole)})) THEN RAISE EXCEPTION 'clean-room schema ownership drifted'; END IF;
   IF EXISTS (
     (SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='mscqr_rls_install' AND c.relkind='r' EXCEPT SELECT * FROM (VALUES ('expected_policy'),('expected_routine'),('state')) expected(table_name))
     UNION ALL

@@ -27,7 +27,6 @@ import {
   isManagedQrSignerRequested,
   validateQrSigningConfiguration,
 } from "./services/qrTokenService";
-import { bootstrapConfiguredSuperAdmin } from "./services/auth/superAdminBootstrapService";
 import { validateArtifactSigningConfiguration } from "./services/artifactSigningService";
 
 dotenv.config();
@@ -361,14 +360,6 @@ const closeHttpServer = async () => {
 };
 
 const startServer = async () => {
-  const bootstrapResult = await bootstrapConfiguredSuperAdmin();
-  if (bootstrapResult.status === "blocked") {
-    logger.error("Refusing to start because super admin bootstrap is enabled but not safe to run", {
-      reason: bootstrapResult.reason,
-    });
-    process.exit(1);
-  }
-
   server = app.listen(PORT, () => {
     let qrSigningProfile: ReturnType<typeof getQrSigningProfile> | null = null;
     try {

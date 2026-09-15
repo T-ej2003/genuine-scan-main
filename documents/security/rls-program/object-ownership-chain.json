@@ -40,9 +40,9 @@
       "owns": [
         "all 78 Prisma tables",
         "application sequences",
-        "public and app_rls schemas",
+        "public, app_rls, and app_ops schemas",
         "table-bound objects",
-        "approved app_rls SECURITY INVOKER helpers"
+        "approved app_rls SECURITY INVOKER helpers and app_ops SECURITY DEFINER operator/deployment boundaries"
       ],
       "forbiddenMemberships": "No runtime role and no standing migration membership."
     },

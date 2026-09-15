@@ -361,15 +361,16 @@
       "loginExpectation": "NOLOGIN",
       "allowedSchemas": [
         "app_rls",
+        "app_ops",
         "public"
       ],
       "allowedCommands": [
         "OWNERSHIP"
       ],
       "tablePrivilegeMode": "owns protected tables and policies",
-      "securityDefinerExecution": "none",
+      "securityDefinerExecution": "owns exact approved app_ops operator and deployment-only bootstrap boundaries but is not an execution identity",
       "mayExecuteSecurityDefinerFunctions": false,
-      "ownershipExpectations": "Owns protected tables and policies; no runtime membership or SET ROLE path is permitted.",
+      "ownershipExpectations": "Owns protected tables, policies, app_ops, and approved app_ops SECURITY DEFINER boundaries; no runtime membership or SET ROLE path is permitted.",
       "mayOwnProtectedTables": true,
       "mayCreateObjects": false,
       "maySetRole": false,
@@ -406,10 +407,10 @@
       "ownedObjectClasses": [
         "tables",
         "sequences",
-        "public/app_rls schemas",
+        "public/app_rls/app_ops schemas",
         "indexes/constraints/policies/triggers through tables",
         "application types/views/materialized views",
-        "approved app_rls SECURITY INVOKER functions"
+        "approved app_rls SECURITY INVOKER and app_ops SECURITY DEFINER functions"
       ]
     },
     {

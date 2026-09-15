@@ -117,6 +117,7 @@ async function main() {
   assert(confirmed, "Session C operator PostgreSQL proof confirmation is required");
   assert.equal(Math.floor(Number(psql("select current_setting('server_version_num')::int")) / 10000), 18);
   psqlFile(path.resolve(__dirname, "../../../src/rls-waves/session-c/c04/operatorProcedures.sql"));
+  psqlFile(path.resolve(__dirname, "../../../src/rls-waves/session-c/c04/bootstrapConfiguredSuperAdmin.sql"));
   psql(setupSql);
   psql(fixtureSql);
 
