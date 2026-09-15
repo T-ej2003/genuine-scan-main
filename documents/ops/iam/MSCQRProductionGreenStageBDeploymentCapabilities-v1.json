@@ -14374,6 +14374,196 @@
       "mutation": false
     },
     {
+      "id": "stage-b-state-reconciliation-producer-collect-stage-a-live-cluster",
+      "phase": "stage-b-exact-refresh-only-state-reconciliation",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/generate-production-green-stage-a-prerequisites.mjs",
+      "sourceFunction": "collect-stage-a-live-cluster",
+      "action": "ecs:DescribeClusters",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
+        "sid": "ReadStageALivePrerequisites",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "stage-b-state-reconciliation-producer-collect-stage-a-live-database",
+      "phase": "stage-b-exact-refresh-only-state-reconciliation",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/generate-production-green-stage-a-prerequisites.mjs",
+      "sourceFunction": "collect-stage-a-live-database",
+      "action": "rds:DescribeDBInstances",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageAGreenRdsInstance",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c7e1a00cf47fdc409bfeec4125a81065de74189b39e3f95a54da63cdfa45fb02"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "stage-b-state-reconciliation-producer-collect-stage-a-live-route-tables",
+      "phase": "stage-b-exact-refresh-only-state-reconciliation",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/generate-production-green-stage-a-prerequisites.mjs",
+      "sourceFunction": "collect-stage-a-live-route-tables",
+      "action": "ec2:DescribeRouteTables",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
+        "sid": "ReadStageALivePrerequisites",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "stage-b-state-reconciliation-producer-collect-stage-a-live-security-groups",
+      "phase": "stage-b-exact-refresh-only-state-reconciliation",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/generate-production-green-stage-a-prerequisites.mjs",
+      "sourceFunction": "collect-stage-a-live-security-groups",
+      "action": "ec2:DescribeSecurityGroups",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageAProviderEndpointMetadata",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c7e1a00cf47fdc409bfeec4125a81065de74189b39e3f95a54da63cdfa45fb02"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "stage-b-state-reconciliation-producer-collect-stage-a-live-subnets",
+      "phase": "stage-b-exact-refresh-only-state-reconciliation",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/generate-production-green-stage-a-prerequisites.mjs",
+      "sourceFunction": "collect-stage-a-live-subnets",
+      "action": "ec2:DescribeSubnets",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
+        "sid": "ReadStageALivePrerequisites",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "stage-b-state-reconciliation-producer-collect-stage-a-prerequisite-state",
+      "phase": "stage-b-exact-refresh-only-state-reconciliation",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/produce-production-green-stage-b-prerequisite-bundle.mjs",
+      "sourceFunction": "collect-stage-a-prerequisite-state",
+      "action": "s3:GetObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate"
+      ],
+      "context": [],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageAStateForHandoff",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c7e1a00cf47fdc409bfeec4125a81065de74189b39e3f95a54da63cdfa45fb02"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
       "id": "stage-b-state-reconciliation-provider-refresh-read-only-canary-attached-policy-lists",
       "phase": "stage-b-exact-refresh-only-state-reconciliation",
       "identity": "RELEASE_DEPLOYER",

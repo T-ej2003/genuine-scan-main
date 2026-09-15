@@ -354,6 +354,11 @@ const STAGE_B_STATE_RECONCILIATION_CAPABILITIES = Object.freeze([
   ["stage-b-state-reconciliation-acquire-lock", "s3:PutObject", [STAGE_B_TERRAFORM_BACKEND.lockArn]],
   ["stage-b-state-reconciliation-release-lock", "s3:DeleteObject", [STAGE_B_TERRAFORM_BACKEND.lockArn]],
 ]);
+const STAGE_B_PREREQUISITE_PRODUCER_READ_IDS = Object.freeze([
+  "collect-stage-a-prerequisite-state", "collect-stage-a-live-subnets", "collect-stage-a-live-route-tables",
+  "collect-stage-a-live-security-groups", "collect-stage-a-live-cluster", "collect-stage-a-live-database",
+]);
+const prerequisiteProducerCapabilityId = (id) => `stage-b-state-reconciliation-producer-${id}`;
 
 const PHASE_CAPABILITY_REQUIREMENTS = Object.freeze({
   "mixed-dual-slot-recovery-execution": MIXED_DUAL_SLOT_RECOVERY_EXECUTION_CAPABILITIES.map(([id]) => id),
@@ -368,7 +373,11 @@ const PHASE_CAPABILITY_REQUIREMENTS = Object.freeze({
     "manifest-backend-health-recovery-update-service",
   ],
   "existing-revision-forward-recovery": FORWARD_RECOVERY_CAPABILITIES.map(([id]) => id),
-  "stage-b-exact-refresh-only-state-reconciliation": STAGE_B_STATE_RECONCILIATION_CAPABILITIES.map(([id]) => id),
+  "stage-b-exact-refresh-only-state-reconciliation": [
+    ...STAGE_B_STATE_RECONCILIATION_CAPABILITIES.map(([id]) => id),
+    ...STAGE_B_PREREQUISITE_PRODUCER_READ_IDS.map(prerequisiteProducerCapabilityId),
+    ...readJson(manifestPath).required.filter(({ phase }) => phase === "refresh").map(({ id }) => `stage-b-state-reconciliation-provider-${id}`),
+  ],
   "stage-a-production-artifacts-state-reconciliation": STAGE_A_PRODUCTION_ARTIFACTS_CAPABILITIES.filter(([, phase]) => phase === "stage-a-production-artifacts-state-reconciliation").map(([id]) => id),
 });
 
@@ -789,9 +798,15 @@ export function buildStageBDeploymentCapabilityGraph() {
     id: `stage-b-state-reconciliation-provider-${entry.id}`, phase: "stage-b-exact-refresh-only-state-reconciliation", identity: "RELEASE_DEPLOYER", executor: "terraform", sourceFile: "scripts/aws/reconcile-production-green-stage-b-state.mjs", sourceFunction: entry.id,
     action: entry.action, resources: entry.resources, context: { account: STAGE_B.account, region: STAGE_B.region, operation: "PRODUCTION_GREEN_STAGE_B_TEN_ADDRESS_REFRESH_ONLY_STATE_RECONCILIATION", remoteResourceMutationCount: 0 }, classification: "TERRAFORM_PROVIDER_READ", probe: "administrator-simulation", probeIds: [], policy: authority(entry, false, policies), required: true, mutation: false,
   }));
+  const prerequisiteProducerReads = manifest.required.filter(({ id }) => STAGE_B_PREREQUISITE_PRODUCER_READ_IDS.includes(id)).map((entry) => ({
+    id: prerequisiteProducerCapabilityId(entry.id), phase: "stage-b-exact-refresh-only-state-reconciliation", identity: "RELEASE_DEPLOYER", executor: "aws-cli",
+    sourceFile: entry.id === "collect-stage-a-prerequisite-state" ? "scripts/aws/produce-production-green-stage-b-prerequisite-bundle.mjs" : "scripts/aws/generate-production-green-stage-a-prerequisites.mjs",
+    sourceFunction: entry.id, action: entry.action, resources: entry.resources, context: entry.context || [], classification: "RELEASE_DIRECT_READ", probe: "direct", probeIds: [],
+    policy: authority(entry, false, policies), required: true, mutation: false,
+  }));
   const runtime = terraformRuntimeActions().map((action) => ({ id: `runtime-${action.replace(/[^A-Za-z0-9]+/g, "-").toLowerCase()}`, phase: "runtime-activation-boundary", identity: "SERVICE_RUNTIME", executor: "lambda-or-ecs-role", sourceFile: terraformPath, sourceFunction: "generated runtime IAM policy", action, resources: ["terraform-derived-runtime-resource"], context: {}, classification: "SERVICE_RUNTIME_ACTION", probe: "structural", policy: { sourceFile: terraformPath, sid: "terraform-generated", livePolicyArn: "created-or-updated-by-stage-b", expectedVersion: "saved-plan", expectedPolicySha256: null }, required: false, mutation: isRuntimeMutationAction(action) }));
   const runtimeAdmin = RUNTIME_ADMIN_CAPABILITIES.map(([id, phase, action, resources, mutation]) => ({ id, phase, identity: "ADMINISTRATOR", executor: "aws-cli", sourceFile: phase === "runtime-consumability-convergence" ? "scripts/aws/converge-production-ecs-runtime-policy.mjs" : "scripts/aws/prepare-production-ecs-runtime-consumability.mjs", sourceFunction: id, action, resources, context: { account: STAGE_B.account, region: STAGE_B.region }, classification: mutation ? "ADMIN_IAM_OR_SIGNING_MUTATION" : "ADMIN_RUNTIME_CLOSURE_READ", probe: action === "iam:SimulatePrincipalPolicy" ? "administrator-simulation" : "administrator-live-read", probeIds: [], policy: { sourceFile: phase === "runtime-consumability-convergence" ? "scripts/aws/converge-production-ecs-runtime-policy.mjs" : "scripts/aws/production-ecs-runtime-consumability.mjs", sid: id, livePolicyArn: null, expectedVersion: "protected-main-source", expectedPolicySha256: null }, required: true, mutation }));
-  const capabilities = [...fixed, ...normalActivation, ...initialActivationPolicyReconciliation, ...initialActivationPreparation, ...providerReadonlyReconciliation, ...providerReadonlyPreparation, ...bootstrapOperatorPolicyReconciliation, ...mixedRecoveryIamPreflight, mixedRecoveryIamAttestationSigning, ...mixedRecoveryExecution, ...stageAProductionArtifacts, ROOT_DROP_SIGNING, ...rootAttestationRelease, ...recovery, ...forwardRecovery, ...stateReconciliation, ...stateReconciliationProviderReads, ...publisher, ...manifestCapabilities, ...checkerCapabilities, ...operatorCapabilities, ...runtimeAdmin, ...runtime].sort((a, b) => a.id.localeCompare(b.id));
+  const capabilities = [...fixed, ...normalActivation, ...initialActivationPolicyReconciliation, ...initialActivationPreparation, ...providerReadonlyReconciliation, ...providerReadonlyPreparation, ...bootstrapOperatorPolicyReconciliation, ...mixedRecoveryIamPreflight, mixedRecoveryIamAttestationSigning, ...mixedRecoveryExecution, ...stageAProductionArtifacts, ROOT_DROP_SIGNING, ...rootAttestationRelease, ...recovery, ...forwardRecovery, ...stateReconciliation, ...prerequisiteProducerReads, ...stateReconciliationProviderReads, ...publisher, ...manifestCapabilities, ...checkerCapabilities, ...operatorCapabilities, ...runtimeAdmin, ...runtime].sort((a, b) => a.id.localeCompare(b.id));
   return {
     schemaVersion: 1, deployment: "production-green-stage-b", account: "368992683803", region: "eu-west-2",
     phases: PHASES.map(([id, sourceFile], index) => ({ order: index + 1, id, sourceFile })),
@@ -822,8 +837,10 @@ export function assertStageBDeploymentCapabilityGraph(graph = readJson(CAPABILIT
   const forwardCapabilities = graph.capabilities.filter(({ phase }) => phase === "existing-revision-forward-recovery");
   if (forwardCapabilities.some(({ action, identity, sourceFile }) => identity !== "RELEASE_DEPLOYER" || sourceFile !== "scripts/aws/forward-recover-stage-b-existing-revision.mjs" || ["ecs:RegisterTaskDefinition", "ecs:DeregisterTaskDefinition", "ecs:UpdateService", "iam:PutRolePolicy", "iam:AttachRolePolicy"].includes(action))) throw new Error("Forward recovery capability boundary is broader than zero-registration Terraform import.");
   const stateReconciliation = graph.capabilities.filter(({ phase }) => phase === "stage-b-exact-refresh-only-state-reconciliation");
-  const expectedStateReconciliationCapabilities = STAGE_B_STATE_RECONCILIATION_CAPABILITIES.length + readJson(manifestPath).required.filter(({ phase }) => phase === "refresh").length;
-  if (stateReconciliation.length !== expectedStateReconciliationCapabilities || stateReconciliation.some(({ identity, executor, sourceFile, action, mutation, classification }) => identity !== "RELEASE_DEPLOYER" || executor !== "terraform" || sourceFile !== "scripts/aws/reconcile-production-green-stage-b-state.mjs" || ["ecs:RegisterTaskDefinition", "ecs:DeregisterTaskDefinition", "ecs:UpdateService", "iam:PutRolePolicy", "iam:AttachRolePolicy"].includes(action) || (classification === "TERRAFORM_STATE_ONLY_MUTATION" ? mutation !== true : classification === "TERRAFORM_PROVIDER_READ" ? mutation !== false : false))) throw new Error("Stage B refresh-only state reconciliation capability boundary is not exact.");
+  const expectedTerraformReconciliationCapabilities = STAGE_B_STATE_RECONCILIATION_CAPABILITIES.length + readJson(manifestPath).required.filter(({ phase }) => phase === "refresh").length;
+  const terraformReconciliation = stateReconciliation.filter(({ sourceFile }) => sourceFile === "scripts/aws/reconcile-production-green-stage-b-state.mjs");
+  const producerReconciliation = stateReconciliation.filter(({ id }) => id.startsWith("stage-b-state-reconciliation-producer-"));
+  if (terraformReconciliation.length !== expectedTerraformReconciliationCapabilities || terraformReconciliation.some(({ identity, executor, sourceFile, action, mutation, classification }) => identity !== "RELEASE_DEPLOYER" || executor !== "terraform" || sourceFile !== "scripts/aws/reconcile-production-green-stage-b-state.mjs" || ["ecs:RegisterTaskDefinition", "ecs:DeregisterTaskDefinition", "ecs:UpdateService", "iam:PutRolePolicy", "iam:AttachRolePolicy"].includes(action) || (classification === "TERRAFORM_STATE_ONLY_MUTATION" ? mutation !== true : classification === "TERRAFORM_PROVIDER_READ" ? mutation !== false : false)) || producerReconciliation.length !== STAGE_B_PREREQUISITE_PRODUCER_READ_IDS.length || producerReconciliation.some(({ identity, executor, sourceFile, mutation, classification }) => identity !== "RELEASE_DEPLOYER" || executor !== "aws-cli" || !["scripts/aws/produce-production-green-stage-b-prerequisite-bundle.mjs", "scripts/aws/generate-production-green-stage-a-prerequisites.mjs"].includes(sourceFile) || mutation !== false || classification !== "RELEASE_DIRECT_READ")) throw new Error("Stage B refresh-only state reconciliation capability boundary is not exact.");
   if (graph.capabilities.some(({ identity, action }) => identity === "RELEASE_DEPLOYER" && action === "iam:SimulatePrincipalPolicy")) throw new Error("Release-deployer cannot own IAM simulation.");
   const mixedRecoveryMutation = graph.capabilities.filter(({ id }) => id === "mixed-recovery-move-awscurrent");
   if (mixedRecoveryMutation.length !== 1 || mixedRecoveryMutation[0].identity !== "MIXED_RECOVERY_EXECUTOR" || mixedRecoveryMutation[0].action !== "secretsmanager:UpdateSecretVersionStage" || JSON.stringify(mixedRecoveryMutation[0].resources) !== JSON.stringify(MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES) || mixedRecoveryMutation[0].policy?.sid !== "RemoveExactRecoveryAwscurrentLabels" || mixedRecoveryMutation[0].policy?.livePolicyArn !== MIXED_DUAL_SLOT_RECOVERY_EXECUTION_POLICY_ARN || mixedRecoveryMutation[0].mutation !== true) throw new Error("Mixed recovery mutation capability is absent or not exact.");

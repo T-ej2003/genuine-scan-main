@@ -113,6 +113,7 @@ test("complete production dependency closure is exact across modes and failure p
     ["stage-a-artifacts-reconciliation-release-read-raw-state", "stage-a-production-artifacts-state-reconciliation"],
     ["stage-a-artifacts-reconciliation-terraform-read-state", "stage-a-production-artifacts-state-reconciliation"],
     ["stage-a-artifacts-recovery-release-read-raw-state", "stage-a-production-artifacts-policy-recovery"],
+    ["stage-b-state-reconciliation-producer-collect-stage-a-prerequisite-state", "stage-b-exact-refresh-only-state-reconciliation"],
   ]);
   const reconciliationMode = report.newAwsCalls.filter(({ reachableMode }) => reachableMode.includes("STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION"));
   const backendResources = new Set(["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2", "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate", "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"]);
