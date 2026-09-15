@@ -72,7 +72,7 @@ jobs:
           test "$(jq '[.artifacts[] | select(.name == "production-green-stage-b-state-reconciliation-authorization" and .expired == false)] | length' <<<"$artifacts")" = 1
           artifact="$(jq -r '.artifacts[] | select(.name == "production-green-stage-b-state-reconciliation-authorization" and .expired == false) | .id' <<<"$artifacts")"; digest="$(jq -r '.artifacts[] | select(.name == "production-green-stage-b-state-reconciliation-authorization" and .expired == false) | .digest' <<<"$artifacts")"
           [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]; gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact/zip" > "$d/authorization.zip"; test "sha256:$(sha256sum "$d/authorization.zip" | awk '{print $1}')" = "$digest"
-          test "$(unzip -Z1 "$d/authorization.zip")" = authorization.json; unzip -p "$d/authorization.zip" authorization.json > "$d/authorization.json"
+          test "$(unzip -Z1 "$d/authorization.zip")" = authorization.json; install -m 600 /dev/null "$d/authorization.json"; unzip -p "$d/authorization.zip" authorization.json > "$d/authorization.json"
       - uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-region: eu-west-2

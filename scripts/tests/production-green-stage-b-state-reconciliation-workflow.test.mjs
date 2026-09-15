@@ -19,6 +19,8 @@ test("Stage B state reconciliation workflows are protected, artifact-bound, and 
   assert.deepEqual(prepare.permissions, { actions: "read", contents: "read", "id-token": "write" });
   assert.deepEqual(authorize.permissions, { actions: "read", contents: "read" });
   assert.deepEqual(execute.permissions, { actions: "read", contents: "read", "id-token": "write" });
+  assert.equal(prepare.jobs.prepare.environment, "production");
+  assert.equal(execute.jobs.execute.environment, "production");
   assert.ok(Object.keys(prepare.on.workflow_dispatch.inputs).length <= 10);
   assert.ok(Object.keys(authorize.on.workflow_dispatch.inputs).length <= 10);
   assert.ok(Object.keys(execute.on.workflow_dispatch.inputs).length <= 10);
@@ -27,5 +29,6 @@ test("Stage B state reconciliation workflows are protected, artifact-bound, and 
   for (const name of ["authorization_workflow_run_id", "authorization_workflow_run_attempt"]) assert.equal(execute.on.workflow_dispatch.inputs[name]?.required, true);
   const source = read(names[2]);
   assert.match(source, /preparation-bundle\.zip/); assert.match(source, /authorization\.zip/); assert.match(source, /sha256:\$\(sha256sum "\$d\/preparation\.zip"/); assert.match(source, /test "\$\(unzip -Z1 "\$d\/authorization\.zip"\)" = authorization\.json/);
+  assert.match(source, /install -m 600 \/dev\/null "\$d\/authorization\.json"/);
   assert.doesNotMatch(source, /saved_plan_base64|preparation_base64|tfvars_base64/);
 });
