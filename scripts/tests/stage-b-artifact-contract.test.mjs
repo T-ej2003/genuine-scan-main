@@ -207,6 +207,7 @@ test("tfvars artifacts register the exact production reader set", () => {
     "scripts/aws/prepare-production-cutover-runtime.mjs",
     "scripts/aws/forward-recover-stage-b-existing-revision.mjs",
     "scripts/aws/recover-stage-b-backend-task-definition.mjs",
+    "scripts/aws/reconcile-production-green-stage-b-state.mjs",
   ];
   for (const id of ["tfvars", "tfvars-binding-report"]) {
     const artifact = STAGE_B_ARTIFACT_CONTRACTS.find((candidate) => candidate.id === id);
@@ -236,6 +237,7 @@ test("release-preflight checker artifacts declare every direct reader and publis
       "scripts/aws/forward-recover-stage-b-existing-revision.mjs",
       "scripts/aws/prepare-production-green-stage-b-approval-input.mjs",
       "scripts/aws/collect-production-green-stage-b-approval-evidence.mjs",
+      "scripts/aws/reconcile-production-green-stage-b-state.mjs",
     ],
     "release-preflight-checker-trust-attestation": [
       "scripts/aws/prepare-production-cutover-runtime.mjs",
@@ -259,6 +261,20 @@ test("release-preflight checker artifacts declare every direct reader and publis
   const paired = generated.filter(({ atomicGroup }) => atomicGroup === "release-preflight-checker-trust-attestation-pair");
   assert.deepEqual(paired.map(({ id }) => id).sort(), ["release-preflight-checker-trust-attestation", "release-preflight-checker-trust-attestation-signature"]);
   assert(paired.every(({ allOrNone, rollback }) => allOrNone === true && rollback === "remove-committed-or-restore-backups"));
+});
+
+test("ten-address state reconciliation artifacts form a closed private authorization chain", () => {
+  const expected = {
+    "stage-b-ten-address-state-reconciliation-saved-plan": [".github/workflows/prepare-production-green-stage-b-state-reconciliation.yml", ".github/workflows/execute-production-green-stage-b-state-reconciliation.yml", "scripts/aws/reconcile-production-green-stage-b-state.mjs"],
+    "stage-b-ten-address-state-reconciliation-preparation": [".github/workflows/prepare-production-green-stage-b-state-reconciliation.yml", ".github/workflows/authorize-production-green-stage-b-state-reconciliation.yml", ".github/workflows/execute-production-green-stage-b-state-reconciliation.yml", "scripts/aws/authorize-production-green-stage-b-state-reconciliation.mjs", "scripts/aws/reconcile-production-green-stage-b-state.mjs"],
+    "stage-b-ten-address-state-reconciliation-authorization": [".github/workflows/execute-production-green-stage-b-state-reconciliation.yml", "scripts/aws/reconcile-production-green-stage-b-state.mjs"],
+    "stage-b-ten-address-state-reconciliation-result": [".github/workflows/execute-production-green-stage-b-state-reconciliation.yml", "documents/ops/iam/PRODUCTION_GREEN_STAGE_B_REFRESH_ONLY_STATE_RECONCILIATION.md"],
+  };
+  for (const [id, consumers] of Object.entries(expected)) {
+    const artifact = STAGE_B_ARTIFACT_CONTRACTS.find((candidate) => candidate.id === id);
+    assert.deepEqual(artifact?.consumers, consumers); assert.equal(artifact?.outsideRepository, true); assert.equal(artifact?.hashBound, true);
+    assert.deepEqual(canonicalStageBArtifactContracts().artifacts.find((candidate) => candidate.id === id)?.consumers, consumers);
+  }
 });
 
 test("real release-read and backend producers normalize generated permissions", () => {

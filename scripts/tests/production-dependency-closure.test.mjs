@@ -41,7 +41,7 @@ test("complete production dependency closure is exact across modes and failure p
     ["scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs", "s3:PutObject", "stage-a-artifacts-recovery-release-lock-acquire"],
     ["scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs", "s3:DeleteObject", "stage-a-artifacts-recovery-release-lock-release"],
   ]);
-  assert.equal(report.newAwsCalls.length, 42 + stageAAdditions.length + 15 + 14 + 21 + 7 + 1 + 6); // baseline, Stage-A, policy reconciliation, ProviderReadOnly, bootstrap-user preparation/authorization/reconciliation, recovery IAM preflight, attestation signing, and exact executor calls
+  assert.equal(report.newAwsCalls.length, 42 + stageAAdditions.length + 15 + 14 + 21 + 7 + 1 + 6 + 1); // baseline, Stage-A, policy reconciliation, ProviderReadOnly, bootstrap-user preparation/authorization/reconciliation, recovery IAM preflight, attestation signing, exact executor calls, and prerequisite producer read
   assert.deepEqual(report.newAwsCalls.filter(({ capabilityId }) => capabilityId?.startsWith("bootstrap-operator-policy-authorization-")).map(({ capabilityId, action, resources, identity, reachableMode }) => [capabilityId, action, resources, identity, reachableMode]), [
     ["bootstrap-operator-policy-authorization-identify", "sts:GetCallerIdentity", ["*"], "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],
     ["bootstrap-operator-policy-authorization-read-transition-consumption", "iam:ListUserTags", ["arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"], "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],
@@ -113,6 +113,8 @@ test("complete production dependency closure is exact across modes and failure p
     ["stage-a-artifacts-reconciliation-release-read-raw-state", "stage-a-production-artifacts-state-reconciliation"],
     ["stage-a-artifacts-reconciliation-terraform-read-state", "stage-a-production-artifacts-state-reconciliation"],
     ["stage-a-artifacts-recovery-release-read-raw-state", "stage-a-production-artifacts-policy-recovery"],
+    ["stage-b-state-reconciliation-producer-collect-stage-a-prerequisite-state", "stage-b-exact-refresh-only-state-reconciliation"],
+    ["stage-b-state-reconciliation-release-preflight-manifest-collect-stage-a-prerequisite-state", "stage-b-exact-refresh-only-state-reconciliation"],
   ]);
   const reconciliationMode = report.newAwsCalls.filter(({ reachableMode }) => reachableMode.includes("STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION"));
   const backendResources = new Set(["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2", "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate", "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"]);

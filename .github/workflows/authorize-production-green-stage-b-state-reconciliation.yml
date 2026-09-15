@@ -1,0 +1,58 @@
+name: Authorize Stage B refresh-only state reconciliation
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha: { description: Exact protected-main source SHA, required: true, type: string }
+      preparation_workflow_run_id: { description: Completed preparation workflow run ID, required: true, type: string }
+      preparation_workflow_run_attempt: { description: Preparation workflow run attempt, required: true, type: string }
+
+permissions: { actions: read, contents: read }
+concurrency: { group: production-deploy, cancel-in-progress: false }
+
+jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with: { node-version: 24, cache: npm }
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Authenticate protected source, preparation artifact, and actual independent approval
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          PREPARATION_RUN: ${{ inputs.preparation_workflow_run_id }}
+          PREPARATION_ATTEMPT: ${{ inputs.preparation_workflow_run_attempt }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          test "$SOURCE_SHA" = "$(gh api repos/$GITHUB_REPOSITORY/branches/main --jq .commit.sha)"
+          test "$SOURCE_SHA" = "$(git rev-parse HEAD)"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          test "$PREPARATION_ATTEMPT" = 1
+          umask 077; d="$RUNNER_TEMP/stage-b-state-reconciliation"; install -d -m 700 "$d"
+          run="$(gh api repos/$GITHUB_REPOSITORY/actions/runs/$PREPARATION_RUN)"
+          test "$(jq -r .path <<<"$run")" = .github/workflows/prepare-production-green-stage-b-state-reconciliation.yml
+          test "$(jq -r .head_sha <<<"$run")" = "$SOURCE_SHA"
+          test "$(jq -r .event <<<"$run")" = workflow_dispatch
+          test "$(jq -r .run_attempt <<<"$run")" = "$PREPARATION_ATTEMPT"
+          test "$(jq -r .conclusion <<<"$run")" = success
+          artifacts="$(gh api repos/$GITHUB_REPOSITORY/actions/runs/$PREPARATION_RUN/artifacts)"
+          test "$(jq '[.artifacts[] | select(.name == "production-green-stage-b-state-reconciliation-preparation" and .expired == false)] | length' <<<"$artifacts")" = 1
+          artifact="$(jq -r '.artifacts[] | select(.name == "production-green-stage-b-state-reconciliation-preparation" and .expired == false) | .id' <<<"$artifacts")"; digest="$(jq -r '.artifacts[] | select(.name == "production-green-stage-b-state-reconciliation-preparation" and .expired == false) | .digest' <<<"$artifacts")"
+          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]; gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact/zip" > "$d/preparation.zip"; test "sha256:$(sha256sum "$d/preparation.zip" | awk '{print $1}')" = "$digest"
+          test "$(unzip -Z1 "$d/preparation.zip")" = preparation-bundle.zip; unzip -p "$d/preparation.zip" preparation-bundle.zip > "$d/preparation-bundle.zip"; test "$(unzip -Z1 "$d/preparation-bundle.zip" | sort)" = $'binding.json\npreparation.json\nprerequisite-bundle.zip\nrefresh.tfplan\nrelease-preflight.json\nstage-b.tfvars'; unzip -p "$d/preparation-bundle.zip" preparation.json > "$d/preparation.json"
+          node scripts/aws/production-github-environment-approval.mjs --output "$d/environment-approval.json" --repository "$GITHUB_REPOSITORY" --environment production --source-sha "$SOURCE_SHA" --workflow-ref "$GITHUB_WORKFLOW_REF" --event-name "$GITHUB_EVENT_NAME" --workflow-run-id "$GITHUB_RUN_ID" --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" --execution-actor "$GITHUB_ACTOR" --require-actual-approval
+          node scripts/aws/authorize-production-green-stage-b-state-reconciliation.mjs --source-sha "$SOURCE_SHA" --preparation "$d/preparation.json" --preparation-file-sha256 "$(sha256sum "$d/preparation.json" | awk '{print $1}')" --environment-approval "$d/environment-approval.json" --environment-approval-file-sha256 "$(sha256sum "$d/environment-approval.json" | awk '{print $1}')" --output "$d/authorization.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-green-stage-b-state-reconciliation-authorization
+          path: ${{ runner.temp }}/stage-b-state-reconciliation/authorization.json
+          if-no-files-found: error
+          retention-days: 90

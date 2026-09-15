@@ -4,6 +4,25 @@
   "status": "PASS",
   "newAwsCalls": [
     {
+      "sourceFile": "scripts/aws/produce-production-green-stage-b-prerequisite-bundle.mjs",
+      "action": "s3:GetObject",
+      "capabilityId": "stage-b-state-reconciliation-producer-collect-stage-a-prerequisite-state",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
       "sourceFile": "scripts/aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs",
       "action": "sts:GetCallerIdentity",
       "capabilityId": "stage-a-artifacts-reconciliation-release-identify",

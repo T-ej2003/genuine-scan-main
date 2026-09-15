@@ -413,6 +413,13 @@ test("current Stage-A handoff and source state bytes are revalidated at the bind
   assert.throws(() => assertStageBTfvarsBinding({ tfvarsPath: regenerated.outputPath, bindingReportPath: regenerated.bindingReportPath }), /Stage-A state backup was modified/);
 });
 
+test("producer-local prerequisite paths are identity-only until consumer materialization", () => {
+  const args = input(); const result = generateStageBTfvars(args);
+  fs.rmSync(args.brokerPackagePath); fs.rmSync(path.join(path.dirname(args.brokerPackagePath), "broker.zip.manifest.json")); fs.rmSync(args.stageAInput); fs.rmSync(args.stageAStateBackup);
+  assert.throws(() => assertStageBTfvarsBinding({ tfvarsPath: result.outputPath, bindingReportPath: result.bindingReportPath }), /broker package must|Stage-A prerequisite/);
+  assert.doesNotThrow(() => assertStageBTfvarsBinding({ tfvarsPath: result.outputPath, bindingReportPath: result.bindingReportPath, validatePrerequisiteFiles: false }));
+});
+
 test("Stage A and Stage B state identities cannot be substituted", () => {
   const args = input(); const stageAInput = JSON.parse(fs.readFileSync(args.stageAInput, "utf8")); const stageBBytes = fs.readFileSync(args.stateBackup);
   const swappedInputPath = path.join(path.dirname(args.stageAInput), "swapped-stage-a.json");

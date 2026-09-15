@@ -2,8 +2,8 @@
 
 Generated from the permission manifest, reviewed source policies, release probes, canonical recovery, zero-registration forward recovery, publisher policy, Terraform runtime policy actions, and the production path. Do not edit generated capability rows manually.
 
-- Phases: 51
-- Capability nodes: 439
+- Phases: 52
+- Capability nodes: 576
 - Unique AWS actions: 148
 - Identities: GITHUB_IMAGE_PUBLISHER, ADMINISTRATOR, ROOT_OPERATOR, BOOTSTRAP_OPERATOR, RELEASE_DEPLOYER, INDEPENDENT_CHECKER, ECS_EXEC_VERIFIER_OPERATOR, SERVICE_RUNTIME, INITIAL_ACTIVATION_RECONCILER, BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER, MIXED_RECOVERY_EXECUTOR
 
@@ -60,3 +60,4 @@ Generated from the permission manifest, reviewed source policies, release probes
 | 49 | bootstrap-operator-policy-reconciliation | `scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs` |
 | 50 | mixed-dual-slot-recovery-iam-preflight | `scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs` |
 | 51 | mixed-dual-slot-recovery-execution | `scripts/aws/recover-production-mixed-dual-slot-topology.mjs` |
+| 52 | stage-b-exact-refresh-only-state-reconciliation | `scripts/aws/reconcile-production-green-stage-b-state.mjs` |

@@ -97,7 +97,7 @@ function assertCanonicalEntryPath(entryPath) {
   if (!entryPath || entryPath.startsWith("/") || entryPath.includes("\\") || entryPath.split("/").some((part) => part === ".." || part === ".") || entryPath.includes("\0")) throw new Error("Stage B broker package manifest contains an unsafe entry path.");
 }
 
-function readZipCentralDirectory(bytes) {
+export function readZipCentralDirectory(bytes) {
   const endOffset = bytes.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
   if (endOffset < 0 || endOffset + 22 > bytes.length) throw new Error("Stage B broker package ZIP end record is malformed.");
   const entryCount = bytes.readUInt16LE(endOffset + 10);
@@ -140,7 +140,7 @@ function readZipCentralDirectory(bytes) {
   return entries;
 }
 
-function zipEntryBytes(bytes, zipEntry) {
+export function zipEntryBytes(bytes, zipEntry) {
   const compressed = bytes.subarray(zipEntry.dataOffset, zipEntry.dataOffset + zipEntry.compressedSize);
   if (zipEntry.method === 0) return compressed;
   if (zipEntry.method === 8) return zlib.inflateRawSync(compressed);

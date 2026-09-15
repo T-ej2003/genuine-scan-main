@@ -1,0 +1,119 @@
+name: Prepare Stage B refresh-only state reconciliation
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha: { description: Exact protected-main source SHA, required: true, type: string }
+      ticket_id: { description: Externally issued change-ticket identifier, required: true, type: string }
+      tfvars_base64: { description: Exact prepared tfvars, required: true, type: string }
+      # The binding report and canonical preflight artifact carry their own hashes.
+      binding_base64: { description: Exact prepared binding report, required: true, type: string }
+      release_preflight_workflow_run_id: { description: Successful canonical release-preflight workflow run ID, required: true, type: string }
+      release_preflight_workflow_run_attempt: { description: Canonical release-preflight workflow run attempt, required: true, type: string }
+      release_preflight_artifact_id: { description: Exact canonical release-preflight artifact ID, required: true, type: string }
+      release_preflight_artifact_digest: { description: Exact canonical release-preflight artifact digest, required: true, type: string }
+      prerequisite_producer_workflow_run_id: { description: Successful canonical prerequisite producer workflow run ID, required: true, type: string }
+      prerequisite_producer_workflow_run_attempt: { description: Canonical prerequisite producer workflow run attempt, required: true, type: string }
+
+permissions: { actions: read, contents: read, id-token: write }
+concurrency: { group: production-deploy, cancel-in-progress: false }
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with: { node-version: 24, cache: npm }
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: 1.15.8, terraform_wrapper: false }
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Download and authenticate the canonical prerequisite bundle
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          PRODUCER_RUN: ${{ inputs.prerequisite_producer_workflow_run_id }}
+          PRODUCER_ATTEMPT: ${{ inputs.prerequisite_producer_workflow_run_attempt }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$PRODUCER_ATTEMPT" = 1
+          d="$RUNNER_TEMP/stage-b-state-reconciliation"; umask 077; install -d -m 700 "$d"
+          run="$(gh api repos/$GITHUB_REPOSITORY/actions/runs/$PRODUCER_RUN)"
+          test "$(jq -r .path <<<"$run")" = .github/workflows/produce-production-green-stage-b-prerequisite-bundle.yml
+          test "$(jq -r .head_sha <<<"$run")" = "$SOURCE_SHA"
+          test "$(jq -r .event <<<"$run")" = workflow_dispatch
+          test "$(jq -r .run_attempt <<<"$run")" = "$PRODUCER_ATTEMPT"
+          test "$(jq -r .conclusion <<<"$run")" = success
+          artifacts="$(gh api repos/$GITHUB_REPOSITORY/actions/runs/$PRODUCER_RUN/artifacts)"
+          test "$(jq '[.artifacts[] | select(.name == "production-green-stage-b-state-reconciliation-prerequisites" and .expired == false)] | length' <<<"$artifacts")" = 1
+          artifact="$(jq -r '.artifacts[] | select(.name == "production-green-stage-b-state-reconciliation-prerequisites" and .expired == false) | .id' <<<"$artifacts")"
+          digest="$(jq -r '.artifacts[] | select(.name == "production-green-stage-b-state-reconciliation-prerequisites" and .expired == false) | .digest' <<<"$artifacts")"
+          [[ "$artifact" =~ ^[0-9]+$ && "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact/zip" > "$d/producer-artifact.zip"
+          test "sha256:$(sha256sum "$d/producer-artifact.zip" | awk '{print $1}')" = "$digest"
+          test "$(unzip -Z1 "$d/producer-artifact.zip")" = prerequisite-bundle.zip
+          install -m 600 /dev/null "$d/prerequisite-bundle.zip"; unzip -p "$d/producer-artifact.zip" prerequisite-bundle.zip > "$d/prerequisite-bundle.zip"
+          printf '%s' "$PRODUCER_RUN" > "$d/producer-run-id"
+          printf '%s' "$PRODUCER_ATTEMPT" > "$d/producer-run-attempt"
+          printf '%s' "$artifact" > "$d/producer-artifact-id"
+          printf '%s' "$digest" > "$d/producer-artifact-digest"
+      - name: Download and authenticate the canonical release preflight artifact
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          PREFLIGHT_RUN: ${{ inputs.release_preflight_workflow_run_id }}
+          PREFLIGHT_ATTEMPT: ${{ inputs.release_preflight_workflow_run_attempt }}
+          PREFLIGHT_ARTIFACT: ${{ inputs.release_preflight_artifact_id }}
+          PREFLIGHT_DIGEST: ${{ inputs.release_preflight_artifact_digest }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$PREFLIGHT_ATTEMPT" = 1
+          [[ "$PREFLIGHT_RUN" =~ ^[0-9]+$ && "$PREFLIGHT_ARTIFACT" =~ ^[0-9]+$ && "$PREFLIGHT_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+          run="$(gh api repos/$GITHUB_REPOSITORY/actions/runs/$PREFLIGHT_RUN)"
+          test "$(jq -r .path <<<"$run")" = .github/workflows/produce-production-green-stage-b-release-preflight.yml
+          test "$(jq -r .head_sha <<<"$run")" = "$SOURCE_SHA"
+          test "$(jq -r .event <<<"$run")" = workflow_dispatch
+          test "$(jq -r .run_attempt <<<"$run")" = "$PREFLIGHT_ATTEMPT"
+          test "$(jq -r .conclusion <<<"$run")" = success
+          artifacts="$(gh api repos/$GITHUB_REPOSITORY/actions/runs/$PREFLIGHT_RUN/artifacts)"
+          test "$(jq '[.artifacts[] | select((.id|tostring) == $id and .name == "production-green-stage-b-release-preflight" and .expired == false)] | length' --arg id "$PREFLIGHT_ARTIFACT" <<<"$artifacts")" = 1
+          test "$(jq -r '[.artifacts[] | select((.id|tostring) == $id) | .digest] | .[0]' --arg id "$PREFLIGHT_ARTIFACT" <<<"$artifacts")" = "$PREFLIGHT_DIGEST"
+          d="$RUNNER_TEMP/stage-b-state-reconciliation"; umask 077; install -d -m 700 "$d"
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$PREFLIGHT_ARTIFACT/zip" > "$d/preflight-artifact.zip"
+          test "sha256:$(sha256sum "$d/preflight-artifact.zip" | awk '{print $1}')" = "$PREFLIGHT_DIGEST"
+          test "$(unzip -Z1 "$d/preflight-artifact.zip")" = release-preflight.json
+          install -m 600 /dev/null "$d/release-preflight.json"
+          unzip -p "$d/preflight-artifact.zip" release-preflight.json > "$d/release-preflight.json"
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: eu-west-2
+          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-release-deployer
+      - name: Prepare and bundle only the authenticated refresh-only transition
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          TICKET_ID: ${{ inputs.ticket_id }}
+          TFVARS_BASE64: ${{ inputs.tfvars_base64 }}
+          BINDING_BASE64: ${{ inputs.binding_base64 }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          test "$SOURCE_SHA" = "$(gh api repos/$GITHUB_REPOSITORY/branches/main --jq .commit.sha)"
+          test "$SOURCE_SHA" = "$(git rev-parse HEAD)"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          umask 077; d="$RUNNER_TEMP/stage-b-state-reconciliation"; install -d -m 700 "$d/terraform-data"
+          printf '%s' "$TFVARS_BASE64" | base64 --decode > "$d/stage-b.tfvars"
+          printf '%s' "$BINDING_BASE64" | base64 --decode > "$d/binding.json"
+          node scripts/aws/reconcile-production-green-stage-b-state.mjs --mode prepare --credential-source github-oidc-release-deployer --source-sha "$SOURCE_SHA" --ticket-id "$TICKET_ID" --tfvars "$d/stage-b.tfvars" --binding-report "$d/binding.json" --release-preflight "$d/release-preflight.json" --release-preflight-sha256 "$(sha256sum "$d/release-preflight.json" | awk '{print $1}')" --prerequisite-bundle "$d/prerequisite-bundle.zip" --prerequisite-producer-workflow-run-id "$(cat "$d/producer-run-id")" --prerequisite-producer-workflow-run-attempt "$(cat "$d/producer-run-attempt")" --prerequisite-bundle-artifact-id "$(cat "$d/producer-artifact-id")" --prerequisite-bundle-artifact-digest "$(cat "$d/producer-artifact-digest")" --terraform-data-dir "$d/terraform-data" --saved-plan-out "$d/refresh.tfplan" --preparation-out "$d/preparation.json"
+          (cd "$d" && zip -q preparation-bundle.zip preparation.json refresh.tfplan stage-b.tfvars binding.json release-preflight.json prerequisite-bundle.zip)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-green-stage-b-state-reconciliation-preparation
+          path: ${{ runner.temp }}/stage-b-state-reconciliation/preparation-bundle.zip
+          if-no-files-found: error
+          retention-days: 1

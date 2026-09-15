@@ -492,7 +492,7 @@ function assertStageAPrerequisiteBinding(report) {
   assertStageAInputMatchesStateBackup(input, stateBytes, stageAState, report);
 }
 
-export function assertStageBTfvarsBindingBytes({ tfvarsPath, bindingReportPath, tfvarsBytes, bindingReportBytes, bindingReportSha256, expectedToolingSha, expectedToolingTreeSha256, expectedImageReleaseSha, expectedImageEvidenceSha256 } = {}) {
+export function assertStageBTfvarsBindingBytes({ tfvarsPath, bindingReportPath, tfvarsBytes, bindingReportBytes, bindingReportSha256, expectedToolingSha, expectedToolingTreeSha256, expectedImageReleaseSha, expectedImageEvidenceSha256, validatePrerequisiteFiles = true } = {}) {
   assertAbsoluteFile(tfvarsPath, "Tfvars"); assertAbsoluteFile(bindingReportPath, "Binding report");
   assertStageBPrivateFile({ filePath: bindingReportPath, repositoryRoot: root, label: "Stage B tfvars binding report" });
   if (!Buffer.isBuffer(tfvarsBytes) || !Buffer.isBuffer(bindingReportBytes)) throw new Error("Stage B tfvars binding requires captured immutable bytes.");
@@ -510,8 +510,10 @@ export function assertStageBTfvarsBindingBytes({ tfvarsPath, bindingReportPath, 
   if (typeof report.recoveryMode !== "string") throw new Error("Stage B tfvars binding recovery mode is missing.");
   const expectedRecoveryMode = resolveStageBRecoveryMode({ recoveryOnly: report.recoveryOnly, partialApplyRecovery: report.partialApplyRecovery, freshImagePartialApplyRecovery: report.freshImagePartialApplyRecovery });
   if (report.recoveryMode !== expectedRecoveryMode) throw new Error("Stage B tfvars binding recovery mode is inconsistent.");
-  assertBrokerPackageBinding(tfvarsBytes, report);
-  assertStageAPrerequisiteBinding(report);
+  if (validatePrerequisiteFiles) {
+    assertBrokerPackageBinding(tfvarsBytes, report);
+    assertStageAPrerequisiteBinding(report);
+  }
   for (const [key, expected] of [["toolingSha", expectedToolingSha], ["toolingTreeSha256", expectedToolingTreeSha256], ["imageReleaseSha", expectedImageReleaseSha], ["imageEvidenceCanonicalSha256", expectedImageEvidenceSha256]]) if (expected !== undefined && report[key] !== expected) throw new Error(`Stage B tfvars binding report ${key} does not match the current deployment identity.`);
   assertCanonicalTerraformSerialNumber(report.stateSerial, "Stage B tfvars binding state serial");
   if (report.stateLineage !== STAGE_B_EXPECTED_STATE_LINEAGE) throw new Error("Stage B tfvars binding report state identity is malformed.");

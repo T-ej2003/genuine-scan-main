@@ -1,0 +1,85 @@
+name: Produce Stage B release preflight
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha: { description: Exact protected-main source SHA, required: true, type: string }
+      image_authorization_workflow_run_id: { description: Successful Release Gate run that published the image authorization artifact, required: true, type: string }
+      image_authorization_workflow_run_attempt: { description: Release Gate workflow run attempt, required: true, type: string }
+      image_authorization_artifact_id: { description: Exact image-authorization artifact ID, required: true, type: string }
+      image_authorization_artifact_digest: { description: Exact GitHub artifact digest, required: true, type: string }
+      tfvars_sha256: { description: SHA-256 of the original Stage-B tfvars bytes, required: true, type: string }
+      binding_sha256: { description: SHA-256 of the original Stage-B binding bytes, required: true, type: string }
+
+permissions: { actions: read, contents: read, id-token: write }
+concurrency: { group: production-deploy, cancel-in-progress: false }
+
+jobs:
+  produce:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with: { node-version: 24, cache: npm }
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Download and authenticate the exact Release Gate image authorization
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          IMAGE_RUN: ${{ inputs.image_authorization_workflow_run_id }}
+          IMAGE_ATTEMPT: ${{ inputs.image_authorization_workflow_run_attempt }}
+          IMAGE_ARTIFACT: ${{ inputs.image_authorization_artifact_id }}
+          IMAGE_DIGEST: ${{ inputs.image_authorization_artifact_digest }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          test "$IMAGE_ATTEMPT" = 1
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ && "$IMAGE_RUN" =~ ^[0-9]+$ && "$IMAGE_ARTIFACT" =~ ^[0-9]+$ && "$IMAGE_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+          run="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$IMAGE_RUN")"
+          test "$(jq -r .path <<<"$run")" = .github/workflows/release-gate.yml
+          test "$(jq -r .head_sha <<<"$run")" = "$SOURCE_SHA"
+          test "$(jq -r .event <<<"$run")" = workflow_dispatch
+          test "$(jq -r .run_attempt <<<"$run")" = "$IMAGE_ATTEMPT"
+          test "$(jq -r .conclusion <<<"$run")" = success
+          artifacts="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$IMAGE_RUN/artifacts")"
+          test "$(jq '[.artifacts[] | select((.id|tostring) == $id and .name == "production-green-stage-b-image-authorization" and .expired == false)] | length' --arg id "$IMAGE_ARTIFACT" <<<"$artifacts")" = 1
+          test "$(jq -r '[.artifacts[] | select((.id|tostring) == $id) | .digest] | .[0]' --arg id "$IMAGE_ARTIFACT" <<<"$artifacts")" = "$IMAGE_DIGEST"
+          d="$RUNNER_TEMP/stage-b-release-preflight"; umask 077; install -d -m 700 "$d"
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$IMAGE_ARTIFACT/zip" > "$d/image-authorization-artifact.zip"
+          test "sha256:$(sha256sum "$d/image-authorization-artifact.zip" | awk '{print $1}')" = "$IMAGE_DIGEST"
+          test "$(unzip -Z1 "$d/image-authorization-artifact.zip")" = image-authorization.json
+          install -m 600 /dev/null "$d/image-authorization.json"
+          unzip -p "$d/image-authorization-artifact.zip" image-authorization.json > "$d/image-authorization.json"
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: eu-west-2
+          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-release-deployer
+      - name: Run the canonical read-only Stage-B release preflight
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          TFVARS_SHA256: ${{ inputs.tfvars_sha256 }}
+          BINDING_SHA256: ${{ inputs.binding_sha256 }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$SOURCE_SHA" = "$GITHUB_SHA"
+          test "$SOURCE_SHA" = "$(gh api repos/$GITHUB_REPOSITORY/branches/main --jq .commit.sha)"
+          test "$SOURCE_SHA" = "$(git rev-parse HEAD)"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          node scripts/aws/produce-production-green-stage-b-release-preflight.mjs \
+            --source-sha "$SOURCE_SHA" \
+            --image-authorization "$RUNNER_TEMP/stage-b-release-preflight/image-authorization.json" \
+            --image-authorization-sha256 "$(sha256sum "$RUNNER_TEMP/stage-b-release-preflight/image-authorization.json" | awk '{print $1}')" \
+            --tfvars-sha256 "$TFVARS_SHA256" --binding-sha256 "$BINDING_SHA256" \
+            --output "$RUNNER_TEMP/stage-b-release-preflight/release-preflight.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-green-stage-b-release-preflight
+          path: ${{ runner.temp }}/stage-b-release-preflight/release-preflight.json
+          if-no-files-found: error
+          retention-days: 1
