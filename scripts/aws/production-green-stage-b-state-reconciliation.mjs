@@ -167,11 +167,12 @@ export function executeStageBStateReconciliation({ sourceSha, preparation, autho
   const result = (status, successorState, terraformStateMutationCount = 1) => { const cleanClosureProven = status === "complete" || status === "state-write-completed-postverify"; return Object.freeze({ schemaVersion: 1, kind: "PRODUCTION_GREEN_STAGE_B_STATE_RECONCILIATION_RESULT", status, sourceSha, authorizationSha256: authorization.authorizationSha256, predecessorState: before, successorState, remainingExpectedStateObservations: cleanClosureProven ? 0 : null, sourceToLiveIamSemanticDifferences: cleanClosureProven ? 0 : null, newUnexpectedDriftCount: cleanClosureProven ? 0 : null, remoteResourceMutationCount: 0, terraformStateMutationCount }); };
   const successor = () => {
     const after = readState();
-    if (after.lineage !== before.lineage || after.serial !== before.serial + 1 || after.stateSha256 === before.stateSha256) throw new Error("Stage B state reconciliation successor is not exact.");
+    if (after.lineage !== before.lineage || after.serial !== before.serial + 1 || after.stateSha256 === before.stateSha256) throw Object.assign(new Error("Stage B state reconciliation successor is not exact."), { observedState: after });
     return after;
   };
   const complete = (status) => {
-    const after = successor();
+    let after;
+    try { after = successor(); } catch (error) { error.reconciliationResult = result("state-write-completed-postverify-failed", error.observedState || null); throw error; }
     try {
       assertCleanStageBNormalPlan(renderRefreshClosurePlan(), { sourceSha });
       assertCleanStageBNormalPlan(renderNormalClosurePlan(), { sourceSha });
@@ -183,7 +184,7 @@ export function executeStageBStateReconciliation({ sourceSha, preparation, autho
   };
   reauthenticateSource();
   try { applyRefreshOnlyPlan(planBytes); } catch (error) {
-    try { const after = readState(); if (equal(after, before)) return result("state-write-not-committed", after, 0); return complete("state-write-completed-postverify"); }
+    try { const after = readState(); if (equal(after, before)) { error.reconciliationResult = result("state-write-not-committed", after, 0); throw error; } return complete("state-write-completed-postverify"); }
     catch (verificationError) {
       if (verificationError.reconciliationResult) throw verificationError;
       error.mutationOutcome = "AMBIGUOUS"; throw error;
