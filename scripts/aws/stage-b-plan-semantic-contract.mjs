@@ -270,7 +270,7 @@ const CONFIGURATION_REFERENCE_RULES = Object.freeze({
     role: ["each.value", "each.value.id"],
   },
   "aws_iam_role_policy.execution": {
-    policy: ["each.key", "local.active_execution_secret_arns", "local.backend_execution_secret_arns", "local.ecr_repository_arns", "local.execution_log_group_arns", "var.stage_b_recovery_only"],
+    policy: ["each.key", "local.ecr_repository_arns", "local.execution_log_group_arns", "local.execution_policy_secret_arns"],
     role: ["each.value", "each.value.id"],
   },
   "aws_iam_role_policy.executor_runtime": {

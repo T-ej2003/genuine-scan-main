@@ -121,10 +121,32 @@ locals {
     ])
   }
   active_execution_secret_arns = var.stage_b_recovery_only ? var.stage_b_recovery_execution_secret_arns : local.execution_secret_arns
+  runtime_rotation_and_artifact_secret_arns = [
+    "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj",
+    "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE",
+    "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2",
+    "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX",
+    "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/smtp-pass-arDHq6",
+    "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/active-key-version-8oxmeP",
+    "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/private-key-current-T0AJAW",
+    "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/public-key-current-VyQhAv",
+    "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/public-keys-json-SNolaH",
+  ]
+  executor_canary_auth_secret_arns = [
+    for secret in local.candidate_definitions.canary.containerDefinitions[0].secrets :
+    regex("^arn:aws:secretsmanager:[^:]+:[^:]+:secret:[^:]+", secret.valueFrom)
+    if secret.name == "AUTH_MFA_ENCRYPTION_KEY" || startswith(secret.name, "MSCQR_CANARY_")
+  ]
   overlap_rotation_secret_arns = var.production_rotation_enabled ? distinct([
     for value in values(var.production_rotation_secret_value_from) : trimsuffix(value, ":value::")
   ]) : []
   backend_execution_secret_arns = var.production_rotation_enabled ? distinct(concat(local.execution_secret_arns.backend, local.overlap_rotation_secret_arns)) : local.execution_secret_arns.backend
+  normal_execution_policy_secret_arns = merge(local.execution_secret_arns, {
+    backend  = distinct(concat(local.backend_execution_secret_arns, local.runtime_rotation_and_artifact_secret_arns))
+    canary   = distinct(concat(local.execution_secret_arns.canary, local.runtime_rotation_and_artifact_secret_arns))
+    executor = distinct(concat(local.execution_secret_arns.executor, local.executor_canary_auth_secret_arns))
+  })
+  execution_policy_secret_arns = var.stage_b_recovery_only ? local.active_execution_secret_arns : local.normal_execution_policy_secret_arns
   execution_log_group_arns = merge(
     { for kind, log_group in aws_cloudwatch_log_group.stage_b : kind => log_group.arn },
     { executor = var.stage_a_executor_log_group_arn }
@@ -358,7 +380,7 @@ resource "aws_iam_role_policy" "execution" {
         Sid      = "ReadOnlyExactInjectedSecrets"
         Effect   = "Allow"
         Action   = ["secretsmanager:GetSecretValue"]
-        Resource = each.key == "backend" && !var.stage_b_recovery_only ? local.backend_execution_secret_arns : local.active_execution_secret_arns[each.key]
+        Resource = local.execution_policy_secret_arns[each.key]
       }
     ]
   })
@@ -377,12 +399,20 @@ resource "aws_iam_role_policy" "candidate_object_storage" {
   role     = each.value.id
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Sid      = "ReadWriteOnlyProductionArtifactObjects"
-      Effect   = "Allow"
-      Action   = ["s3:GetObject", "s3:PutObject"]
-      Resource = "${var.receipt_bucket_arn}/*"
-    }]
+    Statement = concat(
+      [{
+        Sid      = "ReadWriteOnlyProductionArtifactObjects"
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:PutObject"]
+        Resource = "${var.receipt_bucket_arn}/*"
+      }],
+      contains(["backend", "canary"], each.key) ? [{
+        Sid      = "ListExactProductionArtifactBucket"
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
+        Resource = var.receipt_bucket_arn
+      }] : [],
+    )
   })
 }
 

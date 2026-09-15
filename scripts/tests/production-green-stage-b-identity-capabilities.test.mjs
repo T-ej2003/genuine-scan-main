@@ -196,7 +196,7 @@ test("Stage B release readiness requires the completed Stage A contract", () => 
 test("generated capability graph is exhaustive, deterministic, and identity-exact", () => {
   const first = buildStageBDeploymentCapabilityGraph(); const second = buildStageBDeploymentCapabilityGraph();
   assert.deepEqual(first, second);
-  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 51, capabilities: 438, uniqueActions: 148, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
+  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 51, capabilities: 439, uniqueActions: 148, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
   const bootstrapAuthorization = first.capabilities.filter(({ id }) => id.startsWith("bootstrap-operator-policy-authorization-"));
   assert.equal(bootstrapAuthorization.length, 4);
   assert.equal(bootstrapAuthorization.every(({ identity, mutation, policy }) => identity === "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER" && mutation === false && policy.sourceFile === BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.authorizationPolicyPath), true);
