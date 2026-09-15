@@ -20,7 +20,8 @@ assert.doesNotMatch(generated, /GRANT EXECUTE ON FUNCTION app_ops\.bootstrap_con
 assert.match(verifier, /'app_ops'::text,'bootstrap_configured_super_admin'::text/);
 assert.match(source, /pg_advisory_xact_lock\(723425101\)/);
 assert.match(source, /u\.role IN \('SUPER_ADMIN','PLATFORM_SUPER_ADMIN'\)/);
-assert.match(source, /u\.id='174619c3-aabe-4096-a97d-886603ad825e'[\s\S]+u\.metadata->>'managedBy'='production-green-pretraffic-canary-v1'/);
+assert.match(source, /u\.id='174619c3-aabe-4096-a97d-886603ad825e'[\s\S]+COALESCE\(u\.metadata->>'managedBy',''\)='production-green-pretraffic-canary-v1'/);
+assert.match(source, /COALESCE\(u\.metadata->>'managedBy',''\)='production-green-pretraffic-canary-v1'/);
 assert.match(source, /set_config\('app\.bootstrap_email',lower\(btrim\(p_email\)\),true\)/);
 assert.match(source, /'SUPER_ADMIN','ACTIVE',true/);
 assert.doesNotMatch(source.slice(source.indexOf("CREATE OR REPLACE FUNCTION app_ops.bootstrap_configured_super_admin")), /%ROWTYPE|SELECT \*/);

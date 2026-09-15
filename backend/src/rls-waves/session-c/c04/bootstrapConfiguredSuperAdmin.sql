@@ -21,7 +21,7 @@ BEGIN
      AND NOT (
        u.id='174619c3-aabe-4096-a97d-886603ad825e'
        AND u.role='PLATFORM_SUPER_ADMIN'
-       AND u.metadata->>'managedBy'='production-green-pretraffic-canary-v1'
+       AND COALESCE(u.metadata->>'managedBy','')='production-green-pretraffic-canary-v1'
      )
    ORDER BY u."createdAt",u.id LIMIT 1;
   IF FOUND THEN
