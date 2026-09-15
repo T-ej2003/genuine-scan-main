@@ -64,6 +64,7 @@ jobs:
           SOURCE_SHA: ${{ inputs.source_sha }}
           TFVARS_SHA256: ${{ inputs.tfvars_sha256 }}
           BINDING_SHA256: ${{ inputs.binding_sha256 }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           test "$SOURCE_SHA" = "$GITHUB_SHA"

@@ -47,6 +47,19 @@ test("the canonical release-preflight producer is real, source-bound, and artifa
   assert.doesNotMatch(source, /authorization_base64|raw filesystem path/);
 });
 
+test("reconciliation readers authenticate and consume private JSON directly", () => {
+  const reconcile = fs.readFileSync(path.join(root, "scripts/aws/reconcile-production-green-stage-b-state.mjs"), "utf8");
+  const authorize = fs.readFileSync(path.join(root, "scripts/aws/authorize-production-green-stage-b-state-reconciliation.mjs"), "utf8");
+  assert.match(reconcile, /--release-preflight-sha256/);
+  assert.match(reconcile, /--authorization-file-sha256/);
+  assert.doesNotMatch(reconcile, /readBoundStageBPrivateJson\([^;]+\)\.value/);
+  assert.doesNotMatch(authorize, /readBoundStageBPrivateJson\([^;]+\)\.value/);
+  assert.match(read("prepare-production-green-stage-b-state-reconciliation.yml"), /--release-preflight-sha256/);
+  assert.match(read("execute-production-green-stage-b-state-reconciliation.yml"), /--release-preflight-sha256/);
+  assert.match(read("execute-production-green-stage-b-state-reconciliation.yml"), /--authorization-file-sha256/);
+  assert.match(read("produce-production-green-stage-b-release-preflight.yml"), /GITHUB_TOKEN: \$\{\{ github\.token \}\}/);
+});
+
 test("the prerequisite producer is a single source-bound four-member producer", () => {
   const name = "produce-production-green-stage-b-prerequisite-bundle.yml";
   const workflow = parse(name); const source = read(name); const producer = fs.readFileSync(path.join(root, "scripts/aws/produce-production-green-stage-b-prerequisite-bundle.mjs"), "utf8");
