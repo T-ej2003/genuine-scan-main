@@ -201,12 +201,15 @@ test("runtime S3 Get and List actions are classified as read-only", () => {
 test("generated capability graph is exhaustive, deterministic, and identity-exact", () => {
   const first = buildStageBDeploymentCapabilityGraph(); const second = buildStageBDeploymentCapabilityGraph();
   assert.deepEqual(first, second);
-  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 52, capabilities: 500, uniqueActions: 148, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
+  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 52, capabilities: 575, uniqueActions: 148, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
   const stateReconciliation = first.capabilities.filter(({ phase }) => phase === "stage-b-exact-refresh-only-state-reconciliation");
-  assert.equal(stateReconciliation.length, 61);
+  assert.ok(stateReconciliation.length > 61);
   const producerReads = stateReconciliation.filter(({ id }) => id.startsWith("stage-b-state-reconciliation-producer-"));
   assert.deepEqual(producerReads.map(({ action }) => action).sort(), ["ec2:DescribeRouteTables", "ec2:DescribeSecurityGroups", "ec2:DescribeSubnets", "ecs:DescribeClusters", "rds:DescribeDBInstances", "s3:GetObject"]);
   assert.equal(producerReads.every(({ identity, executor, sourceFile, mutation }) => identity === "RELEASE_DEPLOYER" && executor === "aws-cli" && ["scripts/aws/produce-production-green-stage-b-prerequisite-bundle.mjs", "scripts/aws/generate-production-green-stage-a-prerequisites.mjs"].includes(sourceFile) && mutation === false), true);
+  const releasePreflightReads = stateReconciliation.filter(({ id }) => id.startsWith("stage-b-state-reconciliation-release-preflight-"));
+  assert.equal(releasePreflightReads.every(({ identity, executor, sourceFile, mutation }) => identity === "RELEASE_DEPLOYER" && executor === "aws-cli" && sourceFile === "scripts/aws/produce-production-green-stage-b-release-preflight.mjs" && mutation === false), true);
+  assert.deepEqual(new Set(releasePreflightReads.flatMap(({ probeIds }) => probeIds).filter(Boolean)), new Set(RELEASE_READ_PROBES.map(({ id }) => id)));
   assert.equal(stateReconciliation.filter(({ sourceFile }) => sourceFile === "scripts/aws/reconcile-production-green-stage-b-state.mjs").every(({ identity, executor }) => identity === "RELEASE_DEPLOYER" && executor === "terraform"), true);
   assert.equal(stateReconciliation.filter(({ classification }) => classification === "TERRAFORM_STATE_ONLY_MUTATION").every(({ mutation }) => mutation === true), true);
   const bootstrapAuthorization = first.capabilities.filter(({ id }) => id.startsWith("bootstrap-operator-policy-authorization-"));

@@ -382,6 +382,11 @@ const PHASE_CAPABILITY_REQUIREMENTS = Object.freeze({
   "stage-b-exact-refresh-only-state-reconciliation": [
     ...STAGE_B_STATE_RECONCILIATION_CAPABILITIES.map(([id]) => id),
     ...STAGE_B_PREREQUISITE_PRODUCER_READ_IDS.map(prerequisiteProducerCapabilityId),
+    ...readJson(manifestPath).required.filter((entry) => entry.action && RELEASE_READ_PROBES.some((probe) => probe.action === entry.action)).map(({ id }) => `stage-b-state-reconciliation-release-preflight-manifest-${id}`),
+    "stage-b-state-reconciliation-release-preflight-release-identify",
+    "stage-b-state-reconciliation-release-preflight-release-verify-signature",
+    "stage-b-state-reconciliation-release-preflight-recovery-list-backend-revisions",
+    ...ROOT_ATTESTATION_RELEASE_CAPABILITIES.map(([id]) => `stage-b-state-reconciliation-release-preflight-${id}`),
     ...readJson(manifestPath).required.filter(({ phase }) => phase === "refresh").map(({ id }) => `stage-b-state-reconciliation-provider-${id}`),
   ],
   "stage-a-production-artifacts-state-reconciliation": STAGE_A_PRODUCTION_ARTIFACTS_CAPABILITIES.filter(([, phase]) => phase === "stage-a-production-artifacts-state-reconciliation").map(([id]) => id),
@@ -812,9 +817,21 @@ export function buildStageBDeploymentCapabilityGraph() {
     sourceFunction: entry.id, action: entry.action, resources: entry.resources, context: entry.context || [], classification: "RELEASE_DIRECT_READ", probe: "direct", probeIds: [STAGE_B_PREREQUISITE_PRODUCER_PROBES[entry.id]],
     policy: authority(entry, false, policies), required: true, mutation: false,
   }));
+  const releasePreflightProducerReads = [
+    ...manifestCapabilities.filter(({ identity, probeIds }) => identity === "RELEASE_DEPLOYER" && probeIds.length),
+    ...recovery.filter(({ action }) => action === "ecs:ListTaskDefinitions"),
+    ...fixed.filter(({ id }) => ["release-identify", "release-verify-signature"].includes(id)),
+    ...rootAttestationRelease,
+  ].map((capability) => ({
+    ...capability, id: `stage-b-state-reconciliation-release-preflight-${capability.id}`,
+    phase: "stage-b-exact-refresh-only-state-reconciliation", executor: "aws-cli",
+    sourceFile: "scripts/aws/produce-production-green-stage-b-release-preflight.mjs", sourceFunction: capability.id,
+    probeIds: capability.id === "recovery-list-backend-revisions" ? ["recovery-backend-revisions"] : capability.probeIds.filter((id) => RELEASE_READ_PROBES.some((probe) => probe.id === id)),
+    classification: "RELEASE_DIRECT_READ", required: true, mutation: false,
+  }));
   const runtime = terraformRuntimeActions().map((action) => ({ id: `runtime-${action.replace(/[^A-Za-z0-9]+/g, "-").toLowerCase()}`, phase: "runtime-activation-boundary", identity: "SERVICE_RUNTIME", executor: "lambda-or-ecs-role", sourceFile: terraformPath, sourceFunction: "generated runtime IAM policy", action, resources: ["terraform-derived-runtime-resource"], context: {}, classification: "SERVICE_RUNTIME_ACTION", probe: "structural", policy: { sourceFile: terraformPath, sid: "terraform-generated", livePolicyArn: "created-or-updated-by-stage-b", expectedVersion: "saved-plan", expectedPolicySha256: null }, required: false, mutation: isRuntimeMutationAction(action) }));
   const runtimeAdmin = RUNTIME_ADMIN_CAPABILITIES.map(([id, phase, action, resources, mutation]) => ({ id, phase, identity: "ADMINISTRATOR", executor: "aws-cli", sourceFile: phase === "runtime-consumability-convergence" ? "scripts/aws/converge-production-ecs-runtime-policy.mjs" : "scripts/aws/prepare-production-ecs-runtime-consumability.mjs", sourceFunction: id, action, resources, context: { account: STAGE_B.account, region: STAGE_B.region }, classification: mutation ? "ADMIN_IAM_OR_SIGNING_MUTATION" : "ADMIN_RUNTIME_CLOSURE_READ", probe: action === "iam:SimulatePrincipalPolicy" ? "administrator-simulation" : "administrator-live-read", probeIds: [], policy: { sourceFile: phase === "runtime-consumability-convergence" ? "scripts/aws/converge-production-ecs-runtime-policy.mjs" : "scripts/aws/production-ecs-runtime-consumability.mjs", sid: id, livePolicyArn: null, expectedVersion: "protected-main-source", expectedPolicySha256: null }, required: true, mutation }));
-  const capabilities = [...fixed, ...normalActivation, ...initialActivationPolicyReconciliation, ...initialActivationPreparation, ...providerReadonlyReconciliation, ...providerReadonlyPreparation, ...bootstrapOperatorPolicyReconciliation, ...mixedRecoveryIamPreflight, mixedRecoveryIamAttestationSigning, ...mixedRecoveryExecution, ...stageAProductionArtifacts, ROOT_DROP_SIGNING, ...rootAttestationRelease, ...recovery, ...forwardRecovery, ...stateReconciliation, ...prerequisiteProducerReads, ...stateReconciliationProviderReads, ...publisher, ...manifestCapabilities, ...checkerCapabilities, ...operatorCapabilities, ...runtimeAdmin, ...runtime].sort((a, b) => a.id.localeCompare(b.id));
+  const capabilities = [...fixed, ...normalActivation, ...initialActivationPolicyReconciliation, ...initialActivationPreparation, ...providerReadonlyReconciliation, ...providerReadonlyPreparation, ...bootstrapOperatorPolicyReconciliation, ...mixedRecoveryIamPreflight, mixedRecoveryIamAttestationSigning, ...mixedRecoveryExecution, ...stageAProductionArtifacts, ROOT_DROP_SIGNING, ...rootAttestationRelease, ...recovery, ...forwardRecovery, ...stateReconciliation, ...prerequisiteProducerReads, ...releasePreflightProducerReads, ...stateReconciliationProviderReads, ...publisher, ...manifestCapabilities, ...checkerCapabilities, ...operatorCapabilities, ...runtimeAdmin, ...runtime].sort((a, b) => a.id.localeCompare(b.id));
   return {
     schemaVersion: 1, deployment: "production-green-stage-b", account: "368992683803", region: "eu-west-2",
     phases: PHASES.map(([id, sourceFile], index) => ({ order: index + 1, id, sourceFile })),
