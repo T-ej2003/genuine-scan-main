@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { hasExactShellCommand, hasGuardrailBranches } from "./lib/aws-dr-validation-contract.mjs";
+import { guardrailBranchCommandsAreExact } from "./lib/aws-dr-validation-contract.mjs";
 
 const root = process.cwd();
 const scanRoots = [".github/workflows", "scripts", "ops/deploy", "documents/ops"];
@@ -743,20 +743,12 @@ for (const expected of ["  validate:", "Detect DR-relevant change scope", "steps
     });
   }
 }
-for (const command of ["npm run verify:guardrails:source", "npm run verify:guardrails"]) {
-  if (!hasExactShellCommand(drValidationWorkflow, command)) {
-    findings.push({
-      repoPath: drValidationWorkflowPath,
-      line: 1,
-      message: `Required validate workflow contract is missing exact command ${command}.`,
-    });
-  }
-}
-if (!hasGuardrailBranches(drValidationWorkflow)) {
+const guardrailBranches = guardrailBranchCommandsAreExact(drValidationWorkflow);
+if (!guardrailBranches.pullRequest || !guardrailBranches.dispatch) {
   findings.push({
     repoPath: drValidationWorkflowPath,
     line: 1,
-    message: "Required validate workflow must use source guardrails for pull requests and full guardrails for dispatch.",
+    message: "Required validate workflow must use exact source guardrails for pull requests and exact full guardrails for dispatch.",
   });
 }
 

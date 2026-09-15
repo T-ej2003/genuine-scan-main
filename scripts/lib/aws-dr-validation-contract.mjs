@@ -9,10 +9,29 @@ export function isDrRelevantChange({ filename, previous_filename: previousFilena
   return isDrRelevantPath(filename) || isDrRelevantPath(previousFilename);
 }
 
-export function hasExactShellCommand(source, command) {
-  return source.split(/\r?\n/).some((line) => line.trim().replace(/\s+/g, " ") === command);
+function guardrailBranchLines(source) {
+  const lines = source.split(/\r?\n/);
+  const start = lines.findIndex((line) => line.trim() === 'if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then');
+  if (start < 0) return null;
+
+  const otherwise = lines.findIndex((line, index) => index > start && line.trim() === "else");
+  const end = lines.findIndex((line, index) => index > otherwise && line.trim() === "fi");
+  if (otherwise < 0 || end < 0) return null;
+
+  return { pullRequest: lines.slice(start + 1, otherwise), dispatch: lines.slice(otherwise + 1, end) };
 }
 
-export function hasGuardrailBranches(source) {
-  return /if \[ "\$GITHUB_EVENT_NAME" = "pull_request" \]; then\s+npm run verify:guardrails:source\s+else\s+npm run verify:guardrails\s+/m.test(source);
+function hasOnlyExactGuardrailCommand(lines, command) {
+  const commands = lines
+    .map((line) => line.trim().replace(/\s+/g, " "))
+    .filter((line) => line.startsWith("npm run verify:guardrails"));
+  return commands.length === 1 && commands[0] === command;
+}
+
+export function guardrailBranchCommandsAreExact(source) {
+  const branches = guardrailBranchLines(source);
+  return {
+    pullRequest: branches ? hasOnlyExactGuardrailCommand(branches.pullRequest, "npm run verify:guardrails:source") : false,
+    dispatch: branches ? hasOnlyExactGuardrailCommand(branches.dispatch, "npm run verify:guardrails") : false,
+  };
 }
