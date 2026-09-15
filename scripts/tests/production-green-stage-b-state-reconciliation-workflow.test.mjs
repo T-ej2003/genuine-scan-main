@@ -62,6 +62,13 @@ test("state-only image-authorization producer is protected, independently authen
   assert.doesNotMatch(source, /terraform|ecs|apply-production|publish-ecs-images|kms:Sign|release-gate\.yml/);
 });
 
+test("state-reconciliation prerequisite runbook names the non-deploy image-authorization handoff", () => {
+  const runbook = fs.readFileSync(path.join(root, "documents/ops/iam/PRODUCTION_GREEN_STAGE_B_PREREQUISITE_BUNDLE.md"), "utf8");
+  assert.match(runbook, /produce-production-green-stage-b-state-reconciliation-image-authorization\.yml/);
+  assert.match(runbook, /production-green-stage-b-state-reconciliation-image-authorization/);
+  assert.doesNotMatch(runbook, /Release Gate image-authorization artifact/);
+});
+
 test("reconciliation readers authenticate and consume private JSON directly", () => {
   const reconcile = fs.readFileSync(path.join(root, "scripts/aws/reconcile-production-green-stage-b-state.mjs"), "utf8");
   const authorize = fs.readFileSync(path.join(root, "scripts/aws/authorize-production-green-stage-b-state-reconciliation.mjs"), "utf8");
