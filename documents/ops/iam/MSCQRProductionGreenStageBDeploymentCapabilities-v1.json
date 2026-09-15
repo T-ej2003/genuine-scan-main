@@ -14344,10 +14344,40 @@
       "mutation": true
     },
     {
+      "id": "stage-b-state-reconciliation-direct-read-state",
+      "phase": "stage-b-exact-refresh-only-state-reconciliation",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/reconcile-production-green-stage-b-state.mjs",
+      "sourceFunction": "stage-b-state-reconciliation-direct-read-state",
+      "action": "s3:GetObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "operation": "PRODUCTION_GREEN_STAGE_B_TEN_ADDRESS_REFRESH_ONLY_STATE_RECONCILIATION",
+        "remoteResourceMutationCount": 0
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json",
+        "sid": "ReadWriteStageBProductionStateOnly",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "5c45224bb53984f08d98ddeddb2210f26ebc8fc1c6de75beb6ba71ea30693d01"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
       "id": "stage-b-state-reconciliation-identify",
       "phase": "stage-b-exact-refresh-only-state-reconciliation",
       "identity": "RELEASE_DEPLOYER",
-      "executor": "terraform",
+      "executor": "aws-cli",
       "sourceFile": "scripts/aws/reconcile-production-green-stage-b-state.mjs",
       "sourceFunction": "stage-b-state-reconciliation-identify",
       "action": "sts:GetCallerIdentity",
@@ -14360,8 +14390,8 @@
         "operation": "PRODUCTION_GREEN_STAGE_B_TEN_ADDRESS_REFRESH_ONLY_STATE_RECONCILIATION",
         "remoteResourceMutationCount": 0
       },
-      "classification": "TERRAFORM_BACKEND_READ",
-      "probe": "administrator-simulation",
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
       "probeIds": [],
       "policy": {
         "sourceFile": "aws-sts",
