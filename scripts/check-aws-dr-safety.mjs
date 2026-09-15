@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { guardrailBranchCommandsAreExact } from "./lib/aws-dr-validation-contract.mjs";
+import { extractGuardrailRunBlock, guardrailRunBlockIsCanonical } from "./lib/aws-dr-validation-contract.mjs";
 
 const root = process.cwd();
 const scanRoots = [".github/workflows", "scripts", "ops/deploy", "documents/ops"];
@@ -750,12 +750,11 @@ for (const expected of [
     });
   }
 }
-const guardrailBranches = guardrailBranchCommandsAreExact(drValidationWorkflow);
-if (!guardrailBranches.pullRequest || !guardrailBranches.dispatch) {
+if (!guardrailRunBlockIsCanonical(extractGuardrailRunBlock(drValidationWorkflow))) {
   findings.push({
     repoPath: drValidationWorkflowPath,
     line: 1,
-    message: "Required validate workflow must use exact source guardrails for pull requests and exact full guardrails for dispatch.",
+    message: "Required validate workflow guardrail step must be the canonical fail-closed event-selection program.",
   });
 }
 
