@@ -36,6 +36,7 @@ assert.match(policies, /session_user='mscqr_rls_cert_migration'/);
 assert.match(policies, /current_setting\('app\.bootstrap_email',true\)/);
 assert.equal(backendPackage.scripts["auth:bootstrap-super-admin"], "node scripts/create-super-admin.js");
 assert.match(deployment, /npm run auth:bootstrap-super-admin/);
+assert.match(deployment, /full-rls-admin-bootstrap/);
 assert.match(deployment, /full-rls-role-provision/);
 assert.match(deployment, /full-rls-role-verify/);
 assert.match(deployment, /full-rls-admin-ownership/);
@@ -49,7 +50,9 @@ assert.match(deployment, /aws --version/);
 assert.match(deployment, /read -rsp/);
 assert.match(deployment, /aws secretsmanager get-secret-value/);
 assert.doesNotMatch(deployment, /<deployment-only migration database URL>/);
-assert.ok(deployment.indexOf("full-rls-runtime-policy") < deployment.indexOf("npm run auth:bootstrap-super-admin"));
+const bootstrapSection = deployment.slice(deployment.indexOf("## 5. Provision the deployment-only migration credential"));
+assert.ok(bootstrapSection.indexOf("full-rls-admin-bootstrap") < bootstrapSection.indexOf("full-rls-role-provision"));
+assert.ok(bootstrapSection.indexOf("full-rls-runtime-policy") < bootstrapSection.indexOf("npm run auth:bootstrap-super-admin"));
 assert.ok(deployment.indexOf("npm run auth:bootstrap-super-admin") < deployment.indexOf("docker compose --profile worker up"));
 
 console.log("initial admin bootstrap package contract tests passed");
