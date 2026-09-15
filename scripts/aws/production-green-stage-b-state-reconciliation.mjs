@@ -184,11 +184,20 @@ export function executeStageBStateReconciliation({ sourceSha, preparation, autho
   };
   reauthenticateSource();
   try { applyRefreshOnlyPlan(planBytes); } catch (error) {
-    try { const after = readState(); if (equal(after, before)) { error.reconciliationResult = result("state-write-not-committed", after, 0); throw error; } return complete("state-write-completed-postverify"); }
-    catch (verificationError) {
+    try {
+      const after = readState();
+      if (equal(after, before)) {
+        error.reconciliationResult = result("state-write-not-committed", after, 0);
+      } else {
+        error.reconciliationResult = result("state-write-outcome-ambiguous", after, null);
+        error.mutationOutcome = "AMBIGUOUS";
+      }
+    } catch (verificationError) {
       if (verificationError.reconciliationResult) throw verificationError;
-      error.mutationOutcome = "AMBIGUOUS"; throw error;
+      error.reconciliationResult = result("state-write-outcome-ambiguous", null, null);
+      error.mutationOutcome = "AMBIGUOUS";
     }
+    throw error;
   }
   return complete("complete");
 }

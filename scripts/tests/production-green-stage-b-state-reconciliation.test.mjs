@@ -93,10 +93,11 @@ test("execution accepts a fresh private root when the semantic relocation contra
   assert.throws(() => executeStageBStateReconciliation({ sourceSha, preparation, authorization, bindings: { ...execution, relocationContractSha256: "f".repeat(64) }, planBytes: bytes, planJson: plan(), readState: () => state, applyRefreshOnlyPlan: () => {}, renderRefreshClosurePlan: cleanPlan, renderNormalClosurePlan: cleanPlan, reauthenticateSource: () => {}, now }), /execution inputs differ/);
 });
 
-test("apply error is resolved only by exact successor readback", () => {
+test("apply error never attributes an exact successor to this authorization", () => {
   const preparation = prepare(); const authorization = createStageBStateReconciliationAuthorization({ preparation, approval: approval(), now }); let current = { ...state };
-  const result = executeStageBStateReconciliation({ sourceSha, preparation, authorization, bindings: execBindings(), planBytes: bytes, planJson: plan(), readState: () => current, applyRefreshOnlyPlan: () => { current = { ...current, serial: 105, stateSha256: "c".repeat(64) }; throw new Error("transport lost"); }, renderRefreshClosurePlan: cleanPlan, renderNormalClosurePlan: cleanPlan, reauthenticateSource: () => {}, now });
-  assert.equal(result.status, "state-write-completed-postverify");
+  let refreshClosures = 0;
+  assert.throws(() => executeStageBStateReconciliation({ sourceSha, preparation, authorization, bindings: execBindings(), planBytes: bytes, planJson: plan(), readState: () => current, applyRefreshOnlyPlan: () => { current = { ...current, serial: 105, stateSha256: "c".repeat(64) }; throw new Error("transport lost"); }, renderRefreshClosurePlan: () => { refreshClosures += 1; return cleanPlan(); }, renderNormalClosurePlan: cleanPlan, reauthenticateSource: () => {}, now }), (error) => error.mutationOutcome === "AMBIGUOUS" && error.reconciliationResult?.status === "state-write-outcome-ambiguous" && error.reconciliationResult.successorState.serial === 105 && error.reconciliationResult.terraformStateMutationCount === null);
+  assert.equal(refreshClosures, 0);
 });
 
 test("apply failure with exact predecessor readback is a durable zero-mutation result", () => {
