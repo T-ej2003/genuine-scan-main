@@ -688,6 +688,15 @@ jobs:
             --github-output "$GITHUB_OUTPUT"
           echo "authorization_file=$image_file" >> "$GITHUB_OUTPUT"
 
+      - name: Publish exact image authorization for read-only preflight consumers
+        if: ${{ inputs.release_mode == 'normal' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-green-stage-b-image-authorization
+          path: ${{ steps.images.outputs.authorization_file }}
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Verify preserved frontend deployment identity
         id: frontend
         if: ${{ inputs.release_mode == 'normal' }}
