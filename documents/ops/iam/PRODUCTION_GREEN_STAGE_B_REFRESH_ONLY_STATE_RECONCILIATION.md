@@ -2,7 +2,9 @@
 
 This is a one-purpose production control-plane contract. It exists because five previously authorized runtime IAM policy corrections were later reconciled into Terraform source, while the Stage B state at lineage `4e438e59-8b8b-194d-030c-5ede0c26344a`, serial `104` retained ten stale provider observations.
 
-It is not a generic Terraform-drift override. It accepts only the ten addresses in `scripts/aws/production-green-stage-b-state-reconciliation.mjs`, only a refresh-only plan, and only zero remote resource operations. Any source, Terraform root, state lineage/serial, plan hash, ticket, tfvars, binding, preflight, address, output, or provider-state deviation fails closed.
+It is not a generic Terraform-drift override. It accepts only the ten addresses in `scripts/aws/production-green-stage-b-state-reconciliation.mjs`, only a refresh-only plan, and only zero remote resource operations. Any source, Terraform root, state lineage/serial, plan hash, ticket, tfvars, binding, preflight, address, output, policy-value, or provider-state deviation fails closed.
+
+The protected preparation workflow carries the saved plan and bound inputs as one authenticated, short-lived artifact. Authorization and execution accept only that exact preparation artifact and its single authenticated authorization artifact; no Terraform plan is accepted through workflow-dispatch input.
 
 The ceremony has three separate phases:
 

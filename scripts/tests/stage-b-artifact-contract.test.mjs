@@ -265,8 +265,8 @@ test("release-preflight checker artifacts declare every direct reader and publis
 
 test("ten-address state reconciliation artifacts form a closed private authorization chain", () => {
   const expected = {
-    "stage-b-ten-address-state-reconciliation-saved-plan": [".github/workflows/execute-production-green-stage-b-state-reconciliation.yml", "scripts/aws/reconcile-production-green-stage-b-state.mjs"],
-    "stage-b-ten-address-state-reconciliation-preparation": [".github/workflows/authorize-production-green-stage-b-state-reconciliation.yml", ".github/workflows/execute-production-green-stage-b-state-reconciliation.yml", "scripts/aws/authorize-production-green-stage-b-state-reconciliation.mjs", "scripts/aws/reconcile-production-green-stage-b-state.mjs"],
+    "stage-b-ten-address-state-reconciliation-saved-plan": [".github/workflows/prepare-production-green-stage-b-state-reconciliation.yml", ".github/workflows/execute-production-green-stage-b-state-reconciliation.yml", "scripts/aws/reconcile-production-green-stage-b-state.mjs"],
+    "stage-b-ten-address-state-reconciliation-preparation": [".github/workflows/prepare-production-green-stage-b-state-reconciliation.yml", ".github/workflows/authorize-production-green-stage-b-state-reconciliation.yml", ".github/workflows/execute-production-green-stage-b-state-reconciliation.yml", "scripts/aws/authorize-production-green-stage-b-state-reconciliation.mjs", "scripts/aws/reconcile-production-green-stage-b-state.mjs"],
     "stage-b-ten-address-state-reconciliation-authorization": [".github/workflows/execute-production-green-stage-b-state-reconciliation.yml", "scripts/aws/reconcile-production-green-stage-b-state.mjs"],
     "stage-b-ten-address-state-reconciliation-result": [".github/workflows/execute-production-green-stage-b-state-reconciliation.yml", "documents/ops/iam/PRODUCTION_GREEN_STAGE_B_REFRESH_ONLY_STATE_RECONCILIATION.md"],
   };

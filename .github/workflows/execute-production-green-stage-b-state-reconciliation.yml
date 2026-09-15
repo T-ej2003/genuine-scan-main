@@ -4,18 +4,10 @@ on:
   workflow_dispatch:
     inputs:
       source_sha: { description: Exact protected-main source SHA, required: true, type: string }
-      preparation_base64: { description: Exact private preparation artifact, required: true, type: string }
-      preparation_sha256: { description: SHA-256 of preparation bytes, required: true, type: string }
-      saved_plan_base64: { description: Exact validated refresh-only plan, required: true, type: string }
-      saved_plan_sha256: { description: SHA-256 of saved plan bytes, required: true, type: string }
+      preparation_workflow_run_id: { description: Completed preparation workflow run ID, required: true, type: string }
+      preparation_workflow_run_attempt: { description: Preparation workflow run attempt, required: true, type: string }
       authorization_workflow_run_id: { description: Completed authorization workflow run ID, required: true, type: string }
       authorization_workflow_run_attempt: { description: Authorization workflow run attempt, required: true, type: string }
-      tfvars_base64: { description: Exact prepared tfvars, required: true, type: string }
-      tfvars_sha256: { description: SHA-256 of exact prepared tfvars bytes, required: true, type: string }
-      binding_base64: { description: Exact prepared binding report, required: true, type: string }
-      binding_sha256: { description: SHA-256 of exact prepared binding report bytes, required: true, type: string }
-      release_preflight_base64: { description: Exact prepared release preflight, required: true, type: string }
-      release_preflight_sha256: { description: SHA-256 of exact prepared release preflight bytes, required: true, type: string }
 
 permissions: { actions: read, contents: read, id-token: write }
 concurrency: { group: production-deploy, cancel-in-progress: false }
@@ -31,25 +23,15 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: npm
+        with: { node-version: 24, cache: npm }
       - uses: hashicorp/setup-terraform@v3
         with: { terraform_version: 1.15.8, terraform_wrapper: false }
       - run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: Authenticate protected source and exact artifacts
+      - name: Authenticate protected source and exact preparation artifact
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
-          PREPARATION_BASE64: ${{ inputs.preparation_base64 }}
-          PREPARATION_SHA256: ${{ inputs.preparation_sha256 }}
-          PLAN_BASE64: ${{ inputs.saved_plan_base64 }}
-          PLAN_SHA256: ${{ inputs.saved_plan_sha256 }}
-          TFVARS_BASE64: ${{ inputs.tfvars_base64 }}
-          TFVARS_SHA256: ${{ inputs.tfvars_sha256 }}
-          BINDING_BASE64: ${{ inputs.binding_base64 }}
-          BINDING_SHA256: ${{ inputs.binding_sha256 }}
-          PREFLIGHT_BASE64: ${{ inputs.release_preflight_base64 }}
-          PREFLIGHT_SHA256: ${{ inputs.release_preflight_sha256 }}
+          PREPARATION_RUN: ${{ inputs.preparation_workflow_run_id }}
+          PREPARATION_ATTEMPT: ${{ inputs.preparation_workflow_run_attempt }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
@@ -57,17 +39,20 @@ jobs:
           test "$SOURCE_SHA" = "$(gh api repos/$GITHUB_REPOSITORY/branches/main --jq .commit.sha)"
           test "$SOURCE_SHA" = "$(git rev-parse HEAD)"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          test "$PREPARATION_ATTEMPT" = 1
           umask 077; d="$RUNNER_TEMP/stage-b-state-reconciliation"; install -d -m 700 "$d/terraform-data"
-          printf '%s' "$PREPARATION_BASE64" | base64 --decode > "$d/preparation.json"
-          printf '%s' "$PLAN_BASE64" | base64 --decode > "$d/refresh.tfplan"
-          printf '%s' "$TFVARS_BASE64" | base64 --decode > "$d/stage-b.tfvars"
-          printf '%s' "$BINDING_BASE64" | base64 --decode > "$d/binding.json"
-          printf '%s' "$PREFLIGHT_BASE64" | base64 --decode > "$d/release-preflight.json"
-          test "$(sha256sum "$d/preparation.json" | awk '{print $1}')" = "$PREPARATION_SHA256"
-          test "$(sha256sum "$d/refresh.tfplan" | awk '{print $1}')" = "$PLAN_SHA256"
-          test "$(sha256sum "$d/stage-b.tfvars" | awk '{print $1}')" = "$TFVARS_SHA256"
-          test "$(sha256sum "$d/binding.json" | awk '{print $1}')" = "$BINDING_SHA256"
-          test "$(sha256sum "$d/release-preflight.json" | awk '{print $1}')" = "$PREFLIGHT_SHA256"
+          run="$(gh api repos/$GITHUB_REPOSITORY/actions/runs/$PREPARATION_RUN)"
+          test "$(jq -r .path <<<"$run")" = .github/workflows/prepare-production-green-stage-b-state-reconciliation.yml
+          test "$(jq -r .head_sha <<<"$run")" = "$SOURCE_SHA"
+          test "$(jq -r .event <<<"$run")" = workflow_dispatch
+          test "$(jq -r .run_attempt <<<"$run")" = "$PREPARATION_ATTEMPT"
+          test "$(jq -r .conclusion <<<"$run")" = success
+          artifacts="$(gh api repos/$GITHUB_REPOSITORY/actions/runs/$PREPARATION_RUN/artifacts)"
+          test "$(jq '[.artifacts[] | select(.name == "production-green-stage-b-state-reconciliation-preparation" and .expired == false)] | length' <<<"$artifacts")" = 1
+          artifact="$(jq -r '.artifacts[] | select(.name == "production-green-stage-b-state-reconciliation-preparation" and .expired == false) | .id' <<<"$artifacts")"; digest="$(jq -r '.artifacts[] | select(.name == "production-green-stage-b-state-reconciliation-preparation" and .expired == false) | .digest' <<<"$artifacts")"
+          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]; gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact/zip" > "$d/preparation.zip"; test "sha256:$(sha256sum "$d/preparation.zip" | awk '{print $1}')" = "$digest"
+          test "$(unzip -Z1 "$d/preparation.zip")" = preparation-bundle.zip; unzip -p "$d/preparation.zip" preparation-bundle.zip > "$d/preparation-bundle.zip"; test "$(unzip -Z1 "$d/preparation-bundle.zip" | sort)" = $'binding.json\npreparation.json\nrefresh.tfplan\nrelease-preflight.json\nstage-b.tfvars'
+          for f in preparation.json refresh.tfplan stage-b.tfvars binding.json release-preflight.json; do unzip -p "$d/preparation-bundle.zip" "$f" > "$d/$f"; done
       - name: Download authenticated authorization artifact
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
@@ -77,8 +62,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$AUTH_ATTEMPT" = 1
-          d="$RUNNER_TEMP/stage-b-state-reconciliation"
-          run="$(gh api repos/$GITHUB_REPOSITORY/actions/runs/$AUTH_RUN)"
+          d="$RUNNER_TEMP/stage-b-state-reconciliation"; run="$(gh api repos/$GITHUB_REPOSITORY/actions/runs/$AUTH_RUN)"
           test "$(jq -r .path <<<"$run")" = .github/workflows/authorize-production-green-stage-b-state-reconciliation.yml
           test "$(jq -r .head_sha <<<"$run")" = "$SOURCE_SHA"
           test "$(jq -r .event <<<"$run")" = workflow_dispatch
@@ -86,14 +70,9 @@ jobs:
           test "$(jq -r .conclusion <<<"$run")" = success
           artifacts="$(gh api repos/$GITHUB_REPOSITORY/actions/runs/$AUTH_RUN/artifacts)"
           test "$(jq '[.artifacts[] | select(.name == "production-green-stage-b-state-reconciliation-authorization" and .expired == false)] | length' <<<"$artifacts")" = 1
-          artifact="$(jq -r '.artifacts[] | select(.name == "production-green-stage-b-state-reconciliation-authorization" and .expired == false) | .id' <<<"$artifacts")"
-          digest="$(jq -r '.artifacts[] | select(.name == "production-green-stage-b-state-reconciliation-authorization" and .expired == false) | .digest' <<<"$artifacts")"
-          test "$artifact" != null
-          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
-          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact/zip" > "$d/authorization.zip"
-          test "sha256:$(sha256sum "$d/authorization.zip" | awk '{print $1}')" = "$digest"
-          test "$(unzip -Z1 "$d/authorization.zip")" = authorization.json
-          unzip -p "$d/authorization.zip" authorization.json > "$d/authorization.json"
+          artifact="$(jq -r '.artifacts[] | select(.name == "production-green-stage-b-state-reconciliation-authorization" and .expired == false) | .id' <<<"$artifacts")"; digest="$(jq -r '.artifacts[] | select(.name == "production-green-stage-b-state-reconciliation-authorization" and .expired == false) | .digest' <<<"$artifacts")"
+          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]; gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact/zip" > "$d/authorization.zip"; test "sha256:$(sha256sum "$d/authorization.zip" | awk '{print $1}')" = "$digest"
+          test "$(unzip -Z1 "$d/authorization.zip")" = authorization.json; unzip -p "$d/authorization.zip" authorization.json > "$d/authorization.json"
       - uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-region: eu-west-2
@@ -101,12 +80,10 @@ jobs:
       - name: Apply only the reviewed refresh-only state transition
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
-          PREPARATION_SHA256: ${{ inputs.preparation_sha256 }}
-          PLAN_SHA256: ${{ inputs.saved_plan_sha256 }}
         run: |
           set -euo pipefail
           d="$RUNNER_TEMP/stage-b-state-reconciliation"
-          node scripts/aws/reconcile-production-green-stage-b-state.mjs --mode execute --source-sha "$SOURCE_SHA" --tfvars "$d/stage-b.tfvars" --binding-report "$d/binding.json" --release-preflight "$d/release-preflight.json" --terraform-data-dir "$d/terraform-data" --saved-plan "$d/refresh.tfplan" --saved-plan-sha256 "$PLAN_SHA256" --preparation "$d/preparation.json" --preparation-file-sha256 "$PREPARATION_SHA256" --authorization "$d/authorization.json" --result-out "$d/result.json"
+          node scripts/aws/reconcile-production-green-stage-b-state.mjs --mode execute --source-sha "$SOURCE_SHA" --tfvars "$d/stage-b.tfvars" --binding-report "$d/binding.json" --release-preflight "$d/release-preflight.json" --terraform-data-dir "$d/terraform-data" --saved-plan "$d/refresh.tfplan" --saved-plan-sha256 "$(sha256sum "$d/refresh.tfplan" | awk '{print $1}')" --preparation "$d/preparation.json" --preparation-file-sha256 "$(sha256sum "$d/preparation.json" | awk '{print $1}')" --authorization "$d/authorization.json" --result-out "$d/result.json"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

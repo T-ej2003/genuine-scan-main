@@ -1,0 +1,67 @@
+name: Prepare Stage B refresh-only state reconciliation
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha: { description: Exact protected-main source SHA, required: true, type: string }
+      ticket_id: { description: Externally issued change-ticket identifier, required: true, type: string }
+      tfvars_base64: { description: Exact prepared tfvars, required: true, type: string }
+      tfvars_sha256: { description: SHA-256 of exact prepared tfvars bytes, required: true, type: string }
+      binding_base64: { description: Exact prepared binding report, required: true, type: string }
+      binding_sha256: { description: SHA-256 of exact prepared binding report bytes, required: true, type: string }
+      release_preflight_base64: { description: Exact prepared release preflight, required: true, type: string }
+      release_preflight_sha256: { description: SHA-256 of exact prepared release preflight bytes, required: true, type: string }
+
+permissions: { actions: read, contents: read, id-token: write }
+concurrency: { group: production-deploy, cancel-in-progress: false }
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with: { node-version: 24, cache: npm }
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: 1.15.8, terraform_wrapper: false }
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: eu-west-2
+          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-release-deployer
+      - name: Prepare and bundle only the authenticated refresh-only transition
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          TICKET_ID: ${{ inputs.ticket_id }}
+          TFVARS_BASE64: ${{ inputs.tfvars_base64 }}
+          TFVARS_SHA256: ${{ inputs.tfvars_sha256 }}
+          BINDING_BASE64: ${{ inputs.binding_base64 }}
+          BINDING_SHA256: ${{ inputs.binding_sha256 }}
+          PREFLIGHT_BASE64: ${{ inputs.release_preflight_base64 }}
+          PREFLIGHT_SHA256: ${{ inputs.release_preflight_sha256 }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          test "$SOURCE_SHA" = "$(gh api repos/$GITHUB_REPOSITORY/branches/main --jq .commit.sha)"
+          test "$SOURCE_SHA" = "$(git rev-parse HEAD)"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          umask 077; d="$RUNNER_TEMP/stage-b-state-reconciliation"; install -d -m 700 "$d/terraform-data"
+          printf '%s' "$TFVARS_BASE64" | base64 --decode > "$d/stage-b.tfvars"
+          printf '%s' "$BINDING_BASE64" | base64 --decode > "$d/binding.json"
+          printf '%s' "$PREFLIGHT_BASE64" | base64 --decode > "$d/release-preflight.json"
+          test "$(sha256sum "$d/stage-b.tfvars" | awk '{print $1}')" = "$TFVARS_SHA256"
+          test "$(sha256sum "$d/binding.json" | awk '{print $1}')" = "$BINDING_SHA256"
+          test "$(sha256sum "$d/release-preflight.json" | awk '{print $1}')" = "$PREFLIGHT_SHA256"
+          node scripts/aws/reconcile-production-green-stage-b-state.mjs --mode prepare --credential-source github-oidc-release-deployer --source-sha "$SOURCE_SHA" --ticket-id "$TICKET_ID" --tfvars "$d/stage-b.tfvars" --binding-report "$d/binding.json" --release-preflight "$d/release-preflight.json" --terraform-data-dir "$d/terraform-data" --saved-plan-out "$d/refresh.tfplan" --preparation-out "$d/preparation.json"
+          (cd "$d" && zip -q preparation-bundle.zip preparation.json refresh.tfplan stage-b.tfvars binding.json release-preflight.json)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-green-stage-b-state-reconciliation-preparation
+          path: ${{ runner.temp }}/stage-b-state-reconciliation/preparation-bundle.zip
+          if-no-files-found: error
+          retention-days: 1

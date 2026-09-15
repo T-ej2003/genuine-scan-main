@@ -2162,6 +2162,7 @@
       "kind": "file",
       "producer": "scripts/aws/reconcile-production-green-stage-b-state.mjs:runStageBStateReconciliation --mode prepare",
       "consumers": [
+        ".github/workflows/prepare-production-green-stage-b-state-reconciliation.yml",
         ".github/workflows/execute-production-green-stage-b-state-reconciliation.yml",
         "scripts/aws/reconcile-production-green-stage-b-state.mjs"
       ],
@@ -2181,6 +2182,7 @@
       "kind": "file",
       "producer": "scripts/aws/reconcile-production-green-stage-b-state.mjs:runStageBStateReconciliation --mode prepare",
       "consumers": [
+        ".github/workflows/prepare-production-green-stage-b-state-reconciliation.yml",
         ".github/workflows/authorize-production-green-stage-b-state-reconciliation.yml",
         ".github/workflows/execute-production-green-stage-b-state-reconciliation.yml",
         "scripts/aws/authorize-production-green-stage-b-state-reconciliation.mjs",

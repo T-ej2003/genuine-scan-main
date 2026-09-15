@@ -9,7 +9,7 @@ import { assertStageBArtifactPath, ensureStageBPrivateDirectory, ensureStageBPri
 import { STAGE_B_TERRAFORM_BACKEND_CONFIG, assertStageBTerraformInitializedBackendMetadata, readStageBTerraformStateIdentity } from "./stage-b-terraform-backend-contract.mjs";
 import { readStageBProtectedMainCheckout, assertStageBProtectedCheckoutMatchesDeploymentIdentity } from "./stage-b-deployment-identity.mjs";
 import { assertStageBTfvarsBinding } from "./generate-production-green-stage-b-tfvars.mjs";
-import { assertExactStageBRefreshOnlyPlan, createStageBStateReconciliationPreparation, executeStageBStateReconciliation, STAGE_B_STATE_RECONCILIATION } from "./production-green-stage-b-state-reconciliation.mjs";
+import { assertExactStageBRefreshOnlyPlan, assertStageBStateReconciliationSourceAlignment, createStageBStateReconciliationPreparation, executeStageBStateReconciliation, STAGE_B_STATE_RECONCILIATION } from "./production-green-stage-b-state-reconciliation.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const terraformRoot = STAGE_B_STATE_RECONCILIATION.terraformRoot;
@@ -40,11 +40,14 @@ export function runStageBStateReconciliation(argv = process.argv.slice(2), deps 
   const mode = required(argv, "--mode");
   const prepare = mode === "prepare"; const execute = mode === "execute";
   if (!prepare && !execute) throw new Error("--mode must be prepare or execute.");
-  const allowed = prepare ? new Set(["--mode", "--source-sha", "--ticket-id", "--admin-profile", "--tfvars", "--binding-report", "--release-preflight", "--terraform-data-dir", "--saved-plan-out", "--preparation-out"]) : new Set(["--mode", "--source-sha", "--tfvars", "--binding-report", "--release-preflight", "--terraform-data-dir", "--saved-plan", "--saved-plan-sha256", "--preparation", "--preparation-file-sha256", "--authorization", "--result-out"]);
+  const allowed = prepare ? new Set(["--mode", "--source-sha", "--ticket-id", "--admin-profile", "--credential-source", "--tfvars", "--binding-report", "--release-preflight", "--terraform-data-dir", "--saved-plan-out", "--preparation-out"]) : new Set(["--mode", "--source-sha", "--tfvars", "--binding-report", "--release-preflight", "--terraform-data-dir", "--saved-plan", "--saved-plan-sha256", "--preparation", "--preparation-file-sha256", "--authorization", "--result-out"]);
   exactArgs(argv, allowed);
   const sourceSha = required(argv, "--source-sha"); const data = path.resolve(required(argv, "--terraform-data-dir")); ensureStageBPrivateDirectory({ directory: data, repositoryRoot: root, create: true, label: "Stage B state reconciliation Terraform data" });
-  const env = prepare ? { ...createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: required(argv, "--admin-profile") }), TF_DATA_DIR: data, TF_WORKSPACE: "default" } : { ...createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER, env: deps.env || process.env }), TF_DATA_DIR: data, TF_WORKSPACE: "default" };
-  const run = deps.run || createProductionAwsCommandRunner({ credentialSource: prepare ? PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE : PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER, ...(prepare ? { profile: required(argv, "--admin-profile") } : { env: deps.env || process.env }) });
+  const credentialSource = prepare && argv.includes("--credential-source") ? required(argv, "--credential-source") : prepare ? PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE : PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER;
+  if (credentialSource !== PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE && credentialSource !== PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER) throw new Error("Stage B state reconciliation credential source is invalid.");
+  const credentialOptions = credentialSource === PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE ? { profile: required(argv, "--admin-profile") } : { env: deps.env || process.env };
+  const env = { ...createProductionAwsCredentialEnvironment({ credentialSource, ...credentialOptions }), TF_DATA_DIR: data, TF_WORKSPACE: "default" };
+  const run = deps.run || createProductionAwsCommandRunner({ credentialSource, ...credentialOptions });
   if (prepare) {
     const caller = JSON.parse(run(["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"]));
     if (caller.Account !== STAGE_B_STATE_RECONCILIATION.account || !new RegExp(`^arn:aws:sts::${STAGE_B_STATE_RECONCILIATION.account}:assumed-role/mscqr-production-release-deployer/[^/]+$`).test(caller.Arn || "")) throw new Error("Stage B state reconciliation preparation requires the exact release-deployer session.");
@@ -53,8 +56,9 @@ export function runStageBStateReconciliation(argv = process.argv.slice(2), deps 
     const saved = assertStageBArtifactPath({ artifactPath: path.resolve(required(argv, "--saved-plan-out")), repositoryRoot: root, label: "Stage B state reconciliation saved plan", allowExisting: false });
     runTerraform(["plan", "-refresh-only", `-var-file=${required(argv, "--tfvars")}`, "-input=false", "-lock=true", "-out", saved], env); ensureStageBPrivateFile({ filePath: saved, repositoryRoot: root, normalize: true, label: "Stage B state reconciliation saved plan" });
     const bytes = readStageBPrivateFileBytes({ filePath: saved, repositoryRoot: root, label: "Stage B state reconciliation saved plan" }).bytes; const plan = renderPlan(saved, env); assertExactStageBRefreshOnlyPlan(plan, { sourceSha, stateIdentity: before, tfvarsSha256: bindings.tfvarsSha256, bindingSha256: bindings.bindingSha256 });
+    const sourcePlanPath = path.join(data, "source-alignment.tfplan"); runTerraform(["plan", `-var-file=${required(argv, "--tfvars")}`, "-input=false", "-lock=true", "-out", sourcePlanPath], env); assertStageBStateReconciliationSourceAlignment(plan, renderPlan(sourcePlanPath, env), { sourceSha, stateIdentity: before, tfvarsSha256: bindings.tfvarsSha256, bindingSha256: bindings.bindingSha256 });
     const after = stateIdentity(run); if (JSON.stringify(after) !== JSON.stringify(before)) throw new Error("Stage B state changed during reconciliation preparation.");
-    const preparation = createStageBStateReconciliationPreparation({ sourceSha, ticketId: required(argv, "--ticket-id"), stateIdentity: before, ...bindings, planBytes: bytes, planJson: plan });
+    const preparation = createStageBStateReconciliationPreparation({ sourceSha, ticketId: required(argv, "--ticket-id"), stateIdentity: before, ...bindings, planBytes: bytes, planJson: plan, normalPlan: renderPlan(sourcePlanPath, env) });
     const output = assertStageBArtifactPath({ artifactPath: path.resolve(required(argv, "--preparation-out")), repositoryRoot: root, label: "Stage B state reconciliation preparation", allowExisting: false }); ensureStageBPrivateDirectory({ directory: path.dirname(output), repositoryRoot: root, label: "Stage B state reconciliation output" }); writeStageBPrivateFileExclusive({ filePath: output, bytes: Buffer.from(`${JSON.stringify(preparation, null, 2)}\n`), repositoryRoot: root, label: "Stage B state reconciliation preparation" });
     return { status: "prepared", awsResourceMutationCount: 0, terraformStateMutationCount: 0, preparation, savedPlanPath: saved };
   }
@@ -70,7 +74,7 @@ export function runStageBStateReconciliation(argv = process.argv.slice(2), deps 
     runTerraform(["plan", ...(refreshOnly ? ["-refresh-only"] : []), `-var-file=${required(argv, "--tfvars")}`, "-input=false", "-lock=true", "-out", output], env);
     return renderPlan(output, env);
   };
-  const result = executeStageBStateReconciliation({ sourceSha, preparation, authorization, bindings, planBytes: bytes, planJson: plan, readState: () => stateIdentity(run), applyRefreshOnlyPlan: () => runTerraform(["apply", "-input=false", "-refresh-only", saved], env), renderRefreshClosurePlan: () => planPath("post-reconciliation-refresh.tfplan", true), renderNormalClosurePlan: () => planPath("post-reconciliation-normal.tfplan", false) });
+  const result = executeStageBStateReconciliation({ sourceSha, preparation, authorization, bindings, planBytes: bytes, planJson: plan, readState: () => stateIdentity(run), applyRefreshOnlyPlan: () => runTerraform(["apply", "-input=false", saved], env), renderRefreshClosurePlan: () => planPath("post-reconciliation-refresh.tfplan", true), renderNormalClosurePlan: () => planPath("post-reconciliation-normal.tfplan", false), reauthenticateSource: () => assertSource(sourceSha) });
   const resultPath = assertStageBArtifactPath({ artifactPath: path.resolve(required(argv, "--result-out")), repositoryRoot: root, label: "Stage B state reconciliation result", allowExisting: false }); ensureStageBPrivateDirectory({ directory: path.dirname(resultPath), repositoryRoot: root, label: "Stage B state reconciliation result output" }); writeStageBPrivateFileExclusive({ filePath: resultPath, bytes: Buffer.from(`${JSON.stringify(result, null, 2)}\n`), repositoryRoot: root, label: "Stage B state reconciliation result" });
   return result;
 }

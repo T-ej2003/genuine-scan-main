@@ -68,7 +68,8 @@ function assertNoSensitive(value) {
 
 function assertExactDrift(entry) {
   const address = entry?.address;
-  if (!addressSet.has(address) || entry?.mode !== "managed" || !["aws_iam_role", "aws_iam_role_policy"].includes(entry?.type) || !equal(entry?.change?.actions, ["update"]) || (entry?.change?.replace_paths || []).length) throw new Error("Refresh-only plan contains an unreviewed Stage B state observation.");
+  const expectedType = address?.startsWith("aws_iam_role_policy") ? "aws_iam_role_policy" : "aws_iam_role";
+  if (!addressSet.has(address) || entry?.mode !== "managed" || entry?.type !== expectedType || !equal(entry?.change?.actions, ["update"]) || (entry?.change?.replace_paths || []).length) throw new Error("Refresh-only plan contains an unreviewed Stage B state observation.");
   const expectedField = entry.type === "aws_iam_role" ? "inline_policy" : "policy";
   if (!equal(changedTopLevelFields(entry.change), [expectedField])) throw new Error("Refresh-only plan changes an unreviewed state field.");
   if (Object.keys(entry.change.before_unknown || {}).length || Object.keys(entry.change.after_unknown || {}).length) throw new Error("Refresh-only plan contains unknown state metadata.");
@@ -78,7 +79,16 @@ function assertExactDrift(entry) {
   for (const field of identity) if (!equal(entry.change.before[field], entry.change.after[field])) throw new Error("Refresh-only plan changes a managed resource identity.");
 }
 
-export function assertExactStageBRefreshOnlyPlan(plan, { sourceSha, stateIdentity, tfvarsSha256, bindingSha256 } = {}) {
+const policyValueHashes = (plan) => Object.fromEntries((plan.resource_drift || []).map((entry) => {
+  const field = entry.type === "aws_iam_role" ? "inline_policy" : "policy";
+  return [entry.address, { field, beforeSha256: sha256(entry.change.before[field]), afterSha256: sha256(entry.change.after[field]) }];
+}));
+
+function assertPolicyValueHashes(plan, expected) {
+  if (!expected || !equal(policyValueHashes(plan), expected)) throw new Error("Stage B refresh-only plan policy values differ from the reviewed source alignment.");
+}
+
+export function assertExactStageBRefreshOnlyPlan(plan, { sourceSha, stateIdentity, tfvarsSha256, bindingSha256, expectedPolicyValueHashes } = {}) {
   if (!SHA40.test(sourceSha || "") || !SHA256.test(tfvarsSha256 || "") || !SHA256.test(bindingSha256 || "")) throw new Error("Stage B state reconciliation plan bindings are malformed.");
   assertStateIdentity(stateIdentity);
   if (!plan || plan.format_version !== "1.2" || plan.terraform_version !== "1.15.8" || plan.errored !== false || plan.complete !== true || plan.applyable !== true || plan.variables?.tooling_sha?.value !== sourceSha) throw new Error("Stage B refresh-only plan envelope is invalid.");
@@ -89,27 +99,38 @@ export function assertExactStageBRefreshOnlyPlan(plan, { sourceSha, stateIdentit
   for (const entry of drift) assertExactDrift(entry);
   if (!equal([...new Set(drift.map((entry) => entry.address))].sort(), [...addressSet].sort())) throw new Error("Stage B refresh-only plan address set is not exact.");
   if (Object.values(plan.output_changes || {}).some((entry) => !equal(entry?.actions, ["no-op"]))) throw new Error("Stage B refresh-only plan changes an unreviewed output.");
+  if (expectedPolicyValueHashes) assertPolicyValueHashes(plan, expectedPolicyValueHashes);
   return Object.freeze({ refreshOnly: true, remoteResourceMutationCount: 0, stateRecordChangeCount: drift.length, addresses: [...STAGE_B_STATE_RECONCILIATION.addresses] });
 }
 
+export function assertStageBStateReconciliationSourceAlignment(refreshPlan, normalPlan, options = {}) {
+  assertExactStageBRefreshOnlyPlan(refreshPlan, options);
+  if (!normalPlan || normalPlan.format_version !== "1.2" || normalPlan.terraform_version !== "1.15.8" || normalPlan.errored !== false || normalPlan.complete !== true || normalPlan.applyable !== false || normalPlan.variables?.tooling_sha?.value !== options.sourceSha) throw new Error("Stage B normal plan source alignment envelope is invalid.");
+  const changes = normalPlan.resource_changes || [];
+  if (!Array.isArray(changes) || changes.some((entry) => !equal(entry?.change?.actions, ["no-op"]) && !equal(entry?.change?.actions, ["read"])) || Object.values(normalPlan.output_changes || {}).some((entry) => !equal(entry?.actions, ["no-op"]))) throw new Error("Stage B normal plan source alignment is outside the exact state envelope.");
+  if (!equal(normalPlan.resource_drift, refreshPlan.resource_drift)) throw new Error("Stage B normal plan does not bind the live policy values to protected-main Terraform.");
+  return Object.freeze(policyValueHashes(refreshPlan));
+}
+
 export function assertCleanStageBNormalPlan(plan, { sourceSha } = {}) {
-  if (!SHA40.test(sourceSha || "") || !plan || plan.errored !== false || plan.complete !== true || plan.applyable !== true || plan.variables?.tooling_sha?.value !== sourceSha || (plan.resource_drift || []).length !== 0 || Object.values(plan.output_changes || {}).some((entry) => !equal(entry?.actions, ["no-op"])) || (plan.resource_changes || []).some((entry) => !equal(entry?.change?.actions, ["no-op"]) && !equal(entry?.change?.actions, ["read"]))) throw new Error("Stage B state reconciliation normal closure is not clean.");
+  if (!SHA40.test(sourceSha || "") || !plan || plan.errored !== false || plan.complete !== true || plan.applyable !== false || plan.variables?.tooling_sha?.value !== sourceSha || (plan.resource_drift || []).length !== 0 || Object.values(plan.output_changes || {}).some((entry) => !equal(entry?.actions, ["no-op"])) || (plan.resource_changes || []).some((entry) => !equal(entry?.change?.actions, ["no-op"]) && !equal(entry?.change?.actions, ["read"]))) throw new Error("Stage B state reconciliation normal closure is not the canonical non-applyable no-op.");
   return true;
 }
 
-export function createStageBStateReconciliationPreparation({ sourceSha, ticketId, stateIdentity, tfvarsSha256, bindingSha256, preflightSha256, planBytes, planJson, createdAt = new Date().toISOString() } = {}) {
+export function createStageBStateReconciliationPreparation({ sourceSha, ticketId, stateIdentity, tfvarsSha256, bindingSha256, preflightSha256, planBytes, planJson, normalPlan, createdAt = new Date().toISOString() } = {}) {
   if (!TICKET.test(ticketId || "") || !SHA256.test(preflightSha256 || "") || !Buffer.isBuffer(planBytes) || !planBytes.length) throw new Error("Stage B state reconciliation preparation inputs are invalid.");
   const semantics = assertExactStageBRefreshOnlyPlan(planJson, { sourceSha, stateIdentity, tfvarsSha256, bindingSha256 });
+  const reviewedPolicyValueHashes = assertStageBStateReconciliationSourceAlignment(planJson, normalPlan, { sourceSha, stateIdentity, tfvarsSha256, bindingSha256 });
   const created = iso(createdAt, "Stage B state reconciliation preparation timestamp");
-  const body = { schemaVersion: 1, kind: "PRODUCTION_GREEN_STAGE_B_STATE_RECONCILIATION_PREPARATION", operation: STAGE_B_STATE_RECONCILIATION.operation, sourceSha, ticketId, terraformRoot: STAGE_B_STATE_RECONCILIATION.terraformRoot, predecessorState: stateIdentity, tfvarsSha256, bindingSha256, preflightSha256, addresses: semantics.addresses, refreshOnlyPlanSha256: sha256(planBytes), refreshOnlyPlanJsonSha256: sha256(planJson), planSemantics: semantics, createdAt: created.toISOString(), expiresAt: new Date(created.getTime() + STAGE_B_STATE_RECONCILIATION.maxAgeMs).toISOString() };
+  const body = { schemaVersion: 1, kind: "PRODUCTION_GREEN_STAGE_B_STATE_RECONCILIATION_PREPARATION", operation: STAGE_B_STATE_RECONCILIATION.operation, sourceSha, ticketId, terraformRoot: STAGE_B_STATE_RECONCILIATION.terraformRoot, predecessorState: stateIdentity, tfvarsSha256, bindingSha256, preflightSha256, addresses: semantics.addresses, refreshOnlyPlanSha256: sha256(planBytes), refreshOnlyPlanJsonSha256: sha256(planJson), reviewedPolicyValueHashes, planSemantics: semantics, createdAt: created.toISOString(), expiresAt: new Date(created.getTime() + STAGE_B_STATE_RECONCILIATION.maxAgeMs).toISOString() };
   return Object.freeze({ ...body, preparationSha256: sha256(body) });
 }
 
 export function assertStageBStateReconciliationPreparation(value, { sourceSha, now = new Date() } = {}) {
-  const fields = ["schemaVersion", "kind", "operation", "sourceSha", "ticketId", "terraformRoot", "predecessorState", "tfvarsSha256", "bindingSha256", "preflightSha256", "addresses", "refreshOnlyPlanSha256", "refreshOnlyPlanJsonSha256", "planSemantics", "createdAt", "expiresAt", "preparationSha256"];
+  const fields = ["schemaVersion", "kind", "operation", "sourceSha", "ticketId", "terraformRoot", "predecessorState", "tfvarsSha256", "bindingSha256", "preflightSha256", "addresses", "refreshOnlyPlanSha256", "refreshOnlyPlanJsonSha256", "reviewedPolicyValueHashes", "planSemantics", "createdAt", "expiresAt", "preparationSha256"];
   exactKeys(value, fields, "Stage B state reconciliation preparation");
   const { preparationSha256, ...body } = value;
-  if (value.schemaVersion !== 1 || value.kind !== "PRODUCTION_GREEN_STAGE_B_STATE_RECONCILIATION_PREPARATION" || value.operation !== STAGE_B_STATE_RECONCILIATION.operation || value.sourceSha !== sourceSha || !SHA40.test(sourceSha || "") || !TICKET.test(value.ticketId || "") || value.terraformRoot !== STAGE_B_STATE_RECONCILIATION.terraformRoot || !SHA256.test(value.tfvarsSha256 || "") || !SHA256.test(value.bindingSha256 || "") || !SHA256.test(value.preflightSha256 || "") || !SHA256.test(value.refreshOnlyPlanSha256 || "") || !SHA256.test(value.refreshOnlyPlanJsonSha256 || "") || !equal(value.addresses, STAGE_B_STATE_RECONCILIATION.addresses) || !equal(value.planSemantics, { refreshOnly: true, remoteResourceMutationCount: 0, stateRecordChangeCount: 10, addresses: STAGE_B_STATE_RECONCILIATION.addresses }) || value.preparationSha256 !== sha256(body)) throw new Error("Stage B state reconciliation preparation binding is invalid.");
+  if (value.schemaVersion !== 1 || value.kind !== "PRODUCTION_GREEN_STAGE_B_STATE_RECONCILIATION_PREPARATION" || value.operation !== STAGE_B_STATE_RECONCILIATION.operation || value.sourceSha !== sourceSha || !SHA40.test(sourceSha || "") || !TICKET.test(value.ticketId || "") || value.terraformRoot !== STAGE_B_STATE_RECONCILIATION.terraformRoot || !SHA256.test(value.tfvarsSha256 || "") || !SHA256.test(value.bindingSha256 || "") || !SHA256.test(value.preflightSha256 || "") || !SHA256.test(value.refreshOnlyPlanSha256 || "") || !SHA256.test(value.refreshOnlyPlanJsonSha256 || "") || !equal(Object.keys(value.reviewedPolicyValueHashes || {}).sort(), STAGE_B_STATE_RECONCILIATION.addresses.slice().sort()) || !STAGE_B_STATE_RECONCILIATION.addresses.every((address) => { const entry = value.reviewedPolicyValueHashes?.[address]; return entry?.field === (address.startsWith("aws_iam_role_policy") ? "policy" : "inline_policy") && SHA256.test(entry?.beforeSha256 || "") && SHA256.test(entry?.afterSha256 || ""); }) || !equal(value.addresses, STAGE_B_STATE_RECONCILIATION.addresses) || !equal(value.planSemantics, { refreshOnly: true, remoteResourceMutationCount: 0, stateRecordChangeCount: 10, addresses: STAGE_B_STATE_RECONCILIATION.addresses }) || value.preparationSha256 !== sha256(body)) throw new Error("Stage B state reconciliation preparation binding is invalid.");
   assertStateIdentity(value.predecessorState); const created = iso(value.createdAt, "Stage B state reconciliation preparation creation"); const expires = iso(value.expiresAt, "Stage B state reconciliation preparation expiry"); if (expires.getTime() - created.getTime() !== STAGE_B_STATE_RECONCILIATION.maxAgeMs || now < created || now > expires) throw new Error("Stage B state reconciliation preparation is stale.");
   return value;
 }
@@ -133,20 +154,27 @@ export function assertStageBStateReconciliationAuthorization(value, { preparatio
   return value;
 }
 
-export function executeStageBStateReconciliation({ sourceSha, preparation, authorization, bindings, planBytes, planJson, readState, applyRefreshOnlyPlan, renderRefreshClosurePlan, renderNormalClosurePlan, now = new Date() } = {}) {
-  if (![readState, applyRefreshOnlyPlan, renderRefreshClosurePlan, renderNormalClosurePlan].every((value) => typeof value === "function")) throw new Error("Stage B state reconciliation execution adapters are required.");
+export function executeStageBStateReconciliation({ sourceSha, preparation, authorization, bindings, planBytes, planJson, readState, applyRefreshOnlyPlan, renderRefreshClosurePlan, renderNormalClosurePlan, reauthenticateSource, now = new Date() } = {}) {
+  if (![readState, applyRefreshOnlyPlan, renderRefreshClosurePlan, renderNormalClosurePlan, reauthenticateSource].every((value) => typeof value === "function")) throw new Error("Stage B state reconciliation execution adapters are required.");
   const prepared = assertStageBStateReconciliationPreparation(preparation, { sourceSha, now });
   assertStageBStateReconciliationAuthorization(authorization, { preparation: prepared, sourceSha, now });
   if (!bindings || bindings.tfvarsSha256 !== prepared.tfvarsSha256 || bindings.bindingSha256 !== prepared.bindingSha256 || bindings.preflightSha256 !== prepared.preflightSha256) throw new Error("Stage B state reconciliation execution inputs differ from the approved preparation.");
-  if (!Buffer.isBuffer(planBytes) || sha256(planBytes) !== prepared.refreshOnlyPlanSha256 || sha256(planJson) !== prepared.refreshOnlyPlanJsonSha256 || !equal(assertExactStageBRefreshOnlyPlan(planJson, { sourceSha, stateIdentity: prepared.predecessorState, tfvarsSha256: bindings.tfvarsSha256, bindingSha256: bindings.bindingSha256 }), prepared.planSemantics)) throw new Error("Stage B state reconciliation saved plan changed after authorization.");
+  if (!Buffer.isBuffer(planBytes) || sha256(planBytes) !== prepared.refreshOnlyPlanSha256 || sha256(planJson) !== prepared.refreshOnlyPlanJsonSha256 || !equal(assertExactStageBRefreshOnlyPlan(planJson, { sourceSha, stateIdentity: prepared.predecessorState, tfvarsSha256: bindings.tfvarsSha256, bindingSha256: bindings.bindingSha256, expectedPolicyValueHashes: prepared.reviewedPolicyValueHashes }), prepared.planSemantics)) throw new Error("Stage B state reconciliation saved plan changed after authorization.");
   const before = readState();
   if (!equal(before, prepared.predecessorState)) throw new Error("Stage B state reconciliation CAS failed.");
-  applyRefreshOnlyPlan(planBytes);
-  const after = readState();
-  if (after.lineage !== before.lineage || after.serial !== before.serial + 1 || after.stateSha256 === before.stateSha256) throw new Error("Stage B state reconciliation successor is not exact.");
-  assertCleanStageBNormalPlan(renderRefreshClosurePlan(), { sourceSha });
-  assertCleanStageBNormalPlan(renderNormalClosurePlan(), { sourceSha });
-  return Object.freeze({ schemaVersion: 1, kind: "PRODUCTION_GREEN_STAGE_B_STATE_RECONCILIATION_RESULT", status: "complete", sourceSha, authorizationSha256: authorization.authorizationSha256, predecessorState: before, successorState: after, remainingExpectedStateObservations: 0, sourceToLiveIamSemanticDifferences: 0, newUnexpectedDriftCount: 0, remoteResourceMutationCount: 0, terraformStateMutationCount: 1 });
+  const complete = (status) => {
+    const after = readState();
+    if (after.lineage !== before.lineage || after.serial !== before.serial + 1 || after.stateSha256 === before.stateSha256) throw new Error("Stage B state reconciliation successor is not exact.");
+    assertCleanStageBNormalPlan(renderRefreshClosurePlan(), { sourceSha });
+    assertCleanStageBNormalPlan(renderNormalClosurePlan(), { sourceSha });
+    return Object.freeze({ schemaVersion: 1, kind: "PRODUCTION_GREEN_STAGE_B_STATE_RECONCILIATION_RESULT", status, sourceSha, authorizationSha256: authorization.authorizationSha256, predecessorState: before, successorState: after, remainingExpectedStateObservations: 0, sourceToLiveIamSemanticDifferences: 0, newUnexpectedDriftCount: 0, remoteResourceMutationCount: 0, terraformStateMutationCount: 1 });
+  };
+  reauthenticateSource();
+  try { applyRefreshOnlyPlan(planBytes); } catch (error) {
+    try { return complete("state-write-completed-postverify"); }
+    catch { error.mutationOutcome = "AMBIGUOUS"; throw error; }
+  }
+  return complete("complete");
 }
 
 export const stageBStateReconciliationSha256 = (value) => sha256(value);
