@@ -24,13 +24,14 @@ test("Stage B state reconciliation workflows are protected, artifact-bound, and 
   assert.ok(Object.keys(prepare.on.workflow_dispatch.inputs).length <= 10);
   assert.ok(Object.keys(authorize.on.workflow_dispatch.inputs).length <= 10);
   assert.ok(Object.keys(execute.on.workflow_dispatch.inputs).length <= 10);
-  for (const name of ["tfvars_base64", "tfvars_sha256", "binding_base64", "binding_sha256", "release_preflight_base64", "release_preflight_sha256"]) assert.equal(prepare.on.workflow_dispatch.inputs[name]?.required, true);
+  for (const name of ["tfvars_base64", "binding_base64", "release_preflight_workflow_run_id", "release_preflight_workflow_run_attempt", "release_preflight_artifact_id", "release_preflight_artifact_digest"]) assert.equal(prepare.on.workflow_dispatch.inputs[name]?.required, true);
   for (const workflow of [authorize, execute]) for (const name of ["preparation_workflow_run_id", "preparation_workflow_run_attempt"]) assert.equal(workflow.on.workflow_dispatch.inputs[name]?.required, true);
   for (const name of ["authorization_workflow_run_id", "authorization_workflow_run_attempt"]) assert.equal(execute.on.workflow_dispatch.inputs[name]?.required, true);
   const source = read(names[2]);
   assert.match(source, /preparation-bundle\.zip/); assert.match(source, /authorization\.zip/); assert.match(source, /sha256:\$\(sha256sum "\$d\/preparation\.zip"/); assert.match(source, /test "\$\(unzip -Z1 "\$d\/authorization\.zip"\)" = authorization\.json/);
   assert.match(source, /install -m 600 \/dev\/null "\$d\/authorization\.json"/);
-  assert.doesNotMatch(source, /saved_plan_base64|preparation_base64|tfvars_base64/);
+  assert.doesNotMatch(source, /saved_plan_base64|preparation_base64|release_preflight_base64|release_preflight_workflow_path/);
+  assert.match(read(names[0]), /produce-production-green-stage-b-release-preflight\.yml/);
 });
 
 test("the prerequisite producer is a single source-bound four-member producer", () => {

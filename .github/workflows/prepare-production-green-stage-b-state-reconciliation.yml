@@ -6,11 +6,12 @@ on:
       source_sha: { description: Exact protected-main source SHA, required: true, type: string }
       ticket_id: { description: Externally issued change-ticket identifier, required: true, type: string }
       tfvars_base64: { description: Exact prepared tfvars, required: true, type: string }
-      tfvars_sha256: { description: SHA-256 of exact prepared tfvars bytes, required: true, type: string }
+      # The binding report and canonical preflight artifact carry their own hashes.
       binding_base64: { description: Exact prepared binding report, required: true, type: string }
-      binding_sha256: { description: SHA-256 of exact prepared binding report bytes, required: true, type: string }
-      release_preflight_base64: { description: Exact prepared release preflight, required: true, type: string }
-      release_preflight_sha256: { description: SHA-256 of exact prepared release preflight bytes, required: true, type: string }
+      release_preflight_workflow_run_id: { description: Successful canonical release-preflight workflow run ID, required: true, type: string }
+      release_preflight_workflow_run_attempt: { description: Canonical release-preflight workflow run attempt, required: true, type: string }
+      release_preflight_artifact_id: { description: Exact canonical release-preflight artifact ID, required: true, type: string }
+      release_preflight_artifact_digest: { description: Exact canonical release-preflight artifact digest, required: true, type: string }
       prerequisite_producer_workflow_run_id: { description: Successful canonical prerequisite producer workflow run ID, required: true, type: string }
       prerequisite_producer_workflow_run_attempt: { description: Canonical prerequisite producer workflow run attempt, required: true, type: string }
 
@@ -61,6 +62,33 @@ jobs:
           printf '%s' "$PRODUCER_ATTEMPT" > "$d/producer-run-attempt"
           printf '%s' "$artifact" > "$d/producer-artifact-id"
           printf '%s' "$digest" > "$d/producer-artifact-digest"
+      - name: Download and authenticate the canonical release preflight artifact
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          PREFLIGHT_RUN: ${{ inputs.release_preflight_workflow_run_id }}
+          PREFLIGHT_ATTEMPT: ${{ inputs.release_preflight_workflow_run_attempt }}
+          PREFLIGHT_ARTIFACT: ${{ inputs.release_preflight_artifact_id }}
+          PREFLIGHT_DIGEST: ${{ inputs.release_preflight_artifact_digest }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$PREFLIGHT_ATTEMPT" = 1
+          [[ "$PREFLIGHT_RUN" =~ ^[0-9]+$ && "$PREFLIGHT_ARTIFACT" =~ ^[0-9]+$ && "$PREFLIGHT_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+          run="$(gh api repos/$GITHUB_REPOSITORY/actions/runs/$PREFLIGHT_RUN)"
+          test "$(jq -r .path <<<"$run")" = .github/workflows/produce-production-green-stage-b-release-preflight.yml
+          test "$(jq -r .head_sha <<<"$run")" = "$SOURCE_SHA"
+          test "$(jq -r .event <<<"$run")" = workflow_dispatch
+          test "$(jq -r .run_attempt <<<"$run")" = "$PREFLIGHT_ATTEMPT"
+          test "$(jq -r .conclusion <<<"$run")" = success
+          artifacts="$(gh api repos/$GITHUB_REPOSITORY/actions/runs/$PREFLIGHT_RUN/artifacts)"
+          test "$(jq '[.artifacts[] | select((.id|tostring) == $id and .name == "production-green-stage-b-release-preflight" and .expired == false)] | length' --arg id "$PREFLIGHT_ARTIFACT" <<<"$artifacts")" = 1
+          test "$(jq -r '[.artifacts[] | select((.id|tostring) == $id) | .digest] | .[0]' --arg id "$PREFLIGHT_ARTIFACT" <<<"$artifacts")" = "$PREFLIGHT_DIGEST"
+          d="$RUNNER_TEMP/stage-b-state-reconciliation"; umask 077; install -d -m 700 "$d"
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$PREFLIGHT_ARTIFACT/zip" > "$d/preflight-artifact.zip"
+          test "sha256:$(sha256sum "$d/preflight-artifact.zip" | awk '{print $1}')" = "$PREFLIGHT_DIGEST"
+          test "$(unzip -Z1 "$d/preflight-artifact.zip")" = release-preflight.json
+          install -m 600 /dev/null "$d/release-preflight.json"
+          unzip -p "$d/preflight-artifact.zip" release-preflight.json > "$d/release-preflight.json"
       - uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-region: eu-west-2
@@ -70,11 +98,7 @@ jobs:
           SOURCE_SHA: ${{ inputs.source_sha }}
           TICKET_ID: ${{ inputs.ticket_id }}
           TFVARS_BASE64: ${{ inputs.tfvars_base64 }}
-          TFVARS_SHA256: ${{ inputs.tfvars_sha256 }}
           BINDING_BASE64: ${{ inputs.binding_base64 }}
-          BINDING_SHA256: ${{ inputs.binding_sha256 }}
-          PREFLIGHT_BASE64: ${{ inputs.release_preflight_base64 }}
-          PREFLIGHT_SHA256: ${{ inputs.release_preflight_sha256 }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
@@ -85,10 +109,6 @@ jobs:
           umask 077; d="$RUNNER_TEMP/stage-b-state-reconciliation"; install -d -m 700 "$d/terraform-data"
           printf '%s' "$TFVARS_BASE64" | base64 --decode > "$d/stage-b.tfvars"
           printf '%s' "$BINDING_BASE64" | base64 --decode > "$d/binding.json"
-          printf '%s' "$PREFLIGHT_BASE64" | base64 --decode > "$d/release-preflight.json"
-          test "$(sha256sum "$d/stage-b.tfvars" | awk '{print $1}')" = "$TFVARS_SHA256"
-          test "$(sha256sum "$d/binding.json" | awk '{print $1}')" = "$BINDING_SHA256"
-          test "$(sha256sum "$d/release-preflight.json" | awk '{print $1}')" = "$PREFLIGHT_SHA256"
           node scripts/aws/reconcile-production-green-stage-b-state.mjs --mode prepare --credential-source github-oidc-release-deployer --source-sha "$SOURCE_SHA" --ticket-id "$TICKET_ID" --tfvars "$d/stage-b.tfvars" --binding-report "$d/binding.json" --release-preflight "$d/release-preflight.json" --prerequisite-bundle "$d/prerequisite-bundle.zip" --prerequisite-producer-workflow-run-id "$(cat "$d/producer-run-id")" --prerequisite-producer-workflow-run-attempt "$(cat "$d/producer-run-attempt")" --prerequisite-bundle-artifact-id "$(cat "$d/producer-artifact-id")" --prerequisite-bundle-artifact-digest "$(cat "$d/producer-artifact-digest")" --terraform-data-dir "$d/terraform-data" --saved-plan-out "$d/refresh.tfplan" --preparation-out "$d/preparation.json"
           (cd "$d" && zip -q preparation-bundle.zip preparation.json refresh.tfplan stage-b.tfvars binding.json release-preflight.json prerequisite-bundle.zip)
       - uses: actions/upload-artifact@v4

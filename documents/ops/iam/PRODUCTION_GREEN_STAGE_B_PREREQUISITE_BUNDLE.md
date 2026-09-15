@@ -15,6 +15,8 @@ Preparation and execution accept only the authenticated producer run and artifac
 
 The original tfvars and binding are first checked for their immutable semantic identity without dereferencing producer-runner paths. After the four prerequisites are materialized, the derived runtime tfvars and binding are checked with the full prerequisite-file validation. This ordering permits producer and consumer runners to differ while keeping the original hashes and the relocated file hashes authenticated.
 
+The preparation workflow transports the release-preflight report as a private GitHub artifact, never as a `workflow_dispatch` payload. It accepts only the fixed release-preflight workflow path, exact run and attempt, successful conclusion, non-expired artifact ID/name, and GitHub artifact digest; the downloaded archive must contain exactly `release-preflight.json`.
+
 The approved relocation identity is path-independent. It binds the original tfvars and binding hashes, prerequisite-manifest hash, the exact four-field allowlist, each field-to-logical-artifact mapping, canonical filename, artifact hash, and non-path tfvars/binding identity. Each phase still hashes its own runtime tfvars, runtime binding, and physical materialization for local integrity; those runner-specific hashes are not compared across jobs. This permits preparation and execution to use different private roots without weakening prerequisite or saved-plan authentication.
 
 The bundle is a private transport contract for this reconciliation. It is not a generic artifact framework and it does not authorize production execution or remote-resource mutation.
