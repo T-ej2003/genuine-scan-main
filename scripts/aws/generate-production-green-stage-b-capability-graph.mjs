@@ -39,6 +39,7 @@ const awsCliSourceFiles = [
   "scripts/aws/create-production-green-stage-b-approval.mjs", "scripts/aws/generate-production-green-stage-a-prerequisites.mjs",
   "scripts/aws/production-green-stage-b-ecs-observations.mjs", "scripts/aws/production-green-stage-b-image-evidence.mjs",
   "scripts/aws/production-green-stage-b-identity-capabilities.mjs", "scripts/aws/run-production-green-stage-b-preflight.mjs",
+  "scripts/aws/produce-production-green-stage-b-prerequisite-bundle.mjs",
   "scripts/aws/validate-production-green-stage-b-permissions.mjs", "scripts/aws/production-checker-chain-contract.mjs",
   "scripts/aws/production-release-preflight-checker-attestation.mjs",
   "scripts/aws/production-root-attestation-key.mjs", "scripts/aws/production-root-attestation-signer.mjs",
@@ -358,6 +359,11 @@ const STAGE_B_PREREQUISITE_PRODUCER_READ_IDS = Object.freeze([
   "collect-stage-a-prerequisite-state", "collect-stage-a-live-subnets", "collect-stage-a-live-route-tables",
   "collect-stage-a-live-security-groups", "collect-stage-a-live-cluster", "collect-stage-a-live-database",
 ]);
+const STAGE_B_PREREQUISITE_PRODUCER_PROBES = Object.freeze({
+  "collect-stage-a-prerequisite-state": "stage-a-state", "collect-stage-a-live-subnets": "stage-a-subnets",
+  "collect-stage-a-live-route-tables": "stage-a-route-tables", "collect-stage-a-live-security-groups": "stage-a-security-groups",
+  "collect-stage-a-live-cluster": "stage-a-cluster", "collect-stage-a-live-database": "stage-a-database",
+});
 const prerequisiteProducerCapabilityId = (id) => `stage-b-state-reconciliation-producer-${id}`;
 
 const PHASE_CAPABILITY_REQUIREMENTS = Object.freeze({
@@ -591,6 +597,8 @@ export function discoverAwsCliActions() {
         if (!id) throw new Error("Mixed recovery IAM preflight uses an unreviewed AWS action.");
         const resources = MIXED_DUAL_SLOT_RECOVERY_IAM_PREFLIGHT_CAPABILITIES.find(([candidate]) => candidate === id)[2];
         calls.push({ sourceFile, sourceFunction: id, phase: "mixed-dual-slot-recovery-iam-preflight", identity: "ROOT_OPERATOR", action, resources, capabilityId: id });
+      } else if (sourceFile === "scripts/aws/produce-production-green-stage-b-prerequisite-bundle.mjs" && action === "s3:GetObject") {
+        calls.push({ sourceFile, sourceFunction: "collect-stage-a-prerequisite-state", phase: "stage-b-exact-refresh-only-state-reconciliation", identity: "RELEASE_DEPLOYER", action, resources: [stageATerraformStateArn], capabilityId: "stage-b-state-reconciliation-producer-collect-stage-a-prerequisite-state" });
       } else {
         calls.push(sourceFile === "scripts/aws/produce-production-root-drop-evidence.mjs" && action === "kms:Sign"
           ? { sourceFile, sourceFunction: "produce-production-root-drop-evidence", phase: "root-drop-evidence-signing", identity: "ROOT_OPERATOR", action, resources: [ROOT_DROP_SIGNING_KEY_ARN], capabilityId: "root-drop-sign-evidence" }
@@ -801,7 +809,7 @@ export function buildStageBDeploymentCapabilityGraph() {
   const prerequisiteProducerReads = manifest.required.filter(({ id }) => STAGE_B_PREREQUISITE_PRODUCER_READ_IDS.includes(id)).map((entry) => ({
     id: prerequisiteProducerCapabilityId(entry.id), phase: "stage-b-exact-refresh-only-state-reconciliation", identity: "RELEASE_DEPLOYER", executor: "aws-cli",
     sourceFile: entry.id === "collect-stage-a-prerequisite-state" ? "scripts/aws/produce-production-green-stage-b-prerequisite-bundle.mjs" : "scripts/aws/generate-production-green-stage-a-prerequisites.mjs",
-    sourceFunction: entry.id, action: entry.action, resources: entry.resources, context: entry.context || [], classification: "RELEASE_DIRECT_READ", probe: "direct", probeIds: [],
+    sourceFunction: entry.id, action: entry.action, resources: entry.resources, context: entry.context || [], classification: "RELEASE_DIRECT_READ", probe: "direct", probeIds: [STAGE_B_PREREQUISITE_PRODUCER_PROBES[entry.id]],
     policy: authority(entry, false, policies), required: true, mutation: false,
   }));
   const runtime = terraformRuntimeActions().map((action) => ({ id: `runtime-${action.replace(/[^A-Za-z0-9]+/g, "-").toLowerCase()}`, phase: "runtime-activation-boundary", identity: "SERVICE_RUNTIME", executor: "lambda-or-ecs-role", sourceFile: terraformPath, sourceFunction: "generated runtime IAM policy", action, resources: ["terraform-derived-runtime-resource"], context: {}, classification: "SERVICE_RUNTIME_ACTION", probe: "structural", policy: { sourceFile: terraformPath, sid: "terraform-generated", livePolicyArn: "created-or-updated-by-stage-b", expectedVersion: "saved-plan", expectedPolicySha256: null }, required: false, mutation: isRuntimeMutationAction(action) }));

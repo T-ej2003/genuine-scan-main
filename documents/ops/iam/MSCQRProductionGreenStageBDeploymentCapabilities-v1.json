@@ -14395,7 +14395,9 @@
       ],
       "classification": "RELEASE_DIRECT_READ",
       "probe": "direct",
-      "probeIds": [],
+      "probeIds": [
+        "stage-a-cluster"
+      ],
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
         "sid": "ReadStageALivePrerequisites",
@@ -14428,7 +14430,9 @@
       ],
       "classification": "RELEASE_DIRECT_READ",
       "probe": "direct",
-      "probeIds": [],
+      "probeIds": [
+        "stage-a-database"
+      ],
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
         "sid": "ReadExactStageAGreenRdsInstance",
@@ -14461,7 +14465,9 @@
       ],
       "classification": "RELEASE_DIRECT_READ",
       "probe": "direct",
-      "probeIds": [],
+      "probeIds": [
+        "stage-a-route-tables"
+      ],
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
         "sid": "ReadStageALivePrerequisites",
@@ -14494,7 +14500,9 @@
       ],
       "classification": "RELEASE_DIRECT_READ",
       "probe": "direct",
-      "probeIds": [],
+      "probeIds": [
+        "stage-a-security-groups"
+      ],
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
         "sid": "ReadExactStageAProviderEndpointMetadata",
@@ -14527,7 +14535,9 @@
       ],
       "classification": "RELEASE_DIRECT_READ",
       "probe": "direct",
-      "probeIds": [],
+      "probeIds": [
+        "stage-a-subnets"
+      ],
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
         "sid": "ReadStageALivePrerequisites",
@@ -14552,7 +14562,9 @@
       "context": [],
       "classification": "RELEASE_DIRECT_READ",
       "probe": "direct",
-      "probeIds": [],
+      "probeIds": [
+        "stage-a-state"
+      ],
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
         "sid": "ReadExactStageAStateForHandoff",
@@ -16613,6 +16625,17 @@
     {
       "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",
       "action": "sts:GetCallerIdentity"
+    },
+    {
+      "sourceFile": "scripts/aws/produce-production-green-stage-b-prerequisite-bundle.mjs",
+      "sourceFunction": "collect-stage-a-prerequisite-state",
+      "phase": "stage-b-exact-refresh-only-state-reconciliation",
+      "identity": "RELEASE_DEPLOYER",
+      "action": "s3:GetObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate"
+      ],
+      "capabilityId": "stage-b-state-reconciliation-producer-collect-stage-a-prerequisite-state"
     },
     {
       "sourceFile": "scripts/aws/produce-production-root-drop-evidence.mjs",

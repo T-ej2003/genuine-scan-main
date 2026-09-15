@@ -30,6 +30,7 @@ const PROVIDER_READONLY_JOURNAL = `${PRODUCTION_ARTIFACTS_BUCKET}/production-pro
 const BOOTSTRAP_OPERATOR_USER = "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator";
 
 const CALLS = Object.freeze([
+  ["scripts/aws/produce-production-green-stage-b-prerequisite-bundle.mjs", "s3:GetObject", "stage-b-state-reconciliation-producer-collect-stage-a-prerequisite-state", [STAGE_A_TERRAFORM_STATE_ARN]],
   ["scripts/aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs", "sts:GetCallerIdentity", "stage-a-artifacts-reconciliation-release-identify", ["*"]],
   ["scripts/aws/production-stage-a-production-artifacts-journal.mjs", "s3:GetObject", "stage-a-artifacts-journal-read", [STAGE_A_RECONCILIATION_JOURNAL]],
   ["scripts/aws/production-stage-a-production-artifacts-journal.mjs", "s3:ListBucket", "stage-a-artifacts-journal-list-absence", [PRODUCTION_ARTIFACTS_BUCKET]],
