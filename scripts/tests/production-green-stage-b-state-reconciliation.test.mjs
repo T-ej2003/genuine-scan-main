@@ -13,7 +13,7 @@ const cleanPlan = () => ({ format_version: "1.2", terraform_version: "1.15.8", e
 const options = () => ({ sourceSha, stateIdentity: state, tfvarsSha256: digest, bindingSha256: digest });
 const approval = () => createProductionEnvironmentApprovalEvidence({ environmentConfig: { id: 1, name: "production", can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 2, login: "reviewer" } }] }] }, repository: CONTRACT.repository, environment: "production", sourceSha, workflowRef: `${CONTRACT.repository}/${CONTRACT.authorizationWorkflowPath}@refs/heads/main`, eventName: "workflow_dispatch", workflowRunId: "99", workflowRunAttempt: "1", executionActor: "operator", observedAt: now.toISOString(), actualApproval: { state: "approved", environmentId: 1, environmentName: "production", userId: 2, userLogin: "reviewer" } });
 const bytes = Buffer.from("reviewed-refresh-only-plan");
-const closure = { runtimeTfvarsSha256: digest, runtimeBindingSha256: digest, runtimeMaterializationSha256: digest, prerequisiteManifestSha256: digest, brokerPackageSha256: digest, brokerManifestSha256: digest, stageAInputSha256: digest, stageAStateBackupSha256: digest, prerequisiteProducerWorkflowRunId: "123", prerequisiteProducerWorkflowRunAttempt: "1", prerequisiteBundleArtifactId: "456", prerequisiteBundleArtifactDigest: `sha256:${"d".repeat(64)}` };
+const closure = { runtimeTfvarsSha256: digest, runtimeBindingSha256: digest, runtimeMaterializationSha256: digest, relocationContractSha256: digest, prerequisiteManifestSha256: digest, brokerPackageSha256: digest, brokerManifestSha256: digest, stageAInputSha256: digest, stageAStateBackupSha256: digest, prerequisiteProducerWorkflowRunId: "123", prerequisiteProducerWorkflowRunAttempt: "1", prerequisiteBundleArtifactId: "456", prerequisiteBundleArtifactDigest: `sha256:${"d".repeat(64)}` };
 const execBindings = () => ({ tfvarsSha256: digest, bindingSha256: digest, preflightSha256: digest, ...closure });
 const prepare = () => createStageBStateReconciliationPreparation({ sourceSha, ticketId: "CHG-20260915-001", stateIdentity: state, tfvarsSha256: digest, bindingSha256: digest, preflightSha256: digest, ...closure, planBytes: bytes, planJson: plan(), normalPlan: sourcePlan(), createdAt: now.toISOString() });
 
@@ -82,6 +82,15 @@ test("execution rejects substituted bound inputs, stale plan, and non-clean clos
   assert.throws(() => executeStageBStateReconciliation({ ...common, bindings: execBindings(), planBytes: Buffer.from("substituted") }));
   const unclean = cleanPlan(); unclean.resource_changes = [{ change: { actions: ["update"] } }];
   assert.throws(() => assertCleanStageBNormalPlan(unclean, { sourceSha }));
+});
+
+test("execution accepts a fresh private root when the semantic relocation contract is unchanged", () => {
+  const preparation = prepare(); const authorization = createStageBStateReconciliationAuthorization({ preparation, approval: approval(), now });
+  const execution = { ...execBindings(), tfvarsSha256: "c".repeat(64), bindingSha256: "d".repeat(64), runtimeMaterializationSha256: "e".repeat(64) };
+  let current = { ...state }; let applies = 0;
+  const result = executeStageBStateReconciliation({ sourceSha, preparation, authorization, bindings: execution, planBytes: bytes, planJson: plan(), readState: () => current, applyRefreshOnlyPlan: () => { applies += 1; current = { ...current, serial: current.serial + 1, stateSha256: "c".repeat(64) }; }, renderRefreshClosurePlan: cleanPlan, renderNormalClosurePlan: cleanPlan, reauthenticateSource: () => {}, now });
+  assert.equal(result.remoteResourceMutationCount, 0); assert.equal(applies, 1);
+  assert.throws(() => executeStageBStateReconciliation({ sourceSha, preparation, authorization, bindings: { ...execution, relocationContractSha256: "f".repeat(64) }, planBytes: bytes, planJson: plan(), readState: () => state, applyRefreshOnlyPlan: () => {}, renderRefreshClosurePlan: cleanPlan, renderNormalClosurePlan: cleanPlan, reauthenticateSource: () => {}, now }), /execution inputs differ/);
 });
 
 test("apply error is resolved only by exact successor readback", () => {

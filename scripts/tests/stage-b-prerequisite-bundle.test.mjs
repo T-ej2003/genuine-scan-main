@@ -43,6 +43,22 @@ test("one deterministic producer bundle authenticates four payloads and private 
   assert.equal(runtime.materialization.relocatableFields.length, 4); assert.match(fs.readFileSync(runtime.runtimeTfvarsPath, "utf8"), /consumer/); assert.throws(() => writeStageBRuntimeMaterialization({ originalTfvarsBytes: Buffer.from(""), originalBindingBytes: Buffer.from("{}"), prerequisite: materialized, outputDirectory: "/tmp/caller-chosen" }));
 });
 
+test("different preparation and execution roots preserve semantic relocation identity", async () => {
+  const runFixture = await fixture(); const expected = { bundlePath: runFixture.result.bundlePath, sourceSha, ticketId, repository: "T-ej2003/genuine-scan-main", workflowRunId: "123", workflowRunAttempt: "1", headSha: sourceSha };
+  const originalTfvarsBytes = Buffer.from('broker_package_path = "/producer/broker.zip"\naccount_id = "368992683803"\n');
+  const originalBindingBytes = Buffer.from(`${JSON.stringify({ tfvarsSha256: "c".repeat(64), stageAInputPath: "/producer/stage-a-input.json", stageAStateBackupPath: "/producer/stage-a-state-backup.json", brokerPackagePath: "/producer/broker.zip", brokerPackageManifestPath: "/producer/broker-package.manifest.json" })}\n`);
+  const preparationRoot = materializeStageBPrerequisites(expected); const executionRoot = materializeStageBPrerequisites(expected);
+  const preparation = writeStageBRuntimeMaterialization({ originalTfvarsBytes, originalBindingBytes, prerequisite: preparationRoot });
+  const execution = writeStageBRuntimeMaterialization({ originalTfvarsBytes, originalBindingBytes, prerequisite: executionRoot });
+  assert.notEqual(preparation.runtimeTfvarsSha256, execution.runtimeTfvarsSha256);
+  assert.notEqual(preparation.runtimeBindingSha256, execution.runtimeBindingSha256);
+  assert.notEqual(preparation.runtimeMaterializationSha256, execution.runtimeMaterializationSha256);
+  assert.equal(preparation.relocationContractSha256, execution.relocationContractSha256);
+  assert.deepEqual(preparation.relocationContract.fieldToLogicalArtifact, execution.relocationContract.fieldToLogicalArtifact);
+  assert.deepEqual(preparation.relocationContract.artifactIdentities, execution.relocationContract.artifactIdentities);
+  assert.deepEqual(preparation.relocationContract.nonPathTfvarsIdentity, execution.relocationContract.nonPathTfvarsIdentity);
+});
+
 test("producer, run, source, ticket, attempt, and archive identity substitutions fail closed", async () => {
   const runFixture = await fixture(); const expected = { bundlePath: runFixture.result.bundlePath, sourceSha, ticketId, repository: "T-ej2003/genuine-scan-main", workflowRunId: "123", workflowRunAttempt: "1", headSha: sourceSha };
   for (const changed of [

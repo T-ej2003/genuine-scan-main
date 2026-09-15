@@ -16,6 +16,8 @@ const TICKET = /^[A-Za-z0-9][A-Za-z0-9._:/-]{5,127}$/;
 const MAX_MEMBER_BYTES = 64 * 1024 * 1024;
 export const STAGE_B_PREREQUISITE_BUNDLE_WORKFLOW = ".github/workflows/produce-production-green-stage-b-prerequisite-bundle.yml";
 export const STAGE_B_PREREQUISITE_BUNDLE_FORMAT = "stage-b-prerequisite-bundle-v1";
+export const STAGE_B_RUNTIME_RELOCATABLE_FIELDS = Object.freeze(["stageAInputPath", "stageAStateBackupPath", "brokerPackagePath", "brokerPackageManifestPath"]);
+const STAGE_B_RUNTIME_FIELD_TO_ARTIFACT = Object.freeze({ stageAInputPath: "stage-a-handoff", stageAStateBackupPath: "stage-a-state-backup", brokerPackagePath: "broker-package", brokerPackageManifestPath: "broker-package-manifest" });
 export const STAGE_B_PREREQUISITE_BUNDLE_FILES = Object.freeze([
   Object.freeze({ logicalArtifactId: "broker-package", canonicalFilename: "broker-package.zip", existingContractIdentity: "broker-package" }),
   Object.freeze({ logicalArtifactId: "broker-package-manifest", canonicalFilename: "broker-package.manifest.json", existingContractIdentity: "broker-package-manifest" }),
@@ -24,6 +26,10 @@ export const STAGE_B_PREREQUISITE_BUNDLE_FILES = Object.freeze([
 ]);
 const MANIFEST_FILENAME = "prerequisite-manifest.json";
 const allNames = [...STAGE_B_PREREQUISITE_BUNDLE_FILES.map(({ canonicalFilename }) => canonicalFilename), MANIFEST_FILENAME];
+const canonicalJson = (value) => JSON.stringify(value, (_key, nested) => {
+  if (!nested || typeof nested !== "object" || Array.isArray(nested)) return nested;
+  return Object.fromEntries(Object.entries(nested).sort(([left], [right]) => left.localeCompare(right)).map(([key, entry]) => [key, entry]));
+});
 
 const exactKeys = (value, fields, label) => {
   if (!value || typeof value !== "object" || Array.isArray(value) || JSON.stringify(Object.keys(value).sort()) !== JSON.stringify([...fields].sort())) throw new Error(`${label} schema is invalid.`);
@@ -122,7 +128,7 @@ export function writeStageBRuntimeMaterialization({ originalTfvarsBytes, origina
   if (!Buffer.isBuffer(originalTfvarsBytes) || !Buffer.isBuffer(originalBindingBytes) || !prerequisite?.paths || !prerequisite.privateRoot || outputDirectory !== undefined) throw new Error("Stage B runtime materialization inputs are invalid.");
   outputDirectory = prerequisite.privateRoot;
   ensureStageBPrivateDirectory({ directory: outputDirectory, repositoryRoot: root, create: true, normalize: true });
-  const originalTfvarsSha256 = sha256(originalTfvarsBytes); const originalBindingSha256 = sha256(originalBindingBytes); const binding = JSON.parse(originalBindingBytes); const pathFields = ["stageAInputPath", "stageAStateBackupPath", "brokerPackagePath", "brokerPackageManifestPath"];
+  const originalTfvarsSha256 = sha256(originalTfvarsBytes); const originalBindingSha256 = sha256(originalBindingBytes); const binding = JSON.parse(originalBindingBytes); const pathFields = STAGE_B_RUNTIME_RELOCATABLE_FIELDS;
   if (pathFields.some((field) => typeof binding[field] !== "string" || !path.isAbsolute(binding[field]))) throw new Error("Stage B original binding does not contain the exact canonical prerequisite paths.");
   const runtimeTfvarsPath = path.join(outputDirectory, "stage-b.runtime.tfvars"); const runtimeBindingPath = path.join(outputDirectory, "stage-b.runtime.binding.json"); const materializationPath = path.join(outputDirectory, "runtime-materialization.json");
   const brokerPath = prerequisite.paths["broker-package"]; const tfvarsText = originalTfvarsBytes.toString("utf8"); const matches = [...tfvarsText.matchAll(/^broker_package_path\s*=\s*("(?:[^"\\]|\\.)*")\s*$/gm)];
@@ -135,8 +141,12 @@ export function writeStageBRuntimeMaterialization({ originalTfvarsBytes, origina
   const runtimeBinding = { ...binding, stageAInputPath: prerequisite.paths["stage-a-handoff"], stageAStateBackupPath: prerequisite.paths["stage-a-state-backup"], brokerPackagePath: brokerPath, brokerPackageManifestPath: prerequisite.paths["broker-package-manifest"], tfvarsSha256: sha256(runtimeTfvarsBytes) };
   const bindingWithoutRelocation = (value) => Object.fromEntries(Object.entries(value).filter(([key]) => !pathFields.includes(key) && key !== "tfvarsSha256"));
   if (JSON.stringify(bindingWithoutRelocation(binding)) !== JSON.stringify(bindingWithoutRelocation(runtimeBinding))) throw new Error("Stage B runtime binding changed a non-path value.");
-  const materialization = { schemaVersion: 1, kind: "PRODUCTION_GREEN_STAGE_B_STAGE_B_RUNTIME_MATERIALIZATION", originalTfvarsSha256, originalBindingSha256, prerequisiteManifestSha256: prerequisite.manifestSha256, runtimeTfvarsSha256: sha256(runtimeTfvarsBytes), runtimeBindingSha256: sha256(Buffer.from(`${JSON.stringify(runtimeBinding, null, 2)}\n`)), relocatableFields: pathFields, paths: Object.fromEntries(pathFields.map((field) => [field, runtimeBinding[field]])), artifactSha256: Object.fromEntries(Object.entries(prerequisite.paths).map(([id, filePath]) => [id, sha256(fs.readFileSync(filePath))])) };
-  const runtimeBindingBytes = Buffer.from(`${JSON.stringify(runtimeBinding, null, 2)}\n`); const materializationBytes = Buffer.from(`${JSON.stringify(materialization, null, 2)}\n`);
+  const artifactIdentities = Object.fromEntries(prerequisite.manifest.members.map(({ logicalArtifactId, canonicalFilename, sha256: digest }) => [logicalArtifactId, { logicalArtifactId, canonicalFilename, sha256: digest }]));
+  const relocationContract = { schemaVersion: 1, kind: "PRODUCTION_GREEN_STAGE_B_STAGE_B_RELOCATION_CONTRACT", sourceSha: prerequisite.manifest.sourceSha, changeTicketId: prerequisite.manifest.changeTicketId, originalTfvarsSha256, originalBindingSha256, prerequisiteManifestSha256: prerequisite.manifestSha256, relocatableFields: [...pathFields], fieldToLogicalArtifact: Object.fromEntries(pathFields.map((field) => [field, { field, logicalArtifactId: STAGE_B_RUNTIME_FIELD_TO_ARTIFACT[field], ...artifactIdentities[STAGE_B_RUNTIME_FIELD_TO_ARTIFACT[field]] }])), artifactIdentities, nonPathTfvarsIdentity: { tfvarsSha256: sha256(Buffer.from(tfvarsText.replace(matches[0][0], placeholder))), bindingSha256: sha256(Buffer.from(`${canonicalJson(bindingWithoutRelocation(binding))}\n`)) } };
+  const relocationContractSha256 = sha256(Buffer.from(`${canonicalJson(relocationContract)}\n`));
+  const runtimeBindingBytes = Buffer.from(`${JSON.stringify(runtimeBinding, null, 2)}\n`);
+  const materialization = { schemaVersion: 2, kind: "PRODUCTION_GREEN_STAGE_B_STAGE_B_RUNTIME_MATERIALIZATION", originalTfvarsSha256, originalBindingSha256, prerequisiteManifestSha256: prerequisite.manifestSha256, relocationContractSha256, runtimeTfvarsSha256: sha256(runtimeTfvarsBytes), runtimeBindingSha256: sha256(runtimeBindingBytes), relocatableFields: [...pathFields], paths: Object.fromEntries(pathFields.map((field) => [field, runtimeBinding[field]])), artifactSha256: Object.fromEntries(Object.entries(prerequisite.paths).map(([id, filePath]) => [id, sha256(fs.readFileSync(filePath))])) };
+  const materializationBytes = Buffer.from(`${JSON.stringify(materialization, null, 2)}\n`);
   writeStageBPrivateFilesAtomic({ repositoryRoot: root, files: [{ filePath: runtimeTfvarsPath, bytes: runtimeTfvarsBytes, label: "Stage B runtime tfvars" }, { filePath: runtimeBindingPath, bytes: runtimeBindingBytes, label: "Stage B runtime binding" }, { filePath: materializationPath, bytes: materializationBytes, label: "Stage B runtime materialization" }] });
-  return Object.freeze({ runtimeTfvarsPath, runtimeBindingPath, materializationPath, runtimeTfvarsSha256: materialization.runtimeTfvarsSha256, runtimeBindingSha256: materialization.runtimeBindingSha256, runtimeMaterializationSha256: sha256(materializationBytes), materialization });
+  return Object.freeze({ runtimeTfvarsPath, runtimeBindingPath, materializationPath, runtimeTfvarsSha256: materialization.runtimeTfvarsSha256, runtimeBindingSha256: materialization.runtimeBindingSha256, runtimeMaterializationSha256: sha256(materializationBytes), relocationContractSha256, relocationContract, materialization });
 }
