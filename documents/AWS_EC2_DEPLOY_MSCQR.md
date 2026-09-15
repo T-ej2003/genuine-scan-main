@@ -16,6 +16,7 @@ This project is now configured to:
 - Ensure outbound internet access is enabled.
 - If backend uses RDS:
   - allow EC2 security group to reach RDS on `5432`
+- For the one-time initial-admin bootstrap, attach a deployment-only instance profile (or use an equally scoped assumed role) after `full-rls-role-provision` records the exact migration-secret ARN. Its only secret permission is `secretsmanager:GetSecretValue` on that exact ARN. Do not attach this permission to the ordinary backend runtime role or use a wildcard resource.
 
 ## 2. Namecheap DNS (recommended)
 
@@ -35,7 +36,7 @@ dig +short www.mscqr.com
 
 ```bash
 sudo apt update
-sudo apt install -y ca-certificates curl git
+sudo apt install -y awscli ca-certificates curl git
 
 curl -fsSL https://get.docker.com | sudo sh
 sudo usermod -aG docker $USER
@@ -43,6 +44,7 @@ newgrp docker
 
 docker --version
 docker compose version
+aws --version
 ```
 
 ## 4. Deploy app code to EC2
@@ -67,11 +69,12 @@ Update runtime values before first boot:
 
 ## 5. Provision the deployment-only migration credential, bootstrap the initial administrator, and start (HTTP mode)
 
-Before starting the ordinary backend, complete the canonical RLS package phases through `full-rls-role-provision` and `full-rls-role-verify`. The existing production RLS executor generates the login password for `mscqr_prd_rls_phase2_migration` and writes its TLS database URL only to the exact Secrets Manager handle `mscqr/production/rls-green/phase2/database-url/migration`; it never embeds that credential in generated SQL or runtime configuration.
+Before starting the ordinary backend, complete the canonical RLS package phases in this order: `full-rls-role-provision`, `full-rls-role-verify`, Prisma migration during `full-rls-admin-ownership`, then `full-rls-runtime-policy`. The existing production RLS executor generates the login password for `mscqr_prd_rls_phase2_migration` and writes its TLS database URL only to the exact Secrets Manager handle `mscqr/production/rls-green/phase2/database-url/migration`; it never embeds that credential in generated SQL or runtime configuration. The bootstrap function and its RLS policy do not exist until the final two phases complete.
 
-On the deployment host, use the existing instance/task role that is already allowed to read that exact handle. Capture it directly into the one-shot process environment; do not echo it, add it to an `.env` file, or substitute the ordinary application `DATABASE_URL`. The silent prompt keeps the initial credential out of shell history and command output; the process stores only its Argon2id hash.
+The bootstrap host must use that deployment-only instance profile or assumed role with exactly `secretsmanager:GetSecretValue` on the recorded migration secret. Verify the caller before reading it; do not use the ordinary runtime identity, static credentials, or the application `DATABASE_URL`. Capture the result directly into the one-shot process environment; do not echo it or add it to an `.env` file. The silent prompt keeps the initial credential out of shell history and command output; the process stores only its Argon2id hash.
 
 ```bash
+aws sts get-caller-identity --no-cli-pager >/dev/null
 read -rsp "Initial administration@mscqr.com password: " SUPER_ADMIN_BOOTSTRAP_PASSWORD
 echo
 export SUPER_ADMIN_BOOTSTRAP_PASSWORD

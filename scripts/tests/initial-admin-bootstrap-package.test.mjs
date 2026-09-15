@@ -38,9 +38,18 @@ assert.equal(backendPackage.scripts["auth:bootstrap-super-admin"], "node scripts
 assert.match(deployment, /npm run auth:bootstrap-super-admin/);
 assert.match(deployment, /full-rls-role-provision/);
 assert.match(deployment, /full-rls-role-verify/);
+assert.match(deployment, /full-rls-admin-ownership/);
+assert.match(deployment, /full-rls-runtime-policy/);
 assert.match(deployment, /mscqr\/production\/rls-green\/phase2\/database-url\/migration/);
+assert.match(deployment, /secretsmanager:GetSecretValue/);
+assert.match(deployment, /attach a deployment-only instance profile/);
+assert.match(deployment, /wildcard resource/);
+assert.match(deployment, /aws sts get-caller-identity/);
+assert.match(deployment, /aws --version/);
+assert.match(deployment, /read -rsp/);
 assert.match(deployment, /aws secretsmanager get-secret-value/);
 assert.doesNotMatch(deployment, /<deployment-only migration database URL>/);
+assert.ok(deployment.indexOf("full-rls-runtime-policy") < deployment.indexOf("npm run auth:bootstrap-super-admin"));
 assert.ok(deployment.indexOf("npm run auth:bootstrap-super-admin") < deployment.indexOf("docker compose --profile worker up"));
 
 console.log("initial admin bootstrap package contract tests passed");
