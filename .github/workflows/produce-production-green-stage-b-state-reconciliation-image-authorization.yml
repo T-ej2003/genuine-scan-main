@@ -1,0 +1,62 @@
+name: Produce Stage B state-reconciliation image authorization
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha: { description: Exact protected-main source SHA, required: true, type: string }
+      image_authorization_base64: { description: Base64 of the canonical signed image authorization, required: true, type: string }
+      image_authorization_sha256: { description: SHA-256 of decoded image-authorization bytes, required: true, type: string }
+
+permissions: { contents: read, id-token: write }
+concurrency: { group: production-deploy, cancel-in-progress: false }
+
+jobs:
+  produce:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with: { node-version: 24, cache: npm }
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: eu-west-2
+          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-release-deployer
+      - name: Authenticate and publish exact state-only image authorization
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          IMAGE_AUTHORIZATION_BASE64: ${{ inputs.image_authorization_base64 }}
+          IMAGE_AUTHORIZATION_SHA256: ${{ inputs.image_authorization_sha256 }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          test "$SOURCE_SHA" = "$GITHUB_SHA"
+          test "$SOURCE_SHA" = "$(git rev-parse HEAD)"
+          test "$SOURCE_SHA" = "$(gh api repos/$GITHUB_REPOSITORY/branches/main --jq .commit.sha)"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          [[ "$IMAGE_AUTHORIZATION_SHA256" =~ ^[a-f0-9]{64}$ ]]
+          [[ "$IMAGE_AUTHORIZATION_BASE64" =~ ^[A-Za-z0-9+/=]+$ ]]
+          test "${#IMAGE_AUTHORIZATION_BASE64}" -le 32768
+          d="$RUNNER_TEMP/stage-b-state-reconciliation-image-authorization"
+          umask 077; install -d -m 700 "$d"
+          printf '%s' "$IMAGE_AUTHORIZATION_BASE64" | base64 --decode > "$d/image-authorization.json"
+          chmod 600 "$d/image-authorization.json"
+          test "$(sha256sum "$d/image-authorization.json" | awk '{print $1}')" = "$IMAGE_AUTHORIZATION_SHA256"
+          node scripts/aws/verify-production-release-image-authorization.mjs \
+            --credential-source github-oidc-release-deployer \
+            --source-sha "$SOURCE_SHA" \
+            --authorization "$d/image-authorization.json" \
+            --authorization-sha256 "$IMAGE_AUTHORIZATION_SHA256" \
+            --github-output /dev/null
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-green-stage-b-state-reconciliation-image-authorization
+          path: ${{ runner.temp }}/stage-b-state-reconciliation-image-authorization/image-authorization.json
+          if-no-files-found: error
+          retention-days: 1
