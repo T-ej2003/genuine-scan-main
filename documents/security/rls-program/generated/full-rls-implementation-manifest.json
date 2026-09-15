@@ -15,7 +15,7 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "45286276014bc427513ea1ac2f2fba24626d290a631460f0b6bf5c4ede9ff641",
+  "sourceContractSha256": "866cba76e404a254a2c205f2d2f97aaa18fc80f924b2c5e5b60815d47dbb4782",
   "migrationSetDigest": "6642442a81cd98c7a132d241fa98e50ae231510896c9da67ab70d86b050d02db",
   "sourceContractInputs": [
     {
@@ -32,11 +32,11 @@
     },
     {
       "path": "documents/security/rls-program/runtime-identities.json",
-      "sha256": "fc049f55fc74d47cfe3c0136c0431afb4c8375d7b2caa81284918d874bfc9898"
+      "sha256": "bf7a7438f3ff9779a78df0cb0796237d1a2e20fc204f08e92fc2cf999428894b"
     },
     {
       "path": "documents/security/rls-program/object-ownership-chain.json",
-      "sha256": "11dd203aec40efc8e5eb656cc0da1d2bea36c181cb57f41df79b99b8d76cc294"
+      "sha256": "08c33de9d5d468f8c6214202e48c418d88c65c2c1681fc192fcf80de21127077"
     },
     {
       "path": "documents/security/rls-program/essential-workflow-allowlist.json",
@@ -344,7 +344,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:45286276014bc427513ea1ac2f2fba24626d290a631460f0b6bf5c4ede9ff641",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:866cba76e404a254a2c205f2d2f97aaa18fc80f924b2c5e5b60815d47dbb4782",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,
@@ -615,9 +615,9 @@
       "owns": [
         "all 78 Prisma tables",
         "application sequences",
-        "public and app_rls schemas",
+        "public, app_rls, and app_ops schemas",
         "table-bound objects",
-        "approved app_rls SECURITY INVOKER helpers"
+        "approved app_rls SECURITY INVOKER helpers and app_ops SECURITY DEFINER operator/deployment boundaries"
       ],
       "forbiddenMemberships": "No runtime role and no standing migration membership."
     },

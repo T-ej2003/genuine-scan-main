@@ -75,7 +75,7 @@ The bootstrap host must use that deployment-only instance profile or assumed rol
 
 ```bash
 aws sts get-caller-identity --no-cli-pager >/dev/null
-read -rsp "Initial administration@mscqr.com password: " SUPER_ADMIN_BOOTSTRAP_PASSWORD
+IFS= read -rsp "Initial administration@mscqr.com password: " SUPER_ADMIN_BOOTSTRAP_PASSWORD
 echo
 export SUPER_ADMIN_BOOTSTRAP_PASSWORD
 export SUPER_ADMIN_BOOTSTRAP_DATABASE_URL="$(aws secretsmanager get-secret-value \

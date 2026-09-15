@@ -48,6 +48,7 @@ assert.match(deployment, /wildcard resource/);
 assert.match(deployment, /aws sts get-caller-identity/);
 assert.match(deployment, /aws --version/);
 assert.match(deployment, /read -rsp/);
+assert.match(deployment, /IFS= read -rsp/);
 assert.match(deployment, /aws secretsmanager get-secret-value/);
 assert.doesNotMatch(deployment, /<deployment-only migration database URL>/);
 const bootstrapSection = deployment.slice(deployment.indexOf("## 5. Provision the deployment-only migration credential"));
