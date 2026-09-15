@@ -32,13 +32,13 @@ jobs:
           SOURCE_SHA: ${{ inputs.source_sha }}
           IMAGE_AUTHORIZATION_BASE64: ${{ inputs.image_authorization_base64 }}
           IMAGE_AUTHORIZATION_SHA256: ${{ inputs.image_authorization_sha256 }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           test "$GITHUB_RUN_ATTEMPT" = 1
           test "$SOURCE_SHA" = "$GITHUB_SHA"
           test "$SOURCE_SHA" = "$(git rev-parse HEAD)"
-          git fetch --no-tags origin main
-          test "$SOURCE_SHA" = "$(git rev-parse FETCH_HEAD)"
+          test "$SOURCE_SHA" = "$(gh api repos/$GITHUB_REPOSITORY/branches/main --jq .commit.sha)"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
           [[ "$IMAGE_AUTHORIZATION_SHA256" =~ ^[a-f0-9]{64}$ ]]
           [[ "$IMAGE_AUTHORIZATION_BASE64" =~ ^[A-Za-z0-9+/=]+$ ]]

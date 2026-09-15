@@ -55,7 +55,7 @@ test("state-only image-authorization producer is protected, independently authen
   assert.deepEqual(workflow.permissions, { contents: "read", "id-token": "write" });
   assert.equal(workflow.concurrency.group, "production-deploy"); assert.equal(workflow.concurrency["cancel-in-progress"], false);
   assert.equal(workflow.jobs.produce.environment, "production");
-  assert.match(source, /GITHUB_RUN_ATTEMPT/); assert.match(source, /git fetch --no-tags origin main/);
+  assert.match(source, /GITHUB_RUN_ATTEMPT/); assert.match(source, /GITHUB_TOKEN: \$\{\{ github\.token \}\}/); assert.match(source, /gh api repos\/\$GITHUB_REPOSITORY\/branches\/main --jq \.commit\.sha/);
   assert.match(source, /IMAGE_AUTHORIZATION_SHA256/); assert.match(source, /base64 --decode/); assert.match(source, /test "\$\{#IMAGE_AUTHORIZATION_BASE64\}" -le 32768/);
   assert.match(source, /verify-production-release-image-authorization\.mjs/); assert.match(source, /github-oidc-release-deployer/);
   assert.match(source, /production-green-stage-b-state-reconciliation-image-authorization/); assert.match(source, /retention-days: 1/);
