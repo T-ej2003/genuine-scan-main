@@ -46,6 +46,8 @@ assert.match(deployment, /secretsmanager:GetSecretValue/);
 assert.match(deployment, /attach a deployment-only instance profile/);
 assert.match(deployment, /wildcard resource/);
 assert.match(deployment, /aws sts get-caller-identity/);
+assert.match(deployment, /set -euo pipefail/);
+assert.doesNotMatch(deployment, /get-caller-identity --no-cli-pager/);
 assert.match(deployment, /aws --version/);
 assert.match(deployment, /read -rsp/);
 assert.match(deployment, /IFS= read -rsp/);

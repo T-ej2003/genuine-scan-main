@@ -74,7 +74,8 @@ Before starting the ordinary backend, complete the canonical RLS package phases 
 The bootstrap host must use that deployment-only instance profile or assumed role with exactly `secretsmanager:GetSecretValue` on the recorded migration secret. Verify the caller before reading it; do not use the ordinary runtime identity, static credentials, or the application `DATABASE_URL`. Capture the result directly into the one-shot process environment; do not echo it or add it to an `.env` file. The silent prompt keeps the initial credential out of shell history and command output; the process stores only its Argon2id hash.
 
 ```bash
-aws sts get-caller-identity --no-cli-pager >/dev/null
+set -euo pipefail
+aws sts get-caller-identity >/dev/null
 IFS= read -rsp "Initial administration@mscqr.com password: " SUPER_ADMIN_BOOTSTRAP_PASSWORD
 echo
 export SUPER_ADMIN_BOOTSTRAP_PASSWORD

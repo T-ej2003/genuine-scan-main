@@ -15,7 +15,7 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "866cba76e404a254a2c205f2d2f97aaa18fc80f924b2c5e5b60815d47dbb4782",
+  "sourceContractSha256": "84464e275425ab73d930e7ed75050e6f1915075cf466ef28f4f3cdd7aae35b7f",
   "migrationSetDigest": "6642442a81cd98c7a132d241fa98e50ae231510896c9da67ab70d86b050d02db",
   "sourceContractInputs": [
     {
@@ -76,7 +76,7 @@
     },
     {
       "path": "scripts/rls/lib/clean-room-source-contract.mjs",
-      "sha256": "284aac28bda2d2e06369722fc4ce959e35dc17d59dc86845202001b6a2e9e59c"
+      "sha256": "13fc293a6681661d45b73c205ff2fa517382b36a741488527f5e51b1f37d59ab"
     },
     {
       "path": "scripts/rls/lib/program-inventory.mjs",
@@ -299,6 +299,10 @@
       "sha256": "6d53811f942c677ca7e1157d7f16aa736539b8002ccf818c635f09f2f800f377"
     },
     {
+      "path": "backend/src/rls-waves/session-c/c04/operatorProceduresRollback.sql",
+      "sha256": "47d2250c69a140a739970fffe608ac7d069794a0db161c02074d03cc728d3ef3"
+    },
+    {
       "path": "backend/src/rls-waves/session-c/c04/bootstrapConfiguredSuperAdmin.sql",
       "sha256": "3980c18081113174c1e83092e26ef40524cb7d6a465a261cbd2e7aada819611e"
     },
@@ -344,7 +348,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:866cba76e404a254a2c205f2d2f97aaa18fc80f924b2c5e5b60815d47dbb4782",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:84464e275425ab73d930e7ed75050e6f1915075cf466ef28f4f3cdd7aae35b7f",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,
