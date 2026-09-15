@@ -11,7 +11,7 @@ import {
   runReleaseReadPreflight,
 } from "../aws/production-green-stage-b-identity-capabilities.mjs";
 import { STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_STATE_IDENTITY_VERSION, stageAStateSemanticSha256 } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
-import { assertBootstrapOperatorAssumeRoleAuthority, assertBootstrapOperatorVerifierAuthority, assertBootstrapOperatorPolicyAuthorizerAuthority, assertInitialActivationReconcilerAuthority, assertStageBAwsCallCoverage, assertStageBDeploymentCapabilityGraph, buildStageBDeploymentCapabilityGraph, classifyStageARecoveryAwsCliAction, discoverAwsCliActions } from "../aws/generate-production-green-stage-b-capability-graph.mjs";
+import { assertBootstrapOperatorAssumeRoleAuthority, assertBootstrapOperatorVerifierAuthority, assertBootstrapOperatorPolicyAuthorizerAuthority, assertInitialActivationReconcilerAuthority, assertStageBAwsCallCoverage, assertStageBDeploymentCapabilityGraph, buildStageBDeploymentCapabilityGraph, classifyStageARecoveryAwsCliAction, discoverAwsCliActions, isRuntimeMutationAction } from "../aws/generate-production-green-stage-b-capability-graph.mjs";
 import { BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION, LEGACY_BOOTSTRAP_TRANSITION_SECRET_READ_RESOURCES } from "../aws/production-bootstrap-operator-policy-reconciliation.mjs";
 import { assertStageBAdministratorEvidenceIdentity, buildPermissionReportBinding, canonicalizeJson, PERMISSION_REPORT_BINDING_DOMAIN, PERMISSION_REPORT_BINDING_SCHEMA_VERSION, PERMISSION_REPORT_HASH_DOMAIN, PERMISSION_REPORT_SIGNING_ALGORITHM, PERMISSION_REPORT_SIGNING_KEY_ARN, PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION, runPermissionPreflight, signedPermissionReportBindingSha256, sourcePolicyEvidence } from "../aws/validate-production-green-stage-b-permissions.mjs";
 import { runProductionPreflightCli } from "../aws/run-production-green-stage-b-preflight.mjs";
@@ -191,6 +191,11 @@ test("Stage B release readiness requires the completed Stage A contract", () => 
   const source = fs.readFileSync("scripts/aws/run-production-green-stage-b-preflight.mjs", "utf8");
   assert.match(source, /generateStageAPrerequisites\(\{[^;]+phase: "POST_APPLY", run: \(args\) => releaseAwsRun\(args\) \}\);/);
   assert.doesNotMatch(source, /recoveryMode === "NORMAL" \? "PRE_APPLY"/);
+});
+
+test("runtime S3 Get and List actions are classified as read-only", () => {
+  for (const action of ["s3:GetObject", "s3:GetBucketLocation", "s3:ListBucket", "s3:ListBucketVersions"]) assert.equal(isRuntimeMutationAction(action), false);
+  for (const action of ["s3:PutObject", "s3:DeleteObject", "s3:PutBucketPolicy"]) assert.equal(isRuntimeMutationAction(action), true);
 });
 
 test("generated capability graph is exhaustive, deterministic, and identity-exact", () => {

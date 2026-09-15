@@ -13359,7 +13359,7 @@
         "expectedPolicySha256": null
       },
       "required": false,
-      "mutation": true
+      "mutation": false
     },
     {
       "id": "runtime-s3-putobject",
