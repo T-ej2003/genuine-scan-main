@@ -76,7 +76,8 @@
         "scripts/aws/production-cutover-production-adapters.mjs",
         "scripts/aws/forward-recover-stage-b-existing-revision.mjs",
         "scripts/aws/prepare-production-green-stage-b-approval-input.mjs",
-        "scripts/aws/collect-production-green-stage-b-approval-evidence.mjs"
+        "scripts/aws/collect-production-green-stage-b-approval-evidence.mjs",
+        "scripts/aws/reconcile-production-green-stage-b-state.mjs"
       ],
       "directoryMode": "0700",
       "fileMode": "0600",
@@ -741,7 +742,8 @@
         "scripts/aws/production-cutover-runtime-bootstrap.mjs",
         "scripts/aws/prepare-production-cutover-runtime.mjs",
         "scripts/aws/forward-recover-stage-b-existing-revision.mjs",
-        "scripts/aws/recover-stage-b-backend-task-definition.mjs"
+        "scripts/aws/recover-stage-b-backend-task-definition.mjs",
+        "scripts/aws/reconcile-production-green-stage-b-state.mjs"
       ],
       "directoryMode": "0700",
       "fileMode": "0600",
@@ -768,7 +770,8 @@
         "scripts/aws/production-cutover-runtime-bootstrap.mjs",
         "scripts/aws/prepare-production-cutover-runtime.mjs",
         "scripts/aws/forward-recover-stage-b-existing-revision.mjs",
-        "scripts/aws/recover-stage-b-backend-task-definition.mjs"
+        "scripts/aws/recover-stage-b-backend-task-definition.mjs",
+        "scripts/aws/reconcile-production-green-stage-b-state.mjs"
       ],
       "directoryMode": "0700",
       "fileMode": "0600",
@@ -2151,6 +2154,85 @@
       "overwrite": false,
       "hashBound": true,
       "atomicGroup": "image-evidence",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "stage-b-ten-address-state-reconciliation-saved-plan",
+      "kind": "file",
+      "producer": "scripts/aws/reconcile-production-green-stage-b-state.mjs:runStageBStateReconciliation --mode prepare",
+      "consumers": [
+        ".github/workflows/execute-production-green-stage-b-state-reconciliation.yml",
+        "scripts/aws/reconcile-production-green-stage-b-state.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": false,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": null,
+      "allOrNone": false,
+      "rollback": "none"
+    },
+    {
+      "id": "stage-b-ten-address-state-reconciliation-preparation",
+      "kind": "file",
+      "producer": "scripts/aws/reconcile-production-green-stage-b-state.mjs:runStageBStateReconciliation --mode prepare",
+      "consumers": [
+        ".github/workflows/authorize-production-green-stage-b-state-reconciliation.yml",
+        ".github/workflows/execute-production-green-stage-b-state-reconciliation.yml",
+        "scripts/aws/authorize-production-green-stage-b-state-reconciliation.mjs",
+        "scripts/aws/reconcile-production-green-stage-b-state.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "stage-b-ten-address-state-reconciliation-preparation",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "stage-b-ten-address-state-reconciliation-authorization",
+      "kind": "file",
+      "producer": ".github/workflows/authorize-production-green-stage-b-state-reconciliation.yml",
+      "consumers": [
+        ".github/workflows/execute-production-green-stage-b-state-reconciliation.yml",
+        "scripts/aws/reconcile-production-green-stage-b-state.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "externalProducer": true,
+      "atomicGroup": "stage-b-ten-address-state-reconciliation-authorization",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "stage-b-ten-address-state-reconciliation-result",
+      "kind": "file",
+      "producer": "scripts/aws/reconcile-production-green-stage-b-state.mjs:runStageBStateReconciliation --mode execute",
+      "consumers": [
+        ".github/workflows/execute-production-green-stage-b-state-reconciliation.yml",
+        "documents/ops/iam/PRODUCTION_GREEN_STAGE_B_REFRESH_ONLY_STATE_RECONCILIATION.md"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "stage-b-ten-address-state-reconciliation-result",
       "allOrNone": true,
       "rollback": "remove-committed-or-restore-backups"
     }

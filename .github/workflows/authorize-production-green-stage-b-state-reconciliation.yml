@@ -1,0 +1,50 @@
+name: Authorize Stage B refresh-only state reconciliation
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha: { description: Exact protected-main source SHA, required: true, type: string }
+      preparation_base64: { description: Exact private preparation artifact, required: true, type: string }
+      preparation_sha256: { description: SHA-256 of the preparation bytes, required: true, type: string }
+
+permissions: { actions: read, contents: read }
+concurrency: { group: production-deploy, cancel-in-progress: false }
+
+jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Authenticate protected source and actual independent approval
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          PREPARATION_BASE64: ${{ inputs.preparation_base64 }}
+          PREPARATION_SHA256: ${{ inputs.preparation_sha256 }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          test "$SOURCE_SHA" = "$(gh api repos/$GITHUB_REPOSITORY/branches/main --jq .commit.sha)"
+          test "$SOURCE_SHA" = "$(git rev-parse HEAD)"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          umask 077; d="$RUNNER_TEMP/stage-b-state-reconciliation"; install -d -m 700 "$d"
+          printf '%s' "$PREPARATION_BASE64" | base64 --decode > "$d/preparation.json"
+          test "$(sha256sum "$d/preparation.json" | awk '{print $1}')" = "$PREPARATION_SHA256"
+          node scripts/aws/production-github-environment-approval.mjs --output "$d/environment-approval.json" --repository "$GITHUB_REPOSITORY" --environment production --source-sha "$SOURCE_SHA" --workflow-ref "$GITHUB_WORKFLOW_REF" --event-name "$GITHUB_EVENT_NAME" --workflow-run-id "$GITHUB_RUN_ID" --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" --execution-actor "$GITHUB_ACTOR" --require-actual-approval
+          node scripts/aws/authorize-production-green-stage-b-state-reconciliation.mjs --source-sha "$SOURCE_SHA" --preparation "$d/preparation.json" --preparation-file-sha256 "$PREPARATION_SHA256" --environment-approval "$d/environment-approval.json" --environment-approval-file-sha256 "$(sha256sum "$d/environment-approval.json" | awk '{print $1}')" --output "$d/authorization.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-green-stage-b-state-reconciliation-authorization
+          path: ${{ runner.temp }}/stage-b-state-reconciliation/authorization.json
+          if-no-files-found: error
+          retention-days: 90
