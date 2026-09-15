@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { hasExactShellCommand, hasGuardrailBranches } from "./lib/aws-dr-validation-contract.mjs";
 
 const root = process.cwd();
 const scanRoots = [".github/workflows", "scripts", "ops/deploy", "documents/ops"];
@@ -733,13 +734,7 @@ if (/pull_request:[\s\S]*?\n\s+paths:/.test(drValidationWorkflow)) {
     message: "Required validate workflow must not use a pull_request paths filter.",
   });
 }
-for (const expected of [
-  "  validate:",
-  "npm run verify:guardrails:source",
-  "npm run verify:guardrails",
-  "Detect DR-relevant change scope",
-  "steps.scope.outputs.dr_relevant",
-]) {
+for (const expected of ["  validate:", "Detect DR-relevant change scope", "steps.scope.outputs.dr_relevant"]) {
   if (!drValidationWorkflow.includes(expected)) {
     findings.push({
       repoPath: drValidationWorkflowPath,
@@ -747,6 +742,22 @@ for (const expected of [
       message: `Required validate workflow contract is missing ${expected}.`,
     });
   }
+}
+for (const command of ["npm run verify:guardrails:source", "npm run verify:guardrails"]) {
+  if (!hasExactShellCommand(drValidationWorkflow, command)) {
+    findings.push({
+      repoPath: drValidationWorkflowPath,
+      line: 1,
+      message: `Required validate workflow contract is missing exact command ${command}.`,
+    });
+  }
+}
+if (!hasGuardrailBranches(drValidationWorkflow)) {
+  findings.push({
+    repoPath: drValidationWorkflowPath,
+    line: 1,
+    message: "Required validate workflow must use source guardrails for pull requests and full guardrails for dispatch.",
+  });
 }
 
 if (findings.length > 0) {

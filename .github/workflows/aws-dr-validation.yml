@@ -42,15 +42,14 @@ jobs:
               core.setOutput("dr_relevant", "true");
               return;
             }
-            const prefixes = ["documents/ops/", "scripts/", "ops/deploy/", "ops/aws/", ".github/workflows/"];
-            const exact = new Set(["backend/Dockerfile", "package.json", "package-lock.json"]);
+            const { isDrRelevantChange } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/lib/aws-dr-validation-contract.mjs`);
             const files = await github.paginate(github.rest.pulls.listFiles, {
               owner: context.repo.owner,
               repo: context.repo.repo,
               pull_number: context.payload.pull_request.number,
               per_page: 100,
             });
-            core.setOutput("dr_relevant", String(files.some(({ filename }) => exact.has(filename) || prefixes.some((prefix) => filename.startsWith(prefix)))));
+            core.setOutput("dr_relevant", String(files.some(isDrRelevantChange)));
 
       - name: Validate DR guardrails
         run: |
