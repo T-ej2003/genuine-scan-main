@@ -12,8 +12,10 @@ producer credentials. It does not accept a role ARN from
 dispatch inputs, repository variables, environment variables, or secrets, and
 it has no static AWS credential fallback.
 
-Normal activation preserves `mscqr-frontend:20`; the Stage-B publisher contract
-does not authorize frontend publication. Release Gate contains no ECR login,
+Legacy normal activation preserves `mscqr-frontend:20`; the Stage-B publisher contract
+does not authorize frontend publication. The separate governed web publisher,
+evidence, authorization, activation, and rollback contract is documented in
+[`MSCQR_PRODUCTION_WEB_RELEASE.md`](./MSCQR_PRODUCTION_WEB_RELEASE.md). Release Gate contains no ECR login,
 repository-control, image-push, or approval-secret read step. Backend recovery
 retains only its narrowly scoped ECR reads. Rotation overlap explicitly consumes
 the GitHub OIDC release-deployer session and rechecks its STS caller before ECS
@@ -34,8 +36,8 @@ mutation; local operator cutover continues to use the named MFA profile.
 | Release-deployer OIDC trust convergence | governed root administrator | Existing bootstrap path, exact IAM write/readback, then protected source activation. |
 
 Normal Stage-B activation is a consumer phase, not an image or approval
-producer. Any future frontend publication requires its own reviewed publisher
-contract; it must not be inferred from the backend/worker publisher.
+producer. Frontend publication uses its separate reviewed web contract and must
+not be inferred from backend/worker publisher authority.
 
 The source trust policy is
 [`MSCQR_PRODUCTION_RELEASE_DEPLOYER_TRUST_POLICY.json`](./MSCQR_PRODUCTION_RELEASE_DEPLOYER_TRUST_POLICY.json).

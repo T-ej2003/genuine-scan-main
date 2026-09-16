@@ -39,9 +39,19 @@ const IMAGE_INPUTS = [
   /^documents\/security\/rls-program\/generated\//,
   /^documents\/security\/mscqr_.*\.sql$/,
 ];
+const WEB_IMAGE_INPUTS = [
+  /^\.github\/workflows\/production-web-image\.yml$/,
+  /^Dockerfile\.ecs-frontend$/,
+  /^nginx\.ecs-frontend\.conf$/,
+  /^index\.html$/,
+  /^public\//,
+  /^src\//,
+  /^shared\//,
+  /^(?:package\.json|package-lock\.json|vite\.config\.[^/]+|tsconfig[^/]*\.json)$/,
+];
 const DOCUMENTATION = /(?:^|\/)(?:documents|README|CHANGELOG|.*\.md)(?:\/|$)/;
 const CI = /^\.github\/workflows\//;
-const TERRAFORM = /^infra\/aws\/terraform\/(?:production-green-stage-(?:a|b(?:-image-publisher|-publisher-bootstrap)?)|production-initial-activation-policy-reconciler)\//;
+const TERRAFORM = /^infra\/aws\/terraform\/(?:production-green-stage-(?:a|b(?:-image-publisher|-publisher-bootstrap)?)|production-initial-activation-policy-reconciler|production-web-release)\//;
 // This isolated root creates IAM permissions only and is absent from all
 // canonical Docker COPY inputs. Do not classify arbitrary neighboring files.
 const APP_ONLY_PERMISSION_SOURCE = /^infra\/aws\/terraform\/production-app-only-permissions\/(?:main\.tf\.json|\.terraform\.lock\.hcl)$/;
@@ -221,6 +231,7 @@ export function classifyStageBImageReusePath(file) {
     return { file, category: "runtimeApplicationSource", imageAffecting: true };
   }
   if (CONTROL_PLANE.test(file)) return { file, category: "controlPlaneOnly", imageAffecting: false };
+  if (file === ".github/workflows/production-web-image.yml") return { file, category: "dockerBuildConfiguration", imageAffecting: true };
   if (IMAGE_INPUTS.some((pattern) => pattern.test(file))) {
     const category = /package-lock|lock$/.test(file) ? "dependencyLockfile" : /Dockerfile|dockerignore|workflow.*image-build/.test(file) ? "dockerBuildConfiguration" : /^backend\//.test(file) || /^shared\//.test(file) ? "runtimeApplicationSource" : /generated/.test(file) ? "generatedRuntimePackage" : "imageBuildInput";
     return { file, category, imageAffecting: true };
@@ -297,6 +308,7 @@ export function imageImpactReportFor({ imageReleaseSha, toolingSha, changedFiles
   assert.equal(unclassifiedFiles.length, 0, `Stage B image-impact report contains unclassified files: ${unclassifiedFiles.join(", ")}`);
   const imageAffectingFiles = classifiedChangedFiles.filter(({ imageAffecting }) => imageAffecting).map(({ file }) => file);
   const newImagesRequired = imageAffectingFiles.length > 0;
+  const webAffectingFiles = classifiedChangedFiles.filter(({ file, imageAffecting }) => imageAffecting && WEB_IMAGE_INPUTS.some((pattern) => pattern.test(file))).map(({ file }) => file);
   return {
     schemaVersion: STAGE_B_IMAGE_IMPACT_SCHEMA_VERSION,
     identityModel: "tooling-input-tree-sha256",
@@ -310,6 +322,8 @@ export function imageImpactReportFor({ imageReleaseSha, toolingSha, changedFiles
     classificationRulesVersion: STAGE_B_IMAGE_REUSE_RULES_VERSION,
     classifiedChangedFiles,
     imageAffectingFiles,
+    webAffectingFiles,
+    webPublicationRequired: webAffectingFiles.length > 0,
     imageReuseCompatible: !newImagesRequired,
     newImagesRequired,
     deploymentAuthorized: false,

@@ -17,6 +17,9 @@ const authenticate = (authorization, expectedSourceSha) => {
   verifyProductionReleaseImageAuthorization({ authorization, sourceSha: expectedSourceSha, verifyImageEvidence: fixture.verifyImageEvidence, now: fixture.now });
   return true;
 };
+const webAuthorization = { operation: "PRODUCTION_WEB_IMAGE_AUTHORIZATION", valid: true, sourceSha };
+const webBytes = Buffer.from(JSON.stringify(webAuthorization));
+const webDigest = crypto.createHash("sha256").update(webBytes).digest("hex");
 
 test("Release Train validates and forwards the complete normal Release Gate contract", () => {
   const releaseTrain = yaml.load(fs.readFileSync(".github/workflows/release-train.yml", "utf8"));
@@ -28,10 +31,17 @@ test("Release Train validates and forwards the complete normal Release Gate cont
 });
 
 test("normal Release Gate rejects missing preservation, missing or stale authorization, and wrong source", () => {
-  assert.throws(() => assertNormalReleaseGateInputs({ sourceSha, preserveCurrentFrontend: false, authorizationBytes: bytes, expectedSha256: digest, authenticateAuthorization: authenticate }), /preserve/);
+  assert.throws(() => assertNormalReleaseGateInputs({ sourceSha, preserveCurrentFrontend: false, authorizationBytes: bytes, expectedSha256: digest, authenticateAuthorization: authenticate }), /frontend action/);
   assert.throws(() => assertNormalReleaseAuthorizationTransport({ sourceSha, authorizationBytes: Buffer.alloc(0), expectedSha256: digest }), /hash-mismatched/);
   assert.throws(() => assertNormalReleaseAuthorizationTransport({ sourceSha, authorizationBytes: bytes, expectedSha256: "0".repeat(64) }), /hash-mismatched/);
   const stale = Buffer.from(JSON.stringify({ ...fixture.authorization, sourceSha: "b".repeat(40) }));
   assert.throws(() => assertNormalReleaseAuthorizationTransport({ sourceSha, authorizationBytes: stale, expectedSha256: crypto.createHash("sha256").update(stale).digest("hex") }), /stale/);
   assert.throws(() => assertNormalReleaseGateInputs({ sourceSha: "b".repeat(40), preserveCurrentFrontend: true, authorizationBytes: bytes, expectedSha256: digest, authenticateAuthorization: authenticate }), /stale|source/);
+});
+
+test("web-impacting normal release requires source-bound web transport and activates instead of preserving", () => {
+  assert.equal(assertNormalReleaseAuthorizationTransport({ sourceSha, authorizationBytes: bytes, expectedSha256: digest, webAuthorizationBytes: webBytes, webExpectedSha256: webDigest, webPublicationRequired: true }).webPublicationRequired, true);
+  assert.equal(assertNormalReleaseGateInputs({ sourceSha, preserveCurrentFrontend: false, authorizationBytes: bytes, expectedSha256: digest, webAuthorizationBytes: webBytes, webExpectedSha256: webDigest, webPublicationRequired: true, authenticateAuthorization: authenticate, authenticateWebAuthorization: (value, sha) => value === webAuthorization || value.sourceSha === sha }), true);
+  assert.throws(() => assertNormalReleaseAuthorizationTransport({ sourceSha, authorizationBytes: bytes, expectedSha256: digest, webPublicationRequired: true }), /Web image-authorization|requires web/);
+  assert.throws(() => assertNormalReleaseGateInputs({ sourceSha, preserveCurrentFrontend: true, authorizationBytes: bytes, expectedSha256: digest, webAuthorizationBytes: webBytes, webExpectedSha256: webDigest, webPublicationRequired: true, authenticateAuthorization: authenticate, authenticateWebAuthorization: () => true }), /frontend action/);
 });

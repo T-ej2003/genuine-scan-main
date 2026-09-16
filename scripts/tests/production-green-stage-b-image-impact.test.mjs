@@ -28,6 +28,19 @@ test("frontend runtime inputs require publication while test paths remain test-o
   assert.equal(classifyStageBImageReusePath("src/test/audit-scope.test.tsx").category, "testOnly");
   assert.equal(classifyStageBImageReusePath("src/unreviewed/runtime.bin").category, "unknown");
 });
+
+test("governed web publisher changes require web publication while activation and IAM stay control-plane only", () => {
+  const report = imageImpactReportFor({ imageReleaseSha, toolingSha, toolingInputTreeSha256, changedFiles: [
+    ".github/workflows/production-web-image.yml",
+    ".github/workflows/production-web-activation.yml",
+    "infra/aws/terraform/production-web-release/main.tf",
+    "scripts/aws/production-web-release-contract.mjs",
+  ] });
+  assert.deepEqual(report.webAffectingFiles, [".github/workflows/production-web-image.yml"]);
+  assert.equal(report.webPublicationRequired, true);
+  assert.equal(report.classifiedChangedFiles.find(({ file }) => file.endsWith("production-web-activation.yml")).imageAffecting, false);
+  assert.equal(report.classifiedChangedFiles.find(({ file }) => file.endsWith("main.tf")).category, "terraformOnly");
+});
 const toolingSha = "b".repeat(40);
 const toolingInputTreeSha256 = "c".repeat(64);
 const compatibilityReport = (classifiedChangedFiles) => ({
