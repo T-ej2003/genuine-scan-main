@@ -59,7 +59,7 @@ Runtime defaults that matter for ASG:
 - `docker-compose.yml` puts the `worker` service behind `profiles: ["worker"]` and sets worker `RUN_BACKGROUND_WORKERS: "true"`.
 - `docker-compose.asg-web.yml` has no `worker`, `redis`, `minio`, or `minio-init` service.
 - `docker-compose.asg-web.yml` uses backend `/health/live` for container health and keeps `/api/health/ready` as the deeper dependency readiness gate.
-- ASG proxy identity is explicitly configured as CloudFront -> ALB -> fixed frontend nginx -> backend. The SSM manifest requires reviewed ALB and CloudFront CIDRs, an ASG application-network subnet, and the fixed frontend address; bootstrap requires `CLIENT_IP_TRUSTED_NGINX_CIDRS` to be that frontend address as a `/32`. Backend `/health/live` permits only a loopback direct health probe; all other traffic must satisfy the proxy chain.
+- ASG proxy identity is explicitly configured as CloudFront -> ALB -> fixed frontend nginx -> backend. The SSM manifest requires reviewed ALB and CloudFront CIDRs, an ASG application-network subnet, and the fixed frontend address; bootstrap requires `CLIENT_IP_TRUSTED_NGINX_CIDRS` to be that frontend address as a `/32`. Backend `/health/live` accepts direct probes only from loopback or the configured ALB CIDRs; all other traffic must satisfy the viewer proxy chain.
 - `docker-compose.yml` defaults `REDIS_URL` to `redis://redis:6379/0`.
 - `docker-compose.yml` includes the production `redis_data` volume. `docker-compose.local.yml` keeps local-only `minio_data`.
 

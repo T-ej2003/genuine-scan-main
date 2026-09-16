@@ -53,7 +53,8 @@ const isLoopback = (address: string) => address === "127.0.0.1" || address === "
 export const trustedClientIpMiddleware = (config = getClientIpTrustConfig()): RequestHandler => (req, res, next) => {
   try {
     const socketIp = normalizeIp(String(req.socket?.remoteAddress || ""));
-    const clientIp = req.path === "/health/live" && isLoopback(socketIp) ? socketIp : resolveClientIp(req, config);
+    const trustedLivenessPeer = isLoopback(socketIp) || (config.mode !== "direct" && config.trustedAlb(socketIp));
+    const clientIp = req.path === "/health/live" && trustedLivenessPeer ? socketIp : resolveClientIp(req, config);
     Object.defineProperty(req, "ip", { configurable: true, enumerable: true, value: clientIp });
     next();
   } catch {

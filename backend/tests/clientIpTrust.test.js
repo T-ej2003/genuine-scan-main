@@ -6,6 +6,9 @@ const request = (remoteAddress, forwardedFor = "") => ({
   socket: { remoteAddress },
   get: (name) => name.toLowerCase() === "x-forwarded-for" ? forwardedFor : "",
 });
+const response = (onReject = () => assert.fail("trusted request must not reject")) => ({
+  status: (status) => ({ json: () => onReject(status) }),
+});
 
 const previousEnv = Object.fromEntries(["NODE_ENV", "CLIENT_IP_TRUST_MODE", "CLIENT_IP_TRUSTED_NGINX_CIDRS", "CLIENT_IP_TRUSTED_ALB_CIDRS", "CLIENT_IP_TRUSTED_CLOUDFRONT_CIDRS"].map((key) => [key, process.env[key]]));
 Object.assign(process.env, {
@@ -51,11 +54,25 @@ assert.throws(() => resolveClientIp(request("172.30.0.2", "203.0.113.20, 198.51.
 
 const req = request("10.0.0.10", "203.0.113.20, 198.51.100.10");
 let nextCalled = false;
-trustedClientIpMiddleware(config)(req, { status: () => ({ json: () => assert.fail("trusted chain must not reject") }) }, () => { nextCalled = true; });
+trustedClientIpMiddleware(config)(req, response(), () => { nextCalled = true; });
 assert(nextCalled);
 assert.equal(req.ip, "203.0.113.20", "all request consumers, including auth risk, receive the validated viewer IP");
 
 const livenessReq = { ...request("::ffff:127.0.0.1"), path: "/health/live" };
-trustedClientIpMiddleware(nginxConfig)(livenessReq, { status: () => ({ json: () => assert.fail("loopback liveness must not reject") }) }, () => { nextCalled = true; });
+trustedClientIpMiddleware(nginxConfig)(livenessReq, response(), () => { nextCalled = true; });
 assert.equal(livenessReq.ip, "127.0.0.1");
+
+const albLivenessReq = { ...request("10.0.0.10"), path: "/health/live" };
+trustedClientIpMiddleware(nginxConfig)(albLivenessReq, response(), () => {});
+assert.equal(albLivenessReq.ip, "10.0.0.10");
+
+for (const deniedReq of [
+  { ...request("203.0.113.30"), path: "/health/live" },
+  { ...request("10.0.0.10"), path: "/api/auth/login" },
+  { ...request("203.0.113.30", "198.51.100.99, 203.0.113.20, 198.51.100.10, 10.0.0.10"), path: "/api/auth/login" },
+]) {
+  let rejectedStatus;
+  trustedClientIpMiddleware(nginxConfig)(deniedReq, response((status) => { rejectedStatus = status; }), () => assert.fail("untrusted request must reject"));
+  assert.equal(rejectedStatus, 400);
+}
 console.log("client IP trust tests passed");

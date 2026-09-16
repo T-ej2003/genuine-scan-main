@@ -104,7 +104,7 @@ test("image-reuse consumers accept only the current rules version", () => {
   const files = [{ file: "scripts/plan-production-green-stage-b.mjs", category: "toolingOnly", imageAffecting: false }];
   const report = compatibilityReport(files);
   assert.equal(imageReuseCompatibility({ imageReleaseSha: imageReleaseSha, toolingSha, currentHead: toolingSha, changedFiles: files, toolingInputTreeSha256, reviewedReport: report }).classificationRulesVersion, STAGE_B_IMAGE_REUSE_RULES_VERSION);
-  for (const classificationRulesVersion of ["stage-b-image-reuse-v2", "stage-b-image-reuse-v3", "stage-b-image-reuse-v5", undefined]) {
+  for (const classificationRulesVersion of ["stage-b-image-reuse-v3", "stage-b-image-reuse-v4", "stage-b-image-reuse-v6", undefined]) {
     assert.throws(() => imageReuseCompatibility({ imageReleaseSha, toolingSha, currentHead: toolingSha, changedFiles: files, toolingInputTreeSha256, reviewedReport: { ...report, classificationRulesVersion } }), /rules are stale/);
   }
 });
@@ -236,7 +236,7 @@ test("rotation evidence schema is canonical tooling-only input", () => {
 });
 
 test("the Gitleaks baseline is tooling-only while unknown paths remain fail-closed", () => {
-  const files = [".gitleaks-baseline.json", ".gitleaksignore"];
+  const files = [".gitleaks-baseline.json", ".gitleaksignore", "docker-compose.asg-web.yml"];
   for (const file of files) assert.deepEqual(classifyStageBImageReusePath(file), { file, category: "toolingOnly", imageAffecting: false });
   const report = imageImpactReportFor({ imageReleaseSha, toolingSha, toolingInputTreeSha256, changedFiles: files });
   assert.deepEqual(report.imageAffectingFiles, []);

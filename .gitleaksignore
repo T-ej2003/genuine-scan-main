@@ -54,3 +54,5 @@ documents/security/rls-program/release-fix-7-contract-inventory.json:generic-api
 62b73a98b6e0f960e0d326df9addd310324c9740:backend/tests/rls-wave-b/b03/repositoryFunctions.test.js:generic-api-key:49
 8b58ece86aa96e9f11a79623e3cd385b14889957:documents/security/rls-program/public-read-contract.json:generic-api-key:301
 b5c712f7bdb4a01c1736b8a89dc3664069336018:scripts/rls/lib/program-inventory.mjs:generic-api-key:1498
+# Historical false positive on an unmerged branch: source-symbol prose, corrected by d2e790c036572ff3bfd4e30ca68e70bf409b1ed6.
+616f94c69e7fef0a6090d86567100d40aad11f7a:documents/ops/g06-g11-local-remediation.md:generic-api-key:8
