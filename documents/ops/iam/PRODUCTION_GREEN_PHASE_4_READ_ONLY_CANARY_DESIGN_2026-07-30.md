@@ -10,7 +10,7 @@ The execution role can pull the immutable reviewed backend image, write only its
 
 ## Query allowlist and evidence
 
-Only these source-controlled statements are issued: `BEGIN READ ONLY`; the identity `SELECT` for `current_user`, `current_database()`, `transaction_read_only`, `session_user`, and `application_name`; `SELECT ... FROM app_rls.production_read_only_canary_probe()`; `COMMIT` or error-only `ROLLBACK`. The function returns only `same_tenant_visible` and `foreign_tenant_invisible`; it reads the initializer-owned green-only control object under FORCE RLS and returns no rows, URLs, credentials, tokens, or identifiers.
+Only source-controlled statements are issued: `BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY`; transaction-local binding and exact readback of the source-owned canary scope; the identity `SELECT` for `current_user`, `current_database()`, `transaction_read_only`, `session_user`, and `application_name`; `SELECT ... FROM app_rls.production_read_only_canary_probe()`; `COMMIT` or error-only `ROLLBACK`. The scope is neither a workflow input nor a persistent role default and expires with the transaction. The function returns only `same_tenant_visible` and `foreign_tenant_invisible`; it reads the initializer-owned green-only control object under FORCE RLS and returns no rows, URLs, credentials, tokens, or identifiers.
 
 The JSON evidence contains status, deterministic exit code (0 pass, 20 input contract, 21 database/identity, 22 isolation), role, application name, and a boolean database verification. Failure evidence redacts the URL length only.
 

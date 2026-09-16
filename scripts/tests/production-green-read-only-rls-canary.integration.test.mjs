@@ -108,9 +108,12 @@ test("PostgreSQL 18 password-auth contract isolates, rotates, and rolls back the
     );
 
     await psql(env, admin, "postgres", `
+      CREATE ROLE mscqr_prd_rls_phase2_owner NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
       CREATE ROLE mscqr_prd_rls_phase2_auth_owner NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+      GRANT mscqr_prd_rls_phase2_owner TO postgres;
       GRANT mscqr_prd_rls_phase2_auth_owner TO postgres;
-      CREATE SCHEMA app_rls AUTHORIZATION mscqr_prd_rls_phase2_auth_owner;
+      CREATE SCHEMA app_rls AUTHORIZATION mscqr_prd_rls_phase2_owner;
+      GRANT USAGE, CREATE ON SCHEMA app_rls TO mscqr_prd_rls_phase2_auth_owner;
       SET ROLE mscqr_prd_rls_phase2_auth_owner;
       CREATE TABLE app_rls.production_read_only_canary_control (scope_name text PRIMARY KEY CHECK (scope_name IN ('canary','isolation')), scope_id text NOT NULL UNIQUE);
       INSERT INTO app_rls.production_read_only_canary_control VALUES ('canary','${OWN_TENANT}'),('isolation','${FOREIGN_TENANT}');
@@ -118,11 +121,32 @@ test("PostgreSQL 18 password-auth contract isolates, rotates, and rolls back the
       ALTER TABLE app_rls.production_read_only_canary_control FORCE ROW LEVEL SECURITY;
       CREATE POLICY production_read_only_canary_control_select ON app_rls.production_read_only_canary_control FOR SELECT TO mscqr_prd_rls_phase2_auth_owner USING (current_user='mscqr_prd_rls_phase2_auth_owner' AND (session_user='postgres' OR (session_user='mscqr_prod_rls_canary_read' AND scope_id=current_setting('mscqr.rls_canary_scope',true))));
       RESET ROLE;
+      REVOKE CREATE ON SCHEMA app_rls FROM mscqr_prd_rls_phase2_auth_owner;
     `);
 
+    const predecessorSchemaAcl = await psql(env, admin, "postgres", "SELECT nspacl::text FROM pg_namespace WHERE nspname='app_rls';", ["-At"]);
+    assert.equal(await psql(env, admin, "postgres", "SELECT has_schema_privilege('mscqr_prd_rls_phase2_auth_owner','app_rls','CREATE');", ["-At"]), "f");
+
+    const rollbackProof = provisioningSql(initial).replace(
+      "SET ROLE mscqr_prd_rls_phase2_auth_owner;\nCREATE OR REPLACE FUNCTION",
+      "SET ROLE mscqr_prd_rls_phase2_auth_owner;\nDO $$ BEGIN RAISE EXCEPTION 'intentional provisioning rollback proof'; END $$;\nCREATE OR REPLACE FUNCTION",
+    );
+    await assert.rejects(() => psql(env, admin, "postgres", rollbackProof, provisionArgs("false")), /subprocess failed/);
+    assert.equal(await psql(env, admin, "postgres", "SELECT nspacl::text FROM pg_namespace WHERE nspname='app_rls';", ["-At"]), predecessorSchemaAcl);
+    assert.equal(await psql(env, admin, "postgres", "SELECT NOT has_schema_privilege('mscqr_prd_rls_phase2_auth_owner','app_rls','CREATE'), to_regprocedure('app_rls.production_read_only_canary_probe()') IS NULL;", ["-At", "-F", "'|'"]), "t|t");
+
     await psql(env, admin, "postgres", provisioningSql(initial), provisionArgs("false"));
+    const canonicalSchemaAcl = await psql(env, admin, "postgres", "SELECT nspacl::text FROM pg_namespace WHERE nspname='app_rls';", ["-At"]);
+    assert.notEqual(canonicalSchemaAcl, predecessorSchemaAcl);
+    assert.equal(await psql(env, admin, "postgres", `SELECT has_schema_privilege('${ROLE}','app_rls','USAGE'), has_schema_privilege('${ROLE}','app_rls','CREATE');`, ["-At", "-F", "'|'"]), "t|f");
+    assert.equal(await psql(env, admin, "postgres", "SELECT has_schema_privilege('mscqr_prd_rls_phase2_auth_owner','app_rls','CREATE'), proowner::regrole::text FROM pg_proc WHERE oid='app_rls.production_read_only_canary_probe()'::regprocedure;", ["-At", "-F", "'|'"]), "f|mscqr_prd_rls_phase2_auth_owner");
     assert.equal(await psql(env, initial, ROLE, "SELECT current_user, session_user, current_setting('transaction_read_only');", ["-At", "-F", "'|'"]), `${ROLE}|${ROLE}|on`);
-    assert.equal(await psql(env, initial, ROLE, "SELECT same_tenant_visible, foreign_tenant_invisible FROM app_rls.production_read_only_canary_probe();", ["-At", "-F", "'|'"]), "t|t");
+    await expectStatementFailure(env, initial, "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY; SELECT same_tenant_visible, foreign_tenant_invisible FROM app_rls.production_read_only_canary_probe();");
+    assert.ok((await psql(env, initial, ROLE, `BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY; SELECT set_config('mscqr.rls_canary_scope','${FOREIGN_TENANT}',true); SELECT same_tenant_visible, foreign_tenant_invisible FROM app_rls.production_read_only_canary_probe(); COMMIT;`, ["-At", "-F", "'|'"])).split("\n").includes("f|f"));
+    const canonicalProbe = await psql(env, initial, ROLE, `BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY; SELECT set_config('mscqr.rls_canary_scope','${OWN_TENANT}',true); SELECT current_setting('mscqr.rls_canary_scope',false)='${OWN_TENANT}'; SELECT same_tenant_visible, foreign_tenant_invisible FROM app_rls.production_read_only_canary_probe(); COMMIT;`, ["-At", "-F", "'|'"]);
+    assert.ok(canonicalProbe.split("\n").includes("t|t"));
+    assert.equal(await psql(env, initial, ROLE, "SELECT COALESCE(current_setting('mscqr.rls_canary_scope',true),'')='', current_setting('transaction_read_only');", ["-At", "-F", "'|'"]), "t|on");
+    assert.equal(await psql(env, admin, "postgres", `SELECT COALESCE(array_to_string(rolconfig,','),'') NOT LIKE '%mscqr.rls_canary_scope%', relrowsecurity, relforcerowsecurity FROM pg_roles r CROSS JOIN pg_class c WHERE r.rolname='${ROLE}' AND c.oid='app_rls.production_read_only_canary_control'::regclass;`, ["-At", "-F", "'|'"]), "t|t|t");
     assert.equal(await psql(env, admin, "postgres", `SELECT rolsuper, rolbypassrls, rolcreatedb, rolcreaterole, rolreplication, rolinherit FROM pg_roles WHERE rolname='${ROLE}';`, ["-At", "-F", "'|'"]), "f|f|f|f|f|f");
     assert.equal(await psql(env, admin, "postgres", `SELECT count(*) FROM pg_auth_members m JOIN pg_roles parent ON parent.oid=m.roleid JOIN pg_roles member ON member.oid=m.member WHERE parent.rolname='${ROLE}' OR member.rolname='${ROLE}';`, ["-At"]), "0");
     assert.equal(await psql(env, admin, "postgres", `SELECT (SELECT count(*) FROM pg_namespace n JOIN pg_roles r ON r.oid=n.nspowner WHERE r.rolname='${ROLE}') + (SELECT count(*) FROM pg_class c JOIN pg_roles r ON r.oid=c.relowner WHERE r.rolname='${ROLE}');`, ["-At"]), "0");
@@ -143,6 +167,7 @@ test("PostgreSQL 18 password-auth contract isolates, rotates, and rolls back the
     ]) await expectStatementFailure(env, initial, sql);
 
     await psql(env, admin, "postgres", provisioningSql(rotated), provisionArgs("false"));
+    assert.equal(await psql(env, admin, "postgres", "SELECT nspacl::text FROM pg_namespace WHERE nspname='app_rls';", ["-At"]), canonicalSchemaAcl);
     assert.equal(await psql(env, initial, ROLE, "SELECT 1;", ["-At"]), "1");
     await expectAuthenticationFailure(env, rotated);
 

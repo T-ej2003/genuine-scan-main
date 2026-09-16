@@ -1,14 +1,15 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
-import { ALLOWED_ENVIRONMENT_NAMES, APPLICATION_NAME, EXIT, PROBE_SQL, ROLE, main, runReadOnlyCanary, validateConfiguration } from "../../backend/scripts/production-green-read-only-rls-canary.mjs";
+import { ALLOWED_ENVIRONMENT_NAMES, APPLICATION_NAME, CANARY_SCOPE, EXIT, PROBE_SQL, ROLE, main, runReadOnlyCanary, validateConfiguration } from "../../backend/scripts/production-green-read-only-rls-canary.mjs";
 
 const url = `${"postgresql"}://${ROLE}:${["not", "a", "real", "secret"].join("-")}@reviewed-production-db/mscqr_production_rls_green_phase2?sslmode=require&application_name=${APPLICATION_NAME}`;
-const env = { RLS_CANARY_DATABASE_URL: url, NODE_ENV: "production", PORT: "4000", GIT_SHA: "a".repeat(40), RELEASE_GIT_SHA: "a".repeat(40), RUN_DB_MIGRATIONS_ON_START: "false", AWS_EXECUTION_ENV: "AWS_ECS_FARGATE", AWS_REGION: "eu-west-2", AWS_DEFAULT_REGION: "eu-west-2", AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: "/v2/credentials/fixture", ECS_CONTAINER_METADATA_URI_V4: "http://169.254.170.2/v4/fixture", HOSTNAME: "fixture", HOME: "/home/node", LANG: "C.UTF-8", NODE_VERSION: "24", PATH: "/usr/local/bin", PWD: "/app", SHLVL: "1", TERM: "xterm", TZ: "UTC", YARN_VERSION: "1" };
+const env = { RLS_CANARY_DATABASE_URL: url, NODE_ENV: "production", PORT: "4000", GIT_SHA: "a".repeat(40), RELEASE_GIT_SHA: "a".repeat(40), RUN_DB_MIGRATIONS_ON_START: "false", AWS_EXECUTION_ENV: "AWS_ECS_FARGATE", AWS_REGION: "eu-west-2", AWS_DEFAULT_REGION: "eu-west-2", AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: "/v2/credentials/fixture", ECS_CONTAINER_METADATA_URI_V4: "http://169.254.170.2/v4/fixture", ECS_AGENT_URI: "http://169.254.170.2/api/fixture", HOSTNAME: "fixture", HOME: "/home/node", LANG: "C.UTF-8", NODE_VERSION: "24", PATH: "/usr/local/bin", PWD: "/app", SHLVL: "1", TERM: "xterm", TZ: "UTC", YARN_VERSION: "1" };
 const client = (probe = { same_tenant_visible: true, foreign_tenant_invisible: true }) => {
   const calls = [];
   return { calls, $disconnect: async () => {}, $executeRawUnsafe: async (sql) => calls.push(sql), $queryRawUnsafe: async (sql) => {
     calls.push(sql);
+    if (sql === PROBE_SQL.bindScope || sql === PROBE_SQL.readScope) return [{ scope: CANARY_SCOPE }];
     if (sql === PROBE_SQL.identity) return [{ current_user: ROLE, session_user: ROLE, current_database: "mscqr_production_rls_green_phase2", transaction_read_only: "on", application_name: APPLICATION_NAME }];
     return [probe];
   } };
@@ -16,23 +17,30 @@ const client = (probe = { same_tenant_visible: true, foreign_tenant_invisible: t
 
 test("read-only canary accepts the Docker/Fargate baseline and rejects mutable runtime inputs", () => {
   assert.equal(validateConfiguration({ env, argv: [] }), url);
+  const { ECS_AGENT_URI, ...localEnv } = env; assert.equal(validateConfiguration({ env: localEnv, argv: [] }), url);
   assert.throws(() => validateConfiguration({ env: { ...env, DATABASE_URL: url }, argv: [] }), /fixed contract/);
   assert.throws(() => validateConfiguration({ env, argv: ["SELECT 1"] }), /fixed contract/);
   assert.throws(() => validateConfiguration({ env: { ...env, RLS_CANARY_DATABASE_URL: url.replace("sslmode=require", "sslmode=disable") }, argv: [] }), /fixed contract/);
   for (const [name, value] of [["NODE_OPTIONS", "--require=x"], ["HTTPS_PROXY", "http://proxy.invalid"], ["AWS_CONTAINER_CREDENTIALS_FULL_URI", "http://169.254.170.2/credentials"], ["AWS_CONTAINER_AUTHORIZATION_TOKEN", "x"], ["PGOPTIONS", "-c role=owner"], ["RLS_CANARY_QUERY", "SELECT 1"]]) assert.throws(() => validateConfiguration({ env: { ...env, [name]: value }, argv: [] }), /fixed contract/);
   assert.throws(() => validateConfiguration({ env: { ...env, NODE_ENV: "development" }, argv: [] }), /fixed contract/);
+  for (const value of ["http://attacker.invalid/api/task", "http://169.254.170.2/v4/task", "http://169.254.170.2/api/", "http://169.254.170.2/api/task?x=1"]) assert.throws(() => validateConfiguration({ env: { ...env, ECS_AGENT_URI: value }, argv: [] }), /fixed contract/);
 });
 
 test("canary opens an explicit read-only transaction and fails closed on foreign visibility", async () => {
   const passing = client(); assert.equal((await runReadOnlyCanary(passing)).exitCode, EXIT.OK);
-  assert.deepEqual(passing.calls, [PROBE_SQL.begin, PROBE_SQL.identity, PROBE_SQL.probe, PROBE_SQL.commit]);
+  assert.deepEqual(passing.calls, [PROBE_SQL.begin, PROBE_SQL.bindScope, PROBE_SQL.readScope, PROBE_SQL.identity, PROBE_SQL.probe, PROBE_SQL.commit]);
   await assert.rejects(() => runReadOnlyCanary(client({ same_tenant_visible: true, foreign_tenant_invisible: false })), /isolation proof failed/);
+  const stale = client(); stale.$queryRawUnsafe = async (sql) => { stale.calls.push(sql); return sql === PROBE_SQL.bindScope || sql === PROBE_SQL.readScope ? [{ scope: "4e5d6a2d-42cd-4b87-ac85-793e2e72b95c" }] : []; };
+  await assert.rejects(() => runReadOnlyCanary(stale), /transaction scope is outside/);
 });
 
 test("only reviewed SELECT statements and deterministic redacted evidence are emitted", async () => {
   const source = fs.readFileSync("backend/scripts/production-green-read-only-rls-canary.mjs", "utf8");
   for (const sql of Object.values(PROBE_SQL)) assert.doesNotMatch(sql, /\b(?:INSERT|UPDATE|DELETE|UPSERT|TRUNCATE|CREATE|ALTER|DROP|GRANT|REVOKE|SET ROLE)\b/i);
-  assert.match(PROBE_SQL.begin, /^BEGIN READ ONLY$/); assert.match(PROBE_SQL.identity, /^SELECT /); assert.match(PROBE_SQL.probe, /^SELECT /);
+  assert.equal(PROBE_SQL.begin, "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+  assert.match(PROBE_SQL.bindScope, new RegExp(`set_config\\('mscqr\\.rls_canary_scope', '${CANARY_SCOPE}', true\\)`));
+  assert.equal(PROBE_SQL.readScope, "SELECT current_setting('mscqr.rls_canary_scope', false) AS scope");
+  assert.match(PROBE_SQL.identity, /^SELECT /); assert.match(PROBE_SQL.probe, /^SELECT /);
   assert.doesNotMatch(source, /fetch\(|login|mfa|otp|audit|session\//i);
   const output = []; const code = await main({ env, argv: [], createClient: () => client(), write: (line) => output.push(line) });
   assert.equal(code, EXIT.OK); assert.deepEqual(JSON.parse(output[0]), { status: "passed", exitCode: 0, databaseVerified: true, role: ROLE, applicationName: APPLICATION_NAME });
@@ -50,6 +58,12 @@ test("provisioning and task definition preserve the dedicated read-only boundary
   assert.doesNotMatch(sql, /1\s*\/\s*0/);
   assert.doesNotMatch(sql, /PASSWORD\s+['"][^'"]+['"]/i);
   assert.match(sql, /default_transaction_read_only = on/); assert.match(sql, /production_read_only_canary_control/);
+  assert.doesNotMatch(sql, /ALTER ROLE mscqr_prod_rls_canary_read SET mscqr\.rls_canary_scope/);
+  assert.match(sql, /COALESCE\(current_setting\('mscqr\.rls_canary_scope', true\), ''\) !~\*/);
+  assert.match(sql, /auth_owner_had_schema_create/);
+  assert.match(sql, /GRANT CREATE ON SCHEMA app_rls TO mscqr_prd_rls_phase2_auth_owner/);
+  assert.match(sql, /REVOKE CREATE ON SCHEMA app_rls FROM mscqr_prd_rls_phase2_auth_owner/);
+  assert.match(sql, /current_setting\('mscqr\.predecessor_app_rls_acl'\)/);
   assert.doesNotMatch(sql, /\bBatch\b|canary_tenant_id|foreign_tenant_id|fixture/i);
   assert.doesNotMatch(sql, /GRANT .* ON TABLE .* TO mscqr_prod_rls_canary_read/);
   assert.match(sql, /mscqr_prd_rls_phase2_auth_owner/);
