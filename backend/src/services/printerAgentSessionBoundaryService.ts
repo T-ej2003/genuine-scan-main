@@ -141,7 +141,8 @@ export const openTrustedPrinterAgentSession = async (
     connectionId: randomUUID(),
     registrationId: registration.id,
     printerId: printer.id,
-    selectedPrinterId: printer.nativePrinterId || hello.selectedPrinterId,
+    // Keep the authenticated wire selector stable; printerId is the resolved DB identity.
+    selectedPrinterId: hello.selectedPrinterId,
     selectedPrinterName: hello.selectedPrinterName || printer.name || null,
     agentId: registration.agentId,
     deviceFingerprint: registration.deviceFingerprint,

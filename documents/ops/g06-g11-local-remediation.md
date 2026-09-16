@@ -75,6 +75,26 @@ Generated role, ownership-grant, runtime-grant and policy SQL is identical to ba
 
 ## Compatibility and remaining work
 
+### F01 identity-continuity correction
+
+The accepted hello's `selectedPrinterId` is the authenticated wire selector for the entire
+WebSocket session. It is not rewritten to the resolved native identifier. The independently
+resolved `printerId` remains the database/authorization identity; chunk projections retain
+their canonical native printer identity separately. Subsequent messages cannot select a new
+signing identity, and the strict message schema does not admit a selector field.
+
+The real connector serializer and active backend verifier now exercise both database-ID and
+native-ID hello forms through heartbeat, chunk acknowledgement, label confirmation and chunk
+confirmation. Regressions reject alternate/foreign signing selectors, registration/session
+substitution, replay, confirmation before acknowledgement and messages after session closure.
+No SQL, protocol, grant, policy or signature algorithm changes are part of this correction.
+
+Validation: focused socket/session/trust/receipt/realtime tests PASS; G06/G11 compiled suite
+15/15 PASS; `verify:ci:backend` PASS; `verify:ci:frontend` PASS (66 files, 262 tests plus build);
+`rls:full-verify` PASS (16 tests); `lint:security-scope` PASS; `git diff --check` PASS.
+The standalone trust test requires the existing generated-test-secret wrapper; rerunning
+through that wrapper passed. No credential fixture or production access was introduced.
+
 Source requires Windows Connector build `2026.6.26` for persistent sessions, REST minimum `2026.6.16`, and retains `local-agent-direct-v2`.
 No protocol version, signature algorithm, or unsigned fallback was introduced. Shipped-binary compatibility is not inferred from source tests.
 G06 includes canonical printing-function source and generated artifact changes: it is not an app-only rollout. A separately authorized release must coordinate functions with backend code. G11 requires frontend/backend artifacts when release is authorized. No image was built or published here. Database-boundary, outbox, worker, lifecycle, projection and public-auth repairs remain outside this work; integrated onboarding is not certified.

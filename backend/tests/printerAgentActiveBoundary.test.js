@@ -55,16 +55,49 @@ function hello(overrides = {}) {
   return message;
 }
 
-test("active verifier accepts the connector's null-registration hello wire contract", async () => {
-  const wire = await buildSignedSessionMessage({ type: "hello", selectedPrinterId: "printer-db-id",
+for (const selectedPrinterId of ["printer-db-id", "native-printer"]) {
+test(`connector continuation preserves authenticated selector ${selectedPrinterId}`, async () => {
+  operations.length = 0;
+  const wire = await buildSignedSessionMessage({ type: "hello", selectedPrinterId,
     printerHealth: { capabilities: { supportsPersistentPrintSession: true } },
   });
   assert.equal(wire.registrationId, null);
   const session = await boundary.openTrustedPrinterAgentSession(wire);
   assert.equal(session.registrationId, registration.id);
-  assert.equal(session.selectedPrinterId, "native-printer");
+  assert.equal(session.selectedPrinterId, selectedPrinterId);
+  assert.equal(session.printerId, "printer-db-id");
+  // Match session_ready handling: retain the connector's original selection.
+  const connectorSession = { sessionId: session.id, registrationId: session.registrationId, messageSeq: 0 };
+  const chunk = await boundary.buildNextPrintChunkForSession(session);
+  const sign = (type, selector = selectedPrinterId, context = connectorSession) => buildSignedSessionMessage({
+    type, selectedPrinterId: selector, session: context,
+    chunkId: chunk.chunkId, printJobId: claim.printJobId, printItemId: claim.printItemId,
+  });
+  const heartbeat = await sign("heartbeat");
+  await boundary.recordTrustedSessionHeartbeat(session, heartbeat);
+  await assert.rejects(boundary.recordTrustedSessionHeartbeat(session, heartbeat), { errorCode: "message_replay" });
+  for (const selector of [selectedPrinterId === "printer-db-id" ? "native-printer" : "printer-db-id", "foreign-printer"]) {
+    await assert.rejects(boundary.recordTrustedSessionHeartbeat(session, await sign("heartbeat", selector)), {
+      errorCode: "bad_session_signature",
+    });
+  }
+  await assert.rejects(boundary.recordTrustedSessionHeartbeat(session, await sign("heartbeat", selectedPrinterId,
+    { ...connectorSession, registrationId: randomUUID() })), { errorCode: "bad_session_signature" });
+  await assert.rejects(boundary.recordTrustedSessionHeartbeat(session, await sign("heartbeat", selectedPrinterId,
+    { ...connectorSession, sessionId: randomUUID() })), { errorCode: "session_identity_mismatch" });
+  await assert.rejects(boundary.handleTrustedSessionProgressMessage(session, await sign("label_confirmed")), {
+    errorCode: "print_ack_required",
+  });
+  for (const type of ["chunk_ack", "label_confirmed", "chunk_confirmed"]) {
+    await boundary.handleTrustedSessionProgressMessage(session, await sign(type));
+  }
+  assert.deepEqual(operations, ["CLAIM", "ACK", "CONFIRM"]);
   await boundary.closeTrustedPrinterAgentSession(session.id, "test complete");
+  await assert.rejects(boundary.recordTrustedSessionHeartbeat(session, await sign("heartbeat")), {
+    errorCode: "session_not_active",
+  });
 });
+}
 
 test("signed caller identity cannot replace the independently resolved identity", async () => {
   for (const overrides of [
