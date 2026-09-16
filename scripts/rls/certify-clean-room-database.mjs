@@ -924,6 +924,7 @@ const runSuccessfulCertification = ({ adminUrl, maintenanceDatabase, manifest, e
         databaseResidueCount: 0,
         managedRoleResidueCount: 0,
         blueFingerprintUnchanged: true,
+        semanticCertificationExecuted: false,
       };
     }
     if (env.MSCQR_FULL_RLS_CERTIFICATION_FAMILY === "current-runtime-super-admin-invitation") {
@@ -948,6 +949,7 @@ const runSuccessfulCertification = ({ adminUrl, maintenanceDatabase, manifest, e
         databaseResidueCount: 0,
         managedRoleResidueCount: 0,
         blueFingerprintUnchanged: true,
+        semanticCertificationExecuted: false,
       };
     }
     const catalogTamperResults = certifyCatalogTamperDetection(urls.administrator, manifest, policies);
@@ -969,7 +971,7 @@ const runSuccessfulCertification = ({ adminUrl, maintenanceDatabase, manifest, e
       : runApplicationPathCertifications(connections, env);
     const qrSystemCertification = runQrSystemCertification(connections, env);
     destroyAndProve({ urls, database, manifest, blueUrl, expectedBlueFingerprint, allowCertificationFixtures: true });
-    return { tablesCertified, fixtureRows, applicationPathResults, catalogTamperResults, b01Certification, b01PreAuthCertification, scheduledJobIdentityCertification, b03OutboxCertification, c03Certification, currentRuntimeSuperAdminInvitationCertification, printingLifecycleCertification: null, publicVerificationCertification, qrSystemCertification, databaseResidueCount: 0, managedRoleResidueCount: 0, blueFingerprintUnchanged: true };
+    return { tablesCertified, fixtureRows, applicationPathResults, catalogTamperResults, b01Certification, b01PreAuthCertification, scheduledJobIdentityCertification, b03OutboxCertification, c03Certification, currentRuntimeSuperAdminInvitationCertification, printingLifecycleCertification: null, publicVerificationCertification, qrSystemCertification, databaseResidueCount: 0, managedRoleResidueCount: 0, blueFingerprintUnchanged: true, semanticCertificationExecuted: true };
   } catch (error) {
     try { destroyAndProve({ urls, database, manifest, blueUrl, expectedBlueFingerprint, allowCertificationFixtures: true }); } catch (cleanupError) { throw new Error(`${error.message}; cleanup failed: ${cleanupError.message}`); }
     throw error;
@@ -1090,14 +1092,14 @@ export const runCertification = (adminUrl, env = process.env) => {
     result.printingLifecycleCertification = finalRun.printingLifecycleCertification;
     result.publicVerificationCertification = finalRun.publicVerificationCertification;
     result.qrSystemCertification = finalRun.qrSystemCertification;
-    result.exactCatalogTamperCertification = finalRun.catalogTamperResults.length === 9;
-    result.generatedPoliciesCertified = policies.count;
-    result.columnPrivilegeCellsCertified = privileges.cells;
+    result.exactCatalogTamperCertification = finalRun.semanticCertificationExecuted ? finalRun.catalogTamperResults.length === 9 : null;
+    result.generatedPoliciesCertified = finalRun.semanticCertificationExecuted ? policies.count : null;
+    result.columnPrivilegeCellsCertified = finalRun.semanticCertificationExecuted ? privileges.cells : null;
     result.migrationsFromZeroCertified = true;
     result.managedRolesCreatedByPackage = true;
     result.phaseEntrypointCertification = true;
-    result.policySemanticPreservation = true;
-    result.columnPrivilegeCertification = true;
+    result.policySemanticPreservation = finalRun.semanticCertificationExecuted ? true : null;
+    result.columnPrivilegeCertification = finalRun.semanticCertificationExecuted ? true : null;
     result.greenDatabaseResidueCount = 0;
     result.managedRoleResidueCount = 0;
     result.blueFingerprintUnchanged = finalRun.blueFingerprintUnchanged;

@@ -169,7 +169,8 @@ networks:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.30.10.0/29
+        - subnet: 172.30.10.0/28
+          ip_range: 172.30.10.8/29
 
 volumes:
   redis_data:

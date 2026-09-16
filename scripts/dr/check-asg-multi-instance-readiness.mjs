@@ -234,7 +234,8 @@ requireMatch("docker-compose", compose, /worker:\n(?:.*\n){1,8}\s+profiles:\n\s+
 requireMatch("docker-compose", compose, /CLIENT_IP_TRUST_MODE:\s+nginx/, "root production Compose must select the nginx-only trust contract.");
 requireMatch("docker-compose", compose, /CLIENT_IP_TRUSTED_NGINX_CIDRS:\s+172\.30\.10\.2\/32/, "root production Compose must trust only its pinned frontend nginx address.");
 requireMatch("docker-compose", compose, /frontend:\n[\s\S]*?ipv4_address:\s+172\.30\.10\.2/, "root production Compose must pin frontend nginx to the trusted address.");
-requireMatch("docker-compose", compose, /subnet:\s+172\.30\.10\.0\/29/, "root production Compose must use the bounded deterministic proxy network.");
+requireMatch("docker-compose", compose, /subnet:\s+172\.30\.10\.0\/28/, "root production Compose must use the bounded deterministic proxy network.");
+requireMatch("docker-compose", compose, /ip_range:\s+172\.30\.10\.8\/29/, "root production Compose must reserve the pinned frontend address outside dynamic allocation.");
 if (/CLIENT_IP_TRUSTED_[A-Z_]+:\s+(?:0\.0\.0\.0\/0|::\/0)/.test(compose)) failures.push("docker-compose.yml must not trust an all-address proxy CIDR.");
 requireMatch("docker-compose", compose, /entrypoint:\s+\["\/usr\/local\/bin\/nginx-root-entrypoint\.sh"\]/, "root frontend must select the root-only nginx forwarding contract.");
 requireMatch("docker-compose", compose, /\.\/docker\/nginx-root-entrypoint\.sh:\/usr\/local\/bin\/nginx-root-entrypoint\.sh:ro/, "root frontend must mount only the reviewed root nginx adapter.");

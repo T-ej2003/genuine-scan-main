@@ -15,6 +15,12 @@ test("current-runtime Super Admin invitation is an explicit certification family
   assert.match(runner, new RegExp(`if \\(env\\.MSCQR_FULL_RLS_CERTIFICATION_FAMILY === "${family}"\\) \\{[\\s\\S]*?runCurrentRuntimeSuperAdminInvitationCertification\\(connections, env\\)`));
   assert.match(runner, /result\.currentRuntimeSuperAdminInvitationCertification = finalRun\.currentRuntimeSuperAdminInvitationCertification;/);
   assert.match(runner, /result\.status = result\.certificationFamily === "current-runtime-super-admin-invitation"[\s\S]*?"current-runtime-super-admin-invitation-certified"/);
+  assert.match(runner, /currentRuntimeSuperAdminInvitationCertification,[\s\S]*?semanticCertificationExecuted: false/);
+  assert.match(runner, /generatedPoliciesCertified = finalRun\.semanticCertificationExecuted \? policies\.count : null/);
+  assert.match(runner, /columnPrivilegeCellsCertified = finalRun\.semanticCertificationExecuted \? privileges\.cells : null/);
+  assert.match(runner, /policySemanticPreservation = finalRun\.semanticCertificationExecuted \? true : null/);
+  assert.match(runner, /columnPrivilegeCertification = finalRun\.semanticCertificationExecuted \? true : null/);
+  assert.match(runner, /semanticCertificationExecuted: true/);
   assert.match(
     certificationEvidencePath({ MSCQR_FULL_RLS_CERTIFICATION_FAMILY: family }),
     /disposable-certification-result\.current-runtime-super-admin-invitation\.json$/
