@@ -13,6 +13,12 @@ exact-head CI/review and protected merge remain required before production use.
 
 ## Security boundary
 
+ECS deployment IDs are opaque strings matching `ecs-svc/` followed by one or
+more decimal digits, including leading zeros (for example,
+`ecs-svc/0559890711032160707`). Capture, preparation, activation and rollback
+preserve these bytes in evidence and compare them exactly for CAS/ownership.
+Never parse them numerically, trim them, or remove leading zeros.
+
 Three independent identities are required:
 
 1. The compatibility verifier launcher may run only the exact reviewed ephemeral

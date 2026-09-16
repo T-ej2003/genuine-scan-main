@@ -115,12 +115,36 @@ test("all mutable service settings including unknown future fields bind activati
 });
 
 test("missing or non-AWS deployment identity cannot become a predecessor even when tasks omit it too", () => {
-  for (const id of [undefined, "", "ecs-svc/original", "svc/123", "ecs-svc/0"]) {
+  for (const id of [undefined, null, 123, "", "ecs-svc/", "ecs-svc/-1", "ecs-svc/+1", "ecs-svc/1.0", "ecs-svc/abc", "ecs-svc/123abc", "ecs-svc/ 123", "ecs-svc/123 ", "ecs-svc//123", "svc/123", "prefixecs-svc/123", "ecs-svc/123\n", "ecs-svc/123\r", "ecs-svc/１２３"]) {
     const live = fixture(); live.service.deployments[0].id = id;
     for (const task of live.tasks) task.startedBy = id;
     assert.throws(() => captureAppOnlyPredecessor(live));
+    const clean = fixture(), predecessor = captureAppOnlyPredecessor(clean);
+    clean.service.taskDefinition = arn(23);
+    clean.service.deployments = [{ id, status: "PRIMARY", taskDefinition: arn(23) }];
+    const rollback = { service: clean.service, predecessor, candidateArn: arn(23), candidateDeploymentId: id };
+    assert.throws(() => assertAppOnlyRollbackOwnership(rollback));
+    assert.throws(() => assertAppOnlyRollbackOwnership({ ...rollback, candidateDeploymentId: "ecs-svc/200", predecessor: { ...predecessor, deploymentId: id } }));
   }
 });
+for (const id of ["ecs-svc/0559890711032160707", "ecs-svc/1234567890123456789", "ecs-svc/0"]) {
+  test(`opaque deployment identity survives capture, evidence, CAS and rollback: ${id}`, () => {
+    const live = fixture(); live.service.deployments[0].id = id;
+    for (const task of live.tasks) task.startedBy = id;
+    const predecessor = JSON.parse(JSON.stringify(captureAppOnlyPredecessor(live)));
+    assert.equal(predecessor.deploymentId, id);
+    assert.doesNotThrow(() => assertAppOnlyCas(predecessor, captureAppOnlyPredecessor(live)));
+    live.service.taskDefinition = arn(23);
+    live.service.deployments = [{ id, status: "PRIMARY", taskDefinition: arn(23) }];
+    assert.equal(assertAppOnlyRollbackOwnership({ service: live.service, predecessor, candidateArn: arn(23), candidateDeploymentId: id }), arn(14));
+    if (id === "ecs-svc/0559890711032160707") {
+      const stripped = "ecs-svc/559890711032160707";
+      assert.throws(() => assertAppOnlyCas(predecessor, { ...predecessor, deploymentId: stripped }));
+      assert.throws(() => assertAppOnlyRollbackOwnership({ service: live.service, predecessor, candidateArn: arn(23), candidateDeploymentId: stripped }));
+      assert.notEqual(canonicalSha256(predecessor), canonicalSha256({ ...predecessor, deploymentId: stripped }));
+    }
+  });
+}
 test("historical changes require positive compatibility; state drift is not an input", () => {
   const domains = Object.fromEntries(APP_ONLY_DOMAINS.map((domain) => [domain, { changed: true, status: "COMPATIBLE" }]));
   assert.equal(evaluateAppOnlyDomains(domains).eligible, true);

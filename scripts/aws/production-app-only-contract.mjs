@@ -22,6 +22,10 @@ export const APP_ONLY = Object.freeze({
 const sha = (value) => assert.match(value || "", /^[a-f0-9]{40}$/);
 const digest = (value) => assert.match(value || "", /^sha256:[a-f0-9]{64}$/);
 const exact = (actual, expected, label) => assert.equal(canonicalJson(actual), canonicalJson(expected), label);
+export function assertAppOnlyDeploymentId(value) {
+  // Opaque AWS string: preserve leading zeros and require the absolute end (not a final newline).
+  assert.match(value, /^ecs-svc\/[0-9]+(?![\s\S])/, "Invalid ECS deployment identity");
+}
 const tags = (value) => {
   assert.ok(Array.isArray(value));
   assert.equal(new Set(value.map(({ key }) => key)).size, value.length, "Duplicate task-definition tag");
@@ -104,7 +108,7 @@ export function captureAppOnlyPredecessor({ service, definition, tasks }) {
   assert.equal(service.pendingCount, 0);
   assert.equal(service.deployments?.length, 1, "Concurrent deployment");
   const deployment = service.deployments[0];
-  assert.match(deployment.id || "", /^ecs-svc\/[1-9][0-9]*$/, "Missing or invalid ECS deployment identity");
+  assertAppOnlyDeploymentId(deployment.id);
   assert.equal(deployment.status, "PRIMARY");
   assert.equal(deployment.rolloutState, "COMPLETED");
   assert.equal(deployment.taskDefinition, service.taskDefinition);
@@ -200,8 +204,8 @@ export function evaluateAppOnlyDomains(domainEvidence) {
 }
 
 export function assertAppOnlyRollbackOwnership({ service, candidateArn, candidateDeploymentId, predecessor }) {
-  assert.match(candidateDeploymentId || "", /^ecs-svc\/[1-9][0-9]*$/);
-  assert.match(predecessor?.deploymentId || "", /^ecs-svc\/[1-9][0-9]*$/);
+  assertAppOnlyDeploymentId(candidateDeploymentId);
+  assertAppOnlyDeploymentId(predecessor?.deploymentId);
   assert.ok(NORMAL_CANDIDATE_ARN.test(candidateArn || ""));
   assert.ok(NORMAL_CANDIDATE_ARN.test(predecessor?.taskDefinitionArn || ""));
   assert.notEqual(candidateArn, predecessor.taskDefinitionArn);

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import {
-  APP_ONLY, assertAppOnlyCas, assertAppOnlySessionRiskConfiguration,
+  APP_ONLY, assertAppOnlyCas, assertAppOnlyDeploymentId, assertAppOnlySessionRiskConfiguration,
   buildAppOnlyCandidate, assertRegisteredAppOnlyCandidate,
   captureAppOnlyPredecessor, assertAppOnlyRollbackOwnership,
   appOnlyDefinitionSha256, appOnlyExpectedHealthSourceSha,
@@ -60,7 +60,7 @@ export async function executeAppOnlyActivation(preparation, adapters) {
     const primary = service.deployments?.filter((entry) => entry.status === "PRIMARY" && entry.taskDefinition === candidateArn);
     assert.equal(primary?.length, 1, "Activation response did not identify one owned deployment");
     candidateDeploymentId = primary[0].id;
-    assert.match(candidateDeploymentId || "", /^ecs-svc\/[1-9][0-9]*$/, "Activation did not return a valid owned deployment identity");
+    assertAppOnlyDeploymentId(candidateDeploymentId);
     await record("ACTIVATING", { candidateDeploymentId });
     await waitStable(candidateArn);
     const stable = await readLive();
