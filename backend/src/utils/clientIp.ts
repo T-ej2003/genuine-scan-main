@@ -4,6 +4,7 @@ import proxyaddr from "proxy-addr";
 
 type ClientIpTrustConfig =
   | { mode: "direct" }
+  | { mode: "direct-loopback-canary" }
   | { mode: "nginx"; trustedNginx: (address: string) => boolean }
   | { mode: "cloudfront-alb"; trustedAlb: (address: string) => boolean; trustedCloudFront: (address: string) => boolean }
   | { mode: "cloudfront-alb-nginx"; trustedNginx: (address: string) => boolean; trustedAlb: (address: string) => boolean; trustedCloudFront: (address: string) => boolean };
@@ -16,7 +17,13 @@ const configuredCidrs = (key: string) => String(process.env[key] || "").split(",
 export const getClientIpTrustConfig = (): ClientIpTrustConfig => {
   const mode = String(process.env.CLIENT_IP_TRUST_MODE || (process.env.NODE_ENV === "production" ? "cloudfront-alb" : "direct")).trim().toLowerCase();
   if (mode === "direct") return { mode };
-  if (mode !== "nginx" && mode !== "cloudfront-alb" && mode !== "cloudfront-alb-nginx") throw new Error("CLIENT_IP_TRUST_MODE must be direct, nginx, cloudfront-alb, or cloudfront-alb-nginx");
+  if (mode === "direct-loopback-canary") {
+    if (String(process.env.MSCQR_PRODUCTION_GREEN_APPLICATION_CANARY || "").trim().toLowerCase() !== "true") {
+      throw new Error("direct-loopback-canary trust requires the governed application canary runtime");
+    }
+    return { mode };
+  }
+  if (mode !== "nginx" && mode !== "cloudfront-alb" && mode !== "cloudfront-alb-nginx") throw new Error("CLIENT_IP_TRUST_MODE must be direct, direct-loopback-canary, nginx, cloudfront-alb, or cloudfront-alb-nginx");
   const albCidrs = configuredCidrs("CLIENT_IP_TRUSTED_ALB_CIDRS");
   const cloudFrontCidrs = configuredCidrs("CLIENT_IP_TRUSTED_CLOUDFRONT_CIDRS");
   const nginxCidrs = configuredCidrs("CLIENT_IP_TRUSTED_NGINX_CIDRS");
@@ -38,6 +45,10 @@ export const resolveClientIp = (req: Pick<Request, "get" | "socket">, config = g
   const socketIp = normalizeIp(String(req.socket?.remoteAddress || ""));
   if (!isIp(socketIp)) throw new Error("CLIENT_IP_SOCKET_INVALID");
   if (config.mode === "direct") return socketIp;
+  if (config.mode === "direct-loopback-canary") {
+    if (!isLoopback(socketIp)) throw new Error("CLIENT_IP_CANARY_LOOPBACK_REQUIRED");
+    return socketIp;
+  }
 
   const hops = String(req.get("x-forwarded-for") || "").split(",").map(normalizeIp).filter(Boolean);
   if (config.mode === "nginx") {
@@ -56,7 +67,7 @@ export const resolveClientIp = (req: Pick<Request, "get" | "socket">, config = g
 
 export const resolveExternalProtocol = (req: Pick<Request, "get" | "socket">, config = getClientIpTrustConfig()): "http" | "https" => {
   if ((req.socket as { encrypted?: boolean } | undefined)?.encrypted === true) return "https";
-  if (config.mode === "direct") return "http";
+  if (config.mode === "direct" || config.mode === "direct-loopback-canary") return "http";
   try {
     resolveClientIp(req, config);
   } catch {

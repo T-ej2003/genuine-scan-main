@@ -10,7 +10,7 @@ const response = (onReject = () => assert.fail("trusted request must not reject"
   status: (status) => ({ json: () => onReject(status) }),
 });
 
-const previousEnv = Object.fromEntries(["NODE_ENV", "CLIENT_IP_TRUST_MODE", "CLIENT_IP_TRUSTED_NGINX_CIDRS", "CLIENT_IP_TRUSTED_ALB_CIDRS", "CLIENT_IP_TRUSTED_CLOUDFRONT_CIDRS"].map((key) => [key, process.env[key]]));
+const previousEnv = Object.fromEntries(["NODE_ENV", "CLIENT_IP_TRUST_MODE", "CLIENT_IP_TRUSTED_NGINX_CIDRS", "CLIENT_IP_TRUSTED_ALB_CIDRS", "CLIENT_IP_TRUSTED_CLOUDFRONT_CIDRS", "MSCQR_PRODUCTION_GREEN_APPLICATION_CANARY"].map((key) => [key, process.env[key]]));
 Object.assign(process.env, {
   NODE_ENV: "production",
   CLIENT_IP_TRUST_MODE: "cloudfront-alb-nginx",
@@ -26,6 +26,11 @@ process.env.CLIENT_IP_TRUSTED_NGINX_CIDRS = "172.30.10.2/32";
 delete process.env.CLIENT_IP_TRUSTED_ALB_CIDRS;
 delete process.env.CLIENT_IP_TRUSTED_CLOUDFRONT_CIDRS;
 assert.equal(getClientIpTrustConfig().mode, "nginx");
+process.env.CLIENT_IP_TRUST_MODE = "direct-loopback-canary";
+delete process.env.MSCQR_PRODUCTION_GREEN_APPLICATION_CANARY;
+assert.throws(() => getClientIpTrustConfig(), /governed application canary/);
+process.env.MSCQR_PRODUCTION_GREEN_APPLICATION_CANARY = "true";
+assert.equal(getClientIpTrustConfig().mode, "direct-loopback-canary");
 for (const [key, value] of Object.entries(previousEnv)) {
   if (value === undefined) delete process.env[key];
   else process.env[key] = value;
@@ -49,6 +54,11 @@ const rootNginxConfig = { mode: "nginx", trustedNginx: (ip) => ip === "172.30.10
 assert.equal(resolveClientIp(request("172.30.10.2", "203.0.113.20"), rootNginxConfig), "203.0.113.20");
 assert.throws(() => resolveClientIp(request("172.30.10.3", "203.0.113.20"), rootNginxConfig), /PROXY_CHAIN_DENIED/);
 assert.throws(() => resolveClientIp(request("172.30.10.2", "spoofed, 203.0.113.20"), rootNginxConfig), /PROXY_CHAIN_DENIED/);
+
+const canaryConfig = { mode: "direct-loopback-canary" };
+assert.equal(resolveClientIp(request("127.0.0.1", "203.0.113.20"), canaryConfig), "127.0.0.1");
+assert.equal(resolveClientIp(request("::1", "spoofed"), canaryConfig), "::1");
+assert.throws(() => resolveClientIp(request("203.0.113.30", "127.0.0.1"), canaryConfig), /CANARY_LOOPBACK_REQUIRED/);
 
 const nginxConfig = {
   mode: "cloudfront-alb-nginx",
@@ -85,4 +95,17 @@ for (const deniedReq of [
   trustedClientIpMiddleware(nginxConfig)(deniedReq, response((status) => { rejectedStatus = status; }), () => assert.fail("untrusted request must reject"));
   assert.equal(rejectedStatus, 400);
 }
+
+for (const canaryReq of [
+  { ...request("127.0.0.1"), path: "/api/health/ready" },
+  { ...request("127.0.0.1", "203.0.113.20"), path: "/api/auth/login" },
+]) {
+  let canaryNext = false;
+  trustedClientIpMiddleware(canaryConfig)(canaryReq, response(), () => { canaryNext = true; });
+  assert(canaryNext);
+  assert.equal(canaryReq.ip, "127.0.0.1");
+}
+let canaryRejectedStatus;
+trustedClientIpMiddleware(canaryConfig)({ ...request("203.0.113.30", "127.0.0.1"), path: "/api/health/ready" }, response((status) => { canaryRejectedStatus = status; }), () => assert.fail("non-loopback canary request must reject"));
+assert.equal(canaryRejectedStatus, 400);
 console.log("client IP trust tests passed");

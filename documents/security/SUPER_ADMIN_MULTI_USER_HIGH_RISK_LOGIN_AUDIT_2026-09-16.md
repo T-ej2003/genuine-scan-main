@@ -60,6 +60,8 @@ ASG production uses `CLIENT_IP_TRUST_MODE=cloudfront-alb-nginx`: CloudFront -> A
 
 Read-only AWS inspection found that the current CloudFront distribution does not forward `CloudFront-Viewer-Address` or configure an edge-attestation origin header. This implementation intentionally uses the documented XFF append positions and deployment must supply/review all proxy CIDRs and verify the live chain before activation. No infrastructure was changed here.
 
+The governed Stage-B application canary is a separate self-hosted topology. Its fixed task definition sets `CLIENT_IP_TRUST_MODE=direct-loopback-canary` together with `MSCQR_PRODUCTION_GREEN_APPLICATION_CANARY=true`; only loopback socket peers are accepted, forwarded headers are ignored for client identity, and the mode resolves direct HTTP probes as `http`. The normal backend task definitions retain the proxy-chain modes above.
+
 ## Test evidence
 
 `npm run build` passed in `backend`. The focused suite passed: `sessionRiskThresholds`, `authAdminLoginMfaCycle`, `clientIpTrust`, and `authMfaChallengeStateMachine`.
