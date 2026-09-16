@@ -1,5 +1,14 @@
 # G06 / G11 local remediation record
 
+## PR 531 exact-head review correction
+
+- Batch and audit-history controllers now end loading immediately when a super administrator clears the required brand scope. Existing scope/offset guards continue rejecting late success, late failure, and stale `finally` updates; no unscoped request is issued. Batch paging reports offset and total as zero in the no-scope state.
+- Regression coverage exercises pending brand A requests, scope clearing, late success and failure, brand B recovery, paging state, and unchanged licensee-admin behavior. Audit-history coverage proves the same independently confirmed loading invariant without changing REST/SSE authorization or filtering.
+- Deployment Audit Gitleaks identified one historical function-symbol name in prose at commit `616f94c69e7fef0a6090d86567100d40aad11f7a`. Inspection of that commit and current source confirms no credential, token, private/signing key, or runtime secret value is present. The existing exact-finding JSON baseline now contains only that commit/file/rule/line fingerprint; history scanning and generic API-key detection remain enabled.
+- Validation uses Gitleaks v8.24.2 with the Deployment Audit history command, the current-tree `--no-git` command, and an isolated synthetic generic API-key commit that must still fail detection. No scanner rule, path, rule class, commit, or regex was excluded.
+
+Recommendation: keep no-scope transitions explicit in every scoped async controller, and retain a synthetic negative control whenever adding a historical scanner disposition. Production, physical printer, and coordinated release acceptance remain separate gates.
+
 ## PR 529: SSE compatibility and RF7 secret-scan disposition
 
 Correction based on `9191ec43e99eb010117aa65ff0dae3e664dac69b`:

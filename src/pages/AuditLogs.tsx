@@ -286,7 +286,7 @@ export default function AuditLogs() {
 
   const load = async (opts?: { silent?: boolean }) => {
     if (isSuperAdmin && licenseeFilter === "all") {
-      setLogs([]); setHistoryError("Select a brand to review its audit history.");
+      setLogs([]); setActivityLoading(false); setHistoryError("Select a brand to review its audit history.");
       return;
     }
     if (!opts?.silent) setActivityLoading(true);

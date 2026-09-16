@@ -56,3 +56,21 @@ it("suppresses unscoped REST/SSE and rejects old or foreign brand events", async
   expect(screen.queryByText(/Actor-B|Late-B/)).toBeNull();
   expect(subscriptions).toHaveLength(2);
 });
+
+it("clears activity loading when brand scope is removed from an in-flight request", async () => {
+  let finish!: (response: { success: true; data: any[] }) => void;
+  vi.mocked(apiClient.getLicensees).mockResolvedValue({ success: true, data: [{ id: "A", name: "Brand A" }] } as any);
+  vi.mocked(apiClient.getFraudReports).mockResolvedValue({ success: true, data: [] } as any);
+  vi.mocked(apiClient.getAuditLogs).mockImplementation(() => new Promise((resolve) => { finish = resolve; }) as any);
+  vi.mocked(apiClient.streamAuditLogs).mockReturnValue(vi.fn());
+  render(<MemoryRouter><AuditLogs /></MemoryRouter>);
+  const select = (await screen.findAllByRole("combobox")).find(el => el.textContent?.includes("Brand A"))!;
+  fireEvent.change(select, { target: { value: "A" } });
+  await screen.findByText("Loading activity...");
+  fireEvent.change(select, { target: { value: "all" } });
+  await screen.findByText("Select a brand to review its audit history.");
+  expect(screen.queryByText("Loading activity...")).toBeNull();
+  await act(async () => { finish({ success: true, data: [{ id: "late", licenseeId: "A", action: "LOGIN_SUCCESS" }] }); });
+  expect(screen.queryByText("Loading activity...")).toBeNull();
+  expect(screen.queryByText("late")).toBeNull();
+});

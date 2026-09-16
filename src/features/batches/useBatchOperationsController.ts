@@ -87,6 +87,7 @@ export function useBatchOperationsController({
     if (role === "super_admin" && !licenseeScope) {
       setRows([]);
       setError("Select a brand to view its batches.");
+      setLoading(false);
       return;
     }
     if (isActivePrintSessionSuppressed() && !options?.force) return;
@@ -441,7 +442,7 @@ export function useBatchOperationsController({
   return {
     loading,
     batchOffset,
-    batchTotal: batchesQuery.data?.meta?.total,
+    batchTotal: role === "super_admin" && !licenseeScope ? 0 : batchesQuery.data?.meta?.total,
     batchPageSize: 100,
     setBatchOffset: (offset: number) => setBatchPage({ scope: licenseeScope, offset: Math.max(0, offset) }),
     rows,
