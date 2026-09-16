@@ -107,7 +107,19 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
   let residue = null;
   let verifierCreated = false;
   let appOnlyRequirements;
+  let rdsMembershipsNormalized = false;
   const verifierRole = "mscqr_prod_rls_canary_read";
+  const restoreDisposableMemberships = () => psql(maintenanceUrl, ["-q", "-c", `DO $restore_disposable_memberships$
+    DECLARE managed_role text;
+    BEGIN
+      FOR managed_role IN SELECT rolname FROM pg_roles WHERE rolname LIKE 'mscqr\\_prd\\_rls\\_phase2\\_%' ESCAPE '\\'
+      LOOP
+        EXECUTE format('GRANT %I TO %I WITH ADMIN TRUE, INHERIT FALSE, SET FALSE', managed_role, '${administrator}');
+        EXECUTE format('SET ROLE %I', '${administrator}');
+        EXECUTE format('GRANT %I TO %I WITH ADMIN FALSE, INHERIT FALSE, SET TRUE', managed_role, '${administrator}');
+        RESET ROLE;
+      END LOOP;
+    END $restore_disposable_memberships$;`], "restore disposable-superuser membership topology");
   try {
     assert.equal(scalar(maintenanceUrl, `SELECT count(*) FROM pg_roles WHERE rolname=${JSON.stringify(administrator).replaceAll('"', "'")} OR rolname LIKE 'mscqr_prd_rls_phase2_%'`, "clean roles"), "0");
     assert.equal(scalar(maintenanceUrl, `SELECT count(*) FROM pg_database WHERE datname='${targetDatabase}'`, "clean database"), "0");
@@ -165,6 +177,23 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
     for (const file of ["admin-ownership.sql", "runtime-policy.sql", "verification.sql"]) {
       psql(greenUrl, ["-q", "-f", path.join(sqlRoot, file)], file);
     }
+    // The disposable superuser path deliberately leaves a second ADMIN-only
+    // membership per managed role. Amazon RDS exposes the source-defined
+    // rdsadmin-granted SET-only topology instead; requirements must model that
+    // production topology, not a local-superuser implementation detail.
+    psql(maintenanceUrl, ["-q", "-c", `DO $normalize_rds_memberships$
+      DECLARE managed_role text;
+      BEGIN
+        FOR managed_role IN SELECT rolname FROM pg_roles WHERE rolname LIKE 'mscqr\\_prd\\_rls\\_phase2\\_%' ESCAPE '\\'
+        LOOP
+          EXECUTE format('REVOKE ADMIN OPTION FOR %I FROM %I GRANTED BY CURRENT_USER CASCADE', managed_role, '${administrator}');
+          EXECUTE format('GRANT %I TO %I WITH ADMIN FALSE, INHERIT FALSE, SET TRUE', managed_role, '${administrator}');
+        END LOOP;
+      END $normalize_rds_memberships$;`], "normalize production RDS membership topology");
+    rdsMembershipsNormalized = true;
+    assert.equal(scalar(maintenanceUrl, `SELECT count(*) FROM pg_auth_members m JOIN pg_roles parent ON parent.oid=m.roleid
+      JOIN pg_roles member ON member.oid=m.member WHERE parent.rolname LIKE 'mscqr\\_prd\\_rls\\_phase2\\_%' ESCAPE '\\'
+      AND member.rolname='${administrator}' AND NOT m.admin_option AND NOT m.inherit_option AND m.set_option`, "production RDS membership topology"), "9");
     // Requirements come from the canonical, fully installed source package in
     // this disposable server, never from production's observed catalogue.
     assert.equal(scalar(maintenanceUrl, `SELECT count(*) FROM pg_roles WHERE rolname='${verifierRole}'`, "verifier role absent"), "0");
@@ -222,6 +251,8 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
       assert.equal(compareAppOnlyRequirements(hostile, requirements).RLS_FUNCTIONS, "INCOMPATIBLE");
       appOnlyRequirements = requirements;
     } finally { await verifier.$disconnect(); }
+    restoreDisposableMemberships();
+    rdsMembershipsNormalized = false;
     const migrationPassword = "synthetic-migration-password";
     psql(greenUrl, ["-q", "-c", `ALTER ROLE "${new URL(migrationUrl).username}" PASSWORD '${migrationPassword}'`], "migration credential provisioning");
     const connectableMigrationUrl = new URL(migrationUrl); connectableMigrationUrl.password = migrationPassword;
@@ -237,6 +268,10 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
     );
   } finally {
     try {
+      if (rdsMembershipsNormalized) {
+        restoreDisposableMemberships();
+        rdsMembershipsNormalized = false;
+      }
       if (scalar(maintenanceUrl, `SELECT count(*) FROM pg_database WHERE datname='${targetDatabase}'`, "inspect green database") === "1") {
         psql(maintenanceUrl, ["-q", "-c", `DROP DATABASE "${targetDatabase}" WITH (FORCE)`], "drop green database");
       }
