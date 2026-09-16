@@ -320,7 +320,10 @@ const result = {
     rollback: item.security?.rollbackDefinition || null,
   })),
   backendAuthority: {
-    reachableFunctions: [...reachableBackendFunctions].sort(),
+    reachableFunctions: [...reachableBackendFunctions].sort().map((reference) => {
+      const separator = reference.indexOf(":");
+      return { source: reference.slice(0, separator), symbol: reference.slice(separator + 1) };
+    }),
   },
   backendRoutes: routes.sort((a, b) => `${a.path}:${a.method}:${a.source}`.localeCompare(`${b.path}:${b.method}:${b.source}`)),
   frontendConsumers: frontendConsumers.sort((a, b) => a.source.localeCompare(b.source)),

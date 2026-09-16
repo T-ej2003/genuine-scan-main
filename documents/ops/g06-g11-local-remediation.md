@@ -1,5 +1,19 @@
 # G06 / G11 local remediation record
 
+## PR 529: SSE compatibility and RF7 secret-scan disposition
+
+Correction based on `9191ec43e99eb010117aa65ff0dae3e664dac69b`:
+
+- Audit streaming accepts only optional UUID `licenseeId` and optional string `token` after the existing `authenticateSSE` middleware. The middleware, production compatibility-mode switch, authentication sources, required platform brand scope, and server tenant/event filters are unchanged. The controller never authenticates or serializes the query token.
+- Both reported RF7 generic-api-key matches were source-symbol references, not credentials: `isAllowedE2eDryRunOtpDelivery` in the customer verification controller and `hasEd25519QrSigningKeys` in the QR token service. The former is an E2E delivery predicate; the latter returns a boolean from configured-key presence. The generator never evaluates either function or embeds their runtime values.
+- Reachable-function references now contain separate `source` and `symbol` fields. Exact identities, ordering, reachability and reconciliation semantics are preserved. No scanner rules, exclusions, authentication policy, grants, RLS, or connector trust were changed.
+
+Validation: actual middleware/controller SSE regressions passed (cookie/header, enabled/disabled production query compatibility, missing/invalid scope, extra keys, foreign tenant, non-serialization); all 18 compiled G06/G11 tests passed. Backend validation passed; frontend validation passed (67 files / 263 tests, including stale/cross-brand protections). RF7 static tests, 71 app-only/image-impact tests, security-source verification, 16 RLS tests, security-scope lint, and document checks passed.
+
+The exact CI Gitleaks v8.24.2 command passed on a clean tracked-file snapshot. A first local scan also included ignored compiled `backend/dist` and matched a generated JavaScript symbol assignment; that file is not committed or present in the secret-scan checkout. No real secret was found. Repeated RF7 generation is deterministic, and normalized comparison with the predecessor preserves all non-location security metadata and every reachable source/symbol identity.
+
+Recommendation: retain structural source references for generated inventories and middleware-to-handler contract tests at authentication boundaries. Physical printer acceptance and coordinated printing SQL/backend release remain separate, unperformed release gates. This correction does not authorize deployment or onboarding.
+
 Baseline: `6d5a48ce7c32b12ce8671731392f92ddfa625a88`.
 Authority: the accepted G06/G11 mappings in `/private/tmp/mscqr-platform-audit.KQjWTE/remediation-groups.json`.
 

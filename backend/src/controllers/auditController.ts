@@ -179,7 +179,8 @@ export const exportLogsCsv = async (req: AuthRequest, res: Response) => {
 export const streamLogs = async (req: AuthRequest, res: Response) => {
   if (!req.user) return res.status(401).end();
 
-  const scope = z.object({ licenseeId: z.string().uuid().optional() }).strict().safeParse(req.query);
+  // authenticateSSE alone authenticates the optional compatibility token.
+  const scope = z.object({ licenseeId: z.string().uuid().optional(), token: z.string().optional() }).strict().safeParse(req.query);
   if (!scope.success || (isAuditSuperUser(req.user.role) && !scope.data.licenseeId)) {
     return res.status(400).json({ success: false, error: "A valid audit stream brand scope is required" });
   }

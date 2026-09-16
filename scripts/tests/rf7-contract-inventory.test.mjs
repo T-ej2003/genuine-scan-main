@@ -30,16 +30,37 @@ test("inventory reconciles every finite frontend HTTP consumer", () => {
 
 test("runtime reachability does not activate quarantined function bodies", () => {
   assert.ok(
-    inventory.backendAuthority.reachableFunctions.includes(
-      "backend/src/controllers/printerAgentController.ts:reportPrinterHeartbeat"
-    )
+    inventory.backendAuthority.reachableFunctions.some(({ source, symbol }) =>
+      source === "backend/src/controllers/printerAgentController.ts" && symbol === "reportPrinterHeartbeat")
   );
   assert.equal(
-    inventory.backendAuthority.reachableFunctions.includes(
-      "backend/src/controllers/printerAgentController.ts:quarantinedLegacyPrinterHeartbeat"
-    ),
+    inventory.backendAuthority.reachableFunctions.some(({ source, symbol }) =>
+      source === "backend/src/controllers/printerAgentController.ts" && symbol === "quarantinedLegacyPrinterHeartbeat"),
     false
   );
+});
+
+test("reachable authority retains exact structural source and symbol identities", () => {
+  const references = inventory.backendAuthority.reachableFunctions;
+  for (const reference of references) {
+    assert.deepEqual(Object.keys(reference).sort(), ["source", "symbol"]);
+    assert.ok(existsSync(path.join(root, reference.source)));
+    assert.equal(typeof reference.symbol, "string");
+    assert.ok(reference.symbol.length > 0);
+  }
+  const identities = references.map(({ source, symbol }) => `${source}:${symbol}`);
+  assert.equal(new Set(identities).size, identities.length);
+  assert.deepEqual(identities, [...identities].sort());
+  for (const { source, symbol } of [
+    {
+      source: "backend/src/controllers/verify/authHandlers.ts",
+      symbol: "isAllowedE2eDryRunOtpDelivery",
+    },
+    {
+      source: "backend/src/services/qrTokenService.ts",
+      symbol: "hasEd25519QrSigningKeys",
+    },
+  ]) assert.ok(references.some((reference) => reference.source === source && reference.symbol === symbol));
 });
 
 test("removed QR ZIP implementation and vulnerable archive dependency stay absent", () => {
