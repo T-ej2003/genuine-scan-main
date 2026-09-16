@@ -73,9 +73,24 @@ test("frontend preservation authenticates stable governed revisions after bootst
     const currentTask = { ...task, taskDefinitionArn: arn, revision };
     const currentService = { ...service, taskDefinition: arn, deployments: [{ ...service.deployments[0], taskDefinition: arn }] };
     assert.equal(captureFrontendPredecessor(currentService, currentTask).taskDefinitionArn, arn);
+    assert.throws(() => captureFrontendPredecessor(currentService, { ...currentTask, status: "INACTIVE" }), /stable production service/);
   }
+  for (const status of [undefined, "DELETE_IN_PROGRESS", "unexpected"]) assert.throws(() => captureFrontendPredecessor(service, { ...task, status }), /stable production service/);
   assert.throws(() => captureFrontendPredecessor({ ...service, deployments: [...service.deployments, { ...service.deployments[0], id: "ecs-svc/old", status: "ACTIVE" }] }, task), /stable production service/);
   assert.throws(() => captureFrontendPredecessor(service, { ...task, containerDefinitions: [...task.containerDefinitions, { name: "sidecar", image: task.containerDefinitions[0].image }] }), /stable production service/);
+});
+
+test("inactive frontend predecessor fails before candidate registration or service mutation", async () => {
+  const { authorization } = fixture(); let registrations = 0; let updates = 0;
+  await assert.rejects(() => runGovernedFrontendActivation({
+    sourceSha, webAuthorization: authorization, verifyWebAuthorization: () => true, now: createdAt,
+    readService: async () => service,
+    describeTaskDefinition: async () => ({ ...task, status: "INACTIVE" }),
+    registerTaskDefinition: async () => { registrations += 1; },
+    updateService: async () => { updates += 1; },
+    waitStable: async () => {}, verifyHealth: async () => ({ ready: true, loginStatus: 200 }),
+  }), /stable production service/);
+  assert.equal(registrations, 0); assert.equal(updates, 0);
 });
 
 test("frontend activation updates once and rollback can only restore its captured predecessor", async () => {
