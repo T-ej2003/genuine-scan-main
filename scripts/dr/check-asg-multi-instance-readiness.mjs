@@ -29,6 +29,7 @@ const localCompose = requireFile("docker-compose.local.yml");
 const asgWebCompose = requireFile("docker-compose.asg-web.yml");
 const asgBootstrap = requireFile("scripts/dr/bootstrap-asg-web-node.sh");
 const nginxEntrypoint = requireFile("docker/nginx-entrypoint.sh");
+const rootNginxEntrypoint = requireFile("docker/nginx-root-entrypoint.sh");
 const asgComposeInterpolationCheck = requireFile("scripts/dr/check-asg-compose-interpolation.mjs");
 const asgSsmManifestRaw = requireFile("documents/ops/aws-asg-web-ssm-parameter-manifest.json");
 const asgInstancePolicyRaw = requireFile("ops/aws/iam/dr/asg-web-instance-profile-policy.template.json");
@@ -235,10 +236,15 @@ requireMatch("docker-compose", compose, /CLIENT_IP_TRUSTED_NGINX_CIDRS:\s+172\.3
 requireMatch("docker-compose", compose, /frontend:\n[\s\S]*?ipv4_address:\s+172\.30\.10\.2/, "root production Compose must pin frontend nginx to the trusted address.");
 requireMatch("docker-compose", compose, /subnet:\s+172\.30\.10\.0\/29/, "root production Compose must use the bounded deterministic proxy network.");
 if (/CLIENT_IP_TRUSTED_[A-Z_]+:\s+(?:0\.0\.0\.0\/0|::\/0)/.test(compose)) failures.push("docker-compose.yml must not trust an all-address proxy CIDR.");
-for (const [label, source] of [["root HTTP nginx", nginxHttpConf], ["root HTTPS nginx", nginxHttpsConf]]) {
-  requireMatch(label, source, /proxy_set_header X-Forwarded-For \$remote_addr;/, "must replace caller-supplied X-Forwarded-For with the direct client address.");
-  if (/proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;/.test(source)) failures.push(`${label} must not preserve a caller-supplied forwarded chain.`);
+requireMatch("docker-compose", compose, /entrypoint:\s+\["\/usr\/local\/bin\/nginx-root-entrypoint\.sh"\]/, "root frontend must select the root-only nginx forwarding contract.");
+requireMatch("docker-compose", compose, /\.\/docker\/nginx-root-entrypoint\.sh:\/usr\/local\/bin\/nginx-root-entrypoint\.sh:ro/, "root frontend must mount only the reviewed root nginx adapter.");
+requireMatch("root nginx adapter", rootNginxEntrypoint, /proxy_set_header X-Forwarded-For \$remote_addr;/, "must replace caller-supplied X-Forwarded-For with the direct client address.");
+requireMatch("root nginx adapter", rootNginxEntrypoint, /exec \/usr\/local\/bin\/nginx-entrypoint\.sh/, "must return control to the canonical nginx entrypoint.");
+for (const [label, source] of [["shared HTTP nginx", nginxHttpConf], ["shared HTTPS nginx", nginxHttpsConf]]) {
+  requireMatch(label, source, /proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;/, "must preserve and append the ASG CloudFront/ALB forwarding chain.");
+  if (/proxy_set_header X-Forwarded-For \$remote_addr;/.test(source)) failures.push(`${label} must not apply the root-only replacement policy.`);
 }
+if (/nginx-root-entrypoint/.test(asgWebCompose)) failures.push("ASG Compose must not consume the root-only nginx forwarding adapter.");
 requireMatch("asg web compose", asgWebCompose, /\bbackend:/, "ASG web mode must define backend.");
 requireMatch("asg web compose", asgWebCompose, /\bfrontend:/, "ASG web mode must define frontend.");
 requireMatch("asg web compose", asgWebCompose, /RUN_BACKGROUND_WORKERS:\s+"false"/, "ASG web backend must force workers off.");

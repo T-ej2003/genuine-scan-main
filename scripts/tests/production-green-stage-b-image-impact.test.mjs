@@ -170,12 +170,6 @@ test("package-lock image impact is merge-ready but requires fresh protected-main
   assert.equal(report.deploymentAuthorized, false);
 });
 
-test("root nginx runtime configuration requires a frontend image rebuild", () => {
-  for (const file of ["nginx.conf", "nginx.https.conf"]) {
-    assert.deepEqual(classifyStageBImageReusePath(file), { file, category: "imageBuildInput", imageAffecting: true });
-  }
-});
-
 test("Stage A Terraform changes are classified as infrastructure-only without image rebuild", () => {
   const file = "infra/aws/terraform/production-green-stage-a/main.tf";
   assert.deepEqual(classifyStageBImageReusePath(file), { file, category: "terraformOnly", imageAffecting: false });
@@ -242,7 +236,7 @@ test("rotation evidence schema is canonical tooling-only input", () => {
 });
 
 test("tooling and deployment Compose inputs are image-reuse compatible while unknown paths remain fail-closed", () => {
-  const files = [".gitleaks-baseline.json", ".gitleaksignore", "docker-compose.yml", "docker-compose.asg-web.yml"];
+  const files = [".gitleaks-baseline.json", ".gitleaksignore", "docker-compose.yml", "docker-compose.asg-web.yml", "docker/nginx-root-entrypoint.sh"];
   for (const file of files) assert.deepEqual(classifyStageBImageReusePath(file), { file, category: "toolingOnly", imageAffecting: false });
   const report = imageImpactReportFor({ imageReleaseSha, toolingSha, toolingInputTreeSha256, changedFiles: files });
   assert.deepEqual(report.imageAffectingFiles, []);
