@@ -5,6 +5,20 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { addedContentDiffArgs, addedLinesFromUnifiedDiff, scanAddedDiff } from "../check-branch-secret-diff.mjs";
+import { appOnlyCompatibilityReadPolicy } from "../aws/production-app-only-policy.mjs";
+
+test("app-only inventory permits exact source IAM scopes only in the two generated documents", () => {
+  const resources = appOnlyCompatibilityReadPolicy().Statement.flatMap(({ Resource }) => [].concat(Resource))
+    .filter((resource) => resource.startsWith("arn:aws:secretsmanager:"));
+  assert.ok(resources.length > 0);
+  for (const resource of resources) {
+    for (const file of ["documents/ops/iam/MSCQRProductionDependencyClosure-v1.json", "documents/ops/iam/MSCQRProductionGreenStageBDeploymentCapabilities-v1.json"])
+      assert.equal(scanAddedDiff(unified(resource), file).length, 0);
+    for (const file of ["scripts/example.mjs", "documents/ops/runbook.md", "scripts/tests/fixtures/production-initial-activation-reconciler-plan-absent.json"])
+      assert.ok(scanAddedDiff(unified(resource), file).length > 0);
+    assert.ok(scanAddedDiff(unified(`${resource}-substituted`), "documents/ops/iam/MSCQRProductionDependencyClosure-v1.json").length > 0);
+  }
+});
 
 const accessKey = `AKIA${"0".repeat(16)}`;
 const unified = (line) => ["diff --git a/scripts/example.mjs b/scripts/example.mjs", "--- a/scripts/example.mjs", "+++ b/scripts/example.mjs", "@@ -0,0 +1 @@", `+${line}`].join("\n");

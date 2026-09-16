@@ -84,7 +84,7 @@ test("runtime simulation mismatch stays unproven and cannot authorize from anoth
 });
 
 function networkFixture() {
-  const input = fixture(), vpcId = "vpc-0123456789abcdef0";
+  const input = fixture(), vpcId = "vpc-aaa";
   const runtimeGroup = input.service.networkConfiguration.awsvpcConfiguration.securityGroups[0];
   const kmsArn = `arn:aws:kms:${APP_ONLY.region}:${APP_ONLY.account}:key/11111111-1111-1111-1111-111111111111`;
   const responses = {
@@ -125,7 +125,7 @@ test("network/database proof rejects missing, public, foreign, pending, unencryp
     (r) => { r["describe-subnets"].Subnets.pop(); },
     (r) => { r["describe-subnets"].Subnets[0].OwnerId = "000000000000"; },
     (r) => { r["describe-subnets"].Subnets[0].MapPublicIpOnLaunch = true; },
-    (r) => { r["describe-subnets"].Subnets[0].VpcId = "vpc-fffffffffffffffff"; },
+    (r) => { r["describe-subnets"].Subnets[0].VpcId = "vpc-bbb"; },
     (r) => { r["describe-route-tables"].RouteTables[0].Routes[0].State = "blackhole"; },
     (r) => { r["describe-route-tables"].RouteTables[0].Routes.push({ DestinationIpv6CidrBlock: "::/0", GatewayId: "igw-0123456789abcdef0" }); },
     (r) => { r["describe-security-groups"].SecurityGroups[1].IpPermissions[0].IpRanges = [{ CidrIp: "0.0.0.0/0" }]; },

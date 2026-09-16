@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES } from "./aws/production-mixed-dual-slot-recovery-contract.mjs";
+import { appOnlyCompatibilityReadPolicy } from "./aws/production-app-only-policy.mjs";
 
 const repoRoot = process.cwd();
 const generatedRecoveryCapabilityDocuments = new Set([
@@ -10,6 +11,11 @@ const generatedRecoveryCapabilityDocuments = new Set([
   "documents/ops/iam/MSCQRProductionGreenStageBDeploymentCapabilities-v1.json",
 ]);
 const reviewedRecoveryResources = new Set(MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES);
+// Only generated inventories may repeat exact source-owned IAM resource scopes;
+// this does not permit secret values or new identifiers in scripts/runbooks.
+const appOnlyInventoryResources = new Set(appOnlyCompatibilityReadPolicy().Statement
+  .flatMap(({ Resource }) => Array.isArray(Resource) ? Resource : [Resource])
+  .filter((resource) => resource.startsWith("arn:aws:secretsmanager:")));
 const isCanonicalGeneratedRecoveryDocument = (relativePath) => generatedRecoveryCapabilityDocuments.has(relativePath)
   || /^scripts\/tests\/fixtures\/production-initial-activation-reconciler-plan-(?:absent|complete|partial-policy|partial-role|partial-unattached|update)\.json$/.test(relativePath);
 
@@ -118,7 +124,10 @@ export const scanAddedDiff = (diff, relativePath) => {
       const generatedRecoveryResource = rule.name === "Committed Secrets Manager ARN"
         && isCanonicalGeneratedRecoveryDocument(relativePath)
         && reviewedRecoveryResources.has(match[0].replace(/\\+$/, ""));
-      if (!generatedRecoveryResource) findings.push({ file: relativePath, line: contents.slice(0, match.index).split("\n").length, rule: rule.name, message: rule.message });
+      const generatedAppOnlyResource = rule.name === "Committed Secrets Manager ARN"
+        && generatedRecoveryCapabilityDocuments.has(relativePath)
+        && appOnlyInventoryResources.has(match[0]);
+      if (!generatedRecoveryResource && !generatedAppOnlyResource) findings.push({ file: relativePath, line: contents.slice(0, match.index).split("\n").length, rule: rule.name, message: rule.message });
       match = rule.regex.exec(contents);
     }
   }

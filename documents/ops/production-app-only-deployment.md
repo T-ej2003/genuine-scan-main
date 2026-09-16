@@ -346,6 +346,10 @@ This verifies provider-schema planning, not live IAM authorization or mutation.
 - Changed-file ESLint: passed.
 - Final handoff regression rejects rehashed cross-phase, source, verifier and
   eligibility substitutions. CI lint includes all app-only CLI entrypoints.
+- The secret guard permits exact source-derived IAM resource identifiers only
+  in the two canonical generated capability inventories. It still rejects
+  substituted identifiers, credentials and those identifiers in arbitrary files;
+  regression tests cover both boundaries. Runtime fixtures use synthetic VPC IDs.
 - Stage-B control-plane: 747 tests passed; full production RLS package passed
   against disposable PostgreSQL 18.4 with no skipped test.
 - Canonical `npm run rls:full-verify`: passed (16 tests; 27 checksums).
