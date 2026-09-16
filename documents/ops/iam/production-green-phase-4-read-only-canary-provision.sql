@@ -47,13 +47,12 @@ DO $$ BEGIN
   END IF;
 END $$;
 RESET ROLE;
-ALTER ROLE mscqr_prod_rls_canary_read SET mscqr.rls_canary_scope = :'canary_scope';
 SET ROLE mscqr_prd_rls_phase2_auth_owner;
 CREATE OR REPLACE FUNCTION app_rls.production_read_only_canary_probe()
 RETURNS TABLE(same_tenant_visible boolean, foreign_tenant_invisible boolean)
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog, public, app_rls AS $$
 BEGIN
-  IF session_user <> 'mscqr_prod_rls_canary_read' OR current_setting('mscqr.rls_canary_scope', true) !~* '^[0-9a-f-]{36}$' THEN RAISE EXCEPTION 'read-only canary binding is invalid'; END IF;
+  IF session_user <> 'mscqr_prod_rls_canary_read' OR COALESCE(current_setting('mscqr.rls_canary_scope', true), '') !~* '^[0-9a-f-]{36}$' THEN RAISE EXCEPTION 'read-only canary binding is invalid'; END IF;
   RETURN QUERY SELECT EXISTS (SELECT 1 FROM app_rls.production_read_only_canary_control WHERE scope_name='canary'), NOT EXISTS (SELECT 1 FROM app_rls.production_read_only_canary_control WHERE scope_name='isolation');
 END $$;
 REVOKE ALL ON FUNCTION app_rls.production_read_only_canary_probe() FROM PUBLIC;
