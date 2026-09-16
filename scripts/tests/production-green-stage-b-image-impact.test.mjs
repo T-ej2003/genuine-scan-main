@@ -104,7 +104,7 @@ test("image-reuse consumers accept only the current rules version", () => {
   const files = [{ file: "scripts/plan-production-green-stage-b.mjs", category: "toolingOnly", imageAffecting: false }];
   const report = compatibilityReport(files);
   assert.equal(imageReuseCompatibility({ imageReleaseSha: imageReleaseSha, toolingSha, currentHead: toolingSha, changedFiles: files, toolingInputTreeSha256, reviewedReport: report }).classificationRulesVersion, STAGE_B_IMAGE_REUSE_RULES_VERSION);
-  for (const classificationRulesVersion of ["stage-b-image-reuse-v3", "stage-b-image-reuse-v4", "stage-b-image-reuse-v6", undefined]) {
+  for (const classificationRulesVersion of ["stage-b-image-reuse-v4", "stage-b-image-reuse-v5", "stage-b-image-reuse-v7", undefined]) {
     assert.throws(() => imageReuseCompatibility({ imageReleaseSha, toolingSha, currentHead: toolingSha, changedFiles: files, toolingInputTreeSha256, reviewedReport: { ...report, classificationRulesVersion } }), /rules are stale/);
   }
 });
@@ -168,6 +168,12 @@ test("package-lock image impact is merge-ready but requires fresh protected-main
   assert.equal(report.imageReuseCompatible, false);
   assert.equal(report.newImagesRequired, true);
   assert.equal(report.deploymentAuthorized, false);
+});
+
+test("root nginx runtime configuration requires a frontend image rebuild", () => {
+  for (const file of ["nginx.conf", "nginx.https.conf"]) {
+    assert.deepEqual(classifyStageBImageReusePath(file), { file, category: "imageBuildInput", imageAffecting: true });
+  }
 });
 
 test("Stage A Terraform changes are classified as infrastructure-only without image rebuild", () => {
@@ -235,8 +241,8 @@ test("rotation evidence schema is canonical tooling-only input", () => {
   assert.equal(report.imageReuseCompatible, true);
 });
 
-test("the Gitleaks baseline is tooling-only while unknown paths remain fail-closed", () => {
-  const files = [".gitleaks-baseline.json", ".gitleaksignore", "docker-compose.asg-web.yml"];
+test("tooling and deployment Compose inputs are image-reuse compatible while unknown paths remain fail-closed", () => {
+  const files = [".gitleaks-baseline.json", ".gitleaksignore", "docker-compose.yml", "docker-compose.asg-web.yml"];
   for (const file of files) assert.deepEqual(classifyStageBImageReusePath(file), { file, category: "toolingOnly", imageAffecting: false });
   const report = imageImpactReportFor({ imageReleaseSha, toolingSha, toolingInputTreeSha256, changedFiles: files });
   assert.deepEqual(report.imageAffectingFiles, []);

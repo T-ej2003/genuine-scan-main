@@ -57,6 +57,7 @@ Runtime defaults that matter for ASG:
 - `backend/docker/start-runtime.sh` runs `npx prisma migrate deploy` only when `RUN_DB_MIGRATIONS_ON_START=true`.
 - `docker-compose.yml` sets backend `RUN_BACKGROUND_WORKERS: "false"`.
 - `docker-compose.yml` puts the `worker` service behind `profiles: ["worker"]` and sets worker `RUN_BACKGROUND_WORKERS: "true"`.
+- Root production Compose pins frontend nginx to `172.30.10.2` on its dedicated `172.30.10.0/29` bridge, configures backend `CLIENT_IP_TRUST_MODE=nginx`, and trusts only that `/32`. Root nginx replaces inbound `X-Forwarded-For` with its direct client address, so another container or a caller-supplied chain cannot select `req.ip`.
 - `docker-compose.asg-web.yml` has no `worker`, `redis`, `minio`, or `minio-init` service.
 - `docker-compose.asg-web.yml` uses backend `/health/live` for container health and keeps `/api/health/ready` as the deeper dependency readiness gate.
 - ASG proxy identity is explicitly configured as CloudFront -> ALB -> fixed frontend nginx -> backend. The SSM manifest requires reviewed ALB and CloudFront CIDRs, an ASG application-network subnet, and the fixed frontend address; bootstrap requires `CLIENT_IP_TRUSTED_NGINX_CIDRS` to be that frontend address as a `/32`. Backend `/health/live` accepts direct probes only from loopback or the configured ALB CIDRs; all other traffic must satisfy the viewer proxy chain.

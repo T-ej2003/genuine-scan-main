@@ -230,6 +230,15 @@ requireMatch("docker-compose", compose, /RUN_DB_MIGRATIONS_ON_START:\s+\$\{RUN_D
 requireMatch("docker-compose", compose, /RUN_BACKGROUND_WORKERS:\s+"false"/, "web backend nodes must default background workers off.");
 requireMatch("docker-compose", compose, /RUN_BACKGROUND_WORKERS:\s+"true"/, "worker service must be explicitly separate from web.");
 requireMatch("docker-compose", compose, /worker:\n(?:.*\n){1,8}\s+profiles:\n\s+- worker/, "worker service must be behind the explicit worker profile.");
+requireMatch("docker-compose", compose, /CLIENT_IP_TRUST_MODE:\s+nginx/, "root production Compose must select the nginx-only trust contract.");
+requireMatch("docker-compose", compose, /CLIENT_IP_TRUSTED_NGINX_CIDRS:\s+172\.30\.10\.2\/32/, "root production Compose must trust only its pinned frontend nginx address.");
+requireMatch("docker-compose", compose, /frontend:\n[\s\S]*?ipv4_address:\s+172\.30\.10\.2/, "root production Compose must pin frontend nginx to the trusted address.");
+requireMatch("docker-compose", compose, /subnet:\s+172\.30\.10\.0\/29/, "root production Compose must use the bounded deterministic proxy network.");
+if (/CLIENT_IP_TRUSTED_[A-Z_]+:\s+(?:0\.0\.0\.0\/0|::\/0)/.test(compose)) failures.push("docker-compose.yml must not trust an all-address proxy CIDR.");
+for (const [label, source] of [["root HTTP nginx", nginxHttpConf], ["root HTTPS nginx", nginxHttpsConf]]) {
+  requireMatch(label, source, /proxy_set_header X-Forwarded-For \$remote_addr;/, "must replace caller-supplied X-Forwarded-For with the direct client address.");
+  if (/proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;/.test(source)) failures.push(`${label} must not preserve a caller-supplied forwarded chain.`);
+}
 requireMatch("asg web compose", asgWebCompose, /\bbackend:/, "ASG web mode must define backend.");
 requireMatch("asg web compose", asgWebCompose, /\bfrontend:/, "ASG web mode must define frontend.");
 requireMatch("asg web compose", asgWebCompose, /RUN_BACKGROUND_WORKERS:\s+"false"/, "ASG web backend must force workers off.");

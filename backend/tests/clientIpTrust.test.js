@@ -21,6 +21,11 @@ Object.assign(process.env, {
 assert.equal(getClientIpTrustConfig().mode, "cloudfront-alb-nginx");
 delete process.env.CLIENT_IP_TRUSTED_NGINX_CIDRS;
 assert.throws(() => getClientIpTrustConfig(), /reviewed proxy CIDRs/);
+process.env.CLIENT_IP_TRUST_MODE = "nginx";
+process.env.CLIENT_IP_TRUSTED_NGINX_CIDRS = "172.30.10.2/32";
+delete process.env.CLIENT_IP_TRUSTED_ALB_CIDRS;
+delete process.env.CLIENT_IP_TRUSTED_CLOUDFRONT_CIDRS;
+assert.equal(getClientIpTrustConfig().mode, "nginx");
 for (const [key, value] of Object.entries(previousEnv)) {
   if (value === undefined) delete process.env[key];
   else process.env[key] = value;
@@ -39,6 +44,11 @@ assert.equal(resolveClientIp(request("::ffff:127.0.0.1", "spoofed"), { mode: "di
 assert.throws(() => resolveClientIp(request("10.0.0.10", "203.0.113.20"), config), /PROXY_CHAIN_DENIED/);
 assert.throws(() => resolveClientIp(request("10.0.0.10", "203.0.113.20, 203.0.113.21"), config), /PROXY_CHAIN_DENIED/);
 assert.throws(() => resolveClientIp(request("203.0.113.30", "203.0.113.20, 198.51.100.10"), config), /PROXY_CHAIN_DENIED/);
+
+const rootNginxConfig = { mode: "nginx", trustedNginx: (ip) => ip === "172.30.10.2" };
+assert.equal(resolveClientIp(request("172.30.10.2", "203.0.113.20"), rootNginxConfig), "203.0.113.20");
+assert.throws(() => resolveClientIp(request("172.30.10.3", "203.0.113.20"), rootNginxConfig), /PROXY_CHAIN_DENIED/);
+assert.throws(() => resolveClientIp(request("172.30.10.2", "spoofed, 203.0.113.20"), rootNginxConfig), /PROXY_CHAIN_DENIED/);
 
 const nginxConfig = {
   mode: "cloudfront-alb-nginx",
