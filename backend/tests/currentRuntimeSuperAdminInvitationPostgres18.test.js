@@ -52,10 +52,8 @@ async function main() {
   const { getB01PreAuthPrisma } = require("../dist/rls-waves/session-b/b01/runtimeClients");
   const { signAccessToken } = require("../dist/services/auth/tokenService");
   const { sealCookieToken } = require("../dist/services/auth/cookieTokenProtectionService");
-  const { authenticate, DATABASE_SESSION_CAPABILITY_HEADER } = require("../dist/middleware/auth");
-  const { requireAdministrationMutator } = require("../dist/middleware/rbac");
-  const { requireRecentAdminMfa } = require("../dist/middleware/auth");
-  const { invite } = require("../dist/controllers/authController");
+  const { DATABASE_SESSION_CAPABILITY_HEADER } = require("../dist/middleware/auth");
+  const { createAuthRoutes } = require("../dist/routes/modules/authRoutes");
   const express = require("express");
   const capability = await createAuthenticatedSessionCapability(getB01PreAuthPrisma(), {
     refreshTokenId: ids.session, refreshTokenHash: refreshHash, assurance: "ADMIN_MFA", expiresAt: new Date(Date.now() + 30 * 60_000),
@@ -64,7 +62,7 @@ async function main() {
   const runtime = express();
   runtime.use(express.json());
   runtime.use((req, _res, next) => { req.requestId = "00000000-0000-4000-8000-000000000702"; next(); });
-  runtime.post("/api/auth/invite", authenticate, requireAdministrationMutator, requireRecentAdminMfa, invite);
+  runtime.use("/api", createAuthRoutes());
   const server = await listen(runtime);
   try {
     const response = await fetch(`http://127.0.0.1:${server.address().port}/api/auth/invite`, {
