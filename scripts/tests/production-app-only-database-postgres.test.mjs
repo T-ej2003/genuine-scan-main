@@ -51,9 +51,12 @@ test("real PostgreSQL catalogue and hostile read-only verifier regressions", { t
       REVOKE ALL ON FUNCTION app_auth.fixture(integer) FROM PUBLIC;
       GRANT USAGE ON SCHEMA app_auth TO ${role};
       GRANT EXECUTE ON FUNCTION app_auth.fixture(integer) TO ${role};
+      CREATE TYPE public.app_only_status AS ENUM ('pending','ready');
       CREATE TABLE public.app_only_fixture (
         id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
         tenant text NOT NULL DEFAULT 'fixture',
+        status public.app_only_status,
+        status_history public.app_only_status[],
         amount integer NOT NULL DEFAULT 1 CHECK (amount > 0),
         doubled integer GENERATED ALWAYS AS (amount * 2) STORED);
       ALTER TABLE public.app_only_fixture ENABLE ROW LEVEL SECURITY;
@@ -74,6 +77,8 @@ test("real PostgreSQL catalogue and hostile read-only verifier regressions", { t
       const table = baseline.tables.find((r) => r.name === "app_only_fixture");
       assert.equal(table.rls, true); assert.equal(table.forced, true);
       assert.equal(table.columns.find((r) => r.name === "id").identity, "a");
+      assert.deepEqual(table.columns.find((r) => r.name === "status").enumLabels, ['pending','ready']);
+      assert.deepEqual(table.columns.find((r) => r.name === "status_history").enumLabels, ['pending','ready']);
       assert.equal(table.columns.find((r) => r.name === "doubled").generated, "s");
       assert.match(table.columns.find((r) => r.name === "tenant").default, /fixture/);
       // PostgreSQL 18 records the three NOT NULL constraints in pg_constraint,
@@ -108,6 +113,7 @@ test("real PostgreSQL catalogue and hostile read-only verifier regressions", { t
       ["function security", "ALTER FUNCTION app_auth.fixture(integer) SECURITY INVOKER", "ALTER FUNCTION app_auth.fixture(integer) SECURITY DEFINER", "RLS_FUNCTIONS"],
       ["policy expressions", "ALTER POLICY fixture_policy ON app_only_fixture USING (true) WITH CHECK (true)", "ALTER POLICY fixture_policy ON app_only_fixture USING (tenant = current_user) WITH CHECK (amount > 0)", "RLS_POLICIES"],
       ["column default", "ALTER TABLE app_only_fixture ALTER COLUMN amount SET DEFAULT 2", "ALTER TABLE app_only_fixture ALTER COLUMN amount SET DEFAULT 1", "DATABASE_SCHEMA"],
+      ["enum label with unchanged type name", "ALTER TYPE app_only_status RENAME VALUE 'ready' TO 'incompatible'", "ALTER TYPE app_only_status RENAME VALUE 'incompatible' TO 'ready'", "DATABASE_SCHEMA"],
       ["table SELECT grant", `GRANT SELECT ON app_only_fixture TO ${role}`, `REVOKE SELECT ON app_only_fixture FROM ${role}`, "RLS_GRANTS"],
       ["schema PUBLIC grant", "GRANT USAGE ON SCHEMA app_auth TO PUBLIC", "REVOKE USAGE ON SCHEMA app_auth FROM PUBLIC", "RLS_GRANTS"],
       ["function search_path", "ALTER FUNCTION app_auth.fixture(integer) SET search_path=public,pg_catalog", "ALTER FUNCTION app_auth.fixture(integer) SET search_path=pg_catalog,public", "RLS_FUNCTIONS"],

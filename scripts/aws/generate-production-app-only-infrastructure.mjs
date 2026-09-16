@@ -25,9 +25,9 @@ export function appOnlyBootstrapTerraform() {
       },
       aws_iam_role: {
         provisioner: { name: APP_ONLY_PROVISIONING.roleName, path: "/", max_session_duration: 3600,
-          assume_role_policy: JSON.stringify(appOnlyProductionOidcTrust()) },
+          assume_role_policy: JSON.stringify(appOnlyProductionOidcTrust(APP_ONLY_PROVISIONING.roleName)) },
         verifier: { name: APP_ONLY_VERIFIER.roleName, path: "/", max_session_duration: 3600,
-          assume_role_policy: JSON.stringify(appOnlyProductionOidcTrust()), permissions_boundary: APP_ONLY_PROVISIONING.verifierBoundaryArn,
+          assume_role_policy: JSON.stringify(appOnlyProductionOidcTrust(APP_ONLY_VERIFIER.roleName)), permissions_boundary: APP_ONLY_PROVISIONING.verifierBoundaryArn,
           depends_on: ["aws_iam_policy.verifier_boundary"] },
       },
       aws_iam_role_policy: { provisioner: { name: "app-only-bounded-provisioning", role: "${aws_iam_role.provisioner.name}",

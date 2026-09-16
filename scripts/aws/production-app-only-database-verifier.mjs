@@ -43,7 +43,10 @@ export async function collectAppOnlyDatabaseCatalogue(client) {
     const [tables] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.name),'[]'::jsonb) AS rows FROM (
       SELECT c.relname AS name,c.relkind::text AS kind,c.relrowsecurity AS rls,c.relforcerowsecurity AS forced,
         o.rolname AS owner,COALESCE((SELECT jsonb_agg(jsonb_build_object('name',a.attname,'type',pg_catalog.format_type(a.atttypid,a.atttypmod),'notNull',a.attnotnull,
-          'identity',a.attidentity::text,'generated',a.attgenerated::text,'default',pg_catalog.pg_get_expr(d.adbin,d.adrelid))
+          'identity',a.attidentity::text,'generated',a.attgenerated::text,'default',pg_catalog.pg_get_expr(d.adbin,d.adrelid),
+          'enumLabels',COALESCE((SELECT jsonb_agg(e.enumlabel ORDER BY e.enumsortorder)
+            FROM pg_catalog.pg_enum e WHERE e.enumtypid IN
+              (a.atttypid,(SELECT t.typelem FROM pg_catalog.pg_type t WHERE t.oid=a.atttypid))),'[]'::jsonb))
           ORDER BY a.attnum) FROM pg_catalog.pg_attribute a
           LEFT JOIN pg_catalog.pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum
           WHERE a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped),'[]'::jsonb) AS columns,

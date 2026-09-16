@@ -102,11 +102,23 @@ export function appOnlyVerifierLauncherPolicy(exactTaskDefinitionArn) {
   ] };
 }
 
-export function appOnlyProductionOidcTrust() {
+export const APP_ONLY_OIDC_WORKFLOWS = Object.freeze({
+  [APP_ONLY.roleArn.split("/").at(-1)]: ["deploy-production-app-only"],
+  [APP_ONLY_PROVISIONING.roleName]: ["verify-production-app-only-compatibility", "prepare-production-app-only-deployment", "provision-production-app-only-deployer"],
+  [APP_ONLY_VERIFIER.roleName]: ["prepare-production-app-only-verifier", "verify-production-app-only-compatibility", "prepare-production-app-only-deployment"],
+});
+export function appOnlyProductionOidcTrust(roleName) {
+  assert.ok(Object.hasOwn(APP_ONLY_OIDC_WORKFLOWS, roleName), "Explicit app-only principal required");
   return { Version: "2012-10-17", Statement: [{ Effect: "Allow", Action: "sts:AssumeRoleWithWebIdentity",
     Principal: { Federated: `arn:aws:iam::${APP_ONLY.account}:oidc-provider/token.actions.githubusercontent.com` },
     Condition: { StringEquals: { "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-      "token.actions.githubusercontent.com:sub": "repo:T-ej2003/genuine-scan-main:environment:production" } } }] };
+      "token.actions.githubusercontent.com:sub": "repo:T-ej2003/genuine-scan-main:environment:production",
+      "token.actions.githubusercontent.com:repository_id": "1145608538",
+      "token.actions.githubusercontent.com:repository_owner_id": "183396573",
+      "token.actions.githubusercontent.com:ref": "refs/heads/main",
+      "token.actions.githubusercontent.com:job_workflow_ref": APP_ONLY_OIDC_WORKFLOWS[roleName]
+        .map((name) => `T-ej2003/genuine-scan-main/.github/workflows/${name}-operation.yml@refs/heads/main`),
+    } } }] };
 }
 
 // Boundary installation is a separate governed bootstrap. The provisioner

@@ -28,13 +28,17 @@ const tags = (value) => {
   return [...value].sort((a, b) => a.key.localeCompare(b.key));
 };
 export const appOnlyDefinitionSha256 = (definition) => canonicalSha256({ definition: normalizeEcsTaskDefinitionReadback(definition), tags: tags(definition.tags || []) });
-export const appOnlyServiceConfigurationSha256 = (service) => canonicalSha256({
-  networkConfiguration: service.networkConfiguration, loadBalancers: service.loadBalancers,
-  deploymentConfiguration: service.deploymentConfiguration, deploymentController: service.deploymentController,
-  capacityProviderStrategy: service.capacityProviderStrategy, launchType: service.launchType,
-  platformVersion: service.platformVersion, enableExecuteCommand: service.enableExecuteCommand,
-  serviceRegistries: service.serviceRegistries, schedulingStrategy: service.schedulingStrategy,
-});
+export const appOnlyServiceConfigurationSha256 = (service) => {
+  const configuration = structuredClone(service);
+  // Exclude only AWS observations and identities separately bound by CAS.
+  // Unknown/new service settings remain bound, rather than silently ignored.
+  for (const field of ["serviceArn", "serviceName", "clusterArn", "status", "taskDefinition",
+    "desiredCount", "runningCount", "pendingCount", "deployments", "events", "createdAt", "createdBy",
+    "currentServiceDeployment", "currentServiceRevisions", "taskSets"])
+    delete configuration[field];
+  if (Object.hasOwn(configuration, "tags")) configuration.tags = tags(configuration.tags);
+  return canonicalSha256(configuration);
+};
 
 // Only these AWS response fields are non-registration metadata. Unknown fields
 // remain in the request and fail AWS validation rather than being silently lost.

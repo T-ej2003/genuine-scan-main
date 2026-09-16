@@ -1,9 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { appOnlyBootstrapTerraform, appOnlyBootstrapPlanConfiguration, assertAppOnlyBootstrapPlan, verifyAppOnlyBootstrapSource } from "../aws/generate-production-app-only-infrastructure.mjs";
 import { APP_ONLY_PROVISIONING, APP_ONLY_VERIFIER } from "../aws/production-app-only-policy.mjs";
 import { createAppOnlyBootstrapPreparation, assertAppOnlyBootstrapInputs, assertAppOnlyBootstrapAbsent, appOnlyBytesSha256 } from "../aws/production-app-only-bootstrap-contract.mjs";
 import { parseAppOnlyBootstrapArgs, verifyAppOnlyBootstrapReadback } from "../aws/run-production-app-only-bootstrap.mjs";
+test("reviewed AWS provider lock authenticates both Linux CI and macOS packages", () => {
+  const lock = fs.readFileSync("infra/aws/terraform/production-app-only-permissions/.terraform.lock.hcl", "utf8");
+  assert.match(lock, /version\s*=\s*"6\.64\.0"/);
+  // Obtained by terraform providers lock from HashiCorp-signed packages.
+  for (const hash of ["h1:2fTLxzUDmp/KVIHbIeLTB4bIzWHx8E6Dw+1ALLUi+Yw=", "h1:wXARLY+IeQ7ufYxCLTPCwToWGMRvOpiOTfJS97iwUzI="])
+    assert.ok(lock.includes(`"${hash}"`), "Platform package checksum missing; regenerate both platforms when upgrading");
+});
 function fixture() {
   return { terraform_version: "1.15.8", format_version: "1.2", errored: false, applyable: true, complete: true,
     configuration: appOnlyBootstrapPlanConfiguration(), resource_changes: Object.entries(appOnlyBootstrapTerraform().resource).flatMap(([type, resources]) => Object.entries(resources).map(([name, fields]) => {

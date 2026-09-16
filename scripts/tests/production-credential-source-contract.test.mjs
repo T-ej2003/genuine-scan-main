@@ -291,11 +291,11 @@ test("production image publisher workflows select explicit OIDC or the documente
 
 test("every GitHub workflow credential root is classified by its authenticated mode", () => {
   const oidcWorkflows = [
-    ".github/workflows/prepare-production-app-only-verifier.yml",
-    ".github/workflows/prepare-production-app-only-deployment.yml",
-    ".github/workflows/provision-production-app-only-deployer.yml",
-    ".github/workflows/deploy-production-app-only.yml",
-    ".github/workflows/verify-production-app-only-compatibility.yml",
+    ".github/workflows/prepare-production-app-only-verifier-operation.yml",
+    ".github/workflows/prepare-production-app-only-deployment-operation.yml",
+    ".github/workflows/provision-production-app-only-deployer-operation.yml",
+    ".github/workflows/deploy-production-app-only-operation.yml",
+    ".github/workflows/verify-production-app-only-compatibility-operation.yml",
     ".github/workflows/authorize-production-bootstrap-operator-policy-reconciliation.yml",
     ".github/workflows/produce-production-green-stage-b-release-preflight.yml",
     ".github/workflows/produce-production-green-stage-b-state-reconciliation-image-authorization.yml",

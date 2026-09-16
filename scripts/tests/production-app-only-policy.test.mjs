@@ -103,9 +103,22 @@ test("compatibility preparation cannot read DB credentials or mutate any product
   assert.ok(JSON.stringify(appOnlyVerifierLauncherPolicy(verifierArn)).length <= 10240);
 });
 
-test("new principals require the exact repository protected production OIDC identity", () => {
-  assert.deepEqual(appOnlyProductionOidcTrust(), { Version: "2012-10-17", Statement: [{ Effect: "Allow",
-    Action: "sts:AssumeRoleWithWebIdentity", Principal: { Federated: `arn:aws:iam::${APP_ONLY.account}:oidc-provider/token.actions.githubusercontent.com` },
-    Condition: { StringEquals: { "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-      "token.actions.githubusercontent.com:sub": "repo:T-ej2003/genuine-scan-main:environment:production" } } }] });
+test("new principals require production approval plus exact role-specific reusable workflow claims", () => {
+  assert.throws(() => appOnlyProductionOidcTrust());
+  assert.throws(() => appOnlyProductionOidcTrust("unrelated-role"));
+  for (const role of [APP_ONLY.roleArn.split("/").at(-1), APP_ONLY_PROVISIONING.roleName, APP_ONLY_VERIFIER.roleName]) {
+    const trust = appOnlyProductionOidcTrust(role), condition = trust.Statement[0].Condition.StringEquals;
+    assert.equal(trust.Statement.length, 1);
+    assert.equal(trust.Statement[0].Action, "sts:AssumeRoleWithWebIdentity");
+    assert.equal(condition["token.actions.githubusercontent.com:aud"], "sts.amazonaws.com");
+    assert.equal(condition["token.actions.githubusercontent.com:sub"], "repo:T-ej2003/genuine-scan-main:environment:production");
+    assert.equal(condition["token.actions.githubusercontent.com:repository_id"], "1145608538");
+    assert.equal(condition["token.actions.githubusercontent.com:repository_owner_id"], "183396573");
+    assert.equal(condition["token.actions.githubusercontent.com:ref"], "refs/heads/main");
+    const refs = condition["token.actions.githubusercontent.com:job_workflow_ref"];
+    assert.ok(refs.length > 0 && refs.every((ref) => ref.endsWith("-operation.yml@refs/heads/main") && !ref.includes("*")));
+    const deploy = "T-ej2003/genuine-scan-main/.github/workflows/deploy-production-app-only-operation.yml@refs/heads/main";
+    if (role === APP_ONLY.roleArn.split("/").at(-1)) assert.deepEqual(refs, [deploy]);
+    else assert.ok(!refs.includes(deploy), "Application deployment cannot assume verifier or provisioner identity");
+  }
 });

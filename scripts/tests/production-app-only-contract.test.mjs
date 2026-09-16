@@ -100,6 +100,20 @@ test("rollback is only the recorded predecessor while deployment ownership remai
   assert.throws(() => assertAppOnlyRollbackOwnership(input));
 });
 
+test("all mutable service settings including unknown future fields bind activation and rollback CAS", () => {
+  for (const [field, value] of Object.entries({ healthCheckGracePeriodSeconds: 90, propagateTags: "SERVICE",
+    enableECSManagedTags: true, serviceConnectConfiguration: { enabled: true }, availabilityZoneRebalancing: "DISABLED",
+    volumeConfigurations: [{ name: "changed" }], vpcLatticeConfigurations: [{ targetGroupArn: "changed" }],
+    tags: [{ key: "authority", value: "changed" }], futureMutableSetting: { changed: true } })) {
+    const live = fixture(), predecessor = captureAppOnlyPredecessor(live);
+    live.service[field] = value;
+    assert.throws(() => assertAppOnlyCas(predecessor, captureAppOnlyPredecessor(live)), field);
+    live.service.taskDefinition = arn(23);
+    live.service.deployments = [{ id: "ecs-svc/200", status: "PRIMARY", taskDefinition: arn(23) }];
+    assert.throws(() => assertAppOnlyRollbackOwnership({ service: live.service, predecessor, candidateArn: arn(23), candidateDeploymentId: "ecs-svc/200" }), field);
+  }
+});
+
 test("missing or non-AWS deployment identity cannot become a predecessor even when tasks omit it too", () => {
   for (const id of [undefined, "", "ecs-svc/original", "svc/123", "ecs-svc/0"]) {
     const live = fixture(); live.service.deployments[0].id = id;

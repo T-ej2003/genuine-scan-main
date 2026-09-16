@@ -1,72 +1,41 @@
 name: Prepare production app-only compatibility verifier
-
-on:
+'on':
   workflow_dispatch:
     inputs:
-      source_sha: { description: Exact protected-main SHA, required: true, type: string }
-      candidate_digest: { description: Authenticated immutable backend digest, required: true, type: string }
-      publication_reference: { description: Compact publication artifact identity JSON, required: true, type: string }
-      image_authorization_reference: { description: Compact signed image authorization artifact identity JSON, required: true, type: string }
-      requirements_reference: { description: Compact canonical requirements artifact identity JSON, required: true, type: string }
-
-permissions: { contents: read, actions: read }
-concurrency: { group: production-deploy, cancel-in-progress: false }
-
+      source_sha:
+        description: Exact protected-main SHA
+        required: true
+        type: string
+      candidate_digest:
+        description: Authenticated immutable backend digest
+        required: true
+        type: string
+      publication_reference:
+        description: Compact publication artifact identity JSON
+        required: true
+        type: string
+      image_authorization_reference:
+        description: Compact signed image authorization artifact identity JSON
+        required: true
+        type: string
+      requirements_reference:
+        description: Compact canonical requirements artifact identity JSON
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
 jobs:
-  prepare:
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    environment: production
-    permissions: { contents: read, actions: read, id-token: write }
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v6
-        with: { ref: '${{ github.sha }}', fetch-depth: 0, persist-credentials: false }
-      - uses: actions/setup-node@v6
-        with: { node-version: 24, cache: npm }
-      - uses: hashicorp/setup-terraform@v3
-        with: { terraform_version: 1.15.8, terraform_wrapper: false }
-      - run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: Authenticate source and compact inputs before obtaining AWS credentials
-        env:
-          SOURCE_SHA: ${{ inputs.source_sha }}
-          CANDIDATE_DIGEST: ${{ inputs.candidate_digest }}
-          PUBLICATION_REFERENCE: ${{ inputs.publication_reference }}
-          IMAGE_AUTHORIZATION_REFERENCE: ${{ inputs.image_authorization_reference }}
-          REQUIREMENTS_REFERENCE: ${{ inputs.requirements_reference }}
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          node --input-type=module <<'NODE'
-          import { parseAppOnlyVerifierPreparationArgs } from './scripts/aws/prepare-production-app-only-verifier.mjs';
-          parseAppOnlyVerifierPreparationArgs(['--source-sha',process.env.SOURCE_SHA,'--candidate-digest',process.env.CANDIDATE_DIGEST,'--publication-reference',process.env.PUBLICATION_REFERENCE,'--image-authorization-reference',process.env.IMAGE_AUTHORIZATION_REFERENCE,'--requirements-reference',process.env.REQUIREMENTS_REFERENCE]);
-          NODE
-          test "$SOURCE_SHA" = "$(gh api repos/T-ej2003/genuine-scan-main/branches/main --jq .commit.sha)"
-          test -z "$(git status --porcelain=v1 --untracked-files=all)"
-      - name: Assume separate compatibility reader identity
-        uses: aws-actions/configure-aws-credentials@v6
-        with:
-          aws-region: eu-west-2
-          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-app-only-verifier-launcher
-          unset-current-credentials: true
-      - name: Collect fresh read-only compatibility and exact verifier preparation
-        id: prepare
-        env:
-          SOURCE_SHA: ${{ inputs.source_sha }}
-          CANDIDATE_DIGEST: ${{ inputs.candidate_digest }}
-          PUBLICATION_REFERENCE: ${{ inputs.publication_reference }}
-          IMAGE_AUTHORIZATION_REFERENCE: ${{ inputs.image_authorization_reference }}
-          REQUIREMENTS_REFERENCE: ${{ inputs.requirements_reference }}
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          umask 077
-          result="$(node scripts/aws/prepare-production-app-only-verifier.mjs --source-sha "$SOURCE_SHA" --candidate-digest "$CANDIDATE_DIGEST" --publication-reference "$PUBLICATION_REFERENCE" --image-authorization-reference "$IMAGE_AUTHORIZATION_REFERENCE" --requirements-reference "$REQUIREMENTS_REFERENCE")"
-          printf 'path=%s\n' "$(jq -r .artifactPath <<<"$result")" >> "$GITHUB_OUTPUT"
-          jq '{artifactSha256,preparationSha256,predecessorTaskDefinition,predecessorDigest,candidateDigest}' <<<"$result" >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: production-app-only-verifier-preparation
-          path: ${{ steps.prepare.outputs.path }}
-          if-no-files-found: error
-          retention-days: 7
+  operation:
+    if: github.ref == 'refs/heads/main' && github.run_attempt == 1
+    uses: ./.github/workflows/prepare-production-app-only-verifier-operation.yml
+    with:
+      source_sha: ${{ inputs.source_sha }}
+      candidate_digest: ${{ inputs.candidate_digest }}
+      publication_reference: ${{ inputs.publication_reference }}
+      image_authorization_reference: ${{ inputs.image_authorization_reference }}
+      requirements_reference: ${{ inputs.requirements_reference }}

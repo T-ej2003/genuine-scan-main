@@ -17,7 +17,7 @@ const noFailures = (value) => { assert.equal((value.failures || []).length, 0, "
 export function createAppOnlyEcsReaders(run) {
   const aws = (args) => parse(run([...args, "--output", "json", "--no-cli-pager"]));
   const readService = () => {
-    const response = noFailures(aws(["ecs", "describe-services", "--cluster", APP_ONLY.clusterArn, "--services", APP_ONLY.serviceArn]));
+    const response = noFailures(aws(["ecs", "describe-services", "--cluster", APP_ONLY.clusterArn, "--services", APP_ONLY.serviceArn, "--include", "TAGS"]));
     assert.equal(response.services?.length, 1);
     const service = response.services[0];
     assert.equal(service.clusterArn, APP_ONLY.clusterArn); assert.equal(service.serviceArn, APP_ONLY.serviceArn);

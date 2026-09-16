@@ -63,7 +63,7 @@ export function observeAppOnlyProvisioning({ run, verifierArn }) {
     assert.equal(role.MaxSessionDuration, 3600); assert.equal((role.Tags || []).length, 0);
     assert.equal(role.PermissionsBoundary?.PermissionsBoundaryArn, spec.boundaryArn);
     assert.equal(role.PermissionsBoundary.PermissionsBoundaryType, "Policy");
-    assert.equal(trustHash(role.AssumeRolePolicyDocument), trustHash(appOnlyProductionOidcTrust()));
+    assert.equal(trustHash(role.AssumeRolePolicyDocument), trustHash(appOnlyProductionOidcTrust(name)));
     assert.ok(typeof role.RoleId === "string" && role.RoleId.length > 0);
     const attached = aws(["iam", "list-attached-role-policies", "--role-name", name]);
     const inline = aws(["iam", "list-role-policies", "--role-name", name]);
@@ -95,7 +95,7 @@ export function prepareAppOnlyProvisioning({ sourceSha, verifierArn, phase, elig
   const predecessor = observeAppOnlyProvisioning({ run, verifierArn });
   assert.deepEqual(observeAppOnlyProvisioning({ run, verifierArn }), predecessor, "IAM changed during preparation");
   const body = { schemaVersion: 1, kind: "APP_ONLY_PERMISSION_PREPARATION", sourceSha, verifierArn, phase, eligibilitySha256,
-    generatedAt: new Date(now).toISOString(), trustSha256: trustHash(appOnlyProductionOidcTrust()), predecessor, desired };
+    generatedAt: new Date(now).toISOString(), trustSha256: canonicalSha256(specifications(verifierArn).map(({ arn }) => appOnlyProductionOidcTrust(arn.split("/").at(-1)))), predecessor, desired };
   return { ...body, preparationSha256: canonicalSha256(body) };
 }
 
@@ -159,7 +159,7 @@ export async function executeAppOnlyProvisioning({ preparation, sourceSha, eligi
   assert.equal(preparationSha256, canonicalSha256(body));
   assert.equal(body.schemaVersion, 1); assert.equal(body.kind, "APP_ONLY_PERMISSION_PREPARATION");
   assert.match(sourceSha || "", /^[a-f0-9]{40}$/); assert.equal(body.sourceSha, sourceSha);
-  assert.equal(body.trustSha256, trustHash(appOnlyProductionOidcTrust()));
+  assert.equal(body.trustSha256, canonicalSha256(specifications(body.verifierArn).map(({ arn }) => appOnlyProductionOidcTrust(arn.split("/").at(-1)))));
   const specs = specifications(body.verifierArn);
   assert.equal(body.eligibilitySha256, eligibilityBinding(body.phase, eligibility, sourceSha, now()));
   assert.deepEqual(body.desired, specs.filter(({ arn }) => selectedRole(body.phase, arn))
@@ -188,7 +188,7 @@ export async function executeAppOnlyProvisioning({ preparation, sourceSha, eligi
       if (!expected[i].roleId) {
         await beforeWrite(); await record("CREATE_ROLE_INTENT", { roleArn: spec.arn }); writesAttempted++;
         aws(["iam", "create-role", "--role-name", name, "--path", "/", "--max-session-duration", "3600",
-          "--permissions-boundary", spec.boundaryArn, "--assume-role-policy-document", canonicalJson(appOnlyProductionOidcTrust())]);
+          "--permissions-boundary", spec.boundaryArn, "--assume-role-policy-document", canonicalJson(appOnlyProductionOidcTrust(name))]);
         const observed = observeAppOnlyProvisioning({ run, verifierArn: body.verifierArn });
         assert.ok(observed[i].roleId); assert.equal(observed[i].policySha256, null);
         const next = structuredClone(expected); next[i].roleId = observed[i].roleId;

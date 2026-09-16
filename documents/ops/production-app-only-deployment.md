@@ -344,6 +344,10 @@ This verifies provider-schema planning, not live IAM authorization or mutation.
   integration. Full integrated closure is still pending; these are local results,
   not live proof.
 - Changed-file ESLint: passed.
+- Provider maintenance must run `terraform providers lock -platform=linux_amd64
+  -platform=darwin_arm64` in the isolated permission root. Linux CI exposed the
+  missing Linux package hash; HashiCorp-signed lock generation and a regression
+  now bind both reviewed platform packages without weakening readonly init.
 - Final handoff regression rejects rehashed cross-phase, source, verifier and
   eligibility substitutions. CI lint includes all app-only CLI entrypoints.
 - The secret guard permits exact source-derived IAM resource identifiers only
@@ -357,6 +361,28 @@ This verifies provider-schema planning, not live IAM authorization or mutation.
 - No live database verification or production mutation performed.
 
 ### Pre-push hostile review findings addressed
+
+### PR #524 current-head review corrections
+
+- Enum compatibility now binds ordered `pg_enum` labels for scalar and array
+  columns, not only the PostgreSQL type name. A real PostgreSQL label substitution
+  with an unchanged type name must reject compatibility.
+- ECS CAS hashes every service field except enumerated observations and identities
+  bound separately. Newly introduced mutable fields are retained automatically;
+  service-connect, managed tags, grace periods and unknown settings cannot evade
+  deployment or rollback ownership checks.
+- Role trusts require exact role-specific reusable `job_workflow_ref` claims,
+  immutable repository/owner IDs and `refs/heads/main` in addition to the protected
+  production subject. Dispatch wrappers retain concurrency; reusable implementations
+  retain actual production approval. Unrelated production workflows cannot assume
+  these roles directly, and the deploy implementation is trusted by neither the
+  verifier nor provisioner role. The two preparation/verification implementations
+  intentionally use separate verifier/provisioner sessions for their fixed phases;
+  neither is trusted by the app deployer. No generic execution input is provided.
+  This uses the current AWS-documented GitHub claim support, not a repository-wide
+  subject customization or an unsupported `workflow_ref` condition. See
+  [AWS IAM OIDC condition keys](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_iam-condition-keys.html)
+  and [GitHub reusable-workflow OIDC](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-with-reusable-workflows).
 
 - Corrected AWS task-definition read scope; no unsupported resource restriction.
 - Bound private handoffs, actual approval events and semantic preparation closure;

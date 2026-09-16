@@ -170,6 +170,13 @@ test("ECS reader rejects service substitution and AWS partial failures", () => {
     assert.throws(() => createAppOnlyEcsReaders(() => response).readService());
   }
 });
+test("service observation requests tags for the authenticated mutable configuration", () => {
+  const service = { serviceArn: APP_ONLY.serviceArn, clusterArn: APP_ONLY.clusterArn };
+  createAppOnlyEcsReaders((args) => {
+    assert.equal(args[args.indexOf("--include") + 1], "TAGS");
+    return { services: [service] };
+  }).readService();
+});
 test("configuration-only service races invalidate the entire live snapshot", () => {
   let reads = 0;
   const service = { clusterArn: APP_ONLY.clusterArn, serviceArn: APP_ONLY.serviceArn, taskDefinition: predecessorArn,

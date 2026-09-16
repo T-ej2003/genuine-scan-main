@@ -6,6 +6,26 @@ import { parseAppOnlyVerifierPreparationArgs } from "../aws/prepare-production-a
 import { parseAppOnlyVerifierExecutionArgs } from "../aws/run-production-app-only-verifier.mjs";
 import { parseAppOnlyExecutionArgs, assertAppOnlyReleaseInputs } from "../aws/run-production-app-only-deployment.mjs";
 import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
+import { APP_ONLY_OIDC_WORKFLOWS, appOnlyProductionOidcTrust } from "../aws/production-app-only-policy.mjs";
+
+test("OIDC workflow claims bind reviewed reusable code and preserve protected approval and concurrency", () => {
+  for (const [role, names] of Object.entries(APP_ONLY_OIDC_WORKFLOWS)) for (const name of names) {
+    const wrapper = yaml.load(fs.readFileSync(`.github/workflows/${name}.yml`, "utf8"));
+    const operation = yaml.load(fs.readFileSync(`.github/workflows/${name}-operation.yml`, "utf8"));
+    assert.deepEqual(Object.keys(wrapper.jobs), ["operation"]);
+    assert.equal(wrapper.jobs.operation.uses, `./.github/workflows/${name}-operation.yml`);
+    assert.equal(wrapper.concurrency.group, "production-deploy");
+    assert.equal(wrapper.concurrency["cancel-in-progress"], false);
+    assert.equal(operation.concurrency, undefined, "Reusable job cannot deadlock its caller concurrency group");
+    assert.deepEqual(Object.keys(operation.on), ["workflow_call"]);
+    assert.deepEqual(operation.on.workflow_call.inputs, wrapper.on.workflow_dispatch.inputs);
+    const jobs = Object.values(operation.jobs).filter((job) => job.steps?.some((step) => step.with?.["role-to-assume"]?.endsWith(`/${role}`)));
+    assert.ok(jobs.length > 0);
+    for (const job of jobs) assert.equal(job.environment, "production");
+    assert.ok(appOnlyProductionOidcTrust(role).Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:job_workflow_ref"]
+      .includes(`T-ej2003/genuine-scan-main/.github/workflows/${name}-operation.yml@refs/heads/main`));
+  }
+});
 
 test("release handoff rejects substituted permission and deployment identities even when rehashed", () => {
   const source = "a".repeat(40), preparationSha256 = "b".repeat(64), verifierArn = "authenticated-verifier";
@@ -44,17 +64,17 @@ test("application execution binds exact workflow, source and private or immutabl
 
 test("application and IAM execution use separate protected approvals and isolated roles", () => {
   for (const [workflowName, mode, role] of [["provision-production-app-only-deployer", "provision", "permission-provisioner"], ["deploy-production-app-only", "deploy", "deployer"]]) {
-    const source = fs.readFileSync(`.github/workflows/${workflowName}.yml`, "utf8"), workflow = yaml.load(source);
+    const source = fs.readFileSync(`.github/workflows/${workflowName}-operation.yml`, "utf8"), workflow = yaml.load(source);
     const job = workflow.jobs[mode];
     assert.equal(job.environment, "production"); assert.equal(job.needs, "review");
-    assert.equal(workflow.jobs.review.environment, undefined); assert.equal(workflow.concurrency.group, "production-deploy");
-    assert.equal(workflow.concurrency["cancel-in-progress"], false);
+    assert.equal(workflow.jobs.review.environment, undefined); assert.equal(workflow.concurrency, undefined);
+    assert.equal(workflow.concurrency, undefined);
     const roles = job.steps.filter((step) => step.uses?.startsWith("aws-actions/configure-aws-credentials@"));
     assert.equal(roles.length, 1); assert.equal(roles[0].with["role-to-assume"], `arn:aws:iam::368992683803:role/mscqr-production-app-only-${role}`);
     assert.equal(roles[0].with["unset-current-credentials"], true);
     assert.match(source, /--require-actual-approval/); assert.match(source, /if: always\(\).*steps\.operation\.outputs\.journal/);
     assert.doesNotMatch(source, /run-task|execute-command|terraform apply|release-gate|tfvars_base64/);
-    assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), ["preparation_reference", "source_sha", ...(mode === "deploy" ? ["provisioning_reference"] : [])].sort());
+    assert.deepEqual(Object.keys(workflow.on.workflow_call.inputs).sort(), ["preparation_reference", "source_sha", ...(mode === "deploy" ? ["provisioning_reference"] : [])].sort());
     for (const phase of Object.values(workflow.jobs)) for (const step of phase.steps)
       if (step.run) assert.doesNotMatch(step.run, /\$\{\{\s*inputs\./);
   }
@@ -77,12 +97,12 @@ test("verifier execution rejects overrides, workflow reruns and unbound private 
 });
 
 test("verifier workflow previews exact preparation then separates protected provisioner and launcher credentials", () => {
-  const source = fs.readFileSync(".github/workflows/verify-production-app-only-compatibility.yml", "utf8");
+  const source = fs.readFileSync(".github/workflows/verify-production-app-only-compatibility-operation.yml", "utf8");
   const workflow = yaml.load(source), job = workflow.jobs.verify;
-  assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), ["preparation_reference", "source_sha"]);
+  assert.deepEqual(Object.keys(workflow.on.workflow_call.inputs).sort(), ["preparation_reference", "source_sha"]);
   assert.equal(workflow.jobs.review.environment, undefined);
   assert.equal(job.needs, "review"); assert.equal(job.environment, "production");
-  assert.equal(workflow.concurrency["cancel-in-progress"], false);
+  assert.equal(workflow.concurrency, undefined);
   const roles = job.steps.filter((s) => s.uses?.startsWith("aws-actions/configure-aws-credentials@"));
   assert.deepEqual(roles.map((s) => s.with["role-to-assume"].split("/").at(-1)), ["mscqr-production-app-only-permission-provisioner", "mscqr-production-app-only-verifier-launcher"]);
   assert.ok(roles.every((s) => s.with["unset-current-credentials"] === true));
@@ -111,12 +131,12 @@ test("verifier preparation accepts compact authenticated identities only on exac
 });
 
 test("verifier preparation uses protected isolated reader with step-scoped GitHub access", () => {
-  const source = fs.readFileSync(".github/workflows/prepare-production-app-only-verifier.yml", "utf8");
+  const source = fs.readFileSync(".github/workflows/prepare-production-app-only-verifier-operation.yml", "utf8");
   const workflow = yaml.load(source); const job = workflow.jobs.prepare;
   assert.equal(job.environment, "production");
   assert.equal(job.if, "github.ref == 'refs/heads/main'");
   assert.deepEqual(job.permissions, { contents: "read", actions: "read", "id-token": "write" });
-  assert.equal(workflow.concurrency["cancel-in-progress"], false);
+  assert.equal(workflow.concurrency, undefined);
   const credentials = job.steps.findIndex((step) => step.uses?.startsWith("aws-actions/configure-aws-credentials@"));
   assert.ok(credentials > job.steps.findIndex((step) => step.run?.includes("parseAppOnlyVerifierPreparationArgs")));
   assert.equal(job.steps[credentials].with["role-to-assume"], "arn:aws:iam::368992683803:role/mscqr-production-app-only-verifier-launcher");

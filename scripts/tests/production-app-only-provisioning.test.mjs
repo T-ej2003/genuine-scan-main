@@ -54,7 +54,7 @@ test("separate provisioner installs only exact bounded roles/policies and reads 
   assert.deepEqual(mutations(f).map((c) => c[1]), ["create-role", "put-role-policy", "create-role", "put-role-policy"]);
   assert.deepEqual(f.policies.get(APP_ONLY.roleArn.split("/").at(-1)), appOnlyDeployerPolicy());
   assert.deepEqual(f.policies.get(APP_ONLY_VERIFIER.roleName), appOnlyVerifierLauncherPolicy(verifierArn));
-  for (const role of f.roles.values()) assert.deepEqual(role.AssumeRolePolicyDocument, appOnlyProductionOidcTrust());
+  for (const role of f.roles.values()) assert.deepEqual(role.AssumeRolePolicyDocument, appOnlyProductionOidcTrust(role.RoleName));
   assert.equal(f.evidence.at(-1).status, "VERIFIED");
   const before = mutations(f).length;
   await executeAppOnlyProvisioning(f.execution(prepareAppOnlyProvisioning(f.input)));
