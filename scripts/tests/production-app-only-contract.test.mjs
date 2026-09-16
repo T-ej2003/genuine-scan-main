@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import vm from "node:vm";
+import ts from "typescript";
 import { APP_ONLY, APP_ONLY_DOMAINS, buildAppOnlyCandidate, assertAppOnlyCandidate, assertRegisteredAppOnlyCandidate, captureAppOnlyPredecessor, assertAppOnlyCas, assertAppOnlyEvidenceIdentity, evaluateAppOnlyDomains, assertAppOnlyRollbackOwnership, appOnlyExpectedHealthSourceSha } from "../aws/production-app-only-contract.mjs";
 import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
 
@@ -10,15 +12,27 @@ const arn = (revision) => `arn:aws:ecs:${APP_ONLY.region}:${APP_ONLY.account}:ta
 
 test("health metadata precedence matches backend source while image identity remains separate", () => {
   const source = fs.readFileSync("backend/src/observability/release.ts", "utf8");
-  const expression = source.match(/const gitSha = firstKnownValue\(([\s\S]*?)\);/)[1];
-  assert.deepEqual([...expression.matchAll(/process\.env\.([A-Z_]+)/g)].map((match) => match[1]),
-    ["RELEASE_GIT_SHA", "GITHUB_SHA", "COMMIT_SHA", "GIT_SHA", "RENDER_GIT_COMMIT", "VERCEL_GIT_COMMIT_SHA"]);
+  const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true } }).outputText;
+  const imageSha = "a".repeat(40), deploymentSha = "b".repeat(40);
+  for (const metadata of [{ gitSha: imageSha }, { gitSha: "malformed" }, null]) {
+    const exports = {};
+    vm.runInNewContext(compiled, { exports, __dirname: "/app/dist/observability", process: { env: { NODE_ENV: "production", RELEASE_GIT_SHA: deploymentSha } }, require: (name) => {
+      if (name === "../../package.json") return { name: "fixture", version: "1" };
+      if (name === "node:path") return { resolve: () => "/app/image-source.json" };
+      if (name === "node:fs") return { readFileSync: () => { if (metadata === null) throw new Error("missing"); return JSON.stringify(metadata); } };
+      throw new Error(`Unexpected dependency: ${name}`);
+    } });
+    const result = exports.releaseMetadata;
+    assert.equal(result.deploymentGitSha, deploymentSha);
+    assert.equal(result.imageGitSha, metadata?.gitSha === imageSha ? imageSha : "unknown");
+    assert.equal(result.gitSha, result.imageGitSha, "Production identity must not fall back to deployment variables");
+  }
   const definition = fixture().definition, imageSource = "a".repeat(40), configured = "b".repeat(40);
   const backend = definition.containerDefinitions.find((container) => container.name === "backend");
   backend.environment = [{ name: "GIT_SHA", value: configured }];
   assert.equal(appOnlyExpectedHealthSourceSha(definition, imageSource), imageSource, "Image RELEASE_GIT_SHA takes priority over GIT_SHA override");
   backend.environment.push({ name: "RELEASE_GIT_SHA", value: configured });
-  assert.equal(appOnlyExpectedHealthSourceSha(definition, imageSource), configured);
+  assert.equal(appOnlyExpectedHealthSourceSha(definition, imageSource), imageSource);
   backend.environment.push({ name: "RELEASE_GIT_SHA", value: imageSource });
   assert.throws(() => appOnlyExpectedHealthSourceSha(definition, imageSource));
   backend.environment = []; backend.secrets = [{ name: "RELEASE_GIT_SHA", valueFrom: "unproven" }];

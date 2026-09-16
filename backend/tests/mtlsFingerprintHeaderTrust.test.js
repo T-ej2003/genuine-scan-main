@@ -12,6 +12,10 @@ const originalTrustedProxies = process.env.PRINT_AGENT_MTLS_TRUSTED_PROXY_IPS;
 
 try {
   process.env.PRINT_AGENT_MTLS_TRUSTED_PROXY_IPS = "10.0.0.10";
+  assert.strictEqual(getTrustedMtlsFingerprintHeader(buildReq({
+    ip: "10.0.0.10", remoteAddress: "198.51.100.50",
+    headers: { "x-forwarded-for": "10.0.0.10", "x-client-cert-fingerprint": "forged" },
+  })), null, "forwarded addresses cannot confer proxy authority on a direct connection");
   assert.strictEqual(
     getTrustedMtlsFingerprintHeader(
       buildReq({

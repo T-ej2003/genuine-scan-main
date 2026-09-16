@@ -53,15 +53,16 @@ export function useDashboardStats(licenseeId?: string) {
   });
 }
 
-export function useDashboardAuditLogs(enabled: boolean, limit = 5) {
+export function useDashboardAuditLogs(enabled: boolean, limit = 5, licenseeId?: string) {
   const activePrintSuppressed = useActivePrintSessionSuppression();
   return useQuery({
-    queryKey: queryKeys.dashboard.audit(limit),
-    enabled: enabled && !activePrintSuppressed,
+    queryKey: [...queryKeys.dashboard.audit(limit), licenseeId || null],
+    enabled: enabled && Boolean(licenseeId) && !activePrintSuppressed,
     staleTime: pollingPolicy.dashboardFallbackMs,
     refetchOnWindowFocus: false,
     queryFn: async (): Promise<DashboardAuditLogsResult> => {
-      const response = await apiClient.getAuditLogs({ limit });
+      if (!licenseeId) throw new Error("Select a brand before loading audit history");
+      const response = await apiClient.getAuditLogs({ limit, licenseeId, purpose: "dashboard-activity-review" });
       const payload = unwrapParsedApiResponse(
         response,
         auditLogArraySchema.or(z.object({ logs: auditLogArraySchema }).passthrough()),

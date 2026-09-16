@@ -72,6 +72,22 @@ describe("Manufacturers licensee linking flow", () => {
     } as any);
   });
 
+  it("offers a bounded second directory page without dropping tenant scope or count", async () => {
+    vi.mocked(apiClient.getManufacturers).mockImplementation(async (options) => {
+      const offset = typeof options === "object" ? options.offset || 0 : 0;
+      return { success: true, data: [{ id: `maker-${offset}`, name: `Factory ${offset}`, email: `factory${offset}@example.test`, isActive: true }],
+        meta: { total: 101, limit: 100, offset } };
+    });
+    renderWithQueryClient(<MemoryRouter><Manufacturers /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Next manufacturer page" })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole("button", { name: "Next manufacturer page" }));
+    await waitFor(() => expect(apiClient.getManufacturers).toHaveBeenLastCalledWith({
+      licenseeId: "lic-1", includeInactive: true, limit: 100, offset: 100,
+    }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Next manufacturer page" })).toBeDisabled());
+    expect(screen.getByText(/summaries apply to the selected pages/)).toBeInTheDocument();
+  });
+
   it("links an existing manufacturer into the current licensee scope", async () => {
     renderWithQueryClient(
       <MemoryRouter>

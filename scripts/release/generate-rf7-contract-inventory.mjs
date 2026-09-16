@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import ts from "typescript";
+import { literalPath } from "./route-literal-path.mjs";
 import { scanProductionAccess } from "../rls/lib/program-inventory.mjs";
 import { validateNamedSqlFunctionContracts } from "../rls/lib/named-sql-function-contracts.mjs";
 
@@ -119,29 +120,6 @@ for (const source of backendProgram.getSourceFiles()) {
   }
 }
 while (pendingBackendFunctions.length) queueReferences(pendingBackendFunctions.shift());
-const literalPath = (node, source) => {
-  if (ts.isStringLiteralLike(node)) return node.text;
-  if (!ts.isTemplateExpression(node)) return null;
-  let value = node.head.text;
-  for (const span of node.templateSpans) {
-    const expression = textOf(span.expression, source);
-    if (expression === "BASE_URL") {
-      value += span.literal.text;
-      continue;
-    }
-    if (
-      expression === "endpoint" ||
-      expression === "url" ||
-      expression === "query" ||
-      expression.includes("params.toString()") ||
-      span.literal.text.startsWith("?")
-    ) {
-      return value || null;
-    }
-    value += `:${expression.replace(/\W+/g, "_")}${span.literal.text}`;
-  }
-  return value;
-};
 const canonicalPath = (value) =>
   String(value || "")
     .split("?")[0]
@@ -342,7 +320,10 @@ const result = {
     rollback: item.security?.rollbackDefinition || null,
   })),
   backendAuthority: {
-    reachableFunctions: [...reachableBackendFunctions].sort(),
+    reachableFunctions: [...reachableBackendFunctions].sort().map((reference) => {
+      const separator = reference.indexOf(":");
+      return { source: reference.slice(0, separator), symbol: reference.slice(separator + 1) };
+    }),
   },
   backendRoutes: routes.sort((a, b) => `${a.path}:${a.method}:${a.source}`.localeCompare(`${b.path}:${b.method}:${b.source}`)),
   frontendConsumers: frontendConsumers.sort((a, b) => a.source.localeCompare(b.source)),

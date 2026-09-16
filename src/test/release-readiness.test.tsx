@@ -1,7 +1,7 @@
 import React from "react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 
 import ReleaseReadiness from "@/pages/ReleaseReadiness";
@@ -19,6 +19,7 @@ vi.mock("@/components/layout/DashboardLayout", () => ({
 
 vi.mock("@/lib/api-client", () => ({
   default: {
+    getLicensees: vi.fn(),
     getInternalReleaseMetadata: vi.fn(),
     getComplianceReport: vi.fn(),
     getCompliancePackJobs: vi.fn(),
@@ -31,6 +32,7 @@ vi.mock("@/lib/api-client", () => ({
 describe("Release readiness page", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(apiClient.getLicensees).mockResolvedValue({ success: true, data: [{ id: "tenant-fixture", name: "Fixture brand" }] });
 
     vi.mocked(apiClient.getInternalReleaseMetadata).mockResolvedValue({
       success: true,
@@ -118,10 +120,15 @@ describe("Release readiness page", () => {
     );
 
     expect(await screen.findByText("Release readiness")).toBeInTheDocument();
+    expect(apiClient.getComplianceReport).not.toHaveBeenCalled();
+    expect(apiClient.getCompliancePackJobs).not.toHaveBeenCalled();
+    await screen.findByRole("option", { name: "Fixture brand" });
+    fireEvent.change(screen.getByRole("combobox", { name: "Compliance brand scope" }), { target: { value: "tenant-fixture" } });
 
     await waitFor(() => {
       expect(vi.mocked(apiClient.getInternalReleaseMetadata)).toHaveBeenCalled();
-      expect(vi.mocked(apiClient.getComplianceReport)).toHaveBeenCalled();
+      expect(vi.mocked(apiClient.getComplianceReport)).toHaveBeenCalledWith({ licenseeId: "tenant-fixture" });
+      expect(vi.mocked(apiClient.getCompliancePackJobs)).toHaveBeenCalledWith({ licenseeId: "tenant-fixture", limit: 10, offset: 0 });
       expect(vi.mocked(apiClient.getRateLimitAlerts)).toHaveBeenCalledWith({ windowMs: 60 * 60 * 1000 });
     });
 

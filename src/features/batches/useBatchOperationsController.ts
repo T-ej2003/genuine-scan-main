@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { buildStableBatchOverviewRows, type StableBatchOverviewRow } from "@/lib/batch-workspace";
 import apiClient from "@/lib/api-client";
@@ -32,6 +32,7 @@ type ProgressLike = {
 type UseBatchOperationsControllerParams = {
   role?: string | null;
   userLicenseeId?: string | null;
+  selectedLicenseeId?: string;
   searchParams: URLSearchParams;
   canAssignManufacturer: boolean;
   canDelete: boolean;
@@ -43,6 +44,7 @@ type UseBatchOperationsControllerParams = {
 export function useBatchOperationsController({
   role,
   userLicenseeId,
+  selectedLicenseeId,
   searchParams,
   canAssignManufacturer,
   canDelete,
@@ -69,39 +71,55 @@ export function useBatchOperationsController({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteBatch, setDeleteBatch] = useState<BatchRow | null>(null);
 
-  const batchesQuery = useBatches(undefined, false);
-  const manufacturersQuery = useAssignableManufacturers(userLicenseeId || undefined, false);
+  const licenseeScope = role === "super_admin" ? selectedLicenseeId : userLicenseeId || undefined;
+  const [batchPage, setBatchPage] = useState({ scope: licenseeScope, offset: 0 });
+  const batchOffset = batchPage.scope === licenseeScope ? batchPage.offset : 0;
+  const currentScope = useRef(licenseeScope);
+  currentScope.current = licenseeScope;
+  const currentOffset = useRef(batchOffset);
+  currentOffset.current = batchOffset;
+  const batchesQuery = useBatches(licenseeScope, false, batchOffset);
+  const [manufacturerPage, setManufacturerPage] = useState({ scope: userLicenseeId, offset: 0 });
+  const manufacturerOffset = manufacturerPage.scope === userLicenseeId ? manufacturerPage.offset : 0;
+  const manufacturersQuery = useAssignableManufacturers(userLicenseeId || undefined, false, manufacturerOffset);
 
   const fetchBatches = async (options?: { force?: boolean }) => {
+    if (role === "super_admin" && !licenseeScope) {
+      setRows([]);
+      setError("Select a brand to view its batches.");
+      setLoading(false);
+      return;
+    }
     if (isActivePrintSessionSuppressed() && !options?.force) return;
     setLoading(true);
     setError(null);
     try {
       const result = await batchesQuery.refetch();
+      if (currentScope.current !== licenseeScope || currentOffset.current !== batchOffset) return;
       if (!result.data) {
         setRows([]);
         setError(result.error instanceof Error ? result.error.message : "Failed to load batches");
         return;
       }
 
-      setRows(Array.isArray(result.data) ? (result.data as BatchRow[]) : []);
+      setRows(result.data.rows as BatchRow[]);
     } catch (error) {
+      if (currentScope.current !== licenseeScope || currentOffset.current !== batchOffset) return;
       setRows([]);
       setError(error instanceof Error ? error.message : "Failed to load batches");
     } finally {
-      setLoading(false);
+      if (currentScope.current === licenseeScope && currentOffset.current === batchOffset) setLoading(false);
     }
   };
 
   const fetchManufacturersForAssign = async () => {
     if (!canAssignManufacturer) return;
-    const result = await manufacturersQuery.refetch();
-    setManufacturers(Array.isArray(result.data) ? (result.data as ManufacturerRow[]) : []);
+    await manufacturersQuery.refetch();
   };
 
   useEffect(() => {
     if (batchesQuery.data) {
-      setRows(Array.isArray(batchesQuery.data) ? (batchesQuery.data as BatchRow[]) : []);
+      setRows(batchesQuery.data.rows as BatchRow[]);
       setError(null);
     }
   }, [batchesQuery.data]);
@@ -114,9 +132,10 @@ export function useBatchOperationsController({
   }, [batchesQuery.error]);
 
   useEffect(() => {
+    setRows([]);
     void fetchBatches();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [licenseeScope, batchOffset]);
 
   useEffect(() => {
     const manufacturerName = String(searchParams.get("manufacturerName") || "").trim();
@@ -138,19 +157,17 @@ export function useBatchOperationsController({
     });
     return off;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canAssignManufacturer, userLicenseeId]);
+  }, [canAssignManufacturer, userLicenseeId, licenseeScope, batchOffset, manufacturerOffset]);
 
   useEffect(() => {
     if (canAssignManufacturer) {
       void fetchManufacturersForAssign();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canAssignManufacturer, userLicenseeId]);
+  }, [canAssignManufacturer, userLicenseeId, manufacturerOffset]);
 
   useEffect(() => {
-    if (manufacturersQuery.data) {
-      setManufacturers(Array.isArray(manufacturersQuery.data) ? (manufacturersQuery.data as ManufacturerRow[]) : []);
-    }
+    setManufacturers((manufacturersQuery.data?.rows as ManufacturerRow[]) || []);
   }, [manufacturersQuery.data]);
 
   const filteredRows = useMemo(() => {
@@ -424,12 +441,20 @@ export function useBatchOperationsController({
 
   return {
     loading,
+    batchOffset,
+    batchTotal: role === "super_admin" && !licenseeScope ? 0 : batchesQuery.data?.meta?.total,
+    batchPageSize: 100,
+    setBatchOffset: (offset: number) => setBatchPage({ scope: licenseeScope, offset: Math.max(0, offset) }),
     rows,
     error,
     q,
     assignmentFilter,
     printFilter,
     manufacturers,
+    manufacturerOffset,
+    manufacturerTotal: manufacturersQuery.data?.meta?.total,
+    manufacturersLoading: manufacturersQuery.isFetching,
+    setManufacturerOffset: (offset: number) => { setAssignManufacturerId(""); setManufacturerPage({ scope: userLicenseeId, offset }); },
     assignBatch,
     assignManufacturerId,
     assignQuantity,

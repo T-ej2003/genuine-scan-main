@@ -228,6 +228,7 @@ async function main() {
   )`).replayed, false);
 
   const expires = new Date(Date.now() + 3_600_000).toISOString();
+  const signedAt = new Date(Date.now() - 2_100).toISOString();
   denied(app, `SELECT app_rls.printing_create_job(
     '${caps.maker}','printing-create-job','${requestId()}','${ids.batch}','${ids.printer}',1,
     'LBL-0001','LBL-0001','LOCAL_AGENT','PDF',NULL,
@@ -288,12 +289,22 @@ async function main() {
     '[{"qrCodeId":"${ids.qr}","tokenNonce":"${"a".repeat(64)}","tokenHash":"${hash("stale-printer")}","tokenExpiresAt":"${expires}"}]'::jsonb
   )`, /PRINTER_ATTESTATION_STALE/);
   psql(admin, `UPDATE public."PrinterAttestation" SET "expiresAt"=now()+interval '10 minutes' WHERE "printerRegistrationId"='${ids.registration}'`);
+  for (const issuedAt of [null, new Date(Date.now() + 3_600_000).toISOString()]) {
+    const item = { qrCodeId: ids.qr, tokenNonce: "a".repeat(64), tokenHash: hash("invalid-issued-at"), tokenExpiresAt: expires };
+    if (issuedAt) item.tokenIssuedAt = issuedAt;
+    denied(app, `SELECT app_rls.printing_create_job(
+      '${caps.maker}','printing-create-job','${requestId()}','${ids.batch}','${ids.printer}',1,
+      'LBL-0001','LBL-0001','LOCAL_AGENT','ZPL',NULL,'${JSON.stringify([item])}'::jsonb
+    )`, /PRINTING_INVALID_INPUT/);
+    assert.equal(psql(admin, `SELECT count(*) FROM public."PrintJob" WHERE "batchId"='${ids.batch}'`), "0");
+  }
   const created = json(app, `SELECT app_rls.printing_create_job(
     '${caps.maker}','printing-create-job','${requestId()}','${ids.batch}','${ids.printer}',1,
     'LBL-0001','LBL-0001','LOCAL_AGENT','ZPL','${hash("print-lock")}',
-    '[{"qrCodeId":"${ids.qr}","tokenNonce":"${"a".repeat(64)}","tokenHash":"${hash("print-token")}","tokenExpiresAt":"${expires}"}]'::jsonb
+    '[{"qrCodeId":"${ids.qr}","tokenNonce":"${"a".repeat(64)}","tokenHash":"${hash("print-token")}","tokenIssuedAt":"${signedAt}","tokenExpiresAt":"${expires}"}]'::jsonb
   )`);
   assert.equal(created.preparedCount, 1);
+  assert.equal(new Date(`${psql(admin, `SELECT to_char("tokenIssuedAt",'YYYY-MM-DD"T"HH24:MI:SS.MS') FROM public."QRCode" WHERE id='${ids.qr}'`)}Z`).toISOString(), signedAt);
   const immutableCode = psql(admin, `SELECT code FROM public."QRCode" WHERE id='${ids.qr}'`);
 
   const claim = json(app, `SELECT app_rls.printing_connector_event(
@@ -302,6 +313,9 @@ async function main() {
   )`);
   assert.equal(claim.available, true);
   assert.equal(claim.qrCode.code, immutableCode);
+  assert.equal(json(app, `SELECT app_rls.printing_connector_identity(
+    'LOCAL_AGENT','printing-agent','printing-device','${ids.printer}',NULL,NULL,'VERIFY'
+  )`).eligibleForPrinting, true, "action receipt cannot displace the latest readiness heartbeat");
   denied(app, `SELECT app_rls.printing_connector_event(
     '${ids.registration}','printing-agent','printing-device','confirm_too_early',now()::timestamp,
     '${requestId()}','CONFIRM','${created.job.id}','${claim.printItemId}','${ids.printer}','${hash("early")}','spool-1','{}'::jsonb
@@ -369,7 +383,7 @@ async function main() {
   const raceSql = (suffix) => `SELECT app_rls.printing_create_job(
     '${caps.maker}','printing-create-job','${requestId()}','${ids.raceBatch}','${ids.printer}',1,
     'LBL-0002','LBL-0002','LOCAL_AGENT','ZPL','${hash(`race-lock-${suffix}`)}',
-    '[{"qrCodeId":"${ids.raceQr}","tokenNonce":"${suffix.repeat(64)}","tokenHash":"${hash(`race-token-${suffix}`)}","tokenExpiresAt":"${expires}"}]'::jsonb
+    '[{"qrCodeId":"${ids.raceQr}","tokenNonce":"${suffix.repeat(64)}","tokenHash":"${hash(`race-token-${suffix}`)}","tokenIssuedAt":"${signedAt}","tokenExpiresAt":"${expires}"}]'::jsonb
   )`;
   const race = await Promise.all([psqlAsync(app, raceSql("b")), psqlAsync(app, raceSql("c"))]);
   assert.equal(race.filter((entry) => entry.status === 0).length, 1, "one concurrent print-job creation must win");

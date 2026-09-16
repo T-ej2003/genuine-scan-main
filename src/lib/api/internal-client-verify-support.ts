@@ -318,6 +318,7 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
     if (captchaToken) headers["x-captcha-token"] = captchaToken;
     return core.request(`/incidents/report`, {
       method: "POST",
+      idempotencyHeader: "idempotency-key",
       body: formData,
       headers,
       skipJson: true,
@@ -386,6 +387,7 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
     form.append("file", file);
     return core.request(`/incidents/${encodeURIComponent(id)}/evidence`, {
       method: "POST",
+      idempotencyHeader: "idempotency-key",
       body: form,
       skipJson: true,
       timeoutMs: 45_000,
@@ -607,6 +609,7 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
     form.append("file", file);
     return core.request(`/ir/incidents/${encodeURIComponent(id)}/attachments`, {
       method: "POST",
+      idempotencyHeader: "idempotency-key",
       body: form,
       skipJson: true,
       timeoutMs: 45_000,
@@ -636,7 +639,6 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
     incidentSeverity?: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
     incidentPriority?: "P1" | "P2" | "P3" | "P4";
     licenseeId?: string;
-    manufacturerId?: string;
     actionConfig?: IrActionConfig;
   }) {
     return core.request(`/ir/policies`, { method: "POST", body: JSON.stringify(payload) });

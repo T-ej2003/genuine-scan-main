@@ -6,6 +6,8 @@ import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { IRIncidentDetailWorkspace } from "@/features/ir/components/IRIncidentDetailWorkspace";
 import { useToast } from "@/hooks/use-toast";
 import apiClient from "@/lib/api-client";
+import { useUserDirectoryPage } from "@/hooks/useUserDirectoryPage";
+import { DirectoryPageControls } from "@/components/ui/directory-page-controls";
 
 const humanKey = (key: string) =>
   String(key || "")
@@ -61,7 +63,9 @@ export default function IRIncidentDetail() {
 
   const [loading, setLoading] = useState(false);
   const [incident, setIncident] = useState<any | null>(null);
-  const [users, setUsers] = useState<any[]>([]);
+  const [userOffset, setUserOffset] = useState(0);
+  const userPage = useUserDirectoryPage(userOffset);
+  const users = (userPage.data?.rows || []).filter((user) => String(user.role || "").toUpperCase().includes("SUPER_ADMIN"));
   const [saving, setSaving] = useState(false);
 
   const [patch, setPatch] = useState({
@@ -152,16 +156,8 @@ export default function IRIncidentDetail() {
     }
   };
 
-  const loadUsers = async () => {
-    const response = await apiClient.getUsers();
-    if (!response.success) return;
-    const list = (response.data as any[]) || [];
-    setUsers(list.filter((user) => String(user.role || "").toUpperCase().includes("SUPER_ADMIN")));
-  };
-
   useEffect(() => {
     void load();
-    void loadUsers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
@@ -333,6 +329,7 @@ export default function IRIncidentDetail() {
 
   return (
     <DashboardLayout>
+      <DirectoryPageControls offset={userOffset} total={userPage.data?.meta?.total} loading={userPage.isFetching} onChange={setUserOffset} />
       <IRIncidentDetailWorkspace
         id={id}
         loading={loading}

@@ -8,6 +8,7 @@ import {
 import {
   sessionClientMessageSchema,
   sessionHelloSchema,
+  PRINT_AGENT_REQUIRE_MTLS,
   type SessionClientMessage,
   type SessionHello,
   type TrustedPrinterAgentSession,
@@ -22,6 +23,7 @@ import {
   LOCAL_AGENT_PERSISTENT_SESSION_MIN_BUILD_VERSION,
 } from "./localAgentProtocol";
 import { buildApprovedPrintPayload } from "./printPayloadService";
+import { publishPrintJobViewEvent } from "./printJobRealtimeService";
 import {
   acknowledgeLocalAgentPrinterTestJob,
   claimLocalAgentPrinterTestJob,
@@ -35,7 +37,7 @@ export type { TrustedPrinterAgentSession };
 type SessionState = {
   session: TrustedPrinterAgentSession;
   lastMessageSeq: number;
-  chunks: Map<string, { jobId: string; itemId: string; payloadHash: string | null; acknowledged: boolean }>;
+  chunks: Map<string, { jobId: string; itemId: string; licenseeId: string; batchId: string; payloadHash: string | null; acknowledged: boolean; terminal?: "CONFIRM" | "FAIL" }>;
 };
 
 const sessions = new Map<string, SessionState>();
@@ -46,6 +48,11 @@ const verifyMessage = (
   session: TrustedPrinterAgentSession,
   message: SessionHello | SessionClientMessage
 ) => {
+  if (message.type !== "hello" && message.sessionId !== session.id) {
+    throw Object.assign(new Error("Printer session identity mismatch."), {
+      statusCode: 403, errorCode: "session_identity_mismatch",
+    });
+  }
   if (!isPrinterAgentIssuedAtFresh(message.issuedAt)) {
     throw Object.assign(new Error("Agent session message timestamp expired."), {
       statusCode: 401,
@@ -54,10 +61,10 @@ const verifyMessage = (
   }
   const payload = buildPrinterAgentSessionPayload({
     messageType: message.type,
-    registrationId: session.registrationId,
+    registrationId: message.type === "hello" ? message.registrationId || null : session.registrationId,
     agentId: session.agentId,
     deviceFingerprint: session.deviceFingerprint,
-    selectedPrinterId: session.selectedPrinterId,
+    selectedPrinterId: message.type === "hello" ? message.selectedPrinterId : session.selectedPrinterId,
     connectorVersion: session.connectorVersion,
     sessionId: "sessionId" in message ? message.sessionId : null,
     chunkId: "chunkId" in message ? message.chunkId : null,
@@ -87,7 +94,7 @@ export const logPrinterSessionResolverOutcome = (
 
 export const openTrustedPrinterAgentSession = async (
   hello: SessionHello,
-  _options: { mtlsFingerprintHeader?: string | null } = {}
+  options: { mtlsFingerprintHeader?: string | null } = {}
 ): Promise<TrustedPrinterAgentSession> => {
   if (!isLocalAgentPersistentSessionCapable(hello.connectorVersion)
       || (hello.printerHealth as any)?.capabilities?.supportsPersistentPrintSession !== true) {
@@ -111,12 +118,31 @@ export const openTrustedPrinterAgentSession = async (
       errorCode: "registration_not_trusted",
     });
   }
+  if ((hello.registrationId && hello.registrationId !== registration.id)
+      || hello.agentId !== registration.agentId
+      || hello.deviceFingerprint !== registration.deviceFingerprint) {
+    throw Object.assign(new Error("Printer registration identity mismatch."), {
+      statusCode: 403,
+      errorCode: "registration_identity_mismatch",
+    });
+  }
+  if (PRINT_AGENT_REQUIRE_MTLS) {
+    const fingerprint = options.mtlsFingerprintHeader?.trim();
+    if (!registration.certFingerprint || !fingerprint || fingerprint.length > 256
+        || registration.certFingerprint !== fingerprint) {
+      throw Object.assign(new Error("Trusted printer mTLS identity required."), {
+        statusCode: 403,
+        errorCode: "mtls_required",
+      });
+    }
+  }
   const session: TrustedPrinterAgentSession = {
     id: randomUUID(),
     connectionId: randomUUID(),
     registrationId: registration.id,
     printerId: printer.id,
-    selectedPrinterId: printer.nativePrinterId || hello.selectedPrinterId,
+    // Keep the authenticated wire selector stable; printerId is the resolved DB identity.
+    selectedPrinterId: hello.selectedPrinterId,
     selectedPrinterName: hello.selectedPrinterName || printer.name || null,
     agentId: registration.agentId,
     deviceFingerprint: registration.deviceFingerprint,
@@ -220,6 +246,8 @@ export const buildNextPrintChunkForSession = async (
   state.chunks.set(chunkId, {
     jobId: claimed.printJobId,
     itemId: claimed.printItemId,
+    licenseeId: claimed.batch.licenseeId,
+    batchId: claimed.batch.id,
     payloadHash: payload.payloadHash,
     acknowledged: false,
   });
@@ -309,10 +337,20 @@ export const handleTrustedSessionProgressMessage = async (
   }
 
   const chunk = state.chunks.get(String(message.chunkId || ""));
-  if (!chunk || (message.printItemId && message.printItemId !== chunk.itemId)) {
+  if (!chunk || (message.printItemId && message.printItemId !== chunk.itemId)
+      || (message.printJobId && message.printJobId !== chunk.jobId)
+      || (message.payloadHash && message.payloadHash !== chunk.payloadHash)) {
     throw Object.assign(new Error("Print item does not belong to this connector chunk."), {
       statusCode: 403,
       errorCode: "chunk_item_mismatch",
+    });
+  }
+  const terminal = ["chunk_confirmed", "label_confirmed"].includes(message.type) ? "CONFIRM"
+    : ["chunk_failed", "label_failed"].includes(message.type) ? "FAIL" : null;
+  if (chunk.terminal) {
+    if (terminal === chunk.terminal) return { ok: true as const };
+    throw Object.assign(new Error("Connector receipt conflicts with terminal state."), {
+      statusCode: 409, errorCode: "terminal_receipt_conflict",
     });
   }
   const call = (operation: "ACK" | "CONFIRM" | "FAIL") => recordConnectorEvent({
@@ -340,12 +378,27 @@ export const handleTrustedSessionProgressMessage = async (
     await call("ACK");
     chunk.acknowledged = true;
   } else if (["chunk_confirmed","label_confirmed"].includes(message.type)) {
-    if (!chunk.acknowledged) await call("ACK");
+    if (!chunk.acknowledged) {
+      throw Object.assign(new Error("A signed print acknowledgement is required before confirmation."), {
+        statusCode: 409, errorCode: "print_ack_required",
+      });
+    }
     await call("CONFIRM");
-    state.chunks.delete(String(message.chunkId));
+    chunk.terminal = "CONFIRM";
   } else {
     await call("FAIL");
-    state.chunks.delete(String(message.chunkId));
+    chunk.terminal = "FAIL";
   }
+  // Retain only a bounded receipt window; evicted identities fail closed.
+  const completed = [...state.chunks].filter(([, receipt]) => receipt.terminal);
+  for (const [id] of completed.slice(0, Math.max(0, completed.length - 128))) state.chunks.delete(id);
+  await publishPrintJobViewEvent({
+    printJobId: chunk.jobId,
+    manufacturerId: session.manufacturerId,
+    licenseeId: chunk.licenseeId,
+    batchId: chunk.batchId,
+    type: message.type,
+    reason: "printer_session_progress",
+  });
   return { ok: true as const };
 };

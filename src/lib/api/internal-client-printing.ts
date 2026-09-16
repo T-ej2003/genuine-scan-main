@@ -1,4 +1,4 @@
-import { type ApiClientCore } from "@/lib/api/internal-client-core";
+import { BASE_URL, type ApiClientCore } from "@/lib/api/internal-client-core";
 import { createLocalAgentPrintingApi } from "@/lib/api/internal-client-local-agent";
 import { createPrintingOperationsApi } from "@/lib/api/internal-client-printing-operations";
 import { subscribeManagedEventSource } from "@/lib/api/managed-event-source";
@@ -233,7 +233,7 @@ export const createPrintingApi = (core: ApiClientCore) => ({
     const encoded = encodeURIComponent(jobId);
     return subscribeManagedEventSource(
       `manufacturer-print-job:${encoded}:events`,
-      `/api/manufacturer/print-jobs/${encoded}/events`,
+      `${BASE_URL}/manufacturer/print-jobs/${encoded}/events`,
       (event) => {
         try {
           onMessage(JSON.parse(event.data));
@@ -487,7 +487,7 @@ export const createPrintingApi = (core: ApiClientCore) => ({
 
   ...createLocalAgentPrintingApi(),
 
-  async getManufacturers(arg?: string | { licenseeId?: string; includeInactive?: boolean }) {
+  async getManufacturers(arg?: string | { licenseeId?: string; includeInactive?: boolean; limit?: number; offset?: number }) {
     let licenseeId: string | undefined;
     let includeInactive = false;
 
@@ -500,6 +500,8 @@ export const createPrintingApi = (core: ApiClientCore) => ({
     const params = new URLSearchParams();
     if (licenseeId) params.append("licenseeId", licenseeId);
     if (includeInactive) params.append("includeInactive", "true");
+    if (typeof arg === "object" && arg?.limit != null) params.append("limit", String(arg.limit));
+    if (typeof arg === "object" && arg?.offset != null) params.append("offset", String(arg.offset));
 
     const query = params.toString() ? `?${params.toString()}` : "";
     return core.request<any[]>(`/manufacturers${query}`);

@@ -76,8 +76,12 @@ export function useBatchWorkspaceController({
       );
 
       const [traceResponses, auditResponses] = await Promise.all([
-        Promise.all(batchIds.map((batchId) => apiClient.getTraceTimeline({ batchId, limit: 60 }))),
-        Promise.all(batchIds.map((batchId) => apiClient.getAuditLogs({ entityType: "Batch", entityId: batchId, limit: 60 }))),
+        Promise.all(batchIds.map((batchId) => apiClient.getTraceTimeline({ batchId, limit: 60,
+          licenseeId: workspace.licensee?.id || workspace.sourceBatchRow?.licenseeId,
+          purpose: "batch-workspace-history-review" }))),
+        Promise.all(batchIds.map((batchId) => apiClient.getAuditLogs({ entityType: "Batch", entityId: batchId, limit: 60,
+          licenseeId: workspace.licensee?.id || workspace.sourceBatchRow?.licenseeId,
+          purpose: "batch-workspace-history-review" }))),
       ]);
 
       const merged = new Map<string, TraceEventRow>();
@@ -162,7 +166,7 @@ export function useBatchWorkspaceController({
     setAllocationMap(null);
 
     try {
-      const response = await apiClient.getBatchAllocationMap(batch.id);
+      const response = await apiClient.getBatchAllocationMap(batch.id, batch.licenseeId);
       if (!response.success || !response.data) {
         toast({
           title: "Allocation map unavailable",

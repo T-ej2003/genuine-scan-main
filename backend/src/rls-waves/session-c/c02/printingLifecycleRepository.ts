@@ -156,7 +156,7 @@ export const createPrintingJob = (input: {
   printMode: string;
   payloadType: string;
   printLockTokenHash?: string | null;
-  items: Array<{ qrCodeId: string; tokenNonce: string; tokenHash: string; tokenExpiresAt: string }>;
+  items: Array<{ qrCodeId: string; tokenNonce: string; tokenHash: string; tokenIssuedAt: string; tokenExpiresAt: string }>;
   client?: SqlClient;
 }) => {
   const items = JSON.stringify(input.items);
@@ -186,7 +186,7 @@ export const controlPrintingJob = (input: {
     ) AS result
   `);
 
-export const recordConnectorEvent = (input: {
+export const recordConnectorEvent = async (input: {
   registrationId: string;
   agentId: string;
   deviceFingerprint: string;
@@ -201,8 +201,9 @@ export const recordConnectorEvent = (input: {
   deviceJobRef?: string | null;
   details?: Record<string, unknown>;
   client?: SqlClient;
-}) =>
-  oneJson(input.client || prisma, Prisma.sql`
+}) => {
+  const execute = async (client: SqlClient) => {
+    const result = await oneJson(client, Prisma.sql`
     SELECT app_rls.printing_connector_event(
       ${input.registrationId}::text,${input.agentId}::text,${input.deviceFingerprint}::text,
       ${input.nonce}::text,${new Date(input.issuedAt)}::timestamp,${input.requestId}::text,
@@ -210,7 +211,29 @@ export const recordConnectorEvent = (input: {
       ${input.printerId}::text,${input.payloadHash || null}::text,
       ${input.deviceJobRef || null}::text,${input.details || {}}::jsonb
     ) AS result
-  `);
+    `);
+    if (input.operation === "CLAIM" && result?.available) {
+      for (const key of ["tokenIssuedAt", "tokenExpiresAt"] as const) {
+        const raw = result.qrCode?.[key];
+        // PostgreSQL timestamp-without-time-zone projections represent the stored UTC instant.
+        if (typeof raw !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z?$/.test(raw)) {
+          throw new Error("PRINTING_BOUNDARY_INVALID_TOKEN_TIMESTAMP");
+        }
+        const date = new Date(raw.endsWith("Z") ? raw : `${raw}Z`);
+        if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 19) !== raw.slice(0, 19)) {
+          throw new Error("PRINTING_BOUNDARY_INVALID_TOKEN_TIMESTAMP");
+        }
+        result.qrCode[key] = date;
+      }
+      if (result.qrCode.tokenExpiresAt <= result.qrCode.tokenIssuedAt) {
+        throw new Error("PRINTING_BOUNDARY_INVALID_TOKEN_TIMESTAMP");
+      }
+    }
+    return result;
+  };
+  // Invalid claim projections must roll back rather than leave an undeliverable issued item.
+  return input.client ? execute(input.client) : prisma.$transaction(execute);
+};
 
 export const resolvePrintingConnectorIdentity = (input: {
   kind: "LOCAL_AGENT" | "SITE_GATEWAY";

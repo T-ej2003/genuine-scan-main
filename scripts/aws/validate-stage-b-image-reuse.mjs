@@ -215,6 +215,11 @@ function classifyChangedFiles({ imageReleaseSha, toolingSha, changedFiles }) {
 }
 
 export function classifyStageBImageReusePath(file) {
+  // Dockerfile.ecs-frontend copies src into the Vite build. Runtime edits
+  // require publication, never a tooling-only or compatibility exemption.
+  if (/^src\/(?:components|features|hooks|lib|pages)\/.*\.(?:ts|tsx)$/.test(file) && !TEST.test(file)) {
+    return { file, category: "runtimeApplicationSource", imageAffecting: true };
+  }
   if (CONTROL_PLANE.test(file)) return { file, category: "controlPlaneOnly", imageAffecting: false };
   if (IMAGE_INPUTS.some((pattern) => pattern.test(file))) {
     const category = /package-lock|lock$/.test(file) ? "dependencyLockfile" : /Dockerfile|dockerignore|workflow.*image-build/.test(file) ? "dockerBuildConfiguration" : /^backend\//.test(file) || /^shared\//.test(file) ? "runtimeApplicationSource" : /generated/.test(file) ? "generatedRuntimePackage" : "imageBuildInput";

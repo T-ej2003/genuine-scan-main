@@ -6,6 +6,8 @@ import apiClient from "@/lib/api-client";
 import { friendlyReferenceLabel, shortRawReference } from "@/lib/friendly-reference";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
+import { useUserDirectoryPage } from "@/hooks/useUserDirectoryPage";
+import { DirectoryPageControls } from "@/components/ui/directory-page-controls";
 import { IncidentResponseWorkspace } from "@/features/incidents/components/IncidentResponseWorkspace";
 import { useIncident, useIncidents } from "@/features/incidents/hooks";
 import { toIncidentLabel } from "@/features/incidents/types";
@@ -21,7 +23,9 @@ export default function Incidents() {
   const [detail, setDetail] = useState<IncidentDetail | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const [users, setUsers] = useState<any[]>([]);
+  const [userOffset, setUserOffset] = useState(0);
+  const userPage = useUserDirectoryPage(userOffset);
+  const users = (userPage.data?.rows || []).filter((user) => user.role === "LICENSEE_ADMIN" || user.role === "SUPER_ADMIN");
   const [licensees, setLicensees] = useState<any[]>([]);
 
   const [filters, setFilters] = useState({
@@ -140,12 +144,6 @@ export default function Incidents() {
   }, [user?.role]);
 
   useEffect(() => {
-    apiClient.getUsers().then((res) => {
-      if (res.success) {
-        const list = (res.data as any[]) || [];
-        setUsers(list.filter((u) => u.role === "LICENSEE_ADMIN" || u.role === "SUPER_ADMIN"));
-      }
-    });
     if (user?.role === "super_admin") {
       apiClient.getLicensees().then((res) => {
         if (res.success) setLicensees((res.data as any[]) || []);
@@ -345,6 +343,7 @@ export default function Incidents() {
 
   return (
     <DashboardLayout>
+      <DirectoryPageControls offset={userOffset} total={userPage.data?.meta?.total} loading={userPage.isFetching} onChange={setUserOffset} />
       <IncidentResponseWorkspace
         userRole={user?.role}
         userEmail={user?.email}

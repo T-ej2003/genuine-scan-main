@@ -20,6 +20,14 @@ import {
 } from "../aws/validate-stage-b-image-reuse.mjs";
 
 const imageReleaseSha = "a".repeat(40);
+test("frontend runtime inputs require publication while test paths remain test-only", () => {
+  for (const file of ["src/components/ui/directory-page-controls.tsx", "src/features/batches/hooks.ts", "src/hooks/useUserDirectoryPage.ts", "src/lib/api/internal-client-core.ts", "src/pages/AuditLogs.tsx"]) {
+    assert.deepEqual(classifyStageBImageReusePath(file), { file, category: "runtimeApplicationSource", imageAffecting: true });
+    assert.equal(imageImpactReportFor({ imageReleaseSha: "a".repeat(40), toolingSha: "b".repeat(40), toolingInputTreeSha256: "c".repeat(64), changedFiles: [file] }).imageReuseCompatible, false);
+  }
+  assert.equal(classifyStageBImageReusePath("src/test/audit-scope.test.tsx").category, "testOnly");
+  assert.equal(classifyStageBImageReusePath("src/unreviewed/runtime.bin").category, "unknown");
+});
 const toolingSha = "b".repeat(40);
 const toolingInputTreeSha256 = "c".repeat(64);
 const compatibilityReport = (classifiedChangedFiles) => ({

@@ -66,9 +66,9 @@ export function useManufacturerLicensees(enabled: boolean) {
   });
 }
 
-export function useManufacturerDirectory(licenseeId?: string, enabled = true) {
+export function useManufacturerDirectory(licenseeId?: string, enabled = true, offset = 0, batchOffset = 0) {
   return useQuery({
-    queryKey: queryKeys.manufacturers.directory(licenseeId),
+    queryKey: [...queryKeys.manufacturers.directory(licenseeId), offset, batchOffset],
     enabled: enabled && Boolean(licenseeId),
     queryFn: async (): Promise<ManufacturerDirectoryData> => {
       const scope = String(licenseeId || "").trim() || undefined;
@@ -76,17 +76,20 @@ export function useManufacturerDirectory(licenseeId?: string, enabled = true) {
         apiClient.getManufacturers({
           licenseeId: scope,
           includeInactive: true,
+          limit: 100, offset,
         }),
-        apiClient.getBatches(scope ? { licenseeId: scope } : undefined),
+        apiClient.getBatches({ licenseeId: scope, limit: 100, offset: batchOffset }),
       ]);
 
+      let manufacturerPage = manufacturerResponse.meta;
       let manufacturers = manufacturerResponse.success
         ? normalizeManufacturerRows(Array.isArray(manufacturerResponse.data) ? manufacturerResponse.data : [])
         : [];
 
       if (manufacturers.length === 0) {
-        const fallback = await apiClient.getUsers({ licenseeId: scope, role: "MANUFACTURER" });
+        const fallback = await apiClient.getUsers({ licenseeId: scope, role: "MANUFACTURER", limit: 100, offset });
         if (fallback.success) {
+          manufacturerPage = fallback.meta;
           manufacturers = normalizeManufacturerRows(Array.isArray(fallback.data) ? fallback.data : []);
         } else if (!manufacturerResponse.success) {
           throw new Error(manufacturerResponse.error || fallback.error || "Failed to load manufacturers");
@@ -129,6 +132,8 @@ export function useManufacturerDirectory(licenseeId?: string, enabled = true) {
       return {
         manufacturers,
         statsById,
+        manufacturerPage,
+        batchPage: batchResponse.meta,
       };
     },
   });

@@ -20,16 +20,10 @@ const normalizeIp = (value?: string | null) =>
 export const isTrustedMtlsProxyRequest = (req: MtlsHeaderRequest) => {
   const allowed = mtlsTrustedProxyValues();
   if (allowed.length === 0) return false;
-  const requestIps = new Set(
-    [
-      normalizeIp(req.ip),
-      normalizeIp(req.socket?.remoteAddress),
-      ...String(req.get("x-forwarded-for") || "")
-        .split(",")
-        .map((value) => normalizeIp(value)),
-    ].filter(Boolean)
-  );
-  return allowed.some((value) => requestIps.has(normalizeIp(value)));
+  // Only the transport peer can establish proxy authority; forwarded headers
+  // (including req.ip) are not evidence of who supplied the certificate header.
+  const peer = normalizeIp(req.socket?.remoteAddress);
+  return Boolean(peer) && allowed.some((value) => peer === normalizeIp(value));
 };
 
 export const getTrustedMtlsFingerprintHeader = (req: MtlsHeaderRequest) => {

@@ -250,5 +250,25 @@
   "Message": "Finalize help docs, screenshot automation, and role manuals",
   "Tags": [],
   "Fingerprint": "ff8617a52108982a2a8e2d02eeee23b1322494dc:databasefiles/key1.pem:private-key:1"
+ },
+ {
+  "RuleID": "generic-api-key",
+  "Description": "Detected a Generic API Key, potentially exposing access to various services and sensitive operations.",
+  "StartLine": 8,
+  "EndLine": 8,
+  "StartColumn": 81,
+  "EndColumn": 124,
+  "Match": "credentials: `REDACTED`",
+  "Secret": "REDACTED",
+  "File": "documents/ops/g06-g11-local-remediation.md",
+  "SymlinkFile": "",
+  "Commit": "616f94c69e7fef0a6090d86567100d40aad11f7a",
+  "Entropy": 4.1422954,
+  "Author": "T-ej2003",
+  "Email": "karatlapallyabhiramteja@gmail.com",
+  "Date": "2026-09-16T20:06:34Z",
+  "Message": "fix(audit): preserve SSE compatibility and structural RF7 references",
+  "Tags": [],
+  "Fingerprint": "616f94c69e7fef0a6090d86567100d40aad11f7a:documents/ops/g06-g11-local-remediation.md:generic-api-key:8"
  }
 ]

@@ -99,7 +99,7 @@ describe("Governance regression", () => {
 
     await waitFor(() => {
       expect(vi.mocked(apiClient.runCompliancePack)).toHaveBeenCalledWith({ licenseeId: "lic-1" });
-      expect(vi.mocked(apiClient.getCompliancePackJobs)).toHaveBeenCalled();
+      expect(vi.mocked(apiClient.getCompliancePackJobs)).toHaveBeenCalledWith({ licenseeId: "lic-1", limit: 20, offset: 0 });
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Download" }));

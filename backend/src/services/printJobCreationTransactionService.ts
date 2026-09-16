@@ -84,6 +84,7 @@ export const createPrintJobRecords = async (params: {
       qrCodeId: qr.id,
       tokenNonce: nonce,
       tokenHash: hashToken(token),
+      tokenIssuedAt: now.toISOString(),
       tokenExpiresAt: expiresAt.toISOString(),
     };
   });

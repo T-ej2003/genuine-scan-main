@@ -259,7 +259,9 @@ export default function IR() {
         autoCreateIncident: policyForm.autoCreateIncident,
         incidentSeverity: policyForm.autoCreateIncident ? (policyForm.incidentSeverity as any) : undefined,
         incidentPriority: policyForm.autoCreateIncident ? (policyForm.incidentPriority as any) : undefined,
-        licenseeId: policyForm.licenseeId !== "all" ? policyForm.licenseeId : undefined,
+        ...(!editingPolicy?.id && policyForm.licenseeId !== "all"
+          ? { licenseeId: policyForm.licenseeId }
+          : {}),
       };
 
       const res = editingPolicy?.id

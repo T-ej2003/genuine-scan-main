@@ -676,7 +676,7 @@ const notifyConnectionListeners = (event: PrinterConnectionRealtimeEvent) => {
   }
 };
 
-const emitConnectionEvent = (event: PrinterConnectionRealtimeEvent) => {
+export const emitConnectionEvent = (event: PrinterConnectionRealtimeEvent) => {
   notifyConnectionListeners(event);
   void publishRedisJson(PRINTER_CONNECTION_EVENT_CHANNEL, {
     origin: getRedisInstanceId(),

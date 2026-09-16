@@ -67,7 +67,7 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
     email: string;
     password: string;
     name: string;
-    role: "LICENSEE_ADMIN" | "MANUFACTURER";
+    role: "LICENSEE_ADMIN" | "MANUFACTURER_ADMIN";
     licenseeId: string;
     location?: string;
     website?: string;
@@ -75,10 +75,12 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
     return core.request("/users", { method: "POST", body: JSON.stringify(payload) });
   },
 
-  async getUsers(options?: { licenseeId?: string; role?: string }) {
+  async getUsers(options?: { licenseeId?: string; role?: string; limit?: number; offset?: number }) {
     const params = new URLSearchParams();
     if (options?.licenseeId) params.append("licenseeId", options.licenseeId);
     if (options?.role) params.append("role", options.role);
+    if (options?.limit != null) params.append("limit", String(options.limit));
+    if (options?.offset != null) params.append("offset", String(options.offset));
 
     const query = params.toString() ? `?${params.toString()}` : "";
     return core.request<UserDirectoryRow[]>(`/users${query}`);
@@ -104,10 +106,11 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
     return core.request(`/users/${id}${query}`, { method: "DELETE" });
   },
 
-  async getAuditLogs(opts?: { entityType?: string; entityId?: string; licenseeId?: string; limit?: number; offset?: number }) {
+  async getAuditLogs(opts?: { entityType?: string; entityId?: string; licenseeId?: string; purpose?: string; limit?: number; offset?: number }) {
     const params = new URLSearchParams();
     if (opts?.entityType) params.append("entityType", opts.entityType);
     if (opts?.entityId) params.append("entityId", opts.entityId);
+    if (opts?.purpose) params.append("purpose", opts.purpose);
     if (opts?.licenseeId) params.append("licenseeId", opts.licenseeId);
     if (opts?.limit) params.append("limit", String(opts.limit));
     if (opts?.offset) params.append("offset", String(opts.offset));
@@ -117,12 +120,14 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
 
   async getFraudReports(opts?: {
     status?: "ALL" | "OPEN" | "REVIEWED" | "RESOLVED" | "DISMISSED";
+    purpose?: string;
     licenseeId?: string;
     limit?: number;
     offset?: number;
   }) {
     const params = new URLSearchParams();
     if (opts?.status) params.append("status", opts.status);
+    if (opts?.purpose) params.append("purpose", opts.purpose);
     if (opts?.licenseeId) params.append("licenseeId", opts.licenseeId);
     if (opts?.limit != null) params.append("limit", String(opts.limit));
     if (opts?.offset != null) params.append("offset", String(opts.offset));
@@ -143,10 +148,10 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
     });
   },
 
-  streamAuditLogs(onMessage: (log: AuditStreamLog) => void, onError?: () => void) {
-    const url = `${BASE_URL}/audit/stream`;
+  streamAuditLogs(onMessage: (log: AuditStreamLog) => void, onError?: () => void, licenseeId?: string) {
+    const url = `${BASE_URL}/audit/stream${licenseeId ? `?licenseeId=${encodeURIComponent(licenseeId)}` : ""}`;
 
-    return subscribeManagedEventSource("audit:stream", url, (event: MessageEvent) => {
+    return subscribeManagedEventSource(`audit:stream:${licenseeId || "actor"}`, url, (event: MessageEvent) => {
       try {
         onMessage(JSON.parse(event.data));
       } catch {
@@ -315,17 +320,19 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
     return core.request("/account/password", { method: "PATCH", body: JSON.stringify(payload) });
   },
 
-  async exportAuditLogsCsv() {
+  async exportAuditLogsCsv(options: { licenseeId: string; purpose: string }) {
     const headers: Record<string, string> = {};
     if (core.getToken()) headers["Authorization"] = `Bearer ${core.getToken()}`;
 
-    const response = await fetch(`${BASE_URL}/audit/logs/export`, { headers, credentials: "include" });
+    const params = new URLSearchParams({ licenseeId: options.licenseeId, purpose: options.purpose });
+    const response = await fetch(`${BASE_URL}/audit/logs/export?${params}`, { headers, credentials: "include" });
     if (!response.ok) throw new Error("Export failed");
     return response.blob();
   },
 
   async getTraceTimeline(options?: {
     licenseeId?: string;
+    purpose?: string;
     eventType?: string;
     batchId?: string;
     manufacturerId?: string;
@@ -334,6 +341,7 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
     offset?: number;
   }) {
     const params = new URLSearchParams();
+    if (options?.purpose) params.append("purpose", options.purpose);
     if (options?.licenseeId) params.append("licenseeId", options.licenseeId);
     if (options?.eventType) params.append("eventType", options.eventType);
     if (options?.batchId) params.append("batchId", options.batchId);
@@ -364,10 +372,12 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
   },
 
   async getInternalReleaseMetadata() {
-    return core.request<{
+    type ReleaseMetadata = {
       name: string;
       version: string;
       gitSha: string;
+      imageGitSha?: string;
+      deploymentGitSha?: string;
       environment: string;
       release: string;
       signing?: {
@@ -376,7 +386,24 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
         keyVersion: string;
         keyRef?: string | null;
       } | null;
-    }>(`/internal/release`);
+    };
+    // This endpoint deliberately returns release metadata at the top level.
+    const response = await core.request<ReleaseMetadata>(`/internal/release`);
+    if (!response.success) return response;
+    const wire = response as typeof response & ReleaseMetadata;
+    return {
+      ...response,
+      data: {
+        name: wire.name,
+        version: wire.version,
+        gitSha: wire.gitSha,
+        imageGitSha: wire.imageGitSha,
+        deploymentGitSha: wire.deploymentGitSha,
+        environment: wire.environment,
+        release: wire.release,
+        signing: wire.signing,
+      },
+    };
   },
 
   async getPolicyConfig(licenseeId?: string) {
@@ -507,8 +534,9 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
     });
   },
 
-  async getCompliancePackJobs(options?: { limit?: number; offset?: number }) {
+  async getCompliancePackJobs(options?: { licenseeId?: string; limit?: number; offset?: number }) {
     const params = new URLSearchParams();
+    if (options?.licenseeId) params.append("licenseeId", options.licenseeId);
     if (options?.limit != null) params.append("limit", String(options.limit));
     if (options?.offset != null) params.append("offset", String(options.offset));
     const query = params.toString() ? `?${params.toString()}` : "";

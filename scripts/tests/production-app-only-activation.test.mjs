@@ -28,7 +28,7 @@ function harness({ unhealthy = false, competing = false, corruptReadback = false
     readDefinition: async (target) => { const value = structuredClone(target === arn(14) ? prior : registered); if (corruptReadback && target !== arn(14)) value.cpu = "8192"; return value; },
     updateService: async ({ taskDefinition }) => { mutations.push(taskDefinition); current = taskDefinition === arn(14) ? prior : registered; deploymentId = taskDefinition === arn(14) ? "ecs-svc/300" : activatedDeploymentId; if (uncertainUpdate) throw new Error("lost response"); return live().service; },
     waitStable: async () => {},
-    readHealth: async () => { if (unhealthy && current.taskDefinitionArn === arn(23)) { if (competing) deploymentId = "ecs-svc/400"; throw new Error("unhealthy"); } return { frontendStatus: 200, backend: { httpStatus: 200, body: { success: true, status: "ready", timestamp: new Date().toISOString(), release: { gitSha: !fixedRuntimeMetadata && current.taskDefinitionArn === arn(23) ? body.candidateSourceSha : body.predecessorSourceSha }, dependencies: { database: { ready: true }, redis: { configured: true, ready: true }, objectStorage: { configured: true, ready: true } } } } }; },
+    readHealth: async () => { if (unhealthy && current.taskDefinitionArn === arn(23)) { if (competing) deploymentId = "ecs-svc/400"; throw new Error("unhealthy"); } return { frontendStatus: 200, backend: { httpStatus: 200, body: { success: true, status: "ready", timestamp: new Date().toISOString(), release: { gitSha: current.taskDefinitionArn === arn(23) ? body.candidateSourceSha : body.predecessorSourceSha }, dependencies: { database: { ready: true }, redis: { configured: true, ready: true }, objectStorage: { configured: true, ready: true } } } } }; },
     writeEvidence: async (value) => records.push(value),
   };
   return { preparation, adapters, records, mutations, prior };
@@ -66,7 +66,7 @@ test("image-only activation preserves fixed release metadata without confusing i
   assert.equal(result.status, "HEALTHY");
   assert.equal(result.deployedBackendDigest, candidateDigest);
   assert.equal(result.deployedImageSourceSha, h.preparation.candidateSourceSha);
-  assert.equal(result.healthMetadataSourceSha, h.preparation.predecessorSourceSha);
+  assert.equal(result.healthMetadataSourceSha, h.preparation.candidateSourceSha);
 });
 test("stale CAS stops before registration", async () => {
   const h = harness({ stale: true }); await assert.rejects(executeAppOnlyActivation(h.preparation, h.adapters));
