@@ -10,6 +10,7 @@ import {
   buildFrontendUpdate, buildFrontendRollback,
   runGovernedFrontendActivation,
 } from "../aws/production-web-release-contract.mjs";
+import { createWebActivationAwsRunner } from "../aws/run-production-web-activation.mjs";
 
 const sourceSha = "a".repeat(40); const digest = `sha256:${"b".repeat(64)}`; const createdAt = "2026-09-16T12:00:00.000Z"; const expiresAt = "2026-09-17T12:00:00.000Z";
 const imageRef = `${WEB_RELEASE.account}.dkr.ecr.${WEB_RELEASE.region}.amazonaws.com/${WEB_RELEASE.repository}@${digest}`;
@@ -110,6 +111,37 @@ test("web workflow and IAM are fixed, OIDC-only, and isolated from Stage-B four-
   const runtimeList = activation.Statement.find(({ Sid }) => Sid === "ListExactFrontendRuntime"); assert.equal(runtimeList.Action, "ecs:ListTasks"); assert.equal(runtimeList.Condition.ArnEquals["ecs:cluster"], `arn:aws:ecs:${WEB_RELEASE.region}:${WEB_RELEASE.account}:cluster/${WEB_RELEASE.cluster}`);
   assert.equal(JSON.stringify(activation).includes("ecs:ExecuteCommand"), false);
   const activationWorkflow = yaml.load(fs.readFileSync(".github/workflows/production-web-activation.yml", "utf8")); const serializedActivation = JSON.stringify(activationWorkflow); for (const fixed of ["verify-production-web-release-authorization.mjs", "run-production-web-activation.mjs"]) assert.match(serializedActivation, new RegExp(fixed.replaceAll(".", "\\.")));
+  assert.match(serializedActivation, /MSCQR_AWS_CREDENTIAL_SOURCE.*github-oidc-release-deployer/);
   for (const forbidden of ["inputs.service", "inputs.task_definition", "inputs.image", "inputs.rollback", "execute-command"]) assert.doesNotMatch(serializedActivation, new RegExp(forbidden));
   const fourImage = fs.readFileSync("scripts/aws/production-green-stage-b-image-evidence.mjs", "utf8"); assert.match(fourImage, /exactly four image records|all four Stage B images/);
+});
+
+test("web activation uses only the sanitized GitHub OIDC release-deployer session", () => {
+  const hostile = {
+    AWS_PROFILE: "arbitrary", AWS_DEFAULT_PROFILE: "arbitrary-default",
+    AWS_CONFIG_FILE: "/hostile/config", AWS_SHARED_CREDENTIALS_FILE: "/hostile/credentials",
+    AWS_ROLE_ARN: "arn:aws:iam::111111111111:role/hostile", AWS_WEB_IDENTITY_TOKEN_FILE: "/hostile/token",
+    AWS_CONTAINER_CREDENTIALS_FULL_URI: "https://hostile.invalid", AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: "/hostile",
+    AWS_EC2_METADATA_SERVICE_ENDPOINT: "https://hostile.invalid", AWS_ENDPOINT_URL: "https://hostile.invalid",
+  };
+  const session = { MSCQR_AWS_CREDENTIAL_SOURCE: "github-oidc-release-deployer", AWS_ACCESS_KEY_ID: "fixture-access", AWS_SECRET_ACCESS_KEY: "fixture-secret", AWS_SESSION_TOKEN: "fixture-session", PATH: process.env.PATH };
+  const calls = [];
+  const run = createWebActivationAwsRunner({ env: { ...session, ...hostile }, exec: (file, args, options) => { calls.push({ file, args, options }); return "{}"; } });
+  run(["ecs", "describe-services"]);
+  assert.equal(calls.length, 1); assert.equal(calls[0].file, "aws");
+  assert.deepEqual(calls[0].args.slice(-5), ["--output", "json", "--no-cli-pager", "--region", "eu-west-2"]);
+  assert.equal(calls[0].options.env.AWS_EC2_METADATA_DISABLED, "true");
+  for (const key of Object.keys(hostile)) assert.equal(calls[0].options.env[key], undefined, key);
+  for (const key of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"]) assert.equal(calls[0].options.env[key], session[key]);
+
+  const never = () => assert.fail("invalid credentials must fail before AWS execution");
+  for (const env of [
+    { AWS_PROFILE: "arbitrary" }, { AWS_DEFAULT_PROFILE: "arbitrary" },
+    { AWS_ACCESS_KEY_ID: "key", AWS_SECRET_ACCESS_KEY: "secret" },
+    { AWS_ACCESS_KEY_ID: "key", AWS_SECRET_ACCESS_KEY: "secret", AWS_SESSION_TOKEN: "token" },
+    { AWS_ROLE_ARN: hostile.AWS_ROLE_ARN, AWS_WEB_IDENTITY_TOKEN_FILE: hostile.AWS_WEB_IDENTITY_TOKEN_FILE },
+    { AWS_EC2_METADATA_SERVICE_ENDPOINT: hostile.AWS_EC2_METADATA_SERVICE_ENDPOINT },
+    { AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: hostile.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI },
+    { ...session, MSCQR_AWS_CREDENTIAL_SOURCE: "unknown" },
+  ]) assert.throws(() => createWebActivationAwsRunner({ env, exec: never }), /GitHub OIDC release-deployer|AWS_/);
 });

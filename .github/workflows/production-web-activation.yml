@@ -59,6 +59,7 @@ jobs:
           role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-release-deployer
       - name: Authenticate coordinated Stage-B and web evidence
         env:
+          MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-release-deployer
           TARGET_SHA: '${{ inputs.target_sha }}'
           STAGE_B_AUTHORIZATION_JSON: '${{ inputs.stage_b_authorization_json }}'
           STAGE_B_AUTHORIZATION_SHA256: '${{ inputs.stage_b_authorization_sha256 }}'

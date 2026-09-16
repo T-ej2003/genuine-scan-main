@@ -10,11 +10,17 @@ import { runGovernedFrontendActivation, WEB_RELEASE } from "./production-web-rel
 import { verifyCoordinatedWebRelease } from "./verify-production-web-release-authorization.mjs";
 import { createReleaseGateImageAuthorizationRunner } from "./verify-production-release-image-authorization.mjs";
 import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
+import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 
-const run = (args) => execFileSync("aws", [...args, "--region", WEB_RELEASE.region, "--output", "json", "--no-cli-pager"], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
+export function createWebActivationAwsRunner({ env = process.env, exec = execFileSync } = {}) {
+  if (env.MSCQR_AWS_CREDENTIAL_SOURCE !== PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER) throw new Error("Web activation requires the GitHub OIDC release-deployer credential source.");
+  const run = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER, env, region: WEB_RELEASE.region, exec });
+  return (args) => run([...args, "--output", "json", "--no-cli-pager"]);
+}
 
-export function createAwsFrontendActivationAdapters({ execute = run, fetchImpl = fetch } = {}) {
-  const awsJson = (args) => JSON.parse(execute(args));
+export function createAwsFrontendActivationAdapters({ execute, env = process.env, exec = execFileSync, fetchImpl = fetch } = {}) {
+  const run = execute || createWebActivationAwsRunner({ env, exec });
+  const awsJson = (args) => JSON.parse(run(args));
   return Object.freeze({
     readService: async () => awsJson(["ecs", "describe-services", "--cluster", WEB_RELEASE.cluster, "--services", WEB_RELEASE.serviceName]).services?.[0],
     describeTaskDefinition: async (taskDefinition) => { const response = awsJson(["ecs", "describe-task-definition", "--task-definition", taskDefinition, "--include", "TAGS"]); return { ...response.taskDefinition, tags: response.tags || [] }; },
@@ -24,7 +30,7 @@ export function createAwsFrontendActivationAdapters({ execute = run, fetchImpl =
       finally { fs.rmSync(directory, { recursive: true, force: true }); }
     },
     updateService: async ({ cluster, service, taskDefinition }) => awsJson(["ecs", "update-service", "--cluster", cluster, "--service", service, "--task-definition", taskDefinition]),
-    waitStable: async () => { execute(["ecs", "wait", "services-stable", "--cluster", WEB_RELEASE.cluster, "--services", WEB_RELEASE.serviceName]); },
+    waitStable: async () => { run(["ecs", "wait", "services-stable", "--cluster", WEB_RELEASE.cluster, "--services", WEB_RELEASE.serviceName]); },
     verifyHealth: async ({ expectedTaskDefinitionArn, expectedImageRef }) => {
       const service = awsJson(["ecs", "describe-services", "--cluster", WEB_RELEASE.cluster, "--services", WEB_RELEASE.serviceName]).services?.[0];
       const taskArns = awsJson(["ecs", "list-tasks", "--cluster", WEB_RELEASE.cluster, "--service-name", WEB_RELEASE.serviceName, "--desired-status", "RUNNING"]).taskArns || [];
