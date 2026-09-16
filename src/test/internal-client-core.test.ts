@@ -12,6 +12,27 @@ describe("internal client core HTML error handling", () => {
     vi.restoreAllMocks();
   });
 
+  it("uses the selected canonical idempotency header for multipart and retains it on auth retry", async () => {
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ success: false }), { status: 401, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, data: { user: { id: "fixture" } } }), { headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true }), { headers: { "content-type": "application/json" } }));
+    const form = new FormData();
+    form.append("file", new Blob(["fixture"]), "fixture.txt");
+    const response = await createApiClientCore().request("/incidents/report", {
+      method: "POST", body: form, idempotencyHeader: "idempotency-key", skipJson: true,
+    });
+    expect(response.success).toBe(true);
+    const calls = vi.mocked(globalThis.fetch).mock.calls;
+    const original = new Headers(calls[0][1]?.headers);
+    const retried = new Headers(calls[2][1]?.headers);
+    expect(original.get("idempotency-key")).toBeTruthy();
+    expect(retried.get("idempotency-key")).toBe(original.get("idempotency-key"));
+    expect(original.has("x-idempotency-key")).toBe(false);
+    expect(original.has("content-type")).toBe(false);
+    expect(calls[2][1]?.body).toBe(form);
+  });
+
   it("extracts readable text from HTML responses without leaking markup", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: false,

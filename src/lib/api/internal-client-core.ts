@@ -6,6 +6,7 @@ export const BASE_URL = import.meta.env.VITE_API_URL || "/api";
 export interface ApiResponse<T = unknown> {
   success: boolean;
   data?: T;
+  meta?: { total: number; limit: number; offset: number };
   error?: string;
   message?: string;
   degraded?: boolean;
@@ -18,6 +19,7 @@ export interface ApiResponse<T = unknown> {
 }
 
 type RequestOptions = RequestInit & {
+  idempotencyHeader?: "idempotency-key" | "x-idempotency-key";
   skipJson?: boolean;
   timeoutMs?: number;
   skipAuthRefresh?: boolean;
@@ -407,13 +409,18 @@ export function createApiClientCore(): ApiClientCore {
 
     const isStateChanging = !["GET", "HEAD", "OPTIONS"].includes(method);
     if (isStateChanging) {
-      const hasIdempotencyHeader = Object.keys(headers).some((key) => key.toLowerCase() === "x-idempotency-key");
+      const idempotencyHeader = options.idempotencyHeader || "x-idempotency-key";
+      const hasIdempotencyHeader = Object.keys(headers).some((key) => key.toLowerCase() === idempotencyHeader);
       if (!hasIdempotencyHeader) {
         const generatedKey =
           typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
             ? crypto.randomUUID()
             : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-        headers["x-idempotency-key"] = generatedKey;
+        headers[idempotencyHeader] = generatedKey;
+        // Retain the same request identity if authentication refresh retries this request.
+        const retryHeaders = new Headers(options.headers);
+        retryHeaders.set(idempotencyHeader, generatedKey);
+        options = { ...options, headers: Object.fromEntries(retryHeaders.entries()) };
       }
 
       const csrf = readCsrfCookieForEndpoint(endpoint);

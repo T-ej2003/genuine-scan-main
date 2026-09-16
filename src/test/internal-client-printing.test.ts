@@ -28,6 +28,7 @@ describe("printing api request control", () => {
   afterEach(() => {
     clearRequestCoordinator();
     vi.clearAllMocks();
+    vi.unstubAllEnvs();
   });
 
   it("sends the print job creation payload with the saved printer profile UUID only", async () => {
@@ -274,6 +275,22 @@ describe("printing api request control", () => {
         eventName: "realtime",
         pauseWhenHidden: false,
       })
+    );
+  });
+
+  it("uses the configured REST API base for streams and encodes the job identity", async () => {
+    vi.stubEnv("VITE_API_URL", "https://api.example.test/api");
+    vi.resetModules();
+    const { createPrintingApi: configuredPrintingApi } = await import("@/lib/api/internal-client-printing");
+    const api = configuredPrintingApi(createCore(vi.fn()));
+
+    api.streamPrintJobStatus("job/foreign?scope=all", vi.fn());
+
+    expect(subscribeManagedEventSourceMock).toHaveBeenCalledWith(
+      "manufacturer-print-job:job%2Fforeign%3Fscope%3Dall:events",
+      "https://api.example.test/api/manufacturer/print-jobs/job%2Fforeign%3Fscope%3Dall/events",
+      expect.any(Function),
+      expect.objectContaining({ eventName: "realtime", pauseWhenHidden: false })
     );
   });
 });

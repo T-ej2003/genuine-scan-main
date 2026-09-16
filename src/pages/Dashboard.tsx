@@ -44,9 +44,9 @@ export default function Dashboard() {
   const queryClient = useQueryClient();
   const activePrintSuppressed = useActivePrintSessionSuppression();
   const scopedLicenseeId = user?.role === "manufacturer" ? undefined : user?.licenseeId;
-  const canReadAuditFeed = user?.role === "super_admin" || user?.role === "licensee_admin";
+  const canReadAuditFeed = Boolean(scopedLicenseeId) && (user?.role === "super_admin" || user?.role === "licensee_admin");
   const dashboardQuery = useDashboardStats(scopedLicenseeId);
-  const auditLogsQuery = useDashboardAuditLogs(canReadAuditFeed, 5);
+  const auditLogsQuery = useDashboardAuditLogs(canReadAuditFeed, 5, scopedLicenseeId);
   const dashboardRefetch = dashboardQuery.refetch;
   const auditLogsRefetch = auditLogsQuery.refetch;
 

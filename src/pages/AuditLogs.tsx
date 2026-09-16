@@ -191,7 +191,9 @@ export default function AuditLogs() {
   const [licensees, setLicensees] = useState<any[]>([]);
   const [licenseeFilter, setLicenseeFilter] = useState<string>("all");
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
-  const refreshAllInFlightRef = useRef<Promise<void> | null>(null);
+  const refreshAllInFlightRef = useRef<{ scope: string; promise: Promise<void> } | null>(null);
+  const currentLicenseeFilter = useRef(licenseeFilter);
+  currentLicenseeFilter.current = licenseeFilter;
 
   const [fraudStatusFilter, setFraudStatusFilter] = useState<"ALL" | FraudStatus>("OPEN");
   const [fraudReports, setFraudReports] = useState<FraudReportQueueItem[]>([]);
@@ -283,20 +285,24 @@ export default function AuditLogs() {
   };
 
   const load = async (opts?: { silent?: boolean }) => {
+    if (isSuperAdmin && licenseeFilter === "all") {
+      setLogs([]); setHistoryError("Select a brand to review its audit history.");
+      return;
+    }
     if (!opts?.silent) setActivityLoading(true);
     setHistoryError(null);
     try {
       const res = await apiClient.getAuditLogs({
         limit: 150,
+        purpose: "operator-audit-history-review",
         licenseeId: isSuperAdmin && licenseeFilter !== "all" ? licenseeFilter : undefined,
       });
-
+      if (currentLicenseeFilter.current !== licenseeFilter) return;
       if (!res.success) {
         setLogs([]);
         setHistoryError(friendlyLoadError(res, "History could not be loaded right now. Refresh when you are ready."));
         return;
       }
-
       const payload: any = res.data;
       const list = Array.isArray(payload)
         ? payload
@@ -307,13 +313,13 @@ export default function AuditLogs() {
         : [];
       setLogs(list);
     } catch {
+      if (currentLicenseeFilter.current !== licenseeFilter) return;
       setLogs([]);
       setHistoryError("History could not be loaded right now. Refresh when you are ready.");
     } finally {
-      if (!opts?.silent) setActivityLoading(false);
+      if (!opts?.silent && currentLicenseeFilter.current === licenseeFilter) setActivityLoading(false);
     }
   };
-
   const loadPrintHistory = async (opts?: { silent?: boolean }) => {
     if (!isManufacturer) return;
     if (!opts?.silent) setPrintHistoryLoading(true);
@@ -333,17 +339,19 @@ export default function AuditLogs() {
       if (!opts?.silent) setPrintHistoryLoading(false);
     }
   };
-
   const loadFraudReports = async (opts?: { silent?: boolean }) => {
     if (!isSuperAdmin) return;
+    if (licenseeFilter === "all") { setFraudReports([]); return; }
     if (!opts?.silent) setFraudLoading(true);
 
     try {
       const res = await apiClient.getFraudReports({
         status: fraudStatusFilter,
+        purpose: "operator-fraud-report-review",
         licenseeId: licenseeFilter !== "all" ? licenseeFilter : undefined,
         limit: 100,
       });
+      if (currentLicenseeFilter.current !== licenseeFilter) return;
       if (!res.success) {
         setFraudReports([]);
         return;
@@ -352,20 +360,22 @@ export default function AuditLogs() {
       const list = Array.isArray(payload) ? payload : Array.isArray(payload?.reports) ? payload.reports : [];
       setFraudReports(list);
     } finally {
-      if (!opts?.silent) setFraudLoading(false);
+      if (!opts?.silent && currentLicenseeFilter.current === licenseeFilter) setFraudLoading(false);
     }
   };
 
   const refreshAll = async (opts?: { silent?: boolean }) => {
-    if (refreshAllInFlightRef.current) return refreshAllInFlightRef.current;
+    const scope = `${licenseeFilter}:${fraudStatusFilter}`;
+    if (refreshAllInFlightRef.current?.scope === scope) return refreshAllInFlightRef.current.promise;
     if (!opts?.silent) setRefreshing(true);
-    refreshAllInFlightRef.current = Promise.all([load(opts), loadFraudReports(opts), loadPrintHistory(opts)])
+    const promise = Promise.all([load(opts), loadFraudReports(opts), loadPrintHistory(opts)])
       .then(() => undefined)
       .finally(() => {
-        refreshAllInFlightRef.current = null;
+        if (refreshAllInFlightRef.current?.promise === promise) refreshAllInFlightRef.current = null;
         if (!opts?.silent) setRefreshing(false);
       });
-    return refreshAllInFlightRef.current;
+    refreshAllInFlightRef.current = { scope, promise };
+    return promise;
   };
 
   useEffect(() => {
@@ -728,7 +738,7 @@ export default function AuditLogs() {
                   <SelectValue placeholder="Brand" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All brands</SelectItem>
+                  <SelectItem value="all">Select a brand</SelectItem>
                   {licensees.map((l) => (
                     <SelectItem key={l.id} value={l.id}>
                       {l.name}

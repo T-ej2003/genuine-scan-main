@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { ActionButton } from "@/components/ui/action-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { DirectoryPageControls } from "@/components/ui/directory-page-controls";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
@@ -80,7 +81,8 @@ export default function SupportCenterPage() {
   const reportsQuery = useSupportIssueReports();
   const requestAccessQuery = useRequestAccessRecords();
   const detailQuery = useSupportTicketDetail(selectedId);
-  const assigneesQuery = useSupportAssignableUsers(canEdit);
+  const [assigneeOffset, setAssigneeOffset] = useState(0);
+  const assigneesQuery = useSupportAssignableUsers(canEdit, assigneeOffset);
 
   const updateTicketMutation = useUpdateSupportTicketMutation();
   const addMessageMutation = useAddSupportTicketMessageMutation();
@@ -478,13 +480,14 @@ export default function SupportCenterPage() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="unassigned">Unassigned</SelectItem>
-                          {(assigneesQuery.data || []).map((assignee) => (
+                          {(assigneesQuery.data?.rows || []).map((assignee) => (
                             <SelectItem key={assignee.id} value={assignee.id}>
                               {assignee.name || assignee.email}
                             </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
+                      {canEdit && <DirectoryPageControls offset={assigneeOffset} total={assigneesQuery.data?.meta?.total} loading={assigneesQuery.isFetching} onChange={setAssigneeOffset} />}
                     </div>
                   </div>
 

@@ -50,6 +50,8 @@ export type ManufacturerStats = {
 export type ManufacturerDirectoryData = {
   manufacturers: ManufacturerRow[];
   statsById: Record<string, ManufacturerStats>;
+  manufacturerPage?: { total: number; limit: number; offset: number };
+  batchPage?: { total: number; limit: number; offset: number };
 };
 
 const asRecord = (value: unknown) => (value && typeof value === "object" ? (value as Record<string, unknown>) : null);

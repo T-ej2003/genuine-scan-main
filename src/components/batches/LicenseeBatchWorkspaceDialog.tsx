@@ -62,6 +62,7 @@ type LicenseeBatchWorkspaceDialogProps = {
   role?: string | null;
   workspace: StableBatchOverviewRow | null;
   manufacturers: ManufacturerRow[];
+  manufacturerPageControls?: React.ReactNode;
   assignManufacturerId: string;
   assignQuantity: string;
   assigning: boolean;
@@ -336,6 +337,7 @@ export function LicenseeBatchWorkspaceDialog({
   role,
   workspace,
   manufacturers,
+  manufacturerPageControls,
   assignManufacturerId,
   assignQuantity,
   assigning,
@@ -1152,6 +1154,7 @@ export function LicenseeBatchWorkspaceDialog({
                                   )}
                                 </SelectContent>
                               </Select>
+                              {manufacturerPageControls}
                             </div>
                             <div className="space-y-2">
                               <Label>Quantity to allocate</Label>

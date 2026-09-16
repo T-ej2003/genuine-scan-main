@@ -217,7 +217,8 @@ export default function QRTracking() {
     setAllocationMapLoading(true);
     setAllocationMap(null);
     try {
-      const response = await apiClient.getBatchAllocationMap(batchId);
+      if (isSuperAdmin && !scopedLicenseeId) throw new Error("Select a brand before opening its allocation map.");
+      const response = await apiClient.getBatchAllocationMap(batchId, scopedLicenseeId);
       if (!response.success || !response.data) {
         throw new Error(response.error || "Could not load allocation details.");
       }

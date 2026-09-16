@@ -79,6 +79,7 @@ COPY --chown=node:node backend/docker/start-runtime.sh /usr/local/bin/start-runt
 COPY --from=builder --chown=node:node /workspace/backend/node_modules ./node_modules
 COPY --from=builder --chown=node:node /workspace/backend/dist ./dist
 COPY --from=builder --chown=node:node /workspace/backend/scripts/release-smoke ./scripts/release-smoke
+RUN node -e 'const fs = require("node:fs"); const source = process.env.RELEASE_GIT_SHA || ""; const gitSha = /^[0-9a-f]{40}$/.test(source) ? source : "unknown"; fs.writeFileSync("/app/image-source.json", JSON.stringify({ gitSha }), { mode: 0o444 });'
 RUN chmod +x /usr/local/bin/start-runtime.sh
 
 EXPOSE 4000

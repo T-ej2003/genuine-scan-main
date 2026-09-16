@@ -54,7 +54,7 @@ const safeWebSocketProtocolPresence = (value: unknown) => {
 const safeUserAgentFamily = (value: unknown) => {
   const normalized = safeHeaderValue(value, 160);
   if (!normalized) return null;
-  const family = normalized.split(/[\/\s;]/)[0]?.trim() || normalized;
+  const family = normalized.split(/[/\s;]/)[0]?.trim() || normalized;
   return family.slice(0, 80);
 };
 
@@ -174,8 +174,18 @@ export const attachPrinterAgentSessionWebSocket = (server: Server) => {
       ws.ping();
     }, 25_000);
 
+    let messageChain = Promise.resolve();
+    let queuedMessages = 0;
     ws.on("message", (raw: any) => {
-      void (async () => {
+      if (state.closed) return;
+      if (queuedMessages >= 128) {
+        state.closed = true;
+        closeWithReason(ws, 4009, "message_queue_full");
+        return;
+      }
+      queuedMessages += 1;
+      messageChain = messageChain.then(async () => {
+        if (state.closed) return;
         let payload: unknown;
         try {
           payload = JSON.parse(String(raw));
@@ -292,7 +302,10 @@ export const attachPrinterAgentSessionWebSocket = (server: Server) => {
           sendJson(ws, errorPayload(error));
           if (Number(error?.statusCode || 0) === 401) closeWithReason(ws, 4003, error?.errorCode || "session_not_trusted");
         }
-      })();
+      }).catch((error) => {
+        sendJson(ws, errorPayload(error));
+        closeWithReason(ws, 4003, "session_processing_failed");
+      }).finally(() => { queuedMessages -= 1; });
     });
 
     ws.on("close", () => {

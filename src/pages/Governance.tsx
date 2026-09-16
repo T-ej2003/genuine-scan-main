@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { saveAs } from "file-saver";
 import { FileDown, Loader2, RefreshCw, ShieldCheck, SlidersHorizontal } from "lucide-react";
 
@@ -61,6 +61,10 @@ export default function Governance() {
     if (canSelectLicensee) return activeLicenseeId;
     return user?.licenseeId || "";
   };
+  const complianceScope = resolveLicenseeId();
+  const currentComplianceScope = useRef(complianceScope);
+  currentComplianceScope.current = complianceScope;
+  useEffect(() => { setComplianceJobs([]); setComplianceJobsLoading(false); }, [complianceScope]);
 
   const loadAll = async () => {
     const licenseeId = resolveLicenseeId();
@@ -287,9 +291,12 @@ export default function Governance() {
   };
 
   const loadCompliancePackJobs = async () => {
+    const licenseeId = resolveLicenseeId();
+    if (canSelectLicensee && !licenseeId) { setComplianceJobs([]); return; }
     setComplianceJobsLoading(true);
     try {
-      const response = await apiClient.getCompliancePackJobs({ limit: 20, offset: 0 });
+      const response = await apiClient.getCompliancePackJobs({ licenseeId: licenseeId || undefined, limit: 20, offset: 0 });
+      if (currentComplianceScope.current !== licenseeId) return;
       if (!response.success) {
         toast({ title: "Compliance pack jobs failed", description: response.error || "Could not load compliance pack jobs.", variant: "destructive" });
         return;
@@ -297,7 +304,7 @@ export default function Governance() {
       const payload: any = response.data || {};
       setComplianceJobs(Array.isArray(payload.jobs) ? payload.jobs : []);
     } finally {
-      setComplianceJobsLoading(false);
+      if (currentComplianceScope.current === licenseeId) setComplianceJobsLoading(false);
     }
   };
 

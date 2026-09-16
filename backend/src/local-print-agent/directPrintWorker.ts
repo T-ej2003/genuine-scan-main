@@ -345,7 +345,7 @@ export const resolveSessionUrl = (backendUrl: string) => {
   return url.toString();
 };
 
-const buildSignedSessionMessage = async (params: {
+export const buildSignedSessionMessage = async (params: {
   type: "hello" | SessionProgressType;
   session?: SessionContext | null;
   selectedPrinterId: string;

@@ -11,6 +11,8 @@ const releasePayloadInternal = {
   name: releaseMetadata.name,
   version: releaseMetadata.version,
   gitSha: releaseMetadata.shortGitSha,
+  imageGitSha: releaseMetadata.imageGitSha,
+  deploymentGitSha: releaseMetadata.deploymentGitSha,
   environment: releaseMetadata.environment,
   release: releaseMetadata.release,
 };

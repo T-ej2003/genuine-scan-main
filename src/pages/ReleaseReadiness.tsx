@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import {
   AlertTriangle,
@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import apiClient from "@/lib/api-client";
+import { licenseeSummarySchema } from "../../shared/contracts/runtime/common";
 
 type ReleaseMetadata = {
   name: string;
@@ -113,6 +114,18 @@ const renderHealthBadge = (tone: "healthy" | "warning" | "critical", label: stri
 
 export default function ReleaseReadiness() {
   const { toast } = useToast();
+  const [licensees, setLicensees] = useState<Array<{ id: string; name: string }>>([]);
+  const [licenseeId, setLicenseeId] = useState("");
+  const currentScope = useRef(licenseeId);
+  currentScope.current = licenseeId;
+  useEffect(() => {
+    let active = true;
+    void apiClient.getLicensees().then((response) => {
+      const parsed = licenseeSummarySchema.pick({ id: true, name: true }).array().safeParse(response.data);
+      if (active && response.success && parsed.success) setLicensees(parsed.data);
+    }).catch(() => { if (active) setLicensees([]); });
+    return () => { active = false; };
+  }, []);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [releaseMetadata, setReleaseMetadata] = useState<ReleaseMetadata | null>(null);
@@ -140,12 +153,13 @@ export default function ReleaseReadiness() {
         rateLimitAlertsRes,
       ] = await Promise.allSettled([
         apiClient.getInternalReleaseMetadata(),
-        apiClient.getComplianceReport(),
-        apiClient.getCompliancePackJobs({ limit: 10, offset: 0 }),
+        licenseeId ? apiClient.getComplianceReport({ licenseeId }) : Promise.resolve({ success: false, data: undefined }),
+        licenseeId ? apiClient.getCompliancePackJobs({ licenseeId, limit: 10, offset: 0 }) : Promise.resolve({ success: false, data: undefined }),
         apiClient.getRouteTransitionSummary(),
         apiClient.getRateLimitAnalytics({ windowMs: 60 * 60 * 1000 }),
         apiClient.getRateLimitAlerts({ windowMs: 60 * 60 * 1000 }),
       ]);
+      if (currentScope.current !== licenseeId) return;
 
       if (releaseRes.status === "fulfilled" && releaseRes.value.success) {
         setReleaseMetadata((releaseRes.value.data || null) as ReleaseMetadata | null);
@@ -203,7 +217,7 @@ export default function ReleaseReadiness() {
         }
       }
     },
-    [toast]
+    [toast, licenseeId]
   );
 
   useEffect(() => {
@@ -301,6 +315,16 @@ export default function ReleaseReadiness() {
   return (
     <DashboardLayout>
       <div className="space-y-6">
+        <label className="block">Compliance brand scope
+          <select className="ml-3 rounded border p-2" value={licenseeId} onChange={(event) => {
+            setCompliance(null);
+            setComplianceJobs([]);
+            setLicenseeId(event.target.value);
+          }}>
+            <option value="">Select a brand</option>
+            {licensees.map((licensee) => <option key={licensee.id} value={licensee.id}>{licensee.name}</option>)}
+          </select>
+        </label>
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div className="space-y-2">
             <div className="text-[11px] font-semibold uppercase tracking-[0.26em] text-slate-500">Super admin only</div>

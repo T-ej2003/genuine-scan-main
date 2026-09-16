@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='8942a8cadac447d1b947ec71fabfaf679ab2a2217dc0dd730b1c2f24027a20bc'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:8942a8cadac447d1b947ec71fabfaf679ab2a2217dc0dd730b1c2f24027a20bc'
+    AND source_contract_sha256='be203107ae158c0244766c8423baf7d5af4bd1829159969dff7df4dbe761aabb'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:be203107ae158c0244766c8423baf7d5af4bd1829159969dff7df4dbe761aabb'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:8942a8cadac447d1b947ec71fabfaf679ab2a2217dc0dd730b1c2f24027a20bc')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:be203107ae158c0244766c8423baf7d5af4bd1829159969dff7df4dbe761aabb')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -8054,6 +8054,7 @@ BEGIN
           pa."signatureValid",pa."attestedAt",pa."rejectionReason",pa."createdAt"
         FROM public."PrinterAttestation" pa
         JOIN registration pr ON pr.id=pa."printerRegistrationId"
+        WHERE NOT (pa.metadata ? 'operation')
         ORDER BY pa."createdAt" DESC,pa.id DESC LIMIT 1
       )
       SELECT CASE WHEN pr.id IS NULL THEN jsonb_build_object(
@@ -9094,11 +9095,16 @@ BEGIN
     IF item.value->>'qrCodeId' !~* '^[0-9a-f-]{36}$'
        OR item.value->>'tokenNonce' !~ '^(?:[0-9a-f]{64}|[A-Za-z0-9_-]{22})$'
        OR item.value->>'tokenHash' !~ '^[0-9a-f]{64}$'
+       OR item.value->>'tokenIssuedAt' IS NULL
+       OR NOT isfinite((item.value->>'tokenIssuedAt')::timestamp without time zone)
+       OR (item.value->>'tokenIssuedAt')::timestamp without time zone>now_at
+       OR (item.value->>'tokenExpiresAt')::timestamp without time zone<=(item.value->>'tokenIssuedAt')::timestamp without time zone
        OR (item.value->>'tokenExpiresAt')::timestamp without time zone<=now_at
     THEN RAISE EXCEPTION 'PRINTING_INVALID_INPUT'; END IF;
     UPDATE public."QRCode" q SET
       status='ACTIVATED', "tokenNonce"=item.value->>'tokenNonce',
-      "tokenIssuedAt"=now_at,"tokenExpiresAt"=(item.value->>'tokenExpiresAt')::timestamp without time zone,
+      "tokenIssuedAt"=(item.value->>'tokenIssuedAt')::timestamp without time zone,
+      "tokenExpiresAt"=(item.value->>'tokenExpiresAt')::timestamp without time zone,
       "tokenHash"=item.value->>'tokenHash',"printJobId"=job_id,
       "issuanceMode"='GOVERNED_PRINT',"updatedAt"=now_at
      WHERE q.id=item.value->>'qrCodeId' AND q."batchId"=p_batch_id
@@ -9414,7 +9420,7 @@ BEGIN
           set_config('app.printing_gateway_secret_hash',coalesce(p_gateway_secret_hash,''),true);
   IF p_kind='LOCAL_AGENT' THEN
     SELECT pr.id,pr."userId",pr."orgId",pr."licenseeId",pr."agentId",pr."deviceFingerprint",
-      pr."publicKeyPem",pr."trustStatus",pr."approvedAt",pr."revokedAt",pr."lastSeenAt"
+      pr."publicKeyPem",pr."certFingerprint",pr."trustStatus",pr."approvedAt",pr."revokedAt",pr."lastSeenAt"
       INTO STRICT registration FROM public."PrinterRegistration" pr
       WHERE pr."agentId"=p_agent_id AND pr."deviceFingerprint"=p_device_fingerprint
         AND pr."trustStatus"='TRUSTED' AND pr."revokedAt" IS NULL
@@ -9435,6 +9441,7 @@ BEGIN
     SELECT pa."signatureValid",pa."trustValid",pa."expiresAt",pa.metadata
       INTO attestation_row FROM public."PrinterAttestation" pa
       WHERE pa."printerRegistrationId"=registration.id
+        AND NOT (pa.metadata ? 'operation')
       ORDER BY pa."createdAt" DESC,pa.id DESC LIMIT 1;
     IF p_operation='HEARTBEAT' THEN
       UPDATE public."PrinterRegistration" SET "lastSeenAt"=now_at,"updatedAt"=now_at WHERE id=registration.id;
@@ -9445,6 +9452,7 @@ BEGIN
         'id',registration.id,'userId',registration."userId",'orgId',registration."orgId",
         'licenseeId',registration."licenseeId",'agentId',registration."agentId",
         'deviceFingerprint',registration."deviceFingerprint",'publicKeyPem',registration."publicKeyPem",
+        'certFingerprint',registration."certFingerprint",
         'trustStatus',registration."trustStatus",'approvedAt',registration."approvedAt",
         'revokedAt',registration."revokedAt",'lastSeenAt',registration."lastSeenAt"
       ),

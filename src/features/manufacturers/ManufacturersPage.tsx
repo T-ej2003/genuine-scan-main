@@ -78,7 +78,9 @@ export default function ManufacturersPage() {
   const hasMissingScope = !isSuperAdmin && !effectiveLicenseeId;
   const canLoadDirectory = !hasMissingScope && (!isSuperAdmin || Boolean(effectiveLicenseeId));
 
-  const directoryQuery = useManufacturerDirectory(effectiveLicenseeId, canLoadDirectory);
+  const [directoryPage, setDirectoryPage] = useState({ scope: effectiveLicenseeId, offset: 0, batchOffset: 0 });
+  const page = directoryPage.scope === effectiveLicenseeId ? directoryPage : { scope: effectiveLicenseeId, offset: 0, batchOffset: 0 };
+  const directoryQuery = useManufacturerDirectory(effectiveLicenseeId, canLoadDirectory, page.offset, page.batchOffset);
   const inviteMutation = useInviteManufacturerMutation();
   const deactivateMutation = useDeactivateManufacturerMutation();
   const restoreMutation = useRestoreManufacturerMutation();
@@ -345,6 +347,20 @@ export default function ManufacturersPage() {
           />
         ) : null}
 
+        <p className="text-sm text-muted-foreground">Directory filters and activity summaries apply to the selected pages, not all records.</p>
+        {(["manufacturer", "batch"] as const).map((kind) => {
+          const offsetKey = kind === "manufacturer" ? "offset" : "batchOffset";
+          const meta = kind === "manufacturer" ? directoryQuery.data?.manufacturerPage : directoryQuery.data?.batchPage;
+          return <nav key={kind} aria-label={`${kind} pages`} className="flex items-center gap-3 text-sm">
+            <Button variant="outline" disabled={directoryQuery.isFetching || page[offsetKey] === 0} onClick={() => {
+              setDetailsManufacturer(null); setDirectoryPage({ ...page, [offsetKey]: page[offsetKey] - 100 });
+            }}>Previous {kind} page</Button>
+            <span>Page {page[offsetKey] / 100 + 1}{meta ? ` of ${Math.max(1, Math.ceil(meta.total / 100))}` : ""}</span>
+            <Button variant="outline" disabled={directoryQuery.isFetching || !meta || page[offsetKey] + 100 >= meta.total} onClick={() => {
+              setDetailsManufacturer(null); setDirectoryPage({ ...page, [offsetKey]: page[offsetKey] + 100 });
+            }}>Next {kind} page</Button>
+          </nav>;
+        })}
         <ManufacturerSummaryCards {...summary} />
 
         <PageSection

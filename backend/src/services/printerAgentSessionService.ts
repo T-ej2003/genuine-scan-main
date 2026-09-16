@@ -54,7 +54,7 @@ const parseBoolEnv = (name: string, fallback: boolean) => {
 
 export const PRINT_AGENT_SESSION_CHUNK_SIZE = parsePositiveIntEnv("PRINT_AGENT_SESSION_CHUNK_SIZE", 50, 1, 100);
 const PRINT_AGENT_SESSION_EXPIRY_SECONDS = parsePositiveIntEnv("PRINT_AGENT_SESSION_EXPIRY_SECONDS", 12 * 60 * 60, 60, 24 * 60 * 60);
-const PRINT_AGENT_REQUIRE_MTLS = parseBoolEnv("PRINT_AGENT_REQUIRE_MTLS", false);
+export const PRINT_AGENT_REQUIRE_MTLS = parseBoolEnv("PRINT_AGENT_REQUIRE_MTLS", false);
 
 export const sessionHelloSchema = z.object({
   type: z.literal("hello"),

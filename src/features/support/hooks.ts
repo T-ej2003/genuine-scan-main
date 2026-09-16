@@ -138,14 +138,15 @@ export function useSupportTicketDetail(ticketId?: string) {
   });
 }
 
-export function useSupportAssignableUsers(enabled: boolean) {
+export function useSupportAssignableUsers(enabled: boolean, offset = 0) {
   return useQuery({
-    queryKey: queryKeys.support.assignees(),
+    queryKey: [...queryKeys.support.assignees(), offset],
     enabled,
-    queryFn: async (): Promise<SupportAssignee[]> => {
-      const rows = unwrapApiResponse<unknown>(await apiClient.getUsers(), "Could not load support assignees.");
-      if (!Array.isArray(rows)) return [];
-      return parseWithSchema(
+    queryFn: async () => {
+      const response = await apiClient.getUsers({ limit: 100, offset });
+      const rows = unwrapApiResponse<unknown>(response, "Could not load support assignees.");
+      if (!Array.isArray(rows)) throw new Error("Invalid support assignee response");
+      return { meta: response.meta, rows: parseWithSchema(
         supportAssigneeArraySchema,
         rows.filter(
           (row) =>
@@ -154,7 +155,7 @@ export function useSupportAssignableUsers(enabled: boolean) {
             ["LICENSEE_ADMIN", "SUPER_ADMIN", "ORG_ADMIN"].includes(String((row as SupportAssignee).role || ""))
         ),
         "Could not load support assignees."
-      );
+      ) };
     },
   });
 }

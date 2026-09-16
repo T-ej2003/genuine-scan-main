@@ -9,6 +9,7 @@ import { createAuditLog } from "../services/auditService";
 import { createRoleNotifications } from "../services/notificationService";
 import {
   onPrinterConnectionEvent,
+  emitConnectionEvent,
   upsertPrinterConnectionHeartbeat,
 } from "../services/printerConnectionService";
 import { syncLocalAgentPrintersFromHeartbeat } from "../services/printerRegistryService";
@@ -17,7 +18,7 @@ import { getPrinterSseSignSecret } from "../utils/secretConfig";
 import { boundedJsonSchema } from "../utils/boundedJson";
 import { isPrismaMissingTableError } from "../utils/prismaStorageGuard";
 import { writeSseRealtimeEnvelope } from "../utils/realtime";
-import { getOrComputeVersionedCache } from "../services/versionedCacheService";
+import { bumpCacheNamespaceVersion, getOrComputeVersionedCache } from "../services/versionedCacheService";
 import { getTrustedMtlsFingerprintHeader } from "../utils/mtlsFingerprintHeader";
 import {
   readPrintingProjection,
@@ -381,18 +382,13 @@ export const reportPrinterHeartbeat = async (req: AuthRequest, res: Response) =>
 
     const capability = String(req.databaseSessionCapability || "");
     const lookup = await registerPrintingConnector({
-      capability,
-      requestId: requestId(req),
-      operation: "LOOKUP",
+      capability, requestId: requestId(req), operation: "LOOKUP",
       payload: { deviceFingerprint },
     });
-    const publicKeyPem = String(parsed.data.publicKeyPem || lookup?.publicKeyPem || "")
-      .replace(/\\n/g, "\n")
-      .trim();
+    const publicKeyPem = String(parsed.data.publicKeyPem || lookup?.publicKeyPem || "").replace(/\\n/g, "\n").trim();
     if (!publicKeyPem.includes("BEGIN") || (lookup?.publicKeyPem && lookup.publicKeyPem !== publicKeyPem)) {
       return res.status(401).json({ success: false, error: "Connector public key does not match its registration." });
     }
-
     const printerId = String(parsed.data.printerId || parsed.data.selectedPrinterId || "unknown-printer").trim();
     const payloads = [req.user.userId, "manufacturer-browser-heartbeat"].map((userId) =>
       buildPrinterAgentHeartbeatPayload({
@@ -457,7 +453,11 @@ export const reportPrinterHeartbeat = async (req: AuthRequest, res: Response) =>
     if (!signatureValid) {
       return res.status(401).json({ success: false, error: "Printer heartbeat signature verification failed." });
     }
-    return res.json({ success: true, data: await readPrinterStatus(req) });
+    const status = await readPrinterStatus(req);
+    // Publish committed canonical status, not caller-supplied health.
+    emitConnectionEvent({ userId: req.user.userId, status, changedAt: new Date().toISOString() });
+    void bumpCacheNamespaceVersion("printer-status").catch(() => undefined);
+    return res.json({ success: true, data: status });
   } catch (error: any) {
     console.error("reportPrinterHeartbeat error:", error);
     return res.status(500).json({ success: false, error: error?.message || "Internal server error" });

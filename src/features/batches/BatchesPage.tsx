@@ -22,6 +22,7 @@ import { APP_PATHS } from "@/app/route-metadata";
 import { usePrintJobs } from "@/features/printing/hooks";
 import apiClient from "@/lib/api-client";
 import type { PrintJobRow } from "@/features/batches/types";
+import { licenseeSummarySchema } from "../../../shared/contracts/runtime/common";
 
 type ManufacturerRecoveryContext = {
   printJobId: string;
@@ -43,7 +44,18 @@ export default function BatchesPage() {
   const { user } = useAuth();
   const progress = useOperationProgress();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [licenseeOptions, setLicenseeOptions] = useState<Array<{ id: string; name: string }>>([]);
+  const selectedLicenseeId = searchParams.get("licenseeId") || "";
+  useEffect(() => {
+    if (user?.role !== "super_admin") return;
+    let active = true;
+    void apiClient.getLicensees().then((response) => {
+      const parsed = licenseeSummarySchema.pick({ id: true, name: true }).array().safeParse(response.data);
+      if (active && response.success && parsed.success) setLicenseeOptions(parsed.data);
+    }).catch(() => { if (active) setLicenseeOptions([]); });
+    return () => { active = false; };
+  }, [user?.role]);
 
   const role = user?.role;
   const canDelete = role === "super_admin" || role === "licensee_admin";
@@ -64,6 +76,7 @@ export default function BatchesPage() {
   const operations = useBatchOperationsController({
     role,
     userLicenseeId: user?.licenseeId,
+    selectedLicenseeId,
     searchParams,
     canAssignManufacturer,
     canDelete,
@@ -312,6 +325,30 @@ export default function BatchesPage() {
 
   return (
     <DashboardLayout>
+      {role === "super_admin" && <label className="mb-4 block">
+        Brand scope
+        <select className="ml-3 rounded border p-2" value={selectedLicenseeId} onChange={(event) => {
+          const next = new URLSearchParams(searchParams);
+          if (event.target.value) next.set("licenseeId", event.target.value); else next.delete("licenseeId");
+          workspace.closeWorkspace();
+          setSearchParams(next);
+        }}>
+          <option value="">Select a brand</option>
+          {licenseeOptions.map((licensee) => <option key={licensee.id} value={licensee.id}>{licensee.name}</option>)}
+        </select>
+      </label>}
+      <nav aria-label="Batch pages" className="flex items-center gap-3 text-sm">
+        <button type="button" disabled={operations.loading || operations.batchOffset === 0} onClick={() => {
+          workspace.closeWorkspace();
+          operations.setBatchOffset(operations.batchOffset - operations.batchPageSize);
+        }}>Previous page</button>
+        <span>Page {Math.floor(operations.batchOffset / operations.batchPageSize) + 1}
+          {operations.batchTotal !== undefined ? ` · ${operations.batchTotal} batches` : ""}. Filters and summaries apply to this page.</span>
+        <button type="button" disabled={operations.loading || operations.batchTotal === undefined || operations.batchOffset + operations.batchPageSize >= operations.batchTotal} onClick={() => {
+          workspace.closeWorkspace();
+          operations.setBatchOffset(operations.batchOffset + operations.batchPageSize);
+        }}>Next page</button>
+      </nav>
       <BatchesWorkspaceTable
         role={role}
         isManufacturer={isManufacturer}
@@ -359,6 +396,11 @@ export default function BatchesPage() {
         role={role}
         workspace={workspace.workspaceBatch}
         manufacturers={operations.manufacturers}
+        manufacturerPageControls={<nav aria-label="Assignable manufacturer pages" className="flex gap-3 text-sm">
+          <button type="button" disabled={operations.manufacturersLoading || operations.manufacturerOffset === 0} onClick={() => operations.setManufacturerOffset(operations.manufacturerOffset - 100)}>Previous manufacturers</button>
+          <span>Page {operations.manufacturerOffset / 100 + 1}</span>
+          <button type="button" disabled={operations.manufacturersLoading || operations.manufacturerTotal === undefined || operations.manufacturerOffset + 100 >= operations.manufacturerTotal} onClick={() => operations.setManufacturerOffset(operations.manufacturerOffset + 100)}>Next manufacturers</button>
+        </nav>}
         assignManufacturerId={operations.assignManufacturerId}
         assignQuantity={operations.assignQuantity}
         assigning={operations.loading}

@@ -127,8 +127,10 @@ export const createLicenseeQrApi = (core: ApiClientCore) => ({
     return response.blob();
   },
 
-  async getBatches(options?: { licenseeId?: string }) {
+  async getBatches(options?: { licenseeId?: string; limit?: number; offset?: number }) {
     const params = new URLSearchParams();
+    if (options?.limit != null) params.append("limit", String(options.limit));
+    if (options?.offset != null) params.append("offset", String(options.offset));
     if (options?.licenseeId) params.append("licenseeId", options.licenseeId);
     const query = params.toString() ? `?${params.toString()}` : "";
     return controlledDashboardGet(`qr:batches:${query}`, () => core.request<any[]>(`/qr/batches${query}`), {
@@ -163,7 +165,7 @@ export const createLicenseeQrApi = (core: ApiClientCore) => ({
     });
   },
 
-  async getBatchAllocationMap(batchId: string) {
+  async getBatchAllocationMap(batchId: string, licenseeId?: string) {
     return core.request<{
       sourceBatchId: string;
       focusBatchId: string;
@@ -176,7 +178,7 @@ export const createLicenseeQrApi = (core: ApiClientCore) => ({
         pendingPrintableCodes: number;
         printedCodes: number;
       };
-    }>(`/qr/batches/${encodeURIComponent(batchId)}/allocation-map`);
+    }>(`/qr/batches/${encodeURIComponent(batchId)}/allocation-map${licenseeId ? `?licenseeId=${encodeURIComponent(licenseeId)}` : ""}`);
   },
 
   async createQrAllocationRequest(payload: {
@@ -229,8 +231,10 @@ export const createLicenseeQrApi = (core: ApiClientCore) => ({
     return core.request(`/admin/qr/scan-logs${query}`);
   },
 
-  async getBatchSummary(options?: { licenseeId?: string; manufacturerId?: string }) {
+  async getBatchSummary(options?: { licenseeId?: string; manufacturerId?: string; limit?: number; offset?: number }) {
     const params = new URLSearchParams();
+    if (options?.limit != null) params.append("limit", String(options.limit));
+    if (options?.offset != null) params.append("offset", String(options.offset));
     if (options?.licenseeId) params.append("licenseeId", options.licenseeId);
     if (options?.manufacturerId) params.append("manufacturerId", options.manufacturerId);
     const query = params.toString() ? `?${params.toString()}` : "";

@@ -77,6 +77,7 @@ describe("IR regression", () => {
           {
             id: "rule-1",
             name: "Burst scan threshold",
+            licenseeId: "lic-1",
             ruleType: "BURST_SCANS",
             threshold: 6,
             windowMinutes: 10,
@@ -134,5 +135,18 @@ describe("IR regression", () => {
         })
       );
     });
+  });
+
+  it("does not PATCH the immutable tenant when editing a tenant-bound policy", async () => {
+    vi.mocked(apiClient.patchIrPolicy).mockResolvedValue({ success: true });
+    render(<MemoryRouter><IR /></MemoryRouter>);
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Policies" }), { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(apiClient.patchIrPolicy).toHaveBeenCalled());
+    const [id, payload] = vi.mocked(apiClient.patchIrPolicy).mock.calls[0];
+    expect(id).toBe("rule-1");
+    expect(payload.name).toBe("Burst scan threshold");
+    expect(payload).not.toHaveProperty("licenseeId");
   });
 });
