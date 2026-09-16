@@ -211,6 +211,27 @@ const runC03AuthenticatedCertification = (connections, env) => {
   if (!/C03 authenticated boundaries application-path proof passed/.test(result.stdout || "")) throw new Error("C03 authenticated certification did not emit its success marker");
   return { status: "application-path-certified", postgresqlMajor: 18, testFile: "backend/tests/rls-wave-c/c03/c03AuthenticatedBoundariesPostgres18.test.js" };
 };
+const runCurrentRuntimeSuperAdminInvitationCertification = (connections, env) => {
+  if (env.MSCQR_FULL_RLS_CERTIFICATION_FAMILY !== "current-runtime-super-admin-invitation") return null;
+  const result = spawnSync(process.execPath, [path.join(root, "backend/tests/currentRuntimeSuperAdminInvitationPostgres18.test.js")], {
+    cwd: root,
+    env: {
+      ...env,
+      NODE_ENV: "test",
+      DATABASE_URL: connections.app,
+      AUTHENTICATED_APP_DATABASE_URL: connections.app,
+      PREAUTH_DATABASE_URL: connections.preauth,
+      MSCQR_CURRENT_RUNTIME_INVITATION_BOOTSTRAP_URL: connections.bootstrap,
+      MSCQR_CURRENT_RUNTIME_SUPER_ADMIN_INVITATION_POSTGRES18_TEST: "true",
+      MSCQR_CURRENT_RUNTIME_SUPER_ADMIN_INVITATION_POSTGRES18_CONFIRM: "MSCQR_RUN_LOCAL_CURRENT_RUNTIME_SUPER_ADMIN_INVITATION_POSTGRES18_TEST",
+    },
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (result.status !== 0) throw new Error(`Current-runtime super-admin invitation certification failed: ${`${result.stdout || ""}${result.stderr || ""}`.trim()}`);
+  if (!/Current-runtime super-admin invitation PostgreSQL 18 proof passed/.test(result.stdout || "")) throw new Error("Current-runtime super-admin invitation certification did not emit its success marker");
+  return { status: "application-path-certified", postgresqlMajor: 18, testFile: "backend/tests/currentRuntimeSuperAdminInvitationPostgres18.test.js" };
+};
 const runPrintingLifecycleCertification = (connections, env) => {
   if (env.MSCQR_FULL_RLS_CERTIFICATION_FAMILY !== "printing-lifecycle") return null;
   const result = spawnSync(process.execPath, [path.join(root, "backend/tests/rls-wave-c/c02/printingLifecyclePostgres18.test.js")], {
@@ -905,6 +926,30 @@ const runSuccessfulCertification = ({ adminUrl, maintenanceDatabase, manifest, e
         blueFingerprintUnchanged: true,
       };
     }
+    if (env.MSCQR_FULL_RLS_CERTIFICATION_FAMILY === "current-runtime-super-admin-invitation") {
+      const fixtureRows = Number(scalar(urls.bootstrap, "SELECT sum(row_count) FROM (SELECT (xpath('/row/c/text()',query_to_xml(format('SELECT count(*) c FROM public.%I',c.relname),false,true,'')))[1]::text::bigint AS row_count FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='r' AND c.relname<>'_prisma_migrations') counts", "count disposable certification fixture rows"));
+      const connections = { app: urls.app, bootstrap: urls.bootstrap, preauth: urls.preauth, worker: urls.worker, scheduled: urls.scheduled, operator: urls.operator };
+      const currentRuntimeSuperAdminInvitationCertification = runCurrentRuntimeSuperAdminInvitationCertification(connections, env);
+      destroyAndProve({ urls, database, manifest, blueUrl, expectedBlueFingerprint, allowCertificationFixtures: true });
+      return {
+        tablesCertified: 0,
+        fixtureRows,
+        applicationPathResults: [],
+        catalogTamperResults: [],
+        b01Certification: null,
+        b01PreAuthCertification: null,
+        scheduledJobIdentityCertification: null,
+        b03OutboxCertification: null,
+        c03Certification: null,
+        currentRuntimeSuperAdminInvitationCertification,
+        printingLifecycleCertification: null,
+        publicVerificationCertification: null,
+        qrSystemCertification: null,
+        databaseResidueCount: 0,
+        managedRoleResidueCount: 0,
+        blueFingerprintUnchanged: true,
+      };
+    }
     const catalogTamperResults = certifyCatalogTamperDetection(urls.administrator, manifest, policies);
     const b01Certification = certifyB01RefreshRotation(urls, manifest);
     const b01PreAuthCertification = runB01PreAuthCertification({ app: urls.app, bootstrap: urls.bootstrap, preauth: urls.preauth }, env);
@@ -917,13 +962,14 @@ const runSuccessfulCertification = ({ adminUrl, maintenanceDatabase, manifest, e
     const scheduledJobIdentityCertification = runScheduledJobIdentityCertification(connections, env);
     const b03OutboxCertification = runB03OutboxCertification(connections, env);
     const c03Certification = runC03AuthenticatedCertification(connections, env);
+    const currentRuntimeSuperAdminInvitationCertification = runCurrentRuntimeSuperAdminInvitationCertification(connections, env);
     const publicVerificationCertification = runPublicVerificationCertification(connections, env);
     const applicationPathResults = env.MSCQR_FULL_RLS_CERTIFICATION_FAMILY === "c03-authenticated-boundaries"
       ? []
       : runApplicationPathCertifications(connections, env);
     const qrSystemCertification = runQrSystemCertification(connections, env);
     destroyAndProve({ urls, database, manifest, blueUrl, expectedBlueFingerprint, allowCertificationFixtures: true });
-    return { tablesCertified, fixtureRows, applicationPathResults, catalogTamperResults, b01Certification, b01PreAuthCertification, scheduledJobIdentityCertification, b03OutboxCertification, c03Certification, printingLifecycleCertification: null, publicVerificationCertification, qrSystemCertification, databaseResidueCount: 0, managedRoleResidueCount: 0, blueFingerprintUnchanged: true };
+    return { tablesCertified, fixtureRows, applicationPathResults, catalogTamperResults, b01Certification, b01PreAuthCertification, scheduledJobIdentityCertification, b03OutboxCertification, c03Certification, currentRuntimeSuperAdminInvitationCertification, printingLifecycleCertification: null, publicVerificationCertification, qrSystemCertification, databaseResidueCount: 0, managedRoleResidueCount: 0, blueFingerprintUnchanged: true };
   } catch (error) {
     try { destroyAndProve({ urls, database, manifest, blueUrl, expectedBlueFingerprint, allowCertificationFixtures: true }); } catch (cleanupError) { throw new Error(`${error.message}; cleanup failed: ${cleanupError.message}`); }
     throw error;
@@ -972,9 +1018,11 @@ export const runCertification = (adminUrl, env = process.env) => {
     workflowsApplicationPathCertified: 0,
     applicationPathCertifiedWorkflowIds: [],
     applicationPathResults: [],
+    certificationFamily: String(env.MSCQR_FULL_RLS_CERTIFICATION_FAMILY || "").trim() || "default",
     b01PreAuthCertification: null,
     scheduledJobIdentityCertification: null,
     b03OutboxCertification: null,
+    currentRuntimeSuperAdminInvitationCertification: null,
     qrSystemCertification: null,
     workflowsProductProhibited: workflowEvidence.summary.frozenProductProhibited,
     cleanRoomPreflightCertified: false,
@@ -1038,6 +1086,7 @@ export const runCertification = (adminUrl, env = process.env) => {
     result.scheduledJobIdentityCertification = finalRun.scheduledJobIdentityCertification;
     result.b03OutboxCertification = finalRun.b03OutboxCertification;
     result.c03Certification = finalRun.c03Certification;
+    result.currentRuntimeSuperAdminInvitationCertification = finalRun.currentRuntimeSuperAdminInvitationCertification;
     result.printingLifecycleCertification = finalRun.printingLifecycleCertification;
     result.publicVerificationCertification = finalRun.publicVerificationCertification;
     result.qrSystemCertification = finalRun.qrSystemCertification;
@@ -1056,7 +1105,9 @@ export const runCertification = (adminUrl, env = process.env) => {
     result.disposableCertificationFixtureRows = finalRun.fixtureRows;
     runRouteShutdownTests();
     result.routeShutdownTemplateTests = true;
-    result.status = "clean-room-full-table-enforcement-certified-workflows-pending";
+    result.status = result.certificationFamily === "current-runtime-super-admin-invitation"
+      ? "current-runtime-super-admin-invitation-certified"
+      : "clean-room-full-table-enforcement-certified-workflows-pending";
   } catch (error) {
     failure = error;
     result.status = "failed-cleanup-required";

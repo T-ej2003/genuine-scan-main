@@ -666,6 +666,7 @@ export const loginWithPassword = async (input: {
       const loginCycleDays = Math.max(1, getAdminLoginMfaCycleDays());
       const cycleThreshold = addDays(now, -loginCycleDays);
       const mfaFreshForLogin = Boolean(
+        !risk.shouldStepUp &&
         !isManufacturerRole(user.role) &&
           mfaStatus?.enabled &&
           hasValidLastUsedAt &&

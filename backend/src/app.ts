@@ -18,6 +18,8 @@ import { buildReadyPayload } from "./controllers/healthController";
 import { isRedisConfigured } from "./services/redisService";
 import { logger } from "./utils/logger";
 import { sanitizeRequestTelemetryPath } from "./utils/requestTelemetryPath";
+import { getClientIpTrustConfig, trustedClientIpMiddleware } from "./utils/clientIp";
+import { getAuthRiskThresholds } from "./services/auth/sessionRiskService";
 
 const parseBool = (value: unknown, fallback = false) => {
   const normalized = String(value || "").trim().toLowerCase();
@@ -53,6 +55,7 @@ const isManufacturerPrintersReadRoute = (method: string, pathName: string) =>
   method === "GET" && manufacturerPrintersReadTelemetryPaths.has(pathName);
 
 export const createBackendApp = () => {
+  getAuthRiskThresholds();
   const redisRequired =
     process.env.NODE_ENV === "production" &&
     String(process.env.REQUIRE_REDIS_FOR_SHARED_STATE || "true").trim().toLowerCase() !== "false";
@@ -66,7 +69,8 @@ export const createBackendApp = () => {
 
   const app = express();
   app.disable("etag");
-  app.set("trust proxy", 1);
+  app.set("trust proxy", false);
+  app.use(trustedClientIpMiddleware(getClientIpTrustConfig()));
 
   const publicVersionEndpointEnabled = parseBool(process.env.PUBLIC_VERSION_ENDPOINT_ENABLED, false);
 
