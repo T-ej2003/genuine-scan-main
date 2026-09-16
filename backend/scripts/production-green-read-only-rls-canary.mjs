@@ -32,7 +32,7 @@ const validRuntimeEnvironment = (env) =>
   && /^[a-z]{2}-[a-z]+-\d$/.test(String(env.AWS_REGION || "")) && env.AWS_DEFAULT_REGION === env.AWS_REGION
   && /^\/v2\/credentials\/[^/?#]+$/.test(String(env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI || ""))
   && isMetadataUri(env.ECS_CONTAINER_METADATA_URI_V4, "v4")
-  && isMetadataUri(env.ECS_AGENT_URI, "api")
+  && (!env.ECS_AGENT_URI || isMetadataUri(env.ECS_AGENT_URI, "api"))
   && (!env.ECS_CONTAINER_METADATA_URI || isMetadataUri(env.ECS_CONTAINER_METADATA_URI, "v3"));
 
 export function validateConfiguration({ env = process.env, argv = process.argv.slice(2) } = {}) {

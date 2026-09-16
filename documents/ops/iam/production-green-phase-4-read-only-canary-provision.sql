@@ -48,7 +48,10 @@ DO $$ BEGIN
 END $$;
 RESET ROLE;
 SELECT set_config('mscqr.predecessor_app_rls_acl', COALESCE(nspacl::text, ''), true) FROM pg_namespace WHERE nspname='app_rls';
-GRANT CREATE ON SCHEMA app_rls TO mscqr_prd_rls_phase2_auth_owner;
+SELECT set_config('mscqr.auth_owner_had_schema_create', has_schema_privilege('mscqr_prd_rls_phase2_auth_owner', 'app_rls', 'CREATE')::text, true);
+DO $$ BEGIN
+  IF current_setting('mscqr.auth_owner_had_schema_create') = 'false' THEN EXECUTE 'GRANT CREATE ON SCHEMA app_rls TO mscqr_prd_rls_phase2_auth_owner'; END IF;
+END $$;
 SET ROLE mscqr_prd_rls_phase2_auth_owner;
 CREATE OR REPLACE FUNCTION app_rls.production_read_only_canary_probe()
 RETURNS TABLE(same_tenant_visible boolean, foreign_tenant_invisible boolean)
@@ -60,9 +63,11 @@ END $$;
 REVOKE ALL ON FUNCTION app_rls.production_read_only_canary_probe() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app_rls.production_read_only_canary_probe() TO mscqr_prod_rls_canary_read;
 RESET ROLE;
-REVOKE CREATE ON SCHEMA app_rls FROM mscqr_prd_rls_phase2_auth_owner;
 DO $$ BEGIN
-  IF has_schema_privilege('mscqr_prd_rls_phase2_auth_owner', 'app_rls', 'CREATE')
+  IF current_setting('mscqr.auth_owner_had_schema_create') = 'false' THEN EXECUTE 'REVOKE CREATE ON SCHEMA app_rls FROM mscqr_prd_rls_phase2_auth_owner'; END IF;
+END $$;
+DO $$ BEGIN
+  IF has_schema_privilege('mscqr_prd_rls_phase2_auth_owner', 'app_rls', 'CREATE')::text <> current_setting('mscqr.auth_owner_had_schema_create')
      OR (SELECT COALESCE(nspacl::text, '') <> current_setting('mscqr.predecessor_app_rls_acl') FROM pg_namespace WHERE nspname='app_rls')
      OR EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mscqr_prod_rls_canary_read' AND (rolsuper OR rolbypassrls OR rolcreaterole OR rolcreatedb OR rolinherit))
      OR EXISTS (SELECT 1 FROM pg_auth_members m JOIN pg_roles parent ON parent.oid=m.roleid JOIN pg_roles member ON member.oid=m.member WHERE member.rolname='mscqr_prod_rls_canary_read')

@@ -17,6 +17,7 @@ const client = (probe = { same_tenant_visible: true, foreign_tenant_invisible: t
 
 test("read-only canary accepts the Docker/Fargate baseline and rejects mutable runtime inputs", () => {
   assert.equal(validateConfiguration({ env, argv: [] }), url);
+  const { ECS_AGENT_URI, ...localEnv } = env; assert.equal(validateConfiguration({ env: localEnv, argv: [] }), url);
   assert.throws(() => validateConfiguration({ env: { ...env, DATABASE_URL: url }, argv: [] }), /fixed contract/);
   assert.throws(() => validateConfiguration({ env, argv: ["SELECT 1"] }), /fixed contract/);
   assert.throws(() => validateConfiguration({ env: { ...env, RLS_CANARY_DATABASE_URL: url.replace("sslmode=require", "sslmode=disable") }, argv: [] }), /fixed contract/);
@@ -59,6 +60,7 @@ test("provisioning and task definition preserve the dedicated read-only boundary
   assert.match(sql, /default_transaction_read_only = on/); assert.match(sql, /production_read_only_canary_control/);
   assert.doesNotMatch(sql, /ALTER ROLE mscqr_prod_rls_canary_read SET mscqr\.rls_canary_scope/);
   assert.match(sql, /COALESCE\(current_setting\('mscqr\.rls_canary_scope', true\), ''\) !~\*/);
+  assert.match(sql, /auth_owner_had_schema_create/);
   assert.match(sql, /GRANT CREATE ON SCHEMA app_rls TO mscqr_prd_rls_phase2_auth_owner/);
   assert.match(sql, /REVOKE CREATE ON SCHEMA app_rls FROM mscqr_prd_rls_phase2_auth_owner/);
   assert.match(sql, /current_setting\('mscqr\.predecessor_app_rls_acl'\)/);
