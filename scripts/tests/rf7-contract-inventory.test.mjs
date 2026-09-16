@@ -2,6 +2,20 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import ts from "typescript";
+import { literalPath } from "../release/route-literal-path.mjs";
+
+test("query suffixes do not become route segments; dynamic path segments are retained", () => {
+  const parse = (text) => {
+    const source = ts.createSourceFile("fixture.ts", text, ts.ScriptTarget.Latest, true);
+    return literalPath(source.statements[0].expression, source);
+  };
+  assert.equal(parse('`/qr/batches/${batchId}/allocation-map${licenseeId ? `?licenseeId=${licenseeId}` : ""}`'), "/qr/batches/:batchId/allocation-map");
+  assert.equal(parse('`/objects/${id}?limit=${limit}`'), "/objects/:id");
+  assert.equal(parse('`/objects/${id}${flag ? "?a=1" : "?b=2"}`'), "/objects/:id");
+  assert.notEqual(parse('`/objects/${flag ? "/private" : "/public"}`'), "/objects/");
+  assert.equal(parse('`/missing/${id}/route?limit=${limit}`'), "/missing/:id/route");
+});
 
 const root = path.resolve(new URL("../..", import.meta.url).pathname);
 const inventory = JSON.parse(

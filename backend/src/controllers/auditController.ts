@@ -179,6 +179,11 @@ export const exportLogsCsv = async (req: AuthRequest, res: Response) => {
 export const streamLogs = async (req: AuthRequest, res: Response) => {
   if (!req.user) return res.status(401).end();
 
+  const scope = z.object({ licenseeId: z.string().uuid().optional() }).strict().safeParse(req.query);
+  if (!scope.success || (isAuditSuperUser(req.user.role) && !scope.data.licenseeId)) {
+    return res.status(400).json({ success: false, error: "A valid audit stream brand scope is required" });
+  }
+
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
@@ -199,6 +204,8 @@ export const streamLogs = async (req: AuthRequest, res: Response) => {
   const tenantId = req.user.licenseeId;
 
   const unsubscribe = onAuditLog((log) => {
+    // A requested scope only narrows the existing role/ownership visibility below.
+    if (scope.data.licenseeId && log.licenseeId !== scope.data.licenseeId) return;
     if (!isSuper && hiddenActionsForNonSuper.includes(String(log.action || ""))) return;
     if (!isSuper) {
       if (isManufacturer) {

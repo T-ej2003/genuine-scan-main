@@ -148,10 +148,10 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
     });
   },
 
-  streamAuditLogs(onMessage: (log: AuditStreamLog) => void, onError?: () => void) {
-    const url = `${BASE_URL}/audit/stream`;
+  streamAuditLogs(onMessage: (log: AuditStreamLog) => void, onError?: () => void, licenseeId?: string) {
+    const url = `${BASE_URL}/audit/stream${licenseeId ? `?licenseeId=${encodeURIComponent(licenseeId)}` : ""}`;
 
-    return subscribeManagedEventSource("audit:stream", url, (event: MessageEvent) => {
+    return subscribeManagedEventSource(`audit:stream:${licenseeId || "actor"}`, url, (event: MessageEvent) => {
       try {
         onMessage(JSON.parse(event.data));
       } catch {

@@ -8,14 +8,14 @@
     "scripts/rls/lib/program-inventory.mjs"
   ],
   "summary": {
-    "reviewedCapabilities": 192,
-    "runtimeExecutableCapabilities": 191,
+    "reviewedCapabilities": 193,
+    "runtimeExecutableCapabilities": 192,
     "routes": 238,
     "uniqueRoutes": 238,
     "frontendConsumers": 195,
     "dynamicFrontendConsumers": 6,
     "missingFrontendRoutes": 0,
-    "dynamicNavigationSites": 68,
+    "dynamicNavigationSites": 67,
     "directProtectedAccessReferences": 425,
     "reachableDirectProtectedAccesses": 103,
     "directAccessAuthorityStatus": {
@@ -889,6 +889,65 @@
         "b01-refresh-rotation-real-schema"
       ],
       "rollback": "backend/src/rls-waves/session-b/b01/b01RefreshRotationRollback.sql"
+    },
+    {
+      "functionName": "app_ops.bootstrap_configured_super_admin",
+      "signature": "text,text,text,boolean",
+      "returnType": "TABLE(status text, user_id uuid, email text, role text, auto_verified boolean, reason text, audit_event_id uuid)",
+      "owner": "identity-owner",
+      "runtimeGrantees": [
+        "migration"
+      ],
+      "inputAuthority": "deployment-only configured email, Argon2 password hash and fixed SUPER_ADMIN topology",
+      "outputColumns": [
+        "status",
+        "user_id",
+        "email",
+        "role",
+        "auto_verified",
+        "reason",
+        "audit_event_id"
+      ],
+      "context": "Creates the one configured initial SUPER_ADMIN only under the deployment migration identity and records mandatory operator audit evidence.",
+      "tables": [
+        [
+          "User",
+          "SELECT"
+        ],
+        [
+          "User",
+          "INSERT"
+        ],
+        [
+          "AuditLog",
+          "INSERT"
+        ],
+        [
+          "SecurityEventOutbox",
+          "INSERT"
+        ]
+      ],
+      "workflows": [
+        "workflow-cli-backend-scripts-create-super-admin-js"
+      ],
+      "repositoryCallers": [
+        "backend/src/rls-waves/session-c/operatorProcedureService.ts:bootstrapConfiguredSuperAdmin"
+      ],
+      "idempotencyAndTransactionGuarantees": "Creates the one configured initial SUPER_ADMIN only under the deployment migration identity and records mandatory operator audit evidence.",
+      "auditAndOutboxEffects": [
+        [
+          "AuditLog",
+          "INSERT"
+        ],
+        [
+          "SecurityEventOutbox",
+          "INSERT"
+        ]
+      ],
+      "denialEvidence": [
+        "production-full-rls-package-postgres18"
+      ],
+      "rollback": "backend/src/rls-waves/session-c/c04/operatorProceduresRollback.sql"
     },
     {
       "functionName": "app_public.accept_customer_ownership_transfer",
@@ -10504,18 +10563,18 @@
     },
     {
       "functionName": "app_rls.record_auth_session_risk_signal",
-      "signature": "integer,text,text[],text,text,timestamp without time zone,text,text,text,timestamp without time zone,integer,text",
+      "signature": "integer,text,text[],text,text,timestamp without time zone,text,text,text,timestamp without time zone,integer,boolean,text",
       "returnType": "TABLE(recorded boolean, challengeCreated boolean)",
       "owner": "identity-auth-function-owner",
       "runtimeGrantees": [
         "preauth"
       ],
-      "inputAuthority": "password-verified subject bound by app_auth.lookup_password_user; challenge and request values cannot redirect the actor",
+      "inputAuthority": "password-verified subject bound by app_auth.lookup_password_user; challenge, blocked-risk audit and request values cannot redirect the actor",
       "outputColumns": [
         "recorded",
         "challengeCreated"
       ],
-      "context": "Atomically records the bounded risk result, successful-login state reset, optional password rehash and optional actor-bound MFA login challenge.",
+      "context": "Atomically records the bounded risk result, successful-login state reset, optional password rehash, optional actor-bound MFA login challenge and exact platform-admin blocked-risk audit.",
       "tables": [
         [
           "User",
@@ -10544,7 +10603,7 @@
       "repositoryCallers": [
         "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:recordAuthSessionRiskSignal"
       ],
-      "idempotencyAndTransactionGuarantees": "Atomically records the bounded risk result, successful-login state reset, optional password rehash and optional actor-bound MFA login challenge.",
+      "idempotencyAndTransactionGuarantees": "Atomically records the bounded risk result, successful-login state reset, optional password rehash, optional actor-bound MFA login challenge and exact platform-admin blocked-risk audit.",
       "auditAndOutboxEffects": [
         [
           "AuditLogOutbox",
@@ -13444,11 +13503,13 @@
       "backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:controlPrintingJob",
       "backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:createPrintingJob",
       "backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:digest",
+      "backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:execute",
       "backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:idempotencyHashes",
       "backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:mutatePrintingReissueRequest",
       "backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:mutatePrintingTestLabelJob",
       "backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:object",
       "backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:oneJson",
+      "backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:raw",
       "backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:readPrintingProjection",
       "backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:reconcilePrintingLifecycle",
       "backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:recordConnectorEvent",
@@ -13530,12 +13591,6 @@
       "backend/src/rls-waves/session-c/c03/c03RestrictedDatabase.ts:url",
       "backend/src/rls-waves/session-c/c03/c03RestrictedDatabase.ts:withC03PreAuthTransaction",
       "backend/src/rls-waves/session-c/c03/c03RestrictedDatabase.ts:withRestrictedTransaction",
-      "backend/src/rls-waves/session-c/operatorProcedureService.ts:bootstrapConfiguredSuperAdminProcedure",
-      "backend/src/rls-waves/session-c/operatorProcedureService.ts:boundedText",
-      "backend/src/rls-waves/session-c/operatorProcedureService.ts:exactUuid",
-      "backend/src/rls-waves/session-c/operatorProcedureService.ts:inProcedureTransaction",
-      "backend/src/rls-waves/session-c/operatorProcedureService.ts:normalized",
-      "backend/src/rls-waves/session-c/operatorProcedureService.ts:oneRow",
       "backend/src/routes/auditRoutes.ts:auditExportActorLimiter",
       "backend/src/routes/auditRoutes.ts:auditExportIpLimiter",
       "backend/src/routes/auditRoutes.ts:auditExportRouteLimiter",
@@ -13769,6 +13824,25 @@
       "backend/src/services/analyticsService.ts:score",
       "backend/src/services/analyticsService.ts:scoreToLevel",
       "backend/src/services/analyticsService.ts:toRadians",
+      "backend/src/services/artifactSigningService.ts:activeKeyVersion",
+      "backend/src/services/artifactSigningService.ts:currentPrivateKey",
+      "backend/src/services/artifactSigningService.ts:currentPublicKey",
+      "backend/src/services/artifactSigningService.ts:fingerprint",
+      "backend/src/services/artifactSigningService.ts:key",
+      "backend/src/services/artifactSigningService.ts:loadRegistry",
+      "backend/src/services/artifactSigningService.ts:normalizePem",
+      "backend/src/services/artifactSigningService.ts:normalized",
+      "backend/src/services/artifactSigningService.ts:parseRegistry",
+      "backend/src/services/artifactSigningService.ts:parsed",
+      "backend/src/services/artifactSigningService.ts:payloadHash",
+      "backend/src/services/artifactSigningService.ts:probe",
+      "backend/src/services/artifactSigningService.ts:probeSignature",
+      "backend/src/services/artifactSigningService.ts:publicKeyFingerprint",
+      "backend/src/services/artifactSigningService.ts:readEnv",
+      "backend/src/services/artifactSigningService.ts:registryCurrent",
+      "backend/src/services/artifactSigningService.ts:requireEnv",
+      "backend/src/services/artifactSigningService.ts:signArtifactPayload",
+      "backend/src/services/artifactSigningService.ts:validateArtifactSigningConfiguration",
       "backend/src/services/attentionQueueService.ts:attentionPromise",
       "backend/src/services/attentionQueueService.ts:attentionQueueScopeKey",
       "backend/src/services/attentionQueueService.ts:firstIso",
@@ -13913,6 +13987,7 @@
       "backend/src/services/auth/cookieTokenProtectionService.ts:openCookieToken",
       "backend/src/services/auth/cookieTokenProtectionService.ts:parseProtectedToken",
       "backend/src/services/auth/cookieTokenProtectionService.ts:sealCookieToken",
+      "backend/src/services/auth/cookieTokenProtectionService.ts:secret",
       "backend/src/services/auth/emailVerificationService.ts:addHours",
       "backend/src/services/auth/emailVerificationService.ts:buildVerificationUrl",
       "backend/src/services/auth/emailVerificationService.ts:confirmEmailVerification",
@@ -14032,14 +14107,6 @@
       "backend/src/services/auth/sessionSecurityOverview.ts:riskScore",
       "backend/src/services/auth/sessionSecurityOverview.ts:score",
       "backend/src/services/auth/sessionSecurityOverview.ts:toRiskLevel",
-      "backend/src/services/auth/superAdminBootstrapService.ts:bootstrapConfiguredSuperAdmin",
-      "backend/src/services/auth/superAdminBootstrapService.ts:config",
-      "backend/src/services/auth/superAdminBootstrapService.ts:environment",
-      "backend/src/services/auth/superAdminBootstrapService.ts:getBootstrapConfig",
-      "backend/src/services/auth/superAdminBootstrapService.ts:normalized",
-      "backend/src/services/auth/superAdminBootstrapService.ts:parseBool",
-      "backend/src/services/auth/superAdminBootstrapService.ts:redacted",
-      "backend/src/services/auth/superAdminBootstrapService.ts:validateBootstrapConfig",
       "backend/src/services/auth/tokenService.ts:ACCESS_TOKEN_COOKIE",
       "backend/src/services/auth/tokenService.ts:AUTHENTICATED_SESSION_CAPABILITY_COOKIE",
       "backend/src/services/auth/tokenService.ts:CSRF_TOKEN_COOKIE",
@@ -14180,32 +14247,24 @@
       "backend/src/services/compliancePackService.ts:fullPath",
       "backend/src/services/compliancePackService.ts:integrityCanonical",
       "backend/src/services/compliancePackService.ts:integrityPayload",
-      "backend/src/services/compliancePackService.ts:key",
       "backend/src/services/compliancePackService.ts:listCompliancePackJobs",
       "backend/src/services/compliancePackService.ts:loadCompliancePackJobBuffer",
-      "backend/src/services/compliancePackService.ts:normalizePem",
       "backend/src/services/compliancePackService.ts:normalized",
       "backend/src/services/compliancePackService.ts:parseBool",
       "backend/src/services/compliancePackService.ts:parseIntEnv",
-      "backend/src/services/compliancePackService.ts:payloadHash",
       "backend/src/services/compliancePackService.ts:persistCompliancePackBuffer",
-      "backend/src/services/compliancePackService.ts:privateKeyPem",
       "backend/src/services/compliancePackService.ts:raw",
       "backend/src/services/compliancePackService.ts:rebuildCompliancePackArtifactForJob",
       "backend/src/services/compliancePackService.ts:report",
       "backend/src/services/compliancePackService.ts:requireComplianceActorSecurity",
       "backend/src/services/compliancePackService.ts:requireComplianceSecurity",
       "backend/src/services/compliancePackService.ts:runCompliancePackJob",
-      "backend/src/services/compliancePackService.ts:secret",
       "backend/src/services/compliancePackService.ts:sha256Hex",
-      "backend/src/services/compliancePackService.ts:signPayload",
-      "backend/src/services/compliancePackService.ts:signature",
       "backend/src/services/compliancePackService.ts:snapshot",
       "backend/src/services/compliancePackService.ts:stableStringify",
       "backend/src/services/compliancePackService.ts:startCompliancePackScheduler",
       "backend/src/services/compliancePackService.ts:started",
       "backend/src/services/compliancePackService.ts:storageKey",
-      "backend/src/services/compliancePackService.ts:toBase64Url",
       "backend/src/services/compliancePackService.ts:updated",
       "backend/src/services/connectorReleaseService.ts:buildAbsoluteAppUrl",
       "backend/src/services/connectorReleaseService.ts:buildConnectorDownloadUrls",
@@ -14503,17 +14562,10 @@
       "backend/src/services/immutableAuditExportService.ts:files",
       "backend/src/services/immutableAuditExportService.ts:integrityCanonical",
       "backend/src/services/immutableAuditExportService.ts:integrityPayload",
-      "backend/src/services/immutableAuditExportService.ts:key",
-      "backend/src/services/immutableAuditExportService.ts:normalizePem",
       "backend/src/services/immutableAuditExportService.ts:payload",
-      "backend/src/services/immutableAuditExportService.ts:payloadHash",
-      "backend/src/services/immutableAuditExportService.ts:privateKeyPem",
       "backend/src/services/immutableAuditExportService.ts:s",
       "backend/src/services/immutableAuditExportService.ts:sha256Hex",
-      "backend/src/services/immutableAuditExportService.ts:signIntegrityPayload",
-      "backend/src/services/immutableAuditExportService.ts:signature",
       "backend/src/services/immutableAuditExportService.ts:stableStringify",
-      "backend/src/services/immutableAuditExportService.ts:toBase64Url",
       "backend/src/services/incidentEmailService.ts:actorUserId",
       "backend/src/services/incidentEmailService.ts:claim",
       "backend/src/services/incidentEmailService.ts:databaseBoundary",
@@ -14880,6 +14932,7 @@
       "backend/src/services/printerAgentSigningService.ts:signature",
       "backend/src/services/printerAgentSigningService.ts:verifyPrinterAgentPayloadSignature",
       "backend/src/services/printerConnectionService.ts:PRINTER_CONNECTION_EVENT_CHANNEL",
+      "backend/src/services/printerConnectionService.ts:emitConnectionEvent",
       "backend/src/services/printerConnectionService.ts:listener",
       "backend/src/services/printerConnectionService.ts:notifyConnectionListeners",
       "backend/src/services/printerConnectionService.ts:onPrinterConnectionEvent",
@@ -14933,6 +14986,8 @@
       "backend/src/services/qrTokenService.ts:chunkBase64",
       "backend/src/services/qrTokenService.ts:classifyQrSigningSecretFormat",
       "backend/src/services/qrTokenService.ts:createQrSigningError",
+      "backend/src/services/qrTokenService.ts:currentPublicKey",
+      "backend/src/services/qrTokenService.ts:currentVersion",
       "backend/src/services/qrTokenService.ts:data",
       "backend/src/services/qrTokenService.ts:decodeBase64PemIfNeeded",
       "backend/src/services/qrTokenService.ts:decodeBase64UrlStrict",
@@ -14942,21 +14997,22 @@
       "backend/src/services/qrTokenService.ts:expected",
       "backend/src/services/qrTokenService.ts:fromBase64Url",
       "backend/src/services/qrTokenService.ts:getEd25519KeyVersion",
-      "backend/src/services/qrTokenService.ts:getEd25519Keys",
       "backend/src/services/qrTokenService.ts:getQrSigningProfile",
       "backend/src/services/qrTokenService.ts:getQrTokenExpiryDate",
       "backend/src/services/qrTokenService.ts:getSignMode",
       "backend/src/services/qrTokenService.ts:got",
-      "backend/src/services/qrTokenService.ts:hasEd25519KeyPair",
       "backend/src/services/qrTokenService.ts:hasEd25519QrSigningKeys",
       "backend/src/services/qrTokenService.ts:hasManagedQrSignerBridgeRegistered",
       "backend/src/services/qrTokenService.ts:hasManagedQrSignerRefs",
       "backend/src/services/qrTokenService.ts:hashToken",
+      "backend/src/services/qrTokenService.ts:isKeyVersion",
       "backend/src/services/qrTokenService.ts:isManagedQrSignerRequested",
       "backend/src/services/qrTokenService.ts:isPrinterTestQrId",
       "backend/src/services/qrTokenService.ts:keyFormatHint",
+      "backend/src/services/qrTokenService.ts:keys",
       "backend/src/services/qrTokenService.ts:kmsBackedSigningConfigured",
       "backend/src/services/qrTokenService.ts:loadEd25519Keys",
+      "backend/src/services/qrTokenService.ts:loadEd25519VerificationKeys",
       "backend/src/services/qrTokenService.ts:managedQrSignerBridge",
       "backend/src/services/qrTokenService.ts:managedQrSignerRequested",
       "backend/src/services/qrTokenService.ts:metadata",
@@ -14967,10 +15023,18 @@
       "backend/src/services/qrTokenService.ts:payloadBuf",
       "backend/src/services/qrTokenService.ts:payloadHash",
       "backend/src/services/qrTokenService.ts:payloadJson",
+      "backend/src/services/qrTokenService.ts:previousDer",
+      "backend/src/services/qrTokenService.ts:previousRaw",
+      "backend/src/services/qrTokenService.ts:previousVersion",
       "backend/src/services/qrTokenService.ts:priv",
       "backend/src/services/qrTokenService.ts:pub",
       "backend/src/services/qrTokenService.ts:randomNonce",
       "backend/src/services/qrTokenService.ts:raw",
+      "backend/src/services/qrTokenService.ts:readCurrentKeyVersion",
+      "backend/src/services/qrTokenService.ts:readCurrentPrivateKey",
+      "backend/src/services/qrTokenService.ts:readCurrentPublicKey",
+      "backend/src/services/qrTokenService.ts:readPreviousKeyVersion",
+      "backend/src/services/qrTokenService.ts:readPreviousPublicKey",
       "backend/src/services/qrTokenService.ts:requireManagedQrSignerBridge",
       "backend/src/services/qrTokenService.ts:sanitized",
       "backend/src/services/qrTokenService.ts:secret",
@@ -15203,7 +15267,6 @@
       "backend/src/utils/email.ts:atIndex",
       "backend/src/utils/email.ts:domainPart",
       "backend/src/utils/email.ts:isValidAsciiDomain",
-      "backend/src/utils/email.ts:isValidEmailAddress",
       "backend/src/utils/email.ts:isValidLocalPart",
       "backend/src/utils/email.ts:label",
       "backend/src/utils/email.ts:localPart",
@@ -15225,7 +15288,7 @@
       "backend/src/utils/mtlsFingerprintHeader.ts:isTrustedMtlsProxyRequest",
       "backend/src/utils/mtlsFingerprintHeader.ts:mtlsTrustedProxyValues",
       "backend/src/utils/mtlsFingerprintHeader.ts:normalizeIp",
-      "backend/src/utils/mtlsFingerprintHeader.ts:requestIps",
+      "backend/src/utils/mtlsFingerprintHeader.ts:peer",
       "backend/src/utils/printerUserFacingErrors.ts:hasAny",
       "backend/src/utils/printerUserFacingErrors.ts:normalize",
       "backend/src/utils/printerUserFacingErrors.ts:sanitizePrinterActionError",
@@ -15239,6 +15302,8 @@
       "backend/src/utils/requestFingerprint.ts:getFingerprintSecret",
       "backend/src/utils/requestFingerprint.ts:input",
       "backend/src/utils/requestTelemetryPath.ts:sanitizeRequestTelemetryPath",
+      "backend/src/utils/secretConfig.ts:configuredPrevious",
+      "backend/src/utils/secretConfig.ts:current",
       "backend/src/utils/secretConfig.ts:getCurrentAndPreviousSecrets",
       "backend/src/utils/secretConfig.ts:getIncidentHashSalt",
       "backend/src/utils/secretConfig.ts:getIncidentHashSaltSet",
@@ -15246,27 +15311,29 @@
       "backend/src/utils/secretConfig.ts:getJwtSecretSet",
       "backend/src/utils/secretConfig.ts:getPrinterSseSignSecret",
       "backend/src/utils/secretConfig.ts:getPrinterSseSignSecretSet",
-      "backend/src/utils/secretConfig.ts:getQrSigningHmacSecret",
       "backend/src/utils/secretConfig.ts:getQrSigningHmacSecretSet",
       "backend/src/utils/secretConfig.ts:getTokenHashSecretSet",
       "backend/src/utils/secretConfig.ts:hasConfiguredSecret",
       "backend/src/utils/secretConfig.ts:readSecret",
+      "backend/src/utils/secretConfig.ts:secretVersionId",
+      "backend/src/utils/secretConfig.ts:toSecretVersion",
+      "backend/src/utils/secretConfig.ts:trimmed",
+      "backend/src/utils/secretConfig.ts:uniqueById",
+      "backend/src/utils/secretConfig.ts:version",
       "backend/src/utils/security.ts:buildHmacHashCandidates",
       "backend/src/utils/security.ts:buildTokenHashCandidates",
       "backend/src/utils/security.ts:candidates",
+      "backend/src/utils/security.ts:fingerprintWithVersion",
       "backend/src/utils/security.ts:getJwtSecret",
       "backend/src/utils/security.ts:getJwtSecretId",
       "backend/src/utils/security.ts:getJwtSecretVersions",
       "backend/src/utils/security.ts:hashIp",
       "backend/src/utils/security.ts:hashToken",
-      "backend/src/utils/security.ts:hashWithVersion",
       "backend/src/utils/security.ts:hmacSha256Hex",
       "backend/src/utils/security.ts:legacy",
-      "backend/src/utils/security.ts:legacyHash",
-      "backend/src/utils/security.ts:legacyJwtSecret",
+      "backend/src/utils/security.ts:legacyFingerprint",
       "backend/src/utils/security.ts:matchesHashedToken",
       "backend/src/utils/security.ts:matchesVersionedHmacHash",
-      "backend/src/utils/security.ts:must",
       "backend/src/utils/security.ts:normalizeUserAgent",
       "backend/src/utils/security.ts:normalized",
       "backend/src/utils/security.ts:normalizedStored",
@@ -15285,7 +15352,7 @@
     {
       "method": "PATCH",
       "path": "/account/password",
-      "source": "backend/src/routes/index.ts:2372",
+      "source": "backend/src/routes/index.ts:2381",
       "middleware": [
         "accountMutationPreAuthRouteLimiter",
         "authenticate",
@@ -15300,7 +15367,7 @@
     {
       "method": "PATCH",
       "path": "/account/profile",
-      "source": "backend/src/routes/index.ts:2371",
+      "source": "backend/src/routes/index.ts:2380",
       "middleware": [
         "accountMutationPreAuthRouteLimiter",
         "authenticate",
@@ -15315,7 +15382,7 @@
     {
       "method": "POST",
       "path": "/admin/batches/:id/block",
-      "source": "backend/src/routes/index.ts:2368",
+      "source": "backend/src/routes/index.ts:2377",
       "middleware": [
         "qrMutationPreAuthRouteLimiter",
         "authenticate",
@@ -15347,7 +15414,7 @@
     {
       "method": "GET",
       "path": "/admin/qr/analytics",
-      "source": "backend/src/routes/index.ts:2260",
+      "source": "backend/src/routes/index.ts:2269",
       "middleware": [
         "qrReadPreAuthRouteLimiter",
         "authenticate",
@@ -15362,7 +15429,7 @@
     {
       "method": "GET",
       "path": "/admin/qr/batch-summary",
-      "source": "backend/src/routes/index.ts:2259",
+      "source": "backend/src/routes/index.ts:2268",
       "middleware": [
         "qrReadPreAuthRouteLimiter",
         "authenticate",
@@ -15377,7 +15444,7 @@
     {
       "method": "GET",
       "path": "/admin/qr/scan-logs",
-      "source": "backend/src/routes/index.ts:2258",
+      "source": "backend/src/routes/index.ts:2267",
       "middleware": [
         "qrReadPreAuthRouteLimiter",
         "authenticate",
@@ -15392,7 +15459,7 @@
     {
       "method": "POST",
       "path": "/admin/qrs/:id/block",
-      "source": "backend/src/routes/index.ts:2367",
+      "source": "backend/src/routes/index.ts:2376",
       "middleware": [
         "qrMutationPreAuthRouteLimiter",
         "authenticate",
@@ -15408,7 +15475,7 @@
     {
       "method": "GET",
       "path": "/analytics/batch-sla",
-      "source": "backend/src/routes/index.ts:2134",
+      "source": "backend/src/routes/index.ts:2143",
       "middleware": [
         "policyReadPreAuthRouteLimiter",
         "authenticate",
@@ -15423,7 +15490,7 @@
     {
       "method": "GET",
       "path": "/analytics/risk-scores",
-      "source": "backend/src/routes/index.ts:2135",
+      "source": "backend/src/routes/index.ts:2144",
       "middleware": [
         "policyReadPreAuthRouteLimiter",
         "authenticate",
@@ -15438,7 +15505,7 @@
     {
       "method": "GET",
       "path": "/audit/export/batches/:id/package",
-      "source": "backend/src/routes/index.ts:2151",
+      "source": "backend/src/routes/index.ts:2160",
       "middleware": [
         "auditPackageExportPreAuthRouteLimiter",
         "authenticate",
@@ -16252,7 +16319,7 @@
     {
       "method": "GET",
       "path": "/incidents",
-      "source": "backend/src/routes/index.ts:2263",
+      "source": "backend/src/routes/index.ts:2272",
       "middleware": [
         "incidentReadPreAuthRouteLimiter",
         "authenticate",
@@ -16267,7 +16334,7 @@
     {
       "method": "GET",
       "path": "/incidents/:id",
-      "source": "backend/src/routes/index.ts:2274",
+      "source": "backend/src/routes/index.ts:2283",
       "middleware": [
         "incidentReadPreAuthRouteLimiter",
         "authenticate",
@@ -16282,7 +16349,7 @@
     {
       "method": "PATCH",
       "path": "/incidents/:id",
-      "source": "backend/src/routes/index.ts:2275",
+      "source": "backend/src/routes/index.ts:2284",
       "middleware": [
         "incidentMutationPreAuthRouteLimiter",
         "authenticate",
@@ -16299,7 +16366,7 @@
     {
       "method": "POST",
       "path": "/incidents/:id/email",
-      "source": "backend/src/routes/index.ts:2291",
+      "source": "backend/src/routes/index.ts:2300",
       "middleware": [
         "incidentMutationPreAuthRouteLimiter",
         "authenticate",
@@ -16316,7 +16383,7 @@
     {
       "method": "POST",
       "path": "/incidents/:id/events",
-      "source": "backend/src/routes/index.ts:2276",
+      "source": "backend/src/routes/index.ts:2285",
       "middleware": [
         "incidentMutationPreAuthRouteLimiter",
         "authenticate",
@@ -16333,7 +16400,7 @@
     {
       "method": "POST",
       "path": "/incidents/:id/evidence",
-      "source": "backend/src/routes/index.ts:2277",
+      "source": "backend/src/routes/index.ts:2286",
       "middleware": [
         "incidentMutationPreAuthRouteLimiter",
         "authenticate",
@@ -16352,7 +16419,7 @@
     {
       "method": "GET",
       "path": "/incidents/:id/export-pdf",
-      "source": "backend/src/routes/index.ts:2315",
+      "source": "backend/src/routes/index.ts:2324",
       "middleware": [
         "incidentExportPreAuthRouteLimiter",
         "authenticate",
@@ -16367,7 +16434,7 @@
     {
       "method": "POST",
       "path": "/incidents/:id/notify-customer",
-      "source": "backend/src/routes/index.ts:2303",
+      "source": "backend/src/routes/index.ts:2312",
       "middleware": [
         "incidentMutationPreAuthRouteLimiter",
         "authenticate",
@@ -16384,7 +16451,7 @@
     {
       "method": "GET",
       "path": "/incidents/evidence-files/:fileName",
-      "source": "backend/src/routes/index.ts:2264",
+      "source": "backend/src/routes/index.ts:2273",
       "middleware": [
         "incidentExportPreAuthRouteLimiter",
         "authenticate",
@@ -16428,7 +16495,7 @@
     {
       "method": "GET",
       "path": "/ir/alerts",
-      "source": "backend/src/routes/index.ts:2363",
+      "source": "backend/src/routes/index.ts:2372",
       "middleware": [
         "irReadPreAuthRouteLimiter",
         "authenticate",
@@ -16442,7 +16509,7 @@
     {
       "method": "PATCH",
       "path": "/ir/alerts/:id",
-      "source": "backend/src/routes/index.ts:2364",
+      "source": "backend/src/routes/index.ts:2373",
       "middleware": [
         "irMutationPreAuthRouteLimiter",
         "authenticate",
@@ -16458,7 +16525,7 @@
     {
       "method": "GET",
       "path": "/ir/incidents",
-      "source": "backend/src/routes/index.ts:2327",
+      "source": "backend/src/routes/index.ts:2336",
       "middleware": [
         "irReadPreAuthRouteLimiter",
         "authenticate",
@@ -16472,7 +16539,7 @@
     {
       "method": "POST",
       "path": "/ir/incidents",
-      "source": "backend/src/routes/index.ts:2328",
+      "source": "backend/src/routes/index.ts:2337",
       "middleware": [
         "irMutationPreAuthRouteLimiter",
         "authenticate",
@@ -16488,7 +16555,7 @@
     {
       "method": "GET",
       "path": "/ir/incidents/:id",
-      "source": "backend/src/routes/index.ts:2329",
+      "source": "backend/src/routes/index.ts:2338",
       "middleware": [
         "irReadPreAuthRouteLimiter",
         "authenticate",
@@ -16502,7 +16569,7 @@
     {
       "method": "PATCH",
       "path": "/ir/incidents/:id",
-      "source": "backend/src/routes/index.ts:2330",
+      "source": "backend/src/routes/index.ts:2339",
       "middleware": [
         "irMutationPreAuthRouteLimiter",
         "authenticate",
@@ -16518,7 +16585,7 @@
     {
       "method": "POST",
       "path": "/ir/incidents/:id/actions",
-      "source": "backend/src/routes/index.ts:2333",
+      "source": "backend/src/routes/index.ts:2342",
       "middleware": [
         "irMutationPreAuthRouteLimiter",
         "authenticate",
@@ -16534,7 +16601,7 @@
     {
       "method": "POST",
       "path": "/ir/incidents/:id/attachments",
-      "source": "backend/src/routes/index.ts:2345",
+      "source": "backend/src/routes/index.ts:2354",
       "middleware": [
         "irMutationPreAuthRouteLimiter",
         "authenticate",
@@ -16552,7 +16619,7 @@
     {
       "method": "POST",
       "path": "/ir/incidents/:id/communications",
-      "source": "backend/src/routes/index.ts:2334",
+      "source": "backend/src/routes/index.ts:2343",
       "middleware": [
         "irMutationPreAuthRouteLimiter",
         "authenticate",
@@ -16568,7 +16635,7 @@
     {
       "method": "POST",
       "path": "/ir/incidents/:id/customer-trust/review",
-      "source": "backend/src/routes/index.ts:2332",
+      "source": "backend/src/routes/index.ts:2341",
       "middleware": [
         "irMutationPreAuthRouteLimiter",
         "authenticate",
@@ -16584,7 +16651,7 @@
     {
       "method": "POST",
       "path": "/ir/incidents/:id/events",
-      "source": "backend/src/routes/index.ts:2331",
+      "source": "backend/src/routes/index.ts:2340",
       "middleware": [
         "irMutationPreAuthRouteLimiter",
         "authenticate",
@@ -16600,7 +16667,7 @@
     {
       "method": "GET",
       "path": "/ir/policies",
-      "source": "backend/src/routes/index.ts:2359",
+      "source": "backend/src/routes/index.ts:2368",
       "middleware": [
         "irReadPreAuthRouteLimiter",
         "authenticate",
@@ -16614,7 +16681,7 @@
     {
       "method": "POST",
       "path": "/ir/policies",
-      "source": "backend/src/routes/index.ts:2360",
+      "source": "backend/src/routes/index.ts:2369",
       "middleware": [
         "irMutationPreAuthRouteLimiter",
         "authenticate",
@@ -16630,7 +16697,7 @@
     {
       "method": "PATCH",
       "path": "/ir/policies/:id",
-      "source": "backend/src/routes/index.ts:2361",
+      "source": "backend/src/routes/index.ts:2370",
       "middleware": [
         "irMutationPreAuthRouteLimiter",
         "authenticate",
@@ -16754,7 +16821,7 @@
     {
       "method": "GET",
       "path": "/manufacturer/print-jobs",
-      "source": "backend/src/routes/index.ts:1889",
+      "source": "backend/src/routes/index.ts:1896",
       "middleware": [
         "authenticate",
         "requireOpsUser",
@@ -16770,6 +16837,7 @@
       "path": "/manufacturer/print-jobs",
       "source": "backend/src/routes/index.ts:1785",
       "middleware": [
+        "printMutationPreAuthRouteLimiter",
         "authenticate",
         "requireManufacturer",
         "requireRecentSensitiveAuth",
@@ -16785,7 +16853,7 @@
     {
       "method": "GET",
       "path": "/manufacturer/print-jobs/:id",
-      "source": "backend/src/routes/index.ts:1908",
+      "source": "backend/src/routes/index.ts:1915",
       "middleware": [
         "authenticate",
         "requireOpsUser",
@@ -16799,7 +16867,7 @@
     {
       "method": "POST",
       "path": "/manufacturer/print-jobs/:id/abandon",
-      "source": "backend/src/routes/index.ts:1950",
+      "source": "backend/src/routes/index.ts:1957",
       "middleware": [
         "printMutationRouteLimiter",
         "printMutationIpLimiter",
@@ -16815,8 +16883,9 @@
     {
       "method": "POST",
       "path": "/manufacturer/print-jobs/:id/confirm",
-      "source": "backend/src/routes/index.ts:2085",
+      "source": "backend/src/routes/index.ts:2093",
       "middleware": [
+        "printMutationPreAuthRouteLimiter",
         "authenticate",
         "requireManufacturer",
         "requireRecentSensitiveAuth",
@@ -16832,7 +16901,7 @@
     {
       "method": "POST",
       "path": "/manufacturer/print-jobs/:id/direct-print/confirm-item",
-      "source": "backend/src/routes/index.ts:2063",
+      "source": "backend/src/routes/index.ts:2071",
       "middleware": [
         "authenticate",
         "requireManufacturer",
@@ -16848,7 +16917,7 @@
     {
       "method": "POST",
       "path": "/manufacturer/print-jobs/:id/direct-print/fail",
-      "source": "backend/src/routes/index.ts:2074",
+      "source": "backend/src/routes/index.ts:2082",
       "middleware": [
         "authenticate",
         "requireManufacturer",
@@ -16864,7 +16933,7 @@
     {
       "method": "POST",
       "path": "/manufacturer/print-jobs/:id/direct-print/resolve",
-      "source": "backend/src/routes/index.ts:2052",
+      "source": "backend/src/routes/index.ts:2060",
       "middleware": [
         "authenticate",
         "requireManufacturer",
@@ -16880,8 +16949,9 @@
     {
       "method": "POST",
       "path": "/manufacturer/print-jobs/:id/direct-print/tokens",
-      "source": "backend/src/routes/index.ts:2040",
+      "source": "backend/src/routes/index.ts:2047",
       "middleware": [
+        "printMutationPreAuthRouteLimiter",
         "authenticate",
         "requireManufacturer",
         "requireRecentSensitiveAuth",
@@ -16897,7 +16967,7 @@
     {
       "method": "GET",
       "path": "/manufacturer/print-jobs/:id/events",
-      "source": "backend/src/routes/index.ts:1898",
+      "source": "backend/src/routes/index.ts:1905",
       "middleware": [
         "printReadPreAuthRouteLimiter",
         "authenticateSSE",
@@ -16912,7 +16982,7 @@
     {
       "method": "GET",
       "path": "/manufacturer/print-jobs/:id/pack",
-      "source": "backend/src/routes/index.ts:2029",
+      "source": "backend/src/routes/index.ts:2036",
       "middleware": [
         "authenticate",
         "requireManufacturer",
@@ -16928,7 +16998,7 @@
     {
       "method": "POST",
       "path": "/manufacturer/print-jobs/:id/pause",
-      "source": "backend/src/routes/index.ts:1917",
+      "source": "backend/src/routes/index.ts:1924",
       "middleware": [
         "printMutationRouteLimiter",
         "printMutationIpLimiter",
@@ -16944,7 +17014,7 @@
     {
       "method": "POST",
       "path": "/manufacturer/print-jobs/:id/reissue-request",
-      "source": "backend/src/routes/index.ts:1982",
+      "source": "backend/src/routes/index.ts:1989",
       "middleware": [
         "printMutationRouteLimiter",
         "printMutationIpLimiter",
@@ -16960,7 +17030,7 @@
     {
       "method": "POST",
       "path": "/manufacturer/print-jobs/:id/reissue",
-      "source": "backend/src/routes/index.ts:1961",
+      "source": "backend/src/routes/index.ts:1968",
       "middleware": [
         "printMutationRouteLimiter",
         "printMutationIpLimiter",
@@ -16977,7 +17047,7 @@
     {
       "method": "POST",
       "path": "/manufacturer/print-jobs/:id/resume",
-      "source": "backend/src/routes/index.ts:1928",
+      "source": "backend/src/routes/index.ts:1935",
       "middleware": [
         "printMutationRouteLimiter",
         "printMutationIpLimiter",
@@ -16993,7 +17063,7 @@
     {
       "method": "POST",
       "path": "/manufacturer/print-jobs/:id/sample-scan",
-      "source": "backend/src/routes/index.ts:2097",
+      "source": "backend/src/routes/index.ts:2106",
       "middleware": [
         "printMutationPreAuthRouteLimiter",
         "authenticate",
@@ -17011,7 +17081,7 @@
     {
       "method": "POST",
       "path": "/manufacturer/print-jobs/:id/stop",
-      "source": "backend/src/routes/index.ts:1939",
+      "source": "backend/src/routes/index.ts:1946",
       "middleware": [
         "printMutationRouteLimiter",
         "printMutationIpLimiter",
@@ -17027,7 +17097,7 @@
     {
       "method": "GET",
       "path": "/manufacturer/print-reissue-requests",
-      "source": "backend/src/routes/index.ts:1973",
+      "source": "backend/src/routes/index.ts:1980",
       "middleware": [
         "printReadRouteLimiter",
         "authenticate",
@@ -17041,7 +17111,7 @@
     {
       "method": "POST",
       "path": "/manufacturer/print-reissue-requests/:id/approve",
-      "source": "backend/src/routes/index.ts:1993",
+      "source": "backend/src/routes/index.ts:2000",
       "middleware": [
         "printMutationRouteLimiter",
         "printMutationIpLimiter",
@@ -17058,7 +17128,7 @@
     {
       "method": "POST",
       "path": "/manufacturer/print-reissue-requests/:id/print",
-      "source": "backend/src/routes/index.ts:2005",
+      "source": "backend/src/routes/index.ts:2012",
       "middleware": [
         "printMutationRouteLimiter",
         "printMutationIpLimiter",
@@ -17075,7 +17145,7 @@
     {
       "method": "POST",
       "path": "/manufacturer/print-reissue-requests/:id/reject",
-      "source": "backend/src/routes/index.ts:2017",
+      "source": "backend/src/routes/index.ts:2024",
       "middleware": [
         "printMutationRouteLimiter",
         "printMutationIpLimiter",
@@ -17142,7 +17212,7 @@
     {
       "method": "GET",
       "path": "/manufacturer/printers",
-      "source": "backend/src/routes/index.ts:1797",
+      "source": "backend/src/routes/index.ts:1798",
       "middleware": [
         "authenticate",
         "requireOpsUser",
@@ -17156,8 +17226,9 @@
     {
       "method": "POST",
       "path": "/manufacturer/printers",
-      "source": "backend/src/routes/index.ts:1806",
+      "source": "backend/src/routes/index.ts:1807",
       "middleware": [
+        "printMutationPreAuthRouteLimiter",
         "authenticate",
         "requireOpsUser",
         "requireRecentSensitiveAuth",
@@ -17173,8 +17244,9 @@
     {
       "method": "DELETE",
       "path": "/manufacturer/printers/:id",
-      "source": "backend/src/routes/index.ts:1830",
+      "source": "backend/src/routes/index.ts:1833",
       "middleware": [
+        "printMutationPreAuthRouteLimiter",
         "authenticate",
         "requireOpsUser",
         "requireRecentSensitiveAuth",
@@ -17190,8 +17262,9 @@
     {
       "method": "PATCH",
       "path": "/manufacturer/printers/:id",
-      "source": "backend/src/routes/index.ts:1818",
+      "source": "backend/src/routes/index.ts:1820",
       "middleware": [
+        "printMutationPreAuthRouteLimiter",
         "authenticate",
         "requireOpsUser",
         "requireRecentSensitiveAuth",
@@ -17207,8 +17280,9 @@
     {
       "method": "POST",
       "path": "/manufacturer/printers/:id/discover",
-      "source": "backend/src/routes/index.ts:1877",
+      "source": "backend/src/routes/index.ts:1883",
       "middleware": [
+        "printMutationPreAuthRouteLimiter",
         "authenticate",
         "requireOpsUser",
         "requireRecentSensitiveAuth",
@@ -17224,7 +17298,7 @@
     {
       "method": "POST",
       "path": "/manufacturer/printers/:id/relink-local-agent",
-      "source": "backend/src/routes/index.ts:1842",
+      "source": "backend/src/routes/index.ts:1846",
       "middleware": [
         "authenticate",
         "requireOpsUser",
@@ -17240,8 +17314,9 @@
     {
       "method": "POST",
       "path": "/manufacturer/printers/:id/test-label",
-      "source": "backend/src/routes/index.ts:1865",
+      "source": "backend/src/routes/index.ts:1870",
       "middleware": [
+        "printMutationPreAuthRouteLimiter",
         "authenticate",
         "requireOpsUser",
         "requireRecentSensitiveAuth",
@@ -17257,8 +17332,9 @@
     {
       "method": "POST",
       "path": "/manufacturer/printers/:id/test",
-      "source": "backend/src/routes/index.ts:1853",
+      "source": "backend/src/routes/index.ts:1857",
       "middleware": [
+        "printMutationPreAuthRouteLimiter",
         "authenticate",
         "requireOpsUser",
         "requireRecentSensitiveAuth",
@@ -17381,7 +17457,7 @@
     {
       "method": "GET",
       "path": "/policy/alerts",
-      "source": "backend/src/routes/index.ts:2138",
+      "source": "backend/src/routes/index.ts:2147",
       "middleware": [
         "policyReadPreAuthRouteLimiter",
         "authenticate",
@@ -17396,7 +17472,7 @@
     {
       "method": "POST",
       "path": "/policy/alerts/:id/ack",
-      "source": "backend/src/routes/index.ts:2139",
+      "source": "backend/src/routes/index.ts:2148",
       "middleware": [
         "policyMutationPreAuthRouteLimiter",
         "authenticate",
@@ -17413,7 +17489,7 @@
     {
       "method": "GET",
       "path": "/policy/config",
-      "source": "backend/src/routes/index.ts:2136",
+      "source": "backend/src/routes/index.ts:2145",
       "middleware": [
         "policyReadPreAuthRouteLimiter",
         "authenticate",
@@ -17428,7 +17504,7 @@
     {
       "method": "PATCH",
       "path": "/policy/config",
-      "source": "backend/src/routes/index.ts:2137",
+      "source": "backend/src/routes/index.ts:2146",
       "middleware": [
         "policyMutationPreAuthRouteLimiter",
         "authenticate",
@@ -17989,7 +18065,7 @@
     {
       "method": "GET",
       "path": "/qr/requests",
-      "source": "backend/src/routes/index.ts:2124",
+      "source": "backend/src/routes/index.ts:2133",
       "middleware": [
         "qrRequestReadPreAuthRouteLimiter",
         "authenticate",
@@ -18004,7 +18080,7 @@
     {
       "method": "POST",
       "path": "/qr/requests",
-      "source": "backend/src/routes/index.ts:2112",
+      "source": "backend/src/routes/index.ts:2121",
       "middleware": [
         "qrRequestMutationPreAuthRouteLimiter",
         "authenticate",
@@ -18021,7 +18097,7 @@
     {
       "method": "POST",
       "path": "/qr/requests/:id/approve",
-      "source": "backend/src/routes/index.ts:2125",
+      "source": "backend/src/routes/index.ts:2134",
       "middleware": [
         "qrRequestMutationPreAuthRouteLimiter",
         "authenticate",
@@ -18037,7 +18113,7 @@
     {
       "method": "POST",
       "path": "/qr/requests/:id/reject",
-      "source": "backend/src/routes/index.ts:2126",
+      "source": "backend/src/routes/index.ts:2135",
       "middleware": [
         "qrRequestMutationPreAuthRouteLimiter",
         "authenticate",
@@ -18109,7 +18185,7 @@
     {
       "method": "GET",
       "path": "/support/reports",
-      "source": "backend/src/routes/index.ts:2220",
+      "source": "backend/src/routes/index.ts:2229",
       "middleware": [
         "supportReadPreAuthRouteLimiter",
         "authenticate",
@@ -18124,7 +18200,7 @@
     {
       "method": "POST",
       "path": "/support/reports",
-      "source": "backend/src/routes/index.ts:2221",
+      "source": "backend/src/routes/index.ts:2230",
       "middleware": [
         "supportMutationPreAuthRouteLimiter",
         "authenticate",
@@ -18143,7 +18219,7 @@
     {
       "method": "POST",
       "path": "/support/reports/:id/respond",
-      "source": "backend/src/routes/index.ts:2235",
+      "source": "backend/src/routes/index.ts:2244",
       "middleware": [
         "supportMutationPreAuthRouteLimiter",
         "authenticate",
@@ -18159,7 +18235,7 @@
     {
       "method": "GET",
       "path": "/support/reports/files/:fileName",
-      "source": "backend/src/routes/index.ts:2246",
+      "source": "backend/src/routes/index.ts:2255",
       "middleware": [
         "supportReadPreAuthRouteLimiter",
         "authenticate",
@@ -18174,7 +18250,7 @@
     {
       "method": "GET",
       "path": "/support/request-access",
-      "source": "backend/src/routes/index.ts:2176",
+      "source": "backend/src/routes/index.ts:2185",
       "middleware": [
         "supportReadPreAuthRouteLimiter",
         "authenticate",
@@ -18188,7 +18264,7 @@
     {
       "method": "PATCH",
       "path": "/support/request-access/:id",
-      "source": "backend/src/routes/index.ts:2185",
+      "source": "backend/src/routes/index.ts:2194",
       "middleware": [
         "supportMutationPreAuthRouteLimiter",
         "authenticate",
@@ -18204,7 +18280,7 @@
     {
       "method": "GET",
       "path": "/support/tickets",
-      "source": "backend/src/routes/index.ts:2196",
+      "source": "backend/src/routes/index.ts:2205",
       "middleware": [
         "supportReadPreAuthRouteLimiter",
         "authenticate",
@@ -18218,7 +18294,7 @@
     {
       "method": "GET",
       "path": "/support/tickets/:id",
-      "source": "backend/src/routes/index.ts:2197",
+      "source": "backend/src/routes/index.ts:2206",
       "middleware": [
         "supportReadPreAuthRouteLimiter",
         "authenticate",
@@ -18232,7 +18308,7 @@
     {
       "method": "PATCH",
       "path": "/support/tickets/:id",
-      "source": "backend/src/routes/index.ts:2198",
+      "source": "backend/src/routes/index.ts:2207",
       "middleware": [
         "supportMutationPreAuthRouteLimiter",
         "authenticate",
@@ -18248,7 +18324,7 @@
     {
       "method": "POST",
       "path": "/support/tickets/:id/messages",
-      "source": "backend/src/routes/index.ts:2209",
+      "source": "backend/src/routes/index.ts:2218",
       "middleware": [
         "supportMutationPreAuthRouteLimiter",
         "authenticate",
@@ -18305,7 +18381,7 @@
     {
       "method": "GET",
       "path": "/telemetry/route-transition/summary",
-      "source": "backend/src/routes/index.ts:2164",
+      "source": "backend/src/routes/index.ts:2173",
       "middleware": [
         "policyReadPreAuthRouteLimiter",
         "authenticate",
@@ -18320,7 +18396,7 @@
     {
       "method": "GET",
       "path": "/trace/timeline",
-      "source": "backend/src/routes/index.ts:2133",
+      "source": "backend/src/routes/index.ts:2142",
       "middleware": [
         "policyReadPreAuthRouteLimiter",
         "authenticate",
@@ -18763,9 +18839,17 @@
   ],
   "frontendConsumers": [
     {
+      "method": "PATCH",
+      "path": "/users/:id",
+      "source": "src/lib/api/internal-client-admin-ops.ts:101",
+      "call": "core.request(`/users/${id}`, { method: \"PATCH\", body: JSON.stringify(payload) })",
+      "dynamic": false,
+      "runtimeOrigin": "mscqr-backend"
+    },
+    {
       "method": "DELETE",
       "path": "/users/:id",
-      "source": "src/lib/api/internal-client-admin-ops.ts:104",
+      "source": "src/lib/api/internal-client-admin-ops.ts:106",
       "call": "core.request(`/users/${id}${query}`, { method: \"DELETE\" })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -18773,7 +18857,7 @@
     {
       "method": "GET",
       "path": "/audit/logs",
-      "source": "src/lib/api/internal-client-admin-ops.ts:115",
+      "source": "src/lib/api/internal-client-admin-ops.ts:118",
       "call": "core.request(`/audit/logs${query}`)",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -18781,7 +18865,7 @@
     {
       "method": "GET",
       "path": "/audit/fraud-reports",
-      "source": "src/lib/api/internal-client-admin-ops.ts:129",
+      "source": "src/lib/api/internal-client-admin-ops.ts:134",
       "call": "core.request(`/audit/fraud-reports${params.toString() ? `?${params.toString()}` : \"\"}`)",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -18789,7 +18873,7 @@
     {
       "method": "POST",
       "path": "/audit/fraud-reports/:encodeURIComponent_reportId_/respond",
-      "source": "src/lib/api/internal-client-admin-ops.ts:140",
+      "source": "src/lib/api/internal-client-admin-ops.ts:145",
       "call": "core.request(`/audit/fraud-reports/${encodeURIComponent(reportId)}/respond`, { method: \"POST\", body: JSON.stringify(payload), })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -18797,7 +18881,7 @@
     {
       "method": "PATCH",
       "path": "/account/profile",
-      "source": "src/lib/api/internal-client-admin-ops.ts:311",
+      "source": "src/lib/api/internal-client-admin-ops.ts:316",
       "call": "core.request(\"/account/profile\", { method: \"PATCH\", body: JSON.stringify(payload) })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -18805,7 +18889,7 @@
     {
       "method": "PATCH",
       "path": "/account/password",
-      "source": "src/lib/api/internal-client-admin-ops.ts:315",
+      "source": "src/lib/api/internal-client-admin-ops.ts:320",
       "call": "core.request(\"/account/password\", { method: \"PATCH\", body: JSON.stringify(payload) })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -18813,15 +18897,15 @@
     {
       "method": "GET",
       "path": "/audit/logs/export",
-      "source": "src/lib/api/internal-client-admin-ops.ts:322",
-      "call": "fetch(`${BASE_URL}/audit/logs/export`, { headers, credentials: \"include\" })",
+      "source": "src/lib/api/internal-client-admin-ops.ts:328",
+      "call": "fetch(`${BASE_URL}/audit/logs/export?${params}`, { headers, credentials: \"include\" })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
     },
     {
       "method": "GET",
       "path": "/trace/timeline",
-      "source": "src/lib/api/internal-client-admin-ops.ts:345",
+      "source": "src/lib/api/internal-client-admin-ops.ts:353",
       "call": "core.request(`/trace/timeline${query}`)",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -18829,7 +18913,7 @@
     {
       "method": "GET",
       "path": "/analytics/batch-sla",
-      "source": "src/lib/api/internal-client-admin-ops.ts:354",
+      "source": "src/lib/api/internal-client-admin-ops.ts:362",
       "call": "core.request(`/analytics/batch-sla${query}`)",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -18837,7 +18921,7 @@
     {
       "method": "GET",
       "path": "/analytics/risk-scores",
-      "source": "src/lib/api/internal-client-admin-ops.ts:363",
+      "source": "src/lib/api/internal-client-admin-ops.ts:371",
       "call": "core.request(`/analytics/risk-scores${query}`)",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -18845,15 +18929,15 @@
     {
       "method": "GET",
       "path": "/internal/release",
-      "source": "src/lib/api/internal-client-admin-ops.ts:367",
-      "call": "core.request<{ name: string; version: string; gitSha: string; environment: string; release: string; signing?: { mode: string; provider: string; keyVersion: string; keyRef?: string | null; } | null; }>(`/internal/release`)",
+      "source": "src/lib/api/internal-client-admin-ops.ts:391",
+      "call": "core.request<ReleaseMetadata>(`/internal/release`)",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
     },
     {
       "method": "GET",
       "path": "/policy/config",
-      "source": "src/lib/api/internal-client-admin-ops.ts:384",
+      "source": "src/lib/api/internal-client-admin-ops.ts:411",
       "call": "core.request(`/policy/config${query}`)",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -18861,7 +18945,7 @@
     {
       "method": "PATCH",
       "path": "/policy/config",
-      "source": "src/lib/api/internal-client-admin-ops.ts:398",
+      "source": "src/lib/api/internal-client-admin-ops.ts:425",
       "call": "core.request(`/policy/config`, { method: \"PATCH\", body: JSON.stringify(payload) })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -18869,7 +18953,7 @@
     {
       "method": "GET",
       "path": "/policy/alerts",
-      "source": "src/lib/api/internal-client-admin-ops.ts:417",
+      "source": "src/lib/api/internal-client-admin-ops.ts:444",
       "call": "core.request(`/policy/alerts${query}`)",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -18877,7 +18961,7 @@
     {
       "method": "POST",
       "path": "/policy/alerts/:encodeURIComponent_id_/ack",
-      "source": "src/lib/api/internal-client-admin-ops.ts:421",
+      "source": "src/lib/api/internal-client-admin-ops.ts:448",
       "call": "core.request(`/policy/alerts/${encodeURIComponent(id)}/ack`, { method: \"POST\" })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -18885,7 +18969,7 @@
     {
       "method": "GET",
       "path": "/audit/export/batches/:encodeURIComponent_batchId_/package",
-      "source": "src/lib/api/internal-client-admin-ops.ts:427",
+      "source": "src/lib/api/internal-client-admin-ops.ts:454",
       "call": "fetch(`${BASE_URL}/audit/export/batches/${encodeURIComponent(batchId)}/package`, { headers, credentials: \"include\", })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -18893,7 +18977,7 @@
     {
       "method": "GET",
       "path": "/notifications",
-      "source": "src/lib/api/internal-client-admin-ops.ts:441",
+      "source": "src/lib/api/internal-client-admin-ops.ts:468",
       "call": "core.request(`/notifications${query}`)",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -18901,7 +18985,7 @@
     {
       "method": "GET",
       "path": "/dashboard/attention-queue",
-      "source": "src/lib/api/internal-client-admin-ops.ts:449",
+      "source": "src/lib/api/internal-client-admin-ops.ts:476",
       "call": "core.request<OperationalAttentionQueueSnapshot>(\"/dashboard/attention-queue\")",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -18909,7 +18993,7 @@
     {
       "method": "POST",
       "path": "/notifications/:encodeURIComponent_id_/read",
-      "source": "src/lib/api/internal-client-admin-ops.ts:454",
+      "source": "src/lib/api/internal-client-admin-ops.ts:481",
       "call": "core.request(`/notifications/${encodeURIComponent(id)}/read`, { method: \"POST\" })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -18917,7 +19001,7 @@
     {
       "method": "POST",
       "path": "/notifications/read-all",
-      "source": "src/lib/api/internal-client-admin-ops.ts:458",
+      "source": "src/lib/api/internal-client-admin-ops.ts:485",
       "call": "core.request(`/notifications/read-all`, { method: \"POST\" })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -18925,7 +19009,7 @@
     {
       "method": "GET",
       "path": "/governance/feature-flags",
-      "source": "src/lib/api/internal-client-admin-ops.ts:463",
+      "source": "src/lib/api/internal-client-admin-ops.ts:490",
       "call": "core.request(`/governance/feature-flags${query}`)",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -18933,7 +19017,7 @@
     {
       "method": "POST",
       "path": "/governance/feature-flags",
-      "source": "src/lib/api/internal-client-admin-ops.ts:472",
+      "source": "src/lib/api/internal-client-admin-ops.ts:499",
       "call": "core.request(`/governance/feature-flags`, { method: \"POST\", body: JSON.stringify(payload) })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -18941,7 +19025,7 @@
     {
       "method": "GET",
       "path": "/governance/evidence-retention",
-      "source": "src/lib/api/internal-client-admin-ops.ts:477",
+      "source": "src/lib/api/internal-client-admin-ops.ts:504",
       "call": "core.request(`/governance/evidence-retention${query}`)",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -18949,7 +19033,7 @@
     {
       "method": "PATCH",
       "path": "/governance/evidence-retention",
-      "source": "src/lib/api/internal-client-admin-ops.ts:487",
+      "source": "src/lib/api/internal-client-admin-ops.ts:514",
       "call": "core.request(`/governance/evidence-retention`, { method: \"PATCH\", body: JSON.stringify(payload) })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -18957,7 +19041,7 @@
     {
       "method": "POST",
       "path": "/governance/evidence-retention/run",
-      "source": "src/lib/api/internal-client-admin-ops.ts:491",
+      "source": "src/lib/api/internal-client-admin-ops.ts:518",
       "call": "core.request(`/governance/evidence-retention/run`, { method: \"POST\", body: JSON.stringify(payload) })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -18965,7 +19049,7 @@
     {
       "method": "GET",
       "path": "/governance/compliance/report",
-      "source": "src/lib/api/internal-client-admin-ops.ts:500",
+      "source": "src/lib/api/internal-client-admin-ops.ts:527",
       "call": "core.request(`/governance/compliance/report${query}`)",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -18973,7 +19057,7 @@
     {
       "method": "POST",
       "path": "/governance/compliance/pack/run",
-      "source": "src/lib/api/internal-client-admin-ops.ts:504",
+      "source": "src/lib/api/internal-client-admin-ops.ts:531",
       "call": "core.request(`/governance/compliance/pack/run`, { method: \"POST\", body: JSON.stringify(payload || {}), })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -18981,7 +19065,7 @@
     {
       "method": "GET",
       "path": "/governance/compliance/pack/jobs",
-      "source": "src/lib/api/internal-client-admin-ops.ts:515",
+      "source": "src/lib/api/internal-client-admin-ops.ts:543",
       "call": "core.request(`/governance/compliance/pack/jobs${query}`)",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -18989,7 +19073,7 @@
     {
       "method": "GET",
       "path": "/governance/compliance/pack/jobs/:encodeURIComponent_id_/download",
-      "source": "src/lib/api/internal-client-admin-ops.ts:521",
+      "source": "src/lib/api/internal-client-admin-ops.ts:549",
       "call": "fetch(`${BASE_URL}/governance/compliance/pack/jobs/${encodeURIComponent(id)}/download`, { headers, credentials: \"include\", })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -18997,7 +19081,7 @@
     {
       "method": "GET",
       "path": "/audit/export/incidents/:encodeURIComponent_id_/bundle",
-      "source": "src/lib/api/internal-client-admin-ops.ts:536",
+      "source": "src/lib/api/internal-client-admin-ops.ts:564",
       "call": "fetch(`${BASE_URL}/audit/export/incidents/${encodeURIComponent(id)}/bundle`, { headers, credentials: \"include\", })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -19005,7 +19089,7 @@
     {
       "method": "POST",
       "path": "/telemetry/route-transition",
-      "source": "src/lib/api/internal-client-admin-ops.ts:560",
+      "source": "src/lib/api/internal-client-admin-ops.ts:588",
       "call": "core.request(`/telemetry/route-transition`, { method: \"POST\", body: JSON.stringify(payload), timeoutMs: 8000, suppressMutationEvent: true, })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -19013,7 +19097,7 @@
     {
       "method": "GET",
       "path": "/telemetry/route-transition/summary",
-      "source": "src/lib/api/internal-client-admin-ops.ts:574",
+      "source": "src/lib/api/internal-client-admin-ops.ts:602",
       "call": "core.request(`/telemetry/route-transition/summary${query}`)",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -19021,7 +19105,7 @@
     {
       "method": "GET",
       "path": "/security/abuse/rate-limits",
-      "source": "src/lib/api/internal-client-admin-ops.ts:581",
+      "source": "src/lib/api/internal-client-admin-ops.ts:609",
       "call": "core.request(`/security/abuse/rate-limits${query}`)",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -19029,7 +19113,7 @@
     {
       "method": "GET",
       "path": "/security/abuse/rate-limits/alerts",
-      "source": "src/lib/api/internal-client-admin-ops.ts:588",
+      "source": "src/lib/api/internal-client-admin-ops.ts:616",
       "call": "core.request(`/security/abuse/rate-limits/alerts${query}`)",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -19045,16 +19129,8 @@
     {
       "method": "GET",
       "path": "/users",
-      "source": "src/lib/api/internal-client-admin-ops.ts:84",
+      "source": "src/lib/api/internal-client-admin-ops.ts:86",
       "call": "core.request<UserDirectoryRow[]>(`/users${query}`)",
-      "dynamic": false,
-      "runtimeOrigin": "mscqr-backend"
-    },
-    {
-      "method": "PATCH",
-      "path": "/users/:id",
-      "source": "src/lib/api/internal-client-admin-ops.ts:99",
-      "call": "core.request(`/users/${id}`, { method: \"PATCH\", body: JSON.stringify(payload) })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
     },
@@ -19293,7 +19369,7 @@
     {
       "method": "GET",
       "path": null,
-      "source": "src/lib/api/internal-client-core.ts:370",
+      "source": "src/lib/api/internal-client-core.ts:372",
       "call": "request<{ user: any; auth?: any; accessToken?: string }>( endpoint, { ...options, skipRefreshDedup: true }, )",
       "dynamic": true,
       "runtimeOrigin": "mscqr-backend"
@@ -19301,7 +19377,7 @@
     {
       "method": "POST",
       "path": "/auth/refresh",
-      "source": "src/lib/api/internal-client-core.ts:447",
+      "source": "src/lib/api/internal-client-core.ts:454",
       "call": "request<{ user: any; auth?: any; accessToken?: string }>(\"/auth/refresh\", { method: \"POST\", skipAuthRefresh: true, })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -19309,7 +19385,7 @@
     {
       "method": "GET",
       "path": null,
-      "source": "src/lib/api/internal-client-core.ts:453",
+      "source": "src/lib/api/internal-client-core.ts:460",
       "call": "fetch(`${BASE_URL}${endpoint}`, { ...options, headers, cache: \"no-store\", credentials: \"include\", signal: controller.signal, })",
       "dynamic": true,
       "runtimeOrigin": "mscqr-backend"
@@ -19317,7 +19393,7 @@
     {
       "method": "GET",
       "path": null,
-      "source": "src/lib/api/internal-client-core.ts:488",
+      "source": "src/lib/api/internal-client-core.ts:495",
       "call": "request<T>(endpoint, { ...options, skipAuthRefresh: true })",
       "dynamic": true,
       "runtimeOrigin": "mscqr-backend"
@@ -19365,7 +19441,7 @@
     {
       "method": "GET",
       "path": "/qr/batches",
-      "source": "src/lib/api/internal-client-licensee-qr.ts:134",
+      "source": "src/lib/api/internal-client-licensee-qr.ts:136",
       "call": "core.request<any[]>(`/qr/batches${query}`)",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -19373,7 +19449,7 @@
     {
       "method": "DELETE",
       "path": "/qr/batches/:batchId",
-      "source": "src/lib/api/internal-client-licensee-qr.ts:141",
+      "source": "src/lib/api/internal-client-licensee-qr.ts:143",
       "call": "core.request(`/qr/batches/${batchId}`, { method: \"DELETE\" })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -19381,7 +19457,7 @@
     {
       "method": "POST",
       "path": "/qr/batches/bulk-delete",
-      "source": "src/lib/api/internal-client-licensee-qr.ts:145",
+      "source": "src/lib/api/internal-client-licensee-qr.ts:147",
       "call": "core.request<{ deleted: number }>(\"/qr/batches/bulk-delete\", { method: \"POST\", body: JSON.stringify(payload) })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -19389,7 +19465,7 @@
     {
       "method": "POST",
       "path": "/qr/batches/:payload_batchId/assign-manufacturer",
-      "source": "src/lib/api/internal-client-licensee-qr.ts:149",
+      "source": "src/lib/api/internal-client-licensee-qr.ts:151",
       "call": "core.request(`/qr/batches/${payload.batchId}/assign-manufacturer`, { method: \"POST\", body: JSON.stringify({ manufacturerId: payload.manufacturerId, quantity: payload.quantity, name: payload.name, }), })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -19397,7 +19473,7 @@
     {
       "method": "PATCH",
       "path": "/qr/batches/:encodeURIComponent_batchId_/rename",
-      "source": "src/lib/api/internal-client-licensee-qr.ts:160",
+      "source": "src/lib/api/internal-client-licensee-qr.ts:162",
       "call": "core.request(`/qr/batches/${encodeURIComponent(batchId)}/rename`, { method: \"PATCH\", body: JSON.stringify({ name }), })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -19405,7 +19481,7 @@
     {
       "method": "GET",
       "path": "/qr/batches/:encodeURIComponent_batchId_/allocation-map",
-      "source": "src/lib/api/internal-client-licensee-qr.ts:167",
+      "source": "src/lib/api/internal-client-licensee-qr.ts:169",
       "call": "core.request<{ sourceBatchId: string; focusBatchId: string; sourceBatch: any | null; selectedBatch: any | null; allocations: any[]; totals: { totalDistributedCodes: number; sourceRemainingCodes: number; pendingPrintableCodes: number; printe",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -19413,7 +19489,7 @@
     {
       "method": "POST",
       "path": "/qr/requests",
-      "source": "src/lib/api/internal-client-licensee-qr.ts:188",
+      "source": "src/lib/api/internal-client-licensee-qr.ts:190",
       "call": "core.request(\"/qr/requests\", { method: \"POST\", body: JSON.stringify(payload) })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -19421,7 +19497,7 @@
     {
       "method": "GET",
       "path": "/qr/requests",
-      "source": "src/lib/api/internal-client-licensee-qr.ts:196",
+      "source": "src/lib/api/internal-client-licensee-qr.ts:198",
       "call": "core.request<any[]>(`/qr/requests${query}`)",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -19429,7 +19505,7 @@
     {
       "method": "POST",
       "path": "/qr/requests/:id/approve",
-      "source": "src/lib/api/internal-client-licensee-qr.ts:200",
+      "source": "src/lib/api/internal-client-licensee-qr.ts:202",
       "call": "core.request(`/qr/requests/${id}/approve`, { method: \"POST\", body: JSON.stringify(payload || {}) })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -19437,7 +19513,7 @@
     {
       "method": "POST",
       "path": "/qr/requests/:id/reject",
-      "source": "src/lib/api/internal-client-licensee-qr.ts:204",
+      "source": "src/lib/api/internal-client-licensee-qr.ts:206",
       "call": "core.request(`/qr/requests/${id}/reject`, { method: \"POST\", body: JSON.stringify(payload || {}) })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -19445,7 +19521,7 @@
     {
       "method": "GET",
       "path": "/admin/qr/scan-logs",
-      "source": "src/lib/api/internal-client-licensee-qr.ts:229",
+      "source": "src/lib/api/internal-client-licensee-qr.ts:231",
       "call": "core.request(`/admin/qr/scan-logs${query}`)",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -19453,7 +19529,7 @@
     {
       "method": "GET",
       "path": "/admin/qr/batch-summary",
-      "source": "src/lib/api/internal-client-licensee-qr.ts:237",
+      "source": "src/lib/api/internal-client-licensee-qr.ts:241",
       "call": "core.request(`/admin/qr/batch-summary${query}`)",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -19461,7 +19537,7 @@
     {
       "method": "GET",
       "path": "/admin/qr/analytics",
-      "source": "src/lib/api/internal-client-licensee-qr.ts:262",
+      "source": "src/lib/api/internal-client-licensee-qr.ts:266",
       "call": "core.request(`/admin/qr/analytics${query}`)",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -19789,7 +19865,7 @@
     {
       "method": "GET",
       "path": "/manufacturers",
-      "source": "src/lib/api/internal-client-printing.ts:505",
+      "source": "src/lib/api/internal-client-printing.ts:507",
       "call": "core.request<any[]>(`/manufacturers${query}`)",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -19797,7 +19873,7 @@
     {
       "method": "PATCH",
       "path": "/manufacturers/:id/deactivate",
-      "source": "src/lib/api/internal-client-printing.ts:509",
+      "source": "src/lib/api/internal-client-printing.ts:511",
       "call": "core.request(`/manufacturers/${id}/deactivate`, { method: \"PATCH\" })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -19805,7 +19881,7 @@
     {
       "method": "PATCH",
       "path": "/manufacturers/:id/restore",
-      "source": "src/lib/api/internal-client-printing.ts:513",
+      "source": "src/lib/api/internal-client-printing.ts:515",
       "call": "core.request(`/manufacturers/${id}/restore`, { method: \"PATCH\" })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -19813,7 +19889,7 @@
     {
       "method": "DELETE",
       "path": "/manufacturers/:id",
-      "source": "src/lib/api/internal-client-printing.ts:517",
+      "source": "src/lib/api/internal-client-printing.ts:519",
       "call": "core.request(`/manufacturers/${id}`, { method: \"DELETE\" })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -20022,14 +20098,14 @@
       "method": "POST",
       "path": "/incidents/report",
       "source": "src/lib/api/internal-client-verify-support.ts:319",
-      "call": "core.request(`/incidents/report`, { method: \"POST\", body: formData, headers, skipJson: true, timeoutMs: 45_000, })",
+      "call": "core.request(`/incidents/report`, { method: \"POST\", idempotencyHeader: \"idempotency-key\", body: formData, headers, skipJson: true, timeoutMs: 45_000, })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
     },
     {
       "method": "GET",
       "path": "/incidents",
-      "source": "src/lib/api/internal-client-verify-support.ts:352",
+      "source": "src/lib/api/internal-client-verify-support.ts:353",
       "call": "core.request(`/incidents${query}`)",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -20037,7 +20113,7 @@
     {
       "method": "GET",
       "path": "/incidents/:encodeURIComponent_id_",
-      "source": "src/lib/api/internal-client-verify-support.ts:356",
+      "source": "src/lib/api/internal-client-verify-support.ts:357",
       "call": "core.request(`/incidents/${encodeURIComponent(id)}`)",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -20045,7 +20121,7 @@
     {
       "method": "PATCH",
       "path": "/incidents/:encodeURIComponent_id_",
-      "source": "src/lib/api/internal-client-verify-support.ts:371",
+      "source": "src/lib/api/internal-client-verify-support.ts:372",
       "call": "core.request(`/incidents/${encodeURIComponent(id)}`, { method: \"PATCH\", body: JSON.stringify(payload), })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -20053,7 +20129,7 @@
     {
       "method": "POST",
       "path": "/incidents/:encodeURIComponent_id_/events",
-      "source": "src/lib/api/internal-client-verify-support.ts:378",
+      "source": "src/lib/api/internal-client-verify-support.ts:379",
       "call": "core.request(`/incidents/${encodeURIComponent(id)}/events`, { method: \"POST\", body: JSON.stringify({ note }), })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -20069,15 +20145,15 @@
     {
       "method": "POST",
       "path": "/incidents/:encodeURIComponent_id_/evidence",
-      "source": "src/lib/api/internal-client-verify-support.ts:387",
-      "call": "core.request(`/incidents/${encodeURIComponent(id)}/evidence`, { method: \"POST\", body: form, skipJson: true, timeoutMs: 45_000, })",
+      "source": "src/lib/api/internal-client-verify-support.ts:388",
+      "call": "core.request(`/incidents/${encodeURIComponent(id)}/evidence`, { method: \"POST\", idempotencyHeader: \"idempotency-key\", body: form, skipJson: true, timeoutMs: 45_000, })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
     },
     {
       "method": "POST",
       "path": "/incidents/:encodeURIComponent_id_/email",
-      "source": "src/lib/api/internal-client-verify-support.ts:411",
+      "source": "src/lib/api/internal-client-verify-support.ts:413",
       "call": "core.request(`/incidents/${encodeURIComponent(id)}/email`, { method: \"POST\", body: JSON.stringify(payload), })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -20085,7 +20161,7 @@
     {
       "method": "POST",
       "path": "/incidents/:encodeURIComponent_id_/notify-customer",
-      "source": "src/lib/api/internal-client-verify-support.ts:429",
+      "source": "src/lib/api/internal-client-verify-support.ts:431",
       "call": "core.request(`/incidents/${encodeURIComponent(id)}/notify-customer`, { method: \"POST\", body: JSON.stringify(payload), })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -20093,7 +20169,7 @@
     {
       "method": "POST",
       "path": "/incidents/:encodeURIComponent_id_/notify-customer",
-      "source": "src/lib/api/internal-client-verify-support.ts:437",
+      "source": "src/lib/api/internal-client-verify-support.ts:439",
       "call": "core.request(`/incidents/${encodeURIComponent(id)}/notify-customer`, { method: \"POST\", body: JSON.stringify(payload), })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -20101,7 +20177,7 @@
     {
       "method": "GET",
       "path": "/incidents/evidence-files/:encodeURIComponent_fileName_",
-      "source": "src/lib/api/internal-client-verify-support.ts:457",
+      "source": "src/lib/api/internal-client-verify-support.ts:459",
       "call": "fetch(`${BASE_URL}/incidents/evidence-files/${encodeURIComponent(fileName)}`, { headers, credentials: \"include\", })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -20109,7 +20185,7 @@
     {
       "method": "GET",
       "path": "/incidents/:encodeURIComponent_id_/export-pdf",
-      "source": "src/lib/api/internal-client-verify-support.ts:468",
+      "source": "src/lib/api/internal-client-verify-support.ts:470",
       "call": "fetch(`${BASE_URL}/incidents/${encodeURIComponent(id)}/export-pdf`, { headers, credentials: \"include\", })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -20125,7 +20201,7 @@
     {
       "method": "GET",
       "path": "/ir/incidents",
-      "source": "src/lib/api/internal-client-verify-support.ts:504",
+      "source": "src/lib/api/internal-client-verify-support.ts:506",
       "call": "core.request(`/ir/incidents${query}`)",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -20133,7 +20209,7 @@
     {
       "method": "POST",
       "path": "/ir/incidents",
-      "source": "src/lib/api/internal-client-verify-support.ts:516",
+      "source": "src/lib/api/internal-client-verify-support.ts:518",
       "call": "core.request(`/ir/incidents`, { method: \"POST\", body: JSON.stringify(payload) })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -20141,7 +20217,7 @@
     {
       "method": "GET",
       "path": "/ir/incidents/:encodeURIComponent_id_",
-      "source": "src/lib/api/internal-client-verify-support.ts:520",
+      "source": "src/lib/api/internal-client-verify-support.ts:522",
       "call": "core.request(`/ir/incidents/${encodeURIComponent(id)}`)",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -20149,7 +20225,7 @@
     {
       "method": "PATCH",
       "path": "/ir/incidents/:encodeURIComponent_id_",
-      "source": "src/lib/api/internal-client-verify-support.ts:536",
+      "source": "src/lib/api/internal-client-verify-support.ts:538",
       "call": "core.request(`/ir/incidents/${encodeURIComponent(id)}`, { method: \"PATCH\", body: JSON.stringify(payload), })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -20165,7 +20241,7 @@
     {
       "method": "POST",
       "path": "/ir/incidents/:encodeURIComponent_id_/customer-trust/review",
-      "source": "src/lib/api/internal-client-verify-support.ts:550",
+      "source": "src/lib/api/internal-client-verify-support.ts:552",
       "call": "core.request(`/ir/incidents/${encodeURIComponent(id)}/customer-trust/review`, { method: \"POST\", body: JSON.stringify(payload), })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -20173,7 +20249,7 @@
     {
       "method": "POST",
       "path": "/ir/incidents/:encodeURIComponent_id_/events",
-      "source": "src/lib/api/internal-client-verify-support.ts:557",
+      "source": "src/lib/api/internal-client-verify-support.ts:559",
       "call": "core.request(`/ir/incidents/${encodeURIComponent(id)}/events`, { method: \"POST\", body: JSON.stringify({ note }), })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -20181,7 +20257,7 @@
     {
       "method": "POST",
       "path": "/ir/incidents/:encodeURIComponent_id_/actions",
-      "source": "src/lib/api/internal-client-verify-support.ts:582",
+      "source": "src/lib/api/internal-client-verify-support.ts:584",
       "call": "core.request(`/ir/incidents/${encodeURIComponent(id)}/actions`, { method: \"POST\", body: JSON.stringify(payload), })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -20189,7 +20265,7 @@
     {
       "method": "POST",
       "path": "/ir/incidents/:encodeURIComponent_id_/communications",
-      "source": "src/lib/api/internal-client-verify-support.ts:599",
+      "source": "src/lib/api/internal-client-verify-support.ts:601",
       "call": "core.request(`/ir/incidents/${encodeURIComponent(id)}/communications`, { method: \"POST\", body: JSON.stringify(payload), })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -20197,15 +20273,15 @@
     {
       "method": "POST",
       "path": "/ir/incidents/:encodeURIComponent_id_/attachments",
-      "source": "src/lib/api/internal-client-verify-support.ts:608",
-      "call": "core.request(`/ir/incidents/${encodeURIComponent(id)}/attachments`, { method: \"POST\", body: form, skipJson: true, timeoutMs: 45_000, })",
+      "source": "src/lib/api/internal-client-verify-support.ts:610",
+      "call": "core.request(`/ir/incidents/${encodeURIComponent(id)}/attachments`, { method: \"POST\", idempotencyHeader: \"idempotency-key\", body: form, skipJson: true, timeoutMs: 45_000, })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
     },
     {
       "method": "GET",
       "path": "/ir/policies",
-      "source": "src/lib/api/internal-client-verify-support.ts:624",
+      "source": "src/lib/api/internal-client-verify-support.ts:627",
       "call": "core.request(`/ir/policies${query}`)",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -20213,7 +20289,7 @@
     {
       "method": "POST",
       "path": "/ir/policies",
-      "source": "src/lib/api/internal-client-verify-support.ts:642",
+      "source": "src/lib/api/internal-client-verify-support.ts:644",
       "call": "core.request(`/ir/policies`, { method: \"POST\", body: JSON.stringify(payload) })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -20221,7 +20297,7 @@
     {
       "method": "PATCH",
       "path": "/ir/policies/:encodeURIComponent_id_",
-      "source": "src/lib/api/internal-client-verify-support.ts:646",
+      "source": "src/lib/api/internal-client-verify-support.ts:648",
       "call": "core.request(`/ir/policies/${encodeURIComponent(id)}`, { method: \"PATCH\", body: JSON.stringify(payload) })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -20229,7 +20305,7 @@
     {
       "method": "GET",
       "path": "/ir/alerts",
-      "source": "src/lib/api/internal-client-verify-support.ts:673",
+      "source": "src/lib/api/internal-client-verify-support.ts:675",
       "call": "core.request(`/ir/alerts${query}`)",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -20237,7 +20313,7 @@
     {
       "method": "PATCH",
       "path": "/ir/alerts/:encodeURIComponent_id_",
-      "source": "src/lib/api/internal-client-verify-support.ts:677",
+      "source": "src/lib/api/internal-client-verify-support.ts:679",
       "call": "core.request(`/ir/alerts/${encodeURIComponent(id)}`, { method: \"PATCH\", body: JSON.stringify(payload) })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -20245,7 +20321,7 @@
     {
       "method": "GET",
       "path": "/support/tickets",
-      "source": "src/lib/api/internal-client-verify-support.ts:696",
+      "source": "src/lib/api/internal-client-verify-support.ts:700",
       "call": "core.request(`/support/tickets${query}`)",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -20253,7 +20329,7 @@
     {
       "method": "GET",
       "path": "/support/tickets/:encodeURIComponent_id_",
-      "source": "src/lib/api/internal-client-verify-support.ts:700",
+      "source": "src/lib/api/internal-client-verify-support.ts:704",
       "call": "core.request(`/support/tickets/${encodeURIComponent(id)}`)",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -20261,7 +20337,7 @@
     {
       "method": "PATCH",
       "path": "/support/tickets/:encodeURIComponent_id_",
-      "source": "src/lib/api/internal-client-verify-support.ts:710",
+      "source": "src/lib/api/internal-client-verify-support.ts:714",
       "call": "core.request(`/support/tickets/${encodeURIComponent(id)}`, { method: \"PATCH\", body: JSON.stringify(payload), })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -20269,7 +20345,7 @@
     {
       "method": "POST",
       "path": "/support/tickets/:encodeURIComponent_id_/messages",
-      "source": "src/lib/api/internal-client-verify-support.ts:717",
+      "source": "src/lib/api/internal-client-verify-support.ts:721",
       "call": "core.request(`/support/tickets/${encodeURIComponent(id)}/messages`, { method: \"POST\", body: JSON.stringify(payload), })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -20277,7 +20353,7 @@
     {
       "method": "POST",
       "path": "/support/reports",
-      "source": "src/lib/api/internal-client-verify-support.ts:724",
+      "source": "src/lib/api/internal-client-verify-support.ts:728",
       "call": "core.request(`/support/reports`, { method: \"POST\", body: formData, skipJson: true, timeoutMs: 45_000, })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -20285,7 +20361,7 @@
     {
       "method": "GET",
       "path": "/support/reports",
-      "source": "src/lib/api/internal-client-verify-support.ts:738",
+      "source": "src/lib/api/internal-client-verify-support.ts:742",
       "call": "core.request(`/support/reports${query}`)",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -20293,7 +20369,7 @@
     {
       "method": "POST",
       "path": "/support/reports/:encodeURIComponent_reportId_/respond",
-      "source": "src/lib/api/internal-client-verify-support.ts:748",
+      "source": "src/lib/api/internal-client-verify-support.ts:752",
       "call": "core.request(`/support/reports/${encodeURIComponent(reportId)}/respond`, { method: \"POST\", body: JSON.stringify(payload), })",
       "dynamic": false,
       "runtimeOrigin": "mscqr-backend"
@@ -20451,10 +20527,6 @@
         "expression": "APP_PATHS.batches"
       },
       {
-        "source": "src/features/verify/components/VerifyExperience.tsx:1055",
-        "expression": "`${canonicalCode ? `/verify/${encodeURIComponent(canonicalCode)}` : \"/verify\"}?${params.toString()}`"
-      },
-      {
         "source": "src/features/verify/components/VerifyExperience.tsx:1225",
         "expression": "token || !canonicalCode ? `/verify?${params.toString()}` : `/verify/${encodeURIComponent(canonicalCode)}?${params.toString()}`"
       },
@@ -20559,11 +20631,11 @@
         "expression": "APP_PATHS.batches"
       },
       {
-        "source": "src/pages/ReleaseReadiness.tsx:533",
+        "source": "src/pages/ReleaseReadiness.tsx:557",
         "expression": "APP_PATHS.governance"
       },
       {
-        "source": "src/pages/ReleaseReadiness.tsx:536",
+        "source": "src/pages/ReleaseReadiness.tsx:560",
         "expression": "APP_PATHS.support"
       },
       {

@@ -128,8 +128,8 @@ export const openTrustedPrinterAgentSession = async (
   }
   if (PRINT_AGENT_REQUIRE_MTLS) {
     const fingerprint = options.mtlsFingerprintHeader?.trim();
-    if (!fingerprint || fingerprint.length > 256
-        || (registration.certFingerprint && registration.certFingerprint !== fingerprint)) {
+    if (!registration.certFingerprint || !fingerprint || fingerprint.length > 256
+        || registration.certFingerprint !== fingerprint) {
       throw Object.assign(new Error("Trusted printer mTLS identity required."), {
         statusCode: 403,
         errorCode: "mtls_required",

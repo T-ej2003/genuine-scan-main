@@ -103,3 +103,42 @@ Recommendation: retain bounded receipt history and explicit tenant-bound client 
 
 `PRODUCTION_MUTATION_PERFORMED=false`
 `READY_FOR_ONBOARDING=false`
+# PR 529 review corrections
+
+The follow-up preserves both original commits and the authenticated hello wire
+selector. Strict mTLS now requires a stored registration pin and matching trusted
+proxy fingerprint; the existing comparison is exact after trimming the incoming
+header. No TOFU, pin persistence, case-folding or signature-only fallback is added.
+Proxy authority comes only from the socket peer allowlist, never forwarded IPs.
+Operators must configure the actual terminating proxy peer; this is not a claim
+that production proxy configuration has been validated.
+
+Audit live subscriptions are paused for platform administrators without a brand.
+Selected brand identity is sent to the server, which validates it and intersects
+it with existing role/ownership filtering before serializing events. Subscription
+keys include the brand; cleanup and stale-callback guards prevent old subscriptions
+from repopulating state. Existing tenant/manufacturer authority is not expanded.
+
+RF7 extracts conditional query-only suffixes independently of route paths and
+retains dynamic path segments. The generated inventory is refreshed, not exempted.
+The app-only health contract now predicts immutable image identity, independently
+of task deployment variables; missing/malformed image metadata remains fail-closed.
+Tests execute the actual release metadata source rather than assert a source shape.
+
+All 26 previously unclassified frontend runtime paths are image-affecting Docker
+build inputs. **Image reuse is incompatible; later authorized publication is
+required.** Tests remain test-only and unknown paths still fail closed. This does
+not authorize publication or deployment. Printing SQL/backend remains a coordinated
+release unit; physical-printer acceptance is still outstanding.
+
+Local validation: focused mTLS/active connector/audit-stream tests PASS; real
+serializer continuation retained; RF7 8/8 PASS; app-only and image-contract suites
+305/305 PASS (including disposable PostgreSQL checks); backend CI validation PASS;
+frontend CI validation PASS; security source validation PASS; full RLS verification
+16/16 PASS. No grants, RLS policies, IAM or production state changed. The additional
+activation fixture was updated to immutable health identity, and the audit page
+stays within its existing size budget without raising the limit.
+
+Recommendation: retain these negative regressions as release gates, and separately
+verify proxy-peer configuration and physical connector acceptance before any future
+coordinated release. Do not relax trust or tenant boundaries for compatibility.

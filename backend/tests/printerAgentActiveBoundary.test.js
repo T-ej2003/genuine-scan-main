@@ -132,6 +132,16 @@ test("strict mTLS requires the trusted fingerprint and matches a pinned certific
       mtlsFingerprintHeader: registration.certFingerprint,
     });
     await boundary.closeTrustedPrinterAgentSession(session.id, "test complete");
+    const trimmed = await boundary.openTrustedPrinterAgentSession(hello(), {
+      mtlsFingerprintHeader: ` ${registration.certFingerprint} `,
+    });
+    await boundary.closeTrustedPrinterAgentSession(trimmed.id, "test complete");
+    delete registration.certFingerprint;
+    for (const fingerprint of [undefined, "certificate-fixture"]) {
+      await assert.rejects(boundary.openTrustedPrinterAgentSession(hello(), {
+        mtlsFingerprintHeader: fingerprint,
+      }), { errorCode: "mtls_required" });
+    }
   } finally {
     sessionContract.PRINT_AGENT_REQUIRE_MTLS = false;
     delete registration.certFingerprint;

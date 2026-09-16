@@ -379,7 +379,7 @@ export default function AuditLogs() {
   };
 
   useEffect(() => {
-    refreshAll();
+    setLogs([]); refreshAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [licenseeFilter, fraudStatusFilter, isSuperAdmin]);
 
@@ -397,12 +397,12 @@ export default function AuditLogs() {
       if (res.success) setLicensees((res.data as any[]) || []);
     });
   }, [isSuperAdmin]);
-
   useEffect(() => {
-    if (!live) return;
+    if (!live || (isSuperAdmin && licenseeFilter === "all")) return;
+    let active = true;
     const stop = apiClient.streamAuditLogs(
       (log) => {
-        if (isSuperAdmin && licenseeFilter !== "all" && log.licenseeId !== licenseeFilter) return;
+        if (!active || currentLicenseeFilter.current !== licenseeFilter || (isSuperAdmin && log.licenseeId !== licenseeFilter)) return;
         setLogs((prev) => [log, ...prev].slice(0, 200));
         if (isSuperAdmin && (log.action === "CUSTOMER_FRAUD_REPORT" || log.action === "CUSTOMER_FRAUD_REPORT_RESPONSE")) {
           loadFraudReports({ silent: true });
@@ -412,15 +412,15 @@ export default function AuditLogs() {
         }
       },
       () => {
+        if (!active || currentLicenseeFilter.current !== licenseeFilter) return;
         setLive(false);
         toast({
           title: "Live history updates unavailable",
           description: "Automatic updates were paused. Use Refresh to reload the latest history.",
           variant: "destructive",
         });
-      }
-    );
-    return stop;
+      }, isSuperAdmin ? licenseeFilter : undefined);
+    return () => { active = false; stop(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [live, licenseeFilter, isSuperAdmin, fraudStatusFilter]);
 

@@ -153,8 +153,8 @@ export function assertAppOnlySessionRiskConfiguration(definition) {
   return { overridePresent: entries.length === 1, effectiveThreshold: 85 };
 }
 
-// Match backend/src/observability/release.ts and the image ENV defaults in
-// backend/Dockerfile. Runtime metadata is not proof of the running image:
+// Match backend/src/observability/release.ts immutable image-source.json.
+// Runtime deployment metadata is not proof of the running image:
 // immutable digest/publication authentication remains independently required.
 export function appOnlyExpectedHealthSourceSha(definition, imageSourceSha) {
   sha(imageSourceSha);
@@ -162,15 +162,12 @@ export function appOnlyExpectedHealthSourceSha(definition, imageSourceSha) {
   const fields = ["RELEASE_GIT_SHA", "GITHUB_SHA", "COMMIT_SHA", "GIT_SHA", "RENDER_GIT_COMMIT", "VERCEL_GIT_COMMIT_SHA"];
   assert.equal((backend.environmentFiles || []).length, 0, "Release metadata from external environment files is unproven");
   assert.ok(!(backend.secrets || []).some(({ name }) => fields.includes(name)), "Secret-backed release metadata is unproven");
-  const environment = new Map([["RELEASE_GIT_SHA", imageSourceSha], ["GIT_SHA", imageSourceSha]]);
   for (const name of fields) {
     const entries = (backend.environment || []).filter((entry) => entry.name === name);
     assert.ok(entries.length <= 1, "Duplicate release metadata variable");
-    if (entries.length) { assert.equal(typeof entries[0].value, "string"); environment.set(name, entries[0].value); }
+    if (entries.length) assert.equal(typeof entries[0].value, "string");
   }
-  const expected = fields.map((name) => (environment.get(name) || "").trim()).find((value) => value && value.toLowerCase() !== "unknown");
-  sha(expected);
-  return expected;
+  return imageSourceSha;
 }
 
 export function assertAppOnlyEvidenceIdentity(actual, expected, now = Date.now()) {
