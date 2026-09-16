@@ -3,6 +3,207 @@
   "deployment": "production-green-stage-b",
   "artifacts": [
     {
+      "id": "app-only-bootstrap-plan",
+      "kind": "file",
+      "producer": "scripts/aws/run-production-app-only-bootstrap.mjs:prepare",
+      "consumers": [
+        "scripts/aws/run-production-app-only-bootstrap.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": false,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": null,
+      "allOrNone": false,
+      "rollback": "none"
+    },
+    {
+      "id": "app-only-bootstrap-authorization",
+      "kind": "file",
+      "producer": "scripts/aws/authorize-production-app-only-bootstrap.mjs",
+      "consumers": [
+        "scripts/aws/run-production-app-only-bootstrap.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": false,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": null,
+      "allOrNone": false,
+      "rollback": "none"
+    },
+    {
+      "id": "app-only-deployment-inputs",
+      "kind": "file",
+      "producer": "scripts/aws/prepare-production-app-only-deployment.mjs",
+      "consumers": [
+        "scripts/aws/run-production-app-only-deployment.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": false,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": null,
+      "allOrNone": false,
+      "rollback": "none"
+    },
+    {
+      "id": "app-only-release-preparation",
+      "kind": "file",
+      "producer": "scripts/aws/run-production-app-only-deployment.mjs:prepare",
+      "consumers": [
+        "scripts/aws/run-production-app-only-deployment.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": false,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": null,
+      "allOrNone": false,
+      "rollback": "none"
+    },
+    {
+      "id": "app-only-permissions",
+      "kind": "file",
+      "producer": "scripts/aws/run-production-app-only-deployment.mjs:provision",
+      "consumers": [
+        "scripts/aws/run-production-app-only-deployment.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": false,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": null,
+      "allOrNone": false,
+      "rollback": "none"
+    },
+    {
+      "id": "app-only-deployment-result",
+      "kind": "file",
+      "producer": "scripts/aws/run-production-app-only-deployment.mjs:deploy",
+      "consumers": [
+        "documents/ops/production-app-only-deployment.md"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": false,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": null,
+      "allOrNone": false,
+      "rollback": "none"
+    },
+    {
+      "id": "app-only-requirements",
+      "kind": "file",
+      "producer": "scripts/aws/produce-production-app-only-requirements.mjs",
+      "consumers": [
+        "scripts/aws/production-app-only-preparation.mjs",
+        "scripts/aws/production-app-only-verifier-command.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": false,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": null,
+      "allOrNone": false,
+      "rollback": "none"
+    },
+    {
+      "id": "app-only-verifier-preparation",
+      "kind": "file",
+      "producer": "scripts/aws/prepare-production-app-only-verifier.mjs",
+      "consumers": [
+        "scripts/aws/production-app-only-adapters.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": false,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": null,
+      "allOrNone": false,
+      "rollback": "none"
+    },
+    {
+      "id": "app-only-verifier-registration",
+      "kind": "file",
+      "producer": "scripts/aws/run-production-app-only-verifier.mjs:register",
+      "consumers": [
+        "scripts/aws/run-production-app-only-verifier.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": false,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": null,
+      "allOrNone": false,
+      "rollback": "none"
+    },
+    {
+      "id": "app-only-database-compatibility",
+      "kind": "file",
+      "producer": "scripts/aws/run-production-app-only-verifier.mjs:verify",
+      "consumers": [
+        "scripts/aws/production-app-only-preparation.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": false,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": null,
+      "allOrNone": false,
+      "rollback": "none"
+    },
+    {
+      "id": "app-only-execution-journal",
+      "kind": "file",
+      "producer": "scripts/aws/production-app-only-artifacts.mjs:createAppOnlyEvidenceWriter",
+      "consumers": [
+        "scripts/aws/production-app-only-activation.mjs",
+        "scripts/aws/production-app-only-provisioning.mjs",
+        "scripts/aws/production-app-only-adapters.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "app-only-execution-journal",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
       "id": "release-artifact-directory",
       "kind": "directory",
       "producer": "scripts/aws/run-production-green-stage-b-preflight.mjs:runReleaseReadPreflight",

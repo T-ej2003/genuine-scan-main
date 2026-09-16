@@ -139,7 +139,7 @@ function sourceTaskDefinitionIdentity(response, sourceArn) {
   return Object.freeze({ sourceArn, sourceClass, sourceImage: selected[0].image, sourceDigest: match[1] });
 }
 
-function assertRollbackImageAvailable(run, digest) {
+export function assertRollbackImageAvailable(run, digest) {
   let response;
   try { response = parseJson(run, ["ecr", "describe-images", "--repository-name", "mscqr-backend", "--image-ids", `imageDigest=${digest}`]); }
   catch (error) { throw new Error(`Normal activation rollback image viability is unproven: ${/ImageNotFoundException/.test(`${error?.stderr || error?.message || ""}`) ? "exact source digest is absent" : "ECR lookup failed"}.`); }

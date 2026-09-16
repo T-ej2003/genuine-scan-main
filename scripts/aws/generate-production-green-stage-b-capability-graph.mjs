@@ -20,6 +20,8 @@ import { INITIAL_ACTIVATION_RECONCILER } from "./verify-production-initial-activ
 import { PROVIDER_READONLY_RECONCILIATION } from "./production-provider-readonly-policy-reconciliation.mjs";
 import { BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION, LEGACY_BOOTSTRAP_TRANSITION_SECRET_READ_RESOURCES } from "./production-bootstrap-operator-policy-reconciliation.mjs";
 import { MIXED_DUAL_SLOT_RECOVERY_EXECUTION_POLICY_ARN, MIXED_DUAL_SLOT_RECOVERY_EXECUTION_POLICY_PATH, MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN, MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES } from "./production-mixed-dual-slot-recovery-contract.mjs";
+import { APP_ONLY } from "./production-app-only-contract.mjs";
+import { APP_ONLY_VERIFIER, APP_ONLY_PROVISIONING, appOnlyDeployerPolicy, appOnlyVerifierLauncherPolicy, appOnlyPermissionProvisionerPolicy } from "./production-app-only-policy.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const CAPABILITY_GRAPH_PATH = "documents/ops/iam/MSCQRProductionGreenStageBDeploymentCapabilities-v1.json";
@@ -35,6 +37,12 @@ const STAGE_A_RECOVERY_RAW_STATE_READ_COMMAND = '["s3api", "get-object", "--buck
 const rootAttestationPolicyPath = "infra/aws/terraform/production-green-stage-b-publisher-bootstrap/main.tf";
 const bootstrapOperatorPolicyPath = BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.sourcePath;
 const awsCliSourceFiles = [
+  "scripts/aws/run-production-app-only-bootstrap.mjs", "scripts/aws/run-production-app-only-verifier.mjs",
+  "scripts/aws/run-production-app-only-deployment.mjs", "scripts/aws/prepare-production-app-only-verifier.mjs",
+  "scripts/aws/prepare-production-app-only-deployment.mjs", "scripts/aws/production-app-only-preparation.mjs",
+  "scripts/aws/production-app-only-adapters.mjs", "scripts/aws/production-app-only-images.mjs",
+  "scripts/aws/production-app-only-iam-source.mjs", "scripts/aws/production-app-only-runtime.mjs",
+  "scripts/aws/production-app-only-provisioning.mjs", "scripts/aws/production-app-only-bootstrap-contract.mjs",
   "scripts/plan-production-green-stage-b.mjs", "scripts/apply-production-green-stage-b.mjs",
   "scripts/aws/create-production-green-stage-b-approval.mjs", "scripts/aws/generate-production-green-stage-a-prerequisites.mjs",
   "scripts/aws/production-green-stage-b-ecs-observations.mjs", "scripts/aws/production-green-stage-b-image-evidence.mjs",
@@ -74,6 +82,10 @@ const operatorPolicy = readJson(ECS_EXEC_OPERATOR_POLICY_PATH);
 export const isRuntimeMutationAction = (action) => !/^(?:ecr:|kms:Verify|secretsmanager:Get|s3:(?:Get|List))/.test(action);
 
 const PHASES = Object.freeze([
+  ["app-only-permission-bootstrap", "scripts/aws/run-production-app-only-bootstrap.mjs"],
+  ["app-only-live-compatibility", "scripts/aws/run-production-app-only-verifier.mjs"],
+  ["app-only-permission-provisioning", "scripts/aws/production-app-only-provisioning.mjs"],
+  ["app-only-backend-activation", "scripts/aws/production-app-only-activation.mjs"],
   ["protected-main-checkout", "scripts/aws/stage-b-release-gate.mjs"],
   ["dependency-installation", "package.json"],
   ["rls-package-verification", "scripts/rls/verify-full-rls-package.mjs"],
@@ -553,6 +565,10 @@ export function discoverAwsCliActions() {
   const calls = [];
   for (const sourceFile of awsCliSourceFiles) {
     const source = fs.readFileSync(path.join(root, sourceFile), "utf8");
+    if (sourceFile === "scripts/aws/production-app-only-adapters.mjs") {
+      if (!source.includes("assertRollbackImageAvailable((args) =>")) throw new Error("App-only rollback image viability is not composed");
+      calls.push({ sourceFile, action: "ecr:DescribeImages" });
+    }
     const pattern = sourceFile.endsWith(".sh")
       ? new RegExp(`\\baws\\s+(${serviceNames})\\s+([a-z0-9-]+)`, "g")
       : new RegExp(`\\[\\s*["'](${serviceNames})["']\\s*,\\s*["']([a-z0-9-]+)["']`, "g");
@@ -651,6 +667,51 @@ export function discoverAwsCliActions() {
   calls.push({ sourceFile: mixedRecoveryRunnerSourceFile, sourceFunction: "prepareMixedDualSlotRecoveryIamAttestation", phase: "mixed-dual-slot-recovery-iam-preflight", identity: "ROOT_OPERATOR", action: "kms:Sign", resources: [ROOT_ATTESTATION_KEY_ALIAS_ARN], capabilityId: "mixed-recovery-iam-attestation-sign" });
   return calls.filter((call, index) => calls.findIndex((candidate) => candidate.sourceFile === call.sourceFile && candidate.action === call.action && (candidate.identity || "RELEASE_DEPLOYER") === (call.identity || "RELEASE_DEPLOYER") && (candidate.sourceFunction || "") === (call.sourceFunction || "")) === index)
     .sort((left, right) => `${left.sourceFile}:${left.action}`.localeCompare(`${right.sourceFile}:${right.action}`));
+}
+
+// Permission ceilings are not arbitrary-call authority: exact requests are also
+// constrained by authenticated preparation, independent readback and live CAS.
+export function appOnlyCapabilityNodes() {
+  const mutations = new Set(["ecs:RegisterTaskDefinition", "ecs:UpdateService", "ecs:RunTask", "ecs:TagResource", "iam:CreateRole", "iam:PutRolePolicy"]);
+  const specifications = [
+    ["app-only-backend-activation", "APP_ONLY_DEPLOYER", "scripts/aws/production-app-only-adapters.mjs", appOnlyDeployerPolicy()],
+    ["app-only-live-compatibility", "APP_ONLY_VERIFIER_LAUNCHER", "scripts/aws/run-production-app-only-verifier.mjs",
+      appOnlyVerifierLauncherPolicy(`arn:aws:ecs:${APP_ONLY.region}:${APP_ONLY.account}:task-definition/${APP_ONLY_VERIFIER.family}:1`)],
+    ["app-only-permission-provisioning", "APP_ONLY_PERMISSION_PROVISIONER", "scripts/aws/production-app-only-provisioning.mjs", appOnlyPermissionProvisionerPolicy()],
+  ];
+  const nodes = specifications.flatMap(([phase, identity, sourceFile, document]) => document.Statement.flatMap((statement) => asArray(statement.Action).map((action) => {
+    if (!mutations.has(action) && action !== "iam:PassRole" && !/:(Get|Describe|List|Simulate)/.test(action)) throw new Error(`Unclassified app-only action ${action}`);
+    const dynamic = statement.Sid === "RunExactReadOnlyVerifier";
+    return { id: `${phase}-${statement.Sid}-${action}`.replaceAll(":", "-").toLowerCase(), phase, identity,
+      executor: ["iam:PassRole", "ecs:TagResource"].includes(action) ? "aws-service-authorization" : "aws-cli",
+      sourceFile, sourceFunction: statement.Sid, action,
+      resources: asArray(statement.Resource).map((arn) => dynamic ? arn.replace(/:1$/, ":{authenticated-verifier-revision}") : arn),
+      context: { account: APP_ONLY.account, region: APP_ONLY.region, condition: statement.Condition || {}, scope: "identity-policy-ceiling" },
+      classification: mutations.has(action) ? "RELEASE_DIRECT_MUTATION" : "RELEASE_DIRECT_READ",
+      probe: action === "iam:PassRole" || mutations.has(action) ? "administrator-simulation" : "direct", probeIds: [],
+      policy: { sourceFile: "scripts/aws/production-app-only-policy.mjs", sid: statement.Sid, livePolicyArn: null,
+        expectedVersion: dynamic ? "authenticated-preparation-revision" : "protected-main-source",
+        expectedPolicySha256: dynamic ? null : sha256(Buffer.from(canonicalizeJson(document))) }, required: true, mutation: mutations.has(action) };
+  })));
+  const roles = [APP_ONLY_PROVISIONING.roleName, APP_ONLY_VERIFIER.roleName].map((name) => `arn:aws:iam::${APP_ONLY.account}:role/${name}`);
+  const policies = [APP_ONLY_PROVISIONING.deployerBoundaryArn, APP_ONLY_PROVISIONING.verifierBoundaryArn];
+  const bootstrap = [
+    ...["aws-cli", "terraform"].flatMap((executor) => [
+      [executor, "sts:GetCallerIdentity", ["*"], false],
+      ...["iam:GetRole", "iam:GetRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies"].map((action) => [executor, action, roles, false]),
+      ...["iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions"].map((action) => [executor, action, policies, false]),
+    ]),
+    ...["iam:CreateRole", "iam:PutRolePolicy"].map((action) => ["terraform", action, roles, true]),
+    ["terraform", "iam:CreatePolicy", policies, true],
+  ];
+  return [...nodes, ...bootstrap.map(([executor, action, resources, mutation]) => ({
+    id: `app-only-bootstrap-${executor}-${action}`.replaceAll(":", "-").toLowerCase(), phase: "app-only-permission-bootstrap",
+    identity: "ADMINISTRATOR", executor, sourceFile: "scripts/aws/run-production-app-only-bootstrap.mjs", sourceFunction: "governed-six-resource-bootstrap",
+    action, resources, context: { account: APP_ONLY.account, region: APP_ONLY.region, resourcesCreated: 6, terraformBackend: "private-local-only" },
+    classification: mutation ? "TERRAFORM_APPLY_MUTATION" : executor === "terraform" ? "TERRAFORM_PROVIDER_READ" : "ADMIN_DIRECT_READ",
+    probe: "structural", probeIds: [], policy: { sourceFile: "infra/aws/terraform/production-app-only-permissions/main.tf.json",
+      sid: "exact-saved-plan-and-protected-approval", livePolicyArn: null, expectedVersion: "authenticated-saved-plan", expectedPolicySha256: null }, required: true, mutation,
+  }))];
 }
 
 export function buildStageBDeploymentCapabilityGraph() {
@@ -843,7 +904,7 @@ export function buildStageBDeploymentCapabilityGraph() {
   return {
     schemaVersion: 1, deployment: "production-green-stage-b", account: "368992683803", region: "eu-west-2",
     phases: PHASES.map(([id, sourceFile], index) => ({ order: index + 1, id, sourceFile })),
-    identities: ["GITHUB_IMAGE_PUBLISHER", "ADMINISTRATOR", "ROOT_OPERATOR", "BOOTSTRAP_OPERATOR", "RELEASE_DEPLOYER", "INDEPENDENT_CHECKER", "ECS_EXEC_VERIFIER_OPERATOR", "SERVICE_RUNTIME", "INITIAL_ACTIVATION_RECONCILER", "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER", "MIXED_RECOVERY_EXECUTOR"], capabilities,
+    identities: ["GITHUB_IMAGE_PUBLISHER", "ADMINISTRATOR", "ROOT_OPERATOR", "BOOTSTRAP_OPERATOR", "RELEASE_DEPLOYER", "INDEPENDENT_CHECKER", "ECS_EXEC_VERIFIER_OPERATOR", "SERVICE_RUNTIME", "INITIAL_ACTIVATION_RECONCILER", "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER", "MIXED_RECOVERY_EXECUTOR", "APP_ONLY_DEPLOYER", "APP_ONLY_VERIFIER_LAUNCHER", "APP_ONLY_PERMISSION_PROVISIONER"], capabilities: [...capabilities, ...appOnlyCapabilityNodes()].sort((a, b) => a.id.localeCompare(b.id)),
     directProbes: [...RELEASE_READ_PROBES.map(({ id, action }) => ({ id, action })),
       { id: "audit-service-details", action: "ecs:DescribeServices" },
       { id: "audit-task-details", action: "ecs:DescribeTasks" },

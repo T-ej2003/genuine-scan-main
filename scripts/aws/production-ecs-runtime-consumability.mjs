@@ -649,13 +649,14 @@ export async function collectLiveRolePolicyIdentity(principalArns, aws, candidat
   return Object.freeze({ ...body, identitySha256: canonicalSha256(body) });
 }
 
-export async function simulateRuntimeDependencies(dependencies, aws) {
+export async function simulateRuntimeDependencies(dependencies, aws, { loggingResourceMode = "managed-wildcard" } = {}) {
   if (typeof aws !== "function") throw new Error("Runtime closure requires authenticated IAM simulation.");
+  if (!["managed-wildcard", "exact-dependency"].includes(loggingResourceMode)) throw new Error("Runtime logging simulation mode is unsupported.");
   const simulations = {};
   const decisionFor = (response, action, resource) => {
     const restrictionsClear = (result) => (result.MissingContextValues === undefined || (Array.isArray(result.MissingContextValues) && result.MissingContextValues.length === 0))
       && result.OrganizationsDecisionDetail?.AllowedByOrganizations !== false && result.PermissionsBoundaryDecisionDetail?.AllowedByPermissionsBoundary !== false;
-    const actionResults = response?.EvaluationResults?.filter((result) => result?.EvalActionName === action);
+    const actionResults = response?.EvaluationResults?.filter((result) => typeof result?.EvalActionName === "string" && result.EvalActionName.toLowerCase() === action.toLowerCase());
     if (response?.EvaluationResults?.length !== 1 || actionResults?.length !== 1) return null;
     const result = actionResults[0];
     if (Object.hasOwn(result, "ResourceSpecificResults") && !Array.isArray(result.ResourceSpecificResults)) return null;
@@ -672,8 +673,11 @@ export async function simulateRuntimeDependencies(dependencies, aws) {
   for (const dependency of dependencies) {
     // The wildcard probe corroborates the managed Resource:"*" grant. Candidate namespace
     // binding and intersecting-deny rejection come from the authenticated role-policy readback.
-    const logging = LOG_DELIVERY_ACTIONS.has(dependency.action); const resource = logging ? "*" : dependency.resource;
-    const args = ["iam", "simulate-principal-policy", "--policy-source-arn", dependency.principalArn, "--action-names", dependency.action, "--resource-arns", resource];
+    const logging = LOG_DELIVERY_ACTIONS.has(dependency.action); const resource = logging && loggingResourceMode === "managed-wildcard" ? "*" : dependency.resource;
+    // IAM action names are case-insensitive. The simulator's service/resource
+    // lookup can nevertheless reject mixed-case CloudWatch Logs action names;
+    // lowercase the request without changing the policy or resource boundary.
+    const args = ["iam", "simulate-principal-policy", "--policy-source-arn", dependency.principalArn, "--action-names", dependency.action.toLowerCase(), "--resource-arns", resource];
     if (dependency.action === "kms:Decrypt") args.push("--context-entries", `ContextKeyName=kms:ViaService,ContextKeyValues=${dependency.context?.["kms:ViaService"]},ContextKeyType=string`);
     const allowed = decisionFor(await aws(args), dependency.action, resource) === "allowed";
     simulations[dependency.dependencyId] = { principalArn: dependency.principalArn, action: dependency.action, resource: dependency.resource, decision: allowed ? "allowed" : "denied" };

@@ -5,6 +5,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { createRequire } from "node:module";
+import { collectAppOnlyDatabaseCatalogue } from "../aws/production-app-only-database-verifier.mjs";
+import { createAppOnlyRequirements, assertAppOnlyRequirements, compareAppOnlyRequirements } from "../aws/production-app-only-requirements.mjs";
+import { writeStageBPrivateFileExclusive } from "../aws/stage-b-artifact-contract.mjs";
+import { APP_ONLY } from "../aws/production-app-only-contract.mjs";
+import { buildAppOnlyVerifierCommand, authenticateAppOnlyVerifierResult } from "../aws/production-app-only-verifier-command.mjs";
 import {
   PRODUCTION_RLS_APPROVAL_ALGORITHM,
   canonicalProductionApprovalPayload,
@@ -23,7 +29,7 @@ const randomMfaSecret = () =>
 const run = (command, args, options = {}) => {
   const result = spawnSync(command, args, {
     cwd: options.cwd || root,
-    env: { ...process.env, ...(options.env || {}) },
+    env: { ...(options.cleanEnv ? {} : process.env), ...(options.env || {}) },
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
   });
@@ -55,7 +61,7 @@ const databaseUrl = (base, database, user) => {
 const psql = (url, args, label) => run("psql", [url, "-X", "-v", "ON_ERROR_STOP=1", ...args], { label });
 const scalar = (url, sql, label) => psql(url, ["-q", "-t", "-A", "-c", sql], label).split("\n").at(-1);
 
-test("approved production package executes on disposable PostgreSQL 18 and rollback removes every managed role", { skip: !enabled }, () => {
+test("approved production package executes on disposable PostgreSQL 18 and rollback removes every managed role", { skip: !enabled }, async () => {
   const adminUrl = safeAdminUrl();
   assert.equal(Number(scalar(adminUrl, "SELECT current_setting('server_version_num')::integer / 10000", "PostgreSQL major")), 18);
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-production-package-"));
@@ -99,6 +105,9 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
   const greenUrl = databaseUrl(adminUrl, targetDatabase, administrator);
   const migrationUrl = databaseUrl(adminUrl, targetDatabase, "mscqr_prd_rls_phase2_migration");
   let residue = null;
+  let verifierCreated = false;
+  let appOnlyRequirements;
+  const verifierRole = "mscqr_prod_rls_canary_read";
   try {
     assert.equal(scalar(maintenanceUrl, `SELECT count(*) FROM pg_roles WHERE rolname=${JSON.stringify(administrator).replaceAll('"', "'")} OR rolname LIKE 'mscqr_prd_rls_phase2_%'`, "clean roles"), "0");
     assert.equal(scalar(maintenanceUrl, `SELECT count(*) FROM pg_database WHERE datname='${targetDatabase}'`, "clean database"), "0");
@@ -156,6 +165,63 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
     for (const file of ["admin-ownership.sql", "runtime-policy.sql", "verification.sql"]) {
       psql(greenUrl, ["-q", "-f", path.join(sqlRoot, file)], file);
     }
+    // Requirements come from the canonical, fully installed source package in
+    // this disposable server, never from production's observed catalogue.
+    assert.equal(scalar(maintenanceUrl, `SELECT count(*) FROM pg_roles WHERE rolname='${verifierRole}'`, "verifier role absent"), "0");
+    psql(maintenanceUrl, ["-q", "-c", `CREATE ROLE ${verifierRole} LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`], "local verifier identity");
+    verifierCreated = true;
+    // The source-owned canary provisioner adds schema USAGE and a fixed probe.
+    // Include it in the oracle rather than declaring those real grants drift.
+    // Its initializer-owned scope table is only a local provisioning fixture;
+    // it is not part of the candidate's public-schema requirements catalogue.
+    psql(databaseUrl(adminUrl, targetDatabase, adminUrl.username), ["-q", "-c", `GRANT CREATE ON SCHEMA app_rls TO mscqr_prd_rls_phase2_auth_owner;
+      SET ROLE mscqr_prd_rls_phase2_auth_owner;
+      CREATE TABLE app_rls.production_read_only_canary_control(scope_name text PRIMARY KEY, scope_id text UNIQUE);
+      INSERT INTO app_rls.production_read_only_canary_control VALUES ('canary','00000000-0000-4000-8000-000000000001');
+      RESET ROLE;`], "local canary initializer fixture");
+    psql(databaseUrl(adminUrl, targetDatabase, adminUrl.username), ["-q", "-v", "canary_credential_rotation=false", "-f",
+      path.join(root, "documents/ops/iam/production-green-phase-4-read-only-canary-provision.sql")], "canonical local read-only canary provisioning");
+    psql(databaseUrl(adminUrl, targetDatabase, adminUrl.username), ["-q", "-c", "REVOKE CREATE ON SCHEMA app_rls FROM mscqr_prd_rls_phase2_auth_owner"], "restore canonical schema privilege boundary after local fixture setup");
+    const { PrismaClient } = createRequire(new URL("../../backend/package.json", import.meta.url))("@prisma/client");
+    const verifier = new PrismaClient({ datasources: { db: { url: databaseUrl(adminUrl, targetDatabase, verifierRole) } } });
+    try {
+      const catalogue = await collectAppOnlyDatabaseCatalogue(verifier);
+      const sourceSha = run("git", ["rev-parse", "HEAD"]);
+      const context = { repositoryRoot: root, sourceSha,
+        candidateSourceSha: process.env.MSCQR_APP_ONLY_CANDIDATE_SOURCE_SHA || sourceSha };
+      const requirements = createAppOnlyRequirements({ ...context, catalogue,
+        packageChecksums: JSON.parse(fs.readFileSync(path.join(evidenceRoot, "checksums.json"), "utf8")) });
+      assertAppOnlyRequirements(requirements, context);
+      assert.ok(catalogue.tables.length >= 79 && catalogue.policies.length >= 351);
+      assert.ok(Object.values(compareAppOnlyRequirements(catalogue, requirements)).every((value) => value === "COMPATIBLE"));
+      const identity = { sourceSha, candidateSourceSha: context.candidateSourceSha,
+        account: APP_ONLY.account, region: APP_ONLY.region, clusterArn: APP_ONLY.clusterArn, serviceArn: APP_ONLY.serviceArn,
+        databaseHostname: adminUrl.hostname, verifierImageDigest: `sha256:${"3".repeat(64)}`,
+        predecessorTaskDefinition: `arn:aws:ecs:${APP_ONLY.region}:${APP_ONLY.account}:task-definition/${APP_ONLY.family}:14`,
+        predecessorBackendDigest: `sha256:${"1".repeat(64)}`, candidateDigest: `sha256:${"2".repeat(64)}` };
+      const command = buildAppOnlyVerifierCommand({ requirements, identity, repositoryRoot: root });
+      const verifierUrl = new URL(databaseUrl(adminUrl, targetDatabase, verifierRole));
+      verifierUrl.password = "synthetic-local-verifier-password";
+      verifierUrl.searchParams.set("sslmode", "require");
+      verifierUrl.searchParams.set("application_name", "mscqr-production-green-read-only-rls-canary");
+      // macOS injects this process-launch variable even with a clean env. It is
+      // not present in ECS/Linux and must not widen the production allowlist.
+      const localCommand = [...command.command];
+      if (process.platform === "darwin") localCommand[1] = `delete process.env.__CF_USER_TEXT_ENCODING;\n${localCommand[1]}`;
+      const message = run(process.execPath, localCommand, { cwd: path.join(root, "backend"),
+        cleanEnv: true, env: { RLS_CANARY_DATABASE_URL: verifierUrl.toString(), NODE_ENV: "production", PORT: "4000",
+          RUN_DB_MIGRATIONS_ON_START: "false", GIT_SHA: sourceSha, RELEASE_GIT_SHA: sourceSha,
+          AWS_EXECUTION_ENV: "AWS_ECS_FARGATE", AWS_REGION: APP_ONLY.region, AWS_DEFAULT_REGION: APP_ONLY.region,
+          AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: "/v2/credentials/local-disposable",
+          ECS_CONTAINER_METADATA_URI_V4: "http://169.254.170.2/v4/local-disposable" },
+        label: "fixed verifier command against canonical local PostgreSQL" });
+      authenticateAppOnlyVerifierResult({ message, identity, requirementsSha256: requirements.requirementsSha256,
+        verificationContractSha256: command.verificationContractSha256 });
+      const hostile = structuredClone(catalogue);
+      hostile.routines[0].security_definer = !hostile.routines[0].security_definer;
+      assert.equal(compareAppOnlyRequirements(hostile, requirements).RLS_FUNCTIONS, "INCOMPATIBLE");
+      appOnlyRequirements = requirements;
+    } finally { await verifier.$disconnect(); }
     const migrationPassword = "synthetic-migration-password";
     psql(greenUrl, ["-q", "-c", `ALTER ROLE "${new URL(migrationUrl).username}" PASSWORD '${migrationPassword}'`], "migration credential provisioning");
     const connectableMigrationUrl = new URL(migrationUrl); connectableMigrationUrl.password = migrationPassword;
@@ -174,6 +240,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
       if (scalar(maintenanceUrl, `SELECT count(*) FROM pg_database WHERE datname='${targetDatabase}'`, "inspect green database") === "1") {
         psql(maintenanceUrl, ["-q", "-c", `DROP DATABASE "${targetDatabase}" WITH (FORCE)`], "drop green database");
       }
+      if (verifierCreated) psql(maintenanceUrl, ["-q", "-c", `DROP ROLE ${verifierRole}`], "drop local verifier");
       if (scalar(maintenanceUrl, `SELECT count(*) FROM pg_roles WHERE rolname LIKE 'mscqr_prd_rls_phase2_%'`, "inspect managed roles") !== "0") {
         psql(databaseUrl(adminUrl, adminUrl.pathname.slice(1), administrator), [
           "-q", "-v", `candidate_database=${targetDatabase}`, "-f", path.join(sqlRoot, "clean-room-cleanup.sql"),
@@ -192,4 +259,11 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
     }
   }
   assert.equal(residue, "0");
+  // The protected producer owns this private destination. Publish only after
+  // certification AND cleanup/restoration succeed; failed runs emit no proof.
+  if (process.env.MSCQR_APP_ONLY_REQUIREMENTS_PATH) {
+    assert.ok(appOnlyRequirements);
+    writeStageBPrivateFileExclusive({ filePath: process.env.MSCQR_APP_ONLY_REQUIREMENTS_PATH,
+      repositoryRoot: root, bytes: Buffer.from(`${JSON.stringify(appOnlyRequirements)}\n`) });
+  }
 });

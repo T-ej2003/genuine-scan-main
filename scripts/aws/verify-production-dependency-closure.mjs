@@ -203,6 +203,10 @@ const STAGE_A_MUTATING_CAPABILITIES = new Set(["stage-a-artifacts-recovery-root-
 const stageACapabilitiesFor = (mode) => Object.entries(STAGE_A_CAPABILITY_MODES).filter(([, modes]) => modes.includes(mode)).map(([id]) => id);
 
 const MODE_CAPABILITIES = Object.freeze({
+  "app-only-permission-bootstrap": ["app-only-bootstrap-terraform-iam-createpolicy", "app-only-bootstrap-terraform-iam-createrole", "app-only-bootstrap-terraform-iam-putrolepolicy"],
+  "app-only-live-compatibility": ["app-only-live-compatibility-runexactreadonlyverifier-ecs-runtask", "app-only-live-compatibility-readverifieroutput-logs-getlogevents"],
+  "app-only-permission-provisioning": ["app-only-permission-provisioning-provisionboundedinlinepolicies-iam-putrolepolicy", "app-only-permission-provisioning-simulateonlyapproles-iam-simulateprincipalpolicy"],
+  "app-only-backend-activation": ["app-only-backend-activation-registerimageonlycandidate-ecs-registertaskdefinition", "app-only-backend-activation-activatecandidatefamilyonexactservice-ecs-updateservice"],
   [INITIAL_ACTIVATION_POLICY_RECONCILIATION_MODE]: CALLS.filter(({ sourceFile }) => sourceFile === "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs").map(({ capabilityId }) => capabilityId),
   [PROVIDER_READONLY_POLICY_RECONCILIATION_MODE]: CALLS.filter(({ sourceFile }) => sourceFile === "scripts/aws/reconcile-production-provider-readonly-policy.mjs").map(({ capabilityId }) => capabilityId),
   [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION_MODE]: CALLS.filter(({ sourceFile }) => sourceFile === "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs").map(({ capabilityId }) => capabilityId),
@@ -321,6 +325,10 @@ export function buildProductionDependencyClosure() {
     ],
     modes: Object.fromEntries(Object.keys(MODE_CAPABILITIES).map((mode) => [mode, "PASS"])),
     runtimeModeClosure: {
+      "app-only-permission-bootstrap": "separately approved exact six-resource IAM create plan with private local state; no Stage-B backend or application activation",
+      "app-only-live-compatibility": "fixed immutable read-only verifier task and current IAM/runtime collectors bind source, candidate, predecessor and all required database domains",
+      "app-only-permission-provisioning": "isolated provisioner installs only the approved bounded role capability after eligibility, IAM CAS and protected approval",
+      "app-only-backend-activation": "separate deployer clones current task with image-only change, independently reads registration and repeats predecessor CAS before update; rollback is exact and ownership-bound",
       NORMAL: "Terraform-rendered final candidates and exact execution policies are jointly authenticated by Stage-B plan/closure before apply; normal activation registers nothing",
       BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME: "signed candidate-derived closure is re-read before RegisterTaskDefinition and before UpdateService",
       STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY: "the governed P0-to-P2 production-artifacts recovery uses its exact root/release journal, policy, lock, and attestation boundaries",
@@ -339,6 +347,8 @@ export function buildProductionDependencyClosure() {
 }
 
 export function assertChangedAwsCallClosure(scanned, graph) {
+  const appOnly = assertAppOnlyAwsCallClosure(scanned, graph);
+  scanned = scanned.filter(({ sourceFile }) => !Object.hasOwn(APP_ONLY_CALLS, sourceFile));
   const identityBound = (sourceFile) => ["scripts/aws/production-stage-a-production-artifacts-journal.mjs", "scripts/aws/production-root-attestation-signer.mjs", "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "scripts/aws/production-initial-activation-policy-reconciliation.mjs", "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs", "scripts/aws/reconcile-production-provider-readonly-policy.mjs", "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs", "scripts/aws/recover-production-mixed-dual-slot-topology.mjs"].includes(sourceFile);
   const key = ({ sourceFile, action, identity = "RELEASE_DEPLOYER", sourceFunction = "", capabilityId = "" }) => `${sourceFile}\t${action}\t${identityBound(sourceFile) ? identity : ""}\t${capabilityId.endsWith("-read-raw-state") ? sourceFunction : capabilityId.includes("reservation") ? capabilityId : ""}`;
   const callKeys = new Set(CALLS.map(key));
@@ -352,7 +362,7 @@ export function assertChangedAwsCallClosure(scanned, graph) {
   if (baseline.length !== BASE_CALL_COUNT || sha256(JSON.stringify(baseline)) !== BASE_CALL_SHA256) throw new Error("Unknown production AWS call requires capability classification.");
 
   const capabilityById = new Map(graph.capabilities.map((capability) => [capability.id, capability]));
-  return CALLS.map((contract) => {
+  return [...appOnly, ...CALLS.map((contract) => {
     const capability = capabilityById.get(contract.capabilityId);
     const stageAModes = STAGE_A_CAPABILITY_MODES[contract.capabilityId];
     const resourcesCompatible = stageAModes ? same(capability?.resources, contract.resources) : contract.resources.every((resource) => capability?.resources?.includes(resource)
@@ -378,7 +388,45 @@ export function assertChangedAwsCallClosure(scanned, graph) {
       : contract.sourceFile.endsWith("production-bootstrap-operator-policy-reconciliation.mjs") ? [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION_MODE] : ["BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"];
     if (contract.sourceFile.endsWith("reconcile-production-provider-readonly-policy.mjs")) return { ...contract, reachableMode: [PROVIDER_READONLY_POLICY_RECONCILIATION_MODE], executionPrincipal: contract.identity, sourcePolicyPresent: true, generatedManifestPresent: true, capabilityGraphPresent: true, administratorPreflightPresent: true, runtimePreflightPresent: true, negativeTestPresent: true };
     return { ...contract, reachableMode, executionPrincipal: contract.identity, sourcePolicyPresent: true, generatedManifestPresent: true, capabilityGraphPresent: true, administratorPreflightPresent: true, runtimePreflightPresent: true, negativeTestPresent: true };
-  });
+  })];
+}
+
+const APP_ONLY_CALLS = Object.freeze(Object.fromEntries([
+  ["prepare-production-app-only-deployment", "APP_ONLY_VERIFIER_LAUNCHER", ["sts:GetCallerIdentity"]],
+  ["prepare-production-app-only-verifier", "APP_ONLY_VERIFIER_LAUNCHER", ["sts:GetCallerIdentity"]],
+  ["production-app-only-bootstrap-contract", "ADMINISTRATOR", ["iam:GetPolicy", "iam:GetRole"]],
+  ["run-production-app-only-bootstrap", "ADMINISTRATOR", ["iam:GetPolicy", "iam:GetPolicyVersion", "iam:GetRole", "iam:GetRolePolicy", "iam:ListAttachedRolePolicies", "iam:ListPolicyVersions", "iam:ListRolePolicies", "sts:GetCallerIdentity"]],
+  ["production-app-only-iam-source", "APP_ONLY_VERIFIER_LAUNCHER", ["iam:GetRole", "iam:GetRolePolicy", "iam:ListAttachedRolePolicies", "iam:ListRolePolicies", "sts:GetCallerIdentity"]],
+  ["production-app-only-images", "APP_ONLY_VERIFIER_LAUNCHER", ["ecr:DescribeImages", "ecr:DescribeRepositories", "sts:GetCallerIdentity"]],
+  ["production-app-only-preparation", "APP_ONLY_VERIFIER_LAUNCHER", ["ecs:DescribeTasks", "secretsmanager:DescribeSecret"]],
+  ["production-app-only-runtime", "APP_ONLY_VERIFIER_LAUNCHER", ["ec2:DescribeRouteTables", "ec2:DescribeSecurityGroups", "ec2:DescribeSubnets", "kms:DescribeKey", "kms:GetKeyPolicy", "rds:DescribeDBInstances", "rds:DescribeDBParameters", "sts:GetCallerIdentity"]],
+  ["production-app-only-provisioning", "APP_ONLY_PERMISSION_PROVISIONER", ["iam:CreateRole", "iam:GetPolicy", "iam:GetPolicyVersion", "iam:GetRole", "iam:GetRolePolicy", "iam:ListAttachedRolePolicies", "iam:ListRolePolicies", "iam:PutRolePolicy", "iam:SimulatePrincipalPolicy", "sts:GetCallerIdentity"]],
+  ["run-production-app-only-deployment", ["APP_ONLY_DEPLOYER", "APP_ONLY_PERMISSION_PROVISIONER"], ["sts:GetCallerIdentity"]],
+  ["run-production-app-only-verifier", ["APP_ONLY_VERIFIER_LAUNCHER", "APP_ONLY_PERMISSION_PROVISIONER"], ["sts:GetCallerIdentity"]],
+  ["production-app-only-adapters", null, ["ecr:DescribeImages", "ecs:DescribeServices", "ecs:DescribeTaskDefinition", "ecs:DescribeTasks", "ecs:ListTasks", "ecs:RegisterTaskDefinition", "ecs:RunTask", "ecs:UpdateService", "logs:GetLogEvents", "sts:GetCallerIdentity"]],
+].map(([name, identities, actions]) => [`scripts/aws/${name}.mjs`, { identities, actions }])));
+
+export function assertAppOnlyAwsCallClosure(scanned, graph) {
+  const results = [];
+  for (const [sourceFile, { identities, actions }] of Object.entries(APP_ONLY_CALLS)) {
+    const observed = scanned.filter((call) => call.sourceFile === sourceFile).map(({ action }) => action).sort();
+    if (!same(observed, [...actions].sort())) throw new Error(`Unclassified app-only call: ${sourceFile}`);
+    for (const action of actions) {
+      const callers = identities || (action === "ecs:RunTask" || action === "logs:GetLogEvents" ? ["APP_ONLY_VERIFIER_LAUNCHER"]
+        : action === "ecs:UpdateService" || action === "ecr:DescribeImages" ? ["APP_ONLY_DEPLOYER"]
+        : action === "ecs:RegisterTaskDefinition" ? ["APP_ONLY_DEPLOYER", "APP_ONLY_PERMISSION_PROVISIONER"]
+        : action === "sts:GetCallerIdentity" ? ["APP_ONLY_PERMISSION_PROVISIONER"]
+        : ["APP_ONLY_DEPLOYER", "APP_ONLY_PERMISSION_PROVISIONER", "APP_ONLY_VERIFIER_LAUNCHER"]);
+      for (const identity of Array.isArray(callers) ? callers : [callers]) {
+        const capabilities = graph.capabilities.filter((node) => node.phase.startsWith("app-only-") && node.identity === identity && node.action === action && node.executor === "aws-cli");
+        if (!capabilities.length || capabilities.some((node) => !node.policy?.sourceFile || !node.resources?.length))
+          throw new Error(`App-only call has no identity-scoped capability: ${sourceFile} ${identity} ${action}`);
+        for (const node of capabilities) results.push({ sourceFile, action, identity, capabilityId: node.id, resources: node.resources,
+          reachableMode: [node.phase], executionPrincipal: identity, sourcePolicyPresent: true, capabilityGraphPresent: true });
+      }
+    }
+  }
+  return results;
 }
 
 export function assertStageAProductionArtifactsCapabilityClosure(calls, graph) {

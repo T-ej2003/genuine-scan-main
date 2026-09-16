@@ -1,0 +1,68 @@
+name: Prepare live-compatible app-only deployment
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha: { description: Exact protected-main SHA, required: true, type: string }
+      compatibility_reference: { description: Exact compact successful verifier artifact identity JSON, required: true, type: string }
+permissions: { contents: read, actions: read }
+concurrency: { group: production-deploy, cancel-in-progress: false }
+jobs:
+  prepare:
+    if: github.ref == 'refs/heads/main' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    environment: production
+    permissions: { contents: read, actions: read, id-token: write }
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with: { ref: '${{ github.sha }}', fetch-depth: 0, persist-credentials: false }
+      - uses: actions/setup-node@v6
+        with: { node-version: 24, cache: npm }
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: 1.15.8, terraform_wrapper: false }
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Validate compact identifiers before obtaining credentials
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          COMPATIBILITY_REFERENCE: ${{ inputs.compatibility_reference }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { parseAppOnlyDeploymentPreparationArgs } from './scripts/aws/prepare-production-app-only-deployment.mjs';
+          parseAppOnlyDeploymentPreparationArgs(['--source-sha',process.env.SOURCE_SHA,'--compatibility-reference',process.env.COMPATIBILITY_REFERENCE]);
+          NODE
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: eu-west-2
+          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-app-only-verifier-launcher
+          unset-current-credentials: true
+      - name: Reauthenticate exact task evidence and collect fresh live compatibility
+        id: preparation
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          COMPATIBILITY_REFERENCE: ${{ inputs.compatibility_reference }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node scripts/aws/prepare-production-app-only-deployment.mjs --source-sha "$SOURCE_SHA" --compatibility-reference "$COMPATIBILITY_REFERENCE"
+      - name: Switch to isolated provisioner for read-only permission preparation
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: eu-west-2
+          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-app-only-permission-provisioner
+          unset-current-credentials: true
+      - name: Bind exact permission plan before separate mutation approval
+        id: release
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          INPUT: ${{ steps.preparation.outputs.path }}
+          INPUT_SHA256: ${{ steps.preparation.outputs.sha256 }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node scripts/aws/run-production-app-only-deployment.mjs --mode prepare --source-sha "$SOURCE_SHA" --input "$INPUT" --input-sha256 "$INPUT_SHA256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-app-only-preparation
+          path: ${{ steps.release.outputs.path }}
+          if-no-files-found: error
+          retention-days: 7

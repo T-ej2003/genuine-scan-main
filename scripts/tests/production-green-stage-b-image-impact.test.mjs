@@ -171,6 +171,17 @@ test("Stage A Terraform changes are classified as infrastructure-only without im
   assert.equal(report.newImagesRequired, false);
 });
 
+test("isolated app-only IAM source is infrastructure-only without waiving neighboring image inputs", () => {
+  const prefix = "infra/aws/terraform/production-app-only-permissions/";
+  for (const name of ["main.tf.json", ".terraform.lock.hcl"]) {
+    const file = prefix + name;
+    assert.deepEqual(classifyStageBImageReusePath(file), { file, category: "terraformOnly", imageAffecting: false });
+  }
+  for (const name of ["Dockerfile", "package-lock.json", "runtime.sh", "nested/main.tf.json"])
+    assert.equal(classifyStageBImageReusePath(prefix + name).imageAffecting, true);
+  assert.equal(classifyStageBImageReusePath(prefix.replace("permissions/", "permissions-extra/") + "main.tf.json").imageAffecting, true);
+});
+
 test("Terraform classification stays bounded and runtime image behavior remains fail-closed", () => {
   for (const file of [
     "infra/aws/terraform/production-green-stage-b/main.tf",

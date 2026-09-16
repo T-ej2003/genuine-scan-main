@@ -1,0 +1,56 @@
+name: Authorize exact app-only permission bootstrap
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha: { description: Exact protected-main SHA, required: true, type: string }
+      preparation_sha256: { description: Canonical six-resource preparation hash, required: true, type: string }
+      plan_sha256: { description: Exact saved Terraform plan SHA256, required: true, type: string }
+      plan_json_sha256: { description: Exact reviewed plan JSON SHA256, required: true, type: string }
+      prepared_at: { description: Canonical preparation timestamp, required: true, type: string }
+      caller_arn: { description: Authenticated bootstrap operator ARN, required: true, type: string }
+
+permissions: { contents: read, actions: read }
+concurrency: { group: production-deploy, cancel-in-progress: false }
+env:
+  SOURCE_SHA: ${{ inputs.source_sha }}
+  PREPARATION_SHA256: ${{ inputs.preparation_sha256 }}
+  PLAN_SHA256: ${{ inputs.plan_sha256 }}
+  PLAN_JSON_SHA256: ${{ inputs.plan_json_sha256 }}
+  PREPARED_AT: ${{ inputs.prepared_at }}
+  CALLER_ARN: ${{ inputs.caller_arn }}
+
+jobs:
+  review:
+    if: github.ref == 'refs/heads/main' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with: { ref: '${{ github.sha }}', fetch-depth: 0, persist-credentials: false }
+      - uses: actions/setup-node@v6
+        with: { node-version: 24, cache: npm }
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Present exact source-owned six-resource permission scope
+        env: { GITHUB_TOKEN: '${{ github.token }}' }
+        run: node scripts/aws/authorize-production-app-only-bootstrap.mjs --preview
+  authorize:
+    needs: review
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with: { ref: '${{ github.sha }}', fetch-depth: 0, persist-credentials: false }
+      - uses: actions/setup-node@v6
+        with: { node-version: 24, cache: npm }
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Bind actual human approval to exact plan hashes
+        id: authorization
+        env: { GITHUB_TOKEN: '${{ github.token }}' }
+        run: node scripts/aws/authorize-production-app-only-bootstrap.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-app-only-bootstrap-authorization
+          path: ${{ steps.authorization.outputs.path }}
+          if-no-files-found: error
+          retention-days: 7

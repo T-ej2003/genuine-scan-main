@@ -154,7 +154,7 @@ test("identity matrix assigns IAM simulation only to administrator", () => {
   assert(matrix.calls.some(({ identity, action }) => identity === "ADMINISTRATOR" && action === "iam:SimulatePrincipalPolicy"));
   assert(!matrix.calls.some(({ identity, action }) => identity === "RELEASE_DEPLOYER" && action === "iam:SimulatePrincipalPolicy"));
   assert(matrix.calls.some(({ identity, action }) => identity === "ROOT_OPERATOR" && action === "iam:SimulatePrincipalPolicy"));
-  assert.equal(matrix.phases.length, 52);
+  assert.equal(matrix.phases.length, 56);
 });
 
 test("bootstrap AssumeRole capabilities are bound to their exact MFA-gated inline-policy statements", () => {
@@ -201,7 +201,7 @@ test("runtime S3 Get and List actions are classified as read-only", () => {
 test("generated capability graph is exhaustive, deterministic, and identity-exact", () => {
   const first = buildStageBDeploymentCapabilityGraph(); const second = buildStageBDeploymentCapabilityGraph();
   assert.deepEqual(first, second);
-  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 52, capabilities: 576, uniqueActions: 148, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
+  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 56, capabilities: 652, uniqueActions: 149, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
   const stateReconciliation = first.capabilities.filter(({ phase }) => phase === "stage-b-exact-refresh-only-state-reconciliation");
   assert.deepEqual(stateReconciliation.filter(({ id }) => ["stage-b-state-reconciliation-identify", "stage-b-state-reconciliation-direct-read-state"].includes(id)).map(({ id, executor, classification, mutation }) => [id, executor, classification, mutation]), [["stage-b-state-reconciliation-direct-read-state", "aws-cli", "RELEASE_DIRECT_READ", false], ["stage-b-state-reconciliation-identify", "aws-cli", "RELEASE_DIRECT_READ", false]]);
   assert.equal(stateReconciliation.some(({ id, executor, classification }) => id === "stage-b-state-reconciliation-read-state" && executor === "terraform" && classification === "TERRAFORM_BACKEND_READ"), true);

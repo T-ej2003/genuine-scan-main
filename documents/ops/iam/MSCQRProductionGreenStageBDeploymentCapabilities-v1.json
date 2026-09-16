@@ -6,261 +6,281 @@
   "phases": [
     {
       "order": 1,
+      "id": "app-only-permission-bootstrap",
+      "sourceFile": "scripts/aws/run-production-app-only-bootstrap.mjs"
+    },
+    {
+      "order": 2,
+      "id": "app-only-live-compatibility",
+      "sourceFile": "scripts/aws/run-production-app-only-verifier.mjs"
+    },
+    {
+      "order": 3,
+      "id": "app-only-permission-provisioning",
+      "sourceFile": "scripts/aws/production-app-only-provisioning.mjs"
+    },
+    {
+      "order": 4,
+      "id": "app-only-backend-activation",
+      "sourceFile": "scripts/aws/production-app-only-activation.mjs"
+    },
+    {
+      "order": 5,
       "id": "protected-main-checkout",
       "sourceFile": "scripts/aws/stage-b-release-gate.mjs"
     },
     {
-      "order": 2,
+      "order": 6,
       "id": "dependency-installation",
       "sourceFile": "package.json"
     },
     {
-      "order": 3,
+      "order": 7,
       "id": "rls-package-verification",
       "sourceFile": "scripts/rls/verify-full-rls-package.mjs"
     },
     {
-      "order": 4,
+      "order": 8,
       "id": "image-impact-classification",
       "sourceFile": "scripts/aws/validate-stage-b-image-reuse.mjs"
     },
     {
-      "order": 5,
+      "order": 9,
       "id": "image-workflow-dispatch",
       "sourceFile": "scripts/aws/dispatch-production-green-stage-b-images.mjs"
     },
     {
-      "order": 6,
+      "order": 10,
       "id": "image-artifact-verification",
       "sourceFile": ".github/workflows/production-green-stage-b-image-build.yml"
     },
     {
-      "order": 7,
+      "order": 11,
       "id": "schema-v4-image-evidence",
       "sourceFile": "scripts/aws/production-green-stage-b-image-evidence.mjs"
     },
     {
-      "order": 8,
+      "order": 12,
       "id": "administrator-release-oidc-trust-convergence",
       "sourceFile": "scripts/aws/converge-production-release-oidc-trust.mjs"
     },
     {
-      "order": 9,
+      "order": 13,
       "id": "administrator-normal-backend-activation-convergence",
       "sourceFile": "scripts/aws/production-normal-backend-activation.mjs"
     },
     {
-      "order": 10,
+      "order": 14,
       "id": "administrator-iam-simulation",
       "sourceFile": "scripts/aws/validate-production-green-stage-b-permissions.mjs"
     },
     {
-      "order": 11,
+      "order": 15,
       "id": "administrator-kms-signing",
       "sourceFile": "scripts/aws/validate-production-green-stage-b-permissions.mjs"
     },
     {
-      "order": 12,
+      "order": 16,
       "id": "bootstrap-mfa-session",
       "sourceFile": "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_INFRASTRUCTURE_RUNBOOK.md"
     },
     {
-      "order": 13,
+      "order": 17,
       "id": "verifier-role-assumption",
       "sourceFile": "scripts/aws/establish-production-ecs-exec-verifier-session.mjs"
     },
     {
-      "order": 14,
+      "order": 18,
       "id": "release-role-assumption",
       "sourceFile": "documents/security/rls-program/PRODUCTION_GREEN_STAGE_B_INFRASTRUCTURE_RUNBOOK.md"
     },
     {
-      "order": 15,
+      "order": 19,
       "id": "release-direct-read-preflight",
       "sourceFile": "scripts/aws/run-production-green-stage-b-preflight.mjs"
     },
     {
-      "order": 16,
+      "order": 20,
       "id": "release-preflight-checker-trust-attestation",
       "sourceFile": "scripts/aws/production-release-preflight-checker-attestation.mjs"
     },
     {
-      "order": 17,
+      "order": 21,
       "id": "backend-config-generation",
       "sourceFile": "scripts/aws/generate-production-green-stage-b-backend-config.mjs"
     },
     {
-      "order": 18,
+      "order": 22,
       "id": "terraform-initialization",
       "sourceFile": "scripts/aws/run-production-green-stage-b-preflight.mjs"
     },
     {
-      "order": 19,
+      "order": 23,
       "id": "backend-metadata-validation",
       "sourceFile": "scripts/aws/stage-b-terraform-backend-contract.mjs"
     },
     {
-      "order": 20,
+      "order": 24,
       "id": "workspace-validation",
       "sourceFile": "scripts/aws/stage-b-terraform-workspace.mjs"
     },
     {
-      "order": 21,
+      "order": 25,
       "id": "canonical-backend-recovery",
       "sourceFile": "scripts/aws/recover-stage-b-backend-task-definition.mjs"
     },
     {
-      "order": 22,
+      "order": 26,
       "id": "backend-health-recovery",
       "sourceFile": "scripts/aws/recover-production-backend-health.mjs"
     },
     {
-      "order": 23,
+      "order": 27,
       "id": "runtime-consumability-evidence",
       "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs"
     },
     {
-      "order": 24,
+      "order": 28,
       "id": "runtime-consumability-convergence",
       "sourceFile": "scripts/aws/converge-production-ecs-runtime-policy.mjs"
     },
     {
-      "order": 25,
+      "order": 29,
       "id": "existing-revision-forward-recovery",
       "sourceFile": "scripts/aws/forward-recover-stage-b-existing-revision.mjs"
     },
     {
-      "order": 26,
+      "order": 30,
       "id": "stage-b-state-pull",
       "sourceFile": "scripts/aws/run-production-green-stage-b-preflight.mjs"
     },
     {
-      "order": 27,
+      "order": 31,
       "id": "stage-a-state-read",
       "sourceFile": "scripts/aws/run-production-green-stage-b-preflight.mjs"
     },
     {
-      "order": 28,
+      "order": 32,
       "id": "stage-a-handoff-generation",
       "sourceFile": "scripts/aws/generate-production-green-stage-a-prerequisites.mjs"
     },
     {
-      "order": 29,
+      "order": 33,
       "id": "root-drop-evidence-signing",
       "sourceFile": "scripts/aws/produce-production-root-drop-evidence.mjs"
     },
     {
-      "order": 30,
+      "order": 34,
       "id": "tfvars-generation",
       "sourceFile": "scripts/aws/generate-production-green-stage-b-tfvars.mjs"
     },
     {
-      "order": 31,
+      "order": 35,
       "id": "refresh-only",
       "sourceFile": "scripts/refresh-production-green-stage-b.mjs"
     },
     {
-      "order": 32,
+      "order": 36,
       "id": "saved-plan-generation",
       "sourceFile": "scripts/plan-production-green-stage-b.mjs"
     },
     {
-      "order": 33,
+      "order": 37,
       "id": "plan-json-canonicalization",
       "sourceFile": "scripts/plan-production-green-stage-b.mjs"
     },
     {
-      "order": 34,
+      "order": 38,
       "id": "reference-audit",
       "sourceFile": "scripts/aws/generate-production-green-stage-b-reference-audit.mjs"
     },
     {
-      "order": 35,
+      "order": 39,
       "id": "plan-bound-permission-report",
       "sourceFile": "scripts/aws/validate-production-green-stage-b-permissions.mjs"
     },
     {
-      "order": 36,
+      "order": 40,
       "id": "production-closure",
       "sourceFile": "scripts/aws/validate-stage-b-deployment-closure.mjs"
     },
     {
-      "order": 37,
+      "order": 41,
       "id": "validator",
       "sourceFile": "scripts/plan-production-green-stage-b.mjs"
     },
     {
-      "order": 38,
+      "order": 42,
       "id": "wrapper-verify-only",
       "sourceFile": "scripts/apply-production-green-stage-b.mjs"
     },
     {
-      "order": 39,
+      "order": 43,
       "id": "wrapper-apply",
       "sourceFile": "scripts/apply-production-green-stage-b.mjs"
     },
     {
-      "order": 40,
+      "order": 44,
       "id": "post-apply-verification",
       "sourceFile": "scripts/aws/verify-production-green-stage-b-ecs-observations.mjs"
     },
     {
-      "order": 41,
+      "order": 45,
       "id": "runtime-activation-boundary",
       "sourceFile": "scripts/aws/create-production-green-stage-b-approval.mjs"
     },
     {
-      "order": 42,
+      "order": 46,
       "id": "normal-backend-activation",
       "sourceFile": "scripts/aws/production-normal-backend-activation.mjs"
     },
     {
-      "order": 43,
+      "order": 47,
       "id": "initial-activation-lifecycle",
       "sourceFile": "scripts/aws/manage-production-initial-activation-lifecycle.mjs"
     },
     {
-      "order": 44,
+      "order": 48,
       "id": "dual-slot-rebaseline-durable-evidence",
       "sourceFile": "scripts/aws/persist-production-dual-slot-rebaseline-durable-evidence.mjs"
     },
     {
-      "order": 45,
+      "order": 49,
       "id": "stage-a-production-artifacts-policy-recovery",
       "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs"
     },
     {
-      "order": 46,
+      "order": 50,
       "id": "stage-a-production-artifacts-state-reconciliation",
       "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs"
     },
     {
-      "order": 47,
+      "order": 51,
       "id": "initial-activation-lifecycle-policy-reconciliation",
       "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs"
     },
     {
-      "order": 48,
+      "order": 52,
       "id": "provider-readonly-policy-reconciliation",
       "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs"
     },
     {
-      "order": 49,
+      "order": 53,
       "id": "bootstrap-operator-policy-reconciliation",
       "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs"
     },
     {
-      "order": 50,
+      "order": 54,
       "id": "mixed-dual-slot-recovery-iam-preflight",
       "sourceFile": "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs"
     },
     {
-      "order": 51,
+      "order": 55,
       "id": "mixed-dual-slot-recovery-execution",
       "sourceFile": "scripts/aws/recover-production-mixed-dual-slot-topology.mjs"
     },
     {
-      "order": 52,
+      "order": 56,
       "id": "stage-b-exact-refresh-only-state-reconciliation",
       "sourceFile": "scripts/aws/reconcile-production-green-stage-b-state.mjs"
     }
@@ -276,7 +296,10 @@
     "SERVICE_RUNTIME",
     "INITIAL_ACTIVATION_RECONCILER",
     "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER",
-    "MIXED_RECOVERY_EXECUTOR"
+    "MIXED_RECOVERY_EXECUTOR",
+    "APP_ONLY_DEPLOYER",
+    "APP_ONLY_VERIFIER_LAUNCHER",
+    "APP_ONLY_PERMISSION_PROVISIONER"
   ],
   "capabilities": [
     {
@@ -881,6 +904,2532 @@
       },
       "required": true,
       "mutation": true
+    },
+    {
+      "id": "app-only-backend-activation-activatecandidatefamilyonexactservice-ecs-updateservice",
+      "phase": "app-only-backend-activation",
+      "identity": "APP_ONLY_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-app-only-adapters.mjs",
+      "sourceFunction": "ActivateCandidateFamilyOnExactService",
+      "action": "ecs:UpdateService",
+      "resources": [
+        "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {
+          "StringEquals": {
+            "aws:RequestedRegion": "eu-west-2"
+          },
+          "ArnEquals": {
+            "ecs:cluster": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"
+          },
+          "ArnLike": {
+            "ecs:task-definition": "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:*"
+          }
+        },
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_MUTATION",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ActivateCandidateFamilyOnExactService",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "4b40922e4fd042b30f9caa0de8cef9d2c8ff1438e8ca127f5bc8e500f2a145a3"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "app-only-backend-activation-listproductiontasks-ecs-listtasks",
+      "phase": "app-only-backend-activation",
+      "identity": "APP_ONLY_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-app-only-adapters.mjs",
+      "sourceFunction": "ListProductionTasks",
+      "action": "ecs:ListTasks",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {
+          "StringEquals": {
+            "aws:RequestedRegion": "eu-west-2"
+          },
+          "ArnEquals": {
+            "ecs:cluster": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"
+          }
+        },
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ListProductionTasks",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "4b40922e4fd042b30f9caa0de8cef9d2c8ff1438e8ca127f5bc8e500f2a145a3"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-backend-activation-passexacttaskroles-iam-passrole",
+      "phase": "app-only-backend-activation",
+      "identity": "APP_ONLY_DEPLOYER",
+      "executor": "aws-service-authorization",
+      "sourceFile": "scripts/aws/production-app-only-adapters.mjs",
+      "sourceFunction": "PassExactTaskRoles",
+      "action": "iam:PassRole",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {
+          "StringEquals": {
+            "iam:PassedToService": "ecs-tasks.amazonaws.com"
+          }
+        },
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "PassExactTaskRoles",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "4b40922e4fd042b30f9caa0de8cef9d2c8ff1438e8ca127f5bc8e500f2a145a3"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-backend-activation-preservetagsatregistration-ecs-tagresource",
+      "phase": "app-only-backend-activation",
+      "identity": "APP_ONLY_DEPLOYER",
+      "executor": "aws-service-authorization",
+      "sourceFile": "scripts/aws/production-app-only-adapters.mjs",
+      "sourceFunction": "PreserveTagsAtRegistration",
+      "action": "ecs:TagResource",
+      "resources": [
+        "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {
+          "StringEquals": {
+            "aws:RequestedRegion": "eu-west-2",
+            "ecs:CreateAction": "RegisterTaskDefinition"
+          }
+        },
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_MUTATION",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "PreserveTagsAtRegistration",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "4b40922e4fd042b30f9caa0de8cef9d2c8ff1438e8ca127f5bc8e500f2a145a3"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "app-only-backend-activation-readcalleridentity-sts-getcalleridentity",
+      "phase": "app-only-backend-activation",
+      "identity": "APP_ONLY_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-app-only-adapters.mjs",
+      "sourceFunction": "ReadCallerIdentity",
+      "action": "sts:GetCallerIdentity",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {
+          "StringEquals": {
+            "aws:RequestedRegion": "eu-west-2"
+          }
+        },
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadCallerIdentity",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "4b40922e4fd042b30f9caa0de8cef9d2c8ff1438e8ca127f5bc8e500f2a145a3"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-backend-activation-readexactbackendimageviability-ecr-describeimages",
+      "phase": "app-only-backend-activation",
+      "identity": "APP_ONLY_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-app-only-adapters.mjs",
+      "sourceFunction": "ReadExactBackendImageViability",
+      "action": "ecr:DescribeImages",
+      "resources": [
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {
+          "StringEquals": {
+            "aws:RequestedRegion": "eu-west-2"
+          }
+        },
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadExactBackendImageViability",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "4b40922e4fd042b30f9caa0de8cef9d2c8ff1438e8ca127f5bc8e500f2a145a3"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-backend-activation-readexactservice-ecs-describeservices",
+      "phase": "app-only-backend-activation",
+      "identity": "APP_ONLY_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-app-only-adapters.mjs",
+      "sourceFunction": "ReadExactService",
+      "action": "ecs:DescribeServices",
+      "resources": [
+        "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {
+          "StringEquals": {
+            "aws:RequestedRegion": "eu-west-2"
+          }
+        },
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadExactService",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "4b40922e4fd042b30f9caa0de8cef9d2c8ff1438e8ca127f5bc8e500f2a145a3"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-backend-activation-readproductiontasks-ecs-describetasks",
+      "phase": "app-only-backend-activation",
+      "identity": "APP_ONLY_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-app-only-adapters.mjs",
+      "sourceFunction": "ReadProductionTasks",
+      "action": "ecs:DescribeTasks",
+      "resources": [
+        "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {
+          "StringEquals": {
+            "aws:RequestedRegion": "eu-west-2"
+          },
+          "ArnEquals": {
+            "ecs:cluster": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"
+          }
+        },
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadProductionTasks",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "4b40922e4fd042b30f9caa0de8cef9d2c8ff1438e8ca127f5bc8e500f2a145a3"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-backend-activation-readregionaltaskdefinitions-ecs-describetaskdefinition",
+      "phase": "app-only-backend-activation",
+      "identity": "APP_ONLY_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-app-only-adapters.mjs",
+      "sourceFunction": "ReadRegionalTaskDefinitions",
+      "action": "ecs:DescribeTaskDefinition",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {
+          "StringEquals": {
+            "aws:RequestedRegion": "eu-west-2"
+          }
+        },
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadRegionalTaskDefinitions",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "4b40922e4fd042b30f9caa0de8cef9d2c8ff1438e8ca127f5bc8e500f2a145a3"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-backend-activation-registerimageonlycandidate-ecs-registertaskdefinition",
+      "phase": "app-only-backend-activation",
+      "identity": "APP_ONLY_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-app-only-adapters.mjs",
+      "sourceFunction": "RegisterImageOnlyCandidate",
+      "action": "ecs:RegisterTaskDefinition",
+      "resources": [
+        "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {
+          "StringEquals": {
+            "aws:RequestedRegion": "eu-west-2"
+          }
+        },
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_MUTATION",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "RegisterImageOnlyCandidate",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "4b40922e4fd042b30f9caa0de8cef9d2c8ff1438e8ca127f5bc8e500f2a145a3"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "app-only-bootstrap-aws-cli-iam-getpolicy",
+      "phase": "app-only-permission-bootstrap",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-app-only-bootstrap.mjs",
+      "sourceFunction": "governed-six-resource-bootstrap",
+      "action": "iam:GetPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionAppOnlyDeployerBoundary",
+        "arn:aws:iam::368992683803:policy/MSCQRProductionAppOnlyVerifierBoundary"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "resourcesCreated": 6,
+        "terraformBackend": "private-local-only"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-app-only-permissions/main.tf.json",
+        "sid": "exact-saved-plan-and-protected-approval",
+        "livePolicyArn": null,
+        "expectedVersion": "authenticated-saved-plan",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-bootstrap-aws-cli-iam-getpolicyversion",
+      "phase": "app-only-permission-bootstrap",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-app-only-bootstrap.mjs",
+      "sourceFunction": "governed-six-resource-bootstrap",
+      "action": "iam:GetPolicyVersion",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionAppOnlyDeployerBoundary",
+        "arn:aws:iam::368992683803:policy/MSCQRProductionAppOnlyVerifierBoundary"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "resourcesCreated": 6,
+        "terraformBackend": "private-local-only"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-app-only-permissions/main.tf.json",
+        "sid": "exact-saved-plan-and-protected-approval",
+        "livePolicyArn": null,
+        "expectedVersion": "authenticated-saved-plan",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-bootstrap-aws-cli-iam-getrole",
+      "phase": "app-only-permission-bootstrap",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-app-only-bootstrap.mjs",
+      "sourceFunction": "governed-six-resource-bootstrap",
+      "action": "iam:GetRole",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-app-only-permission-provisioner",
+        "arn:aws:iam::368992683803:role/mscqr-production-app-only-verifier-launcher"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "resourcesCreated": 6,
+        "terraformBackend": "private-local-only"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-app-only-permissions/main.tf.json",
+        "sid": "exact-saved-plan-and-protected-approval",
+        "livePolicyArn": null,
+        "expectedVersion": "authenticated-saved-plan",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-bootstrap-aws-cli-iam-getrolepolicy",
+      "phase": "app-only-permission-bootstrap",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-app-only-bootstrap.mjs",
+      "sourceFunction": "governed-six-resource-bootstrap",
+      "action": "iam:GetRolePolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-app-only-permission-provisioner",
+        "arn:aws:iam::368992683803:role/mscqr-production-app-only-verifier-launcher"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "resourcesCreated": 6,
+        "terraformBackend": "private-local-only"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-app-only-permissions/main.tf.json",
+        "sid": "exact-saved-plan-and-protected-approval",
+        "livePolicyArn": null,
+        "expectedVersion": "authenticated-saved-plan",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-bootstrap-aws-cli-iam-listattachedrolepolicies",
+      "phase": "app-only-permission-bootstrap",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-app-only-bootstrap.mjs",
+      "sourceFunction": "governed-six-resource-bootstrap",
+      "action": "iam:ListAttachedRolePolicies",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-app-only-permission-provisioner",
+        "arn:aws:iam::368992683803:role/mscqr-production-app-only-verifier-launcher"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "resourcesCreated": 6,
+        "terraformBackend": "private-local-only"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-app-only-permissions/main.tf.json",
+        "sid": "exact-saved-plan-and-protected-approval",
+        "livePolicyArn": null,
+        "expectedVersion": "authenticated-saved-plan",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-bootstrap-aws-cli-iam-listpolicyversions",
+      "phase": "app-only-permission-bootstrap",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-app-only-bootstrap.mjs",
+      "sourceFunction": "governed-six-resource-bootstrap",
+      "action": "iam:ListPolicyVersions",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionAppOnlyDeployerBoundary",
+        "arn:aws:iam::368992683803:policy/MSCQRProductionAppOnlyVerifierBoundary"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "resourcesCreated": 6,
+        "terraformBackend": "private-local-only"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-app-only-permissions/main.tf.json",
+        "sid": "exact-saved-plan-and-protected-approval",
+        "livePolicyArn": null,
+        "expectedVersion": "authenticated-saved-plan",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-bootstrap-aws-cli-iam-listrolepolicies",
+      "phase": "app-only-permission-bootstrap",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-app-only-bootstrap.mjs",
+      "sourceFunction": "governed-six-resource-bootstrap",
+      "action": "iam:ListRolePolicies",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-app-only-permission-provisioner",
+        "arn:aws:iam::368992683803:role/mscqr-production-app-only-verifier-launcher"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "resourcesCreated": 6,
+        "terraformBackend": "private-local-only"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-app-only-permissions/main.tf.json",
+        "sid": "exact-saved-plan-and-protected-approval",
+        "livePolicyArn": null,
+        "expectedVersion": "authenticated-saved-plan",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-bootstrap-aws-cli-sts-getcalleridentity",
+      "phase": "app-only-permission-bootstrap",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-app-only-bootstrap.mjs",
+      "sourceFunction": "governed-six-resource-bootstrap",
+      "action": "sts:GetCallerIdentity",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "resourcesCreated": 6,
+        "terraformBackend": "private-local-only"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-app-only-permissions/main.tf.json",
+        "sid": "exact-saved-plan-and-protected-approval",
+        "livePolicyArn": null,
+        "expectedVersion": "authenticated-saved-plan",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-bootstrap-terraform-iam-createpolicy",
+      "phase": "app-only-permission-bootstrap",
+      "identity": "ADMINISTRATOR",
+      "executor": "terraform",
+      "sourceFile": "scripts/aws/run-production-app-only-bootstrap.mjs",
+      "sourceFunction": "governed-six-resource-bootstrap",
+      "action": "iam:CreatePolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionAppOnlyDeployerBoundary",
+        "arn:aws:iam::368992683803:policy/MSCQRProductionAppOnlyVerifierBoundary"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "resourcesCreated": 6,
+        "terraformBackend": "private-local-only"
+      },
+      "classification": "TERRAFORM_APPLY_MUTATION",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-app-only-permissions/main.tf.json",
+        "sid": "exact-saved-plan-and-protected-approval",
+        "livePolicyArn": null,
+        "expectedVersion": "authenticated-saved-plan",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "app-only-bootstrap-terraform-iam-createrole",
+      "phase": "app-only-permission-bootstrap",
+      "identity": "ADMINISTRATOR",
+      "executor": "terraform",
+      "sourceFile": "scripts/aws/run-production-app-only-bootstrap.mjs",
+      "sourceFunction": "governed-six-resource-bootstrap",
+      "action": "iam:CreateRole",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-app-only-permission-provisioner",
+        "arn:aws:iam::368992683803:role/mscqr-production-app-only-verifier-launcher"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "resourcesCreated": 6,
+        "terraformBackend": "private-local-only"
+      },
+      "classification": "TERRAFORM_APPLY_MUTATION",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-app-only-permissions/main.tf.json",
+        "sid": "exact-saved-plan-and-protected-approval",
+        "livePolicyArn": null,
+        "expectedVersion": "authenticated-saved-plan",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "app-only-bootstrap-terraform-iam-getpolicy",
+      "phase": "app-only-permission-bootstrap",
+      "identity": "ADMINISTRATOR",
+      "executor": "terraform",
+      "sourceFile": "scripts/aws/run-production-app-only-bootstrap.mjs",
+      "sourceFunction": "governed-six-resource-bootstrap",
+      "action": "iam:GetPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionAppOnlyDeployerBoundary",
+        "arn:aws:iam::368992683803:policy/MSCQRProductionAppOnlyVerifierBoundary"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "resourcesCreated": 6,
+        "terraformBackend": "private-local-only"
+      },
+      "classification": "TERRAFORM_PROVIDER_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-app-only-permissions/main.tf.json",
+        "sid": "exact-saved-plan-and-protected-approval",
+        "livePolicyArn": null,
+        "expectedVersion": "authenticated-saved-plan",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-bootstrap-terraform-iam-getpolicyversion",
+      "phase": "app-only-permission-bootstrap",
+      "identity": "ADMINISTRATOR",
+      "executor": "terraform",
+      "sourceFile": "scripts/aws/run-production-app-only-bootstrap.mjs",
+      "sourceFunction": "governed-six-resource-bootstrap",
+      "action": "iam:GetPolicyVersion",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionAppOnlyDeployerBoundary",
+        "arn:aws:iam::368992683803:policy/MSCQRProductionAppOnlyVerifierBoundary"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "resourcesCreated": 6,
+        "terraformBackend": "private-local-only"
+      },
+      "classification": "TERRAFORM_PROVIDER_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-app-only-permissions/main.tf.json",
+        "sid": "exact-saved-plan-and-protected-approval",
+        "livePolicyArn": null,
+        "expectedVersion": "authenticated-saved-plan",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-bootstrap-terraform-iam-getrole",
+      "phase": "app-only-permission-bootstrap",
+      "identity": "ADMINISTRATOR",
+      "executor": "terraform",
+      "sourceFile": "scripts/aws/run-production-app-only-bootstrap.mjs",
+      "sourceFunction": "governed-six-resource-bootstrap",
+      "action": "iam:GetRole",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-app-only-permission-provisioner",
+        "arn:aws:iam::368992683803:role/mscqr-production-app-only-verifier-launcher"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "resourcesCreated": 6,
+        "terraformBackend": "private-local-only"
+      },
+      "classification": "TERRAFORM_PROVIDER_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-app-only-permissions/main.tf.json",
+        "sid": "exact-saved-plan-and-protected-approval",
+        "livePolicyArn": null,
+        "expectedVersion": "authenticated-saved-plan",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-bootstrap-terraform-iam-getrolepolicy",
+      "phase": "app-only-permission-bootstrap",
+      "identity": "ADMINISTRATOR",
+      "executor": "terraform",
+      "sourceFile": "scripts/aws/run-production-app-only-bootstrap.mjs",
+      "sourceFunction": "governed-six-resource-bootstrap",
+      "action": "iam:GetRolePolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-app-only-permission-provisioner",
+        "arn:aws:iam::368992683803:role/mscqr-production-app-only-verifier-launcher"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "resourcesCreated": 6,
+        "terraformBackend": "private-local-only"
+      },
+      "classification": "TERRAFORM_PROVIDER_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-app-only-permissions/main.tf.json",
+        "sid": "exact-saved-plan-and-protected-approval",
+        "livePolicyArn": null,
+        "expectedVersion": "authenticated-saved-plan",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-bootstrap-terraform-iam-listattachedrolepolicies",
+      "phase": "app-only-permission-bootstrap",
+      "identity": "ADMINISTRATOR",
+      "executor": "terraform",
+      "sourceFile": "scripts/aws/run-production-app-only-bootstrap.mjs",
+      "sourceFunction": "governed-six-resource-bootstrap",
+      "action": "iam:ListAttachedRolePolicies",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-app-only-permission-provisioner",
+        "arn:aws:iam::368992683803:role/mscqr-production-app-only-verifier-launcher"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "resourcesCreated": 6,
+        "terraformBackend": "private-local-only"
+      },
+      "classification": "TERRAFORM_PROVIDER_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-app-only-permissions/main.tf.json",
+        "sid": "exact-saved-plan-and-protected-approval",
+        "livePolicyArn": null,
+        "expectedVersion": "authenticated-saved-plan",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-bootstrap-terraform-iam-listpolicyversions",
+      "phase": "app-only-permission-bootstrap",
+      "identity": "ADMINISTRATOR",
+      "executor": "terraform",
+      "sourceFile": "scripts/aws/run-production-app-only-bootstrap.mjs",
+      "sourceFunction": "governed-six-resource-bootstrap",
+      "action": "iam:ListPolicyVersions",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionAppOnlyDeployerBoundary",
+        "arn:aws:iam::368992683803:policy/MSCQRProductionAppOnlyVerifierBoundary"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "resourcesCreated": 6,
+        "terraformBackend": "private-local-only"
+      },
+      "classification": "TERRAFORM_PROVIDER_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-app-only-permissions/main.tf.json",
+        "sid": "exact-saved-plan-and-protected-approval",
+        "livePolicyArn": null,
+        "expectedVersion": "authenticated-saved-plan",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-bootstrap-terraform-iam-listrolepolicies",
+      "phase": "app-only-permission-bootstrap",
+      "identity": "ADMINISTRATOR",
+      "executor": "terraform",
+      "sourceFile": "scripts/aws/run-production-app-only-bootstrap.mjs",
+      "sourceFunction": "governed-six-resource-bootstrap",
+      "action": "iam:ListRolePolicies",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-app-only-permission-provisioner",
+        "arn:aws:iam::368992683803:role/mscqr-production-app-only-verifier-launcher"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "resourcesCreated": 6,
+        "terraformBackend": "private-local-only"
+      },
+      "classification": "TERRAFORM_PROVIDER_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-app-only-permissions/main.tf.json",
+        "sid": "exact-saved-plan-and-protected-approval",
+        "livePolicyArn": null,
+        "expectedVersion": "authenticated-saved-plan",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-bootstrap-terraform-iam-putrolepolicy",
+      "phase": "app-only-permission-bootstrap",
+      "identity": "ADMINISTRATOR",
+      "executor": "terraform",
+      "sourceFile": "scripts/aws/run-production-app-only-bootstrap.mjs",
+      "sourceFunction": "governed-six-resource-bootstrap",
+      "action": "iam:PutRolePolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-app-only-permission-provisioner",
+        "arn:aws:iam::368992683803:role/mscqr-production-app-only-verifier-launcher"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "resourcesCreated": 6,
+        "terraformBackend": "private-local-only"
+      },
+      "classification": "TERRAFORM_APPLY_MUTATION",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-app-only-permissions/main.tf.json",
+        "sid": "exact-saved-plan-and-protected-approval",
+        "livePolicyArn": null,
+        "expectedVersion": "authenticated-saved-plan",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "app-only-bootstrap-terraform-sts-getcalleridentity",
+      "phase": "app-only-permission-bootstrap",
+      "identity": "ADMINISTRATOR",
+      "executor": "terraform",
+      "sourceFile": "scripts/aws/run-production-app-only-bootstrap.mjs",
+      "sourceFunction": "governed-six-resource-bootstrap",
+      "action": "sts:GetCallerIdentity",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "resourcesCreated": 6,
+        "terraformBackend": "private-local-only"
+      },
+      "classification": "TERRAFORM_PROVIDER_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-app-only-permissions/main.tf.json",
+        "sid": "exact-saved-plan-and-protected-approval",
+        "livePolicyArn": null,
+        "expectedVersion": "authenticated-saved-plan",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-live-compatibility-checkexactjsonselectors-secretsmanager-getsecretvalue",
+      "phase": "app-only-live-compatibility",
+      "identity": "APP_ONLY_VERIFIER_LAUNCHER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-app-only-verifier.mjs",
+      "sourceFunction": "CheckExactJsonSelectors",
+      "action": "secretsmanager:GetSecretValue",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/auth-mfa-encryption-key-9IgHgy",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/jwt-wBQNqk",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_private_key-BcQFPO",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_public_key-v7Xeex",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/redis-i6MoFs"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {},
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "CheckExactJsonSelectors",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-live-compatibility-listproductiontasks-ecs-listtasks",
+      "phase": "app-only-live-compatibility",
+      "identity": "APP_ONLY_VERIFIER_LAUNCHER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-app-only-verifier.mjs",
+      "sourceFunction": "ListProductionTasks",
+      "action": "ecs:ListTasks",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {
+          "StringEquals": {
+            "aws:RequestedRegion": "eu-west-2"
+          },
+          "ArnEquals": {
+            "ecs:cluster": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"
+          }
+        },
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ListProductionTasks",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-live-compatibility-passexacttaskroles-iam-passrole",
+      "phase": "app-only-live-compatibility",
+      "identity": "APP_ONLY_VERIFIER_LAUNCHER",
+      "executor": "aws-service-authorization",
+      "sourceFile": "scripts/aws/run-production-app-only-verifier.mjs",
+      "sourceFunction": "PassExactTaskRoles",
+      "action": "iam:PassRole",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-task",
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-execution"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {
+          "StringEquals": {
+            "iam:PassedToService": "ecs-tasks.amazonaws.com"
+          }
+        },
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "PassExactTaskRoles",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-live-compatibility-readcalleridentity-sts-getcalleridentity",
+      "phase": "app-only-live-compatibility",
+      "identity": "APP_ONLY_VERIFIER_LAUNCHER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-app-only-verifier.mjs",
+      "sourceFunction": "ReadCallerIdentity",
+      "action": "sts:GetCallerIdentity",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {
+          "StringEquals": {
+            "aws:RequestedRegion": "eu-west-2"
+          }
+        },
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadCallerIdentity",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-live-compatibility-readcanarysecretidentity-secretsmanager-describesecret",
+      "phase": "app-only-live-compatibility",
+      "identity": "APP_ONLY_VERIFIER_LAUNCHER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-app-only-verifier.mjs",
+      "sourceFunction": "ReadCanarySecretIdentity",
+      "action": "secretsmanager:DescribeSecret",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase4/read-only-canary-database-url-??????"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {},
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadCanarySecretIdentity",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-live-compatibility-readdatabaseconfiguration-rds-describedbinstances",
+      "phase": "app-only-live-compatibility",
+      "identity": "APP_ONLY_VERIFIER_LAUNCHER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-app-only-verifier.mjs",
+      "sourceFunction": "ReadDatabaseConfiguration",
+      "action": "rds:DescribeDBInstances",
+      "resources": [
+        "arn:aws:rds:eu-west-2:368992683803:db:mscqr-production-rls-green-phase2"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {},
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadDatabaseConfiguration",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-live-compatibility-readdatabasetls-rds-describedbparameters",
+      "phase": "app-only-live-compatibility",
+      "identity": "APP_ONLY_VERIFIER_LAUNCHER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-app-only-verifier.mjs",
+      "sourceFunction": "ReadDatabaseTls",
+      "action": "rds:DescribeDBParameters",
+      "resources": [
+        "arn:aws:rds:eu-west-2:368992683803:pg:mscqr-production-rls-green-pg18"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {},
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadDatabaseTls",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-live-compatibility-readexactservice-ecs-describeservices",
+      "phase": "app-only-live-compatibility",
+      "identity": "APP_ONLY_VERIFIER_LAUNCHER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-app-only-verifier.mjs",
+      "sourceFunction": "ReadExactService",
+      "action": "ecs:DescribeServices",
+      "resources": [
+        "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {
+          "StringEquals": {
+            "aws:RequestedRegion": "eu-west-2"
+          }
+        },
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadExactService",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-live-compatibility-readproductiontasks-ecs-describetasks",
+      "phase": "app-only-live-compatibility",
+      "identity": "APP_ONLY_VERIFIER_LAUNCHER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-app-only-verifier.mjs",
+      "sourceFunction": "ReadProductionTasks",
+      "action": "ecs:DescribeTasks",
+      "resources": [
+        "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {
+          "StringEquals": {
+            "aws:RequestedRegion": "eu-west-2"
+          },
+          "ArnEquals": {
+            "ecs:cluster": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"
+          }
+        },
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadProductionTasks",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-live-compatibility-readpublishedimages-ecr-describeimages",
+      "phase": "app-only-live-compatibility",
+      "identity": "APP_ONLY_VERIFIER_LAUNCHER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-app-only-verifier.mjs",
+      "sourceFunction": "ReadPublishedImages",
+      "action": "ecr:DescribeImages",
+      "resources": [
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend",
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {},
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadPublishedImages",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-live-compatibility-readpublishedimages-ecr-describerepositories",
+      "phase": "app-only-live-compatibility",
+      "identity": "APP_ONLY_VERIFIER_LAUNCHER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-app-only-verifier.mjs",
+      "sourceFunction": "ReadPublishedImages",
+      "action": "ecr:DescribeRepositories",
+      "resources": [
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend",
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {},
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadPublishedImages",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-live-compatibility-readpublishedimages-ecr-getrepositorypolicy",
+      "phase": "app-only-live-compatibility",
+      "identity": "APP_ONLY_VERIFIER_LAUNCHER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-app-only-verifier.mjs",
+      "sourceFunction": "ReadPublishedImages",
+      "action": "ecr:GetRepositoryPolicy",
+      "resources": [
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend",
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {},
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadPublishedImages",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-live-compatibility-readregionalnetworkandlogmetadata-ec2-describeroutetables",
+      "phase": "app-only-live-compatibility",
+      "identity": "APP_ONLY_VERIFIER_LAUNCHER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-app-only-verifier.mjs",
+      "sourceFunction": "ReadRegionalNetworkAndLogMetadata",
+      "action": "ec2:DescribeRouteTables",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {
+          "StringEquals": {
+            "aws:RequestedRegion": "eu-west-2"
+          }
+        },
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadRegionalNetworkAndLogMetadata",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-live-compatibility-readregionalnetworkandlogmetadata-ec2-describesecuritygroups",
+      "phase": "app-only-live-compatibility",
+      "identity": "APP_ONLY_VERIFIER_LAUNCHER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-app-only-verifier.mjs",
+      "sourceFunction": "ReadRegionalNetworkAndLogMetadata",
+      "action": "ec2:DescribeSecurityGroups",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {
+          "StringEquals": {
+            "aws:RequestedRegion": "eu-west-2"
+          }
+        },
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadRegionalNetworkAndLogMetadata",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-live-compatibility-readregionalnetworkandlogmetadata-ec2-describesubnets",
+      "phase": "app-only-live-compatibility",
+      "identity": "APP_ONLY_VERIFIER_LAUNCHER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-app-only-verifier.mjs",
+      "sourceFunction": "ReadRegionalNetworkAndLogMetadata",
+      "action": "ec2:DescribeSubnets",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {
+          "StringEquals": {
+            "aws:RequestedRegion": "eu-west-2"
+          }
+        },
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadRegionalNetworkAndLogMetadata",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-live-compatibility-readregionalnetworkandlogmetadata-logs-describeloggroups",
+      "phase": "app-only-live-compatibility",
+      "identity": "APP_ONLY_VERIFIER_LAUNCHER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-app-only-verifier.mjs",
+      "sourceFunction": "ReadRegionalNetworkAndLogMetadata",
+      "action": "logs:DescribeLogGroups",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {
+          "StringEquals": {
+            "aws:RequestedRegion": "eu-west-2"
+          }
+        },
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadRegionalNetworkAndLogMetadata",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-live-compatibility-readregionaltaskdefinitions-ecs-describetaskdefinition",
+      "phase": "app-only-live-compatibility",
+      "identity": "APP_ONLY_VERIFIER_LAUNCHER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-app-only-verifier.mjs",
+      "sourceFunction": "ReadRegionalTaskDefinitions",
+      "action": "ecs:DescribeTaskDefinition",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {
+          "StringEquals": {
+            "aws:RequestedRegion": "eu-west-2"
+          }
+        },
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadRegionalTaskDefinitions",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-live-compatibility-readruntimeencryptionpolicy-kms-describekey",
+      "phase": "app-only-live-compatibility",
+      "identity": "APP_ONLY_VERIFIER_LAUNCHER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-app-only-verifier.mjs",
+      "sourceFunction": "ReadRuntimeEncryptionPolicy",
+      "action": "kms:DescribeKey",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {},
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadRuntimeEncryptionPolicy",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-live-compatibility-readruntimeencryptionpolicy-kms-getkeypolicy",
+      "phase": "app-only-live-compatibility",
+      "identity": "APP_ONLY_VERIFIER_LAUNCHER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-app-only-verifier.mjs",
+      "sourceFunction": "ReadRuntimeEncryptionPolicy",
+      "action": "kms:GetKeyPolicy",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {},
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadRuntimeEncryptionPolicy",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-live-compatibility-readruntimeiam-iam-getrole",
+      "phase": "app-only-live-compatibility",
+      "identity": "APP_ONLY_VERIFIER_LAUNCHER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-app-only-verifier.mjs",
+      "sourceFunction": "ReadRuntimeIam",
+      "action": "iam:GetRole",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-task",
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-execution"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {},
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadRuntimeIam",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-live-compatibility-readruntimeiam-iam-getrolepolicy",
+      "phase": "app-only-live-compatibility",
+      "identity": "APP_ONLY_VERIFIER_LAUNCHER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-app-only-verifier.mjs",
+      "sourceFunction": "ReadRuntimeIam",
+      "action": "iam:GetRolePolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-task",
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-execution"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {},
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadRuntimeIam",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-live-compatibility-readruntimeiam-iam-listattachedrolepolicies",
+      "phase": "app-only-live-compatibility",
+      "identity": "APP_ONLY_VERIFIER_LAUNCHER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-app-only-verifier.mjs",
+      "sourceFunction": "ReadRuntimeIam",
+      "action": "iam:ListAttachedRolePolicies",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-task",
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-execution"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {},
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadRuntimeIam",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-live-compatibility-readruntimeiam-iam-listrolepolicies",
+      "phase": "app-only-live-compatibility",
+      "identity": "APP_ONLY_VERIFIER_LAUNCHER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-app-only-verifier.mjs",
+      "sourceFunction": "ReadRuntimeIam",
+      "action": "iam:ListRolePolicies",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-task",
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-execution"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {},
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadRuntimeIam",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-live-compatibility-readruntimeiam-iam-simulateprincipalpolicy",
+      "phase": "app-only-live-compatibility",
+      "identity": "APP_ONLY_VERIFIER_LAUNCHER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-app-only-verifier.mjs",
+      "sourceFunction": "ReadRuntimeIam",
+      "action": "iam:SimulatePrincipalPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution",
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-task",
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-execution"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {},
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadRuntimeIam",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-live-compatibility-readruntimesecretmetadata-secretsmanager-describesecret",
+      "phase": "app-only-live-compatibility",
+      "identity": "APP_ONLY_VERIFIER_LAUNCHER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-app-only-verifier.mjs",
+      "sourceFunction": "ReadRuntimeSecretMetadata",
+      "action": "secretsmanager:DescribeSecret",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/auth-mfa-encryption-key-9IgHgy",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/customer-verify-otp-secret-UxAGIY",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/customer-verify-token-secret-2d2D4b",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/incident-hash-salt-current-AVDP4T",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/ip-hash-salt-current-dRoH6B",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/jwt-wBQNqk",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/printer-sse-sign-secret-current-CC0JGW",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_private_key-BcQFPO",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_public_key-v7Xeex",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/redis-i6MoFs",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/scan-fingerprint-secret-3wsoIV",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/token-hash-secret-current-1j79IN",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/app-XNeSfh",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/preauth-xW2U7k"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {},
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadRuntimeSecretMetadata",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-live-compatibility-readruntimesecretmetadata-secretsmanager-getresourcepolicy",
+      "phase": "app-only-live-compatibility",
+      "identity": "APP_ONLY_VERIFIER_LAUNCHER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-app-only-verifier.mjs",
+      "sourceFunction": "ReadRuntimeSecretMetadata",
+      "action": "secretsmanager:GetResourcePolicy",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/auth-mfa-encryption-key-9IgHgy",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/customer-verify-otp-secret-UxAGIY",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/customer-verify-token-secret-2d2D4b",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/incident-hash-salt-current-AVDP4T",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/ip-hash-salt-current-dRoH6B",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/jwt-wBQNqk",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/printer-sse-sign-secret-current-CC0JGW",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_private_key-BcQFPO",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_public_key-v7Xeex",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/redis-i6MoFs",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/scan-fingerprint-secret-3wsoIV",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/token-hash-secret-current-1j79IN",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/app-XNeSfh",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/preauth-xW2U7k"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {},
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadRuntimeSecretMetadata",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-live-compatibility-readruntimesecretmetadata-secretsmanager-listsecretversionids",
+      "phase": "app-only-live-compatibility",
+      "identity": "APP_ONLY_VERIFIER_LAUNCHER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-app-only-verifier.mjs",
+      "sourceFunction": "ReadRuntimeSecretMetadata",
+      "action": "secretsmanager:ListSecretVersionIds",
+      "resources": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/auth-mfa-encryption-key-9IgHgy",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/customer-verify-otp-secret-UxAGIY",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/customer-verify-token-secret-2d2D4b",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/incident-hash-salt-current-AVDP4T",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/ip-hash-salt-current-dRoH6B",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/jwt-wBQNqk",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/printer-sse-sign-secret-current-CC0JGW",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_private_key-BcQFPO",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_public_key-v7Xeex",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/redis-i6MoFs",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/scan-fingerprint-secret-3wsoIV",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/token-hash-secret-current-1j79IN",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/app-XNeSfh",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/preauth-xW2U7k"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {},
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadRuntimeSecretMetadata",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-live-compatibility-readsourceownedstoragekey-kms-describekey",
+      "phase": "app-only-live-compatibility",
+      "identity": "APP_ONLY_VERIFIER_LAUNCHER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-app-only-verifier.mjs",
+      "sourceFunction": "ReadSourceOwnedStorageKey",
+      "action": "kms:DescribeKey",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:key/*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {
+          "ForAnyValue:StringEquals": {
+            "kms:ResourceAliases": "alias/mscqr-production-rls-green-storage"
+          }
+        },
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadSourceOwnedStorageKey",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-live-compatibility-readverifieroutput-logs-getlogevents",
+      "phase": "app-only-live-compatibility",
+      "identity": "APP_ONLY_VERIFIER_LAUNCHER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-app-only-verifier.mjs",
+      "sourceFunction": "ReadVerifierOutput",
+      "action": "logs:GetLogEvents",
+      "resources": [
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-read-only-canary:log-stream:app-only/*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {
+          "StringEquals": {
+            "aws:RequestedRegion": "eu-west-2"
+          }
+        },
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadVerifierOutput",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-live-compatibility-runexactreadonlyverifier-ecs-runtask",
+      "phase": "app-only-live-compatibility",
+      "identity": "APP_ONLY_VERIFIER_LAUNCHER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/run-production-app-only-verifier.mjs",
+      "sourceFunction": "RunExactReadOnlyVerifier",
+      "action": "ecs:RunTask",
+      "resources": [
+        "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-app-only-compatibility-verifier:{authenticated-verifier-revision}"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {
+          "StringEquals": {
+            "aws:RequestedRegion": "eu-west-2",
+            "ecs:enable-execute-command": "false"
+          },
+          "ArnEquals": {
+            "ecs:cluster": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"
+          }
+        },
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_MUTATION",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "RunExactReadOnlyVerifier",
+        "livePolicyArn": null,
+        "expectedVersion": "authenticated-preparation-revision",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "app-only-permission-provisioning-createboundedrole0-iam-createrole",
+      "phase": "app-only-permission-provisioning",
+      "identity": "APP_ONLY_PERMISSION_PROVISIONER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-app-only-provisioning.mjs",
+      "sourceFunction": "CreateBoundedRole0",
+      "action": "iam:CreateRole",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-app-only-deployer"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {
+          "StringEquals": {
+            "iam:PermissionsBoundary": "arn:aws:iam::368992683803:policy/MSCQRProductionAppOnlyDeployerBoundary"
+          }
+        },
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_MUTATION",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "CreateBoundedRole0",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "c29c81828951e88f4a490bf6e1eb6f12356103b732480c7dd399ef357a30a51e"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "app-only-permission-provisioning-createboundedrole1-iam-createrole",
+      "phase": "app-only-permission-provisioning",
+      "identity": "APP_ONLY_PERMISSION_PROVISIONER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-app-only-provisioning.mjs",
+      "sourceFunction": "CreateBoundedRole1",
+      "action": "iam:CreateRole",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-app-only-verifier-launcher"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {
+          "StringEquals": {
+            "iam:PermissionsBoundary": "arn:aws:iam::368992683803:policy/MSCQRProductionAppOnlyVerifierBoundary"
+          }
+        },
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_MUTATION",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "CreateBoundedRole1",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "c29c81828951e88f4a490bf6e1eb6f12356103b732480c7dd399ef357a30a51e"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "app-only-permission-provisioning-listproductiontasks-ecs-listtasks",
+      "phase": "app-only-permission-provisioning",
+      "identity": "APP_ONLY_PERMISSION_PROVISIONER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-app-only-provisioning.mjs",
+      "sourceFunction": "ListProductionTasks",
+      "action": "ecs:ListTasks",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {
+          "StringEquals": {
+            "aws:RequestedRegion": "eu-west-2"
+          },
+          "ArnEquals": {
+            "ecs:cluster": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"
+          }
+        },
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ListProductionTasks",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "c29c81828951e88f4a490bf6e1eb6f12356103b732480c7dd399ef357a30a51e"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-permission-provisioning-passexacttaskroles-iam-passrole",
+      "phase": "app-only-permission-provisioning",
+      "identity": "APP_ONLY_PERMISSION_PROVISIONER",
+      "executor": "aws-service-authorization",
+      "sourceFile": "scripts/aws/production-app-only-provisioning.mjs",
+      "sourceFunction": "PassExactTaskRoles",
+      "action": "iam:PassRole",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-task",
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-execution"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {
+          "StringEquals": {
+            "iam:PassedToService": "ecs-tasks.amazonaws.com"
+          }
+        },
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "PassExactTaskRoles",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "c29c81828951e88f4a490bf6e1eb6f12356103b732480c7dd399ef357a30a51e"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-permission-provisioning-provisionboundedinlinepolicies-iam-putrolepolicy",
+      "phase": "app-only-permission-provisioning",
+      "identity": "APP_ONLY_PERMISSION_PROVISIONER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-app-only-provisioning.mjs",
+      "sourceFunction": "ProvisionBoundedInlinePolicies",
+      "action": "iam:PutRolePolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-app-only-deployer",
+        "arn:aws:iam::368992683803:role/mscqr-production-app-only-verifier-launcher"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {},
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_MUTATION",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ProvisionBoundedInlinePolicies",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "c29c81828951e88f4a490bf6e1eb6f12356103b732480c7dd399ef357a30a51e"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "app-only-permission-provisioning-readcalleridentity-sts-getcalleridentity",
+      "phase": "app-only-permission-provisioning",
+      "identity": "APP_ONLY_PERMISSION_PROVISIONER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-app-only-provisioning.mjs",
+      "sourceFunction": "ReadCallerIdentity",
+      "action": "sts:GetCallerIdentity",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {
+          "StringEquals": {
+            "aws:RequestedRegion": "eu-west-2"
+          }
+        },
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadCallerIdentity",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "c29c81828951e88f4a490bf6e1eb6f12356103b732480c7dd399ef357a30a51e"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-permission-provisioning-readexactapproles-iam-getrole",
+      "phase": "app-only-permission-provisioning",
+      "identity": "APP_ONLY_PERMISSION_PROVISIONER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-app-only-provisioning.mjs",
+      "sourceFunction": "ReadExactAppRoles",
+      "action": "iam:GetRole",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-app-only-deployer",
+        "arn:aws:iam::368992683803:role/mscqr-production-app-only-verifier-launcher"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {},
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadExactAppRoles",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "c29c81828951e88f4a490bf6e1eb6f12356103b732480c7dd399ef357a30a51e"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-permission-provisioning-readexactapproles-iam-getrolepolicy",
+      "phase": "app-only-permission-provisioning",
+      "identity": "APP_ONLY_PERMISSION_PROVISIONER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-app-only-provisioning.mjs",
+      "sourceFunction": "ReadExactAppRoles",
+      "action": "iam:GetRolePolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-app-only-deployer",
+        "arn:aws:iam::368992683803:role/mscqr-production-app-only-verifier-launcher"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {},
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadExactAppRoles",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "c29c81828951e88f4a490bf6e1eb6f12356103b732480c7dd399ef357a30a51e"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-permission-provisioning-readexactapproles-iam-listattachedrolepolicies",
+      "phase": "app-only-permission-provisioning",
+      "identity": "APP_ONLY_PERMISSION_PROVISIONER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-app-only-provisioning.mjs",
+      "sourceFunction": "ReadExactAppRoles",
+      "action": "iam:ListAttachedRolePolicies",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-app-only-deployer",
+        "arn:aws:iam::368992683803:role/mscqr-production-app-only-verifier-launcher"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {},
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadExactAppRoles",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "c29c81828951e88f4a490bf6e1eb6f12356103b732480c7dd399ef357a30a51e"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-permission-provisioning-readexactapproles-iam-listrolepolicies",
+      "phase": "app-only-permission-provisioning",
+      "identity": "APP_ONLY_PERMISSION_PROVISIONER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-app-only-provisioning.mjs",
+      "sourceFunction": "ReadExactAppRoles",
+      "action": "iam:ListRolePolicies",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-app-only-deployer",
+        "arn:aws:iam::368992683803:role/mscqr-production-app-only-verifier-launcher"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {},
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadExactAppRoles",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "c29c81828951e88f4a490bf6e1eb6f12356103b732480c7dd399ef357a30a51e"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-permission-provisioning-readexactservice-ecs-describeservices",
+      "phase": "app-only-permission-provisioning",
+      "identity": "APP_ONLY_PERMISSION_PROVISIONER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-app-only-provisioning.mjs",
+      "sourceFunction": "ReadExactService",
+      "action": "ecs:DescribeServices",
+      "resources": [
+        "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {
+          "StringEquals": {
+            "aws:RequestedRegion": "eu-west-2"
+          }
+        },
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadExactService",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "c29c81828951e88f4a490bf6e1eb6f12356103b732480c7dd399ef357a30a51e"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-permission-provisioning-readimmutableappboundaries-iam-getpolicy",
+      "phase": "app-only-permission-provisioning",
+      "identity": "APP_ONLY_PERMISSION_PROVISIONER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-app-only-provisioning.mjs",
+      "sourceFunction": "ReadImmutableAppBoundaries",
+      "action": "iam:GetPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionAppOnlyDeployerBoundary",
+        "arn:aws:iam::368992683803:policy/MSCQRProductionAppOnlyVerifierBoundary"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {},
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadImmutableAppBoundaries",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "c29c81828951e88f4a490bf6e1eb6f12356103b732480c7dd399ef357a30a51e"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-permission-provisioning-readimmutableappboundaries-iam-getpolicyversion",
+      "phase": "app-only-permission-provisioning",
+      "identity": "APP_ONLY_PERMISSION_PROVISIONER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-app-only-provisioning.mjs",
+      "sourceFunction": "ReadImmutableAppBoundaries",
+      "action": "iam:GetPolicyVersion",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionAppOnlyDeployerBoundary",
+        "arn:aws:iam::368992683803:policy/MSCQRProductionAppOnlyVerifierBoundary"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {},
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadImmutableAppBoundaries",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "c29c81828951e88f4a490bf6e1eb6f12356103b732480c7dd399ef357a30a51e"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-permission-provisioning-readproductiontasks-ecs-describetasks",
+      "phase": "app-only-permission-provisioning",
+      "identity": "APP_ONLY_PERMISSION_PROVISIONER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-app-only-provisioning.mjs",
+      "sourceFunction": "ReadProductionTasks",
+      "action": "ecs:DescribeTasks",
+      "resources": [
+        "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {
+          "StringEquals": {
+            "aws:RequestedRegion": "eu-west-2"
+          },
+          "ArnEquals": {
+            "ecs:cluster": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"
+          }
+        },
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadProductionTasks",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "c29c81828951e88f4a490bf6e1eb6f12356103b732480c7dd399ef357a30a51e"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-permission-provisioning-readregionaltaskdefinitions-ecs-describetaskdefinition",
+      "phase": "app-only-permission-provisioning",
+      "identity": "APP_ONLY_PERMISSION_PROVISIONER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-app-only-provisioning.mjs",
+      "sourceFunction": "ReadRegionalTaskDefinitions",
+      "action": "ecs:DescribeTaskDefinition",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {
+          "StringEquals": {
+            "aws:RequestedRegion": "eu-west-2"
+          }
+        },
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "ReadRegionalTaskDefinitions",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "c29c81828951e88f4a490bf6e1eb6f12356103b732480c7dd399ef357a30a51e"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "app-only-permission-provisioning-registeronlyreadonlyverifier-ecs-registertaskdefinition",
+      "phase": "app-only-permission-provisioning",
+      "identity": "APP_ONLY_PERMISSION_PROVISIONER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-app-only-provisioning.mjs",
+      "sourceFunction": "RegisterOnlyReadOnlyVerifier",
+      "action": "ecs:RegisterTaskDefinition",
+      "resources": [
+        "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-app-only-compatibility-verifier:*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {
+          "StringEquals": {
+            "aws:RequestedRegion": "eu-west-2"
+          }
+        },
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_MUTATION",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "RegisterOnlyReadOnlyVerifier",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "c29c81828951e88f4a490bf6e1eb6f12356103b732480c7dd399ef357a30a51e"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "app-only-permission-provisioning-simulateonlyapproles-iam-simulateprincipalpolicy",
+      "phase": "app-only-permission-provisioning",
+      "identity": "APP_ONLY_PERMISSION_PROVISIONER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-app-only-provisioning.mjs",
+      "sourceFunction": "SimulateOnlyAppRoles",
+      "action": "iam:SimulatePrincipalPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-app-only-deployer",
+        "arn:aws:iam::368992683803:role/mscqr-production-app-only-verifier-launcher"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {},
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "SimulateOnlyAppRoles",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "c29c81828951e88f4a490bf6e1eb6f12356103b732480c7dd399ef357a30a51e"
+      },
+      "required": true,
+      "mutation": false
     },
     {
       "id": "bootstrap-assume-publisher-bootstrap",
@@ -19187,6 +21736,14 @@
       "capabilityId": "mixed-recovery-iam-preflight-identify"
     },
     {
+      "sourceFile": "scripts/aws/prepare-production-app-only-deployment.mjs",
+      "action": "sts:GetCallerIdentity"
+    },
+    {
+      "sourceFile": "scripts/aws/prepare-production-app-only-verifier.mjs",
+      "action": "sts:GetCallerIdentity"
+    },
+    {
       "sourceFile": "scripts/aws/prepare-production-ecs-runtime-consumability.mjs",
       "action": "kms:DescribeKey"
     },
@@ -19222,6 +21779,166 @@
     },
     {
       "sourceFile": "scripts/aws/produce-production-root-drop-evidence.mjs",
+      "action": "sts:GetCallerIdentity"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-adapters.mjs",
+      "action": "ecr:DescribeImages"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-adapters.mjs",
+      "action": "ecs:DescribeServices"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-adapters.mjs",
+      "action": "ecs:DescribeTaskDefinition"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-adapters.mjs",
+      "action": "ecs:DescribeTasks"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-adapters.mjs",
+      "action": "ecs:ListTasks"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-adapters.mjs",
+      "action": "ecs:RegisterTaskDefinition"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-adapters.mjs",
+      "action": "ecs:RunTask"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-adapters.mjs",
+      "action": "ecs:UpdateService"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-adapters.mjs",
+      "action": "logs:GetLogEvents"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-adapters.mjs",
+      "action": "sts:GetCallerIdentity"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-bootstrap-contract.mjs",
+      "action": "iam:GetPolicy"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-bootstrap-contract.mjs",
+      "action": "iam:GetRole"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-iam-source.mjs",
+      "action": "iam:GetRole"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-iam-source.mjs",
+      "action": "iam:GetRolePolicy"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-iam-source.mjs",
+      "action": "iam:ListAttachedRolePolicies"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-iam-source.mjs",
+      "action": "iam:ListRolePolicies"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-iam-source.mjs",
+      "action": "sts:GetCallerIdentity"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-images.mjs",
+      "action": "ecr:DescribeImages"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-images.mjs",
+      "action": "ecr:DescribeRepositories"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-images.mjs",
+      "action": "sts:GetCallerIdentity"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-preparation.mjs",
+      "action": "ecs:DescribeTasks"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-preparation.mjs",
+      "action": "secretsmanager:DescribeSecret"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-provisioning.mjs",
+      "action": "iam:CreateRole"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-provisioning.mjs",
+      "action": "iam:GetPolicy"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-provisioning.mjs",
+      "action": "iam:GetPolicyVersion"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-provisioning.mjs",
+      "action": "iam:GetRole"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-provisioning.mjs",
+      "action": "iam:GetRolePolicy"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-provisioning.mjs",
+      "action": "iam:ListAttachedRolePolicies"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-provisioning.mjs",
+      "action": "iam:ListRolePolicies"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-provisioning.mjs",
+      "action": "iam:PutRolePolicy"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-provisioning.mjs",
+      "action": "iam:SimulatePrincipalPolicy"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-provisioning.mjs",
+      "action": "sts:GetCallerIdentity"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-runtime.mjs",
+      "action": "ec2:DescribeRouteTables"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-runtime.mjs",
+      "action": "ec2:DescribeSecurityGroups"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-runtime.mjs",
+      "action": "ec2:DescribeSubnets"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-runtime.mjs",
+      "action": "kms:DescribeKey"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-runtime.mjs",
+      "action": "kms:GetKeyPolicy"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-runtime.mjs",
+      "action": "rds:DescribeDBInstances"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-runtime.mjs",
+      "action": "rds:DescribeDBParameters"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-runtime.mjs",
       "action": "sts:GetCallerIdentity"
     },
     {
@@ -20159,6 +22876,46 @@
     {
       "sourceFile": "scripts/aws/recover-stage-b-backend-task-definition.mjs",
       "action": "ecs:RegisterTaskDefinition"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-app-only-bootstrap.mjs",
+      "action": "iam:GetPolicy"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-app-only-bootstrap.mjs",
+      "action": "iam:GetPolicyVersion"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-app-only-bootstrap.mjs",
+      "action": "iam:GetRole"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-app-only-bootstrap.mjs",
+      "action": "iam:GetRolePolicy"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-app-only-bootstrap.mjs",
+      "action": "iam:ListAttachedRolePolicies"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-app-only-bootstrap.mjs",
+      "action": "iam:ListPolicyVersions"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-app-only-bootstrap.mjs",
+      "action": "iam:ListRolePolicies"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-app-only-bootstrap.mjs",
+      "action": "sts:GetCallerIdentity"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-app-only-deployment.mjs",
+      "action": "sts:GetCallerIdentity"
+    },
+    {
+      "sourceFile": "scripts/aws/run-production-app-only-verifier.mjs",
+      "action": "sts:GetCallerIdentity"
     },
     {
       "sourceFile": "scripts/aws/run-production-green-stage-b-preflight.mjs",

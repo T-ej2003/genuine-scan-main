@@ -2,11 +2,28 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 import { CAPABILITY_GRAPH_PATH, discoverAwsCliActions } from "../aws/generate-production-green-stage-b-capability-graph.mjs";
-import { assertChangedAwsCallClosure, assertNoUnknownRollbackDependency, assertRollbackSemanticBoundary, assertStageAProductionArtifactsCapabilityClosure, buildProductionDependencyClosure } from "../aws/verify-production-dependency-closure.mjs";
+import { assertChangedAwsCallClosure, assertAppOnlyAwsCallClosure, assertNoUnknownRollbackDependency, assertRollbackSemanticBoundary, assertStageAProductionArtifactsCapabilityClosure, buildProductionDependencyClosure } from "../aws/verify-production-dependency-closure.mjs";
 import { LEGACY_BOOTSTRAP_TRANSITION_SECRET_READ_RESOURCES } from "../aws/production-bootstrap-operator-policy-reconciliation.mjs";
 import { selectStageAProductionArtifactsRecoveryJournals } from "../aws/run-production-stage-a-production-artifacts-recovery.mjs";
 
 const graph = () => JSON.parse(fs.readFileSync(CAPABILITY_GRAPH_PATH, "utf8"));
+
+test("app-only calls require exact source inventory and independent principal capability coverage", () => {
+  const calls = discoverAwsCliActions(), current = graph();
+  assert.equal(assertAppOnlyAwsCallClosure(calls, current).length, 66);
+  const app = current.capabilities.filter(({ identity }) => identity === "APP_ONLY_DEPLOYER");
+  assert.deepEqual(app.filter(({ mutation }) => mutation).map(({ action }) => action).sort(), ["ecs:RegisterTaskDefinition", "ecs:TagResource", "ecs:UpdateService"]);
+  for (const action of ["ecs:RunTask", "ecs:ExecuteCommand", "iam:PutRolePolicy", "s3:PutObject", "secretsmanager:GetSecretValue"])
+    assert.ok(!app.some((node) => node.action === action));
+  assert.ok(current.capabilities.filter(({ identity }) => identity === "APP_ONLY_VERIFIER_LAUNCHER").every(({ action }) => !["ecs:UpdateService", "ecs:RegisterTaskDefinition", "iam:PutRolePolicy"].includes(action)));
+  assert.throws(() => assertAppOnlyAwsCallClosure([...calls, { sourceFile: "scripts/aws/production-app-only-adapters.mjs", action: "ecs:ExecuteCommand" }], current));
+  assert.throws(() => assertAppOnlyAwsCallClosure(calls.filter(({ sourceFile, action }) => !(sourceFile === "scripts/aws/production-app-only-adapters.mjs" && action === "ecs:RunTask")), current));
+  for (const action of ["ecs:UpdateService", "ecs:RegisterTaskDefinition", "ecr:DescribeImages"]) {
+    const changed = structuredClone(current);
+    changed.capabilities = changed.capabilities.filter((node) => !(node.identity === "APP_ONLY_DEPLOYER" && node.action === action));
+    assert.throws(() => assertAppOnlyAwsCallClosure(calls, changed));
+  }
+});
 
 test("complete production dependency closure is exact across modes and failure paths", () => {
   const report = buildProductionDependencyClosure();
@@ -41,7 +58,8 @@ test("complete production dependency closure is exact across modes and failure p
     ["scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs", "s3:PutObject", "stage-a-artifacts-recovery-release-lock-acquire"],
     ["scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs", "s3:DeleteObject", "stage-a-artifacts-recovery-release-lock-release"],
   ]);
-  assert.equal(report.newAwsCalls.length, 42 + stageAAdditions.length + 15 + 14 + 21 + 7 + 1 + 6 + 1); // baseline, Stage-A, policy reconciliation, ProviderReadOnly, bootstrap-user preparation/authorization/reconciliation, recovery IAM preflight, attestation signing, exact executor calls, and prerequisite producer read
+  assert.equal(report.newAwsCalls.filter(({ reachableMode }) => reachableMode.some((mode) => mode.startsWith("app-only-"))).length, 66);
+  assert.equal(report.newAwsCalls.length, 42 + stageAAdditions.length + 15 + 14 + 21 + 7 + 1 + 6 + 1 + 66); // Historical closure plus separately identity-mapped app-only calls.
   assert.deepEqual(report.newAwsCalls.filter(({ capabilityId }) => capabilityId?.startsWith("bootstrap-operator-policy-authorization-")).map(({ capabilityId, action, resources, identity, reachableMode }) => [capabilityId, action, resources, identity, reachableMode]), [
     ["bootstrap-operator-policy-authorization-identify", "sts:GetCallerIdentity", ["*"], "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],
     ["bootstrap-operator-policy-authorization-read-transition-consumption", "iam:ListUserTags", ["arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"], "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],
@@ -137,7 +155,7 @@ test("complete production dependency closure is exact across modes and failure p
   assert.deepEqual(new Set(Object.keys(report.runtimeModeClosure)), new Set(Object.keys(report.modes)));
   for (const { capabilityId, reachableMode } of report.newAwsCalls) for (const mode of reachableMode) assert.notEqual(report.modes[mode], undefined, `${capabilityId} is reachable from undeclared ${mode}`);
   assert.equal(report.runtimeDependencies.some(({ id }) => id === "ecs-final-candidate-runtime-consumability"), true);
-  assert.deepEqual(new Set(Object.keys(report.runtimeModeClosure)), new Set(["NORMAL", "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME", "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY", "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION", "INITIAL_ACTIVATION_POLICY_RECONCILIATION", "PROVIDER_READONLY_POLICY_RECONCILIATION", "BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION", "MIXED_DUAL_SLOT_RECOVERY", "ROTATION_OVERLAP", "ROTATION_CLEANUP", "ROLLBACK_RECONCILIATION", "POST_DEPLOY_VERIFY"]));
+  assert.deepEqual(new Set(Object.keys(report.runtimeModeClosure)), new Set(["app-only-permission-bootstrap", "app-only-live-compatibility", "app-only-permission-provisioning", "app-only-backend-activation", "NORMAL", "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME", "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY", "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION", "INITIAL_ACTIVATION_POLICY_RECONCILIATION", "PROVIDER_READONLY_POLICY_RECONCILIATION", "BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION", "MIXED_DUAL_SLOT_RECOVERY", "ROTATION_OVERLAP", "ROTATION_CLEANUP", "ROLLBACK_RECONCILIATION", "POST_DEPLOY_VERIFY"]));
   for (const id of ["mixed-recovery-iam-preflight-identify", "mixed-recovery-iam-preflight-read-role", "mixed-recovery-iam-preflight-simulate", "mixed-recovery-iam-preflight-read-resource-policy", "mixed-recovery-iam-attestation-sign", "mixed-recovery-executor-identify", "mixed-recovery-executor-describe-service", "mixed-recovery-executor-describe-task-definition", "mixed-recovery-executor-describe-secret", "mixed-recovery-executor-get-secret-value", "mixed-recovery-move-awscurrent"]) assert.deepEqual(report.newAwsCalls.find(({ capabilityId }) => capabilityId === id)?.reachableMode, ["MIXED_DUAL_SLOT_RECOVERY"]);
   assert.equal(report.newAwsCalls.filter(({ capabilityId, reachableMode }) => capabilityId?.startsWith("stage-a-artifacts-recovery-") && !reachableMode.includes("STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY")).length, 0);
   assert.equal(report.newAwsCalls.filter(({ capabilityId, reachableMode }) => (capabilityId?.startsWith("stage-a-artifacts-journal-") || capabilityId?.startsWith("stage-a-artifacts-reconciliation-")) && !reachableMode.includes("STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION")).length, 0);

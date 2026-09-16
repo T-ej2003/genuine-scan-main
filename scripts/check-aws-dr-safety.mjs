@@ -187,6 +187,12 @@ const dangerousPatternExemptions = new Map([
     "scripts/tests/production-full-rls-package-postgres18.test.mjs",
     new Set(["drop-database"]),
   ],
+  [
+    // Fixed Docker tmpfs/loopback harness; asserts database absence before
+    // creation and drops only the database created by that same test.
+    "scripts/tests/production-app-only-database-postgres.test.mjs",
+    new Set(["drop-database"]),
+  ],
 ]);
 
 const isDangerousPatternExempt = (repoPath, ruleId) =>
