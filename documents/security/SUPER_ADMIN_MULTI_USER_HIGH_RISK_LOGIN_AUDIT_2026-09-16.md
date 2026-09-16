@@ -56,9 +56,9 @@ Both values must be decimal integers with `0 <= STEP_UP < BLOCK <= 100`. A legac
 
 ## Proxy trust contract
 
-Production defaults to `CLIENT_IP_TRUST_MODE=cloudfront-alb`. It starts only with reviewed non-empty `CLIENT_IP_TRUSTED_ALB_CIDRS` and `CLIENT_IP_TRUSTED_CLOUDFRONT_CIDRS`. The immediate socket address must be in the ALB list; the terminal XFF address must be in the CloudFront list; and the immediately preceding XFF address is the viewer address installed as `req.ip`. Earlier forwarded entries are ignored, so a viewer-supplied prefix cannot select the client identity. Direct, shortened, malformed, or untrusted chains receive a generic 400.
+ASG production uses `CLIENT_IP_TRUST_MODE=cloudfront-alb-nginx`: CloudFront -> ALB -> the fixed frontend nginx address -> backend. It starts only with reviewed non-empty nginx, ALB, and CloudFront CIDR lists. The backend socket must be the configured nginx address; the terminal XFF address must be the ALB; the preceding address must be CloudFront; and the preceding address is the viewer installed as `req.ip`. Earlier forwarded entries are ignored, so a viewer-supplied prefix cannot select the client identity. The ASG manifest requires the ALB and CloudFront lists and a reviewed application-network subnet/frontend address; bootstrap requires the nginx CIDR to match that frontend address exactly. Direct, shortened, malformed, or untrusted chains receive a generic 400. Loopback-only `/health/live` is the sole direct exception, so the backend container health check can run without a proxy header.
 
-Read-only AWS inspection found that the current CloudFront distribution does not forward `CloudFront-Viewer-Address` or configure an edge-attestation origin header. This implementation intentionally uses only the documented CloudFront and ALB XFF append positions, and deployment must supply/review the two CIDR lists and verify the live chain before activation. No infrastructure was changed here.
+Read-only AWS inspection found that the current CloudFront distribution does not forward `CloudFront-Viewer-Address` or configure an edge-attestation origin header. This implementation intentionally uses the documented XFF append positions and deployment must supply/review all proxy CIDRs and verify the live chain before activation. No infrastructure was changed here.
 
 ## Test evidence
 

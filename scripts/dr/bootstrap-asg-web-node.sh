@@ -222,6 +222,11 @@ if (!parseBool(backendEnv.get("COOKIE_SECURE"))) {
   fail("COOKIE_SECURE must be true for production ASG web nodes.");
 }
 
+const expectedFrontendProxyCidr = `${rootEnv.get("ASG_FRONTEND_PROXY_IP")}/32`;
+if (backendEnv.get("CLIENT_IP_TRUSTED_NGINX_CIDRS") !== expectedFrontendProxyCidr) {
+  fail("CLIENT_IP_TRUSTED_NGINX_CIDRS must be the exact /32 of ASG_FRONTEND_PROXY_IP.");
+}
+
 const envEscape = (value) => {
   const raw = String(value ?? "");
   if (/^[A-Za-z0-9_./:@,+%=-]*$/.test(raw)) return raw;

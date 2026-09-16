@@ -906,7 +906,7 @@ export const logoutSession = async (input: {
     details: {},
     ipHash: input.ipHash || undefined,
     userAgent: input.userAgent || undefined,
-  } as any, undefined, db, {
+  }, undefined, db, {
     requestId: input.requestId,
     organizationId: input.organizationId,
     licenseeId: input.licenseeId,

@@ -63,6 +63,9 @@ if (!/wget -q -O \/dev\/null http:\/\/127\.0\.0\.1\/healthz/.test(compose)) {
 if (!/\$\{FRONTEND_PORT:-80\}:80/.test(compose)) {
   fail(`${composePath} frontend must publish host port 80 for ALB /healthz checks.`);
 }
+if (!/ipv4_address: \$\{ASG_FRONTEND_PROXY_IP:\?Set a reviewed ASG frontend proxy address\}/.test(compose) || !/subnet: \$\{ASG_APP_NETWORK_SUBNET:\?Set a reviewed ASG application-network subnet\}/.test(compose)) {
+  fail(`${composePath} must pin the frontend proxy address inside the reviewed ASG application network.`);
+}
 
 if (!/const composeEnv = new Map\(\[\.\.\.rootEnv\.entries\(\), \.\.\.backendEnv\.entries\(\)\]\)/.test(bootstrap)) {
   fail(`${bootstrapPath} must render a Compose interpolation env from rootEnv plus backendEnv.`);
@@ -85,6 +88,11 @@ const dummyValueFor = (key) => {
   if (key === "REDIS_URL") return "rediss://regional-elasticache:6379/0";
   if (key === "OBJECT_STORAGE_BUCKET") return "mscqr-dummy-artifacts";
   if (key === "BACKEND_PORT") return "4000";
+  if (key === "ASG_APP_NETWORK_SUBNET") return "172.30.0.0/29";
+  if (key === "ASG_FRONTEND_PROXY_IP") return "172.30.0.2";
+  if (key === "CLIENT_IP_TRUSTED_NGINX_CIDRS") return "172.30.0.2/32";
+  if (key === "CLIENT_IP_TRUSTED_ALB_CIDRS") return "10.0.0.0/24";
+  if (key === "CLIENT_IP_TRUSTED_CLOUDFRONT_CIDRS") return "198.51.100.0/24";
   if (key === "FRONTEND_PORT") return "80";
   if (key === "FRONTEND_SSL_PORT") return "443";
   if (key === "QR_SIGN_PRIVATE_KEY") return "ZHVtbXktcHJpdmF0ZS1rZXk=";

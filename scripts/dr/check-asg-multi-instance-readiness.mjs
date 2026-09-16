@@ -565,7 +565,7 @@ if (asgSsmManifest) {
       ...Object.keys(section.forced || {}),
     ]);
   const rootRequired = new Set(asgSsmManifest.rootEnv?.requiredFromSsm || []);
-  for (const key of ["AWS_REGION", "OBJECT_STORAGE_BUCKET", "OBJECT_STORAGE_REGION", "REDIS_URL"]) {
+  for (const key of ["AWS_REGION", "OBJECT_STORAGE_BUCKET", "OBJECT_STORAGE_REGION", "REDIS_URL", "ASG_APP_NETWORK_SUBNET", "ASG_FRONTEND_PROXY_IP"]) {
     if (!rootRequired.has(key)) failures.push(`ASG SSM manifest rootEnv.requiredFromSsm is missing ${key}.`);
   }
   const backendRequired = new Set(asgSsmManifest.backendEnv?.requiredFromSsm || []);
@@ -597,6 +597,9 @@ if (asgSsmManifest) {
     "PRINTER_SSE_SIGN_SECRET_CURRENT",
     "INCIDENT_HASH_SALT_CURRENT",
     "AUTH_MFA_ENCRYPTION_KEY",
+    "CLIENT_IP_TRUSTED_NGINX_CIDRS",
+    "CLIENT_IP_TRUSTED_ALB_CIDRS",
+    "CLIENT_IP_TRUSTED_CLOUDFRONT_CIDRS",
     "SMTP_HOST",
     "SMTP_USER",
     "SMTP_PASS",
