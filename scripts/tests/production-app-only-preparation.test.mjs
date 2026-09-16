@@ -9,7 +9,7 @@ import { appOnlyVerifierNetwork } from "../aws/production-app-only-policy.mjs";
 import { APP_ONLY_SESSION_RISK_CONTRACT } from "../aws/production-app-only-images.mjs";
 
 const signed = (body) => ({ ...body, evidenceSha256: canonicalSha256(body) });
-function fixture() {
+function fixture(deploymentId = "ecs-svc/100") {
   const sourceSha = "fbc47fd83699403b8708f87d757e552d5bc02dd8", candidateSourceSha = "bcec05a421bff28eb2216f399d0a9e7cd2389d5e";
   const predecessorSourceSha = "7e93853e6c48ad3020915f551ef89155825ae403", now = Date.now(), generatedAt = new Date(now).toISOString();
   const arn = `arn:aws:ecs:${APP_ONLY.region}:${APP_ONLY.account}:task-definition/${APP_ONLY.family}:14`;
@@ -21,9 +21,9 @@ function fixture() {
     containerDefinitions: [{ name: "backend", image: `${APP_ONLY.backendRepository}@${predecessorBackendDigest}` }] };
   const service = { clusterArn: APP_ONLY.clusterArn, serviceArn: APP_ONLY.serviceArn, serviceName: APP_ONLY.service,
     status: "ACTIVE", taskDefinition: arn, desiredCount: 2, runningCount: 2, pendingCount: 0,
-    deployments: [{ id: "ecs-svc/100", taskDefinition: arn, status: "PRIMARY", rolloutState: "COMPLETED" }] };
+    deployments: [{ id: deploymentId, taskDefinition: arn, status: "PRIMARY", rolloutState: "COMPLETED" }] };
   const tasks = ["one", "two"].map((taskArn) => ({ taskArn, taskDefinitionArn: arn, clusterArn: APP_ONLY.clusterArn,
-    group: `service:${APP_ONLY.service}`, lastStatus: "RUNNING", healthStatus: "HEALTHY", startedBy: "ecs-svc/100",
+    group: `service:${APP_ONLY.service}`, lastStatus: "RUNNING", healthStatus: "HEALTHY", startedBy: deploymentId,
     containers: [{ name: "backend", imageDigest: predecessorBackendDigest }] }));
   const requirements = createAppOnlyRequirements({ repositoryRoot: process.cwd(), sourceSha, candidateSourceSha,
     packageChecksums: { fixture: true }, catalogue: { routines: [{ schema: "app_auth", name: "fixed", arguments: "" }],
@@ -108,8 +108,9 @@ test("preparation rejects stale, substituted or unproven live reports even with 
   }
 });
 
-test("deployment consumer rederives eligibility and rejects substituted domains, candidate, reports and CAS", () => {
-  const input = fixture(); input.databaseSecretArn = input.verifierIam.databaseSecretArn;
+for (const deploymentId of ["ecs-svc/0559890711032160707", "ecs-svc/1234567890123456789"]) {
+test(`deployment consumer preserves opaque ID and rejects substituted proof and CAS: ${deploymentId}`, () => {
+  const input = fixture(deploymentId); input.databaseSecretArn = input.verifierIam.databaseSecretArn;
   const verifierInputs = { schemaVersion: 1, kind: "APP_ONLY_VERIFIER_INPUTS", preparation: prepareAppOnlyVerifier(input),
     images: input.images, iam: input.iam, verifierIam: input.verifierIam, runtime: input.runtime,
     requirements: input.requirements, requirementsReference: {} };
@@ -117,6 +118,7 @@ test("deployment consumer rederives eligibility and rejects substituted domains,
     inputs: verifierInputs, database: input.database, compatibilityReference: {}, verifierTaskArn: "fixture", verifierTaskDefinitionArn: "fixture" };
   const context = { inputs, sourceSha: input.sourceSha, live: input.live, repositoryRoot: input.repositoryRoot, now: input.now + 1000 };
   assert.deepEqual(authenticateAppOnlyDeploymentInputs(context), inputs.preparation);
+  assert.equal(authenticateAppOnlyDeploymentInputs({ ...context, inputs: JSON.parse(JSON.stringify(inputs)) }).predecessor.deploymentId, deploymentId);
   for (const mutate of [
     (p) => { p.eligible = false; }, (p) => { p.domains.RLS = "UNCHANGED"; },
     (p) => { p.candidateDigest = `sha256:${"f".repeat(64)}`; },
@@ -132,3 +134,4 @@ test("deployment consumer rederives eligibility and rejects substituted domains,
   assert.throws(() => authenticateAppOnlyDeploymentInputs({ ...context, live }));
   assert.throws(() => authenticateAppOnlyDeploymentInputs({ ...context, now: input.now + APP_ONLY.maxEvidenceAgeMs + 1 }));
 });
+}
