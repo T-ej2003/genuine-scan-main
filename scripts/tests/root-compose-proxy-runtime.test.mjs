@@ -13,14 +13,15 @@ const digest = (file) => crypto.createHash("sha256").update(fs.readFileSync(file
 
 test("root Compose reserves the trusted frontend IP and its adapter is restart-idempotent", () => {
   run(["info", "--format", "{{.ServerVersion}}"]);
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-root-proxy-"));
-  const project = `mscqr-root-proxy-${process.pid}`;
-  const templates = path.join(directory, "templates");
-  fs.mkdirSync(templates);
-  fs.copyFileSync(path.join(root, "nginx.conf"), path.join(templates, "default.http.conf"));
-  fs.copyFileSync(path.join(root, "nginx.https.conf"), path.join(templates, "default.https.conf"));
-  fs.writeFileSync(path.join(directory, "canonical.sh"), "#!/bin/sh\nexec sleep 300\n", { mode: 0o755 });
-  fs.writeFileSync(path.join(directory, "compose.yml"), `services:
+  const fixture = (label, mutate) => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), `mscqr-root-proxy-${label}-`));
+    const templates = path.join(directory, "templates");
+    fs.mkdirSync(templates);
+    fs.copyFileSync(path.join(root, "nginx.conf"), path.join(templates, "default.http.conf"));
+    fs.copyFileSync(path.join(root, "nginx.https.conf"), path.join(templates, "default.https.conf"));
+    mutate?.(templates);
+    fs.writeFileSync(path.join(directory, "canonical.sh"), "#!/bin/sh\nexec sleep 300\n", { mode: 0o755 });
+    fs.writeFileSync(path.join(directory, "compose.yml"), `services:
   redis: { image: alpine:3.22, command: ["sleep", "300"], networks: [app] }
   backend: { image: alpine:3.22, command: ["sleep", "300"], networks: [app] }
   worker: { image: alpine:3.22, command: ["sleep", "300"], networks: [app] }
@@ -40,8 +41,20 @@ networks:
         - subnet: 172.30.10.0/28
           ip_range: 172.30.10.8/29
 `);
-  const compose = ["compose", "-p", project, "-f", path.join(directory, "compose.yml")];
-  try {
+    return { directory, templates };
+  };
+  const runFixture = (label, mutate, verify) => {
+    const { directory, templates } = fixture(label, mutate);
+    const project = `mscqr-root-proxy-${label}-${process.pid}`;
+    const compose = ["compose", "-p", project, "-f", path.join(directory, "compose.yml")];
+    try {
+      verify({ compose, directory, templates });
+    } finally {
+      spawnSync("docker", [...compose, "down", "--volumes", "--remove-orphans"], { cwd: root, stdio: "ignore" });
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  };
+  runFixture("valid", undefined, ({ compose, templates }) => {
     run([...compose, "up", "-d", "redis", "backend", "worker"]);
     const dynamicIps = ["redis", "backend", "worker"].map((service) => run([...compose, "exec", "-T", service, "hostname", "-i"]));
     assert(dynamicIps.every((ip) => ip !== "172.30.10.2"));
@@ -51,13 +64,10 @@ networks:
     run([...compose, "restart", "frontend"]);
     assert.deepEqual([digest(path.join(templates, "default.http.conf")), digest(path.join(templates, "default.https.conf"))], first);
     assert.equal(run([...compose, "ps", "--status", "running", "--services", "frontend"]), "frontend");
-
-    fs.appendFileSync(path.join(templates, "default.http.conf"), "\nproxy_set_header X-Forwarded-For unexpected;\n");
-    run([...compose, "restart", "frontend"]);
+  });
+  runFixture("malformed", (templates) => fs.appendFileSync(path.join(templates, "default.http.conf"), "\nproxy_set_header X-Forwarded-For unexpected;\n"), ({ compose }) => {
+    run([...compose, "up", "-d", "frontend"]);
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);
     assert.equal(run([...compose, "ps", "--status", "running", "--services", "frontend"]), "");
-  } finally {
-    spawnSync("docker", [...compose, "down", "--volumes", "--remove-orphans"], { cwd: root, stdio: "ignore" });
-    fs.rmSync(directory, { recursive: true, force: true });
-  }
+  });
 });

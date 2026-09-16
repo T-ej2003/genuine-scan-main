@@ -104,3 +104,4 @@ networks:
     ipam:
       config:
         - subnet: ${ASG_APP_NETWORK_SUBNET:?Set a reviewed ASG application-network subnet}
+          ip_range: ${ASG_APP_NETWORK_IP_RANGE:?Set a reviewed ASG dynamic allocation range}

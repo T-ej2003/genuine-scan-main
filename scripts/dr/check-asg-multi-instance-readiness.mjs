@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import path from "node:path";
+import { validateAsgNetworkContract } from "./asg-network-contract.mjs";
 
 const root = process.cwd();
 const read = (repoPath) => fs.readFileSync(path.join(root, repoPath), "utf8");
@@ -58,6 +59,17 @@ const capetownEnvExample = requireFile(".env.production.capetown.example");
 const nginxHttpConf = requireFile("nginx.conf");
 const nginxHttpsConf = requireFile("nginx.https.conf");
 const asgEvidenceCollector = requireFile("scripts/dr/collect-asg-health-evidence.sh");
+
+try {
+  validateAsgNetworkContract({
+    subnet: "172.30.0.0/29",
+    dynamicRange: "172.30.0.4/30",
+    frontendIp: "172.30.0.2",
+    trustedCidr: "172.30.0.2/32",
+  });
+} catch (error) {
+  failures.push(`ASG network contract: ${error.message}`);
+}
 
 let checklist = null;
 let asgSsmManifest = null;
@@ -248,6 +260,7 @@ for (const [label, source] of [["shared HTTP nginx", nginxHttpConf], ["shared HT
 if (/nginx-root-entrypoint/.test(asgWebCompose)) failures.push("ASG Compose must not consume the root-only nginx forwarding adapter.");
 requireMatch("asg web compose", asgWebCompose, /\bbackend:/, "ASG web mode must define backend.");
 requireMatch("asg web compose", asgWebCompose, /\bfrontend:/, "ASG web mode must define frontend.");
+requireMatch("asg web compose", asgWebCompose, /ip_range: \$\{ASG_APP_NETWORK_IP_RANGE:\?Set a reviewed ASG dynamic allocation range\}/, "ASG web mode must exclude the pinned frontend proxy from Docker dynamic allocation.");
 requireMatch("asg web compose", asgWebCompose, /RUN_BACKGROUND_WORKERS:\s+"false"/, "ASG web backend must force workers off.");
 requireMatch("asg web compose", asgWebCompose, /REDIS_URL:\s+\$\{REDIS_URL:\?Set shared regional REDIS_URL/, "ASG web mode must require shared regional Redis.");
 requireMatch("asg web compose", asgWebCompose, /REDIS_TLS:\s+\$\{REDIS_TLS:-true\}/, "ASG web mode must default Redis TLS on.");
@@ -581,7 +594,7 @@ if (asgSsmManifest) {
       ...Object.keys(section.forced || {}),
     ]);
   const rootRequired = new Set(asgSsmManifest.rootEnv?.requiredFromSsm || []);
-  for (const key of ["AWS_REGION", "OBJECT_STORAGE_BUCKET", "OBJECT_STORAGE_REGION", "REDIS_URL", "ASG_APP_NETWORK_SUBNET", "ASG_FRONTEND_PROXY_IP"]) {
+  for (const key of ["AWS_REGION", "OBJECT_STORAGE_BUCKET", "OBJECT_STORAGE_REGION", "REDIS_URL", "ASG_APP_NETWORK_SUBNET", "ASG_APP_NETWORK_IP_RANGE", "ASG_FRONTEND_PROXY_IP"]) {
     if (!rootRequired.has(key)) failures.push(`ASG SSM manifest rootEnv.requiredFromSsm is missing ${key}.`);
   }
   const backendRequired = new Set(asgSsmManifest.backendEnv?.requiredFromSsm || []);

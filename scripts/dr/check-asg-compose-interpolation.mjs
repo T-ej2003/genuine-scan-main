@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { validateAsgNetworkContract } from "./asg-network-contract.mjs";
 
 const root = process.cwd();
 const runDockerComposeConfig = process.argv.includes("--docker-compose-config");
@@ -63,7 +64,7 @@ if (!/wget -q -O \/dev\/null http:\/\/127\.0\.0\.1\/healthz/.test(compose)) {
 if (!/\$\{FRONTEND_PORT:-80\}:80/.test(compose)) {
   fail(`${composePath} frontend must publish host port 80 for ALB /healthz checks.`);
 }
-if (!/ipv4_address: \$\{ASG_FRONTEND_PROXY_IP:\?Set a reviewed ASG frontend proxy address\}/.test(compose) || !/subnet: \$\{ASG_APP_NETWORK_SUBNET:\?Set a reviewed ASG application-network subnet\}/.test(compose)) {
+if (!/ipv4_address: \$\{ASG_FRONTEND_PROXY_IP:\?Set a reviewed ASG frontend proxy address\}/.test(compose) || !/subnet: \$\{ASG_APP_NETWORK_SUBNET:\?Set a reviewed ASG application-network subnet\}/.test(compose) || !/ip_range: \$\{ASG_APP_NETWORK_IP_RANGE:\?Set a reviewed ASG dynamic allocation range\}/.test(compose)) {
   fail(`${composePath} must pin the frontend proxy address inside the reviewed ASG application network.`);
 }
 
@@ -89,6 +90,7 @@ const dummyValueFor = (key) => {
   if (key === "OBJECT_STORAGE_BUCKET") return "mscqr-dummy-artifacts";
   if (key === "BACKEND_PORT") return "4000";
   if (key === "ASG_APP_NETWORK_SUBNET") return "172.30.0.0/29";
+  if (key === "ASG_APP_NETWORK_IP_RANGE") return "172.30.0.4/30";
   if (key === "ASG_FRONTEND_PROXY_IP") return "172.30.0.2";
   if (key === "CLIENT_IP_TRUSTED_NGINX_CIDRS") return "172.30.0.2/32";
   if (key === "CLIENT_IP_TRUSTED_ALB_CIDRS") return "10.0.0.0/24";
@@ -134,6 +136,17 @@ if (runDockerComposeConfig) {
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
+}
+
+try {
+  validateAsgNetworkContract({
+    subnet: dummyValueFor("ASG_APP_NETWORK_SUBNET"),
+    dynamicRange: dummyValueFor("ASG_APP_NETWORK_IP_RANGE"),
+    frontendIp: dummyValueFor("ASG_FRONTEND_PROXY_IP"),
+    trustedCidr: dummyValueFor("CLIENT_IP_TRUSTED_NGINX_CIDRS"),
+  });
+} catch (error) {
+  fail(`ASG network contract is invalid: ${error.message}`);
 }
 
 console.log("ASG Compose interpolation check passed.");
