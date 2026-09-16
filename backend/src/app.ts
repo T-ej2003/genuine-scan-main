@@ -18,7 +18,7 @@ import { buildReadyPayload } from "./controllers/healthController";
 import { isRedisConfigured } from "./services/redisService";
 import { logger } from "./utils/logger";
 import { sanitizeRequestTelemetryPath } from "./utils/requestTelemetryPath";
-import { getClientIpTrustConfig, trustedClientIpMiddleware } from "./utils/clientIp";
+import { getClientIpTrustConfig, resolveExternalProtocol, trustedClientIpMiddleware } from "./utils/clientIp";
 import { getAuthRiskThresholds } from "./services/auth/sessionRiskService";
 
 const parseBool = (value: unknown, fallback = false) => {
@@ -70,7 +70,8 @@ export const createBackendApp = () => {
   const app = express();
   app.disable("etag");
   app.set("trust proxy", false);
-  app.use(trustedClientIpMiddleware(getClientIpTrustConfig()));
+  const clientIpTrustConfig = getClientIpTrustConfig();
+  app.use(trustedClientIpMiddleware(clientIpTrustConfig));
 
   const publicVersionEndpointEnabled = parseBool(process.env.PUBLIC_VERSION_ENDPOINT_ENABLED, false);
 
@@ -123,8 +124,7 @@ export const createBackendApp = () => {
     res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
     res.setHeader("Cross-Origin-Resource-Policy", "same-site");
 
-    const forwardedProto = String(req.get("x-forwarded-proto") || "").toLowerCase();
-    const isHttps = req.secure || forwardedProto.includes("https");
+    const isHttps = resolveExternalProtocol(req, clientIpTrustConfig) === "https";
     if (process.env.NODE_ENV === "production" && isHttps) {
       res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload");
     }

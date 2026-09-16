@@ -54,6 +54,18 @@ export const resolveClientIp = (req: Pick<Request, "get" | "socket">, config = g
   return viewerIp;
 };
 
+export const resolveExternalProtocol = (req: Pick<Request, "get" | "socket">, config = getClientIpTrustConfig()): "http" | "https" => {
+  if ((req.socket as { encrypted?: boolean } | undefined)?.encrypted === true) return "https";
+  if (config.mode === "direct") return "http";
+  try {
+    resolveClientIp(req, config);
+  } catch {
+    return "http";
+  }
+  const forwardedProto = String(req.get("x-forwarded-proto") || "").trim().toLowerCase();
+  return forwardedProto === "https" || forwardedProto === "http" ? forwardedProto : "http";
+};
+
 const isLoopback = (address: string) => address === "127.0.0.1" || address === "::1";
 
 export const trustedClientIpMiddleware = (config = getClientIpTrustConfig()): RequestHandler => (req, res, next) => {
