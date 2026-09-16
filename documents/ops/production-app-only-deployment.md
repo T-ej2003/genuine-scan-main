@@ -13,6 +13,15 @@ exact-head CI/review and protected merge remain required before production use.
 
 ## Security boundary
 
+The compatibility reader's exact secret-metadata allowlist is the deterministic
+union of static backend task-definition references and protected Terraform's
+`runtime_rotation_and_artifact_secret_arns`. These additional runtime secrets
+receive metadata reads only—never `GetSecretValue`. The identity policy retains
+all regional/read constraints; its outer managed boundary removes only duplicate
+read-only conditions needed to stay within IAM's 6,144-character quota. RunTask,
+PassRole, KMS alias, exact secret resources and all mutation constraints remain
+unchanged.
+
 ECS deployment IDs are opaque strings matching `ecs-svc/` followed by one or
 more decimal digits, including leading zeros (for example,
 `ecs-svc/0559890711032160707`). Capture, preparation, activation and rollback

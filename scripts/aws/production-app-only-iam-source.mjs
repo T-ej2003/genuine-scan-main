@@ -10,7 +10,7 @@ import { writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 import { canonicalizeStageAProductionArtifactsPolicy } from "./production-stage-a-control-plane.mjs";
 import { ecsTaskTrustSha256, RUNTIME_CONSUMABILITY } from "./production-ecs-runtime-consumability.mjs";
-import { APP_ONLY_VERIFIER } from "./production-app-only-policy.mjs";
+import { APP_ONLY_VERIFIER, appOnlyRuntimeSecretArns } from "./production-app-only-policy.mjs";
 
 // Evaluate the actual protected Terraform policy expressions without loading
 // its backend, providers, resources or state. No parallel JS policy model.
@@ -44,7 +44,7 @@ variable "receipt_bucket_arn" { type = string }
 locals {
   ecr_repository_arns = ${local("ecr_repository_arns", "\\}")}
   stage_b_logs = ${local("stage_b_logs", "\\}")}
-  runtime_rotation_and_artifact_secret_arns = ${local("runtime_rotation_and_artifact_secret_arns", "\\]")}
+  runtime_rotation_and_artifact_secret_arns = ${JSON.stringify(appOnlyRuntimeSecretArns(source))}
   execution_log_group_arns = { ${kind} = "arn:aws:logs:${APP_ONLY.region}:${APP_ONLY.account}:log-group:\${local.stage_b_logs.${kind}}" }
   execution_policy_secret_arns = { ${kind} = ${kind === "backend" ? "distinct(concat(var.input.secret_arns, local.runtime_rotation_and_artifact_secret_arns))" : "var.input.secret_arns"} }
   execution = ${block("execution")}

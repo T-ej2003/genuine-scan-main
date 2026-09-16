@@ -1875,7 +1875,7 @@
         "sid": "CheckExactJsonSelectors",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
       },
       "required": true,
       "mutation": false
@@ -1912,7 +1912,7 @@
         "sid": "ListProductionTasks",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
       },
       "required": true,
       "mutation": false
@@ -1947,7 +1947,7 @@
         "sid": "PassExactTaskRoles",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
       },
       "required": true,
       "mutation": false
@@ -1981,7 +1981,7 @@
         "sid": "ReadCallerIdentity",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
       },
       "required": true,
       "mutation": false
@@ -2011,7 +2011,7 @@
         "sid": "ReadCanarySecretIdentity",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
       },
       "required": true,
       "mutation": false
@@ -2041,7 +2041,7 @@
         "sid": "ReadDatabaseConfiguration",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
       },
       "required": true,
       "mutation": false
@@ -2071,7 +2071,7 @@
         "sid": "ReadDatabaseTls",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
       },
       "required": true,
       "mutation": false
@@ -2105,7 +2105,7 @@
         "sid": "ReadExactService",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
       },
       "required": true,
       "mutation": false
@@ -2142,7 +2142,7 @@
         "sid": "ReadProductionTasks",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
       },
       "required": true,
       "mutation": false
@@ -2173,7 +2173,7 @@
         "sid": "ReadPublishedImages",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
       },
       "required": true,
       "mutation": false
@@ -2204,7 +2204,7 @@
         "sid": "ReadPublishedImages",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
       },
       "required": true,
       "mutation": false
@@ -2235,7 +2235,7 @@
         "sid": "ReadPublishedImages",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
       },
       "required": true,
       "mutation": false
@@ -2269,7 +2269,7 @@
         "sid": "ReadRegionalNetworkAndLogMetadata",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
       },
       "required": true,
       "mutation": false
@@ -2303,7 +2303,7 @@
         "sid": "ReadRegionalNetworkAndLogMetadata",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
       },
       "required": true,
       "mutation": false
@@ -2337,7 +2337,7 @@
         "sid": "ReadRegionalNetworkAndLogMetadata",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
       },
       "required": true,
       "mutation": false
@@ -2371,7 +2371,7 @@
         "sid": "ReadRegionalNetworkAndLogMetadata",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
       },
       "required": true,
       "mutation": false
@@ -2405,7 +2405,7 @@
         "sid": "ReadRegionalTaskDefinitions",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
       },
       "required": true,
       "mutation": false
@@ -2435,7 +2435,7 @@
         "sid": "ReadRuntimeEncryptionPolicy",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
       },
       "required": true,
       "mutation": false
@@ -2465,7 +2465,7 @@
         "sid": "ReadRuntimeEncryptionPolicy",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
       },
       "required": true,
       "mutation": false
@@ -2498,7 +2498,7 @@
         "sid": "ReadRuntimeIam",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
       },
       "required": true,
       "mutation": false
@@ -2531,7 +2531,7 @@
         "sid": "ReadRuntimeIam",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
       },
       "required": true,
       "mutation": false
@@ -2564,7 +2564,7 @@
         "sid": "ReadRuntimeIam",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
       },
       "required": true,
       "mutation": false
@@ -2597,7 +2597,7 @@
         "sid": "ReadRuntimeIam",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
       },
       "required": true,
       "mutation": false
@@ -2630,7 +2630,7 @@
         "sid": "ReadRuntimeIam",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
       },
       "required": true,
       "mutation": false
@@ -2654,8 +2654,17 @@
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_private_key-BcQFPO",
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_public_key-v7Xeex",
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/redis-i6MoFs",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX",
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/scan-fingerprint-secret-3wsoIV",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/smtp-pass-arDHq6",
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/token-hash-secret-current-1j79IN",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/active-key-version-8oxmeP",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/private-key-current-T0AJAW",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/public-key-current-VyQhAv",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/public-keys-json-SNolaH",
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/app-XNeSfh",
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/preauth-xW2U7k"
       ],
@@ -2673,7 +2682,7 @@
         "sid": "ReadRuntimeSecretMetadata",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
       },
       "required": true,
       "mutation": false
@@ -2697,8 +2706,17 @@
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_private_key-BcQFPO",
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_public_key-v7Xeex",
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/redis-i6MoFs",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX",
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/scan-fingerprint-secret-3wsoIV",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/smtp-pass-arDHq6",
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/token-hash-secret-current-1j79IN",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/active-key-version-8oxmeP",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/private-key-current-T0AJAW",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/public-key-current-VyQhAv",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/public-keys-json-SNolaH",
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/app-XNeSfh",
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/preauth-xW2U7k"
       ],
@@ -2716,7 +2734,7 @@
         "sid": "ReadRuntimeSecretMetadata",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
       },
       "required": true,
       "mutation": false
@@ -2740,8 +2758,17 @@
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_private_key-BcQFPO",
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_public_key-v7Xeex",
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/redis-i6MoFs",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX",
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/scan-fingerprint-secret-3wsoIV",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/smtp-pass-arDHq6",
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/token-hash-secret-current-1j79IN",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/active-key-version-8oxmeP",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/private-key-current-T0AJAW",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/public-key-current-VyQhAv",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/public-keys-json-SNolaH",
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/app-XNeSfh",
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/preauth-xW2U7k"
       ],
@@ -2759,7 +2786,7 @@
         "sid": "ReadRuntimeSecretMetadata",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
       },
       "required": true,
       "mutation": false
@@ -2793,7 +2820,7 @@
         "sid": "ReadSourceOwnedStorageKey",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
       },
       "required": true,
       "mutation": false
@@ -2827,7 +2854,7 @@
         "sid": "ReadVerifierOutput",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "a3d2b0e9f647986a19d24d8407b85ec5037076b9e570d808d1a1005f84797798"
+        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
       },
       "required": true,
       "mutation": false

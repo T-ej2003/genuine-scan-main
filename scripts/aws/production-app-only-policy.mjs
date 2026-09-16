@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { APP_ONLY } from "./production-app-only-contract.mjs";
-import { canonicalJson, STAGE_B } from "./production-green-stage-b-contract.mjs";
+import { canonicalJson, canonicalSha256, STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { parseEcsSecretsManagerReference } from "./production-ecs-runtime-dependencies.mjs";
 
 export const APP_ONLY_VERIFIER = Object.freeze({
@@ -25,6 +25,19 @@ const familyArn = (family) => `arn:aws:ecs:${APP_ONLY.region}:${APP_ONLY.account
 const regional = { StringEquals: { "aws:RequestedRegion": APP_ONLY.region } };
 const allow = (Sid, Action, Resource, Condition = regional) => ({ Sid, Effect: "Allow", Action, Resource, ...(Condition === null ? {} : { Condition }) });
 const passRoles = (roles) => allow("PassExactTaskRoles", "iam:PassRole", roles, { StringEquals: { "iam:PassedToService": "ecs-tasks.amazonaws.com" } });
+const stageBSource = new URL("../../infra/aws/terraform/production-green-stage-b/main.tf", import.meta.url);
+export function appOnlyRuntimeSecretArns(source = fs.readFileSync(stageBSource, "utf8")) {
+  assert.equal(canonicalSha256(source), "edbf856715bcc59878f3bc8d0ff2040d73ba05891a9d09d71a77a47c00459c23",
+    "Stage-B IAM source wiring is unreviewed by the app-only compatibility model");
+  const matches = [...source.matchAll(/^  runtime_rotation_and_artifact_secret_arns = (\[[\s\S]*?^  \])$/gm)];
+  assert.equal(matches.length, 1, "Ambiguous runtime rotation/artifact secret source");
+  const arns = JSON.parse(matches[0][1].replace(/,\s*]$/, "]"));
+  assert.ok(Array.isArray(arns) && arns.length > 0);
+  for (const arn of arns) assert.match(arn, new RegExp(`^arn:aws:secretsmanager:${APP_ONLY.region}:${APP_ONLY.account}:secret:[A-Za-z0-9/_+=.@-]+$`));
+  assert.equal(new Set(arns).size, arns.length, "Duplicate runtime rotation/artifact secret ARN");
+  return arns;
+}
+export const appOnlySecretMetadataResources = (...groups) => [...new Set(groups.flat())].sort();
 
 // Compatibility preparation authority, never attached to the app deployer.
 // Source-derived secret metadata is readable; only the five reviewed JSON
@@ -33,7 +46,8 @@ const passRoles = (roles) => allow("PassExactTaskRoles", "iam:PassRole", roles, 
 export function appOnlyCompatibilityReadPolicy() {
   const template = JSON.parse(fs.readFileSync(new URL("../../infra/aws/terraform/production-green-stage-b/task-definitions/green-backend-candidate.json", import.meta.url), "utf8"));
   const secrets = template.containerDefinitions[0].secrets;
-  const metadata = [...new Set(secrets.map(({ valueFrom }) => parseEcsSecretsManagerReference(valueFrom).resource))].sort();
+  const metadata = appOnlySecretMetadataResources(
+    secrets.map(({ valueFrom }) => parseEcsSecretsManagerReference(valueFrom).resource), appOnlyRuntimeSecretArns());
   const selectorNames = ["AUTH_MFA_ENCRYPTION_KEY", "JWT_SECRET", "QR_SIGN_PRIVATE_KEY", "QR_SIGN_PUBLIC_KEY", "REDIS_URL"];
   const selected = secrets.filter(({ name }) => selectorNames.includes(name));
   assert.deepEqual(selected.map(({ name }) => name).sort(), [...selectorNames].sort());
@@ -149,10 +163,23 @@ export function appOnlyVerifierBoundaryPolicy() {
   const policy = appOnlyVerifierLauncherPolicy(`${familyArn(APP_ONLY_VERIFIER.family).slice(0, -1)}1`);
   for (const statement of policy.Statement) {
     if (statement.Sid === "RunExactReadOnlyVerifier") statement.Resource = familyArn(APP_ONLY_VERIFIER.family);
+    // The exact identity policy retains these constraints. Their resources are
+    // already fixed (or the APIs are read-only); omitting duplicate boundary
+    // conditions keeps exact secret ARNs under IAM's managed-policy quota.
+    if (["ReadExactService", "ReadRegionalTaskDefinitions", "ReadProductionTasks", "ListProductionTasks", "ReadCallerIdentity",
+      "ReadRegionalNetworkAndLogMetadata", "ReadVerifierOutput"].includes(statement.Sid))
+      delete statement.Condition;
     // Sid labels are not authorization semantics. Omit them from the managed
     // boundary to retain exact scopes within IAM's 6144-character limit.
     delete statement.Sid;
   }
+  const merged = new Map();
+  for (const statement of policy.Statement) {
+    const key = canonicalJson({ Effect: statement.Effect, Resource: statement.Resource, Condition: statement.Condition });
+    if (!merged.has(key)) merged.set(key, statement);
+    else merged.get(key).Action = [...new Set([].concat(merged.get(key).Action, statement.Action))];
+  }
+  policy.Statement = [...merged.values()];
   assert.ok(JSON.stringify(policy).length <= 6144, "Verifier boundary exceeds IAM managed-policy quota");
   return policy;
 }

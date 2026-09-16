@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { appOnlyDeployerPolicy, appOnlyVerifierLauncherPolicy, appOnlyVerifierNetwork, assertAppOnlyVerifierLaunch, APP_ONLY_VERIFIER,
-  APP_ONLY_PROVISIONING, appOnlyCompatibilityReadPolicy, appOnlyPermissionProvisionerPolicy, appOnlyVerifierBoundaryPolicy, appOnlyProductionOidcTrust } from "../aws/production-app-only-policy.mjs";
+  APP_ONLY_PROVISIONING, appOnlyCompatibilityReadPolicy, appOnlyPermissionProvisionerPolicy, appOnlyVerifierBoundaryPolicy, appOnlyProductionOidcTrust,
+  appOnlyRuntimeSecretArns, appOnlySecretMetadataResources } from "../aws/production-app-only-policy.mjs";
+import fs from "node:fs";
+import { parseEcsSecretsManagerReference } from "../aws/production-ecs-runtime-dependencies.mjs";
 import { APP_ONLY } from "../aws/production-app-only-contract.mjs";
 
 const verifierArn = `arn:aws:ecs:${APP_ONLY.region}:${APP_ONLY.account}:task-definition/${APP_ONLY_VERIFIER.family}:1`;
@@ -76,16 +79,18 @@ test("provisioner can create only two boundary-constrained roles and cannot alte
 
 test("verifier boundary permits family evolution but identity policy selects one revision", () => {
   const exact = appOnlyVerifierLauncherPolicy(verifierArn), boundary = appOnlyVerifierBoundaryPolicy();
-  for (let i = 0; i < exact.Statement.length; i++) {
-    const expected = structuredClone(exact.Statement[i]);
-    if (expected.Sid === "RunExactReadOnlyVerifier") expected.Resource = verifierArn.replace(/:1$/, ":*");
-    delete expected.Sid;
-    assert.deepEqual(boundary.Statement[i], expected);
-  }
-  assert.deepEqual(boundary.Statement.find(({ Action }) => Action === "ecs:RunTask").Condition, {
+  const mutation = (action) => boundary.Statement.find(({ Action }) => [].concat(Action).includes(action));
+  assert.deepEqual(mutation("ecs:RunTask").Condition, {
     StringEquals: { "aws:RequestedRegion": APP_ONLY.region, "ecs:enable-execute-command": "false" },
     ArnEquals: { "ecs:cluster": APP_ONLY.clusterArn },
   });
+  assert.deepEqual(mutation("iam:PassRole"), { Effect: "Allow", Action: "iam:PassRole",
+    Resource: [APP_ONLY_VERIFIER.taskRoleArn, APP_ONLY_VERIFIER.executionRoleArn],
+    Condition: { StringEquals: { "iam:PassedToService": "ecs-tasks.amazonaws.com" } } });
+  const metadata = mutation("secretsmanager:DescribeSecret");
+  assert.deepEqual(metadata.Resource, exact.Statement.find(({ Sid }) => Sid === "ReadRuntimeSecretMetadata").Resource);
+  assert.deepEqual(metadata.Action.sort(), ["secretsmanager:DescribeSecret", "secretsmanager:GetResourcePolicy", "secretsmanager:ListSecretVersionIds"].sort());
+  assert.ok(JSON.stringify(boundary).length <= 6144);
 });
 
 test("compatibility preparation cannot read DB credentials or mutate any production service", () => {
@@ -97,7 +102,22 @@ test("compatibility preparation cannot read DB credentials or mutate any product
   assert.equal(values.length, 5);
   assert.ok(values.every((arn) => arn.includes(":secret:mscqr/prod/") && !/[?*]/.test(arn) && !arn.includes("database")));
   const metadata = policy.Statement.find((s) => s.Sid === "ReadRuntimeSecretMetadata");
+  const template = JSON.parse(fs.readFileSync("infra/aws/terraform/production-green-stage-b/task-definitions/green-backend-candidate.json", "utf8"));
+  const staticSecrets = template.containerDefinitions[0].secrets.map(({ valueFrom }) => parseEcsSecretsManagerReference(valueFrom).resource);
+  const runtimeSecrets = appOnlyRuntimeSecretArns();
+  assert.deepEqual(metadata.Resource, appOnlySecretMetadataResources(staticSecrets, runtimeSecrets));
+  assert.ok(runtimeSecrets.every((arn) => metadata.Resource.includes(arn)));
+  assert.ok(metadata.Resource.some((arn) => arn.includes("artifact-signing/public-key-current-")));
+  assert.equal(new Set(metadata.Resource).size, metadata.Resource.length);
+  assert.deepEqual(appOnlySecretMetadataResources([staticSecrets[0]], [staticSecrets[0]], runtimeSecrets),
+    appOnlySecretMetadataResources([staticSecrets[0]], runtimeSecrets));
   assert.ok(!metadata.Action.includes("secretsmanager:GetSecretValue"));
+  assert.deepEqual(metadata.Action.sort(), ["secretsmanager:DescribeSecret", "secretsmanager:GetResourcePolicy", "secretsmanager:ListSecretVersionIds"].sort());
+  assert.ok(metadata.Resource.every((arn) => !arn.includes("*") && !arn.includes("?")));
+  assert.ok(runtimeSecrets.filter((arn) => !staticSecrets.includes(arn)).every((arn) => !values.includes(arn)));
+  const failedArn = runtimeSecrets.find((arn) => arn.includes("artifact-signing/public-key-current-"));
+  assert.ok(metadata.Action.includes("secretsmanager:DescribeSecret") && metadata.Resource.includes(failedArn),
+    "Generated reader policy must pass the exact previously denied DescribeSecret boundary");
   assert.ok(metadata.Resource.some((arn) => arn.includes("database-url/app-")));
   assert.ok(JSON.stringify(appOnlyVerifierBoundaryPolicy()).length <= 6144);
   assert.ok(JSON.stringify(appOnlyVerifierLauncherPolicy(verifierArn)).length <= 10240);
