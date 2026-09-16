@@ -20,6 +20,13 @@ const authenticate = (authorization, expectedSourceSha) => {
 const webAuthorization = { operation: "PRODUCTION_WEB_IMAGE_AUTHORIZATION", valid: true, sourceSha };
 const webBytes = Buffer.from(JSON.stringify(webAuthorization));
 const webDigest = crypto.createHash("sha256").update(webBytes).digest("hex");
+const webImpactFixture = makeCanonicalImageAuthorization({ sourceSha, imageReleaseSha: sourceSha, impactImageReleaseSha: "594bab55f23ff8b2438c12b85b149ba0aebeed1e" });
+const webImpactBytes = Buffer.from(JSON.stringify(webImpactFixture.authorization));
+const webImpactDigest = crypto.createHash("sha256").update(webImpactBytes).digest("hex");
+const authenticateWebImpact = (authorization, expectedSourceSha) => {
+  verifyProductionReleaseImageAuthorization({ authorization, sourceSha: expectedSourceSha, verifyImageEvidence: webImpactFixture.verifyImageEvidence, now: webImpactFixture.now });
+  return true;
+};
 
 test("Release Train validates and forwards the complete normal Release Gate contract", () => {
   const releaseTrain = yaml.load(fs.readFileSync(".github/workflows/release-train.yml", "utf8"));
@@ -40,8 +47,11 @@ test("normal Release Gate rejects missing preservation, missing or stale authori
 });
 
 test("web-impacting normal release requires source-bound web transport and activates instead of preserving", () => {
-  assert.equal(assertNormalReleaseAuthorizationTransport({ sourceSha, authorizationBytes: bytes, expectedSha256: digest, webAuthorizationBytes: webBytes, webExpectedSha256: webDigest, webPublicationRequired: true }).webPublicationRequired, true);
-  assert.equal(assertNormalReleaseGateInputs({ sourceSha, preserveCurrentFrontend: false, authorizationBytes: bytes, expectedSha256: digest, webAuthorizationBytes: webBytes, webExpectedSha256: webDigest, webPublicationRequired: true, authenticateAuthorization: authenticate, authenticateWebAuthorization: (value, sha) => value === webAuthorization || value.sourceSha === sha }), true);
-  assert.throws(() => assertNormalReleaseAuthorizationTransport({ sourceSha, authorizationBytes: bytes, expectedSha256: digest, webPublicationRequired: true }), /Web image-authorization|requires web/);
-  assert.throws(() => assertNormalReleaseGateInputs({ sourceSha, preserveCurrentFrontend: true, authorizationBytes: bytes, expectedSha256: digest, webAuthorizationBytes: webBytes, webExpectedSha256: webDigest, webPublicationRequired: true, authenticateAuthorization: authenticate, authenticateWebAuthorization: () => true }), /frontend action/);
+  assert.equal(assertNormalReleaseAuthorizationTransport({ sourceSha, authorizationBytes: webImpactBytes, expectedSha256: webImpactDigest, webAuthorizationBytes: webBytes, webExpectedSha256: webDigest, webPublicationRequired: true }).webPublicationRequired, true);
+  assert.equal(assertNormalReleaseGateInputs({ sourceSha, preserveCurrentFrontend: false, authorizationBytes: webImpactBytes, expectedSha256: webImpactDigest, webAuthorizationBytes: webBytes, webExpectedSha256: webDigest, webPublicationRequired: true, authenticateAuthorization: authenticateWebImpact, authenticateWebAuthorization: (value, sha) => value === webAuthorization || value.sourceSha === sha }), true);
+  assert.throws(() => assertNormalReleaseAuthorizationTransport({ sourceSha, authorizationBytes: webImpactBytes, expectedSha256: webImpactDigest, webPublicationRequired: true }), /Web image-authorization|requires web/);
+  assert.throws(() => assertNormalReleaseGateInputs({ sourceSha, preserveCurrentFrontend: true, authorizationBytes: webImpactBytes, expectedSha256: webImpactDigest, webAuthorizationBytes: webBytes, webExpectedSha256: webDigest, webPublicationRequired: true, authenticateAuthorization: authenticateWebImpact, authenticateWebAuthorization: () => true }), /frontend action/);
+  const tampered = structuredClone(webImpactFixture.authorization); tampered.imageReuseEvidence.webPublicationRequired = false;
+  const tamperedBytes = Buffer.from(JSON.stringify(tampered));
+  assert.throws(() => assertNormalReleaseAuthorizationTransport({ sourceSha, authorizationBytes: tamperedBytes, expectedSha256: crypto.createHash("sha256").update(tamperedBytes).digest("hex"), webPublicationRequired: false }), /canonical source-bound envelope/);
 });

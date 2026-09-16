@@ -6,7 +6,6 @@ import { verifyProductionReleaseImageAuthorization, createReleaseGateImageAuthor
 import { createPinnedRootAttestationVerifier } from "./production-root-attestation-key.mjs";
 import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
 import { assertCoordinatedImageAuthorization } from "./production-web-release-contract.mjs";
-import { deriveStageBImageImpactReport } from "./validate-stage-b-image-reuse.mjs";
 
 const HASH = /^[a-f0-9]{64}$/;
 const SHA = /^[a-f0-9]{40}$/;
@@ -22,7 +21,7 @@ function readBoundJson(file, expectedHash, label) {
 export async function verifyCoordinatedWebRelease({ sourceSha, stageBAuthorization, webAuthorization, now = new Date().toISOString(), verifyWeb = createPinnedRootAttestationVerifier(), verifyStageBImageEvidence } = {}) {
   if (!SHA.test(sourceSha || "")) throw new Error("Protected source SHA is malformed.");
   verifyProductionReleaseImageAuthorization({ authorization: stageBAuthorization, sourceSha, verifyImageEvidence: verifyStageBImageEvidence, now });
-  const impact = deriveStageBImageImpactReport({ imageReleaseSha: stageBAuthorization.imageReleaseSha, toolingSha: sourceSha });
+  const impact = stageBAuthorization.imageReuseEvidence;
   return Object.freeze({ ...assertCoordinatedImageAuthorization({ sourceSha, stageBAuthorization, webAuthorization, webPublicationRequired: impact.webPublicationRequired, verifyWeb, now }), imageImpact: impact });
 }
 

@@ -26,7 +26,7 @@ test("frontend runtime inputs require publication while test paths remain test-o
     assert.equal(imageImpactReportFor({ imageReleaseSha: "a".repeat(40), toolingSha: "b".repeat(40), toolingInputTreeSha256: "c".repeat(64), changedFiles: [file] }).imageReuseCompatible, false);
   }
   assert.equal(classifyStageBImageReusePath("src/test/audit-scope.test.tsx").category, "testOnly");
-  assert.equal(classifyStageBImageReusePath("src/unreviewed/runtime.bin").category, "unknown");
+  assert.equal(classifyStageBImageReusePath("src/unreviewed/runtime.bin").category, "runtimeApplicationSource");
 });
 
 test("governed web publisher changes require web publication while activation and IAM stay control-plane only", () => {
@@ -40,6 +40,23 @@ test("governed web publisher changes require web publication while activation an
   assert.equal(report.webPublicationRequired, true);
   assert.equal(report.classifiedChangedFiles.find(({ file }) => file.endsWith("production-web-activation.yml")).imageAffecting, false);
   assert.equal(report.classifiedChangedFiles.find(({ file }) => file.endsWith("main.tf")).category, "terraformOnly");
+});
+
+test("every direct production web Docker input requires web publication", () => {
+  const inputs = [
+    ".dockerignore", "Dockerfile.ecs-frontend", "components.json", "docker/nginx-entrypoint.sh", "eslint.config.js", "index.html",
+    "nginx.ecs-frontend.conf", "package.json", "package-lock.json", "postcss.config.js", "public/favicon.ico",
+    "shared/contracts.ts", "src/App.tsx", "tailwind.config.ts", "tsconfig.app.json", "tsconfig.incremental-strict.json", "tsconfig.json",
+    "tsconfig.node.json", "vite.config.ts", "vitest.config.ts",
+  ];
+  for (const file of inputs) {
+    const report = imageImpactReportFor({ imageReleaseSha, toolingSha, toolingInputTreeSha256, changedFiles: [file] });
+    assert.equal(report.webPublicationRequired, true, file);
+    assert.deepEqual(report.webAffectingFiles, [file], file);
+  }
+  for (const file of ["backend/src/app.ts", "infra/aws/terraform/production-web-release/main.tf", ".github/workflows/release-gate.yml"]) {
+    assert.equal(imageImpactReportFor({ imageReleaseSha, toolingSha, toolingInputTreeSha256, changedFiles: [file] }).webPublicationRequired, false, file);
+  }
 });
 const toolingSha = "b".repeat(40);
 const toolingInputTreeSha256 = "c".repeat(64);

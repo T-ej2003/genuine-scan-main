@@ -42,9 +42,10 @@ test("web evidence and authorization reject source, repository, digest, expiry, 
 });
 
 test("coordinated release requires matching web authorization only when web publication is required", () => {
-  const { authorization } = fixture(); const stageB = { sourceSha, authorizationSha256: "d".repeat(64) };
+  const { authorization } = fixture(); const stageB = { sourceSha, authorizationSha256: "d".repeat(64), imageReuseEvidence: impact };
   assert.equal(assertCoordinatedImageAuthorization({ sourceSha, stageBAuthorization: stageB, webAuthorization: authorization, webPublicationRequired: true, verifyWeb: () => true, now: createdAt }).webRequired, true);
   assert.throws(() => assertCoordinatedImageAuthorization({ sourceSha, stageBAuthorization: stageB, webAuthorization: { ...authorization, sourceSha: "e".repeat(40) }, webPublicationRequired: true, verifyWeb: () => true, now: createdAt }), /invalid/);
+  assert.throws(() => assertCoordinatedImageAuthorization({ sourceSha, stageBAuthorization: { ...stageB, imageReuseEvidence: { ...impact, classifiedFiles: ["src/other.tsx"] } }, webAuthorization: authorization, webPublicationRequired: true, verifyWeb: () => true, now: createdAt }), /image impact/);
   assert.equal(assertCoordinatedImageAuthorization({ sourceSha, stageBAuthorization: stageB, webPublicationRequired: false }).webRequired, false);
 });
 
@@ -63,6 +64,17 @@ test("frontend candidate is image-only, read back exactly, and uses predecessor 
   assert.equal(buildFrontendRollback({ predecessor, failedCandidateTaskDefinitionArn: candidateArn }).taskDefinition, taskArn);
   assert.throws(() => buildFrontendRollback({ predecessor, failedCandidateTaskDefinitionArn: taskArn }), /invalid/);
   assert.throws(() => buildFrontendCandidate({ predecessor, authenticatedWebAuthorization: { sourceSha, imageRef, authorizationSha256: authorization.authorizationSha256 } }), /Authenticated/);
+});
+
+test("frontend preservation authenticates stable governed revisions after bootstrap", () => {
+  for (const revision of [20, 21, 22, 107]) {
+    const arn = taskArn.replace(":20", `:${revision}`);
+    const currentTask = { ...task, taskDefinitionArn: arn, revision };
+    const currentService = { ...service, taskDefinition: arn, deployments: [{ ...service.deployments[0], taskDefinition: arn }] };
+    assert.equal(captureFrontendPredecessor(currentService, currentTask).taskDefinitionArn, arn);
+  }
+  assert.throws(() => captureFrontendPredecessor({ ...service, deployments: [...service.deployments, { ...service.deployments[0], id: "ecs-svc/old", status: "ACTIVE" }] }, task), /stable production service/);
+  assert.throws(() => captureFrontendPredecessor(service, { ...task, containerDefinitions: [...task.containerDefinitions, { name: "sidecar", image: task.containerDefinitions[0].image }] }), /stable production service/);
 });
 
 test("frontend activation updates once and rollback can only restore its captured predecessor", async () => {
@@ -86,6 +98,10 @@ test("web workflow and IAM are fixed, OIDC-only, and isolated from Stage-B four-
   assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs), ["release_sha"]); assert.equal(job.environment, WEB_RELEASE.environment); assert.equal(job.permissions["id-token"], "write");
   const serialized = JSON.stringify(workflow); for (const forbidden of ["inputs.repository", "inputs.dockerfile", "inputs.platform", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]) assert.doesNotMatch(serialized, new RegExp(forbidden));
   for (const required of ["mscqr-web", "Dockerfile.ecs-frontend", "linux/amd64", "368992683803", "eu-west-2", "PRODUCTION_WEB_IMAGE_PUBLISH_ROLE"]) assert.match(serialized, new RegExp(required.replaceAll(".", "\\.")));
+  const build = job.steps.find(({ name }) => name === "Publish exact immutable web image").run;
+  assert.match(build, /--build-arg "GIT_SHA=\$IMAGE_TAG"/);
+  assert.match(build, /--build-arg "RELEASE_GIT_SHA=\$IMAGE_TAG"/);
+  assert.match(job.steps.find(({ name }) => name === "Bind protected source").run, /test "\$GITHUB_SHA" = "\$IMAGE_TAG"/);
   const publisher = JSON.parse(fs.readFileSync("infra/aws/terraform/production-web-release/publisher-permissions-policy.json")); const allowedResources = publisher.Statement.filter(({ Effect }) => Effect === "Allow").flatMap(({ Resource }) => Array.isArray(Resource) ? Resource : [Resource]); assert.equal(allowedResources.some((resource) => String(resource).includes("mscqr-backend") || String(resource).includes("mscqr-worker")), false);
   const activation = JSON.parse(fs.readFileSync("infra/aws/terraform/production-web-release/frontend-activation-policy.json"));
   const register = activation.Statement.find(({ Action }) => Action === "ecs:RegisterTaskDefinition"); assert.equal(register.Resource, "*"); assert.deepEqual(register.Condition, { StringEquals: { "aws:RequestedRegion": "eu-west-2" } });

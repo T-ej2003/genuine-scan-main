@@ -41,13 +41,19 @@ const IMAGE_INPUTS = [
 ];
 const WEB_IMAGE_INPUTS = [
   /^\.github\/workflows\/production-web-image\.yml$/,
+  /^\.dockerignore$/,
   /^Dockerfile\.ecs-frontend$/,
+  /^components\.json$/,
+  /^docker\/nginx-entrypoint\.sh$/,
+  /^eslint\.config\.js$/,
   /^nginx\.ecs-frontend\.conf$/,
   /^index\.html$/,
+  /^postcss\.config\.js$/,
   /^public\//,
   /^src\//,
   /^shared\//,
-  /^(?:package\.json|package-lock\.json|vite\.config\.[^/]+|tsconfig[^/]*\.json)$/,
+  /^tailwind\.config\.ts$/,
+  /^(?:package\.json|package-lock\.json|vite\.config\.[^/]+|vitest\.config\.[^/]+|tsconfig[^/]*\.json)$/,
 ];
 const DOCUMENTATION = /(?:^|\/)(?:documents|README|CHANGELOG|.*\.md)(?:\/|$)/;
 const CI = /^\.github\/workflows\//;
@@ -227,11 +233,15 @@ function classifyChangedFiles({ imageReleaseSha, toolingSha, changedFiles }) {
 export function classifyStageBImageReusePath(file) {
   // Dockerfile.ecs-frontend copies src into the Vite build. Runtime edits
   // require publication, never a tooling-only or compatibility exemption.
-  if (/^src\/(?:components|features|hooks|lib|pages)\/.*\.(?:ts|tsx)$/.test(file) && !TEST.test(file)) {
+  if (/^src\//.test(file) && !TEST.test(file)) {
     return { file, category: "runtimeApplicationSource", imageAffecting: true };
   }
   if (CONTROL_PLANE.test(file)) return { file, category: "controlPlaneOnly", imageAffecting: false };
-  if (file === ".github/workflows/production-web-image.yml") return { file, category: "dockerBuildConfiguration", imageAffecting: true };
+  if (TEST.test(file)) return { file, category: "testOnly", imageAffecting: false };
+  if (!/^(?:src|shared)\//.test(file) && WEB_IMAGE_INPUTS.some((pattern) => pattern.test(file))) {
+    const category = /Dockerfile|dockerignore|production-web-image/.test(file) ? "dockerBuildConfiguration" : /^(?:public|scripts|shared|src)\//.test(file) ? "runtimeApplicationSource" : "imageBuildInput";
+    return { file, category, imageAffecting: true };
+  }
   if (IMAGE_INPUTS.some((pattern) => pattern.test(file))) {
     const category = /package-lock|lock$/.test(file) ? "dependencyLockfile" : /Dockerfile|dockerignore|workflow.*image-build/.test(file) ? "dockerBuildConfiguration" : /^backend\//.test(file) || /^shared\//.test(file) ? "runtimeApplicationSource" : /generated/.test(file) ? "generatedRuntimePackage" : "imageBuildInput";
     return { file, category, imageAffecting: true };

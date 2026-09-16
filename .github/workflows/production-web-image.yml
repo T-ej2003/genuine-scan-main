@@ -59,7 +59,7 @@ jobs:
         run: |
           set -euo pipefail
           image_uri="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG"
-          docker buildx build --platform "$PLATFORM" --file Dockerfile.ecs-frontend --label "org.opencontainers.image.revision=$IMAGE_TAG" --push --tag "$image_uri" .
+          docker buildx build --platform "$PLATFORM" --file Dockerfile.ecs-frontend --build-arg "GIT_SHA=$IMAGE_TAG" --build-arg "RELEASE_GIT_SHA=$IMAGE_TAG" --label "org.opencontainers.image.revision=$IMAGE_TAG" --push --tag "$image_uri" .
           digest="$(aws ecr describe-images --repository-name "$ECR_REPOSITORY" --image-ids "imageTag=$IMAGE_TAG" --query 'imageDetails[0].imageDigest' --output text)"
           [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
           image_ref="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY@$digest"

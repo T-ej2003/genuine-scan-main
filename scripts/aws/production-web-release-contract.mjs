@@ -88,6 +88,7 @@ export function assertWebImageAuthorization(value, { sourceSha, now, verify } = 
 export function assertCoordinatedImageAuthorization({ sourceSha, stageBAuthorization, webAuthorization, webPublicationRequired, verifyWeb, now } = {}) {
   if (stageBAuthorization?.sourceSha !== sourceSha) throw new Error("Stage-B authorization source does not match coordinated release source.");
   if (!webPublicationRequired) return Object.freeze({ sourceSha, webRequired: false, stageBAuthorizationSha256: stageBAuthorization.authorizationSha256 });
+  if (webAuthorization?.imageImpactSha256 !== canonicalSha256(stageBAuthorization.imageReuseEvidence)) throw new Error("Web authorization does not match the authenticated Stage-B image impact.");
   assertWebImageAuthorization(webAuthorization, { sourceSha, now, verify: verifyWeb });
   return Object.freeze({ sourceSha, webRequired: true, stageBAuthorizationSha256: stageBAuthorization.authorizationSha256, webAuthorizationSha256: webAuthorization.authorizationSha256, webImageRef: webAuthorization.imageRef });
 }
@@ -101,7 +102,7 @@ export function authenticateWebImageAuthorization({ sourceSha, webAuthorization,
 
 export function captureFrontendPredecessor(service, taskDefinition) {
   const deployment = service?.deployments?.find(({ status }) => status === "PRIMARY"); const container = taskDefinition?.containerDefinitions?.find(({ name }) => name === WEB_RELEASE.container);
-  if (service?.serviceArn !== SERVICE_ARN || service.clusterArn !== CLUSTER_ARN || service.serviceName !== WEB_RELEASE.serviceName || service.status !== "ACTIVE" || service.desiredCount !== 2 || service.runningCount !== 2 || service.pendingCount !== 0 || service.taskDefinition !== taskDefinition?.taskDefinitionArn || !TASK_ARN.test(service.taskDefinition || "") || deployment?.taskDefinition !== service.taskDefinition || deployment.rolloutState !== "COMPLETED" || typeof deployment.id !== "string" || !IMAGE.test(container?.image || "")) throw new Error("Frontend predecessor is not the exact stable production service.");
+  if (service?.serviceArn !== SERVICE_ARN || service.clusterArn !== CLUSTER_ARN || service.serviceName !== WEB_RELEASE.serviceName || service.status !== "ACTIVE" || service.desiredCount !== 2 || service.runningCount !== 2 || service.pendingCount !== 0 || service.deployments?.length !== 1 || service.taskDefinition !== taskDefinition?.taskDefinitionArn || !TASK_ARN.test(service.taskDefinition || "") || deployment?.taskDefinition !== service.taskDefinition || deployment.rolloutState !== "COMPLETED" || typeof deployment.id !== "string" || taskDefinition?.family !== WEB_RELEASE.family || taskDefinition.containerDefinitions?.length !== 1 || !IMAGE.test(container?.image || "")) throw new Error("Frontend predecessor is not the exact stable production service.");
   return Object.freeze({ serviceArn: SERVICE_ARN, clusterArn: CLUSTER_ARN, taskDefinitionArn: service.taskDefinition, deploymentId: deployment.id, desiredCount: 2, runningCount: 2, pendingCount: 0, imageRef: container.image, taskDefinition: structuredClone(taskDefinition) });
 }
 
