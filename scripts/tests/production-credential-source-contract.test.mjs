@@ -51,6 +51,22 @@ const accessKeys = Object.freeze({
   PATH: process.env.PATH,
 });
 
+test("app-only identities use isolated OIDC sessions and cannot fall back to local profiles", () => {
+  for (const credentialSource of [PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_CHECKER_SESSION,
+    PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_POLICY_RECONCILER, PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER]) {
+    const calls = [];
+    const run = createProductionAwsCommandRunner({ credentialSource, env: oidc,
+      exec: (file, args, options) => { calls.push({ file, args, options }); return "{}"; } });
+    run(["sts", "get-caller-identity"]);
+    assert.equal(calls.length, 1); assertAwsOverridesAbsent(calls[0].options.env);
+    for (const name of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"]) {
+      assert.equal(calls[0].options.env[name], oidc[name]);
+      assert.throws(() => createProductionAwsCommandRunner({ credentialSource, env: { ...oidc, [name]: "" },
+        exec: () => assert.fail("Missing session must fail before invoking AWS") })(["sts", "get-caller-identity"]));
+    }
+  }
+});
+
 test("GitHub release-gate composition preserves only the OIDC session and never selects a profile", () => {
   const calls = [];
   const run = createProductionCommandRunner({
@@ -275,6 +291,11 @@ test("production image publisher workflows select explicit OIDC or the documente
 
 test("every GitHub workflow credential root is classified by its authenticated mode", () => {
   const oidcWorkflows = [
+    ".github/workflows/prepare-production-app-only-verifier-operation.yml",
+    ".github/workflows/prepare-production-app-only-deployment-operation.yml",
+    ".github/workflows/provision-production-app-only-deployer-operation.yml",
+    ".github/workflows/deploy-production-app-only-operation.yml",
+    ".github/workflows/verify-production-app-only-compatibility-operation.yml",
     ".github/workflows/authorize-production-bootstrap-operator-policy-reconciliation.yml",
     ".github/workflows/produce-production-green-stage-b-release-preflight.yml",
     ".github/workflows/produce-production-green-stage-b-state-reconciliation-image-authorization.yml",
@@ -304,6 +325,13 @@ test("operator documentation declares the exact non-profile verifier and checker
 
 test("every direct production AWS root declares its credential provenance before invoking AWS", () => {
   const roots = [
+    ["scripts/aws/run-production-app-only-bootstrap.mjs", "NAMED_PROFILE"],
+    ["scripts/aws/prepare-production-app-only-verifier.mjs", "INHERITED_CHECKER_SESSION"],
+    ["scripts/aws/prepare-production-app-only-deployment.mjs", "INHERITED_CHECKER_SESSION"],
+    ["scripts/aws/run-production-app-only-deployment.mjs", "GITHUB_OIDC_POLICY_RECONCILER"],
+    ["scripts/aws/run-production-app-only-deployment.mjs", "GITHUB_OIDC_RELEASE_DEPLOYER"],
+    ["scripts/aws/run-production-app-only-verifier.mjs", "GITHUB_OIDC_POLICY_RECONCILER"],
+    ["scripts/aws/run-production-app-only-verifier.mjs", "INHERITED_CHECKER_SESSION"],
     ["scripts/aws/verify-production-release-image-authorization.mjs", "GITHUB_OIDC_RELEASE_DEPLOYER"],
     ["scripts/aws/create-production-green-stage-b-approval.mjs", "INHERITED_CHECKER_SESSION"],
     ["scripts/aws/publish-production-green-stage-b-approval.mjs", "INHERITED_CHECKER_SESSION"],

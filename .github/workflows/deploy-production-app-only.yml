@@ -1,0 +1,31 @@
+name: Deploy governed production backend application
+'on':
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact protected-main SHA
+        required: true
+        type: string
+      preparation_reference:
+        description: Exact compact release preparation artifact identity JSON
+        required: true
+        type: string
+      provisioning_reference:
+        description: Exact compact successful permission artifact identity JSON
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+jobs:
+  operation:
+    if: github.ref == 'refs/heads/main' && github.run_attempt == 1
+    uses: ./.github/workflows/deploy-production-app-only-operation.yml
+    with:
+      source_sha: ${{ inputs.source_sha }}
+      preparation_reference: ${{ inputs.preparation_reference }}
+      provisioning_reference: ${{ inputs.provisioning_reference }}

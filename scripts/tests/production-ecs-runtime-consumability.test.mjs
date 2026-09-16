@@ -333,7 +333,8 @@ test("non-logging runtime simulations retain exact resources and KMS context", a
   });
   for (const dependency of dependencies) assert.deepEqual(simulations[dependency.dependencyId], { principalArn: dependency.principalArn, action: dependency.action, resource: dependency.resource, decision: "allowed" });
   assert.equal(calls.every((args, index) => args[args.indexOf("--resource-arns") + 1] === dependencies[index].resource), true);
-  assert.equal(calls.find((args) => args.includes("kms:Decrypt")).includes("ContextKeyName=kms:ViaService,ContextKeyValues=secretsmanager.eu-west-2.amazonaws.com,ContextKeyType=string"), true);
+  assert.equal(calls.every((args, index) => args[args.indexOf("--action-names") + 1] === dependencies[index].action.toLowerCase()), true);
+  assert.equal(calls.find((args) => args.includes("kms:decrypt")).includes("ContextKeyName=kms:ViaService,ContextKeyValues=secretsmanager.eu-west-2.amazonaws.com,ContextKeyType=string"), true);
 });
 
 test("repeated candidate secret references retain dependency identity but deduplicate IAM resources", () => {

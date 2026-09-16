@@ -42,6 +42,9 @@ const IMAGE_INPUTS = [
 const DOCUMENTATION = /(?:^|\/)(?:documents|README|CHANGELOG|.*\.md)(?:\/|$)/;
 const CI = /^\.github\/workflows\//;
 const TERRAFORM = /^infra\/aws\/terraform\/(?:production-green-stage-(?:a|b(?:-image-publisher|-publisher-bootstrap)?)|production-initial-activation-policy-reconciler)\//;
+// This isolated root creates IAM permissions only and is absent from all
+// canonical Docker COPY inputs. Do not classify arbitrary neighboring files.
+const APP_ONLY_PERMISSION_SOURCE = /^infra\/aws\/terraform\/production-app-only-permissions\/(?:main\.tf\.json|\.terraform\.lock\.hcl)$/;
 const CONTROL_PLANE = /^infra\/aws\/terraform\/lambda\/production-rls-approval-broker\/(?:index\.mjs|ecs-task-definition-readback\.mjs|package\.json|package-lock\.json)$/;
 const TEST = /(?:^|\/)(?:e2e|tests?|fixtures)(?:\/|\.)|\.test\.[^.]+$/;
 const TOOLING_ONLY = new Set([".gitleaks-baseline.json", ".gitleaksignore", ".security/rotation-evidence.schema.json"]);
@@ -217,7 +220,7 @@ export function classifyStageBImageReusePath(file) {
     const category = /package-lock|lock$/.test(file) ? "dependencyLockfile" : /Dockerfile|dockerignore|workflow.*image-build/.test(file) ? "dockerBuildConfiguration" : /^backend\//.test(file) || /^shared\//.test(file) ? "runtimeApplicationSource" : /generated/.test(file) ? "generatedRuntimePackage" : "imageBuildInput";
     return { file, category, imageAffecting: true };
   }
-  if (TERRAFORM.test(file)) return { file, category: "terraformOnly", imageAffecting: false };
+  if (TERRAFORM.test(file) || APP_ONLY_PERMISSION_SOURCE.test(file)) return { file, category: "terraformOnly", imageAffecting: false };
   if (CI.test(file)) return { file, category: "ciOnly", imageAffecting: false };
   if (DOCUMENTATION.test(file)) return { file, category: "documentationOnly", imageAffecting: false };
   if (TEST.test(file)) return { file, category: "testOnly", imageAffecting: false };

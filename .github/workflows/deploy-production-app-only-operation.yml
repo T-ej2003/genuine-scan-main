@@ -1,0 +1,103 @@
+name: Deploy governed production backend application
+
+on:
+  workflow_call:
+    inputs:
+      source_sha: { description: Exact protected-main SHA, required: true, type: string }
+      preparation_reference: { description: Exact compact release preparation artifact identity JSON, required: true, type: string }
+      provisioning_reference: { description: Exact compact successful permission artifact identity JSON, required: true, type: string }
+
+permissions: { contents: read, actions: read }
+jobs:
+  review:
+    if: github.ref == 'refs/heads/main' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with: { ref: '${{ github.sha }}', fetch-depth: 0, persist-credentials: false }
+      - uses: actions/setup-node@v6
+        with: { node-version: 24, cache: npm }
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Show immutable approval subject before production approval
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          PREPARATION_REFERENCE: ${{ inputs.preparation_reference }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import fs from 'node:fs';
+          import { parseAppOnlyArtifactReference, downloadAppOnlyArtifact } from './scripts/aws/production-app-only-artifacts.mjs';
+          import { assertAppOnlyReleaseInputs } from './scripts/aws/run-production-app-only-deployment.mjs';
+          assert.equal(process.env.SOURCE_SHA,process.env.GITHUB_SHA);
+          const reference=parseAppOnlyArtifactReference(process.env.PREPARATION_REFERENCE);
+          assert.equal(reference.sourceSha,process.env.SOURCE_SHA);
+          const artifact=downloadAppOnlyArtifact({kind:'preparation',reference,repositoryRoot:process.cwd()});
+          const release=assertAppOnlyReleaseInputs(JSON.parse(artifact.bytes),process.env.SOURCE_SHA);
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,JSON.stringify({deployment:release.deployment.preparation,permissions:release.permissionPreparation},null,2));
+          NODE
+  deploy:
+    needs: review
+    runs-on: ubuntu-latest
+    environment: production
+    permissions: { contents: read, actions: read, id-token: write }
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with: { ref: '${{ github.sha }}', fetch-depth: 0, persist-credentials: false }
+      - uses: actions/setup-node@v6
+        with: { node-version: 24, cache: npm }
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Authenticate actual production approval
+        id: approval
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          umask 077
+          directory="$(mktemp -d)"
+          chmod 700 "$directory"
+          node scripts/aws/production-github-environment-approval.mjs --output "$directory/approval.json" \
+            --repository "$GITHUB_REPOSITORY" --environment production --source-sha "$SOURCE_SHA" \
+            --workflow-ref "$GITHUB_WORKFLOW_REF" --event-name "$GITHUB_EVENT_NAME" \
+            --workflow-run-id "$GITHUB_RUN_ID" --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --execution-actor "$GITHUB_ACTOR" --require-actual-approval > /dev/null
+          printf 'path=%s\n' "$directory/approval.json" >> "$GITHUB_OUTPUT"
+          printf 'sha256=%s\n' "$(sha256sum "$directory/approval.json" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+      - name: Assume exact isolated deploy identity
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: eu-west-2
+          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-app-only-deployer
+          unset-current-credentials: true
+      - name: Execute authenticated deploy contract
+        id: operation
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          PREPARATION_REFERENCE: ${{ inputs.preparation_reference }}
+          PROVISIONING_REFERENCE: ${{ inputs.provisioning_reference }}
+          APPROVAL: ${{ steps.approval.outputs.path }}
+          APPROVAL_SHA256: ${{ steps.approval.outputs.sha256 }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node scripts/aws/run-production-app-only-deployment.mjs --mode deploy --source-sha "$SOURCE_SHA" \
+            --preparation-reference "$PREPARATION_REFERENCE" --approval "$APPROVAL" --approval-sha256 "$APPROVAL_SHA256" \
+            --provisioning-reference "$PROVISIONING_REFERENCE"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-app-only-deployment
+          path: ${{ steps.operation.outputs.path }}
+          if-no-files-found: error
+          retention-days: 30
+      - name: Preserve mutation journals even when operation fails
+        if: always() && steps.operation.outputs.journal != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-app-only-deploy-journals
+          path: ${{ steps.operation.outputs.journal }}
+          if-no-files-found: error
+          retention-days: 30

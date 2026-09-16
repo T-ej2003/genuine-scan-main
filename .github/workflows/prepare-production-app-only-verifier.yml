@@ -1,0 +1,41 @@
+name: Prepare production app-only compatibility verifier
+'on':
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact protected-main SHA
+        required: true
+        type: string
+      candidate_digest:
+        description: Authenticated immutable backend digest
+        required: true
+        type: string
+      publication_reference:
+        description: Compact publication artifact identity JSON
+        required: true
+        type: string
+      image_authorization_reference:
+        description: Compact signed image authorization artifact identity JSON
+        required: true
+        type: string
+      requirements_reference:
+        description: Compact canonical requirements artifact identity JSON
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+jobs:
+  operation:
+    if: github.ref == 'refs/heads/main' && github.run_attempt == 1
+    uses: ./.github/workflows/prepare-production-app-only-verifier-operation.yml
+    with:
+      source_sha: ${{ inputs.source_sha }}
+      candidate_digest: ${{ inputs.candidate_digest }}
+      publication_reference: ${{ inputs.publication_reference }}
+      image_authorization_reference: ${{ inputs.image_authorization_reference }}
+      requirements_reference: ${{ inputs.requirements_reference }}

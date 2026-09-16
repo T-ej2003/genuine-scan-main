@@ -53,6 +53,50 @@ permissions:
   contents: read
 
 jobs:
+  app-only-deployment-contract:
+    name: App-only deployment contract and real PostgreSQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.8
+          terraform_wrapper: false
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: backend
+      - run: npx --no-install prisma generate
+        working-directory: backend
+      - name: Install PostgreSQL client and start isolated harness
+        run: |
+          sudo apt-get update && sudo apt-get install -y postgresql-client
+          npm run test:p2:db:up
+          node scripts/p2-test-db-tls.mjs
+      - name: Test app-only contracts against real PostgreSQL
+        run: node --test scripts/tests/production-app-only-*.test.mjs
+      - name: Certify full production package on disposable PostgreSQL
+        env:
+          MSCQR_PRODUCTION_PACKAGE_POSTGRES18_TEST: "true"
+          MSCQR_PRODUCTION_PACKAGE_POSTGRES18_ADMIN_URL: postgresql://mscqr_p2_test@127.0.0.1:55432/mscqr_p2_admin_test
+        run: node --test scripts/tests/production-full-rls-package-postgres18.test.mjs
+      - name: Verify restored generated contracts and permission source
+        run: |
+          npm run rls:full-verify
+          node scripts/aws/generate-production-app-only-infrastructure.mjs
+          terraform -chdir=infra/aws/terraform/production-app-only-permissions fmt -check
+          terraform -chdir=infra/aws/terraform/production-app-only-permissions init -backend=false -input=false -lockfile=readonly
+          terraform -chdir=infra/aws/terraform/production-app-only-permissions validate -no-color
+          npx --no-install eslint scripts/aws/*app-only*.mjs scripts/p2-test-db-tls.mjs scripts/tests/production-app-only-*.test.mjs
+          git diff --exit-code
+
   full-rls-package:
     name: Full RLS package verification
     runs-on: ubuntu-latest
