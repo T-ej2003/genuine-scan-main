@@ -46,6 +46,7 @@ test("verifier registration is the exact source-owned read-only boundary with fi
   const databaseSecretArn = `arn:aws:secretsmanager:${APP_ONLY.region}:${APP_ONLY.account}:secret:mscqr/production/rls-green/phase4/read-only-canary-database-url-ABC123`;
   const input = { requirements, identity, repositoryRoot, databaseSecretArn };
   const { definition } = buildAppOnlyVerifierDefinition(input);
+  assert.doesNotThrow(() => new Function(definition.containerDefinitions[0].command[1]));
   const taskDefinitionArn = `arn:aws:ecs:${APP_ONLY.region}:${APP_ONLY.account}:task-definition/${APP_ONLY_VERIFIER.family}:17`;
   const observed = { ...structuredClone(definition), taskDefinitionArn, status: "ACTIVE", revision: 17, volumes: [], placementConstraints: [], enableFaultInjection: false };
   observed.containerDefinitions[0].cpu = 0;

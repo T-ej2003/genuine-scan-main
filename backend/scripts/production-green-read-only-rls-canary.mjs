@@ -9,7 +9,7 @@ export const APPLICATION_NAME = "mscqr-production-green-read-only-rls-canary";
 export const CANARY_SCOPE = PRODUCTION_GREEN_CANARY_IDS.licensee;
 export const ALLOWED_ENVIRONMENT_NAMES = new Set([
   "RLS_CANARY_DATABASE_URL", "NODE_ENV", "PORT", "GIT_SHA", "RELEASE_GIT_SHA", "RUN_DB_MIGRATIONS_ON_START",
-  "AWS_EXECUTION_ENV", "AWS_REGION", "AWS_DEFAULT_REGION", "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", "ECS_CONTAINER_METADATA_URI", "ECS_CONTAINER_METADATA_URI_V4",
+  "AWS_EXECUTION_ENV", "AWS_REGION", "AWS_DEFAULT_REGION", "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", "ECS_CONTAINER_METADATA_URI", "ECS_CONTAINER_METADATA_URI_V4", "ECS_AGENT_URI",
   "HOSTNAME", "HOME", "LANG", "NODE_VERSION", "PATH", "PWD", "SHLVL", "TERM", "TZ", "YARN_VERSION",
 ]);
 export const PROBE_SQL = Object.freeze({
@@ -32,6 +32,7 @@ const validRuntimeEnvironment = (env) =>
   && /^[a-z]{2}-[a-z]+-\d$/.test(String(env.AWS_REGION || "")) && env.AWS_DEFAULT_REGION === env.AWS_REGION
   && /^\/v2\/credentials\/[^/?#]+$/.test(String(env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI || ""))
   && isMetadataUri(env.ECS_CONTAINER_METADATA_URI_V4, "v4")
+  && isMetadataUri(env.ECS_AGENT_URI, "api")
   && (!env.ECS_CONTAINER_METADATA_URI || isMetadataUri(env.ECS_CONTAINER_METADATA_URI, "v3"));
 
 export function validateConfiguration({ env = process.env, argv = process.argv.slice(2) } = {}) {

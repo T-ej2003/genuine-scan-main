@@ -4,7 +4,7 @@ import test from "node:test";
 import { ALLOWED_ENVIRONMENT_NAMES, APPLICATION_NAME, CANARY_SCOPE, EXIT, PROBE_SQL, ROLE, main, runReadOnlyCanary, validateConfiguration } from "../../backend/scripts/production-green-read-only-rls-canary.mjs";
 
 const url = `${"postgresql"}://${ROLE}:${["not", "a", "real", "secret"].join("-")}@reviewed-production-db/mscqr_production_rls_green_phase2?sslmode=require&application_name=${APPLICATION_NAME}`;
-const env = { RLS_CANARY_DATABASE_URL: url, NODE_ENV: "production", PORT: "4000", GIT_SHA: "a".repeat(40), RELEASE_GIT_SHA: "a".repeat(40), RUN_DB_MIGRATIONS_ON_START: "false", AWS_EXECUTION_ENV: "AWS_ECS_FARGATE", AWS_REGION: "eu-west-2", AWS_DEFAULT_REGION: "eu-west-2", AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: "/v2/credentials/fixture", ECS_CONTAINER_METADATA_URI_V4: "http://169.254.170.2/v4/fixture", HOSTNAME: "fixture", HOME: "/home/node", LANG: "C.UTF-8", NODE_VERSION: "24", PATH: "/usr/local/bin", PWD: "/app", SHLVL: "1", TERM: "xterm", TZ: "UTC", YARN_VERSION: "1" };
+const env = { RLS_CANARY_DATABASE_URL: url, NODE_ENV: "production", PORT: "4000", GIT_SHA: "a".repeat(40), RELEASE_GIT_SHA: "a".repeat(40), RUN_DB_MIGRATIONS_ON_START: "false", AWS_EXECUTION_ENV: "AWS_ECS_FARGATE", AWS_REGION: "eu-west-2", AWS_DEFAULT_REGION: "eu-west-2", AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: "/v2/credentials/fixture", ECS_CONTAINER_METADATA_URI_V4: "http://169.254.170.2/v4/fixture", ECS_AGENT_URI: "http://169.254.170.2/api/fixture", HOSTNAME: "fixture", HOME: "/home/node", LANG: "C.UTF-8", NODE_VERSION: "24", PATH: "/usr/local/bin", PWD: "/app", SHLVL: "1", TERM: "xterm", TZ: "UTC", YARN_VERSION: "1" };
 const client = (probe = { same_tenant_visible: true, foreign_tenant_invisible: true }) => {
   const calls = [];
   return { calls, $disconnect: async () => {}, $executeRawUnsafe: async (sql) => calls.push(sql), $queryRawUnsafe: async (sql) => {
@@ -22,6 +22,7 @@ test("read-only canary accepts the Docker/Fargate baseline and rejects mutable r
   assert.throws(() => validateConfiguration({ env: { ...env, RLS_CANARY_DATABASE_URL: url.replace("sslmode=require", "sslmode=disable") }, argv: [] }), /fixed contract/);
   for (const [name, value] of [["NODE_OPTIONS", "--require=x"], ["HTTPS_PROXY", "http://proxy.invalid"], ["AWS_CONTAINER_CREDENTIALS_FULL_URI", "http://169.254.170.2/credentials"], ["AWS_CONTAINER_AUTHORIZATION_TOKEN", "x"], ["PGOPTIONS", "-c role=owner"], ["RLS_CANARY_QUERY", "SELECT 1"]]) assert.throws(() => validateConfiguration({ env: { ...env, [name]: value }, argv: [] }), /fixed contract/);
   assert.throws(() => validateConfiguration({ env: { ...env, NODE_ENV: "development" }, argv: [] }), /fixed contract/);
+  for (const value of ["http://attacker.invalid/api/task", "http://169.254.170.2/v4/task", "http://169.254.170.2/api/", "http://169.254.170.2/api/task?x=1"]) assert.throws(() => validateConfiguration({ env: { ...env, ECS_AGENT_URI: value }, argv: [] }), /fixed contract/);
 });
 
 test("canary opens an explicit read-only transaction and fails closed on foreign visibility", async () => {

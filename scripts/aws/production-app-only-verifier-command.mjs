@@ -63,7 +63,9 @@ let phase="CONFIGURATION";
   const {requirementsSha256}=input.requirements;
   assert.equal(canonicalSha256(input.requirements),${JSON.stringify(canonicalSha256(packed))});
   const {validateConfiguration}=await import("./scripts/production-green-read-only-rls-canary.mjs");
-  const url=validateConfiguration({env:process.env,argv:[]});
+  assert.match(process.env.ECS_AGENT_URI||"",/^http:\\/\\/169\\.254\\.170\\.2\\/api\\/[^?#]+$/);
+  const {ECS_AGENT_URI,...validationEnv}=process.env;
+  const url=validateConfiguration({env:validationEnv,argv:[]});
   assert.equal(new URL(url).hostname,input.identity.databaseHostname);
   const client=new PrismaClient({datasources:{db:{url}}});
   try {
