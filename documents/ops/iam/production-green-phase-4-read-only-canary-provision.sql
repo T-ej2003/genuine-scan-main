@@ -47,6 +47,8 @@ DO $$ BEGIN
   END IF;
 END $$;
 RESET ROLE;
+SELECT set_config('mscqr.predecessor_app_rls_acl', COALESCE(nspacl::text, ''), true) FROM pg_namespace WHERE nspname='app_rls';
+GRANT CREATE ON SCHEMA app_rls TO mscqr_prd_rls_phase2_auth_owner;
 SET ROLE mscqr_prd_rls_phase2_auth_owner;
 CREATE OR REPLACE FUNCTION app_rls.production_read_only_canary_probe()
 RETURNS TABLE(same_tenant_visible boolean, foreign_tenant_invisible boolean)
@@ -58,8 +60,11 @@ END $$;
 REVOKE ALL ON FUNCTION app_rls.production_read_only_canary_probe() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app_rls.production_read_only_canary_probe() TO mscqr_prod_rls_canary_read;
 RESET ROLE;
+REVOKE CREATE ON SCHEMA app_rls FROM mscqr_prd_rls_phase2_auth_owner;
 DO $$ BEGIN
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mscqr_prod_rls_canary_read' AND (rolsuper OR rolbypassrls OR rolcreaterole OR rolcreatedb OR rolinherit))
+  IF has_schema_privilege('mscqr_prd_rls_phase2_auth_owner', 'app_rls', 'CREATE')
+     OR (SELECT COALESCE(nspacl::text, '') <> current_setting('mscqr.predecessor_app_rls_acl') FROM pg_namespace WHERE nspname='app_rls')
+     OR EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mscqr_prod_rls_canary_read' AND (rolsuper OR rolbypassrls OR rolcreaterole OR rolcreatedb OR rolinherit))
      OR EXISTS (SELECT 1 FROM pg_auth_members m JOIN pg_roles parent ON parent.oid=m.roleid JOIN pg_roles member ON member.oid=m.member WHERE member.rolname='mscqr_prod_rls_canary_read')
      OR EXISTS (SELECT 1 FROM information_schema.role_table_grants WHERE grantee='mscqr_prod_rls_canary_read') THEN RAISE EXCEPTION 'canary privilege verification failed'; END IF;
 END $$;

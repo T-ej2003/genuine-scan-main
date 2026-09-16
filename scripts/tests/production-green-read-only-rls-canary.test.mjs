@@ -58,6 +58,9 @@ test("provisioning and task definition preserve the dedicated read-only boundary
   assert.match(sql, /default_transaction_read_only = on/); assert.match(sql, /production_read_only_canary_control/);
   assert.doesNotMatch(sql, /ALTER ROLE mscqr_prod_rls_canary_read SET mscqr\.rls_canary_scope/);
   assert.match(sql, /COALESCE\(current_setting\('mscqr\.rls_canary_scope', true\), ''\) !~\*/);
+  assert.match(sql, /GRANT CREATE ON SCHEMA app_rls TO mscqr_prd_rls_phase2_auth_owner/);
+  assert.match(sql, /REVOKE CREATE ON SCHEMA app_rls FROM mscqr_prd_rls_phase2_auth_owner/);
+  assert.match(sql, /current_setting\('mscqr\.predecessor_app_rls_acl'\)/);
   assert.doesNotMatch(sql, /\bBatch\b|canary_tenant_id|foreign_tenant_id|fixture/i);
   assert.doesNotMatch(sql, /GRANT .* ON TABLE .* TO mscqr_prod_rls_canary_read/);
   assert.match(sql, /mscqr_prd_rls_phase2_auth_owner/);
