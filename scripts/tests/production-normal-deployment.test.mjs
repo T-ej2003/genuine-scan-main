@@ -7,6 +7,7 @@ import { buildNormalReleasePlan, buildNormalBackendPreparation, executeNormalFro
 import { APP_ONLY } from "../aws/production-app-only-contract.mjs";
 import { assertNormalImageIdentity } from "../aws/production-normal-image-contract.mjs";
 import { WEB_RELEASE, buildNormalFrontendCandidate, captureFrontendPredecessor } from "../aws/production-web-release-contract.mjs";
+import { resolveNormalDeploymentBaseline } from "../aws/production-deployment-baseline.mjs";
 
 const sourceSha = "a".repeat(40);
 const backendImage = NORMAL_RELEASE.account + ".dkr.ecr." + NORMAL_RELEASE.region + ".amazonaws.com/mscqr-backend@sha256:" + "b".repeat(64);
@@ -22,12 +23,23 @@ test("release classification is deterministic and sensitive lanes fail closed", 
   });
   assert.equal(classifyProductionChanges(["src/App.tsx"]).frontend, true);
   assert.equal(classifyProductionChanges(["backend/src/auth/loginService.ts"]).releaseClass, PRODUCTION_RELEASE_CLASS.SECURITY_INFRASTRUCTURE);
+  for (const file of ["backend/src/middleware/rbac.ts", "backend/src/services/accessControlService.ts", "backend/src/middleware/csrf.ts", "backend/src/middleware/tenantIsolation.ts", "backend/src/utils/clientIp.ts", "scripts/aws/production-normal-release.mjs", ".github/workflows/production-deploy.yml"])
+    assert.equal(classifyProductionChanges([file]).releaseClass, PRODUCTION_RELEASE_CLASS.SECURITY_INFRASTRUCTURE, file);
   assert.equal(classifyProductionChanges(["src/features/auth/login.tsx"]).releaseClass, PRODUCTION_RELEASE_CLASS.SECURITY_INFRASTRUCTURE);
   assert.equal(classifyProductionChanges(["backend/prisma/schema.prisma"]).releaseClass, PRODUCTION_RELEASE_CLASS.SECURITY_INFRASTRUCTURE);
   assert.equal(classifyProductionChanges(["infra/aws/terraform/production-web-release/main.tf"]).releaseClass, PRODUCTION_RELEASE_CLASS.SECURITY_INFRASTRUCTURE);
   assert.equal(classifyProductionChanges(["scripts/aws/recover-production-backend-health.mjs"]).releaseClass, PRODUCTION_RELEASE_CLASS.EMERGENCY_RECOVERY);
   assert.equal(classifyProductionChanges(["backend/src/workers/consume.ts"]).releaseClass, PRODUCTION_RELEASE_CLASS.SECURITY_INFRASTRUCTURE);
   assert.throws(() => classifyProductionChanges(["unknown/build-input"]), /Ambiguous/);
+});
+
+test("successful GitHub workflow history supplies the complete undeployed range baseline", () => {
+  const a = "a".repeat(40), b = "b".repeat(40), c = "c".repeat(40);
+  const ancestor = (left, right) => [[a, b], [a, c], [b, c]].some(([x, y]) => left === x && right === y);
+  assert.deepEqual(resolveNormalDeploymentBaseline({ candidateSha: c, successfulSourceShas: [a], isAncestor: ancestor }), { candidateSha: c, baselineSha: a, bootstrap: false });
+  assert.deepEqual(resolveNormalDeploymentBaseline({ candidateSha: c, successfulSourceShas: [b, a], isAncestor: ancestor }), { candidateSha: c, baselineSha: b, bootstrap: false });
+  assert.deepEqual(resolveNormalDeploymentBaseline({ candidateSha: c, successfulSourceShas: [], isAncestor: ancestor }), { candidateSha: c, baselineSha: null, bootstrap: true });
+  assert.deepEqual(resolveNormalDeploymentBaseline({ candidateSha: c, successfulSourceShas: ["d".repeat(40)], isAncestor: ancestor }), { candidateSha: c, baselineSha: null, bootstrap: true });
 });
 
 test("normal plans require only immutable affected images", () => {
@@ -150,6 +162,9 @@ test("normal production workflow is fixed, OIDC-only, gated by main, and smoke-t
   assert.match(workflow, /MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-release-deployer/);
   assert.match(workflow, /SMOKE_AUTHENTICATED_REQUIRED: "true"/);
   assert.match(workflow, /production-normal-release\.mjs/);
+  assert.match(workflow, /listWorkflowRuns/);
+  assert.match(workflow, /git merge-base --is-ancestor/);
+  assert.match(workflow, /Preserve normal-release mutation journal[\s\S]*if: always\(\)/);
   assert.match(workflow, /publish-backend:[\s\S]*?environment: production-stage-b-image-publish/);
   assert.match(workflow, /publish-frontend:[\s\S]*?environment: production-web-image-publish/);
   const webTrust = JSON.parse(fs.readFileSync("infra/aws/terraform/production-web-release/publisher-trust-policy.json", "utf8"));

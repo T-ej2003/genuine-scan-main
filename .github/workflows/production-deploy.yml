@@ -33,15 +33,24 @@ jobs:
       changed_files: ${{ steps.classify.outputs.changed_files }}
     steps:
       - uses: actions/checkout@v6
-        with: { ref: '${{ github.sha }}', fetch-depth: 2, persist-credentials: false }
+        with: { ref: '${{ github.sha }}', fetch-depth: 0, persist-credentials: false }
+      - name: Resolve successful deployment baseline
+        id: baseline
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const runs = await github.paginate(github.rest.actions.listWorkflowRuns, { owner: context.repo.owner, repo: context.repo.repo, workflow_id: 'production-deploy.yml', branch: 'main', status: 'completed', per_page: 100 });
+            core.setOutput('sha', runs.find((run) => run.id !== context.runId && run.conclusion === 'success' && run.head_sha !== context.sha)?.head_sha || '');
       - name: Derive source classification
         id: classify
         run: |
           set -euo pipefail
           test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
-          git fetch --no-tags --depth=1 origin main
+          git fetch --no-tags origin main
           test "$GITHUB_SHA" = "$(git rev-parse refs/remotes/origin/main)"
-          changed_files="$(git diff --name-only -z HEAD^ HEAD | node --input-type=module -e 'let b=Buffer.alloc(0);process.stdin.on("data",c=>b=Buffer.concat([b,c])).on("end",()=>process.stdout.write(JSON.stringify(b.toString().split("\\0").filter(Boolean))))')"
+          baseline='${{ steps.baseline.outputs.sha }}'
+          if [ -n "$baseline" ]; then git merge-base --is-ancestor "$baseline" "$GITHUB_SHA" || { echo 'Deployment baseline is not an ancestor' >&2; exit 1; }; range="$baseline..$GITHUB_SHA"; else range="$(git hash-object -t tree /dev/null)..$GITHUB_SHA"; fi
+          changed_files="$(git diff --name-only -z "$range" | node --input-type=module -e 'let b=Buffer.alloc(0);process.stdin.on("data",c=>b=Buffer.concat([b,c])).on("end",()=>process.stdout.write(JSON.stringify(b.toString().split("\\0").filter(Boolean))))')"
           node --input-type=module - "$changed_files" "$GITHUB_OUTPUT" <<'NODE'
           import fs from 'node:fs';
           import { classifyProductionChanges } from './scripts/aws/production-deployment-classification.mjs';
@@ -208,6 +217,7 @@ jobs:
       SMOKE_VERIFY_CODE: ${{ secrets.PRODUCTION_SMOKE_VERIFY_CODE }}
       SMOKE_ADMIN_MFA_CODE: ${{ secrets.PRODUCTION_SMOKE_ADMIN_MFA_CODE }}
       SMOKE_ADMIN_MFA_SECRET: ${{ secrets.PRODUCTION_SMOKE_ADMIN_MFA_SECRET }}
+      MSCQR_APP_ONLY_JOURNAL_DIR: ${{ runner.temp }}/normal-release-journal
     steps:
       - uses: actions/checkout@v6
         with: { ref: '${{ github.sha }}', fetch-depth: 2, persist-credentials: false }
@@ -252,3 +262,11 @@ jobs:
       - name: No-op release
         if: needs.classify.outputs.backend != 'true' && needs.classify.outputs.frontend != 'true'
         run: echo 'No production image-affecting application changes.'
+      - name: Preserve normal-release mutation journal
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: normal-release-journal-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/normal-release-journal
+          if-no-files-found: warn
+          retention-days: 30

@@ -7,13 +7,18 @@ export const PRODUCTION_RELEASE_CLASS = Object.freeze({
   EMERGENCY_RECOVERY: "EMERGENCY_RECOVERY",
 });
 
+// Normal ownership is explicit. Unknown runtime ownership fails closed; security
+// ownership is evaluated first and can never be made normal by a filename.
 const normalApplication = [
-  /^backend\/src\/(?!.*(?:auth|mfa|permission|tenant|security|risk|invite|session|rls))/,
+  /^backend\/src\/services\/(?:batchService|qrService|notificationService)\.ts$/,
+  /^backend\/src\/printing\//,
+  /^backend\/src\/utils\/(?:cursorPagination|email|logger|boundedJson|realtime)\.ts$/,
   /^backend\/package(?:-lock)?\.json$/,
   /^package(?:-lock)?\.json$/,
-  /^src\//,
+  /^src\/(?:App\.tsx|main\.tsx|App\.css|index\.css)$/,
+  /^src\/(?:components\/|features\/batches\/|pages\/(?:Batches|QrBatches)|lib\/|hooks\/)/,
   /^public\//,
-  /^shared\//,
+  /^shared\/(?:ui|formatting|validation)\//,
   /^components\.json$/,
   /^index\.html$/,
   /^postcss\.config\.js$/,
@@ -32,8 +37,11 @@ const securityInfrastructure = [
   /^\.github\/workflows\//,
   /^infra\//,
   /^backend\/prisma\//,
-  /^backend\/src\/.*(?:auth|mfa|permission|tenant|security|risk|invite|session|rls)/,
-  /^src\/.*(?:auth|mfa|permission|tenant|security|risk|invite|session)/i,
+  /^backend\/src\/(?:middleware\/(?:auth|rbac|csrf|tenantIsolation|customerVerifyAuth)|security\/|config\/database\.ts|app\.ts)/,
+  /^backend\/src\/services\/(?:accessControlService|auth|mfa|session|invitation|role|risk|tenant)/i,
+  /^backend\/src\/(?:auth|workers)\//,
+  /^backend\/src\/utils\/(?:security|clientIp|mtlsFingerprintHeader|secretConfig|cookies|ipAddress|publicIntegrityGuard|prismaStorageGuard)\.ts$/,
+  /^src\/(?:contexts\/(?:AuthContext|auth-bootstrap)|features\/(?:auth|mfa|security)|pages\/(?:Login|Settings|Invitation)|app\/route-metadata)/i,
   /(?:^|\/)(?:\.env|.*(?:policy|grant|role|ownership|network|kms|iam|rls|migration|schema))\./i,
   /^documents\/(?:security|ops\/iam)\//,
   /^scripts\/(?:aws|security|check-|validate-)/,
@@ -61,7 +69,7 @@ export function classifyProductionChanges(paths) {
   if (changed.some((file) => matches(securityInfrastructure, file))) {
     return Object.freeze({ releaseClass: PRODUCTION_RELEASE_CLASS.SECURITY_INFRASTRUCTURE, files: changed, backend: false, frontend: false, worker: false, database: changed.some((file) => /^backend\/prisma\//.test(file) || /\.sql$/.test(file)) });
   }
-  const unknown = changed.filter((file) => !matches(normalApplication, file) && !/^scripts\/tests?\//.test(file) && !/^backend\/tests?\//.test(file) && !/\.md$/.test(file));
+  const unknown = changed.filter((file) => !matches(normalApplication, file) && !/^scripts\/tests?\//.test(file) && !/^backend\/tests?\//.test(file) && !/^src\/test\//.test(file) && !/\.md$/.test(file));
   assert.equal(unknown.length, 0, `Ambiguous production change paths: ${unknown.join(", ")}`);
   const image = changed.map(classifyStageBImageReusePath);
   const backendAffecting = image.some(({ file, imageAffecting }) => imageAffecting && (/^backend\//.test(file) || /^shared\//.test(file)));

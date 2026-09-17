@@ -29,7 +29,7 @@ test("normal production deployment is automatically triggered from protected mai
 test("normal workflow rejects non-main dispatch and verifies exact protected source", () => {
   assert.equal(workflow.jobs.classify.if, "github.ref == 'refs/heads/main'");
   assert.match(workflowText, /test \"\$GITHUB_SHA\" = \"\$\(git rev-parse HEAD\)\"/);
-  assert.match(workflowText, /git fetch --no-tags --depth=1 origin main/);
+  assert.match(workflowText, /git fetch --no-tags origin main/);
   assert.match(workflowText, /refs\/remotes\/origin\/main/);
   assert.match(workflowText, /refs\/remotes\/origin\/main/);
 });

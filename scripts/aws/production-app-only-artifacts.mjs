@@ -36,7 +36,12 @@ export function parseAppOnlyArtifactReference(text) {
 // always-upload remains necessary for runner-loss durability.
 export function createAppOnlyEvidenceWriter({ repositoryRoot, sourceSha, preparationSha256 }) {
   assert.match(sourceSha || "", /^[a-f0-9]{40}$/); assert.match(preparationSha256 || "", /^[a-f0-9]{64}$/);
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-app-only-evidence-"));
+  const requested = process.env.MSCQR_APP_ONLY_JOURNAL_DIR;
+  const directory = requested ? path.resolve(requested) : fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-app-only-evidence-"));
+  if (requested) {
+    assert.ok(path.isAbsolute(requested) && !directory.startsWith(path.resolve(repositoryRoot) + path.sep), "Journal directory must be external to the checkout");
+    fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+  }
   fs.chmodSync(directory, 0o700);
   let sequence = 0, previousSha256 = null;
   const writeEvidence = (event) => {
