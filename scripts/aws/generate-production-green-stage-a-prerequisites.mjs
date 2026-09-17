@@ -244,10 +244,10 @@ const canonicalIpv4Cidrs = (values, label) => {
 const dns = (value) => String(value || "").trim().replace(/\.+$/, "").toLowerCase();
 const exactAliases = (values) => JSON.stringify([...(values || [])].map(dns).sort()) === JSON.stringify([...PRODUCTION_PUBLIC_ALIASES]);
 const glob = (pattern) => new RegExp(`^${String(pattern).split("*").map((part) => part.replace(/[|\\{}()[\]^$+?.]/g, "\\$&")).join(".*")}$`);
-const apiTarget = (config, requestPath) => {
+const apiBehavior = (config, requestPath) => {
   const behavior = (config.CacheBehaviors?.Items || []).find(({ PathPattern }) => typeof PathPattern === "string" && glob(PathPattern).test(requestPath)) || config.DefaultCacheBehavior;
   if (!behavior || typeof behavior.TargetOriginId !== "string" || !behavior.TargetOriginId) throw new Error("Stage B backend CloudFront API behavior is not provable.");
-  return behavior.TargetOriginId;
+  return behavior;
 };
 
 export function collectStageBBackendProxyTrust({ vpcId, run } = {}) {
@@ -286,8 +286,14 @@ export function collectStageBBackendProxyTrust({ vpcId, run } = {}) {
   if (!config || !/^[A-Z0-9]+$/.test(configResponse.ETag || "") || config.Enabled !== true || !exactAliases(config.Aliases?.Items)) throw new Error("Stage B backend CloudFront distribution configuration is unavailable.");
   const albOrigins = (config.Origins?.Items || []).filter(({ Id, DomainName }) => typeof Id === "string" && dns(DomainName) === dns(alb.DNSName));
   if (albOrigins.length !== 1 || (config.OriginGroups?.Quantity || 0) !== 0) throw new Error("Stage B backend CloudFront origin is not uniquely bound to the reviewed ALB.");
-  const targetOriginId = albOrigins[0].Id;
-  if (PRODUCTION_API_PATHS.some((requestPath) => apiTarget(config, requestPath) !== targetOriginId)) throw new Error("Stage B backend CloudFront API behavior does not route to the reviewed ALB origin.");
+  const origin = albOrigins[0];
+  const originProtocolPolicy = origin.CustomOriginConfig?.OriginProtocolPolicy;
+  const originHttpsPort = origin.CustomOriginConfig?.HTTPSPort;
+  if (originProtocolPolicy !== "https-only" || originHttpsPort !== 443) throw new Error("Stage B backend CloudFront ALB origin must use the reviewed HTTPS-only port 443 contract.");
+  const targetOriginId = origin.Id;
+  const apiBehaviors = PRODUCTION_API_PATHS.map((requestPath) => apiBehavior(config, requestPath));
+  if (apiBehaviors.some((behavior) => behavior.TargetOriginId !== targetOriginId)) throw new Error("Stage B backend CloudFront API behavior does not route to the reviewed ALB origin.");
+  if (apiBehaviors.some((behavior) => behavior.ViewerProtocolPolicy !== "redirect-to-https")) throw new Error("Stage B backend CloudFront API behavior must redirect viewers to HTTPS.");
   const records = (awsJson(["route53", "list-resource-record-sets", "--hosted-zone-id", PRODUCTION_HOSTED_ZONE_ID, "--output", "json", "--no-cli-pager"], run).ResourceRecordSets || [])
     .filter(({ Name, Type }) => PRODUCTION_PUBLIC_ALIASES.includes(dns(Name)) && (Type === "A" || Type === "AAAA"));
   const expectedRecords = PRODUCTION_PUBLIC_ALIASES.flatMap((name) => ["A", "AAAA"].map((type) => `${name}:${type}`));
@@ -296,7 +302,7 @@ export function collectStageBBackendProxyTrust({ vpcId, run } = {}) {
     if (!AliasTarget || dns(AliasTarget.DNSName) !== dns(distribution.DomainName) || AliasTarget.HostedZoneId !== CLOUDFRONT_ALIAS_HOSTED_ZONE_ID || AliasTarget.EvaluateTargetHealth !== false) throw new Error("Stage B backend Route53 aliases do not route to the reviewed CloudFront distribution.");
     return { name: dns(Name), type: Type, target: dns(AliasTarget.DNSName), hostedZoneId: AliasTarget.HostedZoneId };
   }).sort((left, right) => `${left.name}:${left.type}`.localeCompare(`${right.name}:${right.type}`));
-  return Object.freeze({ mode: "cloudfront-alb", alb: { name: PRODUCTION_BACKEND_ALB_NAME, arn: alb.LoadBalancerArn, dnsName: alb.DNSName, vpcId: alb.VpcId, subnetIds, cidrs: albCidrs, xffHeaderProcessingMode, xffClientPortEnabled: false }, targetGroup: { name: PRODUCTION_BACKEND_TARGET_GROUP_NAME, arn: targetGroup.TargetGroupArn }, cloudFront: { distributionId: distribution.Id, domainName: dns(distribution.DomainName), configEtag: configResponse.ETag, aliases: [...PRODUCTION_PUBLIC_ALIASES], dns: { hostedZoneId: PRODUCTION_HOSTED_ZONE_ID, records: dnsRecords }, targetOriginId, apiPaths: [...PRODUCTION_API_PATHS], managedPrefixListId: prefixList.PrefixListId, managedPrefixListVersion: prefixList.Version, cidrs: cloudFrontCidrs } });
+  return Object.freeze({ mode: "cloudfront-alb", alb: { name: PRODUCTION_BACKEND_ALB_NAME, arn: alb.LoadBalancerArn, dnsName: alb.DNSName, vpcId: alb.VpcId, subnetIds, cidrs: albCidrs, xffHeaderProcessingMode, xffClientPortEnabled: false }, targetGroup: { name: PRODUCTION_BACKEND_TARGET_GROUP_NAME, arn: targetGroup.TargetGroupArn }, cloudFront: { distributionId: distribution.Id, domainName: dns(distribution.DomainName), configEtag: configResponse.ETag, aliases: [...PRODUCTION_PUBLIC_ALIASES], dns: { hostedZoneId: PRODUCTION_HOSTED_ZONE_ID, records: dnsRecords }, targetOriginId, viewerProtocolPolicy: "redirect-to-https", originProtocolPolicy, originHttpsPort, apiPaths: [...PRODUCTION_API_PATHS], managedPrefixListId: prefixList.PrefixListId, managedPrefixListVersion: prefixList.Version, cidrs: cloudFrontCidrs } });
 }
 
 export function assertStageBBackendProxyTrustCurrent({ expected, vpcId, run } = {}) {
