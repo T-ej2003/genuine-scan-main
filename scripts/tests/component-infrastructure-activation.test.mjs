@@ -86,7 +86,8 @@ test("authorization binds exact source, plan bytes, preparation and absent remot
   for (const field of Object.keys(binding)) assert.throws(() => assertAuthorization({ ...binding, [field]: "d".repeat(64) }, preparation, binding));
   assert.throws(() => assertAuthorization(binding, { ...preparation, stateIdentity: "changed" }, binding));
 });
-test("environment requires exact main branch and explicit sole-operator reviewer without bypass", () => {
+for (const environment of ["production-normal-deploy", "production-component-state-bootstrap", "production-component-infrastructure-activation"]) test(`${environment} requires exact main branch and explicit sole-operator reviewer without bypass`, () => {
+  assert(JSON.parse(fs.readFileSync(`${stack}/github-environment-contract.json`)).environments.includes(environment));
   const config = { can_admins_bypass: false, deployment_branch_policy: { protected_branches: false, custom_branch_policies: true }, protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{ type: "User", reviewer: { id: 183396573, login: "T-ej2003" } }] }] };
   const branches = { branch_policies: [{ name: "main", type: "branch" }] };
   assertEnvironment(config, branches);
@@ -97,11 +98,14 @@ test("environment requires exact main branch and explicit sole-operator reviewer
     { ...config.protection_rules[0], prevent_self_review: true },
     { ...config.protection_rules[0], reviewers: [] },
     { ...config.protection_rules[0], reviewers: [{ type: "User", reviewer: { id: 1, login: "T-ej2003" } }] },
+    { ...config.protection_rules[0], reviewers: [{ type: "User", reviewer: { id: 1, login: "other", site_admin: true } }] },
+    { ...config.protection_rules[0], reviewers: [{ type: "User", reviewer: { id: 183396573, login: "other" } }] },
     { ...config.protection_rules[0], reviewers: [{ type: "Team", reviewer: { id: 183396573, login: "T-ej2003" } }] },
   ]) assert.throws(() => assertEnvironment({ ...config, protection_rules: [rule] }, branches));
+  assert.throws(() => assertEnvironment(config, { branch_policies: [{ name: "feature", type: "branch" }] }));
 });
 
-function installation(t, { changedSource = false, changedPlan = false, existingState = false, replay = false, approval = true, wrongReviewer = false, wrongInitiator = false, inherited = {}, provenance = () => issuance(), rejectedProvenance = false } = {}) {
+function installation(t, { changedSource = false, changedPlan = false, existingState = false, replay = false, approval = true, wrongReviewer = false, wrongInitiator = false, wrongApprovalEnvironment = false, inherited = {}, provenance = () => issuance(), rejectedProvenance = false } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "component-install-test-"));
   t.after(() => fs.rmSync(dir, { recursive: true }));
   const calls = [];
@@ -131,7 +135,7 @@ function installation(t, { changedSource = false, changedPlan = false, existingS
       if (endpoint.endsWith("branches/main")) value = { commit: { sha: applying && changedSource ? "b".repeat(40) : sourceSha } };
       else if (endpoint.endsWith("deployment-branch-policies")) value = branches;
       else if (endpoint.includes("/environments/")) value = config;
-      else if (endpoint.endsWith("/approvals")) value = approval ? [{ state: "approved", environments: [{ id: 20 }], user: wrongReviewer ? { id: 1, login: "other" } : operator }] : [];
+      else if (endpoint.endsWith("/approvals")) value = approval ? [{ state: "approved", environments: [{ id: wrongApprovalEnvironment ? 21 : 20 }], user: wrongReviewer ? { id: 1, login: "other" } : operator }] : [];
       else value = { path: ".github/workflows/authorize-component-infrastructure-activation.yml", head_sha: sourceSha, head_branch: "main", head_repository: { full_name: "T-ej2003/genuine-scan-main" }, event: "workflow_dispatch", conclusion: "success", run_attempt: 1, created_at: new Date().toISOString(), actor: wrongInitiator ? { id: 1, login: "other" } : operator };
     } else if (name === "aws") {
       if (["iam", "dynamodb"].includes(args[0])) throw Object.assign(new Error("Missing"), { stderr: `(${args[0] === "iam" ? "NoSuchEntity" : "ResourceNotFoundException"})` });
@@ -226,7 +230,7 @@ test("sole initiator may explicitly approve exact plan; installation reserves on
   assert(applies[0].at(-1).endsWith("/activation.tfplan"));
   assert(calls.indexOf(writes[0]) < calls.indexOf(applies[0]));
 });
-for (const scenario of [{ changedSource: true }, { changedPlan: true }, { existingState: true }, { replay: true }, { approval: false }, { wrongReviewer: true }, { wrongInitiator: true }]) {
+for (const scenario of [{ changedSource: true }, { changedPlan: true }, { existingState: true }, { replay: true }, { approval: false }, { wrongReviewer: true }, { wrongInitiator: true }, { wrongApprovalEnvironment: true }]) {
   test(`mocked installation rejects before apply: ${JSON.stringify(scenario)}`, (t) => {
     const { calls, apply } = installation(t, scenario);
     assert.throws(apply);
