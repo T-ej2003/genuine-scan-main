@@ -25,7 +25,9 @@ const json = (bytes, label) => { try { return JSON.parse(Buffer.from(bytes).toSt
 function assertFreshProtectedSource(sourceSha, { cwd = process.cwd(), git = execFileSync } = {}) {
   if (!SHA.test(sourceSha || "")) throw new Error("Protected source SHA is malformed.");
   const read = (args) => git("git", args, { cwd, encoding: "utf8" }).trim();
-  if (read(["rev-parse", "HEAD"]) !== sourceSha || read(["rev-parse", "origin/main"]) !== sourceSha || read(["status", "--porcelain"]) !== "") throw new Error("Web evidence requires a clean exact protected-main checkout.");
+  const protectedMainSha = read(["rev-parse", "origin/main"]);
+  try { git("git", ["merge-base", "--is-ancestor", sourceSha, protectedMainSha], { cwd, encoding: "utf8", stdio: ["ignore", "ignore", "ignore"] }); } catch { throw new Error("Web evidence source is not reachable from protected main."); }
+  if (read(["rev-parse", "HEAD"]) !== sourceSha || !SHA.test(protectedMainSha) || read(["status", "--porcelain"]) !== "") throw new Error("Web evidence requires a clean checkout of a commit reachable from protected main.");
   return true;
 }
 
@@ -55,16 +57,17 @@ function extractArtifactBundle(archiveBytes, { exec = execFileSync } = {}) {
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 }
 
-export function readGovernedWebPublication({ sourceSha, workflowRunId, github = defaultGithub, extract = extractArtifactBundle } = {}) {
+export function readGovernedWebPublication({ sourceSha, workflowRunId, workflowDefinitionSha, github = defaultGithub, extract = extractArtifactBundle } = {}) {
   if (!SHA.test(sourceSha || "") || !WORKFLOW_RUN.test(String(workflowRunId || ""))) throw new Error("Web publication source or workflow run is invalid.");
   const run = json(github(["api", `repos/${REPOSITORY}/actions/runs/${workflowRunId}`]), "Web publication workflow run");
   const artifacts = json(github(["api", `repos/${REPOSITORY}/actions/runs/${workflowRunId}/artifacts`]), "Web publication artifacts").artifacts;
   const matches = Array.isArray(artifacts) ? artifacts.filter((artifact) => artifact?.name === WEB_RELEASE.artifactName) : [];
-  if (run?.id !== Number(workflowRunId) || run.path !== WEB_RELEASE.workflowFile || run.name !== WEB_RELEASE.workflowName || run.event !== "workflow_dispatch" || run.head_sha !== sourceSha || run.head_branch !== "main" || run.conclusion !== "success" || run.actor?.login !== WEB_RELEASE.reviewer || matches.length !== 1 || matches[0].expired !== false || !/^\d+$/.test(String(matches[0].id || "")) || !/^sha256:[a-f0-9]{64}$/.test(matches[0].digest || "")) throw new Error("Web publication workflow identity is not canonical.");
+  const expectedWorkflowDefinitionSha = workflowDefinitionSha || run?.head_sha;
+  if (run?.id !== Number(workflowRunId) || run.path !== WEB_RELEASE.workflowFile || run.name !== WEB_RELEASE.workflowName || run.event !== "workflow_dispatch" || run.head_sha !== expectedWorkflowDefinitionSha || !SHA.test(run.head_sha || "") || run.head_branch !== "main" || run.conclusion !== "success" || run.actor?.login !== WEB_RELEASE.reviewer || matches.length !== 1 || matches[0].expired !== false || !/^\d+$/.test(String(matches[0].id || "")) || !/^sha256:[a-f0-9]{64}$/.test(matches[0].digest || "")) throw new Error("Web publication workflow identity is not canonical.");
   const artifact = matches[0]; const archiveBytes = Buffer.from(github(["api", `repos/${REPOSITORY}/actions/artifacts/${artifact.id}/zip`], { binary: true }));
   if (`sha256:${sha256(archiveBytes)}` !== artifact.digest) throw new Error("Web publication artifact archive digest is invalid.");
   const bundle = extract(archiveBytes);
-  assertWebPublicationArtifactBundle({ ...bundle, sourceSha, workflowRunId });
+  assertWebPublicationArtifactBundle({ ...bundle, sourceSha, workflowRunId, workflowDefinitionSha: run.head_sha });
   return Object.freeze({ observed: Object.freeze({ workflowRunId: String(run.id), workflowDatabaseId: String(run.workflow_id), workflowFile: run.path, workflowName: run.name, event: run.event, workflowDefinitionSha: run.head_sha, headBranch: run.head_branch, conclusion: run.conclusion, artifactId: String(artifact.id), artifactName: artifact.name, artifactExpired: false, reviewer: WEB_RELEASE.reviewer }), artifact, archiveBytes, ...bundle });
 }
 
@@ -92,7 +95,7 @@ export function produceGovernedWebEvidence({ sourceSha, stageBAuthorization, pub
   verifyStageBAuthorization({ authorization: stageBAuthorization, sourceSha, verifyImageEvidence: verifyStageBImageEvidence || ((options) => verifyImageEvidenceSignature({ ...options, run })), now });
   const impact = stageBAuthorization?.imageReuseEvidence;
   if (impact?.webPublicationRequired !== true || impact.toolingSha !== sourceSha) throw new Error("Governed web evidence requires authenticated web-required Stage-B impact.");
-  const record = assertWebPublicationArtifactBundle({ artifactBytes: publication.artifactBytes, sbomBytes: publication.sbomBytes, provenanceBytes: publication.provenanceBytes, sourceSha, workflowRunId: publication.observed?.workflowRunId });
+  const record = assertWebPublicationArtifactBundle({ artifactBytes: publication.artifactBytes, sbomBytes: publication.sbomBytes, provenanceBytes: publication.provenanceBytes, sourceSha, workflowRunId: publication.observed?.workflowRunId, workflowDefinitionSha: publication.observed?.workflowDefinitionSha });
   const identity = buildWebPublicationIdentity({ sourceSha, observed: publication.observed, artifactBytes: publication.artifactBytes, observedAt: now });
   const repositoryEvidence = readRepositoryEvidence(run); const imageReadback = readImageEvidence(run, sourceSha);
   if (imageReadback.imageDigest !== record.image_digest || typeof verifyArtifacts !== "function" || verifyArtifacts(record.image_ref) !== true) throw new Error("Web image supply-chain verification is invalid.");

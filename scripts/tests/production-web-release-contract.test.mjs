@@ -159,7 +159,13 @@ test("web workflow and IAM are fixed, OIDC-only, and isolated from Stage-B four-
   assert.match(signing.env.COSIGN_CERT_IDENTITY_REGEXP, /production-web-image/);
   assert.equal(signing.env.COSIGN_CERT_OIDC_ISSUER, "https://token.actions.githubusercontent.com");
   assert.match(fs.readFileSync("scripts/aws/cosign-idempotent-sign-and-attest.sh", "utf8"), /production-web-provenance\/v1/);
-  assert.match(job.steps.find(({ name }) => name === "Bind protected source").run, /test "\$GITHUB_SHA" = "\$IMAGE_TAG"/);
+  const binding = job.steps.find(({ name }) => name === "Bind protected workflow and release source");
+  assert.match(binding.run, /git merge-base --is-ancestor "\$IMAGE_TAG" "\$protected_main_sha"/);
+  assert.match(binding.run, /git cat-file -e "\$IMAGE_TAG\^\{commit\}"/);
+  assert.match(binding.run, /\[\[ "\$IMAGE_TAG" =~ \^\[0-9a-f\]\{40\}\$ \]\]/);
+  assert.match(binding.run, /\[\[ "\$WORKFLOW_DEFINITION_SHA" =~ \^\[0-9a-f\]\{40\}\$ \]\]/);
+  assert.equal(job.steps.find(({ uses, with: options }) => uses === "actions/checkout@v6" && options?.path === "release-source").with.ref, "${{ inputs.release_sha }}");
+  assert.equal(job.env.WORKFLOW_DEFINITION_SHA, "${{ github.sha }}");
   const publisher = JSON.parse(fs.readFileSync("infra/aws/terraform/production-web-release/publisher-permissions-policy.json")); const allowedResources = publisher.Statement.filter(({ Effect }) => Effect === "Allow").flatMap(({ Resource }) => Array.isArray(Resource) ? Resource : [Resource]); assert.equal(allowedResources.some((resource) => String(resource).includes("mscqr-backend") || String(resource).includes("mscqr-worker")), false);
   const activation = JSON.parse(fs.readFileSync("infra/aws/terraform/production-web-release/frontend-activation-policy.json"));
   const register = activation.Statement.find(({ Action }) => Action === "ecs:RegisterTaskDefinition"); assert.equal(register.Resource, "*"); assert.deepEqual(register.Condition, { StringEquals: { "aws:RequestedRegion": "eu-west-2" } });
@@ -233,5 +239,5 @@ test("web publication resumes immutable tags through the reviewed digest-bound p
   assert.match(publish, /resolveWebImagePublication/);
   assert.match(publish, /image_ref=.*@\$digest/);
   assert.match(publish, /if \[\[ "\$image_state" == absent \]\]; then\n\s+docker buildx build[\s\S]*?--push/);
-  assert.match(publish, /verify-image-manifest\.sh "\$image_ref"/);
+  assert.match(publish, /verify-image-manifest\.sh"? "\$image_ref"/);
 });

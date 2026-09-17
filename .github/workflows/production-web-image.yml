@@ -26,6 +26,7 @@ jobs:
       AWS_REGION: eu-west-2
       ECR_REPOSITORY: mscqr-web
       IMAGE_TAG: ${{ inputs.release_sha }}
+      WORKFLOW_DEFINITION_SHA: ${{ github.sha }}
       PLATFORM: linux/amd64
     steps:
       - name: Require the sole authorized operator
@@ -34,14 +35,23 @@ jobs:
         run: test "$GITHUB_REF" = refs/heads/main
       - uses: actions/checkout@v6
         with: { fetch-depth: 0 }
-      - name: Bind protected source
+      - name: Bind protected workflow and release source
         run: |
           set -euo pipefail
-          test "$GITHUB_SHA" = "$IMAGE_TAG"
+          [[ "$IMAGE_TAG" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$WORKFLOW_DEFINITION_SHA" =~ ^[0-9a-f]{40}$ ]]
           git fetch --no-tags origin main
-          test "$(git rev-parse HEAD)" = "$IMAGE_TAG"
-          test "$(git rev-parse FETCH_HEAD)" = "$IMAGE_TAG"
+          test "$(git rev-parse HEAD)" = "$WORKFLOW_DEFINITION_SHA"
+          protected_main_sha="$(git rev-parse FETCH_HEAD)"
+          git cat-file -e "$IMAGE_TAG^{commit}"
+          git merge-base --is-ancestor "$IMAGE_TAG" "$protected_main_sha"
+          git merge-base --is-ancestor "$WORKFLOW_DEFINITION_SHA" "$protected_main_sha"
           test -z "$(git status --porcelain)"
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.release_sha }}
+          path: release-source
+          fetch-depth: 0
       - uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-region: eu-west-2
@@ -56,6 +66,7 @@ jobs:
           node -e 'const r=JSON.parse(process.argv[1]).repositories; if(r?.length!==1||r[0].repositoryName!=="mscqr-web"||r[0].registryId!=="368992683803"||r[0].imageTagMutability!=="IMMUTABLE"||r[0].imageTagMutabilityExclusionFilters?.length) throw Error("mscqr-web repository is not the reviewed immutable target")' "$repository"
       - name: Publish exact immutable web image
         id: image
+        working-directory: release-source
         run: |
           set -euo pipefail
           image_uri="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG"
@@ -76,17 +87,18 @@ jobs:
             aws ecr describe-images --repository-name "$ECR_REPOSITORY" --image-ids "imageTag=$IMAGE_TAG" --output json >"$image_json"
           fi
           if [[ "$image_state" == existing ]]; then
-            digest="$(node -e 'const image=JSON.parse(require("fs").readFileSync(process.argv[1])).imageDetails?.[0]; if(!image||!/^[a-f0-9]{64}$/.test((image.imageDigest||"").replace(/^sha256:/,""))) throw Error("Published web image readback is invalid"); process.stdout.write(image.imageDigest)' "$image_json")"
+            digest="$(node -e 'const image=JSON.parse(require("fs").readFileSync(process.argv[1])).imageDetails?.[0]; if(!image||!/^[a-f0-9]{64}$/.test((image.imageDigest||"").replace(/^sha256:/,""))||image.repositoryName!=="mscqr-web"||String(image.registryId)!=="368992683803"||!Array.isArray(image.imageTags)||!image.imageTags.includes(process.env.IMAGE_TAG)) throw Error("Existing published web image readback is invalid"); process.stdout.write(image.imageDigest)' "$image_json")"
           else
             digest="$(node -e 'const image=JSON.parse(require("fs").readFileSync(process.argv[1])).imageDetails?.[0]; if(!image||!/^[a-f0-9]{64}$/.test((image.imageDigest||"").replace(/^sha256:/,""))||image.repositoryName!=="mscqr-web"||String(image.registryId)!=="368992683803"||!Array.isArray(image.imageTags)||!image.imageTags.includes(process.env.IMAGE_TAG)) throw Error("Published web image readback is invalid"); process.stdout.write(image.imageDigest)' "$image_json")"
           fi
           image_ref="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY@$digest"
-          REQUIRED_PLATFORMS="$PLATFORM" scripts/aws/verify-image-manifest.sh "$image_ref"
+          REQUIRED_PLATFORMS="$PLATFORM" "$GITHUB_WORKSPACE/scripts/aws/verify-image-manifest.sh" "$image_ref"
           docker pull "$image_ref" >/dev/null
           docker image inspect "$image_ref" --format '{{json .Config.Labels}}' >"$labels_json"
           node --input-type=module - "$IMAGE_TAG" "$repository_json" "$image_json" "$labels_json" <<'NODE'
           import fs from "node:fs";
-          import { resolveWebImagePublication } from "./scripts/aws/production-web-image-resume.mjs";
+          import { pathToFileURL } from "node:url";
+          const { resolveWebImagePublication } = await import(pathToFileURL(`${process.env.GITHUB_WORKSPACE}/scripts/aws/production-web-image-resume.mjs`).href);
           const [sourceSha, repositoryFile, imageFile, labelsFile] = process.argv.slice(2);
           resolveWebImagePublication({ sourceSha, repository: JSON.parse(fs.readFileSync(repositoryFile, "utf8")).repositories?.[0], image: JSON.parse(fs.readFileSync(imageFile, "utf8")).imageDetails?.[0], labels: JSON.parse(fs.readFileSync(labelsFile, "utf8")), platforms: ["linux/amd64"] });
           NODE
@@ -105,7 +117,7 @@ jobs:
           docker pull "$IMAGE_REF"
           docker save "$IMAGE_REF" -o "$RUNNER_TEMP/web-image.tar"
           docker run --rm -v "$RUNNER_TEMP:/workspace:ro" anchore/syft:v1.38.0 /workspace/web-image.tar -o spdx-json > "$RUNNER_TEMP/web.spdx.json"
-          node -e 'require("fs").writeFileSync(process.argv[1],JSON.stringify({releaseSha:process.env.IMAGE_TAG,workflowDefinitionSha:process.env.GITHUB_SHA,workflowRunId:process.env.GITHUB_RUN_ID,repository:"mscqr-web",platform:"linux/amd64",dockerfile:"Dockerfile.ecs-frontend",buildContext:"."}))' "$RUNNER_TEMP/web.provenance.json"
+          node -e 'require("fs").writeFileSync(process.argv[1],JSON.stringify({releaseSha:process.env.IMAGE_TAG,workflowDefinitionSha:process.env.WORKFLOW_DEFINITION_SHA,workflowRunId:process.env.GITHUB_RUN_ID,repository:"mscqr-web",platform:"linux/amd64",dockerfile:"Dockerfile.ecs-frontend",buildContext:"."}))' "$RUNNER_TEMP/web.provenance.json"
           scripts/aws/cosign-idempotent-sign-and-attest.sh sign "$IMAGE_REF"
           scripts/aws/cosign-idempotent-sign-and-attest.sh attest "$IMAGE_REF" spdxjson "$RUNNER_TEMP/web.spdx.json"
           scripts/aws/cosign-idempotent-sign-and-attest.sh attest "$IMAGE_REF" https://mscqr.com/attestations/production-web-provenance/v1 "$RUNNER_TEMP/web.provenance.json"
