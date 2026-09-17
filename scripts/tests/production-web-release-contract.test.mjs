@@ -228,6 +228,16 @@ test("both governed activation callers establish the canonical credential source
   assert.match(JSON.stringify(standalone), /MSCQR_AWS_CREDENTIAL_SOURCE.*github-oidc-release-deployer/);
 });
 
+test("standalone activation accepts an authenticated retained target under current protected tooling", () => {
+  const workflow = fs.readFileSync(".github/workflows/production-web-activation.yml", "utf8");
+  assert.match(workflow, /WORKFLOW_DEFINITION_SHA: '\$\{\{ github\.sha \}\}'/);
+  assert.match(workflow, /test "\$GITHUB_SHA" = "\$WORKFLOW_DEFINITION_SHA"/);
+  assert.doesNotMatch(workflow, /test "\$GITHUB_SHA" = "\$TARGET_SHA"/);
+  assert.match(workflow, /git cat-file -e "\$TARGET_SHA\^\{commit\}"/);
+  assert.match(workflow, /git merge-base --is-ancestor "\$TARGET_SHA" "\$protected_main_sha"/);
+  assert.match(workflow, /git merge-base --is-ancestor "\$WORKFLOW_DEFINITION_SHA" "\$protected_main_sha"/);
+});
+
 test("release gate reserves web authorization before the database mutation boundary", () => {
   const workflow = yaml.load(fs.readFileSync(".github/workflows/release-gate.yml", "utf8"));
   const steps = workflow.jobs["deploy-production-ecs"].steps;
