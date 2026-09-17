@@ -249,6 +249,8 @@ const apiBehavior = (config, requestPath) => {
   if (!behavior || typeof behavior.TargetOriginId !== "string" || !behavior.TargetOriginId) throw new Error("Stage B backend CloudFront API behavior is not provable.");
   return behavior;
 };
+const behaviorPath = ({ PathPattern } = {}) => typeof PathPattern === "string" && PathPattern ? PathPattern : "<default>";
+const apiNamespaceBehavior = ({ PathPattern } = {}) => typeof PathPattern === "string" && /^\/?api(?:\/|\*|$)/.test(PathPattern);
 
 export function collectStageBBackendProxyTrust({ vpcId, run } = {}) {
   const loadBalancers = awsJson(["elbv2", "describe-load-balancers", "--names", PRODUCTION_BACKEND_ALB_NAME, "--region", STAGE_B.region, "--output", "json", "--no-cli-pager"], run).LoadBalancers || [];
@@ -293,7 +295,10 @@ export function collectStageBBackendProxyTrust({ vpcId, run } = {}) {
   const targetOriginId = origin.Id;
   const apiBehaviors = PRODUCTION_API_PATHS.map((requestPath) => apiBehavior(config, requestPath));
   if (apiBehaviors.some((behavior) => behavior.TargetOriginId !== targetOriginId)) throw new Error("Stage B backend CloudFront API behavior does not route to the reviewed ALB origin.");
-  if (apiBehaviors.some((behavior) => behavior.ViewerProtocolPolicy !== "redirect-to-https")) throw new Error("Stage B backend CloudFront API behavior must redirect viewers to HTTPS.");
+  const configuredBehaviors = [config.DefaultCacheBehavior, ...(config.CacheBehaviors?.Items || [])].filter(Boolean);
+  const backendBehaviors = configuredBehaviors.filter((behavior) => behavior.TargetOriginId === targetOriginId).map((behavior) => ({ pathPattern: behaviorPath(behavior), targetOriginId: behavior.TargetOriginId, viewerProtocolPolicy: behavior.ViewerProtocolPolicy })).sort((left, right) => left.pathPattern.localeCompare(right.pathPattern));
+  const apiNamespaceCovered = config.DefaultCacheBehavior?.TargetOriginId === targetOriginId || configuredBehaviors.some((behavior) => behavior.PathPattern === "/api/*" && behavior.TargetOriginId === targetOriginId);
+  if (!apiNamespaceCovered || backendBehaviors.some(({ viewerProtocolPolicy }) => viewerProtocolPolicy !== "redirect-to-https") || configuredBehaviors.filter(apiNamespaceBehavior).some((behavior) => behavior.TargetOriginId !== targetOriginId || behavior.ViewerProtocolPolicy !== "redirect-to-https")) throw new Error("Every Stage B backend CloudFront API or ALB behavior must redirect viewers to HTTPS.");
   const records = (awsJson(["route53", "list-resource-record-sets", "--hosted-zone-id", PRODUCTION_HOSTED_ZONE_ID, "--output", "json", "--no-cli-pager"], run).ResourceRecordSets || [])
     .filter(({ Name, Type }) => PRODUCTION_PUBLIC_ALIASES.includes(dns(Name)) && (Type === "A" || Type === "AAAA"));
   const expectedRecords = PRODUCTION_PUBLIC_ALIASES.flatMap((name) => ["A", "AAAA"].map((type) => `${name}:${type}`));
@@ -302,7 +307,7 @@ export function collectStageBBackendProxyTrust({ vpcId, run } = {}) {
     if (!AliasTarget || dns(AliasTarget.DNSName) !== dns(distribution.DomainName) || AliasTarget.HostedZoneId !== CLOUDFRONT_ALIAS_HOSTED_ZONE_ID || AliasTarget.EvaluateTargetHealth !== false) throw new Error("Stage B backend Route53 aliases do not route to the reviewed CloudFront distribution.");
     return { name: dns(Name), type: Type, target: dns(AliasTarget.DNSName), hostedZoneId: AliasTarget.HostedZoneId };
   }).sort((left, right) => `${left.name}:${left.type}`.localeCompare(`${right.name}:${right.type}`));
-  return Object.freeze({ mode: "cloudfront-alb", alb: { name: PRODUCTION_BACKEND_ALB_NAME, arn: alb.LoadBalancerArn, dnsName: alb.DNSName, vpcId: alb.VpcId, subnetIds, cidrs: albCidrs, xffHeaderProcessingMode, xffClientPortEnabled: false }, targetGroup: { name: PRODUCTION_BACKEND_TARGET_GROUP_NAME, arn: targetGroup.TargetGroupArn }, cloudFront: { distributionId: distribution.Id, domainName: dns(distribution.DomainName), configEtag: configResponse.ETag, aliases: [...PRODUCTION_PUBLIC_ALIASES], dns: { hostedZoneId: PRODUCTION_HOSTED_ZONE_ID, records: dnsRecords }, targetOriginId, viewerProtocolPolicy: "redirect-to-https", originProtocolPolicy, originHttpsPort, apiPaths: [...PRODUCTION_API_PATHS], managedPrefixListId: prefixList.PrefixListId, managedPrefixListVersion: prefixList.Version, cidrs: cloudFrontCidrs } });
+  return Object.freeze({ mode: "cloudfront-alb", alb: { name: PRODUCTION_BACKEND_ALB_NAME, arn: alb.LoadBalancerArn, dnsName: alb.DNSName, vpcId: alb.VpcId, subnetIds, cidrs: albCidrs, xffHeaderProcessingMode, xffClientPortEnabled: false }, targetGroup: { name: PRODUCTION_BACKEND_TARGET_GROUP_NAME, arn: targetGroup.TargetGroupArn }, cloudFront: { distributionId: distribution.Id, domainName: dns(distribution.DomainName), configEtag: configResponse.ETag, aliases: [...PRODUCTION_PUBLIC_ALIASES], dns: { hostedZoneId: PRODUCTION_HOSTED_ZONE_ID, records: dnsRecords }, targetOriginId, backendBehaviors, originProtocolPolicy, originHttpsPort, apiPaths: [...PRODUCTION_API_PATHS], managedPrefixListId: prefixList.PrefixListId, managedPrefixListVersion: prefixList.Version, cidrs: cloudFrontCidrs } });
 }
 
 export function assertStageBBackendProxyTrustCurrent({ expected, vpcId, run } = {}) {

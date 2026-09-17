@@ -114,7 +114,8 @@ Both wrapper modes run `terraform -chdir=infra/aws/terraform/production-green-st
 ### CloudFront proxy topology and prefix-list lifecycle
 
 Stage-A binds the Route53 A/AAAA aliases, deployed CloudFront distribution/config ETag,
-API behavior target origin, ALB origin, the ALB append-without-client-port XFF attributes,
+complete API/ALB behavior set and HTTPS viewer policy, ALB origin, the ALB
+append-without-client-port XFF attributes,
 and managed origin-facing prefix-list ID, version, and canonical CIDRs. Stage-B rejects a
 stale binding before candidate registration. The
 read-only `verify-production-cloudfront-proxy-drift.yml` workflow is scheduled four
