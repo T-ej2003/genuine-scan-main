@@ -400,7 +400,7 @@ const APP_ONLY_CALLS = Object.freeze(Object.fromEntries([
   ["production-app-only-images", "APP_ONLY_VERIFIER_LAUNCHER", ["ecr:DescribeImages", "ecr:DescribeRepositories", "sts:GetCallerIdentity"]],
   ["production-app-only-preparation", "APP_ONLY_VERIFIER_LAUNCHER", ["ecs:DescribeTasks", "secretsmanager:DescribeSecret"]],
   ["production-app-only-runtime", "APP_ONLY_VERIFIER_LAUNCHER", ["ec2:DescribeRouteTables", "ec2:DescribeSecurityGroups", "ec2:DescribeSubnets", "kms:DescribeKey", "kms:GetKeyPolicy", "rds:DescribeDBInstances", "rds:DescribeDBParameters", "sts:GetCallerIdentity"]],
-  ["production-app-only-provisioning", "APP_ONLY_PERMISSION_PROVISIONER", ["iam:CreateRole", "iam:GetPolicy", "iam:GetPolicyVersion", "iam:GetRole", "iam:GetRolePolicy", "iam:ListAttachedRolePolicies", "iam:ListRolePolicies", "iam:PutRolePolicy", "iam:SimulatePrincipalPolicy", "sts:GetCallerIdentity"]],
+  ["production-app-only-provisioning", "APP_ONLY_PERMISSION_PROVISIONER", ["iam:CreateRole", "iam:GetPolicy", "iam:GetPolicyVersion", "iam:GetRole", "iam:GetRolePolicy", "iam:ListAttachedRolePolicies", "iam:ListRolePolicies", "iam:PutRolePolicy", "iam:SimulatePrincipalPolicy", "iam:UpdateAssumeRolePolicy", "sts:GetCallerIdentity"]],
   ["run-production-app-only-deployment", ["APP_ONLY_DEPLOYER", "APP_ONLY_PERMISSION_PROVISIONER"], ["sts:GetCallerIdentity"]],
   ["run-production-app-only-verifier", ["APP_ONLY_VERIFIER_LAUNCHER", "APP_ONLY_PERMISSION_PROVISIONER"], ["sts:GetCallerIdentity"]],
   ["production-app-only-adapters", null, ["ecr:DescribeImages", "ecs:DescribeServices", "ecs:DescribeTaskDefinition", "ecs:DescribeTasks", "ecs:ListTasks", "ecs:RegisterTaskDefinition", "ecs:RunTask", "ecs:UpdateService", "logs:GetLogEvents", "sts:GetCallerIdentity"]],

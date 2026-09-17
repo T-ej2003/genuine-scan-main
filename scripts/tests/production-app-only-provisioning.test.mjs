@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { APP_ONLY, APP_ONLY_DOMAINS } from "../aws/production-app-only-contract.mjs";
 import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
 import { APP_ONLY_PROVISIONING, APP_ONLY_VERIFIER, appOnlyCompatibilityReadPolicy, appOnlyDeployerPolicy, appOnlyVerifierBoundaryPolicy,
-  appOnlyVerifierLauncherPolicy, appOnlyProductionOidcTrust } from "../aws/production-app-only-policy.mjs";
+  appOnlyVerifierLauncherPolicy, appOnlyProductionOidcTrust, appOnlyProductionOidcTrustPredecessors } from "../aws/production-app-only-policy.mjs";
 import { observeAppOnlyProvisioning, prepareAppOnlyProvisioning, executeAppOnlyProvisioning, verifyAppOnlyEffectivePermissions } from "../aws/production-app-only-provisioning.mjs";
 const sourceSha = "a".repeat(40), now = Date.now();
 const verifierArn = `arn:aws:ecs:${APP_ONLY.region}:${APP_ONLY.account}:task-definition/${APP_ONLY_VERIFIER.family}:2`;
@@ -29,6 +29,7 @@ function fixture() {
           AssumeRolePolicyDocument: JSON.parse(field("--assume-role-policy-document")) };
         roles.set(name, role); return { Role: role };
       }
+      case "update-assume-role-policy": roles.get(name).AssumeRolePolicyDocument = JSON.parse(field("--policy-document")); return {};
       case "put-role-policy": policies.set(name, JSON.parse(field("--policy-document"))); return {};
       default: assert.fail(`Unexpected API ${args[1]}`);
     }
@@ -42,7 +43,7 @@ function fixture() {
     authenticate: async () => {}, writeEvidence: async (item) => evidence.push(item), verifyEffective: async () => ({ verified: true }) });
   return { roles, policies, boundaries, calls, evidence, run, input, execution, eligibility };
 }
-const mutations = (f) => f.calls.filter((c) => ["create-role", "put-role-policy"].includes(c[1]));
+const mutations = (f) => f.calls.filter((c) => ["create-role", "put-role-policy", "update-assume-role-policy"].includes(c[1]));
 
 test("separate provisioner installs only exact bounded roles/policies and reads back every write", async () => {
   const f = fixture(), prep = prepareAppOnlyProvisioning(f.input);
@@ -83,6 +84,19 @@ test("unexpected predecessor trust/boundary/policy cannot be silently repaired",
     const count = mutations(f).length; mutate(f);
     assert.throws(() => observeAppOnlyProvisioning(f.input)); assert.equal(mutations(f).length, count);
   }
+});
+
+test("the app deployer accepts only the exact legacy trust and upgrades it once", async () => {
+  const f = fixture();
+  await executeAppOnlyProvisioning(f.execution(prepareAppOnlyProvisioning(f.input)));
+  const deployment = prepareAppOnlyProvisioning({ ...f.input, phase: "DEPLOYER", eligibility: f.eligibility });
+  await executeAppOnlyProvisioning(f.execution(deployment));
+  const name = APP_ONLY.roleArn.split("/").at(-1);
+  f.roles.get(name).AssumeRolePolicyDocument = appOnlyProductionOidcTrustPredecessors(name)[1];
+  const before = mutations(f).length;
+  await executeAppOnlyProvisioning(f.execution(prepareAppOnlyProvisioning({ ...f.input, phase: "DEPLOYER", eligibility: f.eligibility })));
+  assert.deepEqual(mutations(f).slice(before).map((call) => call[1]), ["update-assume-role-policy"]);
+  assert.deepEqual(f.roles.get(name).AssumeRolePolicyDocument, appOnlyProductionOidcTrust(name));
 });
 
 test("verifier revision changes replace only exact launcher policy and never recreate roles", async () => {

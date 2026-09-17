@@ -52,7 +52,7 @@ test("RunTask rejects all command, environment, network and task substitutions",
   }
 });
 
-test("provisioner can create only two boundary-constrained roles and cannot alter their boundaries or trust", () => {
+test("provisioner can create only two boundary-constrained roles and can update only the app deployer's exact trust", () => {
   const policy = appOnlyPermissionProvisionerPolicy();
   const verifierRole = `arn:aws:iam::${APP_ONLY.account}:role/${APP_ONLY_VERIFIER.roleName}`;
   const creates = policy.Statement.filter(({ Action }) => Action === "iam:CreateRole");
@@ -63,7 +63,7 @@ test("provisioner can create only two boundary-constrained roles and cannot alte
   const actions = policy.Statement.flatMap(({ Action }) => Action);
   assert.deepEqual([...new Set(actions)].sort(), ["iam:CreateRole", "iam:GetRole", "iam:GetRolePolicy", "iam:ListRolePolicies",
     "iam:ListAttachedRolePolicies", "iam:PutRolePolicy", "iam:PassRole", "iam:SimulatePrincipalPolicy", "iam:GetPolicy", "iam:GetPolicyVersion",
-    "ecs:RegisterTaskDefinition", "ecs:DescribeTaskDefinition", "ecs:DescribeServices", "ecs:DescribeTasks", "ecs:ListTasks", "sts:GetCallerIdentity"].sort());
+    "iam:UpdateAssumeRolePolicy", "ecs:RegisterTaskDefinition", "ecs:DescribeTaskDefinition", "ecs:DescribeServices", "ecs:DescribeTasks", "ecs:ListTasks", "sts:GetCallerIdentity"].sort());
   for (const statement of policy.Statement.filter(({ Action }) => [].concat(Action).some((action) => action.startsWith("iam:") && action !== "iam:PassRole"))) {
     const resources = statement.Sid === "ReadImmutableAppBoundaries"
       ? [APP_ONLY_PROVISIONING.deployerBoundaryArn, APP_ONLY_PROVISIONING.verifierBoundaryArn] : [APP_ONLY.roleArn, verifierRole];
@@ -75,6 +75,7 @@ test("provisioner can create only two boundary-constrained roles and cannot alte
   const pass = policy.Statement.find(({ Action }) => Action === "iam:PassRole");
   assert.deepEqual(pass.Resource, [APP_ONLY_VERIFIER.taskRoleArn, APP_ONLY_VERIFIER.executionRoleArn]);
   assert.deepEqual(pass.Condition, { StringEquals: { "iam:PassedToService": "ecs-tasks.amazonaws.com" } });
+  assert.deepEqual(policy.Statement.find(({ Action }) => Action === "iam:UpdateAssumeRolePolicy"), { Sid: "UpdateExactAppDeployerTrust", Effect: "Allow", Action: "iam:UpdateAssumeRolePolicy", Resource: APP_ONLY.roleArn });
 });
 
 test("verifier boundary permits family evolution but identity policy selects one revision", () => {
@@ -136,9 +137,10 @@ test("new principals require production approval plus exact role-specific reusab
     assert.equal(condition["token.actions.githubusercontent.com:repository_owner_id"], "183396573");
     assert.equal(condition["token.actions.githubusercontent.com:ref"], "refs/heads/main");
     const refs = condition["token.actions.githubusercontent.com:job_workflow_ref"];
-    assert.ok(refs.length > 0 && refs.every((ref) => ref.endsWith("-operation.yml@refs/heads/main") && !ref.includes("*")));
+    assert.ok(refs.length > 0 && refs.every((ref) => ref.endsWith(".yml@refs/heads/main") && !ref.includes("*")));
     const deploy = "T-ej2003/genuine-scan-main/.github/workflows/deploy-production-app-only-operation.yml@refs/heads/main";
-    if (role === APP_ONLY.roleArn.split("/").at(-1)) assert.deepEqual(refs, [deploy]);
-    else assert.ok(!refs.includes(deploy), "Application deployment cannot assume verifier or provisioner identity");
+    const normal = "T-ej2003/genuine-scan-main/.github/workflows/production-deploy.yml@refs/heads/main";
+    if (role === APP_ONLY.roleArn.split("/").at(-1)) assert.deepEqual(refs, [deploy, normal]);
+    else { assert.ok(!refs.includes(deploy), "Application deployment cannot assume verifier or provisioner identity"); assert.ok(!refs.includes(normal)); }
   }
 });

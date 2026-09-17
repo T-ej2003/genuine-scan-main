@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { buildRootAttestationKeyPolicy, ROOT_ATTESTATION_KEY_DESCRIPTION, ROOT_ATTESTATION_TAGS } from "../aws/production-root-attestation-key.mjs";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -581,7 +582,16 @@ test("canonical producer persists the exact self-contained evidence bundle", (co
   const manifest = { schemaVersion: 1, records: [{ recoveryEvidence: files.recoveryEvidenceBytes, environmentApproval: files.environmentApprovalBytes, runtimeConsumability: files.runtimeConsumabilityBytes }] };
   const manifestFile = path.join(directory, "manifest.json"); const manifestBytes = bytes(manifest); fs.writeFileSync(manifestFile, manifestBytes, { mode: 0o600 });
   const outputFile = path.join(directory, "bundle.json");
-  const result = prepareProductionBackendFailedRecoveryEvidence({ sourceSha, manifestFile, manifestSha256: hash(manifestBytes), outputFile, now, protectedMain: () => {}, run: (_command, args) => JSON.stringify(args[1] === "verify" ? { SignatureValid: true } : { Signature: "AQ==" }) });
+  const keyArn = "arn:aws:kms:eu-west-2:368992683803:key/11111111-1111-1111-1111-111111111111";
+  const result = prepareProductionBackendFailedRecoveryEvidence({ sourceSha, manifestFile, manifestSha256: hash(manifestBytes), outputFile, now, protectedMain: () => {}, run: (_command, args) => {
+    const responses = {
+      "describe-key": { KeyMetadata: { Arn: keyArn, KeyId: keyArn.split("/").at(-1), Description: ROOT_ATTESTATION_KEY_DESCRIPTION, KeyUsage: "SIGN_VERIFY", KeySpec: "RSA_3072", KeyState: "Enabled", Enabled: true, KeyManager: "CUSTOMER", Origin: "AWS_KMS", MultiRegion: false } },
+      "get-key-policy": { Policy: JSON.stringify(buildRootAttestationKeyPolicy()) },
+      "list-resource-tags": { Tags: Object.entries(ROOT_ATTESTATION_TAGS).map(([TagKey, TagValue]) => ({ TagKey, TagValue })) },
+      verify: { SignatureValid: true }, sign: { Signature: "AQ==" },
+    };
+    assert.ok(responses[args[1]], "Unexpected AWS command"); return JSON.stringify(responses[args[1]]);
+  } });
   const persisted = JSON.parse(fs.readFileSync(outputFile));
   assert.equal(result.envelopeSha256, persisted.envelopeSha256);
   assert.equal(verify(persisted).knownFailedRevisions[0].taskDefinitionArn, failedArn);

@@ -909,6 +909,7 @@ jobs:
           retention-days: 90
 
       - name: Deploy rotation transition backend ECS service
+        id: rotation-deployment
         if: ${{ inputs.release_mode == 'rotation-overlap' || inputs.release_mode == 'rotation-cleanup' }}
         env:
           AWS_REGION: ${{ env.AWS_REGION }}
@@ -939,7 +940,7 @@ jobs:
           set -euo pipefail
           receipt_args=()
           if [[ "${{ inputs.release_mode }}" == "rotation-overlap" ]]; then
-            receipt_args=(--rotation-fixture-sha256 "$ROTATION_FIXTURE_SHA256" --environment-approval "$PRODUCTION_ENVIRONMENT_APPROVAL_FILE" --environment-approval-sha256 "$PRODUCTION_ENVIRONMENT_APPROVAL_SHA256" --deployment-receipt-output "$OVERLAP_DEPLOYMENT_RECEIPT_FILE")
+            receipt_args=(--rotation-fixture-sha256 "$ROTATION_FIXTURE_SHA256" --deployment-receipt-output "$OVERLAP_DEPLOYMENT_RECEIPT_FILE")
           fi
           node scripts/aws/run-production-cutover.mjs \
             --mode rotation-overlap \
@@ -951,13 +952,17 @@ jobs:
             --task-definition "$EXISTING_TASK_DEFINITION_ARN" \
             --readiness-file "$OVERLAP_READINESS_EVIDENCE_FILE" \
             --readiness-sha256 "$OVERLAP_READINESS_EVIDENCE_SHA256" \
-            "${receipt_args[@]}"
+            --environment-approval "$PRODUCTION_ENVIRONMENT_APPROVAL_FILE" \
+            --environment-approval-sha256 "$PRODUCTION_ENVIRONMENT_APPROVAL_SHA256" \
+            "${receipt_args[@]}" > "$RUNNER_TEMP/rotation-deployment-result.json"
+          chmod 600 "$RUNNER_TEMP/rotation-deployment-result.json"
+          echo "sha256=$(sha256sum "$RUNNER_TEMP/rotation-deployment-result.json" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Upload overlap deployment receipt
         if: ${{ inputs.release_mode == 'rotation-overlap' }}
         uses: actions/upload-artifact@v7
         with:
-          name: production-overlap-deployment-receipt
+          name: production-overlap-deployment-receipt-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/production-overlap-deployment-receipt.json
           if-no-files-found: error
           retention-days: 90
@@ -1070,7 +1075,7 @@ jobs:
         if: ${{ always() && inputs.release_mode == 'backend-health-recovery' }}
         uses: actions/upload-artifact@v7
         with:
-          name: backend-health-recovery-evidence
+          name: backend-health-recovery-evidence-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/backend-health-recovery/evidence.json
           if-no-files-found: ignore
           retention-days: 90
@@ -1081,6 +1086,26 @@ jobs:
         run: |
           set -euo pipefail
           ./scripts/aws/verify-production-smoke.sh
+
+      - name: Commit authenticated backend recovery component state
+        if: ${{ inputs.release_mode == 'backend-health-recovery' }}
+        env:
+          MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-release-deployer
+          RECOVERY_EVIDENCE: ${{ runner.temp }}/backend-health-recovery/evidence.json
+        run: node scripts/aws/commit-production-component-recovery-state.mjs --evidence="$RECOVERY_EVIDENCE"
+
+      - name: Commit authenticated rotation backend and security component state
+        if: ${{ inputs.release_mode == 'rotation-overlap' || inputs.release_mode == 'rotation-cleanup' }}
+        env:
+          MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-release-deployer
+          SOURCE_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
+          ROTATION_ID: ${{ inputs.rotation_id }}
+          ROTATION_STATE_SHA256: ${{ inputs.rotation_state_sha256 }}
+          ROTATION_READINESS: ${{ runner.temp }}/rotation-readiness.json
+          ROTATION_READINESS_SHA256: ${{ inputs.rotation_readiness_evidence_sha256 }}
+          ROTATION_MODE: ${{ inputs.release_mode }}
+          ROTATION_DEPLOYMENT_SHA256: ${{ steps.rotation-deployment.outputs.sha256 }}
+        run: node scripts/aws/commit-production-component-rotation-state.mjs --mode="$ROTATION_MODE" --source-sha="$SOURCE_SHA" --rotation-id="$ROTATION_ID" --rotation-state-sha256="$ROTATION_STATE_SHA256" --readiness="$ROTATION_READINESS" --readiness-sha256="$ROTATION_READINESS_SHA256" --deployment="$RUNNER_TEMP/rotation-deployment-result.json" --deployment-sha256="$ROTATION_DEPLOYMENT_SHA256"
 
       - name: Activate authenticated frontend image
         id: frontend-activation
@@ -1101,10 +1126,14 @@ jobs:
             --web-authorization-sha256 "$WEB_AUTHORIZATION_SHA256" \
             --backend-activation-evidence "$BACKEND_METADATA_FILE" \
             --backend-activation-evidence-sha256 "$(sha256sum "$BACKEND_METADATA_FILE" | cut -d' ' -f1)")"
-          node --input-type=module - "$GITHUB_OUTPUT" "$result" <<'NODE'
+          activation_file="$RUNNER_TEMP/frontend-activation.json"
+          printf '%s\n' "$result" > "$activation_file"
+          chmod 600 "$activation_file"
+          node --input-type=module - "$GITHUB_OUTPUT" "$activation_file" <<'NODE'
           import fs from "node:fs";
-          const result = JSON.parse(process.argv[3]);
-          for (const [key, value] of Object.entries({ previous_task_definition: result.predecessorTaskDefinitionArn, task_definition: result.candidateTaskDefinitionArn, image_ref: result.imageRef })) fs.appendFileSync(process.argv[2], `${key}=${value}\n`);
+          import crypto from "node:crypto";
+          const bytes = fs.readFileSync(process.argv[3]); const result = JSON.parse(bytes);
+          for (const [key, value] of Object.entries({ previous_task_definition: result.predecessorTaskDefinitionArn, task_definition: result.candidateTaskDefinitionArn, image_ref: result.imageRef, evidence_file: process.argv[3], evidence_sha256: crypto.createHash("sha256").update(bytes).digest("hex") })) fs.appendFileSync(process.argv[2], `${key}=${value}\n`);
           NODE
 
       - name: Summarize ECS production deployment
@@ -1168,3 +1197,24 @@ jobs:
               echo "- Deployment: preserved reviewed task definition"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit authenticated security component state
+        if: ${{ inputs.release_mode == 'normal' }}
+        env:
+          MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-release-deployer
+          SOURCE_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
+          AUTHORIZATION_FILE: ${{ steps.images.outputs.authorization_file }}
+          AUTHORIZATION_SHA256: ${{ inputs.normal_image_authorization_sha256 }}
+          RLS_RECEIPT: ${{ runner.temp }}/production-rls-release-receipt.json
+          BACKEND_METADATA: ${{ steps.image-meta.outputs.backend_metadata_file }}
+          WEB_REQUIRED: ${{ steps.images.outputs.web_required }}
+          FRONTEND_ACTIVATION: ${{ steps.frontend-activation.outputs.evidence_file }}
+          FRONTEND_ACTIVATION_SHA256: ${{ steps.frontend-activation.outputs.evidence_sha256 }}
+        run: |
+          set -euo pipefail
+          args=(--source-sha="$SOURCE_SHA" --authorization="$AUTHORIZATION_FILE" --authorization-sha256="$AUTHORIZATION_SHA256" --release-receipt="$RLS_RECEIPT" --release-receipt-sha256="$(sha256sum "$RLS_RECEIPT" | cut -d' ' -f1)" --backend-metadata="$BACKEND_METADATA" --backend-metadata-sha256="$(sha256sum "$BACKEND_METADATA" | cut -d' ' -f1)")
+          if [ "$WEB_REQUIRED" = true ]; then
+            test -n "$FRONTEND_ACTIVATION" && test -n "$FRONTEND_ACTIVATION_SHA256"
+            args+=(--frontend-activation="$FRONTEND_ACTIVATION" --frontend-activation-sha256="$FRONTEND_ACTIVATION_SHA256")
+          fi
+          node scripts/aws/commit-production-component-security-state.mjs "${args[@]}"

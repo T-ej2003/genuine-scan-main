@@ -12,6 +12,7 @@ const identity = "^https://github.com/T-ej2003/genuine-scan-main/.github/workflo
 const issuer = "https://token.actions.githubusercontent.com";
 const spdxType = "https://spdx.dev/Document";
 const provenanceType = "https://mscqr.com/attestations/stage-b-provenance/v1";
+const normalProvenanceType = "https://mscqr.com/attestations/normal-production-provenance/v1";
 const spdxPredicate = { spdxVersion: "SPDX-2.3", name: "mscqr-backend" };
 const provenancePredicate = { sourceSha: "3d5eeefc34d69820e00bef072da3c4396689491f", workflowRunId: "31876252809" };
 
@@ -137,6 +138,11 @@ test("exact recovered provenance predicate passes while changed source or workfl
   assert.equal(runAttestation("equivalent", provenancePredicate, provenanceType, verifiedOutput([{ predicate: provenancePredicate }], provenanceType)).status, 0);
   assert.notEqual(runAttestation("equivalent", provenancePredicate, provenanceType, verifiedOutput([{ predicate: { ...provenancePredicate, sourceSha: "4".repeat(40) } }], provenanceType)).status, 0);
   assert.notEqual(runAttestation("equivalent", provenancePredicate, provenanceType, verifiedOutput([{ predicate: { ...provenancePredicate, workflowRunId: "different" } }], provenanceType)).status, 0);
+});
+
+test("normal production provenance is accepted and remains exact on recovery", () => {
+  assert.equal(runAttestation("equivalent", provenancePredicate, normalProvenanceType, verifiedOutput([{ predicate: provenancePredicate }], normalProvenanceType)).status, 0);
+  assert.notEqual(runAttestation("equivalent", provenancePredicate, normalProvenanceType, verifiedOutput([{ predicate: { ...provenancePredicate, sourceSha: "4".repeat(40) } }], normalProvenanceType)).status, 0);
 });
 
 test("multiple verified same-type attestations require one exact predicate match", () => {

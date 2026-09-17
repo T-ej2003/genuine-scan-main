@@ -57,7 +57,7 @@ const WEB_IMAGE_INPUTS = [
 ];
 const DOCUMENTATION = /(?:^|\/)(?:documents|README|CHANGELOG|.*\.md)(?:\/|$)/;
 const CI = /^\.github\/workflows\//;
-const TERRAFORM = /^infra\/aws\/terraform\/(?:production-green-stage-(?:a|b(?:-image-publisher|-publisher-bootstrap)?)|production-initial-activation-policy-reconciler|production-web-release)\//;
+const TERRAFORM = /^infra\/aws\/terraform\/(?:production-green-stage-(?:a|b(?:-image-publisher|-publisher-bootstrap)?)|production-initial-activation-policy-reconciler|production-web-release|production-component-deployment-state)\//;
 // This isolated root creates IAM permissions only and is absent from all
 // canonical Docker COPY inputs. Do not classify arbitrary neighboring files.
 const APP_ONLY_PERMISSION_SOURCE = /^infra\/aws\/terraform\/production-app-only-permissions\/(?:main\.tf\.json|\.terraform\.lock\.hcl)$/;

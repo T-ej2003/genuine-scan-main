@@ -9,12 +9,13 @@ import { assertRollbackImageAvailable } from "./production-normal-backend-activa
 
 const family = new RegExp(`^arn:aws:ecs:${APP_ONLY.region}:${APP_ONLY.account}:task-definition/${APP_ONLY.family}:[1-9][0-9]*$`);
 const taskArn = new RegExp(`^arn:aws:ecs:${APP_ONLY.region}:${APP_ONLY.account}:task/${APP_ONLY.cluster}/[a-f0-9]{32}$`);
+const sourceSha = /^[a-f0-9]{40}$/;
 const parse = (value) => typeof value === "string" ? JSON.parse(value) : value;
 const noFailures = (value) => { assert.equal((value.failures || []).length, 0, "ECS readback returned failures"); return value; };
 
 // Internal fixed adapters, not a CLI. The protected workflow supplies the
 // credential-scoped runner; no dispatch input supplies AWS argument arrays.
-export function createAppOnlyEcsReaders(run) {
+export function createAppOnlyEcsReaders(run, { assertDefinitionArn = (arn) => assert.match(arn || "", family) } = {}) {
   const aws = (args) => parse(run([...args, "--output", "json", "--no-cli-pager"]));
   const readService = () => {
     const response = noFailures(aws(["ecs", "describe-services", "--cluster", APP_ONLY.clusterArn, "--services", APP_ONLY.serviceArn, "--include", "TAGS"]));
@@ -24,7 +25,7 @@ export function createAppOnlyEcsReaders(run) {
     return service;
   };
   const readDefinition = (arn) => {
-    assert.match(arn || "", family);
+    assertDefinitionArn(arn);
     const response = aws(["ecs", "describe-task-definition", "--task-definition", arn, "--include", "TAGS"]);
     assert.equal(response.taskDefinition?.taskDefinitionArn, arn);
     return { ...response.taskDefinition, tags: response.tags || [] };
@@ -47,7 +48,17 @@ export function createAppOnlyEcsReaders(run) {
     assert.equal(appOnlyServiceConfigurationSha256(after), appOnlyServiceConfigurationSha256(service), "Concurrent service configuration change during readback");
     return { service, definition, tasks };
   };
-  return { readService, readDefinition, readLive };
+  const readBackendImageSource = (digest) => {
+    assert.match(digest || "", /^sha256:[a-f0-9]{64}$/);
+    const response = aws(["ecr", "describe-images", "--repository-name", "mscqr-backend", "--image-ids", `imageDigest=${digest}`]);
+    assert.equal(response.imageDetails?.length, 1, "Predecessor backend image is unavailable");
+    const image = response.imageDetails[0];
+    assert.equal(image.repositoryName, "mscqr-backend"); assert.equal(String(image.registryId), APP_ONLY.account); assert.equal(image.imageDigest, digest);
+    const sources = (image.imageTags || []).filter((tag) => sourceSha.test(tag));
+    assert.equal(sources.length, 1, "Predecessor backend image source identity is ambiguous or unavailable");
+    return sources[0];
+  };
+  return { readService, readDefinition, readLive, readBackendImageSource };
 }
 
 export function createAppOnlyActivationAdapters({ run, preparation, authenticate, writeEvidence, fetchImpl = fetch, wait = sleep, now = Date.now }) {

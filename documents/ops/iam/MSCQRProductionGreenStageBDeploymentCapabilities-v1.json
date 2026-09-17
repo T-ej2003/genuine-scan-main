@@ -2926,7 +2926,7 @@
         "sid": "CreateBoundedRole0",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "c29c81828951e88f4a490bf6e1eb6f12356103b732480c7dd399ef357a30a51e"
+        "expectedPolicySha256": "d7460a1946a8b55f5cca63a54dace7c114c5033afaefc2b3e80b8c7bd60a51dd"
       },
       "required": true,
       "mutation": true
@@ -2960,7 +2960,7 @@
         "sid": "CreateBoundedRole1",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "c29c81828951e88f4a490bf6e1eb6f12356103b732480c7dd399ef357a30a51e"
+        "expectedPolicySha256": "d7460a1946a8b55f5cca63a54dace7c114c5033afaefc2b3e80b8c7bd60a51dd"
       },
       "required": true,
       "mutation": true
@@ -2997,7 +2997,7 @@
         "sid": "ListProductionTasks",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "c29c81828951e88f4a490bf6e1eb6f12356103b732480c7dd399ef357a30a51e"
+        "expectedPolicySha256": "d7460a1946a8b55f5cca63a54dace7c114c5033afaefc2b3e80b8c7bd60a51dd"
       },
       "required": true,
       "mutation": false
@@ -3032,7 +3032,7 @@
         "sid": "PassExactTaskRoles",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "c29c81828951e88f4a490bf6e1eb6f12356103b732480c7dd399ef357a30a51e"
+        "expectedPolicySha256": "d7460a1946a8b55f5cca63a54dace7c114c5033afaefc2b3e80b8c7bd60a51dd"
       },
       "required": true,
       "mutation": false
@@ -3063,7 +3063,7 @@
         "sid": "ProvisionBoundedInlinePolicies",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "c29c81828951e88f4a490bf6e1eb6f12356103b732480c7dd399ef357a30a51e"
+        "expectedPolicySha256": "d7460a1946a8b55f5cca63a54dace7c114c5033afaefc2b3e80b8c7bd60a51dd"
       },
       "required": true,
       "mutation": true
@@ -3097,7 +3097,7 @@
         "sid": "ReadCallerIdentity",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "c29c81828951e88f4a490bf6e1eb6f12356103b732480c7dd399ef357a30a51e"
+        "expectedPolicySha256": "d7460a1946a8b55f5cca63a54dace7c114c5033afaefc2b3e80b8c7bd60a51dd"
       },
       "required": true,
       "mutation": false
@@ -3128,7 +3128,7 @@
         "sid": "ReadExactAppRoles",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "c29c81828951e88f4a490bf6e1eb6f12356103b732480c7dd399ef357a30a51e"
+        "expectedPolicySha256": "d7460a1946a8b55f5cca63a54dace7c114c5033afaefc2b3e80b8c7bd60a51dd"
       },
       "required": true,
       "mutation": false
@@ -3159,7 +3159,7 @@
         "sid": "ReadExactAppRoles",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "c29c81828951e88f4a490bf6e1eb6f12356103b732480c7dd399ef357a30a51e"
+        "expectedPolicySha256": "d7460a1946a8b55f5cca63a54dace7c114c5033afaefc2b3e80b8c7bd60a51dd"
       },
       "required": true,
       "mutation": false
@@ -3190,7 +3190,7 @@
         "sid": "ReadExactAppRoles",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "c29c81828951e88f4a490bf6e1eb6f12356103b732480c7dd399ef357a30a51e"
+        "expectedPolicySha256": "d7460a1946a8b55f5cca63a54dace7c114c5033afaefc2b3e80b8c7bd60a51dd"
       },
       "required": true,
       "mutation": false
@@ -3221,7 +3221,7 @@
         "sid": "ReadExactAppRoles",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "c29c81828951e88f4a490bf6e1eb6f12356103b732480c7dd399ef357a30a51e"
+        "expectedPolicySha256": "d7460a1946a8b55f5cca63a54dace7c114c5033afaefc2b3e80b8c7bd60a51dd"
       },
       "required": true,
       "mutation": false
@@ -3255,7 +3255,7 @@
         "sid": "ReadExactService",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "c29c81828951e88f4a490bf6e1eb6f12356103b732480c7dd399ef357a30a51e"
+        "expectedPolicySha256": "d7460a1946a8b55f5cca63a54dace7c114c5033afaefc2b3e80b8c7bd60a51dd"
       },
       "required": true,
       "mutation": false
@@ -3286,7 +3286,7 @@
         "sid": "ReadImmutableAppBoundaries",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "c29c81828951e88f4a490bf6e1eb6f12356103b732480c7dd399ef357a30a51e"
+        "expectedPolicySha256": "d7460a1946a8b55f5cca63a54dace7c114c5033afaefc2b3e80b8c7bd60a51dd"
       },
       "required": true,
       "mutation": false
@@ -3317,7 +3317,7 @@
         "sid": "ReadImmutableAppBoundaries",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "c29c81828951e88f4a490bf6e1eb6f12356103b732480c7dd399ef357a30a51e"
+        "expectedPolicySha256": "d7460a1946a8b55f5cca63a54dace7c114c5033afaefc2b3e80b8c7bd60a51dd"
       },
       "required": true,
       "mutation": false
@@ -3354,7 +3354,7 @@
         "sid": "ReadProductionTasks",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "c29c81828951e88f4a490bf6e1eb6f12356103b732480c7dd399ef357a30a51e"
+        "expectedPolicySha256": "d7460a1946a8b55f5cca63a54dace7c114c5033afaefc2b3e80b8c7bd60a51dd"
       },
       "required": true,
       "mutation": false
@@ -3388,7 +3388,7 @@
         "sid": "ReadRegionalTaskDefinitions",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "c29c81828951e88f4a490bf6e1eb6f12356103b732480c7dd399ef357a30a51e"
+        "expectedPolicySha256": "d7460a1946a8b55f5cca63a54dace7c114c5033afaefc2b3e80b8c7bd60a51dd"
       },
       "required": true,
       "mutation": false
@@ -3422,7 +3422,7 @@
         "sid": "RegisterOnlyReadOnlyVerifier",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "c29c81828951e88f4a490bf6e1eb6f12356103b732480c7dd399ef357a30a51e"
+        "expectedPolicySha256": "d7460a1946a8b55f5cca63a54dace7c114c5033afaefc2b3e80b8c7bd60a51dd"
       },
       "required": true,
       "mutation": true
@@ -3453,10 +3453,40 @@
         "sid": "SimulateOnlyAppRoles",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "c29c81828951e88f4a490bf6e1eb6f12356103b732480c7dd399ef357a30a51e"
+        "expectedPolicySha256": "d7460a1946a8b55f5cca63a54dace7c114c5033afaefc2b3e80b8c7bd60a51dd"
       },
       "required": true,
       "mutation": false
+    },
+    {
+      "id": "app-only-permission-provisioning-updateexactappdeployertrust-iam-updateassumerolepolicy",
+      "phase": "app-only-permission-provisioning",
+      "identity": "APP_ONLY_PERMISSION_PROVISIONER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/production-app-only-provisioning.mjs",
+      "sourceFunction": "UpdateExactAppDeployerTrust",
+      "action": "iam:UpdateAssumeRolePolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-app-only-deployer"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "condition": {},
+        "scope": "identity-policy-ceiling"
+      },
+      "classification": "RELEASE_DIRECT_MUTATION",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-app-only-policy.mjs",
+        "sid": "UpdateExactAppDeployerTrust",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "d7460a1946a8b55f5cca63a54dace7c114c5033afaefc2b3e80b8c7bd60a51dd"
+      },
+      "required": true,
+      "mutation": true
     },
     {
       "id": "bootstrap-assume-publisher-bootstrap",
@@ -21931,6 +21961,10 @@
     {
       "sourceFile": "scripts/aws/production-app-only-provisioning.mjs",
       "action": "iam:SimulatePrincipalPolicy"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-provisioning.mjs",
+      "action": "iam:UpdateAssumeRolePolicy"
     },
     {
       "sourceFile": "scripts/aws/production-app-only-provisioning.mjs",

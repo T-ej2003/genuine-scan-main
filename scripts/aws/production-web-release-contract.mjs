@@ -122,15 +122,26 @@ export function captureFrontendPredecessor(service, taskDefinition) {
   return Object.freeze({ serviceArn: SERVICE_ARN, clusterArn: CLUSTER_ARN, taskDefinitionArn: service.taskDefinition, deploymentId: deployment.id, desiredCount: 2, runningCount: 2, pendingCount: 0, imageRef: container.image, taskDefinition: structuredClone(taskDefinition) });
 }
 
-export function buildFrontendCandidate({ predecessor, authenticatedWebAuthorization } = {}) {
-  if (!authenticatedWebAuthorizations.has(authenticatedWebAuthorization)) throw new Error("Authenticated web image authorization is required.");
+function buildFrontendCandidateFromImage({ predecessor, imageRef } = {}) {
   if (!predecessor || !TASK_ARN.test(predecessor.taskDefinitionArn || "")) throw new Error("Frontend predecessor is invalid.");
   const candidate = structuredClone(predecessor.taskDefinition); for (const key of ["taskDefinitionArn", "revision", "status", "registeredAt", "registeredBy", "deregisteredAt", "deleteRequestedAt", "requiresAttributes", "compatibilities"]) delete candidate[key];
-  const container = candidate.containerDefinitions?.find(({ name }) => name === WEB_RELEASE.container); if (!container) throw new Error("Frontend container is missing."); container.image = authenticatedWebAuthorization.imageRef;
+  const container = candidate.containerDefinitions?.find(({ name }) => name === WEB_RELEASE.container); if (!container) throw new Error("Frontend container is missing."); container.image = imageRef;
   if (!IMAGE.test(container.image) || candidate.family !== WEB_RELEASE.family || candidate.containerDefinitions.length !== predecessor.taskDefinition.containerDefinitions.length) throw new Error("Frontend candidate is outside the reviewed family or image contract.");
   const before = structuredClone(candidate); before.containerDefinitions.find(({ name }) => name === WEB_RELEASE.container).image = predecessor.imageRef;
   if (canonicalizeEcsTaskDefinition(before) !== canonicalizeEcsTaskDefinition(predecessor.taskDefinition)) throw new Error("Frontend candidate contains a semantic change other than the image.");
   return Object.freeze(candidate);
+}
+
+export function buildFrontendCandidate({ predecessor, authenticatedWebAuthorization } = {}) {
+  if (!authenticatedWebAuthorizations.has(authenticatedWebAuthorization)) throw new Error("Authenticated web image authorization is required.");
+  return buildFrontendCandidateFromImage({ predecessor, imageRef: authenticatedWebAuthorization.imageRef });
+}
+
+// Normal application releases use the same immutable image and predecessor
+// contract, but do not consume the high-assurance web authorization lane.
+// The caller still cannot supply a family, service, or mutable image.
+export function buildNormalFrontendCandidate({ predecessor, imageRef } = {}) {
+  return buildFrontendCandidateFromImage({ predecessor, imageRef });
 }
 
 export function assertFrontendCandidateReadback({ definition, taskDefinitionArn, candidate } = {}) {
@@ -156,6 +167,17 @@ export function buildFrontendRollback({ predecessor, failedCandidateTaskDefiniti
   return Object.freeze({ cluster: WEB_RELEASE.cluster, service: WEB_RELEASE.serviceName, taskDefinition: predecessor.taskDefinitionArn, expectedFailedCandidateTaskDefinitionArn: failedCandidateTaskDefinitionArn });
 }
 
+export async function rollbackFrontendCandidate({ predecessor, candidateTaskDefinitionArn, readService, updateService, waitStable } = {}) {
+  for (const value of [readService, updateService, waitStable]) if (typeof value !== "function") throw new Error("Frontend rollback adapter is missing.");
+  const current = await readService();
+  if (current?.taskDefinition !== candidateTaskDefinitionArn) throw new Error("Frontend rollback ownership is lost.");
+  await updateService(buildFrontendRollback({ predecessor, failedCandidateTaskDefinitionArn: candidateTaskDefinitionArn }));
+  await waitStable({ expectedTaskDefinitionArn: predecessor.taskDefinitionArn });
+  const restored = await readService();
+  if (restored?.taskDefinition !== predecessor.taskDefinitionArn || restored.desiredCount !== predecessor.desiredCount || restored.runningCount !== predecessor.desiredCount || restored.pendingCount !== 0) throw new Error("Frontend rollback did not restore the exact predecessor.");
+  return predecessor.taskDefinitionArn;
+}
+
 export async function runGovernedFrontendActivation({ sourceSha, webAuthorization, verifyWebAuthorization, now, readService, describeTaskDefinition, registerTaskDefinition, updateService, waitStable, verifyHealth } = {}) {
   for (const [name, value] of Object.entries({ readService, describeTaskDefinition, registerTaskDefinition, updateService, waitStable, verifyHealth })) if (typeof value !== "function") throw new Error(`Frontend activation adapter is missing: ${name}.`);
   const authenticatedWebAuthorization = authenticateWebImageAuthorization({ sourceSha, webAuthorization, verify: verifyWebAuthorization, now });
@@ -172,7 +194,7 @@ export async function runGovernedFrontendActivation({ sourceSha, webAuthorizatio
     if (health?.ready !== true || health.loginStatus !== 200) throw new Error("Frontend post-deployment health failed.");
     return Object.freeze({ sourceSha, predecessorTaskDefinitionArn: predecessor.taskDefinitionArn, candidateTaskDefinitionArn: candidateArn, imageRef: webAuthorization.imageRef, updateCount: 1, rollbackCount: 0, health });
   } catch (error) {
-    if (updateAttempted) { const current = await readService(); if (current?.taskDefinition === candidateArn) { await updateService(buildFrontendRollback({ predecessor, failedCandidateTaskDefinitionArn: candidateArn })); await waitStable({ expectedTaskDefinitionArn: predecessor.taskDefinitionArn }); const restored = await readService(); if (restored?.taskDefinition !== predecessor.taskDefinitionArn || restored.desiredCount !== predecessor.desiredCount || restored.runningCount !== predecessor.desiredCount || restored.pendingCount !== 0) throw new Error(`Frontend rollback failed after: ${error.message}`); } }
+    if (updateAttempted) { const current = await readService(); if (current?.taskDefinition === candidateArn) { try { await rollbackFrontendCandidate({ predecessor, candidateTaskDefinitionArn: candidateArn, readService, updateService, waitStable }); } catch (rollbackError) { throw new Error(`Frontend rollback failed after: ${error.message}`, { cause: rollbackError }); } } }
     throw error;
   }
 }

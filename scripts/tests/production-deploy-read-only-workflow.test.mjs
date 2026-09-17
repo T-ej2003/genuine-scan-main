@@ -19,40 +19,52 @@ const workflow = yaml.load(workflowText);
 const sha = "a".repeat(40);
 const cleanState = { remoteDefaultBranch: "main", shallow: false, mergeInProgress: false, rebaseInProgress: false, cherryPickInProgress: false };
 
-test("production readiness is manually dispatched with an exact source SHA", () => {
-  const dispatch = workflow.on?.workflow_dispatch || workflow[true]?.workflow_dispatch;
-  assert(dispatch);
-  assert.equal(dispatch.inputs.source_sha.required, true);
-  assert.equal(dispatch.inputs.source_sha.type, "string");
-  assert.match(workflowText, /--source-sha/);
-  assert.match(workflowText, /scripts\/ci\/production-readiness-orchestrator\.mjs/);
+test("normal production deployment is automatically triggered from protected main", () => {
+  assert.ok(Object.hasOwn(workflow.on || workflow[true] || {}, "workflow_dispatch"));
+  assert.ok(workflow.on?.push?.branches?.includes("main") || workflow[true]?.push?.branches?.includes("main"));
+  assert.match(workflowText, /ref: '\$\{\{ github\.sha \}\}'/);
+  assert.match(workflowText, /prepare-production-normal-deployment\.mjs/);
 });
 
-test("workflow authorizes protected main before requested-source checkout or code execution", () => {
-  const steps = workflow.jobs["read-only-readiness"].steps;
-  const bootstrap = steps.find(({ name }) => /Authorize requested source/.test(name));
-  const requestedCheckout = steps.find(({ name }) => /Checkout exact authorized source/.test(name));
-  assert(bootstrap);
-  assert(requestedCheckout);
-  assert.ok(steps.indexOf(bootstrap) < steps.indexOf(requestedCheckout));
-  assert.doesNotMatch(steps[steps.indexOf(bootstrap)].run, /npm|node|terraform|aws\b/);
-  assert.ok(steps.findIndex(({ name }) => /Install dependencies/.test(name)) > steps.indexOf(bootstrap));
-  assert.doesNotMatch(requestedCheckout.with.ref, /inputs\.source_sha/);
-  assert.match(workflowText, /ref: main/);
-  assert.match(workflowText, /trusted_main_sha/);
-  assert.match(workflowText, /git cat-file -e/);
-  assert.match(workflowText, /REQUESTED_SOURCE_SHA[\s\S]*origin\/main/);
+test("normal workflow rejects non-main dispatch and verifies exact protected source", () => {
+  assert.equal(workflow.jobs.classify.if, "github.ref == 'refs/heads/main'");
+  assert.match(workflowText, /test \"\$GITHUB_SHA\" = \"\$\(git rev-parse HEAD\)\"/);
+  assert.match(workflowText, /git fetch --no-tags origin main/);
+  assert.match(workflowText, /refs\/remotes\/origin\/main/);
+  assert.match(workflowText, /refs\/remotes\/origin\/main/);
 });
 
-test("workflow is read-only, serialized, and cannot reach mutation boundaries", () => {
-  assert.deepEqual(workflow.permissions, { contents: "read" });
+test("workflow is OIDC-only, serialized, and uses fixed production boundaries", () => {
+  assert.deepEqual(workflow.permissions, { contents: "read", "id-token": "write" });
   assert.equal(workflow.concurrency["cancel-in-progress"], false);
   assert.equal(workflow.concurrency.group, "production-deploy");
-  assert.doesNotMatch(workflowText, /configure-aws-credentials|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|id-token:\s*write/);
-  assert.doesNotMatch(workflowText, /terraform\s+(?:apply|state\b)|ecs:(?:RegisterTaskDefinition|UpdateService|DeregisterTaskDefinition)|aws\s+ecs\s+(?:register-task-definition|update-service|deregister-task-definition)|PutSecretValue|MFA/i);
-  assert.doesNotMatch(workflowText, /environment:\s*production\s*$/m);
-  assert.match(workflowText, /MSCQR_DEPLOYMENT_MODE:\s*read-only/);
+  assert.match(workflowText, /configure-aws-credentials@v6/);
+  assert.doesNotMatch(workflowText, /AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY/);
+  assert.doesNotMatch(workflowText, /role-to-assume:\s*\$\{\{/);
+  assert.match(workflowText, /368992683803/);
+  assert.match(workflowText, /eu-west-2/);
+  assert.match(workflowText, /environment: production/);
   assert.match(workflowText, /actions\/upload-artifact@v7/);
+});
+
+test("runner-scoped journal paths are evaluated only at step scope", () => {
+  assert.equal(Object.hasOwn(workflow.jobs.deploy.env || {}, "MSCQR_APP_ONLY_JOURNAL_DIR"), false);
+  assert.equal(Object.hasOwn(workflow.jobs.classify.env || {}, "MSCQR_APP_ONLY_JOURNAL_DIR"), false);
+  const deployStep = workflow.jobs.deploy.steps.find((step) => step.name === "Deploy coordinated normal release");
+  assert.equal(deployStep.env.MSCQR_APP_ONLY_JOURNAL_DIR, "${{ runner.temp }}/normal-release-journal");
+});
+
+test("current-main reconciliation precedes range classification and publication with protected smoke and always-upload", () => {
+  const job = workflow.jobs.classify;
+  assert.equal(job.environment, "production-normal-deploy");
+  assert.equal(job.env.SMOKE_AUTHENTICATED_REQUIRED, "true");
+  const step = job.steps.find((entry) => entry.id === "classify");
+  assert.ok(step.run.indexOf('test "$GITHUB_SHA"') < step.run.indexOf("production-normal-release.mjs --reconcile"));
+  assert.ok(step.run.indexOf("production-normal-release.mjs --reconcile") < step.run.indexOf("prepare-production-normal-deployment.mjs"));
+  const upload = job.steps.find((entry) => entry.name === "Preserve normal reconciliation journal");
+  assert.equal(upload.if, "always()");
+  assert.equal(workflow.jobs["publish-backend"].needs, "classify");
+  assert.equal(workflow.jobs["publish-frontend"].needs, "classify");
 });
 
 test("fixed orchestrator command set contains no mutation boundary", () => {
@@ -144,11 +156,14 @@ test("deployment mode is an executable kill switch", () => {
   assert.throws(() => assertReadOnlyMode({ mode: "read-only", environment: { MSCQR_DEPLOYMENT_MODE: "production" } }), /read-only/);
 });
 
-test("workflow does not create an AWS identity or enable Phase 2 mutation", () => {
-  assert.equal(workflow.jobs["read-only-readiness"].environment, undefined);
-  assert.equal(workflow.jobs["read-only-readiness"].permissions, undefined);
-  assert.match(workflowText, /read-only production readiness/i);
-  assert.doesNotMatch(workflowText, /environment:\s*production\s*$/m);
+test("normal workflow has authenticated smoke and preserves the read-only orchestrator as a separate tool", () => {
+  const normalRelease = fs.readFileSync(path.resolve("scripts/aws/production-normal-release.mjs"), "utf8");
+  assert.match(workflowText, /node scripts\/aws\/production-normal-release\.mjs/);
+  assert.match(normalRelease, /runNormalSmoke\(repositoryRoot\)/);
+  assert.match(normalRelease, /executeAppOnlyActivation\(preparation/);
+  assert.match(normalRelease, /executeNormalFrontendActivation\(/);
+  assert.match(workflowText, /SMOKE_AUTHENTICATED_REQUIRED: "true"/);
+  assert.doesNotMatch(workflowText, /scripts\/ci\/production-readiness-orchestrator\.mjs/);
 });
 
 test("read-only orchestrator writes a bounded success report without mutation commands", () => {

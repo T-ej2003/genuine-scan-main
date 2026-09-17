@@ -672,7 +672,7 @@ export function discoverAwsCliActions() {
 // Permission ceilings are not arbitrary-call authority: exact requests are also
 // constrained by authenticated preparation, independent readback and live CAS.
 export function appOnlyCapabilityNodes() {
-  const mutations = new Set(["ecs:RegisterTaskDefinition", "ecs:UpdateService", "ecs:RunTask", "ecs:TagResource", "iam:CreateRole", "iam:PutRolePolicy"]);
+  const mutations = new Set(["ecs:RegisterTaskDefinition", "ecs:UpdateService", "ecs:RunTask", "ecs:TagResource", "iam:CreateRole", "iam:PutRolePolicy", "iam:UpdateAssumeRolePolicy"]);
   const specifications = [
     ["app-only-backend-activation", "APP_ONLY_DEPLOYER", "scripts/aws/production-app-only-adapters.mjs", appOnlyDeployerPolicy()],
     ["app-only-live-compatibility", "APP_ONLY_VERIFIER_LAUNCHER", "scripts/aws/run-production-app-only-verifier.mjs",

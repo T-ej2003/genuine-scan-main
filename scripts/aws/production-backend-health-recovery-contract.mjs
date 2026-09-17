@@ -55,7 +55,12 @@ const ARTIFACT_SIGNING_DISCOVERY_FAILURES = new Set(Object.values(ARTIFACT_SIGNI
 const SHA = /^[a-f0-9]{40}$/;
 const SHA256 = /^sha256:[a-f0-9]{64}$/;
 const HEX256 = /^[a-f0-9]{64}$/;
-const TASK_ARN = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/mscqr-backend:([1-9][0-9]*)$/;
+export const BACKEND_HEALTH_RECOVERY_TASK_ARN = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/mscqr-backend:([1-9][0-9]*)$/;
+const TASK_ARN = BACKEND_HEALTH_RECOVERY_TASK_ARN;
+export function assertBackendHealthRecoveryTaskArn(arn) {
+  if (!TASK_ARN.test(arn || "")) throw new Error("Invalid canonical backend health recovery task definition.");
+  return arn;
+}
 const TASK_INSTANCE_ARN = /^arn:aws:ecs:eu-west-2:368992683803:task\/mscqr-prod-euw2-main\/[A-Za-z0-9_-]+$/;
 const SERVICE_DEPLOYMENT_ID = /^ecs-svc\/[1-9][0-9]*$/;
 const IMAGE = /^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/mscqr-backend@(sha256:[a-f0-9]{64})$/;

@@ -1,0 +1,15 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Sid": "InitializeExactComponentStateOnce",
+    "Effect": "Allow",
+    "Action": ["dynamodb:GetItem", "dynamodb:PutItem"],
+    "Resource": "arn:aws:dynamodb:eu-west-2:368992683803:table/mscqr-production-component-deployment-state",
+    "Condition": { "ForAllValues:StringEquals": { "dynamodb:LeadingKeys": ["production#T-ej2003/genuine-scan-main"] }, "StringEquals": { "aws:RequestedRegion": "eu-west-2" } }
+  },
+  { "Sid": "ReadExactBootstrapServices", "Effect": "Allow", "Action": "ecs:DescribeServices", "Resource": ["arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2", "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-frontend-servi-euw2"], "Condition": { "StringEquals": { "aws:RequestedRegion": "eu-west-2" }, "ArnEquals": { "ecs:cluster": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main" } } },
+  { "Sid": "ReadRegionalBootstrapTaskDefinitions", "Effect": "Allow", "Action": "ecs:DescribeTaskDefinition", "Resource": "*", "Condition": { "StringEquals": { "aws:RequestedRegion": "eu-west-2" } } },
+  { "Sid": "ReadExactBootstrapImages", "Effect": "Allow", "Action": "ecr:DescribeImages", "Resource": ["arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend", "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-web"], "Condition": { "StringEquals": { "aws:RequestedRegion": "eu-west-2" } } },
+  { "Sid": "ReadCallerIdentity", "Effect": "Allow", "Action": "sts:GetCallerIdentity", "Resource": "*" }
+  ]
+}

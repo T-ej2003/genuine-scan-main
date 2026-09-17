@@ -38,6 +38,20 @@ test("activation rechecks candidate and predecessor ECR viability without tags o
     else { await adapters.authenticate(preparation); assert.equal(calls.length, 2); }
   }
 });
+test("backend predecessor source is derived from exactly one immutable source tag", () => {
+  const digest = `sha256:${"1".repeat(64)}`, source = "a".repeat(40);
+  const reader = createAppOnlyEcsReaders((args) => {
+    assert.deepEqual(args.slice(0, 6), ["ecr", "describe-images", "--repository-name", "mscqr-backend", "--image-ids", `imageDigest=${digest}`]);
+    return { imageDetails: [{ repositoryName: "mscqr-backend", registryId: APP_ONLY.account, imageDigest: digest, imageTags: [source] }] };
+  });
+  assert.equal(reader.readBackendImageSource(digest), source);
+  for (const image of [
+    { repositoryName: "mscqr-backend", registryId: APP_ONLY.account, imageDigest: digest, imageTags: [] },
+    { repositoryName: "mscqr-backend", registryId: APP_ONLY.account, imageDigest: digest, imageTags: [source, "b".repeat(40)] },
+    { repositoryName: "other", registryId: APP_ONLY.account, imageDigest: digest, imageTags: [source] },
+    { repositoryName: "mscqr-backend", registryId: APP_ONLY.account, imageDigest: `sha256:${"2".repeat(64)}`, imageTags: [source] },
+  ]) assert.throws(() => createAppOnlyEcsReaders(() => ({ imageDetails: [image] })).readBackendImageSource(digest));
+});
 test("separate provisioner registers only source-derived verifier and requires independent exact readback", async () => {
   const now = Date.now();
   const body = { schemaVersion: 1, kind: "APP_ONLY_VERIFIER_PREPARATION", eligible: false,

@@ -15,7 +15,7 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "29bfbf95b42cc21775784642a4a89aa6b5fc90995aa88b41fdb674a6787b280a",
+  "sourceContractSha256": "dfef89f80fca58ea5b93429df31ff206569841fa1db5e2f9b1152ef799c9466b",
   "migrationSetDigest": "6642442a81cd98c7a132d241fa98e50ae231510896c9da67ab70d86b050d02db",
   "sourceContractInputs": [
     {
@@ -220,7 +220,7 @@
     },
     {
       "path": "scripts/aws/publish-ecs-images.sh",
-      "sha256": "ea58065d004e799ab354ecaeec3fd60467ac791cae56c6989dd4bf6d8ab67b68"
+      "sha256": "2d6218ff28894154661ccfb61dda8bb91dd148c55298fb26c86a5ace8ff034c7"
     },
     {
       "path": "scripts/aws/production-credential-source-contract.mjs",
@@ -240,7 +240,7 @@
     },
     {
       "path": ".github/workflows/release-gate.yml",
-      "sha256": "3071ae0fd992fb8440686be7bec3c6db027b735431b448e6450a3cea70500adf"
+      "sha256": "8450e336ae5e15671af29442869d3b86abb09173a2250357f838afd8d7487fbd"
     },
     {
       "path": ".github/workflows/release-train.yml",
@@ -348,7 +348,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:29bfbf95b42cc21775784642a4a89aa6b5fc90995aa88b41fdb674a6787b280a",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:dfef89f80fca58ea5b93429df31ff206569841fa1db5e2f9b1152ef799c9466b",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,
