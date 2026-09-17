@@ -41,7 +41,15 @@ function protectedMain(branch, sourceSha) {
 }
 
 export function assertComponentIamEnvironment(config, branches, approvals) {
-  assert.equal(config.name, environment);
+  return assertSoloEnvironment(config, branches, approvals, environment);
+}
+
+export function assertComponentIdentityBootstrapEnvironment(config, branches, approvals) {
+  return assertSoloEnvironment(config, branches, approvals, "production-component-installation-identity-bootstrap");
+}
+
+function assertSoloEnvironment(config, branches, approvals, expectedEnvironment) {
+  assert.equal(config.name, expectedEnvironment);
   assert(Number.isSafeInteger(config.id) && config.id > 0, "Invalid environment ID");
   assert.equal(config.can_admins_bypass, false);
   assert.deepEqual(config.deployment_branch_policy, { protected_branches: false, custom_branch_policies: true });
@@ -58,7 +66,7 @@ export function assertComponentIamEnvironment(config, branches, approvals) {
   assert(Array.isArray(approvals) && approvals.length === 1, "Exactly one approval required");
   assert.equal(approvals[0].state, "approved");
   user(approvals[0].user);
-  assert.deepEqual(approvals[0].environments.map(({ id, name }) => ({ id, name })), [{ id: config.id, name: environment }]);
+  assert.deepEqual(approvals[0].environments.map(({ id, name }) => ({ id, name })), [{ id: config.id, name: expectedEnvironment }]);
   return config.id;
 }
 

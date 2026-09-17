@@ -33,6 +33,22 @@ authorization, exceptional bootstrap principal, identity transaction and durable
 reservation composition still need wiring. The 34 transaction tests are mocked
 AWS transport tests, not proof of live deployment permissions or final readiness.
 
+## Dedicated bootstrap approval checkpoint
+
+The first-bootstrap approval workflow is separate from normal installation. It
+has no AWS credential acquisition, OIDC permission or mutation step. Its exact
+environment requires the sole authorized User reviewer, no administrator bypass
+and exact main-only access. It constructs a clean-source package after approval
+and binds the five execution identities, trust/policy hashes, bootstrap capability
+set, three broker configurations, package/manifest, transition, source and expiry.
+
+The shared environment verifier preserves the existing installation policy and
+adds only the fixed first-bootstrap environment. The authorization suites pass
+74 offline tests, including real child-process rejection of unsupported publisher
+commands. Execution still must independently authenticate the completed GitHub
+run/artifact and archive the original approval durably before AWS writes; this
+checkpoint does not expose an executable administrative bootstrap command.
+
 Baseline: `bc6ac2ead8b750d9d99cc179d8bb321956fa7a8e`.
 Implementation remains uncommitted on
 `codex/component-infrastructure-install-permission`. No production execution,
