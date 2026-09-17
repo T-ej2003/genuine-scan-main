@@ -86,14 +86,16 @@ jobs:
         id: bind
         run: |
           set -euo pipefail
-          node --input-type=module - "${{ runner.temp }}/backend.jsonl" "$GITHUB_ENV" "$GITHUB_OUTPUT" <<'NODE'
+          IMAGE_REF="$(node --input-type=module - "${{ runner.temp }}/backend.jsonl" "$GITHUB_ENV" "$GITHUB_OUTPUT" <<'NODE'
           import fs from 'node:fs';
           const [file, envFile, outputFile] = process.argv.slice(2);
           const records = fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
           if (records.length !== 1 || records[0].service !== 'backend' || records[0].image_tag !== process.env.IMAGE_TAG || !records[0].image_ref?.includes('@sha256:')) throw new Error('Backend publication output is not one exact immutable digest.');
           fs.appendFileSync(envFile, `IMAGE_REF=${records[0].image_ref}\n`);
           fs.appendFileSync(outputFile, `image_ref=${records[0].image_ref}\n`);
+          process.stdout.write(records[0].image_ref);
           NODE
+          )"
           docker pull "$IMAGE_REF"
           REQUIRED_PLATFORMS="$PLATFORMS" ./scripts/aws/verify-image-manifest.sh "$IMAGE_REF"
       - uses: aquasecurity/trivy-action@v0.36.0
@@ -160,14 +162,16 @@ jobs:
         id: bind
         run: |
           set -euo pipefail
-          node --input-type=module - "${{ runner.temp }}/frontend.jsonl" "$GITHUB_ENV" "$GITHUB_OUTPUT" <<'NODE'
+          IMAGE_REF="$(node --input-type=module - "${{ runner.temp }}/frontend.jsonl" "$GITHUB_ENV" "$GITHUB_OUTPUT" <<'NODE'
           import fs from 'node:fs';
           const [file, envFile, outputFile] = process.argv.slice(2);
           const records = fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
           if (records.length !== 1 || records[0].service !== 'frontend' || records[0].image_tag !== process.env.IMAGE_TAG || !records[0].image_ref?.includes('@sha256:')) throw new Error('Frontend publication output is not one exact immutable digest.');
           fs.appendFileSync(envFile, `IMAGE_REF=${records[0].image_ref}\n`);
           fs.appendFileSync(outputFile, `image_ref=${records[0].image_ref}\n`);
+          process.stdout.write(records[0].image_ref);
           NODE
+          )"
           docker pull "$IMAGE_REF"
           REQUIRED_PLATFORMS="$PLATFORMS" ./scripts/aws/verify-image-manifest.sh "$IMAGE_REF"
       - uses: aquasecurity/trivy-action@v0.36.0

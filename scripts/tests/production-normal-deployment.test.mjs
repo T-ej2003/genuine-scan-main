@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import test from "node:test";
 import { PRODUCTION_RELEASE_CLASS, classifyProductionChanges, classifyProductionComponentRanges } from "../aws/production-deployment-classification.mjs";
-import { buildNormalReleasePlan, buildNormalBackendPreparation, classifyNormalLiveComponentState, executeNormalFrontendActivation, executeNormalRelease, executeNormalComponentTransaction, NORMAL_RELEASE, parseNormalReleaseArgs } from "../aws/production-normal-release.mjs";
+import { buildNormalReleasePlan, buildNormalBackendPreparation, assertNormalBackendExactCandidate, classifyNormalLiveComponentState, executeNormalFrontendActivation, executeNormalRelease, executeNormalComponentTransaction, NORMAL_RELEASE, parseNormalReleaseArgs } from "../aws/production-normal-release.mjs";
 import { APP_ONLY } from "../aws/production-app-only-contract.mjs";
 import { assertNormalImageIdentity } from "../aws/production-normal-image-contract.mjs";
 import { WEB_RELEASE, buildNormalFrontendCandidate, captureFrontendPredecessor } from "../aws/production-web-release-contract.mjs";
@@ -28,7 +28,7 @@ test("release classification is deterministic and sensitive lanes fail closed", 
   for (const file of ["package.json", "package-lock.json", "Dockerfile.ecs-frontend", "tailwind.config.ts", "postcss.config.js", "vite.config.ts", "docker/nginx-entrypoint.sh"])
     assert.equal(classifyProductionChanges([file]).frontend, true, file);
   assert.equal(classifyProductionChanges(["backend/src/auth/loginService.ts"]).releaseClass, PRODUCTION_RELEASE_CLASS.SECURITY_INFRASTRUCTURE);
-  for (const file of ["backend/src/middleware/rbac.ts", "backend/src/services/accessControlService.ts", "backend/src/middleware/csrf.ts", "backend/src/middleware/tenantIsolation.ts", "backend/src/utils/clientIp.ts", "scripts/aws/production-normal-release.mjs", ".github/workflows/production-deploy.yml"])
+  for (const file of ["backend/src/middleware/rbac.ts", "backend/src/services/accessControlService.ts", "backend/src/middleware/csrf.ts", "backend/src/middleware/tenantIsolation.ts", "backend/src/utils/clientIp.ts", "src/lib/api/internal-client-core.ts", "src/lib/api/internal-client-auth.ts", "src/lib/webauthn.ts", "src/components/auth/StepUpRecoveryDialog.tsx", "src/features/account-settings/AdminMfaCard.tsx", "scripts/aws/production-normal-release.mjs", ".github/workflows/production-deploy.yml"])
     assert.equal(classifyProductionChanges([file]).releaseClass, PRODUCTION_RELEASE_CLASS.SECURITY_INFRASTRUCTURE, file);
   assert.equal(classifyProductionChanges(["src/features/auth/login.tsx"]).releaseClass, PRODUCTION_RELEASE_CLASS.SECURITY_INFRASTRUCTURE);
   assert.equal(classifyProductionChanges(["backend/prisma/schema.prisma"]).releaseClass, PRODUCTION_RELEASE_CLASS.SECURITY_INFRASTRUCTURE);
@@ -129,6 +129,8 @@ test("backend preparation binds an independently authenticated predecessor sourc
   const live = { definition, service: { clusterArn: APP_ONLY.clusterArn, serviceArn: APP_ONLY.serviceArn, serviceName: APP_ONLY.service, status: "ACTIVE", taskDefinition: priorArn, desiredCount: 2, runningCount: 2, pendingCount: 0, deployments: [{ id: "ecs-svc/100", status: "PRIMARY", rolloutState: "COMPLETED", taskDefinition: priorArn }] }, tasks: ["a", "b"].map((taskArn) => ({ taskArn, clusterArn: APP_ONLY.clusterArn, group: `service:${APP_ONLY.service}`, taskDefinitionArn: priorArn, lastStatus: "RUNNING", healthStatus: "HEALTHY", startedBy: "ecs-svc/100", containers: [{ name: "backend", imageDigest: digest }] })) };
   const preparation = buildNormalBackendPreparation({ sourceSha, predecessorSourceSha: "b".repeat(40), live, candidateDigest: `sha256:${"c".repeat(64)}` });
   assert.equal(preparation.candidateSourceSha, sourceSha); assert.equal(preparation.predecessorSourceSha, "b".repeat(40));
+  const candidate = structuredClone(live.definition); candidate.taskDefinitionArn = priorArn.replace(":14", ":15"); candidate.revision = 15; candidate.containerDefinitions[0].image = `${APP_ONLY.backendRepository}@sha256:${"c".repeat(64)}`;
+  assert.doesNotThrow(() => assertNormalBackendExactCandidate(live.definition, candidate, `sha256:${"c".repeat(64)}`));
   assert.throws(() => buildNormalBackendPreparation({ sourceSha, live, candidateDigest: `sha256:${"c".repeat(64)}` }));
   assert.throws(() => buildNormalBackendPreparation({ sourceSha, predecessorSourceSha: "unknown", live, candidateDigest: `sha256:${"c".repeat(64)}` }));
 });
@@ -267,6 +269,7 @@ test("normal production workflow is fixed, OIDC-only, gated by main, and smoke-t
   assert.match(workflow, /Preserve normal-release mutation journal[\s\S]*if: always\(\)/);
   assert.match(workflow, /publish-backend:[\s\S]*?environment: production-stage-b-image-publish/);
   assert.match(workflow, /publish-frontend:[\s\S]*?environment: production-web-image-publish/);
+  assert.equal((workflow.match(/IMAGE_REF="\$\(node --input-type=module/g) || []).length, 2, "Each publisher must bind its digest in the current shell before Docker uses it.");
   const webTrust = JSON.parse(fs.readFileSync("infra/aws/terraform/production-web-release/publisher-trust-policy.json", "utf8"));
   assert.equal(webTrust.Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:sub"], "repo:T-ej2003/genuine-scan-main:environment:production-web-image-publish");
   const webEnvironmentUsers = fs.readdirSync(".github/workflows").filter((file) => file.endsWith(".yml") && fs.readFileSync(`.github/workflows/${file}`, "utf8").match(/environment:\s*production-web-image-publish/));

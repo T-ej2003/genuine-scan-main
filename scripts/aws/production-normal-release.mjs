@@ -6,7 +6,7 @@ import fs from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 import { classifyProductionChanges, classifyProductionComponentRanges, assertNormalApplicationRelease } from "./production-deployment-classification.mjs";
-import { APP_ONLY, captureAppOnlyPredecessor } from "./production-app-only-contract.mjs";
+import { APP_ONLY, captureAppOnlyPredecessor, assertRegisteredAppOnlyCandidate } from "./production-app-only-contract.mjs";
 import { createAppOnlyEcsReaders, createAppOnlyActivationAdapters } from "./production-app-only-adapters.mjs";
 import { executeAppOnlyActivation, rollbackAppOnlyActivation } from "./production-app-only-activation.mjs";
 import { createAppOnlyEvidenceWriter } from "./production-app-only-artifacts.mjs";
@@ -149,6 +149,8 @@ function assertCaller(caller, role) {
 
 const sameComponentIdentity = (actual, expected) => actual?.sourceSha === expected?.sourceSha && actual?.imageDigest === expected?.imageDigest && actual?.taskDefinitionArn === expected?.taskDefinitionArn && actual?.desiredCount === expected?.desiredCount;
 
+export const assertNormalBackendExactCandidate = (predecessorDefinition, candidateDefinition, candidateDigest) => assertRegisteredAppOnlyCandidate(predecessorDefinition, candidateDefinition, candidateDigest);
+
 export function classifyNormalLiveComponentState({ live, predecessor, candidate } = {}) {
   if (sameComponentIdentity(live, predecessor)) return "LIVE_IS_PREDECESSOR";
   if (live?.sourceSha === candidate?.sourceSha && live?.imageDigest === candidate?.imageDigest && live?.desiredCount === predecessor?.desiredCount && live.taskDefinitionArn !== predecessor?.taskDefinitionArn) return "LIVE_IS_EXACT_CANDIDATE";
@@ -187,7 +189,7 @@ async function executeBackendCli({ sourceSha, imageRef, expectedState, run, repo
   const liveIdentity = { sourceSha: readers.readBackendImageSource(predecessor.backendDigest), imageDigest: predecessor.backendDigest, taskDefinitionArn: predecessor.taskDefinitionArn, desiredCount: predecessor.desiredCount };
   if (expectedState && !sameComponentIdentity(liveIdentity, expectedState)) {
     if (classifyNormalLiveComponentState({ live: liveIdentity, predecessor: expectedState, candidate: { sourceSha, imageDigest: digest } }) === "LIVE_IS_EXACT_CANDIDATE") {
-      assertRegisteredAppOnlyCandidate(readers.readDefinition(expectedState.taskDefinitionArn), live.definition, digest);
+      assertNormalBackendExactCandidate(readers.readDefinition(expectedState.taskDefinitionArn), live.definition, digest);
       return Object.freeze({ result: { candidateTaskDefinition: liveIdentity.taskDefinitionArn, candidateDeploymentId: predecessor.deploymentId, deployedBackendDigest: digest, deployedImageSourceSha: sourceSha, retry: "LIVE_IS_EXACT_CANDIDATE" }, predecessor: expectedState, rollback: () => rollbackBackendToState({ state: expectedState, sourceSha, run, repositoryRoot }) });
     }
     throw new Error("Backend live state is neither the authenticated predecessor nor the exact candidate.");
