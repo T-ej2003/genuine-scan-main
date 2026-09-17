@@ -47,6 +47,7 @@ const bindings = {
   canaryLogGroup: "/ecs/mscqr-production/rls-green-canary",
   backendLogGroup: "/ecs/mscqr-production/rls-green-backend",
   workerLogGroup: "/ecs/mscqr-production/rls-green-worker",
+  backendProxyTrust: { mode: "cloudfront-alb", albCidrs: "10.1.0.0/24", cloudFrontCidrs: "198.51.100.0/24", cloudFrontPrefixListId: "pl-0123456789abcdef0", cloudFrontPrefixListVersion: "7" },
 };
 const protectedCheckout = { currentHead: sourceSha, originMainHead: sourceSha, toolingSha: sourceSha, porcelainStatus: "" };
 const deriveProvenance = () => ({ toolingTreeSha256: bindings.toolingTreeSha256, sourceContractSha256: bindings.sourceContractSha256 });
@@ -418,7 +419,7 @@ test("forward tfvars preflight binds the canonical release report and authorized
   for (const filePath of [tfvarsPath, bindingReportPath, releasePreflightPath]) fs.writeFileSync(filePath, "{}\n", { mode: 0o600 });
   const backendDigest = imageAuthorization.backendDigest;
   const bindingsForPreflight = { ...bindings, sourceContractSha256: bindings.sourceContractSha256 };
-  const report = { tfvarsSha256: "a".repeat(64), imageEvidenceCanonicalSha256: imageAuthorization.imageEvidenceSha256, sourceContractSha256: bindingsForPreflight.sourceContractSha256, images: { backend: { imageReference: bindingsForPreflight.backendImage, digest: backendDigest } } };
+  const report = { tfvarsSha256: "a".repeat(64), imageEvidenceCanonicalSha256: imageAuthorization.imageEvidenceSha256, sourceContractSha256: bindingsForPreflight.sourceContractSha256, backendProxyTrust: bindingsForPreflight.backendProxyTrust, images: { backend: { imageReference: bindingsForPreflight.backendImage, digest: backendDigest } } };
   fs.writeFileSync(releasePreflightPath, `${JSON.stringify({ status: "ready-for-plan", tfvarsSha256: report.tfvarsSha256 })}\n`, { mode: 0o600 });
   const calls = [];
   assertForwardRecoveryTfvarsBinding({
@@ -456,6 +457,11 @@ test("forward tfvars preflight binds the canonical release report and authorized
     bindings: bindingsForPreflight, imageAuthorization,
     validateTfvarsBinding: () => ({ ...report, images: { backend: { imageReference: bindingsForPreflight.backendImage, digest: "sha256:" + "f".repeat(64) } } }),
   }), /authorized backend/);
+  assert.throws(() => assertForwardRecoveryTfvarsBinding({
+    tfvarsPath, bindingReportPath, bindingReportSha256: "b".repeat(64), releasePreflightPath, sourceSha,
+    bindings: { ...bindingsForPreflight, backendProxyTrust: { ...bindingsForPreflight.backendProxyTrust, albCidrs: "0.0.0.0/0" } }, imageAuthorization,
+    validateTfvarsBinding: () => report,
+  }), /authenticated tfvars binding report/);
 });
 
 test("mutation-boundary tfvars revalidation blocks a changed binding before import", async () => {

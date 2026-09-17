@@ -65,6 +65,27 @@ export const STAGE_A_CHECKER_ROLE_TRUST = Object.freeze({
   principal: "arn:aws:iam::368992683803:role/mscqr-production-independent-checker",
   action: "sts:AssumeRole",
 });
+export const STAGE_A_CLOUDFRONT_PROXY_DRIFT_ROLE = Object.freeze({
+  address: "aws_iam_role.cloudfront_proxy_drift_readonly",
+  type: "aws_iam_role",
+  name: "mscqr-production-cloudfront-proxy-drift-readonly",
+});
+export const STAGE_A_CLOUDFRONT_PROXY_DRIFT_POLICY = Object.freeze({
+  address: "aws_iam_role_policy.cloudfront_proxy_drift_readonly",
+  type: "aws_iam_role_policy",
+  role: STAGE_A_CLOUDFRONT_PROXY_DRIFT_ROLE.name,
+  name: "production-cloudfront-proxy-drift-readonly",
+});
+export const STAGE_A_CLOUDFRONT_PROXY_DRIFT_POLICY_DOCUMENT = Object.freeze({
+  Version: "2012-10-17",
+  Statement: [
+    { Sid: "ReadExactProductionBackendService", Effect: "Allow", Action: "ecs:DescribeServices", Resource: "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2" },
+    { Sid: "ReadExactProductionBackendTaskDefinitions", Effect: "Allow", Action: "ecs:DescribeTaskDefinition", Resource: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:*" },
+    { Sid: "ReadCurrentBackendAndProxyTopology", Effect: "Allow", Action: ["elasticloadbalancing:DescribeLoadBalancers", "elasticloadbalancing:DescribeLoadBalancerAttributes", "elasticloadbalancing:DescribeTargetGroups", "ec2:DescribeSubnets", "ec2:DescribeManagedPrefixLists", "ec2:GetManagedPrefixListEntries", "cloudfront:ListDistributions"], Resource: "*" },
+    { Sid: "ReadReviewedCloudFrontDistribution", Effect: "Allow", Action: "cloudfront:GetDistributionConfig", Resource: "arn:aws:cloudfront::368992683803:distribution/E32TIKZ33PVJOW" },
+    { Sid: "ReadProductionPublicAliases", Effect: "Allow", Action: "route53:ListResourceRecordSets", Resource: "arn:aws:route53:::hostedzone/Z0569586VLFIGGVI7HAZ" },
+  ],
+});
 export const STAGE_A_CHECKER_PUBLICATION_POLICY = Object.freeze({
   address: "aws_iam_role_policy.checker",
   type: "aws_iam_role_policy",
@@ -713,6 +734,49 @@ function assertStageACheckerPublicationPolicyChange(entry) {
   return { valid: true, alreadyConverged: exactActions(change.actions, ["no-op"]), mutationCount: exactActions(change.actions, ["update"]) ? 1 : 0 };
 }
 
+function assertStageACloudFrontProxyDriftRoleChange(entry) {
+  if (entry.type !== STAGE_A_CLOUDFRONT_PROXY_DRIFT_ROLE.type) throw new Error("Stage A CloudFront proxy drift role resource type is wrong.");
+  const change = entry.change;
+  if (!exactActions(change?.actions, ["create"]) && !exactActions(change?.actions, ["no-op"])) throw new Error("Stage A CloudFront proxy drift role must be an exact create or converged no-op.");
+  if (change.replace_paths?.length || (exactActions(change.actions, ["create"]) ? change.before !== null : !change.before)) throw new Error("Stage A CloudFront proxy drift role predecessor is not exact.");
+  const after = change.after;
+  if (!after || after.name !== STAGE_A_CLOUDFRONT_PROXY_DRIFT_ROLE.name || after.permissions_boundary != null) throw new Error("Stage A CloudFront proxy drift role identity is wrong.");
+  const trust = decodePolicyDocument(after.assume_role_policy, "Stage A CloudFront proxy drift role trust");
+  const expected = {
+    Version: "2012-10-17",
+    Statement: [{
+      Sid: "ExactMainWorkflowOnly", Effect: "Allow",
+      Principal: { Federated: "arn:aws:iam::368992683803:oidc-provider/token.actions.githubusercontent.com" },
+      Action: "sts:AssumeRoleWithWebIdentity",
+      Condition: { StringEquals: {
+        "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+        "token.actions.githubusercontent.com:sub": "repo:T-ej2003/genuine-scan-main:ref:refs/heads/main",
+        "token.actions.githubusercontent.com:repository": "T-ej2003/genuine-scan-main",
+        "token.actions.githubusercontent.com:repository_id": "1145608538",
+        "token.actions.githubusercontent.com:repository_owner_id": "183396573",
+        "token.actions.githubusercontent.com:workflow": "Verify Production CloudFront Proxy Drift",
+        "token.actions.githubusercontent.com:ref": "refs/heads/main",
+      } },
+    }],
+  };
+  if (stablePolicyJson(trust) !== stablePolicyJson(expected)) throw new Error("Stage A CloudFront proxy drift role trust is not exact.");
+  if (exactActions(change.actions, ["no-op"]) && stablePolicyJson(decodePolicyDocument(change.before.assume_role_policy, "Stage A converged CloudFront proxy drift role trust")) !== stablePolicyJson(expected)) throw new Error("Stage A converged CloudFront proxy drift role trust is not exact.");
+  return { alreadyConverged: exactActions(change.actions, ["no-op"]), mutationCount: exactActions(change.actions, ["create"]) ? 1 : 0 };
+}
+
+function assertStageACloudFrontProxyDriftPolicyChange(entry) {
+  if (entry.type !== STAGE_A_CLOUDFRONT_PROXY_DRIFT_POLICY.type) throw new Error("Stage A CloudFront proxy drift policy resource type is wrong.");
+  const change = entry.change;
+  if (!exactActions(change?.actions, ["create"]) && !exactActions(change?.actions, ["no-op"])) throw new Error("Stage A CloudFront proxy drift policy must be an exact create or converged no-op.");
+  if (change.replace_paths?.length || (exactActions(change.actions, ["create"]) ? change.before !== null : !change.before)) throw new Error("Stage A CloudFront proxy drift policy predecessor is not exact.");
+  const after = change.after;
+  if (!after || after.name !== STAGE_A_CLOUDFRONT_PROXY_DRIFT_POLICY.name || after.role !== STAGE_A_CLOUDFRONT_PROXY_DRIFT_POLICY.role) throw new Error("Stage A CloudFront proxy drift policy identity is wrong.");
+  const policy = decodePolicyDocument(after.policy, "Stage A CloudFront proxy drift policy");
+  if (stablePolicyJson(policy) !== stablePolicyJson(STAGE_A_CLOUDFRONT_PROXY_DRIFT_POLICY_DOCUMENT)) throw new Error("Stage A CloudFront proxy drift policy semantics are not read-only and exact.");
+  if (exactActions(change.actions, ["no-op"]) && stablePolicyJson(decodePolicyDocument(change.before.policy, "Stage A converged CloudFront proxy drift policy")) !== stablePolicyJson(policy)) throw new Error("Stage A converged CloudFront proxy drift policy is not exact.");
+  return { alreadyConverged: exactActions(change.actions, ["no-op"]), mutationCount: exactActions(change.actions, ["create"]) ? 1 : 0 };
+}
+
 function assertStageAProductionArtifactsBucketPolicyChange(entry) {
   if (entry.type !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.type) throw new Error("Stage A production-artifacts bucket-policy resource type is wrong.");
   const change = entry.change;
@@ -892,10 +956,18 @@ export function assertStageAPlan(plan, { endpointSecurityGroupId, runtimeSecurit
   const artifactsBucketPolicy = changes.filter(({ entry }) => entry.address === STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.address);
   if (artifactsBucketPolicy.length !== 1) throw new Error("Stage A plan must contain exactly one complete production-artifacts bucket policy.");
   const artifactsBucketPolicyValidation = assertStageAProductionArtifactsBucketPolicyChange(artifactsBucketPolicy[0].entry);
+  const driftRoles = changes.filter(({ entry }) => entry.address === STAGE_A_CLOUDFRONT_PROXY_DRIFT_ROLE.address);
+  if (driftRoles.length !== 1) throw new Error("Stage A plan must contain exactly one CloudFront proxy drift role.");
+  const driftRoleValidation = assertStageACloudFrontProxyDriftRoleChange(driftRoles[0].entry);
+  const driftPolicies = changes.filter(({ entry }) => entry.address === STAGE_A_CLOUDFRONT_PROXY_DRIFT_POLICY.address);
+  if (driftPolicies.length !== 1) throw new Error("Stage A plan must contain exactly one CloudFront proxy drift policy.");
+  const driftPolicyValidation = assertStageACloudFrontProxyDriftPolicyChange(driftPolicies[0].entry);
   const unexpected = changes.filter(({ entry, actions }) => entry.address !== expectedAddress && entry.address !== STAGE_A_CHECKER_POLICY.address
     && entry.address !== STAGE_A_CHECKER_ROLE_TRUST.address
     && entry.address !== STAGE_A_CHECKER_PUBLICATION_POLICY.address
     && entry.address !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.address
+    && entry.address !== STAGE_A_CLOUDFRONT_PROXY_DRIFT_ROLE.address
+    && entry.address !== STAGE_A_CLOUDFRONT_PROXY_DRIFT_POLICY.address
     && !exactActions(actions, ["no-op"]) && !exactActions(actions, ["read"]));
   if (unexpected.length) throw new Error("Stage A plan contains an unreviewed mutation.");
   const reviewed = changes.filter(({ entry }) => entry.address === expectedAddress);
@@ -929,8 +1001,8 @@ export function assertStageAPlan(plan, { endpointSecurityGroupId, runtimeSecurit
   exact(String(after.to_port), "443", "Stage A plan ingress port is wrong.");
   exact(after.ip_protocol, "tcp", "Stage A plan ingress protocol is wrong.");
   if (after.cidr_ipv4 !== null || after.cidr_ipv6 !== null || after.prefix_list_id !== null) throw new Error("Stage A plan ingress source is not the reviewed security group.");
-  const mutationCount = [actions, checkerActions].filter((value) => exactActions(value, ["create"])).length + checkerRoleValidation.mutationCount + checkerPublicationValidation.mutationCount + artifactsBucketPolicyValidation.mutationCount;
-  return { valid: true, changes: mutationCount, address: change.address, actions, checkerActions, checkerRoleActions: checkerRole[0].actions, checkerPublicationActions: checkerPublication[0].actions, alreadyConverged: exactActions(actions, ["no-op"]) && exactActions(checkerActions, ["no-op"]) && checkerRoleValidation.alreadyConverged && checkerPublicationValidation.alreadyConverged && artifactsBucketPolicyValidation.alreadyConverged, recoveryRequired: artifactsBucketPolicyValidation.recoveryRequired, executionDisposition: artifactsBucketPolicyValidation.recoveryRequired ? "RECOVERY_REQUIRED" : "ORDINARY_STAGE_A" };
+  const mutationCount = [actions, checkerActions].filter((value) => exactActions(value, ["create"])).length + checkerRoleValidation.mutationCount + checkerPublicationValidation.mutationCount + artifactsBucketPolicyValidation.mutationCount + driftRoleValidation.mutationCount + driftPolicyValidation.mutationCount;
+  return { valid: true, changes: mutationCount, address: change.address, actions, checkerActions, checkerRoleActions: checkerRole[0].actions, checkerPublicationActions: checkerPublication[0].actions, alreadyConverged: exactActions(actions, ["no-op"]) && exactActions(checkerActions, ["no-op"]) && checkerRoleValidation.alreadyConverged && checkerPublicationValidation.alreadyConverged && artifactsBucketPolicyValidation.alreadyConverged && driftRoleValidation.alreadyConverged && driftPolicyValidation.alreadyConverged, recoveryRequired: artifactsBucketPolicyValidation.recoveryRequired, executionDisposition: artifactsBucketPolicyValidation.recoveryRequired ? "RECOVERY_REQUIRED" : "ORDINARY_STAGE_A" };
 }
 
 export async function runStageAControlPlane({ adapter, endpointSecurityGroupId, runtimeSecurityGroupId, sourceSha } = {}) {

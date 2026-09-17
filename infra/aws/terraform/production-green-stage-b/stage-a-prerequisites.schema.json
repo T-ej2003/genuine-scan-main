@@ -9,10 +9,10 @@
     "stageABrokerRoleArn", "stageAExecutorLogGroupName", "stageAExecutorLogGroupArn",
     "stageABrokerLogGroupName", "stageABrokerLogGroupArn", "stageARuntimeSecretArns",
     "stageAExecutorNetworkingReady", "approvalSecretArn", "approvalKmsKeyArn", "receiptBucketArn",
-    "stageAReadOnlyCanaryDatabaseSecretArn"
+    "stageAReadOnlyCanaryDatabaseSecretArn", "stageBBackendProxyTrust"
   ],
   "properties": {
-    "schemaVersion": { "const": 2 },
+    "schemaVersion": { "const": 3 },
     "generator": { "const": "scripts/aws/generate-production-green-stage-a-prerequisites.mjs" },
     "toolingSha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
     "toolingTreeSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
@@ -50,6 +50,7 @@
     "approvalSecretArn": { "const": "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/approval-e0shho" },
     "approvalKmsKeyArn": { "const": "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478" },
     "receiptBucketArn": { "const": "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an" },
-    "stageAReadOnlyCanaryDatabaseSecretArn": { "type": "string", "pattern": "^arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase4/read-only-canary-database-url-[A-Za-z0-9]+$" }
+    "stageAReadOnlyCanaryDatabaseSecretArn": { "type": "string", "pattern": "^arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase4/read-only-canary-database-url-[A-Za-z0-9]+$" },
+    "stageBBackendProxyTrust": { "type": "object", "required": ["mode", "alb", "targetGroup", "cloudFront"], "additionalProperties": false, "properties": { "mode": { "const": "cloudfront-alb" }, "alb": { "type": "object", "required": ["name", "arn", "dnsName", "vpcId", "subnetIds", "cidrs", "xffHeaderProcessingMode", "xffClientPortEnabled"], "properties": { "xffHeaderProcessingMode": { "const": "append" }, "xffClientPortEnabled": { "const": false } } }, "targetGroup": { "type": "object", "required": ["name", "arn"] }, "cloudFront": { "type": "object", "required": ["distributionId", "domainName", "configEtag", "aliases", "dns", "targetOriginId", "backendBehaviors", "originProtocolPolicy", "originHttpsPort", "apiPaths", "managedPrefixListId", "managedPrefixListVersion", "cidrs"], "properties": { "backendBehaviors": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["pathPattern", "targetOriginId", "viewerProtocolPolicy"], "additionalProperties": false, "properties": { "pathPattern": { "type": "string", "minLength": 1 }, "targetOriginId": { "type": "string", "minLength": 1 }, "viewerProtocolPolicy": { "const": "redirect-to-https" } } } }, "originProtocolPolicy": { "const": "https-only" }, "originHttpsPort": { "const": 443 } } } } }
   }
 }

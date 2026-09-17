@@ -262,6 +262,70 @@ resource "aws_iam_role" "checker" {
   tags = local.tags
 }
 
+resource "aws_iam_role" "cloudfront_proxy_drift_readonly" {
+  name = "mscqr-production-cloudfront-proxy-drift-readonly"
+  assume_role_policy = jsonencode({ Version = "2012-10-17", Statement = [{
+    Sid       = "ExactMainWorkflowOnly"
+    Effect    = "Allow"
+    Principal = { Federated = "arn:aws:iam::368992683803:oidc-provider/token.actions.githubusercontent.com" }
+    Action    = "sts:AssumeRoleWithWebIdentity"
+    Condition = { StringEquals = {
+      "token.actions.githubusercontent.com:aud"                 = "sts.amazonaws.com"
+      "token.actions.githubusercontent.com:sub"                 = "repo:T-ej2003/genuine-scan-main:ref:refs/heads/main"
+      "token.actions.githubusercontent.com:repository"          = "T-ej2003/genuine-scan-main"
+      "token.actions.githubusercontent.com:repository_id"       = "1145608538"
+      "token.actions.githubusercontent.com:repository_owner_id" = "183396573"
+      "token.actions.githubusercontent.com:workflow"            = "Verify Production CloudFront Proxy Drift"
+      "token.actions.githubusercontent.com:ref"                 = "refs/heads/main"
+    } }
+  }] })
+}
+
+resource "aws_iam_role_policy" "cloudfront_proxy_drift_readonly" {
+  name = "production-cloudfront-proxy-drift-readonly"
+  role = aws_iam_role.cloudfront_proxy_drift_readonly.id
+  policy = jsonencode({ Version = "2012-10-17", Statement = [
+    {
+      Sid      = "ReadExactProductionBackendService"
+      Effect   = "Allow"
+      Action   = "ecs:DescribeServices"
+      Resource = "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2"
+    },
+    {
+      Sid      = "ReadExactProductionBackendTaskDefinitions"
+      Effect   = "Allow"
+      Action   = "ecs:DescribeTaskDefinition"
+      Resource = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:*"
+    },
+    {
+      Sid    = "ReadCurrentBackendAndProxyTopology"
+      Effect = "Allow"
+      Action = [
+        "elasticloadbalancing:DescribeLoadBalancers",
+        "elasticloadbalancing:DescribeLoadBalancerAttributes",
+        "elasticloadbalancing:DescribeTargetGroups",
+        "ec2:DescribeSubnets",
+        "ec2:DescribeManagedPrefixLists",
+        "ec2:GetManagedPrefixListEntries",
+        "cloudfront:ListDistributions",
+      ]
+      Resource = "*"
+    },
+    {
+      Sid      = "ReadReviewedCloudFrontDistribution"
+      Effect   = "Allow"
+      Action   = "cloudfront:GetDistributionConfig"
+      Resource = "arn:aws:cloudfront::368992683803:distribution/E32TIKZ33PVJOW"
+    },
+    {
+      Sid      = "ReadProductionPublicAliases"
+      Effect   = "Allow"
+      Action   = "route53:ListResourceRecordSets"
+      Resource = "arn:aws:route53:::hostedzone/Z0569586VLFIGGVI7HAZ"
+    },
+  ] })
+}
+
 resource "aws_kms_key" "approval" {
   description              = "Independent production RLS approval signing key"
   key_usage                = "SIGN_VERIFY"

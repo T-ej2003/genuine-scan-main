@@ -85,9 +85,10 @@ artifact does not change the trust classification of historical logs.
 | `backend_image`, `worker_image`, `executor_image`, `canary_image`, `read_only_canary_image` | exact signed schema-v3 image records; the read-only canary intentionally reuses the signed `rls-canary` record | tfvars and binding report; digest only in safe report metadata |
 | `canonical_image_evidence_sha256` | canonical signed report | tfvars and binding report |
 | `tooling_sha`, tooling-tree digest | explicit protected-main identifiers | tfvars / binding report |
-| Stage-A VPC, subnet, cluster, security-group, role, log-group, secret, approval, and receipt inputs | canonical prerequisite generator: exact Stage-A state backup plus read-only AWS subnet/route/security-group/ECS/RDS evidence | tfvars; prerequisite and source-state hashes are reported |
+| Stage-A VPC, subnet, cluster, security-group, role, log-group, secret, approval, receipt, and backend proxy-trust inputs | canonical prerequisite generator: exact Stage-A state backup plus read-only AWS subnet/route/security-group/ECS/RDS evidence; the backend topology is bound from the reviewed ALB, target group, deployed CloudFront origin, and AWS-managed CloudFront origin-facing prefix list | tfvars; prerequisite and source-state hashes are reported |
 | `broker_package_path` | explicit output of the reviewed broker package builder | tfvars; raw and base64 SHA-256 in report |
 | `source_contract_sha256`, `migration_set_digest`, `package_checksum_sha256` | source-controlled `generated/checksums.json` bytes and fields | tfvars and binding report |
+| `backend_client_ip_trust_mode`, `backend_client_ip_trusted_alb_cidrs`, `backend_client_ip_trusted_cloudfront_cidrs` | bound `stageBBackendProxyTrust` in the authenticated Stage-A prerequisite artifact, including the CloudFront ALB origin's HTTPS-only port 443 contract | rendered backend candidate task definition; the normal backend receives only the reviewed CloudFront-to-ALB topology |
 | retained candidate/executor maps | supplied production Terraform state backup after lineage, serial, family, revision, broker policy, and address checks | tfvars and retained counts in report |
 
 `stage_a_executor_networking_ready` and `log_retention_days` are contract values; the former must be proven true in the prerequisite JSON and the latter remains the reviewed Terraform default of 30 days. No sensitive secret values are accepted or emitted.
@@ -109,3 +110,17 @@ MSCQR_STAGE_B_PLAN_ENABLED=true MSCQR_STAGE_B_PLAN_CONFIRM=MSCQR_GENERATE_STAGE_
 Review the saved JSON plan. Stop on any delete or any resource outside the listed control-plane types. A separately approved operator runbook must invoke scripts/apply-production-green-stage-b.mjs with the complete canonical tfvars provenance options; direct Terraform apply is not an approved path.
 
 Both wrapper modes run `terraform -chdir=infra/aws/terraform/production-green-stage-b show -json` against the selected saved plan and pass the reviewed deployment environment, including `TF_DATA_DIR`, `TF_WORKSPACE`, `HOME`, `PATH`, and Terraform CLI configuration. Provider discovery must therefore use the initialized release-local data directory; repository-root or ambient `.terraform` discovery is not an accepted fallback.
+
+### CloudFront proxy topology and prefix-list lifecycle
+
+Stage-A binds the Route53 A/AAAA aliases, deployed CloudFront distribution/config ETag,
+complete API/ALB behavior set and HTTPS viewer policy, ALB origin, the ALB
+append-without-client-port XFF attributes,
+and managed origin-facing prefix-list ID, version, and canonical CIDRs. Stage-B rejects a
+stale binding before candidate registration. The
+read-only `verify-production-cloudfront-proxy-drift.yml` workflow is scheduled four
+times per hour and rechecks the live backend task definition against AWS authority.
+GitHub Actions does not guarantee a maximum scheduling latency, so this cadence is not
+a 15-minute maximum stale-window guarantee. Drift requires fresh Stage-A prerequisites
+followed by the existing governed Stage-B replacement and activation path. It never
+changes ECS, Route53, or AWS configuration.

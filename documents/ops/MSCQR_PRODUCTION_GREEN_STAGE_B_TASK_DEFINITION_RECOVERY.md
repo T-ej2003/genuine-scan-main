@@ -16,6 +16,11 @@ explicit AWS profile, and the exact `:5`/`:8` predecessor evidence. Before
 any AWS or Terraform mutation the command verifies the clean protected-main
 checkout, exact HEAD/tooling SHA, source-bound image-release identity, the
 authorized immutable backend digest, and a private unoccupied evidence destination.
+The command also requires the canonical `--binding-report` and its independently
+reviewed `--binding-report-sha256`. It validates the paired tfvars and Stage-A
+prerequisite evidence, then requires every backend proxy-trust value in the
+operator bindings to equal that authenticated report before discovery and again
+immediately before task-definition registration.
 The producer performs a complete ACTIVE-family census, renders the backend task
 definition through the existing Stage-B renderer, and creates a deterministic
 schema-v4 incident identity from the protected source, source-content,

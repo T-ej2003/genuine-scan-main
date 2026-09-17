@@ -539,6 +539,11 @@ test("Terraform 1.15.7 type-checks recovery ECS collections without configuring 
   const taskDefinitionsDir = path.resolve("infra/aws/terraform/production-green-stage-b/task-definitions");
   const replacements = {
     "{{BACKEND_IMAGE}}": "backend-image",
+    "{{BACKEND_CLIENT_IP_TRUST_MODE}}": "cloudfront-alb",
+    "{{BACKEND_CLIENT_IP_TRUSTED_ALB_CIDRS}}": "10.1.0.0/24",
+    "{{BACKEND_CLIENT_IP_TRUSTED_CLOUDFRONT_CIDRS}}": "198.51.100.0/24",
+    "{{BACKEND_CLIENT_IP_CLOUDFRONT_PREFIX_LIST_ID}}": "pl-0123456789abcdef0",
+    "{{BACKEND_CLIENT_IP_CLOUDFRONT_PREFIX_LIST_VERSION}}": "7",
     "{{WORKER_IMAGE}}": "worker-image",
     "{{CANARY_IMAGE}}": "canary-image",
     "{{READ_ONLY_CANARY_IMAGE}}": "read-only-canary-image",

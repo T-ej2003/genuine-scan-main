@@ -1,0 +1,24 @@
+name: Verify Production CloudFront Proxy Drift
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "7,22,37,52 * * * *"
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-cloudfront-proxy-drift-readonly
+          aws-region: eu-west-2
+      - run: node scripts/aws/verify-production-cloudfront-proxy-drift.mjs

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { assertStageAStateContract, assertStageAStateIdentity, assertStageAStateIdentityBinding, buildStageAStateIdentity, generateStageAPrerequisites, normalizeStageAStateForIdentity, parseAuthenticatedStateBytes, resolveStageASubnetRouteTable, STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_MINIMUM_STATE_SERIAL, STAGE_A_STATE_IDENTITY_VERSION, STAGE_A_STATE_OBJECT, stageAStateSemanticSha256 } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
+import { assertStageBBackendProxyTrustCurrent, collectStageBBackendProxyTrust, assertStageAStateContract, assertStageAStateIdentity, assertStageAStateIdentityBinding, buildStageAStateIdentity, generateStageAPrerequisites, normalizeStageAStateForIdentity, parseAuthenticatedStateBytes, resolveStageASubnetRouteTable, STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_MINIMUM_STATE_SERIAL, STAGE_A_STATE_IDENTITY_VERSION, STAGE_A_STATE_OBJECT, stageAStateSemanticSha256 } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
 import { STAGE_A_CHECKER_ROLE_TRUST } from "../aws/production-stage-a-control-plane.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { productionStageAState } from "./fixtures/production-stage-a-state.mjs";
@@ -15,11 +15,26 @@ const preApplyStage = withoutRootDrop(productionStageAState({ serial: 43 }), [["
 const statePath = path.join(directory, "stage-a-state.json"); fs.writeFileSync(statePath, JSON.stringify(preApplyStage), { mode: 0o600 });
 const postApplyStatePath = path.join(directory, "post-apply-stage-a-state.json"); fs.writeFileSync(postApplyStatePath, JSON.stringify(stage), { mode: 0o600 });
 const run = (args) => {
-  if (args[1] === "describe-subnets") return JSON.stringify({ Subnets: STAGE_B.privateSubnetIds.map((SubnetId, index) => ({ SubnetId, VpcId: "vpc-0123456789abcdef0", State: "available", MapPublicIpOnLaunch: false, AvailabilityZone: `eu-west-2${index ? "b" : "a"}`, CidrBlock: `10.0.${index}.0/24` })) });
+  if (args[1] === "describe-subnets") {
+    const requested = args.slice(args.indexOf("--subnet-ids") + 1, args.indexOf("--region"));
+    if (requested.every((subnetId) => subnetId.startsWith("subnet-0alb"))) return JSON.stringify({ Subnets: requested.map((SubnetId, index) => ({ SubnetId, VpcId: "vpc-0123456789abcdef0", State: "available", CidrBlock: `10.1.${index}.0/24` })) });
+    return JSON.stringify({ Subnets: STAGE_B.privateSubnetIds.map((SubnetId, index) => ({ SubnetId, VpcId: "vpc-0123456789abcdef0", State: "available", MapPublicIpOnLaunch: false, AvailabilityZone: `eu-west-2${index ? "b" : "a"}`, CidrBlock: `10.0.${index}.0/24` })) });
+  }
   if (args[1] === "describe-route-tables") return JSON.stringify({ RouteTables: [{ RouteTableId: "rtb-12345678", VpcId: "vpc-0123456789abcdef0", Associations: [{ Main: true }], Routes: [{ DestinationCidrBlock: "0.0.0.0/0", NatGatewayId: "nat-12345678" }] }] });
   if (args[1] === "describe-security-groups") return JSON.stringify({ SecurityGroups: [STAGE_B.databaseSecurityGroupId, STAGE_B.executorSecurityGroupId].map((GroupId) => ({ GroupId, VpcId: "vpc-0123456789abcdef0" })) });
   if (args[1] === "describe-clusters") return JSON.stringify({ clusters: [{ clusterArn: STAGE_B.clusterArn, status: "ACTIVE" }] });
   if (args[1] === "describe-db-instances") return JSON.stringify({ DBInstances: [{ DBInstanceStatus: "available", DBSubnetGroup: { Subnets: STAGE_B.privateSubnetIds.map((SubnetIdentifier) => ({ SubnetIdentifier })) } }] });
+  if (args[1] === "describe-load-balancers") return JSON.stringify({ LoadBalancers: [{ LoadBalancerArn: "arn:aws:elasticloadbalancing:eu-west-2:368992683803:loadbalancer/app/mscqr-alb-euw2/example", DNSName: "mscqr-alb-euw2.example.elb.amazonaws.com", Type: "application", Scheme: "internet-facing", VpcId: "vpc-0123456789abcdef0", AvailabilityZones: [{ SubnetId: "subnet-0alb0000000000001" }, { SubnetId: "subnet-0alb0000000000002" }] }] });
+  if (args[1] === "describe-load-balancer-attributes") {
+    assert.equal(args[args.indexOf("--load-balancer-arn") + 1], "arn:aws:elasticloadbalancing:eu-west-2:368992683803:loadbalancer/app/mscqr-alb-euw2/example");
+    return JSON.stringify({ Attributes: [{ Key: "routing.http.xff_header_processing.mode", Value: "append" }, { Key: "routing.http.xff_client_port.enabled", Value: "false" }, { Key: "idle_timeout.timeout_seconds", Value: "60" }] });
+  }
+  if (args[1] === "describe-target-groups") return JSON.stringify({ TargetGroups: [{ TargetGroupArn: "arn:aws:elasticloadbalancing:eu-west-2:368992683803:targetgroup/mscqr-backend-tg-euw2-v2/example", VpcId: "vpc-0123456789abcdef0", TargetType: "ip", Protocol: "HTTP", Port: 4000, HealthCheckPath: "/health/live", LoadBalancerArns: ["arn:aws:elasticloadbalancing:eu-west-2:368992683803:loadbalancer/app/mscqr-alb-euw2/example"] }] });
+  if (args[1] === "describe-managed-prefix-lists") return JSON.stringify({ ManagedPrefixLists: [{ PrefixListId: "pl-0123456789abcdef0", PrefixListName: "com.amazonaws.global.cloudfront.origin-facing", State: "create-complete", Version: 7 }] });
+  if (args[1] === "get-managed-prefix-list-entries") { assert.equal(args[args.indexOf("--target-version") + 1], "7"); return JSON.stringify({ Entries: [{ Cidr: "198.51.100.0/24" }] }); }
+  if (args[0] === "cloudfront" && args[1] === "list-distributions") return JSON.stringify({ DistributionList: { Items: [{ Id: "E123", DomainName: "d123.cloudfront.net", Enabled: true, Status: "Deployed", Aliases: { Items: ["mscqr.com", "www.mscqr.com"] } }] } });
+  if (args[0] === "cloudfront" && args[1] === "get-distribution-config") return JSON.stringify({ ETag: "E123ABC", DistributionConfig: { Enabled: true, Aliases: { Items: ["mscqr.com", "www.mscqr.com"] }, Origins: { Items: [{ Id: "backend", DomainName: "mscqr-alb-euw2.example.elb.amazonaws.com", CustomOriginConfig: { OriginProtocolPolicy: "https-only", HTTPSPort: 443 } }] }, OriginGroups: { Quantity: 0 }, DefaultCacheBehavior: { TargetOriginId: "backend", ViewerProtocolPolicy: "redirect-to-https" }, CacheBehaviors: { Quantity: 0 } } });
+  if (args[0] === "route53" && args[1] === "list-resource-record-sets") return JSON.stringify({ ResourceRecordSets: ["mscqr.com", "www.mscqr.com"].flatMap((Name) => ["A", "AAAA"].map((Type) => ({ Name: `${Name}.`, Type, AliasTarget: { DNSName: "d123.cloudfront.net.", HostedZoneId: "Z2FDTNDATAQYW2", EvaluateTargetHealth: false } }))) });
   throw new Error(`unexpected AWS command ${args.join(" ")}`);
 };
 
@@ -52,7 +67,7 @@ test("Stage A checker trust accepts the Terraform singleton principal array and 
 test("canonical Stage A handoff derives every identifier from state and read-only live evidence", () => {
   const outputPath = path.join(directory, "handoff.json");
   const output = generateStageAPrerequisites({ stateBackup: statePath, stateObject: STAGE_A_STATE_OBJECT, toolingSha: "a".repeat(40), toolingTreeSha256: "b".repeat(64), outputPath, phase: "PRE_APPLY", run });
-  assert.equal(output.schemaVersion, 3); assert.equal(output.stageAStateIdentityVersion, STAGE_A_STATE_IDENTITY_VERSION); assert.equal(output.stageAStateObject, STAGE_A_STATE_OBJECT); assert.equal(output.stageAStateLineage, STAGE_A_EXPECTED_STATE_LINEAGE); assert.equal(output.stageAStateSerial, 43); assert.deepEqual(output.privateSubnetIds, [...STAGE_B.privateSubnetIds].sort()); assert.equal(output.networkEvidence.privateSubnets.length, 2); assert.equal(fs.statSync(outputPath).mode & 0o777, 0o600);
+  assert.equal(output.schemaVersion, 3); assert.equal(output.stageAStateIdentityVersion, STAGE_A_STATE_IDENTITY_VERSION); assert.equal(output.stageAStateObject, STAGE_A_STATE_OBJECT); assert.equal(output.stageAStateLineage, STAGE_A_EXPECTED_STATE_LINEAGE); assert.equal(output.stageAStateSerial, 43); assert.deepEqual(output.privateSubnetIds, [...STAGE_B.privateSubnetIds].sort()); assert.equal(output.networkEvidence.privateSubnets.length, 2); assert.deepEqual(output.stageBBackendProxyTrust, { mode: "cloudfront-alb", alb: { name: "mscqr-alb-euw2", vpcId: "vpc-0123456789abcdef0", arn: "arn:aws:elasticloadbalancing:eu-west-2:368992683803:loadbalancer/app/mscqr-alb-euw2/example", dnsName: "mscqr-alb-euw2.example.elb.amazonaws.com", subnetIds: ["subnet-0alb0000000000001", "subnet-0alb0000000000002"], cidrs: ["10.1.0.0/24", "10.1.1.0/24"], xffHeaderProcessingMode: "append", xffClientPortEnabled: false }, targetGroup: { name: "mscqr-backend-tg-euw2-v2", arn: "arn:aws:elasticloadbalancing:eu-west-2:368992683803:targetgroup/mscqr-backend-tg-euw2-v2/example" }, cloudFront: { distributionId: "E123", domainName: "d123.cloudfront.net", configEtag: "E123ABC", aliases: ["mscqr.com", "www.mscqr.com"], dns: { hostedZoneId: "Z0569586VLFIGGVI7HAZ", records: [{ name: "mscqr.com", type: "A", target: "d123.cloudfront.net", hostedZoneId: "Z2FDTNDATAQYW2" }, { name: "mscqr.com", type: "AAAA", target: "d123.cloudfront.net", hostedZoneId: "Z2FDTNDATAQYW2" }, { name: "www.mscqr.com", type: "A", target: "d123.cloudfront.net", hostedZoneId: "Z2FDTNDATAQYW2" }, { name: "www.mscqr.com", type: "AAAA", target: "d123.cloudfront.net", hostedZoneId: "Z2FDTNDATAQYW2" }] }, targetOriginId: "backend", backendBehaviors: [{ pathPattern: "<default>", targetOriginId: "backend", viewerProtocolPolicy: "redirect-to-https" }], originProtocolPolicy: "https-only", originHttpsPort: 443, apiPaths: ["/api/health/ready", "/api/auth/login"], managedPrefixListId: "pl-0123456789abcdef0", managedPrefixListVersion: 7, cidrs: ["198.51.100.0/24"] } }); assert.equal(fs.statSync(outputPath).mode & 0o777, 0o600);
 });
 
 test("generator requires an explicit lifecycle phase and preserves post-apply handoff state binding", () => {
@@ -231,4 +246,69 @@ test("each production subnet resolves independently", () => {
   const tables = [routeTable("rtb-a", [{ SubnetId: subnetA }]), routeTable("rtb-b", [{ SubnetId: subnetB }]), routeTable("rtb-main", [{ Main: true }])];
   assert.equal(resolveStageASubnetRouteTable({ routeTables: tables, vpcId: "vpc-0123456789abcdef0", subnetId: subnetA }).table.RouteTableId, "rtb-a");
   assert.equal(resolveStageASubnetRouteTable({ routeTables: tables, vpcId: "vpc-0123456789abcdef0", subnetId: subnetB }).table.RouteTableId, "rtb-b");
+});
+
+
+test("Stage A backend proxy collector binds mutable ALB XFF attributes and rejects topology drift", () => {
+  const trust = collectStageBBackendProxyTrust({ vpcId: "vpc-0123456789abcdef0", run });
+  const replace = (needle, replacement) => (args) => {
+    if (needle === "prefix" && args[0] === "ec2" && args[1] === "get-managed-prefix-list-entries") {
+      assert.equal(args[args.indexOf("--target-version") + 1], "8");
+      return JSON.stringify({ Entries: [{ Cidr: "198.51.100.0/24" }] });
+    }
+    if (args[0] === "elbv2" && args[1] === "describe-load-balancer-attributes") {
+      if (needle === "attribute-read-failure") throw new Error("AWS attribute read failed");
+      const parsed = JSON.parse(run(args));
+      if (needle === "mode-preserve") parsed.Attributes[0].Value = "preserve";
+      if (needle === "mode-remove") parsed.Attributes[0].Value = "remove";
+      if (needle === "client-port") parsed.Attributes[1].Value = "true";
+      if (needle === "missing-mode") parsed.Attributes.shift();
+      if (needle === "missing-client-port") parsed.Attributes.splice(1, 1);
+      if (needle === "duplicate-mode") parsed.Attributes.push({ Key: "routing.http.xff_header_processing.mode", Value: "remove" });
+      if (needle === "malformed-attribute") parsed.Attributes[0].Value = false;
+      if (needle === "missing-attributes") delete parsed.Attributes;
+      return JSON.stringify(parsed);
+    }
+    const value = run(args);
+    if (args[0] === "route53" && args[1] === "list-resource-record-sets" && needle === "route53") {
+      const parsed = JSON.parse(value); parsed.ResourceRecordSets[0].AliasTarget.DNSName = "mscqr-alb-euw2.example.elb.amazonaws.com."; return JSON.stringify(parsed);
+    }
+    if (args[0] === "cloudfront" && args[1] === "get-distribution-config" && ["behavior", "viewer-allow-http", "sampled-only-https", "sampled-only-backend", "api-other-origin", "wildcard-api-origin", "question-api-origin", "origin-http", "origin-match-viewer", "origin-port"].includes(needle)) {
+      const parsed = JSON.parse(value);
+      if (needle === "behavior") parsed.DistributionConfig.DefaultCacheBehavior.TargetOriginId = "unused";
+      if (needle === "viewer-allow-http") parsed.DistributionConfig.DefaultCacheBehavior.ViewerProtocolPolicy = "allow-all";
+      if (needle === "sampled-only-https") parsed.DistributionConfig.CacheBehaviors = { Items: [
+        { PathPattern: "/api/health/ready", TargetOriginId: "backend", ViewerProtocolPolicy: "redirect-to-https" },
+        { PathPattern: "/api/auth/login", TargetOriginId: "backend", ViewerProtocolPolicy: "redirect-to-https" },
+        { PathPattern: "/api/*", TargetOriginId: "backend", ViewerProtocolPolicy: "allow-all" },
+      ] };
+      if (needle === "sampled-only-backend") {
+        parsed.DistributionConfig.DefaultCacheBehavior.TargetOriginId = "other";
+        parsed.DistributionConfig.CacheBehaviors = { Items: [
+          { PathPattern: "/api/health/ready", TargetOriginId: "backend", ViewerProtocolPolicy: "redirect-to-https" },
+          { PathPattern: "/api/auth/login", TargetOriginId: "backend", ViewerProtocolPolicy: "redirect-to-https" },
+        ] };
+      }
+      if (needle === "api-other-origin") parsed.DistributionConfig.CacheBehaviors = { Items: [{ PathPattern: "/api/admin/*", TargetOriginId: "other", ViewerProtocolPolicy: "redirect-to-https" }] };
+      if (needle === "wildcard-api-origin") parsed.DistributionConfig.CacheBehaviors = { Items: [{ PathPattern: "*/admin/*", TargetOriginId: "other", ViewerProtocolPolicy: "allow-all" }] };
+      if (needle === "question-api-origin") parsed.DistributionConfig.CacheBehaviors = { Items: [{ PathPattern: "/?pi/admin/*", TargetOriginId: "other", ViewerProtocolPolicy: "allow-all" }] };
+      if (needle === "origin-http") parsed.DistributionConfig.Origins.Items[0].CustomOriginConfig.OriginProtocolPolicy = "http-only";
+      if (needle === "origin-match-viewer") parsed.DistributionConfig.Origins.Items[0].CustomOriginConfig.OriginProtocolPolicy = "match-viewer";
+      if (needle === "origin-port") parsed.DistributionConfig.Origins.Items[0].CustomOriginConfig.HTTPSPort = 8443;
+      return JSON.stringify(parsed);
+    }
+    if (args[0] === "ec2" && args[1] === "describe-managed-prefix-lists" && needle === "prefix") {
+      const parsed = JSON.parse(value); parsed.ManagedPrefixLists[0].Version = 8; return JSON.stringify(parsed);
+    }
+    return replacement ? replacement(value) : value;
+  };
+  assert.throws(() => collectStageBBackendProxyTrust({ vpcId: "vpc-0123456789abcdef0", run: replace("route53") }), /Route53 aliases/);
+  assert.throws(() => collectStageBBackendProxyTrust({ vpcId: "vpc-0123456789abcdef0", run: replace("behavior") }), /API behavior/);
+  for (const drift of ["viewer-allow-http", "sampled-only-https", "sampled-only-backend", "api-other-origin", "wildcard-api-origin", "question-api-origin"]) assert.throws(() => assertStageBBackendProxyTrustCurrent({ expected: trust, vpcId: "vpc-0123456789abcdef0", run: replace(drift) }), /redirect viewers to HTTPS/);
+  for (const drift of ["origin-http", "origin-match-viewer", "origin-port"]) assert.throws(() => assertStageBBackendProxyTrustCurrent({ expected: trust, vpcId: "vpc-0123456789abcdef0", run: replace(drift) }), /HTTPS-only port 443/);
+  for (const drift of ["mode-preserve", "mode-remove", "client-port"]) assert.throws(() => assertStageBBackendProxyTrustCurrent({ expected: trust, vpcId: "vpc-0123456789abcdef0", run: replace(drift) }), /X-Forwarded-For attributes/);
+  for (const invalid of ["missing-mode", "missing-client-port", "duplicate-mode", "malformed-attribute", "missing-attributes"]) assert.throws(() => collectStageBBackendProxyTrust({ vpcId: "vpc-0123456789abcdef0", run: replace(invalid) }), /attribute|attributes/);
+  assert.throws(() => collectStageBBackendProxyTrust({ vpcId: "vpc-0123456789abcdef0", run: replace("attribute-read-failure") }), /AWS attribute read failed/);
+  assert.throws(() => assertStageBBackendProxyTrustCurrent({ expected: trust, vpcId: "vpc-0123456789abcdef0", run: replace("prefix") }), /prefix-list drift/);
+  assert.doesNotThrow(() => assertStageBBackendProxyTrustCurrent({ expected: trust, vpcId: "vpc-0123456789abcdef0", run }));
 });

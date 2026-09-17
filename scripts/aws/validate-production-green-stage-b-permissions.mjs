@@ -46,11 +46,17 @@ export const CUTOVER_CRITICAL_CAPABILITIES = Object.freeze([
   Object.freeze({ principal: ECS_EXEC_OPERATOR_ROLE_ARN, evaluationId: "operator-execute-production-backend", action: "ecs:ExecuteCommand" }),
 ]);
 const STAGE_A_LIVE_EVIDENCE_EVALUATIONS = Object.freeze([
-  ["collect-stage-a-live-subnets", "ec2:DescribeSubnets"],
-  ["collect-stage-a-live-route-tables", "ec2:DescribeRouteTables"],
-  ["collect-stage-a-live-security-groups", "ec2:DescribeSecurityGroups"],
-  ["collect-stage-a-live-cluster", "ecs:DescribeClusters"],
-  ["collect-stage-a-live-database", "rds:DescribeDBInstances"],
+  ["collect-stage-a-live-subnets", "ec2:DescribeSubnets", true],
+  ["collect-stage-a-live-route-tables", "ec2:DescribeRouteTables", true],
+  ["collect-stage-a-live-security-groups", "ec2:DescribeSecurityGroups", true],
+  ["collect-stage-a-live-alb", "elasticloadbalancing:DescribeLoadBalancers", true],
+  ["collect-stage-a-live-alb-attributes", "elasticloadbalancing:DescribeLoadBalancerAttributes", true],
+  ["collect-stage-a-live-target-group", "elasticloadbalancing:DescribeTargetGroups", true],
+  ["collect-stage-a-live-cloudfront-prefix-list", "ec2:DescribeManagedPrefixLists", true],
+  ["collect-stage-a-live-cloudfront-prefix-list-entries", "ec2:GetManagedPrefixListEntries", true],
+  ["collect-stage-a-live-cloudfront-distribution", "cloudfront:ListDistributions", false],
+  ["collect-stage-a-live-cluster", "ecs:DescribeClusters", true],
+  ["collect-stage-a-live-database", "rds:DescribeDBInstances", true],
 ]);
 export const APPROVED_PREFLIGHT_GENERATOR_ARNS = Object.freeze([`arn:aws:iam::${ACCOUNT}:root`]);
 export const RELEASE_CALLER_PATTERN = `^arn:aws:sts::${ACCOUNT}:assumed-role/mscqr-production-release-deployer/[^/]+$`;
@@ -618,9 +624,10 @@ export function validateManifest(manifest, { account = ACCOUNT, region = REGION,
   if (!Array.isArray(manifest.required) || !Array.isArray(manifest.forbidden) || !Array.isArray(manifest.checkerRequired)) throw new Error("Permission manifest sections are malformed.");
   const reviewedContextRegistry = assertReviewedSimulationContextRegistry({ conditionKeyOrigins, registry: contextRegistry });
   assertStageBTerraformBackendManifest(manifest);
-  for (const [id, action] of STAGE_A_LIVE_EVIDENCE_EVALUATIONS) {
+  for (const [id, action, regional] of STAGE_A_LIVE_EVIDENCE_EVALUATIONS) {
     const entry = manifest.required.find((candidate) => candidate.id === id);
-    if (!entry || entry.action !== action || JSON.stringify(entry.resources) !== JSON.stringify(["*"]) || JSON.stringify(entry.context) !== JSON.stringify([{ key: "aws:RequestedRegion", type: "string", values: [region] }])) {
+    const expectedContext = regional ? [{ key: "aws:RequestedRegion", type: "string", values: [region] }] : [];
+    if (!entry || entry.action !== action || JSON.stringify(entry.resources) !== JSON.stringify(["*"]) || JSON.stringify(entry.context) !== JSON.stringify(expectedContext)) {
       throw new Error(`Stage A live-evidence permission mapping is not exact: ${id}.`);
     }
   }

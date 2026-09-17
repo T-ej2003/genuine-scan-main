@@ -2,9 +2,12 @@
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "ReadExactStageAStateForHandoff",
+      "Sid": "ReadWriteExactStageAState",
       "Effect": "Allow",
-      "Action": "s3:GetObject",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject"
+      ],
       "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate"
     },
     {
@@ -14,27 +17,13 @@
       "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2"
     },
     {
-      "Sid": "WriteExactStageAState",
+      "Sid": "ManageExactStageALock",
       "Effect": "Allow",
-      "Action": "s3:PutObject",
-      "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate"
-    },
-    {
-      "Sid": "ReadExactStageALock",
-      "Effect": "Allow",
-      "Action": "s3:GetObject",
-      "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"
-    },
-    {
-      "Sid": "WriteExactStageALock",
-      "Effect": "Allow",
-      "Action": "s3:PutObject",
-      "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"
-    },
-    {
-      "Sid": "ReleaseExactStageALock",
-      "Effect": "Allow",
-      "Action": "s3:DeleteObject",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject"
+      ],
       "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"
     },
     {
@@ -164,7 +153,8 @@
         "arn:aws:iam::368992683803:role/mscqr-production-independent-checker",
         "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker",
         "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task",
-        "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker"
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker",
+        "arn:aws:iam::368992683803:role/mscqr-production-cloudfront-proxy-drift-readonly"
       ]
     },
     {
@@ -173,7 +163,8 @@
       "Action": "iam:GetRolePolicy",
       "Resource": [
         "arn:aws:iam::368992683803:role/mscqr-production-independent-checker",
-        "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker"
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker",
+        "arn:aws:iam::368992683803:role/mscqr-production-cloudfront-proxy-drift-readonly"
       ]
     },
     {
@@ -213,22 +204,26 @@
       }
     },
     {
-      "Sid": "ApplyExactStageACheckerRoleChainPolicy",
-      "Effect": "Allow",
-      "Action": "iam:PutRolePolicy",
-      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-independent-checker"
-    },
-    {
-      "Sid": "ApplyExactStageACheckerPublicationPolicy",
-      "Effect": "Allow",
-      "Action": "iam:PutRolePolicy",
-      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker"
-    },
-    {
       "Sid": "ApplyExactStageACheckerRoleTrust",
       "Effect": "Allow",
       "Action": "iam:UpdateAssumeRolePolicy",
       "Resource": "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker"
+    },
+    {
+      "Sid": "ApplyExactStageAIamPolicies",
+      "Effect": "Allow",
+      "Action": "iam:PutRolePolicy",
+      "Resource": [
+        "arn:aws:iam::368992683803:role/mscqr-production-independent-checker",
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker",
+        "arn:aws:iam::368992683803:role/mscqr-production-cloudfront-proxy-drift-readonly"
+      ]
+    },
+    {
+      "Sid": "CreateExactCloudFrontProxyDriftReadonlyRole",
+      "Effect": "Allow",
+      "Action": "iam:CreateRole",
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-cloudfront-proxy-drift-readonly"
     }
   ]
 }

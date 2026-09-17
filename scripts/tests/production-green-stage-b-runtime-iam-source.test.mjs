@@ -54,3 +54,31 @@ test("Stage-B candidate object storage grants only exact bucket listing beside o
   assert.match(block, /Sid\s+= "ReadWriteOnlyProductionArtifactObjects"[\s\S]*?Action\s+= \["s3:GetObject", "s3:PutObject"\][\s\S]*?Resource = "\$\{var\.receipt_bucket_arn\}\/\*"/);
   assert.doesNotMatch(block, /Action\s+=\s+"s3:\*"/);
 });
+
+test("Stage-B backend candidates bind the reviewed CloudFront-to-ALB runtime topology while the application canary stays loopback-only", () => {
+  const values = {
+    "{{BACKEND_CLIENT_IP_TRUST_MODE}}": "cloudfront-alb",
+    "{{BACKEND_CLIENT_IP_TRUSTED_ALB_CIDRS}}": "10.1.0.0/24,10.1.1.0/24",
+    "{{BACKEND_CLIENT_IP_TRUSTED_CLOUDFRONT_CIDRS}}": "198.51.100.0/24",
+    "{{BACKEND_CLIENT_IP_CLOUDFRONT_PREFIX_LIST_ID}}": "pl-0123456789abcdef0",
+    "{{BACKEND_CLIENT_IP_CLOUDFRONT_PREFIX_LIST_VERSION}}": "7",
+  };
+  for (const file of ["green-backend-candidate.json", "green-backend-rotation-candidate.json"]) {
+    const template = fs.readFileSync(`infra/aws/terraform/production-green-stage-b/task-definitions/${file}`, "utf8");
+    const rendered = Object.entries(values).reduce((current, [placeholder, value]) => current.replaceAll(placeholder, value), template);
+    assert.doesNotMatch(rendered, /\{\{BACKEND_CLIENT_IP_/);
+    const environment = JSON.parse(rendered).containerDefinitions[0].environment;
+    assert.deepEqual(Object.fromEntries(environment.filter(({ name }) => name.startsWith("CLIENT_IP_")).map(({ name, value }) => [name, value])), {
+      CLIENT_IP_TRUST_MODE: "cloudfront-alb",
+      CLIENT_IP_TRUSTED_ALB_CIDRS: "10.1.0.0/24,10.1.1.0/24",
+      CLIENT_IP_TRUSTED_CLOUDFRONT_CIDRS: "198.51.100.0/24",
+    });
+    assert.deepEqual(Object.fromEntries(environment.filter(({ name }) => name.startsWith("MSCQR_CLIENT_IP_CLOUDFRONT_PREFIX_LIST_")).map(({ name, value }) => [name, value])), {
+      MSCQR_CLIENT_IP_CLOUDFRONT_PREFIX_LIST_ID: "pl-0123456789abcdef0",
+      MSCQR_CLIENT_IP_CLOUDFRONT_PREFIX_LIST_VERSION: "7",
+    });
+  }
+  assert.match(source, /backend_template_proxy = replace\([\s\S]*?BACKEND_CLIENT_IP_TRUST_MODE[\s\S]*?BACKEND_CLIENT_IP_TRUSTED_ALB_CIDRS[\s\S]*?BACKEND_CLIENT_IP_TRUSTED_CLOUDFRONT_CIDRS/);
+  assert.match(source, /backend_template_proxy_metadata = replace\([\s\S]*?local\.backend_template_proxy[\s\S]*?BACKEND_CLIENT_IP_CLOUDFRONT_PREFIX_LIST_ID[\s\S]*?backend_client_ip_cloudfront_prefix_list_id[\s\S]*?BACKEND_CLIENT_IP_CLOUDFRONT_PREFIX_LIST_VERSION[\s\S]*?backend_client_ip_cloudfront_prefix_list_version/);
+  assert.match(source, /rendered_candidates = \{[\s\S]*?backend\s+= replace\([\s\S]*?local\.backend_template_proxy_metadata/);
+});

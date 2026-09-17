@@ -5,6 +5,7 @@ import path from "node:path";
 import { ensureStageBPrivateDirectory, ensureStageBPrivateFile, readStageBPrivateFileBytes, writeStageBPrivateFileAtomic, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { loadApprovedArtifactSigningBindings } from "./production-artifact-signing-secrets-adapter.mjs";
 import { buildOverlapTaskDefinition } from "./production-overlap-task-definition.mjs";
+import { assertStageBBackendProxyTrust } from "./production-green-stage-b-task-definitions.mjs";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { RELEASE_ROLE_ARN } from "./production-identity-adapters.mjs";
 import { assertImageAuthorization, authorizedBackendDigest, buildRotationTerraformInputs, renderRotationTerraformInput } from "./production-cutover-control-plane.mjs";
@@ -368,6 +369,7 @@ export function prepareProductionCutoverRuntime({
     ensureStageBPrivateFile({ filePath: stageBTfvarsPath, repositoryRoot, label: "Canonical Stage B tfvars" });
     const stageBTfvarsBinding = readInputFile(stageBTfvarsBindingReportPath, repositoryRoot, "Canonical Stage B tfvars binding report");
     if (stageBTfvarsBinding.sha256 !== stageBTfvarsBindingReportSha256) throw new Error("Canonical Stage B tfvars binding report hash does not match its authenticated input.");
+    const backendProxyTrust = assertStageBBackendProxyTrust(stageBTfvarsBinding.value.backendProxyTrust);
     ensureStageBPrivateDirectory({ directory: stageBTerraformDataDir, repositoryRoot, create: false, normalize: true, label: "Canonical Stage B Terraform data directory" });
     let currentStageBStateSha256 = null;
     if (stageARecovery) {
@@ -409,6 +411,7 @@ export function prepareProductionCutoverRuntime({
       backendImage: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${backendImageDigest}`,
       releaseSha: protectedSha,
       backendLogGroup: STAGE_B.inventoryLogGroupName,
+      proxyTrust: backendProxyTrust,
       secretBindings: {
         ...rotationBindingsToTaskBindings(rotationBindings),
         ...artifactBindings,
@@ -465,7 +468,7 @@ export function prepareProductionCutoverRuntime({
       inventoryExecutionRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution",
       rotationInventoryRlsRole: "mscqr_prod_rls_read",
       inventoryLogGroupName: STAGE_B.inventoryLogGroupName,
-      overlapTaskInput: { backendImage: overlapTaskInput.containerDefinitions.find(({ name }) => name === "backend")?.image, releaseSha: protectedSha, backendLogGroup: STAGE_B.inventoryLogGroupName, secretBindings: { ...rotationBindingsToTaskBindings(rotationBindings), ...artifactBindings, ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls_read" } },
+      overlapTaskInput: { backendImage: overlapTaskInput.containerDefinitions.find(({ name }) => name === "backend")?.image, releaseSha: protectedSha, backendLogGroup: STAGE_B.inventoryLogGroupName, proxyTrust: backendProxyTrust, secretBindings: { ...rotationBindingsToTaskBindings(rotationBindings), ...artifactBindings, ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls_read" } },
       ...paths,
       stageBTfvarsPath: path.resolve(stageBTfvarsPath),
       stageBTfvarsBindingReportPath: path.resolve(stageBTfvarsBindingReportPath),

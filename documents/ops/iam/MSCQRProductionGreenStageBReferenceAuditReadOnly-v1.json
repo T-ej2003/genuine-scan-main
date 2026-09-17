@@ -9,7 +9,12 @@
         "ec2:DescribeRouteTables",
         "ec2:DescribeSecurityGroups",
         "ecs:DescribeClusters",
-        "rds:DescribeDBInstances"
+        "rds:DescribeDBInstances",
+        "ec2:DescribeManagedPrefixLists",
+        "ec2:GetManagedPrefixListEntries",
+        "elasticloadbalancing:DescribeLoadBalancers",
+        "elasticloadbalancing:DescribeLoadBalancerAttributes",
+        "elasticloadbalancing:DescribeTargetGroups"
       ],
       "Resource": "*",
       "Condition": {
@@ -17,6 +22,21 @@
           "aws:RequestedRegion": "eu-west-2"
         }
       }
+    },
+    {
+      "Sid": "ReadStageBCloudFrontOriginTopology",
+      "Effect": "Allow",
+      "Action": [
+        "cloudfront:ListDistributions",
+        "cloudfront:GetDistributionConfig"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ReadProductionRoute53AliasTopology",
+      "Effect": "Allow",
+      "Action": "route53:ListResourceRecordSets",
+      "Resource": "*"
     },
     {
       "Sid": "ListAttachedRolePoliciesReadOnly",
