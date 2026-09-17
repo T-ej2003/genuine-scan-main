@@ -18,6 +18,7 @@ Environment:
   IMAGE_TAG          Optional. Defaults to git rev-parse HEAD.
   SOURCE_RELEASE_SHA Optional source revision for image labels. Defaults to IMAGE_TAG.
   PLATFORMS          Optional. Defaults to linux/amd64.
+  REQUIRE_SOURCE_IMAGE_BINDING Optional true to verify source labels on reused/published images.
   BACKEND_ECR_REPO   Optional. Defaults to mscqr-backend.
   FRONTEND_ECR_REPO  Optional. Defaults to mscqr-web.
   WORKER_ECR_REPO    Optional. Defaults to mscqr-worker.
@@ -93,6 +94,7 @@ WORKER_BUILD_CONTEXT="${WORKER_BUILD_CONTEXT:-.}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 VERIFY_SCRIPT="$REPO_ROOT/scripts/aws/verify-image-manifest.sh"
 STAGE_B_BINDING_SCRIPT="$REPO_ROOT/scripts/aws/stage-b-image-bindings.mjs"
+NORMAL_IMAGE_CONTRACT="$REPO_ROOT/scripts/aws/production-normal-image-contract.mjs"
 
 if [[ "$SERVICE_SCOPE" == "production-green-stage-b" ]]; then
   if ! [[ "$IMAGE_TAG" =~ ^[a-f0-9]{40}$ ]] || [[ "$IMAGE_TAG" != "$(git rev-parse HEAD)" ]] || ! [[ "$SOURCE_RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || [[ "$SOURCE_RELEASE_SHA" != "$IMAGE_TAG" ]]; then
@@ -168,6 +170,17 @@ if (!Array.isArray(repositories) || repositories.length !== 1
 }
 NODE
 done
+
+repository_file_for_name() {
+  local wanted="$1" index
+  for index in "${!REPOSITORIES[@]}"; do
+    if [[ "${REPOSITORIES[$index]}" == "$wanted" ]]; then
+      printf '%s/repository-%s.json' "$PREFLIGHT_DIR" "$index"
+      return 0
+    fi
+  done
+  return 1
+}
 
 echo "Logging in to ${ECR_REGISTRY}"
 aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$ECR_REGISTRY"
@@ -253,6 +266,25 @@ verify_stage_b_reuse() {
   printf '%s' "$labels" | node "$STAGE_B_BINDING_SCRIPT" "$service" "$IMAGE_TAG" "$SOURCE_CONTRACT_SHA256" "$MIGRATION_SET_DIGEST"
 }
 
+verify_normal_image_binding() {
+  if [[ "${REQUIRE_SOURCE_IMAGE_BINDING:-false}" != "true" ]]; then return 0; fi
+  local service="$1" image_uri="$2" image_digest="$3" image_file="$4" repository_file="$5" labels
+  docker pull --platform "$PLATFORMS" "$image_uri" >/dev/null
+  labels="$(docker image inspect "$image_uri" --format '{{json .Config.Labels}}')"
+  NORMAL_IMAGE_CONTRACT="$NORMAL_IMAGE_CONTRACT" node --input-type=module - "$service" "$SOURCE_RELEASE_SHA" "$image_digest" "$image_file" "$repository_file" "$labels" "$PLATFORMS" "$image_uri" <<'NODE'
+import fs from "node:fs";
+import { assertNormalImageIdentity } from process.env.NORMAL_IMAGE_CONTRACT;
+const [service, sourceSha, imageDigest, imageFile, repositoryFile, labelsText, platformsText, imageUri] = process.argv.slice(2);
+const image = JSON.parse(fs.readFileSync(imageFile, "utf8"))?.imageDetails?.[0];
+const repository = JSON.parse(fs.readFileSync(repositoryFile, "utf8"))?.repositories?.[0];
+const labels = JSON.parse(labelsText || "null");
+if (image?.imageDigest !== imageDigest || !imageUri.endsWith(`@${imageDigest}`)) {
+  throw new Error("Normal image digest readback does not match the immutable reference.");
+}
+assertNormalImageIdentity({ service, sourceSha, repository, image, labels, platforms: platformsText.split(",").filter(Boolean) });
+NODE
+}
+
 declare -a IMAGE_URIS=()
 declare -a PREFLIGHT_DIGESTS=()
 
@@ -311,6 +343,10 @@ for service in "${SERVICES[@]}"; do
   repository_name="${repository_name%%:*}"
   echo "Reusing immutable ${service} image ${image_uri}@${existing_digest}"
   REQUIRED_PLATFORMS="$PLATFORMS" "$VERIFY_SCRIPT" "$image_uri"
+  if [[ "${REQUIRE_SOURCE_IMAGE_BINDING:-false}" == "true" ]]; then
+    image_file="$PREFLIGHT_DIR/image-${service}.json"
+    verify_normal_image_binding "$service" "${ECR_REGISTRY}/${repository_name}@${existing_digest}" "$existing_digest" "$image_file" "$(repository_file_for_name "$repository_name")"
+  fi
   if [[ "$SERVICE_SCOPE" == "production-green-stage-b" ]]; then
     verify_stage_b_reuse "$service" "$image_uri"
   fi
@@ -371,7 +407,7 @@ for service in "${SERVICES[@]}"; do
 
   REQUIRED_PLATFORMS="$PLATFORMS" "$VERIFY_SCRIPT" "$image_uri"
 
-  if [[ -n "${OUTPUT_FILE:-}" ]]; then
+  if [[ -n "${OUTPUT_FILE:-}" || "${REQUIRE_SOURCE_IMAGE_BINDING:-false}" == "true" ]]; then
     image_digest="$(
       aws ecr describe-images \
         --region "$AWS_REGION" \
@@ -380,7 +416,15 @@ for service in "${SERVICES[@]}"; do
         --query 'imageDetails[0].imageDigest' \
         --output text
     )"
-    node --input-type=module - "$OUTPUT_FILE" "$service" "$repository_name" "$image_uri" "$published_tag" "$image_digest" <<'NODE'
+    if [[ "${REQUIRE_SOURCE_IMAGE_BINDING:-false}" == "true" ]]; then
+      aws ecr describe-images \
+        --region "$AWS_REGION" \
+        --repository-name "$repository_name" \
+        --image-ids imageTag="$published_tag" >"$response_file"
+      verify_normal_image_binding "$service" "${ECR_REGISTRY}/${repository_name}@${image_digest}" "$image_digest" "$response_file" "$(repository_file_for_name "$repository_name")"
+    fi
+    if [[ -n "${OUTPUT_FILE:-}" ]]; then
+      node --input-type=module - "$OUTPUT_FILE" "$service" "$repository_name" "$image_uri" "$published_tag" "$image_digest" <<'NODE'
 import fs from "node:fs";
 
 const [outputPath, service, repositoryName, imageUri, imageTag, imageDigest] = process.argv.slice(2);
@@ -394,6 +438,7 @@ const record = {
 };
 fs.appendFileSync(outputPath, `${JSON.stringify(record)}\n`);
 NODE
+    fi
   fi
   echo
 done

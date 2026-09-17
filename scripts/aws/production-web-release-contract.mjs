@@ -122,15 +122,26 @@ export function captureFrontendPredecessor(service, taskDefinition) {
   return Object.freeze({ serviceArn: SERVICE_ARN, clusterArn: CLUSTER_ARN, taskDefinitionArn: service.taskDefinition, deploymentId: deployment.id, desiredCount: 2, runningCount: 2, pendingCount: 0, imageRef: container.image, taskDefinition: structuredClone(taskDefinition) });
 }
 
-export function buildFrontendCandidate({ predecessor, authenticatedWebAuthorization } = {}) {
-  if (!authenticatedWebAuthorizations.has(authenticatedWebAuthorization)) throw new Error("Authenticated web image authorization is required.");
+function buildFrontendCandidateFromImage({ predecessor, imageRef } = {}) {
   if (!predecessor || !TASK_ARN.test(predecessor.taskDefinitionArn || "")) throw new Error("Frontend predecessor is invalid.");
   const candidate = structuredClone(predecessor.taskDefinition); for (const key of ["taskDefinitionArn", "revision", "status", "registeredAt", "registeredBy", "deregisteredAt", "deleteRequestedAt", "requiresAttributes", "compatibilities"]) delete candidate[key];
-  const container = candidate.containerDefinitions?.find(({ name }) => name === WEB_RELEASE.container); if (!container) throw new Error("Frontend container is missing."); container.image = authenticatedWebAuthorization.imageRef;
+  const container = candidate.containerDefinitions?.find(({ name }) => name === WEB_RELEASE.container); if (!container) throw new Error("Frontend container is missing."); container.image = imageRef;
   if (!IMAGE.test(container.image) || candidate.family !== WEB_RELEASE.family || candidate.containerDefinitions.length !== predecessor.taskDefinition.containerDefinitions.length) throw new Error("Frontend candidate is outside the reviewed family or image contract.");
   const before = structuredClone(candidate); before.containerDefinitions.find(({ name }) => name === WEB_RELEASE.container).image = predecessor.imageRef;
   if (canonicalizeEcsTaskDefinition(before) !== canonicalizeEcsTaskDefinition(predecessor.taskDefinition)) throw new Error("Frontend candidate contains a semantic change other than the image.");
   return Object.freeze(candidate);
+}
+
+export function buildFrontendCandidate({ predecessor, authenticatedWebAuthorization } = {}) {
+  if (!authenticatedWebAuthorizations.has(authenticatedWebAuthorization)) throw new Error("Authenticated web image authorization is required.");
+  return buildFrontendCandidateFromImage({ predecessor, imageRef: authenticatedWebAuthorization.imageRef });
+}
+
+// Normal application releases use the same immutable image and predecessor
+// contract, but do not consume the high-assurance web authorization lane.
+// The caller still cannot supply a family, service, or mutable image.
+export function buildNormalFrontendCandidate({ predecessor, imageRef } = {}) {
+  return buildFrontendCandidateFromImage({ predecessor, imageRef });
 }
 
 export function assertFrontendCandidateReadback({ definition, taskDefinitionArn, candidate } = {}) {

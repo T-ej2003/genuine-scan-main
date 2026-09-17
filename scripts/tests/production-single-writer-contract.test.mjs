@@ -10,14 +10,17 @@ const releaseGateText = read(".github/workflows/release-gate.yml");
 const productionReadinessText = read(".github/workflows/production-deploy.yml");
 const releaseTrainText = read(".github/workflows/release-train.yml");
 
-test("release-gate is the only enabled production mutation writer", () => {
+test("release-gate and the normal application lane are the only enabled production mutation writers", () => {
   assert.match(releaseGateText, /group: production-deploy/);
   assert.match(releaseGateText, /Activate exact Stage-B backend candidate/);
   assert.doesNotMatch(releaseGateText, /Deploy backend ECS service|Deploy worker ECS service/);
   assert.match(releaseGateText, /environment: production/);
   assert.equal(legacy.jobs["legacy-disabled"].if, "${{ false }}");
   assert.doesNotMatch(legacyText, /configure-aws-credentials|AWS_ACCESS_KEY_ID|terraform apply|register-task-definition|update-service|deregister-task-definition/i);
-  assert.doesNotMatch(productionReadinessText, /configure-aws-credentials|AWS_ACCESS_KEY_ID|terraform apply|register-task-definition|update-service|deregister-task-definition/i);
+  assert.match(productionReadinessText, /configure-aws-credentials/);
+  assert.match(productionReadinessText, /Normal Production Deployment/);
+  assert.match(productionReadinessText, /production-normal-release\.mjs/);
+  assert.doesNotMatch(productionReadinessText, /AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|terraform apply|PutSecretValue/i);
   assert.doesNotMatch(releaseTrainText, /terraform apply|register-task-definition|update-service|deregister-task-definition/i);
   assert.match(releaseTrainText, /dispatch-protected-main-release-gate\.mjs[\s\\]*--target-ref "\$TARGET_REF" --target-sha "\$TARGET_SHA"/);
 });
