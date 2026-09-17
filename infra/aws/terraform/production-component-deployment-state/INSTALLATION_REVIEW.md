@@ -371,3 +371,24 @@ approval and after protected main advances, with zero writes. The 93 directly
 affected tests and changed-file ESLint pass. The public legacy controller still
 needs replacement; no completed operator lifecycle or production execution is
 claimed by this checkpoint.
+
+### Scoped normal controller checkpoint
+
+The legacy 472-line root/admin controller has now been deleted and replaced by
+the scoped installation/inspection/closure composition root. It cannot select
+an IAM writer, Lambda deployer, administrator profile, temporary-policy installer
+or local Terraform adapter. Unsupported historical commands are rejected by real
+child-process tests before source/network/credential operations.
+
+Installation authenticates the current reusable publisher's three-file audit
+archive, run/source/reviewer/environment and broker publication result before MFA.
+Cleanup uses only its durable-context session client; legacy GitHub-artifact-based
+cleanup helpers have been removed. Receipt schemas and source movement are checked
+before returning success. The updated runbook replaces obsolete administrator
+commands instead of documenting them as a fallback.
+
+The directly affected controller, authorization, publisher, capability and
+credential-source tests pass (100 tests); changed-source ESLint and diff checks
+pass. This is still not the final gate: initial bootstrap and isolated Terraform
+execution remain unfinished. No push or production operation is authorized by
+this local checkpoint.

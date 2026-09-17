@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { installationCapabilitySet, installationIdentity, installationDocuments, digest } from "../aws/component-iam-installation-contract.mjs";
-import { temporaryInstallationPolicies } from "../aws/component-iam-installation.mjs";
+import { bootstrapManagedIdentities, componentSessionIdentities } from "../aws/component-installation-identity-contract.mjs";
 
 const capabilities = installationCapabilitySet();
 const actions = (policy) => policy.Statement.flatMap((statement) => [].concat(statement.Action));
@@ -37,13 +37,10 @@ test("backend grants only exact state/lock/attempt writes; no state or attempt d
   assert.deepEqual(listings.Condition.StringEquals, { "s3:prefix": "mscqr/production/component-deployment-state/terraform.tfstate" });
 });
 
-test("runtime grants expire; IAM credentials are restricted to the exact Lambda", () => {
-  const expiresAt = "2030-01-01T00:30:00.000Z";
-  const policies = temporaryInstallationPolicies({ expiresAt });
-  for (const statement of [...policies.provisioner.Statement, ...policies.terraform.Statement]) assert.deepEqual(statement.Condition.DateLessThan, { "aws:CurrentTime": expiresAt });
-  for (const statement of policies.provisioner.Statement) assert.deepEqual(statement.Condition.ArnEquals, { "lambda:SourceFunctionArn": "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-component-iam-installer" });
-  assert.equal(pairs(policies.provisioner).length, pairs(capabilities.provisioner).length);
-  assert.equal(pairs(policies.terraform).length, pairs(capabilities.terraform).length);
+test("bootstrap owns fixed broker authority; normal sessions cannot replace code or authority", () => {
+  const broker = bootstrapManagedIdentities().find(target => target.role === installationIdentity.provisionerRole);
+  for (const statement of broker.policy.Statement) assert.deepEqual(statement.Condition.ArnEquals, { "lambda:SourceFunctionArn": "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-component-iam-installer" });
+  for (const session of componentSessionIdentities()) assert.deepEqual(actions(session.policy), ["lambda:InvokeFunction"]);
   const changed = structuredClone(capabilities); changed.terraform.Statement.push({ Effect: "Allow", Action: "iam:PassRole", Resource: "*" });
   assert.notEqual(digest(changed), digest(capabilities));
 });
