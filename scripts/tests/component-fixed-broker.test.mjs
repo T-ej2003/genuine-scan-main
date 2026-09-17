@@ -105,8 +105,8 @@ function fixture() {
     assert.equal(operation, "GetRuntimeManagementConfig");
     return { UpdateRuntimeOn: "FunctionUpdate", RuntimeVersionArn: null };
   };
-  f.run = (operation, fields = {}, version = { AUTHORIZE: "3", CLOSE: "2", CLEANUP_CONTEXT: "2", INSTALL: "1", INSPECT: "1" }[operation]) => {
-    const purpose = operation === "CLOSE" ? "CLEANUP" : "INSTALL";
+  f.run = (operation, fields = {}, version = { AUTHORIZE: "3", CLOSE: "2", CLEANUP_CONTEXT: "2", PROVE_CLEANUP_SESSION: "2", INSTALL: "1", INSPECT: "1", PROVE_INSTALL_SESSION: "1" }[operation]) => {
+    const purpose = ["CLOSE", "PROVE_CLEANUP_SESSION"].includes(operation) ? "CLEANUP" : "INSTALL";
     const role = purpose === "CLEANUP" ? identityBootstrap.cleanupRole : identityBootstrap.installationRole;
     const binding = { sourceSha, transitionId, authorizationSha256: digest(authorization), purpose };
     const key = ["A", "S", "I", "A"].join("") + "0".repeat(16);
@@ -121,10 +121,25 @@ function fixture() {
       responseElements: { credentials: { accessKeyId: key, expiration: new Date(issued + 900000).toISOString() }, assumedRoleUser: { arn: principal, assumedRoleId: "role-id:session" } } };
     const event = operation === "CLEANUP_CONTEXT" ? { operation, ...fields } : operation === "AUTHORIZE" ? { operation, authorization, ...fields } : { operation, transitionId, authorizationSha256: digest(authorization), proof, ...fields };
     return executeFixedBroker(event, { functionVersion: version, invokedFunctionArn: `${componentBrokerArn}:${version}` }, { manifest, iam, s3, lambda, currentMain: async () => f.main, now: () => f.clock,
-      sts: async (request) => { assert.equal(request.headers["x-mscqr-component-binding"], sessionProofBinding(binding)); return { Account: "368992683803", Arn: principal, UserId: "role-id:session" }; }, issuanceEvents: async () => [issuance] });
+      sts: async (request) => { assert.equal(request.headers["x-mscqr-component-binding"], sessionProofBinding(binding)); return { Account: "368992683803", Arn: principal, UserId: "role-id:session" }; }, issuanceEvents: async () => f.issuanceMissing ? [] : [issuance] });
   };
   return f;
 }
+
+test("proof readiness authenticates issuance without claiming a session or writing IAM/S3", async () => {
+  const f = fixture(); await f.run("AUTHORIZE");
+  const before = JSON.stringify([...f.objects]);
+  for (const operation of ["PROVE_INSTALL_SESSION", "PROVE_CLEANUP_SESSION"]) {
+    f.issuanceMissing = true; await assert.rejects(f.run(operation));
+    f.issuanceMissing = false;
+    const proof = await f.run(operation);
+    assert.equal(proof.state, "SESSION_VERIFIED");
+    assert.equal(proof.transitionId, transitionId);
+    assert.equal(JSON.stringify([...f.objects]), before);
+    assert.deepEqual(f.writes, []);
+    await assert.rejects(f.run(operation, {}, operation === "PROVE_INSTALL_SESSION" ? "2" : "1"));
+  }
+});
 
 test("cleanup context reads the fixed authenticated archive after expiry without mutating it", async () => {
   const f = fixture();

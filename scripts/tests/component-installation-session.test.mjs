@@ -15,6 +15,7 @@ function fixture(purpose = "INSTALL") {
   const scoped = { AccessKeyId: key, SecretAccessKey: "disposable-scoped-secret", SessionToken: "disposable-scoped-session", Expiration: new Date(start + 900000) };
   const f = { binding, base, user, scoped, principal, calls: [], closed: 0, clock: start + 1000, prompts: 0, payloads: [], before: () => {} };
   f.dependencies = {
+    sleep: async milliseconds => { f.clock += milliseconds; },
     loadUser: async () => ({ ...base }), now: () => f.clock, mfa: async () => { f.prompts++; return "0".repeat(6); },
     sts: (credentials) => ({ close: () => { f.closed++; }, send: async (operation, input) => {
       f.calls.push(operation); f.before(operation);
@@ -33,7 +34,13 @@ function fixture(purpose = "INSTALL") {
       assert.equal(input.InvocationType, "RequestResponse");
       f.payloads.push(JSON.parse(Buffer.from(input.Payload).toString("utf8")));
       const payload = f.payloads.at(-1);
-      const result = payload.operation === "CLEANUP_CONTEXT" ? (f.context || binding) : { state: "test-accepted" };
+      if (payload.operation.startsWith("PROVE_") && f.proofFailures > 0) {
+        f.proofFailures--;
+        return { StatusCode: 200, ExecutedVersion: purpose === "INSTALL" ? "1" : "2", FunctionError: "Unhandled" };
+      }
+      const result = payload.operation === "CLEANUP_CONTEXT" ? (f.context || binding) : payload.operation.startsWith("PROVE_")
+        ? { state: "SESSION_VERIFIED", principal, expiresAt: scoped.Expiration.toISOString(), sourceSha: binding.sourceSha, transitionId: binding.transitionId, authorizationSha256: binding.authorizationSha256 }
+        : { state: "test-accepted" };
       return { StatusCode: 200, ExecutedVersion: purpose === "INSTALL" ? "1" : "2", Payload: Buffer.from(JSON.stringify(result)) };
     },
   };
@@ -67,7 +74,7 @@ test("normal client issues a 900-second MFA human session and exposes only fixed
     await assert.rejects(client.invoke(purpose === "INSTALL" ? "CLOSE" : "INSTALL"));
     f.clock = start + 900000;
     await assert.rejects(client.invoke(operation), /expired/);
-    assert.equal(f.payloads.length, 1);
+    assert.equal(f.payloads.length, 2);
   }
 });
 
@@ -97,9 +104,10 @@ test("cleanup discovers durable coordinates without GitHub artifacts or local au
   const client = await establishComponentCleanupSession(f.binding.transitionId, f.dependencies);
   assert.deepEqual(f.payloads, [{ operation: "CLEANUP_CONTEXT" }]);
   await client.invoke("CLOSE");
-  assert.equal(f.payloads[1].authorizationSha256, f.binding.authorizationSha256);
-  assert.equal(f.payloads[1].transitionId, f.binding.transitionId);
-  assert(f.payloads[1].proof);
+  assert.equal(f.payloads[1].operation, "PROVE_CLEANUP_SESSION");
+  assert.equal(f.payloads[2].authorizationSha256, f.binding.authorizationSha256);
+  assert.equal(f.payloads[2].transitionId, f.binding.transitionId);
+  assert(f.payloads[2].proof);
   await assert.rejects(client.invoke("INSTALL"));
 });
 
@@ -110,3 +118,18 @@ for (const change of [{ purpose: "INSTALL" }, { transitionId: "12345678-1234-423
     assert.deepEqual(f.payloads, [{ operation: "CLEANUP_CONTEXT" }]);
   });
 }
+
+test("CloudTrail propagation reuses one session and retries only read-only proof", async () => {
+  const f = fixture(); f.proofFailures = 3;
+  const client = await f.open(); await client.invoke("INSTALL");
+  assert.equal(f.calls.filter(value => value === "AssumeRole").length, 1);
+  assert.deepEqual(f.payloads.map(value => value.operation), [...Array(4).fill("PROVE_INSTALL_SESSION"), "INSTALL"]);
+});
+
+test("unavailable issuance proof stops at the deadline without any installation attempt", async () => {
+  const f = fixture(); f.proofFailures = 100;
+  const client = await f.open();
+  await assert.rejects(client.invoke("INSTALL"), /proof unavailable/);
+  assert(f.payloads.length <= 60 && f.payloads.every(value => value.operation === "PROVE_INSTALL_SESSION"));
+  assert.equal(f.calls.filter(value => value === "AssumeRole").length, 1);
+});

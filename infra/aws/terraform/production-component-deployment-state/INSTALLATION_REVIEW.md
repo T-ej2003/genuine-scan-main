@@ -2,6 +2,18 @@
 
 ## Runtime readback correction
 
+### Issuance propagation integration
+
+Normal installation and cleanup now poll fixed read-only session-proof operations
+before their single mutation-capable invocation. The same in-memory 900-second
+session is retained while CloudTrail issuance becomes visible. Proof probes still
+authenticate the fixed broker, durable authorization, signed STS identity and MFA
+issuance; they cannot claim ownership or write IAM/S3. Polling lasts at most five
+minutes and reserves two minutes before credential expiry. Missing/invalid proof
+at that boundary stops without invoking INSTALL/CLOSE. No automatic mutation
+retry or new session issuance occurs inside the loop. The 96 directly affected
+broker/archive/session/configuration tests pass offline.
+
 The recovered runtime fixture incorrectly returned a runtime ARN from
 `GetRuntimeManagementConfig` in `FunctionUpdate` mode. The
 [AWS API contract](https://docs.aws.amazon.com/lambda/latest/api/API_GetRuntimeManagementConfig.html)

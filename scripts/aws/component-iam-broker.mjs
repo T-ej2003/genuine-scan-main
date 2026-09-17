@@ -244,9 +244,16 @@ export async function executeFixedBroker(event, context, { manifest, iam, s3, la
   assert.deepEqual(Object.keys(event).sort(), ["authorizationSha256", "operation", "proof", "transitionId"]);
   const { proof, ...request } = event;
   const authorization = await archive.authenticate(request, context);
-  const cleanup = event.operation === "CLOSE";
+  const cleanup = ["CLOSE", "PROVE_CLEANUP_SESSION"].includes(event.operation);
   const session = await authenticateComponentSession(proof, { sourceSha: manifest.sourceSha, transitionId: request.transitionId, authorizationSha256: request.authorizationSha256, purpose: cleanup ? "CLEANUP" : "INSTALL" }, { sts, issuanceEvents, now: now() });
   if (!cleanup) assert(Date.parse(session.issuanceEventTime) >= Date.parse(authorization.authorization.approvalObservedAt) - 999, "Session predates explicit approval");
+  // CloudTrail issuance is eventually visible. This exact read-only operation
+  // lets the same in-memory STS session wait for proof without retrying a write,
+  // reserving controller ownership or issuing another MFA session each attempt.
+  if (["PROVE_INSTALL_SESSION", "PROVE_CLEANUP_SESSION"].includes(event.operation)) return {
+    state: "SESSION_VERIFIED", principal: session.principal, expiresAt: session.expiresAt,
+    sourceSha: manifest.sourceSha, transitionId: request.transitionId, authorizationSha256: request.authorizationSha256,
+  };
   // Classify live IAM before claiming/replacing controller ownership. The write
   // engine repeats readback afterward and authenticates the guard at every write.
   if (!cleanup) await inspect(authorization);

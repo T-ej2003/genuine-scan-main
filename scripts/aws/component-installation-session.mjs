@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
+import { setTimeout as delay } from "node:timers/promises";
 import { promptProductionMfaCode } from "../security/production-interactive-mfa-provider.mjs";
 import { createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { identityBootstrap, componentBrokerArn } from "./component-installation-identity-contract.mjs";
@@ -36,7 +37,7 @@ export async function establishComponentCleanupSession(transitionId, dependencie
   return establish({ transitionId, purpose: "CLEANUP" }, dependencies, true);
 }
 
-async function establish(binding, { loadUser = loadOperator, sts = stsTransport, mfa = () => promptProductionMfaCode({ prompt: "Component installation operator MFA code: " }), invoke, now = Date.now } = {}, discover = false) {
+async function establish(binding, { loadUser = loadOperator, sts = stsTransport, mfa = () => promptProductionMfaCode({ prompt: "Component installation operator MFA code: " }), invoke, now = Date.now, sleep = delay } = {}, discover = false) {
   const fixedBinding = structuredClone(binding);
   if (!discover) sessionProofBinding(fixedBinding);
   assert(Object.hasOwn(roles, fixedBinding.purpose));
@@ -97,14 +98,31 @@ async function establish(binding, { loadUser = loadOperator, sts = stsTransport,
       assert.equal(archived.transitionId, fixedBinding.transitionId, "Different cleanup transition");
       Object.assign(fixedBinding, archived);
     }
+    const signedPayload = async operation => {
+      const signed = await signer.presign({ protocol: "https:", hostname: "sts.eu-west-2.amazonaws.com", method: "GET", path: "/", headers: { host: "sts.eu-west-2.amazonaws.com", "x-mscqr-component-binding": sessionProofBinding(fixedBinding) }, query: { Action: "GetCallerIdentity", Version: "2011-06-15" } }, { expiresIn: 60, signingDate: new Date(now()) });
+      return { operation, transitionId: fixedBinding.transitionId, authorizationSha256: fixedBinding.authorizationSha256, proof: { query: signed.query } };
+    };
     return Object.freeze({
       principal, expiresAt: new Date(expires).toISOString(),
       async invoke(operation) {
         assert((fixedBinding.purpose === "INSTALL" ? ["INSTALL", "INSPECT"] : ["CLOSE"]).includes(operation), "Unsupported session operation");
         assert(now() < expires, "AWS session expired");
-        const signed = await signer.presign({ protocol: "https:", hostname: "sts.eu-west-2.amazonaws.com", method: "GET", path: "/", headers: { host: "sts.eu-west-2.amazonaws.com", "x-mscqr-component-binding": sessionProofBinding(fixedBinding) }, query: { Action: "GetCallerIdentity", Version: "2011-06-15" } }, { expiresIn: 60, signingDate: new Date(now()) });
-        const payload = { operation, transitionId: fixedBinding.transitionId, authorizationSha256: fixedBinding.authorizationSha256, proof: { query: signed.query } };
-        return send(payload);
+        const deadline = Math.min(now() + 300000, expires - 120000);
+        let verified = false;
+        for (let attempt = 0; attempt < 60 && now() < deadline; attempt++) {
+          try {
+            const proof = await send(await signedPayload(fixedBinding.purpose === "INSTALL" ? "PROVE_INSTALL_SESSION" : "PROVE_CLEANUP_SESSION"));
+            assert.deepEqual(proof, { state: "SESSION_VERIFIED", principal, expiresAt: new Date(expires).toISOString(), sourceSha: fixedBinding.sourceSha,
+              transitionId: fixedBinding.transitionId, authorizationSha256: fixedBinding.authorizationSha256 });
+            verified = true; break;
+          } catch {
+            // Only read-only proof probes are retried, never INSTALL or CLOSE.
+            if (now() + 5000 >= deadline) break;
+            await sleep(5000);
+          }
+        }
+        assert(verified, "AWS issuance proof unavailable before the bounded deadline");
+        return send(await signedPayload(operation));
       },
     });
   } finally {
