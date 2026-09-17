@@ -65,3 +65,8 @@ No Codex session, hand-built evidence JSON, manual digest copying, temporary
 DBA task, Stage-B recovery authorization, or physical printer acceptance is
 part of this routine path. Physical printer acceptance remains a separate
 post-release G06 acceptance test.
+## Durable baseline and recovery journal
+
+`production-deploy.yml` deploys only the complete range from the latest completed successful normal-release workflow SHA to the protected-main candidate. Failed, cancelled, partial, and superseded runs never advance that GitHub-authenticated baseline. Classification is positive and fail-closed: sensitive, recovery, and unknown production ownership leave the normal lane.
+
+Backend mutation journals use the existing app-only hash-chained format and are uploaded with `always()` for both success and failure recovery.
