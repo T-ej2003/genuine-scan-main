@@ -90,14 +90,16 @@ export async function executeNormalFrontendActivation({ sourceSha, imageRef, ada
   } catch (error) {
     let rollback = { attempted: false, verified: false };
     if (updateAttempted) {
-      const current = await adapters.readService();
-      if (current.taskDefinition === candidateArn) {
-        rollback = { attempted: true, verified: false };
-        await adapters.updateService(buildFrontendRollback({ predecessor, failedCandidateTaskDefinitionArn: candidateArn }));
-        await adapters.waitStable({ expectedTaskDefinitionArn: predecessor.taskDefinitionArn });
-        const restored = await adapters.readService();
-        assert.equal(restored.taskDefinition, predecessor.taskDefinitionArn); assert.equal(restored.desiredCount, predecessor.desiredCount);
-        rollback.verified = true;
+      try {
+        const current = await adapters.readService();
+        if (current.taskDefinition === candidateArn) {
+          rollback = { attempted: true, verified: false };
+          await rollbackFrontendCandidate({ predecessor, candidateTaskDefinitionArn: candidateArn, ...adapters });
+          rollback.verified = true;
+        }
+      } catch (rollbackError) {
+        rollback.error = rollbackError.message.slice(0, 512);
+        throw Object.assign(new Error(`Frontend rollback failed after: ${error.message}`, { cause: rollbackError }), { frontendRollback: rollback });
       }
     }
     throw Object.assign(error, { frontendRollback: rollback });

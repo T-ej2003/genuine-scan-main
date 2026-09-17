@@ -171,6 +171,24 @@ test("normal frontend activation uses the exact active predecessor and rolls it 
   assert.equal(active, taskArn);
 });
 
+test("normal frontend rollback failure remains journal-visible and fail-closed", async () => {
+  let active = taskArn;
+  const candidateArn = taskArn.replace(":20", ":21");
+  const predecessor = captureFrontendPredecessor(service, task);
+  const candidate = buildNormalFrontendCandidate({ predecessor, imageRef: frontendImage });
+  const adapters = {
+    readService: async () => ({ ...service, taskDefinition: active, deployments: [{ ...service.deployments[0], taskDefinition: active }] }),
+    describeTaskDefinition: async (arn) => arn === taskArn ? task : { ...candidate, taskDefinitionArn: candidateArn, revision: 21, status: "ACTIVE" },
+    registerTaskDefinition: async () => ({ taskDefinitionArn: candidateArn }),
+    updateService: async ({ taskDefinition }) => { if (taskDefinition === taskArn) throw new Error("rollback update denied"); active = taskDefinition; },
+    waitStable: async ({ expectedTaskDefinitionArn }) => assert.equal(active, expectedTaskDefinitionArn),
+    verifyHealth: async () => ({ ready: false, loginStatus: 500 }),
+  };
+  await assert.rejects(() => executeNormalFrontendActivation({ sourceSha, imageRef: frontendImage, adapters }), (error) => {
+    assert.match(error.message, /rollback failed/); assert.deepEqual(error.frontendRollback, { attempted: true, verified: false, error: "rollback update denied" }); return true;
+  });
+});
+
 test("normal release orchestrator covers no-op and failure rollback without caller-selected targets", async () => {
   const calls = [];
   const plan = buildNormalReleasePlan({ sourceSha, changedFiles: ["backend/src/services/batchService.ts", "src/App.tsx"], images: { backend: backendImage, frontend: frontendImage } });
