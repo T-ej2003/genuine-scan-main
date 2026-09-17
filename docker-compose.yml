@@ -170,6 +170,7 @@ networks:
     ipam:
       config:
         - subnet: 172.30.10.0/28
+          gateway: 172.30.10.1
           ip_range: 172.30.10.8/29
 
 volumes:

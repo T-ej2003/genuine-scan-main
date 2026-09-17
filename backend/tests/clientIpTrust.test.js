@@ -43,7 +43,7 @@ const config = {
 };
 
 assert.equal(resolveClientIp(request("10.0.0.10", "203.0.113.20, 198.51.100.10"), config), "203.0.113.20");
-assert.equal(resolveClientIp(request("10.0.0.10", "spoofed, 203.0.113.20, 198.51.100.10"), config), "203.0.113.20");
+assert.throws(() => resolveClientIp(request("10.0.0.10", "spoofed, 203.0.113.20, 198.51.100.10"), config), /PROXY_CHAIN_DENIED/);
 assert.equal(resolveClientIp(request("2001:db8:10::10", "2001:db8:1::20, 2001:db8:cf::10"), config), "2001:db8:1::20");
 assert.equal(resolveClientIp(request("::ffff:127.0.0.1", "spoofed"), { mode: "direct" }), "127.0.0.1");
 assert.throws(() => resolveClientIp(request("10.0.0.10", "203.0.113.20"), config), /PROXY_CHAIN_DENIED/);
@@ -66,7 +66,7 @@ const nginxConfig = {
   trustedAlb: config.trustedAlb,
   trustedCloudFront: config.trustedCloudFront,
 };
-assert.equal(resolveClientIp(request("172.30.0.2", "spoofed, 203.0.113.20, 198.51.100.10, 10.0.0.10"), nginxConfig), "203.0.113.20");
+assert.throws(() => resolveClientIp(request("172.30.0.2", "spoofed, 203.0.113.20, 198.51.100.10, 10.0.0.10"), nginxConfig), /PROXY_CHAIN_DENIED/);
 assert.equal(resolveClientIp(request("2001:db8:30::2", "2001:db8:1::20, 2001:db8:cf::10, 2001:db8:10::10"), nginxConfig), "2001:db8:1::20");
 assert.throws(() => resolveClientIp(request("172.30.0.2", "203.0.113.20, 198.51.100.10"), nginxConfig), /PROXY_CHAIN_DENIED/);
 assert.throws(() => resolveClientIp(request("172.30.0.3", "203.0.113.20, 198.51.100.10, 10.0.0.10"), nginxConfig), /PROXY_CHAIN_DENIED/);

@@ -231,6 +231,7 @@ const { validateAsgNetworkContract } = await import(pathToFileURL(path.resolve(p
 try {
   validateAsgNetworkContract({
     subnet: rootEnv.get("ASG_APP_NETWORK_SUBNET"),
+    gateway: rootEnv.get("ASG_APP_NETWORK_GATEWAY"),
     dynamicRange: rootEnv.get("ASG_APP_NETWORK_IP_RANGE"),
     frontendIp: rootEnv.get("ASG_FRONTEND_PROXY_IP"),
     trustedCidr: backendEnv.get("CLIENT_IP_TRUSTED_NGINX_CIDRS"),

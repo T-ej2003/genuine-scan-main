@@ -64,7 +64,7 @@ if (!/wget -q -O \/dev\/null http:\/\/127\.0\.0\.1\/healthz/.test(compose)) {
 if (!/\$\{FRONTEND_PORT:-80\}:80/.test(compose)) {
   fail(`${composePath} frontend must publish host port 80 for ALB /healthz checks.`);
 }
-if (!/ipv4_address: \$\{ASG_FRONTEND_PROXY_IP:\?Set a reviewed ASG frontend proxy address\}/.test(compose) || !/subnet: \$\{ASG_APP_NETWORK_SUBNET:\?Set a reviewed ASG application-network subnet\}/.test(compose) || !/ip_range: \$\{ASG_APP_NETWORK_IP_RANGE:\?Set a reviewed ASG dynamic allocation range\}/.test(compose)) {
+if (!/ipv4_address: \$\{ASG_FRONTEND_PROXY_IP:\?Set a reviewed ASG frontend proxy address\}/.test(compose) || !/subnet: \$\{ASG_APP_NETWORK_SUBNET:\?Set a reviewed ASG application-network subnet\}/.test(compose) || !/gateway: \$\{ASG_APP_NETWORK_GATEWAY:\?Set a reviewed ASG application-network gateway\}/.test(compose) || !/ip_range: \$\{ASG_APP_NETWORK_IP_RANGE:\?Set a reviewed ASG dynamic allocation range\}/.test(compose)) {
   fail(`${composePath} must pin the frontend proxy address inside the reviewed ASG application network.`);
 }
 
@@ -90,6 +90,7 @@ const dummyValueFor = (key) => {
   if (key === "OBJECT_STORAGE_BUCKET") return "mscqr-dummy-artifacts";
   if (key === "BACKEND_PORT") return "4000";
   if (key === "ASG_APP_NETWORK_SUBNET") return "172.30.0.0/29";
+  if (key === "ASG_APP_NETWORK_GATEWAY") return "172.30.0.1";
   if (key === "ASG_APP_NETWORK_IP_RANGE") return "172.30.0.4/30";
   if (key === "ASG_FRONTEND_PROXY_IP") return "172.30.0.2";
   if (key === "CLIENT_IP_TRUSTED_NGINX_CIDRS") return "172.30.0.2/32";
@@ -141,6 +142,7 @@ if (runDockerComposeConfig) {
 try {
   validateAsgNetworkContract({
     subnet: dummyValueFor("ASG_APP_NETWORK_SUBNET"),
+    gateway: dummyValueFor("ASG_APP_NETWORK_GATEWAY"),
     dynamicRange: dummyValueFor("ASG_APP_NETWORK_IP_RANGE"),
     frontendIp: dummyValueFor("ASG_FRONTEND_PROXY_IP"),
     trustedCidr: dummyValueFor("CLIENT_IP_TRUSTED_NGINX_CIDRS"),

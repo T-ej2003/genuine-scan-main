@@ -55,9 +55,11 @@ export const resolveClientIp = (req: Pick<Request, "get" | "socket">, config = g
     if (!config.trustedNginx(socketIp) || hops.length !== 1 || !isIp(hops[0])) throw new Error("CLIENT_IP_PROXY_CHAIN_DENIED");
     return hops[0];
   }
-  const albIp = config.mode === "cloudfront-alb-nginx" ? hops.at(-1) || "" : socketIp;
-  const cloudFrontIp = config.mode === "cloudfront-alb-nginx" ? hops.at(-2) || "" : hops.at(-1) || "";
-  const viewerIp = config.mode === "cloudfront-alb-nginx" ? hops.at(-3) || "" : hops.at(-2) || "";
+  const expectedHops = config.mode === "cloudfront-alb-nginx" ? 3 : 2;
+  if (hops.length !== expectedHops) throw new Error("CLIENT_IP_PROXY_CHAIN_DENIED");
+  const albIp = config.mode === "cloudfront-alb-nginx" ? hops[2] : socketIp;
+  const cloudFrontIp = hops[1];
+  const viewerIp = hops[0];
   const trustedSocket = config.mode === "cloudfront-alb-nginx" ? config.trustedNginx(socketIp) : config.trustedAlb(socketIp);
   if (!trustedSocket || !isIp(albIp) || !config.trustedAlb(albIp) || !isIp(cloudFrontIp) || !config.trustedCloudFront(cloudFrontIp) || !isIp(viewerIp)) {
     throw new Error("CLIENT_IP_PROXY_CHAIN_DENIED");

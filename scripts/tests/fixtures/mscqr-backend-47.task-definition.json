@@ -32,7 +32,7 @@
           { "name": "CUSTOMER_WEBAUTHN_CHALLENGE_TTL_MINUTES", "value": "fixture-value" },
           { "name": "SCAN_RATE_LIMIT_PER_MIN", "value": "fixture-value" },
           { "name": "PORT", "value": "fixture-value" },
-          { "name": "AUTH_RISK_STEP_UP_THRESHOLD", "value": "fixture-value" },
+          { "name": "AUTH_RISK_STEPUP_THRESHOLD", "value": "fixture-value" },
           { "name": "PRINT_JOB_MAX_RUN_LABELS", "value": "fixture-value" },
           { "name": "SMTP_FROM", "value": "fixture-value" },
           { "name": "SMTP_HOST", "value": "fixture-value" },

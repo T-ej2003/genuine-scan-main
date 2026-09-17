@@ -63,6 +63,7 @@ const asgEvidenceCollector = requireFile("scripts/dr/collect-asg-health-evidence
 try {
   validateAsgNetworkContract({
     subnet: "172.30.0.0/29",
+    gateway: "172.30.0.1",
     dynamicRange: "172.30.0.4/30",
     frontendIp: "172.30.0.2",
     trustedCidr: "172.30.0.2/32",
@@ -247,6 +248,7 @@ requireMatch("docker-compose", compose, /CLIENT_IP_TRUST_MODE:\s+nginx/, "root p
 requireMatch("docker-compose", compose, /CLIENT_IP_TRUSTED_NGINX_CIDRS:\s+172\.30\.10\.2\/32/, "root production Compose must trust only its pinned frontend nginx address.");
 requireMatch("docker-compose", compose, /frontend:\n[\s\S]*?ipv4_address:\s+172\.30\.10\.2/, "root production Compose must pin frontend nginx to the trusted address.");
 requireMatch("docker-compose", compose, /subnet:\s+172\.30\.10\.0\/28/, "root production Compose must use the bounded deterministic proxy network.");
+requireMatch("docker-compose", compose, /gateway:\s+172\.30\.10\.1/, "root production Compose must bind the Docker bridge gateway explicitly.");
 requireMatch("docker-compose", compose, /ip_range:\s+172\.30\.10\.8\/29/, "root production Compose must reserve the pinned frontend address outside dynamic allocation.");
 if (/CLIENT_IP_TRUSTED_[A-Z_]+:\s+(?:0\.0\.0\.0\/0|::\/0)/.test(compose)) failures.push("docker-compose.yml must not trust an all-address proxy CIDR.");
 requireMatch("docker-compose", compose, /entrypoint:\s+\["\/usr\/local\/bin\/nginx-root-entrypoint\.sh"\]/, "root frontend must select the root-only nginx forwarding contract.");
@@ -261,6 +263,7 @@ if (/nginx-root-entrypoint/.test(asgWebCompose)) failures.push("ASG Compose must
 requireMatch("asg web compose", asgWebCompose, /\bbackend:/, "ASG web mode must define backend.");
 requireMatch("asg web compose", asgWebCompose, /\bfrontend:/, "ASG web mode must define frontend.");
 requireMatch("asg web compose", asgWebCompose, /ip_range: \$\{ASG_APP_NETWORK_IP_RANGE:\?Set a reviewed ASG dynamic allocation range\}/, "ASG web mode must exclude the pinned frontend proxy from Docker dynamic allocation.");
+requireMatch("asg web compose", asgWebCompose, /gateway: \$\{ASG_APP_NETWORK_GATEWAY:\?Set a reviewed ASG application-network gateway\}/, "ASG web mode must bind the Docker bridge gateway from the reviewed network contract.");
 requireMatch("asg web compose", asgWebCompose, /RUN_BACKGROUND_WORKERS:\s+"false"/, "ASG web backend must force workers off.");
 requireMatch("asg web compose", asgWebCompose, /REDIS_URL:\s+\$\{REDIS_URL:\?Set shared regional REDIS_URL/, "ASG web mode must require shared regional Redis.");
 requireMatch("asg web compose", asgWebCompose, /REDIS_TLS:\s+\$\{REDIS_TLS:-true\}/, "ASG web mode must default Redis TLS on.");
@@ -594,7 +597,7 @@ if (asgSsmManifest) {
       ...Object.keys(section.forced || {}),
     ]);
   const rootRequired = new Set(asgSsmManifest.rootEnv?.requiredFromSsm || []);
-  for (const key of ["AWS_REGION", "OBJECT_STORAGE_BUCKET", "OBJECT_STORAGE_REGION", "REDIS_URL", "ASG_APP_NETWORK_SUBNET", "ASG_APP_NETWORK_IP_RANGE", "ASG_FRONTEND_PROXY_IP"]) {
+  for (const key of ["AWS_REGION", "OBJECT_STORAGE_BUCKET", "OBJECT_STORAGE_REGION", "REDIS_URL", "ASG_APP_NETWORK_SUBNET", "ASG_APP_NETWORK_GATEWAY", "ASG_APP_NETWORK_IP_RANGE", "ASG_FRONTEND_PROXY_IP"]) {
     if (!rootRequired.has(key)) failures.push(`ASG SSM manifest rootEnv.requiredFromSsm is missing ${key}.`);
   }
   const backendRequired = new Set(asgSsmManifest.backendEnv?.requiredFromSsm || []);
