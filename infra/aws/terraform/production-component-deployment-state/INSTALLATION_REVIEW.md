@@ -26,6 +26,22 @@ Terraform execution integration remain unfinished; this is not an activation gat
 
 ## Fixed broker bootstrap transaction checkpoint
 
+### Identity transaction composition checkpoint
+
+The internal first-bootstrap transaction now composes exact creation/readback of
+the five execution identities with the fixed broker publication transaction.
+Its fixed S3 journal is conditionally reserved before writes, and closure is
+conditional on the owned ETag plus full IAM/broker readback. Accepted-but-lost IAM
+and S3 responses are classified by live readback, not replay. Concurrent starts
+have one reservation winner. The production-shaped offline adapters exercise ten
+IAM writes, eight Lambda writes and reservation/closure; 58 focused tests pass.
+
+This checkpoint deliberately does not expose an administrative CLI. A reserved
+incomplete bootstrap has no automatic takeover; the administrative issuance and
+authenticated restart/recovery boundary remain unfinished. Do not confuse the
+normal broker's implemented STS-expiry recovery with this exceptional initial
+bootstrap. No lease age, local marker or manual S3 deletion can unlock it.
+
 The internal bootstrap transaction now creates the source-derived ZIP function,
 sets reserved concurrency and FunctionUpdate runtime management, and publishes
 the three fixed semantic versions. Publication binds both AWS RevisionId and
