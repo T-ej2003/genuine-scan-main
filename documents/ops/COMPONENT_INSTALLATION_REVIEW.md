@@ -1,4 +1,4 @@
-# Component installation boundary review — source only
+# Component installation boundary review log — source only
 
 ## Terraform isolation boundary checkpoint
 

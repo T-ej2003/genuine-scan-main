@@ -3,7 +3,7 @@
 This is source-only work in progress. Do not activate infrastructure from an
 unmerged checkpoint. First-bootstrap execution and isolated Terraform execution
 must pass their final gates before this installation procedure is operational.
-Historical development findings live in `INSTALLATION_REVIEW.md`; they are not
+Historical development findings live in [the review log](../../../../documents/ops/COMPONENT_INSTALLATION_REVIEW.md); they are not
 alternative supported commands. Recovery provenance is in `RECOVERY.md`.
 
 ## Ownership

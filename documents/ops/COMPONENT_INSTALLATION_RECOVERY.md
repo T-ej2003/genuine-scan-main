@@ -1,4 +1,4 @@
-# Component installation implementation recovery
+# Component installation implementation recovery record
 
 ## Recovery checkpoint — 2026-09-17
 
