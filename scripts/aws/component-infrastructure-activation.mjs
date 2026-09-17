@@ -7,7 +7,7 @@ import os from "node:os";
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { createProductionAwsCredentialEnvironment, createProductionGithubCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import { createProductionAwsCredentialEnvironment, createProductionGithubCredentialEnvironment, createAssumedRoleSessionEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const stack = "infra/aws/terraform/production-component-deployment-state";
@@ -16,6 +16,34 @@ const repository = "T-ej2003/genuine-scan-main";
 const workflow = "authorize-component-infrastructure-activation.yml";
 export const hash = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 const json = (file) => JSON.parse(fs.readFileSync(file));
+
+// Only an AWS-authenticated issuance event proves how this exact session arose.
+// Session names, local profile configuration and operator-supplied receipts do not.
+export function authenticateOperatorSession({ caller, credentials, events, now = Date.now() }) {
+  assert.equal(caller.Account, contract.account);
+  assert.match(caller.Arn, /^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\/[^/]+$/);
+  assert(typeof caller.UserId === "string" && caller.UserId.length > 0, "Session principal ID required");
+  assert(typeof credentials.AccessKeyId === "string" && credentials.AccessKeyId.length > 0, "Session key identity required");
+  assert(Date.parse(credentials.Expiration) > now + 10 * 60 * 1000, "Operator session needs at least ten minutes remaining");
+  const matches = events.filter((event) => event.responseElements?.credentials?.accessKeyId === credentials.AccessKeyId);
+  assert.equal(matches.length, 1, "Unique AWS session issuance evidence required");
+  const event = matches[0];
+  assert.equal(event.eventSource, "sts.amazonaws.com");
+  assert.equal(event.eventName, "AssumeRole");
+  assert.equal(event.recipientAccountId, contract.account);
+  assert.equal(event.errorCode, undefined);
+  assert.equal(event.userIdentity?.type, "IAMUser");
+  assert.equal(event.userIdentity?.arn, `arn:aws:iam::${contract.account}:user/mscqr-production-bootstrap-operator`);
+  assert.equal(event.userIdentity?.accountId, contract.account);
+  assert.equal(event.userIdentity?.sessionContext?.attributes?.mfaAuthenticated, "true");
+  assert.equal(event.requestParameters?.roleArn, `arn:aws:iam::${contract.account}:role/mscqr-production-release-deployer`);
+  assert.equal(event.responseElements?.assumedRoleUser?.arn, caller.Arn);
+  assert.equal(event.responseElements?.assumedRoleUser?.assumedRoleId, caller.UserId);
+  assert.equal(Date.parse(event.responseElements.credentials.expiration), Date.parse(credentials.Expiration));
+  assert(now - Date.parse(event.eventTime) >= 0 && now - Date.parse(event.eventTime) < 60 * 60 * 1000, "Operator issuance evidence expired");
+  assert.match(event.eventID || "", /^[a-f0-9-]{36}$/);
+  return { eventId: event.eventID, operatorArn: event.userIdentity.arn, sessionKeySha256: hash(credentials.AccessKeyId) };
+}
 
 export function assertBackend(backend, workspace) {
   assert.equal(backend.type, "s3");
@@ -99,9 +127,10 @@ export function run(argv = process.argv.slice(2), deps = {}) {
   assert.equal(fs.statSync(work).mode & 0o077, 0, "Private plan directory required");
   // Canonical safelists isolate AWS/Terraform from redirects and GitHub tokens.
   const inherited = deps.env || process.env;
-  const env = { ...createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer", region: contract.region, env: inherited }), TF_WORKSPACE: "default", TF_DATA_DIR: path.join(work, "terraform-data") };
+  let env = { ...createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer", region: contract.region, env: inherited }), AWS_IGNORE_CONFIGURED_ENDPOINT_URLS: "true", TF_WORKSPACE: "default", TF_DATA_DIR: path.join(work, "terraform-data") };
+  const localEnvironment = env;
   const githubEnvironment = createProductionGithubCredentialEnvironment({ env: inherited });
-  const exec = (name, args) => (deps.execute || execFileSync)(name, args, { cwd: root, env: name === "gh" ? githubEnvironment : env, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 }).trim();
+  const exec = (name, args) => (deps.execute || execFileSync)(name, args, { cwd: root, env: name === "gh" ? githubEnvironment : name === "git" ? localEnvironment : env, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 }).trim();
   const aws = (...args) => JSON.parse(exec("aws", [...args, "--region", contract.region, "--no-cli-pager", "--output", "json"]) || "{}");
   const gh = (endpoint) => JSON.parse(exec("gh", ["api", `repos/${repository}/${endpoint}`]));
   const tf = (...args) => exec("terraform", [`-chdir=${stack}`, ...args]);
@@ -118,9 +147,42 @@ export function run(argv = process.argv.slice(2), deps = {}) {
   for (const file of fs.readdirSync(path.join(root, stack))) {
     if (/\.(tf|tf\.json|tfvars|tfvars\.json)$/.test(file)) assert(tracked.has(file), `Untracked Terraform input: ${file}`);
   }
+  // Resolve once, privately, then pin the verified session for all AWS/Terraform
+  // children so a profile refresh cannot substitute credentials after the check.
+  let credentials;
+  try { credentials = aws("configure", "export-credentials", "--format", "process"); }
+  catch { throw new Error("Unable to resolve the pinned operator session"); }
+  env = { ...createAssumedRoleSessionEnvironment({ credentials, env: inherited, region: contract.region }), AWS_IGNORE_CONFIGURED_ENDPOINT_URLS: "true", TF_WORKSPACE: "default", TF_DATA_DIR: path.join(work, "terraform-data") };
   const caller = aws("sts", "get-caller-identity");
-  assert.equal(caller.Account, contract.account);
-  assert.match(caller.Arn, /^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\/[^/]+$/);
+  // CloudTrail is an existing administrator read boundary, never an added
+  // release-role permission. Administrator credentials never reach Terraform.
+  const auditEnv = { ...createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "default", env: inherited, region: contract.region }), AWS_IGNORE_CONFIGURED_ENDPOINT_URLS: "true" };
+  const audit = (args, region = contract.region) => {
+    try { return JSON.parse((deps.execute || execFileSync)("aws", [...args, "--region", region, "--no-cli-pager", "--output", "json"], { cwd: root, env: auditEnv, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 })); }
+    catch { throw new Error("Administrator session provenance read failed; no installation permitted"); }
+  };
+  const administrator = audit(["sts", "get-caller-identity"]);
+  assert.equal(administrator.Account, contract.account);
+  assert.equal(administrator.Arn, `arn:aws:iam::${contract.account}:root`);
+  const events = new Map();
+  const now = Date.now();
+  // Regional STS and the existing global STS operator path have distinct logs.
+  for (const region of [contract.region, "us-east-1"]) {
+    let token;
+    for (let page = 0; page < 20; page++) {
+      const response = audit(["cloudtrail", "lookup-events", "--lookup-attributes", "AttributeKey=EventName,AttributeValue=AssumeRole", "--start-time", new Date(now - 60 * 60 * 1000).toISOString(), "--end-time", new Date(now).toISOString(), "--no-paginate", ...(token ? ["--next-token", token] : [])], region);
+      for (const entry of response.Events || []) {
+        let event;
+        try { event = JSON.parse(entry.CloudTrailEvent); }
+        catch { throw new Error("Malformed AWS issuance event; no installation permitted"); }
+        events.set(event.eventID, event);
+      }
+      token = response.NextToken;
+      if (!token) break;
+    }
+    assert(!token, "Operator provenance pagination exceeded bound");
+  }
+  const operatorProvenance = authenticateOperatorSession({ caller, credentials, events: [...events.values()], now });
   const absent = () => {
     const listing = aws("s3api", "list-objects-v2", "--bucket", contract.bucket, "--prefix", contract.key);
     assert(!(listing.Contents || []).some(({ Key }) => Key === contract.key || Key === `${contract.key}.tflock`), "State/lock already exists: stop and reconcile");
@@ -160,7 +222,7 @@ export function run(argv = process.argv.slice(2), deps = {}) {
     assertInitialPlan(JSON.parse(tf("show", "-json", planPath)));
     absent();
     assert.equal(source(), sourceSha);
-    const preparation = { sourceSha, backend: contract, stateIdentity: "ABSENT", operatorArn: caller.Arn, planSha256: hash(fs.readFileSync(planPath)) };
+    const preparation = { sourceSha, backend: contract, stateIdentity: "ABSENT", operatorArn: caller.Arn, operatorProvenance, planSha256: hash(fs.readFileSync(planPath)) };
     fs.writeFileSync(preparationPath, `${JSON.stringify(preparation, null, 2)}\n`, { flag: "wx", mode: 0o600 });
     process.stdout.write(`${JSON.stringify({ ...preparation, preparationSha256: hash(fs.readFileSync(preparationPath)) }, null, 2)}\n`);
     return;
@@ -188,6 +250,7 @@ export function run(argv = process.argv.slice(2), deps = {}) {
   const planSha256 = hash(fs.readFileSync(planPath));
   assertAuthorization(authorization, preparation, { sourceSha, planSha256, preparationSha256: hash(fs.readFileSync(preparationPath)) });
   assert.equal(preparation.operatorArn, caller.Arn, "Operator session changed: prepare and authorize again");
+  assert.deepEqual(preparation.operatorProvenance, operatorProvenance, "Operator issuance changed: prepare and authorize again");
   assertInitialPlan(JSON.parse(tf("show", "-json", planPath)));
   absent();
   liveAbsent();

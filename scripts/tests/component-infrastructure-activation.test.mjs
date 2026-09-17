@@ -3,11 +3,39 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { assertBackend, assertInitialPlan, assertAuthorization, assertEnvironment, contract, stack, run, hash } from "../aws/component-infrastructure-activation.mjs";
+import { assertBackend, assertInitialPlan, assertAuthorization, assertEnvironment, authenticateOperatorSession, contract, stack, run, hash } from "../aws/component-infrastructure-activation.mjs";
 import { productionAwsCredentialSourceContract } from "../aws/production-credential-source-contract.mjs";
 
 const backend = () => ({ type: "s3", config: { ...contract, allowed_account_ids: [contract.account] } });
 const readPolicy = (name) => fs.readFileSync(`${stack}/${name}.json`, "utf8");
+const caller = { Account: contract.account, Arn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", UserId: "role-id:test" };
+const credentials = { AccessKeyId: "fixture-session-key", SecretAccessKey: "fixture-secret", SessionToken: "fixture-token", Expiration: new Date(Date.now() + 50 * 60 * 1000).toISOString() };
+const issuance = () => ({
+  eventID: "12345678-1234-1234-1234-123456789abc", eventSource: "sts.amazonaws.com", eventName: "AssumeRole", eventTime: new Date(Date.now() - 1000).toISOString(), recipientAccountId: contract.account,
+  userIdentity: { type: "IAMUser", arn: `arn:aws:iam::${contract.account}:user/mscqr-production-bootstrap-operator`, accountId: contract.account, sessionContext: { attributes: { mfaAuthenticated: "true" } } },
+  requestParameters: { roleArn: `arn:aws:iam::${contract.account}:role/mscqr-production-release-deployer` },
+  responseElements: { assumedRoleUser: { arn: caller.Arn, assumedRoleId: caller.UserId }, credentials: { accessKeyId: credentials.AccessKeyId, expiration: credentials.Expiration } },
+});
+
+test("operator provenance accepts only exact AWS MFA-backed human issuance, not role shape or markers", () => {
+  const verify = (event = issuance(), identity = caller) => authenticateOperatorSession({ caller: identity, credentials, events: [event] });
+  assert.equal(verify().operatorArn, issuance().userIdentity.arn);
+  for (const mutate of [
+    (e) => { e.eventName = "AssumeRoleWithWebIdentity"; },
+    (e) => { e.userIdentity.type = "AssumedRole"; },
+    (e) => { e.userIdentity.sessionContext.attributes.mfaAuthenticated = "false"; },
+    (e) => { delete e.userIdentity.sessionContext; e.mfaVerified = true; },
+    (e) => { e.userIdentity.arn = "arn:aws:iam::368992683803:user/other"; },
+    (e) => { e.recipientAccountId = "000000000000"; },
+    (e) => { e.requestParameters.roleArn += "other"; },
+    (e) => { e.responseElements.credentials.accessKeyId += "other"; },
+    (e) => { e.responseElements.assumedRoleUser.assumedRoleId += "other"; },
+    (e) => { e.eventTime = new Date(Date.now() - 61 * 60 * 1000).toISOString(); },
+  ]) { const event = issuance(); mutate(event); assert.throws(() => verify(event)); }
+  assert.throws(() => verify(issuance(), { ...caller, Account: "000000000000" }));
+  assert.throws(() => verify(issuance(), { ...caller, Arn: caller.Arn.replace("release-deployer", "other") }));
+  assert.throws(() => authenticateOperatorSession({ caller, credentials, events: [] }));
+});
 const plan = () => {
   const values = {
     "aws_dynamodb_table.component_deployment_state": { name: "mscqr-production-component-deployment-state", hash_key: "stateKey", billing_mode: "PAY_PER_REQUEST", server_side_encryption: [{ enabled: true }], point_in_time_recovery: [{ enabled: true }] },
@@ -67,7 +95,7 @@ test("environment requires exact main branch and independent real reviewer witho
   assert.throws(() => assertEnvironment(config, { branch_policies: [...branches.branch_policies, { name: "*", type: "branch" }] }));
 });
 
-function installation(t, { changedSource = false, changedPlan = false, existingState = false, replay = false, approval = true, inherited = {} } = {}) {
+function installation(t, { changedSource = false, changedPlan = false, existingState = false, replay = false, approval = true, inherited = {}, provenance = () => issuance(), rejectedProvenance = false } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "component-install-test-"));
   t.after(() => fs.rmSync(dir, { recursive: true }));
   const calls = [];
@@ -78,7 +106,7 @@ function installation(t, { changedSource = false, changedPlan = false, existingS
   const branches = { branch_policies: [{ name: "main", type: "branch" }] };
   const execute = (name, args, { env }) => {
     calls.push([name, ...args]);
-    children.push({ name, env });
+    children.push({ name, args, env });
     let value;
     if (name === "git") {
       if (args[0] === "rev-parse") return sourceSha;
@@ -100,7 +128,9 @@ function installation(t, { changedSource = false, changedPlan = false, existingS
       else value = { path: ".github/workflows/authorize-component-infrastructure-activation.yml", head_sha: sourceSha, head_branch: "main", head_repository: { full_name: "T-ej2003/genuine-scan-main" }, event: "workflow_dispatch", conclusion: "success", run_attempt: 1, created_at: new Date().toISOString(), actor: { id: 1 } };
     } else if (name === "aws") {
       if (["iam", "dynamodb"].includes(args[0])) throw Object.assign(new Error("Missing"), { stderr: `(${args[0] === "iam" ? "NoSuchEntity" : "ResourceNotFoundException"})` });
-      if (args[0] === "sts") value = { Account: contract.account, Arn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test" };
+      if (args[0] === "configure") value = credentials;
+      else if (args[0] === "sts") value = env.AWS_PROFILE === "default" ? { Account: contract.account, Arn: `arn:aws:iam::${contract.account}:root` } : caller;
+      else if (args[0] === "cloudtrail") value = { Events: provenance(applying) ? [{ CloudTrailEvent: JSON.stringify(provenance(applying)) }] : [] };
       else if (args[1] === "get-bucket-versioning") value = { Status: "Enabled" };
       else if (args[1] === "list-objects-v2") value = applying && existingState ? { Contents: [{ Key: contract.key }] } : {};
       else if (args[1] === "put-object") {
@@ -119,6 +149,12 @@ function installation(t, { changedSource = false, changedPlan = false, existingS
     } else throw new Error(`Unexpected tool ${name}`);
     return JSON.stringify(value);
   };
+  if (rejectedProvenance) {
+    assert.throws(() => run(["prepare", dir], { execute, env: inherited }));
+    assert(!calls.some(([name]) => name === "terraform"));
+    assert(!calls.some(([name, , operation]) => name === "aws" && operation === "put-object"));
+    return;
+  }
   run(["prepare", dir], { execute, env: inherited });
   applying = true;
   if (changedPlan) fs.appendFileSync(path.join(dir, "activation.tfplan"), "modified");
@@ -139,15 +175,38 @@ test("activation child environments use canonical safelists and pin production v
   apply();
   assert(children.some(({ name }) => name === "aws"));
   assert(children.some(({ name }) => name === "terraform"));
-  for (const { name, env } of children) {
+  for (const { name, args, env } of children) {
     if (name === "gh") {
       assert.deepEqual(env, { ...safe, GH_TOKEN: inherited.GH_TOKEN, GITHUB_TOKEN: inherited.GITHUB_TOKEN });
     } else {
-      assert.deepEqual(env, { ...safe, AWS_PROFILE: "mscqr-production-release-deployer", AWS_REGION: contract.region,
-        AWS_DEFAULT_REGION: contract.region, AWS_EC2_METADATA_DISABLED: "true", TF_WORKSPACE: "default", TF_DATA_DIR: path.join(fs.realpathSync(dir), "terraform-data") });
-      for (const key of redirects.filter((key) => key !== "AWS_PROFILE")) assert.equal(env[key], undefined, key);
+      const base = { ...safe, AWS_REGION: contract.region, AWS_DEFAULT_REGION: contract.region, AWS_EC2_METADATA_DISABLED: "true", AWS_IGNORE_CONFIGURED_ENDPOINT_URLS: "true" };
+      if (env.AWS_PROFILE === "default") {
+        assert.equal(name, "aws");
+        assert(["sts", "cloudtrail"].includes(args[0]));
+        assert.deepEqual(env, { ...base, AWS_PROFILE: "default" });
+      } else {
+        const identity = env.AWS_PROFILE ? { AWS_PROFILE: "mscqr-production-release-deployer" } : { AWS_ACCESS_KEY_ID: credentials.AccessKeyId, AWS_SECRET_ACCESS_KEY: credentials.SecretAccessKey, AWS_SESSION_TOKEN: credentials.SessionToken };
+        assert.deepEqual(env, { ...base, ...identity, TF_WORKSPACE: "default", TF_DATA_DIR: path.join(fs.realpathSync(dir), "terraform-data") });
+        if (name === "terraform") assert.equal(env.AWS_PROFILE, undefined, "Terraform uses only authenticated pinned session");
+      }
+      for (const key of redirects.filter((key) => !["AWS_PROFILE", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"].includes(key))) assert.equal(env[key], undefined, key);
     }
   }
+});
+
+test("OIDC and missing/forged provenance stop installer before Terraform", (t) => {
+  for (const provenance of [() => null, () => ({ ...issuance(), eventName: "AssumeRoleWithWebIdentity" }), () => ({ mfaVerified: true })]) {
+    installation(t, { provenance, rejectedProvenance: true });
+  }
+});
+
+test("apply rejects different issuance even with identical session ARN before reservation", (t) => {
+  const { calls, apply, dir } = installation(t, { provenance: (applying) => ({ ...issuance(), ...(applying ? { eventID: "abcdefab-1234-1234-1234-123456789abc" } : {}) }) });
+  const preparation = fs.readFileSync(path.join(dir, "preparation.json"), "utf8");
+  for (const value of Object.values(credentials)) assert(!preparation.includes(value));
+  assert.throws(apply, /Operator issuance changed/);
+  assert(!calls.some(([name, , operation]) => name === "aws" && operation === "put-object"));
+  assert(!calls.some(([name, , operation]) => name === "terraform" && operation === "apply"));
 });
 
 test("mocked installation binds approval, reserves once, applies only saved binary, then verifies", (t) => {

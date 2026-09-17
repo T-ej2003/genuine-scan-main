@@ -54,6 +54,36 @@ writer is inactive. Never delete the permanent initial-activation attempt record
    reuse the unrelated reconciler bootstrap role, or grant AdministratorAccess.
    Any required permission transition must be separately reviewed before planning.
 
+### Human operator provenance
+
+An assumed-role ARN does **not** prove MFA: this same role also permits GitHub
+OIDC. The installer resolves the named release profile once with AWS CLI v2
+`configure export-credentials`, keeps those credentials only in memory, and
+authenticates their exact issuance before any Terraform initialization or plan.
+It uses the repository's existing **administrator audit** boundary: the `default`
+profile must authenticate as account `368992683803` root and is used only for
+GetCallerIdentity and CloudTrail LookupEvents. It never reaches Terraform or S3
+writes. This is one-time installation audit access, not a normal-deployment
+dependency; the release role is not granted CloudTrail permissions.
+
+CloudTrail must prove an `AssumeRole` by the exact bootstrap IAM operator with
+`mfaAuthenticated=true`, binding the issued access-key ID, assumed-role principal
+ID/ARN, target role and expiration to the current release session. The installer
+reads regional and global STS event locations (`eu-west-2` and `us-east-1`), with
+bounded pagination. The issuance must be less than one hour old and the session
+must have at least ten minutes remaining. Missing/delayed events, access denial,
+OIDC, role chaining, forged local markers and ambiguous evidence fail closed:
+wait for CloudTrail delivery or reauthenticate and prepare again; never bypass.
+
+All Terraform/AWS executor children use that exact authenticated in-memory
+session, not a profile that could refresh between verification and apply.
+Git/GitHub do not receive it. The private preparation binds a sanitized issuance
+event ID, operator ARN and session-key hash, never credentials or raw CloudTrail
+events. Apply reauthenticates the same issuance and rejects session replacement,
+even when the replacement reuses the same role-session name. Configured AWS CLI
+endpoint overrides are disabled as well as inherited endpoint variables.
+This follows [AWS STS CloudTrail issuance semantics](https://docs.aws.amazon.com/IAM/latest/UserGuide/cloudtrail-integration.html).
+
 The executor needs exact state Get/Put and bucket-location/versioning/prefix-list
 and prefix-scoped ListBucketVersions access (historical state blocks fresh install),
 Get/Put/Delete on this key's `.tflock` only, and conditional Put on the exact
@@ -85,7 +115,7 @@ requires six creates and no drift, and writes private `preparation.json`.
 Inspect `terraform show "$activation_dir/activation.tfplan"` with the same
 Terraform version. Review all resource values against protected source, not just
 the resource count. The preparation binds source, account/region/root/backend,
-ABSENT state identity, exact operator session ARN and plan hash. Keep plan bytes
+ABSENT state identity, exact operator session ARN/issuance and plan hash. Keep plan bytes
 private and unchanged; do not commit/upload a plan containing private values.
 
 Dispatch **Authorize component infrastructure activation** on main with the
