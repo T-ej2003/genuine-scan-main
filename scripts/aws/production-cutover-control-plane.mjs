@@ -199,7 +199,7 @@ function recordMutation(mutations, name, result) {
   if (count > 0) mutations.push({ name, count, payloadSha256: result?.mutationPayload ? sha(result.mutationPayload) : null });
 }
 
-export function assertImageAuthorizationEnvelope(value, { now, verifyImageEvidence } = {}) {
+export function assertImageAuthorizationEnvelope(value, { now, verifyImageEvidence, minimumRemainingMs } = {}) {
   const sourceSha = value?.sourceSha;
   if (!SHA40.test(sourceSha || "") || value?.schemaVersion !== 3 || value.valid !== true || !SHA256.test(value.evidenceSha256 || "")
     || !value.imageEvidence || !value.imageEvidenceSignature || !value.imageReuseEvidence
@@ -228,6 +228,7 @@ export function assertImageAuthorizationEnvelope(value, { now, verifyImageEviden
     workflowRunId: value.imageEvidence.workflowRunId,
     artifactSha256: value.imageEvidence.canonicalArtifactSha256,
     now,
+    minimumRemainingMs,
     ...(verifyImageEvidence ? { verifySignature: verifyImageEvidence } : {}),
   });
   const { derived: impactEvidence, authorizationPath } = assertCanonicalImageImpactEvidence(value.imageEvidence, value.imageReuseEvidence, sourceSha);

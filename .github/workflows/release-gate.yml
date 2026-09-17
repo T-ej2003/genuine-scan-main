@@ -28,17 +28,16 @@ on:
         description: "Exact workflow-run IDs dispatched and authenticated by the Release Train."
         required: false
         type: string
-      preserve_current_frontend:
-        description: "Keep the currently deployed frontend task definition during a backend/RLS activation."
-        required: false
-        type: boolean
-        default: false
       normal_image_authorization_json:
         description: "Canonical signed four-image authorization for normal Stage-B activation."
         required: false
         type: string
       normal_image_authorization_sha256:
         description: "SHA-256 of the exact normal image authorization JSON bytes."
+        required: false
+        type: string
+      web_image_authorization_json:
+        description: "Canonical signed web-image authorization when canonical impact requires web publication."
         required: false
         type: string
       release_mode:
@@ -180,12 +179,7 @@ jobs:
                 echo "::error::A main target retained across a main advance requires its exact Release Train run identity."
                 exit 1
               fi
-              node --input-type=module - <<'NODE'
-              const response = await fetch(`https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.RELEASE_TRAIN_RUN_ID}`, { headers: { Accept: "application/vnd.github+json", Authorization: `Bearer ${process.env.GITHUB_TOKEN}`, "X-GitHub-Api-Version": "2022-11-28" } });
-              if (!response.ok) throw new Error(`Unable to authenticate Release Train target identity (${response.status}).`);
-              const run = await response.json();
-              if (run.repository?.full_name !== process.env.GITHUB_REPOSITORY || run.head_repository?.full_name !== process.env.GITHUB_REPOSITORY || run.path !== ".github/workflows/release-train.yml" || run.event !== "workflow_dispatch" || run.head_branch !== "main" || run.head_sha !== process.env.INPUT_TARGET_SHA || !["in_progress", "completed"].includes(run.status)) throw new Error("Release Train does not authenticate the retained main deployment target.");
-              NODE
+              node --input-type=module -e 'const response=await fetch(`https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.RELEASE_TRAIN_RUN_ID}`,{headers:{Accept:"application/vnd.github+json",Authorization:`Bearer ${process.env.GITHUB_TOKEN}`,"X-GitHub-Api-Version":"2022-11-28"}}); if(!response.ok) throw new Error(`Unable to authenticate Release Train target identity (${response.status}).`); const run=await response.json(); if(run.repository?.full_name!==process.env.GITHUB_REPOSITORY||run.head_repository?.full_name!==process.env.GITHUB_REPOSITORY||run.path!==".github/workflows/release-train.yml"||run.event!=="workflow_dispatch"||run.head_branch!=="main"||run.head_sha!==process.env.INPUT_TARGET_SHA||!["in_progress","completed"].includes(run.status)) throw new Error("Release Train does not authenticate the retained main deployment target.");'
             fi
           else
             deploy_sha="$ref_sha"
@@ -248,7 +242,7 @@ jobs:
           BACKEND_RECOVERY_EVIDENCE_BUNDLE_SHA256: ${{ inputs.backend_recovery_evidence_bundle_sha256 }}
           NORMAL_IMAGE_AUTHORIZATION_JSON: ${{ inputs.normal_image_authorization_json }}
           NORMAL_IMAGE_AUTHORIZATION_SHA256: ${{ inputs.normal_image_authorization_sha256 }}
-          PRESERVE_CURRENT_FRONTEND: ${{ inputs.preserve_current_frontend }}
+          WEB_IMAGE_AUTHORIZATION_JSON: ${{ inputs.web_image_authorization_json }}
           RELEASE_TRAIN_RUN_ID: ${{ inputs.release_train_run_id }}
         run: |
           set -euo pipefail
@@ -256,10 +250,6 @@ jobs:
             normal)
               if ! [[ "$RELEASE_TRAIN_RUN_ID" =~ ^[1-9][0-9]*$ ]]; then
                 echo "::error::Normal Stage-B activation requires the exact Release Train run identity."
-                exit 1
-              fi
-              if [ "$PRESERVE_CURRENT_FRONTEND" != "true" ]; then
-                echo "::error::Normal Stage-B activation must preserve the reviewed frontend task definition."
                 exit 1
               fi
               for name in NORMAL_IMAGE_AUTHORIZATION_JSON NORMAL_IMAGE_AUTHORIZATION_SHA256; do
@@ -672,6 +662,7 @@ jobs:
         env:
           IMAGE_AUTHORIZATION_JSON: ${{ inputs.normal_image_authorization_json }}
           IMAGE_AUTHORIZATION_SHA256: ${{ inputs.normal_image_authorization_sha256 }}
+          WEB_IMAGE_AUTHORIZATION_JSON: ${{ inputs.web_image_authorization_json }}
           SOURCE_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
         run: |
           set -euo pipefail
@@ -687,6 +678,27 @@ jobs:
             --authorization-sha256 "$IMAGE_AUTHORIZATION_SHA256" \
             --github-output "$GITHUB_OUTPUT"
           echo "authorization_file=$image_file" >> "$GITHUB_OUTPUT"
+          web_required="$(sed -n 's/^web_required=//p' "$GITHUB_OUTPUT" | tail -1)"
+          if [ "$web_required" = true ]; then
+            test -n "${WEB_IMAGE_AUTHORIZATION_JSON:-}"
+            web_file="$image_dir/web-authorization.json"
+            coordinated_file="$image_dir/coordinated-authorization.json"
+            printf '%s' "$WEB_IMAGE_AUTHORIZATION_JSON" > "$web_file"
+            chmod 600 "$web_file"
+            web_sha256="$(sha256sum "$web_file" | cut -d' ' -f1)"
+            node scripts/aws/verify-production-web-release-authorization.mjs \
+              --source-sha "$SOURCE_SHA" \
+              --stage-b-authorization "$image_file" \
+              --stage-b-authorization-sha256 "$IMAGE_AUTHORIZATION_SHA256" \
+              --web-authorization "$web_file" \
+              --web-authorization-sha256 "$web_sha256" \
+              --output "$coordinated_file"
+            echo "web_authorization_file=$web_file" >> "$GITHUB_OUTPUT"
+            echo "web_authorization_sha256=$web_sha256" >> "$GITHUB_OUTPUT"
+          elif [ -n "${WEB_IMAGE_AUTHORIZATION_JSON:-}" ]; then
+            echo "::error::Web authorization is forbidden when canonical impact does not require web publication."
+            exit 1
+          fi
 
       - name: Publish exact image authorization for read-only preflight consumers
         if: ${{ inputs.release_mode == 'normal' }}
@@ -697,7 +709,7 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-      - name: Verify preserved frontend deployment identity
+      - name: Authenticate current frontend deployment identity
         id: frontend
         if: ${{ inputs.release_mode == 'normal' }}
         run: |
@@ -705,18 +717,17 @@ jobs:
           source scripts/aws/production-credential-source.sh
           export MSCQR_AWS_CREDENTIAL_SOURCE=github-oidc-release-deployer
           configure_production_aws_credential_source
-          frontend_task="$(aws ecs describe-services --cluster "$CLUSTER_NAME" --services "$FRONTEND_SERVICE_NAME" --query 'services[0].taskDefinition' --output text)"
-          if [ "$frontend_task" != "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-frontend:20" ]; then
-            echo "::error::Normal Stage-B activation requires the reviewed mscqr-frontend:20 task definition."
-            exit 1
-          fi
-          frontend_image="$(aws ecs describe-task-definition --task-definition "$frontend_task" --query "taskDefinition.containerDefinitions[?name=='${FRONTEND_CONTAINER_NAME}'].image | [0]" --output text)"
-          if ! [[ "$frontend_image" =~ ^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com/mscqr-web@sha256:[a-f0-9]{64}$ ]]; then
-            echo "::error::Reviewed frontend task definition is not bound to an immutable production image digest."
-            exit 1
-          fi
-          echo "task_definition=$frontend_task" >> "$GITHUB_OUTPUT"
-          echo "image_ref=$frontend_image" >> "$GITHUB_OUTPUT"
+          service_file="$RUNNER_TEMP/frontend-service.json"
+          task_file="$RUNNER_TEMP/frontend-task-definition.json"
+          aws ecs describe-services --cluster "$CLUSTER_NAME" --services "$FRONTEND_SERVICE_NAME" --query 'services[0]' > "$service_file"
+          frontend_task="$(node -e 'process.stdout.write(require(process.argv[1]).taskDefinition)' "$service_file")"
+          aws ecs describe-task-definition --task-definition "$frontend_task" --query taskDefinition > "$task_file"
+          node --input-type=module - "$service_file" "$task_file" "$GITHUB_OUTPUT" <<'NODE'
+          import fs from "node:fs";
+          import { captureFrontendPredecessor } from "./scripts/aws/production-web-release-contract.mjs";
+          const predecessor = captureFrontendPredecessor(JSON.parse(fs.readFileSync(process.argv[2])), JSON.parse(fs.readFileSync(process.argv[3])));
+          fs.appendFileSync(process.argv[4], `task_definition=${predecessor.taskDefinitionArn}\nimage_ref=${predecessor.imageRef}\n`);
+          NODE
 
       - name: Authorize exact Stage-B backend candidate before database mutation
         id: backend-activation
@@ -798,7 +809,7 @@ jobs:
           PRODUCTION_BACKEND_IMAGE: ${{ steps.images.outputs.backend_image_ref }}
           PRODUCTION_WORKER_IMAGE: ${{ steps.images.outputs.worker_image_ref }}
           PRODUCTION_RLS_CANARY_IMAGE: ${{ steps.images.outputs.rls_canary_image_ref }}
-          PRODUCTION_FRONTEND_TASK_DEFINITION: mscqr-frontend:20
+          PRODUCTION_FRONTEND_TASK_DEFINITION: ${{ steps.frontend.outputs.task_definition }}
           PRODUCTION_RLS_CLUSTER_ARN: arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main
           PRODUCTION_RLS_RECEIPT_BUCKET: ${{ vars.PRODUCTION_RLS_RECEIPT_BUCKET }}
           PRODUCTION_RLS_RELEASE_RECEIPT_PATH: ${{ runner.temp }}/production-rls-release-receipt.json
@@ -806,8 +817,20 @@ jobs:
           RELEASE_TRAIN_RUN_ID: ${{ inputs.release_train_run_id }}
           ACTIVATION_BINDING_FILE: ${{ steps.backend-activation.outputs.binding_file }}
           ACTIVATION_BINDING_SHA256: ${{ steps.backend-activation.outputs.binding_sha256 }}
+          WEB_AUTHORIZATION_FILE: ${{ steps.images.outputs.web_authorization_file }}
+          WEB_AUTHORIZATION_SHA256: ${{ steps.images.outputs.web_authorization_sha256 }}
         run: |
           set -euo pipefail
+          if [[ "${{ steps.images.outputs.web_required }}" == "true" ]]; then
+            node scripts/aws/verify-production-web-release-authorization.mjs \
+              --reserve-downstream-lifetime \
+              --source-sha "$SOURCE_SHA" \
+              --stage-b-authorization "${{ steps.images.outputs.authorization_file }}" \
+              --stage-b-authorization-sha256 "${{ inputs.normal_image_authorization_sha256 }}" \
+              --web-authorization "$WEB_AUTHORIZATION_FILE" \
+              --web-authorization-sha256 "$WEB_AUTHORIZATION_SHA256" \
+              --output "$RUNNER_TEMP/coordinated-web-authorization-reservation.json"
+          fi
           node scripts/check-production-activation-rotation.mjs
           node scripts/aws/production-normal-backend-activation.mjs \
             --mode verify \
@@ -1059,12 +1082,40 @@ jobs:
           set -euo pipefail
           ./scripts/aws/verify-production-smoke.sh
 
+      - name: Activate authenticated frontend image
+        id: frontend-activation
+        if: ${{ inputs.release_mode == 'normal' && steps.images.outputs.web_required == 'true' }}
+        env:
+          SOURCE_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
+          WEB_AUTHORIZATION_FILE: ${{ steps.images.outputs.web_authorization_file }}
+          WEB_AUTHORIZATION_SHA256: ${{ steps.images.outputs.web_authorization_sha256 }}
+          BACKEND_METADATA_FILE: ${{ steps.image-meta.outputs.backend_metadata_file }}
+          MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-release-deployer
+        run: |
+          set -euo pipefail
+          result="$(node scripts/aws/run-production-web-activation.mjs \
+            --source-sha "$SOURCE_SHA" \
+            --stage-b-authorization "${{ steps.images.outputs.authorization_file }}" \
+            --stage-b-authorization-sha256 "${{ inputs.normal_image_authorization_sha256 }}" \
+            --web-authorization "$WEB_AUTHORIZATION_FILE" \
+            --web-authorization-sha256 "$WEB_AUTHORIZATION_SHA256" \
+            --backend-activation-evidence "$BACKEND_METADATA_FILE" \
+            --backend-activation-evidence-sha256 "$(sha256sum "$BACKEND_METADATA_FILE" | cut -d' ' -f1)")"
+          node --input-type=module - "$GITHUB_OUTPUT" "$result" <<'NODE'
+          import fs from "node:fs";
+          const result = JSON.parse(process.argv[3]);
+          for (const [key, value] of Object.entries({ previous_task_definition: result.predecessorTaskDefinitionArn, task_definition: result.candidateTaskDefinitionArn, image_ref: result.imageRef })) fs.appendFileSync(process.argv[2], `${key}=${value}\n`);
+          NODE
+
       - name: Summarize ECS production deployment
         if: ${{ inputs.release_mode == 'normal' }}
         env:
           BACKEND_METADATA_FILE: ${{ steps.image-meta.outputs.backend_metadata_file }}
           BACKEND_IMAGE_REF: ${{ steps.images.outputs.backend_image_ref }}
-          FRONTEND_IMAGE_REF: ${{ steps.frontend.outputs.image_ref }}
+          FRONTEND_IMAGE_REF: ${{ steps.frontend-activation.outputs.image_ref || steps.frontend.outputs.image_ref }}
+          FRONTEND_NEW_TASK: ${{ steps.frontend-activation.outputs.task_definition || steps.frontend.outputs.task_definition }}
+          FRONTEND_PREVIOUS_TASK: ${{ steps.frontend-activation.outputs.previous_task_definition || steps.frontend.outputs.task_definition }}
+          FRONTEND_WEB_REQUIRED: ${{ steps.images.outputs.web_required }}
           RLS_EXECUTOR_IMAGE_REF: ${{ steps.images.outputs.rls_executor_image_ref }}
           RLS_SOURCE_CONTRACT_SHA256: ${{ steps.rls-package.outputs.source_contract_sha256 }}
           RLS_PACKAGE_CHECKSUM_SHA256: ${{ steps.rls-package.outputs.package_checksum_sha256 }}
@@ -1078,8 +1129,8 @@ jobs:
           backend_previous_task="$(
             node --input-type=module -e 'import fs from "node:fs"; const payload = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); process.stdout.write(payload.previousTaskDefinitionArn || "");' "$BACKEND_METADATA_FILE"
           )"
-          frontend_new_task="arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-frontend:20"
-          frontend_previous_task="$frontend_new_task"
+          frontend_new_task="$FRONTEND_NEW_TASK"
+          frontend_previous_task="$FRONTEND_PREVIOUS_TASK"
           rls_receipt_bundle="$(
             node --input-type=module -e 'import fs from "node:fs"; const payload = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); process.stdout.write(payload.receiptBundleSha256 || "");' "$RLS_RELEASE_RECEIPT_FILE"
           )"
@@ -1111,5 +1162,9 @@ jobs:
             echo "- Image: \`${FRONTEND_IMAGE_REF}\`"
             echo "- Previous task definition: \`${frontend_previous_task}\`"
             echo "- New task definition: \`${frontend_new_task}\`"
-            echo "- Deployment: preserved reviewed task definition \`mscqr-frontend:20\`"
+            if [ "$FRONTEND_WEB_REQUIRED" = true ]; then
+              echo "- Deployment: authenticated image-only activation with exact predecessor CAS"
+            else
+              echo "- Deployment: preserved reviewed task definition"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"

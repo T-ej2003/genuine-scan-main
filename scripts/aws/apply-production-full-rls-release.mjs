@@ -47,7 +47,7 @@ export function validateProductionReleaseEnvironment(env = process.env) {
       || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{5,127}$/.test(config.approvalId || "")
       || config.clusterArn !== CLUSTER_ARN
       || config.brokerAliasArn !== STAGE_B.brokerAliasArn
-      || config.frontendTaskDefinition !== "mscqr-frontend:20"
+      || !new RegExp(`^arn:aws:ecs:${REGION}:${ACCOUNT}:task-definition/mscqr-frontend:[1-9][0-9]*$`).test(config.frontendTaskDefinition || "")
       || !PRODUCTION_GREEN.receiptBucketPattern.test(config.receiptBucket || "")) {
     throw new Error("Production release binding is incomplete or outside the reviewed identity.");
   }

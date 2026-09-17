@@ -1,0 +1,107 @@
+name: Production Web Activation
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_sha:
+        description: Exact current protected-main SHA
+        required: true
+        type: string
+      stage_b_authorization_json:
+        description: Exact signed four-image Stage-B authorization
+        required: true
+        type: string
+      stage_b_authorization_sha256:
+        description: SHA-256 of Stage-B authorization bytes
+        required: true
+        type: string
+      web_authorization_json:
+        description: Exact signed web-image authorization
+        required: true
+        type: string
+      web_authorization_sha256:
+        description: SHA-256 of web authorization bytes
+        required: true
+        type: string
+      backend_activation_evidence_json:
+        description: Exact completed backend activation evidence from the coordinated release
+        required: true
+        type: string
+      backend_activation_evidence_sha256:
+        description: SHA-256 of backend activation evidence bytes
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  activate:
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with: { fetch-depth: 0 }
+      - name: Bind exact protected source
+        env:
+          TARGET_SHA: '${{ inputs.target_sha }}'
+          WORKFLOW_DEFINITION_SHA: '${{ github.sha }}'
+        run: |
+          set -euo pipefail
+          [[ "$TARGET_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$WORKFLOW_DEFINITION_SHA" =~ ^[a-f0-9]{40}$ ]]
+          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_SHA" = "$WORKFLOW_DEFINITION_SHA"
+          git fetch --no-tags origin main
+          test "$(git rev-parse HEAD)" = "$WORKFLOW_DEFINITION_SHA"
+          protected_main_sha="$(git rev-parse FETCH_HEAD)"
+          git cat-file -e "$TARGET_SHA^{commit}"
+          git merge-base --is-ancestor "$TARGET_SHA" "$protected_main_sha"
+          git merge-base --is-ancestor "$WORKFLOW_DEFINITION_SHA" "$protected_main_sha"
+          test -z "$(git status --porcelain)"
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: eu-west-2
+          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-release-deployer
+      - name: Authenticate coordinated Stage-B and web evidence
+        env:
+          MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-release-deployer
+          TARGET_SHA: '${{ inputs.target_sha }}'
+          STAGE_B_AUTHORIZATION_JSON: '${{ inputs.stage_b_authorization_json }}'
+          STAGE_B_AUTHORIZATION_SHA256: '${{ inputs.stage_b_authorization_sha256 }}'
+          WEB_AUTHORIZATION_JSON: '${{ inputs.web_authorization_json }}'
+          WEB_AUTHORIZATION_SHA256: '${{ inputs.web_authorization_sha256 }}'
+          BACKEND_ACTIVATION_EVIDENCE_JSON: '${{ inputs.backend_activation_evidence_json }}'
+          BACKEND_ACTIVATION_EVIDENCE_SHA256: '${{ inputs.backend_activation_evidence_sha256 }}'
+        run: |
+          set -euo pipefail
+          directory="$RUNNER_TEMP/web-activation"
+          install -d -m 700 "$directory"
+          trap 'rm -rf "$directory"' EXIT
+          printf '%s' "$STAGE_B_AUTHORIZATION_JSON" > "$directory/stage-b.json"
+          printf '%s' "$WEB_AUTHORIZATION_JSON" > "$directory/web.json"
+          printf '%s' "$BACKEND_ACTIVATION_EVIDENCE_JSON" > "$directory/backend.json"
+          chmod 600 "$directory"/*.json
+          node scripts/aws/verify-production-web-release-authorization.mjs \
+            --source-sha "$TARGET_SHA" \
+            --stage-b-authorization "$directory/stage-b.json" \
+            --stage-b-authorization-sha256 "$STAGE_B_AUTHORIZATION_SHA256" \
+            --web-authorization "$directory/web.json" \
+            --web-authorization-sha256 "$WEB_AUTHORIZATION_SHA256" \
+            --output "$directory/coordinated.json"
+          node scripts/aws/run-production-web-activation.mjs \
+            --source-sha "$TARGET_SHA" \
+            --stage-b-authorization "$directory/stage-b.json" \
+            --stage-b-authorization-sha256 "$STAGE_B_AUTHORIZATION_SHA256" \
+            --web-authorization "$directory/web.json" \
+            --web-authorization-sha256 "$WEB_AUTHORIZATION_SHA256" \
+            --backend-activation-evidence "$directory/backend.json" \
+            --backend-activation-evidence-sha256 "$BACKEND_ACTIVATION_EVIDENCE_SHA256"
