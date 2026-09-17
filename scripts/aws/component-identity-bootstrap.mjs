@@ -5,6 +5,7 @@ import { identityBootstrap, bootstrapManagedIdentities, inspectBootstrapIdentiti
 import { assertIdentityBootstrapAuthorization } from "./component-identity-bootstrap-authorization.mjs";
 import { bootstrapFixedBroker } from "./component-broker-bootstrap.mjs";
 import { canonical, digest, installationIdentity } from "./component-iam-installation-contract.mjs";
+import { assertComponentSessionRecord } from "./component-session-proof.mjs";
 
 const bucket = identityBootstrap.bucket;
 const key = `${identityBootstrap.prefix}identity-bootstrap.json`;
@@ -12,14 +13,19 @@ const key = `${identityBootstrap.prefix}identity-bootstrap.json`;
 // Internal exceptional first-bootstrap transaction. Normal controllers do not
 // import it. Authorization and MFA/admin credential issuance belong to its
 // separate composition root, never caller-selected CLI documents or SDK inputs.
-export async function executeIdentityBootstrap({ authorization, packageEvidence }, { iam, lambda, s3, authenticate, now = Date.now, sleep = delay }) {
+export async function executeIdentityBootstrap({ authorization, packageEvidence, operatorProof }, { iam, lambda, s3, authenticate, now = Date.now, sleep = delay }) {
   const approval = structuredClone(authorization);
   const authorizationSha256 = assertIdentityBootstrapAuthorization(approval, packageEvidence, now());
+  const human = structuredClone(operatorProof);
+  assertComponentSessionRecord(human);
+  assert.equal(human.purpose, "IDENTITY_BOOTSTRAP");
+  for (const [field, value] of Object.entries({ sourceSha: approval.sourceSha, transitionId: approval.transitionId, authorizationSha256 })) assert.equal(human[field], value);
+  assert(Date.parse(human.issuanceEventTime) >= Date.parse(approval.approvalObservedAt) - 999, "Bootstrap human session predates approval");
   const identities = bootstrapManagedIdentities();
   const owner = randomUUID();
   const record = { schemaVersion: 1, state: "BOOTSTRAP_EXECUTING", sourceSha: approval.sourceSha,
     transitionId: approval.transitionId, authorizationSha256, authorization: approval, owner,
-    manifestSha256: approval.manifestSha256, identitySetSha256: approval.identitySetSha256, packageSha256: approval.packageSha256 };
+    manifestSha256: approval.manifestSha256, identitySetSha256: approval.identitySetSha256, packageSha256: approval.packageSha256, operatorProof: human };
   const read = async () => {
     const listing = await s3("ListObjectsV2", { Bucket: bucket, Prefix: key });
     assert.equal(listing.IsTruncated, false);
@@ -31,6 +37,7 @@ export async function executeIdentityBootstrap({ authorization, packageEvidence 
   };
   const authorize = async () => {
     assertIdentityBootstrapAuthorization(approval, packageEvidence, now());
+    assert(now() < Date.parse(human.expiresAt), "Bootstrap human authorization session expired");
     await authenticate();
   };
   await authorize();

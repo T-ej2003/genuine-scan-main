@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { executeIdentityBootstrap } from "../aws/component-identity-bootstrap.mjs";
 import { bootstrapSourceBindings } from "../aws/component-identity-bootstrap-authorization.mjs";
 import { bootstrapManagedIdentities, identityBootstrap } from "../aws/component-installation-identity-contract.mjs";
-import { canonical } from "../aws/component-iam-installation-contract.mjs";
+import { canonical, digest } from "../aws/component-iam-installation-contract.mjs";
 import { fixture as brokerFixture } from "./helpers/component-bootstrap-fixture.mjs";
 
 function fixture() {
@@ -50,7 +50,11 @@ function fixture() {
     assert(input.IfNoneMatch === "*" || input.IfMatch);
     f.record = JSON.parse(input.Body); f.s3Writes.push(f.record.state); f.afterS3(f.s3Writes.length); return {};
   };
-  f.execute = () => executeIdentityBootstrap({ authorization, packageEvidence: f.packageEvidence }, { iam, lambda: f.lambda, s3, authenticate: async () => f.guard(), now: () => f.clock, sleep: async () => {} });
+  f.operatorProof = { account: identityBootstrap.account, region: identityBootstrap.region, sourceSha: authorization.sourceSha, transitionId: authorization.transitionId,
+    authorizationSha256: digest(authorization), purpose: "IDENTITY_BOOTSTRAP", principal: `arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/component-${authorization.transitionId}`,
+    issuedAt: new Date(now).toISOString(), expiresAt: new Date(now + 900000).toISOString(), issuanceEventId: "12345678-1234-4234-8234-123456789def", issuanceEventTime: new Date(now).toISOString(),
+    operatorArn: "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator", mfaAuthenticated: true };
+  f.execute = () => executeIdentityBootstrap({ authorization, packageEvidence: f.packageEvidence, operatorProof: f.operatorProof }, { iam, lambda: f.lambda, s3, authenticate: async () => f.guard(), now: () => f.clock, sleep: async () => {} });
   return f;
 }
 
@@ -82,6 +86,12 @@ test("missing authority fails before reservation or IAM", async () => {
   const f = fixture(); f.guard = () => { throw new Error("MFA or source proof failed"); };
   await assert.rejects(f.execute());
   assert.deepEqual(f.s3Writes, []); assert.deepEqual(f.iamWrites, []);
+});
+test("expired or substituted bootstrap human proof cannot reserve or mutate", async () => {
+  for (const mutate of [f => { f.clock += 900000; }, f => { f.operatorProof.authorizationSha256 = "f".repeat(64); }, f => { f.operatorProof.purpose = "INSTALL"; }]) {
+    const f = fixture(); mutate(f); await assert.rejects(f.execute());
+    assert.deepEqual(f.s3Writes, []); assert.deepEqual(f.iamWrites, []);
+  }
 });
 test("failed-before-acceptance IAM write retains reservation without blind retry or age takeover", async () => {
   const f = fixture(); f.beforeIam = () => { throw new Error("not accepted"); };

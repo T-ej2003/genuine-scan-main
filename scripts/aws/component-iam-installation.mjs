@@ -10,7 +10,7 @@ import { createProductionGithubCredentialEnvironment } from "./production-creden
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 
-function cleanSource() {
+export function cleanSource() {
   const git = (...args) => execFileSync("/usr/bin/git", args, { cwd: root, env: createProductionGithubCredentialEnvironment(), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
   git("fetch", "origin", "main");
   const sourceSha = git("rev-parse", "HEAD");

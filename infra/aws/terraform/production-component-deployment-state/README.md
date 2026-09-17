@@ -4,7 +4,7 @@ This is source-only work in progress. Do not activate infrastructure from an
 unmerged checkpoint. First-bootstrap execution and isolated Terraform execution
 must pass their final gates before this installation procedure is operational.
 Historical development findings live in [the review log](../../../../documents/ops/COMPONENT_INSTALLATION_REVIEW.md); they are not
-alternative supported commands. Recovery provenance is in `RECOVERY.md`.
+alternative supported commands. Recovery provenance is in [the recovery record](../../../../documents/ops/COMPONENT_INSTALLATION_RECOVERY.md).
 
 ## Ownership
 
@@ -61,6 +61,38 @@ The separate installation environment is
 bootstrap uses `production-component-installation-identity-bootstrap`.
 The normal deployment, component-state bootstrap and table-activation environments
 retain their exact contracts. Never broaden an OIDC subject to bypass approval.
+
+## Exceptional first identity bootstrap
+
+After merge, use clean protected main and dispatch
+`authorize-component-installation-identity-bootstrap.yml` with the exact source
+SHA and a new UUIDv4 transition. T-ej2003 must approve its dedicated environment.
+The workflow only builds source-bound approval evidence; it has no AWS credentials.
+After its first-attempt run succeeds, the separately reviewed bootstrap command is:
+
+```sh
+node scripts/aws/component-identity-bootstrap-cli.mjs execute APPROVED_RUN_ID TRANSITION_UUID
+```
+
+The command reauthenticates GitHub approval and the deterministic broker package
+before loading the existing exact administrator. This is the explicitly approved
+first-bootstrap exception, **not an IAM policy restriction on root**. Its adapter
+performs only the fixed source transaction. Administrative credentials remain in
+that process's SDK clients and are not returned, archived, forwarded to Terraform
+or Lambda, or used by the normal controllers.
+
+Fresh hidden MFA authenticates the exact bootstrap operator through the existing
+release role solely as human provenance. Signed STS identity and unique CloudTrail
+issuance bind its 900-second expiry to the approved bootstrap. Root
+`GetSessionToken` is not used. The non-secret human proof is archived with the
+fixed CAS bootstrap record. The five exact execution identities and three fixed
+broker versions must pass complete readback before closure.
+
+An existing or incomplete reservation is never stolen based on elapsed time.
+Ambiguous accepted writes are read back within the owning transaction; a crashed
+administrative transaction remains fail-closed and requires separately reviewed
+reconciliation. Human-session expiry is not claimed to revoke root authority.
+Do not delete its journal or replay initial bootstrap to update existing targets.
 
 ## Normal IAM installation after trust-anchor bootstrap
 

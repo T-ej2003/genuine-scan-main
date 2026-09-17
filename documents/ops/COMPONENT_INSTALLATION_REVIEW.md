@@ -563,3 +563,20 @@ container protocol and barriers, not live AWS plan/apply behavior. No production
 plan/apply was executed. Production MFA/approval/state preflight composition and
 replacement of the old infrastructure activation entry point remain unfinished;
 the runner is not yet exposed through that production entry point.
+
+### Exceptional bootstrap composition checkpoint
+
+The first-bootstrap CLI now authenticates the dedicated completed GitHub approval
+and rebuilt package before loading its exceptional administrator adapter. It
+authenticates a fresh MFA-backed human release session using signed STS identity
+and unique CloudTrail issuance, then binds that non-secret proof into the durable
+bootstrap reservation and closure. Normal installation/cleanup never import the
+administrative adapter. Real CLI tests reject alternate operations, policy paths
+and malformed coordinates before credentials; 47 bootstrap tests and 28 canonical
+credential-boundary tests pass.
+
+This does not claim root authority is constrained by a session expiry: root is
+the explicitly approved initial-bootstrap exception only. An interrupted root
+transaction has no automatic takeover route. Normal session fencing remains
+AWS-expiry based. Production activation composition, final recovery review and
+all pre-PR gates remain outstanding; no bootstrap was executed against AWS.
