@@ -47,8 +47,8 @@ export function assertStageBBackendProxyTrust(value) {
     return extra === undefined && net.isIP(address) === 4 && /^[0-9]+$/.test(prefix || "") && Number(prefix) >= 0 && Number(prefix) <= 32;
   });
   const albCidrs = cidrs("albCidrs"); const cloudFrontCidrs = cidrs("cloudFrontCidrs");
-  if (!validCidrs(albCidrs) || !validCidrs(cloudFrontCidrs)) throw new Error("Stage B backend proxy trust CIDRs are malformed.");
-  return { mode: value.mode, albCidrs: albCidrs.join(","), cloudFrontCidrs: cloudFrontCidrs.join(",") };
+  if (!validCidrs(albCidrs) || !validCidrs(cloudFrontCidrs) || !/^pl-[a-z0-9]+$/.test(value.cloudFrontPrefixListId || "") || !/^[1-9][0-9]*$/.test(String(value.cloudFrontPrefixListVersion || ""))) throw new Error("Stage B backend proxy trust CIDRs or prefix-list identity are malformed.");
+  return { mode: value.mode, albCidrs: albCidrs.join(","), cloudFrontCidrs: cloudFrontCidrs.join(","), cloudFrontPrefixListId: value.cloudFrontPrefixListId, cloudFrontPrefixListVersion: String(value.cloudFrontPrefixListVersion) };
 }
 
 const reviewedTemplate = (kind) => ({ ...readTemplate(kind), runtimePlatform: { ...STAGE_B.taskRuntimePlatform } });
@@ -103,7 +103,7 @@ export function renderStageBTaskDefinition(kind, bindings) {
   const values = { ...base, [imageField]: image };
   if (kind === "backend") {
     const proxy = assertStageBBackendProxyTrust(bindings.backendProxyTrust);
-    Object.assign(values, { BACKEND_CLIENT_IP_TRUST_MODE: proxy.mode, BACKEND_CLIENT_IP_TRUSTED_ALB_CIDRS: proxy.albCidrs, BACKEND_CLIENT_IP_TRUSTED_CLOUDFRONT_CIDRS: proxy.cloudFrontCidrs });
+    Object.assign(values, { BACKEND_CLIENT_IP_TRUST_MODE: proxy.mode, BACKEND_CLIENT_IP_TRUSTED_ALB_CIDRS: proxy.albCidrs, BACKEND_CLIENT_IP_TRUSTED_CLOUDFRONT_CIDRS: proxy.cloudFrontCidrs, BACKEND_CLIENT_IP_CLOUDFRONT_PREFIX_LIST_ID: proxy.cloudFrontPrefixListId, BACKEND_CLIENT_IP_CLOUDFRONT_PREFIX_LIST_VERSION: proxy.cloudFrontPrefixListVersion });
   }
   if (kind === "executor") {
     if (!STAGE_B_MODES.includes(bindings.mode) || bindings.mode === "full-rls-application-canary") throw new Error("Executor mode is outside the fixed reviewed set.");

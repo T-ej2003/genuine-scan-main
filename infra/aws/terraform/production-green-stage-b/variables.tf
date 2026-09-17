@@ -112,6 +112,20 @@ variable "backend_client_ip_trusted_cloudfront_cidrs" {
     error_message = "Stage B backend candidates require a non-empty canonical CloudFront CIDR list."
   }
 }
+variable "backend_client_ip_cloudfront_prefix_list_id" {
+  type = string
+  validation {
+    condition     = can(regex("^pl-[a-z0-9]+$", var.backend_client_ip_cloudfront_prefix_list_id))
+    error_message = "Stage B backend candidates require the reviewed CloudFront managed prefix-list ID."
+  }
+}
+variable "backend_client_ip_cloudfront_prefix_list_version" {
+  type = string
+  validation {
+    condition     = can(regex("^[1-9][0-9]*$", var.backend_client_ip_cloudfront_prefix_list_version))
+    error_message = "Stage B backend candidates require the reviewed CloudFront managed prefix-list version."
+  }
+}
 variable "backend_image" { type = string }
 variable "worker_image" { type = string }
 variable "executor_image" { type = string }

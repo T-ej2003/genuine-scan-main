@@ -141,7 +141,7 @@ function evidenceFiles(directory, repositoryRoot, expectedSha = sourceSha, image
   const tfvarsBytes = Buffer.from("production_rotation_enabled = false\n");
   const stageBTfvarsPath = path.join(directory, "stage-b.tfvars");
   writeFileSync(stageBTfvarsPath, tfvarsBytes, { mode: 0o600 }); chmodSync(stageBTfvarsPath, 0o600);
-  const stageBTfvarsBindingReportPath = file("stage-b.tfvars.binding.json", { schemaVersion: 2, tfvarsSchemaVersion: 1, tfvarsFormat: "hcl", tfvarsFileName: "stage-b.tfvars", tfvarsExtension: ".tfvars", generator: "scripts/aws/generate-production-green-stage-b-tfvars.mjs", tfvarsSha256: createHash("sha256").update(tfvarsBytes).digest("hex"), backendProxyTrust: { mode: "cloudfront-alb", albCidrs: "10.1.0.0/24", cloudFrontCidrs: "198.51.100.0/24" } });
+  const stageBTfvarsBindingReportPath = file("stage-b.tfvars.binding.json", { schemaVersion: 2, tfvarsSchemaVersion: 1, tfvarsFormat: "hcl", tfvarsFileName: "stage-b.tfvars", tfvarsExtension: ".tfvars", generator: "scripts/aws/generate-production-green-stage-b-tfvars.mjs", tfvarsSha256: createHash("sha256").update(tfvarsBytes).digest("hex"), backendProxyTrust: { mode: "cloudfront-alb", albCidrs: "10.1.0.0/24", cloudFrontCidrs: "198.51.100.0/24", cloudFrontPrefixListId: "pl-0123456789abcdef0", cloudFrontPrefixListVersion: "7" } });
   const stageBTerraformDataDir = path.join(directory, "terraform-data");
   mkdirSync(stageBTerraformDataDir, { mode: 0o700 }); chmodSync(stageBTerraformDataDir, 0o700);
   const artifactBinding = artifactSigningRuntimeBindingPath(expectedSha);
@@ -772,7 +772,7 @@ test("overlap task rejects legacy/ECS reference confusion and double JSON-key su
     backendImage: image,
     releaseSha: sourceSha,
     backendLogGroup: "/ecs/mscqr-production/rls-green-backend",
-    proxyTrust: { mode: "cloudfront-alb", albCidrs: "10.1.0.0/24", cloudFrontCidrs: "198.51.100.0/24" },
+    proxyTrust: { mode: "cloudfront-alb", albCidrs: "10.1.0.0/24", cloudFrontCidrs: "198.51.100.0/24", cloudFrontPrefixListId: "pl-0123456789abcdef0", cloudFrontPrefixListVersion: "7" },
     secretBindings,
   };
   const rendered = buildOverlapTaskDefinition(input);

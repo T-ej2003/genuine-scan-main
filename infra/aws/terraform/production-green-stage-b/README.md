@@ -110,3 +110,13 @@ MSCQR_STAGE_B_PLAN_ENABLED=true MSCQR_STAGE_B_PLAN_CONFIRM=MSCQR_GENERATE_STAGE_
 Review the saved JSON plan. Stop on any delete or any resource outside the listed control-plane types. A separately approved operator runbook must invoke scripts/apply-production-green-stage-b.mjs with the complete canonical tfvars provenance options; direct Terraform apply is not an approved path.
 
 Both wrapper modes run `terraform -chdir=infra/aws/terraform/production-green-stage-b show -json` against the selected saved plan and pass the reviewed deployment environment, including `TF_DATA_DIR`, `TF_WORKSPACE`, `HOME`, `PATH`, and Terraform CLI configuration. Provider discovery must therefore use the initialized release-local data directory; repository-root or ambient `.terraform` discovery is not an accepted fallback.
+
+### CloudFront proxy topology and prefix-list lifecycle
+
+Stage-A binds the Route53 A/AAAA aliases, deployed CloudFront distribution/config ETag,
+API behavior target origin, ALB origin, and managed origin-facing prefix-list ID, version,
+and canonical CIDRs. Stage-B rejects a stale binding before candidate registration. The
+read-only `verify-production-cloudfront-proxy-drift.yml` workflow rechecks the live
+backend task definition and AWS authority every 15 minutes; drift requires fresh Stage-A
+prerequisites followed by the existing governed Stage-B replacement and activation path.
+It never changes ECS, Route53, or AWS configuration.

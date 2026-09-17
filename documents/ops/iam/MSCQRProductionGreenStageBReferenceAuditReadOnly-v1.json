@@ -25,7 +25,16 @@
     {
       "Sid": "ReadStageBCloudFrontOriginTopology",
       "Effect": "Allow",
-      "Action": "cloudfront:ListDistributions",
+      "Action": [
+        "cloudfront:ListDistributions",
+        "cloudfront:GetDistributionConfig"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ReadProductionRoute53AliasTopology",
+      "Effect": "Allow",
+      "Action": "route53:ListResourceRecordSets",
       "Resource": "*"
     },
     {

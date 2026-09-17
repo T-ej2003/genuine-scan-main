@@ -60,6 +60,8 @@ test("Stage-B backend candidates bind the reviewed CloudFront-to-ALB runtime top
     "{{BACKEND_CLIENT_IP_TRUST_MODE}}": "cloudfront-alb",
     "{{BACKEND_CLIENT_IP_TRUSTED_ALB_CIDRS}}": "10.1.0.0/24,10.1.1.0/24",
     "{{BACKEND_CLIENT_IP_TRUSTED_CLOUDFRONT_CIDRS}}": "198.51.100.0/24",
+    "{{BACKEND_CLIENT_IP_CLOUDFRONT_PREFIX_LIST_ID}}": "pl-0123456789abcdef0",
+    "{{BACKEND_CLIENT_IP_CLOUDFRONT_PREFIX_LIST_VERSION}}": "7",
   };
   for (const file of ["green-backend-candidate.json", "green-backend-rotation-candidate.json"]) {
     const template = fs.readFileSync(`infra/aws/terraform/production-green-stage-b/task-definitions/${file}`, "utf8");
@@ -70,6 +72,10 @@ test("Stage-B backend candidates bind the reviewed CloudFront-to-ALB runtime top
       CLIENT_IP_TRUST_MODE: "cloudfront-alb",
       CLIENT_IP_TRUSTED_ALB_CIDRS: "10.1.0.0/24,10.1.1.0/24",
       CLIENT_IP_TRUSTED_CLOUDFRONT_CIDRS: "198.51.100.0/24",
+    });
+    assert.deepEqual(Object.fromEntries(environment.filter(({ name }) => name.startsWith("MSCQR_CLIENT_IP_CLOUDFRONT_PREFIX_LIST_")).map(({ name, value }) => [name, value])), {
+      MSCQR_CLIENT_IP_CLOUDFRONT_PREFIX_LIST_ID: "pl-0123456789abcdef0",
+      MSCQR_CLIENT_IP_CLOUDFRONT_PREFIX_LIST_VERSION: "7",
     });
   }
   assert.match(source, /backend_template_proxy = replace\([\s\S]*?BACKEND_CLIENT_IP_TRUST_MODE[\s\S]*?BACKEND_CLIENT_IP_TRUSTED_ALB_CIDRS[\s\S]*?BACKEND_CLIENT_IP_TRUSTED_CLOUDFRONT_CIDRS/);

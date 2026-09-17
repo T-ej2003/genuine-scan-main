@@ -63,6 +63,8 @@ export function buildOverlapTaskDefinition({ backendImage, releaseSha, backendLo
     BACKEND_CLIENT_IP_TRUST_MODE: proxy.mode,
     BACKEND_CLIENT_IP_TRUSTED_ALB_CIDRS: proxy.albCidrs,
     BACKEND_CLIENT_IP_TRUSTED_CLOUDFRONT_CIDRS: proxy.cloudFrontCidrs,
+    BACKEND_CLIENT_IP_CLOUDFRONT_PREFIX_LIST_ID: proxy.cloudFrontPrefixListId,
+    BACKEND_CLIENT_IP_CLOUDFRONT_PREFIX_LIST_VERSION: proxy.cloudFrontPrefixListVersion,
     ...secretBindings,
   }), runtimePlatform: { ...STAGE_B.taskRuntimePlatform } };
   assertUniqueSecretBindingNames(definition);

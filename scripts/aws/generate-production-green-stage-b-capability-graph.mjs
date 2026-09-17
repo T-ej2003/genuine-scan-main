@@ -373,13 +373,13 @@ const STAGE_B_STATE_RECONCILIATION_TERRAFORM_CAPABILITIES = Object.freeze([
 const STAGE_B_PREREQUISITE_PRODUCER_READ_IDS = Object.freeze([
   "collect-stage-a-prerequisite-state", "collect-stage-a-live-subnets", "collect-stage-a-live-route-tables",
   "collect-stage-a-live-security-groups", "collect-stage-a-live-alb", "collect-stage-a-live-target-group",
-  "collect-stage-a-live-cloudfront-prefix-list", "collect-stage-a-live-cloudfront-prefix-list-entries", "collect-stage-a-live-cloudfront-distribution", "collect-stage-a-live-cluster", "collect-stage-a-live-database",
+  "collect-stage-a-live-cloudfront-prefix-list", "collect-stage-a-live-cloudfront-prefix-list-entries", "collect-stage-a-live-cloudfront-distribution", "collect-stage-a-live-cloudfront-distribution-config", "collect-stage-a-live-route53-production-aliases", "collect-stage-a-live-cluster", "collect-stage-a-live-database",
 ]);
 const STAGE_B_PREREQUISITE_PRODUCER_PROBES = Object.freeze({
   "collect-stage-a-prerequisite-state": "stage-a-state", "collect-stage-a-live-subnets": "stage-a-subnets",
   "collect-stage-a-live-route-tables": "stage-a-route-tables", "collect-stage-a-live-security-groups": "stage-a-security-groups",
   "collect-stage-a-live-alb": "stage-b-backend-alb", "collect-stage-a-live-target-group": "stage-b-backend-target-group",
-  "collect-stage-a-live-cloudfront-prefix-list": "stage-b-cloudfront-prefix-list", "collect-stage-a-live-cloudfront-prefix-list-entries": "stage-b-cloudfront-prefix-list-entries", "collect-stage-a-live-cloudfront-distribution": "stage-b-cloudfront-distribution",
+  "collect-stage-a-live-cloudfront-prefix-list": "stage-b-cloudfront-prefix-list", "collect-stage-a-live-cloudfront-prefix-list-entries": "stage-b-cloudfront-prefix-list-entries", "collect-stage-a-live-cloudfront-distribution": "stage-b-cloudfront-distribution", "collect-stage-a-live-cloudfront-distribution-config": "stage-b-cloudfront-distribution-config", "collect-stage-a-live-route53-production-aliases": "stage-b-route53-production-aliases",
   "collect-stage-a-live-cluster": "stage-a-cluster", "collect-stage-a-live-database": "stage-a-database",
 });
 const prerequisiteProducerCapabilityId = (id) => `stage-b-state-reconciliation-producer-${id}`;
@@ -564,7 +564,7 @@ export function classifyStageARecoveryAwsCliAction({ action, source, offset } = 
 }
 
 export function discoverAwsCliActions() {
-  const serviceNames = "sts|iam|kms|ecr|ec2|ecs|rds|lambda|logs|cloudtrail|cloudfront|elbv2|organizations|secretsmanager|dynamodb|s3api";
+  const serviceNames = "sts|iam|kms|ecr|ec2|ecs|rds|lambda|logs|cloudtrail|cloudfront|route53|elbv2|organizations|secretsmanager|dynamodb|s3api";
   const calls = [];
   for (const sourceFile of awsCliSourceFiles) {
     const source = fs.readFileSync(path.join(root, sourceFile), "utf8");
