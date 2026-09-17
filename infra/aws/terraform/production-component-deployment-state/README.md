@@ -66,8 +66,11 @@ recurring root dependency in normal deployments.
 
 ## Prepare, review, apply once
 
-Use a clean checkout of exact current protected main. The installer rejects
-credential/endpoint/Terraform overrides and pins the existing non-root profile.
+Use a clean checkout of exact current protected main. The installer strips
+credential/config/endpoint/Terraform redirects using the canonical production
+child-environment safelist and pins the existing non-root profile. Only explicitly
+safe process variables survive; GitHub tokens reach only the GitHub CLI, never
+AWS or Terraform. Unknown future environment variables are not inherited.
 Do not export AWS access keys or TF variables. Authenticate GitHub CLI with
 repository read and environment-read access; expired credentials fail closed.
 

@@ -7,6 +7,7 @@ import os from "node:os";
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { createProductionAwsCredentialEnvironment, createProductionGithubCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const stack = "infra/aws/terraform/production-component-deployment-state";
@@ -96,13 +97,11 @@ export function run(argv = process.argv.slice(2), deps = {}) {
   const work = fs.realpathSync(directory);
   assert(!work.startsWith(`${root}/`) && work !== root, "Plan directory must be outside checkout");
   assert.equal(fs.statSync(work).mode & 0o077, 0, "Private plan directory required");
-  // Do not inherit alternate backends, providers, CLI flags, endpoints or credentials.
+  // Canonical safelists isolate AWS/Terraform from redirects and GitHub tokens.
   const inherited = deps.env || process.env;
-  for (const name of Object.keys(inherited)) {
-    assert(!/^(TF_|TERRAFORM_|AWS_ENDPOINT|AWS_ACCESS_KEY_ID$|AWS_SECRET_ACCESS_KEY$|AWS_SESSION_TOKEN$|AWS_WEB_IDENTITY|AWS_ROLE_ARN$|GH_HOST$)/.test(name), `Forbidden override: ${name}`);
-  }
-  const env = { ...inherited, AWS_PROFILE: "mscqr-production-release-deployer", AWS_REGION: contract.region, AWS_DEFAULT_REGION: contract.region, AWS_EC2_METADATA_DISABLED: "true", TF_WORKSPACE: "default", TF_DATA_DIR: path.join(work, "terraform-data") };
-  const exec = (name, args) => (deps.execute || execFileSync)(name, args, { cwd: root, env, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 }).trim();
+  const env = { ...createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer", region: contract.region, env: inherited }), TF_WORKSPACE: "default", TF_DATA_DIR: path.join(work, "terraform-data") };
+  const githubEnvironment = createProductionGithubCredentialEnvironment({ env: inherited });
+  const exec = (name, args) => (deps.execute || execFileSync)(name, args, { cwd: root, env: name === "gh" ? githubEnvironment : env, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 }).trim();
   const aws = (...args) => JSON.parse(exec("aws", [...args, "--region", contract.region, "--no-cli-pager", "--output", "json"]) || "{}");
   const gh = (endpoint) => JSON.parse(exec("gh", ["api", `repos/${repository}/${endpoint}`]));
   const tf = (...args) => exec("terraform", [`-chdir=${stack}`, ...args]);

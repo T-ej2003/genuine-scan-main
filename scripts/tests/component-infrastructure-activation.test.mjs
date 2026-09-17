@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { assertBackend, assertInitialPlan, assertAuthorization, assertEnvironment, contract, stack, run, hash } from "../aws/component-infrastructure-activation.mjs";
+import { productionAwsCredentialSourceContract } from "../aws/production-credential-source-contract.mjs";
 
 const backend = () => ({ type: "s3", config: { ...contract, allowed_account_ids: [contract.account] } });
 const readPolicy = (name) => fs.readFileSync(`${stack}/${name}.json`, "utf8");
@@ -66,16 +67,18 @@ test("environment requires exact main branch and independent real reviewer witho
   assert.throws(() => assertEnvironment(config, { branch_policies: [...branches.branch_policies, { name: "*", type: "branch" }] }));
 });
 
-function installation(t, { changedSource = false, changedPlan = false, existingState = false, replay = false, approval = true } = {}) {
+function installation(t, { changedSource = false, changedPlan = false, existingState = false, replay = false, approval = true, inherited = {} } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "component-install-test-"));
   t.after(() => fs.rmSync(dir, { recursive: true }));
   const calls = [];
+  const children = [];
   const sourceSha = "a".repeat(40);
   let applying = false;
   const config = { id: 20, can_admins_bypass: false, deployment_branch_policy: { protected_branches: false, custom_branch_policies: true }, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 2 } }] }] };
   const branches = { branch_policies: [{ name: "main", type: "branch" }] };
   const execute = (name, args, { env }) => {
     calls.push([name, ...args]);
+    children.push({ name, env });
     let value;
     if (name === "git") {
       if (args[0] === "rev-parse") return sourceSha;
@@ -116,11 +119,36 @@ function installation(t, { changedSource = false, changedPlan = false, existingS
     } else throw new Error(`Unexpected tool ${name}`);
     return JSON.stringify(value);
   };
-  run(["prepare", dir], { execute, env: {} });
+  run(["prepare", dir], { execute, env: inherited });
   applying = true;
   if (changedPlan) fs.appendFileSync(path.join(dir, "activation.tfplan"), "modified");
-  return { calls, apply: () => run(["apply", dir, "123"], { execute, env: {} }) };
+  return { calls, children, dir, apply: () => run(["apply", dir, "123"], { execute, env: inherited }) };
 }
+
+test("activation child environments use canonical safelists and pin production values", (t) => {
+  const redirects = [...productionAwsCredentialSourceContract.namedProfileStrips,
+    "AWS_ENDPOINT_URL_STS", "AWS_ENDPOINT_URL_S3", "AWS_ENDPOINT_URL_IAM", "AWS_ENDPOINT_URL_DYNAMODB",
+    "TF_CLI_CONFIG_FILE", "TF_CLI_ARGS", "TF_CLI_ARGS_apply", "TF_VAR_region", "TERRAFORM_CONFIG",
+    "GH_HOST", "GH_CONFIG_DIR", "NODE_OPTIONS", "HTTPS_PROXY", "UNREVIEWED_FUTURE_VARIABLE"];
+  const safe = { HOME: "/operator", PATH: "/usr/bin", TMPDIR: "/tmp", TERM: "xterm", LANG: "C", LC_ALL: "C", LC_CTYPE: "C", NODE_EXTRA_CA_CERTS: "/operator/trusted-ca" };
+  const inherited = { ...Object.fromEntries(redirects.map((key) => [key, "hostile-value"])), ...safe,
+    GH_TOKEN: "fixture-gh-token", GITHUB_TOKEN: "fixture-github-token",
+    AWS_REGION: "us-east-1", AWS_DEFAULT_REGION: "us-east-1", AWS_EC2_METADATA_DISABLED: "false",
+    TF_WORKSPACE: "hostile", TF_DATA_DIR: "/hostile" };
+  const { children, dir, apply } = installation(t, { inherited });
+  apply();
+  assert(children.some(({ name }) => name === "aws"));
+  assert(children.some(({ name }) => name === "terraform"));
+  for (const { name, env } of children) {
+    if (name === "gh") {
+      assert.deepEqual(env, { ...safe, GH_TOKEN: inherited.GH_TOKEN, GITHUB_TOKEN: inherited.GITHUB_TOKEN });
+    } else {
+      assert.deepEqual(env, { ...safe, AWS_PROFILE: "mscqr-production-release-deployer", AWS_REGION: contract.region,
+        AWS_DEFAULT_REGION: contract.region, AWS_EC2_METADATA_DISABLED: "true", TF_WORKSPACE: "default", TF_DATA_DIR: path.join(fs.realpathSync(dir), "terraform-data") });
+      for (const key of redirects.filter((key) => key !== "AWS_PROFILE")) assert.equal(env[key], undefined, key);
+    }
+  }
+});
 
 test("mocked installation binds approval, reserves once, applies only saved binary, then verifies", (t) => {
   const { calls, apply } = installation(t);
