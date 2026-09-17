@@ -14,7 +14,8 @@ test("isolated executor uses pinned platform image, no network, read-only inputs
     for (const value of ["--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pull=never"]) assert(args.includes(value));
     assert.equal(args.filter(value => value.startsWith("--mount=")).length, 1);
     assert(args.find(value => value.startsWith("--mount=")).endsWith(",target=/inputs,readonly"));
-    assert(!args.some(value => /docker\.sock|\.aws|Keychain|--privileged|--pid=host|--env|--device|--volume/.test(value)));
+    assert(!args.some(value => /docker\.sock|\.aws|Keychain|--privileged|--pid=host|--device|--volume/.test(value)));
+    assert.deepEqual(args.filter(value => value.startsWith("--env=")), ["HTTP_PROXY", "HTTPS_PROXY", "FTP_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "ftp_proxy", "all_proxy", "no_proxy"].map(key => `--env=${key}=`));
     assert(args.includes(terraformExecution.image));
     fs.chmodSync(directory, 0o777); assert.throws(() => terraformDockerArguments(fs.realpathSync(directory)));
   } finally { fs.rmSync(directory, { recursive: true }); }

@@ -530,3 +530,11 @@ listens only on the container's loopback interface and carries TLS unchanged
 over stdio to the independently restricted host relay. It is not yet connected
 to production prepare/apply; no production-ready claim follows from these
 transport unit tests.
+
+The runtime audit reproduced Docker client-config proxy injection: an otherwise
+network-disabled container inherited host proxy settings unless explicit empty
+proxy environment overrides were supplied. All ten upper/lower-case Docker proxy
+variables are now cleared. A disposable client configuration and real-container
+negative control prove the guard, without reading or changing user proxy secrets
+or Docker configuration. Network isolation alone would not prevent disclosure
+of credentials embedded in those configuration values.

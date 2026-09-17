@@ -53,6 +53,9 @@ export function terraformDockerArguments(inputDirectory) {
   assert(architecture, "Unsupported isolated execution architecture");
   return ["run", "--rm", "--interactive", "--pull=never", `--platform=linux/${architecture}`,
     "--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges",
+    // Docker can otherwise inject proxy URLs (including passwords) from its
+    // host client configuration even when no host environment is forwarded.
+    ...["HTTP_PROXY", "HTTPS_PROXY", "FTP_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "ftp_proxy", "all_proxy", "no_proxy"].map(key => `--env=${key}=`),
     `--user=${uid}:${gid}`, "--pids-limit=128", "--memory=3g", "--cpus=2",
     // Terraform installs the checksum-verified provider into this ephemeral
     // filesystem. exec is necessary there; it does not expose host executables.

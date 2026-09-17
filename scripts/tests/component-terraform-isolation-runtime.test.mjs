@@ -20,6 +20,7 @@ test("real isolated container cannot access host credentials, control sockets, w
       import net from 'node:net';
       assert(process.getuid() > 0);
       for (const key of ['AWS_PROFILE', 'AWS_DEFAULT_PROFILE', 'AWS_CONFIG_FILE', 'AWS_SHARED_CREDENTIALS_FILE', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN', 'AWS_WEB_IDENTITY_TOKEN_FILE', 'AWS_CONTAINER_CREDENTIALS_FULL_URI', 'COMPONENT_HOST_ONLY_MARKER']) assert.equal(process.env[key], undefined);
+      for (const key of ['HTTP_PROXY', 'HTTPS_PROXY', 'FTP_PROXY', 'ALL_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'ftp_proxy', 'all_proxy', 'no_proxy']) assert.equal(process.env[key], '');
       for (const name of ['/root/.aws', '/root/.ssh', '/var/run/docker.sock', '/run/docker.sock', '/Library/Keychains', '/Users/abhiramteja/.aws', '/Users/abhiramteja/Downloads/genuine-scan-main']) assert(!fs.existsSync(name));
       const status = fs.readFileSync('/proc/self/status', 'utf8');
       assert.match(status, /CapEff:\\s+0000000000000000/);
@@ -45,6 +46,24 @@ test("real isolated container cannot access host credentials, control sockets, w
     assert.equal(result.status, 0, `Docker isolation probe failed: ${result.stderr}`);
     assert.equal(result.stdout, "ISOLATION_RUNTIME_PROBE=PASS\n");
     assert.equal(fs.readFileSync(path.join(directory, "marker"), "utf8"), "reviewed-public-input");
+    const context = spawnSync("docker", ["context", "inspect", "--format", "{{.Endpoints.docker.Host}}"], {
+      env: { PATH: process.env.PATH, HOME: process.env.HOME }, encoding: "utf8", timeout: 10000,
+    });
+    assert.equal(context.status, 0);
+    const endpoint = context.stdout.trim(); assert(endpoint.startsWith("unix://"));
+    const clientConfig = path.join(directory, "docker-test-config"); fs.mkdirSync(clientConfig, { mode: 0o700 });
+    fs.writeFileSync(path.join(clientConfig, "config.json"), JSON.stringify({ proxies: { default: {
+      httpProxy: "http://host-only-proxy.invalid:3128", httpsProxy: "http://host-only-proxy.invalid:3128", ftpProxy: "http://host-only-proxy.invalid:3128", allProxy: "http://host-only-proxy.invalid:3128", noProxy: "host-only.invalid",
+    } } }), { mode: 0o600 });
+    const configured = spawnSync("docker", ["--config", clientConfig, "--host", endpoint, ...terraformDockerArguments(fs.realpathSync(directory))], {
+      env: { PATH: process.env.PATH, HOME: process.env.HOME }, encoding: "utf8", timeout: 30000, maxBuffer: 1024 * 1024,
+    });
+    assert.equal(configured.status, 0, `Docker client-config proxy escape: ${configured.stderr}`);
+    assert.equal(configured.stdout, "ISOLATION_RUNTIME_PROBE=PASS\n");
+    const negativeControl = spawnSync("docker", ["--config", clientConfig, "--host", endpoint, ...terraformDockerArguments(fs.realpathSync(directory)).filter(value => !value.startsWith("--env="))], {
+      env: { PATH: process.env.PATH, HOME: process.env.HOME }, encoding: "utf8", timeout: 30000, maxBuffer: 1024 * 1024,
+    });
+    assert.equal(negativeControl.status, 1, "Probe must detect Docker's automatic host proxy injection when the guard is removed");
   } finally { fs.rmSync(directory, { recursive: true }); }
 });
 
