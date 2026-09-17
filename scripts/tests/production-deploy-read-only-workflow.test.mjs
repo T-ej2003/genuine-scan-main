@@ -49,8 +49,22 @@ test("workflow is OIDC-only, serialized, and uses fixed production boundaries", 
 
 test("runner-scoped journal paths are evaluated only at step scope", () => {
   assert.equal(Object.hasOwn(workflow.jobs.deploy.env || {}, "MSCQR_APP_ONLY_JOURNAL_DIR"), false);
+  assert.equal(Object.hasOwn(workflow.jobs.classify.env || {}, "MSCQR_APP_ONLY_JOURNAL_DIR"), false);
   const deployStep = workflow.jobs.deploy.steps.find((step) => step.name === "Deploy coordinated normal release");
   assert.equal(deployStep.env.MSCQR_APP_ONLY_JOURNAL_DIR, "${{ runner.temp }}/normal-release-journal");
+});
+
+test("current-main reconciliation precedes range classification and publication with protected smoke and always-upload", () => {
+  const job = workflow.jobs.classify;
+  assert.equal(job.environment, "production-normal-deploy");
+  assert.equal(job.env.SMOKE_AUTHENTICATED_REQUIRED, "true");
+  const step = job.steps.find((entry) => entry.id === "classify");
+  assert.ok(step.run.indexOf('test "$GITHUB_SHA"') < step.run.indexOf("production-normal-release.mjs --reconcile"));
+  assert.ok(step.run.indexOf("production-normal-release.mjs --reconcile") < step.run.indexOf("prepare-production-normal-deployment.mjs"));
+  const upload = job.steps.find((entry) => entry.name === "Preserve normal reconciliation journal");
+  assert.equal(upload.if, "always()");
+  assert.equal(workflow.jobs["publish-backend"].needs, "classify");
+  assert.equal(workflow.jobs["publish-frontend"].needs, "classify");
 });
 
 test("fixed orchestrator command set contains no mutation boundary", () => {

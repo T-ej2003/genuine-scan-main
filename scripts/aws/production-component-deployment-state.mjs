@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { COMPLETED_EMERGENCY_PATHS } from "./production-completed-emergency-work.mjs";
+import { assertNormalDeploymentReceipt, normalReceiptHash } from "./production-normal-receipt-contract.mjs";
 
 export const PRODUCTION_COMPONENT_STATE = Object.freeze({ table: "mscqr-production-component-deployment-state", key: "production#T-ej2003/genuine-scan-main", account: "368992683803", region: "eu-west-2", repository: "T-ej2003/genuine-scan-main" });
 const SHA = /^[a-f0-9]{40}$/, DIGEST = /^sha256:[a-f0-9]{64}$/;
@@ -16,6 +17,7 @@ export function assertProductionComponentDeploymentState(value) {
   assert.ok(["BOOTSTRAP", "NORMAL_APPLICATION", "SECURITY_INFRASTRUCTURE", "EMERGENCY_RECOVERY"].includes(value.updatedByLane));
   assert.match(value.updatedByWorkflow || "", /^[A-Za-z0-9_.:/@-]{1,512}$/); assert.match(String(value.githubRunId || ""), /^(?:[1-9][0-9]*|bootstrap|local-test)$/);
   assert.deepEqual(Object.keys(value.components || {}).sort(), [...components].sort());
+  if (value.normalDeploymentReceipt !== undefined) assertNormalDeploymentReceipt(value.normalDeploymentReceipt);
   if (value.completedEmergencyWork !== undefined) {
     assert.notEqual(value.updatedByLane, "BOOTSTRAP", "Bootstrap cannot attest completed emergency operations");
     assert.ok(value.completedEmergencyWork && typeof value.completedEmergencyWork === "object" && !Array.isArray(value.completedEmergencyWork));
@@ -38,10 +40,17 @@ export function createProductionComponentDeploymentState({ components: stateComp
   return Object.freeze(assertProductionComponentDeploymentState({ schemaVersion: 1, environment: "production", repository: PRODUCTION_COMPONENT_STATE.repository, generation: 1, updatedAt: now, updatedByLane: "BOOTSTRAP", updatedByWorkflow, githubRunId: String(githubRunId), components: stateComponents }));
 }
 
-export function advanceProductionComponentDeploymentState({ current, expectedGeneration, lane, changes, emergencyCompletion, now = new Date().toISOString(), recovery = false, isAncestor, authenticateRecovery, updatedByWorkflow = "local-test", githubRunId = "local-test" } = {}) {
+export function advanceProductionComponentDeploymentState({ current, expectedGeneration, lane, changes, emergencyCompletion, normalReceiptSha256, now = new Date().toISOString(), recovery = false, isAncestor, authenticateRecovery, updatedByWorkflow = "local-test", githubRunId = "local-test" } = {}) {
   assertProductionComponentDeploymentState(current); assert.equal(expectedGeneration, current.generation); assert.ok(["NORMAL_APPLICATION", "SECURITY_INFRASTRUCTURE", "EMERGENCY_RECOVERY"].includes(lane));
   assert.ok(changes && typeof changes === "object" && !Array.isArray(changes));
   assert.ok(Object.keys(changes).length > 0, "A component-state transition must declare an authenticated component mutation set");
+  if (current.normalDeploymentReceipt && lane === "NORMAL_APPLICATION") {
+    const receipt = current.normalDeploymentReceipt;
+    assert.equal(normalReceiptSha256, normalReceiptHash(receipt), "Normal terminal requires its durable receipt");
+    assert.equal(receipt.phase, "VERIFIED");
+    assert.deepEqual(changes, receipt.candidates, "Normal terminal must commit the whole verified release");
+    for (const [name, predecessor] of Object.entries(receipt.predecessors)) assert.deepEqual(current.components[name], predecessor, "Normal receipt predecessor changed");
+  } else assert.equal(normalReceiptSha256, undefined, "Normal receipt is unavailable to this terminal");
   for (const [name, next] of Object.entries(changes)) {
     assert.ok(components.has(name)); assert.ok(next && typeof next === "object"); assert.match(next.sourceSha || "", SHA);
     if (lane === "NORMAL_APPLICATION") { assert.ok(current.components[name], "Normal deployment requires bootstrapped component state"); assert.equal(recovery, false); if (["backend", "frontend"].includes(name)) assert.equal(next.establishedThroughSha, next.sourceSha, "Normal deployment must establish the deployed candidate source"); }
@@ -62,6 +71,16 @@ export function advanceProductionComponentDeploymentState({ current, expectedGen
   }
   const next = clone(current); next.generation++; next.updatedAt = now; next.updatedByLane = lane; next.updatedByWorkflow = updatedByWorkflow; next.githubRunId = String(githubRunId);
   for (const [name, value] of Object.entries(changes)) next.components[name] = clone(value);
+  if (normalReceiptSha256) delete next.normalDeploymentReceipt;
+  else if (current.normalDeploymentReceipt && lane !== "NORMAL_APPLICATION") {
+    const receipt = next.normalDeploymentReceipt;
+    const superseded = Object.keys(receipt.predecessors).filter((name) => Object.hasOwn(changes, name));
+    if (superseded.length) {
+      for (const name of superseded) for (const field of ["predecessors", "images", "candidates"]) delete receipt[field][name];
+      if (Object.keys(receipt.predecessors).length) { receipt.phase = "ROLLING_BACK"; delete receipt.verification; }
+      else delete next.normalDeploymentReceipt;
+    }
+  }
   if (emergencyCompletion) {
     const { mode, sourceSha, evidenceSha256 } = emergencyCompletion;
     assert.ok(Object.hasOwn(COMPLETED_EMERGENCY_PATHS, mode));
@@ -105,7 +124,7 @@ export function createProductionComponentDeploymentStateClient({ run } = {}) {
 // DynamoDB only provides document-level conditional writes. A writer may retry
 // after an unrelated component advances, but never after its own predecessor
 // changed. This keeps one durable item without lost component updates.
-export function advanceProductionComponentDeploymentStateWithRetry({ client, current, lane, changes, emergencyCompletion, maxRetries = 2, now = () => new Date().toISOString(), recovery = false, isAncestor, authenticateRecovery, updatedByWorkflow, githubRunId } = {}) {
+export function advanceProductionComponentDeploymentStateWithRetry({ client, current, lane, changes, emergencyCompletion, normalReceiptSha256, maxRetries = 2, now = () => new Date().toISOString(), recovery = false, isAncestor, authenticateRecovery, updatedByWorkflow, githubRunId } = {}) {
   assert.equal(typeof client?.read, "function"); assert.equal(typeof client?.advance, "function");
   assert.ok(Number.isSafeInteger(maxRetries) && maxRetries >= 0 && maxRetries <= 5);
   assertProductionComponentDeploymentState(current);
@@ -119,7 +138,7 @@ export function advanceProductionComponentDeploymentStateWithRetry({ client, cur
   const expectedComponents = Object.fromEntries(Object.keys(changes || {}).map((name) => [name, clone(current.components[name])]));
   let observed = current;
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
-    const next = advanceProductionComponentDeploymentState({ current: observed, expectedGeneration: observed.generation, lane, changes, emergencyCompletion, now: now(), recovery, isAncestor, authenticateRecovery, updatedByWorkflow, githubRunId });
+    const next = advanceProductionComponentDeploymentState({ current: observed, expectedGeneration: observed.generation, lane, changes, emergencyCompletion, normalReceiptSha256, now: now(), recovery, isAncestor, authenticateRecovery, updatedByWorkflow, githubRunId });
     try {
       client.advance(observed, next);
       return Object.freeze({ state: next, attempts: attempt + 1, reconciledUnrelatedConcurrentUpdate: attempt > 0 });

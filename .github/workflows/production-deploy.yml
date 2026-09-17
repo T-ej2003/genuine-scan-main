@@ -26,6 +26,16 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: production-normal-deploy
+    env:
+      SMOKE_BASE_URL: https://www.mscqr.com
+      SMOKE_API_BASE_URL: https://www.mscqr.com/api
+      SMOKE_REQUIRED: "true"
+      SMOKE_AUTHENTICATED_REQUIRED: "true"
+      SMOKE_LOGIN_EMAIL: ${{ secrets.PRODUCTION_SMOKE_LOGIN_EMAIL }}
+      SMOKE_LOGIN_PASSWORD: ${{ secrets.PRODUCTION_SMOKE_LOGIN_PASSWORD }}
+      SMOKE_VERIFY_CODE: ${{ secrets.PRODUCTION_SMOKE_VERIFY_CODE }}
+      SMOKE_ADMIN_MFA_CODE: ${{ secrets.PRODUCTION_SMOKE_ADMIN_MFA_CODE }}
+      SMOKE_ADMIN_MFA_SECRET: ${{ secrets.PRODUCTION_SMOKE_ADMIN_MFA_SECRET }}
     outputs:
       release_class: ${{ steps.classify.outputs.release_class }}
       backend: ${{ steps.classify.outputs.backend }}
@@ -42,12 +52,13 @@ jobs:
           unset-current-credentials: true
       - name: Derive component-state classification
         id: classify
-        env: { MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-release-deployer, PLAN_FILE: '${{ runner.temp }}/normal-component-deployment-plan.json' }
+        env: { MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-release-deployer, PLAN_FILE: '${{ runner.temp }}/normal-component-deployment-plan.json', MSCQR_APP_ONLY_JOURNAL_DIR: '${{ runner.temp }}/normal-reconciliation-journal' }
         run: |
           set -euo pipefail
           test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
           git fetch --no-tags origin main
           test "$GITHUB_SHA" = "$(git rev-parse refs/remotes/origin/main)"
+          node scripts/aws/production-normal-release.mjs --reconcile
           node scripts/aws/prepare-production-normal-deployment.mjs --output="$PLAN_FILE"
           node --input-type=module - "$PLAN_FILE" "$GITHUB_OUTPUT" <<'NODE'
           import fs from 'node:fs';
@@ -60,6 +71,14 @@ jobs:
           name: normal-component-deployment-plan
           path: ${{ runner.temp }}/normal-component-deployment-plan.json
           if-no-files-found: error
+          retention-days: 30
+      - name: Preserve normal reconciliation journal
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: normal-reconciliation-journal-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/normal-reconciliation-journal
+          if-no-files-found: warn
           retention-days: 30
 
   publish-backend:

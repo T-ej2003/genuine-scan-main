@@ -15,6 +15,9 @@ import { assertGithubOidcReleaseDeployerEnvironment, createProductionAwsCommandR
 import { assertProductionBackendReadiness } from "./production-backend-readiness-contract.mjs";
 import { CANONICAL_PRODUCTION_ORIGIN, CANONICAL_PRODUCTION_READINESS_URL } from "./production-backend-readiness-contract.mjs";
 import { advanceProductionComponentDeploymentStateWithRetry, createProductionComponentDeploymentStateClient, stateHash } from "./production-component-deployment-state.mjs";
+import { NORMAL_RECEIPT_WORKFLOW, normalReceiptHash, sameNormalIdentity } from "./production-normal-receipt-contract.mjs";
+import { replaceNormalDeploymentReceipt, reconcileNormalDeployment } from "./production-normal-reconciliation.mjs";
+export { classifyNormalLiveComponentState } from "./production-normal-receipt-contract.mjs";
 
 export const NORMAL_RELEASE = Object.freeze({
   account: "368992683803", region: "eu-west-2", cluster: "mscqr-prod-euw2-main",
@@ -65,7 +68,7 @@ export function buildNormalBackendPreparation({ sourceSha, predecessorSourceSha,
   return Object.freeze({ ...body, preparationSha256: sha256(JSON.stringify(body)) });
 }
 
-export async function executeNormalFrontendActivation({ sourceSha, imageRef, adapters } = {}) {
+export async function executeNormalFrontendActivation({ sourceSha, imageRef, adapters, recordCandidate = async () => {} } = {}) {
   assert.match(sourceSha || "", SHA); assert.match(imageRef || "", /^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/mscqr-web@sha256:[a-f0-9]{64}$/);
   for (const name of ["readService", "describeTaskDefinition", "registerTaskDefinition", "updateService", "waitStable", "verifyHealth"]) assert.equal(typeof adapters?.[name], "function", `Missing frontend adapter: ${name}`);
   const initialService = await adapters.readService();
@@ -77,6 +80,7 @@ export async function executeNormalFrontendActivation({ sourceSha, imageRef, ada
   assert.match(candidateArn || "", taskArn(WEB_RELEASE.family));
   const readback = await adapters.describeTaskDefinition(candidateArn);
   assertFrontendCandidateReadback({ definition: readback, taskDefinitionArn: candidateArn, candidate });
+  await recordCandidate(candidateArn);
   const casService = await adapters.readService();
   const casDefinition = await adapters.describeTaskDefinition(casService.taskDefinition);
   assertFrontendPredecessorCas({ predecessor, currentService: casService, currentTaskDefinition: casDefinition });
@@ -147,40 +151,11 @@ function assertCaller(caller, role) {
   assert.match(caller?.Arn || "", new RegExp(`^arn:aws:sts::${NORMAL_RELEASE.account}:assumed-role/${role}/[^/]+$`));
 }
 
-const sameComponentIdentity = (actual, expected) => actual?.sourceSha === expected?.sourceSha && actual?.imageDigest === expected?.imageDigest && actual?.taskDefinitionArn === expected?.taskDefinitionArn && actual?.desiredCount === expected?.desiredCount;
+const sameComponentIdentity = sameNormalIdentity;
 
 export const assertNormalBackendExactCandidate = (predecessorDefinition, candidateDefinition, candidateDigest) => assertRegisteredAppOnlyCandidate(predecessorDefinition, candidateDefinition, candidateDigest);
 
-export function classifyNormalLiveComponentState({ live, predecessor, candidate } = {}) {
-  if (sameComponentIdentity(live, predecessor)) return "LIVE_IS_PREDECESSOR";
-  if (live?.sourceSha === candidate?.sourceSha && live?.imageDigest === candidate?.imageDigest && live?.desiredCount === predecessor?.desiredCount && live.taskDefinitionArn !== predecessor?.taskDefinitionArn) return "LIVE_IS_EXACT_CANDIDATE";
-  return "LIVE_IS_UNKNOWN";
-}
-
-async function rollbackBackendToState({ state, sourceSha, run, repositoryRoot }) {
-  const readers = createAppOnlyEcsReaders(run); const live = readers.readLive(); const observed = captureAppOnlyPredecessor(live);
-  assert.equal(readers.readBackendImageSource(observed.backendDigest), sourceSha, "Backend rollback ownership is lost");
-  assert.notEqual(observed.taskDefinitionArn, state.taskDefinitionArn, "Backend is already at its predecessor");
-  const definition = readers.readDefinition(state.taskDefinitionArn); const target = captureAppOnlyPredecessor({ service: { ...live.service, taskDefinition: state.taskDefinitionArn, deployments: [{ ...live.service.deployments[0], taskDefinition: state.taskDefinitionArn }] }, definition, tasks: live.tasks.map((task) => ({ ...task, taskDefinitionArn: state.taskDefinitionArn, containers: task.containers.map((container) => container.name === APP_ONLY.container ? { ...container, imageDigest: state.imageDigest } : container) })) });
-  assert.equal(target.backendDigest, state.imageDigest);
-  json(run, ["ecs", "update-service", "--cluster", APP_ONLY.clusterArn, "--service", APP_ONLY.serviceArn, "--task-definition", state.taskDefinitionArn]);
-  run(["ecs", "wait", "services-stable", "--cluster", APP_ONLY.clusterArn, "--services", APP_ONLY.serviceArn]);
-  const restored = captureAppOnlyPredecessor(readers.readLive()); assert.equal(restored.taskDefinitionArn, state.taskDefinitionArn); assert.equal(restored.backendDigest, state.imageDigest); assert.equal(restored.desiredCount, state.desiredCount); assert.equal(readers.readBackendImageSource(restored.backendDigest), state.sourceSha);
-  runNormalSmoke(repositoryRoot);
-}
-
-async function rollbackFrontendToState({ state, sourceSha, run, repositoryRoot }) {
-  const adapters = createNormalFrontendAdapters({ run }); const service = await adapters.readService(); const definition = await adapters.describeTaskDefinition(service.taskDefinition); const current = captureFrontendPredecessor(service, definition);
-  const currentDigest = current.imageRef.split("@")[1]; const response = json(run, ["ecr", "describe-images", "--repository-name", WEB_RELEASE.repository, "--image-ids", `imageDigest=${currentDigest}`]);
-  assert.equal(response.imageDetails?.length, 1); assert.ok(response.imageDetails[0].imageTags?.includes(sourceSha), "Frontend rollback ownership is lost");
-  assert.notEqual(current.taskDefinitionArn, state.taskDefinitionArn, "Frontend is already at its predecessor");
-  const target = await adapters.describeTaskDefinition(state.taskDefinitionArn); const targetImage = target.containerDefinitions?.find(({ name }) => name === WEB_RELEASE.container)?.image;
-  assert.equal(targetImage, `368992683803.dkr.ecr.eu-west-2.amazonaws.com/${WEB_RELEASE.repository}@${state.imageDigest}`);
-  await rollbackFrontendCandidate({ predecessor: { taskDefinitionArn: state.taskDefinitionArn, desiredCount: state.desiredCount }, candidateTaskDefinitionArn: current.taskDefinitionArn, ...adapters });
-  runNormalSmoke(repositoryRoot);
-}
-
-async function executeBackendCli({ sourceSha, imageRef, expectedState, run, repositoryRoot }) {
+async function executeBackendCli({ sourceSha, imageRef, expectedState, run, repositoryRoot, recordCandidate }) {
   assert.match(imageRef || "", /^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/mscqr-backend@sha256:[a-f0-9]{64}$/);
   assertCaller(json(run, ["sts", "get-caller-identity"]), NORMAL_RELEASE.role);
   const readers = createAppOnlyEcsReaders(run), live = readers.readLive();
@@ -188,22 +163,21 @@ async function executeBackendCli({ sourceSha, imageRef, expectedState, run, repo
   const predecessor = captureAppOnlyPredecessor(live);
   const liveIdentity = { sourceSha: readers.readBackendImageSource(predecessor.backendDigest), imageDigest: predecessor.backendDigest, taskDefinitionArn: predecessor.taskDefinitionArn, desiredCount: predecessor.desiredCount };
   if (expectedState && !sameComponentIdentity(liveIdentity, expectedState)) {
-    if (classifyNormalLiveComponentState({ live: liveIdentity, predecessor: expectedState, candidate: { sourceSha, imageDigest: digest } }) === "LIVE_IS_EXACT_CANDIDATE") {
-      assertNormalBackendExactCandidate(readers.readDefinition(expectedState.taskDefinitionArn), live.definition, digest);
-      return Object.freeze({ result: { candidateTaskDefinition: liveIdentity.taskDefinitionArn, candidateDeploymentId: predecessor.deploymentId, deployedBackendDigest: digest, deployedImageSourceSha: sourceSha, retry: "LIVE_IS_EXACT_CANDIDATE" }, predecessor: expectedState, rollback: () => rollbackBackendToState({ state: expectedState, sourceSha, run, repositoryRoot }) });
-    }
-    throw new Error("Backend live state is neither the authenticated predecessor nor the exact candidate.");
+    throw new Error("LIVE_IS_UNKNOWN: backend must reconcile its durable receipt before activation.");
   }
   const preparation = buildNormalBackendPreparation({ sourceSha, predecessorSourceSha: readers.readBackendImageSource(predecessor.backendDigest), live, candidateDigest: digest });
   const authenticate = async () => { assertCaller(json(run, ["sts", "get-caller-identity"]), NORMAL_RELEASE.role); };
   const journalDirectory = process.env.MSCQR_APP_ONLY_JOURNAL_DIR ? path.join(process.env.MSCQR_APP_ONLY_JOURNAL_DIR, "backend") : undefined;
   const journal = createAppOnlyEvidenceWriter({ repositoryRoot, sourceSha, preparationSha256: preparation.preparationSha256, directory: journalDirectory });
-  const adapters = createAppOnlyActivationAdapters({ run, preparation, authenticate, writeEvidence: journal.writeEvidence });
+  const adapters = createAppOnlyActivationAdapters({ run, preparation, authenticate, writeEvidence: async (entry) => {
+    journal.writeEvidence(entry);
+    if (entry.status === "CANDIDATE_REGISTERED") await recordCandidate(entry.candidateTaskDefinition);
+  } });
   const result = await executeAppOnlyActivation(preparation, adapters);
   return Object.freeze({ result, predecessor: preparation.predecessor, rollback: () => rollbackAppOnlyActivation({ preparation, candidateArn: result.candidateTaskDefinition, candidateDeploymentId: result.candidateDeploymentId, adapters }) });
 }
 
-async function executeFrontendCli({ sourceSha, imageRef, expectedState, run, repositoryRoot }) {
+async function executeFrontendCli({ sourceSha, imageRef, expectedState, run, recordCandidate }) {
   assert.match(imageRef || "", /^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/mscqr-web@sha256:[a-f0-9]{64}$/);
   assertCaller(json(run, ["sts", "get-caller-identity"]), NORMAL_RELEASE.role);
   const repo = json(run, ["ecr", "describe-repositories", "--repository-names", WEB_RELEASE.repository]).repositories?.[0];
@@ -216,17 +190,9 @@ async function executeFrontendCli({ sourceSha, imageRef, expectedState, run, rep
   assert.equal(liveImage?.length, 1); const liveSources = (liveImage[0].imageTags || []).filter((tag) => SHA.test(tag)); assert.equal(liveSources.length, 1, "Frontend live source identity is ambiguous");
   const liveIdentity = { sourceSha: liveSources[0], imageDigest: liveDigest, taskDefinitionArn: livePredecessor.taskDefinitionArn, desiredCount: livePredecessor.desiredCount };
   if (expectedState && !sameComponentIdentity(liveIdentity, expectedState)) {
-    if (classifyNormalLiveComponentState({ live: liveIdentity, predecessor: expectedState, candidate: { sourceSha, imageDigest: digest } }) === "LIVE_IS_EXACT_CANDIDATE") {
-      const predecessorDefinition = await adapters.describeTaskDefinition(expectedState.taskDefinitionArn);
-      const predecessorImage = predecessorDefinition.containerDefinitions?.find(({ name }) => name === WEB_RELEASE.container)?.image;
-      assert.equal(predecessorImage, `368992683803.dkr.ecr.eu-west-2.amazonaws.com/${WEB_RELEASE.repository}@${expectedState.imageDigest}`);
-      const expectedCandidate = buildNormalFrontendCandidate({ predecessor: { taskDefinitionArn: expectedState.taskDefinitionArn, desiredCount: expectedState.desiredCount, imageRef: predecessorImage, taskDefinition: predecessorDefinition }, imageRef });
-      assertFrontendCandidateReadback({ definition: liveDefinition, taskDefinitionArn: liveIdentity.taskDefinitionArn, candidate: expectedCandidate });
-      return Object.freeze({ result: { sourceSha, predecessorTaskDefinitionArn: expectedState.taskDefinitionArn, candidateTaskDefinitionArn: liveIdentity.taskDefinitionArn, imageRef, retry: "LIVE_IS_EXACT_CANDIDATE" }, predecessor: expectedState, rollback: () => rollbackFrontendToState({ state: expectedState, sourceSha, run, repositoryRoot }) });
-    }
-    throw new Error("Frontend live state is neither the authenticated predecessor nor the exact candidate.");
+    throw new Error("LIVE_IS_UNKNOWN: frontend must reconcile its durable receipt before activation.");
   }
-  const result = await executeNormalFrontendActivation({ sourceSha, imageRef, adapters });
+  const result = await executeNormalFrontendActivation({ sourceSha, imageRef, adapters, recordCandidate });
   const predecessor = { taskDefinitionArn: result.predecessorTaskDefinitionArn, desiredCount: result.predecessorDesiredCount };
   return Object.freeze({ result, predecessor, rollback: () => rollbackFrontendCandidate({ predecessor, candidateTaskDefinitionArn: result.candidateTaskDefinitionArn, ...adapters }) });
 }
@@ -265,10 +231,33 @@ export async function executeNormalRelease({ plan, sourceSha, backend, frontend,
   return Object.freeze(result);
 }
 
-export async function executeNormalComponentTransaction({ plan, sourceSha, state, stateClient, backend, frontend, smoke = async () => true, isAncestor, writeJournal = async () => {}, writerContext = {} } = {}) {
+export async function executeNormalComponentTransaction({ plan, sourceSha, state, stateClient, backend, frontend, smoke = async () => true, verifyCandidates, isAncestor, writeJournal = async () => {}, writerContext = {} } = {}) {
   assertNormalReleasePlan(plan, sourceSha); assert.ok(state); assert.equal(typeof stateClient?.advance, "function");
+  const names = ["backend", "frontend"].filter((name) => plan.classification[name]);
+  let receipt;
+  if (names.length) {
+    assert.equal(typeof verifyCandidates, "function");
+    assert.equal(typeof isAncestor, "function");
+    assert.equal(state.normalDeploymentReceipt, undefined, "Reconcile the previous normal release before preparing another");
+    receipt = { schemaVersion: 1, kind: "NORMAL_DEPLOYMENT_RECEIPT", workflow: writerContext.updatedByWorkflow,
+      githubRunId: String(writerContext.githubRunId), sourceSha, planSha256: plan.planSha256, phase: "PREPARED",
+      predecessors: Object.fromEntries(names.map((name) => [name, state.components[name]])), images: plan.images, candidates: {} };
+    await verifyCandidates(receipt.predecessors);
+    for (const previous of Object.values(receipt.predecessors)) assert.equal(isAncestor(previous.establishedThroughSha, sourceSha), true);
+    state = replaceNormalDeploymentReceipt({ client: stateClient, expected: undefined, receipt, writerContext });
+  }
+  const wrap = (name, adapter) => ({ ...adapter, deploy: (image) => adapter.deploy(image, {
+    recordCandidate: async (taskDefinitionArn) => {
+      assert.equal(receipt.candidates[name], undefined, "Candidate identity is immutable within a release");
+      const next = { ...receipt, candidates: { ...receipt.candidates, [name]: { sourceSha, establishedThroughSha: sourceSha,
+        imageDigest: plan.images[name].split("@")[1], taskDefinitionArn, desiredCount: receipt.predecessors[name].desiredCount } } };
+      state = replaceNormalDeploymentReceipt({ client: stateClient, expected: receipt, receipt: next, writerContext });
+      receipt = next;
+    },
+  }) });
   const result = await executeNormalRelease({ plan, sourceSha,
-    backend: plan.classification.backend ? backend : {}, frontend: plan.classification.frontend ? frontend : {}, smoke, writeJournal });
+    backend: plan.classification.backend ? wrap("backend", backend) : {}, frontend: plan.classification.frontend ? wrap("frontend", frontend) : {},
+    smoke: async (value) => { await smoke(value); if (names.length) await verifyCandidates(receipt.candidates); }, writeJournal });
   const changes = {};
   if (plan.classification.backend) {
     const activation = result.backend?.result || result.backend;
@@ -279,10 +268,13 @@ export async function executeNormalComponentTransaction({ plan, sourceSha, state
     changes.frontend = { sourceSha, establishedThroughSha: sourceSha, imageDigest: activation.imageRef?.split("@")[1], taskDefinitionArn: activation.candidateTaskDefinitionArn, desiredCount: state.components.frontend.desiredCount };
   }
   if (Object.keys(changes).length) {
-    // If this CAS fails after smoke, retain the exact live candidate. A retry
-    // authenticates that candidate and commits; it never lies about success.
+    assert.deepEqual(changes, receipt.candidates, "Activation did not bind all registered candidates before mutation");
+    const verified = { ...receipt, phase: "VERIFIED", verification: "STABILITY_READINESS_AUTHENTICATED_SMOKE_PASSED" };
+    state = replaceNormalDeploymentReceipt({ client: stateClient, expected: receipt, receipt: verified, writerContext });
+    // A persisted verified receipt survives both runner loss and main advancing.
+    // Its removal and the complete component transition are one DynamoDB CAS.
     await writeJournal({ status: "STATE_CAS_INTENT", stateGeneration: state.generation, components: Object.keys(changes).sort() });
-    const committed = advanceProductionComponentDeploymentStateWithRetry({ client: stateClient, current: state, lane: "NORMAL_APPLICATION", changes, isAncestor, ...writerContext });
+    const committed = advanceProductionComponentDeploymentStateWithRetry({ client: stateClient, current: state, lane: "NORMAL_APPLICATION", changes, normalReceiptSha256: normalReceiptHash(verified), isAncestor, ...writerContext });
     await writeJournal({ status: "STATE_COMMITTED", stateGeneration: committed.state.generation });
     return Object.freeze({ ...result, componentState: committed.state, stateCommitAttempts: committed.attempts });
   }
@@ -317,25 +309,119 @@ export function parseNormalComponentReleaseArgs(argv) {
   return Object.freeze({ plan, preparation });
 }
 
+export function createNormalReconciliationAdapters({ run, repositoryRoot }) {
+  const backend = createAppOnlyEcsReaders(run), frontend = createNormalFrontendAdapters({ run });
+  const service = (name) => name === "backend" ? backend.readService() : frontend.readService();
+  const definition = (name, arn) => name === "backend" ? backend.readDefinition(arn) : frontend.describeTaskDefinition(arn);
+  const readLive = async (name) => {
+    const observed = await service(name), task = await definition(name, observed.taskDefinition);
+    const container = task.containerDefinitions?.find((entry) => entry.name === (name === "backend" ? APP_ONLY.container : WEB_RELEASE.container));
+    const repository = name === "backend" ? "mscqr-backend" : WEB_RELEASE.repository;
+    assert.match(container?.image || "", new RegExp(`^368992683803\\.dkr\\.ecr\\.eu-west-2\\.amazonaws\\.com/${repository}@sha256:[a-f0-9]{64}$`));
+    const imageDigest = container.image.split("@")[1];
+    const images = json(run, ["ecr", "describe-images", "--repository-name", repository, "--image-ids", `imageDigest=${imageDigest}`]).imageDetails;
+    assert.equal(images?.length, 1); assert.equal(images[0].imageDigest, imageDigest);
+    assert.equal(images[0].repositoryName, repository); assert.equal(String(images[0].registryId), NORMAL_RELEASE.account);
+    const sources = (images[0].imageTags || []).filter((value) => SHA.test(value)); assert.equal(sources.length, 1);
+    return { sourceSha: sources[0], imageDigest, taskDefinitionArn: observed.taskDefinition, desiredCount: observed.desiredCount };
+  };
+  const authenticateCandidate = async (name, previous, candidate) => {
+    const prior = await definition(name, previous.taskDefinitionArn), next = await definition(name, candidate.taskDefinitionArn);
+    const imageRef = `368992683803.dkr.ecr.eu-west-2.amazonaws.com/${name === "backend" ? "mscqr-backend" : WEB_RELEASE.repository}@${candidate.imageDigest}`;
+    if (name === "backend") {
+      assert.equal(prior.containerDefinitions?.find((entry) => entry.name === APP_ONLY.container)?.image, `${APP_ONLY.backendRepository}@${previous.imageDigest}`);
+      assertNormalBackendExactCandidate(prior, next, candidate.imageDigest);
+    }
+    else {
+      const priorImage = prior.containerDefinitions?.find((entry) => entry.name === WEB_RELEASE.container)?.image;
+      assert.equal(priorImage, `368992683803.dkr.ecr.eu-west-2.amazonaws.com/${WEB_RELEASE.repository}@${previous.imageDigest}`);
+      const expected = buildNormalFrontendCandidate({ predecessor: { taskDefinitionArn: previous.taskDefinitionArn, desiredCount: previous.desiredCount, imageRef: priorImage, taskDefinition: prior }, imageRef });
+      assertFrontendCandidateReadback({ definition: next, taskDefinitionArn: candidate.taskDefinitionArn, candidate: expected });
+    }
+  };
+  const verify = async (identities) => {
+    for (const [name, expected] of Object.entries(identities)) {
+      const serviceName = name === "backend" ? NORMAL_RELEASE.backendService : NORMAL_RELEASE.frontendService;
+      run(["ecs", "wait", "services-stable", "--cluster", NORMAL_RELEASE.cluster, "--services", serviceName]);
+      assert.ok(sameNormalIdentity(await readLive(name), expected), "Normal verification live identity changed");
+      if (name === "backend") {
+        captureAppOnlyPredecessor(backend.readLive());
+        const response = await fetch(CANONICAL_PRODUCTION_READINESS_URL, { redirect: "error" });
+        assert.equal(response.status, 200); assertProductionBackendReadiness(await response.json(), { expectedReleaseSha: expected.sourceSha });
+      } else {
+        const observed = await frontend.readService(); captureFrontendPredecessor(observed, await frontend.describeTaskDefinition(observed.taskDefinition));
+        const listing = json(run, ["ecs", "list-tasks", "--cluster", NORMAL_RELEASE.cluster, "--service-name", NORMAL_RELEASE.frontendService, "--desired-status", "RUNNING"]);
+        assert.equal(listing.nextToken, undefined); assert.equal(listing.taskArns?.length, expected.desiredCount);
+        assert.equal(new Set(listing.taskArns).size, expected.desiredCount);
+        for (const arn of listing.taskArns) assert.match(arn, /^arn:aws:ecs:eu-west-2:368992683803:task\/mscqr-prod-euw2-main\/[a-f0-9]{32}$/);
+        const response = json(run, ["ecs", "describe-tasks", "--cluster", NORMAL_RELEASE.cluster, "--tasks", ...listing.taskArns]);
+        assert.equal(response.failures?.length, 0); assert.equal(response.tasks?.length, expected.desiredCount);
+        assert.deepEqual(response.tasks.map((task) => task.taskArn).sort(), [...listing.taskArns].sort());
+        for (const task of response.tasks) {
+          assert.equal(task.clusterArn, observed.clusterArn); assert.equal(task.group, `service:${NORMAL_RELEASE.frontendService}`);
+          assert.equal(task.startedBy, observed.deployments[0].id);
+          assert.equal(task.taskDefinitionArn, expected.taskDefinitionArn); assert.equal(task.lastStatus, "RUNNING");
+          assert.notEqual(task.healthStatus, "UNHEALTHY");
+          const container = task.containers?.find((entry) => entry.name === WEB_RELEASE.container);
+          assert.equal(container?.imageDigest, expected.imageDigest); assert.equal(container.lastStatus, "RUNNING");
+        }
+        await frontend.verifyHealth();
+      }
+    }
+    runNormalSmoke(repositoryRoot);
+    for (const [name, expected] of Object.entries(identities)) assert.ok(sameNormalIdentity(await readLive(name), expected), "Normal live identity changed during smoke");
+  };
+  const rollback = async (name, previous, candidate) => {
+    await authenticateCandidate(name, previous, candidate);
+    assert.ok(sameNormalIdentity(await readLive(name), candidate), "Normal rollback lost exact candidate ownership");
+    const serviceName = name === "backend" ? NORMAL_RELEASE.backendService : NORMAL_RELEASE.frontendService;
+    json(run, ["ecs", "update-service", "--cluster", NORMAL_RELEASE.cluster, "--service", serviceName, "--task-definition", previous.taskDefinitionArn]);
+    run(["ecs", "wait", "services-stable", "--cluster", NORMAL_RELEASE.cluster, "--services", serviceName]);
+    assert.ok(sameNormalIdentity(await readLive(name), previous), "Normal rollback predecessor mismatch");
+  };
+  return { readLive, authenticateCandidate, verify, rollback };
+}
+
 async function main() {
   const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
-  const { plan, preparation } = parseNormalComponentReleaseArgs(process.argv.slice(2));
   assertGithubOidcReleaseDeployerEnvironment();
-  assert.match(process.env.GITHUB_WORKFLOW_REF || "", /^T-ej2003\/genuine-scan-main\/.github\/workflows\/production-deploy\.yml@refs\/heads\/main$/);
+  assert.equal(process.env.GITHUB_WORKFLOW_REF, NORMAL_RECEIPT_WORKFLOW);
   assert.match(process.env.GITHUB_RUN_ID || "", /^[1-9][0-9]*$/);
   const run = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER, region: NORMAL_RELEASE.region });
   assertCaller(json(run, ["sts", "get-caller-identity"]), NORMAL_RELEASE.role);
+  for (const ref of ["HEAD", "refs/remotes/origin/main"]) {
+    const result = spawnSync("git", ["rev-parse", ref], { cwd: repositoryRoot, encoding: "utf8" });
+    assert.equal(result.status, 0); assert.equal(result.stdout.trim(), process.env.GITHUB_SHA);
+  }
+  const writerContext = { updatedByWorkflow: process.env.GITHUB_WORKFLOW_REF, githubRunId: process.env.GITHUB_RUN_ID };
+  const isAncestor = (ancestor, candidate) => spawnSync("git", ["merge-base", "--is-ancestor", ancestor, candidate], { cwd: repositoryRoot, stdio: "ignore" }).status === 0;
+  const reconciliation = createNormalReconciliationAdapters({ run, repositoryRoot });
+  if (process.argv.slice(2).length === 1 && process.argv[2] === "--reconcile") {
+    const client = createProductionComponentDeploymentStateClient({ run });
+    const initial = client.read(); assert.ok(initial, "Production component deployment state is not bootstrapped");
+    const journal = createAppOnlyEvidenceWriter({ repositoryRoot, sourceSha: process.env.GITHUB_SHA, preparationSha256: stateHash(initial) });
+    const state = await reconcileNormalDeployment({ client, sourceSha: process.env.GITHUB_SHA, isAncestor, ...reconciliation, writerContext, writeJournal: journal.writeEvidence });
+    journal.writeEvidence({ status: "RECONCILIATION_COMPLETE", stateGeneration: state.generation });
+    process.stdout.write(`${JSON.stringify({ reconciledGeneration: state.generation })}\n`); return;
+  }
+  const { plan, preparation } = parseNormalComponentReleaseArgs(process.argv.slice(2));
   const stateClient = createProductionComponentDeploymentStateClient({ run }); const state = stateClient.read();
   assert.ok(state, "Production component deployment state is not bootstrapped."); assert.equal(state.generation, preparation.stateGeneration, "Component deployment state changed; reprepare release."); assert.equal(stateHash(state), preparation.stateSha256, "Component deployment state changed; reprepare release.");
   const journalDirectory = process.env.MSCQR_APP_ONLY_JOURNAL_DIR ? path.join(process.env.MSCQR_APP_ONLY_JOURNAL_DIR, "release") : undefined;
   const journal = createAppOnlyEvidenceWriter({ repositoryRoot, sourceSha: plan.sourceSha, preparationSha256: sha256(JSON.stringify(preparation)), directory: journalDirectory });
-  const component = (name, deploy) => ({ deploy: (image) => deploy({ sourceSha: plan.sourceSha, imageRef: image, expectedState: state.components[name], run, repositoryRoot }), rollback: (value) => value.rollback() });
+  for (const [name, imageRef] of Object.entries(plan.images)) {
+    const repository = name === "backend" ? "mscqr-backend" : WEB_RELEASE.repository, digest = imageRef.split("@")[1];
+    const images = json(run, ["ecr", "describe-images", "--repository-name", repository, "--image-ids", `imageDigest=${digest}`]).imageDetails;
+    assert.equal(images?.length, 1); assert.equal(images[0].imageDigest, digest);
+    assert.equal(images[0].repositoryName, repository); assert.equal(String(images[0].registryId), NORMAL_RELEASE.account);
+    assert.deepEqual((images[0].imageTags || []).filter((tag) => SHA.test(tag)), [plan.sourceSha], "Published normal image source mismatch");
+  }
+  const component = (name, deploy) => ({ deploy: (image, { recordCandidate }) => deploy({ sourceSha: plan.sourceSha, imageRef: image, expectedState: state.components[name], run, repositoryRoot, recordCandidate }), rollback: (value) => value.rollback() });
   let result;
   try {
     result = await executeNormalComponentTransaction({ plan, sourceSha: plan.sourceSha, state, stateClient,
       backend: component("backend", executeBackendCli), frontend: component("frontend", executeFrontendCli), smoke: async () => { runNormalSmoke(repositoryRoot); }, writeJournal: journal.writeEvidence,
-      isAncestor: (ancestor, candidate) => spawnSync("git", ["merge-base", "--is-ancestor", ancestor, candidate], { cwd: repositoryRoot, stdio: "ignore" }).status === 0,
-      writerContext: { updatedByWorkflow: process.env.GITHUB_WORKFLOW_REF, githubRunId: process.env.GITHUB_RUN_ID } });
+      verifyCandidates: reconciliation.verify, isAncestor, writerContext });
   } catch (error) {
     journal.writeEvidence({ status: "FINAL_FAILURE", error: error.message.slice(0, 512) }); throw error;
   }

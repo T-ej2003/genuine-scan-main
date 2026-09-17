@@ -253,21 +253,29 @@ test("combined component transaction rolls every mutated service back before sta
     database: { sourceSha: prior, releaseIdentity: "db" }, security: { sourceSha: prior, releaseIdentity: "security" },
   } });
   const plan = buildNormalReleasePlan({ sourceSha: candidate, componentFiles: { backendFiles: ["backend/src/services/batchService.ts"], frontendFiles: ["src/App.tsx"], securityFiles: [], databaseFiles: [] }, images: { backend: backendImage, frontend: frontendImage } });
-  const events = [], backend = { deploy: async () => ({ result: { candidateTaskDefinition: `arn:aws:ecs:eu-west-2:368992683803:task-definition/${APP_ONLY.family}:15`, candidateDeploymentId: "ecs-svc/15", deployedBackendDigest: backendImage.split("@")[1] }, rollback: async () => events.push("backend-rollback") }), rollback: async (value) => value.rollback() };
+  const events = [], backend = { deploy: async (_, { recordCandidate }) => {
+    const candidateTaskDefinition = `arn:aws:ecs:eu-west-2:368992683803:task-definition/${APP_ONLY.family}:15`;
+    await recordCandidate(candidateTaskDefinition);
+    return { result: { candidateTaskDefinition, candidateDeploymentId: "ecs-svc/15", deployedBackendDigest: backendImage.split("@")[1] }, rollback: async () => events.push("backend-rollback") };
+  }, rollback: async (value) => value.rollback() };
   const frontendFailure = { deploy: async () => { throw new Error("frontend failed"); }, rollback: async () => events.push("frontend-rollback") };
   let committed = false;
-  await assert.rejects(() => executeNormalComponentTransaction({ plan, sourceSha: candidate, state, stateClient: { advance: () => { committed = true; } }, backend, frontend: frontendFailure, smoke: async () => true, isAncestor: () => true }), /frontend failed/);
+  let stored = structuredClone(state);
+  const stateClient = { read: () => structuredClone(stored), advance: (_, next) => { stored = structuredClone(next); committed = next.components.backend.sourceSha === candidate; } };
+  const context = { stateClient, verifyCandidates: async () => {}, writerContext: { updatedByWorkflow: "T-ej2003/genuine-scan-main/.github/workflows/production-deploy.yml@refs/heads/main", githubRunId: "123" } };
+  await assert.rejects(() => executeNormalComponentTransaction({ plan, sourceSha: candidate, state, ...context, backend, frontend: frontendFailure, smoke: async () => true, isAncestor: () => true }), /frontend failed/);
   assert.deepEqual(events, ["backend-rollback"]); assert.equal(committed, false);
-  const frontend = { deploy: async () => ({ result: { candidateTaskDefinitionArn: taskArn.replace(":20", ":21"), imageRef: frontendImage }, rollback: async () => events.push("frontend-rollback") }), rollback: async (value) => value.rollback() };
-  const complete = await executeNormalComponentTransaction({ plan, sourceSha: candidate, state, stateClient: { read: () => state, advance: () => { committed = true; } }, backend, frontend, smoke: async () => true, isAncestor: () => true });
+  stored = structuredClone(state);
+  const frontend = { deploy: async (_, { recordCandidate }) => { const candidateTaskDefinitionArn = taskArn.replace(":20", ":21"); await recordCandidate(candidateTaskDefinitionArn); return { result: { candidateTaskDefinitionArn, imageRef: frontendImage }, rollback: async () => events.push("frontend-rollback") }; }, rollback: async (value) => value.rollback() };
+  const complete = await executeNormalComponentTransaction({ plan, sourceSha: candidate, state, ...context, backend, frontend, smoke: async () => true, isAncestor: () => true });
   assert.equal(committed, true); assert.equal(complete.componentState.components.backend.sourceSha, candidate); assert.equal(complete.componentState.components.backend.establishedThroughSha, candidate); assert.equal(complete.componentState.components.frontend.sourceSha, candidate); assert.equal(complete.componentState.components.frontend.establishedThroughSha, candidate);
 });
 
-test("retry accepts only the exact already-live candidate and rejects unknown live state", () => {
+test("live source equality without a durable receipt never authorizes reconciliation", () => {
   const predecessor = { sourceSha: "a".repeat(40), imageDigest: `sha256:${"1".repeat(64)}`, taskDefinitionArn: "task:1", desiredCount: 2 };
   const candidate = { sourceSha: "b".repeat(40), imageDigest: `sha256:${"2".repeat(64)}` };
   assert.equal(classifyNormalLiveComponentState({ live: predecessor, predecessor, candidate }), "LIVE_IS_PREDECESSOR");
-  assert.equal(classifyNormalLiveComponentState({ live: { ...candidate, taskDefinitionArn: "task:2", desiredCount: 2 }, predecessor, candidate }), "LIVE_IS_EXACT_CANDIDATE");
+  assert.equal(classifyNormalLiveComponentState({ live: { ...candidate, taskDefinitionArn: "task:2", desiredCount: 2 }, predecessor, candidate }), "LIVE_IS_UNKNOWN");
   assert.equal(classifyNormalLiveComponentState({ live: { ...candidate, taskDefinitionArn: "task:1" }, predecessor, candidate }), "LIVE_IS_UNKNOWN");
   assert.equal(classifyNormalLiveComponentState({ live: { ...candidate, sourceSha: "c".repeat(40), taskDefinitionArn: "task:3" }, predecessor, candidate }), "LIVE_IS_UNKNOWN");
 });
