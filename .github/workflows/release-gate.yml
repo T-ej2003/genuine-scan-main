@@ -940,7 +940,7 @@ jobs:
           set -euo pipefail
           receipt_args=()
           if [[ "${{ inputs.release_mode }}" == "rotation-overlap" ]]; then
-            receipt_args=(--rotation-fixture-sha256 "$ROTATION_FIXTURE_SHA256" --environment-approval "$PRODUCTION_ENVIRONMENT_APPROVAL_FILE" --environment-approval-sha256 "$PRODUCTION_ENVIRONMENT_APPROVAL_SHA256" --deployment-receipt-output "$OVERLAP_DEPLOYMENT_RECEIPT_FILE")
+            receipt_args=(--rotation-fixture-sha256 "$ROTATION_FIXTURE_SHA256" --deployment-receipt-output "$OVERLAP_DEPLOYMENT_RECEIPT_FILE")
           fi
           node scripts/aws/run-production-cutover.mjs \
             --mode rotation-overlap \
@@ -952,6 +952,8 @@ jobs:
             --task-definition "$EXISTING_TASK_DEFINITION_ARN" \
             --readiness-file "$OVERLAP_READINESS_EVIDENCE_FILE" \
             --readiness-sha256 "$OVERLAP_READINESS_EVIDENCE_SHA256" \
+            --environment-approval "$PRODUCTION_ENVIRONMENT_APPROVAL_FILE" \
+            --environment-approval-sha256 "$PRODUCTION_ENVIRONMENT_APPROVAL_SHA256" \
             "${receipt_args[@]}" > "$RUNNER_TEMP/rotation-deployment-result.json"
           chmod 600 "$RUNNER_TEMP/rotation-deployment-result.json"
           echo "sha256=$(sha256sum "$RUNNER_TEMP/rotation-deployment-result.json" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"

@@ -150,7 +150,7 @@ export function createProductionOverlapDeploymentAdapter({ run, runScript = exec
         runScript(deployScript, [], { cwd: process.cwd(), env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
         const metadata = JSON.parse(readFileSync(metadataFile, "utf8"));
         if (metadata.newTaskDefinitionArn !== taskDefinitionArn) throw new Error("Governed overlap deployment reported a different task-definition ARN.");
-        return { updateServiceCount: 1, propagateTags: "TASK_DEFINITION", taskDefinitionArn, rotationStateSha256: suppliedRotationStateSha256, mutationPayload: { cluster, service, taskDefinitionArn, enableExecuteCommand: true, propagateTags: "TASK_DEFINITION", rotationStateSha256: suppliedRotationStateSha256, expectedCurrentTaskDefinitionArn: expectedCurrentTaskDefinitionArn || null }, metadata };
+        return { disposition: "APPLIED", updateServiceCount: 1, propagateTags: "TASK_DEFINITION", taskDefinitionArn, rotationStateSha256: suppliedRotationStateSha256, mutationPayload: { cluster, service, taskDefinitionArn, enableExecuteCommand: true, propagateTags: "TASK_DEFINITION", rotationStateSha256: suppliedRotationStateSha256, expectedCurrentTaskDefinitionArn: expectedCurrentTaskDefinitionArn || null }, metadata };
       } finally {
         rmSync(temporaryDirectory, { recursive: true, force: true });
       }

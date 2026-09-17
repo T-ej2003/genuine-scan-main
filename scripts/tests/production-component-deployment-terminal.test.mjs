@@ -12,7 +12,8 @@ import { completedBackendRecoveryEvidence } from "./fixtures/completed-backend-r
 import { taskDefinitionFingerprint } from "../aws/stage-b-task-definition-recovery-contract.mjs";
 import { createAppOnlyEcsReaders } from "../aws/production-app-only-adapters.mjs";
 import { assertBackendHealthRecoveryTaskArn } from "../aws/production-backend-health-recovery-contract.mjs";
-import { commitRotationComponentState } from "../aws/commit-production-component-rotation-state.mjs";
+import { commitRotationComponentState, rotationReleaseIdentity } from "../aws/commit-production-component-rotation-state.mjs";
+import { authenticateRotationReconciliation, runReconciledRotationDeployment } from "../aws/production-rotation-reconciliation.mjs";
 import { commitSecurityComponentState } from "../aws/commit-production-component-security-state.mjs";
 import { READY_FOR_OVERLAP_DEPLOYMENT_STAGES } from "../aws/production-overlap-readiness-contract.mjs";
 import { writeOverlapReadinessEvidence } from "../aws/produce-production-overlap-readiness-evidence.mjs";
@@ -20,7 +21,7 @@ import { classifyNormalLiveComponentState } from "../aws/production-normal-relea
 
 const source = "b".repeat(40), recoverySource = "c".repeat(40);
 const state = () => createProductionComponentDeploymentState({ components: {
-  backend: { sourceSha: "a".repeat(40), establishedThroughSha: "a".repeat(40), imageDigest: `sha256:${"1".repeat(64)}`, taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend:1", desiredCount: 2 },
+  backend: { sourceSha: "a".repeat(40), establishedThroughSha: "a".repeat(40), imageDigest: `sha256:${"1".repeat(64)}`, taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:1", desiredCount: 2 },
   frontend: { sourceSha: "a".repeat(40), establishedThroughSha: "a".repeat(40), imageDigest: `sha256:${"2".repeat(64)}`, taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-frontend:1", desiredCount: 2 }, database: null, security: null,
 } });
 
@@ -121,21 +122,54 @@ test("backend recovery forwards its explicit regression authority through the CA
   assert.equal(commitBackendRecoveryComponentState({ evidence, run: aws, client: { read: () => initial, advance: () => {} }, isProtectedMainAncestor: () => true }).state.components.backend.taskDefinitionArn, live.taskDefinitionArn);
 });
 
-test("overlap and cleanup atomically record the live backend for the next normal release", () => {
+test("overlap and cleanup atomically record the live backend for the next normal release", async () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), "component-rotation-")); const rotationId = "rotation-test-1234"; const rotationStateSha256 = "c".repeat(64);
   const taskDefinitionArn = `arn:aws:ecs:eu-west-2:368992683803:task-definition/${APP_ONLY.family}:7`, imageDigest = `sha256:${"3".repeat(64)}`, imageSource = "a".repeat(40);
-  const readiness = writeOverlapReadinessEvidence({ outputPath: path.join(dir, "readiness.json"), sourceSha: source, rotationId, rotationStateSha256, stages: Object.fromEntries(READY_FOR_OVERLAP_DEPLOYMENT_STAGES.map((name) => [name, { valid: true, evidenceRef: `test://${name}`, evidenceSha256: crypto.createHash("sha256").update(name).digest("hex"), identityBindings: { sourceSha: source, rotationId, ...(name === "overlapTaskDefinition" ? { taskDefinitionArn } : {}) } }])) });
+  const readiness = writeOverlapReadinessEvidence({ outputPath: path.join(dir, "readiness.json"), sourceSha: source, rotationId, rotationStateSha256, stages: Object.fromEntries(READY_FOR_OVERLAP_DEPLOYMENT_STAGES.map((name) => [name, { valid: true, evidenceRef: `test://${name}`, evidenceSha256: crypto.createHash("sha256").update(name).digest("hex"), identityBindings: { sourceSha: source, rotationId, ...(name === "overlapTaskDefinition" ? { taskDefinitionArn, imageDigest, expectedCurrentTaskDefinitionArn: state().components.backend.taskDefinitionArn, predecessorSha256: canonicalSha256(state().components.backend), desiredCount: "2" } : {}) } }])) });
   const live = { sourceSha: imageSource, imageDigest, taskDefinitionArn, desiredCount: 2 };
-  const readers = { readBackendImageSource: () => imageSource, readLive: () => ({
-    service: { clusterArn: APP_ONLY.clusterArn, serviceArn: APP_ONLY.serviceArn, serviceName: APP_ONLY.service, status: "ACTIVE", taskDefinition: taskDefinitionArn, desiredCount: 2, runningCount: 2, pendingCount: 0, deployments: [{ id: "ecs-svc/1", status: "PRIMARY", rolloutState: "COMPLETED", taskDefinition: taskDefinitionArn }] },
+  const readers = { readDefinition: (arn) => ({ taskDefinitionArn: arn, containerDefinitions: [{ name: APP_ONLY.container, image: `${APP_ONLY.backendRepository}@${state().components.backend.imageDigest}` }] }), readBackendImageSource: () => imageSource, readLive: () => ({
+    service: { clusterArn: APP_ONLY.clusterArn, serviceArn: APP_ONLY.serviceArn, serviceName: APP_ONLY.service, status: "ACTIVE", enableExecuteCommand: true, propagateTags: "TASK_DEFINITION", taskDefinition: taskDefinitionArn, desiredCount: 2, runningCount: 2, pendingCount: 0, deployments: [{ id: "ecs-svc/1", status: "PRIMARY", rolloutState: "COMPLETED", taskDefinition: taskDefinitionArn }] },
     definition: { taskDefinitionArn, family: APP_ONLY.family, status: "ACTIVE", taskRoleArn: APP_ONLY.taskRoleArn, executionRoleArn: APP_ONLY.executionRoleArn, networkMode: "awsvpc", runtimePlatform: { cpuArchitecture: "X86_64", operatingSystemFamily: "LINUX" }, containerDefinitions: [{ name: "backend", image: `${APP_ONLY.backendRepository}@${imageDigest}` }] },
     tasks: ["a", "b"].map((taskArn) => ({ taskArn, clusterArn: APP_ONLY.clusterArn, group: `service:${APP_ONLY.service}`, taskDefinitionArn, lastStatus: "RUNNING", healthStatus: "HEALTHY", startedBy: "ecs-svc/1", containers: [{ name: "backend", imageDigest }] })),
   }) };
   for (const mode of ["rotation-overlap", "rotation-cleanup"]) {
     const initial = state(); let writes = 0;
-    const deployment = { sourceSha: source, transitionMode: mode, rotationId, rotationStateSha256, readinessSha256: readiness.evidenceSha256, workflowRunId: "123", workflowRunAttempt: "1", terminalState: mode === "rotation-overlap" ? "DEPLOYED_PENDING_VERIFICATION" : "DEPLOYED", updateServiceCount: 1, taskDefinitionArn,
-      metadata: { mode: "existing-task-definition", clusterName: APP_ONLY.cluster, serviceName: APP_ONLY.service, containerName: APP_ONLY.container, newTaskDefinitionArn: taskDefinitionArn, observedTaskDefinitionArn: taskDefinitionArn, expectedImageDigest: imageDigest, observedImageDigest: imageDigest, desiredCount: 2, runningCount: 2, pendingCount: 0, serviceStable: true } };
+    const deployment = { disposition: "APPLIED", sourceSha: source, transitionMode: mode, rotationId, rotationStateSha256, readinessSha256: readiness.evidenceSha256, workflowRunId: "123", workflowRunAttempt: "1", terminalState: mode === "rotation-overlap" ? "DEPLOYED_PENDING_VERIFICATION" : "DEPLOYED", updateServiceCount: 1, taskDefinitionArn,
+      metadata: { mode: "existing-task-definition", clusterName: APP_ONLY.cluster, serviceName: APP_ONLY.service, containerName: APP_ONLY.container, previousTaskDefinitionArn: initial.components.backend.taskDefinitionArn, newTaskDefinitionArn: taskDefinitionArn, observedTaskDefinitionArn: taskDefinitionArn, expectedImageDigest: imageDigest, observedImageDigest: imageDigest, desiredCount: 2, runningCount: 2, pendingCount: 0, serviceStable: true } };
     const options = { mode, sourceSha: source, rotationId, rotationStateSha256, readinessFile: readiness.outputPath, readinessSha256: readiness.evidenceSha256, deployment, readers, client: { read: () => initial, advance: (_, next) => { writes++; assert.equal(next.components.backend.taskDefinitionArn, taskDefinitionArn); assert.equal(next.components.security.sourceSha, source); } }, isProtectedMainAncestor: () => true, writerContext: { githubRunId: "123", githubRunAttempt: "1" } };
+    let switched = false, ecsWrites = 0;
+    const transitionReaders = { ...readers, readLive: () => {
+      const snapshot = readers.readLive();
+      if (!switched) {
+        const predecessor = initial.components.backend;
+        snapshot.service.taskDefinition = predecessor.taskDefinitionArn;
+        snapshot.service.deployments[0].taskDefinition = predecessor.taskDefinitionArn;
+        snapshot.definition.taskDefinitionArn = predecessor.taskDefinitionArn;
+        snapshot.definition.containerDefinitions[0].image = `${APP_ONLY.backendRepository}@${predecessor.imageDigest}`;
+        for (const task of snapshot.tasks) { task.taskDefinitionArn = predecessor.taskDefinitionArn; task.containers[0].imageDigest = predecessor.imageDigest; }
+      }
+      return snapshot;
+    } };
+    const transitionInput = { verifyApplied: async () => {}, readiness: readiness.evidence, current: initial, readers: transitionReaders, expectedCurrentTaskDefinitionArn: initial.components.backend.taskDefinitionArn, taskDefinitionArn, imageDigest, mode, releaseIdentity: rotationReleaseIdentity({ mode, sourceSha: source, rotationId, rotationStateSha256, readinessSha256: readiness.evidenceSha256, readiness: readiness.evidence, expectedCurrentTaskDefinitionArn: initial.components.backend.taskDefinitionArn }), isProtectedMainAncestor: () => true, deploy: () => { ecsWrites++; switched = true; return deployment; } };
+    assert.equal((await runReconciledRotationDeployment(transitionInput)).updateServiceCount, 1);
+    assert.equal((await runReconciledRotationDeployment(transitionInput)).updateServiceCount, 0);
+    assert.equal(ecsWrites, 1);
+    await assert.rejects(() => runReconciledRotationDeployment({ ...transitionInput, verifyApplied: () => { throw new Error("Version health failed"); } }), /Version health/);
+    assert.equal(ecsWrites, 1);
+    await assert.rejects(() => runReconciledRotationDeployment({ ...transitionInput, expectedCurrentTaskDefinitionArn: taskDefinitionArn }), /predecessor/);
+    for (const replacement of [taskDefinitionArn.replace(":7", ":9"), taskDefinitionArn.replace("368992683803", "111111111111"), taskDefinitionArn.replace("eu-west-2", "eu-west-1")]) {
+      const unknownReaders = { ...readers, readLive: () => {
+        const snapshot = readers.readLive(); snapshot.service.taskDefinition = replacement; snapshot.service.deployments[0].taskDefinition = replacement;
+        snapshot.definition.taskDefinitionArn = replacement; for (const task of snapshot.tasks) task.taskDefinitionArn = replacement; return snapshot;
+      } };
+      await assert.rejects(() => runReconciledRotationDeployment({ ...transitionInput, readers: unknownReaders }));
+    }
+    const wrongDigestReaders = { ...readers, readLive: () => {
+      const snapshot = readers.readLive(); const wrong = `sha256:${"f".repeat(64)}`;
+      snapshot.definition.containerDefinitions[0].image = `${APP_ONLY.backendRepository}@${wrong}`;
+      for (const task of snapshot.tasks) task.containers[0].imageDigest = wrong; return snapshot;
+    } };
+    await assert.rejects(() => runReconciledRotationDeployment({ ...transitionInput, readers: wrongDigestReaders }), /digest/);
     assert.equal(classifyNormalLiveComponentState({ live, predecessor: initial.components.backend, candidate: { sourceSha: recoverySource, imageDigest: `sha256:${"4".repeat(64)}` } }), "LIVE_IS_UNKNOWN");
     const result = commitRotationComponentState(options);
     assert.equal(writes, 1); assert.deepEqual(result.state.components.backend, { ...live, establishedThroughSha: source });
@@ -149,5 +183,30 @@ test("overlap and cleanup atomically record the live backend for the next normal
     assert.throws(() => commitRotationComponentState({ ...options, deployment: { ...deployment, workflowRunAttempt: "2" } }), /mismatch/);
     assert.throws(() => commitRotationComponentState({ ...options, readinessSha256: "d".repeat(64) }), /does not match/);
     assert.equal(writes, 1);
+    // A successful ECS switch is followed by an unavailable or ambiguously successful state write.
+    for (const ambiguous of [false, true]) {
+      let durable = initial, attempts = 0;
+      const client = { read: () => durable, advance: (_, next) => { attempts++; if (ambiguous || attempts > 1) durable = next; if (attempts === 1) throw new Error("DynamoDB response lost"); } };
+      assert.throws(() => commitRotationComponentState({ ...options, client }), /response lost/);
+      const retryInput = { verifyApplied: async () => {}, readiness: readiness.evidence, current: durable, readers, expectedCurrentTaskDefinitionArn: initial.components.backend.taskDefinitionArn, taskDefinitionArn, imageDigest, mode, releaseIdentity: rotationReleaseIdentity({ mode, sourceSha: source, rotationId, rotationStateSha256, readinessSha256: readiness.evidenceSha256, readiness: readiness.evidence, expectedCurrentTaskDefinitionArn: initial.components.backend.taskDefinitionArn }), isProtectedMainAncestor: () => true };
+      const reconciliation = authenticateRotationReconciliation(retryInput);
+      assert.equal(reconciliation.disposition, "ALREADY_APPLIED");
+      const retryDeployment = await runReconciledRotationDeployment({ ...retryInput, deploy: () => assert.fail("A retry must not issue a second ECS mutation") });
+      assert.equal(retryDeployment.updateServiceCount, 0);
+      const retried = commitRotationComponentState({ ...options, client, deployment: { ...deployment, disposition: "ALREADY_APPLIED", updateServiceCount: 0, metadata: reconciliation.metadata } });
+      assert.equal(attempts, ambiguous ? 1 : 2);
+      assert.equal(classifyNormalLiveComponentState({ live, predecessor: retried.state.components.backend, candidate }), "LIVE_IS_PREDECESSOR");
+      assert.deepEqual(durable.components.frontend, initial.components.frontend);
+    }
+    const unknown = structuredClone(initial); unknown.components.backend.sourceSha = recoverySource;
+    assert.throws(() => commitRotationComponentState({ ...options, client: { read: () => unknown } }), /predecessor/);
+    for (const [key, value] of Object.entries({ rotationId: "wrong-rotation", sourceSha: recoverySource, rotationStateSha256: "0".repeat(64), readinessSha256: "0".repeat(64), taskDefinitionArn: taskDefinitionArn.replace(":7", ":9"), disposition: "FORGED", updateServiceCount: 0 })) {
+      assert.throws(() => commitRotationComponentState({ ...options, deployment: { ...deployment, [key]: value } }), undefined, key);
+    }
+    for (const [key, value] of Object.entries({ desiredCount: 3, runningCount: 1, pendingCount: 1, serviceName: "wrong", clusterArn: "wrong", enableExecuteCommand: false, propagateTags: "NONE" })) {
+      const badReaders = { ...readers, readLive: () => { const snapshot = readers.readLive(); snapshot.service[key] = value; return snapshot; } };
+      assert.throws(() => commitRotationComponentState({ ...options, readers: badReaders }), undefined, key);
+    }
+    assert.throws(() => commitRotationComponentState({ ...options, isProtectedMainAncestor: () => false }), /protected-main/);
   }
 });

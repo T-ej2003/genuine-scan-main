@@ -10,9 +10,11 @@ import { readBoundStageBPrivateJson } from "./stage-b-artifact-contract.mjs";
 import { createAppOnlyEcsReaders } from "./production-app-only-adapters.mjs";
 import { APP_ONLY, captureAppOnlyPredecessor } from "./production-app-only-contract.mjs";
 import { assertGithubOidcReleaseDeployerEnvironment, createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import { assertRotationBackendTaskArn, authenticateRotationReconciliation } from "./production-rotation-reconciliation.mjs";
 
 const SHA = /^[a-f0-9]{40}$/, HASH = /^[a-f0-9]{64}$/;
 const hash = (value) => crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex");
+export const rotationReleaseIdentity = ({ mode, sourceSha, rotationId, rotationStateSha256, readinessSha256, readiness, expectedCurrentTaskDefinitionArn }) => hash({ mode, sourceSha, rotationId, rotationStateSha256, readinessSha256, readiness, expectedCurrentTaskDefinitionArn });
 
 export function commitRotationComponentState({ mode, sourceSha, rotationId, rotationStateSha256, readinessFile, readinessSha256, deployment, readers, client, isProtectedMainAncestor, writerContext } = {}) {
   assert.ok(["rotation-overlap", "rotation-cleanup"].includes(mode)); assert.match(sourceSha || "", SHA); assert.match(rotationStateSha256 || "", HASH); assert.match(readinessSha256 || "", HASH);
@@ -24,7 +26,7 @@ export function commitRotationComponentState({ mode, sourceSha, rotationId, rota
   for (const [key, expected] of Object.entries({ sourceSha, transitionMode: mode, rotationId, rotationStateSha256, readinessSha256, workflowRunId: writerContext.githubRunId, workflowRunAttempt: writerContext.githubRunAttempt }))
     assert.equal(deployment?.[key], expected, `Rotation deployment ${key} mismatch`);
   assert.equal(deployment.terminalState, mode === "rotation-overlap" ? "DEPLOYED_PENDING_VERIFICATION" : "DEPLOYED");
-  assert.equal(deployment.updateServiceCount, 1);
+  assert.ok((deployment.disposition === "ALREADY_APPLIED" && deployment.updateServiceCount === 0) || (deployment.disposition === "APPLIED" && deployment.updateServiceCount === 1), "Rotation mutation accounting is invalid.");
   const live = captureAppOnlyPredecessor(readers.readLive());
   const metadata = deployment.metadata;
   assert.equal(deployment.taskDefinitionArn, readiness.evidence.overlapTaskDefinition.identityBindings.taskDefinitionArn);
@@ -34,7 +36,10 @@ export function commitRotationComponentState({ mode, sourceSha, rotationId, rota
   const imageSource = readers.readBackendImageSource(live.backendDigest);
   assert.equal(isProtectedMainAncestor(imageSource), true, "Rotated backend source is not protected-main history.");
   const backend = { sourceSha: imageSource, establishedThroughSha: sourceSha, imageDigest: live.backendDigest, taskDefinitionArn: live.taskDefinitionArn, desiredCount: live.desiredCount };
-  const releaseIdentity = hash({ mode, sourceSha, rotationId, rotationStateSha256, readinessSha256, readiness: readiness.evidence });
+  const releaseIdentity = rotationReleaseIdentity({ mode, sourceSha, rotationId, rotationStateSha256, readinessSha256, readiness: readiness.evidence, expectedCurrentTaskDefinitionArn: metadata.previousTaskDefinitionArn });
+  const reconciled = authenticateRotationReconciliation({ readiness: readiness.evidence, current, readers, expectedCurrentTaskDefinitionArn: metadata.previousTaskDefinitionArn, taskDefinitionArn: deployment.taskDefinitionArn, imageDigest: metadata.expectedImageDigest, releaseIdentity, mode, isProtectedMainAncestor });
+  assert.equal(reconciled.disposition, "ALREADY_APPLIED");
+  assert.deepEqual(reconciled.backend, backend);
   return advanceProductionComponentDeploymentStateWithRetry({ client, current, lane: "SECURITY_INFRASTRUCTURE", changes: { security: { sourceSha, releaseIdentity }, backend }, emergencyCompletion: { mode, sourceSha, evidenceSha256: releaseIdentity }, ...writerContext });
 }
 
@@ -47,7 +52,7 @@ function main() {
   const caller = JSON.parse(run(["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"])); assert.equal(String(caller.Account), PRODUCTION_COMPONENT_STATE.account); assert.match(caller.Arn || "", /^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\/[^/]+$/);
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
   const deployment = readBoundStageBPrivateJson({ filePath: values.deployment, expectedSha256: values["deployment-sha256"], label: "Rotation deployment result" });
-  const result = commitRotationComponentState({ mode: values.mode, sourceSha: values["source-sha"], rotationId: values["rotation-id"], rotationStateSha256: values["rotation-state-sha256"], readinessFile: values.readiness, readinessSha256: values["readiness-sha256"], deployment, readers: createAppOnlyEcsReaders(run), client: createProductionComponentDeploymentStateClient({ run }), writerContext: { updatedByWorkflow: process.env.GITHUB_WORKFLOW_REF, githubRunId: process.env.GITHUB_RUN_ID, githubRunAttempt: process.env.GITHUB_RUN_ATTEMPT }, isProtectedMainAncestor: (source) => {
+  const result = commitRotationComponentState({ mode: values.mode, sourceSha: values["source-sha"], rotationId: values["rotation-id"], rotationStateSha256: values["rotation-state-sha256"], readinessFile: values.readiness, readinessSha256: values["readiness-sha256"], deployment, readers: createAppOnlyEcsReaders(run, { assertDefinitionArn: assertRotationBackendTaskArn }), client: createProductionComponentDeploymentStateClient({ run }), writerContext: { updatedByWorkflow: process.env.GITHUB_WORKFLOW_REF, githubRunId: process.env.GITHUB_RUN_ID, githubRunAttempt: process.env.GITHUB_RUN_ATTEMPT }, isProtectedMainAncestor: (source) => {
     try { execFileSync("git", ["merge-base", "--is-ancestor", source, "refs/remotes/origin/main"], { cwd: root, stdio: "ignore" }); return true; } catch { return false; }
   } });
   process.stdout.write(`${JSON.stringify({ generation: result.state.generation, component: "security", sourceSha: result.state.components.security.sourceSha })}\n`);

@@ -159,7 +159,7 @@ export async function runGovernedOverlapDeployment({ readiness, sourceSha, rotat
   assertReadyForOverlapDeployment(readiness, { sourceSha, rotationId, rotationStateSha256 });
   if (!deployOverlap || typeof deployOverlap.run !== "function") throw new Error("Governed overlap deployment adapter is required.");
   const deployment = await deployOverlap.run({ readiness, readinessSha256, rotationStateSha256, taskDefinitionArn });
-  if (deployment?.updateServiceCount !== 1 || deployment.propagateTags !== "TASK_DEFINITION" || deployment.taskDefinitionArn !== taskDefinitionArn) throw new Error("Governed overlap deployment payload is invalid.");
+  if (!(deployment?.updateServiceCount === 1 || deployment?.updateServiceCount === 0 && deployment.disposition === "ALREADY_APPLIED") || deployment.propagateTags !== "TASK_DEFINITION" || deployment.taskDefinitionArn !== taskDefinitionArn) throw new Error("Governed overlap deployment payload is invalid.");
   return deployment;
 }
 
@@ -385,6 +385,7 @@ export async function runProductionCutoverControlPlane(input = {}) {
   results.overlapTaskDefinition = { ...task, sourceSha, rotationId, rotationStateSha256, rotationPrepared: true, rotationInfraConverged: true, activeKeyVersion: artifact.activeKeyVersion, bindings: task.input?.secretBindings || runtimeOverlapTask.input?.secretBindings };
   results.registrationReadback = { ...results.overlapTaskDefinition, registeredTaskDefinitionArn: task.taskDefinitionArn, sourceSha, rotationId, rotationStateSha256: rotation.rotationStateSha256, rotationPrepared: true, rotationInfraConverged: true };
 
+  const expectedImageDigest = task.taskDefinition.containerDefinitions?.find(({ name }) => name === "backend")?.image?.split("@").at(-1);
   const stages = {
     imageAuthorization: stageEvidence("imageAuthorization", imageAuthorization, { sourceSha }),
     iamPreflight: stageEvidence("iamPreflight", iamReport.evidence || iamReport, { sourceSha }),
@@ -393,7 +394,7 @@ export async function runProductionCutoverControlPlane(input = {}) {
     verifierIdentity: stageEvidence("verifierIdentity", identities.verifier, { sourceSha }),
     stageA: stageEvidence("stageA", stageAResult, { sourceSha }),
     artifactSigning: stageEvidence("artifactSigning", results.artifactSigning, { sourceSha }),
-    overlapTaskDefinition: stageEvidence("overlapTaskDefinition", task, { sourceSha, taskDefinitionArn: task.taskDefinitionArn }),
+    overlapTaskDefinition: stageEvidence("overlapTaskDefinition", task, { sourceSha, taskDefinitionArn: task.taskDefinitionArn, imageDigest: expectedImageDigest }),
     inventory: stageEvidence("inventory", inventoryResult, { sourceSha, rotationId }),
     rotationPrepare: stageEvidence("rotationPrepare", rotation, { sourceSha, rotationId }),
   };
@@ -415,7 +416,6 @@ export async function runProductionCutoverControlPlane(input = {}) {
   recordMutation(mutations, "M6_ECS_UPDATE_SERVICE", deployment);
   results.deployment = { ...deployment, sourceSha, rotationId, rotationStateSha256, ecsUpdateServiceCount: deployment.updateServiceCount };
 
-  const expectedImageDigest = task.taskDefinition.containerDefinitions?.find(({ name }) => name === "backend")?.image?.split("@").at(-1);
   const overlapVerification = await runPostOverlapVerification({ deployment, sourceSha, rotationId, rotationStateSha256, rotationFixtureSha256, taskDefinitionArn: task.taskDefinitionArn, expectedImageDigest, verifierSession, postDeploy, ecsExec, rotationVerify: rotationPrepare?.verifyOverlap });
   const { deployed, execProof } = overlapVerification;
   results.postDeploy = { ...deployed, sourceSha, rotationId, selectedTaskArn: deployed.taskArn, propagateTags: deployment.propagateTags, updateServiceCount: deployment.updateServiceCount };

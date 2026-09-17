@@ -8,6 +8,7 @@ export const COMPLETED_EMERGENCY_PATHS = Object.freeze({
     "scripts/aws/commit-production-component-recovery-state.mjs",
   ]),
   "rotation-overlap": Object.freeze([
+    "scripts/aws/production-rotation-reconciliation.mjs",
     "scripts/aws/run-production-cutover.mjs",
     "scripts/aws/production-cutover-control-plane.mjs",
     "scripts/aws/production-cutover-production-adapters.mjs",
@@ -15,6 +16,7 @@ export const COMPLETED_EMERGENCY_PATHS = Object.freeze({
     "scripts/aws/commit-production-component-rotation-state.mjs",
   ]),
   "rotation-cleanup": Object.freeze([
+    "scripts/aws/production-rotation-reconciliation.mjs",
     "scripts/aws/run-production-cutover.mjs",
     "scripts/aws/production-cutover-control-plane.mjs",
     "scripts/aws/production-cutover-production-adapters.mjs",
