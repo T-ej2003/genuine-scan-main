@@ -257,9 +257,13 @@ jobs:
           git fetch --no-tags origin main
           test "$GITHUB_SHA" = "$(git rev-parse refs/remotes/origin/main)"
           node scripts/aws/prepare-production-normal-deployment.mjs --output="$RUNNER_TEMP/revalidated-normal-component-deployment-plan.json"
-          cmp "$PREPARATION_FILE" "$RUNNER_TEMP/revalidated-normal-component-deployment-plan.json"
+          node --input-type=module - "$PREPARATION_FILE" "$RUNNER_TEMP/revalidated-normal-component-deployment-plan.json" <<'NODE'
+          import fs from 'node:fs';
+          import { assertRevalidatedProductionNormalDeploymentPlan } from './scripts/aws/prepare-production-normal-deployment.mjs';
+          assertRevalidatedProductionNormalDeploymentPlan(JSON.parse(fs.readFileSync(process.argv[2], 'utf8')), JSON.parse(fs.readFileSync(process.argv[3], 'utf8')));
+          NODE
       - name: Deploy coordinated normal release
-        env: { MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-release-deployer, BACKEND_IMAGE: '${{ steps.images.outputs.backend }}', FRONTEND_IMAGE: '${{ steps.images.outputs.frontend }}', PREPARATION_FILE: '${{ runner.temp }}/normal-plan/normal-component-deployment-plan.json' }
+        env: { MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-release-deployer, BACKEND_IMAGE: '${{ steps.images.outputs.backend }}', FRONTEND_IMAGE: '${{ steps.images.outputs.frontend }}', PREPARATION_FILE: '${{ runner.temp }}/revalidated-normal-component-deployment-plan.json' }
         run: node scripts/aws/production-normal-release.mjs --source-sha="${GITHUB_SHA}" --preparation-file="${PREPARATION_FILE}" --backend-image="${BACKEND_IMAGE}" --frontend-image="${FRONTEND_IMAGE}"
       - name: Preserve normal-release mutation journal
         if: always()

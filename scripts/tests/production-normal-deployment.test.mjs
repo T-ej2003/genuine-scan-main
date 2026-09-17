@@ -9,7 +9,7 @@ import { APP_ONLY } from "../aws/production-app-only-contract.mjs";
 import { assertNormalImageIdentity } from "../aws/production-normal-image-contract.mjs";
 import { WEB_RELEASE, buildNormalFrontendCandidate, captureFrontendPredecessor } from "../aws/production-web-release-contract.mjs";
 import { createProductionComponentDeploymentState } from "../aws/production-component-deployment-state.mjs";
-import { buildProductionNormalDeploymentPlan } from "../aws/prepare-production-normal-deployment.mjs";
+import { assertRevalidatedProductionNormalDeploymentPlan, buildProductionNormalDeploymentPlan } from "../aws/prepare-production-normal-deployment.mjs";
 import { classifyStageBImageReusePath } from "../aws/validate-stage-b-image-reuse.mjs";
 
 const sourceSha = "a".repeat(40);
@@ -66,6 +66,14 @@ test("component deployment state, never workflow history, supplies component-spe
   assert.throws(() => buildProductionNormalDeploymentPlan({ sourceSha: d, state: { ...state, components: { ...state.components, backend: null } }, isAncestor: () => true, readRange: () => [] }), /bootstrapped/);
   assert.throws(() => buildProductionNormalDeploymentPlan({ sourceSha: d, state, isAncestor: () => false, readRange: () => [] }), /ancestor/);
   assert.equal(typeof classifyProductionComponentRanges, "function");
+});
+
+test("revalidation tolerates only unrelated component-state advancement", () => {
+  const initial = { kind: "NORMAL_COMPONENT_DEPLOYMENT_PREPARATION", sourceSha, componentBaselines: { backend: "b".repeat(40), frontend: "c".repeat(40) }, classification: { backend: true, frontend: false } };
+  const unrelated = { ...initial, stateGeneration: 2, componentBaselines: { ...initial.componentBaselines }, stateSha256: "d".repeat(64) };
+  assert.equal(assertRevalidatedProductionNormalDeploymentPlan(initial, unrelated), unrelated);
+  assert.throws(() => assertRevalidatedProductionNormalDeploymentPlan(initial, { ...unrelated, componentBaselines: { ...unrelated.componentBaselines, backend: "e".repeat(40) } }), /backend predecessor/);
+  assert.throws(() => assertRevalidatedProductionNormalDeploymentPlan(initial, { ...unrelated, classification: { backend: false, frontend: true } }), /classification/);
 });
 
 test("recorded security work does not deadlock an unrelated frontend release, but unrecorded security does", () => {
@@ -254,6 +262,8 @@ test("normal production workflow is fixed, OIDC-only, gated by main, and smoke-t
   assert.deepEqual(normalEnvironmentUsers, ["production-deploy.yml"]);
   assert.match(workflow, /normal-component-deployment-plan/);
   assert.match(workflow, /Deploy coordinated normal release/);
+  assert.match(workflow, /assertRevalidatedProductionNormalDeploymentPlan/);
+  assert.doesNotMatch(workflow, /cmp "\$PREPARATION_FILE"/);
   assert.match(workflow, /Preserve normal-release mutation journal[\s\S]*if: always\(\)/);
   assert.match(workflow, /publish-backend:[\s\S]*?environment: production-stage-b-image-publish/);
   assert.match(workflow, /publish-frontend:[\s\S]*?environment: production-web-image-publish/);

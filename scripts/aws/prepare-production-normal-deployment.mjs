@@ -60,6 +60,20 @@ export function prepareProductionNormalDeployment({ sourceSha, repositoryRoot, c
   });
 }
 
+// A concurrent terminal may advance an unrelated component between the
+// classifier and deploy jobs. Reuse only a freshly-read plan whose candidate,
+// classification, and affected-component predecessors are unchanged.
+export function assertRevalidatedProductionNormalDeploymentPlan(initial, current) {
+  for (const value of [initial, current]) {
+    assert.equal(value?.kind, "NORMAL_COMPONENT_DEPLOYMENT_PREPARATION"); assert.match(value?.sourceSha || "", SHA);
+  }
+  assert.equal(current.sourceSha, initial.sourceSha, "Revalidated deployment source changed.");
+  assert.deepEqual(current.classification, initial.classification, "Component-state revalidation changed the release classification.");
+  for (const name of ["backend", "frontend"].filter((component) => current.classification[component]))
+    assert.equal(current.componentBaselines?.[name], initial.componentBaselines?.[name], `Concurrent update changed the ${name} predecessor; reprepare release.`);
+  return current;
+}
+
 function main() {
   const output = process.argv.slice(2).find((value) => value.startsWith("--output="))?.slice("--output=".length);
   assert.ok(output && path.isAbsolute(output), "A fixed absolute output path is required.");
