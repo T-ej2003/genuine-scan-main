@@ -1,5 +1,5 @@
 locals {
-  tags                 = { ManagedBy = "Terraform", Environment = "production", Stack = "production-component-deployment-state" }
+  tags = { ManagedBy = "Terraform", Environment = "production", Stack = "production-component-deployment-state" }
 }
 
 resource "aws_dynamodb_table" "component_deployment_state" {

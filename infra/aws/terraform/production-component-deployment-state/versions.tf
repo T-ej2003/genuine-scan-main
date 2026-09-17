@@ -1,5 +1,5 @@
 terraform {
-  required_version = ">= 1.10.0, < 2.0.0"
+  required_version = "= 1.15.8"
   backend "s3" {
     bucket              = "mscqr-production-terraform-state-368992683803-eu-west-2"
     key                 = "mscqr/production/component-deployment-state/terraform.tfstate"
@@ -11,7 +11,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = ">= 6.41.0, < 7.0"
+      version = "= 6.65.0"
     }
   }
 }

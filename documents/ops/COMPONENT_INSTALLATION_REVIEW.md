@@ -503,3 +503,23 @@ credential-source tests pass (100 tests); changed-source ESLint and diff checks
 pass. This is still not the final gate: initial bootstrap and isolated Terraform
 execution remain unfinished. No push or production operation is authorized by
 this local checkpoint.
+
+### Isolated provider validation checkpoint
+
+The actual network-disabled, non-root Docker runner now passes Terraform
+`fmt -check`, `init -backend=false -input=false -lockfile=readonly`, and
+`validate` using Terraform 1.15.8 and AWS provider 6.65.0. The provider lock was
+regenerated with Terraform's canonical `providers lock` command for Linux ARM64,
+Linux AMD64 and macOS ARM64. No production backend was initialized.
+
+The read-only input mount contains only reviewed source and checksum-pinned
+downloads. The provider executes from an ephemeral executable tmpfs, not a host
+plugin cache. Actual container tests prove blocked host credential/control-socket
+access and blocked metadata/network fallback, and reject substituted provider
+archives and CLI development overrides before Terraform starts.
+
+This checkpoint implements backend-disabled validation, not production
+prepare/apply orchestration. The legacy infrastructure activation entry point
+still requires replacement before the branch may be pushed. Keep the same
+isolated runner for CI and production to prevent provider-boundary divergence;
+do not add a second host execution fallback.

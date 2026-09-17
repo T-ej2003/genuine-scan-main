@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { terraformDockerArguments } from "../aws/component-terraform-isolation.mjs";
+import { prepareIsolatedTerraformInputs } from "../aws/component-terraform-inputs.mjs";
 
 // Explicit local/CI runtime gate. No AWS credentials, Terraform production call,
 // image build/publication, existing container or Docker volume is touched.
@@ -45,4 +46,25 @@ test("real isolated container cannot access host credentials, control sockets, w
     assert.equal(result.stdout, "ISOLATION_RUNTIME_PROBE=PASS\n");
     assert.equal(fs.readFileSync(path.join(directory, "marker"), "utf8"), "reviewed-public-input");
   } finally { fs.rmSync(directory, { recursive: true }); }
+});
+
+test("real pinned Terraform and provider validate offline inside the isolated runner with the committed lock", { skip: process.env.COMPONENT_CONTAINER_TESTS !== "1", timeout: 360000 }, async () => {
+  const inputs = await prepareIsolatedTerraformInputs();
+  try {
+    const result = spawnSync("docker", [...terraformDockerArguments(inputs.directory), inputs.manifestSha256, "validate"], {
+      env: { PATH: process.env.PATH, HOME: process.env.HOME }, encoding: "utf8", timeout: 180000, maxBuffer: 1024 * 1024,
+    });
+    assert.equal(result.status, 0, `Isolated backend-disabled validation failed: ${result.stderr}`);
+    assert.deepEqual(JSON.parse(result.stdout), { type: "result", valid: true, manifestSha256: inputs.manifestSha256, terraformVersion: "1.15.8", providerVersion: "6.65.0" });
+    const run = () => spawnSync("docker", [...terraformDockerArguments(inputs.directory), inputs.manifestSha256, "validate"], {
+      env: { PATH: process.env.PATH, HOME: process.env.HOME }, encoding: "utf8", timeout: 30000, maxBuffer: 1024 * 1024,
+    });
+    const cli = path.join(inputs.directory, "terraform.rc"), original = fs.readFileSync(cli);
+    fs.chmodSync(cli, 0o600); fs.writeFileSync(cli, 'provider_installation { dev_overrides { "hashicorp/aws" = "/work/alternate" } }');
+    const override = run(); assert.equal(override.status, 1); assert.match(override.stderr, /input-authentication/); assert.equal(override.stdout, "");
+    fs.writeFileSync(cli, original); fs.chmodSync(cli, 0o444);
+    const provider = path.join(inputs.directory, Object.keys(inputs.manifest.files).find(name => name.startsWith("providers/")));
+    fs.chmodSync(provider, 0o600); fs.writeFileSync(provider, "substituted binary archive");
+    const replacement = run(); assert.equal(replacement.status, 1); assert.match(replacement.stderr, /input-authentication/); assert.equal(replacement.stdout, "");
+  } finally { inputs.dispose(); }
 });

@@ -54,7 +54,9 @@ export function terraformDockerArguments(inputDirectory) {
   return ["run", "--rm", "--interactive", "--pull=never", `--platform=linux/${architecture}`,
     "--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges",
     `--user=${uid}:${gid}`, "--pids-limit=128", "--memory=3g", "--cpus=2",
-    `--tmpfs=/work:rw,nosuid,nodev,size=2147483648,uid=${uid},gid=${gid},mode=0700`,
+    // Terraform installs the checksum-verified provider into this ephemeral
+    // filesystem. exec is necessary there; it does not expose host executables.
+    `--tmpfs=/work:rw,exec,nosuid,nodev,size=2147483648,uid=${uid},gid=${gid},mode=0700`,
     `--mount=type=bind,source=${actual},target=/inputs,readonly`,
     "--workdir=/work", "--entrypoint=node", terraformExecution.image, "/inputs/agent.mjs"];
 }
