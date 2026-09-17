@@ -13,6 +13,8 @@ export const WEB_RELEASE = Object.freeze({
   cluster: "mscqr-prod-euw2-main", serviceName: "mscqr-frontend-servi-euw2", family: "mscqr-frontend",
 });
 export const WEB_EVIDENCE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+// Must cover the release-gate job's 180-minute downstream mutation window.
+export const WEB_RELEASE_DOWNSTREAM_RESERVE_MS = 180 * 60 * 1000;
 const SHA = /^[a-f0-9]{40}$/; const HASH = /^[a-f0-9]{64}$/; const DIGEST = /^sha256:[a-f0-9]{64}$/;
 const IMAGE = new RegExp(`^${WEB_RELEASE.account}\\.dkr\\.ecr\\.${WEB_RELEASE.region}\\.amazonaws\\.com/${WEB_RELEASE.repository}@sha256:[a-f0-9]{64}$`);
 const TASK_ARN = new RegExp(`^arn:aws:ecs:${WEB_RELEASE.region}:${WEB_RELEASE.account}:task-definition/${WEB_RELEASE.family}:[1-9][0-9]*$`);
@@ -89,19 +91,21 @@ export function buildWebImageAuthorization({ sourceSha, evidence, signature, ima
   authorization.authorizationSha256 = canonicalSha256(authorizationPayload(authorization)); return Object.freeze(authorization);
 }
 
-export function assertWebImageAuthorization(value, { sourceSha, now, verify } = {}) {
+export function assertWebImageAuthorization(value, { sourceSha, now = new Date().toISOString(), verify, minimumRemainingMs } = {}) {
   if (value?.schemaVersion !== 1 || value.operation !== "PRODUCTION_WEB_IMAGE_AUTHORIZATION" || value.valid !== true || value.sourceSha !== sourceSha || value.evidence?.sourceSha !== value.sourceSha || value.authorizationSha256 !== canonicalSha256(authorizationPayload(value)) || value.imageRef !== value.evidence?.imageRef || value.imageDigest !== value.evidence?.imageDigest || value.evidenceSha256 !== value.evidence?.evidenceSha256 || value.signatureSha256 !== canonicalSha256(value.signature) || value.imageImpactSha256 !== canonicalSha256(value.imageImpact) || value.imageImpact?.webPublicationRequired !== true || value.imageImpact?.toolingSha !== sourceSha || value.reviewer !== value.evidence?.reviewer) throw new Error("Web image authorization is invalid.");
-  assertWebImageEvidence(value.evidence, { signature: value.signature, verify, now }); return true;
+  assertWebImageEvidence(value.evidence, { signature: value.signature, verify, now });
+  if (minimumRemainingMs !== undefined && (!Number.isSafeInteger(minimumRemainingMs) || minimumRemainingMs < 0 || nowMs(value.expiresAt, "Web authorization expiry") - nowMs(now, "Web authorization validation time") <= minimumRemainingMs)) throw new Error("Web image authorization does not have enough remaining lifetime for the governed release.");
+  return true;
 }
 
-export function assertCoordinatedImageAuthorization({ sourceSha, stageBAuthorization, webAuthorization, webPublicationRequired, verifyWeb, now } = {}) {
+export function assertCoordinatedImageAuthorization({ sourceSha, stageBAuthorization, webAuthorization, webPublicationRequired, verifyWeb, now, minimumWebAuthorizationRemainingMs } = {}) {
   if (stageBAuthorization?.sourceSha !== sourceSha) throw new Error("Stage-B authorization source does not match coordinated release source.");
   if (!webPublicationRequired) {
     if (webAuthorization !== undefined) throw new Error("Web authorization is forbidden when authenticated Stage-B impact does not require web publication.");
     return Object.freeze({ sourceSha, webRequired: false, stageBAuthorizationSha256: stageBAuthorization.authorizationSha256 });
   }
   if (webAuthorization?.imageImpactSha256 !== canonicalSha256(stageBAuthorization.imageReuseEvidence)) throw new Error("Web authorization does not match the authenticated Stage-B image impact.");
-  assertWebImageAuthorization(webAuthorization, { sourceSha, now, verify: verifyWeb });
+  assertWebImageAuthorization(webAuthorization, { sourceSha, now, verify: verifyWeb, minimumRemainingMs: minimumWebAuthorizationRemainingMs });
   return Object.freeze({ sourceSha, webRequired: true, stageBAuthorizationSha256: stageBAuthorization.authorizationSha256, webAuthorizationSha256: webAuthorization.authorizationSha256, webImageRef: webAuthorization.imageRef });
 }
 

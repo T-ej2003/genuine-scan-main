@@ -817,8 +817,20 @@ jobs:
           RELEASE_TRAIN_RUN_ID: ${{ inputs.release_train_run_id }}
           ACTIVATION_BINDING_FILE: ${{ steps.backend-activation.outputs.binding_file }}
           ACTIVATION_BINDING_SHA256: ${{ steps.backend-activation.outputs.binding_sha256 }}
+          WEB_AUTHORIZATION_FILE: ${{ steps.images.outputs.web_authorization_file }}
+          WEB_AUTHORIZATION_SHA256: ${{ steps.images.outputs.web_authorization_sha256 }}
         run: |
           set -euo pipefail
+          if [[ "${{ steps.images.outputs.web_required }}" == "true" ]]; then
+            node scripts/aws/verify-production-web-release-authorization.mjs \
+              --reserve-downstream-lifetime \
+              --source-sha "$SOURCE_SHA" \
+              --stage-b-authorization "${{ steps.images.outputs.authorization_file }}" \
+              --stage-b-authorization-sha256 "${{ inputs.normal_image_authorization_sha256 }}" \
+              --web-authorization "$WEB_AUTHORIZATION_FILE" \
+              --web-authorization-sha256 "$WEB_AUTHORIZATION_SHA256" \
+              --output "$RUNNER_TEMP/coordinated-web-authorization-reservation.json"
+          fi
           node scripts/check-production-activation-rotation.mjs
           node scripts/aws/production-normal-backend-activation.mjs \
             --mode verify \

@@ -4,7 +4,7 @@ import test from "node:test";
 import yaml from "js-yaml";
 import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
 import {
-  WEB_RELEASE, parseWebPublicationArtifact, buildWebPublicationIdentity, buildWebImageEvidence, signWebImageEvidence,
+  WEB_RELEASE, WEB_RELEASE_DOWNSTREAM_RESERVE_MS, parseWebPublicationArtifact, buildWebPublicationIdentity, buildWebImageEvidence, signWebImageEvidence,
   assertWebImageEvidence, buildWebImageAuthorization, assertWebImageAuthorization, assertCoordinatedImageAuthorization, authenticateWebImageAuthorization,
   captureFrontendPredecessor, buildFrontendCandidate, assertFrontendCandidateReadback, assertFrontendPredecessorCas,
   buildFrontendUpdate, buildFrontendRollback,
@@ -58,6 +58,16 @@ test("coordinated release requires matching web authorization only when web publ
   assert.throws(() => assertCoordinatedImageAuthorization({ sourceSha, stageBAuthorization: { ...stageB, imageReuseEvidence: { ...impact, classifiedFiles: ["src/other.tsx"] } }, webAuthorization: authorization, webPublicationRequired: true, verifyWeb: () => true, now: createdAt }), /image impact/);
   assert.equal(assertCoordinatedImageAuthorization({ sourceSha, stageBAuthorization: stageB, webPublicationRequired: false }).webRequired, false);
   assert.throws(() => assertCoordinatedImageAuthorization({ sourceSha, stageBAuthorization: stageB, webAuthorization: authorization, webPublicationRequired: false }), /forbidden/);
+});
+
+test("coordinated web authorization reserves the complete downstream release window", () => {
+  const { authorization } = fixture();
+  const nearlyExpired = new Date(Date.parse(authorization.expiresAt) - WEB_RELEASE_DOWNSTREAM_RESERVE_MS + 1).toISOString();
+  const enoughLifetime = new Date(Date.parse(authorization.expiresAt) - WEB_RELEASE_DOWNSTREAM_RESERVE_MS - 1).toISOString();
+  const stageB = { sourceSha, authorizationSha256: "d".repeat(64), imageReuseEvidence: impact };
+  assert.throws(() => assertCoordinatedImageAuthorization({ sourceSha, stageBAuthorization: stageB, webAuthorization: authorization, webPublicationRequired: true, verifyWeb: () => true, now: nearlyExpired, minimumWebAuthorizationRemainingMs: WEB_RELEASE_DOWNSTREAM_RESERVE_MS }), /remaining lifetime/);
+  assert.equal(assertCoordinatedImageAuthorization({ sourceSha, stageBAuthorization: stageB, webAuthorization: authorization, webPublicationRequired: true, verifyWeb: () => true, now: enoughLifetime, minimumWebAuthorizationRemainingMs: WEB_RELEASE_DOWNSTREAM_RESERVE_MS }).webRequired, true);
+  assert.throws(() => assertCoordinatedImageAuthorization({ sourceSha, stageBAuthorization: stageB, webAuthorization: authorization, webPublicationRequired: true, verifyWeb: () => true, now: createdAt, minimumWebAuthorizationRemainingMs: -1 }), /remaining lifetime/);
 });
 
 test("frontend activation consumes the authenticated Stage-B web decision before AWS adapters", async () => {
@@ -202,6 +212,17 @@ test("both governed activation callers establish the canonical credential source
   assert.equal(activation.env.MSCQR_AWS_CREDENTIAL_SOURCE, "github-oidc-release-deployer");
   const standalone = yaml.load(fs.readFileSync(".github/workflows/production-web-activation.yml", "utf8"));
   assert.match(JSON.stringify(standalone), /MSCQR_AWS_CREDENTIAL_SOURCE.*github-oidc-release-deployer/);
+});
+
+test("release gate reserves web authorization before the database mutation boundary", () => {
+  const workflow = yaml.load(fs.readFileSync(".github/workflows/release-gate.yml", "utf8"));
+  const steps = workflow.jobs["deploy-production-ecs"].steps;
+  const database = steps.findIndex(({ name }) => name === "Apply and verify checksum-bound production RLS package");
+  const step = steps[database];
+  assert.match(step.run, /--reserve-downstream-lifetime/);
+  assert.match(step.run, /verify-production-web-release-authorization\.mjs/);
+  assert.match(step.run, /steps\.images\.outputs\.web_required/);
+  assert.ok(database > -1);
 });
 
 test("web publication resumes immutable tags through the reviewed digest-bound preflight", () => {

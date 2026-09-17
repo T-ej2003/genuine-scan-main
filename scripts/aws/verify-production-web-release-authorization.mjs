@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 import { verifyProductionReleaseImageAuthorization, createReleaseGateImageAuthorizationRunner } from "./verify-production-release-image-authorization.mjs";
 import { createPinnedRootAttestationVerifier } from "./production-root-attestation-key.mjs";
 import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
-import { assertCoordinatedImageAuthorization } from "./production-web-release-contract.mjs";
+import { assertCoordinatedImageAuthorization, WEB_RELEASE_DOWNSTREAM_RESERVE_MS } from "./production-web-release-contract.mjs";
 
 const HASH = /^[a-f0-9]{64}$/;
 const SHA = /^[a-f0-9]{40}$/;
@@ -18,11 +18,11 @@ function readBoundJson(file, expectedHash, label) {
   return JSON.parse(bytes);
 }
 
-export async function verifyCoordinatedWebRelease({ sourceSha, stageBAuthorization, webAuthorization, now = new Date().toISOString(), verifyWeb = createPinnedRootAttestationVerifier(), verifyStageBImageEvidence } = {}) {
+export async function verifyCoordinatedWebRelease({ sourceSha, stageBAuthorization, webAuthorization, now = new Date().toISOString(), verifyWeb = createPinnedRootAttestationVerifier(), verifyStageBImageEvidence, minimumWebAuthorizationRemainingMs } = {}) {
   if (!SHA.test(sourceSha || "")) throw new Error("Protected source SHA is malformed.");
   verifyProductionReleaseImageAuthorization({ authorization: stageBAuthorization, sourceSha, verifyImageEvidence: verifyStageBImageEvidence, now });
   const impact = stageBAuthorization.imageReuseEvidence;
-  return Object.freeze({ ...assertCoordinatedImageAuthorization({ sourceSha, stageBAuthorization, webAuthorization, webPublicationRequired: impact.webPublicationRequired, verifyWeb, now }), imageImpact: impact });
+  return Object.freeze({ ...assertCoordinatedImageAuthorization({ sourceSha, stageBAuthorization, webAuthorization, webPublicationRequired: impact.webPublicationRequired, verifyWeb, now, minimumWebAuthorizationRemainingMs }), imageImpact: impact });
 }
 
 function required(argv, name) {
@@ -32,12 +32,13 @@ function required(argv, name) {
 }
 
 export async function runCli(argv = process.argv.slice(2), deps = {}) {
-  if (argv.length !== 14) throw new Error("Coordinated web release verification accepts exactly seven options.");
+  const reserveDownstreamLifetime = argv.includes("--reserve-downstream-lifetime");
+  if (argv.length !== 14 + (reserveDownstreamLifetime ? 1 : 0) || argv.filter((value) => value === "--reserve-downstream-lifetime").length > 1) throw new Error("Coordinated web release verification accepts exactly seven options and an optional fixed downstream-lifetime reservation.");
   const sourceSha = required(argv, "--source-sha");
   const stageB = readBoundJson(required(argv, "--stage-b-authorization"), required(argv, "--stage-b-authorization-sha256"), "Stage-B authorization");
   const web = readBoundJson(required(argv, "--web-authorization"), required(argv, "--web-authorization-sha256"), "Web authorization");
   const releaseRun = deps.releaseRun || createReleaseGateImageAuthorizationRunner();
-  const result = await verifyCoordinatedWebRelease({ sourceSha, stageBAuthorization: stageB, webAuthorization: web, verifyStageBImageEvidence: (options) => verifyImageEvidenceSignature({ ...options, run: releaseRun }), ...deps });
+  const result = await verifyCoordinatedWebRelease({ sourceSha, stageBAuthorization: stageB, webAuthorization: web, verifyStageBImageEvidence: (options) => verifyImageEvidenceSignature({ ...options, run: releaseRun }), ...deps, minimumWebAuthorizationRemainingMs: reserveDownstreamLifetime ? WEB_RELEASE_DOWNSTREAM_RESERVE_MS : undefined });
   fs.writeFileSync(required(argv, "--output"), `${JSON.stringify(result)}\n`, { mode: 0o600, flag: "wx" });
   return result;
 }
