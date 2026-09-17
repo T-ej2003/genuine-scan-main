@@ -401,6 +401,14 @@ test("normal activation rejects a receipt with the wrong Stage-B approval before
   assert.equal(awsReads, 0);
 });
 
+test("normal activation metadata preserves every downstream predecessor identity", () => {
+  const source = fs.readFileSync("scripts/aws/production-normal-backend-activation.mjs", "utf8");
+  assert.match(source, /normalActivationSourceArn: binding\.sourceArn/);
+  assert.match(source, /previousTaskDefinitionArn: binding\.sourceArn/);
+  assert.match(source, /targetTaskDefinitionArn: binding\.targetArn/);
+  assert.match(source, /newTaskDefinitionArn: metadata\.newTaskDefinitionArn/);
+});
+
 test("Release Gate prepares exact normal activation before database mutation and never registers or updates a worker service", () => {
   const workflow = fs.readFileSync(".github/workflows/release-gate.yml", "utf8");
   yaml.load(workflow);
