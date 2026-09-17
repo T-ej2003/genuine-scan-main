@@ -12,6 +12,27 @@ Null/omitted control ARN is accepted, missing resolved runtime identity is not.
 The configuration and fixed-broker suites pass 59 offline tests. Bootstrap and
 Terraform execution integration remain unfinished; this is not an activation gate.
 
+## Fixed broker bootstrap transaction checkpoint
+
+The internal bootstrap transaction now creates the source-derived ZIP function,
+sets reserved concurrency and FunctionUpdate runtime management, and publishes
+the three fixed semantic versions. Publication binds both AWS RevisionId and
+CodeSha256. Only the description changes between publications; no code-update,
+alias, resource-policy, alternate-role or generic configuration API is exposed.
+AWS requires a configuration/code change between versions, as documented by
+[PublishVersion](https://docs.aws.amazon.com/lambda/latest/api/API_PublishVersion.html).
+
+Each mutation rechecks authorization and the package's current source manifest.
+Every resume reads live version/configuration inventories before choosing a
+missing write. Unknown versions, source/code/configuration drift and resource
+policies fail closed. Lost responses after each of the eight bootstrap writes
+are covered by offline readback/recovery tests with no duplicate write.
+
+This is an internal transaction, not a production-ready bootstrap CLI. Its
+authorization, exceptional bootstrap principal, identity transaction and durable
+reservation composition still need wiring. The 34 transaction tests are mocked
+AWS transport tests, not proof of live deployment permissions or final readiness.
+
 Baseline: `bc6ac2ead8b750d9d99cc179d8bb321956fa7a8e`.
 Implementation remains uncommitted on
 `codex/component-infrastructure-install-permission`. No production execution,
