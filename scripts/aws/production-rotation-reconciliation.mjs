@@ -47,6 +47,7 @@ export function authenticateRotationReconciliation({ readiness, current, readers
   assert.equal(live.taskDefinitionArn, taskDefinitionArn, "Unknown live rotation task definition.");
   assert.equal(live.backendDigest, imageDigest, "Rotation live digest mismatch.");
   captureAppOnlyPredecessor(snapshot);
+  assert.equal(snapshot.definition.tags?.filter(({ key, value }) => key === "MSCQRExecTarget" && value === "production-backend").length, 1, "Rotation execution-target marker mismatch.");
   for (const entry of containers[0].environment || []) {
     if (["GIT_SHA", "RELEASE_GIT_SHA"].includes(entry.name)) assert.equal(entry.value, readiness.sourceSha, "Rotation runtime source mismatch.");
   }
@@ -56,6 +57,7 @@ export function authenticateRotationReconciliation({ readiness, current, readers
     mode: "existing-task-definition", clusterName: APP_ONLY.cluster, serviceName: APP_ONLY.service, containerName: APP_ONLY.container,
     previousTaskDefinitionArn: expectedCurrentTaskDefinitionArn, newTaskDefinitionArn: taskDefinitionArn,
     expectedImageDigest: imageDigest, observedTaskDefinitionArn: taskDefinitionArn, observedImageDigest: imageDigest,
+    observedTaskArns: snapshot.tasks.map(({ taskArn }) => taskArn).sort(),
     desiredCount: live.desiredCount, runningCount: live.desiredCount, pendingCount: 0, serviceStable: true,
   } };
 }
