@@ -1,0 +1,206 @@
+#!/usr/bin/env node
+// One-time installation only. No application deployment or component bootstrap.
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
+import crypto from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+export const stack = "infra/aws/terraform/production-component-deployment-state";
+export const contract = JSON.parse(fs.readFileSync(path.join(root, stack, "state-backend-contract.json")));
+const repository = "T-ej2003/genuine-scan-main";
+const workflow = "authorize-component-infrastructure-activation.yml";
+export const hash = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
+const json = (file) => JSON.parse(fs.readFileSync(file));
+
+export function assertBackend(backend, workspace) {
+  assert.equal(backend.type, "s3");
+  for (const field of ["bucket", "key", "region", "encrypt", "use_lockfile"]) assert.deepEqual(backend.config[field], contract[field], `Wrong backend ${field}`);
+  assert.deepEqual(backend.config.allowed_account_ids, [contract.account]);
+  assert.equal(workspace, "default");
+  for (const field of ["endpoint", "endpoints", "assume_role", "assume_role_with_web_identity", "profile", "skip_credentials_validation", "skip_requesting_account_id", "skip_region_validation"]) assert(!backend.config[field], `Backend override: ${field}`);
+}
+
+export function assertInitialPlan(plan) {
+  assert.equal(plan.errored, false);
+  assert.equal(plan.applyable, true);
+  const providers = plan.configuration.provider_config;
+  assert.deepEqual(Object.keys(providers), ["aws"]);
+  assert.equal(providers.aws.full_name, "registry.terraform.io/hashicorp/aws");
+  assert.deepEqual(providers.aws.expressions, { allowed_account_ids: { constant_value: [contract.account] }, region: { constant_value: contract.region } });
+  const configuration = plan.configuration.root_module;
+  assert.equal(Object.keys(configuration.module_calls || {}).length, 0);
+  assert(configuration.resources.every((resource) => !resource.provisioners?.length));
+  for (const name of ["normal_deployer", "bootstrap"]) {
+    const resource = configuration.resources.find(({ address }) => address === `aws_iam_role_policy.${name}`);
+    assert.deepEqual(resource.expressions.role.references, [`aws_iam_role.${name}.id`, `aws_iam_role.${name}`]);
+  }
+  const changes = (plan.resource_changes || []).filter((item) => item.mode === "managed");
+  assert.deepEqual(changes.map((item) => item.address).sort(), [...contract.expectedManagedAddresses].sort());
+  for (const item of changes) assert.deepEqual(item.change.actions, ["create"], `Not initial create: ${item.address}`);
+  assert.equal((plan.resource_drift || []).length, 0);
+  assert.equal((plan.prior_state?.values?.root_module?.resources || []).filter((item) => item.mode === "managed").length, 0);
+  const get = (address) => changes.find((item) => item.address === address).change.after;
+  for (const [name, role, policy] of [
+    ["normal_deployer", "mscqr-production-normal-deployer", "MSCQRProductionNormalDeployment"],
+    ["bootstrap", "mscqr-production-component-state-bootstrap", "MSCQRProductionComponentStateBootstrap"],
+  ]) {
+    const value = get(`aws_iam_role.${name}`);
+    assert.equal(value.name, role);
+    assert.equal(value.path, "/");
+    assert.equal(value.max_session_duration, 3600);
+    const prefix = name === "normal_deployer" ? "normal-deployer" : "bootstrap";
+    assert.deepEqual(JSON.parse(value.assume_role_policy), json(path.join(root, stack, `${prefix}-trust-policy.json`)));
+    assert.equal(get(`aws_iam_role_policy.${name}`).name, policy);
+    assert.deepEqual(JSON.parse(get(`aws_iam_role_policy.${name}`).policy), json(path.join(root, stack, `${prefix}-policy.json`)));
+  }
+  const terminal = get("aws_iam_role_policy.release_terminal_state");
+  assert.equal(terminal.name, "MSCQRProductionComponentStateTerminalWriter");
+  assert.equal(terminal.role, "mscqr-production-release-deployer");
+  assert.deepEqual(JSON.parse(terminal.policy), json(path.join(root, stack, "release-terminal-state-policy.json")));
+  const table = get("aws_dynamodb_table.component_deployment_state");
+  assert.equal(table.name, "mscqr-production-component-deployment-state");
+  assert.equal(table.hash_key, "stateKey");
+  assert.equal(table.billing_mode, "PAY_PER_REQUEST");
+  assert.equal(table.server_side_encryption[0].enabled, true);
+  assert.equal(table.point_in_time_recovery[0].enabled, true);
+}
+
+export function assertAuthorization(authorization, preparation, { sourceSha, planSha256, preparationSha256 }) {
+  assert.deepEqual(authorization, { sourceSha, planSha256, preparationSha256 });
+  assert.equal(preparation.sourceSha, sourceSha);
+  assert.equal(preparation.planSha256, planSha256);
+  assert.deepEqual(preparation.backend, contract);
+  assert.equal(preparation.stateIdentity, "ABSENT");
+}
+
+export function assertEnvironment(config, branches) {
+  assert.equal(config.can_admins_bypass, false);
+  assert.deepEqual(config.deployment_branch_policy, { protected_branches: false, custom_branch_policies: true });
+  assert.deepEqual(branches.branch_policies.map(({ name, type }) => ({ name, type })), [{ name: "main", type: "branch" }]);
+  const rules = config.protection_rules.filter((rule) => rule.type === "required_reviewers");
+  assert.equal(rules.length, 1);
+  assert.equal(rules[0].prevent_self_review, true);
+  assert(rules[0].reviewers.length > 0);
+  assert(rules[0].reviewers.every(({ type, reviewer }) => type === "User" && Number.isSafeInteger(reviewer.id)));
+  return rules[0].reviewers.map(({ reviewer }) => reviewer.id);
+}
+
+export function run(argv = process.argv.slice(2), deps = {}) {
+  const [mode, directory, approvalRun] = argv;
+  assert(["prepare", "apply"].includes(mode), "Expected prepare or apply");
+  assert.equal(argv.length, mode === "prepare" ? 2 : 3);
+  const work = fs.realpathSync(directory);
+  assert(!work.startsWith(`${root}/`) && work !== root, "Plan directory must be outside checkout");
+  assert.equal(fs.statSync(work).mode & 0o077, 0, "Private plan directory required");
+  // Do not inherit alternate backends, providers, CLI flags, endpoints or credentials.
+  const inherited = deps.env || process.env;
+  for (const name of Object.keys(inherited)) {
+    assert(!/^(TF_|TERRAFORM_|AWS_ENDPOINT|AWS_ACCESS_KEY_ID$|AWS_SECRET_ACCESS_KEY$|AWS_SESSION_TOKEN$|AWS_WEB_IDENTITY|AWS_ROLE_ARN$|GH_HOST$)/.test(name), `Forbidden override: ${name}`);
+  }
+  const env = { ...inherited, AWS_PROFILE: "mscqr-production-release-deployer", AWS_REGION: contract.region, AWS_DEFAULT_REGION: contract.region, AWS_EC2_METADATA_DISABLED: "true", TF_WORKSPACE: "default", TF_DATA_DIR: path.join(work, "terraform-data") };
+  const exec = (name, args) => (deps.execute || execFileSync)(name, args, { cwd: root, env, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 }).trim();
+  const aws = (...args) => JSON.parse(exec("aws", [...args, "--region", contract.region, "--no-cli-pager", "--output", "json"]) || "{}");
+  const gh = (endpoint) => JSON.parse(exec("gh", ["api", `repos/${repository}/${endpoint}`]));
+  const tf = (...args) => exec("terraform", [`-chdir=${stack}`, ...args]);
+  const source = () => {
+    exec("git", ["fetch", "origin", "main"]);
+    const sha = exec("git", ["rev-parse", "HEAD"]);
+    assert.equal(sha, exec("git", ["rev-parse", "origin/main"]));
+    assert.equal(sha, gh("branches/main").commit.sha);
+    assert.equal(exec("git", ["status", "--porcelain", "--untracked-files=all"]), "");
+    return sha;
+  };
+  const sourceSha = source();
+  const tracked = new Set(exec("git", ["ls-files", stack]).split("\n").map((file) => path.basename(file)));
+  for (const file of fs.readdirSync(path.join(root, stack))) {
+    if (/\.(tf|tf\.json|tfvars|tfvars\.json)$/.test(file)) assert(tracked.has(file), `Untracked Terraform input: ${file}`);
+  }
+  const caller = aws("sts", "get-caller-identity");
+  assert.equal(caller.Account, contract.account);
+  assert.match(caller.Arn, /^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\/[^/]+$/);
+  const absent = () => {
+    const listing = aws("s3api", "list-objects-v2", "--bucket", contract.bucket, "--prefix", contract.key);
+    assert(!(listing.Contents || []).some(({ Key }) => Key === contract.key || Key === `${contract.key}.tflock`), "State/lock already exists: stop and reconcile");
+    const history = aws("s3api", "list-object-versions", "--bucket", contract.bucket, "--prefix", contract.key);
+    assert(![...(history.Versions || []), ...(history.DeleteMarkers || [])].some(({ Key }) => Key === contract.key), "Historical state exists: not a first initialization");
+  };
+  const liveAbsent = () => {
+    for (const [args, code] of [
+      [["iam", "get-role", "--role-name", "mscqr-production-normal-deployer"], "NoSuchEntity"],
+      [["iam", "get-role", "--role-name", "mscqr-production-component-state-bootstrap"], "NoSuchEntity"],
+      [["iam", "get-role-policy", "--role-name", "mscqr-production-release-deployer", "--policy-name", "MSCQRProductionComponentStateTerminalWriter"], "NoSuchEntity"],
+      [["dynamodb", "describe-table", "--table-name", "mscqr-production-component-deployment-state"], "ResourceNotFoundException"],
+    ]) {
+      let missing = false;
+      try { aws(...args); } catch (error) {
+        if (!String(error.stderr).includes(`(${code})`)) throw error;
+        missing = true;
+      }
+      assert(missing, `Live prerequisite already exists: ${args[1]}`);
+    }
+  };
+  assert.equal(aws("s3api", "get-bucket-versioning", "--bucket", contract.bucket).Status, "Enabled");
+  for (const name of ["production-normal-deploy", "production-component-state-bootstrap", contract.authorizationEnvironment]) {
+    assertEnvironment(gh(`environments/${name}`), gh(`environments/${name}/deployment-branch-policies`));
+  }
+  absent();
+  liveAbsent();
+  assert.equal(JSON.parse(exec("terraform", ["version", "-json"])).terraform_version, "1.15.8");
+  tf("init", "-input=false", "-upgrade=false", "-lockfile=readonly");
+  assertBackend(json(path.join(env.TF_DATA_DIR, "terraform.tfstate")).backend, tf("workspace", "show"));
+  tf("validate");
+  const planPath = path.join(work, "activation.tfplan");
+  const preparationPath = path.join(work, "preparation.json");
+  if (mode === "prepare") {
+    assert(!fs.existsSync(planPath) && !fs.existsSync(preparationPath), "Use a fresh private plan directory");
+    tf("plan", "-input=false", "-lock-timeout=0s", `-out=${planPath}`);
+    assertInitialPlan(JSON.parse(tf("show", "-json", planPath)));
+    absent();
+    assert.equal(source(), sourceSha);
+    const preparation = { sourceSha, backend: contract, stateIdentity: "ABSENT", operatorArn: caller.Arn, planSha256: hash(fs.readFileSync(planPath)) };
+    fs.writeFileSync(preparationPath, `${JSON.stringify(preparation, null, 2)}\n`, { flag: "wx", mode: 0o600 });
+    process.stdout.write(`${JSON.stringify({ ...preparation, preparationSha256: hash(fs.readFileSync(preparationPath)) }, null, 2)}\n`);
+    return;
+  }
+  assert.match(approvalRun || "", /^[1-9][0-9]*$/);
+  const run = gh(`actions/runs/${approvalRun}`);
+  assert.equal(run.path, `.github/workflows/${workflow}`);
+  assert.equal(run.head_sha, sourceSha);
+  assert.equal(run.head_branch, "main");
+  assert.equal(run.head_repository.full_name, repository);
+  assert.equal(run.event, "workflow_dispatch");
+  assert.equal(run.conclusion, "success");
+  assert.equal(run.run_attempt, 1, "Rerun authorization is forbidden");
+  assert(Date.now() - Date.parse(run.created_at) >= 0 && Date.now() - Date.parse(run.created_at) < 30 * 60 * 1000, "Authorization expired");
+  const config = gh(`environments/${contract.authorizationEnvironment}`);
+  const reviewers = assertEnvironment(config, gh(`environments/${contract.authorizationEnvironment}/deployment-branch-policies`));
+  const approvals = gh(`actions/runs/${approvalRun}/approvals`).filter((item) => item.state === "approved" && item.environments.some(({ id }) => id === config.id));
+  assert.equal(approvals.length, 1);
+  assert(reviewers.includes(approvals[0].user.id));
+  assert.notEqual(approvals[0].user.id, run.actor.id);
+  const download = fs.mkdtempSync(path.join(os.tmpdir(), "component-activation-approval-"));
+  exec("gh", ["run", "download", approvalRun, "--repo", repository, "--name", "component-infrastructure-authorization", "--dir", download]);
+  const authorization = json(path.join(download, "authorization.json"));
+  const preparation = json(preparationPath);
+  const planSha256 = hash(fs.readFileSync(planPath));
+  assertAuthorization(authorization, preparation, { sourceSha, planSha256, preparationSha256: hash(fs.readFileSync(preparationPath)) });
+  assert.equal(preparation.operatorArn, caller.Arn, "Operator session changed: prepare and authorize again");
+  assertInitialPlan(JSON.parse(tf("show", "-json", planPath)));
+  absent();
+  liveAbsent();
+  assert.equal(source(), sourceSha);
+  // Permanent one-time reservation, before apply. An ambiguous result requires
+  // read-only investigation, never another apply or deletion of this record.
+  aws("s3api", "put-object", "--bucket", contract.bucket, "--key", `${contract.key}.initial-activation-attempt`, "--body", preparationPath, "--if-none-match", "*", "--server-side-encryption", "AES256");
+  assert.equal(hash(fs.readFileSync(planPath)), planSha256);
+  tf("apply", "-input=false", "-lock-timeout=0s", planPath);
+  // Terraform drift readback is required, and must not become a second apply.
+  tf("plan", "-input=false", "-lock-timeout=0s", "-detailed-exitcode");
+  process.stdout.write("INFRA_ACTIVATION_VERIFIED=true\nBOOTSTRAP_EXECUTED=false\n");
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1] || "").href) run();

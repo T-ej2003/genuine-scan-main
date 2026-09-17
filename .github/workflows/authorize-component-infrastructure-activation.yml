@@ -1,0 +1,73 @@
+name: Authorize component infrastructure activation
+run-name: Authorize component infrastructure plan ${{ inputs.plan_sha256 }}
+
+'on':
+  pull_request:
+    paths:
+      - infra/aws/terraform/production-component-deployment-state/**
+      - scripts/aws/component-infrastructure-activation.mjs
+      - scripts/tests/component-infrastructure-activation.test.mjs
+      - .github/workflows/authorize-component-infrastructure-activation.yml
+  workflow_dispatch:
+    inputs:
+      source_sha: {description: Exact protected-main SHA, required: true, type: string}
+      plan_sha256: {description: Reviewed saved plan SHA256, required: true, type: string}
+      preparation_sha256: {description: Reviewed preparation SHA256 including backend and operator identity, required: true, type: string}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.event_name == 'workflow_dispatch' && 'production-deploy' || format('component-infrastructure-test-{0}', github.ref) }}
+  cancel-in-progress: false
+
+jobs:
+  contract-tests:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with: {persist-credentials: false}
+      - uses: actions/setup-node@v6
+        with: {node-version: 24}
+      - uses: hashicorp/setup-terraform@v3
+        with: {terraform_version: 1.15.8, terraform_wrapper: false}
+      - run: node --test scripts/tests/component-infrastructure-activation.test.mjs
+      - run: |
+          terraform -chdir=infra/aws/terraform/production-component-deployment-state fmt -check
+          terraform -chdir=infra/aws/terraform/production-component-deployment-state init -backend=false -input=false -lockfile=readonly
+          terraform -chdir=infra/aws/terraform/production-component-deployment-state validate
+  authorize:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    environment: production-component-infrastructure-activation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with: {fetch-depth: 0, persist-credentials: false}
+      - name: Bind reviewed plan to current protected source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          PLAN_SHA256: ${{ inputs.plan_sha256 }}
+          PREPARATION_SHA256: ${{ inputs.preparation_sha256 }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = T-ej2003/genuine-scan-main
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          test "$SOURCE_SHA" = "$GITHUB_SHA"
+          test "$SOURCE_SHA" = "$(gh api repos/T-ej2003/genuine-scan-main/branches/main --jq '.commit.sha')"
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import fs from 'node:fs';
+          const { SOURCE_SHA: sourceSha, PLAN_SHA256: planSha256, PREPARATION_SHA256: preparationSha256 } = process.env;
+          assert.match(sourceSha, /^[a-f0-9]{40}$/);
+          assert.match(planSha256, /^[a-f0-9]{64}$/);
+          assert.match(preparationSha256, /^[a-f0-9]{64}$/);
+          fs.writeFileSync(`${process.env.RUNNER_TEMP}/authorization.json`, JSON.stringify({sourceSha, planSha256, preparationSha256}));
+          JS
+      - uses: actions/upload-artifact@v7
+        with:
+          name: component-infrastructure-authorization
+          path: ${{ runner.temp }}/authorization.json
+          if-no-files-found: error
+          retention-days: 30
