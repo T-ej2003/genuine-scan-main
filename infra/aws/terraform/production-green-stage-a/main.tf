@@ -302,6 +302,7 @@ resource "aws_iam_role_policy" "cloudfront_proxy_drift_readonly" {
       Effect = "Allow"
       Action = [
         "elasticloadbalancing:DescribeLoadBalancers",
+        "elasticloadbalancing:DescribeLoadBalancerAttributes",
         "elasticloadbalancing:DescribeTargetGroups",
         "ec2:DescribeSubnets",
         "ec2:DescribeManagedPrefixLists",

@@ -25,6 +25,10 @@ const run = (args) => {
   if (args[1] === "describe-clusters") return JSON.stringify({ clusters: [{ clusterArn: STAGE_B.clusterArn, status: "ACTIVE" }] });
   if (args[1] === "describe-db-instances") return JSON.stringify({ DBInstances: [{ DBInstanceStatus: "available", DBSubnetGroup: { Subnets: STAGE_B.privateSubnetIds.map((SubnetIdentifier) => ({ SubnetIdentifier })) } }] });
   if (args[1] === "describe-load-balancers") return JSON.stringify({ LoadBalancers: [{ LoadBalancerArn: "arn:aws:elasticloadbalancing:eu-west-2:368992683803:loadbalancer/app/mscqr-alb-euw2/example", DNSName: "mscqr-alb-euw2.example.elb.amazonaws.com", Type: "application", Scheme: "internet-facing", VpcId: "vpc-0123456789abcdef0", AvailabilityZones: [{ SubnetId: "subnet-0alb0000000000001" }, { SubnetId: "subnet-0alb0000000000002" }] }] });
+  if (args[1] === "describe-load-balancer-attributes") {
+    assert.equal(args[args.indexOf("--load-balancer-arn") + 1], "arn:aws:elasticloadbalancing:eu-west-2:368992683803:loadbalancer/app/mscqr-alb-euw2/example");
+    return JSON.stringify({ Attributes: [{ Key: "routing.http.xff_header_processing.mode", Value: "append" }, { Key: "routing.http.xff_client_port.enabled", Value: "false" }, { Key: "idle_timeout.timeout_seconds", Value: "60" }] });
+  }
   if (args[1] === "describe-target-groups") return JSON.stringify({ TargetGroups: [{ TargetGroupArn: "arn:aws:elasticloadbalancing:eu-west-2:368992683803:targetgroup/mscqr-backend-tg-euw2-v2/example", VpcId: "vpc-0123456789abcdef0", TargetType: "ip", Protocol: "HTTP", Port: 4000, HealthCheckPath: "/health/live", LoadBalancerArns: ["arn:aws:elasticloadbalancing:eu-west-2:368992683803:loadbalancer/app/mscqr-alb-euw2/example"] }] });
   if (args[1] === "describe-managed-prefix-lists") return JSON.stringify({ ManagedPrefixLists: [{ PrefixListId: "pl-0123456789abcdef0", PrefixListName: "com.amazonaws.global.cloudfront.origin-facing", State: "create-complete", Version: 7 }] });
   if (args[1] === "get-managed-prefix-list-entries") { assert.equal(args[args.indexOf("--target-version") + 1], "7"); return JSON.stringify({ Entries: [{ Cidr: "198.51.100.0/24" }] }); }
@@ -63,7 +67,7 @@ test("Stage A checker trust accepts the Terraform singleton principal array and 
 test("canonical Stage A handoff derives every identifier from state and read-only live evidence", () => {
   const outputPath = path.join(directory, "handoff.json");
   const output = generateStageAPrerequisites({ stateBackup: statePath, stateObject: STAGE_A_STATE_OBJECT, toolingSha: "a".repeat(40), toolingTreeSha256: "b".repeat(64), outputPath, phase: "PRE_APPLY", run });
-  assert.equal(output.schemaVersion, 3); assert.equal(output.stageAStateIdentityVersion, STAGE_A_STATE_IDENTITY_VERSION); assert.equal(output.stageAStateObject, STAGE_A_STATE_OBJECT); assert.equal(output.stageAStateLineage, STAGE_A_EXPECTED_STATE_LINEAGE); assert.equal(output.stageAStateSerial, 43); assert.deepEqual(output.privateSubnetIds, [...STAGE_B.privateSubnetIds].sort()); assert.equal(output.networkEvidence.privateSubnets.length, 2); assert.deepEqual(output.stageBBackendProxyTrust, { mode: "cloudfront-alb", alb: { name: "mscqr-alb-euw2", vpcId: "vpc-0123456789abcdef0", arn: "arn:aws:elasticloadbalancing:eu-west-2:368992683803:loadbalancer/app/mscqr-alb-euw2/example", dnsName: "mscqr-alb-euw2.example.elb.amazonaws.com", subnetIds: ["subnet-0alb0000000000001", "subnet-0alb0000000000002"], cidrs: ["10.1.0.0/24", "10.1.1.0/24"] }, targetGroup: { name: "mscqr-backend-tg-euw2-v2", arn: "arn:aws:elasticloadbalancing:eu-west-2:368992683803:targetgroup/mscqr-backend-tg-euw2-v2/example" }, cloudFront: { distributionId: "E123", domainName: "d123.cloudfront.net", configEtag: "E123ABC", aliases: ["mscqr.com", "www.mscqr.com"], dns: { hostedZoneId: "Z0569586VLFIGGVI7HAZ", records: [{ name: "mscqr.com", type: "A", target: "d123.cloudfront.net", hostedZoneId: "Z2FDTNDATAQYW2" }, { name: "mscqr.com", type: "AAAA", target: "d123.cloudfront.net", hostedZoneId: "Z2FDTNDATAQYW2" }, { name: "www.mscqr.com", type: "A", target: "d123.cloudfront.net", hostedZoneId: "Z2FDTNDATAQYW2" }, { name: "www.mscqr.com", type: "AAAA", target: "d123.cloudfront.net", hostedZoneId: "Z2FDTNDATAQYW2" }] }, targetOriginId: "backend", apiPaths: ["/api/health/ready", "/api/auth/login"], managedPrefixListId: "pl-0123456789abcdef0", managedPrefixListVersion: 7, cidrs: ["198.51.100.0/24"] } }); assert.equal(fs.statSync(outputPath).mode & 0o777, 0o600);
+  assert.equal(output.schemaVersion, 3); assert.equal(output.stageAStateIdentityVersion, STAGE_A_STATE_IDENTITY_VERSION); assert.equal(output.stageAStateObject, STAGE_A_STATE_OBJECT); assert.equal(output.stageAStateLineage, STAGE_A_EXPECTED_STATE_LINEAGE); assert.equal(output.stageAStateSerial, 43); assert.deepEqual(output.privateSubnetIds, [...STAGE_B.privateSubnetIds].sort()); assert.equal(output.networkEvidence.privateSubnets.length, 2); assert.deepEqual(output.stageBBackendProxyTrust, { mode: "cloudfront-alb", alb: { name: "mscqr-alb-euw2", vpcId: "vpc-0123456789abcdef0", arn: "arn:aws:elasticloadbalancing:eu-west-2:368992683803:loadbalancer/app/mscqr-alb-euw2/example", dnsName: "mscqr-alb-euw2.example.elb.amazonaws.com", subnetIds: ["subnet-0alb0000000000001", "subnet-0alb0000000000002"], cidrs: ["10.1.0.0/24", "10.1.1.0/24"], xffHeaderProcessingMode: "append", xffClientPortEnabled: false }, targetGroup: { name: "mscqr-backend-tg-euw2-v2", arn: "arn:aws:elasticloadbalancing:eu-west-2:368992683803:targetgroup/mscqr-backend-tg-euw2-v2/example" }, cloudFront: { distributionId: "E123", domainName: "d123.cloudfront.net", configEtag: "E123ABC", aliases: ["mscqr.com", "www.mscqr.com"], dns: { hostedZoneId: "Z0569586VLFIGGVI7HAZ", records: [{ name: "mscqr.com", type: "A", target: "d123.cloudfront.net", hostedZoneId: "Z2FDTNDATAQYW2" }, { name: "mscqr.com", type: "AAAA", target: "d123.cloudfront.net", hostedZoneId: "Z2FDTNDATAQYW2" }, { name: "www.mscqr.com", type: "A", target: "d123.cloudfront.net", hostedZoneId: "Z2FDTNDATAQYW2" }, { name: "www.mscqr.com", type: "AAAA", target: "d123.cloudfront.net", hostedZoneId: "Z2FDTNDATAQYW2" }] }, targetOriginId: "backend", apiPaths: ["/api/health/ready", "/api/auth/login"], managedPrefixListId: "pl-0123456789abcdef0", managedPrefixListVersion: 7, cidrs: ["198.51.100.0/24"] } }); assert.equal(fs.statSync(outputPath).mode & 0o777, 0o600);
 });
 
 test("generator requires an explicit lifecycle phase and preserves post-apply handoff state binding", () => {
@@ -245,12 +249,25 @@ test("each production subnet resolves independently", () => {
 });
 
 
-test("Stage A backend proxy collector rejects direct DNS, unused ALB origins, and prefix-list drift", () => {
+test("Stage A backend proxy collector binds mutable ALB XFF attributes and rejects topology drift", () => {
   const trust = collectStageBBackendProxyTrust({ vpcId: "vpc-0123456789abcdef0", run });
   const replace = (needle, replacement) => (args) => {
     if (needle === "prefix" && args[0] === "ec2" && args[1] === "get-managed-prefix-list-entries") {
       assert.equal(args[args.indexOf("--target-version") + 1], "8");
       return JSON.stringify({ Entries: [{ Cidr: "198.51.100.0/24" }] });
+    }
+    if (args[0] === "elbv2" && args[1] === "describe-load-balancer-attributes") {
+      if (needle === "attribute-read-failure") throw new Error("AWS attribute read failed");
+      const parsed = JSON.parse(run(args));
+      if (needle === "mode-preserve") parsed.Attributes[0].Value = "preserve";
+      if (needle === "mode-remove") parsed.Attributes[0].Value = "remove";
+      if (needle === "client-port") parsed.Attributes[1].Value = "true";
+      if (needle === "missing-mode") parsed.Attributes.shift();
+      if (needle === "missing-client-port") parsed.Attributes.splice(1, 1);
+      if (needle === "duplicate-mode") parsed.Attributes.push({ Key: "routing.http.xff_header_processing.mode", Value: "remove" });
+      if (needle === "malformed-attribute") parsed.Attributes[0].Value = false;
+      if (needle === "missing-attributes") delete parsed.Attributes;
+      return JSON.stringify(parsed);
     }
     const value = run(args);
     if (args[0] === "route53" && args[1] === "list-resource-record-sets" && needle === "route53") {
@@ -266,6 +283,9 @@ test("Stage A backend proxy collector rejects direct DNS, unused ALB origins, an
   };
   assert.throws(() => collectStageBBackendProxyTrust({ vpcId: "vpc-0123456789abcdef0", run: replace("route53") }), /Route53 aliases/);
   assert.throws(() => collectStageBBackendProxyTrust({ vpcId: "vpc-0123456789abcdef0", run: replace("behavior") }), /API behavior/);
+  for (const drift of ["mode-preserve", "mode-remove", "client-port"]) assert.throws(() => assertStageBBackendProxyTrustCurrent({ expected: trust, vpcId: "vpc-0123456789abcdef0", run: replace(drift) }), /X-Forwarded-For attributes/);
+  for (const invalid of ["missing-mode", "missing-client-port", "duplicate-mode", "malformed-attribute", "missing-attributes"]) assert.throws(() => collectStageBBackendProxyTrust({ vpcId: "vpc-0123456789abcdef0", run: replace(invalid) }), /attribute|attributes/);
+  assert.throws(() => collectStageBBackendProxyTrust({ vpcId: "vpc-0123456789abcdef0", run: replace("attribute-read-failure") }), /AWS attribute read failed/);
   assert.throws(() => assertStageBBackendProxyTrustCurrent({ expected: trust, vpcId: "vpc-0123456789abcdef0", run: replace("prefix") }), /prefix-list drift/);
   assert.doesNotThrow(() => assertStageBBackendProxyTrustCurrent({ expected: trust, vpcId: "vpc-0123456789abcdef0", run }));
 });

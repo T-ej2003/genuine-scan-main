@@ -1086,6 +1086,25 @@
     },
     {
       "sourceFile": "scripts/aws/generate-production-green-stage-a-prerequisites.mjs",
+      "action": "elasticloadbalancing:DescribeLoadBalancerAttributes",
+      "capabilityId": "stage-b-state-reconciliation-producer-collect-stage-a-live-alb-attributes",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "*"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/generate-production-green-stage-a-prerequisites.mjs",
       "action": "elasticloadbalancing:DescribeTargetGroups",
       "capabilityId": "stage-b-state-reconciliation-producer-collect-stage-a-live-target-group",
       "identity": "RELEASE_DEPLOYER",

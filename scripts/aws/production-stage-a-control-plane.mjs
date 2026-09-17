@@ -81,7 +81,7 @@ export const STAGE_A_CLOUDFRONT_PROXY_DRIFT_POLICY_DOCUMENT = Object.freeze({
   Statement: [
     { Sid: "ReadExactProductionBackendService", Effect: "Allow", Action: "ecs:DescribeServices", Resource: "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2" },
     { Sid: "ReadExactProductionBackendTaskDefinitions", Effect: "Allow", Action: "ecs:DescribeTaskDefinition", Resource: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:*" },
-    { Sid: "ReadCurrentBackendAndProxyTopology", Effect: "Allow", Action: ["elasticloadbalancing:DescribeLoadBalancers", "elasticloadbalancing:DescribeTargetGroups", "ec2:DescribeSubnets", "ec2:DescribeManagedPrefixLists", "ec2:GetManagedPrefixListEntries", "cloudfront:ListDistributions"], Resource: "*" },
+    { Sid: "ReadCurrentBackendAndProxyTopology", Effect: "Allow", Action: ["elasticloadbalancing:DescribeLoadBalancers", "elasticloadbalancing:DescribeLoadBalancerAttributes", "elasticloadbalancing:DescribeTargetGroups", "ec2:DescribeSubnets", "ec2:DescribeManagedPrefixLists", "ec2:GetManagedPrefixListEntries", "cloudfront:ListDistributions"], Resource: "*" },
     { Sid: "ReadReviewedCloudFrontDistribution", Effect: "Allow", Action: "cloudfront:GetDistributionConfig", Resource: "arn:aws:cloudfront::368992683803:distribution/E32TIKZ33PVJOW" },
     { Sid: "ReadProductionPublicAliases", Effect: "Allow", Action: "route53:ListResourceRecordSets", Resource: "arn:aws:route53:::hostedzone/Z0569586VLFIGGVI7HAZ" },
   ],

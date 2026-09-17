@@ -969,6 +969,24 @@
       "evidence": "Reviewed Stage B handoff resolves the exact public production ALB and its subnet identities in eu-west-2"
     },
     {
+      "id": "collect-stage-a-live-alb-attributes",
+      "phase": "preflight",
+      "action": "elasticloadbalancing:DescribeLoadBalancerAttributes",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "evidence": "Reviewed Stage B handoff binds the exact public production ALB X-Forwarded-For processing attributes in eu-west-2"
+    },
+    {
       "id": "collect-stage-a-live-target-group",
       "phase": "preflight",
       "action": "elasticloadbalancing:DescribeTargetGroups",

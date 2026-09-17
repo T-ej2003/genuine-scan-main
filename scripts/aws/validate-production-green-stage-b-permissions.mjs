@@ -50,6 +50,7 @@ const STAGE_A_LIVE_EVIDENCE_EVALUATIONS = Object.freeze([
   ["collect-stage-a-live-route-tables", "ec2:DescribeRouteTables", true],
   ["collect-stage-a-live-security-groups", "ec2:DescribeSecurityGroups", true],
   ["collect-stage-a-live-alb", "elasticloadbalancing:DescribeLoadBalancers", true],
+  ["collect-stage-a-live-alb-attributes", "elasticloadbalancing:DescribeLoadBalancerAttributes", true],
   ["collect-stage-a-live-target-group", "elasticloadbalancing:DescribeTargetGroups", true],
   ["collect-stage-a-live-cloudfront-prefix-list", "ec2:DescribeManagedPrefixLists", true],
   ["collect-stage-a-live-cloudfront-prefix-list-entries", "ec2:GetManagedPrefixListEntries", true],

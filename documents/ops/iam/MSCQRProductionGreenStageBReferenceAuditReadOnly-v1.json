@@ -13,6 +13,7 @@
         "ec2:DescribeManagedPrefixLists",
         "ec2:GetManagedPrefixListEntries",
         "elasticloadbalancing:DescribeLoadBalancers",
+        "elasticloadbalancing:DescribeLoadBalancerAttributes",
         "elasticloadbalancing:DescribeTargetGroups"
       ],
       "Resource": "*",

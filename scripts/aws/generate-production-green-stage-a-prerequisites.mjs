@@ -256,6 +256,16 @@ export function collectStageBBackendProxyTrust({ vpcId, run } = {}) {
   const alb = loadBalancers[0];
   const subnetIds = (alb.AvailabilityZones || []).map(({ SubnetId }) => SubnetId).filter(Boolean).sort();
   if (alb.Type !== "application" || alb.Scheme !== "internet-facing" || (vpcId !== undefined && alb.VpcId !== vpcId) || subnetIds.length < 2 || new Set(subnetIds).size !== subnetIds.length || !alb.LoadBalancerArn || !alb.DNSName) throw new Error("Stage B backend ALB topology is not the reviewed public application boundary.");
+  const attributes = awsJson(["elbv2", "describe-load-balancer-attributes", "--load-balancer-arn", alb.LoadBalancerArn, "--region", STAGE_B.region, "--output", "json", "--no-cli-pager"], run).Attributes;
+  if (!Array.isArray(attributes)) throw new Error("Stage B backend ALB X-Forwarded-For attributes are unavailable.");
+  const attribute = (key) => {
+    const matches = attributes.filter((item) => item?.Key === key);
+    if (matches.length !== 1 || typeof matches[0].Value !== "string") throw new Error(`Stage B backend ALB attribute ${key} is missing, duplicate, or malformed.`);
+    return matches[0].Value;
+  };
+  const xffHeaderProcessingMode = attribute("routing.http.xff_header_processing.mode");
+  const xffClientPortEnabled = attribute("routing.http.xff_client_port.enabled");
+  if (xffHeaderProcessingMode !== "append" || xffClientPortEnabled !== "false") throw new Error("Stage B backend ALB X-Forwarded-For attributes do not preserve the reviewed append-without-client-port contract.");
   const targetGroups = awsJson(["elbv2", "describe-target-groups", "--names", PRODUCTION_BACKEND_TARGET_GROUP_NAME, "--region", STAGE_B.region, "--output", "json", "--no-cli-pager"], run).TargetGroups || [];
   const targetGroup = targetGroups[0];
   if (targetGroups.length !== 1 || targetGroup.VpcId !== alb.VpcId || (vpcId !== undefined && targetGroup.VpcId !== vpcId) || targetGroup.TargetType !== "ip" || targetGroup.Protocol !== "HTTP" || targetGroup.Port !== 4000 || targetGroup.HealthCheckPath !== "/health/live" || JSON.stringify([...(targetGroup.LoadBalancerArns || [])].sort()) !== JSON.stringify([alb.LoadBalancerArn])) throw new Error("Stage B backend target group is not bound to the reviewed ALB backend topology.");
@@ -286,7 +296,7 @@ export function collectStageBBackendProxyTrust({ vpcId, run } = {}) {
     if (!AliasTarget || dns(AliasTarget.DNSName) !== dns(distribution.DomainName) || AliasTarget.HostedZoneId !== CLOUDFRONT_ALIAS_HOSTED_ZONE_ID || AliasTarget.EvaluateTargetHealth !== false) throw new Error("Stage B backend Route53 aliases do not route to the reviewed CloudFront distribution.");
     return { name: dns(Name), type: Type, target: dns(AliasTarget.DNSName), hostedZoneId: AliasTarget.HostedZoneId };
   }).sort((left, right) => `${left.name}:${left.type}`.localeCompare(`${right.name}:${right.type}`));
-  return Object.freeze({ mode: "cloudfront-alb", alb: { name: PRODUCTION_BACKEND_ALB_NAME, arn: alb.LoadBalancerArn, dnsName: alb.DNSName, vpcId: alb.VpcId, subnetIds, cidrs: albCidrs }, targetGroup: { name: PRODUCTION_BACKEND_TARGET_GROUP_NAME, arn: targetGroup.TargetGroupArn }, cloudFront: { distributionId: distribution.Id, domainName: dns(distribution.DomainName), configEtag: configResponse.ETag, aliases: [...PRODUCTION_PUBLIC_ALIASES], dns: { hostedZoneId: PRODUCTION_HOSTED_ZONE_ID, records: dnsRecords }, targetOriginId, apiPaths: [...PRODUCTION_API_PATHS], managedPrefixListId: prefixList.PrefixListId, managedPrefixListVersion: prefixList.Version, cidrs: cloudFrontCidrs } });
+  return Object.freeze({ mode: "cloudfront-alb", alb: { name: PRODUCTION_BACKEND_ALB_NAME, arn: alb.LoadBalancerArn, dnsName: alb.DNSName, vpcId: alb.VpcId, subnetIds, cidrs: albCidrs, xffHeaderProcessingMode, xffClientPortEnabled: false }, targetGroup: { name: PRODUCTION_BACKEND_TARGET_GROUP_NAME, arn: targetGroup.TargetGroupArn }, cloudFront: { distributionId: distribution.Id, domainName: dns(distribution.DomainName), configEtag: configResponse.ETag, aliases: [...PRODUCTION_PUBLIC_ALIASES], dns: { hostedZoneId: PRODUCTION_HOSTED_ZONE_ID, records: dnsRecords }, targetOriginId, apiPaths: [...PRODUCTION_API_PATHS], managedPrefixListId: prefixList.PrefixListId, managedPrefixListVersion: prefixList.Version, cidrs: cloudFrontCidrs } });
 }
 
 export function assertStageBBackendProxyTrustCurrent({ expected, vpcId, run } = {}) {
