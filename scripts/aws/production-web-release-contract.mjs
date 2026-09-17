@@ -167,6 +167,17 @@ export function buildFrontendRollback({ predecessor, failedCandidateTaskDefiniti
   return Object.freeze({ cluster: WEB_RELEASE.cluster, service: WEB_RELEASE.serviceName, taskDefinition: predecessor.taskDefinitionArn, expectedFailedCandidateTaskDefinitionArn: failedCandidateTaskDefinitionArn });
 }
 
+export async function rollbackFrontendCandidate({ predecessor, candidateTaskDefinitionArn, readService, updateService, waitStable } = {}) {
+  for (const value of [readService, updateService, waitStable]) if (typeof value !== "function") throw new Error("Frontend rollback adapter is missing.");
+  const current = await readService();
+  if (current?.taskDefinition !== candidateTaskDefinitionArn) throw new Error("Frontend rollback ownership is lost.");
+  await updateService(buildFrontendRollback({ predecessor, failedCandidateTaskDefinitionArn: candidateTaskDefinitionArn }));
+  await waitStable({ expectedTaskDefinitionArn: predecessor.taskDefinitionArn });
+  const restored = await readService();
+  if (restored?.taskDefinition !== predecessor.taskDefinitionArn || restored.desiredCount !== predecessor.desiredCount || restored.runningCount !== predecessor.desiredCount || restored.pendingCount !== 0) throw new Error("Frontend rollback did not restore the exact predecessor.");
+  return predecessor.taskDefinitionArn;
+}
+
 export async function runGovernedFrontendActivation({ sourceSha, webAuthorization, verifyWebAuthorization, now, readService, describeTaskDefinition, registerTaskDefinition, updateService, waitStable, verifyHealth } = {}) {
   for (const [name, value] of Object.entries({ readService, describeTaskDefinition, registerTaskDefinition, updateService, waitStable, verifyHealth })) if (typeof value !== "function") throw new Error(`Frontend activation adapter is missing: ${name}.`);
   const authenticatedWebAuthorization = authenticateWebImageAuthorization({ sourceSha, webAuthorization, verify: verifyWebAuthorization, now });
@@ -183,7 +194,7 @@ export async function runGovernedFrontendActivation({ sourceSha, webAuthorizatio
     if (health?.ready !== true || health.loginStatus !== 200) throw new Error("Frontend post-deployment health failed.");
     return Object.freeze({ sourceSha, predecessorTaskDefinitionArn: predecessor.taskDefinitionArn, candidateTaskDefinitionArn: candidateArn, imageRef: webAuthorization.imageRef, updateCount: 1, rollbackCount: 0, health });
   } catch (error) {
-    if (updateAttempted) { const current = await readService(); if (current?.taskDefinition === candidateArn) { await updateService(buildFrontendRollback({ predecessor, failedCandidateTaskDefinitionArn: candidateArn })); await waitStable({ expectedTaskDefinitionArn: predecessor.taskDefinitionArn }); const restored = await readService(); if (restored?.taskDefinition !== predecessor.taskDefinitionArn || restored.desiredCount !== predecessor.desiredCount || restored.runningCount !== predecessor.desiredCount || restored.pendingCount !== 0) throw new Error(`Frontend rollback failed after: ${error.message}`); } }
+    if (updateAttempted) { const current = await readService(); if (current?.taskDefinition === candidateArn) { try { await rollbackFrontendCandidate({ predecessor, candidateTaskDefinitionArn: candidateArn, readService, updateService, waitStable }); } catch (rollbackError) { throw new Error(`Frontend rollback failed after: ${error.message}`, { cause: rollbackError }); } } }
     throw error;
   }
 }

@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import test from "node:test";
-import { PRODUCTION_RELEASE_CLASS, classifyProductionChanges } from "../aws/production-deployment-classification.mjs";
-import { buildNormalReleasePlan, buildNormalBackendPreparation, executeNormalFrontendActivation, executeNormalRelease, NORMAL_RELEASE, parseNormalReleaseArgs } from "../aws/production-normal-release.mjs";
+import { PRODUCTION_RELEASE_CLASS, classifyProductionChanges, classifyProductionComponentRanges } from "../aws/production-deployment-classification.mjs";
+import { buildNormalReleasePlan, buildNormalBackendPreparation, classifyNormalLiveComponentState, executeNormalFrontendActivation, executeNormalRelease, executeNormalComponentTransaction, NORMAL_RELEASE, parseNormalReleaseArgs } from "../aws/production-normal-release.mjs";
 import { APP_ONLY } from "../aws/production-app-only-contract.mjs";
 import { assertNormalImageIdentity } from "../aws/production-normal-image-contract.mjs";
 import { WEB_RELEASE, buildNormalFrontendCandidate, captureFrontendPredecessor } from "../aws/production-web-release-contract.mjs";
-import { resolveNormalDeploymentBaseline } from "../aws/production-deployment-baseline.mjs";
+import { createProductionComponentDeploymentState } from "../aws/production-component-deployment-state.mjs";
+import { buildProductionNormalDeploymentPlan } from "../aws/prepare-production-normal-deployment.mjs";
+import { classifyStageBImageReusePath } from "../aws/validate-stage-b-image-reuse.mjs";
 
 const sourceSha = "a".repeat(40);
 const backendImage = NORMAL_RELEASE.account + ".dkr.ecr." + NORMAL_RELEASE.region + ".amazonaws.com/mscqr-backend@sha256:" + "b".repeat(64);
@@ -22,6 +25,8 @@ test("release classification is deterministic and sensitive lanes fail closed", 
     backend: true, frontend: false, worker: false, database: false,
   });
   assert.equal(classifyProductionChanges(["src/App.tsx"]).frontend, true);
+  for (const file of ["package.json", "package-lock.json", "Dockerfile.ecs-frontend", "tailwind.config.ts", "postcss.config.js", "vite.config.ts", "docker/nginx-entrypoint.sh"])
+    assert.equal(classifyProductionChanges([file]).frontend, true, file);
   assert.equal(classifyProductionChanges(["backend/src/auth/loginService.ts"]).releaseClass, PRODUCTION_RELEASE_CLASS.SECURITY_INFRASTRUCTURE);
   for (const file of ["backend/src/middleware/rbac.ts", "backend/src/services/accessControlService.ts", "backend/src/middleware/csrf.ts", "backend/src/middleware/tenantIsolation.ts", "backend/src/utils/clientIp.ts", "scripts/aws/production-normal-release.mjs", ".github/workflows/production-deploy.yml"])
     assert.equal(classifyProductionChanges([file]).releaseClass, PRODUCTION_RELEASE_CLASS.SECURITY_INFRASTRUCTURE, file);
@@ -33,13 +38,47 @@ test("release classification is deterministic and sensitive lanes fail closed", 
   assert.throws(() => classifyProductionChanges(["unknown/build-input"]), /Ambiguous/);
 });
 
-test("successful GitHub workflow history supplies the complete undeployed range baseline", () => {
+test("every tracked image-affecting production input has a service owner or a stronger lane", () => {
+  const files = execFileSync("git", ["ls-files", "-z"], { encoding: "utf8" }).split("\0").filter(Boolean);
+  const unowned = [];
+  for (const file of files) {
+    const impact = classifyStageBImageReusePath(file);
+    if (!impact.imageAffecting) continue;
+    try {
+      const classification = classifyProductionChanges([file]);
+      if (classification.releaseClass === PRODUCTION_RELEASE_CLASS.NORMAL_APPLICATION && !classification.backend && !classification.frontend) unowned.push(file);
+    } catch (error) {
+      if (!/Image-affecting production input has no service owner|Ambiguous production change paths/.test(error.message)) throw error;
+      // Unknown image input is intentionally rejected before a normal release
+      // can claim it as a safe no-op.
+    }
+  }
+  assert.deepEqual(unowned, []);
+});
+
+test("component deployment state, never workflow history, supplies component-specific undeployed ranges", () => {
+  const a = "a".repeat(40), b = "b".repeat(40), c = "c".repeat(40), d = "d".repeat(40);
+  const component = (name, source) => ({ sourceSha: source, imageDigest: `sha256:${(name === "backend" ? "1" : "2").repeat(64)}`, taskDefinitionArn: `arn:aws:ecs:eu-west-2:368992683803:task-definition/${name}:1`, desiredCount: 2 });
+  const state = createProductionComponentDeploymentState({ components: { backend: component("backend", b), frontend: component("frontend", a), database: { sourceSha: a, releaseIdentity: "db-release" }, security: { sourceSha: a, releaseIdentity: "security-release" } } });
+  const ranges = new Map([[`${b}..${d}`, ["backend/src/services/batchService.ts"]], [`${a}..${d}`, ["src/App.tsx"]]]);
+  const plan = buildProductionNormalDeploymentPlan({ sourceSha: d, state, isAncestor: (left, right) => [a, b, c, d].indexOf(left) <= [a, b, c, d].indexOf(right), readRange: (left, right) => ranges.get(`${left}..${right}`) || [] });
+  assert.equal(plan.classification.backend, true); assert.equal(plan.classification.frontend, true); assert.equal(plan.componentBaselines.backend, b); assert.equal(plan.componentBaselines.frontend, a);
+  assert.throws(() => buildProductionNormalDeploymentPlan({ sourceSha: d, state: { ...state, components: { ...state.components, backend: null } }, isAncestor: () => true, readRange: () => [] }), /bootstrapped/);
+  assert.throws(() => buildProductionNormalDeploymentPlan({ sourceSha: d, state, isAncestor: () => false, readRange: () => [] }), /ancestor/);
+  assert.equal(typeof classifyProductionComponentRanges, "function");
+});
+
+test("recorded security work does not deadlock an unrelated frontend release, but unrecorded security does", () => {
   const a = "a".repeat(40), b = "b".repeat(40), c = "c".repeat(40);
-  const ancestor = (left, right) => [[a, b], [a, c], [b, c]].some(([x, y]) => left === x && right === y);
-  assert.deepEqual(resolveNormalDeploymentBaseline({ candidateSha: c, successfulSourceShas: [a], isAncestor: ancestor }), { candidateSha: c, baselineSha: a, bootstrap: false });
-  assert.deepEqual(resolveNormalDeploymentBaseline({ candidateSha: c, successfulSourceShas: [b, a], isAncestor: ancestor }), { candidateSha: c, baselineSha: b, bootstrap: false });
-  assert.deepEqual(resolveNormalDeploymentBaseline({ candidateSha: c, successfulSourceShas: [], isAncestor: ancestor }), { candidateSha: c, baselineSha: null, bootstrap: true });
-  assert.deepEqual(resolveNormalDeploymentBaseline({ candidateSha: c, successfulSourceShas: ["d".repeat(40)], isAncestor: ancestor }), { candidateSha: c, baselineSha: null, bootstrap: true });
+  const state = createProductionComponentDeploymentState({ components: {
+    backend: { sourceSha: a, imageDigest: `sha256:${"1".repeat(64)}`, taskDefinitionArn: `arn:aws:ecs:eu-west-2:368992683803:task-definition/${APP_ONLY.family}:1`, desiredCount: 2 },
+    frontend: { sourceSha: a, imageDigest: `sha256:${"2".repeat(64)}`, taskDefinitionArn: taskArn, desiredCount: 2 },
+    database: null, security: { sourceSha: b, releaseIdentity: "security" },
+  } });
+  const ranges = new Map([[`${a}..${b}`, ["backend/src/middleware/rbac.ts"]], [`${a}..${c}`, ["backend/src/middleware/rbac.ts", "src/App.tsx"]], [`${b}..${c}`, ["src/App.tsx"]]]);
+  const plan = buildProductionNormalDeploymentPlan({ sourceSha: c, state, isAncestor: (left, right) => [a, b, c].indexOf(left) <= [a, b, c].indexOf(right), readRange: (left, right) => ranges.get(`${left}..${right}`) || [] });
+  assert.equal(plan.classification.frontend, true); assert.equal(plan.classification.backend, false);
+  assert.throws(() => buildProductionNormalDeploymentPlan({ sourceSha: c, state: { ...state, components: { ...state.components, security: null } }, isAncestor: () => true, readRange: (left, right) => ranges.get(`${left}..${right}`) || [] }), /Sensitive|stronger-lane/);
 });
 
 test("normal plans require only immutable affected images", () => {
@@ -144,6 +183,33 @@ test("normal release orchestrator covers no-op and failure rollback without call
   await assert.rejects(() => executeNormalRelease({ plan: { ...noOp, sourceSha: "b".repeat(40) }, sourceSha, backend, frontend }), /source identity/);
 });
 
+test("combined component transaction rolls every mutated service back before state commit and commits both only after smoke", async () => {
+  const candidate = "d".repeat(40), prior = "b".repeat(40);
+  const state = createProductionComponentDeploymentState({ components: {
+    backend: { sourceSha: prior, imageDigest: `sha256:${"1".repeat(64)}`, taskDefinitionArn: `arn:aws:ecs:eu-west-2:368992683803:task-definition/${APP_ONLY.family}:14`, desiredCount: 2 },
+    frontend: { sourceSha: prior, imageDigest: `sha256:${"2".repeat(64)}`, taskDefinitionArn: taskArn, desiredCount: 2 },
+    database: { sourceSha: prior, releaseIdentity: "db" }, security: { sourceSha: prior, releaseIdentity: "security" },
+  } });
+  const plan = buildNormalReleasePlan({ sourceSha: candidate, componentFiles: { backendFiles: ["backend/src/services/batchService.ts"], frontendFiles: ["src/App.tsx"], securityFiles: [], databaseFiles: [] }, images: { backend: backendImage, frontend: frontendImage } });
+  const events = [], backend = { deploy: async () => ({ result: { candidateTaskDefinition: `arn:aws:ecs:eu-west-2:368992683803:task-definition/${APP_ONLY.family}:15`, candidateDeploymentId: "ecs-svc/15", deployedBackendDigest: backendImage.split("@")[1] }, rollback: async () => events.push("backend-rollback") }), rollback: async (value) => value.rollback() };
+  const frontendFailure = { deploy: async () => { throw new Error("frontend failed"); }, rollback: async () => events.push("frontend-rollback") };
+  let committed = false;
+  await assert.rejects(() => executeNormalComponentTransaction({ plan, sourceSha: candidate, state, stateClient: { advance: () => { committed = true; } }, backend, frontend: frontendFailure, smoke: async () => true, isAncestor: () => true }), /frontend failed/);
+  assert.deepEqual(events, ["backend-rollback"]); assert.equal(committed, false);
+  const frontend = { deploy: async () => ({ result: { candidateTaskDefinitionArn: taskArn.replace(":20", ":21"), imageRef: frontendImage }, rollback: async () => events.push("frontend-rollback") }), rollback: async (value) => value.rollback() };
+  const complete = await executeNormalComponentTransaction({ plan, sourceSha: candidate, state, stateClient: { read: () => state, advance: () => { committed = true; } }, backend, frontend, smoke: async () => true, isAncestor: () => true });
+  assert.equal(committed, true); assert.equal(complete.componentState.components.backend.sourceSha, candidate); assert.equal(complete.componentState.components.frontend.sourceSha, candidate);
+});
+
+test("retry accepts only the exact already-live candidate and rejects unknown live state", () => {
+  const predecessor = { sourceSha: "a".repeat(40), imageDigest: `sha256:${"1".repeat(64)}`, taskDefinitionArn: "task:1", desiredCount: 2 };
+  const candidate = { sourceSha: "b".repeat(40), imageDigest: `sha256:${"2".repeat(64)}` };
+  assert.equal(classifyNormalLiveComponentState({ live: predecessor, predecessor, candidate }), "LIVE_IS_PREDECESSOR");
+  assert.equal(classifyNormalLiveComponentState({ live: { ...candidate, taskDefinitionArn: "task:2", desiredCount: 2 }, predecessor, candidate }), "LIVE_IS_EXACT_CANDIDATE");
+  assert.equal(classifyNormalLiveComponentState({ live: { ...candidate, taskDefinitionArn: "task:1" }, predecessor, candidate }), "LIVE_IS_UNKNOWN");
+  assert.equal(classifyNormalLiveComponentState({ live: { ...candidate, sourceSha: "c".repeat(40), taskDefinitionArn: "task:3" }, predecessor, candidate }), "LIVE_IS_UNKNOWN");
+});
+
 test("normal release plans cannot smuggle database or forged classification work into the normal lane", async () => {
   const dbFiles = ["backend/prisma/migrations/001_init/migration.sql"];
   assert.equal(classifyProductionChanges(dbFiles).releaseClass, PRODUCTION_RELEASE_CLASS.SECURITY_INFRASTRUCTURE);
@@ -162,8 +228,14 @@ test("normal production workflow is fixed, OIDC-only, gated by main, and smoke-t
   assert.match(workflow, /MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-release-deployer/);
   assert.match(workflow, /SMOKE_AUTHENTICATED_REQUIRED: "true"/);
   assert.match(workflow, /production-normal-release\.mjs/);
-  assert.match(workflow, /listWorkflowRuns/);
-  assert.match(workflow, /git merge-base --is-ancestor/);
+  assert.match(workflow, /prepare-production-normal-deployment\.mjs/);
+  assert.doesNotMatch(workflow, /listWorkflowRuns|Resolve successful deployment baseline/);
+  assert.match(workflow, /mscqr-production-normal-deployer/);
+  assert.match(workflow, /environment: production-normal-deploy/);
+  const normalEnvironmentUsers = fs.readdirSync(".github/workflows").filter((file) => file.endsWith(".yml") && fs.readFileSync(`.github/workflows/${file}`, "utf8").match(/environment:\s*production-normal-deploy/));
+  assert.deepEqual(normalEnvironmentUsers, ["production-deploy.yml"]);
+  assert.match(workflow, /normal-component-deployment-plan/);
+  assert.match(workflow, /Deploy coordinated normal release/);
   assert.match(workflow, /Preserve normal-release mutation journal[\s\S]*if: always\(\)/);
   assert.match(workflow, /publish-backend:[\s\S]*?environment: production-stage-b-image-publish/);
   assert.match(workflow, /publish-frontend:[\s\S]*?environment: production-web-image-publish/);

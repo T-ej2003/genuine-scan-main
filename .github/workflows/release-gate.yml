@@ -1082,6 +1082,25 @@ jobs:
           set -euo pipefail
           ./scripts/aws/verify-production-smoke.sh
 
+      - name: Commit authenticated backend recovery component state
+        if: ${{ inputs.release_mode == 'backend-health-recovery' }}
+        env:
+          MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-release-deployer
+          RECOVERY_EVIDENCE: ${{ runner.temp }}/backend-health-recovery/evidence.json
+        run: node scripts/aws/commit-production-component-recovery-state.mjs --evidence="$RECOVERY_EVIDENCE"
+
+      - name: Commit authenticated rotation security component state
+        if: ${{ inputs.release_mode == 'rotation-overlap' || inputs.release_mode == 'rotation-cleanup' }}
+        env:
+          MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-release-deployer
+          SOURCE_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
+          ROTATION_ID: ${{ inputs.rotation_id }}
+          ROTATION_STATE_SHA256: ${{ inputs.rotation_state_sha256 }}
+          ROTATION_READINESS: ${{ runner.temp }}/rotation-readiness.json
+          ROTATION_READINESS_SHA256: ${{ inputs.rotation_readiness_evidence_sha256 }}
+          ROTATION_MODE: ${{ inputs.release_mode }}
+        run: node scripts/aws/commit-production-component-rotation-state.mjs --mode="$ROTATION_MODE" --source-sha="$SOURCE_SHA" --rotation-id="$ROTATION_ID" --rotation-state-sha256="$ROTATION_STATE_SHA256" --readiness="$ROTATION_READINESS" --readiness-sha256="$ROTATION_READINESS_SHA256"
+
       - name: Activate authenticated frontend image
         id: frontend-activation
         if: ${{ inputs.release_mode == 'normal' && steps.images.outputs.web_required == 'true' }}
@@ -1168,3 +1187,12 @@ jobs:
               echo "- Deployment: preserved reviewed task definition"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit authenticated security component state
+        if: ${{ inputs.release_mode == 'normal' }}
+        env:
+          MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-release-deployer
+          SOURCE_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
+          AUTHORIZATION_FILE: ${{ steps.images.outputs.authorization_file }}
+          AUTHORIZATION_SHA256: ${{ inputs.normal_image_authorization_sha256 }}
+        run: node scripts/aws/commit-production-component-security-state.mjs --source-sha="$SOURCE_SHA" --authorization="$AUTHORIZATION_FILE" --authorization-sha256="$AUTHORIZATION_SHA256"

@@ -73,7 +73,8 @@ export function classifyProductionChanges(paths) {
   assert.equal(unknown.length, 0, `Ambiguous production change paths: ${unknown.join(", ")}`);
   const image = changed.map(classifyStageBImageReusePath);
   const backendAffecting = image.some(({ file, imageAffecting }) => imageAffecting && (/^backend\//.test(file) || /^shared\//.test(file)));
-  const frontendAffecting = image.some(({ file, imageAffecting }) => imageAffecting && (/^(?:src|public|shared)\//.test(file) || /(?:frontend|web|Dockerfile\.ecs-frontend|\.dockerignore|postcss|tailwind|nginx-entrypoint|index\.html)/i.test(file)));
+  const frontendAffecting = image.some(({ file, imageAffecting }) => imageAffecting && (/^(?:src|public|shared)\//.test(file) || /^(?:package(?:-lock)?\.json|components\.json|eslint\.config\.js|index\.html|postcss\.config\.js|tailwind\.config\.ts|tsconfig(?:\.[^/]+)?\.json|vite\.config\.[^/]+|vitest\.config\.[^/]+|Dockerfile\.ecs-frontend|nginx\.ecs-frontend\.conf|docker\/nginx-entrypoint\.sh|\.dockerignore)$/.test(file)));
+  if (image.some(({ imageAffecting }) => imageAffecting) && !backendAffecting && !frontendAffecting) throw new Error("Image-affecting production input has no service owner.");
   const workerAffecting = image.some(({ file, imageAffecting }) => imageAffecting && (/^backend\/(?:src\/.*worker|scripts\/.*worker)/i.test(file) || /^worker\//i.test(file) || /^shared\//.test(file)));
   if (workerAffecting) {
     return Object.freeze({ releaseClass: PRODUCTION_RELEASE_CLASS.SECURITY_INFRASTRUCTURE, files: changed, backend: backendAffecting, frontend: frontendAffecting, worker: true, database: false });
@@ -91,4 +92,26 @@ export function classifyProductionChanges(paths) {
 export function assertNormalApplicationRelease(classification) {
   assert.equal(classification?.releaseClass, PRODUCTION_RELEASE_CLASS.NORMAL_APPLICATION, "Sensitive or ambiguous changes must not enter the normal deployment lane.");
   return classification;
+}
+
+// Component baselines legitimately differ. Classify each component range on
+// its own, then select only that component's impact; do not re-deploy backend
+// merely because an older backend commit appears in the frontend range.
+export function classifyProductionComponentRanges({ backendFiles = [], frontendFiles = [], securityFiles = [], databaseFiles = [] } = {}) {
+  const backend = assertNormalApplicationRelease(classifyProductionChanges(backendFiles));
+  const frontend = assertNormalApplicationRelease(classifyProductionChanges(frontendFiles));
+  const security = classifyProductionChanges(securityFiles);
+  const database = classifyProductionChanges(databaseFiles);
+  for (const classification of [security, database])
+    if (classification.releaseClass !== PRODUCTION_RELEASE_CLASS.NORMAL_APPLICATION || classification.worker)
+      throw new Error("A stronger-lane component has undeployed production impact.");
+  return Object.freeze({
+    releaseClass: PRODUCTION_RELEASE_CLASS.NORMAL_APPLICATION,
+    files: [...new Set([...backend.files, ...frontend.files])].sort(),
+    backend: backend.backend,
+    frontend: frontend.frontend,
+    worker: false,
+    database: false,
+    componentFiles: Object.freeze({ backend: backend.files, frontend: frontend.files, security: security.files, database: database.files }),
+  });
 }

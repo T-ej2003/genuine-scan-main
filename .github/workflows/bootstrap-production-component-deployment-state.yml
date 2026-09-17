@@ -1,0 +1,28 @@
+name: Bootstrap Production Component Deployment State
+
+'on':
+  workflow_dispatch:
+
+permissions: { contents: read, id-token: write }
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  bootstrap:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production-component-state-bootstrap
+    steps:
+      - uses: actions/checkout@v6
+        with: { ref: '${{ github.sha }}', fetch-depth: 0, persist-credentials: false }
+      - run: git fetch --no-tags origin main && test "$GITHUB_SHA" = "$(git rev-parse refs/remotes/origin/main)"
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: eu-west-2
+          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-component-state-bootstrap
+          unset-current-credentials: true
+      - name: Bootstrap exact live component state once
+        env: { MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-release-deployer }
+        run: node scripts/aws/bootstrap-production-component-deployment-state.mjs

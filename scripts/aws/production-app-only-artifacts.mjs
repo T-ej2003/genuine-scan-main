@@ -34,9 +34,9 @@ export function parseAppOnlyArtifactReference(text) {
 // Private, append-only snapshots. Existing atomic publication fsyncs file and
 // directory; mutation adapters await this writer before calling AWS. Workflow
 // always-upload remains necessary for runner-loss durability.
-export function createAppOnlyEvidenceWriter({ repositoryRoot, sourceSha, preparationSha256 }) {
+export function createAppOnlyEvidenceWriter({ repositoryRoot, sourceSha, preparationSha256, directory: requestedDirectory }) {
   assert.match(sourceSha || "", /^[a-f0-9]{40}$/); assert.match(preparationSha256 || "", /^[a-f0-9]{64}$/);
-  const requested = process.env.MSCQR_APP_ONLY_JOURNAL_DIR;
+  const requested = requestedDirectory || process.env.MSCQR_APP_ONLY_JOURNAL_DIR;
   const directory = requested ? path.resolve(requested) : fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-app-only-evidence-"));
   if (requested) {
     assert.ok(path.isAbsolute(requested) && !directory.startsWith(path.resolve(repositoryRoot) + path.sep), "Journal directory must be external to the checkout");

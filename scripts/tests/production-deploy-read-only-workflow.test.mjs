@@ -23,7 +23,7 @@ test("normal production deployment is automatically triggered from protected mai
   assert.ok(Object.hasOwn(workflow.on || workflow[true] || {}, "workflow_dispatch"));
   assert.ok(workflow.on?.push?.branches?.includes("main") || workflow[true]?.push?.branches?.includes("main"));
   assert.match(workflowText, /ref: '\$\{\{ github\.sha \}\}'/);
-  assert.match(workflowText, /production-deployment-classification\.mjs/);
+  assert.match(workflowText, /prepare-production-normal-deployment\.mjs/);
 });
 
 test("normal workflow rejects non-main dispatch and verifies exact protected source", () => {
@@ -35,7 +35,7 @@ test("normal workflow rejects non-main dispatch and verifies exact protected sou
 });
 
 test("workflow is OIDC-only, serialized, and uses fixed production boundaries", () => {
-  assert.deepEqual(workflow.permissions, { contents: "read", actions: "read", "id-token": "write" });
+  assert.deepEqual(workflow.permissions, { contents: "read", "id-token": "write" });
   assert.equal(workflow.concurrency["cancel-in-progress"], false);
   assert.equal(workflow.concurrency.group, "production-deploy");
   assert.match(workflowText, /configure-aws-credentials@v6/);

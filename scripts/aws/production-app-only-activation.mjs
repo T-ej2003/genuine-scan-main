@@ -15,6 +15,28 @@ export function assertAppOnlyHealth({ backend, frontendStatus }, expectedRelease
   return assertProductionBackendReadiness(backend.body, { expectedReleaseSha });
 }
 
+export async function rollbackAppOnlyActivation({ preparation, candidateArn, candidateDeploymentId, adapters } = {}) {
+  const { readLive, readDefinition, updateService, waitStable, readHealth, writeEvidence } = adapters || {};
+  assert.ok(preparation?.predecessor); assert.match(candidateArn || "", new RegExp(`^arn:aws:ecs:${APP_ONLY.region}:${APP_ONLY.account}:task-definition/${APP_ONLY.family}:[1-9][0-9]*$`));
+  assertAppOnlyDeploymentId(candidateDeploymentId);
+  for (const value of [readLive, readDefinition, updateService, waitStable, readHealth, writeEvidence]) assert.equal(typeof value, "function", "App-only rollback adapter is missing");
+  const result = { schemaVersion: 1, preparationSha256: preparation.preparationSha256, status: "ROLLBACK_INTENT", rollbackRequired: true, rollbackExecuted: false, rollbackVerified: false, rollbackTarget: preparation.predecessor.taskDefinitionArn };
+  await writeEvidence(structuredClone(result));
+  const current = await readLive();
+  const target = assertAppOnlyRollbackOwnership({ service: current.service, candidateArn, candidateDeploymentId, predecessor: preparation.predecessor });
+  const prior = await readDefinition(target);
+  assert.equal(appOnlyDefinitionSha256(prior), preparation.predecessor.definitionSha256, "Rollback predecessor definition changed");
+  assertAppOnlyRollbackOwnership({ service: (await readLive()).service, candidateArn, candidateDeploymentId, predecessor: preparation.predecessor });
+  await updateService({ cluster: APP_ONLY.clusterArn, service: APP_ONLY.serviceArn, taskDefinition: target });
+  result.status = "ROLLING_BACK"; result.rollbackExecuted = true; await writeEvidence(structuredClone(result));
+  await waitStable(target);
+  const restored = captureAppOnlyPredecessor(await readLive());
+  assert.equal(restored.taskDefinitionArn, target); assert.equal(restored.backendDigest, preparation.predecessor.backendDigest); assert.equal(restored.definitionSha256, preparation.predecessor.definitionSha256);
+  assertAppOnlyHealth(await readHealth(), appOnlyExpectedHealthSourceSha(prior, preparation.predecessorSourceSha));
+  result.status = "ROLLED_BACK"; result.rollbackVerified = true; await writeEvidence(structuredClone(result));
+  return Object.freeze(result);
+}
+
 // AWS adapters passed here must be the fixed production adapters, never dispatch
 // inputs. This state machine has exactly register and update mutation methods.
 export async function executeAppOnlyActivation(preparation, adapters) {
@@ -85,22 +107,9 @@ export async function executeAppOnlyActivation(preparation, adapters) {
       // An ambiguous UpdateService response cannot authorize a guessed rollback.
       // Without the returned owned deployment ID leave durable recovery evidence.
       assert.ok(candidateDeploymentId, "Activation ownership is unproven");
-      const current = await readLive();
-      const target = assertAppOnlyRollbackOwnership({ service: current.service, candidateArn, candidateDeploymentId, predecessor });
-      const prior = await readDefinition(target);
-      assert.equal(appOnlyDefinitionSha256(prior), predecessor.definitionSha256, "Rollback predecessor definition changed");
-      await record("ROLLBACK_INTENT", { rollbackRequired: true, rollbackTarget: target });
-      // Repeat ownership immediately before the rollback API call.
-      assertAppOnlyRollbackOwnership({ service: (await readLive()).service, candidateArn, candidateDeploymentId, predecessor });
-      await updateService({ cluster: APP_ONLY.clusterArn, service: APP_ONLY.serviceArn, taskDefinition: target });
-      await record("ROLLING_BACK", { rollbackExecuted: true });
-      await waitStable(target);
-      const restored = captureAppOnlyPredecessor(await readLive());
-      assert.equal(restored.taskDefinitionArn, target);
-      assert.equal(restored.backendDigest, predecessor.backendDigest);
-      assert.equal(restored.definitionSha256, predecessor.definitionSha256);
-      assertAppOnlyHealth(await readHealth(), appOnlyExpectedHealthSourceSha(prior, preparation.predecessorSourceSha));
-      await record("ROLLED_BACK", { rollbackVerified: true });
+      const rollback = await rollbackAppOnlyActivation({ preparation, candidateArn, candidateDeploymentId,
+        adapters: { readLive, readDefinition, updateService, waitStable, readHealth, writeEvidence } });
+      Object.assign(result, rollback);
     } catch {
       await record("ACTIVATION_FAILED_RECOVERY_REQUIRED", { rollbackRequired: true });
     }

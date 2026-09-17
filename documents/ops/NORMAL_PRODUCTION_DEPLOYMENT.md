@@ -1,72 +1,16 @@
 # Normal production deployment
 
-Routine application releases use .github/workflows/production-deploy.yml.
-Merging a reviewed change to main starts the workflow; the protected
-production environment supplies the required approval, GitHub OIDC supplies
-the fixed deployer session, and the workflow classifies, publishes immutable
-SHA-tagged images, deploys affected ECS services, waits for stable healthy
-tasks, and runs the authenticated application smoke suite inside each
-affected service's rollback boundary.
+After the one-time component-state bootstrap, an ordinary backend or frontend PR is merged to `main`. GitHub Actions classifies the affected live component, builds its immutable image, deploys it, verifies health and authenticated smoke checks, rolls back automatically on failure, and records only the components that are actually live.
 
-Image publication uses the existing `production-stage-b-image-publish`
-environment for backend images and `production-web-image-publish` for web
-images. Activation remains in the `production` environment; its app-only role
-trust explicitly names this canonical workflow and protected-main reference.
-The first deployment of this infrastructure-changing release must apply that
-exact app-only trust transition through the reviewed security lane; later
-ordinary releases need no trust reconciliation.
+Approve the protected GitHub `production-normal-deploy` environment if prompted. It is reserved for `.github/workflows/production-deploy.yml` and must retain independent approval. No Codex session, Stage-B authorization, KMS evidence, JSON artifact construction, digest copying, Terraform command, or ECS command is part of a normal application release.
 
-The workflow is intentionally limited to NORMAL_APPLICATION changes. Its
-classification is derived from the changed paths in the protected-main
-commit. IAM, RLS, network, KMS, authentication, migration, recovery, and
-ambiguous changes fail closed and remain on the stronger reviewed
-SECURITY_INFRASTRUCTURE or EMERGENCY_RECOVERY lanes. A caller cannot
-select a release class.
+Security/infrastructure changes use the stronger reviewed lane. Recovery uses its dedicated recovery lane.
 
-Backend and frontend deployment use fixed account, region, cluster, service,
-family, task-role, execution-role, and container contracts. Images are
-referenced by the digest returned by the immutable ECR publication step.
-Predecessor capture and ECS service CAS prevent deploying over concurrent
-state. A failed service rollout, health gate, or authenticated smoke gate rolls
-that service back to the exact captured predecessor; the ECS deployment
-circuit-breaker remains the last-resort service rollback boundary.
+## One-time bootstrap
 
-Compatible database migrations and function changes are not currently in the
-normal lane: they are classified as infrastructure/security work and must use
-the governed database release path before dependent application activation.
-For G06 this includes printing_readiness, printing_create_job, and
-printing_connector_identity.
+Before the first normal deployment, create the protected `production-component-state-bootstrap` GitHub environment with the same independent-approval rule as production, then run **Bootstrap Production Component Deployment State** from protected `main`. The workflow reads the current backend and frontend ECS/ECR identities, proves their protected-main source tags, and conditionally creates the single state record. It rejects an existing record and never uses workflow history as deployment state.
 
-The worker service remains absent by reviewed production topology. Worker
-changes are not silently deployed as backend changes; they fail closed to the
-infrastructure lane until a worker service contract exists.
+## Troubleshooting
 
-The older Stage-B evidence, KMS, and recovery machinery remains available for
-security/infrastructure and emergency/recovery operations. It is not required
-for an ordinary application release. No production credentials, image tags,
-task definitions, rollback targets, or evidence documents are supplied by a
-caller.
-
-Required production environment values for the authenticated smoke are the
-PRODUCTION_SMOKE_LOGIN_EMAIL, PRODUCTION_SMOKE_LOGIN_PASSWORD, and
-reviewed MFA/verification secrets. Missing smoke credentials fail the release
-gate; they are never replaced by a degraded or unauthenticated result.
-
-## Operator procedure
-
-1. Merge the reviewed application PR to main.
-2. Approve the protected production environment if GitHub requests it.
-3. Monitor Normal Production Deployment.
-4. Treat a failed classification or gate as a routed security/recovery
-   operation, not as permission to edit the normal workflow inputs.
-5. Confirm the workflow's deployment, health, smoke, and rollback results.
-
-No Codex session, hand-built evidence JSON, manual digest copying, temporary
-DBA task, Stage-B recovery authorization, or physical printer acceptance is
-part of this routine path. Physical printer acceptance remains a separate
-post-release G06 acceptance test.
-## Durable baseline and recovery journal
-
-`production-deploy.yml` deploys only the complete range from the latest completed successful normal-release workflow SHA to the protected-main candidate. Failed, cancelled, partial, and superseded runs never advance that GitHub-authenticated baseline. Classification is positive and fail-closed: sensitive, recovery, and unknown production ownership leave the normal lane.
-
-Backend mutation journals use the existing app-only hash-chained format and are uploaded with `always()` for both success and failure recovery.
+- A normal workflow that fails after a service mutation rolls the exact authenticated predecessor back and preserves its automatic journal artifact.
+- A workflow that reports unknown or drifted live state stops without forcing a service update; use the reviewed recovery lane to reconcile that component.
