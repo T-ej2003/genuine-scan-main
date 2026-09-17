@@ -42,7 +42,7 @@ export function buildProductionNormalDeploymentPlan({ sourceSha, state, readRang
       const completedFiles = new Set(readRange(baseline, established));
       files[component] = files[component].filter((file) => !(COMPLETED_EMERGENCY_PATHS[mode].includes(file)
         && completedFiles.has(file) && !newerFiles.has(file)
-        && classifyProductionChanges([file]).releaseClass === PRODUCTION_RELEASE_CLASS.EMERGENCY_RECOVERY));
+        && [PRODUCTION_RELEASE_CLASS.EMERGENCY_RECOVERY, PRODUCTION_RELEASE_CLASS.SECURITY_INFRASTRUCTURE].includes(classifyProductionChanges([file]).releaseClass)));
     }
   }
   // Component baselines can lag an already-completed stronger or recovery

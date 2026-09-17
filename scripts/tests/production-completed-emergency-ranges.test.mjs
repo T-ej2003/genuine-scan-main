@@ -6,6 +6,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { createProductionComponentDeploymentState, advanceProductionComponentDeploymentState, advanceProductionComponentDeploymentStateWithRetry } from "../aws/production-component-deployment-state.mjs";
 import { buildProductionNormalDeploymentPlan, prepareProductionNormalDeployment } from "../aws/prepare-production-normal-deployment.mjs";
+import { COMPLETED_EMERGENCY_PATHS } from "../aws/production-completed-emergency-work.mjs";
 
 const [a, b, c, d, e] = ["a", "b", "c", "d", "e"].map((letter) => letter.repeat(40));
 const history = [a, b, c, d, e];
@@ -31,6 +32,7 @@ for (const mode of ["backend-health-recovery", "rotation-overlap", "rotation-cle
     assert.throws(() => plan(initial(), events), /Sensitive|stronger-lane/);
     const established = complete(initial(), mode);
     const result = plan(established, events);
+    assert.equal(plan(established, [[b, COMPLETED_EMERGENCY_PATHS[mode]], [c, ["src/App.tsx"]]]).classification.frontend, true);
     assert.equal(result.classification.frontend, true); assert.equal(result.classification.backend, false);
     for (const files of Object.values(result.componentFiles)) assert.ok(!files.includes(emergency));
     assert.equal(established.components.frontend.establishedThroughSha, a);
