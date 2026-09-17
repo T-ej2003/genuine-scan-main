@@ -58,7 +58,7 @@ export function assertBrokerConfiguration(response, expected, { concurrency, sig
 }
 
 export function assertBrokerEntryPoint(context, operation) {
-  const version = { INSTALL: "1", INSPECT: "1", PROVE_INSTALL_SESSION: "1", CLOSE: "2", CLEANUP_CONTEXT: "2", PROVE_CLEANUP_SESSION: "2", AUTHORIZE: "3" }[operation];
+  const version = { INSTALL: "1", INSPECT: "1", PROVE_INSTALL_SESSION: "1", PROVE_TERRAFORM_SESSION: "1", CLOSE: "2", CLEANUP_CONTEXT: "2", PROVE_CLEANUP_SESSION: "2", AUTHORIZE: "3" }[operation];
   assert(version, "Unsupported broker operation");
   assert.equal(context.functionVersion, version, "Operation not authorized on this immutable entry point");
   assert.equal(context.invokedFunctionArn, `${componentBrokerArn}:${version}`, "Unqualified/alias invocation forbidden");

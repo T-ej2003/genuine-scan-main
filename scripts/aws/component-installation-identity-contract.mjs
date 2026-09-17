@@ -76,7 +76,7 @@ export function assertPostBootstrapCapabilitySeparation(identities = componentSe
   const terraform = installationCapabilitySet().terraform;
   for (const statement of terraform.Statement) {
     for (const action of [].concat(statement.Action)) {
-      assert(!action.startsWith("lambda:"));
+      if (action.startsWith("lambda:")) assert.deepEqual(statement, invoke(1).Statement[0]);
       assert(!action.startsWith("iam:") || /^iam:(Get|List)/.test(action));
     }
   }

@@ -105,9 +105,9 @@ function fixture() {
     assert.equal(operation, "GetRuntimeManagementConfig");
     return { UpdateRuntimeOn: "FunctionUpdate", RuntimeVersionArn: null };
   };
-  f.run = (operation, fields = {}, version = { AUTHORIZE: "3", CLOSE: "2", CLEANUP_CONTEXT: "2", PROVE_CLEANUP_SESSION: "2", INSTALL: "1", INSPECT: "1", PROVE_INSTALL_SESSION: "1" }[operation]) => {
-    const purpose = ["CLOSE", "PROVE_CLEANUP_SESSION"].includes(operation) ? "CLEANUP" : "INSTALL";
-    const role = purpose === "CLEANUP" ? identityBootstrap.cleanupRole : identityBootstrap.installationRole;
+  f.run = (operation, fields = {}, version = { AUTHORIZE: "3", CLOSE: "2", CLEANUP_CONTEXT: "2", PROVE_CLEANUP_SESSION: "2", INSTALL: "1", INSPECT: "1", PROVE_INSTALL_SESSION: "1", PROVE_TERRAFORM_SESSION: "1" }[operation]) => {
+    const purpose = f.proofPurpose || (["CLOSE", "PROVE_CLEANUP_SESSION"].includes(operation) ? "CLEANUP" : operation === "PROVE_TERRAFORM_SESSION" ? "TERRAFORM" : "INSTALL");
+    const role = { CLEANUP: identityBootstrap.cleanupRole, INSTALL: identityBootstrap.installationRole, TERRAFORM: installationIdentity.terraformRole }[purpose];
     const binding = { sourceSha, transitionId, authorizationSha256: digest(authorization), purpose };
     const key = ["A", "S", "I", "A"].join("") + "0".repeat(16);
     const date = new Date(f.clock).toISOString().replace(/[-:]|\.\d{3}/g, "");
@@ -170,6 +170,22 @@ test("fresh-session inspection neither claims nor replaces active installation a
   assert.equal(JSON.stringify([...f.objects]), before);
   assert.deepEqual(f.writes, writes);
   await assert.rejects(f.run("INSTALL"), /not safely expired/);
+});
+
+test("Terraform proof is read-only, requires installed IAM and cannot become an IAM-write proof", async () => {
+  const f = fixture(); await f.run("AUTHORIZE");
+  await assert.rejects(f.run("PROVE_TERRAFORM_SESSION"), /requires verified IAM/);
+  await f.run("INSTALL");
+  const before = JSON.stringify([...f.objects]), writes = [...f.writes];
+  f.clock += 1800001; f.sessionIssuedAt = f.clock;
+  const proof = await f.run("PROVE_TERRAFORM_SESSION");
+  assert.equal(proof.state, "SESSION_VERIFIED"); assert.equal(proof.session.purpose, "TERRAFORM");
+  assert.equal(JSON.stringify([...f.objects]), before); assert.deepEqual(f.writes, writes);
+  f.proofPurpose = "TERRAFORM";
+  await assert.rejects(f.run("INSTALL"));
+  await assert.rejects(f.run("PROVE_INSTALL_SESSION"));
+  assert.equal(JSON.stringify([...f.objects]), before); assert.deepEqual(f.writes, writes);
+  f.main = "d".repeat(40); await assert.rejects(f.run("PROVE_TERRAFORM_SESSION"));
 });
 
 for (const qualifier of ["$LATEST", "1", "2", "3"]) test(`broker rejects a resource policy bypass on ${qualifier}`, async () => {

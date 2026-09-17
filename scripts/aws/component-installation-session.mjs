@@ -5,11 +5,12 @@ import { setTimeout as delay } from "node:timers/promises";
 import { promptProductionMfaCode } from "../security/production-interactive-mfa-provider.mjs";
 import { createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { identityBootstrap, componentBrokerArn } from "./component-installation-identity-contract.mjs";
-import { sessionProofBinding } from "./component-session-proof.mjs";
+import { sessionProofBinding, assertComponentSessionRecord } from "./component-session-proof.mjs";
+import { executeIsolatedTerraform } from "./component-terraform-runner.mjs";
 
 const requireSdk = createRequire(new URL("../../infra/aws/terraform/production-component-deployment-state/broker-package/package.json", import.meta.url));
 const operator = "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator";
-const roles = { INSTALL: identityBootstrap.installationRole, CLEANUP: identityBootstrap.cleanupRole };
+const roles = { INSTALL: identityBootstrap.installationRole, CLEANUP: identityBootstrap.cleanupRole, TERRAFORM: "mscqr-production-component-table-installer" };
 const credentialsForSdk = (value) => ({ accessKeyId: value.AccessKeyId, secretAccessKey: value.SecretAccessKey, ...(value.SessionToken ? { sessionToken: value.SessionToken } : {}) });
 const options = (credentials, service) => ({ region: identityBootstrap.region, credentials: credentialsForSdk(credentials), endpoint: `https://${service}.eu-west-2.amazonaws.com`, maxAttempts: 1 });
 function stsTransport(credentials) {
@@ -37,7 +38,7 @@ export async function establishComponentCleanupSession(transitionId, dependencie
   return establish({ transitionId, purpose: "CLEANUP" }, dependencies, true);
 }
 
-async function establish(binding, { loadUser = loadOperator, sts = stsTransport, mfa = () => promptProductionMfaCode({ prompt: "Component installation operator MFA code: " }), invoke, now = Date.now, sleep = delay } = {}, discover = false) {
+async function establish(binding, { loadUser = loadOperator, sts = stsTransport, mfa = () => promptProductionMfaCode({ prompt: "Component installation operator MFA code: " }), invoke, isolated = executeIsolatedTerraform, now = Date.now, sleep = delay } = {}, discover = false) {
   const fixedBinding = structuredClone(binding);
   if (!discover) sessionProofBinding(fixedBinding);
   assert(Object.hasOwn(roles, fixedBinding.purpose));
@@ -77,7 +78,7 @@ async function establish(binding, { loadUser = loadOperator, sts = stsTransport,
     const signer = new SignatureV4({ credentials: credentialsForSdk(scoped), region: identityBootstrap.region, service: "sts", sha256: Sha256 });
     const send = async (payload) => {
       assert(now() < expires, "AWS session expired");
-      const input = { FunctionName: `${componentBrokerArn}:${fixedBinding.purpose === "INSTALL" ? "1" : "2"}`, InvocationType: "RequestResponse", Payload: Buffer.from(JSON.stringify(payload)) };
+      const input = { FunctionName: `${componentBrokerArn}:${fixedBinding.purpose === "CLEANUP" ? "2" : "1"}`, InvocationType: "RequestResponse", Payload: Buffer.from(JSON.stringify(payload)) };
       let result;
       if (invoke) result = await invoke(input);
       else {
@@ -88,7 +89,7 @@ async function establish(binding, { loadUser = loadOperator, sts = stsTransport,
       }
       assert.equal(result.StatusCode, 200);
       assert(!result.FunctionError, "Broker rejected the request; authenticate live evidence before retry");
-      assert.equal(result.ExecutedVersion, fixedBinding.purpose === "INSTALL" ? "1" : "2");
+      assert.equal(result.ExecutedVersion, fixedBinding.purpose === "CLEANUP" ? "2" : "1");
       return JSON.parse(Buffer.from(result.Payload).toString("utf8"));
     };
     if (discover) {
@@ -102,26 +103,48 @@ async function establish(binding, { loadUser = loadOperator, sts = stsTransport,
       const signed = await signer.presign({ protocol: "https:", hostname: "sts.eu-west-2.amazonaws.com", method: "GET", path: "/", headers: { host: "sts.eu-west-2.amazonaws.com", "x-mscqr-component-binding": sessionProofBinding(fixedBinding) }, query: { Action: "GetCallerIdentity", Version: "2011-06-15" } }, { expiresIn: 60, signingDate: new Date(now()) });
       return { operation, transitionId: fixedBinding.transitionId, authorizationSha256: fixedBinding.authorizationSha256, proof: { query: signed.query } };
     };
-    return Object.freeze({
-      principal, expiresAt: new Date(expires).toISOString(),
-      async invoke(operation) {
-        assert((fixedBinding.purpose === "INSTALL" ? ["INSTALL", "INSPECT"] : ["CLOSE"]).includes(operation), "Unsupported session operation");
+    const prove = async () => {
         assert(now() < expires, "AWS session expired");
         const deadline = Math.min(now() + 300000, expires - 120000);
-        let verified = false;
         for (let attempt = 0; attempt < 60 && now() < deadline; attempt++) {
           try {
-            const proof = await send(await signedPayload(fixedBinding.purpose === "INSTALL" ? "PROVE_INSTALL_SESSION" : "PROVE_CLEANUP_SESSION"));
-            assert.deepEqual(proof, { state: "SESSION_VERIFIED", principal, expiresAt: new Date(expires).toISOString(), sourceSha: fixedBinding.sourceSha,
+            const proof = await send(await signedPayload({ INSTALL: "PROVE_INSTALL_SESSION", CLEANUP: "PROVE_CLEANUP_SESSION", TERRAFORM: "PROVE_TERRAFORM_SESSION" }[fixedBinding.purpose]));
+            const { session, ...envelope } = proof;
+            if (fixedBinding.purpose === "TERRAFORM") {
+              assertComponentSessionRecord(session); assert.equal(session.purpose, "TERRAFORM");
+              for (const field of ["sourceSha", "transitionId", "authorizationSha256"]) assert.equal(session[field], fixedBinding[field]);
+              assert.equal(session.principal, principal); assert.equal(session.expiresAt, new Date(expires).toISOString());
+            } else assert.equal(session, undefined);
+            assert.deepEqual(envelope, { state: "SESSION_VERIFIED", principal, expiresAt: new Date(expires).toISOString(), sourceSha: fixedBinding.sourceSha,
               transitionId: fixedBinding.transitionId, authorizationSha256: fixedBinding.authorizationSha256 });
-            verified = true; break;
+            return session;
           } catch {
             // Only read-only proof probes are retried, never INSTALL or CLOSE.
             if (now() + 5000 >= deadline) break;
             await sleep(5000);
           }
         }
-        assert(verified, "AWS issuance proof unavailable before the bounded deadline");
+        throw new Error("AWS issuance proof unavailable before the bounded deadline");
+    };
+    if (fixedBinding.purpose === "TERRAFORM") {
+      let consumed = false;
+      return Object.freeze({ principal, expiresAt: new Date(expires).toISOString(),
+        async execute({ mode, plan }, { checkpoint }) {
+          assert(!consumed, "Terraform session execution already consumed"); consumed = true;
+          assert(["prepare", "apply"].includes(mode)); assert.equal(typeof checkpoint, "function");
+          try {
+            const session = await prove();
+            return { session, result: await isolated({ mode, plan, expiresAt: session.expiresAt,
+              credentials: { AccessKeyId: scoped.AccessKeyId, SecretAccessKey: scoped.SecretAccessKey, SessionToken: scoped.SessionToken } }, { checkpoint }) };
+          } finally { for (const field of ["AccessKeyId", "SecretAccessKey", "SessionToken"]) delete scoped[field]; }
+        },
+      });
+    }
+    return Object.freeze({
+      principal, expiresAt: new Date(expires).toISOString(),
+      async invoke(operation) {
+        assert((fixedBinding.purpose === "INSTALL" ? ["INSTALL", "INSPECT"] : ["CLOSE"]).includes(operation), "Unsupported session operation");
+        await prove();
         return send(await signedPayload(operation));
       },
     });

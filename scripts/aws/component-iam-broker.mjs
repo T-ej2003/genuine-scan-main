@@ -245,14 +245,21 @@ export async function executeFixedBroker(event, context, { manifest, iam, s3, la
   const { proof, ...request } = event;
   const authorization = await archive.authenticate(request, context);
   const cleanup = ["CLOSE", "PROVE_CLEANUP_SESSION"].includes(event.operation);
-  const session = await authenticateComponentSession(proof, { sourceSha: manifest.sourceSha, transitionId: request.transitionId, authorizationSha256: request.authorizationSha256, purpose: cleanup ? "CLEANUP" : "INSTALL" }, { sts, issuanceEvents, now: now() });
+  const terraform = event.operation === "PROVE_TERRAFORM_SESSION";
+  const session = await authenticateComponentSession(proof, { sourceSha: manifest.sourceSha, transitionId: request.transitionId, authorizationSha256: request.authorizationSha256, purpose: cleanup ? "CLEANUP" : terraform ? "TERRAFORM" : "INSTALL" }, { sts, issuanceEvents, now: now() });
   if (!cleanup) assert(Date.parse(session.issuanceEventTime) >= Date.parse(authorization.authorization.approvalObservedAt) - 999, "Session predates explicit approval");
   // CloudTrail issuance is eventually visible. This exact read-only operation
   // lets the same in-memory STS session wait for proof without retrying a write,
   // reserving controller ownership or issuing another MFA session each attempt.
-  if (["PROVE_INSTALL_SESSION", "PROVE_CLEANUP_SESSION"].includes(event.operation)) return {
+  if (terraform) {
+    const observed = await inspect(authorization);
+    assert.equal(observed.state, "IAM_VERIFIED", "Terraform requires verified IAM installation");
+    assert(observed.live.every(target => target.role === "EXPECTED" && target.policy === "EXPECTED"));
+  }
+  if (["PROVE_INSTALL_SESSION", "PROVE_CLEANUP_SESSION", "PROVE_TERRAFORM_SESSION"].includes(event.operation)) return {
     state: "SESSION_VERIFIED", principal: session.principal, expiresAt: session.expiresAt,
     sourceSha: manifest.sourceSha, transitionId: request.transitionId, authorizationSha256: request.authorizationSha256,
+    ...(terraform ? { session } : {}),
   };
   // Inspection must not consume or replace the mutation session. A freshly
   // authenticated reader can classify an active/partial installation without

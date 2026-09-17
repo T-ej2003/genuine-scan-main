@@ -5,7 +5,7 @@ import { canonical, digest } from "./component-iam-installation-contract.mjs";
 
 const host = "sts.eu-west-2.amazonaws.com";
 const queryNames = ["Action", "Version", "X-Amz-Algorithm", "X-Amz-Credential", "X-Amz-Date", "X-Amz-Expires", "X-Amz-Security-Token", "X-Amz-Signature", "X-Amz-SignedHeaders"].sort();
-const roles = { INSTALL: identityBootstrap.installationRole, CLEANUP: identityBootstrap.cleanupRole, IDENTITY_BOOTSTRAP: "mscqr-production-release-deployer" };
+const roles = { INSTALL: identityBootstrap.installationRole, CLEANUP: identityBootstrap.cleanupRole, IDENTITY_BOOTSTRAP: "mscqr-production-release-deployer", TERRAFORM: "mscqr-production-component-table-installer" };
 function awsExpiration(value) {
   assert(typeof value === "string", "AWS expiration missing");
   if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value)) return Date.parse(value);

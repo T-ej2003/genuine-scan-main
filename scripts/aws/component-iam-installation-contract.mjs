@@ -39,6 +39,10 @@ export function terraformTargetPolicy() {
   const key = "mscqr/production/component-deployment-state/terraform.tfstate";
   const state = `${bucket}/${key}`;
   return { Version: "2012-10-17", Statement: [
+    // The fixed broker authenticates this role's MFA/expiry proof read-only.
+    // Its IAM-write entry rejects a Terraform-role proof. No Lambda deployment,
+    // configuration or authority modification is granted to this executor.
+    { Effect: "Allow", Action: "lambda:InvokeFunction", Resource: `arn:aws:lambda:eu-west-2:${account}:function:${installationIdentity.functionName}:1`, Condition: { StringEquals: { "aws:RequestedRegion": "eu-west-2" } } },
     { Effect: "Allow", Action: "s3:GetBucketVersioning", Resource: bucket },
     { Effect: "Allow", Action: ["s3:ListBucket", "s3:ListBucketVersions"], Resource: bucket, Condition: { StringEquals: { "s3:prefix": key } } },
     { Effect: "Allow", Action: "s3:GetObject", Resource: [state, `${state}.tflock`, `${bucket}/mscqr/production/component-deployment-state/iam-installation.json`] },

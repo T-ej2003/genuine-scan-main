@@ -152,7 +152,7 @@ export function createBrokerAuthorizationArchive({ manifest, packageSha256, s3, 
     },
     async authenticate(event, context) {
       assert.deepEqual(Object.keys(event).sort(), ["authorizationSha256", "operation", "transitionId"]);
-      const version = { INSTALL: "1", INSPECT: "1", PROVE_INSTALL_SESSION: "1", CLOSE: "2", PROVE_CLEANUP_SESSION: "2" }[event.operation];
+      const version = { INSTALL: "1", INSPECT: "1", PROVE_INSTALL_SESSION: "1", PROVE_TERRAFORM_SESSION: "1", CLOSE: "2", PROVE_CLEANUP_SESSION: "2" }[event.operation];
       assert(version, "Unsupported semantic operation");
       assert.equal(context.functionVersion, version);
       assert.equal(context.invokedFunctionArn, `${functionArn}:${version}`);
@@ -161,7 +161,7 @@ export function createBrokerAuthorizationArchive({ manifest, packageSha256, s3, 
       assert.equal(record.authorization.transitionId, event.transitionId);
       assert.equal(record.authorizationSha256, event.authorizationSha256);
       const cleanup = ["CLOSE", "PROVE_CLEANUP_SESSION"].includes(event.operation);
-      assertArchivedInstallationAuthorization(record.authorization, manifest, packageSha256, { now: now(), allowExpired: cleanup });
+      assertArchivedInstallationAuthorization(record.authorization, manifest, packageSha256, { now: now(), allowExpired: cleanup || event.operation === "PROVE_TERRAFORM_SESSION" });
       if (!cleanup) {
         assert.equal(await closure(record.authorizationSha256), null, "Installation authorization consumed by closure");
         assert.equal(await currentMain(), manifest.sourceSha);

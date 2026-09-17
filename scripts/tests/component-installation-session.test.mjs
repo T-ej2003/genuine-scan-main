@@ -7,7 +7,8 @@ import { identityBootstrap, componentBrokerArn } from "../aws/component-installa
 const start = Date.parse("2026-09-17T12:00:00Z");
 function fixture(purpose = "INSTALL") {
   const binding = { sourceSha: "a".repeat(40), transitionId: "12345678-1234-4234-8234-123456789abc", authorizationSha256: "b".repeat(64), purpose };
-  const role = purpose === "INSTALL" ? identityBootstrap.installationRole : identityBootstrap.cleanupRole;
+  const role = { INSTALL: identityBootstrap.installationRole, CLEANUP: identityBootstrap.cleanupRole, TERRAFORM: "mscqr-production-component-table-installer" }[purpose];
+  const version = purpose === "CLEANUP" ? "2" : "1";
   const principal = `arn:aws:sts::368992683803:assumed-role/${role}/component-${binding.transitionId}`;
   const user = { Account: "368992683803", Arn: "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator" };
   const key = ["A", "S", "I", "A"].join("") + "0".repeat(16);
@@ -30,18 +31,21 @@ function fixture(purpose = "INSTALL") {
       return { Credentials: scoped, AssumedRoleUser: { Arn: principal, AssumedRoleId: "role-id:session" } };
     } }),
     invoke: async (input) => {
-      assert.equal(input.FunctionName, `${componentBrokerArn}:${purpose === "INSTALL" ? "1" : "2"}`);
+      assert.equal(input.FunctionName, `${componentBrokerArn}:${version}`);
       assert.equal(input.InvocationType, "RequestResponse");
       f.payloads.push(JSON.parse(Buffer.from(input.Payload).toString("utf8")));
       const payload = f.payloads.at(-1);
       if (payload.operation.startsWith("PROVE_") && f.proofFailures > 0) {
         f.proofFailures--;
-        return { StatusCode: 200, ExecutedVersion: purpose === "INSTALL" ? "1" : "2", FunctionError: "Unhandled" };
+        return { StatusCode: 200, ExecutedVersion: version, FunctionError: "Unhandled" };
       }
       const result = payload.operation === "CLEANUP_CONTEXT" ? (f.context || binding) : payload.operation.startsWith("PROVE_")
         ? { state: "SESSION_VERIFIED", principal, expiresAt: scoped.Expiration.toISOString(), sourceSha: binding.sourceSha, transitionId: binding.transitionId, authorizationSha256: binding.authorizationSha256 }
         : { state: "test-accepted" };
-      return { StatusCode: 200, ExecutedVersion: purpose === "INSTALL" ? "1" : "2", Payload: Buffer.from(JSON.stringify(result)) };
+      if (purpose === "TERRAFORM") result.session = { account: "368992683803", region: "eu-west-2", ...binding, principal,
+        issuedAt: new Date(start).toISOString(), expiresAt: scoped.Expiration.toISOString(), issuanceEventId: "12345678-1234-4234-8234-123456789def", issuanceEventTime: new Date(start).toISOString(),
+        operatorArn: user.Arn, mfaAuthenticated: true, ...(f.sessionOverride || {}) };
+      return { StatusCode: 200, ExecutedVersion: version, Payload: Buffer.from(JSON.stringify(result)) };
     },
   };
   f.open = () => establishComponentSession(binding, f.dependencies);
@@ -76,6 +80,29 @@ test("normal client issues a 900-second MFA human session and exposes only fixed
     await assert.rejects(client.invoke(operation), /expired/);
     assert.equal(f.payloads.length, 2);
   }
+});
+
+test("Terraform operator authenticates broker MFA proof and sends only its scoped session to the isolated runner once", async () => {
+  const f = fixture("TERRAFORM"); let executions = 0;
+  f.dependencies.isolated = async (input, options) => {
+    executions++; assert.equal(input.mode, "prepare"); assert.equal(input.plan, null);
+    assert.deepEqual(input.credentials, { AccessKeyId: f.scoped.AccessKeyId, SecretAccessKey: f.scoped.SecretAccessKey, SessionToken: f.scoped.SessionToken });
+    assert.notEqual(input.credentials.AccessKeyId, f.base.AccessKeyId); assert.equal(typeof options.checkpoint, "function");
+    return { fixture: "saved-plan" };
+  };
+  const client = await f.open(); assert.equal(client.invoke, undefined);
+  const result = await client.execute({ mode: "prepare", plan: null }, { checkpoint: async () => {} });
+  assert.equal(result.session.purpose, "TERRAFORM"); assert.equal(result.result.fixture, "saved-plan");
+  assert.deepEqual(f.payloads.map(value => value.operation), ["PROVE_TERRAFORM_SESSION"]);
+  assert.equal(executions, 1); assert.equal(f.scoped.SecretAccessKey, undefined);
+  await assert.rejects(client.execute({ mode: "prepare", plan: null }, { checkpoint: async () => {} }), /already consumed/);
+});
+test("substituted Terraform session evidence never reaches a container", async () => {
+  const f = fixture("TERRAFORM"); f.sessionOverride = { authorizationSha256: "c".repeat(64) };
+  f.dependencies.isolated = async () => assert.fail("must not run");
+  const client = await f.open();
+  await assert.rejects(client.execute({ mode: "prepare", plan: null }, { checkpoint: async () => {} }), /proof unavailable/);
+  assert.equal(f.scoped.SecretAccessKey, undefined);
 });
 
 for (const arn of ["arn:aws:iam::368992683803:root", "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/session", "arn:aws:iam::368992683803:user/other"]) test(`issuer rejects ${arn} before MFA or AssumeRole`, async () => {

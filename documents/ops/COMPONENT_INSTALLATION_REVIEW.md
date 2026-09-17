@@ -580,3 +580,23 @@ the explicitly approved initial-bootstrap exception only. An interrupted root
 transaction has no automatic takeover route. Normal session fencing remains
 AWS-expiry based. Production activation composition, final recovery review and
 all pre-PR gates remain outstanding; no bootstrap was executed against AWS.
+
+### Terraform session-provenance integration checkpoint
+
+The canonical hidden-MFA client now issues the exact 900-second table-executor
+session and sends its signed proof to the fixed broker before isolated execution.
+The broker checks unique CloudTrail issuance, complete bootstrap/broker readback,
+current protected source and verified component IAM. Its new
+`PROVE_TERRAFORM_SESSION` operation is strictly read-only and cannot claim an IAM
+installation session. Terraform-role proofs cannot authorize IAM-write operations.
+
+This adds one justified capability pair: `lambda:InvokeFunction` on the existing
+exact broker version 1, solely to reach the guarded read-only provenance path.
+There is no broker deployment/configuration/role permission, PassRole, or IAM
+mutation authority. The executor container's network relay still excludes Lambda;
+the source-owned issuer performs this verification before sending only the scoped
+session over the private container pipe. An expired IAM-install approval can be
+read for provenance, but cannot authorize a new IAM write; table apply remains
+subject to its separate exact saved-plan approval. The 67 directly affected
+session/broker/capability tests and ESLint pass. Production activation CLI wiring
+is still required before the legacy host path can be removed.
