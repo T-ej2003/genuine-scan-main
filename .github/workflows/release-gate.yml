@@ -909,6 +909,7 @@ jobs:
           retention-days: 90
 
       - name: Deploy rotation transition backend ECS service
+        id: rotation-deployment
         if: ${{ inputs.release_mode == 'rotation-overlap' || inputs.release_mode == 'rotation-cleanup' }}
         env:
           AWS_REGION: ${{ env.AWS_REGION }}
@@ -951,7 +952,9 @@ jobs:
             --task-definition "$EXISTING_TASK_DEFINITION_ARN" \
             --readiness-file "$OVERLAP_READINESS_EVIDENCE_FILE" \
             --readiness-sha256 "$OVERLAP_READINESS_EVIDENCE_SHA256" \
-            "${receipt_args[@]}"
+            "${receipt_args[@]}" > "$RUNNER_TEMP/rotation-deployment-result.json"
+          chmod 600 "$RUNNER_TEMP/rotation-deployment-result.json"
+          echo "sha256=$(sha256sum "$RUNNER_TEMP/rotation-deployment-result.json" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Upload overlap deployment receipt
         if: ${{ inputs.release_mode == 'rotation-overlap' }}
@@ -1089,7 +1092,7 @@ jobs:
           RECOVERY_EVIDENCE: ${{ runner.temp }}/backend-health-recovery/evidence.json
         run: node scripts/aws/commit-production-component-recovery-state.mjs --evidence="$RECOVERY_EVIDENCE"
 
-      - name: Commit authenticated rotation security component state
+      - name: Commit authenticated rotation backend and security component state
         if: ${{ inputs.release_mode == 'rotation-overlap' || inputs.release_mode == 'rotation-cleanup' }}
         env:
           MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-release-deployer
@@ -1099,7 +1102,8 @@ jobs:
           ROTATION_READINESS: ${{ runner.temp }}/rotation-readiness.json
           ROTATION_READINESS_SHA256: ${{ inputs.rotation_readiness_evidence_sha256 }}
           ROTATION_MODE: ${{ inputs.release_mode }}
-        run: node scripts/aws/commit-production-component-rotation-state.mjs --mode="$ROTATION_MODE" --source-sha="$SOURCE_SHA" --rotation-id="$ROTATION_ID" --rotation-state-sha256="$ROTATION_STATE_SHA256" --readiness="$ROTATION_READINESS" --readiness-sha256="$ROTATION_READINESS_SHA256"
+          ROTATION_DEPLOYMENT_SHA256: ${{ steps.rotation-deployment.outputs.sha256 }}
+        run: node scripts/aws/commit-production-component-rotation-state.mjs --mode="$ROTATION_MODE" --source-sha="$SOURCE_SHA" --rotation-id="$ROTATION_ID" --rotation-state-sha256="$ROTATION_STATE_SHA256" --readiness="$ROTATION_READINESS" --readiness-sha256="$ROTATION_READINESS_SHA256" --deployment="$RUNNER_TEMP/rotation-deployment-result.json" --deployment-sha256="$ROTATION_DEPLOYMENT_SHA256"
 
       - name: Activate authenticated frontend image
         id: frontend-activation

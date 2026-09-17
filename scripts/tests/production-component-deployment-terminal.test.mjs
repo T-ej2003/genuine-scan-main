@@ -12,6 +12,7 @@ import { commitRotationComponentState } from "../aws/commit-production-component
 import { commitSecurityComponentState } from "../aws/commit-production-component-security-state.mjs";
 import { READY_FOR_OVERLAP_DEPLOYMENT_STAGES } from "../aws/production-overlap-readiness-contract.mjs";
 import { writeOverlapReadinessEvidence } from "../aws/produce-production-overlap-readiness-evidence.mjs";
+import { classifyNormalLiveComponentState } from "../aws/production-normal-release.mjs";
 
 const source = "b".repeat(40), recoverySource = "c".repeat(40);
 const state = () => createProductionComponentDeploymentState({ components: {
@@ -83,10 +84,32 @@ test("backend recovery forwards its explicit regression authority through the CA
   assert.equal(writes, 0); assert.equal(initial.components.backend.establishedThroughSha, "a".repeat(40));
 });
 
-test("rotation terminal accepts only hash-bound readiness and changes security alone", () => {
+test("overlap and cleanup atomically record the live backend for the next normal release", () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), "component-rotation-")); const rotationId = "rotation-test-1234"; const rotationStateSha256 = "c".repeat(64);
-  const readiness = writeOverlapReadinessEvidence({ outputPath: path.join(dir, "readiness.json"), sourceSha: source, rotationId, rotationStateSha256, stages: Object.fromEntries(READY_FOR_OVERLAP_DEPLOYMENT_STAGES.map((name) => [name, { valid: true, evidenceRef: `test://${name}`, evidenceSha256: crypto.createHash("sha256").update(name).digest("hex"), identityBindings: { sourceSha: source, rotationId } }])) });
-  const initial = state(); const result = commitRotationComponentState({ mode: "rotation-overlap", sourceSha: source, rotationId, rotationStateSha256, readinessFile: readiness.outputPath, readinessSha256: readiness.evidenceSha256, client: { read: () => initial, advance: () => {} }, isProtectedMainAncestor: () => true });
-  assert.equal(result.state.components.security.sourceSha, source); assert.equal(result.state.components.backend.sourceSha, initial.components.backend.sourceSha);
-  assert.throws(() => commitRotationComponentState({ mode: "rotation-overlap", sourceSha: source, rotationId, rotationStateSha256, readinessFile: readiness.outputPath, readinessSha256: "d".repeat(64), client: { read: () => initial, advance: () => {} }, isProtectedMainAncestor: () => true }), /does not match/);
+  const taskDefinitionArn = `arn:aws:ecs:eu-west-2:368992683803:task-definition/${APP_ONLY.family}:7`, imageDigest = `sha256:${"3".repeat(64)}`, imageSource = "a".repeat(40);
+  const readiness = writeOverlapReadinessEvidence({ outputPath: path.join(dir, "readiness.json"), sourceSha: source, rotationId, rotationStateSha256, stages: Object.fromEntries(READY_FOR_OVERLAP_DEPLOYMENT_STAGES.map((name) => [name, { valid: true, evidenceRef: `test://${name}`, evidenceSha256: crypto.createHash("sha256").update(name).digest("hex"), identityBindings: { sourceSha: source, rotationId, ...(name === "overlapTaskDefinition" ? { taskDefinitionArn } : {}) } }])) });
+  const live = { sourceSha: imageSource, imageDigest, taskDefinitionArn, desiredCount: 2 };
+  const readers = { readBackendImageSource: () => imageSource, readLive: () => ({
+    service: { clusterArn: APP_ONLY.clusterArn, serviceArn: APP_ONLY.serviceArn, serviceName: APP_ONLY.service, status: "ACTIVE", taskDefinition: taskDefinitionArn, desiredCount: 2, runningCount: 2, pendingCount: 0, deployments: [{ id: "ecs-svc/1", status: "PRIMARY", rolloutState: "COMPLETED", taskDefinition: taskDefinitionArn }] },
+    definition: { taskDefinitionArn, family: APP_ONLY.family, status: "ACTIVE", taskRoleArn: APP_ONLY.taskRoleArn, executionRoleArn: APP_ONLY.executionRoleArn, networkMode: "awsvpc", runtimePlatform: { cpuArchitecture: "X86_64", operatingSystemFamily: "LINUX" }, containerDefinitions: [{ name: "backend", image: `${APP_ONLY.backendRepository}@${imageDigest}` }] },
+    tasks: ["a", "b"].map((taskArn) => ({ taskArn, clusterArn: APP_ONLY.clusterArn, group: `service:${APP_ONLY.service}`, taskDefinitionArn, lastStatus: "RUNNING", healthStatus: "HEALTHY", startedBy: "ecs-svc/1", containers: [{ name: "backend", imageDigest }] })),
+  }) };
+  for (const mode of ["rotation-overlap", "rotation-cleanup"]) {
+    const initial = state(); let writes = 0;
+    const deployment = { sourceSha: source, transitionMode: mode, rotationId, rotationStateSha256, readinessSha256: readiness.evidenceSha256, workflowRunId: "123", workflowRunAttempt: "1", terminalState: mode === "rotation-overlap" ? "DEPLOYED_PENDING_VERIFICATION" : "DEPLOYED", updateServiceCount: 1, taskDefinitionArn,
+      metadata: { mode: "existing-task-definition", clusterName: APP_ONLY.cluster, serviceName: APP_ONLY.service, containerName: APP_ONLY.container, newTaskDefinitionArn: taskDefinitionArn, observedTaskDefinitionArn: taskDefinitionArn, expectedImageDigest: imageDigest, observedImageDigest: imageDigest, desiredCount: 2, runningCount: 2, pendingCount: 0, serviceStable: true } };
+    const options = { mode, sourceSha: source, rotationId, rotationStateSha256, readinessFile: readiness.outputPath, readinessSha256: readiness.evidenceSha256, deployment, readers, client: { read: () => initial, advance: (_, next) => { writes++; assert.equal(next.components.backend.taskDefinitionArn, taskDefinitionArn); assert.equal(next.components.security.sourceSha, source); } }, isProtectedMainAncestor: () => true, writerContext: { githubRunId: "123", githubRunAttempt: "1" } };
+    assert.equal(classifyNormalLiveComponentState({ live, predecessor: initial.components.backend, candidate: { sourceSha: recoverySource, imageDigest: `sha256:${"4".repeat(64)}` } }), "LIVE_IS_UNKNOWN");
+    const result = commitRotationComponentState(options);
+    assert.equal(writes, 1); assert.deepEqual(result.state.components.backend, { ...live, establishedThroughSha: source });
+    assert.deepEqual(result.state.components.frontend, initial.components.frontend);
+    const candidate = { sourceSha: recoverySource, imageDigest: `sha256:${"4".repeat(64)}` };
+    assert.equal(classifyNormalLiveComponentState({ live, predecessor: result.state.components.backend, candidate }), "LIVE_IS_PREDECESSOR");
+    assert.equal(classifyNormalLiveComponentState({ live: { ...live, taskDefinitionArn: taskDefinitionArn.replace(":7", ":8") }, predecessor: result.state.components.backend, candidate }), "LIVE_IS_UNKNOWN");
+    for (const [key, value] of Object.entries({ newTaskDefinitionArn: taskDefinitionArn.replace(":7", ":8"), observedImageDigest: candidate.imageDigest, desiredCount: 3 }))
+      assert.throws(() => commitRotationComponentState({ ...options, deployment: { ...deployment, metadata: { ...deployment.metadata, [key]: value } } }), /mismatch/);
+    assert.throws(() => commitRotationComponentState({ ...options, deployment: { ...deployment, workflowRunAttempt: "2" } }), /mismatch/);
+    assert.throws(() => commitRotationComponentState({ ...options, readinessSha256: "d".repeat(64) }), /does not match/);
+    assert.equal(writes, 1);
+  }
 });
