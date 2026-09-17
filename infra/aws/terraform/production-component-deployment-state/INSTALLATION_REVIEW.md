@@ -49,6 +49,16 @@ commands. Execution still must independently authenticate the completed GitHub
 run/artifact and archive the original approval durably before AWS writes; this
 checkpoint does not expose an executable administrative bootstrap command.
 
+The execution-side archive verifier now reuses the strict GitHub transport and
+ZIP checks used by normal installation. Bootstrap selects only its fixed workflow,
+environment and single archive member. A completed successful first-attempt run,
+exact reviewer, repository IDs, artifact SHA256, current protected source,
+transition and locally rederived package bindings are all required. There is no
+local approval path. Thirty-six archive transport tests pass across the two
+boundaries. The preceding complete focused component/credential sweep passed
+441 tests, including the clean-source package reproducibility test; this does
+not substitute for final validation once remaining execution paths are finished.
+
 Baseline: `bc6ac2ead8b750d9d99cc179d8bb321956fa7a8e`.
 Implementation remains uncommitted on
 `codex/component-infrastructure-install-permission`. No production execution,

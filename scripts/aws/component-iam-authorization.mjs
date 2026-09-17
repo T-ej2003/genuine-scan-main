@@ -7,6 +7,7 @@ import { execFileSync } from "node:child_process";
 import { createProductionGithubCredentialEnvironment } from "./production-credential-source-contract.mjs";
 import { componentBrokerPackageManifest } from "./component-broker-package.mjs";
 import { assertArchivedInstallationAuthorization } from "./component-broker-authorization.mjs";
+import { assertIdentityBootstrapAuthorization, bootstrapAuthorizationContract } from "./component-identity-bootstrap-authorization.mjs";
 
 // Authorization only: no AWS, dispatch, consumption, or installation. The caller
 // must run trusted protected-main code and consume the transition once before writes.
@@ -83,14 +84,14 @@ function githubExecutable() {
   throw new Error("No safelisted GitHub CLI installation found");
 }
 
-function githubReader(execute, env) {
+function githubReader(execute, env, targetEnvironment = environment) {
   const childEnv = { ...createProductionGithubCredentialEnvironment({ env }), GH_HOST: "github.com", GH_PROMPT_DISABLED: "1" };
   const executable = execute ? "gh" : githubExecutable();
   const runner = execute || execFileSync;
   return (endpoint, { binary = false, paginate = false } = {}) => {
     const prefix = `repos/${repository}/`;
     const suffix = endpoint.slice(prefix.length);
-    assert(endpoint.startsWith(prefix) && (suffix === "branches/main" || /^compare\/[a-f0-9]{40}\.\.\.[a-f0-9]{40}$/.test(suffix) || suffix === `environments/${environment}` || suffix === `environments/${environment}/deployment-branch-policies` || /^actions\/(?:runs\/[1-9][0-9]*(?:\/(?:approvals|artifacts))?|artifacts\/[1-9][0-9]*\/zip)$/.test(suffix)), "Endpoint outside read-only authorization safelist");
+    assert(endpoint.startsWith(prefix) && (suffix === "branches/main" || suffix === `environments/${targetEnvironment}` || suffix === `environments/${targetEnvironment}/deployment-branch-policies` || /^actions\/(?:runs\/[1-9][0-9]*(?:\/(?:approvals|artifacts))?|artifacts\/[1-9][0-9]*\/zip)$/.test(suffix)), "Endpoint outside read-only authorization safelist");
     let bytes;
     try {
       bytes = runner(executable, ["api", "--hostname", "github.com", endpoint, ...(paginate ? ["--paginate", "--slurp"] : [])], { env: childEnv, encoding: binary ? null : "utf8", maxBuffer: 1024 * 1024, timeout: 30_000, stdio: ["ignore", "pipe", "pipe"] });
@@ -102,12 +103,23 @@ function githubReader(execute, env) {
 // Normal installation authenticates the publisher's completed run before MFA
 // issuance. The broker independently authenticates the durable AWS archive;
 // these audit bytes can never replace it. Cleanup does not use this function.
-export function authenticatePublishedComponentAuthorization(input, { execute, env = process.env, now = Date.now } = {}) {
+export function authenticatePublishedComponentAuthorization(input, dependencies = {}) {
+  return authenticatePublication(input, dependencies);
+}
+
+export function authenticateIdentityBootstrapPublication(input, packageEvidence, dependencies = {}) {
+  assert(packageEvidence, "Clean-source bootstrap package required");
+  return authenticatePublication(input, dependencies, packageEvidence);
+}
+
+function authenticatePublication(input, { execute, env = process.env, now = Date.now }, bootstrapPackage) {
+  const targetEnvironment = bootstrapPackage ? "production-component-installation-identity-bootstrap" : environment;
+  const targetWorkflow = bootstrapPackage ? bootstrapAuthorizationContract.workflow : workflow;
   assert.deepEqual(Object.keys(input).sort(), ["runId", "sourceSha", "transitionId"]);
   coordinates(input);
   const { runId, sourceSha, transitionId } = input;
   assert.match(runId || "", /^[1-9][0-9]*$/);
-  const gh = githubReader(execute, env);
+  const gh = githubReader(execute, env, targetEnvironment);
   const api = (suffix, options) => gh(`repos/${repository}/${suffix}`, options);
   const verifyRun = (run) => {
     assert.equal(String(run.id), runId);
@@ -115,7 +127,7 @@ export function authenticatePublishedComponentAuthorization(input, { execute, en
       assert.equal(value?.full_name, repository);
       assert.equal(value?.id, 1145608538);
     }
-    assert.equal(run.path, workflow);
+    assert.equal(run.path, targetWorkflow);
     assert.equal(run.event, "workflow_dispatch");
     assert.equal(run.head_branch, "main");
     assert.equal(run.head_sha, sourceSha);
@@ -129,13 +141,13 @@ export function authenticatePublishedComponentAuthorization(input, { execute, en
   protectedMain(api("branches/main"), sourceSha);
   const run = api(`actions/runs/${runId}`);
   verifyRun(run);
-  assertComponentIamEnvironment(api(`environments/${environment}`), api(`environments/${environment}/deployment-branch-policies`), api(`actions/runs/${runId}/approvals`));
+  (bootstrapPackage ? assertComponentIdentityBootstrapEnvironment : assertComponentIamEnvironment)(api(`environments/${targetEnvironment}`), api(`environments/${targetEnvironment}/deployment-branch-policies`), api(`actions/runs/${runId}/approvals`));
   const pages = api(`actions/runs/${runId}/artifacts`, { paginate: true });
   assert(Array.isArray(pages) && pages.length && pages.every(page => Array.isArray(page.artifacts)));
   const artifacts = pages.flatMap(page => page.artifacts);
   assert.equal(artifacts.length, 1);
   const artifact = artifacts[0];
-  assert.equal(artifact.name, "component-installation-authorization-audit");
+  assert.equal(artifact.name, bootstrapPackage ? bootstrapAuthorizationContract.artifact : "component-installation-authorization-audit");
   assert.equal(artifact.expired, false);
   assert(Number.isSafeInteger(artifact.id) && artifact.id > 0);
   assert(Number.isSafeInteger(artifact.size_in_bytes) && artifact.size_in_bytes > 0 && artifact.size_in_bytes <= 1024 * 1024);
@@ -152,7 +164,7 @@ export function authenticatePublishedComponentAuthorization(input, { execute, en
     const zip = path.join(directory, "audit.zip");
     fs.writeFileSync(zip, bytes, { mode: 0o600, flag: "wx" });
     const unzip = (...args) => execFileSync("/usr/bin/unzip", args, { env: { PATH: "/usr/bin:/bin", LANG: "C" }, encoding: "utf8", timeout: 10000, maxBuffer: 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
-    const names = ["invocation", "request", "result"].map(name => `component-installation-${name}.json`);
+    const names = bootstrapPackage ? [bootstrapAuthorizationContract.file] : ["invocation", "request", "result"].map(name => `component-installation-${name}.json`);
     assert.deepEqual(unzip("-Z1", zip).trim().split("\n").sort(), names);
     const listing = unzip("-Z", "-l", zip).split("\n");
     for (const name of names) {
@@ -162,20 +174,28 @@ export function authenticatePublishedComponentAuthorization(input, { execute, en
     }
     audit = Object.fromEntries(names.map(name => [name, JSON.parse(unzip("-p", zip, name))]));
   } finally { fs.rmSync(directory, { recursive: true }); }
-  const request = audit["component-installation-request.json"];
-  assert.deepEqual(Object.keys(request).sort(), ["authorization", "operation"]);
-  assert.equal(request.operation, "AUTHORIZE");
-  const authorization = request.authorization;
+  let authorization;
+  if (bootstrapPackage) authorization = audit[bootstrapAuthorizationContract.file];
+  else {
+    const request = audit["component-installation-request.json"];
+    assert.deepEqual(Object.keys(request).sort(), ["authorization", "operation"]);
+    assert.equal(request.operation, "AUTHORIZE");
+    authorization = request.authorization;
+  }
   assert.equal(authorization.runId, runId);
   assert.equal(authorization.transitionId, transitionId);
   assert(timestamp(run.created_at) <= timestamp(authorization.approvalObservedAt));
   assert(timestamp(authorization.approvalObservedAt) <= timestamp(run.updated_at));
-  const authorizationSha256 = assertArchivedInstallationAuthorization(authorization, componentBrokerPackageManifest(sourceSha), authorization.brokerPackageSha256, { now: now() });
-  const invocation = audit["component-installation-invocation.json"];
-  assert.equal(invocation.StatusCode, 200);
-  assert.equal(invocation.ExecutedVersion, "3");
-  assert.equal(invocation.FunctionError, undefined);
-  assert.deepEqual(audit["component-installation-result.json"], { authorizationSha256 });
+  const authorizationSha256 = bootstrapPackage
+    ? assertIdentityBootstrapAuthorization(authorization, bootstrapPackage, now())
+    : assertArchivedInstallationAuthorization(authorization, componentBrokerPackageManifest(sourceSha), authorization.brokerPackageSha256, { now: now() });
+  if (!bootstrapPackage) {
+    const invocation = audit["component-installation-invocation.json"];
+    assert.equal(invocation.StatusCode, 200);
+    assert.equal(invocation.ExecutedVersion, "3");
+    assert.equal(invocation.FunctionError, undefined);
+    assert.deepEqual(audit["component-installation-result.json"], { authorizationSha256 });
+  }
   protectedMain(api("branches/main"), sourceSha);
   const finalRun = api(`actions/runs/${runId}`);
   verifyRun(finalRun);
