@@ -26,6 +26,7 @@ test("governed web publication authenticates one exact workflow artifact", () =>
   const observed = readGovernedWebPublication({ sourceSha, workflowRunId: "12", github, extract: () => ({ artifactBytes, sbomBytes: sbom, provenanceBytes: provenance }) });
   assert.equal(observed.observed.artifactId, "56");
   assert.throws(() => readGovernedWebPublication({ sourceSha, workflowRunId: "12", github: (args, options) => options?.binary ? archive : JSON.stringify({ id: 12, workflow_id: 34, path: WEB_RELEASE.workflowFile, name: WEB_RELEASE.workflowName, event: "workflow_dispatch", head_sha: "c".repeat(40), head_branch: "main", conclusion: "success", actor: { login: WEB_RELEASE.reviewer }, artifacts: [] }), extract: () => ({ artifactBytes, sbomBytes: sbom, provenanceBytes: provenance }) }), /identity|artifacts/);
+  assert.throws(() => readGovernedWebPublication({ sourceSha, workflowRunId: "12", github: (args, options = {}) => options.binary ? Buffer.from("wrong") : JSON.stringify(args.at(-1).endsWith("/artifacts") ? { artifacts: [{ id: 56, name: WEB_RELEASE.artifactName, expired: false, digest: `sha256:${hash(archive)}` }] } : { id: 12, workflow_id: 34, path: ".github/workflows/other.yml", name: WEB_RELEASE.workflowName, event: "workflow_dispatch", head_sha: sourceSha, head_branch: "main", conclusion: "success", actor: { login: WEB_RELEASE.reviewer } }), extract: () => ({ artifactBytes, sbomBytes: sbom, provenanceBytes: provenance }) }), /identity/);
 });
 
 test("governed web evidence signs exactly once after authenticated publication and rejects drift before signing", () => {
@@ -35,6 +36,11 @@ test("governed web evidence signs exactly once after authenticated publication a
   assert.throws(() => produceGovernedWebEvidence({ sourceSha, stageBAuthorization: { ...stageBAuthorization, imageReuseEvidence: { ...stageBAuthorization.imageReuseEvidence, webPublicationRequired: false } }, publication, run, now, verifyStageBAuthorization: () => true, verifyArtifacts: () => true, sign: () => { signatures += 1; return "AQ=="; }, verifyWebEvidence: () => true }), /web-required/);
   assert.equal(signatures, 1);
   assert.throws(() => produceGovernedWebEvidence({ sourceSha, stageBAuthorization, publication: { ...publication, provenanceBytes: Buffer.from("{}") }, run, now, verifyStageBAuthorization: verifyStageB, verifyArtifacts: () => true, sign: () => "AQ==", verifyWebEvidence: () => true }), /hashes|provenance/);
+  for (const [invalidRun, expected] of [
+    [() => JSON.stringify({ Arn: "arn:aws:iam::368992683803:role/other", Account: WEB_RELEASE.account }), /signer identity/],
+    [(args) => args[1] === "describe-images" ? JSON.stringify({ imageDetails: [{ imageDigest: `sha256:${"e".repeat(64)}`, imagePushedAt: now }] }) : run(args), /supply-chain/],
+  ]) assert.throws(() => produceGovernedWebEvidence({ sourceSha, stageBAuthorization, publication, run: (args) => args[0] === "sts" ? invalidRun(args) : invalidRun(args), now, verifyStageBAuthorization: verifyStageB, verifyArtifacts: () => true, sign: () => { signatures += 1; return "AQ=="; }, verifyWebEvidence: () => true }), expected);
+  assert.equal(signatures, 1);
 });
 
 test("web authorization handoff accepts only the authenticated web-required Stage-B impact", () => {
