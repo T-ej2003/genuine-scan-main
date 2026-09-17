@@ -45,7 +45,9 @@ export function buildNormalReleasePlan({ sourceSha, changedFiles, images = {} } 
 export function assertNormalReleasePlan(plan, sourceSha) {
   assert.equal(plan?.schemaVersion, 1); assert.equal(plan.kind, "NORMAL_APPLICATION_RELEASE"); assert.equal(plan.sourceSha, sourceSha, "Normal release plan source identity mismatch");
   assert.equal(plan.imageReleaseSha, sourceSha); assert.equal(plan.planSha256, sha256(JSON.stringify({ sourceSha, classification: plan.classification, images: plan.images })));
-  assertNormalApplicationRelease(plan.classification);
+  const derived = classifyProductionChanges(plan.classification?.files);
+  assert.deepEqual(derived, plan.classification, "Normal release classification is not derived from its protected source paths.");
+  assertNormalApplicationRelease(derived);
   for (const name of ["backend", "frontend"]) if (plan.classification[name]) assert.match(plan.images?.[name] || "", IMAGE);
   return true;
 }

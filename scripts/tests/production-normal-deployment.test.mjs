@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import test from "node:test";
 import { PRODUCTION_RELEASE_CLASS, classifyProductionChanges } from "../aws/production-deployment-classification.mjs";
@@ -97,6 +98,16 @@ test("normal release orchestrator covers no-op and failure rollback without call
   const noOp = buildNormalReleasePlan({ sourceSha, changedFiles: ["README.md"] });
   assert.deepEqual(await executeNormalRelease({ plan: noOp, sourceSha, backend, frontend }), { sourceSha, database: "UNCHANGED", backend: "UNCHANGED", frontend: "UNCHANGED" });
   await assert.rejects(() => executeNormalRelease({ plan: { ...noOp, sourceSha: "b".repeat(40) }, sourceSha, backend, frontend }), /source identity/);
+});
+
+test("normal release plans cannot smuggle database or forged classification work into the normal lane", async () => {
+  const dbFiles = ["backend/prisma/migrations/001_init/migration.sql"];
+  assert.equal(classifyProductionChanges(dbFiles).releaseClass, PRODUCTION_RELEASE_CLASS.SECURITY_INFRASTRUCTURE);
+  assert.throws(() => buildNormalReleasePlan({ sourceSha, changedFiles: dbFiles, images: { backend: backendImage } }), /Sensitive/);
+  const normal = buildNormalReleasePlan({ sourceSha, changedFiles: ["backend/src/services/batchService.ts"], images: { backend: backendImage } });
+  const forged = { ...normal, classification: { ...normal.classification, database: true } };
+  forged.planSha256 = crypto.createHash("sha256").update(JSON.stringify({ sourceSha, classification: forged.classification, images: forged.images })).digest("hex");
+  await assert.rejects(() => executeNormalRelease({ plan: forged, sourceSha, database: { applyAndVerify: async () => { throw new Error("must not run"); } }, backend: {}, frontend: {} }), /derived from its protected source paths/);
 });
 
 test("normal production workflow is fixed, OIDC-only, gated by main, and smoke-tested", () => {
