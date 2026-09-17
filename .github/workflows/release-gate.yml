@@ -1077,6 +1077,7 @@ jobs:
           SOURCE_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
           WEB_AUTHORIZATION_FILE: ${{ steps.images.outputs.web_authorization_file }}
           WEB_AUTHORIZATION_SHA256: ${{ steps.images.outputs.web_authorization_sha256 }}
+          MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-release-deployer
         run: |
           set -euo pipefail
           result="$(node scripts/aws/run-production-web-activation.mjs \

@@ -59,10 +59,37 @@ jobs:
         run: |
           set -euo pipefail
           image_uri="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG"
-          docker buildx build --platform "$PLATFORM" --file Dockerfile.ecs-frontend --build-arg "GIT_SHA=$IMAGE_TAG" --build-arg "RELEASE_GIT_SHA=$IMAGE_TAG" --label "org.opencontainers.image.revision=$IMAGE_TAG" --push --tag "$image_uri" .
-          digest="$(aws ecr describe-images --repository-name "$ECR_REPOSITORY" --image-ids "imageTag=$IMAGE_TAG" --query 'imageDetails[0].imageDigest' --output text)"
-          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+          repository_json="$RUNNER_TEMP/web-repository.json"
+          image_json="$RUNNER_TEMP/web-image-readback.json"
+          labels_json="$RUNNER_TEMP/web-image-labels.json"
+          aws ecr describe-repositories --repository-names "$ECR_REPOSITORY" --output json >"$repository_json"
+          if aws ecr describe-images --repository-name "$ECR_REPOSITORY" --image-ids "imageTag=$IMAGE_TAG" --output json >"$image_json" 2>"$RUNNER_TEMP/web-image-readback.error"; then
+            image_state=existing
+          else
+            error="$(<"$RUNNER_TEMP/web-image-readback.error")"
+            [[ "$error" == *"(ImageNotFoundException)"* ]] || { echo "Web image tag lookup failed." >&2; exit 1; }
+            printf '%s\n' '{"imageDetails":[]}' >"$image_json"
+            image_state=absent
+          fi
+          if [[ "$image_state" == absent ]]; then
+            docker buildx build --platform "$PLATFORM" --file Dockerfile.ecs-frontend --build-arg "GIT_SHA=$IMAGE_TAG" --build-arg "RELEASE_GIT_SHA=$IMAGE_TAG" --label "org.opencontainers.image.revision=$IMAGE_TAG" --label "org.opencontainers.image.title=mscqr-frontend" --push --tag "$image_uri" .
+            aws ecr describe-images --repository-name "$ECR_REPOSITORY" --image-ids "imageTag=$IMAGE_TAG" --output json >"$image_json"
+          fi
+          if [[ "$image_state" == existing ]]; then
+            digest="$(node -e 'const image=JSON.parse(require("fs").readFileSync(process.argv[1])).imageDetails?.[0]; if(!image||!/^[a-f0-9]{64}$/.test((image.imageDigest||"").replace(/^sha256:/,""))) throw Error("Published web image readback is invalid"); process.stdout.write(image.imageDigest)' "$image_json")"
+          else
+            digest="$(node -e 'const image=JSON.parse(require("fs").readFileSync(process.argv[1])).imageDetails?.[0]; if(!image||!/^[a-f0-9]{64}$/.test((image.imageDigest||"").replace(/^sha256:/,""))||image.repositoryName!=="mscqr-web"||String(image.registryId)!=="368992683803"||!Array.isArray(image.imageTags)||!image.imageTags.includes(process.env.IMAGE_TAG)) throw Error("Published web image readback is invalid"); process.stdout.write(image.imageDigest)' "$image_json")"
+          fi
           image_ref="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY@$digest"
+          REQUIRED_PLATFORMS="$PLATFORM" scripts/aws/verify-image-manifest.sh "$image_ref"
+          docker pull "$image_ref" >/dev/null
+          docker image inspect "$image_ref" --format '{{json .Config.Labels}}' >"$labels_json"
+          node --input-type=module - "$IMAGE_TAG" "$repository_json" "$image_json" "$labels_json" <<'NODE'
+          import fs from "node:fs";
+          import { resolveWebImagePublication } from "./scripts/aws/production-web-image-resume.mjs";
+          const [sourceSha, repositoryFile, imageFile, labelsFile] = process.argv.slice(2);
+          resolveWebImagePublication({ sourceSha, repository: JSON.parse(fs.readFileSync(repositoryFile, "utf8")).repositories?.[0], image: JSON.parse(fs.readFileSync(imageFile, "utf8")).imageDetails?.[0], labels: JSON.parse(fs.readFileSync(labelsFile, "utf8")), platforms: ["linux/amd64"] });
+          NODE
           printf '%s\n' "$(node -e 'process.stdout.write(JSON.stringify({service:"frontend",repository:"mscqr-web",image_uri:process.argv[1],image_tag:process.env.IMAGE_TAG,image_digest:process.argv[2],image_ref:process.argv[3],platform:"linux/amd64",dockerfile:"Dockerfile.ecs-frontend",build_context:"."}))' "$image_uri" "$digest" "$image_ref")" > "$RUNNER_TEMP/web-image.pending.json"
           echo "image_ref=$image_ref" >> "$GITHUB_OUTPUT"
       - uses: aquasecurity/trivy-action@v0.36.0

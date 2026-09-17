@@ -174,3 +174,22 @@ test("web activation uses only the sanitized GitHub OIDC release-deployer sessio
     { ...session, MSCQR_AWS_CREDENTIAL_SOURCE: "unknown" },
   ]) assert.throws(() => createWebActivationAwsRunner({ env, exec: never }), /GitHub OIDC release-deployer|AWS_/);
 });
+
+test("both governed activation callers establish the canonical credential source", () => {
+  const releaseGate = yaml.load(fs.readFileSync(".github/workflows/release-gate.yml", "utf8"));
+  const activation = releaseGate.jobs["deploy-production-ecs"].steps.find(({ name }) => name === "Activate authenticated frontend image");
+  assert.equal(activation.env.MSCQR_AWS_CREDENTIAL_SOURCE, "github-oidc-release-deployer");
+  const standalone = yaml.load(fs.readFileSync(".github/workflows/production-web-activation.yml", "utf8"));
+  assert.match(JSON.stringify(standalone), /MSCQR_AWS_CREDENTIAL_SOURCE.*github-oidc-release-deployer/);
+});
+
+test("web publication resumes immutable tags through the reviewed digest-bound preflight", () => {
+  const workflow = yaml.load(fs.readFileSync(".github/workflows/production-web-image.yml", "utf8"));
+  const publish = workflow.jobs.publish.steps.find(({ name }) => name === "Publish exact immutable web image").run;
+  assert.match(publish, /describe-images/);
+  assert.match(publish, /ImageNotFoundException/);
+  assert.match(publish, /resolveWebImagePublication/);
+  assert.match(publish, /image_ref=.*@\$digest/);
+  assert.match(publish, /if \[\[ "\$image_state" == absent \]\]; then\n\s+docker buildx build[\s\S]*?--push/);
+  assert.match(publish, /verify-image-manifest\.sh "\$image_ref"/);
+});
