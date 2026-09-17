@@ -1,0 +1,25 @@
+name: Authorize component IAM installation
+run-name: Authorize component IAM transition ${{ inputs.transition_id }}
+
+'on':
+  workflow_dispatch:
+    inputs:
+      source_sha: {description: Exact current protected-main SHA, required: true, type: string}
+      transition_id: {description: Unique installation transition UUID, required: true, type: string}
+
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+
+concurrency:
+  group: component-iam-installation-authorization
+  cancel-in-progress: false
+
+jobs:
+  authorize:
+    if: github.repository == 'T-ej2003/genuine-scan-main' && github.ref == 'refs/heads/main' && github.run_attempt == 1
+    uses: ./.github/workflows/component-iam-authorization-publisher.yml
+    with:
+      source_sha: ${{ inputs.source_sha }}
+      transition_id: ${{ inputs.transition_id }}

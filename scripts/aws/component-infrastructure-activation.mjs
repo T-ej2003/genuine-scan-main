@@ -8,6 +8,8 @@ import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createProductionAwsCredentialEnvironment, createProductionGithubCredentialEnvironment, createAssumedRoleSessionEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import { installationDocuments, documentBindings, digest } from "./component-iam-installation-contract.mjs";
+import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const stack = "infra/aws/terraform/production-component-deployment-state";
@@ -17,12 +19,53 @@ const repository = "T-ej2003/genuine-scan-main";
 const workflow = "authorize-component-infrastructure-activation.yml";
 export const hash = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 const json = (file) => JSON.parse(fs.readFileSync(file));
+const receiptBucket = "mscqr-production-terraform-state-368992683803-eu-west-2";
+const receiptKey = "mscqr/production/component-deployment-state/iam-installation.json";
+
+// Only bytes downloaded from the fixed AWS store are accepted by run(). The
+// isolated Lambda owns receipt writes; local JSON is never installation proof.
+export function assertIamInstallation(receipt, sourceSha, aws) {
+  assert.equal(receipt.schemaVersion, 1);
+  assert.equal(receipt.sourceSha, sourceSha);
+  assert.match(receipt.transitionId || "", /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i);
+  assert.match(receipt.authorizationSha256 || "", /^[a-f0-9]{64}$/);
+  assert.equal(receipt.documentBindingsSha256, digest(documentBindings()));
+  assert.equal(receipt.state, "IAM_VERIFIED");
+  const targets = installationDocuments();
+  assert.deepEqual(receipt.live, targets.map(({ arn }) => ({ arn, role: "EXPECTED", policy: "EXPECTED" })));
+  for (const target of targets) {
+    const { Role: role } = aws("iam", "get-role", "--role-name", target.role);
+    assert.equal(role.Arn, target.arn);
+    assert.equal(role.RoleName, target.role);
+    if (target.trust) {
+      assert.equal(digest(normalizeIamPolicyDocument(role.AssumeRolePolicyDocument)), digest(target.trust));
+      assert.equal(role.Path, "/");
+      assert.equal(role.MaxSessionDuration, 3600);
+      assert.equal(role.PermissionsBoundary, undefined);
+      assert.deepEqual(role.Tags?.filter(({ Key }) => Key === "Transition"), [{ Key: "Transition", Value: receipt.transitionId }]);
+      const attached = aws("iam", "list-attached-role-policies", "--role-name", target.role);
+      assert(!attached.IsTruncated);
+      assert.deepEqual(attached.AttachedPolicies, []);
+      const inline = aws("iam", "list-role-policies", "--role-name", target.role);
+      assert(!inline.IsTruncated);
+      assert.deepEqual(inline.PolicyNames, [target.policyName]);
+    }
+    const policy = aws("iam", "get-role-policy", "--role-name", target.role, "--policy-name", target.policyName);
+    assert.equal(policy.RoleName, target.role);
+    assert.equal(policy.PolicyName, target.policyName);
+    assert.equal(digest(normalizeIamPolicyDocument(policy.PolicyDocument)), digest(target.policy));
+  }
+}
 
 // Only an AWS-authenticated issuance event proves how this exact session arose.
 // Session names, local profile configuration and operator-supplied receipts do not.
-export function authenticateOperatorSession({ caller, credentials, events, now = Date.now() }) {
+// IAM_BOOTSTRAP lets the controller verify the original human release session
+// before creating the dedicated role; Terraform always uses the default purpose.
+export function authenticateOperatorSession({ caller, credentials, events, now = Date.now(), purpose = "TERRAFORM" }) {
+  assert(["TERRAFORM", "IAM_BOOTSTRAP"].includes(purpose), "Unknown operator purpose");
+  const role = purpose === "IAM_BOOTSTRAP" ? "mscqr-production-release-deployer" : "mscqr-production-component-table-installer";
   assert.equal(caller.Account, contract.account);
-  assert.match(caller.Arn, /^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\/[^/]+$/);
+  assert.match(caller.Arn, new RegExp(`^arn:aws:sts::368992683803:assumed-role/${role}/[^/]+$`));
   assert(typeof caller.UserId === "string" && caller.UserId.length > 0, "Session principal ID required");
   assert(typeof credentials.AccessKeyId === "string" && credentials.AccessKeyId.length > 0, "Session key identity required");
   assert(Date.parse(credentials.Expiration) > now + 10 * 60 * 1000, "Operator session needs at least ten minutes remaining");
@@ -37,7 +80,7 @@ export function authenticateOperatorSession({ caller, credentials, events, now =
   assert.equal(event.userIdentity?.arn, `arn:aws:iam::${contract.account}:user/mscqr-production-bootstrap-operator`);
   assert.equal(event.userIdentity?.accountId, contract.account);
   assert.equal(event.userIdentity?.sessionContext?.attributes?.mfaAuthenticated, "true");
-  assert.equal(event.requestParameters?.roleArn, `arn:aws:iam::${contract.account}:role/mscqr-production-release-deployer`);
+  assert.equal(event.requestParameters?.roleArn, `arn:aws:iam::${contract.account}:role/${role}`);
   assert.equal(event.responseElements?.assumedRoleUser?.arn, caller.Arn);
   assert.equal(event.responseElements?.assumedRoleUser?.assumedRoleId, caller.UserId);
   assert.equal(Date.parse(event.responseElements.credentials.expiration), Date.parse(credentials.Expiration));
@@ -64,37 +107,25 @@ export function assertInitialPlan(plan) {
   const configuration = plan.configuration.root_module;
   assert.equal(Object.keys(configuration.module_calls || {}).length, 0);
   assert(configuration.resources.every((resource) => !resource.provisioners?.length));
-  for (const name of ["normal_deployer", "bootstrap"]) {
-    const resource = configuration.resources.find(({ address }) => address === `aws_iam_role_policy.${name}`);
-    assert.deepEqual(resource.expressions.role.references, [`aws_iam_role.${name}.id`, `aws_iam_role.${name}`]);
-  }
-  const changes = (plan.resource_changes || []).filter((item) => item.mode === "managed");
+  assert.deepEqual(contract.expectedManagedAddresses, ["aws_dynamodb_table.component_deployment_state"]);
+  assert.deepEqual(configuration.resources.map(({ address }) => address), contract.expectedManagedAddresses);
+  const changes = plan.resource_changes || [];
   assert.deepEqual(changes.map((item) => item.address).sort(), [...contract.expectedManagedAddresses].sort());
-  for (const item of changes) assert.deepEqual(item.change.actions, ["create"], `Not initial create: ${item.address}`);
-  assert.equal((plan.resource_drift || []).length, 0);
-  assert.equal((plan.prior_state?.values?.root_module?.resources || []).filter((item) => item.mode === "managed").length, 0);
-  const get = (address) => changes.find((item) => item.address === address).change.after;
-  for (const [name, role, policy] of [
-    ["normal_deployer", "mscqr-production-normal-deployer", "MSCQRProductionNormalDeployment"],
-    ["bootstrap", "mscqr-production-component-state-bootstrap", "MSCQRProductionComponentStateBootstrap"],
-  ]) {
-    const value = get(`aws_iam_role.${name}`);
-    assert.equal(value.name, role);
-    assert.equal(value.path, "/");
-    assert.equal(value.max_session_duration, 3600);
-    const prefix = name === "normal_deployer" ? "normal-deployer" : "bootstrap";
-    assert.deepEqual(JSON.parse(value.assume_role_policy), json(path.join(root, stack, `${prefix}-trust-policy.json`)));
-    assert.equal(get(`aws_iam_role_policy.${name}`).name, policy);
-    assert.deepEqual(JSON.parse(get(`aws_iam_role_policy.${name}`).policy), json(path.join(root, stack, `${prefix}-policy.json`)));
+  for (const item of changes) {
+    assert.equal(item.mode, "managed");
+    assert.equal(item.type, "aws_dynamodb_table");
+    assert.equal(item.provider_name, "registry.terraform.io/hashicorp/aws");
+    assert.deepEqual(item.change.actions, ["create"], `Not initial create: ${item.address}`);
   }
-  const terminal = get("aws_iam_role_policy.release_terminal_state");
-  assert.equal(terminal.name, "MSCQRProductionComponentStateTerminalWriter");
-  assert.equal(terminal.role, "mscqr-production-release-deployer");
-  assert.deepEqual(JSON.parse(terminal.policy), json(path.join(root, stack, "release-terminal-state-policy.json")));
+  assert.equal((plan.resource_drift || []).length, 0);
+  assert.equal((plan.prior_state?.values?.root_module?.resources || []).length, 0);
+  assert.equal((plan.prior_state?.values?.root_module?.child_modules || []).length, 0);
+  const get = (address) => changes.find((item) => item.address === address).change.after;
   const table = get("aws_dynamodb_table.component_deployment_state");
   assert.equal(table.name, "mscqr-production-component-deployment-state");
   assert.equal(table.hash_key, "stateKey");
   assert.equal(table.billing_mode, "PAY_PER_REQUEST");
+  assert.deepEqual(table.attribute, [{ name: "stateKey", type: "S" }]);
   assert.equal(table.server_side_encryption[0].enabled, true);
   assert.equal(table.point_in_time_recovery[0].enabled, true);
 }
@@ -127,7 +158,8 @@ export function run(argv = process.argv.slice(2), deps = {}) {
   assert.equal(fs.statSync(work).mode & 0o077, 0, "Private plan directory required");
   // Canonical safelists isolate AWS/Terraform from redirects and GitHub tokens.
   const inherited = deps.env || process.env;
-  let env = { ...createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer", region: contract.region, env: inherited }), AWS_IGNORE_CONFIGURED_ENDPOINT_URLS: "true", TF_WORKSPACE: "default", TF_DATA_DIR: path.join(work, "terraform-data") };
+  assert.equal(contract.executorRole, "mscqr-production-component-table-installer");
+  let env = { ...createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: contract.executorRole, region: contract.region, env: inherited }), AWS_IGNORE_CONFIGURED_ENDPOINT_URLS: "true", TF_WORKSPACE: "default", TF_DATA_DIR: path.join(work, "terraform-data") };
   const localEnvironment = env;
   const githubEnvironment = createProductionGithubCredentialEnvironment({ env: inherited });
   const exec = (name, args) => (deps.execute || execFileSync)(name, args, { cwd: root, env: name === "gh" ? githubEnvironment : name === "git" ? localEnvironment : env, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 }).trim();
@@ -183,6 +215,21 @@ export function run(argv = process.argv.slice(2), deps = {}) {
     assert(!token, "Operator provenance pagination exceeded bound");
   }
   const operatorProvenance = authenticateOperatorSession({ caller, credentials, events: [...events.values()], now });
+  const readIamInstallation = () => {
+    const download = fs.mkdtempSync(path.join(work, "iam-receipt-"));
+    const file = path.join(download, "receipt.json");
+    try {
+      fs.writeFileSync(file, "", { flag: "wx", mode: 0o600 });
+      aws("s3api", "get-object", "--bucket", receiptBucket, "--key", receiptKey, file);
+      const bytes = fs.readFileSync(file);
+      const receipt = JSON.parse(bytes);
+      assertIamInstallation(receipt, sourceSha, aws);
+      return { receiptSha256: hash(bytes), transitionId: receipt.transitionId, documentBindingsSha256: receipt.documentBindingsSha256 };
+    } finally { fs.rmSync(download, { recursive: true }); }
+  };
+  const iamInstallation = readIamInstallation();
+  const preparationPath = path.join(work, "preparation.json");
+  if (mode === "apply") assert.deepEqual(iamInstallation, json(preparationPath).iamInstallation, "IAM installation changed: prepare and authorize again");
   const absent = () => {
     const listing = aws("s3api", "list-objects-v2", "--bucket", contract.bucket, "--prefix", contract.key);
     assert(!(listing.Contents || []).some(({ Key }) => Key === contract.key || Key === `${contract.key}.tflock`), "State/lock already exists: stop and reconcile");
@@ -190,19 +237,12 @@ export function run(argv = process.argv.slice(2), deps = {}) {
     assert(![...(history.Versions || []), ...(history.DeleteMarkers || [])].some(({ Key }) => Key === contract.key), "Historical state exists: not a first initialization");
   };
   const liveAbsent = () => {
-    for (const [args, code] of [
-      [["iam", "get-role", "--role-name", "mscqr-production-normal-deployer"], "NoSuchEntity"],
-      [["iam", "get-role", "--role-name", "mscqr-production-component-state-bootstrap"], "NoSuchEntity"],
-      [["iam", "get-role-policy", "--role-name", "mscqr-production-release-deployer", "--policy-name", "MSCQRProductionComponentStateTerminalWriter"], "NoSuchEntity"],
-      [["dynamodb", "describe-table", "--table-name", "mscqr-production-component-deployment-state"], "ResourceNotFoundException"],
-    ]) {
-      let missing = false;
-      try { aws(...args); } catch (error) {
-        if (!String(error.stderr).includes(`(${code})`)) throw error;
-        missing = true;
-      }
-      assert(missing, `Live prerequisite already exists: ${args[1]}`);
+    try { aws("dynamodb", "describe-table", "--table-name", "mscqr-production-component-deployment-state"); }
+    catch (error) {
+      if (!String(error.stderr).includes("(ResourceNotFoundException)")) throw error;
+      return;
     }
+    assert.fail("Live table already exists: stop and reconcile");
   };
   assert.equal(aws("s3api", "get-bucket-versioning", "--bucket", contract.bucket).Status, "Enabled");
   for (const name of ["production-normal-deploy", "production-component-state-bootstrap", contract.authorizationEnvironment]) {
@@ -215,14 +255,14 @@ export function run(argv = process.argv.slice(2), deps = {}) {
   assertBackend(json(path.join(env.TF_DATA_DIR, "terraform.tfstate")).backend, tf("workspace", "show"));
   tf("validate");
   const planPath = path.join(work, "activation.tfplan");
-  const preparationPath = path.join(work, "preparation.json");
   if (mode === "prepare") {
     assert(!fs.existsSync(planPath) && !fs.existsSync(preparationPath), "Use a fresh private plan directory");
     tf("plan", "-input=false", "-lock-timeout=0s", `-out=${planPath}`);
     assertInitialPlan(JSON.parse(tf("show", "-json", planPath)));
     absent();
     assert.equal(source(), sourceSha);
-    const preparation = { sourceSha, backend: contract, stateIdentity: "ABSENT", operatorArn: caller.Arn, operatorProvenance, planSha256: hash(fs.readFileSync(planPath)) };
+    assert.deepEqual(readIamInstallation(), iamInstallation, "IAM installation changed during preparation");
+    const preparation = { sourceSha, backend: contract, stateIdentity: "ABSENT", iamInstallation, operatorArn: caller.Arn, operatorProvenance, planSha256: hash(fs.readFileSync(planPath)) };
     fs.writeFileSync(preparationPath, `${JSON.stringify(preparation, null, 2)}\n`, { flag: "wx", mode: 0o600 });
     process.stdout.write(`${JSON.stringify({ ...preparation, preparationSha256: hash(fs.readFileSync(preparationPath)) }, null, 2)}\n`);
     return;
@@ -257,6 +297,7 @@ export function run(argv = process.argv.slice(2), deps = {}) {
   absent();
   liveAbsent();
   assert.equal(source(), sourceSha);
+  assert.deepEqual(readIamInstallation(), preparation.iamInstallation, "IAM installation changed: prepare and authorize again");
   // Permanent one-time reservation, before apply. An ambiguous result requires
   // read-only investigation, never another apply or deletion of this record.
   aws("s3api", "put-object", "--bucket", contract.bucket, "--key", `${contract.key}.initial-activation-attempt`, "--body", preparationPath, "--if-none-match", "*", "--server-side-encryption", "AES256");

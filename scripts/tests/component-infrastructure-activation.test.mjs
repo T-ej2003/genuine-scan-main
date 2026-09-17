@@ -5,15 +5,15 @@ import os from "node:os";
 import path from "node:path";
 import { assertBackend, assertInitialPlan, assertAuthorization, assertEnvironment, authenticateOperatorSession, contract, stack, run, hash } from "../aws/component-infrastructure-activation.mjs";
 import { productionAwsCredentialSourceContract } from "../aws/production-credential-source-contract.mjs";
+import { installationDocuments, documentBindings, digest } from "../aws/component-iam-installation-contract.mjs";
 
 const backend = () => ({ type: "s3", config: { ...contract, allowed_account_ids: [contract.account] } });
-const readPolicy = (name) => fs.readFileSync(`${stack}/${name}.json`, "utf8");
-const caller = { Account: contract.account, Arn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test", UserId: "role-id:test" };
+const caller = { Account: contract.account, Arn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-component-table-installer/test", UserId: "role-id:test" };
 const credentials = { AccessKeyId: "fixture-session-key", SecretAccessKey: "fixture-secret", SessionToken: "fixture-token", Expiration: new Date(Date.now() + 50 * 60 * 1000).toISOString() };
 const issuance = () => ({
   eventID: "12345678-1234-1234-1234-123456789abc", eventSource: "sts.amazonaws.com", eventName: "AssumeRole", eventTime: new Date(Date.now() - 1000).toISOString(), recipientAccountId: contract.account,
   userIdentity: { type: "IAMUser", arn: `arn:aws:iam::${contract.account}:user/mscqr-production-bootstrap-operator`, accountId: contract.account, sessionContext: { attributes: { mfaAuthenticated: "true" } } },
-  requestParameters: { roleArn: `arn:aws:iam::${contract.account}:role/mscqr-production-release-deployer` },
+  requestParameters: { roleArn: `arn:aws:iam::${contract.account}:role/mscqr-production-component-table-installer` },
   responseElements: { assumedRoleUser: { arn: caller.Arn, assumedRoleId: caller.UserId }, credentials: { accessKeyId: credentials.AccessKeyId, expiration: credentials.Expiration } },
 });
 
@@ -33,22 +33,30 @@ test("operator provenance accepts only exact AWS MFA-backed human issuance, not 
     (e) => { e.eventTime = new Date(Date.now() - 61 * 60 * 1000).toISOString(); },
   ]) { const event = issuance(); mutate(event); assert.throws(() => verify(event)); }
   assert.throws(() => verify(issuance(), { ...caller, Account: "000000000000" }));
-  assert.throws(() => verify(issuance(), { ...caller, Arn: caller.Arn.replace("release-deployer", "other") }));
+  assert.throws(() => verify(issuance(), { ...caller, Arn: caller.Arn.replace("component-table-installer", "other") }));
   assert.throws(() => authenticateOperatorSession({ caller, credentials, events: [] }));
+});
+test("IAM bootstrap purpose authenticates only the original MFA human release role", () => {
+  const identity = { ...caller, Arn: caller.Arn.replace("component-table-installer", "release-deployer") };
+  const event = issuance();
+  event.requestParameters.roleArn = event.requestParameters.roleArn.replace("component-table-installer", "release-deployer");
+  event.responseElements.assumedRoleUser.arn = identity.Arn;
+  const input = { caller: identity, credentials, events: [event], purpose: "IAM_BOOTSTRAP" };
+  assert.equal(authenticateOperatorSession(input).operatorArn, event.userIdentity.arn);
+  assert.throws(() => authenticateOperatorSession({ ...input, purpose: "TERRAFORM" }));
+  assert.throws(() => authenticateOperatorSession({ ...input, purpose: "arbitrary-role" }));
+  assert.throws(() => authenticateOperatorSession({ caller, credentials, events: [issuance()], purpose: "IAM_BOOTSTRAP" }));
+  event.userIdentity.sessionContext.attributes.mfaAuthenticated = "false";
+  assert.throws(() => authenticateOperatorSession(input));
 });
 const plan = () => {
   const values = {
-    "aws_dynamodb_table.component_deployment_state": { name: "mscqr-production-component-deployment-state", hash_key: "stateKey", billing_mode: "PAY_PER_REQUEST", server_side_encryption: [{ enabled: true }], point_in_time_recovery: [{ enabled: true }] },
-    "aws_iam_role.normal_deployer": { name: "mscqr-production-normal-deployer", path: "/", max_session_duration: 3600, assume_role_policy: readPolicy("normal-deployer-trust-policy") },
-    "aws_iam_role.bootstrap": { name: "mscqr-production-component-state-bootstrap", path: "/", max_session_duration: 3600, assume_role_policy: readPolicy("bootstrap-trust-policy") },
-    "aws_iam_role_policy.normal_deployer": { name: "MSCQRProductionNormalDeployment", policy: readPolicy("normal-deployer-policy") },
-    "aws_iam_role_policy.bootstrap": { name: "MSCQRProductionComponentStateBootstrap", policy: readPolicy("bootstrap-policy") },
-    "aws_iam_role_policy.release_terminal_state": { name: "MSCQRProductionComponentStateTerminalWriter", role: "mscqr-production-release-deployer", policy: readPolicy("release-terminal-state-policy") },
+    "aws_dynamodb_table.component_deployment_state": { name: "mscqr-production-component-deployment-state", hash_key: "stateKey", attribute: [{ name: "stateKey", type: "S" }], billing_mode: "PAY_PER_REQUEST", server_side_encryption: [{ enabled: true }], point_in_time_recovery: [{ enabled: true }] },
   };
   return {
     errored: false, applyable: true,
-    configuration: { provider_config: { aws: { full_name: "registry.terraform.io/hashicorp/aws", expressions: { allowed_account_ids: { constant_value: [contract.account] }, region: { constant_value: contract.region } } } }, root_module: { resources: ["normal_deployer", "bootstrap"].map((name) => ({ address: `aws_iam_role_policy.${name}`, expressions: { role: { references: [`aws_iam_role.${name}.id`, `aws_iam_role.${name}`] } } })) } },
-    resource_changes: contract.expectedManagedAddresses.map((address) => ({ address, mode: "managed", change: { actions: ["create"], after: values[address] } })),
+    configuration: { provider_config: { aws: { full_name: "registry.terraform.io/hashicorp/aws", expressions: { allowed_account_ids: { constant_value: [contract.account] }, region: { constant_value: contract.region } } } }, root_module: { resources: contract.expectedManagedAddresses.map((address) => ({ address })) } },
+    resource_changes: contract.expectedManagedAddresses.map((address) => ({ address, mode: "managed", type: "aws_dynamodb_table", provider_name: "registry.terraform.io/hashicorp/aws", change: { actions: ["create"], after: values[address] } })),
   };
 };
 test("fixed backend never accepts local state, other keys, bucket, account, region or workspace", () => {
@@ -64,7 +72,7 @@ test("fixed backend never accepts local state, other keys, bucket, account, regi
   assert(versions.includes(`key                 = "${contract.key}"`));
   assert.equal(contract.key, "mscqr/production/component-deployment-state/terraform.tfstate");
 });
-test("only the six initial creates can be authorized", () => {
+test("only the initial table create can be authorized; all IAM configuration and changes fail", () => {
   assertInitialPlan(plan());
   for (const actions of [["update"], ["delete", "create"], ["no-op"]]) {
     const changed = plan(); changed.resource_changes[0].change.actions = actions;
@@ -72,11 +80,24 @@ test("only the six initial creates can be authorized", () => {
   }
   const changed = plan(); changed.resource_changes.push({ address: "aws_iam_role.unrelated", mode: "managed", change: { actions: ["create"] } });
   assert.throws(() => assertInitialPlan(changed));
-  const wrongTrust = plan();
-  wrongTrust.resource_changes.find(({address}) => address === "aws_iam_role.normal_deployer").change.after.assume_role_policy = '{}';
-  assert.throws(() => assertInitialPlan(wrongTrust));
+  const iamConfig = plan(); iamConfig.configuration.root_module.resources.push({ address: "aws_iam_role.normal_deployer" });
+  assert.throws(() => assertInitialPlan(iamConfig));
+  const iamRead = plan(); iamRead.resource_changes.push({ address: "data.aws_iam_role.release", mode: "data", change: { actions: ["read"] } });
+  assert.throws(() => assertInitialPlan(iamRead));
   const wrongProvider = plan(); wrongProvider.configuration.provider_config.aws.expressions.region.constant_value = "eu-west-1";
   assert.throws(() => assertInitialPlan(wrongProvider));
+});
+test("table create rejects wrong schema, encryption, recovery and provider", () => {
+  for (const mutate of [
+    (p) => { p.resource_changes[0].change.after.name = "other"; },
+    (p) => { p.resource_changes[0].change.after.attribute[0].type = "N"; },
+    (p) => { p.resource_changes[0].change.after.server_side_encryption[0].enabled = false; },
+    (p) => { p.resource_changes[0].change.after.point_in_time_recovery[0].enabled = false; },
+    (p) => { p.resource_changes[0].provider_name = "other/aws"; },
+    (p) => { p.configuration.root_module.module_calls = { hidden: {} }; },
+    (p) => { p.configuration.root_module.resources[0].provisioners = [{}]; },
+    (p) => { p.prior_state = { values: { root_module: { child_modules: [{}] } } }; },
+  ]) { const p = plan(); mutate(p); assert.throws(() => assertInitialPlan(p)); }
 });
 test("authorization binds exact source, plan bytes, preparation and absent remote state", () => {
   const binding = { sourceSha: "a".repeat(40), planSha256: "b".repeat(64), preparationSha256: "c".repeat(64) };
@@ -105,12 +126,15 @@ for (const environment of ["production-normal-deploy", "production-component-sta
   assert.throws(() => assertEnvironment(config, { branch_policies: [{ name: "feature", type: "branch" }] }));
 });
 
-function installation(t, { changedSource = false, changedPlan = false, existingState = false, replay = false, approval = true, wrongReviewer = false, wrongInitiator = false, wrongApprovalEnvironment = false, inherited = {}, provenance = () => issuance(), rejectedProvenance = false } = {}) {
+const receipt = () => ({ schemaVersion: 1, sourceSha: "a".repeat(40), transitionId: "12345678-1234-1234-1234-123456789abc", authorizationSha256: "b".repeat(64), documentBindingsSha256: digest(documentBindings()), state: "IAM_VERIFIED", live: installationDocuments().map(({ arn }) => ({ arn, role: "EXPECTED", policy: "EXPECTED" })) });
+
+function installation(t, { changedSource = false, changedPlan = false, existingState = false, replay = false, approval = true, wrongReviewer = false, wrongInitiator = false, wrongApprovalEnvironment = false, inherited = {}, provenance = () => issuance(), rejectedProvenance = false, storedReceipt = () => receipt(), liveMutation = () => {}, rejectPrepare = false, forgedLocal = false } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "component-install-test-"));
   t.after(() => fs.rmSync(dir, { recursive: true }));
   const calls = [];
   const children = [];
   const sourceSha = "a".repeat(40);
+  if (forgedLocal) fs.writeFileSync(path.join(dir, "iam-installation.json"), JSON.stringify(receipt()));
   let applying = false;
   const operator = { id: 183396573, login: "T-ej2003" };
   const config = { id: 20, can_admins_bypass: false, deployment_branch_policy: { protected_branches: false, custom_branch_policies: true }, protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{ type: "User", reviewer: operator }] }] };
@@ -138,8 +162,25 @@ function installation(t, { changedSource = false, changedPlan = false, existingS
       else if (endpoint.endsWith("/approvals")) value = approval ? [{ state: "approved", environments: [{ id: wrongApprovalEnvironment ? 21 : 20 }], user: wrongReviewer ? { id: 1, login: "other" } : operator }] : [];
       else value = { path: ".github/workflows/authorize-component-infrastructure-activation.yml", head_sha: sourceSha, head_branch: "main", head_repository: { full_name: "T-ej2003/genuine-scan-main" }, event: "workflow_dispatch", conclusion: "success", run_attempt: 1, created_at: new Date().toISOString(), actor: wrongInitiator ? { id: 1, login: "other" } : operator };
     } else if (name === "aws") {
-      if (["iam", "dynamodb"].includes(args[0])) throw Object.assign(new Error("Missing"), { stderr: `(${args[0] === "iam" ? "NoSuchEntity" : "ResourceNotFoundException"})` });
-      if (args[0] === "configure") value = credentials;
+      if (args[0] === "dynamodb") throw Object.assign(new Error("Missing"), { stderr: "(ResourceNotFoundException)" });
+      if (args[0] === "iam") {
+        const target = installationDocuments().find(({ role }) => role === args[args.indexOf("--role-name") + 1]);
+        assert(target);
+        if (args[1] === "get-role") value = { Role: { Arn: target.arn, RoleName: target.role, ...(target.trust ? { AssumeRolePolicyDocument: encodeURIComponent(JSON.stringify(target.trust)), Path: "/", MaxSessionDuration: 3600, Tags: [{ Key: "Transition", Value: receipt().transitionId }] } : {}) } };
+        else if (args[1] === "list-attached-role-policies") value = { AttachedPolicies: [], IsTruncated: false };
+        else if (args[1] === "list-role-policies") value = { PolicyNames: [target.policyName], IsTruncated: false };
+        else { assert.equal(args[1], "get-role-policy"); assert.equal(args[args.indexOf("--policy-name") + 1], target.policyName); value = { RoleName: target.role, PolicyName: target.policyName, PolicyDocument: target.policy }; }
+        liveMutation(value, target, applying);
+      } else if (args[1] === "get-object") {
+        assert.equal(args[args.indexOf("--bucket") + 1], "mscqr-production-terraform-state-368992683803-eu-west-2");
+        assert.equal(args[args.indexOf("--key") + 1], "mscqr/production/component-deployment-state/iam-installation.json");
+        const file = args[args.indexOf("--key") + 2];
+        assert.equal(fs.statSync(file).mode & 0o077, 0);
+        assert.equal(fs.statSync(path.dirname(file)).mode & 0o077, 0);
+        const stored = storedReceipt(applying, calls);
+        if (!stored) throw new Error("NoSuchKey");
+        fs.writeFileSync(file, JSON.stringify(stored)); value = {};
+      } else if (args[0] === "configure") value = credentials;
       else if (args[0] === "sts") value = env.AWS_PROFILE === "default" ? { Account: contract.account, Arn: `arn:aws:iam::${contract.account}:root` } : caller;
       else if (args[0] === "cloudtrail") value = { Events: provenance(applying) ? [{ CloudTrailEvent: JSON.stringify(provenance(applying)) }] : [] };
       else if (args[1] === "get-bucket-versioning") value = { Status: "Enabled" };
@@ -160,7 +201,7 @@ function installation(t, { changedSource = false, changedPlan = false, existingS
     } else throw new Error(`Unexpected tool ${name}`);
     return JSON.stringify(value);
   };
-  if (rejectedProvenance) {
+  if (rejectedProvenance || rejectPrepare) {
     assert.throws(() => run(["prepare", dir], { execute, env: inherited }));
     assert(!calls.some(([name]) => name === "terraform"));
     assert(!calls.some(([name, , operation]) => name === "aws" && operation === "put-object"));
@@ -196,7 +237,7 @@ test("activation child environments use canonical safelists and pin production v
         assert(["sts", "cloudtrail"].includes(args[0]));
         assert.deepEqual(env, { ...base, AWS_PROFILE: "default" });
       } else {
-        const identity = env.AWS_PROFILE ? { AWS_PROFILE: "mscqr-production-release-deployer" } : { AWS_ACCESS_KEY_ID: credentials.AccessKeyId, AWS_SECRET_ACCESS_KEY: credentials.SecretAccessKey, AWS_SESSION_TOKEN: credentials.SessionToken };
+        const identity = env.AWS_PROFILE ? { AWS_PROFILE: "mscqr-production-component-table-installer" } : { AWS_ACCESS_KEY_ID: credentials.AccessKeyId, AWS_SECRET_ACCESS_KEY: credentials.SecretAccessKey, AWS_SESSION_TOKEN: credentials.SessionToken };
         assert.deepEqual(env, { ...base, ...identity, TF_WORKSPACE: "default", TF_DATA_DIR: path.join(fs.realpathSync(dir), "terraform-data") });
         if (name === "terraform") assert.equal(env.AWS_PROFILE, undefined, "Terraform uses only authenticated pinned session");
       }
@@ -221,7 +262,8 @@ test("apply rejects different issuance even with identical session ARN before re
 });
 
 test("sole initiator may explicitly approve exact plan; installation reserves once and verifies", (t) => {
-  const { calls, apply } = installation(t);
+  const { calls, apply, dir } = installation(t);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, "preparation.json"))).iamInstallation, { receiptSha256: hash(JSON.stringify(receipt())), transitionId: receipt().transitionId, documentBindingsSha256: digest(documentBindings()) });
   apply();
   const writes = calls.filter(([name, , operation]) => name === "aws" && operation === "put-object");
   assert.equal(writes.length, 1);
@@ -229,6 +271,57 @@ test("sole initiator may explicitly approve exact plan; installation reserves on
   assert.equal(applies.length, 1);
   assert(applies[0].at(-1).endsWith("/activation.tfplan"));
   assert(calls.indexOf(writes[0]) < calls.indexOf(applies[0]));
+  assert.equal(writes[0][writes[0].indexOf("--key") + 1], `${contract.key}.initial-activation-attempt`);
+  assert(calls.some(([name, , operation, ...args]) => name === "terraform" && operation === "plan" && args.includes("-detailed-exitcode")));
+});
+for (const [label, mutate] of [
+  ["schema", (r) => { r.schemaVersion = 2; }],
+  ["stale source", (r) => { r.sourceSha = "c".repeat(40); }],
+  ["transition", (r) => { r.transitionId = "not-uuid"; }],
+  ["authorization", (r) => { r.authorizationSha256 = "bad"; }],
+  ["documents", (r) => { r.documentBindingsSha256 = "c".repeat(64); }],
+  ["unverified", (r) => { r.state = "IAM_INSTALLING"; }],
+  ["missing target", (r) => { r.live.pop(); }],
+  ["forged target", (r) => { r.live[0].arn += "other"; }],
+  ["absent policy", (r) => { r.live[0].policy = "ABSENT"; }],
+]) test(`receipt rejects ${label} before any Terraform`, (t) => {
+  installation(t, { rejectPrepare: true, storedReceipt: () => { const r = receipt(); mutate(r); return r; } });
+});
+test("missing AWS receipt rejects even when a caller provides valid local JSON", (t) => {
+  installation(t, { rejectPrepare: true, forgedLocal: true, storedReceipt: () => null });
+});
+for (const [label, mutate] of [
+  ["wrong policy", (value) => { if (value.PolicyDocument) value.PolicyDocument = {}; }],
+  ["wrong release policy", (value, target) => { if (!target.trust && value.PolicyDocument) value.PolicyDocument = {}; }],
+  ["wrong trust", (value) => { if (value.Role?.AssumeRolePolicyDocument) value.Role.AssumeRolePolicyDocument = {}; }],
+  ["wrong path", (value) => { if (value.Role) value.Role.Path = "/other/"; }],
+  ["wrong duration", (value) => { if (value.Role) value.Role.MaxSessionDuration = 7200; }],
+  ["boundary", (value) => { if (value.Role) value.Role.PermissionsBoundary = {}; }],
+  ["additional managed policy", (value) => { if (value.AttachedPolicies) value.AttachedPolicies.push({ PolicyArn: "unexpected" }); }],
+  ["additional inline policy", (value) => { if (value.PolicyNames) value.PolicyNames.push("unexpected"); }],
+  ["truncated policy inventory", (value) => { if (value.PolicyNames) value.IsTruncated = true; }],
+  ["wrong transition", (value) => { if (value.Role) value.Role.Tags = [{ Key: "Transition", Value: "other" }]; }],
+  ["missing IAM", () => { throw new Error("NoSuchEntity"); }],
+]) test(`live IAM rejects ${label} before any Terraform`, (t) => {
+  installation(t, { rejectPrepare: true, liveMutation: mutate });
+});
+test("apply rejects changed receipt bytes before any apply-time Terraform", (t) => {
+  const { calls, apply } = installation(t, { storedReceipt: (applying) => ({ ...receipt(), ...(applying ? { authorizationSha256: "c".repeat(64) } : {}) }) });
+  const before = calls.length;
+  assert.throws(apply, /IAM installation changed/);
+  assert(!calls.slice(before).some(([name]) => name === "terraform"));
+  assert(!calls.some(([name, , operation]) => name === "aws" && operation === "put-object"));
+});
+test("receipt is re-read after approval and a mid-apply change prevents reservation", (t) => {
+  const { calls, apply } = installation(t, { storedReceipt: (applying, calls) => ({ ...receipt(), ...(applying && calls.some(([name, operation]) => name === "gh" && operation === "run") ? { authorizationSha256: "c".repeat(64) } : {}) }) });
+  assert.throws(apply, /IAM installation changed/);
+  assert(!calls.some(([name, , operation]) => name === "aws" && operation === "put-object"));
+});
+test("live IAM is reauthenticated at apply even if receipt is unchanged", (t) => {
+  const { calls, apply } = installation(t, { liveMutation: (value, target, applying) => { if (applying && value.PolicyDocument) value.PolicyDocument = {}; } });
+  const before = calls.length;
+  assert.throws(apply);
+  assert(!calls.slice(before).some(([name]) => name === "terraform"));
 });
 for (const scenario of [{ changedSource: true }, { changedPlan: true }, { existingState: true }, { replay: true }, { approval: false }, { wrongReviewer: true }, { wrongInitiator: true }, { wrongApprovalEnvironment: true }]) {
   test(`mocked installation rejects before apply: ${JSON.stringify(scenario)}`, (t) => {

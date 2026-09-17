@@ -11,14 +11,9 @@
   "workspace": "default",
   "firstInitialization": "ABSENT_REMOTE_STATE_ONLY",
   "rootApplyAllowed": false,
-  "executorRole": "mscqr-production-release-deployer",
+  "executorRole": "mscqr-production-component-table-installer",
   "authorizationEnvironment": "production-component-infrastructure-activation",
   "expectedManagedAddresses": [
-    "aws_dynamodb_table.component_deployment_state",
-    "aws_iam_role.normal_deployer",
-    "aws_iam_role_policy.normal_deployer",
-    "aws_iam_role.bootstrap",
-    "aws_iam_role_policy.bootstrap",
-    "aws_iam_role_policy.release_terminal_state"
+    "aws_dynamodb_table.component_deployment_state"
   ]
 }
