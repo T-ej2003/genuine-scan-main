@@ -14,8 +14,12 @@ test("component deployment state Terraform fixes the table, key, and exact write
   assert.equal(trust["token.actions.githubusercontent.com:sub"], "repo:T-ej2003/genuine-scan-main:environment:production-normal-deploy");
   assert.deepEqual(Object.keys(trust).sort(), ["token.actions.githubusercontent.com:aud", "token.actions.githubusercontent.com:sub"]);
   const policy = read("normal-deployer-policy.json");
-  assert.match(JSON.stringify(policy), /mscqr-production-rls-green-backend-candidate:\*/);
-  assert.match(JSON.stringify(policy), /mscqr-frontend:\*/);
+  const backendCandidate = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:*";
+  const frontend = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-frontend:*";
+  const tag = policy.Statement.find(({ Sid }) => Sid === "PreserveTaskDefinitionTags");
+  assert.deepEqual(tag.Resource, [backendCandidate, frontend]);
+  const frontendRead = policy.Statement.find(({ Sid }) => Sid === "ReadExactFrontendImage");
+  assert.deepEqual(frontendRead.Action, ["ecr:DescribeImages", "ecr:DescribeRepositories"]);
 });
 
 test("state permissions are exact-key DynamoDB operations and publishers receive no state writer", () => {
