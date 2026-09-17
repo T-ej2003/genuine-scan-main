@@ -15,6 +15,10 @@ import { createProductionEnvironmentApprovalEvidence } from "../aws/production-g
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
 import { backendRecoverySecretArn, loadBackendRecoveryTaskDefinition } from "./fixtures/backend-recovery-task-definition.mjs";
 import { classifyRollbackViability } from "../aws/production-ecs-rollback-viability.mjs";
+import { commitBackendRecoveryComponentState } from "../aws/commit-production-component-recovery-state.mjs";
+import { createProductionComponentDeploymentState } from "../aws/production-component-deployment-state.mjs";
+import { completedBackendRecoveryEvidence } from "./fixtures/completed-backend-recovery-evidence.mjs";
+import { classifyNormalLiveComponentState } from "../aws/production-normal-release.mjs";
 
 const sourceSha = "565f78be803558feb40a543ead464c5410738960";
 const digest = "sha256:3dbd02136a99d1741fdfa655397a661fa2275812e1cad0675c93fc5c7c4b4477";
@@ -1256,6 +1260,20 @@ test("durable recovery states preserve every confirmed partial mutation and term
   assert.equal(result.health.status, "ready");
   assert.equal(success.records.at(-1).status, "RECOVERY_COMPLETE");
   assert.equal(success.records.at(-1).health.healthy, true);
+  const complete = success.records.at(-1);
+  const terminal = completedBackendRecoveryEvidence({ ...complete, sourceSha, imageReleaseSha: sourceSha,
+    candidateFingerprint: taskDefinitionFingerprint(registered.taskDefinition, registered.tags),
+    health: { ...complete.health, dependencies: { database: "ready", redis: "ready", objectStorage: "ready" }, release: { gitSha: sourceSha }, timestamp: now.toISOString() } });
+  const predecessor = { sourceSha, establishedThroughSha: sourceSha, imageDigest: digest, taskDefinitionArn: current.taskDefinition.taskDefinitionArn, desiredCount: 2 };
+  const initial = createProductionComponentDeploymentState({ components: { backend: predecessor, frontend: null, database: null, security: null } });
+  const service = { ...base().service, status: "ACTIVE", taskDefinition: targetArn, runningCount: 2, pendingCount: 0,
+    deployments: [{ id: "ecs-svc/123", status: "PRIMARY", rolloutState: "COMPLETED", taskDefinition: targetArn }] };
+  const tasks = ["a", "b"].map((taskArn) => ({ taskArn, clusterArn: service.clusterArn, group: `service:${service.serviceName}`, taskDefinitionArn: targetArn, lastStatus: "RUNNING", healthStatus: "HEALTHY", startedBy: "ecs-svc/123", containers: [{ name: "backend", imageDigest: digest }] }));
+  let committed;
+  const stateResult = commitBackendRecoveryComponentState({ evidence: terminal, readers: { readLive: () => ({ service, definition: { ...registered.taskDefinition, tags: registered.tags }, tasks }), readBackendImageSource: () => sourceSha },
+    client: { read: () => initial, advance: (_expected, next) => { committed = next; } }, isProtectedMainAncestor: () => true });
+  assert.equal(committed.components.backend.taskDefinitionArn, targetArn);
+  assert.equal(classifyNormalLiveComponentState({ live: committed.components.backend, predecessor: stateResult.state.components.backend, candidate: { sourceSha: "d".repeat(40), imageDigest: `sha256:${"d".repeat(64)}` } }), "LIVE_IS_PREDECESSOR");
 });
 
 test("already-recovered replay records completion without fake mutations", async () => {

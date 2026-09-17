@@ -15,7 +15,7 @@ const noFailures = (value) => { assert.equal((value.failures || []).length, 0, "
 
 // Internal fixed adapters, not a CLI. The protected workflow supplies the
 // credential-scoped runner; no dispatch input supplies AWS argument arrays.
-export function createAppOnlyEcsReaders(run) {
+export function createAppOnlyEcsReaders(run, { assertDefinitionArn = (arn) => assert.match(arn || "", family) } = {}) {
   const aws = (args) => parse(run([...args, "--output", "json", "--no-cli-pager"]));
   const readService = () => {
     const response = noFailures(aws(["ecs", "describe-services", "--cluster", APP_ONLY.clusterArn, "--services", APP_ONLY.serviceArn, "--include", "TAGS"]));
@@ -25,7 +25,7 @@ export function createAppOnlyEcsReaders(run) {
     return service;
   };
   const readDefinition = (arn) => {
-    assert.match(arn || "", family);
+    assertDefinitionArn(arn);
     const response = aws(["ecs", "describe-task-definition", "--task-definition", arn, "--include", "TAGS"]);
     assert.equal(response.taskDefinition?.taskDefinitionArn, arn);
     return { ...response.taskDefinition, tags: response.tags || [] };

@@ -237,7 +237,8 @@ test("release gate exposes one bounded backend health recovery mode", () => {
 
 test("backend recovery cannot enter rotation, frontend, worker, or normal release steps", () => {
   assert.doesNotMatch(workflow, /if: \$\{\{ inputs\.release_mode != 'normal' \}\}/);
-  assert.match(workflow, /Deploy rotation transition backend ECS service\n\s*if: \$\{\{ inputs\.release_mode == 'rotation-overlap' \|\| inputs\.release_mode == 'rotation-cleanup' \}\}/);
+  const rotationStep = yaml.load(workflow).jobs["deploy-production-ecs"].steps.find(({ name }) => name === "Deploy rotation transition backend ECS service");
+  assert.equal(rotationStep.if, "${{ inputs.release_mode == 'rotation-overlap' || inputs.release_mode == 'rotation-cleanup' }}");
   assert.doesNotMatch(workflow, /Deploy frontend ECS service/);
   assert.doesNotMatch(workflow, /Deploy worker ECS service|PRODUCTION_WORKER_SERVICE_NAME/);
 });

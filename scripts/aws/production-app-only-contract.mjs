@@ -98,13 +98,21 @@ export function assertRegisteredAppOnlyCandidate(predecessor, candidate, candida
 
 export function captureAppOnlyPredecessor({ service, definition, tasks }) {
   const backend = assertAppOnlyDefinition(definition);
+  assert.equal(service?.desiredCount, 2);
+  return captureBackendServiceSnapshot({ service, definition, tasks }, backend.image.split("@")[1]);
+}
+
+// Service/task readback shared with recovery; each caller authenticates its own
+// task-definition family and privileges before capturing this snapshot.
+export function captureBackendServiceSnapshot({ service, definition, tasks }, backendDigest) {
+  digest(backendDigest);
   assert.equal(service?.clusterArn, APP_ONLY.clusterArn);
   assert.equal(service?.serviceArn, APP_ONLY.serviceArn);
   assert.equal(service?.serviceName, APP_ONLY.service);
   assert.equal(service?.status, "ACTIVE");
   assert.equal(service.taskDefinition, definition.taskDefinitionArn);
-  assert.equal(service.desiredCount, 2);
-  assert.equal(service.runningCount, 2);
+  assert.ok(Number.isSafeInteger(service.desiredCount) && service.desiredCount > 0);
+  assert.equal(service.runningCount, service.desiredCount);
   assert.equal(service.pendingCount, 0);
   assert.equal(service.deployments?.length, 1, "Concurrent deployment");
   const deployment = service.deployments[0];
@@ -112,8 +120,8 @@ export function captureAppOnlyPredecessor({ service, definition, tasks }) {
   assert.equal(deployment.status, "PRIMARY");
   assert.equal(deployment.rolloutState, "COMPLETED");
   assert.equal(deployment.taskDefinition, service.taskDefinition);
-  assert.equal(tasks?.length, 2);
-  assert.equal(new Set(tasks.map(({ taskArn }) => taskArn)).size, 2);
+  assert.equal(tasks?.length, service.desiredCount);
+  assert.equal(new Set(tasks.map(({ taskArn }) => taskArn)).size, service.desiredCount);
   for (const task of tasks) {
     assert.equal(task.clusterArn, APP_ONLY.clusterArn);
     assert.equal(task.group, `service:${APP_ONLY.service}`);
@@ -123,11 +131,11 @@ export function captureAppOnlyPredecessor({ service, definition, tasks }) {
     assert.equal(task.startedBy, deployment.id);
     const containers = task.containers?.filter(({ name }) => name === APP_ONLY.container);
     assert.equal(containers?.length, 1);
-    assert.equal(containers[0].imageDigest, backend.image.split("@")[1]);
+    assert.equal(containers[0].imageDigest, backendDigest);
   }
   return {
     clusterArn: service.clusterArn, serviceArn: service.serviceArn,
-    taskDefinitionArn: service.taskDefinition, backendDigest: backend.image.split("@")[1],
+    taskDefinitionArn: service.taskDefinition, backendDigest,
     desiredCount: service.desiredCount, deploymentId: deployment.id,
     deploymentStatus: deployment.rolloutState,
     definitionSha256: appOnlyDefinitionSha256(definition),

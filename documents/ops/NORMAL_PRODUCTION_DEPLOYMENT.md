@@ -10,6 +10,8 @@ Backend and frontend state keep two source identities. `sourceSha` authenticates
 
 Overlap and cleanup rotations commit the verified backend identity and security identity together. The terminal checks the deployment result against fresh ECS/ECR reads, retaining the image source separately from the rotation revision. A mismatch leaves both component records unchanged.
 
+Legacy backend-health recovery records only the canonical `mscqr-backend` target after validating recovery evidence and fresh task/digest readback. Its artifact source and completed-recovery revision remain separate. This does not widen the green-family app-only activation boundary; legacy-to-green migration still belongs to the stronger lane.
+
 ## One-time bootstrap
 
 Before the first normal deployment, create the protected `production-component-state-bootstrap` GitHub environment with the same independent-approval rule as production, then run **Bootstrap Production Component Deployment State** from protected `main`. The workflow reads the current backend and frontend ECS/ECR identities, proves their protected-main source tags, initializes each reconciliation baseline to that proven source, and conditionally creates the single state record. It rejects an existing record and never uses workflow history as deployment state.

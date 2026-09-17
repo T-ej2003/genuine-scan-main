@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { BACKEND_HEALTH_RECOVERY, BACKEND_HEALTH_RECOVERY_STATUS, assertLegacyBackendRecoveryEvidence, recoveryHistoryLineageSha256 } from "./production-backend-health-recovery-contract.mjs";
+import { BACKEND_HEALTH_RECOVERY, BACKEND_HEALTH_RECOVERY_STATUS, BACKEND_HEALTH_RECOVERY_TASK_ARN as TASK_ARN, assertLegacyBackendRecoveryEvidence, recoveryHistoryLineageSha256 } from "./production-backend-health-recovery-contract.mjs";
 import { assertRuntimeConsumabilityEnvelopeSignature } from "./production-ecs-runtime-consumability.mjs";
 import { assertProductionEnvironmentApprovalIdentity, PRODUCTION_ENVIRONMENT_APPROVAL } from "./production-github-environment-approval.mjs";
 import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM } from "./production-green-stage-b-contract.mjs";
@@ -15,7 +15,6 @@ const NOT_PART_OF_SCHEMA = "NOT_PART_OF_SCHEMA";
 const LEGACY_APPROVAL_PROOF = "AUTHENTICATED_GITHUB_PRODUCTION_ENVIRONMENT_APPROVAL_HISTORY";
 const HEX = /^[a-f0-9]{64}$/;
 const SHA = /^[a-f0-9]{40}$/;
-const TASK_ARN = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/mscqr-backend:[1-9][0-9]*$/;
 const RUN_ID = /^[1-9][0-9]*$/;
 const MAX_HISTORY_RECORDS = 32;
 const MAX_HISTORY_BYTES = 8 * 1024 * 1024;

@@ -6,22 +6,39 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { advanceProductionComponentDeploymentStateWithRetry, createProductionComponentDeploymentStateClient, PRODUCTION_COMPONENT_STATE } from "./production-component-deployment-state.mjs";
 import { createAppOnlyEcsReaders } from "./production-app-only-adapters.mjs";
-import { captureAppOnlyPredecessor } from "./production-app-only-contract.mjs";
+import { captureBackendServiceSnapshot } from "./production-app-only-contract.mjs";
+import { BACKEND_HEALTH_RECOVERY, assertBackendHealthRecoveryTaskArn, assertLegacyBackendRecoveryEvidence } from "./production-backend-health-recovery-contract.mjs";
+import { taskDefinitionFingerprint } from "./stage-b-task-definition-recovery-contract.mjs";
 import { assertGithubOidcReleaseDeployerEnvironment, createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 
-const SHA = /^[a-f0-9]{40}$/;
-const readEvidence = (file) => { const value = JSON.parse(fs.readFileSync(file, "utf8")); assert.equal(value.kind, "BACKEND_HEALTH_RECOVERY_EVIDENCE"); assert.equal(value.status, "RECOVERY_COMPLETE"); assert.match(value.sourceSha || "", SHA); assert.match(value.imageReleaseSha || "", SHA); assert.match(value.recoveryImageDigest || "", /^sha256:[a-f0-9]{64}$/); assert.match(value.targetArn || "", /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/mscqr-production-rls-green-backend:[1-9][0-9]*$/); return value; };
+export function assertCompletedBackendRecoveryEvidence(value) {
+  assertLegacyBackendRecoveryEvidence(value, { ...value, account: BACKEND_HEALTH_RECOVERY.account, region: BACKEND_HEALTH_RECOVERY.region });
+  assert.equal(value.status, "RECOVERY_COMPLETE");
+  assertBackendHealthRecoveryTaskArn(value.targetArn);
+  return value;
+}
+export const readEvidence = (file) => assertCompletedBackendRecoveryEvidence(JSON.parse(fs.readFileSync(file, "utf8")));
 
 export function authenticatedBackendRecoveryComponent(live, evidence) {
+  assertCompletedBackendRecoveryEvidence(evidence);
   assert.equal(live.backendDigest, evidence.recoveryImageDigest); assert.equal(live.taskDefinitionArn, evidence.targetArn);
   return { sourceSha: evidence.imageReleaseSha, establishedThroughSha: evidence.sourceSha, imageDigest: live.backendDigest, taskDefinitionArn: live.taskDefinitionArn, desiredCount: live.desiredCount };
 }
 
-export function commitBackendRecoveryComponentState({ evidence, client, run, readers = createAppOnlyEcsReaders(run), isProtectedMainAncestor = () => true, writerContext } = {}) {
-  const live = captureAppOnlyPredecessor(readers.readLive());
+export function commitBackendRecoveryComponentState({ evidence, client, run, readers = createAppOnlyEcsReaders(run, { assertDefinitionArn: assertBackendHealthRecoveryTaskArn }), isProtectedMainAncestor, writerContext } = {}) {
+  assertCompletedBackendRecoveryEvidence(evidence);
+  const state = client.read(); assert.ok(state, "Production component deployment state is not bootstrapped.");
+  const snapshot = readers.readLive();
+  assertBackendHealthRecoveryTaskArn(snapshot.definition.taskDefinitionArn);
+  assert.equal(snapshot.definition.family, BACKEND_HEALTH_RECOVERY.family);
+  assert.equal(snapshot.definition.status, "ACTIVE");
+  assert.equal(taskDefinitionFingerprint(snapshot.definition), evidence.candidateFingerprint, "Recovered task definition differs from authenticated candidate");
+  const containers = snapshot.definition.containerDefinitions.filter(({ name }) => name === BACKEND_HEALTH_RECOVERY.container);
+  assert.equal(containers.length, 1);
+  assert.equal(containers[0].image, `${BACKEND_HEALTH_RECOVERY.account}.dkr.ecr.${BACKEND_HEALTH_RECOVERY.region}.amazonaws.com/${BACKEND_HEALTH_RECOVERY.repository}@${evidence.recoveryImageDigest}`);
+  const live = captureBackendServiceSnapshot(snapshot, evidence.recoveryImageDigest);
   const sourceSha = readers.readBackendImageSource(live.backendDigest);
   assert.equal(sourceSha, evidence.imageReleaseSha); const component = authenticatedBackendRecoveryComponent(live, evidence); assert.equal(isProtectedMainAncestor(sourceSha), true, "Recovered backend source is not protected-main history."); assert.equal(isProtectedMainAncestor(evidence.sourceSha), true, "Recovery completion source is not protected-main history.");
-  const state = client.read(); assert.ok(state, "Production component deployment state is not bootstrapped.");
   return advanceProductionComponentDeploymentStateWithRetry({ client, current: state, lane: "EMERGENCY_RECOVERY", recovery: true,
     changes: { backend: component },
     authenticateRecovery: ({ next }) => { assert.equal(next.sourceSha, sourceSha); assert.equal(next.establishedThroughSha, evidence.sourceSha); }, ...writerContext });
