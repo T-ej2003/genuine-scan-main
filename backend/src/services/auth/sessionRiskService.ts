@@ -7,10 +7,29 @@ import {
 } from "../../rls-waves/session-b/b01/authenticatedSecurityRepository";
 import type { Prisma } from "@prisma/client";
 
-const parseIntEnv = (key: string, fallback: number) => {
-  const raw = Number(String(process.env[key] || "").trim());
-  const normalized = Math.floor(raw);
-  return Number.isFinite(raw) && normalized > 0 ? normalized : fallback;
+const STEP_UP_KEY = "AUTH_RISK_STEP_UP_THRESHOLD";
+const LEGACY_STEP_UP_KEY = "AUTH_RISK_STEPUP_THRESHOLD";
+const BLOCK_KEY = "AUTH_RISK_BLOCK_THRESHOLD";
+
+const readThreshold = (key: string, fallback: number) => {
+  const raw = process.env[key];
+  if (raw === undefined) return fallback;
+  if (!/^\d+$/.test(raw.trim())) throw new Error(`${key} must be an integer from 0 to 100`);
+  const value = Number(raw);
+  if (value < 0 || value > 100) throw new Error(`${key} must be an integer from 0 to 100`);
+  return value;
+};
+
+export const getAuthRiskThresholds = () => {
+  const canonical = process.env[STEP_UP_KEY];
+  const legacy = process.env[LEGACY_STEP_UP_KEY];
+  if (canonical !== undefined && legacy !== undefined && canonical.trim() !== legacy.trim()) {
+    throw new Error(`${STEP_UP_KEY} conflicts with legacy ${LEGACY_STEP_UP_KEY}`);
+  }
+  const stepUp = readThreshold(STEP_UP_KEY, legacy === undefined ? 55 : readThreshold(LEGACY_STEP_UP_KEY, 55));
+  const block = readThreshold(BLOCK_KEY, 85);
+  if (stepUp >= block) throw new Error(`${STEP_UP_KEY} must be lower than ${BLOCK_KEY}`);
+  return { stepUp, block };
 };
 
 const toRiskLevel = (score: number): AuthRiskLevel => {
@@ -96,15 +115,14 @@ export const assessAuthSessionRisk = async (input: {
   score = Math.max(0, Math.min(100, Math.round(score)));
   const riskLevel = toRiskLevel(score);
 
-  const stepupThreshold = parseIntEnv("AUTH_RISK_STEPUP_THRESHOLD", 55);
-  const blockThreshold = parseIntEnv("AUTH_RISK_BLOCK_THRESHOLD", 85);
+  const thresholds = getAuthRiskThresholds();
 
   return {
     score,
     riskLevel,
     reasons,
-    shouldStepUp: score >= stepupThreshold,
-    shouldBlock: score >= blockThreshold,
+    shouldStepUp: score >= thresholds.stepUp,
+    shouldBlock: score >= thresholds.block,
     actorState,
   };
 };

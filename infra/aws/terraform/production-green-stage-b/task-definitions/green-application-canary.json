@@ -21,6 +21,8 @@
       { "name": "RELEASE_GIT_SHA", "value": "{{RELEASE_SHA}}" },
       { "name": "MSCQR_FULL_RLS_SOURCE_CONTRACT_SHA256", "value": "{{SOURCE_CONTRACT_SHA256}}" },
       { "name": "MSCQR_FULL_RLS_MIGRATION_SET_DIGEST", "value": "{{MIGRATION_SET_DIGEST}}" },
+      { "name": "CLIENT_IP_TRUST_MODE", "value": "direct-loopback-canary" },
+      { "name": "MSCQR_PRODUCTION_GREEN_APPLICATION_CANARY", "value": "true" },
       { "name": "COOKIE_SECURE", "value": "true" },
       { "name": "RUN_BACKGROUND_WORKERS", "value": "false" },
       { "name": "OBJECT_STORAGE_BUCKET", "value": "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an" },

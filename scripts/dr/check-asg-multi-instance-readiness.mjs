@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import path from "node:path";
+import { validateAsgNetworkContract } from "./asg-network-contract.mjs";
 
 const root = process.cwd();
 const read = (repoPath) => fs.readFileSync(path.join(root, repoPath), "utf8");
@@ -29,6 +30,7 @@ const localCompose = requireFile("docker-compose.local.yml");
 const asgWebCompose = requireFile("docker-compose.asg-web.yml");
 const asgBootstrap = requireFile("scripts/dr/bootstrap-asg-web-node.sh");
 const nginxEntrypoint = requireFile("docker/nginx-entrypoint.sh");
+const rootNginxEntrypoint = requireFile("docker/nginx-root-entrypoint.sh");
 const asgComposeInterpolationCheck = requireFile("scripts/dr/check-asg-compose-interpolation.mjs");
 const asgSsmManifestRaw = requireFile("documents/ops/aws-asg-web-ssm-parameter-manifest.json");
 const asgInstancePolicyRaw = requireFile("ops/aws/iam/dr/asg-web-instance-profile-policy.template.json");
@@ -57,6 +59,18 @@ const capetownEnvExample = requireFile(".env.production.capetown.example");
 const nginxHttpConf = requireFile("nginx.conf");
 const nginxHttpsConf = requireFile("nginx.https.conf");
 const asgEvidenceCollector = requireFile("scripts/dr/collect-asg-health-evidence.sh");
+
+try {
+  validateAsgNetworkContract({
+    subnet: "172.30.0.0/29",
+    gateway: "172.30.0.1",
+    dynamicRange: "172.30.0.4/30",
+    frontendIp: "172.30.0.2",
+    trustedCidr: "172.30.0.2/32",
+  });
+} catch (error) {
+  failures.push(`ASG network contract: ${error.message}`);
+}
 
 let checklist = null;
 let asgSsmManifest = null;
@@ -230,8 +244,26 @@ requireMatch("docker-compose", compose, /RUN_DB_MIGRATIONS_ON_START:\s+\$\{RUN_D
 requireMatch("docker-compose", compose, /RUN_BACKGROUND_WORKERS:\s+"false"/, "web backend nodes must default background workers off.");
 requireMatch("docker-compose", compose, /RUN_BACKGROUND_WORKERS:\s+"true"/, "worker service must be explicitly separate from web.");
 requireMatch("docker-compose", compose, /worker:\n(?:.*\n){1,8}\s+profiles:\n\s+- worker/, "worker service must be behind the explicit worker profile.");
+requireMatch("docker-compose", compose, /CLIENT_IP_TRUST_MODE:\s+nginx/, "root production Compose must select the nginx-only trust contract.");
+requireMatch("docker-compose", compose, /CLIENT_IP_TRUSTED_NGINX_CIDRS:\s+172\.30\.10\.2\/32/, "root production Compose must trust only its pinned frontend nginx address.");
+requireMatch("docker-compose", compose, /frontend:\n[\s\S]*?ipv4_address:\s+172\.30\.10\.2/, "root production Compose must pin frontend nginx to the trusted address.");
+requireMatch("docker-compose", compose, /subnet:\s+172\.30\.10\.0\/28/, "root production Compose must use the bounded deterministic proxy network.");
+requireMatch("docker-compose", compose, /gateway:\s+172\.30\.10\.1/, "root production Compose must bind the Docker bridge gateway explicitly.");
+requireMatch("docker-compose", compose, /ip_range:\s+172\.30\.10\.8\/29/, "root production Compose must reserve the pinned frontend address outside dynamic allocation.");
+if (/CLIENT_IP_TRUSTED_[A-Z_]+:\s+(?:0\.0\.0\.0\/0|::\/0)/.test(compose)) failures.push("docker-compose.yml must not trust an all-address proxy CIDR.");
+requireMatch("docker-compose", compose, /entrypoint:\s+\["\/usr\/local\/bin\/nginx-root-entrypoint\.sh"\]/, "root frontend must select the root-only nginx forwarding contract.");
+requireMatch("docker-compose", compose, /\.\/docker\/nginx-root-entrypoint\.sh:\/usr\/local\/bin\/nginx-root-entrypoint\.sh:ro/, "root frontend must mount only the reviewed root nginx adapter.");
+requireMatch("root nginx adapter", rootNginxEntrypoint, /proxy_set_header X-Forwarded-For \$remote_addr;/, "must replace caller-supplied X-Forwarded-For with the direct client address.");
+requireMatch("root nginx adapter", rootNginxEntrypoint, /exec \/usr\/local\/bin\/nginx-entrypoint\.sh/, "must return control to the canonical nginx entrypoint.");
+for (const [label, source] of [["shared HTTP nginx", nginxHttpConf], ["shared HTTPS nginx", nginxHttpsConf]]) {
+  requireMatch(label, source, /proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;/, "must preserve and append the ASG CloudFront/ALB forwarding chain.");
+  if (/proxy_set_header X-Forwarded-For \$remote_addr;/.test(source)) failures.push(`${label} must not apply the root-only replacement policy.`);
+}
+if (/nginx-root-entrypoint/.test(asgWebCompose)) failures.push("ASG Compose must not consume the root-only nginx forwarding adapter.");
 requireMatch("asg web compose", asgWebCompose, /\bbackend:/, "ASG web mode must define backend.");
 requireMatch("asg web compose", asgWebCompose, /\bfrontend:/, "ASG web mode must define frontend.");
+requireMatch("asg web compose", asgWebCompose, /ip_range: \$\{ASG_APP_NETWORK_IP_RANGE:\?Set a reviewed ASG dynamic allocation range\}/, "ASG web mode must exclude the pinned frontend proxy from Docker dynamic allocation.");
+requireMatch("asg web compose", asgWebCompose, /gateway: \$\{ASG_APP_NETWORK_GATEWAY:\?Set a reviewed ASG application-network gateway\}/, "ASG web mode must bind the Docker bridge gateway from the reviewed network contract.");
 requireMatch("asg web compose", asgWebCompose, /RUN_BACKGROUND_WORKERS:\s+"false"/, "ASG web backend must force workers off.");
 requireMatch("asg web compose", asgWebCompose, /REDIS_URL:\s+\$\{REDIS_URL:\?Set shared regional REDIS_URL/, "ASG web mode must require shared regional Redis.");
 requireMatch("asg web compose", asgWebCompose, /REDIS_TLS:\s+\$\{REDIS_TLS:-true\}/, "ASG web mode must default Redis TLS on.");
@@ -565,7 +597,7 @@ if (asgSsmManifest) {
       ...Object.keys(section.forced || {}),
     ]);
   const rootRequired = new Set(asgSsmManifest.rootEnv?.requiredFromSsm || []);
-  for (const key of ["AWS_REGION", "OBJECT_STORAGE_BUCKET", "OBJECT_STORAGE_REGION", "REDIS_URL"]) {
+  for (const key of ["AWS_REGION", "OBJECT_STORAGE_BUCKET", "OBJECT_STORAGE_REGION", "REDIS_URL", "ASG_APP_NETWORK_SUBNET", "ASG_APP_NETWORK_GATEWAY", "ASG_APP_NETWORK_IP_RANGE", "ASG_FRONTEND_PROXY_IP"]) {
     if (!rootRequired.has(key)) failures.push(`ASG SSM manifest rootEnv.requiredFromSsm is missing ${key}.`);
   }
   const backendRequired = new Set(asgSsmManifest.backendEnv?.requiredFromSsm || []);
@@ -597,6 +629,9 @@ if (asgSsmManifest) {
     "PRINTER_SSE_SIGN_SECRET_CURRENT",
     "INCIDENT_HASH_SALT_CURRENT",
     "AUTH_MFA_ENCRYPTION_KEY",
+    "CLIENT_IP_TRUSTED_NGINX_CIDRS",
+    "CLIENT_IP_TRUSTED_ALB_CIDRS",
+    "CLIENT_IP_TRUSTED_CLOUDFRONT_CIDRS",
     "SMTP_HOST",
     "SMTP_USER",
     "SMTP_PASS",

@@ -15,7 +15,7 @@ const authRoutes = read("backend/src/routes/modules/authRoutes.ts");
 const routes = read("backend/src/routes/index.ts");
 
 assert.match(repository, /SELECT \* FROM app_rls\.prepare_invitation\(/);
-for (const boundAuthority of ["context.userId", "actorSessionId", "context.requestId", "context.purpose"]) {
+for (const boundAuthority of ["input.capability", "input.actorUserId", "actorSessionId", "input.requestId", "input.purpose"]) {
   assert.match(repository, new RegExp(boundAuthority.replace(".", "\\.")));
 }
 assert.match(repository, /unexpected projection/);
@@ -29,10 +29,11 @@ assert.match(preauth, /inviteId/);
 assert.match(preauth, /unexpected projection/);
 assert.doesNotMatch(preauth, /\$queryRawUnsafe|\bprisma\./);
 
-assert.match(service, /INVITE_DATABASE_BOUNDARY_REQUIRED/);
+assert.match(service, /databaseCapability:\s*string/);
+assert.match(service, /capability:\s*input\.databaseCapability/);
 assert.match(service, /INVITE_ACTOR_SESSION_REQUIRED/);
 assert.doesNotMatch(service, /createAuditLog|\.(?:user|invite|licensee|organization|manufacturerLicenseeLink)\.(?:find|create|update|delete|upsert)/);
-assert.ok(service.indexOf("databaseBoundary.run") < service.indexOf("sendAuthEmail({"));
+assert.ok(service.indexOf("prepareInvitation({") < service.indexOf("sendAuthEmail({"));
 
 assert.match(authController, /actorSessionId:\s*claims\.sessionId/);
 assert.match(authController, /requestId:\s*getRequestId\(req\)/);
@@ -41,7 +42,7 @@ assert.match(resendController, /isCanonicalAuthDenial/);
 assert.match(resendController, /clearAuthCookies\(res\)/);
 
 const recentMfa = middleware.slice(middleware.indexOf("export const requireRecentAdminMfa"));
-assert.match(recentMfa, /withCanonicalAuthClaims/);
+assert.match(recentMfa, /withDatabaseAuthenticatedSession/);
 assert.match(recentMfa, /requireRecentMfaSession/);
 assert.doesNotMatch(recentMfa, /req\.user\.mfaVerifiedAt|getAdminMfaStatus/);
 

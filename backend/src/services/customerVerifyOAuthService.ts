@@ -10,6 +10,7 @@ import {
   normalizeCustomerVerifyEmail,
 } from "./customerVerifyAuthService";
 import { getJwtSecret, randomOpaqueToken } from "../utils/security";
+import { resolveExternalProtocol } from "../utils/clientIp";
 
 export type CustomerOAuthProvider = "google";
 
@@ -73,8 +74,7 @@ const resolveApiBaseUrl = (req: Request) => {
   const origin = req.get("origin");
   if (origin) return normalizeBaseUrl(origin);
 
-  const forwardedProto = String(req.get("x-forwarded-proto") || "").trim();
-  const protocol = forwardedProto || req.protocol;
+  const protocol = resolveExternalProtocol(req);
   return `${protocol}://${req.get("host") || "localhost"}`;
 };
 
@@ -334,9 +334,7 @@ export const finishCustomerOAuthCallback = async (params: {
   }
 
   const callbackUrl = `${resolveApiBaseUrl(params.req)}/api/verify/auth/oauth/${params.provider}/callback`;
-  let profile: CustomerOAuthProfile;
-
-  profile = await exchangeGoogleCode({
+  const profile: CustomerOAuthProfile = await exchangeGoogleCode({
     config,
     code: params.code,
     callbackUrl,
