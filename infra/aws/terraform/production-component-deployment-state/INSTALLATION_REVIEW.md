@@ -1,5 +1,29 @@
 # Component installation boundary review — source only
 
+## Terraform isolation boundary checkpoint
+
+The selected local boundary is a digest-pinned official Node container with
+`--network=none`, read-only root, all capabilities dropped, no-new-privileges,
+non-root UID, bounded processes/memory/CPU, and ephemeral scratch tmpfs. Its only
+host mount is the newly assembled public source/package input directory, read-only;
+there are no credential, home, Keychain, Docker/control socket or project mounts.
+
+A real Docker runtime probe passed on this host: host AWS-profile/marker variables
+were absent; credential, Keychain and control-socket paths were absent; capability
+and no-new-privileges checks passed; source writes failed; scratch writes worked;
+metadata, host gateway and direct public network connections failed. No AWS request
+was performed. This tests the container boundary, **not yet Terraform integration**.
+
+The planned network path is a stdio TLS-byte relay to five fixed AWS endpoints.
+It does not terminate TLS, load credentials, execute commands or expose a host
+listening socket. Host-side validation rejects alternate services/ports, private,
+metadata and reserved DNS answers. The 34 offline transport/configuration tests
+pass. Exact Terraform 1.15.8 and AWS provider 6.65.0 archive digests were obtained
+from the official HashiCorp release checksums; the existing provider lock includes
+those platform ZIP digests. Input assembly, lock enforcement, the in-container
+agent and activation orchestration remain unfinished and must be validated before
+the unsafe local Terraform production route can be replaced and this branch pushed.
+
 ## Runtime readback correction
 
 ### Issuance propagation integration
