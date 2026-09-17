@@ -244,12 +244,18 @@ export async function executeNormalRelease({ plan, sourceSha, backend, frontend,
     await writeJournal({ status: "WHOLE_RELEASE_SMOKE_HEALTHY" });
   }
   catch (error) {
-    await writeJournal({ status: "FAILURE", error: error.message.slice(0, 512) });
-    if (error.frontendRollback?.attempted) await writeJournal({ status: error.frontendRollback.verified ? "FRONTEND_ROLLED_BACK" : "FRONTEND_ROLLBACK_UNVERIFIED" });
     const rollbackErrors = [];
+    const record = async (entry) => {
+      try { await writeJournal(entry); }
+      catch (journalError) { rollbackErrors.push({ component: "JOURNAL", error: journalError.message.slice(0, 512) }); }
+    };
+    await record({ status: "FAILURE", error: error.message.slice(0, 512) });
+    if (error.frontendRollback?.attempted) await record({ status: error.frontendRollback.verified ? "FRONTEND_ROLLED_BACK" : "FRONTEND_ROLLBACK_UNVERIFIED" });
     const rollback = async (component, value, operation) => {
-      try { await writeJournal({ status: `${component}_ROLLBACK_INTENT` }); await operation(value); await writeJournal({ status: `${component}_ROLLED_BACK` }); }
-      catch (rollbackError) { rollbackErrors.push({ component, error: rollbackError.message.slice(0, 512) }); try { await writeJournal({ status: `${component}_ROLLBACK_FAILED`, error: rollbackError.message.slice(0, 512) }); } catch (journalError) { rollbackErrors.push({ component: `${component}_JOURNAL`, error: journalError.message.slice(0, 512) }); } }
+      await record({ status: `${component}_ROLLBACK_INTENT` });
+      try { await operation(value); }
+      catch (rollbackError) { rollbackErrors.push({ component, error: rollbackError.message.slice(0, 512) }); await record({ status: `${component}_ROLLBACK_FAILED`, error: rollbackError.message.slice(0, 512) }); return; }
+      await record({ status: `${component}_ROLLED_BACK` });
     };
     if (plan.classification.frontend && result.frontend !== "UNCHANGED") await rollback("FRONTEND", result.frontend, frontend.rollback);
     if (plan.classification.backend && result.backend !== "UNCHANGED") await rollback("BACKEND", result.backend, backend.rollback);

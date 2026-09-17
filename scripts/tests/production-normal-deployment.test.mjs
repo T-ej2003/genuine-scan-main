@@ -222,6 +222,15 @@ test("combined release attempts backend rollback even when frontend rollback fai
   assert.deepEqual(events, ["frontend-rollback", "backend-rollback"]);
 });
 
+test("journal failure never prevents rollback of an already-mutated service", async () => {
+  const events = [];
+  const plan = buildNormalReleasePlan({ sourceSha, changedFiles: ["backend/src/services/batchService.ts", "src/App.tsx"], images: { backend: backendImage, frontend: frontendImage } });
+  const backend = { deploy: async () => ({ candidate: "backend:21" }), rollback: async () => events.push("backend-rollback") };
+  const frontend = { deploy: async () => { throw new Error("frontend failed"); }, rollback: async () => events.push("frontend-rollback") };
+  await assert.rejects(() => executeNormalRelease({ plan, sourceSha, backend, frontend, writeJournal: async ({ status }) => { if (status === "FAILURE") throw new Error("journal unavailable"); } }), /rollback failed after: frontend failed/);
+  assert.deepEqual(events, ["backend-rollback"]);
+});
+
 test("combined component transaction rolls every mutated service back before state commit and commits both only after smoke", async () => {
   const candidate = "d".repeat(40), prior = "b".repeat(40);
   const state = createProductionComponentDeploymentState({ components: {
