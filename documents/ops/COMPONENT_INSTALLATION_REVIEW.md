@@ -1,5 +1,53 @@
 # Component installation boundary review log — source only
 
+## Current pre-PR status
+
+The earlier sections below are chronological recovery/development evidence, not
+current operator instructions. In particular, their pending root-controller,
+local-Terraform, bootstrap and integration statements have been superseded.
+The supported flow is the component root README.
+
+The source implementation now contains the separately approved first-bootstrap
+transaction, fixed published broker, scoped installation/cleanup sessions,
+artifact-independent closure, isolated Terraform execution and exact saved-plan
+approval/reservation. The first-bootstrap administrative exception is intentionally
+not advertised as AWS-expiring root authority or automatic crash takeover: an
+interrupted administrative reservation is a fail-closed terminal state requiring
+separate reconciliation. Post-bootstrap controller takeover uses authenticated
+AWS session expiry and fresh approval, never lease age.
+
+The bounded final source review covered capability composition, fixed broker
+resource policies/configuration, bootstrap-only PassRole, credential sources,
+session/approval substitution, expiry/CAS recovery, immutable evidence, saved-plan
+binding, container/relay isolation and provider substitution. Reproduced defects
+were corrected before push: read-only inspection consuming mutation ownership,
+Docker proxy injection, and implicit Terraform retry configuration. No unresolved
+P0/P1/P2 finding remains in that bounded local review. This is not external review.
+
+Final local component validation includes all 599 focused/credential tests with
+the container runtime gate enabled, clean-source double package build, and actual
+pinned Terraform fmt/backend-disabled readonly init/validate. ESLint, workflow,
+document, fixture-secret, baseline-secret, branch-secret, security guardrails and
+RLS freshness checks pass. The security-scope script checks unstaged files only;
+all component source/tests were additionally linted explicitly. AWS read-only
+simulation could not authenticate the local release session: static policy tests
+pass, but live/effective permission simulation remains unproven. The exact
+`lambda:SourceFunctionArn` restriction remains intact.
+
+Final source capability pair counts are 79 broker, 28 Terraform, one each for
+installation/cleanup/authorization sessions, and 68 exceptional-bootstrap pairs.
+These replace the historical pre-split missing-capability count, not broaden the
+old release role. Identity-set digest:
+`95b1712a10c127205368f28cf474202bb7ccb9c700908baf1d72ed2ed1d1bdc4`.
+Package hashes are source-SHA dependent and must be rebuilt/authenticated from
+the eventual merged protected source; a local fixture hash is not production
+authorization. PR CI and exact-head external review are still required.
+
+Recommendation: keep future broker/identity changes separately governed rather
+than turning initial bootstrap into a reusable administrator. Production readiness
+still requires the separately authorized live bootstrap and readback; this PR
+does not perform or certify those operations.
+
 ## Terraform isolation boundary checkpoint
 
 The selected local boundary is a digest-pinned official Node container with
