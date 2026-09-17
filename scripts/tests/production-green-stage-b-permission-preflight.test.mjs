@@ -500,8 +500,9 @@ test("Stage A live-evidence preflight covers the reviewed topology and regional 
   const expected = [
     ["collect-stage-a-live-alb", "elasticloadbalancing:DescribeLoadBalancers"], ["collect-stage-a-live-cloudfront-distribution", "cloudfront:ListDistributions"], ["collect-stage-a-live-cloudfront-distribution-config", "cloudfront:GetDistributionConfig"], ["collect-stage-a-live-route53-production-aliases", "route53:ListResourceRecordSets"], ["collect-stage-a-live-cloudfront-prefix-list-entries", "ec2:GetManagedPrefixListEntries"], ["collect-stage-a-live-cloudfront-prefix-list", "ec2:DescribeManagedPrefixLists"], ["collect-stage-a-live-cluster", "ecs:DescribeClusters"], ["collect-stage-a-live-database", "rds:DescribeDBInstances"], ["collect-stage-a-live-route-tables", "ec2:DescribeRouteTables"], ["collect-stage-a-live-security-groups", "ec2:DescribeSecurityGroups"], ["collect-stage-a-live-subnets", "ec2:DescribeSubnets"], ["collect-stage-a-live-target-group", "elasticloadbalancing:DescribeTargetGroups"],
   ];
+  expected.sort(([left], [right]) => left.localeCompare(right));
   const derived = deriveRequiredEvaluations(plan, manifest).required.filter((item) => item.manifestId.startsWith("collect-stage-a-live-"));
-  assert.deepEqual(derived.map((item) => [item.manifestId, item.action, item.resource, item.context]), expected.map(([id, action]) => [id, action, "*", derived.find((item) => item.manifestId === id).context ]));
+  assert.deepEqual(derived.map((item) => [item.manifestId, item.action, item.resource, item.context]).sort(([left], [right]) => left.localeCompare(right)), expected.map(([id, action]) => [id, action, "*", derived.find((item) => item.manifestId === id).context ]));
   const missing = structuredClone(manifest); missing.required = missing.required.filter((entry) => entry.id !== "collect-stage-a-live-database");
   assert.throws(() => validateManifest(missing), /live-evidence permission mapping/);
 });
@@ -517,17 +518,19 @@ test("Stage A live-evidence simulations fail closed for denied or wrong-region r
 test("Stage A checker source-role policy refresh is an exact preflight capability", () => {
   const sourceRole = "arn:aws:iam::368992683803:role/mscqr-production-independent-checker";
   const targetRole = "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker";
+  const driftRole = "arn:aws:iam::368992683803:role/mscqr-production-cloudfront-proxy-drift-readonly";
   const entry = manifest.required.find(({ id }) => id === "refresh-stage-a-checker-inline-policy");
   assert.deepEqual(entry, {
     id: "refresh-stage-a-checker-inline-policy",
     phase: "refresh",
     action: "iam:GetRolePolicy",
-    resources: [sourceRole, targetRole],
+    resources: [sourceRole, targetRole, driftRole],
     context: [],
     evidence: "locked hashicorp/aws provider refresh of the Stage A checker policy and exact source-role checker role-chain policy",
   });
   const evaluations = deriveRequiredEvaluations(plan, manifest).required.filter(({ manifestId }) => manifestId === entry.id);
-  assert.deepEqual(evaluations.map(({ action, resource }) => [action, resource]), [
+  assert.deepEqual(evaluations.map(({ action, resource }) => [action, resource]).sort(([, left], [, right]) => left.localeCompare(right)), [
+    ["iam:GetRolePolicy", driftRole],
     ["iam:GetRolePolicy", sourceRole],
     ["iam:GetRolePolicy", targetRole],
   ]);
@@ -654,7 +657,7 @@ test("Stage A live-evidence policy source contains no mutation permission", () =
   const policy = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json", "utf8"));
   const statement = policy.Statement.find((item) => item.Sid === "ReadStageALivePrerequisites");
   assert.deepEqual(statement, { Sid: "ReadStageALivePrerequisites", Effect: "Allow", Action: ["ec2:DescribeSubnets", "ec2:DescribeRouteTables", "ec2:DescribeSecurityGroups", "ecs:DescribeClusters", "rds:DescribeDBInstances", "ec2:DescribeManagedPrefixLists", "ec2:GetManagedPrefixListEntries", "elasticloadbalancing:DescribeLoadBalancers", "elasticloadbalancing:DescribeTargetGroups"], Resource: "*", Condition: { StringEquals: { "aws:RequestedRegion": "eu-west-2" } } });
-  assert.deepEqual(policy.Statement.find((item) => item.Sid === "ReadStageBCloudFrontOriginTopology"), { Sid: "ReadStageBCloudFrontOriginTopology", Effect: "Allow", Action: "cloudfront:ListDistributions", Resource: "*" });
+  assert.deepEqual(policy.Statement.find((item) => item.Sid === "ReadStageBCloudFrontOriginTopology"), { Sid: "ReadStageBCloudFrontOriginTopology", Effect: "Allow", Action: ["cloudfront:ListDistributions", "cloudfront:GetDistributionConfig"], Resource: "*" });
   for (const action of ["ec2:CreateSubnet", "ecs:UpdateService", "rds:ModifyDBInstance"]) {
     const evaluation = { id: `unrelated-${action}`, action, resource: "*", context: [{ key: "aws:RequestedRegion", type: "string", values: ["eu-west-2"] }], expectedDecision: "implicitDeny", expectedMissingContextValues: [] };
     Object.defineProperty(evaluation, "forbidden", { value: true });
@@ -860,7 +863,7 @@ test("production-shaped plan requires and binds the exact account and region var
   assert.throws(() => run({ ...productionPlan, variables: { ...productionPlan.variables, aws_region: { value: "us-east-1" } } }), /Plan account or region is wrong/);
   const report = runPermissionPreflight({ reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan: productionPlan, planBytes: bytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test-session", simulate: allowRequiredDenyForbidden, cloudTrail: clearCloudTrail });
   assert.equal(report.status, "valid");
-  assert.equal(report.requiredEvaluations.length, 263);
+  assert.equal(report.requiredEvaluations.length, 269);
   assert.equal(report.forbiddenEvaluations.length, 38);
   for (const evaluation of report.requiredEvaluations) {
     for (const context of evaluation.context.filter(({ key }) => key === "aws:RequestedRegion")) assert.deepEqual(context.values, ["eu-west-2"]);

@@ -27,6 +27,6 @@ export function verifyProductionCloudFrontProxyDrift({ run } = {}) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const run = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER });
+  const run = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_PROXY_DRIFT_READONLY });
   console.log(JSON.stringify(verifyProductionCloudFrontProxyDrift({ run })));
 }

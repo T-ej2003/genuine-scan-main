@@ -439,6 +439,8 @@ export function renderTfvars(values) {
     `backend_client_ip_trust_mode = ${quote(values.backend_client_ip_trust_mode)}`,
     `backend_client_ip_trusted_alb_cidrs = ${quote(values.backend_client_ip_trusted_alb_cidrs)}`,
     `backend_client_ip_trusted_cloudfront_cidrs = ${quote(values.backend_client_ip_trusted_cloudfront_cidrs)}`,
+    `backend_client_ip_cloudfront_prefix_list_id = ${quote(values.backend_client_ip_cloudfront_prefix_list_id)}`,
+    `backend_client_ip_cloudfront_prefix_list_version = ${quote(values.backend_client_ip_cloudfront_prefix_list_version)}`,
     `backend_image = ${quote(values.backend_image)}`,
     `worker_image = ${quote(values.worker_image)}`,
     `executor_image = ${quote(values.executor_image)}`,

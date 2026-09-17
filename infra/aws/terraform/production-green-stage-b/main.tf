@@ -58,6 +58,10 @@ locals {
     ),
     "{{BACKEND_CLIENT_IP_TRUSTED_CLOUDFRONT_CIDRS}", var.backend_client_ip_trusted_cloudfront_cidrs,
   )
+  backend_template_proxy_metadata = replace(
+    replace(local.backend_template_proxy, "{{BACKEND_CLIENT_IP_CLOUDFRONT_PREFIX_LIST_ID}}", var.backend_client_ip_cloudfront_prefix_list_id),
+    "{{BACKEND_CLIENT_IP_CLOUDFRONT_PREFIX_LIST_VERSION}}", var.backend_client_ip_cloudfront_prefix_list_version,
+  )
   rendered_candidates = {
     backend          = replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(local.backend_template_proxy_metadata, "{{BACKEND_IMAGE}}", var.backend_image), "{{RELEASE_SHA}}", var.image_release_sha), "{{BACKEND_LOG_GROUP}}", local.logs.backend), "{{JWT_SECRET_CURRENT}}", var.production_rotation_secret_value_from.jwt_current), "{{JWT_SECRET_PREVIOUS}}", var.production_rotation_secret_value_from.jwt_previous), "{{QR_SIGN_PRIVATE_KEY_CURRENT}}", var.production_rotation_secret_value_from.qr_private_current), "{{QR_SIGN_PUBLIC_KEY_CURRENT}}", var.production_rotation_secret_value_from.qr_public_current), "{{QR_SIGN_ACTIVE_KEY_VERSION}}", var.production_rotation_secret_value_from.qr_current_version), "{{QR_SIGN_PUBLIC_KEY_PREVIOUS}}", var.production_rotation_secret_value_from.qr_public_previous), "{{QR_SIGN_PREVIOUS_KEY_VERSION}}", var.production_rotation_secret_value_from.qr_previous_version), "{{ARTIFACT_SIGN_PRIVATE_KEY_CURRENT}}", var.production_rotation_secret_value_from.artifact_private_current), "{{ARTIFACT_SIGN_PUBLIC_KEY_CURRENT}}", var.production_rotation_secret_value_from.artifact_public_current), "{{ARTIFACT_SIGN_ACTIVE_KEY_VERSION}}", var.production_rotation_secret_value_from.artifact_active_version), "{{ARTIFACT_SIGN_PUBLIC_KEYS_JSON}}", var.production_rotation_secret_value_from.artifact_public_keys_json),
     worker           = replace(replace(replace(file("${path.module}/task-definitions/green-worker-candidate.json"), "{{WORKER_IMAGE}}", var.worker_image), "{{RELEASE_SHA}}", var.image_release_sha), "{{WORKER_LOG_GROUP}}", local.logs.worker)

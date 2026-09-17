@@ -116,7 +116,9 @@ Both wrapper modes run `terraform -chdir=infra/aws/terraform/production-green-st
 Stage-A binds the Route53 A/AAAA aliases, deployed CloudFront distribution/config ETag,
 API behavior target origin, ALB origin, and managed origin-facing prefix-list ID, version,
 and canonical CIDRs. Stage-B rejects a stale binding before candidate registration. The
-read-only `verify-production-cloudfront-proxy-drift.yml` workflow rechecks the live
-backend task definition and AWS authority every 15 minutes; drift requires fresh Stage-A
-prerequisites followed by the existing governed Stage-B replacement and activation path.
-It never changes ECS, Route53, or AWS configuration.
+read-only `verify-production-cloudfront-proxy-drift.yml` workflow is scheduled four
+times per hour and rechecks the live backend task definition against AWS authority.
+GitHub Actions does not guarantee a maximum scheduling latency, so this cadence is not
+a 15-minute maximum stale-window guarantee. Drift requires fresh Stage-A prerequisites
+followed by the existing governed Stage-B replacement and activation path. It never
+changes ECS, Route53, or AWS configuration.

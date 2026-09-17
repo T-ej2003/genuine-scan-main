@@ -265,7 +265,7 @@ export function collectStageBBackendProxyTrust({ vpcId, run } = {}) {
   const prefixLists = awsJson(["ec2", "describe-managed-prefix-lists", "--filters", `Name=prefix-list-name,Values=${CLOUDFRONT_ORIGIN_PREFIX_LIST_NAME}`, "--region", STAGE_B.region, "--output", "json", "--no-cli-pager"], run).ManagedPrefixLists || [];
   if (prefixLists.length !== 1 || prefixLists[0].State !== "create-complete" || !prefixLists[0].PrefixListId || !Number.isInteger(prefixLists[0].Version)) throw new Error("Stage B backend CloudFront prefix-list evidence is unavailable.");
   const prefixList = prefixLists[0];
-  const entries = awsJson(["ec2", "get-managed-prefix-list-entries", "--prefix-list-id", prefixList.PrefixListId, "--region", STAGE_B.region, "--output", "json", "--no-cli-pager"], run).Entries || [];
+  const entries = awsJson(["ec2", "get-managed-prefix-list-entries", "--prefix-list-id", prefixList.PrefixListId, "--target-version", String(prefixList.Version), "--region", STAGE_B.region, "--output", "json", "--no-cli-pager"], run).Entries || [];
   const cloudFrontCidrs = canonicalIpv4Cidrs(entries.map(({ Cidr }) => Cidr), "Stage B backend CloudFront origin CIDRs");
   const distributions = awsJson(["cloudfront", "list-distributions", "--output", "json", "--no-cli-pager"], run).DistributionList?.Items || [];
   const matches = distributions.filter((distribution) => distribution.Enabled === true && distribution.Status === "Deployed" && exactAliases(distribution.Aliases?.Items) && typeof distribution.Id === "string" && typeof distribution.DomainName === "string");

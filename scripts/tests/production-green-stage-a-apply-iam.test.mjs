@@ -36,6 +36,7 @@ const production = Object.freeze({
   brokerLogArn: "arn:aws:logs:eu-west-2:368992683803:log-group:/aws/lambda/mscqr-production-rls-approval-broker",
   executorRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task",
   brokerRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker",
+  driftRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-cloudfront-proxy-drift-readonly",
 });
 
 const checkerPolicyRefresh = refreshContract.resourceTypes.find(({ type }) => type === "aws_iam_role_policy");
@@ -134,12 +135,22 @@ test("the independent Stage A resource graph has a reviewed refresh contract", (
       }
     }
   }
-  assert.deepEqual(checkerPolicyRefresh.addresses, ["aws_iam_role_policy.checker", "aws_iam_role_policy.checker_assume_target"]);
+  assert.deepEqual(checkerPolicyRefresh.addresses, ["aws_iam_role_policy.checker", "aws_iam_role_policy.checker_assume_target", "aws_iam_role_policy.cloudfront_proxy_drift_readonly"]);
   assert.deepEqual(checkerPolicyRefresh.readActions, [{
     action: "iam:GetRolePolicy",
-    resources: [production.checkerSourceRoleArn, production.checkerRoleArn],
+    resources: [production.checkerSourceRoleArn, production.checkerRoleArn, production.driftRoleArn],
     sourceOfProof: "provider iam/role_policy.go",
   }]);
+});
+
+test("Stage A can create only the exact untagged read-only drift role and policy", () => {
+  const values = context();
+  assert.equal(allows({ action: "iam:CreateRole", resource: production.driftRoleArn, values }), true);
+  assert.equal(allows({ action: "iam:TagRole", resource: production.driftRoleArn, values }), false);
+  assert.equal(allows({ action: "iam:PutRolePolicy", resource: production.driftRoleArn, values: context() }), true);
+  assert.equal(allows({ action: "iam:CreateRole", resource: "arn:aws:iam::368992683803:role/unrelated", values }), false);
+  assert.equal(allows({ action: "iam:DeleteRole", resource: production.driftRoleArn, values }), false);
+  assert.equal(allows({ action: "iam:DeleteRolePolicy", resource: production.driftRoleArn, values }), false);
 });
 
 test("the S3 backend contract covers exact state and lockfile lifecycle only", () => {

@@ -349,6 +349,7 @@ test("every direct production AWS root declares its credential provenance before
     ["scripts/aws/authorize-production-stage-a-production-artifacts-continuation-rebind.mjs", "GITHUB_OIDC_RELEASE_DEPLOYER"],
     ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "NAMED_PROFILE"],
     ["scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "NAMED_PROFILE"],
+    ["scripts/aws/verify-production-cloudfront-proxy-drift.mjs", "GITHUB_OIDC_PROXY_DRIFT_READONLY"],
   ];
   for (const [file, source] of roots) assertLiteralIncludes(fs.readFileSync(file, "utf8"), `PRODUCTION_AWS_CREDENTIAL_SOURCE.${source}`, file);
 });

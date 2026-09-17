@@ -27,7 +27,7 @@ const run = (args) => {
   if (args[1] === "describe-load-balancers") return JSON.stringify({ LoadBalancers: [{ LoadBalancerArn: "arn:aws:elasticloadbalancing:eu-west-2:368992683803:loadbalancer/app/mscqr-alb-euw2/example", DNSName: "mscqr-alb-euw2.example.elb.amazonaws.com", Type: "application", Scheme: "internet-facing", VpcId: "vpc-0123456789abcdef0", AvailabilityZones: [{ SubnetId: "subnet-0alb0000000000001" }, { SubnetId: "subnet-0alb0000000000002" }] }] });
   if (args[1] === "describe-target-groups") return JSON.stringify({ TargetGroups: [{ TargetGroupArn: "arn:aws:elasticloadbalancing:eu-west-2:368992683803:targetgroup/mscqr-backend-tg-euw2-v2/example", VpcId: "vpc-0123456789abcdef0", TargetType: "ip", Protocol: "HTTP", Port: 4000, HealthCheckPath: "/health/live", LoadBalancerArns: ["arn:aws:elasticloadbalancing:eu-west-2:368992683803:loadbalancer/app/mscqr-alb-euw2/example"] }] });
   if (args[1] === "describe-managed-prefix-lists") return JSON.stringify({ ManagedPrefixLists: [{ PrefixListId: "pl-0123456789abcdef0", PrefixListName: "com.amazonaws.global.cloudfront.origin-facing", State: "create-complete", Version: 7 }] });
-  if (args[1] === "get-managed-prefix-list-entries") return JSON.stringify({ Entries: [{ Cidr: "198.51.100.0/24" }] });
+  if (args[1] === "get-managed-prefix-list-entries") { assert.equal(args[args.indexOf("--target-version") + 1], "7"); return JSON.stringify({ Entries: [{ Cidr: "198.51.100.0/24" }] }); }
   if (args[0] === "cloudfront" && args[1] === "list-distributions") return JSON.stringify({ DistributionList: { Items: [{ Id: "E123", DomainName: "d123.cloudfront.net", Enabled: true, Status: "Deployed", Aliases: { Items: ["mscqr.com", "www.mscqr.com"] } }] } });
   if (args[0] === "cloudfront" && args[1] === "get-distribution-config") return JSON.stringify({ ETag: "E123ABC", DistributionConfig: { Enabled: true, Aliases: { Items: ["mscqr.com", "www.mscqr.com"] }, Origins: { Items: [{ Id: "backend", DomainName: "mscqr-alb-euw2.example.elb.amazonaws.com" }] }, OriginGroups: { Quantity: 0 }, DefaultCacheBehavior: { TargetOriginId: "backend" }, CacheBehaviors: { Quantity: 0 } } });
   if (args[0] === "route53" && args[1] === "list-resource-record-sets") return JSON.stringify({ ResourceRecordSets: ["mscqr.com", "www.mscqr.com"].flatMap((Name) => ["A", "AAAA"].map((Type) => ({ Name: `${Name}.`, Type, AliasTarget: { DNSName: "d123.cloudfront.net.", HostedZoneId: "Z2FDTNDATAQYW2", EvaluateTargetHealth: false } }))) });
@@ -248,6 +248,10 @@ test("each production subnet resolves independently", () => {
 test("Stage A backend proxy collector rejects direct DNS, unused ALB origins, and prefix-list drift", () => {
   const trust = collectStageBBackendProxyTrust({ vpcId: "vpc-0123456789abcdef0", run });
   const replace = (needle, replacement) => (args) => {
+    if (needle === "prefix" && args[0] === "ec2" && args[1] === "get-managed-prefix-list-entries") {
+      assert.equal(args[args.indexOf("--target-version") + 1], "8");
+      return JSON.stringify({ Entries: [{ Cidr: "198.51.100.0/24" }] });
+    }
     const value = run(args);
     if (args[0] === "route53" && args[1] === "list-resource-record-sets" && needle === "route53") {
       const parsed = JSON.parse(value); parsed.ResourceRecordSets[0].AliasTarget.DNSName = "mscqr-alb-euw2.example.elb.amazonaws.com."; return JSON.stringify(parsed);

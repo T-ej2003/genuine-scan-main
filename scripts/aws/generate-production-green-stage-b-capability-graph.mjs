@@ -841,13 +841,13 @@ export function buildStageBDeploymentCapabilityGraph() {
   };
   const stageABackendPolicySid = Object.freeze({
     "stage-a-artifacts-reconciliation-terraform-read-bucket-location": "ReadExactStageABackendBucketLocation",
-    "stage-a-artifacts-reconciliation-release-read-raw-state": "ReadExactStageAStateForHandoff",
-    "stage-a-artifacts-reconciliation-terraform-read-state": "ReadExactStageAStateForHandoff",
-    "stage-a-artifacts-recovery-release-read-raw-state": "ReadExactStageAStateForHandoff",
-    "stage-a-artifacts-reconciliation-terraform-write-state": "WriteExactStageAState",
-    "stage-a-artifacts-reconciliation-terraform-read-lock": "ReadExactStageALock",
-    "stage-a-artifacts-recovery-release-lock-acquire": "WriteExactStageALock",
-    "stage-a-artifacts-recovery-release-lock-release": "ReleaseExactStageALock",
+    "stage-a-artifacts-reconciliation-release-read-raw-state": "ReadWriteExactStageAState",
+    "stage-a-artifacts-reconciliation-terraform-read-state": "ReadWriteExactStageAState",
+    "stage-a-artifacts-recovery-release-read-raw-state": "ReadWriteExactStageAState",
+    "stage-a-artifacts-reconciliation-terraform-write-state": "ReadWriteExactStageAState",
+    "stage-a-artifacts-reconciliation-terraform-read-lock": "ManageExactStageALock",
+    "stage-a-artifacts-recovery-release-lock-acquire": "ManageExactStageALock",
+    "stage-a-artifacts-recovery-release-lock-release": "ManageExactStageALock",
   });
   const stageAProductionArtifactsPolicySid = Object.freeze({
     "initial-activation-policy-reconciliation-root-read-reservation": "AllowRootOperatorReadInitialActivationPolicyReconciliationReservations",
@@ -979,18 +979,18 @@ export function assertStageBDeploymentCapabilityGraph(graph = readJson(CAPABILIT
   const rootSigning = graph.capabilities.find(({ id }) => id === "stage-a-artifacts-recovery-root-sign");
   if (!rootSigning || rootSigning.phase !== "stage-a-production-artifacts-policy-recovery" || rootSigning.identity !== "ROOT_OPERATOR" || rootSigning.sourceFile !== "scripts/aws/production-root-attestation-signer.mjs" || rootSigning.action !== "kms:Sign" || rootSigning.mutation !== true || JSON.stringify(rootSigning.resources) !== JSON.stringify([ROOT_ATTESTATION_KEY_ALIAS_ARN])) throw new Error("Stage-A root signing capability boundary is not exact.");
   const rawStateRead = graph.capabilities.find(({ id }) => id === "stage-a-artifacts-recovery-release-read-raw-state");
-  if (!rawStateRead || rawStateRead.phase !== "stage-a-production-artifacts-policy-recovery" || rawStateRead.identity !== "RELEASE_DEPLOYER" || rawStateRead.executor !== "aws-cli" || rawStateRead.sourceFile !== "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs" || rawStateRead.action !== "s3:GetObject" || JSON.stringify(rawStateRead.resources) !== JSON.stringify([stageATerraformStateArn]) || rawStateRead.mutation !== false || rawStateRead.policy?.sourceFile !== stageAReleaseS3ContractPath || rawStateRead.policy?.sid !== "ReadExactStageAStateForHandoff") throw new Error("Stage-A recovery raw-state read capability boundary is not exact.");
+  if (!rawStateRead || rawStateRead.phase !== "stage-a-production-artifacts-policy-recovery" || rawStateRead.identity !== "RELEASE_DEPLOYER" || rawStateRead.executor !== "aws-cli" || rawStateRead.sourceFile !== "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs" || rawStateRead.action !== "s3:GetObject" || JSON.stringify(rawStateRead.resources) !== JSON.stringify([stageATerraformStateArn]) || rawStateRead.mutation !== false || rawStateRead.policy?.sourceFile !== stageAReleaseS3ContractPath || rawStateRead.policy?.sid !== "ReadWriteExactStageAState") throw new Error("Stage-A recovery raw-state read capability boundary is not exact.");
   const reconciliationRawStateRead = graph.capabilities.find(({ id }) => id === "stage-a-artifacts-reconciliation-release-read-raw-state");
-  if (!reconciliationRawStateRead || reconciliationRawStateRead.phase !== "stage-a-production-artifacts-state-reconciliation" || reconciliationRawStateRead.identity !== "RELEASE_DEPLOYER" || reconciliationRawStateRead.executor !== "aws-cli" || reconciliationRawStateRead.sourceFile !== "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs" || reconciliationRawStateRead.action !== "s3:GetObject" || JSON.stringify(reconciliationRawStateRead.resources) !== JSON.stringify([stageATerraformStateArn]) || reconciliationRawStateRead.mutation !== false || reconciliationRawStateRead.policy?.sourceFile !== stageAReleaseS3ContractPath || reconciliationRawStateRead.policy?.sid !== "ReadExactStageAStateForHandoff") throw new Error("Stage-A reconciliation raw-state read capability boundary is not exact.");
+  if (!reconciliationRawStateRead || reconciliationRawStateRead.phase !== "stage-a-production-artifacts-state-reconciliation" || reconciliationRawStateRead.identity !== "RELEASE_DEPLOYER" || reconciliationRawStateRead.executor !== "aws-cli" || reconciliationRawStateRead.sourceFile !== "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs" || reconciliationRawStateRead.action !== "s3:GetObject" || JSON.stringify(reconciliationRawStateRead.resources) !== JSON.stringify([stageATerraformStateArn]) || reconciliationRawStateRead.mutation !== false || reconciliationRawStateRead.policy?.sourceFile !== stageAReleaseS3ContractPath || reconciliationRawStateRead.policy?.sid !== "ReadWriteExactStageAState") throw new Error("Stage-A reconciliation raw-state read capability boundary is not exact.");
   for (const [id, action] of [["stage-a-artifacts-recovery-release-lock-acquire", "s3:PutObject"], ["stage-a-artifacts-recovery-release-lock-release", "s3:DeleteObject"]]) {
     const capability = graph.capabilities.find(({ id: candidate }) => candidate === id);
     if (!capability || capability.phase !== "stage-a-production-artifacts-policy-recovery" || capability.identity !== "RELEASE_DEPLOYER" || capability.sourceFile !== "scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs" || capability.action !== action || JSON.stringify(capability.resources) !== JSON.stringify([STAGE_A_TERRAFORM_LOCK_ARN]) || capability.mutation !== true) throw new Error("Stage-A recovery lock capability boundary is not exact.");
   }
   for (const [id, action, resources, mutation, sid] of [
     ["stage-a-artifacts-reconciliation-terraform-read-bucket-location", "s3:GetBucketLocation", [STAGE_B_TERRAFORM_BACKEND.bucketArn], false, "ReadExactStageABackendBucketLocation"],
-    ["stage-a-artifacts-reconciliation-terraform-read-state", "s3:GetObject", [stageATerraformStateArn], false, "ReadExactStageAStateForHandoff"],
-    ["stage-a-artifacts-reconciliation-terraform-write-state", "s3:PutObject", [stageATerraformStateArn], true, "WriteExactStageAState"],
-    ["stage-a-artifacts-reconciliation-terraform-read-lock", "s3:GetObject", [STAGE_A_TERRAFORM_LOCK_ARN], false, "ReadExactStageALock"],
+    ["stage-a-artifacts-reconciliation-terraform-read-state", "s3:GetObject", [stageATerraformStateArn], false, "ReadWriteExactStageAState"],
+    ["stage-a-artifacts-reconciliation-terraform-write-state", "s3:PutObject", [stageATerraformStateArn], true, "ReadWriteExactStageAState"],
+    ["stage-a-artifacts-reconciliation-terraform-read-lock", "s3:GetObject", [STAGE_A_TERRAFORM_LOCK_ARN], false, "ManageExactStageALock"],
   ]) {
     const capability = graph.capabilities.find(({ id: candidate }) => candidate === id);
     if (!capability || capability.phase !== "stage-a-production-artifacts-state-reconciliation" || capability.identity !== "RELEASE_DEPLOYER" || capability.executor !== "terraform" || capability.action !== action || JSON.stringify(capability.resources) !== JSON.stringify(resources) || capability.mutation !== mutation || capability.policy?.sourceFile !== stageAReleaseS3ContractPath || capability.policy?.sid !== sid) throw new Error("Stage-A reconciliation Terraform backend capability boundary is not exact.");

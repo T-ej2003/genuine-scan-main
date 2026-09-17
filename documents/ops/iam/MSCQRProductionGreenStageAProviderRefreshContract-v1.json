@@ -96,18 +96,18 @@
     },
     {
       "type": "aws_iam_role",
-      "addresses": ["aws_iam_role.checker", "aws_iam_role.executor", "aws_iam_role.broker"],
+      "addresses": ["aws_iam_role.checker", "aws_iam_role.executor", "aws_iam_role.broker", "aws_iam_role.cloudfront_proxy_drift_readonly"],
       "readActions": [
-        { "action": "iam:GetRole", "resources": ["arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker", "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task", "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker"], "sourceOfProof": "provider iam/role.go" },
-        { "action": "iam:ListAttachedRolePolicies", "resources": ["arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker", "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task", "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker"], "sourceOfProof": "provider iam/role.go" },
-        { "action": "iam:ListRolePolicies", "resources": ["arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker", "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task", "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker"], "sourceOfProof": "provider iam/role.go" }
+        { "action": "iam:GetRole", "resources": ["arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker", "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task", "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker", "arn:aws:iam::368992683803:role/mscqr-production-cloudfront-proxy-drift-readonly"], "sourceOfProof": "provider iam/role.go" },
+        { "action": "iam:ListAttachedRolePolicies", "resources": ["arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker", "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task", "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker", "arn:aws:iam::368992683803:role/mscqr-production-cloudfront-proxy-drift-readonly"], "sourceOfProof": "provider iam/role.go" },
+        { "action": "iam:ListRolePolicies", "resources": ["arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker", "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task", "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker", "arn:aws:iam::368992683803:role/mscqr-production-cloudfront-proxy-drift-readonly"], "sourceOfProof": "provider iam/role.go" }
       ]
     },
     {
       "type": "aws_iam_role_policy",
-      "addresses": ["aws_iam_role_policy.checker", "aws_iam_role_policy.checker_assume_target"],
+      "addresses": ["aws_iam_role_policy.checker", "aws_iam_role_policy.checker_assume_target", "aws_iam_role_policy.cloudfront_proxy_drift_readonly"],
       "readActions": [
-        { "action": "iam:GetRolePolicy", "resources": ["arn:aws:iam::368992683803:role/mscqr-production-independent-checker", "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker"], "sourceOfProof": "provider iam/role_policy.go" }
+        { "action": "iam:GetRolePolicy", "resources": ["arn:aws:iam::368992683803:role/mscqr-production-independent-checker", "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker", "arn:aws:iam::368992683803:role/mscqr-production-cloudfront-proxy-drift-readonly"], "sourceOfProof": "provider iam/role_policy.go" }
       ]
     },
     {

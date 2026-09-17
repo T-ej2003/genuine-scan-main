@@ -546,7 +546,8 @@
       "phase": "refresh",
       "action": "iam:GetRole",
       "resources": [
-        "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker"
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker",
+        "arn:aws:iam::368992683803:role/mscqr-production-cloudfront-proxy-drift-readonly"
       ],
       "context": [],
       "evidence": "locked hashicorp/aws 6.56.0 iam/role.go refresh of Stage A provider-managed roles"
@@ -556,7 +557,8 @@
       "phase": "refresh",
       "action": "iam:ListAttachedRolePolicies",
       "resources": [
-        "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker"
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker",
+        "arn:aws:iam::368992683803:role/mscqr-production-cloudfront-proxy-drift-readonly"
       ],
       "context": [],
       "evidence": "locked hashicorp/aws 6.56.0 iam/role.go attached-policy refresh of Stage A provider-managed roles"
@@ -566,7 +568,8 @@
       "phase": "refresh",
       "action": "iam:ListRolePolicies",
       "resources": [
-        "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker"
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker",
+        "arn:aws:iam::368992683803:role/mscqr-production-cloudfront-proxy-drift-readonly"
       ],
       "context": [],
       "evidence": "locked hashicorp/aws 6.56.0 iam/role.go inline-policy list refresh of Stage A provider-managed roles"
@@ -1101,7 +1104,8 @@
       "action": "iam:GetRolePolicy",
       "resources": [
         "arn:aws:iam::368992683803:role/mscqr-production-independent-checker",
-        "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker"
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker",
+        "arn:aws:iam::368992683803:role/mscqr-production-cloudfront-proxy-drift-readonly"
       ],
       "context": [],
       "evidence": "locked hashicorp/aws provider refresh of the Stage A checker policy and exact source-role checker role-chain policy"

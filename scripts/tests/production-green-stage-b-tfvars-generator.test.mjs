@@ -84,6 +84,8 @@ test("production-shaped inputs generate deterministic private tfvars and binding
   assert.equal(first.values.backend_client_ip_trust_mode, "cloudfront-alb");
   assert.equal(first.values.backend_client_ip_trusted_alb_cidrs, "10.1.0.0/24,10.1.1.0/24");
   assert.equal(first.values.backend_client_ip_trusted_cloudfront_cidrs, "198.51.100.0/24");
+  assert.equal(first.values.backend_client_ip_cloudfront_prefix_list_id, "pl-0123456789abcdef0");
+  assert.equal(first.values.backend_client_ip_cloudfront_prefix_list_version, "7");
   assert.equal(fs.statSync(first.outputPath).mode & 0o777, 0o600);
   const terraformFormat = spawnSync("terraform", ["fmt", "-write=false", "-no-color", first.outputPath], { encoding: "utf8" });
   assert.equal(terraformFormat.status, 0, terraformFormat.stderr || terraformFormat.stdout);
@@ -92,8 +94,26 @@ test("production-shaped inputs generate deterministic private tfvars and binding
   const second = generateStageBTfvars({ ...args, allowOverwrite: true });
   assert.equal(second.tfvarsSha256, first.tfvarsSha256);
   assert.deepEqual(second.bindingReport, first.bindingReport);
-  assert.match(fs.readFileSync(first.outputPath, "utf8"), /read_only_canary_image/);
-  assert.match(fs.readFileSync(first.outputPath, "utf8"), /backend_client_ip_trust_mode = "cloudfront-alb"/);
+  const tfvars = fs.readFileSync(first.outputPath, "utf8");
+  assert.match(tfvars, /read_only_canary_image/);
+  assert.match(tfvars, /backend_client_ip_trust_mode = "cloudfront-alb"/);
+  assert.match(tfvars, /backend_client_ip_cloudfront_prefix_list_id = "pl-0123456789abcdef0"/);
+  assert.match(tfvars, /backend_client_ip_cloudfront_prefix_list_version = "7"/);
+  const declared = [...fs.readFileSync("infra/aws/terraform/production-green-stage-b/variables.tf", "utf8").matchAll(/^variable "([^"]+)"/gm)].map(([, name]) => name);
+  const serialized = [...tfvars.matchAll(/^([a-z0-9_]+)\s*=/gm)].map(([, name]) => name);
+  assert.deepEqual(serialized.filter((name) => !declared.includes(name)), []);
+  for (const name of declared.filter((name) => !["production_rotation_enabled", "production_rotation_cleanup_enabled", "production_rotation_secret_value_from", "log_retention_days"].includes(name))) assert.ok(serialized.includes(name), `generated tfvars is missing ${name}`);
+  const terraformModule = path.join(repositoryRoot, "infra/aws/terraform/production-green-stage-b");
+  const terraformTests = fs.mkdtempSync(path.join(terraformModule, ".generated-tfvars-test-"));
+  try {
+    fs.writeFileSync(path.join(terraformTests, "generated-tfvars.tftest.hcl"), 'mock_provider "aws" {}\nrun "generated_tfvars_plan" { command = plan }\n');
+    const init = spawnSync("terraform", ["init", "-backend=false", "-input=false", "-lockfile=readonly", "-no-color"], { cwd: terraformModule, encoding: "utf8" });
+    assert.equal(init.status, 0, init.stderr || init.stdout);
+    const plan = spawnSync("terraform", ["test", "-no-color", `-test-directory=${path.basename(terraformTests)}`, `-var-file=${first.outputPath}`], { cwd: terraformModule, encoding: "utf8", env: { ...process.env, TF_INPUT: "0" } });
+    assert.equal(plan.status, 0, plan.stderr || plan.stdout);
+  } finally {
+    fs.rmSync(terraformTests, { recursive: true, force: true });
+  }
   assert.equal(first.bindingReport.tfvarsFormat, "hcl");
   assert.equal(first.bindingReport.tfvarsFileName, "out.tfvars");
   assert.equal(first.bindingReport.tfvarsExtension, ".tfvars");

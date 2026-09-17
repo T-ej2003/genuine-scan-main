@@ -23,3 +23,7 @@ output "stage_b_prerequisites" {
     read_only_canary_database_secret_arn = aws_secretsmanager_secret.read_only_canary.arn
   }
 }
+
+output "cloudfront_proxy_drift_readonly_role_arn" {
+  value = aws_iam_role.cloudfront_proxy_drift_readonly.arn
+}

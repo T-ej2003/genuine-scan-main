@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import test from "node:test";
 import { verifyProductionCloudFrontProxyDrift } from "../aws/verify-production-cloudfront-proxy-drift.mjs";
 
@@ -12,7 +13,7 @@ const run = (drift = {}) => (args) => {
   if (operation === "elbv2 describe-target-groups") return JSON.stringify({ TargetGroups: [{ TargetGroupArn: "arn:aws:elasticloadbalancing:eu-west-2:368992683803:targetgroup/mscqr-backend-tg-euw2-v2/example", VpcId: "vpc-1", TargetType: "ip", Protocol: "HTTP", Port: 4000, HealthCheckPath: "/health/live", LoadBalancerArns: ["arn:aws:elasticloadbalancing:eu-west-2:368992683803:loadbalancer/app/mscqr-alb-euw2/example"] }] });
   if (operation === "ec2 describe-subnets") return JSON.stringify({ Subnets: [{ VpcId: "vpc-1", State: "available", CidrBlock: "10.1.0.0/24" }, { VpcId: "vpc-1", State: "available", CidrBlock: "10.1.1.0/24" }] });
   if (operation === "ec2 describe-managed-prefix-lists") return JSON.stringify({ ManagedPrefixLists: [{ PrefixListId: "pl-0123456789abcdef0", State: "create-complete", Version: 7 }] });
-  if (operation === "ec2 get-managed-prefix-list-entries") return JSON.stringify({ Entries: [{ Cidr: "198.51.100.0/24" }] });
+  if (operation === "ec2 get-managed-prefix-list-entries") { assert.equal(args[args.indexOf("--target-version") + 1], "7"); return JSON.stringify({ Entries: [{ Cidr: "198.51.100.0/24" }] }); }
   if (operation === "cloudfront list-distributions") return JSON.stringify({ DistributionList: { Items: [{ Id: "E1", DomainName: "d1.cloudfront.net", Enabled: true, Status: "Deployed", Aliases: { Items: ["mscqr.com", "www.mscqr.com"] } }] } });
   if (operation === "cloudfront get-distribution-config") return JSON.stringify({ ETag: "E1", DistributionConfig: { Enabled: true, Aliases: { Items: ["mscqr.com", "www.mscqr.com"] }, Origins: { Items: [{ Id: "api", DomainName: "mscqr-alb.example.elb.amazonaws.com" }] }, OriginGroups: { Quantity: 0 }, DefaultCacheBehavior: { TargetOriginId: "api" }, CacheBehaviors: { Quantity: 0 } } });
   if (operation === "route53 list-resource-record-sets") return JSON.stringify({ ResourceRecordSets: ["mscqr.com", "www.mscqr.com"].flatMap((Name) => ["A", "AAAA"].map((Type) => ({ Name, Type, AliasTarget: { DNSName: "d1.cloudfront.net.", HostedZoneId: "Z2FDTNDATAQYW2", EvaluateTargetHealth: false } }))) });
@@ -23,4 +24,24 @@ test("production proxy drift verifier accepts only an exact live task-definition
   assert.equal(verifyProductionCloudFrontProxyDrift({ run: run() }).status, "CURRENT");
   assert.throws(() => verifyProductionCloudFrontProxyDrift({ run: run({ version: true }) }), /prefix-list drift/);
   assert.throws(() => verifyProductionCloudFrontProxyDrift({ run: run({ cidr: true }) }), /prefix-list drift/);
+});
+
+test("scheduled proxy drift verification uses an exact unattended read-only OIDC boundary", () => {
+  const workflow = fs.readFileSync(".github/workflows/verify-production-cloudfront-proxy-drift.yml", "utf8");
+  const terraform = fs.readFileSync("infra/aws/terraform/production-green-stage-a/main.tf", "utf8");
+  assert.match(workflow, /cron: "7,22,37,52 \* \* \* \*"/);
+  assert.match(workflow, /id-token: write/);
+  assert.doesNotMatch(workflow, /environment:\s*production/);
+  assert.match(workflow, /role-to-assume: arn:aws:iam::368992683803:role\/mscqr-production-cloudfront-proxy-drift-readonly/);
+  for (const binding of [
+    '"token.actions.githubusercontent.com:sub"                 = "repo:T-ej2003/genuine-scan-main:ref:refs/heads/main"',
+    '"token.actions.githubusercontent.com:repository_id"       = "1145608538"',
+    '"token.actions.githubusercontent.com:repository_owner_id" = "183396573"',
+    '"token.actions.githubusercontent.com:workflow"            = "Verify Production CloudFront Proxy Drift"',
+    '"token.actions.githubusercontent.com:ref"                 = "refs/heads/main"',
+  ]) assert.ok(terraform.includes(binding), `missing exact OIDC binding ${binding}`);
+  const policy = terraform.match(/resource "aws_iam_role_policy" "cloudfront_proxy_drift_readonly" \{([\s\S]*?)\n\}/)?.[1] || "";
+  for (const action of ["ecs:DescribeServices", "ecs:DescribeTaskDefinition", "elasticloadbalancing:DescribeLoadBalancers", "elasticloadbalancing:DescribeTargetGroups", "ec2:DescribeSubnets", "ec2:DescribeManagedPrefixLists", "ec2:GetManagedPrefixListEntries", "cloudfront:ListDistributions", "cloudfront:GetDistributionConfig", "route53:ListResourceRecordSets"]) assert.ok(policy.includes(`"${action}"`), `missing ${action}`);
+  assert.doesNotMatch(policy, /(?:Create|Delete|Put|Update|Register|RunTask|StopTask|Sign|ChangeResourceRecordSets)/);
+  assert.match(fs.readFileSync(".github/workflows/release-gate.yml", "utf8"), /environment:\s*production/);
 });

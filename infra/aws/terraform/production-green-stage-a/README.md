@@ -88,6 +88,23 @@ The executor security group has no default egress. It permits only green-DB
 TCP/5432, reviewed AWS interface endpoint and S3 TCP/443, and exact VPC resolver
 DNS paths required by the later Stage B executor.
 
+Stage A also owns `mscqr-production-cloudfront-proxy-drift-readonly`, the
+unattended identity used only by
+`verify-production-cloudfront-proxy-drift.yml`. Its OIDC trust is bound to the
+repository, immutable repository and owner IDs, protected `main` ref, and exact
+workflow name. GitHub emits `job_workflow_ref` only for reusable workflows, so
+this direct scheduled workflow does not require that absent claim. Its inline policy contains only the reads needed to compare the
+live backend task definition with ECS, ELB, subnet, CloudFront managed-prefix-
+list, CloudFront distribution, and Route53 authority. The workflow deliberately
+does not enter the approval-gated `production` environment; mutation-capable
+release workflows continue to require that environment.
+
+The governed provider-policy reconciliation must first converge
+`MSCQRProductionGreenStageARelease` to the protected source contract. That
+contract permits creation of this one untagged role and its exact inline
+policy; the Stage-A saved-plan validator rejects any other role, trust policy,
+or IAM action. The release role cannot delete or repurpose the monitor role.
+
 `manage_master_user_password = true` asks RDS—not Terraform—to create the
 KMS-encrypted administrator secret when the database is created. It is separate
 from the 15 empty application/runtime secret handles, including the dedicated

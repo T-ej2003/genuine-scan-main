@@ -256,18 +256,15 @@ test("the canonical Stage A managed contract is exact and recovery-scoped", () =
   assert.equal(serialized.includes("rls-green/stage-b"), false);
   assert.equal(stageA.Statement.some((statement) => statement.Sid.startsWith("StageB")), false);
   assert.deepEqual(stageA.Statement[0], {
-    Sid: "ReadExactStageAStateForHandoff",
+    Sid: "ReadWriteExactStageAState",
     Effect: "Allow",
-    Action: "s3:GetObject",
+    Action: ["s3:GetObject", "s3:PutObject"],
     Resource: "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate",
   });
   assert.deepEqual(stageA.Statement.map(({ Sid }) => Sid), [
-    "ReadExactStageAStateForHandoff",
+    "ReadWriteExactStageAState",
     "ReadExactStageABackendBucketLocation",
-    "WriteExactStageAState",
-    "ReadExactStageALock",
-    "WriteExactStageALock",
-    "ReleaseExactStageALock",
+    "ManageExactStageALock",
     "ReadExactStageAProviderEndpointMetadata",
     "ReadExactStageAStorageKeys",
     "ReadExactStageAGreenRdsGroups",
@@ -281,9 +278,9 @@ test("the canonical Stage A managed contract is exact and recovery-scoped", () =
     "ReadExactStageAProviderLogGroups",
     "ReadExactStageALogTags",
     "ApplyExactStageAEndpointSecurityGroupIngress",
-    "ApplyExactStageACheckerRoleChainPolicy",
-    "ApplyExactStageACheckerPublicationPolicy",
     "ApplyExactStageACheckerRoleTrust",
+    "ApplyExactStageAIamPolicies",
+    "CreateExactCloudFrontProxyDriftReadonlyRole",
   ]);
   const stageAStatement = (sid) => stageA.Statement.find((statement) => statement.Sid === sid);
   assert.equal(stageAStatement("ReadExactStageABackendBucketLocation").Action, "s3:GetBucketLocation");
@@ -300,14 +297,10 @@ test("the canonical Stage A managed contract is exact and recovery-scoped", () =
     ],
     Condition: { StringEquals: { "aws:RequestedRegion": "eu-west-2" } },
   });
-  assert.deepEqual(stageAStatement("WriteExactStageAState").Action, "s3:PutObject");
-  assert.match(stageAStatement("WriteExactStageAState").Resource, /stage-a\/terraform\.tfstate$/);
-  assert.deepEqual(stageAStatement("ReadExactStageALock").Action, "s3:GetObject");
-  assert.match(stageAStatement("ReadExactStageALock").Resource, /stage-a\/terraform\.tfstate\.tflock$/);
-  assert.deepEqual(stageAStatement("WriteExactStageALock").Action, "s3:PutObject");
-  assert.match(stageAStatement("WriteExactStageALock").Resource, /stage-a\/terraform\.tfstate\.tflock$/);
-  assert.deepEqual(stageAStatement("ReleaseExactStageALock").Action, "s3:DeleteObject");
-  assert.match(stageAStatement("ReleaseExactStageALock").Resource, /stage-a\/terraform\.tfstate\.tflock$/);
+  assert.deepEqual(stageAStatement("ReadWriteExactStageAState").Action, ["s3:GetObject", "s3:PutObject"]);
+  assert.match(stageAStatement("ReadWriteExactStageAState").Resource, /stage-a\/terraform\.tfstate$/);
+  assert.deepEqual(stageAStatement("ManageExactStageALock").Action, ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]);
+  assert.match(stageAStatement("ManageExactStageALock").Resource, /stage-a\/terraform\.tfstate\.tflock$/);
   assert.equal(stageA.Statement.some(({ Action }) => asArray(Action).includes("s3:ListBucket")), false);
   assert.equal(stageA.Statement.some(({ Action, Resource }) => asArray(Action).includes("s3:DeleteObject") && asArray(Resource).some((value) => value.endsWith("terraform.tfstate"))), false);
   assert.doesNotThrow(() => assertSteadyStateReleasePolicy(stageA));
@@ -316,17 +309,15 @@ test("the canonical Stage A managed contract is exact and recovery-scoped", () =
   assert.equal(apply.Action, "ec2:AuthorizeSecurityGroupIngress");
   assert.equal(apply.Resource, "arn:aws:ec2:eu-west-2:368992683803:security-group/sg-04d5bf116755ba412");
   assert.deepEqual(apply.Condition, { StringEquals: { "aws:RequestedRegion": "eu-west-2" } });
-  const checkerApply = stageAStatement("ApplyExactStageACheckerRoleChainPolicy");
+  const checkerApply = stageAStatement("ApplyExactStageAIamPolicies");
   assert.equal(checkerApply.Action, "iam:PutRolePolicy");
-  assert.equal(checkerApply.Resource, "arn:aws:iam::368992683803:role/mscqr-production-independent-checker");
-  const checkerPublicationApply = stageAStatement("ApplyExactStageACheckerPublicationPolicy");
-  assert.equal(checkerPublicationApply.Action, "iam:PutRolePolicy");
-  assert.equal(checkerPublicationApply.Resource, "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker");
+  assert.deepEqual(checkerApply.Resource, ["arn:aws:iam::368992683803:role/mscqr-production-independent-checker", "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker", "arn:aws:iam::368992683803:role/mscqr-production-cloudfront-proxy-drift-readonly"]);
   const checkerTrustApply = stageAStatement("ApplyExactStageACheckerRoleTrust");
   assert.equal(checkerTrustApply.Action, "iam:UpdateAssumeRolePolicy");
   assert.equal(checkerTrustApply.Resource, "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker");
   assert.deepEqual(stageAStatement("ReadExactStageACheckerRolePolicy").Resource, [
     "arn:aws:iam::368992683803:role/mscqr-production-independent-checker",
     "arn:aws:iam::368992683803:role/mscqr-production-rls-independent-checker",
+    "arn:aws:iam::368992683803:role/mscqr-production-cloudfront-proxy-drift-readonly",
   ]);
 });

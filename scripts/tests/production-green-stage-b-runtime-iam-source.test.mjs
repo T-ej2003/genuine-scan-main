@@ -79,4 +79,6 @@ test("Stage-B backend candidates bind the reviewed CloudFront-to-ALB runtime top
     });
   }
   assert.match(source, /backend_template_proxy = replace\([\s\S]*?BACKEND_CLIENT_IP_TRUST_MODE[\s\S]*?BACKEND_CLIENT_IP_TRUSTED_ALB_CIDRS[\s\S]*?BACKEND_CLIENT_IP_TRUSTED_CLOUDFRONT_CIDRS/);
+  assert.match(source, /backend_template_proxy_metadata = replace\([\s\S]*?local\.backend_template_proxy[\s\S]*?BACKEND_CLIENT_IP_CLOUDFRONT_PREFIX_LIST_ID[\s\S]*?backend_client_ip_cloudfront_prefix_list_id[\s\S]*?BACKEND_CLIENT_IP_CLOUDFRONT_PREFIX_LIST_VERSION[\s\S]*?backend_client_ip_cloudfront_prefix_list_version/);
+  assert.match(source, /rendered_candidates = \{[\s\S]*?backend\s+= replace\([\s\S]*?local\.backend_template_proxy_metadata/);
 });

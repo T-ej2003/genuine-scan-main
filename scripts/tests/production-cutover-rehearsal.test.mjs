@@ -4,7 +4,7 @@ import { createHash, generateKeyPairSync } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { assertStageAPlan, buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifactsBucketPolicyPredecessor, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservationPredecessor, buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection, createTerraformStageAAdapter, runStageAControlPlane, STAGE_A_CHECKER_POLICY, STAGE_A_CHECKER_PUBLICATION_POLICY, STAGE_A_CHECKER_ROLE_TRUST, STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY } from "../aws/production-stage-a-control-plane.mjs";
+import { assertStageAPlan, buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifactsBucketPolicyPredecessor, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservationPredecessor, buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection, createTerraformStageAAdapter, runStageAControlPlane, STAGE_A_CHECKER_POLICY, STAGE_A_CHECKER_PUBLICATION_POLICY, STAGE_A_CHECKER_ROLE_TRUST, STAGE_A_CLOUDFRONT_PROXY_DRIFT_POLICY, STAGE_A_CLOUDFRONT_PROXY_DRIFT_POLICY_DOCUMENT, STAGE_A_CLOUDFRONT_PROXY_DRIFT_ROLE, STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY } from "../aws/production-stage-a-control-plane.mjs";
 import { describeStageAIngress } from "../aws/production-cutover-production-adapters.mjs";
 import { assertTransitionMatrix, buildTransitionMatrix, PRODUCTION_CUTOVER_MODE, runGovernedOverlapDeployment, runProductionCutoverControlPlane } from "../aws/production-cutover-control-plane.mjs";
 import { persistOverlapReadinessEvidence } from "../aws/produce-production-overlap-readiness-evidence.mjs";
@@ -64,6 +64,9 @@ const checkerRoleChange = ({ actions = ["no-op"], before = {}, after = {} } = {}
     after: { name: STAGE_A_CHECKER_ROLE_TRUST.name, assume_role_policy: checkerRoleTrustDocument(), ...after },
   },
 });
+const driftRoleTrust = () => JSON.stringify({ Version: "2012-10-17", Statement: [{ Sid: "ExactMainWorkflowOnly", Effect: "Allow", Principal: { Federated: "arn:aws:iam::368992683803:oidc-provider/token.actions.githubusercontent.com" }, Action: "sts:AssumeRoleWithWebIdentity", Condition: { StringEquals: { "token.actions.githubusercontent.com:aud": "sts.amazonaws.com", "token.actions.githubusercontent.com:sub": "repo:T-ej2003/genuine-scan-main:ref:refs/heads/main", "token.actions.githubusercontent.com:repository": "T-ej2003/genuine-scan-main", "token.actions.githubusercontent.com:repository_id": "1145608538", "token.actions.githubusercontent.com:repository_owner_id": "183396573", "token.actions.githubusercontent.com:workflow": "Verify Production CloudFront Proxy Drift", "token.actions.githubusercontent.com:ref": "refs/heads/main" } } }] });
+const driftRoleChange = (actions = ["no-op"], after = {}) => ({ address: STAGE_A_CLOUDFRONT_PROXY_DRIFT_ROLE.address, type: STAGE_A_CLOUDFRONT_PROXY_DRIFT_ROLE.type, change: { actions, before: actions[0] === "create" ? null : { name: STAGE_A_CLOUDFRONT_PROXY_DRIFT_ROLE.name, permissions_boundary: null, assume_role_policy: driftRoleTrust() }, after: { name: STAGE_A_CLOUDFRONT_PROXY_DRIFT_ROLE.name, permissions_boundary: null, assume_role_policy: driftRoleTrust(), ...after } } });
+const driftPolicyChange = (actions = ["no-op"], after = {}) => ({ address: STAGE_A_CLOUDFRONT_PROXY_DRIFT_POLICY.address, type: STAGE_A_CLOUDFRONT_PROXY_DRIFT_POLICY.type, change: { actions, before: actions[0] === "create" ? null : { name: STAGE_A_CLOUDFRONT_PROXY_DRIFT_POLICY.name, role: STAGE_A_CLOUDFRONT_PROXY_DRIFT_POLICY.role, policy: JSON.stringify(STAGE_A_CLOUDFRONT_PROXY_DRIFT_POLICY_DOCUMENT) }, after: { name: STAGE_A_CLOUDFRONT_PROXY_DRIFT_POLICY.name, role: STAGE_A_CLOUDFRONT_PROXY_DRIFT_POLICY.role, policy: JSON.stringify(STAGE_A_CLOUDFRONT_PROXY_DRIFT_POLICY_DOCUMENT), ...after } } });
 const artifactsBucketPolicyChange = ({ actions = ["create"], before = null, beforePolicy, after = {}, policy = buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection() } = {}) => ({
   address: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.address,
   type: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.type,
@@ -139,7 +142,7 @@ export function fixtureInput(overrides = {}) {
     endpointSecurityGroupId: "sg-endpoint",
     runtimeSecurityGroupId: "sg-runtime",
     adapter: {
-      createSavedPlan: async () => ({ sourceSha, savedPlanSha256: "e".repeat(64), plan: { resource_changes: [{ address: 'aws_vpc_security_group_ingress_rule.runtime_endpoints_https["sg-runtime"]', change: { actions: ["create"], after: { security_group_id: "sg-endpoint", referenced_security_group_id: "sg-runtime", from_port: 443, to_port: 443, ip_protocol: "tcp", cidr_ipv4: null, cidr_ipv6: null, prefix_list_id: null } } }, checkerPolicyChange(), checkerRoleChange(), checkerPublicationChange(), artifactsBucketPolicyChange()] }, evidenceRef: "terraform-plan:rehearsal", evidenceSha256 }),
+      createSavedPlan: async () => ({ sourceSha, savedPlanSha256: "e".repeat(64), plan: { resource_changes: [{ address: 'aws_vpc_security_group_ingress_rule.runtime_endpoints_https["sg-runtime"]', change: { actions: ["create"], after: { security_group_id: "sg-endpoint", referenced_security_group_id: "sg-runtime", from_port: 443, to_port: 443, ip_protocol: "tcp", cidr_ipv4: null, cidr_ipv6: null, prefix_list_id: null } } }, checkerPolicyChange(), checkerRoleChange(), checkerPublicationChange(), artifactsBucketPolicyChange(), driftRoleChange(["create"]), driftPolicyChange(["create"])] }, evidenceRef: "terraform-plan:rehearsal", evidenceSha256 }),
       applySavedPlan: async () => { mutations.push("M2_STAGE_A_APPLY"); },
       describeIngress: async () => ({ present: true, endpointSecurityGroupId: "sg-endpoint", runtimeSecurityGroupId: "sg-runtime", direction: "ingress", protocol: "tcp", fromPort: 443, toPort: 443 }),
     },
@@ -188,8 +191,8 @@ export function fixtureInput(overrides = {}) {
   };
 }
 
-const stageAPlan = ({ address = 'aws_vpc_security_group_ingress_rule.runtime_endpoints_https["sg-runtime"]', actions = ["create"], checkerActions = actions, after = {}, checkerAfter = {}, checkerRole = checkerRoleChange(), checkerPublication = checkerPublicationChange(), artifactsBucketPolicy, extra = [] } = {}) => ({
-  resource_changes: [{ address, change: { actions, after: { security_group_id: "sg-endpoint", referenced_security_group_id: "sg-runtime", from_port: 443, to_port: 443, ip_protocol: "tcp", cidr_ipv4: null, cidr_ipv6: null, prefix_list_id: null, ...after } } }, checkerPolicyChange(checkerActions, checkerAfter), checkerRole, checkerPublication, artifactsBucketPolicy ?? artifactsBucketPolicyChange({ actions: actions[0] === "no-op" ? ["no-op"] : ["create"] }), ...extra],
+const stageAPlan = ({ address = 'aws_vpc_security_group_ingress_rule.runtime_endpoints_https["sg-runtime"]', actions = ["create"], checkerActions = actions, after = {}, checkerAfter = {}, checkerRole = checkerRoleChange(), checkerPublication = checkerPublicationChange(), artifactsBucketPolicy, driftRole = driftRoleChange(actions[0] === "no-op" ? ["no-op"] : ["create"]), driftPolicy = driftPolicyChange(actions[0] === "no-op" ? ["no-op"] : ["create"]), extra = [] } = {}) => ({
+  resource_changes: [{ address, change: { actions, after: { security_group_id: "sg-endpoint", referenced_security_group_id: "sg-runtime", from_port: 443, to_port: 443, ip_protocol: "tcp", cidr_ipv4: null, cidr_ipv6: null, prefix_list_id: null, ...after } } }, checkerPolicyChange(checkerActions, checkerAfter), checkerRole, checkerPublication, artifactsBucketPolicy ?? artifactsBucketPolicyChange({ actions: actions[0] === "no-op" ? ["no-op"] : ["create"] }), driftRole, driftPolicy, ...extra],
 });
 
 test("Stage A accepts only the reviewed indexed for_each instance", () => {
@@ -236,7 +239,7 @@ test("Stage A admits only the exact production-artifacts bucket policy lifecycle
   assert.doesNotThrow(() => assertStageAPlan(stageAPlan(), inputs));
   const exactUpdate = artifactsBucketPolicyChange({ actions: ["update"], beforePolicy: buildStageAProductionArtifactsBucketPolicyPredecessor() });
   const exactUpdateValidation = assertStageAPlan(stageAPlan({ artifactsBucketPolicy: exactUpdate }), inputs);
-  assert.equal(exactUpdateValidation.changes, 3);
+  assert.equal(exactUpdateValidation.changes, 5);
   assert.equal(exactUpdateValidation.recoveryRequired, true);
   assert.equal(exactUpdateValidation.executionDisposition, "RECOVERY_REQUIRED");
   const intentionalReservationUpdate = assertStageAPlan(stageAPlan({ artifactsBucketPolicy: artifactsBucketPolicyChange({ actions: ["update"], beforePolicy: buildStageAProductionArtifactsBucketPolicy() }) }), inputs);
@@ -423,6 +426,15 @@ test("Stage A admits only the exact Role-B trust transition", () => {
   assert.throws(() => assertStageAPlan(stageAPlan({ checkerRole: checkerRoleChange({ actions: ["update"] }), extra: [{ address: "aws_iam_role.unrelated", type: "aws_iam_role", change: { actions: ["update"], before: {}, after: {} } }] }), inputs));
 });
 
+test("Stage A admits only the exact unattended drift role and read-only policy", () => {
+  const inputs = { endpointSecurityGroupId: "sg-endpoint", runtimeSecurityGroupId: "sg-runtime" };
+  assert.doesNotThrow(() => assertStageAPlan(stageAPlan(), inputs));
+  assert.throws(() => assertStageAPlan(stageAPlan({ driftRole: driftRoleChange(["create"], { name: "unrelated" }) }), inputs));
+  assert.throws(() => assertStageAPlan(stageAPlan({ driftRole: driftRoleChange(["create"], { assume_role_policy: driftRoleTrust().replace("refs/heads/main", "refs/heads/feature") }) }), inputs));
+  assert.throws(() => assertStageAPlan(stageAPlan({ driftPolicy: driftPolicyChange(["create"], { policy: JSON.stringify({ ...STAGE_A_CLOUDFRONT_PROXY_DRIFT_POLICY_DOCUMENT, Statement: [...STAGE_A_CLOUDFRONT_PROXY_DRIFT_POLICY_DOCUMENT.Statement, { Effect: "Allow", Action: "ecs:UpdateService", Resource: "*" }] }) }) }), inputs));
+  assert.throws(() => assertStageAPlan(stageAPlan({ driftRole: driftRoleChange(["delete"]) }), inputs));
+});
+
 test("Stage A rejects malformed unexpected entries before any apply", async () => {
   const inputs = { endpointSecurityGroupId: "sg-endpoint", runtimeSecurityGroupId: "sg-runtime" };
   const malformedEntries = [
@@ -465,7 +477,7 @@ test("Stage A applies exact create once and reads the postcondition", async () =
   });
   assert.equal(result.alreadyConverged, false);
   assert.equal(result.appliedExactSavedPlan, true);
-  assert.equal(result.mutationCount, 3);
+  assert.equal(result.mutationCount, 5);
   assert.equal(applyCalls, 1);
   assert.equal(postconditionReads, 1);
 });

@@ -9,7 +9,6 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    environment: production
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
@@ -20,6 +19,6 @@ jobs:
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - uses: aws-actions/configure-aws-credentials@v6
         with:
-          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-release-deployer
+          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-cloudfront-proxy-drift-readonly
           aws-region: eu-west-2
       - run: node scripts/aws/verify-production-cloudfront-proxy-drift.mjs
