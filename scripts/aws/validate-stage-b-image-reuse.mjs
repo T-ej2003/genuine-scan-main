@@ -233,6 +233,9 @@ function classifyChangedFiles({ imageReleaseSha, toolingSha, changedFiles }) {
 export function classifyStageBImageReusePath(file) {
   // Dockerfile.ecs-frontend copies src into the Vite build. Runtime edits
   // require publication, never a tooling-only or compatibility exemption.
+  if (/^public\//.test(file)) {
+    return { file, category: "runtimeApplicationSource", imageAffecting: true };
+  }
   if (/^src\//.test(file) && !TEST.test(file)) {
     return { file, category: "runtimeApplicationSource", imageAffecting: true };
   }

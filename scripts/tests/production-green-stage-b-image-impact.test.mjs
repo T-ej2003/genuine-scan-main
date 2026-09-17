@@ -27,6 +27,7 @@ test("frontend runtime inputs require publication while test paths remain test-o
   }
   assert.equal(classifyStageBImageReusePath("src/test/audit-scope.test.tsx").category, "testOnly");
   assert.equal(classifyStageBImageReusePath("src/unreviewed/runtime.bin").category, "runtimeApplicationSource");
+  for (const file of ["public/fixtures/foo.json", "public/test/index.html", "public/e2e/asset.js"]) assert.deepEqual(classifyStageBImageReusePath(file), { file, category: "runtimeApplicationSource", imageAffecting: true });
 });
 
 test("governed web publisher changes require web publication while activation and IAM stay control-plane only", () => {

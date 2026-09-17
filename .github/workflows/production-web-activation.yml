@@ -23,13 +23,21 @@ on:
         description: SHA-256 of web authorization bytes
         required: true
         type: string
+      backend_activation_evidence_json:
+        description: Exact completed backend activation evidence from the coordinated release
+        required: true
+        type: string
+      backend_activation_evidence_sha256:
+        description: SHA-256 of backend activation evidence bytes
+        required: true
+        type: string
 
 permissions:
   contents: read
   id-token: write
 
 concurrency:
-  group: production-web-activation
+  group: production-deploy
   cancel-in-progress: false
 
 jobs:
@@ -65,6 +73,8 @@ jobs:
           STAGE_B_AUTHORIZATION_SHA256: '${{ inputs.stage_b_authorization_sha256 }}'
           WEB_AUTHORIZATION_JSON: '${{ inputs.web_authorization_json }}'
           WEB_AUTHORIZATION_SHA256: '${{ inputs.web_authorization_sha256 }}'
+          BACKEND_ACTIVATION_EVIDENCE_JSON: '${{ inputs.backend_activation_evidence_json }}'
+          BACKEND_ACTIVATION_EVIDENCE_SHA256: '${{ inputs.backend_activation_evidence_sha256 }}'
         run: |
           set -euo pipefail
           directory="$RUNNER_TEMP/web-activation"
@@ -72,6 +82,7 @@ jobs:
           trap 'rm -rf "$directory"' EXIT
           printf '%s' "$STAGE_B_AUTHORIZATION_JSON" > "$directory/stage-b.json"
           printf '%s' "$WEB_AUTHORIZATION_JSON" > "$directory/web.json"
+          printf '%s' "$BACKEND_ACTIVATION_EVIDENCE_JSON" > "$directory/backend.json"
           chmod 600 "$directory"/*.json
           node scripts/aws/verify-production-web-release-authorization.mjs \
             --source-sha "$TARGET_SHA" \
@@ -85,4 +96,6 @@ jobs:
             --stage-b-authorization "$directory/stage-b.json" \
             --stage-b-authorization-sha256 "$STAGE_B_AUTHORIZATION_SHA256" \
             --web-authorization "$directory/web.json" \
-            --web-authorization-sha256 "$WEB_AUTHORIZATION_SHA256"
+            --web-authorization-sha256 "$WEB_AUTHORIZATION_SHA256" \
+            --backend-activation-evidence "$directory/backend.json" \
+            --backend-activation-evidence-sha256 "$BACKEND_ACTIVATION_EVIDENCE_SHA256"

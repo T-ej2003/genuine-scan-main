@@ -90,7 +90,7 @@ export function buildWebImageAuthorization({ sourceSha, evidence, signature, ima
 }
 
 export function assertWebImageAuthorization(value, { sourceSha, now, verify } = {}) {
-  if (value?.schemaVersion !== 1 || value.operation !== "PRODUCTION_WEB_IMAGE_AUTHORIZATION" || value.valid !== true || value.sourceSha !== sourceSha || value.authorizationSha256 !== canonicalSha256(authorizationPayload(value)) || value.imageRef !== value.evidence?.imageRef || value.imageDigest !== value.evidence?.imageDigest || value.evidenceSha256 !== value.evidence?.evidenceSha256 || value.signatureSha256 !== canonicalSha256(value.signature) || value.imageImpactSha256 !== canonicalSha256(value.imageImpact) || value.imageImpact?.webPublicationRequired !== true || value.imageImpact?.toolingSha !== sourceSha || value.reviewer !== value.evidence?.reviewer) throw new Error("Web image authorization is invalid.");
+  if (value?.schemaVersion !== 1 || value.operation !== "PRODUCTION_WEB_IMAGE_AUTHORIZATION" || value.valid !== true || value.sourceSha !== sourceSha || value.evidence?.sourceSha !== value.sourceSha || value.authorizationSha256 !== canonicalSha256(authorizationPayload(value)) || value.imageRef !== value.evidence?.imageRef || value.imageDigest !== value.evidence?.imageDigest || value.evidenceSha256 !== value.evidence?.evidenceSha256 || value.signatureSha256 !== canonicalSha256(value.signature) || value.imageImpactSha256 !== canonicalSha256(value.imageImpact) || value.imageImpact?.webPublicationRequired !== true || value.imageImpact?.toolingSha !== sourceSha || value.reviewer !== value.evidence?.reviewer) throw new Error("Web image authorization is invalid.");
   assertWebImageEvidence(value.evidence, { signature: value.signature, verify, now }); return true;
 }
 

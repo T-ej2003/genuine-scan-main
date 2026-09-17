@@ -2,6 +2,7 @@
   "Version": "2012-10-17",
   "Statement": [
     { "Sid": "RegisterCanonicalFrontendDefinition", "Effect": "Allow", "Action": "ecs:RegisterTaskDefinition", "Resource": "*", "Condition": { "StringEquals": { "aws:RequestedRegion": "eu-west-2" } } },
+    { "Sid": "PreserveFrontendTaskDefinitionTags", "Effect": "Allow", "Action": "ecs:TagResource", "Resource": "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-frontend:*", "Condition": { "StringEquals": { "aws:RequestedRegion": "eu-west-2", "ecs:CreateAction": "RegisterTaskDefinition" } } },
     { "Sid": "ReadTaskDefinitions", "Effect": "Allow", "Action": "ecs:DescribeTaskDefinition", "Resource": "*", "Condition": { "StringEquals": { "aws:RequestedRegion": "eu-west-2" } } },
     { "Sid": "ListExactFrontendRuntime", "Effect": "Allow", "Action": "ecs:ListTasks", "Resource": "*", "Condition": { "StringEquals": { "aws:RequestedRegion": "eu-west-2" }, "ArnEquals": { "ecs:cluster": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main" } } },
     { "Sid": "ReadExactFrontendRuntime", "Effect": "Allow", "Action": "ecs:DescribeTasks", "Resource": "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/*", "Condition": { "StringEquals": { "aws:RequestedRegion": "eu-west-2" }, "ArnEquals": { "ecs:cluster": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main" } } },

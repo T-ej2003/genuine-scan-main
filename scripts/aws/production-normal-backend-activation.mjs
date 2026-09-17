@@ -24,6 +24,7 @@ const canonical = canonicalNormalActivationValue;
 const POLICY_VERSION = /^v[1-9][0-9]*$/;
 const WORKFLOW_RUN_ID = /^[1-9][0-9]*$/;
 const BACKEND_IMAGE = /^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/mscqr-backend@(sha256:[a-f0-9]{64})$/;
+const TASK_ARN = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/[A-Za-z0-9_-]+:[1-9][0-9]*$/;
 
 export class NormalActivationPolicyConvergenceError extends Error {
   constructor(report, cause) {
@@ -99,6 +100,11 @@ export function assertProductionRlsReleaseReceipt(receipt, { sourceSha, imageDig
   delete copy.receiptBundleSha256;
   if (receipt?.schemaVersion !== 2 || receipt.environment !== "production" || receipt.releaseSha !== sourceSha || receipt.images?.backend !== `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${imageDigest}` || receipt.approvalId !== stageBApprovalIdForReleaseSha(sourceSha) || !SHA256.test(claimed || "") || claimed !== sha256(`${JSON.stringify(copy)}\n`)) throw new Error("Production RLS release receipt is not bound to the normal backend activation.");
   return receipt.approvalId;
+}
+
+export function assertNormalBackendActivationEvidence(value, { sourceSha, stageBAuthorization } = {}) {
+  if (value?.schemaVersion !== 1 || value.operation !== "PRODUCTION_NORMAL_BACKEND_ACTIVATION" || value.sourceSha !== sourceSha || value.stageBAuthorizationSha256 !== stageBAuthorization?.authorizationSha256 || !WORKFLOW_RUN_ID.test(String(value.workflowRunId || "")) || !WORKFLOW_RUN_ID.test(String(value.releaseTrainRunId || "")) || value.clusterArn !== NORMAL_ACTIVATION.clusterArn || value.serviceArn !== NORMAL_ACTIVATION.serviceArn || value.targetArn !== value.newTaskDefinitionArn || value.targetArn !== value.observedTaskDefinitionArn || !NORMAL_CANDIDATE_ARN.test(value.targetArn || "") || !TASK_ARN.test(value.sourceArn || "") || !BACKEND_IMAGE.test(value.imageRef || "") || value.imageDigest !== BACKEND_IMAGE.exec(value.imageRef)?.[1] || value.serviceStable !== true || value.desiredCount !== 2 || value.runningCount !== 2 || value.pendingCount !== 0) throw new Error("Normal backend activation evidence is invalid or not the completed coordinated release.");
+  return true;
 }
 
 function assertReleaseReceipt(receipt, { sourceSha, imageAuthorization }) {
@@ -369,7 +375,7 @@ export function executeNormalBackendActivation({ run, runScript = execFileSync, 
       NORMAL_ACTIVATION_OUTCOME_FILE: outcomeFile,
     } });
     const metadata = JSON.parse(fs.readFileSync(metadataFile, "utf8"));
-    fs.writeFileSync(metadataFile, `${JSON.stringify({ ...metadata, normalActivationSourceArn: binding.sourceArn, normalActivationTargetArn: binding.targetArn, authorityContractionRequired: true, contractionCommand: `npm run production:normal-backend-activation -- --mode contract-policy --source-sha ${sourceSha} --source-task-definition ${binding.sourceArn} --admin-profile <governed-admin-profile>` }, null, 2)}\n`, { mode: 0o600 });
+    fs.writeFileSync(metadataFile, `${JSON.stringify({ schemaVersion: 1, operation: "PRODUCTION_NORMAL_BACKEND_ACTIVATION", sourceSha, stageBAuthorizationSha256: imageAuthorization.authorizationSha256, workflowRunId: runIdentity.workflowRunId, releaseTrainRunId: runIdentity.releaseTrainRunId, sourceArn: binding.sourceArn, targetArn: binding.targetArn, newTaskDefinitionArn: metadata.newTaskDefinitionArn, observedTaskDefinitionArn: metadata.newTaskDefinitionArn, imageRef: binding.image, imageDigest: binding.digest, clusterArn: NORMAL_ACTIVATION.clusterArn, serviceArn: NORMAL_ACTIVATION.serviceArn, serviceStable: true, desiredCount: binding.desiredCount, runningCount: binding.desiredCount, pendingCount: 0 }, null, 2)}\n`, { mode: 0o600 });
     return Object.freeze({ status: binding.sourceArn === binding.targetArn ? "ALREADY_APPLIED_EXACT_TARGET" : "APPLIED_EXACT_TARGET", sourceArn: binding.sourceArn, targetArn: binding.targetArn, postSuccessAuthorityContractionRequired: true, exactNextAction: `RUN_GOVERNED_ADMIN_CONTRACTION_FOR_${binding.targetArn}` });
   } catch (error) {
     const outcome = classifyNormalActivationLiveOutcome({ run, binding });

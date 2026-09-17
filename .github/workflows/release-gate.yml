@@ -1077,6 +1077,7 @@ jobs:
           SOURCE_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
           WEB_AUTHORIZATION_FILE: ${{ steps.images.outputs.web_authorization_file }}
           WEB_AUTHORIZATION_SHA256: ${{ steps.images.outputs.web_authorization_sha256 }}
+          BACKEND_METADATA_FILE: ${{ steps.image-meta.outputs.backend_metadata_file }}
           MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-release-deployer
         run: |
           set -euo pipefail
@@ -1085,7 +1086,9 @@ jobs:
             --stage-b-authorization "${{ steps.images.outputs.authorization_file }}" \
             --stage-b-authorization-sha256 "${{ inputs.normal_image_authorization_sha256 }}" \
             --web-authorization "$WEB_AUTHORIZATION_FILE" \
-            --web-authorization-sha256 "$WEB_AUTHORIZATION_SHA256")"
+            --web-authorization-sha256 "$WEB_AUTHORIZATION_SHA256" \
+            --backend-activation-evidence "$BACKEND_METADATA_FILE" \
+            --backend-activation-evidence-sha256 "$(sha256sum "$BACKEND_METADATA_FILE" | cut -d' ' -f1)")"
           node --input-type=module - "$GITHUB_OUTPUT" "$result" <<'NODE'
           import fs from "node:fs";
           const result = JSON.parse(process.argv[3]);
