@@ -156,6 +156,22 @@ test("cleanup context reads the fixed authenticated archive after expiry without
   await assert.rejects(f.run("CLEANUP_CONTEXT"), /resource-based/);
 });
 
+test("fresh-session inspection neither claims nor replaces active installation authority", async () => {
+  const f = fixture(); await f.run("AUTHORIZE");
+  let before = JSON.stringify([...f.objects]);
+  assert.equal((await f.run("INSPECT")).state, "ABSENT");
+  assert.equal(JSON.stringify([...f.objects]), before);
+  await f.run("INSTALL");
+  before = JSON.stringify([...f.objects]);
+  const writes = [...f.writes];
+  f.clock += 1000; f.sessionIssuedAt = f.clock;
+  f.sessionEventId = "12345678-1234-4234-8234-123456789fed";
+  assert.equal((await f.run("INSPECT")).state, "IAM_VERIFIED");
+  assert.equal(JSON.stringify([...f.objects]), before);
+  assert.deepEqual(f.writes, writes);
+  await assert.rejects(f.run("INSTALL"), /not safely expired/);
+});
+
 for (const qualifier of ["$LATEST", "1", "2", "3"]) test(`broker rejects a resource policy bypass on ${qualifier}`, async () => {
   const f = fixture();
   f.resourcePolicy = qualifier;

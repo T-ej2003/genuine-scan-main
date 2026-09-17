@@ -538,3 +538,10 @@ variables are now cleared. A disposable client configuration and real-container
 negative control prove the guard, without reading or changing user proxy secrets
 or Docker configuration. Network isolation alone would not prevent disclosure
 of credentials embedded in those configuration values.
+
+Operator inspection now returns through the authenticated read-only classifier
+before mutation-session reservation. Previously a fresh `inspect` session could
+consume the first reservation, or be rejected by another active controller's
+fence. Regression coverage proves absent and installed inspections write neither
+IAM nor S3, while an attempted installation takeover by that same fresh reader
+still fails until the existing session is safely expired and freshly approved.

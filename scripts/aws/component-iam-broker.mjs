@@ -254,6 +254,10 @@ export async function executeFixedBroker(event, context, { manifest, iam, s3, la
     state: "SESSION_VERIFIED", principal: session.principal, expiresAt: session.expiresAt,
     sourceSha: manifest.sourceSha, transitionId: request.transitionId, authorizationSha256: request.authorizationSha256,
   };
+  // Inspection must not consume or replace the mutation session. A freshly
+  // authenticated reader can classify an active/partial installation without
+  // either stealing its lease or requiring another installation approval.
+  if (event.operation === "INSPECT") return inspect(authorization);
   // Classify live IAM before claiming/replacing controller ownership. The write
   // engine repeats readback afterward and authenticates the guard at every write.
   if (!cleanup) await inspect(authorization);
