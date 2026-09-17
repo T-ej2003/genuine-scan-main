@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
+import { COMPLETED_EMERGENCY_PATHS } from "./production-completed-emergency-work.mjs";
 
 export const PRODUCTION_COMPONENT_STATE = Object.freeze({ table: "mscqr-production-component-deployment-state", key: "production#T-ej2003/genuine-scan-main", account: "368992683803", region: "eu-west-2", repository: "T-ej2003/genuine-scan-main" });
 const SHA = /^[a-f0-9]{40}$/, DIGEST = /^sha256:[a-f0-9]{64}$/;
@@ -15,6 +16,15 @@ export function assertProductionComponentDeploymentState(value) {
   assert.ok(["BOOTSTRAP", "NORMAL_APPLICATION", "SECURITY_INFRASTRUCTURE", "EMERGENCY_RECOVERY"].includes(value.updatedByLane));
   assert.match(value.updatedByWorkflow || "", /^[A-Za-z0-9_.:/@-]{1,512}$/); assert.match(String(value.githubRunId || ""), /^(?:[1-9][0-9]*|bootstrap|local-test)$/);
   assert.deepEqual(Object.keys(value.components || {}).sort(), [...components].sort());
+  if (value.completedEmergencyWork !== undefined) {
+    assert.notEqual(value.updatedByLane, "BOOTSTRAP", "Bootstrap cannot attest completed emergency operations");
+    assert.ok(value.completedEmergencyWork && typeof value.completedEmergencyWork === "object" && !Array.isArray(value.completedEmergencyWork));
+    for (const [mode, proof] of Object.entries(value.completedEmergencyWork)) {
+      assert.ok(Object.hasOwn(COMPLETED_EMERGENCY_PATHS, mode), "Unknown completed emergency operation");
+      assert.deepEqual(Object.keys(proof).sort(), ["evidenceSha256", "sourceSha"]);
+      assert.match(proof.sourceSha || "", SHA); assert.match(proof.evidenceSha256 || "", /^[a-f0-9]{64}$/);
+    }
+  }
   for (const [name, component] of Object.entries(value.components)) {
     assert.ok(component === null || typeof component === "object", `${name} state malformed`);
     if (!component) continue;
@@ -28,7 +38,7 @@ export function createProductionComponentDeploymentState({ components: stateComp
   return Object.freeze(assertProductionComponentDeploymentState({ schemaVersion: 1, environment: "production", repository: PRODUCTION_COMPONENT_STATE.repository, generation: 1, updatedAt: now, updatedByLane: "BOOTSTRAP", updatedByWorkflow, githubRunId: String(githubRunId), components: stateComponents }));
 }
 
-export function advanceProductionComponentDeploymentState({ current, expectedGeneration, lane, changes, now = new Date().toISOString(), recovery = false, isAncestor, authenticateRecovery, updatedByWorkflow = "local-test", githubRunId = "local-test" } = {}) {
+export function advanceProductionComponentDeploymentState({ current, expectedGeneration, lane, changes, emergencyCompletion, now = new Date().toISOString(), recovery = false, isAncestor, authenticateRecovery, updatedByWorkflow = "local-test", githubRunId = "local-test" } = {}) {
   assertProductionComponentDeploymentState(current); assert.equal(expectedGeneration, current.generation); assert.ok(["NORMAL_APPLICATION", "SECURITY_INFRASTRUCTURE", "EMERGENCY_RECOVERY"].includes(lane));
   assert.ok(changes && typeof changes === "object" && !Array.isArray(changes));
   assert.ok(Object.keys(changes).length > 0, "A component-state transition must declare an authenticated component mutation set");
@@ -38,7 +48,7 @@ export function advanceProductionComponentDeploymentState({ current, expectedGen
     if (current.components[name]) {
       const sameSource = next.sourceSha === current.components[name].sourceSha;
       if (sameSource) {
-        assert.ok(!same(current.components[name], next), "No-op component update is forbidden");
+        assert.ok(!same(current.components[name], next) || emergencyCompletion, "No-op component update is forbidden");
         assert.notEqual(lane, "NORMAL_APPLICATION", "Normal deployment cannot rewrite a component without a new source identity");
       }
       if (lane === "EMERGENCY_RECOVERY") {
@@ -52,6 +62,17 @@ export function advanceProductionComponentDeploymentState({ current, expectedGen
   }
   const next = clone(current); next.generation++; next.updatedAt = now; next.updatedByLane = lane; next.updatedByWorkflow = updatedByWorkflow; next.githubRunId = String(githubRunId);
   for (const [name, value] of Object.entries(changes)) next.components[name] = clone(value);
+  if (emergencyCompletion) {
+    const { mode, sourceSha, evidenceSha256 } = emergencyCompletion;
+    assert.ok(Object.hasOwn(COMPLETED_EMERGENCY_PATHS, mode));
+    assert.equal(lane, mode === "backend-health-recovery" ? "EMERGENCY_RECOVERY" : "SECURITY_INFRASTRUCTURE");
+    assert.equal(changes.backend?.establishedThroughSha, sourceSha, "Emergency completion must bind its authenticated backend transition");
+    if (mode !== "backend-health-recovery") {
+      assert.equal(changes.security?.sourceSha, sourceSha, "Rotation completion requires atomic security state");
+      assert.equal(changes.security?.releaseIdentity, evidenceSha256, "Rotation completion must bind the security release identity");
+    }
+    next.completedEmergencyWork = { ...current.completedEmergencyWork, [mode]: { sourceSha, evidenceSha256 } };
+  }
   return Object.freeze(assertProductionComponentDeploymentState(next));
 }
 
@@ -84,7 +105,7 @@ export function createProductionComponentDeploymentStateClient({ run } = {}) {
 // DynamoDB only provides document-level conditional writes. A writer may retry
 // after an unrelated component advances, but never after its own predecessor
 // changed. This keeps one durable item without lost component updates.
-export function advanceProductionComponentDeploymentStateWithRetry({ client, current, lane, changes, maxRetries = 2, now = () => new Date().toISOString(), recovery = false, isAncestor, authenticateRecovery, updatedByWorkflow, githubRunId } = {}) {
+export function advanceProductionComponentDeploymentStateWithRetry({ client, current, lane, changes, emergencyCompletion, maxRetries = 2, now = () => new Date().toISOString(), recovery = false, isAncestor, authenticateRecovery, updatedByWorkflow, githubRunId } = {}) {
   assert.equal(typeof client?.read, "function"); assert.equal(typeof client?.advance, "function");
   assert.ok(Number.isSafeInteger(maxRetries) && maxRetries >= 0 && maxRetries <= 5);
   assertProductionComponentDeploymentState(current);
@@ -92,12 +113,13 @@ export function advanceProductionComponentDeploymentStateWithRetry({ client, cur
   assertProductionComponentDeploymentState({ ...clone(current), components: { ...clone(current.components), ...changes } });
   // Terminal writers are retry-safe: after a successful conditional write the
   // exact same authenticated terminal may rerun without another state write.
-  if (Object.entries(changes).every(([name, value]) => same(current.components[name], value)))
+  if (Object.entries(changes).every(([name, value]) => same(current.components[name], value))
+    && (!emergencyCompletion || same(current.completedEmergencyWork?.[emergencyCompletion.mode], { sourceSha: emergencyCompletion.sourceSha, evidenceSha256: emergencyCompletion.evidenceSha256 })))
     return Object.freeze({ state: current, attempts: 0, reconciledUnrelatedConcurrentUpdate: false, alreadyCurrent: true });
   const expectedComponents = Object.fromEntries(Object.keys(changes || {}).map((name) => [name, clone(current.components[name])]));
   let observed = current;
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
-    const next = advanceProductionComponentDeploymentState({ current: observed, expectedGeneration: observed.generation, lane, changes, now: now(), recovery, isAncestor, authenticateRecovery, updatedByWorkflow, githubRunId });
+    const next = advanceProductionComponentDeploymentState({ current: observed, expectedGeneration: observed.generation, lane, changes, emergencyCompletion, now: now(), recovery, isAncestor, authenticateRecovery, updatedByWorkflow, githubRunId });
     try {
       client.advance(observed, next);
       return Object.freeze({ state: next, attempts: attempt + 1, reconciledUnrelatedConcurrentUpdate: attempt > 0 });
@@ -107,6 +129,7 @@ export function advanceProductionComponentDeploymentStateWithRetry({ client, cur
       assert.ok(latest, "Deployment state disappeared during conditional update"); assertProductionComponentDeploymentState(latest);
       for (const [name, expected] of Object.entries(expectedComponents))
         assert.ok(same(latest.components[name], expected), `Concurrent update changed ${name}; reconcile before retrying.`);
+      if (emergencyCompletion) assert.ok(same(latest.completedEmergencyWork?.[emergencyCompletion.mode], current.completedEmergencyWork?.[emergencyCompletion.mode]), "Concurrent emergency completion changed; reconcile before retrying.");
       observed = latest;
     }
   }

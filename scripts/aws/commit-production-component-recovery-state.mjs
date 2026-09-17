@@ -41,6 +41,7 @@ export function commitBackendRecoveryComponentState({ evidence, client, run, rea
   assert.equal(sourceSha, evidence.imageReleaseSha); const component = authenticatedBackendRecoveryComponent(live, evidence); assert.equal(isProtectedMainAncestor(sourceSha), true, "Recovered backend source is not protected-main history."); assert.equal(isProtectedMainAncestor(evidence.sourceSha), true, "Recovery completion source is not protected-main history.");
   return advanceProductionComponentDeploymentStateWithRetry({ client, current: state, lane: "EMERGENCY_RECOVERY", recovery: true,
     changes: { backend: component },
+    emergencyCompletion: { mode: "backend-health-recovery", sourceSha: evidence.sourceSha, evidenceSha256: evidence.evidenceSha256 },
     authenticateRecovery: ({ next }) => { assert.equal(next.sourceSha, sourceSha); assert.equal(next.establishedThroughSha, evidence.sourceSha); }, ...writerContext });
 }
 

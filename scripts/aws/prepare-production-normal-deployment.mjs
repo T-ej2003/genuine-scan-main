@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { classifyProductionChanges, classifyProductionComponentRanges, PRODUCTION_RELEASE_CLASS } from "./production-deployment-classification.mjs";
 import { assertProductionComponentDeploymentState, createProductionComponentDeploymentStateClient, stateHash } from "./production-component-deployment-state.mjs";
 import { assertGithubOidcReleaseDeployerEnvironment, createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import { COMPLETED_EMERGENCY_PATHS } from "./production-completed-emergency-work.mjs";
 
 const SHA = /^[a-f0-9]{40}$/;
 const COMPONENTS = Object.freeze(["backend", "frontend", "database", "security"]);
@@ -28,11 +29,31 @@ export function buildProductionNormalDeploymentPlan({ sourceSha, state, readRang
   }
   for (const name of ["backend", "frontend"]) assert.ok(state.components[name], `${name} deployment state has not been bootstrapped.`);
   const files = Object.fromEntries(COMPONENTS.map((name) => [name, state.components[name] ? readRange(baselineOf(state.components[name]), sourceSha) : []]));
+  for (const [mode, completion] of Object.entries(state.completedEmergencyWork || {})) {
+    const established = completion.sourceSha;
+    assert.equal(isAncestor(established, sourceSha), true, "Emergency completion is not protected-main history");
+    assert.equal(isAncestor(established, baselineOf(state.components.backend)), true, "Emergency completion is ahead of authenticated backend state");
+    if (mode !== "backend-health-recovery")
+      assert.ok(state.components.security && isAncestor(established, state.components.security.sourceSha), "Rotation completion is ahead of authenticated security state");
+    const newerFiles = new Set(readRange(established, sourceSha));
+    for (const component of COMPONENTS) {
+      const baseline = baselineOf(state.components[component]);
+      if (!baseline || !isAncestor(baseline, established)) continue;
+      const completedFiles = new Set(readRange(baseline, established));
+      files[component] = files[component].filter((file) => !(COMPLETED_EMERGENCY_PATHS[mode].includes(file)
+        && completedFiles.has(file) && !newerFiles.has(file)
+        && classifyProductionChanges([file]).releaseClass === PRODUCTION_RELEASE_CLASS.EMERGENCY_RECOVERY));
+    }
+  }
   // Component baselines can lag an already-completed stronger or recovery
   // transition. Remove only a prior sensitive path whose terminal component
   // state proves it was established; a later edit remains in the range.
   for (const component of COMPONENTS) for (const establishedComponent of COMPONENTS) {
     const baseline = baselineOf(state.components[component]), established = baselineOf(state.components[establishedComponent]);
+    // A rotation establishes its own security identity, not arbitrary IAM/RBAC
+    // work that happens to precede it. Only its explicit paths were cleared above.
+    if (establishedComponent === "security" && Object.entries(state.completedEmergencyWork || {}).some(([mode, proof]) => mode.startsWith("rotation-")
+      && proof.sourceSha === established && proof.evidenceSha256 === state.components.security?.releaseIdentity)) continue;
     if (!baseline || !established || !isAncestor(baseline, established) || !isAncestor(established, sourceSha)) continue;
     const establishedFiles = new Set(readRange(baseline, established)); const newerFiles = new Set(readRange(established, sourceSha));
     files[component] = files[component].filter((file) => {

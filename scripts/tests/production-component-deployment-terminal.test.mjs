@@ -87,6 +87,7 @@ test("backend recovery forwards its explicit regression authority through the CA
   const evidence = completedBackendRecoveryEvidence({ sourceSha: recoverySource, imageReleaseSha: source, recoveryImageDigest: live.backendDigest, targetArn: live.taskDefinitionArn, candidateFingerprint: taskDefinitionFingerprint(snapshot.definition) });
   const result = commitBackendRecoveryComponentState({ evidence, readers, client: { read: () => initial, advance: () => {} }, isProtectedMainAncestor: () => true });
   assert.equal(result.state.components.backend.sourceSha, source); assert.equal(result.state.components.backend.establishedThroughSha, recoverySource);
+  assert.deepEqual(result.state.completedEmergencyWork["backend-health-recovery"], { sourceSha: recoverySource, evidenceSha256: evidence.evidenceSha256 });
   let writes = 0;
   assert.throws(() => commitBackendRecoveryComponentState({ evidence, readers, client: { read: () => initial, advance: () => { writes += 1; } }, isProtectedMainAncestor: (value) => value !== recoverySource }), /completion source/);
   assert.equal(writes, 0); assert.equal(initial.components.backend.establishedThroughSha, "a".repeat(40));
@@ -138,6 +139,7 @@ test("overlap and cleanup atomically record the live backend for the next normal
     assert.equal(classifyNormalLiveComponentState({ live, predecessor: initial.components.backend, candidate: { sourceSha: recoverySource, imageDigest: `sha256:${"4".repeat(64)}` } }), "LIVE_IS_UNKNOWN");
     const result = commitRotationComponentState(options);
     assert.equal(writes, 1); assert.deepEqual(result.state.components.backend, { ...live, establishedThroughSha: source });
+    assert.deepEqual(result.state.completedEmergencyWork[mode], { sourceSha: source, evidenceSha256: result.state.components.security.releaseIdentity });
     assert.deepEqual(result.state.components.frontend, initial.components.frontend);
     const candidate = { sourceSha: recoverySource, imageDigest: `sha256:${"4".repeat(64)}` };
     assert.equal(classifyNormalLiveComponentState({ live, predecessor: result.state.components.backend, candidate }), "LIVE_IS_PREDECESSOR");

@@ -35,7 +35,7 @@ export function commitRotationComponentState({ mode, sourceSha, rotationId, rota
   assert.equal(isProtectedMainAncestor(imageSource), true, "Rotated backend source is not protected-main history.");
   const backend = { sourceSha: imageSource, establishedThroughSha: sourceSha, imageDigest: live.backendDigest, taskDefinitionArn: live.taskDefinitionArn, desiredCount: live.desiredCount };
   const releaseIdentity = hash({ mode, sourceSha, rotationId, rotationStateSha256, readinessSha256, readiness: readiness.evidence });
-  return advanceProductionComponentDeploymentStateWithRetry({ client, current, lane: "SECURITY_INFRASTRUCTURE", changes: { security: { sourceSha, releaseIdentity }, backend }, ...writerContext });
+  return advanceProductionComponentDeploymentStateWithRetry({ client, current, lane: "SECURITY_INFRASTRUCTURE", changes: { security: { sourceSha, releaseIdentity }, backend }, emergencyCompletion: { mode, sourceSha, evidenceSha256: releaseIdentity }, ...writerContext });
 }
 
 function main() {

@@ -12,6 +12,8 @@ Overlap and cleanup rotations commit the verified backend identity and security 
 
 Legacy backend-health recovery records only the canonical `mscqr-backend` target after validating recovery evidence and fresh task/digest readback. Its artifact source and completed-recovery revision remain separate. This does not widen the green-family app-only activation boundary; legacy-to-green migration still belongs to the stronger lane.
 
+Successful recovery/rotation terminals also atomically record their source and evidence identity in `completedEmergencyWork` in the same component-state item. Normal preparation uses these operation-specific completions only for the operation's explicit source paths in a lagging range. Later edits, unrelated emergency code, and unrelated security work still require the stronger lane. Bootstrap and normal releases cannot create these completions; no operator action is added to routine deployment.
+
 ## One-time bootstrap
 
 Before the first normal deployment, create the protected `production-component-state-bootstrap` GitHub environment with the same independent-approval rule as production, then run **Bootstrap Production Component Deployment State** from protected `main`. The workflow reads the current backend and frontend ECS/ECR identities, proves their protected-main source tags, initializes each reconciliation baseline to that proven source, and conditionally creates the single state record. It rejects an existing record and never uses workflow history as deployment state.
