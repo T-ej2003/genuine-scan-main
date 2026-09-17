@@ -21,6 +21,7 @@ export function assertBackend(backend, workspace) {
   for (const field of ["bucket", "key", "region", "encrypt", "use_lockfile"]) assert.deepEqual(backend.config[field], contract[field], `Wrong backend ${field}`);
   assert.deepEqual(backend.config.allowed_account_ids, [contract.account]);
   assert.equal(workspace, "default");
+  assert.equal(backend.config.max_retries, 0, "Backend retries must be disabled");
   for (const field of ["endpoint", "endpoints", "assume_role", "assume_role_with_web_identity", "profile", "skip_credentials_validation", "skip_requesting_account_id", "skip_region_validation"]) assert(!backend.config[field], `Backend override: ${field}`);
 }
 
@@ -30,7 +31,7 @@ export function assertInitialPlan(plan) {
   const providers = plan.configuration.provider_config;
   assert.deepEqual(Object.keys(providers), ["aws"]);
   assert.equal(providers.aws.full_name, "registry.terraform.io/hashicorp/aws");
-  assert.deepEqual(providers.aws.expressions, { allowed_account_ids: { constant_value: [contract.account] }, region: { constant_value: contract.region } });
+  assert.deepEqual(providers.aws.expressions, { allowed_account_ids: { constant_value: [contract.account] }, region: { constant_value: contract.region }, max_retries: { constant_value: 0 } });
   const configuration = plan.configuration.root_module;
   assert.equal(Object.keys(configuration.module_calls || {}).length, 0);
   assert(configuration.resources.every((resource) => !resource.provisioners?.length));

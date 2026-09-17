@@ -618,3 +618,15 @@ Real GitHub ZIP fixtures cover exact saved-plan bindings and substituted approva
 evidence. ESLint is clean for the integration. These are local source/fixture
 results, not live AWS or effective-permission proof. Final adversarial review,
 full local gates, PR CI and exact-head external review remain outstanding.
+
+### Retry-boundary review correction
+
+Pinned Terraform 1.15.8's S3 backend constructs a default of five retries even
+when the child environment sets `AWS_MAX_ATTEMPTS`. The backend and AWS provider
+now explicitly declare `max_retries = 0`, and activation rejects a different
+backend/provider retry configuration. This removes implicit SDK retry policy;
+it does not claim Terraform performs no read-only waiter polling. The actual
+isolated pinned Terraform/provider fmt, backend-disabled readonly initialization
+and validation pass, along with the changed activation tests (29 total).
+Source references: [Terraform S3 backend](https://github.com/hashicorp/terraform/blob/v1.15.8/internal/backend/remote-state/s3/backend.go)
+and [AWS provider retry configuration](https://github.com/hashicorp/terraform-provider-aws/blob/v6.65.0/website/docs/index.html.markdown).

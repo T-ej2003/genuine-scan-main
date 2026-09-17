@@ -6,6 +6,7 @@ terraform {
     region              = "eu-west-2"
     encrypt             = true
     use_lockfile        = true
+    max_retries         = 0
     allowed_account_ids = ["368992683803"]
   }
   required_providers {

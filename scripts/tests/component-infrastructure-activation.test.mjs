@@ -5,20 +5,20 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { assertBackend, assertInitialPlan, assertAuthorization, assertEnvironment, contract, stack, run, hash } from "../aws/component-infrastructure-activation.mjs";
-const backend = () => ({ type: "s3", config: { ...contract, allowed_account_ids: [contract.account] } });
+const backend = () => ({ type: "s3", config: { ...contract, allowed_account_ids: [contract.account], max_retries: 0 } });
 const plan = () => {
   const values = {
     "aws_dynamodb_table.component_deployment_state": { name: "mscqr-production-component-deployment-state", hash_key: "stateKey", attribute: [{ name: "stateKey", type: "S" }], billing_mode: "PAY_PER_REQUEST", server_side_encryption: [{ enabled: true }], point_in_time_recovery: [{ enabled: true }] },
   };
   return {
     errored: false, applyable: true,
-    configuration: { provider_config: { aws: { full_name: "registry.terraform.io/hashicorp/aws", expressions: { allowed_account_ids: { constant_value: [contract.account] }, region: { constant_value: contract.region } } } }, root_module: { resources: contract.expectedManagedAddresses.map((address) => ({ address })) } },
+    configuration: { provider_config: { aws: { full_name: "registry.terraform.io/hashicorp/aws", expressions: { allowed_account_ids: { constant_value: [contract.account] }, region: { constant_value: contract.region }, max_retries: { constant_value: 0 } } } }, root_module: { resources: contract.expectedManagedAddresses.map((address) => ({ address })) } },
     resource_changes: contract.expectedManagedAddresses.map((address) => ({ address, mode: "managed", type: "aws_dynamodb_table", provider_name: "registry.terraform.io/hashicorp/aws", change: { actions: ["create"], after: values[address] } })),
   };
 };
 test("fixed backend never accepts local state, other keys, bucket, account, region or workspace", () => {
   assertBackend(backend(), "default");
-  for (const [field, value] of [["bucket", "other"], ["key", "mscqr/production/rls-green/stage-a/terraform.tfstate"], ["region", "eu-west-1"], ["allowed_account_ids", ["000000000000"]], ["use_lockfile", false], ["encrypt", false]]) {
+  for (const [field, value] of [["bucket", "other"], ["key", "mscqr/production/rls-green/stage-a/terraform.tfstate"], ["region", "eu-west-1"], ["allowed_account_ids", ["000000000000"]], ["use_lockfile", false], ["encrypt", false], ["max_retries", 5]]) {
     const changed = backend(); changed.config[field] = value;
     assert.throws(() => assertBackend(changed, "default"));
   }
