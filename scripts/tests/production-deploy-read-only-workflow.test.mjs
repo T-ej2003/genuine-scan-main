@@ -19,6 +19,33 @@ const workflow = yaml.load(workflowText);
 const sha = "a".repeat(40);
 const cleanState = { remoteDefaultBranch: "main", shallow: false, mergeInProgress: false, rebaseInProgress: false, cherryPickInProgress: false };
 
+test("component workflows gate credentials and mutation behind exact protected environments", () => {
+  const bootstrap = yaml.load(fs.readFileSync(".github/workflows/bootstrap-production-component-deployment-state.yml", "utf8"));
+  const activation = yaml.load(fs.readFileSync(".github/workflows/authorize-component-infrastructure-activation.yml", "utf8"));
+  for (const [job, environment, command] of [
+    [workflow.jobs.classify, "production-normal-deploy", "production-normal-release.mjs --reconcile"],
+    [workflow.jobs.deploy, "production-normal-deploy", "production-normal-release.mjs --source-sha"],
+    [bootstrap.jobs.bootstrap, "production-component-state-bootstrap", "bootstrap-production-component-deployment-state.mjs"],
+  ]) {
+    // GitHub evaluates required reviewers before starting any environment job,
+    // not through an application-created approval token or fabricated receipt.
+    assert.equal(job.environment, environment);
+    const credentials = job.steps.findIndex((step) => step.uses === "aws-actions/configure-aws-credentials@v6");
+    const mutation = job.steps.findIndex((step) => step.run?.includes(command));
+    assert(credentials >= 0 && mutation > credentials);
+    assert.equal(job.steps[credentials].with["unset-current-credentials"], true);
+    assert(job.steps.some((step) => step.run?.includes("refs/remotes/origin/main")));
+  }
+  assert.equal(bootstrap.jobs.bootstrap.if, "github.ref == 'refs/heads/main'");
+  assert.equal(workflow.jobs.classify.if, "github.ref == 'refs/heads/main'");
+  assert(workflow.jobs.deploy.needs.includes("classify"));
+  assert(workflow.jobs.deploy.if.includes("needs.classify.result == 'success'"));
+  assert.equal(activation.jobs.authorize.environment, "production-component-infrastructure-activation");
+  assert.equal(activation.jobs.authorize.if, "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'");
+  assert.deepEqual(activation.permissions, { contents: "read" });
+  assert(activation.jobs.authorize.steps.some((step) => step.run?.includes('test "$GITHUB_RUN_ATTEMPT" = 1')));
+});
+
 test("normal production deployment is automatically triggered from protected main", () => {
   assert.ok(Object.hasOwn(workflow.on || workflow[true] || {}, "workflow_dispatch"));
   assert.ok(workflow.on?.push?.branches?.includes("main") || workflow[true]?.push?.branches?.includes("main"));

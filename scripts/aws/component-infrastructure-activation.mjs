@@ -12,6 +12,7 @@ import { createProductionAwsCredentialEnvironment, createProductionGithubCredent
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const stack = "infra/aws/terraform/production-component-deployment-state";
 export const contract = JSON.parse(fs.readFileSync(path.join(root, stack, "state-backend-contract.json")));
+const environmentContract = JSON.parse(fs.readFileSync(path.join(root, stack, "github-environment-contract.json")));
 const repository = "T-ej2003/genuine-scan-main";
 const workflow = "authorize-component-infrastructure-activation.yml";
 export const hash = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
@@ -112,9 +113,8 @@ export function assertEnvironment(config, branches) {
   assert.deepEqual(branches.branch_policies.map(({ name, type }) => ({ name, type })), [{ name: "main", type: "branch" }]);
   const rules = config.protection_rules.filter((rule) => rule.type === "required_reviewers");
   assert.equal(rules.length, 1);
-  assert.equal(rules[0].prevent_self_review, true);
-  assert(rules[0].reviewers.length > 0);
-  assert(rules[0].reviewers.every(({ type, reviewer }) => type === "User" && Number.isSafeInteger(reviewer.id)));
+  assert.equal(rules[0].prevent_self_review, false);
+  assert.deepEqual(rules[0].reviewers.map(({ type, reviewer }) => ({ type, login: reviewer.login, id: reviewer.id })), [environmentContract.requiredReviewer]);
   return rules[0].reviewers.map(({ reviewer }) => reviewer.id);
 }
 
@@ -242,7 +242,9 @@ export function run(argv = process.argv.slice(2), deps = {}) {
   const approvals = gh(`actions/runs/${approvalRun}/approvals`).filter((item) => item.state === "approved" && item.environments.some(({ id }) => id === config.id));
   assert.equal(approvals.length, 1);
   assert(reviewers.includes(approvals[0].user.id));
-  assert.notEqual(approvals[0].user.id, run.actor.id);
+  assert.equal(approvals[0].user.login, environmentContract.requiredReviewer.login);
+  assert.equal(run.actor.id, environmentContract.authorizedOperator.id);
+  assert.equal(run.actor.login, environmentContract.authorizedOperator.login);
   const download = fs.mkdtempSync(path.join(os.tmpdir(), "component-activation-approval-"));
   exec("gh", ["run", "download", approvalRun, "--repo", repository, "--name", "component-infrastructure-authorization", "--dir", download]);
   const authorization = json(path.join(download, "authorization.json"));

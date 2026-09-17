@@ -35,10 +35,12 @@ writer is inactive. Never delete the permanent initial-activation attempt record
    `production-component-state-bootstrap`, and
    `production-component-infrastructure-activation`. In Settings → Environments,
    select **Selected branches and tags**, add exactly **branch main** (no tags),
-   require an existing authorized independent User reviewer, prevent self-review,
-   and disable administrator bypass. Remove other branch/tag rules. Reviewer IDs
-   must be authenticated, not guessed. If no eligible reviewer or plan-supported
-   protection is available, stop; do not substitute self-approval.
+   require exactly User **T-ej2003** (GitHub ID `183396573`), allow self-review
+   (`prevent_self_review=false`), and disable administrator bypass. Remove other
+   branch/tag rules. MSCQR currently has one authorized production operator and
+   reviewer: T-ej2003 may initiate and explicitly approve the same run. This does
+   not authorize automatic approval or administrator bypass. If required-reviewer
+   protection is unavailable, stop rather than remove the approval gate.
 3. Keep the existing default repository OIDC subject configuration. Normal trust
    remains `repo:T-ej2003/genuine-scan-main:environment:production-normal-deploy`;
    bootstrap trust remains
@@ -48,7 +50,7 @@ writer is inactive. Never delete the permanent initial-activation attempt record
 4. Authenticate an MFA-backed, non-root `mscqr-production-release-deployer`
    session through the existing operator path. **Existing permissions are not
    presumed sufficient.** This role's existing source contracts deliberately
-   restrict IAM creation. An independently authorized one-time privilege bootstrap
+   restrict IAM creation. A separately authorized one-time privilege bootstrap
    is necessary if its policy/boundary does not permit this installation. Stop at
    that boundary; this PR does not change the release role's general privileges,
    reuse the unrelated reconciler bootstrap role, or grant AdministratorAccess.
@@ -119,8 +121,8 @@ ABSENT state identity, exact operator session ARN/issuance and plan hash. Keep p
 private and unchanged; do not commit/upload a plan containing private values.
 
 Dispatch **Authorize component infrastructure activation** on main with the
-printed `sourceSha`, `planSha256`, and `preparationSha256`. The independent
-environment reviewer must inspect the exact private plan/preparation and approve
+printed `sourceSha`, `planSha256`, and `preparationSha256`. T-ej2003 must
+inspect the exact private plan/preparation and explicitly approve
 only those hashes. No AWS mutation occurs in this authorization workflow.
 
 After approval and successful workflow completion, within 30 minutes of dispatch:
@@ -130,7 +132,7 @@ node scripts/aws/component-infrastructure-activation.mjs apply "$activation_dir"
 ```
 
 The command authenticates the successful exact-main workflow run, first attempt,
-actual independent approval, current environment protections and downloaded
+actual approval by the authorized sole operator, current environment protections and downloaded
 authorization artifact. It rechecks source, caller, backend, missing state,
 resource scope and hashes. Any movement requires a fresh preparation/review;
 never regenerate the plan under an old approval.
@@ -183,3 +185,19 @@ state (version-history check); and PR validation sharing production concurrency
 (separate PR-test group). Focused mocked tests cover exact saved-plan execution,
 missing approval, source/hash movement, existing state and consumed reservation.
 These are source/local proofs, not a production activation result.
+
+## Solo-operator governance boundary
+
+The solo-operator exception applies only to the three environments named in
+`github-environment-contract.json`. No second human identity is required. MFA
+operator provenance, protected-main/source binding, exact saved-plan/state/hash
+bindings, account/region restrictions, backend locking and one-time reservation
+remain mandatory. GitHub approval history and the source-bound authorization
+artifact retain the audit trail. No code automatically approves a deployment.
+
+[GitHub Prevent self-review](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments)
+would prevent the sole initiator from approving even as the required reviewer;
+therefore it must be disabled for these three environments. All other protection
+requirements remain enabled. Historical Stage-A/Stage-B maker-checker contracts
+are unchanged. If MSCQR later adds authorized operators, review the explicit
+identity contract rather than silently accepting additional reviewers.
