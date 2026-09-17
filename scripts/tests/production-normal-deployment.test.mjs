@@ -89,6 +89,17 @@ test("recorded security work does not deadlock an unrelated frontend release, bu
   assert.throws(() => buildProductionNormalDeploymentPlan({ sourceSha: c, state: { ...state, components: { ...state.components, security: null } }, isAncestor: () => true, readRange: (left, right) => ranges.get(`${left}..${right}`) || [] }), /Sensitive|stronger-lane/);
 });
 
+test("completed recovery paths do not strand stale stronger-component ranges", () => {
+  const a = "a".repeat(40), b = "b".repeat(40), c = "c".repeat(40);
+  const backend = { sourceSha: b, imageDigest: `sha256:${"1".repeat(64)}`, taskDefinitionArn: `arn:aws:ecs:eu-west-2:368992683803:task-definition/${APP_ONLY.family}:1`, desiredCount: 2 };
+  const frontend = { sourceSha: a, imageDigest: `sha256:${"2".repeat(64)}`, taskDefinitionArn: taskArn, desiredCount: 2 };
+  const state = createProductionComponentDeploymentState({ components: { backend, frontend, database: null, security: null } });
+  const ranges = new Map([[`${a}..${b}`, ["scripts/aws/recover-production-backend-health.mjs"]], [`${a}..${c}`, ["scripts/aws/recover-production-backend-health.mjs", "src/App.tsx"]], [`${b}..${c}`, ["src/App.tsx"]]]);
+  const options = { sourceSha: c, state, isAncestor: (left, right) => [a, b, c].indexOf(left) <= [a, b, c].indexOf(right), readRange: (left, right) => ranges.get(`${left}..${right}`) || [] };
+  assert.equal(buildProductionNormalDeploymentPlan(options).classification.frontend, true);
+  assert.throws(() => buildProductionNormalDeploymentPlan({ ...options, state: { ...state, components: { ...state.components, backend: { ...backend, sourceSha: a } } } }), /Sensitive|stronger-lane/);
+});
+
 test("normal plans require only immutable affected images", () => {
   const backendPlan = buildNormalReleasePlan({ sourceSha, changedFiles: ["backend/src/services/batchService.ts"], images: { backend: backendImage } });
   assert.equal(backendPlan.classification.backend, true);

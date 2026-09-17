@@ -27,15 +27,21 @@ export function buildProductionNormalDeploymentPlan({ sourceSha, state, readRang
   }
   for (const name of ["backend", "frontend"]) assert.ok(state.components[name], `${name} deployment state has not been bootstrapped.`);
   const files = Object.fromEntries(COMPONENTS.map((name) => [name, state.components[name] ? readRange(state.components[name].sourceSha, sourceSha) : []]));
-  // A component's own range can contain an already-completed stronger-lane
-  // commit. Remove only those previously-recorded sensitive paths, and retain
-  // any path changed again after that stronger baseline.
-  for (const component of ["backend", "frontend"]) for (const stronger of ["security", "database"]) {
-    const baseline = state.components[component]?.sourceSha, established = state.components[stronger]?.sourceSha;
+  // Component baselines can lag an already-completed stronger or recovery
+  // transition. Remove only a prior sensitive path whose terminal component
+  // state proves it was established; a later edit remains in the range.
+  for (const component of COMPONENTS) for (const establishedComponent of COMPONENTS) {
+    const baseline = state.components[component]?.sourceSha, established = state.components[establishedComponent]?.sourceSha;
     if (!baseline || !established || !isAncestor(baseline, established) || !isAncestor(established, sourceSha)) continue;
     const establishedFiles = new Set(readRange(baseline, established)); const newerFiles = new Set(readRange(established, sourceSha));
-    files[component] = files[component].filter((file) => !(establishedFiles.has(file) && !newerFiles.has(file)
-      && classifyProductionChanges([file]).releaseClass !== PRODUCTION_RELEASE_CLASS.NORMAL_APPLICATION));
+    files[component] = files[component].filter((file) => {
+      if (!establishedFiles.has(file) || newerFiles.has(file)) return true;
+      const classification = classifyProductionChanges([file]);
+      const releaseClass = classification.releaseClass;
+      if (releaseClass === PRODUCTION_RELEASE_CLASS.EMERGENCY_RECOVERY) return false;
+      return !(releaseClass === PRODUCTION_RELEASE_CLASS.SECURITY_INFRASTRUCTURE
+        && (establishedComponent === "security" || (establishedComponent === "database" && classification.database)));
+    });
   }
   const classification = classifyProductionComponentRanges({ backendFiles: files.backend, frontendFiles: files.frontend, securityFiles: files.security, databaseFiles: files.database });
   for (const component of ["backend", "frontend"].filter((name) => classification[name])) {

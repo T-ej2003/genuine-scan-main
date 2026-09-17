@@ -18,6 +18,9 @@ test("component deployment state Terraform fixes the table, key, and exact write
   const frontend = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-frontend:*";
   const tag = policy.Statement.find(({ Sid }) => Sid === "PreserveTaskDefinitionTags");
   assert.deepEqual(tag.Resource, [backendCandidate, frontend]);
+  const register = policy.Statement.find(({ Sid }) => Sid === "RegisterExactFamilies");
+  assert.equal(register.Resource, "*");
+  assert.deepEqual(register.Condition, { StringEquals: { "aws:RequestedRegion": "eu-west-2" } });
   const frontendRead = policy.Statement.find(({ Sid }) => Sid === "ReadExactFrontendImage");
   assert.deepEqual(frontendRead.Action, ["ecr:DescribeImages", "ecr:DescribeRepositories"]);
 });
