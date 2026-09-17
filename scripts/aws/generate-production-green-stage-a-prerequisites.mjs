@@ -243,14 +243,29 @@ const canonicalIpv4Cidrs = (values, label) => {
 
 const dns = (value) => String(value || "").trim().replace(/\.+$/, "").toLowerCase();
 const exactAliases = (values) => JSON.stringify([...(values || [])].map(dns).sort()) === JSON.stringify([...PRODUCTION_PUBLIC_ALIASES]);
-const glob = (pattern) => new RegExp(`^${String(pattern).split("*").map((part) => part.replace(/[|\\{}()[\]^$+?.]/g, "\\$&")).join(".*")}$`);
+const cloudFrontPattern = (value) => { const pattern = String(value || ""); return pattern.startsWith("/") ? pattern : `/${pattern}`; };
+const glob = (value) => new RegExp(`^${[...cloudFrontPattern(value)].map((character) => character === "*" ? ".*" : character === "?" ? "." : character.replace(/[|\\{}()[\]^$+.]/g, "\\$&")).join("")}$`);
+const intersectsApiNamespace = (value) => {
+  const pattern = cloudFrontPattern(value); let states = new Set([0]);
+  const close = () => { for (const index of states) if (pattern[index] === "*") states.add(index + 1); };
+  close();
+  for (const character of "/api/") {
+    const next = new Set();
+    for (const index of states) {
+      if (pattern[index] === "*") next.add(index);
+      else if (pattern[index] === "?" || pattern[index] === character) next.add(index + 1);
+    }
+    states = next; close();
+  }
+  return states.size > 0;
+};
 const apiBehavior = (config, requestPath) => {
   const behavior = (config.CacheBehaviors?.Items || []).find(({ PathPattern }) => typeof PathPattern === "string" && glob(PathPattern).test(requestPath)) || config.DefaultCacheBehavior;
   if (!behavior || typeof behavior.TargetOriginId !== "string" || !behavior.TargetOriginId) throw new Error("Stage B backend CloudFront API behavior is not provable.");
   return behavior;
 };
 const behaviorPath = ({ PathPattern } = {}) => typeof PathPattern === "string" && PathPattern ? PathPattern : "<default>";
-const apiNamespaceBehavior = ({ PathPattern } = {}) => typeof PathPattern === "string" && /^\/?api(?:\/|\*|$)/.test(PathPattern);
+const apiNamespaceBehavior = ({ PathPattern } = {}) => typeof PathPattern === "string" && intersectsApiNamespace(PathPattern);
 
 export function collectStageBBackendProxyTrust({ vpcId, run } = {}) {
   const loadBalancers = awsJson(["elbv2", "describe-load-balancers", "--names", PRODUCTION_BACKEND_ALB_NAME, "--region", STAGE_B.region, "--output", "json", "--no-cli-pager"], run).LoadBalancers || [];
@@ -297,7 +312,7 @@ export function collectStageBBackendProxyTrust({ vpcId, run } = {}) {
   if (apiBehaviors.some((behavior) => behavior.TargetOriginId !== targetOriginId)) throw new Error("Stage B backend CloudFront API behavior does not route to the reviewed ALB origin.");
   const configuredBehaviors = [config.DefaultCacheBehavior, ...(config.CacheBehaviors?.Items || [])].filter(Boolean);
   const backendBehaviors = configuredBehaviors.filter((behavior) => behavior.TargetOriginId === targetOriginId).map((behavior) => ({ pathPattern: behaviorPath(behavior), targetOriginId: behavior.TargetOriginId, viewerProtocolPolicy: behavior.ViewerProtocolPolicy })).sort((left, right) => left.pathPattern.localeCompare(right.pathPattern));
-  const apiNamespaceCovered = config.DefaultCacheBehavior?.TargetOriginId === targetOriginId || configuredBehaviors.some((behavior) => behavior.PathPattern === "/api/*" && behavior.TargetOriginId === targetOriginId);
+  const apiNamespaceCovered = config.DefaultCacheBehavior?.TargetOriginId === targetOriginId || configuredBehaviors.some((behavior) => cloudFrontPattern(behavior.PathPattern) === "/api/*" && behavior.TargetOriginId === targetOriginId);
   if (!apiNamespaceCovered || backendBehaviors.some(({ viewerProtocolPolicy }) => viewerProtocolPolicy !== "redirect-to-https") || configuredBehaviors.filter(apiNamespaceBehavior).some((behavior) => behavior.TargetOriginId !== targetOriginId || behavior.ViewerProtocolPolicy !== "redirect-to-https")) throw new Error("Every Stage B backend CloudFront API or ALB behavior must redirect viewers to HTTPS.");
   const records = (awsJson(["route53", "list-resource-record-sets", "--hosted-zone-id", PRODUCTION_HOSTED_ZONE_ID, "--output", "json", "--no-cli-pager"], run).ResourceRecordSets || [])
     .filter(({ Name, Type }) => PRODUCTION_PUBLIC_ALIASES.includes(dns(Name)) && (Type === "A" || Type === "AAAA"));

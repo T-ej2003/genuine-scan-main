@@ -273,7 +273,7 @@ test("Stage A backend proxy collector binds mutable ALB XFF attributes and rejec
     if (args[0] === "route53" && args[1] === "list-resource-record-sets" && needle === "route53") {
       const parsed = JSON.parse(value); parsed.ResourceRecordSets[0].AliasTarget.DNSName = "mscqr-alb-euw2.example.elb.amazonaws.com."; return JSON.stringify(parsed);
     }
-    if (args[0] === "cloudfront" && args[1] === "get-distribution-config" && ["behavior", "viewer-allow-http", "sampled-only-https", "sampled-only-backend", "api-other-origin", "origin-http", "origin-match-viewer", "origin-port"].includes(needle)) {
+    if (args[0] === "cloudfront" && args[1] === "get-distribution-config" && ["behavior", "viewer-allow-http", "sampled-only-https", "sampled-only-backend", "api-other-origin", "wildcard-api-origin", "question-api-origin", "origin-http", "origin-match-viewer", "origin-port"].includes(needle)) {
       const parsed = JSON.parse(value);
       if (needle === "behavior") parsed.DistributionConfig.DefaultCacheBehavior.TargetOriginId = "unused";
       if (needle === "viewer-allow-http") parsed.DistributionConfig.DefaultCacheBehavior.ViewerProtocolPolicy = "allow-all";
@@ -290,6 +290,8 @@ test("Stage A backend proxy collector binds mutable ALB XFF attributes and rejec
         ] };
       }
       if (needle === "api-other-origin") parsed.DistributionConfig.CacheBehaviors = { Items: [{ PathPattern: "/api/admin/*", TargetOriginId: "other", ViewerProtocolPolicy: "redirect-to-https" }] };
+      if (needle === "wildcard-api-origin") parsed.DistributionConfig.CacheBehaviors = { Items: [{ PathPattern: "*/admin/*", TargetOriginId: "other", ViewerProtocolPolicy: "allow-all" }] };
+      if (needle === "question-api-origin") parsed.DistributionConfig.CacheBehaviors = { Items: [{ PathPattern: "/?pi/admin/*", TargetOriginId: "other", ViewerProtocolPolicy: "allow-all" }] };
       if (needle === "origin-http") parsed.DistributionConfig.Origins.Items[0].CustomOriginConfig.OriginProtocolPolicy = "http-only";
       if (needle === "origin-match-viewer") parsed.DistributionConfig.Origins.Items[0].CustomOriginConfig.OriginProtocolPolicy = "match-viewer";
       if (needle === "origin-port") parsed.DistributionConfig.Origins.Items[0].CustomOriginConfig.HTTPSPort = 8443;
@@ -302,7 +304,7 @@ test("Stage A backend proxy collector binds mutable ALB XFF attributes and rejec
   };
   assert.throws(() => collectStageBBackendProxyTrust({ vpcId: "vpc-0123456789abcdef0", run: replace("route53") }), /Route53 aliases/);
   assert.throws(() => collectStageBBackendProxyTrust({ vpcId: "vpc-0123456789abcdef0", run: replace("behavior") }), /API behavior/);
-  for (const drift of ["viewer-allow-http", "sampled-only-https", "sampled-only-backend", "api-other-origin"]) assert.throws(() => assertStageBBackendProxyTrustCurrent({ expected: trust, vpcId: "vpc-0123456789abcdef0", run: replace(drift) }), /redirect viewers to HTTPS/);
+  for (const drift of ["viewer-allow-http", "sampled-only-https", "sampled-only-backend", "api-other-origin", "wildcard-api-origin", "question-api-origin"]) assert.throws(() => assertStageBBackendProxyTrustCurrent({ expected: trust, vpcId: "vpc-0123456789abcdef0", run: replace(drift) }), /redirect viewers to HTTPS/);
   for (const drift of ["origin-http", "origin-match-viewer", "origin-port"]) assert.throws(() => assertStageBBackendProxyTrustCurrent({ expected: trust, vpcId: "vpc-0123456789abcdef0", run: replace(drift) }), /HTTPS-only port 443/);
   for (const drift of ["mode-preserve", "mode-remove", "client-port"]) assert.throws(() => assertStageBBackendProxyTrustCurrent({ expected: trust, vpcId: "vpc-0123456789abcdef0", run: replace(drift) }), /X-Forwarded-For attributes/);
   for (const invalid of ["missing-mode", "missing-client-port", "duplicate-mode", "malformed-attribute", "missing-attributes"]) assert.throws(() => collectStageBBackendProxyTrust({ vpcId: "vpc-0123456789abcdef0", run: replace(invalid) }), /attribute|attributes/);
