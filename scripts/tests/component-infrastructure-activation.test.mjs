@@ -86,23 +86,30 @@ test("authorization binds exact source, plan bytes, preparation and absent remot
   for (const field of Object.keys(binding)) assert.throws(() => assertAuthorization({ ...binding, [field]: "d".repeat(64) }, preparation, binding));
   assert.throws(() => assertAuthorization(binding, { ...preparation, stateIdentity: "changed" }, binding));
 });
-test("environment requires exact main branch and independent real reviewer without bypass", () => {
-  const config = { can_admins_bypass: false, deployment_branch_policy: { protected_branches: false, custom_branch_policies: true }, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 1 } }] }] };
+test("environment requires exact main branch and explicit sole-operator reviewer without bypass", () => {
+  const config = { can_admins_bypass: false, deployment_branch_policy: { protected_branches: false, custom_branch_policies: true }, protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{ type: "User", reviewer: { id: 183396573, login: "T-ej2003" } }] }] };
   const branches = { branch_policies: [{ name: "main", type: "branch" }] };
   assertEnvironment(config, branches);
   assert.throws(() => assertEnvironment({ ...config, can_admins_bypass: true }, branches));
   assert.throws(() => assertEnvironment(config, { branch_policies: [{ name: "main", type: "tag" }] }));
   assert.throws(() => assertEnvironment(config, { branch_policies: [...branches.branch_policies, { name: "*", type: "branch" }] }));
+  for (const rule of [
+    { ...config.protection_rules[0], prevent_self_review: true },
+    { ...config.protection_rules[0], reviewers: [] },
+    { ...config.protection_rules[0], reviewers: [{ type: "User", reviewer: { id: 1, login: "T-ej2003" } }] },
+    { ...config.protection_rules[0], reviewers: [{ type: "Team", reviewer: { id: 183396573, login: "T-ej2003" } }] },
+  ]) assert.throws(() => assertEnvironment({ ...config, protection_rules: [rule] }, branches));
 });
 
-function installation(t, { changedSource = false, changedPlan = false, existingState = false, replay = false, approval = true, inherited = {}, provenance = () => issuance(), rejectedProvenance = false } = {}) {
+function installation(t, { changedSource = false, changedPlan = false, existingState = false, replay = false, approval = true, wrongReviewer = false, wrongInitiator = false, inherited = {}, provenance = () => issuance(), rejectedProvenance = false } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "component-install-test-"));
   t.after(() => fs.rmSync(dir, { recursive: true }));
   const calls = [];
   const children = [];
   const sourceSha = "a".repeat(40);
   let applying = false;
-  const config = { id: 20, can_admins_bypass: false, deployment_branch_policy: { protected_branches: false, custom_branch_policies: true }, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 2 } }] }] };
+  const operator = { id: 183396573, login: "T-ej2003" };
+  const config = { id: 20, can_admins_bypass: false, deployment_branch_policy: { protected_branches: false, custom_branch_policies: true }, protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{ type: "User", reviewer: operator }] }] };
   const branches = { branch_policies: [{ name: "main", type: "branch" }] };
   const execute = (name, args, { env }) => {
     calls.push([name, ...args]);
@@ -124,8 +131,8 @@ function installation(t, { changedSource = false, changedPlan = false, existingS
       if (endpoint.endsWith("branches/main")) value = { commit: { sha: applying && changedSource ? "b".repeat(40) : sourceSha } };
       else if (endpoint.endsWith("deployment-branch-policies")) value = branches;
       else if (endpoint.includes("/environments/")) value = config;
-      else if (endpoint.endsWith("/approvals")) value = approval ? [{ state: "approved", environments: [{ id: 20 }], user: { id: 2 } }] : [];
-      else value = { path: ".github/workflows/authorize-component-infrastructure-activation.yml", head_sha: sourceSha, head_branch: "main", head_repository: { full_name: "T-ej2003/genuine-scan-main" }, event: "workflow_dispatch", conclusion: "success", run_attempt: 1, created_at: new Date().toISOString(), actor: { id: 1 } };
+      else if (endpoint.endsWith("/approvals")) value = approval ? [{ state: "approved", environments: [{ id: 20 }], user: wrongReviewer ? { id: 1, login: "other" } : operator }] : [];
+      else value = { path: ".github/workflows/authorize-component-infrastructure-activation.yml", head_sha: sourceSha, head_branch: "main", head_repository: { full_name: "T-ej2003/genuine-scan-main" }, event: "workflow_dispatch", conclusion: "success", run_attempt: 1, created_at: new Date().toISOString(), actor: wrongInitiator ? { id: 1, login: "other" } : operator };
     } else if (name === "aws") {
       if (["iam", "dynamodb"].includes(args[0])) throw Object.assign(new Error("Missing"), { stderr: `(${args[0] === "iam" ? "NoSuchEntity" : "ResourceNotFoundException"})` });
       if (args[0] === "configure") value = credentials;
@@ -209,7 +216,7 @@ test("apply rejects different issuance even with identical session ARN before re
   assert(!calls.some(([name, , operation]) => name === "terraform" && operation === "apply"));
 });
 
-test("mocked installation binds approval, reserves once, applies only saved binary, then verifies", (t) => {
+test("sole initiator may explicitly approve exact plan; installation reserves once and verifies", (t) => {
   const { calls, apply } = installation(t);
   apply();
   const writes = calls.filter(([name, , operation]) => name === "aws" && operation === "put-object");
@@ -219,7 +226,7 @@ test("mocked installation binds approval, reserves once, applies only saved bina
   assert(applies[0].at(-1).endsWith("/activation.tfplan"));
   assert(calls.indexOf(writes[0]) < calls.indexOf(applies[0]));
 });
-for (const scenario of [{ changedSource: true }, { changedPlan: true }, { existingState: true }, { replay: true }, { approval: false }]) {
+for (const scenario of [{ changedSource: true }, { changedPlan: true }, { existingState: true }, { replay: true }, { approval: false }, { wrongReviewer: true }, { wrongInitiator: true }]) {
   test(`mocked installation rejects before apply: ${JSON.stringify(scenario)}`, (t) => {
     const { calls, apply } = installation(t, scenario);
     assert.throws(apply);
