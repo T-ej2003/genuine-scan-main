@@ -224,7 +224,6 @@ jobs:
       SMOKE_VERIFY_CODE: ${{ secrets.PRODUCTION_SMOKE_VERIFY_CODE }}
       SMOKE_ADMIN_MFA_CODE: ${{ secrets.PRODUCTION_SMOKE_ADMIN_MFA_CODE }}
       SMOKE_ADMIN_MFA_SECRET: ${{ secrets.PRODUCTION_SMOKE_ADMIN_MFA_SECRET }}
-      MSCQR_APP_ONLY_JOURNAL_DIR: ${{ runner.temp }}/normal-release-journal
     steps:
       - uses: actions/checkout@v6
         with: { ref: '${{ github.sha }}', fetch-depth: 0, persist-credentials: false }
@@ -267,7 +266,7 @@ jobs:
           assertRevalidatedProductionNormalDeploymentPlan(JSON.parse(fs.readFileSync(process.argv[2], 'utf8')), JSON.parse(fs.readFileSync(process.argv[3], 'utf8')));
           NODE
       - name: Deploy coordinated normal release
-        env: { MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-release-deployer, BACKEND_IMAGE: '${{ steps.images.outputs.backend }}', FRONTEND_IMAGE: '${{ steps.images.outputs.frontend }}', PREPARATION_FILE: '${{ runner.temp }}/revalidated-normal-component-deployment-plan.json' }
+        env: { MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-release-deployer, BACKEND_IMAGE: '${{ steps.images.outputs.backend }}', FRONTEND_IMAGE: '${{ steps.images.outputs.frontend }}', PREPARATION_FILE: '${{ runner.temp }}/revalidated-normal-component-deployment-plan.json', MSCQR_APP_ONLY_JOURNAL_DIR: '${{ runner.temp }}/normal-release-journal' }
         run: node scripts/aws/production-normal-release.mjs --source-sha="${GITHUB_SHA}" --preparation-file="${PREPARATION_FILE}" --backend-image="${BACKEND_IMAGE}" --frontend-image="${FRONTEND_IMAGE}"
       - name: Preserve normal-release mutation journal
         if: always()

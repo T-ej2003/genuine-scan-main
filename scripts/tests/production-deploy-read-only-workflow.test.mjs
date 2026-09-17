@@ -47,6 +47,12 @@ test("workflow is OIDC-only, serialized, and uses fixed production boundaries", 
   assert.match(workflowText, /actions\/upload-artifact@v7/);
 });
 
+test("runner-scoped journal paths are evaluated only at step scope", () => {
+  assert.equal(Object.hasOwn(workflow.jobs.deploy.env || {}, "MSCQR_APP_ONLY_JOURNAL_DIR"), false);
+  const deployStep = workflow.jobs.deploy.steps.find((step) => step.name === "Deploy coordinated normal release");
+  assert.equal(deployStep.env.MSCQR_APP_ONLY_JOURNAL_DIR, "${{ runner.temp }}/normal-release-journal");
+});
+
 test("fixed orchestrator command set contains no mutation boundary", () => {
   assert.doesNotThrow(() => assertReadOnlyCheckPlan());
   assert.equal(READ_ONLY_CHECKS.some(({ command, args }) => /apply|state\b|register|update-service|deregister/i.test([command, ...args].join(" "))), false);
