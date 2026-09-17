@@ -7,6 +7,9 @@ import yaml from "js-yaml";
 import { assertNormalReleaseAuthorizationTransport, assertNormalReleaseGateInputs } from "../aws/production-release-dispatch-contract.mjs";
 import { assertReleaseTrainNormalDispatchContract } from "../aws/production-release-oidc-contract.mjs";
 import { verifyProductionReleaseImageAuthorization } from "../aws/verify-production-release-image-authorization.mjs";
+import { verifyCoordinatedWebRelease } from "../aws/verify-production-web-release-authorization.mjs";
+import { IMAGE_EVIDENCE_MAX_AGE_MS } from "../aws/production-green-stage-b-image-evidence.mjs";
+import { WEB_RELEASE_DOWNSTREAM_RESERVE_MS } from "../aws/production-web-release-contract.mjs";
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
 
 const sourceSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
@@ -44,6 +47,17 @@ test("normal Release Gate rejects missing preservation, missing or stale authori
   const stale = Buffer.from(JSON.stringify({ ...fixture.authorization, sourceSha: "b".repeat(40) }));
   assert.throws(() => assertNormalReleaseAuthorizationTransport({ sourceSha, authorizationBytes: stale, expectedSha256: crypto.createHash("sha256").update(stale).digest("hex") }), /stale/);
   assert.throws(() => assertNormalReleaseGateInputs({ sourceSha: "b".repeat(40), preserveCurrentFrontend: true, authorizationBytes: bytes, expectedSha256: digest, authenticateAuthorization: authenticate }), /stale|source/);
+});
+
+test("normal Release Gate reserves Stage-B evidence lifetime before downstream mutation", () => {
+  const now = new Date(Date.parse(fixture.now) + IMAGE_EVIDENCE_MAX_AGE_MS - WEB_RELEASE_DOWNSTREAM_RESERVE_MS + 1).toISOString();
+  assert.throws(() => verifyProductionReleaseImageAuthorization({ authorization: fixture.authorization, sourceSha, verifyImageEvidence: fixture.verifyImageEvidence, now, minimumRemainingMs: WEB_RELEASE_DOWNSTREAM_RESERVE_MS }), /remaining lifetime/);
+  assert.doesNotThrow(() => verifyProductionReleaseImageAuthorization({ authorization: fixture.authorization, sourceSha, verifyImageEvidence: fixture.verifyImageEvidence, now: fixture.now, minimumRemainingMs: WEB_RELEASE_DOWNSTREAM_RESERVE_MS }));
+});
+
+test("coordinated web verification reserves Stage-B evidence before crossing the database boundary", async () => {
+  const now = new Date(Date.parse(fixture.now) + IMAGE_EVIDENCE_MAX_AGE_MS - WEB_RELEASE_DOWNSTREAM_RESERVE_MS + 1).toISOString();
+  await assert.rejects(() => verifyCoordinatedWebRelease({ sourceSha, stageBAuthorization: fixture.authorization, verifyStageBImageEvidence: fixture.verifyImageEvidence, now, minimumWebAuthorizationRemainingMs: WEB_RELEASE_DOWNSTREAM_RESERVE_MS }), /remaining lifetime/);
 });
 
 test("web-impacting normal release requires source-bound web transport and activates instead of preserving", () => {

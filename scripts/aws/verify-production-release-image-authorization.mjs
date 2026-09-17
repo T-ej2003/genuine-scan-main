@@ -8,8 +8,8 @@ import { readBoundStageBPrivateJson } from "./stage-b-artifact-contract.mjs";
 
 const repositories = { backend: "mscqr-backend", worker: "mscqr-worker", "rls-executor": "mscqr-backend", "rls-canary": "mscqr-backend" };
 
-export function verifyProductionReleaseImageAuthorization({ authorization, sourceSha, verifyImageEvidence, now } = {}) {
-  assertImageAuthorization(authorization, sourceSha, { verifyImageEvidence, now });
+export function verifyProductionReleaseImageAuthorization({ authorization, sourceSha, verifyImageEvidence, now, minimumRemainingMs } = {}) {
+  assertImageAuthorization(authorization, sourceSha, { verifyImageEvidence, now, minimumRemainingMs });
   return Object.freeze(Object.fromEntries(authorization.images.map(({ service, digest }) => [service, `368992683803.dkr.ecr.eu-west-2.amazonaws.com/${repositories[service]}@${digest}`])));
 }
 

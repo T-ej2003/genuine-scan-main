@@ -18,9 +18,9 @@ function readBoundJson(file, expectedHash, label) {
   return JSON.parse(bytes);
 }
 
-export async function verifyCoordinatedWebRelease({ sourceSha, stageBAuthorization, webAuthorization, now = new Date().toISOString(), verifyWeb = createPinnedRootAttestationVerifier(), verifyStageBImageEvidence, minimumWebAuthorizationRemainingMs } = {}) {
+export async function verifyCoordinatedWebRelease({ sourceSha, stageBAuthorization, webAuthorization, now = new Date().toISOString(), verifyWeb = createPinnedRootAttestationVerifier(), verifyStageBImageEvidence, minimumWebAuthorizationRemainingMs, minimumStageBImageEvidenceRemainingMs = minimumWebAuthorizationRemainingMs } = {}) {
   if (!SHA.test(sourceSha || "")) throw new Error("Protected source SHA is malformed.");
-  verifyProductionReleaseImageAuthorization({ authorization: stageBAuthorization, sourceSha, verifyImageEvidence: verifyStageBImageEvidence, now });
+  verifyProductionReleaseImageAuthorization({ authorization: stageBAuthorization, sourceSha, verifyImageEvidence: verifyStageBImageEvidence, now, minimumRemainingMs: minimumStageBImageEvidenceRemainingMs });
   const impact = stageBAuthorization.imageReuseEvidence;
   return Object.freeze({ ...assertCoordinatedImageAuthorization({ sourceSha, stageBAuthorization, webAuthorization, webPublicationRequired: impact.webPublicationRequired, verifyWeb, now, minimumWebAuthorizationRemainingMs }), imageImpact: impact });
 }
