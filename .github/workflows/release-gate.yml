@@ -962,7 +962,7 @@ jobs:
         if: ${{ inputs.release_mode == 'rotation-overlap' }}
         uses: actions/upload-artifact@v7
         with:
-          name: production-overlap-deployment-receipt
+          name: production-overlap-deployment-receipt-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/production-overlap-deployment-receipt.json
           if-no-files-found: error
           retention-days: 90
@@ -1075,7 +1075,7 @@ jobs:
         if: ${{ always() && inputs.release_mode == 'backend-health-recovery' }}
         uses: actions/upload-artifact@v7
         with:
-          name: backend-health-recovery-evidence
+          name: backend-health-recovery-evidence-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/backend-health-recovery/evidence.json
           if-no-files-found: ignore
           retention-days: 90

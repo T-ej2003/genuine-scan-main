@@ -85,13 +85,14 @@ export function resolveProductionOverlapDeploymentReceipt({ workflowRunId, workf
   const approvals = pages(`repos/${OVERLAP_DEPLOYMENT_RECEIPT.repository}/actions/runs/${workflowRunId}/approvals`);
   const approved = approvals.filter((item) => item.state === "approved" && item.user?.type === "User" && item.user?.site_admin === false && item.environments?.length === 1 && item.environments[0]?.name === "production" && item.environments[0]?.can_admins_bypass === false);
   if (approved.length !== 1 || approved[0].user.login.toLowerCase() === workflow.actor?.login?.toLowerCase()) throw new Error("Overlap deployment lacks one independent protected-production approval.");
+  const artifactName = `${OVERLAP_DEPLOYMENT_RECEIPT.artifactName}-attempt-${workflowRunAttempt}`;
   const artifacts = pages(`repos/${OVERLAP_DEPLOYMENT_RECEIPT.repository}/actions/runs/${workflowRunId}/artifacts`, "artifacts");
   const uploadStep = boundarySteps[2].step;
-  const matches = artifacts.filter((item) => item.name === OVERLAP_DEPLOYMENT_RECEIPT.artifactName && item.expired === false && String(item.workflow_run?.id) === String(workflowRunId) && item.workflow_run?.head_sha === sourceSha && item.workflow_run?.head_branch === "main" && item.workflow_run?.repository_id === workflow.repository.id && item.workflow_run?.head_repository_id === workflow.head_repository.id && Date.parse(item.created_at) >= Date.parse(uploadStep.started_at) && Date.parse(item.created_at) <= Date.parse(uploadStep.completed_at) && /^sha256:[a-f0-9]{64}$/.test(item.digest || ""));
+  const matches = artifacts.filter((item) => item.name === artifactName && item.expired === false && String(item.workflow_run?.id) === String(workflowRunId) && item.workflow_run?.head_sha === sourceSha && item.workflow_run?.head_branch === "main" && item.workflow_run?.repository_id === workflow.repository.id && item.workflow_run?.head_repository_id === workflow.head_repository.id && Date.parse(item.created_at) >= Date.parse(uploadStep.started_at) && Date.parse(item.created_at) <= Date.parse(uploadStep.completed_at) && /^sha256:[a-f0-9]{64}$/.test(item.digest || ""));
   if (matches?.length !== 1) throw new Error("Overlap deployment run does not expose one immutable receipt artifact.");
   const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-overlap-receipt-"));
   try {
-    run("gh", ["run", "download", String(workflowRunId), "--repo", OVERLAP_DEPLOYMENT_RECEIPT.repository, "--name", OVERLAP_DEPLOYMENT_RECEIPT.artifactName, "--dir", directory]);
+    run("gh", ["run", "download", String(workflowRunId), "--repo", OVERLAP_DEPLOYMENT_RECEIPT.repository, "--name", artifactName, "--dir", directory]);
     const receipt = assertProductionOverlapDeploymentReceipt(JSON.parse(readFileSync(path.join(directory, "production-overlap-deployment-receipt.json"), "utf8")), { sourceSha, workflowRunId: String(workflowRunId), workflowRunAttempt: String(workflowRunAttempt) });
     if (receipt.executionActor.toLowerCase() !== workflow.actor?.login?.toLowerCase()) throw new Error("Overlap deployment receipt execution actor is wrong.");
     const tailFailures = job[0].steps.slice(boundarySteps[2].index + 1).filter((step) => step.status === "completed" && step.conclusion !== "success");

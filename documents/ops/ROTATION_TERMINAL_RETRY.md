@@ -17,6 +17,11 @@ completed deployment, runtime roles/platform, ECS Exec and tag propagation.
 The same version-endpoint check used by the shell must pass. The result records
 `ALREADY_APPLIED` and `updateServiceCount=0`; an actual switch records `APPLIED`
 and `updateServiceCount=1`. The existing overlap receipt preserves that count.
+Rotation receipts and backend-recovery evidence use attempt-specific artifact
+names, so a rerun cannot collide with or overwrite a prior attempt's evidence.
+The rotation receipt resolver authenticates the exact attempt's name, job steps,
+timestamp window, digest and run identity. Historical pre-runtime-closure recovery
+evidence retains its original, history-bound resolver contract.
 
 Backend and security still commit in one generation-CAS update. An uncertain
 write is resolved by rereading: exact committed state is an idempotent success;
