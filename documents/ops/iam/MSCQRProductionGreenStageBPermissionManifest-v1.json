@@ -498,6 +498,46 @@
       "evidence": "EC2 DescribeSecurityGroups has no resource-level IAM type; handoff validates reviewed groups in eu-west-2"
     },
     {
+      "id": "collect-stage-a-live-alb",
+      "phase": "preflight",
+      "action": "elasticloadbalancing:DescribeLoadBalancers",
+      "resources": ["*"],
+      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "evidence": "Reviewed Stage B handoff resolves the exact public production ALB and its subnet identities in eu-west-2"
+    },
+    {
+      "id": "collect-stage-a-live-target-group",
+      "phase": "preflight",
+      "action": "elasticloadbalancing:DescribeTargetGroups",
+      "resources": ["*"],
+      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "evidence": "Reviewed Stage B handoff binds the exact backend target group to the reviewed public ALB in eu-west-2"
+    },
+    {
+      "id": "collect-stage-a-live-cloudfront-prefix-list",
+      "phase": "preflight",
+      "action": "ec2:DescribeManagedPrefixLists",
+      "resources": ["*"],
+      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "evidence": "Reviewed Stage B handoff identifies the AWS-managed CloudFront origin-facing prefix list in eu-west-2"
+    },
+    {
+      "id": "collect-stage-a-live-cloudfront-prefix-list-entries",
+      "phase": "preflight",
+      "action": "ec2:GetManagedPrefixListEntries",
+      "resources": ["*"],
+      "context": [{"key": "aws:RequestedRegion", "type": "string", "values": ["eu-west-2"]}],
+      "evidence": "Reviewed Stage B handoff snapshots the exact AWS-managed CloudFront origin-facing CIDRs in eu-west-2"
+    },
+    {
+      "id": "collect-stage-a-live-cloudfront-distribution",
+      "phase": "preflight",
+      "action": "cloudfront:ListDistributions",
+      "resources": ["*"],
+      "context": [],
+      "evidence": "Reviewed Stage B handoff binds the deployed production CloudFront distribution to the exact ALB origin"
+    },
+    {
       "id": "collect-stage-a-live-cluster",
       "phase": "preflight",
       "action": "ecs:DescribeClusters",

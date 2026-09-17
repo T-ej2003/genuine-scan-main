@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import net from "node:net";
 import path from "node:path";
 import { assertStageBRuntimePlatform, canonicalSha256, assertImmutableImage, STAGE_B, STAGE_B_MODES, STAGE_B_TASK_TEMPLATE_KEYS } from "./production-green-stage-b-contract.mjs";
 import { deriveEcsRuntimeDependencies } from "./production-ecs-runtime-dependencies.mjs";
@@ -37,6 +38,18 @@ const assertNoTokens = (value) => {
   const text = JSON.stringify(value);
   if (/{{[A-Z0-9_]+}}/.test(text)) throw new Error("Stage B task template has an unresolved binding.");
 };
+
+export function assertStageBBackendProxyTrust(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || value.mode !== "cloudfront-alb") throw new Error("Stage B backend proxy trust must use the reviewed CloudFront-to-ALB topology.");
+  const cidrs = (field) => String(value[field] || "").split(",").map((item) => item.trim()).filter(Boolean);
+  const validCidrs = (values) => values.length > 0 && values.every((item) => {
+    const [address, prefix, extra] = item.split("/");
+    return extra === undefined && net.isIP(address) === 4 && /^[0-9]+$/.test(prefix || "") && Number(prefix) >= 0 && Number(prefix) <= 32;
+  });
+  const albCidrs = cidrs("albCidrs"); const cloudFrontCidrs = cidrs("cloudFrontCidrs");
+  if (!validCidrs(albCidrs) || !validCidrs(cloudFrontCidrs)) throw new Error("Stage B backend proxy trust CIDRs are malformed.");
+  return { mode: value.mode, albCidrs: albCidrs.join(","), cloudFrontCidrs: cloudFrontCidrs.join(",") };
+}
 
 const reviewedTemplate = (kind) => ({ ...readTemplate(kind), runtimePlatform: { ...STAGE_B.taskRuntimePlatform } });
 export const stageBTemplateHashes = () => Object.fromEntries(Object.entries(files).map(([kind]) => [kind, canonicalSha256(reviewedTemplate(kind))]));
@@ -88,6 +101,10 @@ export function renderStageBTaskDefinition(kind, bindings) {
   assertImmutableImage(image, `${kind} image`);
   if (!imagePatterns[kind].test(image)) throw new Error(`${kind} image is not from its reviewed ECR repository.`);
   const values = { ...base, [imageField]: image };
+  if (kind === "backend") {
+    const proxy = assertStageBBackendProxyTrust(bindings.backendProxyTrust);
+    Object.assign(values, { BACKEND_CLIENT_IP_TRUST_MODE: proxy.mode, BACKEND_CLIENT_IP_TRUSTED_ALB_CIDRS: proxy.albCidrs, BACKEND_CLIENT_IP_TRUSTED_CLOUDFRONT_CIDRS: proxy.cloudFrontCidrs });
+  }
   if (kind === "executor") {
     if (!STAGE_B_MODES.includes(bindings.mode) || bindings.mode === "full-rls-application-canary") throw new Error("Executor mode is outside the fixed reviewed set.");
     values.MODE = bindings.mode;

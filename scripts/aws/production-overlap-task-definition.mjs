@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
-import { assertFixedTaskDefinition } from "./production-green-stage-b-task-definitions.mjs";
+import { assertFixedTaskDefinition, assertStageBBackendProxyTrust } from "./production-green-stage-b-task-definitions.mjs";
 import { deriveEcsRuntimeDependencies } from "./production-ecs-runtime-dependencies.mjs";
 import { assertEcsTaskDefinitionReadback } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/ecs-task-definition-readback.mjs";
 
@@ -47,7 +47,7 @@ export function assertUniqueSecretBindingNames(definition) {
   return true;
 }
 
-export function buildOverlapTaskDefinition({ backendImage, releaseSha, backendLogGroup, secretBindings, postPrepare = false } = {}) {
+export function buildOverlapTaskDefinition({ backendImage, releaseSha, backendLogGroup, secretBindings, proxyTrust, postPrepare = false } = {}) {
   if (!DIGEST.test(backendImage || "") || !SHA.test(releaseSha || "") || typeof backendLogGroup !== "string" || !backendLogGroup) throw new Error("Overlap task identity bindings are invalid.");
   if (!secretBindings || typeof secretBindings !== "object" || Array.isArray(secretBindings) || Object.keys(secretBindings).sort().join(",") !== [...REQUIRED_BINDINGS].sort().join(",")) throw new Error("Overlap task bindings are incomplete or contain an unreviewed target.");
   for (const name of REQUIRED_BINDINGS) {
@@ -55,10 +55,14 @@ export function buildOverlapTaskDefinition({ backendImage, releaseSha, backendLo
     else if (!SECRET_REF.test(secretBindings[name] || "")) throw new Error(`Overlap task secret binding is not an exact production reference: ${name}.`);
     else if (ROTATION_BINDING_SHAPES[name] && !((postPrepare && ["JWT_SECRET_CURRENT", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT"].includes(name) ? ECS_VALUE_REF : ROTATION_BINDING_SHAPES[name]).test(secretBindings[name]))) throw new Error(`Overlap task secret binding has the wrong SDK/ECS reference shape: ${name}.`);
   }
+  const proxy = assertStageBBackendProxyTrust(proxyTrust);
   const definition = { ...replace(JSON.parse(fs.readFileSync(TEMPLATE_PATH, "utf8")), {
     BACKEND_IMAGE: backendImage,
     RELEASE_SHA: releaseSha,
     BACKEND_LOG_GROUP: backendLogGroup,
+    BACKEND_CLIENT_IP_TRUST_MODE: proxy.mode,
+    BACKEND_CLIENT_IP_TRUSTED_ALB_CIDRS: proxy.albCidrs,
+    BACKEND_CLIENT_IP_TRUSTED_CLOUDFRONT_CIDRS: proxy.cloudFrontCidrs,
     ...secretBindings,
   }), runtimePlatform: { ...STAGE_B.taskRuntimePlatform } };
   assertUniqueSecretBindingNames(definition);

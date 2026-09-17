@@ -48,6 +48,7 @@ const bindings = {
   canaryLogGroup: "/ecs/mscqr-production/rls-green-canary",
   backendLogGroup: "/ecs/mscqr-production/rls-green-backend",
   workerLogGroup: "/ecs/mscqr-production/rls-green-worker",
+  backendProxyTrust: { mode: "cloudfront-alb", albCidrs: "10.1.0.0/24", cloudFrontCidrs: "198.51.100.0/24" },
 };
 const protectedCheckout = { mode: "production", toolingSha: sourceSha, currentHead: sourceSha, originMainHead: sourceSha, isAncestor: true, porcelainStatus: "", derivedProvenance: { toolingTreeSha256: "a".repeat(64), sourceContractSha256: "b".repeat(64) }, repositoryState: { remoteDefaultBranch: "main", shallow: false, mergeInProgress: false, rebaseInProgress: false, cherryPickInProgress: false } };
 const deriveProvenance = ({ protectedCheckout: checkout }) => checkout.derivedProvenance;

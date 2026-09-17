@@ -91,6 +91,27 @@ variable "canonical_image_evidence_sha256" { type = string }
 variable "source_contract_sha256" { type = string }
 variable "migration_set_digest" { type = string }
 variable "package_checksum_sha256" { type = string }
+variable "backend_client_ip_trust_mode" {
+  type = string
+  validation {
+    condition     = var.backend_client_ip_trust_mode == "cloudfront-alb"
+    error_message = "Stage B backend candidates require the reviewed cloudfront-alb trust topology."
+  }
+}
+variable "backend_client_ip_trusted_alb_cidrs" {
+  type = string
+  validation {
+    condition     = length(trimspace(var.backend_client_ip_trusted_alb_cidrs)) > 0 && !can(regex("[\r\n]", var.backend_client_ip_trusted_alb_cidrs))
+    error_message = "Stage B backend candidates require a non-empty canonical ALB CIDR list."
+  }
+}
+variable "backend_client_ip_trusted_cloudfront_cidrs" {
+  type = string
+  validation {
+    condition     = length(trimspace(var.backend_client_ip_trusted_cloudfront_cidrs)) > 0 && !can(regex("[\r\n]", var.backend_client_ip_trusted_cloudfront_cidrs))
+    error_message = "Stage B backend candidates require a non-empty canonical CloudFront CIDR list."
+  }
+}
 variable "backend_image" { type = string }
 variable "worker_image" { type = string }
 variable "executor_image" { type = string }

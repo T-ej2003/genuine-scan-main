@@ -47,6 +47,7 @@ const bindings = {
   canaryLogGroup: "/ecs/mscqr-production/rls-green-canary",
   backendLogGroup: "/ecs/mscqr-production/rls-green-backend",
   workerLogGroup: "/ecs/mscqr-production/rls-green-worker",
+  backendProxyTrust: { mode: "cloudfront-alb", albCidrs: "10.1.0.0/24", cloudFrontCidrs: "198.51.100.0/24" },
 };
 const protectedCheckout = { currentHead: sourceSha, originMainHead: sourceSha, toolingSha: sourceSha, porcelainStatus: "" };
 const deriveProvenance = () => ({ toolingTreeSha256: bindings.toolingTreeSha256, sourceContractSha256: bindings.sourceContractSha256 });

@@ -15,11 +15,20 @@ const preApplyStage = withoutRootDrop(productionStageAState({ serial: 43 }), [["
 const statePath = path.join(directory, "stage-a-state.json"); fs.writeFileSync(statePath, JSON.stringify(preApplyStage), { mode: 0o600 });
 const postApplyStatePath = path.join(directory, "post-apply-stage-a-state.json"); fs.writeFileSync(postApplyStatePath, JSON.stringify(stage), { mode: 0o600 });
 const run = (args) => {
-  if (args[1] === "describe-subnets") return JSON.stringify({ Subnets: STAGE_B.privateSubnetIds.map((SubnetId, index) => ({ SubnetId, VpcId: "vpc-0123456789abcdef0", State: "available", MapPublicIpOnLaunch: false, AvailabilityZone: `eu-west-2${index ? "b" : "a"}`, CidrBlock: `10.0.${index}.0/24` })) });
+  if (args[1] === "describe-subnets") {
+    const requested = args.slice(args.indexOf("--subnet-ids") + 1, args.indexOf("--region"));
+    if (requested.every((subnetId) => subnetId.startsWith("subnet-0alb"))) return JSON.stringify({ Subnets: requested.map((SubnetId, index) => ({ SubnetId, VpcId: "vpc-0123456789abcdef0", State: "available", CidrBlock: `10.1.${index}.0/24` })) });
+    return JSON.stringify({ Subnets: STAGE_B.privateSubnetIds.map((SubnetId, index) => ({ SubnetId, VpcId: "vpc-0123456789abcdef0", State: "available", MapPublicIpOnLaunch: false, AvailabilityZone: `eu-west-2${index ? "b" : "a"}`, CidrBlock: `10.0.${index}.0/24` })) });
+  }
   if (args[1] === "describe-route-tables") return JSON.stringify({ RouteTables: [{ RouteTableId: "rtb-12345678", VpcId: "vpc-0123456789abcdef0", Associations: [{ Main: true }], Routes: [{ DestinationCidrBlock: "0.0.0.0/0", NatGatewayId: "nat-12345678" }] }] });
   if (args[1] === "describe-security-groups") return JSON.stringify({ SecurityGroups: [STAGE_B.databaseSecurityGroupId, STAGE_B.executorSecurityGroupId].map((GroupId) => ({ GroupId, VpcId: "vpc-0123456789abcdef0" })) });
   if (args[1] === "describe-clusters") return JSON.stringify({ clusters: [{ clusterArn: STAGE_B.clusterArn, status: "ACTIVE" }] });
   if (args[1] === "describe-db-instances") return JSON.stringify({ DBInstances: [{ DBInstanceStatus: "available", DBSubnetGroup: { Subnets: STAGE_B.privateSubnetIds.map((SubnetIdentifier) => ({ SubnetIdentifier })) } }] });
+  if (args[1] === "describe-load-balancers") return JSON.stringify({ LoadBalancers: [{ LoadBalancerArn: "arn:aws:elasticloadbalancing:eu-west-2:368992683803:loadbalancer/app/mscqr-alb-euw2/example", DNSName: "mscqr-alb-euw2.example.elb.amazonaws.com", Type: "application", Scheme: "internet-facing", VpcId: "vpc-0123456789abcdef0", AvailabilityZones: [{ SubnetId: "subnet-0alb0000000000001" }, { SubnetId: "subnet-0alb0000000000002" }] }] });
+  if (args[1] === "describe-target-groups") return JSON.stringify({ TargetGroups: [{ TargetGroupArn: "arn:aws:elasticloadbalancing:eu-west-2:368992683803:targetgroup/mscqr-backend-tg-euw2-v2/example", VpcId: "vpc-0123456789abcdef0", TargetType: "ip", Protocol: "HTTP", Port: 4000, HealthCheckPath: "/health/live", LoadBalancerArns: ["arn:aws:elasticloadbalancing:eu-west-2:368992683803:loadbalancer/app/mscqr-alb-euw2/example"] }] });
+  if (args[1] === "describe-managed-prefix-lists") return JSON.stringify({ ManagedPrefixLists: [{ PrefixListId: "pl-0123456789abcdef0", PrefixListName: "com.amazonaws.global.cloudfront.origin-facing", State: "create-complete", Version: 7 }] });
+  if (args[1] === "get-managed-prefix-list-entries") return JSON.stringify({ Entries: [{ Cidr: "198.51.100.0/24" }] });
+  if (args[0] === "cloudfront" && args[1] === "list-distributions") return JSON.stringify({ DistributionList: { Items: [{ Id: "E123", Enabled: true, Status: "Deployed", Origins: { Items: [{ DomainName: "mscqr-alb-euw2.example.elb.amazonaws.com" }] }, Aliases: { Items: ["mscqr.com", "www.mscqr.com"] } }] } });
   throw new Error(`unexpected AWS command ${args.join(" ")}`);
 };
 
@@ -52,7 +61,7 @@ test("Stage A checker trust accepts the Terraform singleton principal array and 
 test("canonical Stage A handoff derives every identifier from state and read-only live evidence", () => {
   const outputPath = path.join(directory, "handoff.json");
   const output = generateStageAPrerequisites({ stateBackup: statePath, stateObject: STAGE_A_STATE_OBJECT, toolingSha: "a".repeat(40), toolingTreeSha256: "b".repeat(64), outputPath, phase: "PRE_APPLY", run });
-  assert.equal(output.schemaVersion, 3); assert.equal(output.stageAStateIdentityVersion, STAGE_A_STATE_IDENTITY_VERSION); assert.equal(output.stageAStateObject, STAGE_A_STATE_OBJECT); assert.equal(output.stageAStateLineage, STAGE_A_EXPECTED_STATE_LINEAGE); assert.equal(output.stageAStateSerial, 43); assert.deepEqual(output.privateSubnetIds, [...STAGE_B.privateSubnetIds].sort()); assert.equal(output.networkEvidence.privateSubnets.length, 2); assert.equal(fs.statSync(outputPath).mode & 0o777, 0o600);
+  assert.equal(output.schemaVersion, 3); assert.equal(output.stageAStateIdentityVersion, STAGE_A_STATE_IDENTITY_VERSION); assert.equal(output.stageAStateObject, STAGE_A_STATE_OBJECT); assert.equal(output.stageAStateLineage, STAGE_A_EXPECTED_STATE_LINEAGE); assert.equal(output.stageAStateSerial, 43); assert.deepEqual(output.privateSubnetIds, [...STAGE_B.privateSubnetIds].sort()); assert.equal(output.networkEvidence.privateSubnets.length, 2); assert.deepEqual(output.stageBBackendProxyTrust, { mode: "cloudfront-alb", alb: { name: "mscqr-alb-euw2", arn: "arn:aws:elasticloadbalancing:eu-west-2:368992683803:loadbalancer/app/mscqr-alb-euw2/example", dnsName: "mscqr-alb-euw2.example.elb.amazonaws.com", subnetIds: ["subnet-0alb0000000000001", "subnet-0alb0000000000002"], cidrs: ["10.1.0.0/24", "10.1.1.0/24"] }, targetGroup: { name: "mscqr-backend-tg-euw2-v2", arn: "arn:aws:elasticloadbalancing:eu-west-2:368992683803:targetgroup/mscqr-backend-tg-euw2-v2/example" }, cloudFront: { distributionId: "E123", aliases: ["mscqr.com", "www.mscqr.com"], managedPrefixListId: "pl-0123456789abcdef0", managedPrefixListVersion: 7, cidrs: ["198.51.100.0/24"] } }); assert.equal(fs.statSync(outputPath).mode & 0o777, 0o600);
 });
 
 test("generator requires an explicit lifecycle phase and preserves post-apply handoff state binding", () => {

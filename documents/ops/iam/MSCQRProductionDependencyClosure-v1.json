@@ -1066,6 +1066,101 @@
       "negativeTestPresent": true
     },
     {
+      "sourceFile": "scripts/aws/generate-production-green-stage-a-prerequisites.mjs",
+      "action": "elasticloadbalancing:DescribeLoadBalancers",
+      "capabilityId": "stage-b-state-reconciliation-producer-collect-stage-a-live-alb",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "*"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/generate-production-green-stage-a-prerequisites.mjs",
+      "action": "elasticloadbalancing:DescribeTargetGroups",
+      "capabilityId": "stage-b-state-reconciliation-producer-collect-stage-a-live-target-group",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "*"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/generate-production-green-stage-a-prerequisites.mjs",
+      "action": "ec2:DescribeManagedPrefixLists",
+      "capabilityId": "stage-b-state-reconciliation-producer-collect-stage-a-live-cloudfront-prefix-list",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "*"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/generate-production-green-stage-a-prerequisites.mjs",
+      "action": "ec2:GetManagedPrefixListEntries",
+      "capabilityId": "stage-b-state-reconciliation-producer-collect-stage-a-live-cloudfront-prefix-list-entries",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "*"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/generate-production-green-stage-a-prerequisites.mjs",
+      "action": "cloudfront:ListDistributions",
+      "capabilityId": "stage-b-state-reconciliation-producer-collect-stage-a-live-cloudfront-distribution",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "*"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
       "sourceFile": "scripts/aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs",
       "action": "sts:GetCallerIdentity",
       "capabilityId": "stage-a-artifacts-reconciliation-release-identify",

@@ -165,7 +165,7 @@ export function fixtureInput(overrides = {}) {
     stageA,
     artifactSigning: artifactFixture(),
     overlapTask: {
-      input: { backendImage: imageDigest, releaseSha: sourceSha, backendLogGroup: "/aws/ecs/rehearsal", secretBindings: { ...secretBindings, ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls_read" } },
+      input: { backendImage: imageDigest, releaseSha: sourceSha, backendLogGroup: "/aws/ecs/rehearsal", proxyTrust: { mode: "cloudfront-alb", albCidrs: "10.1.0.0/24", cloudFrontCidrs: "198.51.100.0/24" }, secretBindings: { ...secretBindings, ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls_read" } },
       register: async ({ taskDefinition, tags }) => {
         mutations.push("M4_REGISTER_TASK_DEFINITION");
         registeredOverlapDefinition = structuredClone(taskDefinition);
@@ -703,7 +703,7 @@ test("the real predeployment adapter feeds the same cutover spine before deploym
   const preAdapter = createProductionPreDeploymentInventoryAdapter({
     sourceSha,
     imageDigest: imageDigest,
-    config: { inventoryApprovalId: stageBApprovalIdForReleaseSha(sourceSha), rotationInventoryRlsRole: "mscqr_prod_rls_read", inventoryLogGroupName: "/ecs/mscqr-production/rls-green-backend", overlapTaskInput: { backendLogGroup: "/ecs/mscqr-production/rls-green-backend", secretBindings: { ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls_read" } } },
+    config: { inventoryApprovalId: stageBApprovalIdForReleaseSha(sourceSha), rotationInventoryRlsRole: "mscqr_prod_rls_read", inventoryLogGroupName: "/ecs/mscqr-production/rls-green-backend", overlapTaskInput: { backendLogGroup: "/ecs/mscqr-production/rls-green-backend", proxyTrust: { mode: "cloudfront-alb", albCidrs: "10.1.0.0/24", cloudFrontCidrs: "198.51.100.0/24" }, secretBindings: { ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls_read" } } },
     run: (args) => {
       if (args[0] === "ecs" && args[1] === "register-task-definition") {
         const payload = JSON.parse(args[3]);

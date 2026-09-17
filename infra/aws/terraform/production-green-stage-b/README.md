@@ -85,9 +85,10 @@ artifact does not change the trust classification of historical logs.
 | `backend_image`, `worker_image`, `executor_image`, `canary_image`, `read_only_canary_image` | exact signed schema-v3 image records; the read-only canary intentionally reuses the signed `rls-canary` record | tfvars and binding report; digest only in safe report metadata |
 | `canonical_image_evidence_sha256` | canonical signed report | tfvars and binding report |
 | `tooling_sha`, tooling-tree digest | explicit protected-main identifiers | tfvars / binding report |
-| Stage-A VPC, subnet, cluster, security-group, role, log-group, secret, approval, and receipt inputs | canonical prerequisite generator: exact Stage-A state backup plus read-only AWS subnet/route/security-group/ECS/RDS evidence | tfvars; prerequisite and source-state hashes are reported |
+| Stage-A VPC, subnet, cluster, security-group, role, log-group, secret, approval, receipt, and backend proxy-trust inputs | canonical prerequisite generator: exact Stage-A state backup plus read-only AWS subnet/route/security-group/ECS/RDS evidence; the backend topology is bound from the reviewed ALB, target group, deployed CloudFront origin, and AWS-managed CloudFront origin-facing prefix list | tfvars; prerequisite and source-state hashes are reported |
 | `broker_package_path` | explicit output of the reviewed broker package builder | tfvars; raw and base64 SHA-256 in report |
 | `source_contract_sha256`, `migration_set_digest`, `package_checksum_sha256` | source-controlled `generated/checksums.json` bytes and fields | tfvars and binding report |
+| `backend_client_ip_trust_mode`, `backend_client_ip_trusted_alb_cidrs`, `backend_client_ip_trusted_cloudfront_cidrs` | bound `stageBBackendProxyTrust` in the authenticated Stage-A prerequisite artifact | rendered backend candidate task definition; the normal backend receives only the CloudFront-to-ALB topology |
 | retained candidate/executor maps | supplied production Terraform state backup after lineage, serial, family, revision, broker policy, and address checks | tfvars and retained counts in report |
 
 `stage_a_executor_networking_ready` and `log_retention_days` are contract values; the former must be proven true in the prerequisite JSON and the latter remains the reviewed Terraform default of 30 days. No sensitive secret values are accepted or emitted.

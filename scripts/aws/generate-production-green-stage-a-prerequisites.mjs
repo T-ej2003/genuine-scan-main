@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import crypto from "node:crypto";
 import fs from "node:fs";
+import net from "node:net";
 import path from "node:path";
 import { TextDecoder } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -225,6 +226,41 @@ export function resolveStageASubnetRouteTable({ routeTables, vpcId, subnetId } =
   if (!natGatewayId) throw new Error("Live Stage A subnet does not have the required NAT default route.");
   return { table, natGatewayId, resolution: explicit.length === 1 ? "explicit-subnet-association" : "vpc-main-fallback" };
 }
+const PRODUCTION_BACKEND_ALB_NAME = "mscqr-alb-euw2";
+const PRODUCTION_BACKEND_TARGET_GROUP_NAME = "mscqr-backend-tg-euw2-v2";
+const CLOUDFRONT_ORIGIN_PREFIX_LIST_NAME = "com.amazonaws.global.cloudfront.origin-facing";
+const PRODUCTION_PUBLIC_ALIASES = Object.freeze(["mscqr.com", "www.mscqr.com"]);
+
+const canonicalIpv4Cidrs = (values, label) => {
+  if (!Array.isArray(values) || values.length === 0 || values.some((value) => typeof value !== "string" || !/^\d{1,3}(?:\.\d{1,3}){3}\/(?:[0-9]|[12][0-9]|3[0-2])$/.test(value) || net.isIP(value.split("/")[0]) !== 4)) throw new Error(`${label} must be a non-empty IPv4 CIDR list.`);
+  const sorted = [...new Set(values)].sort();
+  if (sorted.length !== values.length) throw new Error(`${label} contains duplicate CIDRs.`);
+  return sorted;
+};
+
+export function collectStageBBackendProxyTrust({ vpcId, run } = {}) {
+  const loadBalancers = awsJson(["elbv2", "describe-load-balancers", "--names", PRODUCTION_BACKEND_ALB_NAME, "--region", STAGE_B.region, "--output", "json", "--no-cli-pager"], run).LoadBalancers || [];
+  if (loadBalancers.length !== 1) throw new Error("Stage B backend proxy evidence requires exactly one reviewed ALB.");
+  const alb = loadBalancers[0];
+  const subnetIds = (alb.AvailabilityZones || []).map(({ SubnetId }) => SubnetId).filter(Boolean).sort();
+  if (alb.Type !== "application" || alb.Scheme !== "internet-facing" || alb.VpcId !== vpcId || subnetIds.length < 2 || new Set(subnetIds).size !== subnetIds.length || !alb.LoadBalancerArn || !alb.DNSName) throw new Error("Stage B backend ALB topology is not the reviewed public application boundary.");
+  const targetGroups = awsJson(["elbv2", "describe-target-groups", "--names", PRODUCTION_BACKEND_TARGET_GROUP_NAME, "--region", STAGE_B.region, "--output", "json", "--no-cli-pager"], run).TargetGroups || [];
+  const targetGroup = targetGroups[0];
+  if (targetGroups.length !== 1 || targetGroup.VpcId !== vpcId || targetGroup.TargetType !== "ip" || targetGroup.Protocol !== "HTTP" || targetGroup.Port !== 4000 || targetGroup.HealthCheckPath !== "/health/live" || JSON.stringify([...(targetGroup.LoadBalancerArns || [])].sort()) !== JSON.stringify([alb.LoadBalancerArn])) throw new Error("Stage B backend target group is not bound to the reviewed ALB backend topology.");
+  const subnets = awsJson(["ec2", "describe-subnets", "--subnet-ids", ...subnetIds, "--region", STAGE_B.region, "--output", "json", "--no-cli-pager"], run).Subnets || [];
+  if (subnets.length !== subnetIds.length || subnets.some((subnet) => subnet.VpcId !== vpcId || subnet.State !== "available")) throw new Error("Stage B backend ALB subnet evidence is incomplete.");
+  const albCidrs = canonicalIpv4Cidrs(subnets.map(({ CidrBlock }) => CidrBlock), "Stage B backend ALB subnet CIDRs");
+  const prefixLists = awsJson(["ec2", "describe-managed-prefix-lists", "--filters", `Name=prefix-list-name,Values=${CLOUDFRONT_ORIGIN_PREFIX_LIST_NAME}`, "--region", STAGE_B.region, "--output", "json", "--no-cli-pager"], run).ManagedPrefixLists || [];
+  if (prefixLists.length !== 1 || prefixLists[0].State !== "create-complete" || !prefixLists[0].PrefixListId || !Number.isInteger(prefixLists[0].Version)) throw new Error("Stage B backend CloudFront prefix-list evidence is unavailable.");
+  const prefixList = prefixLists[0];
+  const entries = awsJson(["ec2", "get-managed-prefix-list-entries", "--prefix-list-id", prefixList.PrefixListId, "--region", STAGE_B.region, "--output", "json", "--no-cli-pager"], run).Entries || [];
+  const cloudFrontCidrs = canonicalIpv4Cidrs(entries.map(({ Cidr }) => Cidr), "Stage B backend CloudFront origin CIDRs");
+  const distributions = awsJson(["cloudfront", "list-distributions", "--output", "json", "--no-cli-pager"], run).DistributionList?.Items || [];
+  const matches = distributions.filter((distribution) => distribution.Enabled === true && distribution.Status === "Deployed" && (distribution.Origins?.Items || []).some(({ DomainName }) => DomainName === alb.DNSName) && JSON.stringify([...(distribution.Aliases?.Items || [])].sort()) === JSON.stringify([...PRODUCTION_PUBLIC_ALIASES]));
+  if (matches.length !== 1 || !matches[0].Id) throw new Error("Stage B backend CloudFront distribution is not uniquely bound to the reviewed ALB origin.");
+  return Object.freeze({ mode: "cloudfront-alb", alb: { name: PRODUCTION_BACKEND_ALB_NAME, arn: alb.LoadBalancerArn, dnsName: alb.DNSName, subnetIds, cidrs: albCidrs }, targetGroup: { name: PRODUCTION_BACKEND_TARGET_GROUP_NAME, arn: targetGroup.TargetGroupArn }, cloudFront: { distributionId: matches[0].Id, aliases: [...PRODUCTION_PUBLIC_ALIASES], managedPrefixListId: prefixList.PrefixListId, managedPrefixListVersion: prefixList.Version, cidrs: cloudFrontCidrs } });
+}
+
 function liveEvidence({ vpcId, subnetIds, databaseIdentifier, run }) {
   const subnets = awsJson(["ec2", "describe-subnets", "--subnet-ids", ...subnetIds, "--region", STAGE_B.region, "--output", "json", "--no-cli-pager"], run).Subnets || [];
   if (subnets.length !== subnetIds.length) throw new Error("Live Stage A subnet evidence is incomplete.");
@@ -254,9 +290,10 @@ export function generateStageAPrerequisites({ stateBackup, stateObject, toolingS
   const stateArtifact = assertStageBPrivateFile({ filePath: stateBackup, repositoryRoot: root, label: "Stage A state backup" });
   const bytes = fs.readFileSync(stateArtifact.path); const state = parseAuthenticatedStateBytes(bytes); const { value, vpcId, subnetIds, databaseIdentifier } = assertStageAStateContract(state, { stateObject, phase });
   const network = liveEvidence({ vpcId, subnetIds, databaseIdentifier, run });
+  const stageBBackendProxyTrust = collectStageBBackendProxyTrust({ vpcId, run });
   const output = {
     schemaVersion: STAGE_A_PREREQUISITES_SCHEMA_VERSION, generator: STAGE_A_PREREQUISITES_GENERATOR, toolingSha, toolingTreeSha256,
-    stageAStateIdentityVersion: STAGE_A_STATE_IDENTITY_VERSION, stageAStateObject: STAGE_A_STATE_OBJECT, stageAStateLineage: STAGE_A_EXPECTED_STATE_LINEAGE, stageAStateSerial: state.serial, stageAStateSha256: stageAStateSemanticSha256(state), networkEvidence: network,
+    stageAStateIdentityVersion: STAGE_A_STATE_IDENTITY_VERSION, stageAStateObject: STAGE_A_STATE_OBJECT, stageAStateLineage: STAGE_A_EXPECTED_STATE_LINEAGE, stageAStateSerial: state.serial, stageAStateSha256: stageAStateSemanticSha256(state), networkEvidence: network, stageBBackendProxyTrust,
     accountId: STAGE_B.account, region: STAGE_B.region, vpcId, privateSubnetIds: subnetIds, ecsClusterArn: STAGE_B.clusterArn,
     stageADatabaseSecurityGroupId: exact(value.database_security_group_id, STAGE_B.databaseSecurityGroupId, "Stage A database security group"), stageAExecutorSecurityGroupId: exact(value.executor_security_group_id, STAGE_B.executorSecurityGroupId, "Stage A executor security group"),
     stageAExecutorTaskRoleArn: exact(value.executor_role_arn, STAGE_B.executorRoleArn, "Stage A executor role"), stageABrokerRoleArn: exact(value.broker_role_arn, STAGE_B.brokerRoleArn, "Stage A broker role"),

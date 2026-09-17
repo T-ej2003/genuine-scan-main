@@ -234,7 +234,7 @@ export function collectStageBTerraformCheckAddresses(terraformRoot = TERRAFORM_R
   if (duplicates.length) throw new Error(`Duplicate Stage B Terraform check block: ${duplicates[0]}`);
   return [...new Set(addresses)].sort();
 }
-const REVIEWED_VARIABLE_VALIDATION_NAMES = Object.freeze(["production_rotation_secret_value_from", "retained_candidate_task_definitions", "retained_executor_task_definitions", "stage_b_recovery_alias_target_version"]);
+const REVIEWED_VARIABLE_VALIDATION_NAMES = Object.freeze(["backend_client_ip_trust_mode", "backend_client_ip_trusted_alb_cidrs", "backend_client_ip_trusted_cloudfront_cidrs", "production_rotation_secret_value_from", "retained_candidate_task_definitions", "retained_executor_task_definitions", "stage_b_recovery_alias_target_version"]);
 const variableValidationNamesFromSource = (source) => [...source.matchAll(/variable\s+"([^"]+)"\s*\{/g)]
   .filter((match) => {
     const nextVariable = source.indexOf("\nvariable ", match.index + match[0].length);
