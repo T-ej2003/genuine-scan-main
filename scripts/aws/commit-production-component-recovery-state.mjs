@@ -12,13 +12,18 @@ import { assertGithubOidcReleaseDeployerEnvironment, createProductionAwsCommandR
 const SHA = /^[a-f0-9]{40}$/;
 const readEvidence = (file) => { const value = JSON.parse(fs.readFileSync(file, "utf8")); assert.equal(value.kind, "BACKEND_HEALTH_RECOVERY_EVIDENCE"); assert.equal(value.status, "RECOVERY_COMPLETE"); assert.match(value.sourceSha || "", SHA); assert.match(value.imageReleaseSha || "", SHA); assert.match(value.recoveryImageDigest || "", /^sha256:[a-f0-9]{64}$/); assert.match(value.targetArn || "", /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/mscqr-production-rls-green-backend:[1-9][0-9]*$/); return value; };
 
+export function authenticatedBackendRecoveryComponent(live, evidence) {
+  assert.equal(live.backendDigest, evidence.recoveryImageDigest); assert.equal(live.taskDefinitionArn, evidence.targetArn);
+  return { sourceSha: evidence.imageReleaseSha, imageDigest: live.backendDigest, taskDefinitionArn: live.taskDefinitionArn, desiredCount: live.desiredCount };
+}
+
 export function commitBackendRecoveryComponentState({ evidence, client, run, isProtectedMainAncestor = () => true, writerContext } = {}) {
   const readers = createAppOnlyEcsReaders(run); const live = captureAppOnlyPredecessor(readers.readLive());
   const sourceSha = readers.readBackendImageSource(live.backendDigest);
-  assert.equal(sourceSha, evidence.imageReleaseSha); assert.equal(live.backendDigest, evidence.recoveryImageDigest); assert.equal(live.taskDefinitionArn, evidence.targetArn); assert.equal(isProtectedMainAncestor(sourceSha), true, "Recovered backend source is not protected-main history.");
+  assert.equal(sourceSha, evidence.imageReleaseSha); const component = authenticatedBackendRecoveryComponent(live, evidence); assert.equal(isProtectedMainAncestor(sourceSha), true, "Recovered backend source is not protected-main history.");
   const state = client.read(); assert.ok(state, "Production component deployment state is not bootstrapped.");
   return advanceProductionComponentDeploymentStateWithRetry({ client, current: state, lane: "EMERGENCY_RECOVERY", recovery: true,
-    changes: { backend: { sourceSha, imageDigest: live.backendDigest, taskDefinitionArn: live.taskDefinitionArn } },
+    changes: { backend: component },
     authenticateRecovery: ({ next }) => assert.equal(next.sourceSha, sourceSha), ...writerContext });
 }
 

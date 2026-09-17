@@ -1,8 +1,16 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
+import os from "node:os";
+import path from "node:path";
+import { mkdtempSync } from "node:fs";
 import test from "node:test";
 import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
 import { createProductionComponentDeploymentState } from "../aws/production-component-deployment-state.mjs";
+import { authenticatedBackendRecoveryComponent } from "../aws/commit-production-component-recovery-state.mjs";
+import { commitRotationComponentState } from "../aws/commit-production-component-rotation-state.mjs";
 import { commitSecurityComponentState } from "../aws/commit-production-component-security-state.mjs";
+import { READY_FOR_OVERLAP_DEPLOYMENT_STAGES } from "../aws/production-overlap-readiness-contract.mjs";
+import { writeOverlapReadinessEvidence } from "../aws/produce-production-overlap-readiness-evidence.mjs";
 
 const source = "b".repeat(40);
 const state = () => createProductionComponentDeploymentState({ components: {
@@ -30,4 +38,19 @@ test("a verified security rotation may refresh only its release identity at the 
   const result = commitSecurityComponentState({ sourceSha: source, authorization, client: { read: () => initial, advance: () => {} }, isProtectedMainAncestor: () => true });
   assert.equal(result.state.components.security.sourceSha, source); assert.equal(result.state.components.security.releaseIdentity, authorization.authorizationSha256);
   assert.equal(result.state.components.backend.sourceSha, initial.components.backend.sourceSha);
+});
+
+test("backend recovery writes only the authenticated restored backend identity", () => {
+  const live = { backendDigest: `sha256:${"3".repeat(64)}`, taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend:7", desiredCount: 2 };
+  const evidence = { imageReleaseSha: source, recoveryImageDigest: live.backendDigest, targetArn: live.taskDefinitionArn };
+  assert.deepEqual(authenticatedBackendRecoveryComponent(live, evidence), { sourceSha: source, imageDigest: live.backendDigest, taskDefinitionArn: live.taskDefinitionArn, desiredCount: 2 });
+  assert.throws(() => authenticatedBackendRecoveryComponent(live, { ...evidence, recoveryImageDigest: `sha256:${"4".repeat(64)}` }), /Expected values to be strictly equal/);
+});
+
+test("rotation terminal accepts only hash-bound readiness and changes security alone", () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "component-rotation-")); const rotationId = "rotation-test-1234"; const rotationStateSha256 = "c".repeat(64);
+  const readiness = writeOverlapReadinessEvidence({ outputPath: path.join(dir, "readiness.json"), sourceSha: source, rotationId, rotationStateSha256, stages: Object.fromEntries(READY_FOR_OVERLAP_DEPLOYMENT_STAGES.map((name) => [name, { valid: true, evidenceRef: `test://${name}`, evidenceSha256: crypto.createHash("sha256").update(name).digest("hex"), identityBindings: { sourceSha: source, rotationId } }])) });
+  const initial = state(); const result = commitRotationComponentState({ mode: "rotation-overlap", sourceSha: source, rotationId, rotationStateSha256, readinessFile: readiness.outputPath, readinessSha256: readiness.evidenceSha256, client: { read: () => initial, advance: () => {} }, isProtectedMainAncestor: () => true });
+  assert.equal(result.state.components.security.sourceSha, source); assert.equal(result.state.components.backend.sourceSha, initial.components.backend.sourceSha);
+  assert.throws(() => commitRotationComponentState({ mode: "rotation-overlap", sourceSha: source, rotationId, rotationStateSha256, readinessFile: readiness.outputPath, readinessSha256: "d".repeat(64), client: { read: () => initial, advance: () => {} }, isProtectedMainAncestor: () => true }), /does not match/);
 });
