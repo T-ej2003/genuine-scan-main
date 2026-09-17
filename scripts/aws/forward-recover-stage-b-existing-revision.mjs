@@ -15,6 +15,7 @@ import { createProductionAwsCredentialEnvironment } from "./production-credentia
 import { runAmbiguousImportSupersession, runExistingRevisionForwardRecovery, STAGE_B_AMBIGUOUS_IMPORT_SUPERSESSION, STAGE_B_EXISTING_REVISION_FORWARD_RECOVERY } from "./stage-b-existing-revision-forward-recovery-contract.mjs";
 import { assertStageBTfvarsBinding } from "./generate-production-green-stage-b-tfvars.mjs";
 import { authorizedBackendDigest } from "./production-cutover-control-plane.mjs";
+import { assertStageBBackendProxyTrustBinding } from "./production-green-stage-b-task-definitions.mjs";
 import { findTerraformCliArgEnvKeys } from "../plan-staging-terraform.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -64,6 +65,7 @@ export function assertForwardRecoveryTfvarsBinding({ tfvarsPath, bindingReportPa
     || report.images?.backend?.digest !== authorizedBackendDigest(imageAuthorization)) {
     throw new Error("Forward recovery tfvars binding does not match the authenticated release preflight, source, or authorized backend image.");
   }
+  assertStageBBackendProxyTrustBinding(bindings, report);
   return Object.freeze({
     report,
     releasePreflight,

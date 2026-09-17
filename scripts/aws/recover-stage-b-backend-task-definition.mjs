@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 import { assertCanonicalRecoverySourceBinding, canonicalSha256, runCanonicalBackendRecovery, STAGE_B_BACKEND_RECOVERY } from "./stage-b-task-definition-recovery-contract.mjs";
+import { assertStageBBackendProxyTrustBinding } from "./production-green-stage-b-task-definitions.mjs";
 import { deriveStageBImageImpactReport, deriveStageBToolingInputTreeSha256 } from "./validate-stage-b-image-reuse.mjs";
 import { assertStageBTfvarsBinding } from "./generate-production-green-stage-b-tfvars.mjs";
 import { calculateCleanRoomSourceContract } from "../rls/lib/clean-room-source-contract.mjs";
@@ -110,7 +111,7 @@ function finalizeEvidence({ evidencePath, evidence, repositoryRoot = root }) {
   writeStageBPrivateFilesAtomic({ repositoryRoot, overwrite: false, files: [{ filePath: evidencePath, bytes, label: "Recovery evidence" }] });
 }
 
-export async function runCanonicalRecoveryCli(argv = process.argv.slice(2), { exec = run, readProtectedCheckout = () => readStageBProtectedMainCheckout({ cwd: root }), verifyImageEvidence = verifyImageEvidenceSignature, proveDescendant: proveDescendantOverride, deriveImageReuse: deriveImageReuseOverride, baseEnv = process.env } = {}) {
+export async function runCanonicalRecoveryCli(argv = process.argv.slice(2), { exec = run, readProtectedCheckout = () => readStageBProtectedMainCheckout({ cwd: root }), verifyImageEvidence = verifyImageEvidenceSignature, validateTfvarsBinding = assertStageBTfvarsBinding, proveDescendant: proveDescendantOverride, deriveImageReuse: deriveImageReuseOverride, baseEnv = process.env } = {}) {
   if (!argv.includes("--execute")) throw new Error("Recovery is mutation-capable; --execute is required and must be explicitly reviewed after merge.");
   const sourceSha = required(argv, "--source-sha");
   const bindingsPath = required(argv, "--bindings");
@@ -131,9 +132,9 @@ export async function runCanonicalRecoveryCli(argv = process.argv.slice(2), { ex
   const imageAuthorizationFile = assertStageBPrivateFile({ filePath: imageAuthorizationPath, repositoryRoot: root, label: "Image authorization" });
   const imageAuthorization = JSON.parse(fs.readFileSync(imageAuthorizationFile.path, "utf8"));
   const protectedCheckout = readProtectedCheckout();
-  const env = buildRecoveryAwsEnvironment(profile, baseEnv);
+  const env = buildRecoveryTerraformEnvironment(profile, baseEnv, { allowedTerraformVariableKeys: ["TF_DATA_DIR", "TF_WORKSPACE"] });
   const releaseRun = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile, env, exec: (command, args) => exec(command, args, env) });
-  const imageAuthorizationValidation = { verifyImageEvidence: (input) => verifyImageEvidence({ ...input, run: releaseRun }) };
+  const imageAuthorizationValidation = { verifyImageEvidence: (input) => verifyImageEvidence({ ...input, run: releaseRun, env }) };
   const deriveProvenance = ({ sourceSha: provenanceSha = sourceSha } = {}) => deriveCanonicalRecoveryProvenance({ sourceSha: provenanceSha, repositoryRoot: root });
   const journal = createFileJournal({ filePath: outputs.journal });
   const existingJournal = journal.read();
@@ -155,6 +156,27 @@ export async function runCanonicalRecoveryCli(argv = process.argv.slice(2), { ex
   if (!existingJournal || existingJournal.sourceSha === sourceSha) {
     assertCanonicalRecoverySourceBinding({ sourceSha, bindings, protectedCheckout, imageAuthorization, imageAuthorizationValidation, deriveProvenance });
   }
+  const bindingReportPath = path.resolve(required(argv, "--binding-report"));
+  const bindingReportSha256 = required(argv, "--binding-report-sha256");
+  if (!/^[a-f0-9]{64}$/.test(bindingReportSha256)) throw new Error("--binding-report-sha256 must be a lowercase SHA256.");
+  const validateRecoveryProxyBinding = () => {
+    const bindingFile = assertStageBPrivateFile({ filePath: bindingReportPath, repositoryRoot: root, label: "Stage-B tfvars binding report" });
+    if (bindingFile.sha256 !== bindingReportSha256) throw new Error("Recovery tfvars binding-report SHA256 mismatch.");
+    const bindingReport = JSON.parse(fs.readFileSync(bindingFile.path, "utf8"));
+    if (bindingReport.tfvarsFileName !== path.basename(bindingReport.tfvarsFileName || "")) throw new Error("Recovery tfvars binding report names an invalid tfvars artifact.");
+    const report = validateTfvarsBinding({
+      tfvarsPath: path.join(path.dirname(bindingFile.path), bindingReport.tfvarsFileName),
+      bindingReportPath: bindingFile.path,
+      bindingReportSha256,
+      expectedToolingSha: bindings.toolingSha,
+      expectedToolingTreeSha256: bindings.toolingTreeSha256,
+      expectedImageReleaseSha: bindings.imageReleaseSha,
+      expectedImageEvidenceSha256: imageAuthorization.imageEvidenceSha256,
+    });
+    assertStageBBackendProxyTrustBinding(bindings, report);
+    return report;
+  };
+  validateRecoveryProxyBinding();
   const terraformData = assertStageBTerraformBackendMetadataPrivate({ terraformDataDir: env.TF_DATA_DIR, repositoryRoot: root });
   assertStageBTerraformInitializedBackendMetadata(JSON.parse(fs.readFileSync(terraformData.backendMetadataPath, "utf8")).backend);
   const observedWorkspace = String(exec("terraform", [`-chdir=${terraformRoot}`, "workspace", "show"], env)).trim();
@@ -162,7 +184,7 @@ export async function runCanonicalRecoveryCli(argv = process.argv.slice(2), { ex
   const terraform = (args) => JSON.parse(exec("terraform", [`-chdir=${terraformRoot}`, ...args], env));
   const aws = (args) => JSON.parse(exec("aws", [...args, "--region", "eu-west-2", "--profile", profile, "--output", "json"], env));
   const readState = async () => terraform(["state", "pull"]);
-  const register = async ({ taskDefinition, tags }) => aws(["ecs", "register-task-definition", "--cli-input-json", JSON.stringify({ ...taskDefinition, tags })]);
+  const register = async ({ taskDefinition, tags }) => { validateRecoveryProxyBinding(); return aws(["ecs", "register-task-definition", "--cli-input-json", JSON.stringify({ ...taskDefinition, tags })]); };
   const describe = async (arn) => aws(["ecs", "describe-task-definition", "--task-definition", arn, "--include", "TAGS"]);
   const census = () => collectCanonicalBackendRecoveryCensus({ list: (nextToken) => {
     const args = ["ecs", "list-task-definitions", "--family-prefix", STAGE_B_BACKEND_RECOVERY.family, "--status", "ACTIVE", "--sort", "DESC", "--page-size", "100", "--max-items", "100"];

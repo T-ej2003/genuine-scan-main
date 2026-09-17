@@ -51,6 +51,13 @@ export function assertStageBBackendProxyTrust(value) {
   return { mode: value.mode, albCidrs: albCidrs.join(","), cloudFrontCidrs: cloudFrontCidrs.join(","), cloudFrontPrefixListId: value.cloudFrontPrefixListId, cloudFrontPrefixListVersion: String(value.cloudFrontPrefixListVersion) };
 }
 
+export function assertStageBBackendProxyTrustBinding(bindings, bindingReport) {
+  const supplied = assertStageBBackendProxyTrust(bindings?.backendProxyTrust);
+  const authenticated = assertStageBBackendProxyTrust(bindingReport?.backendProxyTrust);
+  if (JSON.stringify(supplied) !== JSON.stringify(authenticated)) throw new Error("Stage B backend proxy trust does not match the authenticated tfvars binding report.");
+  return authenticated;
+}
+
 const reviewedTemplate = (kind) => ({ ...readTemplate(kind), runtimePlatform: { ...STAGE_B.taskRuntimePlatform } });
 export const stageBTemplateHashes = () => Object.fromEntries(Object.entries(files).map(([kind]) => [kind, canonicalSha256(reviewedTemplate(kind))]));
 export const approvedNetworkConfiguration = (privateSubnetIds) => {

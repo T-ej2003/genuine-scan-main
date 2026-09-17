@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "nod
 import path from "node:path";
 import test from "node:test";
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
-import { buildRecoveryAwsEnvironment, collectCanonicalBackendRecoveryCensus, deriveCanonicalRecoveryProvenance, runCanonicalRecoveryCli } from "../aws/recover-stage-b-backend-task-definition.mjs";
+import { buildRecoveryTerraformEnvironment, collectCanonicalBackendRecoveryCensus, deriveCanonicalRecoveryProvenance, runCanonicalRecoveryCli } from "../aws/recover-stage-b-backend-task-definition.mjs";
 import { STAGE_B_TERRAFORM_BACKEND_CONFIG } from "../aws/stage-b-terraform-backend-contract.mjs";
 import {
   STAGE_B_BACKEND_RECOVERY,
@@ -26,6 +26,7 @@ import {
   taskDefinitionFingerprint,
 } from "../aws/stage-b-task-definition-recovery-contract.mjs";
 import { STAGE_B_IMAGE_REUSE_RULES_VERSION, STAGE_B_TRUSTED_IMAGE_WORKFLOW_PATH } from "../aws/validate-stage-b-image-reuse.mjs";
+import { assertStageBBackendProxyTrustBinding } from "../aws/production-green-stage-b-task-definitions.mjs";
 
 const sourceSha = "45c5a38c7e3594793fafe1f051f1f381937ba0d4";
 const imageAuthorizationFixture = makeCanonicalImageAuthorization({ sourceSha, imageReleaseSha: "25394d30c189583384c9bba62604bf968dc9e0b2" });
@@ -51,6 +52,11 @@ const bindings = {
   backendProxyTrust: { mode: "cloudfront-alb", albCidrs: "10.1.0.0/24", cloudFrontCidrs: "198.51.100.0/24", cloudFrontPrefixListId: "pl-0123456789abcdef0", cloudFrontPrefixListVersion: "7" },
 };
 const protectedCheckout = { mode: "production", toolingSha: sourceSha, currentHead: sourceSha, originMainHead: sourceSha, isAncestor: true, porcelainStatus: "", derivedProvenance: { toolingTreeSha256: "a".repeat(64), sourceContractSha256: "b".repeat(64) }, repositoryState: { remoteDefaultBranch: "main", shallow: false, mergeInProgress: false, rebaseInProgress: false, cherryPickInProgress: false } };
+
+test("recovery proxy trust must equal the authenticated tfvars binding", () => {
+  assert.deepEqual(assertStageBBackendProxyTrustBinding(bindings, { backendProxyTrust: bindings.backendProxyTrust }), bindings.backendProxyTrust);
+  assert.throws(() => assertStageBBackendProxyTrustBinding({ ...bindings, backendProxyTrust: { ...bindings.backendProxyTrust, albCidrs: "0.0.0.0/0" } }, { backendProxyTrust: bindings.backendProxyTrust }), /authenticated tfvars binding report/);
+});
 const deriveProvenance = ({ protectedCheckout: checkout }) => checkout.derivedProvenance;
 const freshSourceSha = "94da9651eb9427603be87abe89f89111412755c9";
 const freshImageAuthorizationFixture = makeCanonicalImageAuthorization({ sourceSha: freshSourceSha, imageReleaseSha: freshSourceSha, impactImageReleaseSha: "29bf92a14d5e832575009bd76b16886feff62cbd" });
@@ -181,6 +187,7 @@ function cliPostRemoveState() {
 }
 
 function createCliCrossDescendantFixture({ journalMutate, bindingsMutate, authorizationMutate, protectedCheckout = crossProtectedCheckout, deriveImageReuse } = {}) {
+  const authenticatedProxyTrust = structuredClone(crossBindings.backendProxyTrust);
   const originalProvenance = deriveCanonicalRecoveryProvenance({ sourceSha: originalIncidentSha });
   const incidentBindings = { ...crossBindings, toolingTreeSha256: originalProvenance.toolingTreeSha256, sourceContractSha256: originalProvenance.sourceContractSha256 };
   bindingsMutate?.(incidentBindings);
@@ -220,10 +227,15 @@ function createCliCrossDescendantFixture({ journalMutate, bindingsMutate, author
   const evidencePath = path.join(directory, "evidence.json");
   const journalPath = path.join(directory, "recovery.json");
   const stateBeforePath = path.join(directory, "state-before.json");
+  const tfvarsPath = path.join(directory, "stage-b.tfvars");
+  const bindingReportPath = path.join(directory, "stage-b.tfvars.binding.json");
+  const bindingReportBytes = Buffer.from(`${JSON.stringify({ tfvarsFileName: path.basename(tfvarsPath) })}\n`);
   writeFileSync(bindingsPath, JSON.stringify(incidentBindings), { mode: 0o600 });
   writeFileSync(imageAuthorizationPath, JSON.stringify(authorization), { mode: 0o600 });
   writeFileSync(journalPath, `${JSON.stringify(journal, null, 2)}\n`, { mode: 0o600 });
   writeFileSync(stateBeforePath, JSON.stringify(predecessor), { mode: 0o600 });
+  writeFileSync(tfvarsPath, "# authenticated fixture\n", { mode: 0o600 });
+  writeFileSync(bindingReportPath, bindingReportBytes, { mode: 0o600 });
   let current = cliPostRemoveState();
   const calls = [];
   const exec = (command, args) => {
@@ -241,12 +253,13 @@ function createCliCrossDescendantFixture({ journalMutate, bindingsMutate, author
   };
   const argv = ["--execute", "--source-sha", executorSha, "--bindings", bindingsPath, "--image-authorization", imageAuthorizationPath,
     "--terraform-root", path.resolve("infra/aws/terraform/production-green-stage-b"), "--evidence-out", evidencePath, "--recovery-state", journalPath,
-    "--state-before", stateBeforePath, "--aws-profile", "test"];
+    "--state-before", stateBeforePath, "--binding-report", bindingReportPath, "--binding-report-sha256", crypto.createHash("sha256").update(bindingReportBytes).digest("hex"), "--aws-profile", "test"];
   return {
     argv,
     baseEnv: { ...process.env, TF_DATA_DIR: terraformDataDir, TF_WORKSPACE: "default" },
     protectedCheckout,
     authorizationFixture: crossImageAuthorizationFixture,
+    validateTfvarsBinding: () => ({ backendProxyTrust: authenticatedProxyTrust }),
     exec,
     deriveImageReuse,
     calls,
@@ -410,6 +423,7 @@ test("production CLI reaches cross-descendant reconciliation without exact-sourc
       exec: fixture.exec,
       readProtectedCheckout: () => fixture.protectedCheckout,
       verifyImageEvidence: fixture.authorizationFixture.verifyImageEvidence,
+      validateTfvarsBinding: fixture.validateTfvarsBinding,
       deriveImageReuse: fixture.deriveImageReuse,
     });
     assert.equal(result.registration.registrationCalls, 0);
@@ -430,6 +444,7 @@ test("production CLI rejects forged descendant resume inputs before any adapter 
     ["dirty executor", { protectedCheckout: { ...crossProtectedCheckout, porcelainStatus: " M scripts/aws/example.mjs" } }],
     ["invalid image authorization", { authorizationMutate: (authorization) => { authorization.valid = false; } }],
     ["bindings not matching original incident", { bindingsMutate: (value) => { value.sourceSha = executorSha; } }],
+    ["proxy trust not matching authenticated tfvars", { bindingsMutate: (value) => { value.backendProxyTrust = { ...value.backendProxyTrust, albCidrs: "0.0.0.0/0" }; } }],
     ["image-affecting descendant delta", { deriveImageReuse: () => ({ ...crossReuse({ imageReleaseSha: crossBindings.imageReleaseSha, toolingSha: executorSha }), imageAffectingFiles: ["backend/src/runtime.mjs"], classifiedChangedFiles: [{ file: "backend/src/runtime.mjs", category: "runtimeApplicationSource", imageAffecting: true }] }) }],
     ["unregistered early phase", { journalMutate: (journal) => { journal.phase = "DISCOVERY"; } }],
   ];
@@ -441,6 +456,7 @@ test("production CLI rejects forged descendant resume inputs before any adapter 
         exec: fixture.exec,
         readProtectedCheckout: () => fixture.protectedCheckout,
         verifyImageEvidence: fixture.authorizationFixture.verifyImageEvidence,
+        validateTfvarsBinding: fixture.validateTfvarsBinding,
         deriveImageReuse: fixture.deriveImageReuse,
       }), label);
       assert.equal(fixture.calls.some(({ command, args }) => (command === "aws" && args.includes("register-task-definition")) || (command === "terraform" && args.includes("state") && (args.includes("rm") || args.includes("import")))), false, label);
@@ -477,6 +493,7 @@ test("completed cross-descendant recovery is terminal and leaves journal/evidenc
       exec: fixture.exec,
       readProtectedCheckout: () => fixture.protectedCheckout,
       verifyImageEvidence: fixture.authorizationFixture.verifyImageEvidence,
+      validateTfvarsBinding: fixture.validateTfvarsBinding,
       deriveImageReuse: fixture.deriveImageReuse,
     }), /terminal/);
     assert.deepEqual(readFileSync(fixture.journalPath), journalBefore);
@@ -737,10 +754,15 @@ test("recovery authorization uses the selected profile environment and rejects a
   const bindingsPath = path.join(directory, "bindings.json");
   const imageAuthorizationPath = path.join(directory, "image-authorization.json");
   const evidencePath = path.join(directory, "evidence.json");
+  const bindingReportPath = path.join(directory, "stage-b.tfvars.binding.json");
+  const bindingReportBytes = Buffer.from(`${JSON.stringify({ tfvarsFileName: "stage-b.tfvars" })}\n`);
   writeFileSync(bindingsPath, JSON.stringify(bindings), { mode: 0o600 });
   writeFileSync(imageAuthorizationPath, JSON.stringify(imageAuthorization), { mode: 0o600 });
+  writeFileSync(path.join(directory, "stage-b.tfvars"), "# authenticated fixture\n", { mode: 0o600 });
+  writeFileSync(bindingReportPath, bindingReportBytes, { mode: 0o600 });
   const cliArgs = ["--execute", "--source-sha", sourceSha, "--bindings", bindingsPath, "--image-authorization", imageAuthorizationPath,
-    "--terraform-root", path.resolve("infra/aws/terraform/production-green-stage-b"), "--evidence-out", evidencePath, "--aws-profile", "selected-recovery-profile"];
+    "--terraform-root", path.resolve("infra/aws/terraform/production-green-stage-b"), "--evidence-out", evidencePath,
+    "--binding-report", bindingReportPath, "--binding-report-sha256", crypto.createHash("sha256").update(bindingReportBytes).digest("hex"), "--aws-profile", "selected-recovery-profile"];
   const observed = [];
   const calls = [];
   const ambient = { ...process.env, AWS_PROFILE: "ambient-profile", AWS_ACCESS_KEY_ID: "ambient-key", AWS_SECRET_ACCESS_KEY: "ambient-secret", AWS_SESSION_TOKEN: "ambient-token", AWS_SECURITY_TOKEN: "ambient-security-token" };
@@ -749,6 +771,7 @@ test("recovery authorization uses the selected profile environment and rejects a
       baseEnv: ambient,
       readProtectedCheckout: () => protectedCheckout,
       verifyImageEvidence: ({ env }) => { observed.push(env); throw new Error("signature verification failed"); },
+      validateTfvarsBinding: () => ({ backendProxyTrust: bindings.backendProxyTrust }),
       exec: (...args) => { calls.push(args); throw new Error("mutation adapter must not run"); },
     }), /signature verification failed/);
     assert.equal(observed.length, 1);
@@ -756,7 +779,7 @@ test("recovery authorization uses the selected profile environment and rejects a
     assert.equal(observed[0].AWS_REGION, "eu-west-2");
     for (const key of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN"]) assert.equal(observed[0][key], undefined);
     assert.deepEqual(calls, []);
-    assert.deepEqual(buildRecoveryAwsEnvironment("selected-recovery-profile", ambient), observed[0]);
+    assert.deepEqual(buildRecoveryTerraformEnvironment("selected-recovery-profile", ambient, { allowedTerraformVariableKeys: ["TF_DATA_DIR", "TF_WORKSPACE"] }), observed[0]);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
