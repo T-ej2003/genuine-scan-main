@@ -523,3 +523,10 @@ prepare/apply orchestration. The legacy infrastructure activation entry point
 still requires replacement before the branch may be pushed. Keep the same
 isolated runner for CI and production to prevent provider-boundary divergence;
 do not add a second host execution fallback.
+
+The container-side CONNECT transport is separately tested against metadata,
+hostnames, alternate ports, filesystem/socket names and malformed frames. It
+listens only on the container's loopback interface and carries TLS unchanged
+over stdio to the independently restricted host relay. It is not yet connected
+to production prepare/apply; no production-ready claim follows from these
+transport unit tests.
