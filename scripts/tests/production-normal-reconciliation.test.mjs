@@ -177,6 +177,16 @@ test("fresh verification failure never commits a previously verified receipt", a
   assert.deepEqual(f.calls.filter((value) => value.startsWith("rollback-")), ["rollback-frontend", "rollback-backend"]);
 });
 
+test("a verified release partly returned to its exact predecessor is rolled back, never partially committed", async () => {
+  const f = fixture(); f.fail("definite"); await assert.rejects(deploy(f)); f.fail(undefined);
+  f.live.frontend = identity("frontend", "a", 1);
+  await f.reconcile();
+  assert.equal(f.state.components.backend.sourceSha, sha("a"));
+  assert.equal(f.state.components.frontend.sourceSha, sha("a"));
+  assert.equal(f.state.normalDeploymentReceipt, undefined);
+  assert.deepEqual(f.calls.filter((value) => value.startsWith("rollback-")), ["rollback-backend"]);
+});
+
 test("authenticated recovery supersedes only its backend; the pending frontend remains rollback-only", async () => {
   const f = fixture(); f.fail("definite"); await assert.rejects(deploy(f)); f.fail(undefined);
   const restored = identity("backend", "a", 4); restored.establishedThroughSha = sha("c");

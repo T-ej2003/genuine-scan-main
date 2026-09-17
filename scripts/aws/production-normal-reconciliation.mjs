@@ -47,8 +47,7 @@ export async function reconcileNormalDeployment({ client, sourceSha, isAncestor,
     assert.ok(sameNormalIdentity(live[name], predecessor) || (receipt.candidates[name] && sameNormalIdentity(live[name], receipt.candidates[name])), "LIVE_IS_UNKNOWN: live component has no authenticated normal mutation receipt");
   }
   let verificationError;
-  if (receipt.phase === "VERIFIED") {
-    for (const name of Object.keys(receipt.candidates)) assert.equal(classifyNormalLiveComponentState({ live: live[name], predecessor: receipt.predecessors[name], authenticatedReceipt: receipt, component: name }), "LIVE_IS_RECONCILABLE_NORMAL_DEPLOYMENT", "Verified normal receipt no longer matches live production");
+  if (receipt.phase === "VERIFIED" && Object.keys(receipt.candidates).every((name) => classifyNormalLiveComponentState({ live: live[name], predecessor: receipt.predecessors[name], authenticatedReceipt: receipt, component: name }) === "LIVE_IS_RECONCILABLE_NORMAL_DEPLOYMENT")) {
     try { await verify(receipt.candidates); } catch (error) { verificationError = error; }
     if (!verificationError) {
       await writeJournal({ status: "RECONCILIATION_STATE_CAS_INTENT", reconciledSourceSha: receipt.sourceSha });
