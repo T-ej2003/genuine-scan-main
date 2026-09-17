@@ -43,6 +43,14 @@ test("web evidence and authorization reject source, repository, digest, expiry, 
   assert.throws(() => buildWebImageAuthorization({ sourceSha, evidence, signature, imageImpact: impact, reviewer: "other", now: createdAt, verify: () => true }), /reviewer/);
 });
 
+test("web authorization lifetime is bound to the signed evidence lifetime", () => {
+  const { authorization } = fixture();
+  const forged = { ...authorization, expiresAt: "2026-09-18T12:00:00.000Z" };
+  const { authorizationSha256: _authorizationSha256, ...payload } = forged;
+  forged.authorizationSha256 = canonicalSha256(payload);
+  assert.throws(() => assertWebImageAuthorization(forged, { sourceSha, now: createdAt, verify: () => true, minimumRemainingMs: WEB_RELEASE_DOWNSTREAM_RESERVE_MS }), /invalid/);
+});
+
 test("web authorization cannot wrap valid evidence from another source", () => {
   const { authorization } = fixture(); const staleEvidence = structuredClone(authorization.evidence); const staleSource = "c".repeat(40);
   staleEvidence.sourceSha = staleSource; staleEvidence.publicationIdentity.sourceSha = staleSource; staleEvidence.publicationIdentity.workflowDefinitionSha = staleSource;
