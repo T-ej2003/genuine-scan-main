@@ -600,3 +600,21 @@ read for provenance, but cannot authorize a new IAM write; table apply remains
 subject to its separate exact saved-plan approval. The 67 directly affected
 session/broker/capability tests and ESLint pass. Production activation CLI wiring
 is still required before the legacy host path can be removed.
+
+### Isolated activation integration checkpoint
+
+The production activation CLI now uses the scoped MFA session client and isolated
+runner for both preparation and exact saved-plan application. The root-profile
+audit and host Terraform adapters have been deleted. Fixed read-only AWS checks
+authenticate absent state/history/table and the broker receipt plus all owned IAM
+documents. A write-once exact attempt reservation is mandatory at the isolated
+apply barrier. Source, IAM receipt, saved bytes and GitHub approval are rechecked
+before releasing that barrier; ambiguous results never trigger another apply.
+
+The completed focused sweep reports 597 tests, 589 passing and eight explicitly
+opt-in container tests skipped. The separate actual-container runner suite passes
+all ten tests, including simulated init/plan/apply failures and refused approval.
+Real GitHub ZIP fixtures cover exact saved-plan bindings and substituted approval
+evidence. ESLint is clean for the integration. These are local source/fixture
+results, not live AWS or effective-permission proof. Final adversarial review,
+full local gates, PR CI and exact-head external review remain outstanding.

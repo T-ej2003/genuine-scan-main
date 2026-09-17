@@ -107,7 +107,10 @@ async function main() {
     }
     const planSha256 = await fileHash(planPath);
     const planJson = JSON.parse(await tf(["show", "-json", planPath]));
-    if (mode === "prepare") emit({ type: "result", plan: fs.readFileSync(planPath).toString("base64"), planSha256, planJson });
+    if (mode === "prepare") {
+      await input.barrier({ stage: "plan", planSha256, planJson });
+      emit({ type: "result", plan: fs.readFileSync(planPath).toString("base64"), planSha256, planJson });
+    }
     else {
       await input.barrier({ stage: "apply", planSha256, planJson });
       assert.equal(await fileHash(planPath), planSha256);

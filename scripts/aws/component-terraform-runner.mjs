@@ -59,7 +59,7 @@ export async function executeIsolatedTerraform(request, { checkpoint, prepare = 
           await checkpoint(value);
           assert(Date.now() < expires - 10000);
           send({ type: "continue", stage, manifestSha256: inputs.manifestSha256 });
-          stage = stage === "backend" && request.mode === "apply" ? "apply" : "result";
+          stage = stage === "backend" ? request.mode === "apply" ? "apply" : "plan" : "result";
         } else {
           assert(ready && stage === "result" && value.type === "result" && !result);
           assert.deepEqual(Object.keys(value).sort(), request.mode === "prepare" ? ["plan", "planJson", "planSha256", "type"] : ["appliedPlanSha256", "driftVerified", "type"]);

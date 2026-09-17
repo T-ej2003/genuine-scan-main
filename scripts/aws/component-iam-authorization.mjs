@@ -112,9 +112,29 @@ export function authenticateIdentityBootstrapPublication(input, packageEvidence,
   return authenticatePublication(input, dependencies, packageEvidence);
 }
 
-function authenticatePublication(input, { execute, env = process.env, now = Date.now }, bootstrapPackage) {
-  const targetEnvironment = bootstrapPackage ? "production-component-installation-identity-bootstrap" : environment;
-  const targetWorkflow = bootstrapPackage ? bootstrapAuthorizationContract.workflow : workflow;
+export function authenticateTerraformActivationAuthorization(input, dependencies = {}) {
+  assert.deepEqual(Object.keys(input).sort(), ["planSha256", "preparationSha256", "runId", "sourceSha", "transitionId"]);
+  const { planSha256, preparationSha256, ...coordinates } = input;
+  for (const value of [planSha256, preparationSha256]) assert.match(value || "", /^[a-f0-9]{64}$/);
+  return authenticatePublication(coordinates, dependencies, undefined, { sourceSha: input.sourceSha, planSha256, preparationSha256 });
+}
+
+export function readComponentActivationEnvironments(sourceSha, { execute, env = process.env } = {}) {
+  assert.match(sourceSha || "", /^[a-f0-9]{40}$/);
+  return ["production-normal-deploy", "production-component-state-bootstrap", "production-component-infrastructure-activation"].map(name => {
+    const read = githubReader(execute, env, name);
+    protectedMain(read(`repos/${repository}/branches/main`), sourceSha);
+    const config = read(`repos/${repository}/environments/${name}`);
+    const branches = read(`repos/${repository}/environments/${name}/deployment-branch-policies`);
+    assert.equal(config.name, name);
+    assert.equal(branches.total_count, 1);
+    return { config, branches };
+  });
+}
+
+function authenticatePublication(input, { execute, env = process.env, now = Date.now }, bootstrapPackage, terraformBinding) {
+  const targetEnvironment = terraformBinding ? "production-component-infrastructure-activation" : bootstrapPackage ? "production-component-installation-identity-bootstrap" : environment;
+  const targetWorkflow = terraformBinding ? ".github/workflows/authorize-component-infrastructure-activation.yml" : bootstrapPackage ? bootstrapAuthorizationContract.workflow : workflow;
   assert.deepEqual(Object.keys(input).sort(), ["runId", "sourceSha", "transitionId"]);
   coordinates(input);
   const { runId, sourceSha, transitionId } = input;
@@ -141,13 +161,13 @@ function authenticatePublication(input, { execute, env = process.env, now = Date
   protectedMain(api("branches/main"), sourceSha);
   const run = api(`actions/runs/${runId}`);
   verifyRun(run);
-  (bootstrapPackage ? assertComponentIdentityBootstrapEnvironment : assertComponentIamEnvironment)(api(`environments/${targetEnvironment}`), api(`environments/${targetEnvironment}/deployment-branch-policies`), api(`actions/runs/${runId}/approvals`));
+  assertSoloEnvironment(api(`environments/${targetEnvironment}`), api(`environments/${targetEnvironment}/deployment-branch-policies`), api(`actions/runs/${runId}/approvals`), targetEnvironment);
   const pages = api(`actions/runs/${runId}/artifacts`, { paginate: true });
   assert(Array.isArray(pages) && pages.length && pages.every(page => Array.isArray(page.artifacts)));
   const artifacts = pages.flatMap(page => page.artifacts);
   assert.equal(artifacts.length, 1);
   const artifact = artifacts[0];
-  assert.equal(artifact.name, bootstrapPackage ? bootstrapAuthorizationContract.artifact : "component-installation-authorization-audit");
+  assert.equal(artifact.name, terraformBinding ? "component-infrastructure-authorization" : bootstrapPackage ? bootstrapAuthorizationContract.artifact : "component-installation-authorization-audit");
   assert.equal(artifact.expired, false);
   assert(Number.isSafeInteger(artifact.id) && artifact.id > 0);
   assert(Number.isSafeInteger(artifact.size_in_bytes) && artifact.size_in_bytes > 0 && artifact.size_in_bytes <= 1024 * 1024);
@@ -164,7 +184,7 @@ function authenticatePublication(input, { execute, env = process.env, now = Date
     const zip = path.join(directory, "audit.zip");
     fs.writeFileSync(zip, bytes, { mode: 0o600, flag: "wx" });
     const unzip = (...args) => execFileSync("/usr/bin/unzip", args, { env: { PATH: "/usr/bin:/bin", LANG: "C" }, encoding: "utf8", timeout: 10000, maxBuffer: 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
-    const names = bootstrapPackage ? [bootstrapAuthorizationContract.file] : ["invocation", "request", "result"].map(name => `component-installation-${name}.json`);
+    const names = terraformBinding ? ["authorization.json"] : bootstrapPackage ? [bootstrapAuthorizationContract.file] : ["invocation", "request", "result"].map(name => `component-installation-${name}.json`);
     assert.deepEqual(unzip("-Z1", zip).trim().split("\n").sort(), names);
     const listing = unzip("-Z", "-l", zip).split("\n");
     for (const name of names) {
@@ -175,12 +195,21 @@ function authenticatePublication(input, { execute, env = process.env, now = Date
     audit = Object.fromEntries(names.map(name => [name, JSON.parse(unzip("-p", zip, name))]));
   } finally { fs.rmSync(directory, { recursive: true }); }
   let authorization;
-  if (bootstrapPackage) authorization = audit[bootstrapAuthorizationContract.file];
+  if (terraformBinding) authorization = audit["authorization.json"];
+  else if (bootstrapPackage) authorization = audit[bootstrapAuthorizationContract.file];
   else {
     const request = audit["component-installation-request.json"];
     assert.deepEqual(Object.keys(request).sort(), ["authorization", "operation"]);
     assert.equal(request.operation, "AUTHORIZE");
     authorization = request.authorization;
+  }
+  if (terraformBinding) {
+    assert.deepEqual(authorization, terraformBinding, "Saved-plan approval bindings differ");
+    assert(now() - timestamp(run.created_at) < componentIamAuthorization.maxAgeMs, "Saved-plan approval expired");
+    protectedMain(api("branches/main"), sourceSha);
+    const finalRun = api(`actions/runs/${runId}`); verifyRun(finalRun);
+    assert.equal(finalRun.created_at, run.created_at); assert.equal(finalRun.updated_at, run.updated_at);
+    return Object.freeze(authorization);
   }
   assert.equal(authorization.runId, runId);
   assert.equal(authorization.transitionId, transitionId);

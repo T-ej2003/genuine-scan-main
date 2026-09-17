@@ -62,7 +62,7 @@ for (const mode of ["prepare", "apply"]) test(`actual isolated ${mode} orchestra
   const result = await executeIsolatedTerraform(request(mode), { prepare: fixture, checkpoint: async value => { checkpoints.push(value); } });
   assert.deepEqual(checkpoints[0], { type: "checkpoint", stage: "backend", backend: { type: "s3", config: { fixture: true } }, workspace: "default" });
   if (mode === "prepare") {
-    assert.equal(checkpoints.length, 1);
+    assert.equal(checkpoints.length, 2); assert.equal(checkpoints[1].stage, "plan");
     assert.deepEqual(result, { type: "result", plan: Buffer.from("exact-reviewed-plan").toString("base64"), planSha256: hash("exact-reviewed-plan"), planJson: { fixture: true } });
   } else {
     assert.deepEqual(checkpoints[1], { type: "checkpoint", stage: "apply", planSha256: hash("exact-reviewed-plan"), planJson: { fixture: true } });

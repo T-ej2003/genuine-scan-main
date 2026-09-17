@@ -105,6 +105,24 @@ test("substituted Terraform session evidence never reaches a container", async (
   assert.equal(f.scoped.SecretAccessKey, undefined);
 });
 
+for (const reserve of [false, true]) test(`isolated apply requires exactly one authenticated reservation: ${reserve}`, async () => {
+  const f = fixture("TERRAFORM"); let reservations = 0, closed = 0;
+  f.dependencies.state = () => ({ inspect: async () => ({ stateIdentity: "ABSENT" }), close: () => { closed++; }, reserve: async record => {
+    reservations++; assert.equal(record.session.purpose, "TERRAFORM"); assert.equal(record.session.principal, f.principal);
+  } });
+  f.dependencies.isolated = async (_input, options) => { await options.checkpoint({ stage: "apply" }); return {}; };
+  const client = await f.open();
+  await assert.rejects(client.reserve({}), /No active/);
+  const execution = client.execute({ mode: "apply", plan: Buffer.from("fixture") }, { checkpoint: async () => {
+    if (reserve) { await client.reserve({}); await assert.rejects(client.reserve({}), /No active/); }
+  } });
+  if (reserve) await execution;
+  else await assert.rejects(execution, /reservation required/);
+  assert.equal(reservations, Number(reserve)); assert.equal(closed, 1);
+  assert.equal(f.scoped.SecretAccessKey, undefined);
+  await assert.rejects(client.reserve({}), /No active/);
+});
+
 for (const arn of ["arn:aws:iam::368992683803:root", "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/session", "arn:aws:iam::368992683803:user/other"]) test(`issuer rejects ${arn} before MFA or AssumeRole`, async () => {
   const f = fixture(); f.user.Arn = arn;
   await assert.rejects(f.open());

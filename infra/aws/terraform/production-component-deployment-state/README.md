@@ -155,9 +155,38 @@ credentials; closure fences the broker transition permanently.
 
 Table preparation/application remains separately governed by exact protected SHA,
 backend/workspace identity, authenticated IAM receipt and exact saved-plan SHA256.
-A regenerated plan cannot reuse approval. The replacement isolated executor is
-required before production use; the recovered host-local Terraform implementation
-is not an approved execution path and is being removed.
+A regenerated plan cannot reuse approval. The activation entry point now invokes
+only the credential-isolated container runner; the host Terraform/root-profile
+adapter has been removed. After the IAM installation is verified, create a fresh
+owner-only directory outside the checkout and use:
+
+```sh
+node scripts/aws/component-infrastructure-activation.mjs prepare PRIVATE_DIRECTORY INSTALLATION_APPROVAL_RUN_ID TRANSITION_UUID
+```
+
+Preparation authenticates all three deployment environments, current protected
+source, durable IAM receipt and live IAM documents, absent remote state/history,
+and absent table. Hidden MFA issues the scoped Terraform session. Terraform runs
+with no network namespace access or host credential mounts; a fixed TLS relay
+permits only the required AWS endpoints. The reviewed Terraform/provider downloads
+are hash checked, the committed provider lock is read-only, and no host plugin
+cache or CLI override is accepted.
+
+Review the saved `activation.tfplan`, `preparation.json` and returned hashes.
+Dispatch `authorize-component-infrastructure-activation.yml` with their exact
+source, plan and preparation hashes, then explicitly approve its environment.
+Only a separately authorized apply execution may run:
+
+```sh
+node scripts/aws/component-infrastructure-activation.mjs apply PRIVATE_DIRECTORY ACTIVATION_APPROVAL_RUN_ID
+```
+
+Apply obtains a fresh scoped session and reauthenticates the exact GitHub approval,
+source, plan, backend and live IAM receipt at the isolated pre-apply barrier.
+A conditional write reserves the fixed activation-attempt object before the
+exact saved plan may execute. Ambiguous reservation or apply is not retried.
+The executor verifies a no-change readback plan before reporting success. No
+credentials are written to the plan directory, evidence or child environment.
 
 After verified infrastructure installation, component-state bootstrap is a separate
 explicitly approved operation. Creating a table is not bootstrapping its contents.

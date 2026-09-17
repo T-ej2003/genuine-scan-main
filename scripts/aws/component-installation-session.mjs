@@ -7,6 +7,7 @@ import { createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOU
 import { identityBootstrap, componentBrokerArn } from "./component-installation-identity-contract.mjs";
 import { sessionProofBinding, assertComponentSessionRecord } from "./component-session-proof.mjs";
 import { executeIsolatedTerraform } from "./component-terraform-runner.mjs";
+import { createTerraformStateBoundary } from "./component-terraform-state.mjs";
 
 const requireSdk = createRequire(new URL("../../infra/aws/terraform/production-component-deployment-state/broker-package/package.json", import.meta.url));
 const operator = "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator";
@@ -38,7 +39,7 @@ export async function establishComponentCleanupSession(transitionId, dependencie
   return establish({ transitionId, purpose: "CLEANUP" }, dependencies, true);
 }
 
-async function establish(binding, { loadUser = loadOperator, sts = stsTransport, mfa = () => promptProductionMfaCode({ prompt: "Component installation operator MFA code: " }), invoke, isolated = executeIsolatedTerraform, now = Date.now, sleep = delay } = {}, discover = false) {
+async function establish(binding, { loadUser = loadOperator, sts = stsTransport, mfa = () => promptProductionMfaCode({ prompt: "Component installation operator MFA code: " }), invoke, isolated = executeIsolatedTerraform, state = createTerraformStateBoundary, now = Date.now, sleep = delay } = {}, discover = false) {
   const fixedBinding = structuredClone(binding);
   if (!discover) sessionProofBinding(fixedBinding);
   assert(Object.hasOwn(roles, fixedBinding.purpose));
@@ -127,16 +128,29 @@ async function establish(binding, { loadUser = loadOperator, sts = stsTransport,
         throw new Error("AWS issuance proof unavailable before the bounded deadline");
     };
     if (fixedBinding.purpose === "TERRAFORM") {
-      let consumed = false;
+      let consumed = false, applying = false, reserved = false, activeSession;
+      const boundary = state(scoped, fixedBinding);
+      const close = () => { applying = false; boundary.close(); for (const field of ["AccessKeyId", "SecretAccessKey", "SessionToken"]) delete scoped[field]; };
       return Object.freeze({ principal, expiresAt: new Date(expires).toISOString(),
+        close,
+        async inspect() { await prove(); return boundary.inspect(); },
+        async reserve(record) {
+          assert(applying && !reserved && now() < expires, "No active unconsumed apply authorization");
+          reserved = true; return boundary.reserve({ ...record, session: activeSession });
+        },
         async execute({ mode, plan }, { checkpoint }) {
           assert(!consumed, "Terraform session execution already consumed"); consumed = true;
           assert(["prepare", "apply"].includes(mode)); assert.equal(typeof checkpoint, "function");
           try {
             const session = await prove();
+            activeSession = session;
+            applying = mode === "apply";
             return { session, result: await isolated({ mode, plan, expiresAt: session.expiresAt,
-              credentials: { AccessKeyId: scoped.AccessKeyId, SecretAccessKey: scoped.SecretAccessKey, SessionToken: scoped.SessionToken } }, { checkpoint }) };
-          } finally { for (const field of ["AccessKeyId", "SecretAccessKey", "SessionToken"]) delete scoped[field]; }
+              credentials: { AccessKeyId: scoped.AccessKeyId, SecretAccessKey: scoped.SecretAccessKey, SessionToken: scoped.SessionToken } }, { checkpoint: async value => {
+                await checkpoint(value);
+                if (value.stage === "apply") assert(reserved, "Exact one-time activation reservation required");
+              } }) };
+          } finally { close(); }
         },
       });
     }

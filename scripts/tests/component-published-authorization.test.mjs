@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { authenticatePublishedComponentAuthorization, authenticateIdentityBootstrapPublication, componentIamAuthorization as installationContract } from "../aws/component-iam-authorization.mjs";
+import { authenticatePublishedComponentAuthorization, authenticateIdentityBootstrapPublication, authenticateTerraformActivationAuthorization, componentIamAuthorization as installationContract } from "../aws/component-iam-authorization.mjs";
 import { approveIdentityBootstrap, bootstrapAuthorizationContract } from "../aws/component-identity-bootstrap-authorization.mjs";
 import { identityBootstrap } from "../aws/component-installation-identity-contract.mjs";
 import { approvedInstallationRequest } from "../aws/component-iam-authorization-publisher.mjs";
@@ -15,8 +15,9 @@ import { digest } from "../aws/component-iam-installation-contract.mjs";
 const now = Date.parse("2026-09-17T12:05:00Z");
 const input = { sourceSha: "a".repeat(40), transitionId: "12345678-1234-4234-8234-123456789abc", runId: "1234" };
 const actor = { type: "User", login: "T-ej2003", id: 183396573 };
-function fixture(change = () => {}, bootstrap = false) {
-  const contract = bootstrap ? { ...installationContract, workflow: bootstrapAuthorizationContract.workflow, environment: identityBootstrap.environment } : installationContract;
+function fixture(change = () => {}, bootstrap = false, terraform = false) {
+  const contract = terraform ? { ...installationContract, workflow: ".github/workflows/authorize-component-infrastructure-activation.yml", environment: "production-component-infrastructure-activation" } : bootstrap ? { ...installationContract, workflow: bootstrapAuthorizationContract.workflow, environment: identityBootstrap.environment } : installationContract;
+  const binding = { sourceSha: input.sourceSha, planSha256: "e".repeat(64), preparationSha256: "f".repeat(64) };
   const manifest = componentBrokerPackageManifest(input.sourceSha);
   const main = { name: "main", protected: true, commit: { sha: input.sourceSha } };
   const repository = { id: 1145608538, full_name: contract.repository };
@@ -27,10 +28,10 @@ function fixture(change = () => {}, bootstrap = false) {
   const branches = { total_count: 1, branch_policies: [{ name: "main", type: "branch" }] };
   const approvals = [{ state: "approved", user: actor, environments: [{ id: 91, name: contract.environment }] }];
   const packageEvidence = { manifest, manifestSha256: digest(manifest), packageSha256: "b".repeat(64) };
-  const request = (bootstrap ? approveIdentityBootstrap : approvedInstallationRequest)({ ...input, main, run, environment, branches, approvals,
+  const request = terraform ? binding : (bootstrap ? approveIdentityBootstrap : approvedInstallationRequest)({ ...input, main, run, environment, branches, approvals,
     packageEvidence, now: now - 120000 });
   Object.assign(run, { status: "completed", conclusion: "success" });
-  const files = bootstrap ? { [bootstrapAuthorizationContract.file]: request } : { "component-installation-invocation.json": { StatusCode: 200, ExecutedVersion: "3" }, "component-installation-request.json": request,
+  const files = terraform ? { "authorization.json": { ...binding } } : bootstrap ? { [bootstrapAuthorizationContract.file]: request } : { "component-installation-invocation.json": { StatusCode: 200, ExecutedVersion: "3" }, "component-installation-request.json": request,
     "component-installation-result.json": { authorizationSha256: digest(request.authorization) } };
   const f = { main, run, environment, branches, approvals, files, calls: [], now };
   change(f);
@@ -41,9 +42,9 @@ function fixture(change = () => {}, bootstrap = false) {
     execFileSync("/usr/bin/zip", ["-q", "archive.zip", ...Object.keys(files)], { cwd: directory });
     archive = fs.readFileSync(path.join(directory, "archive.zip"));
   } finally { fs.rmSync(directory, { recursive: true }); }
-  const artifact = { id: 55, name: bootstrap ? bootstrapAuthorizationContract.artifact : "component-installation-authorization-audit", expired: false, size_in_bytes: archive.length,
+  const artifact = { id: 55, name: terraform ? "component-infrastructure-authorization" : bootstrap ? bootstrapAuthorizationContract.artifact : "component-installation-authorization-audit", expired: false, size_in_bytes: archive.length,
     digest: `sha256:${crypto.createHash("sha256").update(archive).digest("hex")}`, workflow_run: { id: 1234, head_sha: input.sourceSha, repository_id: 1145608538 }, ...f.artifact };
-  const authenticate = bootstrap ? (value, deps) => authenticateIdentityBootstrapPublication(value, packageEvidence, deps) : authenticatePublishedComponentAuthorization;
+  const authenticate = terraform ? (value, deps) => authenticateTerraformActivationAuthorization({ ...value, ...binding }, deps) : bootstrap ? (value, deps) => authenticateIdentityBootstrapPublication(value, packageEvidence, deps) : authenticatePublishedComponentAuthorization;
   f.authenticate = () => authenticate(input, { now: () => f.now, env: {}, execute: (_cmd, args) => {
     const suffix = args[3].slice(`repos/${contract.repository}/`.length); f.calls.push(suffix);
     if (suffix === "actions/artifacts/55/zip") return archive;
@@ -88,5 +89,18 @@ for (const field of ["sourceSha", "transitionId", "runId", "identitySetSha256", 
   test(`bootstrap archive rejects substitution of ${field}`, () => {
     const f = fixture(value => { value.files[bootstrapAuthorizationContract.file][field] = "different"; }, true);
     assert.throws(f.authenticate);
+  });
+}
+
+test("saved-plan approval authenticates the exact GitHub archive", () => {
+  const f = fixture(() => {}, false, true);
+  assert.deepEqual(f.authenticate(), f.files["authorization.json"]);
+});
+for (const name of ["missing approval", "different reviewer", "different environment", "rerun", "failed publisher", "different source", "expired authorization", "different artifact", "forged archive hash", "extra archive member"]) {
+  test(`saved-plan archive rejects ${name}`, () => assert.throws(fixture(invalid[name], false, true).authenticate));
+}
+for (const field of ["sourceSha", "planSha256", "preparationSha256"]) {
+  test(`saved-plan archive rejects substituted ${field}`, () => {
+    assert.throws(fixture(f => { f.files["authorization.json"][field] = "0".repeat(field === "sourceSha" ? 40 : 64); }, false, true).authenticate);
   });
 }
