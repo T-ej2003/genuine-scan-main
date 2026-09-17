@@ -84,7 +84,7 @@ export function createProductionComponentDeploymentStateClient({ run } = {}) {
 // DynamoDB only provides document-level conditional writes. A writer may retry
 // after an unrelated component advances, but never after its own predecessor
 // changed. This keeps one durable item without lost component updates.
-export function advanceProductionComponentDeploymentStateWithRetry({ client, current, lane, changes, maxRetries = 2, now = () => new Date().toISOString(), isAncestor, authenticateRecovery, updatedByWorkflow, githubRunId } = {}) {
+export function advanceProductionComponentDeploymentStateWithRetry({ client, current, lane, changes, maxRetries = 2, now = () => new Date().toISOString(), recovery = false, isAncestor, authenticateRecovery, updatedByWorkflow, githubRunId } = {}) {
   assert.equal(typeof client?.read, "function"); assert.equal(typeof client?.advance, "function");
   assert.ok(Number.isSafeInteger(maxRetries) && maxRetries >= 0 && maxRetries <= 5);
   assertProductionComponentDeploymentState(current);
@@ -97,7 +97,7 @@ export function advanceProductionComponentDeploymentStateWithRetry({ client, cur
   const expectedComponents = Object.fromEntries(Object.keys(changes || {}).map((name) => [name, clone(current.components[name])]));
   let observed = current;
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
-    const next = advanceProductionComponentDeploymentState({ current: observed, expectedGeneration: observed.generation, lane, changes, now: now(), isAncestor, authenticateRecovery, updatedByWorkflow, githubRunId });
+    const next = advanceProductionComponentDeploymentState({ current: observed, expectedGeneration: observed.generation, lane, changes, now: now(), recovery, isAncestor, authenticateRecovery, updatedByWorkflow, githubRunId });
     try {
       client.advance(observed, next);
       return Object.freeze({ state: next, attempts: attempt + 1, reconciledUnrelatedConcurrentUpdate: attempt > 0 });

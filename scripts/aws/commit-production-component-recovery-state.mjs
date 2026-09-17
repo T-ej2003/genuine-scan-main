@@ -17,8 +17,8 @@ export function authenticatedBackendRecoveryComponent(live, evidence) {
   return { sourceSha: evidence.imageReleaseSha, imageDigest: live.backendDigest, taskDefinitionArn: live.taskDefinitionArn, desiredCount: live.desiredCount };
 }
 
-export function commitBackendRecoveryComponentState({ evidence, client, run, isProtectedMainAncestor = () => true, writerContext } = {}) {
-  const readers = createAppOnlyEcsReaders(run); const live = captureAppOnlyPredecessor(readers.readLive());
+export function commitBackendRecoveryComponentState({ evidence, client, run, readers = createAppOnlyEcsReaders(run), isProtectedMainAncestor = () => true, writerContext } = {}) {
+  const live = captureAppOnlyPredecessor(readers.readLive());
   const sourceSha = readers.readBackendImageSource(live.backendDigest);
   assert.equal(sourceSha, evidence.imageReleaseSha); const component = authenticatedBackendRecoveryComponent(live, evidence); assert.equal(isProtectedMainAncestor(sourceSha), true, "Recovered backend source is not protected-main history.");
   const state = client.read(); assert.ok(state, "Production component deployment state is not bootstrapped.");

@@ -23,7 +23,7 @@ function imageSource(run, repository, digest) {
   return sources[0];
 }
 
-function serviceDefinition(run, cluster, service, family, container, repository) {
+export function serviceDefinition(run, cluster, service, family, container, repository) {
   const response = json(run, ["ecs", "describe-services", "--cluster", cluster, "--services", service]);
   assert.equal(response.failures?.length, 0); assert.equal(response.services?.length, 1);
   const live = response.services[0];
