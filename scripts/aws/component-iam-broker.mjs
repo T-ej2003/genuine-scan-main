@@ -240,6 +240,7 @@ export async function executeFixedBroker(event, context, { manifest, iam, s3, la
   const inspect = (authorization) => createInstallationHandler({ manifest: bind(authorization), iam, s3, currentMain, cleanup: true, now })({ operation: "INSPECT", transitionId: authorization.authorization.transitionId });
   const archive = createBrokerAuthorizationArchive({ manifest, packageSha256, s3, currentMain, now, reconcile: inspect });
   if (event.operation === "AUTHORIZE") return archive.authorize(event, context);
+  if (event.operation === "CLEANUP_CONTEXT") return archive.cleanupContext(event, context);
   assert.deepEqual(Object.keys(event).sort(), ["authorizationSha256", "operation", "proof", "transitionId"]);
   const { proof, ...request } = event;
   const authorization = await archive.authenticate(request, context);

@@ -24,9 +24,21 @@ function loadOperator() {
 // The caller must authenticate explicit authorization before issuance. This
 // client exposes only fixed broker operations; no AWS/IAM client or credentials
 // are returned to the normal controller, output files, evidence or child env.
-export async function establishComponentSession(binding, { loadUser = loadOperator, sts = stsTransport, mfa = () => promptProductionMfaCode({ prompt: "Component installation operator MFA code: " }), invoke, now = Date.now } = {}) {
+export async function establishComponentSession(binding, dependencies = {}) {
+  sessionProofBinding(binding);
+  return establish(binding, dependencies);
+}
+
+// Cleanup retrieves its original coordinates from the fixed broker-owned AWS
+// archive, not a retained GitHub artifact or caller-selected authorization file.
+export async function establishComponentCleanupSession(transitionId, dependencies = {}) {
+  assert.match(transitionId || "", /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
+  return establish({ transitionId, purpose: "CLEANUP" }, dependencies, true);
+}
+
+async function establish(binding, { loadUser = loadOperator, sts = stsTransport, mfa = () => promptProductionMfaCode({ prompt: "Component installation operator MFA code: " }), invoke, now = Date.now } = {}, discover = false) {
   const fixedBinding = structuredClone(binding);
-  sessionProofBinding(fixedBinding);
+  if (!discover) sessionProofBinding(fixedBinding);
   assert(Object.hasOwn(roles, fixedBinding.purpose));
   let base;
   let human;
@@ -62,6 +74,29 @@ export async function establishComponentSession(binding, { loadUser = loadOperat
     const { SignatureV4 } = requireSdk("@smithy/signature-v4");
     const { Sha256 } = requireSdk("@aws-crypto/sha256-js");
     const signer = new SignatureV4({ credentials: credentialsForSdk(scoped), region: identityBootstrap.region, service: "sts", sha256: Sha256 });
+    const send = async (payload) => {
+      assert(now() < expires, "AWS session expired");
+      const input = { FunctionName: `${componentBrokerArn}:${fixedBinding.purpose === "INSTALL" ? "1" : "2"}`, InvocationType: "RequestResponse", Payload: Buffer.from(JSON.stringify(payload)) };
+      let result;
+      if (invoke) result = await invoke(input);
+      else {
+        const sdk = requireSdk("@aws-sdk/client-lambda");
+        const client = new sdk.LambdaClient(options(scoped, "lambda"));
+        try { result = await client.send(new sdk.InvokeCommand(input)); }
+        finally { client.destroy(); }
+      }
+      assert.equal(result.StatusCode, 200);
+      assert(!result.FunctionError, "Broker rejected the request; authenticate live evidence before retry");
+      assert.equal(result.ExecutedVersion, fixedBinding.purpose === "INSTALL" ? "1" : "2");
+      return JSON.parse(Buffer.from(result.Payload).toString("utf8"));
+    };
+    if (discover) {
+      const archived = await send({ operation: "CLEANUP_CONTEXT" });
+      sessionProofBinding(archived);
+      assert.equal(archived.purpose, "CLEANUP");
+      assert.equal(archived.transitionId, fixedBinding.transitionId, "Different cleanup transition");
+      Object.assign(fixedBinding, archived);
+    }
     return Object.freeze({
       principal, expiresAt: new Date(expires).toISOString(),
       async invoke(operation) {
@@ -69,19 +104,7 @@ export async function establishComponentSession(binding, { loadUser = loadOperat
         assert(now() < expires, "AWS session expired");
         const signed = await signer.presign({ protocol: "https:", hostname: "sts.eu-west-2.amazonaws.com", method: "GET", path: "/", headers: { host: "sts.eu-west-2.amazonaws.com", "x-mscqr-component-binding": sessionProofBinding(fixedBinding) }, query: { Action: "GetCallerIdentity", Version: "2011-06-15" } }, { expiresIn: 60, signingDate: new Date(now()) });
         const payload = { operation, transitionId: fixedBinding.transitionId, authorizationSha256: fixedBinding.authorizationSha256, proof: { query: signed.query } };
-        const input = { FunctionName: `${componentBrokerArn}:${fixedBinding.purpose === "INSTALL" ? "1" : "2"}`, InvocationType: "RequestResponse", Payload: Buffer.from(JSON.stringify(payload)) };
-        let result;
-        if (invoke) result = await invoke(input);
-        else {
-          const sdk = requireSdk("@aws-sdk/client-lambda");
-          const client = new sdk.LambdaClient(options(scoped, "lambda"));
-          try { result = await client.send(new sdk.InvokeCommand(input)); }
-          finally { client.destroy(); }
-        }
-        assert.equal(result.StatusCode, 200);
-        assert(!result.FunctionError, "Broker rejected the request; authenticate live evidence before retry");
-        assert.equal(result.ExecutedVersion, fixedBinding.purpose === "INSTALL" ? "1" : "2");
-        return JSON.parse(Buffer.from(result.Payload).toString("utf8"));
+        return send(payload);
       },
     });
   } finally {

@@ -352,3 +352,22 @@ running all component tests plus the credential-source contract. The current
 combined focused run passes **518 tests** with no skips. This includes retained
 legacy-controller unit tests and does not imply that the unfinished CLI/bootstrap
 and Terraform isolation paths meet the final security requirements.
+
+### Durable cleanup discovery after recovery
+
+The new cleanup session client can retrieve the original non-secret source,
+transition and authorization hash from the fixed broker's `CLEANUP_CONTEXT`
+operation on version 2. It requires only the transition identifier from the
+operator, not a local authorization file or retained GitHub artifact. The broker
+authenticates its bootstrap record, all execution identities, package/configuration,
+and absence of resource-policy bypasses before reading its fixed authorization
+archive. This read-only operation cannot select a key or perform an IAM/S3 write.
+
+Discovery does not authorize cleanup mutation. `CLOSE` still requires the freshly
+issued exact cleanup role, signed STS identity, MFA-backed issuance/expiry proof,
+matching archived bindings, and live IAM classification. Substituted coordinates
+fail before closure. The source/transport tests include discovery 91 days after
+approval and after protected main advances, with zero writes. The 93 directly
+affected tests and changed-file ESLint pass. The public legacy controller still
+needs replacement; no completed operator lifecycle or production execution is
+claimed by this checkpoint.

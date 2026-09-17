@@ -105,7 +105,7 @@ function fixture() {
     assert.equal(operation, "GetRuntimeManagementConfig");
     return { UpdateRuntimeOn: "FunctionUpdate", RuntimeVersionArn: runtimeArn };
   };
-  f.run = (operation, fields = {}, version = { AUTHORIZE: "3", CLOSE: "2", INSTALL: "1", INSPECT: "1" }[operation]) => {
+  f.run = (operation, fields = {}, version = { AUTHORIZE: "3", CLOSE: "2", CLEANUP_CONTEXT: "2", INSTALL: "1", INSPECT: "1" }[operation]) => {
     const purpose = operation === "CLOSE" ? "CLEANUP" : "INSTALL";
     const role = purpose === "CLEANUP" ? identityBootstrap.cleanupRole : identityBootstrap.installationRole;
     const binding = { sourceSha, transitionId, authorizationSha256: digest(authorization), purpose };
@@ -119,12 +119,27 @@ function fixture() {
       userIdentity: { type: "IAMUser", accountId: "368992683803", arn: "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator", sessionContext: { attributes: { mfaAuthenticated: "true" } } },
       requestParameters: { roleArn: `arn:aws:iam::368992683803:role/${role}`, roleSessionName: `component-${transitionId}`, durationSeconds: 900 },
       responseElements: { credentials: { accessKeyId: key, expiration: new Date(issued + 900000).toISOString() }, assumedRoleUser: { arn: principal, assumedRoleId: "role-id:session" } } };
-    const event = operation === "AUTHORIZE" ? { operation, authorization, ...fields } : { operation, transitionId, authorizationSha256: digest(authorization), proof, ...fields };
+    const event = operation === "CLEANUP_CONTEXT" ? { operation, ...fields } : operation === "AUTHORIZE" ? { operation, authorization, ...fields } : { operation, transitionId, authorizationSha256: digest(authorization), proof, ...fields };
     return executeFixedBroker(event, { functionVersion: version, invokedFunctionArn: `${componentBrokerArn}:${version}` }, { manifest, iam, s3, lambda, currentMain: async () => f.main, now: () => f.clock,
       sts: async (request) => { assert.equal(request.headers["x-mscqr-component-binding"], sessionProofBinding(binding)); return { Account: "368992683803", Arn: principal, UserId: "role-id:session" }; }, issuanceEvents: async () => [issuance] });
   };
   return f;
 }
+
+test("cleanup context reads the fixed authenticated archive after expiry without mutating it", async () => {
+  const f = fixture();
+  await f.run("AUTHORIZE");
+  const before = JSON.stringify([...f.objects]);
+  f.clock += 91 * 24 * 3600000;
+  f.main = "d".repeat(40);
+  assert.deepEqual(await f.run("CLEANUP_CONTEXT"), { sourceSha, transitionId, authorizationSha256: digest(f.authorization), purpose: "CLEANUP" });
+  assert.equal(JSON.stringify([...f.objects]), before);
+  assert.deepEqual(f.writes, []);
+  for (const fields of [{ key: "alternate" }, { transitionId }, { authorizationSha256: "d".repeat(64) }]) await assert.rejects(f.run("CLEANUP_CONTEXT", fields));
+  for (const version of ["1", "3", "$LATEST"]) await assert.rejects(f.run("CLEANUP_CONTEXT", {}, version));
+  f.resourcePolicy = "2";
+  await assert.rejects(f.run("CLEANUP_CONTEXT"), /resource-based/);
+});
 
 for (const qualifier of ["$LATEST", "1", "2", "3"]) test(`broker rejects a resource policy bypass on ${qualifier}`, async () => {
   const f = fixture();

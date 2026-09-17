@@ -40,7 +40,7 @@ test("signing, runtime and concurrency are independently bound", () => {
   ]) assert.throws(() => assertBrokerConfiguration(response(), expected, changed));
 });
 test("AWS-supplied version, not request operation, separates cleanup and install", () => {
-  for (const [operation, version] of Object.entries({ INSTALL: "1", INSPECT: "1", CLOSE: "2", AUTHORIZE: "3" })) {
+  for (const [operation, version] of Object.entries({ INSTALL: "1", INSPECT: "1", CLOSE: "2", CLEANUP_CONTEXT: "2", AUTHORIZE: "3" })) {
     const context = { functionVersion: version, invokedFunctionArn: `${componentBrokerArn}:${version}` };
     assert.equal(assertBrokerEntryPoint(context, operation), version);
     for (const wrong of ["$LATEST", "reviewed", "99"]) assert.throws(() => assertBrokerEntryPoint({ functionVersion: wrong, invokedFunctionArn: `${componentBrokerArn}:${wrong}` }, operation));

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { establishComponentSession } from "../aws/component-installation-session.mjs";
+import { establishComponentSession, establishComponentCleanupSession } from "../aws/component-installation-session.mjs";
 import { authenticateComponentSession } from "../aws/component-session-proof.mjs";
 import { identityBootstrap, componentBrokerArn } from "../aws/component-installation-identity-contract.mjs";
 
@@ -14,7 +14,7 @@ function fixture(purpose = "INSTALL") {
   const base = { AccessKeyId: "source-fixture", SecretAccessKey: "disposable-source-secret" };
   const scoped = { AccessKeyId: key, SecretAccessKey: "disposable-scoped-secret", SessionToken: "disposable-scoped-session", Expiration: new Date(start + 900000) };
   const f = { binding, base, user, scoped, principal, calls: [], closed: 0, clock: start + 1000, prompts: 0, payloads: [], before: () => {} };
-  f.open = () => establishComponentSession(binding, {
+  f.dependencies = {
     loadUser: async () => ({ ...base }), now: () => f.clock, mfa: async () => { f.prompts++; return "0".repeat(6); },
     sts: (credentials) => ({ close: () => { f.closed++; }, send: async (operation, input) => {
       f.calls.push(operation); f.before(operation);
@@ -32,9 +32,12 @@ function fixture(purpose = "INSTALL") {
       assert.equal(input.FunctionName, `${componentBrokerArn}:${purpose === "INSTALL" ? "1" : "2"}`);
       assert.equal(input.InvocationType, "RequestResponse");
       f.payloads.push(JSON.parse(Buffer.from(input.Payload).toString("utf8")));
-      return { StatusCode: 200, ExecutedVersion: purpose === "INSTALL" ? "1" : "2", Payload: Buffer.from(JSON.stringify({ state: "test-accepted" })) };
+      const payload = f.payloads.at(-1);
+      const result = payload.operation === "CLEANUP_CONTEXT" ? (f.context || binding) : { state: "test-accepted" };
+      return { StatusCode: 200, ExecutedVersion: purpose === "INSTALL" ? "1" : "2", Payload: Buffer.from(JSON.stringify(result)) };
     },
-  });
+  };
+  f.open = () => establishComponentSession(binding, f.dependencies);
   return f;
 }
 
@@ -88,3 +91,22 @@ test("unexpected AWS expiration rejects issuance and closes STS transports", asy
   assert.equal(f.closed, 2);
   assert.deepEqual(f.payloads, []);
 });
+
+test("cleanup discovers durable coordinates without GitHub artifacts or local authorization bytes", async () => {
+  const f = fixture("CLEANUP");
+  const client = await establishComponentCleanupSession(f.binding.transitionId, f.dependencies);
+  assert.deepEqual(f.payloads, [{ operation: "CLEANUP_CONTEXT" }]);
+  await client.invoke("CLOSE");
+  assert.equal(f.payloads[1].authorizationSha256, f.binding.authorizationSha256);
+  assert.equal(f.payloads[1].transitionId, f.binding.transitionId);
+  assert(f.payloads[1].proof);
+  await assert.rejects(client.invoke("INSTALL"));
+});
+
+for (const change of [{ purpose: "INSTALL" }, { transitionId: "12345678-1234-4234-8234-123456789def" }, { sourceSha: "invalid" }, { evidenceKey: "alternate" }]) {
+  test(`cleanup discovery rejects substituted coordinates ${Object.keys(change)[0]}`, async () => {
+    const f = fixture("CLEANUP"); f.context = { ...f.binding, ...change };
+    await assert.rejects(establishComponentCleanupSession(f.binding.transitionId, f.dependencies));
+    assert.deepEqual(f.payloads, [{ operation: "CLEANUP_CONTEXT" }]);
+  });
+}

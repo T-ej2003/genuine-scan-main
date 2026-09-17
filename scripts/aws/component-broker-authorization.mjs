@@ -92,6 +92,17 @@ export function createBrokerAuthorizationArchive({ manifest, packageSha256, s3, 
     return record;
   };
   const api = {
+    async cleanupContext(event, context) {
+      assert.equal(context.functionVersion, "2");
+      assert.equal(context.invokedFunctionArn, `${functionArn}:2`);
+      assert.deepEqual(event, { operation: "CLEANUP_CONTEXT" });
+      const record = await read();
+      assert(record, "No durable authorization");
+      // Non-secret coordinates only. Discovery grants no mutation authority:
+      // CLOSE still requires the exact fresh MFA/session proof and live readback.
+      return { sourceSha: record.authorization.sourceSha, transitionId: record.authorization.transitionId,
+        authorizationSha256: record.authorizationSha256, purpose: "CLEANUP" };
+    },
     async authorize(event, context) {
       assert.equal(context.functionVersion, "3");
       assert.equal(context.invokedFunctionArn, `${functionArn}:3`);
