@@ -39,7 +39,7 @@ const env = {
   PRODUCTION_BACKEND_IMAGE: image("mscqr-backend", "2"),
   PRODUCTION_WORKER_IMAGE: image("mscqr-worker", "3"),
   PRODUCTION_RLS_CANARY_IMAGE: image("mscqr-backend", "4"),
-  PRODUCTION_FRONTEND_TASK_DEFINITION: "mscqr-frontend:20",
+  PRODUCTION_FRONTEND_TASK_DEFINITION: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-frontend:20",
   PRODUCTION_RLS_CLUSTER_ARN: "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main",
   PRODUCTION_RLS_RECEIPT_BUCKET: "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an",
 };
@@ -122,7 +122,7 @@ test("production green canary provisioning is approval-bound, secret-safe and id
 test("production release rejects mutable images and incomplete broker bindings", () => {
   for (const candidate of [
     { PRODUCTION_RLS_EXECUTOR_IMAGE: "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend:latest" },
-    { PRODUCTION_FRONTEND_TASK_DEFINITION: "mscqr-frontend:21" },
+    { PRODUCTION_FRONTEND_TASK_DEFINITION: "arn:aws:ecs:eu-west-2:368992683803:task-definition/other:21" },
     { PRODUCTION_RLS_CLUSTER_ARN: env.PRODUCTION_RLS_CLUSTER_ARN.replace("prod", "staging") },
     { PRODUCTION_RLS_BROKER_ARN: env.PRODUCTION_RLS_BROKER_ARN.replace("production", "staging") },
     { MSCQR_FULL_RLS_MIGRATION_SET_DIGEST: "" },
@@ -208,7 +208,7 @@ test("production workflow applies verified green and canaries before backend tra
   assert.match(workflow, /MSCQR_FULL_RLS_MIGRATION_SET_DIGEST/);
   assert.match(workflow, /production-normal-backend-activation\.mjs/);
   assert.doesNotMatch(workflow, /TASK_DEFINITION: mscqr-backend|PRODUCTION_WORKER_SERVICE_NAME/);
-  assert.match(workflow, /mscqr-frontend:20/);
+  assert.match(workflow, /PRODUCTION_FRONTEND_TASK_DEFINITION: \$\{\{ steps\.frontend\.outputs\.task_definition \}\}/);
   assert.doesNotMatch(workflow, /PRODUCTION_RLS_ADMIN_SECRET_ARN|PRODUCTION_RLS_PRIVATE_SUBNETS_JSON/);
 });
 

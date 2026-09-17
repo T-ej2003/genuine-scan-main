@@ -9,7 +9,7 @@ import { assertStageBProtectedMainCheckout, buildStageBProtectedMainCheckoutEvid
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const STAGE_B_IMAGE_REUSE_SCHEMA_VERSION = 2;
-export const STAGE_B_IMAGE_REUSE_RULES_VERSION = "stage-b-image-reuse-v6";
+export const STAGE_B_IMAGE_REUSE_RULES_VERSION = "stage-b-image-reuse-v7";
 export const COMPATIBILITY_REPORT_REPO_PATH = "documents/ops/iam/MSCQRProductionGreenStageBImageReuseCompatibility-v1.json";
 export const STAGE_B_IMAGE_IMPACT_SCHEMA_VERSION = 1;
 export const IMAGE_IMPACT_REPORT_REPO_PATH = "documents/ops/iam/MSCQRProductionGreenStageBImageImpact-v1.json";
@@ -39,9 +39,25 @@ const IMAGE_INPUTS = [
   /^documents\/security\/rls-program\/generated\//,
   /^documents\/security\/mscqr_.*\.sql$/,
 ];
+const WEB_IMAGE_INPUTS = [
+  /^\.github\/workflows\/production-web-image\.yml$/,
+  /^\.dockerignore$/,
+  /^Dockerfile\.ecs-frontend$/,
+  /^components\.json$/,
+  /^docker\/nginx-entrypoint\.sh$/,
+  /^eslint\.config\.js$/,
+  /^nginx\.ecs-frontend\.conf$/,
+  /^index\.html$/,
+  /^postcss\.config\.js$/,
+  /^public\//,
+  /^src\//,
+  /^shared\//,
+  /^tailwind\.config\.ts$/,
+  /^(?:package\.json|package-lock\.json|vite\.config\.[^/]+|vitest\.config\.[^/]+|tsconfig[^/]*\.json)$/,
+];
 const DOCUMENTATION = /(?:^|\/)(?:documents|README|CHANGELOG|.*\.md)(?:\/|$)/;
 const CI = /^\.github\/workflows\//;
-const TERRAFORM = /^infra\/aws\/terraform\/(?:production-green-stage-(?:a|b(?:-image-publisher|-publisher-bootstrap)?)|production-initial-activation-policy-reconciler)\//;
+const TERRAFORM = /^infra\/aws\/terraform\/(?:production-green-stage-(?:a|b(?:-image-publisher|-publisher-bootstrap)?)|production-initial-activation-policy-reconciler|production-web-release)\//;
 // This isolated root creates IAM permissions only and is absent from all
 // canonical Docker COPY inputs. Do not classify arbitrary neighboring files.
 const APP_ONLY_PERMISSION_SOURCE = /^infra\/aws\/terraform\/production-app-only-permissions\/(?:main\.tf\.json|\.terraform\.lock\.hcl)$/;
@@ -217,10 +233,18 @@ function classifyChangedFiles({ imageReleaseSha, toolingSha, changedFiles }) {
 export function classifyStageBImageReusePath(file) {
   // Dockerfile.ecs-frontend copies src into the Vite build. Runtime edits
   // require publication, never a tooling-only or compatibility exemption.
-  if (/^src\/(?:components|features|hooks|lib|pages)\/.*\.(?:ts|tsx)$/.test(file) && !TEST.test(file)) {
+  if (/^public\//.test(file)) {
+    return { file, category: "runtimeApplicationSource", imageAffecting: true };
+  }
+  if (/^src\//.test(file) && !TEST.test(file)) {
     return { file, category: "runtimeApplicationSource", imageAffecting: true };
   }
   if (CONTROL_PLANE.test(file)) return { file, category: "controlPlaneOnly", imageAffecting: false };
+  if (TEST.test(file)) return { file, category: "testOnly", imageAffecting: false };
+  if (!/^(?:src|shared)\//.test(file) && WEB_IMAGE_INPUTS.some((pattern) => pattern.test(file))) {
+    const category = /Dockerfile|dockerignore|production-web-image/.test(file) ? "dockerBuildConfiguration" : /^(?:public|scripts|shared|src)\//.test(file) ? "runtimeApplicationSource" : "imageBuildInput";
+    return { file, category, imageAffecting: true };
+  }
   if (IMAGE_INPUTS.some((pattern) => pattern.test(file))) {
     const category = /package-lock|lock$/.test(file) ? "dependencyLockfile" : /Dockerfile|dockerignore|workflow.*image-build/.test(file) ? "dockerBuildConfiguration" : /^backend\//.test(file) || /^shared\//.test(file) ? "runtimeApplicationSource" : /generated/.test(file) ? "generatedRuntimePackage" : "imageBuildInput";
     return { file, category, imageAffecting: true };
@@ -297,6 +321,7 @@ export function imageImpactReportFor({ imageReleaseSha, toolingSha, changedFiles
   assert.equal(unclassifiedFiles.length, 0, `Stage B image-impact report contains unclassified files: ${unclassifiedFiles.join(", ")}`);
   const imageAffectingFiles = classifiedChangedFiles.filter(({ imageAffecting }) => imageAffecting).map(({ file }) => file);
   const newImagesRequired = imageAffectingFiles.length > 0;
+  const webAffectingFiles = classifiedChangedFiles.filter(({ file, imageAffecting }) => imageAffecting && WEB_IMAGE_INPUTS.some((pattern) => pattern.test(file))).map(({ file }) => file);
   return {
     schemaVersion: STAGE_B_IMAGE_IMPACT_SCHEMA_VERSION,
     identityModel: "tooling-input-tree-sha256",
@@ -310,6 +335,8 @@ export function imageImpactReportFor({ imageReleaseSha, toolingSha, changedFiles
     classificationRulesVersion: STAGE_B_IMAGE_REUSE_RULES_VERSION,
     classifiedChangedFiles,
     imageAffectingFiles,
+    webAffectingFiles,
+    webPublicationRequired: webAffectingFiles.length > 0,
     imageReuseCompatible: !newImagesRequired,
     newImagesRequired,
     deploymentAuthorized: false,

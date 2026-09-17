@@ -8,8 +8,8 @@ import { readBoundStageBPrivateJson } from "./stage-b-artifact-contract.mjs";
 
 const repositories = { backend: "mscqr-backend", worker: "mscqr-worker", "rls-executor": "mscqr-backend", "rls-canary": "mscqr-backend" };
 
-export function verifyProductionReleaseImageAuthorization({ authorization, sourceSha, verifyImageEvidence, now } = {}) {
-  assertImageAuthorization(authorization, sourceSha, { verifyImageEvidence, now });
+export function verifyProductionReleaseImageAuthorization({ authorization, sourceSha, verifyImageEvidence, now, minimumRemainingMs } = {}) {
+  assertImageAuthorization(authorization, sourceSha, { verifyImageEvidence, now, minimumRemainingMs });
   return Object.freeze(Object.fromEntries(authorization.images.map(({ service, digest }) => [service, `368992683803.dkr.ecr.eu-west-2.amazonaws.com/${repositories[service]}@${digest}`])));
 }
 
@@ -33,7 +33,7 @@ export function runCli(argv = process.argv.slice(2)) {
   if (required("--credential-source") !== PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER) throw new Error("Release-gate image authorization requires the GitHub OIDC release-deployer credential source.");
   const releaseRun = createReleaseGateImageAuthorizationRunner();
   const refs = verifyProductionReleaseImageAuthorization({ authorization, sourceSha: required("--source-sha"), verifyImageEvidence: (options) => verifyImageEvidenceSignature({ ...options, run: releaseRun }) });
-  fs.appendFileSync(required("--github-output"), Object.entries(refs).map(([service, ref]) => `${service.replaceAll("-", "_")}_image_ref=${ref}\n`).join(""));
+  fs.appendFileSync(required("--github-output"), `${Object.entries(refs).map(([service, ref]) => `${service.replaceAll("-", "_")}_image_ref=${ref}\n`).join("")}web_required=${authorization.imageReuseEvidence.webPublicationRequired}\n`);
   return refs;
 }
 

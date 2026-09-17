@@ -346,7 +346,14 @@ export function signImageEvidence(report, { now = new Date().toISOString(), keyA
   return { schemaVersion: IMAGE_EVIDENCE_SIGNATURE_SCHEMA_VERSION, keyId: keyArn, keyArn, signingAlgorithm, reportSha256, imageReleaseSha: report.imageReleaseSha, workflowRunId: report.workflowRunId, publicationIdentitySha256: report.publicationIdentitySha256, canonicalArtifactSha256: report.canonicalArtifactSha256, signatureBase64, signedAt: now };
 }
 
-export function verifyImageEvidenceSignature({ report, publicationSourceSha, currentSourceSha, signatureArtifact, now = new Date().toISOString(), keyArn = IMAGE_EVIDENCE_SIGNING_KEY_ARN, signingAlgorithm = IMAGE_EVIDENCE_SIGNING_ALGORITHM, run, verify }) {
+function assertMinimumRemaining({ timestamp, now, minimumRemainingMs, label }) {
+  if (minimumRemainingMs === undefined) return;
+  if (!Number.isSafeInteger(minimumRemainingMs) || minimumRemainingMs < 0 || minimumRemainingMs >= IMAGE_EVIDENCE_MAX_AGE_MS) throw new Error(`${label} minimum remaining lifetime is invalid.`);
+  const timestampMs = Date.parse(timestamp); const nowMs = Date.parse(now);
+  if (!Number.isFinite(timestampMs) || !Number.isFinite(nowMs) || nowMs - timestampMs > IMAGE_EVIDENCE_MAX_AGE_MS - minimumRemainingMs) throw new Error(`${label} does not have enough remaining lifetime for the governed release.`);
+}
+
+export function verifyImageEvidenceSignature({ report, publicationSourceSha, currentSourceSha, signatureArtifact, now = new Date().toISOString(), keyArn = IMAGE_EVIDENCE_SIGNING_KEY_ARN, signingAlgorithm = IMAGE_EVIDENCE_SIGNING_ALGORITHM, run, verify, minimumRemainingMs }) {
   rejectLegacyProvenanceClaims(report);
   if (report?.schemaVersion !== IMAGE_EVIDENCE_SCHEMA_VERSION || report.revocationModel !== IMAGE_EVIDENCE_REVOCATION_MODEL) throw new Error("Image evidence revocation model or schema is unsupported.");
   requireRepositoryEvidence(report.repositories, [...new Set((report.images || []).map(({ repository }) => repository))], report.observedAt);
@@ -361,6 +368,8 @@ export function verifyImageEvidenceSignature({ report, publicationSourceSha, cur
   if (signatureArtifact.reportSha256 !== reportSha256) throw new Error("Image evidence signature is bound to a different report.");
   const signedAtMs = Date.parse(signatureArtifact.signedAt); const nowMs = Date.parse(now);
   if (!Number.isFinite(signedAtMs) || signedAtMs > nowMs + IMAGE_EVIDENCE_CLOCK_SKEW_MS || nowMs - signedAtMs > IMAGE_EVIDENCE_MAX_AGE_MS) throw new Error("Image evidence signature is stale or malformed.");
+  assertMinimumRemaining({ timestamp: signatureArtifact.signedAt, now, minimumRemainingMs, label: "Image evidence signature" });
+  assertMinimumRemaining({ timestamp: report.observedAt, now, minimumRemainingMs, label: "Image evidence observation" });
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(signatureArtifact.signatureBase64 || "")) throw new Error("Image evidence signature is malformed.");
   if (typeof verify !== "function" && typeof run !== "function") throw new Error("Image evidence signature verification requires an explicit trusted verifier or command runner.");
   const verifySignature = verify || createRootAttestationKmsVerifier({ run });
@@ -368,19 +377,20 @@ export function verifyImageEvidenceSignature({ report, publicationSourceSha, cur
   return true;
 }
 
-export function assertImageEvidence(report, { signatureArtifact, verifySignature = verifyImageEvidenceSignature, publicationSourceSha, currentSourceSha, imageReleaseSha, workflowRunId, artifactSha256, now = new Date().toISOString() } = {}) {
+export function assertImageEvidence(report, { signatureArtifact, verifySignature = verifyImageEvidenceSignature, publicationSourceSha, currentSourceSha, imageReleaseSha, workflowRunId, artifactSha256, now = new Date().toISOString(), minimumRemainingMs } = {}) {
   rejectLegacyProvenanceClaims(report);
   assertImageEvidenceSourceIdentity(report, { publicationSourceSha, currentSourceSha, imageReleaseSha });
   assertStageBImagePublicationIdentity(report?.publicationIdentity, { expectedPublicationSourceSha: publicationSourceSha, expectedReleaseSha: imageReleaseSha, canonicalArtifactSha256: artifactSha256 });
   if (String(report?.workflowRunId) !== String(report?.publicationIdentity?.workflowRunId)) throw new Error("Image evidence workflow run does not match historical publication identity.");
   if (publicationIdentitySha256(report.publicationIdentity) !== report.publicationIdentitySha256) throw new Error("Image evidence publication identity hash is wrong.");
-  if (!verifySignature({ report, signatureArtifact, now })) throw new Error("Authenticated image evidence signature verification failed.");
+  if (!verifySignature({ report, signatureArtifact, now, minimumRemainingMs })) throw new Error("Authenticated image evidence signature verification failed.");
   if (report?.schemaVersion !== IMAGE_EVIDENCE_SCHEMA_VERSION || report.imageReleaseSha !== imageReleaseSha || String(report.workflowRunId) !== String(workflowRunId) || report.canonicalArtifactSha256 !== artifactSha256) throw new Error("Image evidence is bound to a different image release, workflow, or canonical artifact.");
   if (report.revocationModel !== IMAGE_EVIDENCE_REVOCATION_MODEL) throw new Error("Image evidence revocation model is unsupported.");
   requireVerifier(report.verifierCallerArn);
   if (report.account !== STAGE_B.account || report.region !== STAGE_B.region) throw new Error("Image evidence account or region is wrong.");
   const observedAtMs = Date.parse(report.observedAt); const nowMs = Date.parse(now);
   if (!Number.isFinite(observedAtMs) || !Number.isFinite(nowMs) || observedAtMs > nowMs + IMAGE_EVIDENCE_CLOCK_SKEW_MS || nowMs - observedAtMs > IMAGE_EVIDENCE_MAX_AGE_MS) throw new Error("Image evidence observation is stale or malformed.");
+  assertMinimumRemaining({ timestamp: report.observedAt, now, minimumRemainingMs, label: "Image evidence observation" });
   if (!Array.isArray(report.images) || report.images.length !== Object.keys(SERVICES).length || new Set(report.images.map((image) => image.service)).size !== report.images.length) throw new Error("Image evidence does not contain all four Stage B images.");
   requireRepositoryEvidence(report.repositories, [...new Set(Object.values(SERVICES).map(({ repository }) => repository))], report.observedAt);
   for (const [service, contract] of Object.entries(SERVICES)) {

@@ -246,7 +246,7 @@ test("normal release consumes separated publisher and checker outputs under the 
   assert.match(workflow, /normal_image_authorization_json/);
   assert.match(workflow, /verify-production-release-image-authorization\.mjs/);
   assert.match(workflow, /PRODUCTION_RLS_CANARY_IMAGE/);
-  assert.match(workflow, /PRODUCTION_FRONTEND_TASK_DEFINITION: mscqr-frontend:20/);
+  assert.match(workflow, /PRODUCTION_FRONTEND_TASK_DEFINITION: \$\{\{ steps\.frontend\.outputs\.task_definition \}\}/);
   assert.doesNotMatch(workflow, /amazon-ecr-login|setup-buildx|publish-ecs-images|apply-ecr-repository-controls/);
   assert.doesNotMatch(workflow, /secretsmanager get-secret-value|PRODUCTION_RLS_APPROVAL_SECRET_ARN/);
   assert.match(workflow, /role-to-assume: \$\{\{ env\.PRODUCTION_RELEASE_ROLE_ARN \}\}/);

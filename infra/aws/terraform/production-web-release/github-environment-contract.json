@@ -1,0 +1,11 @@
+{
+  "name": "production-web-image-publish",
+  "deploymentBranches": "protected-main-only",
+  "requiredReviewers": true,
+  "preventSelfReview": true,
+  "forbidUnprotectedBranchesAndTags": true,
+  "variables": ["PRODUCTION_WEB_IMAGE_PUBLISH_ROLE"],
+  "forbiddenSecrets": ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"],
+  "requiresEnvironmentSecrets": false,
+  "activation": "operator-configured; not managed by Terraform"
+}

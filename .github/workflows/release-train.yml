@@ -28,6 +28,10 @@ on:
         description: "SHA-256 of the exact normal image authorization JSON bytes."
         required: true
         type: string
+      web_image_authorization_json:
+        description: "Exact signed web-image authorization; required only when canonical impact requires web publication."
+        required: false
+        type: string
       rotation_id:
         description: "Exact authenticated-overlap rotation ID."
         required: false
@@ -137,6 +141,7 @@ jobs:
           RELEASE_LIFECYCLE: ${{ inputs.release_lifecycle }}
           NORMAL_IMAGE_AUTHORIZATION_JSON: ${{ inputs.normal_image_authorization_json }}
           NORMAL_IMAGE_AUTHORIZATION_SHA256: ${{ inputs.normal_image_authorization_sha256 }}
+          WEB_IMAGE_AUTHORIZATION_JSON: ${{ inputs.web_image_authorization_json }}
           ROTATION_ID: ${{ inputs.rotation_id }}
           ROTATION_STATE_JSON: ${{ inputs.rotation_state_json }}
           ROTATION_STATE_SHA256: ${{ inputs.rotation_state_sha256 }}
@@ -189,16 +194,7 @@ jobs:
             inputs_file="$RUNNER_TEMP/${workflow_file}.inputs.json"
             trap 'rm -f "$inputs_file"' EXIT
             if WORKFLOW_FILE="$workflow_file" node --input-type=module -e 'import { usesLifecycleInputs } from "./scripts/github/release-lifecycle-contract.mjs"; process.exit(usesLifecycleInputs(process.env.RELEASE_LIFECYCLE, process.env.WORKFLOW_FILE) ? 0 : 1)' ; then
-              node --input-type=module - "$inputs_file" <<'NODE'
-              import fs from "node:fs";
-              const values = Object.fromEntries([
-                ["release_lifecycle", process.env.RELEASE_LIFECYCLE], ["target_sha", process.env.TARGET_SHA],
-                ["rotation_id", process.env.ROTATION_ID], ["rotation_state_json", process.env.ROTATION_STATE_JSON],
-                ["rotation_state_sha256", process.env.ROTATION_STATE_SHA256], ["rotation_task_definition_arn", process.env.ROTATION_TASK_DEFINITION_ARN],
-                ["rotation_image_digest", process.env.ROTATION_IMAGE_DIGEST], ["rotation_deployment_sha", process.env.ROTATION_DEPLOYMENT_SHA],
-              ].filter(([, value]) => value !== undefined && value !== ""));
-              fs.writeFileSync(process.argv[2], JSON.stringify(values), { mode: 0o600 });
-              NODE
+              node --input-type=module -e 'import fs from "node:fs"; const keys=["release_lifecycle","target_sha","rotation_id","rotation_state_json","rotation_state_sha256","rotation_task_definition_arn","rotation_image_digest","rotation_deployment_sha"]; const values=Object.fromEntries(keys.map((key)=>[key,process.env[key.toUpperCase()]]).filter(([,value])=>value)); fs.writeFileSync(process.argv[1],JSON.stringify(values),{mode:0o600});' "$inputs_file"
             else
               printf '{}' > "$inputs_file"
               chmod 600 "$inputs_file"
@@ -246,6 +242,7 @@ jobs:
           TARGET_SHA: ${{ steps.resolve.outputs.target_sha }}
           NORMAL_IMAGE_AUTHORIZATION_JSON: ${{ inputs.normal_image_authorization_json }}
           NORMAL_IMAGE_AUTHORIZATION_SHA256: ${{ inputs.normal_image_authorization_sha256 }}
+          WEB_IMAGE_AUTHORIZATION_JSON: ${{ inputs.web_image_authorization_json }}
           RELEASE_LIFECYCLE: ${{ inputs.release_lifecycle }}
           ROTATION_ID: ${{ inputs.rotation_id }}
           ROTATION_STATE_JSON: ${{ inputs.rotation_state_json }}
@@ -257,14 +254,22 @@ jobs:
           set -euo pipefail
 
           authorization_file="$RUNNER_TEMP/normal-image-authorization.json"
-          trap 'rm -f "$authorization_file"' EXIT
+          web_authorization_file="$RUNNER_TEMP/web-image-authorization.json"
+          trap 'rm -f "$authorization_file" "$web_authorization_file"' EXIT
           printf '%s' "$NORMAL_IMAGE_AUTHORIZATION_JSON" > "$authorization_file"
           chmod 600 "$authorization_file"
-          node scripts/aws/production-release-dispatch-contract.mjs \
+          dispatch_args=(
             --source-sha "$TARGET_SHA" \
             --authorization "$authorization_file" \
             --authorization-sha256 "$NORMAL_IMAGE_AUTHORIZATION_SHA256"
-          rm -f "$authorization_file"
+          )
+          if [ -n "${WEB_IMAGE_AUTHORIZATION_JSON:-}" ]; then
+            printf '%s' "$WEB_IMAGE_AUTHORIZATION_JSON" > "$web_authorization_file"
+            chmod 600 "$web_authorization_file"
+            dispatch_args+=(--web-authorization "$web_authorization_file")
+          fi
+          node scripts/aws/production-release-dispatch-contract.mjs "${dispatch_args[@]}"
+          rm -f "$authorization_file" "$web_authorization_file"
           trap - EXIT
 
           echo "All required gates passed for ${TARGET_SHA}."
@@ -276,8 +281,9 @@ jobs:
           const values = Object.fromEntries([
             ["git_ref", process.env.TARGET_REF], ["target_sha", process.env.TARGET_SHA], ["release_train_run_id", process.env.GITHUB_RUN_ID],
             ["release_lifecycle", process.env.RELEASE_LIFECYCLE], ["required_gate_run_ids_json", process.env.REQUIRED_GATE_RUN_IDS_JSON],
-            ["preserve_current_frontend", "true"], ["normal_image_authorization_json", process.env.NORMAL_IMAGE_AUTHORIZATION_JSON],
+            ["normal_image_authorization_json", process.env.NORMAL_IMAGE_AUTHORIZATION_JSON],
             ["normal_image_authorization_sha256", process.env.NORMAL_IMAGE_AUTHORIZATION_SHA256],
+            ["web_image_authorization_json", process.env.WEB_IMAGE_AUTHORIZATION_JSON],
             ["rotation_id", process.env.ROTATION_ID], ["rotation_state_json", process.env.ROTATION_STATE_JSON],
             ["rotation_state_sha256", process.env.ROTATION_STATE_SHA256], ["rotation_task_definition_arn", process.env.ROTATION_TASK_DEFINITION_ARN],
             ["rotation_image_digest", process.env.ROTATION_IMAGE_DIGEST], ["rotation_deployment_sha", process.env.ROTATION_DEPLOYMENT_SHA],
