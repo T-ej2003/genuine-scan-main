@@ -55,7 +55,7 @@ jobs:
     needs: classify
     if: needs.classify.outputs.backend == 'true'
     runs-on: ubuntu-latest
-    environment: production
+    environment: production-stage-b-image-publish
     permissions: { contents: read, id-token: write }
     steps:
       - uses: actions/checkout@v6
@@ -122,7 +122,7 @@ jobs:
     needs: classify
     if: needs.classify.outputs.frontend == 'true'
     runs-on: ubuntu-latest
-    environment: production
+    environment: production-web-image-publish
     permissions: { contents: read, id-token: write }
     steps:
       - uses: actions/checkout@v6

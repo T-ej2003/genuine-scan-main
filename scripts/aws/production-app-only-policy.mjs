@@ -121,6 +121,11 @@ export const APP_ONLY_OIDC_WORKFLOWS = Object.freeze({
   [APP_ONLY_PROVISIONING.roleName]: ["verify-production-app-only-compatibility", "prepare-production-app-only-deployment", "provision-production-app-only-deployer"],
   [APP_ONLY_VERIFIER.roleName]: ["prepare-production-app-only-verifier", "verify-production-app-only-compatibility", "prepare-production-app-only-deployment"],
 });
+const normalDeployWorkflowRef = "T-ej2003/genuine-scan-main/.github/workflows/production-deploy.yml@refs/heads/main";
+const appOnlyWorkflowRefs = (roleName, includeNormal = true) => [
+  ...APP_ONLY_OIDC_WORKFLOWS[roleName].map((name) => `T-ej2003/genuine-scan-main/.github/workflows/${name}-operation.yml@refs/heads/main`),
+  ...(includeNormal && roleName === APP_ONLY.roleArn.split("/").at(-1) ? [normalDeployWorkflowRef] : []),
+];
 export function appOnlyProductionOidcTrust(roleName) {
   assert.ok(Object.hasOwn(APP_ONLY_OIDC_WORKFLOWS, roleName), "Explicit app-only principal required");
   return { Version: "2012-10-17", Statement: [{ Effect: "Allow", Action: "sts:AssumeRoleWithWebIdentity",
@@ -130,13 +135,21 @@ export function appOnlyProductionOidcTrust(roleName) {
       "token.actions.githubusercontent.com:repository_id": "1145608538",
       "token.actions.githubusercontent.com:repository_owner_id": "183396573",
       "token.actions.githubusercontent.com:ref": "refs/heads/main",
-      "token.actions.githubusercontent.com:job_workflow_ref": APP_ONLY_OIDC_WORKFLOWS[roleName]
-        .map((name) => `T-ej2003/genuine-scan-main/.github/workflows/${name}-operation.yml@refs/heads/main`),
+      "token.actions.githubusercontent.com:job_workflow_ref": appOnlyWorkflowRefs(roleName),
     } } }] };
+}
+export function appOnlyProductionOidcTrustPredecessors(roleName) {
+  assert.ok(Object.hasOwn(APP_ONLY_OIDC_WORKFLOWS, roleName), "Explicit app-only principal required");
+  const current = appOnlyProductionOidcTrust(roleName);
+  if (roleName !== APP_ONLY.roleArn.split("/").at(-1)) return [current];
+  const legacy = structuredClone(current);
+  legacy.Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:job_workflow_ref"] = appOnlyWorkflowRefs(roleName, false);
+  return [current, legacy];
 }
 
 // Boundary installation is a separate governed bootstrap. The provisioner
-// cannot create/change/remove boundaries or alter trust on existing roles.
+// cannot create/change/remove boundaries; it may only reconcile the app
+// deployer's one reviewed legacy trust to the exact current trust.
 // Its policy writes therefore cannot turn the two runtime identities into an
 // administrator, even if an inline-policy payload were accidentally broadened.
 export function appOnlyPermissionProvisionerPolicy() {
@@ -147,6 +160,7 @@ export function appOnlyPermissionProvisionerPolicy() {
     ...[[APP_ONLY.roleArn, APP_ONLY_PROVISIONING.deployerBoundaryArn], [verifierRole, APP_ONLY_PROVISIONING.verifierBoundaryArn]].map(([role, boundary], index) =>
       allow(`CreateBoundedRole${index}`, "iam:CreateRole", role, { StringEquals: { "iam:PermissionsBoundary": boundary } })),
     allow("ReadExactAppRoles", ["iam:GetRole", "iam:GetRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies"], [APP_ONLY.roleArn, verifierRole], null),
+    allow("UpdateExactAppDeployerTrust", "iam:UpdateAssumeRolePolicy", APP_ONLY.roleArn, null),
     allow("ReadImmutableAppBoundaries", ["iam:GetPolicy", "iam:GetPolicyVersion"], [APP_ONLY_PROVISIONING.deployerBoundaryArn, APP_ONLY_PROVISIONING.verifierBoundaryArn], null),
     allow("ProvisionBoundedInlinePolicies", "iam:PutRolePolicy", [APP_ONLY.roleArn, verifierRole], null),
     allow("RegisterOnlyReadOnlyVerifier", "ecs:RegisterTaskDefinition", verifierFamily),

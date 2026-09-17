@@ -52,11 +52,11 @@ export function assertNormalReleasePlan(plan, sourceSha) {
   return true;
 }
 
-export function buildNormalBackendPreparation({ sourceSha, live, candidateDigest } = {}) {
-  assert.match(sourceSha || "", SHA); assert.match(candidateDigest || "", /^sha256:[a-f0-9]{64}$/);
+export function buildNormalBackendPreparation({ sourceSha, predecessorSourceSha, live, candidateDigest } = {}) {
+  assert.match(sourceSha || "", SHA); assert.match(predecessorSourceSha || "", SHA); assert.match(candidateDigest || "", /^sha256:[a-f0-9]{64}$/);
   const predecessor = captureAppOnlyPredecessor(live);
   const body = { schemaVersion: 1, kind: "NORMAL_APPLICATION_BACKEND_PREPARATION", candidateSourceSha: sourceSha,
-    predecessorSourceSha: sourceSha, candidateDigest, predecessor };
+    predecessorSourceSha, candidateDigest, predecessor };
   return Object.freeze({ ...body, preparationSha256: sha256(JSON.stringify(body)) });
 }
 
@@ -139,9 +139,11 @@ function assertCaller(caller, role) {
 
 async function executeBackendCli({ sourceSha, imageRef, run, repositoryRoot }) {
   assert.match(imageRef || "", /^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/mscqr-backend@sha256:[a-f0-9]{64}$/);
+  assertCaller(json(run, ["sts", "get-caller-identity"]), NORMAL_RELEASE.backendRole);
   const readers = createAppOnlyEcsReaders(run), live = readers.readLive();
   const digest = imageRef.split("@")[1];
-  const preparation = buildNormalBackendPreparation({ sourceSha, live, candidateDigest: digest });
+  const predecessor = captureAppOnlyPredecessor(live);
+  const preparation = buildNormalBackendPreparation({ sourceSha, predecessorSourceSha: readers.readBackendImageSource(predecessor.backendDigest), live, candidateDigest: digest });
   const authenticate = async () => { assertCaller(json(run, ["sts", "get-caller-identity"]), NORMAL_RELEASE.backendRole); };
   const journal = createAppOnlyEvidenceWriter({ repositoryRoot, sourceSha, preparationSha256: preparation.preparationSha256 });
   const adapters = createAppOnlyActivationAdapters({ run, preparation, authenticate, writeEvidence: journal.writeEvidence });
@@ -186,7 +188,9 @@ export function parseNormalReleaseArgs(argv) {
   assert.match(values["source-sha"] || "", SHA); assert.equal(values["source-sha"], process.env.GITHUB_SHA); assert.ok(["backend", "frontend", "none"].includes(values.service));
   const files = JSON.parse(values["changed-files"]); assert.ok(Array.isArray(files));
   const plan = buildNormalReleasePlan({ sourceSha: values["source-sha"], changedFiles: files, images: Object.fromEntries(["backend", "frontend"].filter((name) => values[`${name}-image`] !== undefined).map((name) => [name, values[`${name}-image`]])) });
-  assert.equal(values.service === "backend", plan.classification.backend); assert.equal(values.service === "frontend", plan.classification.frontend); assert.equal(values.service === "none", !plan.classification.backend && !plan.classification.frontend);
+  if (values.service === "backend") assert.equal(plan.classification.backend, true, "Backend was selected for a non-backend release");
+  if (values.service === "frontend") assert.equal(plan.classification.frontend, true, "Frontend was selected for a non-frontend release");
+  if (values.service === "none") assert.equal(plan.classification.backend || plan.classification.frontend, false, "No-op was selected for an affected release");
   return plan;
 }
 

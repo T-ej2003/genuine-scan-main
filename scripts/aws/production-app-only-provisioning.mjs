@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { APP_ONLY, APP_ONLY_DOMAINS } from "./production-app-only-contract.mjs";
 import { APP_ONLY_PROVISIONING, APP_ONLY_VERIFIER, appOnlyCompatibilityReadPolicy, appOnlyDeployerPolicy, appOnlyVerifierBoundaryPolicy,
-  appOnlyVerifierLauncherPolicy, appOnlyProductionOidcTrust } from "./production-app-only-policy.mjs";
+  appOnlyVerifierLauncherPolicy, appOnlyProductionOidcTrust, appOnlyProductionOidcTrustPredecessors } from "./production-app-only-policy.mjs";
 import { canonicalJson, canonicalSha256 } from "./production-green-stage-b-contract.mjs";
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 import { canonicalizeStageAProductionArtifactsPolicy } from "./production-stage-a-control-plane.mjs";
@@ -63,7 +63,8 @@ export function observeAppOnlyProvisioning({ run, verifierArn }) {
     assert.equal(role.MaxSessionDuration, 3600); assert.equal((role.Tags || []).length, 0);
     assert.equal(role.PermissionsBoundary?.PermissionsBoundaryArn, spec.boundaryArn);
     assert.equal(role.PermissionsBoundary.PermissionsBoundaryType, "Policy");
-    assert.equal(trustHash(role.AssumeRolePolicyDocument), trustHash(appOnlyProductionOidcTrust(name)));
+    const observedTrustSha256 = trustHash(role.AssumeRolePolicyDocument);
+    assert.ok(appOnlyProductionOidcTrustPredecessors(name).some((trust) => trustHash(trust) === observedTrustSha256), "Unreviewed predecessor OIDC trust");
     assert.ok(typeof role.RoleId === "string" && role.RoleId.length > 0);
     const attached = aws(["iam", "list-attached-role-policies", "--role-name", name]);
     const inline = aws(["iam", "list-role-policies", "--role-name", name]);
@@ -83,7 +84,7 @@ export function observeAppOnlyProvisioning({ run, verifierArn }) {
       assert.equal(policyHash(document), policyHash(expected), "Unreviewed predecessor inline policy");
       result.policySha256 = policyHash(document);
     }
-    return { ...result, roleId: role.RoleId };
+    return { ...result, roleId: role.RoleId, trustSha256: observedTrustSha256 };
   });
 }
 
@@ -191,8 +192,17 @@ export async function executeAppOnlyProvisioning({ preparation, sourceSha, eligi
           "--permissions-boundary", spec.boundaryArn, "--assume-role-policy-document", canonicalJson(appOnlyProductionOidcTrust(name))]);
         const observed = observeAppOnlyProvisioning({ run, verifierArn: body.verifierArn });
         assert.ok(observed[i].roleId); assert.equal(observed[i].policySha256, null);
-        const next = structuredClone(expected); next[i].roleId = observed[i].roleId;
+        const next = structuredClone(expected); next[i].roleId = observed[i].roleId; next[i].trustSha256 = observed[i].trustSha256;
         assert.deepEqual(observed, next, "Unexpected IAM change after role creation"); expected = observed;
+      }
+      const expectedTrustSha256 = trustHash(appOnlyProductionOidcTrust(name));
+      if (expected[i].trustSha256 !== expectedTrustSha256) {
+        assert.equal(spec.arn, APP_ONLY.roleArn, "Only the app deployer has an approved trust transition");
+        await beforeWrite(); await record("UPDATE_TRUST_INTENT", { roleArn: spec.arn }); writesAttempted++;
+        aws(["iam", "update-assume-role-policy", "--role-name", name, "--policy-document", canonicalJson(appOnlyProductionOidcTrust(name))]);
+        const observed = observeAppOnlyProvisioning({ run, verifierArn: body.verifierArn });
+        const next = structuredClone(expected); next[i].trustSha256 = expectedTrustSha256;
+        assert.deepEqual(observed, next, "IAM trust readback is not exact"); expected = observed;
       }
       if (expected[i].policySha256 !== policyHash(spec.policy)) {
         await beforeWrite(); await record("PUT_POLICY_INTENT", { roleArn: spec.arn }); writesAttempted++;

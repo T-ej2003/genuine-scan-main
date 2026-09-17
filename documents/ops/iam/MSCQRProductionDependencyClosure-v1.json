@@ -688,6 +688,21 @@
     },
     {
       "sourceFile": "scripts/aws/production-app-only-provisioning.mjs",
+      "action": "iam:UpdateAssumeRolePolicy",
+      "identity": "APP_ONLY_PERMISSION_PROVISIONER",
+      "capabilityId": "app-only-permission-provisioning-updateexactappdeployertrust-iam-updateassumerolepolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-app-only-deployer"
+      ],
+      "reachableMode": [
+        "app-only-permission-provisioning"
+      ],
+      "executionPrincipal": "APP_ONLY_PERMISSION_PROVISIONER",
+      "sourcePolicyPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-provisioning.mjs",
       "action": "sts:GetCallerIdentity",
       "identity": "APP_ONLY_PERMISSION_PROVISIONER",
       "capabilityId": "app-only-permission-provisioning-readcalleridentity-sts-getcalleridentity",

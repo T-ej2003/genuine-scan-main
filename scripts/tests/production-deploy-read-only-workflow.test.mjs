@@ -137,7 +137,11 @@ test("deployment mode is an executable kill switch", () => {
 });
 
 test("normal workflow has authenticated smoke and preserves the read-only orchestrator as a separate tool", () => {
-  assert.match(workflowText, /Run authenticated application smoke/);
+  const normalRelease = fs.readFileSync(path.resolve("scripts/aws/production-normal-release.mjs"), "utf8");
+  assert.match(workflowText, /node scripts\/aws\/production-normal-release\.mjs/);
+  assert.match(normalRelease, /runNormalSmoke\(repositoryRoot\)/);
+  assert.match(normalRelease, /executeAppOnlyActivation\(preparation/);
+  assert.match(normalRelease, /executeNormalFrontendActivation\(/);
   assert.match(workflowText, /SMOKE_AUTHENTICATED_REQUIRED: "true"/);
   assert.doesNotMatch(workflowText, /scripts\/ci\/production-readiness-orchestrator\.mjs/);
 });

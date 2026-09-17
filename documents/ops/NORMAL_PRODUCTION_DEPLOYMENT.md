@@ -8,6 +8,14 @@ SHA-tagged images, deploys affected ECS services, waits for stable healthy
 tasks, and runs the authenticated application smoke suite inside each
 affected service's rollback boundary.
 
+Image publication uses the existing `production-stage-b-image-publish`
+environment for backend images and `production-web-image-publish` for web
+images. Activation remains in the `production` environment; its app-only role
+trust explicitly names this canonical workflow and protected-main reference.
+The first deployment of this infrastructure-changing release must apply that
+exact app-only trust transition through the reviewed security lane; later
+ordinary releases need no trust reconciliation.
+
 The workflow is intentionally limited to NORMAL_APPLICATION changes. Its
 classification is derived from the changed paths in the protected-main
 commit. IAM, RLS, network, KMS, authentication, migration, recovery, and
