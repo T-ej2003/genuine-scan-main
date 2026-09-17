@@ -86,8 +86,12 @@ export function createProductionAwsCommandRunner({ credentialSource, profile, en
   };
 }
 
+export function createProductionGithubCredentialEnvironment({ env = process.env } = {}) {
+  return Object.freeze({ ...copy(env, SAFE_PROCESS_KEYS), ...copy(env, GITHUB_AUTH_KEYS) });
+}
+
 export function createProductionGithubCommandRunner({ env = process.env, exec = execFileSync } = {}) {
-  const githubEnvironment = Object.freeze({ ...copy(env, SAFE_PROCESS_KEYS), ...copy(env, GITHUB_AUTH_KEYS) });
+  const githubEnvironment = createProductionGithubCredentialEnvironment({ env });
   const localEnvironment = Object.freeze(copy(env, SAFE_PROCESS_KEYS));
   return (command, args, { encoding = "utf8", maxBuffer } = {}) => {
     if (command === "gh") {

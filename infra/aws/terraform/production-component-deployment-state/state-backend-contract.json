@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "terraformRoot": "infra/aws/terraform/production-component-deployment-state",
+  "account": "368992683803",
+  "type": "s3",
+  "bucket": "mscqr-production-terraform-state-368992683803-eu-west-2",
+  "key": "mscqr/production/component-deployment-state/terraform.tfstate",
+  "region": "eu-west-2",
+  "encrypt": true,
+  "use_lockfile": true,
+  "workspace": "default",
+  "firstInitialization": "ABSENT_REMOTE_STATE_ONLY",
+  "rootApplyAllowed": false,
+  "executorRole": "mscqr-production-release-deployer",
+  "authorizationEnvironment": "production-component-infrastructure-activation",
+  "expectedManagedAddresses": [
+    "aws_dynamodb_table.component_deployment_state",
+    "aws_iam_role.normal_deployer",
+    "aws_iam_role_policy.normal_deployer",
+    "aws_iam_role.bootstrap",
+    "aws_iam_role_policy.bootstrap",
+    "aws_iam_role_policy.release_terminal_state"
+  ]
+}
