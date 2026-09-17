@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import test from "node:test";
 import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
 import { createProductionComponentDeploymentState } from "../aws/production-component-deployment-state.mjs";
@@ -30,6 +30,19 @@ test("security terminal rejects forged authorization and non-main source", () =>
   assert.throws(() => commitSecurityComponentState({ sourceSha: source, authorization: { sourceSha: source, authorizationSha256: "0".repeat(64) }, client: { read: () => initial, advance: () => {} }, isProtectedMainAncestor: () => true }), /integrity/);
   const body = { sourceSha: source, valid: true }; const authorization = { ...body, authorizationSha256: canonicalSha256(body) };
   assert.throws(() => commitSecurityComponentState({ sourceSha: source, authorization, client: { read: () => initial, advance: () => {} }, isProtectedMainAncestor: () => false }), /protected-main/);
+});
+
+test("normal security completion records only live-authenticated backend, database, and security identities", () => {
+  const workflow = readFileSync(".github/workflows/release-gate.yml", "utf8");
+  const writer = readFileSync("scripts/aws/commit-production-component-security-state.mjs", "utf8");
+  const activation = workflow.indexOf("Activate exact Stage-B backend candidate");
+  const commit = workflow.indexOf("Commit authenticated security component state");
+  assert(activation >= 0 && commit > activation, "state must commit only after the authenticated security terminal");
+  assert.match(workflow.slice(commit), /--release-receipt="\$RLS_RECEIPT"[\s\S]*--backend-metadata="\$BACKEND_METADATA"/);
+  assert.match(writer, /assertProductionRlsReleaseReceipt\(releaseReceipt, \{ sourceSha, imageDigest: authorizedBackendDigest\(authorization\) \}\)/);
+  assert.match(writer, /assertNormalBackendActivationEvidence\(backendActivation, \{ sourceSha, stageBAuthorization: authorization \}\)/);
+  assert.match(writer, /changes\.database = \{ sourceSha, releaseIdentity: releaseReceipt\.receiptBundleSha256 \}/);
+  assert.match(writer, /changes\.backend = \{ sourceSha: backendImageSource, imageDigest: backendLive\.backendDigest, taskDefinitionArn: backendLive\.taskDefinitionArn, desiredCount: backendLive\.desiredCount \}/);
 });
 
 test("a verified security rotation may refresh only its release identity at the same source", () => {

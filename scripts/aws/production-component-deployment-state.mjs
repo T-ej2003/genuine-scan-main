@@ -37,7 +37,10 @@ export function advanceProductionComponentDeploymentState({ current, expectedGen
     if (lane === "NORMAL_APPLICATION") { assert.ok(current.components[name], "Normal deployment requires bootstrapped component state"); assert.equal(recovery, false); }
     if (current.components[name]) {
       const sameSource = next.sourceSha === current.components[name].sourceSha;
-      if (sameSource) assert.ok(lane === "SECURITY_INFRASTRUCTURE" && name === "security" && next.releaseIdentity !== current.components[name].releaseIdentity, "No-op component update is forbidden");
+      if (sameSource) {
+        assert.ok(!same(current.components[name], next), "No-op component update is forbidden");
+        assert.notEqual(lane, "NORMAL_APPLICATION", "Normal deployment cannot rewrite a component without a new source identity");
+      }
       if (lane === "EMERGENCY_RECOVERY") {
         assert.equal(recovery, true, "Recovery source regression requires the explicit recovery lane");
         assert.equal(typeof authenticateRecovery, "function", "Recovery state changes require authenticated historical identity");

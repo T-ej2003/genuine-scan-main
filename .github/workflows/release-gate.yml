@@ -1195,4 +1195,6 @@ jobs:
           SOURCE_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
           AUTHORIZATION_FILE: ${{ steps.images.outputs.authorization_file }}
           AUTHORIZATION_SHA256: ${{ inputs.normal_image_authorization_sha256 }}
-        run: node scripts/aws/commit-production-component-security-state.mjs --source-sha="$SOURCE_SHA" --authorization="$AUTHORIZATION_FILE" --authorization-sha256="$AUTHORIZATION_SHA256"
+          RLS_RECEIPT: ${{ runner.temp }}/production-rls-release-receipt.json
+          BACKEND_METADATA: ${{ steps.image-meta.outputs.backend_metadata_file }}
+        run: node scripts/aws/commit-production-component-security-state.mjs --source-sha="$SOURCE_SHA" --authorization="$AUTHORIZATION_FILE" --authorization-sha256="$AUTHORIZATION_SHA256" --release-receipt="$RLS_RECEIPT" --release-receipt-sha256="$(sha256sum "$RLS_RECEIPT" | cut -d' ' -f1)" --backend-metadata="$BACKEND_METADATA" --backend-metadata-sha256="$(sha256sum "$BACKEND_METADATA" | cut -d' ' -f1)"
