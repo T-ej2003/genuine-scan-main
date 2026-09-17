@@ -222,7 +222,7 @@ export async function executeFixedBroker(event, context, { manifest, iam, s3, la
     lambda("GetFunctionCodeSigningConfig", { FunctionName: functionName }),
     lambda("GetRuntimeManagementConfig", { FunctionName: functionName, Qualifier: version }),
   ]);
-  assert.equal(runtime.RuntimeVersionArn, bootstrap.runtimeVersions[version], "Bootstrapped runtime changed");
+  assert.equal(fn.Configuration.RuntimeVersionConfig?.RuntimeVersionArn, bootstrap.runtimeVersions[version], "Bootstrapped runtime changed");
   assertBrokerConfiguration(fn, brokerConfiguration({ packageSha256, manifestSha256: hash(manifest), entryPoint: { 1: "INSTALL", 2: "CLEANUP", 3: "AUTHORIZE" }[version] }), { concurrency, signing, runtime });
   // Identity policies are the only invocation grant. A resource policy on the
   // function or any fixed entry version could bypass the authorizer role trust.

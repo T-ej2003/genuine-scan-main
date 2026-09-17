@@ -1,5 +1,17 @@
 # Component installation boundary review — source only
 
+## Runtime readback correction
+
+The recovered runtime fixture incorrectly returned a runtime ARN from
+`GetRuntimeManagementConfig` in `FunctionUpdate` mode. The
+[AWS API contract](https://docs.aws.amazon.com/lambda/latest/api/API_GetRuntimeManagementConfig.html)
+returns null there. Runtime identity is now authenticated from
+`GetFunction.Configuration.RuntimeVersionConfig` and compared with the durable
+bootstrap record; the separate management call must still prove FunctionUpdate.
+Null/omitted control ARN is accepted, missing resolved runtime identity is not.
+The configuration and fixed-broker suites pass 59 offline tests. Bootstrap and
+Terraform execution integration remain unfinished; this is not an activation gate.
+
 Baseline: `bc6ac2ead8b750d9d99cc179d8bb321956fa7a8e`.
 Implementation remains uncommitted on
 `codex/component-infrastructure-install-permission`. No production execution,

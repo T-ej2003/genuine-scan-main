@@ -5,12 +5,15 @@ import { componentBrokerArn } from "../aws/component-installation-identity-contr
 import { installationIdentity } from "../aws/component-iam-installation-contract.mjs";
 
 const expected = brokerConfiguration({ packageSha256: "a".repeat(64), manifestSha256: "b".repeat(64), entryPoint: "INSTALL" });
-const runtime = { UpdateRuntimeOn: "FunctionUpdate", RuntimeVersionArn: `arn:aws:lambda:eu-west-2::runtime:${"c".repeat(64)}` };
+const runtime = { UpdateRuntimeOn: "FunctionUpdate", RuntimeVersionArn: null };
 const controls = { concurrency: { ReservedConcurrentExecutions: 1 }, signing: { FunctionName: installationIdentity.functionName }, runtime };
-const response = () => ({ Configuration: { ...structuredClone(expected), CodeSize: 1000, State: "Active", LastUpdateStatus: "Successful", RuntimeVersionConfig: { RuntimeVersionArn: runtime.RuntimeVersionArn } } });
+const response = () => ({ Configuration: { ...structuredClone(expected), CodeSize: 1000, State: "Active", LastUpdateStatus: "Successful", RuntimeVersionConfig: { RuntimeVersionArn: `arn:aws:lambda:eu-west-2::runtime:${"c".repeat(64)}` } } });
 
 test("exact qualified package and full configuration accepted", () => {
   assert.match(assertBrokerConfiguration(response(), expected, controls), /^[a-f0-9]{64}$/);
+  assertBrokerConfiguration(response(), expected, { ...controls, runtime: { UpdateRuntimeOn: "FunctionUpdate" } });
+  const missing = response(); delete missing.Configuration.RuntimeVersionConfig;
+  assert.throws(() => assertBrokerConfiguration(missing, expected, controls));
 });
 for (const field of Object.keys(expected)) {
   test(`reject broker configuration drift: ${field}`, () => {

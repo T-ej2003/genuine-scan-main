@@ -103,7 +103,7 @@ function fixture() {
     if (operation === "GetFunctionConcurrency") return { ReservedConcurrentExecutions: 1 };
     if (operation === "GetFunctionCodeSigningConfig") return { FunctionName: installationIdentity.functionName };
     assert.equal(operation, "GetRuntimeManagementConfig");
-    return { UpdateRuntimeOn: "FunctionUpdate", RuntimeVersionArn: runtimeArn };
+    return { UpdateRuntimeOn: "FunctionUpdate", RuntimeVersionArn: null };
   };
   f.run = (operation, fields = {}, version = { AUTHORIZE: "3", CLOSE: "2", CLEANUP_CONTEXT: "2", INSTALL: "1", INSPECT: "1" }[operation]) => {
     const purpose = operation === "CLOSE" ? "CLEANUP" : "INSTALL";

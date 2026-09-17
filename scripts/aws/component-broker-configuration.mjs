@@ -49,8 +49,11 @@ export function assertBrokerConfiguration(response, expected, { concurrency, sig
   assert.equal(signing?.FunctionName, installationIdentity.functionName);
   assert(!signing.CodeSigningConfigArn, "Unreviewed signing configuration");
   assert.equal(runtime?.UpdateRuntimeOn, "FunctionUpdate");
-  assert.match(runtime.RuntimeVersionArn || "", /^arn:aws:lambda:eu-west-2::runtime:[a-f0-9]{64}$/);
-  assert.deepEqual(config.RuntimeVersionConfig, { RuntimeVersionArn: runtime.RuntimeVersionArn });
+  // GetRuntimeManagementConfig returns null in FunctionUpdate mode. The
+  // resolved runtime identity is supplied by GetFunction, not this control API.
+  assert(runtime.RuntimeVersionArn == null, "Unexpected manual runtime binding");
+  assert.match(config.RuntimeVersionConfig?.RuntimeVersionArn || "", /^arn:aws:lambda:eu-west-2::runtime:[a-f0-9]{64}$/);
+  assert.deepEqual(Object.keys(config.RuntimeVersionConfig), ["RuntimeVersionArn"]);
   return digest(expected);
 }
 
