@@ -343,6 +343,7 @@ test("every direct production AWS root declares its credential provenance before
     ["scripts/aws/check-production-green-stage-b-approval-publication.mjs", "NAMED_PROFILE"],
     ["scripts/aws/production-normal-backend-activation.mjs", "GITHUB_OIDC_RELEASE_DEPLOYER"],
     ["scripts/aws/run-production-web-activation.mjs", "GITHUB_OIDC_RELEASE_DEPLOYER"],
+    ["scripts/aws/produce-production-web-image-evidence.mjs", "NAMED_PROFILE"],
     ["scripts/aws/recover-stage-b-backend-task-definition.mjs", "NAMED_PROFILE"],
     ["scripts/aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs", "GITHUB_OIDC_RELEASE_DEPLOYER"],
     ["scripts/aws/authorize-production-stage-a-production-artifacts-continuation-rebind.mjs", "GITHUB_OIDC_RELEASE_DEPLOYER"],

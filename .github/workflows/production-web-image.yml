@@ -71,6 +71,8 @@ jobs:
         env:
           IMAGE_REF: ${{ steps.image.outputs.image_ref }}
           COSIGN_EXPERIMENTAL: "1"
+          COSIGN_CERT_IDENTITY_REGEXP: "^https://github.com/${{ github.repository }}/.github/workflows/production-web-image.yml@.*$"
+          COSIGN_CERT_OIDC_ISSUER: https://token.actions.githubusercontent.com
         run: |
           set -euo pipefail
           docker pull "$IMAGE_REF"

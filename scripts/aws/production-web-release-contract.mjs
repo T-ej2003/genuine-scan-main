@@ -9,7 +9,7 @@ export const WEB_RELEASE = Object.freeze({
   dockerfile: "Dockerfile.ecs-frontend", buildContext: ".",
   workflowFile: ".github/workflows/production-web-image.yml", workflowName: "Production Web Image",
   artifactName: "production-web-image", canonicalFilename: "web-image.jsonl",
-  environment: "production-web-image-publish", service: "frontend", container: "frontend",
+  environment: "production-web-image-publish", reviewer: "T-ej2003", service: "frontend", container: "frontend",
   cluster: "mscqr-prod-euw2-main", serviceName: "mscqr-frontend-servi-euw2", family: "mscqr-frontend",
 });
 export const WEB_EVIDENCE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -36,6 +36,15 @@ export function parseWebPublicationArtifact(bytes, sourceSha) {
   const ref = `${WEB_RELEASE.account}.dkr.ecr.${WEB_RELEASE.region}.amazonaws.com/${WEB_RELEASE.repository}@${record.image_digest}`;
   if (record.service !== WEB_RELEASE.service || record.repository !== WEB_RELEASE.repository || record.image_tag !== sourceSha || !DIGEST.test(record.image_digest || "") || record.image_uri !== uri || record.image_ref !== ref || record.platform !== WEB_RELEASE.platform || record.dockerfile !== WEB_RELEASE.dockerfile || record.build_context !== WEB_RELEASE.buildContext || record.critical_scan !== "pass" || !HASH.test(record.sbom_sha256 || "") || !HASH.test(record.provenance_sha256 || "") || record.cosign_signature_verified !== true || record.sbom_attestation_verified !== true || record.provenance_attestation_verified !== true) throw new Error("Web publication record is outside the canonical contract.");
   return Object.freeze(record);
+}
+
+export function assertWebPublicationArtifactBundle({ artifactBytes, sbomBytes, provenanceBytes, sourceSha, workflowRunId } = {}) {
+  const record = parseWebPublicationArtifact(artifactBytes, sourceSha);
+  if (!Buffer.isBuffer(sbomBytes) || !Buffer.isBuffer(provenanceBytes) || hashBytes(sbomBytes) !== record.sbom_sha256 || hashBytes(provenanceBytes) !== record.provenance_sha256) throw new Error("Web publication supply-chain artifact hashes are invalid.");
+  let provenance; try { provenance = JSON.parse(provenanceBytes.toString("utf8")); } catch { throw new Error("Web publication provenance is malformed."); }
+  exactKeys(provenance, ["releaseSha", "workflowDefinitionSha", "workflowRunId", "repository", "platform", "dockerfile", "buildContext"], "Web publication provenance");
+  if (provenance.releaseSha !== sourceSha || provenance.workflowDefinitionSha !== sourceSha || String(provenance.workflowRunId) !== String(workflowRunId) || provenance.repository !== WEB_RELEASE.repository || provenance.platform !== WEB_RELEASE.platform || provenance.dockerfile !== WEB_RELEASE.dockerfile || provenance.buildContext !== WEB_RELEASE.buildContext) throw new Error("Web publication provenance is outside the canonical contract.");
+  return record;
 }
 
 export function buildWebPublicationIdentity({ observed, artifactBytes, sourceSha, observedAt } = {}) {
@@ -87,7 +96,10 @@ export function assertWebImageAuthorization(value, { sourceSha, now, verify } = 
 
 export function assertCoordinatedImageAuthorization({ sourceSha, stageBAuthorization, webAuthorization, webPublicationRequired, verifyWeb, now } = {}) {
   if (stageBAuthorization?.sourceSha !== sourceSha) throw new Error("Stage-B authorization source does not match coordinated release source.");
-  if (!webPublicationRequired) return Object.freeze({ sourceSha, webRequired: false, stageBAuthorizationSha256: stageBAuthorization.authorizationSha256 });
+  if (!webPublicationRequired) {
+    if (webAuthorization !== undefined) throw new Error("Web authorization is forbidden when authenticated Stage-B impact does not require web publication.");
+    return Object.freeze({ sourceSha, webRequired: false, stageBAuthorizationSha256: stageBAuthorization.authorizationSha256 });
+  }
   if (webAuthorization?.imageImpactSha256 !== canonicalSha256(stageBAuthorization.imageReuseEvidence)) throw new Error("Web authorization does not match the authenticated Stage-B image impact.");
   assertWebImageAuthorization(webAuthorization, { sourceSha, now, verify: verifyWeb });
   return Object.freeze({ sourceSha, webRequired: true, stageBAuthorizationSha256: stageBAuthorization.authorizationSha256, webAuthorizationSha256: webAuthorization.authorizationSha256, webImageRef: webAuthorization.imageRef });

@@ -10,7 +10,7 @@ import {
   buildFrontendUpdate, buildFrontendRollback,
   runGovernedFrontendActivation,
 } from "../aws/production-web-release-contract.mjs";
-import { createWebActivationAwsRunner } from "../aws/run-production-web-activation.mjs";
+import { activateAuthenticatedWebRelease, createWebActivationAwsRunner, assertFrontendActivationAuthorized } from "../aws/run-production-web-activation.mjs";
 
 const sourceSha = "a".repeat(40); const digest = `sha256:${"b".repeat(64)}`; const createdAt = "2026-09-16T12:00:00.000Z"; const expiresAt = "2026-09-17T12:00:00.000Z";
 const imageRef = `${WEB_RELEASE.account}.dkr.ecr.${WEB_RELEASE.region}.amazonaws.com/${WEB_RELEASE.repository}@${digest}`;
@@ -48,6 +48,16 @@ test("coordinated release requires matching web authorization only when web publ
   assert.throws(() => assertCoordinatedImageAuthorization({ sourceSha, stageBAuthorization: stageB, webAuthorization: { ...authorization, sourceSha: "e".repeat(40) }, webPublicationRequired: true, verifyWeb: () => true, now: createdAt }), /invalid/);
   assert.throws(() => assertCoordinatedImageAuthorization({ sourceSha, stageBAuthorization: { ...stageB, imageReuseEvidence: { ...impact, classifiedFiles: ["src/other.tsx"] } }, webAuthorization: authorization, webPublicationRequired: true, verifyWeb: () => true, now: createdAt }), /image impact/);
   assert.equal(assertCoordinatedImageAuthorization({ sourceSha, stageBAuthorization: stageB, webPublicationRequired: false }).webRequired, false);
+  assert.throws(() => assertCoordinatedImageAuthorization({ sourceSha, stageBAuthorization: stageB, webAuthorization: authorization, webPublicationRequired: false }), /forbidden/);
+});
+
+test("frontend activation consumes the authenticated Stage-B web decision before AWS adapters", async () => {
+  assert.equal(assertFrontendActivationAuthorized({ webRequired: true }), true);
+  assert.throws(() => assertFrontendActivationAuthorized({ webRequired: false }), /forbidden/);
+  assert.throws(() => assertFrontendActivationAuthorized(undefined), /forbidden/);
+  let adapters = 0;
+  await assert.rejects(() => activateAuthenticatedWebRelease({ sourceSha, stageBAuthorization: {}, webAuthorization: {}, verifyWeb: () => true, verifyCoordinated: async () => ({ webRequired: false }), createAdapters: () => { adapters += 1; throw new Error("must not construct adapters"); } }), /forbidden/);
+  assert.equal(adapters, 0);
 });
 
 const taskArn = `arn:aws:ecs:${WEB_RELEASE.region}:${WEB_RELEASE.account}:task-definition/mscqr-frontend:20`;
@@ -117,6 +127,10 @@ test("web workflow and IAM are fixed, OIDC-only, and isolated from Stage-B four-
   const build = job.steps.find(({ name }) => name === "Publish exact immutable web image").run;
   assert.match(build, /--build-arg "GIT_SHA=\$IMAGE_TAG"/);
   assert.match(build, /--build-arg "RELEASE_GIT_SHA=\$IMAGE_TAG"/);
+  const signing = job.steps.find(({ name }) => name === "Sign and attest immutable web image");
+  assert.match(signing.env.COSIGN_CERT_IDENTITY_REGEXP, /production-web-image/);
+  assert.equal(signing.env.COSIGN_CERT_OIDC_ISSUER, "https://token.actions.githubusercontent.com");
+  assert.match(fs.readFileSync("scripts/aws/cosign-idempotent-sign-and-attest.sh", "utf8"), /production-web-provenance\/v1/);
   assert.match(job.steps.find(({ name }) => name === "Bind protected source").run, /test "\$GITHUB_SHA" = "\$IMAGE_TAG"/);
   const publisher = JSON.parse(fs.readFileSync("infra/aws/terraform/production-web-release/publisher-permissions-policy.json")); const allowedResources = publisher.Statement.filter(({ Effect }) => Effect === "Allow").flatMap(({ Resource }) => Array.isArray(Resource) ? Resource : [Resource]); assert.equal(allowedResources.some((resource) => String(resource).includes("mscqr-backend") || String(resource).includes("mscqr-worker")), false);
   const activation = JSON.parse(fs.readFileSync("infra/aws/terraform/production-web-release/frontend-activation-policy.json"));

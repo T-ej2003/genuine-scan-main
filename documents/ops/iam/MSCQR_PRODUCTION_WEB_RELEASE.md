@@ -8,7 +8,20 @@ Dispatch `.github/workflows/production-web-image.yml` from protected `main` with
 
 The workflow authenticates immutable ECR configuration, publishes and reads back one digest, scans critical vulnerabilities, produces SBOM and provenance attestations, applies and verifies keyless Cosign evidence, and retains `production-web-image/web-image.jsonl` for 90 days.
 
-`scripts/aws/production-web-release-contract.mjs` defines 24-hour schema-v1 evidence and authorization binding source, run/artifact identity, reviewer, repository, digest, platform, build identity, account/region, ECR readback, and canonical image-impact hash. A governed administrator signs web evidence with the existing root-attestation KMS key. A complete coordinated release therefore expects two KMS signatures: unchanged Stage-B evidence plus web evidence. Mixed-source pairs fail closed.
+`scripts/aws/production-web-release-contract.mjs` defines 24-hour schema-v1 evidence and authorization binding source, run/artifact identity, reviewer, repository, digest, platform, build identity, account/region, ECR readback, and canonical image-impact hash. `scripts/aws/produce-production-web-image-evidence.mjs` is the sole governed web-evidence producer: it starts from a clean exact protected-main checkout, authenticates the exact successful web-publication workflow run and immutable artifact archive, checks SBOM/provenance hashes and the fixed supply-chain verifier, reads back immutable ECR state, verifies the authenticated Stage-B impact is web-required, signs exactly once with the existing root-only attestation key, verifies that signature, and atomically writes evidence, signature, and authorization. A complete coordinated release therefore expects two KMS signatures: unchanged Stage-B evidence plus web evidence. Mixed-source pairs fail closed.
+
+The evidence producer is a root-attested operator operation, not a generic signer or JSON construction step. Its fixed command is:
+
+```sh
+node scripts/aws/produce-production-web-image-evidence.mjs \
+  --source-sha <exact-protected-main-sha> \
+  --stage-b-authorization <private-stage-b-authorization.json> \
+  --stage-b-authorization-sha256 <exact-file-sha256> \
+  --web-workflow-run-id <successful-production-web-image-run-id> \
+  --output-dir <new-private-0700-directory-outside-the-repository>
+```
+
+The caller cannot select a repository, Dockerfile, platform, account, region, KMS key, artifact member, or output filename. The command accepts only the canonical root-attestation profile fixed in source and refuses any workflow, source, artifact, ECR, impact, or signature mismatch before producing the authorization.
 
 ## Activation and rollback
 
@@ -23,7 +36,7 @@ AWS IAM cannot resource-scope or field-constrain `ecs:RegisterTaskDefinition`. T
 1. Merge reviewed source and derive exact image impact.
 2. Publish/authenticate four Stage-B images when required.
 3. Separately publish/authenticate web when required.
-4. KMS-sign both evidence objects and generate both authorizations.
+4. Run the fixed governed web-evidence producer above; it KMS-signs web evidence once and generates the web authorization atomically.
 5. Verify one source SHA across Stage-B, web, DB package, backend, and frontend candidates.
 6. Verify the database before backend activation.
 7. Activate backend, then frontend under exact predecessor CAS.

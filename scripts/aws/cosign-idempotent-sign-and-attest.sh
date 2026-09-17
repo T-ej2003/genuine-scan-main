@@ -35,7 +35,7 @@ case "$operation" in
     predicate_path="${4:-}"
     [[ "$#" -eq 4 && -f "$predicate_path" ]] || { usage; exit 2; }
     case "$attestation_type" in
-      spdxjson|https://mscqr.com/attestations/stage-b-provenance/v1) ;;
+      spdxjson|https://mscqr.com/attestations/stage-b-provenance/v1|https://mscqr.com/attestations/production-web-provenance/v1) ;;
       *) echo "Unsupported Stage B attestation type." >&2; exit 2 ;;
     esac
     sign_args=(attest --yes --type "$attestation_type" --predicate "$predicate_path" "$image_ref")
