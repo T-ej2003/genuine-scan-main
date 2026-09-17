@@ -273,7 +273,7 @@ verify_normal_image_binding() {
   labels="$(docker image inspect "$image_uri" --format '{{json .Config.Labels}}')"
   NORMAL_IMAGE_CONTRACT="$NORMAL_IMAGE_CONTRACT" node --input-type=module - "$service" "$SOURCE_RELEASE_SHA" "$image_digest" "$image_file" "$repository_file" "$labels" "$PLATFORMS" "$image_uri" <<'NODE'
 import fs from "node:fs";
-import { assertNormalImageIdentity } from process.env.NORMAL_IMAGE_CONTRACT;
+const { assertNormalImageIdentity } = await import(process.env.NORMAL_IMAGE_CONTRACT);
 const [service, sourceSha, imageDigest, imageFile, repositoryFile, labelsText, platformsText, imageUri] = process.argv.slice(2);
 const image = JSON.parse(fs.readFileSync(imageFile, "utf8"))?.imageDetails?.[0];
 const repository = JSON.parse(fs.readFileSync(repositoryFile, "utf8"))?.repositories?.[0];

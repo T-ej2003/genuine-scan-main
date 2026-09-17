@@ -246,8 +246,14 @@ export async function executeNormalRelease({ plan, sourceSha, backend, frontend,
   catch (error) {
     await writeJournal({ status: "FAILURE", error: error.message.slice(0, 512) });
     if (error.frontendRollback?.attempted) await writeJournal({ status: error.frontendRollback.verified ? "FRONTEND_ROLLED_BACK" : "FRONTEND_ROLLBACK_UNVERIFIED" });
-    if (plan.classification.frontend && result.frontend !== "UNCHANGED") { await writeJournal({ status: "FRONTEND_ROLLBACK_INTENT" }); await frontend.rollback(result.frontend); await writeJournal({ status: "FRONTEND_ROLLED_BACK" }); }
-    if (plan.classification.backend && result.backend !== "UNCHANGED") { await writeJournal({ status: "BACKEND_ROLLBACK_INTENT" }); await backend.rollback(result.backend); await writeJournal({ status: "BACKEND_ROLLED_BACK" }); }
+    const rollbackErrors = [];
+    const rollback = async (component, value, operation) => {
+      try { await writeJournal({ status: `${component}_ROLLBACK_INTENT` }); await operation(value); await writeJournal({ status: `${component}_ROLLED_BACK` }); }
+      catch (rollbackError) { rollbackErrors.push({ component, error: rollbackError.message.slice(0, 512) }); try { await writeJournal({ status: `${component}_ROLLBACK_FAILED`, error: rollbackError.message.slice(0, 512) }); } catch (journalError) { rollbackErrors.push({ component: `${component}_JOURNAL`, error: journalError.message.slice(0, 512) }); } }
+    };
+    if (plan.classification.frontend && result.frontend !== "UNCHANGED") await rollback("FRONTEND", result.frontend, frontend.rollback);
+    if (plan.classification.backend && result.backend !== "UNCHANGED") await rollback("BACKEND", result.backend, backend.rollback);
+    if (rollbackErrors.length) throw Object.assign(new Error(`Normal release rollback failed after: ${error.message}`, { cause: error }), { rollbackErrors });
     throw error;
   }
   return Object.freeze(result);

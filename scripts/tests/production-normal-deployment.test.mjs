@@ -211,6 +211,17 @@ test("normal release orchestrator covers no-op and failure rollback without call
   await assert.rejects(() => executeNormalRelease({ plan: { ...noOp, sourceSha: "b".repeat(40) }, sourceSha, backend, frontend }), /source identity/);
 });
 
+test("combined release attempts backend rollback even when frontend rollback fails", async () => {
+  const events = [];
+  const plan = buildNormalReleasePlan({ sourceSha, changedFiles: ["backend/src/services/batchService.ts", "src/App.tsx"], images: { backend: backendImage, frontend: frontendImage } });
+  const backend = { deploy: async () => ({ candidate: "backend:21" }), rollback: async () => events.push("backend-rollback") };
+  const frontend = { deploy: async () => ({ candidate: "frontend:21" }), rollback: async () => { events.push("frontend-rollback"); throw new Error("frontend rollback denied"); } };
+  await assert.rejects(() => executeNormalRelease({ plan, sourceSha, backend, frontend, smoke: async () => { throw new Error("smoke failed"); } }), (error) => {
+    assert.match(error.message, /rollback failed after: smoke failed/); assert.deepEqual(error.rollbackErrors, [{ component: "FRONTEND", error: "frontend rollback denied" }]); return true;
+  });
+  assert.deepEqual(events, ["frontend-rollback", "backend-rollback"]);
+});
+
 test("combined component transaction rolls every mutated service back before state commit and commits both only after smoke", async () => {
   const candidate = "d".repeat(40), prior = "b".repeat(40);
   const state = createProductionComponentDeploymentState({ components: {
@@ -270,6 +281,7 @@ test("normal production workflow is fixed, OIDC-only, gated by main, and smoke-t
   assert.match(workflow, /publish-backend:[\s\S]*?environment: production-stage-b-image-publish/);
   assert.match(workflow, /publish-frontend:[\s\S]*?environment: production-web-image-publish/);
   assert.equal((workflow.match(/IMAGE_REF="\$\(node --input-type=module/g) || []).length, 2, "Each publisher must bind its digest in the current shell before Docker uses it.");
+  assert.match(fs.readFileSync("scripts/aws/publish-ecs-images.sh", "utf8"), /await import\(process\.env\.NORMAL_IMAGE_CONTRACT\)/);
   const webTrust = JSON.parse(fs.readFileSync("infra/aws/terraform/production-web-release/publisher-trust-policy.json", "utf8"));
   assert.equal(webTrust.Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:sub"], "repo:T-ej2003/genuine-scan-main:environment:production-web-image-publish");
   const webEnvironmentUsers = fs.readdirSync(".github/workflows").filter((file) => file.endsWith(".yml") && fs.readFileSync(`.github/workflows/${file}`, "utf8").match(/environment:\s*production-web-image-publish/));
