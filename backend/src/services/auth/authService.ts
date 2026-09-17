@@ -666,6 +666,7 @@ export const loginWithPassword = async (input: {
       const loginCycleDays = Math.max(1, getAdminLoginMfaCycleDays());
       const cycleThreshold = addDays(now, -loginCycleDays);
       const mfaFreshForLogin = Boolean(
+        !risk.shouldStepUp &&
         !isManufacturerRole(user.role) &&
           mfaStatus?.enabled &&
           hasValidLastUsedAt &&
@@ -905,7 +906,7 @@ export const logoutSession = async (input: {
     details: {},
     ipHash: input.ipHash || undefined,
     userAgent: input.userAgent || undefined,
-  } as any, undefined, db, {
+  }, undefined, db, {
     requestId: input.requestId,
     organizationId: input.organizationId,
     licenseeId: input.licenseeId,

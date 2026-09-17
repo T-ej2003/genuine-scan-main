@@ -30,6 +30,14 @@ test("Stage-B execution policies retain the exact live runtime secret closure", 
   assert.match(source, /executor_canary_auth_secret_arns = \[[\s\S]*?secret\.name == "AUTH_MFA_ENCRYPTION_KEY" \|\| startswith\(secret\.name, "MSCQR_CANARY_"\)/);
   const canaryDefinition = JSON.parse(fs.readFileSync("infra/aws/terraform/production-green-stage-b/task-definitions/green-application-canary.json", "utf8"));
   assert.deepEqual(
+    canaryDefinition.containerDefinitions[0].environment.find(({ name }) => name === "CLIENT_IP_TRUST_MODE"),
+    { name: "CLIENT_IP_TRUST_MODE", value: "direct-loopback-canary" },
+  );
+  assert.deepEqual(
+    canaryDefinition.containerDefinitions[0].environment.find(({ name }) => name === "MSCQR_PRODUCTION_GREEN_APPLICATION_CANARY"),
+    { name: "MSCQR_PRODUCTION_GREEN_APPLICATION_CANARY", value: "true" },
+  );
+  assert.deepEqual(
     canaryDefinition.containerDefinitions[0].secrets
       .map(({ name }) => name)
       .filter((name) => name === "AUTH_MFA_ENCRYPTION_KEY" || name.startsWith("MSCQR_CANARY_")),

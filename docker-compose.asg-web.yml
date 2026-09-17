@@ -95,8 +95,14 @@ services:
         max-size: "10m"
         max-file: "5"
     networks:
-      - app
+      app:
+        ipv4_address: ${ASG_FRONTEND_PROXY_IP:?Set a reviewed ASG frontend proxy address}
 
 networks:
   app:
     driver: bridge
+    ipam:
+      config:
+        - subnet: ${ASG_APP_NETWORK_SUBNET:?Set a reviewed ASG application-network subnet}
+          gateway: ${ASG_APP_NETWORK_GATEWAY:?Set a reviewed ASG application-network gateway}
+          ip_range: ${ASG_APP_NETWORK_IP_RANGE:?Set a reviewed ASG dynamic allocation range}

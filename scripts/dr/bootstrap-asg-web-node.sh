@@ -89,6 +89,7 @@ umask 077
 node --input-type=module - "$manifest_path" "$params_json" "$ssm_prefix" "$root_env_path" "$backend_env_path" "$compose_env_path" "$aws_region" "$release_git_sha" <<'NODE'
 import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 const [
   manifestPath,
@@ -220,6 +221,23 @@ for (const [key, expected] of Object.entries(safetyExpectations)) {
 
 if (!parseBool(backendEnv.get("COOKIE_SECURE"))) {
   fail("COOKIE_SECURE must be true for production ASG web nodes.");
+}
+
+const expectedFrontendProxyCidr = `${rootEnv.get("ASG_FRONTEND_PROXY_IP")}/32`;
+if (backendEnv.get("CLIENT_IP_TRUSTED_NGINX_CIDRS") !== expectedFrontendProxyCidr) {
+  fail("CLIENT_IP_TRUSTED_NGINX_CIDRS must be the exact /32 of ASG_FRONTEND_PROXY_IP.");
+}
+const { validateAsgNetworkContract } = await import(pathToFileURL(path.resolve(path.dirname(manifestPath), "../../scripts/dr/asg-network-contract.mjs")).href);
+try {
+  validateAsgNetworkContract({
+    subnet: rootEnv.get("ASG_APP_NETWORK_SUBNET"),
+    gateway: rootEnv.get("ASG_APP_NETWORK_GATEWAY"),
+    dynamicRange: rootEnv.get("ASG_APP_NETWORK_IP_RANGE"),
+    frontendIp: rootEnv.get("ASG_FRONTEND_PROXY_IP"),
+    trustedCidr: backendEnv.get("CLIENT_IP_TRUSTED_NGINX_CIDRS"),
+  });
+} catch (error) {
+  fail(`ASG network contract is invalid: ${error.message}`);
 }
 
 const envEscape = (value) => {

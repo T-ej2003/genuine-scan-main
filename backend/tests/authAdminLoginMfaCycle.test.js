@@ -4,6 +4,7 @@ const { UserRole } = require("@prisma/client");
 
 const distRoot = path.resolve(__dirname, "../dist");
 process.env.NODE_ENV = "test";
+process.env.TOKEN_HASH_SECRET_CURRENT ||= "auth-admin-login-mfa-cycle-test-secret";
 
 const mockModule = (relativePath, exportsValue) => {
   const resolved = require.resolve(path.join(distRoot, relativePath));
@@ -20,7 +21,10 @@ process.env.ADMIN_LOGIN_MFA_CYCLE_DAYS = "28";
 let prismaUser = null;
 let auditEvents = [];
 let riskWrites = [];
+let createdSessions = [];
 let riskBlocked = false;
+let riskStepUp = false;
+let riskScore = 10;
 let riskWriteError = null;
 let ordinaryAuditWrites = 0;
 
@@ -63,11 +67,15 @@ mockModule("services/auth/tokenService.js", {
 });
 
 mockModule("services/auth/refreshTokenService.js", {
-  createRefreshToken: async () => ({
-    row: { id: "session-1" },
-    tokenHash: "a".repeat(64),
+  createRefreshToken: async ({ userId }) => {
+    const row = { id: `session-${userId}` };
+    createdSessions.push({ userId, sessionId: row.id });
+    return {
+    row,
+    tokenHash: userId.padEnd(64, "a").slice(0, 64),
     expiresAt: new Date("2026-05-01T12:00:00.000Z"),
-  }),
+    };
+  },
   rotateRefreshToken: async () => null,
   revokeAllUserRefreshTokens: async () => null,
   revokeRefreshTokenByRaw: async () => null,
@@ -92,10 +100,11 @@ mockModule("services/auth/sessionRiskService.js", {
   assessAuthSessionRisk: async () => {
     if (failMfaStatusRead) throw new Error("MFA_STATUS_UNAVAILABLE");
     return {
-      score: 10,
+      score: riskScore,
       riskLevel: riskBlocked ? "CRITICAL" : "LOW",
       reasons: [riskBlocked ? "Untrusted network" : "Known device"],
       shouldBlock: riskBlocked,
+      shouldStepUp: riskStepUp,
       actorState: {
         userId: prismaUser.id, email: prismaUser.email, name: prismaUser.name, role: prismaUser.role,
         legacyLicenseeId: null, legacyOrganizationId: null, emailVerifiedAt: prismaUser.emailVerifiedAt,
@@ -147,7 +156,7 @@ const { normalizeAuthError } = require("../dist/controllers/authControllerShared
 
 const baseUser = {
   id: "admin-1",
-  email: "admin@example.com",
+  email: "administration@mscqr.com",
   name: "Admin",
   passwordHash: "hash",
   role: UserRole.SUPER_ADMIN,
@@ -184,6 +193,49 @@ const run = async () => {
     "session should carry the previous verified-at timestamp when login MFA is still fresh"
   );
   assert.equal(riskWrites.length, 1, "recent MFA login should record one database-bound risk result");
+
+  const secondSuperAdmin = {
+    ...baseUser,
+    id: "admin-2",
+    email: "victoria@mscqr.com",
+    passwordHash: "different-hash",
+  };
+  assert.notEqual(prismaUser.id, secondSuperAdmin.id);
+  assert.notEqual(prismaUser.passwordHash, secondSuperAdmin.passwordHash);
+  const firstSession = recentMfaSession.sessionId;
+  prismaUser = secondSuperAdmin;
+  const secondSession = await loginWithPassword({
+    email: prismaUser.email,
+    password: "different-password",
+    ipHash: "independent-ip-hash",
+    userAgent: "independent-agent",
+    requestId: "independent-super-admin-login",
+  });
+  assert.strictEqual(secondSession.sessionStage, "ACTIVE");
+  assert.notEqual(firstSession, secondSession.sessionId, "super-admin sessions must be user-bound and independent");
+  assert.deepEqual(createdSessions.slice(-2).map(({ userId }) => userId), ["admin-1", "admin-2"]);
+  prismaUser = { ...baseUser };
+
+  riskStepUp = true;
+  for (const score of [55, 70, 84]) {
+    riskScore = score;
+    auditEvents = [];
+    riskWrites = [];
+    const riskStepUpSession = await loginWithPassword({
+      email: prismaUser.email,
+      password: "correct-password",
+      ipHash: "new-ip-hash",
+      userAgent: "new-agent",
+      requestId: `risk-step-up-admin-login-${score}`,
+    });
+    assert.strictEqual(riskStepUpSession.sessionStage, "MFA_BOOTSTRAP", `risk ${score} must override a recent MFA cycle`);
+    assert.strictEqual(riskStepUpSession.refreshToken, null, "risk step-up must not issue a full session");
+    assert(riskStepUpSession.auth?.mfaChallenge?.ticket, "risk step-up must issue a bound MFA challenge");
+    assert.equal(riskWrites.length, 1);
+    assert(riskWrites[0].challenge, "risk step-up must persist its MFA challenge atomically");
+  }
+  riskStepUp = false;
+  riskScore = 85;
 
   riskBlocked = true;
   auditEvents = [];
@@ -225,6 +277,20 @@ const run = async () => {
   );
   riskWriteError = null;
   riskBlocked = false;
+  riskScore = 86;
+  riskBlocked = true;
+  await assert.rejects(
+    loginWithPassword({
+      email: prismaUser.email,
+      password: "correct-password",
+      ipHash: "blocked-ip-hash",
+      userAgent: "blocked-agent",
+      requestId: "blocked-admin-risk-login-above-threshold",
+    }),
+    /High-risk login blocked/
+  );
+  riskBlocked = false;
+  riskScore = 10;
 
   mockedMfaStatus = {
     enabled: true,

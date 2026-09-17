@@ -6,6 +6,7 @@ import {
   resolveConnectorDownload,
   type ConnectorPlatformKey,
 } from "../services/connectorReleaseService";
+import { resolveExternalProtocol } from "../utils/clientIp";
 
 const downloadParamsSchema = z.object({
   version: z.string().trim().min(3),
@@ -14,7 +15,7 @@ const downloadParamsSchema = z.object({
 
 const normalizeBaseUrl = (value?: string | null) => String(value || "").trim().replace(/\/+$/, "");
 
-const resolveConnectorBaseUrl = (req: Request) => {
+export const resolveConnectorBaseUrl = (req: Request) => {
   const explicitApi = normalizeBaseUrl(process.env.PUBLIC_API_BASE_URL);
   if (explicitApi) return explicitApi;
 
@@ -24,7 +25,7 @@ const resolveConnectorBaseUrl = (req: Request) => {
   const origin = req.get("origin");
   if (origin) return normalizeBaseUrl(origin);
 
-  return `${req.protocol}://${req.get("host") || "localhost"}`;
+  return `${resolveExternalProtocol(req)}://${req.get("host") || "localhost"}`;
 };
 
 const isInternalConnectorArtifactAllowed = (req: Request) => {

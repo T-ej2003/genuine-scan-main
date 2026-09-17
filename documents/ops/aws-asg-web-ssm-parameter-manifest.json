@@ -11,7 +11,11 @@
       "AWS_REGION",
       "OBJECT_STORAGE_BUCKET",
       "OBJECT_STORAGE_REGION",
-      "REDIS_URL"
+      "REDIS_URL",
+      "ASG_APP_NETWORK_SUBNET",
+      "ASG_APP_NETWORK_GATEWAY",
+      "ASG_APP_NETWORK_IP_RANGE",
+      "ASG_FRONTEND_PROXY_IP"
     ],
     "optionalFromSsm": [
       "GIT_SHA",
@@ -58,7 +62,10 @@
       "SMTP_HOST",
       "SMTP_USER",
       "SMTP_PASS",
-      "SUPER_ADMIN_EMAIL"
+      "SUPER_ADMIN_EMAIL",
+      "CLIENT_IP_TRUSTED_NGINX_CIDRS",
+      "CLIENT_IP_TRUSTED_ALB_CIDRS",
+      "CLIENT_IP_TRUSTED_CLOUDFRONT_CIDRS"
     ],
     "optionalFromSsm": [
       "JWT_SECRET_PREVIOUS",
@@ -209,6 +216,7 @@
       "AUTH_MFA_BACKUP_CODE_COUNT",
       "AUTH_MFA_TOTP_WINDOW",
       "AUTH_RISK_STEPUP_THRESHOLD",
+      "AUTH_RISK_STEP_UP_THRESHOLD",
       "AUTH_RISK_BLOCK_THRESHOLD",
       "AUTH_BASELINE_LOOKBACK_DAYS",
       "AUTH_BASELINE_CACHE_TTL_SEC",
@@ -231,7 +239,8 @@
       "OBJECT_STORAGE_ENDPOINT": "",
       "OBJECT_STORAGE_ACCESS_KEY": "",
       "OBJECT_STORAGE_SECRET_KEY": "",
-      "OBJECT_STORAGE_FORCE_PATH_STYLE": "false"
+      "OBJECT_STORAGE_FORCE_PATH_STYLE": "false",
+      "CLIENT_IP_TRUST_MODE": "cloudfront-alb-nginx"
     },
     "excluded": [
       "MINIO_ROOT_USER",
