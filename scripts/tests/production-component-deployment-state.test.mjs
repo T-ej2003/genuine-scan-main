@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createProductionComponentDeploymentState, advanceProductionComponentDeploymentState, advanceProductionComponentDeploymentStateWithRetry, bootstrapProductionComponentDeploymentState, componentStateCasRequest, createProductionComponentDeploymentStateClient, PRODUCTION_COMPONENT_STATE } from "../aws/production-component-deployment-state.mjs";
 const sha = (value) => value.repeat(40); const digest = (value) => `sha256:${value.repeat(64)}`;
-const component = (name, value) => ({ sourceSha: sha(value), imageDigest: digest(value), taskDefinitionArn: `arn:aws:ecs:eu-west-2:368992683803:task-definition/${name}:1`, desiredCount: 2 });
+const component = (name, value) => ({ sourceSha: sha(value), establishedThroughSha: sha(value), imageDigest: digest(value), taskDefinitionArn: `arn:aws:ecs:eu-west-2:368992683803:task-definition/${name}:1`, desiredCount: 2 });
 const initial = () => createProductionComponentDeploymentState({ components: { backend: component("backend", "a"), frontend: component("frontend", "a"), database: null, security: null } });
 test("component state CAS preserves unrelated live identities and rejects stale writers", () => {
   const state = initial(), next = advanceProductionComponentDeploymentState({ current: state, expectedGeneration: 1, lane: "NORMAL_APPLICATION", changes: { backend: component("backend", "b") } });
-  assert.equal(next.components.frontend.sourceSha, sha("a")); assert.equal(next.components.backend.sourceSha, sha("b"));
+  assert.equal(next.components.frontend.sourceSha, sha("a")); assert.equal(next.components.frontend.establishedThroughSha, sha("a")); assert.equal(next.components.backend.sourceSha, sha("b"));
   assert.throws(() => advanceProductionComponentDeploymentState({ current: state, expectedGeneration: 2, lane: "NORMAL_APPLICATION", changes: { frontend: component("frontend", "b") } }));
   assert.throws(() => advanceProductionComponentDeploymentState({ current: state, expectedGeneration: 1, lane: "SECURITY_INFRASTRUCTURE", changes: {} }), /mutation set/);
   assert.equal(componentStateCasRequest({ current: state, next }).ConditionExpression, "#generation = :generation");
@@ -28,7 +28,7 @@ test("conditional CAS retries only an unrelated component update and rejects a s
   };
   const result = advanceProductionComponentDeploymentStateWithRetry({ client, current: state, lane: "NORMAL_APPLICATION", changes: { backend: component("backend", "b") }, now: () => "2026-01-01T00:00:00.000Z" });
   assert.equal(result.reconciledUnrelatedConcurrentUpdate, true); assert.equal(result.state.generation, 3);
-  assert.equal(result.state.components.frontend.sourceSha, sha("b")); assert.equal(result.state.components.backend.sourceSha, sha("b"));
+  assert.equal(result.state.components.frontend.sourceSha, sha("b")); assert.equal(result.state.components.frontend.establishedThroughSha, sha("b")); assert.equal(result.state.components.backend.sourceSha, sha("b"));
   assert.throws(() => advanceProductionComponentDeploymentStateWithRetry({ client: { advance: () => { throw Object.assign(new Error("ConditionalCheckFailedException"), { code: "ConditionalCheckFailedException" }); }, read: () => advanceProductionComponentDeploymentState({ current: state, expectedGeneration: 1, lane: "NORMAL_APPLICATION", changes: { backend: component("backend", "c") } }) }, current: state, lane: "NORMAL_APPLICATION", changes: { backend: component("backend", "b") } }), /Concurrent update changed backend/);
 });
 
@@ -42,6 +42,8 @@ test("bootstrap is conditional-only, malformed state is rejected, and recovery r
   const state = bootstrapProductionComponentDeploymentState({ components: initial().components, now: "2026-01-01T00:00:00.000Z" });
   assert.equal(state.generation, 1);
   assert.throws(() => createProductionComponentDeploymentState({ components: { ...state.components, backend: { sourceSha: "unknown" } } }));
+  assert.throws(() => createProductionComponentDeploymentState({ components: { ...state.components, backend: { ...state.components.backend, establishedThroughSha: "unknown" } } }));
+  assert.throws(() => advanceProductionComponentDeploymentState({ current: state, expectedGeneration: 1, lane: "NORMAL_APPLICATION", changes: { backend: { ...component("backend", "b"), establishedThroughSha: sha("c") } } }), /must establish/);
   assert.throws(() => advanceProductionComponentDeploymentState({ current: state, expectedGeneration: 1, lane: "EMERGENCY_RECOVERY", recovery: true, changes: { backend: component("backend", "0") } }), /authenticated historical identity/);
   assert.doesNotThrow(() => advanceProductionComponentDeploymentState({ current: state, expectedGeneration: 1, lane: "EMERGENCY_RECOVERY", recovery: true, authenticateRecovery: () => true, changes: { backend: component("backend", "0") } }));
 });

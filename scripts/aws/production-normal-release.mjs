@@ -272,11 +272,11 @@ export async function executeNormalComponentTransaction({ plan, sourceSha, state
   const changes = {};
   if (plan.classification.backend) {
     const activation = result.backend?.result || result.backend;
-    changes.backend = { sourceSha, imageDigest: activation.deployedBackendDigest, taskDefinitionArn: activation.candidateTaskDefinition, desiredCount: state.components.backend.desiredCount };
+    changes.backend = { sourceSha, establishedThroughSha: sourceSha, imageDigest: activation.deployedBackendDigest, taskDefinitionArn: activation.candidateTaskDefinition, desiredCount: state.components.backend.desiredCount };
   }
   if (plan.classification.frontend) {
     const activation = result.frontend?.result || result.frontend;
-    changes.frontend = { sourceSha, imageDigest: activation.imageRef?.split("@")[1], taskDefinitionArn: activation.candidateTaskDefinitionArn, desiredCount: state.components.frontend.desiredCount };
+    changes.frontend = { sourceSha, establishedThroughSha: sourceSha, imageDigest: activation.imageRef?.split("@")[1], taskDefinitionArn: activation.candidateTaskDefinitionArn, desiredCount: state.components.frontend.desiredCount };
   }
   if (Object.keys(changes).length) {
     // If this CAS fails after smoke, retain the exact live candidate. A retry

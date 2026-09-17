@@ -25,6 +25,10 @@ test("release classification is deterministic and sensitive lanes fail closed", 
     backend: true, frontend: false, worker: false, database: false,
   });
   assert.equal(classifyProductionChanges(["src/App.tsx"]).frontend, true);
+  assert.equal(classifyProductionChanges([".dockerignore"]).backend, true);
+  assert.equal(classifyProductionChanges([".dockerignore"]).frontend, true);
+  assert.equal(classifyProductionChanges(["shared/ui/button.tsx"]).backend, true);
+  assert.equal(classifyProductionChanges(["shared/ui/button.tsx"]).frontend, true);
   for (const file of ["package.json", "package-lock.json", "Dockerfile.ecs-frontend", "tailwind.config.ts", "postcss.config.js", "vite.config.ts", "docker/nginx-entrypoint.sh"])
     assert.equal(classifyProductionChanges([file]).frontend, true, file);
   assert.equal(classifyProductionChanges(["backend/src/auth/loginService.ts"]).releaseClass, PRODUCTION_RELEASE_CLASS.SECURITY_INFRASTRUCTURE);
@@ -38,27 +42,26 @@ test("release classification is deterministic and sensitive lanes fail closed", 
   assert.throws(() => classifyProductionChanges(["unknown/build-input"]), /Ambiguous/);
 });
 
-test("every tracked image-affecting production input has a service owner or a stronger lane", () => {
+test("shared root-context image inputs include every required service owner", () => {
   const files = execFileSync("git", ["ls-files", "-z"], { encoding: "utf8" }).split("\0").filter(Boolean);
-  const unowned = [];
+  const missingRequiredOwners = [];
   for (const file of files) {
     const impact = classifyStageBImageReusePath(file);
     if (!impact.imageAffecting) continue;
     try {
       const classification = classifyProductionChanges([file]);
-      if (classification.releaseClass === PRODUCTION_RELEASE_CLASS.NORMAL_APPLICATION && !classification.backend && !classification.frontend) unowned.push(file);
+      const required = file === ".dockerignore" || /^shared\/(?:ui|formatting|validation)\//.test(file) ? ["backend", "frontend"] : [];
+      for (const owner of required) if (!classification[owner]) missingRequiredOwners.push(`${file}:${owner}`);
     } catch (error) {
       if (!/Image-affecting production input has no service owner|Ambiguous production change paths/.test(error.message)) throw error;
-      // Unknown image input is intentionally rejected before a normal release
-      // can claim it as a safe no-op.
     }
   }
-  assert.deepEqual(unowned, []);
+  assert.deepEqual(missingRequiredOwners, []);
 });
 
 test("component deployment state, never workflow history, supplies component-specific undeployed ranges", () => {
   const a = "a".repeat(40), b = "b".repeat(40), c = "c".repeat(40), d = "d".repeat(40);
-  const component = (name, source) => ({ sourceSha: source, imageDigest: `sha256:${(name === "backend" ? "1" : "2").repeat(64)}`, taskDefinitionArn: `arn:aws:ecs:eu-west-2:368992683803:task-definition/${name}:1`, desiredCount: 2 });
+  const component = (name, source) => ({ sourceSha: source, establishedThroughSha: source, imageDigest: `sha256:${(name === "backend" ? "1" : "2").repeat(64)}`, taskDefinitionArn: `arn:aws:ecs:eu-west-2:368992683803:task-definition/${name}:1`, desiredCount: 2 });
   const state = createProductionComponentDeploymentState({ components: { backend: component("backend", b), frontend: component("frontend", a), database: { sourceSha: a, releaseIdentity: "db-release" }, security: { sourceSha: a, releaseIdentity: "security-release" } } });
   const ranges = new Map([[`${b}..${d}`, ["backend/src/services/batchService.ts"]], [`${a}..${d}`, ["src/App.tsx"]]]);
   const plan = buildProductionNormalDeploymentPlan({ sourceSha: d, state, isAncestor: (left, right) => [a, b, c, d].indexOf(left) <= [a, b, c, d].indexOf(right), readRange: (left, right) => ranges.get(`${left}..${right}`) || [] });
@@ -79,8 +82,8 @@ test("revalidation tolerates only unrelated component-state advancement", () => 
 test("recorded security work does not deadlock an unrelated frontend release, but unrecorded security does", () => {
   const a = "a".repeat(40), b = "b".repeat(40), c = "c".repeat(40);
   const state = createProductionComponentDeploymentState({ components: {
-    backend: { sourceSha: a, imageDigest: `sha256:${"1".repeat(64)}`, taskDefinitionArn: `arn:aws:ecs:eu-west-2:368992683803:task-definition/${APP_ONLY.family}:1`, desiredCount: 2 },
-    frontend: { sourceSha: a, imageDigest: `sha256:${"2".repeat(64)}`, taskDefinitionArn: taskArn, desiredCount: 2 },
+    backend: { sourceSha: a, establishedThroughSha: a, imageDigest: `sha256:${"1".repeat(64)}`, taskDefinitionArn: `arn:aws:ecs:eu-west-2:368992683803:task-definition/${APP_ONLY.family}:1`, desiredCount: 2 },
+    frontend: { sourceSha: a, establishedThroughSha: a, imageDigest: `sha256:${"2".repeat(64)}`, taskDefinitionArn: taskArn, desiredCount: 2 },
     database: null, security: { sourceSha: b, releaseIdentity: "security" },
   } });
   const ranges = new Map([[`${a}..${b}`, ["backend/src/middleware/rbac.ts"]], [`${a}..${c}`, ["backend/src/middleware/rbac.ts", "src/App.tsx"]], [`${b}..${c}`, ["src/App.tsx"]]]);
@@ -89,15 +92,15 @@ test("recorded security work does not deadlock an unrelated frontend release, bu
   assert.throws(() => buildProductionNormalDeploymentPlan({ sourceSha: c, state: { ...state, components: { ...state.components, security: null } }, isAncestor: () => true, readRange: (left, right) => ranges.get(`${left}..${right}`) || [] }), /Sensitive|stronger-lane/);
 });
 
-test("completed recovery paths do not strand stale stronger-component ranges", () => {
-  const a = "a".repeat(40), b = "b".repeat(40), c = "c".repeat(40);
-  const backend = { sourceSha: b, imageDigest: `sha256:${"1".repeat(64)}`, taskDefinitionArn: `arn:aws:ecs:eu-west-2:368992683803:task-definition/${APP_ONLY.family}:1`, desiredCount: 2 };
-  const frontend = { sourceSha: a, imageDigest: `sha256:${"2".repeat(64)}`, taskDefinitionArn: taskArn, desiredCount: 2 };
+test("completed recovery uses its reconciliation source while preserving the historical live image source", () => {
+  const h = "0".repeat(40), a = "a".repeat(40), r = "b".repeat(40), c = "c".repeat(40);
+  const backend = { sourceSha: h, establishedThroughSha: r, imageDigest: `sha256:${"1".repeat(64)}`, taskDefinitionArn: `arn:aws:ecs:eu-west-2:368992683803:task-definition/${APP_ONLY.family}:1`, desiredCount: 2 };
+  const frontend = { sourceSha: a, establishedThroughSha: a, imageDigest: `sha256:${"2".repeat(64)}`, taskDefinitionArn: taskArn, desiredCount: 2 };
   const state = createProductionComponentDeploymentState({ components: { backend, frontend, database: null, security: null } });
-  const ranges = new Map([[`${a}..${b}`, ["scripts/aws/recover-production-backend-health.mjs"]], [`${a}..${c}`, ["scripts/aws/recover-production-backend-health.mjs", "src/App.tsx"]], [`${b}..${c}`, ["src/App.tsx"]]]);
-  const options = { sourceSha: c, state, isAncestor: (left, right) => [a, b, c].indexOf(left) <= [a, b, c].indexOf(right), readRange: (left, right) => ranges.get(`${left}..${right}`) || [] };
-  assert.equal(buildProductionNormalDeploymentPlan(options).classification.frontend, true);
-  assert.throws(() => buildProductionNormalDeploymentPlan({ ...options, state: { ...state, components: { ...state.components, backend: { ...backend, sourceSha: a } } } }), /Sensitive|stronger-lane/);
+  const calls = [], ranges = new Map([[`${r}..${c}`, ["backend/src/services/batchService.ts"]], [`${a}..${c}`, ["src/App.tsx"]]]);
+  const options = { sourceSha: c, state, isAncestor: (left, right) => [h, a, r, c].indexOf(left) <= [h, a, r, c].indexOf(right), readRange: (left, right) => { calls.push(`${left}..${right}`); return ranges.get(`${left}..${right}`) || []; } };
+  const plan = buildProductionNormalDeploymentPlan(options);
+  assert.equal(plan.classification.backend, true); assert.equal(plan.classification.frontend, true); assert.equal(plan.componentBaselines.backend, r); assert.ok(calls.includes(`${r}..${c}`)); assert.equal(calls.includes(`${h}..${c}`), false);
 });
 
 test("normal plans require only immutable affected images", () => {
@@ -245,8 +248,8 @@ test("journal failure never prevents rollback of an already-mutated service", as
 test("combined component transaction rolls every mutated service back before state commit and commits both only after smoke", async () => {
   const candidate = "d".repeat(40), prior = "b".repeat(40);
   const state = createProductionComponentDeploymentState({ components: {
-    backend: { sourceSha: prior, imageDigest: `sha256:${"1".repeat(64)}`, taskDefinitionArn: `arn:aws:ecs:eu-west-2:368992683803:task-definition/${APP_ONLY.family}:14`, desiredCount: 2 },
-    frontend: { sourceSha: prior, imageDigest: `sha256:${"2".repeat(64)}`, taskDefinitionArn: taskArn, desiredCount: 2 },
+    backend: { sourceSha: prior, establishedThroughSha: prior, imageDigest: `sha256:${"1".repeat(64)}`, taskDefinitionArn: `arn:aws:ecs:eu-west-2:368992683803:task-definition/${APP_ONLY.family}:14`, desiredCount: 2 },
+    frontend: { sourceSha: prior, establishedThroughSha: prior, imageDigest: `sha256:${"2".repeat(64)}`, taskDefinitionArn: taskArn, desiredCount: 2 },
     database: { sourceSha: prior, releaseIdentity: "db" }, security: { sourceSha: prior, releaseIdentity: "security" },
   } });
   const plan = buildNormalReleasePlan({ sourceSha: candidate, componentFiles: { backendFiles: ["backend/src/services/batchService.ts"], frontendFiles: ["src/App.tsx"], securityFiles: [], databaseFiles: [] }, images: { backend: backendImage, frontend: frontendImage } });
@@ -257,7 +260,7 @@ test("combined component transaction rolls every mutated service back before sta
   assert.deepEqual(events, ["backend-rollback"]); assert.equal(committed, false);
   const frontend = { deploy: async () => ({ result: { candidateTaskDefinitionArn: taskArn.replace(":20", ":21"), imageRef: frontendImage }, rollback: async () => events.push("frontend-rollback") }), rollback: async (value) => value.rollback() };
   const complete = await executeNormalComponentTransaction({ plan, sourceSha: candidate, state, stateClient: { read: () => state, advance: () => { committed = true; } }, backend, frontend, smoke: async () => true, isAncestor: () => true });
-  assert.equal(committed, true); assert.equal(complete.componentState.components.backend.sourceSha, candidate); assert.equal(complete.componentState.components.frontend.sourceSha, candidate);
+  assert.equal(committed, true); assert.equal(complete.componentState.components.backend.sourceSha, candidate); assert.equal(complete.componentState.components.backend.establishedThroughSha, candidate); assert.equal(complete.componentState.components.frontend.sourceSha, candidate); assert.equal(complete.componentState.components.frontend.establishedThroughSha, candidate);
 });
 
 test("retry accepts only the exact already-live candidate and rejects unknown live state", () => {

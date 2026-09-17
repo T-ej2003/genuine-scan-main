@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { classifyProductionChanges, classifyProductionComponentRanges, PRODUCTION_RELEASE_CLASS } from "./production-deployment-classification.mjs";
-import { createProductionComponentDeploymentStateClient, stateHash } from "./production-component-deployment-state.mjs";
+import { assertProductionComponentDeploymentState, createProductionComponentDeploymentStateClient, stateHash } from "./production-component-deployment-state.mjs";
 import { assertGithubOidcReleaseDeployerEnvironment, createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 
 const SHA = /^[a-f0-9]{40}$/;
@@ -20,25 +20,25 @@ const assertAncestor = (ancestor, candidate, cwd) => {
 const rangeFiles = (baseline, candidate, cwd) => git(["diff", "--name-only", "-z", `${baseline}..${candidate}`], cwd).split("\0").filter(Boolean);
 
 export function buildProductionNormalDeploymentPlan({ sourceSha, state, readRange, isAncestor } = {}) {
-  assert.match(sourceSha || "", SHA); assert.equal(typeof readRange, "function"); assert.equal(typeof isAncestor, "function");
+  assert.match(sourceSha || "", SHA); assertProductionComponentDeploymentState(state); assert.equal(typeof readRange, "function"); assert.equal(typeof isAncestor, "function");
+  const baselineOf = (component) => component?.establishedThroughSha || component?.sourceSha;
   for (const name of COMPONENTS) {
     const component = state?.components?.[name];
-    if (component) { assert.match(component.sourceSha || "", SHA); assert.equal(isAncestor(component.sourceSha, sourceSha), true, `${name} baseline is not an ancestor of the candidate`); }
+    if (component) { assert.match(baselineOf(component) || "", SHA); assert.equal(isAncestor(baselineOf(component), sourceSha), true, `${name} baseline is not an ancestor of the candidate`); }
   }
   for (const name of ["backend", "frontend"]) assert.ok(state.components[name], `${name} deployment state has not been bootstrapped.`);
-  const files = Object.fromEntries(COMPONENTS.map((name) => [name, state.components[name] ? readRange(state.components[name].sourceSha, sourceSha) : []]));
+  const files = Object.fromEntries(COMPONENTS.map((name) => [name, state.components[name] ? readRange(baselineOf(state.components[name]), sourceSha) : []]));
   // Component baselines can lag an already-completed stronger or recovery
   // transition. Remove only a prior sensitive path whose terminal component
   // state proves it was established; a later edit remains in the range.
   for (const component of COMPONENTS) for (const establishedComponent of COMPONENTS) {
-    const baseline = state.components[component]?.sourceSha, established = state.components[establishedComponent]?.sourceSha;
+    const baseline = baselineOf(state.components[component]), established = baselineOf(state.components[establishedComponent]);
     if (!baseline || !established || !isAncestor(baseline, established) || !isAncestor(established, sourceSha)) continue;
     const establishedFiles = new Set(readRange(baseline, established)); const newerFiles = new Set(readRange(established, sourceSha));
     files[component] = files[component].filter((file) => {
       if (!establishedFiles.has(file) || newerFiles.has(file)) return true;
       const classification = classifyProductionChanges([file]);
       const releaseClass = classification.releaseClass;
-      if (releaseClass === PRODUCTION_RELEASE_CLASS.EMERGENCY_RECOVERY) return false;
       return !(releaseClass === PRODUCTION_RELEASE_CLASS.SECURITY_INFRASTRUCTURE
         && (establishedComponent === "security" || (establishedComponent === "database" && classification.database)));
     });
@@ -52,7 +52,7 @@ export function buildProductionNormalDeploymentPlan({ sourceSha, state, readRang
       assert.equal(files[dependency].some((file) => /(?:^|\/)(?:security|auth|mfa|rbac|csrf|tenant|rls|iam|kms|policy|grant|role|migration|schema|network)(?:\/|\.|-|_)/i.test(file)), false, `${component} deployment has an undeployed stronger-lane dependency.`);
     }
   }
-  const componentBaselines = Object.fromEntries(COMPONENTS.map((name) => [name, state.components[name]?.sourceSha || null]));
+  const componentBaselines = Object.fromEntries(COMPONENTS.map((name) => [name, baselineOf(state.components[name]) || null]));
   return Object.freeze({ schemaVersion: 1, kind: "NORMAL_COMPONENT_DEPLOYMENT_PREPARATION", sourceSha, stateGeneration: state.generation, stateSha256: stateHash(state), componentBaselines,
     componentFiles: Object.freeze({ backendFiles: files.backend, frontendFiles: files.frontend, securityFiles: files.security, databaseFiles: files.database }), classification });
 }

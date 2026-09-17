@@ -13,10 +13,10 @@ import { commitSecurityComponentState } from "../aws/commit-production-component
 import { READY_FOR_OVERLAP_DEPLOYMENT_STAGES } from "../aws/production-overlap-readiness-contract.mjs";
 import { writeOverlapReadinessEvidence } from "../aws/produce-production-overlap-readiness-evidence.mjs";
 
-const source = "b".repeat(40);
+const source = "b".repeat(40), recoverySource = "c".repeat(40);
 const state = () => createProductionComponentDeploymentState({ components: {
-  backend: { sourceSha: "a".repeat(40), imageDigest: `sha256:${"1".repeat(64)}`, taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend:1", desiredCount: 2 },
-  frontend: { sourceSha: "a".repeat(40), imageDigest: `sha256:${"2".repeat(64)}`, taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-frontend:1", desiredCount: 2 }, database: null, security: null,
+  backend: { sourceSha: "a".repeat(40), establishedThroughSha: "a".repeat(40), imageDigest: `sha256:${"1".repeat(64)}`, taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend:1", desiredCount: 2 },
+  frontend: { sourceSha: "a".repeat(40), establishedThroughSha: "a".repeat(40), imageDigest: `sha256:${"2".repeat(64)}`, taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-frontend:1", desiredCount: 2 }, database: null, security: null,
 } });
 
 test("security terminal advances only the authenticated security component", () => {
@@ -45,7 +45,7 @@ test("normal security completion records only live-authenticated backend, databa
   assert.match(writer, /assertProductionRlsReleaseReceipt\(releaseReceipt, \{ sourceSha, imageDigest: authorizedBackendDigest\(authorization\) \}\)/);
   assert.match(writer, /assertNormalBackendActivationEvidence\(backendActivation, \{ sourceSha, stageBAuthorization: authorization \}\)/);
   assert.match(writer, /changes\.database = \{ sourceSha, releaseIdentity: releaseReceipt\.receiptBundleSha256 \}/);
-  assert.match(writer, /changes\.backend = \{ sourceSha: backendImageSource, imageDigest: backendLive\.backendDigest, taskDefinitionArn: backendLive\.taskDefinitionArn, desiredCount: backendLive\.desiredCount \}/);
+  assert.match(writer, /changes\.backend = \{ sourceSha: backendImageSource, establishedThroughSha: sourceSha, imageDigest: backendLive\.backendDigest, taskDefinitionArn: backendLive\.taskDefinitionArn, desiredCount: backendLive\.desiredCount \}/);
 });
 
 test("web-required security completion records the exact activated frontend only", () => {
@@ -53,7 +53,7 @@ test("web-required security completion records the exact activated frontend only
   const frontend = { sourceSha: source, imageDigest: `sha256:${"4".repeat(64)}`, taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-frontend:8", desiredCount: 2 };
   const activation = { sourceSha: source, candidateTaskDefinitionArn: frontend.taskDefinitionArn, imageRef: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-web@${frontend.imageDigest}`, health: { ready: true, loginStatus: 200 } };
   const result = commitSecurityComponentState({ sourceSha: source, authorization, frontendActivation: activation, frontendLive: frontend, frontendImageSource: source, client: { read: () => initial, advance: () => {} }, isProtectedMainAncestor: () => true });
-  assert.deepEqual(result.state.components.frontend, frontend);
+  assert.deepEqual(result.state.components.frontend, { ...frontend, establishedThroughSha: source });
   assert.throws(() => commitSecurityComponentState({ sourceSha: source, authorization, client: { read: () => initial, advance: () => {} }, isProtectedMainAncestor: () => true }), /Web-required/);
 });
 
@@ -67,17 +67,20 @@ test("a verified security rotation may refresh only its release identity at the 
 
 test("backend recovery writes only the authenticated restored backend identity", () => {
   const live = { backendDigest: `sha256:${"3".repeat(64)}`, taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend:7", desiredCount: 2 };
-  const evidence = { imageReleaseSha: source, recoveryImageDigest: live.backendDigest, targetArn: live.taskDefinitionArn };
-  assert.deepEqual(authenticatedBackendRecoveryComponent(live, evidence), { sourceSha: source, imageDigest: live.backendDigest, taskDefinitionArn: live.taskDefinitionArn, desiredCount: 2 });
+  const evidence = { sourceSha: recoverySource, imageReleaseSha: source, recoveryImageDigest: live.backendDigest, targetArn: live.taskDefinitionArn };
+  assert.deepEqual(authenticatedBackendRecoveryComponent(live, evidence), { sourceSha: source, establishedThroughSha: recoverySource, imageDigest: live.backendDigest, taskDefinitionArn: live.taskDefinitionArn, desiredCount: 2 });
   assert.throws(() => authenticatedBackendRecoveryComponent(live, { ...evidence, recoveryImageDigest: `sha256:${"4".repeat(64)}` }), /Expected values to be strictly equal/);
 });
 
 test("backend recovery forwards its explicit regression authority through the CAS transition", () => {
   const initial = state(); const live = { backendDigest: `sha256:${"3".repeat(64)}`, taskDefinitionArn: `arn:aws:ecs:eu-west-2:368992683803:task-definition/${APP_ONLY.family}:7`, desiredCount: 2 };
-  const evidence = { imageReleaseSha: source, recoveryImageDigest: live.backendDigest, targetArn: live.taskDefinitionArn };
+  const evidence = { sourceSha: recoverySource, imageReleaseSha: source, recoveryImageDigest: live.backendDigest, targetArn: live.taskDefinitionArn };
   const readers = { readLive: () => ({ service: { taskDefinition: live.taskDefinitionArn, serviceArn: APP_ONLY.serviceArn, serviceName: APP_ONLY.service, clusterArn: APP_ONLY.clusterArn, status: "ACTIVE", desiredCount: 2, runningCount: 2, pendingCount: 0, deployments: [{ status: "PRIMARY", taskDefinition: live.taskDefinitionArn, rolloutState: "COMPLETED", id: "ecs-svc/1" }] }, definition: { taskDefinitionArn: live.taskDefinitionArn, family: APP_ONLY.family, taskRoleArn: APP_ONLY.taskRoleArn, executionRoleArn: APP_ONLY.executionRoleArn, networkMode: "awsvpc", runtimePlatform: { cpuArchitecture: "X86_64", operatingSystemFamily: "LINUX" }, containerDefinitions: [{ name: "backend", image: `${APP_ONLY.backendRepository}@${live.backendDigest}` }], status: "ACTIVE" }, tasks: ["a", "b"].map((taskArn) => ({ taskArn, clusterArn: APP_ONLY.clusterArn, group: `service:${APP_ONLY.service}`, taskDefinitionArn: live.taskDefinitionArn, lastStatus: "RUNNING", healthStatus: "HEALTHY", startedBy: "ecs-svc/1", containers: [{ name: "backend", imageDigest: live.backendDigest }] })) }), readBackendImageSource: () => source };
   const result = commitBackendRecoveryComponentState({ evidence, readers, client: { read: () => initial, advance: () => {} }, isProtectedMainAncestor: () => true });
-  assert.equal(result.state.components.backend.sourceSha, source);
+  assert.equal(result.state.components.backend.sourceSha, source); assert.equal(result.state.components.backend.establishedThroughSha, recoverySource);
+  let writes = 0;
+  assert.throws(() => commitBackendRecoveryComponentState({ evidence: { ...evidence, sourceSha: "d".repeat(40) }, readers, client: { read: () => initial, advance: () => { writes += 1; } }, isProtectedMainAncestor: (value) => value !== "d".repeat(40) }), /completion source/);
+  assert.equal(writes, 0); assert.equal(initial.components.backend.establishedThroughSha, "a".repeat(40));
 });
 
 test("rotation terminal accepts only hash-bound readiness and changes security alone", () => {

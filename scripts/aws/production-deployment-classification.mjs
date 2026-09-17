@@ -72,7 +72,7 @@ export function classifyProductionChanges(paths) {
   const unknown = changed.filter((file) => !matches(normalApplication, file) && !/^scripts\/tests?\//.test(file) && !/^backend\/tests?\//.test(file) && !/^src\/test\//.test(file) && !/\.md$/.test(file));
   assert.equal(unknown.length, 0, `Ambiguous production change paths: ${unknown.join(", ")}`);
   const image = changed.map(classifyStageBImageReusePath);
-  const backendAffecting = image.some(({ file, imageAffecting }) => imageAffecting && (/^backend\//.test(file) || /^shared\//.test(file)));
+  const backendAffecting = image.some(({ file, imageAffecting }) => imageAffecting && (/^backend\//.test(file) || /^shared\//.test(file) || file === ".dockerignore"));
   const frontendAffecting = image.some(({ file, imageAffecting }) => imageAffecting && (/^(?:src|public|shared)\//.test(file) || /^(?:package(?:-lock)?\.json|components\.json|eslint\.config\.js|index\.html|postcss\.config\.js|tailwind\.config\.ts|tsconfig(?:\.[^/]+)?\.json|vite\.config\.[^/]+|vitest\.config\.[^/]+|Dockerfile\.ecs-frontend|nginx\.ecs-frontend\.conf|docker\/nginx-entrypoint\.sh|\.dockerignore)$/.test(file)));
   if (image.some(({ imageAffecting }) => imageAffecting) && !backendAffecting && !frontendAffecting) throw new Error("Image-affecting production input has no service owner.");
   const workerAffecting = image.some(({ file, imageAffecting }) => imageAffecting && (/^backend\/(?:src\/.*worker|scripts\/.*worker)/i.test(file) || /^worker\//i.test(file) || /^shared\//.test(file)));

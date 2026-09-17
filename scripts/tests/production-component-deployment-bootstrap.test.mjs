@@ -27,6 +27,7 @@ function runner({ caller = "arn:aws:sts::368992683803:assumed-role/mscqr-product
 test("bootstrap derives each live service identity and leaves unproven database/security null", () => {
   const state = bootstrapProductionComponentStateFromLive({ run: runner(), isProtectedMainAncestor: (value) => [backendSha, frontendSha].includes(value), now: "2026-01-01T00:00:00.000Z" });
   assert.equal(state.components.backend.sourceSha, backendSha); assert.equal(state.components.frontend.sourceSha, frontendSha);
+  assert.equal(state.components.backend.establishedThroughSha, backendSha); assert.equal(state.components.frontend.establishedThroughSha, frontendSha);
   assert.equal(state.components.database, null); assert.equal(state.components.security, null);
 });
 

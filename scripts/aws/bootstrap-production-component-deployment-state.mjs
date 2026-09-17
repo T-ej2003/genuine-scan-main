@@ -46,7 +46,7 @@ export function bootstrapProductionComponentStateFromLive({ run, isProtectedMain
   const backend = serviceDefinition(run, APP_ONLY.cluster, APP_ONLY.service, APP_ONLY.family, APP_ONLY.container, APP_ONLY.backendRepository);
   const frontend = serviceDefinition(run, WEB_RELEASE.cluster, WEB_RELEASE.serviceName, WEB_RELEASE.family, WEB_RELEASE.container, `368992683803.dkr.ecr.eu-west-2.amazonaws.com/${WEB_RELEASE.repository}`);
   for (const value of [backend, frontend]) assert.equal(isProtectedMainAncestor(value.sourceSha), true, "Live component source is not protected-main history");
-  return bootstrapProductionComponentDeploymentState({ components: { backend, frontend, database: null, security: null }, now, updatedByWorkflow, githubRunId });
+  return bootstrapProductionComponentDeploymentState({ components: { backend: { ...backend, establishedThroughSha: backend.sourceSha }, frontend: { ...frontend, establishedThroughSha: frontend.sourceSha }, database: null, security: null }, now, updatedByWorkflow, githubRunId });
 }
 
 function main() {
@@ -62,7 +62,7 @@ function main() {
   const client = createProductionComponentDeploymentStateClient({ run });
   assert.equal(client.read(), null, "Component deployment state was already bootstrapped.");
   client.initialize(state);
-  process.stdout.write(`${JSON.stringify({ environment: state.environment, generation: state.generation, components: Object.fromEntries(Object.entries(state.components).map(([name, value]) => [name, value && { sourceSha: value.sourceSha, imageDigest: value.imageDigest, taskDefinitionArn: value.taskDefinitionArn }])) })}\n`);
+  process.stdout.write(`${JSON.stringify({ environment: state.environment, generation: state.generation, components: Object.fromEntries(Object.entries(state.components).map(([name, value]) => [name, value && { sourceSha: value.sourceSha, establishedThroughSha: value.establishedThroughSha, imageDigest: value.imageDigest, taskDefinitionArn: value.taskDefinitionArn }])) })}\n`);
 }
 
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) main();

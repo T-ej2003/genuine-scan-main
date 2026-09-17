@@ -14,17 +14,17 @@ const readEvidence = (file) => { const value = JSON.parse(fs.readFileSync(file, 
 
 export function authenticatedBackendRecoveryComponent(live, evidence) {
   assert.equal(live.backendDigest, evidence.recoveryImageDigest); assert.equal(live.taskDefinitionArn, evidence.targetArn);
-  return { sourceSha: evidence.imageReleaseSha, imageDigest: live.backendDigest, taskDefinitionArn: live.taskDefinitionArn, desiredCount: live.desiredCount };
+  return { sourceSha: evidence.imageReleaseSha, establishedThroughSha: evidence.sourceSha, imageDigest: live.backendDigest, taskDefinitionArn: live.taskDefinitionArn, desiredCount: live.desiredCount };
 }
 
 export function commitBackendRecoveryComponentState({ evidence, client, run, readers = createAppOnlyEcsReaders(run), isProtectedMainAncestor = () => true, writerContext } = {}) {
   const live = captureAppOnlyPredecessor(readers.readLive());
   const sourceSha = readers.readBackendImageSource(live.backendDigest);
-  assert.equal(sourceSha, evidence.imageReleaseSha); const component = authenticatedBackendRecoveryComponent(live, evidence); assert.equal(isProtectedMainAncestor(sourceSha), true, "Recovered backend source is not protected-main history.");
+  assert.equal(sourceSha, evidence.imageReleaseSha); const component = authenticatedBackendRecoveryComponent(live, evidence); assert.equal(isProtectedMainAncestor(sourceSha), true, "Recovered backend source is not protected-main history."); assert.equal(isProtectedMainAncestor(evidence.sourceSha), true, "Recovery completion source is not protected-main history.");
   const state = client.read(); assert.ok(state, "Production component deployment state is not bootstrapped.");
   return advanceProductionComponentDeploymentStateWithRetry({ client, current: state, lane: "EMERGENCY_RECOVERY", recovery: true,
     changes: { backend: component },
-    authenticateRecovery: ({ next }) => assert.equal(next.sourceSha, sourceSha), ...writerContext });
+    authenticateRecovery: ({ next }) => { assert.equal(next.sourceSha, sourceSha); assert.equal(next.establishedThroughSha, evidence.sourceSha); }, ...writerContext });
 }
 
 function main() {
@@ -39,7 +39,7 @@ function main() {
   const result = commitBackendRecoveryComponentState({ evidence, run, client: createProductionComponentDeploymentStateClient({ run }), writerContext: { updatedByWorkflow: process.env.GITHUB_WORKFLOW_REF, githubRunId: process.env.GITHUB_RUN_ID }, isProtectedMainAncestor: (sourceSha) => {
     try { execFileSync("git", ["merge-base", "--is-ancestor", sourceSha, "refs/remotes/origin/main"], { cwd: root, stdio: "ignore" }); return true; } catch { return false; }
   } });
-  process.stdout.write(`${JSON.stringify({ generation: result.state.generation, component: "backend", sourceSha: result.state.components.backend.sourceSha })}\n`);
+  process.stdout.write(`${JSON.stringify({ generation: result.state.generation, component: "backend", sourceSha: result.state.components.backend.sourceSha, establishedThroughSha: result.state.components.backend.establishedThroughSha })}\n`);
 }
 
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) main();

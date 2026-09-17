@@ -31,7 +31,7 @@ export function commitSecurityComponentState({ sourceSha, authorization, release
     assert.equal(backendActivation.imageDigest, backendLive.backendDigest); assert.equal(backendActivation.targetArn, backendLive.taskDefinitionArn); assert.equal(backendActivation.desiredCount, backendLive.desiredCount);
     assert.match(backendImageSource, SHA); assert.equal(isProtectedMainAncestor(backendImageSource), true, "Live backend source is not protected-main history.");
     changes.database = { sourceSha, releaseIdentity: releaseReceipt.receiptBundleSha256 };
-    changes.backend = { sourceSha: backendImageSource, imageDigest: backendLive.backendDigest, taskDefinitionArn: backendLive.taskDefinitionArn, desiredCount: backendLive.desiredCount };
+    changes.backend = { sourceSha: backendImageSource, establishedThroughSha: sourceSha, imageDigest: backendLive.backendDigest, taskDefinitionArn: backendLive.taskDefinitionArn, desiredCount: backendLive.desiredCount };
   }
   const frontendInputs = [frontendActivation, frontendLive, frontendImageSource];
   const webRequired = authorization.imageReuseEvidence?.webPublicationRequired;
@@ -41,7 +41,7 @@ export function commitSecurityComponentState({ sourceSha, authorization, release
     assert.equal(webRequired, true, "Frontend state may change only for an authenticated web-required release.");
     assert.equal(frontendActivation.sourceSha, sourceSha); assert.match(frontendActivation.candidateTaskDefinitionArn || "", /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/mscqr-frontend:[1-9][0-9]*$/); assert.match(frontendActivation.imageRef || "", /^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/mscqr-web@sha256:[a-f0-9]{64}$/); assert.equal(frontendActivation.health?.ready, true); assert.equal(frontendActivation.health?.loginStatus, 200);
     assert.equal(frontendLive.sourceSha, frontendImageSource); assert.equal(frontendLive.sourceSha, sourceSha); assert.equal(frontendLive.imageDigest, frontendActivation.imageRef.split("@")[1]); assert.equal(frontendLive.taskDefinitionArn, frontendActivation.candidateTaskDefinitionArn); assert.equal(frontendLive.desiredCount, 2);
-    changes.frontend = frontendLive;
+    changes.frontend = { ...frontendLive, establishedThroughSha: sourceSha };
   }
   return advanceProductionComponentDeploymentStateWithRetry({ client, current, lane: "SECURITY_INFRASTRUCTURE", changes, ...writerContext });
 }

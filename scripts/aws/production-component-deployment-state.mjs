@@ -19,7 +19,7 @@ export function assertProductionComponentDeploymentState(value) {
     assert.ok(component === null || typeof component === "object", `${name} state malformed`);
     if (!component) continue;
     assert.match(component.sourceSha || "", SHA); assert.match(component.releaseIdentity || component.imageDigest || "", component.imageDigest ? DIGEST : /^.{1,512}$/);
-    if (["backend", "frontend"].includes(name)) { assert.match(component.imageDigest || "", DIGEST); assert.match(component.taskDefinitionArn || "", /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/[^:]+:[1-9][0-9]*$/); assert.ok(Number.isSafeInteger(component.desiredCount) && component.desiredCount > 0, `${name} desired count malformed`); }
+    if (["backend", "frontend"].includes(name)) { assert.match(component.establishedThroughSha || "", SHA); assert.match(component.imageDigest || "", DIGEST); assert.match(component.taskDefinitionArn || "", /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/[^:]+:[1-9][0-9]*$/); assert.ok(Number.isSafeInteger(component.desiredCount) && component.desiredCount > 0, `${name} desired count malformed`); }
   }
   return value;
 }
@@ -34,7 +34,7 @@ export function advanceProductionComponentDeploymentState({ current, expectedGen
   assert.ok(Object.keys(changes).length > 0, "A component-state transition must declare an authenticated component mutation set");
   for (const [name, next] of Object.entries(changes)) {
     assert.ok(components.has(name)); assert.ok(next && typeof next === "object"); assert.match(next.sourceSha || "", SHA);
-    if (lane === "NORMAL_APPLICATION") { assert.ok(current.components[name], "Normal deployment requires bootstrapped component state"); assert.equal(recovery, false); }
+    if (lane === "NORMAL_APPLICATION") { assert.ok(current.components[name], "Normal deployment requires bootstrapped component state"); assert.equal(recovery, false); if (["backend", "frontend"].includes(name)) assert.equal(next.establishedThroughSha, next.sourceSha, "Normal deployment must establish the deployed candidate source"); }
     if (current.components[name]) {
       const sameSource = next.sourceSha === current.components[name].sourceSha;
       if (sameSource) {
@@ -45,8 +45,8 @@ export function advanceProductionComponentDeploymentState({ current, expectedGen
         assert.equal(recovery, true, "Recovery source regression requires the explicit recovery lane");
         assert.equal(typeof authenticateRecovery, "function", "Recovery state changes require authenticated historical identity");
         authenticateRecovery({ component: name, current: current.components[name], next });
-      } else if (!sameSource && typeof isAncestor === "function") {
-        assert.equal(isAncestor(current.components[name].sourceSha, next.sourceSha), true, "Component source transition is not forward protected-main history");
+      } else if (typeof isAncestor === "function") {
+        assert.equal(isAncestor(current.components[name].establishedThroughSha || current.components[name].sourceSha, next.establishedThroughSha || next.sourceSha), true, "Component source transition is not forward protected-main history");
       }
     }
   }
