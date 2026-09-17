@@ -32,6 +32,12 @@ test("conditional CAS retries only an unrelated component update and rejects a s
   assert.throws(() => advanceProductionComponentDeploymentStateWithRetry({ client: { advance: () => { throw Object.assign(new Error("ConditionalCheckFailedException"), { code: "ConditionalCheckFailedException" }); }, read: () => advanceProductionComponentDeploymentState({ current: state, expectedGeneration: 1, lane: "NORMAL_APPLICATION", changes: { backend: component("backend", "c") } }) }, current: state, lane: "NORMAL_APPLICATION", changes: { backend: component("backend", "b") } }), /Concurrent update changed backend/);
 });
 
+test("an exact terminal retry is idempotent without another DynamoDB write", () => {
+  const state = initial(); let writes = 0;
+  const result = advanceProductionComponentDeploymentStateWithRetry({ client: { read: () => state, advance: () => { writes += 1; } }, current: state, lane: "SECURITY_INFRASTRUCTURE", changes: { security: state.components.security } });
+  assert.equal(result.alreadyCurrent, true); assert.equal(result.attempts, 0); assert.equal(writes, 0);
+});
+
 test("bootstrap is conditional-only, malformed state is rejected, and recovery regression needs authenticated identity", () => {
   const state = bootstrapProductionComponentDeploymentState({ components: initial().components, now: "2026-01-01T00:00:00.000Z" });
   assert.equal(state.generation, 1);

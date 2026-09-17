@@ -88,6 +88,12 @@ export function advanceProductionComponentDeploymentStateWithRetry({ client, cur
   assert.equal(typeof client?.read, "function"); assert.equal(typeof client?.advance, "function");
   assert.ok(Number.isSafeInteger(maxRetries) && maxRetries >= 0 && maxRetries <= 5);
   assertProductionComponentDeploymentState(current);
+  assert.ok(changes && typeof changes === "object" && Object.keys(changes).length > 0);
+  assertProductionComponentDeploymentState({ ...clone(current), components: { ...clone(current.components), ...changes } });
+  // Terminal writers are retry-safe: after a successful conditional write the
+  // exact same authenticated terminal may rerun without another state write.
+  if (Object.entries(changes).every(([name, value]) => same(current.components[name], value)))
+    return Object.freeze({ state: current, attempts: 0, reconciledUnrelatedConcurrentUpdate: false, alreadyCurrent: true });
   const expectedComponents = Object.fromEntries(Object.keys(changes || {}).map((name) => [name, clone(current.components[name])]));
   let observed = current;
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
