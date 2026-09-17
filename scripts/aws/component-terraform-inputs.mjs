@@ -27,7 +27,8 @@ export async function prepareIsolatedTerraformInputs() {
   assert(lock.includes(`version     = "${terraformExecution.providerVersion}"`) && lock.includes(`zh:${expected.provider}`), "Committed provider lock does not bind the reviewed platform archive");
   assert(source["root/versions.tf"].toString().includes(`required_version = "= ${terraformExecution.terraformVersion}"`));
   assert(source["root/versions.tf"].toString().includes(`version = "= ${terraformExecution.providerVersion}"`));
-  for (const [name, sourceName] of [["agent.mjs", "component-terraform-agent.mjs"], ["isolation.mjs", "component-terraform-isolation.mjs"]]) {
+  const runnerSources = [["agent.mjs", "component-terraform-agent.mjs"], ["component-terraform-isolation.mjs", "component-terraform-isolation.mjs"], ["component-terraform-network.mjs", "component-terraform-network.mjs"]];
+  for (const [name, sourceName] of runnerSources) {
     const file = path.join(root, "scripts/aws", sourceName); assert(fs.lstatSync(file).isFile()); source[name] = fs.readFileSync(file);
   }
   const download = async (name, version, checksum) => {
@@ -48,7 +49,7 @@ export async function prepareIsolatedTerraformInputs() {
   // Recheck source after all downloads. Production composition additionally
   // authenticates clean protected main before and after this preparation.
   for (const name of sourceNames) assert.equal(sha(fs.readFileSync(path.join(root, stack, name))), sha(source[`root/${name}`]), "Source moved during executable preparation");
-  for (const [name, sourceName] of [["agent.mjs", "component-terraform-agent.mjs"], ["isolation.mjs", "component-terraform-isolation.mjs"]]) {
+  for (const [name, sourceName] of runnerSources) {
     assert.equal(sha(fs.readFileSync(path.join(root, "scripts/aws", sourceName))), sha(source[name]), "Runner source moved during executable preparation");
   }
   const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-component-terraform-inputs-")));

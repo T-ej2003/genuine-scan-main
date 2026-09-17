@@ -545,3 +545,21 @@ consume the first reservation, or be rejected by another active controller's
 fence. Regression coverage proves absent and installed inspections write neither
 IAM nor S3, while an attempted installation takeover by that same fresh reader
 still fails until the existing session is safely expired and freshly approved.
+
+### Isolated orchestration checkpoint
+
+The container agent and host stdio runner now implement fixed prepare/apply
+operations with backend and pre-apply approval barriers. Scoped credentials cross
+only the private input pipe, never Docker arguments, host child environment,
+mounted files or evidence. The runner uses a local Unix Docker endpoint, an empty
+private Docker client configuration, a uniquely named disposable container, and
+exact-container removal plus absence readback on success and failure.
+
+All 59 isolation/transport/orchestration tests pass, including real container
+negative probes and the real pinned Terraform/provider backend-disabled
+validation. Prepare/apply orchestration tests deliberately substitute a simulated
+Terraform executable through an in-process test adapter: these demonstrate the
+container protocol and barriers, not live AWS plan/apply behavior. No production
+plan/apply was executed. Production MFA/approval/state preflight composition and
+replacement of the old infrastructure activation entry point remain unfinished;
+the runner is not yet exposed through that production entry point.
