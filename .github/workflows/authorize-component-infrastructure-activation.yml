@@ -5,9 +5,18 @@ run-name: Authorize component infrastructure plan ${{ inputs.plan_sha256 }}
   pull_request:
     paths:
       - infra/aws/terraform/production-component-deployment-state/**
-      - scripts/aws/component-infrastructure-activation.mjs
-      - scripts/tests/component-infrastructure-activation.test.mjs
-      - .github/workflows/authorize-component-infrastructure-activation.yml
+      - scripts/aws/component-*.mjs
+      - scripts/tests/component-*.test.mjs
+      - scripts/tests/helpers/component-bootstrap-fixture.mjs
+      - scripts/aws/production-credential-source-contract.mjs
+      - scripts/tests/production-credential-source-contract.test.mjs
+      - scripts/security/production-interactive-mfa-provider.mjs
+      - scripts/aws/iam-policy-document.mjs
+      - scripts/aws/package-production-green-stage-b-broker.mjs
+      - scripts/aws/stage-b-artifact-contract.mjs
+      - .github/workflows/*component*.yml
+      - package.json
+      - package-lock.json
   workflow_dispatch:
     inputs:
       source_sha: {description: Exact protected-main SHA, required: true, type: string}
@@ -30,13 +39,14 @@ jobs:
         with: {persist-credentials: false}
       - uses: actions/setup-node@v6
         with: {node-version: 24}
-      - uses: hashicorp/setup-terraform@v3
-        with: {terraform_version: 1.15.8, terraform_wrapper: false}
-      - run: node --test scripts/tests/component-infrastructure-activation.test.mjs
-      - run: |
-          terraform -chdir=infra/aws/terraform/production-component-deployment-state fmt -check
-          terraform -chdir=infra/aws/terraform/production-component-deployment-state init -backend=false -input=false -lockfile=readonly
-          terraform -chdir=infra/aws/terraform/production-component-deployment-state validate
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm ci --ignore-scripts --no-audit --no-fund --prefix infra/aws/terraform/production-component-deployment-state/broker-package
+      - name: Obtain the reviewed immutable isolation image
+        run: docker pull docker.io/library/node@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d
+      - name: Component contracts and credential-isolated backend-disabled Terraform validation
+        env:
+          COMPONENT_CONTAINER_TESTS: '1'
+        run: node --test scripts/tests/component-*.test.mjs scripts/tests/production-credential-source-contract.test.mjs
   authorize:
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     environment: production-component-infrastructure-activation

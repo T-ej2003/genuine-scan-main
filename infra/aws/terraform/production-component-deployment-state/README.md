@@ -1,203 +1,208 @@
-# Component deployment state infrastructure installation
+# Component deployment-state installation
 
-This is a new, isolated production stack, not an application release. It owns
-exactly six resources: one DynamoDB table, two IAM roles, their two inline
-policies, and one inline terminal-state policy on the existing release role.
-It does not own ECS, RDS, GitHub environments, the OIDC provider or the state bucket.
+This is source-only work in progress. Do not activate infrastructure from an
+unmerged checkpoint. First-bootstrap execution and isolated Terraform execution
+must pass their final gates before this installation procedure is operational.
+Historical development findings live in [the review log](../../../../documents/ops/COMPONENT_INSTALLATION_REVIEW.md); they are not
+alternative supported commands. Recovery provenance is in [the recovery record](../../../../documents/ops/COMPONENT_INSTALLATION_RECOVERY.md).
 
-## State ownership
+## Ownership
 
-`state-backend-contract.json` is authoritative. Following the publisher and
-reconciler roots, use the existing bucket
-`mscqr-production-terraform-state-368992683803-eu-west-2`, unique key
-`mscqr/production/component-deployment-state/terraform.tfstate`, region
-`eu-west-2`, account `368992683803`, workspace `default`, encryption and S3 native
-`use_lockfile=true`. Terraform 1.15.8 is the installation tool version; the
-configuration requires at least 1.10 for native locking. No DynamoDB lock table.
+| Owner | Exact scope |
+| --- | --- |
+| Initial identity bootstrap | Narrow permanent session identities, fixed broker execution role/policy, exact broker package/configuration and published versions |
+| Guarded broker | Two component roles and three inline policies; source-owned trust/policy documents only |
+| Terraform | `aws_dynamodb_table.component_deployment_state` only |
+| Normal controller | Explicit approval authentication, scoped session issuance, fixed broker invocation |
+| Cleanup controller | Fresh weaker cleanup session, durable archive discovery, exact readback and closure |
 
-Before first installation, absence of this exact state object is expected and
-does not require manual state creation. After authorized first apply, Terraform's
-remote state owns this stack. Existing state or a lock blocks this initial-only
-procedure: investigate read-only, never import, replace or reset automatically.
-Subsequent maintenance requires a separately reviewed state-bound plan; this
-installer cannot be used as an update command.
+The component IAM targets are `mscqr-production-normal-deployer`,
+`mscqr-production-component-state-bootstrap`, and only
+`MSCQRProductionComponentStateTerminalWriter` on the existing
+`mscqr-production-release-deployer`. No Terraform-managed IAM resources remain.
+The existing release role's other legitimate policies are not owned here.
 
-Local-state production apply, other stacks' keys, workspace overrides, state
-push, state deletion, migration and force unlock are prohibited. A stale lock or
-partial installation requires a separately approved recovery after proving the
-writer is inactive. Never delete the permanent initial-activation attempt record.
+IAM resource scoping does not constrain replacement policy/trust bytes. Therefore
+the Terraform executor never receives IAM document-writing authority. The broker
+derives all such bytes from its protected-source package. The normal installer
+cannot replace broker code/configuration/authority or pass its execution role.
+The broker cannot modify its own authority. Future `BROKER_CHANGE` and
+`IDENTITY_CHANGE` transitions require separate governance; initial bootstrap is
+not a generic updater.
 
-## Before installation: explicit administration boundaries
+## Authoritative remote state
 
-1. Merge this infrastructure PR. Do not run installation from the PR branch.
-2. A repository administrator configures the three environments in
-   `github-environment-contract.json`: `production-normal-deploy`,
-   `production-component-state-bootstrap`, and
-   `production-component-infrastructure-activation`. In Settings → Environments,
-   select **Selected branches and tags**, add exactly **branch main** (no tags),
-   require exactly User **T-ej2003** (GitHub ID `183396573`), allow self-review
-   (`prevent_self_review=false`), and disable administrator bypass. Remove other
-   branch/tag rules. MSCQR currently has one authorized production operator and
-   reviewer: T-ej2003 may initiate and explicitly approve the same run. This does
-   not authorize automatic approval or administrator bypass. If required-reviewer
-   protection is unavailable, stop rather than remove the approval gate.
-3. Keep the existing default repository OIDC subject configuration. Normal trust
-   remains `repo:T-ej2003/genuine-scan-main:environment:production-normal-deploy`;
-   bootstrap trust remains
-   `repo:T-ej2003/genuine-scan-main:environment:production-component-state-bootstrap`.
-   Both audiences remain `sts.amazonaws.com`. The authorization workflow has no
-   AWS role and no OIDC token permission. No static AWS credentials are added.
-4. Authenticate an MFA-backed, non-root `mscqr-production-release-deployer`
-   session through the existing operator path. **Existing permissions are not
-   presumed sufficient.** This role's existing source contracts deliberately
-   restrict IAM creation. A separately authorized one-time privilege bootstrap
-   is necessary if its policy/boundary does not permit this installation. Stop at
-   that boundary; this PR does not change the release role's general privileges,
-   reuse the unrelated reconciler bootstrap role, or grant AdministratorAccess.
-   Any required permission transition must be separately reviewed before planning.
+`state-backend-contract.json` fixes:
 
-### Human operator provenance
+- Account: `368992683803`; region: `eu-west-2`; workspace: `default`.
+- Existing S3 bucket: `mscqr-production-terraform-state-368992683803-eu-west-2`.
+- Unique state key: `mscqr/production/component-deployment-state/terraform.tfstate`.
+- Encryption enabled; native S3 locking with `use_lockfile = true`.
+- Lock: exact state key plus `.tflock`.
+- Write-once apply reservation: exact state key plus `.initial-activation-attempt`.
 
-An assumed-role ARN does **not** prove MFA: this same role also permits GitHub
-OIDC. The installer resolves the named release profile once with AWS CLI v2
-`configure export-credentials`, keeps those credentials only in memory, and
-authenticates their exact issuance before any Terraform initialization or plan.
-It uses the repository's existing **administrator audit** boundary: the `default`
-profile must authenticate as account `368992683803` root and is used only for
-GetCallerIdentity and CloudTrail LookupEvents. It never reaches Terraform or S3
-writes. This is one-time installation audit access, not a normal-deployment
-dependency; the release role is not granted CloudTrail permissions.
+Absence of state before the authorized first installation is expected. Terraform
+creates its first remote state through that governed operation; no operator
+manually creates/imports state. Subsequent ownership belongs exclusively to this
+remote backend. No local production state, state-key reuse, force state push,
+state deletion, arbitrary workspace, or force unlock is supported. An ambiguous
+first apply must be reconciled through separately reviewed recovery, not repeated.
 
-CloudTrail must prove an `AssumeRole` by the exact bootstrap IAM operator with
-`mfaAuthenticated=true`, binding the issued access-key ID, assumed-role principal
-ID/ARN, target role and expiration to the current release session. The installer
-reads regional and global STS event locations (`eu-west-2` and `us-east-1`), with
-bounded pagination. The issuance must be less than one hour old and the session
-must have at least ten minutes remaining. Missing/delayed events, access denial,
-OIDC, role chaining, forged local markers and ambiguous evidence fail closed:
-wait for CloudTrail delivery or reauthenticate and prepare again; never bypass.
+## Solo-operator approval
 
-All Terraform/AWS executor children use that exact authenticated in-memory
-session, not a profile that could refresh between verification and apply.
-Git/GitHub do not receive it. The private preparation binds a sanitized issuance
-event ID, operator ARN and session-key hash, never credentials or raw CloudTrail
-events. Apply reauthenticates the same issuance and rejects session replacement,
-even when the replacement reuses the same role-session name. Configured AWS CLI
-endpoint overrides are disabled as well as inherited endpoint variables.
-This follows [AWS STS CloudTrail issuance semantics](https://docs.aws.amazon.com/IAM/latest/UserGuide/cloudtrail-integration.html).
+MSCQR currently has one authorized operator/reviewer: User `T-ej2003`, GitHub ID
+`183396573`. Each component approval environment requires that exact identity,
+`prevent_self_review=false`, `can_admins_bypass=false`, and only branch `main`.
+There is no automatic self-authorization and no independent second reviewer.
+This exception does not change Stage-A/Stage-B or other governance domains.
 
-The executor needs exact state Get/Put and bucket-location/versioning/prefix-list
-and prefix-scoped ListBucketVersions access (historical state blocks fresh install),
-Get/Put/Delete on this key's `.tflock` only, and conditional Put on the exact
-`.initial-activation-attempt` object. It must not delete state or the attempt.
-Its provider permissions must cover only the six reviewed resources and their
-readback (including existing release-role read). Do not infer approval to add
-permissions from an AccessDenied error. Root may authorize a separately reviewed
-one-time IAM bootstrap if required, but must not run Terraform. There is no
-recurring root dependency in normal deployments.
+The separate installation environment is
+`production-component-infrastructure-install-permission`. Initial identity
+bootstrap uses `production-component-installation-identity-bootstrap`.
+The normal deployment, component-state bootstrap and table-activation environments
+retain their exact contracts. Never broaden an OIDC subject to bypass approval.
 
-## Prepare, review, apply once
+## Exceptional first identity bootstrap
 
-Use a clean checkout of exact current protected main. The installer strips
-credential/config/endpoint/Terraform redirects using the canonical production
-child-environment safelist and pins the existing non-root profile. Only explicitly
-safe process variables survive; GitHub tokens reach only the GitHub CLI, never
-AWS or Terraform. Unknown future environment variables are not inherited.
-Do not export AWS access keys or TF variables. Authenticate GitHub CLI with
-repository read and environment-read access; expired credentials fail closed.
+After merge, use clean protected main and dispatch
+`authorize-component-installation-identity-bootstrap.yml` with the exact source
+SHA and a new UUIDv4 transition. T-ej2003 must approve its dedicated environment.
+The workflow only builds source-bound approval evidence; it has no AWS credentials.
+After its first-attempt run succeeds, the separately reviewed bootstrap command is:
 
 ```sh
-activation_dir=$(mktemp -d /private/tmp/mscqr-component-install.XXXXXX)
-node scripts/aws/component-infrastructure-activation.mjs prepare "$activation_dir"
+node scripts/aws/component-identity-bootstrap-cli.mjs execute APPROVED_RUN_ID TRANSITION_UUID
 ```
 
-Preparation checks the environments, caller and missing state, initializes the
-fixed backend, validates, saves `activation.tfplan`, renders that exact plan,
-requires six creates and no drift, and writes private `preparation.json`.
-Inspect `terraform show "$activation_dir/activation.tfplan"` with the same
-Terraform version. Review all resource values against protected source, not just
-the resource count. The preparation binds source, account/region/root/backend,
-ABSENT state identity, exact operator session ARN/issuance and plan hash. Keep plan bytes
-private and unchanged; do not commit/upload a plan containing private values.
+The command reauthenticates GitHub approval and the deterministic broker package
+before loading the existing exact administrator. This is the explicitly approved
+first-bootstrap exception, **not an IAM policy restriction on root**. Its adapter
+performs only the fixed source transaction. Administrative credentials remain in
+that process's SDK clients and are not returned, archived, forwarded to Terraform
+or Lambda, or used by the normal controllers.
 
-Dispatch **Authorize component infrastructure activation** on main with the
-printed `sourceSha`, `planSha256`, and `preparationSha256`. T-ej2003 must
-inspect the exact private plan/preparation and explicitly approve
-only those hashes. No AWS mutation occurs in this authorization workflow.
+Fresh hidden MFA authenticates the exact bootstrap operator through the existing
+release role solely as human provenance. Signed STS identity and unique CloudTrail
+issuance bind its 900-second expiry to the approved bootstrap. Root
+`GetSessionToken` is not used. The non-secret human proof is archived with the
+fixed CAS bootstrap record. The five exact execution identities and three fixed
+broker versions must pass complete readback before closure.
 
-After approval and successful workflow completion, within 30 minutes of dispatch:
+An existing or incomplete reservation is never stolen based on elapsed time.
+Ambiguous accepted writes are read back within the owning transaction; a crashed
+administrative transaction remains fail-closed and requires separately reviewed
+reconciliation. Human-session expiry is not claimed to revoke root authority.
+Do not delete its journal or replay initial bootstrap to update existing targets.
+
+## Normal IAM installation after trust-anchor bootstrap
+
+Use a clean current protected-main checkout after merge. Dispatch the exact
+`authorize-component-iam-installation.yml` workflow with `source_sha` and a UUIDv4
+`transition_id`. T-ej2003 explicitly approves its environment request. The fixed
+reusable publisher authenticates source and approval before acquiring OIDC
+credentials, then invokes only broker version 3 to archive the authorization.
+Record the successful first-attempt run ID.
+
+Future operator commands, after prerequisites are installed and verified:
 
 ```sh
-node scripts/aws/component-infrastructure-activation.mjs apply "$activation_dir" APPROVED_RUN_ID
+node scripts/aws/component-iam-installation.mjs install APPROVED_RUN_ID TRANSITION_UUID
+node scripts/aws/component-iam-installation.mjs inspect APPROVED_RUN_ID TRANSITION_UUID
+node scripts/aws/component-iam-installation.mjs close TRANSITION_UUID
 ```
 
-The command authenticates the successful exact-main workflow run, first attempt,
-actual approval by the authorized sole operator, current environment protections and downloaded
-authorization artifact. It rechecks source, caller, backend, missing state,
-resource scope and hashes. Any movement requires a fresh preparation/review;
-never regenerate the plan under an old approval.
+These are the only normal-controller modes. `activate`, `recover`, `renew`,
+`prepare-table` and `apply-table` administrator routes have been deleted. There
+is no root/default-profile or release-deployer mutation adapter in this controller.
 
-Before applying it conditionally creates the permanent exact-key attempt record
-(`If-None-Match: *`). Concurrent installation attempts cannot both pass this
-reservation. Terraform also acquires its native state lock and checks saved-plan
-state freshness. It applies the **saved binary once**, then requires a fresh
-readback plan to be no-op. That readback is never applied.
+Installation authenticates the completed publisher run, explicit reviewer,
+environment, exact source and audit archive before MFA issuance. It then obtains
+a 900-second human session and exact installation-role session. The broker
+independently checks its durable archive, signed STS caller proof, unique
+MFA-backed CloudTrail issuance and actual AWS expiration before its exact writes.
+Local JSON and an assumed-role ARN alone are never sufficient.
 
-An ambiguous reservation/apply result, partial failure, or failed verification
-stops for read-only diagnosis and separately reviewed recovery. Do not retry the
-apply, delete its attempt record or force-unlock. Preserve the private directory
-and authorization run URL for the audit trail.
+## Interruption and closure
 
-## After verified installation
+The fixed broker classifies exact live IAM as ABSENT/EXPECTED/DIFFERENT. It never
+overwrites DIFFERENT state. Ambiguous responses resolve through readback; retries
+do not blindly repeat IAM mutations. A verified installation must still match live
+state on idempotent continuation.
 
-Separately authorize **Bootstrap Production Component Deployment State** from
-current main using its protected environment. It binds live ECS/ECR identities
-and conditionally creates the component item once; unknown database/security
-identities remain unproven. Table creation is not component bootstrap. Verify
-the resulting state against live production without any ECS update.
+The durable session record is coordination, not credential authority. Replacement
+requires authenticated old STS expiry plus the source-defined safety margin,
+fresh approval, a new session issued after fencing, live reconciliation and CAS.
+No lease-age, PID, host-death or unsigned-marker takeover exists. A failed CLI
+does not imply the previous session is expired. Do not immediately issue another
+controller expecting it to take ownership.
 
-Do not dispatch Normal Production Deployment merely to test credentials: its
-classification job can reconcile interrupted releases. Use a separately reviewed
-read-only OIDC/state-read preflight before allowing the deployment workflow.
-Accumulated security/database changes must still route to their stronger lane.
+Fresh approval for the same source/transition goes through the same authorization
+workflow and installation command. The broker retains authenticated approval
+lineage, finishes only missing exact writes, and cannot reopen a closed transition.
+Source changes require new governance, hashes and approvals; they never inherit
+an old transition silently.
 
-## Source-only checks
+Cleanup requires only the transition ID and a fresh exact cleanup-role session.
+Broker version 2 exposes read-only `CLEANUP_CONTEXT` at its fixed evidence location
+to discover the original source and authorization hash. No retained GitHub artifact
+or caller-selected file/key is required. `CLOSE` still authenticates signed human
+session proof and live IAM before writing durable closure. It does not delete the
+permanent bootstrap identities, fixed broker, component roles or table, and cannot
+reinstall or modify IAM. STS expiration removes the old controller's usable
+credentials; closure fences the broker transition permanently.
+
+## Remaining table and deployment boundaries
+
+Table preparation/application remains separately governed by exact protected SHA,
+backend/workspace identity, authenticated IAM receipt and exact saved-plan SHA256.
+A regenerated plan cannot reuse approval. The activation entry point now invokes
+only the credential-isolated container runner; the host Terraform/root-profile
+adapter has been removed. After the IAM installation is verified, create a fresh
+owner-only directory outside the checkout and use:
 
 ```sh
-terraform -chdir=infra/aws/terraform/production-component-deployment-state fmt -check
-terraform -chdir=infra/aws/terraform/production-component-deployment-state init -backend=false -lockfile=readonly
-terraform -chdir=infra/aws/terraform/production-component-deployment-state validate
-node --test scripts/tests/component-infrastructure-activation.test.mjs
+node scripts/aws/component-infrastructure-activation.mjs prepare PRIVATE_DIRECTORY TRANSITION_UUID
 ```
 
-No live init, plan, apply, environment mutation or bootstrap is part of PR validation.
-Native lock permissions follow [HashiCorp's S3 backend contract](https://developer.hashicorp.com/terraform/language/backend/s3).
-The one-time reservation follows [S3 conditional writes](https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-writes.html).
+Preparation authenticates all three deployment environments, current protected
+source, the closed durable IAM authorization/receipt and live IAM documents, absent remote state/history,
+and absent table. Hidden MFA issues the scoped Terraform session. Terraform runs
+with no network namespace access or host credential mounts; a fixed TLS relay
+permits only the required AWS endpoints. The reviewed Terraform/provider downloads
+are hash checked, the committed provider lock is read-only, and no host plugin
+cache or CLI override is accepted.
 
-## Installation-path review
+The historical IAM approval may have expired before preparation. Its fixed AWS
+archive and closure remain provenance, never mutation authority: broker version 1
+discovers the exact transition, requires a fully verified closure and receipt,
+then authenticates the fresh scoped Terraform session. Closure continues to reject
+`INSTALL`, `INSPECT`, and installation-session proof. Terraform apply still needs
+its separate fresh environment-gated saved-plan approval. Saved-plan freshness is
+measured from GitHub's authenticated successful-run completion (`updated_at`), not
+workflow dispatch time; the completion timestamp is re-read unchanged with the run.
 
-The source review found and closed these direct failure classes before opening
-the PR: resource-count-only plan acceptance (now exact provider/trust/policy/name
-checks); unmanaged live resource collisions (fresh absence checks before plan
-and apply); consumed approval replay/concurrent first apply (permanent conditional
-reservation plus Terraform locking); historical deleted state mistaken for new
-state (version-history check); and PR validation sharing production concurrency
-(separate PR-test group). Focused mocked tests cover exact saved-plan execution,
-missing approval, source/hash movement, existing state and consumed reservation.
-These are source/local proofs, not a production activation result.
+Review the saved `activation.tfplan`, `preparation.json` and returned hashes.
+Dispatch `authorize-component-infrastructure-activation.yml` with their exact
+source, plan and preparation hashes, then explicitly approve its environment.
+Only a separately authorized apply execution may run:
 
-## Solo-operator governance boundary
+```sh
+node scripts/aws/component-infrastructure-activation.mjs apply PRIVATE_DIRECTORY ACTIVATION_APPROVAL_RUN_ID
+```
 
-The solo-operator exception applies only to the three environments named in
-`github-environment-contract.json`. No second human identity is required. MFA
-operator provenance, protected-main/source binding, exact saved-plan/state/hash
-bindings, account/region restrictions, backend locking and one-time reservation
-remain mandatory. GitHub approval history and the source-bound authorization
-artifact retain the audit trail. No code automatically approves a deployment.
+Apply obtains a fresh scoped session and reauthenticates the exact GitHub approval,
+source, plan, backend and live IAM receipt at the isolated pre-apply barrier.
+A conditional write reserves the fixed activation-attempt object before the
+exact saved plan may execute. Ambiguous reservation or apply is not retried.
+The executor verifies a no-change readback plan before reporting success. No
+credentials are written to the plan directory, evidence or child environment.
 
-[GitHub Prevent self-review](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments)
-would prevent the sole initiator from approving even as the required reviewer;
-therefore it must be disabled for these three environments. All other protection
-requirements remain enabled. Historical Stage-A/Stage-B maker-checker contracts
-are unchanged. If MSCQR later adds authorized operators, review the explicit
-identity contract rather than silently accepting additional reviewers.
+After verified infrastructure installation, component-state bootstrap is a separate
+explicitly approved operation. Creating a table is not bootstrapping its contents.
+Normal-deployer OIDC/read-only preflight and accumulated-release classification
+follow; installation never dispatches an application deployment. Security/database
+changes cannot be routed through the normal application lane to bypass their gates.
+
+CTO recommendation: preserve this small ownership split and durable evidence. Do
+not add a reusable privileged installer framework. Add future identity/broker
+changes only as separately reviewed transitions when actually needed.

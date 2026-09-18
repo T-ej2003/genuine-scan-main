@@ -291,6 +291,7 @@ test("production image publisher workflows select explicit OIDC or the documente
 
 test("every GitHub workflow credential root is classified by its authenticated mode", () => {
   const oidcWorkflows = [
+    ".github/workflows/component-iam-authorization-publisher.yml",
     ".github/workflows/prepare-production-app-only-verifier-operation.yml",
     ".github/workflows/prepare-production-app-only-deployment-operation.yml",
     ".github/workflows/provision-production-app-only-deployer-operation.yml",
@@ -419,10 +420,16 @@ test("every direct AWS source in scripts/aws has an explicit audited credential 
   const walk = (directory) => fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => entry.isDirectory() ? walk(`${directory}/${entry.name}`) : [`${directory}/${entry.name}`]);
   const direct = walk("scripts/aws").filter((file) => /\.(mjs|sh)$/.test(file) && /(?:execFileSync|execFile|spawnSync|spawn|run)\(["']aws["']|\baws\s+(?:sts|kms|ecr|ecs|iam|s3|secretsmanager|rds|cloudtrail)/.test(fs.readFileSync(file, "utf8"))).sort();
   const classified = [
+    "scripts/aws/component-bootstrap-operator.mjs",
+    "scripts/aws/component-identity-bootstrap-cli.mjs",
+    "scripts/aws/component-installation-session.mjs",
     "scripts/aws/apply-ecr-repository-controls.sh", "scripts/aws/apply-production-full-rls-release.mjs", "scripts/aws/deploy-ecs-service.sh", "scripts/aws/discover-staging-endpoints.mjs", "scripts/aws/prepare-production-backend-failed-recovery-evidence.mjs", "scripts/aws/production-cutover-production-adapters.mjs", "scripts/aws/production-dual-slot-rebaseline-contract.mjs", "scripts/aws/production-identity-adapters.mjs", "scripts/aws/production-initial-activation-lifecycle.mjs", "scripts/aws/publish-ecs-images.sh", "scripts/aws/reconcile-production-stage-a-temporary-kms-capability.mjs", "scripts/aws/recover-production-backend-health.mjs", "scripts/aws/recover-production-green-stage-a-root-drop-orphan.mjs", "scripts/aws/rollback-ecs-service.sh", "scripts/aws/staging-database-role-credentials.mjs", "scripts/aws/verify-production-dependency-closure.mjs", "scripts/aws/verify-production-rotation-via-ecs-exec.mjs",
   ].sort();
   assert.deepEqual(direct, classified);
   const boundaries = {
+    "scripts/aws/component-bootstrap-operator.mjs": /createProductionAwsCredentialEnvironment/,
+    "scripts/aws/component-identity-bootstrap-cli.mjs": /createProductionAwsCredentialEnvironment/,
+    "scripts/aws/component-installation-session.mjs": /createProductionAwsCredentialEnvironment/,
     "scripts/aws/apply-ecr-repository-controls.sh": /configure_production_aws_credential_source/,
     "scripts/aws/apply-production-full-rls-release.mjs": /createProductionAwsCredentialEnvironment/,
     "scripts/aws/deploy-ecs-service.sh": /configure_production_aws_credential_source/,

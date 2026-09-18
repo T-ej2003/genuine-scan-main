@@ -1,0 +1,713 @@
+# Component installation boundary review log — source only
+
+## Current pre-PR status
+
+The earlier sections below are chronological recovery/development evidence, not
+current operator instructions. In particular, their pending root-controller,
+local-Terraform, bootstrap and integration statements have been superseded.
+The supported flow is the component root README.
+
+The source implementation now contains the separately approved first-bootstrap
+transaction, fixed published broker, scoped installation/cleanup sessions,
+artifact-independent closure, isolated Terraform execution and exact saved-plan
+approval/reservation. The first-bootstrap administrative exception is intentionally
+not advertised as AWS-expiring root authority or automatic crash takeover: an
+interrupted administrative reservation is a fail-closed terminal state requiring
+separate reconciliation. Post-bootstrap controller takeover uses authenticated
+AWS session expiry and fresh approval, never lease age.
+
+The bounded final source review covered capability composition, fixed broker
+resource policies/configuration, bootstrap-only PassRole, credential sources,
+session/approval substitution, expiry/CAS recovery, immutable evidence, saved-plan
+binding, container/relay isolation and provider substitution. Reproduced defects
+were corrected before push: read-only inspection consuming mutation ownership,
+Docker proxy injection, and implicit Terraform retry configuration. No unresolved
+P0/P1/P2 finding remains in that bounded local review. This is not external review.
+
+Final local component validation includes all 599 focused/credential tests with
+the container runtime gate enabled, clean-source double package build, and actual
+pinned Terraform fmt/backend-disabled readonly init/validate. ESLint, workflow,
+document, fixture-secret, baseline-secret, branch-secret, security guardrails and
+RLS freshness checks pass. The security-scope script checks unstaged files only;
+all component source/tests were additionally linted explicitly. AWS read-only
+simulation could not authenticate the local release session: static policy tests
+pass, but live/effective permission simulation remains unproven. The exact
+`lambda:SourceFunctionArn` restriction remains intact.
+
+Final source capability pair counts are 79 broker, 28 Terraform, one each for
+installation/cleanup/authorization sessions, and 68 exceptional-bootstrap pairs.
+These replace the historical pre-split missing-capability count, not broaden the
+old release role. Identity-set digest:
+`95b1712a10c127205368f28cf474202bb7ccb9c700908baf1d72ed2ed1d1bdc4`.
+Package hashes are source-SHA dependent and must be rebuilt/authenticated from
+the eventual merged protected source; a local fixture hash is not production
+authorization. PR CI and exact-head external review are still required.
+
+Recommendation: keep future broker/identity changes separately governed rather
+than turning initial bootstrap into a reusable administrator. Production readiness
+still requires the separately authorized live bootstrap and readback; this PR
+does not perform or certify those operations.
+
+## Terraform isolation boundary checkpoint
+
+The selected local boundary is a digest-pinned official Node container with
+`--network=none`, read-only root, all capabilities dropped, no-new-privileges,
+non-root UID, bounded processes/memory/CPU, and ephemeral scratch tmpfs. Its only
+host mount is the newly assembled public source/package input directory, read-only;
+there are no credential, home, Keychain, Docker/control socket or project mounts.
+
+A real Docker runtime probe passed on this host: host AWS-profile/marker variables
+were absent; credential, Keychain and control-socket paths were absent; capability
+and no-new-privileges checks passed; source writes failed; scratch writes worked;
+metadata, host gateway and direct public network connections failed. No AWS request
+was performed. This tests the container boundary, **not yet Terraform integration**.
+
+The planned network path is a stdio TLS-byte relay to five fixed AWS endpoints.
+It does not terminate TLS, load credentials, execute commands or expose a host
+listening socket. Host-side validation rejects alternate services/ports, private,
+metadata and reserved DNS answers. The 34 offline transport/configuration tests
+pass. Exact Terraform 1.15.8 and AWS provider 6.65.0 archive digests were obtained
+from the official HashiCorp release checksums; the existing provider lock includes
+those platform ZIP digests. Input assembly, lock enforcement, the in-container
+agent and activation orchestration remain unfinished and must be validated before
+the unsafe local Terraform production route can be replaced and this branch pushed.
+
+## Runtime readback correction
+
+### Issuance propagation integration
+
+Normal installation and cleanup now poll fixed read-only session-proof operations
+before their single mutation-capable invocation. The same in-memory 900-second
+session is retained while CloudTrail issuance becomes visible. Proof probes still
+authenticate the fixed broker, durable authorization, signed STS identity and MFA
+issuance; they cannot claim ownership or write IAM/S3. Polling lasts at most five
+minutes and reserves two minutes before credential expiry. Missing/invalid proof
+at that boundary stops without invoking INSTALL/CLOSE. No automatic mutation
+retry or new session issuance occurs inside the loop. The 96 directly affected
+broker/archive/session/configuration tests pass offline.
+
+The recovered runtime fixture incorrectly returned a runtime ARN from
+`GetRuntimeManagementConfig` in `FunctionUpdate` mode. The
+[AWS API contract](https://docs.aws.amazon.com/lambda/latest/api/API_GetRuntimeManagementConfig.html)
+returns null there. Runtime identity is now authenticated from
+`GetFunction.Configuration.RuntimeVersionConfig` and compared with the durable
+bootstrap record; the separate management call must still prove FunctionUpdate.
+Null/omitted control ARN is accepted, missing resolved runtime identity is not.
+The configuration and fixed-broker suites pass 59 offline tests. Bootstrap and
+Terraform execution integration remain unfinished; this is not an activation gate.
+
+## Fixed broker bootstrap transaction checkpoint
+
+### Identity transaction composition checkpoint
+
+The internal first-bootstrap transaction now composes exact creation/readback of
+the five execution identities with the fixed broker publication transaction.
+Its fixed S3 journal is conditionally reserved before writes, and closure is
+conditional on the owned ETag plus full IAM/broker readback. Accepted-but-lost IAM
+and S3 responses are classified by live readback, not replay. Concurrent starts
+have one reservation winner. The production-shaped offline adapters exercise ten
+IAM writes, eight Lambda writes and reservation/closure; 58 focused tests pass.
+
+This checkpoint deliberately does not expose an administrative CLI. A reserved
+incomplete bootstrap has no automatic takeover; the administrative issuance and
+authenticated restart/recovery boundary remain unfinished. Do not confuse the
+normal broker's implemented STS-expiry recovery with this exceptional initial
+bootstrap. No lease age, local marker or manual S3 deletion can unlock it.
+
+The internal bootstrap transaction now creates the source-derived ZIP function,
+sets reserved concurrency and FunctionUpdate runtime management, and publishes
+the three fixed semantic versions. Publication binds both AWS RevisionId and
+CodeSha256. Only the description changes between publications; no code-update,
+alias, resource-policy, alternate-role or generic configuration API is exposed.
+AWS requires a configuration/code change between versions, as documented by
+[PublishVersion](https://docs.aws.amazon.com/lambda/latest/api/API_PublishVersion.html).
+
+Each mutation rechecks authorization and the package's current source manifest.
+Every resume reads live version/configuration inventories before choosing a
+missing write. Unknown versions, source/code/configuration drift and resource
+policies fail closed. Lost responses after each of the eight bootstrap writes
+are covered by offline readback/recovery tests with no duplicate write.
+
+This is an internal transaction, not a production-ready bootstrap CLI. Its
+authorization, exceptional bootstrap principal, identity transaction and durable
+reservation composition still need wiring. The 34 transaction tests are mocked
+AWS transport tests, not proof of live deployment permissions or final readiness.
+
+## Dedicated bootstrap approval checkpoint
+
+The first-bootstrap approval workflow is separate from normal installation. It
+has no AWS credential acquisition, OIDC permission or mutation step. Its exact
+environment requires the sole authorized User reviewer, no administrator bypass
+and exact main-only access. It constructs a clean-source package after approval
+and binds the five execution identities, trust/policy hashes, bootstrap capability
+set, three broker configurations, package/manifest, transition, source and expiry.
+
+The shared environment verifier preserves the existing installation policy and
+adds only the fixed first-bootstrap environment. The authorization suites pass
+74 offline tests, including real child-process rejection of unsupported publisher
+commands. Execution still must independently authenticate the completed GitHub
+run/artifact and archive the original approval durably before AWS writes; this
+checkpoint does not expose an executable administrative bootstrap command.
+
+The execution-side archive verifier now reuses the strict GitHub transport and
+ZIP checks used by normal installation. Bootstrap selects only its fixed workflow,
+environment and single archive member. A completed successful first-attempt run,
+exact reviewer, repository IDs, artifact SHA256, current protected source,
+transition and locally rederived package bindings are all required. There is no
+local approval path. Thirty-six archive transport tests pass across the two
+boundaries. The preceding complete focused component/credential sweep passed
+441 tests, including the clean-source package reproducibility test; this does
+not substitute for final validation once remaining execution paths are finished.
+
+Baseline: `bc6ac2ead8b750d9d99cc179d8bb321956fa7a8e`.
+Implementation remains uncommitted on
+`codex/component-infrastructure-install-permission`. No production execution,
+permission activation, plan, apply, bootstrap or deployment occurred.
+
+## Blocking findings
+
+## Implementation continuation: bootstrap-owned broker decision accepted
+
+The owner has now authorized the exact broker deployment and execution role as
+part of the first bootstrap. The decision requests below are historical and
+must not be raised again. Existing work is preserved; no production action is
+authorized by this source implementation.
+
+The implementation now includes offline-tested contracts for:
+
+- permanent installation and cleanup session roles without IAM writes or
+  broker-deployment permissions;
+- separate immutable invocation versions: installation `:1`, cleanup `:2`,
+  authorization publication `:3`, with no unqualified/alias invocation;
+- an exact authorization-publisher identity for the approved GitHub workflow,
+  so installation credentials cannot manufacture archived approval;
+- Lambda configuration/default normalization that rejects unexpected fields,
+  plus separate concurrency, signing-state and runtime checks;
+- a broker-owned, fixed-key authorization archive with conditional first write,
+  exact readback after an ambiguous result, and a distinct concurrent-CAS loser;
+- cleanup authentication from durable AWS evidence after artifact expiry;
+- a conservative expiration predicate which explicitly requires independently
+  authenticated AWS session metadata rather than an unsigned local receipt.
+
+These are **contract implementations, not a completed execution path**. They
+are not yet connected to bootstrap/controller/broker workflow execution. The
+current archive implements initial reservation, not fresh-authorization recovery.
+The old root-controller and local Terraform execution remain pending replacement.
+The final package supply chain, executable role inventory, STS issuance/fencing,
+isolation runner, workflow wiring and full lifecycle tests remain required.
+Do not treat the passing new unit tests as proof of those unimplemented paths.
+
+The publication identity must use a reusable authorization workflow that actually
+emits the bound `job_workflow_ref` OIDC claim; the previous non-reusable workflow
+does not satisfy that new trust contract. Workflow wiring must resolve this
+before any PR or execution readiness claim.
+
+Initial bootstrap may provision these trust anchors once. `BROKER_CHANGE` and
+`IDENTITY_CHANGE` are future separately governed operations, not initial
+bootstrap replay or normal controller commands. Recommendation: keep normal
+controllers invocation-only; do not add permission-management convenience APIs.
+
+### New decision: broker deployment ownership cannot belong to the session controller
+
+The one-time **identity bootstrap exception is now authorized** for source
+implementation. It resolves the administrative-identity prerequisite below;
+that earlier request is historical, not an outstanding authorization request.
+Protected main was reauthenticated at the baseline above. No live operation
+has been performed.
+
+Before defining the permanent installation-role policy, a source-derived
+counterexample exposed a further ownership decision. Moving the current
+controller's calls unchanged into an expiring session would grant that role:
+
+1. creation/replacement of `mscqr-production-component-iam-installer` code;
+2. installation of the provisioner execution role's inline capability;
+3. invocation of that function.
+
+The broker capability permits `iam:PutRolePolicy` on the existing
+`mscqr-production-release-deployer`. Its conditions bind authorization expiry
+and the exact **unqualified function ARN**, not the code hash or policy bytes.
+Replacement code running in that same function would satisfy the ARN condition
+and could write a different release-role policy. The human bootstrap operator
+already has the source-defined MFA assumption path into the release role.
+Even a short-lived controller session could therefore leave persistent expanded
+authority behind. No such policy was submitted, and no Lambda was created or
+changed: this is a static capability-composition counterexample, not a live
+exploit or an IAM simulation result.
+
+The local package/hash assertions protect the supported CLI path but do not
+restrict direct use of the resulting AWS credentials. Expiration, lease CAS,
+and the absence of direct self-policy writes do not fix this composition.
+Retain `lambda:SourceFunctionArn`; it is useful but is not code authentication.
+AWS documents its unqualified-ARN semantics in
+[Using source function ARN](https://docs.aws.amazon.com/lambda/latest/dg/permissions-source-function-arn.html).
+
+Reproduction inspected the current `temporaryInstallationPolicies()` result:
+the release-role PutRolePolicy statement has only `ArnEquals` and
+`DateLessThan` conditions, and the controller contains CreateFunction,
+UpdateFunctionCode and PutRolePolicy calls. The original five component IAM
+objects remain outside Terraform ownership.
+
+Recommended architectural decision: make the **fixed broker executable and its
+execution authority** owned by the separately governed first bootstrap, rather
+than the normal installation session. The installation session must not be
+able to replace broker code/configuration/trust or grant broker permissions.
+The fixed broker must authenticate fresh approval itself; it must not trust an
+installer-writable manifest as authorization. Future code/identity changes
+belong to a separate change transition, not initial-bootstrap replay.
+
+This expands the newly authorized identity-only bootstrap to own the exact
+broker deployment and its execution role, including any separately justified
+exact Lambda PassRole requirement. Obtain that ownership decision before
+encoding a permanent role with the unsafe combination above. All existing
+implementation is preserved. No PR, successful final validation, or resolution
+of the three preceding execution-security findings is claimed.
+
+### Administrative-session prerequisite assessment
+
+Protected main was freshly fetched and remains the baseline above. Read-only
+IAM inspection found no component-install administrative role. The existing
+human-MFA release-deployer and Stage-B publisher-bootstrap roles do not grant
+the new component executor-role/function installation authority. The app-only
+provisioner is OIDC-only and targets different, boundary-constrained roles;
+the initial-activation bootstrap is also OIDC-only and targets other stacks.
+Reusing those identities would require changing their existing governance.
+
+AWS STS does not synthesize missing authority:
+
+- `AssumeRole` session policies intersect the assumed role's existing policy;
+  they cannot grant the missing installation permissions.
+- `GetFederationToken` accepts a scope-down policy but its credentials cannot
+  make IAM API calls.
+- `GetSessionToken` has no scope-down policy parameter. Root-issued temporary
+  credentials retain root authority, even though they expire. This does not
+  implement the requested exact installation or cleanup-only capability.
+
+References: [AssumeRole](https://docs.aws.amazon.com/STS/latest/APIReference/API_AssumeRole.html),
+[GetFederationToken](https://docs.aws.amazon.com/STS/latest/APIReference/API_GetFederationToken.html),
+[GetSessionToken](https://docs.aws.amazon.com/STS/latest/APIReference/API_GetSessionToken.html).
+
+The unresolved prerequisite is how the initial narrowly scoped administrative
+and cleanup authority is provisioned. The current restriction permits the
+long-lived bootstrap principal only to issue sessions, not to create those
+missing roles/policies. No role/session was created during this assessment.
+Do not implement root temporary credentials as a substitute or repurpose an
+unrelated production role.
+
+Recommended decision: separately review an exact, one-time bootstrap of the
+component administrative and cleanup identities, before their session-only
+controller can run. Installation and cleanup sessions must remain separate;
+neither may modify its own authority. This requires an explicit exception for
+the initial identity bootstrap, not permission for the controller to use root.
+Until that decision, all three execution-security findings remain open; the
+preserved implementation must not be pushed as merge-ready. Isolation and
+archival cleanup are not claimed implemented or validated by this assessment.
+
+### P1-1: administrative authority is not fenced after controller loss
+
+The controller authenticates the existing root profile and reserves a durable
+S3 lease. SIGKILL/host loss can interrupt it between the final lease check and
+an IAM/Lambda call. Root authority has no authenticated expiry in this contract.
+Deleting or stealing the lease cannot revoke that authority; S3 conditional
+writes do not condition IAM requests. Retaining the lease fails closed, but
+provides no bounded canonical recovery. The orphan-lease regression proves that
+a second controller is rejected without mutation; it does not prove recovery.
+
+Decision needed: an AWS-enforced, authenticated administrative-session lifetime
+or revocation boundary, with outstanding-request reconciliation before takeover.
+Do not substitute a lease-age threshold or an unsigned operator marker.
+
+### P1-2: Terraform's local process can reach administrator credentials
+
+Terraform receives only a scoped in-memory session, but still runs as the same
+OS user with the same credential home as administrator audit/bootstrap. A
+malicious provider can bypass environment selection and read those credentials
+or use their local credential provider. The policy test proving no IAM writes
+in the Terraform role does not prove execution isolation.
+
+Decision needed: a credential-isolated execution sandbox or remote executor
+that receives only the scoped table/backend session and cannot access the
+administrator home, keychain, process credentials or host control socket.
+Changing HOME alone is not an adequate fix.
+
+### P2-1: cleanup depends on retained GitHub artifacts
+
+Cleanup permits authorization expiry but still downloads the original GitHub
+artifact. Its 90-day retention can prevent exact-policy removal afterward.
+Permissions have expired, but durable closure cannot be completed. Resolve with
+cleanup-only use of authenticated fixed-key AWS archival evidence and original
+approval bindings; never accept a caller-selected local authorization file.
+
+## Direct sibling repairs already implemented
+
+- Terraform owns one DynamoDB table; the five IAM objects are exclusively owned
+  by the fixed-code Lambda broker.
+- Public broker input selects only INSTALL/INSPECT and a transition ID, never
+  role names, policy names or IAM documents.
+- Exact-source documents, package/configuration, capability hashes, approval,
+  expiry and conditional journals are checked. Neither scoped executor policy
+  permits provisioner self-policy mutation or IAM PassRole.
+- Explicit exact-prefix S3 listing proves initial receipt absence; AccessDenied
+  is never interpreted as absence.
+- AWS SDK retries are disabled so ambiguous writes return to readback recovery.
+- Verified receipts cannot reinstall a subsequently removed policy.
+- Same-source fresh approval renews closed/expired capabilities after cleanup
+  and function quiescence. Broker journal rebinding uses CAS before further
+  target writes; verified objects are not rewritten.
+- Table wrappers attempt exact-capability cleanup on downstream failure and
+  after apply. Ordinary signal cleanup is best effort, not SIGKILL recovery.
+- Terraform rechecks extra inline/managed policies on the two new roles.
+
+## Validation meaning
+
+Focused offline tests, lint, document/workflow guards and backend-disabled
+Terraform validation exercise source contracts, not production authority.
+Read-only simulation allowed 27 Terraform pairs and denied 21 selected negative
+cases. Provisioner simulation was inconclusive under the required exact Lambda
+context; it must not be relabeled PASS or fixed by weakening that restriction.
+The later receipt-listing pair has not been simulated.
+
+No commit, push, PR, CI result or external review is asserted. These findings
+must be resolved before declaring the installation lifecycle merge-ready.
+
+Recommendation: keep the IAM/Terraform split, and complete the two execution
+isolation boundaries before adding any installation convenience features.
+
+## Bootstrap-owned broker integration checkpoint
+
+The fixed broker entry point now authenticates the bootstrap closure, published
+package/configuration/runtime, and all five execution identities before accepting
+an authorization or installation request. Execution identity readback checks
+exact names, ARNs, paths, session limits, trust, tags, boundary absence, attached
+policy absence, and inline policy inventory/document. Paginated inventories are
+consumed with bounded, non-repeating markers; incomplete inventories and access
+denials fail closed. Installation inputs cannot select IAM documents or targets.
+
+The offline fixed-entry integration test covers the real dispatch path from
+authorization archive through five component IAM writes, idempotent readback,
+and durable closure. Lost responses after each IAM write resolve by readback.
+Cleanup can close the archived authorization without a retained GitHub artifact
+and cannot create/delete IAM objects. Drift in the bootstrap execution authority
+is rejected before any component IAM mutation. These are mocked AWS transport
+tests, **not live AWS verification or proof of effective runtime permission**.
+
+Current focused result: 162 tests passed across fixed broker dispatch,
+authorization archive, configuration, identity contract, and IAM state machine.
+The former local/root controller has not yet been replaced; bootstrap execution,
+session issuance/fencing, authorization renewal, and isolated Terraform execution
+remain integration work. Earlier descriptions
+of the legacy controller above are not claims that those open boundaries are
+resolved. This branch is not ready for activation, push, or external review.
+
+### Deterministic package boundary
+
+`component-broker-package.mjs` assembles only a fixed inventory of runtime source,
+source-owned IAM JSON, and locked SDK dependencies. It reuses the repository's
+deterministic ZIP implementation. Production packaging requires clean HEAD equal
+to origin/main; bootstrap must separately authenticate that remote reference and
+the exact approval. The builder accepts no ZIP, source directory, policy path,
+dependency path, or replacement document from its caller. npm executes with
+scripts disabled, the public registry pinned, isolated empty configuration,
+private temporary cache/home, and no inherited credentials.
+
+The real package test creates a disposable local Git fixture, builds twice and
+compares complete ZIP bytes, loads the packaged handler/SDKs in a credential-empty
+child process, and confirms rejection before AWS access. This proves packaging
+and cold-load behavior, not deployment or cross-version compression identity.
+The reviewed authorization must bind the actual package hash. Dirty source is
+rejected before dependency installation.
+
+### Authorizer trust support
+
+AWS's current [OIDC condition-key reference](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_iam-condition-keys.html)
+documents GitHub `job_workflow_ref`, repository/owner IDs, and ref as supported
+AssumeRoleWithWebIdentity trust conditions. `job_workflow_ref` identifies a
+**reusable** workflow. The dispatch now delegates to
+`component-iam-authorization-publisher.yml`; the authorizer trust pins that exact
+reusable workflow, main, repository/owner IDs, actor ID, audience and environment.
+The environment approval and live approval/source/package verification precede
+OIDC acquisition. The resulting 900-second role may invoke only broker version 3
+to archive authorization; it cannot install component IAM, deploy the broker,
+pass roles or execute Terraform. GitHub artifacts are human audit copies only.
+
+Focused publisher tests reject missing/wrong approval, alternate actor,
+repository/fork/workflow/source substitution, reruns, environment bypass,
+wildcard branches, and malformed package/transition bindings. Real child-process
+tests reject unsupported CLI commands before build or credential acquisition.
+The combined publisher, authorization and identity suites pass 192 tests;
+workflow YAML, document organization and security-scope lint also pass. No
+production OIDC assumption or workflow dispatch is claimed by these tests.
+
+The legacy local controller still consumes the earlier artifact schema. It must
+be replaced with the fixed-broker/session orchestration before this branch can
+be pushed or used. Passing publisher tests do not close that integration gap.
+
+### Invocation grant and session-proof work
+
+Broker readback now rejects resource-based invocation policies on the base
+function and each fixed published version. This is necessary because an added
+resource policy could bypass the source-bound authorizer identity policy. Missing
+policy and denied policy read are distinguished; denial stops execution. Five
+new fixed-dispatch regression cases exercise this boundary.
+
+The session authenticator combines a transition-bound, presigned STS
+GetCallerIdentity request with its unique CloudTrail AssumeRole issuance event.
+The request has a fixed endpoint/action/region, a signed binding header, and a
+locally enforced 60-second proof window. That proof window is **not** a claim
+that STS credentials expire in 60 seconds. AWS-returned session expiry, the
+900-second requested duration, and the MFA human issuance chain are authenticated
+separately. Durable output contains no access key, session token or signature.
+CloudTrail legacy date strings are explicitly treated as UTC.
+
+This follows the [AWS IAM Authenticator's signed GetCallerIdentity pattern](https://github.com/kubernetes-sigs/aws-iam-authenticator)
+and [AWS's documented STS CloudTrail response evidence](https://docs.aws.amazon.com/IAM/latest/UserGuide/cloudtrail-integration.html).
+Twenty-nine offline session tests pass, including wrong caller/account, OIDC or
+non-MFA issuance, altered request bindings, ambiguous/missing events, expiry, and
+timezone behavior. The broker now uses the fixed STS transport and a bounded,
+fully consumed CloudTrail AssumeRole lookup before claiming the fixed
+`installation-session.json` record. Its read-only `cloudtrail:LookupEvents`
+permission is regional and conditioned on the exact source function ARN; the API
+does not support an IAM resource ARN. No caller chooses the lookup operation,
+region or evidence key.
+
+The session record is CAS-protected. Reusing the same authenticated session is
+idempotent; replacing it requires prior AWS expiry plus the 120-second margin,
+fresh explicit authorization, and a new session issued after that boundary.
+There is no lease-age takeover. Every broker IAM-write guard rechecks session
+ownership and expiration. Closure records include the separately authenticated
+cleanup-session metadata. No proof query, access key, session token or signature
+is archived. The public Lambda handler sanitizes rejected-request exceptions.
+
+The integrated dispatch, archive, session-proof and session-fencing suites pass
+79 tests, including expiry immediately after the first IAM write and exact
+partial-state retention. The real locked-package reproducibility/cold-load test
+also passes with the pinned CloudTrail SDK. These remain offline transport tests.
+The legacy controller is still not safe to execute and has not yet been replaced.
+No completed operator lifecycle or live session proof is claimed.
+
+### Fresh approval and scoped client integration checkpoint
+
+The broker archive now retains an authenticated approval lineage. Renewal must
+use a new run, the same transition/source/package, an unclosed transition, and
+expired prior AWS authority plus the safety margin. Exact live IAM readback
+precedes replacement of the authorization archive. A lost response is resolved
+by exact readback; CAS contention is not treated as success. The new session
+must be issued after fencing, and the IAM journal may bind only a predecessor
+present in the authenticated archive. Completed IAM writes are not replayed.
+
+The normal session client uses the canonical named bootstrap-operator credential
+boundary and existing hidden-MFA prompt. Root, release-deployer and alternate
+users are rejected before MFA/session issuance. Only the exact installation or
+cleanup role is requested, for 900 seconds, and STS-returned identity/expiration
+are checked. The returned client exposes only fixed broker invocation operations,
+not AWS credentials or general SDK clients. A real pinned SDK signer produces
+proofs accepted by the broker parser in offline transport tests. This client is
+not yet the public installation controller; the old root-based controller must
+still be removed before activation or PR publication.
+
+CI path filters now include every component boundary source/test, the reusable
+publisher, shared credential/MFA/package helpers, and dependency lockfiles. The
+contract job installs both root and locked broker-package dependencies before
+running all component tests plus the credential-source contract. The current
+combined focused run passes **518 tests** with no skips. This includes retained
+legacy-controller unit tests and does not imply that the unfinished CLI/bootstrap
+and Terraform isolation paths meet the final security requirements.
+
+### Durable cleanup discovery after recovery
+
+The new cleanup session client can retrieve the original non-secret source,
+transition and authorization hash from the fixed broker's `CLEANUP_CONTEXT`
+operation on version 2. It requires only the transition identifier from the
+operator, not a local authorization file or retained GitHub artifact. The broker
+authenticates its bootstrap record, all execution identities, package/configuration,
+and absence of resource-policy bypasses before reading its fixed authorization
+archive. This read-only operation cannot select a key or perform an IAM/S3 write.
+
+Discovery does not authorize cleanup mutation. `CLOSE` still requires the freshly
+issued exact cleanup role, signed STS identity, MFA-backed issuance/expiry proof,
+matching archived bindings, and live IAM classification. Substituted coordinates
+fail before closure. The source/transport tests include discovery 91 days after
+approval and after protected main advances, with zero writes. The 93 directly
+affected tests and changed-file ESLint pass. The public legacy controller still
+needs replacement; no completed operator lifecycle or production execution is
+claimed by this checkpoint.
+
+### Scoped normal controller checkpoint
+
+The legacy 472-line root/admin controller has now been deleted and replaced by
+the scoped installation/inspection/closure composition root. It cannot select
+an IAM writer, Lambda deployer, administrator profile, temporary-policy installer
+or local Terraform adapter. Unsupported historical commands are rejected by real
+child-process tests before source/network/credential operations.
+
+Installation authenticates the current reusable publisher's three-file audit
+archive, run/source/reviewer/environment and broker publication result before MFA.
+Cleanup uses only its durable-context session client; legacy GitHub-artifact-based
+cleanup helpers have been removed. Receipt schemas and source movement are checked
+before returning success. The updated runbook replaces obsolete administrator
+commands instead of documenting them as a fallback.
+
+The directly affected controller, authorization, publisher, capability and
+credential-source tests pass (100 tests); changed-source ESLint and diff checks
+pass. This is still not the final gate: initial bootstrap and isolated Terraform
+execution remain unfinished. No push or production operation is authorized by
+this local checkpoint.
+
+### Isolated provider validation checkpoint
+
+The actual network-disabled, non-root Docker runner now passes Terraform
+`fmt -check`, `init -backend=false -input=false -lockfile=readonly`, and
+`validate` using Terraform 1.15.8 and AWS provider 6.65.0. The provider lock was
+regenerated with Terraform's canonical `providers lock` command for Linux ARM64,
+Linux AMD64 and macOS ARM64. No production backend was initialized.
+
+The read-only input mount contains only reviewed source and checksum-pinned
+downloads. The provider executes from an ephemeral executable tmpfs, not a host
+plugin cache. Actual container tests prove blocked host credential/control-socket
+access and blocked metadata/network fallback, and reject substituted provider
+archives and CLI development overrides before Terraform starts.
+
+This checkpoint implements backend-disabled validation, not production
+prepare/apply orchestration. The legacy infrastructure activation entry point
+still requires replacement before the branch may be pushed. Keep the same
+isolated runner for CI and production to prevent provider-boundary divergence;
+do not add a second host execution fallback.
+
+The container-side CONNECT transport is separately tested against metadata,
+hostnames, alternate ports, filesystem/socket names and malformed frames. It
+listens only on the container's loopback interface and carries TLS unchanged
+over stdio to the independently restricted host relay. It is not yet connected
+to production prepare/apply; no production-ready claim follows from these
+transport unit tests.
+
+The runtime audit reproduced Docker client-config proxy injection: an otherwise
+network-disabled container inherited host proxy settings unless explicit empty
+proxy environment overrides were supplied. All ten upper/lower-case Docker proxy
+variables are now cleared. A disposable client configuration and real-container
+negative control prove the guard, without reading or changing user proxy secrets
+or Docker configuration. Network isolation alone would not prevent disclosure
+of credentials embedded in those configuration values.
+
+Operator inspection now returns through the authenticated read-only classifier
+before mutation-session reservation. Previously a fresh `inspect` session could
+consume the first reservation, or be rejected by another active controller's
+fence. Regression coverage proves absent and installed inspections write neither
+IAM nor S3, while an attempted installation takeover by that same fresh reader
+still fails until the existing session is safely expired and freshly approved.
+
+### Isolated orchestration checkpoint
+
+The container agent and host stdio runner now implement fixed prepare/apply
+operations with backend and pre-apply approval barriers. Scoped credentials cross
+only the private input pipe, never Docker arguments, host child environment,
+mounted files or evidence. The runner uses a local Unix Docker endpoint, an empty
+private Docker client configuration, a uniquely named disposable container, and
+exact-container removal plus absence readback on success and failure.
+
+All 59 isolation/transport/orchestration tests pass, including real container
+negative probes and the real pinned Terraform/provider backend-disabled
+validation. Prepare/apply orchestration tests deliberately substitute a simulated
+Terraform executable through an in-process test adapter: these demonstrate the
+container protocol and barriers, not live AWS plan/apply behavior. No production
+plan/apply was executed. Production MFA/approval/state preflight composition and
+replacement of the old infrastructure activation entry point remain unfinished;
+the runner is not yet exposed through that production entry point.
+
+### Exceptional bootstrap composition checkpoint
+
+The first-bootstrap CLI now authenticates the dedicated completed GitHub approval
+and rebuilt package before loading its exceptional administrator adapter. It
+authenticates a fresh MFA-backed human release session using signed STS identity
+and unique CloudTrail issuance, then binds that non-secret proof into the durable
+bootstrap reservation and closure. Normal installation/cleanup never import the
+administrative adapter. Real CLI tests reject alternate operations, policy paths
+and malformed coordinates before credentials; 47 bootstrap tests and 28 canonical
+credential-boundary tests pass.
+
+This does not claim root authority is constrained by a session expiry: root is
+the explicitly approved initial-bootstrap exception only. An interrupted root
+transaction has no automatic takeover route. Normal session fencing remains
+AWS-expiry based. Production activation composition, final recovery review and
+all pre-PR gates remain outstanding; no bootstrap was executed against AWS.
+
+### Terraform session-provenance integration checkpoint
+
+The canonical hidden-MFA client now issues the exact 900-second table-executor
+session and sends its signed proof to the fixed broker before isolated execution.
+The broker checks unique CloudTrail issuance, complete bootstrap/broker readback,
+current protected source and verified component IAM. Its new
+`PROVE_TERRAFORM_SESSION` operation is strictly read-only and cannot claim an IAM
+installation session. Terraform-role proofs cannot authorize IAM-write operations.
+
+This adds one justified capability pair: `lambda:InvokeFunction` on the existing
+exact broker version 1, solely to reach the guarded read-only provenance path.
+There is no broker deployment/configuration/role permission, PassRole, or IAM
+mutation authority. The executor container's network relay still excludes Lambda;
+the source-owned issuer performs this verification before sending only the scoped
+session over the private container pipe. An expired IAM-install approval can be
+read for provenance, but cannot authorize a new IAM write; table apply remains
+subject to its separate exact saved-plan approval. The 67 directly affected
+session/broker/capability tests and ESLint pass. Production activation CLI wiring
+is still required before the legacy host path can be removed.
+
+### Isolated activation integration checkpoint
+
+The production activation CLI now uses the scoped MFA session client and isolated
+runner for both preparation and exact saved-plan application. The root-profile
+audit and host Terraform adapters have been deleted. Fixed read-only AWS checks
+authenticate absent state/history/table and the broker receipt plus all owned IAM
+documents. A write-once exact attempt reservation is mandatory at the isolated
+apply barrier. Source, IAM receipt, saved bytes and GitHub approval are rechecked
+before releasing that barrier; ambiguous results never trigger another apply.
+
+The completed focused sweep reports 597 tests, 589 passing and eight explicitly
+opt-in container tests skipped. The separate actual-container runner suite passes
+all ten tests, including simulated init/plan/apply failures and refused approval.
+Real GitHub ZIP fixtures cover exact saved-plan bindings and substituted approval
+evidence. ESLint is clean for the integration. These are local source/fixture
+results, not live AWS or effective-permission proof. Final adversarial review,
+full local gates, PR CI and exact-head external review remain outstanding.
+
+### Retry-boundary review correction
+
+Pinned Terraform 1.15.8's S3 backend constructs a default of five retries even
+when the child environment sets `AWS_MAX_ATTEMPTS`. The backend and AWS provider
+now explicitly declare `max_retries = 0`, and activation rejects a different
+backend/provider retry configuration. This removes implicit SDK retry policy;
+it does not claim Terraform performs no read-only waiter polling. The actual
+isolated pinned Terraform/provider fmt, backend-disabled readonly initialization
+and validation pass, along with the changed activation tests (29 total).
+Source references: [Terraform S3 backend](https://github.com/hashicorp/terraform/blob/v1.15.8/internal/backend/remote-state/s3/backend.go)
+and [AWS provider retry configuration](https://github.com/hashicorp/terraform-provider-aws/blob/v6.65.0/website/docs/index.html.markdown).
+
+### Closed-installation provenance lifecycle correction
+
+IAM mutation authority now ends at installation closure, while the fixed broker
+retains a separate read-only path for authenticating the closed installation's
+durable authorization, verified IAM receipt, exact live IAM state and fresh
+Terraform session. This provenance path accepts an expired historical installation
+approval only after exact closure and cannot install, inspect through the mutation
+lane, renew or reopen installation authority. Terraform apply still requires its
+own current saved-plan approval and scoped session.
+
+Saved-plan approval freshness now starts at GitHub's authenticated successful-run
+completion timestamp, not workflow dispatch. The final run is re-read with the
+same creation and completion timestamps, so a legitimate environment wait does
+not consume the approval lifetime. Exact maximum age is rejected. Focused tests
+cover 30 minutes plus one millisecond, one hour, closure/tamper failures, mutation
+rejection and approval freshness boundaries. No production operation was run.
+
+### STS Query response correction
+
+The production signed-session verifier now parses STS `GetCallerIdentity` as the
+namespaced XML Query response AWS actually returns. The locked `sax` parser is
+used in strict mode; the verifier rejects document types, CDATA, comments,
+unexpected processing instructions, duplicate identity fields, unknown structure,
+missing response metadata, malformed/truncated bodies, non-2xx responses and the
+existing 32 KiB response limit. The parsed account, ARN and user ID still pass
+the complete session, MFA issuance, expiry and source-binding checks.
+
+Tests exercise the default fetch/verifier path for installation, cleanup,
+identity-bootstrap and Terraform sessions rather than substituting the STS
+verifier. A bounded sibling audit found no other raw AWS Query protocol parser in
+the component boundary; SDK-based IAM, S3, Lambda and CloudTrail calls remain
+unchanged. No AWS request was made.

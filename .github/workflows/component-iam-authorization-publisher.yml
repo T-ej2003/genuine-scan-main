@@ -1,0 +1,73 @@
+name: Publish component IAM authorization
+
+'on':
+  workflow_call:
+    inputs:
+      source_sha: {required: true, type: string}
+      transition_id: {required: true, type: string}
+
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+
+jobs:
+  publish:
+    if: github.repository == 'T-ej2003/genuine-scan-main' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production-component-infrastructure-install-permission
+    steps:
+      - uses: actions/checkout@v6
+        with: {ref: '${{ github.sha }}', fetch-depth: 0, persist-credentials: false}
+      - uses: actions/setup-node@v6
+        with: {node-version: 24}
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Authenticate explicit approval and exact package before credentials
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          TRANSITION_ID: ${{ inputs.transition_id }}
+        run: node scripts/aws/component-iam-authorization-publisher.mjs prepare
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-component-installation-authorizer
+          aws-region: eu-west-2
+          allowed-account-ids: '368992683803'
+          role-duration-seconds: 900
+          role-session-name: component-authorization-${{ github.run_id }}
+          mask-aws-account-id: true
+      - name: Archive authorization through the fixed broker only
+        shell: bash
+        env:
+          AWS_MAX_ATTEMPTS: '1'
+          AWS_EC2_METADATA_DISABLED: 'true'
+        run: |
+          set -euo pipefail
+          aws lambda invoke \
+            --region eu-west-2 \
+            --function-name arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-component-iam-installer:3 \
+            --cli-binary-format raw-in-base64-out \
+            --payload "fileb://${RUNNER_TEMP}/component-installation-request.json" \
+            "${RUNNER_TEMP}/component-installation-result.json" \
+            > "${RUNNER_TEMP}/component-installation-invocation.json"
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import fs from 'node:fs';
+          import { digest } from './scripts/aws/component-iam-installation-contract.mjs';
+          const read = (name) => JSON.parse(fs.readFileSync(`${process.env.RUNNER_TEMP}/component-installation-${name}.json`));
+          const invocation = read('invocation');
+          assert.equal(invocation.StatusCode, 200);
+          assert.equal(invocation.FunctionError, undefined, 'Broker rejected authorization');
+          assert.equal(invocation.ExecutedVersion, '3');
+          const expected = digest(read('request').authorization);
+          assert.equal(read('result').authorizationSha256, expected);
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `Component installation authorization archived: \`${expected}\`. No IAM installation or Terraform operation performed.\n`);
+          JS
+      - uses: actions/upload-artifact@v7
+        with:
+          name: component-installation-authorization-audit
+          path: ${{ runner.temp }}/component-installation-*.json
+          if-no-files-found: error
+          retention-days: 90
+          # Human audit copy only; cleanup uses the fixed AWS archive.
