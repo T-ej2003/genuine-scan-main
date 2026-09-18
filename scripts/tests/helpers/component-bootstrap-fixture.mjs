@@ -20,7 +20,7 @@ export function fixture() {
     if (operation === "GetPolicy") return state.policies.has(version) ? { Policy: "unexpected" } : absent();
     if (operation === "ListVersionsByFunction") return { Versions: Object.keys(state.versions).map(Version => ({ Version })) };
     if (operation === "GetFunctionConcurrency") return structuredClone(state.concurrency);
-    if (operation === "GetFunctionCodeSigningConfig") return { FunctionName: installationIdentity.functionName, ...state.signing };
+    if (operation === "GetFunctionCodeSigningConfig") return { $metadata: { httpStatusCode: 200 }, ...state.signing };
     if (operation === "GetRuntimeManagementConfig") return structuredClone(state.runtime);
     if (operation === "CreateFunction") {
       assert.equal(state.versions.$LATEST, undefined);

@@ -46,8 +46,10 @@ export function assertBrokerConfiguration(response, expected, { concurrency, sig
   assert.equal(config.LastUpdateStatus, "Successful");
   assert(Number.isSafeInteger(config.CodeSize) && config.CodeSize > 0);
   assert.equal(concurrency?.ReservedConcurrentExecutions, 1);
-  assert.equal(signing?.FunctionName, installationIdentity.functionName);
-  assert(!signing.CodeSigningConfigArn, "Unreviewed signing configuration");
+  assert(signing && typeof signing === "object" && !Array.isArray(signing), "Malformed signing configuration");
+  for (const key of Object.keys(signing)) assert(["$metadata", "FunctionName", "CodeSigningConfigArn"].includes(key), `Unknown signing field: ${key}`);
+  if (signing.FunctionName !== undefined) assert.equal(signing.FunctionName, installationIdentity.functionName);
+  assert.equal(signing.CodeSigningConfigArn, undefined, "Unreviewed signing configuration");
   assert.equal(runtime?.UpdateRuntimeOn, "FunctionUpdate");
   // GetRuntimeManagementConfig returns null in FunctionUpdate mode. The
   // resolved runtime identity is supplied by GetFunction, not this control API.
@@ -55,6 +57,20 @@ export function assertBrokerConfiguration(response, expected, { concurrency, sig
   assert.match(config.RuntimeVersionConfig?.RuntimeVersionArn || "", /^arn:aws:lambda:eu-west-2::runtime:[a-f0-9]{64}$/);
   assert.deepEqual(Object.keys(config.RuntimeVersionConfig), ["RuntimeVersionArn"]);
   return digest(expected);
+}
+
+// AWS GetFunction includes a short-lived presigned package URL. Diagnostics
+// retain only non-secret structure and can never serialize that URL or signing
+// query material.
+export function redactBrokerDiagnostic(value) {
+  if (Array.isArray(value)) return value.map(redactBrokerDiagnostic);
+  if (!value || typeof value !== "object") {
+    if (typeof value === "string" && (/https?:\/\/[^\s]*X-Amz-(?:Credential|Signature|Security-Token)/i.test(value) || /X-Amz-(?:Credential|Signature|Security-Token)=/i.test(value))) return "[REDACTED_PRESIGNED_URL]";
+    return value;
+  }
+  return Object.fromEntries(Object.entries(value)
+    .filter(([key]) => key !== "Location" && !/(?:SecretAccessKey|SessionToken|AccessKeyId|MfaCode)/i.test(key))
+    .map(([key, item]) => [key, redactBrokerDiagnostic(item)]));
 }
 
 export function assertBrokerEntryPoint(context, operation) {

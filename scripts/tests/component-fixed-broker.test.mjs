@@ -101,7 +101,7 @@ function fixture() {
       return response;
     }
     if (operation === "GetFunctionConcurrency") return { ReservedConcurrentExecutions: 1 };
-    if (operation === "GetFunctionCodeSigningConfig") return { FunctionName: installationIdentity.functionName };
+    if (operation === "GetFunctionCodeSigningConfig") return { $metadata: { httpStatusCode: 200 } };
     assert.equal(operation, "GetRuntimeManagementConfig");
     return { UpdateRuntimeOn: "FunctionUpdate", RuntimeVersionArn: null };
   };
