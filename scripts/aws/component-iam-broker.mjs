@@ -285,7 +285,9 @@ export async function executeFixedBroker(event, context, { manifest, iam, s3, la
   // Classify live IAM before claiming/replacing controller ownership. The write
   // engine repeats readback afterward and authenticates the guard at every write.
   if (!cleanup) await inspect(authorization);
-  const sessionGuard = cleanup ? async () => { assert(now() < Date.parse(session.expiresAt), "Cleanup session expired"); } : await claimComponentSession({ session, s3, now });
+  const sessionGuard = cleanup ? async () => { assert(now() < Date.parse(session.expiresAt), "Cleanup session expired"); } : await claimComponentSession({ session, s3,
+    authorizedPredecessors: authorization.history.map(({ authorization: prior, authorizationSha256 }) => ({ authorizationSha256,
+      sourceSha: prior.sourceSha, documentBindingsSha256: prior.documentBindingsSha256 })), now });
   const bound = bind(authorization);
   const execute = createInstallationHandler({ manifest: bound, iam, s3, cleanup, now, currentMain: async () => {
     // Reauthenticate at every IAM-write guard, not merely upon invocation.
