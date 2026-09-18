@@ -232,7 +232,7 @@ function authenticatePublication(input, { execute, env = process.env, now = Date
     : bootstrapPackage
     ? assertIdentityBootstrapAuthorization(authorization, bootstrapPackage, now())
     : assertArchivedInstallationAuthorization(authorization, componentBrokerPackageManifest(sourceSha), authorization.brokerPackageSha256, { now: now() });
-  if (!bootstrapPackage) {
+  if (!bootstrapPackage && !recoveryPackage) {
     const invocation = audit["component-installation-invocation.json"];
     assert.equal(invocation.StatusCode, 200);
     assert.equal(invocation.ExecutedVersion, "3");

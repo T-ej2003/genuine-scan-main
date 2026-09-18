@@ -1,5 +1,10 @@
 # Component installation implementation recovery record
 
+> The September 2026 production partial-bootstrap incident has a separate,
+> source-bound forward-recovery runbook:
+> [COMPONENT_BOOTSTRAP_PARTIAL_RECOVERY.md](./COMPONENT_BOOTSTRAP_PARTIAL_RECOVERY.md).
+> The historical reconstruction notes below do not authorize that recovery.
+
 ## Recovery checkpoint — 2026-09-17
 
 The former `/private/tmp/mscqr-component-install-permission-v2` worktree
