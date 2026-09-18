@@ -115,8 +115,8 @@ the current protected-main fence. Terraform's saved-plan approval remains a
 separate current-source authorization. Before a renewed installation proceeds,
 the broker CAS-migrates its durable IAM ledger only after exact predecessor
 authorization, source and document bindings and live readback all match.
-separate fresh authorization; its session proof carries the verified historical
-installation source only to bind the durable IAM receipt.
+Its session proof carries the verified historical installation source only to
+bind the durable IAM receipt.
 
 ## Evidence and redaction
 
