@@ -22,7 +22,7 @@ function assertHistoricalLineage(bootstrap) {
   uuid(bootstrap.owner);
 }
 
-function assertRecoveredClosure(bootstrap) {
+function assertRecoveredClosure(bootstrap, manifest, packageSha256) {
   const expectedKeys = ["authorization", "authorizationSha256", "broker", ...(Object.hasOwn(bootstrap, "brokerChange") ? ["brokerChange"] : []), "closedAt", "identities", "identityReadbackSha256", "identitySetSha256", "manifestSha256", "operatorProof", "owner", "packageSha256", "recovery", "runtimeVersions", "schemaVersion", "sourceSha", "state", "transitionId"];
   assert.deepEqual(Object.keys(bootstrap).sort(), expectedKeys.sort(), "Malformed recovered bootstrap closure");
   assertHistoricalLineage(bootstrap);
@@ -59,6 +59,12 @@ function assertRecoveredClosure(bootstrap) {
   assert.deepEqual(bootstrap.broker, { functionArn: componentBrokerArn, packageSha256: completedBootstrapRecovery.packageSha256,
     manifestSha256: completedBootstrapRecovery.manifestSha256, runtimeVersions: bootstrap.runtimeVersions });
   assert.deepEqual(recovery.versions, ["1", "2", "3"]);
+  if (manifest !== undefined || packageSha256 !== undefined) {
+    assert(manifest && typeof manifest === "object" && !Array.isArray(manifest), "Recovery manifest is required"); sha256(packageSha256);
+    assert.equal(manifest.sourceSha, recovery.sourceSha, "Recovery source differs");
+    assert.equal(digest(manifest), recovery.finalManifestSha256, "Recovery manifest differs");
+    assert.equal(packageSha256, recovery.finalPackageSha256, "Recovery package differs");
+  }
   return { sourceSha: recovery.sourceSha, packageSha256: recovery.finalPackageSha256, manifestSha256: recovery.finalManifestSha256, recovered: true, entryPoints: brokerEntryPoints, allVersions: ["1", "2", "3"], runtimeVersions: bootstrap.runtimeVersions };
 }
 
@@ -113,7 +119,7 @@ export function assertEffectiveBootstrapTrustAnchor(bootstrap, manifest, package
     assert(Object.hasOwn(bootstrap, "recovery"), "Broker change without recovered predecessor is invalid");
     return assertBrokerChangeClosure(bootstrap, manifest, packageSha256);
   }
-  if (Object.hasOwn(bootstrap, "recovery")) return assertRecoveredClosure(bootstrap);
+  if (Object.hasOwn(bootstrap, "recovery")) return assertRecoveredClosure(bootstrap, manifest, packageSha256);
   assert.equal(bootstrap.sourceSha, manifest.sourceSha);
   assert.equal(bootstrap.manifestSha256, digest(manifest));
   assert.equal(bootstrap.identitySetSha256, digest(manifest.identities));

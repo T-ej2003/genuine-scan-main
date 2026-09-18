@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { executeFixedBroker } from "../aws/component-iam-broker.mjs";
+import { assertCompletedRecoveryTrustAnchor } from "../aws/component-bootstrap-trust-anchor.mjs";
 import { installationDocuments, documentBindings, digest, installationIdentity } from "../aws/component-iam-installation-contract.mjs";
 import { bootstrapManagedIdentities, componentBrokerArn, identityBootstrap } from "../aws/component-installation-identity-contract.mjs";
 import { sessionProofBinding } from "../aws/component-session-proof.mjs";
@@ -259,13 +260,10 @@ test("broker cannot mistake denied policy readback for absence", async () => {
   assert.deepEqual(f.writes, []);
 });
 
-test("recovered bootstrap closure authorizes fixed broker entry points without rewriting historical lineage", async () => {
+test("recovered bootstrap remains an authenticated predecessor and rejects an unbound executing package", async () => {
   const f = recoveredFixture();
-  await f.run("AUTHORIZE");
-  assert(f.objects.has(`${prefix}installation-authorization.json`));
-  await f.run("INSTALL");
-  assert.equal((await f.run("CLEANUP_CONTEXT")).transitionId, transitionId);
-  assert.equal((await f.run("INSPECT")).state, "IAM_VERIFIED");
+  assert.doesNotThrow(() => assertCompletedRecoveryTrustAnchor(f.bootstrap));
+  await assert.rejects(f.run("AUTHORIZE"), /Recovery (?:source|manifest|package) differs/);
   assert.equal(f.bootstrap.sourceSha, historicalBootstrapIncident.sourceSha);
   assert.equal(f.bootstrap.recovery.sourceSha, completedBootstrapRecovery.sourceSha);
 });
