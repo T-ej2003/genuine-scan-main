@@ -101,6 +101,20 @@ test("broker change resumption rejects an unsupported nested schema before mutat
   assert.equal(f.writes.length, writes); assert.equal(f.s3Writes, checkpoints);
 });
 
+for (const mutate of [
+  change => { change.owner = "not-a-uuid"; },
+  change => { change.authorizationExpiresAt = "not-a-timestamp"; },
+  change => { change.sessionExpiresAt = "2026-09-18T13:00:00Z"; },
+  change => { change.configurationSha256 = "d".repeat(64); },
+  change => { change.identitySetSha256 = "d".repeat(64); },
+]) test("broker change resumption rejects corrupt closure-bound fields before takeover", async () => {
+  const f = fixture(); f.before = operation => { if (operation === "UpdateFunctionConfiguration") throw new Error("interrupted"); };
+  await assert.rejects(f.execute()); const writes = f.writes.length, checkpoints = f.s3Writes;
+  f.renew(); f.before = () => {}; mutate(f.record.brokerChange);
+  await assert.rejects(f.execute());
+  assert.equal(f.writes.length, writes); assert.equal(f.s3Writes, checkpoints);
+});
+
 test("closed broker change cannot replay and no changed identity receives broker mutation capability", async () => {
   const f = fixture(), closed = await f.execute(); await assert.rejects(f.execute());
   const anchor = assertEffectiveBootstrapTrustAnchor(closed, componentBrokerPackageManifest(closed.brokerChange.sourceSha), closed.brokerChange.successor.packageSha256);

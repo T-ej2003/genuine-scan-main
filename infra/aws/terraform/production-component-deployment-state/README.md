@@ -169,7 +169,9 @@ existing journal. It cannot select another function/package/configuration, alter
 trust or execution authority, add resource policy, or pass a role. Interrupted
 changes require fresh approval, expiry fencing, exact checkpoint readback and CAS
 transfer. A malformed or incomplete change fails closed; source merge alone never
-updates the deployed broker.
+updates the deployed broker. Before takeover, the controller validates the active
+owner, canonical expiry timestamps, and every closure-bound source, configuration
+and identity digest; it never CAS-migrates a corrupt reservation.
 
 Cleanup requires only the transition ID and a fresh exact cleanup-role session.
 Broker version 2 exposes read-only `CLEANUP_CONTEXT` at its fixed evidence location
