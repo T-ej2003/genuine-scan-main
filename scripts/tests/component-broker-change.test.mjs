@@ -65,10 +65,11 @@ test("governed broker change authenticates predecessor, publishes only successor
 });
 
 for (const mutate of [
+  f => { f.record.schemaVersion = 2; },
   f => { f.versions.$LATEST.CodeSha256 = Buffer.from("d".repeat(64), "hex").toString("base64"); },
   f => { f.versions["4"] = structuredClone(f.versions.$LATEST); },
   f => { f.record.recovery.authorizationSha256 = "d".repeat(64); },
-]) test("broker change rejects a different predecessor before mutation", async () => { const f = fixture(); mutate(f); await assert.rejects(f.execute()); assert.deepEqual(f.writes, []); assert.equal(f.s3Writes, 0); });
+]) test("broker change rejects corrupted predecessor lineage before mutation", async () => { const f = fixture(); mutate(f); await assert.rejects(f.execute()); assert.deepEqual(f.writes, []); assert.equal(f.s3Writes, 0); });
 
 test("ambiguous accepted update and closure reconcile by exact readback without replay", async () => {
   const f = fixture(); let once = true; f.after = operation => { if (operation === "UpdateFunctionCode" && once) { once = false; throw new Error("lost"); } };

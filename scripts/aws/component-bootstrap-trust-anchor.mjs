@@ -25,6 +25,7 @@ function assertHistoricalLineage(bootstrap) {
 function assertRecoveredClosure(bootstrap, manifest, packageSha256) {
   const expectedKeys = ["authorization", "authorizationSha256", "broker", ...(Object.hasOwn(bootstrap, "brokerChange") ? ["brokerChange"] : []), "closedAt", "identities", "identityReadbackSha256", "identitySetSha256", "manifestSha256", "operatorProof", "owner", "packageSha256", "recovery", "runtimeVersions", "schemaVersion", "sourceSha", "state", "transitionId"];
   assert.deepEqual(Object.keys(bootstrap).sort(), expectedKeys.sort(), "Malformed recovered bootstrap closure");
+  assert.equal(bootstrap.schemaVersion, 1);
   assertHistoricalLineage(bootstrap);
   assert.equal(bootstrap.state, "BOOTSTRAP_CLOSED"); timestamp(bootstrap.closedAt);
   assert(Array.isArray(bootstrap.identities));
