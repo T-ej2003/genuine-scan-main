@@ -1,0 +1,41 @@
+name: Authorize component installation identity bootstrap recovery
+run-name: Authorize partial component identity bootstrap recovery ${{ inputs.transition_id }}
+
+'on':
+  workflow_dispatch:
+    inputs:
+      source_sha: {description: Exact current protected-main SHA containing the reviewed recovery, required: true, type: string}
+      transition_id: {description: Unique recovery transition UUID, required: true, type: string}
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: component-installation-identity-bootstrap-recovery-authorization
+  cancel-in-progress: false
+
+jobs:
+  authorize:
+    if: github.repository == 'T-ej2003/genuine-scan-main' && github.ref == 'refs/heads/main' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production-component-installation-identity-bootstrap-recovery
+    steps:
+      - uses: actions/checkout@v6
+        with: {ref: '${{ github.sha }}', fetch-depth: 0, persist-credentials: false}
+      - uses: actions/setup-node@v6
+        with: {node-version: 24}
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Bind explicit recovery approval to the exact historical incident and corrected broker package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          TRANSITION_ID: ${{ inputs.transition_id }}
+        run: node scripts/aws/component-bootstrap-partial-recovery-authorization.mjs prepare
+      - uses: actions/upload-artifact@v7
+        with:
+          name: component-identity-bootstrap-recovery-authorization
+          path: ${{ runner.temp }}/component-identity-bootstrap-recovery-authorization.json
+          if-no-files-found: error
+          retention-days: 90

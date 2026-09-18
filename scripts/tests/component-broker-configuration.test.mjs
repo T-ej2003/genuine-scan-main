@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { brokerConfiguration, assertBrokerConfiguration, assertBrokerEntryPoint } from "../aws/component-broker-configuration.mjs";
+import { brokerConfiguration, assertBrokerConfiguration, assertBrokerEntryPoint, redactBrokerDiagnostic } from "../aws/component-broker-configuration.mjs";
 import { componentBrokerArn } from "../aws/component-installation-identity-contract.mjs";
 import { installationIdentity } from "../aws/component-iam-installation-contract.mjs";
 
@@ -41,6 +41,19 @@ test("signing, runtime and concurrency are independently bound", () => {
     { ...controls, runtime: { ...runtime, UpdateRuntimeOn: "Auto" } },
     { ...controls, runtime: { ...runtime, RuntimeVersionArn: `arn:aws:lambda:eu-west-2::runtime:${"d".repeat(64)}` } },
   ]) assert.throws(() => assertBrokerConfiguration(response(), expected, changed));
+});
+test("production no-code-signing response omits FunctionName without weakening the authenticated function", () => {
+  assertBrokerConfiguration(response(), expected, { ...controls, signing: { $metadata: { httpStatusCode: 200 } } });
+  assertBrokerConfiguration(response(), expected, { ...controls, signing: { FunctionName: installationIdentity.functionName } });
+  for (const signing of [null, [], { FunctionName: "other" }, { CodeSigningConfigArn: "arn:unexpected" }, { FutureSecurityState: true }]) {
+    assert.throws(() => assertBrokerConfiguration(response(), expected, { ...controls, signing }));
+  }
+});
+test("broker diagnostics drop package locations and presigned credential material recursively", () => {
+  const url = "https://awslambda.example/code?X-Amz-Credential=credential&X-Amz-Signature=signature&X-Amz-Security-Token=token";
+  const safe = redactBrokerDiagnostic({ Code: { RepositoryType: "S3", Location: url }, nested: { value: url }, SessionToken: "secret", Configuration: { FunctionName: installationIdentity.functionName } });
+  assert.deepEqual(safe, { Code: { RepositoryType: "S3" }, nested: { value: "[REDACTED_PRESIGNED_URL]" }, Configuration: { FunctionName: installationIdentity.functionName } });
+  assert.doesNotMatch(JSON.stringify(safe), /Location|X-Amz-Credential|X-Amz-Signature|X-Amz-Security-Token|secret/);
 });
 test("AWS-supplied version, not request operation, separates cleanup and install", () => {
   for (const [operation, version] of Object.entries({ INSTALL: "1", INSPECT: "1", CLOSE: "2", CLEANUP_CONTEXT: "2", AUTHORIZE: "3" })) {
