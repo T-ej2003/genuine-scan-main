@@ -60,9 +60,21 @@ export function createBrokerAuthorizationArchive({ manifest, packageSha256, s3, 
     assert((list.Contents || []).length <= 1 && (list.Contents || []).every(({ Key }) => Key === closureKey));
     if (!list.Contents?.length) return null;
     const record = JSON.parse(await (await s3("GetObject", { Bucket: bucket, Key: closureKey })).Body.transformToString());
+    assert.deepEqual(Object.keys(record).sort(), ["authorizationSha256", "cleanupSession", "live", "sourceSha", "state", "transitionId"]);
     assert.equal(record.state, "CLOSED");
     assert.equal(record.sourceSha, manifest.sourceSha);
     assert.equal(record.authorizationSha256, authorizationSha256);
+    assertComponentSessionRecord(record.cleanupSession);
+    assert.equal(record.cleanupSession.purpose, "CLEANUP");
+    assert.equal(record.cleanupSession.sourceSha, record.sourceSha);
+    assert.equal(record.cleanupSession.transitionId, record.transitionId);
+    assert.equal(record.cleanupSession.authorizationSha256, authorizationSha256);
+    assert.deepEqual(record.live.map(({ arn }) => arn), manifest.targets.map(({ arn }) => arn));
+    for (const target of record.live) {
+      assert.deepEqual(Object.keys(target).sort(), ["arn", "policy", "role"]);
+      assert(["ABSENT", "EXPECTED"].includes(target.role));
+      assert(["ABSENT", "EXPECTED"].includes(target.policy));
+    }
     return record;
   };
   const read = async () => {
@@ -102,6 +114,20 @@ export function createBrokerAuthorizationArchive({ manifest, packageSha256, s3, 
       // CLOSE still requires the exact fresh MFA/session proof and live readback.
       return { sourceSha: record.authorization.sourceSha, transitionId: record.authorization.transitionId,
         authorizationSha256: record.authorizationSha256, purpose: "CLEANUP" };
+    },
+    async terraformContext(event, context) {
+      assert.equal(context.functionVersion, "1");
+      assert.equal(context.invokedFunctionArn, `${functionArn}:1`);
+      assert.deepEqual(Object.keys(event).sort(), ["operation", "transitionId"]);
+      assert.equal(event.operation, "TERRAFORM_CONTEXT");
+      const record = await read();
+      assert(record, "No durable authorization");
+      assert.equal(record.authorization.transitionId, event.transitionId);
+      const closed = await closure(record.authorizationSha256);
+      assert(closed, "Verified installation closure required");
+      assert(closed.live.every(({ role, policy }) => role === "EXPECTED" && policy === "EXPECTED"), "Closed installation was not fully verified");
+      return { sourceSha: record.authorization.sourceSha, transitionId: record.authorization.transitionId,
+        authorizationSha256: record.authorizationSha256, purpose: "TERRAFORM" };
     },
     async authorize(event, context) {
       assert.equal(context.functionVersion, "3");
@@ -160,11 +186,16 @@ export function createBrokerAuthorizationArchive({ manifest, packageSha256, s3, 
       assert(record, "No durable authorization");
       assert.equal(record.authorization.transitionId, event.transitionId);
       assert.equal(record.authorizationSha256, event.authorizationSha256);
-      const cleanup = ["CLOSE", "PROVE_CLEANUP_SESSION"].includes(event.operation);
-      assertArchivedInstallationAuthorization(record.authorization, manifest, packageSha256, { now: now(), allowExpired: cleanup || event.operation === "PROVE_TERRAFORM_SESSION" });
-      if (!cleanup) {
+      const operationClass = ["CLOSE", "PROVE_CLEANUP_SESSION"].includes(event.operation) ? "CLEANUP"
+        : event.operation === "PROVE_TERRAFORM_SESSION" ? "PROVENANCE" : "MUTATION";
+      assertArchivedInstallationAuthorization(record.authorization, manifest, packageSha256, { now: now(), allowExpired: operationClass !== "MUTATION" });
+      if (operationClass === "MUTATION") {
         assert.equal(await closure(record.authorizationSha256), null, "Installation authorization consumed by closure");
         assert.equal(await currentMain(), manifest.sourceSha);
+      } else if (operationClass === "PROVENANCE") {
+        const closed = await closure(record.authorizationSha256);
+        assert(closed, "Verified installation closure required");
+        assert(closed.live.every(({ role, policy }) => role === "EXPECTED" && policy === "EXPECTED"), "Closed installation was not fully verified");
       }
       // Cleanup can read archived provenance after GitHub artifact expiry. It
       // receives no authority to install and must still obey the closure ledger.

@@ -161,16 +161,25 @@ adapter has been removed. After the IAM installation is verified, create a fresh
 owner-only directory outside the checkout and use:
 
 ```sh
-node scripts/aws/component-infrastructure-activation.mjs prepare PRIVATE_DIRECTORY INSTALLATION_APPROVAL_RUN_ID TRANSITION_UUID
+node scripts/aws/component-infrastructure-activation.mjs prepare PRIVATE_DIRECTORY TRANSITION_UUID
 ```
 
 Preparation authenticates all three deployment environments, current protected
-source, durable IAM receipt and live IAM documents, absent remote state/history,
+source, the closed durable IAM authorization/receipt and live IAM documents, absent remote state/history,
 and absent table. Hidden MFA issues the scoped Terraform session. Terraform runs
 with no network namespace access or host credential mounts; a fixed TLS relay
 permits only the required AWS endpoints. The reviewed Terraform/provider downloads
 are hash checked, the committed provider lock is read-only, and no host plugin
 cache or CLI override is accepted.
+
+The historical IAM approval may have expired before preparation. Its fixed AWS
+archive and closure remain provenance, never mutation authority: broker version 1
+discovers the exact transition, requires a fully verified closure and receipt,
+then authenticates the fresh scoped Terraform session. Closure continues to reject
+`INSTALL`, `INSPECT`, and installation-session proof. Terraform apply still needs
+its separate fresh environment-gated saved-plan approval. Saved-plan freshness is
+measured from GitHub's authenticated successful-run completion (`updated_at`), not
+workflow dispatch time; the completion timestamp is re-read unchanged with the run.
 
 Review the saved `activation.tfplan`, `preparation.json` and returned hashes.
 Dispatch `authorize-component-infrastructure-activation.yml` with their exact

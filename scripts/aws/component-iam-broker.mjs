@@ -241,6 +241,15 @@ export async function executeFixedBroker(event, context, { manifest, iam, s3, la
   const archive = createBrokerAuthorizationArchive({ manifest, packageSha256, s3, currentMain, now, reconcile: inspect });
   if (event.operation === "AUTHORIZE") return archive.authorize(event, context);
   if (event.operation === "CLEANUP_CONTEXT") return archive.cleanupContext(event, context);
+  if (event.operation === "TERRAFORM_CONTEXT") {
+    const provenance = await archive.terraformContext(event, context);
+    const authorization = await archive.authenticate({ operation: "PROVE_TERRAFORM_SESSION", transitionId: provenance.transitionId,
+      authorizationSha256: provenance.authorizationSha256 }, context);
+    const observed = await inspect(authorization);
+    assert.equal(observed.state, "IAM_VERIFIED", "Terraform requires durable verified IAM installation");
+    assert(observed.live.every(target => target.role === "EXPECTED" && target.policy === "EXPECTED"));
+    return provenance;
+  }
   assert.deepEqual(Object.keys(event).sort(), ["authorizationSha256", "operation", "proof", "transitionId"]);
   const { proof, ...request } = event;
   const authorization = await archive.authenticate(request, context);

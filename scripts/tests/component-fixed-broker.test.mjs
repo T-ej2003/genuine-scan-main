@@ -105,7 +105,7 @@ function fixture() {
     assert.equal(operation, "GetRuntimeManagementConfig");
     return { UpdateRuntimeOn: "FunctionUpdate", RuntimeVersionArn: null };
   };
-  f.run = (operation, fields = {}, version = { AUTHORIZE: "3", CLOSE: "2", CLEANUP_CONTEXT: "2", PROVE_CLEANUP_SESSION: "2", INSTALL: "1", INSPECT: "1", PROVE_INSTALL_SESSION: "1", PROVE_TERRAFORM_SESSION: "1" }[operation]) => {
+  f.run = (operation, fields = {}, version = { AUTHORIZE: "3", CLOSE: "2", CLEANUP_CONTEXT: "2", TERRAFORM_CONTEXT: "1", PROVE_CLEANUP_SESSION: "2", INSTALL: "1", INSPECT: "1", PROVE_INSTALL_SESSION: "1", PROVE_TERRAFORM_SESSION: "1" }[operation]) => {
     const purpose = f.proofPurpose || (["CLOSE", "PROVE_CLEANUP_SESSION"].includes(operation) ? "CLEANUP" : operation === "PROVE_TERRAFORM_SESSION" ? "TERRAFORM" : "INSTALL");
     const role = { CLEANUP: identityBootstrap.cleanupRole, INSTALL: identityBootstrap.installationRole, TERRAFORM: installationIdentity.terraformRole }[purpose];
     const binding = { sourceSha, transitionId, authorizationSha256: digest(authorization), purpose };
@@ -119,7 +119,8 @@ function fixture() {
       userIdentity: { type: "IAMUser", accountId: "368992683803", arn: "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator", sessionContext: { attributes: { mfaAuthenticated: "true" } } },
       requestParameters: { roleArn: `arn:aws:iam::368992683803:role/${role}`, roleSessionName: `component-${transitionId}`, durationSeconds: 900 },
       responseElements: { credentials: { accessKeyId: key, expiration: new Date(issued + 900000).toISOString() }, assumedRoleUser: { arn: principal, assumedRoleId: "role-id:session" } } };
-    const event = operation === "CLEANUP_CONTEXT" ? { operation, ...fields } : operation === "AUTHORIZE" ? { operation, authorization, ...fields } : { operation, transitionId, authorizationSha256: digest(authorization), proof, ...fields };
+    const event = operation === "CLEANUP_CONTEXT" ? { operation, ...fields } : operation === "TERRAFORM_CONTEXT" ? { operation, transitionId, ...fields }
+      : operation === "AUTHORIZE" ? { operation, authorization, ...fields } : { operation, transitionId, authorizationSha256: digest(authorization), proof, ...fields };
     return executeFixedBroker(event, { functionVersion: version, invokedFunctionArn: `${componentBrokerArn}:${version}` }, { manifest, iam, s3, lambda, currentMain: async () => f.main, now: () => f.clock,
       sts: async (request) => { assert.equal(request.headers["x-mscqr-component-binding"], sessionProofBinding(binding)); return { Account: "368992683803", Arn: principal, UserId: "role-id:session" }; }, issuanceEvents: async () => f.issuanceMissing ? [] : [issuance] });
   };
@@ -174,12 +175,11 @@ test("fresh-session inspection neither claims nor replaces active installation a
 
 test("Terraform proof is read-only, requires installed IAM and cannot become an IAM-write proof", async () => {
   const f = fixture(); await f.run("AUTHORIZE");
-  await assert.rejects(f.run("PROVE_TERRAFORM_SESSION"), /requires verified IAM/);
+  await assert.rejects(f.run("PROVE_TERRAFORM_SESSION"), /closure required/);
   await f.run("INSTALL");
   const before = JSON.stringify([...f.objects]), writes = [...f.writes];
   f.clock += 1800001; f.sessionIssuedAt = f.clock;
-  const proof = await f.run("PROVE_TERRAFORM_SESSION");
-  assert.equal(proof.state, "SESSION_VERIFIED"); assert.equal(proof.session.purpose, "TERRAFORM");
+  await assert.rejects(f.run("PROVE_TERRAFORM_SESSION"), /closure required/);
   assert.equal(JSON.stringify([...f.objects]), before); assert.deepEqual(f.writes, writes);
   f.proofPurpose = "TERRAFORM";
   await assert.rejects(f.run("INSTALL"));
@@ -187,6 +187,38 @@ test("Terraform proof is read-only, requires installed IAM and cannot become an 
   assert.equal(JSON.stringify([...f.objects]), before); assert.deepEqual(f.writes, writes);
   f.main = "d".repeat(40); await assert.rejects(f.run("PROVE_TERRAFORM_SESSION"));
 });
+
+for (const pauseMs of [1800001, 3600000]) test(`closed installation retains verified Terraform provenance after ${pauseMs}ms`, async () => {
+  const f = fixture(); await f.run("AUTHORIZE"); await f.run("INSTALL");
+  f.clock += 1000; f.sessionIssuedAt = f.clock;
+  await f.run("CLOSE");
+  const before = JSON.stringify([...f.objects]), writes = [...f.writes];
+  f.clock += pauseMs; f.sessionIssuedAt = f.clock;
+  assert.deepEqual(await f.run("TERRAFORM_CONTEXT"), { sourceSha, transitionId, authorizationSha256: digest(f.authorization), purpose: "TERRAFORM" });
+  const proof = await f.run("PROVE_TERRAFORM_SESSION");
+  assert.equal(proof.state, "SESSION_VERIFIED");
+  for (const operation of ["INSTALL", "INSPECT", "PROVE_INSTALL_SESSION"]) await assert.rejects(f.run(operation), /closure|expired/i);
+  assert.equal(JSON.stringify([...f.objects]), before); assert.deepEqual(f.writes, writes);
+});
+
+for (const scenario of ["wrong closure source", "wrong closure transition", "wrong closure authorization", "wrong capability", "wrong document binding", "missing receipt", "tampered receipt"]) {
+  test(`Terraform provenance rejects ${scenario}`, async () => {
+    const f = fixture(); await f.run("AUTHORIZE"); await f.run("INSTALL");
+    f.clock += 1000; f.sessionIssuedAt = f.clock; await f.run("CLOSE");
+    const closure = f.objects.get(`${prefix}permission-installation.json`).value;
+    const archived = f.objects.get(`${prefix}installation-authorization.json`).value;
+    const receipt = f.objects.get(`${prefix}iam-installation.json`);
+    if (scenario === "wrong closure source") closure.sourceSha = "f".repeat(40);
+    if (scenario === "wrong closure transition") closure.transitionId = "12345678-1234-4234-8234-123456789def";
+    if (scenario === "wrong closure authorization") closure.authorizationSha256 = "f".repeat(64);
+    if (scenario === "wrong capability") archived.authorization.capabilitySetSha256 = "f".repeat(64);
+    if (scenario === "wrong document binding") archived.authorization.documentBindingsSha256 = "f".repeat(64);
+    if (scenario === "missing receipt") f.objects.delete(`${prefix}iam-installation.json`);
+    if (scenario === "tampered receipt") receipt.value.documentBindingsSha256 = "f".repeat(64);
+    f.clock += 3600000; f.sessionIssuedAt = f.clock;
+    await assert.rejects(f.run("TERRAFORM_CONTEXT"));
+  });
+}
 
 for (const qualifier of ["$LATEST", "1", "2", "3"]) test(`broker rejects a resource policy bypass on ${qualifier}`, async () => {
   const f = fixture();

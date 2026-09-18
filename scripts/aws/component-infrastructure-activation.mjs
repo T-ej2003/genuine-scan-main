@@ -6,9 +6,9 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { cleanSource } from "./component-iam-installation.mjs";
-import { establishComponentSession } from "./component-installation-session.mjs";
+import { establishComponentTerraformSession } from "./component-installation-session.mjs";
 import { assertComponentSessionRecord } from "./component-session-proof.mjs";
-import { authenticatePublishedComponentAuthorization, authenticateTerraformActivationAuthorization, readComponentActivationEnvironments } from "./component-iam-authorization.mjs";
+import { authenticateTerraformActivationAuthorization, readComponentActivationEnvironments } from "./component-iam-authorization.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const stack = "infra/aws/terraform/production-component-deployment-state";
@@ -83,13 +83,15 @@ function privateBytes(file, limit) {
   return fs.readFileSync(file);
 }
 
-export async function run(argv = process.argv.slice(2), { source = cleanSource, installApproval = authenticatePublishedComponentAuthorization,
-  planApproval = authenticateTerraformActivationAuthorization, environments = readComponentActivationEnvironments, session = establishComponentSession } = {}) {
-  const [mode, directory, runId, transition] = argv;
+export async function run(argv = process.argv.slice(2), { source = cleanSource,
+  planApproval = authenticateTerraformActivationAuthorization, environments = readComponentActivationEnvironments, session = establishComponentTerraformSession } = {}) {
+  const [mode, directory, argument] = argv;
   assert(["prepare", "apply"].includes(mode), "Unsupported activation operation");
-  assert.equal(argv.length, mode === "prepare" ? 4 : 3);
-  assert.match(runId || "", /^[1-9][0-9]*$/);
-  if (mode === "prepare") assert.match(transition || "", /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
+  assert.equal(argv.length, 3);
+  const runId = mode === "apply" ? argument : undefined;
+  const transition = mode === "prepare" ? argument : undefined;
+  if (mode === "apply") assert.match(runId || "", /^[1-9][0-9]*$/);
+  else assert.match(transition || "", /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
   assert(path.isAbsolute(directory || ""));
   const work = fs.realpathSync(directory), stat = fs.statSync(work);
   assert(stat.isDirectory() && stat.uid === process.getuid() && (stat.mode & 0o077) === 0);
@@ -107,10 +109,7 @@ export async function run(argv = process.argv.slice(2), { source = cleanSource, 
   };
   if (mode === "prepare") {
     assert(!fs.existsSync(preparationPath) && !fs.existsSync(planPath), "Use a fresh private plan directory");
-    const authorized = installApproval({ runId, sourceSha, transitionId: transition });
-    assert.equal(authorized.sourceSha, sourceSha); assert.equal(authorized.transitionId, transition);
-    assert.match(authorized.authorizationSha256 || "", /^[a-f0-9]{64}$/);
-    binding = { sourceSha, transitionId: transition, authorizationSha256: authorized.authorizationSha256, purpose: "TERRAFORM" };
+    binding = { transitionId: transition };
   } else {
     const bytes = privateBytes(preparationPath, 1024 * 1024);
     preparationSha256 = hash(bytes); preparation = JSON.parse(bytes);
@@ -124,7 +123,7 @@ export async function run(argv = process.argv.slice(2), { source = cleanSource, 
     approved = approvePlan();
   }
   sourceGuard();
-  const client = await session(binding);
+  const client = await session({ sourceSha, transitionId: binding.transitionId });
   try {
     const baseline = await client.inspect();
     assert.equal(baseline.stateIdentity, "ABSENT");

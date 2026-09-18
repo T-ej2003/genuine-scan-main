@@ -157,6 +157,7 @@ function authenticatePublication(input, { execute, env = process.env, now = Date
     user(run.actor); user(run.triggering_actor);
     assert(timestamp(run.created_at) <= now());
     assert(timestamp(run.updated_at) <= now());
+    assert(timestamp(run.created_at) <= timestamp(run.updated_at));
   };
   protectedMain(api("branches/main"), sourceSha);
   const run = api(`actions/runs/${runId}`);
@@ -205,7 +206,10 @@ function authenticatePublication(input, { execute, env = process.env, now = Date
   }
   if (terraformBinding) {
     assert.deepEqual(authorization, terraformBinding, "Saved-plan approval bindings differ");
-    assert(now() - timestamp(run.created_at) < componentIamAuthorization.maxAgeMs, "Saved-plan approval expired");
+    // A successful environment-gated run can complete only after approval.
+    // GitHub's authenticated completion timestamp is the effective freshness
+    // origin; workflow dispatch time is not approval time.
+    assert(now() - timestamp(run.updated_at) < componentIamAuthorization.maxAgeMs, "Saved-plan approval expired");
     protectedMain(api("branches/main"), sourceSha);
     const finalRun = api(`actions/runs/${runId}`); verifyRun(finalRun);
     assert.equal(finalRun.created_at, run.created_at); assert.equal(finalRun.updated_at, run.updated_at);

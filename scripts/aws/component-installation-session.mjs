@@ -36,12 +36,19 @@ export async function establishComponentSession(binding, dependencies = {}) {
 // archive, not a retained GitHub artifact or caller-selected authorization file.
 export async function establishComponentCleanupSession(transitionId, dependencies = {}) {
   assert.match(transitionId || "", /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
-  return establish({ transitionId, purpose: "CLEANUP" }, dependencies, true);
+  return establish({ transitionId, purpose: "CLEANUP" }, dependencies, "CLEANUP");
 }
 
-async function establish(binding, { loadUser = loadOperator, sts = stsTransport, mfa = () => promptProductionMfaCode({ prompt: "Component installation operator MFA code: " }), invoke, isolated = executeIsolatedTerraform, state = createTerraformStateBoundary, now = Date.now, sleep = delay } = {}, discover = false) {
+export async function establishComponentTerraformSession(binding, dependencies = {}) {
+  assert.deepEqual(Object.keys(binding).sort(), ["sourceSha", "transitionId"]);
+  assert.match(binding.sourceSha || "", /^[a-f0-9]{40}$/);
+  assert.match(binding.transitionId || "", /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
+  return establish({ ...binding, purpose: "TERRAFORM" }, dependencies, "TERRAFORM");
+}
+
+async function establish(binding, { loadUser = loadOperator, sts = stsTransport, mfa = () => promptProductionMfaCode({ prompt: "Component installation operator MFA code: " }), invoke, isolated = executeIsolatedTerraform, state = createTerraformStateBoundary, now = Date.now, sleep = delay } = {}, discovery = null) {
   const fixedBinding = structuredClone(binding);
-  if (!discover) sessionProofBinding(fixedBinding);
+  if (!discovery) sessionProofBinding(fixedBinding);
   assert(Object.hasOwn(roles, fixedBinding.purpose));
   let base;
   let human;
@@ -93,11 +100,15 @@ async function establish(binding, { loadUser = loadOperator, sts = stsTransport,
       assert.equal(result.ExecutedVersion, fixedBinding.purpose === "CLEANUP" ? "2" : "1");
       return JSON.parse(Buffer.from(result.Payload).toString("utf8"));
     };
-    if (discover) {
-      const archived = await send({ operation: "CLEANUP_CONTEXT" });
+    if (discovery) {
+      const expectedSource = fixedBinding.sourceSha;
+      const archived = await send(discovery === "TERRAFORM"
+        ? { operation: "TERRAFORM_CONTEXT", transitionId: fixedBinding.transitionId }
+        : { operation: "CLEANUP_CONTEXT" });
       sessionProofBinding(archived);
-      assert.equal(archived.purpose, "CLEANUP");
+      assert.equal(archived.purpose, discovery);
       assert.equal(archived.transitionId, fixedBinding.transitionId, "Different cleanup transition");
+      if (discovery === "TERRAFORM") assert.equal(archived.sourceSha, expectedSource, "Durable installation belongs to different protected source");
       Object.assign(fixedBinding, archived);
     }
     const signedPayload = async operation => {

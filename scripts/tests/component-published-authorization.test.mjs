@@ -96,6 +96,32 @@ test("saved-plan approval authenticates the exact GitHub archive", () => {
   const f = fixture(() => {}, false, true);
   assert.deepEqual(f.authenticate(), f.files["authorization.json"]);
 });
+for (const [name, age, accepted] of [
+  ["completion plus max age minus one millisecond", installationContract.maxAgeMs - 1, true],
+  ["completion plus exact max age", installationContract.maxAgeMs, false],
+  ["completion plus max age and one millisecond", installationContract.maxAgeMs + 1, false],
+]) test(`saved-plan freshness uses ${name}`, () => {
+  const completed = Date.parse("2026-09-17T12:46:00.000Z");
+  const f = fixture(value => {
+    value.run.created_at = "2026-09-17T12:00:00.000Z";
+    value.run.updated_at = new Date(completed).toISOString();
+    value.now = completed + age;
+  }, false, true);
+  if (accepted) assert.deepEqual(f.authenticate(), f.files["authorization.json"]);
+  else assert.throws(f.authenticate, /expired/);
+});
+test("saved-plan approval remains fresh after a 45-minute environment wait", () => {
+  const f = fixture(value => {
+    value.run.created_at = "2026-09-17T12:00:00.000Z";
+    value.run.updated_at = "2026-09-17T12:46:00.000Z";
+    value.now = Date.parse("2026-09-17T12:46:01.000Z");
+  }, false, true);
+  assert.deepEqual(f.authenticate(), f.files["authorization.json"]);
+});
+for (const [name, mutate] of Object.entries({
+  "completion before dispatch": f => { f.run.updated_at = "2026-09-17T11:59:59.000Z"; },
+  "completion after observation": f => { f.run.updated_at = "2026-09-17T12:05:01.000Z"; },
+})) test(`saved-plan rejects ${name}`, () => assert.throws(fixture(mutate, false, true).authenticate));
 for (const name of ["missing approval", "different reviewer", "different environment", "rerun", "failed publisher", "different source", "expired authorization", "different artifact", "forged archive hash", "extra archive member"]) {
   test(`saved-plan archive rejects ${name}`, () => assert.throws(fixture(invalid[name], false, true).authenticate));
 }

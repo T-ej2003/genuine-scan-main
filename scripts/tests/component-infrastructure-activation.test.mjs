@@ -96,14 +96,15 @@ function fixture(t) {
   const dependencies = {
     source: () => f.sourceSha,
     environments: () => [1,2,3].map(() => ({ config, branches })),
-    installApproval: input => { f.calls.push("installation-approval"); assert.equal(input.sourceSha, sourceSha); return { ...input, authorizationSha256 }; },
     planApproval: () => {
       f.calls.push("plan-approval");
       if (f.rejectApproval) throw new Error("missing or wrong approval");
       return { sourceSha, planSha256, preparationSha256: f.preparationSha256 };
     },
-    session: async binding => {
+    session: async requested => {
       f.calls.push("MFA");
+      assert.deepEqual(requested, { sourceSha, transitionId });
+      const binding = { sourceSha, transitionId, authorizationSha256, purpose: "TERRAFORM" };
       assert.deepEqual(binding, { sourceSha, transitionId, authorizationSha256, purpose: "TERRAFORM" });
       const issued = Date.now();
       const proof = { ...binding, account: contract.account, region: contract.region,
@@ -141,7 +142,7 @@ function fixture(t) {
       };
     },
   };
-  f.prepare = async () => { const result = await run(["prepare", directory, "123", transitionId], dependencies); f.preparationSha256 = result.preparationSha256; return result; };
+  f.prepare = async () => { const result = await run(["prepare", directory, transitionId], dependencies); f.preparationSha256 = result.preparationSha256; return result; };
   f.apply = () => run(["apply", directory, "456"], dependencies);
   return f;
 }
@@ -152,7 +153,7 @@ test("sole operator prepares an isolated plan and explicitly approves its exact 
   assert.equal(f.reservations, 0); assert.equal(f.applies, 0);
   assert.equal((await f.apply()).state, "INFRA_ACTIVATION_VERIFIED");
   assert.equal(f.reservations, 1); assert.equal(f.applies, 1);
-  assert(f.calls.indexOf("installation-approval") < f.calls.indexOf("MFA"));
+  assert(!f.calls.includes("installation-approval"));
   assert(f.calls.indexOf("plan-approval") < f.calls.lastIndexOf("MFA"));
   assert.equal(f.calls.at(-1), "close-session");
 });
@@ -193,7 +194,7 @@ test("legacy administrator, host Terraform and credential-export execution paths
   const source = fs.readFileSync("scripts/aws/component-infrastructure-activation.mjs", "utf8");
   for (const forbidden of [/execFileSync/, /profile:\s*"default"/, /auditEnv/, /exec\("terraform"/, /authenticateOperatorSession/, /createAssumedRoleSessionEnvironment/]) assert(!forbidden.test(source));
 });
-for (const argv of [[], ["prepare", "/tmp"], ["apply"], ["root", "123"], ["prepare", "/tmp", "123", "../transition"]]) test("actual activation CLI rejects malformed or obsolete command " + JSON.stringify(argv), () => {
+for (const argv of [[], ["prepare", "/tmp"], ["apply"], ["root", "123"], ["prepare", "/tmp", "123", "../transition"], ["prepare", "/tmp", "123", "12345678-1234-4234-8234-123456789abc"]]) test("actual activation CLI rejects malformed or obsolete command " + JSON.stringify(argv), () => {
   const result = spawnSync(process.execPath, ["scripts/aws/component-infrastructure-activation.mjs", ...argv], { env: { PATH: "/usr/bin:/bin" }, encoding: "utf8", timeout: 15000 });
   assert.equal(result.status, 1); assert.equal(result.stdout, "");
   assert.equal(result.stderr, "Component infrastructure activation rejected; reconcile exact state before retry.\n");

@@ -678,3 +678,20 @@ isolated pinned Terraform/provider fmt, backend-disabled readonly initialization
 and validation pass, along with the changed activation tests (29 total).
 Source references: [Terraform S3 backend](https://github.com/hashicorp/terraform/blob/v1.15.8/internal/backend/remote-state/s3/backend.go)
 and [AWS provider retry configuration](https://github.com/hashicorp/terraform-provider-aws/blob/v6.65.0/website/docs/index.html.markdown).
+
+### Closed-installation provenance lifecycle correction
+
+IAM mutation authority now ends at installation closure, while the fixed broker
+retains a separate read-only path for authenticating the closed installation's
+durable authorization, verified IAM receipt, exact live IAM state and fresh
+Terraform session. This provenance path accepts an expired historical installation
+approval only after exact closure and cannot install, inspect through the mutation
+lane, renew or reopen installation authority. Terraform apply still requires its
+own current saved-plan approval and scoped session.
+
+Saved-plan approval freshness now starts at GitHub's authenticated successful-run
+completion timestamp, not workflow dispatch. The final run is re-read with the
+same creation and completion timestamps, so a legitimate environment wait does
+not consume the approval lifetime. Exact maximum age is rejected. Focused tests
+cover 30 minutes plus one millisecond, one hour, closure/tamper failures, mutation
+rejection and approval freshness boundaries. No production operation was run.

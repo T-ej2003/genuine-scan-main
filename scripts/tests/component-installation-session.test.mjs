@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { establishComponentSession, establishComponentCleanupSession } from "../aws/component-installation-session.mjs";
+import { establishComponentSession, establishComponentCleanupSession, establishComponentTerraformSession } from "../aws/component-installation-session.mjs";
 import { authenticateComponentSession } from "../aws/component-session-proof.mjs";
 import { identityBootstrap, componentBrokerArn } from "../aws/component-installation-identity-contract.mjs";
 
@@ -39,10 +39,10 @@ function fixture(purpose = "INSTALL") {
         f.proofFailures--;
         return { StatusCode: 200, ExecutedVersion: version, FunctionError: "Unhandled" };
       }
-      const result = payload.operation === "CLEANUP_CONTEXT" ? (f.context || binding) : payload.operation.startsWith("PROVE_")
+      const result = ["CLEANUP_CONTEXT", "TERRAFORM_CONTEXT"].includes(payload.operation) ? (f.context || binding) : payload.operation.startsWith("PROVE_")
         ? { state: "SESSION_VERIFIED", principal, expiresAt: scoped.Expiration.toISOString(), sourceSha: binding.sourceSha, transitionId: binding.transitionId, authorizationSha256: binding.authorizationSha256 }
         : { state: "test-accepted" };
-      if (purpose === "TERRAFORM") result.session = { account: "368992683803", region: "eu-west-2", ...binding, principal,
+      if (purpose === "TERRAFORM" && payload.operation === "PROVE_TERRAFORM_SESSION") result.session = { account: "368992683803", region: "eu-west-2", ...binding, principal,
         issuedAt: new Date(start).toISOString(), expiresAt: scoped.Expiration.toISOString(), issuanceEventId: "12345678-1234-4234-8234-123456789def", issuanceEventTime: new Date(start).toISOString(),
         operatorArn: user.Arn, mfaAuthenticated: true, ...(f.sessionOverride || {}) };
       return { StatusCode: 200, ExecutedVersion: version, Payload: Buffer.from(JSON.stringify(result)) };
@@ -154,6 +154,22 @@ test("cleanup discovers durable coordinates without GitHub artifacts or local au
   assert.equal(f.payloads[2].transitionId, f.binding.transitionId);
   assert(f.payloads[2].proof);
   await assert.rejects(client.invoke("INSTALL"));
+});
+
+test("Terraform discovers closed verified installation provenance without the expired GitHub artifact", async () => {
+  const f = fixture("TERRAFORM");
+  f.context = f.binding;
+  f.dependencies.state = () => ({ inspect: async () => ({ stateIdentity: "ABSENT" }), reserve: async () => {}, close: () => {} });
+  const client = await establishComponentTerraformSession({ sourceSha: f.binding.sourceSha, transitionId: f.binding.transitionId }, f.dependencies);
+  assert.deepEqual(f.payloads, [{ operation: "TERRAFORM_CONTEXT", transitionId: f.binding.transitionId }]);
+  await client.inspect();
+  assert.equal(f.payloads[1].operation, "PROVE_TERRAFORM_SESSION");
+  client.close();
+});
+test("Terraform provenance from a different protected source is rejected before execution", async () => {
+  const f = fixture("TERRAFORM");
+  f.context = { ...f.binding, sourceSha: "c".repeat(40) };
+  await assert.rejects(establishComponentTerraformSession({ sourceSha: f.binding.sourceSha, transitionId: f.binding.transitionId }, f.dependencies), /different protected source/);
 });
 
 for (const change of [{ purpose: "INSTALL" }, { transitionId: "12345678-1234-4234-8234-123456789def" }, { sourceSha: "invalid" }, { evidenceKey: "alternate" }]) {
