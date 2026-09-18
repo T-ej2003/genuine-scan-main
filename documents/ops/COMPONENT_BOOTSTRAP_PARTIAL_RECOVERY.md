@@ -79,10 +79,12 @@ The closed journal retains the original bootstrap fields as immutable incident
 lineage. A broker built from the recovery source must therefore authenticate
 both lineages: the original source, authorization, transition, package and
 manifest first; then the complete `RECOVERY_CLOSED` record. The recovery's
-source, package and manifest become the effective broker binding only when its
-state, operation list, partial-state digest, authorization lineage, final
-versions and identity readback are all exact. Any present-but-invalid recovery
-metadata fails closed; the broker never falls back to the historical binding.
+source, package and manifest become the effective *predecessor* binding only
+when its state, operation list, partial-state digest, authorization lineage,
+final versions and identity readback are all exact. Any present-but-invalid
+recovery metadata fails closed; the broker never falls back to the historical
+binding. A later broker package is not implicitly accepted by this recovery
+record: it must be bound by its own governed `BROKER_CHANGE` transition.
 
 This check is shared by every fixed broker entry point, including authorization
 archive, installation, cleanup context and Terraform provenance.

@@ -129,7 +129,7 @@ function fixture({ currentSourceSha = sourceSha, currentPackageSha256 = packageS
 }
 
 function recoveredFixture() {
-  const f = fixture({ currentSourceSha: completedBootstrapRecovery.sourceSha, currentPackageSha256: completedBootstrapRecovery.packageSha256 });
+  const f = fixture();
   const runtimeVersions = { 1: runtimeArn, 2: runtimeArn, 3: runtimeArn };
   const operatorProof = { account: identityBootstrap.account, region: identityBootstrap.region, sourceSha: historicalBootstrapIncident.sourceSha,
     transitionId: historicalBootstrapIncident.transitionId, authorizationSha256: historicalBootstrapIncident.authorizationSha256,
@@ -142,12 +142,12 @@ function recoveredFixture() {
     authorization: historicalBootstrapAuthorization(), owner: "12345678-1234-4234-8234-123456789aaa", manifestSha256: historicalBootstrapIncident.manifestSha256,
     identitySetSha256: historicalBootstrapIncident.identitySetSha256, packageSha256: historicalBootstrapIncident.packageSha256, operatorProof,
     identities, identityReadbackSha256: digest(identities), runtimeVersions,
-    broker: { functionArn: componentBrokerArn, packageSha256: completedBootstrapRecovery.packageSha256, manifestSha256: digest(f.manifest), runtimeVersions }, closedAt: "2026-09-18T12:00:00.000Z",
+    broker: { functionArn: componentBrokerArn, packageSha256: completedBootstrapRecovery.packageSha256, manifestSha256: completedBootstrapRecovery.manifestSha256, runtimeVersions }, closedAt: "2026-09-18T12:00:00.000Z",
     recovery: { schemaVersion: 1, state: "RECOVERY_CLOSED", transitionId: completedBootstrapRecovery.transitionId, authorizationSha256: completedBootstrapRecovery.authorizationSha256,
-      sourceSha: f.manifest.sourceSha, oldPackageSha256: historicalBootstrapIncident.packageSha256, newPackageSha256: completedBootstrapRecovery.packageSha256, newManifestSha256: digest(f.manifest),
+      sourceSha: completedBootstrapRecovery.sourceSha, oldPackageSha256: historicalBootstrapIncident.packageSha256, newPackageSha256: completedBootstrapRecovery.packageSha256, newManifestSha256: completedBootstrapRecovery.manifestSha256,
       partialStateSha256: bootstrapPartialStateDigest(), remainingOperations: bootstrapRecoveryOperations, authorizationExpiresAt: "2026-09-18T12:30:00.000Z",
       sessionExpiresAt: "2026-09-18T12:15:00.000Z", authorizationHistory: [], owner: "12345678-1234-4234-8234-123456789def", closedAt: "2026-09-18T12:01:00.000Z",
-      oldRevisionId: historicalBootstrapIncident.revisionId, finalPackageSha256: completedBootstrapRecovery.packageSha256, finalManifestSha256: digest(f.manifest), versions: ["1", "2", "3"] } };
+      oldRevisionId: historicalBootstrapIncident.revisionId, finalPackageSha256: completedBootstrapRecovery.packageSha256, finalManifestSha256: completedBootstrapRecovery.manifestSha256, versions: ["1", "2", "3"] } };
   f.objects.set(`${prefix}identity-bootstrap.json`, { value: f.bootstrap, etag: "recovered" });
   return f;
 }
@@ -267,7 +267,7 @@ test("recovered bootstrap closure authorizes fixed broker entry points without r
   assert.equal((await f.run("CLEANUP_CONTEXT")).transitionId, transitionId);
   assert.equal((await f.run("INSPECT")).state, "IAM_VERIFIED");
   assert.equal(f.bootstrap.sourceSha, historicalBootstrapIncident.sourceSha);
-  assert.equal(f.bootstrap.recovery.sourceSha, f.manifest.sourceSha);
+  assert.equal(f.bootstrap.recovery.sourceSha, completedBootstrapRecovery.sourceSha);
 });
 
 for (const [name, mutate] of [
