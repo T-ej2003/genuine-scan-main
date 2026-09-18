@@ -80,6 +80,17 @@ function fixture() {
     issuedAt: new Date(now).toISOString(), expiresAt: new Date(now + 900000).toISOString(), issuanceEventId: "12345678-1234-4234-8234-123456789def",
     issuanceEventTime: new Date(now).toISOString(), operatorArn: "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator", mfaAuthenticated: true };
   state.authenticate = async () => {};
+  state.renew = (advance = bootstrapRecovery.maxAgeMs + 60_001) => {
+    state.clock += advance;
+    authorization.runId = String(Number(authorization.runId) + 1);
+    authorization.approvalObservedAt = new Date(state.clock).toISOString();
+    authorization.expiresAt = new Date(state.clock + bootstrapRecovery.maxAgeMs).toISOString();
+    operatorProof.authorizationSha256 = digest(authorization);
+    operatorProof.issuedAt = new Date(state.clock).toISOString();
+    operatorProof.issuanceEventTime = new Date(state.clock).toISOString();
+    operatorProof.expiresAt = new Date(state.clock + 900_000).toISOString();
+    operatorProof.issuanceEventId = `12345678-1234-4234-8234-${String(123456789000 + Number(authorization.runId)).slice(-12)}`;
+  };
   state.execute = () => executeBootstrapRecovery({ authorization, packageEvidence, operatorProof }, { iam, lambda, s3, authenticate: state.authenticate, now: () => state.clock, sleep: async () => {} });
   return state;
 }
@@ -105,7 +116,7 @@ for (let boundary = 1; boundary <= 2; boundary++) test(`accepted-but-lost guarde
 });
 for (let boundary = 3; boundary <= 9; boundary++) test(`accepted-but-lost forward-completion write ${boundary} resumes from live readback`, async () => {
   const f = fixture(); f.after = (_operation, count) => { if (count === boundary) throw new Error("timeout"); };
-  await assert.rejects(f.execute()); f.after = () => {};
+  await assert.rejects(f.execute()); f.after = () => {}; f.renew();
   assert.equal((await f.execute()).state, "BOOTSTRAP_CLOSED"); assert.equal(f.writes.filter(value => value === "UpdateFunctionCode").length, 1);
 });
 
@@ -120,6 +131,27 @@ test("two concurrent recoveries have one journal-CAS winner", async () => {
   const f = fixture(), outcomes = await Promise.allSettled([f.execute(), f.execute()]);
   assert.equal(outcomes.filter(value => value.status === "fulfilled").length, 1); assert.equal(outcomes.filter(value => value.status === "rejected").length, 1);
   assert.equal(f.writes.filter(value => value === "UpdateFunctionCode").length, 1);
+});
+
+test("expired recovery owner transfers only through fresh approval, fenced session and CAS", async () => {
+  const f = fixture(); f.after = (_operation, count) => { if (count === 3) throw new Error("lost controller"); };
+  await assert.rejects(f.execute(), /lost controller/); f.after = () => {};
+  await assert.rejects(f.execute(), /fresh approval/);
+  f.renew(bootstrapRecovery.maxAgeMs - 1);
+  await assert.rejects(f.execute(), /safely fenced/);
+  f.renew(60_002);
+  assert.equal((await f.execute()).state, "BOOTSTRAP_CLOSED");
+  assert.equal(f.record.recovery.authorizationHistory.length, 1);
+  assert.equal(f.writes.filter(value => value === "UpdateFunctionCode").length, 1);
+});
+
+test("concurrent fenced resumptions have one CAS owner before any remaining Lambda write", async () => {
+  const f = fixture(); f.after = (_operation, count) => { if (count === 3) throw new Error("lost controller"); };
+  await assert.rejects(f.execute()); f.after = () => {}; f.renew();
+  const before = f.writes.length, outcomes = await Promise.allSettled([f.execute(), f.execute()]);
+  assert.equal(outcomes.filter(value => value.status === "fulfilled").length, 1);
+  assert.equal(outcomes.filter(value => value.status === "rejected").length, 1);
+  assert.equal(f.writes.slice(before).filter(value => value === "PublishVersion").length, 3);
 });
 
 test("definite pre-acceptance package failure leaves old code and never retries blindly", async () => {

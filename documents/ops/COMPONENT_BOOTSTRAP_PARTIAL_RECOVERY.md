@@ -61,6 +61,14 @@ protected-branch-only selection are invalid.
    recovery provenance. An ambiguous response is resolved by exact live
    readback. Never retry with ad-hoc AWS CLI commands.
 
+If a controller is lost after reserving recovery, its approval cannot be
+reused. A replacement waits until both the recorded approval and human session
+have expired plus the source-owned safety margin, obtains a fresh environment
+approval and MFA session for the same recovery transition, and CAS-transfers
+the journal to a new owner. A live owner or losing CAS contender performs no
+further Lambda write. The closure retains the complete authorization/owner
+lineage.
+
 After closure, ordinary bootstrap and the recovery authorization are
 non-replayable. Component IAM installation remains a separate governed step and
 must not start before exact bootstrap closure.

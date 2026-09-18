@@ -11,6 +11,7 @@ import { assertComponentSessionRecord } from "./component-session-proof.mjs";
 
 const key = `${identityBootstrap.prefix}identity-bootstrap.json`;
 const absent = error => error?.name === "ResourceNotFoundException";
+const takeoverMarginMs = 60_000;
 
 export async function executeBootstrapRecovery({ authorization, packageEvidence, operatorProof }, { iam, lambda, s3, authenticate, now = Date.now, sleep = delay }) {
   assert.equal(createHash("sha256").update(packageEvidence.bytes).digest("hex"), packageEvidence.packageSha256, "Corrected package bytes differ");
@@ -106,7 +107,8 @@ export async function executeBootstrapRecovery({ authorization, packageEvidence,
   if (!initial.value.recovery) await inspectPartial();
   const claim = { schemaVersion: 1, state: "RECOVERY_EXECUTING", transitionId: approval.transitionId, authorizationSha256,
     sourceSha: approval.newSourceSha, oldPackageSha256: historicalBootstrapIncident.packageSha256, newPackageSha256: approval.newPackageSha256,
-    newManifestSha256: approval.newManifestSha256, partialStateSha256: approval.partialStateSha256, remainingOperations: bootstrapRecoveryOperations, owner };
+    newManifestSha256: approval.newManifestSha256, partialStateSha256: approval.partialStateSha256, remainingOperations: bootstrapRecoveryOperations,
+    authorizationExpiresAt: approval.expiresAt, sessionExpiresAt: human.expiresAt, authorizationHistory: [], owner };
   if (!initial.value.recovery) {
     activeRecord = { ...initial.value, recovery: claim };
     await authorize();
@@ -120,12 +122,32 @@ export async function executeBootstrapRecovery({ authorization, packageEvidence,
     assert.deepEqual(Object.keys(recovery).sort(), Object.keys(claim).sort(), "Malformed recovery reservation");
     assert.match(recovery.owner || "", /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
     for (const [field, expected] of Object.entries({ schemaVersion: 1, state: "RECOVERY_EXECUTING", transitionId: approval.transitionId,
-      authorizationSha256, sourceSha: approval.newSourceSha, oldPackageSha256: historicalBootstrapIncident.packageSha256,
+      sourceSha: approval.newSourceSha, oldPackageSha256: historicalBootstrapIncident.packageSha256,
       newPackageSha256: approval.newPackageSha256, newManifestSha256: approval.newManifestSha256, partialStateSha256: approval.partialStateSha256 })) {
       assert.equal(recovery[field], expected, `Recovery reservation ${field} differs`);
     }
     assert.deepEqual(recovery.remainingOperations, bootstrapRecoveryOperations);
-    activeRecord = initial.value;
+    assert(Array.isArray(recovery.authorizationHistory));
+    for (const entry of recovery.authorizationHistory) {
+      assert.deepEqual(Object.keys(entry).sort(), ["authorizationExpiresAt", "authorizationSha256", "owner", "sessionExpiresAt"].sort());
+      assert.match(entry.authorizationSha256, /^[a-f0-9]{64}$/); assert.match(entry.owner, /^[a-f0-9-]{36}$/);
+      assert(Number.isFinite(Date.parse(entry.authorizationExpiresAt))); assert(Number.isFinite(Date.parse(entry.sessionExpiresAt)));
+    }
+    assert(Number.isFinite(Date.parse(recovery.authorizationExpiresAt))); assert(Number.isFinite(Date.parse(recovery.sessionExpiresAt)));
+    assert.notEqual(recovery.authorizationSha256, authorizationSha256, "An existing owner cannot be resumed without fresh approval");
+    const fenceAt = Math.max(Date.parse(recovery.authorizationExpiresAt), Date.parse(recovery.sessionExpiresAt)) + takeoverMarginMs;
+    assert(now() >= fenceAt, "Prior recovery owner is not safely fenced");
+    assert(Date.parse(human.issuanceEventTime) >= fenceAt, "Fresh recovery session predates ownership fence");
+    const predecessor = { authorizationSha256: recovery.authorizationSha256, authorizationExpiresAt: recovery.authorizationExpiresAt,
+      sessionExpiresAt: recovery.sessionExpiresAt, owner: recovery.owner };
+    const transferred = { ...claim, authorizationHistory: [...recovery.authorizationHistory, predecessor] };
+    activeRecord = { ...initial.value, recovery: transferred };
+    await authorize();
+    try { await s3("PutObject", { Bucket: identityBootstrap.bucket, Key: key, Body: canonical(activeRecord), ServerSideEncryption: "AES256", IfMatch: initial.etag }); }
+    catch {
+      const observed = await readJournal();
+      assert.equal(canonical(observed.value), canonical(activeRecord), "Concurrent recovery won ownership transfer");
+    }
   }
   ({ etag: activeEtag } = await readJournal());
   const guard = async () => {
@@ -160,7 +182,7 @@ export async function executeBootstrapRecovery({ authorization, packageEvidence,
   const broker = await bootstrapFixedBroker(packageEvidence, { lambda, authorize: guard, sleep });
   const live = await inspectIdentities();
   const closed = { ...activeRecord, state: "BOOTSTRAP_CLOSED", identities: live, broker, runtimeVersions: broker.runtimeVersions,
-    closedAt: new Date(now()).toISOString(), identityReadbackSha256: digest(live), recovery: { ...claim, state: "RECOVERY_CLOSED", closedAt: new Date(now()).toISOString(),
+    closedAt: new Date(now()).toISOString(), identityReadbackSha256: digest(live), recovery: { ...activeRecord.recovery, state: "RECOVERY_CLOSED", closedAt: new Date(now()).toISOString(),
       oldRevisionId: historicalBootstrapIncident.revisionId, finalPackageSha256: broker.packageSha256, finalManifestSha256: broker.manifestSha256,
       versions: Object.keys(broker.runtimeVersions) } };
   await guard();
