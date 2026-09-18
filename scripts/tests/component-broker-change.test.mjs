@@ -75,6 +75,15 @@ test("ambiguous accepted update and closure reconcile by exact readback without 
   const result = await f.execute(); assert.equal(result.brokerChange.state, "BROKER_CHANGE_CLOSED"); assert.equal(f.writes.filter(write => write === "UpdateFunctionCode").length, 1);
 });
 
+test("interrupted broker change requires fresh fenced authorization and rejects malformed checkpoint lineage", async () => {
+  const f = fixture(); f.before = operation => { if (operation === "UpdateFunctionConfiguration") throw new Error("interrupted"); };
+  await assert.rejects(f.execute()); assert.equal(f.record.brokerChange.state, "CODE_UPDATED");
+  const writes = f.writes.length; f.renew(); f.record.brokerChange.policyCheckpoints = [brokerChangeManagedIdentities()[0].role];
+  await assert.rejects(f.execute()); assert.equal(f.writes.length, writes);
+  f.record.brokerChange.policyCheckpoints = []; f.before = () => {};
+  assert.equal((await f.execute()).brokerChange.state, "BROKER_CHANGE_CLOSED");
+});
+
 test("closed broker change cannot replay and no changed identity receives broker mutation capability", async () => {
   const f = fixture(), closed = await f.execute(); await assert.rejects(f.execute());
   const anchor = assertEffectiveBootstrapTrustAnchor(closed, componentBrokerPackageManifest(closed.brokerChange.sourceSha), closed.brokerChange.successor.packageSha256);

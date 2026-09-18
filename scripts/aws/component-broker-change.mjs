@@ -80,6 +80,22 @@ export async function executeBrokerChange({ authorization, packageEvidence, oper
     configurationSha256: approval.successorConfigurationSha256, identitySetSha256: approval.successorIdentitySetSha256,
     remainingOperations: brokerChangeOperations, authorizationExpiresAt: approval.expiresAt, sessionExpiresAt: human.expiresAt,
     authorizationHistory: [], owner, runtimeVersions: {}, policyCheckpoints: [] });
+  const assertReservation = (existing) => {
+    const required = ["schemaVersion", "state", "transitionId", "authorizationSha256", "sourceSha", "predecessor", "successor", "configurationSha256", "identitySetSha256", "remainingOperations", "authorizationExpiresAt", "sessionExpiresAt", "authorizationHistory", "owner", "runtimeVersions", "policyCheckpoints", ...(existing.state === "VERIFIED" ? ["identityReadbackSha256"] : [])];
+    assert.deepEqual(Object.keys(existing).sort(), required.sort(), "Malformed broker change reservation");
+    const states = ["EXECUTING", "CODE_UPDATED", "INSTALL_DESCRIPTION_SET", "VERSION_4", "CLEANUP_DESCRIPTION_SET", "VERSION_5", "AUTHORIZE_DESCRIPTION_SET", "VERSION_6", "IDENTITY_POLICY_1", "IDENTITY_POLICY_2", "IDENTITY_POLICY_3", "IDENTITY_POLICY_4", "IDENTITY_POLICY_5", "VERIFIED"];
+    assert(states.includes(existing.state), "Unknown broker change checkpoint"); assert.deepEqual(existing.runtimeVersions, {}, "Active broker change cannot predeclare runtime versions");
+    const roles = brokerChangeManagedIdentities().map(({ role }) => role), completed = existing.state === "VERIFIED" ? roles.length : existing.state.startsWith("IDENTITY_POLICY_") ? Number(existing.state.at(-1)) : 0;
+    assert.deepEqual(existing.policyCheckpoints, roles.slice(0, completed), "Broker change policy checkpoint lineage differs");
+    assert(Array.isArray(existing.authorizationHistory));
+    const seen = new Set([existing.authorizationSha256]); assert.match(existing.authorizationSha256 || "", /^[a-f0-9]{64}$/);
+    for (const prior of existing.authorizationHistory) {
+      assert.deepEqual(Object.keys(prior).sort(), ["authorizationExpiresAt", "authorizationSha256", "owner", "sessionExpiresAt"]);
+      assert.match(prior.authorizationSha256 || "", /^[a-f0-9]{64}$/); uuid(prior.owner);
+      for (const field of ["authorizationExpiresAt", "sessionExpiresAt"]) assert.equal(new Date(Date.parse(prior[field])).toISOString(), prior[field]);
+      assert(!seen.has(prior.authorizationSha256), "Repeated broker change authorization"); seen.add(prior.authorizationSha256);
+    }
+  };
   await authorize(); let initial = await readJournal();
   let record = claimRecord();
   if (!Object.hasOwn(initial.value, "brokerChange")) {
@@ -88,9 +104,7 @@ export async function executeBrokerChange({ authorization, packageEvidence, oper
     const existing = initial.value.brokerChange;
     assert(existing && typeof existing === "object" && !Array.isArray(existing));
     if (existing.state === "BROKER_CHANGE_CLOSED") throw new Error("Broker change is already closed");
-    const required = ["schemaVersion", "state", "transitionId", "authorizationSha256", "sourceSha", "predecessor", "successor", "configurationSha256", "identitySetSha256", "remainingOperations", "authorizationExpiresAt", "sessionExpiresAt", "authorizationHistory", "owner", "runtimeVersions", "policyCheckpoints", ...(existing.state === "VERIFIED" ? ["identityReadbackSha256"] : [])];
-    assert.deepEqual(Object.keys(existing).sort(), required.sort(), "Malformed broker change reservation");
-    assert(["EXECUTING", "CODE_UPDATED", "INSTALL_DESCRIPTION_SET", "VERSION_4", "CLEANUP_DESCRIPTION_SET", "VERSION_5", "AUTHORIZE_DESCRIPTION_SET", "VERSION_6", "IDENTITY_POLICY_1", "IDENTITY_POLICY_2", "IDENTITY_POLICY_3", "IDENTITY_POLICY_4", "IDENTITY_POLICY_5", "VERIFIED"].includes(existing.state), "Unknown broker change checkpoint"); assert.equal(existing.transitionId, approval.transitionId); assert.equal(existing.sourceSha, approval.successorSourceSha);
+    assertReservation(existing); assert.equal(existing.transitionId, approval.transitionId); assert.equal(existing.sourceSha, approval.successorSourceSha);
     assert.deepEqual(existing.predecessor, brokerChangePredecessor()); assert.deepEqual(existing.successor, record.successor); assert.deepEqual(existing.remainingOperations, brokerChangeOperations); assert(Array.isArray(existing.policyCheckpoints) && existing.policyCheckpoints.every(role => brokerChangeManagedIdentities().some(target => target.role === role)) && new Set(existing.policyCheckpoints).size === existing.policyCheckpoints.length);
     assert.notEqual(existing.authorizationSha256, authorizationSha256, "Existing owner requires fresh authorization");
     const fenceAt = Math.max(Date.parse(existing.authorizationExpiresAt), Date.parse(existing.sessionExpiresAt)) + takeoverMarginMs;

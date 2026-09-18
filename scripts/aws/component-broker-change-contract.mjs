@@ -17,6 +17,7 @@ export const brokerChange = Object.freeze({
 
 export const brokerChangeOperations = Object.freeze([
   "UPDATE_EXACT_BROKER_CODE",
+  "SET_INSTALL_SUCCESSOR_DESCRIPTION",
   "PUBLISH_INSTALL_SUCCESSOR_VERSION",
   "SET_CLEANUP_SUCCESSOR_DESCRIPTION",
   "PUBLISH_CLEANUP_SUCCESSOR_VERSION",
