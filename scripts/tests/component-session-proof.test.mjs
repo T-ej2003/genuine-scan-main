@@ -10,7 +10,7 @@ function fixture(purpose = "INSTALL") {
   const query = { Action: "GetCallerIdentity", Version: "2011-06-15", "X-Amz-Algorithm": "AWS4-HMAC-SHA256", "X-Amz-Credential": `${key}/20260917/eu-west-2/sts/aws4_request`,
     "X-Amz-Date": "20260917T120000Z", "X-Amz-Expires": "60", "X-Amz-Security-Token": "disposable-test-session", "X-Amz-Signature": "c".repeat(64), "X-Amz-SignedHeaders": "host;x-mscqr-component-binding" };
   const role = { INSTALL: identityBootstrap.installationRole, CLEANUP: identityBootstrap.cleanupRole,
-    IDENTITY_BOOTSTRAP: "mscqr-production-release-deployer", TERRAFORM: "mscqr-production-component-table-installer" }[purpose];
+    IDENTITY_BOOTSTRAP: "mscqr-production-release-deployer", BROKER_CHANGE: "mscqr-production-release-deployer", TERRAFORM: "mscqr-production-component-table-installer" }[purpose];
   const principal = `arn:aws:sts::368992683803:assumed-role/${role}/component-${binding.transitionId}`;
   const caller = { Account: "368992683803", Arn: principal, UserId: "role-id:session" };
   const event = { eventID: "12345678-1234-4234-8234-123456789def", eventTime: "2026-09-17T12:00:00Z", eventSource: "sts.amazonaws.com", eventName: "AssumeRole", awsRegion: "eu-west-2", recipientAccountId: "368992683803",
@@ -70,7 +70,7 @@ test("AWS signature validation plus unique MFA issuance evidence supplies non-se
 });
 
 test("default production STS verifier parses the namespaced Query API XML for every session purpose", async () => {
-  for (const purpose of ["INSTALL", "CLEANUP", "IDENTITY_BOOTSTRAP", "TERRAFORM"]) {
+  for (const purpose of ["INSTALL", "CLEANUP", "IDENTITY_BOOTSTRAP", "BROKER_CHANGE", "TERRAFORM"]) {
     const f = fixture(purpose);
     f.caller.UserId = "role-id:session&bound";
     f.events[0].responseElements.assumedRoleUser.assumedRoleId = f.caller.UserId;

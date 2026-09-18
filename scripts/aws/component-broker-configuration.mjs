@@ -3,11 +3,18 @@ import { installationIdentity, digest, canonical } from "./component-iam-install
 import { componentBrokerArn, componentRoleArn } from "./component-installation-identity-contract.mjs";
 
 export const brokerEntryPoints = Object.freeze({ INSTALL: "1", CLEANUP: "2", AUTHORIZE: "3" });
-export function brokerConfiguration({ packageSha256, manifestSha256, entryPoint }) {
+// A broker change publishes another immutable three-entry set.  This is not
+// configurable input: these are the only two source-owned entry layouts.
+export const brokerChangeEntryPoints = Object.freeze({ INSTALL: "4", CLEANUP: "5", AUTHORIZE: "6" });
+function assertEntryPoints(value) {
+  assert(value === brokerEntryPoints || value === brokerChangeEntryPoints, "Unreviewed broker entry-point set");
+  return value;
+}
+export function brokerConfiguration({ packageSha256, manifestSha256, entryPoint, entryPoints = brokerEntryPoints }) {
   assert.match(packageSha256 || "", /^[a-f0-9]{64}$/);
   assert.match(manifestSha256 || "", /^[a-f0-9]{64}$/);
-  assert(Object.hasOwn(brokerEntryPoints, entryPoint));
-  const version = brokerEntryPoints[entryPoint];
+  assertEntryPoints(entryPoints); assert(Object.hasOwn(entryPoints, entryPoint));
+  const version = entryPoints[entryPoint];
   return {
     FunctionName: installationIdentity.functionName, FunctionArn: `${componentBrokerArn}:${version}`,
     Version: version, CodeSha256: Buffer.from(packageSha256, "hex").toString("base64"),
@@ -73,8 +80,10 @@ export function redactBrokerDiagnostic(value) {
     .map(([key, item]) => [key, redactBrokerDiagnostic(item)]));
 }
 
-export function assertBrokerEntryPoint(context, operation) {
-  const version = { INSTALL: "1", INSPECT: "1", PROVE_INSTALL_SESSION: "1", TERRAFORM_CONTEXT: "1", PROVE_TERRAFORM_SESSION: "1", CLOSE: "2", CLEANUP_CONTEXT: "2", PROVE_CLEANUP_SESSION: "2", AUTHORIZE: "3" }[operation];
+export function assertBrokerEntryPoint(context, operation, entryPoints = brokerEntryPoints) {
+  assertEntryPoints(entryPoints);
+  const entry = { INSTALL: "INSTALL", INSPECT: "INSTALL", PROVE_INSTALL_SESSION: "INSTALL", TERRAFORM_CONTEXT: "INSTALL", PROVE_TERRAFORM_SESSION: "INSTALL", CLOSE: "CLEANUP", CLEANUP_CONTEXT: "CLEANUP", PROVE_CLEANUP_SESSION: "CLEANUP", AUTHORIZE: "AUTHORIZE" }[operation];
+  const version = entry && entryPoints[entry];
   assert(version, "Unsupported broker operation");
   assert.equal(context.functionVersion, version, "Operation not authorized on this immutable entry point");
   assert.equal(context.invokedFunctionArn, `${componentBrokerArn}:${version}`, "Unqualified/alias invocation forbidden");

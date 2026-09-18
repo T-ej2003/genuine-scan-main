@@ -4,7 +4,7 @@ import fs from "node:fs";
 import { createBrokerAuthorizationArchive } from "./component-broker-authorization.mjs";
 import { assertBrokerEntryPoint, assertBrokerConfiguration, brokerConfiguration } from "./component-broker-configuration.mjs";
 import { assertEffectiveBootstrapTrustAnchor } from "./component-bootstrap-trust-anchor.mjs";
-import { inspectBootstrapIdentities } from "./component-installation-identity-contract.mjs";
+import { componentBrokerArn, inspectBootstrapIdentities, inspectBrokerChangeIdentities } from "./component-installation-identity-contract.mjs";
 import { authenticateComponentSession, claimComponentSession } from "./component-session-proof.mjs";
 
 const canonical = (value) => JSON.stringify(sort(value));
@@ -151,7 +151,6 @@ export async function handler(event, context) {
 }
 
 async function runHandler(event, context) {
-  assertBrokerEntryPoint(context, event?.operation);
   const manifest = JSON.parse(fs.readFileSync(new URL("./installation-manifest.json", import.meta.url), "utf8"));
   const iamSdk = await import("@aws-sdk/client-iam");
   const s3Sdk = await import("@aws-sdk/client-s3");
@@ -204,25 +203,29 @@ async function runHandler(event, context) {
 // Transport injection is for offline state-machine tests. The deployed handler
 // supplies only fixed SDK clients and its immutable package, never request data.
 export async function executeFixedBroker(event, context, { manifest, iam, s3, lambda, currentMain, issuanceEvents, sts, now = Date.now }) {
-  const version = assertBrokerEntryPoint(context, event?.operation);
   assert.equal(manifest.account, account);
   const bootstrap = JSON.parse(await (await s3("GetObject", { Bucket: bucket, Key: "mscqr/production/component-deployment-state/identity-bootstrap.json" })).Body.transformToString());
   const functionName = "mscqr-production-component-iam-installer";
-  const fn = await lambda("GetFunction", { FunctionName: functionName, Qualifier: version });
+  assert.match(context?.functionVersion || "", /^[1-9][0-9]*$/, "Unqualified broker invocation forbidden");
+  assert.equal(context?.invokedFunctionArn, `${componentBrokerArn}:${context.functionVersion}`, "Broker invocation ARN differs");
+  const fn = await lambda("GetFunction", { FunctionName: functionName, Qualifier: context.functionVersion });
   const packageSha256 = Buffer.from(fn.Configuration.CodeSha256, "base64").toString("hex");
-  assertEffectiveBootstrapTrustAnchor(bootstrap, manifest, packageSha256);
-  const identities = await inspectBootstrapIdentities(iam);
+  const anchor = assertEffectiveBootstrapTrustAnchor(bootstrap, manifest, packageSha256);
+  const version = assertBrokerEntryPoint(context, event?.operation, anchor.entryPoints);
+  const identities = await (anchor.changed ? inspectBrokerChangeIdentities(iam) : inspectBootstrapIdentities(iam));
   assert(identities.every(({ role, policy }) => role === "EXPECTED" && policy === "EXPECTED"), "Bootstrap execution authority is incomplete");
   const [concurrency, signing, runtime] = await Promise.all([
     lambda("GetFunctionConcurrency", { FunctionName: functionName }),
     lambda("GetFunctionCodeSigningConfig", { FunctionName: functionName }),
     lambda("GetRuntimeManagementConfig", { FunctionName: functionName, Qualifier: version }),
   ]);
-  assert.equal(fn.Configuration.RuntimeVersionConfig?.RuntimeVersionArn, bootstrap.runtimeVersions[version], "Bootstrapped runtime changed");
-  assertBrokerConfiguration(fn, brokerConfiguration({ packageSha256, manifestSha256: hash(manifest), entryPoint: { 1: "INSTALL", 2: "CLEANUP", 3: "AUTHORIZE" }[version] }), { concurrency, signing, runtime });
+  assert.equal(fn.Configuration.RuntimeVersionConfig?.RuntimeVersionArn, anchor.runtimeVersions[version], "Bootstrapped runtime changed");
+  const entryPoint = Object.entries(anchor.entryPoints).find(([, value]) => value === version)?.[0];
+  assert(entryPoint, "Unknown immutable broker entry point");
+  assertBrokerConfiguration(fn, brokerConfiguration({ packageSha256, manifestSha256: hash(manifest), entryPoint, entryPoints: anchor.entryPoints }), { concurrency, signing, runtime });
   // Identity policies are the only invocation grant. A resource policy on the
   // function or any fixed entry version could bypass the authorizer role trust.
-  for (const qualifier of [null, "1", "2", "3"]) {
+  for (const qualifier of [null, ...anchor.allVersions]) {
     let missingPolicy = false;
     try { await lambda("GetPolicy", { FunctionName: functionName, ...(qualifier ? { Qualifier: qualifier } : {}) }); }
     catch (error) {
@@ -234,7 +237,7 @@ export async function executeFixedBroker(event, context, { manifest, iam, s3, la
   const bind = (authorization) => ({ ...manifest, ...authorization.authorization, authorizationSha256: authorization.authorizationSha256,
     authorizedPredecessors: authorization.history.map((item) => item.authorizationSha256) });
   const inspect = (authorization) => createInstallationHandler({ manifest: bind(authorization), iam, s3, currentMain, cleanup: true, now })({ operation: "INSPECT", transitionId: authorization.authorization.transitionId });
-  const archive = createBrokerAuthorizationArchive({ manifest, packageSha256, s3, currentMain, now, reconcile: inspect });
+  const archive = createBrokerAuthorizationArchive({ manifest, packageSha256, s3, currentMain, now, reconcile: inspect, entryPoints: anchor.entryPoints });
   if (event.operation === "AUTHORIZE") return archive.authorize(event, context);
   if (event.operation === "CLEANUP_CONTEXT") return archive.cleanupContext(event, context);
   if (event.operation === "TERRAFORM_CONTEXT") {

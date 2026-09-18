@@ -72,7 +72,7 @@ test("reusable publisher approval and preparation precede OIDC; only exact broke
   const credentials = job.steps.findIndex((step) => step.uses?.startsWith("aws-actions/configure-aws-credentials@"));
   assert(credentials > job.steps.findIndex((step) => step.run?.includes("authorization-publisher.mjs prepare")));
   assert.equal(job.steps[credentials].with["role-duration-seconds"], 900);
-  assert.match(source, /component-iam-installer:3/);
+  assert.match(source, /component-iam-installer:6/);
   assert.doesNotMatch(source, /lambda (create|update|delete)|iam |terraform |pull_request_target/);
   const authorizer = componentSessionIdentities()[2];
   assert.equal(authorizer.trust.Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:job_workflow_ref"], `${installationIdentity.repository}/${file}@refs/heads/main`);

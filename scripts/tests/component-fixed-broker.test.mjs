@@ -419,3 +419,8 @@ test("an unfinished or substituted bootstrap record cannot authorize any broker 
     assert.deepEqual(f.writes, []);
   }
 });
+
+test("broker change metadata without a recovered predecessor never falls back to an original trust anchor", async () => {
+  const f = fixture(); f.bootstrap.brokerChange = { state: "BROKER_CHANGE_CLOSED" };
+  await assert.rejects(f.run("AUTHORIZE")); assert.deepEqual(f.writes, []);
+});

@@ -59,6 +59,10 @@ This exception does not change Stage-A/Stage-B or other governance domains.
 The separate installation environment is
 `production-component-infrastructure-install-permission`. Initial identity
 bootstrap uses `production-component-installation-identity-bootstrap`.
+An already recovered broker can change only through the separately configured
+`production-component-installation-broker-change` environment. It has the same
+single User reviewer and exact `main` branch contract; GitHub must not create it
+implicitly.
 The normal deployment, component-state bootstrap and table-activation environments
 retain their exact contracts. Never broaden an OIDC subject to bypass approval.
 
@@ -100,7 +104,8 @@ Use a clean current protected-main checkout after merge. Dispatch the exact
 `authorize-component-iam-installation.yml` workflow with `source_sha` and a UUIDv4
 `transition_id`. T-ej2003 explicitly approves its environment request. The fixed
 reusable publisher authenticates source and approval before acquiring OIDC
-credentials, then invokes only broker version 3 to archive the authorization.
+credentials, then invokes only the authenticated successor broker version 6 to
+archive the authorization.
 Record the successful first-attempt run ID.
 
 Future operator commands, after prerequisites are installed and verified:
@@ -141,6 +146,29 @@ workflow and installation command. The broker retains authenticated approval
 lineage, finishes only missing exact writes, and cannot reopen a closed transition.
 Source changes require new governance, hashes and approvals; they never inherit
 an old transition silently.
+
+## Governed broker change after a recovered bootstrap
+
+The recovery closure is immutable predecessor evidence; it does not authorize a
+future package. Merge the successor source, configure and authenticate the exact
+`production-component-installation-broker-change` environment, dispatch
+`authorize-component-installation-broker-change.yml` with a fresh UUIDv4 and the
+current protected-main SHA, then obtain explicit environment approval. From a
+clean current-main worktree, run:
+
+```sh
+node scripts/aws/component-broker-change-cli.mjs execute APPROVED_RUN_ID TRANSITION_UUID
+```
+
+The command binds the complete recovered predecessor and the exact successor
+source, package, manifest, code, configuration and invocation policies. It can
+update the fixed broker once with `Publish=false`, publish versions 4–6 in order,
+rebind only the five fixed execution identities, verify, and CAS-close the
+existing journal. It cannot select another function/package/configuration, alter
+trust or execution authority, add resource policy, or pass a role. Interrupted
+changes require fresh approval, expiry fencing, exact checkpoint readback and CAS
+transfer. A malformed or incomplete change fails closed; source merge alone never
+updates the deployed broker.
 
 Cleanup requires only the transition ID and a fresh exact cleanup-role session.
 Broker version 2 exposes read-only `CLEANUP_CONTEXT` at its fixed evidence location

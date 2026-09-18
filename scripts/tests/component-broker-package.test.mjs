@@ -11,7 +11,7 @@ test("package manifest binds all fixed runtime source, locked dependencies, and 
   assert.deepEqual(manifest, componentBrokerPackageManifest("a".repeat(40)));
   assert.equal(manifest.documentBindingsSha256, digest(documentBindings()));
   assert.deepEqual(manifest.identities, bootstrapManagedIdentities());
-  assert.equal(Object.keys(manifest.sourceFiles).length, 16);
+  assert.equal(Object.keys(manifest.sourceFiles).length, 17);
   for (const [name, hash] of Object.entries(manifest.sourceFiles)) {
     const bytes = fs.readFileSync(new URL(`../../${name}`, import.meta.url));
     assert.equal(hash, crypto.createHash("sha256").update(bytes).digest("hex"));

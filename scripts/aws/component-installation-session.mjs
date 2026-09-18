@@ -86,7 +86,7 @@ async function establish(binding, { loadUser = loadOperator, sts = stsTransport,
     const signer = new SignatureV4({ credentials: credentialsForSdk(scoped), region: identityBootstrap.region, service: "sts", sha256: Sha256 });
     const send = async (payload) => {
       assert(now() < expires, "AWS session expired");
-      const input = { FunctionName: `${componentBrokerArn}:${fixedBinding.purpose === "CLEANUP" ? "2" : "1"}`, InvocationType: "RequestResponse", Payload: Buffer.from(JSON.stringify(payload)) };
+      const input = { FunctionName: `${componentBrokerArn}:${fixedBinding.purpose === "CLEANUP" ? "5" : "4"}`, InvocationType: "RequestResponse", Payload: Buffer.from(JSON.stringify(payload)) };
       let result;
       if (invoke) result = await invoke(input);
       else {
@@ -97,7 +97,7 @@ async function establish(binding, { loadUser = loadOperator, sts = stsTransport,
       }
       assert.equal(result.StatusCode, 200);
       assert(!result.FunctionError, "Broker rejected the request; authenticate live evidence before retry");
-      assert.equal(result.ExecutedVersion, fixedBinding.purpose === "CLEANUP" ? "2" : "1");
+      assert.equal(result.ExecutedVersion, fixedBinding.purpose === "CLEANUP" ? "5" : "4");
       return JSON.parse(Buffer.from(result.Payload).toString("utf8"));
     };
     if (discovery) {

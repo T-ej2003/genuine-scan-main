@@ -10,7 +10,7 @@ import { buildComponentBrokerPackage } from "./component-broker-package.mjs";
 import { digest } from "./component-iam-installation-contract.mjs";
 
 // Pure evidence construction, not a local grant. Only the fixed reusable
-// workflow's OIDC role can submit this to immutable broker entry version 3.
+// workflow's OIDC role can submit this to immutable successor broker entry version 6.
 export function approvedInstallationRequest({ sourceSha, transitionId, runId, main, run, environment, branches, approvals, packageEvidence, now }) {
   const contract = componentIamAuthorization;
   assert.equal(main.name, "main");

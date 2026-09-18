@@ -8,7 +8,7 @@ const start = Date.parse("2026-09-17T12:00:00Z");
 function fixture(purpose = "INSTALL") {
   const binding = { sourceSha: "a".repeat(40), transitionId: "12345678-1234-4234-8234-123456789abc", authorizationSha256: "b".repeat(64), purpose };
   const role = { INSTALL: identityBootstrap.installationRole, CLEANUP: identityBootstrap.cleanupRole, TERRAFORM: "mscqr-production-component-table-installer" }[purpose];
-  const version = purpose === "CLEANUP" ? "2" : "1";
+  const version = purpose === "CLEANUP" ? "5" : "4";
   const principal = `arn:aws:sts::368992683803:assumed-role/${role}/component-${binding.transitionId}`;
   const user = { Account: "368992683803", Arn: "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator" };
   const key = ["A", "S", "I", "A"].join("") + "0".repeat(16);

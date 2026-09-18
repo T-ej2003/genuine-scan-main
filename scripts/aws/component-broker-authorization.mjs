@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { assertComponentSessionRecord } from "./component-session-proof.mjs";
 import { assertExpiredSession } from "./component-installation-identity-contract.mjs";
+import { brokerChangeEntryPoints, brokerEntryPoints } from "./component-broker-configuration.mjs";
 
 const canonical = (value) => JSON.stringify(sorted(value));
 function sorted(value) {
@@ -53,7 +54,8 @@ export function assertArchivedInstallationAuthorization(value, manifest, package
   return digest(value);
 }
 
-export function createBrokerAuthorizationArchive({ manifest, packageSha256, s3, currentMain, reconcile, now = Date.now }) {
+export function createBrokerAuthorizationArchive({ manifest, packageSha256, s3, currentMain, reconcile, entryPoints = brokerEntryPoints, now = Date.now }) {
+  assert(entryPoints === brokerEntryPoints || entryPoints === brokerChangeEntryPoints, "Unreviewed broker entry points");
   const closure = async (authorizationSha256) => {
     const list = await s3("ListObjectsV2", { Bucket: bucket, Prefix: closureKey });
     assert(!list.IsTruncated);
@@ -105,8 +107,8 @@ export function createBrokerAuthorizationArchive({ manifest, packageSha256, s3, 
   };
   const api = {
     async cleanupContext(event, context) {
-      assert.equal(context.functionVersion, "2");
-      assert.equal(context.invokedFunctionArn, `${functionArn}:2`);
+      assert.equal(context.functionVersion, entryPoints.CLEANUP);
+      assert.equal(context.invokedFunctionArn, `${functionArn}:${entryPoints.CLEANUP}`);
       assert.deepEqual(event, { operation: "CLEANUP_CONTEXT" });
       const record = await read();
       assert(record, "No durable authorization");
@@ -116,8 +118,8 @@ export function createBrokerAuthorizationArchive({ manifest, packageSha256, s3, 
         authorizationSha256: record.authorizationSha256, purpose: "CLEANUP" };
     },
     async terraformContext(event, context) {
-      assert.equal(context.functionVersion, "1");
-      assert.equal(context.invokedFunctionArn, `${functionArn}:1`);
+      assert.equal(context.functionVersion, entryPoints.INSTALL);
+      assert.equal(context.invokedFunctionArn, `${functionArn}:${entryPoints.INSTALL}`);
       assert.deepEqual(Object.keys(event).sort(), ["operation", "transitionId"]);
       assert.equal(event.operation, "TERRAFORM_CONTEXT");
       const record = await read();
@@ -130,8 +132,8 @@ export function createBrokerAuthorizationArchive({ manifest, packageSha256, s3, 
         authorizationSha256: record.authorizationSha256, purpose: "TERRAFORM" };
     },
     async authorize(event, context) {
-      assert.equal(context.functionVersion, "3");
-      assert.equal(context.invokedFunctionArn, `${functionArn}:3`);
+      assert.equal(context.functionVersion, entryPoints.AUTHORIZE);
+      assert.equal(context.invokedFunctionArn, `${functionArn}:${entryPoints.AUTHORIZE}`);
       assert.deepEqual(Object.keys(event).sort(), ["authorization", "operation"]);
       assert.equal(event.operation, "AUTHORIZE");
       assert.equal(await currentMain(), manifest.sourceSha);
@@ -178,7 +180,7 @@ export function createBrokerAuthorizationArchive({ manifest, packageSha256, s3, 
     },
     async authenticate(event, context) {
       assert.deepEqual(Object.keys(event).sort(), ["authorizationSha256", "operation", "transitionId"]);
-      const version = { INSTALL: "1", INSPECT: "1", PROVE_INSTALL_SESSION: "1", PROVE_TERRAFORM_SESSION: "1", CLOSE: "2", PROVE_CLEANUP_SESSION: "2" }[event.operation];
+      const version = { INSTALL: entryPoints.INSTALL, INSPECT: entryPoints.INSTALL, PROVE_INSTALL_SESSION: entryPoints.INSTALL, PROVE_TERRAFORM_SESSION: entryPoints.INSTALL, CLOSE: entryPoints.CLEANUP, PROVE_CLEANUP_SESSION: entryPoints.CLEANUP }[event.operation];
       assert(version, "Unsupported semantic operation");
       assert.equal(context.functionVersion, version);
       assert.equal(context.invokedFunctionArn, `${functionArn}:${version}`);

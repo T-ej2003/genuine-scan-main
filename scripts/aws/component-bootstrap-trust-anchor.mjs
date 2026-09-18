@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { bootstrapPartialStateDigest, bootstrapRecoveryOperations, completedBootstrapRecovery, historicalBootstrapAuthorization, historicalBootstrapIncident } from "./component-bootstrap-partial-recovery-contract.mjs";
+import { brokerChangeConfigurationSha256, brokerChangeOperations, brokerChangePredecessor } from "./component-broker-change-contract.mjs";
+import { brokerChangeEntryPoints, brokerEntryPoints } from "./component-broker-configuration.mjs";
 import { digest } from "./component-iam-installation-contract.mjs";
-import { bootstrapManagedIdentities, componentBrokerArn } from "./component-installation-identity-contract.mjs";
+import { bootstrapManagedIdentities, brokerChangeManagedIdentities, componentBrokerArn } from "./component-installation-identity-contract.mjs";
 import { assertComponentSessionRecord } from "./component-session-proof.mjs";
 
 const sha256 = value => assert.match(value || "", /^[a-f0-9]{64}$/);
@@ -21,7 +23,7 @@ function assertHistoricalLineage(bootstrap) {
 }
 
 function assertRecoveredClosure(bootstrap) {
-  const expectedKeys = ["authorization", "authorizationSha256", "broker", "closedAt", "identities", "identityReadbackSha256", "identitySetSha256", "manifestSha256", "operatorProof", "owner", "packageSha256", "recovery", "runtimeVersions", "schemaVersion", "sourceSha", "state", "transitionId"];
+  const expectedKeys = ["authorization", "authorizationSha256", "broker", ...(Object.hasOwn(bootstrap, "brokerChange") ? ["brokerChange"] : []), "closedAt", "identities", "identityReadbackSha256", "identitySetSha256", "manifestSha256", "operatorProof", "owner", "packageSha256", "recovery", "runtimeVersions", "schemaVersion", "sourceSha", "state", "transitionId"];
   assert.deepEqual(Object.keys(bootstrap).sort(), expectedKeys.sort(), "Malformed recovered bootstrap closure");
   assertHistoricalLineage(bootstrap);
   assert.equal(bootstrap.state, "BOOTSTRAP_CLOSED"); timestamp(bootstrap.closedAt);
@@ -57,7 +59,48 @@ function assertRecoveredClosure(bootstrap) {
   assert.deepEqual(bootstrap.broker, { functionArn: componentBrokerArn, packageSha256: completedBootstrapRecovery.packageSha256,
     manifestSha256: completedBootstrapRecovery.manifestSha256, runtimeVersions: bootstrap.runtimeVersions });
   assert.deepEqual(recovery.versions, ["1", "2", "3"]);
-  return { sourceSha: recovery.sourceSha, packageSha256: recovery.finalPackageSha256, manifestSha256: recovery.finalManifestSha256, recovered: true };
+  return { sourceSha: recovery.sourceSha, packageSha256: recovery.finalPackageSha256, manifestSha256: recovery.finalManifestSha256, recovered: true, entryPoints: brokerEntryPoints, allVersions: ["1", "2", "3"], runtimeVersions: bootstrap.runtimeVersions };
+}
+
+// The BROKER_CHANGE controller authenticates this immutable predecessor before
+// it can reserve a successor transition. It deliberately refuses any existing
+// change metadata; resumption is handled by that controller's exact CAS record.
+export function assertCompletedRecoveryTrustAnchor(bootstrap) {
+  assert(bootstrap && typeof bootstrap === "object" && !Array.isArray(bootstrap));
+  assert.equal(bootstrap.state, "BOOTSTRAP_CLOSED");
+  assert(Object.hasOwn(bootstrap, "recovery"), "Completed recovery predecessor required");
+  assert(!Object.hasOwn(bootstrap, "brokerChange"), "Existing broker change requires exact resumption");
+  return assertRecoveredClosure(bootstrap);
+}
+
+function assertBrokerChangeClosure(bootstrap, manifest, packageSha256) {
+  const recovery = assertRecoveredClosure(bootstrap);
+  const change = bootstrap.brokerChange;
+  const keys = ["authorizationExpiresAt", "authorizationHistory", "authorizationSha256", "closedAt", "configurationSha256", "identityReadbackSha256", "identitySetSha256", "owner", "policyCheckpoints", "predecessor", "remainingOperations", "runtimeVersions", "schemaVersion", "sessionExpiresAt", "sourceSha", "state", "successor", "transitionId"];
+  assert(change && typeof change === "object" && !Array.isArray(change), "Missing broker change closure");
+  assert.deepEqual(Object.keys(change).sort(), keys.sort(), "Malformed broker change closure");
+  assert.equal(change.schemaVersion, 1); assert.equal(change.state, "BROKER_CHANGE_CLOSED"); uuid(change.owner);
+  for (const field of ["authorizationExpiresAt", "sessionExpiresAt", "closedAt"]) timestamp(change[field]);
+  assert.deepEqual(change.predecessor, brokerChangePredecessor(), "Broker change predecessor differs");
+  assert.deepEqual(change.remainingOperations, brokerChangeOperations, "Broker change operations differ");
+  assert.deepEqual(change.policyCheckpoints, brokerChangeManagedIdentities().map(({ role }) => role), "Broker change identity checkpoint lineage differs");
+  assert(Array.isArray(change.authorizationHistory));
+  const authorizations = new Set([change.authorizationSha256]); sha256(change.authorizationSha256);
+  for (const prior of change.authorizationHistory) {
+    assert.deepEqual(Object.keys(prior).sort(), ["authorizationExpiresAt", "authorizationSha256", "owner", "sessionExpiresAt"]);
+    sha256(prior.authorizationSha256); uuid(prior.owner); timestamp(prior.authorizationExpiresAt); timestamp(prior.sessionExpiresAt);
+    assert(!authorizations.has(prior.authorizationSha256), "Repeated broker change authorization"); authorizations.add(prior.authorizationSha256);
+  }
+  const evidence = { manifest, manifestSha256: digest(manifest), packageSha256 };
+  const successor = { sourceSha: manifest.sourceSha, packageSha256, lambdaCodeSha256: Buffer.from(packageSha256, "hex").toString("base64"), manifestSha256: digest(manifest),
+    configurationSha256: brokerChangeConfigurationSha256(evidence), identitySetSha256: digest(brokerChangeManagedIdentities()), versions: ["4", "5", "6"] };
+  assert.deepEqual(change.successor, successor, "Broker change successor differs");
+  assert.equal(change.sourceSha, successor.sourceSha); assert.equal(change.configurationSha256, successor.configurationSha256);
+  assert.deepEqual(change.runtimeVersions && Object.keys(change.runtimeVersions).sort(), successor.versions, "Broker change runtime versions differ");
+  for (const value of Object.values(change.runtimeVersions || {})) assert.match(value || "", /^arn:aws:lambda:eu-west-2::runtime:[a-f0-9]{64}$/);
+  assert.equal(change.identitySetSha256, successor.identitySetSha256); assert.equal(change.identityReadbackSha256, digest(brokerChangeManagedIdentities().map(({ arn }) => ({ arn, role: "EXPECTED", policy: "EXPECTED" }))));
+  return { sourceSha: successor.sourceSha, packageSha256, manifestSha256: successor.manifestSha256, recovered: true, changed: true,
+    entryPoints: brokerChangeEntryPoints, allVersions: ["1", "2", "3", "4", "5", "6"], runtimeVersions: change.runtimeVersions, predecessor: recovery };
 }
 
 // The original record is immutable incident lineage. A completed recovery adds
@@ -66,10 +109,14 @@ export function assertEffectiveBootstrapTrustAnchor(bootstrap, manifest, package
   assert(bootstrap && typeof bootstrap === "object" && !Array.isArray(bootstrap));
   assert.equal(bootstrap.schemaVersion, 1); assert.equal(bootstrap.state, "BOOTSTRAP_CLOSED", "Trust anchor bootstrap is incomplete");
   sha256(packageSha256);
+  if (Object.hasOwn(bootstrap, "brokerChange")) {
+    assert(Object.hasOwn(bootstrap, "recovery"), "Broker change without recovered predecessor is invalid");
+    return assertBrokerChangeClosure(bootstrap, manifest, packageSha256);
+  }
   if (Object.hasOwn(bootstrap, "recovery")) return assertRecoveredClosure(bootstrap);
   assert.equal(bootstrap.sourceSha, manifest.sourceSha);
   assert.equal(bootstrap.manifestSha256, digest(manifest));
   assert.equal(bootstrap.identitySetSha256, digest(manifest.identities));
   assert.equal(bootstrap.packageSha256, packageSha256);
-  return { sourceSha: bootstrap.sourceSha, packageSha256, manifestSha256: bootstrap.manifestSha256, recovered: false };
+  return { sourceSha: bootstrap.sourceSha, packageSha256, manifestSha256: bootstrap.manifestSha256, recovered: false, entryPoints: brokerEntryPoints, allVersions: ["1", "2", "3"], runtimeVersions: bootstrap.runtimeVersions };
 }
