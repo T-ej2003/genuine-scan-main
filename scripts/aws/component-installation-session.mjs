@@ -5,6 +5,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { promptProductionMfaCode } from "../security/production-interactive-mfa-provider.mjs";
 import { createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { identityBootstrap, componentBrokerArn } from "./component-installation-identity-contract.mjs";
+import { brokerEntryPointCandidates } from "./component-broker-configuration.mjs";
 import { sessionProofBinding, assertComponentSessionRecord } from "./component-session-proof.mjs";
 import { executeIsolatedTerraform } from "./component-terraform-runner.mjs";
 import { createTerraformStateBoundary } from "./component-terraform-state.mjs";
@@ -86,18 +87,28 @@ async function establish(binding, { loadUser = loadOperator, sts = stsTransport,
     const signer = new SignatureV4({ credentials: credentialsForSdk(scoped), region: identityBootstrap.region, service: "sts", sha256: Sha256 });
     const send = async (payload) => {
       assert(now() < expires, "AWS session expired");
-      const input = { FunctionName: `${componentBrokerArn}:${fixedBinding.purpose === "CLEANUP" ? "5" : "4"}`, InvocationType: "RequestResponse", Payload: Buffer.from(JSON.stringify(payload)) };
-      let result;
-      if (invoke) result = await invoke(input);
-      else {
-        const sdk = requireSdk("@aws-sdk/client-lambda");
-        const client = new sdk.LambdaClient(options(scoped, "lambda"));
-        try { result = await client.send(new sdk.InvokeCommand(input)); }
-        finally { client.destroy(); }
+      const versions = brokerEntryPointCandidates(fixedBinding.purpose === "CLEANUP" ? "CLEANUP" : "INSTALL");
+      let result, version;
+      for (const candidate of versions) {
+        const input = { FunctionName: `${componentBrokerArn}:${candidate}`, InvocationType: "RequestResponse", Payload: Buffer.from(JSON.stringify(payload)) };
+        try {
+          if (invoke) result = await invoke(input);
+          else {
+            const sdk = requireSdk("@aws-sdk/client-lambda");
+            const client = new sdk.LambdaClient(options(scoped, "lambda"));
+            try { result = await client.send(new sdk.InvokeCommand(input)); }
+            finally { client.destroy(); }
+          }
+          version = candidate;
+          break;
+        } catch (error) {
+          if (candidate !== versions[0] || error?.name !== "AccessDeniedException") throw error;
+        }
       }
+      assert(result && version, "No authorized fixed broker entry point");
       assert.equal(result.StatusCode, 200);
       assert(!result.FunctionError, "Broker rejected the request; authenticate live evidence before retry");
-      assert.equal(result.ExecutedVersion, fixedBinding.purpose === "CLEANUP" ? "5" : "4");
+      assert.equal(result.ExecutedVersion, version);
       return JSON.parse(Buffer.from(result.Payload).toString("utf8"));
     };
     if (discovery) {

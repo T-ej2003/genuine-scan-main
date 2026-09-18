@@ -84,6 +84,14 @@ test("interrupted broker change requires fresh fenced authorization and rejects 
   assert.equal((await f.execute()).brokerChange.state, "BROKER_CHANGE_CLOSED");
 });
 
+test("broker change resumption reauthenticates the immutable recovery lineage before mutation", async () => {
+  const f = fixture(); f.before = operation => { if (operation === "UpdateFunctionConfiguration") throw new Error("interrupted"); };
+  await assert.rejects(f.execute()); const writes = f.writes.length;
+  f.renew(); f.record.recovery.authorizationSha256 = "d".repeat(64);
+  await assert.rejects(f.execute());
+  assert.equal(f.writes.length, writes); assert.equal(f.s3Writes, 2);
+});
+
 test("closed broker change cannot replay and no changed identity receives broker mutation capability", async () => {
   const f = fixture(), closed = await f.execute(); await assert.rejects(f.execute());
   const anchor = assertEffectiveBootstrapTrustAnchor(closed, componentBrokerPackageManifest(closed.brokerChange.sourceSha), closed.brokerChange.successor.packageSha256);

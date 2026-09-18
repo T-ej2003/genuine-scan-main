@@ -91,13 +91,13 @@ archive, installation, cleanup context and Terraform provenance.
 
 ## Post-merge deployment boundary
 
-This recovery is closed and cannot update broker code again. The current
-component contracts intentionally provide no post-bootstrap `BROKER_CHANGE`
-controller or authority. Consequently a source-only trust-anchor repair does
-not alter the deployed broker package: deploying it requires a separately
-governed `BROKER_CHANGE` design and approval that binds the exact current and
-replacement package/configuration/version state. Do not rerun bootstrap or
-recovery to deploy this repair.
+This recovery is closed and cannot update broker code again. A separately
+governed `BROKER_CHANGE` controller now provides the only post-bootstrap code
+path: merge the successor source, configure the exact protected environment,
+obtain fresh explicit approval, then run the documented source-owned CLI. It
+binds the immutable recovered predecessor and exact replacement
+package/configuration/version state. Source merge alone does not alter the
+deployed broker; do not rerun bootstrap or recovery to deploy a successor.
 
 ## Evidence and redaction
 

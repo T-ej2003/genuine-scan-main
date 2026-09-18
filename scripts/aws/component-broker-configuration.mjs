@@ -10,6 +10,14 @@ function assertEntryPoints(value) {
   assert(value === brokerEntryPoints || value === brokerChangeEntryPoints, "Unreviewed broker entry-point set");
   return value;
 }
+
+// Routing is not authority: the invoked broker still authenticates the full
+// journal lineage before a semantic operation. Callers try the predecessor
+// first and may reach the successor only after AWS denies that exact version.
+export function brokerEntryPointCandidates(entryPoint) {
+  assert(["INSTALL", "CLEANUP", "AUTHORIZE"].includes(entryPoint), "Unsupported broker entry point");
+  return [brokerEntryPoints[entryPoint], brokerChangeEntryPoints[entryPoint]];
+}
 export function brokerConfiguration({ packageSha256, manifestSha256, entryPoint, entryPoints = brokerEntryPoints }) {
   assert.match(packageSha256 || "", /^[a-f0-9]{64}$/);
   assert.match(manifestSha256 || "", /^[a-f0-9]{64}$/);

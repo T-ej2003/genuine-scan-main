@@ -76,6 +76,15 @@ export function assertCompletedRecoveryTrustAnchor(bootstrap) {
   assert.equal(bootstrap.state, "BOOTSTRAP_CLOSED");
   assert(Object.hasOwn(bootstrap, "recovery"), "Completed recovery predecessor required");
   assert(!Object.hasOwn(bootstrap, "brokerChange"), "Existing broker change requires exact resumption");
+  return assertRecoveredBootstrapLineage(bootstrap);
+}
+
+// A broker-change resumption must re-authenticate immutable outer lineage
+// before accepting its mutable-in-progress nested checkpoint.
+export function assertRecoveredBootstrapLineage(bootstrap) {
+  assert(bootstrap && typeof bootstrap === "object" && !Array.isArray(bootstrap));
+  assert.equal(bootstrap.state, "BOOTSTRAP_CLOSED");
+  assert(Object.hasOwn(bootstrap, "recovery"), "Completed recovery predecessor required");
   return assertRecoveredClosure(bootstrap);
 }
 

@@ -4,7 +4,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { assertBrokerConfiguration, brokerChangeEntryPoints, brokerConfiguration, brokerEntryPoints } from "./component-broker-configuration.mjs";
 import { assertBrokerChangeAuthorization } from "./component-broker-change-authorization.mjs";
 import { brokerChangeConfigurations, brokerChangeOperations, brokerChangePredecessor } from "./component-broker-change-contract.mjs";
-import { assertCompletedRecoveryTrustAnchor, assertEffectiveBootstrapTrustAnchor } from "./component-bootstrap-trust-anchor.mjs";
+import { assertCompletedRecoveryTrustAnchor, assertEffectiveBootstrapTrustAnchor, assertRecoveredBootstrapLineage } from "./component-bootstrap-trust-anchor.mjs";
 import { canonical, digest, installationIdentity } from "./component-iam-installation-contract.mjs";
 import { bootstrapManagedIdentities, brokerChangeManagedIdentities, componentBrokerArn, identityBootstrap, inspectBootstrapIdentities, inspectBrokerChangeIdentities } from "./component-installation-identity-contract.mjs";
 import { assertComponentSessionRecord } from "./component-session-proof.mjs";
@@ -101,6 +101,7 @@ export async function executeBrokerChange({ authorization, packageEvidence, oper
   if (!Object.hasOwn(initial.value, "brokerChange")) {
     await assertPredecessor(); active = { ...initial.value, brokerChange: record }; ({ etag: activeEtag } = await put(active, initial.etag));
   } else {
+    assertRecoveredBootstrapLineage(initial.value);
     const existing = initial.value.brokerChange;
     assert(existing && typeof existing === "object" && !Array.isArray(existing));
     if (existing.state === "BROKER_CHANGE_CLOSED") throw new Error("Broker change is already closed");
