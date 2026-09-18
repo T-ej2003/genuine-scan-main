@@ -108,6 +108,10 @@ function managedIdentities(entryPoints) {
   const capabilities = installationCapabilitySet();
   const terraformInvocation = capabilities.terraform.Statement.find(({ Action }) => Action === "lambda:InvokeFunction");
   assert(terraformInvocation); terraformInvocation.Resource = `${componentBrokerArn}:${entryPoints.INSTALL}`;
+  // The successor broker still rejects a resource-policy bypass on every
+  // retained immutable version, but it has no mutation capability for any of
+  // them. Fresh bootstrap keeps the original three-version read surface.
+  const brokerVersions = entryPoints === changedEntryPoints ? [...Object.values(bootstrapEntryPoints), ...Object.values(changedEntryPoints)] : Object.values(entryPoints);
   const objects = ["installation-authorization.json", "iam-installation.json", "permission-installation.json", "installation-session.json"].map((name) => `arn:aws:s3:::${identityBootstrap.bucket}/${identityBootstrap.prefix}${name}`);
   const brokerPolicy = provisionerTargetPolicy();
   brokerPolicy.Statement.push(
@@ -118,7 +122,7 @@ function managedIdentities(entryPoints) {
     { Effect: "Allow", Action: "s3:GetObject", Resource: objects },
     { Effect: "Allow", Action: "s3:GetObject", Resource: `arn:aws:s3:::${identityBootstrap.bucket}/${identityBootstrap.prefix}identity-bootstrap.json` },
     { Effect: "Allow", Action: "s3:PutObject", Resource: objects, Condition: { StringEquals: { "s3:x-amz-server-side-encryption": "AES256" } } },
-    { Effect: "Allow", Action: ["lambda:GetFunction", "lambda:GetFunctionConfiguration", "lambda:GetFunctionCodeSigningConfig", "lambda:GetRuntimeManagementConfig", "lambda:GetFunctionConcurrency", "lambda:GetPolicy"], Resource: [componentBrokerArn, ...Object.values(entryPoints).map((version) => `${componentBrokerArn}:${version}`)] },
+    { Effect: "Allow", Action: ["lambda:GetFunction", "lambda:GetFunctionConfiguration", "lambda:GetFunctionCodeSigningConfig", "lambda:GetRuntimeManagementConfig", "lambda:GetFunctionConcurrency", "lambda:GetPolicy"], Resource: [componentBrokerArn, ...brokerVersions.map((version) => `${componentBrokerArn}:${version}`)] },
     { Effect: "Allow", Action: ["iam:GetRole", "iam:GetRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies", "iam:ListRoleTags"], Resource: [installationIdentity.provisionerRole, installationIdentity.terraformRole, identityBootstrap.installationRole, identityBootstrap.cleanupRole, identityBootstrap.authorizationRole].map(componentRoleArn) },
   );
   for (const statement of brokerPolicy.Statement) statement.Condition = { ...statement.Condition, ArnEquals: { "lambda:SourceFunctionArn": componentBrokerArn } };

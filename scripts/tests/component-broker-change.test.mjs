@@ -83,4 +83,7 @@ test("closed broker change cannot replay and no changed identity receives broker
     const invalid = structuredClone(closed); mutate(invalid); assert.throws(() => assertEffectiveBootstrapTrustAnchor(invalid, componentBrokerPackageManifest(closed.brokerChange.sourceSha), closed.brokerChange.successor.packageSha256));
   }
   for (const target of brokerChangeManagedIdentities()) for (const statement of target.policy.Statement) for (const action of [].concat(statement.Action)) assert(!/^(?:lambda:(?:Update|Publish|Create|Delete)|iam:PassRole)/.test(action));
+  const broker = brokerChangeManagedIdentities().find(({ role }) => role === installationIdentity.provisionerRole);
+  const reads = broker.policy.Statement.find(({ Action }) => [].concat(Action).includes("lambda:GetPolicy"));
+  assert.deepEqual(reads.Resource, [componentBrokerArn, ...[1, 2, 3, 4, 5, 6].map(version => `${componentBrokerArn}:${version}`)]);
 });
