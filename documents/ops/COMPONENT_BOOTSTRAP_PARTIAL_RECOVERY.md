@@ -107,6 +107,14 @@ readable only when their source, package and manifest match the authenticated
 predecessor triple; they are history, never fresh IAM-mutation authority. New
 authorizations must bind the successor package and manifest.
 
+The broker resolves that authenticated predecessor consistently for an existing
+installation's expired-session renewal, cleanup closure and read-only Terraform
+provenance. A predecessor authorization can never call `INSTALL` after the
+change: that mutation path requires a fresh successor-bound authorization and
+the current protected-main fence. Terraform's saved-plan approval remains a
+separate fresh authorization; its session proof carries the verified historical
+installation source only to bind the durable IAM receipt.
+
 ## Evidence and redaction
 
 Diagnostics may retain hashes, ARNs, configuration values, version inventory,

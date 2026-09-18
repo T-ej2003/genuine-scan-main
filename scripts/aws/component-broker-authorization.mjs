@@ -35,6 +35,12 @@ function archiveLineages(manifest, packageSha256, predecessors) {
   })];
 }
 
+export function archivedAuthorizationLineage(value, manifest, packageSha256, options) {
+  assertArchivedInstallationAuthorization(value, manifest, packageSha256, options);
+  return archiveLineages(manifest, packageSha256, options.predecessors || []).find((candidate) =>
+    candidate.sourceSha === value.sourceSha && candidate.packageSha256 === value.brokerPackageSha256 && candidate.manifestSha256 === value.brokerManifestSha256);
+}
+
 export function assertArchivedInstallationAuthorization(value, manifest, packageSha256, { now, allowExpired = false, predecessors = [] }) {
   assert.deepEqual(Object.keys(value).sort(), [...fields].sort());
   assert.equal(value.schemaVersion, 1);
@@ -70,7 +76,10 @@ export function assertArchivedInstallationAuthorization(value, manifest, package
 export function createBrokerAuthorizationArchive({ manifest, packageSha256, s3, currentMain, reconcile, entryPoints = brokerEntryPoints, predecessors = [], now = Date.now }) {
   assert(entryPoints === brokerEntryPoints || entryPoints === brokerChangeEntryPoints, "Unreviewed broker entry points");
   archiveLineages(manifest, packageSha256, predecessors);
-  const closure = async (authorizationSha256) => {
+  const closure = async (authorization) => {
+    const authorizationSha256 = assertArchivedInstallationAuthorization(authorization, manifest, packageSha256, { now: now(), allowExpired: true, predecessors });
+    const { sourceSha } = archivedAuthorizationLineage(authorization, manifest, packageSha256, { now: now(), allowExpired: true, predecessors });
+    const transitionId = authorization.transitionId;
     const list = await s3("ListObjectsV2", { Bucket: bucket, Prefix: closureKey });
     assert(!list.IsTruncated);
     assert((list.Contents || []).length <= 1 && (list.Contents || []).every(({ Key }) => Key === closureKey));
@@ -78,13 +87,14 @@ export function createBrokerAuthorizationArchive({ manifest, packageSha256, s3, 
     const record = JSON.parse(await (await s3("GetObject", { Bucket: bucket, Key: closureKey })).Body.transformToString());
     assert.deepEqual(Object.keys(record).sort(), ["authorizationSha256", "cleanupSession", "live", "sourceSha", "state", "transitionId"]);
     assert.equal(record.state, "CLOSED");
-    assert.equal(record.sourceSha, manifest.sourceSha);
+    assert.equal(record.sourceSha, sourceSha);
     assert.equal(record.authorizationSha256, authorizationSha256);
     assertComponentSessionRecord(record.cleanupSession);
     assert.equal(record.cleanupSession.purpose, "CLEANUP");
     assert.equal(record.cleanupSession.sourceSha, record.sourceSha);
     assert.equal(record.cleanupSession.transitionId, record.transitionId);
     assert.equal(record.cleanupSession.authorizationSha256, authorizationSha256);
+    assert.equal(record.transitionId, transitionId);
     assert.deepEqual(record.live.map(({ arn }) => arn), manifest.targets.map(({ arn }) => arn));
     for (const target of record.live) {
       assert.deepEqual(Object.keys(target).sort(), ["arn", "policy", "role"]);
@@ -139,7 +149,7 @@ export function createBrokerAuthorizationArchive({ manifest, packageSha256, s3, 
       const record = await read();
       assert(record, "No durable authorization");
       assert.equal(record.authorization.transitionId, event.transitionId);
-      const closed = await closure(record.authorizationSha256);
+      const closed = await closure(record.authorization);
       assert(closed, "Verified installation closure required");
       assert(closed.live.every(({ role, policy }) => role === "EXPECTED" && policy === "EXPECTED"), "Closed installation was not fully verified");
       return { sourceSha: record.authorization.sourceSha, transitionId: record.authorization.transitionId,
@@ -155,7 +165,7 @@ export function createBrokerAuthorizationArchive({ manifest, packageSha256, s3, 
       const prior = await read();
       if (prior) {
         assert.equal(event.authorization.transitionId, prior.authorization.transitionId, "Different installation transition");
-        assert.equal(await closure(prior.authorizationSha256), null, "Closed authorization cannot reopen installation");
+        assert.equal(await closure(prior.authorization), null, "Closed authorization cannot reopen installation");
         const history = [...prior.history, prior];
         assert(history.every((item) => item.authorization.runId !== event.authorization.runId), "Approval already consumed");
         assert(Date.parse(event.authorization.approvalObservedAt) > Date.parse(prior.authorization.approvalObservedAt), "Fresh approval required");
@@ -167,9 +177,10 @@ export function createBrokerAuthorizationArchive({ manifest, packageSha256, s3, 
           const journal = JSON.parse(await (await s3("GetObject", { Bucket: bucket, Key: sessionKey })).Body.transformToString());
           assert.equal(journal.schemaVersion, 1);
           assertComponentSessionRecord(journal.session);
-          assert.equal(journal.session.sourceSha, manifest.sourceSha);
+          const sessionAuthorization = history.find((item) => item.authorizationSha256 === journal.session.authorizationSha256);
+          assert(sessionAuthorization, "Session belongs to unknown authorization");
+          assert.equal(journal.session.sourceSha, archivedAuthorizationLineage(sessionAuthorization.authorization, manifest, packageSha256, { now: now(), allowExpired: true, predecessors }).sourceSha);
           assert.equal(journal.session.transitionId, event.authorization.transitionId);
-          assert(history.some((item) => item.authorizationSha256 === journal.session.authorizationSha256), "Session belongs to unknown authorization");
           assertExpiredSession(journal.session, now());
         }
         assert.equal(typeof reconcile, "function", "Authenticated live reconciliation required for renewal");
@@ -204,12 +215,12 @@ export function createBrokerAuthorizationArchive({ manifest, packageSha256, s3, 
       assert.equal(record.authorizationSha256, event.authorizationSha256);
       const operationClass = ["CLOSE", "PROVE_CLEANUP_SESSION"].includes(event.operation) ? "CLEANUP"
         : event.operation === "PROVE_TERRAFORM_SESSION" ? "PROVENANCE" : "MUTATION";
-      assertArchivedInstallationAuthorization(record.authorization, manifest, packageSha256, { now: now(), allowExpired: operationClass !== "MUTATION" });
+      assertArchivedInstallationAuthorization(record.authorization, manifest, packageSha256, { now: now(), allowExpired: operationClass !== "MUTATION", ...(operationClass === "MUTATION" ? {} : { predecessors }) });
       if (operationClass === "MUTATION") {
-        assert.equal(await closure(record.authorizationSha256), null, "Installation authorization consumed by closure");
+        assert.equal(await closure(record.authorization), null, "Installation authorization consumed by closure");
         assert.equal(await currentMain(), manifest.sourceSha);
       } else if (operationClass === "PROVENANCE") {
-        const closed = await closure(record.authorizationSha256);
+        const closed = await closure(record.authorization);
         assert(closed, "Verified installation closure required");
         assert(closed.live.every(({ role, policy }) => role === "EXPECTED" && policy === "EXPECTED"), "Closed installation was not fully verified");
       }
@@ -224,23 +235,24 @@ export function createBrokerAuthorizationArchive({ manifest, packageSha256, s3, 
       assert.equal(cleanupSession.purpose, "CLEANUP");
       assert.equal(cleanupSession.account, "368992683803");
       assert.equal(cleanupSession.region, "eu-west-2");
-      assert.equal(cleanupSession.sourceSha, manifest.sourceSha);
+      const sourceSha = archivedAuthorizationLineage(authorized.authorization, manifest, packageSha256, { now: now(), allowExpired: true, predecessors }).sourceSha;
+      assert.equal(cleanupSession.sourceSha, sourceSha);
       assert.equal(cleanupSession.transitionId, event.transitionId);
       assert.equal(cleanupSession.authorizationSha256, authorized.authorizationSha256);
       assert.equal(cleanupSession.mfaAuthenticated, true);
       assert(now() < Date.parse(cleanupSession.expiresAt), "Cleanup session expired");
       assert.deepEqual(live.map(({ arn }) => arn), manifest.targets.map(({ arn }) => arn));
       assert(live.every(({ role, policy }) => ["EXPECTED", "ABSENT"].includes(role) && ["EXPECTED", "ABSENT"].includes(policy)));
-      const existing = await closure(authorized.authorizationSha256);
+      const existing = await closure(authorized.authorization);
       if (existing) return existing;
-      const record = { state: "CLOSED", sourceSha: manifest.sourceSha, transitionId: event.transitionId, authorizationSha256: authorized.authorizationSha256, cleanupSession, live };
+      const record = { state: "CLOSED", sourceSha, transitionId: event.transitionId, authorizationSha256: authorized.authorizationSha256, cleanupSession, live };
       try {
         await s3("PutObject", { Bucket: bucket, Key: closureKey, Body: canonical(record), ServerSideEncryption: "AES256", IfNoneMatch: "*" });
       } catch (cause) {
         if (["PreconditionFailed", "ConditionalRequestConflict"].includes(cause.name)) throw cause;
-        if (canonical(await closure(authorized.authorizationSha256)) !== canonical(record)) throw cause;
+        if (canonical(await closure(authorized.authorization)) !== canonical(record)) throw cause;
       }
-      assert.deepEqual(await closure(authorized.authorizationSha256), record);
+      assert.deepEqual(await closure(authorized.authorization), record);
       return record;
     },
   };

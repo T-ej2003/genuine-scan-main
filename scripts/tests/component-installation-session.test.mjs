@@ -40,10 +40,11 @@ function fixture(purpose = "INSTALL", changed = true) {
         f.proofFailures--;
         return { StatusCode: 200, ExecutedVersion: version, FunctionError: "Unhandled" };
       }
+      const proofBinding = f.proofBinding || binding;
       const result = ["CLEANUP_CONTEXT", "TERRAFORM_CONTEXT"].includes(payload.operation) ? (f.context || binding) : payload.operation.startsWith("PROVE_")
-        ? { state: "SESSION_VERIFIED", principal, expiresAt: scoped.Expiration.toISOString(), sourceSha: binding.sourceSha, transitionId: binding.transitionId, authorizationSha256: binding.authorizationSha256 }
+        ? { state: "SESSION_VERIFIED", principal, expiresAt: scoped.Expiration.toISOString(), sourceSha: proofBinding.sourceSha, transitionId: proofBinding.transitionId, authorizationSha256: proofBinding.authorizationSha256 }
         : { state: "test-accepted" };
-      if (purpose === "TERRAFORM" && payload.operation === "PROVE_TERRAFORM_SESSION") result.session = { account: "368992683803", region: "eu-west-2", ...binding, principal,
+      if (purpose === "TERRAFORM" && payload.operation === "PROVE_TERRAFORM_SESSION") result.session = { account: "368992683803", region: "eu-west-2", ...proofBinding, principal,
         issuedAt: new Date(start).toISOString(), expiresAt: scoped.Expiration.toISOString(), issuanceEventId: "12345678-1234-4234-8234-123456789def", issuanceEventTime: new Date(start).toISOString(),
         operatorArn: user.Arn, mfaAuthenticated: true, ...(f.sessionOverride || {}) };
       return { StatusCode: 200, ExecutedVersion: version, Payload: Buffer.from(JSON.stringify(result)) };
@@ -187,10 +188,13 @@ test("Terraform discovers closed verified installation provenance without the ex
   assert.equal(f.payloads[1].operation, "PROVE_TERRAFORM_SESSION");
   client.close();
 });
-test("Terraform provenance from a different protected source is rejected before execution", async () => {
+test("Terraform accepts the broker-authenticated historical installation source after a broker change", async () => {
   const f = fixture("TERRAFORM");
-  f.context = { ...f.binding, sourceSha: "c".repeat(40) };
-  await assert.rejects(establishComponentTerraformSession({ sourceSha: f.binding.sourceSha, transitionId: f.binding.transitionId }, f.dependencies), /different protected source/);
+  f.context = f.proofBinding = { ...f.binding, sourceSha: "c".repeat(40) };
+  f.dependencies.state = () => ({ inspect: async () => ({ stateIdentity: "ABSENT" }), reserve: async () => {}, close: () => {} });
+  const client = await establishComponentTerraformSession({ sourceSha: f.binding.sourceSha, transitionId: f.binding.transitionId }, f.dependencies);
+  await client.inspect();
+  client.close();
 });
 
 for (const change of [{ purpose: "INSTALL" }, { transitionId: "12345678-1234-4234-8234-123456789def" }, { sourceSha: "invalid" }, { evidenceKey: "alternate" }]) {

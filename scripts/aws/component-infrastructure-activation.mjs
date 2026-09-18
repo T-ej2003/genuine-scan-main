@@ -117,8 +117,9 @@ export async function run(argv = process.argv.slice(2), { source = cleanSource,
     assert.equal(preparation.schemaVersion, 1); assert.equal(preparation.sourceSha, sourceSha);
     assertComponentSessionRecord(preparation.operatorProvenance);
     assert.equal(preparation.operatorProvenance.purpose, "TERRAFORM");
+    assert.deepEqual(Object.keys(preparation.iamInstallation).sort(), ["authorizationSha256", "documentBindingsSha256", "receiptSha256", "sourceSha", "transitionId"]);
     plan = privateBytes(planPath, 16 * 1024 * 1024);
-    binding = { sourceSha, transitionId: preparation.iamInstallation.transitionId, authorizationSha256: preparation.iamInstallation.authorizationSha256, purpose: "TERRAFORM" };
+    binding = { sourceSha: preparation.iamInstallation.sourceSha, transitionId: preparation.iamInstallation.transitionId, authorizationSha256: preparation.iamInstallation.authorizationSha256, purpose: "TERRAFORM" };
     for (const field of Object.keys(binding)) assert.equal(preparation.operatorProvenance[field], binding[field]);
     approved = approvePlan();
   }
@@ -142,14 +143,16 @@ export async function run(argv = process.argv.slice(2), { source = cleanSource,
           assert.equal(hash(privateBytes(preparationPath, 1024 * 1024)), preparationSha256, "Preparation moved");
           assert.deepEqual(approvePlan(), approved);
           sourceGuard();
-          await client.reserve({ sourceSha, transitionId: binding.transitionId, planSha256: approved.planSha256, preparationSha256,
+          await client.reserve({ sourceSha: binding.sourceSha, transitionId: binding.transitionId, planSha256: approved.planSha256, preparationSha256,
             iamReceiptSha256: baseline.iamInstallation.receiptSha256, authorizationRunId: runId });
         }
       }
     } });
     sourceGuard();
     assertComponentSessionRecord(executed.session);
-    for (const field of Object.keys(binding)) assert.equal(executed.session[field], binding[field]);
+    const sessionBinding = Object.fromEntries(["sourceSha", "transitionId", "authorizationSha256", "purpose"].map(field => [field, executed.session[field]]));
+    if (mode === "apply") assert.deepEqual(sessionBinding, binding);
+    else assert.equal(sessionBinding.transitionId, binding.transitionId);
     if (mode === "prepare") {
       const result = executed.result;
       assertInitialPlan(result.planJson);

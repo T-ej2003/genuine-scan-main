@@ -75,7 +75,7 @@ export function createTerraformStateBoundary(credentials, binding, { send, descr
         assert.equal(policy.RoleName, target.role); assert.equal(policy.PolicyName, target.policyName);
         assert.equal(digest(normalizeIamPolicyDocument(policy.PolicyDocument)), target.policySha256);
       }
-      return { stateIdentity: "ABSENT", iamInstallation: { receiptSha256: sha(bytes), transitionId: binding.transitionId, authorizationSha256: binding.authorizationSha256, documentBindingsSha256: receipt.documentBindingsSha256 } };
+      return { stateIdentity: "ABSENT", iamInstallation: { receiptSha256: sha(bytes), sourceSha: receipt.sourceSha, transitionId: binding.transitionId, authorizationSha256: binding.authorizationSha256, documentBindingsSha256: receipt.documentBindingsSha256 } };
     },
     async reserve(record) {
       assert.deepEqual(Object.keys(record).sort(), ["authorizationRunId", "iamReceiptSha256", "planSha256", "preparationSha256", "session", "sourceSha", "transitionId"]);

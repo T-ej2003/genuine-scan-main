@@ -112,14 +112,16 @@ async function establish(binding, { loadUser = loadOperator, sts = stsTransport,
       return JSON.parse(Buffer.from(result.Payload).toString("utf8"));
     };
     if (discovery) {
-      const expectedSource = fixedBinding.sourceSha;
       const archived = await send(discovery === "TERRAFORM"
         ? { operation: "TERRAFORM_CONTEXT", transitionId: fixedBinding.transitionId }
         : { operation: "CLEANUP_CONTEXT" });
       sessionProofBinding(archived);
       assert.equal(archived.purpose, discovery);
       assert.equal(archived.transitionId, fixedBinding.transitionId, "Different cleanup transition");
-      if (discovery === "TERRAFORM") assert.equal(archived.sourceSha, expectedSource, "Durable installation belongs to different protected source");
+      // The executing fixed broker authenticates its exact effective trust
+      // anchor before returning this archive-owned predecessor binding. The
+      // local source argument still fences the current activation workflow;
+      // the signed STS proof must bind the historical installation receipt.
       Object.assign(fixedBinding, archived);
     }
     const signedPayload = async operation => {

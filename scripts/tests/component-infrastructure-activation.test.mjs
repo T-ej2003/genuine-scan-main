@@ -117,7 +117,7 @@ function fixture(t) {
           f.calls.push("inspect");
           if (f.existingState) throw new Error("state exists");
           if (f.missingReceipt) throw new Error("AWS receipt absent");
-          return { stateIdentity: "ABSENT", iamInstallation: { receiptSha256: f.receiptSha256, transitionId, authorizationSha256, documentBindingsSha256: "d".repeat(64) } };
+          return { stateIdentity: "ABSENT", iamInstallation: { receiptSha256: f.receiptSha256, sourceSha, transitionId, authorizationSha256, documentBindingsSha256: "d".repeat(64) } };
         },
         reserve: async record => {
           f.calls.push("reserve");

@@ -60,6 +60,30 @@ test("broker change preserves only an exact predecessor archive lineage", async 
   const invalid = structuredClone(state.record); invalid.history[0].authorization.brokerPackageSha256 = "0".repeat(64); state.record = invalid;
   await assert.rejects(changed.authenticate({ operation: "INSTALL", transitionId: successor.transitionId, authorizationSha256: digest(successor) }, context("4")));
 });
+test("a changed broker carries an exact predecessor through renewal, closure and read-only proof only", async () => {
+  const predecessor = { sourceSha: "e".repeat(40), packageSha256: "f".repeat(64), manifestSha256: "c".repeat(64) };
+  const { state, s3 } = fixture();
+  const archive = createBrokerAuthorizationArchive({ manifest, packageSha256, predecessors: [predecessor], currentMain: async () => state.main, now: () => state.time, entryPoints: brokerChangeEntryPoints, s3, reconcile: async () => {} });
+  const old = { ...authorization(), sourceSha: predecessor.sourceSha, brokerPackageSha256: predecessor.packageSha256, brokerManifestSha256: predecessor.manifestSha256 };
+  const oldSha = digest(old);
+  const cleanupSession = { account: "368992683803", region: "eu-west-2", sourceSha: predecessor.sourceSha, transitionId: old.transitionId,
+    authorizationSha256: oldSha, purpose: "CLEANUP", principal: `arn:aws:sts::368992683803:assumed-role/mscqr-production-component-cleanup-session/component-${old.transitionId}`,
+    issuedAt: new Date(start).toISOString(), expiresAt: new Date(start + 900000).toISOString(), issuanceEventId: "12345678-1234-4234-8234-123456789def", issuanceEventTime: new Date(start).toISOString(), operatorArn: "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator", mfaAuthenticated: true };
+  state.record = { state: "AUTHORIZED", authorization: old, authorizationSha256: oldSha, history: [] };
+  state.closure = { state: "CLOSED", sourceSha: predecessor.sourceSha, transitionId: old.transitionId, authorizationSha256: oldSha, cleanupSession,
+    live: [{ arn: manifest.targets[0].arn, role: "EXPECTED", policy: "EXPECTED" }] };
+  state.time = start + 3600000;
+  assert.deepEqual(await archive.terraformContext({ operation: "TERRAFORM_CONTEXT", transitionId: old.transitionId }, context("4")), { sourceSha: predecessor.sourceSha, transitionId: old.transitionId, authorizationSha256: oldSha, purpose: "TERRAFORM" });
+  await archive.authenticate({ operation: "PROVE_TERRAFORM_SESSION", transitionId: old.transitionId, authorizationSha256: oldSha }, context("4"));
+  await archive.authenticate({ operation: "CLOSE", transitionId: old.transitionId, authorizationSha256: oldSha }, context("5"));
+  await assert.rejects(archive.authenticate({ operation: "INSTALL", transitionId: old.transitionId, authorizationSha256: oldSha }, context("4")), /lineage differs/);
+
+  state.closure = null;
+  state.session = { schemaVersion: 1, session: { ...cleanupSession, purpose: "INSTALL", principal: `arn:aws:sts::368992683803:assumed-role/mscqr-production-component-installation-session/component-${old.transitionId}` }, history: [] };
+  const successor = { ...authorization(), runId: "12346", approvalObservedAt: new Date(state.time).toISOString(), expiresAt: new Date(state.time + 1800000).toISOString() };
+  await archive.authorize({ operation: "AUTHORIZE", authorization: successor }, context("6"));
+  assert.equal(state.record.authorizationSha256, digest(successor));
+});
 test("archive rejects duplicate or caller-shaped predecessor lineage", () => {
   assert.throws(() => createBrokerAuthorizationArchive({ manifest, packageSha256, predecessors: [{ sourceSha: manifest.sourceSha, packageSha256, manifestSha256: digest(manifest) }], currentMain: async () => manifest.sourceSha, s3: async () => ({}) }));
   assert.throws(() => createBrokerAuthorizationArchive({ manifest, packageSha256, predecessors: [{ sourceSha: "e".repeat(40), packageSha256: "f".repeat(64), manifestSha256: "c".repeat(64), extra: true }], currentMain: async () => manifest.sourceSha, s3: async () => ({}) }));
