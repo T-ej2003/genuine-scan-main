@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import { createBrokerAuthorizationArchive } from "./component-broker-authorization.mjs";
 import { assertBrokerEntryPoint, assertBrokerConfiguration, brokerConfiguration } from "./component-broker-configuration.mjs";
+import { assertEffectiveBootstrapTrustAnchor } from "./component-bootstrap-trust-anchor.mjs";
 import { inspectBootstrapIdentities } from "./component-installation-identity-contract.mjs";
 import { authenticateComponentSession, claimComponentSession } from "./component-session-proof.mjs";
 
@@ -206,17 +207,12 @@ export async function executeFixedBroker(event, context, { manifest, iam, s3, la
   const version = assertBrokerEntryPoint(context, event?.operation);
   assert.equal(manifest.account, account);
   const bootstrap = JSON.parse(await (await s3("GetObject", { Bucket: bucket, Key: "mscqr/production/component-deployment-state/identity-bootstrap.json" })).Body.transformToString());
-  assert.equal(bootstrap.schemaVersion, 1);
-  assert.equal(bootstrap.state, "BOOTSTRAP_CLOSED", "Trust anchor bootstrap is incomplete");
-  assert.equal(bootstrap.sourceSha, manifest.sourceSha);
-  assert.equal(bootstrap.manifestSha256, hash(manifest));
-  assert.equal(bootstrap.identitySetSha256, hash(manifest.identities));
-  const identities = await inspectBootstrapIdentities(iam);
-  assert(identities.every(({ role, policy }) => role === "EXPECTED" && policy === "EXPECTED"), "Bootstrap execution authority is incomplete");
   const functionName = "mscqr-production-component-iam-installer";
   const fn = await lambda("GetFunction", { FunctionName: functionName, Qualifier: version });
   const packageSha256 = Buffer.from(fn.Configuration.CodeSha256, "base64").toString("hex");
-  assert.equal(packageSha256, bootstrap.packageSha256);
+  assertEffectiveBootstrapTrustAnchor(bootstrap, manifest, packageSha256);
+  const identities = await inspectBootstrapIdentities(iam);
+  assert(identities.every(({ role, policy }) => role === "EXPECTED" && policy === "EXPECTED"), "Bootstrap execution authority is incomplete");
   const [concurrency, signing, runtime] = await Promise.all([
     lambda("GetFunctionConcurrency", { FunctionName: functionName }),
     lambda("GetFunctionCodeSigningConfig", { FunctionName: functionName }),

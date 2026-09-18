@@ -73,6 +73,30 @@ After closure, ordinary bootstrap and the recovery authorization are
 non-replayable. Component IAM installation remains a separate governed step and
 must not start before exact bootstrap closure.
 
+## Effective trust anchor after recovery
+
+The closed journal retains the original bootstrap fields as immutable incident
+lineage. A broker built from the recovery source must therefore authenticate
+both lineages: the original source, authorization, transition, package and
+manifest first; then the complete `RECOVERY_CLOSED` record. The recovery's
+source, package and manifest become the effective broker binding only when its
+state, operation list, partial-state digest, authorization lineage, final
+versions and identity readback are all exact. Any present-but-invalid recovery
+metadata fails closed; the broker never falls back to the historical binding.
+
+This check is shared by every fixed broker entry point, including authorization
+archive, installation, cleanup context and Terraform provenance.
+
+## Post-merge deployment boundary
+
+This recovery is closed and cannot update broker code again. The current
+component contracts intentionally provide no post-bootstrap `BROKER_CHANGE`
+controller or authority. Consequently a source-only trust-anchor repair does
+not alter the deployed broker package: deploying it requires a separately
+governed `BROKER_CHANGE` design and approval that binds the exact current and
+replacement package/configuration/version state. Do not rerun bootstrap or
+recovery to deploy this repair.
+
 ## Evidence and redaction
 
 Diagnostics may retain hashes, ARNs, configuration values, version inventory,
