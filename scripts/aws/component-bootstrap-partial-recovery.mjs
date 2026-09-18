@@ -17,7 +17,7 @@ export async function executeBootstrapRecovery({ authorization, packageEvidence,
   const approval = structuredClone(authorization);
   const authorizationSha256 = assertBootstrapRecoveryAuthorization(approval, packageEvidence, now());
   const human = structuredClone(operatorProof);
-  assertComponentSessionRecord(human); assert.equal(human.purpose, "IDENTITY_BOOTSTRAP_RECOVERY");
+  assertComponentSessionRecord(human); assert.equal(human.purpose, "IDENTITY_BOOTSTRAP");
   for (const [field, value] of Object.entries({ sourceSha: approval.newSourceSha, transitionId: approval.transitionId, authorizationSha256 })) assert.equal(human[field], value);
   assert(Date.parse(human.issuanceEventTime) >= Date.parse(approval.approvalObservedAt) - 999, "Recovery human session predates approval");
   const owner = randomUUID();
@@ -35,14 +35,17 @@ export async function executeBootstrapRecovery({ authorization, packageEvidence,
     return { value, etag: response.ETag };
   };
   const assertHistoricalJournal = ({ value, etag }, allowRecovery = false) => {
+    assert.deepEqual(Object.keys(value).sort(), ["authorization", "authorizationSha256", "identitySetSha256", "manifestSha256", "operatorProof", "owner", "packageSha256", ...(allowRecovery ? ["recovery"] : []), "schemaVersion", "sourceSha", "state", "transitionId"].sort(), "Malformed historical journal");
     assert.equal(value.schemaVersion, 1); assert.equal(value.state, "BOOTSTRAP_EXECUTING");
     for (const [field, expected] of Object.entries({ sourceSha: historicalBootstrapIncident.sourceSha, transitionId: historicalBootstrapIncident.transitionId,
       authorizationSha256: historicalBootstrapIncident.authorizationSha256, manifestSha256: historicalBootstrapIncident.manifestSha256,
       identitySetSha256: historicalBootstrapIncident.identitySetSha256, packageSha256: historicalBootstrapIncident.packageSha256 })) assert.equal(value[field], expected, `Historical journal ${field} differs`);
     assert.deepEqual(value.authorization, historicalBootstrapAuthorization(), "Historical authorization bytes differ");
     assert.equal(value.authorization.runId, historicalBootstrapIncident.authorizationRunId);
-    assert.equal(value.operatorProof?.purpose, "IDENTITY_BOOTSTRAP"); assert.equal(value.operatorProof?.transitionId, historicalBootstrapIncident.transitionId);
+    assertComponentSessionRecord(value.operatorProof); assert.equal(value.operatorProof.purpose, "IDENTITY_BOOTSTRAP"); assert.equal(value.operatorProof.sourceSha, historicalBootstrapIncident.sourceSha);
+    assert.equal(value.operatorProof.transitionId, historicalBootstrapIncident.transitionId);
     assert.equal(value.operatorProof?.authorizationSha256, historicalBootstrapIncident.authorizationSha256);
+    assert.match(value.owner || "", /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
     if (!allowRecovery) { assert.equal(etag, historicalBootstrapIncident.journalEtag, "Historical journal version differs"); assert.equal(value.recovery, undefined); }
     return value;
   };
@@ -90,7 +93,7 @@ export async function executeBootstrapRecovery({ authorization, packageEvidence,
     const identities = await inspectIdentities(), fn = await ready(), published = await versions(), settings = await controls(); await noPolicies();
     assert.deepEqual(published, [], "Historical defective package must never have been published");
     assert.equal(fn.Configuration.CodeSha256, historicalBootstrapIncident.lambdaCodeSha256); assert.equal(fn.Configuration.RevisionId, historicalBootstrapIncident.revisionId);
-    assert([undefined, 1].includes(settings.concurrency.ReservedConcurrentExecutions));
+    assert.equal(settings.concurrency.ReservedConcurrentExecutions, undefined);
     assert.equal(settings.runtime.UpdateRuntimeOn, "Auto"); assert(settings.runtime.RuntimeVersionArn == null);
     assertBrokerConfiguration(fn, historicalBrokerConfiguration(), { ...settings, concurrency: { ReservedConcurrentExecutions: 1 }, runtime: { UpdateRuntimeOn: "FunctionUpdate", RuntimeVersionArn: null } });
     assert.equal(digest(identities.map(({ arn, role, policy }) => ({ arn, role, policy }))).length, 64);
@@ -113,8 +116,15 @@ export async function executeBootstrapRecovery({ authorization, packageEvidence,
       assert.equal(canonical(observed.value), canonical(activeRecord), "Concurrent recovery won reservation");
     }
   } else {
-    assert.equal(initial.value.recovery.authorizationSha256, authorizationSha256, "Different recovery already reserved");
-    assert.equal(initial.value.recovery.sourceSha, approval.newSourceSha); assert.equal(initial.value.recovery.newPackageSha256, approval.newPackageSha256);
+    const recovery = initial.value.recovery;
+    assert.deepEqual(Object.keys(recovery).sort(), Object.keys(claim).sort(), "Malformed recovery reservation");
+    assert.match(recovery.owner || "", /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
+    for (const [field, expected] of Object.entries({ schemaVersion: 1, state: "RECOVERY_EXECUTING", transitionId: approval.transitionId,
+      authorizationSha256, sourceSha: approval.newSourceSha, oldPackageSha256: historicalBootstrapIncident.packageSha256,
+      newPackageSha256: approval.newPackageSha256, newManifestSha256: approval.newManifestSha256, partialStateSha256: approval.partialStateSha256 })) {
+      assert.equal(recovery[field], expected, `Recovery reservation ${field} differs`);
+    }
+    assert.deepEqual(recovery.remainingOperations, bootstrapRecoveryOperations);
     activeRecord = initial.value;
   }
   ({ etag: activeEtag } = await readJournal());
@@ -157,5 +167,6 @@ export async function executeBootstrapRecovery({ authorization, packageEvidence,
   try { await s3("PutObject", { Bucket: identityBootstrap.bucket, Key: key, Body: canonical(closed), ServerSideEncryption: "AES256", IfMatch: activeEtag }); }
   catch { assert.equal(canonical((await readJournal()).value), canonical(closed), "Ambiguous recovery closure"); }
   assert.equal(canonical((await readJournal()).value), canonical(closed), "Recovery closure readback differs");
+  assert(!/Location|X-Amz-(?:Credential|Signature|Security-Token)/.test(canonical(closed)), "Closure evidence contains presigned package material");
   return closed;
 }

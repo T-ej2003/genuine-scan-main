@@ -23,10 +23,13 @@ function fixture() {
     clock: now, writes: [], after: () => {}, before: () => {}, policies: new Set(), concurrency: {}, runtime: { UpdateRuntimeOn: "Auto", RuntimeVersionArn: null },
     versions: { $LATEST: { ...old, CodeSize: 1000, RevisionId: historicalBootstrapIncident.revisionId, State: "Active", LastUpdateStatus: "Successful", RuntimeVersionConfig: { RuntimeVersionArn: runtimeArn } } },
     record: { schemaVersion: 1, state: "BOOTSTRAP_EXECUTING", sourceSha: historicalBootstrapIncident.sourceSha, transitionId: historicalBootstrapIncident.transitionId,
-      authorizationSha256: historicalBootstrapIncident.authorizationSha256, authorization: historicalBootstrapAuthorization(), owner: "historical-owner",
+      authorizationSha256: historicalBootstrapIncident.authorizationSha256, authorization: historicalBootstrapAuthorization(), owner: "12345678-1234-4234-8234-123456789aaa",
       manifestSha256: historicalBootstrapIncident.manifestSha256, identitySetSha256: historicalBootstrapIncident.identitySetSha256,
-      packageSha256: historicalBootstrapIncident.packageSha256, operatorProof: { purpose: "IDENTITY_BOOTSTRAP", transitionId: historicalBootstrapIncident.transitionId,
-        authorizationSha256: historicalBootstrapIncident.authorizationSha256 } },
+      packageSha256: historicalBootstrapIncident.packageSha256, operatorProof: { account: identityBootstrap.account, region: identityBootstrap.region,
+        sourceSha: historicalBootstrapIncident.sourceSha, transitionId: historicalBootstrapIncident.transitionId, authorizationSha256: historicalBootstrapIncident.authorizationSha256,
+        purpose: "IDENTITY_BOOTSTRAP", principal: `arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/component-${historicalBootstrapIncident.transitionId}`,
+        issuedAt: "2026-09-18T09:33:54.000Z", expiresAt: "2026-09-18T09:48:54.000Z", issuanceEventId: "12345678-1234-4234-8234-123456789aaa",
+        issuanceEventTime: "2026-09-18T09:33:54.000Z", operatorArn: "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator", mfaAuthenticated: true } },
     etag: historicalBootstrapIncident.journalEtag, s3Writes: 0, afterS3: () => {},
   };
   const iam = async (operation, input) => {
@@ -73,7 +76,7 @@ function fixture() {
     state.record = JSON.parse(input.Body); state.etag = `"recovery-${++state.s3Writes}"`; state.afterS3(state.s3Writes); return { ETag: state.etag };
   };
   const operatorProof = { account: identityBootstrap.account, region: identityBootstrap.region, sourceSha, transitionId: authorization.transitionId, authorizationSha256,
-    purpose: "IDENTITY_BOOTSTRAP_RECOVERY", principal: `arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/component-${authorization.transitionId}`,
+    purpose: "IDENTITY_BOOTSTRAP", principal: `arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/component-${authorization.transitionId}`,
     issuedAt: new Date(now).toISOString(), expiresAt: new Date(now + 900000).toISOString(), issuanceEventId: "12345678-1234-4234-8234-123456789def",
     issuanceEventTime: new Date(now).toISOString(), operatorArn: "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator", mfaAuthenticated: true };
   state.authenticate = async () => {};
@@ -88,6 +91,7 @@ test("production-shaped partial bootstrap repairs exact package then forward-com
   assert.deepEqual(Object.keys(f.versions).sort(), ["$LATEST", "1", "2", "3"].sort());
   for (const version of ["1", "2", "3"]) assert.notEqual(f.versions[version].CodeSha256, historicalBootstrapIncident.lambdaCodeSha256);
   assert.equal(closed.recovery.state, "RECOVERY_CLOSED"); assert.equal(f.s3Writes, 2);
+  assert.doesNotMatch(JSON.stringify(closed), /Location|X-Amz-Credential|X-Amz-Signature|X-Amz-Security-Token/);
 });
 
 test("accepted-but-lost code update is read back and never repeated", async () => {
@@ -149,6 +153,14 @@ test("package repair structurally rejects publish, alternate function and config
     }
   };
   await f.execute();
+});
+
+test("post-bootstrap identities cannot compose broker replacement, authority mutation and invocation", () => {
+  for (const target of bootstrapManagedIdentities()) {
+    const actions = target.policy.Statement.flatMap(statement => [].concat(statement.Action));
+    assert(!actions.includes("lambda:UpdateFunctionCode")); assert(!actions.includes("lambda:UpdateFunctionConfiguration"));
+    assert(!actions.includes("iam:PassRole"));
+  }
 });
 
 test("closed recovery authorization and ordinary bootstrap are not replayable", async () => {

@@ -2,6 +2,7 @@
 // Exact one-time repair for the authenticated September 2026 partial bootstrap.
 // It is not an identity bootstrap, broker updater, or general Lambda interface.
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
@@ -9,14 +10,20 @@ import { cleanSource } from "./component-iam-installation.mjs";
 import { buildComponentBrokerPackage } from "./component-broker-package.mjs";
 import { authenticateBootstrapRecoveryPublication } from "./component-iam-authorization.mjs";
 import { executeBootstrapRecovery } from "./component-bootstrap-partial-recovery.mjs";
-import { bootstrapRecoveryCapabilitySet } from "./component-bootstrap-partial-recovery-contract.mjs";
+import { bootstrapRecoveryCapabilitySet, historicalBootstrapIncident } from "./component-bootstrap-partial-recovery-contract.mjs";
 import { authenticateBootstrapOperator } from "./component-bootstrap-operator.mjs";
+import { brokerConfiguration } from "./component-broker-configuration.mjs";
+import { bootstrapManagedIdentities, identityBootstrap } from "./component-installation-identity-contract.mjs";
+import { installationIdentity } from "./component-iam-installation-contract.mjs";
 import { createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 
 const sdk = createRequire(new URL("../../infra/aws/terraform/production-component-deployment-state/broker-package/package.json", import.meta.url));
 const administrator = "arn:aws:iam::368992683803:root";
 
-async function recoveryAdministrativeAdapter() {
+async function recoveryAdministrativeAdapter(packageEvidence) {
+  assert.equal(packageEvidence.packageSha256, createHash("sha256").update(packageEvidence.bytes).digest("hex"));
+  const configurations = Object.fromEntries(["INSTALL", "CLEANUP", "AUTHORIZE"].map(entryPoint => [entryPoint,
+    brokerConfiguration({ packageSha256: packageEvidence.packageSha256, manifestSha256: packageEvidence.manifestSha256, entryPoint })]));
   let exported; const clients = [];
   try {
     exported = JSON.parse(execFileSync("aws", ["configure", "export-credentials", "--format", "process"], {
@@ -35,7 +42,33 @@ async function recoveryAdministrativeAdapter() {
     const permitted = new Set(bootstrapRecoveryCapabilitySet().Statement.flatMap(statement => [].concat(statement.Action)));
     const confined = (service, name, endpoint, region) => {
       const send = create(service, name, endpoint, region);
-      return (operation, input) => { assert(permitted.has(`${service}:${service === "s3" && operation === "ListObjectsV2" ? "ListBucket" : operation}`), "Unsupported recovery API"); return send(operation, input); };
+      return (operation, input = {}) => {
+        assert(permitted.has(`${service}:${service === "s3" && operation === "ListObjectsV2" ? "ListBucket" : operation}`), "Unsupported recovery API");
+        if (service === "lambda") {
+          assert.equal(input.FunctionName, installationIdentity.functionName, "Alternate recovery function forbidden");
+          if (input.Qualifier !== undefined) assert(["1", "2", "3"].includes(input.Qualifier), "Alternate recovery qualifier forbidden");
+          if (operation === "UpdateFunctionCode") {
+            assert.deepEqual(Object.keys(input).sort(), ["FunctionName", "Publish", "RevisionId", "ZipFile"]); assert.equal(input.Publish, false);
+            assert(Buffer.isBuffer(input.ZipFile)); assert.equal(createHash("sha256").update(input.ZipFile).digest("hex"), packageEvidence.packageSha256);
+            assert.equal(input.RevisionId, historicalBootstrapIncident.revisionId);
+          } else if (operation === "UpdateFunctionConfiguration") {
+            assert.deepEqual(Object.keys(input).sort(), ["Description", "FunctionName", "RevisionId"]); assert(Object.values(configurations).some(({ Description }) => Description === input.Description));
+            assert.equal(typeof input.RevisionId, "string");
+          } else if (operation === "PublishVersion") {
+            assert.deepEqual(Object.keys(input).sort(), ["CodeSha256", "Description", "FunctionName", "RevisionId"]);
+            assert.equal(input.CodeSha256, Buffer.from(packageEvidence.packageSha256, "hex").toString("base64"));
+            assert(Object.values(configurations).some(({ Description }) => Description === input.Description)); assert.equal(typeof input.RevisionId, "string");
+          } else if (operation === "PutFunctionConcurrency") {
+            assert.deepEqual(input, { FunctionName: installationIdentity.functionName, ReservedConcurrentExecutions: 1 });
+          } else if (operation === "PutRuntimeManagementConfig") {
+            assert.deepEqual(input, { FunctionName: installationIdentity.functionName, UpdateRuntimeOn: "FunctionUpdate" });
+          }
+        } else if (service === "iam") assert(bootstrapManagedIdentities().some(({ role }) => role === input.RoleName), "Alternate recovery role forbidden");
+        else {
+          assert.equal(input.Bucket, identityBootstrap.bucket); assert.equal(input.Key || input.Prefix, `${identityBootstrap.prefix}identity-bootstrap.json`);
+        }
+        return send(operation, input);
+      };
     };
     const cloudtrail = create("cloudtrail", "CloudTrail", "https://cloudtrail.eu-west-2.amazonaws.com");
     return {
@@ -65,9 +98,9 @@ export async function run(argv = process.argv.slice(2), { source = cleanSource, 
   const sourceSha = source(), packageEvidence = await build(); assert.equal(packageEvidence.manifest.sourceSha, sourceSha);
   const approved = authorize({ runId, transitionId, sourceSha }, packageEvidence); const { authorizationSha256, ...authorization } = approved;
   assert.equal(source(), sourceSha);
-  const authority = await admin();
+  const authority = await admin(packageEvidence);
   try {
-    const operatorProof = await human({ sourceSha, transitionId, authorizationSha256, purpose: "IDENTITY_BOOTSTRAP_RECOVERY" }, { issuanceEvents: authority.issuanceEvents });
+    const operatorProof = await human({ sourceSha, transitionId, authorizationSha256, purpose: "IDENTITY_BOOTSTRAP" }, { issuanceEvents: authority.issuanceEvents });
     const result = await execute({ authorization, packageEvidence, operatorProof }, { ...authority, authenticate: async () => { assert.equal(source(), sourceSha, "Protected main moved during recovery"); await authority.authenticate(); } });
     assert.equal(result.state, "BOOTSTRAP_CLOSED"); return { state: result.state, sourceSha, transitionId, authorizationSha256 };
   } finally { authority.close(); }

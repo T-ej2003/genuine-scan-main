@@ -19,7 +19,7 @@ function fixture() {
 test("recovery CLI authenticates approval before admin/MFA and exposes no target or package input", async () => {
   const f = fixture(), result = await f.run(); assert.equal(result.state, "BOOTSTRAP_CLOSED");
   assert.deepEqual(f.calls.map(([name]) => name), ["authorize", "admin", "human", "execute", "close"]);
-  assert.deepEqual(f.calls[2][1], { sourceSha, transitionId, authorizationSha256, purpose: "IDENTITY_BOOTSTRAP_RECOVERY" });
+  assert.deepEqual(f.calls[2][1], { sourceSha, transitionId, authorizationSha256, purpose: "IDENTITY_BOOTSTRAP" });
 });
 
 for (const argv of [[], ["execute"], ["recover", "456", transitionId], ["execute", "456", transitionId, "package.zip"], ["execute", "456", "bad"]]) {
