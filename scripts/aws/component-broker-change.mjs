@@ -83,6 +83,7 @@ export async function executeBrokerChange({ authorization, packageEvidence, oper
   const assertReservation = (existing) => {
     const required = ["schemaVersion", "state", "transitionId", "authorizationSha256", "sourceSha", "predecessor", "successor", "configurationSha256", "identitySetSha256", "remainingOperations", "authorizationExpiresAt", "sessionExpiresAt", "authorizationHistory", "owner", "runtimeVersions", "policyCheckpoints", ...(existing.state === "VERIFIED" ? ["identityReadbackSha256"] : [])];
     assert.deepEqual(Object.keys(existing).sort(), required.sort(), "Malformed broker change reservation");
+    assert.equal(existing.schemaVersion, 1);
     const states = ["EXECUTING", "CODE_UPDATED", "INSTALL_DESCRIPTION_SET", "VERSION_4", "CLEANUP_DESCRIPTION_SET", "VERSION_5", "AUTHORIZE_DESCRIPTION_SET", "VERSION_6", "IDENTITY_POLICY_1", "IDENTITY_POLICY_2", "IDENTITY_POLICY_3", "IDENTITY_POLICY_4", "IDENTITY_POLICY_5", "VERIFIED"];
     assert(states.includes(existing.state), "Unknown broker change checkpoint"); assert.deepEqual(existing.runtimeVersions, {}, "Active broker change cannot predeclare runtime versions");
     const roles = brokerChangeManagedIdentities().map(({ role }) => role), completed = existing.state === "VERIFIED" ? roles.length : existing.state.startsWith("IDENTITY_POLICY_") ? Number(existing.state.at(-1)) : 0;

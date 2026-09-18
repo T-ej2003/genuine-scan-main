@@ -94,11 +94,18 @@ export function createInstallationHandler({ manifest, iam, s3, currentMain, now 
       assert.equal(ledger.transitionId, manifest.transitionId, "Different or consumed transition");
       renewing = ledger.authorizationSha256 !== manifest.authorizationSha256;
       if (renewing) {
-        assert(Array.isArray(manifest.authorizedPredecessors) && manifest.authorizedPredecessors.every((value) => /^[a-f0-9]{64}$/.test(value)), "Authenticated authorization lineage required");
-        assert(manifest.authorizedPredecessors.includes(ledger.authorizationSha256), "Unbound prior authorization");
+        assert(Array.isArray(manifest.authorizedPredecessors) && manifest.authorizedPredecessors.length <= 100, "Authenticated authorization lineage required");
+        const predecessor = manifest.authorizedPredecessors.find((value) => value?.authorizationSha256 === ledger.authorizationSha256);
+        assert(predecessor && Object.keys(predecessor).sort().join(",") === "authorizationSha256,documentBindingsSha256,sourceSha", "Unbound prior authorization");
+        for (const field of ["authorizationSha256", "documentBindingsSha256"]) assert.match(predecessor[field], /^[a-f0-9]{64}$/);
+        assert.match(predecessor.sourceSha, /^[a-f0-9]{40}$/);
+        assert.equal(ledger.sourceSha, predecessor.sourceSha, "Unbound prior authorization");
+        assert.equal(ledger.documentBindingsSha256, predecessor.documentBindingsSha256, "Unbound prior authorization");
       }
-      assert.equal(ledger.sourceSha, manifest.sourceSha);
-      assert.equal(ledger.documentBindingsSha256, manifest.documentBindingsSha256);
+      if (!renewing) {
+        assert.equal(ledger.sourceSha, manifest.sourceSha);
+        assert.equal(ledger.documentBindingsSha256, manifest.documentBindingsSha256);
+      }
       assert(["IAM_INSTALLING", "IAM_VERIFIED", ...(cleanup ? ["CLOSED"] : [])].includes(ledger.state));
     }
     const persist = async (state, live) => {
@@ -235,7 +242,8 @@ export async function executeFixedBroker(event, context, { manifest, iam, s3, la
     assert(missingPolicy, "Unexpected broker resource-based invocation policy");
   }
   const bind = (authorization) => ({ ...manifest, ...authorization.authorization, authorizationSha256: authorization.authorizationSha256,
-    authorizedPredecessors: authorization.history.map((item) => item.authorizationSha256) });
+    authorizedPredecessors: authorization.history.map(({ authorization: prior, authorizationSha256 }) => ({ authorizationSha256,
+      sourceSha: prior.sourceSha, documentBindingsSha256: prior.documentBindingsSha256 })) });
   const inspect = (authorization) => createInstallationHandler({ manifest: bind(authorization), iam, s3, currentMain, cleanup: true, now })({ operation: "INSPECT", transitionId: authorization.authorization.transitionId });
   const predecessors = anchor.changed ? [{ sourceSha: anchor.predecessor.sourceSha, packageSha256: anchor.predecessor.packageSha256, manifestSha256: anchor.predecessor.manifestSha256 }] : [];
   const archive = createBrokerAuthorizationArchive({ manifest, packageSha256, s3, currentMain, now, reconcile: inspect, entryPoints: anchor.entryPoints, predecessors });
