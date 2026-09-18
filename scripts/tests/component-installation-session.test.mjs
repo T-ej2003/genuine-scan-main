@@ -5,10 +5,10 @@ import { authenticateComponentSession } from "../aws/component-session-proof.mjs
 import { identityBootstrap, componentBrokerArn } from "../aws/component-installation-identity-contract.mjs";
 
 const start = Date.parse("2026-09-17T12:00:00Z");
-function fixture(purpose = "INSTALL") {
+function fixture(purpose = "INSTALL", changed = true) {
   const binding = { sourceSha: "a".repeat(40), transitionId: "12345678-1234-4234-8234-123456789abc", authorizationSha256: "b".repeat(64), purpose };
   const role = { INSTALL: identityBootstrap.installationRole, CLEANUP: identityBootstrap.cleanupRole, TERRAFORM: "mscqr-production-component-table-installer" }[purpose];
-  const version = purpose === "CLEANUP" ? "2" : "1";
+  const version = changed ? (purpose === "CLEANUP" ? "5" : "4") : (purpose === "CLEANUP" ? "2" : "1");
   const principal = `arn:aws:sts::368992683803:assumed-role/${role}/component-${binding.transitionId}`;
   const user = { Account: "368992683803", Arn: "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator" };
   const key = ["A", "S", "I", "A"].join("") + "0".repeat(16);
@@ -31,6 +31,7 @@ function fixture(purpose = "INSTALL") {
       return { Credentials: scoped, AssumedRoleUser: { Arn: principal, AssumedRoleId: "role-id:session" } };
     } }),
     invoke: async (input) => {
+      if (changed && (input.FunctionName.endsWith(":1") || input.FunctionName.endsWith(":2"))) throw Object.assign(new Error("not authorized on predecessor"), { name: "AccessDeniedException" });
       assert.equal(input.FunctionName, `${componentBrokerArn}:${version}`);
       assert.equal(input.InvocationType, "RequestResponse");
       f.payloads.push(JSON.parse(Buffer.from(input.Payload).toString("utf8")));
@@ -39,10 +40,11 @@ function fixture(purpose = "INSTALL") {
         f.proofFailures--;
         return { StatusCode: 200, ExecutedVersion: version, FunctionError: "Unhandled" };
       }
+      const proofBinding = f.proofBinding || binding;
       const result = ["CLEANUP_CONTEXT", "TERRAFORM_CONTEXT"].includes(payload.operation) ? (f.context || binding) : payload.operation.startsWith("PROVE_")
-        ? { state: "SESSION_VERIFIED", principal, expiresAt: scoped.Expiration.toISOString(), sourceSha: binding.sourceSha, transitionId: binding.transitionId, authorizationSha256: binding.authorizationSha256 }
+        ? { state: "SESSION_VERIFIED", principal, expiresAt: scoped.Expiration.toISOString(), sourceSha: proofBinding.sourceSha, transitionId: proofBinding.transitionId, authorizationSha256: proofBinding.authorizationSha256 }
         : { state: "test-accepted" };
-      if (purpose === "TERRAFORM" && payload.operation === "PROVE_TERRAFORM_SESSION") result.session = { account: "368992683803", region: "eu-west-2", ...binding, principal,
+      if (purpose === "TERRAFORM" && payload.operation === "PROVE_TERRAFORM_SESSION") result.session = { account: "368992683803", region: "eu-west-2", ...proofBinding, principal,
         issuedAt: new Date(start).toISOString(), expiresAt: scoped.Expiration.toISOString(), issuanceEventId: "12345678-1234-4234-8234-123456789def", issuanceEventTime: new Date(start).toISOString(),
         operatorArn: user.Arn, mfaAuthenticated: true, ...(f.sessionOverride || {}) };
       return { StatusCode: 200, ExecutedVersion: version, Payload: Buffer.from(JSON.stringify(result)) };
@@ -80,6 +82,26 @@ test("normal client issues a 900-second MFA human session and exposes only fixed
     await assert.rejects(client.invoke(operation), /expired/);
     assert.equal(f.payloads.length, 2);
   }
+});
+
+test("fresh bootstrap routes only to its original fixed entry points", async () => {
+  for (const purpose of ["INSTALL", "CLEANUP"]) {
+    const f = fixture(purpose, false);
+    const client = await f.open();
+    await client.invoke(purpose === "INSTALL" ? "INSTALL" : "CLOSE");
+    assert.equal(f.payloads[0].operation, purpose === "INSTALL" ? "PROVE_INSTALL_SESSION" : "PROVE_CLEANUP_SESSION");
+  }
+});
+
+test("entry-point fallback occurs only after AWS denies the predecessor version", async () => {
+  const f = fixture("INSTALL", true); const calls = [];
+  f.dependencies.invoke = async (input) => {
+    calls.push(input.FunctionName);
+    return { StatusCode: 200, ExecutedVersion: "1", FunctionError: "Unhandled", Payload: Buffer.from("{}") };
+  };
+  const client = await f.open();
+  await assert.rejects(client.invoke("INSTALL"), /proof unavailable/);
+  assert(calls.length > 0 && calls.every(value => value === `${componentBrokerArn}:1`));
 });
 
 test("Terraform operator authenticates broker MFA proof and sends only its scoped session to the isolated runner once", async () => {
@@ -166,10 +188,13 @@ test("Terraform discovers closed verified installation provenance without the ex
   assert.equal(f.payloads[1].operation, "PROVE_TERRAFORM_SESSION");
   client.close();
 });
-test("Terraform provenance from a different protected source is rejected before execution", async () => {
+test("Terraform accepts the broker-authenticated historical installation source after a broker change", async () => {
   const f = fixture("TERRAFORM");
-  f.context = { ...f.binding, sourceSha: "c".repeat(40) };
-  await assert.rejects(establishComponentTerraformSession({ sourceSha: f.binding.sourceSha, transitionId: f.binding.transitionId }, f.dependencies), /different protected source/);
+  f.context = f.proofBinding = { ...f.binding, sourceSha: "c".repeat(40) };
+  f.dependencies.state = () => ({ inspect: async () => ({ stateIdentity: "ABSENT" }), reserve: async () => {}, close: () => {} });
+  const client = await establishComponentTerraformSession({ sourceSha: f.binding.sourceSha, transitionId: f.binding.transitionId }, f.dependencies);
+  await client.inspect();
+  client.close();
 });
 
 for (const change of [{ purpose: "INSTALL" }, { transitionId: "12345678-1234-4234-8234-123456789def" }, { sourceSha: "invalid" }, { evidenceKey: "alternate" }]) {

@@ -25,7 +25,7 @@ function fixture() {
     if (f.ambiguous) throw new Error("Response lost after acceptance");
     return { ETag: `${f.version}` };
   };
-  f.claim = (value = session()) => claimComponentSession({ session: value, s3, now: () => f.clock });
+  f.claim = (value = session(), authorizedPredecessors = []) => claimComponentSession({ session: value, s3, authorizedPredecessors, now: () => f.clock });
   return f;
 }
 
@@ -82,4 +82,21 @@ test("source movement, cleanup identity, secret fields and altered ownership fai
   f.record.session.authorizationSha256 = "d".repeat(64);
   await assert.rejects(guard(), /ownership changed/);
   assert.equal(f.writes, 1);
+});
+
+test("successor source replaces only an exact expired authorization predecessor", async () => {
+  const f = fixture(), old = session(); await f.claim(old);
+  f.clock = start + 1020001;
+  const successor = { ...session(f.clock, "c".repeat(64), "12345678-1234-4234-8234-123456789aaa"), sourceSha: "d".repeat(40) };
+  await assert.rejects(f.claim(successor), /Unbound prior installation session/);
+  const predecessor = { authorizationSha256: old.authorizationSha256, sourceSha: old.sourceSha, documentBindingsSha256: "e".repeat(64) };
+  for (const value of [
+    { ...predecessor, authorizationSha256: "f".repeat(64) },
+    { ...predecessor, sourceSha: "f".repeat(40) },
+    { ...predecessor, documentBindingsSha256: "not-a-hash" },
+  ]) await assert.rejects(f.claim(successor, [value]));
+  await f.claim(successor, [predecessor]);
+  assert.equal(f.record.session.sourceSha, successor.sourceSha);
+  assert.deepEqual(f.record.history, [old]);
+  assert.equal(f.writes, 2);
 });

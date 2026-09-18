@@ -28,6 +28,17 @@ export const historicalBootstrapIncident = Object.freeze({
   documentBindingsSha256: "28278e4c91df4f30d3dac16aadb2253031908308b43dcb675beb6368d5f4a2d1",
 });
 
+// The only completed recovery this source recognizes as a post-bootstrap trust
+// anchor. It is immutable predecessor lineage; a successor needs its own
+// governed BROKER_CHANGE binding and cannot be inferred from this record.
+export const completedBootstrapRecovery = Object.freeze({
+  transitionId: "fbeed27b-0ab5-4cde-87d8-1ec88794d6e6",
+  authorizationSha256: "777e0075615571fee12a533cc1c4e5e2b7fc0cc8fc4e6a70d24d82f0094e4754",
+  sourceSha: "c8cd9c8c5f823e7e120682facb63729def2fab5e",
+  packageSha256: "c90b5f4e20c2333105196181b83b233c25f01f577f62340fa0a9bfdcf39ea2ab",
+  manifestSha256: "8f90089cffd9c8dbd3d94b0f3f73c5783436d6b30de5bc64465a22aff1ef576c",
+});
+
 export const bootstrapRecoveryOperations = Object.freeze([
   "UPDATE_EXACT_BROKER_CODE",
   "SET_EXACT_RESERVED_CONCURRENCY",

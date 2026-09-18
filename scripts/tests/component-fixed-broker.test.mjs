@@ -1,10 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { executeFixedBroker } from "../aws/component-iam-broker.mjs";
+import { assertCompletedRecoveryTrustAnchor } from "../aws/component-bootstrap-trust-anchor.mjs";
 import { installationDocuments, documentBindings, digest, installationIdentity } from "../aws/component-iam-installation-contract.mjs";
 import { bootstrapManagedIdentities, componentBrokerArn, identityBootstrap } from "../aws/component-installation-identity-contract.mjs";
 import { sessionProofBinding } from "../aws/component-session-proof.mjs";
 import { brokerConfiguration } from "../aws/component-broker-configuration.mjs";
+import { bootstrapPartialStateDigest, bootstrapRecoveryOperations, completedBootstrapRecovery, historicalBootstrapAuthorization, historicalBootstrapIncident } from "../aws/component-bootstrap-partial-recovery-contract.mjs";
 
 const start = Date.parse("2026-09-17T12:00:00.000Z");
 const sourceSha = "a".repeat(40);
@@ -15,17 +17,17 @@ const actor = { type: "User", login: "T-ej2003", id: 183396573 };
 const prefix = "mscqr/production/component-deployment-state/";
 const fault = (name) => Object.assign(new Error(name), { name });
 
-function fixture() {
+function fixture({ currentSourceSha = sourceSha, currentPackageSha256 = packageSha256 } = {}) {
   const identities = bootstrapManagedIdentities();
-  const manifest = { account: installationIdentity.account, sourceSha, identities, targets: installationDocuments(), documentBindingsSha256: digest(documentBindings()), capabilitySetSha256: digest(identities) };
-  const bootstrap = { schemaVersion: 1, state: "BOOTSTRAP_CLOSED", sourceSha, manifestSha256: digest(manifest), identitySetSha256: digest(identities), packageSha256, runtimeVersions: { 1: runtimeArn, 2: runtimeArn, 3: runtimeArn } };
-  const authorization = { schemaVersion: 1, account: installationIdentity.account, region: installationIdentity.region, sourceSha, transitionId, runId: "12345", operator: actor, reviewer: actor,
+  const manifest = { account: installationIdentity.account, sourceSha: currentSourceSha, identities, targets: installationDocuments(), documentBindingsSha256: digest(documentBindings()), capabilitySetSha256: digest(identities) };
+  const bootstrap = { schemaVersion: 1, state: "BOOTSTRAP_CLOSED", sourceSha: currentSourceSha, manifestSha256: digest(manifest), identitySetSha256: digest(identities), packageSha256: currentPackageSha256, runtimeVersions: { 1: runtimeArn, 2: runtimeArn, 3: runtimeArn } };
+  const authorization = { schemaVersion: 1, account: installationIdentity.account, region: installationIdentity.region, sourceSha: currentSourceSha, transitionId, runId: "12345", operator: actor, reviewer: actor,
     environment: installationIdentity.authorizationEnvironment, approvalObservedAt: new Date(start).toISOString(), expiresAt: new Date(start + 1800000).toISOString(),
-    documentBindingsSha256: manifest.documentBindingsSha256, capabilitySetSha256: manifest.capabilitySetSha256, brokerPackageSha256: packageSha256, brokerManifestSha256: digest(manifest) };
+    documentBindingsSha256: manifest.documentBindingsSha256, capabilitySetSha256: manifest.capabilitySetSha256, brokerPackageSha256: currentPackageSha256, brokerManifestSha256: digest(manifest) };
   const objects = new Map([[`${prefix}identity-bootstrap.json`, { value: bootstrap, etag: "bootstrap" }]]);
   const roles = new Map([[manifest.targets[2].role, { RoleName: manifest.targets[2].role, Arn: manifest.targets[2].arn }]]);
   const policies = new Map();
-  const f = { clock: start + 1000, main: sourceSha, sessionIssuedAt: start, sessionEventId: "12345678-1234-4234-8234-123456789def", writes: [], objects, roles, policies, manifest, authorization, bootstrap, configure: () => {}, configureIdentity: () => {}, afterWrite: () => {} };
+  const f = { clock: start + 1000, main: currentSourceSha, sessionIssuedAt: start, sessionEventId: "12345678-1234-4234-8234-123456789def", writes: [], objects, roles, policies, manifest, authorization, bootstrap, configure: () => {}, configureIdentity: () => {}, afterWrite: () => {} };
   let serial = 0;
   const s3 = async (operation, input) => {
     assert.equal(input.Bucket, "mscqr-production-terraform-state-368992683803-eu-west-2");
@@ -95,7 +97,7 @@ function fixture() {
       throw fault("ResourceNotFoundException");
     }
     if (operation === "GetFunction") {
-      const expected = brokerConfiguration({ packageSha256, manifestSha256: digest(manifest), entryPoint: { 1: "INSTALL", 2: "CLEANUP", 3: "AUTHORIZE" }[input.Qualifier] });
+      const expected = brokerConfiguration({ packageSha256: currentPackageSha256, manifestSha256: digest(manifest), entryPoint: { 1: "INSTALL", 2: "CLEANUP", 3: "AUTHORIZE" }[input.Qualifier] });
       const response = { Configuration: { ...expected, State: "Active", LastUpdateStatus: "Successful", CodeSize: 1000, RuntimeVersionConfig: { RuntimeVersionArn: runtimeArn } } };
       f.configure(response.Configuration);
       return response;
@@ -108,7 +110,7 @@ function fixture() {
   f.run = (operation, fields = {}, version = { AUTHORIZE: "3", CLOSE: "2", CLEANUP_CONTEXT: "2", TERRAFORM_CONTEXT: "1", PROVE_CLEANUP_SESSION: "2", INSTALL: "1", INSPECT: "1", PROVE_INSTALL_SESSION: "1", PROVE_TERRAFORM_SESSION: "1" }[operation]) => {
     const purpose = f.proofPurpose || (["CLOSE", "PROVE_CLEANUP_SESSION"].includes(operation) ? "CLEANUP" : operation === "PROVE_TERRAFORM_SESSION" ? "TERRAFORM" : "INSTALL");
     const role = { CLEANUP: identityBootstrap.cleanupRole, INSTALL: identityBootstrap.installationRole, TERRAFORM: installationIdentity.terraformRole }[purpose];
-    const binding = { sourceSha, transitionId, authorizationSha256: digest(authorization), purpose };
+    const binding = { sourceSha: manifest.sourceSha, transitionId, authorizationSha256: digest(authorization), purpose };
     const key = ["A", "S", "I", "A"].join("") + "0".repeat(16);
     const date = new Date(f.clock).toISOString().replace(/[-:]|\.\d{3}/g, "");
     const proof = { query: { Action: "GetCallerIdentity", Version: "2011-06-15", "X-Amz-Algorithm": "AWS4-HMAC-SHA256", "X-Amz-Credential": `${key}/${date.slice(0, 8)}/eu-west-2/sts/aws4_request`,
@@ -124,6 +126,30 @@ function fixture() {
     return executeFixedBroker(event, { functionVersion: version, invokedFunctionArn: `${componentBrokerArn}:${version}` }, { manifest, iam, s3, lambda, currentMain: async () => f.main, now: () => f.clock,
       sts: async (request) => { assert.equal(request.headers["x-mscqr-component-binding"], sessionProofBinding(binding)); return { Account: "368992683803", Arn: principal, UserId: "role-id:session" }; }, issuanceEvents: async () => f.issuanceMissing ? [] : [issuance] });
   };
+  return f;
+}
+
+function recoveredFixture() {
+  const f = fixture();
+  const runtimeVersions = { 1: runtimeArn, 2: runtimeArn, 3: runtimeArn };
+  const operatorProof = { account: identityBootstrap.account, region: identityBootstrap.region, sourceSha: historicalBootstrapIncident.sourceSha,
+    transitionId: historicalBootstrapIncident.transitionId, authorizationSha256: historicalBootstrapIncident.authorizationSha256,
+    purpose: "IDENTITY_BOOTSTRAP", principal: `arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/component-${historicalBootstrapIncident.transitionId}`,
+    issuedAt: "2026-09-18T09:33:54.000Z", expiresAt: "2026-09-18T09:48:54.000Z", issuanceEventId: "12345678-1234-4234-8234-123456789aaa",
+    issuanceEventTime: "2026-09-18T09:33:54.000Z", operatorArn: "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator", mfaAuthenticated: true };
+  const identities = f.manifest.identities.map(({ arn }) => ({ arn, role: "EXPECTED", policy: "EXPECTED" }));
+  f.bootstrap = { schemaVersion: 1, state: "BOOTSTRAP_CLOSED", sourceSha: historicalBootstrapIncident.sourceSha,
+    transitionId: historicalBootstrapIncident.transitionId, authorizationSha256: historicalBootstrapIncident.authorizationSha256,
+    authorization: historicalBootstrapAuthorization(), owner: "12345678-1234-4234-8234-123456789aaa", manifestSha256: historicalBootstrapIncident.manifestSha256,
+    identitySetSha256: historicalBootstrapIncident.identitySetSha256, packageSha256: historicalBootstrapIncident.packageSha256, operatorProof,
+    identities, identityReadbackSha256: digest(identities), runtimeVersions,
+    broker: { functionArn: componentBrokerArn, packageSha256: completedBootstrapRecovery.packageSha256, manifestSha256: completedBootstrapRecovery.manifestSha256, runtimeVersions }, closedAt: "2026-09-18T12:00:00.000Z",
+    recovery: { schemaVersion: 1, state: "RECOVERY_CLOSED", transitionId: completedBootstrapRecovery.transitionId, authorizationSha256: completedBootstrapRecovery.authorizationSha256,
+      sourceSha: completedBootstrapRecovery.sourceSha, oldPackageSha256: historicalBootstrapIncident.packageSha256, newPackageSha256: completedBootstrapRecovery.packageSha256, newManifestSha256: completedBootstrapRecovery.manifestSha256,
+      partialStateSha256: bootstrapPartialStateDigest(), remainingOperations: bootstrapRecoveryOperations, authorizationExpiresAt: "2026-09-18T12:30:00.000Z",
+      sessionExpiresAt: "2026-09-18T12:15:00.000Z", authorizationHistory: [], owner: "12345678-1234-4234-8234-123456789def", closedAt: "2026-09-18T12:01:00.000Z",
+      oldRevisionId: historicalBootstrapIncident.revisionId, finalPackageSha256: completedBootstrapRecovery.packageSha256, finalManifestSha256: completedBootstrapRecovery.manifestSha256, versions: ["1", "2", "3"] } };
+  f.objects.set(`${prefix}identity-bootstrap.json`, { value: f.bootstrap, etag: "recovered" });
   return f;
 }
 
@@ -231,6 +257,31 @@ test("broker cannot mistake denied policy readback for absence", async () => {
   const f = fixture();
   f.policyReadDenied = true;
   await assert.rejects(f.run("AUTHORIZE"), /AccessDeniedException/);
+  assert.deepEqual(f.writes, []);
+});
+
+test("recovered bootstrap remains an authenticated predecessor and rejects an unbound executing package", async () => {
+  const f = recoveredFixture();
+  assert.doesNotThrow(() => assertCompletedRecoveryTrustAnchor(f.bootstrap));
+  await assert.rejects(f.run("AUTHORIZE"), /Recovery (?:source|manifest|package) differs/);
+  assert.equal(f.bootstrap.sourceSha, historicalBootstrapIncident.sourceSha);
+  assert.equal(f.bootstrap.recovery.sourceSha, completedBootstrapRecovery.sourceSha);
+});
+
+for (const [name, mutate] of [
+  ["source mismatch", f => { f.bootstrap.recovery.sourceSha = sourceSha; }],
+  ["manifest mismatch", f => { f.bootstrap.recovery.finalManifestSha256 = "f".repeat(64); }],
+  ["package mismatch", f => { f.bootstrap.recovery.finalPackageSha256 = "f".repeat(64); }],
+  ["incomplete recovery", f => { delete f.bootstrap.recovery.closedAt; }],
+  ["executing recovery", f => { f.bootstrap.recovery.state = "RECOVERY_EXECUTING"; }],
+  ["wrong recovery authorization", f => { f.bootstrap.recovery.authorizationSha256 = "f".repeat(64); }],
+  ["historical lineage mismatch", f => { f.bootstrap.manifestSha256 = "f".repeat(64); }],
+  ["partial recovery fields", f => { f.bootstrap.recovery.unexpected = true; }],
+  ["repeated recovery authorization", f => { f.bootstrap.recovery.authorizationHistory = [{ authorizationSha256: f.bootstrap.recovery.authorizationSha256, authorizationExpiresAt: "2026-09-18T12:20:00.000Z", sessionExpiresAt: "2026-09-18T12:10:00.000Z", owner: "12345678-1234-4234-8234-123456789aaa" }]; }],
+]) test(`recovered bootstrap ${name} fails closed without historical fallback`, async () => {
+  const f = recoveredFixture(); mutate(f);
+  await assert.rejects(f.run("AUTHORIZE"));
+  assert(!f.objects.has(`${prefix}installation-authorization.json`));
   assert.deepEqual(f.writes, []);
 });
 
@@ -365,4 +416,9 @@ test("an unfinished or substituted bootstrap record cannot authorize any broker 
     await assert.rejects(f.run("AUTHORIZE"));
     assert.deepEqual(f.writes, []);
   }
+});
+
+test("broker change metadata without a recovered predecessor never falls back to an original trust anchor", async () => {
+  const f = fixture(); f.bootstrap.brokerChange = { state: "BROKER_CHANGE_CLOSED" };
+  await assert.rejects(f.run("AUTHORIZE")); assert.deepEqual(f.writes, []);
 });

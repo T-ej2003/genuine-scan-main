@@ -59,6 +59,10 @@ This exception does not change Stage-A/Stage-B or other governance domains.
 The separate installation environment is
 `production-component-infrastructure-install-permission`. Initial identity
 bootstrap uses `production-component-installation-identity-bootstrap`.
+An already recovered broker can change only through the separately configured
+`production-component-installation-broker-change` environment. It has the same
+single User reviewer and exact `main` branch contract; GitHub must not create it
+implicitly.
 The normal deployment, component-state bootstrap and table-activation environments
 retain their exact contracts. Never broaden an OIDC subject to bypass approval.
 
@@ -100,7 +104,9 @@ Use a clean current protected-main checkout after merge. Dispatch the exact
 `authorize-component-iam-installation.yml` workflow with `source_sha` and a UUIDv4
 `transition_id`. T-ej2003 explicitly approves its environment request. The fixed
 reusable publisher authenticates source and approval before acquiring OIDC
-credentials, then invokes only broker version 3 to archive the authorization.
+credentials, then invokes the authenticated authorization-publisher entry
+point: version 3 after a fresh bootstrap, or version 6 after a closed broker
+change, to archive the authorization.
 Record the successful first-attempt run ID.
 
 Future operator commands, after prerequisites are installed and verified:
@@ -142,13 +148,39 @@ lineage, finishes only missing exact writes, and cannot reopen a closed transiti
 Source changes require new governance, hashes and approvals; they never inherit
 an old transition silently.
 
+## Governed broker change after a recovered bootstrap
+
+The recovery closure is immutable predecessor evidence; it does not authorize a
+future package. Merge the successor source, configure and authenticate the exact
+`production-component-installation-broker-change` environment, dispatch
+`authorize-component-installation-broker-change.yml` with a fresh UUIDv4 and the
+current protected-main SHA, then obtain explicit environment approval. From a
+clean current-main worktree, run:
+
+```sh
+node scripts/aws/component-broker-change-cli.mjs execute APPROVED_RUN_ID TRANSITION_UUID
+```
+
+The command binds the complete recovered predecessor and the exact successor
+source, package, manifest, code, configuration and invocation policies. It can
+update the fixed broker once with `Publish=false`, publish versions 4–6 in order,
+rebind only the five fixed execution identities, verify, and CAS-close the
+existing journal. It cannot select another function/package/configuration, alter
+trust or execution authority, add resource policy, or pass a role. Interrupted
+changes require fresh approval, expiry fencing, exact checkpoint readback and CAS
+transfer. A malformed or incomplete change fails closed; source merge alone never
+updates the deployed broker. Before takeover, the controller validates the active
+owner, canonical expiry timestamps, and every closure-bound source, configuration
+and identity digest; it never CAS-migrates a corrupt reservation.
+
 Cleanup requires only the transition ID and a fresh exact cleanup-role session.
-Broker version 2 exposes read-only `CLEANUP_CONTEXT` at its fixed evidence location
-to discover the original source and authorization hash. No retained GitHub artifact
-or caller-selected file/key is required. `CLOSE` still authenticates signed human
-session proof and live IAM before writing durable closure. It does not delete the
-permanent bootstrap identities, fixed broker, component roles or table, and cannot
-reinstall or modify IAM. STS expiration removes the old controller's usable
+The original/recovered anchor binds `CLEANUP_CONTEXT` to broker version 2; a closed
+broker change rebinds it to version 5. Both expose the same read-only fixed evidence
+location to discover the original source and authorization hash. No retained GitHub
+artifact or caller-selected file/key is required. `CLOSE` still authenticates signed
+human session proof and live IAM before writing durable closure. It does not delete
+the permanent bootstrap identities, fixed broker, component roles or table, and
+cannot reinstall or modify IAM. STS expiration removes the old controller's usable
 credentials; closure fences the broker transition permanently.
 
 ## Remaining table and deployment boundaries
@@ -173,13 +205,15 @@ are hash checked, the committed provider lock is read-only, and no host plugin
 cache or CLI override is accepted.
 
 The historical IAM approval may have expired before preparation. Its fixed AWS
-archive and closure remain provenance, never mutation authority: broker version 1
-discovers the exact transition, requires a fully verified closure and receipt,
-then authenticates the fresh scoped Terraform session. Closure continues to reject
-`INSTALL`, `INSPECT`, and installation-session proof. Terraform apply still needs
-its separate fresh environment-gated saved-plan approval. Saved-plan freshness is
-measured from GitHub's authenticated successful-run completion (`updated_at`), not
-workflow dispatch time; the completion timestamp is re-read unchanged with the run.
+archive and closure remain provenance, never mutation authority: the
+original/recovered anchor binds this proof to broker version 1, while a closed broker
+change rebinds it to version 4. The selected version discovers the exact transition,
+requires a fully verified closure and receipt, then authenticates the fresh scoped
+Terraform session. Closure continues to reject `INSTALL`, `INSPECT`, and
+installation-session proof. Terraform apply still needs its separate fresh
+environment-gated saved-plan approval. Saved-plan freshness is measured from
+GitHub's authenticated successful-run completion (`updated_at`), not workflow
+dispatch time; the completion timestamp is re-read unchanged with the run.
 
 Review the saved `activation.tfplan`, `preparation.json` and returned hashes.
 Dispatch `authorize-component-infrastructure-activation.yml` with their exact

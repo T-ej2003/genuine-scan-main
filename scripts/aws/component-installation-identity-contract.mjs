@@ -26,12 +26,20 @@ const humanTrust = () => policy([{ Effect: "Allow", Principal: { AWS: human }, A
 // Separate immutable entry versions prevent cleanup credentials invoking the
 // installation entry point directly. Unqualified invocation is never granted.
 const invoke = (version) => policy([{ Effect: "Allow", Action: "lambda:InvokeFunction", Resource: `${componentBrokerArn}:${version}`, Condition: { StringEquals: { "aws:RequestedRegion": identityBootstrap.region } } }]);
+// Kept local to avoid a configuration/identity import cycle. The public
+// broker configuration module independently pins these same immutable sets.
+const bootstrapEntryPoints = Object.freeze({ INSTALL: "1", CLEANUP: "2", AUTHORIZE: "3" });
+const changedEntryPoints = Object.freeze({ INSTALL: "4", CLEANUP: "5", AUTHORIZE: "6" });
+const assertEntryPoints = (entryPoints) => {
+  assert(entryPoints === bootstrapEntryPoints || entryPoints === changedEntryPoints, "Identity entry-point override forbidden");
+  return entryPoints;
+};
 
-export function componentSessionIdentities() {
-  assert.equal(arguments.length, 0, "Identity overrides are forbidden");
+function sessionIdentities(entryPoints) {
+  assertEntryPoints(entryPoints);
   const roles = [
-    { role: identityBootstrap.installationRole, policyName: "MSCQRComponentInstallationSession", trust: humanTrust(), policy: invoke(1) },
-    { role: identityBootstrap.cleanupRole, policyName: "MSCQRComponentCleanupSession", trust: humanTrust(), policy: invoke(2) },
+    { role: identityBootstrap.installationRole, policyName: "MSCQRComponentInstallationSession", trust: humanTrust(), policy: invoke(entryPoints.INSTALL) },
+    { role: identityBootstrap.cleanupRole, policyName: "MSCQRComponentCleanupSession", trust: humanTrust(), policy: invoke(entryPoints.CLEANUP) },
     { role: identityBootstrap.authorizationRole, policyName: "MSCQRComponentInstallationAuthorization", trust: policy([{
       Effect: "Allow", Principal: { Federated: `arn:aws:iam::${identityBootstrap.account}:oidc-provider/token.actions.githubusercontent.com` },
       Action: "sts:AssumeRoleWithWebIdentity", Condition: { StringEquals: {
@@ -43,11 +51,23 @@ export function componentSessionIdentities() {
         "token.actions.githubusercontent.com:ref": "refs/heads/main",
         "token.actions.githubusercontent.com:job_workflow_ref": `${installationIdentity.repository}/.github/workflows/component-iam-authorization-publisher.yml@refs/heads/main`,
       } },
-    }]), policy: invoke(3) },
+    }]), policy: invoke(entryPoints.AUTHORIZE) },
   ];
   return roles.map((role) => ({ ...role, arn: componentRoleArn(role.role), path: "/", maxSessionDuration: identityBootstrap.maxSessionDuration,
     tags: { ManagedBy: "GovernedComponentIdentityBootstrap", Environment: "production", Component: "component-installation" },
     trustSha256: digest(role.trust), policySha256: digest(role.policy) }));
+}
+
+export function componentSessionIdentities() {
+  assert.equal(arguments.length, 0, "Identity overrides are forbidden");
+  return sessionIdentities(bootstrapEntryPoints);
+}
+
+// This is used solely by the governed BROKER_CHANGE controller and trust
+// anchor. Callers cannot provide a custom version map.
+export function brokerChangeSessionIdentities() {
+  assert.equal(arguments.length, 0, "Identity overrides are forbidden");
+  return sessionIdentities(changedEntryPoints);
 }
 
 export function assertExpiredSession(session, now) {
@@ -83,9 +103,15 @@ export function assertPostBootstrapCapabilitySeparation(identities = componentSe
   return true;
 }
 
-export function bootstrapManagedIdentities() {
-  assert.equal(arguments.length, 0, "Bootstrap identity overrides are forbidden");
+function managedIdentities(entryPoints) {
+  assertEntryPoints(entryPoints);
   const capabilities = installationCapabilitySet();
+  const terraformInvocation = capabilities.terraform.Statement.find(({ Action }) => Action === "lambda:InvokeFunction");
+  assert(terraformInvocation); terraformInvocation.Resource = `${componentBrokerArn}:${entryPoints.INSTALL}`;
+  // The successor broker still rejects a resource-policy bypass on every
+  // retained immutable version, but it has no mutation capability for any of
+  // them. Fresh bootstrap keeps the original three-version read surface.
+  const brokerVersions = entryPoints === changedEntryPoints ? [...Object.values(bootstrapEntryPoints), ...Object.values(changedEntryPoints)] : Object.values(entryPoints);
   const objects = ["installation-authorization.json", "iam-installation.json", "permission-installation.json", "installation-session.json"].map((name) => `arn:aws:s3:::${identityBootstrap.bucket}/${identityBootstrap.prefix}${name}`);
   const brokerPolicy = provisionerTargetPolicy();
   brokerPolicy.Statement.push(
@@ -96,7 +122,7 @@ export function bootstrapManagedIdentities() {
     { Effect: "Allow", Action: "s3:GetObject", Resource: objects },
     { Effect: "Allow", Action: "s3:GetObject", Resource: `arn:aws:s3:::${identityBootstrap.bucket}/${identityBootstrap.prefix}identity-bootstrap.json` },
     { Effect: "Allow", Action: "s3:PutObject", Resource: objects, Condition: { StringEquals: { "s3:x-amz-server-side-encryption": "AES256" } } },
-    { Effect: "Allow", Action: ["lambda:GetFunction", "lambda:GetFunctionConfiguration", "lambda:GetFunctionCodeSigningConfig", "lambda:GetRuntimeManagementConfig", "lambda:GetFunctionConcurrency", "lambda:GetPolicy"], Resource: [componentBrokerArn, ...[1, 2, 3].map((version) => `${componentBrokerArn}:${version}`)] },
+    { Effect: "Allow", Action: ["lambda:GetFunction", "lambda:GetFunctionConfiguration", "lambda:GetFunctionCodeSigningConfig", "lambda:GetRuntimeManagementConfig", "lambda:GetFunctionConcurrency", "lambda:GetPolicy"], Resource: [componentBrokerArn, ...brokerVersions.map((version) => `${componentBrokerArn}:${version}`)] },
     { Effect: "Allow", Action: ["iam:GetRole", "iam:GetRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies", "iam:ListRoleTags"], Resource: [installationIdentity.provisionerRole, installationIdentity.terraformRole, identityBootstrap.installationRole, identityBootstrap.cleanupRole, identityBootstrap.authorizationRole].map(componentRoleArn) },
   );
   for (const statement of brokerPolicy.Statement) statement.Condition = { ...statement.Condition, ArnEquals: { "lambda:SourceFunctionArn": componentBrokerArn } };
@@ -106,12 +132,22 @@ export function bootstrapManagedIdentities() {
   ].map((role) => ({ ...role, arn: componentRoleArn(role.role), path: "/", maxSessionDuration: identityBootstrap.maxSessionDuration,
     tags: { ManagedBy: "GovernedComponentIdentityBootstrap", Environment: "production", Component: "component-installation" },
     trustSha256: digest(role.trust), policySha256: digest(role.policy) }));
-  return [...roles, ...componentSessionIdentities()];
+  return [...roles, ...sessionIdentities(entryPoints)];
+}
+
+export function bootstrapManagedIdentities() {
+  assert.equal(arguments.length, 0, "Bootstrap identity overrides are forbidden");
+  return managedIdentities(bootstrapEntryPoints);
+}
+
+export function brokerChangeManagedIdentities() {
+  assert.equal(arguments.length, 0, "Identity overrides are forbidden");
+  return managedIdentities(changedEntryPoints);
 }
 
 // Read-only, fixed identity inventory. The caller cannot substitute IAM targets
 // or documents; the same verifier serves initial bootstrap and broker readback.
-export async function inspectBootstrapIdentities(iam) {
+async function inspectManagedIdentities(iam, targets) {
   const inventory = async (operation, role, field) => {
     const values = [];
     const markers = new Set();
@@ -128,7 +164,7 @@ export async function inspectBootstrapIdentities(iam) {
     } while (marker);
   };
   const result = [];
-  for (const target of bootstrapManagedIdentities()) {
+  for (const target of targets) {
     let response;
     try { response = await iam("GetRole", { RoleName: target.role }); }
     catch (error) {
@@ -155,6 +191,16 @@ export async function inspectBootstrapIdentities(iam) {
     result.push({ arn: target.arn, role: "EXPECTED", policy: names.length ? "EXPECTED" : "ABSENT" });
   }
   return result;
+}
+
+export async function inspectBootstrapIdentities(iam) {
+  assert.equal(arguments.length, 1, "Identity overrides are forbidden");
+  return inspectManagedIdentities(iam, bootstrapManagedIdentities());
+}
+
+export async function inspectBrokerChangeIdentities(iam) {
+  assert.equal(arguments.length, 1, "Identity overrides are forbidden");
+  return inspectManagedIdentities(iam, brokerChangeManagedIdentities());
 }
 
 // This is the source-owned mutation envelope for the exceptional first bootstrap,

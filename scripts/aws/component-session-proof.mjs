@@ -7,7 +7,7 @@ import { canonical, digest } from "./component-iam-installation-contract.mjs";
 const host = "sts.eu-west-2.amazonaws.com";
 const stsNamespace = "https://sts.amazonaws.com/doc/2011-06-15/";
 const queryNames = ["Action", "Version", "X-Amz-Algorithm", "X-Amz-Credential", "X-Amz-Date", "X-Amz-Expires", "X-Amz-Security-Token", "X-Amz-Signature", "X-Amz-SignedHeaders"].sort();
-const roles = { INSTALL: identityBootstrap.installationRole, CLEANUP: identityBootstrap.cleanupRole, IDENTITY_BOOTSTRAP: "mscqr-production-release-deployer", TERRAFORM: "mscqr-production-component-table-installer" };
+const roles = { INSTALL: identityBootstrap.installationRole, CLEANUP: identityBootstrap.cleanupRole, IDENTITY_BOOTSTRAP: "mscqr-production-release-deployer", BROKER_CHANGE: "mscqr-production-release-deployer", TERRAFORM: "mscqr-production-component-table-installer" };
 function awsExpiration(value) {
   assert(typeof value === "string", "AWS expiration missing");
   if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value)) return Date.parse(value);
@@ -168,9 +168,15 @@ export function assertComponentSessionRecord(session) {
   return true;
 }
 
-export async function claimComponentSession({ session, s3, now = Date.now }) {
+export async function claimComponentSession({ session, s3, authorizedPredecessors = [], now = Date.now }) {
   assertComponentSessionRecord(session);
   assert.equal(session.purpose, "INSTALL");
+  assert(Array.isArray(authorizedPredecessors) && authorizedPredecessors.length <= 100, "Authenticated authorization lineage required");
+  for (const predecessor of authorizedPredecessors) {
+    assert.deepEqual(Object.keys(predecessor || {}).sort(), ["authorizationSha256", "documentBindingsSha256", "sourceSha"]);
+    for (const field of ["authorizationSha256", "documentBindingsSha256"]) assert.match(predecessor[field] || "", /^[a-f0-9]{64}$/);
+    assert.match(predecessor.sourceSha || "", /^[a-f0-9]{40}$/);
+  }
   const key = `${identityBootstrap.prefix}installation-session.json`;
   const read = async () => {
     const list = await s3("ListObjectsV2", { Bucket: identityBootstrap.bucket, Prefix: key });
@@ -184,8 +190,11 @@ export async function claimComponentSession({ session, s3, now = Date.now }) {
     assert.equal(record.schemaVersion, 1);
     assert(Array.isArray(record.history) && record.history.length <= 100, "Unexpected session history");
     for (const item of [...record.history, record.session]) assertComponentSessionRecord(item);
-    assert.equal(record.session.sourceSha, session.sourceSha);
     assert.equal(record.session.transitionId, session.transitionId);
+    if (record.session.sourceSha !== session.sourceSha) {
+      assert(authorizedPredecessors.some(({ authorizationSha256, sourceSha }) =>
+        authorizationSha256 === record.session.authorizationSha256 && sourceSha === record.session.sourceSha), "Unbound prior installation session");
+    }
     return { record, etag: response.ETag };
   };
   const prior = await read();

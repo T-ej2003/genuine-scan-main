@@ -13,7 +13,7 @@ const root = fileURLToPath(new URL("../../", import.meta.url));
 const terraformRoot = "infra/aws/terraform/production-component-deployment-state";
 const packageRoot = `${terraformRoot}/broker-package`;
 const sourceFiles = [
-  ...["component-iam-broker", "component-broker-authorization", "component-broker-configuration", "component-installation-identity-contract", "component-iam-installation-contract", "component-session-proof", "iam-policy-document"].map((name) => `scripts/aws/${name}.mjs`),
+  ...["component-iam-broker", "component-broker-authorization", "component-broker-configuration", "component-bootstrap-partial-recovery-contract", "component-broker-change-contract", "component-bootstrap-trust-anchor", "component-installation-identity-contract", "component-iam-installation-contract", "component-session-proof", "iam-policy-document"].map((name) => `scripts/aws/${name}.mjs`),
   ...["normal-deployer-trust-policy", "normal-deployer-policy", "bootstrap-trust-policy", "bootstrap-policy", "release-terminal-state-policy"].map((name) => `${terraformRoot}/${name}.json`),
   `${packageRoot}/package.json`, `${packageRoot}/package-lock.json`,
 ];

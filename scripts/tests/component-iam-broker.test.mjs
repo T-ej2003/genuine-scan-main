@@ -372,7 +372,7 @@ for (const state of ["IAM_INSTALLING", "IAM_VERIFIED"]) test(`fresh pinned autho
   const f = fixture();
   f.seed(state, state === "IAM_VERIFIED");
   const previous = f.manifest.authorizationSha256;
-  f.manifest.authorizedPredecessors = [previous];
+  f.manifest.authorizedPredecessors = [{ authorizationSha256: previous, sourceSha: f.manifest.sourceSha, documentBindingsSha256: f.manifest.documentBindingsSha256 }];
   f.manifest.authorizationSha256 = digest({ authorization: "fresh-offline-fixture" });
   await f.run();
   assert.equal(f.ledger().state, "IAM_VERIFIED");
@@ -386,7 +386,7 @@ for (const state of ["IAM_INSTALLING", "IAM_VERIFIED"]) test(`fresh pinned autho
 
 test("renewal cannot consume a different authorization's journal", async () => {
   const f = fixture(); f.seed();
-  f.manifest.authorizedPredecessors = [digest({ unrelated: true })];
+  f.manifest.authorizedPredecessors = [{ authorizationSha256: digest({ unrelated: true }), sourceSha: f.manifest.sourceSha, documentBindingsSha256: f.manifest.documentBindingsSha256 }];
   f.manifest.authorizationSha256 = digest({ fresh: true });
   await assert.rejects(f.run(), /Unbound prior authorization/);
   assert.equal(f.writes.length, 0);
@@ -395,11 +395,33 @@ test("renewal cannot consume a different authorization's journal", async () => {
 
 test("renewal CAS failure prevents remaining IAM mutations", async () => {
   const f = fixture(); f.seed();
-  f.manifest.authorizedPredecessors = [f.manifest.authorizationSha256];
+  f.manifest.authorizedPredecessors = [{ authorizationSha256: f.manifest.authorizationSha256, sourceSha: f.manifest.sourceSha, documentBindingsSha256: f.manifest.documentBindingsSha256 }];
   f.manifest.authorizationSha256 = digest({ fresh: true });
   f.beforeS3 = (operation) => { if (operation === "PutObject") throw error("PreconditionFailed", 412); };
   await assert.rejects(f.run(), /PreconditionFailed/);
   assert.equal(f.writes.length, 0);
+});
+
+test("renewal migrates only an exact predecessor-source verified ledger", async () => {
+  const f = fixture(); f.seed("IAM_VERIFIED", true);
+  const previous = f.manifest.authorizationSha256, sourceSha = "b".repeat(40);
+  f.object.Body = JSON.stringify({ ...f.ledger(), sourceSha });
+  f.manifest.authorizedPredecessors = [{ authorizationSha256: previous, sourceSha, documentBindingsSha256: f.manifest.documentBindingsSha256 }];
+  f.manifest.authorizationSha256 = digest({ authorization: "fresh-predecessor-migration" });
+  await f.run();
+  assert.equal(f.ledger().sourceSha, f.manifest.sourceSha);
+  assert.equal(f.ledger().authorizationSha256, f.manifest.authorizationSha256);
+  assert.equal(f.writes.length, 0);
+});
+
+for (const [field, value] of [["sourceSha", "c".repeat(40)], ["documentBindingsSha256", "c".repeat(64)]]) test(`renewal rejects a substituted predecessor ${field}`, async () => {
+  const f = fixture(); f.seed("IAM_VERIFIED", true);
+  const previous = f.manifest.authorizationSha256, sourceSha = "b".repeat(40);
+  f.object.Body = JSON.stringify({ ...f.ledger(), sourceSha });
+  f.manifest.authorizedPredecessors = [{ authorizationSha256: previous, sourceSha, documentBindingsSha256: f.manifest.documentBindingsSha256, [field]: value }];
+  f.manifest.authorizationSha256 = digest({ authorization: `substituted-${field}` });
+  await assert.rejects(f.run(), /Unbound prior authorization/);
+  assert.equal(f.writes.length, 0); assert.equal(f.commits.length, 0);
 });
 
 test("first-install absence is established by exact listing, never AccessDenied", async () => {

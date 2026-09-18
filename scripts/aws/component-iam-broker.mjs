@@ -3,7 +3,8 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import { createBrokerAuthorizationArchive } from "./component-broker-authorization.mjs";
 import { assertBrokerEntryPoint, assertBrokerConfiguration, brokerConfiguration } from "./component-broker-configuration.mjs";
-import { inspectBootstrapIdentities } from "./component-installation-identity-contract.mjs";
+import { assertEffectiveBootstrapTrustAnchor } from "./component-bootstrap-trust-anchor.mjs";
+import { componentBrokerArn, inspectBootstrapIdentities, inspectBrokerChangeIdentities } from "./component-installation-identity-contract.mjs";
 import { authenticateComponentSession, claimComponentSession } from "./component-session-proof.mjs";
 
 const canonical = (value) => JSON.stringify(sort(value));
@@ -93,11 +94,18 @@ export function createInstallationHandler({ manifest, iam, s3, currentMain, now 
       assert.equal(ledger.transitionId, manifest.transitionId, "Different or consumed transition");
       renewing = ledger.authorizationSha256 !== manifest.authorizationSha256;
       if (renewing) {
-        assert(Array.isArray(manifest.authorizedPredecessors) && manifest.authorizedPredecessors.every((value) => /^[a-f0-9]{64}$/.test(value)), "Authenticated authorization lineage required");
-        assert(manifest.authorizedPredecessors.includes(ledger.authorizationSha256), "Unbound prior authorization");
+        assert(Array.isArray(manifest.authorizedPredecessors) && manifest.authorizedPredecessors.length <= 100, "Authenticated authorization lineage required");
+        const predecessor = manifest.authorizedPredecessors.find((value) => value?.authorizationSha256 === ledger.authorizationSha256);
+        assert(predecessor && Object.keys(predecessor).sort().join(",") === "authorizationSha256,documentBindingsSha256,sourceSha", "Unbound prior authorization");
+        for (const field of ["authorizationSha256", "documentBindingsSha256"]) assert.match(predecessor[field], /^[a-f0-9]{64}$/);
+        assert.match(predecessor.sourceSha, /^[a-f0-9]{40}$/);
+        assert.equal(ledger.sourceSha, predecessor.sourceSha, "Unbound prior authorization");
+        assert.equal(ledger.documentBindingsSha256, predecessor.documentBindingsSha256, "Unbound prior authorization");
       }
-      assert.equal(ledger.sourceSha, manifest.sourceSha);
-      assert.equal(ledger.documentBindingsSha256, manifest.documentBindingsSha256);
+      if (!renewing) {
+        assert.equal(ledger.sourceSha, manifest.sourceSha);
+        assert.equal(ledger.documentBindingsSha256, manifest.documentBindingsSha256);
+      }
       assert(["IAM_INSTALLING", "IAM_VERIFIED", ...(cleanup ? ["CLOSED"] : [])].includes(ledger.state));
     }
     const persist = async (state, live) => {
@@ -150,7 +158,6 @@ export async function handler(event, context) {
 }
 
 async function runHandler(event, context) {
-  assertBrokerEntryPoint(context, event?.operation);
   const manifest = JSON.parse(fs.readFileSync(new URL("./installation-manifest.json", import.meta.url), "utf8"));
   const iamSdk = await import("@aws-sdk/client-iam");
   const s3Sdk = await import("@aws-sdk/client-s3");
@@ -203,30 +210,29 @@ async function runHandler(event, context) {
 // Transport injection is for offline state-machine tests. The deployed handler
 // supplies only fixed SDK clients and its immutable package, never request data.
 export async function executeFixedBroker(event, context, { manifest, iam, s3, lambda, currentMain, issuanceEvents, sts, now = Date.now }) {
-  const version = assertBrokerEntryPoint(context, event?.operation);
   assert.equal(manifest.account, account);
   const bootstrap = JSON.parse(await (await s3("GetObject", { Bucket: bucket, Key: "mscqr/production/component-deployment-state/identity-bootstrap.json" })).Body.transformToString());
-  assert.equal(bootstrap.schemaVersion, 1);
-  assert.equal(bootstrap.state, "BOOTSTRAP_CLOSED", "Trust anchor bootstrap is incomplete");
-  assert.equal(bootstrap.sourceSha, manifest.sourceSha);
-  assert.equal(bootstrap.manifestSha256, hash(manifest));
-  assert.equal(bootstrap.identitySetSha256, hash(manifest.identities));
-  const identities = await inspectBootstrapIdentities(iam);
-  assert(identities.every(({ role, policy }) => role === "EXPECTED" && policy === "EXPECTED"), "Bootstrap execution authority is incomplete");
   const functionName = "mscqr-production-component-iam-installer";
-  const fn = await lambda("GetFunction", { FunctionName: functionName, Qualifier: version });
+  assert.match(context?.functionVersion || "", /^[1-9][0-9]*$/, "Unqualified broker invocation forbidden");
+  assert.equal(context?.invokedFunctionArn, `${componentBrokerArn}:${context.functionVersion}`, "Broker invocation ARN differs");
+  const fn = await lambda("GetFunction", { FunctionName: functionName, Qualifier: context.functionVersion });
   const packageSha256 = Buffer.from(fn.Configuration.CodeSha256, "base64").toString("hex");
-  assert.equal(packageSha256, bootstrap.packageSha256);
+  const anchor = assertEffectiveBootstrapTrustAnchor(bootstrap, manifest, packageSha256);
+  const version = assertBrokerEntryPoint(context, event?.operation, anchor.entryPoints);
+  const identities = await (anchor.changed ? inspectBrokerChangeIdentities(iam) : inspectBootstrapIdentities(iam));
+  assert(identities.every(({ role, policy }) => role === "EXPECTED" && policy === "EXPECTED"), "Bootstrap execution authority is incomplete");
   const [concurrency, signing, runtime] = await Promise.all([
     lambda("GetFunctionConcurrency", { FunctionName: functionName }),
     lambda("GetFunctionCodeSigningConfig", { FunctionName: functionName }),
     lambda("GetRuntimeManagementConfig", { FunctionName: functionName, Qualifier: version }),
   ]);
-  assert.equal(fn.Configuration.RuntimeVersionConfig?.RuntimeVersionArn, bootstrap.runtimeVersions[version], "Bootstrapped runtime changed");
-  assertBrokerConfiguration(fn, brokerConfiguration({ packageSha256, manifestSha256: hash(manifest), entryPoint: { 1: "INSTALL", 2: "CLEANUP", 3: "AUTHORIZE" }[version] }), { concurrency, signing, runtime });
+  assert.equal(fn.Configuration.RuntimeVersionConfig?.RuntimeVersionArn, anchor.runtimeVersions[version], "Bootstrapped runtime changed");
+  const entryPoint = Object.entries(anchor.entryPoints).find(([, value]) => value === version)?.[0];
+  assert(entryPoint, "Unknown immutable broker entry point");
+  assertBrokerConfiguration(fn, brokerConfiguration({ packageSha256, manifestSha256: hash(manifest), entryPoint, entryPoints: anchor.entryPoints }), { concurrency, signing, runtime });
   // Identity policies are the only invocation grant. A resource policy on the
   // function or any fixed entry version could bypass the authorizer role trust.
-  for (const qualifier of [null, "1", "2", "3"]) {
+  for (const qualifier of [null, ...anchor.allVersions]) {
     let missingPolicy = false;
     try { await lambda("GetPolicy", { FunctionName: functionName, ...(qualifier ? { Qualifier: qualifier } : {}) }); }
     catch (error) {
@@ -236,9 +242,11 @@ export async function executeFixedBroker(event, context, { manifest, iam, s3, la
     assert(missingPolicy, "Unexpected broker resource-based invocation policy");
   }
   const bind = (authorization) => ({ ...manifest, ...authorization.authorization, authorizationSha256: authorization.authorizationSha256,
-    authorizedPredecessors: authorization.history.map((item) => item.authorizationSha256) });
+    authorizedPredecessors: authorization.history.map(({ authorization: prior, authorizationSha256 }) => ({ authorizationSha256,
+      sourceSha: prior.sourceSha, documentBindingsSha256: prior.documentBindingsSha256 })) });
   const inspect = (authorization) => createInstallationHandler({ manifest: bind(authorization), iam, s3, currentMain, cleanup: true, now })({ operation: "INSPECT", transitionId: authorization.authorization.transitionId });
-  const archive = createBrokerAuthorizationArchive({ manifest, packageSha256, s3, currentMain, now, reconcile: inspect });
+  const predecessors = anchor.changed ? [{ sourceSha: anchor.predecessor.sourceSha, packageSha256: anchor.predecessor.packageSha256, manifestSha256: anchor.predecessor.manifestSha256 }] : [];
+  const archive = createBrokerAuthorizationArchive({ manifest, packageSha256, s3, currentMain, now, reconcile: inspect, entryPoints: anchor.entryPoints, predecessors });
   if (event.operation === "AUTHORIZE") return archive.authorize(event, context);
   if (event.operation === "CLEANUP_CONTEXT") return archive.cleanupContext(event, context);
   if (event.operation === "TERRAFORM_CONTEXT") {
@@ -255,7 +263,7 @@ export async function executeFixedBroker(event, context, { manifest, iam, s3, la
   const authorization = await archive.authenticate(request, context);
   const cleanup = ["CLOSE", "PROVE_CLEANUP_SESSION"].includes(event.operation);
   const terraform = event.operation === "PROVE_TERRAFORM_SESSION";
-  const session = await authenticateComponentSession(proof, { sourceSha: manifest.sourceSha, transitionId: request.transitionId, authorizationSha256: request.authorizationSha256, purpose: cleanup ? "CLEANUP" : terraform ? "TERRAFORM" : "INSTALL" }, { sts, issuanceEvents, now: now() });
+  const session = await authenticateComponentSession(proof, { sourceSha: authorization.authorization.sourceSha, transitionId: request.transitionId, authorizationSha256: request.authorizationSha256, purpose: cleanup ? "CLEANUP" : terraform ? "TERRAFORM" : "INSTALL" }, { sts, issuanceEvents, now: now() });
   if (!cleanup) assert(Date.parse(session.issuanceEventTime) >= Date.parse(authorization.authorization.approvalObservedAt) - 999, "Session predates explicit approval");
   // CloudTrail issuance is eventually visible. This exact read-only operation
   // lets the same in-memory STS session wait for proof without retrying a write,
@@ -267,7 +275,7 @@ export async function executeFixedBroker(event, context, { manifest, iam, s3, la
   }
   if (["PROVE_INSTALL_SESSION", "PROVE_CLEANUP_SESSION", "PROVE_TERRAFORM_SESSION"].includes(event.operation)) return {
     state: "SESSION_VERIFIED", principal: session.principal, expiresAt: session.expiresAt,
-    sourceSha: manifest.sourceSha, transitionId: request.transitionId, authorizationSha256: request.authorizationSha256,
+    sourceSha: authorization.authorization.sourceSha, transitionId: request.transitionId, authorizationSha256: request.authorizationSha256,
     ...(terraform ? { session } : {}),
   };
   // Inspection must not consume or replace the mutation session. A freshly
@@ -277,7 +285,9 @@ export async function executeFixedBroker(event, context, { manifest, iam, s3, la
   // Classify live IAM before claiming/replacing controller ownership. The write
   // engine repeats readback afterward and authenticates the guard at every write.
   if (!cleanup) await inspect(authorization);
-  const sessionGuard = cleanup ? async () => { assert(now() < Date.parse(session.expiresAt), "Cleanup session expired"); } : await claimComponentSession({ session, s3, now });
+  const sessionGuard = cleanup ? async () => { assert(now() < Date.parse(session.expiresAt), "Cleanup session expired"); } : await claimComponentSession({ session, s3,
+    authorizedPredecessors: authorization.history.map(({ authorization: prior, authorizationSha256 }) => ({ authorizationSha256,
+      sourceSha: prior.sourceSha, documentBindingsSha256: prior.documentBindingsSha256 })), now });
   const bound = bind(authorization);
   const execute = createInstallationHandler({ manifest: bound, iam, s3, cleanup, now, currentMain: async () => {
     // Reauthenticate at every IAM-write guard, not merely upon invocation.

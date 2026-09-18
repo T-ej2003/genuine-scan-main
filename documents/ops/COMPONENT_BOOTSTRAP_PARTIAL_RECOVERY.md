@@ -73,6 +73,53 @@ After closure, ordinary bootstrap and the recovery authorization are
 non-replayable. Component IAM installation remains a separate governed step and
 must not start before exact bootstrap closure.
 
+## Effective trust anchor after recovery
+
+The closed journal retains the original bootstrap fields as immutable incident
+lineage. A broker built from the recovery source must therefore authenticate
+both lineages: the original source, authorization, transition, package and
+manifest first; then the complete `RECOVERY_CLOSED` record. The recovery's
+source, package and manifest become the effective *predecessor* binding only
+when its state, operation list, partial-state digest, authorization lineage,
+final versions and identity readback are all exact. Any present-but-invalid
+recovery metadata fails closed; the broker never falls back to the historical
+binding. A later broker package is not implicitly accepted by this recovery
+record: it must be bound by its own governed `BROKER_CHANGE` transition.
+
+This check is shared by every fixed broker entry point, including authorization
+archive, installation, cleanup context and Terraform provenance.
+
+## Post-merge deployment boundary
+
+This recovery is closed and cannot update broker code again. A separately
+governed `BROKER_CHANGE` controller now provides the only post-bootstrap code
+path: merge the successor source, configure the exact protected environment,
+obtain fresh explicit approval, then run the documented source-owned CLI. It
+binds the immutable recovered predecessor and exact replacement
+package/configuration/version state. Source merge alone does not alter the
+deployed broker; do not rerun bootstrap or recovery to deploy a successor.
+
+During that change, invocation routing remains exact: a caller tries the
+predecessor entry only and reaches the successor entry only after AWS denies
+that predecessor version. The broker then authenticates the effective closed
+trust anchor. Durable installation receipts from the predecessor remain
+readable only when their source, package and manifest match the authenticated
+predecessor triple; they are history, never fresh IAM-mutation authority. New
+authorizations must bind the successor package and manifest.
+
+The broker resolves that authenticated predecessor consistently for an existing
+installation's expired-session renewal, cleanup closure and read-only Terraform
+provenance. A predecessor authorization can never call `INSTALL` after the
+change: that mutation path requires a fresh successor-bound authorization and
+the current protected-main fence. Terraform's saved-plan approval remains a
+separate current-source authorization. Before a renewed installation proceeds,
+the broker CAS-migrates its durable IAM ledger only after exact predecessor
+authorization, source and document bindings and live readback all match.
+An expired installation session is replaced under the same exact predecessor
+authorization/source/document lineage, after AWS expiry fencing and before any
+successor IAM write. Its session proof carries the verified historical
+installation source only to bind the durable IAM receipt.
+
 ## Evidence and redaction
 
 Diagnostics may retain hashes, ARNs, configuration values, version inventory,
