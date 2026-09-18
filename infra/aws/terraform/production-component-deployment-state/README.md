@@ -104,8 +104,9 @@ Use a clean current protected-main checkout after merge. Dispatch the exact
 `authorize-component-iam-installation.yml` workflow with `source_sha` and a UUIDv4
 `transition_id`. T-ej2003 explicitly approves its environment request. The fixed
 reusable publisher authenticates source and approval before acquiring OIDC
-credentials, then invokes only the authenticated successor broker version 6 to
-archive the authorization.
+credentials, then invokes the authenticated authorization-publisher entry
+point: version 3 after a fresh bootstrap, or version 6 after a closed broker
+change, to archive the authorization.
 Record the successful first-attempt run ID.
 
 Future operator commands, after prerequisites are installed and verified:
