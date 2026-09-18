@@ -174,12 +174,13 @@ owner, canonical expiry timestamps, and every closure-bound source, configuratio
 and identity digest; it never CAS-migrates a corrupt reservation.
 
 Cleanup requires only the transition ID and a fresh exact cleanup-role session.
-Broker version 2 exposes read-only `CLEANUP_CONTEXT` at its fixed evidence location
-to discover the original source and authorization hash. No retained GitHub artifact
-or caller-selected file/key is required. `CLOSE` still authenticates signed human
-session proof and live IAM before writing durable closure. It does not delete the
-permanent bootstrap identities, fixed broker, component roles or table, and cannot
-reinstall or modify IAM. STS expiration removes the old controller's usable
+The original/recovered anchor binds `CLEANUP_CONTEXT` to broker version 2; a closed
+broker change rebinds it to version 5. Both expose the same read-only fixed evidence
+location to discover the original source and authorization hash. No retained GitHub
+artifact or caller-selected file/key is required. `CLOSE` still authenticates signed
+human session proof and live IAM before writing durable closure. It does not delete
+the permanent bootstrap identities, fixed broker, component roles or table, and
+cannot reinstall or modify IAM. STS expiration removes the old controller's usable
 credentials; closure fences the broker transition permanently.
 
 ## Remaining table and deployment boundaries
@@ -204,13 +205,15 @@ are hash checked, the committed provider lock is read-only, and no host plugin
 cache or CLI override is accepted.
 
 The historical IAM approval may have expired before preparation. Its fixed AWS
-archive and closure remain provenance, never mutation authority: broker version 1
-discovers the exact transition, requires a fully verified closure and receipt,
-then authenticates the fresh scoped Terraform session. Closure continues to reject
-`INSTALL`, `INSPECT`, and installation-session proof. Terraform apply still needs
-its separate fresh environment-gated saved-plan approval. Saved-plan freshness is
-measured from GitHub's authenticated successful-run completion (`updated_at`), not
-workflow dispatch time; the completion timestamp is re-read unchanged with the run.
+archive and closure remain provenance, never mutation authority: the
+original/recovered anchor binds this proof to broker version 1, while a closed broker
+change rebinds it to version 4. The selected version discovers the exact transition,
+requires a fully verified closure and receipt, then authenticates the fresh scoped
+Terraform session. Closure continues to reject `INSTALL`, `INSPECT`, and
+installation-session proof. Terraform apply still needs its separate fresh
+environment-gated saved-plan approval. Saved-plan freshness is measured from
+GitHub's authenticated successful-run completion (`updated_at`), not workflow
+dispatch time; the completion timestamp is re-read unchanged with the run.
 
 Review the saved `activation.tfplan`, `preparation.json` and returned hashes.
 Dispatch `authorize-component-infrastructure-activation.yml` with their exact
