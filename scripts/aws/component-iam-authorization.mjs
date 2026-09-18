@@ -6,6 +6,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { createProductionGithubCredentialEnvironment } from "./production-credential-source-contract.mjs";
 import { componentBrokerPackageManifest } from "./component-broker-package.mjs";
+import { brokerEntryPointCandidates } from "./component-broker-configuration.mjs";
 import { assertArchivedInstallationAuthorization } from "./component-broker-authorization.mjs";
 import { assertIdentityBootstrapAuthorization, bootstrapAuthorizationContract } from "./component-identity-bootstrap-authorization.mjs";
 import { assertBootstrapRecoveryAuthorization } from "./component-bootstrap-partial-recovery-authorization.mjs";
@@ -245,7 +246,7 @@ function authenticatePublication(input, { execute, env = process.env, now = Date
   if (!bootstrapPackage && !recoveryPackage && !brokerChangePackage) {
     const invocation = audit["component-installation-invocation.json"];
     assert.equal(invocation.StatusCode, 200);
-    assert.equal(invocation.ExecutedVersion, "6");
+    assert(brokerEntryPointCandidates("AUTHORIZE").includes(invocation.ExecutedVersion), "Unexpected broker authorizer version");
     assert.equal(invocation.FunctionError, undefined);
     assert.deepEqual(audit["component-installation-result.json"], { authorizationSha256 });
   }

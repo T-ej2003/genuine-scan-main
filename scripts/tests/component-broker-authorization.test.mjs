@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createBrokerAuthorizationArchive, assertArchivedInstallationAuthorization } from "../aws/component-broker-authorization.mjs";
 import { digest } from "../aws/component-iam-installation-contract.mjs";
+import { brokerChangeEntryPoints } from "../aws/component-broker-configuration.mjs";
 
 const manifest = { sourceSha: "a".repeat(40), documentBindingsSha256: "b".repeat(64), capabilitySetSha256: "c".repeat(64), targets: [{ arn: "arn:aws:iam::368992683803:role/mscqr-production-normal-deployer" }] };
 const packageSha256 = "d".repeat(64);
@@ -14,22 +15,25 @@ const authorization = () => ({ schemaVersion: 1, account: "368992683803", region
   brokerPackageSha256: packageSha256, brokerManifestSha256: digest(manifest) });
 const context = (version) => ({ functionVersion: version, invokedFunctionArn: `arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-component-iam-installer:${version}` });
 function fixture() {
-  const state = { record: null, closure: null, main: manifest.sourceSha, time: start + 1000, writes: 0, ambiguous: false };
+  const state = { record: null, closure: null, session: null, main: manifest.sourceSha, time: start + 1000, writes: 0, ambiguous: false };
+  const s3 = async (operation, params) => {
+    assert.equal(params.Bucket, "mscqr-production-terraform-state-368992683803-eu-west-2");
+    const key = params.Key || params.Prefix;
+    assert(["mscqr/production/component-deployment-state/installation-authorization.json", "mscqr/production/component-deployment-state/permission-installation.json", "mscqr/production/component-deployment-state/installation-session.json"].includes(key));
+    const field = key.endsWith("permission-installation.json") ? "closure" : key.endsWith("installation-session.json") ? "session" : "record";
+    if (operation === "ListObjectsV2") return { IsTruncated: false, Contents: state[field] ? [{ Key: params.Prefix }] : [] };
+    if (operation === "GetObject") return { ETag: "one", Body: { transformToString: async () => JSON.stringify(state[field]) } };
+    assert.equal(operation, "PutObject");
+    if (state[field] && params.IfNoneMatch === "*") throw Object.assign(new Error("PreconditionFailed"), { name: "PreconditionFailed" });
+    if (state[field]) assert.equal(params.IfMatch, "one");
+    else assert.equal(params.IfNoneMatch, "*");
+    state[field] = JSON.parse(params.Body); state.writes++;
+    if (state.ambiguous) throw new Error("Response lost");
+    return { ETag: "one" };
+  };
   const archive = createBrokerAuthorizationArchive({ manifest, packageSha256, currentMain: async () => state.main, now: () => state.time,
-    s3: async (operation, params) => {
-      assert.equal(params.Bucket, "mscqr-production-terraform-state-368992683803-eu-west-2");
-      const key = params.Key || params.Prefix;
-      assert(["mscqr/production/component-deployment-state/installation-authorization.json", "mscqr/production/component-deployment-state/permission-installation.json"].includes(key));
-      const field = key.endsWith("permission-installation.json") ? "closure" : "record";
-      if (operation === "ListObjectsV2") return { IsTruncated: false, Contents: state[field] ? [{ Key: params.Prefix }] : [] };
-      if (operation === "GetObject") return { ETag: "one", Body: { transformToString: async () => JSON.stringify(state[field]) } };
-      assert.equal(operation, "PutObject"); assert.equal(params.IfNoneMatch, "*");
-      if (state[field]) throw Object.assign(new Error("PreconditionFailed"), { name: "PreconditionFailed" });
-      state[field] = JSON.parse(params.Body); state.writes++;
-      if (state.ambiguous) throw new Error("Response lost");
-      return { ETag: "one" };
-    } });
-  return { state, archive };
+    s3 });
+  return { state, archive, s3 };
 }
 const request = (operation = "INSTALL") => ({ operation, transitionId: authorization().transitionId, authorizationSha256: digest(authorization()) });
 test("trusted authorizer archives once; installation uses fixed durable AWS evidence", async () => {
@@ -39,6 +43,26 @@ test("trusted authorizer archives once; installation uses fixed durable AWS evid
   assert.equal((await archive.authenticate(request(), context("1"))).authorizationSha256, digest(authorization()));
   await assert.rejects(archive.authorize({ operation: "AUTHORIZE", authorization: authorization() }, context("3")));
   assert.equal(state.writes, 1);
+});
+test("broker change preserves only an exact predecessor archive lineage", async () => {
+  const predecessor = { sourceSha: "e".repeat(40), packageSha256: "f".repeat(64), manifestSha256: "c".repeat(64) };
+  const { state, s3 } = fixture();
+  const changed = createBrokerAuthorizationArchive({ manifest, packageSha256, predecessors: [predecessor], currentMain: async () => state.main, now: () => state.time, entryPoints: brokerChangeEntryPoints,
+    s3, reconcile: async () => {} });
+  const old = { ...authorization(), sourceSha: predecessor.sourceSha, brokerPackageSha256: predecessor.packageSha256, brokerManifestSha256: predecessor.manifestSha256 };
+  await assert.rejects(changed.authorize({ operation: "AUTHORIZE", authorization: old }, context("6")));
+  assert.equal(state.writes, 0, "A predecessor receipt is not fresh mutation authority");
+  state.record = { state: "AUTHORIZED", authorization: old, authorizationSha256: digest(old), history: [] };
+  const successor = { ...authorization(), runId: "12346", approvalObservedAt: new Date(start + 1).toISOString() };
+  await changed.authorize({ operation: "AUTHORIZE", authorization: successor }, context("6"));
+  assert.equal(state.record.authorizationSha256, digest(successor));
+  assert.equal(state.record.history[0].authorizationSha256, digest(old));
+  const invalid = structuredClone(state.record); invalid.history[0].authorization.brokerPackageSha256 = "0".repeat(64); state.record = invalid;
+  await assert.rejects(changed.authenticate({ operation: "INSTALL", transitionId: successor.transitionId, authorizationSha256: digest(successor) }, context("4")));
+});
+test("archive rejects duplicate or caller-shaped predecessor lineage", () => {
+  assert.throws(() => createBrokerAuthorizationArchive({ manifest, packageSha256, predecessors: [{ sourceSha: manifest.sourceSha, packageSha256, manifestSha256: digest(manifest) }], currentMain: async () => manifest.sourceSha, s3: async () => ({}) }));
+  assert.throws(() => createBrokerAuthorizationArchive({ manifest, packageSha256, predecessors: [{ sourceSha: "e".repeat(40), packageSha256: "f".repeat(64), manifestSha256: "c".repeat(64), extra: true }], currentMain: async () => manifest.sourceSha, s3: async () => ({}) }));
 });
 test("direct installer invocation cannot manufacture authorization", async () => {
   const { archive, state } = fixture();

@@ -63,6 +63,10 @@ test("actual publisher audit archive authenticates before operator session issua
   assert.equal(f.authenticate().authorizationSha256, f.files["component-installation-result.json"].authorizationSha256);
   assert.equal(f.calls.filter(name => name === "branches/main").length, 2);
 });
+test("publisher audit accepts only the exact predecessor or successor authorizer version", () => {
+  const f = fixture(value => { value.files["component-installation-invocation.json"].ExecutedVersion = "3"; });
+  assert.equal(f.authenticate().authorizationSha256, f.files["component-installation-result.json"].authorizationSha256);
+});
 const invalid = {
   "missing approval": f => { f.approvals = []; },
   "different reviewer": f => { f.approvals = [{ ...f.approvals[0], user: { ...actor, id: 1 } }]; },

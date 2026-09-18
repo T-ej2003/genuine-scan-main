@@ -23,12 +23,23 @@ function assertIdentity(value) {
 
 // This validator never authenticates unsigned local JSON. It is used only after
 // the AWS invocation-version boundary or a read from the fixed broker-owned key.
-export function assertArchivedInstallationAuthorization(value, manifest, packageSha256, { now, allowExpired = false }) {
+function archiveLineages(manifest, packageSha256, predecessors) {
+  assert.match(packageSha256 || "", /^[a-f0-9]{64}$/);
+  assert(Array.isArray(predecessors) && predecessors.length <= 1, "Malformed predecessor archive lineage");
+  const current = { sourceSha: manifest.sourceSha, packageSha256, manifestSha256: digest(manifest), current: true };
+  return [current, ...predecessors.map((predecessor) => {
+    assert.deepEqual(Object.keys(predecessor || {}).sort(), ["manifestSha256", "packageSha256", "sourceSha"]);
+    for (const field of ["sourceSha", "packageSha256", "manifestSha256"]) assert.match(predecessor[field] || "", field === "sourceSha" ? /^[a-f0-9]{40}$/ : /^[a-f0-9]{64}$/);
+    assert(!(predecessor.sourceSha === current.sourceSha && predecessor.packageSha256 === current.packageSha256 && predecessor.manifestSha256 === current.manifestSha256), "Duplicate predecessor archive lineage");
+    return { ...predecessor, current: false };
+  })];
+}
+
+export function assertArchivedInstallationAuthorization(value, manifest, packageSha256, { now, allowExpired = false, predecessors = [] }) {
   assert.deepEqual(Object.keys(value).sort(), [...fields].sort());
   assert.equal(value.schemaVersion, 1);
   assert.equal(value.account, "368992683803");
   assert.equal(value.region, "eu-west-2");
-  assert.equal(value.sourceSha, manifest.sourceSha);
   assert.match(value.sourceSha, /^[a-f0-9]{40}$/);
   assert.match(value.transitionId || "", /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
   assert.match(value.runId || "", /^[1-9][0-9]*$/);
@@ -37,11 +48,13 @@ export function assertArchivedInstallationAuthorization(value, manifest, package
   assertIdentity(value.reviewer);
   for (const field of ["documentBindingsSha256", "capabilitySetSha256"]) {
     assert.match(value[field] || "", /^[a-f0-9]{64}$/);
-    assert.equal(value[field], manifest[field]);
   }
-  assert.equal(value.brokerManifestSha256, digest(manifest));
-  assert.match(packageSha256 || "", /^[a-f0-9]{64}$/);
-  assert.equal(value.brokerPackageSha256, packageSha256);
+  const lineage = archiveLineages(manifest, packageSha256, predecessors).find((candidate) =>
+    candidate.sourceSha === value.sourceSha && candidate.packageSha256 === value.brokerPackageSha256 && candidate.manifestSha256 === value.brokerManifestSha256);
+  assert(lineage, "Authorization broker lineage differs");
+  // A predecessor receipt is durable evidence only. New AUTHORIZE calls below
+  // validate against the current binding with no predecessor allowance.
+  if (lineage.current) for (const field of ["documentBindingsSha256", "capabilitySetSha256"]) assert.equal(value[field], manifest[field]);
   // GitHub's approval-history API has no approval timestamp. Bind the trusted
   // workflow's observation timestamp; never mislabel it as the click time.
   const approved = Date.parse(value.approvalObservedAt);
@@ -54,8 +67,9 @@ export function assertArchivedInstallationAuthorization(value, manifest, package
   return digest(value);
 }
 
-export function createBrokerAuthorizationArchive({ manifest, packageSha256, s3, currentMain, reconcile, entryPoints = brokerEntryPoints, now = Date.now }) {
+export function createBrokerAuthorizationArchive({ manifest, packageSha256, s3, currentMain, reconcile, entryPoints = brokerEntryPoints, predecessors = [], now = Date.now }) {
   assert(entryPoints === brokerEntryPoints || entryPoints === brokerChangeEntryPoints, "Unreviewed broker entry points");
+  archiveLineages(manifest, packageSha256, predecessors);
   const closure = async (authorizationSha256) => {
     const list = await s3("ListObjectsV2", { Bucket: bucket, Prefix: closureKey });
     assert(!list.IsTruncated);
@@ -91,13 +105,13 @@ export function createBrokerAuthorizationArchive({ manifest, packageSha256, s3, 
     assert(response.ETag);
     const record = JSON.parse(await response.Body.transformToString());
     assert.deepEqual(Object.keys(record).sort(), ["authorization", "authorizationSha256", "history", "state"]);
-    assert.equal(record.authorizationSha256, assertArchivedInstallationAuthorization(record.authorization, manifest, packageSha256, { now: now(), allowExpired: true }));
+    assert.equal(record.authorizationSha256, assertArchivedInstallationAuthorization(record.authorization, manifest, packageSha256, { now: now(), allowExpired: true, predecessors }));
     assert.equal(record.state, "AUTHORIZED");
     assert(Array.isArray(record.history) && record.history.length <= 100);
     const runs = new Set([record.authorization.runId]);
     for (const previous of record.history) {
       assert.deepEqual(Object.keys(previous).sort(), ["authorization", "authorizationSha256"]);
-      assert.equal(previous.authorizationSha256, assertArchivedInstallationAuthorization(previous.authorization, manifest, packageSha256, { now: now(), allowExpired: true }));
+      assert.equal(previous.authorizationSha256, assertArchivedInstallationAuthorization(previous.authorization, manifest, packageSha256, { now: now(), allowExpired: true, predecessors }));
       assert.equal(previous.authorization.transitionId, record.authorization.transitionId);
       assert(!runs.has(previous.authorization.runId), "Replayed archived approval");
       runs.add(previous.authorization.runId);

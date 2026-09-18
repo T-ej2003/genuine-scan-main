@@ -99,6 +99,14 @@ binds the immutable recovered predecessor and exact replacement
 package/configuration/version state. Source merge alone does not alter the
 deployed broker; do not rerun bootstrap or recovery to deploy a successor.
 
+During that change, invocation routing remains exact: a caller tries the
+predecessor entry only and reaches the successor entry only after AWS denies
+that predecessor version. The broker then authenticates the effective closed
+trust anchor. Durable installation receipts from the predecessor remain
+readable only when their source, package and manifest match the authenticated
+predecessor triple; they are history, never fresh IAM-mutation authority. New
+authorizations must bind the successor package and manifest.
+
 ## Evidence and redaction
 
 Diagnostics may retain hashes, ARNs, configuration values, version inventory,

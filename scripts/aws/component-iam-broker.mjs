@@ -237,7 +237,8 @@ export async function executeFixedBroker(event, context, { manifest, iam, s3, la
   const bind = (authorization) => ({ ...manifest, ...authorization.authorization, authorizationSha256: authorization.authorizationSha256,
     authorizedPredecessors: authorization.history.map((item) => item.authorizationSha256) });
   const inspect = (authorization) => createInstallationHandler({ manifest: bind(authorization), iam, s3, currentMain, cleanup: true, now })({ operation: "INSPECT", transitionId: authorization.authorization.transitionId });
-  const archive = createBrokerAuthorizationArchive({ manifest, packageSha256, s3, currentMain, now, reconcile: inspect, entryPoints: anchor.entryPoints });
+  const predecessors = anchor.changed ? [{ sourceSha: anchor.predecessor.sourceSha, packageSha256: anchor.predecessor.packageSha256, manifestSha256: anchor.predecessor.manifestSha256 }] : [];
+  const archive = createBrokerAuthorizationArchive({ manifest, packageSha256, s3, currentMain, now, reconcile: inspect, entryPoints: anchor.entryPoints, predecessors });
   if (event.operation === "AUTHORIZE") return archive.authorize(event, context);
   if (event.operation === "CLEANUP_CONTEXT") return archive.cleanupContext(event, context);
   if (event.operation === "TERRAFORM_CONTEXT") {
