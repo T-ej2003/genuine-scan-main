@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
+import sax from "sax";
 import { identityBootstrap, assertExpiredSession } from "./component-installation-identity-contract.mjs";
 import { canonical, digest } from "./component-iam-installation-contract.mjs";
 
 const host = "sts.eu-west-2.amazonaws.com";
+const stsNamespace = "https://sts.amazonaws.com/doc/2011-06-15/";
 const queryNames = ["Action", "Version", "X-Amz-Algorithm", "X-Amz-Credential", "X-Amz-Date", "X-Amz-Expires", "X-Amz-Security-Token", "X-Amz-Signature", "X-Amz-SignedHeaders"].sort();
 const roles = { INSTALL: identityBootstrap.installationRole, CLEANUP: identityBootstrap.cleanupRole, IDENTITY_BOOTSTRAP: "mscqr-production-release-deployer", TERRAFORM: "mscqr-production-component-table-installer" };
 function awsExpiration(value) {
@@ -28,7 +30,7 @@ export function sessionProofBinding(binding) {
 // knowledge of its ARN. AWS validates the signature at a fixed STS endpoint.
 // CloudTrail then supplies the matching AWS-issued expiration and MFA chain.
 // Request/query credentials are transient and must never enter durable evidence.
-export async function authenticateComponentSession(proof, binding, { sts = verifyPresignedCaller, issuanceEvents, now = Date.now() }) {
+export async function authenticateComponentSession(proof, binding, { fetcher = globalThis.fetch, sts = request => verifyPresignedCaller(request, fetcher), issuanceEvents, now = Date.now() }) {
   const bindingHash = sessionProofBinding(binding);
   assert.deepEqual(Object.keys(proof).sort(), ["query"]);
   assert(proof.query && typeof proof.query === "object" && !Array.isArray(proof.query));
@@ -87,17 +89,67 @@ export async function authenticateComponentSession(proof, binding, { sts = verif
     issuanceEventId: event.eventID, issuanceEventTime: new Date(eventTime).toISOString(), operatorArn, mfaAuthenticated: true };
 }
 
-async function verifyPresignedCaller({ host: requestedHost, query, headers }) {
+function parseCallerIdentity(body) {
+  const roots = [], stack = [];
+  let declaration = false;
+  const parser = sax.parser(true, { xmlns: true });
+  parser.ondoctype = () => { throw new Error("STS identity response contains a forbidden document type"); };
+  parser.onprocessinginstruction = ({ name }) => {
+    assert.equal(name.toLowerCase(), "xml", "Unexpected STS processing instruction");
+    assert(!declaration && roots.length === 0, "Duplicate or misplaced XML declaration");
+    declaration = true;
+  };
+  parser.oncomment = () => { throw new Error("STS identity response contains an unexpected comment"); };
+  parser.oncdata = () => { throw new Error("STS identity response contains unexpected CDATA"); };
+  parser.onopentag = (tag) => {
+    const node = { name: tag.local, prefix: tag.prefix, uri: tag.uri, attributes: tag.attributes, children: [], text: "" };
+    if (stack.length) stack.at(-1).children.push(node); else roots.push(node);
+    stack.push(node);
+  };
+  parser.ontext = (text) => {
+    if (stack.length) stack.at(-1).text += text;
+    else assert.equal(text.trim(), "", "Unexpected text outside STS response");
+  };
+  parser.onclosetag = () => { stack.pop(); };
+  try { parser.write(body).close(); } catch { throw new Error("STS identity response is malformed"); }
+  assert.equal(stack.length, 0, "STS identity response is incomplete");
+  assert.equal(roots.length, 1, "STS identity response root is ambiguous");
+  const root = roots[0];
+  const exactElement = (node, name, children, allowText = false) => {
+    assert.equal(node.name, name); assert.equal(node.prefix, ""); assert.equal(node.uri, stsNamespace);
+    if (!allowText) assert.equal(node.text.trim(), "");
+    assert.deepEqual(Object.keys(node.attributes), []);
+    assert.deepEqual(node.children.map(child => child.name).sort(), [...children].sort());
+    assert.equal(node.children.length, children.length);
+  };
+  assert.equal(root.name, "GetCallerIdentityResponse"); assert.equal(root.prefix, ""); assert.equal(root.uri, stsNamespace);
+  assert.equal(root.text.trim(), ""); assert.deepEqual(Object.keys(root.attributes), ["xmlns"]);
+  assert.equal(root.attributes.xmlns.value, stsNamespace);
+  assert.deepEqual(root.children.map(child => child.name).sort(), ["GetCallerIdentityResult", "ResponseMetadata"]);
+  assert.equal(root.children.length, 2);
+  const result = root.children.find(child => child.name === "GetCallerIdentityResult");
+  const metadata = root.children.find(child => child.name === "ResponseMetadata");
+  exactElement(result, "GetCallerIdentityResult", ["Account", "Arn", "UserId"]);
+  exactElement(metadata, "ResponseMetadata", ["RequestId"]);
+  const value = (parent, name) => {
+    const node = parent.children.find(child => child.name === name);
+    exactElement(node, name, [], true);
+    assert(typeof node.text === "string" && node.text.length > 0 && node.text.length <= 2048);
+    return node.text;
+  };
+  assert.match(value(metadata, "RequestId"), /^[A-Za-z0-9-]{1,128}$/);
+  return { Account: value(result, "Account"), Arn: value(result, "Arn"), UserId: value(result, "UserId") };
+}
+
+async function verifyPresignedCaller({ host: requestedHost, query, headers }, fetcher) {
   assert.equal(requestedHost, host);
   const url = new URL(`https://${host}/`);
   url.search = new URLSearchParams(query).toString();
-  const response = await fetch(url, { headers: { ...headers, Accept: "application/json" }, redirect: "error", signal: AbortSignal.timeout(10000) });
+  const response = await fetcher(url, { headers, redirect: "error", signal: AbortSignal.timeout(10000) });
   assert(response.ok, "AWS session proof rejected");
   const body = await response.text();
-  assert(body.length < 32768, "Unexpected STS response size");
-  const caller = JSON.parse(body).GetCallerIdentityResponse?.GetCallerIdentityResult;
-  assert(caller && typeof caller === "object", "STS identity response missing");
-  return { Account: caller.Account, Arn: caller.Arn, UserId: caller.UserId };
+  assert(Buffer.byteLength(body, "utf8") < 32768, "Unexpected STS response size");
+  return parseCallerIdentity(body);
 }
 
 // Only broker-authenticated session records reach this function in production.

@@ -695,3 +695,19 @@ same creation and completion timestamps, so a legitimate environment wait does
 not consume the approval lifetime. Exact maximum age is rejected. Focused tests
 cover 30 minutes plus one millisecond, one hour, closure/tamper failures, mutation
 rejection and approval freshness boundaries. No production operation was run.
+
+### STS Query response correction
+
+The production signed-session verifier now parses STS `GetCallerIdentity` as the
+namespaced XML Query response AWS actually returns. The locked `sax` parser is
+used in strict mode; the verifier rejects document types, CDATA, comments,
+unexpected processing instructions, duplicate identity fields, unknown structure,
+missing response metadata, malformed/truncated bodies, non-2xx responses and the
+existing 32 KiB response limit. The parsed account, ARN and user ID still pass
+the complete session, MFA issuance, expiry and source-binding checks.
+
+Tests exercise the default fetch/verifier path for installation, cleanup,
+identity-bootstrap and Terraform sessions rather than substituting the STS
+verifier. A bounded sibling audit found no other raw AWS Query protocol parser in
+the component boundary; SDK-based IAM, S3, Lambda and CloudTrail calls remain
+unchanged. No AWS request was made.
