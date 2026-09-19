@@ -42,7 +42,7 @@ jobs:
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm ci --ignore-scripts --no-audit --no-fund --prefix infra/aws/terraform/production-component-deployment-state/broker-package
       - name: Obtain the reviewed immutable isolation image
-        run: docker pull docker.io/library/node@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d
+        run: docker pull docker.io/library/node@sha256:5711a0d445a1af54af9589066c646df387d1831a608226f4cd694fc59e745059
       - name: Component contracts and credential-isolated backend-disabled Terraform validation
         env:
           COMPONENT_CONTAINER_TESTS: '1'

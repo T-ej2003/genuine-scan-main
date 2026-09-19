@@ -21,6 +21,11 @@ test("isolated executor uses pinned platform image, no network, read-only inputs
   } finally { fs.rmSync(directory, { recursive: true }); }
 });
 
+test("activation CI preloads the exact immutable image required by pull=never", () => {
+  const workflow = fs.readFileSync(path.resolve(".github/workflows/authorize-component-infrastructure-activation.yml"), "utf8");
+  assert(workflow.includes(`docker pull ${terraformExecution.image}`));
+});
+
 for (const host of ["169.254.169.254", "169.254.170.2", "localhost", "host.docker.internal", "metadata.google.internal", "sts.us-east-1.amazonaws.com", "sts.eu-west-2.amazonaws.com.attacker.invalid", "iam.amazonaws.com:80", "https://iam.amazonaws.com", "other.s3.eu-west-2.amazonaws.com", "/var/run/docker.sock"]) {
   test(`relay denies destination ${host}`, () => assert.throws(() => assertTerraformRelayTarget(host)));
 }
