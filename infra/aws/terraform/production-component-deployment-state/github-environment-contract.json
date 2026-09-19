@@ -1,6 +1,6 @@
 {
   "repository": "T-ej2003/genuine-scan-main",
-  "environments": ["production-normal-deploy", "production-component-state-bootstrap", "production-component-infrastructure-activation"],
+  "environments": ["production-normal-deploy", "production-component-state-bootstrap", "production-component-infrastructure-activation", "production-component-infrastructure-activation-recovery"],
   "deployment_branch_policy": {"protected_branches": false, "custom_branch_policies": true},
   "deployment_branch_policies": [{"name": "main", "type": "branch"}],
   "operatingModel": "SOLO_OPERATOR",

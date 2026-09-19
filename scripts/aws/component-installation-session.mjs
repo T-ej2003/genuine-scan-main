@@ -152,23 +152,29 @@ async function establish(binding, { loadUser = loadOperator, sts = stsTransport,
         throw new Error("AWS issuance proof unavailable before the bounded deadline");
     };
     if (fixedBinding.purpose === "TERRAFORM") {
-      let consumed = false, applying = false, reserved = false, activeSession;
+      let consumed = false, applying = false, recovering = false, reserved = false, activeSession;
       const boundary = state(scoped, fixedBinding);
-      const close = () => { applying = false; boundary.close(); for (const field of ["AccessKeyId", "SecretAccessKey", "SessionToken"]) delete scoped[field]; };
+      const close = () => { applying = false; recovering = false; boundary.close(); for (const field of ["AccessKeyId", "SecretAccessKey", "SessionToken"]) delete scoped[field]; };
       return Object.freeze({ principal, expiresAt: new Date(expires).toISOString(),
         close,
         async inspect() { await prove(); return boundary.inspect(); },
+        async inspectPartialActivationRecovery() { await prove(); return boundary.inspectPartialActivationRecovery(); },
+        async inspectPartialActivationRecoveryContinuation(preparation, preparationSha256) { await prove(); return boundary.inspectPartialActivationRecoveryContinuation(preparation, preparationSha256); },
+        activatePartialActivationRecovery() { assert(!consumed && !applying && !recovering && now() < expires, "No fresh recovery session"); recovering = true; },
+        async releasePartialActivationLock(lock, claimEtag, record, preparation, preparationSha256) { assert(recovering && now() < expires, "No active recovery authorization"); return boundary.releasePartialActivationLock(lock, claimEtag, record, preparation, preparationSha256); },
+        async readRecoveredTerraformState() { assert(recovering && now() < expires, "No active recovery authorization"); return boundary.readRecoveredTerraformState(); },
+        async beginPartialActivationRecovery(record, preparation, preparationSha256, continuation) { assert(recovering && now() < expires, "No active recovery authorization"); return boundary.beginPartialActivationRecovery(record, preparation, preparationSha256, continuation); },
         async reserve(record) {
           assert(applying && !reserved && now() < expires, "No active unconsumed apply authorization");
           reserved = true; return boundary.reserve({ ...record, session: activeSession });
         },
         async execute({ mode, plan }, { checkpoint }) {
           assert(!consumed, "Terraform session execution already consumed"); consumed = true;
-          assert(["prepare", "apply"].includes(mode)); assert.equal(typeof checkpoint, "function");
+          assert(["prepare", "apply", "recover", "recover-verify"].includes(mode)); assert.equal(typeof checkpoint, "function");
           try {
             const session = await prove();
             activeSession = session;
-            applying = mode === "apply";
+            applying = mode === "apply"; recovering = mode.startsWith("recover");
             return { session, result: await isolated({ mode, plan, expiresAt: session.expiresAt,
               credentials: { AccessKeyId: scoped.AccessKeyId, SecretAccessKey: scoped.SecretAccessKey, SessionToken: scoped.SessionToken } }, { checkpoint: async value => {
                 await checkpoint(value);

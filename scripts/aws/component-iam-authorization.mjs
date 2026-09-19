@@ -13,6 +13,8 @@ import { assertBootstrapRecoveryAuthorization } from "./component-bootstrap-part
 import { bootstrapRecovery } from "./component-bootstrap-partial-recovery-contract.mjs";
 import { assertBrokerChangeAuthorization } from "./component-broker-change-authorization.mjs";
 import { brokerChange } from "./component-broker-change-contract.mjs";
+import { assertPartialActivationRecoveryAuthorization } from "./component-infrastructure-partial-activation-recovery-authorization.mjs";
+import { partialActivationRecovery } from "./component-infrastructure-partial-activation-recovery-contract.mjs";
 
 // Authorization only: no AWS, dispatch, consumption, or installation. The caller
 // must run trusted protected-main code and consume the transition once before writes.
@@ -134,6 +136,23 @@ export function authenticateTerraformActivationAuthorization(input, dependencies
   return authenticatePublication(coordinates, dependencies, undefined, { sourceSha: input.sourceSha, planSha256, preparationSha256 });
 }
 
+export function authenticatePartialActivationRecoveryAuthorization(input, dependencies = {}) {
+  assert.deepEqual(Object.keys(input || {}).sort(), ["preparation", "preparationSha256", "runId"]);
+  const { preparation, preparationSha256, runId } = input;
+  assert.match(preparationSha256 || "", /^[a-f0-9]{64}$/);
+  return authenticatePublication({ runId, sourceSha: preparation.sourceSha, transitionId: preparation.recoveryTransitionId }, dependencies, undefined, undefined, undefined, undefined, { preparation, preparationSha256 });
+}
+
+// Historical approval evidence is deliberately non-executable: it authenticates
+// the incident only and never bypasses the normal current-main/freshness guard.
+export function authenticateHistoricalTerraformActivationAuthorization(input, dependencies = {}) {
+  assert.deepEqual(Object.keys(input || {}).sort(), ["authorizationArtifactSha256", "planSha256", "preparationSha256", "runId", "sourceSha", "transitionId"]);
+  for (const field of ["planSha256", "preparationSha256"]) assert.match(input[field] || "", /^[a-f0-9]{64}$/);
+  assert.match(input.authorizationArtifactSha256 || "", /^sha256:[a-f0-9]{64}$/);
+  const authorization = authenticatePublication({ runId: input.runId, sourceSha: input.sourceSha, transitionId: input.transitionId }, dependencies, undefined, undefined, undefined, undefined, undefined, { planSha256: input.planSha256, preparationSha256: input.preparationSha256, authorizationArtifactSha256: input.authorizationArtifactSha256 });
+  return Object.freeze({ ...authorization, historical: true, executable: false });
+}
+
 export function readComponentActivationEnvironments(sourceSha, { execute, env = process.env } = {}) {
   assert.match(sourceSha || "", /^[a-f0-9]{40}$/);
   return ["production-normal-deploy", "production-component-state-bootstrap", "production-component-infrastructure-activation"].map(name => {
@@ -147,9 +166,19 @@ export function readComponentActivationEnvironments(sourceSha, { execute, env = 
   });
 }
 
-function authenticatePublication(input, { execute, env = process.env, now = Date.now }, bootstrapPackage, terraformBinding, recoveryPackage, brokerChangePackage) {
-  const targetEnvironment = brokerChangePackage ? brokerChange.environment : recoveryPackage ? bootstrapRecovery.environment : terraformBinding ? "production-component-infrastructure-activation" : bootstrapPackage ? "production-component-installation-identity-bootstrap" : environment;
-  const targetWorkflow = brokerChangePackage ? brokerChange.workflow : recoveryPackage ? bootstrapRecovery.workflow : terraformBinding ? ".github/workflows/authorize-component-infrastructure-activation.yml" : bootstrapPackage ? bootstrapAuthorizationContract.workflow : workflow;
+export function readPartialActivationRecoveryEnvironment(sourceSha, { execute, env = process.env } = {}) {
+  assert.match(sourceSha || "", /^[a-f0-9]{40}$/);
+  const read = githubReader(execute, env, partialActivationRecovery.environment);
+  protectedMain(read(`repos/${repository}/branches/main`), sourceSha);
+  const config = read(`repos/${repository}/environments/${partialActivationRecovery.environment}`);
+  const branches = read(`repos/${repository}/environments/${partialActivationRecovery.environment}/deployment-branch-policies`);
+  assert.equal(branches.total_count, 1);
+  return { config, branches };
+}
+
+function authenticatePublication(input, { execute, env = process.env, now = Date.now }, bootstrapPackage, terraformBinding, recoveryPackage, brokerChangePackage, partialActivationPackage, historicalTerraformPackage) {
+  const targetEnvironment = partialActivationPackage ? partialActivationRecovery.environment : brokerChangePackage ? brokerChange.environment : recoveryPackage ? bootstrapRecovery.environment : terraformBinding || historicalTerraformPackage ? "production-component-infrastructure-activation" : bootstrapPackage ? "production-component-installation-identity-bootstrap" : environment;
+  const targetWorkflow = partialActivationPackage ? partialActivationRecovery.workflow : brokerChangePackage ? brokerChange.workflow : recoveryPackage ? bootstrapRecovery.workflow : terraformBinding || historicalTerraformPackage ? ".github/workflows/authorize-component-infrastructure-activation.yml" : bootstrapPackage ? bootstrapAuthorizationContract.workflow : workflow;
   assert.deepEqual(Object.keys(input).sort(), ["runId", "sourceSha", "transitionId"]);
   coordinates(input);
   const { runId, sourceSha, transitionId } = input;
@@ -174,7 +203,7 @@ function authenticatePublication(input, { execute, env = process.env, now = Date
     assert(timestamp(run.updated_at) <= now());
     assert(timestamp(run.created_at) <= timestamp(run.updated_at));
   };
-  protectedMain(api("branches/main"), sourceSha);
+  if (!historicalTerraformPackage) protectedMain(api("branches/main"), sourceSha);
   const run = api(`actions/runs/${runId}`);
   verifyRun(run);
   assertSoloEnvironment(api(`environments/${targetEnvironment}`), api(`environments/${targetEnvironment}/deployment-branch-policies`), api(`actions/runs/${runId}/approvals`), targetEnvironment);
@@ -183,7 +212,7 @@ function authenticatePublication(input, { execute, env = process.env, now = Date
   const artifacts = pages.flatMap(page => page.artifacts);
   assert.equal(artifacts.length, 1);
   const artifact = artifacts[0];
-  assert.equal(artifact.name, brokerChangePackage ? brokerChange.artifact : recoveryPackage ? bootstrapRecovery.artifact : terraformBinding ? "component-infrastructure-authorization" : bootstrapPackage ? bootstrapAuthorizationContract.artifact : "component-installation-authorization-audit");
+  assert.equal(artifact.name, partialActivationPackage ? partialActivationRecovery.artifact : brokerChangePackage ? brokerChange.artifact : recoveryPackage ? bootstrapRecovery.artifact : terraformBinding || historicalTerraformPackage ? "component-infrastructure-authorization" : bootstrapPackage ? bootstrapAuthorizationContract.artifact : "component-installation-authorization-audit");
   assert.equal(artifact.expired, false);
   assert(Number.isSafeInteger(artifact.id) && artifact.id > 0);
   assert(Number.isSafeInteger(artifact.size_in_bytes) && artifact.size_in_bytes > 0 && artifact.size_in_bytes <= 1024 * 1024);
@@ -200,7 +229,7 @@ function authenticatePublication(input, { execute, env = process.env, now = Date
     const zip = path.join(directory, "audit.zip");
     fs.writeFileSync(zip, bytes, { mode: 0o600, flag: "wx" });
     const unzip = (...args) => execFileSync("/usr/bin/unzip", args, { env: { PATH: "/usr/bin:/bin", LANG: "C" }, encoding: "utf8", timeout: 10000, maxBuffer: 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
-    const names = brokerChangePackage ? [brokerChange.file] : recoveryPackage ? [bootstrapRecovery.file] : terraformBinding ? ["authorization.json"] : bootstrapPackage ? [bootstrapAuthorizationContract.file] : ["invocation", "request", "result"].map(name => `component-installation-${name}.json`);
+    const names = partialActivationPackage ? [partialActivationRecovery.file] : brokerChangePackage ? [brokerChange.file] : recoveryPackage ? [bootstrapRecovery.file] : terraformBinding || historicalTerraformPackage ? ["authorization.json"] : bootstrapPackage ? [bootstrapAuthorizationContract.file] : ["invocation", "request", "result"].map(name => `component-installation-${name}.json`);
     assert.deepEqual(unzip("-Z1", zip).trim().split("\n").sort(), names);
     const listing = unzip("-Z", "-l", zip).split("\n");
     for (const name of names) {
@@ -211,15 +240,28 @@ function authenticatePublication(input, { execute, env = process.env, now = Date
     audit = Object.fromEntries(names.map(name => [name, JSON.parse(unzip("-p", zip, name))]));
   } finally { fs.rmSync(directory, { recursive: true }); }
   let authorization;
-  if (brokerChangePackage) authorization = audit[brokerChange.file];
+  if (partialActivationPackage) authorization = audit[partialActivationRecovery.file];
+  else if (brokerChangePackage) authorization = audit[brokerChange.file];
   else if (recoveryPackage) authorization = audit[bootstrapRecovery.file];
-  else if (terraformBinding) authorization = audit["authorization.json"];
+  else if (terraformBinding || historicalTerraformPackage) authorization = audit["authorization.json"];
   else if (bootstrapPackage) authorization = audit[bootstrapAuthorizationContract.file];
   else {
     const request = audit["component-installation-request.json"];
     assert.deepEqual(Object.keys(request).sort(), ["authorization", "operation"]);
     assert.equal(request.operation, "AUTHORIZE");
     authorization = request.authorization;
+  }
+  if (partialActivationPackage) {
+    assertPartialActivationRecoveryAuthorization(authorization, partialActivationPackage.preparation, partialActivationPackage.preparationSha256, now());
+    protectedMain(api("branches/main"), sourceSha);
+    const finalRun = api(`actions/runs/${runId}`); verifyRun(finalRun);
+    assert.equal(finalRun.created_at, run.created_at); assert.equal(finalRun.updated_at, run.updated_at);
+    return Object.freeze(authorization);
+  }
+  if (historicalTerraformPackage) {
+    assert.equal(artifact.digest, historicalTerraformPackage.authorizationArtifactSha256, "Historical authorization artifact changed");
+    assert.deepEqual(authorization, { sourceSha, planSha256: historicalTerraformPackage.planSha256, preparationSha256: historicalTerraformPackage.preparationSha256 }, "Historical saved-plan bindings differ");
+    return Object.freeze(authorization);
   }
   if (terraformBinding) {
     assert.deepEqual(authorization, terraformBinding, "Saved-plan approval bindings differ");
@@ -250,7 +292,7 @@ function authenticatePublication(input, { execute, env = process.env, now = Date
     assert.equal(invocation.FunctionError, undefined);
     assert.deepEqual(audit["component-installation-result.json"], { authorizationSha256 });
   }
-  protectedMain(api("branches/main"), sourceSha);
+  if (!historicalTerraformPackage) protectedMain(api("branches/main"), sourceSha);
   const finalRun = api(`actions/runs/${runId}`);
   verifyRun(finalRun);
   assert.equal(finalRun.created_at, run.created_at);

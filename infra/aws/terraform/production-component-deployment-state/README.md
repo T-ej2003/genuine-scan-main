@@ -48,6 +48,26 @@ remote backend. No local production state, state-key reuse, force state push,
 state deletion, arbitrary workspace, or force unlock is supported. An ambiguous
 first apply must be reconciled through separately reviewed recovery, not repeated.
 
+## Partial activation recovery
+
+`INFRASTRUCTURE_CREATED_STATE_INCOMPLETE` means the immutable activation attempt
+exists, the exact table is ACTIVE, remote state and its history are absent, and
+the incident `.tflock` remains. Preserve all three objects. Operators must not
+delete/recreate the table, force-unlock, retry the first activation, run manual
+Terraform import/state commands, or alter the activation reservation.
+
+The only supported response is the separate source-owned partial-activation
+recovery controller. It authenticates the expired original approval solely as
+historical evidence, requires a fresh recovery approval, validates the exact
+table, reservation, empty state history and lock snapshot, imports only
+`aws_dynamodb_table.component_deployment_state` with its fixed table ID, and
+requires a zero-drift readback before closing. Versioned incident-bound lock
+markers checkpoint ownership, adoption, verification and closure; a crash
+after adoption resumes verification only under a new recovery approval. Its
+environment is
+`production-component-infrastructure-activation-recovery`; it has the same
+sole-user `main`-only approval contract and must be configured explicitly.
+
 ## Solo-operator approval
 
 MSCQR currently has one authorized operator/reviewer: User `T-ej2003`, GitHub ID

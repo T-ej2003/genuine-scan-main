@@ -14,7 +14,7 @@ function liveReceiptBody(f, client) {
     return JSON.stringify(f.receipt);
   } };
 }
-function fixture({ liveStream = false } = {}) {
+function fixture({ liveStream = false, recovery = false } = {}) {
   const targets = installationDocuments();
   const f = { objects: [], versions: [], deleted: [], table: null, versioning: "Enabled", truncated: false, mutate: () => {}, calls: [], puts: [], denied: false, clients: [] };
   f.receipt = { schemaVersion: 1, sourceSha: binding.sourceSha, transitionId: binding.transitionId, authorizationSha256: binding.authorizationSha256,
@@ -27,6 +27,8 @@ function fixture({ liveStream = false } = {}) {
         if (operation === "ListObjectsV2") { assert.equal(input.Prefix, key); return { IsTruncated: f.truncated, Contents: f.objects }; }
         if (operation === "ListObjectVersions") { assert.equal(input.Prefix, key); return { IsTruncated: f.truncated, Versions: f.versions, DeleteMarkers: f.deleted }; }
         if (operation === "GetObject") {
+          if (recovery && input.Key === key + ".tflock") return { Body: { transformToString: async () => JSON.stringify({ ID: "incident-lock", Operation: "OperationTypeApply", Info: "", Who: "operator", Version: "1.15.8", Created: "2026-09-19T00:00:00Z", Path: "mscqr-production-terraform-state-368992683803-eu-west-2/" + key }) } };
+          if (recovery && input.Key === key) return { Body: { transformToString: async () => JSON.stringify({ lineage: "lineage", serial: 1, resources: [{ mode: "managed", type: "aws_dynamodb_table", name: "component_deployment_state", instances: [{ attributes: { id: "mscqr-production-component-deployment-state" } }] }] }) } };
           assert.equal(input.Key, "mscqr/production/component-deployment-state/iam-installation.json"); if (f.denied) throw new Error("AccessDenied");
           return { Body: liveReceiptBody(f, client) };
         }
@@ -46,6 +48,7 @@ function fixture({ liveStream = false } = {}) {
       f.mutate(operation, response, target); return response;
     };
   const dependencies = { describe: async () => f.table };
+  if (recovery) dependencies.recoveryDescribe = async operation => f.recoveryMetadata?.[operation];
   if (liveStream) {
     dependencies.createClient = service => {
       const client = {
@@ -59,6 +62,30 @@ function fixture({ liveStream = false } = {}) {
   f.boundary = createTerraformStateBoundary({ AccessKeyId: "fixture", SecretAccessKey: "placeholder", SessionToken: "fixture-token" }, binding, dependencies);
   return f;
 }
+
+function recoveryFixture() {
+  const f = fixture({ recovery: true });
+  f.objects = [{ Key: key + ".initial-activation-attempt" }, { Key: key + ".tflock" }];
+  f.versions = [{ Key: key + ".initial-activation-attempt", IsLatest: true, VersionId: "attempt-version", ETag: '"attempt"' }, { Key: key + ".tflock", IsLatest: true, VersionId: "lock-version", ETag: '"lock"' }];
+  f.table = { TableName: "mscqr-production-component-deployment-state", TableArn: "arn:aws:dynamodb:eu-west-2:368992683803:table/mscqr-production-component-deployment-state", TableStatus: "ACTIVE", BillingModeSummary: { BillingMode: "PAY_PER_REQUEST" }, KeySchema: [{ AttributeName: "stateKey", KeyType: "HASH" }], AttributeDefinitions: [{ AttributeName: "stateKey", AttributeType: "S" }], SSEDescription: { Status: "ENABLED" }, DeletionProtectionEnabled: false, StreamSpecification: { StreamEnabled: false }, Replicas: [] };
+  f.recoveryMetadata = { DescribeContinuousBackups: { ContinuousBackupsDescription: { PointInTimeRecoveryDescription: { PointInTimeRecoveryStatus: "ENABLED" } } }, DescribeTimeToLive: { TimeToLiveDescription: { TimeToLiveStatus: "DISABLED" } }, ListTagsOfResource: { Tags: [{ Key: "ManagedBy", Value: "Terraform" }, { Key: "Environment", Value: "production" }, { Key: "Stack", Value: "production-component-deployment-state" }] } };
+  return f;
+}
+
+test("partial activation recovery accepts only the exact reservation, retained lock, empty state history and expected live table", async () => {
+  const f = recoveryFixture(), result = await f.boundary.inspectPartialActivationRecovery();
+  assert.equal(result.stateIdentity, "INFRASTRUCTURE_CREATED_STATE_INCOMPLETE"); assert.equal(result.lock.versionId, "lock-version"); assert.equal(result.table.address, "aws_dynamodb_table.component_deployment_state");
+  assert(f.calls.every(({ operation }) => !/Put|Delete|Create|Update/.test(operation)));
+});
+
+for (const mutate of [
+  f => { f.objects = f.objects.filter(({ Key }) => Key !== key + ".initial-activation-attempt"); }, f => { f.objects = f.objects.filter(({ Key }) => Key !== key + ".tflock"); },
+  f => { f.objects.push({ Key: key }); }, f => { f.versions.push({ Key: key, IsLatest: true, VersionId: "state", ETag: '"state"' }); }, f => { f.deleted.push({ Key: key }); },
+  f => { f.table.KeySchema = []; }, f => { f.table.BillingModeSummary.BillingMode = "PROVISIONED"; }, f => { f.table.SSEDescription.Status = "DISABLED"; },
+  f => { f.recoveryMetadata.DescribeContinuousBackups.ContinuousBackupsDescription.PointInTimeRecoveryDescription.PointInTimeRecoveryStatus = "DISABLED"; }, f => { f.recoveryMetadata.ListTagsOfResource.Tags.pop(); },
+]) test("partial activation recovery fails closed on incident topology or table drift", async () => {
+  const f = recoveryFixture(); mutate(f); await assert.rejects(f.boundary.inspectPartialActivationRecovery()); assert(f.calls.every(({ operation }) => !/Put|Delete|Create|Update/.test(operation)));
+});
 test("state preflight authenticates exact absent state/history/table and all guarded IAM readbacks", async () => {
   const f = fixture(), result = await f.boundary.inspect();
   assert.equal(result.stateIdentity, "ABSENT"); assert.match(result.iamInstallation.receiptSha256, /^[a-f0-9]{64}$/);

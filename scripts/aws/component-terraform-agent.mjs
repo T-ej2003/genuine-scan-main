@@ -19,7 +19,7 @@ async function main() {
   assert.equal(process.argv.length, 4);
   assert.match(process.argv[2] || "", /^[a-f0-9]{64}$/);
   const mode = process.argv[3];
-  assert(["validate", "prepare", "apply"].includes(mode), "Unsupported isolated operation");
+  assert(["validate", "prepare", "apply", "recover", "recover-verify"].includes(mode), "Unsupported isolated operation");
   const bytes = fs.readFileSync("/inputs/manifest.json");
   assert.equal(hash(bytes), process.argv[2]);
   const manifest = JSON.parse(bytes);
@@ -97,7 +97,16 @@ async function main() {
     const workspace = (await tf(["workspace", "show"])).trim();
     await input.barrier({ stage: "backend", backend, workspace });
     const planPath = "/work/activation.tfplan";
-    if (mode === "prepare") {
+    if (["recover", "recover-verify"].includes(mode)) {
+      assert.equal(input.plan, null);
+      await input.barrier({ stage: "recovery" });
+      if (mode === "recover") await tf(["import", "-input=false", "-lock-timeout=0s", "aws_dynamodb_table.component_deployment_state", "mscqr-production-component-deployment-state"]);
+      await input.barrier({ stage: "adopted" });
+      await tf(["plan", "-input=false", "-lock-timeout=0s", "-detailed-exitcode"]);
+      await input.barrier({ stage: "verified" });
+      await input.barrier({ stage: "closed" });
+      emit({ type: "result", recoveredAddress: "aws_dynamodb_table.component_deployment_state", driftVerified: true });
+    } else if (mode === "prepare") {
       assert.equal(input.plan, null);
       await tf(["plan", "-input=false", "-lock-timeout=0s", `-out=${planPath}`]);
     } else {
@@ -105,18 +114,20 @@ async function main() {
       const plan = Buffer.from(input.plan, "base64"); assert.equal(plan.toString("base64"), input.plan);
       fs.writeFileSync(planPath, plan, { mode: 0o600, flag: "wx" });
     }
-    const planSha256 = await fileHash(planPath);
-    const planJson = JSON.parse(await tf(["show", "-json", planPath]));
-    if (mode === "prepare") {
+    if (!["recover", "recover-verify"].includes(mode)) {
+      const planSha256 = await fileHash(planPath);
+      const planJson = JSON.parse(await tf(["show", "-json", planPath]));
+      if (mode === "prepare") {
       await input.barrier({ stage: "plan", planSha256, planJson });
       emit({ type: "result", plan: fs.readFileSync(planPath).toString("base64"), planSha256, planJson });
-    }
-    else {
+      }
+      else {
       await input.barrier({ stage: "apply", planSha256, planJson });
       assert.equal(await fileHash(planPath), planSha256);
       await tf(["apply", "-input=false", "-lock-timeout=0s", planPath]);
       await tf(["plan", "-input=false", "-lock-timeout=0s", "-detailed-exitcode"]);
-      emit({ type: "result", appliedPlanSha256: planSha256, driftVerified: true });
+        emit({ type: "result", appliedPlanSha256: planSha256, driftVerified: true });
+      }
     }
     transport.close(); lines.close(); process.stdin.destroy();
   }
