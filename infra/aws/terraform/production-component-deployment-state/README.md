@@ -204,6 +204,10 @@ permits only the required AWS endpoints. The reviewed Terraform/provider downloa
 are hash checked, the committed provider lock is read-only, and no host plugin
 cache or CLI override is accepted.
 
+The fixed IAM receipt is read as a live S3 response stream. Its isolated S3
+client remains alive until the complete receipt is consumed; a stream error still
+fails the activation boundary closed.
+
 The historical IAM approval may have expired before preparation. Its fixed AWS
 archive and closure remain provenance, never mutation authority: the
 original/recovered anchor binds this proof to broker version 1, while a closed broker
