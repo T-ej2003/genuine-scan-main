@@ -5,21 +5,31 @@ import { installationDocuments, documentBindings, digest } from "../aws/componen
 
 const binding = { sourceSha: "a".repeat(40), transitionId: "12345678-1234-4234-8234-123456789abc", authorizationSha256: "b".repeat(64), purpose: "TERRAFORM" };
 const key = "mscqr/production/component-deployment-state/terraform.tfstate";
-function fixture() {
+function liveReceiptBody(f, client) {
+  return { transformToString: async () => {
+    await Promise.resolve();
+    if (client?.destroyed) throw Object.assign(new Error("aborted"), { code: "ECONNRESET" });
+    f.streamRead = true;
+    if (f.streamFailure) throw new Error("receipt stream failed");
+    return JSON.stringify(f.receipt);
+  } };
+}
+function fixture({ liveStream = false } = {}) {
   const targets = installationDocuments();
-  const f = { objects: [], versions: [], deleted: [], table: null, versioning: "Enabled", truncated: false, mutate: () => {}, calls: [], puts: [], denied: false };
+  const f = { objects: [], versions: [], deleted: [], table: null, versioning: "Enabled", truncated: false, mutate: () => {}, calls: [], puts: [], denied: false, clients: [] };
   f.receipt = { schemaVersion: 1, sourceSha: binding.sourceSha, transitionId: binding.transitionId, authorizationSha256: binding.authorizationSha256,
     documentBindingsSha256: digest(documentBindings()), state: "IAM_VERIFIED", live: targets.map(({ arn }) => ({ arn, role: "EXPECTED", policy: "EXPECTED" })) };
-  f.boundary = createTerraformStateBoundary({ AccessKeyId: "fixture", SecretAccessKey: "placeholder", SessionToken: "fixture-token" }, binding, {
-    describe: async () => f.table,
-    send: async (service, operation, input) => {
+  const send = async (service, operation, input, client) => {
       f.calls.push({ service, operation, input });
       if (service === "s3") {
         assert.equal(input.Bucket, "mscqr-production-terraform-state-368992683803-eu-west-2");
         if (operation === "GetBucketVersioning") return { Status: f.versioning };
         if (operation === "ListObjectsV2") { assert.equal(input.Prefix, key); return { IsTruncated: f.truncated, Contents: f.objects }; }
         if (operation === "ListObjectVersions") { assert.equal(input.Prefix, key); return { IsTruncated: f.truncated, Versions: f.versions, DeleteMarkers: f.deleted }; }
-        if (operation === "GetObject") { assert.equal(input.Key, "mscqr/production/component-deployment-state/iam-installation.json"); if (f.denied) throw new Error("AccessDenied"); return { Body: { transformToString: async () => JSON.stringify(f.receipt) } }; }
+        if (operation === "GetObject") {
+          assert.equal(input.Key, "mscqr/production/component-deployment-state/iam-installation.json"); if (f.denied) throw new Error("AccessDenied");
+          return { Body: liveReceiptBody(f, client) };
+        }
         assert.equal(operation, "PutObject"); assert.equal(input.Key, key + ".initial-activation-attempt");
         assert.equal(input.IfNoneMatch, "*"); assert.equal(input.ServerSideEncryption, "AES256");
         f.puts.push(input); if (f.ambiguous) throw new Error("ambiguous acceptance"); return { ETag: "authenticated-service-response" };
@@ -34,8 +44,19 @@ function fixture() {
         ListAttachedRolePolicies: { IsTruncated: false, AttachedPolicies: [] },
       }[operation]; assert(response);
       f.mutate(operation, response, target); return response;
-    },
-  });
+    };
+  const dependencies = { describe: async () => f.table };
+  if (liveStream) {
+    dependencies.createClient = service => {
+      const client = {
+        destroyed: false, destroyCalls: 0,
+        async send(command) { client.operation = command.constructor.name.replace("Command", ""); return send(service, client.operation, command.input, client); },
+        destroy() { client.destroyed = true; client.destroyCalls++; },
+      };
+      f.clients.push(client); return client;
+    };
+  } else dependencies.send = send;
+  f.boundary = createTerraformStateBoundary({ AccessKeyId: "fixture", SecretAccessKey: "placeholder", SessionToken: "fixture-token" }, binding, dependencies);
   return f;
 }
 test("state preflight authenticates exact absent state/history/table and all guarded IAM readbacks", async () => {
@@ -44,6 +65,23 @@ test("state preflight authenticates exact absent state/history/table and all gua
   assert.equal(result.iamInstallation.authorizationSha256, binding.authorizationSha256);
   assert.equal(f.puts.length, 0);
   assert(f.calls.every(value => !/Create|Put|Delete|Update/.test(value.operation)));
+});
+test("receipt stream stays live until fully consumed and every client is cleaned up once", async () => {
+  const f = fixture({ liveStream: true }), result = await f.boundary.inspect();
+  assert.equal(result.stateIdentity, "ABSENT"); assert.equal(f.streamRead, true);
+  assert(f.clients.length > 1);
+  assert(f.clients.every(client => client.destroyed && client.destroyCalls === 1));
+  assert(f.clients.filter(client => client.operation !== "GetObject").every(client => client.destroyed && client.destroyCalls === 1));
+});
+test("a live receipt stream aborts when its client closes before consumption", async () => {
+  const client = { destroyed: true };
+  await assert.rejects(liveReceiptBody({ receipt: {} }, client).transformToString(), error => error.code === "ECONNRESET" && error.message === "aborted");
+});
+test("receipt stream failure still closes its client exactly once", async () => {
+  const f = fixture({ liveStream: true }); f.streamFailure = true;
+  await assert.rejects(f.boundary.inspect(), /receipt stream failed/);
+  assert.equal(f.streamRead, true);
+  assert(f.clients.every(client => client.destroyed && client.destroyCalls === 1));
 });
 for (const mutate of [
   f => { f.objects = [{ Key: key }]; }, f => { f.objects = [{ Key: key + ".tflock" }]; }, f => { f.objects = [{ Key: key + ".initial-activation-attempt" }]; },

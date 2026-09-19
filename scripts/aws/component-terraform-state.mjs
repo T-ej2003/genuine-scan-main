@@ -13,15 +13,22 @@ const sha = bytes => createHash("sha256").update(bytes).digest("hex");
 
 // A private adapter used only with the freshly authenticated table session.
 // It exposes no caller-selected AWS action, resource, object key or document.
-export function createTerraformStateBoundary(credentials, binding, { send, describe } = {}) {
+export function createTerraformStateBoundary(credentials, binding, { send, describe, createClient } = {}) {
   const value = { accessKeyId: credentials.AccessKeyId, secretAccessKey: credentials.SecretAccessKey, sessionToken: credentials.SessionToken };
-  const call = async (service, operation, input) => {
-    if (send) return send(service, operation, input);
+  const call = async (service, operation, input, consume) => {
+    if (send) {
+      const response = await send(service, operation, input);
+      return consume ? await consume(response) : response;
+    }
     const library = sdk(`@aws-sdk/client-${service}`);
     const name = { iam: "IAM", s3: "S3" }[service]; assert(name);
-    const client = new library[`${name}Client`]({ credentials: value, region: service === "iam" ? "us-east-1" : "eu-west-2",
-      endpoint: service === "iam" ? "https://iam.amazonaws.com" : "https://s3.eu-west-2.amazonaws.com", maxAttempts: 1 });
-    try { return await client.send(new library[`${operation}Command`](input)); } finally { client.destroy(); }
+    const options = { credentials: value, region: service === "iam" ? "us-east-1" : "eu-west-2",
+      endpoint: service === "iam" ? "https://iam.amazonaws.com" : "https://s3.eu-west-2.amazonaws.com", maxAttempts: 1 };
+    const client = createClient ? createClient(service, options) : new library[`${name}Client`](options);
+    try {
+      const response = await client.send(new library[`${operation}Command`](input));
+      return consume ? await consume(response) : response;
+    } finally { client.destroy(); }
   };
   const table = async () => {
     if (describe) return describe();
@@ -49,8 +56,10 @@ export function createTerraformStateBoundary(credentials, binding, { send, descr
       assert.equal(history.IsTruncated, false);
       assert(![...(history.Versions || []), ...(history.DeleteMarkers || [])].some(object => [key, `${key}.initial-activation-attempt`].includes(object.Key)), "Historical state or activation attempt exists");
       assert.equal(await table(), null, "Component table already exists");
-      const received = await call("s3", "GetObject", { Bucket: bucket, Key: receiptKey });
-      const bytes = await received.Body.transformToString(); assert(bytes.length < 1024 * 1024);
+      // GetObject.Body is a live Node stream: consume it before its owning
+      // client closes the underlying HTTPS agent.
+      const bytes = await call("s3", "GetObject", { Bucket: bucket, Key: receiptKey }, received => received.Body.transformToString());
+      assert(bytes.length < 1024 * 1024);
       const receipt = JSON.parse(bytes);
       assert.deepEqual(Object.keys(receipt).sort(), ["authorizationSha256", "documentBindingsSha256", "live", "schemaVersion", "sourceSha", "state", "transitionId"]);
       assert.equal(receipt.schemaVersion, 1); assert.equal(receipt.state, "IAM_VERIFIED");
