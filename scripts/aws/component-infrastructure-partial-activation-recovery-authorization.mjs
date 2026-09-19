@@ -59,7 +59,7 @@ async function prepare() {
   assert.equal(GITHUB_REPOSITORY, installationIdentity.repository); assert.equal(GITHUB_REF, "refs/heads/main"); assert.equal(GITHUB_RUN_ATTEMPT, "1"); assert(path.isAbsolute(RUNNER_TEMP || ""));
   const sourceSha = environmentValue("SOURCE_SHA", /^[a-f0-9]{40}$/); assert.equal(sourceSha, GITHUB_SHA);
   const preparation = { schemaVersion: 1, sourceSha, recoveryTransitionId: environmentValue("RECOVERY_TRANSITION_ID", uuid), stateIdentity: "INFRASTRUCTURE_CREATED_STATE_INCOMPLETE",
-    backend: JSON.parse(environmentValue("BACKEND_JSON", /^\{.+\}$/)), liveTable: JSON.parse(environmentValue("LIVE_TABLE_JSON", /^\{.+\}$/)), lock: JSON.parse(environmentValue("LOCK_JSON", /^\{.+\}$/)),
+    backend: JSON.parse(environmentValue("BACKEND_JSON", /^\{.+\}$/)), liveTable: JSON.parse(environmentValue("LIVE_TABLE_JSON", /^\{.+\}$/)), lock: JSON.parse(environmentValue("LOCK_JSON", /^\{.+\}$/)), attempt: JSON.parse(environmentValue("ATTEMPT_JSON", /^\{.+\}$/)),
     historicalActivation: { sourceSha: environmentValue("HISTORICAL_SOURCE_SHA", /^[a-f0-9]{40}$/), authorizationRunId: environmentValue("HISTORICAL_AUTHORIZATION_RUN_ID", /^[1-9][0-9]*$/), authorizationArtifactSha256: environmentValue("HISTORICAL_AUTHORIZATION_ARTIFACT_SHA256", artifactSha), planSha256: environmentValue("HISTORICAL_PLAN_SHA256", sha), preparationSha256: environmentValue("HISTORICAL_PREPARATION_SHA256", sha), transitionId: environmentValue("HISTORICAL_TRANSITION_ID", uuid) },
     iamInstallation: JSON.parse(environmentValue("IAM_INSTALLATION_JSON", /^\{.+\}$/)) };
   const preparationSha256 = environmentValue("RECOVERY_PREPARATION_SHA256", sha);

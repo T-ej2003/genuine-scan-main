@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { installationDocuments, documentBindings, digest } from "./component-iam-installation-contract.mjs";
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 import { assertComponentSessionRecord } from "./component-session-proof.mjs";
-import { assertPartialActivationRecoveryCheckpoint, assertPartialActivationRecoveryPreparation, partialActivationRecoveryTarget } from "./component-infrastructure-partial-activation-recovery-contract.mjs";
+import { assertPartialActivationHistoricalActivation, assertPartialActivationRecoveryCheckpoint, assertPartialActivationRecoveryPreparation, partialActivationRecoveryTarget } from "./component-infrastructure-partial-activation-recovery-contract.mjs";
 
 const sdk = createRequire(new URL("../../infra/aws/terraform/production-component-deployment-state/broker-package/package.json", import.meta.url));
 const bucket = "mscqr-production-terraform-state-368992683803-eu-west-2";
@@ -42,6 +42,18 @@ function assertRecoveredTerraformState(bytes) {
   assert.deepEqual((value.resources || []).map(({ mode, type, name }) => ({ mode, type, name })), [{ mode: "managed", type: "aws_dynamodb_table", name: "component_deployment_state" }]);
   const resource = value.resources[0]; assert.equal(resource.instances?.length, 1); assert.equal(resource.instances[0]?.attributes?.id, tableName);
   return { lineage: value.lineage, serial: value.serial, managedAddresses: [partialActivationRecoveryTarget.address] };
+}
+
+function assertHistoricalActivationReservation(value, historicalActivation, iamInstallation) {
+  const historical = assertPartialActivationHistoricalActivation(historicalActivation);
+  assert.deepEqual(Object.keys(value || {}).sort(), ["authorizationRunId", "iamReceiptSha256", "planSha256", "preparationSha256", "session", "sourceSha", "transitionId"]);
+  assert.equal(value.authorizationRunId, historical.authorizationRunId);
+  assert.equal(value.sourceSha, historical.sourceSha); assert.equal(value.planSha256, historical.planSha256);
+  assert.equal(value.preparationSha256, historical.preparationSha256); assert.equal(value.transitionId, historical.transitionId);
+  assert.equal(value.iamReceiptSha256, iamInstallation.receiptSha256);
+  assertComponentSessionRecord(value.session); assert.equal(value.session.purpose, "TERRAFORM");
+  for (const field of ["sourceSha", "transitionId", "authorizationSha256"]) assert.equal(value.session[field], iamInstallation[field]);
+  return Object.freeze(structuredClone(value));
 }
 
 // A private adapter used only with the freshly authenticated table session.
@@ -148,7 +160,8 @@ export function createTerraformStateBoundary(credentials, binding, { send, descr
       const response = await call("s3", "PutObject", { Bucket: bucket, Key: `${key}.initial-activation-attempt`, Body: JSON.stringify(record), ServerSideEncryption: "AES256", IfNoneMatch: "*" });
       assert(typeof response.ETag === "string" && response.ETag, "Activation reservation response is ambiguous");
     },
-    async inspectPartialActivationRecovery() {
+    async inspectPartialActivationRecovery(historicalActivation) {
+      const historical = assertPartialActivationHistoricalActivation(historicalActivation);
       assert.equal((await call("s3", "GetBucketVersioning", { Bucket: bucket })).Status, "Enabled");
       const objects = await call("s3", "ListObjectsV2", { Bucket: bucket, Prefix: key }); assert.equal(objects.IsTruncated, false);
       const current = new Map((objects.Contents || []).map(object => [object.Key, object]));
@@ -166,7 +179,12 @@ export function createTerraformStateBoundary(credentials, binding, { send, descr
       assertLock(JSON.parse(lockBytes));
       const observedTable = await table(); assertRecoveredTable(observedTable);
       assertRecoveredTableMetadata({ backups: await dynamo("DescribeContinuousBackups", { TableName: tableName }), ttl: await dynamo("DescribeTimeToLive", { TableName: tableName }), tags: await dynamo("ListTagsOfResource", { ResourceArn: observedTable.TableArn }) });
-      return Object.freeze({ stateIdentity: "INFRASTRUCTURE_CREATED_STATE_INCOMPLETE", lock: { key: partialActivationRecoveryTarget.lockKey, sha256: sha(lockBytes), etag: lockVersion.ETag, versionId: lockVersion.VersionId }, table: partialActivationRecoveryTarget, iamInstallation: await authenticateInstallation() });
+      const iamInstallation = await authenticateInstallation();
+      const attemptVersion = versions.find(({ Key, IsLatest }) => Key === partialActivationRecoveryTarget.attemptKey && IsLatest);
+      assert(attemptVersion?.VersionId && attemptVersion.ETag, "Exact immutable activation reservation version is required");
+      const attemptText = await call("s3", "GetObject", { Bucket: bucket, Key: partialActivationRecoveryTarget.attemptKey, VersionId: attemptVersion.VersionId }, received => received.Body.transformToString());
+      const attempt = assertHistoricalActivationReservation(JSON.parse(attemptText), historical, iamInstallation);
+      return Object.freeze({ stateIdentity: "INFRASTRUCTURE_CREATED_STATE_INCOMPLETE", lock: { key: partialActivationRecoveryTarget.lockKey, sha256: sha(lockBytes), etag: lockVersion.ETag, versionId: lockVersion.VersionId }, attempt: { versionId: attemptVersion.VersionId, etag: attemptVersion.ETag, sha256: sha(attemptText), authorizationRunId: attempt.authorizationRunId }, table: partialActivationRecoveryTarget, iamInstallation });
     },
     async inspectPartialActivationRecoveryContinuation(preparation, preparationSha256) {
       assertPartialActivationRecoveryPreparation(preparation); assert.match(preparationSha256 || "", /^[a-f0-9]{64}$/); assert.equal((await call("s3", "GetBucketVersioning", { Bucket: bucket })).Status, "Enabled");
@@ -178,23 +196,46 @@ export function createTerraformStateBoundary(credentials, binding, { send, descr
       assert.equal(stateMarkers.length, 0, "Terraform state delete marker exists"); assert(stateVersions.length <= 1, "Terraform state history is ambiguous");
       const lockVersions = versions.filter(({ Key }) => Key === partialActivationRecoveryTarget.lockKey); assert(lockVersions.length > 0, "Incident lock history is absent");
       assert(lockVersions.some(({ VersionId, ETag }) => VersionId === preparation.lock.versionId && ETag === preparation.lock.etag), "Original incident lock changed");
+      const iamInstallation = await authenticateInstallation();
+      const attemptVersion = versions.find(({ Key, IsLatest }) => Key === partialActivationRecoveryTarget.attemptKey && IsLatest);
+      assert(attemptVersion?.VersionId && attemptVersion.ETag, "Exact immutable activation reservation version is required");
+      const attemptText = await call("s3", "GetObject", { Bucket: bucket, Key: partialActivationRecoveryTarget.attemptKey, VersionId: attemptVersion.VersionId }, received => received.Body.transformToString());
+      const attempt = assertHistoricalActivationReservation(JSON.parse(attemptText), preparation.historicalActivation, iamInstallation);
+      assert.deepEqual({ authorizationRunId: attempt.authorizationRunId, etag: attemptVersion.ETag, sha256: sha(attemptText), versionId: attemptVersion.VersionId }, preparation.attempt, "Historical activation reservation changed");
       const inspected = await Promise.all(lockVersions.map(version => recoveryLock(version, preparation, preparationSha256)));
       const checkpoints = inspected.filter(({ checkpoint }) => checkpoint).map(({ checkpoint, version }) => ({ checkpoint, version }));
       const latest = checkpoints[0]; assert(latest, "Recovery checkpoint is absent");
       for (const { checkpoint } of checkpoints) { assert.equal(checkpoint.recoveryTransitionId, preparation.recoveryTransitionId); assert.equal(checkpoint.preparationSha256, preparationSha256); }
       assert.notEqual(latest.checkpoint.state, "RECOVERY_CLOSED", "Recovery is already closed");
-      const currentLock = current.has(partialActivationRecoveryTarget.lockKey) ? inspected.find(({ version }) => version.IsLatest) : null;
-      if (currentLock) { assert(currentLock.checkpoint, "Unexpected active native lock"); assert.deepEqual(currentLock.checkpoint, latest.checkpoint, "Recovery lock is not the latest checkpoint"); }
+      const active = current.has(partialActivationRecoveryTarget.lockKey) ? inspected.find(({ version }) => version.IsLatest) : null;
+      let retainedNativeLock = null;
+      if (active) {
+        if (active.checkpoint) assert.deepEqual(active.checkpoint, latest.checkpoint, "Recovery lock is not the latest checkpoint");
+        else {
+          assert.equal(active.value.Operation, "OperationTypeApply", "Unexpected active native lock operation");
+          assert.equal(active.value.Path, `${bucket}/${key}`);
+          assert.match(active.value.ID, /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i, "Unexpected native import lock ID");
+          assert.equal(active.value.Info, "", "Unexpected native import lock info"); assert.equal(active.value.Version, "1.15.8", "Unexpected native import lock version");
+          assert.equal(active.version.IsLatest, true); const currentIndex = lockVersions.findIndex(({ VersionId }) => VersionId === active.version.VersionId);
+          assert.equal(currentIndex, 0, "Native lock version ordering is ambiguous"); const predecessor = inspected[currentIndex + 1]; assert(predecessor?.checkpoint, "Native import lock has no recovery predecessor");
+          assert.equal(predecessor.checkpoint.state, "RECOVERY_EXECUTING", "Native import lock is not bound to an import checkpoint");
+          assert.equal(predecessor.checkpoint.recoveryTransitionId, preparation.recoveryTransitionId);
+          const nativeCreated = Date.parse(active.value.Created), checkpointCreated = Date.parse(predecessor.value.Created), expiresAt = Date.parse(predecessor.checkpoint.expiresAt);
+          assert(Number.isFinite(nativeCreated) && Number.isFinite(checkpointCreated) && Number.isFinite(expiresAt));
+          assert(nativeCreated >= checkpointCreated, "Native import lock predates recovery checkpoint"); assert(nativeCreated < expiresAt, "Native import lock is outside the authorized recovery lifetime");
+          retainedNativeLock = { key: partialActivationRecoveryTarget.lockKey, etag: active.version.ETag, versionId: active.version.VersionId, id: active.value.ID, operation: active.value.Operation, who: active.value.Who, version: active.value.Version, created: active.value.Created, path: active.value.Path };
+        }
+      }
       const observedTable = await table(); assertRecoveredTable(observedTable);
       assertRecoveredTableMetadata({ backups: await dynamo("DescribeContinuousBackups", { TableName: tableName }), ttl: await dynamo("DescribeTimeToLive", { TableName: tableName }), tags: await dynamo("ListTagsOfResource", { ResourceArn: observedTable.TableArn }) });
       const state = stateVersions.length ? await this.readRecoveredTerraformState() : null;
-      return Object.freeze({ recovery: latest.checkpoint, currentRecoveryLock: currentLock ? { etag: currentLock.version.ETag, versionId: currentLock.version.VersionId } : null, state, stateExists: state !== null, table: partialActivationRecoveryTarget, iamInstallation: await authenticateInstallation() });
+      return Object.freeze({ recovery: latest.checkpoint, currentRecoveryLock: active?.checkpoint ? { etag: active.version.ETag, versionId: active.version.VersionId } : null, retainedNativeLock, state, stateExists: state !== null, table: partialActivationRecoveryTarget, iamInstallation });
     },
     async releasePartialActivationLock(lock, claimEtag, record, preparation, preparationSha256) {
       assert.deepEqual(Object.keys(lock || {}).sort(), ["etag", "key", "sha256", "versionId"]); assert.equal(lock.key, partialActivationRecoveryTarget.lockKey); assert(typeof claimEtag === "string" && claimEtag);
       const checkpoint = assertPartialActivationRecoveryCheckpoint(record, preparation, preparationSha256);
-      const marker = await call("s3", "GetObject", { Bucket: bucket, Key: lock.key }, received => ({ etag: received.ETag, text: received.Body.transformToString() }));
-      assert.equal(marker.etag, claimEtag, "Recovery lock ownership changed"); const value = assertLock(JSON.parse(await marker.text));
+      const marker = await call("s3", "GetObject", { Bucket: bucket, Key: lock.key }, async received => ({ etag: received.ETag, text: await received.Body.transformToString() }));
+      assert.equal(marker.etag, claimEtag, "Recovery lock ownership changed"); const value = assertLock(JSON.parse(marker.text));
       assert.equal(value.ID, checkpoint.recoveryTransitionId); assert.equal(value.Operation, "OperationTypeRecovery"); assert.deepEqual(JSON.parse(value.Info), checkpoint);
       const response = await call("s3", "DeleteObject", { Bucket: bucket, Key: lock.key }); assert.equal(response.DeleteMarker, true, "Recovery lock must retain a versioned incident trail");
       const objects = await call("s3", "ListObjectsV2", { Bucket: bucket, Prefix: key }); assert(!(objects.Contents || []).some(({ Key }) => Key === lock.key), "Recovery lock remains");
@@ -205,6 +246,17 @@ export function createTerraformStateBoundary(credentials, binding, { send, descr
       const response = await call("s3", "PutObject", { Bucket: bucket, Key: partialActivationRecoveryTarget.lockKey, Body: JSON.stringify(marker), ServerSideEncryption: "AES256", ...(continuation ? { IfNoneMatch: "*" } : { IfMatch: checkpoint.lock.etag }) });
       assert(typeof response.ETag === "string" && response.ETag, "Recovery lock claim is ambiguous");
       return response.ETag;
+    },
+    async capturePartialActivationNativeLock(lock, record, preparation, preparationSha256) {
+      assert.deepEqual(Object.keys(lock || {}).sort(), ["created", "etag", "id", "key", "operation", "path", "version", "versionId", "who"]);
+      assert.equal(lock.key, partialActivationRecoveryTarget.lockKey); assert.equal(lock.operation, "OperationTypeApply"); assert.equal(lock.path, `${bucket}/${key}`);
+      const checkpoint = assertPartialActivationRecoveryCheckpoint(record, preparation, preparationSha256); assert.equal(checkpoint.state, "IMPORT_LOCK_CAPTURED");
+      const marker = await call("s3", "GetObject", { Bucket: bucket, Key: lock.key }, async received => ({ etag: received.ETag, text: await received.Body.transformToString() }));
+      assert.equal(marker.etag, lock.etag, "Retained native import lock changed"); const native = assertLock(JSON.parse(marker.text));
+      for (const field of ["ID", "Operation", "Who", "Version", "Created", "Path"]) assert.equal(native[field], lock[{ ID: "id", Operation: "operation", Who: "who", Version: "version", Created: "created", Path: "path" }[field]], "Retained native import lock changed");
+      const recovery = { ID: checkpoint.recoveryTransitionId, Operation: "OperationTypeRecovery", Info: JSON.stringify(checkpoint), Who: checkpoint.owner.principal, Version: "1.15.8", Created: new Date().toISOString(), Path: `${bucket}/${key}` };
+      const response = await call("s3", "PutObject", { Bucket: bucket, Key: lock.key, Body: JSON.stringify(recovery), ServerSideEncryption: "AES256", IfMatch: lock.etag });
+      assert(typeof response.ETag === "string" && response.ETag, "Native import lock capture is ambiguous"); return response.ETag;
     },
     async readRecoveredTerraformState() {
       const bytes = await call("s3", "GetObject", { Bucket: bucket, Key: key }, received => received.Body.transformToString());

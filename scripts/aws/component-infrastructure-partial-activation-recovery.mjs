@@ -38,10 +38,10 @@ export async function run(argv = process.argv.slice(2), { source = cleanSource, 
     assert.equal(authenticated.historical, true); assert.equal(authenticated.executable, false); sourceGuard();
     const client = await session({ sourceSha, transitionId: historicalActivation.transitionId });
     try {
-      const observed = await client.inspectPartialActivationRecovery();
+      const observed = await client.inspectPartialActivationRecovery(historicalActivation);
       assert.deepEqual(observed.table, partialActivationRecoveryTarget); assert.equal(observed.iamInstallation.transitionId, historicalActivation.transitionId);
       const preparation = assertPartialActivationRecoveryPreparation({ schemaVersion: 1, sourceSha, recoveryTransitionId: argument, stateIdentity: observed.stateIdentity, backend: contract,
-        historicalActivation, iamInstallation: observed.iamInstallation, liveTable: partialActivationRecoveryTarget, lock: observed.lock });
+        historicalActivation, iamInstallation: observed.iamInstallation, liveTable: partialActivationRecoveryTarget, lock: observed.lock, attempt: observed.attempt });
       const bytes = Buffer.from(`${JSON.stringify(preparation, null, 2)}\n`); fs.writeFileSync(artifactPath, bytes, { flag: "wx", mode: 0o600 });
       return { ...preparation, preparationSha256: sha(bytes), historicalAuthorizationExecutable: false };
     } finally { client.close(); }
@@ -59,7 +59,7 @@ export async function run(argv = process.argv.slice(2), { source = cleanSource, 
   const client = await session({ sourceSha, transitionId: historicalActivation.transitionId });
   try {
     let observed, continuation = false;
-    try { observed = await client.inspectPartialActivationRecovery(); assert.deepEqual(observed.lock, preparation.lock, "Incident lock changed"); }
+    try { observed = await client.inspectPartialActivationRecovery(historicalActivation); assert.deepEqual(observed.lock, preparation.lock, "Incident lock changed"); }
     catch { observed = await client.inspectPartialActivationRecoveryContinuation(preparation, preparationSha256); continuation = true; }
     assert.deepEqual(observed.iamInstallation, preparation.iamInstallation, "Component IAM closure changed");
     const authorizationSha256 = sha(Buffer.from(JSON.stringify(approved)));
@@ -72,6 +72,11 @@ export async function run(argv = process.argv.slice(2), { source = cleanSource, 
     };
     client.activatePartialActivationRecovery();
     if (continuation && observed.currentRecoveryLock) await client.releasePartialActivationLock(preparation.lock, observed.currentRecoveryLock.etag, observed.recovery, preparation, preparationSha256);
+    if (continuation && observed.retainedNativeLock) {
+      const value = record("IMPORT_LOCK_CAPTURED");
+      const etag = await client.capturePartialActivationNativeLock(observed.retainedNativeLock, value, preparation, preparationSha256);
+      await client.releasePartialActivationLock(preparation.lock, etag, value, preparation, preparationSha256);
+    }
     const result = await client.execute({ mode: continuation && observed.stateExists ? "recover-verify" : "recover", plan: null }, { checkpoint: async value => {
       sourceGuard();
       if (value.stage === "backend") assertBackend(value.backend, value.workspace);

@@ -164,6 +164,7 @@ async function establish(binding, { loadUser = loadOperator, sts = stsTransport,
         async releasePartialActivationLock(lock, claimEtag, record, preparation, preparationSha256) { assert(recovering && now() < expires, "No active recovery authorization"); return boundary.releasePartialActivationLock(lock, claimEtag, record, preparation, preparationSha256); },
         async readRecoveredTerraformState() { assert(recovering && now() < expires, "No active recovery authorization"); return boundary.readRecoveredTerraformState(); },
         async beginPartialActivationRecovery(record, preparation, preparationSha256, continuation) { assert(recovering && now() < expires, "No active recovery authorization"); return boundary.beginPartialActivationRecovery(record, preparation, preparationSha256, continuation); },
+        async capturePartialActivationNativeLock(lock, record, preparation, preparationSha256) { assert(recovering && now() < expires, "No active recovery authorization"); return boundary.capturePartialActivationNativeLock(lock, record, preparation, preparationSha256); },
         async reserve(record) {
           assert(applying && !reserved && now() < expires, "No active unconsumed apply authorization");
           reserved = true; return boundary.reserve({ ...record, session: activeSession });

@@ -59,11 +59,16 @@ Terraform import/state commands, or alter the activation reservation.
 The only supported response is the separate source-owned partial-activation
 recovery controller. It authenticates the expired original approval solely as
 historical evidence, requires a fresh recovery approval, validates the exact
-table, reservation, empty state history and lock snapshot, imports only
+table, immutable reservation body (including its historical run, plan,
+preparation, transition and session proof), empty state history and lock snapshot, imports only
 `aws_dynamodb_table.component_deployment_state` with its fixed table ID, and
 requires a zero-drift readback before closing. Versioned incident-bound lock
-markers checkpoint ownership, adoption, verification and closure; a crash
-after adoption resumes verification only under a new recovery approval. Its
+markers checkpoint ownership, interrupted native-import-lock capture, adoption,
+verification and closure. A retained Terraform `OperationTypeApply` lock is
+accepted only when its exact versioned predecessor is the incident's recovery
+checkpoint and its native path, creation time and operation match; it is then
+captured with an exact ETag conditional write before release. A crash after
+adoption resumes verification only under a new recovery approval. Its
 environment is
 `production-component-infrastructure-activation-recovery`; it has the same
 sole-user `main`-only approval contract and must be configured explicitly.
