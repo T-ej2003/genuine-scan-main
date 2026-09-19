@@ -202,7 +202,9 @@ and absent table. Hidden MFA issues the scoped Terraform session. Terraform runs
 with no network namespace access or host credential mounts; a fixed TLS relay
 permits only the required AWS endpoints. The reviewed Terraform/provider downloads
 are hash checked, the committed provider lock is read-only, and no host plugin
-cache or CLI override is accepted.
+cache or CLI override is accepted. The immutable executor image includes its own
+public CA trust store (including Amazon Root CA 1); TLS remains end-to-end to AWS
+through the relay, with no host CA mount or verification bypass.
 
 The fixed IAM receipt is read as a live S3 response stream. Its isolated S3
 client remains alive until the complete receipt is consumed; a stream error still

@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 export const terraformExecution = Object.freeze({
-  image: "docker.io/library/node@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d",
+  image: "docker.io/library/node@sha256:5711a0d445a1af54af9589066c646df387d1831a608226f4cd694fc59e745059",
   terraformVersion: "1.15.8", providerVersion: "6.65.0",
   archives: Object.freeze({
     amd64: Object.freeze({ terraform: "d25ce7b6902013ad905db3d2eab0be4cd905887fe88b81a6171b8d5503c31f3d", provider: "718a880d81bfd9af7e297ed3d7bf98d1febebe8b9ebe3333854a4c17f2c4de09" }),

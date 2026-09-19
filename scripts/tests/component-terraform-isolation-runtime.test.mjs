@@ -18,6 +18,7 @@ test("real isolated container cannot access host credentials, control sockets, w
       import assert from 'node:assert/strict';
       import fs from 'node:fs';
       import net from 'node:net';
+      import { X509Certificate } from 'node:crypto';
       assert(process.getuid() > 0);
       for (const key of ['AWS_PROFILE', 'AWS_DEFAULT_PROFILE', 'AWS_CONFIG_FILE', 'AWS_SHARED_CREDENTIALS_FILE', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN', 'AWS_WEB_IDENTITY_TOKEN_FILE', 'AWS_CONTAINER_CREDENTIALS_FULL_URI', 'COMPONENT_HOST_ONLY_MARKER']) assert.equal(process.env[key], undefined);
       for (const key of ['HTTP_PROXY', 'HTTPS_PROXY', 'FTP_PROXY', 'ALL_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'ftp_proxy', 'all_proxy', 'no_proxy']) assert.equal(process.env[key], '');
@@ -25,6 +26,11 @@ test("real isolated container cannot access host credentials, control sockets, w
       const status = fs.readFileSync('/proc/self/status', 'utf8');
       assert.match(status, /CapEff:\\s+0000000000000000/);
       assert.match(status, /NoNewPrivs:\\s+1/);
+      const bundle = '/etc/ssl/certs/ca-certificates.crt';
+      const bundleStat = fs.statSync(bundle); assert(bundleStat.isFile() && bundleStat.size > 0 && (bundleStat.mode & 0o444));
+      const certificates = fs.readFileSync(bundle, 'utf8').match(/-----BEGIN CERTIFICATE-----[\\s\\S]*?-----END CERTIFICATE-----/g) || [];
+      assert(certificates.length >= 100, 'Public trust store is incomplete');
+      assert(certificates.map(value => new X509Certificate(value)).some(value => value.ca && value.subject.includes('O=Amazon') && value.subject.includes('CN=Amazon Root CA 1') && value.issuer === value.subject), 'Amazon Root CA 1 missing');
       assert.equal(fs.readFileSync('/inputs/marker', 'utf8'), 'reviewed-public-input');
       assert.throws(() => fs.writeFileSync('/inputs/marker', 'changed'));
       assert.throws(() => fs.writeFileSync('/host-escape', 'changed'));
