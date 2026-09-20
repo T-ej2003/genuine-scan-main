@@ -3,17 +3,20 @@ import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import { promptProductionMfaCode } from "../security/production-interactive-mfa-provider.mjs";
-import { createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import { createProductionAwsCredentialEnvironment, productionAwsExecutable, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { authenticateComponentSession, sessionProofBinding } from "./component-session-proof.mjs";
 
 const sdk = createRequire(new URL("../../infra/aws/terraform/production-component-deployment-state/broker-package/package.json", import.meta.url));
 const operator = "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator";
 const credentials = value => ({ accessKeyId: value.AccessKeyId, secretAccessKey: value.SecretAccessKey, ...(value.SessionToken ? { sessionToken: value.SessionToken } : {}) });
-function loadUser() {
-  return JSON.parse(execFileSync("aws", ["configure", "export-credentials", "--format", "process"], {
-    env: createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-bootstrap-operator", region: "eu-west-2" }),
-    encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
-  }));
+export function loadBootstrapOperatorSource(exec = execFileSync, fsOps, processEnv = process.env) {
+  const executable = productionAwsExecutable(fsOps);
+  try {
+    return JSON.parse(exec(executable, ["configure", "export-credentials", "--format", "process"], {
+      env: createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-bootstrap-operator", region: "eu-west-2", env: processEnv }),
+      encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+    }));
+  } catch { throw new Error("Bootstrap operator credential source is unavailable"); }
 }
 function transport(value) {
   const { STSClient, GetCallerIdentityCommand, GetSessionTokenCommand, AssumeRoleCommand } = sdk("@aws-sdk/client-sts");
@@ -25,7 +28,7 @@ function transport(value) {
 // Bootstrap-only human proof through the already-existing release-role trust.
 // The release session performs no installation mutation and is never returned.
 // Root GetSessionToken is neither requested nor accepted here.
-export async function authenticateBootstrapOperator(binding, { issuanceEvents, load = loadUser, sts = transport,
+export async function authenticateBootstrapOperator(binding, { issuanceEvents, load = loadBootstrapOperatorSource, sts = transport,
   mfa = () => promptProductionMfaCode({ prompt: "Identity bootstrap operator MFA code: " }), verify, now = Date.now, sleep = delay } = {}) {
   assert(["IDENTITY_BOOTSTRAP", "BROKER_CHANGE", "BROKER_POLICY_SUCCESSOR"].includes(binding.purpose), "Unsupported exceptional operator purpose"); sessionProofBinding(binding);
   assert.equal(typeof issuanceEvents, "function");

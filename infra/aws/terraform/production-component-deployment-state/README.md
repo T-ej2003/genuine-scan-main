@@ -101,6 +101,47 @@ executor and is not a runtime dependency. Historical broker versions and
 predecessor policy evidence remain unchanged. Do not run recovery until this
 successor lineage is durably closed.
 
+### One-time root MFA session for the successor
+
+The successor CLI obtains its administrative session only from the fixed local
+profile `mscqr-production-root-long-term`. That exceptional profile must resolve
+to long-term credentials for account root, contain no session token or
+expiration, and declare the root MFA device as `mfa_serial` in the local AWS
+config. `default`, `mscqr-production-root`, and `aws login` sessions are not
+accepted as the source. The repository never creates, stores, or discovers a
+root access key or guesses an MFA device ARN. Before that profile is exposed to
+a child process, the helper resolves AWS CLI only from its fixed absolute
+system/Homebrew installation safelist, verifies the canonical executable is not
+group/world writable, and uses that same absolute executable for both profile
+reads; `PATH`, the working directory, and operator-selected executable paths
+cannot select the root credential reader. The bootstrap-operator credential
+read in the same command uses this identical executable boundary.
+
+After a fresh successor authorization, run the existing governed command:
+
+```sh
+node scripts/aws/component-broker-policy-successor-cli.mjs execute APPROVED_RUN_ID TRANSITION_UUID
+```
+
+It authenticates the approval before reading the fixed profile, verifies the
+long-term caller is exact account root, prompts for the MFA code through the
+non-echoing controlling terminal, and calls STS `GetSessionToken` for one hour.
+The resulting credentials stay process-local. Execution waits for exactly one
+matching successful CloudTrail issuance bound to the returned access key, root
+identity, configured MFA device, and requested duration. Because that request
+is signed by long-term credentials, its session context is not used as MFA
+proof. Every observed `GetCallerIdentity` event signed by the returned
+credentials must bind the same access key and report `mfaAuthenticated=true`;
+repeated successful proof calls from that exact session are valid, while any
+conflicting event for that access key fails closed. Each bounded
+convergence attempt captures one lookup window and reuses it unchanged across
+every CloudTrail pagination token, while a later attempt captures a fresh
+window. Timeout or ambiguity fails closed.
+Remove the exceptional long-term root credential from local configuration
+immediately after the one-time transition. Never place it, the session, or an
+MFA code in the repository, shell history, command arguments, or an
+authorization artifact.
+
 ## Solo-operator approval
 
 MSCQR currently has one authorized operator/reviewer: User `T-ej2003`, GitHub ID

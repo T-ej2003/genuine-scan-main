@@ -1,10 +1,28 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { authenticateBootstrapOperator } from "../aws/component-bootstrap-operator.mjs";
+import { authenticateBootstrapOperator, loadBootstrapOperatorSource } from "../aws/component-bootstrap-operator.mjs";
 
 const account = "368992683803", operator = `arn:aws:iam::${account}:user/mscqr-production-bootstrap-operator`;
 const binding = { sourceSha: "a".repeat(40), authorizationSha256: "b".repeat(64), transitionId: "12345678-1234-4234-8234-123456789abc", purpose: "IDENTITY_BOOTSTRAP" };
 const start = Date.parse("2026-09-18T12:00:00Z");
+const canonicalAws = "/usr/local/aws-cli/aws";
+const awsInstallation = ({ present = true, resolved = canonicalAws } = {}) => ({
+  existsSync: candidate => present && candidate === "/usr/local/bin/aws", realpathSync: () => resolved,
+  statSync: () => ({ isFile: () => true, mode: 0o100755 }),
+});
+
+test("bootstrap operator source uses the shared canonical absolute AWS CLI before loading credentials", () => {
+  const calls = [];
+  const value = loadBootstrapOperatorSource((file, args, options) => {
+    calls.push({ file, args, env: options.env, shell: options.shell });
+    return JSON.stringify({ AccessKeyId: "fixture", SecretAccessKey: "fixture" });
+  }, awsInstallation(), { HOME: "/tmp/operator", PATH: "/tmp/fake-cwd:/tmp/fake-bin", AWS_ACCESS_KEY_ID: "hostile" });
+  assert.equal(value.AccessKeyId, "fixture"); assert.equal(calls[0].file, canonicalAws); assert.equal(calls[0].file.startsWith("/"), true);
+  assert.equal(calls[0].env.AWS_PROFILE, "mscqr-production-bootstrap-operator"); assert.equal(calls[0].env.AWS_ACCESS_KEY_ID, undefined); assert.equal(calls[0].shell, undefined);
+  let executions = 0; assert.throws(() => loadBootstrapOperatorSource(() => { executions += 1; }, awsInstallation({ present: false })), /No safelisted/); assert.equal(executions, 0);
+  assert.throws(() => loadBootstrapOperatorSource(() => assert.fail("untrusted executable reached"), awsInstallation({ resolved: "/tmp/fake-cwd/aws" })), /outside canonical safelist/);
+  assert.throws(() => loadBootstrapOperatorSource(() => "fixture-secret-not-json", awsInstallation()), error => error.message === "Bootstrap operator credential source is unavailable" && !error.message.includes("fixture-secret"));
+});
 function fixture() {
   const principal = `arn:aws:sts::${account}:assumed-role/mscqr-production-release-deployer/component-${binding.transitionId}`;
   const key = ["A", "S", "I", "A"].join("") + "0".repeat(16);

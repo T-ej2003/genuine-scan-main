@@ -27,6 +27,11 @@ test("successor CLI authenticates approval before root/MFA and exposes no target
   assert.equal((await run(["execute", "456", transitionId], dependencies)).state, "BROKER_POLICY_SUCCESSOR_CLOSED"); assert.deepEqual(calls, ["build", "authorize", "admin", "human", "execute", "close"]);
   calls.length = 0; dependencies.authorize = () => { calls.push("authorize"); throw new Error("denied"); };
   await assert.rejects(run(["execute", "456", transitionId], dependencies), /denied/); assert.deepEqual(calls, ["build", "authorize"]);
+  dependencies.authorize = input => { calls.push("authorize"); return { authorizationSha256: "b".repeat(64), transitionId: input.transitionId }; };
+  calls.length = 0; dependencies.human = async () => { calls.push("human"); throw new Error("human denied"); };
+  await assert.rejects(run(["execute", "456", transitionId], dependencies), /human denied/); assert.deepEqual(calls, ["build", "authorize", "admin", "human", "close"]);
+  calls.length = 0; dependencies.human = async () => { calls.push("human"); return {}; }; dependencies.execute = async () => { calls.push("execute"); throw new Error("execution denied"); };
+  await assert.rejects(run(["execute", "456", transitionId], dependencies), /execution denied/); assert.deepEqual(calls, ["build", "authorize", "admin", "human", "execute", "close"]);
 });
 
 for (const argv of [[], ["execute"], ["execute", "456", "bad"], ["execute", "456", "12345678-1234-4234-8234-123456789abc", "role"]]) test(`actual successor CLI rejects unsupported surface ${JSON.stringify(argv)}`, () => {
