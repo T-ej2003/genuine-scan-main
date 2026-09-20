@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import fs from "node:fs";
 import { createRequire } from "node:module";
 import { promptProductionMfaCode } from "../security/production-interactive-mfa-provider.mjs";
 import { createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
@@ -12,11 +13,31 @@ export const brokerPolicySuccessorRootMfaSource = Object.freeze({ profile: "mscq
 const secret = value => ({ accessKeyId: value.AccessKeyId, secretAccessKey: value.SecretAccessKey, ...(value.SessionToken ? { sessionToken: value.SessionToken } : {}) });
 const clear = value => { if (value) for (const field of ["AccessKeyId", "SecretAccessKey", "SessionToken", "accessKeyId", "secretAccessKey", "sessionToken"]) delete value[field]; };
 
-export function loadRootSource(exec = execFileSync) {
-  const env = createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: brokerPolicySuccessorRootMfaSource.profile, region: identityBootstrap.region });
-  const credentials = JSON.parse(exec("aws", ["configure", "export-credentials", "--format", "process"], { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
-  const serial = exec("aws", ["configure", "get", "mfa_serial", "--profile", brokerPolicySuccessorRootMfaSource.profile], { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
-  return { credentials, serial };
+// Resolve the CLI before exposing the exceptional root profile to a child.
+// This mirrors the fixed-candidate, realpath, and mode contract used by the
+// production GitHub authorization reader; PATH and cwd are never consulted.
+export function rootAwsExecutable(fsOps = fs) {
+  for (const candidate of ["/usr/bin/aws", "/opt/homebrew/bin/aws", "/usr/local/bin/aws"]) {
+    if (!fsOps.existsSync(candidate)) continue;
+    const resolved = fsOps.realpathSync(candidate);
+    assert(/^(?:\/usr\/bin\/aws|\/usr\/local\/aws-cli\/aws|\/usr\/local\/aws-cli\/v2\/[0-9.]+\/dist\/aws|\/(?:opt\/homebrew|usr\/local)\/Cellar\/awscli\/[0-9.]+\/libexec\/bin\/aws)$/.test(resolved), "AWS executable is outside canonical safelist");
+    const stat = fsOps.statSync(resolved);
+    assert(stat.isFile() && (stat.mode & 0o111) && !(stat.mode & 0o022), "Unsafe AWS executable");
+    return resolved;
+  }
+  throw new Error("No safelisted AWS CLI installation found");
+}
+
+export function loadRootSource(exec = execFileSync, fsOps = fs, processEnv = process.env) {
+  const executable = rootAwsExecutable(fsOps);
+  const env = createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: brokerPolicySuccessorRootMfaSource.profile, region: identityBootstrap.region, env: processEnv });
+  let credentials;
+  try { credentials = JSON.parse(exec(executable, ["configure", "export-credentials", "--format", "process"], { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })); }
+  catch { throw new Error("Long-term root credential source is unavailable"); }
+  try {
+    const serial = exec(executable, ["configure", "get", "mfa_serial", "--profile", brokerPolicySuccessorRootMfaSource.profile], { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    return { credentials, serial };
+  } catch { clear(credentials); throw new Error("Root MFA device configuration is unavailable"); }
 }
 
 function transport(value) {

@@ -1,21 +1,55 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { convergeRootMfaIssuance } from "../aws/component-broker-policy-successor-cli.mjs";
-import { brokerPolicySuccessorRootMfaSource, createBrokerPolicySuccessorRootMfaSession, loadRootSource } from "../aws/component-broker-policy-successor-root-mfa.mjs";
+import { brokerPolicySuccessorRootMfaSource, createBrokerPolicySuccessorRootMfaSession, loadRootSource, rootAwsExecutable } from "../aws/component-broker-policy-successor-root-mfa.mjs";
 
 const account = "368992683803", rootArn = `arn:aws:iam::${account}:root`, serial = `arn:aws:iam::${account}:mfa/root-fixture`;
 const nowValue = Date.parse("2026-09-20T20:00:00.000Z"), expiration = new Date(nowValue + 3600000).toISOString();
 const source = () => ({ credentials: { AccessKeyId: "BASEKEY", SecretAccessKey: "base-secret" }, serial });
+const canonicalAws = "/usr/local/aws-cli/aws";
+const awsInstallation = ({ present = true, resolved = canonicalAws, mode = 0o100755 } = {}) => ({
+  existsSync: candidate => present && candidate === "/usr/local/bin/aws",
+  realpathSync: () => resolved,
+  statSync: () => ({ isFile: () => true, mode }),
+});
 
-test("root MFA source is one fixed sanitized local profile with a profile-owned device ARN", () => {
+test("root MFA source pins one canonical absolute CLI before loading the fixed profile", () => {
   const calls = [], result = loadRootSource((file, args, options) => {
     calls.push({ file, args, env: options.env });
     return args[1] === "export-credentials" ? JSON.stringify({ AccessKeyId: "BASEKEY", SecretAccessKey: "base-secret" }) : `${serial}\n`;
-  });
+  }, awsInstallation());
   assert.equal(result.serial, serial); assert.equal(calls.length, 2);
-  for (const call of calls) { assert.equal(call.file, "aws"); assert.equal(call.env.AWS_PROFILE, brokerPolicySuccessorRootMfaSource.profile); assert.equal(call.env.AWS_ACCESS_KEY_ID, undefined); assert.equal(call.env.AWS_SESSION_TOKEN, undefined); }
+  for (const call of calls) { assert.equal(call.file, canonicalAws); assert.equal(call.file.startsWith("/"), true); assert.equal(call.env.AWS_PROFILE, brokerPolicySuccessorRootMfaSource.profile); assert.equal(call.env.AWS_ACCESS_KEY_ID, undefined); assert.equal(call.env.AWS_SESSION_TOKEN, undefined); }
   assert.deepEqual(calls[0].args, ["configure", "export-credentials", "--format", "process"]);
   assert.deepEqual(calls[1].args, ["configure", "get", "mfa_serial", "--profile", brokerPolicySuccessorRootMfaSource.profile]);
+});
+
+test("root MFA source cannot be redirected by PATH, cwd, or a caller-selected executable", () => {
+  const calls = [], candidates = [], filesystem = awsInstallation();
+  const existsSync = filesystem.existsSync;
+  filesystem.existsSync = candidate => { candidates.push(candidate); return existsSync(candidate); };
+  loadRootSource((file, args, options) => {
+    calls.push({ file, shell: options.shell, path: options.env.PATH });
+    return args[1] === "export-credentials" ? JSON.stringify({ AccessKeyId: "BASEKEY", SecretAccessKey: "base-secret" }) : `${serial}\n`;
+  }, filesystem, { HOME: "/tmp/operator", PATH: "/tmp/attacker-cwd:/tmp/attacker-bin" });
+  assert.deepEqual(calls.map(({ file }) => file), [canonicalAws, canonicalAws]);
+  assert.equal(calls.every(({ path }) => path === "/tmp/attacker-cwd:/tmp/attacker-bin"), true);
+  assert.equal(candidates.every(candidate => candidate.startsWith("/")), true);
+  assert.equal(calls.every(({ shell }) => shell === undefined), true);
+  assert.throws(() => rootAwsExecutable(awsInstallation({ resolved: "/tmp/attacker/aws" })), /outside canonical safelist/);
+});
+
+test("root MFA source fails closed before profile loading when no canonical safe CLI exists", () => {
+  let executions = 0;
+  assert.throws(() => loadRootSource(() => { executions += 1; }, awsInstallation({ present: false })), error => error.message === "No safelisted AWS CLI installation found");
+  assert.equal(executions, 0);
+  for (const unsafe of [{ resolved: "/tmp/aws" }, { mode: 0o100777 }]) assert.throws(() => rootAwsExecutable(awsInstallation(unsafe)), /(?:outside canonical safelist|Unsafe AWS executable)/);
+});
+
+test("root source failures redact CLI output and clear credentials already loaded", () => {
+  const sensitive = "sensitive-root-material";
+  assert.throws(() => loadRootSource(() => { throw new Error(sensitive); }, awsInstallation()), error => error.message === "Long-term root credential source is unavailable" && !error.message.includes(sensitive));
+  assert.throws(() => loadRootSource((_file, args) => args[1] === "export-credentials" ? JSON.stringify({ AccessKeyId: sensitive, SecretAccessKey: sensitive }) : (() => { throw new Error(sensitive); })(), awsInstallation()), error => error.message === "Root MFA device configuration is unavailable" && !error.message.includes(sensitive));
 });
 
 function transport({ sourceIdentity = rootArn, sessionIdentity = rootArn, issued = { AccessKeyId: "SESSIONKEY", SecretAccessKey: "session-secret", SessionToken: "session-token", Expiration: expiration } } = {}) {

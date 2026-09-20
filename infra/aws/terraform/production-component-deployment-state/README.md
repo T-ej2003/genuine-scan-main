@@ -109,7 +109,12 @@ to long-term credentials for account root, contain no session token or
 expiration, and declare the root MFA device as `mfa_serial` in the local AWS
 config. `default`, `mscqr-production-root`, and `aws login` sessions are not
 accepted as the source. The repository never creates, stores, or discovers a
-root access key or guesses an MFA device ARN.
+root access key or guesses an MFA device ARN. Before that profile is exposed to
+a child process, the helper resolves AWS CLI only from its fixed absolute
+system/Homebrew installation safelist, verifies the canonical executable is not
+group/world writable, and uses that same absolute executable for both profile
+reads; `PATH`, the working directory, and operator-selected executable paths
+cannot select the root credential reader.
 
 After a fresh successor authorization, run the existing governed command:
 
