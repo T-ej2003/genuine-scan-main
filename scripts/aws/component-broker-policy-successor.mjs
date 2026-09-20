@@ -3,7 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { assertBrokerConfiguration, brokerChangeEntryPoints, brokerConfiguration } from "./component-broker-configuration.mjs";
 import { assertBrokerPolicySuccessorAuthorization } from "./component-broker-policy-successor-authorization.mjs";
-import { assertBrokerPolicySuccessorClosureMetadata, brokerPolicyPredecessor, brokerPolicySuccessor, brokerPolicySuccessorBindings, brokerPolicySuccessorClosureMetadata, brokerPolicySuccessorConfiguration, brokerPolicySuccessorMetadataKey, predecessorExecutorPolicySha256, successorExecutorPolicySha256 } from "./component-broker-policy-successor-contract.mjs";
+import { assertBrokerPolicySuccessorClosureMetadata, brokerPolicyPredecessor, brokerPolicySuccessor, brokerPolicySuccessorBindings, brokerPolicySuccessorClosureMetadata, brokerPolicySuccessorConfiguration, brokerPolicySuccessorMetadataKey, predecessorBrokerPolicySha256, predecessorExecutorPolicySha256, successorBrokerPolicySha256, successorExecutorPolicySha256 } from "./component-broker-policy-successor-contract.mjs";
 import { assertEffectiveBootstrapTrustAnchor, assertHistoricalBrokerChangeClosure } from "./component-bootstrap-trust-anchor.mjs";
 import { canonical, digest, installationIdentity } from "./component-iam-installation-contract.mjs";
 import { brokerChangeManagedIdentities, brokerPolicySuccessorManagedIdentities, componentBrokerArn, identityBootstrap, inspectBrokerChangeIdentities, inspectBrokerPolicySuccessorIdentities } from "./component-installation-identity-contract.mjs";
@@ -37,7 +37,7 @@ export async function executeBrokerPolicySuccessor({ authorization, packageEvide
   const noPolicies = async () => { for (const qualifier of [null, "1", "2", "3", "4", "5", "6", "7"]) try { await lambda("GetPolicy", { FunctionName: installationIdentity.functionName, ...(qualifier ? { Qualifier: qualifier } : {}) }); throw new Error("Unexpected broker invocation bypass"); } catch (error) { if (!absent(error)) throw error; } };
   const versions = async () => { const response = await lambda("ListVersionsByFunction", { FunctionName: installationIdentity.functionName }); assert.equal(response.NextMarker, undefined); return response.Versions.map(({ Version }) => Version).filter(value => value !== "$LATEST").sort((a, b) => Number(a) - Number(b)); };
   const oldConfigurations = Object.fromEntries(Object.keys(brokerChangeEntryPoints).map(entryPoint => [entryPoint, brokerConfiguration({ packageSha256: brokerPolicyPredecessor.packageSha256, manifestSha256: brokerPolicyPredecessor.manifestSha256, entryPoint, entryPoints: brokerChangeEntryPoints })]));
-  const successorStates = ["EXECUTING", "CODE_UPDATED", "DESCRIPTION_SET", "VERSION_PUBLISHED", "POLICY_INSTALLED", "VERIFIED"];
+  const successorStates = ["EXECUTING", "CODE_UPDATED", "DESCRIPTION_SET", "VERSION_PUBLISHED", "BROKER_POLICY_INSTALLED", "POLICY_INSTALLED", "VERIFIED"];
   const authenticatePredecessor = async journal => {
     const anchor = verifyPredecessor(journal.value);
     for (const field of ["sourceSha", "packageSha256", "manifestSha256", "configurationSha256", "identitySetSha256"]) assert.equal(anchor[field], brokerPolicyPredecessor[field]);
@@ -83,16 +83,22 @@ export async function executeBrokerPolicySuccessor({ authorization, packageEvide
     await checkpoint("VERSION_PUBLISHED");
   }
   assert.deepEqual(await versions(), ["1", "2", "3", "4", "5", "6", "7"]); assertBrokerConfiguration(version7, successorConfiguration, await controls("7"));
-  const target = brokerPolicySuccessorManagedIdentities().find(({ role }) => role === installationIdentity.terraformRole);
-  let policy = await iam("GetRolePolicy", { RoleName: target.role, PolicyName: target.policyName }), policySha = digest(normalizeIamPolicyDocument(policy.PolicyDocument));
-  assert([predecessorExecutorPolicySha256, successorExecutorPolicySha256].includes(policySha), "Executor policy is outside authorized generation lineage");
-  if (policySha !== successorExecutorPolicySha256) {
-    await guard(); policy = await iam("GetRolePolicy", { RoleName: target.role, PolicyName: target.policyName }); assert.equal(digest(normalizeIamPolicyDocument(policy.PolicyDocument)), predecessorExecutorPolicySha256, "Executor policy CAS predecessor changed");
-    await authorize();
-    try { await iam("PutRolePolicy", { RoleName: target.role, PolicyName: target.policyName, PolicyDocument: canonical(target.policy) }); } catch {}
-    policy = await iam("GetRolePolicy", { RoleName: target.role, PolicyName: target.policyName }); assert.equal(digest(normalizeIamPolicyDocument(policy.PolicyDocument)), successorExecutorPolicySha256, "Executor policy successor did not converge");
-    await checkpoint("POLICY_INSTALLED");
-  }
+  const predecessorIdentities = brokerChangeManagedIdentities(), successorIdentities = brokerPolicySuccessorManagedIdentities();
+  const installPolicy = async (role, predecessorSha256, successorSha256, state, label) => {
+    const target = successorIdentities.find(identity => identity.role === role), predecessorTarget = predecessorIdentities.find(identity => identity.role === role);
+    assert(target && predecessorTarget && target.policyName === predecessorTarget.policyName);
+    let policy = await iam("GetRolePolicy", { RoleName: target.role, PolicyName: target.policyName }), policySha = digest(normalizeIamPolicyDocument(policy.PolicyDocument));
+    assert([predecessorSha256, successorSha256].includes(policySha), `${label} policy is outside authorized generation lineage`);
+    if (policySha !== successorSha256) {
+      await guard(); policy = await iam("GetRolePolicy", { RoleName: target.role, PolicyName: target.policyName }); assert.equal(digest(normalizeIamPolicyDocument(policy.PolicyDocument)), predecessorSha256, `${label} policy CAS predecessor changed`);
+      await authorize();
+      try { await iam("PutRolePolicy", { RoleName: target.role, PolicyName: target.policyName, PolicyDocument: canonical(target.policy) }); } catch {}
+      policy = await iam("GetRolePolicy", { RoleName: target.role, PolicyName: target.policyName }); assert.equal(digest(normalizeIamPolicyDocument(policy.PolicyDocument)), successorSha256, `${label} policy successor did not converge`);
+    }
+    if (successorStates.indexOf(record.state) < successorStates.indexOf(state)) await checkpoint(state);
+  };
+  await installPolicy(installationIdentity.provisionerRole, predecessorBrokerPolicySha256, successorBrokerPolicySha256, "BROKER_POLICY_INSTALLED", "Broker execution");
+  await installPolicy(installationIdentity.terraformRole, predecessorExecutorPolicySha256, successorExecutorPolicySha256, "POLICY_INSTALLED", "Executor");
   const identities = await inspectSuccessor(iam); assert(identities.every(({ role, policy: state }) => role === "EXPECTED" && state === "EXPECTED")); await noPolicies(); await checkpoint("VERIFIED");
   const closedAt = new Date(now()).toISOString(), runtimeVersionArn = version7.Configuration.RuntimeVersionConfig.RuntimeVersionArn;
   const finalRecord = { ...record, state: "BROKER_POLICY_SUCCESSOR_CLOSED", closedAt, runtimeVersionArn };

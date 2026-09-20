@@ -150,8 +150,10 @@ export function authenticatePartialActivationRecoveryAuthorization(input, depend
   return authenticatePublication({ runId, sourceSha: preparation.sourceSha, transitionId: preparation.recoveryTransitionId }, dependencies, undefined, undefined, undefined, undefined, { preparation, preparationSha256 });
 }
 
-// Historical approval evidence is deliberately non-executable: it authenticates
-// the incident only and never bypasses the normal current-main/freshness guard.
+// Historical approval evidence is deliberately non-executable. GitHub proves
+// the immutable run, reviewer, environment and plan title; the write-once AWS
+// activation reservation independently proves plan/preparation/session binding.
+// Recovery therefore does not depend on a short-lived downloadable artifact.
 export function authenticateHistoricalTerraformActivationAuthorization(input, dependencies = {}) {
   assert.deepEqual(Object.keys(input || {}).sort(), ["authorizationArtifactSha256", "planSha256", "preparationSha256", "runId", "sourceSha", "transitionId"]);
   for (const field of ["planSha256", "preparationSha256"]) assert.match(input[field] || "", /^[a-f0-9]{64}$/);
@@ -214,6 +216,11 @@ function authenticatePublication(input, { execute, env = process.env, now = Date
   const run = api(`actions/runs/${runId}`);
   verifyRun(run);
   assertSoloEnvironment(api(`environments/${targetEnvironment}`), api(`environments/${targetEnvironment}/deployment-branch-policies`), api(`actions/runs/${runId}/approvals`), targetEnvironment);
+  if (historicalTerraformPackage) {
+    assert.equal(run.display_title, `Authorize component infrastructure plan ${historicalTerraformPackage.planSha256}`, "Historical plan title differs");
+    return Object.freeze({ sourceSha, planSha256: historicalTerraformPackage.planSha256, preparationSha256: historicalTerraformPackage.preparationSha256,
+      authorizationArtifactSha256: historicalTerraformPackage.authorizationArtifactSha256, authorizationRunId: runId });
+  }
   const pages = api(`actions/runs/${runId}/artifacts`, { paginate: true });
   assert(Array.isArray(pages) && pages.length && pages.every(page => Array.isArray(page.artifacts)));
   const artifacts = pages.flatMap(page => page.artifacts);
@@ -270,11 +277,6 @@ function authenticatePublication(input, { execute, env = process.env, now = Date
     protectedMain(api("branches/main"), sourceSha);
     const finalRun = api(`actions/runs/${runId}`); verifyRun(finalRun);
     assert.equal(finalRun.created_at, run.created_at); assert.equal(finalRun.updated_at, run.updated_at);
-    return Object.freeze(authorization);
-  }
-  if (historicalTerraformPackage) {
-    assert.equal(artifact.digest, historicalTerraformPackage.authorizationArtifactSha256, "Historical authorization artifact changed");
-    assert.deepEqual(authorization, { sourceSha, planSha256: historicalTerraformPackage.planSha256, preparationSha256: historicalTerraformPackage.preparationSha256 }, "Historical saved-plan bindings differ");
     return Object.freeze(authorization);
   }
   if (terraformBinding) {

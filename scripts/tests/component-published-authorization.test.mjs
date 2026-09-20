@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { authenticatePublishedComponentAuthorization, authenticateIdentityBootstrapPublication, authenticateBootstrapRecoveryPublication, authenticateBrokerChangePublication, authenticateBrokerPolicySuccessorPublication, authenticateTerraformActivationAuthorization, componentIamAuthorization as installationContract } from "../aws/component-iam-authorization.mjs";
+import { authenticatePublishedComponentAuthorization, authenticateIdentityBootstrapPublication, authenticateBootstrapRecoveryPublication, authenticateBrokerChangePublication, authenticateBrokerPolicySuccessorPublication, authenticateHistoricalTerraformActivationAuthorization, authenticateTerraformActivationAuthorization, componentIamAuthorization as installationContract } from "../aws/component-iam-authorization.mjs";
 import { approveIdentityBootstrap, bootstrapAuthorizationContract } from "../aws/component-identity-bootstrap-authorization.mjs";
 import { approveBootstrapRecovery } from "../aws/component-bootstrap-partial-recovery-authorization.mjs";
 import { bootstrapRecovery } from "../aws/component-bootstrap-partial-recovery-contract.mjs";
@@ -27,7 +27,7 @@ function fixture(change = () => {}, bootstrap = false, terraform = false, recove
   const manifest = componentBrokerPackageManifest(input.sourceSha);
   const main = { name: "main", protected: true, commit: { sha: input.sourceSha } };
   const repository = { id: 1145608538, full_name: contract.repository };
-  const run = { id: 1234, repository, head_repository: { ...repository }, head_sha: input.sourceSha, head_branch: "main", path: contract.workflow,
+  const run = { id: 1234, repository, head_repository: { ...repository }, head_sha: input.sourceSha, head_branch: "main", path: contract.workflow, ...(terraform ? { display_title: `Authorize component infrastructure plan ${binding.planSha256}` } : {}),
     event: "workflow_dispatch", status: "in_progress", run_attempt: 1, actor, triggering_actor: actor, created_at: "2026-09-17T12:00:00Z", updated_at: "2026-09-17T12:04:00Z" };
   const environment = { id: 91, name: contract.environment, can_admins_bypass: false, deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
     protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{ type: "User", reviewer: actor }] }] };
@@ -51,13 +51,14 @@ function fixture(change = () => {}, bootstrap = false, terraform = false, recove
   const artifact = { id: 55, name: policySuccessorPublication ? brokerPolicySuccessor.artifact : brokerChangePublication ? brokerChange.artifact : recovery ? bootstrapRecovery.artifact : terraform ? "component-infrastructure-authorization" : bootstrap ? bootstrapAuthorizationContract.artifact : "component-installation-authorization-audit", expired: false, size_in_bytes: archive.length,
     digest: `sha256:${crypto.createHash("sha256").update(archive).digest("hex")}`, workflow_run: { id: 1234, head_sha: input.sourceSha, repository_id: 1145608538 }, ...f.artifact };
   const authenticate = policySuccessorPublication ? (value, deps) => authenticateBrokerPolicySuccessorPublication(value, packageEvidence, deps) : brokerChangePublication ? (value, deps) => authenticateBrokerChangePublication(value, packageEvidence, deps) : recovery ? (value, deps) => authenticateBootstrapRecoveryPublication(value, packageEvidence, deps) : terraform ? (value, deps) => authenticateTerraformActivationAuthorization({ ...value, ...binding }, deps) : bootstrap ? (value, deps) => authenticateIdentityBootstrapPublication(value, packageEvidence, deps) : authenticatePublishedComponentAuthorization;
-  f.authenticate = () => authenticate(input, { now: () => f.now, env: {}, execute: (_cmd, args) => {
+  f.dependencies = { now: () => f.now, env: {}, execute: (_cmd, args) => {
     const suffix = args[3].slice(`repos/${contract.repository}/`.length); f.calls.push(suffix);
     if (suffix === "actions/artifacts/55/zip") return archive;
     const values = { "branches/main": f.main, "actions/runs/1234": f.run, [`environments/${contract.environment}`]: f.environment,
       [`environments/${contract.environment}/deployment-branch-policies`]: f.branches, "actions/runs/1234/approvals": f.approvals, "actions/runs/1234/artifacts": [{ artifacts: [artifact] }] };
     assert(Object.hasOwn(values, suffix)); return JSON.stringify(values[suffix]);
-  } });
+  } };
+  f.authenticate = () => authenticate(input, f.dependencies);
   return f;
 }
 test("actual publisher audit archive authenticates before operator session issuance", () => {
@@ -151,6 +152,23 @@ test("saved-plan approval remains fresh after a 45-minute environment wait", () 
     value.now = Date.parse("2026-09-17T12:46:01.000Z");
   }, false, true);
   assert.deepEqual(f.authenticate(), f.files["authorization.json"]);
+});
+test("historical saved-plan approval survives artifact expiry without becoming executable", () => {
+  const f = fixture(() => {}, false, true), historical = { runId: input.runId, sourceSha: input.sourceSha, transitionId: input.transitionId,
+    planSha256: "e".repeat(64), preparationSha256: "f".repeat(64), authorizationArtifactSha256: `sha256:${"c".repeat(64)}` };
+  f.now += 90 * 24 * 60 * 60 * 1000;
+  const authenticated = authenticateHistoricalTerraformActivationAuthorization(historical, f.dependencies);
+  assert.equal(authenticated.historical, true); assert.equal(authenticated.executable, false);
+  assert.deepEqual(f.calls, ["actions/runs/1234", "environments/production-component-infrastructure-activation",
+    "environments/production-component-infrastructure-activation/deployment-branch-policies", "actions/runs/1234/approvals"]);
+});
+test("historical saved-plan approval rejects a different plan title or reviewer", () => {
+  const inputValue = { runId: input.runId, sourceSha: input.sourceSha, transitionId: input.transitionId,
+    planSha256: "e".repeat(64), preparationSha256: "f".repeat(64), authorizationArtifactSha256: `sha256:${"c".repeat(64)}` };
+  const wrongPlan = fixture(value => { value.run.display_title = "Authorize component infrastructure plan " + "0".repeat(64); }, false, true);
+  assert.throws(() => authenticateHistoricalTerraformActivationAuthorization(inputValue, wrongPlan.dependencies), /plan title/);
+  const wrongReviewer = fixture(value => { value.approvals[0].user.id = 1; }, false, true);
+  assert.throws(() => authenticateHistoricalTerraformActivationAuthorization(inputValue, wrongReviewer.dependencies), /operator ID/);
 });
 for (const [name, mutate] of Object.entries({
   "completion before dispatch": f => { f.run.updated_at = "2026-09-17T11:59:59.000Z"; },

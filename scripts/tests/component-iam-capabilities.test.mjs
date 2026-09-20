@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { installationCapabilitySet, installationIdentity, installationDocuments, digest, terraformExecutorPolicyGeneration } from "../aws/component-iam-installation-contract.mjs";
-import { bootstrapManagedIdentities, componentSessionIdentities } from "../aws/component-installation-identity-contract.mjs";
+import { bootstrapManagedIdentities, brokerChangeManagedIdentities, brokerPolicySuccessorManagedIdentities, componentBrokerArn, componentSessionIdentities } from "../aws/component-installation-identity-contract.mjs";
 
 const capabilities = installationCapabilitySet();
 const actions = (policy) => policy.Statement.flatMap((statement) => [].concat(statement.Action));
@@ -58,4 +58,15 @@ test("bootstrap owns fixed broker authority; normal sessions cannot replace code
   for (const session of componentSessionIdentities()) assert.deepEqual(actions(session.policy), ["lambda:InvokeFunction"]);
   const changed = structuredClone(capabilities); changed.terraform.Statement.push({ Effect: "Allow", Action: "iam:PassRole", Resource: "*" });
   assert.notEqual(digest(changed), digest(capabilities));
+});
+
+test("successor broker gains only exact immutable version-7 self-read authority", () => {
+  const predecessor = brokerChangeManagedIdentities().find(({ role }) => role === installationIdentity.provisionerRole).policy;
+  const successor = brokerPolicySuccessorManagedIdentities().find(({ role }) => role === installationIdentity.provisionerRole).policy;
+  const added = pairs(successor).filter(pair => !permitsPair(predecessor, pair.action, pair.resource));
+  assert.deepEqual(added.map(({ action, resource }) => [action, resource]), [
+    ["lambda:GetFunction", `${componentBrokerArn}:7`], ["lambda:GetFunctionConfiguration", `${componentBrokerArn}:7`],
+    ["lambda:GetFunctionCodeSigningConfig", `${componentBrokerArn}:7`], ["lambda:GetRuntimeManagementConfig", `${componentBrokerArn}:7`],
+    ["lambda:GetFunctionConcurrency", `${componentBrokerArn}:7`], ["lambda:GetPolicy", `${componentBrokerArn}:7`],
+  ]);
 });

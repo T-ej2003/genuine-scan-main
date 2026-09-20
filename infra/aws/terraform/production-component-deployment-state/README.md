@@ -76,6 +76,12 @@ AWS-session expirations. Its
 environment is
 `production-component-infrastructure-activation-recovery`; it has the same
 sole-user `main`-only approval contract and must be configured explicitly.
+Historical authentication does not depend on downloading the 30-day GitHub
+artifact: GitHub authenticates the completed environment-approved run and its
+plan-bound title, while the immutable versioned activation reservation proves
+the exact plan, preparation, Terraform session, IAM receipt, source, and
+transition. The historical artifact digest remains a coordinate bound by the
+fresh recovery approval and is never executable authority.
 
 Before recovery, the one-time
 `production-component-broker-policy-successor` transition must move the
@@ -83,7 +89,8 @@ authenticated broker/executor generation together from immutable broker `:4`
 to `:7`. It publishes and authenticates `:7`, preserves the historical journal
 body consumed by immutable cleanup/authorization versions `:5`/`:6`, records
 the compact successor closure in authenticated journal object metadata, then
-replaces only the exact executor inline policy so it invokes `:7` and may version-read only the retained
+extends the broker's own read-only self-inspection policy to exact version `:7`
+and replaces only the exact executor inline policy so it invokes `:7` and may version-read only the retained
 `.tflock` and immutable `.initial-activation-attempt` objects. The transition
 requires a fresh environment approval, bootstrap-operator MFA provenance, and
 a fresh MFA-backed root session; root is only the bounded administrative

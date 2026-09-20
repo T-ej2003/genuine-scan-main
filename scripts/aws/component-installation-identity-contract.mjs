@@ -137,6 +137,10 @@ function managedIdentities(entryPoints) {
 
 export function brokerPolicySuccessorManagedIdentities() {
   const identities = structuredClone(brokerChangeManagedIdentities());
+  const broker = identities.find(({ role }) => role === installationIdentity.provisionerRole);
+  const brokerReads = broker.policy.Statement.find(({ Action }) => [].concat(Action).includes("lambda:GetFunction"));
+  brokerReads.Resource.push(`${componentBrokerArn}:7`);
+  broker.policySha256 = digest(broker.policy);
   const terraform = identities.find(({ role }) => role === installationIdentity.terraformRole);
   terraform.policy = terraformExecutorPolicyGeneration("7", true);
   terraform.policySha256 = digest(terraform.policy);

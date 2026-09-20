@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import yaml from "js-yaml";
 import { approveBrokerPolicySuccessor, assertBrokerPolicySuccessorAuthorization, brokerPolicySuccessorSourceBindings } from "../aws/component-broker-policy-successor-authorization.mjs";
-import { brokerPolicyPredecessor, brokerPolicySuccessor, brokerPolicySuccessorCapabilitySet, brokerPolicySuccessorDelta, predecessorExecutorPolicySha256, successorExecutorPolicySha256 } from "../aws/component-broker-policy-successor-contract.mjs";
+import { brokerPolicyPredecessor, brokerPolicySuccessor, brokerPolicySuccessorCapabilitySet, brokerPolicySuccessorDelta, predecessorBrokerPolicySha256, predecessorExecutorPolicySha256, successorBrokerPolicySha256, successorExecutorPolicySha256 } from "../aws/component-broker-policy-successor-contract.mjs";
 import { componentBrokerPackageManifest } from "../aws/component-broker-package.mjs";
 import { digest } from "../aws/component-iam-installation-contract.mjs";
 
@@ -20,6 +20,7 @@ test("successor authorization binds exact immutable generations and minimal delt
   const f = fixture(), value = approveBrokerPolicySuccessor(f); assert.equal(assertBrokerPolicySuccessorAuthorization(value, f.packageEvidence, f.now), digest(value));
   assert.deepEqual(value.predecessor, brokerPolicyPredecessor); assert.equal(predecessorExecutorPolicySha256, "777b32148b2c03bf740db2a955b11dc5c524b1437d4d73a83d6f8d47745ea8a6");
   assert.equal(successorExecutorPolicySha256, "0f08fdee746a32153be9e04394beb71a4ebd7c710020207d6339fc2080c6f4bf");
+  assert.equal(value.predecessor.brokerPolicySha256, predecessorBrokerPolicySha256); assert.equal(value.successor.brokerPolicySha256, successorBrokerPolicySha256);
   assert.equal(value.successor.brokerVersion, "7"); assert.deepEqual(value.delta, brokerPolicySuccessorDelta); assert.deepEqual(value, { ...value, ...brokerPolicySuccessorSourceBindings(f.packageEvidence) });
 });
 
@@ -37,6 +38,10 @@ test("root capability and workflow expose only the exact one-time successor surf
   for (const required of ["iam:PutRolePolicy", "lambda:UpdateFunctionCode", "lambda:PublishVersion", "s3:PutObject"]) assert(actions.includes(required));
   for (const forbidden of ["iam:CreateRole", "iam:PassRole", "lambda:AddPermission", "lambda:DeleteFunction", "s3:DeleteObject"]) assert(!actions.includes(forbidden));
   for (const statement of capability.Statement) assert(![].concat(statement.Resource).includes("*"));
+  assert.deepEqual(capability.Statement.find(({ Action }) => Action === "iam:PutRolePolicy").Resource.sort(), [
+    "arn:aws:iam::368992683803:role/mscqr-production-component-iam-provisioner",
+    "arn:aws:iam::368992683803:role/mscqr-production-component-table-installer",
+  ]);
   const workflow = yaml.load(fs.readFileSync(new URL("../../.github/workflows/authorize-component-broker-policy-successor.yml", import.meta.url), "utf8"));
   assert.deepEqual(workflow.permissions, { contents: "read", actions: "read" }); assert.equal(workflow.jobs.authorize.environment, brokerPolicySuccessor.environment); assert(!JSON.stringify(workflow).includes("configure-aws-credentials"));
 });
