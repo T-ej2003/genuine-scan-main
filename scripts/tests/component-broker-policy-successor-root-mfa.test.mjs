@@ -76,6 +76,14 @@ test("root MFA helper exchanges only the fixed long-term root profile and hands 
   assert.deepEqual(session.credentials, {}); assert.deepEqual(wire.closed, [false, true]);
 });
 
+test("root MFA failure clears long-term and returned credentials without exposing the MFA code", async () => {
+  const base = { AccessKeyId: "BASEKEY", SecretAccessKey: "base-secret" }, issued = { AccessKeyId: "SESSIONKEY", SecretAccessKey: "session-secret", SessionToken: "session-token", Expiration: expiration }, closed = [];
+  await assert.rejects(createBrokerPolicySuccessorRootMfaSession({ load: async () => ({ credentials: base, serial }), mfa: async () => "123456", now: () => nowValue, sts: value => ({
+    close: () => closed.push(Boolean(value.SessionToken)), async send(operation) { if (operation === "GetSessionToken") return { Credentials: issued }; if (value.SessionToken) throw new Error("returned identity rejected"); return { Account: account, Arn: rootArn }; },
+  }) }), error => !error.message.includes("123456") && !error.message.includes("session-secret"));
+  assert.deepEqual(base, {}); assert.deepEqual(issued, { Expiration: expiration }); assert.deepEqual(closed, [false, true]);
+});
+
 test("root MFA helper rejects temporary/login credentials, wrong identities, device ARNs, prompts and lifetimes", async () => {
   const check = (options, pattern) => assert.rejects(() => createBrokerPolicySuccessorRootMfaSession({ load: source, mfa: async () => "123456", now: () => nowValue, ...options }), pattern);
   await check({ load: async () => ({ credentials: { AccessKeyId: "A", SecretAccessKey: "S", SessionToken: "aws-login-token" }, serial }), sts: transport().create }, /Temporary root credentials/);
@@ -86,6 +94,11 @@ test("root MFA helper rejects temporary/login credentials, wrong identities, dev
   await check({ sts: transport({ sessionIdentity: `arn:aws:iam::${account}:user/not-root` }).create }, /not account root/);
   await check({ sts: transport().create, mfa: async () => { throw new Error("sensitive-123456"); } }, error => error.message === "Interactive root MFA entry failed" && !error.message.includes("123456"));
   await check({ sts: transport({ issued: { AccessKeyId: "A", SecretAccessKey: "S", SessionToken: "T", Expiration: new Date(nowValue + 120000).toISOString() } }).create }, /lifetime/);
+  await check({ load: async () => null, sts: transport().create }, /credential source/);
+  await check({ sts: transport({ issued: null }).create }, /issuance failed/);
+  await check({ sts: transport({ issued: { AccessKeyId: "A", SecretAccessKey: "S", SessionToken: "T", Expiration: "not-a-date" } }).create }, /lifetime/);
+  await check({ sts: transport({ issued: { AccessKeyId: "A", SecretAccessKey: "S", SessionToken: "T", Expiration: new Date(nowValue + 3601001).toISOString() } }).create }, /lifetime/);
+  await check({ sts: value => ({ close() {}, async send(operation) { if (operation === "GetCallerIdentity") return { Account: account, Arn: rootArn }; throw new Error("fixture STS rejection"); } }) }, /fixture STS rejection/);
 });
 
 const issuance = ({ accessKeyId = "SESSIONKEY", arn = rootArn, accountId = account, serialNumber = serial, durationSeconds = 3600, mfa, expires = expiration, errorCode } = {}) => ({
@@ -134,6 +147,7 @@ test("root MFA proof accepts an exact issuance on a later valid CloudTrail page"
 });
 
 test("CloudTrail pagination rejects repeated tokens and chains beyond its bound", async () => {
+  await assert.rejects(() => lookupCloudTrailEvents({ eventName: "GetSessionToken", lookup: async () => ({ Events: [{ CloudTrailEvent: "not-json" }] }) }));
   await assert.rejects(() => lookupCloudTrailEvents({ eventName: "GetSessionToken", lookup: async () => ({ Events: [], NextToken: "repeat" }) }));
   let page = 0;
   await assert.rejects(() => lookupCloudTrailEvents({ eventName: "GetSessionToken", lookup: async () => ({ Events: [], NextToken: `page-${++page}` }) }));
@@ -159,14 +173,16 @@ test("root MFA CloudTrail proof binds one exact issuance without misreading its 
   await assert.rejects(verify([issuance({ accessKeyId: "OTHER" })]), /unavailable/);
 });
 
-test("returned root MFA session requires one matching MFA-authenticated CloudTrail proof", async () => {
+test("returned root MFA session accepts repeated exact proof events from the same session", async () => {
   let clock = nowValue, attempts = 0;
   const event = await convergeRootMfaSessionProof({ events: async () => ++attempts === 2 ? [sessionProof()] : [], accessKeyId: "SESSIONKEY", rootExpires: Date.parse(expiration), now: () => clock, sleep: async milliseconds => { clock += milliseconds; } });
   assert.equal(event.userIdentity.accessKeyId, "SESSIONKEY"); assert.equal(attempts, 2);
   const verify = events => convergeRootMfaSessionProof({ events: async () => events, accessKeyId: "SESSIONKEY", rootExpires: Date.parse(expiration), now: () => nowValue, sleep: async () => {}, maxWaitMs: 1 });
   await assert.rejects(verify([]), /unavailable/);
-  await assert.rejects(verify([sessionProof(), sessionProof()]), /Unique/);
+  assert.equal((await verify([sessionProof(), sessionProof()])).userIdentity.accessKeyId, "SESSIONKEY");
+  assert.equal((await verify([sessionProof({ accessKeyId: "OTHER" }), sessionProof(), sessionProof()])).userIdentity.accessKeyId, "SESSIONKEY");
   await assert.rejects(verify([sessionProof({ mfa: "false" })]));
+  await assert.rejects(verify([sessionProof(), sessionProof({ mfa: "false" })]));
   await assert.rejects(verify([sessionProof({ accessKeyId: "OTHER" })]), /unavailable/);
   await assert.rejects(verify([sessionProof({ arn: `arn:aws:iam::${account}:user/not-root` })]));
   await assert.rejects(verify([sessionProof({ accountId: "111111111111" })]));

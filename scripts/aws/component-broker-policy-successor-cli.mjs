@@ -49,11 +49,13 @@ export async function convergeRootMfaSessionProof({ events, accessKeyId, rootExp
   const deadline = Math.min(now() + maxWaitMs, rootExpires - 120000);
   while (now() < deadline) {
     const matches = (await events("GetCallerIdentity")).filter(value => value.userIdentity?.accessKeyId === accessKeyId);
-    assert(matches.length <= 1, "Unique root MFA session proof required");
-    if (matches.length === 1) {
-      const event = matches[0]; assert.equal(event.eventSource, "sts.amazonaws.com"); assert.equal(event.eventName, "GetCallerIdentity"); assert.equal(event.awsRegion, identityBootstrap.region);
-      assert.equal(event.userIdentity?.type, "Root"); assert.equal(event.userIdentity?.accountId, identityBootstrap.account); assert.equal(event.userIdentity?.arn, expectedRootArn);
-      assert.equal(event.userIdentity?.sessionContext?.attributes?.mfaAuthenticated, "true"); assert.equal(event.errorCode, undefined); return event;
+    if (matches.length) {
+      for (const event of matches) {
+        assert.equal(event.eventSource, "sts.amazonaws.com"); assert.equal(event.eventName, "GetCallerIdentity"); assert.equal(event.awsRegion, identityBootstrap.region);
+        assert.equal(event.userIdentity?.type, "Root"); assert.equal(event.userIdentity?.accountId, identityBootstrap.account); assert.equal(event.userIdentity?.arn, expectedRootArn);
+        assert.equal(event.userIdentity?.sessionContext?.attributes?.mfaAuthenticated, "true"); assert.equal(event.errorCode, undefined);
+      }
+      return matches[0];
     }
     if (now() + 5000 >= deadline) break; await sleep(5000);
   }

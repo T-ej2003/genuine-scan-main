@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import fs from "node:fs";
 import { createRequire } from "node:module";
 import { promptProductionMfaCode } from "../security/production-interactive-mfa-provider.mjs";
-import { createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import { createProductionAwsCredentialEnvironment, productionAwsExecutable, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { identityBootstrap } from "./component-installation-identity-contract.mjs";
 
 const sdk = createRequire(new URL("../../infra/aws/terraform/production-component-deployment-state/broker-package/package.json", import.meta.url));
@@ -13,22 +12,9 @@ export const brokerPolicySuccessorRootMfaSource = Object.freeze({ profile: "mscq
 const secret = value => ({ accessKeyId: value.AccessKeyId, secretAccessKey: value.SecretAccessKey, ...(value.SessionToken ? { sessionToken: value.SessionToken } : {}) });
 const clear = value => { if (value) for (const field of ["AccessKeyId", "SecretAccessKey", "SessionToken", "accessKeyId", "secretAccessKey", "sessionToken"]) delete value[field]; };
 
-// Resolve the CLI before exposing the exceptional root profile to a child.
-// This mirrors the fixed-candidate, realpath, and mode contract used by the
-// production GitHub authorization reader; PATH and cwd are never consulted.
-export function rootAwsExecutable(fsOps = fs) {
-  for (const candidate of ["/usr/bin/aws", "/opt/homebrew/bin/aws", "/usr/local/bin/aws"]) {
-    if (!fsOps.existsSync(candidate)) continue;
-    const resolved = fsOps.realpathSync(candidate);
-    assert(/^(?:\/usr\/bin\/aws|\/usr\/local\/aws-cli\/aws|\/usr\/local\/aws-cli\/v2\/[0-9.]+\/dist\/aws|\/(?:opt\/homebrew|usr\/local)\/Cellar\/awscli\/[0-9.]+\/libexec\/bin\/aws)$/.test(resolved), "AWS executable is outside canonical safelist");
-    const stat = fsOps.statSync(resolved);
-    assert(stat.isFile() && (stat.mode & 0o111) && !(stat.mode & 0o022), "Unsafe AWS executable");
-    return resolved;
-  }
-  throw new Error("No safelisted AWS CLI installation found");
-}
+export const rootAwsExecutable = productionAwsExecutable;
 
-export function loadRootSource(exec = execFileSync, fsOps = fs, processEnv = process.env) {
+export function loadRootSource(exec = execFileSync, fsOps, processEnv = process.env) {
   const executable = rootAwsExecutable(fsOps);
   const env = createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: brokerPolicySuccessorRootMfaSource.profile, region: identityBootstrap.region, env: processEnv });
   let credentials;

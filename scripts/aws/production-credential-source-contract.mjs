@@ -1,4 +1,6 @@
 import { execFileSync } from "node:child_process";
+import assert from "node:assert/strict";
+import fs from "node:fs";
 import path from "node:path";
 
 const REGION = "eu-west-2";
@@ -34,6 +36,18 @@ const required = (env, key) => {
   if (typeof env?.[key] !== "string" || !env[key]) throw new Error(`Credential source requires ${key}.`);
   return env[key];
 };
+
+export function productionAwsExecutable(fsOps = fs) {
+  for (const candidate of ["/usr/bin/aws", "/opt/homebrew/bin/aws", "/usr/local/bin/aws"]) {
+    if (!fsOps.existsSync(candidate)) continue;
+    const resolved = fsOps.realpathSync(candidate);
+    assert(/^(?:\/usr\/bin\/aws|\/usr\/local\/aws-cli\/aws|\/usr\/local\/aws-cli\/v2\/[0-9.]+\/dist\/aws|\/(?:opt\/homebrew|usr\/local)\/Cellar\/awscli\/[0-9.]+\/libexec\/bin\/aws)$/.test(resolved), "AWS executable is outside canonical safelist");
+    const stat = fsOps.statSync(resolved);
+    assert(stat.isFile() && (stat.mode & 0o111) && !(stat.mode & 0o022), "Unsafe AWS executable");
+    return resolved;
+  }
+  throw new Error("No safelisted AWS CLI installation found");
+}
 
 export function createProductionAwsCredentialEnvironment({ credentialSource, profile, env = process.env, region = REGION, injected = false } = {}) {
   if (!Object.values(PRODUCTION_AWS_CREDENTIAL_SOURCE).includes(credentialSource)) throw new Error("Production AWS credential source must be explicit.");

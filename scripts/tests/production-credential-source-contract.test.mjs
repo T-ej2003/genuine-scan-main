@@ -420,7 +420,6 @@ test("every direct AWS source in scripts/aws has an explicit audited credential 
   const walk = (directory) => fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => entry.isDirectory() ? walk(`${directory}/${entry.name}`) : [`${directory}/${entry.name}`]);
   const direct = walk("scripts/aws").filter((file) => /\.(mjs|sh)$/.test(file) && (file === "scripts/aws/component-broker-policy-successor-root-mfa.mjs" || /(?:execFileSync|execFile|spawnSync|spawn|run)\(["']aws["']|\baws\s+(?:sts|kms|ecr|ecs|iam|s3|secretsmanager|rds|cloudtrail)/.test(fs.readFileSync(file, "utf8")))).sort();
   const classified = [
-    "scripts/aws/component-bootstrap-operator.mjs",
     "scripts/aws/component-bootstrap-partial-recovery-cli.mjs",
     "scripts/aws/component-broker-change-cli.mjs",
     "scripts/aws/component-broker-policy-successor-root-mfa.mjs",
@@ -430,7 +429,6 @@ test("every direct AWS source in scripts/aws has an explicit audited credential 
   ].sort();
   assert.deepEqual(direct, classified);
   const boundaries = {
-    "scripts/aws/component-bootstrap-operator.mjs": /createProductionAwsCredentialEnvironment/,
     "scripts/aws/component-bootstrap-partial-recovery-cli.mjs": /createProductionAwsCredentialEnvironment/,
     "scripts/aws/component-broker-change-cli.mjs": /createProductionAwsCredentialEnvironment/,
     "scripts/aws/component-broker-policy-successor-root-mfa.mjs": /createProductionAwsCredentialEnvironment/,

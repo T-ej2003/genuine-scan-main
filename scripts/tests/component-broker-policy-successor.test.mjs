@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { executeBrokerPolicySuccessor } from "../aws/component-broker-policy-successor.mjs";
+import { convergeRootMfaIssuance, convergeRootMfaSessionProof } from "../aws/component-broker-policy-successor-cli.mjs";
+import { createBrokerPolicySuccessorRootMfaSession } from "../aws/component-broker-policy-successor-root-mfa.mjs";
 import { assertEffectiveBootstrapTrustAnchor } from "../aws/component-bootstrap-trust-anchor.mjs";
 import { brokerPolicySuccessorSourceBindings } from "../aws/component-broker-policy-successor-authorization.mjs";
 import { assertBrokerPolicySuccessorClosureMetadata, brokerPolicyPredecessor, brokerPolicySuccessor, brokerPolicySuccessorBindings, brokerPolicySuccessorConfiguration, predecessorExecutorPolicy, successorExecutorPolicy } from "../aws/component-broker-policy-successor-contract.mjs";
@@ -26,7 +28,7 @@ function fixture() {
   const predecessorSession = predecessorIdentities.find(({ role }) => role === identityBootstrap.installationRole);
   const predecessorCleanup = predecessorIdentities.find(({ role }) => role === identityBootstrap.cleanupRole);
   const predecessorAuthorization = predecessorIdentities.find(({ role }) => role === identityBootstrap.authorizationRole);
-  const state = { now, authorization, operatorProof, packageEvidence, runtime, writes: [], iamWrites: [], after: () => {}, failInspect: false, policy: predecessorExecutorPolicy(), brokerPolicy: predecessorBroker.policy, sessionPolicy: predecessorSession.policy, cleanupPolicy: predecessorCleanup.policy, authorizationPolicy: predecessorAuthorization.policy, etags: new Map([[`${identityBootstrap.prefix}identity-bootstrap.json`, "journal-1"]]), metadata: new Map([[`${identityBootstrap.prefix}identity-bootstrap.json`, {}]]), objects: new Map([[`${identityBootstrap.prefix}identity-bootstrap.json`, { brokerChange: {} }]]), versions: {
+  const state = { now, rootExpires: now + 3600000, authorization, operatorProof, packageEvidence, runtime, writes: [], iamWrites: [], authentications: 0, after: () => {}, failInspect: false, policy: predecessorExecutorPolicy(), brokerPolicy: predecessorBroker.policy, sessionPolicy: predecessorSession.policy, cleanupPolicy: predecessorCleanup.policy, authorizationPolicy: predecessorAuthorization.policy, etags: new Map([[`${identityBootstrap.prefix}identity-bootstrap.json`, "journal-1"]]), metadata: new Map([[`${identityBootstrap.prefix}identity-bootstrap.json`, {}]]), objects: new Map([[`${identityBootstrap.prefix}identity-bootstrap.json`, { brokerChange: {} }]]), versions: {
     $LATEST: { ...config(old.AUTHORIZE), FunctionArn: componentBrokerArn, Version: "$LATEST", RevisionId: "old" },
     1: { ...config(old.INSTALL), FunctionArn: `${componentBrokerArn}:1`, Version: "1", RevisionId: "one" }, 2: { ...config(old.CLEANUP), FunctionArn: `${componentBrokerArn}:2`, Version: "2", RevisionId: "two" }, 3: { ...config(old.AUTHORIZE), FunctionArn: `${componentBrokerArn}:3`, Version: "3", RevisionId: "three" },
     4: { ...config(old.INSTALL), FunctionArn: `${componentBrokerArn}:4`, Version: "4", RevisionId: "four" }, 5: { ...config(old.CLEANUP), FunctionArn: `${componentBrokerArn}:5`, Version: "5", RevisionId: "five" }, 6: { ...config(old.AUTHORIZE), FunctionArn: `${componentBrokerArn}:6`, Version: "6", RevisionId: "six" },
@@ -59,8 +61,8 @@ function fixture() {
   };
   const predecessor = () => ({ ...brokerPolicyPredecessor, entryPoints: brokerChangeEntryPoints, allVersions: ["1", "2", "3", "4", "5", "6"], runtimeVersions: { 4: runtime, 5: runtime, 6: runtime } });
   const matches = identities => [["policy", installationIdentity.terraformRole], ["brokerPolicy", installationIdentity.provisionerRole], ["sessionPolicy", identityBootstrap.installationRole], ["cleanupPolicy", identityBootstrap.cleanupRole], ["authorizationPolicy", identityBootstrap.authorizationRole]].every(([field, role]) => digest(state[field]) === identities.find(identity => identity.role === role).policySha256);
-  state.execute = () => executeBrokerPolicySuccessor({ authorization: state.authorization, packageEvidence, operatorProof: state.operatorProof }, { iam, lambda, s3, authenticate: async () => {}, now: () => state.now, sleep: async () => {}, verifyPredecessor: predecessor, inspectPredecessor: async () => [{ role: "EXPECTED", policy: matches(predecessorIdentities) ? "EXPECTED" : "DRIFT" }], inspectSuccessor: async () => { if (state.failInspect) throw new Error("crash"); return [{ role: "EXPECTED", policy: matches(successorIdentities) ? "EXPECTED" : "DRIFT" }]; }, verifyEffective: (value, _manifest, _packageSha256, metadata) => { assert(!Object.hasOwn(value, "brokerPolicySuccessor")); assertBrokerPolicySuccessorClosureMetadata(metadata, brokerPolicySuccessorBindings(packageEvidence)); } });
-  state.renew = () => { state.now += brokerPolicySuccessor.maxAgeMs + 120001; state.authorization.runId = String(Number(state.authorization.runId) + 1); state.authorization.approvalObservedAt = new Date(state.now).toISOString(); state.authorization.expiresAt = new Date(state.now + brokerPolicySuccessor.maxAgeMs).toISOString(); state.operatorProof.authorizationSha256 = digest(state.authorization); state.operatorProof.issuedAt = state.operatorProof.issuanceEventTime = new Date(state.now).toISOString(); state.operatorProof.expiresAt = new Date(state.now + 900000).toISOString(); };
+  state.execute = () => executeBrokerPolicySuccessor({ authorization: state.authorization, packageEvidence, operatorProof: state.operatorProof }, { iam, lambda, s3, authenticate: async () => { state.authentications += 1; assert(state.now + 120000 < state.rootExpires, "Root MFA session expired"); }, now: () => state.now, sleep: async () => {}, verifyPredecessor: predecessor, inspectPredecessor: async () => [{ role: "EXPECTED", policy: matches(predecessorIdentities) ? "EXPECTED" : "DRIFT" }], inspectSuccessor: async () => { if (state.failInspect) throw new Error("crash"); return [{ role: "EXPECTED", policy: matches(successorIdentities) ? "EXPECTED" : "DRIFT" }]; }, verifyEffective: (value, _manifest, _packageSha256, metadata) => { assert(!Object.hasOwn(value, "brokerPolicySuccessor")); assertBrokerPolicySuccessorClosureMetadata(metadata, brokerPolicySuccessorBindings(packageEvidence)); } });
+  state.renew = () => { state.now += brokerPolicySuccessor.maxAgeMs + 120001; state.rootExpires = state.now + 3600000; state.authorization.runId = String(Number(state.authorization.runId) + 1); state.authorization.approvalObservedAt = new Date(state.now).toISOString(); state.authorization.expiresAt = new Date(state.now + brokerPolicySuccessor.maxAgeMs).toISOString(); state.operatorProof.authorizationSha256 = digest(state.authorization); state.operatorProof.issuedAt = state.operatorProof.issuanceEventTime = new Date(state.now).toISOString(); state.operatorProof.expiresAt = new Date(state.now + 900000).toISOString(); };
   return state;
 }
 
@@ -74,6 +76,28 @@ test("one-time successor publishes versions 7-9, installs exact policies and clo
   assert.deepEqual(f.writes.filter(value => ["UpdateFunctionCode", "UpdateFunctionConfiguration", "PublishVersion", "PutRolePolicy"].includes(value)), ["UpdateFunctionCode", "UpdateFunctionConfiguration", "PublishVersion", "UpdateFunctionConfiguration", "PublishVersion", "UpdateFunctionConfiguration", "PublishVersion", "PutRolePolicy", "PutRolePolicy", "PutRolePolicy", "PutRolePolicy", "PutRolePolicy"]);
   assert.deepEqual(f.iamWrites, [installationIdentity.provisionerRole, installationIdentity.terraformRole, identityBootstrap.installationRole, identityBootstrap.cleanupRole, identityBootstrap.authorizationRole]);
   await assert.rejects(f.execute(), /already closed/);
+});
+
+test("intended root-MFA path authenticates repeated same-session proof before one-time successor closure", async () => {
+  const f = fixture(), accessKeyId = "SESSIONKEY", rootArn = `arn:aws:iam::${identityBootstrap.account}:root`, serial = `arn:aws:iam::${identityBootstrap.account}:mfa/root-fixture`, expiration = new Date(f.rootExpires).toISOString();
+  const base = { AccessKeyId: "BASEKEY", SecretAccessKey: "base-secret" }, issued = { AccessKeyId: accessKeyId, SecretAccessKey: "session-secret", SessionToken: "session-token", Expiration: expiration }, closed = [];
+  const session = await createBrokerPolicySuccessorRootMfaSession({ load: async () => ({ credentials: base, serial }), mfa: async () => "123456", now: () => f.now, sts: value => ({
+    close: () => closed.push(Boolean(value.SessionToken)), send: async operation => operation === "GetSessionToken" ? { Credentials: issued } : { Account: identityBootstrap.account, Arn: rootArn },
+  }) });
+  const issuance = { eventSource: "sts.amazonaws.com", eventName: "GetSessionToken", awsRegion: identityBootstrap.region, userIdentity: { type: "Root", accountId: identityBootstrap.account, arn: rootArn }, requestParameters: { serialNumber: serial, durationSeconds: 3600 }, responseElements: { credentials: { accessKeyId, expiration } } };
+  const proof = { eventSource: "sts.amazonaws.com", eventName: "GetCallerIdentity", awsRegion: identityBootstrap.region, userIdentity: { type: "Root", accountId: identityBootstrap.account, arn: rootArn, accessKeyId, sessionContext: { attributes: { mfaAuthenticated: "true" } } } };
+  await convergeRootMfaIssuance({ events: async () => [issuance], accessKeyId, rootExpires: f.rootExpires, mfaSerial: serial, durationSeconds: 3600, now: () => f.now, sleep: async () => {}, maxWaitMs: 1 });
+  await convergeRootMfaSessionProof({ events: async () => [proof, structuredClone(proof)], accessKeyId, rootExpires: f.rootExpires, now: () => f.now, sleep: async () => {}, maxWaitMs: 1 });
+  assert.equal((await f.execute()).brokerPolicySuccessor.state, "BROKER_POLICY_SUCCESSOR_CLOSED"); await assert.rejects(f.execute(), /already closed/);
+  session.close(); assert.deepEqual(session.credentials, {}); assert.deepEqual(closed, [false, true]);
+});
+
+for (const boundary of ["authorization", "operator", "root"]) test(`successor performs zero infrastructure mutation when ${boundary} freshness expires after reservation`, async () => {
+  const f = fixture(); let advanced = false; f.after = operation => {
+    if (!advanced && operation === "PutObject") { advanced = true; f.now = boundary === "authorization" ? Date.parse(f.authorization.expiresAt) : boundary === "operator" ? Date.parse(f.operatorProof.expiresAt) : f.rootExpires - 120000; }
+  };
+  await assert.rejects(f.execute());
+  assert.equal(f.writes.some(value => ["UpdateFunctionCode", "UpdateFunctionConfiguration", "PublishVersion", "PutRolePolicy"].includes(value)), false);
 });
 
 for (const stopAfter of ["UpdateFunctionCode", "UpdateFunctionConfiguration", "PublishVersion", "PutRolePolicy"]) test(`successor reconciles an ambiguous ${stopAfter} response without replay`, async () => {

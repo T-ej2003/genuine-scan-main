@@ -114,7 +114,8 @@ a child process, the helper resolves AWS CLI only from its fixed absolute
 system/Homebrew installation safelist, verifies the canonical executable is not
 group/world writable, and uses that same absolute executable for both profile
 reads; `PATH`, the working directory, and operator-selected executable paths
-cannot select the root credential reader.
+cannot select the root credential reader. The bootstrap-operator credential
+read in the same command uses this identical executable boundary.
 
 After a fresh successor authorization, run the existing governed command:
 
@@ -129,8 +130,10 @@ The resulting credentials stay process-local. Execution waits for exactly one
 matching successful CloudTrail issuance bound to the returned access key, root
 identity, configured MFA device, and requested duration. Because that request
 is signed by long-term credentials, its session context is not used as MFA
-proof. A separate `GetCallerIdentity` event signed by the returned credentials
-must bind the same access key and report `mfaAuthenticated=true`. Each bounded
+proof. Every observed `GetCallerIdentity` event signed by the returned
+credentials must bind the same access key and report `mfaAuthenticated=true`;
+repeated successful proof calls from that exact session are valid, while any
+conflicting event for that access key fails closed. Each bounded
 convergence attempt captures one lookup window and reuses it unchanged across
 every CloudTrail pagination token, while a later attempt captures a fresh
 window. Timeout or ambiguity fails closed.
