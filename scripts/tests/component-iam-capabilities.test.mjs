@@ -69,4 +69,6 @@ test("successor broker gains only exact immutable version-7 self-read authority"
     ["lambda:GetFunctionCodeSigningConfig", `${componentBrokerArn}:7`], ["lambda:GetRuntimeManagementConfig", `${componentBrokerArn}:7`],
     ["lambda:GetFunctionConcurrency", `${componentBrokerArn}:7`], ["lambda:GetPolicy", `${componentBrokerArn}:7`],
   ]);
+  const session = brokerPolicySuccessorManagedIdentities().find(({ role }) => role === "mscqr-production-component-installation-session");
+  assert.deepEqual(pairs(session.policy), [{ action: "lambda:InvokeFunction", resource: `${componentBrokerArn}:7` }]);
 });

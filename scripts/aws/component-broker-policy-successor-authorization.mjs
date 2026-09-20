@@ -13,7 +13,7 @@ const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{1
 function environment(config, branches, approvals) {
   assert.equal(config.name, brokerPolicySuccessor.environment); assert(Number.isSafeInteger(config.id) && config.id > 0); assert.equal(config.can_admins_bypass, false);
   assert.deepEqual(config.deployment_branch_policy, { protected_branches: false, custom_branch_policies: true });
-  assert.deepEqual(branches, { total_count: 1, branch_policies: [{ name: "main", type: "branch" }] });
+  assert.equal(branches.total_count, 1); assert.deepEqual(branches.branch_policies.map(({ name, type }) => ({ name, type })), [{ name: "main", type: "branch" }]);
   const rules = config.protection_rules.filter(({ type }) => type === "required_reviewers");
   assert.equal(rules.length, 1); assert.equal(rules[0].prevent_self_review, false);
   assert.deepEqual(rules[0].reviewers.map(({ type, reviewer }) => ({ type, reviewer: { type: reviewer?.type, login: reviewer?.login, id: reviewer?.id } })), [{ type: "User", reviewer: actor }]);

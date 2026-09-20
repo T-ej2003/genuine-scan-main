@@ -22,6 +22,13 @@ test("successor authorization binds exact immutable generations and minimal delt
   assert.equal(successorExecutorPolicySha256, "0f08fdee746a32153be9e04394beb71a4ebd7c710020207d6339fc2080c6f4bf");
   assert.equal(value.predecessor.brokerPolicySha256, predecessorBrokerPolicySha256); assert.equal(value.successor.brokerPolicySha256, successorBrokerPolicySha256);
   assert.equal(value.successor.brokerVersion, "7"); assert.deepEqual(value.delta, brokerPolicySuccessorDelta); assert.deepEqual(value, { ...value, ...brokerPolicySuccessorSourceBindings(f.packageEvidence) });
+  assert.equal(value.installationSession.role, "mscqr-production-component-installation-session"); assert.notEqual(value.installationSession.predecessorPolicySha256, value.installationSession.successorPolicySha256);
+});
+
+test("successor authorization normalizes the exact main branch policy", () => {
+  const f = fixture(); f.branches.branch_policies[0] = { id: 7, node_id: "branch-node", name: "main", type: "branch" };
+  assert.doesNotThrow(() => approveBrokerPolicySuccessor(f));
+  f.branches.branch_policies[0].name = "release"; assert.throws(() => approveBrokerPolicySuccessor(f));
 });
 
 for (const mutate of [f => { f.main.commit.sha = "c".repeat(40); }, f => { f.run.path = "other"; }, f => { f.environment.can_admins_bypass = true; }, f => { f.branches.branch_policies[0].name = "*"; }, f => { f.approvals[0].user.id = 1; }])
@@ -39,9 +46,10 @@ test("root capability and workflow expose only the exact one-time successor surf
   for (const forbidden of ["iam:CreateRole", "iam:PassRole", "lambda:AddPermission", "lambda:DeleteFunction", "s3:DeleteObject"]) assert(!actions.includes(forbidden));
   for (const statement of capability.Statement) assert(![].concat(statement.Resource).includes("*"));
   assert.deepEqual(capability.Statement.find(({ Action }) => Action === "iam:PutRolePolicy").Resource.sort(), [
+    "arn:aws:iam::368992683803:role/mscqr-production-component-installation-session",
     "arn:aws:iam::368992683803:role/mscqr-production-component-iam-provisioner",
     "arn:aws:iam::368992683803:role/mscqr-production-component-table-installer",
-  ]);
+  ].sort());
   const workflow = yaml.load(fs.readFileSync(new URL("../../.github/workflows/authorize-component-broker-policy-successor.yml", import.meta.url), "utf8"));
   assert.deepEqual(workflow.permissions, { contents: "read", actions: "read" }); assert.equal(workflow.jobs.authorize.environment, brokerPolicySuccessor.environment); assert(!JSON.stringify(workflow).includes("configure-aws-credentials"));
 });

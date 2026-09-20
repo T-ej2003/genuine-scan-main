@@ -30,8 +30,9 @@ const invoke = (version) => policy([{ Effect: "Allow", Action: "lambda:InvokeFun
 // broker configuration module independently pins these same immutable sets.
 const bootstrapEntryPoints = Object.freeze({ INSTALL: "1", CLEANUP: "2", AUTHORIZE: "3" });
 const changedEntryPoints = Object.freeze({ INSTALL: "4", CLEANUP: "5", AUTHORIZE: "6" });
+const successorEntryPoints = Object.freeze({ INSTALL: "7", CLEANUP: "5", AUTHORIZE: "6" });
 const assertEntryPoints = (entryPoints) => {
-  assert(entryPoints === bootstrapEntryPoints || entryPoints === changedEntryPoints, "Identity entry-point override forbidden");
+  assert([bootstrapEntryPoints, changedEntryPoints, successorEntryPoints].includes(entryPoints), "Identity entry-point override forbidden");
   return entryPoints;
 };
 
@@ -111,7 +112,7 @@ function managedIdentities(entryPoints) {
   // The successor broker still rejects a resource-policy bypass on every
   // retained immutable version, but it has no mutation capability for any of
   // them. Fresh bootstrap keeps the original three-version read surface.
-  const brokerVersions = entryPoints === changedEntryPoints ? [...Object.values(bootstrapEntryPoints), ...Object.values(changedEntryPoints)] : Object.values(entryPoints);
+  const brokerVersions = entryPoints === bootstrapEntryPoints ? Object.values(entryPoints) : [...Object.values(bootstrapEntryPoints), ...Object.values(changedEntryPoints), ...(entryPoints === successorEntryPoints ? [successorEntryPoints.INSTALL] : [])];
   const objects = ["installation-authorization.json", "iam-installation.json", "permission-installation.json", "installation-session.json"].map((name) => `arn:aws:s3:::${identityBootstrap.bucket}/${identityBootstrap.prefix}${name}`);
   const brokerPolicy = provisionerTargetPolicy();
   brokerPolicy.Statement.push(
@@ -136,11 +137,7 @@ function managedIdentities(entryPoints) {
 }
 
 export function brokerPolicySuccessorManagedIdentities() {
-  const identities = structuredClone(brokerChangeManagedIdentities());
-  const broker = identities.find(({ role }) => role === installationIdentity.provisionerRole);
-  const brokerReads = broker.policy.Statement.find(({ Action }) => [].concat(Action).includes("lambda:GetFunction"));
-  brokerReads.Resource.push(`${componentBrokerArn}:7`);
-  broker.policySha256 = digest(broker.policy);
+  const identities = managedIdentities(successorEntryPoints);
   const terraform = identities.find(({ role }) => role === installationIdentity.terraformRole);
   terraform.policy = terraformExecutorPolicyGeneration("7", true);
   terraform.policySha256 = digest(terraform.policy);

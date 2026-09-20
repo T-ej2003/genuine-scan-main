@@ -37,7 +37,7 @@ export async function executeBrokerPolicySuccessor({ authorization, packageEvide
   const noPolicies = async () => { for (const qualifier of [null, "1", "2", "3", "4", "5", "6", "7"]) try { await lambda("GetPolicy", { FunctionName: installationIdentity.functionName, ...(qualifier ? { Qualifier: qualifier } : {}) }); throw new Error("Unexpected broker invocation bypass"); } catch (error) { if (!absent(error)) throw error; } };
   const versions = async () => { const response = await lambda("ListVersionsByFunction", { FunctionName: installationIdentity.functionName }); assert.equal(response.NextMarker, undefined); return response.Versions.map(({ Version }) => Version).filter(value => value !== "$LATEST").sort((a, b) => Number(a) - Number(b)); };
   const oldConfigurations = Object.fromEntries(Object.keys(brokerChangeEntryPoints).map(entryPoint => [entryPoint, brokerConfiguration({ packageSha256: brokerPolicyPredecessor.packageSha256, manifestSha256: brokerPolicyPredecessor.manifestSha256, entryPoint, entryPoints: brokerChangeEntryPoints })]));
-  const successorStates = ["EXECUTING", "CODE_UPDATED", "DESCRIPTION_SET", "VERSION_PUBLISHED", "BROKER_POLICY_INSTALLED", "POLICY_INSTALLED", "VERIFIED"];
+  const successorStates = ["EXECUTING", "CODE_UPDATED", "DESCRIPTION_SET", "VERSION_PUBLISHED", "BROKER_POLICY_INSTALLED", "POLICY_INSTALLED", "SESSION_POLICY_INSTALLED", "VERIFIED"];
   const authenticatePredecessor = async journal => {
     const anchor = verifyPredecessor(journal.value);
     for (const field of ["sourceSha", "packageSha256", "manifestSha256", "configurationSha256", "identitySetSha256"]) assert.equal(anchor[field], brokerPolicyPredecessor[field]);
@@ -99,6 +99,8 @@ export async function executeBrokerPolicySuccessor({ authorization, packageEvide
   };
   await installPolicy(installationIdentity.provisionerRole, predecessorBrokerPolicySha256, successorBrokerPolicySha256, "BROKER_POLICY_INSTALLED", "Broker execution");
   await installPolicy(installationIdentity.terraformRole, predecessorExecutorPolicySha256, successorExecutorPolicySha256, "POLICY_INSTALLED", "Executor");
+  const predecessorSession = predecessorIdentities.find(({ role }) => role === identityBootstrap.installationRole), successorSession = successorIdentities.find(({ role }) => role === identityBootstrap.installationRole);
+  await installPolicy(identityBootstrap.installationRole, predecessorSession.policySha256, successorSession.policySha256, "SESSION_POLICY_INSTALLED", "Installation session");
   const identities = await inspectSuccessor(iam); assert(identities.every(({ role, policy: state }) => role === "EXPECTED" && state === "EXPECTED")); await noPolicies(); await checkpoint("VERIFIED");
   const closedAt = new Date(now()).toISOString(), runtimeVersionArn = version7.Configuration.RuntimeVersionConfig.RuntimeVersionArn;
   const finalRecord = { ...record, state: "BROKER_POLICY_SUCCESSOR_CLOSED", closedAt, runtimeVersionArn };

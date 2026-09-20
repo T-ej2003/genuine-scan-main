@@ -89,8 +89,8 @@ authenticated broker/executor generation together from immutable broker `:4`
 to `:7`. It publishes and authenticates `:7`, preserves the historical journal
 body consumed by immutable cleanup/authorization versions `:5`/`:6`, records
 the compact successor closure in authenticated journal object metadata, then
-extends the broker's own read-only self-inspection policy to exact version `:7`
-and replaces only the exact executor inline policy so it invokes `:7` and may version-read only the retained
+extends the broker's own read-only self-inspection policy to exact version `:7`,
+rebinds the installation session from `:4` to `:7`, and replaces only the exact executor inline policy so it invokes `:7` and may version-read only the retained
 `.tflock` and immutable `.initial-activation-attempt` objects. The transition
 requires a fresh environment approval, bootstrap-operator MFA provenance, and
 a fresh MFA-backed root session; root is only the bounded administrative

@@ -22,7 +22,10 @@ export function assertBrokerPolicySuccessorIamRequest(operation, input) {
   const identity = brokerPolicySuccessorManagedIdentities().find(({ role }) => role === input.RoleName);
   assert(identity, "Alternate broker identity forbidden");
   if (input.PolicyName !== undefined) assert.equal(input.PolicyName, identity.policyName);
-  if (operation === "PutRolePolicy") assert.equal(input.PolicyDocument, canonical(identity.policy));
+  if (operation === "PutRolePolicy") {
+    assert([installationIdentity.provisionerRole, installationIdentity.terraformRole, identityBootstrap.installationRole].includes(identity.role), "Non-successor policy mutation forbidden");
+    assert.equal(input.PolicyDocument, canonical(identity.policy));
+  }
 }
 
 async function administrativeAdapter(packageEvidence) {
