@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { createTerraformStateBoundary } from "../aws/component-terraform-state.mjs";
-import { installationDocuments, documentBindings, digest } from "../aws/component-iam-installation-contract.mjs";
+import { installationDocuments, documentBindings, digest, terraformExecutorPolicyGeneration } from "../aws/component-iam-installation-contract.mjs";
 import { contract } from "../aws/component-infrastructure-activation.mjs";
 import { partialActivationRecoveryTarget, assertPartialActivationRecoveryPreparation } from "../aws/component-infrastructure-partial-activation-recovery-contract.mjs";
 
@@ -21,7 +21,7 @@ function liveReceiptBody(f, client) {
 function activationAttempt(f) {
   return { authorizationRunId: historical.authorizationRunId, sourceSha: historical.sourceSha, planSha256: historical.planSha256, preparationSha256: historical.preparationSha256, transitionId: historical.transitionId, iamReceiptSha256: crypto.createHash("sha256").update(JSON.stringify(f.receipt)).digest("hex"), session: { ...binding, account: "368992683803", region: "eu-west-2", principal: `arn:aws:sts::368992683803:assumed-role/mscqr-production-component-table-installer/component-${binding.transitionId}`, issuedAt: "2026-09-19T00:00:00.000Z", expiresAt: "2026-09-19T00:15:00.000Z", issuanceEventId: "12345678-1234-4234-8234-123456789abc", issuanceEventTime: "2026-09-19T00:00:00.000Z", operatorArn: "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator", mfaAuthenticated: true } };
 }
-function fixture({ liveStream = false, recovery = false } = {}) {
+function fixture({ liveStream = false, recovery = false, now = Date.now } = {}) {
   const targets = installationDocuments();
   const f = { objects: [], versions: [], deleted: [], table: null, versioning: "Enabled", truncated: false, mutate: () => {}, calls: [], puts: [], denied: false, clients: [] };
   f.receipt = { schemaVersion: 1, sourceSha: binding.sourceSha, transitionId: binding.transitionId, authorizationSha256: binding.authorizationSha256,
@@ -55,7 +55,7 @@ function fixture({ liveStream = false, recovery = false } = {}) {
       }[operation]; assert(response);
       f.mutate(operation, response, target); return response;
     };
-  const dependencies = { describe: async () => f.table };
+  const dependencies = { describe: async () => f.table, now };
   if (recovery) dependencies.recoveryDescribe = async operation => f.recoveryMetadata?.[operation];
   if (liveStream) {
     dependencies.createClient = service => {
@@ -71,8 +71,8 @@ function fixture({ liveStream = false, recovery = false } = {}) {
   return f;
 }
 
-function recoveryFixture() {
-  const f = fixture({ recovery: true });
+function recoveryFixture(now) {
+  const f = fixture({ recovery: true, ...(now ? { now } : {}) });
   f.objects = [{ Key: key + ".initial-activation-attempt" }, { Key: key + ".tflock" }];
   f.versions = [{ Key: key + ".initial-activation-attempt", IsLatest: true, VersionId: "attempt-version", ETag: '"attempt"' }, { Key: key + ".tflock", IsLatest: true, VersionId: "lock-version", ETag: '"lock"' }];
   f.table = { TableName: "mscqr-production-component-deployment-state", TableArn: "arn:aws:dynamodb:eu-west-2:368992683803:table/mscqr-production-component-deployment-state", TableStatus: "ACTIVE", BillingModeSummary: { BillingMode: "PAY_PER_REQUEST" }, KeySchema: [{ AttributeName: "stateKey", KeyType: "HASH" }], AttributeDefinitions: [{ AttributeName: "stateKey", AttributeType: "S" }], SSEDescription: { Status: "ENABLED" }, DeletionProtectionEnabled: false, StreamSpecification: { StreamEnabled: false }, Replicas: [] };
@@ -83,7 +83,26 @@ function recoveryFixture() {
 test("partial activation recovery authenticates the exact immutable reservation, retained lock, empty state history and expected live table", async () => {
   const f = recoveryFixture(), result = await f.boundary.inspectPartialActivationRecovery(historical);
   assert.equal(result.stateIdentity, "INFRASTRUCTURE_CREATED_STATE_INCOMPLETE"); assert.equal(result.lock.versionId, "lock-version"); assert.equal(result.table.address, "aws_dynamodb_table.component_deployment_state");
+  const statements = terraformExecutorPolicyGeneration("7", true).Statement;
+  for (const { input } of f.calls.filter(({ operation, input }) => operation === "GetObject" && input.VersionId)) {
+    const resource = `arn:aws:s3:::${input.Bucket}/${input.Key}`;
+    assert(statements.some(statement => [].concat(statement.Action).includes("s3:GetObjectVersion") && [].concat(statement.Resource).includes(resource)), `Missing version-read authority for ${resource}`);
+  }
   assert(f.calls.every(({ operation }) => !/Put|Delete|Create|Update/.test(operation)));
+});
+test("partial activation recovery waits through the authenticated original Terraform session expiry fence", async () => {
+  const expiry = Date.parse("2026-09-19T00:15:00.000Z"), fence = expiry + 120000, clock = { value: expiry - 1 };
+  const f = recoveryFixture(() => clock.value);
+  await assert.rejects(f.boundary.inspectPartialActivationRecovery(historical), /not safely expired/);
+  assert(f.calls.every(({ operation }) => !/Put|Delete|Create|Update/.test(operation)));
+  clock.value = fence;
+  await assert.rejects(f.boundary.inspectPartialActivationRecovery(historical), /not safely expired/);
+  clock.value = fence + 1;
+  assert.equal((await f.boundary.inspectPartialActivationRecovery(historical)).stateIdentity, "INFRASTRUCTURE_CREATED_STATE_INCOMPLETE");
+  for (const mutate of [value => { delete value.session.expiresAt; }, value => { value.session.expiresAt = "invalid"; }, value => { value.session.issuedAt = "2026-09-19T01:00:00.000Z"; value.session.expiresAt = "2026-09-19T01:15:00.000Z"; }]) {
+    f.attempt = activationAttempt(f); mutate(f.attempt);
+    await assert.rejects(f.boundary.inspectPartialActivationRecovery(historical));
+  }
 });
 test("continuation accepts only the native import lock following the exact recovery checkpoint", async () => {
   const f = recoveryFixture(), receiptSha256 = crypto.createHash("sha256").update(JSON.stringify(f.receipt)).digest("hex");

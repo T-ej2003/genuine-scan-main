@@ -102,7 +102,7 @@ async function establish(binding, { loadUser = loadOperator, sts = stsTransport,
           version = candidate;
           break;
         } catch (error) {
-          if (candidate !== versions[0] || error?.name !== "AccessDeniedException") throw error;
+          if (candidate === versions.at(-1) || error?.name !== "AccessDeniedException") throw error;
         }
       }
       assert(result && version, "No authorized fixed broker entry point");
@@ -152,19 +152,26 @@ async function establish(binding, { loadUser = loadOperator, sts = stsTransport,
         throw new Error("AWS issuance proof unavailable before the bounded deadline");
     };
     if (fixedBinding.purpose === "TERRAFORM") {
-      let consumed = false, applying = false, recovering = false, reserved = false, activeSession;
-      const boundary = state(scoped, fixedBinding);
-      const close = () => { applying = false; recovering = false; boundary.close(); for (const field of ["AccessKeyId", "SecretAccessKey", "SessionToken"]) delete scoped[field]; };
+      let consumed = false, applying = false, recovering = false, recoveryDeadline = 0, reserved = false, activeSession;
+      const boundary = state(scoped, fixedBinding, { now });
+      const recoveryFresh = lead => assert(recovering && now() + lead < recoveryDeadline, "No fresh recovery authorization");
+      const close = () => { applying = false; recovering = false; recoveryDeadline = 0; boundary.close(); for (const field of ["AccessKeyId", "SecretAccessKey", "SessionToken"]) delete scoped[field]; };
       return Object.freeze({ principal, expiresAt: new Date(expires).toISOString(),
         close,
         async inspect() { await prove(); return boundary.inspect(); },
         async inspectPartialActivationRecovery() { await prove(); return boundary.inspectPartialActivationRecovery(); },
         async inspectPartialActivationRecoveryContinuation(preparation, preparationSha256) { await prove(); return boundary.inspectPartialActivationRecoveryContinuation(preparation, preparationSha256); },
-        activatePartialActivationRecovery() { assert(!consumed && !applying && !recovering && now() < expires, "No fresh recovery session"); recovering = true; },
-        async releasePartialActivationLock(lock, claimEtag, record, preparation, preparationSha256) { assert(recovering && now() < expires, "No active recovery authorization"); return boundary.releasePartialActivationLock(lock, claimEtag, record, preparation, preparationSha256); },
-        async readRecoveredTerraformState() { assert(recovering && now() < expires, "No active recovery authorization"); return boundary.readRecoveredTerraformState(); },
-        async beginPartialActivationRecovery(record, preparation, preparationSha256, continuation) { assert(recovering && now() < expires, "No active recovery authorization"); return boundary.beginPartialActivationRecovery(record, preparation, preparationSha256, continuation); },
-        async capturePartialActivationNativeLock(lock, record, preparation, preparationSha256) { assert(recovering && now() < expires, "No active recovery authorization"); return boundary.capturePartialActivationNativeLock(lock, record, preparation, preparationSha256); },
+        activatePartialActivationRecovery(approvalExpiresAt) {
+          const approvalExpires = Date.parse(approvalExpiresAt);
+          assert(!consumed && !applying && !recovering && new Date(approvalExpires).toISOString() === approvalExpiresAt, "No fresh recovery session");
+          recoveryDeadline = Math.min(expires, approvalExpires);
+          assert(now() + 120000 < recoveryDeadline, "No fresh recovery authorization"); recovering = true;
+          return new Date(recoveryDeadline).toISOString();
+        },
+        async releasePartialActivationLock(lock, claimEtag, record, preparation, preparationSha256) { recoveryFresh(0); return boundary.releasePartialActivationLock(lock, claimEtag, record, preparation, preparationSha256); },
+        async readRecoveredTerraformState() { recoveryFresh(0); return boundary.readRecoveredTerraformState(); },
+        async beginPartialActivationRecovery(record, preparation, preparationSha256, continuation) { recoveryFresh(0); return boundary.beginPartialActivationRecovery(record, preparation, preparationSha256, continuation); },
+        async capturePartialActivationNativeLock(lock, record, preparation, preparationSha256) { recoveryFresh(0); return boundary.capturePartialActivationNativeLock(lock, record, preparation, preparationSha256); },
         async reserve(record) {
           assert(applying && !reserved && now() < expires, "No active unconsumed apply authorization");
           reserved = true; return boundary.reserve({ ...record, session: activeSession });
@@ -175,8 +182,9 @@ async function establish(binding, { loadUser = loadOperator, sts = stsTransport,
           try {
             const session = await prove();
             activeSession = session;
-            applying = mode === "apply"; recovering = mode.startsWith("recover");
-            return { session, result: await isolated({ mode, plan, expiresAt: session.expiresAt,
+            applying = mode === "apply";
+            if (mode.startsWith("recover")) recoveryFresh(120000);
+            return { session, result: await isolated({ mode, plan, expiresAt: mode.startsWith("recover") ? new Date(recoveryDeadline).toISOString() : session.expiresAt,
               credentials: { AccessKeyId: scoped.AccessKeyId, SecretAccessKey: scoped.SecretAccessKey, SessionToken: scoped.SessionToken } }, { checkpoint: async value => {
                 await checkpoint(value);
                 if (value.stage === "apply") assert(reserved, "Exact one-time activation reservation required");

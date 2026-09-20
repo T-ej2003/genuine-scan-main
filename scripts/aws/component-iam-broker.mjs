@@ -4,7 +4,7 @@ import fs from "node:fs";
 import { createBrokerAuthorizationArchive } from "./component-broker-authorization.mjs";
 import { assertBrokerEntryPoint, assertBrokerConfiguration, brokerConfiguration } from "./component-broker-configuration.mjs";
 import { assertEffectiveBootstrapTrustAnchor } from "./component-bootstrap-trust-anchor.mjs";
-import { componentBrokerArn, inspectBootstrapIdentities, inspectBrokerChangeIdentities } from "./component-installation-identity-contract.mjs";
+import { componentBrokerArn, inspectBootstrapIdentities, inspectBrokerChangeIdentities, inspectBrokerPolicySuccessorIdentities } from "./component-installation-identity-contract.mjs";
 import { authenticateComponentSession, claimComponentSession } from "./component-session-proof.mjs";
 
 const canonical = (value) => JSON.stringify(sort(value));
@@ -219,7 +219,7 @@ export async function executeFixedBroker(event, context, { manifest, iam, s3, la
   const packageSha256 = Buffer.from(fn.Configuration.CodeSha256, "base64").toString("hex");
   const anchor = assertEffectiveBootstrapTrustAnchor(bootstrap, manifest, packageSha256);
   const version = assertBrokerEntryPoint(context, event?.operation, anchor.entryPoints);
-  const identities = await (anchor.changed ? inspectBrokerChangeIdentities(iam) : inspectBootstrapIdentities(iam));
+  const identities = await (anchor.policySuccessor ? inspectBrokerPolicySuccessorIdentities(iam) : anchor.changed ? inspectBrokerChangeIdentities(iam) : inspectBootstrapIdentities(iam));
   assert(identities.every(({ role, policy }) => role === "EXPECTED" && policy === "EXPECTED"), "Bootstrap execution authority is incomplete");
   const [concurrency, signing, runtime] = await Promise.all([
     lambda("GetFunctionConcurrency", { FunctionName: functionName }),

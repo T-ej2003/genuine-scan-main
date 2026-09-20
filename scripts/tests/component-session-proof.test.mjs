@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { authenticateComponentSession, sessionProofBinding } from "../aws/component-session-proof.mjs";
+import { assertExpiredComponentSession, authenticateComponentSession, sessionProofBinding } from "../aws/component-session-proof.mjs";
 import { identityBootstrap, assertExpiredSession } from "../aws/component-installation-identity-contract.mjs";
 
 function fixture(purpose = "INSTALL") {
@@ -55,7 +55,7 @@ function authenticateDefault(f, body, status = 200) {
 }
 
 test("AWS signature validation plus unique MFA issuance evidence supplies non-secret actual session expiry", async () => {
-  for (const purpose of ["INSTALL", "CLEANUP"]) {
+  for (const purpose of ["INSTALL", "CLEANUP", "TERRAFORM"]) {
     const f = fixture(purpose);
     const record = await f.authenticate();
     assert.equal(record.expiresAt, "2026-09-17T12:15:00.000Z");
@@ -66,6 +66,8 @@ test("AWS signature validation plus unique MFA issuance evidence supplies non-se
       assert.throws(() => assertExpiredSession(record, Date.parse(record.expiresAt) + 120000));
       assert(assertExpiredSession(record, Date.parse(record.expiresAt) + 120001));
     }
+    assert.throws(() => assertExpiredComponentSession(record, Date.parse(record.expiresAt) + 120000));
+    assert(assertExpiredComponentSession(record, Date.parse(record.expiresAt) + 120001));
   }
 });
 

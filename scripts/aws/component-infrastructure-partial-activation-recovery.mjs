@@ -64,13 +64,16 @@ export async function run(argv = process.argv.slice(2), { source = cleanSource, 
     assert.deepEqual(observed.iamInstallation, preparation.iamInstallation, "Component IAM closure changed");
     const authorizationSha256 = sha(Buffer.from(JSON.stringify(approved)));
     if (continuation) assert.notEqual(observed.recovery.authorizationSha256, authorizationSha256, "Recovery authorization already consumed");
+    let executionExpiresAt;
     const record = state => ({ schemaVersion: 1, state, sourceSha, recoveryTransitionId: preparation.recoveryTransitionId, preparationSha256,
-      authorizationSha256, expiresAt: approved.expiresAt, owner: { principal: client.principal, expiresAt: approved.expiresAt }, historical: historicalActivation, lock: preparation.lock });
+      authorizationSha256, expiresAt: executionExpiresAt, owner: { principal: client.principal, expiresAt: executionExpiresAt }, historical: historicalActivation, lock: preparation.lock });
     const checkpoint = async (state, continuation) => {
       const value = record(state), etag = await client.beginPartialActivationRecovery(value, preparation, preparationSha256, continuation);
       await client.releasePartialActivationLock(preparation.lock, etag, value, preparation, preparationSha256);
     };
-    client.activatePartialActivationRecovery();
+    assertPartialActivationRecoveryAuthorization(approved, preparation, preparationSha256, now());
+    executionExpiresAt = client.activatePartialActivationRecovery(approved.expiresAt);
+    assert(Date.parse(executionExpiresAt) <= Date.parse(approved.expiresAt), "Recovery execution exceeds its approval");
     if (continuation && observed.currentRecoveryLock) await client.releasePartialActivationLock(preparation.lock, observed.currentRecoveryLock.etag, observed.recovery, preparation, preparationSha256);
     if (continuation && observed.retainedNativeLock) {
       const value = record("IMPORT_LOCK_CAPTURED");

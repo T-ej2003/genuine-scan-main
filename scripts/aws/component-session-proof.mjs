@@ -7,7 +7,7 @@ import { canonical, digest } from "./component-iam-installation-contract.mjs";
 const host = "sts.eu-west-2.amazonaws.com";
 const stsNamespace = "https://sts.amazonaws.com/doc/2011-06-15/";
 const queryNames = ["Action", "Version", "X-Amz-Algorithm", "X-Amz-Credential", "X-Amz-Date", "X-Amz-Expires", "X-Amz-Security-Token", "X-Amz-Signature", "X-Amz-SignedHeaders"].sort();
-const roles = { INSTALL: identityBootstrap.installationRole, CLEANUP: identityBootstrap.cleanupRole, IDENTITY_BOOTSTRAP: "mscqr-production-release-deployer", BROKER_CHANGE: "mscqr-production-release-deployer", TERRAFORM: "mscqr-production-component-table-installer" };
+const roles = { INSTALL: identityBootstrap.installationRole, CLEANUP: identityBootstrap.cleanupRole, IDENTITY_BOOTSTRAP: "mscqr-production-release-deployer", BROKER_CHANGE: "mscqr-production-release-deployer", BROKER_POLICY_SUCCESSOR: "mscqr-production-release-deployer", TERRAFORM: "mscqr-production-component-table-installer" };
 function awsExpiration(value) {
   assert(typeof value === "string", "AWS expiration missing");
   if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value)) return Date.parse(value);
@@ -165,6 +165,13 @@ export function assertComponentSessionRecord(session) {
   assert.equal(session.operatorArn, `arn:aws:iam::${identityBootstrap.account}:user/mscqr-production-bootstrap-operator`);
   assert.equal(Date.parse(session.expiresAt) - Date.parse(session.issuedAt), identityBootstrap.sessionSeconds * 1000);
   for (const field of ["issuedAt", "expiresAt", "issuanceEventTime"]) assert.equal(new Date(Date.parse(session[field])).toISOString(), session[field]);
+  return true;
+}
+
+export function assertExpiredComponentSession(session, now) {
+  assertComponentSessionRecord(session);
+  const expires = Date.parse(session.expiresAt);
+  assert(Number.isFinite(now) && now > expires + identityBootstrap.expiryMarginSeconds * 1000, "Prior component session is not safely expired");
   return true;
 }
 

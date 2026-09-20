@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { digest, installationIdentity, installationCapabilitySet, provisionerTargetPolicy } from "./component-iam-installation-contract.mjs";
+import { digest, installationIdentity, installationCapabilitySet, provisionerTargetPolicy, terraformExecutorPolicyGeneration } from "./component-iam-installation-contract.mjs";
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 
 // First-bootstrap ownership is deliberately separate from component IAM and
@@ -135,6 +135,14 @@ function managedIdentities(entryPoints) {
   return [...roles, ...sessionIdentities(entryPoints)];
 }
 
+export function brokerPolicySuccessorManagedIdentities() {
+  const identities = structuredClone(brokerChangeManagedIdentities());
+  const terraform = identities.find(({ role }) => role === installationIdentity.terraformRole);
+  terraform.policy = terraformExecutorPolicyGeneration("7", true);
+  terraform.policySha256 = digest(terraform.policy);
+  return identities;
+}
+
 export function bootstrapManagedIdentities() {
   assert.equal(arguments.length, 0, "Bootstrap identity overrides are forbidden");
   return managedIdentities(bootstrapEntryPoints);
@@ -201,6 +209,11 @@ export async function inspectBootstrapIdentities(iam) {
 export async function inspectBrokerChangeIdentities(iam) {
   assert.equal(arguments.length, 1, "Identity overrides are forbidden");
   return inspectManagedIdentities(iam, brokerChangeManagedIdentities());
+}
+
+export async function inspectBrokerPolicySuccessorIdentities(iam) {
+  assert.equal(arguments.length, 1, "Identity overrides are forbidden");
+  return inspectManagedIdentities(iam, brokerPolicySuccessorManagedIdentities());
 }
 
 // This is the source-owned mutation envelope for the exceptional first bootstrap,

@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import { createHash } from "node:crypto";
 import { installationDocuments, documentBindings, digest } from "./component-iam-installation-contract.mjs";
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
-import { assertComponentSessionRecord } from "./component-session-proof.mjs";
+import { assertComponentSessionRecord, assertExpiredComponentSession } from "./component-session-proof.mjs";
 import { assertPartialActivationHistoricalActivation, assertPartialActivationRecoveryCheckpoint, assertPartialActivationRecoveryPreparation, partialActivationRecoveryTarget } from "./component-infrastructure-partial-activation-recovery-contract.mjs";
 
 const sdk = createRequire(new URL("../../infra/aws/terraform/production-component-deployment-state/broker-package/package.json", import.meta.url));
@@ -44,7 +44,7 @@ function assertRecoveredTerraformState(bytes) {
   return { lineage: value.lineage, serial: value.serial, managedAddresses: [partialActivationRecoveryTarget.address] };
 }
 
-function assertHistoricalActivationReservation(value, historicalActivation, iamInstallation) {
+function assertHistoricalActivationReservation(value, historicalActivation, iamInstallation, now) {
   const historical = assertPartialActivationHistoricalActivation(historicalActivation);
   assert.deepEqual(Object.keys(value || {}).sort(), ["authorizationRunId", "iamReceiptSha256", "planSha256", "preparationSha256", "session", "sourceSha", "transitionId"]);
   assert.equal(value.authorizationRunId, historical.authorizationRunId);
@@ -53,12 +53,13 @@ function assertHistoricalActivationReservation(value, historicalActivation, iamI
   assert.equal(value.iamReceiptSha256, iamInstallation.receiptSha256);
   assertComponentSessionRecord(value.session); assert.equal(value.session.purpose, "TERRAFORM");
   for (const field of ["sourceSha", "transitionId", "authorizationSha256"]) assert.equal(value.session[field], iamInstallation[field]);
+  assertExpiredComponentSession(value.session, now);
   return Object.freeze(structuredClone(value));
 }
 
 // A private adapter used only with the freshly authenticated table session.
 // It exposes no caller-selected AWS action, resource, object key or document.
-export function createTerraformStateBoundary(credentials, binding, { send, describe, recoveryDescribe, createClient } = {}) {
+export function createTerraformStateBoundary(credentials, binding, { send, describe, recoveryDescribe, createClient, now = Date.now } = {}) {
   const value = { accessKeyId: credentials.AccessKeyId, secretAccessKey: credentials.SecretAccessKey, sessionToken: credentials.SessionToken };
   const call = async (service, operation, input, consume) => {
     if (send) {
@@ -183,7 +184,7 @@ export function createTerraformStateBoundary(credentials, binding, { send, descr
       const attemptVersion = versions.find(({ Key, IsLatest }) => Key === partialActivationRecoveryTarget.attemptKey && IsLatest);
       assert(attemptVersion?.VersionId && attemptVersion.ETag, "Exact immutable activation reservation version is required");
       const attemptText = await call("s3", "GetObject", { Bucket: bucket, Key: partialActivationRecoveryTarget.attemptKey, VersionId: attemptVersion.VersionId }, received => received.Body.transformToString());
-      const attempt = assertHistoricalActivationReservation(JSON.parse(attemptText), historical, iamInstallation);
+      const attempt = assertHistoricalActivationReservation(JSON.parse(attemptText), historical, iamInstallation, now());
       return Object.freeze({ stateIdentity: "INFRASTRUCTURE_CREATED_STATE_INCOMPLETE", lock: { key: partialActivationRecoveryTarget.lockKey, sha256: sha(lockBytes), etag: lockVersion.ETag, versionId: lockVersion.VersionId }, attempt: { versionId: attemptVersion.VersionId, etag: attemptVersion.ETag, sha256: sha(attemptText), authorizationRunId: attempt.authorizationRunId }, table: partialActivationRecoveryTarget, iamInstallation });
     },
     async inspectPartialActivationRecoveryContinuation(preparation, preparationSha256) {
@@ -200,7 +201,7 @@ export function createTerraformStateBoundary(credentials, binding, { send, descr
       const attemptVersion = versions.find(({ Key, IsLatest }) => Key === partialActivationRecoveryTarget.attemptKey && IsLatest);
       assert(attemptVersion?.VersionId && attemptVersion.ETag, "Exact immutable activation reservation version is required");
       const attemptText = await call("s3", "GetObject", { Bucket: bucket, Key: partialActivationRecoveryTarget.attemptKey, VersionId: attemptVersion.VersionId }, received => received.Body.transformToString());
-      const attempt = assertHistoricalActivationReservation(JSON.parse(attemptText), preparation.historicalActivation, iamInstallation);
+      const attempt = assertHistoricalActivationReservation(JSON.parse(attemptText), preparation.historicalActivation, iamInstallation, now());
       assert.deepEqual({ authorizationRunId: attempt.authorizationRunId, etag: attemptVersion.ETag, sha256: sha(attemptText), versionId: attemptVersion.VersionId }, preparation.attempt, "Historical activation reservation changed");
       const inspected = await Promise.all(lockVersions.map(version => recoveryLock(version, preparation, preparationSha256)));
       const checkpoints = inspected.filter(({ checkpoint }) => checkpoint).map(({ checkpoint, version }) => ({ checkpoint, version }));

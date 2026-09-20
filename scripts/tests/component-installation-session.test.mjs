@@ -104,6 +104,24 @@ test("entry-point fallback occurs only after AWS denies the predecessor version"
   assert(calls.length > 0 && calls.every(value => value === `${componentBrokerArn}:1`));
 });
 
+test("entry-point fallback reaches the exact broker-policy successor after both predecessors are denied", async () => {
+  const f = fixture("TERRAFORM"), invoked = [];
+  f.dependencies.state = () => ({ inspect: async () => ({ stateIdentity: "ABSENT" }), close: () => {} });
+  f.dependencies.invoke = async input => {
+    invoked.push(input.FunctionName);
+    if (!input.FunctionName.endsWith(":7")) throw Object.assign(new Error("denied"), { name: "AccessDeniedException" });
+    const payload = JSON.parse(Buffer.from(input.Payload).toString("utf8"));
+    const result = payload.operation === "TERRAFORM_CONTEXT" ? f.binding : { state: "SESSION_VERIFIED", principal: f.principal, expiresAt: f.scoped.Expiration.toISOString(), sourceSha: f.binding.sourceSha,
+      transitionId: f.binding.transitionId, authorizationSha256: f.binding.authorizationSha256, session: { account: identityBootstrap.account, region: identityBootstrap.region, ...f.binding, principal: f.principal,
+        issuedAt: new Date(start).toISOString(), expiresAt: f.scoped.Expiration.toISOString(), issuanceEventId: "12345678-1234-4234-8234-123456789def", issuanceEventTime: new Date(start).toISOString(), operatorArn: f.user.Arn, mfaAuthenticated: true } };
+    return { StatusCode: 200, ExecutedVersion: "7", Payload: Buffer.from(JSON.stringify(result)) };
+  };
+  const client = await establishComponentTerraformSession({ sourceSha: f.binding.sourceSha, transitionId: f.binding.transitionId }, f.dependencies);
+  try { await client.inspect(); }
+  finally { client.close(); }
+  assert.deepEqual(invoked, [...Array(2)].flatMap(() => [`${componentBrokerArn}:1`, `${componentBrokerArn}:4`, `${componentBrokerArn}:7`]));
+});
+
 test("Terraform operator authenticates broker MFA proof and sends only its scoped session to the isolated runner once", async () => {
   const f = fixture("TERRAFORM"); let executions = 0;
   f.dependencies.isolated = async (input, options) => {
@@ -125,6 +143,25 @@ test("substituted Terraform session evidence never reaches a container", async (
   const client = await f.open();
   await assert.rejects(client.execute({ mode: "prepare", plan: null }, { checkpoint: async () => {} }), /proof unavailable/);
   assert.equal(f.scoped.SecretAccessKey, undefined);
+});
+
+test("recovery uses the stricter approval/AWS deadline and rechecks it at every mutation", async () => {
+  const open = async approvalExpires => {
+    const f = fixture("TERRAFORM"); let writes = 0, isolatedExpiry;
+    f.dependencies.state = () => ({ close: () => {}, beginPartialActivationRecovery: async () => { writes++; } });
+    f.dependencies.isolated = async (input, { checkpoint }) => { isolatedExpiry = input.expiresAt; await checkpoint({ stage: "recovery" }); return {}; };
+    const client = await f.open(), deadline = client.activatePartialActivationRecovery(approvalExpires);
+    return { f, client, deadline, writes: () => writes, isolatedExpiry: () => isolatedExpiry };
+  };
+  const approvalFirst = new Date(start + 600000).toISOString();
+  const a = await open(approvalFirst); assert.equal(a.deadline, approvalFirst); await a.client.execute({ mode: "recover", plan: null }, { checkpoint: async () => {} }); assert.equal(a.isolatedExpiry(), approvalFirst);
+  const awsFirst = await open(new Date(start + 1800000).toISOString()); assert.equal(awsFirst.deadline, new Date(start + 900000).toISOString()); await awsFirst.client.execute({ mode: "recover-verify", plan: null }, { checkpoint: async () => {} }); assert.equal(awsFirst.isolatedExpiry(), awsFirst.deadline);
+  for (const boundary of [start + 200000, start + 200001]) {
+    const value = await open(new Date(boundary).toISOString()); value.f.clock = boundary;
+    await assert.rejects(value.client.beginPartialActivationRecovery({}, {}, "", false), /fresh recovery authorization/); assert.equal(value.writes(), 0); value.client.close();
+  }
+  const f = fixture("TERRAFORM"); f.dependencies.state = () => ({ close: () => {} }); f.dependencies.isolated = async () => assert.fail("must not execute");
+  const client = await f.open(); await assert.rejects(client.execute({ mode: "recover", plan: null }, { checkpoint: async () => {} }), /fresh recovery authorization/); client.close();
 });
 
 for (const reserve of [false, true]) test(`isolated apply requires exactly one authenticated reservation: ${reserve}`, async () => {

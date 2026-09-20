@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { installationCapabilitySet, installationIdentity, installationDocuments, digest } from "../aws/component-iam-installation-contract.mjs";
+import { installationCapabilitySet, installationIdentity, installationDocuments, digest, terraformExecutorPolicyGeneration } from "../aws/component-iam-installation-contract.mjs";
 import { bootstrapManagedIdentities, componentSessionIdentities } from "../aws/component-installation-identity-contract.mjs";
 
 const capabilities = installationCapabilitySet();
@@ -10,6 +10,8 @@ const permitsPair = (policy, action, resource) => pairs(policy).some((pair) => p
 const state = "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/component-deployment-state/terraform.tfstate";
 
 test("capability split forbids all Terraform IAM mutations and both executors' self-policy changes", () => {
+  assert(!actions(capabilities.terraform).includes("s3:GetObjectVersion"));
+  assert(permitsPair(capabilities.terraform, "lambda:InvokeFunction", "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-component-iam-installer:1"));
   assert(actions(capabilities.terraform).filter((action) => action.startsWith("iam:")).every((action) => ["iam:GetRole", "iam:GetRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies"].includes(action)));
   for (const policy of [capabilities.terraform, capabilities.provisioner]) {
     assert(!actions(policy).includes("iam:PassRole"));
@@ -27,7 +29,9 @@ test("capability split forbids all Terraform IAM mutations and both executors' s
 });
 
 test("backend grants only exact state/lock/attempt writes; no state or attempt deletion", () => {
-  const policy = capabilities.terraform;
+  const policy = terraformExecutorPolicyGeneration("7", true);
+  for (const resource of [`${state}.tflock`, `${state}.initial-activation-attempt`]) assert(permitsPair(policy, "s3:GetObjectVersion", resource));
+  for (const resource of [state, `${state}-other`, `${state}.initial-activation-attempt-other`]) assert(!permitsPair(policy, "s3:GetObjectVersion", resource));
   for (const resource of [state, `${state}.tflock`, `${state}.initial-activation-attempt`]) assert(permitsPair(policy, "s3:PutObject", resource));
   assert(permitsPair(policy, "s3:DeleteObject", `${state}.tflock`));
   for (const resource of [state, `${state}.initial-activation-attempt`, `${state}-other`]) assert(!permitsPair(policy, "s3:DeleteObject", resource));
@@ -35,6 +39,17 @@ test("backend grants only exact state/lock/attempt writes; no state or attempt d
   for (const statement of policy.Statement.filter((item) => [].concat(item.Action).includes("s3:PutObject"))) assert.equal(statement.Condition.StringEquals["s3:x-amz-server-side-encryption"], "AES256");
   const listings = policy.Statement.find((item) => [].concat(item.Action).includes("s3:ListBucket"));
   assert.deepEqual(listings.Condition.StringEquals, { "s3:prefix": "mscqr/production/component-deployment-state/terraform.tfstate" });
+});
+
+test("every recovery S3 call is covered only at its fixed backend resource", () => {
+  const policy = terraformExecutorPolicyGeneration("7", true);
+  const bucket = "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2";
+  for (const [action, resource] of [
+    ["s3:GetBucketVersioning", bucket], ["s3:ListBucket", bucket], ["s3:ListBucketVersions", bucket],
+    ["s3:GetObject", state], ["s3:GetObject", `${state}.tflock`],
+    ["s3:GetObjectVersion", `${state}.tflock`], ["s3:GetObjectVersion", `${state}.initial-activation-attempt`],
+    ["s3:PutObject", state], ["s3:PutObject", `${state}.tflock`], ["s3:DeleteObject", `${state}.tflock`],
+  ]) assert(permitsPair(policy, action, resource), `${action} ${resource}`);
 });
 
 test("bootstrap owns fixed broker authority; normal sessions cannot replace code or authority", () => {

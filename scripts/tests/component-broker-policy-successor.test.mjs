@@ -1,0 +1,124 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { executeBrokerPolicySuccessor } from "../aws/component-broker-policy-successor.mjs";
+import { assertEffectiveBootstrapTrustAnchor } from "../aws/component-bootstrap-trust-anchor.mjs";
+import { brokerPolicySuccessorSourceBindings } from "../aws/component-broker-policy-successor-authorization.mjs";
+import { brokerPolicyPredecessor, brokerPolicySuccessor, brokerPolicySuccessorConfiguration, predecessorExecutorPolicy, successorExecutorPolicy } from "../aws/component-broker-policy-successor-contract.mjs";
+import { brokerChangeEntryPoints, brokerConfiguration, brokerPolicySuccessorEntryPoints } from "../aws/component-broker-configuration.mjs";
+import { brokerChangeOperations, brokerChangePredecessor } from "../aws/component-broker-change-contract.mjs";
+import { bootstrapPartialStateDigest, bootstrapRecoveryOperations, completedBootstrapRecovery, historicalBootstrapAuthorization, historicalBootstrapIncident } from "../aws/component-bootstrap-partial-recovery-contract.mjs";
+import { componentBrokerPackageManifest } from "../aws/component-broker-package.mjs";
+import { bootstrapManagedIdentities, brokerChangeManagedIdentities, componentBrokerArn, identityBootstrap } from "../aws/component-installation-identity-contract.mjs";
+import { digest, installationIdentity } from "../aws/component-iam-installation-contract.mjs";
+
+const fault = name => Object.assign(new Error(name), { name });
+function fixture() {
+  const now = Date.parse("2026-09-20T12:00:00.000Z"), sourceSha = "b".repeat(40), bytes = Buffer.from("successor-package");
+  const manifest = componentBrokerPackageManifest(sourceSha), packageEvidence = { manifest, manifestSha256: digest(manifest), bytes, packageSha256: createHash("sha256").update(bytes).digest("hex") };
+  const actor = { type: "User", login: "T-ej2003", id: 183396573 }, transitionId = "12345678-1234-4234-8234-123456789abc";
+  const authorization = { schemaVersion: 1, transitionType: brokerPolicySuccessor.transitionType, account: identityBootstrap.account, region: identityBootstrap.region, ...brokerPolicySuccessorSourceBindings(packageEvidence), transitionId, runId: "456", environment: brokerPolicySuccessor.environment, operator: actor, reviewer: actor, approvalObservedAt: new Date(now).toISOString(), expiresAt: new Date(now + brokerPolicySuccessor.maxAgeMs).toISOString() };
+  const operatorProof = { account: identityBootstrap.account, region: identityBootstrap.region, sourceSha, transitionId, authorizationSha256: digest(authorization), purpose: "BROKER_POLICY_SUCCESSOR", principal: `arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/component-${transitionId}`, issuedAt: new Date(now).toISOString(), expiresAt: new Date(now + 900000).toISOString(), issuanceEventId: "12345678-1234-4234-8234-123456789def", issuanceEventTime: new Date(now).toISOString(), operatorArn: "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator", mfaAuthenticated: true };
+  const runtime = `arn:aws:lambda:eu-west-2::runtime:${"c".repeat(64)}`, old = Object.fromEntries(Object.keys(brokerChangeEntryPoints).map(entryPoint => [entryPoint, brokerConfiguration({ packageSha256: brokerPolicyPredecessor.packageSha256, manifestSha256: brokerPolicyPredecessor.manifestSha256, entryPoint, entryPoints: brokerChangeEntryPoints })]));
+  const config = value => ({ ...value, CodeSize: 1000, State: "Active", LastUpdateStatus: "Successful", RuntimeVersionConfig: { RuntimeVersionArn: runtime } });
+  const state = { now, authorization, operatorProof, packageEvidence, runtime, writes: [], after: () => {}, failInspect: false, policy: predecessorExecutorPolicy(), etags: new Map([[`${identityBootstrap.prefix}identity-bootstrap.json`, "journal-1"]]), objects: new Map([[`${identityBootstrap.prefix}identity-bootstrap.json`, { brokerChange: {} }]]), versions: {
+    $LATEST: { ...config(old.AUTHORIZE), FunctionArn: componentBrokerArn, Version: "$LATEST", RevisionId: "old" },
+    1: { ...config(old.INSTALL), FunctionArn: `${componentBrokerArn}:1`, Version: "1", RevisionId: "one" }, 2: { ...config(old.CLEANUP), FunctionArn: `${componentBrokerArn}:2`, Version: "2", RevisionId: "two" }, 3: { ...config(old.AUTHORIZE), FunctionArn: `${componentBrokerArn}:3`, Version: "3", RevisionId: "three" },
+    4: { ...config(old.INSTALL), FunctionArn: `${componentBrokerArn}:4`, Version: "4", RevisionId: "four" }, 5: { ...config(old.CLEANUP), FunctionArn: `${componentBrokerArn}:5`, Version: "5", RevisionId: "five" }, 6: { ...config(old.AUTHORIZE), FunctionArn: `${componentBrokerArn}:6`, Version: "6", RevisionId: "six" },
+  } };
+  const lambda = async (operation, input) => {
+    const qualifier = input.Qualifier || "$LATEST", value = state.versions[qualifier];
+    if (operation === "GetFunction") { if (!value) throw fault("ResourceNotFoundException"); return { Configuration: structuredClone(value) }; }
+    if (operation === "GetPolicy") throw fault("ResourceNotFoundException");
+    if (operation === "ListVersionsByFunction") return { Versions: Object.keys(state.versions).map(Version => ({ Version })) };
+    if (operation === "GetFunctionConcurrency") return { ReservedConcurrentExecutions: 1 };
+    if (operation === "GetFunctionCodeSigningConfig") return {};
+    if (operation === "GetRuntimeManagementConfig") return { UpdateRuntimeOn: "FunctionUpdate", RuntimeVersionArn: null };
+    if (operation === "UpdateFunctionCode") Object.assign(state.versions.$LATEST, { CodeSha256: Buffer.from(packageEvidence.packageSha256, "hex").toString("base64"), RevisionId: "code" });
+    else if (operation === "UpdateFunctionConfiguration") Object.assign(state.versions.$LATEST, { Description: input.Description, RevisionId: "description" });
+    else if (operation === "PublishVersion") state.versions["7"] = { ...structuredClone(state.versions.$LATEST), FunctionArn: `${componentBrokerArn}:7`, Version: "7", RevisionId: "seven" };
+    else assert.fail(operation);
+    state.writes.push(operation); state.after(operation); return {};
+  };
+  const iam = async (operation, input) => {
+    assert.equal(input.RoleName, installationIdentity.terraformRole); assert.equal(input.PolicyName, "MSCQRComponentTableExecutor");
+    if (operation === "GetRolePolicy") return { RoleName: input.RoleName, PolicyName: input.PolicyName, PolicyDocument: state.policy };
+    assert.equal(operation, "PutRolePolicy"); state.policy = JSON.parse(input.PolicyDocument); state.writes.push(operation); state.after(operation); return {};
+  };
+  const s3 = async (operation, input) => {
+    const key = input.Key;
+    if (operation === "GetObject") { if (state.crashNextReadKey === key) { state.crashNextReadKey = null; throw new Error("crash"); } if (!state.objects.has(key)) throw fault("NoSuchKey"); return { ETag: state.etags.get(key), Body: { transformToString: async () => JSON.stringify(state.objects.get(key)) } }; }
+    assert.equal(operation, "PutObject"); if (input.IfNoneMatch) assert(!state.objects.has(key)); if (input.IfMatch) assert.equal(input.IfMatch, state.etags.get(key)); const body = JSON.parse(input.Body); state.objects.set(key, body); state.etags.set(key, `${key}-${state.writes.length}`); state.writes.push(`${operation}:${key}`); if ((key === brokerPolicySuccessor.reservationKey && body.state === state.crashAfterCheckpoint) || (key.endsWith("identity-bootstrap.json") && body.brokerPolicySuccessor && state.crashAfterClosure)) state.crashNextReadKey = key; state.after(operation); return {};
+  };
+  const predecessor = () => ({ ...brokerPolicyPredecessor, entryPoints: brokerChangeEntryPoints, allVersions: ["1", "2", "3", "4", "5", "6"], runtimeVersions: { 4: runtime, 5: runtime, 6: runtime } });
+  state.execute = () => executeBrokerPolicySuccessor({ authorization: state.authorization, packageEvidence, operatorProof: state.operatorProof }, { iam, lambda, s3, authenticate: async () => {}, now: () => state.now, sleep: async () => {}, verifyPredecessor: predecessor, inspectPredecessor: async () => [{ role: "EXPECTED", policy: digest(state.policy) === digest(predecessorExecutorPolicy()) ? "EXPECTED" : "DRIFT" }], inspectSuccessor: async () => { if (state.failInspect) throw new Error("crash"); return [{ role: "EXPECTED", policy: digest(state.policy) === digest(successorExecutorPolicy()) ? "EXPECTED" : "DRIFT" }]; }, verifyEffective: value => { assert.equal(value.brokerPolicySuccessor.state, "BROKER_POLICY_SUCCESSOR_CLOSED"); } });
+  state.renew = () => { state.now += brokerPolicySuccessor.maxAgeMs + 120001; state.authorization.runId = String(Number(state.authorization.runId) + 1); state.authorization.approvalObservedAt = new Date(state.now).toISOString(); state.authorization.expiresAt = new Date(state.now + brokerPolicySuccessor.maxAgeMs).toISOString(); state.operatorProof.authorizationSha256 = digest(state.authorization); state.operatorProof.issuedAt = state.operatorProof.issuanceEventTime = new Date(state.now).toISOString(); state.operatorProof.expiresAt = new Date(state.now + 900000).toISOString(); };
+  return state;
+}
+
+test("one-time successor publishes version 7, installs exact policy and closes lineage", async () => {
+  const f = fixture(), result = await f.execute(); assert.equal(result.brokerPolicySuccessor.state, "BROKER_POLICY_SUCCESSOR_CLOSED"); assert(Object.hasOwn(f.versions, "7")); assert.equal(digest(f.policy), digest(successorExecutorPolicy()));
+  assert.deepEqual(f.writes.filter(value => ["UpdateFunctionCode", "UpdateFunctionConfiguration", "PublishVersion", "PutRolePolicy"].includes(value)), ["UpdateFunctionCode", "UpdateFunctionConfiguration", "PublishVersion", "PutRolePolicy"]);
+  await assert.rejects(f.execute(), /already closed/);
+});
+
+for (const stopAfter of ["UpdateFunctionCode", "UpdateFunctionConfiguration", "PublishVersion", "PutRolePolicy"]) test(`successor reconciles an ambiguous ${stopAfter} response without replay`, async () => {
+  const f = fixture(); let stopped = false; f.after = operation => { if (!stopped && operation === stopAfter) { stopped = true; throw new Error("crash"); } };
+  assert.equal((await f.execute()).brokerPolicySuccessor.state, "BROKER_POLICY_SUCCESSOR_CLOSED");
+  assert.equal(f.writes.filter(value => value === stopAfter).length, 1);
+});
+
+test("wrong predecessor policy, version lineage or policy widening fails before IAM mutation", async () => {
+  for (const mutate of [f => { f.policy.Statement.push({ Effect: "Allow", Action: "s3:*", Resource: "*" }); }, f => { delete f.versions["6"]; }, f => { f.versions["4"].Description = "wrong"; }]) {
+    const f = fixture(); mutate(f); await assert.rejects(f.execute()); assert(!f.writes.includes("PutRolePolicy"));
+  }
+});
+
+test("interrupted successor requires a fresh authorization after the prior owner is fenced", async () => {
+  const f = fixture(); f.failInspect = true; await assert.rejects(f.execute(), /crash/); assert.equal(f.objects.get(brokerPolicySuccessor.reservationKey).state, "POLICY_INSTALLED");
+  f.renew(); f.failInspect = false; const result = await f.execute(); assert.equal(result.brokerPolicySuccessor.state, "BROKER_POLICY_SUCCESSOR_CLOSED"); assert.equal(result.brokerPolicySuccessor.authorizationHistory.length, 1);
+});
+
+for (const checkpoint of ["EXECUTING", "CODE_UPDATED", "DESCRIPTION_SET", "VERSION_PUBLISHED", "POLICY_INSTALLED", "VERIFIED"]) test(`successor resumes safely after process death at ${checkpoint}`, async () => {
+  const f = fixture(); f.crashAfterCheckpoint = checkpoint; await assert.rejects(f.execute(), /crash/); assert.equal(f.objects.get(brokerPolicySuccessor.reservationKey).state, checkpoint);
+  f.crashAfterCheckpoint = null; f.renew(); assert.equal((await f.execute()).brokerPolicySuccessor.state, "BROKER_POLICY_SUCCESSOR_CLOSED");
+});
+
+test("a lost closure response remains durably closed and blocks replay", async () => {
+  const f = fixture(); f.crashAfterClosure = true; await assert.rejects(f.execute(), /crash/); assert.equal(f.objects.get(`${identityBootstrap.prefix}identity-bootstrap.json`).brokerPolicySuccessor.state, "BROKER_POLICY_SUCCESSOR_CLOSED");
+  f.renew(); await assert.rejects(f.execute(), /already closed/);
+});
+
+test("the production trust anchor authenticates the exact predecessor and successor generations", async () => {
+  const f = fixture(), successor = (await f.execute()).brokerPolicySuccessor;
+  const originalProof = { account: identityBootstrap.account, region: identityBootstrap.region, sourceSha: historicalBootstrapIncident.sourceSha, transitionId: historicalBootstrapIncident.transitionId,
+    authorizationSha256: historicalBootstrapIncident.authorizationSha256, purpose: "IDENTITY_BOOTSTRAP", principal: `arn:aws:sts::${identityBootstrap.account}:assumed-role/mscqr-production-release-deployer/component-${historicalBootstrapIncident.transitionId}`,
+    issuedAt: "2026-09-18T09:33:54.000Z", expiresAt: "2026-09-18T09:48:54.000Z", issuanceEventId: "12345678-1234-4234-8234-123456789aaa", issuanceEventTime: "2026-09-18T09:33:54.000Z",
+    operatorArn: `arn:aws:iam::${identityBootstrap.account}:user/mscqr-production-bootstrap-operator`, mfaAuthenticated: true };
+  const bootstrapIdentities = bootstrapManagedIdentities().map(({ arn }) => ({ arn, role: "EXPECTED", policy: "EXPECTED" }));
+  const journal = { schemaVersion: 1, state: "BOOTSTRAP_CLOSED", sourceSha: historicalBootstrapIncident.sourceSha, transitionId: historicalBootstrapIncident.transitionId,
+    authorizationSha256: historicalBootstrapIncident.authorizationSha256, authorization: historicalBootstrapAuthorization(), owner: "12345678-1234-4234-8234-123456789aaa", manifestSha256: historicalBootstrapIncident.manifestSha256,
+    identitySetSha256: historicalBootstrapIncident.identitySetSha256, packageSha256: historicalBootstrapIncident.packageSha256, operatorProof: originalProof, identities: bootstrapIdentities,
+    identityReadbackSha256: digest(bootstrapIdentities), runtimeVersions: { 1: f.runtime, 2: f.runtime, 3: f.runtime }, broker: { functionArn: componentBrokerArn, packageSha256: completedBootstrapRecovery.packageSha256,
+      manifestSha256: completedBootstrapRecovery.manifestSha256, runtimeVersions: { 1: f.runtime, 2: f.runtime, 3: f.runtime } }, closedAt: "2026-09-18T12:00:00.000Z",
+    recovery: { schemaVersion: 1, state: "RECOVERY_CLOSED", transitionId: completedBootstrapRecovery.transitionId, authorizationSha256: completedBootstrapRecovery.authorizationSha256, sourceSha: completedBootstrapRecovery.sourceSha,
+      oldPackageSha256: historicalBootstrapIncident.packageSha256, newPackageSha256: completedBootstrapRecovery.packageSha256, newManifestSha256: completedBootstrapRecovery.manifestSha256,
+      partialStateSha256: bootstrapPartialStateDigest(), remainingOperations: bootstrapRecoveryOperations, authorizationExpiresAt: "2026-09-18T12:30:00.000Z", sessionExpiresAt: "2026-09-18T12:15:00.000Z",
+      authorizationHistory: [], owner: "12345678-1234-4234-8234-123456789def", closedAt: "2026-09-18T12:01:00.000Z", oldRevisionId: historicalBootstrapIncident.revisionId,
+      finalPackageSha256: completedBootstrapRecovery.packageSha256, finalManifestSha256: completedBootstrapRecovery.manifestSha256, versions: ["1", "2", "3"] },
+    brokerChange: { schemaVersion: 1, state: "BROKER_CHANGE_CLOSED", transitionId: "12345678-1234-4234-8234-123456789abc", authorizationSha256: "d".repeat(64), authorizationExpiresAt: "2026-09-19T12:30:00.000Z",
+      sessionExpiresAt: "2026-09-19T12:15:00.000Z", authorizationHistory: [], owner: "12345678-1234-4234-8234-123456789def", closedAt: "2026-09-19T12:01:00.000Z", predecessor: brokerChangePredecessor(),
+      sourceSha: brokerPolicyPredecessor.sourceSha, configurationSha256: brokerPolicyPredecessor.configurationSha256, identitySetSha256: brokerPolicyPredecessor.identitySetSha256,
+      identityReadbackSha256: digest(brokerChangeManagedIdentities().map(({ arn }) => ({ arn, role: "EXPECTED", policy: "EXPECTED" }))), remainingOperations: brokerChangeOperations,
+      policyCheckpoints: brokerChangeManagedIdentities().map(({ role }) => role), runtimeVersions: { 4: f.runtime, 5: f.runtime, 6: f.runtime }, successor: { sourceSha: brokerPolicyPredecessor.sourceSha,
+        packageSha256: brokerPolicyPredecessor.packageSha256, lambdaCodeSha256: Buffer.from(brokerPolicyPredecessor.packageSha256, "hex").toString("base64"), manifestSha256: brokerPolicyPredecessor.manifestSha256,
+        configurationSha256: brokerPolicyPredecessor.configurationSha256, identitySetSha256: brokerPolicyPredecessor.identitySetSha256, versions: ["4", "5", "6"] } }, brokerPolicySuccessor: successor };
+  const anchor = assertEffectiveBootstrapTrustAnchor(journal, f.packageEvidence.manifest, f.packageEvidence.packageSha256);
+  assert.deepEqual(anchor.entryPoints, brokerPolicySuccessorEntryPoints); assert.equal(anchor.predecessor.packageSha256, brokerPolicyPredecessor.packageSha256);
+  const substituted = structuredClone(journal); substituted.brokerChange.successor.packageSha256 = "e".repeat(64);
+  assert.throws(() => assertEffectiveBootstrapTrustAnchor(substituted, f.packageEvidence.manifest, f.packageEvidence.packageSha256));
+  const malformed = structuredClone(journal); malformed.brokerChange.transitionId = "not-a-transition";
+  assert.throws(() => assertEffectiveBootstrapTrustAnchor(malformed, f.packageEvidence.manifest, f.packageEvidence.packageSha256));
+});
+
+test("successor configuration is immutable install version 7", () => { const f = fixture(), expected = brokerPolicySuccessorConfiguration({ manifest: componentBrokerPackageManifest("b".repeat(40)), manifestSha256: digest(componentBrokerPackageManifest("b".repeat(40))), packageSha256: createHash("sha256").update("successor-package").digest("hex") }); assert.match(expected.Description, /INSTALL/); assert.equal(f.versions["4"].Version, "4"); });

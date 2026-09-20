@@ -27,7 +27,7 @@ function transport(value) {
 // Root GetSessionToken is neither requested nor accepted here.
 export async function authenticateBootstrapOperator(binding, { issuanceEvents, load = loadUser, sts = transport,
   mfa = () => promptProductionMfaCode({ prompt: "Identity bootstrap operator MFA code: " }), verify, now = Date.now, sleep = delay } = {}) {
-  assert(["IDENTITY_BOOTSTRAP", "BROKER_CHANGE"].includes(binding.purpose), "Unsupported exceptional operator purpose"); sessionProofBinding(binding);
+  assert(["IDENTITY_BOOTSTRAP", "BROKER_CHANGE", "BROKER_POLICY_SUCCESSOR"].includes(binding.purpose), "Unsupported exceptional operator purpose"); sessionProofBinding(binding);
   assert.equal(typeof issuanceEvents, "function");
   const clients = [], secrets = [];
   const client = value => { secrets.push(value); const instance = sts(value); clients.push(instance); return instance; };

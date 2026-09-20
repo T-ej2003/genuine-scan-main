@@ -68,10 +68,26 @@ verification and closure. A retained Terraform `OperationTypeApply` lock is
 accepted only when its exact versioned predecessor is the incident's recovery
 checkpoint and its native path, creation time and operation match; it is then
 captured with an exact ETag conditional write before release. A crash after
-adoption resumes verification only under a new recovery approval. Its
+adoption resumes verification only under a new recovery approval. Recovery
+waits through the broker-authenticated original Terraform session's safety
+fence, reads only the fixed lock/reservation object versions, and fences every
+mutation and isolated command to the earlier of the fresh approval and scoped
+AWS-session expirations. Its
 environment is
 `production-component-infrastructure-activation-recovery`; it has the same
 sole-user `main`-only approval contract and must be configured explicitly.
+
+Before recovery, the one-time
+`production-component-broker-policy-successor` transition must move the
+authenticated broker/executor generation together from immutable broker `:4`
+to `:7`. It publishes and authenticates `:7`, then replaces only the exact
+executor inline policy so it invokes `:7` and may version-read only the retained
+`.tflock` and immutable `.initial-activation-attempt` objects. The transition
+requires a fresh environment approval, bootstrap-operator MFA provenance, and
+a fresh MFA-backed root session; root is only the bounded administrative
+executor and is not a runtime dependency. Historical broker versions and
+predecessor policy evidence remain unchanged. Do not run recovery until this
+successor lineage is durably closed.
 
 ## Solo-operator approval
 

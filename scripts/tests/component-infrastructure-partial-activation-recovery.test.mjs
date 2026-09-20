@@ -21,7 +21,7 @@ const backend = () => ({ type: "s3", config: { ...contract, allowed_account_ids:
 
 function fixture(t) {
   const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "component-partial-recovery-"))); fs.chmodSync(directory, 0o700); t.after(() => fs.rmSync(directory, { recursive: true }));
-  const state = { calls: [], lockReleased: 0, journal: [], closed: 0, execution: 0, sourceSha };
+  const state = { calls: [], lockReleased: 0, journal: [], closed: 0, execution: 0, sourceSha, clock: Date.now() };
   const dependencies = {
     source: () => state.sourceSha,
     historicalAuthorization: input => { assert.deepEqual(input, { runId: historicalActivation.authorizationRunId, sourceSha: historicalActivation.sourceSha, transitionId: historicalActivation.transitionId, planSha256: historicalActivation.planSha256, preparationSha256: historicalActivation.preparationSha256, authorizationArtifactSha256: historicalActivation.authorizationArtifactSha256 }); return { historical: true, executable: false }; },
@@ -30,8 +30,8 @@ function fixture(t) {
       assert.equal(requestedSource, sourceSha); assert.equal(transitionId, historicalTransitionId);
       return {
         principal: "arn:aws:sts::368992683803:assumed-role/mscqr-production-component-table-installer/component-" + historicalTransitionId,
-        inspectPartialActivationRecovery: async () => ({ stateIdentity: "INFRASTRUCTURE_CREATED_STATE_INCOMPLETE", lock, attempt, table: partialActivationRecoveryTarget, iamInstallation }),
-        activatePartialActivationRecovery: () => { state.activated = (state.activated || 0) + 1; },
+        inspectPartialActivationRecovery: async () => { if (state.expireAfterInspect) state.clock += partialActivationRecovery.maxAgeMs; return { stateIdentity: "INFRASTRUCTURE_CREATED_STATE_INCOMPLETE", lock, attempt, table: partialActivationRecoveryTarget, iamInstallation }; },
+        activatePartialActivationRecovery: expiresAt => { assert.equal(new Date(Date.parse(expiresAt)).toISOString(), expiresAt); state.activated = (state.activated || 0) + 1; return expiresAt; },
         beginPartialActivationRecovery: async (record, _preparation, _sha, continuation) => { state.journal.push({ ...record, continuation }); return `"journal-${state.journal.length}"`; },
         releasePartialActivationLock: async (value, _etag, record) => { assert.deepEqual(value, lock); assert.match(record.authorizationSha256, /^[a-f0-9]{64}$/); state.lockReleased++; },
         readRecoveredTerraformState: async () => ({ lineage: "lineage", serial: 1, managedAddresses: [partialActivationRecoveryTarget.address] }),
@@ -40,7 +40,8 @@ function fixture(t) {
       };
     },
   };
-  dependencies.recoveryAuthorization = ({ runId, preparation, preparationSha256 }) => approvePartialActivationRecovery({ runId, preparation, preparationSha256, now: Date.now(), main: { name: "main", protected: true, commit: { sha: sourceSha } }, run: { id: Number(runId), head_sha: sourceSha, head_branch: "main", path: partialActivationRecovery.workflow, event: "workflow_dispatch", status: "in_progress", run_attempt: 1, repository: { id: 1145608538, full_name: "T-ej2003/genuine-scan-main" }, head_repository: { id: 1145608538, full_name: "T-ej2003/genuine-scan-main" }, actor, triggering_actor: actor }, environment: dependencies.environment().config, branches: dependencies.environment().branches, approvals: [{ state: "approved", user: actor, environments: [{ id: 1, name: partialActivationRecovery.environment }] }] });
+  dependencies.now = () => state.clock;
+  dependencies.recoveryAuthorization = ({ runId, preparation, preparationSha256 }) => approvePartialActivationRecovery({ runId, preparation, preparationSha256, now: state.clock, main: { name: "main", protected: true, commit: { sha: sourceSha } }, run: { id: Number(runId), head_sha: sourceSha, head_branch: "main", path: partialActivationRecovery.workflow, event: "workflow_dispatch", status: "in_progress", run_attempt: 1, repository: { id: 1145608538, full_name: "T-ej2003/genuine-scan-main" }, head_repository: { id: 1145608538, full_name: "T-ej2003/genuine-scan-main" }, actor, triggering_actor: actor }, environment: dependencies.environment().config, branches: dependencies.environment().branches, approvals: [{ state: "approved", user: actor, environments: [{ id: 1, name: partialActivationRecovery.environment }] }] });
   return { directory, state, dependencies };
 }
 
@@ -52,13 +53,20 @@ test("recovery adopts only the fixed table after historical evidence and a fresh
   assert.equal(result.state, "RECOVERY_CLOSED"); assert.equal(f.state.activated, 1); assert.equal(f.state.execution, 1); assert.equal(f.state.lockReleased, 4); assert.deepEqual(f.state.journal.map(({ state }) => state), ["RECOVERY_EXECUTING", "RESOURCE_ADOPTED", "STATE_VERIFIED", "RECOVERY_CLOSED"]); assert.equal(f.state.closed, 2);
 });
 
+test("approval expiring after inspection stops before the first recovery mutation", async t => {
+  const f = fixture(t); await run(["prepare", f.directory, recoveryTransitionId, historicalActivation.sourceSha, historicalActivation.authorizationRunId, historicalActivation.authorizationArtifactSha256, historicalActivation.planSha256, historicalActivation.preparationSha256, historicalActivation.transitionId], f.dependencies);
+  f.state.expireAfterInspect = true;
+  await assert.rejects(run(["recover", f.directory, "789"], f.dependencies), /expired or invalid/);
+  assert.equal(f.state.activated || 0, 0); assert.deepEqual(f.state.journal, []); assert.equal(f.state.lockReleased, 0); assert.equal(f.state.execution, 0);
+});
+
 test("a crashed adoption resumes verification only with a different fresh approval", async t => {
   const f = fixture(t); const prepared = await run(["prepare", f.directory, recoveryTransitionId, historicalActivation.sourceSha, historicalActivation.authorizationRunId, historicalActivation.authorizationArtifactSha256, historicalActivation.planSha256, historicalActivation.preparationSha256, historicalActivation.transitionId], f.dependencies);
   f.dependencies.session = async () => ({
     principal: "arn:aws:sts::368992683803:assumed-role/mscqr-production-component-table-installer/component-" + historicalTransitionId,
     inspectPartialActivationRecovery: async () => { throw new Error("original incident lock is no longer current"); },
     inspectPartialActivationRecoveryContinuation: async () => ({ recovery: { authorizationSha256: "0".repeat(64) }, currentRecoveryLock: null, stateExists: true, table: partialActivationRecoveryTarget, iamInstallation }),
-    activatePartialActivationRecovery: () => {},
+    activatePartialActivationRecovery: expiresAt => expiresAt,
     beginPartialActivationRecovery: async () => '"marker"', releasePartialActivationLock: async () => {},
     readRecoveredTerraformState: async () => ({ lineage: "lineage", serial: 1, managedAddresses: [partialActivationRecoveryTarget.address] }),
     execute: async ({ mode }, { checkpoint }) => { assert.equal(mode, "recover-verify"); for (const stage of ["backend", "recovery", "adopted", "verified", "closed"]) await checkpoint(stage === "backend" ? { stage, backend: backend(), workspace: "default" } : { stage }); return { result: { type: "result", recoveredAddress: partialActivationRecoveryTarget.address, driftVerified: true } }; },
@@ -75,7 +83,7 @@ test("a retained native import lock is captured only through the incident-bound 
     principal: "arn:aws:sts::368992683803:assumed-role/mscqr-production-component-table-installer/component-" + historicalTransitionId,
     inspectPartialActivationRecovery: async () => { throw new Error("initial topology is no longer current"); },
     inspectPartialActivationRecoveryContinuation: async () => ({ recovery: { authorizationSha256: "0".repeat(64) }, currentRecoveryLock: null, retainedNativeLock: native, stateExists: true, table: partialActivationRecoveryTarget, iamInstallation }),
-    activatePartialActivationRecovery: () => {}, capturePartialActivationNativeLock: async (value, record) => { assert.deepEqual(value, native); assert.equal(record.state, "IMPORT_LOCK_CAPTURED"); captured = record; return '"captured"'; },
+    activatePartialActivationRecovery: expiresAt => expiresAt, capturePartialActivationNativeLock: async (value, record) => { assert.deepEqual(value, native); assert.equal(record.state, "IMPORT_LOCK_CAPTURED"); captured = record; return '"captured"'; },
     beginPartialActivationRecovery: async () => '"marker"', releasePartialActivationLock: async () => {},
     readRecoveredTerraformState: async () => ({ lineage: "lineage", serial: 1, managedAddresses: [partialActivationRecoveryTarget.address] }),
     execute: async ({ mode }, { checkpoint }) => { assert.equal(mode, "recover-verify"); for (const stage of ["backend", "recovery", "adopted", "verified", "closed"]) await checkpoint(stage === "backend" ? { stage, backend: backend(), workspace: "default" } : { stage }); return { result: { type: "result", recoveredAddress: partialActivationRecoveryTarget.address, driftVerified: true } }; }, close: () => {},
