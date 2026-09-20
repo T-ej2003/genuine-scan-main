@@ -45,6 +45,7 @@ else if (operation === 'workspace') process.stdout.write('default\\n');
 else if (operation === 'plan' && args.some(arg => arg.startsWith('-out='))) fs.writeFileSync('/work/activation.tfplan','exact-reviewed-plan');
 else if (operation === 'show') process.stdout.write(JSON.stringify({fixture:true}));
 else if (operation === 'apply') assert.equal(fs.readFileSync(args.at(-1),'utf8'),'exact-reviewed-plan');
+else if (operation === 'import') assert.deepEqual(args.slice(-2), ['aws_dynamodb_table.component_deployment_state','mscqr-production-component-deployment-state']);
 else assert(['fmt','plan'].includes(operation));
 `);
   for (const [name, value] of Object.entries(files)) {
@@ -57,16 +58,19 @@ else assert(['fmt','plan'].includes(operation));
   return { directory, manifestSha256: hash(bytes), dispose: () => fs.rmSync(directory, { recursive: true }) };
 }
 
-for (const mode of ["prepare", "apply"]) test(`actual isolated ${mode} orchestration uses scoped pipe credentials and exact saved bytes`, { skip: process.env.COMPONENT_CONTAINER_TESTS !== "1", timeout: 30000 }, async () => {
+for (const mode of ["prepare", "apply", "recover", "recover-verify"]) test(`actual isolated ${mode} orchestration uses scoped pipe credentials and exact saved bytes`, { skip: process.env.COMPONENT_CONTAINER_TESTS !== "1", timeout: 30000 }, async () => {
   const checkpoints = [];
   const result = await executeIsolatedTerraform(request(mode), { prepare: fixture, checkpoint: async value => { checkpoints.push(value); } });
   assert.deepEqual(checkpoints[0], { type: "checkpoint", stage: "backend", backend: { type: "s3", config: { fixture: true } }, workspace: "default" });
   if (mode === "prepare") {
     assert.equal(checkpoints.length, 2); assert.equal(checkpoints[1].stage, "plan");
     assert.deepEqual(result, { type: "result", plan: Buffer.from("exact-reviewed-plan").toString("base64"), planSha256: hash("exact-reviewed-plan"), planJson: { fixture: true } });
-  } else {
+  } else if (mode === "apply") {
     assert.deepEqual(checkpoints[1], { type: "checkpoint", stage: "apply", planSha256: hash("exact-reviewed-plan"), planJson: { fixture: true } });
     assert.deepEqual(result, { type: "result", appliedPlanSha256: hash("exact-reviewed-plan"), driftVerified: true });
+  } else {
+    assert.deepEqual(checkpoints.map(({ stage }) => stage), ["backend", "recovery", "adopted", "verified", "closed"]);
+    assert.deepEqual(result, { type: "result", recoveredAddress: "aws_dynamodb_table.component_deployment_state", driftVerified: true });
   }
 });
 

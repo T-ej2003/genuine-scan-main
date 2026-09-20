@@ -1,0 +1,41 @@
+name: Authorize component broker-policy successor
+run-name: Authorize component broker-policy successor ${{ inputs.transition_id }}
+
+'on':
+  workflow_dispatch:
+    inputs:
+      source_sha: {description: Exact current protected-main SHA containing the reviewed successor, required: true, type: string}
+      transition_id: {description: Unique broker-policy successor transition UUID, required: true, type: string}
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: component-broker-policy-successor-authorization
+  cancel-in-progress: false
+
+jobs:
+  authorize:
+    if: github.repository == 'T-ej2003/genuine-scan-main' && github.ref == 'refs/heads/main' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production-component-broker-policy-successor
+    steps:
+      - uses: actions/checkout@v6
+        with: {ref: '${{ github.sha }}', fetch-depth: 0, persist-credentials: false}
+      - uses: actions/setup-node@v6
+        with: {node-version: 24}
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Bind approval to exact broker and executor policy generations
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          TRANSITION_ID: ${{ inputs.transition_id }}
+        run: node scripts/aws/component-broker-policy-successor-authorization.mjs prepare
+      - uses: actions/upload-artifact@v7
+        with:
+          name: component-broker-policy-successor-authorization
+          path: ${{ runner.temp }}/component-broker-policy-successor-authorization.json
+          if-no-files-found: error
+          retention-days: 90

@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { bootstrapPartialStateDigest, bootstrapRecoveryOperations, completedBootstrapRecovery, historicalBootstrapAuthorization, historicalBootstrapIncident } from "./component-bootstrap-partial-recovery-contract.mjs";
 import { brokerChangeConfigurationSha256, brokerChangeOperations, brokerChangePredecessor } from "./component-broker-change-contract.mjs";
-import { brokerChangeEntryPoints, brokerEntryPoints } from "./component-broker-configuration.mjs";
+import { brokerChangeEntryPoints, brokerEntryPoints, brokerPolicySuccessorEntryPoints } from "./component-broker-configuration.mjs";
+import { assertBrokerPolicySuccessorClosureMetadata, brokerPolicySuccessorBindings, brokerPolicySuccessorMetadataKey } from "./component-broker-policy-successor-contract.mjs";
 import { digest } from "./component-iam-installation-contract.mjs";
-import { bootstrapManagedIdentities, brokerChangeManagedIdentities, componentBrokerArn } from "./component-installation-identity-contract.mjs";
+import { bootstrapManagedIdentities, brokerChangeManagedIdentities, brokerPolicySuccessorManagedIdentities, componentBrokerArn } from "./component-installation-identity-contract.mjs";
 import { assertComponentSessionRecord } from "./component-session-proof.mjs";
 
 const sha256 = value => assert.match(value || "", /^[a-f0-9]{64}$/);
@@ -69,6 +70,36 @@ function assertRecoveredClosure(bootstrap, manifest, packageSha256) {
   return { sourceSha: recovery.sourceSha, packageSha256: recovery.finalPackageSha256, manifestSha256: recovery.finalManifestSha256, recovered: true, entryPoints: brokerEntryPoints, allVersions: ["1", "2", "3"], runtimeVersions: bootstrap.runtimeVersions };
 }
 
+export function assertHistoricalBrokerChangeClosure(bootstrap) {
+  const recovery = assertRecoveredClosure(bootstrap);
+  const change = bootstrap.brokerChange;
+  const keys = ["authorizationExpiresAt", "authorizationHistory", "authorizationSha256", "closedAt", "configurationSha256", "identityReadbackSha256", "identitySetSha256", "owner", "policyCheckpoints", "predecessor", "remainingOperations", "runtimeVersions", "schemaVersion", "sessionExpiresAt", "sourceSha", "state", "successor", "transitionId"];
+  assert(change && typeof change === "object" && !Array.isArray(change)); assert.deepEqual(Object.keys(change).sort(), keys.sort());
+  assert.equal(change.schemaVersion, 1); assert.equal(change.state, "BROKER_CHANGE_CLOSED"); uuid(change.transitionId); uuid(change.owner); sha256(change.authorizationSha256);
+  for (const field of ["authorizationExpiresAt", "sessionExpiresAt", "closedAt"]) timestamp(change[field]);
+  assert.deepEqual(change.predecessor, brokerChangePredecessor()); assert.deepEqual(change.remainingOperations, brokerChangeOperations);
+  assert.deepEqual(change.policyCheckpoints, brokerChangeManagedIdentities().map(({ role }) => role));
+  assert(Array.isArray(change.authorizationHistory)); const authorizations = new Set([change.authorizationSha256]); for (const prior of change.authorizationHistory) { assert.deepEqual(Object.keys(prior).sort(), ["authorizationExpiresAt", "authorizationSha256", "owner", "sessionExpiresAt"]); sha256(prior.authorizationSha256); uuid(prior.owner); timestamp(prior.authorizationExpiresAt); timestamp(prior.sessionExpiresAt); assert(!authorizations.has(prior.authorizationSha256)); authorizations.add(prior.authorizationSha256); }
+  assert.equal(change.identitySetSha256, digest(brokerChangeManagedIdentities()));
+  assert.equal(change.identityReadbackSha256, digest(brokerChangeManagedIdentities().map(({ arn }) => ({ arn, role: "EXPECTED", policy: "EXPECTED" }))));
+  assert.deepEqual(change.successor?.versions, ["4", "5", "6"]); assert.equal(change.successor?.identitySetSha256, change.identitySetSha256);
+  assert.match(change.successor?.sourceSha || "", /^[a-f0-9]{40}$/); for (const field of ["packageSha256", "manifestSha256", "configurationSha256", "identitySetSha256"]) sha256(change.successor?.[field]);
+  assert.equal(change.successor.lambdaCodeSha256, Buffer.from(change.successor.packageSha256, "hex").toString("base64"));
+  assert.equal(change.sourceSha, change.successor.sourceSha); assert.equal(change.configurationSha256, change.successor.configurationSha256);
+  assert.deepEqual(Object.keys(change.runtimeVersions || {}).sort(), ["4", "5", "6"]); for (const runtime of Object.values(change.runtimeVersions)) assert.match(runtime || "", /^arn:aws:lambda:eu-west-2::runtime:[a-f0-9]{64}$/);
+  return { ...change.successor, entryPoints: brokerChangeEntryPoints, allVersions: ["1", "2", "3", "4", "5", "6"], runtimeVersions: change.runtimeVersions, predecessor: recovery };
+}
+
+function assertBrokerPolicySuccessorClosure(bootstrap, manifest, packageSha256, metadata) {
+  const predecessor = assertHistoricalBrokerChangeClosure(bootstrap);
+  const packageEvidence = { manifest, manifestSha256: digest(manifest), packageSha256 };
+  const bindings = brokerPolicySuccessorBindings(packageEvidence);
+  for (const field of ["sourceSha", "packageSha256", "manifestSha256", "configurationSha256", "identitySetSha256"]) assert.equal(predecessor[field], bindings.predecessor[field], `Broker-policy predecessor ${field} differs`);
+  const closure = assertBrokerPolicySuccessorClosureMetadata(metadata, bindings);
+  return { sourceSha: bindings.successor.sourceSha, packageSha256, manifestSha256: bindings.successor.manifestSha256, recovered: true, changed: true, policySuccessor: true,
+    entryPoints: brokerPolicySuccessorEntryPoints, allVersions: ["1", "2", "3", "4", "5", "6", "7", "8", "9"], runtimeVersions: { ...predecessor.runtimeVersions, ...closure.runtimeVersions }, predecessor };
+}
+
 // The BROKER_CHANGE controller authenticates this immutable predecessor before
 // it can reserve a successor transition. It deliberately refuses any existing
 // change metadata; resumption is handled by that controller's exact CAS record.
@@ -121,10 +152,14 @@ function assertBrokerChangeClosure(bootstrap, manifest, packageSha256) {
 
 // The original record is immutable incident lineage. A completed recovery adds
 // a second, fully-bound effective lineage; malformed recovery never falls back.
-export function assertEffectiveBootstrapTrustAnchor(bootstrap, manifest, packageSha256) {
+export function assertEffectiveBootstrapTrustAnchor(bootstrap, manifest, packageSha256, metadata = {}) {
   assert(bootstrap && typeof bootstrap === "object" && !Array.isArray(bootstrap));
   assert.equal(bootstrap.schemaVersion, 1); assert.equal(bootstrap.state, "BOOTSTRAP_CLOSED", "Trust anchor bootstrap is incomplete");
   sha256(packageSha256);
+  if (Object.hasOwn(metadata, brokerPolicySuccessorMetadataKey)) {
+    assert(Object.hasOwn(bootstrap, "brokerChange"), "Broker-policy successor lacks broker predecessor");
+    return assertBrokerPolicySuccessorClosure(bootstrap, manifest, packageSha256, metadata);
+  }
   if (Object.hasOwn(bootstrap, "brokerChange")) {
     assert(Object.hasOwn(bootstrap, "recovery"), "Broker change without recovered predecessor is invalid");
     return assertBrokerChangeClosure(bootstrap, manifest, packageSha256);

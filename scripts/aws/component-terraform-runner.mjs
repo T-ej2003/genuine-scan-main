@@ -11,13 +11,13 @@ import { createTerraformRelay, terraformDockerArguments } from "./component-terr
 // are prepared; checkpoint authorization belongs to the activation controller.
 export async function executeIsolatedTerraform(request, { checkpoint, prepare = prepareIsolatedTerraformInputs } = {}) {
   assert.deepEqual(Object.keys(request).sort(), ["credentials", "expiresAt", "mode", "plan"]);
-  assert(["prepare", "apply"].includes(request.mode));
+  assert(["prepare", "apply", "recover", "recover-verify"].includes(request.mode));
   assert.equal(typeof checkpoint, "function");
   assert.deepEqual(Object.keys(request.credentials).sort(), ["AccessKeyId", "SecretAccessKey", "SessionToken"]);
   for (const value of Object.values(request.credentials)) assert(typeof value === "string" && value.length > 0 && value.length < 16384);
   const expires = Date.parse(request.expiresAt);
   assert(Number.isFinite(expires) && expires > Date.now() + 120000 && expires <= Date.now() + 901000);
-  if (request.mode === "prepare") assert.equal(request.plan, null);
+  if (["prepare", "recover", "recover-verify"].includes(request.mode)) assert.equal(request.plan, null);
   else assert(Buffer.isBuffer(request.plan) && request.plan.length > 0 && request.plan.length <= 16 * 1024 * 1024);
   const binary = process.platform === "darwin" ? "/usr/local/bin/docker" : "/usr/bin/docker";
   assert(fs.statSync(binary).isFile());
@@ -55,14 +55,15 @@ export async function executeIsolatedTerraform(request, { checkpoint, prepare = 
           send({ type: "execution", manifestSha256: inputs.manifestSha256, credentials: request.credentials, expiresAt: request.expiresAt, plan: request.plan?.toString("base64") ?? null });
         } else if (value.type === "checkpoint") {
           assert(ready && value.stage === stage);
-          assert.deepEqual(Object.keys(value).sort(), stage === "backend" ? ["backend", "stage", "type", "workspace"] : ["planJson", "planSha256", "stage", "type"]);
+          const fields = stage === "backend" ? ["backend", "stage", "type", "workspace"] : request.mode.startsWith("recover") ? ["stage", "type"] : ["planJson", "planSha256", "stage", "type"];
+          assert.deepEqual(Object.keys(value).sort(), fields);
           await checkpoint(value);
           assert(Date.now() < expires - 10000);
           send({ type: "continue", stage, manifestSha256: inputs.manifestSha256 });
-          stage = stage === "backend" ? request.mode === "apply" ? "apply" : "plan" : "result";
+          stage = stage === "backend" ? request.mode === "apply" ? "apply" : request.mode.startsWith("recover") ? "recovery" : "plan" : request.mode.startsWith("recover") && stage === "recovery" ? "adopted" : request.mode.startsWith("recover") && stage === "adopted" ? "verified" : request.mode.startsWith("recover") && stage === "verified" ? "closed" : "result";
         } else {
           assert(ready && stage === "result" && value.type === "result" && !result);
-          assert.deepEqual(Object.keys(value).sort(), request.mode === "prepare" ? ["plan", "planJson", "planSha256", "type"] : ["appliedPlanSha256", "driftVerified", "type"]);
+          assert.deepEqual(Object.keys(value).sort(), request.mode === "prepare" ? ["plan", "planJson", "planSha256", "type"] : request.mode === "apply" ? ["appliedPlanSha256", "driftVerified", "type"] : ["driftVerified", "recoveredAddress", "type"]);
           result = value; stage = "closed";
         }
       };

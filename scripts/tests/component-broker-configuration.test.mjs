@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { brokerConfiguration, assertBrokerConfiguration, assertBrokerEntryPoint, redactBrokerDiagnostic } from "../aws/component-broker-configuration.mjs";
+import { brokerConfiguration, assertBrokerConfiguration, assertBrokerEntryPoint, brokerPolicySuccessorEntryPoints, redactBrokerDiagnostic } from "../aws/component-broker-configuration.mjs";
 import { componentBrokerArn } from "../aws/component-installation-identity-contract.mjs";
 import { installationIdentity } from "../aws/component-iam-installation-contract.mjs";
 
@@ -64,4 +64,12 @@ test("AWS-supplied version, not request operation, separates cleanup and install
   }
   assert.throws(() => assertBrokerEntryPoint({ functionVersion: "2", invokedFunctionArn: `${componentBrokerArn}:2` }, "INSTALL"));
   assert.throws(() => assertBrokerEntryPoint({ functionVersion: "1", invokedFunctionArn: `${componentBrokerArn}:1` }, "AUTHORIZE"));
+});
+
+test("successor package routes install, cleanup and authorization only through immutable versions 7-9", () => {
+  for (const [operation, version] of Object.entries({ TERRAFORM_CONTEXT: "7", PROVE_TERRAFORM_SESSION: "7", CLOSE: "8", CLEANUP_CONTEXT: "8", AUTHORIZE: "9" })) {
+    const context = { functionVersion: version, invokedFunctionArn: `${componentBrokerArn}:${version}` };
+    assert.equal(assertBrokerEntryPoint(context, operation, brokerPolicySuccessorEntryPoints), version);
+    for (const predecessor of ["4", "5", "6"]) assert.throws(() => assertBrokerEntryPoint({ functionVersion: predecessor, invokedFunctionArn: `${componentBrokerArn}:${predecessor}` }, operation, brokerPolicySuccessorEntryPoints));
+  }
 });

@@ -48,6 +48,59 @@ remote backend. No local production state, state-key reuse, force state push,
 state deletion, arbitrary workspace, or force unlock is supported. An ambiguous
 first apply must be reconciled through separately reviewed recovery, not repeated.
 
+## Partial activation recovery
+
+`INFRASTRUCTURE_CREATED_STATE_INCOMPLETE` means the immutable activation attempt
+exists, the exact table is ACTIVE, remote state and its history are absent, and
+the incident `.tflock` remains. Preserve all three objects. Operators must not
+delete/recreate the table, force-unlock, retry the first activation, run manual
+Terraform import/state commands, or alter the activation reservation.
+
+The only supported response is the separate source-owned partial-activation
+recovery controller. It authenticates the expired original approval solely as
+historical evidence, requires a fresh recovery approval, validates the exact
+table, immutable reservation body (including its historical run, plan,
+preparation, transition and session proof), empty state history and lock snapshot, imports only
+`aws_dynamodb_table.component_deployment_state` with its fixed table ID, and
+requires a zero-drift readback before closing. Versioned incident-bound lock
+markers checkpoint ownership, interrupted native-import-lock capture, adoption,
+verification and closure. A retained Terraform `OperationTypeApply` lock is
+accepted only when its exact versioned predecessor is the incident's recovery
+checkpoint and its native path, creation time and operation match; it is then
+captured with an exact ETag conditional write before release. A crash after
+adoption resumes verification only under a new recovery approval. Recovery
+waits through the broker-authenticated original Terraform session's safety
+fence, reads only the fixed lock/reservation object versions, and fences every
+mutation and isolated command to the earlier of the fresh approval and scoped
+AWS-session expirations. Its
+environment is
+`production-component-infrastructure-activation-recovery`; it has the same
+sole-user `main`-only approval contract and must be configured explicitly.
+Historical authentication does not depend on downloading the 30-day GitHub
+artifact: GitHub authenticates the completed environment-approved run and its
+plan-bound title, while the immutable versioned activation reservation proves
+the exact plan, preparation, Terraform session, IAM receipt, source, and
+transition. The historical artifact digest remains a coordinate bound by the
+fresh recovery approval and is never executable authority.
+
+Before recovery, the one-time
+`production-component-broker-policy-successor` transition must move the
+authenticated broker/executor generation together from immutable broker `:4`
+to the successor immutable entry set `:7`/`:8`/`:9`. It publishes and
+authenticates install `:7`, cleanup `:8`, and authorization `:9` without
+modifying historical versions `:4`/`:5`/`:6`, records
+the compact successor closure in authenticated journal object metadata, then
+extends the broker's own read-only self-inspection policy to the exact successor
+versions, rebinds the installation, cleanup, and authorization sessions to
+`:7`, `:8`, and `:9` respectively, and replaces only the exact executor inline
+policy so it invokes `:7` and may version-read only the retained
+`.tflock` and immutable `.initial-activation-attempt` objects. The transition
+requires a fresh environment approval, bootstrap-operator MFA provenance, and
+a fresh MFA-backed root session; root is only the bounded administrative
+executor and is not a runtime dependency. Historical broker versions and
+predecessor policy evidence remain unchanged. Do not run recovery until this
+successor lineage is durably closed.
+
 ## Solo-operator approval
 
 MSCQR currently has one authorized operator/reviewer: User `T-ej2003`, GitHub ID

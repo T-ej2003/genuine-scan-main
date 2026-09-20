@@ -54,6 +54,17 @@ export function terraformTargetPolicy() {
   ] };
 }
 
+export function terraformExecutorPolicyGeneration(version, recovery = false) {
+  assert(["4", "7"].includes(version) && recovery === (version === "7"), "Unsupported Terraform executor policy generation");
+  const policy = terraformTargetPolicy();
+  policy.Statement.find(({ Action }) => Action === "lambda:InvokeFunction").Resource = `arn:aws:lambda:eu-west-2:${account}:function:${installationIdentity.functionName}:${version}`;
+  if (recovery) {
+    const state = "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/component-deployment-state/terraform.tfstate";
+    policy.Statement.splice(4, 0, { Effect: "Allow", Action: "s3:GetObjectVersion", Resource: [`${state}.tflock`, `${state}.initial-activation-attempt`] });
+  }
+  return policy;
+}
+
 export function installationCapabilitySet() {
   const provisioner = provisionerTargetPolicy();
   const receipt = "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/component-deployment-state/iam-installation.json";

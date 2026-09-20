@@ -1,0 +1,63 @@
+name: Authorize component infrastructure partial activation recovery
+run-name: Authorize component infrastructure recovery ${{ inputs.recovery_transition_id }}
+
+'on':
+  workflow_dispatch:
+    inputs:
+      source_sha: {description: Exact protected-main SHA containing recovery, required: true, type: string}
+      recovery_transition_id: {description: Exact incident-bound recovery transition UUID, required: true, type: string}
+      recovery_preparation_sha256: {description: Exact private recovery preparation SHA256, required: true, type: string}
+      historical_source_sha: {description: Historical activation protected source SHA, required: true, type: string}
+      historical_authorization_run_id: {description: Historical activation authorization run, required: true, type: string}
+      historical_authorization_artifact_sha256: {description: Historical activation artifact digest, required: true, type: string}
+      historical_plan_sha256: {description: Historical approved plan SHA256, required: true, type: string}
+      historical_preparation_sha256: {description: Historical preparation SHA256, required: true, type: string}
+      historical_transition_id: {description: Closed component IAM transition UUID, required: true, type: string}
+      iam_installation_json: {description: Exact authenticated component IAM receipt binding JSON, required: true, type: string}
+      lock_json: {description: Exact retained lock metadata JSON, required: true, type: string}
+      attempt_json: {description: Exact immutable historical activation reservation metadata JSON, required: true, type: string}
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: component-infrastructure-partial-activation-recovery-authorization
+  cancel-in-progress: false
+
+jobs:
+  authorize:
+    if: github.repository == 'T-ej2003/genuine-scan-main' && github.ref == 'refs/heads/main' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production-component-infrastructure-activation-recovery
+    steps:
+      - uses: actions/checkout@v6
+        with: {ref: '${{ github.sha }}', fetch-depth: 0, persist-credentials: false}
+      - uses: actions/setup-node@v6
+        with: {node-version: 24}
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Bind fresh recovery approval to one exact incomplete activation incident
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          RECOVERY_TRANSITION_ID: ${{ inputs.recovery_transition_id }}
+          RECOVERY_PREPARATION_SHA256: ${{ inputs.recovery_preparation_sha256 }}
+          HISTORICAL_SOURCE_SHA: ${{ inputs.historical_source_sha }}
+          HISTORICAL_AUTHORIZATION_RUN_ID: ${{ inputs.historical_authorization_run_id }}
+          HISTORICAL_AUTHORIZATION_ARTIFACT_SHA256: ${{ inputs.historical_authorization_artifact_sha256 }}
+          HISTORICAL_PLAN_SHA256: ${{ inputs.historical_plan_sha256 }}
+          HISTORICAL_PREPARATION_SHA256: ${{ inputs.historical_preparation_sha256 }}
+          HISTORICAL_TRANSITION_ID: ${{ inputs.historical_transition_id }}
+          IAM_INSTALLATION_JSON: ${{ inputs.iam_installation_json }}
+          LOCK_JSON: ${{ inputs.lock_json }}
+          ATTEMPT_JSON: ${{ inputs.attempt_json }}
+          BACKEND_JSON: '{"schemaVersion":1,"terraformRoot":"infra/aws/terraform/production-component-deployment-state","account":"368992683803","type":"s3","bucket":"mscqr-production-terraform-state-368992683803-eu-west-2","key":"mscqr/production/component-deployment-state/terraform.tfstate","region":"eu-west-2","encrypt":true,"use_lockfile":true,"workspace":"default","firstInitialization":"ABSENT_REMOTE_STATE_ONLY","rootApplyAllowed":false,"executorRole":"mscqr-production-component-table-installer","authorizationEnvironment":"production-component-infrastructure-activation","expectedManagedAddresses":["aws_dynamodb_table.component_deployment_state"]}'
+          LIVE_TABLE_JSON: '{"address":"aws_dynamodb_table.component_deployment_state","id":"mscqr-production-component-deployment-state","stateKey":"mscqr/production/component-deployment-state/terraform.tfstate","lockKey":"mscqr/production/component-deployment-state/terraform.tfstate.tflock","attemptKey":"mscqr/production/component-deployment-state/terraform.tfstate.initial-activation-attempt"}'
+        run: node scripts/aws/component-infrastructure-partial-activation-recovery-authorization.mjs prepare
+      - uses: actions/upload-artifact@v7
+        with:
+          name: component-infrastructure-partial-activation-recovery-authorization
+          path: ${{ runner.temp }}/component-infrastructure-partial-activation-recovery-authorization.json
+          if-no-files-found: error
+          retention-days: 90
