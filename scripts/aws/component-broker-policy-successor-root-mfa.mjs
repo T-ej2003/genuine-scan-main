@@ -66,7 +66,8 @@ export async function createBrokerPolicySuccessorRootMfaSession({ load = loadRoo
     sessionClient = sts(issued); const sessionIdentity = await sessionClient.send("GetCallerIdentity");
     assert.deepEqual({ Account: sessionIdentity.Account, Arn: sessionIdentity.Arn }, { Account: identityBootstrap.account, Arn: rootArn }, "Issued MFA session is not account root");
     const credentials = secret(issued);
-    return { credentials, expiresAt: new Date(expires).toISOString(), close() { clear(credentials); sessionClient?.close(); sessionClient = null; clear(issued); } };
+    return { credentials, expiresAt: new Date(expires).toISOString(), mfaSerial: source.serial, durationSeconds: brokerPolicySuccessorRootMfaSource.durationSeconds,
+      close() { clear(credentials); sessionClient?.close(); sessionClient = null; clear(issued); } };
   } catch (error) { base?.close(); sessionClient?.close(); clear(source?.credentials); clear(issued); throw error; }
   finally { code = ""; }
 }

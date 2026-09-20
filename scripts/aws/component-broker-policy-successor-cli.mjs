@@ -28,18 +28,36 @@ export function assertBrokerPolicySuccessorIamRequest(operation, input) {
   }
 }
 
-export async function convergeRootMfaIssuance({ events, accessKeyId, rootExpires, rootArn: expectedRootArn = rootArn, now = Date.now, sleep = delay, maxWaitMs = 300000 }) {
+export async function convergeRootMfaIssuance({ events, accessKeyId, rootExpires, mfaSerial, durationSeconds, rootArn: expectedRootArn = rootArn, now = Date.now, sleep = delay, maxWaitMs = 300000 }) {
+  assert.match(mfaSerial || "", new RegExp(`^arn:aws:iam::${identityBootstrap.account}:mfa/[A-Za-z0-9+=,.@_/-]{1,128}$`)); assert.equal(durationSeconds, 3600);
   const deadline = Math.min(now() + maxWaitMs, rootExpires - 120000);
   while (now() < deadline) {
     const matches = (await events("GetSessionToken")).filter(value => value.responseElements?.credentials?.accessKeyId === accessKeyId);
     assert(matches.length <= 1, "Unique root MFA GetSessionToken issuance required");
     if (matches.length === 1) {
-      const event = matches[0]; assert.equal(event.userIdentity?.type, "Root"); assert.equal(event.userIdentity?.arn, expectedRootArn); assert.equal(event.userIdentity?.sessionContext?.attributes?.mfaAuthenticated, "true"); assert.equal(event.errorCode, undefined);
+      const event = matches[0]; assert.equal(event.eventSource, "sts.amazonaws.com"); assert.equal(event.eventName, "GetSessionToken"); assert.equal(event.awsRegion, identityBootstrap.region);
+      assert.equal(event.userIdentity?.type, "Root"); assert.equal(event.userIdentity?.accountId, identityBootstrap.account); assert.equal(event.userIdentity?.arn, expectedRootArn); assert.equal(event.errorCode, undefined);
+      assert.equal(event.requestParameters?.serialNumber, mfaSerial); assert.equal(event.requestParameters?.durationSeconds, durationSeconds);
       const expires = expiration(event.responseElements?.credentials?.expiration); assert.equal(expires, rootExpires, "Root MFA issuance expiration differs"); return event;
     }
     if (now() + 5000 >= deadline) break; await sleep(5000);
   }
   throw new Error("Root MFA GetSessionToken issuance evidence unavailable");
+}
+
+export async function convergeRootMfaSessionProof({ events, accessKeyId, rootExpires, rootArn: expectedRootArn = rootArn, now = Date.now, sleep = delay, maxWaitMs = 300000 }) {
+  const deadline = Math.min(now() + maxWaitMs, rootExpires - 120000);
+  while (now() < deadline) {
+    const matches = (await events("GetCallerIdentity")).filter(value => value.userIdentity?.accessKeyId === accessKeyId);
+    assert(matches.length <= 1, "Unique root MFA session proof required");
+    if (matches.length === 1) {
+      const event = matches[0]; assert.equal(event.eventSource, "sts.amazonaws.com"); assert.equal(event.eventName, "GetCallerIdentity"); assert.equal(event.awsRegion, identityBootstrap.region);
+      assert.equal(event.userIdentity?.type, "Root"); assert.equal(event.userIdentity?.accountId, identityBootstrap.account); assert.equal(event.userIdentity?.arn, expectedRootArn);
+      assert.equal(event.userIdentity?.sessionContext?.attributes?.mfaAuthenticated, "true"); assert.equal(event.errorCode, undefined); return event;
+    }
+    if (now() + 5000 >= deadline) break; await sleep(5000);
+  }
+  throw new Error("Root MFA returned-session evidence unavailable");
 }
 
 export async function lookupCloudTrailEvents({ lookup, eventName, now = Date.now }) {
@@ -66,7 +84,8 @@ export async function administrativeAdapter(packageEvidence, { root = createBrok
     const cloudtrail = create("cloudtrail", "CloudTrail", "https://cloudtrail.eu-west-2.amazonaws.com"), accessKeyId = credentials.accessKeyId;
     const events = eventName => lookupCloudTrailEvents({ lookup: cloudtrail, eventName, now });
     const rootExpires = Date.parse(session.expiresAt); assert(Number.isFinite(rootExpires) && now() + 120000 < rootExpires && rootExpires <= now() + 3601000, "Root MFA session is not fresh");
-    await convergeRootMfaIssuance({ events, accessKeyId, rootExpires, now, sleep });
+    await convergeRootMfaIssuance({ events, accessKeyId, rootExpires, mfaSerial: session.mfaSerial, durationSeconds: session.durationSeconds, now, sleep });
+    await convergeRootMfaSessionProof({ events, accessKeyId, rootExpires, now, sleep });
     const permitted = new Set(brokerPolicySuccessorCapabilitySet().Statement.flatMap(({ Action }) => [].concat(Action)));
     const configurations = Object.values(brokerPolicySuccessorConfigurations(packageEvidence));
     const confined = (service, name, endpoint, region) => { const send = create(service, name, endpoint, region); return (operation, input = {}) => {

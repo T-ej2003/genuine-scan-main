@@ -126,10 +126,14 @@ It authenticates the approval before reading the fixed profile, verifies the
 long-term caller is exact account root, prompts for the MFA code through the
 non-echoing controlling terminal, and calls STS `GetSessionToken` for one hour.
 The resulting credentials stay process-local. Execution waits for exactly one
-matching successful CloudTrail issuance with root identity and
-`mfaAuthenticated=true`; each bounded convergence attempt captures one lookup
-window and reuses it unchanged across every CloudTrail pagination token, while
-a later attempt captures a fresh window. Timeout or ambiguity fails closed.
+matching successful CloudTrail issuance bound to the returned access key, root
+identity, configured MFA device, and requested duration. Because that request
+is signed by long-term credentials, its session context is not used as MFA
+proof. A separate `GetCallerIdentity` event signed by the returned credentials
+must bind the same access key and report `mfaAuthenticated=true`. Each bounded
+convergence attempt captures one lookup window and reuses it unchanged across
+every CloudTrail pagination token, while a later attempt captures a fresh
+window. Timeout or ambiguity fails closed.
 Remove the exceptional long-term root credential from local configuration
 immediately after the one-time transition. Never place it, the session, or an
 MFA code in the repository, shell history, command arguments, or an

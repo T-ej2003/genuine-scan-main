@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { convergeRootMfaIssuance, lookupCloudTrailEvents } from "../aws/component-broker-policy-successor-cli.mjs";
+import { convergeRootMfaIssuance, convergeRootMfaSessionProof, lookupCloudTrailEvents } from "../aws/component-broker-policy-successor-cli.mjs";
 import { brokerPolicySuccessorRootMfaSource, createBrokerPolicySuccessorRootMfaSession, loadRootSource, rootAwsExecutable } from "../aws/component-broker-policy-successor-root-mfa.mjs";
 
 const account = "368992683803", rootArn = `arn:aws:iam::${account}:root`, serial = `arn:aws:iam::${account}:mfa/root-fixture`;
@@ -71,7 +71,8 @@ test("root MFA helper exchanges only the fixed long-term root profile and hands 
   assert.deepEqual(wire.calls.map(({ operation }) => operation), ["GetCallerIdentity", "GetSessionToken", "GetCallerIdentity"]);
   assert.deepEqual(wire.calls[1].input, { DurationSeconds: brokerPolicySuccessorRootMfaSource.durationSeconds, SerialNumber: serial, TokenCode: "123456" });
   assert.deepEqual(session.credentials, { accessKeyId: "SESSIONKEY", secretAccessKey: "session-secret", sessionToken: "session-token" });
-  assert.equal(session.expiresAt, expiration); assert.deepEqual(wire.closed, [false]); session.close();
+  assert.deepEqual({ expiresAt: session.expiresAt, mfaSerial: session.mfaSerial, durationSeconds: session.durationSeconds }, { expiresAt: expiration, mfaSerial: serial, durationSeconds: 3600 });
+  assert.equal(JSON.stringify(session).includes("123456"), false); assert.deepEqual(wire.closed, [false]); session.close();
   assert.deepEqual(session.credentials, {}); assert.deepEqual(wire.closed, [false, true]);
 });
 
@@ -87,7 +88,14 @@ test("root MFA helper rejects temporary/login credentials, wrong identities, dev
   await check({ sts: transport({ issued: { AccessKeyId: "A", SecretAccessKey: "S", SessionToken: "T", Expiration: new Date(nowValue + 120000).toISOString() } }).create }, /lifetime/);
 });
 
-const issuance = ({ accessKeyId = "SESSIONKEY", arn = rootArn, mfa = "true", expires = expiration, errorCode } = {}) => ({ userIdentity: { type: "Root", arn, sessionContext: { attributes: { mfaAuthenticated: mfa } } }, responseElements: { credentials: { accessKeyId, expiration: expires } }, ...(errorCode ? { errorCode } : {}) });
+const issuance = ({ accessKeyId = "SESSIONKEY", arn = rootArn, accountId = account, serialNumber = serial, durationSeconds = 3600, mfa, expires = expiration, errorCode } = {}) => ({
+  eventSource: "sts.amazonaws.com", eventName: "GetSessionToken", awsRegion: "eu-west-2",
+  userIdentity: { type: "Root", accountId, arn, ...(mfa === undefined ? {} : { sessionContext: { attributes: { mfaAuthenticated: mfa } } }) },
+  requestParameters: { serialNumber, durationSeconds }, responseElements: { credentials: { accessKeyId, expiration: expires } }, ...(errorCode ? { errorCode } : {}) });
+const sessionProof = ({ accessKeyId = "SESSIONKEY", arn = rootArn, accountId = account, mfa = "true", errorCode } = {}) => ({
+  eventSource: "sts.amazonaws.com", eventName: "GetCallerIdentity", awsRegion: "eu-west-2",
+  userIdentity: { type: "Root", accountId, arn, accessKeyId, sessionContext: { attributes: { mfaAuthenticated: mfa } } }, ...(errorCode ? { errorCode } : {}) });
+const issuanceProof = options => convergeRootMfaIssuance({ mfaSerial: serial, durationSeconds: 3600, ...options });
 const cloudTrailEntry = event => ({ CloudTrailEvent: JSON.stringify(event) });
 
 test("one CloudTrail pagination chain reuses one lookup window while time advances", async () => {
@@ -103,7 +111,7 @@ test("one CloudTrail pagination chain reuses one lookup window while time advanc
   assert.deepEqual(Object.keys(requests[0]).sort(), ["EndTime", "LookupAttributes", "StartTime"]);
   assert.deepEqual(Object.keys(requests[1]).sort(), ["EndTime", "LookupAttributes", "NextToken", "StartTime"]);
   assert.equal(requests[1].NextToken, "page-2");
-  const accepted = await convergeRootMfaIssuance({ events: async () => values, accessKeyId: "SESSIONKEY", rootExpires: Date.parse(expiration), now: () => nowValue, sleep: async () => {}, maxWaitMs: 1 });
+  const accepted = await issuanceProof({ events: async () => values, accessKeyId: "SESSIONKEY", rootExpires: Date.parse(expiration), now: () => nowValue, sleep: async () => {}, maxWaitMs: 1 });
   assert.equal(accepted.responseElements.credentials.accessKeyId, "SESSIONKEY");
 });
 
@@ -121,7 +129,7 @@ test("root MFA proof accepts an exact issuance on a later valid CloudTrail page"
   const events = eventName => lookupCloudTrailEvents({ eventName, now: () => nowValue, lookup: async () => {
     page += 1; return page < 3 ? { Events: [], NextToken: `page-${page + 1}` } : { Events: [cloudTrailEntry(issuance())] };
   } });
-  const event = await convergeRootMfaIssuance({ events, accessKeyId: "SESSIONKEY", rootExpires: Date.parse(expiration), now: () => nowValue, sleep: async () => {}, maxWaitMs: 1 });
+  const event = await issuanceProof({ events, accessKeyId: "SESSIONKEY", rootExpires: Date.parse(expiration), now: () => nowValue, sleep: async () => {}, maxWaitMs: 1 });
   assert.equal(event.responseElements.credentials.accessKeyId, "SESSIONKEY"); assert.equal(page, 3);
 });
 
@@ -132,17 +140,35 @@ test("CloudTrail pagination rejects repeated tokens and chains beyond its bound"
   assert.equal(page, 21);
 });
 
-test("root MFA CloudTrail proof converges only on one exact issuance", async () => {
+test("root MFA CloudTrail proof binds one exact issuance without misreading its signing context", async () => {
   let clock = nowValue, attempts = 0;
-  const event = await convergeRootMfaIssuance({ events: async () => ++attempts === 3 ? [issuance()] : [], accessKeyId: "SESSIONKEY", rootExpires: Date.parse(expiration), now: () => clock, sleep: async milliseconds => { clock += milliseconds; } });
+  const event = await issuanceProof({ events: async () => ++attempts === 3 ? [issuance({ mfa: "false" })] : [], accessKeyId: "SESSIONKEY", rootExpires: Date.parse(expiration), now: () => clock, sleep: async milliseconds => { clock += milliseconds; } });
   assert.equal(event.responseElements.credentials.accessKeyId, "SESSIONKEY"); assert.equal(attempts, 3);
-  const verify = events => convergeRootMfaIssuance({ events: async () => events, accessKeyId: "SESSIONKEY", rootExpires: Date.parse(expiration), now: () => nowValue, sleep: async () => {}, maxWaitMs: 1 });
+  await issuanceProof({ events: async () => [issuance({ mfa: undefined })], accessKeyId: "SESSIONKEY", rootExpires: Date.parse(expiration), now: () => nowValue, sleep: async () => {}, maxWaitMs: 1 });
+  const verify = events => issuanceProof({ events: async () => events, accessKeyId: "SESSIONKEY", rootExpires: Date.parse(expiration), now: () => nowValue, sleep: async () => {}, maxWaitMs: 1 });
   await assert.rejects(verify([]), /unavailable/);
   await assert.rejects(verify([issuance(), issuance()]), /Unique/);
-  await assert.rejects(verify([issuance({ mfa: "false" })]));
-  await assert.rejects(verify([{ ...issuance(), userIdentity: { type: "IAMUser", arn: rootArn, sessionContext: { attributes: { mfaAuthenticated: "true" } } } }]));
+  await assert.rejects(verify([{ ...issuance(), userIdentity: { type: "IAMUser", accountId: account, arn: rootArn } }]));
   await assert.rejects(verify([issuance({ arn: `arn:aws:iam::${account}:user/not-root` })]));
+  await assert.rejects(verify([issuance({ accountId: "111111111111" })]));
+  await assert.rejects(verify([issuance({ serialNumber: `arn:aws:iam::${account}:mfa/other` })]));
+  await assert.rejects(verify([issuance({ durationSeconds: 900 })]));
+  await assert.rejects(convergeRootMfaIssuance({ events: async () => [issuance()], accessKeyId: "SESSIONKEY", rootExpires: Date.parse(expiration), now: () => nowValue }), /match/);
   await assert.rejects(verify([issuance({ errorCode: "AccessDenied" })]));
   await assert.rejects(verify([issuance({ expires: new Date(nowValue + 3500000).toISOString() })]), /expiration differs/);
   await assert.rejects(verify([issuance({ accessKeyId: "OTHER" })]), /unavailable/);
+});
+
+test("returned root MFA session requires one matching MFA-authenticated CloudTrail proof", async () => {
+  let clock = nowValue, attempts = 0;
+  const event = await convergeRootMfaSessionProof({ events: async () => ++attempts === 2 ? [sessionProof()] : [], accessKeyId: "SESSIONKEY", rootExpires: Date.parse(expiration), now: () => clock, sleep: async milliseconds => { clock += milliseconds; } });
+  assert.equal(event.userIdentity.accessKeyId, "SESSIONKEY"); assert.equal(attempts, 2);
+  const verify = events => convergeRootMfaSessionProof({ events: async () => events, accessKeyId: "SESSIONKEY", rootExpires: Date.parse(expiration), now: () => nowValue, sleep: async () => {}, maxWaitMs: 1 });
+  await assert.rejects(verify([]), /unavailable/);
+  await assert.rejects(verify([sessionProof(), sessionProof()]), /Unique/);
+  await assert.rejects(verify([sessionProof({ mfa: "false" })]));
+  await assert.rejects(verify([sessionProof({ accessKeyId: "OTHER" })]), /unavailable/);
+  await assert.rejects(verify([sessionProof({ arn: `arn:aws:iam::${account}:user/not-root` })]));
+  await assert.rejects(verify([sessionProof({ accountId: "111111111111" })]));
+  await assert.rejects(verify([sessionProof({ errorCode: "AccessDenied" })]));
 });
