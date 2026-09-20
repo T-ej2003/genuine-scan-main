@@ -69,6 +69,9 @@ accepted only when its exact versioned predecessor is the incident's recovery
 checkpoint and its native path, creation time and operation match; it is then
 captured with an exact ETag conditional write before release. A crash after
 adoption resumes verification only under a new recovery approval. Recovery
+accepts Terraform 1.15.8's canonical lowercase five-group hexadecimal lock ID without
+assuming UUID version or variant bits; the ID never substitutes for the exact
+version, ETag, path, operation, and checkpoint bindings above. Recovery
 waits through the broker-authenticated original Terraform session's safety
 fence, reads only the fixed lock/reservation object versions, and fences every
 mutation and isolated command to the earlier of the fresh approval and scoped
