@@ -101,6 +101,32 @@ executor and is not a runtime dependency. Historical broker versions and
 predecessor policy evidence remain unchanged. Do not run recovery until this
 successor lineage is durably closed.
 
+### One-time root MFA session for the successor
+
+The successor CLI obtains its administrative session only from the fixed local
+profile `mscqr-production-root-long-term`. That exceptional profile must resolve
+to long-term credentials for account root, contain no session token or
+expiration, and declare the root MFA device as `mfa_serial` in the local AWS
+config. `default`, `mscqr-production-root`, and `aws login` sessions are not
+accepted as the source. The repository never creates, stores, or discovers a
+root access key or guesses an MFA device ARN.
+
+After a fresh successor authorization, run the existing governed command:
+
+```sh
+node scripts/aws/component-broker-policy-successor-cli.mjs execute APPROVED_RUN_ID TRANSITION_UUID
+```
+
+It authenticates the approval before reading the fixed profile, verifies the
+long-term caller is exact account root, prompts for the MFA code through the
+non-echoing controlling terminal, and calls STS `GetSessionToken` for one hour.
+The resulting credentials stay process-local. Execution waits for exactly one
+matching successful CloudTrail issuance with root identity and
+`mfaAuthenticated=true`; timeout or ambiguity fails closed. Remove the
+exceptional long-term root credential from local configuration immediately
+after the one-time transition. Never place it, the session, or an MFA code in
+the repository, shell history, command arguments, or an authorization artifact.
+
 ## Solo-operator approval
 
 MSCQR currently has one authorized operator/reviewer: User `T-ej2003`, GitHub ID

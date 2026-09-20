@@ -418,12 +418,12 @@ test("the shell credential boundary preserves OIDC or access keys, or pins a loc
 
 test("every direct AWS source in scripts/aws has an explicit audited credential boundary", () => {
   const walk = (directory) => fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => entry.isDirectory() ? walk(`${directory}/${entry.name}`) : [`${directory}/${entry.name}`]);
-  const direct = walk("scripts/aws").filter((file) => /\.(mjs|sh)$/.test(file) && /(?:execFileSync|execFile|spawnSync|spawn|run)\(["']aws["']|\baws\s+(?:sts|kms|ecr|ecs|iam|s3|secretsmanager|rds|cloudtrail)/.test(fs.readFileSync(file, "utf8"))).sort();
+  const direct = walk("scripts/aws").filter((file) => /\.(mjs|sh)$/.test(file) && (file === "scripts/aws/component-broker-policy-successor-root-mfa.mjs" || /(?:execFileSync|execFile|spawnSync|spawn|run)\(["']aws["']|\baws\s+(?:sts|kms|ecr|ecs|iam|s3|secretsmanager|rds|cloudtrail)/.test(fs.readFileSync(file, "utf8")))).sort();
   const classified = [
     "scripts/aws/component-bootstrap-operator.mjs",
     "scripts/aws/component-bootstrap-partial-recovery-cli.mjs",
     "scripts/aws/component-broker-change-cli.mjs",
-    "scripts/aws/component-broker-policy-successor-cli.mjs",
+    "scripts/aws/component-broker-policy-successor-root-mfa.mjs",
     "scripts/aws/component-identity-bootstrap-cli.mjs",
     "scripts/aws/component-installation-session.mjs",
     "scripts/aws/apply-ecr-repository-controls.sh", "scripts/aws/apply-production-full-rls-release.mjs", "scripts/aws/deploy-ecs-service.sh", "scripts/aws/discover-staging-endpoints.mjs", "scripts/aws/prepare-production-backend-failed-recovery-evidence.mjs", "scripts/aws/production-cutover-production-adapters.mjs", "scripts/aws/production-dual-slot-rebaseline-contract.mjs", "scripts/aws/production-identity-adapters.mjs", "scripts/aws/production-initial-activation-lifecycle.mjs", "scripts/aws/publish-ecs-images.sh", "scripts/aws/reconcile-production-stage-a-temporary-kms-capability.mjs", "scripts/aws/recover-production-backend-health.mjs", "scripts/aws/recover-production-green-stage-a-root-drop-orphan.mjs", "scripts/aws/rollback-ecs-service.sh", "scripts/aws/staging-database-role-credentials.mjs", "scripts/aws/verify-production-dependency-closure.mjs", "scripts/aws/verify-production-rotation-via-ecs-exec.mjs",
@@ -433,7 +433,7 @@ test("every direct AWS source in scripts/aws has an explicit audited credential 
     "scripts/aws/component-bootstrap-operator.mjs": /createProductionAwsCredentialEnvironment/,
     "scripts/aws/component-bootstrap-partial-recovery-cli.mjs": /createProductionAwsCredentialEnvironment/,
     "scripts/aws/component-broker-change-cli.mjs": /createProductionAwsCredentialEnvironment/,
-    "scripts/aws/component-broker-policy-successor-cli.mjs": /createProductionAwsCredentialEnvironment/,
+    "scripts/aws/component-broker-policy-successor-root-mfa.mjs": /createProductionAwsCredentialEnvironment/,
     "scripts/aws/component-identity-bootstrap-cli.mjs": /createProductionAwsCredentialEnvironment/,
     "scripts/aws/component-installation-session.mjs": /createProductionAwsCredentialEnvironment/,
     "scripts/aws/apply-ecr-repository-controls.sh": /configure_production_aws_credential_source/,
