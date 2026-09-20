@@ -76,7 +76,7 @@ export async function run(argv = process.argv.slice(2), { source = cleanSource, 
     assert(Date.parse(executionExpiresAt) <= Date.parse(approved.expiresAt), "Recovery execution exceeds its approval");
     if (continuation && observed.currentRecoveryLock) await client.releasePartialActivationLock(preparation.lock, observed.currentRecoveryLock.etag, observed.recovery, preparation, preparationSha256);
     if (continuation && observed.retainedNativeLock) {
-      const value = record("IMPORT_LOCK_CAPTURED");
+      const value = record(observed.retainedNativeLock.operation === "OperationTypeApply" ? "IMPORT_LOCK_CAPTURED" : "PLAN_LOCK_CAPTURED");
       const etag = await client.capturePartialActivationNativeLock(observed.retainedNativeLock, value, preparation, preparationSha256);
       await client.releasePartialActivationLock(preparation.lock, etag, value, preparation, preparationSha256);
     }

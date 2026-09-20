@@ -1,7 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { run } from "../aws/component-broker-policy-successor-cli.mjs";
+import { assertBrokerPolicySuccessorIamRequest, run } from "../aws/component-broker-policy-successor-cli.mjs";
+import { brokerPolicySuccessorManagedIdentities } from "../aws/component-installation-identity-contract.mjs";
+import { canonical } from "../aws/component-iam-installation-contract.mjs";
+
+test("successor root adapter permits only the two exact successor policy writes", () => {
+  const identities = brokerPolicySuccessorManagedIdentities();
+  for (const identity of identities) assert.doesNotThrow(() => assertBrokerPolicySuccessorIamRequest("PutRolePolicy", { RoleName: identity.role, PolicyName: identity.policyName, PolicyDocument: canonical(identity.policy) }));
+  assert.throws(() => assertBrokerPolicySuccessorIamRequest("PutRolePolicy", { RoleName: identities[0].role, PolicyName: identities[0].policyName, PolicyDocument: canonical(identities[1].policy) }));
+  assert.throws(() => assertBrokerPolicySuccessorIamRequest("PutRolePolicy", { RoleName: "other", PolicyName: identities[0].policyName, PolicyDocument: canonical(identities[0].policy) }));
+});
 
 test("successor CLI authenticates approval before root/MFA and exposes no target input", async () => {
   const calls = [], sourceSha = "a".repeat(40), transitionId = "12345678-1234-4234-8234-123456789abc", packageEvidence = { manifest: { sourceSha }, bytes: Buffer.from("x") };

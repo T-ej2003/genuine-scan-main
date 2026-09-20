@@ -213,13 +213,14 @@ export function createTerraformStateBoundary(credentials, binding, { send, descr
       if (active) {
         if (active.checkpoint) assert.deepEqual(active.checkpoint, latest.checkpoint, "Recovery lock is not the latest checkpoint");
         else {
-          assert.equal(active.value.Operation, "OperationTypeApply", "Unexpected active native lock operation");
+          assert(["OperationTypeApply", "OperationTypePlan"].includes(active.value.Operation), "Unexpected active native lock operation");
           assert.equal(active.value.Path, `${bucket}/${key}`);
           assert.match(active.value.ID, /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i, "Unexpected native import lock ID");
           assert.equal(active.value.Info, "", "Unexpected native import lock info"); assert.equal(active.value.Version, "1.15.8", "Unexpected native import lock version");
           assert.equal(active.version.IsLatest, true); const currentIndex = lockVersions.findIndex(({ VersionId }) => VersionId === active.version.VersionId);
           assert.equal(currentIndex, 0, "Native lock version ordering is ambiguous"); const predecessor = inspected[currentIndex + 1]; assert(predecessor?.checkpoint, "Native import lock has no recovery predecessor");
-          assert.equal(predecessor.checkpoint.state, "RECOVERY_EXECUTING", "Native import lock is not bound to an import checkpoint");
+          const expectedCheckpoint = active.value.Operation === "OperationTypeApply" ? "RECOVERY_EXECUTING" : "RESOURCE_ADOPTED";
+          assert.equal(predecessor.checkpoint.state, expectedCheckpoint, "Native lock is not bound to its recovery checkpoint");
           assert.equal(predecessor.checkpoint.recoveryTransitionId, preparation.recoveryTransitionId);
           const nativeCreated = Date.parse(active.value.Created), checkpointCreated = Date.parse(predecessor.value.Created), expiresAt = Date.parse(predecessor.checkpoint.expiresAt);
           assert(Number.isFinite(nativeCreated) && Number.isFinite(checkpointCreated) && Number.isFinite(expiresAt));
@@ -250,8 +251,9 @@ export function createTerraformStateBoundary(credentials, binding, { send, descr
     },
     async capturePartialActivationNativeLock(lock, record, preparation, preparationSha256) {
       assert.deepEqual(Object.keys(lock || {}).sort(), ["created", "etag", "id", "key", "operation", "path", "version", "versionId", "who"]);
-      assert.equal(lock.key, partialActivationRecoveryTarget.lockKey); assert.equal(lock.operation, "OperationTypeApply"); assert.equal(lock.path, `${bucket}/${key}`);
-      const checkpoint = assertPartialActivationRecoveryCheckpoint(record, preparation, preparationSha256); assert.equal(checkpoint.state, "IMPORT_LOCK_CAPTURED");
+      assert.equal(lock.key, partialActivationRecoveryTarget.lockKey); assert(["OperationTypeApply", "OperationTypePlan"].includes(lock.operation)); assert.equal(lock.path, `${bucket}/${key}`);
+      const checkpoint = assertPartialActivationRecoveryCheckpoint(record, preparation, preparationSha256);
+      assert.equal(checkpoint.state, lock.operation === "OperationTypeApply" ? "IMPORT_LOCK_CAPTURED" : "PLAN_LOCK_CAPTURED");
       const marker = await call("s3", "GetObject", { Bucket: bucket, Key: lock.key }, async received => ({ etag: received.ETag, text: await received.Body.transformToString() }));
       assert.equal(marker.etag, lock.etag, "Retained native import lock changed"); const native = assertLock(JSON.parse(marker.text));
       for (const field of ["ID", "Operation", "Who", "Version", "Created", "Path"]) assert.equal(native[field], lock[{ ID: "id", Operation: "operation", Who: "who", Version: "version", Created: "created", Path: "path" }[field]], "Retained native import lock changed");

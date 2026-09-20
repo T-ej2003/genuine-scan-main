@@ -8,7 +8,7 @@ const backend = JSON.parse(fs.readFileSync(path.join(directory, "../../infra/aws
 const sha = /^[a-f0-9]{64}$/;
 const artifactSha = /^sha256:[a-f0-9]{64}$/;
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
-const checkpointStates = new Set(["RECOVERY_EXECUTING", "IMPORT_LOCK_CAPTURED", "RESOURCE_ADOPTED", "STATE_VERIFIED", "RECOVERY_CLOSED"]);
+const checkpointStates = new Set(["RECOVERY_EXECUTING", "IMPORT_LOCK_CAPTURED", "PLAN_LOCK_CAPTURED", "RESOURCE_ADOPTED", "STATE_VERIFIED", "RECOVERY_CLOSED"]);
 
 export const partialActivationRecovery = Object.freeze({
   transitionType: "COMPONENT_INFRASTRUCTURE_PARTIAL_ACTIVATION_RECOVERY",

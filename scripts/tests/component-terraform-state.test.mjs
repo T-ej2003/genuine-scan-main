@@ -104,7 +104,7 @@ test("partial activation recovery waits through the authenticated original Terra
     await assert.rejects(f.boundary.inspectPartialActivationRecovery(historical));
   }
 });
-test("continuation accepts only the native import lock following the exact recovery checkpoint", async () => {
+test("continuation accepts only native import or verification locks following their exact recovery checkpoints", async () => {
   const f = recoveryFixture(), receiptSha256 = crypto.createHash("sha256").update(JSON.stringify(f.receipt)).digest("hex");
   const original = { key: partialActivationRecoveryTarget.lockKey, sha256: "4".repeat(64), etag: '"original"', versionId: "original" };
   const preparation = assertPartialActivationRecoveryPreparation({ schemaVersion: 1, sourceSha: binding.sourceSha, recoveryTransitionId: "87654321-1234-4234-8234-123456789abc", stateIdentity: "INFRASTRUCTURE_CREATED_STATE_INCOMPLETE", backend: contract, historicalActivation: historical,
@@ -117,6 +117,10 @@ test("continuation accepts only the native import lock following the exact recov
   const result = await f.boundary.inspectPartialActivationRecoveryContinuation(preparation, preparationSha256);
   assert.equal(result.stateExists, true); assert.equal(result.retainedNativeLock.id, "12345678-1234-4234-8234-123456789abc");
   f.lockBodies.native.Operation = "OperationTypePlan";
+  await assert.rejects(f.boundary.inspectPartialActivationRecoveryContinuation(preparation, preparationSha256));
+  checkpoint.state = "RESOURCE_ADOPTED"; f.lockBodies.recovery.Info = JSON.stringify(checkpoint);
+  assert.equal((await f.boundary.inspectPartialActivationRecoveryContinuation(preparation, preparationSha256)).retainedNativeLock.operation, "OperationTypePlan");
+  f.lockBodies.native.Operation = "OperationTypeRefresh";
   await assert.rejects(f.boundary.inspectPartialActivationRecoveryContinuation(preparation, preparationSha256));
 });
 for (const mutate of [

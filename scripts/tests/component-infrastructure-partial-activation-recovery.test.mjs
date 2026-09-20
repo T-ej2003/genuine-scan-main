@@ -75,15 +75,15 @@ test("a crashed adoption resumes verification only with a different fresh approv
   assert.equal((await run(["recover", f.directory, "790"], f.dependencies)).state, "RECOVERY_CLOSED"); assert.equal(prepared.historicalAuthorizationExecutable, false);
 });
 
-test("a retained native import lock is captured only through the incident-bound continuation", async t => {
+for (const operation of ["OperationTypeApply", "OperationTypePlan"]) test(`a retained native ${operation} lock is captured only through the incident-bound continuation`, async t => {
   const f = fixture(t); await run(["prepare", f.directory, recoveryTransitionId, historicalActivation.sourceSha, historicalActivation.authorizationRunId, historicalActivation.authorizationArtifactSha256, historicalActivation.planSha256, historicalActivation.preparationSha256, historicalActivation.transitionId], f.dependencies);
-  const native = { key: partialActivationRecoveryTarget.lockKey, etag: '"native"', versionId: "native-version", id: "native-id", operation: "OperationTypeApply", who: "terraform@isolated", version: "1.15.8", created: new Date(Date.now() - 1000).toISOString(), path: `mscqr-production-terraform-state-368992683803-eu-west-2/${partialActivationRecoveryTarget.stateKey}` };
+  const native = { key: partialActivationRecoveryTarget.lockKey, etag: '"native"', versionId: "native-version", id: "native-id", operation, who: "terraform@isolated", version: "1.15.8", created: new Date(Date.now() - 1000).toISOString(), path: `mscqr-production-terraform-state-368992683803-eu-west-2/${partialActivationRecoveryTarget.stateKey}` };
   let captured;
   f.dependencies.session = async () => ({
     principal: "arn:aws:sts::368992683803:assumed-role/mscqr-production-component-table-installer/component-" + historicalTransitionId,
     inspectPartialActivationRecovery: async () => { throw new Error("initial topology is no longer current"); },
     inspectPartialActivationRecoveryContinuation: async () => ({ recovery: { authorizationSha256: "0".repeat(64) }, currentRecoveryLock: null, retainedNativeLock: native, stateExists: true, table: partialActivationRecoveryTarget, iamInstallation }),
-    activatePartialActivationRecovery: expiresAt => expiresAt, capturePartialActivationNativeLock: async (value, record) => { assert.deepEqual(value, native); assert.equal(record.state, "IMPORT_LOCK_CAPTURED"); captured = record; return '"captured"'; },
+    activatePartialActivationRecovery: expiresAt => expiresAt, capturePartialActivationNativeLock: async (value, record) => { assert.deepEqual(value, native); assert.equal(record.state, operation === "OperationTypeApply" ? "IMPORT_LOCK_CAPTURED" : "PLAN_LOCK_CAPTURED"); captured = record; return '"captured"'; },
     beginPartialActivationRecovery: async () => '"marker"', releasePartialActivationLock: async () => {},
     readRecoveredTerraformState: async () => ({ lineage: "lineage", serial: 1, managedAddresses: [partialActivationRecoveryTarget.address] }),
     execute: async ({ mode }, { checkpoint }) => { assert.equal(mode, "recover-verify"); for (const stage of ["backend", "recovery", "adopted", "verified", "closed"]) await checkpoint(stage === "backend" ? { stage, backend: backend(), workspace: "default" } : { stage }); return { result: { type: "result", recoveredAddress: partialActivationRecoveryTarget.address, driftVerified: true } }; }, close: () => {},

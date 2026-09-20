@@ -18,6 +18,13 @@ const sdk = createRequire(new URL("../../infra/aws/terraform/production-componen
 const rootArn = `arn:aws:iam::${identityBootstrap.account}:root`;
 const expiration = value => /^\d{4}-\d{2}-\d{2}T/.test(value || "") ? Date.parse(value) : Date.parse(`${value} UTC`);
 
+export function assertBrokerPolicySuccessorIamRequest(operation, input) {
+  const identity = brokerPolicySuccessorManagedIdentities().find(({ role }) => role === input.RoleName);
+  assert(identity, "Alternate broker identity forbidden");
+  if (input.PolicyName !== undefined) assert.equal(input.PolicyName, identity.policyName);
+  if (operation === "PutRolePolicy") assert.equal(input.PolicyDocument, canonical(identity.policy));
+}
+
 async function administrativeAdapter(packageEvidence) {
   const exported = JSON.parse(execFileSync("aws", ["configure", "export-credentials", "--format", "process"], { env: createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "default", region: identityBootstrap.region }), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
   const credentials = { accessKeyId: exported.AccessKeyId, secretAccessKey: exported.SecretAccessKey, sessionToken: exported.SessionToken };
@@ -31,7 +38,7 @@ async function administrativeAdapter(packageEvidence) {
     assert.equal(rootEvent.userIdentity?.type, "Root"); assert.equal(rootEvent.userIdentity?.arn, rootArn); assert.equal(rootEvent.userIdentity?.sessionContext?.attributes?.mfaAuthenticated, "true"); assert.equal(rootEvent.errorCode, undefined);
     const rootExpires = expiration(rootEvent.responseElements?.credentials?.expiration); assert(Number.isFinite(rootExpires) && Date.now() + 120000 < rootExpires && rootExpires <= Date.now() + 3601000, "Root MFA session is not fresh");
     const permitted = new Set(brokerPolicySuccessorCapabilitySet().Statement.flatMap(({ Action }) => [].concat(Action)));
-    const configuration = brokerPolicySuccessorConfiguration(packageEvidence), identities = brokerPolicySuccessorManagedIdentities(), target = identities.find(({ role }) => role === installationIdentity.terraformRole);
+    const configuration = brokerPolicySuccessorConfiguration(packageEvidence);
     const confined = (service, name, endpoint, region) => { const send = create(service, name, endpoint, region); return (operation, input = {}) => {
       const action = `${service}:${service === "s3" && operation === "ListObjectsV2" ? "ListBucket" : operation}`; assert(permitted.has(action), "Unsupported broker-policy successor API");
       if (service === "lambda") {
@@ -39,11 +46,8 @@ async function administrativeAdapter(packageEvidence) {
         if (operation === "UpdateFunctionCode") { assert.deepEqual(Object.keys(input).sort(), ["FunctionName", "Publish", "RevisionId", "ZipFile"]); assert.equal(input.Publish, false); assert.equal(createHash("sha256").update(input.ZipFile).digest("hex"), packageEvidence.packageSha256); }
         if (operation === "UpdateFunctionConfiguration") assert.deepEqual(input, { FunctionName: installationIdentity.functionName, Description: configuration.Description, RevisionId: input.RevisionId });
         if (operation === "PublishVersion") assert.deepEqual(input, { FunctionName: installationIdentity.functionName, Description: configuration.Description, CodeSha256: configuration.CodeSha256, RevisionId: input.RevisionId });
-      } else if (service === "iam") {
-        const identity = identities.find(({ role }) => role === input.RoleName); assert(identity, "Alternate broker identity forbidden");
-        if (input.PolicyName !== undefined) assert.equal(input.PolicyName, identity.policyName);
-        if (operation === "PutRolePolicy") { assert.equal(identity.role, target.role); assert.equal(input.PolicyDocument, canonical(target.policy)); }
-      } else {
+      } else if (service === "iam") assertBrokerPolicySuccessorIamRequest(operation, input);
+      else {
         assert.equal(input.Bucket, identityBootstrap.bucket); assert([`${identityBootstrap.prefix}identity-bootstrap.json`, brokerPolicySuccessor.reservationKey].includes(input.Key || input.Prefix));
       }
       return send(operation, input);
