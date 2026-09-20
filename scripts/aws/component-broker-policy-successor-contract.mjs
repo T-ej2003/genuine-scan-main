@@ -16,6 +16,7 @@ export const brokerPolicySuccessor = Object.freeze({
   reservationKey: `${identityBootstrap.prefix}broker-policy-successor.json`,
   maxAgeMs: 30 * 60 * 1000,
 });
+export const brokerPolicySuccessorMetadataKey = "broker-policy-successor";
 
 export const predecessorExecutorPolicy = () => terraformExecutorPolicyGeneration("4", false);
 export const successorExecutorPolicy = () => terraformExecutorPolicyGeneration("7", true);
@@ -80,5 +81,21 @@ export function assertBrokerPolicySuccessorRecord(value, bindings) {
   for (const field of ["authorizationExpiresAt", "sessionExpiresAt", "closedAt"]) timestamp(value[field]);
   sha(value.authorizationSha256); assert(Array.isArray(value.authorizationHistory)); const authorizations = new Set([value.authorizationSha256]); for (const prior of value.authorizationHistory) { assert.deepEqual(Object.keys(prior).sort(), ["authorizationExpiresAt", "authorizationSha256", "owner", "sessionExpiresAt"]); sha(prior.authorizationSha256); uuid(prior.owner); timestamp(prior.authorizationExpiresAt); timestamp(prior.sessionExpiresAt); assert(!authorizations.has(prior.authorizationSha256), "Repeated successor authorization"); authorizations.add(prior.authorizationSha256); }
   assert.match(value.runtimeVersionArn || "", /^arn:aws:lambda:eu-west-2::runtime:[a-f0-9]{64}$/); assert.equal(canonical(value.bindings), canonical(bindings), "Broker-policy successor bindings differ");
+  return Object.freeze(structuredClone(value));
+}
+
+export function brokerPolicySuccessorClosureMetadata(record, bindings, runtimeVersionArn, reservationEtag, closedAt) {
+  assert.equal(record.state, "VERIFIED"); assert(typeof reservationEtag === "string" && reservationEtag); timestamp(closedAt); assert.match(runtimeVersionArn || "", /^arn:aws:lambda:eu-west-2::runtime:[a-f0-9]{64}$/);
+  const value = { schemaVersion: 1, state: "BROKER_POLICY_SUCCESSOR_CLOSED", transitionId: record.transitionId, authorizationSha256: record.authorizationSha256,
+    bindingsSha256: digest(bindings), reservationSha256: digest(record), reservationEtagSha256: digest(reservationEtag), runtimeVersionArn, closedAt };
+  return Object.freeze({ [brokerPolicySuccessorMetadataKey]: Buffer.from(canonical(value)).toString("base64url") });
+}
+
+export function assertBrokerPolicySuccessorClosureMetadata(metadata, bindings) {
+  assert.deepEqual(Object.keys(metadata || {}), [brokerPolicySuccessorMetadataKey], "Unexpected broker-policy successor metadata");
+  const value = JSON.parse(Buffer.from(metadata[brokerPolicySuccessorMetadataKey], "base64url").toString("utf8"));
+  assert.deepEqual(Object.keys(value || {}).sort(), ["authorizationSha256", "bindingsSha256", "closedAt", "reservationEtagSha256", "reservationSha256", "runtimeVersionArn", "schemaVersion", "state", "transitionId"].sort());
+  assert.equal(value.schemaVersion, 1); assert.equal(value.state, "BROKER_POLICY_SUCCESSOR_CLOSED"); uuid(value.transitionId); for (const field of ["authorizationSha256", "reservationEtagSha256", "reservationSha256"]) sha(value[field]);
+  assert.equal(value.bindingsSha256, digest(bindings)); assert.match(value.runtimeVersionArn || "", /^arn:aws:lambda:eu-west-2::runtime:[a-f0-9]{64}$/); timestamp(value.closedAt);
   return Object.freeze(structuredClone(value));
 }

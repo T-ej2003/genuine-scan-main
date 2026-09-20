@@ -164,6 +164,14 @@ test("recovery uses the stricter approval/AWS deadline and rechecks it at every 
   const client = await f.open(); await assert.rejects(client.execute({ mode: "recover", plan: null }, { checkpoint: async () => {} }), /fresh recovery authorization/); client.close();
 });
 
+test("recovery inspection forwards the authenticated historical activation", async () => {
+  const f = fixture("TERRAFORM"), historicalActivation = { sourceSha: "c".repeat(40) }; let received;
+  f.dependencies.state = () => ({ close: () => {}, inspectPartialActivationRecovery: async value => { received = value; return { stateIdentity: "INFRASTRUCTURE_CREATED_STATE_INCOMPLETE" }; } });
+  const client = await f.open();
+  assert.equal((await client.inspectPartialActivationRecovery(historicalActivation)).stateIdentity, "INFRASTRUCTURE_CREATED_STATE_INCOMPLETE");
+  assert.equal(received, historicalActivation); client.close();
+});
+
 for (const reserve of [false, true]) test(`isolated apply requires exactly one authenticated reservation: ${reserve}`, async () => {
   const f = fixture("TERRAFORM"); let reservations = 0, closed = 0;
   f.dependencies.state = () => ({ inspect: async () => ({ stateIdentity: "ABSENT" }), close: () => { closed++; }, reserve: async record => {

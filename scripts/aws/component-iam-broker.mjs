@@ -211,13 +211,14 @@ async function runHandler(event, context) {
 // supplies only fixed SDK clients and its immutable package, never request data.
 export async function executeFixedBroker(event, context, { manifest, iam, s3, lambda, currentMain, issuanceEvents, sts, now = Date.now }) {
   assert.equal(manifest.account, account);
-  const bootstrap = JSON.parse(await (await s3("GetObject", { Bucket: bucket, Key: "mscqr/production/component-deployment-state/identity-bootstrap.json" })).Body.transformToString());
+  const bootstrapObject = await s3("GetObject", { Bucket: bucket, Key: "mscqr/production/component-deployment-state/identity-bootstrap.json" });
+  const bootstrap = JSON.parse(await bootstrapObject.Body.transformToString());
   const functionName = "mscqr-production-component-iam-installer";
   assert.match(context?.functionVersion || "", /^[1-9][0-9]*$/, "Unqualified broker invocation forbidden");
   assert.equal(context?.invokedFunctionArn, `${componentBrokerArn}:${context.functionVersion}`, "Broker invocation ARN differs");
   const fn = await lambda("GetFunction", { FunctionName: functionName, Qualifier: context.functionVersion });
   const packageSha256 = Buffer.from(fn.Configuration.CodeSha256, "base64").toString("hex");
-  const anchor = assertEffectiveBootstrapTrustAnchor(bootstrap, manifest, packageSha256);
+  const anchor = assertEffectiveBootstrapTrustAnchor(bootstrap, manifest, packageSha256, bootstrapObject.Metadata || {});
   const version = assertBrokerEntryPoint(context, event?.operation, anchor.entryPoints);
   const identities = await (anchor.policySuccessor ? inspectBrokerPolicySuccessorIdentities(iam) : anchor.changed ? inspectBrokerChangeIdentities(iam) : inspectBootstrapIdentities(iam));
   assert(identities.every(({ role, policy }) => role === "EXPECTED" && policy === "EXPECTED"), "Bootstrap execution authority is incomplete");

@@ -159,7 +159,7 @@ async function establish(binding, { loadUser = loadOperator, sts = stsTransport,
       return Object.freeze({ principal, expiresAt: new Date(expires).toISOString(),
         close,
         async inspect() { await prove(); return boundary.inspect(); },
-        async inspectPartialActivationRecovery() { await prove(); return boundary.inspectPartialActivationRecovery(); },
+        async inspectPartialActivationRecovery(historicalActivation) { await prove(); return boundary.inspectPartialActivationRecovery(historicalActivation); },
         async inspectPartialActivationRecoveryContinuation(preparation, preparationSha256) { await prove(); return boundary.inspectPartialActivationRecoveryContinuation(preparation, preparationSha256); },
         activatePartialActivationRecovery(approvalExpiresAt) {
           const approvalExpires = Date.parse(approvalExpiresAt);

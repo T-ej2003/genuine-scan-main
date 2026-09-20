@@ -80,8 +80,10 @@ sole-user `main`-only approval contract and must be configured explicitly.
 Before recovery, the one-time
 `production-component-broker-policy-successor` transition must move the
 authenticated broker/executor generation together from immutable broker `:4`
-to `:7`. It publishes and authenticates `:7`, then replaces only the exact
-executor inline policy so it invokes `:7` and may version-read only the retained
+to `:7`. It publishes and authenticates `:7`, preserves the historical journal
+body consumed by immutable cleanup/authorization versions `:5`/`:6`, records
+the compact successor closure in authenticated journal object metadata, then
+replaces only the exact executor inline policy so it invokes `:7` and may version-read only the retained
 `.tflock` and immutable `.initial-activation-attempt` objects. The transition
 requires a fresh environment approval, bootstrap-operator MFA provenance, and
 a fresh MFA-backed root session; root is only the bounded administrative
