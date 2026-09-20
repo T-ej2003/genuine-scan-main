@@ -74,7 +74,12 @@ function fixture({ liveStream = false, recovery = false, now = Date.now } = {}) 
 function recoveryFixture(now) {
   const f = fixture({ recovery: true, ...(now ? { now } : {}) });
   f.objects = [{ Key: key + ".initial-activation-attempt" }, { Key: key + ".tflock" }];
-  f.versions = [{ Key: key + ".initial-activation-attempt", IsLatest: true, VersionId: "attempt-version", ETag: '"attempt"' }, { Key: key + ".tflock", IsLatest: true, VersionId: "lock-version", ETag: '"lock"' }];
+  f.versions = [{ Key: key + ".initial-activation-attempt", IsLatest: true, VersionId: "attempt-version", ETag: '"attempt"' },
+    { Key: key + ".tflock", IsLatest: true, VersionId: "lock-version", ETag: '"lock"', LastModified: "2026-09-19T00:10:00.000Z" },
+    { Key: key + ".tflock", IsLatest: false, VersionId: "plan-lock-version", ETag: '"plan-lock"', LastModified: "2026-09-19T00:00:00.000Z" }];
+  f.deleted = [{ Key: key + ".tflock", IsLatest: false, VersionId: "plan-delete-version", LastModified: "2026-09-19T00:01:00.000Z" }];
+  f.lockBodies = { "lock-version": { ID: "12345678-1234-4234-8234-123456789abc", Operation: "OperationTypeApply", Info: "", Who: "terraform@isolated", Version: "1.15.8", Created: "2026-09-19T00:10:00.000Z", Path: "mscqr-production-terraform-state-368992683803-eu-west-2/" + key },
+    "plan-lock-version": { ID: "22345678-1234-4234-8234-123456789abc", Operation: "OperationTypePlan", Info: "", Who: "terraform@isolated", Version: "1.15.8", Created: "2026-09-19T00:00:00.000Z", Path: "mscqr-production-terraform-state-368992683803-eu-west-2/" + key } };
   f.table = { TableName: "mscqr-production-component-deployment-state", TableArn: "arn:aws:dynamodb:eu-west-2:368992683803:table/mscqr-production-component-deployment-state", TableStatus: "ACTIVE", BillingModeSummary: { BillingMode: "PAY_PER_REQUEST" }, KeySchema: [{ AttributeName: "stateKey", KeyType: "HASH" }], AttributeDefinitions: [{ AttributeName: "stateKey", AttributeType: "S" }], SSEDescription: { Status: "ENABLED" }, DeletionProtectionEnabled: false, StreamSpecification: { StreamEnabled: false }, Replicas: [] };
   f.recoveryMetadata = { DescribeContinuousBackups: { ContinuousBackupsDescription: { PointInTimeRecoveryDescription: { PointInTimeRecoveryStatus: "ENABLED" } } }, DescribeTimeToLive: { TimeToLiveDescription: { TimeToLiveStatus: "DISABLED" } }, ListTagsOfResource: { Tags: [{ Key: "ManagedBy", Value: "Terraform" }, { Key: "Environment", Value: "production" }, { Key: "Stack", Value: "production-component-deployment-state" }] } };
   return f;
@@ -89,6 +94,14 @@ test("partial activation recovery authenticates the exact immutable reservation,
     assert(statements.some(statement => [].concat(statement.Action).includes("s3:GetObjectVersion") && [].concat(statement.Resource).includes(resource)), `Missing version-read authority for ${resource}`);
   }
   assert(f.calls.every(({ operation }) => !/Put|Delete|Create|Update/.test(operation)));
+});
+test("partial activation recovery accepts only paired preparatory plan lock history before the current apply lock", async () => {
+  for (const mutate of [
+    f => { f.deleted = []; },
+    f => { f.deleted[0].IsLatest = true; },
+    f => { f.lockBodies["plan-lock-version"].Operation = "OperationTypeApply"; },
+    f => { f.deleted[0].LastModified = "2026-09-19T00:11:00.000Z"; },
+  ]) { const f = recoveryFixture(); mutate(f); await assert.rejects(f.boundary.inspectPartialActivationRecovery(historical)); }
 });
 test("partial activation recovery waits through the authenticated original Terraform session expiry fence", async () => {
   const expiry = Date.parse("2026-09-19T00:15:00.000Z"), fence = expiry + 120000, clock = { value: expiry - 1 };

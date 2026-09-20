@@ -36,6 +36,12 @@ function assertLock(value) {
   assert.equal(value.Path, `${bucket}/${key}`); return value;
 }
 
+function assertNativeTerraformLock(value, operation) {
+  const lock = assertLock(value); assert.equal(lock.Operation, operation);
+  assert.match(lock.ID, /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i);
+  assert.equal(lock.Info, ""); assert.equal(lock.Version, "1.15.8"); return lock;
+}
+
 function assertRecoveredTerraformState(bytes) {
   const value = JSON.parse(bytes);
   assert(typeof value.lineage === "string" && value.lineage); assert(Number.isSafeInteger(value.serial) && value.serial >= 1);
@@ -173,11 +179,23 @@ export function createTerraformStateBoundary(credentials, binding, { send, descr
       const versions = history.Versions || [], markers = history.DeleteMarkers || [];
       assert.equal(versions.filter(({ Key }) => Key === key).length, 0, "Terraform state history exists");
       assert.equal(markers.filter(({ Key }) => Key === key).length, 0, "Terraform state delete marker exists");
-      const lockVersion = versions.find(({ Key, IsLatest }) => Key === partialActivationRecoveryTarget.lockKey && IsLatest);
+      const lockVersions = versions.filter(({ Key }) => Key === partialActivationRecoveryTarget.lockKey), lockMarkers = markers.filter(({ Key }) => Key === partialActivationRecoveryTarget.lockKey);
+      const lockVersion = lockVersions.find(({ IsLatest }) => IsLatest);
       assert(lockVersion?.VersionId && lockVersion.ETag, "Exact current lock version is required");
-      assert.equal(markers.filter(({ Key }) => Key === partialActivationRecoveryTarget.lockKey).length, 0, "Lock delete-marker topology is unsafe");
+      assert.equal(lockVersions.filter(({ IsLatest }) => IsLatest).length, 1); assert.equal(lockMarkers.length, lockVersions.length - 1, "Preparatory lock history is incomplete");
+      assert(lockMarkers.every(marker => marker.VersionId && !marker.IsLatest), "Current lock cannot be a delete marker");
       const lockBytes = await call("s3", "GetObject", { Bucket: bucket, Key: partialActivationRecoveryTarget.lockKey, VersionId: lockVersion.VersionId }, received => received.Body.transformToString());
-      assertLock(JSON.parse(lockBytes));
+      assertNativeTerraformLock(JSON.parse(lockBytes), "OperationTypeApply");
+      const planLocks = [];
+      for (const version of lockVersions.filter(value => value !== lockVersion)) {
+        assert(version.VersionId && version.ETag && !version.IsLatest, "Preparatory lock version is ambiguous");
+        const text = await call("s3", "GetObject", { Bucket: bucket, Key: partialActivationRecoveryTarget.lockKey, VersionId: version.VersionId }, received => received.Body.transformToString());
+        assertNativeTerraformLock(JSON.parse(text), "OperationTypePlan"); planLocks.push(version);
+      }
+      const times = values => values.map(({ LastModified }) => Date.parse(LastModified)).sort((a, b) => a - b);
+      const planTimes = times(planLocks), markerTimes = times(lockMarkers), applyTime = Date.parse(lockVersion.LastModified);
+      assert(planTimes.every(Number.isFinite) && markerTimes.every(Number.isFinite) && Number.isFinite(applyTime));
+      for (let index = 0; index < planTimes.length; index++) assert(planTimes[index] <= markerTimes[index] && markerTimes[index] <= (planTimes[index + 1] ?? applyTime), "Preparatory lock lifecycle ordering is invalid");
       const observedTable = await table(); assertRecoveredTable(observedTable);
       assertRecoveredTableMetadata({ backups: await dynamo("DescribeContinuousBackups", { TableName: tableName }), ttl: await dynamo("DescribeTimeToLive", { TableName: tableName }), tags: await dynamo("ListTagsOfResource", { ResourceArn: observedTable.TableArn }) });
       const iamInstallation = await authenticateInstallation();
@@ -214,9 +232,7 @@ export function createTerraformStateBoundary(credentials, binding, { send, descr
         if (active.checkpoint) assert.deepEqual(active.checkpoint, latest.checkpoint, "Recovery lock is not the latest checkpoint");
         else {
           assert(["OperationTypeApply", "OperationTypePlan"].includes(active.value.Operation), "Unexpected active native lock operation");
-          assert.equal(active.value.Path, `${bucket}/${key}`);
-          assert.match(active.value.ID, /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i, "Unexpected native import lock ID");
-          assert.equal(active.value.Info, "", "Unexpected native import lock info"); assert.equal(active.value.Version, "1.15.8", "Unexpected native import lock version");
+          assertNativeTerraformLock(active.value, active.value.Operation);
           assert.equal(active.version.IsLatest, true); const currentIndex = lockVersions.findIndex(({ VersionId }) => VersionId === active.version.VersionId);
           assert.equal(currentIndex, 0, "Native lock version ordering is ambiguous"); const predecessor = inspected[currentIndex + 1]; assert(predecessor?.checkpoint, "Native import lock has no recovery predecessor");
           const expectedCheckpoint = active.value.Operation === "OperationTypeApply" ? "RECOVERY_EXECUTING" : "RESOURCE_ADOPTED";
@@ -255,7 +271,7 @@ export function createTerraformStateBoundary(credentials, binding, { send, descr
       const checkpoint = assertPartialActivationRecoveryCheckpoint(record, preparation, preparationSha256);
       assert.equal(checkpoint.state, lock.operation === "OperationTypeApply" ? "IMPORT_LOCK_CAPTURED" : "PLAN_LOCK_CAPTURED");
       const marker = await call("s3", "GetObject", { Bucket: bucket, Key: lock.key }, async received => ({ etag: received.ETag, text: await received.Body.transformToString() }));
-      assert.equal(marker.etag, lock.etag, "Retained native import lock changed"); const native = assertLock(JSON.parse(marker.text));
+      assert.equal(marker.etag, lock.etag, "Retained native import lock changed"); const native = assertNativeTerraformLock(JSON.parse(marker.text), lock.operation);
       for (const field of ["ID", "Operation", "Who", "Version", "Created", "Path"]) assert.equal(native[field], lock[{ ID: "id", Operation: "operation", Who: "who", Version: "version", Created: "created", Path: "path" }[field]], "Retained native import lock changed");
       const recovery = { ID: checkpoint.recoveryTransitionId, Operation: "OperationTypeRecovery", Info: JSON.stringify(checkpoint), Who: checkpoint.owner.principal, Version: "1.15.8", Created: new Date().toISOString(), Path: `${bucket}/${key}` };
       const response = await call("s3", "PutObject", { Bucket: bucket, Key: lock.key, Body: JSON.stringify(recovery), ServerSideEncryption: "AES256", IfMatch: lock.etag });
