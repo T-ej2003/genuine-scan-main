@@ -42,6 +42,21 @@ export async function convergeRootMfaIssuance({ events, accessKeyId, rootExpires
   throw new Error("Root MFA GetSessionToken issuance evidence unavailable");
 }
 
+export async function lookupCloudTrailEvents({ lookup, eventName, now = Date.now }) {
+  const EndTime = new Date(now()), invariant = Object.freeze({
+    LookupAttributes: Object.freeze([Object.freeze({ AttributeKey: "EventName", AttributeValue: eventName })]),
+    StartTime: new Date(EndTime.getTime() - 3600000), EndTime,
+  });
+  const values = [], seen = new Set(); let NextToken;
+  do {
+    const page = await lookup("LookupEvents", { ...invariant, ...(NextToken ? { NextToken } : {}) });
+    for (const event of page.Events || []) values.push(JSON.parse(event.CloudTrailEvent));
+    NextToken = page.NextToken;
+    if (NextToken) { assert(!seen.has(NextToken) && seen.size < 20); seen.add(NextToken); }
+  } while (NextToken);
+  return values;
+}
+
 export async function administrativeAdapter(packageEvidence, { root = createBrokerPolicySuccessorRootMfaSession, now = Date.now, sleep = delay } = {}) {
   const session = await root(), credentials = session.credentials;
   const clients = [], create = (service, name, endpoint, region = identityBootstrap.region) => { const library = sdk(`@aws-sdk/client-${service}`), client = new library[`${name}Client`]({ credentials, region, endpoint, maxAttempts: 1 }); clients.push(client); return async (operation, input = {}) => client.send(new library[`${operation}Command`](input)); };
@@ -49,7 +64,7 @@ export async function administrativeAdapter(packageEvidence, { root = createBrok
     assert.deepEqual(Object.keys(credentials || {}).sort(), ["accessKeyId", "secretAccessKey", "sessionToken"]); assert(Object.values(credentials).every(value => typeof value === "string" && value), "Fresh MFA-backed root session credentials required");
     const sts = create("sts", "STS", "https://sts.eu-west-2.amazonaws.com"), caller = await sts("GetCallerIdentity"); assert.deepEqual({ Account: caller.Account, Arn: caller.Arn }, { Account: identityBootstrap.account, Arn: rootArn });
     const cloudtrail = create("cloudtrail", "CloudTrail", "https://cloudtrail.eu-west-2.amazonaws.com"), accessKeyId = credentials.accessKeyId;
-    const events = async eventName => { const values = [], seen = new Set(); let NextToken; do { const page = await cloudtrail("LookupEvents", { LookupAttributes: [{ AttributeKey: "EventName", AttributeValue: eventName }], StartTime: new Date(now() - 3600000), EndTime: new Date(now()), ...(NextToken ? { NextToken } : {}) }); for (const event of page.Events || []) values.push(JSON.parse(event.CloudTrailEvent)); NextToken = page.NextToken; if (NextToken) { assert(!seen.has(NextToken) && seen.size < 20); seen.add(NextToken); } } while (NextToken); return values; };
+    const events = eventName => lookupCloudTrailEvents({ lookup: cloudtrail, eventName, now });
     const rootExpires = Date.parse(session.expiresAt); assert(Number.isFinite(rootExpires) && now() + 120000 < rootExpires && rootExpires <= now() + 3601000, "Root MFA session is not fresh");
     await convergeRootMfaIssuance({ events, accessKeyId, rootExpires, now, sleep });
     const permitted = new Set(brokerPolicySuccessorCapabilitySet().Statement.flatMap(({ Action }) => [].concat(Action)));

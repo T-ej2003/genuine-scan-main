@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { convergeRootMfaIssuance } from "../aws/component-broker-policy-successor-cli.mjs";
+import { convergeRootMfaIssuance, lookupCloudTrailEvents } from "../aws/component-broker-policy-successor-cli.mjs";
 import { brokerPolicySuccessorRootMfaSource, createBrokerPolicySuccessorRootMfaSession, loadRootSource, rootAwsExecutable } from "../aws/component-broker-policy-successor-root-mfa.mjs";
 
 const account = "368992683803", rootArn = `arn:aws:iam::${account}:root`, serial = `arn:aws:iam::${account}:mfa/root-fixture`;
@@ -88,6 +88,49 @@ test("root MFA helper rejects temporary/login credentials, wrong identities, dev
 });
 
 const issuance = ({ accessKeyId = "SESSIONKEY", arn = rootArn, mfa = "true", expires = expiration, errorCode } = {}) => ({ userIdentity: { type: "Root", arn, sessionContext: { attributes: { mfaAuthenticated: mfa } } }, responseElements: { credentials: { accessKeyId, expiration: expires } }, ...(errorCode ? { errorCode } : {}) });
+const cloudTrailEntry = event => ({ CloudTrailEvent: JSON.stringify(event) });
+
+test("one CloudTrail pagination chain reuses one lookup window while time advances", async () => {
+  let clock = nowValue, page = 0; const requests = [];
+  const values = await lookupCloudTrailEvents({ eventName: "GetSessionToken", now: () => clock, lookup: async (_operation, input) => {
+    requests.push(input); clock += 30000; page += 1;
+    return page === 1 ? { Events: [], NextToken: "page-2" } : { Events: [cloudTrailEntry(issuance())] };
+  } });
+  assert.equal(values.length, 1); assert.equal(requests.length, 2);
+  assert.strictEqual(requests[0].LookupAttributes, requests[1].LookupAttributes);
+  assert.strictEqual(requests[0].StartTime, requests[1].StartTime);
+  assert.strictEqual(requests[0].EndTime, requests[1].EndTime);
+  assert.deepEqual(Object.keys(requests[0]).sort(), ["EndTime", "LookupAttributes", "StartTime"]);
+  assert.deepEqual(Object.keys(requests[1]).sort(), ["EndTime", "LookupAttributes", "NextToken", "StartTime"]);
+  assert.equal(requests[1].NextToken, "page-2");
+  const accepted = await convergeRootMfaIssuance({ events: async () => values, accessKeyId: "SESSIONKEY", rootExpires: Date.parse(expiration), now: () => nowValue, sleep: async () => {}, maxWaitMs: 1 });
+  assert.equal(accepted.responseElements.credentials.accessKeyId, "SESSIONKEY");
+});
+
+test("a new CloudTrail convergence lookup captures a new window", async () => {
+  let clock = nowValue; const requests = [], lookup = async (_operation, input) => { requests.push(input); return { Events: [] }; };
+  await lookupCloudTrailEvents({ lookup, eventName: "GetSessionToken", now: () => clock });
+  clock += 5000;
+  await lookupCloudTrailEvents({ lookup, eventName: "GetSessionToken", now: () => clock });
+  assert.equal(requests[1].EndTime.getTime() - requests[0].EndTime.getTime(), 5000);
+  assert.equal(requests[1].StartTime.getTime() - requests[0].StartTime.getTime(), 5000);
+});
+
+test("root MFA proof accepts an exact issuance on a later valid CloudTrail page", async () => {
+  let page = 0;
+  const events = eventName => lookupCloudTrailEvents({ eventName, now: () => nowValue, lookup: async () => {
+    page += 1; return page < 3 ? { Events: [], NextToken: `page-${page + 1}` } : { Events: [cloudTrailEntry(issuance())] };
+  } });
+  const event = await convergeRootMfaIssuance({ events, accessKeyId: "SESSIONKEY", rootExpires: Date.parse(expiration), now: () => nowValue, sleep: async () => {}, maxWaitMs: 1 });
+  assert.equal(event.responseElements.credentials.accessKeyId, "SESSIONKEY"); assert.equal(page, 3);
+});
+
+test("CloudTrail pagination rejects repeated tokens and chains beyond its bound", async () => {
+  await assert.rejects(() => lookupCloudTrailEvents({ eventName: "GetSessionToken", lookup: async () => ({ Events: [], NextToken: "repeat" }) }));
+  let page = 0;
+  await assert.rejects(() => lookupCloudTrailEvents({ eventName: "GetSessionToken", lookup: async () => ({ Events: [], NextToken: `page-${++page}` }) }));
+  assert.equal(page, 21);
+});
 
 test("root MFA CloudTrail proof converges only on one exact issuance", async () => {
   let clock = nowValue, attempts = 0;
