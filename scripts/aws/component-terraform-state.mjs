@@ -20,7 +20,8 @@ function assertRecoveredTable(value) {
   assert.deepEqual(value?.KeySchema, [{ AttributeName: "stateKey", KeyType: "HASH" }]);
   assert.deepEqual(value?.AttributeDefinitions, [{ AttributeName: "stateKey", AttributeType: "S" }]);
   assert.equal(value?.SSEDescription?.Status, "ENABLED"); assert.equal(value?.DeletionProtectionEnabled, false);
-  assert.equal(value?.StreamSpecification?.StreamEnabled, false); assert.deepEqual(value?.Replicas || [], []);
+  const stream = value?.StreamSpecification;
+  assert(stream === undefined || stream.StreamEnabled === false, "DynamoDB stream must be disabled"); assert.deepEqual(value?.Replicas || [], []);
 }
 
 function assertRecoveredTableMetadata({ backups, ttl, tags }) {
