@@ -38,7 +38,9 @@ function assertLock(value) {
 
 function assertNativeTerraformLock(value, operation) {
   const lock = assertLock(value); assert.equal(lock.Operation, operation);
-  assert.match(lock.ID, /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i);
+  // Terraform 1.15.8 formats sixteen random bytes as five hex groups. It
+  // does not assign UUID version or variant bits to LockInfo.ID.
+  assert.match(lock.ID, /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/);
   assert.equal(lock.Info, ""); assert.equal(lock.Version, "1.15.8"); return lock;
 }
 

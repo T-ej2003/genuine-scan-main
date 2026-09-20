@@ -95,6 +95,18 @@ test("partial activation recovery authenticates the exact immutable reservation,
   }
   assert(f.calls.every(({ operation }) => !/Put|Delete|Create|Update/.test(operation)));
 });
+test("partial activation recovery accepts the pinned Terraform lock ID format without inventing UUIDv4 semantics", async () => {
+  const f = recoveryFixture(), id = "12345678-1234-7abc-2def-0123456789ab";
+  // Terraform 1.15.8's uuid.FormatUUID formats random bytes; it does not set
+  // the UUIDv4 version or variant bits this ID deliberately lacks.
+  assert.doesNotMatch(id, /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i);
+  f.lockBodies["lock-version"].ID = id;
+  assert.equal((await f.boundary.inspectPartialActivationRecovery(historical)).stateIdentity, "INFRASTRUCTURE_CREATED_STATE_INCOMPLETE");
+  for (const mutate of [value => { value.ID = "not-a-terraform-lock-id"; }, value => { value.ID = id.toUpperCase(); }, value => { value.ID = ""; }, value => { delete value.ID; }]) {
+    const invalid = recoveryFixture(); mutate(invalid.lockBodies["lock-version"]);
+    await assert.rejects(invalid.boundary.inspectPartialActivationRecovery(historical));
+  }
+});
 test("partial activation recovery accepts only paired preparatory plan lock history before the current apply lock", async () => {
   for (const mutate of [
     f => { f.deleted = []; },
