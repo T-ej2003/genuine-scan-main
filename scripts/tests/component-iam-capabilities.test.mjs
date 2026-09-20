@@ -60,15 +60,14 @@ test("bootstrap owns fixed broker authority; normal sessions cannot replace code
   assert.notEqual(digest(changed), digest(capabilities));
 });
 
-test("successor broker gains only exact immutable version-7 self-read authority", () => {
+test("successor broker gains only exact immutable version-7-to-9 self-read authority", () => {
   const predecessor = brokerChangeManagedIdentities().find(({ role }) => role === installationIdentity.provisionerRole).policy;
   const successor = brokerPolicySuccessorManagedIdentities().find(({ role }) => role === installationIdentity.provisionerRole).policy;
   const added = pairs(successor).filter(pair => !permitsPair(predecessor, pair.action, pair.resource));
-  assert.deepEqual(added.map(({ action, resource }) => [action, resource]), [
-    ["lambda:GetFunction", `${componentBrokerArn}:7`], ["lambda:GetFunctionConfiguration", `${componentBrokerArn}:7`],
-    ["lambda:GetFunctionCodeSigningConfig", `${componentBrokerArn}:7`], ["lambda:GetRuntimeManagementConfig", `${componentBrokerArn}:7`],
-    ["lambda:GetFunctionConcurrency", `${componentBrokerArn}:7`], ["lambda:GetPolicy", `${componentBrokerArn}:7`],
-  ]);
-  const session = brokerPolicySuccessorManagedIdentities().find(({ role }) => role === "mscqr-production-component-installation-session");
-  assert.deepEqual(pairs(session.policy), [{ action: "lambda:InvokeFunction", resource: `${componentBrokerArn}:7` }]);
+  assert.deepEqual(added.map(({ action, resource }) => [action, resource]), ["lambda:GetFunction", "lambda:GetFunctionConfiguration", "lambda:GetFunctionCodeSigningConfig", "lambda:GetRuntimeManagementConfig", "lambda:GetFunctionConcurrency", "lambda:GetPolicy"]
+    .flatMap(action => ["7", "8", "9"].map(version => [action, `${componentBrokerArn}:${version}`])));
+  for (const [role, version] of [["mscqr-production-component-installation-session", "7"], ["mscqr-production-component-cleanup-session", "8"], ["mscqr-production-component-installation-authorizer", "9"]]) {
+    const session = brokerPolicySuccessorManagedIdentities().find(identity => identity.role === role);
+    assert.deepEqual(pairs(session.policy), [{ action: "lambda:InvokeFunction", resource: `${componentBrokerArn}:${version}` }]);
+  }
 });

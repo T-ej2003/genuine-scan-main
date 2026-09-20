@@ -30,12 +30,14 @@ assert.equal(successorExecutorPolicySha256, "0f08fdee746a32153be9e04394beb71a4eb
 export const brokerPolicySuccessorDelta = Object.freeze({
   invocation: Object.freeze({ from: `${componentBrokerArn}:${brokerChangeEntryPoints.INSTALL}`, to: `${componentBrokerArn}:${brokerPolicySuccessorEntryPoints.INSTALL}` }),
   installationSessionInvocation: Object.freeze({ from: `${componentBrokerArn}:${brokerChangeEntryPoints.INSTALL}`, to: `${componentBrokerArn}:${brokerPolicySuccessorEntryPoints.INSTALL}` }),
+  cleanupSessionInvocation: Object.freeze({ from: `${componentBrokerArn}:${brokerChangeEntryPoints.CLEANUP}`, to: `${componentBrokerArn}:${brokerPolicySuccessorEntryPoints.CLEANUP}` }),
+  authorizationSessionInvocation: Object.freeze({ from: `${componentBrokerArn}:${brokerChangeEntryPoints.AUTHORIZE}`, to: `${componentBrokerArn}:${brokerPolicySuccessorEntryPoints.AUTHORIZE}` }),
   versionedReads: Object.freeze(successorExecutorPolicy().Statement.find(({ Action }) => Action === "s3:GetObjectVersion").Resource),
 });
 
 export const brokerPolicySuccessorMutations = Object.freeze([
-  "RESERVE_EXACT_TRANSITION", "UPDATE_EXACT_BROKER_CODE", "SET_SUCCESSOR_INSTALL_DESCRIPTION", "PUBLISH_IMMUTABLE_VERSION_7",
-  "PUT_EXACT_BROKER_POLICY", "PUT_EXACT_EXECUTOR_POLICY", "PUT_EXACT_INSTALLATION_SESSION_POLICY", "CLOSE_SUCCESSOR_LINEAGE",
+  "RESERVE_EXACT_TRANSITION", "UPDATE_EXACT_BROKER_CODE", "PUBLISH_IMMUTABLE_VERSION_7", "PUBLISH_IMMUTABLE_VERSION_8", "PUBLISH_IMMUTABLE_VERSION_9",
+  "PUT_EXACT_BROKER_POLICY", "PUT_EXACT_EXECUTOR_POLICY", "PUT_EXACT_INSTALLATION_SESSION_POLICY", "PUT_EXACT_CLEANUP_SESSION_POLICY", "PUT_EXACT_AUTHORIZATION_SESSION_POLICY", "CLOSE_SUCCESSOR_LINEAGE",
 ]);
 
 export const brokerPolicyPredecessor = Object.freeze({
@@ -47,22 +49,28 @@ export const brokerPolicyPredecessor = Object.freeze({
   identitySetSha256: "d31834166a87c78bbd5c72d7501f94706665d43cbaee6925ba9b447e91fceef0",
 });
 
-export function brokerPolicySuccessorConfiguration(packageEvidence) {
+export function brokerPolicySuccessorConfiguration(packageEvidence, entryPoint = "INSTALL") {
   assert.equal(packageEvidence.manifestSha256, digest(packageEvidence.manifest));
   return brokerConfiguration({ packageSha256: packageEvidence.packageSha256, manifestSha256: packageEvidence.manifestSha256,
-    entryPoint: "INSTALL", entryPoints: brokerPolicySuccessorEntryPoints });
+    entryPoint, entryPoints: brokerPolicySuccessorEntryPoints });
 }
+
+export const brokerPolicySuccessorConfigurations = packageEvidence => Object.freeze(Object.fromEntries(
+  Object.keys(brokerPolicySuccessorEntryPoints).map(entryPoint => [entryPoint, brokerPolicySuccessorConfiguration(packageEvidence, entryPoint)]),
+));
 
 export function brokerPolicySuccessorBindings(packageEvidence) {
   assert.equal(packageEvidence.manifestSha256, digest(packageEvidence.manifest)); sha(packageEvidence.packageSha256);
-  const predecessorSession = brokerChangeManagedIdentities().find(({ role }) => role === identityBootstrap.installationRole), successorSession = brokerPolicySuccessorManagedIdentities().find(({ role }) => role === identityBootstrap.installationRole);
+  const predecessorIdentities = brokerChangeManagedIdentities(), successorIdentities = brokerPolicySuccessorManagedIdentities();
+  const session = role => { const predecessor = predecessorIdentities.find(identity => identity.role === role), successor = successorIdentities.find(identity => identity.role === role); return { role, policyName: predecessor.policyName, predecessorPolicySha256: predecessor.policySha256, successorPolicySha256: successor.policySha256 }; };
+  const configurations = brokerPolicySuccessorConfigurations(packageEvidence);
   return Object.freeze({
     predecessor: brokerPolicyPredecessor,
     successor: { sourceSha: packageEvidence.manifest.sourceSha, packageSha256: packageEvidence.packageSha256, manifestSha256: packageEvidence.manifestSha256,
-      lambdaCodeSha256: Buffer.from(packageEvidence.packageSha256, "hex").toString("base64"), brokerVersion: "7", policySha256: successorExecutorPolicySha256, brokerPolicySha256: successorBrokerPolicySha256,
-      configurationSha256: digest(brokerPolicySuccessorConfiguration(packageEvidence)), identitySetSha256: digest(brokerPolicySuccessorManagedIdentities()) },
+      lambdaCodeSha256: Buffer.from(packageEvidence.packageSha256, "hex").toString("base64"), brokerVersion: "7", brokerVersions: Object.values(brokerPolicySuccessorEntryPoints), policySha256: successorExecutorPolicySha256, brokerPolicySha256: successorBrokerPolicySha256,
+      configurationSha256: digest(configurations.INSTALL), configurationSetSha256: digest(configurations), identitySetSha256: digest(successorIdentities) },
     role: installationIdentity.terraformRole, policyName: "MSCQRComponentTableExecutor",
-    installationSession: { role: identityBootstrap.installationRole, policyName: predecessorSession.policyName, predecessorPolicySha256: predecessorSession.policySha256, successorPolicySha256: successorSession.policySha256 },
+    installationSession: session(identityBootstrap.installationRole), cleanupSession: session(identityBootstrap.cleanupRole), authorizationSession: session(identityBootstrap.authorizationRole),
     delta: brokerPolicySuccessorDelta, mutations: brokerPolicySuccessorMutations,
   });
 }
@@ -73,35 +81,35 @@ export function brokerPolicySuccessorCapabilitySet() {
   const identities = brokerPolicySuccessorManagedIdentities();
   return { Version: "2012-10-17", Statement: [
     { Effect: "Allow", Action: ["iam:GetRole", "iam:GetRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies", "iam:ListRoleTags"], Resource: identities.map(({ arn }) => arn) },
-    { Effect: "Allow", Action: "iam:PutRolePolicy", Resource: [componentRoleArn(installationIdentity.provisionerRole), componentRoleArn(installationIdentity.terraformRole), componentRoleArn(identityBootstrap.installationRole)] },
+    { Effect: "Allow", Action: "iam:PutRolePolicy", Resource: [componentRoleArn(installationIdentity.provisionerRole), componentRoleArn(installationIdentity.terraformRole), componentRoleArn(identityBootstrap.installationRole), componentRoleArn(identityBootstrap.cleanupRole), componentRoleArn(identityBootstrap.authorizationRole)] },
     { Effect: "Allow", Action: ["lambda:GetFunction", "lambda:GetFunctionConfiguration", "lambda:GetFunctionCodeSigningConfig", "lambda:GetFunctionConcurrency", "lambda:GetRuntimeManagementConfig", "lambda:ListVersionsByFunction", "lambda:GetPolicy", "lambda:UpdateFunctionCode", "lambda:UpdateFunctionConfiguration", "lambda:PublishVersion"], Resource: componentBrokerArn },
-    { Effect: "Allow", Action: ["lambda:GetFunction", "lambda:GetFunctionConfiguration", "lambda:GetRuntimeManagementConfig", "lambda:GetPolicy"], Resource: [...[1, 2, 3, 4, 5, 6, 7].map(version => `${componentBrokerArn}:${version}`)] },
+    { Effect: "Allow", Action: ["lambda:GetFunction", "lambda:GetFunctionConfiguration", "lambda:GetRuntimeManagementConfig", "lambda:GetPolicy"], Resource: [...[1, 2, 3, 4, 5, 6, 7, 8, 9].map(version => `${componentBrokerArn}:${version}`)] },
     { Effect: "Allow", Action: "s3:GetObject", Resource: [journal, reservation] },
     { Effect: "Allow", Action: "s3:PutObject", Resource: [journal, reservation], Condition: { StringEquals: { "s3:x-amz-server-side-encryption": "AES256" } } },
   ] };
 }
 
 export function assertBrokerPolicySuccessorRecord(value, bindings) {
-  assert.deepEqual(Object.keys(value || {}).sort(), ["authorizationHistory", "authorizationSha256", "closedAt", "owner", "schemaVersion", "state", "transitionId", "authorizationExpiresAt", "sessionExpiresAt", "bindings", "runtimeVersionArn"].sort());
+  assert.deepEqual(Object.keys(value || {}).sort(), ["authorizationHistory", "authorizationSha256", "closedAt", "owner", "schemaVersion", "state", "transitionId", "authorizationExpiresAt", "sessionExpiresAt", "bindings", "runtimeVersions"].sort());
   assert.equal(value.schemaVersion, 1); assert.equal(value.state, "BROKER_POLICY_SUCCESSOR_CLOSED"); uuid(value.transitionId); uuid(value.owner);
   for (const field of ["authorizationExpiresAt", "sessionExpiresAt", "closedAt"]) timestamp(value[field]);
   sha(value.authorizationSha256); assert(Array.isArray(value.authorizationHistory)); const authorizations = new Set([value.authorizationSha256]); for (const prior of value.authorizationHistory) { assert.deepEqual(Object.keys(prior).sort(), ["authorizationExpiresAt", "authorizationSha256", "owner", "sessionExpiresAt"]); sha(prior.authorizationSha256); uuid(prior.owner); timestamp(prior.authorizationExpiresAt); timestamp(prior.sessionExpiresAt); assert(!authorizations.has(prior.authorizationSha256), "Repeated successor authorization"); authorizations.add(prior.authorizationSha256); }
-  assert.match(value.runtimeVersionArn || "", /^arn:aws:lambda:eu-west-2::runtime:[a-f0-9]{64}$/); assert.equal(canonical(value.bindings), canonical(bindings), "Broker-policy successor bindings differ");
+  assert.deepEqual(Object.keys(value.runtimeVersions || {}).sort(), Object.values(brokerPolicySuccessorEntryPoints)); for (const runtime of Object.values(value.runtimeVersions)) assert.match(runtime || "", /^arn:aws:lambda:eu-west-2::runtime:[a-f0-9]{64}$/); assert.equal(canonical(value.bindings), canonical(bindings), "Broker-policy successor bindings differ");
   return Object.freeze(structuredClone(value));
 }
 
-export function brokerPolicySuccessorClosureMetadata(record, bindings, runtimeVersionArn, reservationEtag, closedAt) {
-  assert.equal(record.state, "VERIFIED"); assert(typeof reservationEtag === "string" && reservationEtag); timestamp(closedAt); assert.match(runtimeVersionArn || "", /^arn:aws:lambda:eu-west-2::runtime:[a-f0-9]{64}$/);
+export function brokerPolicySuccessorClosureMetadata(record, bindings, runtimeVersions, reservationEtag, closedAt) {
+  assert.equal(record.state, "VERIFIED"); assert(typeof reservationEtag === "string" && reservationEtag); timestamp(closedAt); assert.deepEqual(Object.keys(runtimeVersions || {}).sort(), Object.values(brokerPolicySuccessorEntryPoints)); for (const runtime of Object.values(runtimeVersions)) assert.match(runtime || "", /^arn:aws:lambda:eu-west-2::runtime:[a-f0-9]{64}$/);
   const value = { schemaVersion: 1, state: "BROKER_POLICY_SUCCESSOR_CLOSED", transitionId: record.transitionId, authorizationSha256: record.authorizationSha256,
-    bindingsSha256: digest(bindings), reservationSha256: digest(record), reservationEtagSha256: digest(reservationEtag), runtimeVersionArn, closedAt };
+    bindingsSha256: digest(bindings), reservationSha256: digest(record), reservationEtagSha256: digest(reservationEtag), runtimeVersions, closedAt };
   return Object.freeze({ [brokerPolicySuccessorMetadataKey]: Buffer.from(canonical(value)).toString("base64url") });
 }
 
 export function assertBrokerPolicySuccessorClosureMetadata(metadata, bindings) {
   assert.deepEqual(Object.keys(metadata || {}), [brokerPolicySuccessorMetadataKey], "Unexpected broker-policy successor metadata");
   const value = JSON.parse(Buffer.from(metadata[brokerPolicySuccessorMetadataKey], "base64url").toString("utf8"));
-  assert.deepEqual(Object.keys(value || {}).sort(), ["authorizationSha256", "bindingsSha256", "closedAt", "reservationEtagSha256", "reservationSha256", "runtimeVersionArn", "schemaVersion", "state", "transitionId"].sort());
+  assert.deepEqual(Object.keys(value || {}).sort(), ["authorizationSha256", "bindingsSha256", "closedAt", "reservationEtagSha256", "reservationSha256", "runtimeVersions", "schemaVersion", "state", "transitionId"].sort());
   assert.equal(value.schemaVersion, 1); assert.equal(value.state, "BROKER_POLICY_SUCCESSOR_CLOSED"); uuid(value.transitionId); for (const field of ["authorizationSha256", "reservationEtagSha256", "reservationSha256"]) sha(value[field]);
-  assert.equal(value.bindingsSha256, digest(bindings)); assert.match(value.runtimeVersionArn || "", /^arn:aws:lambda:eu-west-2::runtime:[a-f0-9]{64}$/); timestamp(value.closedAt);
+  assert.equal(value.bindingsSha256, digest(bindings)); assert.deepEqual(Object.keys(value.runtimeVersions || {}).sort(), Object.values(brokerPolicySuccessorEntryPoints)); for (const runtime of Object.values(value.runtimeVersions)) assert.match(runtime || "", /^arn:aws:lambda:eu-west-2::runtime:[a-f0-9]{64}$/); timestamp(value.closedAt);
   return Object.freeze(structuredClone(value));
 }

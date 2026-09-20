@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
-import { assertBrokerConfiguration, brokerChangeEntryPoints, brokerConfiguration } from "./component-broker-configuration.mjs";
+import { assertBrokerConfiguration, brokerChangeEntryPoints, brokerConfiguration, brokerPolicySuccessorEntryPoints } from "./component-broker-configuration.mjs";
 import { assertBrokerPolicySuccessorAuthorization } from "./component-broker-policy-successor-authorization.mjs";
-import { assertBrokerPolicySuccessorClosureMetadata, brokerPolicyPredecessor, brokerPolicySuccessor, brokerPolicySuccessorBindings, brokerPolicySuccessorClosureMetadata, brokerPolicySuccessorConfiguration, brokerPolicySuccessorMetadataKey, predecessorBrokerPolicySha256, predecessorExecutorPolicySha256, successorBrokerPolicySha256, successorExecutorPolicySha256 } from "./component-broker-policy-successor-contract.mjs";
+import { assertBrokerPolicySuccessorClosureMetadata, brokerPolicyPredecessor, brokerPolicySuccessor, brokerPolicySuccessorBindings, brokerPolicySuccessorClosureMetadata, brokerPolicySuccessorConfigurations, brokerPolicySuccessorMetadataKey, predecessorBrokerPolicySha256, predecessorExecutorPolicySha256, successorBrokerPolicySha256, successorExecutorPolicySha256 } from "./component-broker-policy-successor-contract.mjs";
 import { assertEffectiveBootstrapTrustAnchor, assertHistoricalBrokerChangeClosure } from "./component-bootstrap-trust-anchor.mjs";
 import { canonical, digest, installationIdentity } from "./component-iam-installation-contract.mjs";
 import { brokerChangeManagedIdentities, brokerPolicySuccessorManagedIdentities, componentBrokerArn, identityBootstrap, inspectBrokerChangeIdentities, inspectBrokerPolicySuccessorIdentities } from "./component-installation-identity-contract.mjs";
@@ -34,10 +34,10 @@ export async function executeBrokerPolicySuccessor({ authorization, packageEvide
   const readFunction = async qualifier => lambda("GetFunction", { FunctionName: installationIdentity.functionName, ...(qualifier ? { Qualifier: qualifier } : {}) });
   const ready = async qualifier => { for (let attempt = 0; attempt < 12; attempt++) { const fn = await readFunction(qualifier); if (fn.Configuration.State === "Active" && fn.Configuration.LastUpdateStatus === "Successful") return fn; await sleep(1000); } throw new Error("Broker successor did not converge"); };
   const controls = async qualifier => ({ concurrency: await lambda("GetFunctionConcurrency", { FunctionName: installationIdentity.functionName }), signing: await lambda("GetFunctionCodeSigningConfig", { FunctionName: installationIdentity.functionName }), runtime: await lambda("GetRuntimeManagementConfig", { FunctionName: installationIdentity.functionName, ...(qualifier ? { Qualifier: qualifier } : {}) }) });
-  const noPolicies = async () => { for (const qualifier of [null, "1", "2", "3", "4", "5", "6", "7"]) try { await lambda("GetPolicy", { FunctionName: installationIdentity.functionName, ...(qualifier ? { Qualifier: qualifier } : {}) }); throw new Error("Unexpected broker invocation bypass"); } catch (error) { if (!absent(error)) throw error; } };
+  const noPolicies = async () => { for (const qualifier of [null, "1", "2", "3", "4", "5", "6", "7", "8", "9"]) try { await lambda("GetPolicy", { FunctionName: installationIdentity.functionName, ...(qualifier ? { Qualifier: qualifier } : {}) }); throw new Error("Unexpected broker invocation bypass"); } catch (error) { if (!absent(error)) throw error; } };
   const versions = async () => { const response = await lambda("ListVersionsByFunction", { FunctionName: installationIdentity.functionName }); assert.equal(response.NextMarker, undefined); return response.Versions.map(({ Version }) => Version).filter(value => value !== "$LATEST").sort((a, b) => Number(a) - Number(b)); };
   const oldConfigurations = Object.fromEntries(Object.keys(brokerChangeEntryPoints).map(entryPoint => [entryPoint, brokerConfiguration({ packageSha256: brokerPolicyPredecessor.packageSha256, manifestSha256: brokerPolicyPredecessor.manifestSha256, entryPoint, entryPoints: brokerChangeEntryPoints })]));
-  const successorStates = ["EXECUTING", "CODE_UPDATED", "DESCRIPTION_SET", "VERSION_PUBLISHED", "BROKER_POLICY_INSTALLED", "POLICY_INSTALLED", "SESSION_POLICY_INSTALLED", "VERIFIED"];
+  const successorStates = ["EXECUTING", "CODE_UPDATED", "INSTALL_DESCRIPTION_SET", "INSTALL_VERSION_PUBLISHED", "CLEANUP_DESCRIPTION_SET", "CLEANUP_VERSION_PUBLISHED", "AUTHORIZE_DESCRIPTION_SET", "AUTHORIZE_VERSION_PUBLISHED", "BROKER_POLICY_INSTALLED", "POLICY_INSTALLED", "INSTALLATION_SESSION_POLICY_INSTALLED", "CLEANUP_SESSION_POLICY_INSTALLED", "AUTHORIZATION_SESSION_POLICY_INSTALLED", "VERIFIED"];
   const authenticatePredecessor = async journal => {
     const anchor = verifyPredecessor(journal.value);
     for (const field of ["sourceSha", "packageSha256", "manifestSha256", "configurationSha256", "identitySetSha256"]) assert.equal(anchor[field], brokerPolicyPredecessor[field]);
@@ -66,23 +66,28 @@ export async function executeBrokerPolicySuccessor({ authorization, packageEvide
   const checkpoint = async state => { record = { ...record, state }; ({ etag: reservationEtag } = await put(brokerPolicySuccessor.reservationKey, record, { IfMatch: reservationEtag })); };
   const guard = async () => { await authorize(); const observed = await readReservation(); assert.equal(canonical(observed?.value), canonical(record), "Successor owner changed"); reservationEtag = observed.etag; };
   const mutate = async (service, operation, input, reconcile) => { await guard(); try { await service(operation, input); } catch {} await reconcile(); };
-  const successorConfiguration = brokerPolicySuccessorConfiguration(packageEvidence), successorCode = bindings.successor.lambdaCodeSha256;
+  const successorConfigurations = brokerPolicySuccessorConfigurations(packageEvidence), successorCode = bindings.successor.lambdaCodeSha256;
   let latest = await ready();
   if (latest.Configuration.CodeSha256 !== successorCode) {
     assert.equal(latest.Configuration.CodeSha256, Buffer.from(brokerPolicyPredecessor.packageSha256, "hex").toString("base64"));
     await mutate(lambda, "UpdateFunctionCode", { FunctionName: installationIdentity.functionName, ZipFile: Buffer.from(packageEvidence.bytes), Publish: false, RevisionId: latest.Configuration.RevisionId }, async () => { latest = await ready(); assert.equal(latest.Configuration.CodeSha256, successorCode); });
     await checkpoint("CODE_UPDATED");
   }
-  let version7; try { version7 = await ready("7"); } catch (error) { if (!absent(error)) throw error; }
-  if (!version7) {
-    latest = await ready(); if (latest.Configuration.Description !== successorConfiguration.Description) {
-      await mutate(lambda, "UpdateFunctionConfiguration", { FunctionName: installationIdentity.functionName, Description: successorConfiguration.Description, RevisionId: latest.Configuration.RevisionId }, async () => { latest = await ready(); assert.equal(latest.Configuration.Description, successorConfiguration.Description); });
-      await checkpoint("DESCRIPTION_SET");
+  const published = {};
+  for (const entryPoint of Object.keys(brokerPolicySuccessorEntryPoints)) {
+    const version = brokerPolicySuccessorEntryPoints[entryPoint], configuration = successorConfigurations[entryPoint];
+    try { published[version] = await ready(version); } catch (error) { if (!absent(error)) throw error; }
+    if (!published[version]) {
+      latest = await ready(); if (latest.Configuration.Description !== configuration.Description) {
+        await mutate(lambda, "UpdateFunctionConfiguration", { FunctionName: installationIdentity.functionName, Description: configuration.Description, RevisionId: latest.Configuration.RevisionId }, async () => { latest = await ready(); assert.equal(latest.Configuration.Description, configuration.Description); });
+        await checkpoint(`${entryPoint}_DESCRIPTION_SET`);
+      }
+      await mutate(lambda, "PublishVersion", { FunctionName: installationIdentity.functionName, Description: configuration.Description, CodeSha256: configuration.CodeSha256, RevisionId: latest.Configuration.RevisionId }, async () => { published[version] = await ready(version); assertBrokerConfiguration(published[version], configuration, await controls(version)); });
     }
-    await mutate(lambda, "PublishVersion", { FunctionName: installationIdentity.functionName, Description: successorConfiguration.Description, CodeSha256: successorConfiguration.CodeSha256, RevisionId: latest.Configuration.RevisionId }, async () => { version7 = await ready("7"); assertBrokerConfiguration(version7, successorConfiguration, await controls("7")); });
-    await checkpoint("VERSION_PUBLISHED");
+    assertBrokerConfiguration(published[version], configuration, await controls(version));
+    if (successorStates.indexOf(record.state) < successorStates.indexOf(`${entryPoint}_VERSION_PUBLISHED`)) await checkpoint(`${entryPoint}_VERSION_PUBLISHED`);
   }
-  assert.deepEqual(await versions(), ["1", "2", "3", "4", "5", "6", "7"]); assertBrokerConfiguration(version7, successorConfiguration, await controls("7"));
+  assert.deepEqual(await versions(), ["1", "2", "3", "4", "5", "6", "7", "8", "9"]);
   const predecessorIdentities = brokerChangeManagedIdentities(), successorIdentities = brokerPolicySuccessorManagedIdentities();
   const installPolicy = async (role, predecessorSha256, successorSha256, state, label) => {
     const target = successorIdentities.find(identity => identity.role === role), predecessorTarget = predecessorIdentities.find(identity => identity.role === role);
@@ -99,13 +104,19 @@ export async function executeBrokerPolicySuccessor({ authorization, packageEvide
   };
   await installPolicy(installationIdentity.provisionerRole, predecessorBrokerPolicySha256, successorBrokerPolicySha256, "BROKER_POLICY_INSTALLED", "Broker execution");
   await installPolicy(installationIdentity.terraformRole, predecessorExecutorPolicySha256, successorExecutorPolicySha256, "POLICY_INSTALLED", "Executor");
-  const predecessorSession = predecessorIdentities.find(({ role }) => role === identityBootstrap.installationRole), successorSession = successorIdentities.find(({ role }) => role === identityBootstrap.installationRole);
-  await installPolicy(identityBootstrap.installationRole, predecessorSession.policySha256, successorSession.policySha256, "SESSION_POLICY_INSTALLED", "Installation session");
+  for (const [role, state, label] of [
+    [identityBootstrap.installationRole, "INSTALLATION_SESSION_POLICY_INSTALLED", "Installation session"],
+    [identityBootstrap.cleanupRole, "CLEANUP_SESSION_POLICY_INSTALLED", "Cleanup session"],
+    [identityBootstrap.authorizationRole, "AUTHORIZATION_SESSION_POLICY_INSTALLED", "Authorization session"],
+  ]) {
+    const predecessorSession = predecessorIdentities.find(identity => identity.role === role), successorSession = successorIdentities.find(identity => identity.role === role);
+    await installPolicy(role, predecessorSession.policySha256, successorSession.policySha256, state, label);
+  }
   const identities = await inspectSuccessor(iam); assert(identities.every(({ role, policy: state }) => role === "EXPECTED" && state === "EXPECTED")); await noPolicies(); await checkpoint("VERIFIED");
-  const closedAt = new Date(now()).toISOString(), runtimeVersionArn = version7.Configuration.RuntimeVersionConfig.RuntimeVersionArn;
-  const finalRecord = { ...record, state: "BROKER_POLICY_SUCCESSOR_CLOSED", closedAt, runtimeVersionArn };
+  const closedAt = new Date(now()).toISOString(), runtimeVersions = Object.fromEntries(Object.entries(brokerPolicySuccessorEntryPoints).map(([, version]) => [version, published[version].Configuration.RuntimeVersionConfig.RuntimeVersionArn]));
+  const finalRecord = { ...record, state: "BROKER_POLICY_SUCCESSOR_CLOSED", closedAt, runtimeVersions };
   const currentJournal = await readJournal(); assert.equal(currentJournal.etag, journal.etag, "Bootstrap lineage changed during successor transition"); verifyPredecessor(currentJournal.value);
-  const metadata = brokerPolicySuccessorClosureMetadata(record, bindings, runtimeVersionArn, reservationEtag, closedAt);
+  const metadata = brokerPolicySuccessorClosureMetadata(record, bindings, runtimeVersions, reservationEtag, closedAt);
   await put(journalKey, currentJournal.value, { IfMatch: currentJournal.etag }, metadata); assertBrokerPolicySuccessorClosureMetadata(metadata, bindings);
   const closedJournal = await readJournal(); verifyEffective(closedJournal.value, packageEvidence.manifest, packageEvidence.packageSha256, closedJournal.metadata);
   return { ...closedJournal.value, brokerPolicySuccessor: finalRecord };

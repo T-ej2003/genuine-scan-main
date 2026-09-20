@@ -23,6 +23,8 @@ test("successor authorization binds exact immutable generations and minimal delt
   assert.equal(value.predecessor.brokerPolicySha256, predecessorBrokerPolicySha256); assert.equal(value.successor.brokerPolicySha256, successorBrokerPolicySha256);
   assert.equal(value.successor.brokerVersion, "7"); assert.deepEqual(value.delta, brokerPolicySuccessorDelta); assert.deepEqual(value, { ...value, ...brokerPolicySuccessorSourceBindings(f.packageEvidence) });
   assert.equal(value.installationSession.role, "mscqr-production-component-installation-session"); assert.notEqual(value.installationSession.predecessorPolicySha256, value.installationSession.successorPolicySha256);
+  assert.equal(value.cleanupSession.role, "mscqr-production-component-cleanup-session"); assert.notEqual(value.cleanupSession.predecessorPolicySha256, value.cleanupSession.successorPolicySha256);
+  assert.equal(value.authorizationSession.role, "mscqr-production-component-installation-authorizer"); assert.notEqual(value.authorizationSession.predecessorPolicySha256, value.authorizationSession.successorPolicySha256);
 });
 
 test("successor authorization normalizes the exact main branch policy", () => {
@@ -47,6 +49,8 @@ test("root capability and workflow expose only the exact one-time successor surf
   for (const statement of capability.Statement) assert(![].concat(statement.Resource).includes("*"));
   assert.deepEqual(capability.Statement.find(({ Action }) => Action === "iam:PutRolePolicy").Resource.sort(), [
     "arn:aws:iam::368992683803:role/mscqr-production-component-installation-session",
+    "arn:aws:iam::368992683803:role/mscqr-production-component-cleanup-session",
+    "arn:aws:iam::368992683803:role/mscqr-production-component-installation-authorizer",
     "arn:aws:iam::368992683803:role/mscqr-production-component-iam-provisioner",
     "arn:aws:iam::368992683803:role/mscqr-production-component-table-installer",
   ].sort());

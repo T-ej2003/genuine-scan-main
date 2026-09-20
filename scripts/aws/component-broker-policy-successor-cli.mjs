@@ -8,7 +8,7 @@ import { cleanSource } from "./component-iam-installation.mjs";
 import { buildComponentBrokerPackage } from "./component-broker-package.mjs";
 import { authenticateBrokerPolicySuccessorPublication } from "./component-iam-authorization.mjs";
 import { executeBrokerPolicySuccessor } from "./component-broker-policy-successor.mjs";
-import { brokerPolicySuccessor, brokerPolicySuccessorCapabilitySet, brokerPolicySuccessorConfiguration } from "./component-broker-policy-successor-contract.mjs";
+import { brokerPolicySuccessor, brokerPolicySuccessorCapabilitySet, brokerPolicySuccessorConfigurations } from "./component-broker-policy-successor-contract.mjs";
 import { authenticateBootstrapOperator } from "./component-bootstrap-operator.mjs";
 import { brokerPolicySuccessorManagedIdentities, componentBrokerArn, identityBootstrap } from "./component-installation-identity-contract.mjs";
 import { canonical, installationIdentity } from "./component-iam-installation-contract.mjs";
@@ -23,7 +23,7 @@ export function assertBrokerPolicySuccessorIamRequest(operation, input) {
   assert(identity, "Alternate broker identity forbidden");
   if (input.PolicyName !== undefined) assert.equal(input.PolicyName, identity.policyName);
   if (operation === "PutRolePolicy") {
-    assert([installationIdentity.provisionerRole, installationIdentity.terraformRole, identityBootstrap.installationRole].includes(identity.role), "Non-successor policy mutation forbidden");
+    assert([installationIdentity.provisionerRole, installationIdentity.terraformRole, identityBootstrap.installationRole, identityBootstrap.cleanupRole, identityBootstrap.authorizationRole].includes(identity.role), "Non-successor policy mutation forbidden");
     assert.equal(input.PolicyDocument, canonical(identity.policy));
   }
 }
@@ -41,14 +41,14 @@ async function administrativeAdapter(packageEvidence) {
     assert.equal(rootEvent.userIdentity?.type, "Root"); assert.equal(rootEvent.userIdentity?.arn, rootArn); assert.equal(rootEvent.userIdentity?.sessionContext?.attributes?.mfaAuthenticated, "true"); assert.equal(rootEvent.errorCode, undefined);
     const rootExpires = expiration(rootEvent.responseElements?.credentials?.expiration); assert(Number.isFinite(rootExpires) && Date.now() + 120000 < rootExpires && rootExpires <= Date.now() + 3601000, "Root MFA session is not fresh");
     const permitted = new Set(brokerPolicySuccessorCapabilitySet().Statement.flatMap(({ Action }) => [].concat(Action)));
-    const configuration = brokerPolicySuccessorConfiguration(packageEvidence);
+    const configurations = Object.values(brokerPolicySuccessorConfigurations(packageEvidence));
     const confined = (service, name, endpoint, region) => { const send = create(service, name, endpoint, region); return (operation, input = {}) => {
       const action = `${service}:${service === "s3" && operation === "ListObjectsV2" ? "ListBucket" : operation}`; assert(permitted.has(action), "Unsupported broker-policy successor API");
       if (service === "lambda") {
-        assert.equal(input.FunctionName, installationIdentity.functionName); if (input.Qualifier !== undefined) assert(["1", "2", "3", "4", "5", "6", "7"].includes(input.Qualifier));
+        assert.equal(input.FunctionName, installationIdentity.functionName); if (input.Qualifier !== undefined) assert(["1", "2", "3", "4", "5", "6", "7", "8", "9"].includes(input.Qualifier));
         if (operation === "UpdateFunctionCode") { assert.deepEqual(Object.keys(input).sort(), ["FunctionName", "Publish", "RevisionId", "ZipFile"]); assert.equal(input.Publish, false); assert.equal(createHash("sha256").update(input.ZipFile).digest("hex"), packageEvidence.packageSha256); }
-        if (operation === "UpdateFunctionConfiguration") assert.deepEqual(input, { FunctionName: installationIdentity.functionName, Description: configuration.Description, RevisionId: input.RevisionId });
-        if (operation === "PublishVersion") assert.deepEqual(input, { FunctionName: installationIdentity.functionName, Description: configuration.Description, CodeSha256: configuration.CodeSha256, RevisionId: input.RevisionId });
+        if (operation === "UpdateFunctionConfiguration") assert(configurations.some(configuration => canonical(input) === canonical({ FunctionName: installationIdentity.functionName, Description: configuration.Description, RevisionId: input.RevisionId })), "Unreviewed successor configuration");
+        if (operation === "PublishVersion") assert(configurations.some(configuration => canonical(input) === canonical({ FunctionName: installationIdentity.functionName, Description: configuration.Description, CodeSha256: configuration.CodeSha256, RevisionId: input.RevisionId })), "Unreviewed successor publication");
       } else if (service === "iam") assertBrokerPolicySuccessorIamRequest(operation, input);
       else {
         assert.equal(input.Bucket, identityBootstrap.bucket); assert([`${identityBootstrap.prefix}identity-bootstrap.json`, brokerPolicySuccessor.reservationKey].includes(input.Key || input.Prefix));

@@ -6,7 +6,7 @@ export const brokerEntryPoints = Object.freeze({ INSTALL: "1", CLEANUP: "2", AUT
 // A broker change publishes another immutable three-entry set.  This is not
 // configurable input: these are the only two source-owned entry layouts.
 export const brokerChangeEntryPoints = Object.freeze({ INSTALL: "4", CLEANUP: "5", AUTHORIZE: "6" });
-export const brokerPolicySuccessorEntryPoints = Object.freeze({ INSTALL: "7", CLEANUP: "5", AUTHORIZE: "6" });
+export const brokerPolicySuccessorEntryPoints = Object.freeze({ INSTALL: "7", CLEANUP: "8", AUTHORIZE: "9" });
 function assertEntryPoints(value) {
   assert(value === brokerEntryPoints || value === brokerChangeEntryPoints || value === brokerPolicySuccessorEntryPoints, "Unreviewed broker entry-point set");
   return value;

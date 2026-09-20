@@ -30,7 +30,7 @@ const invoke = (version) => policy([{ Effect: "Allow", Action: "lambda:InvokeFun
 // broker configuration module independently pins these same immutable sets.
 const bootstrapEntryPoints = Object.freeze({ INSTALL: "1", CLEANUP: "2", AUTHORIZE: "3" });
 const changedEntryPoints = Object.freeze({ INSTALL: "4", CLEANUP: "5", AUTHORIZE: "6" });
-const successorEntryPoints = Object.freeze({ INSTALL: "7", CLEANUP: "5", AUTHORIZE: "6" });
+const successorEntryPoints = Object.freeze({ INSTALL: "7", CLEANUP: "8", AUTHORIZE: "9" });
 const assertEntryPoints = (entryPoints) => {
   assert([bootstrapEntryPoints, changedEntryPoints, successorEntryPoints].includes(entryPoints), "Identity entry-point override forbidden");
   return entryPoints;
@@ -112,7 +112,7 @@ function managedIdentities(entryPoints) {
   // The successor broker still rejects a resource-policy bypass on every
   // retained immutable version, but it has no mutation capability for any of
   // them. Fresh bootstrap keeps the original three-version read surface.
-  const brokerVersions = entryPoints === bootstrapEntryPoints ? Object.values(entryPoints) : [...Object.values(bootstrapEntryPoints), ...Object.values(changedEntryPoints), ...(entryPoints === successorEntryPoints ? [successorEntryPoints.INSTALL] : [])];
+  const brokerVersions = entryPoints === bootstrapEntryPoints ? Object.values(entryPoints) : [...Object.values(bootstrapEntryPoints), ...Object.values(changedEntryPoints), ...(entryPoints === successorEntryPoints ? Object.values(successorEntryPoints) : [])];
   const objects = ["installation-authorization.json", "iam-installation.json", "permission-installation.json", "installation-session.json"].map((name) => `arn:aws:s3:::${identityBootstrap.bucket}/${identityBootstrap.prefix}${name}`);
   const brokerPolicy = provisionerTargetPolicy();
   brokerPolicy.Statement.push(

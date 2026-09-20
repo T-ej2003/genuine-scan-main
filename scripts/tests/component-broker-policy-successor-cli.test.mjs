@@ -5,10 +5,10 @@ import { assertBrokerPolicySuccessorIamRequest, run } from "../aws/component-bro
 import { brokerPolicySuccessorManagedIdentities } from "../aws/component-installation-identity-contract.mjs";
 import { canonical } from "../aws/component-iam-installation-contract.mjs";
 
-test("successor root adapter permits only the three exact successor policy writes", () => {
+test("successor root adapter permits only the five exact successor policy writes", () => {
   const identities = brokerPolicySuccessorManagedIdentities();
-  const writable = identities.filter(({ role }) => ["mscqr-production-component-iam-provisioner", "mscqr-production-component-table-installer", "mscqr-production-component-installation-session"].includes(role));
-  assert.equal(writable.length, 3);
+  const writable = identities.filter(({ role }) => ["mscqr-production-component-iam-provisioner", "mscqr-production-component-table-installer", "mscqr-production-component-installation-session", "mscqr-production-component-cleanup-session", "mscqr-production-component-installation-authorizer"].includes(role));
+  assert.equal(writable.length, 5);
   for (const identity of writable) assert.doesNotThrow(() => assertBrokerPolicySuccessorIamRequest("PutRolePolicy", { RoleName: identity.role, PolicyName: identity.policyName, PolicyDocument: canonical(identity.policy) }));
   for (const identity of identities.filter(value => !writable.includes(value))) assert.throws(() => assertBrokerPolicySuccessorIamRequest("PutRolePolicy", { RoleName: identity.role, PolicyName: identity.policyName, PolicyDocument: canonical(identity.policy) }));
   assert.throws(() => assertBrokerPolicySuccessorIamRequest("PutRolePolicy", { RoleName: identities[0].role, PolicyName: identities[0].policyName, PolicyDocument: canonical(identities[1].policy) }));

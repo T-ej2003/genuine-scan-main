@@ -97,7 +97,7 @@ function assertBrokerPolicySuccessorClosure(bootstrap, manifest, packageSha256, 
   for (const field of ["sourceSha", "packageSha256", "manifestSha256", "configurationSha256", "identitySetSha256"]) assert.equal(predecessor[field], bindings.predecessor[field], `Broker-policy predecessor ${field} differs`);
   const closure = assertBrokerPolicySuccessorClosureMetadata(metadata, bindings);
   return { sourceSha: bindings.successor.sourceSha, packageSha256, manifestSha256: bindings.successor.manifestSha256, recovered: true, changed: true, policySuccessor: true,
-    entryPoints: brokerPolicySuccessorEntryPoints, allVersions: ["1", "2", "3", "4", "5", "6", "7"], runtimeVersions: { ...predecessor.runtimeVersions, 7: closure.runtimeVersionArn }, predecessor };
+    entryPoints: brokerPolicySuccessorEntryPoints, allVersions: ["1", "2", "3", "4", "5", "6", "7", "8", "9"], runtimeVersions: { ...predecessor.runtimeVersions, ...closure.runtimeVersions }, predecessor };
 }
 
 // The BROKER_CHANGE controller authenticates this immutable predecessor before
