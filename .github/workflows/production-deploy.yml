@@ -3,9 +3,16 @@ name: Normal Production Deployment
 'on':
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      baseline:
+        description: Deploy the one-time reviewed runtime baseline from the exact historical images
+        required: true
+        type: boolean
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: production-deploy
@@ -27,17 +34,32 @@ jobs:
       release_class: ${{ steps.classify.outputs.release_class }}
       backend: ${{ steps.classify.outputs.backend }}
       frontend: ${{ steps.classify.outputs.frontend }}
+      baseline: ${{ steps.classify.outputs.baseline }}
     steps:
       - uses: actions/checkout@v6
         with: { ref: '${{ github.sha }}', fetch-depth: 0, persist-credentials: false }
       - name: Classify Lane A eligibility
         id: classify
-        env: { BEFORE_SHA: '${{ github.event.before }}' }
+        env:
+          BEFORE_SHA: '${{ github.event.before }}'
+          BASELINE_REQUESTED: '${{ inputs.baseline || false }}'
+          GH_TOKEN: '${{ github.token }}'
         run: |
           set -euo pipefail
           test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
           git fetch --no-tags origin main
           test "$GITHUB_SHA" = "$(git rev-parse refs/remotes/origin/main)"
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            test "$BASELINE_REQUESTED" = "true"
+            test "$GITHUB_RUN_ATTEMPT" = "1"
+            baseline_merge_sha="$(gh api "repos/$GITHUB_REPOSITORY/pulls/555" --jq 'select(.merged == true and .base.ref == "main") | .merge_commit_sha')"
+            [[ "$baseline_merge_sha" =~ ^[a-f0-9]{40}$ ]]
+            test "$baseline_merge_sha" = "$GITHUB_SHA"
+            printf 'release_class=NORMAL_APPLICATION\nbackend=true\nfrontend=true\nbaseline=true\n' >> "$GITHUB_OUTPUT"
+            echo "### One-time reviewed runtime baseline" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo 'baseline=false' >> "$GITHUB_OUTPUT"
           base="$BEFORE_SHA"
           if [[ ! "$base" =~ ^[a-f0-9]{40}$ ]] || [[ "$base" == "0000000000000000000000000000000000000000" ]]; then base="$(git rev-parse HEAD^)"; fi
           if node scripts/aws/classify-production-lane-a.mjs --backend-base="$base" --frontend-base="$base" --target="$GITHUB_SHA" --github-output="$GITHUB_OUTPUT"; then
@@ -78,11 +100,13 @@ jobs:
         env:
           EXPECT_BACKEND: ${{ needs.classify.outputs.backend }}
           EXPECT_FRONTEND: ${{ needs.classify.outputs.frontend }}
+          BASELINE_MODE: ${{ needs.classify.outputs.baseline }}
         run: |
           set -euo pipefail
           git fetch --no-tags origin main
           test "$GITHUB_SHA" = "$(git rev-parse refs/remotes/origin/main)"
           aws ecs describe-services --region "$AWS_REGION" --cluster mscqr-prod-euw2-main --services mscqr-backend-servi-euw2 mscqr-frontend-servi-euw2 > "$RUNNER_TEMP/services.json"
+          node scripts/aws/production-ecs-native-rollback.mjs --services="$RUNNER_TEMP/services.json"
           node --input-type=module - "$RUNNER_TEMP/services.json" "$GITHUB_OUTPUT" <<'NODE'
           import fs from 'node:fs';
           const [file, output] = process.argv.slice(2), response = JSON.parse(fs.readFileSync(file));
@@ -109,12 +133,19 @@ jobs:
             const image = JSON.parse(execFileSync('aws', ['ecr','describe-images','--region','eu-west-2','--repository-name',repository,'--image-ids',`imageDigest=${match[1]}`], {encoding:'utf8'})).imageDetails;
             const tags = image?.length === 1 ? (image[0].imageTags || []).filter((tag) => /^[a-f0-9]{40}$/.test(tag)) : [];
             if (tags.length !== 1) throw new Error(`Live ${component} image does not resolve to one protected source SHA.`);
-            fs.appendFileSync(output, `${component}_base=${tags[0]}\n`);
+            fs.appendFileSync(output, `${component}_base=${tags[0]}\n${component}_digest=${match[1]}\n`);
           }
           NODE
-          node scripts/aws/classify-production-lane-a.mjs --backend-base="$(grep '^backend_base=' "$GITHUB_OUTPUT" | cut -d= -f2-)" --frontend-base="$(grep '^frontend_base=' "$GITHUB_OUTPUT" | cut -d= -f2-)" --target="$GITHUB_SHA" --github-output="$RUNNER_TEMP/live-classification"
-          grep -q "^backend=${EXPECT_BACKEND}$" "$RUNNER_TEMP/live-classification"
-          grep -q "^frontend=${EXPECT_FRONTEND}$" "$RUNNER_TEMP/live-classification"
+          if [[ "$BASELINE_MODE" == "true" ]]; then
+            grep -q '^backend_base=bcec05a421bff28eb2216f399d0a9e7cd2389d5e$' "$GITHUB_OUTPUT"
+            grep -q '^backend_digest=sha256:d2a6f641f44e27454a80d502914a9e168c61cdace1201f9d7af9d85a87ea208c$' "$GITHUB_OUTPUT"
+            grep -q '^frontend_base=d355a77675d4320c2bfa975ebf3682995ba54a2f$' "$GITHUB_OUTPUT"
+            grep -q '^frontend_digest=sha256:5053d6a6481b3bcacb414adf82c41d7504c4a91a93c8c52dd3b11aae0e01c277$' "$GITHUB_OUTPUT"
+          else
+            node scripts/aws/classify-production-lane-a.mjs --backend-base="$(grep '^backend_base=' "$GITHUB_OUTPUT" | cut -d= -f2-)" --frontend-base="$(grep '^frontend_base=' "$GITHUB_OUTPUT" | cut -d= -f2-)" --target="$GITHUB_SHA" --github-output="$RUNNER_TEMP/live-classification"
+            grep -q "^backend=${EXPECT_BACKEND}$" "$RUNNER_TEMP/live-classification"
+            grep -q "^frontend=${EXPECT_FRONTEND}$" "$RUNNER_TEMP/live-classification"
+          fi
       - uses: aws-actions/amazon-ecr-login@v2
       - uses: docker/setup-buildx-action@v4
       - name: Publish immutable backend image

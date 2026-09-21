@@ -16,9 +16,11 @@ Before publishing, the protected job resolves each live image digest back to exa
 
 Terraform, IAM, networking, database infrastructure, Prisma/schema/migrations, RLS packages/policies, secrets topology, workers without a production service, authentication/tenant-isolation security boundaries, and recovery/control-plane changes are rejected from Lane A. They retain their existing reviewed infrastructure or privileged procedures. The normal workflow reports `LANE_B_REQUIRED` and performs no AWS action.
 
-## First migration deployment
+## One-time baseline deployment
 
-Protected main currently contains application/security/infrastructure work newer than the live backend and frontend image source tags. It is therefore not eligible for the first Lane A deployment. Establish a reviewed Lane B runtime baseline first; after both live ECR digests identify that protected source, later ordinary application commits can use Lane A.
+Protected main currently contains application/security/infrastructure work newer than the live backend and frontend image source tags. It is therefore not eligible for the first Lane A deployment. The same workflow has one manual `baseline: true` route that accepts only GitHub's immutable merge commit for reviewed PR #555 and the exact reviewed historical backend and frontend image identities, then uses the same protected environment, OIDC role, immutable-image build and scan, ECS rolling deployment, stability wait, smoke checks, and best-effort runner rollback as Lane A. A later main commit or either live image advancing makes the escape hatch unusable.
+
+Both ECS services must already have circuit-breaker rollback and the exact source-owned target-5xx and unhealthy-host deployment alarms enabled. The workflow rejects the deployment before image publication when that AWS configuration is absent or different. ECS-native rollback is primary; the runner-local rollback remains secondary. No authenticated synthetic alarm exists today, so adding one is a separate AWS configuration decision rather than part of this source change.
 
 ## Retirement inventory
 

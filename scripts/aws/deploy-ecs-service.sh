@@ -943,6 +943,21 @@ if [[ "$WAIT_FOR_STABLE" == "true" ]]; then
     --region "$AWS_REGION" \
     --cluster "$CLUSTER_NAME" \
     --services "$SERVICE_NAME"
+  aws ecs describe-services \
+    --region "$AWS_REGION" \
+    --cluster "$CLUSTER_NAME" \
+    --services "$SERVICE_NAME" \
+    >"$EXISTING_POST_SERVICE_FILE"
+  node --input-type=module - "$EXISTING_POST_SERVICE_FILE" "$NEW_TASK_DEFINITION_ARN" <<'NODE'
+import fs from "node:fs";
+const [file, expectedArn] = process.argv.slice(2);
+const response = JSON.parse(fs.readFileSync(file, "utf8"));
+const service = response.services?.length === 1 ? response.services[0] : null;
+const deployment = service?.deployments?.length === 1 ? service.deployments[0] : null;
+if (!Array.isArray(response.failures) || response.failures.length !== 0 || !service || service.status !== "ACTIVE" || service.taskDefinition !== expectedArn || !deployment || deployment.status !== "PRIMARY" || deployment.taskDefinition !== expectedArn || deployment.pendingCount !== 0 || deployment.runningCount !== service.desiredCount || (deployment.rolloutState && deployment.rolloutState !== "COMPLETED")) {
+  throw new Error("ECS-native rollback or concurrent change prevented the exact candidate from becoming stable.");
+}
+NODE
 fi
 
 if [[ "$ENABLE_EXECUTE_COMMAND" == "true" ]]; then
