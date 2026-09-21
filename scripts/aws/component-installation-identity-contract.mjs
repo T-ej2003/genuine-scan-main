@@ -31,8 +31,9 @@ const invoke = (version) => policy([{ Effect: "Allow", Action: "lambda:InvokeFun
 const bootstrapEntryPoints = Object.freeze({ INSTALL: "1", CLEANUP: "2", AUTHORIZE: "3" });
 const changedEntryPoints = Object.freeze({ INSTALL: "4", CLEANUP: "5", AUTHORIZE: "6" });
 const successorEntryPoints = Object.freeze({ INSTALL: "7", CLEANUP: "8", AUTHORIZE: "9" });
+const recoverySuccessorEntryPoints = Object.freeze({ INSTALL: "10", CLEANUP: "11", AUTHORIZE: "12" });
 const assertEntryPoints = (entryPoints) => {
-  assert([bootstrapEntryPoints, changedEntryPoints, successorEntryPoints].includes(entryPoints), "Identity entry-point override forbidden");
+  assert([bootstrapEntryPoints, changedEntryPoints, successorEntryPoints, recoverySuccessorEntryPoints].includes(entryPoints), "Identity entry-point override forbidden");
   return entryPoints;
 };
 
@@ -112,7 +113,7 @@ function managedIdentities(entryPoints) {
   // The successor broker still rejects a resource-policy bypass on every
   // retained immutable version, but it has no mutation capability for any of
   // them. Fresh bootstrap keeps the original three-version read surface.
-  const brokerVersions = entryPoints === bootstrapEntryPoints ? Object.values(entryPoints) : [...Object.values(bootstrapEntryPoints), ...Object.values(changedEntryPoints), ...(entryPoints === successorEntryPoints ? Object.values(successorEntryPoints) : [])];
+  const brokerVersions = entryPoints === bootstrapEntryPoints ? Object.values(entryPoints) : [...Object.values(bootstrapEntryPoints), ...Object.values(changedEntryPoints), ...(entryPoints === successorEntryPoints || entryPoints === recoverySuccessorEntryPoints ? Object.values(successorEntryPoints) : []), ...(entryPoints === recoverySuccessorEntryPoints ? Object.values(recoverySuccessorEntryPoints) : [])];
   const objects = ["installation-authorization.json", "iam-installation.json", "permission-installation.json", "installation-session.json"].map((name) => `arn:aws:s3:::${identityBootstrap.bucket}/${identityBootstrap.prefix}${name}`);
   const brokerPolicy = provisionerTargetPolicy();
   brokerPolicy.Statement.push(
@@ -140,6 +141,20 @@ export function brokerPolicySuccessorManagedIdentities() {
   const identities = managedIdentities(successorEntryPoints);
   const terraform = identities.find(({ role }) => role === installationIdentity.terraformRole);
   terraform.policy = terraformExecutorPolicyGeneration("7", true);
+  terraform.policySha256 = digest(terraform.policy);
+  return identities;
+}
+
+export function brokerRecoverySuccessorManagedIdentities() {
+  const identities = managedIdentities(recoverySuccessorEntryPoints);
+  const broker = identities.find(({ role }) => role === installationIdentity.provisionerRole);
+  broker.policy.Statement.find(({ Action }) => Action === "s3:GetObject").Resource.push(
+    `arn:aws:s3:::${identityBootstrap.bucket}/${identityBootstrap.prefix}broker-policy-successor.json`,
+    `arn:aws:s3:::${identityBootstrap.bucket}/${identityBootstrap.prefix}broker-recovery-successor.json`,
+  );
+  broker.policySha256 = digest(broker.policy);
+  const terraform = identities.find(({ role }) => role === installationIdentity.terraformRole);
+  terraform.policy = terraformExecutorPolicyGeneration("10", true);
   terraform.policySha256 = digest(terraform.policy);
   return identities;
 }
@@ -215,6 +230,11 @@ export async function inspectBrokerChangeIdentities(iam) {
 export async function inspectBrokerPolicySuccessorIdentities(iam) {
   assert.equal(arguments.length, 1, "Identity overrides are forbidden");
   return inspectManagedIdentities(iam, brokerPolicySuccessorManagedIdentities());
+}
+
+export async function inspectBrokerRecoverySuccessorIdentities(iam) {
+  assert.equal(arguments.length, 1, "Identity overrides are forbidden");
+  return inspectManagedIdentities(iam, brokerRecoverySuccessorManagedIdentities());
 }
 
 // This is the source-owned mutation envelope for the exceptional first bootstrap,

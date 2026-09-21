@@ -10,6 +10,7 @@ export const PRODUCTION_AWS_CREDENTIAL_SOURCE = Object.freeze({
   GITHUB_OIDC_RELEASE_DEPLOYER: "github-oidc-release-deployer",
   GITHUB_OIDC_INITIAL_ACTIVATION_BOOTSTRAP: "github-oidc-initial-activation-bootstrap",
   GITHUB_OIDC_POLICY_RECONCILER: "github-oidc-policy-reconciler",
+  GITHUB_OIDC_BROKER_RECOVERY_SUCCESSOR_EVIDENCE: "github-oidc-broker-recovery-successor-evidence",
   GITHUB_ACCESS_KEYS: "github-access-keys",
   INHERITED_CHECKER_SESSION: "inherited-checker-session",
   INHERITED_ECS_EXEC_VERIFIER_SESSION: "inherited-ecs-exec-verifier-session",
@@ -61,7 +62,7 @@ export function createProductionAwsCredentialEnvironment({ credentialSource, pro
     const session = Object.fromEntries(SESSION_KEYS.slice(0, 2).map((key) => [key, required(env, key)]));
     return Object.freeze({ ...copy(env, SAFE_PROCESS_KEYS), ...session, ...copy(env, ["AWS_SESSION_TOKEN"]), AWS_REGION: region, AWS_DEFAULT_REGION: region, AWS_EC2_METADATA_DISABLED: "true" });
   }
-  if ([PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER, PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_INITIAL_ACTIVATION_BOOTSTRAP, PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_POLICY_RECONCILER, PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_CHECKER_SESSION, PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_ECS_EXEC_VERIFIER_SESSION].includes(credentialSource)) {
+  if ([PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER, PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_INITIAL_ACTIVATION_BOOTSTRAP, PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_POLICY_RECONCILER, PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_BROKER_RECOVERY_SUCCESSOR_EVIDENCE, PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_CHECKER_SESSION, PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_ECS_EXEC_VERIFIER_SESSION].includes(credentialSource)) {
     if (profile !== undefined) throw new Error("Session-backed production AWS execution cannot select a local profile.");
     const session = Object.fromEntries(SESSION_KEYS.slice(0, 3).map((key) => [key, required(env, key)]));
     return Object.freeze({ ...copy(env, SAFE_PROCESS_KEYS), ...session, AWS_REGION: region, AWS_DEFAULT_REGION: region, AWS_EC2_METADATA_DISABLED: "true" });

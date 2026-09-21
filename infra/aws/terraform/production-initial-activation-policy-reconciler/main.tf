@@ -1,14 +1,40 @@
 locals {
-  role_name                  = "mscqr-production-initial-activation-policy-reconciler"
-  policy_name                = "MSCQRProductionInitialActivationPolicyReconciler"
-  mixed_recovery_role_name   = "mscqr-production-mixed-dual-slot-recovery-executor"
-  mixed_recovery_policy_name = "MSCQRProductionMixedDualSlotRecoveryExecutor"
+  role_name                                             = "mscqr-production-initial-activation-policy-reconciler"
+  policy_name                                           = "MSCQRProductionInitialActivationPolicyReconciler"
+  mixed_recovery_role_name                              = "mscqr-production-mixed-dual-slot-recovery-executor"
+  mixed_recovery_policy_name                            = "MSCQRProductionMixedDualSlotRecoveryExecutor"
+  broker_recovery_successor_evidence_reader_role_name   = "mscqr-production-broker-recovery-successor-evidence-reader"
+  broker_recovery_successor_evidence_reader_policy_name = "MSCQRProductionBrokerRecoverySuccessorEvidenceRead"
   tags = {
     ManagedBy   = "Terraform"
     Environment = "production"
     Component   = "initial-activation-policy-reconciliation"
     Stack       = "production-initial-activation-policy-reconciler"
   }
+}
+
+resource "aws_iam_role" "broker_recovery_successor_evidence_reader" {
+  name                 = local.broker_recovery_successor_evidence_reader_role_name
+  description          = "Temporary GitHub OIDC reader for exact broker successor lineage evidence."
+  max_session_duration = 3600
+  assume_role_policy   = file("${path.module}/broker-recovery-successor-evidence-reader-trust-policy.json")
+  tags                 = merge(local.tags, { Component = "broker-recovery-successor-evidence" })
+
+  lifecycle { prevent_destroy = true }
+}
+
+resource "aws_iam_policy" "broker_recovery_successor_evidence_reader" {
+  name        = local.broker_recovery_successor_evidence_reader_policy_name
+  description = "Read only the two immutable component broker successor lineage objects."
+  policy      = file("${path.module}/broker-recovery-successor-evidence-reader-permissions-policy.json")
+  tags        = merge(local.tags, { Component = "broker-recovery-successor-evidence" })
+
+  lifecycle { prevent_destroy = true }
+}
+
+resource "aws_iam_role_policy_attachment" "broker_recovery_successor_evidence_reader" {
+  role       = aws_iam_role.broker_recovery_successor_evidence_reader.name
+  policy_arn = aws_iam_policy.broker_recovery_successor_evidence_reader.arn
 }
 
 resource "aws_iam_role" "mixed_recovery" {

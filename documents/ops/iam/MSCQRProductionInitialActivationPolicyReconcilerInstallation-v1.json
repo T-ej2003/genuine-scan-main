@@ -17,12 +17,15 @@
     "aws_iam_role_policy_attachment.mixed_recovery",
     "aws_iam_role.bootstrap_operator_policy_authorizer",
     "aws_iam_policy.bootstrap_operator_policy_authorizer",
-    "aws_iam_role_policy_attachment.bootstrap_operator_policy_authorizer"
+    "aws_iam_role_policy_attachment.bootstrap_operator_policy_authorizer",
+    "aws_iam_role.broker_recovery_successor_evidence_reader",
+    "aws_iam_policy.broker_recovery_successor_evidence_reader",
+    "aws_iam_role_policy_attachment.broker_recovery_successor_evidence_reader"
   ],
   "maxAwsMutations": {
-    "iam:CreateRole": 3,
-    "iam:CreatePolicy": 3,
-    "iam:AttachRolePolicy": 3,
+    "iam:CreateRole": 4,
+    "iam:CreatePolicy": 4,
+    "iam:AttachRolePolicy": 4,
     "iam:UpdateAssumeRolePolicy": 1,
     "iam:PutRolePolicy": 0,
     "iam:CreatePolicyVersion": 2

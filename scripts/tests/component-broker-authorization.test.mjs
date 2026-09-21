@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createBrokerAuthorizationArchive, assertArchivedInstallationAuthorization } from "../aws/component-broker-authorization.mjs";
 import { digest } from "../aws/component-iam-installation-contract.mjs";
-import { brokerChangeEntryPoints, brokerEntryPoints, brokerPolicySuccessorEntryPoints } from "../aws/component-broker-configuration.mjs";
+import { brokerChangeEntryPoints, brokerEntryPoints, brokerPolicySuccessorEntryPoints, brokerRecoverySuccessorEntryPoints } from "../aws/component-broker-configuration.mjs";
+import { assertHistoricalV7ArchiveEntryPoints } from "./fixtures/component-broker-v7-archive.mjs";
 
 const manifest = { sourceSha: "a".repeat(40), documentBindingsSha256: "b".repeat(64), capabilitySetSha256: "c".repeat(64), targets: [{ arn: "arn:aws:iam::368992683803:role/mscqr-production-normal-deployer" }] };
 const packageSha256 = "d".repeat(64);
@@ -38,7 +39,7 @@ function fixture() {
 const request = (operation = "INSTALL") => ({ operation, transitionId: authorization().transitionId, authorizationSha256: digest(authorization()) });
 test("archive accepts only exact source-owned broker entry-point generations", () => {
   const options = { manifest, packageSha256, currentMain: async () => manifest.sourceSha, s3: async () => ({}) };
-  for (const entryPoints of [brokerEntryPoints, brokerChangeEntryPoints, brokerPolicySuccessorEntryPoints]) {
+  for (const entryPoints of [brokerEntryPoints, brokerChangeEntryPoints, brokerPolicySuccessorEntryPoints, brokerRecoverySuccessorEntryPoints]) {
     assert.doesNotThrow(() => createBrokerAuthorizationArchive({ ...options, entryPoints }));
   }
   for (const entryPoints of [
@@ -48,6 +49,22 @@ test("archive accepts only exact source-owned broker entry-point generations", (
     Object.freeze({ INSTALL: "7", CLEANUP: "8" }),
     Object.freeze({}),
   ]) assert.throws(() => createBrokerAuthorizationArchive({ ...options, entryPoints }), /Unreviewed broker entry points/);
+});
+test("immutable v7 reproduces the historical 7/8/9 self-host rejection", () => {
+  assert.throws(() => assertHistoricalV7ArchiveEntryPoints(brokerPolicySuccessorEntryPoints), /Unreviewed broker entry points/);
+  assert.doesNotThrow(() => assertHistoricalV7ArchiveEntryPoints(brokerEntryPoints));
+  assert.doesNotThrow(() => assertHistoricalV7ArchiveEntryPoints(brokerChangeEntryPoints));
+});
+test("recovery successor install version provides Terraform context only through 10/11/12", async () => {
+  const { state, s3 } = fixture();
+  const archive = createBrokerAuthorizationArchive({ manifest, packageSha256, currentMain: async () => state.main, now: () => state.time, entryPoints: brokerRecoverySuccessorEntryPoints, s3 });
+  const current = authorization(), currentSha = digest(current);
+  state.record = { state: "AUTHORIZED", authorization: current, authorizationSha256: currentSha, history: [] };
+  state.closure = { state: "CLOSED", sourceSha: manifest.sourceSha, transitionId: current.transitionId, authorizationSha256: currentSha,
+    cleanupSession: { account: "368992683803", region: "eu-west-2", sourceSha: manifest.sourceSha, transitionId: current.transitionId, authorizationSha256: currentSha, purpose: "CLEANUP", principal: `arn:aws:sts::368992683803:assumed-role/mscqr-production-component-cleanup-session/component-${current.transitionId}`, issuedAt: new Date(start).toISOString(), expiresAt: new Date(start + 900000).toISOString(), issuanceEventId: "12345678-1234-4234-8234-123456789def", issuanceEventTime: new Date(start).toISOString(), operatorArn: "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator", mfaAuthenticated: true }, live: [{ arn: manifest.targets[0].arn, role: "EXPECTED", policy: "EXPECTED" }] };
+  state.time = start + 3600000;
+  assert.deepEqual(await archive.terraformContext({ operation: "TERRAFORM_CONTEXT", transitionId: current.transitionId }, context("10")), { sourceSha: manifest.sourceSha, transitionId: current.transitionId, authorizationSha256: currentSha, purpose: "TERRAFORM" });
+  await assert.rejects(archive.terraformContext({ operation: "TERRAFORM_CONTEXT", transitionId: current.transitionId }, context("7")));
 });
 test("successor install version provides Terraform context only through the exact successor entry points", async () => {
   const { state, s3 } = fixture();

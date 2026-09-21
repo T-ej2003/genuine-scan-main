@@ -7,8 +7,11 @@ export const brokerEntryPoints = Object.freeze({ INSTALL: "1", CLEANUP: "2", AUT
 // configurable input: these are the only three source-owned entry layouts.
 export const brokerChangeEntryPoints = Object.freeze({ INSTALL: "4", CLEANUP: "5", AUTHORIZE: "6" });
 export const brokerPolicySuccessorEntryPoints = Object.freeze({ INSTALL: "7", CLEANUP: "8", AUTHORIZE: "9" });
+// This repair is a separate, governed immutable generation.  It is not a
+// caller-selected or extensible version map.
+export const brokerRecoverySuccessorEntryPoints = Object.freeze({ INSTALL: "10", CLEANUP: "11", AUTHORIZE: "12" });
 function assertEntryPoints(value) {
-  assert(value === brokerEntryPoints || value === brokerChangeEntryPoints || value === brokerPolicySuccessorEntryPoints, "Unreviewed broker entry-point set");
+  assert(value === brokerEntryPoints || value === brokerChangeEntryPoints || value === brokerPolicySuccessorEntryPoints || value === brokerRecoverySuccessorEntryPoints, "Unreviewed broker entry-point set");
   return value;
 }
 
@@ -17,7 +20,7 @@ function assertEntryPoints(value) {
 // first and may reach the successor only after AWS denies that exact version.
 export function brokerEntryPointCandidates(entryPoint) {
   assert(["INSTALL", "CLEANUP", "AUTHORIZE"].includes(entryPoint), "Unsupported broker entry point");
-  return [...new Set([brokerEntryPoints[entryPoint], brokerChangeEntryPoints[entryPoint], brokerPolicySuccessorEntryPoints[entryPoint]])];
+  return [...new Set([brokerEntryPoints[entryPoint], brokerChangeEntryPoints[entryPoint], brokerPolicySuccessorEntryPoints[entryPoint], brokerRecoverySuccessorEntryPoints[entryPoint]])];
 }
 export function brokerConfiguration({ packageSha256, manifestSha256, entryPoint, entryPoints = brokerEntryPoints }) {
   assert.match(packageSha256 || "", /^[a-f0-9]{64}$/);

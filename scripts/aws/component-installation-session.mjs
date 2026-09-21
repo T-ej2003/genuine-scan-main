@@ -5,7 +5,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { promptProductionMfaCode } from "../security/production-interactive-mfa-provider.mjs";
 import { createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { identityBootstrap, componentBrokerArn } from "./component-installation-identity-contract.mjs";
-import { brokerEntryPointCandidates } from "./component-broker-configuration.mjs";
+import { brokerEntryPointCandidates, brokerRecoverySuccessorEntryPoints } from "./component-broker-configuration.mjs";
 import { sessionProofBinding, assertComponentSessionRecord } from "./component-session-proof.mjs";
 import { executeIsolatedTerraform } from "./component-terraform-runner.mjs";
 import { createTerraformStateBoundary } from "./component-terraform-state.mjs";
@@ -47,7 +47,14 @@ export async function establishComponentTerraformSession(binding, dependencies =
   return establish({ ...binding, purpose: "TERRAFORM" }, dependencies, "TERRAFORM");
 }
 
-async function establish(binding, { loadUser = loadOperator, sts = stsTransport, mfa = () => promptProductionMfaCode({ prompt: "Component installation operator MFA code: " }), invoke, isolated = executeIsolatedTerraform, state = createTerraformStateBoundary, now = Date.now, sleep = delay } = {}, discovery = null) {
+export async function establishComponentRecoveryTerraformSession(binding, dependencies = {}) {
+  assert.deepEqual(Object.keys(binding).sort(), ["sourceSha", "transitionId"]);
+  assert.match(binding.sourceSha || "", /^[a-f0-9]{40}$/);
+  assert.match(binding.transitionId || "", /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
+  return establish({ ...binding, purpose: "TERRAFORM" }, dependencies, "TERRAFORM", [brokerRecoverySuccessorEntryPoints.INSTALL]);
+}
+
+async function establish(binding, { loadUser = loadOperator, sts = stsTransport, mfa = () => promptProductionMfaCode({ prompt: "Component installation operator MFA code: " }), invoke, isolated = executeIsolatedTerraform, state = createTerraformStateBoundary, now = Date.now, sleep = delay } = {}, discovery = null, requiredVersions = null) {
   const fixedBinding = structuredClone(binding);
   if (!discovery) sessionProofBinding(fixedBinding);
   assert(Object.hasOwn(roles, fixedBinding.purpose));
@@ -87,7 +94,7 @@ async function establish(binding, { loadUser = loadOperator, sts = stsTransport,
     const signer = new SignatureV4({ credentials: credentialsForSdk(scoped), region: identityBootstrap.region, service: "sts", sha256: Sha256 });
     const send = async (payload) => {
       assert(now() < expires, "AWS session expired");
-      const versions = brokerEntryPointCandidates(fixedBinding.purpose === "CLEANUP" ? "CLEANUP" : "INSTALL");
+      const versions = requiredVersions || brokerEntryPointCandidates(fixedBinding.purpose === "CLEANUP" ? "CLEANUP" : "INSTALL");
       let result, version;
       for (const candidate of versions) {
         const input = { FunctionName: `${componentBrokerArn}:${candidate}`, InvocationType: "RequestResponse", Payload: Buffer.from(JSON.stringify(payload)) };
