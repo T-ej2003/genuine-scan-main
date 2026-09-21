@@ -21,12 +21,14 @@ test("component deployment state Terraform fixes the table, key, and exact write
   const register = policy.Statement.find(({ Sid }) => Sid === "RegisterExactFamilies");
   assert.equal(register.Resource, "*");
   assert.deepEqual(register.Condition, { StringEquals: { "aws:RequestedRegion": "eu-west-2" } });
-  const frontendRead = policy.Statement.find(({ Sid }) => Sid === "ReadExactFrontendImage");
-  assert.deepEqual(frontendRead.Action, ["ecr:DescribeImages", "ecr:DescribeRepositories"]);
+  const publish = policy.Statement.find(({ Sid }) => Sid === "PublishExactApplicationImages");
+  assert.deepEqual(publish.Resource, ["arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend", "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-web"]);
+  assert.ok(publish.Action.includes("ecr:PutImage"));
+  assert.equal(policy.Statement.some(({ Action }) => JSON.stringify(Action).includes("dynamodb:")), false);
 });
 
-test("state permissions are exact-key DynamoDB operations and publishers receive no state writer", () => {
-  for (const file of ["normal-deployer-policy.json", "bootstrap-policy.json", "release-terminal-state-policy.json"]) {
+test("legacy state identities retain exact-key access while the normal deployer has none", () => {
+  for (const file of ["bootstrap-policy.json", "release-terminal-state-policy.json"]) {
     const statements = read(file).Statement.filter((statement) => JSON.stringify(statement.Action).includes("dynamodb:"));
     assert.ok(statements.length > 0);
     for (const statement of statements) {

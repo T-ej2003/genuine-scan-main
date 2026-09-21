@@ -17,6 +17,8 @@ Required environment:
 
 Optional environment:
   WAIT_FOR_STABLE   Default: true
+  EXPECTED_FAILED_TASK_DEFINITION_ARN
+                    When set, rollback only if the service still targets this exact failed candidate.
 EOF
 }
 
@@ -44,6 +46,18 @@ for required in AWS_REGION CLUSTER_NAME SERVICE_NAME PREVIOUS_TASK_DEFINITION_AR
     exit 1
   fi
 done
+
+if [[ -n "${EXPECTED_FAILED_TASK_DEFINITION_ARN:-}" ]]; then
+  current="$(aws ecs describe-services --region "$AWS_REGION" --cluster "$CLUSTER_NAME" --services "$SERVICE_NAME" --query 'services[0].taskDefinition' --output text)"
+  if [[ "$current" == "$PREVIOUS_TASK_DEFINITION_ARN" ]]; then
+    echo "${SERVICE_NAME} is already on ${PREVIOUS_TASK_DEFINITION_ARN}; rollback not required."
+    exit 0
+  fi
+  if [[ "$current" != "$EXPECTED_FAILED_TASK_DEFINITION_ARN" ]]; then
+    echo "Refusing rollback: ${SERVICE_NAME} targets an unexpected task definition." >&2
+    exit 1
+  fi
+fi
 
 aws ecs update-service \
   --region "$AWS_REGION" \

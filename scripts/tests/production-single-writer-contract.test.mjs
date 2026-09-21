@@ -19,7 +19,9 @@ test("release-gate and the normal application lane are the only enabled producti
   assert.doesNotMatch(legacyText, /configure-aws-credentials|AWS_ACCESS_KEY_ID|terraform apply|register-task-definition|update-service|deregister-task-definition/i);
   assert.match(productionReadinessText, /configure-aws-credentials/);
   assert.match(productionReadinessText, /Normal Production Deployment/);
-  assert.match(productionReadinessText, /production-normal-release\.mjs/);
+  assert.match(productionReadinessText, /deploy-ecs-service\.sh/);
+  assert.match(productionReadinessText, /rollback-ecs-service\.sh/);
+  assert.match(productionReadinessText, /smoke-release\.mjs/);
   assert.doesNotMatch(productionReadinessText, /AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|terraform apply|PutSecretValue/i);
   assert.doesNotMatch(releaseTrainText, /terraform apply|register-task-definition|update-service|deregister-task-definition/i);
   assert.match(releaseTrainText, /dispatch-protected-main-release-gate\.mjs[\s\\]*--target-ref "\$TARGET_REF" --target-sha "\$TARGET_SHA"/);

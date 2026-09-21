@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import test from "node:test";
 import { PRODUCTION_RELEASE_CLASS, classifyProductionChanges, classifyProductionComponentRanges } from "../aws/production-deployment-classification.mjs";
+import { classifyLaneAComponentRanges } from "../aws/classify-production-lane-a.mjs";
 import { buildNormalReleasePlan, buildNormalBackendPreparation, assertNormalBackendExactCandidate, classifyNormalLiveComponentState, executeNormalFrontendActivation, executeNormalRelease, executeNormalComponentTransaction, NORMAL_RELEASE, parseNormalReleaseArgs } from "../aws/production-normal-release.mjs";
 import { APP_ONLY } from "../aws/production-app-only-contract.mjs";
 import { assertNormalImageIdentity } from "../aws/production-normal-image-contract.mjs";
@@ -31,14 +32,11 @@ test("release classification is deterministic and sensitive lanes fail closed", 
   assert.equal(classifyProductionChanges(["shared/ui/button.tsx"]).frontend, true);
   for (const file of ["package.json", "package-lock.json", "Dockerfile.ecs-frontend", "tailwind.config.ts", "postcss.config.js", "vite.config.ts", "docker/nginx-entrypoint.sh"])
     assert.equal(classifyProductionChanges([file]).frontend, true, file);
-  assert.equal(classifyProductionChanges(["backend/src/auth/loginService.ts"]).releaseClass, PRODUCTION_RELEASE_CLASS.SECURITY_INFRASTRUCTURE);
-  for (const file of ["backend/src/middleware/rbac.ts", "backend/src/services/accessControlService.ts", "backend/src/middleware/csrf.ts", "backend/src/middleware/tenantIsolation.ts", "backend/src/utils/clientIp.ts", "src/lib/api/internal-client-core.ts", "src/lib/api/internal-client-auth.ts", "src/lib/webauthn.ts", "src/components/auth/StepUpRecoveryDialog.tsx", "src/features/account-settings/AdminMfaCard.tsx", "scripts/aws/production-normal-release.mjs", ".github/workflows/production-deploy.yml"])
+  for (const file of ["backend/src/app.ts", "backend/src/index.ts", "backend/src/auth/loginService.ts", "backend/src/routes/index.ts", "backend/src/routes/modules/authRoutes.ts", "backend/src/controllers/authController.ts", "backend/src/controllers/authControllerShared.ts", "backend/src/controllers/authSessionController.ts", "backend/src/controllers/authAdminSecurityController.ts", "backend/src/controllers/verify/authHandlers.ts", "backend/src/services/auth/tokenService.ts", "backend/src/services/customerVerifyAuthService.ts", "backend/src/services/customerVerifyDatabaseSessionService.ts", "backend/src/services/sessionService.ts", "backend/src/middleware/auth.ts", "backend/src/middleware/incidentUpload.ts", "backend/src/middleware/rbac.ts", "backend/src/services/accessControlService.ts", "backend/src/middleware/csrf.ts", "backend/src/middleware/tenantIsolation.ts", "backend/src/utils/clientIp.ts", "backend/src/rls-waves/session-c/policy.sql", "backend/src/workers/consume.ts", "src/lib/webauthn.ts", "src/lib/api/internal-client-auth.ts", "src/components/auth/StepUpRecoveryDialog.tsx", "src/features/account-settings/AdminMfaCard.tsx", "src/features/auth/login.tsx", "scripts/aws/production-normal-release.mjs", ".github/workflows/production-deploy.yml"])
     assert.equal(classifyProductionChanges([file]).releaseClass, PRODUCTION_RELEASE_CLASS.SECURITY_INFRASTRUCTURE, file);
-  assert.equal(classifyProductionChanges(["src/features/auth/login.tsx"]).releaseClass, PRODUCTION_RELEASE_CLASS.SECURITY_INFRASTRUCTURE);
   assert.equal(classifyProductionChanges(["backend/prisma/schema.prisma"]).releaseClass, PRODUCTION_RELEASE_CLASS.SECURITY_INFRASTRUCTURE);
   assert.equal(classifyProductionChanges(["infra/aws/terraform/production-web-release/main.tf"]).releaseClass, PRODUCTION_RELEASE_CLASS.SECURITY_INFRASTRUCTURE);
   assert.equal(classifyProductionChanges(["scripts/aws/recover-production-backend-health.mjs"]).releaseClass, PRODUCTION_RELEASE_CLASS.EMERGENCY_RECOVERY);
-  assert.equal(classifyProductionChanges(["backend/src/workers/consume.ts"]).releaseClass, PRODUCTION_RELEASE_CLASS.SECURITY_INFRASTRUCTURE);
   assert.throws(() => classifyProductionChanges(["unknown/build-input"]), /Ambiguous/);
 });
 
@@ -290,6 +288,12 @@ test("normal release plans cannot smuggle database or forged classification work
   await assert.rejects(() => executeNormalRelease({ plan: forged, sourceSha, database: { applyAndVerify: async () => { throw new Error("must not run"); } }, backend: {}, frontend: {} }), /derived from its protected source paths/);
 });
 
+test("Lane A accepts application changes and rejects infrastructure, RLS, schema, and worker changes", () => {
+  assert.deepEqual(classifyLaneAComponentRanges({ backendFiles: ["backend/src/services/batchService.ts"], frontendFiles: ["src/App.tsx"] }), { releaseClass: "NORMAL_APPLICATION", backend: true, frontend: true, worker: false });
+  for (const file of ["infra/aws/main.tf", "backend/prisma/schema.prisma", "backend/src/migrations/backfill.ts", "backend/src/security/tenant.ts", "backend/src/workers/jobs.ts", "scripts/rls/generated.sql"])
+    assert.throws(() => classifyLaneAComponentRanges({ backendFiles: [file], frontendFiles: [] }), /Lane B|stronger lane|Ambiguous/i);
+});
+
 test("normal production workflow is fixed, OIDC-only, gated by main, and smoke-tested", () => {
   const workflow = fs.readFileSync(".github/workflows/production-deploy.yml", "utf8");
   assert.match(workflow, /name: Normal Production Deployment/);
@@ -297,27 +301,25 @@ test("normal production workflow is fixed, OIDC-only, gated by main, and smoke-t
   assert.match(workflow, /configure-aws-credentials@v6/);
   assert.match(workflow, /MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-release-deployer/);
   assert.match(workflow, /SMOKE_AUTHENTICATED_REQUIRED: "true"/);
-  assert.match(workflow, /production-normal-release\.mjs/);
-  assert.match(workflow, /prepare-production-normal-deployment\.mjs/);
-  assert.doesNotMatch(workflow, /listWorkflowRuns|Resolve successful deployment baseline/);
+  assert.match(workflow, /classify-production-lane-a\.mjs/);
+  assert.match(workflow, /publish-ecs-images\.sh/);
+  assert.match(workflow, /deploy-ecs-service\.sh/);
+  assert.match(workflow, /rollback-ecs-service\.sh/);
+  assert.match(workflow, /docker save "\$image" -o "\$RUNNER_TEMP\/\$\{component\}\.tar"/);
+  assert.match(workflow, /--scanners vuln --severity CRITICAL --ignore-unfixed --exit-code 1/);
+  assert.match(workflow, /--scanners secret --exit-code 1/);
+  assert.doesNotMatch(workflow, /--scanners vuln,secret/);
+  assert.doesNotMatch(workflow, /\/var\/run\/docker\.sock/);
+  assert.doesNotMatch(workflow, /production-normal-release|prepare-production-normal-deployment|normal-component-deployment-plan|DynamoDB/i);
   assert.match(workflow, /mscqr-production-normal-deployer/);
   assert.match(workflow, /environment: production-normal-deploy/);
   const normalEnvironmentUsers = fs.readdirSync(".github/workflows").filter((file) => file.endsWith(".yml") && fs.readFileSync(`.github/workflows/${file}`, "utf8").match(/environment:\s*production-normal-deploy/));
   assert.deepEqual(normalEnvironmentUsers, ["production-deploy.yml"]);
-  assert.match(workflow, /normal-component-deployment-plan/);
-  assert.match(workflow, /Deploy coordinated normal release/);
-  assert.match(workflow, /assertRevalidatedProductionNormalDeploymentPlan/);
-  assert.doesNotMatch(workflow, /cmp "\$PREPARATION_FILE"/);
-  assert.match(workflow, /Preserve normal-release mutation journal[\s\S]*if: always\(\)/);
-  assert.match(workflow, /publish-backend:[\s\S]*?environment: production-stage-b-image-publish/);
-  assert.match(workflow, /publish-frontend:[\s\S]*?environment: production-web-image-publish/);
-  assert.equal((workflow.match(/IMAGE_REF="\$\(node --input-type=module/g) || []).length, 2, "Each publisher must bind its digest in the current shell before Docker uses it.");
+  assert.equal((workflow.match(/environment: production-normal-deploy/g) || []).length, 1);
+  assert.match(workflow, /Roll back exact predecessors after failure[\s\S]*if: failure\(\)/);
+  assert.match(workflow, /rollback_failed=0[\s\S]*if ! CLUSTER_NAME=[\s\S]*rollback_failed=1[\s\S]*exit "\$rollback_failed"/);
   assert.match(fs.readFileSync("scripts/aws/publish-ecs-images.sh", "utf8"), /await import\(process\.env\.NORMAL_IMAGE_CONTRACT\)/);
-  const webTrust = JSON.parse(fs.readFileSync("infra/aws/terraform/production-web-release/publisher-trust-policy.json", "utf8"));
-  assert.equal(webTrust.Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:sub"], "repo:T-ej2003/genuine-scan-main:environment:production-web-image-publish");
-  const webEnvironmentUsers = fs.readdirSync(".github/workflows").filter((file) => file.endsWith(".yml") && fs.readFileSync(`.github/workflows/${file}`, "utf8").match(/environment:\s*production-web-image-publish/));
-  assert.deepEqual(webEnvironmentUsers.sort(), ["production-deploy.yml", "production-web-image.yml"]);
-  assert.doesNotMatch(workflow, /run: npm run smoke:release/);
+  assert.match(workflow, /node scripts\/smoke-release\.mjs/);
   assert.doesNotMatch(workflow, /AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|terraform apply|PutSecretValue|KMS_SIGN/);
   assert.doesNotMatch(workflow, /role-to-assume:\s*\$\{\{/);
 });

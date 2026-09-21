@@ -3,11 +3,9 @@ name: Normal Production Deployment
 'on':
   push:
     branches: [main]
-  workflow_dispatch:
 
 permissions:
   contents: read
-  id-token: write
 
 concurrency:
   group: production-deploy
@@ -22,218 +20,42 @@ env:
 
 jobs:
   classify:
-    name: Classify production change
+    name: Route protected-main change
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    environment: production-normal-deploy
-    env:
-      SMOKE_BASE_URL: https://www.mscqr.com
-      SMOKE_API_BASE_URL: https://www.mscqr.com/api
-      SMOKE_REQUIRED: "true"
-      SMOKE_AUTHENTICATED_REQUIRED: "true"
-      SMOKE_LOGIN_EMAIL: ${{ secrets.PRODUCTION_SMOKE_LOGIN_EMAIL }}
-      SMOKE_LOGIN_PASSWORD: ${{ secrets.PRODUCTION_SMOKE_LOGIN_PASSWORD }}
-      SMOKE_VERIFY_CODE: ${{ secrets.PRODUCTION_SMOKE_VERIFY_CODE }}
-      SMOKE_ADMIN_MFA_CODE: ${{ secrets.PRODUCTION_SMOKE_ADMIN_MFA_CODE }}
-      SMOKE_ADMIN_MFA_SECRET: ${{ secrets.PRODUCTION_SMOKE_ADMIN_MFA_SECRET }}
     outputs:
       release_class: ${{ steps.classify.outputs.release_class }}
       backend: ${{ steps.classify.outputs.backend }}
       frontend: ${{ steps.classify.outputs.frontend }}
-      worker: ${{ steps.classify.outputs.worker }}
-      changed_files: ${{ steps.classify.outputs.changed_files }}
     steps:
       - uses: actions/checkout@v6
         with: { ref: '${{ github.sha }}', fetch-depth: 0, persist-credentials: false }
-      - uses: aws-actions/configure-aws-credentials@v6
-        with:
-          aws-region: eu-west-2
-          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-normal-deployer
-          unset-current-credentials: true
-      - name: Derive component-state classification
+      - name: Classify Lane A eligibility
         id: classify
-        env: { MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-release-deployer, PLAN_FILE: '${{ runner.temp }}/normal-component-deployment-plan.json', MSCQR_APP_ONLY_JOURNAL_DIR: '${{ runner.temp }}/normal-reconciliation-journal' }
+        env: { BEFORE_SHA: '${{ github.event.before }}' }
         run: |
           set -euo pipefail
           test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
           git fetch --no-tags origin main
           test "$GITHUB_SHA" = "$(git rev-parse refs/remotes/origin/main)"
-          node scripts/aws/production-normal-release.mjs --reconcile
-          node scripts/aws/prepare-production-normal-deployment.mjs --output="$PLAN_FILE"
-          node --input-type=module - "$PLAN_FILE" "$GITHUB_OUTPUT" <<'NODE'
-          import fs from 'node:fs';
-          const [file, output] = process.argv.slice(2), result = JSON.parse(fs.readFileSync(file, 'utf8'));
-          fs.appendFileSync(output, `release_class=${result.classification.releaseClass}\nbackend=${result.classification.backend}\nfrontend=${result.classification.frontend}\nworker=${result.classification.worker}\nchanged_files=${JSON.stringify(result.classification.files)}\n`);
-          if (result.classification.releaseClass !== 'NORMAL_APPLICATION' || result.classification.worker) throw new Error(`Normal lane rejected ${result.classification.releaseClass}; use the reviewed security/recovery lane.`);
-          NODE
-      - uses: actions/upload-artifact@v7
-        with:
-          name: normal-component-deployment-plan
-          path: ${{ runner.temp }}/normal-component-deployment-plan.json
-          if-no-files-found: error
-          retention-days: 30
-      - name: Preserve normal reconciliation journal
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: normal-reconciliation-journal-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/normal-reconciliation-journal
-          if-no-files-found: warn
-          retention-days: 30
-
-  publish-backend:
-    name: Publish backend image
-    needs: classify
-    if: needs.classify.outputs.backend == 'true'
-    runs-on: ubuntu-latest
-    environment: production-stage-b-image-publish
-    permissions: { contents: read, id-token: write }
-    steps:
-      - uses: actions/checkout@v6
-        with: { ref: '${{ github.sha }}', fetch-depth: 0, persist-credentials: false }
-      - uses: aws-actions/configure-aws-credentials@v6
-        with:
-          aws-region: eu-west-2
-          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-stage-b-image-publisher
-          unset-current-credentials: true
-      - uses: aws-actions/amazon-ecr-login@v2
-      - uses: docker/setup-buildx-action@v4
-      - name: Publish immutable backend image
-        env: { MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-release-deployer, REQUIRE_SOURCE_IMAGE_BINDING: "true", OUTPUT_FILE: '${{ runner.temp }}/backend.jsonl' }
-        run: ./scripts/aws/publish-ecs-images.sh backend
-      - name: Bind and verify backend digest
-        id: bind
-        run: |
-          set -euo pipefail
-          IMAGE_REF="$(node --input-type=module - "${{ runner.temp }}/backend.jsonl" "$GITHUB_ENV" "$GITHUB_OUTPUT" <<'NODE'
-          import fs from 'node:fs';
-          const [file, envFile, outputFile] = process.argv.slice(2);
-          const records = fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
-          if (records.length !== 1 || records[0].service !== 'backend' || records[0].image_tag !== process.env.IMAGE_TAG || !records[0].image_ref?.includes('@sha256:')) throw new Error('Backend publication output is not one exact immutable digest.');
-          fs.appendFileSync(envFile, `IMAGE_REF=${records[0].image_ref}\n`);
-          fs.appendFileSync(outputFile, `image_ref=${records[0].image_ref}\n`);
-          process.stdout.write(records[0].image_ref);
-          NODE
-          )"
-          docker pull "$IMAGE_REF"
-          REQUIRED_PLATFORMS="$PLATFORMS" ./scripts/aws/verify-image-manifest.sh "$IMAGE_REF"
-      - uses: aquasecurity/trivy-action@v0.36.0
-        with: { image-ref: '${{ steps.bind.outputs.image_ref }}', scanners: vuln, severity: CRITICAL, ignore-unfixed: true, exit-code: '1' }
-      - uses: aquasecurity/trivy-action@v0.36.0
-        with: { image-ref: '${{ steps.bind.outputs.image_ref }}', scanners: secret, exit-code: '1' }
-      - uses: sigstore/cosign-installer@v4.1.2
-      - name: Produce and verify backend supply-chain attestations
-        env:
-          COSIGN_EXPERIMENTAL: "1"
-          COSIGN_CERT_IDENTITY_REGEXP: "^https://github.com/${{ github.repository }}/.github/workflows/production-deploy.yml@.*$"
-          COSIGN_CERT_OIDC_ISSUER: https://token.actions.githubusercontent.com
-          PROVENANCE_ATTESTATION_TYPE: https://mscqr.com/attestations/normal-production-provenance/v1
-        run: |
-          set -euo pipefail
-          docker save "$IMAGE_REF" -o "$RUNNER_TEMP/backend.tar"
-          docker run --rm -v "$RUNNER_TEMP:/workspace:ro" anchore/syft:v1.38.0 /workspace/backend.tar -o spdx-json > "$RUNNER_TEMP/backend.spdx.json"
-          node --input-type=module - "$RUNNER_TEMP/backend.provenance.json" "$IMAGE_REF" <<'NODE'
-          import fs from 'node:fs';
-          fs.writeFileSync(process.argv[2], JSON.stringify({ buildType: 'mscqr-normal-production-provenance', subject: { imageRef: process.argv[3] }, invocation: { repository: process.env.GITHUB_REPOSITORY, sha: process.env.GITHUB_SHA, workflow: process.env.GITHUB_WORKFLOW, runId: process.env.GITHUB_RUN_ID }, metadata: { platforms: ['linux/amd64'] } }));
-          NODE
-          ./scripts/aws/cosign-idempotent-sign-and-attest.sh sign "$IMAGE_REF"
-          ./scripts/aws/cosign-idempotent-sign-and-attest.sh attest "$IMAGE_REF" spdxjson "$RUNNER_TEMP/backend.spdx.json"
-          ./scripts/aws/cosign-idempotent-sign-and-attest.sh attest "$IMAGE_REF" "$PROVENANCE_ATTESTATION_TYPE" "$RUNNER_TEMP/backend.provenance.json"
-          PROVENANCE_ATTESTATION_TYPE="$PROVENANCE_ATTESTATION_TYPE" ./scripts/aws/verify-release-artifacts.sh "$IMAGE_REF"
-      - uses: actions/upload-artifact@v7
-        with:
-          name: normal-backend-image
-          path: |
-            ${{ runner.temp }}/backend.jsonl
-            ${{ runner.temp }}/backend.spdx.json
-            ${{ runner.temp }}/backend.provenance.json
-          if-no-files-found: error
-          retention-days: 30
-
-  publish-frontend:
-    name: Publish frontend image
-    needs: classify
-    if: needs.classify.outputs.frontend == 'true'
-    runs-on: ubuntu-latest
-    environment: production-web-image-publish
-    permissions: { contents: read, id-token: write }
-    steps:
-      - uses: actions/checkout@v6
-        with: { ref: '${{ github.sha }}', fetch-depth: 0, persist-credentials: false }
-      - uses: aws-actions/configure-aws-credentials@v6
-        with:
-          aws-region: eu-west-2
-          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-web-image-publisher
-          unset-current-credentials: true
-      - uses: aws-actions/amazon-ecr-login@v2
-      - uses: docker/setup-buildx-action@v4
-      - name: Publish immutable frontend image
-        env:
-          MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-release-deployer
-          REQUIRE_SOURCE_IMAGE_BINDING: "true"
-          OUTPUT_FILE: ${{ runner.temp }}/frontend.jsonl
-          FRONTEND_ECR_REPO: mscqr-web
-          FRONTEND_DOCKERFILE: Dockerfile.ecs-frontend
-          FRONTEND_BUILD_CONTEXT: .
-          PLATFORMS: linux/amd64
-        run: ./scripts/aws/publish-ecs-images.sh frontend
-      - name: Bind and verify frontend digest
-        id: bind
-        run: |
-          set -euo pipefail
-          IMAGE_REF="$(node --input-type=module - "${{ runner.temp }}/frontend.jsonl" "$GITHUB_ENV" "$GITHUB_OUTPUT" <<'NODE'
-          import fs from 'node:fs';
-          const [file, envFile, outputFile] = process.argv.slice(2);
-          const records = fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
-          if (records.length !== 1 || records[0].service !== 'frontend' || records[0].image_tag !== process.env.IMAGE_TAG || !records[0].image_ref?.includes('@sha256:')) throw new Error('Frontend publication output is not one exact immutable digest.');
-          fs.appendFileSync(envFile, `IMAGE_REF=${records[0].image_ref}\n`);
-          fs.appendFileSync(outputFile, `image_ref=${records[0].image_ref}\n`);
-          process.stdout.write(records[0].image_ref);
-          NODE
-          )"
-          docker pull "$IMAGE_REF"
-          REQUIRED_PLATFORMS="$PLATFORMS" ./scripts/aws/verify-image-manifest.sh "$IMAGE_REF"
-      - uses: aquasecurity/trivy-action@v0.36.0
-        with: { image-ref: '${{ steps.bind.outputs.image_ref }}', scanners: vuln, severity: CRITICAL, ignore-unfixed: true, exit-code: '1' }
-      - uses: aquasecurity/trivy-action@v0.36.0
-        with: { image-ref: '${{ steps.bind.outputs.image_ref }}', scanners: secret, exit-code: '1' }
-      - uses: sigstore/cosign-installer@v4.1.2
-      - name: Produce and verify frontend supply-chain attestations
-        env:
-          COSIGN_EXPERIMENTAL: "1"
-          COSIGN_CERT_IDENTITY_REGEXP: "^https://github.com/${{ github.repository }}/.github/workflows/production-deploy.yml@.*$"
-          COSIGN_CERT_OIDC_ISSUER: https://token.actions.githubusercontent.com
-          PROVENANCE_ATTESTATION_TYPE: https://mscqr.com/attestations/normal-production-provenance/v1
-        run: |
-          set -euo pipefail
-          docker save "$IMAGE_REF" -o "$RUNNER_TEMP/frontend.tar"
-          docker run --rm -v "$RUNNER_TEMP:/workspace:ro" anchore/syft:v1.38.0 /workspace/frontend.tar -o spdx-json > "$RUNNER_TEMP/frontend.spdx.json"
-          node --input-type=module - "$RUNNER_TEMP/frontend.provenance.json" "$IMAGE_REF" <<'NODE'
-          import fs from 'node:fs';
-          fs.writeFileSync(process.argv[2], JSON.stringify({ buildType: 'mscqr-normal-production-provenance', subject: { imageRef: process.argv[3] }, invocation: { repository: process.env.GITHUB_REPOSITORY, sha: process.env.GITHUB_SHA, workflow: process.env.GITHUB_WORKFLOW, runId: process.env.GITHUB_RUN_ID }, metadata: { platforms: ['linux/amd64'] } }));
-          NODE
-          ./scripts/aws/cosign-idempotent-sign-and-attest.sh sign "$IMAGE_REF"
-          ./scripts/aws/cosign-idempotent-sign-and-attest.sh attest "$IMAGE_REF" spdxjson "$RUNNER_TEMP/frontend.spdx.json"
-          ./scripts/aws/cosign-idempotent-sign-and-attest.sh attest "$IMAGE_REF" "$PROVENANCE_ATTESTATION_TYPE" "$RUNNER_TEMP/frontend.provenance.json"
-          PROVENANCE_ATTESTATION_TYPE="$PROVENANCE_ATTESTATION_TYPE" ./scripts/aws/verify-release-artifacts.sh "$IMAGE_REF"
-      - uses: actions/upload-artifact@v7
-        with:
-          name: normal-frontend-image
-          path: |
-            ${{ runner.temp }}/frontend.jsonl
-            ${{ runner.temp }}/frontend.spdx.json
-            ${{ runner.temp }}/frontend.provenance.json
-          if-no-files-found: error
-          retention-days: 30
+          base="$BEFORE_SHA"
+          if [[ ! "$base" =~ ^[a-f0-9]{40}$ ]] || [[ "$base" == "0000000000000000000000000000000000000000" ]]; then base="$(git rev-parse HEAD^)"; fi
+          if node scripts/aws/classify-production-lane-a.mjs --backend-base="$base" --frontend-base="$base" --target="$GITHUB_SHA" --github-output="$GITHUB_OUTPUT"; then
+            echo "### Lane A: normal application deployment" >> "$GITHUB_STEP_SUMMARY"
+          else
+            printf 'release_class=LANE_B_REQUIRED\nbackend=false\nfrontend=false\n' >> "$GITHUB_OUTPUT"
+            echo "### Lane B required; normal production deployment skipped" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   deploy:
-    name: Deploy and verify normal release
-    needs: [classify, publish-backend, publish-frontend]
-    if: always() && needs.classify.result == 'success' && (needs.publish-backend.result == 'success' || needs.publish-backend.result == 'skipped') && (needs.publish-frontend.result == 'success' || needs.publish-frontend.result == 'skipped')
+    name: Build, deploy, verify, and roll back on failure
+    needs: classify
+    if: needs.classify.outputs.release_class == 'NORMAL_APPLICATION' && (needs.classify.outputs.backend == 'true' || needs.classify.outputs.frontend == 'true')
     runs-on: ubuntu-latest
     environment: production-normal-deploy
     permissions: { contents: read, id-token: write }
     env:
+      MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-release-deployer
       SMOKE_BASE_URL: https://www.mscqr.com
       SMOKE_API_BASE_URL: https://www.mscqr.com/api
       SMOKE_REQUIRED: "true"
@@ -246,52 +68,166 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with: { ref: '${{ github.sha }}', fetch-depth: 0, persist-credentials: false }
-      - uses: actions/download-artifact@v7
-        with: { name: normal-component-deployment-plan, path: '${{ runner.temp }}/normal-plan' }
-      - uses: actions/download-artifact@v7
-        if: needs.classify.outputs.backend == 'true'
-        with: { name: normal-backend-image, path: '${{ runner.temp }}/backend' }
-      - uses: actions/download-artifact@v7
-        if: needs.classify.outputs.frontend == 'true'
-        with: { name: normal-frontend-image, path: '${{ runner.temp }}/frontend' }
-      - name: Bind immutable image outputs
-        id: images
-        env:
-          BACKEND_FILE: ${{ runner.temp }}/backend/backend.jsonl
-          FRONTEND_FILE: ${{ runner.temp }}/frontend/frontend.jsonl
-        run: |
-          set -euo pipefail
-          node --input-type=module - "$GITHUB_OUTPUT" <<'NODE'
-          import fs from 'node:fs';
-          const out = process.argv[2];
-          const read = (file, service) => { if (!fs.existsSync(file)) return ''; const rows = fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse); if (rows.length !== 1 || rows[0].service !== service || !/^[a-f0-9]{40}$/.test(rows[0].image_tag) || !/^[a-f0-9]{64}$/.test((rows[0].image_digest || '').replace(/^sha256:/, ''))) throw new Error(`Invalid ${service} publication output`); return rows[0].image_ref; };
-          fs.appendFileSync(out, `backend=${read(process.env.BACKEND_FILE, 'backend')}\nfrontend=${read(process.env.FRONTEND_FILE, 'frontend')}\n`);
-          NODE
       - uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-region: eu-west-2
           role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-normal-deployer
           unset-current-credentials: true
-      - name: Reauthenticate component-state preparation
-        env: { MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-release-deployer, BACKEND_IMAGE: '${{ steps.images.outputs.backend }}', FRONTEND_IMAGE: '${{ steps.images.outputs.frontend }}', PREPARATION_FILE: '${{ runner.temp }}/normal-plan/normal-component-deployment-plan.json' }
+      - name: Authenticate live deployment baseline
+        id: live
+        env:
+          EXPECT_BACKEND: ${{ needs.classify.outputs.backend }}
+          EXPECT_FRONTEND: ${{ needs.classify.outputs.frontend }}
         run: |
           set -euo pipefail
           git fetch --no-tags origin main
           test "$GITHUB_SHA" = "$(git rev-parse refs/remotes/origin/main)"
-          node scripts/aws/prepare-production-normal-deployment.mjs --output="$RUNNER_TEMP/revalidated-normal-component-deployment-plan.json"
-          node --input-type=module - "$PREPARATION_FILE" "$RUNNER_TEMP/revalidated-normal-component-deployment-plan.json" <<'NODE'
+          aws ecs describe-services --region "$AWS_REGION" --cluster mscqr-prod-euw2-main --services mscqr-backend-servi-euw2 mscqr-frontend-servi-euw2 > "$RUNNER_TEMP/services.json"
+          node --input-type=module - "$RUNNER_TEMP/services.json" "$GITHUB_OUTPUT" <<'NODE'
           import fs from 'node:fs';
-          import { assertRevalidatedProductionNormalDeploymentPlan } from './scripts/aws/prepare-production-normal-deployment.mjs';
-          assertRevalidatedProductionNormalDeploymentPlan(JSON.parse(fs.readFileSync(process.argv[2], 'utf8')), JSON.parse(fs.readFileSync(process.argv[3], 'utf8')));
+          const [file, output] = process.argv.slice(2), response = JSON.parse(fs.readFileSync(file));
+          const expected = new Map([['mscqr-backend-servi-euw2', 'backend'], ['mscqr-frontend-servi-euw2', 'frontend']]);
+          if (response.failures?.length || response.services?.length !== 2) throw new Error('Production ECS services are missing.');
+          for (const service of response.services) {
+            const key = expected.get(service.serviceName), deployment = service.deployments?.length === 1 ? service.deployments[0] : null;
+            if (!key || service.status !== 'ACTIVE' || service.desiredCount < 1 || service.runningCount !== service.desiredCount || service.pendingCount !== 0 || deployment?.status !== 'PRIMARY' || deployment.taskDefinition !== service.taskDefinition || (deployment.rolloutState && deployment.rolloutState !== 'COMPLETED')) throw new Error('Production ECS service is not uniquely stable.');
+            fs.appendFileSync(output, `${key}_task=${service.taskDefinition}\n`);
+          }
           NODE
-      - name: Deploy coordinated normal release
-        env: { MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-release-deployer, BACKEND_IMAGE: '${{ steps.images.outputs.backend }}', FRONTEND_IMAGE: '${{ steps.images.outputs.frontend }}', PREPARATION_FILE: '${{ runner.temp }}/revalidated-normal-component-deployment-plan.json', MSCQR_APP_ONLY_JOURNAL_DIR: '${{ runner.temp }}/normal-release-journal' }
-        run: node scripts/aws/production-normal-release.mjs --source-sha="${GITHUB_SHA}" --preparation-file="${PREPARATION_FILE}" --backend-image="${BACKEND_IMAGE}" --frontend-image="${FRONTEND_IMAGE}"
-      - name: Preserve normal-release mutation journal
+          for component in backend frontend; do
+            task="$(grep "^${component}_task=" "$GITHUB_OUTPUT" | cut -d= -f2-)"
+            aws ecs describe-task-definition --region "$AWS_REGION" --task-definition "$task" > "$RUNNER_TEMP/${component}-task.json"
+          done
+          node --input-type=module - "$RUNNER_TEMP" "$GITHUB_OUTPUT" <<'NODE'
+          import fs from 'node:fs'; import { execFileSync } from 'node:child_process';
+          const [directory, output] = process.argv.slice(2);
+          for (const [component, container, repository] of [['backend','backend','mscqr-backend'], ['frontend','frontend','mscqr-web']]) {
+            const task = JSON.parse(fs.readFileSync(`${directory}/${component}-task.json`)).taskDefinition;
+            const selected = task?.containerDefinitions?.filter(({name}) => name === container) || [];
+            const match = selected.length === 1 ? new RegExp(`^368992683803\\.dkr\\.ecr\\.eu-west-2\\.amazonaws\\.com/${repository}@(sha256:[a-f0-9]{64})$`).exec(selected[0].image || '') : null;
+            if (!match) throw new Error(`Live ${component} image is not an exact production digest.`);
+            const image = JSON.parse(execFileSync('aws', ['ecr','describe-images','--region','eu-west-2','--repository-name',repository,'--image-ids',`imageDigest=${match[1]}`], {encoding:'utf8'})).imageDetails;
+            const tags = image?.length === 1 ? (image[0].imageTags || []).filter((tag) => /^[a-f0-9]{40}$/.test(tag)) : [];
+            if (tags.length !== 1) throw new Error(`Live ${component} image does not resolve to one protected source SHA.`);
+            fs.appendFileSync(output, `${component}_base=${tags[0]}\n`);
+          }
+          NODE
+          node scripts/aws/classify-production-lane-a.mjs --backend-base="$(grep '^backend_base=' "$GITHUB_OUTPUT" | cut -d= -f2-)" --frontend-base="$(grep '^frontend_base=' "$GITHUB_OUTPUT" | cut -d= -f2-)" --target="$GITHUB_SHA" --github-output="$RUNNER_TEMP/live-classification"
+          grep -q "^backend=${EXPECT_BACKEND}$" "$RUNNER_TEMP/live-classification"
+          grep -q "^frontend=${EXPECT_FRONTEND}$" "$RUNNER_TEMP/live-classification"
+      - uses: aws-actions/amazon-ecr-login@v2
+      - uses: docker/setup-buildx-action@v4
+      - name: Publish immutable backend image
+        if: needs.classify.outputs.backend == 'true'
+        env: { REQUIRE_SOURCE_IMAGE_BINDING: "true", OUTPUT_FILE: '${{ runner.temp }}/backend.jsonl' }
+        run: ./scripts/aws/publish-ecs-images.sh backend
+      - name: Bind backend digest
+        if: needs.classify.outputs.backend == 'true'
+        id: backend
+        run: |
+          node --input-type=module - "$RUNNER_TEMP/backend.jsonl" "$GITHUB_OUTPUT" backend <<'NODE'
+          import fs from 'node:fs'; const [file,out,service]=process.argv.slice(2); const rows=fs.readFileSync(file,'utf8').trim().split('\n').map(JSON.parse); if(rows.length!==1||rows[0].service!==service||rows[0].image_tag!==process.env.GITHUB_SHA||!rows[0].image_ref?.includes('@sha256:')) throw new Error('Invalid immutable image output.'); fs.appendFileSync(out,`image=${rows[0].image_ref}\n`);
+          NODE
+      - name: Publish immutable frontend image
+        if: needs.classify.outputs.frontend == 'true'
+        env: { REQUIRE_SOURCE_IMAGE_BINDING: "true", OUTPUT_FILE: '${{ runner.temp }}/frontend.jsonl', FRONTEND_ECR_REPO: mscqr-web, FRONTEND_DOCKERFILE: Dockerfile.ecs-frontend, FRONTEND_BUILD_CONTEXT: . }
+        run: ./scripts/aws/publish-ecs-images.sh frontend
+      - name: Bind frontend digest
+        if: needs.classify.outputs.frontend == 'true'
+        id: frontend
+        run: |
+          node --input-type=module - "$RUNNER_TEMP/frontend.jsonl" "$GITHUB_OUTPUT" frontend <<'NODE'
+          import fs from 'node:fs'; const [file,out,service]=process.argv.slice(2); const rows=fs.readFileSync(file,'utf8').trim().split('\n').map(JSON.parse); if(rows.length!==1||rows[0].service!==service||rows[0].image_tag!==process.env.GITHUB_SHA||!rows[0].image_ref?.includes('@sha256:')) throw new Error('Invalid immutable image output.'); fs.appendFileSync(out,`image=${rows[0].image_ref}\n`);
+          NODE
+      - name: Scan published images
+        env: { BACKEND_IMAGE: '${{ steps.backend.outputs.image }}', FRONTEND_IMAGE: '${{ steps.frontend.outputs.image }}' }
+        run: |
+          set -euo pipefail
+          for component in backend frontend; do
+            variable="${component^^}_IMAGE"; image="${!variable:-}"
+            [[ -z "$image" ]] && continue
+            docker save "$image" -o "$RUNNER_TEMP/${component}.tar"
+            docker run --rm -v "$RUNNER_TEMP:/workspace:ro" aquasec/trivy:0.69.3 image --input "/workspace/${component}.tar" --scanners vuln --severity CRITICAL --ignore-unfixed --exit-code 1
+            docker run --rm -v "$RUNNER_TEMP:/workspace:ro" aquasec/trivy:0.69.3 image --input "/workspace/${component}.tar" --scanners secret --exit-code 1
+          done
+      - uses: sigstore/cosign-installer@v4.1.2
+      - name: Sign and attest published images
+        env:
+          BACKEND_IMAGE: ${{ steps.backend.outputs.image }}
+          FRONTEND_IMAGE: ${{ steps.frontend.outputs.image }}
+          COSIGN_EXPERIMENTAL: "1"
+          COSIGN_CERT_IDENTITY_REGEXP: "^https://github.com/${{ github.repository }}/.github/workflows/production-deploy.yml@.*$"
+          COSIGN_CERT_OIDC_ISSUER: https://token.actions.githubusercontent.com
+          PROVENANCE_ATTESTATION_TYPE: https://mscqr.com/attestations/normal-production-provenance/v1
+        run: |
+          set -euo pipefail
+          for component in backend frontend; do
+            variable="${component^^}_IMAGE"; image="${!variable:-}"
+            [[ -z "$image" ]] && continue
+            test -f "$RUNNER_TEMP/${component}.tar"
+            docker run --rm -v "$RUNNER_TEMP:/workspace:ro" anchore/syft:v1.38.0 "/workspace/${component}.tar" -o spdx-json > "$RUNNER_TEMP/${component}.spdx.json"
+            node --input-type=module - "$RUNNER_TEMP/${component}.provenance.json" "$image" <<'NODE'
+          import fs from 'node:fs'; fs.writeFileSync(process.argv[2], JSON.stringify({ buildType:'mscqr-normal-production-provenance', subject:{imageRef:process.argv[3]}, invocation:{repository:process.env.GITHUB_REPOSITORY,sha:process.env.GITHUB_SHA,workflow:process.env.GITHUB_WORKFLOW,runId:process.env.GITHUB_RUN_ID}, metadata:{platforms:['linux/amd64']} }));
+          NODE
+            ./scripts/aws/cosign-idempotent-sign-and-attest.sh sign "$image"
+            ./scripts/aws/cosign-idempotent-sign-and-attest.sh attest "$image" spdxjson "$RUNNER_TEMP/${component}.spdx.json"
+            ./scripts/aws/cosign-idempotent-sign-and-attest.sh attest "$image" "$PROVENANCE_ATTESTATION_TYPE" "$RUNNER_TEMP/${component}.provenance.json"
+            PROVENANCE_ATTESTATION_TYPE="$PROVENANCE_ATTESTATION_TYPE" ./scripts/aws/verify-release-artifacts.sh "$image"
+          done
+      - name: Deploy backend
+        if: needs.classify.outputs.backend == 'true'
+        env:
+          CLUSTER_NAME: mscqr-prod-euw2-main
+          SERVICE_NAME: mscqr-backend-servi-euw2
+          TASK_DEFINITION: ${{ steps.live.outputs.backend_task }}
+          CONTAINER_NAME: backend
+          IMAGE_URI: ${{ steps.backend.outputs.image }}
+          EXPECTED_GIT_SHA: ${{ github.sha }}
+          VERSION_URL: https://www.mscqr.com/api/health
+          WAIT_FOR_STABLE: "true"
+          ENABLE_EXECUTE_COMMAND: "true"
+          METADATA_FILE: ${{ runner.temp }}/backend-deployment.json
+          MSCQR_NORMAL_APPLICATION_DEPLOYMENT: "true"
+        run: ./scripts/aws/deploy-ecs-service.sh
+      - name: Deploy frontend
+        if: needs.classify.outputs.frontend == 'true'
+        env:
+          CLUSTER_NAME: mscqr-prod-euw2-main
+          SERVICE_NAME: mscqr-frontend-servi-euw2
+          TASK_DEFINITION: ${{ steps.live.outputs.frontend_task }}
+          CONTAINER_NAME: frontend
+          IMAGE_URI: ${{ steps.frontend.outputs.image }}
+          ENV_UPDATES: GIT_SHA,RELEASE_GIT_SHA
+          GIT_SHA: ${{ github.sha }}
+          RELEASE_GIT_SHA: ${{ github.sha }}
+          WAIT_FOR_STABLE: "true"
+          METADATA_FILE: ${{ runner.temp }}/frontend-deployment.json
+          MSCQR_NORMAL_APPLICATION_DEPLOYMENT: "true"
+        run: ./scripts/aws/deploy-ecs-service.sh
+      - name: Verify production health and authenticated smoke
+        env: { SMOKE_SYNTHETIC_REQUIRED: "true", SMOKE_SYNTHETIC_RUN_ID: 'production-${{ github.run_id }}-${{ github.run_attempt }}' }
+        run: node scripts/smoke-release.mjs
+      - name: Roll back exact predecessors after failure
+        if: failure()
+        run: |
+          set -euo pipefail
+          rollback_failed=0
+          for component in frontend backend; do
+            file="$RUNNER_TEMP/${component}-deployment.json"
+            [[ -f "$file" ]] || continue
+            readarray -t values < <(node --input-type=module - "$file" <<'NODE'
+          import fs from 'node:fs'; const value=JSON.parse(fs.readFileSync(process.argv[2])); for(const key of ['clusterName','serviceName','previousTaskDefinitionArn','newTaskDefinitionArn']) console.log(value[key]);
+          NODE
+            )
+            if ! CLUSTER_NAME="${values[0]}" SERVICE_NAME="${values[1]}" PREVIOUS_TASK_DEFINITION_ARN="${values[2]}" EXPECTED_FAILED_TASK_DEFINITION_ARN="${values[3]}" WAIT_FOR_STABLE=true ./scripts/aws/rollback-ecs-service.sh; then
+              rollback_failed=1
+            fi
+          done
+          exit "$rollback_failed"
+      - name: Deployment audit summary
         if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: normal-release-journal-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/normal-release-journal
-          if-no-files-found: warn
-          retention-days: 30
+        run: |
+          echo "### Normal production deployment" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Source: \`$GITHUB_SHA\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Backend image: \`${{ steps.backend.outputs.image || 'unchanged' }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Frontend image: \`${{ steps.frontend.outputs.image || 'unchanged' }}\`" >> "$GITHUB_STEP_SUMMARY"
