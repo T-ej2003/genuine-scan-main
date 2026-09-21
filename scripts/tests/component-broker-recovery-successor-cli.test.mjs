@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { assertBrokerRecoverySuccessorIamRequest, run } from "../aws/component-broker-recovery-successor-cli.mjs";
-import { brokerRecoverySuccessorManagedIdentities } from "../aws/component-installation-identity-contract.mjs";
+import { brokerRecoverySuccessorManagedIdentities, identityBootstrap } from "../aws/component-installation-identity-contract.mjs";
 import { canonical } from "../aws/component-iam-installation-contract.mjs";
 
 test("recovery successor root adapter permits only the five exact successor policy writes", () => {
@@ -11,6 +11,17 @@ test("recovery successor root adapter permits only the five exact successor poli
   assert.equal(writable.length, 5);
   for (const identity of writable) assert.doesNotThrow(() => assertBrokerRecoverySuccessorIamRequest("PutRolePolicy", { RoleName: identity.role, PolicyName: identity.policyName, PolicyDocument: canonical(identity.policy) }));
   assert.throws(() => assertBrokerRecoverySuccessorIamRequest("PutRolePolicy", { RoleName: "other", PolicyName: identities[0].policyName, PolicyDocument: canonical(identities[0].policy) }));
+});
+
+test("successor reservations are readable historical evidence but never broker write targets", () => {
+  const broker = brokerRecoverySuccessorManagedIdentities().find(({ role }) => role === "mscqr-production-component-iam-provisioner");
+  const reads = broker.policy.Statement.find(({ Action }) => Action === "s3:GetObject").Resource;
+  const writes = broker.policy.Statement.find(({ Action }) => Action === "s3:PutObject").Resource;
+  for (const name of ["broker-policy-successor.json", "broker-recovery-successor.json"]) {
+    const resource = `arn:aws:s3:::${identityBootstrap.bucket}/${identityBootstrap.prefix}${name}`;
+    assert(reads.includes(resource));
+    assert(!writes.includes(resource));
+  }
 });
 
 test("recovery successor CLI authenticates approval before root/MFA and always closes local credentials", async () => {

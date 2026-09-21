@@ -148,10 +148,11 @@ export function brokerPolicySuccessorManagedIdentities() {
 export function brokerRecoverySuccessorManagedIdentities() {
   const identities = managedIdentities(recoverySuccessorEntryPoints);
   const broker = identities.find(({ role }) => role === installationIdentity.provisionerRole);
-  broker.policy.Statement.find(({ Action }) => Action === "s3:GetObject").Resource.push(
+  const historicalRead = broker.policy.Statement.find(({ Action }) => Action === "s3:GetObject");
+  historicalRead.Resource = [...historicalRead.Resource,
     `arn:aws:s3:::${identityBootstrap.bucket}/${identityBootstrap.prefix}broker-policy-successor.json`,
     `arn:aws:s3:::${identityBootstrap.bucket}/${identityBootstrap.prefix}broker-recovery-successor.json`,
-  );
+  ];
   broker.policySha256 = digest(broker.policy);
   const terraform = identities.find(({ role }) => role === installationIdentity.terraformRole);
   terraform.policy = terraformExecutorPolicyGeneration("10", true);
