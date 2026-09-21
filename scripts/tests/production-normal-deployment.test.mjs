@@ -306,6 +306,8 @@ test("normal production workflow is fixed, OIDC-only, gated by main, and smoke-t
   assert.match(workflow, /configure-aws-credentials@v6/);
   assert.match(workflow, /MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-release-deployer/);
   assert.match(workflow, /SMOKE_AUTHENTICATED_REQUIRED: "true"/);
+  assert.match(workflow, /SMOKE_EXPECTED_USER_ID: 556f5cfa-0820-4e05-a0e0-7357699546f4/);
+  assert.match(workflow, /SMOKE_EXPECTED_ROLE: LICENSEE_ADMIN/);
   assert.match(workflow, /classify-production-lane-a\.mjs/);
   assert.match(workflow, /publish-ecs-images\.sh/);
   assert.match(workflow, /deploy-ecs-service\.sh/);
@@ -327,7 +329,7 @@ test("normal production workflow is fixed, OIDC-only, gated by main, and smoke-t
   assert.match(workflow, /node scripts\/smoke-release\.mjs/);
   assert.doesNotMatch(workflow, /AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|terraform apply|PutSecretValue|KMS_SIGN/);
   assert.doesNotMatch(workflow, /role-to-assume:\s*\$\{\{/);
-  assert.match(workflow, /production-ecs-native-rollback\.mjs --services=/);
+  assert.match(workflow, /cloudwatch describe-alarms[\s\S]*production-ecs-native-rollback\.mjs --services=.* --alarms=/);
   assert.match(workflow, /BASELINE_MODE/);
   assert.match(workflow, /backend_base=bcec05a421bff28eb2216f399d0a9e7cd2389d5e/);
   assert.match(workflow, /backend_digest=sha256:d2a6f641f44e27454a80d502914a9e168c61cdace1201f9d7af9d85a87ea208c/);

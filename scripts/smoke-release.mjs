@@ -302,6 +302,12 @@ const run = async () => {
   {
     const { response, payload } = await requestJson(`${apiBaseUrl}/auth/me`);
     ensureOk("auth me", response.status, payload);
+    const expectedUserId = String(process.env.SMOKE_EXPECTED_USER_ID || "").trim();
+    const expectedRole = String(process.env.SMOKE_EXPECTED_ROLE || "").trim();
+    if (Boolean(expectedUserId) !== Boolean(expectedRole)) throw new Error("Smoke identity binding requires both SMOKE_EXPECTED_USER_ID and SMOKE_EXPECTED_ROLE.");
+    if (expectedUserId && (payload?.data?.id !== expectedUserId || payload?.data?.role !== expectedRole)) {
+      throw new Error("Authenticated smoke identity does not match the dedicated production canary contract.");
+    }
     logPass("current user");
   }
 

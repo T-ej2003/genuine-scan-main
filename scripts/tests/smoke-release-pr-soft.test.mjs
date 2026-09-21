@@ -31,7 +31,7 @@ const startHtml503Server = async () => {
   };
 };
 
-const startMfaBootstrapServer = async () => {
+const startMfaBootstrapServer = async ({ user = { id: "smoke-user", role: "LICENSEE_ADMIN" } } = {}) => {
   let submittedMfaCode = null;
   const server = http.createServer(async (req, res) => {
     const json = (status, payload) => {
@@ -62,7 +62,7 @@ const startMfaBootstrapServer = async () => {
       submittedMfaCode = JSON.parse(body).code;
       return json(200, { success: true, data: { auth: { sessionStage: "ACTIVE" } } });
     }
-    if (req.url === "/api/auth/me") return json(200, { success: true, data: { user: { role: "ADMIN" } } });
+    if (req.url === "/api/auth/me") return json(200, { success: true, data: user });
     if (req.url === "/api/auth/refresh" && req.method === "POST") {
       req.resume();
       return json(200, { success: true, data: { auth: { sessionStage: "ACTIVE" } } });
@@ -233,6 +233,27 @@ test("TOTP secret supplies the MFA challenge code when no static code is configu
     assert.equal(acceptedCodes.includes(submittedCode), true);
     assert.equal(`${result.stdout}${result.stderr}`.includes(RFC_TOTP_SECRET), false);
     assert.equal(`${result.stdout}${result.stderr}`.includes(submittedCode), false);
+  } finally {
+    await server.close();
+  }
+});
+
+test("production smoke authenticates the exact dedicated user and minimum role", async () => {
+  const server = await startMfaBootstrapServer();
+  try {
+    const valid = await runSmoke(server.baseUrl, {
+      GITHUB_EVENT_NAME: "workflow_dispatch", SMOKE_REQUIRED: "true",
+      SMOKE_LOGIN_EMAIL: "canary@example.invalid", SMOKE_LOGIN_PASSWORD: "correct-horse-battery-staple",
+      SMOKE_ADMIN_MFA_CODE: "654321", SMOKE_EXPECTED_USER_ID: "smoke-user", SMOKE_EXPECTED_ROLE: "LICENSEE_ADMIN",
+    });
+    assert.equal(valid.status, 0, valid.stderr || valid.stdout);
+    const wrongRole = await runSmoke(server.baseUrl, {
+      GITHUB_EVENT_NAME: "workflow_dispatch", SMOKE_REQUIRED: "true",
+      SMOKE_LOGIN_EMAIL: "canary@example.invalid", SMOKE_LOGIN_PASSWORD: "correct-horse-battery-staple",
+      SMOKE_ADMIN_MFA_CODE: "654321", SMOKE_EXPECTED_USER_ID: "smoke-user", SMOKE_EXPECTED_ROLE: "SUPER_ADMIN",
+    });
+    assert.notEqual(wrongRole.status, 0);
+    assert.match(wrongRole.stderr, /dedicated production canary contract/);
   } finally {
     await server.close();
   }

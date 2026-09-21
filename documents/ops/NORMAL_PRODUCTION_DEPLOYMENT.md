@@ -22,6 +22,23 @@ Protected main currently contains application/security/infrastructure work newer
 
 Both ECS services must already have circuit-breaker rollback and the exact source-owned target-5xx and unhealthy-host deployment alarms enabled. The workflow rejects the deployment before image publication when that AWS configuration is absent or different. ECS-native rollback is primary; the runner-local rollback remains secondary. No authenticated synthetic alarm exists today, so adding one is a separate AWS configuration decision rather than part of this source change.
 
+The four alarms are the `AWS/ApplicationELB` contracts exported by `scripts/aws/production-ecs-native-rollback.mjs`: target 5xx uses `Sum`; unhealthy hosts uses `Maximum`; both use 60-second periods, two evaluation periods, two datapoints to alarm, `GreaterThanThreshold` at zero, and `notBreaching` missing data. Each alarm is bound to the production ALB and exactly one backend or frontend target group, with no CloudWatch alarm action. ECS observes these alarm states and performs the rollback.
+
+## Dedicated production smoke identity
+
+Authenticated smoke uses the existing `production-green-pretraffic-canary-v1` ordinary canary only. It is the deterministic user `556f5cfa-0820-4e05-a0e0-7357699546f4`, has role `LICENSEE_ADMIN`, belongs to the dedicated green-canary organization/licensee, has independent password and MFA credentials, and has a distinct audit identity. The workflow and `/auth/me` smoke bind both the user ID and role, so the operator's human Super Admin account is rejected.
+
+The environment-secret contract is:
+
+- `PRODUCTION_SMOKE_LOGIN_EMAIL` and `PRODUCTION_SMOKE_LOGIN_PASSWORD`: required and sourced from the existing ordinary-canary Secrets Manager values through a non-printing operator handoff.
+- `PRODUCTION_SMOKE_ADMIN_MFA_SECRET`: the ordinary canary's independent Base32 seed. It is required when login enters `MFA_BOOTSTRAP`; the smoke derives the current six-digit TOTP at runtime.
+- `PRODUCTION_SMOKE_ADMIN_MFA_CODE`: optional manual override and unset during normal CI.
+- `PRODUCTION_SMOKE_VERIFY_CODE`: optional until a dedicated non-customer QR is issued. Its absence skips only public verification.
+
+Do not use `seed-launch-smoke-users.js` in production: that executable deliberately refuses protected-environment mutation. The already-provisioned ordinary canary is reused instead of creating a second identity system.
+
+A permanent public-verification fixture must use the normal QR lifecycle: the dedicated canary licensee submits one QR allocation request, a human platform operator approves it with normal MFA in the application, governed printing/issuance completes, and the resulting non-customer raw QR code is transferred directly into the GitHub environment secret without terminal or workflow-log output. Do not use a customer QR, a generated random string, the risk-blocked platform canary, or the operator's human credentials in CI. Until that fixture exists, leave `PRODUCTION_SMOKE_VERIFY_CODE` unset.
+
 ## Retirement inventory
 
 - **KEEP:** protected-main CI/security checks, ECR repositories, ECS cluster/services/task roles, production smoke tests, GitHub OIDC provider, `production-normal-deploy`, and historical recovery evidence.

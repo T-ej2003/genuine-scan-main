@@ -36,7 +36,7 @@ deployed secret and its payload/signature is never printed.
 
 ## Onboarding smoke
 
-Use the reviewed production-green canary tenant/account and approved secret-store credentials. Run login, MFA,
+Use the reviewed synthetic tenant/account from the production-green canary and approved secret-store credentials. Run login, MFA,
 `/api/auth/me`, refresh, dashboard stats, QR stats, and public `/api/verify/:code` with a tagged synthetic run identifier.
 Customer credentials and customer QR payloads are prohibited; provisioning is operational and not performed here.
 

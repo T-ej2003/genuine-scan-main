@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { NORMAL_DEPLOYMENT_ROLLBACK, assertNormalDeploymentNativeRollback } from "../aws/production-ecs-native-rollback.mjs";
+import { NORMAL_DEPLOYMENT_ALARMS, NORMAL_DEPLOYMENT_ROLLBACK, assertNormalDeploymentAlarms, assertNormalDeploymentNativeRollback } from "../aws/production-ecs-native-rollback.mjs";
 
 const response = () => ({ failures: [], services: Object.entries(NORMAL_DEPLOYMENT_ROLLBACK).map(([serviceName, alarmNames]) => ({
   serviceName,
@@ -35,4 +35,24 @@ test("native rollback contract rejects missing, duplicate, and unrelated service
   assert.throws(() => assertNormalDeploymentNativeRollback(duplicate));
   const unrelated = response(); unrelated.services[0].serviceName = "other";
   assert.throws(() => assertNormalDeploymentNativeRollback(unrelated));
+});
+
+const alarms = () => ({ CompositeAlarms: [], MetricAlarms: NORMAL_DEPLOYMENT_ALARMS.map((value) => structuredClone(value)) });
+
+test("four exact ALB target-failure alarms protect backend and frontend deployments", () => {
+  assert.equal(NORMAL_DEPLOYMENT_ALARMS.length, 4);
+  assert.doesNotThrow(() => assertNormalDeploymentAlarms(alarms()));
+  for (const mutate of [
+    (value) => value.MetricAlarms.pop(),
+    (value) => value.MetricAlarms.push({ ...value.MetricAlarms[0], AlarmName: "unreviewed" }),
+    (value) => { value.MetricAlarms[0].MetricName = "HTTPCode_ELB_5XX_Count"; },
+    (value) => { value.MetricAlarms[0].Threshold = 5; },
+    (value) => { value.MetricAlarms[0].Dimensions[1].Value = "targetgroup/other/123"; },
+    (value) => { value.MetricAlarms[0].TreatMissingData = "breaching"; },
+    (value) => { value.MetricAlarms[0].AlarmActions = ["arn:aws:sns:eu-west-2:368992683803:other"]; },
+    (value) => { value.CompositeAlarms = [{ AlarmName: "other" }]; },
+  ]) {
+    const changed = alarms(); mutate(changed);
+    assert.throws(() => assertNormalDeploymentAlarms(changed));
+  }
 });
