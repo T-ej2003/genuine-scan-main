@@ -9,6 +9,10 @@ name: Normal Production Deployment
         description: Deploy the one-time reviewed runtime baseline from the exact historical images
         required: true
         type: boolean
+      baseline_source_sha:
+        description: Exact protected-main SHA reviewed for the one-time baseline
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -39,7 +43,10 @@ jobs:
         with: { ref: '${{ github.sha }}', fetch-depth: 0, persist-credentials: false }
       - name: Classify Lane A eligibility
         id: classify
-        env: { BEFORE_SHA: '${{ github.event.before }}', BASELINE_REQUESTED: '${{ inputs.baseline || false }}' }
+        env:
+          BEFORE_SHA: '${{ github.event.before }}'
+          BASELINE_REQUESTED: '${{ inputs.baseline || false }}'
+          BASELINE_SOURCE_SHA: '${{ inputs.baseline_source_sha }}'
         run: |
           set -euo pipefail
           test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
@@ -48,6 +55,8 @@ jobs:
           if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
             test "$BASELINE_REQUESTED" = "true"
             test "$GITHUB_RUN_ATTEMPT" = "1"
+            [[ "$BASELINE_SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
+            test "$BASELINE_SOURCE_SHA" = "$GITHUB_SHA"
             printf 'release_class=NORMAL_APPLICATION\nbackend=true\nfrontend=true\nbaseline=true\n' >> "$GITHUB_OUTPUT"
             echo "### One-time reviewed runtime baseline" >> "$GITHUB_STEP_SUMMARY"
             exit 0

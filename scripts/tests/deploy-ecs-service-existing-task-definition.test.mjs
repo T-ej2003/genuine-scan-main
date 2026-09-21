@@ -176,6 +176,7 @@ elif [[ "$1 $2" == "ecr describe-images" ]]; then
   for ((i=1; i<=$#; i++)); do if [[ "\${!i}" == imageDigest=* ]]; then requested="\${!i#imageDigest=}"; fi; done
   printf '{"imageDetails":[{"imageDigest":"%s"}]}' "$requested"
 elif [[ "$1 $2" == "ecs wait" ]]; then
+  if [[ "$FAKE_SCENARIO" == "native-rollback" ]]; then printf '%s' "${fromArn}" > "$FAKE_DATA/state"; fi
   if [[ ("$FAKE_SCENARIO" == "stable-failure" || "$FAKE_SCENARIO" == "rollback-failure") && ! -f "$FAKE_DATA/stable-failed" ]]; then touch "$FAKE_DATA/stable-failed"; exit 32; fi
   if [[ "$FAKE_SCENARIO" == "foreign-after-update" && ! -f "$FAKE_DATA/stable-failed" ]]; then touch "$FAKE_DATA/stable-failed"; printf '%s' "${unrelatedTaskDefinition}" > "$FAKE_DATA/state"; exit 32; fi
   if [[ "$FAKE_SCENARIO" == "previous-before-exit" && ! -f "$FAKE_DATA/stable-failed" ]]; then touch "$FAKE_DATA/stable-failed"; printf '%s' "${fromArn}" > "$FAKE_DATA/state"; exit 32; fi
@@ -628,6 +629,34 @@ test("explicit new-revision mode still registers before updating the service", (
     },
   });
   assert.equal(result.status, 0, result.stderr);
+  assert.equal((fs.readFileSync(fixture.calls, "utf8").match(/ecs register-task-definition/g) || []).length, 1);
+  assertTempClean({ fixture });
+});
+
+test("explicit new-revision mode rejects an ECS-native rollback to the predecessor", () => {
+  const fixture = writeFixture({}, { scenario: "native-rollback" });
+  const result = spawnSync("bash", [script], {
+    cwd: path.resolve("."),
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: `${fixture.fakeBin}:${process.env.PATH}`,
+      MSCQR_AWS_CREDENTIAL_SOURCE: "named-profile",
+      MSCQR_AWS_NAMED_PROFILE: "mscqr-production-release-deployer",
+      AWS_REGION: region,
+      CLUSTER_NAME: cluster,
+      SERVICE_NAME: service,
+      TASK_DEFINITION: "mscqr-backend",
+      CONTAINER_NAME: containerName,
+      IMAGE_URI: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${digest}`,
+      WAIT_FOR_STABLE: "true",
+      FAKE_DATA: fixture.dir,
+      FAKE_SCENARIO: "native-rollback",
+      TMPDIR: fixture.tempDir,
+    },
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /ECS-native rollback/);
   assert.equal((fs.readFileSync(fixture.calls, "utf8").match(/ecs register-task-definition/g) || []).length, 1);
   assertTempClean({ fixture });
 });
