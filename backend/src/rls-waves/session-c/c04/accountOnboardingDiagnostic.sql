@@ -80,6 +80,7 @@ DECLARE
   target_password_configured boolean := false;
   target_email_verified boolean := false;
   target_mfa_configured boolean := false;
+  target_unactivated boolean := false;
   observed_at timestamp without time zone := clock_timestamp();
   accepted_invite_for_target boolean := false;
   invite_created boolean := false;
@@ -99,10 +100,9 @@ BEGIN
      OR normalized_email ~ '[[:cntrl:]]'
      OR char_length(local_part) > 64
      OR domain_part !~ '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$'
-     OR (local_part !~ '^".+"$' AND (
-       local_part !~ '^[A-Za-z0-9!#$%&''*+/=?^_`{|}~.-]+$'
-       OR left(local_part,1)='.' OR right(local_part,1)='.' OR local_part LIKE '%..%'
-     )) THEN
+     OR (local_part ~ '^"' AND local_part !~ '^"(?:[\x20-\x21\x23-\x5B\x5D-\x7E]|\\[\x20-\x7E])+"$')
+     OR (local_part !~ '^"' AND (local_part !~ '^[A-Za-z0-9!#$%&''*+/=?^_`{|}~.-]+$'
+       OR left(local_part,1)='.' OR right(local_part,1)='.' OR local_part LIKE '%..%')) THEN
     RAISE EXCEPTION 'SESSION_C04_INVALID_NORMALIZED_EMAIL';
   END IF;
 
@@ -138,6 +138,7 @@ BEGIN
     target_active := target_is_active AND target_status='ACTIVE' AND target_disabled_at IS NULL AND target_deleted_at IS NULL;
     target_password_configured := target_password_hash IS NOT NULL;
     target_email_verified := target_email_verified_at IS NOT NULL;
+    target_unactivated := target_is_active AND target_status='INVITED' AND target_disabled_at IS NULL AND target_deleted_at IS NULL AND target_password_hash IS NULL;
     accepted_invite_for_target := EXISTS (
       SELECT 1 FROM public."Invite" i
        WHERE lower(i.email)=normalized_email AND i."usedAt" IS NOT NULL AND i."acceptedByUserId"=target_id
@@ -187,7 +188,7 @@ BEGIN
 
   IF NOT target_exists AND latest_exists AND latest_used IS NULL AND latest_expires <= observed_at THEN
     classification := 'A_EXPIRED_UNUSED_INVITE_NO_ACCOUNT';
-  ELSIF target_exists AND NOT target_active AND latest_exists AND latest_used IS NULL AND latest_expires <= observed_at THEN
+  ELSIF target_unactivated AND latest_exists AND latest_used IS NULL AND latest_expires <= observed_at THEN
     classification := 'B_EXPIRED_UNUSED_INVITE_EXISTING_UNACTIVATED_ACCOUNT';
   ELSIF target_exists AND target_active AND target_password_configured AND target_email_verified AND accepted_invite_for_target AND NOT target_mfa_configured THEN
     classification := 'C_ACTIVATED_ACCOUNT_MFA_INCOMPLETE';
@@ -195,7 +196,7 @@ BEGIN
     classification := 'D_ACTIVATED_ACCOUNT_MFA_COMPLETE';
   ELSIF NOT target_exists AND latest_exists AND latest_used IS NULL AND latest_expires > observed_at THEN
     classification := 'F_VALID_UNUSED_INVITE_NO_ACCOUNT';
-  ELSIF target_exists AND NOT target_active AND latest_exists AND latest_used IS NULL AND latest_expires > observed_at THEN
+  ELSIF target_unactivated AND latest_exists AND latest_used IS NULL AND latest_expires > observed_at THEN
     classification := 'F_VALID_UNUSED_INVITE_EXISTING_UNACTIVATED_ACCOUNT';
   END IF;
 
