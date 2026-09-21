@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { assertComponentSessionRecord } from "./component-session-proof.mjs";
 import { assertExpiredSession } from "./component-installation-identity-contract.mjs";
-import { brokerChangeEntryPoints, brokerEntryPoints } from "./component-broker-configuration.mjs";
+import { brokerChangeEntryPoints, brokerEntryPoints, brokerPolicySuccessorEntryPoints } from "./component-broker-configuration.mjs";
 
 const canonical = (value) => JSON.stringify(sorted(value));
 function sorted(value) {
@@ -74,7 +74,7 @@ export function assertArchivedInstallationAuthorization(value, manifest, package
 }
 
 export function createBrokerAuthorizationArchive({ manifest, packageSha256, s3, currentMain, reconcile, entryPoints = brokerEntryPoints, predecessors = [], now = Date.now }) {
-  assert(entryPoints === brokerEntryPoints || entryPoints === brokerChangeEntryPoints, "Unreviewed broker entry points");
+  assert(entryPoints === brokerEntryPoints || entryPoints === brokerChangeEntryPoints || entryPoints === brokerPolicySuccessorEntryPoints, "Unreviewed broker entry points");
   archiveLineages(manifest, packageSha256, predecessors);
   const closure = async (authorization) => {
     const authorizationSha256 = assertArchivedInstallationAuthorization(authorization, manifest, packageSha256, { now: now(), allowExpired: true, predecessors });
