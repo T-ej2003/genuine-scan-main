@@ -110,6 +110,7 @@
     "stage-b:authorize-stale-rotation-supersession": "node scripts/aws/authorize-production-stale-rotation-supersession.mjs",
     "stage-b:produce-root-drop-evidence": "node scripts/aws/produce-production-root-drop-evidence.mjs",
     "production:release-oidc-trust": "node scripts/aws/converge-production-release-oidc-trust.mjs",
+    "production:normal-deployer-policy": "node scripts/aws/converge-production-normal-deployer-policy.mjs",
     "production:verify-initial-activation-reconciler": "node scripts/aws/verify-production-initial-activation-policy-reconciler.mjs",
     "production:initial-activation-reconciler:prepare": "node scripts/aws/prepare-production-initial-activation-reconciler-installation.mjs",
     "production:initial-activation-reconciler:authorize": "node scripts/aws/authorize-production-initial-activation-reconciler-installation.mjs",
