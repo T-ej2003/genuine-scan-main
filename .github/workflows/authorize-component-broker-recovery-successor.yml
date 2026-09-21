@@ -1,0 +1,46 @@
+name: Authorize component broker recovery successor
+run-name: Authorize component broker recovery successor ${{ inputs.transition_id }}
+
+'on':
+  workflow_dispatch:
+    inputs:
+      source_sha: {description: Exact current protected-main SHA containing the reviewed successor, required: true, type: string}
+      transition_id: {description: Unique broker recovery successor transition UUID, required: true, type: string}
+
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+
+concurrency:
+  group: component-broker-recovery-successor-authorization
+  cancel-in-progress: false
+
+jobs:
+  authorize:
+    if: github.repository == 'T-ej2003/genuine-scan-main' && github.ref == 'refs/heads/main' && github.run_attempt == 1 && inputs.source_sha == github.sha
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production-component-broker-recovery-successor-evidence
+    steps:
+      - uses: actions/checkout@v6
+        with: {ref: '${{ github.sha }}', fetch-depth: 0, persist-credentials: false}
+      - uses: actions/setup-node@v6
+        with: {node-version: 24}
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-broker-recovery-successor-evidence-reader
+          aws-region: eu-west-2
+      - name: Authenticate historical lineage and authorize exact second successor
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          TRANSITION_ID: ${{ inputs.transition_id }}
+        run: node scripts/aws/component-broker-recovery-successor-authorization.mjs prepare
+      - uses: actions/upload-artifact@v7
+        with:
+          name: component-broker-recovery-successor-authorization
+          path: ${{ runner.temp }}/component-broker-recovery-successor-authorization.json
+          if-no-files-found: error
+          retention-days: 90

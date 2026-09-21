@@ -48,6 +48,18 @@ export const BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER = Object.freeze({
   policyDescription: "Exact read-only binding verification for bootstrap-operator policy authorization.",
   tags: Object.freeze({ ...INITIAL_ACTIVATION_RECONCILER.tags, Component: "bootstrap-operator-policy-authorization" }),
 });
+export const BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER = Object.freeze({
+  roleName: "mscqr-production-broker-recovery-successor-evidence-reader",
+  roleArn: "arn:aws:iam::368992683803:role/mscqr-production-broker-recovery-successor-evidence-reader",
+  policyName: "MSCQRProductionBrokerRecoverySuccessorEvidenceRead",
+  policyArn: "arn:aws:iam::368992683803:policy/MSCQRProductionBrokerRecoverySuccessorEvidenceRead",
+  trustPath: "infra/aws/terraform/production-initial-activation-policy-reconciler/broker-recovery-successor-evidence-reader-trust-policy.json",
+  permissionsPath: "infra/aws/terraform/production-initial-activation-policy-reconciler/broker-recovery-successor-evidence-reader-permissions-policy.json",
+  path: "/",
+  roleDescription: "Temporary GitHub OIDC reader for exact broker successor lineage evidence.",
+  policyDescription: "Read only the two immutable component broker successor lineage objects.",
+  tags: Object.freeze({ ...INITIAL_ACTIVATION_RECONCILER.tags, Component: "broker-recovery-successor-evidence" }),
+});
 
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 const readJson = (relativePath) => JSON.parse(fs.readFileSync(path.join(root, relativePath), "utf8"));
@@ -156,6 +168,36 @@ export function verifyBootstrapOperatorPolicyAuthorizer({ run } = {}) {
   return Object.freeze({ roleArn: role.Arn, policyArn: policy.Arn, defaultVersionId: policy.DefaultVersionId });
 }
 
+export function assertBrokerRecoverySuccessorEvidenceReaderRoleMetadata(role) {
+  const expected = BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER;
+  if (role?.Arn !== expected.roleArn || role?.RoleName !== expected.roleName || role?.Path !== expected.path || role?.Description !== expected.roleDescription || role?.MaxSessionDuration !== 3600 || Object.hasOwn(role, "PermissionsBoundary")) throw new Error("Broker recovery successor evidence reader role metadata is not exact.");
+  exactJson(decodeAwsDocument(role.AssumeRolePolicyDocument, "evidence reader trust policy"), readJson(expected.trustPath), "evidence reader trust policy");
+  exactJson(Object.fromEntries((role.Tags || []).map(({ Key, Value }) => [Key, Value])), expected.tags, "evidence reader role tags");
+  return role;
+}
+
+export function assertBrokerRecoverySuccessorEvidenceReaderPolicyMetadata(policy, document) {
+  const expected = BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER;
+  if (policy?.Arn !== expected.policyArn || policy?.PolicyName !== expected.policyName || policy?.Path !== expected.path || policy?.Description !== expected.policyDescription || !/^v[1-9][0-9]*$/.test(policy?.DefaultVersionId || "") || policy?.PermissionsBoundaryUsageCount !== 0) throw new Error("Broker recovery successor evidence reader policy metadata is not exact.");
+  exactJson(decodeAwsDocument(document, "evidence reader permissions policy"), readJson(expected.permissionsPath), "evidence reader permissions policy");
+  exactJson(Object.fromEntries((policy.Tags || []).map(({ Key, Value }) => [Key, Value])), expected.tags, "evidence reader policy tags");
+  return policy;
+}
+
+export function verifyBrokerRecoverySuccessorEvidenceReader({ run } = {}) {
+  const expected = BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER;
+  const role = json(run, ["iam", "get-role", "--role-name", expected.roleName]).Role;
+  assertBrokerRecoverySuccessorEvidenceReaderRoleMetadata(role);
+  const policy = json(run, ["iam", "get-policy", "--policy-arn", expected.policyArn]).Policy;
+  const version = json(run, ["iam", "get-policy-version", "--policy-arn", expected.policyArn, "--version-id", policy?.DefaultVersionId]).PolicyVersion;
+  assertBrokerRecoverySuccessorEvidenceReaderPolicyMetadata(policy, version?.Document);
+  const attached = json(run, ["iam", "list-attached-role-policies", "--role-name", expected.roleName]).AttachedPolicies;
+  const inline = json(run, ["iam", "list-role-policies", "--role-name", expected.roleName]).PolicyNames;
+  const entities = readPolicyEntities(run, expected.policyArn);
+  if (!Array.isArray(attached) || attached.length !== 1 || attached[0]?.PolicyArn !== expected.policyArn || !Array.isArray(inline) || inline.length || entities.roles.length !== 1 || entities.roles[0]?.RoleName !== expected.roleName || entities.users.length || entities.groups.length) throw new Error("Broker recovery successor evidence reader attachment topology is not exact.");
+  return Object.freeze({ roleArn: role.Arn, policyArn: policy.Arn, defaultVersionId: policy.DefaultVersionId });
+}
+
 export function verifyInitialActivationPolicyReconciler({ run, expectedCallerArn = "arn:aws:iam::368992683803:root" } = {}) {
   if (typeof run !== "function") throw new Error("An explicit AWS runner is required.");
   const identity = json(run, ["sts", "get-caller-identity"]);
@@ -175,7 +217,8 @@ export function verifyInitialActivationPolicyReconciler({ run, expectedCallerArn
   if (entities.roles.length !== 1 || entities.roles[0]?.RoleName !== INITIAL_ACTIVATION_RECONCILER.roleName || entities.users.length !== 0 || entities.groups.length !== 0) throw new Error("Initial-activation reconciler policy entity topology is not exact.");
   const mixedRecoveryExecutor = verifyMixedRecoveryExecutor({ run });
   const bootstrapOperatorPolicyAuthorizer = verifyBootstrapOperatorPolicyAuthorizer({ run });
-  return Object.freeze({ roleArn: role.Arn, policyArn: policy.Arn, defaultVersionId: policy.DefaultVersionId, trustPolicySha256: sha256(readBytes(INITIAL_ACTIVATION_RECONCILER.trustPath)), permissionsPolicySha256: sha256(readBytes(INITIAL_ACTIVATION_RECONCILER.permissionsPath)), targetPolicyArn: INITIAL_ACTIVATION_RECONCILER.targetPolicyArn, releaseRoleArn: INITIAL_ACTIVATION_RECONCILER.releaseRoleArn, policyRoleCount: entities.roles.length, policyUserCount: entities.users.length, policyGroupCount: entities.groups.length, permissionsBoundaryUsageCount: policy.PermissionsBoundaryUsageCount, mixedRecoveryExecutor, bootstrapOperatorPolicyAuthorizer, roleDefinedInSource: true, pr448RuntimeMigrated: true });
+  const brokerRecoverySuccessorEvidenceReader = verifyBrokerRecoverySuccessorEvidenceReader({ run });
+  return Object.freeze({ roleArn: role.Arn, policyArn: policy.Arn, defaultVersionId: policy.DefaultVersionId, trustPolicySha256: sha256(readBytes(INITIAL_ACTIVATION_RECONCILER.trustPath)), permissionsPolicySha256: sha256(readBytes(INITIAL_ACTIVATION_RECONCILER.permissionsPath)), targetPolicyArn: INITIAL_ACTIVATION_RECONCILER.targetPolicyArn, releaseRoleArn: INITIAL_ACTIVATION_RECONCILER.releaseRoleArn, policyRoleCount: entities.roles.length, policyUserCount: entities.users.length, policyGroupCount: entities.groups.length, permissionsBoundaryUsageCount: policy.PermissionsBoundaryUsageCount, mixedRecoveryExecutor, bootstrapOperatorPolicyAuthorizer, brokerRecoverySuccessorEvidenceReader, roleDefinedInSource: true, pr448RuntimeMigrated: true });
 }
 
 const required = (argv, name) => { const index = argv.indexOf(name); const value = index < 0 ? undefined : argv[index + 1]; if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };

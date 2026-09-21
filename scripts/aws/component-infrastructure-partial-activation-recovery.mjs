@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { cleanSource } from "./component-iam-installation.mjs";
-import { establishComponentTerraformSession } from "./component-installation-session.mjs";
+import { establishComponentRecoveryTerraformSession } from "./component-installation-session.mjs";
 import { assertBackend, contract } from "./component-infrastructure-activation.mjs";
 import { authenticateHistoricalTerraformActivationAuthorization, authenticatePartialActivationRecoveryAuthorization, readPartialActivationRecoveryEnvironment } from "./component-iam-authorization.mjs";
 import { assertPartialActivationRecoveryAuthorization, assertPartialActivationRecoveryEnvironment } from "./component-infrastructure-partial-activation-recovery-authorization.mjs";
@@ -24,7 +24,7 @@ function historical(argv) {
   return { activationAuthorizationSourceSha, installationReservationSourceSha, authorizationRunId: runId, authorizationArtifactSha256, planSha256, preparationSha256, transitionId };
 }
 
-export async function run(argv = process.argv.slice(2), { source = cleanSource, session = establishComponentTerraformSession,
+export async function run(argv = process.argv.slice(2), { source = cleanSource, session = establishComponentRecoveryTerraformSession,
   historicalAuthorization = authenticateHistoricalTerraformActivationAuthorization, recoveryAuthorization = authenticatePartialActivationRecoveryAuthorization,
   environment = readPartialActivationRecoveryEnvironment, now = Date.now } = {}) {
   const [mode, directory, argument, ...rest] = argv;

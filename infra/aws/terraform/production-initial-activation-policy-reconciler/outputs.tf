@@ -37,3 +37,19 @@ output "mixed_recovery_permissions_policy_sha256" {
 output "mixed_recovery_trust_policy_sha256" {
   value = filesha256("${path.module}/mixed-recovery-trust-policy.json")
 }
+
+output "broker_recovery_successor_evidence_reader_role_arn" {
+  value = aws_iam_role.broker_recovery_successor_evidence_reader.arn
+}
+
+output "broker_recovery_successor_evidence_reader_policy_arn" {
+  value = aws_iam_policy.broker_recovery_successor_evidence_reader.arn
+}
+
+output "broker_recovery_successor_evidence_reader_trust_policy_sha256" {
+  value = filesha256("${path.module}/broker-recovery-successor-evidence-reader-trust-policy.json")
+}
+
+output "broker_recovery_successor_evidence_reader_permissions_policy_sha256" {
+  value = filesha256("${path.module}/broker-recovery-successor-evidence-reader-permissions-policy.json")
+}

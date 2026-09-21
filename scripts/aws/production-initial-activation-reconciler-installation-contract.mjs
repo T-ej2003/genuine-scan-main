@@ -5,6 +5,7 @@ import { canonicalJson } from "./production-green-stage-b-contract.mjs";
 import { BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER, INITIAL_ACTIVATION_RECONCILER } from "./verify-production-initial-activation-policy-reconciler.mjs";
 import { MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES } from "./production-mixed-dual-slot-recovery-contract.mjs";
 import { PRODUCTION_ENVIRONMENT_APPROVAL, assertProductionEnvironmentApprovalEvidence, assertProductionEnvironmentApprovalIdentity } from "./production-github-environment-approval.mjs";
+import { brokerRecoverySuccessorEvidenceReader } from "./component-broker-recovery-successor-evidence-reader-contract.mjs";
 
 export const INSTALLATION = Object.freeze({
   schemaVersion: 1,
@@ -23,10 +24,12 @@ export const INSTALLATION = Object.freeze({
   mixedRecoveryPolicyArn: "arn:aws:iam::368992683803:policy/MSCQRProductionMixedDualSlotRecoveryExecutor",
   bootstrapOperatorPolicyAuthorizerRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-bootstrap-operator-policy-authorizer",
   bootstrapOperatorPolicyAuthorizerPolicyArn: "arn:aws:iam::368992683803:policy/MSCQRProductionBootstrapOperatorPolicyAuthorizer",
+  brokerRecoverySuccessorEvidenceReaderRoleArn: brokerRecoverySuccessorEvidenceReader.roleArn,
+  brokerRecoverySuccessorEvidenceReaderPolicyArn: brokerRecoverySuccessorEvidenceReader.policyArn,
   authorizationWorkflowPath: ".github/workflows/authorize-production-initial-activation-policy-reconciler-installation.yml",
   authorizationArtifactName: "production-initial-activation-policy-reconciler-installation-authorization",
-  expectedAddresses: Object.freeze(["aws_iam_role.reconciler", "aws_iam_policy.reconciler", "aws_iam_role_policy_attachment.reconciler", "aws_iam_role.mixed_recovery", "aws_iam_policy.mixed_recovery", "aws_iam_role_policy_attachment.mixed_recovery", "aws_iam_role.bootstrap_operator_policy_authorizer", "aws_iam_policy.bootstrap_operator_policy_authorizer", "aws_iam_role_policy_attachment.bootstrap_operator_policy_authorizer"]),
-  maxAwsMutations: Object.freeze({ "iam:CreateRole": 3, "iam:CreatePolicy": 3, "iam:AttachRolePolicy": 3, "iam:UpdateAssumeRolePolicy": 1, "iam:PutRolePolicy": 0, "iam:CreatePolicyVersion": 2 }),
+  expectedAddresses: Object.freeze(["aws_iam_role.reconciler", "aws_iam_policy.reconciler", "aws_iam_role_policy_attachment.reconciler", "aws_iam_role.mixed_recovery", "aws_iam_policy.mixed_recovery", "aws_iam_role_policy_attachment.mixed_recovery", "aws_iam_role.bootstrap_operator_policy_authorizer", "aws_iam_policy.bootstrap_operator_policy_authorizer", "aws_iam_role_policy_attachment.bootstrap_operator_policy_authorizer", "aws_iam_role.broker_recovery_successor_evidence_reader", "aws_iam_policy.broker_recovery_successor_evidence_reader", "aws_iam_role_policy_attachment.broker_recovery_successor_evidence_reader"]),
+  maxAwsMutations: Object.freeze({ "iam:CreateRole": 4, "iam:CreatePolicy": 4, "iam:AttachRolePolicy": 4, "iam:UpdateAssumeRolePolicy": 1, "iam:PutRolePolicy": 0, "iam:CreatePolicyVersion": 2 }),
 });
 
 export const INSTALLATION_BACKEND = Object.freeze({ type: "s3", bucket: INSTALLATION.backend.bucket, key: INSTALLATION.backend.key, region: INSTALLATION.backend.region, encrypt: INSTALLATION.backend.encrypt, use_lockfile: INSTALLATION.backend.useLockfile, workspace: INSTALLATION.backend.workspace });
@@ -45,6 +48,8 @@ const sourceHashes = () => Object.freeze({
   permissionsPolicySha256: sha256(read(sourceFile(`${INSTALLATION.terraformRoot}/permissions-policy.json`))),
   mixedRecoveryPermissionsPolicySha256: sha256(read(sourceFile(`${INSTALLATION.terraformRoot}/mixed-recovery-permissions-policy.json`))),
   bootstrapOperatorPolicyAuthorizerPermissionsPolicySha256: sha256(read(sourceFile(`${INSTALLATION.terraformRoot}/bootstrap-operator-policy-authorizer-permissions-policy.json`))),
+  brokerRecoverySuccessorEvidenceReaderTrustPolicySha256: sha256(read(sourceFile(brokerRecoverySuccessorEvidenceReader.trustPath))),
+  brokerRecoverySuccessorEvidenceReaderPermissionsPolicySha256: sha256(read(sourceFile(brokerRecoverySuccessorEvidenceReader.permissionsPath))),
   installationContractSha256: sha256(read(sourceFile(`${INSTALLATION.terraformRoot}/installation-contract.json`))),
   backendContractSha256: sha256(read(sourceFile(`${INSTALLATION.terraformRoot}/state-backend-contract.json`))),
 });
@@ -77,6 +82,9 @@ const AUTHORIZER_ROLE_NAME = "mscqr-production-bootstrap-operator-policy-authori
 const AUTHORIZER_POLICY_NAME = "MSCQRProductionBootstrapOperatorPolicyAuthorizer";
 const AUTHORIZER_ROLE_DESCRIPTION = "GitHub OIDC-only read-only authorizer for the exact bootstrap-operator legacy transition.";
 const AUTHORIZER_POLICY_DESCRIPTION = "Exact read-only binding verification for bootstrap-operator policy authorization.";
+const EVIDENCE_READER_TAGS = Object.freeze({ ...EXPECTED_TAGS, Component: "broker-recovery-successor-evidence" });
+const EVIDENCE_READER_ROLE_DESCRIPTION = "Temporary GitHub OIDC reader for exact broker successor lineage evidence.";
+const EVIDENCE_READER_POLICY_DESCRIPTION = "Read only the two immutable component broker successor lineage objects.";
 const hasKnownNoPermissionsBoundary = (value, unknown) => (value === null || value === "") && unknown !== true;
 export const installationPermissionsPredecessor = () => {
   const desired = sourceJson(`${INSTALLATION.terraformRoot}/permissions-policy.json`);
@@ -99,6 +107,10 @@ const EXPECTED_PROVIDER_CONFIGURATION = Object.freeze({
   },
 });
 const EXPECTED_OUTPUT_CONFIGURATION = Object.freeze({
+  broker_recovery_successor_evidence_reader_permissions_policy_sha256: { expression: { references: ["path.module"] } },
+  broker_recovery_successor_evidence_reader_policy_arn: { expression: { references: ["aws_iam_policy.broker_recovery_successor_evidence_reader.arn", "aws_iam_policy.broker_recovery_successor_evidence_reader"] } },
+  broker_recovery_successor_evidence_reader_role_arn: { expression: { references: ["aws_iam_role.broker_recovery_successor_evidence_reader.arn", "aws_iam_role.broker_recovery_successor_evidence_reader"] } },
+  broker_recovery_successor_evidence_reader_trust_policy_sha256: { expression: { references: ["path.module"] } },
   mixed_recovery_permissions_policy_sha256: { expression: { references: ["path.module"] } },
   mixed_recovery_policy_arn: { expression: { references: ["aws_iam_policy.mixed_recovery.arn", "aws_iam_policy.mixed_recovery"] } },
   mixed_recovery_role_arn: { expression: { references: ["aws_iam_role.mixed_recovery.arn", "aws_iam_role.mixed_recovery"] } },
@@ -111,6 +123,18 @@ const EXPECTED_OUTPUT_CONFIGURATION = Object.freeze({
   trust_policy_sha256: { expression: { references: ["path.module"] } },
 });
 const EXPECTED_RESOURCE_CONFIGURATION = Object.freeze({
+  "aws_iam_policy.broker_recovery_successor_evidence_reader": {
+    address: "aws_iam_policy.broker_recovery_successor_evidence_reader", mode: "managed", type: "aws_iam_policy", name: "broker_recovery_successor_evidence_reader", provider_config_key: "aws", schema_version: 0,
+    expressions: { description: { constant_value: EVIDENCE_READER_POLICY_DESCRIPTION }, name: { references: ["local.broker_recovery_successor_evidence_reader_policy_name"] }, policy: { references: ["path.module"] }, tags: { references: ["local.tags"] } },
+  },
+  "aws_iam_role.broker_recovery_successor_evidence_reader": {
+    address: "aws_iam_role.broker_recovery_successor_evidence_reader", mode: "managed", type: "aws_iam_role", name: "broker_recovery_successor_evidence_reader", provider_config_key: "aws", schema_version: 0,
+    expressions: { assume_role_policy: { references: ["path.module"] }, description: { constant_value: EVIDENCE_READER_ROLE_DESCRIPTION }, max_session_duration: { constant_value: 3600 }, name: { references: ["local.broker_recovery_successor_evidence_reader_role_name"] }, tags: { references: ["local.tags"] } },
+  },
+  "aws_iam_role_policy_attachment.broker_recovery_successor_evidence_reader": {
+    address: "aws_iam_role_policy_attachment.broker_recovery_successor_evidence_reader", mode: "managed", type: "aws_iam_role_policy_attachment", name: "broker_recovery_successor_evidence_reader", provider_config_key: "aws", schema_version: 0,
+    expressions: { policy_arn: { references: ["aws_iam_policy.broker_recovery_successor_evidence_reader.arn", "aws_iam_policy.broker_recovery_successor_evidence_reader"] }, role: { references: ["aws_iam_role.broker_recovery_successor_evidence_reader.name", "aws_iam_role.broker_recovery_successor_evidence_reader"] } },
+  },
   "aws_iam_policy.bootstrap_operator_policy_authorizer": {
     address: "aws_iam_policy.bootstrap_operator_policy_authorizer", mode: "managed", type: "aws_iam_policy", name: "bootstrap_operator_policy_authorizer", provider_config_key: "aws", schema_version: 0,
     expressions: { description: { constant_value: AUTHORIZER_POLICY_DESCRIPTION }, name: { constant_value: AUTHORIZER_POLICY_NAME }, policy: { references: ["path.module"] }, tags: { references: ["local.tags"] } },
@@ -220,6 +244,7 @@ export function assertInstallationPlan(plan) {
   const policyCreated = JSON.stringify(changes.find((entry) => entry?.address === "aws_iam_policy.reconciler")?.change?.actions) === JSON.stringify(["create"]);
   const mixedRecoveryPolicyCreated = JSON.stringify(changes.find((entry) => entry?.address === "aws_iam_policy.mixed_recovery")?.change?.actions) === JSON.stringify(["create"]);
   const authorizerPolicyCreated = JSON.stringify(changes.find((entry) => entry?.address === "aws_iam_policy.bootstrap_operator_policy_authorizer")?.change?.actions) === JSON.stringify(["create"]);
+  const evidenceReaderPolicyCreated = JSON.stringify(changes.find((entry) => entry?.address === "aws_iam_policy.broker_recovery_successor_evidence_reader")?.change?.actions) === JSON.stringify(["create"]);
   const createdAddresses = [];
   const updatedAddresses = [];
   const noOpAddresses = [];
@@ -229,7 +254,7 @@ export function assertInstallationPlan(plan) {
     const update = action === JSON.stringify(["update"]);
     if (entry.mode !== "managed" || ![JSON.stringify(["create"]), JSON.stringify(["no-op"]), JSON.stringify(["update"])].includes(action) || update && !["aws_iam_policy.reconciler", "aws_iam_role.mixed_recovery", "aws_iam_role.bootstrap_operator_policy_authorizer", "aws_iam_policy.bootstrap_operator_policy_authorizer"].includes(entry.address)) throw new Error("Installation plan contains an unreviewed resource action.");
     const expectedType = entry.address.startsWith("aws_iam_role_policy_attachment.") ? "aws_iam_role_policy_attachment" : entry.address.startsWith("aws_iam_role.") ? "aws_iam_role" : "aws_iam_policy";
-    const expectedName = entry.address.endsWith(".mixed_recovery") ? "mixed_recovery" : entry.address.endsWith(".bootstrap_operator_policy_authorizer") ? "bootstrap_operator_policy_authorizer" : "reconciler";
+    const expectedName = entry.address.endsWith(".mixed_recovery") ? "mixed_recovery" : entry.address.endsWith(".bootstrap_operator_policy_authorizer") ? "bootstrap_operator_policy_authorizer" : entry.address.endsWith(".broker_recovery_successor_evidence_reader") ? "broker_recovery_successor_evidence_reader" : "reconciler";
     if (entry.type !== expectedType || entry.name !== expectedName || entry.provider_name !== "registry.terraform.io/hashicorp/aws") throw new Error("Installation plan resource identity is not exact.");
     const create = action === JSON.stringify(["create"]);
     if (create ? entry.change.before !== null : !update && canonicalJson(entry.change.before) !== canonicalJson(entry.change.after)) throw new Error("Installation plan action predecessor is not exact.");
@@ -261,6 +286,10 @@ export function assertInstallationPlan(plan) {
         const before = entry.change.before;
         if (!before || before.arn !== INSTALLATION.bootstrapOperatorPolicyAuthorizerPolicyArn || canonicalJson(policyValue(before.policy, "Authorizer predecessor permissions policy")) !== canonicalJson(bootstrapOperatorPolicyAuthorizerPermissionsPredecessor()) || canonicalJson({ ...before, policy: after.policy }) !== canonicalJson(after)) throw new Error("Authorizer policy update predecessor is not exact.");
       }
+    } else if (entry.address === "aws_iam_role.broker_recovery_successor_evidence_reader") {
+      if (after.name !== brokerRecoverySuccessorEvidenceReader.roleName || after.path !== "/" || after.description !== EVIDENCE_READER_ROLE_DESCRIPTION || after.force_detach_policies !== false || after.max_session_duration !== 3600 || !hasKnownNoPermissionsBoundary(after.permissions_boundary, entry.change.after_unknown?.permissions_boundary) || canonicalJson(after.tags) !== canonicalJson(EVIDENCE_READER_TAGS) || canonicalJson(after.tags_all) !== canonicalJson(EVIDENCE_READER_TAGS) || canonicalJson(policyValue(after.assume_role_policy, "Evidence reader trust policy")) !== canonicalJson(sourceJson(brokerRecoverySuccessorEvidenceReader.trustPath)) || !create && after.arn !== INSTALLATION.brokerRecoverySuccessorEvidenceReaderRoleArn) throw new Error("Evidence reader role contract is not exact.");
+    } else if (entry.address === "aws_iam_policy.broker_recovery_successor_evidence_reader") {
+      if (after.name !== brokerRecoverySuccessorEvidenceReader.policyName || after.path !== "/" || after.description !== EVIDENCE_READER_POLICY_DESCRIPTION || after.delay_after_policy_creation_in_ms !== null || canonicalJson(after.tags) !== canonicalJson(EVIDENCE_READER_TAGS) || canonicalJson(after.tags_all) !== canonicalJson(EVIDENCE_READER_TAGS) || canonicalJson(policyValue(after.policy, "Evidence reader permissions policy")) !== canonicalJson(sourceJson(brokerRecoverySuccessorEvidenceReader.permissionsPath)) || !create && after.arn !== INSTALLATION.brokerRecoverySuccessorEvidenceReaderPolicyArn) throw new Error("Evidence reader policy contract is not exact.");
     } else if (entry.address === "aws_iam_role_policy_attachment.reconciler") {
       const policyArnKnown = !policyCreated && after.policy_arn === INSTALLATION.policyArn && entry.change.after_unknown?.policy_arn === undefined;
       const policyArnComputed = policyCreated && !Object.hasOwn(after, "policy_arn") && entry.change.after_unknown?.policy_arn === true;
@@ -273,6 +302,10 @@ export function assertInstallationPlan(plan) {
       const policyArnKnown = !authorizerPolicyCreated && after.policy_arn === INSTALLATION.bootstrapOperatorPolicyAuthorizerPolicyArn && entry.change.after_unknown?.policy_arn === undefined;
       const policyArnComputed = authorizerPolicyCreated && !Object.hasOwn(after, "policy_arn") && entry.change.after_unknown?.policy_arn === true;
       if (after.role !== AUTHORIZER_ROLE_NAME || !(policyArnKnown || policyArnComputed)) throw new Error("Authorizer installation attachment contract is not exact.");
+    } else if (entry.address === "aws_iam_role_policy_attachment.broker_recovery_successor_evidence_reader") {
+      const policyArnKnown = !evidenceReaderPolicyCreated && after.policy_arn === INSTALLATION.brokerRecoverySuccessorEvidenceReaderPolicyArn && entry.change.after_unknown?.policy_arn === undefined;
+      const policyArnComputed = evidenceReaderPolicyCreated && !Object.hasOwn(after, "policy_arn") && entry.change.after_unknown?.policy_arn === true;
+      if (after.role !== brokerRecoverySuccessorEvidenceReader.roleName || !(policyArnKnown || policyArnComputed)) throw new Error("Evidence reader attachment contract is not exact.");
     }
   }
   const resourceChanges = changes.map((entry) => Object.freeze({
@@ -338,7 +371,8 @@ export function assertInstallationAuthorizedPostState(rawBytes, { predecessorSta
     const resource = state.resources.find((candidate) => candidate?.mode === "managed" && !candidate.module && `${candidate.type}.${candidate.name}` === change.address);
     const attributes = resource?.instances?.length === 1 ? resource.instances[0]?.attributes : undefined;
     if (!attributes) throw new Error(`Installation Terraform post-state ${change.address} identity is not exact.`);
-    if (change.address === "aws_iam_policy.reconciler" && (attributes.arn !== INSTALLATION.policyArn || attributes.id !== INSTALLATION.policyArn) || change.address === "aws_iam_policy.mixed_recovery" && (attributes.arn !== INSTALLATION.mixedRecoveryPolicyArn || attributes.id !== INSTALLATION.mixedRecoveryPolicyArn)) throw new Error("Installation Terraform post-state policy identity is not exact.");
+    const policyArn = { "aws_iam_policy.reconciler": INSTALLATION.policyArn, "aws_iam_policy.mixed_recovery": INSTALLATION.mixedRecoveryPolicyArn, "aws_iam_policy.bootstrap_operator_policy_authorizer": INSTALLATION.bootstrapOperatorPolicyAuthorizerPolicyArn, "aws_iam_policy.broker_recovery_successor_evidence_reader": INSTALLATION.brokerRecoverySuccessorEvidenceReaderPolicyArn }[change.address];
+    if (policyArn && (attributes.arn !== policyArn || attributes.id !== policyArn)) throw new Error("Installation Terraform post-state policy identity is not exact.");
     for (const [field, expected] of Object.entries(change.after)) {
       const actual = attributes[field];
       const equal = field === "permissions_boundary"
@@ -368,7 +402,7 @@ export function createInstallationPreparation({ sourceSha, state, livePredecesso
     || livePredecessor === "EXACT_TRUST_UPDATE" && (semantics.createCount !== 0 || semantics.updateCount !== 1 || semantics.changedAddresses[0] !== "aws_iam_role.mixed_recovery" || semantics.noOpCount !== INSTALLATION.expectedAddresses.length - 1)
     || livePredecessor === "EXACT_AUTHORIZER_TRUST_UPDATE" && (semantics.createCount !== 0 || semantics.updateCount !== 1 || semantics.changedAddresses[0] !== "aws_iam_role.bootstrap_operator_policy_authorizer" || semantics.noOpCount !== INSTALLATION.expectedAddresses.length - 1)
     || livePredecessor === "EXACT_AUTHORIZER_POLICY_UPDATE" && (semantics.createCount !== 0 || semantics.updateCount !== 1 || semantics.changedAddresses[0] !== "aws_iam_policy.bootstrap_operator_policy_authorizer" || semantics.noOpCount !== INSTALLATION.expectedAddresses.length - 1)
-    || livePredecessor === "EXACT_EXPANSION" && (semantics.createCount < 1 || semantics.createCount > 6 || semantics.updateCount > 1 || semantics.updateCount === 1 && !semantics.changedAddresses.includes("aws_iam_policy.reconciler") || semantics.noOpCount !== INSTALLATION.expectedAddresses.length - semantics.createCount - semantics.updateCount)
+    || livePredecessor === "EXACT_EXPANSION" && (semantics.createCount < 1 || semantics.createCount > 9 || semantics.updateCount > 1 || semantics.updateCount === 1 && !semantics.changedAddresses.includes("aws_iam_policy.reconciler") || semantics.noOpCount !== INSTALLATION.expectedAddresses.length - semantics.createCount - semantics.updateCount)
     || livePredecessor === "EXACT_COMPLETE" && (semantics.createCount !== 0 || semantics.updateCount !== 0 || semantics.noOpCount !== INSTALLATION.expectedAddresses.length)
     || JSON.stringify(livePredecessorAddresses) !== JSON.stringify(["EXACT_UPDATE", "EXACT_TRUST_UPDATE", "EXACT_AUTHORIZER_TRUST_UPDATE", "EXACT_AUTHORIZER_POLICY_UPDATE"].includes(livePredecessor) ? [...INSTALLATION.expectedAddresses].sort() : livePredecessor === "EXACT_EXPANSION" ? planPredecessorAddresses : semantics.noOpAddresses)) throw new Error("Installation plan does not match the authenticated live predecessor.");
   if (!Buffer.isBuffer(planBytes) || planBytes.length < 1) throw new Error("Saved Terraform plan bytes are required.");
@@ -408,7 +442,7 @@ export function assertInstallationPreparation(value, { sourceSha, planBytes } = 
     || value.livePredecessor === "EXACT_TRUST_UPDATE" && (value.planSemantics.updateCount !== 1 || value.planSemantics.changedAddresses[0] !== "aws_iam_role.mixed_recovery")
     || value.livePredecessor === "EXACT_AUTHORIZER_TRUST_UPDATE" && (value.planSemantics.updateCount !== 1 || value.planSemantics.changedAddresses[0] !== "aws_iam_role.bootstrap_operator_policy_authorizer")
     || value.livePredecessor === "EXACT_AUTHORIZER_POLICY_UPDATE" && (value.planSemantics.updateCount !== 1 || value.planSemantics.changedAddresses[0] !== "aws_iam_policy.bootstrap_operator_policy_authorizer")
-    || value.livePredecessor === "EXACT_EXPANSION" && (value.planSemantics.createCount < 1 || value.planSemantics.createCount > 6 || value.planSemantics.updateCount > 1 || value.planSemantics.updateCount === 1 && !value.planSemantics.changedAddresses.includes("aws_iam_policy.reconciler"))
+    || value.livePredecessor === "EXACT_EXPANSION" && (value.planSemantics.createCount < 1 || value.planSemantics.createCount > 9 || value.planSemantics.updateCount > 1 || value.planSemantics.updateCount === 1 && !value.planSemantics.changedAddresses.includes("aws_iam_policy.reconciler"))
     || value.livePredecessor === "EXACT_COMPLETE" && value.planSemantics.resourceChangeCount !== 0) throw new Error("Installation preparation plan semantics are not exact.");
   return value;
 }

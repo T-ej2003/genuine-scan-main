@@ -113,3 +113,20 @@ export function assertBrokerPolicySuccessorClosureMetadata(metadata, bindings) {
   assert.equal(value.bindingsSha256, digest(bindings)); assert.deepEqual(Object.keys(value.runtimeVersions || {}).sort(), Object.values(brokerPolicySuccessorEntryPoints)); for (const runtime of Object.values(value.runtimeVersions)) assert.match(runtime || "", /^arn:aws:lambda:eu-west-2::runtime:[a-f0-9]{64}$/); timestamp(value.closedAt);
   return Object.freeze(structuredClone(value));
 }
+
+// The original successor package is immutable.  Later transitions must verify
+// its closure against the binding document retained in its reservation, not
+// rebuild that document from a newer package.
+export function assertHistoricalBrokerPolicySuccessorClosure(metadata, bindings) {
+  const encoded = metadata?.[brokerPolicySuccessorMetadataKey];
+  assert(typeof encoded === "string" && encoded, "First successor closure missing");
+  const value = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+  assert.deepEqual(Object.keys(value || {}).sort(), ["authorizationSha256", "bindingsSha256", "closedAt", "reservationEtagSha256", "reservationSha256", "runtimeVersions", "schemaVersion", "state", "transitionId"].sort());
+  assert.equal(value.schemaVersion, 1); assert.equal(value.state, "BROKER_POLICY_SUCCESSOR_CLOSED"); uuid(value.transitionId);
+  for (const field of ["authorizationSha256", "bindingsSha256", "reservationEtagSha256", "reservationSha256"]) sha(value[field]);
+  assert.equal(value.bindingsSha256, digest(bindings), "First successor closure binding digest differs");
+  assert.deepEqual(Object.keys(value.runtimeVersions || {}).sort(), Object.values(brokerPolicySuccessorEntryPoints));
+  for (const runtime of Object.values(value.runtimeVersions)) assert.match(runtime || "", /^arn:aws:lambda:eu-west-2::runtime:[a-f0-9]{64}$/);
+  timestamp(value.closedAt);
+  return Object.freeze(structuredClone(value));
+}

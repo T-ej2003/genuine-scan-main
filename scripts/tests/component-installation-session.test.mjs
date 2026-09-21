@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { establishComponentSession, establishComponentCleanupSession, establishComponentTerraformSession } from "../aws/component-installation-session.mjs";
+import { establishComponentSession, establishComponentCleanupSession, establishComponentRecoveryTerraformSession, establishComponentTerraformSession } from "../aws/component-installation-session.mjs";
 import { authenticateComponentSession } from "../aws/component-session-proof.mjs";
 import { identityBootstrap, componentBrokerArn } from "../aws/component-installation-identity-contract.mjs";
 
@@ -120,6 +120,22 @@ test("entry-point fallback reaches the exact broker-policy successor after both 
   try { await client.inspect(); }
   finally { client.close(); }
   assert.deepEqual(invoked, [...Array(2)].flatMap(() => [`${componentBrokerArn}:1`, `${componentBrokerArn}:4`, `${componentBrokerArn}:7`]));
+});
+
+test("partial-activation recovery invokes only authenticated successor INSTALL version 10", async () => {
+  const f = fixture("TERRAFORM"), invoked = [];
+  f.dependencies.state = () => ({ inspectPartialActivationRecovery: async () => ({ stateIdentity: "ABSENT" }), close: () => {} });
+  f.dependencies.invoke = async input => {
+    invoked.push(input.FunctionName); assert.equal(input.FunctionName, `${componentBrokerArn}:10`);
+    const payload = JSON.parse(Buffer.from(input.Payload).toString("utf8"));
+    const result = payload.operation === "TERRAFORM_CONTEXT" ? f.binding : { state: "SESSION_VERIFIED", principal: f.principal, expiresAt: f.scoped.Expiration.toISOString(), sourceSha: f.binding.sourceSha,
+      transitionId: f.binding.transitionId, authorizationSha256: f.binding.authorizationSha256, session: { account: identityBootstrap.account, region: identityBootstrap.region, ...f.binding, principal: f.principal,
+        issuedAt: new Date(start).toISOString(), expiresAt: f.scoped.Expiration.toISOString(), issuanceEventId: "12345678-1234-4234-8234-123456789def", issuanceEventTime: new Date(start).toISOString(), operatorArn: f.user.Arn, mfaAuthenticated: true } };
+    return { StatusCode: 200, ExecutedVersion: "10", Payload: Buffer.from(JSON.stringify(result)) };
+  };
+  const client = await establishComponentRecoveryTerraformSession({ sourceSha: f.binding.sourceSha, transitionId: f.binding.transitionId }, f.dependencies);
+  try { await client.inspectPartialActivationRecovery({}); } finally { client.close(); }
+  assert.deepEqual(invoked, [`${componentBrokerArn}:10`, `${componentBrokerArn}:10`]);
 });
 
 test("Terraform operator authenticates broker MFA proof and sends only its scoped session to the isolated runner once", async () => {

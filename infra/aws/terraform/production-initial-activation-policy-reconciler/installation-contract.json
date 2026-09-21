@@ -6,9 +6,9 @@
   "concurrencyGroup": "production-deploy",
   "sourceShaRequired": true,
   "maxAwsMutations": {
-    "iam:CreateRole": 2,
-    "iam:CreatePolicy": 2,
-    "iam:AttachRolePolicy": 2,
+    "iam:CreateRole": 4,
+    "iam:CreatePolicy": 4,
+    "iam:AttachRolePolicy": 4,
     "iam:UpdateAssumeRolePolicy": 1,
     "iam:PutRolePolicy": 0,
     "iam:CreatePolicyVersion": 2
@@ -17,7 +17,11 @@
     "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler",
     "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
     "arn:aws:iam::368992683803:role/mscqr-production-mixed-dual-slot-recovery-executor",
-    "arn:aws:iam::368992683803:policy/MSCQRProductionMixedDualSlotRecoveryExecutor"
+    "arn:aws:iam::368992683803:policy/MSCQRProductionMixedDualSlotRecoveryExecutor",
+    "arn:aws:iam::368992683803:role/mscqr-production-bootstrap-operator-policy-authorizer",
+    "arn:aws:iam::368992683803:policy/MSCQRProductionBootstrapOperatorPolicyAuthorizer",
+    "arn:aws:iam::368992683803:role/mscqr-production-broker-recovery-successor-evidence-reader",
+    "arn:aws:iam::368992683803:policy/MSCQRProductionBrokerRecoverySuccessorEvidenceRead"
   ],
   "verificationCommand": "canonical workflow invokes verify-production-initial-activation-policy-reconciler.mjs with the authenticated bootstrap session",
   "executionPerformedInThisSource": true

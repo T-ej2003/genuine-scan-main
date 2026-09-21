@@ -55,7 +55,7 @@ export function terraformTargetPolicy() {
 }
 
 export function terraformExecutorPolicyGeneration(version, recovery = false) {
-  assert(["4", "7"].includes(version) && recovery === (version === "7"), "Unsupported Terraform executor policy generation");
+  assert(["4", "7", "10"].includes(version) && recovery === (version === "7" || version === "10"), "Unsupported Terraform executor policy generation");
   const policy = terraformTargetPolicy();
   policy.Statement.find(({ Action }) => Action === "lambda:InvokeFunction").Resource = `arn:aws:lambda:eu-west-2:${account}:function:${installationIdentity.functionName}:${version}`;
   if (recovery) {

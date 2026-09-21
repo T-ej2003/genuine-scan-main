@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { brokerConfiguration, assertBrokerConfiguration, assertBrokerEntryPoint, brokerPolicySuccessorEntryPoints, redactBrokerDiagnostic } from "../aws/component-broker-configuration.mjs";
+import { brokerConfiguration, assertBrokerConfiguration, assertBrokerEntryPoint, brokerPolicySuccessorEntryPoints, brokerRecoverySuccessorEntryPoints, redactBrokerDiagnostic } from "../aws/component-broker-configuration.mjs";
 import { componentBrokerArn } from "../aws/component-installation-identity-contract.mjs";
 import { installationIdentity } from "../aws/component-iam-installation-contract.mjs";
 
@@ -72,4 +72,8 @@ test("successor package routes install, cleanup and authorization only through i
     assert.equal(assertBrokerEntryPoint(context, operation, brokerPolicySuccessorEntryPoints), version);
     for (const predecessor of ["4", "5", "6"]) assert.throws(() => assertBrokerEntryPoint({ functionVersion: predecessor, invokedFunctionArn: `${componentBrokerArn}:${predecessor}` }, operation, brokerPolicySuccessorEntryPoints));
   }
+});
+test("recovery successor package routes Terraform only through immutable version 10", () => {
+  assert.equal(assertBrokerEntryPoint({ functionVersion: "10", invokedFunctionArn: `${componentBrokerArn}:10` }, "TERRAFORM_CONTEXT", brokerRecoverySuccessorEntryPoints), "10");
+  for (const version of ["7", "8", "9", "11", "12"]) assert.throws(() => assertBrokerEntryPoint({ functionVersion: version, invokedFunctionArn: `${componentBrokerArn}:${version}` }, "TERRAFORM_CONTEXT", brokerRecoverySuccessorEntryPoints));
 });
