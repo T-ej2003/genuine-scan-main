@@ -38,6 +38,7 @@ assert.match(diagnostic, /strpos\(normalized_email,'@'\)<>separator_position/, "
 assert.match(diagnostic, /target_unactivated := target_is_active AND target_status='INVITED' AND target_disabled_at IS NULL AND target_deleted_at IS NULL AND target_password_hash IS NULL/);
 assert(!/target_exists AND NOT target_active AND latest_exists/.test(diagnostic), "disabled or deleted accounts must not be reported as unactivated");
 assert.match(diagnostic, /latest_invite_acceptable := latest_exists/);
+assert.match(diagnostic, /latest_invite_acceptable := latest_exists\s+AND latest_invite_email=normalized_email/, "acceptable invites must satisfy the canonical acceptance email match");
 assert.match(diagnostic, /AND \(target_exists AND target_unactivated/, "acceptable invites must have an acceptance-compatible target account");
 assert(!diagnostic.includes("F_VALID_UNUSED_INVITE_NO_ACCOUNT"), "account-less invites must remain inconsistent");
 assert.match(diagnostic, /FROM public\."Organization" o WHERE o\.id=latest_org_id AND o\."isActive"/);

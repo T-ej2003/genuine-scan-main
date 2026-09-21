@@ -163,6 +163,7 @@ BEGIN
   END IF;
 
   latest_invite_acceptable := latest_exists
+    AND latest_invite_email=normalized_email
     AND EXISTS (SELECT 1 FROM public."Organization" o WHERE o.id=latest_org_id AND o."isActive")
     AND (latest_licensee_id IS NULL OR EXISTS (
       SELECT 1 FROM public."Licensee" l
