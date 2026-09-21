@@ -50,10 +50,12 @@ columns. The generated-package gate rejects:
 - direct whole-row JSON serialization;
 - untyped `record.field` projection targets.
 
-The only exclusion is `session-c/c04/operatorProcedures.sql`: it is
-operator-only, absent from the named runtime-function inventory and generated
-package, and the scanner fails if it becomes active or disappears without a
-contract update. This is a source-contract exclusion, not runtime authority.
+`session-c/c04/operatorProcedures.sql` remains excluded because its recovery
+operations are not named runtime boundaries. The separate canonical
+`session-c/c04/accountOnboardingDiagnostic.sql` is included in the generated
+package as the single fixed, read-only C04 diagnostic boundary; its generated
+grant is limited to the exact environment operator role. This is a
+source-contract inclusion, not additional direct-table authority.
 
 ## Isolated staging executor
 

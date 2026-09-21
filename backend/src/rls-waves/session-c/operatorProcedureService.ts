@@ -3,6 +3,7 @@ import { randomUUID } from "crypto";
 import { Prisma, PrismaClient } from "@prisma/client";
 
 import prisma from "../../config/database";
+import { normalizeEmailAddress } from "../../utils/email";
 
 export type ProcedureDatabase = Pick<PrismaClient, "$transaction">;
 
@@ -59,12 +60,98 @@ const inProcedureTransaction = async <T>(
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 };
 
+const inReadOnlyProcedureTransaction = async <T>(
+  db: ProcedureDatabase,
+  context: ProcedureContext,
+  run: (tx: Prisma.TransactionClient) => Promise<T[]>,
+  procedure: string
+) => {
+  const purpose = boundedText(context.purpose, "purpose", 160);
+  const requestId = exactUuid(context.requestId || randomUUID(), "requestId");
+  const actorId = context.actorId ? exactUuid(context.actorId, "actorId") : "";
+  const licenseeId = context.licenseeId ? exactUuid(context.licenseeId, "licenseeId") : "";
+  return db.$transaction(async (tx) => {
+    await tx.$executeRaw(Prisma.sql`SET TRANSACTION READ ONLY`);
+    await tx.$executeRaw(
+      Prisma.sql`SELECT set_config('app.user_id', ${actorId}, true),
+                        set_config('app.licensee_id', ${licenseeId}, true),
+                        set_config('app.auth_assurance', ${context.assurance}, true),
+                        set_config('app.operator_environment', ${context.environment}, true),
+                        set_config('app.request_id', ${requestId}, true),
+                        set_config('app.purpose', ${purpose}, true),
+                        set_config('app.context_installed', '1', true)`
+    );
+    return oneRow(await run(tx), procedure);
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+};
+
 export type PrintDiagnosticResult = {
   batchId: string;
   printJobId: string | null;
   printState: string | null;
   itemCounts: Prisma.JsonValue;
   redactedFailureCodes: Prisma.JsonValue;
+};
+
+export type AccountOnboardingDiagnosticResult = {
+  inviteCount: number;
+  latestCreatedAt: Date | null;
+  latestExpiresAt: Date | null;
+  latestUsedAt: Date | null;
+  latestExpired: boolean | null;
+  latestRole: string | null;
+  latestTenantBinding: Prisma.JsonValue | null;
+  latestAcceptedByPresent: boolean | null;
+  accountExists: boolean;
+  accountStatus: string | null;
+  accountActive: boolean | null;
+  accountEmailVerified: boolean | null;
+  passwordConfigured: boolean | null;
+  accountRole: string | null;
+  accountTenantBinding: Prisma.JsonValue | null;
+  mfaConfigured: boolean | null;
+  inviteCreatedPresent: boolean;
+  inviteAcceptedPresent: boolean;
+  mfaEnrolledPresent: boolean;
+  stateClassification: string;
+};
+
+export const diagnoseAccountOnboarding = async (
+  input: ProcedureContext & { normalizedEmail: string; operatorId: string },
+  db: ProcedureDatabase = prisma
+) => {
+  const normalizedEmail = normalizeEmailAddress(input.normalizedEmail);
+  if (!normalizedEmail) throw new Error("normalizedEmail must be a valid email address.");
+  const operatorId = exactUuid(input.operatorId, "operatorId");
+  return inReadOnlyProcedureTransaction<AccountOnboardingDiagnosticResult>(
+    db,
+    { ...input, actorId: operatorId },
+    (tx) =>
+      tx.$queryRaw(Prisma.sql`
+        SELECT invite_count::integer AS "inviteCount",
+               latest_created_at AS "latestCreatedAt",
+               latest_expires_at AS "latestExpiresAt",
+               latest_used_at AS "latestUsedAt",
+               latest_expired AS "latestExpired",
+               latest_role AS "latestRole",
+               latest_tenant_binding AS "latestTenantBinding",
+               latest_accepted_by_present AS "latestAcceptedByPresent",
+               account_exists AS "accountExists",
+               account_status AS "accountStatus",
+               account_active AS "accountActive",
+               account_email_verified AS "accountEmailVerified",
+               password_configured AS "passwordConfigured",
+               account_role AS "accountRole",
+               account_tenant_binding AS "accountTenantBinding",
+               mfa_configured AS "mfaConfigured",
+               invite_created_present AS "inviteCreatedPresent",
+               invite_accepted_present AS "inviteAcceptedPresent",
+               mfa_enrolled_present AS "mfaEnrolledPresent",
+               state_classification AS "stateClassification"
+          FROM app_ops.diagnose_account_onboarding(${normalizedEmail}::text)
+      `),
+    "app_ops.diagnose_account_onboarding"
+  );
 };
 
 export const runPrintDiagnostic = async (

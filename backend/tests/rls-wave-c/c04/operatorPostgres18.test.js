@@ -6,8 +6,9 @@ const { PrismaClient } = require("@prisma/client");
 const enabled = process.env.MSCQR_SESSION_C_OPERATOR_POSTGRES18_TEST === "true";
 const confirmed = process.env.MSCQR_SESSION_C_OPERATOR_POSTGRES18_CONFIRM === "MSCQR_RUN_LOCAL_SESSION_C_OPERATOR_POSTGRES18_TEST";
 const database = "mscqr_rls_wave_c_admin_governance_operator";
-const adminUrl = `postgresql://mscqr_rls_cert_admin@127.0.0.1:55434/${database}`;
-const roleUrl = (role) => `postgresql://${role}@127.0.0.1:55434/${database}`;
+const postgresPort = Number(process.env.MSCQR_SESSION_C_OPERATOR_POSTGRES18_PORT || 55434);
+const adminUrl = `postgresql://mscqr_rls_cert_admin@127.0.0.1:${postgresPort}/${database}`;
+const roleUrl = (role) => `postgresql://${role}@127.0.0.1:${postgresPort}/${database}`;
 
 const psql = (sql) => {
   const run = spawnSync("psql", [adminUrl, "-X", "-v", "ON_ERROR_STOP=1", "-At", "-c", sql], { encoding: "utf8" });
@@ -26,6 +27,10 @@ const ids = {
   approver2: "00000000-0000-4400-8000-000000000003",
   target: "00000000-0000-4400-8000-000000000004",
   tenantActor: "00000000-0000-4400-8000-000000000005",
+  diagnosticUnactivated: "00000000-0000-4400-8000-000000000006",
+  diagnosticMfaIncomplete: "00000000-0000-4400-8000-000000000007",
+  diagnosticMfaComplete: "00000000-0000-4400-8000-000000000008",
+  diagnosticSuperseded: "00000000-0000-4400-8000-000000000009",
   orgA: "00000000-0000-4400-8000-000000000011",
   orgB: "00000000-0000-4400-8000-000000000012",
   licenseeA: "00000000-0000-4400-8000-000000000021",
@@ -43,11 +48,13 @@ DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='mscqr_rls_wave_c_operator') THEN CREATE ROLE mscqr_rls_wave_c_operator LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS; END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='mscqr_rls_wave_c_breakglass') THEN CREATE ROLE mscqr_rls_wave_c_breakglass LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS; END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='mscqr_rls_wave_c_migration') THEN CREATE ROLE mscqr_rls_wave_c_migration LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS; END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='mscqr_rls_wave_c_unrelated') THEN CREATE ROLE mscqr_rls_wave_c_unrelated LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS; END IF;
 END $$;
-GRANT CONNECT ON DATABASE ${database} TO mscqr_rls_wave_c_operator,mscqr_rls_wave_c_breakglass,mscqr_rls_wave_c_migration;
+GRANT CONNECT ON DATABASE ${database} TO mscqr_rls_wave_c_operator,mscqr_rls_wave_c_breakglass,mscqr_rls_wave_c_migration,mscqr_rls_wave_c_unrelated;
 GRANT USAGE ON SCHEMA public,app_ops TO mscqr_rls_wave_c_operator,mscqr_rls_wave_c_breakglass,mscqr_rls_wave_c_migration;
-REVOKE ALL ON ALL TABLES IN SCHEMA public FROM mscqr_rls_wave_c_operator,mscqr_rls_wave_c_breakglass,mscqr_rls_wave_c_migration;
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM mscqr_rls_wave_c_operator,mscqr_rls_wave_c_breakglass,mscqr_rls_wave_c_migration,mscqr_rls_wave_c_unrelated;
 GRANT EXECUTE ON FUNCTION app_ops.print_diagnostic(uuid) TO mscqr_rls_wave_c_operator;
+GRANT EXECUTE ON FUNCTION app_ops.diagnose_account_onboarding(text) TO mscqr_rls_wave_c_operator;
 GRANT EXECUTE ON FUNCTION app_ops.reissue_account_setup_link(uuid,uuid,text,uuid) TO mscqr_rls_wave_c_operator;
 GRANT EXECUTE ON FUNCTION app_ops.prepare_rls_validation_fixture(uuid,text,uuid) TO mscqr_rls_wave_c_operator;
 GRANT EXECUTE ON FUNCTION app_ops.reset_account_mfa(uuid,uuid,text,uuid) TO mscqr_rls_wave_c_breakglass;
@@ -64,8 +71,15 @@ DELETE FROM public."AuditLog" WHERE action LIKE 'OPERATOR_%' OR action LIKE 'AUT
 DELETE FROM public."ActionIdempotencyKey" WHERE action LIKE 'operator.%';
 DELETE FROM public."SensitiveActionApproval" WHERE id IN ('${ids.setupApproval}','${ids.staleApproval}','${ids.mfaApproval}','${ids.fixtureApproval}');
 DELETE FROM public."Invite" WHERE email='target-c04@example.invalid';
+DELETE FROM public."Invite" WHERE email LIKE 'diagnostic-c04-%@example.invalid';
+DELETE FROM public."AuditLog" WHERE "entityId" IN ('diagnostic-c04-no-account-invite','diagnostic-c04-unactivated-invite','diagnostic-c04-mfa-incomplete-invite','diagnostic-c04-mfa-complete-invite','diagnostic-c04-history-a','diagnostic-c04-history-b','diagnostic-c04-superseded-old','diagnostic-c04-superseded-new','${ids.diagnosticUnactivated}','${ids.diagnosticMfaIncomplete}','${ids.diagnosticMfaComplete}','${ids.diagnosticSuperseded}');
+DELETE FROM public."AuditLogOutbox" WHERE payload->>'entityId' IN ('diagnostic-c04-no-account-invite','diagnostic-c04-unactivated-invite','diagnostic-c04-mfa-incomplete-invite','diagnostic-c04-mfa-complete-invite','diagnostic-c04-history-a','diagnostic-c04-history-b','diagnostic-c04-superseded-old','diagnostic-c04-superseded-new','${ids.diagnosticUnactivated}','${ids.diagnosticMfaIncomplete}','${ids.diagnosticMfaComplete}','${ids.diagnosticSuperseded}');
 DELETE FROM public."PasswordReset" WHERE "userId"='${ids.target}';
 DELETE FROM public."AdminMfaCredential" WHERE "userId"='${ids.target}';
+DELETE FROM public."AdminMfaCredential" WHERE "userId" IN ('${ids.diagnosticUnactivated}','${ids.diagnosticMfaIncomplete}','${ids.diagnosticMfaComplete}','${ids.diagnosticSuperseded}');
+DELETE FROM public."AdminWebAuthnCredential" WHERE "userId" IN ('${ids.diagnosticUnactivated}','${ids.diagnosticMfaIncomplete}','${ids.diagnosticMfaComplete}','${ids.diagnosticSuperseded}');
+DELETE FROM public."UserMfaFactor" WHERE "userId" IN ('${ids.diagnosticUnactivated}','${ids.diagnosticMfaIncomplete}','${ids.diagnosticMfaComplete}','${ids.diagnosticSuperseded}');
+DELETE FROM public."UserBackupCode" WHERE "userId" IN ('${ids.diagnosticUnactivated}','${ids.diagnosticMfaIncomplete}','${ids.diagnosticMfaComplete}','${ids.diagnosticSuperseded}');
 DELETE FROM public."AdminWebAuthnCredential" WHERE "userId"='${ids.target}';
 DELETE FROM public."UserMfaFactor" WHERE "userId"='${ids.target}';
 DELETE FROM public."UserBackupCode" WHERE "userId"='${ids.target}';
@@ -78,6 +92,7 @@ DELETE FROM public."Batch" WHERE id='${ids.batch}' OR metadata->>'synthetic'='tr
 DELETE FROM public."QRRange" WHERE "licenseeId" IN (SELECT id FROM public."Licensee" WHERE metadata->>'synthetic'='true');
 DELETE FROM public."ManufacturerLicenseeLink" WHERE "manufacturerId" IN (SELECT id FROM public."User" WHERE metadata->>'synthetic'='true');
 DELETE FROM public."User" WHERE id IN ('${ids.operator}','${ids.approver1}','${ids.approver2}','${ids.target}','${ids.tenantActor}') OR metadata->>'synthetic'='true';
+DELETE FROM public."User" WHERE id IN ('${ids.diagnosticUnactivated}','${ids.diagnosticMfaIncomplete}','${ids.diagnosticMfaComplete}','${ids.diagnosticSuperseded}');
 DELETE FROM public."Licensee" WHERE id IN ('${ids.licenseeA}','${ids.licenseeB}') OR metadata->>'synthetic'='true';
 DELETE FROM public."Organization" WHERE id IN ('${ids.orgA}','${ids.orgB}','${ids.fixture}');
 
@@ -110,6 +125,28 @@ INSERT INTO public."SensitiveActionApproval" (id,"actionKey",status,"requestedBy
  ('${ids.staleApproval}','OPERATOR_ACCOUNT_SETUP_LINK_REISSUE','APPROVED','${ids.operator}','${ids.approver1}','User','${ids.target}','{}',transaction_timestamp()-interval '1 minute',transaction_timestamp(),transaction_timestamp()),
  ('${ids.mfaApproval}','BREAK_GLASS_MFA_RESET','APPROVED','${ids.operator}','${ids.approver1}','User','${ids.target}',jsonb_build_object('executorId','${ids.operator}','approverIds',jsonb_build_array('${ids.approver1}','${ids.approver2}')),transaction_timestamp()+interval '1 hour',transaction_timestamp(),transaction_timestamp()),
  ('${ids.fixtureApproval}','STAGING_RLS_VALIDATION_FIXTURE','APPROVED','${ids.operator}','${ids.approver1}','Organization','${ids.fixture}','{}',transaction_timestamp()+interval '1 hour',transaction_timestamp(),transaction_timestamp());
+
+INSERT INTO public."User" (id,email,"passwordHash",name,role,"orgId","licenseeId",status,"isActive","emailVerifiedAt","updatedAt") VALUES
+ ('${ids.diagnosticUnactivated}','diagnostic-c04-unactivated@example.invalid',NULL,'Diagnostic Unactivated','LICENSEE_ADMIN','${ids.orgA}','${ids.licenseeA}','INVITED',true,NULL,transaction_timestamp()),
+ ('${ids.diagnosticMfaIncomplete}','diagnostic-c04-mfa-incomplete@example.invalid','configured','Diagnostic MFA Incomplete','LICENSEE_ADMIN','${ids.orgA}','${ids.licenseeA}','ACTIVE',true,transaction_timestamp(),transaction_timestamp()),
+ ('${ids.diagnosticMfaComplete}','diagnostic-c04-mfa-complete@example.invalid','configured','Diagnostic MFA Complete','LICENSEE_ADMIN','${ids.orgA}','${ids.licenseeA}','ACTIVE',true,transaction_timestamp(),transaction_timestamp()),
+ ('${ids.diagnosticSuperseded}','diagnostic-c04-superseded@example.invalid','configured','Diagnostic Superseded','LICENSEE_ADMIN','${ids.orgA}','${ids.licenseeA}','ACTIVE',true,transaction_timestamp(),transaction_timestamp());
+INSERT INTO public."Invite" (id,"orgId","licenseeId",email,role,"tokenHash","expiresAt","usedAt","acceptedByUserId","createdAt") VALUES
+ ('diagnostic-c04-no-account-invite','${ids.orgA}','${ids.licenseeA}','diagnostic-c04-no-account@example.invalid','LICENSEE_ADMIN','diagnostic-c04-no-account-token',transaction_timestamp()-interval '1 day',NULL,NULL,transaction_timestamp()-interval '2 days'),
+ ('diagnostic-c04-unactivated-invite','${ids.orgA}','${ids.licenseeA}','diagnostic-c04-unactivated@example.invalid','LICENSEE_ADMIN','diagnostic-c04-unactivated-token',transaction_timestamp()-interval '1 day',NULL,NULL,transaction_timestamp()-interval '2 days'),
+ ('diagnostic-c04-mfa-incomplete-invite','${ids.orgA}','${ids.licenseeA}','diagnostic-c04-mfa-incomplete@example.invalid','LICENSEE_ADMIN','diagnostic-c04-mfa-incomplete-token',transaction_timestamp()-interval '1 day',transaction_timestamp()-interval '2 days','${ids.diagnosticMfaIncomplete}',transaction_timestamp()-interval '3 days'),
+ ('diagnostic-c04-mfa-complete-invite','${ids.orgA}','${ids.licenseeA}','diagnostic-c04-mfa-complete@example.invalid','LICENSEE_ADMIN','diagnostic-c04-mfa-complete-token',transaction_timestamp()-interval '1 day',transaction_timestamp()-interval '2 days','${ids.diagnosticMfaComplete}',transaction_timestamp()-interval '3 days'),
+ ('diagnostic-c04-history-a','${ids.orgA}','${ids.licenseeA}','diagnostic-c04-history@example.invalid','ORG_ADMIN','diagnostic-c04-history-token-a',transaction_timestamp()-interval '1 day',NULL,NULL,transaction_timestamp()-interval '2 days'),
+ ('diagnostic-c04-history-b','${ids.orgB}','${ids.licenseeB}','diagnostic-c04-history@example.invalid','LICENSEE_ADMIN','diagnostic-c04-history-token-b',transaction_timestamp()-interval '1 day',NULL,NULL,transaction_timestamp()-interval '2 days'),
+ ('diagnostic-c04-superseded-old','${ids.orgA}','${ids.licenseeA}','diagnostic-c04-superseded@example.invalid','LICENSEE_ADMIN','diagnostic-c04-superseded-token-old',transaction_timestamp()-interval '1 day',NULL,NULL,transaction_timestamp()-interval '3 days'),
+ ('diagnostic-c04-superseded-new','${ids.orgA}','${ids.licenseeA}','diagnostic-c04-superseded@example.invalid','LICENSEE_ADMIN','diagnostic-c04-superseded-token-new',transaction_timestamp()-interval '1 day',transaction_timestamp()-interval '1 day','${ids.diagnosticSuperseded}',transaction_timestamp()-interval '2 days');
+INSERT INTO public."AdminMfaCredential" (id,"userId","secretCiphertext","secretIv","secretTag","backupCodesHash","isEnabled","verifiedAt","updatedAt") VALUES
+ ('diagnostic-c04-mfa-complete','${ids.diagnosticMfaComplete}','fixture-cipher','fixture-iv','fixture-tag',ARRAY['fixture-backup'],true,transaction_timestamp(),transaction_timestamp());
+INSERT INTO public."AuditLog" (id,action,"entityType","entityId",details,"createdAt") VALUES
+ ('diagnostic-c04-audit-accepted','AUTH_INVITE_ACCEPTED','Invite','diagnostic-c04-mfa-incomplete-invite','{}',transaction_timestamp());
+INSERT INTO public."AuditLogOutbox" (id,payload,"updatedAt") VALUES
+ ('diagnostic-c04-outbox-created',jsonb_build_object('action','AUTH_INVITE_CREATED','entityType','Invite','entityId','diagnostic-c04-no-account-invite'),transaction_timestamp()),
+ ('diagnostic-c04-outbox-mfa',jsonb_build_object('action','AUTH_MFA_ENROLLED','entityType','User','entityId','${ids.diagnosticMfaComplete}'),transaction_timestamp());
 `;
 
 async function main() {
@@ -117,15 +154,54 @@ async function main() {
   assert(confirmed, "Session C operator PostgreSQL proof confirmation is required");
   assert.equal(Math.floor(Number(psql("select current_setting('server_version_num')::int")) / 10000), 18);
   psqlFile(path.resolve(__dirname, "../../../src/rls-waves/session-c/c04/operatorProcedures.sql"));
+  psqlFile(path.resolve(__dirname, "../../../src/rls-waves/session-c/c04/accountOnboardingDiagnostic.sql"));
   psql(setupSql);
   psql(fixtureSql);
 
   const operator = new PrismaClient({ datasources: { db: { url: roleUrl("mscqr_rls_wave_c_operator") } } });
   const breakglass = new PrismaClient({ datasources: { db: { url: roleUrl("mscqr_rls_wave_c_breakglass") } } });
   const migration = new PrismaClient({ datasources: { db: { url: roleUrl("mscqr_rls_wave_c_migration") } } });
+  const unrelated = new PrismaClient({ datasources: { db: { url: roleUrl("mscqr_rls_wave_c_unrelated") } } });
   const procedures = require("../../../dist/rls-waves/session-c/operatorProcedureService");
   const bootstrap = require("../../../dist/services/auth/superAdminBootstrapService");
   try {
+    const accountDiagnosticInput = (normalizedEmail, requestId) => ({
+      normalizedEmail, operatorId: ids.operator,
+      purpose: "operator-account-onboarding-diagnostic", assurance: "operator-approved", environment: "production", requestId,
+    });
+    const diagnosticBefore = psql(`SELECT concat_ws('|',(SELECT count(*) FROM public."User"),(SELECT count(*) FROM public."Invite"),(SELECT count(*) FROM public."AdminMfaCredential"),(SELECT count(*) FROM public."AuditLog"),(SELECT count(*) FROM public."AuditLogOutbox"))`);
+    const noAccount = await procedures.diagnoseAccountOnboarding(accountDiagnosticInput("diagnostic-c04-no-account@example.invalid", "00000000-0000-4400-8000-000000000201"), operator);
+    const unactivated = await procedures.diagnoseAccountOnboarding(accountDiagnosticInput("diagnostic-c04-unactivated@example.invalid", "00000000-0000-4400-8000-000000000202"), operator);
+    const mfaIncomplete = await procedures.diagnoseAccountOnboarding(accountDiagnosticInput("diagnostic-c04-mfa-incomplete@example.invalid", "00000000-0000-4400-8000-000000000203"), operator);
+    const mfaComplete = await procedures.diagnoseAccountOnboarding(accountDiagnosticInput("diagnostic-c04-mfa-complete@example.invalid", "00000000-0000-4400-8000-000000000204"), operator);
+    const history = await procedures.diagnoseAccountOnboarding(accountDiagnosticInput("diagnostic-c04-history@example.invalid", "00000000-0000-4400-8000-000000000205"), operator);
+    const superseded = await procedures.diagnoseAccountOnboarding(accountDiagnosticInput("diagnostic-c04-superseded@example.invalid", "00000000-0000-4400-8000-000000000206"), operator);
+    assert.equal(noAccount.stateClassification, "A_EXPIRED_UNUSED_INVITE_NO_ACCOUNT");
+    assert.equal(noAccount.accountExists, false);
+    assert.equal(noAccount.inviteCreatedPresent, true);
+    assert.equal(unactivated.stateClassification, "B_EXPIRED_UNUSED_INVITE_EXISTING_UNACTIVATED_ACCOUNT");
+    assert.equal(unactivated.passwordConfigured, false);
+    assert.equal(mfaIncomplete.stateClassification, "C_ACTIVATED_ACCOUNT_MFA_INCOMPLETE");
+    assert.equal(mfaIncomplete.mfaConfigured, false);
+    assert.equal(mfaIncomplete.inviteAcceptedPresent, true);
+    assert.equal(mfaComplete.stateClassification, "D_ACTIVATED_ACCOUNT_MFA_COMPLETE");
+    assert.equal(mfaComplete.mfaConfigured, true);
+    assert.equal(mfaComplete.mfaEnrolledPresent, true);
+    assert.equal(history.inviteCount, 2);
+    assert.equal(history.latestRole, "LICENSEE_ADMIN");
+    assert.deepEqual(history.latestTenantBinding, { organizationId: ids.orgB, licenseeId: ids.licenseeB });
+    assert.equal(superseded.inviteCount, 2);
+    assert.equal(superseded.stateClassification, "C_ACTIVATED_ACCOUNT_MFA_INCOMPLETE");
+    assert.equal(typeof mfaIncomplete.passwordConfigured, "boolean");
+    assert.equal(typeof mfaComplete.mfaConfigured, "boolean");
+    assert.deepEqual(Object.keys(mfaComplete).sort(), ["accountActive","accountEmailVerified","accountExists","accountRole","accountStatus","accountTenantBinding","inviteAcceptedPresent","inviteCount","inviteCreatedPresent","latestAcceptedByPresent","latestCreatedAt","latestExpired","latestExpiresAt","latestRole","latestTenantBinding","latestUsedAt","mfaConfigured","mfaEnrolledPresent","passwordConfigured","stateClassification"].sort());
+    assert.equal(psql(`SELECT has_function_privilege(0::oid,'app_ops.diagnose_account_onboarding(text)'::regprocedure,'EXECUTE')::text`), "false");
+    assert.equal(psql(`SELECT has_function_privilege('mscqr_rls_wave_c_operator','app_ops.diagnose_account_onboarding(text)','EXECUTE')::text`), "true");
+    await assert.rejects(() => unrelated.$queryRawUnsafe("SELECT * FROM app_ops.diagnose_account_onboarding('diagnostic-c04-no-account@example.invalid')"), /permission denied/i);
+    await assert.rejects(() => procedures.diagnoseAccountOnboarding(accountDiagnosticInput("x@example.invalid' OR '1'='1", "00000000-0000-4400-8000-000000000207"), operator), /normalizedEmail must be a valid email address/);
+    await assert.rejects(() => procedures.diagnoseAccountOnboarding(accountDiagnosticInput("not-an-email", "00000000-0000-4400-8000-000000000208"), operator), /normalizedEmail must be a valid email address/);
+    assert.equal(psql(`SELECT concat_ws('|',(SELECT count(*) FROM public."User"),(SELECT count(*) FROM public."Invite"),(SELECT count(*) FROM public."AdminMfaCredential"),(SELECT count(*) FROM public."AuditLog"),(SELECT count(*) FROM public."AuditLogOutbox"))`), diagnosticBefore);
+
     const diagnosticInput = {
       batchId: ids.batch, operatorId: ids.operator, licenseeId: ids.licenseeA,
       purpose: "operator-print-diagnostic", assurance: "operator-approved", environment: "staging",
@@ -192,7 +268,7 @@ async function main() {
     assert.equal(Number(directGrants), 0);
     console.log("Session C operator PostgreSQL 18 application-path proof passed");
   } finally {
-    await Promise.all([operator.$disconnect(),breakglass.$disconnect(),migration.$disconnect()]);
+    await Promise.all([operator.$disconnect(),breakglass.$disconnect(),migration.$disconnect(),unrelated.$disconnect()]);
   }
 }
 

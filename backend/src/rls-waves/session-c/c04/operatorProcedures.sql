@@ -428,3 +428,4 @@ REVOKE ALL ON FUNCTION app_ops.reissue_account_setup_link(uuid,uuid,text,uuid) F
 REVOKE ALL ON FUNCTION app_ops.reset_account_mfa(uuid,uuid,text,uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_ops.prepare_rls_validation_fixture(uuid,text,uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_ops.bootstrap_configured_super_admin(text,text,text,boolean) FROM PUBLIC;
+REVOKE ALL ON SCHEMA app_ops FROM PUBLIC;

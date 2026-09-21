@@ -527,6 +527,7 @@
         "operator-boundary-failed-job-summary",
         "operator-boundary-tenant-incident-summary",
         "operator-boundary-print-diagnostic",
+        "operator-boundary-account-onboarding-diagnostic",
         "operator-boundary-deployment-preflight",
         "operator-boundary-migration-broker",
         "operator-boundary-credential-rotation",
