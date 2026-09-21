@@ -1572,6 +1572,7 @@
       "producer": "scripts/aws/prepare-production-initial-activation-reconciler-installation.mjs:terraformPlan",
       "consumers": [
         ".github/workflows/authorize-production-initial-activation-policy-reconciler-installation.yml",
+        "scripts/aws/dispatch-production-initial-activation-reconciler-installation.mjs",
         "scripts/aws/prepare-production-initial-activation-reconciler-installation.mjs",
         "scripts/aws/install-production-initial-activation-reconciler.mjs"
       ],
@@ -1611,6 +1612,7 @@
       "consumers": [
         ".github/workflows/authorize-production-initial-activation-policy-reconciler-installation.yml",
         "scripts/aws/authorize-production-initial-activation-reconciler-installation.mjs",
+        "scripts/aws/dispatch-production-initial-activation-reconciler-installation.mjs",
         "scripts/aws/install-production-initial-activation-reconciler.mjs"
       ],
       "directoryMode": "0700",
