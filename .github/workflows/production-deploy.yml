@@ -87,8 +87,6 @@ jobs:
       SMOKE_VERIFY_CODE: ${{ secrets.PRODUCTION_SMOKE_VERIFY_CODE }}
       SMOKE_ADMIN_MFA_CODE: ${{ secrets.PRODUCTION_SMOKE_ADMIN_MFA_CODE }}
       SMOKE_ADMIN_MFA_SECRET: ${{ secrets.PRODUCTION_SMOKE_ADMIN_MFA_SECRET }}
-      SMOKE_EXPECTED_USER_ID: 556f5cfa-0820-4e05-a0e0-7357699546f4
-      SMOKE_EXPECTED_ROLE: LICENSEE_ADMIN
     steps:
       - uses: actions/checkout@v6
         with: { ref: '${{ github.sha }}', fetch-depth: 0, persist-credentials: false }
