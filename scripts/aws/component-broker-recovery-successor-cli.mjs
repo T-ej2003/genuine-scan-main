@@ -8,7 +8,7 @@ import { cleanSource } from "./component-iam-installation.mjs";
 import { buildComponentBrokerPackage } from "./component-broker-package.mjs";
 import { authenticateBrokerRecoverySuccessorPublication } from "./component-iam-authorization.mjs";
 import { executeBrokerRecoverySuccessor } from "./component-broker-recovery-successor.mjs";
-import { brokerRecoverySuccessor, brokerRecoverySuccessorCapabilitySet, brokerRecoverySuccessorConfigurations } from "./component-broker-recovery-successor-contract.mjs";
+import { brokerRecoverySuccessorCapabilitySet, brokerRecoverySuccessorConfigurations } from "./component-broker-recovery-successor-contract.mjs";
 import { authenticateBootstrapOperator } from "./component-bootstrap-operator.mjs";
 import { brokerRecoverySuccessorManagedIdentities, componentBrokerArn, identityBootstrap } from "./component-installation-identity-contract.mjs";
 import { canonical, installationIdentity } from "./component-iam-installation-contract.mjs";
@@ -26,6 +26,14 @@ export function assertBrokerRecoverySuccessorIamRequest(operation, input) {
     assert([installationIdentity.provisionerRole, installationIdentity.terraformRole, identityBootstrap.installationRole, identityBootstrap.cleanupRole, identityBootstrap.authorizationRole].includes(identity.role), "Non-successor policy mutation forbidden");
     assert.equal(input.PolicyDocument, canonical(identity.policy));
   }
+}
+
+export function assertBrokerRecoverySuccessorS3Request(operation, input) {
+  assert.equal(input.Bucket, identityBootstrap.bucket);
+  const action = `s3:${operation}`, resource = `arn:aws:s3:::${input.Bucket}/${input.Key}`;
+  const statements = brokerRecoverySuccessorCapabilitySet().Statement.filter(statement => [].concat(statement.Action).includes(action) && [].concat(statement.Resource).includes(resource));
+  assert.equal(statements.length, 1, "Unsupported broker recovery successor S3 target");
+  if (operation === "PutObject") assert.equal(input.ServerSideEncryption, statements[0].Condition.StringEquals["s3:x-amz-server-side-encryption"]);
 }
 
 export async function convergeRootMfaIssuance({ events, accessKeyId, rootExpires, mfaSerial, durationSeconds, rootArn: expectedRootArn = rootArn, now = Date.now, sleep = delay, maxWaitMs = 300000 }) {
@@ -98,9 +106,7 @@ export async function administrativeAdapter(packageEvidence, { root = createBrok
         if (operation === "UpdateFunctionConfiguration") assert(configurations.some(configuration => canonical(input) === canonical({ FunctionName: installationIdentity.functionName, Description: configuration.Description, RevisionId: input.RevisionId })), "Unreviewed successor configuration");
         if (operation === "PublishVersion") assert(configurations.some(configuration => canonical(input) === canonical({ FunctionName: installationIdentity.functionName, Description: configuration.Description, CodeSha256: configuration.CodeSha256, RevisionId: input.RevisionId })), "Unreviewed successor publication");
       } else if (service === "iam") assertBrokerRecoverySuccessorIamRequest(operation, input);
-      else {
-        assert.equal(input.Bucket, identityBootstrap.bucket); assert([`${identityBootstrap.prefix}identity-bootstrap.json`, `${identityBootstrap.prefix}broker-policy-successor.json`, brokerRecoverySuccessor.reservationKey].includes(input.Key || input.Prefix));
-      }
+      else assertBrokerRecoverySuccessorS3Request(operation, input);
       return send(operation, input);
     }; };
     return { iam: confined("iam", "IAM", "https://iam.amazonaws.com", "us-east-1"), lambda: confined("lambda", "Lambda", "https://lambda.eu-west-2.amazonaws.com"), s3: confined("s3", "S3", "https://s3.eu-west-2.amazonaws.com"), authenticate: async () => { assert(now() + 120000 < rootExpires, "Root MFA session expired"); const value = await sts("GetCallerIdentity"); assert.equal(value.Arn, rootArn); }, issuanceEvents: () => events("AssumeRole"),

@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { assertBrokerRecoverySuccessorIamRequest, run } from "../aws/component-broker-recovery-successor-cli.mjs";
+import { assertBrokerRecoverySuccessorIamRequest, assertBrokerRecoverySuccessorS3Request, run } from "../aws/component-broker-recovery-successor-cli.mjs";
+import { brokerRecoverySuccessor } from "../aws/component-broker-recovery-successor-contract.mjs";
 import { brokerRecoverySuccessorManagedIdentities, identityBootstrap } from "../aws/component-installation-identity-contract.mjs";
 import { canonical } from "../aws/component-iam-installation-contract.mjs";
 
@@ -22,6 +23,16 @@ test("successor reservations are readable historical evidence but never broker w
     assert(reads.includes(resource));
     assert(!writes.includes(resource));
   }
+});
+
+test("root adapter permits S3 writes only to the mutable successor records", () => {
+  const request = (Key, write = false) => ({ Bucket: identityBootstrap.bucket, Key, ...(write ? { ServerSideEncryption: "AES256" } : {}) });
+  const journalKey = `${identityBootstrap.prefix}identity-bootstrap.json`, firstReservationKey = `${identityBootstrap.prefix}broker-policy-successor.json`;
+  for (const key of [journalKey, firstReservationKey, brokerRecoverySuccessor.reservationKey]) assert.doesNotThrow(() => assertBrokerRecoverySuccessorS3Request("GetObject", request(key)));
+  for (const key of [journalKey, brokerRecoverySuccessor.reservationKey]) assert.doesNotThrow(() => assertBrokerRecoverySuccessorS3Request("PutObject", request(key, true)));
+  assert.throws(() => assertBrokerRecoverySuccessorS3Request("PutObject", request(firstReservationKey, true)), /Unsupported broker recovery successor S3 target/);
+  assert.throws(() => assertBrokerRecoverySuccessorS3Request("PutObject", request(`${identityBootstrap.prefix}other.json`, true)), /Unsupported broker recovery successor S3 target/);
+  assert.throws(() => assertBrokerRecoverySuccessorS3Request("PutObject", request(journalKey)));
 });
 
 test("recovery successor CLI authenticates approval before root/MFA and always closes local credentials", async () => {
