@@ -118,6 +118,7 @@ async function main() {
   assert.equal(Math.floor(Number(psql("select current_setting('server_version_num')::int")) / 10000), 18);
   psqlFile(path.resolve(__dirname, "../../../src/rls-waves/session-c/c04/operatorProcedures.sql"));
   psqlFile(path.resolve(__dirname, "../../../src/rls-waves/session-c/c04/bootstrapConfiguredSuperAdmin.sql"));
+  psqlFile(path.resolve(__dirname, "../../../src/rls-waves/session-c/c04/accountOnboardingDiagnostic.sql"));
   psql(setupSql);
   psql(fixtureSql);
 

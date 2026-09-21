@@ -292,6 +292,9 @@ const operationalReadContracts = validateNamedSqlFunctionContracts().filter((con
 const initialAdminBootstrapContracts = validateNamedSqlFunctionContracts().filter((contract) =>
   contract.security.deploymentPhase === "session-c-c04-initial-admin-bootstrap"
 );
+const accountOnboardingDiagnosticContracts = validateNamedSqlFunctionContracts().filter((contract) =>
+  contract.security.deploymentPhase === "session-c-c04-account-onboarding-diagnostic"
+);
 const b01FunctionSource = b01Contracts.length
   ? fs.readFileSync(path.join(repoRoot, b01Contracts[0].definitionLocation), "utf8").replaceAll("{{AUTH_OWNER}}", q(roleNames.authOwner))
   : "";
@@ -429,6 +432,13 @@ const operationalReadInternalSignatures = [
 ];
 const operationalReadOwnerPrivileges = [...new Map(operationalReadContracts.flatMap((contract) => contract.security.ownerPrivileges || []).map((entry) => [JSON.stringify(entry), entry])).values()];
 const operationalReadOwnerPolicies = [...new Map(operationalReadContracts.flatMap((contract) => contract.security.ownerPolicies || []).map((entry) => [JSON.stringify(entry), entry])).values()];
+const accountOnboardingDiagnosticFunctionSource = accountOnboardingDiagnosticContracts.length
+  ? fs.readFileSync(path.join(repoRoot, accountOnboardingDiagnosticContracts[0].definitionLocation), "utf8")
+      .replaceAll("{{OPERATOR_ROLE}}", roleNames.operator)
+      .replaceAll("{{TARGET_ENVIRONMENT}}", targetEnvironment)
+  : "";
+const accountOnboardingDiagnosticSignatures = accountOnboardingDiagnosticContracts.map((contract) => `app_ops.${contract.name}(${contract.signature})`);
+const accountOnboardingDiagnosticOwnerPolicies = [...new Map(accountOnboardingDiagnosticContracts.flatMap((contract) => contract.security.ownerPolicies || []).map((entry) => [JSON.stringify(entry), entry])).values()];
 // This is deliberately an exact runtime execution allowlist.  The functions
 // are the only app_rls public boundaries emitted by this clean-room package;
 // context setters and authorization helpers stay internal to their owner.
@@ -1709,6 +1719,11 @@ REVOKE ALL ON FUNCTION app_ops.bootstrap_configured_super_admin(text,text,text,b
 GRANT USAGE ON SCHEMA app_ops TO ${q(roleNames.migration)};
 GRANT EXECUTE ON FUNCTION app_ops.bootstrap_configured_super_admin(text,text,text,boolean) TO ${q(roleNames.migration)};
 ${resetRole}
+${accountOnboardingDiagnosticFunctionSource ? `${setRole(roleNames.owner)}
+${accountOnboardingDiagnosticFunctionSource}
+GRANT USAGE ON SCHEMA app_ops TO ${q(roleNames.operator)};
+${accountOnboardingDiagnosticSignatures.map((signature) => `GRANT EXECUTE ON FUNCTION ${signature} TO ${q(roleNames.operator)};`).join("\n")}
+${resetRole}` : ""}
 INSERT INTO mscqr_rls_install.expected_routine(
   schema_name,routine_name,identity_arguments,result_type,routine_kind,owner_name,language_name,volatility,
   security_definer,leakproof,strict,parallel_mode,configuration,source_body,acl_rows
@@ -2162,6 +2177,15 @@ for (const [table, command, rawPredicate] of b03AuthenticatedOwnerPolicies) {
   policyStatements.push(`CREATE POLICY ${q(policyName)} ON public.${q(table)} AS PERMISSIVE FOR ${command} TO ${q(roleNames.authOwner)} ${clause};`);
   policyStatements.push(`COMMENT ON POLICY ${q(policyName)} ON public.${q(table)} IS ${lit(JSON.stringify({ boundary: "b03-authenticated-notification-email", ownerIdentity: "identity-auth-function-owner", scope: "live capability plus operation-specific notification or incident selector" }))};`);
 }
+for (const [table, command, rawPredicate] of accountOnboardingDiagnosticOwnerPolicies) {
+  const predicate = rawPredicate
+    .replaceAll("{{OWNER}}", lit(roleNames.owner))
+    .replaceAll("{{OPERATOR_ROLE}}", lit(roleNames.operator))
+    .replaceAll("{{TARGET_ENVIRONMENT}}", targetEnvironment);
+  const policyName = shortName("c04_account_onboarding_diagnostic", table, command);
+  policyStatements.push(`CREATE POLICY ${q(policyName)} ON public.${q(table)} AS PERMISSIVE FOR SELECT TO ${q(roleNames.owner)} USING (${predicate});`);
+  policyStatements.push(`COMMENT ON POLICY ${q(policyName)} ON public.${q(table)} IS ${lit(JSON.stringify({ boundary: "c04-account-onboarding-diagnostic", ownerIdentity: "identity-table-owner", scope: "exact brokered operator and fixed normalized-email diagnostic context" }))};`);
+}
 const policiesSql = `\\set ON_ERROR_STOP on
 DO $$ BEGIN
 ${requirePackagePhaseSql("runtime-grants-installed", "policy package")}
@@ -2324,7 +2348,8 @@ const expectedRoutineIdentities = [
   ["app_ops", "session_c04_assert_context", "required_purpose text, required_assurance text, identity_class text, allowed_environments text[]"],
   ["app_ops", "session_c04_audit", "actor_id text, action_name text, entity_type text, entity_id text, details jsonb"],
   ["app_ops", "bootstrap_configured_super_admin", "p_email text, p_password_hash text, p_name text, p_auto_verify boolean"],
-  ...[...b01Contracts, ...preAuthContracts, ...authenticatedSessionContracts, ...authenticationClosureContracts, ...c03Contracts, ...administrationContracts, ...qrSystemContracts, ...printingLifecycleContracts, ...publicVerificationContracts, ...scheduledContracts, ...outboxContracts, ...b03AuthenticatedContracts, ...operationalReadContracts].map((contract) => [contract.schema, contract.name, contract.identityArguments]),
+  ["app_ops", "session_c04_assert_diagnostic_context", ""],
+  ...[...b01Contracts, ...preAuthContracts, ...authenticatedSessionContracts, ...authenticationClosureContracts, ...c03Contracts, ...administrationContracts, ...qrSystemContracts, ...printingLifecycleContracts, ...publicVerificationContracts, ...scheduledContracts, ...outboxContracts, ...b03AuthenticatedContracts, ...operationalReadContracts, ...accountOnboardingDiagnosticContracts].map((contract) => [contract.schema, contract.name, contract.identityArguments]),
 ];
 const routineIdentityColumns = [{ name: "schema_name", type: "text" }, { name: "routine_name", type: "text" }, { name: "identity_arguments", type: "text" }];
 const expectedRoutineIdentitySelect = expectedRowsSelect(expectedRoutineIdentities, routineIdentityColumns);
@@ -2599,6 +2624,26 @@ const policyInventory = [
     certificationStatus: "pending",
     internalHelperOnly: true,
   })),
+  ...accountOnboardingDiagnosticOwnerPolicies.map(([table, command, rawPredicate]) => ({
+    tableId: tables.find((entry) => entry.physicalTable === table)?.id,
+    table,
+    policyName: shortName("c04_account_onboarding_diagnostic", table, command),
+    command,
+    actors: ["operator"],
+    assurance: "source-rule-specific",
+    purpose: ["operator-account-onboarding-diagnostic"],
+    scopeType: "security-definer-owner-and-fixed-normalized-email-selector",
+    scopePredicate: rawPredicate
+      .replaceAll("{{OWNER}}", lit(roleNames.owner))
+      .replaceAll("{{OPERATOR_ROLE}}", lit(roleNames.operator))
+      .replaceAll("{{TARGET_ENVIRONMENT}}", targetEnvironment),
+    columns: [],
+    sourceCommandRuleIds: contractEvidenceFor(accountOnboardingDiagnosticContracts, table, command),
+    workflowId: null,
+    route: "C04 brokered account-onboarding diagnostic",
+    certificationStatus: "pending",
+    internalHelperOnly: true,
+  })),
 ].sort((left, right) => `${left.table}:${left.policyName}`.localeCompare(`${right.table}:${right.policyName}`));
 const expectedPolicyValues = policyInventory.map((policy) => `(${lit(policy.table)},${lit(policy.policyName)},${lit(policy.command)})`).join(",");
 const expectedSchemaAclRows = [
@@ -2611,6 +2656,7 @@ const expectedSchemaAclRows = [
   ["app_auth", roleNames.app, roleNames.authOwner, "USAGE", false],
   ["app_public", roleNames.preauth, roleNames.authOwner, "USAGE", false],
   ["app_ops", roleNames.migration, roleNames.owner, "USAGE", false],
+  ["app_ops", roleNames.operator, roleNames.owner, "USAGE", false],
 ];
 const schemaAclColumns = aclColumns.filter(({ name }) => name !== "object_name");
 const expectedSchemaAclSelect = expectedRowsSelect(expectedSchemaAclRows, schemaAclColumns);

@@ -17,6 +17,7 @@ Production break-glass is an individually attributable broker-issued identity wi
 | operator-boundary-failed-job-summary | read-diagnostics | development, staging, production | identity-operator | app_ops.failed_job_summary | 100 rows within one tenant and job type |
 | operator-boundary-tenant-incident-summary | read-diagnostics | development, staging, production | identity-operator | app_ops.tenant_incident_summary | one incident and at most 100 redacted events |
 | operator-boundary-print-diagnostic | read-diagnostics | development, staging | identity-operator | app_ops.print_diagnostic | one batch aggregate; no QR payload rows |
+| operator-boundary-account-onboarding-diagnostic | read-diagnostics | development, staging, production | identity-operator | app_ops.diagnose_account_onboarding | one exact normalized email; at most one account and one deterministically selected latest invite |
 | operator-boundary-deployment-preflight | deployment-preflight | development, staging, production | identity-operator | mscqr-operator deployment-preflight | catalog and release metadata only |
 | operator-boundary-migration-broker | migration-broker | development, staging, production | identity-operator | mscqr-operator migration-broker | exact reviewed migration object set |
 | operator-boundary-credential-rotation | credential-rotation | development, staging, production | identity-operator | mscqr-operator rotate-runtime-credential | one runtime identity credential and its registered consumers |

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "count": 351,
+  "count": 360,
   "rows": [
     {
       "tableId": "table-action-idempotency-key",
@@ -601,6 +601,29 @@
       "internalHelperOnly": true
     },
     {
+      "tableId": "table-admin-mfa-credential",
+      "table": "AdminMfaCredential",
+      "policyName": "c04_account_onboarding_diagnostic_adminmfacredential_select",
+      "command": "SELECT",
+      "actors": [
+        "operator"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "operator-account-onboarding-diagnostic"
+      ],
+      "scopeType": "security-definer-owner-and-fixed-normalized-email-selector",
+      "scopePredicate": "current_user='mscqr_rls_cert_owner' AND session_user='mscqr_rls_cert_operator' AND current_setting('app.context_installed',true)='1' AND current_setting('app.purpose',true)='operator-account-onboarding-diagnostic' AND current_setting('app.auth_assurance',true)='operator-approved' AND current_setting('app.operator_environment',true)='certification'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:c04-diagnose-account-onboarding:AdminMfaCredential:SELECT"
+      ],
+      "workflowId": null,
+      "route": "C04 brokered account-onboarding diagnostic",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
       "tableId": "table-admin-web-authn-credential",
       "table": "AdminWebAuthnCredential",
       "policyName": "b01_adminwebauthncredential_select",
@@ -724,6 +747,29 @@
       ],
       "workflowId": null,
       "route": "POST /auth/login, POST /auth/logout, GET /auth/me",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-admin-web-authn-credential",
+      "table": "AdminWebAuthnCredential",
+      "policyName": "c04_account_onboarding_diagnostic_adminwebauthncrede_9cdacdd348",
+      "command": "SELECT",
+      "actors": [
+        "operator"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "operator-account-onboarding-diagnostic"
+      ],
+      "scopeType": "security-definer-owner-and-fixed-normalized-email-selector",
+      "scopePredicate": "current_user='mscqr_rls_cert_owner' AND session_user='mscqr_rls_cert_operator' AND current_setting('app.context_installed',true)='1' AND current_setting('app.purpose',true)='operator-account-onboarding-diagnostic' AND current_setting('app.auth_assurance',true)='operator-approved' AND current_setting('app.operator_environment',true)='certification'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:c04-diagnose-account-onboarding:AdminWebAuthnCredential:SELECT"
+      ],
+      "workflowId": null,
+      "route": "C04 brokered account-onboarding diagnostic",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },
@@ -949,6 +995,29 @@
       ],
       "workflowId": null,
       "route": "C03 exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-audit-log",
+      "table": "AuditLog",
+      "policyName": "c04_account_onboarding_diagnostic_auditlog_select",
+      "command": "SELECT",
+      "actors": [
+        "operator"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "operator-account-onboarding-diagnostic"
+      ],
+      "scopeType": "security-definer-owner-and-fixed-normalized-email-selector",
+      "scopePredicate": "current_user='mscqr_rls_cert_owner' AND session_user='mscqr_rls_cert_operator' AND current_setting('app.context_installed',true)='1' AND current_setting('app.purpose',true)='operator-account-onboarding-diagnostic' AND current_setting('app.auth_assurance',true)='operator-approved' AND current_setting('app.operator_environment',true)='certification'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:c04-diagnose-account-onboarding:AuditLog:SELECT"
+      ],
+      "workflowId": null,
+      "route": "C04 brokered account-onboarding diagnostic",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },
@@ -1554,6 +1623,29 @@
       ],
       "workflowId": null,
       "route": "C03 exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-audit-log-outbox",
+      "table": "AuditLogOutbox",
+      "policyName": "c04_account_onboarding_diagnostic_auditlogoutbox_select",
+      "command": "SELECT",
+      "actors": [
+        "operator"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "operator-account-onboarding-diagnostic"
+      ],
+      "scopeType": "security-definer-owner-and-fixed-normalized-email-selector",
+      "scopePredicate": "current_user='mscqr_rls_cert_owner' AND session_user='mscqr_rls_cert_operator' AND current_setting('app.context_installed',true)='1' AND current_setting('app.purpose',true)='operator-account-onboarding-diagnostic' AND current_setting('app.auth_assurance',true)='operator-approved' AND current_setting('app.operator_environment',true)='certification'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:c04-diagnose-account-onboarding:AuditLogOutbox:SELECT"
+      ],
+      "workflowId": null,
+      "route": "C04 brokered account-onboarding diagnostic",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },
@@ -3782,6 +3874,29 @@
     {
       "tableId": "table-invite",
       "table": "Invite",
+      "policyName": "c04_account_onboarding_diagnostic_invite_select",
+      "command": "SELECT",
+      "actors": [
+        "operator"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "operator-account-onboarding-diagnostic"
+      ],
+      "scopeType": "security-definer-owner-and-fixed-normalized-email-selector",
+      "scopePredicate": "current_user='mscqr_rls_cert_owner' AND session_user='mscqr_rls_cert_operator' AND current_setting('app.context_installed',true)='1' AND current_setting('app.purpose',true)='operator-account-onboarding-diagnostic' AND current_setting('app.auth_assurance',true)='operator-approved' AND current_setting('app.operator_environment',true)='certification'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:c04-diagnose-account-onboarding:Invite:SELECT"
+      ],
+      "workflowId": null,
+      "route": "C04 brokered account-onboarding diagnostic",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-invite",
+      "table": "Invite",
       "policyName": "tenant_directory_invite_select",
       "command": "SELECT",
       "actors": [
@@ -4068,6 +4183,29 @@
       ],
       "workflowId": null,
       "route": "C03 exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-licensee",
+      "table": "Licensee",
+      "policyName": "c04_account_onboarding_diagnostic_licensee_select",
+      "command": "SELECT",
+      "actors": [
+        "operator"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "operator-account-onboarding-diagnostic"
+      ],
+      "scopeType": "security-definer-owner-and-fixed-normalized-email-selector",
+      "scopePredicate": "current_user='mscqr_rls_cert_owner' AND session_user='mscqr_rls_cert_operator' AND current_setting('app.context_installed',true)='1' AND current_setting('app.purpose',true)='operator-account-onboarding-diagnostic' AND current_setting('app.auth_assurance',true)='operator-approved' AND current_setting('app.operator_environment',true)='certification'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:c04-diagnose-account-onboarding:Licensee:SELECT"
+      ],
+      "workflowId": null,
+      "route": "C04 brokered account-onboarding diagnostic",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },
@@ -5241,6 +5379,29 @@
       ],
       "workflowId": null,
       "route": "C03 exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-organization",
+      "table": "Organization",
+      "policyName": "c04_account_onboarding_diagnostic_organization_select",
+      "command": "SELECT",
+      "actors": [
+        "operator"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "operator-account-onboarding-diagnostic"
+      ],
+      "scopeType": "security-definer-owner-and-fixed-normalized-email-selector",
+      "scopePredicate": "current_user='mscqr_rls_cert_owner' AND session_user='mscqr_rls_cert_operator' AND current_setting('app.context_installed',true)='1' AND current_setting('app.purpose',true)='operator-account-onboarding-diagnostic' AND current_setting('app.auth_assurance',true)='operator-approved' AND current_setting('app.operator_environment',true)='certification'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:c04-diagnose-account-onboarding:Organization:SELECT"
+      ],
+      "workflowId": null,
+      "route": "C04 brokered account-onboarding diagnostic",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },
@@ -9497,6 +9658,29 @@
     {
       "tableId": "table-user",
       "table": "User",
+      "policyName": "c04_account_onboarding_diagnostic_user_select",
+      "command": "SELECT",
+      "actors": [
+        "operator"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "operator-account-onboarding-diagnostic"
+      ],
+      "scopeType": "security-definer-owner-and-fixed-normalized-email-selector",
+      "scopePredicate": "current_user='mscqr_rls_cert_owner' AND session_user='mscqr_rls_cert_operator' AND current_setting('app.context_installed',true)='1' AND current_setting('app.purpose',true)='operator-account-onboarding-diagnostic' AND current_setting('app.auth_assurance',true)='operator-approved' AND current_setting('app.operator_environment',true)='certification'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:c04-diagnose-account-onboarding:User:SELECT"
+      ],
+      "workflowId": null,
+      "route": "C04 brokered account-onboarding diagnostic",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-user",
+      "table": "User",
       "policyName": "full_rls_initial_admin_bootstrap_user_insert",
       "command": "INSERT",
       "actors": [
@@ -10075,6 +10259,29 @@
       ],
       "workflowId": "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session",
       "route": "POST /auth/refresh",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-user-mfa-factor",
+      "table": "UserMfaFactor",
+      "policyName": "c04_account_onboarding_diagnostic_usermfafactor_select",
+      "command": "SELECT",
+      "actors": [
+        "operator"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "operator-account-onboarding-diagnostic"
+      ],
+      "scopeType": "security-definer-owner-and-fixed-normalized-email-selector",
+      "scopePredicate": "current_user='mscqr_rls_cert_owner' AND session_user='mscqr_rls_cert_operator' AND current_setting('app.context_installed',true)='1' AND current_setting('app.purpose',true)='operator-account-onboarding-diagnostic' AND current_setting('app.auth_assurance',true)='operator-approved' AND current_setting('app.operator_environment',true)='certification'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:c04-diagnose-account-onboarding:UserMfaFactor:SELECT"
+      ],
+      "workflowId": null,
+      "route": "C04 brokered account-onboarding diagnostic",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },

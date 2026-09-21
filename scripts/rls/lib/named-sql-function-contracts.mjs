@@ -84,6 +84,31 @@ const printingLifecycleSource = "backend/src/rls-waves/session-c/c02/printingLif
 const printingLifecycleRollback = "backend/src/rls-waves/session-c/c02/printingLifecycleRollback.sql";
 const publicVerificationSource = "backend/src/rls-waves/session-b/b02/publicVerificationFunctions.sql";
 const publicVerificationRollback = "backend/src/rls-waves/session-b/b02/publicVerificationRollback.sql";
+const accountOnboardingDiagnosticSource = "backend/src/rls-waves/session-c/c04/accountOnboardingDiagnostic.sql";
+const accountOnboardingDiagnosticRollback = "backend/src/rls-waves/session-c/c04/accountOnboardingDiagnosticRollback.sql";
+const accountOnboardingDiagnosticOwner = `current_user={{OWNER}} AND session_user={{OPERATOR_ROLE}} AND current_setting('app.context_installed',true)='1' AND current_setting('app.purpose',true)='operator-account-onboarding-diagnostic' AND current_setting('app.auth_assurance',true)='operator-approved' AND current_setting('app.operator_environment',true)='{{TARGET_ENVIRONMENT}}'`;
+const accountOnboardingDiagnosticSecurity = Object.freeze({
+  mode: "SECURITY DEFINER",
+  ownerIdentity: "identity-table-owner",
+  ownerRole: "owner",
+  searchPath: "pg_catalog,public",
+  publicExecute: "revoked",
+  runtimeExecuteGrantees: ["operator"],
+  functionSource: accountOnboardingDiagnosticSource,
+  rollbackDefinition: accountOnboardingDiagnosticRollback,
+  deploymentPhase: "session-c-c04-account-onboarding-diagnostic",
+  ownerPolicies: [
+    ["User", "SELECT", accountOnboardingDiagnosticOwner],
+    ["Invite", "SELECT", accountOnboardingDiagnosticOwner],
+    ["Organization", "SELECT", accountOnboardingDiagnosticOwner],
+    ["Licensee", "SELECT", accountOnboardingDiagnosticOwner],
+    ["AdminMfaCredential", "SELECT", accountOnboardingDiagnosticOwner],
+    ["AdminWebAuthnCredential", "SELECT", accountOnboardingDiagnosticOwner],
+    ["UserMfaFactor", "SELECT", accountOnboardingDiagnosticOwner],
+    ["AuditLog", "SELECT", accountOnboardingDiagnosticOwner],
+    ["AuditLogOutbox", "SELECT", accountOnboardingDiagnosticOwner],
+  ],
+});
 const b01Workflow = "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session";
 const b01Context = "SECURITY DEFINER sets transaction-local B01 bearer-hash scope before the first RefreshToken read, then derives every user, tenant, manufacturer and MFA scope from the locked predecessor row. Caller app.* settings are never read as authority.";
 const b01Security = Object.freeze({
@@ -1981,6 +2006,17 @@ export const NAMED_SQL_FUNCTION_CONTRACTS = Object.freeze([
     security: b01Security, tableCommands: b01Tables.complete, context: b01Context, canonicalWorkflowIds: [b01Workflow],
     repositoryCallers: ["backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:completeRefreshTokenRotation"],
     inputAuthority: "claimed predecessor identity; successor hash is supplied by the application and raw successor is never accepted or retained", outputColumns: ["id", "expiresAt"], disposableProbes: ["b01-refresh-rotation-real-schema"],
+  },
+  {
+    id: "c04-diagnose-account-onboarding", schema: "app_ops", name: "diagnose_account_onboarding", signature: "text", returnType: "TABLE(invite_count bigint, latest_created_at timestamp without time zone, latest_expires_at timestamp without time zone, latest_used_at timestamp without time zone, latest_expired boolean, latest_role text, latest_tenant_binding jsonb, latest_accepted_by_present boolean, account_exists boolean, account_status text, account_active boolean, account_email_verified boolean, password_configured boolean, account_role text, account_tenant_binding jsonb, mfa_configured boolean, invite_created_present boolean, invite_accepted_present boolean, mfa_enrolled_present boolean, state_classification text)",
+    identityArguments: "p_normalized_email text", definitionLocation: accountOnboardingDiagnosticSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed",
+    security: accountOnboardingDiagnosticSecurity,
+    tableCommands: [["User", "SELECT"], ["Invite", "SELECT"], ["Organization", "SELECT"], ["Licensee", "SELECT"], ["AdminMfaCredential", "SELECT"], ["AdminWebAuthnCredential", "SELECT"], ["UserMfaFactor", "SELECT"], ["AuditLog", "SELECT"], ["AuditLogOutbox", "SELECT"]],
+    context: "Runs one normalized email selector in a SERIALIZABLE READ ONLY, broker-attributed operator transaction and returns only bounded onboarding state; the broker emits the external invocation audit.",
+    canonicalWorkflowIds: [], repositoryCallers: ["backend/src/rls-waves/session-c/operatorProcedureService.ts:diagnoseAccountOnboarding"],
+    inputAuthority: "one normalized email is an equality selector only; the exact brokered operator, target environment, approved purpose, and active platform actor are database-revalidated",
+    outputColumns: ["inviteCount", "latestCreatedAt", "latestExpiresAt", "latestUsedAt", "latestExpired", "latestRole", "latestTenantBinding", "latestAcceptedByPresent", "accountExists", "accountStatus", "accountActive", "accountEmailVerified", "passwordConfigured", "accountRole", "accountTenantBinding", "mfaConfigured", "inviteCreatedPresent", "inviteAcceptedPresent", "mfaEnrolledPresent", "stateClassification"],
+    disposableProbes: ["c04-operator-postgres18"],
   },
 ]);
 

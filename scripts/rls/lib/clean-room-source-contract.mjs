@@ -78,6 +78,8 @@ export const cleanRoomSourcePaths = [...new Set([
   "backend/src/rls-waves/session-c/c04/operatorProcedures.sql",
   "backend/src/rls-waves/session-c/c04/operatorProceduresRollback.sql",
   "backend/src/rls-waves/session-c/c04/bootstrapConfiguredSuperAdmin.sql",
+  "backend/src/rls-waves/session-c/c04/accountOnboardingDiagnostic.sql",
+  "backend/src/rls-waves/session-c/c04/accountOnboardingDiagnosticRollback.sql",
   ...applicationPathCertificationFamilies.map((family) => family.testFile),
 ])];
 
