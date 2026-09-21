@@ -15,6 +15,7 @@ BEGIN
   IF current_setting('app.context_installed', true) IS DISTINCT FROM '1'
      OR current_setting('app.purpose', true) IS DISTINCT FROM 'operator-account-onboarding-diagnostic'
      OR current_setting('app.auth_assurance', true) IS DISTINCT FROM 'operator-approved'
+     OR current_setting('app.request_id', true) IS NULL
      OR current_setting('app.request_id', true) !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
      OR (login_role = '{{OPERATOR_ROLE}}' AND environment <> '{{TARGET_ENVIRONMENT}}')
      OR (login_role = 'mscqr_rls_wave_c_operator' AND environment NOT IN ('development','staging','production'))
@@ -73,6 +74,7 @@ DECLARE
   target_user_role text;
   target_org_id text;
   target_licensee_id text;
+  target_count integer := 0;
   target_exists boolean := false;
   target_active boolean := false;
   target_password_configured boolean := false;
@@ -121,10 +123,14 @@ BEGIN
    ORDER BY i."createdAt" DESC,i.id DESC
    LIMIT 1;
   latest_exists := FOUND;
+  SELECT count(*) INTO target_count FROM public."User" u WHERE lower(u.email)=normalized_email;
+  IF target_count > 1 THEN
+    RAISE EXCEPTION 'SESSION_C04_AMBIGUOUS_NORMALIZED_EMAIL';
+  END IF;
   SELECT u.id,u.status::text,u."isActive",u."disabledAt",u."deletedAt",u."passwordHash",u."emailVerifiedAt",u.role::text,u."orgId",u."licenseeId"
     INTO target_id,target_status,target_is_active,target_disabled_at,target_deleted_at,target_password_hash,target_email_verified_at,target_user_role,target_org_id,target_licensee_id
     FROM public."User" u
-   WHERE u.email=normalized_email;
+   WHERE lower(u.email)=normalized_email;
   target_exists := FOUND;
 
   IF target_exists THEN

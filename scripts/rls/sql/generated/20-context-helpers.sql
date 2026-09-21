@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='65c6f12930b1272edd5c2ca728a67f588393416d0959bc5228e61d2a63566d5b'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:65c6f12930b1272edd5c2ca728a67f588393416d0959bc5228e61d2a63566d5b'
+    AND source_contract_sha256='d0c2095a8b0793c08acbe7aa69eed1f69e88f3e17a7fb665b5c83e6ca2aeb00c'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:d0c2095a8b0793c08acbe7aa69eed1f69e88f3e17a7fb665b5c83e6ca2aeb00c'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:65c6f12930b1272edd5c2ca728a67f588393416d0959bc5228e61d2a63566d5b')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:d0c2095a8b0793c08acbe7aa69eed1f69e88f3e17a7fb665b5c83e6ca2aeb00c')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -13678,6 +13678,7 @@ BEGIN
   IF current_setting('app.context_installed', true) IS DISTINCT FROM '1'
      OR current_setting('app.purpose', true) IS DISTINCT FROM 'operator-account-onboarding-diagnostic'
      OR current_setting('app.auth_assurance', true) IS DISTINCT FROM 'operator-approved'
+     OR current_setting('app.request_id', true) IS NULL
      OR current_setting('app.request_id', true) !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
      OR (login_role = 'mscqr_rls_cert_operator' AND environment <> 'certification')
      OR (login_role = 'mscqr_rls_wave_c_operator' AND environment NOT IN ('development','staging','production'))
@@ -13736,6 +13737,7 @@ DECLARE
   target_user_role text;
   target_org_id text;
   target_licensee_id text;
+  target_count integer := 0;
   target_exists boolean := false;
   target_active boolean := false;
   target_password_configured boolean := false;
@@ -13784,10 +13786,14 @@ BEGIN
    ORDER BY i."createdAt" DESC,i.id DESC
    LIMIT 1;
   latest_exists := FOUND;
+  SELECT count(*) INTO target_count FROM public."User" u WHERE lower(u.email)=normalized_email;
+  IF target_count > 1 THEN
+    RAISE EXCEPTION 'SESSION_C04_AMBIGUOUS_NORMALIZED_EMAIL';
+  END IF;
   SELECT u.id,u.status::text,u."isActive",u."disabledAt",u."deletedAt",u."passwordHash",u."emailVerifiedAt",u.role::text,u."orgId",u."licenseeId"
     INTO target_id,target_status,target_is_active,target_disabled_at,target_deleted_at,target_password_hash,target_email_verified_at,target_user_role,target_org_id,target_licensee_id
     FROM public."User" u
-   WHERE u.email=normalized_email;
+   WHERE lower(u.email)=normalized_email;
   target_exists := FOUND;
 
   IF target_exists THEN
