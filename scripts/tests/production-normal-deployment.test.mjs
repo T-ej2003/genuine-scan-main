@@ -300,7 +300,7 @@ test("normal production workflow is fixed, OIDC-only, gated by main, and smoke-t
   assert.match(workflow, /branches: \[main\]/);
   assert.match(workflow, /workflow_dispatch:[\s\S]*baseline:/);
   assert.match(workflow, /test "\$GITHUB_RUN_ATTEMPT" = "1"/);
-  assert.match(workflow, /repos\/\$GITHUB_REPOSITORY\/pulls\/555/);
+  assert.match(workflow, /repos\/\$GITHUB_REPOSITORY\/pulls\/556/);
   assert.match(workflow, /select\(\.merged == true and \.base\.ref == "main"\)/);
   assert.match(workflow, /test "\$baseline_merge_sha" = "\$GITHUB_SHA"/);
   assert.match(workflow, /configure-aws-credentials@v6/);
