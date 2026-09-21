@@ -157,7 +157,7 @@
     {
       "Sid": "ReadExactBrokerRecoverySuccessorEvidenceReaderPolicy",
       "Effect": "Allow",
-      "Action": ["iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions", "iam:ListEntitiesForPolicy"],
+      "Action": ["iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListEntitiesForPolicy", "iam:ListPolicyTags", "iam:ListPolicyVersions"],
       "Resource": "arn:aws:iam::368992683803:policy/MSCQRProductionBrokerRecoverySuccessorEvidenceRead"
     },
     {
