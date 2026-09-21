@@ -39,7 +39,7 @@ const securityInfrastructure = [
   /^\.github\/workflows\//,
   /^infra\//,
   /^backend\/prisma\//,
-  /^backend\/src\/(?:rls-waves\/|workers\/|security\/|middleware\/|config\/database\.ts)/i,
+  /^backend\/src\/(?:app\.ts$|rls-waves\/|workers\/|security\/|middleware\/|config\/database\.ts)/i,
   /^backend\/src\/services\/(?:accessControlService|risk|tenant)/i,
   /^backend\/src\/utils\/(?:security|clientIp|mtlsFingerprintHeader|secretConfig|cookies|ipAddress|publicIntegrityGuard|prismaStorageGuard)\.ts$/,
   /^src\/(?:features\/security\/|lib\/(?:secure-printer-readiness|webauthn)\.ts)/i,
