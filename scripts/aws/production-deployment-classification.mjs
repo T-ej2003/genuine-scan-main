@@ -10,14 +10,12 @@ export const PRODUCTION_RELEASE_CLASS = Object.freeze({
 // Normal ownership is explicit. Unknown runtime ownership fails closed; security
 // ownership is evaluated first and can never be made normal by a filename.
 const normalApplication = [
-  /^backend\/src\//,
   /^backend\/src\/services\/(?:batchService|qrService|notificationService)\.ts$/,
   /^backend\/src\/printing\//,
   /^backend\/src\/utils\/(?:cursorPagination|email|logger|boundedJson|realtime)\.ts$/,
   /^backend\/package(?:-lock)?\.json$/,
   /^package(?:-lock)?\.json$/,
   /^src\/(?:App\.tsx|main\.tsx|App\.css|index\.css)$/,
-  /^src\//,
   /^src\/(?:components\/(?!auth\/)|features\/batches\/|pages\/(?:Batches|QrBatches)|hooks\/)/,
   /^public\//,
   /^shared\/(?:ui|formatting|validation)\//,
@@ -39,10 +37,10 @@ const securityInfrastructure = [
   /^\.github\/workflows\//,
   /^infra\//,
   /^backend\/prisma\//,
-  /^backend\/src\/(?:app\.ts$|index\.ts$|auth\/|rls-waves\/|workers\/|security\/|middleware\/|routes\/(?:index\.ts$|modules\/authRoutes\.ts$)|controllers\/auth(?:AdminSecurity|Session)?Controller(?:Shared)?\.ts$|config\/database\.ts)/i,
-  /^backend\/src\/services\/(?:accessControlService|auth\/|mfa|session|invitation|role|risk|tenant)/i,
+  /^backend\/src\/(?:app\.ts$|index\.ts$|auth\/|rls-waves\/|workers\/|security\/|middleware\/|routes\/(?:index\.ts$|modules\/authRoutes\.ts$)|controllers\/(?:auth(?:AdminSecurity|Session)?Controller(?:Shared)?\.ts$|verify\/)|config\/database\.ts)/i,
+  /^backend\/src\/services\/(?:accessControlService|auth\/|customerVerify|mfa|session|invitation|role|risk|tenant)/i,
   /^backend\/src\/utils\/(?:security|clientIp|mtlsFingerprintHeader|secretConfig|cookies|ipAddress|publicIntegrityGuard|prismaStorageGuard)\.ts$/,
-  /^src\/(?:features\/security\/|lib\/(?:secure-printer-readiness|webauthn)\.ts)/i,
+  /^src\/(?:contexts\/|components\/auth\/|features\/(?:auth|mfa|security|account-settings|verify|licensees|manufacturers)\/|pages\/(?:AcceptInvite|ForgotPassword|Login|ResetPassword|Settings|VerifyEmail)|lib\/(?:api(?:\/|\.ts$)|api-client\.ts|browser-storage-cleanup\.ts|secure-printer-readiness\.ts|verification-decision\.ts|webauthn\.ts)|app\/route-metadata)/i,
   /\.sql$/i,
   /(?:^|\/)(?:migrations?|schema|rls|terraform|iam|networking?|secrets?)(?:\/|$)/i,
   /(?:^|\/)(?:\.env|.*(?:policy|grant|role|ownership|network|kms|iam|rls|migration|schema))\./i,
