@@ -4,11 +4,12 @@
   "bootstrapPolicyProvenanceSha": "49cf9d6314cdb599b602a913eaa724a5189dfefb",
   "bootstrapPolicySha256": "56c819a5043ebde905847b0df13c2eb733a91547c16351c565bb1923cf701a0b",
   "bootstrapPolicyOmittedStatementSids": [
-    "ReadExactBrokerRecoverySuccessorEvidenceReaderRole",
-    "ReadExactBrokerRecoverySuccessorEvidenceReaderPolicy",
-    "CreateExactBrokerRecoverySuccessorEvidenceReaderRole",
-    "CreateExactBrokerRecoverySuccessorEvidenceReaderPolicy",
+    "CreateExactBrokerRecoverySuccessorEvidenceReaderIdentity",
     "AttachExactBrokerRecoverySuccessorEvidenceReaderPolicyToRole"
+  ],
+  "bootstrapPolicyOmittedResourceArns": [
+    "arn:aws:iam::368992683803:role/mscqr-production-broker-recovery-successor-evidence-reader",
+    "arn:aws:iam::368992683803:policy/MSCQRProductionBrokerRecoverySuccessorEvidenceRead"
   ],
   "requiredAuthorizerPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionBootstrapOperatorPolicyAuthorizer",
   "evidenceReader": {

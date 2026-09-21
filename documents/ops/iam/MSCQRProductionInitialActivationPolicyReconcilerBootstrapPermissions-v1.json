@@ -76,7 +76,10 @@
         "iam:ListRolePolicies",
         "iam:ListRoleTags"
       ],
-      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler"
+      "Resource": [
+        "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler",
+        "arn:aws:iam::368992683803:role/mscqr-production-broker-recovery-successor-evidence-reader"
+      ]
     },
     {
       "Sid": "ReadExactMixedRecoveryRole",
@@ -101,12 +104,6 @@
       "Resource": "arn:aws:iam::368992683803:role/mscqr-production-bootstrap-operator-policy-authorizer"
     },
     {
-      "Sid": "ReadExactBrokerRecoverySuccessorEvidenceReaderRole",
-      "Effect": "Allow",
-      "Action": ["iam:GetRole", "iam:ListAttachedRolePolicies", "iam:ListRolePolicies", "iam:ListRoleTags"],
-      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-broker-recovery-successor-evidence-reader"
-    },
-    {
       "Sid": "UpdateExactMixedRecoveryRoleTrust",
       "Effect": "Allow",
       "Action": "iam:UpdateAssumeRolePolicy",
@@ -128,7 +125,10 @@
         "iam:ListPolicyTags",
         "iam:ListPolicyVersions"
       ],
-      "Resource": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler"
+      "Resource": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
+        "arn:aws:iam::368992683803:policy/MSCQRProductionBrokerRecoverySuccessorEvidenceRead"
+      ]
     },
     {
       "Sid": "ReadExactMixedRecoveryPolicy",
@@ -153,12 +153,6 @@
         "iam:ListPolicyVersions"
       ],
       "Resource": "arn:aws:iam::368992683803:policy/MSCQRProductionBootstrapOperatorPolicyAuthorizer"
-    },
-    {
-      "Sid": "ReadExactBrokerRecoverySuccessorEvidenceReaderPolicy",
-      "Effect": "Allow",
-      "Action": ["iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListEntitiesForPolicy", "iam:ListPolicyTags", "iam:ListPolicyVersions"],
-      "Resource": "arn:aws:iam::368992683803:policy/MSCQRProductionBrokerRecoverySuccessorEvidenceRead"
     },
     {
       "Sid": "UpdateExactReconcilerPolicyVersion",
@@ -279,25 +273,13 @@
       }
     },
     {
-      "Sid": "CreateExactBrokerRecoverySuccessorEvidenceReaderRole",
+      "Sid": "CreateExactBrokerRecoverySuccessorEvidenceReaderIdentity",
       "Effect": "Allow",
-      "Action": ["iam:CreateRole", "iam:TagRole"],
-      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-broker-recovery-successor-evidence-reader",
-      "Condition": {
-        "StringEquals": {
-          "aws:RequestTag/ManagedBy": "Terraform",
-          "aws:RequestTag/Environment": "production",
-          "aws:RequestTag/Component": "broker-recovery-successor-evidence",
-          "aws:RequestTag/Stack": "production-initial-activation-policy-reconciler"
-        },
-        "ForAllValues:StringEquals": { "aws:TagKeys": ["ManagedBy", "Environment", "Component", "Stack"] }
-      }
-    },
-    {
-      "Sid": "CreateExactBrokerRecoverySuccessorEvidenceReaderPolicy",
-      "Effect": "Allow",
-      "Action": ["iam:CreatePolicy", "iam:TagPolicy"],
-      "Resource": "arn:aws:iam::368992683803:policy/MSCQRProductionBrokerRecoverySuccessorEvidenceRead",
+      "Action": ["iam:CreateRole", "iam:TagRole", "iam:CreatePolicy", "iam:TagPolicy"],
+      "Resource": [
+        "arn:aws:iam::368992683803:role/mscqr-production-broker-recovery-successor-evidence-reader",
+        "arn:aws:iam::368992683803:policy/MSCQRProductionBrokerRecoverySuccessorEvidenceRead"
+      ],
       "Condition": {
         "StringEquals": {
           "aws:RequestTag/ManagedBy": "Terraform",
