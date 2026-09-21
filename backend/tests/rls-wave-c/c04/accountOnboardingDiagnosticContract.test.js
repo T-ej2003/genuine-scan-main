@@ -50,7 +50,7 @@ const boundary = operatorBoundaries.boundaries.find(({ id }) => id === "operator
 assert(boundary?.targetTables.includes("table-organization") && boundary.targetTables.includes("table-licensee"), "operator boundary must declare tenant-scope tables");
 assert.equal((diagnostic.match(/lower\(i\.email\)=normalized_email/g) || []).length, 7, "all invite selectors must use canonical matching");
 assert.match(diagnostic, /AUTH_MFA_ENROLLED','AUTH_WEBAUTHN_ENROLLED/);
-assert.match(diagnostic, /observed_at timestamp without time zone := clock_timestamp\(\)/);
+assert.match(diagnostic, /observed_at timestamp without time zone := clock_timestamp\(\) AT TIME ZONE 'UTC'/);
 assert.equal((diagnostic.match(/clock_timestamp\(\)/g) || []).length, 1, "invite expiry must use one observation time");
 assert.match(diagnostic, /ORDER BY i\."createdAt" DESC,i\.id DESC/);
 assert.match(diagnostic, /'A_EXPIRED_UNUSED_INVITE_NO_ACCOUNT'/);

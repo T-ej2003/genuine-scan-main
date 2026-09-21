@@ -85,7 +85,7 @@ DECLARE
   target_mfa_configured boolean := false;
   target_unactivated boolean := false;
   latest_invite_acceptable boolean := false;
-  observed_at timestamp without time zone := clock_timestamp();
+  observed_at timestamp without time zone := clock_timestamp() AT TIME ZONE 'UTC';
   accepted_invite_for_target boolean := false;
   invite_created boolean := false;
   invite_accepted boolean := false;
