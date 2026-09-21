@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='581005a2580ca802ae737da64f5a6c8dacd11cb58b5ed4b91260c1793c8f03aa'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:581005a2580ca802ae737da64f5a6c8dacd11cb58b5ed4b91260c1793c8f03aa'
+    AND source_contract_sha256='171abff4bf8c7e3af38af2cef61156906c26d5b7b6ff103e0d881f83ee59c22b'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:171abff4bf8c7e3af38af2cef61156906c26d5b7b6ff103e0d881f83ee59c22b'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:581005a2580ca802ae737da64f5a6c8dacd11cb58b5ed4b91260c1793c8f03aa')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:171abff4bf8c7e3af38af2cef61156906c26d5b7b6ff103e0d881f83ee59c22b')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -13723,11 +13723,14 @@ DECLARE
   latest_created timestamp without time zone;
   latest_expires timestamp without time zone;
   latest_used timestamp without time zone;
+  latest_invite_email text;
   latest_invite_role text;
   latest_org_id text;
   latest_licensee_id text;
+  latest_manufacturer_id text;
   latest_accepted_by_id text;
   target_id text;
+  target_email text;
   target_status text;
   target_is_active boolean;
   target_disabled_at timestamp without time zone;
@@ -13744,6 +13747,7 @@ DECLARE
   target_email_verified boolean := false;
   target_mfa_configured boolean := false;
   target_unactivated boolean := false;
+  latest_invite_acceptable boolean := false;
   observed_at timestamp without time zone := clock_timestamp();
   accepted_invite_for_target boolean := false;
   invite_created boolean := false;
@@ -13780,8 +13784,8 @@ BEGIN
   END IF;
 
   SELECT count(*) INTO invite_count FROM public."Invite" i WHERE lower(i.email)=normalized_email;
-  SELECT i."createdAt",i."expiresAt",i."usedAt",i.role::text,i."orgId",i."licenseeId",i."acceptedByUserId"
-    INTO latest_created,latest_expires,latest_used,latest_invite_role,latest_org_id,latest_licensee_id,latest_accepted_by_id
+  SELECT i."createdAt",i."expiresAt",i."usedAt",i.email,i.role::text,i."orgId",i."licenseeId",i."manufacturerId",i."acceptedByUserId"
+    INTO latest_created,latest_expires,latest_used,latest_invite_email,latest_invite_role,latest_org_id,latest_licensee_id,latest_manufacturer_id,latest_accepted_by_id
     FROM public."Invite" i
    WHERE lower(i.email)=normalized_email
    ORDER BY i."createdAt" DESC,i.id DESC
@@ -13791,8 +13795,8 @@ BEGIN
   IF target_count > 1 THEN
     RAISE EXCEPTION 'SESSION_C04_AMBIGUOUS_NORMALIZED_EMAIL';
   END IF;
-  SELECT u.id,u.status::text,u."isActive",u."disabledAt",u."deletedAt",u."passwordHash",u."emailVerifiedAt",u.role::text,u."orgId",u."licenseeId"
-    INTO target_id,target_status,target_is_active,target_disabled_at,target_deleted_at,target_password_hash,target_email_verified_at,target_user_role,target_org_id,target_licensee_id
+  SELECT u.id,u.email,u.status::text,u."isActive",u."disabledAt",u."deletedAt",u."passwordHash",u."emailVerifiedAt",u.role::text,u."orgId",u."licenseeId"
+    INTO target_id,target_email,target_status,target_is_active,target_disabled_at,target_deleted_at,target_password_hash,target_email_verified_at,target_user_role,target_org_id,target_licensee_id
     FROM public."User" u
    WHERE lower(u.email)=normalized_email;
   target_exists := FOUND;
@@ -13817,6 +13821,30 @@ BEGIN
          AND (f.type='WEBAUTHN' OR (f.type='TOTP' AND (f."lastUsedAt" IS NOT NULL OR f."legacySource"='AdminMfaCredential')))
     );
   END IF;
+
+  latest_invite_acceptable := latest_exists
+    AND EXISTS (SELECT 1 FROM public."Organization" o WHERE o.id=latest_org_id AND o."isActive")
+    AND (latest_licensee_id IS NULL OR EXISTS (
+      SELECT 1 FROM public."Licensee" l
+       WHERE l.id=latest_licensee_id AND l."orgId"=latest_org_id AND l."isActive" AND l."suspendedAt" IS NULL
+    ))
+    AND (NOT target_exists OR (
+      target_unactivated
+      AND target_email=latest_invite_email
+      AND (CASE WHEN target_user_role IN ('LICENSEE_ADMIN','ORG_ADMIN') THEN 'LICENSEE_ADMIN'
+                WHEN target_user_role IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') THEN 'MANUFACTURER'
+                ELSE target_user_role END)
+          IS NOT DISTINCT FROM
+          (CASE WHEN latest_invite_role IN ('LICENSEE_ADMIN','ORG_ADMIN') THEN 'LICENSEE_ADMIN'
+                WHEN latest_invite_role IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') THEN 'MANUFACTURER'
+                ELSE latest_invite_role END)
+      AND (latest_invite_role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
+           AND target_org_id IS NULL AND target_licensee_id IS NULL
+           OR latest_invite_role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
+           AND target_org_id IS NOT DISTINCT FROM latest_org_id
+           AND target_licensee_id IS NOT DISTINCT FROM latest_licensee_id)
+      AND (latest_manufacturer_id IS NULL OR target_id IS NOT DISTINCT FROM latest_manufacturer_id)
+    ));
 
   invite_created := EXISTS (
     SELECT 1 FROM public."AuditLog" a
@@ -13857,9 +13885,9 @@ BEGIN
     classification := 'C_ACTIVATED_ACCOUNT_MFA_INCOMPLETE';
   ELSIF target_exists AND target_active AND target_password_configured AND target_email_verified AND accepted_invite_for_target AND target_mfa_configured THEN
     classification := 'D_ACTIVATED_ACCOUNT_MFA_COMPLETE';
-  ELSIF NOT target_exists AND latest_exists AND latest_used IS NULL AND latest_expires > observed_at THEN
+  ELSIF NOT target_exists AND latest_invite_acceptable AND latest_used IS NULL AND latest_expires > observed_at THEN
     classification := 'F_VALID_UNUSED_INVITE_NO_ACCOUNT';
-  ELSIF target_unactivated AND latest_exists AND latest_used IS NULL AND latest_expires > observed_at THEN
+  ELSIF target_unactivated AND latest_invite_acceptable AND latest_used IS NULL AND latest_expires > observed_at THEN
     classification := 'F_VALID_UNUSED_INVITE_EXISTING_UNACTIVATED_ACCOUNT';
   END IF;
 
