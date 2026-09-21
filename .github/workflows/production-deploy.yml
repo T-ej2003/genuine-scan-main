@@ -143,9 +143,11 @@ jobs:
         env: { BACKEND_IMAGE: '${{ steps.backend.outputs.image }}', FRONTEND_IMAGE: '${{ steps.frontend.outputs.image }}' }
         run: |
           set -euo pipefail
-          for image in "$BACKEND_IMAGE" "$FRONTEND_IMAGE"; do
+          for component in backend frontend; do
+            variable="${component^^}_IMAGE"; image="${!variable:-}"
             [[ -z "$image" ]] && continue
-            docker run --rm aquasec/trivy:0.69.3 image --scanners vuln,secret --severity CRITICAL --ignore-unfixed --exit-code 1 "$image"
+            docker save "$image" -o "$RUNNER_TEMP/${component}.tar"
+            docker run --rm -v "$RUNNER_TEMP:/workspace:ro" aquasec/trivy:0.69.3 image --input "/workspace/${component}.tar" --scanners vuln,secret --severity CRITICAL --ignore-unfixed --exit-code 1
           done
       - uses: sigstore/cosign-installer@v4.1.2
       - name: Sign and attest published images
@@ -161,8 +163,7 @@ jobs:
           for component in backend frontend; do
             variable="${component^^}_IMAGE"; image="${!variable:-}"
             [[ -z "$image" ]] && continue
-            docker pull "$image"
-            docker save "$image" -o "$RUNNER_TEMP/${component}.tar"
+            test -f "$RUNNER_TEMP/${component}.tar"
             docker run --rm -v "$RUNNER_TEMP:/workspace:ro" anchore/syft:v1.38.0 "/workspace/${component}.tar" -o spdx-json > "$RUNNER_TEMP/${component}.spdx.json"
             node --input-type=module - "$RUNNER_TEMP/${component}.provenance.json" "$image" <<'NODE'
           import fs from 'node:fs'; fs.writeFileSync(process.argv[2], JSON.stringify({ buildType:'mscqr-normal-production-provenance', subject:{imageRef:process.argv[3]}, invocation:{repository:process.env.GITHUB_REPOSITORY,sha:process.env.GITHUB_SHA,workflow:process.env.GITHUB_WORKFLOW,runId:process.env.GITHUB_RUN_ID}, metadata:{platforms:['linux/amd64']} }));
@@ -209,6 +210,7 @@ jobs:
         if: failure()
         run: |
           set -euo pipefail
+          rollback_failed=0
           for component in frontend backend; do
             file="$RUNNER_TEMP/${component}-deployment.json"
             [[ -f "$file" ]] || continue
@@ -216,8 +218,11 @@ jobs:
           import fs from 'node:fs'; const value=JSON.parse(fs.readFileSync(process.argv[2])); for(const key of ['clusterName','serviceName','previousTaskDefinitionArn','newTaskDefinitionArn']) console.log(value[key]);
           NODE
             )
-            CLUSTER_NAME="${values[0]}" SERVICE_NAME="${values[1]}" PREVIOUS_TASK_DEFINITION_ARN="${values[2]}" EXPECTED_FAILED_TASK_DEFINITION_ARN="${values[3]}" WAIT_FOR_STABLE=true ./scripts/aws/rollback-ecs-service.sh
+            if ! CLUSTER_NAME="${values[0]}" SERVICE_NAME="${values[1]}" PREVIOUS_TASK_DEFINITION_ARN="${values[2]}" EXPECTED_FAILED_TASK_DEFINITION_ARN="${values[3]}" WAIT_FOR_STABLE=true ./scripts/aws/rollback-ecs-service.sh; then
+              rollback_failed=1
+            fi
           done
+          exit "$rollback_failed"
       - name: Deployment audit summary
         if: always()
         run: |

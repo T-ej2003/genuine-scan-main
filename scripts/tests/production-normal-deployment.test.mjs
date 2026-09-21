@@ -34,7 +34,7 @@ test("release classification is deterministic and sensitive lanes fail closed", 
     assert.equal(classifyProductionChanges([file]).frontend, true, file);
   for (const file of ["backend/src/auth/loginService.ts", "src/lib/api/internal-client-core.ts", "src/lib/api/internal-client-auth.ts", "src/components/auth/StepUpRecoveryDialog.tsx", "src/features/account-settings/AdminMfaCard.tsx", "src/features/auth/login.tsx"])
     assert.equal(classifyProductionChanges([file]).releaseClass, PRODUCTION_RELEASE_CLASS.NORMAL_APPLICATION, file);
-  for (const file of ["backend/src/middleware/rbac.ts", "backend/src/services/accessControlService.ts", "backend/src/middleware/csrf.ts", "backend/src/middleware/tenantIsolation.ts", "backend/src/utils/clientIp.ts", "backend/src/rls-waves/session-c/policy.sql", "backend/src/workers/consume.ts", "src/lib/webauthn.ts", "scripts/aws/production-normal-release.mjs", ".github/workflows/production-deploy.yml"])
+  for (const file of ["backend/src/middleware/auth.ts", "backend/src/middleware/incidentUpload.ts", "backend/src/middleware/rbac.ts", "backend/src/services/accessControlService.ts", "backend/src/middleware/csrf.ts", "backend/src/middleware/tenantIsolation.ts", "backend/src/utils/clientIp.ts", "backend/src/rls-waves/session-c/policy.sql", "backend/src/workers/consume.ts", "src/lib/webauthn.ts", "scripts/aws/production-normal-release.mjs", ".github/workflows/production-deploy.yml"])
     assert.equal(classifyProductionChanges([file]).releaseClass, PRODUCTION_RELEASE_CLASS.SECURITY_INFRASTRUCTURE, file);
   assert.equal(classifyProductionChanges(["backend/prisma/schema.prisma"]).releaseClass, PRODUCTION_RELEASE_CLASS.SECURITY_INFRASTRUCTURE);
   assert.equal(classifyProductionChanges(["infra/aws/terraform/production-web-release/main.tf"]).releaseClass, PRODUCTION_RELEASE_CLASS.SECURITY_INFRASTRUCTURE);
@@ -307,6 +307,9 @@ test("normal production workflow is fixed, OIDC-only, gated by main, and smoke-t
   assert.match(workflow, /publish-ecs-images\.sh/);
   assert.match(workflow, /deploy-ecs-service\.sh/);
   assert.match(workflow, /rollback-ecs-service\.sh/);
+  assert.match(workflow, /docker save "\$image" -o "\$RUNNER_TEMP\/\$\{component\}\.tar"/);
+  assert.match(workflow, /trivy:0\.69\.3 image --input "\/workspace\/\$\{component\}\.tar"/);
+  assert.doesNotMatch(workflow, /\/var\/run\/docker\.sock/);
   assert.doesNotMatch(workflow, /production-normal-release|prepare-production-normal-deployment|normal-component-deployment-plan|DynamoDB/i);
   assert.match(workflow, /mscqr-production-normal-deployer/);
   assert.match(workflow, /environment: production-normal-deploy/);
@@ -314,6 +317,7 @@ test("normal production workflow is fixed, OIDC-only, gated by main, and smoke-t
   assert.deepEqual(normalEnvironmentUsers, ["production-deploy.yml"]);
   assert.equal((workflow.match(/environment: production-normal-deploy/g) || []).length, 1);
   assert.match(workflow, /Roll back exact predecessors after failure[\s\S]*if: failure\(\)/);
+  assert.match(workflow, /rollback_failed=0[\s\S]*if ! CLUSTER_NAME=[\s\S]*rollback_failed=1[\s\S]*exit "\$rollback_failed"/);
   assert.match(fs.readFileSync("scripts/aws/publish-ecs-images.sh", "utf8"), /await import\(process\.env\.NORMAL_IMAGE_CONTRACT\)/);
   assert.match(workflow, /node scripts\/smoke-release\.mjs/);
   assert.doesNotMatch(workflow, /AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|terraform apply|PutSecretValue|KMS_SIGN/);
