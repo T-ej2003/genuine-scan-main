@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='91235b01bbe665f970d5eeaa4466627d2ee968eeb07488eef206e26d71b81b53'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:91235b01bbe665f970d5eeaa4466627d2ee968eeb07488eef206e26d71b81b53'
+    AND source_contract_sha256='ec8f0bc9be0e5094cc1b55810bb1039ce04fc654412a83823dfccc15f1d78a67'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:ec8f0bc9be0e5094cc1b55810bb1039ce04fc654412a83823dfccc15f1d78a67'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:91235b01bbe665f970d5eeaa4466627d2ee968eeb07488eef206e26d71b81b53')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:ec8f0bc9be0e5094cc1b55810bb1039ce04fc654412a83823dfccc15f1d78a67')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -13754,16 +13754,18 @@ DECLARE
   invite_accepted boolean := false;
   mfa_enrolled boolean := false;
   classification text := 'E_INCONSISTENT_STATE_REQUIRING_REPAIR';
+  separator_position integer;
 BEGIN
   PERFORM app_ops.session_c04_assert_diagnostic_context();
 
   -- normalizeEmailAddress performs IDNA conversion before this fixed SQL
   -- selector. The database repeats its ASCII-domain/local-part safety checks
   -- for direct broker calls without widening the application contract.
-  local_part := split_part(normalized_email,'@',1);
-  domain_part := split_part(normalized_email,'@',2);
+  separator_position := char_length(normalized_email)-strpos(reverse(normalized_email),'@')+1;
+  local_part := left(normalized_email,separator_position-1);
+  domain_part := substr(normalized_email,separator_position+1);
   IF normalized_email = '' OR char_length(normalized_email) > 254
-     OR length(normalized_email)-length(replace(normalized_email,'@','')) <> 1
+     OR strpos(normalized_email,'@')=0
      OR normalized_email ~ '[[:cntrl:]]'
      OR char_length(local_part) > 64
      OR domain_part !~ '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$'
@@ -13828,8 +13830,7 @@ BEGIN
       SELECT 1 FROM public."Licensee" l
        WHERE l.id=latest_licensee_id AND l."orgId"=latest_org_id AND l."isActive" AND l."suspendedAt" IS NULL
     ))
-    AND (NOT target_exists OR (
-      target_unactivated
+    AND (target_exists AND target_unactivated
       AND target_email=latest_invite_email
       AND (CASE WHEN target_user_role IN ('LICENSEE_ADMIN','ORG_ADMIN') THEN 'LICENSEE_ADMIN'
                 WHEN target_user_role IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') THEN 'MANUFACTURER'
@@ -13885,8 +13886,6 @@ BEGIN
     classification := 'C_ACTIVATED_ACCOUNT_MFA_INCOMPLETE';
   ELSIF target_exists AND target_active AND target_password_configured AND target_email_verified AND accepted_invite_for_target AND target_mfa_configured THEN
     classification := 'D_ACTIVATED_ACCOUNT_MFA_COMPLETE';
-  ELSIF NOT target_exists AND latest_invite_acceptable AND latest_used IS NULL AND latest_expires > observed_at THEN
-    classification := 'F_VALID_UNUSED_INVITE_NO_ACCOUNT';
   ELSIF target_unactivated AND latest_invite_acceptable AND latest_used IS NULL AND latest_expires > observed_at THEN
     classification := 'F_VALID_UNUSED_INVITE_EXISTING_UNACTIVATED_ACCOUNT';
   END IF;
