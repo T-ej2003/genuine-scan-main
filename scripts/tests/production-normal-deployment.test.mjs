@@ -306,7 +306,9 @@ test("normal production workflow is fixed, OIDC-only, gated by main, and smoke-t
   assert.match(workflow, /deploy-ecs-service\.sh/);
   assert.match(workflow, /rollback-ecs-service\.sh/);
   assert.match(workflow, /docker save "\$image" -o "\$RUNNER_TEMP\/\$\{component\}\.tar"/);
-  assert.match(workflow, /trivy:0\.69\.3 image --input "\/workspace\/\$\{component\}\.tar"/);
+  assert.match(workflow, /--scanners vuln --severity CRITICAL --ignore-unfixed --exit-code 1/);
+  assert.match(workflow, /--scanners secret --exit-code 1/);
+  assert.doesNotMatch(workflow, /--scanners vuln,secret/);
   assert.doesNotMatch(workflow, /\/var\/run\/docker\.sock/);
   assert.doesNotMatch(workflow, /production-normal-release|prepare-production-normal-deployment|normal-component-deployment-plan|DynamoDB/i);
   assert.match(workflow, /mscqr-production-normal-deployer/);

@@ -147,7 +147,8 @@ jobs:
             variable="${component^^}_IMAGE"; image="${!variable:-}"
             [[ -z "$image" ]] && continue
             docker save "$image" -o "$RUNNER_TEMP/${component}.tar"
-            docker run --rm -v "$RUNNER_TEMP:/workspace:ro" aquasec/trivy:0.69.3 image --input "/workspace/${component}.tar" --scanners vuln,secret --severity CRITICAL --ignore-unfixed --exit-code 1
+            docker run --rm -v "$RUNNER_TEMP:/workspace:ro" aquasec/trivy:0.69.3 image --input "/workspace/${component}.tar" --scanners vuln --severity CRITICAL --ignore-unfixed --exit-code 1
+            docker run --rm -v "$RUNNER_TEMP:/workspace:ro" aquasec/trivy:0.69.3 image --input "/workspace/${component}.tar" --scanners secret --exit-code 1
           done
       - uses: sigstore/cosign-installer@v4.1.2
       - name: Sign and attest published images
