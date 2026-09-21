@@ -420,7 +420,7 @@
       "resolvedAt": "2026-07-16",
       "resolution": {
         "authority": "documents/security/rls-program/operator-boundaries.json",
-        "boundaries": 29,
+        "boundaries": 30,
         "selectedWorkflows": 1,
         "selectedCommandRules": 1,
         "maximumBreakGlassLifetimeMinutes": 30,

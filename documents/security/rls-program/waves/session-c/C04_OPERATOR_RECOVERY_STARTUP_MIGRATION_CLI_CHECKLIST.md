@@ -20,9 +20,32 @@ Status: owned application boundary and local PostgreSQL 18 proof complete; Sessi
 
 ## Integration seams
 
-- The generated GREEN package must install and grant only the exact reviewed `app_ops.print_diagnostic(uuid)`, `app_ops.reissue_account_setup_link(uuid,uuid,text,uuid)`, `app_ops.reset_account_mfa(uuid,uuid,text,uuid)`, `app_ops.prepare_rls_validation_fixture(uuid,text,uuid)`, and migration bootstrap function used by the owned application client.
+- The generated GREEN package installs only the reviewed read-only `app_ops.diagnose_account_onboarding(text)` C04 boundary. The remaining C04 recovery procedures stay outside the generated runtime package until each has its own named-function, policy and checksum contract.
 - Each function must revalidate the database actor/identity, environment, assurance, approval/ticket/purpose, active target scope and lifecycle; constrain exact columns and returned projection; lock or compare-and-set mutations; make replay deterministic; append immutable audit/outbox evidence atomically; and deny direct protected-table access to the operator/migration LOGIN roles.
 - Startup registration currently invokes bootstrap through the ordinary application client. Session A must provide a deployment-only migration invocation seam; the running application role must not receive migration authority or credentials.
+
+## Account-onboarding diagnostic
+
+`app_ops.diagnose_account_onboarding(text)` is a fixed, parameterized,
+platform-operator-only read for one normalized email. It returns the bounded
+invite, account, MFA, audit-presence and classification projection needed to
+distinguish expired onboarding from accepted onboarding; it never returns a
+token, hash, MFA credential, audit payload, account email or user identifier.
+
+The function must be invoked through the operator broker with purpose
+`operator-account-onboarding-diagnostic`, an attributed platform actor and a
+fresh request ID. The service wrapper starts `SERIALIZABLE READ ONLY` before
+installing context, so the function must not append `AuditLog` or an outbox
+row. The broker transcript is the immutable invocation audit: it records the
+operator identity, request ID, fixed procedure name, privacy-safe target
+fingerprint, approval/purpose and result envelope without logging the email.
+
+The brokered GREEN installer owns deployment. It creates the function under the
+existing table-owner definer, revokes PUBLIC, grants schema USAGE and EXECUTE
+only to the exact generated environment operator login, and
+verify that no operator receives direct table privileges. This repository does
+not authorize applying that installer or querying a customer account from this
+working tree.
 
 ## Family boundary gate
 

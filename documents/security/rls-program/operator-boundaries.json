@@ -617,6 +617,141 @@
       "automaticRevocation": true
     },
     {
+      "id": "operator-boundary-account-onboarding-diagnostic",
+      "actionClass": "read-diagnostics",
+      "environmentAvailability": [
+        "development",
+        "staging",
+        "production"
+      ],
+      "actorClass": "operator-admin",
+      "runtimeIdentity": "identity-operator",
+      "exactCommandOrNamedProcedure": {
+        "kind": "named-procedure",
+        "identifier": "app_ops.diagnose_account_onboarding",
+        "signature": "app_ops.diagnose_account_onboarding(normalized_email text)",
+        "arbitraryArgumentsAllowed": false
+      },
+      "acceptedArguments": [
+        "one normalized email"
+      ],
+      "returnedFields": [
+        "invite_count",
+        "latest_created_at",
+        "latest_expires_at",
+        "latest_used_at",
+        "latest_expired",
+        "latest_role",
+        "latest_tenant_binding",
+        "latest_accepted_by_present",
+        "account_exists",
+        "account_status",
+        "account_active",
+        "account_email_verified",
+        "password_configured",
+        "account_role",
+        "account_tenant_binding",
+        "mfa_configured",
+        "invite_created_present",
+        "invite_accepted_present",
+        "mfa_enrolled_present",
+        "state_classification"
+      ],
+      "targetSchemas": [
+        "app_ops"
+      ],
+      "targetTables": [
+        "table-invite",
+        "table-user",
+        "table-admin-mfa-credential",
+        "table-admin-web-authn-credential",
+        "table-user-mfa-factor",
+        "table-audit-log",
+        "table-audit-log-outbox"
+      ],
+      "targetFunctions": [
+        "app_ops.diagnose_account_onboarding"
+      ],
+      "requiredAssurance": "operator-approved",
+      "approvalRequirement": {
+        "required": false,
+        "distinctApprovers": 0
+      },
+      "approvalClass": "operator-change-approval",
+      "ticketRequirement": true,
+      "purposeRequirement": true,
+      "maximumDurationMinutes": 60,
+      "maximumRowScope": "one exact normalized email; at most one account and one deterministically selected latest invite",
+      "tenantScopeRequirement": "tenant binding is derived from the selected account/invite; no tenant listing or unrelated tenant data",
+      "allowedColumns": [
+        "bounded onboarding timestamps and roles",
+        "one account lifecycle projection",
+        "boolean passwordConfigured and mfaConfigured",
+        "target tenant binding only",
+        "audit event presence booleans"
+      ],
+      "prohibitedColumns": [
+        "passwordHash",
+        "tokenHash",
+        "secret",
+        "privateKey",
+        "credentialPublicKey",
+        "backupCodeHash",
+        "audit actor identity",
+        "raw audit payload"
+      ],
+      "transactionBehavior": "One SERIALIZABLE READ ONLY transaction; fixed selector and bounded projection only; the broker records immutable invocation attribution externally because this procedure performs no application-state write.",
+      "auditEventRequirement": {
+        "required": true,
+        "immutable": true,
+        "fields": [
+          "operator_actor",
+          "runtime_identity",
+          "ticket_id",
+          "purpose",
+          "privacy_safe_target_fingerprint",
+          "request_id",
+          "result",
+          "started_at",
+          "completed_at"
+        ]
+      },
+      "beforeAfterEvidence": false,
+      "expiryBehavior": "The command authorization expires at maximumDurationMinutes or earlier completion; stale approvals and credentials are rejected.",
+      "revocationBehavior": "Broker authorization is revoked on completion, failure, approval withdrawal or expiry and absence is verified.",
+      "retrySemantics": "Read-only invocations may retry the same fixed selector; no application state or audit row is created by the database procedure.",
+      "allowScenarios": [
+        "A broker-authorized platform operator reads the fixed non-secret projection for one normalized email in a READ ONLY transaction."
+      ],
+      "denyScenarios": [
+        "Malformed or noncanonical input, absent platform actor, wrong runtime identity/context, direct table access, PUBLIC execution, unrelated runtime execution, arbitrary SQL, secret output and multi-account enumeration are denied."
+      ],
+      "implementationStatus": "green-package-integrated-not-deployed",
+      "certificationTests": [
+        "backend/tests/rls-wave-c/c04/accountOnboardingDiagnosticContract.test.js",
+        "backend/tests/rls-wave-c/c04/operatorPostgres18.test.js",
+        "scripts/tests/production-full-rls-package-postgres18.test.mjs"
+      ],
+      "workflowIds": [],
+      "exactCommandRuleIds": [],
+      "arbitrarySqlAllowed": false,
+      "objectOwnershipAllowed": false,
+      "ownerRoleMembershipAllowed": false,
+      "setRoleAllowed": false,
+      "bypassRlsAllowed": false,
+      "superuserAllowed": false,
+      "applicationImpersonationAllowed": false,
+      "unrestrictedCrossTenantScope": false,
+      "schemaCreateAllowed": false,
+      "migrationAuthorityAllowed": false,
+      "roleElevationAllowed": false,
+      "tenantReassignmentAllowed": false,
+      "auditDeletionAllowed": false,
+      "secretOutputAllowed": false,
+      "sharedCredentialAllowed": false,
+      "automaticRevocation": true
+    },
+    {
       "id": "operator-boundary-deployment-preflight",
       "actionClass": "deployment-preflight",
       "environmentAvailability": [
