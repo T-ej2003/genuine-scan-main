@@ -182,7 +182,7 @@ BEGIN
            AND target_org_id IS NOT DISTINCT FROM latest_org_id
            AND target_licensee_id IS NOT DISTINCT FROM latest_licensee_id)
       AND (latest_manufacturer_id IS NULL OR target_id IS NOT DISTINCT FROM latest_manufacturer_id)
-    ));
+    );
 
   invite_created := EXISTS (
     SELECT 1 FROM public."AuditLog" a

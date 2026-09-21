@@ -33,9 +33,12 @@ assert.match(sql, /current_setting\('app\.request_id', true\) IS NULL\s+OR curre
 assert.match(diagnostic, /SELECT count\(\*\) INTO target_count FROM public\."User" u WHERE lower\(u\.email\)=normalized_email/);
 assert.match(diagnostic, /SESSION_C04_AMBIGUOUS_NORMALIZED_EMAIL/);
 assert(diagnostic.includes("[\\x20-\\x21\\x23-\\x5B\\x5D-\\x7E]|\\\\[\\x20-\\x7E]"), "quoted local parts must use the canonical escaped-printable grammar");
+assert.match(diagnostic, /separator_position := char_length\(normalized_email\)-strpos\(reverse\(normalized_email\),'@'\)\+1/, "quoted local parts must split on the final @");
 assert.match(diagnostic, /target_unactivated := target_is_active AND target_status='INVITED' AND target_disabled_at IS NULL AND target_deleted_at IS NULL AND target_password_hash IS NULL/);
 assert(!/target_exists AND NOT target_active AND latest_exists/.test(diagnostic), "disabled or deleted accounts must not be reported as unactivated");
 assert.match(diagnostic, /latest_invite_acceptable := latest_exists/);
+assert.match(diagnostic, /AND \(target_exists AND target_unactivated/, "acceptable invites must have an acceptance-compatible target account");
+assert(!diagnostic.includes("F_VALID_UNUSED_INVITE_NO_ACCOUNT"), "account-less invites must remain inconsistent");
 assert.match(diagnostic, /FROM public\."Organization" o WHERE o\.id=latest_org_id AND o\."isActive"/);
 assert.match(diagnostic, /l\.id=latest_licensee_id AND l\."orgId"=latest_org_id AND l\."isActive" AND l\."suspendedAt" IS NULL/);
 assert.match(diagnostic, /target_org_id IS NOT DISTINCT FROM latest_org_id/);
