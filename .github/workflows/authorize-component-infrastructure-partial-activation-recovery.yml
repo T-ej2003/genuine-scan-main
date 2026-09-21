@@ -7,7 +7,8 @@ run-name: Authorize component infrastructure recovery ${{ inputs.recovery_transi
       source_sha: {description: Exact protected-main SHA containing recovery, required: true, type: string}
       recovery_transition_id: {description: Exact incident-bound recovery transition UUID, required: true, type: string}
       recovery_preparation_sha256: {description: Exact private recovery preparation SHA256, required: true, type: string}
-      historical_source_sha: {description: Historical activation protected source SHA, required: true, type: string}
+      historical_activation_authorization_source_sha: {description: Historical activation authorization/execution source SHA, required: true, type: string}
+      historical_installation_reservation_source_sha: {description: Historical component IAM reservation source SHA, required: true, type: string}
       historical_authorization_run_id: {description: Historical activation authorization run, required: true, type: string}
       historical_authorization_artifact_sha256: {description: Historical activation artifact digest, required: true, type: string}
       historical_plan_sha256: {description: Historical approved plan SHA256, required: true, type: string}
@@ -43,7 +44,8 @@ jobs:
           SOURCE_SHA: ${{ inputs.source_sha }}
           RECOVERY_TRANSITION_ID: ${{ inputs.recovery_transition_id }}
           RECOVERY_PREPARATION_SHA256: ${{ inputs.recovery_preparation_sha256 }}
-          HISTORICAL_SOURCE_SHA: ${{ inputs.historical_source_sha }}
+          HISTORICAL_ACTIVATION_AUTHORIZATION_SOURCE_SHA: ${{ inputs.historical_activation_authorization_source_sha }}
+          HISTORICAL_INSTALLATION_RESERVATION_SOURCE_SHA: ${{ inputs.historical_installation_reservation_source_sha }}
           HISTORICAL_AUTHORIZATION_RUN_ID: ${{ inputs.historical_authorization_run_id }}
           HISTORICAL_AUTHORIZATION_ARTIFACT_SHA256: ${{ inputs.historical_authorization_artifact_sha256 }}
           HISTORICAL_PLAN_SHA256: ${{ inputs.historical_plan_sha256 }}

@@ -17,10 +17,11 @@ const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{1
 const privateBytes = file => { const stat = fs.lstatSync(file); assert(stat.isFile() && stat.nlink === 1 && stat.uid === process.getuid() && (stat.mode & 0o077) === 0 && stat.size > 0 && stat.size <= 1024 * 1024); return fs.readFileSync(file); };
 
 function historical(argv) {
-  const [sourceSha, runId, authorizationArtifactSha256, planSha256, preparationSha256, transitionId] = argv;
-  assert.match(sourceSha || "", /^[a-f0-9]{40}$/); assert.match(runId || "", /^[1-9][0-9]*$/); assert.match(authorizationArtifactSha256 || "", /^sha256:[a-f0-9]{64}$/);
+  const [activationAuthorizationSourceSha, installationReservationSourceSha, runId, authorizationArtifactSha256, planSha256, preparationSha256, transitionId] = argv;
+  for (const value of [activationAuthorizationSourceSha, installationReservationSourceSha]) assert.match(value || "", /^[a-f0-9]{40}$/);
+  assert.match(runId || "", /^[1-9][0-9]*$/); assert.match(authorizationArtifactSha256 || "", /^sha256:[a-f0-9]{64}$/);
   for (const value of [planSha256, preparationSha256]) assert.match(value || "", /^[a-f0-9]{64}$/); assert.match(transitionId || "", uuid);
-  return { sourceSha, authorizationRunId: runId, authorizationArtifactSha256, planSha256, preparationSha256, transitionId };
+  return { activationAuthorizationSourceSha, installationReservationSourceSha, authorizationRunId: runId, authorizationArtifactSha256, planSha256, preparationSha256, transitionId };
 }
 
 export async function run(argv = process.argv.slice(2), { source = cleanSource, session = establishComponentTerraformSession,
@@ -32,8 +33,8 @@ export async function run(argv = process.argv.slice(2), { source = cleanSource, 
   const sourceSha = source(); const sourceGuard = () => assert.equal(source(), sourceSha, "Protected source moved");
   const artifactPath = path.join(work, "partial-activation-recovery.json");
   if (mode === "prepare") {
-    assert.equal(argv.length, 9); assert(!fs.existsSync(artifactPath), "Use a fresh private recovery directory"); assert.match(argument || "", uuid);
-    const historicalActivation = historical(rest); const authenticated = historicalAuthorization({ runId: historicalActivation.authorizationRunId, sourceSha: historicalActivation.sourceSha, transitionId: historicalActivation.transitionId,
+    assert.equal(argv.length, 10); assert(!fs.existsSync(artifactPath), "Use a fresh private recovery directory"); assert.match(argument || "", uuid);
+    const historicalActivation = historical(rest); const authenticated = historicalAuthorization({ runId: historicalActivation.authorizationRunId, sourceSha: historicalActivation.activationAuthorizationSourceSha, transitionId: historicalActivation.transitionId,
       planSha256: historicalActivation.planSha256, preparationSha256: historicalActivation.preparationSha256, authorizationArtifactSha256: historicalActivation.authorizationArtifactSha256 });
     assert.equal(authenticated.historical, true); assert.equal(authenticated.executable, false); sourceGuard();
     const client = await session({ sourceSha, transitionId: historicalActivation.transitionId });
@@ -49,7 +50,7 @@ export async function run(argv = process.argv.slice(2), { source = cleanSource, 
   assert.equal(argv.length, 3); assert.match(argument || "", /^[1-9][0-9]*$/);
   const bytes = privateBytes(artifactPath), preparationSha256 = sha(bytes), preparation = assertPartialActivationRecoveryPreparation(JSON.parse(bytes));
   assert.equal(preparation.sourceSha, sourceSha); const historicalActivation = preparation.historicalActivation;
-  const old = historicalAuthorization({ runId: historicalActivation.authorizationRunId, sourceSha: historicalActivation.sourceSha, transitionId: historicalActivation.transitionId,
+  const old = historicalAuthorization({ runId: historicalActivation.authorizationRunId, sourceSha: historicalActivation.activationAuthorizationSourceSha, transitionId: historicalActivation.transitionId,
     planSha256: historicalActivation.planSha256, preparationSha256: historicalActivation.preparationSha256, authorizationArtifactSha256: historicalActivation.authorizationArtifactSha256 });
   assert.equal(old.historical, true); assert.equal(old.executable, false);
   const approved = recoveryAuthorization({ runId: argument, preparation, preparationSha256 });

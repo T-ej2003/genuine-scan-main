@@ -165,7 +165,7 @@ test("recovery uses the stricter approval/AWS deadline and rechecks it at every 
 });
 
 test("recovery inspection forwards the authenticated historical activation", async () => {
-  const f = fixture("TERRAFORM"), historicalActivation = { sourceSha: "c".repeat(40) }; let received;
+  const f = fixture("TERRAFORM"), historicalActivation = { activationAuthorizationSourceSha: "c".repeat(40), installationReservationSourceSha: "d".repeat(40) }; let received;
   f.dependencies.state = () => ({ close: () => {}, inspectPartialActivationRecovery: async value => { received = value; return { stateIdentity: "INFRASTRUCTURE_CREATED_STATE_INCOMPLETE" }; } });
   const client = await f.open();
   assert.equal((await client.inspectPartialActivationRecovery(historicalActivation)).stateIdentity, "INFRASTRUCTURE_CREATED_STATE_INCOMPLETE");

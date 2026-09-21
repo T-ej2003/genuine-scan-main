@@ -1,5 +1,13 @@
 # MSCQR
 
+## Governed component recovery
+
+Partial component-infrastructure recovery independently binds the historical
+activation authorization/execution source and the historical
+installation/reservation source. Neither source identity may substitute for the
+other. Its prepare command takes those identities in that order, before the
+historical authorization run and artifact bindings.
+
 Production-grade, multi-tenant QR issuance, controlled-print, verification, anomaly-detection, and auditability platform.
 
 Zebra ZT410 raw TCP validation and DB-backed print lifecycle notes are documented in
