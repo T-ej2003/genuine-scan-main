@@ -23,7 +23,7 @@ export function executeInstallation({ sourceSha, preparation, authorization, pla
   assertInstallationPreparation(preparation, { sourceSha, planBytes });
   assertFreshInstallationAuthorization(authorization, { sourceSha, preparation, now });
   if (executionRoleArn !== INSTALLATION.executionRoleArn) throw new Error("Installation workflow role identity is not exact.");
-  const semantics = assertInstallationPlan(planJson);
+  const semantics = assertInstallationPlan(planJson, { livePredecessor });
   if (canonicalJson(semantics) !== canonicalJson(preparation.planSemantics)) throw new Error("Rendered saved-plan semantics differ from the authorized preparation.");
   if (!["ABSENT", "EXACT_PARTIAL", "EXACT_UPDATE", "EXACT_TRUST_UPDATE", "EXACT_AUTHORIZER_TRUST_UPDATE", "EXACT_AUTHORIZER_POLICY_UPDATE", EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, "EXACT_EXPANSION", "EXACT_COMPLETE"].includes(livePredecessor)) throw new Error("Installation live predecessor is not a supported exact state.");
   if (livePredecessor === "ABSENT" && semantics.resourceChangeCount !== INSTALLATION.expectedAddresses.length) throw new Error("First-install plan mutation scope is not exact.");

@@ -28,6 +28,7 @@ const readerTrust = fs.readFileSync("infra/aws/terraform/production-initial-acti
 const readerPermissions = fs.readFileSync("infra/aws/terraform/production-initial-activation-policy-reconciler/broker-recovery-successor-evidence-reader-permissions-policy.json", "utf8");
 const capability = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionInitialActivationPolicyReconcilerInstallation-v1.json", "utf8"));
 const liveEvidenceReaderPredecessor = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-initial-activation-reconciler-live-evidence-reader-predecessor.json", "utf8"));
+const liveAuthorizerAttachmentDrift = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-initial-activation-reconciler-plan-evidence-reader-authorizer-drift.json", "utf8"));
 const fixture = (name) => currentInstallationPlan(JSON.parse(fs.readFileSync(`scripts/tests/fixtures/production-initial-activation-reconciler-plan-${name}.json`, "utf8")));
 const plan = fixture("absent");
 const partialPlans = [fixture("partial-role"), fixture("partial-policy"), fixture("partial-unattached")];
@@ -86,6 +87,18 @@ for (const address of liveEvidenceReaderPredecessor.expectedCreateAddresses) {
   if (address.startsWith("aws_iam_policy.")) { delete change.after.arn; delete change.after.id; change.after_unknown.arn = true; }
   if (address.startsWith("aws_iam_role_policy_attachment.")) { delete change.after.policy_arn; change.after_unknown.policy_arn = true; }
 }
+const policyDriftBase = structuredClone(liveEvidenceReaderExpansionPlan.resource_changes.find(({ address }) => address === "aws_iam_policy.bootstrap_operator_policy_authorizer").change.before);
+const roleDriftBase = structuredClone(liveEvidenceReaderExpansionPlan.resource_changes.find(({ address }) => address === "aws_iam_role.bootstrap_operator_policy_authorizer").change.after);
+liveEvidenceReaderExpansionPlan.resource_drift = [
+  {
+    address: "aws_iam_policy.bootstrap_operator_policy_authorizer", mode: "managed", type: "aws_iam_policy", name: "bootstrap_operator_policy_authorizer", provider_name: "registry.terraform.io/hashicorp/aws",
+    change: { actions: ["update"], before: { ...policyDriftBase, attachment_count: 0 }, after: { ...policyDriftBase, attachment_count: 1 }, after_unknown: {}, before_sensitive: { tags: {}, tags_all: {} }, after_sensitive: { tags: {}, tags_all: {} } },
+  },
+  {
+    address: "aws_iam_role.bootstrap_operator_policy_authorizer", mode: "managed", type: "aws_iam_role", name: "bootstrap_operator_policy_authorizer", provider_name: "registry.terraform.io/hashicorp/aws",
+    change: { actions: ["update"], before: { ...roleDriftBase, managed_policy_arns: [] }, after: { ...roleDriftBase, managed_policy_arns: [INSTALLATION.bootstrapOperatorPolicyAuthorizerPolicyArn] }, after_unknown: {}, before_sensitive: { inline_policy: [], managed_policy_arns: [], tags: {}, tags_all: {} }, after_sensitive: { inline_policy: [], managed_policy_arns: [false], tags: {}, tags_all: {} } },
+  },
+];
 const liveEvidenceReaderPredecessorState = JSON.stringify({ ...JSON.parse(authorizerPolicyPredecessorState), resources: JSON.parse(authorizerPolicyPredecessorState).resources.filter(({ name }) => name !== "broker_recovery_successor_evidence_reader") });
 const updatePostState = JSON.stringify({ version: 4, terraform_version: "1.15.8", serial: 2, lineage: "first-install-lineage", outputs: {}, resources: updatePlan.resource_changes.map((entry) => ({ mode: entry.mode, type: entry.type, name: entry.name, provider: 'provider["registry.terraform.io/hashicorp/aws"]', instances: [{ schema_version: 0, attributes: stateAttributes(entry), sensitive_attributes: [] }] })) });
 const completePlanBytes = Buffer.from("exact-saved-noop-plan");
@@ -684,7 +697,7 @@ test("captured live predecessor expands exactly the absent evidence reader and a
   assert.equal(liveEvidenceReaderPredecessor.bootstrapPolicyProvenanceSha, "49cf9d6314cdb599b602a913eaa724a5189dfefb");
   assert.deepEqual(liveEvidenceReaderPredecessor.evidenceReader, { roleExists: false, policyExists: false, attachmentExists: false });
   assert.deepEqual(discoverInstallationPredecessor({ run: discoveryRun({ authorizerDocument: authorizerPolicyPredecessor, readerRole: false, readerPolicy: false }) }), { classification: EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, existingAddresses: expectedAddresses });
-  const semantics = assertInstallationPlan(liveEvidenceReaderExpansionPlan);
+  const semantics = assertInstallationPlan(liveEvidenceReaderExpansionPlan, { livePredecessor: EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE });
   assert.equal(semantics.createCount, 3);
   assert.equal(semantics.updateCount, 1);
   assert.equal(semantics.deleteCount, 0);
@@ -699,7 +712,7 @@ test("captured live predecessor expands exactly the absent evidence reader and a
   ]) assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ authorizerDocument: authorizerPolicyPredecessor, ...topology }) }).classification, "UNEXPECTED");
 
   const updateOnly = structuredClone(authorizerPolicyUpdatePlan);
-  assert.throws(() => createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(liveEvidenceReaderPredecessorState)), livePredecessor: EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, livePredecessorAddresses: expectedAddresses, planJson: updateOnly, planBytes, preparedAt: now.toISOString() }), /plan does not match/);
+  assert.throws(() => createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(liveEvidenceReaderPredecessorState)), livePredecessor: EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, livePredecessorAddresses: expectedAddresses, planJson: updateOnly, planBytes, preparedAt: now.toISOString() }), /drift|plan does not match/);
   const createsOnly = structuredClone(liveEvidenceReaderExpansionPlan);
   const authorizerChange = createsOnly.resource_changes.find(({ address }) => address === "aws_iam_policy.bootstrap_operator_policy_authorizer").change;
   authorizerChange.actions = ["no-op"];
@@ -708,6 +721,72 @@ test("captured live predecessor expands exactly the absent evidence reader and a
   const attachmentOnly = structuredClone(liveEvidenceReaderExpansionPlan);
   attachmentOnly.resource_changes.find(({ address }) => address === "aws_iam_role_policy_attachment.broker_recovery_successor_evidence_reader").change = structuredClone(completePlan.resource_changes.find(({ address }) => address === "aws_iam_role_policy_attachment.broker_recovery_successor_evidence_reader").change);
   assert.throws(() => createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(liveEvidenceReaderPredecessorState)), livePredecessor: EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, livePredecessorAddresses: expectedAddresses, planJson: attachmentOnly, planBytes, preparedAt: now.toISOString() }), /attachment contract|plan does not match/);
+});
+
+test("Terraform 1.15.8 attachment-reflection drift is predecessor-gated, exact, and authorization-bound", () => {
+  assert.equal(liveAuthorizerAttachmentDrift.formatVersion, "1.2");
+  assert.equal(liveAuthorizerAttachmentDrift.terraformVersion, INSTALLATION.terraformVersion);
+  assert.equal(liveAuthorizerAttachmentDrift.providerVersion, "6.57.1");
+  assert.equal(liveAuthorizerAttachmentDrift.planFileSha256, "180375bee9566f98e820bbbbcce67152319e342bc6d98a9fd70d38e214bdbbc6");
+  assert.equal(liveAuthorizerAttachmentDrift.predecessorClassification, EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE);
+  assert.deepEqual(liveAuthorizerAttachmentDrift.resourceChanges, {
+    create: liveEvidenceReaderPredecessor.expectedCreateAddresses,
+    update: ["aws_iam_policy.bootstrap_operator_policy_authorizer"],
+    delete: [],
+    replace: [],
+  });
+  assert.deepEqual(liveAuthorizerAttachmentDrift.resourceDrift, liveEvidenceReaderExpansionPlan.resource_drift.map((entry) => ({
+    address: entry.address, mode: entry.mode, type: entry.type, name: entry.name, provider_name: entry.provider_name, actions: entry.change.actions,
+    changedAttribute: entry.type === "aws_iam_policy" ? "attachment_count" : "managed_policy_arns",
+    before: entry.type === "aws_iam_policy" ? entry.change.before.attachment_count : entry.change.before.managed_policy_arns,
+    after: entry.type === "aws_iam_policy" ? entry.change.after.attachment_count : entry.change.after.managed_policy_arns,
+  })));
+  const options = { livePredecessor: EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE };
+  const semantics = assertInstallationPlan(liveEvidenceReaderExpansionPlan, options);
+  assert.equal(semantics.resourceDriftCount, 2);
+  assert.match(semantics.resourceDriftSha256, /^[a-f0-9]{64}$/);
+  assert.throws(() => assertInstallationPlan(liveEvidenceReaderExpansionPlan), /plan envelope/);
+
+  const rejected = [
+    (candidate) => candidate.resource_drift.push(structuredClone(candidate.resource_drift[0])),
+    (candidate) => candidate.resource_drift.splice(0, 1),
+    (candidate) => candidate.resource_drift.splice(1, 1),
+    (candidate) => { candidate.resource_drift[0].address = "aws_iam_policy.reconciler"; },
+    (candidate) => { candidate.resource_drift[1].change.after.managed_policy_arns = [INSTALLATION.policyArn]; },
+    (candidate) => { candidate.resource_drift[0].change.before.attachment_count = 1; candidate.resource_drift[0].change.after.attachment_count = 0; },
+    (candidate) => { candidate.resource_drift[1].change.before.managed_policy_arns = [INSTALLATION.bootstrapOperatorPolicyAuthorizerPolicyArn]; candidate.resource_drift[1].change.after.managed_policy_arns = []; },
+    (candidate) => { candidate.resource_drift[0].change.before.attachment_count = 2; },
+    (candidate) => { candidate.resource_drift[0].change.after.attachment_count = 2; },
+    (candidate) => { candidate.resource_drift[1].change.after.description = "unreviewed"; },
+    (candidate) => { candidate.resource_drift[0].change.actions = ["create"]; },
+    (candidate) => { candidate.resource_drift[0].change.actions = ["delete"]; },
+    (candidate) => { candidate.resource_drift[0].change.actions = ["delete", "create"]; },
+  ];
+  for (const mutate of rejected) {
+    const candidate = structuredClone(liveEvidenceReaderExpansionPlan);
+    mutate(candidate);
+    assert.throws(() => assertInstallationPlan(candidate, options), /drift/);
+  }
+
+  for (const actions of [["delete"], ["delete", "create"]]) {
+    const candidate = structuredClone(liveEvidenceReaderExpansionPlan);
+    candidate.resource_changes.find(({ address }) => address === liveEvidenceReaderPredecessor.expectedCreateAddresses[0]).change.actions = actions;
+    assert.throws(() => assertInstallationPlan(candidate, options), /resource action/);
+  }
+  const unexpected = structuredClone(liveEvidenceReaderExpansionPlan);
+  unexpected.resource_changes[0].address = "aws_iam_policy.unexpected";
+  assert.throws(() => assertInstallationPlan(unexpected, options), /unreviewed/);
+
+  const bytes = Buffer.from("attachment-reflection-bound-plan");
+  const prepared = createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(liveEvidenceReaderPredecessorState)), livePredecessor: EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, livePredecessorAddresses: liveEvidenceReaderPredecessor.expectedExistingAddresses, planJson: liveEvidenceReaderExpansionPlan, planBytes: bytes, preparedAt: now.toISOString() });
+  const authorized = createInstallationAuthorization({ preparation: prepared, preparationArtifactSha256: prepared.preparationArtifactSha256, protectedEnvironmentApprovalEvidence: approval, sourceSha });
+  const changedAfterApproval = structuredClone(liveEvidenceReaderExpansionPlan);
+  const roleDrift = changedAfterApproval.resource_drift[1].change;
+  roleDrift.before.create_date = "2026-09-14T13:05:38Z";
+  roleDrift.after.create_date = "2026-09-14T13:05:38Z";
+  assert.throws(() => executeInstallation({ sourceSha, preparation: prepared, authorization: authorized, planBytes: bytes, planJson: changedAfterApproval, executionRoleArn: INSTALLATION.executionRoleArn, livePredecessor: EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, livePredecessorAddresses: liveEvidenceReaderPredecessor.expectedExistingAddresses, applySavedPlan: () => assert.fail("apply must not run"), readState: () => Buffer.from(liveEvidenceReaderPredecessorState), now }), /semantics differ/);
+  const changedPreparation = createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(liveEvidenceReaderPredecessorState)), livePredecessor: EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, livePredecessorAddresses: liveEvidenceReaderPredecessor.expectedExistingAddresses, planJson: changedAfterApproval, planBytes: bytes, preparedAt: now.toISOString() });
+  assert.throws(() => executeInstallation({ sourceSha, preparation: changedPreparation, authorization: authorized, planBytes: bytes, planJson: changedAfterApproval, executionRoleArn: INSTALLATION.executionRoleArn, livePredecessor: EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, livePredecessorAddresses: liveEvidenceReaderPredecessor.expectedExistingAddresses, applySavedPlan: () => assert.fail("apply must not run"), readState: () => Buffer.from(liveEvidenceReaderPredecessorState), now }), /authorization binding|preparation/i);
 });
 
 test("installed legacy recovery trust is one exact authorized Terraform update", () => {

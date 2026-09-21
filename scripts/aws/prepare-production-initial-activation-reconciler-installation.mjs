@@ -237,7 +237,7 @@ function renderExactPlanJson({ planPath, planBytes, terraformDataDir, profile, e
 }
 
 export function prepareInstallation({ sourceSha, planBytes, planJson, stateBytes, livePredecessor, livePredecessorAddresses, preparedAt, outputPath, repositoryRoot = root } = {}) {
-  assertInstallationPlan(planJson);
+  assertInstallationPlan(planJson, { livePredecessor });
   if (livePredecessor !== "ABSENT") assertInstallationStateResources(stateBytes, { requiredAddresses: livePredecessorAddresses });
   const preparation = createInstallationPreparation({ sourceSha, state: stateIdentity(stateBytes), livePredecessor, livePredecessorAddresses, planJson, planBytes, preparedAt });
   const output = assertStageBArtifactPath({ artifactPath: outputPath, repositoryRoot, label: "Installation preparation artifact", allowExisting: false });

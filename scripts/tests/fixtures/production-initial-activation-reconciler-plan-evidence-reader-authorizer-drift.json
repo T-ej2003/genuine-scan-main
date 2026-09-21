@@ -1,0 +1,45 @@
+{
+  "formatVersion": "1.2",
+  "terraformVersion": "1.15.8",
+  "providerVersion": "6.57.1",
+  "planFileSha256": "180375bee9566f98e820bbbbcce67152319e342bc6d98a9fd70d38e214bdbbc6",
+  "predecessorClassification": "EXACT_EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE",
+  "resourceChanges": {
+    "create": [
+      "aws_iam_policy.broker_recovery_successor_evidence_reader",
+      "aws_iam_role.broker_recovery_successor_evidence_reader",
+      "aws_iam_role_policy_attachment.broker_recovery_successor_evidence_reader"
+    ],
+    "update": [
+      "aws_iam_policy.bootstrap_operator_policy_authorizer"
+    ],
+    "delete": [],
+    "replace": []
+  },
+  "resourceDrift": [
+    {
+      "address": "aws_iam_policy.bootstrap_operator_policy_authorizer",
+      "mode": "managed",
+      "type": "aws_iam_policy",
+      "name": "bootstrap_operator_policy_authorizer",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "actions": ["update"],
+      "changedAttribute": "attachment_count",
+      "before": 0,
+      "after": 1
+    },
+    {
+      "address": "aws_iam_role.bootstrap_operator_policy_authorizer",
+      "mode": "managed",
+      "type": "aws_iam_role",
+      "name": "bootstrap_operator_policy_authorizer",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "actions": ["update"],
+      "changedAttribute": "managed_policy_arns",
+      "before": [],
+      "after": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionBootstrapOperatorPolicyAuthorizer"
+      ]
+    }
+  ]
+}
