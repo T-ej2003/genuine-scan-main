@@ -24,6 +24,15 @@ test("component deployment state Terraform fixes the table, key, and exact write
   const publish = policy.Statement.find(({ Sid }) => Sid === "PublishExactApplicationImages");
   assert.deepEqual(publish.Resource, ["arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend", "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-web"]);
   assert.ok(publish.Action.includes("ecr:PutImage"));
+  assert.equal(policy.Statement.find(({ Sid }) => Sid === "EcrAuthorizationTokenOnly").Action, "ecr:GetAuthorizationToken");
+  assert.ok(policy.Statement.find(({ Sid }) => Sid === "ActivateExactServices").Action === "ecs:UpdateService");
+  assert.ok(policy.Statement.find(({ Sid }) => Sid === "RegisterExactFamilies").Action === "ecs:RegisterTaskDefinition");
+  assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "PassExactTaskRoles").Resource.sort(), [
+    "arn:aws:iam::368992683803:role/mscqr-ecs-execution-role",
+    "arn:aws:iam::368992683803:role/mscqr-ecs-task-role",
+    "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution",
+    "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task",
+  ]);
   assert.equal(policy.Statement.some(({ Action }) => JSON.stringify(Action).includes("dynamodb:")), false);
 });
 

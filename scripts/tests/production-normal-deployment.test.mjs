@@ -298,6 +298,8 @@ test("normal production workflow is fixed, OIDC-only, gated by main, and smoke-t
   const workflow = fs.readFileSync(".github/workflows/production-deploy.yml", "utf8");
   assert.match(workflow, /name: Normal Production Deployment/);
   assert.match(workflow, /branches: \[main\]/);
+  assert.match(workflow, /workflow_dispatch:[\s\S]*baseline:/);
+  assert.match(workflow, /test "\$GITHUB_RUN_ATTEMPT" = "1"/);
   assert.match(workflow, /configure-aws-credentials@v6/);
   assert.match(workflow, /MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-release-deployer/);
   assert.match(workflow, /SMOKE_AUTHENTICATED_REQUIRED: "true"/);
@@ -322,4 +324,11 @@ test("normal production workflow is fixed, OIDC-only, gated by main, and smoke-t
   assert.match(workflow, /node scripts\/smoke-release\.mjs/);
   assert.doesNotMatch(workflow, /AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|terraform apply|PutSecretValue|KMS_SIGN/);
   assert.doesNotMatch(workflow, /role-to-assume:\s*\$\{\{/);
+  assert.match(workflow, /production-ecs-native-rollback\.mjs --services=/);
+  assert.match(workflow, /BASELINE_MODE/);
+  assert.match(workflow, /backend_base=bcec05a421bff28eb2216f399d0a9e7cd2389d5e/);
+  assert.match(workflow, /backend_digest=sha256:d2a6f641f44e27454a80d502914a9e168c61cdace1201f9d7af9d85a87ea208c/);
+  assert.match(workflow, /frontend_base=d355a77675d4320c2bfa975ebf3682995ba54a2f/);
+  assert.match(workflow, /frontend_digest=sha256:5053d6a6481b3bcacb414adf82c41d7504c4a91a93c8c52dd3b11aae0e01c277/);
+  assert.doesNotMatch(workflow, /terraform|broker|component-deployment-state/i);
 });
