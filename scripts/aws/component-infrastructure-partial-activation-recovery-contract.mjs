@@ -28,8 +28,8 @@ export const partialActivationRecoveryTarget = Object.freeze({
 });
 
 export function assertPartialActivationHistoricalActivation(value) {
-  assert.deepEqual(Object.keys(value || {}).sort(), ["authorizationArtifactSha256", "authorizationRunId", "planSha256", "preparationSha256", "sourceSha", "transitionId"]);
-  assert.match(value.sourceSha || "", /^[a-f0-9]{40}$/);
+  assert.deepEqual(Object.keys(value || {}).sort(), ["activationAuthorizationSourceSha", "authorizationArtifactSha256", "authorizationRunId", "installationReservationSourceSha", "planSha256", "preparationSha256", "transitionId"]);
+  for (const field of ["activationAuthorizationSourceSha", "installationReservationSourceSha"]) assert.match(value[field] || "", /^[a-f0-9]{40}$/);
   assert.match(value.authorizationRunId || "", /^[1-9][0-9]*$/);
   assert.match(value.authorizationArtifactSha256 || "", artifactSha);
   for (const field of ["planSha256", "preparationSha256"]) assert.match(value[field] || "", sha);
@@ -62,7 +62,8 @@ export function partialActivationRecoveryBindings(preparation) {
   return Object.freeze({
     recoverySourceSha: value.sourceSha,
     recoveryTransitionId: value.recoveryTransitionId,
-    historicalSourceSha: value.historicalActivation.sourceSha,
+    historicalActivationAuthorizationSourceSha: value.historicalActivation.activationAuthorizationSourceSha,
+    historicalInstallationReservationSourceSha: value.historicalActivation.installationReservationSourceSha,
     historicalAuthorizationRunId: value.historicalActivation.authorizationRunId,
     historicalAuthorizationArtifactSha256: value.historicalActivation.authorizationArtifactSha256,
     historicalPlanSha256: value.historicalActivation.planSha256,

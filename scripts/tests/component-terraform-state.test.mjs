@@ -8,7 +8,7 @@ import { partialActivationRecoveryTarget, assertPartialActivationRecoveryPrepara
 
 const binding = { sourceSha: "a".repeat(40), transitionId: "12345678-1234-4234-8234-123456789abc", authorizationSha256: "b".repeat(64), purpose: "TERRAFORM" };
 const key = "mscqr/production/component-deployment-state/terraform.tfstate";
-const historical = { sourceSha: "c".repeat(40), authorizationRunId: "456", authorizationArtifactSha256: `sha256:${"d".repeat(64)}`, planSha256: "e".repeat(64), preparationSha256: "f".repeat(64), transitionId: binding.transitionId };
+const historical = { activationAuthorizationSourceSha: "c".repeat(40), installationReservationSourceSha: binding.sourceSha, authorizationRunId: "456", authorizationArtifactSha256: `sha256:${"d".repeat(64)}`, planSha256: "e".repeat(64), preparationSha256: "f".repeat(64), transitionId: binding.transitionId };
 function liveReceiptBody(f, client) {
   return { transformToString: async () => {
     await Promise.resolve();
@@ -19,7 +19,7 @@ function liveReceiptBody(f, client) {
   } };
 }
 function activationAttempt(f) {
-  return { authorizationRunId: historical.authorizationRunId, sourceSha: historical.sourceSha, planSha256: historical.planSha256, preparationSha256: historical.preparationSha256, transitionId: historical.transitionId, iamReceiptSha256: crypto.createHash("sha256").update(JSON.stringify(f.receipt)).digest("hex"), session: { ...binding, account: "368992683803", region: "eu-west-2", principal: `arn:aws:sts::368992683803:assumed-role/mscqr-production-component-table-installer/component-${binding.transitionId}`, issuedAt: "2026-09-19T00:00:00.000Z", expiresAt: "2026-09-19T00:15:00.000Z", issuanceEventId: "12345678-1234-4234-8234-123456789abc", issuanceEventTime: "2026-09-19T00:00:00.000Z", operatorArn: "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator", mfaAuthenticated: true } };
+  return { authorizationRunId: historical.authorizationRunId, sourceSha: historical.installationReservationSourceSha, planSha256: historical.planSha256, preparationSha256: historical.preparationSha256, transitionId: historical.transitionId, iamReceiptSha256: crypto.createHash("sha256").update(JSON.stringify(f.receipt)).digest("hex"), session: { ...binding, account: "368992683803", region: "eu-west-2", principal: `arn:aws:sts::368992683803:assumed-role/mscqr-production-component-table-installer/component-${binding.transitionId}`, issuedAt: "2026-09-19T00:00:00.000Z", expiresAt: "2026-09-19T00:15:00.000Z", issuanceEventId: "12345678-1234-4234-8234-123456789abc", issuanceEventTime: "2026-09-19T00:00:00.000Z", operatorArn: "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator", mfaAuthenticated: true } };
 }
 function fixture({ liveStream = false, recovery = false, now = Date.now } = {}) {
   const targets = installationDocuments();
@@ -94,6 +94,16 @@ test("partial activation recovery authenticates the exact immutable reservation,
     assert(statements.some(statement => [].concat(statement.Action).includes("s3:GetObjectVersion") && [].concat(statement.Resource).includes(resource)), `Missing version-read authority for ${resource}`);
   }
   assert(f.calls.every(({ operation }) => !/Put|Delete|Create|Update/.test(operation)));
+});
+
+test("partial activation recovery rejects a reservation or installation receipt bound to the activation authorization source", async () => {
+  for (const mutate of [
+    f => { f.attempt = activationAttempt(f); f.attempt.sourceSha = historical.activationAuthorizationSourceSha; },
+    f => { f.receipt.sourceSha = historical.activationAuthorizationSourceSha; },
+  ]) {
+    const f = recoveryFixture(); mutate(f);
+    await assert.rejects(f.boundary.inspectPartialActivationRecovery(historical));
+  }
 });
 for (const [name, stream, accepted] of [
   ["accepts an absent DynamoDB stream specification as disabled", undefined, true],

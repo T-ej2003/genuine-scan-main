@@ -57,9 +57,9 @@ function assertHistoricalActivationReservation(value, historicalActivation, iamI
   const historical = assertPartialActivationHistoricalActivation(historicalActivation);
   assert.deepEqual(Object.keys(value || {}).sort(), ["authorizationRunId", "iamReceiptSha256", "planSha256", "preparationSha256", "session", "sourceSha", "transitionId"]);
   assert.equal(value.authorizationRunId, historical.authorizationRunId);
-  assert.equal(value.sourceSha, historical.sourceSha); assert.equal(value.planSha256, historical.planSha256);
+  assert.equal(value.sourceSha, historical.installationReservationSourceSha); assert.equal(value.planSha256, historical.planSha256);
   assert.equal(value.preparationSha256, historical.preparationSha256); assert.equal(value.transitionId, historical.transitionId);
-  assert.equal(value.iamReceiptSha256, iamInstallation.receiptSha256);
+  assert.equal(value.iamReceiptSha256, iamInstallation.receiptSha256); assert.equal(iamInstallation.sourceSha, historical.installationReservationSourceSha);
   assertComponentSessionRecord(value.session); assert.equal(value.session.purpose, "TERRAFORM");
   for (const field of ["sourceSha", "transitionId", "authorizationSha256"]) assert.equal(value.session[field], iamInstallation[field]);
   assertExpiredComponentSession(value.session, now);
