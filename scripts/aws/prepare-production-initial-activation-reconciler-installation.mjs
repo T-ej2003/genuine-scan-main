@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createProductionAwsCommandRunner, createProductionAwsCredentialEnvironment, createProductionGithubCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { readMixedDualSlotRecoveryGithubEnvironmentGuard } from "./production-mixed-dual-slot-recovery-contract.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, ensureStageBPrivateFile, readStageBPrivateFileBytes, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
-import { INSTALLATION, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationStateResources, bootstrapOperatorPolicyAuthorizerPermissionsPredecessor, classifyInstallationStatePullError, createInstallationPreparation, installationPermissionsPredecessor, stateIdentity } from "./production-initial-activation-reconciler-installation-contract.mjs";
+import { EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, INSTALLATION, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationStateResources, bootstrapOperatorPolicyAuthorizerPermissionsPredecessor, classifyInstallationStatePullError, createInstallationPreparation, installationPermissionsPredecessor, stateIdentity } from "./production-initial-activation-reconciler-installation-contract.mjs";
 import { BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER, BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER, INITIAL_ACTIVATION_RECONCILER, MIXED_RECOVERY_EXECUTOR, assertBootstrapOperatorPolicyAuthorizerPolicyMetadata, assertBootstrapOperatorPolicyAuthorizerRoleMetadata, assertBrokerRecoverySuccessorEvidenceReaderPolicyMetadata, assertBrokerRecoverySuccessorEvidenceReaderRoleMetadata, assertInitialActivationReconcilerPolicyMetadata, assertInitialActivationReconcilerRoleMetadata, assertMixedRecoveryExecutorPolicyMetadata, assertMixedRecoveryExecutorRoleMetadata, readPolicyEntities, verifyInitialActivationPolicyReconciler } from "./verify-production-initial-activation-policy-reconciler.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -145,8 +145,8 @@ export function discoverInstallationPredecessor({ run, expectedCallerArn } = {})
   const evidenceReaderInline = evidenceReaderRole ? runJson(run, ["iam", "list-role-policies", "--role-name", BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER.roleName]).PolicyNames : [];
   const evidenceReaderEntities = evidenceReaderPolicy ? readPolicyEntities(run, BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER.policyArn) : { roles: [], users: [], groups: [] };
   const evidenceReaderComplete = Boolean(evidenceReaderRole && evidenceReaderPolicy) && Array.isArray(evidenceReaderAttached) && evidenceReaderAttached.length === 1 && evidenceReaderAttached[0]?.PolicyArn === BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER.policyArn && Array.isArray(evidenceReaderInline) && evidenceReaderInline.length === 0 && evidenceReaderEntities.roles.length === 1 && evidenceReaderEntities.roles[0]?.RoleName === BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER.roleName && evidenceReaderEntities.users.length === 0 && evidenceReaderEntities.groups.length === 0;
-  const evidenceReaderUnattached = Array.isArray(evidenceReaderAttached) && evidenceReaderAttached.length === 0 && Array.isArray(evidenceReaderInline) && evidenceReaderInline.length === 0 && evidenceReaderEntities.roles.length === 0 && evidenceReaderEntities.users.length === 0 && evidenceReaderEntities.groups.length === 0;
-  if (!evidenceReaderComplete && !evidenceReaderUnattached) return predecessor("UNEXPECTED", existingAddresses);
+  const evidenceReaderAbsent = !evidenceReaderRole && !evidenceReaderPolicy;
+  if (!evidenceReaderComplete && !evidenceReaderAbsent) return predecessor("UNEXPECTED", existingAddresses);
   const evidenceReaderAddresses = [evidenceReaderRole && "aws_iam_role.broker_recovery_successor_evidence_reader", evidenceReaderPolicy && "aws_iam_policy.broker_recovery_successor_evidence_reader", evidenceReaderComplete && "aws_iam_role_policy_attachment.broker_recovery_successor_evidence_reader"].filter(Boolean);
   if (!role || !policy) {
     if (role) {
@@ -179,7 +179,9 @@ export function discoverInstallationPredecessor({ run, expectedCallerArn } = {})
   if (!mixedRole && !mixedPolicy) return predecessor("EXACT_EXPANSION", [...reconcilerAddresses, ...authorizerAddresses, ...evidenceReaderAddresses].sort());
   if (mixedComplete) {
     if (authorizerRoleNeedsTrustUpdate) return predecessor("EXACT_AUTHORIZER_TRUST_UPDATE", [...INSTALLATION.expectedAddresses]);
-    if (authorizerPolicyNeedsUpdate) return predecessor("EXACT_AUTHORIZER_POLICY_UPDATE", [...INSTALLATION.expectedAddresses]);
+    if (authorizerPolicyNeedsUpdate) return evidenceReaderAbsent && authorizerComplete
+      ? predecessor(EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, [...reconcilerAddresses, ...mixedAddresses, ...authorizerAddresses].sort())
+      : evidenceReaderComplete && authorizerComplete ? predecessor("EXACT_AUTHORIZER_POLICY_UPDATE", [...INSTALLATION.expectedAddresses]) : predecessor("UNEXPECTED", existingAddresses);
     if (mixedRoleNeedsTrustUpdate) return predecessor("EXACT_TRUST_UPDATE", [...INSTALLATION.expectedAddresses]);
     if (!authorizerComplete || !evidenceReaderComplete) return predecessor("EXACT_EXPANSION", [...reconcilerAddresses, ...mixedAddresses, ...authorizerAddresses, ...evidenceReaderAddresses].sort());
     verifyInitialActivationPolicyReconciler({ run, ...(expectedCallerArn ? { expectedCallerArn } : {}) }); return predecessor("EXACT_COMPLETE", INSTALLATION.expectedAddresses);

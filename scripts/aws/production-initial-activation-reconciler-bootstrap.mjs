@@ -30,12 +30,12 @@ const bootstrapPermissionsPredecessors = () => {
   const authorizerSids = ["ReadExactBootstrapOperatorPolicyAuthorizerRole", "ReadExactBootstrapOperatorPolicyAuthorizerPolicy", "UpdateExactBootstrapOperatorPolicyAuthorizerRoleTrust", "CreateExactBootstrapOperatorPolicyAuthorizerRole", "CreateExactBootstrapOperatorPolicyAuthorizerPolicy", "AttachExactBootstrapOperatorPolicyAuthorizerPolicyToRole"];
   const evidenceReaderSids = ["ReadExactBrokerRecoverySuccessorEvidenceReaderRole", "ReadExactBrokerRecoverySuccessorEvidenceReaderPolicy", "CreateExactBrokerRecoverySuccessorEvidenceReaderRole", "CreateExactBrokerRecoverySuccessorEvidenceReaderPolicy", "AttachExactBrokerRecoverySuccessorEvidenceReaderPolicyToRole"];
   const previousSelfRead = (document) => { document.Statement.find(({ Sid }) => Sid === "ReadOwnExactBootstrapInlinePolicy").Action = "iam:GetRolePolicy"; };
-  const exact = (generation, omittedSids, sha256, omitExpansion = true, mutate, omitAuthorizer = true, omitEvidenceReader = true) => {
+  const exact = (generation, omittedSids, sha256, omitExpansion = true, mutate, omitAuthorizer = true, omitEvidenceReader = true, retainAuthorizerPolicyUpdate = false) => {
     const document = structuredClone(desired);
     document.Statement = document.Statement.filter(({ Sid }) => ![...(omitExpansion ? expansionSids : []), ...(omitAuthorizer ? authorizerSids : []), ...(omitEvidenceReader ? evidenceReaderSids : []), ...omittedSids].includes(Sid));
     const update = document.Statement.find(({ Sid }) => Sid === "UpdateExactReconcilerPolicyVersion");
     if (update && omitExpansion) update.Resource = "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler";
-    else if (update) update.Resource = [].concat(update.Resource).filter((resource) => resource !== "arn:aws:iam::368992683803:policy/MSCQRProductionBootstrapOperatorPolicyAuthorizer");
+    else if (update && !retainAuthorizerPolicyUpdate) update.Resource = [].concat(update.Resource).filter((resource) => resource !== "arn:aws:iam::368992683803:policy/MSCQRProductionBootstrapOperatorPolicyAuthorizer");
     mutate?.(document);
     if (canonicalSha256(document) !== sha256) throw new Error(`Bootstrap predecessor ${generation} source document drifted.`);
     return Object.freeze({ generation, document, sha256 });
@@ -48,7 +48,7 @@ const bootstrapPermissionsPredecessors = () => {
     exact("GENERATION_5", [], "5c2fb0e2c8d5a61f7ee9327bfca879872cc8f0d31d57b4d6f2c819c67d65fbf6", false, previousSelfRead),
     exact("GENERATION_6", [], "1ca47a092f12de79dbbac8ba2c27170426ac0e69dc631250046051882beccbeb", false, undefined, true),
     exact("GENERATION_7", ["UpdateExactBootstrapOperatorPolicyAuthorizerRoleTrust"], ["48ccc2d48ec24774", "ce9c7309ff8d5f8b", "894ef1f8928063a9f", "4acda55ae2e1a46"].join(""), false, undefined, false),
-    exact("GENERATION_8", [], "716551f9dfebb1dae8898e4b3adf3b381814065d08c173e303f8c3cb1f6e8234", false, undefined, false, true),
+    exact("GENERATION_8", [], "56c819a5043ebde905847b0df13c2eb733a91547c16351c565bb1923cf701a0b", false, undefined, false, true, true),
   ]);
 };
 
