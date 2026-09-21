@@ -27,6 +27,7 @@ test("component deployment state Terraform fixes the table, key, and exact write
   assert.equal(policy.Statement.find(({ Sid }) => Sid === "EcrAuthorizationTokenOnly").Action, "ecr:GetAuthorizationToken");
   assert.ok(policy.Statement.find(({ Sid }) => Sid === "ActivateExactServices").Action === "ecs:UpdateService");
   assert.ok(policy.Statement.find(({ Sid }) => Sid === "RegisterExactFamilies").Action === "ecs:RegisterTaskDefinition");
+  assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "ReadDeploymentAlarms"), { Sid: "ReadDeploymentAlarms", Effect: "Allow", Action: "cloudwatch:DescribeAlarms", Resource: "*", Condition: { StringEquals: { "aws:RequestedRegion": "eu-west-2" } } });
   assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "PassExactTaskRoles").Resource.sort(), [
     "arn:aws:iam::368992683803:role/mscqr-ecs-execution-role",
     "arn:aws:iam::368992683803:role/mscqr-ecs-task-role",

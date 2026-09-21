@@ -52,7 +52,7 @@ jobs:
           if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
             test "$BASELINE_REQUESTED" = "true"
             test "$GITHUB_RUN_ATTEMPT" = "1"
-            baseline_merge_sha="$(gh api "repos/$GITHUB_REPOSITORY/pulls/555" --jq 'select(.merged == true and .base.ref == "main") | .merge_commit_sha')"
+            baseline_merge_sha="$(gh api "repos/$GITHUB_REPOSITORY/pulls/556" --jq 'select(.merged == true and .base.ref == "main") | .merge_commit_sha')"
             [[ "$baseline_merge_sha" =~ ^[a-f0-9]{40}$ ]]
             test "$baseline_merge_sha" = "$GITHUB_SHA"
             printf 'release_class=NORMAL_APPLICATION\nbackend=true\nfrontend=true\nbaseline=true\n' >> "$GITHUB_OUTPUT"
@@ -87,6 +87,11 @@ jobs:
       SMOKE_VERIFY_CODE: ${{ secrets.PRODUCTION_SMOKE_VERIFY_CODE }}
       SMOKE_ADMIN_MFA_CODE: ${{ secrets.PRODUCTION_SMOKE_ADMIN_MFA_CODE }}
       SMOKE_ADMIN_MFA_SECRET: ${{ secrets.PRODUCTION_SMOKE_ADMIN_MFA_SECRET }}
+      SMOKE_EXPECTED_IDENTITY_REQUIRED: "true"
+      SMOKE_EXPECTED_USER_ID: 556f5cfa-0820-4e05-a0e0-7357699546f4
+      SMOKE_EXPECTED_ROLE: LICENSEE_ADMIN
+      SMOKE_EXPECTED_ORG_ID: bbc886ec-ecb6-435b-a3b1-7a97896a5937
+      SMOKE_EXPECTED_LICENSEE_ID: 75b80c75-98dd-44d2-a4b6-c091a12a4fb8
     steps:
       - uses: actions/checkout@v6
         with: { ref: '${{ github.sha }}', fetch-depth: 0, persist-credentials: false }
@@ -106,7 +111,8 @@ jobs:
           git fetch --no-tags origin main
           test "$GITHUB_SHA" = "$(git rev-parse refs/remotes/origin/main)"
           aws ecs describe-services --region "$AWS_REGION" --cluster mscqr-prod-euw2-main --services mscqr-backend-servi-euw2 mscqr-frontend-servi-euw2 > "$RUNNER_TEMP/services.json"
-          node scripts/aws/production-ecs-native-rollback.mjs --services="$RUNNER_TEMP/services.json"
+          aws cloudwatch describe-alarms --region "$AWS_REGION" --alarm-names mscqr-production-backend-target-5xx mscqr-production-backend-unhealthy-hosts mscqr-production-frontend-target-5xx mscqr-production-frontend-unhealthy-hosts > "$RUNNER_TEMP/alarms.json"
+          node scripts/aws/production-ecs-native-rollback.mjs --services="$RUNNER_TEMP/services.json" --alarms="$RUNNER_TEMP/alarms.json"
           node --input-type=module - "$RUNNER_TEMP/services.json" "$GITHUB_OUTPUT" <<'NODE'
           import fs from 'node:fs';
           const [file, output] = process.argv.slice(2), response = JSON.parse(fs.readFileSync(file));

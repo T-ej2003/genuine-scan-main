@@ -18,9 +18,29 @@ Terraform, IAM, networking, database infrastructure, Prisma/schema/migrations, R
 
 ## One-time baseline deployment
 
-Protected main currently contains application/security/infrastructure work newer than the live backend and frontend image source tags. It is therefore not eligible for the first Lane A deployment. The same workflow has one manual `baseline: true` route that accepts only GitHub's immutable merge commit for reviewed PR #555 and the exact reviewed historical backend and frontend image identities, then uses the same protected environment, OIDC role, immutable-image build and scan, ECS rolling deployment, stability wait, smoke checks, and best-effort runner rollback as Lane A. A later main commit or either live image advancing makes the escape hatch unusable.
+Protected main currently contains application/security/infrastructure work newer than the live backend and frontend image source tags. It is therefore not eligible for the first Lane A deployment. The same workflow has one manual `baseline: true` route that accepts only GitHub's immutable merge commit for this final pre-baseline PR (#556) and the exact reviewed historical backend and frontend image identities, then uses the same protected environment, OIDC role, immutable-image build and scan, ECS rolling deployment, stability wait, smoke checks, and best-effort runner rollback as Lane A. A later main commit or either live image advancing makes the escape hatch unusable.
 
 Both ECS services must already have circuit-breaker rollback and the exact source-owned target-5xx and unhealthy-host deployment alarms enabled. The workflow rejects the deployment before image publication when that AWS configuration is absent or different. ECS-native rollback is primary; the runner-local rollback remains secondary. No authenticated synthetic alarm exists today, so adding one is a separate AWS configuration decision rather than part of this source change.
+
+Before the first deployment from a protected-main revision that changes `normal-deployer-policy.json`, the configuration operator converges the existing inline policy with `npm run production:normal-deployer-policy -- --source-sha <protected-main-sha> --admin-profile mscqr-production-root`. The command accepts only the source-owned role and policy name, requires the exact reviewed predecessor (or exact target), performs at most one `PutRolePolicy`, and authenticates the exact source policy by readback. Unknown predecessors, additional inline or attached policies, another role, and another AWS identity fail closed. This is bounded IAM configuration maintenance; ordinary deployments continue to use only GitHub OIDC and never invoke the convergence command.
+
+The four alarms are the `AWS/ApplicationELB` contracts exported by `scripts/aws/production-ecs-native-rollback.mjs`: target 5xx uses `Sum`; unhealthy hosts uses `Maximum`; both use 60-second periods, two evaluation periods, two datapoints to alarm, `GreaterThanThreshold` at zero, and `notBreaching` missing data. Each alarm is bound to the production ALB and exactly one backend or frontend target group, with no CloudWatch alarm action. ECS observes these alarm states and performs the rollback.
+
+## Dedicated production smoke identity
+
+Authenticated smoke uses the existing `production-green-pretraffic-canary-v1` ordinary canary only. It is the deterministic user `556f5cfa-0820-4e05-a0e0-7357699546f4`, has role `LICENSEE_ADMIN`, belongs to the dedicated green-canary organization/licensee, has independent password and MFA credentials, and has a distinct audit identity. The environment secrets must reference this canary; the operator's human Super Admin account is prohibited.
+The workflow passes the canary's exact source-owned user, role, organization, and licensee identities to the smoke runner; `/auth/me` must match all four before authenticated smoke can continue.
+
+The environment-secret contract is:
+
+- `PRODUCTION_SMOKE_LOGIN_EMAIL` and `PRODUCTION_SMOKE_LOGIN_PASSWORD`: required and sourced from the existing ordinary-canary Secrets Manager values through a non-printing operator handoff.
+- `PRODUCTION_SMOKE_ADMIN_MFA_SECRET`: the ordinary canary's independent Base32 seed. It is required when login enters `MFA_BOOTSTRAP`; the smoke derives the current six-digit TOTP at runtime.
+- `PRODUCTION_SMOKE_ADMIN_MFA_CODE`: optional manual override and unset during normal CI.
+- `PRODUCTION_SMOKE_VERIFY_CODE`: optional until a dedicated non-customer QR is issued. Its absence skips only public verification.
+
+Do not use `seed-launch-smoke-users.js` in production: that executable deliberately refuses protected-environment mutation. The already-provisioned ordinary canary is reused instead of creating a second identity system.
+
+A permanent public-verification fixture must use the normal QR lifecycle: the dedicated canary licensee submits one QR allocation request, a human platform operator approves it with normal MFA in the application, governed printing/issuance completes, and the resulting non-customer raw QR code is transferred directly into the GitHub environment secret without terminal or workflow-log output. Do not use a customer QR, a generated random string, the risk-blocked platform canary, or the operator's human credentials in CI. Until that fixture exists, leave `PRODUCTION_SMOKE_VERIFY_CODE` unset.
 
 ## Retirement inventory
 

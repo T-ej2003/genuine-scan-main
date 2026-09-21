@@ -17,6 +17,7 @@ if (!explicitSmokeBaseUrl && !allowLocalDefault) {
 const baseUrl = trimTrailingSlash(explicitSmokeBaseUrl || process.env.PUBLIC_ADMIN_WEB_BASE_URL || process.env.WEB_APP_BASE_URL || "http://127.0.0.1:4000");
 const apiBaseUrl = trimTrailingSlash(process.env.SMOKE_API_BASE_URL || `${baseUrl}/api`);
 const smokeRequired = parseBool(process.env.SMOKE_REQUIRED, true);
+const authenticatedSmokeRequired = parseBool(process.env.SMOKE_AUTHENTICATED_REQUIRED, false);
 const allowDegradedReadyOnPr = parseBool(process.env.ALLOW_STAGING_SMOKE_DEGRADED_ON_PR, false);
 const isPullRequestSmoke = process.env.GITHUB_EVENT_NAME === "pull_request";
 const smokeRequestTimeoutMs = Number.parseInt(process.env.SMOKE_REQUEST_TIMEOUT_MS || "15000", 10);
@@ -249,7 +250,7 @@ const run = async () => {
   const loginPassword = String(process.env.SMOKE_LOGIN_PASSWORD || "").trim();
 
   if (!loginEmail || !loginPassword) {
-    if (parseBool(process.env.SMOKE_AUTHENTICATED_REQUIRED, false)) {
+    if (authenticatedSmokeRequired) {
       throw new Error("Authenticated production canary requires SMOKE_LOGIN_EMAIL and SMOKE_LOGIN_PASSWORD.");
     }
     logSkip("authenticated smoke flow (set SMOKE_LOGIN_EMAIL and SMOKE_LOGIN_PASSWORD)");
@@ -302,6 +303,20 @@ const run = async () => {
   {
     const { response, payload } = await requestJson(`${apiBaseUrl}/auth/me`);
     ensureOk("auth me", response.status, payload);
+    const expectedIdentity = {
+      id: String(process.env.SMOKE_EXPECTED_USER_ID || "").trim(),
+      role: String(process.env.SMOKE_EXPECTED_ROLE || "").trim(),
+      orgId: String(process.env.SMOKE_EXPECTED_ORG_ID || "").trim(),
+      licenseeId: String(process.env.SMOKE_EXPECTED_LICENSEE_ID || "").trim(),
+    };
+    const expectedIdentityRequired = parseBool(process.env.SMOKE_EXPECTED_IDENTITY_REQUIRED, false)
+      || Object.values(expectedIdentity).some(Boolean);
+    if (expectedIdentityRequired && Object.values(expectedIdentity).some((value) => !value)) {
+      throw new Error("Authenticated smoke requires an exact expected identity binding.");
+    }
+    for (const [key, expected] of Object.entries(expectedIdentity)) {
+      if (expected && payload?.data?.[key] !== expected) throw new Error(`Authenticated smoke identity mismatch: ${key}.`);
+    }
     logPass("current user");
   }
 

@@ -60,7 +60,7 @@ test("normal workflow rejects non-main dispatch and verifies exact protected sou
 });
 
 test("workflow is OIDC-only, serialized, and uses fixed production boundaries", () => {
-  assert.deepEqual(workflow.permissions, { contents: "read" });
+  assert.deepEqual(workflow.permissions, { contents: "read", "pull-requests": "read" });
   assert.deepEqual(workflow.jobs.deploy.permissions, { contents: "read", "id-token": "write" });
   assert.equal(workflow.concurrency["cancel-in-progress"], false);
   assert.equal(workflow.concurrency.group, "production-deploy");
