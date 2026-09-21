@@ -95,6 +95,17 @@ test("partial activation recovery authenticates the exact immutable reservation,
   }
   assert(f.calls.every(({ operation }) => !/Put|Delete|Create|Update/.test(operation)));
 });
+for (const [name, stream, accepted] of [
+  ["accepts an absent DynamoDB stream specification as disabled", undefined, true],
+  ["accepts an explicitly disabled DynamoDB stream", { StreamEnabled: false }, true],
+  ["rejects an enabled DynamoDB stream", { StreamEnabled: true }, false],
+]) test(`partial activation recovery ${name}`, async () => {
+  const f = recoveryFixture();
+  if (stream === undefined) delete f.table.StreamSpecification;
+  else f.table.StreamSpecification = stream;
+  if (accepted) assert.equal((await f.boundary.inspectPartialActivationRecovery(historical)).stateIdentity, "INFRASTRUCTURE_CREATED_STATE_INCOMPLETE");
+  else await assert.rejects(f.boundary.inspectPartialActivationRecovery(historical), /DynamoDB stream must be disabled/);
+});
 test("partial activation recovery accepts the pinned Terraform lock ID format without inventing UUIDv4 semantics", async () => {
   const f = recoveryFixture(), id = "12345678-1234-7abc-2def-0123456789ab";
   // Terraform 1.15.8's uuid.FormatUUID formats random bytes; it does not set
