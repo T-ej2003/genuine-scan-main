@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "deploymentModel": "clean-room-blue-green",
-  "sourceContractSha256": "63562264cff78793f6eb284c0739040f6fddd555d73310c090c060f8fe04097e",
+  "sourceContractSha256": "15e6aa391288fe7d4042fd88c47238df19ba988e91deaca71ac7987d61027dad",
   "migrationSetDigest": "6642442a81cd98c7a132d241fa98e50ae231510896c9da67ab70d86b050d02db",
   "sourceContractInputs": [
     {
@@ -202,7 +202,7 @@
     },
     {
       "path": "scripts/aws/deploy-ecs-service.sh",
-      "sha256": "f0138a483eaeb9b630a9554c86a06892b968106653e811243e3199a83883e337"
+      "sha256": "520f2b185ff4ced4f0adb6e2543bc9a5eb240cb3d4aa4912eeb5c9c603b4d7a3"
     },
     {
       "path": "scripts/aws/publish-ecs-images.sh",
@@ -11483,55 +11483,55 @@
       "key": "owner",
       "name": "mscqr_rls_cert_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:63562264cff78793f6eb284c0739040f6fddd555d73310c090c060f8fe04097e"
+      "marker": "mscqr-full-rls-clean-room:certification:15e6aa391288fe7d4042fd88c47238df19ba988e91deaca71ac7987d61027dad"
     },
     {
       "key": "authOwner",
       "name": "mscqr_rls_cert_auth_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:63562264cff78793f6eb284c0739040f6fddd555d73310c090c060f8fe04097e"
+      "marker": "mscqr-full-rls-clean-room:certification:15e6aa391288fe7d4042fd88c47238df19ba988e91deaca71ac7987d61027dad"
     },
     {
       "key": "app",
       "name": "mscqr_rls_cert_app",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:63562264cff78793f6eb284c0739040f6fddd555d73310c090c060f8fe04097e"
+      "marker": "mscqr-full-rls-clean-room:certification:15e6aa391288fe7d4042fd88c47238df19ba988e91deaca71ac7987d61027dad"
     },
     {
       "key": "read",
       "name": "mscqr_rls_cert_read",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:63562264cff78793f6eb284c0739040f6fddd555d73310c090c060f8fe04097e"
+      "marker": "mscqr-full-rls-clean-room:certification:15e6aa391288fe7d4042fd88c47238df19ba988e91deaca71ac7987d61027dad"
     },
     {
       "key": "preauth",
       "name": "mscqr_rls_cert_preauth",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:63562264cff78793f6eb284c0739040f6fddd555d73310c090c060f8fe04097e"
+      "marker": "mscqr-full-rls-clean-room:certification:15e6aa391288fe7d4042fd88c47238df19ba988e91deaca71ac7987d61027dad"
     },
     {
       "key": "worker",
       "name": "mscqr_rls_cert_worker",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:63562264cff78793f6eb284c0739040f6fddd555d73310c090c060f8fe04097e"
+      "marker": "mscqr-full-rls-clean-room:certification:15e6aa391288fe7d4042fd88c47238df19ba988e91deaca71ac7987d61027dad"
     },
     {
       "key": "scheduled",
       "name": "mscqr_rls_cert_scheduled",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:63562264cff78793f6eb284c0739040f6fddd555d73310c090c060f8fe04097e"
+      "marker": "mscqr-full-rls-clean-room:certification:15e6aa391288fe7d4042fd88c47238df19ba988e91deaca71ac7987d61027dad"
     },
     {
       "key": "operator",
       "name": "mscqr_rls_cert_operator",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:63562264cff78793f6eb284c0739040f6fddd555d73310c090c060f8fe04097e"
+      "marker": "mscqr-full-rls-clean-room:certification:15e6aa391288fe7d4042fd88c47238df19ba988e91deaca71ac7987d61027dad"
     },
     {
       "key": "migration",
       "name": "mscqr_rls_cert_migration",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:63562264cff78793f6eb284c0739040f6fddd555d73310c090c060f8fe04097e"
+      "marker": "mscqr-full-rls-clean-room:certification:15e6aa391288fe7d4042fd88c47238df19ba988e91deaca71ac7987d61027dad"
     }
   ]
 }
