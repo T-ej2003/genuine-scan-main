@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='3f508aa1f3edda22fd9515937c95342d0e000d2a7521af4db056ce0cf03b98f3'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:3f508aa1f3edda22fd9515937c95342d0e000d2a7521af4db056ce0cf03b98f3'
+    AND source_contract_sha256='12e0caf66bb7cb2c79cc73da29cd43c7b2cd7529f2e44bada1eacc36c668d75a'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:12e0caf66bb7cb2c79cc73da29cd43c7b2cd7529f2e44bada1eacc36c668d75a'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:3f508aa1f3edda22fd9515937c95342d0e000d2a7521af4db056ce0cf03b98f3')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:12e0caf66bb7cb2c79cc73da29cd43c7b2cd7529f2e44bada1eacc36c668d75a')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -13766,6 +13766,7 @@ BEGIN
   domain_part := substr(normalized_email,separator_position+1);
   IF normalized_email = '' OR char_length(normalized_email) > 254
      OR strpos(normalized_email,'@')=0
+     OR strpos(normalized_email,'@')<>separator_position
      OR normalized_email ~ '[[:cntrl:]]'
      OR char_length(local_part) > 64
      OR domain_part !~ '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$'

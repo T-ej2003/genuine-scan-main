@@ -103,6 +103,7 @@ BEGIN
   domain_part := substr(normalized_email,separator_position+1);
   IF normalized_email = '' OR char_length(normalized_email) > 254
      OR strpos(normalized_email,'@')=0
+     OR strpos(normalized_email,'@')<>separator_position
      OR normalized_email ~ '[[:cntrl:]]'
      OR char_length(local_part) > 64
      OR domain_part !~ '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$'

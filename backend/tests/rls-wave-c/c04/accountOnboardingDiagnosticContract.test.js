@@ -33,7 +33,8 @@ assert.match(sql, /current_setting\('app\.request_id', true\) IS NULL\s+OR curre
 assert.match(diagnostic, /SELECT count\(\*\) INTO target_count FROM public\."User" u WHERE lower\(u\.email\)=normalized_email/);
 assert.match(diagnostic, /SESSION_C04_AMBIGUOUS_NORMALIZED_EMAIL/);
 assert(diagnostic.includes("[\\x20-\\x21\\x23-\\x5B\\x5D-\\x7E]|\\\\[\\x20-\\x7E]"), "quoted local parts must use the canonical escaped-printable grammar");
-assert.match(diagnostic, /separator_position := char_length\(normalized_email\)-strpos\(reverse\(normalized_email\),'@'\)\+1/, "quoted local parts must split on the final @");
+assert.match(diagnostic, /separator_position := char_length\(normalized_email\)-strpos\(reverse\(normalized_email\),'@'\)\+1/, "email validation must locate the final @");
+assert.match(diagnostic, /strpos\(normalized_email,'@'\)<>separator_position/, "direct calls must reject additional @ separators like the application normalizer");
 assert.match(diagnostic, /target_unactivated := target_is_active AND target_status='INVITED' AND target_disabled_at IS NULL AND target_deleted_at IS NULL AND target_password_hash IS NULL/);
 assert(!/target_exists AND NOT target_active AND latest_exists/.test(diagnostic), "disabled or deleted accounts must not be reported as unactivated");
 assert.match(diagnostic, /latest_invite_acceptable := latest_exists/);
