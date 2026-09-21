@@ -663,6 +663,8 @@
       "targetTables": [
         "table-invite",
         "table-user",
+        "table-organization",
+        "table-licensee",
         "table-admin-mfa-credential",
         "table-admin-web-authn-credential",
         "table-user-mfa-factor",

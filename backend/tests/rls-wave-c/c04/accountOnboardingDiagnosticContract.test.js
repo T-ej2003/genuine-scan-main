@@ -7,6 +7,7 @@ const sql = fs.readFileSync(path.join(backend, "src/rls-waves/session-c/c04/acco
 const generator = fs.readFileSync(path.join(backend, "../scripts/rls/generate-clean-room-rls-sql.mjs"), "utf8");
 const contracts = fs.readFileSync(path.join(backend, "../scripts/rls/lib/named-sql-function-contracts.mjs"), "utf8");
 const generatedPolicies = fs.readFileSync(path.join(backend, "../scripts/rls/sql/generated/30-policies.sql"), "utf8");
+const operatorBoundaries = JSON.parse(fs.readFileSync(path.join(backend, "../documents/security/rls-program/operator-boundaries.json"), "utf8"));
 const service = fs.readFileSync(path.join(backend, "src/rls-waves/session-c/operatorProcedureService.ts"), "utf8");
 const start = sql.indexOf("CREATE OR REPLACE FUNCTION app_ops.diagnose_account_onboarding");
 const end = sql.indexOf("REVOKE ALL ON FUNCTION app_ops.diagnose_account_onboarding", start);
@@ -45,6 +46,8 @@ assert.match(contracts, /\["Licensee", "SELECT", accountOnboardingDiagnosticOwne
 assert.match(contracts, /tableCommands: \[\["User", "SELECT"\], \["Invite", "SELECT"\], \["Organization", "SELECT"\], \["Licensee", "SELECT"\]/);
 assert.match(generatedPolicies, /CREATE POLICY "c04_account_onboarding_diagnostic_organization_select" ON public\."Organization"/);
 assert.match(generatedPolicies, /CREATE POLICY "c04_account_onboarding_diagnostic_licensee_select" ON public\."Licensee"/);
+const boundary = operatorBoundaries.boundaries.find(({ id }) => id === "operator-boundary-account-onboarding-diagnostic");
+assert(boundary?.targetTables.includes("table-organization") && boundary.targetTables.includes("table-licensee"), "operator boundary must declare tenant-scope tables");
 assert.equal((diagnostic.match(/lower\(i\.email\)=normalized_email/g) || []).length, 7, "all invite selectors must use canonical matching");
 assert.match(diagnostic, /AUTH_MFA_ENROLLED','AUTH_WEBAUTHN_ENROLLED/);
 assert.match(diagnostic, /observed_at timestamp without time zone := clock_timestamp\(\)/);
