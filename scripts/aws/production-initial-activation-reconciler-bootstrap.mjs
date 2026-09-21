@@ -22,13 +22,46 @@ const noSuchEntity = (error) => /\bNoSuchEntity(?:Exception)?\b/.test(`${error?.
 const exactFields = (value, names, label) => {
   if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).sort().join(",") !== [...names].sort().join(",")) throw new Error(`${label} fields are not exact.`);
 };
-const bootstrapPermissions = () => readSourceJson(INSTALLATION_BOOTSTRAP.permissionsPath);
+export const IAM_ROLE_INLINE_POLICY_LIMIT = 10_240;
+export function iamInlinePolicySize(document) {
+  const serialized = typeof document === "string" ? document : JSON.stringify(document);
+  if (typeof serialized !== "string") throw new Error("IAM inline policy document is missing.");
+  if (typeof document === "string") JSON.parse(document);
+  return serialized.replace(/\s/g, "").length;
+}
+export function assertIamRoleInlinePolicyReplacementQuota({ inlinePolicies, replacedPolicyName, proposedPolicy, replacementRequired = true, limit = IAM_ROLE_INLINE_POLICY_LIMIT } = {}) {
+  if (!Array.isArray(inlinePolicies) || !inlinePolicies.every((entry) => entry && typeof entry.policyName === "string" && entry.policyName && entry.document) || new Set(inlinePolicies.map(({ policyName }) => policyName)).size !== inlinePolicies.length || typeof replacedPolicyName !== "string" || !replacedPolicyName || !Number.isSafeInteger(limit) || limit < 1) throw new Error("IAM inline policy replacement inventory is ambiguous.");
+  const replaced = inlinePolicies.filter(({ policyName }) => policyName === replacedPolicyName);
+  if (replaced.length !== (replacementRequired ? 1 : 0)) throw new Error("IAM inline policy replacement target is ambiguous.");
+  const existingAggregateSize = inlinePolicies.reduce((total, { document }) => total + iamInlinePolicySize(document), 0);
+  const replacedPolicySize = replaced.length ? iamInlinePolicySize(replaced[0].document) : 0;
+  const proposedPolicySize = iamInlinePolicySize(proposedPolicy);
+  const resultingAggregateSize = existingAggregateSize - replacedPolicySize + proposedPolicySize;
+  if (resultingAggregateSize > limit) throw new Error(`IAM inline policy aggregate exceeds quota: proposed=${proposedPolicySize} resulting=${resultingAggregateSize} limit=${limit} excess=${resultingAggregateSize - limit}.`);
+  return Object.freeze({ existingAggregateSize, replacedPolicySize, proposedPolicySize, resultingAggregateSize, limit, headroom: limit - resultingAggregateSize });
+}
+const bootstrapPermissions = () => {
+  const permissions = readSourceJson(INSTALLATION_BOOTSTRAP.permissionsPath);
+  assertIamRoleInlinePolicyReplacementQuota({ inlinePolicies: [], replacedPolicyName: INSTALLATION_BOOTSTRAP.inlinePolicyName, proposedPolicy: permissions, replacementRequired: false });
+  return permissions;
+};
 const bootstrapPermissionsSha256 = () => canonicalSha256(bootstrapPermissions());
 const bootstrapPermissionsPredecessors = () => {
   const desired = bootstrapPermissions();
   const expansionSids = ["ReadExactMixedRecoveryRole", "UpdateExactMixedRecoveryRoleTrust", "ReadExactMixedRecoveryPolicy", "CreateExactMixedRecoveryRole", "CreateExactMixedRecoveryPolicy", "AttachExactMixedRecoveryPolicyToRole"];
   const authorizerSids = ["ReadExactBootstrapOperatorPolicyAuthorizerRole", "ReadExactBootstrapOperatorPolicyAuthorizerPolicy", "UpdateExactBootstrapOperatorPolicyAuthorizerRoleTrust", "CreateExactBootstrapOperatorPolicyAuthorizerRole", "CreateExactBootstrapOperatorPolicyAuthorizerPolicy", "AttachExactBootstrapOperatorPolicyAuthorizerPolicyToRole"];
-  const evidenceReaderSids = ["ReadExactBrokerRecoverySuccessorEvidenceReaderRole", "ReadExactBrokerRecoverySuccessorEvidenceReaderPolicy", "CreateExactBrokerRecoverySuccessorEvidenceReaderRole", "CreateExactBrokerRecoverySuccessorEvidenceReaderPolicy", "AttachExactBrokerRecoverySuccessorEvidenceReaderPolicyToRole"];
+  const evidenceReaderSids = ["CreateExactBrokerRecoverySuccessorEvidenceReaderIdentity", "AttachExactBrokerRecoverySuccessorEvidenceReaderPolicyToRole"];
+  const evidenceReaderResources = new Set([
+    "arn:aws:iam::368992683803:role/mscqr-production-broker-recovery-successor-evidence-reader",
+    "arn:aws:iam::368992683803:policy/MSCQRProductionBrokerRecoverySuccessorEvidenceRead",
+  ]);
+  const omitEvidenceReaderResources = (document) => {
+    for (const Sid of ["ReadExactReconcilerRole", "ReadExactReconcilerPolicy"]) {
+      const statement = document.Statement.find((entry) => entry.Sid === Sid);
+      const resources = [].concat(statement.Resource).filter((resource) => !evidenceReaderResources.has(resource));
+      statement.Resource = resources.length === 1 ? resources[0] : resources;
+    }
+  };
   const previousSelfRead = (document) => { document.Statement.find(({ Sid }) => Sid === "ReadOwnExactBootstrapInlinePolicy").Action = "iam:GetRolePolicy"; };
   const exact = (generation, omittedSids, sha256, omitExpansion = true, mutate, omitAuthorizer = true, omitEvidenceReader = true, retainAuthorizerPolicyUpdate = false) => {
     const document = structuredClone(desired);
@@ -36,6 +69,7 @@ const bootstrapPermissionsPredecessors = () => {
     const update = document.Statement.find(({ Sid }) => Sid === "UpdateExactReconcilerPolicyVersion");
     if (update && omitExpansion) update.Resource = "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler";
     else if (update && !retainAuthorizerPolicyUpdate) update.Resource = [].concat(update.Resource).filter((resource) => resource !== "arn:aws:iam::368992683803:policy/MSCQRProductionBootstrapOperatorPolicyAuthorizer");
+    if (omitEvidenceReader) omitEvidenceReaderResources(document);
     mutate?.(document);
     if (canonicalSha256(document) !== sha256) throw new Error(`Bootstrap predecessor ${generation} source document drifted.`);
     return Object.freeze({ generation, document, sha256 });
@@ -138,13 +172,16 @@ export function assertBootstrapPermissionsDocument(document) {
 
 export function discoverBootstrapRole({ run } = {}) {
   let role;
-  try { role = runJson(run, ["iam", "get-role", "--role-name", INSTALLATION_BOOTSTRAP.roleName]).Role; } catch (error) { if (noSuchEntity(error)) return Object.freeze({ classification: "ABSENT" }); throw error; }
+  try { role = runJson(run, ["iam", "get-role", "--role-name", INSTALLATION_BOOTSTRAP.roleName]).Role; } catch (error) { if (noSuchEntity(error)) { bootstrapPermissions(); return Object.freeze({ classification: "ABSENT" }); } throw error; }
   assertBootstrapRole(role);
   const attached = runJson(run, ["iam", "list-attached-role-policies", "--role-name", INSTALLATION_BOOTSTRAP.roleName]).AttachedPolicies;
   const inline = runJson(run, ["iam", "list-role-policies", "--role-name", INSTALLATION_BOOTSTRAP.roleName]).PolicyNames;
-  if (!Array.isArray(attached) || attached.length !== 0 || !Array.isArray(inline) || inline.some((name) => name !== INSTALLATION_BOOTSTRAP.inlinePolicyName) || inline.length > 1) throw new Error("Bootstrap role policy topology is unexpected.");
+  if (!Array.isArray(attached) || attached.length !== 0 || !Array.isArray(inline) || new Set(inline).size !== inline.length) throw new Error("Bootstrap role policy topology is unexpected.");
+  const inlinePolicies = inline.map((policyName) => ({ policyName, document: runJson(run, ["iam", "get-role-policy", "--role-name", INSTALLATION_BOOTSTRAP.roleName, "--policy-name", policyName]).PolicyDocument }));
+  assertIamRoleInlinePolicyReplacementQuota({ inlinePolicies, replacedPolicyName: INSTALLATION_BOOTSTRAP.inlinePolicyName, proposedPolicy: bootstrapPermissions(), replacementRequired: inline.length !== 0 });
+  if (inline.some((name) => name !== INSTALLATION_BOOTSTRAP.inlinePolicyName) || inline.length > 1) throw new Error("Bootstrap role policy topology is unexpected.");
   if (inline.length === 0) return Object.freeze({ classification: "EXACT_PARTIAL" });
-  const document = runJson(run, ["iam", "get-role-policy", "--role-name", INSTALLATION_BOOTSTRAP.roleName, "--policy-name", INSTALLATION_BOOTSTRAP.inlinePolicyName]).PolicyDocument;
+  const document = inlinePolicies[0].document;
   const normalized = normalizeIamPolicyDocument(document, "bootstrap permissions policy");
   if (canonicalJson(normalized) === canonicalJson(bootstrapPermissions())) return Object.freeze({ classification: "EXACT_COMPLETE", predecessorPolicySha256: bootstrapPermissionsSha256() });
   const predecessor = bootstrapPermissionsPredecessors().find(({ document }) => canonicalJson(normalized) === canonicalJson(document));

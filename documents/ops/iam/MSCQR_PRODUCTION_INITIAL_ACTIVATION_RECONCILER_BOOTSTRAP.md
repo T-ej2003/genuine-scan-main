@@ -23,6 +23,12 @@ source-hashed document and is the final root mutation, so an ambiguous response
 is resolved only by exact readback. Unexpected trust, tags, boundaries,
 attachments, or inline policies fail closed.
 
+Preparation also enforces IAM's 10,240-character aggregate inline-role policy
+quota before authorization. It reads every inline policy on the bootstrap role,
+counts non-whitespace characters, subtracts the exact policy being replaced,
+and adds the protected-source replacement. A missing or ambiguous replacement,
+or a resulting aggregate above the quota, stops before authorization.
+
 MSCQR currently operates with one authorized production operator, so the
 dedicated environment intentionally permits self-review
 (`prevent_self_review=false`). Approval is still real GitHub environment
