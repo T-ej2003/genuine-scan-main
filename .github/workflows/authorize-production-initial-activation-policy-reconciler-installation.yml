@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       source_sha: { description: Protected main source SHA, required: true, type: string }
-      preparation_artifact_base64: { description: Exact preparation artifact bytes, required: true, type: string }
+      preparation_artifact_gzip_base64: { description: Deterministic bounded gzip/Base64 transport of exact preparation artifact bytes, required: true, type: string }
       preparation_artifact_sha256: { description: SHA256 of the preparation artifact, required: true, type: string }
       saved_plan_base64: { description: Exact saved Terraform plan bytes, required: true, type: string }
       saved_plan_sha256: { description: SHA256 of the saved Terraform plan, required: true, type: string }
@@ -76,7 +76,7 @@ jobs:
         id: authorization
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
-          PREPARATION_ARTIFACT_BASE64: ${{ inputs.preparation_artifact_base64 }}
+          PREPARATION_ARTIFACT_GZIP_BASE64: ${{ inputs.preparation_artifact_gzip_base64 }}
           PREPARATION_SHA256: ${{ inputs.preparation_artifact_sha256 }}
           ENVIRONMENT_APPROVAL_SHA256: ${{ steps.environment-approval.outputs.sha256 }}
         shell: bash
@@ -84,8 +84,12 @@ jobs:
           set -euo pipefail
           umask 077
           workdir="$RUNNER_TEMP/initial-activation-installation"
-          printf '%s' "$PREPARATION_ARTIFACT_BASE64" | base64 --decode > "$workdir/preparation.json"
-          test "$(sha256sum "$workdir/preparation.json" | awk '{print $1}')" = "$PREPARATION_SHA256"
+          node --input-type=module - "$workdir/preparation.json" <<'NODE'
+          import fs from "node:fs";
+          import { decodeWorkflowDispatchGzip } from "./scripts/aws/workflow-dispatch-gzip-transport.mjs";
+          const bytes = decodeWorkflowDispatchGzip(process.env.PREPARATION_ARTIFACT_GZIP_BASE64, process.env.PREPARATION_SHA256, { label: "Installation preparation artifact" });
+          fs.writeFileSync(process.argv[2], bytes, { flag: "wx", mode: 0o600 });
+          NODE
           node scripts/aws/authorize-production-initial-activation-reconciler-installation.mjs --authorize \
             --source-sha "$SOURCE_SHA" --preparation "$workdir/preparation.json" \
             --preparation-file-sha256 "$PREPARATION_SHA256" \

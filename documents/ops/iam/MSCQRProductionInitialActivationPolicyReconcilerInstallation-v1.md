@@ -14,7 +14,14 @@ the saved plan; temporary render copies are unique, private, and removed in
 `finally`.
 
 The saved plan and preparation bytes are submitted to the canonical GitHub
-workflow. The dedicated `production-initial-activation-reconciler-bootstrap`
+workflow by `dispatch-production-initial-activation-reconciler-installation.mjs`.
+The helper authenticates protected main and both local artifacts, transports only
+the preparation through the repository's deterministic bounded gzip/Base64
+contract, keeps the saved plan in canonical Base64, and rejects the complete
+serialized inputs above the repository's 60,000-character budget before calling
+GitHub. The workflow decompresses the preparation under the same ceiling and
+authenticates its original uncompressed byte SHA-256 before authorization. The
+dedicated `production-initial-activation-reconciler-bootstrap`
 environment supplies authenticated human approval and the matching OIDC subject;
 `production` remains the deployment tier, not the GitHub environment identity.
 The same workflow run assumes only
