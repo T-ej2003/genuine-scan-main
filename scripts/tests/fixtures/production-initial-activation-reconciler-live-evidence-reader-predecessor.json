@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "protectedMainSha": "81c631ca6a92fd470615b064d99132b55eef2748",
+  "bootstrapPolicyProvenanceSha": "49cf9d6314cdb599b602a913eaa724a5189dfefb",
+  "bootstrapPolicySha256": "56c819a5043ebde905847b0df13c2eb733a91547c16351c565bb1923cf701a0b",
+  "bootstrapPolicyOmittedStatementSids": [
+    "ReadExactBrokerRecoverySuccessorEvidenceReaderRole",
+    "ReadExactBrokerRecoverySuccessorEvidenceReaderPolicy",
+    "CreateExactBrokerRecoverySuccessorEvidenceReaderRole",
+    "CreateExactBrokerRecoverySuccessorEvidenceReaderPolicy",
+    "AttachExactBrokerRecoverySuccessorEvidenceReaderPolicyToRole"
+  ],
+  "requiredAuthorizerPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionBootstrapOperatorPolicyAuthorizer",
+  "evidenceReader": {
+    "roleExists": false,
+    "policyExists": false,
+    "attachmentExists": false
+  },
+  "expectedClassification": "EXACT_EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE",
+  "expectedExistingAddresses": [
+    "aws_iam_policy.bootstrap_operator_policy_authorizer",
+    "aws_iam_policy.mixed_recovery",
+    "aws_iam_policy.reconciler",
+    "aws_iam_role.bootstrap_operator_policy_authorizer",
+    "aws_iam_role.mixed_recovery",
+    "aws_iam_role.reconciler",
+    "aws_iam_role_policy_attachment.bootstrap_operator_policy_authorizer",
+    "aws_iam_role_policy_attachment.mixed_recovery",
+    "aws_iam_role_policy_attachment.reconciler"
+  ],
+  "expectedCreateAddresses": [
+    "aws_iam_policy.broker_recovery_successor_evidence_reader",
+    "aws_iam_role.broker_recovery_successor_evidence_reader",
+    "aws_iam_role_policy_attachment.broker_recovery_successor_evidence_reader"
+  ],
+  "expectedUpdateAddresses": [
+    "aws_iam_policy.bootstrap_operator_policy_authorizer"
+  ]
+}
