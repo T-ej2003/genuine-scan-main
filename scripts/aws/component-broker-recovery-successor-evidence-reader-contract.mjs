@@ -32,11 +32,6 @@ export function assertBrokerRecoverySuccessorEvidenceReaderSource() {
   assert.deepEqual(trust, { Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { Federated: "arn:aws:iam::368992683803:oidc-provider/token.actions.githubusercontent.com" }, Action: "sts:AssumeRoleWithWebIdentity", Condition: { StringEquals: {
     "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
     "token.actions.githubusercontent.com:sub": `repo:T-ej2003/genuine-scan-main:environment:${brokerRecoverySuccessorEvidenceReader.environment}`,
-    "token.actions.githubusercontent.com:repository_owner_id": "183396573",
-    "token.actions.githubusercontent.com:repository_id": "1145608538",
-    "token.actions.githubusercontent.com:actor_id": "183396573",
-    "token.actions.githubusercontent.com:ref": "refs/heads/main",
-    "token.actions.githubusercontent.com:job_workflow_ref": `T-ej2003/genuine-scan-main/${brokerRecoverySuccessorEvidenceReader.workflow}@refs/heads/main`,
   } } }] });
   assert.deepEqual(permissions, { Version: "2012-10-17", Statement: [{ Sid: "ReadExactHistoricalBrokerSuccessorEvidence", Effect: "Allow", Action: "s3:GetObject", Resource: brokerRecoverySuccessorEvidenceReader.resources }] });
   assert(!/\*/.test(canonical(permissions)), "Evidence-reader wildcard forbidden");

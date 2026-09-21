@@ -65,7 +65,8 @@ test("evidence reader and workflow are exact, read-only, OIDC-bound contracts", 
   const { trust, permissions } = assertBrokerRecoverySuccessorEvidenceReaderSource();
   assert.deepEqual(permissions.Statement[0].Action, "s3:GetObject"); assert.deepEqual(permissions.Statement[0].Resource, brokerRecoverySuccessorEvidenceReader.resources);
   assert(!JSON.stringify(permissions).match(/PutObject|DeleteObject|ListBucket|lambda:|dynamodb:|iam:|sts:AssumeRole"/));
-  const conditions = trust.Statement[0].Condition.StringEquals; assert.equal(conditions["token.actions.githubusercontent.com:repository_id"], "1145608538"); assert.equal(conditions["token.actions.githubusercontent.com:ref"], "refs/heads/main");
+  const conditions = trust.Statement[0].Condition.StringEquals;
+  assert.deepEqual(conditions, { "token.actions.githubusercontent.com:aud": "sts.amazonaws.com", "token.actions.githubusercontent.com:sub": `repo:T-ej2003/genuine-scan-main:environment:${brokerRecoverySuccessorEvidenceReader.environment}` });
   const workflow = yaml.load(fs.readFileSync(new URL("../../.github/workflows/authorize-component-broker-recovery-successor.yml", import.meta.url), "utf8"));
   assert.deepEqual(workflow.permissions, { contents: "read", actions: "read", "id-token": "write" }); assert.equal(workflow.jobs.authorize.environment, brokerRecoverySuccessorEvidenceReader.environment);
   assert.equal(workflow.jobs.authorize.steps.filter(step => step.uses === "aws-actions/configure-aws-credentials@v6")[0].with["role-to-assume"], brokerRecoverySuccessorEvidenceReader.roleArn);
