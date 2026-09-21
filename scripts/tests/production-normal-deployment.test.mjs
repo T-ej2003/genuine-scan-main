@@ -306,6 +306,11 @@ test("normal production workflow is fixed, OIDC-only, gated by main, and smoke-t
   assert.match(workflow, /configure-aws-credentials@v6/);
   assert.match(workflow, /MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-release-deployer/);
   assert.match(workflow, /SMOKE_AUTHENTICATED_REQUIRED: "true"/);
+  assert.match(workflow, /SMOKE_EXPECTED_IDENTITY_REQUIRED: "true"/);
+  assert.match(workflow, /SMOKE_EXPECTED_USER_ID: 556f5cfa-0820-4e05-a0e0-7357699546f4/);
+  assert.match(workflow, /SMOKE_EXPECTED_ROLE: LICENSEE_ADMIN/);
+  assert.match(workflow, /SMOKE_EXPECTED_ORG_ID: bbc886ec-ecb6-435b-a3b1-7a97896a5937/);
+  assert.match(workflow, /SMOKE_EXPECTED_LICENSEE_ID: 75b80c75-98dd-44d2-a4b6-c091a12a4fb8/);
   assert.match(workflow, /classify-production-lane-a\.mjs/);
   assert.match(workflow, /publish-ecs-images\.sh/);
   assert.match(workflow, /deploy-ecs-service\.sh/);

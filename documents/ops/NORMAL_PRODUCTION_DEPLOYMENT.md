@@ -27,6 +27,7 @@ The four alarms are the `AWS/ApplicationELB` contracts exported by `scripts/aws/
 ## Dedicated production smoke identity
 
 Authenticated smoke uses the existing `production-green-pretraffic-canary-v1` ordinary canary only. It is the deterministic user `556f5cfa-0820-4e05-a0e0-7357699546f4`, has role `LICENSEE_ADMIN`, belongs to the dedicated green-canary organization/licensee, has independent password and MFA credentials, and has a distinct audit identity. The environment secrets must reference this canary; the operator's human Super Admin account is prohibited.
+The workflow passes the canary's exact source-owned user, role, organization, and licensee identities to the smoke runner; `/auth/me` must match all four before authenticated smoke can continue.
 
 The environment-secret contract is:
 

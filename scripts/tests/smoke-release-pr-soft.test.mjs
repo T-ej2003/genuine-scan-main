@@ -10,6 +10,12 @@ import {
 } from "../lib/staging-smoke-totp.mjs";
 
 const RFC_TOTP_SECRET = ["GEZD", "GNBV", "GY3T", "QOJQ", "GEZD", "GNBV", "GY3T", "QOJQ"].join("");
+const smokeIdentity = Object.freeze({
+  id: "556f5cfa-0820-4e05-a0e0-7357699546f4",
+  role: "LICENSEE_ADMIN",
+  orgId: "bbc886ec-ecb6-435b-a3b1-7a97896a5937",
+  licenseeId: "75b80c75-98dd-44d2-a4b6-c091a12a4fb8",
+});
 
 const startHtml503Server = async () => {
   const server = http.createServer((req, res) => {
@@ -62,7 +68,7 @@ const startMfaBootstrapServer = async () => {
       submittedMfaCode = JSON.parse(body).code;
       return json(200, { success: true, data: { auth: { sessionStage: "ACTIVE" } } });
     }
-    if (req.url === "/api/auth/me") return json(200, { success: true, data: { user: { role: "ADMIN" } } });
+    if (req.url === "/api/auth/me") return json(200, { success: true, data: smokeIdentity });
     if (req.url === "/api/auth/refresh" && req.method === "POST") {
       req.resume();
       return json(200, { success: true, data: { auth: { sessionStage: "ACTIVE" } } });
@@ -98,6 +104,10 @@ const runSmoke = (baseUrl, env) =>
         SMOKE_ALLOW_LOCAL_DEFAULT: "false",
         SMOKE_ADMIN_MFA_CODE: "",
         SMOKE_ADMIN_MFA_SECRET: "",
+        SMOKE_EXPECTED_USER_ID: smokeIdentity.id,
+        SMOKE_EXPECTED_ROLE: smokeIdentity.role,
+        SMOKE_EXPECTED_ORG_ID: smokeIdentity.orgId,
+        SMOKE_EXPECTED_LICENSEE_ID: smokeIdentity.licenseeId,
         ...env,
       },
     });
@@ -192,6 +202,25 @@ test("static MFA code overrides the TOTP secret", async () => {
     assert.equal(result.status, 0, result.stderr || result.stdout);
     assert.equal(server.submittedMfaCode() === "654321", true);
     assert.equal(`${result.stdout}${result.stderr}`.includes(malformedSecret), false);
+  } finally {
+    await server.close();
+  }
+});
+
+test("strict authenticated smoke rejects any valid but unexpected account", async () => {
+  const server = await startMfaBootstrapServer();
+  try {
+    const result = await runSmoke(server.baseUrl, {
+      GITHUB_EVENT_NAME: "workflow_dispatch",
+      SMOKE_REQUIRED: "true",
+      SMOKE_AUTHENTICATED_REQUIRED: "true",
+      SMOKE_LOGIN_EMAIL: "admin@example.com",
+      SMOKE_LOGIN_PASSWORD: "correct-horse-battery-staple",
+      SMOKE_ADMIN_MFA_CODE: "654321",
+      SMOKE_EXPECTED_USER_ID: "00000000-0000-4000-a000-000000000000",
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Authenticated smoke identity mismatch: id/);
   } finally {
     await server.close();
   }

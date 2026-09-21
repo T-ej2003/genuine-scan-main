@@ -32,6 +32,10 @@ export const NORMAL_DEPLOYMENT_ROLLBACK = Object.freeze({
   "mscqr-backend-servi-euw2": Object.freeze(NORMAL_DEPLOYMENT_ALARMS.slice(0, 2).map(({ AlarmName }) => AlarmName)),
   "mscqr-frontend-servi-euw2": Object.freeze(NORMAL_DEPLOYMENT_ALARMS.slice(2).map(({ AlarmName }) => AlarmName)),
 });
+const serviceTargetGroups = Object.freeze({
+  "mscqr-backend-servi-euw2": "targetgroup/mscqr-backend-tg-euw2-v2/f6673ff776f6e2ec",
+  "mscqr-frontend-servi-euw2": "targetgroup/mscqr-frontend-ecs-tg-euw2/ddafd2fc00ed732e",
+});
 
 export function assertNormalDeploymentNativeRollback(response) {
   assert.deepEqual(response?.failures, []);
@@ -45,6 +49,7 @@ export function assertNormalDeploymentNativeRollback(response) {
     assert.equal(service.deploymentConfiguration?.alarms?.enable, true, `${service.serviceName} must enable ECS deployment alarms.`);
     assert.equal(service.deploymentConfiguration?.alarms?.rollback, true, `${service.serviceName} alarms must roll back failed deployments.`);
     assert.deepEqual([...(service.deploymentConfiguration?.alarms?.alarmNames || [])].sort(), [...alarms].sort(), `${service.serviceName} deployment alarms do not match the reviewed contract.`);
+    assert.deepEqual(service.loadBalancers?.map(({ targetGroupArn }) => String(targetGroupArn).split(":").at(-1)), [serviceTargetGroups[service.serviceName]], `${service.serviceName} target group does not match its deployment alarms.`);
   }
   assert.deepEqual([...seen].sort(), Object.keys(NORMAL_DEPLOYMENT_ROLLBACK).sort());
 }
@@ -64,6 +69,7 @@ export function assertNormalDeploymentAlarms(response) {
     assert.deepEqual(value.OKActions || [], [], `${expected.AlarmName} must not invoke OK actions.`);
     assert.deepEqual(value.InsufficientDataActions || [], [], `${expected.AlarmName} must not invoke insufficient-data actions.`);
     assert.equal(value.Metrics, undefined, `${expected.AlarmName} must use the reviewed single metric.`);
+    assert.equal(value.Unit, undefined, `${expected.AlarmName} must not set a metric unit.`);
   }
 }
 
