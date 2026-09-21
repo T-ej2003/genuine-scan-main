@@ -855,8 +855,9 @@ test("authorization workflow passes dynamic values through environment variables
   assert.ok(authorizationStep);
   const shell = authorizationStep.split("\n        run: |\n")[1];
   assert.doesNotMatch(shell, /\$\{\{/);
-  assert.match(authorizationStep, /PREPARATION_ARTIFACT_BASE64: \$\{\{ inputs\.preparation_artifact_base64 \}\}/);
-  assert.match(shell, /printf '%s' "\$PREPARATION_ARTIFACT_BASE64"/);
+  assert.match(authorizationStep, /PREPARATION_ARTIFACT_GZIP_BASE64: \$\{\{ inputs\.preparation_artifact_gzip_base64 \}\}/);
+  assert.match(shell, /decodeWorkflowDispatchGzip\(process\.env\.PREPARATION_ARTIFACT_GZIP_BASE64, process\.env\.PREPARATION_SHA256/);
+  assert.match(shell, /fs\.writeFileSync\(process\.argv\[2\], bytes, \{ flag: "wx", mode: 0o600 \}\)/);
   assert.match(shell, /--environment-approval-sha256 "\$ENVIRONMENT_APPROVAL_SHA256"/);
   const applyStep = workflow.match(/- name: Apply the exact authorized saved plan once[\s\S]*?(?=\n      - uses: actions\/upload-artifact)/)?.[0];
   assert.ok(applyStep);

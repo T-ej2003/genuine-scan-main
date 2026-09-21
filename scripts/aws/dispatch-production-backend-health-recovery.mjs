@@ -3,12 +3,12 @@ import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { constants as zlibConstants, gunzipSync, gzipSync, inflateRawSync } from "node:zlib";
 import { BACKEND_HEALTH_RECOVERY, BACKEND_HEALTH_RECOVERY_TASK_ARN as TASK_DEFINITION } from "./production-backend-health-recovery-contract.mjs";
 import { assertImageAuthorization, authorizedBackendDigest } from "./production-cutover-control-plane.mjs";
 import { readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
 import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
 import { assertFailedRecoveryEvidenceReference } from "./production-backend-failed-recovery-evidence-reference.mjs";
+import { decodeWorkflowDispatchGzip, encodeWorkflowDispatchGzip, MAX_DECOMPRESSED_WORKFLOW_DISPATCH_BYTES, measureWorkflowDispatchInputs as measureBoundedWorkflowDispatchInputs, WORKFLOW_DISPATCH_INTERNAL_BUDGET, WORKFLOW_DISPATCH_PLATFORM_LIMIT } from "./workflow-dispatch-gzip-transport.mjs";
 
 const REPOSITORY = "T-ej2003/genuine-scan-main";
 const REPOSITORY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -24,60 +24,17 @@ const FAILED_HISTORY_APPROVAL_FIELD = "failedRecoveryEvidenceSha256";
 const FAILED_HISTORY_REFERENCE_APPROVAL_FIELD = "failedRecoveryEvidenceReferenceSha256";
 const BUNDLE_KIND = "BACKEND_HEALTH_RECOVERY_DISPATCH_BUNDLE";
 const COMPONENTS = ["imageAuthorization", "approval", "runtimeConsumability", "failedRecoveryEvidenceReference"];
-export const WORKFLOW_DISPATCH_PLATFORM_LIMIT = 65_535;
-export const WORKFLOW_DISPATCH_INTERNAL_BUDGET = 60_000;
-export const MAX_DECOMPRESSED_BUNDLE_BYTES = WORKFLOW_DISPATCH_INTERNAL_BUDGET;
+export { WORKFLOW_DISPATCH_INTERNAL_BUDGET, WORKFLOW_DISPATCH_PLATFORM_LIMIT };
+export const MAX_DECOMPRESSED_BUNDLE_BYTES = MAX_DECOMPRESSED_WORKFLOW_DISPATCH_BYTES;
 export const MAX_ENCODED_BUNDLE_CHARACTERS = WORKFLOW_DISPATCH_INTERNAL_BUDGET;
 
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
-const CANONICAL_BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
-
-function deterministicGzip(bytes) {
-  const compressed = gzipSync(bytes, { level: 9, strategy: zlibConstants.Z_DEFAULT_STRATEGY, windowBits: 15, memLevel: 8, mtime: 0 });
-  compressed.fill(0, 4, 8);
-  compressed[9] = 255;
-  return compressed;
-}
-
-function gzipDeflateOffset(compressed) {
-  if (compressed.length < 18 || compressed[0] !== 0x1f || compressed[1] !== 0x8b || compressed[2] !== 8 || (compressed[3] & 0xe0) !== 0) throw new Error("Recovery dispatch bundle gzip framing is invalid.");
-  const flags = compressed[3]; let offset = 10;
-  if (flags & 0x04) {
-    if (offset + 2 > compressed.length) throw new Error("Recovery dispatch bundle gzip framing is invalid.");
-    const extraLength = compressed.readUInt16LE(offset); offset += 2;
-    if (offset + extraLength > compressed.length) throw new Error("Recovery dispatch bundle gzip framing is invalid.");
-    offset += extraLength;
-  }
-  for (const flag of [0x08, 0x10]) if (flags & flag) {
-    const end = compressed.indexOf(0, offset);
-    if (end === -1) throw new Error("Recovery dispatch bundle gzip framing is invalid.");
-    offset = end + 1;
-  }
-  if (flags & 0x02) offset += 2;
-  if (offset + 8 >= compressed.length) throw new Error("Recovery dispatch bundle gzip framing is invalid.");
-  return offset;
-}
-
 export function encodeBackendHealthRecoveryBundleTransport(bytes) {
-  if (!Buffer.isBuffer(bytes) || bytes.length === 0 || bytes.length > MAX_DECOMPRESSED_BUNDLE_BYTES) throw new Error(`Recovery dispatch bundle exceeds the ${MAX_DECOMPRESSED_BUNDLE_BYTES}-byte decompressed limit.`);
-  return deterministicGzip(bytes).toString("base64");
+  return encodeWorkflowDispatchGzip(bytes, { label: "Recovery dispatch bundle", maxDecompressedBytes: MAX_DECOMPRESSED_BUNDLE_BYTES });
 }
 
 export function decodeBackendHealthRecoveryBundleTransport(encoded, expectedSha256) {
-  if (typeof encoded !== "string" || encoded.length === 0 || encoded.length > MAX_ENCODED_BUNDLE_CHARACTERS || !CANONICAL_BASE64.test(encoded)) throw new Error("Recovery dispatch bundle transport is not canonical base64.");
-  const compressed = Buffer.from(encoded, "base64");
-  if (compressed.toString("base64") !== encoded) throw new Error("Recovery dispatch bundle transport is not canonical base64.");
-  let bytes;
-  try {
-    const deflateOffset = gzipDeflateOffset(compressed);
-    const deflateBytes = inflateRawSync(compressed.subarray(deflateOffset), { info: true, maxOutputLength: MAX_DECOMPRESSED_BUNDLE_BYTES }).engine.bytesWritten;
-    if (deflateOffset + deflateBytes + 8 !== compressed.length) throw new Error("Recovery dispatch bundle transport must contain exactly one gzip member without trailing data.");
-    bytes = gunzipSync(compressed, { maxOutputLength: MAX_DECOMPRESSED_BUNDLE_BYTES });
-  }
-  catch { throw new Error("Recovery dispatch bundle transport is invalid or exceeds the decompressed limit."); }
-  if (!bytes.length || bytes.length > MAX_DECOMPRESSED_BUNDLE_BYTES) throw new Error("Recovery dispatch bundle transport is invalid or exceeds the decompressed limit.");
-  if (!/^[a-f0-9]{64}$/.test(expectedSha256 || "") || sha256(bytes) !== expectedSha256) throw new Error("Recovery dispatch bundle bytes do not match their SHA-256.");
-  return bytes;
+  return decodeWorkflowDispatchGzip(encoded, expectedSha256, { label: "Recovery dispatch bundle", maxDecompressedBytes: MAX_DECOMPRESSED_BUNDLE_BYTES, maxEncodedCharacters: MAX_ENCODED_BUNDLE_CHARACTERS });
 }
 
 export function canonicalWorkflowJsonInput(bytes, label = "Workflow JSON input") {
@@ -134,10 +91,7 @@ function assertBindings({ sourceSha, currentTaskDefinitionArn, recoveryImageDige
 }
 
 export function measureWorkflowDispatchInputs(inputs) {
-  const serialized = JSON.stringify(inputs);
-  const characters = Array.from(serialized).length; const bytes = Buffer.byteLength(serialized);
-  if (characters > WORKFLOW_DISPATCH_INTERNAL_BUDGET || bytes > WORKFLOW_DISPATCH_INTERNAL_BUDGET) throw new Error(`Recovery workflow_dispatch payload exceeds the ${WORKFLOW_DISPATCH_INTERNAL_BUDGET}-character internal budget.`);
-  return Object.freeze({ characters, bytes, serialized });
+  return measureBoundedWorkflowDispatchInputs(inputs, { label: "Recovery workflow_dispatch payload" });
 }
 
 export function buildBackendHealthRecoveryDispatch({ sourceSha, currentTaskDefinitionArn, recoveryImageDigest, service, releaseMode, imageAuthorizationBytes, imageValidation, approvalBytes, runtimeConsumabilityBytes, failedRecoveryEvidenceReferenceBytes } = {}) {
