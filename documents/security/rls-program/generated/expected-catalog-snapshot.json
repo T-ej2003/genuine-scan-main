@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "deploymentModel": "clean-room-blue-green",
-  "sourceContractSha256": "171abff4bf8c7e3af38af2cef61156906c26d5b7b6ff103e0d881f83ee59c22b",
+  "sourceContractSha256": "72821975b93deadca1e800a4e6769a4c1287a540ad30552b9625a868c4010076",
   "migrationSetDigest": "6642442a81cd98c7a132d241fa98e50ae231510896c9da67ab70d86b050d02db",
   "sourceContractInputs": [
     {
@@ -66,7 +66,7 @@
     },
     {
       "path": "scripts/rls/lib/program-inventory.mjs",
-      "sha256": "69efcb0487a41c9e20a514149da5a5cf95e7913f75ce9868c19593a1e1ab68aa"
+      "sha256": "0e80463ad99fbab533bd1d30bc1f064eaf9b47627351caf02fdfbc0011a461b6"
     },
     {
       "path": "scripts/rls/lib/table-inventory-baseline.mjs",
@@ -78,7 +78,7 @@
     },
     {
       "path": "scripts/rls/lib/named-sql-function-contracts.mjs",
-      "sha256": "bf9a1f1b1c5d0e7647f06245b797d726ec0558ce62edc193d4c9161bf42b8780"
+      "sha256": "50de996200735cfb1ec9ccc442412d2f883ab7341d7abede59cd4b2b3ac62dc3"
     },
     {
       "path": "scripts/rls/lib/restricted-owner-projection-contract.mjs",
@@ -5477,6 +5477,29 @@
     {
       "tableId": "table-licensee",
       "table": "Licensee",
+      "policyName": "c04_account_onboarding_diagnostic_licensee_select",
+      "command": "SELECT",
+      "actors": [
+        "operator"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "operator-account-onboarding-diagnostic"
+      ],
+      "scopeType": "security-definer-owner-and-fixed-normalized-email-selector",
+      "scopePredicate": "current_user='mscqr_rls_cert_owner' AND session_user='mscqr_rls_cert_operator' AND current_setting('app.context_installed',true)='1' AND current_setting('app.purpose',true)='operator-account-onboarding-diagnostic' AND current_setting('app.auth_assurance',true)='operator-approved' AND current_setting('app.operator_environment',true)='certification'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:c04-diagnose-account-onboarding:Licensee:SELECT"
+      ],
+      "workflowId": null,
+      "route": "C04 brokered account-onboarding diagnostic",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-licensee",
+      "table": "Licensee",
       "policyName": "full_rls_internal_authowner_licensee_select",
       "name": "full_rls_internal_authowner_licensee_select",
       "command": "SELECT",
@@ -6644,6 +6667,29 @@
       ],
       "workflowId": null,
       "route": "C03 exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-organization",
+      "table": "Organization",
+      "policyName": "c04_account_onboarding_diagnostic_organization_select",
+      "command": "SELECT",
+      "actors": [
+        "operator"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "operator-account-onboarding-diagnostic"
+      ],
+      "scopeType": "security-definer-owner-and-fixed-normalized-email-selector",
+      "scopePredicate": "current_user='mscqr_rls_cert_owner' AND session_user='mscqr_rls_cert_operator' AND current_setting('app.context_installed',true)='1' AND current_setting('app.purpose',true)='operator-account-onboarding-diagnostic' AND current_setting('app.auth_assurance',true)='operator-approved' AND current_setting('app.operator_environment',true)='certification'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:c04-diagnose-account-onboarding:Organization:SELECT"
+      ],
+      "workflowId": null,
+      "route": "C04 brokered account-onboarding diagnostic",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },
@@ -11652,55 +11698,55 @@
       "key": "owner",
       "name": "mscqr_rls_cert_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:171abff4bf8c7e3af38af2cef61156906c26d5b7b6ff103e0d881f83ee59c22b"
+      "marker": "mscqr-full-rls-clean-room:certification:72821975b93deadca1e800a4e6769a4c1287a540ad30552b9625a868c4010076"
     },
     {
       "key": "authOwner",
       "name": "mscqr_rls_cert_auth_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:171abff4bf8c7e3af38af2cef61156906c26d5b7b6ff103e0d881f83ee59c22b"
+      "marker": "mscqr-full-rls-clean-room:certification:72821975b93deadca1e800a4e6769a4c1287a540ad30552b9625a868c4010076"
     },
     {
       "key": "app",
       "name": "mscqr_rls_cert_app",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:171abff4bf8c7e3af38af2cef61156906c26d5b7b6ff103e0d881f83ee59c22b"
+      "marker": "mscqr-full-rls-clean-room:certification:72821975b93deadca1e800a4e6769a4c1287a540ad30552b9625a868c4010076"
     },
     {
       "key": "read",
       "name": "mscqr_rls_cert_read",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:171abff4bf8c7e3af38af2cef61156906c26d5b7b6ff103e0d881f83ee59c22b"
+      "marker": "mscqr-full-rls-clean-room:certification:72821975b93deadca1e800a4e6769a4c1287a540ad30552b9625a868c4010076"
     },
     {
       "key": "preauth",
       "name": "mscqr_rls_cert_preauth",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:171abff4bf8c7e3af38af2cef61156906c26d5b7b6ff103e0d881f83ee59c22b"
+      "marker": "mscqr-full-rls-clean-room:certification:72821975b93deadca1e800a4e6769a4c1287a540ad30552b9625a868c4010076"
     },
     {
       "key": "worker",
       "name": "mscqr_rls_cert_worker",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:171abff4bf8c7e3af38af2cef61156906c26d5b7b6ff103e0d881f83ee59c22b"
+      "marker": "mscqr-full-rls-clean-room:certification:72821975b93deadca1e800a4e6769a4c1287a540ad30552b9625a868c4010076"
     },
     {
       "key": "scheduled",
       "name": "mscqr_rls_cert_scheduled",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:171abff4bf8c7e3af38af2cef61156906c26d5b7b6ff103e0d881f83ee59c22b"
+      "marker": "mscqr-full-rls-clean-room:certification:72821975b93deadca1e800a4e6769a4c1287a540ad30552b9625a868c4010076"
     },
     {
       "key": "operator",
       "name": "mscqr_rls_cert_operator",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:171abff4bf8c7e3af38af2cef61156906c26d5b7b6ff103e0d881f83ee59c22b"
+      "marker": "mscqr-full-rls-clean-room:certification:72821975b93deadca1e800a4e6769a4c1287a540ad30552b9625a868c4010076"
     },
     {
       "key": "migration",
       "name": "mscqr_rls_cert_migration",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:171abff4bf8c7e3af38af2cef61156906c26d5b7b6ff103e0d881f83ee59c22b"
+      "marker": "mscqr-full-rls-clean-room:certification:72821975b93deadca1e800a4e6769a4c1287a540ad30552b9625a868c4010076"
     }
   ]
 }

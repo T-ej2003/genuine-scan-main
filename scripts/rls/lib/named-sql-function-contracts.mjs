@@ -100,6 +100,8 @@ const accountOnboardingDiagnosticSecurity = Object.freeze({
   ownerPolicies: [
     ["User", "SELECT", accountOnboardingDiagnosticOwner],
     ["Invite", "SELECT", accountOnboardingDiagnosticOwner],
+    ["Organization", "SELECT", accountOnboardingDiagnosticOwner],
+    ["Licensee", "SELECT", accountOnboardingDiagnosticOwner],
     ["AdminMfaCredential", "SELECT", accountOnboardingDiagnosticOwner],
     ["AdminWebAuthnCredential", "SELECT", accountOnboardingDiagnosticOwner],
     ["UserMfaFactor", "SELECT", accountOnboardingDiagnosticOwner],
@@ -2009,7 +2011,7 @@ export const NAMED_SQL_FUNCTION_CONTRACTS = Object.freeze([
     id: "c04-diagnose-account-onboarding", schema: "app_ops", name: "diagnose_account_onboarding", signature: "text", returnType: "TABLE(invite_count bigint, latest_created_at timestamp without time zone, latest_expires_at timestamp without time zone, latest_used_at timestamp without time zone, latest_expired boolean, latest_role text, latest_tenant_binding jsonb, latest_accepted_by_present boolean, account_exists boolean, account_status text, account_active boolean, account_email_verified boolean, password_configured boolean, account_role text, account_tenant_binding jsonb, mfa_configured boolean, invite_created_present boolean, invite_accepted_present boolean, mfa_enrolled_present boolean, state_classification text)",
     identityArguments: "p_normalized_email text", definitionLocation: accountOnboardingDiagnosticSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed",
     security: accountOnboardingDiagnosticSecurity,
-    tableCommands: [["User", "SELECT"], ["Invite", "SELECT"], ["AdminMfaCredential", "SELECT"], ["AdminWebAuthnCredential", "SELECT"], ["UserMfaFactor", "SELECT"], ["AuditLog", "SELECT"], ["AuditLogOutbox", "SELECT"]],
+    tableCommands: [["User", "SELECT"], ["Invite", "SELECT"], ["Organization", "SELECT"], ["Licensee", "SELECT"], ["AdminMfaCredential", "SELECT"], ["AdminWebAuthnCredential", "SELECT"], ["UserMfaFactor", "SELECT"], ["AuditLog", "SELECT"], ["AuditLogOutbox", "SELECT"]],
     context: "Runs one normalized email selector in a SERIALIZABLE READ ONLY, broker-attributed operator transaction and returns only bounded onboarding state; the broker emits the external invocation audit.",
     canonicalWorkflowIds: [], repositoryCallers: ["backend/src/rls-waves/session-c/operatorProcedureService.ts:diagnoseAccountOnboarding"],
     inputAuthority: "one normalized email is an equality selector only; the exact brokered operator, target environment, approved purpose, and active platform actor are database-revalidated",

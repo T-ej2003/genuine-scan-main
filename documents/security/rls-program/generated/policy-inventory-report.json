@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "count": 358,
+  "count": 360,
   "rows": [
     {
       "tableId": "table-action-idempotency-key",
@@ -4189,6 +4189,29 @@
     {
       "tableId": "table-licensee",
       "table": "Licensee",
+      "policyName": "c04_account_onboarding_diagnostic_licensee_select",
+      "command": "SELECT",
+      "actors": [
+        "operator"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "operator-account-onboarding-diagnostic"
+      ],
+      "scopeType": "security-definer-owner-and-fixed-normalized-email-selector",
+      "scopePredicate": "current_user='mscqr_rls_cert_owner' AND session_user='mscqr_rls_cert_operator' AND current_setting('app.context_installed',true)='1' AND current_setting('app.purpose',true)='operator-account-onboarding-diagnostic' AND current_setting('app.auth_assurance',true)='operator-approved' AND current_setting('app.operator_environment',true)='certification'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:c04-diagnose-account-onboarding:Licensee:SELECT"
+      ],
+      "workflowId": null,
+      "route": "C04 brokered account-onboarding diagnostic",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-licensee",
+      "table": "Licensee",
       "policyName": "full_rls_internal_authowner_licensee_select",
       "name": "full_rls_internal_authowner_licensee_select",
       "command": "SELECT",
@@ -5356,6 +5379,29 @@
       ],
       "workflowId": null,
       "route": "C03 exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-organization",
+      "table": "Organization",
+      "policyName": "c04_account_onboarding_diagnostic_organization_select",
+      "command": "SELECT",
+      "actors": [
+        "operator"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "operator-account-onboarding-diagnostic"
+      ],
+      "scopeType": "security-definer-owner-and-fixed-normalized-email-selector",
+      "scopePredicate": "current_user='mscqr_rls_cert_owner' AND session_user='mscqr_rls_cert_operator' AND current_setting('app.context_installed',true)='1' AND current_setting('app.purpose',true)='operator-account-onboarding-diagnostic' AND current_setting('app.auth_assurance',true)='operator-approved' AND current_setting('app.operator_environment',true)='certification'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:c04-diagnose-account-onboarding:Organization:SELECT"
+      ],
+      "workflowId": null,
+      "route": "C04 brokered account-onboarding diagnostic",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },

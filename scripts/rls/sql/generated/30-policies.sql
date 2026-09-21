@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='171abff4bf8c7e3af38af2cef61156906c26d5b7b6ff103e0d881f83ee59c22b'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:171abff4bf8c7e3af38af2cef61156906c26d5b7b6ff103e0d881f83ee59c22b'
+    AND source_contract_sha256='72821975b93deadca1e800a4e6769a4c1287a540ad30552b9625a868c4010076'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:72821975b93deadca1e800a4e6769a4c1287a540ad30552b9625a868c4010076'
     AND administrator_role='certification-administrator'
 
     AND phase='runtime-grants-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:171abff4bf8c7e3af38af2cef61156906c26d5b7b6ff103e0d881f83ee59c22b')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:72821975b93deadca1e800a4e6769a4c1287a540ad30552b9625a868c4010076')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -994,6 +994,10 @@ CREATE POLICY "c04_account_onboarding_diagnostic_user_select" ON public."User" A
 COMMENT ON POLICY "c04_account_onboarding_diagnostic_user_select" ON public."User" IS '{"boundary":"c04-account-onboarding-diagnostic","ownerIdentity":"identity-table-owner","scope":"exact brokered operator and fixed normalized-email diagnostic context"}';
 CREATE POLICY "c04_account_onboarding_diagnostic_invite_select" ON public."Invite" AS PERMISSIVE FOR SELECT TO "mscqr_rls_cert_owner" USING (current_user='mscqr_rls_cert_owner' AND session_user='mscqr_rls_cert_operator' AND current_setting('app.context_installed',true)='1' AND current_setting('app.purpose',true)='operator-account-onboarding-diagnostic' AND current_setting('app.auth_assurance',true)='operator-approved' AND current_setting('app.operator_environment',true)='certification');
 COMMENT ON POLICY "c04_account_onboarding_diagnostic_invite_select" ON public."Invite" IS '{"boundary":"c04-account-onboarding-diagnostic","ownerIdentity":"identity-table-owner","scope":"exact brokered operator and fixed normalized-email diagnostic context"}';
+CREATE POLICY "c04_account_onboarding_diagnostic_organization_select" ON public."Organization" AS PERMISSIVE FOR SELECT TO "mscqr_rls_cert_owner" USING (current_user='mscqr_rls_cert_owner' AND session_user='mscqr_rls_cert_operator' AND current_setting('app.context_installed',true)='1' AND current_setting('app.purpose',true)='operator-account-onboarding-diagnostic' AND current_setting('app.auth_assurance',true)='operator-approved' AND current_setting('app.operator_environment',true)='certification');
+COMMENT ON POLICY "c04_account_onboarding_diagnostic_organization_select" ON public."Organization" IS '{"boundary":"c04-account-onboarding-diagnostic","ownerIdentity":"identity-table-owner","scope":"exact brokered operator and fixed normalized-email diagnostic context"}';
+CREATE POLICY "c04_account_onboarding_diagnostic_licensee_select" ON public."Licensee" AS PERMISSIVE FOR SELECT TO "mscqr_rls_cert_owner" USING (current_user='mscqr_rls_cert_owner' AND session_user='mscqr_rls_cert_operator' AND current_setting('app.context_installed',true)='1' AND current_setting('app.purpose',true)='operator-account-onboarding-diagnostic' AND current_setting('app.auth_assurance',true)='operator-approved' AND current_setting('app.operator_environment',true)='certification');
+COMMENT ON POLICY "c04_account_onboarding_diagnostic_licensee_select" ON public."Licensee" IS '{"boundary":"c04-account-onboarding-diagnostic","ownerIdentity":"identity-table-owner","scope":"exact brokered operator and fixed normalized-email diagnostic context"}';
 CREATE POLICY "c04_account_onboarding_diagnostic_adminmfacredential_select" ON public."AdminMfaCredential" AS PERMISSIVE FOR SELECT TO "mscqr_rls_cert_owner" USING (current_user='mscqr_rls_cert_owner' AND session_user='mscqr_rls_cert_operator' AND current_setting('app.context_installed',true)='1' AND current_setting('app.purpose',true)='operator-account-onboarding-diagnostic' AND current_setting('app.auth_assurance',true)='operator-approved' AND current_setting('app.operator_environment',true)='certification');
 COMMENT ON POLICY "c04_account_onboarding_diagnostic_adminmfacredential_select" ON public."AdminMfaCredential" IS '{"boundary":"c04-account-onboarding-diagnostic","ownerIdentity":"identity-table-owner","scope":"exact brokered operator and fixed normalized-email diagnostic context"}';
 CREATE POLICY "c04_account_onboarding_diagnostic_adminwebauthncrede_9cdacdd348" ON public."AdminWebAuthnCredential" AS PERMISSIVE FOR SELECT TO "mscqr_rls_cert_owner" USING (current_user='mscqr_rls_cert_owner' AND session_user='mscqr_rls_cert_operator' AND current_setting('app.context_installed',true)='1' AND current_setting('app.purpose',true)='operator-account-onboarding-diagnostic' AND current_setting('app.auth_assurance',true)='operator-approved' AND current_setting('app.operator_environment',true)='certification');
