@@ -299,9 +299,10 @@ test("normal production workflow is fixed, OIDC-only, gated by main, and smoke-t
   assert.match(workflow, /name: Normal Production Deployment/);
   assert.match(workflow, /branches: \[main\]/);
   assert.match(workflow, /workflow_dispatch:[\s\S]*baseline:/);
-  assert.match(workflow, /baseline_source_sha:/);
   assert.match(workflow, /test "\$GITHUB_RUN_ATTEMPT" = "1"/);
-  assert.match(workflow, /test "\$BASELINE_SOURCE_SHA" = "\$GITHUB_SHA"/);
+  assert.match(workflow, /repos\/\$GITHUB_REPOSITORY\/pulls\/555/);
+  assert.match(workflow, /select\(\.merged == true and \.base\.ref == "main"\)/);
+  assert.match(workflow, /test "\$baseline_merge_sha" = "\$GITHUB_SHA"/);
   assert.match(workflow, /configure-aws-credentials@v6/);
   assert.match(workflow, /MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-release-deployer/);
   assert.match(workflow, /SMOKE_AUTHENTICATED_REQUIRED: "true"/);
