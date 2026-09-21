@@ -19,12 +19,11 @@ const workflow = yaml.load(workflowText);
 const sha = "a".repeat(40);
 const cleanState = { remoteDefaultBranch: "main", shallow: false, mergeInProgress: false, rebaseInProgress: false, cherryPickInProgress: false };
 
-test("component workflows gate credentials and mutation behind exact protected environments", () => {
+test("normal deployment has one protected mutation job and leaves stronger lanes unchanged", () => {
   const bootstrap = yaml.load(fs.readFileSync(".github/workflows/bootstrap-production-component-deployment-state.yml", "utf8"));
   const activation = yaml.load(fs.readFileSync(".github/workflows/authorize-component-infrastructure-activation.yml", "utf8"));
   for (const [job, environment, command] of [
-    [workflow.jobs.classify, "production-normal-deploy", "production-normal-release.mjs --reconcile"],
-    [workflow.jobs.deploy, "production-normal-deploy", "production-normal-release.mjs --source-sha"],
+    [workflow.jobs.deploy, "production-normal-deploy", "deploy-ecs-service.sh"],
     [bootstrap.jobs.bootstrap, "production-component-state-bootstrap", "bootstrap-production-component-deployment-state.mjs"],
   ]) {
     // GitHub evaluates required reviewers before starting any environment job,
@@ -37,9 +36,9 @@ test("component workflows gate credentials and mutation behind exact protected e
     assert(job.steps.some((step) => step.run?.includes("refs/remotes/origin/main")));
   }
   assert.equal(bootstrap.jobs.bootstrap.if, "github.ref == 'refs/heads/main'");
-  assert.equal(workflow.jobs.classify.if, "github.ref == 'refs/heads/main'");
+  assert.equal(workflow.jobs.classify.environment, undefined);
   assert(workflow.jobs.deploy.needs.includes("classify"));
-  assert(workflow.jobs.deploy.if.includes("needs.classify.result == 'success'"));
+  assert(workflow.jobs.deploy.if.includes("needs.classify.outputs.release_class == 'NORMAL_APPLICATION'"));
   assert.equal(activation.jobs.authorize.environment, "production-component-infrastructure-activation");
   assert.equal(activation.jobs.authorize.if, "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'");
   assert.deepEqual(activation.permissions, { contents: "read" });
@@ -47,10 +46,9 @@ test("component workflows gate credentials and mutation behind exact protected e
 });
 
 test("normal production deployment is automatically triggered from protected main", () => {
-  assert.ok(Object.hasOwn(workflow.on || workflow[true] || {}, "workflow_dispatch"));
   assert.ok(workflow.on?.push?.branches?.includes("main") || workflow[true]?.push?.branches?.includes("main"));
   assert.match(workflowText, /ref: '\$\{\{ github\.sha \}\}'/);
-  assert.match(workflowText, /prepare-production-normal-deployment\.mjs/);
+  assert.match(workflowText, /classify-production-lane-a\.mjs/);
 });
 
 test("normal workflow rejects non-main dispatch and verifies exact protected source", () => {
@@ -62,7 +60,8 @@ test("normal workflow rejects non-main dispatch and verifies exact protected sou
 });
 
 test("workflow is OIDC-only, serialized, and uses fixed production boundaries", () => {
-  assert.deepEqual(workflow.permissions, { contents: "read", "id-token": "write" });
+  assert.deepEqual(workflow.permissions, { contents: "read" });
+  assert.deepEqual(workflow.jobs.deploy.permissions, { contents: "read", "id-token": "write" });
   assert.equal(workflow.concurrency["cancel-in-progress"], false);
   assert.equal(workflow.concurrency.group, "production-deploy");
   assert.match(workflowText, /configure-aws-credentials@v6/);
@@ -71,27 +70,20 @@ test("workflow is OIDC-only, serialized, and uses fixed production boundaries", 
   assert.match(workflowText, /368992683803/);
   assert.match(workflowText, /eu-west-2/);
   assert.match(workflowText, /environment: production/);
-  assert.match(workflowText, /actions\/upload-artifact@v7/);
+  assert.doesNotMatch(workflowText, /actions\/upload-artifact@v7/);
 });
 
-test("runner-scoped journal paths are evaluated only at step scope", () => {
-  assert.equal(Object.hasOwn(workflow.jobs.deploy.env || {}, "MSCQR_APP_ONLY_JOURNAL_DIR"), false);
-  assert.equal(Object.hasOwn(workflow.jobs.classify.env || {}, "MSCQR_APP_ONLY_JOURNAL_DIR"), false);
-  const deployStep = workflow.jobs.deploy.steps.find((step) => step.name === "Deploy coordinated normal release");
-  assert.equal(deployStep.env.MSCQR_APP_ONLY_JOURNAL_DIR, "${{ runner.temp }}/normal-release-journal");
+test("normal workflow has no custom preparation, authorization, or journal protocol", () => {
+  assert.doesNotMatch(workflowText, /preparation|authorization artifact|MSCQR_APP_ONLY_JOURNAL_DIR|component-deployment-state/i);
 });
 
-test("current-main reconciliation precedes range classification and publication with protected smoke and always-upload", () => {
-  const job = workflow.jobs.classify;
-  assert.equal(job.environment, "production-normal-deploy");
-  assert.equal(job.env.SMOKE_AUTHENTICATED_REQUIRED, "true");
-  const step = job.steps.find((entry) => entry.id === "classify");
-  assert.ok(step.run.indexOf('test "$GITHUB_SHA"') < step.run.indexOf("production-normal-release.mjs --reconcile"));
-  assert.ok(step.run.indexOf("production-normal-release.mjs --reconcile") < step.run.indexOf("prepare-production-normal-deployment.mjs"));
-  const upload = job.steps.find((entry) => entry.name === "Preserve normal reconciliation journal");
-  assert.equal(upload.if, "always()");
-  assert.equal(workflow.jobs["publish-backend"].needs, "classify");
-  assert.equal(workflow.jobs["publish-frontend"].needs, "classify");
+test("live baseline authentication precedes publication and rollback is failure-only", () => {
+  const steps = workflow.jobs.deploy.steps;
+  assert.ok(steps.findIndex(({ name }) => name === "Authenticate live deployment baseline") < steps.findIndex(({ name }) => name === "Publish immutable backend image"));
+  assert.equal(steps.find(({ name }) => name === "Roll back exact predecessors after failure").if, "failure()");
+  assert.match(steps.find(({ name }) => name === "Sign and attest published images").env.COSIGN_CERT_IDENTITY_REGEXP, /production-deploy\.yml/);
+  assert.equal(workflow.jobs.deploy.environment, "production-normal-deploy");
+  assert.equal(workflow.jobs.deploy.env.SMOKE_AUTHENTICATED_REQUIRED, "true");
 });
 
 test("fixed orchestrator command set contains no mutation boundary", () => {
@@ -184,13 +176,20 @@ test("deployment mode is an executable kill switch", () => {
 });
 
 test("normal workflow has authenticated smoke and preserves the read-only orchestrator as a separate tool", () => {
-  const normalRelease = fs.readFileSync(path.resolve("scripts/aws/production-normal-release.mjs"), "utf8");
-  assert.match(workflowText, /node scripts\/aws\/production-normal-release\.mjs/);
-  assert.match(normalRelease, /runNormalSmoke\(repositoryRoot\)/);
-  assert.match(normalRelease, /executeAppOnlyActivation\(preparation/);
-  assert.match(normalRelease, /executeNormalFrontendActivation\(/);
+  assert.match(workflowText, /node scripts\/smoke-release\.mjs/);
+  assert.match(workflowText, /deploy-ecs-service\.sh/);
+  assert.match(workflowText, /rollback-ecs-service\.sh/);
   assert.match(workflowText, /SMOKE_AUTHENTICATED_REQUIRED: "true"/);
   assert.doesNotMatch(workflowText, /scripts\/ci\/production-readiness-orchestrator\.mjs/);
+});
+
+test("frontend records immutable source metadata without requesting an unavailable version endpoint", () => {
+  const step = workflow.jobs.deploy.steps.find(({ name }) => name === "Deploy frontend");
+  assert.equal(step.env.ENV_UPDATES, "GIT_SHA,RELEASE_GIT_SHA");
+  assert.equal(step.env.GIT_SHA, "${{ github.sha }}");
+  assert.equal(step.env.RELEASE_GIT_SHA, "${{ github.sha }}");
+  assert.equal(step.env.EXPECTED_GIT_SHA, undefined);
+  assert.equal(step.env.VERSION_URL, undefined);
 });
 
 test("read-only orchestrator writes a bounded success report without mutation commands", () => {

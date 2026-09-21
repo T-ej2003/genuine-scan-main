@@ -228,7 +228,19 @@ reject_generic_stage_b_registration() {
   family="${family##*/}"
   family="${family%%:*}"
   case "$family" in
-    mscqr-production-rls-green-backend-candidate|mscqr-production-rls-green-worker-candidate|mscqr-production-full-rls-green-application-canary|mscqr-production-full-rls-green-read-only-canary|mscqr-production-full-rls-green-*)
+    mscqr-production-rls-green-backend-candidate)
+      if [[ "${MSCQR_NORMAL_APPLICATION_DEPLOYMENT:-false}" == "true" ]]; then
+        caller="$(aws sts get-caller-identity --query Arn --output text)"
+        [[ "$caller" =~ ^arn:aws:sts::368992683803:assumed-role/mscqr-production-normal-deployer/[^/]+$ ]] || {
+          echo "Normal application backend registration requires the production normal-deployer identity." >&2
+          exit 1
+        }
+        return
+      fi
+      echo "The production backend family requires the normal application deployment lane." >&2
+      exit 1
+      ;;
+    mscqr-production-rls-green-worker-candidate|mscqr-production-full-rls-green-application-canary|mscqr-production-full-rls-green-read-only-canary|mscqr-production-full-rls-green-*)
       echo "Stage-B managed task-definition families must be registered by Terraform or the governed rotation producer, not deploy-ecs-service.sh." >&2
       exit 1
       ;;
@@ -252,10 +264,11 @@ verify_deployed_version_if_requested() {
 validate_service_load_balancer_compatibility() {
   local service_path="$1"
   local task_definition_path="$2"
-  node --input-type=module - "$service_path" "$task_definition_path" "$CONTAINER_NAME" <<'NODE'
+  local require_current="${3:-false}"
+  node --input-type=module - "$service_path" "$task_definition_path" "$CONTAINER_NAME" "$require_current" <<'NODE'
 import fs from "node:fs";
 
-const [servicePath, taskDefinitionPath, expectedContainerName] = process.argv.slice(2);
+const [servicePath, taskDefinitionPath, expectedContainerName, requireCurrent] = process.argv.slice(2);
 const serviceResponse = JSON.parse(fs.readFileSync(servicePath, "utf8"));
 const taskResponse = JSON.parse(fs.readFileSync(taskDefinitionPath, "utf8"));
 const fail = (message) => { throw new Error(`ECS service/task-definition compatibility failed: ${message}`); };
@@ -263,6 +276,7 @@ if (!Array.isArray(serviceResponse.failures) || serviceResponse.failures.length 
 const service = serviceResponse.services[0];
 if (!Array.isArray(service.loadBalancers) || service.loadBalancers.length === 0) fail("service load-balancer contract is missing.");
 const definition = taskResponse.taskDefinition || taskResponse;
+if (requireCurrent === "true" && service.taskDefinition !== definition.taskDefinitionArn) fail("service task definition changed before registration.");
 const containers = Array.isArray(definition.containerDefinitions) ? definition.containerDefinitions : [];
 for (const loadBalancer of service.loadBalancers) {
   if (typeof loadBalancer.containerName !== "string" || loadBalancer.containerName !== expectedContainerName || !Number.isInteger(loadBalancer.containerPort)) fail("service load-balancer binding is malformed or names a different container.");
@@ -887,6 +901,7 @@ aws ecs describe-services \
   --cluster "$CLUSTER_NAME" \
   --services "$SERVICE_NAME" \
   >"$EXISTING_SERVICE_FILE"
+validate_service_load_balancer_compatibility "$EXISTING_SERVICE_FILE" "$RAW_FILE" true
 validate_service_load_balancer_compatibility "$EXISTING_SERVICE_FILE" "$PAYLOAD_FILE"
 
 PREVIOUS_TASK_DEFINITION_ARN="$(
@@ -906,6 +921,14 @@ NEW_TASK_DEFINITION_ARN="$(
     --output text
 )"
 
+if [[ -n "${METADATA_FILE:-}" ]]; then
+  node --input-type=module - "$METADATA_FILE" "$CLUSTER_NAME" "$SERVICE_NAME" "$CONTAINER_NAME" "$IMAGE_URI" "$PREVIOUS_TASK_DEFINITION_ARN" "$NEW_TASK_DEFINITION_ARN" <<'NODE'
+import fs from "node:fs";
+const [outPath, clusterName, serviceName, containerName, imageUri, previousTaskDefinitionArn, newTaskDefinitionArn] = process.argv.slice(2);
+fs.writeFileSync(outPath, JSON.stringify({ clusterName, serviceName, containerName, imageUri, previousTaskDefinitionArn, newTaskDefinitionArn }, null, 2));
+NODE
+fi
+
 update_args=(aws ecs update-service \
   --region "$AWS_REGION" \
   --cluster "$CLUSTER_NAME" \
@@ -914,24 +937,6 @@ update_args=(aws ecs update-service \
 if [[ "$ENABLE_EXECUTE_COMMAND" == "true" ]]; then update_args+=(--enable-execute-command); fi
 if [[ -n "${PROPAGATE_TAGS:-}" ]]; then update_args+=(--propagate-tags "$PROPAGATE_TAGS"); fi
 "${update_args[@]}" >/dev/null
-
-if [[ -n "${METADATA_FILE:-}" ]]; then
-  node --input-type=module - "$METADATA_FILE" "$CLUSTER_NAME" "$SERVICE_NAME" "$CONTAINER_NAME" "$IMAGE_URI" "$PREVIOUS_TASK_DEFINITION_ARN" "$NEW_TASK_DEFINITION_ARN" <<'NODE'
-import fs from "node:fs";
-
-const [outPath, clusterName, serviceName, containerName, imageUri, previousTaskDefinitionArn, newTaskDefinitionArn] =
-  process.argv.slice(2);
-const payload = {
-  clusterName,
-  serviceName,
-  containerName,
-  imageUri,
-  previousTaskDefinitionArn,
-  newTaskDefinitionArn,
-};
-fs.writeFileSync(outPath, JSON.stringify(payload, null, 2));
-NODE
-fi
 
 if [[ "$WAIT_FOR_STABLE" == "true" ]]; then
   aws ecs wait services-stable \
