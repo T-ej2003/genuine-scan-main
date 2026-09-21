@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='d0c2095a8b0793c08acbe7aa69eed1f69e88f3e17a7fb665b5c83e6ca2aeb00c'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:d0c2095a8b0793c08acbe7aa69eed1f69e88f3e17a7fb665b5c83e6ca2aeb00c'
+    AND source_contract_sha256='c77fc0d30c7987888e92f3a9935c8eeac9ba553640d097c9bb34f1a591178b8f'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:c77fc0d30c7987888e92f3a9935c8eeac9ba553640d097c9bb34f1a591178b8f'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:d0c2095a8b0793c08acbe7aa69eed1f69e88f3e17a7fb665b5c83e6ca2aeb00c')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:c77fc0d30c7987888e92f3a9935c8eeac9ba553640d097c9bb34f1a591178b8f')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -13743,6 +13743,7 @@ DECLARE
   target_password_configured boolean := false;
   target_email_verified boolean := false;
   target_mfa_configured boolean := false;
+  observed_at timestamp without time zone := clock_timestamp();
   accepted_invite_for_target boolean := false;
   invite_created boolean := false;
   invite_accepted boolean := false;
@@ -13778,11 +13779,11 @@ BEGIN
     RAISE EXCEPTION 'SESSION_C04_PLATFORM_ACTOR_REQUIRED';
   END IF;
 
-  SELECT count(*) INTO invite_count FROM public."Invite" i WHERE i.email=normalized_email;
+  SELECT count(*) INTO invite_count FROM public."Invite" i WHERE lower(i.email)=normalized_email;
   SELECT i."createdAt",i."expiresAt",i."usedAt",i.role::text,i."orgId",i."licenseeId",i."acceptedByUserId"
     INTO latest_created,latest_expires,latest_used,latest_invite_role,latest_org_id,latest_licensee_id,latest_accepted_by_id
     FROM public."Invite" i
-   WHERE i.email=normalized_email
+   WHERE lower(i.email)=normalized_email
    ORDER BY i."createdAt" DESC,i.id DESC
    LIMIT 1;
   latest_exists := FOUND;
@@ -13802,7 +13803,7 @@ BEGIN
     target_email_verified := target_email_verified_at IS NOT NULL;
     accepted_invite_for_target := EXISTS (
       SELECT 1 FROM public."Invite" i
-       WHERE i.email=normalized_email AND i."usedAt" IS NOT NULL AND i."acceptedByUserId"=target_id
+       WHERE lower(i.email)=normalized_email AND i."usedAt" IS NOT NULL AND i."acceptedByUserId"=target_id
     );
     target_mfa_configured := EXISTS (
       SELECT 1 FROM public."AdminMfaCredential" c WHERE c."userId"=target_id AND c."isEnabled"
@@ -13819,51 +13820,51 @@ BEGIN
   invite_created := EXISTS (
     SELECT 1 FROM public."AuditLog" a
      WHERE a.action='AUTH_INVITE_CREATED' AND a."entityType"='Invite'
-       AND a."entityId" IN (SELECT i.id FROM public."Invite" i WHERE i.email=normalized_email)
+       AND a."entityId" IN (SELECT i.id FROM public."Invite" i WHERE lower(i.email)=normalized_email)
   ) OR EXISTS (
     SELECT 1 FROM public."AuditLogOutbox" o
      WHERE o.payload->>'action'='AUTH_INVITE_CREATED'
        AND o.payload->>'entityType'='Invite'
-       AND o.payload->>'entityId' IN (SELECT i.id FROM public."Invite" i WHERE i.email=normalized_email)
+       AND o.payload->>'entityId' IN (SELECT i.id FROM public."Invite" i WHERE lower(i.email)=normalized_email)
   );
   invite_accepted := EXISTS (
     SELECT 1 FROM public."AuditLog" a
      WHERE a.action='AUTH_INVITE_ACCEPTED' AND (
-       (a."entityType"='Invite' AND a."entityId" IN (SELECT i.id FROM public."Invite" i WHERE i.email=normalized_email))
+       (a."entityType"='Invite' AND a."entityId" IN (SELECT i.id FROM public."Invite" i WHERE lower(i.email)=normalized_email))
        OR (target_exists AND a."entityType"='User' AND a."entityId"=target_id)
      )
   ) OR EXISTS (
     SELECT 1 FROM public."AuditLogOutbox" o
      WHERE o.payload->>'action'='AUTH_INVITE_ACCEPTED' AND (
-       (o.payload->>'entityType'='Invite' AND o.payload->>'entityId' IN (SELECT i.id FROM public."Invite" i WHERE i.email=normalized_email))
+       (o.payload->>'entityType'='Invite' AND o.payload->>'entityId' IN (SELECT i.id FROM public."Invite" i WHERE lower(i.email)=normalized_email))
        OR (target_exists AND o.payload->>'entityType'='User' AND o.payload->>'entityId'=target_id)
      )
   );
   mfa_enrolled := target_exists AND (EXISTS (
     SELECT 1 FROM public."AuditLog" a
-     WHERE a.action='AUTH_MFA_ENROLLED' AND a."entityType"='User' AND a."entityId"=target_id
+     WHERE a.action IN ('AUTH_MFA_ENROLLED','AUTH_WEBAUTHN_ENROLLED') AND a."entityType"='User' AND a."entityId"=target_id
   ) OR EXISTS (
     SELECT 1 FROM public."AuditLogOutbox" o
-     WHERE o.payload->>'action'='AUTH_MFA_ENROLLED' AND o.payload->>'entityType'='User' AND o.payload->>'entityId'=target_id
+     WHERE o.payload->>'action' IN ('AUTH_MFA_ENROLLED','AUTH_WEBAUTHN_ENROLLED') AND o.payload->>'entityType'='User' AND o.payload->>'entityId'=target_id
   ));
 
-  IF NOT target_exists AND latest_exists AND latest_used IS NULL AND latest_expires <= clock_timestamp() THEN
+  IF NOT target_exists AND latest_exists AND latest_used IS NULL AND latest_expires <= observed_at THEN
     classification := 'A_EXPIRED_UNUSED_INVITE_NO_ACCOUNT';
-  ELSIF target_exists AND NOT target_active AND latest_exists AND latest_used IS NULL AND latest_expires <= clock_timestamp() THEN
+  ELSIF target_exists AND NOT target_active AND latest_exists AND latest_used IS NULL AND latest_expires <= observed_at THEN
     classification := 'B_EXPIRED_UNUSED_INVITE_EXISTING_UNACTIVATED_ACCOUNT';
   ELSIF target_exists AND target_active AND target_password_configured AND target_email_verified AND accepted_invite_for_target AND NOT target_mfa_configured THEN
     classification := 'C_ACTIVATED_ACCOUNT_MFA_INCOMPLETE';
   ELSIF target_exists AND target_active AND target_password_configured AND target_email_verified AND accepted_invite_for_target AND target_mfa_configured THEN
     classification := 'D_ACTIVATED_ACCOUNT_MFA_COMPLETE';
-  ELSIF NOT target_exists AND latest_exists AND latest_used IS NULL AND latest_expires > clock_timestamp() THEN
+  ELSIF NOT target_exists AND latest_exists AND latest_used IS NULL AND latest_expires > observed_at THEN
     classification := 'F_VALID_UNUSED_INVITE_NO_ACCOUNT';
-  ELSIF target_exists AND NOT target_active AND latest_exists AND latest_used IS NULL AND latest_expires > clock_timestamp() THEN
+  ELSIF target_exists AND NOT target_active AND latest_exists AND latest_used IS NULL AND latest_expires > observed_at THEN
     classification := 'F_VALID_UNUSED_INVITE_EXISTING_UNACTIVATED_ACCOUNT';
   END IF;
 
   RETURN QUERY SELECT
     invite_count,latest_created,latest_expires,latest_used,
-    CASE WHEN latest_exists THEN latest_expires <= clock_timestamp() ELSE NULL END,
+    CASE WHEN latest_exists THEN latest_expires <= observed_at ELSE NULL END,
     latest_invite_role,
     CASE WHEN latest_exists THEN jsonb_build_object('organizationId',latest_org_id,'licenseeId',latest_licensee_id) ELSE NULL END,
     CASE WHEN latest_exists THEN latest_accepted_by_id IS NOT NULL ELSE NULL END,
