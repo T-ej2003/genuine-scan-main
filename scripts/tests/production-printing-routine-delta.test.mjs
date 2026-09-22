@@ -54,7 +54,7 @@ const harness = ({ classifications = [RLS_PROBE_CLASSIFICATIONS.EXPECTED, RLS_PR
     async $executeRawUnsafe(sql) { commands.push(sql); if (sql.startsWith("CREATE OR REPLACE FUNCTION")) { creates++; if (creates === failCreate) throw new Error("injected replacement failure"); } },
     async $queryRawUnsafe(sql) { commands.push(sql); return sql.includes("pg_advisory_xact_lock") ? [] : ownerRows; },
   };
-  const collect = async () => ({ identity: observedIdentity, marker: reads++ });
+  const collect = async (_tx, validateIdentity = () => {}) => { validateIdentity(observedIdentity); return { identity: observedIdentity, marker: reads++ }; };
   const classify = () => classifications.shift();
   return { tx, commands, run: () => executePrintingRoutineDeltaTransaction({ tx, input: tamperedInput, collect, classify }) };
 };

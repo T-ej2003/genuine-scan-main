@@ -105,11 +105,13 @@ export async function executePrintingRoutineDeltaTransaction({ tx, input, collec
   assert.deepEqual(input.routines.map(({ name }) => name), EXPECTED_PRINTING_ROUTINES);
   await tx.$executeRawUnsafe("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE");
   await tx.$queryRawUnsafe("SELECT pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('mscqr-production-printing-routine-delta',0))");
-  const before = await collect(tx), { identity } = before;
-  assert.equal(identity.role, administrator); assert.equal(identity.session_role, administrator);
-  assert.equal(identity.database, "mscqr_production_rls_green_phase2"); assert.equal(identity.read_only, "off");
-  assert.equal(identity.rolsuper, false); assert.equal(identity.rolbypassrls, false);
-  assert.equal(identity.rolcreaterole, true); assert.equal(identity.rolcreatedb, true);
+  const validateIdentity = (identity) => {
+    assert.equal(identity.role, administrator); assert.equal(identity.session_role, administrator);
+    assert.equal(identity.database, "mscqr_production_rls_green_phase2"); assert.equal(identity.read_only, "off");
+    assert.equal(identity.rolsuper, false); assert.equal(identity.rolbypassrls, false);
+    assert.equal(identity.rolcreaterole, true); assert.equal(identity.rolcreatedb, true);
+  };
+  const before = await collect(tx, validateIdentity);
   const owners = await tx.$queryRawUnsafe("SELECT n.nspname||'.'||p.proname||'('||pg_catalog.pg_get_function_identity_arguments(p.oid)||')' AS identity,o.rolname AS owner FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace JOIN pg_catalog.pg_roles o ON o.oid=p.proowner WHERE n.nspname='app_rls' AND p.proname=ANY(ARRAY['printing_readiness','printing_create_job','printing_connector_identity']) ORDER BY 1");
   assert.equal(owners.length, 3); assert.deepEqual(owners.map((value) => value.identity), input.contract.identities);
   assert.ok(owners.every((value) => value.owner === ownerRole));
@@ -124,7 +126,7 @@ export async function executePrintingRoutineDeltaTransaction({ tx, input, collec
   }
   assert.equal(writeCount, 3);
   await tx.$executeRawUnsafe("RESET ROLE");
-  const after = await collect(tx);
+  const after = await collect(tx, validateIdentity);
   assert.equal(classify(after, input.requirements), RLS_PROBE_CLASSIFICATIONS.MATCH);
   return { status: "APPLIED", writeCount };
 }
