@@ -149,6 +149,9 @@ test("GitHub authorization runner supports token and credential-store domains wi
     assert.equal(captured.options.env.GH_TOKEN, input.GH_TOKEN);
     assert.equal(captured.options.env.GITHUB_TOKEN, input.GITHUB_TOKEN);
     assert.equal(captured.options.env.HOME, input.HOME);
+    assert.equal(captured.options.env.GH_HOST, "github.com");
+    assert.equal(captured.options.env.GH_PROMPT_DISABLED, "1");
+    assert.deepEqual(captured.args.slice(0, 2), ["api", "repos/T-ej2003/genuine-scan-main/actions/runs/123"]);
   }
 });
 

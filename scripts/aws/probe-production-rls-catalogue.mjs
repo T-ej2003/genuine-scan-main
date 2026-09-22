@@ -12,7 +12,8 @@ import { appOnlyRequirementIdentity, assertAppOnlyRequirements } from "./product
 import { canonicalJson, canonicalSha256, STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { assertEcsTaskDefinitionReadback } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/ecs-task-definition-readback.mjs";
 import { assertProtectedCheckout } from "./prepare-production-initial-activation-reconciler-installation.mjs";
-import { createProductionAwsCredentialEnvironment, productionAwsExecutable, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import { downloadAppOnlyArtifact, parseAppOnlyArtifactReference } from "./production-app-only-artifacts.mjs";
+import { createProductionAwsCredentialEnvironment, createProductionGithubCommandRunner, productionAwsExecutable, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const collections = Object.freeze(["routines", "tables", "policies", "schemas", "roles"]);
@@ -79,17 +80,31 @@ export function buildProductionRlsProbeDefinition({ baseDefinition, requirements
 export function authenticateProductionRlsProbeResult(message, { sourceSha, requirementsSha256 }) {
   assert.ok(typeof message === "string" && Buffer.byteLength(message) <= 196608, "RLS probe result is oversized");
   const result = JSON.parse(message), { evidenceSha256, ...body } = result;
+  assert.deepEqual(Object.keys(result).sort(), ["catalogue", "databaseRole", "evidenceSha256", "kind", "requirementsSha256", "schemaVersion", "sourceSha"]);
   assert.equal(evidenceSha256, canonicalSha256(body)); assert.equal(body.schemaVersion, 1); assert.equal(body.kind, "PRODUCTION_RLS_CATALOGUE_PROBE");
   assert.equal(body.sourceSha, sourceSha); assert.equal(body.requirementsSha256, requirementsSha256); assert.equal(body.databaseRole, APP_ONLY_VERIFIER.databaseRole);
   assert.deepEqual(Object.keys(body.catalogue || {}).sort(), [...collections].sort());
-  for (const rows of Object.values(body.catalogue)) for (const row of rows) { assert.match(row.identity || "", /^.{1,4096}$/s); assert.match(row.sha256 || "", /^[a-f0-9]{64}$/); }
+  for (const rows of Object.values(body.catalogue)) {
+    assert.ok(Array.isArray(rows) && rows.length <= 2000);
+    for (const row of rows) { assert.deepEqual(Object.keys(row).sort(), ["identity", "sha256"]); assert.match(row.identity || "", /^.{1,4096}$/s); assert.match(row.sha256 || "", /^[a-f0-9]{64}$/); }
+  }
   return result;
 }
 
 const parse = (value) => JSON.parse(Buffer.isBuffer(value) ? value.toString("utf8") : value);
-export async function runProductionRlsCatalogueProbe({ sourceSha, requirementsPath, awsProfile, run = (command, args, options) => execFileSync(command, args, options), wait = sleep, repositoryRoot = root, env = process.env }) {
+export function authenticateCanonicalProductionRequirements({ sourceSha, requirementsReference, repositoryRoot = root, githubRun = createProductionGithubCommandRunner() }) {
+  assert.equal(requirementsReference.sourceSha, sourceSha, "Canonical requirements source does not match protected source");
+  const branch = parse(githubRun("gh", ["api", "repos/T-ej2003/genuine-scan-main/branches/main"]));
+  assert.equal(branch.commit?.sha, sourceSha, "Canonical requirements source is not current protected main");
+  const artifact = downloadAppOnlyArtifact({ kind: "requirements", reference: requirementsReference, repositoryRoot, githubRun });
+  const requirements = assertAppOnlyRequirements(JSON.parse(artifact.bytes), { sourceSha, candidateSourceSha: sourceSha, repositoryRoot });
+  assert.equal(artifact.sha256, requirementsReference.fileSha256);
+  return Object.freeze({ requirements, provenance: Object.freeze({ runId: String(artifact.run.id), runAttempt: String(artifact.run.run_attempt), artifactId: String(artifact.artifact.id), artifactDigest: artifact.artifact.digest, fileSha256: artifact.sha256 }) });
+}
+
+export async function runProductionRlsCatalogueProbe({ sourceSha, requirementsReference, awsProfile, run = (command, args, options) => execFileSync(command, args, options), githubRun = createProductionGithubCommandRunner(), wait = sleep, repositoryRoot = root, env = process.env }) {
   assertProtectedCheckout({ sourceSha, repositoryRoot });
-  const requirements = assertAppOnlyRequirements(JSON.parse(fs.readFileSync(requirementsPath, "utf8")), { sourceSha, candidateSourceSha: sourceSha, repositoryRoot });
+  const { requirements } = authenticateCanonicalProductionRequirements({ sourceSha, requirementsReference, repositoryRoot, githubRun });
   const commandEnvironment = createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: awsProfile, env });
   const awsExecutable = productionAwsExecutable();
   const aws = (args) => parse(run(awsExecutable, [...args, "--output", "json", "--no-cli-pager"], { env: commandEnvironment, encoding: "utf8", timeout: 30000, maxBuffer: 8 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] }));
@@ -128,9 +143,10 @@ export async function runProductionRlsCatalogueProbe({ sourceSha, requirementsPa
 
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
   try {
-    const { values } = parseArgs({ options: { "source-sha": { type: "string" }, requirements: { type: "string" }, "aws-profile": { type: "string" } }, strict: true });
-    assert.match(values["source-sha"] || "", /^[a-f0-9]{40}$/); assert.ok(path.isAbsolute(values.requirements || "")); assert.ok(values["aws-profile"]);
-    const result = await runProductionRlsCatalogueProbe({ sourceSha: values["source-sha"], requirementsPath: values.requirements, awsProfile: values["aws-profile"] });
+    const { values } = parseArgs({ options: { "source-sha": { type: "string" }, "requirements-reference": { type: "string" }, "aws-profile": { type: "string" } }, strict: true });
+    assert.match(values["source-sha"] || "", /^[a-f0-9]{40}$/); assert.ok(values["aws-profile"]);
+    const requirementsReference = parseAppOnlyArtifactReference(values["requirements-reference"]);
+    const result = await runProductionRlsCatalogueProbe({ sourceSha: values["source-sha"], requirementsReference, awsProfile: values["aws-profile"] });
     process.stdout.write(`${JSON.stringify(result)}\n`); if (result.classification === RLS_PROBE_CLASSIFICATIONS.UNEXPECTED) process.exitCode = 2;
   } catch { process.stderr.write("Production RLS catalogue probe failed closed; no database mutation was attempted.\n"); process.exitCode = 1; }
 }
