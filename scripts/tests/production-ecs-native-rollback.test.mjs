@@ -32,6 +32,38 @@ test("backend and frontend require exact ECS-native rollback alarms", () => {
   }
 });
 
+test("backend and frontend accept expanded ECS circuit-breaker readback without weakening rollback", () => {
+  for (const serviceName of Object.keys(NORMAL_DEPLOYMENT_ROLLBACK)) {
+    for (const circuitBreaker of [
+      { enable: true, rollback: true },
+      { enable: true, rollback: true, resetOnHealthyTask: true, thresholdConfiguration: { type: "BOUNDED_PERCENT", value: 50 } },
+      { enable: true, rollback: true, resetOnUnhealthyTask: true, thresholdConfiguration: { type: "BOUNDED_PERCENT", value: 50 } },
+      { enable: true, rollback: true, futureAwsField: "value" },
+    ]) {
+      const changed = response();
+      changed.services.find((service) => service.serviceName === serviceName).deploymentConfiguration.deploymentCircuitBreaker = circuitBreaker;
+      assert.doesNotThrow(() => assertNormalDeploymentNativeRollback(changed));
+    }
+  }
+});
+
+test("native rollback rejects malformed or weakened circuit-breaker readback", () => {
+  for (const circuitBreaker of [
+    { enable: false, rollback: true }, { enable: true, rollback: false },
+    { enable: true, rollback: true, thresholdConfiguration: { type: "COUNT", value: 50 } },
+    { enable: true, rollback: true, thresholdConfiguration: { type: "BOUNDED_PERCENT", value: 51 } },
+    { enable: true, rollback: true, resetOnHealthyTask: false },
+    { rollback: true }, { enable: true }, {}, null, [], "invalid", 1,
+  ]) {
+    const changed = response();
+    changed.services[0].deploymentConfiguration.deploymentCircuitBreaker = circuitBreaker;
+    assert.throws(() => assertNormalDeploymentNativeRollback(changed));
+  }
+  const missing = response();
+  delete missing.services[0].deploymentConfiguration.deploymentCircuitBreaker;
+  assert.throws(() => assertNormalDeploymentNativeRollback(missing));
+});
+
 test("native rollback contract rejects missing, duplicate, and unrelated services", () => {
   const missing = response(); missing.services.pop();
   assert.throws(() => assertNormalDeploymentNativeRollback(missing));
