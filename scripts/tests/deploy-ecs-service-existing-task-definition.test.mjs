@@ -23,7 +23,7 @@ const validBackendPortMappings = [{ containerPort: 4000, hostPort: 4000, protoco
 
 const serviceResponse = (taskDefinition, deployments = [
   { status: "PRIMARY", taskDefinition, pendingCount: 0, runningCount: 2, rolloutState: "COMPLETED" },
-], enableExecuteCommand = false, propagateTags) => ({ failures: [], services: [{ status: "ACTIVE", taskDefinition, desiredCount: 2, loadBalancers: serviceLoadBalancers, deployments, enableExecuteCommand, ...(propagateTags ? { propagateTags } : {}) }] });
+], enableExecuteCommand = false, propagateTags) => ({ failures: [], services: [{ serviceName: service, serviceArn: `arn:aws:ecs:${region}:${account}:service/${cluster}/${service}`, clusterArn: `arn:aws:ecs:${region}:${account}:cluster/${cluster}`, status: "ACTIVE", taskDefinition, desiredCount: 2, loadBalancers: serviceLoadBalancers, deployments, enableExecuteCommand, ...(propagateTags ? { propagateTags } : {}) }] });
 
 function writeFixture(data, options = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ecs-existing-target-"));
@@ -69,7 +69,7 @@ function writeFixture(data, options = {}) {
   const normal = {
     taskDefinition: {
       taskDefinitionArn: fromArn,
-      family: "mscqr-backend",
+      family: options.clientIpRuntime ? targetFamily : "mscqr-backend",
       containerDefinitions: [{ name: containerName, image: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${sourceDigest}`, portMappings: options.normalPortMappings === undefined ? validBackendPortMappings : options.normalPortMappings }],
       runtimePlatform: { cpuArchitecture: "X86_64" },
     },
@@ -105,6 +105,15 @@ function writeFixture(data, options = {}) {
   for (const [name, value] of Object.entries({ target, normal, pre, post, targetDeployment, unrelated, foreignDeployment, tasks, taskArns })) {
     fs.writeFileSync(path.join(dir, `${name}.json`), JSON.stringify(value));
   }
+  if (options.clientIpRuntime) {
+    fs.writeFileSync(path.join(dir, "target-groups.json"), JSON.stringify({ TargetGroups: [{ TargetGroupArn: serviceLoadBalancers[0].targetGroupArn.replace("/example", "/f6673ff776f6e2ec"), LoadBalancerArns: ["arn:aws:elasticloadbalancing:eu-west-2:368992683803:loadbalancer/app/mscqr-alb-euw2/cda0292be6e39608"], VpcId: "vpc-example", TargetType: "ip", Protocol: "HTTP", Port: 4000 }] }));
+    pre.services[0].loadBalancers[0].targetGroupArn = "arn:aws:elasticloadbalancing:eu-west-2:368992683803:targetgroup/mscqr-backend-tg-euw2-v2/f6673ff776f6e2ec";
+    fs.writeFileSync(path.join(dir, "pre.json"), JSON.stringify(pre));
+    fs.writeFileSync(path.join(dir, "load-balancers.json"), JSON.stringify({ LoadBalancers: [{ LoadBalancerArn: "arn:aws:elasticloadbalancing:eu-west-2:368992683803:loadbalancer/app/mscqr-alb-euw2/cda0292be6e39608", Type: "application", Scheme: "internet-facing", VpcId: "vpc-example", State: { Code: "active" }, AvailabilityZones: [{ SubnetId: "subnet-a" }, { SubnetId: "subnet-b" }] }] }));
+    fs.writeFileSync(path.join(dir, "subnets.json"), JSON.stringify({ Subnets: [{ SubnetId: "subnet-a", CidrBlock: "10.0.0.0/20", VpcId: "vpc-example", State: "available" }, { SubnetId: "subnet-b", CidrBlock: "10.0.16.0/20", VpcId: "vpc-example", State: "available" }] }));
+    fs.writeFileSync(path.join(dir, "prefix-lists.json"), JSON.stringify({ PrefixLists: [{ PrefixListName: "com.amazonaws.global.cloudfront.origin-facing", PrefixListId: "pl-93a247fa", PrefixListArn: "arn:aws:ec2:eu-west-2:aws:prefix-list/pl-93a247fa", OwnerId: "AWS", AddressFamily: "IPv4", State: "create-complete" }] }));
+    fs.writeFileSync(path.join(dir, "prefix-list-entries.json"), JSON.stringify({ Entries: [{ Cidr: "198.51.100.0/24" }, { Cidr: "192.0.2.0/24" }] }));
+  }
   const aws = `#!/usr/bin/env bash
 set -euo pipefail
 echo "$*" >> "$FAKE_DATA/calls.log"
@@ -115,7 +124,7 @@ elif [[ "$1 $2" == "ecs describe-task-definition" ]]; then
   for ((i=1; i<=$#; i++)); do
     if [[ "\${!i}" == "--task-definition" ]]; then j=$((i + 1)); task_definition="\${!j}"; fi
   done
-  if [[ "$task_definition" == "${fromArn}" || "$task_definition" == "mscqr-backend" ]]; then cat "$FAKE_DATA/normal.json"; else cat "$FAKE_DATA/target.json"; fi
+  if [[ "$task_definition" == "${targetArn}" && -f "$FAKE_DATA/registered.json" ]]; then cat "$FAKE_DATA/registered.json"; elif [[ "$task_definition" == "${fromArn}" || "$task_definition" == "mscqr-backend" || "$task_definition" == "${targetFamily}" ]]; then cat "$FAKE_DATA/normal.json"; else cat "$FAKE_DATA/target.json"; fi
 elif [[ "$1 $2" == "ecs describe-services" ]]; then
   if [[ "$FAKE_SCENARIO" == "reconcile-failure" && -f "$FAKE_DATA/update-attempted" ]]; then exit 51; fi
   if [[ "$FAKE_SCENARIO" == "ownership-read-failure" && -f "$FAKE_DATA/stable-failed" ]]; then exit 51; fi
@@ -183,7 +192,16 @@ elif [[ "$1 $2" == "ecs wait" ]]; then
   if [[ "$FAKE_SCENARIO" == "ownership-read-failure" && ! -f "$FAKE_DATA/stable-failed" ]]; then touch "$FAKE_DATA/stable-failed"; exit 32; fi
 elif [[ "$1 $2" == "ecs list-tasks" ]]; then cat "$FAKE_DATA/taskArns.json"
 elif [[ "$1 $2" == "ecs describe-tasks" ]]; then cat "$FAKE_DATA/tasks.json"
-elif [[ "$1 $2" == "ecs register-task-definition" ]]; then printf '%s\\n' "${targetArn}"
+elif [[ "$1 $2" == "elbv2 describe-target-groups" ]]; then cat "$FAKE_DATA/target-groups.json"
+elif [[ "$1 $2" == "elbv2 describe-load-balancers" ]]; then cat "$FAKE_DATA/load-balancers.json"
+elif [[ "$1 $2" == "ec2 describe-subnets" ]]; then cat "$FAKE_DATA/subnets.json"
+elif [[ "$1 $2" == "ec2 describe-managed-prefix-lists" ]]; then cat "$FAKE_DATA/prefix-lists.json"
+elif [[ "$1 $2" == "ec2 get-managed-prefix-list-entries" ]]; then cat "$FAKE_DATA/prefix-list-entries.json"
+elif [[ "$1 $2" == "ecs register-task-definition" ]]; then
+  input=""
+  for ((i=1; i<=$#; i++)); do if [[ "\${!i}" == "--cli-input-json" ]]; then j=$((i + 1)); input="\${!j#file://}"; fi; done
+  node --input-type=module -e 'import fs from "node:fs"; const [input,out,arn]=process.argv.slice(1); const payload=JSON.parse(fs.readFileSync(input)); const {tags=[], ...taskDefinition}=payload; Object.assign(taskDefinition,{taskDefinitionArn:arn,revision:7,status:"ACTIVE"}); fs.writeFileSync(out,JSON.stringify({taskDefinition,tags}));' "$input" "$FAKE_DATA/registered.json" "${targetArn}"
+  printf '%s\\n' "${targetArn}"
 fi
 `;
   const fakeAws = path.join(fakeBin, "aws");
@@ -630,6 +648,45 @@ test("explicit new-revision mode still registers before updating the service", (
   });
   assert.equal(result.status, 0, result.stderr);
   assert.equal((fs.readFileSync(fixture.calls, "utf8").match(/ecs register-task-definition/g) || []).length, 1);
+  assertTempClean({ fixture });
+});
+
+test("normal backend mode authenticates topology, injects client-IP trust, and verifies readback before UpdateService", () => {
+  const fixture = writeFixture({}, { clientIpRuntime: true, callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-normal-deployer/test" });
+  const result = spawnSync("bash", [script], {
+    cwd: path.resolve("."),
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: `${fixture.fakeBin}:${process.env.PATH}`,
+      MSCQR_AWS_CREDENTIAL_SOURCE: "named-profile",
+      MSCQR_AWS_NAMED_PROFILE: "mscqr-production-release-deployer",
+      AWS_REGION: region,
+      CLUSTER_NAME: cluster,
+      SERVICE_NAME: service,
+      TASK_DEFINITION: targetFamily,
+      CONTAINER_NAME: containerName,
+      IMAGE_URI: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${digest}`,
+      MSCQR_NORMAL_APPLICATION_DEPLOYMENT: "true",
+      FAKE_DATA: fixture.dir,
+      FAKE_SCENARIO: "",
+      TMPDIR: fixture.tempDir,
+    },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const calls = fs.readFileSync(fixture.calls, "utf8").trim().split("\n");
+  for (const expected of ["elbv2 describe-target-groups", "elbv2 describe-load-balancers", "ec2 describe-subnets", "ec2 describe-managed-prefix-lists", "ec2 get-managed-prefix-list-entries"]) {
+    assert.equal(calls.filter((call) => call.startsWith(expected)).length, 1);
+  }
+  const registered = JSON.parse(fs.readFileSync(path.join(fixture.dir, "registered.json"), "utf8"));
+  const environment = Object.fromEntries(registered.taskDefinition.containerDefinitions[0].environment.map(({ name, value }) => [name, value]));
+  assert.equal(environment.CLIENT_IP_TRUST_MODE, "cloudfront-alb");
+  assert.equal(environment.CLIENT_IP_TRUSTED_ALB_CIDRS, "10.0.0.0/20,10.0.16.0/20");
+  assert.equal(environment.CLIENT_IP_TRUSTED_CLOUDFRONT_CIDRS, "192.0.2.0/24,198.51.100.0/24");
+  const registration = calls.findIndex((call) => call.startsWith("ecs register-task-definition"));
+  const readback = calls.findIndex((call, index) => index > registration && call.startsWith("ecs describe-task-definition"));
+  const update = calls.findIndex((call) => call.startsWith("ecs update-service"));
+  assert(registration >= 0 && readback > registration && update > readback);
   assertTempClean({ fixture });
 });
 

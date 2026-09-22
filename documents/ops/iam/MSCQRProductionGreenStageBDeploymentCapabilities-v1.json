@@ -291,6 +291,7 @@
     "ROOT_OPERATOR",
     "BOOTSTRAP_OPERATOR",
     "RELEASE_DEPLOYER",
+    "NORMAL_DEPLOYER",
     "INDEPENDENT_CHECKER",
     "ECS_EXEC_VERIFIER_OPERATOR",
     "SERVICE_RUNTIME",
@@ -12443,6 +12444,151 @@
       "mutation": true
     },
     {
+      "id": "normal-deployer-ec2-describemanagedprefixlists",
+      "phase": "normal-backend-activation",
+      "identity": "NORMAL_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/deploy-ecs-service.sh",
+      "sourceFunction": "ReadClientIpTrustTopology",
+      "action": "ec2:DescribeManagedPrefixLists",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      },
+      "classification": "NORMAL_DEPLOYMENT_READ",
+      "probe": "direct-live-read",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-component-deployment-state/normal-deployer-policy.json",
+        "sid": "ReadClientIpTrustTopology",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "db0474bd315ded004278b7654e88218054536200b0ccde61aed71de2465a62fd"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "normal-deployer-ec2-describesubnets",
+      "phase": "normal-backend-activation",
+      "identity": "NORMAL_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/deploy-ecs-service.sh",
+      "sourceFunction": "ReadClientIpTrustTopology",
+      "action": "ec2:DescribeSubnets",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      },
+      "classification": "NORMAL_DEPLOYMENT_READ",
+      "probe": "direct-live-read",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-component-deployment-state/normal-deployer-policy.json",
+        "sid": "ReadClientIpTrustTopology",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "db0474bd315ded004278b7654e88218054536200b0ccde61aed71de2465a62fd"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "normal-deployer-ec2-getmanagedprefixlistentries",
+      "phase": "normal-backend-activation",
+      "identity": "NORMAL_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/deploy-ecs-service.sh",
+      "sourceFunction": "ReadCloudFrontOriginPrefixListEntries",
+      "action": "ec2:GetManagedPrefixListEntries",
+      "resources": [
+        "arn:aws:ec2:eu-west-2:aws:prefix-list/*"
+      ],
+      "context": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      },
+      "classification": "NORMAL_DEPLOYMENT_READ",
+      "probe": "direct-live-read",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-component-deployment-state/normal-deployer-policy.json",
+        "sid": "ReadCloudFrontOriginPrefixListEntries",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "db0474bd315ded004278b7654e88218054536200b0ccde61aed71de2465a62fd"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "normal-deployer-elasticloadbalancing-describeloadbalancers",
+      "phase": "normal-backend-activation",
+      "identity": "NORMAL_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/deploy-ecs-service.sh",
+      "sourceFunction": "ReadClientIpTrustTopology",
+      "action": "elasticloadbalancing:DescribeLoadBalancers",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      },
+      "classification": "NORMAL_DEPLOYMENT_READ",
+      "probe": "direct-live-read",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-component-deployment-state/normal-deployer-policy.json",
+        "sid": "ReadClientIpTrustTopology",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "db0474bd315ded004278b7654e88218054536200b0ccde61aed71de2465a62fd"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "normal-deployer-elasticloadbalancing-describetargetgroups",
+      "phase": "normal-backend-activation",
+      "identity": "NORMAL_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/deploy-ecs-service.sh",
+      "sourceFunction": "ReadClientIpTrustTopology",
+      "action": "elasticloadbalancing:DescribeTargetGroups",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      },
+      "classification": "NORMAL_DEPLOYMENT_READ",
+      "probe": "direct-live-read",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-component-deployment-state/normal-deployer-policy.json",
+        "sid": "ReadClientIpTrustTopology",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "db0474bd315ded004278b7654e88218054536200b0ccde61aed71de2465a62fd"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
       "id": "operator-operator-describe-production-backend-service",
       "phase": "runtime-verification",
       "identity": "ECS_EXEC_VERIFIER_OPERATOR",
@@ -21645,6 +21791,18 @@
     },
     {
       "sourceFile": "scripts/aws/deploy-ecs-service.sh",
+      "action": "ec2:DescribeManagedPrefixLists"
+    },
+    {
+      "sourceFile": "scripts/aws/deploy-ecs-service.sh",
+      "action": "ec2:DescribeSubnets"
+    },
+    {
+      "sourceFile": "scripts/aws/deploy-ecs-service.sh",
+      "action": "ec2:GetManagedPrefixListEntries"
+    },
+    {
+      "sourceFile": "scripts/aws/deploy-ecs-service.sh",
       "action": "ecr:DescribeImages"
     },
     {
@@ -21670,6 +21828,14 @@
     {
       "sourceFile": "scripts/aws/deploy-ecs-service.sh",
       "action": "ecs:UpdateService"
+    },
+    {
+      "sourceFile": "scripts/aws/deploy-ecs-service.sh",
+      "action": "elasticloadbalancing:DescribeLoadBalancers"
+    },
+    {
+      "sourceFile": "scripts/aws/deploy-ecs-service.sh",
+      "action": "elasticloadbalancing:DescribeTargetGroups"
     },
     {
       "sourceFile": "scripts/aws/deploy-ecs-service.sh",

@@ -2200,6 +2200,101 @@
       "negativeTestPresent": true
     },
     {
+      "sourceFile": "scripts/aws/deploy-ecs-service.sh",
+      "action": "ec2:DescribeManagedPrefixLists",
+      "capabilityId": "normal-deployer-ec2-describemanagedprefixlists",
+      "identity": "NORMAL_DEPLOYER",
+      "resources": [
+        "*"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "NORMAL_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/deploy-ecs-service.sh",
+      "action": "ec2:GetManagedPrefixListEntries",
+      "capabilityId": "normal-deployer-ec2-getmanagedprefixlistentries",
+      "identity": "NORMAL_DEPLOYER",
+      "resources": [
+        "arn:aws:ec2:eu-west-2:aws:prefix-list/*"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "NORMAL_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/deploy-ecs-service.sh",
+      "action": "ec2:DescribeSubnets",
+      "capabilityId": "normal-deployer-ec2-describesubnets",
+      "identity": "NORMAL_DEPLOYER",
+      "resources": [
+        "*"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "NORMAL_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/deploy-ecs-service.sh",
+      "action": "elasticloadbalancing:DescribeTargetGroups",
+      "capabilityId": "normal-deployer-elasticloadbalancing-describetargetgroups",
+      "identity": "NORMAL_DEPLOYER",
+      "resources": [
+        "*"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "NORMAL_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/deploy-ecs-service.sh",
+      "action": "elasticloadbalancing:DescribeLoadBalancers",
+      "capabilityId": "normal-deployer-elasticloadbalancing-describeloadbalancers",
+      "identity": "NORMAL_DEPLOYER",
+      "resources": [
+        "*"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "NORMAL_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
       "sourceFile": "scripts/aws/converge-production-ecs-runtime-policy.mjs",
       "action": "iam:GetRole",
       "capabilityId": "runtime-admin-get-role",

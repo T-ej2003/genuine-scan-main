@@ -6,9 +6,16 @@ import { NORMAL_DEPLOYER_POLICY, convergeNormalDeployerPolicy } from "../aws/con
 
 const target = JSON.parse(fs.readFileSync("infra/aws/terraform/production-component-deployment-state/normal-deployer-policy.json", "utf8"));
 const predecessor = structuredClone(target);
-predecessor.Statement = predecessor.Statement.filter(({ Sid }) => Sid !== "ReadDeploymentAlarms");
+predecessor.Statement = predecessor.Statement.filter(({ Sid }) => !["ReadClientIpTrustTopology", "ReadCloudFrontOriginPrefixListEntries"].includes(Sid));
 assert.equal(digest(predecessor), NORMAL_DEPLOYER_POLICY.predecessorSha256);
 assert.equal(digest(target), NORMAL_DEPLOYER_POLICY.targetSha256);
+const discoveryActions = [
+  "ec2:DescribeManagedPrefixLists",
+  "ec2:GetManagedPrefixListEntries",
+  "ec2:DescribeSubnets",
+  "elasticloadbalancing:DescribeTargetGroups",
+  "elasticloadbalancing:DescribeLoadBalancers",
+];
 
 function fixture({ policy = predecessor, roleArn = NORMAL_DEPLOYER_POLICY.roleArn, names = [NORMAL_DEPLOYER_POLICY.policyName], attached = [], apply = true, callerArn = "arn:aws:iam::368992683803:root" } = {}) {
   let live = structuredClone(policy);
@@ -27,7 +34,7 @@ function fixture({ policy = predecessor, roleArn = NORMAL_DEPLOYER_POLICY.roleAr
   return { run, calls, live: () => live };
 }
 
-test("exact reviewed predecessor converges once to the alarm-read policy and verifies readback", () => {
+test("exact reviewed predecessor converges once to the topology-read policy and verifies readback", () => {
   const value = fixture();
   const result = convergeNormalDeployerPolicy({ run: value.run, sourceSha: "a".repeat(40) });
   assert.equal(result.iamWrites, 1);
@@ -35,7 +42,36 @@ test("exact reviewed predecessor converges once to the alarm-read policy and ver
   assert.equal(result.policySha256, NORMAL_DEPLOYER_POLICY.targetSha256);
   assert.equal(value.calls.filter(([service, operation]) => service === "iam" && operation === "put-role-policy").length, 1);
   assert.equal(digest(value.live()), NORMAL_DEPLOYER_POLICY.targetSha256);
-  assert.ok(target.Statement.some(({ Action }) => Action === "cloudwatch:DescribeAlarms"));
+  assert.deepEqual(target.Statement.find(({ Sid }) => Sid === "ReadClientIpTrustTopology"), {
+    Sid: "ReadClientIpTrustTopology",
+    Effect: "Allow",
+    Action: discoveryActions.filter((action) => action !== "ec2:GetManagedPrefixListEntries"),
+    Resource: "*",
+    Condition: { StringEquals: { "aws:RequestedRegion": "eu-west-2" } },
+  });
+  assert.deepEqual(target.Statement.find(({ Sid }) => Sid === "ReadCloudFrontOriginPrefixListEntries"), {
+    Sid: "ReadCloudFrontOriginPrefixListEntries",
+    Effect: "Allow",
+    Action: "ec2:GetManagedPrefixListEntries",
+    Resource: "arn:aws:ec2:eu-west-2:aws:prefix-list/*",
+    Condition: { StringEquals: { "aws:RequestedRegion": "eu-west-2" } },
+  });
+});
+
+test("topology discovery adds only five read actions and no representative mutation authority", () => {
+  const targetActions = target.Statement.flatMap(({ Action }) => Array.isArray(Action) ? Action : [Action]);
+  const predecessorActions = predecessor.Statement.flatMap(({ Action }) => Array.isArray(Action) ? Action : [Action]);
+  assert.deepEqual(targetActions.filter((action) => !predecessorActions.includes(action)).sort(), [...discoveryActions].sort());
+  for (const action of [
+    "ec2:RunInstances", "ec2:CreateSubnet", "ec2:AuthorizeSecurityGroupIngress", "ec2:CreateManagedPrefixList", "ec2:ModifyManagedPrefixList",
+    "elasticloadbalancing:CreateLoadBalancer", "elasticloadbalancing:ModifyLoadBalancerAttributes", "elasticloadbalancing:CreateTargetGroup", "elasticloadbalancing:ModifyTargetGroup",
+    "iam:PutRolePolicy", "iam:AttachRolePolicy",
+  ]) assert.equal(targetActions.includes(action), false, `${action} must remain denied.`);
+  assert.deepEqual(
+    target.Statement.filter(({ Sid }) => !["ReadClientIpTrustTopology", "ReadCloudFrontOriginPrefixListEntries"].includes(Sid)),
+    predecessor.Statement,
+    "existing bounded permissions changed",
+  );
 });
 
 test("already-converged policy is read-only and still verifies", () => {

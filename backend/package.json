@@ -27,6 +27,7 @@
     "db:scan-archive:run": "tsx scripts/archive-scan-logs.ts",
     "storage:migrate-local-uploads": "tsx scripts/migrate-local-uploads-to-object-storage.ts",
     "build": "npm run prisma:generate && tsc",
+    "test:production-client-ip-runtime": "npm run build && node tests/clientIpTrust.test.js && node tests/productionClientIpStartup.test.js",
     "mock:printer": "node mock-printer/server.js",
     "print:agent": "node dist/local-print-agent/index.js",
     "print:agent:dev": "tsx src/local-print-agent/index.ts",
