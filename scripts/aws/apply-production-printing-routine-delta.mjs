@@ -3,14 +3,13 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { parseArgs } from "node:util";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { APP_ONLY } from "./production-app-only-contract.mjs";
 import { appOnlyVerifierNetwork } from "./production-app-only-policy.mjs";
-import { collectAppOnlyDatabaseCatalogueRows } from "./production-app-only-database-verifier.mjs";
-import { appOnlyRequirementIdentity } from "./production-app-only-requirements.mjs";
 import { readAppOnlyArtifactArchive } from "./production-app-only-artifacts.mjs";
 import { canonicalJson, canonicalSha256, STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { assertEcsTaskDefinitionReadback } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/ecs-task-definition-readback.mjs";
@@ -19,6 +18,9 @@ import { createProductionAwsCredentialEnvironment, createProductionGithubCommand
 import { authenticateCanonicalProductionRequirements, EXPECTED_PRINTING_ROUTINE_PREDECESSORS, EXPECTED_PRINTING_ROUTINES, hashProductionRlsCatalogue, RLS_PROBE_CLASSIFICATIONS } from "./probe-production-rls-catalogue.mjs";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
+const require = createRequire(import.meta.url);
+const runtime = require("./production-printing-routine-delta-executor.cjs");
+const runtimePath = fileURLToPath(new URL("./production-printing-routine-delta-executor.cjs", import.meta.url));
 const repository = "T-ej2003/genuine-scan-main";
 const sourceSqlPath = "backend/src/rls-waves/session-c/c02/printingLifecycle.sql";
 const family = "mscqr-production-printing-routine-delta";
@@ -100,39 +102,11 @@ export function classifyPrintingRoutineTransactionCatalogue(catalogue, requireme
   return RLS_PROBE_CLASSIFICATIONS.UNEXPECTED;
 }
 
-export async function executePrintingRoutineDeltaTransaction({ tx, input, collect = collectAppOnlyDatabaseCatalogueRows,
-  classify = classifyPrintingRoutineTransactionCatalogue } = {}) {
-  assert.deepEqual(input.routines.map(({ name }) => name), EXPECTED_PRINTING_ROUTINES);
-  await tx.$executeRawUnsafe("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE");
-  await tx.$queryRawUnsafe("SELECT pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('mscqr-production-printing-routine-delta',0))");
-  const validateIdentity = (identity) => {
-    assert.equal(identity.role, administrator); assert.equal(identity.session_role, administrator);
-    assert.equal(identity.database, "mscqr_production_rls_green_phase2"); assert.equal(identity.read_only, "off");
-    assert.equal(identity.rolsuper, false); assert.equal(identity.rolbypassrls, false);
-    assert.equal(identity.rolcreaterole, true); assert.equal(identity.rolcreatedb, true);
-  };
-  const before = await collect(tx, validateIdentity);
-  const owners = await tx.$queryRawUnsafe("SELECT n.nspname||'.'||p.proname||'('||pg_catalog.pg_get_function_identity_arguments(p.oid)||')' AS identity,o.rolname AS owner FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace JOIN pg_catalog.pg_roles o ON o.oid=p.proowner WHERE n.nspname='app_rls' AND p.proname=ANY(ARRAY['printing_readiness','printing_create_job','printing_connector_identity']) ORDER BY 1");
-  assert.equal(owners.length, 3); assert.deepEqual(owners.map((value) => value.identity), input.contract.identities);
-  assert.ok(owners.every((value) => value.owner === ownerRole));
-  const state = classify(before, input.requirements);
-  if (state === RLS_PROBE_CLASSIFICATIONS.MATCH) return { status: "ALREADY_CONVERGED", writeCount: 0 };
-  assert.equal(state, RLS_PROBE_CLASSIFICATIONS.EXPECTED);
-  await tx.$executeRawUnsafe(`SET LOCAL ROLE "${ownerRole}"`);
-  let writeCount = 0;
-  for (const routine of input.routines) {
-    assert.equal(sha256(routine.sql), input.contract.sqlSha256[routine.name]);
-    await tx.$executeRawUnsafe(routine.sql); writeCount++;
-  }
-  assert.equal(writeCount, 3);
-  await tx.$executeRawUnsafe("RESET ROLE");
-  const after = await collect(tx, validateIdentity);
-  assert.equal(classify(after, input.requirements), RLS_PROBE_CLASSIFICATIONS.MATCH);
-  return { status: "APPLIED", writeCount };
-}
+export const executePrintingRoutineDeltaTransaction = runtime.executePrintingRoutineDeltaTransaction;
 
-export function buildPrintingRoutineDeltaCommand({ sourceSha, requirements, databaseHostname, routines = canonicalPrintingRoutineDelta() }) {
+export function buildPrintingRoutineDeltaCommand({ sourceSha, requirements, databaseHostname, repositoryRoot = root }) {
   assert.match(sourceSha || "", /^[a-f0-9]{40}$/); assert.match(databaseHostname || "", /^[a-z0-9.-]+$/);
+  const routines = canonicalPrintingRoutineDelta({ repositoryRoot });
   assert.deepEqual(routines.map(({ name }) => name), EXPECTED_PRINTING_ROUTINES);
   const expectedSuccessors = Object.fromEntries(requirements.objects.routines.filter(({ identity }) =>
     EXPECTED_PRINTING_ROUTINES.some((name) => identity.startsWith(`app_rls.${name}(`))).map(({ identity, sha256: digest }) => [identity, digest]));
@@ -140,21 +114,25 @@ export function buildPrintingRoutineDeltaCommand({ sourceSha, requirements, data
   const predecessor = structuredClone(requirements);
   for (const row of predecessor.objects.routines) if (Object.hasOwn(EXPECTED_PRINTING_ROUTINE_PREDECESSORS, row.identity)) row.sha256 = EXPECTED_PRINTING_ROUTINE_PREDECESSORS[row.identity];
   const packed = { predecessor: catalogueDigestContract(predecessor.objects), successor: catalogueDigestContract(requirements.objects) };
+  const executorSourcePath = path.join(repositoryRoot, path.relative(root, runtimePath));
+  assert.ok(fs.lstatSync(executorSourcePath).isFile()); assert.equal(fs.realpathSync(executorSourcePath), executorSourcePath);
+  const executorSource = fs.readFileSync(executorSourcePath, "utf8");
+  assert.ok(Buffer.byteLength(executorSource) <= 65536, "Bounded printing routine executor exceeds source budget");
   const contract = { sourceSha, requirementsSha256: requirements.requirementsSha256, identities: Object.keys(expectedSuccessors).sort(),
     predecessorSha256: EXPECTED_PRINTING_ROUTINE_PREDECESSORS, successorSha256: expectedSuccessors,
     predecessorContractSha256: canonicalSha256(packed.predecessor), successorContractSha256: canonicalSha256(packed.successor),
-    sqlSha256: Object.fromEntries(routines.map(({ name, sql }) => [name, sha256(sql)])) };
+    sqlSha256: Object.fromEntries(routines.map(({ name, sql }) => [name, sha256(sql)])), executorSourceSha256: sha256(executorSource) };
   const input = { contract, requirements: packed, databaseHostname, routines };
-  const functions = [collectAppOnlyDatabaseCatalogueRows, appOnlyRequirementIdentity, hashProductionRlsCatalogue, catalogueDigestContract,
-    classifyPrintingRoutineTransactionCatalogue, executePrintingRoutineDeltaTransaction]
-    .map((fn) => fn.toString()).join("\n");
-  const command = `"use strict";const assert=require("node:assert/strict"),crypto=require("node:crypto");const {PrismaClient}=require("@prisma/client");const canonicalJson=${canonicalJson.toString()};const canonicalSha256=v=>crypto.createHash("sha256").update(canonicalJson(v)).digest("hex");const sha256=v=>crypto.createHash("sha256").update(v).digest("hex");const collections=${JSON.stringify(collections)};const administrator=${JSON.stringify(administrator)},ownerRole=${JSON.stringify(ownerRole)};const EXPECTED_PRINTING_ROUTINES=${JSON.stringify(EXPECTED_PRINTING_ROUTINES)};const EXPECTED_PRINTING_ROUTINE_PREDECESSORS=${JSON.stringify(EXPECTED_PRINTING_ROUTINE_PREDECESSORS)};const RLS_PROBE_CLASSIFICATIONS=${JSON.stringify(RLS_PROBE_CLASSIFICATIONS)};${functions};const input=${JSON.stringify(input)};(async()=>{assert.equal(canonicalSha256(input.contract),${JSON.stringify(canonicalSha256(contract))});assert.equal(canonicalSha256(input.requirements.predecessor),input.contract.predecessorContractSha256);assert.equal(canonicalSha256(input.requirements.successor),input.contract.successorContractSha256);const url=new URL("postgresql://unused/mscqr_production_rls_green_phase2");url.username=administrator;url.password=process.env.MSCQR_PRINTING_DELTA_ADMIN_PASSWORD||"";url.hostname=input.databaseHostname;url.port="5432";url.searchParams.set("sslmode","require");url.searchParams.set("application_name","mscqr-production-printing-routine-delta");assert.ok(url.password);const client=new PrismaClient({datasources:{db:{url:url.toString()}}});try{const result=await client.$transaction(tx=>executePrintingRoutineDeltaTransaction({tx,input}),{maxWait:10000,timeout:120000});const body={schemaVersion:1,kind:"PRODUCTION_PRINTING_ROUTINE_DELTA_RESULT",sourceSha:input.contract.sourceSha,requirementsSha256:input.contract.requirementsSha256,contractSha256:${JSON.stringify(canonicalSha256(contract))},database:"mscqr_production_rls_green_phase2",databaseRole:administrator,status:result.status,writeCount:result.writeCount};console.log(JSON.stringify({...body,evidenceSha256:canonicalSha256(body)}));}finally{await client.$disconnect();}})().catch(()=>{console.error(JSON.stringify({status:"PRODUCTION_PRINTING_ROUTINE_DELTA_FAILED"}));process.exitCode=1;});`;
-  assert.ok(Buffer.byteLength(command) <= 98304, "Bounded printing routine command exceeds task-definition budget");
-  return Object.freeze({ command: ["-e", command], contract: Object.freeze(contract), contractSha256: canonicalSha256(contract) });
+  const payload = Buffer.from(canonicalJson({ input, contractSha256: canonicalSha256(contract) }));
+  assert.ok(payload.length <= 65536, "Bounded printing routine payload exceeds data budget");
+  const encodedPayload = payload.toString("base64");
+  assert.equal(Buffer.from(encodedPayload, "base64").toString("base64"), encodedPayload);
+  assert.ok(Buffer.byteLength(executorSource) + Buffer.byteLength(encodedPayload) <= 98304, "Bounded printing routine command exceeds task-definition budget");
+  return Object.freeze({ command: ["-e", executorSource, encodedPayload, sha256(payload)], contract: Object.freeze(contract), contractSha256: canonicalSha256(contract) });
 }
 
-export function buildPrintingRoutineDeltaDefinition({ sourceSha, requirements, databaseHostname, routines, repositoryRoot = root }) {
-  const built = buildPrintingRoutineDeltaCommand({ sourceSha, requirements, databaseHostname, routines: routines || canonicalPrintingRoutineDelta({ repositoryRoot }) });
+export function buildPrintingRoutineDeltaDefinition({ sourceSha, requirements, databaseHostname, repositoryRoot = root }) {
+  const built = buildPrintingRoutineDeltaCommand({ sourceSha, requirements, databaseHostname, repositoryRoot });
   const definition = { family, networkMode: "awsvpc", requiresCompatibilities: ["FARGATE"], cpu: "1024", memory: "2048",
     executionRoleArn, runtimePlatform: STAGE_B.taskRuntimePlatform, volumes: [{ name: "executor-tmp" }], containerDefinitions: [{
       name: containerName, image: executorImage, essential: true, entryPoint: ["node"], command: built.command,

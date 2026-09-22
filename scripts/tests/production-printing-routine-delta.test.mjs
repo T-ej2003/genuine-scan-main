@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import {
   PRINTING_ROUTINE_DELTA,
   authenticatePrintingRoutineExecutorPredecessor,
@@ -15,6 +16,8 @@ import {
 } from "../aws/apply-production-printing-routine-delta.mjs";
 import { EXPECTED_PRINTING_ROUTINE_PREDECESSORS, RLS_PROBE_CLASSIFICATIONS } from "../aws/probe-production-rls-catalogue.mjs";
 import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
+
+const runtime = createRequire(import.meta.url)("../aws/production-printing-routine-delta-executor.cjs");
 
 const hash = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const identities = Object.keys(EXPECTED_PRINTING_ROUTINE_PREDECESSORS).sort();
@@ -121,9 +124,13 @@ test("replacement failures and successor mismatch reject the one transaction", a
 });
 
 test("task command is one bounded transaction with no caller-selected authority or secret output", () => {
-  const built = buildPrintingRoutineDeltaCommand({ sourceSha: contract.sourceSha, requirements, databaseHostname: input.databaseHostname, routines });
+  const built = buildPrintingRoutineDeltaCommand({ sourceSha: contract.sourceSha, requirements, databaseHostname: input.databaseHostname });
   const command = built.command[1];
   assert.match(command, /client\.\$transaction/); assert.equal((command.match(/client\.\$transaction/g) || []).length, 1);
+  assert.doesNotMatch(command, /Function\.prototype\.toString|fn\.toString|eval\(|new Function/);
+  assert.equal(built.command.length, 4); const decoded = runtime.decodeInput(built.command[2], built.command[3]);
+  assert.equal(decoded.input.contract.sourceSha, contract.sourceSha); assert.doesNotThrow(() => runtime.validateInput(decoded.input));
+  assert.equal(decoded.input.contract.executorSourceSha256, hash(Buffer.from(command)));
   assert.doesNotMatch(command, /process\.env\.(?:DATABASE_URL|AWS_ENDPOINT_URL|AWS_PROFILE)/);
   assert.doesNotMatch(command, /console\.log\([^)]*(?:password|DATABASE_URL|MSCQR_PRINTING_DELTA_ADMIN_PASSWORD)/i);
   assert.ok(Buffer.byteLength(command) <= 196608); assert.deepEqual(built.contract.identities, identities);
@@ -136,7 +143,7 @@ test("task command is one bounded transaction with no caller-selected authority 
 });
 
 test("task definition pins the authenticated historical image and removes its task role", () => {
-  const value = buildPrintingRoutineDeltaDefinition({ sourceSha: contract.sourceSha, requirements, databaseHostname: input.databaseHostname, routines });
+  const value = buildPrintingRoutineDeltaDefinition({ sourceSha: contract.sourceSha, requirements, databaseHostname: input.databaseHostname });
   assert.equal(value.definition.family, "mscqr-production-printing-routine-delta"); assert.equal(value.definition.taskRoleArn, undefined);
   assert.equal(value.definition.containerDefinitions[0].image, PRINTING_ROUTINE_DELTA.executorImage);
   assert.deepEqual(value.definition.containerDefinitions[0].secrets, [{ name: "MSCQR_PRINTING_DELTA_ADMIN_PASSWORD", valueFrom: PRINTING_ROUTINE_DELTA.administratorSecretArn }]);
@@ -150,6 +157,46 @@ test("task definition pins the authenticated historical image and removes its ta
     (v) => { v.taskDefinition.containerDefinitions[0].image = v.taskDefinition.containerDefinitions[0].image.replace(/.$/, "0"); },
     (v) => { v.imageDetails[0].imageDigest = `sha256:${"0".repeat(64)}`; }, (v) => { v.imageDetails[0].imageTags = ["0".repeat(40)]; },
   ]) { const changed = structuredClone(exact); change(changed); assert.throws(() => authenticatePrintingRoutineExecutorPredecessor(changed)); }
+});
+
+test("hostile structured values remain canonical data and cannot alter the fixed executor", () => {
+  const hostile = ["\"", "'", "`", "\\", "${process.exit(0)}", ";)}", "</script>", "\u2028", "\u2029", "line\nfeed", "carriage\rreturn", "nul\0byte", "require('node:child_process').execSync('id')"];
+  const baseline = buildPrintingRoutineDeltaCommand({ sourceSha: contract.sourceSha, requirements, databaseHostname: input.databaseHostname });
+  for (const value of hostile) {
+    const changed = structuredClone(requirements); changed.objects.tables[0].identity = value;
+    const built = buildPrintingRoutineDeltaCommand({ sourceSha: contract.sourceSha, requirements: changed, databaseHostname: input.databaseHostname });
+    assert.equal(built.command[1], baseline.command[1], "Structured data changed executable source");
+    const decoded = runtime.decodeInput(built.command[2], built.command[3]);
+    assert.equal(decoded.input.requirements.successor.tables, canonicalSha256(changed.objects.tables));
+  }
+});
+
+test("payload transport rejects malformed, noncanonical, altered and oversized data", () => {
+  const built = buildPrintingRoutineDeltaCommand({ sourceSha: contract.sourceSha, requirements, databaseHostname: input.databaseHostname });
+  assert.throws(() => runtime.decodeInput(`${built.command[2]}\n`, built.command[3]));
+  assert.throws(() => runtime.decodeInput(built.command[2].slice(0, -4), built.command[3]));
+  assert.throws(() => runtime.decodeInput(built.command[2], "0".repeat(64)));
+  assert.throws(() => runtime.decodeInput("A".repeat(87388), hash(Buffer.from("x"))));
+  const noncanonical = Buffer.from(JSON.stringify({ z: 1, a: 2 }));
+  assert.throws(() => runtime.decodeInput(noncanonical.toString("base64"), hash(noncanonical)));
+  const decoded = runtime.decodeInput(built.command[2], built.command[3]);
+  for (const change of [
+    (value) => { value.input.contract.sourceSha = "x"; },
+    (value) => { value.input.contract.identities.reverse(); },
+    (value) => { value.input.contract.predecessorSha256[Object.keys(value.input.contract.predecessorSha256)[0]] = "0".repeat(64); },
+    (value) => { value.input.routines[0].name = "arbitrary"; },
+    (value) => { value.input.routines[0].sql += ";DROP TABLE public.User"; },
+    (value) => { value.input.databaseHostname = "host;injection"; },
+    (value) => { value.input.unreviewed = true; },
+  ]) { const altered = structuredClone(decoded); change(altered); assert.throws(() => runtime.validateInput(altered.input)); }
+});
+
+test("fixed node-e executor parses authenticated data and fails generically before a missing secret", () => {
+  const built = buildPrintingRoutineDeltaCommand({ sourceSha: contract.sourceSha, requirements, databaseHostname: input.databaseHostname });
+  const result = spawnSync(process.execPath, built.command, { cwd: "backend", env: { NODE_ENV: "production" }, encoding: "utf8" });
+  assert.equal(result.status, 1); assert.equal(result.stdout, "");
+  assert.equal(result.stderr, '{"status":"PRODUCTION_PRINTING_ROUTINE_DELTA_FAILED"}\n');
+  assert.doesNotMatch(`${result.stdout}${result.stderr}`, /password|DATABASE_URL|secret|credential/i);
 });
 
 test("only exact authenticated completion evidence is accepted", () => {

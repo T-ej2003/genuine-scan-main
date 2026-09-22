@@ -116,6 +116,7 @@
       "producer": "scripts/aws/produce-production-app-only-requirements.mjs",
       "consumers": [
         "scripts/aws/apply-production-printing-routine-delta.mjs",
+        "scripts/aws/production-printing-routine-delta-executor.cjs",
         "scripts/aws/probe-production-rls-catalogue.mjs",
         "scripts/aws/production-app-only-preparation.mjs",
         "scripts/aws/production-app-only-verifier-command.mjs"
