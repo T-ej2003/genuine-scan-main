@@ -299,7 +299,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
           assert.equal(scalar(greenUrl, "SELECT has_schema_privilege('mscqr_prd_rls_phase2_auth_owner','app_rls','CREATE')", `${failStage} privilege rollback`), "f");
           assert.equal(await classifyLive(), RLS_PROBE_CLASSIFICATIONS.EXPECTED);
         }
-        for (const failStage of ["DATABASE_IDENTITY_AUTHENTICATION", "PREDECESSOR_COLLECTION", "PREDECESSOR_AUTHENTICATION", "PRIVILEGE_GRANT",
+        for (const failStage of ["TRANSACTION_SETUP", "DATABASE_IDENTITY_AUTHENTICATION", "PREDECESSOR_COLLECTION", "PREDECESSOR_AUTHENTICATION", "PRIVILEGE_GRANT",
           "ROUTINE_OWNER_SWITCH", "REPLACE_PRINTING_READINESS", "REPLACE_PRINTING_CREATE_JOB", "REPLACE_PRINTING_CONNECTOR_IDENTITY",
           "PRIVILEGE_RESTORATION", "SUCCESSOR_AUTHENTICATION", "COMMIT"]) {
           await assert.rejects(administratorClient.$transaction((tx) => printingDeltaRuntime.executePrintingRoutineDeltaTransaction({

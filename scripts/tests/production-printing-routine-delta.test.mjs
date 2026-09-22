@@ -267,7 +267,7 @@ test("every privilege-bridge failure stage aborts the transaction contract", asy
 });
 
 test("fixed source stages are set before every bounded transaction operation", async () => {
-  const transactionStages = ["DATABASE_IDENTITY_AUTHENTICATION", "PREDECESSOR_COLLECTION", "PREDECESSOR_AUTHENTICATION", "PRIVILEGE_GRANT",
+  const transactionStages = ["TRANSACTION_SETUP", "DATABASE_IDENTITY_AUTHENTICATION", "PREDECESSOR_COLLECTION", "PREDECESSOR_AUTHENTICATION", "PRIVILEGE_GRANT",
     "ROUTINE_OWNER_SWITCH", "REPLACE_PRINTING_READINESS", "REPLACE_PRINTING_CREATE_JOB", "REPLACE_PRINTING_CONNECTOR_IDENTITY",
     "PRIVILEGE_RESTORATION", "SUCCESSOR_AUTHENTICATION", "COMMIT"];
   assert.deepEqual(Object.keys(runtime.stages), stageValues);

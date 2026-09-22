@@ -20,6 +20,7 @@ const stages = Object.freeze({
   ARGV_VALIDATION: "ARGV_VALIDATION", TRANSPORT_VALIDATION: "TRANSPORT_VALIDATION", PAYLOAD_DECOMPRESSION: "PAYLOAD_DECOMPRESSION",
   PAYLOAD_AUTHENTICATION: "PAYLOAD_AUTHENTICATION", CONTRACT_AUTHENTICATION: "CONTRACT_AUTHENTICATION", SECRET_VALIDATION: "SECRET_VALIDATION",
   DATABASE_URL_CONSTRUCTION: "DATABASE_URL_CONSTRUCTION", PRISMA_INITIALIZATION: "PRISMA_INITIALIZATION", TRANSACTION_START: "TRANSACTION_START",
+  TRANSACTION_SETUP: "TRANSACTION_SETUP",
   DATABASE_IDENTITY_AUTHENTICATION: "DATABASE_IDENTITY_AUTHENTICATION", PREDECESSOR_COLLECTION: "PREDECESSOR_COLLECTION",
   PREDECESSOR_AUTHENTICATION: "PREDECESSOR_AUTHENTICATION", PRIVILEGE_GRANT: "PRIVILEGE_GRANT", ROUTINE_OWNER_SWITCH: "ROUTINE_OWNER_SWITCH",
   REPLACE_PRINTING_READINESS: "REPLACE_PRINTING_READINESS", REPLACE_PRINTING_CREATE_JOB: "REPLACE_PRINTING_CREATE_JOB",
@@ -156,6 +157,7 @@ async function executePrintingRoutineDeltaTransaction({ tx, input, collect = col
   classify = classifyPrintingRoutineTransactionCatalogue, checkpoint = async () => {}, setStage = () => {} } = {}) {
   assert.deepEqual(input.routines.map(({ name }) => name), expectedRoutines);
   assert.deepEqual(input.contract.predecessorSha256, expectedPredecessors);
+  setStage(stages.TRANSACTION_SETUP);
   await tx.$executeRawUnsafe("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE");
   await tx.$executeRawUnsafe("SELECT pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('mscqr-production-printing-routine-delta',0))");
   const validateIdentity = (identity) => {
