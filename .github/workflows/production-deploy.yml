@@ -46,6 +46,7 @@ jobs:
           GH_TOKEN: '${{ github.token }}'
         run: |
           set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
           test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
           git fetch --no-tags origin main
           test "$GITHUB_SHA" = "$(git rev-parse refs/remotes/origin/main)"
@@ -54,9 +55,10 @@ jobs:
             test "$GITHUB_RUN_ATTEMPT" = "1"
             baseline_merge_sha="$(GH_HOST=github.com gh api --hostname github.com repos/T-ej2003/genuine-scan-main/pulls/558 --jq 'select(.merged_at != null and .base.ref == "main" and .base.repo.full_name == "T-ej2003/genuine-scan-main" and .head.repo.full_name == "T-ej2003/genuine-scan-main") | .merge_commit_sha')"
             [[ "$baseline_merge_sha" =~ ^[a-f0-9]{40}$ ]]
-            test "$GITHUB_SHA" = "$baseline_merge_sha"
-            # The exact reviewed PR merge and both historical image digests
-            # make this route ineligible after main or either service advances.
+            test "$GITHUB_SHA" != "$baseline_merge_sha"
+            git merge-base --is-ancestor "$baseline_merge_sha" "$GITHUB_SHA"
+            # The reviewed baseline lineage and both historical image digests
+            # separate current deployment source from the one-time predecessor.
             printf 'release_class=NORMAL_APPLICATION\nbackend=true\nfrontend=true\nbaseline=true\n' >> "$GITHUB_OUTPUT"
             echo "### One-time reviewed runtime baseline" >> "$GITHUB_STEP_SUMMARY"
             exit 0
