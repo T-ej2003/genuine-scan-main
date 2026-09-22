@@ -1,0 +1,194 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import crypto from "node:crypto";
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
+import { APP_ONLY } from "../aws/production-app-only-contract.mjs";
+import { APP_ONLY_VERIFIER } from "../aws/production-app-only-policy.mjs";
+import { collectAppOnlyDatabaseCatalogue } from "../aws/production-app-only-database-verifier.mjs";
+import { createAppOnlyRequirements } from "../aws/production-app-only-requirements.mjs";
+import {
+  FORBIDDEN_SMOKE_SECRETS, SMOKE_ENVIRONMENT, SMOKE_REPOSITORY,
+  executeSmokeSecretHandoff, smokeSecretHandoffContract,
+} from "../aws/handoff-production-smoke-secrets.mjs";
+import {
+  EXPECTED_PRINTING_ROUTINES, EXPECTED_PRINTING_ROUTINE_PREDECESSORS, RLS_PROBE_CLASSIFICATIONS,
+  authenticateCanonicalProductionRequirements, authenticateProductionRlsProbeResult, buildProductionRlsProbeDefinition,
+  classifyProductionRlsCatalogue, hashProductionRlsCatalogue,
+} from "../aws/probe-production-rls-catalogue.mjs";
+
+const handoff = smokeSecretHandoffContract();
+const sourceSha = "a".repeat(40);
+const fakeHandoffRunner = ({ wrongArn = false, fail = "", branchSha = sourceSha } = {}) => {
+  const calls = [];
+  const run = (command, args, options = {}) => {
+    calls.push({ command, args, env: options.env, input: options.input ? Buffer.from(options.input) : undefined });
+    if (fail && args.includes(fail)) throw new Error("injected failure");
+    if (command === "gh" && args[0] === "api") return Buffer.from(JSON.stringify({ commit: { sha: branchSha } }));
+    if (command === "gh" && args[0] === "secret" && args[1] === "list") return Buffer.from(JSON.stringify(handoff.map(({ destination }) => ({ name: destination }))));
+    if (command === "gh" && args[0] === "secret" && args[1] === "set") return Buffer.alloc(0);
+    if (args.includes("get-caller-identity")) return Buffer.from(JSON.stringify({ Account: "368992683803", Arn: "arn:aws:iam::368992683803:root" }));
+    if (args.includes("describe-secret")) {
+      const id = args[args.indexOf("--secret-id") + 1], entry = handoff.find(({ secretId }) => secretId === id);
+      return Buffer.from(JSON.stringify({ Name: id, ARN: wrongArn ? `${entry.arn}x` : entry.arn }));
+    }
+    if (args.includes("get-secret-value")) return Buffer.from("dedicated-secret-value\n");
+    throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
+  };
+  return { run, calls };
+};
+
+test("smoke handoff maps only the three source-owned canary handles to the three reviewed destinations", () => {
+  assert.deepEqual(handoff.map(({ secretId }) => secretId), [
+    "mscqr/production/rls-green/phase2/canary/ordinary-email",
+    "mscqr/production/rls-green/phase2/canary/ordinary-password",
+    "mscqr/production/rls-green/phase2/canary/ordinary-mfa-secret",
+  ]);
+  assert.deepEqual(handoff.map(({ destination }) => destination), ["PRODUCTION_SMOKE_LOGIN_EMAIL", "PRODUCTION_SMOKE_LOGIN_PASSWORD", "PRODUCTION_SMOKE_ADMIN_MFA_SECRET"]);
+  const hostileEnvironment = { PATH: process.env.PATH, HOME: process.env.HOME, GH_TOKEN: "fixture-token", GH_HOST: "attacker.invalid", GH_ENTERPRISE_TOKEN: "hostile-enterprise-token", AWS_ENDPOINT_URL: "https://attacker.invalid", AWS_ENDPOINT_URL_SECRETSMANAGER: "https://attacker.invalid/secrets", AWS_ACCESS_KEY_ID: "ambient" };
+  const fake = fakeHandoffRunner(), result = executeSmokeSecretHandoff({ sourceSha, awsProfile: "fixture", run: fake.run, env: hostileEnvironment, awsExecutable: "aws", githubExecutable: "gh" });
+  assert.equal(result.repository, SMOKE_REPOSITORY); assert.equal(result.environment, SMOKE_ENVIRONMENT);
+  const writes = fake.calls.filter(({ command, args }) => command === "gh" && args[1] === "set");
+  assert.deepEqual(writes.map(({ args }) => args[2]), handoff.map(({ destination }) => destination));
+  assert.ok(writes.every(({ args, input }) => !args.includes("--body") && input.length > 0));
+  assert.ok(fake.calls.filter(({ command }) => command === "gh").every(({ args, env }) => (args.includes("github.com/T-ej2003/genuine-scan-main") || args[1] === "repos/T-ej2003/genuine-scan-main/branches/main") && env?.GH_HOST === "github.com" && !env?.GH_ENTERPRISE_TOKEN && !env?.AWS_ACCESS_KEY_ID && !env?.AWS_ENDPOINT_URL));
+  assert.ok(fake.calls.filter(({ command }) => command === "aws").every(({ env }) => env?.AWS_PROFILE === "fixture" && !env?.AWS_ACCESS_KEY_ID && !env?.AWS_ENDPOINT_URL && !env?.AWS_ENDPOINT_URL_SECRETSMANAGER));
+  assert.ok(fake.calls.every(({ args }) => !args.includes("dedicated-secret-value")));
+  assert.ok(FORBIDDEN_SMOKE_SECRETS.every((name) => !writes.some(({ args }) => args.includes(name))));
+  assert.doesNotMatch(JSON.stringify(result), /dedicated-secret-value/);
+});
+
+test("smoke handoff fails closed for substituted identity or command failure", () => {
+  const invoke = (options) => executeSmokeSecretHandoff({ sourceSha, awsProfile: "fixture", run: fakeHandoffRunner(options).run, awsExecutable: "aws", githubExecutable: "gh" });
+  assert.throws(() => invoke({ wrongArn: true }));
+  assert.throws(() => invoke({ fail: "describe-secret" }));
+  assert.throws(() => invoke({ fail: "get-secret-value" }));
+  assert.throws(() => invoke({ fail: "set" }));
+  const first = fakeHandoffRunner({ fail: "set" });
+  assert.throws(() => executeSmokeSecretHandoff({ sourceSha, awsProfile: "fixture", run: first.run, awsExecutable: "aws", githubExecutable: "gh" }));
+  assert.throws(() => invoke({ branchSha: "c".repeat(40) }), /current protected main/);
+  assert.doesNotThrow(() => executeSmokeSecretHandoff({ sourceSha, awsProfile: "fixture", run: fakeHandoffRunner().run, awsExecutable: "aws", githubExecutable: "gh" }));
+});
+
+const catalogue = () => ({
+  identity: { role: APP_ONLY_VERIFIER.databaseRole },
+  routines: Object.keys(EXPECTED_PRINTING_ROUTINE_PREDECESSORS).map((identity) => { const [, name, args] = identity.match(/^app_rls\.([^(]+)\((.*)\)$/); return { schema: "app_rls", name, arguments: args, definition: `current-${name}`, grants: [] }; })
+    .concat([{ schema: "app_auth", name: "login", arguments: "", definition: "current-login", grants: [] }]),
+  tables: [{ name: "User", owner: "owner", rls: true, forced: true, grants: [], column_grants: [] }],
+  policies: [{ table: "User", name: "tenant", command: "r", roles: ["app"], using: "false", check: null }],
+  schemas: [{ name: "app_rls", owner: "owner", grants: [] }],
+  roles: [{ name: APP_ONLY_VERIFIER.databaseRole, login: true, superuser: false, memberships: [], members: [] }],
+});
+const requirementsFor = (value) => ({ schemaVersion: 1, kind: "APP_ONLY_CANONICAL_DATABASE_REQUIREMENTS", sourceSha: "a".repeat(40), candidateSourceSha: "a".repeat(40), requirementsSha256: "b".repeat(64),
+  objects: Object.fromEntries(["routines", "tables", "policies", "schemas", "roles"].map((name) => [name, value[name].map((row) => ({ identity: name === "routines" ? `${row.schema}.${row.name}(${row.arguments})` : name === "policies" ? `${row.table}.${row.name}` : row.name, sha256: canonicalSha256(row) }))])) });
+
+const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
+const requirementsArchive = (name, bytes) => execFileSync("python3", ["-c", `import io,sys,zipfile
+b=io.BytesIO()
+with zipfile.ZipFile(b,'w',compression=zipfile.ZIP_DEFLATED) as z:
+ i=zipfile.ZipInfo(sys.argv[1]);i.create_system=3;i.external_attr=33152<<16
+ z.writestr(i,sys.stdin.buffer.read(),compress_type=zipfile.ZIP_DEFLATED)
+sys.stdout.buffer.write(b.getvalue())`, name], { input: bytes });
+const canonicalRequirementsFixture = () => {
+  const requirements = createAppOnlyRequirements({ repositoryRoot: process.cwd(), sourceSha, candidateSourceSha: sourceSha, catalogue: catalogue(), packageChecksums: { package: "fixture" } });
+  const bytes = Buffer.from(JSON.stringify(requirements)), archive = requirementsArchive("app-only-requirements.json", bytes);
+  const reference = { sourceSha, runId: "123", runAttempt: "1", artifactId: "456", artifactDigest: `sha256:${sha256(archive)}`, fileSha256: sha256(bytes) };
+  const run = { id: 123, run_attempt: 1, repository: { id: 9, full_name: "T-ej2003/genuine-scan-main" }, head_repository: { id: 9, full_name: "T-ej2003/genuine-scan-main" }, head_sha: sourceSha, head_branch: "main", path: ".github/workflows/produce-production-app-only-requirements.yml", event: "workflow_dispatch", status: "completed", conclusion: "success" };
+  const artifact = { id: 456, name: "production-app-only-requirements", expired: false, digest: reference.artifactDigest, size_in_bytes: archive.length, workflow_run: { id: 123, head_sha: sourceSha, head_repository_id: 9, repository_id: 9 } };
+  const githubRun = (_command, args) => args[1].endsWith("/branches/main") ? JSON.stringify({ commit: { sha: sourceSha } }) : args[1].endsWith("/zip") ? archive : args[1].endsWith("/artifacts") ? JSON.stringify([{ artifacts: [artifact] }]) : JSON.stringify(run);
+  return { sourceSha, requirements, bytes, archive, reference, run, artifact, githubRun };
+};
+
+test("production RLS requirements come only from the authenticated canonical producer artifact", () => {
+  const fixture = canonicalRequirementsFixture();
+  const authenticated = authenticateCanonicalProductionRequirements({ sourceSha: fixture.sourceSha, requirementsReference: fixture.reference, repositoryRoot: process.cwd(), githubRun: fixture.githubRun });
+  assert.equal(authenticated.requirements.requirementsSha256, fixture.requirements.requirementsSha256);
+  assert.deepEqual(authenticated.provenance, { runId: "123", runAttempt: "1", artifactId: "456", artifactDigest: fixture.reference.artifactDigest, fileSha256: fixture.reference.fileSha256 });
+  assert.throws(() => authenticateCanonicalProductionRequirements({ sourceSha: "c".repeat(40), requirementsReference: fixture.reference, repositoryRoot: process.cwd(), githubRun: fixture.githubRun }), /source/);
+  assert.throws(() => authenticateCanonicalProductionRequirements({ sourceSha: fixture.sourceSha, requirementsReference: fixture.reference, repositoryRoot: process.cwd(), githubRun: (_command, args) => args[1].endsWith("/branches/main") ? JSON.stringify({ commit: { sha: "c".repeat(40) } }) : fixture.githubRun(_command, args) }), /current protected main/);
+  for (const change of [
+    (value) => { value.objects.tables[0].sha256 = "0".repeat(64); },
+    (value) => { value.objects.routines[0].sha256 = "0".repeat(64); },
+    (value) => { value.canonicalPackageChecksumsSha256 = "0".repeat(64); },
+    (value) => { value.sourceSha = value.candidateSourceSha = "d".repeat(40); },
+  ]) {
+    const replaced = structuredClone(fixture.requirements); change(replaced);
+    const { requirementsSha256: _old, ...body } = replaced; replaced.requirementsSha256 = canonicalSha256(body);
+    const replacementArchive = requirementsArchive("app-only-requirements.json", Buffer.from(JSON.stringify(replaced)));
+    const substituted = (_command, args) => args[1].endsWith("/zip") ? replacementArchive : fixture.githubRun(_command, args);
+    assert.throws(() => authenticateCanonicalProductionRequirements({ sourceSha: fixture.sourceSha, requirementsReference: fixture.reference, repositoryRoot: process.cwd(), githubRun: substituted }));
+  }
+  const wrongMember = requirementsArchive("copied-requirements.json", fixture.bytes);
+  assert.throws(() => authenticateCanonicalProductionRequirements({ sourceSha: fixture.sourceSha, requirementsReference: fixture.reference, repositoryRoot: process.cwd(), githubRun: (_command, args) => args[1].endsWith("/zip") ? wrongMember : fixture.githubRun(_command, args) }));
+  for (const mutate of [
+    (run) => { run.path = ".github/workflows/other.yml"; },
+    (run) => { run.conclusion = "failure"; },
+    (run) => { run.run_attempt = 2; },
+  ]) {
+    const changed = structuredClone(fixture.run); mutate(changed);
+    assert.throws(() => authenticateCanonicalProductionRequirements({ sourceSha: fixture.sourceSha, requirementsReference: fixture.reference, repositoryRoot: process.cwd(), githubRun: (_command, args) => args[1].includes("/runs/123") && !args[1].endsWith("/artifacts") ? JSON.stringify(changed) : fixture.githubRun(_command, args) }));
+  }
+});
+
+test("RLS classification accepts exact match and only the exact three printing routine deltas", () => {
+  const expected = catalogue(), requirements = requirementsFor(expected);
+  assert.deepEqual(classifyProductionRlsCatalogue(hashProductionRlsCatalogue(expected), requirements), { classification: RLS_PROBE_CLASSIFICATIONS.MATCH, deltaObjects: [] });
+  const predecessor = hashProductionRlsCatalogue(expected);
+  for (const row of predecessor.routines) if (EXPECTED_PRINTING_ROUTINE_PREDECESSORS[row.identity]) row.sha256 = EXPECTED_PRINTING_ROUTINE_PREDECESSORS[row.identity];
+  const result = classifyProductionRlsCatalogue(predecessor, requirements);
+  assert.equal(result.classification, RLS_PROBE_CLASSIFICATIONS.EXPECTED); assert.equal(result.deltaObjects.length, 3);
+  for (const mutate of [
+    (v) => v.routines.splice(v.routines.findIndex(({ identity }) => identity.includes("printing_readiness(")), 1),
+    (v) => v.routines.find(({ identity }) => identity.includes("printing_create_job(")).sha256 = "0".repeat(64),
+    (v) => v.routines.find(({ identity }) => identity.includes("printing_connector_identity(")).sha256 = requirements.objects.routines.find(({ identity }) => identity.includes("printing_connector_identity(")).sha256,
+  ]) { const bad = structuredClone(predecessor); mutate(bad); assert.equal(classifyProductionRlsCatalogue(bad, requirements).classification, RLS_PROBE_CLASSIFICATIONS.UNEXPECTED); }
+  const old = structuredClone(expected); for (const row of old.routines.filter(({ name }) => EXPECTED_PRINTING_ROUTINES.includes(name))) row.definition = `unreviewed-${row.name}`;
+  assert.equal(classifyProductionRlsCatalogue(hashProductionRlsCatalogue(old), requirements).classification, RLS_PROBE_CLASSIFICATIONS.UNEXPECTED);
+  for (const mutate of [
+    (v) => v.routines.at(-1).owner = "wrong",
+    (v) => v.policies[0].using = "true",
+    (v) => v.tables[0].forced = false,
+    (v) => v.tables[0].owner = "wrong",
+    (v) => v.tables[0].grants.push({ role: "PUBLIC", privilege: "SELECT" }),
+    (v) => v.tables[0].column_grants.push({ column: "id", role: "PUBLIC", privilege: "SELECT" }),
+    (v) => v.roles[0].superuser = true,
+  ]) { const bad = structuredClone(old); mutate(bad); assert.equal(classifyProductionRlsCatalogue(hashProductionRlsCatalogue(bad), requirements).classification, RLS_PROBE_CLASSIFICATIONS.UNEXPECTED); }
+});
+
+test("RLS probe definition reuses the exact private read-only task boundary", () => {
+  const value = catalogue(), requirements = requirementsFor(value);
+  const secret = ["arn:aws:secretsmanager:eu-west-2:368992683803:secret", "mscqr/production/rls-green/phase4/read-only-canary-database-url-ABC123"].join(":");
+  const baseDefinition = { family: APP_ONLY_VERIFIER.family, taskRoleArn: APP_ONLY_VERIFIER.taskRoleArn, executionRoleArn: APP_ONLY_VERIFIER.executionRoleArn,
+    networkMode: "awsvpc", runtimePlatform: { cpuArchitecture: "X86_64", operatingSystemFamily: "LINUX" }, containerDefinitions: [{ name: "production-green-read-only-rls-canary",
+      image: `${APP_ONLY.backendRepository}@sha256:${"1".repeat(64)}`, entryPoint: ["node"], environment: [], secrets: [{ name: "RLS_CANARY_DATABASE_URL", valueFrom: secret }], readonlyRootFilesystem: true, privileged: false }] };
+  const definition = buildProductionRlsProbeDefinition({ baseDefinition, requirements, identity: { sourceSha: "a".repeat(40) }, databaseSecretArn: secret });
+  assert.equal(definition.family, APP_ONLY_VERIFIER.family); assert.equal(definition.taskRoleArn, APP_ONLY_VERIFIER.taskRoleArn); assert.equal(definition.executionRoleArn, APP_ONLY_VERIFIER.executionRoleArn);
+  assert.deepEqual(definition.containerDefinitions[0].secrets, [{ name: "RLS_CANARY_DATABASE_URL", valueFrom: secret }]); assert.equal(definition.containerDefinitions[0].readonlyRootFilesystem, true);
+  assert.doesNotMatch(definition.containerDefinitions[0].command.join("\n"), /\$executeRawUnsafe\(["'`](?:ALTER|CREATE|DROP|GRANT|REVOKE|INSERT|UPDATE|DELETE)/i);
+  assert.match(definition.containerDefinitions[0].command.join("\n"), /url\.hostname,input\.identity\.databaseHostname/);
+  assert.ok(Buffer.byteLength(definition.containerDefinitions[0].command[1]) < 48000);
+  const collector = collectAppOnlyDatabaseCatalogue.toString();
+  assert.equal((collector.match(/\$executeRawUnsafe/g) || []).length, 1); assert.match(collector, /SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY/);
+  assert.ok([...collector.matchAll(/\$queryRawUnsafe\(`([\s\S]*?)`\)/g)].every(([, sql]) => /^SELECT\b/.test(sql.trim())));
+});
+
+test("RLS execution failure or unauthenticated output can never become MATCH", () => {
+  const body = { schemaVersion: 1, kind: "PRODUCTION_RLS_CATALOGUE_PROBE", sourceSha: "a".repeat(40), requirementsSha256: "b".repeat(64), databaseRole: APP_ONLY_VERIFIER.databaseRole, catalogue: hashProductionRlsCatalogue(catalogue()) };
+  const valid = JSON.stringify({ ...body, evidenceSha256: canonicalSha256(body) });
+  assert.deepEqual(authenticateProductionRlsProbeResult(valid, { sourceSha: body.sourceSha, requirementsSha256: body.requirementsSha256 }).catalogue, body.catalogue);
+  assert.throws(() => authenticateProductionRlsProbeResult(JSON.stringify({ status: "PRODUCTION_RLS_CATALOGUE_PROBE_FAILED" }), { sourceSha: body.sourceSha, requirementsSha256: body.requirementsSha256 }));
+  const changed = JSON.parse(valid); changed.sourceSha = "c".repeat(40); assert.throws(() => authenticateProductionRlsProbeResult(JSON.stringify(changed), { sourceSha: body.sourceSha, requirementsSha256: body.requirementsSha256 }));
+  const extra = JSON.parse(valid); extra.catalogue.tables[0].unexpected = true; extra.evidenceSha256 = canonicalSha256(Object.fromEntries(Object.entries(extra).filter(([key]) => key !== "evidenceSha256"))); assert.throws(() => authenticateProductionRlsProbeResult(JSON.stringify(extra), { sourceSha: body.sourceSha, requirementsSha256: body.requirementsSha256 }));
+  assert.throws(() => authenticateProductionRlsProbeResult("not-json", { sourceSha: body.sourceSha, requirementsSha256: body.requirementsSha256 }));
+});
+
+test("operator scripts contain no secret output or database mutation surface", () => {
+  const handoffSource = fs.readFileSync("scripts/aws/handoff-production-smoke-secrets.mjs", "utf8"), probeSource = fs.readFileSync("scripts/aws/probe-production-rls-catalogue.mjs", "utf8");
+  assert.doesNotMatch(handoffSource, /console\.(?:log|error)|SecretString[^\n]+process\.stdout/);
+  assert.doesNotMatch(probeSource, /\b(?:ALTER|CREATE|DROP|GRANT|REVOKE|INSERT|UPDATE|DELETE)\b[^\n]*\$executeRawUnsafe/i);
+  assert.doesNotMatch(probeSource, /["'](?:dynamodb|lambda)["']|InvokeFunction/);
+  assert.doesNotMatch(probeSource, /requirementsPath|--requirements(?:["'])/);
+  assert.match(probeSource, /downloadAppOnlyArtifact\(\{ kind: "requirements"/);
+  assert.match(fs.readFileSync("scripts/aws/production-app-only-artifacts.mjs", "utf8"), /execFileSync\("\/usr\/bin\/python3"/);
+});

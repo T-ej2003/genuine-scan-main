@@ -115,6 +115,7 @@
       "kind": "file",
       "producer": "scripts/aws/produce-production-app-only-requirements.mjs",
       "consumers": [
+        "scripts/aws/probe-production-rls-catalogue.mjs",
         "scripts/aws/production-app-only-preparation.mjs",
         "scripts/aws/production-app-only-verifier-command.mjs"
       ],

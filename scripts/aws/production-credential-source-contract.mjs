@@ -50,6 +50,18 @@ export function productionAwsExecutable(fsOps = fs) {
   throw new Error("No safelisted AWS CLI installation found");
 }
 
+export function productionGithubExecutable(fsOps = fs) {
+  for (const candidate of ["/usr/bin/gh", "/opt/homebrew/bin/gh", "/usr/local/bin/gh", "/Users/abhiramteja/.local/bin/gh"]) {
+    if (!fsOps.existsSync(candidate)) continue;
+    const resolved = fsOps.realpathSync(candidate);
+    assert(/^(?:\/usr\/bin\/gh|\/usr\/local\/bin\/gh|\/(?:opt\/homebrew|usr\/local)\/Cellar\/gh\/[^/]+\/bin\/gh|\/Users\/abhiramteja\/\.local\/gh-[0-9.]+\/bin\/gh)$/.test(resolved), "GitHub executable is outside canonical safelist");
+    const stat = fsOps.statSync(resolved);
+    assert(stat.isFile() && (stat.mode & 0o111) && !(stat.mode & 0o022), "Unsafe GitHub executable");
+    return resolved;
+  }
+  throw new Error("No safelisted GitHub CLI installation found");
+}
+
 export function createProductionAwsCredentialEnvironment({ credentialSource, profile, env = process.env, region = REGION, injected = false } = {}) {
   if (!Object.values(PRODUCTION_AWS_CREDENTIAL_SOURCE).includes(credentialSource)) throw new Error("Production AWS credential source must be explicit.");
   if (typeof region !== "string" || !/^eu-west-2$/.test(region)) throw new Error("Production AWS region is invalid.");
@@ -106,7 +118,7 @@ export function createProductionGithubCredentialEnvironment({ env = process.env 
 }
 
 export function createProductionGithubCommandRunner({ env = process.env, exec = execFileSync } = {}) {
-  const githubEnvironment = createProductionGithubCredentialEnvironment({ env });
+  const githubEnvironment = Object.freeze({ ...createProductionGithubCredentialEnvironment({ env }), GH_HOST: "github.com", GH_PROMPT_DISABLED: "1" });
   const localEnvironment = Object.freeze(copy(env, SAFE_PROCESS_KEYS));
   return (command, args, { encoding = "utf8", maxBuffer } = {}) => {
     if (command === "gh") {
@@ -114,7 +126,8 @@ export function createProductionGithubCommandRunner({ env = process.env, exec = 
       const allowedFlags = new Set(["--paginate", "--slurp"]);
       const allowedEndpoint = new RegExp(`^repos/T-ej2003/genuine-scan-main/(?:branches/main|environments/(?:${GITHUB_ENVIRONMENT_ENDPOINTS.join("|")})|environments/production-mixed-dual-slot-recovery/(?:deployment-branch-policies|deployment_protection_rules|secrets)|actions/(?:runs/[1-9][0-9]*(?:/(?:approvals|artifacts))?|artifacts/[1-9][0-9]*/zip))$`).test(endpoint || "");
       if (!Array.isArray(args) || args[0] !== "api" || !allowedEndpoint || args.slice(2).some((value) => !allowedFlags.has(value))) throw new Error("Production GitHub runner permits only the reviewed read-only authorization API calls.");
-      return exec("gh", args, { cwd: process.cwd(), env: githubEnvironment, encoding, stdio: ["ignore", "pipe", "pipe"], ...(maxBuffer === undefined ? {} : { maxBuffer }) });
+      const executable = exec === execFileSync ? productionGithubExecutable() : "gh";
+      return exec(executable, args, { cwd: process.cwd(), env: githubEnvironment, encoding, stdio: ["ignore", "pipe", "pipe"], ...(maxBuffer === undefined ? {} : { maxBuffer }) });
     }
     if (command === "unzip") {
       const archive = args?.[0] === "-Z" ? args?.[2] : args?.[1];

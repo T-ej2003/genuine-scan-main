@@ -38,6 +38,24 @@ The environment-secret contract is:
 - `PRODUCTION_SMOKE_ADMIN_MFA_CODE`: optional manual override and unset during normal CI.
 - `PRODUCTION_SMOKE_VERIFY_CODE`: optional until a dedicated non-customer QR is issued. Its absence skips only public verification.
 
+After authenticating protected main, the operator installs the existing ordinary-canary values without displaying them or writing plaintext to disk:
+
+```bash
+npm run production:smoke-secret-handoff -- --source-sha <protected-main-sha> --aws-profile mscqr-production-root
+```
+
+The command authenticates the three exact source-owned Secrets Manager ARNs, pipes each value directly to `gh secret set` over stdin, verifies names only, and refuses to run while either the static MFA-code or public-verify secret is present.
+
+The final pre-baseline RLS comparison reuses the existing canonical disposable-package requirements workflow and the installed private read-only canary task boundary. Dispatch `.github/workflows/produce-production-app-only-requirements.yml` with identical protected/candidate SHAs, then use its compact authenticated artifact reference:
+
+```bash
+npm run production:rls-catalogue-probe -- --source-sha <protected-main-sha> --requirements-reference '<compact-requirements-artifact-reference-json>' --aws-profile mscqr-production-root
+```
+
+The probe accepts no requirements file path. It independently authenticates the successful producer workflow, protected-main SHA, run attempt, immutable artifact ID/digest, exact ZIP member, and original file SHA before parsing the certified requirements. It then registers only a new revision of the existing compatibility-verifier task definition and runs it once with no overrides. Its PostgreSQL transaction is repeatable-read and read-only under `mscqr_prod_rls_canary_read`; the result is exactly `MATCH`, `EXPECTED_THREE_ROUTINE_DELTA_ONLY`, or `UNEXPECTED_DRIFT`. It never applies an RLS change.
+
+`EXPECTED_THREE_ROUTINE_DELTA_ONLY` is not a name-only exception. It requires all three routines to be present with the exact catalogue hashes authenticated by the last compatible production proof at source `6d5a48ce7c32b12ce8671731392f92ddfa625a88` (requirements `647841407b6bbba43d45ecc880dca713e73cacae4e1d27e74ce3dcdf977a2f88`). A missing routine, another predecessor definition, or any additional catalogue difference is `UNEXPECTED_DRIFT`.
+
 Do not use `seed-launch-smoke-users.js` in production: that executable deliberately refuses protected-environment mutation. The already-provisioned ordinary canary is reused instead of creating a second identity system.
 
 A permanent public-verification fixture must use the normal QR lifecycle: the dedicated canary licensee submits one QR allocation request, a human platform operator approves it with normal MFA in the application, governed printing/issuance completes, and the resulting non-customer raw QR code is transferred directly into the GitHub environment secret without terminal or workflow-log output. Do not use a customer QR, a generated random string, the risk-blocked platform canary, or the operator's human credentials in CI. Until that fixture exists, leave `PRODUCTION_SMOKE_VERIFY_CODE` unset.

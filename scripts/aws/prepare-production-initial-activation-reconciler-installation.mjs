@@ -43,9 +43,10 @@ function readInitializedBackend(terraformDataDir) {
 
 export function assertProtectedCheckout({ exec = execFileSync, sourceSha, repositoryRoot = root } = {}) {
   if (!/^[a-f0-9]{40}$/.test(sourceSha || "")) throw new Error("Protected source SHA is invalid.");
-  const head = String(exec("git", ["rev-parse", "HEAD"], { cwd: repositoryRoot, encoding: "utf8" })).trim();
-  const main = String(exec("git", ["rev-parse", "origin/main"], { cwd: repositoryRoot, encoding: "utf8" })).trim();
-  const status = String(exec("git", ["status", "--porcelain", "--untracked-files=all"], { cwd: repositoryRoot, encoding: "utf8" }));
+  const executable = exec === execFileSync ? "/usr/bin/git" : "git";
+  const head = String(exec(executable, ["rev-parse", "HEAD"], { cwd: repositoryRoot, encoding: "utf8" })).trim();
+  const main = String(exec(executable, ["rev-parse", "origin/main"], { cwd: repositoryRoot, encoding: "utf8" })).trim();
+  const status = String(exec(executable, ["status", "--porcelain", "--untracked-files=all"], { cwd: repositoryRoot, encoding: "utf8" }));
   if (head !== sourceSha || main !== sourceSha || status) throw new Error("Preparation requires the exact clean protected-main checkout.");
   return Object.freeze({ head, originMain: main });
 }

@@ -85,7 +85,7 @@ with zipfile.ZipFile(io.BytesIO(data)) as z:
 export function readAppOnlyArtifactArchive(bytes, kind) {
   const contract = contracts[kind]; assert.ok(contract, "Unknown app-only artifact kind");
   assert.ok(Buffer.isBuffer(bytes) && bytes.length > 0 && bytes.length <= 8 * 1024 * 1024);
-  return execFileSync("python3", ["-c", readMember, contract.file], {
+  return execFileSync("/usr/bin/python3", ["-c", readMember, contract.file], {
     input: bytes, timeout: 10000, maxBuffer: 1024 * 1024, stdio: ["pipe", "pipe", "pipe"],
   });
 }
