@@ -170,6 +170,7 @@ test("RLS probe definition reuses the exact private read-only task boundary", ()
   assert.ok(Buffer.byteLength(definition.containerDefinitions[0].command[1]) < 48000);
   const wrapper = collectAppOnlyDatabaseCatalogue.toString(), collector = collectAppOnlyDatabaseCatalogueRows.toString();
   assert.equal((wrapper.match(/\$executeRawUnsafe/g) || []).length, 1); assert.match(wrapper, /SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY/);
+  assert.equal((collector.match(/\$executeRawUnsafe/g) || []).length, 1); assert.match(collector, /SET LOCAL search_path = pg_catalog/);
   assert.ok([...collector.matchAll(/\$queryRawUnsafe\(`([\s\S]*?)`\)/g)].every(([, sql]) => /^SELECT\b/.test(sql.trim())));
 });
 

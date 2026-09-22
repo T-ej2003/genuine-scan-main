@@ -47,10 +47,11 @@ test("all fixed catalogue statements use one read-only repeatable-read transacti
   const result = await collectAppOnlyDatabaseCatalogue(client);
   assert.deepEqual(result.routines, observed.routines);
   assert.equal(calls[0], "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
+  assert.equal(calls[1], "SET LOCAL search_path = pg_catalog");
   assert.equal(read, 6);
   // Inspection check, not the security boundary: callers cannot supply SQL;
   // database privileges, fixed code and read-only transaction enforce the limit.
-  assert.ok(calls.slice(1).every((sql) => sql.startsWith("SELECT ")));
+  assert.ok(calls.slice(2).every((sql) => sql.startsWith("SELECT ")));
 });
 for (const field of Object.keys(identity())) test(`database identity boundary rejects ${field} substitution`, async () => {
   const bad = { ...identity(), [field]: typeof identity()[field] === "boolean" ? true : "wrong" };

@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { createRequire } from "node:module";
-import { collectAppOnlyDatabaseCatalogue } from "../aws/production-app-only-database-verifier.mjs";
+import { collectAppOnlyDatabaseCatalogue, collectAppOnlyDatabaseCatalogueRows } from "../aws/production-app-only-database-verifier.mjs";
 import { createAppOnlyRequirements, assertAppOnlyRequirements, compareAppOnlyRequirements } from "../aws/production-app-only-requirements.mjs";
 import { writeStageBPrivateFileExclusive } from "../aws/stage-b-artifact-contract.mjs";
 import { APP_ONLY } from "../aws/production-app-only-contract.mjs";
@@ -71,7 +71,33 @@ const databaseUrl = (base, database, user) => {
 const psql = (url, args, label) => run("psql", [url, "-X", "-v", "ON_ERROR_STOP=1", ...args], { label });
 const scalar = (url, sql, label) => psql(url, ["-q", "-t", "-A", "-c", sql], label).split("\n").at(-1);
 
-test("approved production package executes on disposable PostgreSQL 18 and rollback removes every managed role", { skip: !enabled }, async () => {
+const collectCatalogueRows = (client) => client.$transaction(async (tx) => {
+  await tx.$executeRawUnsafe("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
+  return collectAppOnlyDatabaseCatalogueRows(tx);
+}, { maxWait: 5000, timeout: 30000 });
+
+const collectUnpinnedDeparserSurface = (client) => client.$transaction(async (tx) => {
+  await tx.$executeRawUnsafe("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
+  const [constraints, defaults, policies] = await Promise.all([
+    tx.$queryRawUnsafe(`SELECT c.relname AS "table",k.conname AS name,pg_catalog.pg_get_constraintdef(k.oid) AS value
+      FROM pg_catalog.pg_constraint k JOIN pg_catalog.pg_class c ON c.oid=k.conrelid
+      JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' ORDER BY 1,2`),
+    tx.$queryRawUnsafe(`SELECT c.relname AS "table",a.attname AS name,pg_catalog.pg_get_expr(d.adbin,d.adrelid) AS value
+      FROM pg_catalog.pg_attrdef d JOIN pg_catalog.pg_class c ON c.oid=d.adrelid
+      JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace JOIN pg_catalog.pg_attribute a ON a.attrelid=c.oid AND a.attnum=d.adnum
+      WHERE n.nspname='public' ORDER BY 1,2`),
+    tx.$queryRawUnsafe(`SELECT c.relname AS "table",p.polname AS name,pg_catalog.pg_get_expr(p.polqual,p.polrelid) AS "using",
+      pg_catalog.pg_get_expr(p.polwithcheck,p.polrelid) AS "check" FROM pg_catalog.pg_policy p
+      JOIN pg_catalog.pg_class c ON c.oid=p.polrelid JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+      WHERE n.nspname='public' ORDER BY 1,2`),
+  ]);
+  return { constraints, defaults, policies };
+}, { maxWait: 5000, timeout: 30000 });
+
+const changedRowCount = (left, right) => left.filter((row, index) => JSON.stringify(row) !== JSON.stringify(right[index])).length;
+const changedFieldCount = (left, right, field) => left.filter((row, index) => row[field] !== right[index]?.[field]).length;
+
+test("approved production package executes on disposable PostgreSQL 18 and rollback removes every managed role", { skip: !enabled }, async (t) => {
   const adminUrl = safeAdminUrl();
   assert.equal(Number(scalar(adminUrl, "SELECT current_setting('server_version_num')::integer / 10000", "PostgreSQL major")), 18);
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-production-package-"));
@@ -223,7 +249,33 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
     psql(databaseUrl(adminUrl, targetDatabase, adminUrl.username), ["-q", "-c", "REVOKE CREATE ON SCHEMA app_rls FROM mscqr_prd_rls_phase2_auth_owner"], "restore canonical schema privilege boundary after local fixture setup");
     const { PrismaClient } = createRequire(new URL("../../backend/package.json", import.meta.url))("@prisma/client");
     const verifier = new PrismaClient({ datasources: { db: { url: databaseUrl(adminUrl, targetDatabase, verifierRole) } } });
+    const administratorClient = new PrismaClient({ datasources: { db: { url: greenUrl } } });
+    const maintenanceClient = new PrismaClient({ datasources: { db: { url: databaseUrl(adminUrl, targetDatabase, adminUrl.username) } } });
     try {
+      psql(maintenanceUrl, ["-q", "-c", `ALTER ROLE "${administrator}" INHERIT;
+        GRANT pg_read_all_data TO "${administrator}" WITH ADMIN FALSE, INHERIT TRUE, SET TRUE`], "production-equivalent inherited public access");
+      assert.equal(scalar(greenUrl, "SELECT has_schema_privilege(current_user,'public','USAGE')", "administrator public usage"), "t");
+      assert.equal(scalar(databaseUrl(adminUrl, targetDatabase, verifierRole), "SELECT has_schema_privilege(current_user,'public','USAGE')", "canary public usage"), "f");
+      const [rawCanary, rawAdministrator] = await Promise.all([
+        collectUnpinnedDeparserSurface(verifier), collectUnpinnedDeparserSurface(administratorClient),
+      ]);
+      const rawDifferences = {
+        constraints: changedRowCount(rawCanary.constraints, rawAdministrator.constraints),
+        defaults: changedRowCount(rawCanary.defaults, rawAdministrator.defaults),
+        policyUsing: changedFieldCount(rawCanary.policies, rawAdministrator.policies, "using"),
+        policyCheck: changedFieldCount(rawCanary.policies, rawAdministrator.policies, "check"),
+      };
+      assert.ok(Object.values(rawDifferences).every((count) => count > 0));
+      const [canaryCatalogue, administratorCatalogue] = await Promise.all([
+        collectCatalogueRows(verifier), collectCatalogueRows(administratorClient),
+      ]);
+      for (const collection of ["routines", "tables", "policies", "schemas", "roles"]) {
+        assert.deepEqual(administratorCatalogue[collection], canaryCatalogue[collection]);
+      }
+      assert.equal(scalar(greenUrl, "SHOW search_path", "collector search path remains transaction-local"), '"$user", public');
+      const collectionDigests = Object.fromEntries(["routines", "tables", "policies", "schemas", "roles"]
+        .map((collection) => [collection, crypto.createHash("sha256").update(JSON.stringify(canaryCatalogue[collection])).digest("hex")]));
+      t.diagnostic(JSON.stringify({ principalInvariantCatalogue: { rawDifferences, collectionDigests } }));
       const catalogue = await collectAppOnlyDatabaseCatalogue(verifier);
       const sourceSha = run("git", ["rev-parse", "HEAD"]);
       const context = { repositoryRoot: root, sourceSha,
@@ -233,6 +285,22 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
       assertAppOnlyRequirements(requirements, context);
       assert.ok(catalogue.tables.length >= 79 && catalogue.policies.length >= 351);
       assert.ok(Object.values(compareAppOnlyRequirements(catalogue, requirements)).every((value) => value === "COMPATIBLE"));
+      const assertDurableDrift = async (sql, label) => {
+        await assert.rejects(maintenanceClient.$transaction(async (tx) => {
+          await tx.$executeRawUnsafe(sql);
+          const changed = await collectAppOnlyDatabaseCatalogueRows(tx);
+          assert.equal(classifyProductionRlsCatalogue(hashProductionRlsCatalogue(changed), requirements).classification,
+            RLS_PROBE_CLASSIFICATIONS.UNEXPECTED);
+          throw new Error(`rollback ${label}`);
+        }), new RegExp(`rollback ${label}`));
+        assert.equal(classifyProductionRlsCatalogue(hashProductionRlsCatalogue(await collectCatalogueRows(verifier)), requirements).classification,
+          RLS_PROBE_CLASSIFICATIONS.MATCH);
+      };
+      await assertDurableDrift("GRANT USAGE ON SCHEMA app_rls TO PUBLIC", "schema ACL drift");
+      await assertDurableDrift("ALTER SCHEMA app_rls OWNER TO mscqr_prod_admin", "schema owner drift");
+      await assertDurableDrift(`ALTER POLICY "full_rls_auditlog_select_sql_profile_audit_log_licen_9fc3407041"
+        ON public."AuditLog" USING (true)`, "policy drift");
+      await assertDurableDrift("GRANT pg_read_all_settings TO mscqr_prod_rls_canary_read", "role membership drift");
       const identity = { sourceSha, candidateSourceSha: context.candidateSourceSha,
         account: APP_ONLY.account, region: APP_ONLY.region, clusterArn: APP_ONLY.clusterArn, serviceArn: APP_ONLY.serviceArn,
         databaseHostname: adminUrl.hostname, verifierImageDigest: `sha256:${"3".repeat(64)}`,
@@ -287,36 +355,33 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
       assert.equal(scalar(greenUrl, "SELECT has_schema_privilege('mscqr_prd_rls_phase2_auth_owner','app_rls','CREATE')", "predecessor privilege restored"), "f");
       const builtDelta = buildPrintingRoutineDeltaCommand({ sourceSha, requirements, databaseHostname: adminUrl.hostname });
       const deltaInput = printingDeltaRuntime.decodeInput(builtDelta.command[2], builtDelta.command[3]).input;
-      const administratorClient = new PrismaClient({ datasources: { db: { url: greenUrl } } });
-      try {
-        const classifyLive = async () => classifyProductionRlsCatalogue(hashProductionRlsCatalogue(await collectAppOnlyDatabaseCatalogue(verifier)), requirements).classification;
+      const classifyLive = async () => classifyProductionRlsCatalogue(hashProductionRlsCatalogue(await collectAppOnlyDatabaseCatalogue(verifier)), requirements).classification;
+      assert.equal(await classifyLive(), RLS_PROBE_CLASSIFICATIONS.EXPECTED);
+      for (const failStage of ["after-grant", "after-owner-role", "after-routine-1", "after-routine-2", "after-routine-3",
+        "before-revoke", "after-revoke", "after-successor-readback"]) {
+        await assert.rejects(administratorClient.$transaction((tx) => printingDeltaRuntime.executePrintingRoutineDeltaTransaction({
+          tx, input: deltaInput, checkpoint: async (stage) => { if (stage === failStage) throw new Error(`injected ${stage} failure`); },
+        }), { maxWait: 10000, timeout: 120000 }), new RegExp(`injected ${failStage} failure`));
+        assert.equal(scalar(greenUrl, "SELECT has_schema_privilege('mscqr_prd_rls_phase2_auth_owner','app_rls','CREATE')", `${failStage} privilege rollback`), "f");
         assert.equal(await classifyLive(), RLS_PROBE_CLASSIFICATIONS.EXPECTED);
-        for (const failStage of ["after-grant", "after-owner-role", "after-routine-1", "after-routine-2", "after-routine-3",
-          "before-revoke", "after-revoke", "after-successor-readback"]) {
-          await assert.rejects(administratorClient.$transaction((tx) => printingDeltaRuntime.executePrintingRoutineDeltaTransaction({
-            tx, input: deltaInput, checkpoint: async (stage) => { if (stage === failStage) throw new Error(`injected ${stage} failure`); },
-          }), { maxWait: 10000, timeout: 120000 }), new RegExp(`injected ${failStage} failure`));
-          assert.equal(scalar(greenUrl, "SELECT has_schema_privilege('mscqr_prd_rls_phase2_auth_owner','app_rls','CREATE')", `${failStage} privilege rollback`), "f");
-          assert.equal(await classifyLive(), RLS_PROBE_CLASSIFICATIONS.EXPECTED);
-        }
-        for (const failStage of ["TRANSACTION_SETUP", "DATABASE_IDENTITY_AUTHENTICATION", "PREDECESSOR_COLLECTION", "PREDECESSOR_AUTHENTICATION", "PRIVILEGE_GRANT",
-          "ROUTINE_OWNER_SWITCH", "REPLACE_PRINTING_READINESS", "REPLACE_PRINTING_CREATE_JOB", "REPLACE_PRINTING_CONNECTOR_IDENTITY",
-          "PRIVILEGE_RESTORATION", "SUCCESSOR_AUTHENTICATION", "COMMIT"]) {
-          await assert.rejects(administratorClient.$transaction((tx) => printingDeltaRuntime.executePrintingRoutineDeltaTransaction({
-            tx, input: deltaInput, setStage: (stage) => { if (stage === failStage) throw new Error(`injected ${stage} failure`); },
-          }), { maxWait: 10000, timeout: 120000 }), new RegExp(`injected ${failStage} failure`));
-          assert.equal(scalar(greenUrl, "SELECT has_schema_privilege('mscqr_prd_rls_phase2_auth_owner','app_rls','CREATE')", `${failStage} privilege rollback`), "f");
-          assert.equal(await classifyLive(), RLS_PROBE_CLASSIFICATIONS.EXPECTED);
-        }
-        const applied = await administratorClient.$transaction((tx) => printingDeltaRuntime.executePrintingRoutineDeltaTransaction({ tx, input: deltaInput }), { maxWait: 10000, timeout: 120000 });
-        assert.deepEqual(applied, { status: "APPLIED", writeCount: 3 });
-        assert.equal(scalar(greenUrl, "SELECT has_schema_privilege('mscqr_prd_rls_phase2_auth_owner','app_rls','CREATE')", "successful privilege restoration"), "f");
-        assert.equal(await classifyLive(), RLS_PROBE_CLASSIFICATIONS.MATCH);
-        const converged = await administratorClient.$transaction((tx) => printingDeltaRuntime.executePrintingRoutineDeltaTransaction({ tx, input: deltaInput }), { maxWait: 10000, timeout: 120000 });
-        assert.deepEqual(converged, { status: "ALREADY_CONVERGED", writeCount: 0 });
-        assert.equal(scalar(greenUrl, "SELECT has_schema_privilege('mscqr_prd_rls_phase2_auth_owner','app_rls','CREATE')", "already-converged privilege unchanged"), "f");
-      } finally { await administratorClient.$disconnect(); }
-    } finally { await verifier.$disconnect(); }
+      }
+      for (const failStage of ["TRANSACTION_SETUP", "DATABASE_IDENTITY_AUTHENTICATION", "PREDECESSOR_COLLECTION", "PREDECESSOR_AUTHENTICATION", "PRIVILEGE_GRANT",
+        "ROUTINE_OWNER_SWITCH", "REPLACE_PRINTING_READINESS", "REPLACE_PRINTING_CREATE_JOB", "REPLACE_PRINTING_CONNECTOR_IDENTITY",
+        "PRIVILEGE_RESTORATION", "SUCCESSOR_AUTHENTICATION", "COMMIT"]) {
+        await assert.rejects(administratorClient.$transaction((tx) => printingDeltaRuntime.executePrintingRoutineDeltaTransaction({
+          tx, input: deltaInput, setStage: (stage) => { if (stage === failStage) throw new Error(`injected ${stage} failure`); },
+        }), { maxWait: 10000, timeout: 120000 }), new RegExp(`injected ${failStage} failure`));
+        assert.equal(scalar(greenUrl, "SELECT has_schema_privilege('mscqr_prd_rls_phase2_auth_owner','app_rls','CREATE')", `${failStage} privilege rollback`), "f");
+        assert.equal(await classifyLive(), RLS_PROBE_CLASSIFICATIONS.EXPECTED);
+      }
+      const applied = await administratorClient.$transaction((tx) => printingDeltaRuntime.executePrintingRoutineDeltaTransaction({ tx, input: deltaInput }), { maxWait: 10000, timeout: 120000 });
+      assert.deepEqual(applied, { status: "APPLIED", writeCount: 3 });
+      assert.equal(scalar(greenUrl, "SELECT has_schema_privilege('mscqr_prd_rls_phase2_auth_owner','app_rls','CREATE')", "successful privilege restoration"), "f");
+      assert.equal(await classifyLive(), RLS_PROBE_CLASSIFICATIONS.MATCH);
+      const converged = await administratorClient.$transaction((tx) => printingDeltaRuntime.executePrintingRoutineDeltaTransaction({ tx, input: deltaInput }), { maxWait: 10000, timeout: 120000 });
+      assert.deepEqual(converged, { status: "ALREADY_CONVERGED", writeCount: 0 });
+      assert.equal(scalar(greenUrl, "SELECT has_schema_privilege('mscqr_prd_rls_phase2_auth_owner','app_rls','CREATE')", "already-converged privilege unchanged"), "f");
+    } finally { await Promise.all([maintenanceClient.$disconnect(), administratorClient.$disconnect(), verifier.$disconnect()]); }
     restoreDisposableMemberships();
     rdsMembershipsNormalized = false;
     const migrationPassword = "synthetic-migration-password";

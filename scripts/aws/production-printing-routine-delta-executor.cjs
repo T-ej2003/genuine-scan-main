@@ -81,6 +81,9 @@ function classifyPrintingRoutineTransactionCatalogue(catalogue, requirements) {
 }
 
 async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity = () => {}, afterIdentity = () => {}) {
+  // PostgreSQL deparsers consult the effective search path. Pin it locally so
+  // identical durable state hashes identically for every authorized principal.
+  await tx.$executeRawUnsafe("SET LOCAL search_path = pg_catalog");
   const [identity] = await tx.$queryRawUnsafe(`SELECT current_user AS role, session_user AS session_role,
     current_database() AS database, current_setting('transaction_read_only') AS read_only,
     current_setting('default_transaction_read_only') AS default_read_only,
