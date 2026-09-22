@@ -17,6 +17,7 @@ import {
 import { EXPECTED_PRINTING_ROUTINE_PREDECESSORS, RLS_PROBE_CLASSIFICATIONS } from "../aws/probe-production-rls-catalogue.mjs";
 import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
 import { createAppOnlyRequirements } from "../aws/production-app-only-requirements.mjs";
+import { createProductionGithubCommandRunner } from "../aws/production-credential-source-contract.mjs";
 
 const runtime = createRequire(import.meta.url)("../aws/production-printing-routine-delta-executor.cjs");
 
@@ -116,7 +117,9 @@ test("canonical protected source yields exactly the three fixed routine replacem
 test("requirements discovery accepts only the exact protected producer run and immutable artifact", () => {
   const fixture = artifactFixture();
   const [{ run, artifact, bytes }] = fixture.values;
-  assert.deepEqual(discoverCanonicalRequirementsReference({ sourceSha: contract.sourceSha, githubRun: fixture.githubRun }), {
+  const githubRun = createProductionGithubCommandRunner({ env: { GH_TOKEN: "fixture-token" },
+    exec: (_file, args, options) => fixture.githubRun("gh", args, options) });
+  assert.deepEqual(discoverCanonicalRequirementsReference({ sourceSha: contract.sourceSha, githubRun }), {
     sourceSha: contract.sourceSha, runId: "123", runAttempt: "1", artifactId: "456", artifactDigest: artifact.digest, fileSha256: hash(bytes),
   });
   assert.equal(run.id, 123);
