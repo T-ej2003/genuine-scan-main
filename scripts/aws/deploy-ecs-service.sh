@@ -641,8 +641,8 @@ const target = targetResponse.taskDefinition;
 if (!target || target.taskDefinitionArn !== targetArn) fail("Described task definition did not match the exact requested ARN.");
 if (target.status !== "ACTIVE") fail(`Target task definition status is ${target.status || "missing"}; expected ACTIVE.`);
 if (target.family !== expectedFamily || targetMatch[3] !== expectedFamily) fail("Target task-definition family does not match the expected family.");
-const targetTags = new Map((targetResponse.tags || []).map((tag) => [tag?.key, tag?.value]));
-if (targetTags.get("MSCQRExecTarget") !== "production-backend") fail("Target task definition lacks the reviewed MSCQRExecTarget marker.");
+const targetExecutionMarkers = (targetResponse.tags || []).filter((tag) => tag?.key === "MSCQRExecTarget");
+if (targetExecutionMarkers.length !== 1 || targetExecutionMarkers[0].value !== "production-backend") fail("Target task definition lacks exactly one reviewed MSCQRExecTarget marker.");
 const runtimePlatform = target.runtimePlatform || null;
 if (runtimePlatform?.cpuArchitecture && runtimePlatform.cpuArchitecture !== "X86_64") fail(`Target runtimePlatform.cpuArchitecture is ${runtimePlatform.cpuArchitecture}; expected X86_64.`);
 const containers = Array.isArray(target.containerDefinitions) ? target.containerDefinitions : [];
@@ -966,8 +966,16 @@ if (fs.statSync(clientIpRuntimePath).size > 0) {
   assertProductionClientIpTrustRuntime(payload, runtime);
 }
 
-if (Array.isArray(raw.tags) && raw.tags.length > 0) {
-  payload.tags = raw.tags;
+const inheritedTags = Array.isArray(raw.tags) ? raw.tags : [];
+if (normalBackendDeployment === "true") {
+  // The normal candidate's execution target is a destination-family invariant;
+  // inherited historical tags cannot override or duplicate it.
+  payload.tags = [
+    ...inheritedTags.filter((tag) => tag?.key !== "MSCQRExecTarget"),
+    { key: "MSCQRExecTarget", value: "production-backend" },
+  ];
+} else if (inheritedTags.length > 0) {
+  payload.tags = inheritedTags;
 }
 
 for (const optionalField of [
@@ -1025,6 +1033,8 @@ const readback = JSON.parse(fs.readFileSync(readbackPath, "utf8"));
 const definition = { ...readback.taskDefinition, tags: readback.tags || [] };
 assertEcsTaskDefinitionReadback({ definition, taskDefinitionArn, expected, label: "Normal production backend task definition" });
 assertProductionClientIpTrustRuntime(definition, JSON.parse(fs.readFileSync(runtimePath, "utf8")));
+const executionMarkers = (readback.tags || []).filter((tag) => tag?.key === "MSCQRExecTarget");
+if (executionMarkers.length !== 1 || executionMarkers[0].value !== "production-backend") throw new Error("Normal production backend task definition lacks exactly one reviewed MSCQRExecTarget marker.");
 NODE
 fi
 

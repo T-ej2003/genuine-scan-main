@@ -78,6 +78,7 @@ function writeFixture(data, options = {}) {
     },
   };
   const normal = {
+    tags: options.normalTags === undefined ? [] : options.normalTags,
     taskDefinition: {
       taskDefinitionArn: fromArn,
       family: options.normalFamily || (options.clientIpRuntime ? targetFamily : "mscqr-backend"),
@@ -397,6 +398,9 @@ test("existing mode rejects an unmarked definition before UpdateService and a re
   const unmarkedTask = runExisting({ taskTags: [] });
   assertFailure(unmarkedTask, /propagated MSCQRExecTarget/);
   assert.equal((unmarkedTask.calls.match(/ecs update-service/g) || []).length, 2);
+  const duplicateMarker = runExisting({ targetTags: [{ key: "MSCQRExecTarget", value: "production-backend" }, { key: "MSCQRExecTarget", value: "production-backend" }] });
+  assertFailure(duplicateMarker, /exactly one reviewed MSCQRExecTarget/);
+  assert.equal((duplicateMarker.calls.match(/ecs update-service/g) || []).length, 0);
 });
 test("existing mode enforces the independent service load-balancer port contract", () => {
   const missing = runExisting({ targetPortMappings: [] });
@@ -733,15 +737,49 @@ test("normal backend mode from a historical predecessor authenticates topology, 
     assert.equal(calls.filter((call) => call.startsWith(expected)).length, 1);
   }
   const registered = JSON.parse(fs.readFileSync(path.join(fixture.dir, "registered.json"), "utf8"));
+  assert.deepEqual(registered.tags.filter(({ key }) => key === "MSCQRExecTarget"), [{ key: "MSCQRExecTarget", value: "production-backend" }]);
   const environment = Object.fromEntries(registered.taskDefinition.containerDefinitions[0].environment.map(({ name, value }) => [name, value]));
   assert.equal(environment.CLIENT_IP_TRUST_MODE, "cloudfront-alb");
   assert.equal(environment.CLIENT_IP_TRUSTED_ALB_CIDRS, "10.0.0.0/20,10.0.16.0/20");
   assert.equal(environment.CLIENT_IP_TRUSTED_CLOUDFRONT_CIDRS, "192.0.2.0/24,198.51.100.0/24");
+  const activation = runExisting({
+    targetTags: registered.tags,
+    targetClientIpRuntime: registered.taskDefinition.containerDefinitions[0].environment.filter(({ name }) => name.startsWith("CLIENT_IP_")),
+  });
+  assert.equal(activation.status, 0, activation.stderr);
   const registration = calls.findIndex((call) => call.startsWith("ecs register-task-definition"));
   const readback = calls.findIndex((call, index) => index > registration && call.startsWith("ecs describe-task-definition"));
   const update = calls.findIndex((call) => call.startsWith("ecs update-service"));
   assert(registration >= 0 && readback > registration && update > readback);
   assertTempClean({ fixture });
+});
+
+test("normal backend migration preserves unrelated inherited tags and canonicalizes its execution marker", () => {
+  for (const normalTags of [
+    [{ key: "Owner", value: "platform" }],
+    [{ key: "MSCQRExecTarget", value: "production-backend" }],
+    [{ key: "MSCQRExecTarget", value: "wrong-value" }],
+    [{ key: "MSCQRExecTarget", value: "wrong-value" }, { key: "MSCQRExecTarget", value: "production-backend" }],
+  ]) {
+    const fixture = writeFixture({}, { clientIpRuntime: true, normalFamily: "mscqr-backend", normalTags, callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-normal-deployer/test" });
+    const result = spawnSync("bash", [script], {
+      cwd: path.resolve("."), encoding: "utf8", env: {
+        ...process.env, PATH: `${fixture.fakeBin}:${process.env.PATH}`,
+        MSCQR_AWS_CREDENTIAL_SOURCE: "named-profile", MSCQR_AWS_NAMED_PROFILE: "mscqr-production-release-deployer",
+        AWS_REGION: region, CLUSTER_NAME: cluster, SERVICE_NAME: service, TASK_DEFINITION: "mscqr-backend:47", CONTAINER_NAME: containerName,
+        IMAGE_URI: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${digest}`,
+        MSCQR_NORMAL_APPLICATION_DEPLOYMENT: "true", FAKE_DATA: fixture.dir, FAKE_SCENARIO: "", TMPDIR: fixture.tempDir,
+      },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const tags = JSON.parse(fs.readFileSync(path.join(fixture.dir, "registered.json"), "utf8")).tags;
+    assert.deepEqual(tags.filter(({ key }) => key === "MSCQRExecTarget"), [{ key: "MSCQRExecTarget", value: "production-backend" }]);
+    if (normalTags[0]?.key === "Owner") assert(tags.some(({ key, value }) => key === "Owner" && value === "platform"));
+    const updates = fs.readFileSync(fixture.calls, "utf8").split("\n").filter((call) => call.startsWith("ecs update-service"));
+    assert.equal(updates.length, 1);
+    assert.match(updates[0], new RegExp(targetArn.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assertTempClean({ fixture });
+  }
 });
 
 test("explicit new-revision mode rejects an ECS-native rollback to the predecessor", () => {

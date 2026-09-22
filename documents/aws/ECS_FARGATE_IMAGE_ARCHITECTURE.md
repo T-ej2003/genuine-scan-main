@@ -295,3 +295,5 @@ The normal backend deployment derives `CLIENT_IP_TRUST_MODE=cloudfront-alb` and 
 Before `UpdateService`, the deployment authenticates the registered task-definition readback and requires the exact derived mode and CIDRs. Missing, changed, empty, universal, or unauthenticated values fail before service activation.
 
 The immutable `--existing-task-definition` production-backend activation path validates the same structural fail-closed trust contract without live topology reads; it never rewrites a supplied revision to repair missing runtime values.
+
+When the normal production lane registers a new `mscqr-production-rls-green-backend-candidate` from a historical backend definition, it preserves inherited tags while atomically binding exactly one `MSCQRExecTarget=production-backend` destination-family marker. The historical predecessor is never retagged.
