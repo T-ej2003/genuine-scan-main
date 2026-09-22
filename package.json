@@ -113,6 +113,7 @@
     "production:normal-deployer-policy": "node scripts/aws/converge-production-normal-deployer-policy.mjs",
     "production:smoke-secret-handoff": "node scripts/aws/handoff-production-smoke-secrets.mjs",
     "production:rls-catalogue-probe": "node scripts/aws/probe-production-rls-catalogue.mjs",
+    "production:apply-printing-routine-delta": "node scripts/aws/apply-production-printing-routine-delta.mjs",
     "production:rls-requirements": "node scripts/aws/produce-production-app-only-requirements.mjs",
     "production:verify-initial-activation-reconciler": "node scripts/aws/verify-production-initial-activation-policy-reconciler.mjs",
     "production:initial-activation-reconciler:prepare": "node scripts/aws/prepare-production-initial-activation-reconciler-installation.mjs",

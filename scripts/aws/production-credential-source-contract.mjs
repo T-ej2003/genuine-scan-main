@@ -124,7 +124,7 @@ export function createProductionGithubCommandRunner({ env = process.env, exec = 
     if (command === "gh") {
       const endpoint = args?.[1];
       const allowedFlags = new Set(["--paginate", "--slurp"]);
-      const allowedEndpoint = new RegExp(`^repos/T-ej2003/genuine-scan-main/(?:branches/main|environments/(?:${GITHUB_ENVIRONMENT_ENDPOINTS.join("|")})|environments/production-mixed-dual-slot-recovery/(?:deployment-branch-policies|deployment_protection_rules|secrets)|actions/(?:runs/[1-9][0-9]*(?:/(?:approvals|artifacts))?|artifacts/[1-9][0-9]*/zip))$`).test(endpoint || "");
+      const allowedEndpoint = new RegExp(`^repos/T-ej2003/genuine-scan-main/(?:branches/main|environments/(?:${GITHUB_ENVIRONMENT_ENDPOINTS.join("|")})|environments/production-mixed-dual-slot-recovery/(?:deployment-branch-policies|deployment_protection_rules|secrets)|actions/(?:workflows/produce-production-app-only-requirements\\.yml/runs\\?branch=main&event=workflow_dispatch&status=success&per_page=100|runs/[1-9][0-9]*(?:/(?:approvals|artifacts))?|artifacts/[1-9][0-9]*/zip))$`).test(endpoint || "");
       if (!Array.isArray(args) || args[0] !== "api" || !allowedEndpoint || args.slice(2).some((value) => !allowedFlags.has(value))) throw new Error("Production GitHub runner permits only the reviewed read-only authorization API calls.");
       const executable = exec === execFileSync ? productionGithubExecutable() : "gh";
       return exec(executable, args, { cwd: process.cwd(), env: githubEnvironment, encoding, stdio: ["ignore", "pipe", "pipe"], ...(maxBuffer === undefined ? {} : { maxBuffer }) });

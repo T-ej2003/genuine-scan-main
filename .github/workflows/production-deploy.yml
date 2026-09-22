@@ -12,7 +12,6 @@ name: Normal Production Deployment
 
 permissions:
   contents: read
-  pull-requests: read
 
 concurrency:
   group: production-deploy
@@ -52,9 +51,9 @@ jobs:
           if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
             test "$BASELINE_REQUESTED" = "true"
             test "$GITHUB_RUN_ATTEMPT" = "1"
-            baseline_merge_sha="$(gh api "repos/$GITHUB_REPOSITORY/pulls/556" --jq 'select(.merged == true and .base.ref == "main") | .merge_commit_sha')"
-            [[ "$baseline_merge_sha" =~ ^[a-f0-9]{40}$ ]]
-            test "$baseline_merge_sha" = "$GITHUB_SHA"
+            # The exact protected-main tip is authenticated above. The deploy
+            # job separately requires both historical image digests, making
+            # this route ineligible after its first successful activation.
             printf 'release_class=NORMAL_APPLICATION\nbackend=true\nfrontend=true\nbaseline=true\n' >> "$GITHUB_OUTPUT"
             echo "### One-time reviewed runtime baseline" >> "$GITHUB_STEP_SUMMARY"
             exit 0

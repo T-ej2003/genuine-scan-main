@@ -7,7 +7,7 @@ import { parseArgs } from "node:util";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { APP_ONLY } from "./production-app-only-contract.mjs";
 import { APP_ONLY_VERIFIER, appOnlyVerifierNetwork } from "./production-app-only-policy.mjs";
-import { collectAppOnlyDatabaseCatalogue } from "./production-app-only-database-verifier.mjs";
+import { collectAppOnlyDatabaseCatalogue, collectAppOnlyDatabaseCatalogueRows } from "./production-app-only-database-verifier.mjs";
 import { appOnlyRequirementIdentity, assertAppOnlyRequirements } from "./production-app-only-requirements.mjs";
 import { canonicalJson, canonicalSha256, STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { assertEcsTaskDefinitionReadback } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/ecs-task-definition-readback.mjs";
@@ -55,7 +55,7 @@ export function classifyProductionRlsCatalogue(catalogue, requirements) {
 
 export function buildProductionRlsProbeCommand(requirements, identity) {
   const input = { requirementsSha256: requirements.requirementsSha256, identity };
-  const functions = [collectAppOnlyDatabaseCatalogue, appOnlyRequirementIdentity, hashProductionRlsCatalogue].map((fn) => fn.toString()).join("\n");
+  const functions = [collectAppOnlyDatabaseCatalogueRows, collectAppOnlyDatabaseCatalogue, appOnlyRequirementIdentity, hashProductionRlsCatalogue].map((fn) => fn.toString()).join("\n");
   const command = `"use strict";const assert=require("node:assert/strict"),crypto=require("node:crypto");const {PrismaClient}=require("@prisma/client");const canonicalJson=${canonicalJson.toString()};const canonicalSha256=v=>crypto.createHash("sha256").update(canonicalJson(v)).digest("hex");const collections=${JSON.stringify(collections)};${functions};const input=${JSON.stringify(input)};(async()=>{const url=new URL(process.env.RLS_CANARY_DATABASE_URL||"");assert.equal(url.username,"mscqr_prod_rls_canary_read");assert.equal(url.hostname,input.identity.databaseHostname);assert.equal(url.pathname,"/mscqr_production_rls_green_phase2");assert.equal(url.searchParams.size,2);assert.equal(url.searchParams.get("sslmode"),"require");assert.equal(url.searchParams.get("application_name"),"mscqr-production-green-read-only-rls-canary");assert.equal(url.hash,"");const client=new PrismaClient({datasources:{db:{url:url.toString()}}});try{const catalogue=await collectAppOnlyDatabaseCatalogue(client);const body={schemaVersion:1,kind:"PRODUCTION_RLS_CATALOGUE_PROBE",sourceSha:input.identity.sourceSha,requirementsSha256:input.requirementsSha256,databaseRole:catalogue.identity.role,catalogue:hashProductionRlsCatalogue(catalogue)};const output=JSON.stringify({...body,evidenceSha256:canonicalSha256(body)});assert.ok(Buffer.byteLength(output)<=196608);console.log(output);}finally{await client.$disconnect();}})().catch(()=>{console.error(JSON.stringify({status:"PRODUCTION_RLS_CATALOGUE_PROBE_FAILED"}));process.exitCode=1;});`;
   assert.ok(Buffer.byteLength(command) <= 48000, "RLS catalogue probe command exceeds task-definition budget");
   return ["-e", command];
