@@ -19,7 +19,7 @@ const handoff = smokeSecretHandoffContract();
 const fakeHandoffRunner = ({ wrongArn = false, fail = "" } = {}) => {
   const calls = [];
   const run = (command, args, options = {}) => {
-    calls.push({ command, args, input: options.input ? Buffer.from(options.input) : undefined });
+    calls.push({ command, args, env: options.env, input: options.input ? Buffer.from(options.input) : undefined });
     if (fail && args.includes(fail)) throw new Error("injected failure");
     if (command === "gh" && args[0] === "secret" && args[1] === "list") return Buffer.from(JSON.stringify(handoff.map(({ destination }) => ({ name: destination }))));
     if (command === "gh" && args[0] === "secret" && args[1] === "set") return Buffer.alloc(0);
@@ -41,21 +41,25 @@ test("smoke handoff maps only the three source-owned canary handles to the three
     "mscqr/production/rls-green/phase2/canary/ordinary-mfa-secret",
   ]);
   assert.deepEqual(handoff.map(({ destination }) => destination), ["PRODUCTION_SMOKE_LOGIN_EMAIL", "PRODUCTION_SMOKE_LOGIN_PASSWORD", "PRODUCTION_SMOKE_ADMIN_MFA_SECRET"]);
-  const fake = fakeHandoffRunner(), result = executeSmokeSecretHandoff({ awsProfile: "fixture", run: fake.run, contract: handoff });
+  const hostileEnvironment = { PATH: process.env.PATH, HOME: process.env.HOME, GH_TOKEN: "fixture-token", GH_HOST: "attacker.invalid", AWS_ENDPOINT_URL: "https://attacker.invalid", AWS_ACCESS_KEY_ID: "ambient" };
+  const fake = fakeHandoffRunner(), result = executeSmokeSecretHandoff({ awsProfile: "fixture", run: fake.run, contract: handoff, env: hostileEnvironment, awsExecutable: "aws" });
   assert.equal(result.repository, SMOKE_REPOSITORY); assert.equal(result.environment, SMOKE_ENVIRONMENT);
   const writes = fake.calls.filter(({ command, args }) => command === "gh" && args[1] === "set");
   assert.deepEqual(writes.map(({ args }) => args[2]), handoff.map(({ destination }) => destination));
   assert.ok(writes.every(({ args, input }) => !args.includes("--body") && input.length > 0));
+  assert.ok(fake.calls.filter(({ command }) => command === "gh").every(({ args, env }) => args.includes("github.com/T-ej2003/genuine-scan-main") && env?.GH_HOST === "github.com" && !env?.AWS_ACCESS_KEY_ID && !env?.AWS_ENDPOINT_URL));
+  assert.ok(fake.calls.filter(({ command }) => command === "aws").every(({ env }) => env?.AWS_PROFILE === "fixture" && !env?.AWS_ACCESS_KEY_ID && !env?.AWS_ENDPOINT_URL));
   assert.ok(fake.calls.every(({ args }) => !args.includes("dedicated-secret-value")));
   assert.ok(FORBIDDEN_SMOKE_SECRETS.every((name) => !writes.some(({ args }) => args.includes(name))));
   assert.doesNotMatch(JSON.stringify(result), /dedicated-secret-value/);
 });
 
 test("smoke handoff fails closed for substituted identity or command failure", () => {
-  assert.throws(() => executeSmokeSecretHandoff({ awsProfile: "fixture", run: fakeHandoffRunner({ wrongArn: true }).run, contract: handoff }));
-  assert.throws(() => executeSmokeSecretHandoff({ awsProfile: "fixture", run: fakeHandoffRunner({ fail: "describe-secret" }).run, contract: handoff }));
-  assert.throws(() => executeSmokeSecretHandoff({ awsProfile: "fixture", run: fakeHandoffRunner({ fail: "get-secret-value" }).run, contract: handoff }));
-  assert.throws(() => executeSmokeSecretHandoff({ awsProfile: "fixture", run: fakeHandoffRunner({ fail: "set" }).run, contract: handoff }));
+  const invoke = (options) => executeSmokeSecretHandoff({ awsProfile: "fixture", run: fakeHandoffRunner(options).run, contract: handoff, awsExecutable: "aws" });
+  assert.throws(() => invoke({ wrongArn: true }));
+  assert.throws(() => invoke({ fail: "describe-secret" }));
+  assert.throws(() => invoke({ fail: "get-secret-value" }));
+  assert.throws(() => invoke({ fail: "set" }));
   const wrong = structuredClone(handoff); wrong[0].destination = "OTHER";
   assert.notDeepEqual(wrong.map(({ destination }) => destination), handoff.map(({ destination }) => destination));
 });

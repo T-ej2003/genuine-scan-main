@@ -12,6 +12,7 @@ import { appOnlyRequirementIdentity, assertAppOnlyRequirements } from "./product
 import { canonicalJson, canonicalSha256, STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { assertEcsTaskDefinitionReadback } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/ecs-task-definition-readback.mjs";
 import { assertProtectedCheckout } from "./prepare-production-initial-activation-reconciler-installation.mjs";
+import { createProductionAwsCredentialEnvironment, productionAwsExecutable, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const collections = Object.freeze(["routines", "tables", "policies", "schemas", "roles"]);
@@ -86,10 +87,12 @@ export function authenticateProductionRlsProbeResult(message, { sourceSha, requi
 }
 
 const parse = (value) => JSON.parse(Buffer.isBuffer(value) ? value.toString("utf8") : value);
-export async function runProductionRlsCatalogueProbe({ sourceSha, requirementsPath, awsProfile, run = (command, args) => execFileSync(command, args, { encoding: "utf8", timeout: 30000, maxBuffer: 8 * 1024 * 1024 }), wait = sleep, repositoryRoot = root }) {
+export async function runProductionRlsCatalogueProbe({ sourceSha, requirementsPath, awsProfile, run = (command, args, options) => execFileSync(command, args, options), wait = sleep, repositoryRoot = root, env = process.env }) {
   assertProtectedCheckout({ sourceSha, repositoryRoot });
   const requirements = assertAppOnlyRequirements(JSON.parse(fs.readFileSync(requirementsPath, "utf8")), { sourceSha, candidateSourceSha: sourceSha, repositoryRoot });
-  const aws = (args) => parse(run("aws", ["--profile", awsProfile, ...args, "--output", "json", "--no-cli-pager"]));
+  const commandEnvironment = createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: awsProfile, env });
+  const awsExecutable = productionAwsExecutable();
+  const aws = (args) => parse(run(awsExecutable, [...args, "--output", "json", "--no-cli-pager"], { env: commandEnvironment, encoding: "utf8", timeout: 30000, maxBuffer: 8 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] }));
   const caller = aws(["sts", "get-caller-identity"]); assert.equal(caller.Account, APP_ONLY.account); assert.equal(caller.Arn, `arn:aws:iam::${APP_ONLY.account}:root`);
   const live = aws(["ecs", "describe-services", "--region", APP_ONLY.region, "--cluster", APP_ONLY.cluster, "--services", APP_ONLY.service]);
   assert.deepEqual(live.failures || [], []); assert.equal(live.services?.length, 1); const service = live.services[0]; assert.equal(service.deployments?.length, 1); assert.equal(service.runningCount, service.desiredCount);

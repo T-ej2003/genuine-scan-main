@@ -426,7 +426,7 @@ test("every direct AWS source in scripts/aws has an explicit audited credential 
     "scripts/aws/component-broker-policy-successor-root-mfa.mjs",
     "scripts/aws/component-identity-bootstrap-cli.mjs",
     "scripts/aws/component-installation-session.mjs",
-    "scripts/aws/apply-ecr-repository-controls.sh", "scripts/aws/apply-production-full-rls-release.mjs", "scripts/aws/deploy-ecs-service.sh", "scripts/aws/discover-staging-endpoints.mjs", "scripts/aws/handoff-production-smoke-secrets.mjs", "scripts/aws/prepare-production-backend-failed-recovery-evidence.mjs", "scripts/aws/probe-production-rls-catalogue.mjs", "scripts/aws/production-cutover-production-adapters.mjs", "scripts/aws/production-dual-slot-rebaseline-contract.mjs", "scripts/aws/production-identity-adapters.mjs", "scripts/aws/production-initial-activation-lifecycle.mjs", "scripts/aws/publish-ecs-images.sh", "scripts/aws/reconcile-production-stage-a-temporary-kms-capability.mjs", "scripts/aws/recover-production-backend-health.mjs", "scripts/aws/recover-production-green-stage-a-root-drop-orphan.mjs", "scripts/aws/rollback-ecs-service.sh", "scripts/aws/staging-database-role-credentials.mjs", "scripts/aws/verify-production-dependency-closure.mjs", "scripts/aws/verify-production-rotation-via-ecs-exec.mjs",
+    "scripts/aws/apply-ecr-repository-controls.sh", "scripts/aws/apply-production-full-rls-release.mjs", "scripts/aws/deploy-ecs-service.sh", "scripts/aws/discover-staging-endpoints.mjs", "scripts/aws/prepare-production-backend-failed-recovery-evidence.mjs", "scripts/aws/production-cutover-production-adapters.mjs", "scripts/aws/production-dual-slot-rebaseline-contract.mjs", "scripts/aws/production-identity-adapters.mjs", "scripts/aws/production-initial-activation-lifecycle.mjs", "scripts/aws/publish-ecs-images.sh", "scripts/aws/reconcile-production-stage-a-temporary-kms-capability.mjs", "scripts/aws/recover-production-backend-health.mjs", "scripts/aws/recover-production-green-stage-a-root-drop-orphan.mjs", "scripts/aws/rollback-ecs-service.sh", "scripts/aws/staging-database-role-credentials.mjs", "scripts/aws/verify-production-dependency-closure.mjs", "scripts/aws/verify-production-rotation-via-ecs-exec.mjs",
   ].sort();
   assert.deepEqual(direct, classified);
   const boundaries = {
@@ -439,9 +439,7 @@ test("every direct AWS source in scripts/aws has an explicit audited credential 
     "scripts/aws/apply-production-full-rls-release.mjs": /createProductionAwsCredentialEnvironment/,
     "scripts/aws/deploy-ecs-service.sh": /configure_production_aws_credential_source/,
     "scripts/aws/discover-staging-endpoints.mjs": /--profile", C\.profile/,
-    "scripts/aws/handoff-production-smoke-secrets.mjs": /"--profile", awsProfile/,
     "scripts/aws/prepare-production-backend-failed-recovery-evidence.mjs": /createProductionAwsCommandRunner/,
-    "scripts/aws/probe-production-rls-catalogue.mjs": /"--profile", awsProfile/,
     "scripts/aws/production-cutover-production-adapters.mjs": /createProductionAwsCredentialEnvironment/,
     "scripts/aws/production-dual-slot-rebaseline-contract.mjs": /explicit credential-bound AWS runner/,
     "scripts/aws/production-identity-adapters.mjs": /createProductionAwsCredentialEnvironment/,

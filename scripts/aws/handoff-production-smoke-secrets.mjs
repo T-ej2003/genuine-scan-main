@@ -5,9 +5,11 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { assertProtectedCheckout } from "./prepare-production-initial-activation-reconciler-installation.mjs";
+import { createProductionAwsCredentialEnvironment, createProductionGithubCredentialEnvironment, productionAwsExecutable, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 
 const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
 export const SMOKE_REPOSITORY = "T-ej2003/genuine-scan-main";
+const SMOKE_REPOSITORY_ARGUMENT = `github.com/${SMOKE_REPOSITORY}`;
 export const SMOKE_ENVIRONMENT = "production-normal-deploy";
 export const FORBIDDEN_SMOKE_SECRETS = Object.freeze(["PRODUCTION_SMOKE_ADMIN_MFA_CODE", "PRODUCTION_SMOKE_VERIFY_CODE"]);
 const sourceNames = Object.freeze({
@@ -36,12 +38,14 @@ const secretBytes = (value) => {
   return bytes.subarray(0, end);
 };
 
-export function executeSmokeSecretHandoff({ awsProfile, run, contract }) {
-  const aws = (args, options) => run("aws", ["--profile", awsProfile, ...args, "--no-cli-pager"], options);
+export function executeSmokeSecretHandoff({ awsProfile, run, contract, env = process.env, awsExecutable = productionAwsExecutable() }) {
+  const awsEnvironment = createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: awsProfile, env });
+  const githubEnvironment = { ...createProductionGithubCredentialEnvironment({ env }), GH_HOST: "github.com", GH_PROMPT_DISABLED: "1" };
+  const aws = (args, options = {}) => run(awsExecutable, [...args, "--no-cli-pager"], { ...options, env: awsEnvironment });
   const caller = parse(aws(["sts", "get-caller-identity", "--output", "json"]));
   assert.equal(caller.Account, "368992683803");
   assert.equal(caller.Arn, "arn:aws:iam::368992683803:root");
-  const list = () => new Set(parse(run("gh", ["secret", "list", "--repo", SMOKE_REPOSITORY, "--env", SMOKE_ENVIRONMENT, "--json", "name"])).map(({ name }) => name));
+  const list = () => new Set(parse(run("gh", ["secret", "list", "--repo", SMOKE_REPOSITORY_ARGUMENT, "--env", SMOKE_ENVIRONMENT, "--json", "name"], { env: githubEnvironment })).map(({ name }) => name));
   const before = list();
   for (const name of FORBIDDEN_SMOKE_SECRETS) assert.equal(before.has(name), false, `${name} must remain unset`);
   for (const entry of contract) {
@@ -53,7 +57,7 @@ export function executeSmokeSecretHandoff({ awsProfile, run, contract }) {
     const output = aws(["secretsmanager", "get-secret-value", "--region", "eu-west-2", "--secret-id", entry.arn, "--query", "SecretString", "--output", "text"]);
     const value = secretBytes(output);
     try {
-      run("gh", ["secret", "set", entry.destination, "--repo", SMOKE_REPOSITORY, "--env", SMOKE_ENVIRONMENT], { input: value, stdio: ["pipe", "pipe", "pipe"] });
+      run("gh", ["secret", "set", entry.destination, "--repo", SMOKE_REPOSITORY_ARGUMENT, "--env", SMOKE_ENVIRONMENT], { env: githubEnvironment, input: value, stdio: ["pipe", "pipe", "pipe"] });
     } finally { value.fill(0); if (Buffer.isBuffer(output)) output.fill(0); }
     installed.push(entry.destination);
   }
@@ -65,7 +69,7 @@ export function executeSmokeSecretHandoff({ awsProfile, run, contract }) {
 
 export function handoffProductionSmokeSecrets({ sourceSha, awsProfile, run = (command, args, options = {}) => execFileSync(command, args, { ...options, maxBuffer: 1024 * 1024 }), root = repositoryRoot }) {
   assertProtectedCheckout({ sourceSha, repositoryRoot: root });
-  return executeSmokeSecretHandoff({ awsProfile, run, contract: smokeSecretHandoffContract(root) });
+  return executeSmokeSecretHandoff({ awsProfile, run, contract: smokeSecretHandoffContract(root), awsExecutable: productionAwsExecutable() });
 }
 
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
