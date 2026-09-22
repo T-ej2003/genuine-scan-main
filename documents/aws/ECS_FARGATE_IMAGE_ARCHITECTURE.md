@@ -293,3 +293,5 @@ For a future ChatGPT/operator handoff version of this runbook, see:
 The normal backend deployment derives `CLIENT_IP_TRUST_MODE=cloudfront-alb` and both trusted proxy CIDR lists from the authenticated production ECS service, target group, ALB subnets, and AWS-managed `com.amazonaws.global.cloudfront.origin-facing` prefix list. The normal deployer may only read those topology APIs; its existing ECS/ECR mutation scope is unchanged. AWS does not expose resource-level authorization for the four required Describe/List calls, so they use the existing region condition with `Resource: "*"`; prefix-list entry reads are restricted to AWS-owned prefix lists in `eu-west-2`.
 
 Before `UpdateService`, the deployment authenticates the registered task-definition readback and requires the exact derived mode and CIDRs. Missing, changed, empty, universal, or unauthenticated values fail before service activation.
+
+The immutable `--existing-task-definition` production-backend activation path performs the same authentication; it never rewrites a supplied revision to repair missing runtime values.

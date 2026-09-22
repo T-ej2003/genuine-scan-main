@@ -515,6 +515,50 @@ NODE
 }
 trap cleanup_and_rollback_on_exit EXIT
 
+prepare_production_client_ip_runtime() {
+  aws elbv2 describe-target-groups \
+    --region "$AWS_REGION" \
+    --target-group-arns "arn:aws:elasticloadbalancing:eu-west-2:368992683803:targetgroup/mscqr-backend-tg-euw2-v2/f6673ff776f6e2ec" \
+    >"$TARGET_GROUPS_FILE"
+  aws elbv2 describe-load-balancers \
+    --region "$AWS_REGION" \
+    --load-balancer-arns "arn:aws:elasticloadbalancing:eu-west-2:368992683803:loadbalancer/app/mscqr-alb-euw2/cda0292be6e39608" \
+    >"$LOAD_BALANCERS_FILE"
+  ALB_SUBNET_IDS=()
+  while IFS= read -r subnet_id; do ALB_SUBNET_IDS+=("$subnet_id"); done < <(node --input-type=module - "$LOAD_BALANCERS_FILE" <<'NODE'
+import assert from "node:assert/strict";
+import fs from "node:fs";
+const value = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+assert.equal(value.LoadBalancers?.length, 1, "Exact production ALB was not discovered once.");
+const subnetIds = (value.LoadBalancers[0].AvailabilityZones || []).map(({ SubnetId }) => SubnetId).sort();
+assert.equal(subnetIds.length, 2, "Production ALB must use exactly two subnets.");
+assert.equal(new Set(subnetIds).size, subnetIds.length, "Production ALB subnet identity is duplicated.");
+for (const subnetId of subnetIds) assert.match(subnetId || "", /^subnet-[0-9a-f]+$/);
+process.stdout.write(`${subnetIds.join("\n")}\n`);
+NODE
+)
+  [[ "${#ALB_SUBNET_IDS[@]}" -eq 2 ]] || { echo "Production ALB subnet discovery is incomplete." >&2; exit 1; }
+  aws ec2 describe-subnets --region "$AWS_REGION" --subnet-ids "${ALB_SUBNET_IDS[@]}" >"$SUBNETS_FILE"
+  aws ec2 describe-managed-prefix-lists \
+    --region "$AWS_REGION" \
+    --filters "Name=prefix-list-name,Values=com.amazonaws.global.cloudfront.origin-facing" \
+    >"$PREFIX_LISTS_FILE"
+  CLOUDFRONT_PREFIX_LIST_ID="$(node --input-type=module - "$PREFIX_LISTS_FILE" <<'NODE'
+import assert from "node:assert/strict";
+import fs from "node:fs";
+const value = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+assert.equal(value.PrefixLists?.length, 1, "CloudFront origin-facing managed prefix list was not discovered once.");
+assert.match(value.PrefixLists[0].PrefixListId || "", /^pl-[a-f0-9]+$/);
+process.stdout.write(value.PrefixLists[0].PrefixListId);
+NODE
+)"
+  aws ec2 get-managed-prefix-list-entries --region "$AWS_REGION" --prefix-list-id "$CLOUDFRONT_PREFIX_LIST_ID" >"$PREFIX_LIST_ENTRIES_FILE"
+  node "$SCRIPT_DIR/production-client-ip-trust-runtime.mjs" \
+    --service "$EXISTING_SERVICE_FILE" --target-groups "$TARGET_GROUPS_FILE" --load-balancers "$LOAD_BALANCERS_FILE" \
+    --subnets "$SUBNETS_FILE" --prefix-lists "$PREFIX_LISTS_FILE" --prefix-list-entries "$PREFIX_LIST_ENTRIES_FILE" \
+    --output "$CLIENT_IP_RUNTIME_FILE"
+}
+
 if [[ -n "$EXISTING_TASK_DEFINITION_ARN" ]]; then
   existing_mode_active=true
   require_env CLUSTER_NAME
@@ -625,6 +669,17 @@ process.stdout.write(expectedCurrentArn);
 NODE
   )"
 
+  if [[ "$AWS_REGION" == "eu-west-2" && "$CLUSTER_NAME" == "mscqr-prod-euw2-main" && "$SERVICE_NAME" == "mscqr-backend-servi-euw2" && "$CONTAINER_NAME" == "backend" && "$EXPECTED_FAMILY" == "mscqr-production-rls-green-backend-candidate" ]]; then
+    prepare_production_client_ip_runtime
+    node --input-type=module - "$RAW_FILE" "$CLIENT_IP_RUNTIME_FILE" "$SCRIPT_DIR/production-client-ip-trust-runtime.mjs" <<'NODE'
+import fs from "node:fs";
+import { pathToFileURL } from "node:url";
+const [taskPath, runtimePath, runtimeModulePath] = process.argv.slice(2);
+const { assertProductionClientIpTrustRuntime } = await import(pathToFileURL(runtimeModulePath));
+assertProductionClientIpTrustRuntime(JSON.parse(fs.readFileSync(taskPath, "utf8")).taskDefinition, JSON.parse(fs.readFileSync(runtimePath, "utf8")));
+NODE
+  fi
+
   aws ecs describe-task-definition --region "$AWS_REGION" --task-definition "$PREVIOUS_TASK_DEFINITION_ARN" >"$ROLLBACK_TASK_DEFINITION_FILE"
   ROLLBACK_IMAGE_DIGEST="$(node --input-type=module - "$ROLLBACK_TASK_DEFINITION_FILE" "$PREVIOUS_TASK_DEFINITION_ARN" "$CONTAINER_NAME" <<'NODE'
 import fs from "node:fs";
@@ -647,7 +702,7 @@ const details = JSON.parse(fs.readFileSync(file, "utf8")).imageDetails;
 if (!Array.isArray(details) || details.length !== 1 || details[0]?.imageDigest !== digest) throw new Error("Rollback candidate image readback does not match the exact immutable digest.");
 NODE
 
-  if [[ "$PREVIOUS_TASK_DEFINITION_ARN" != "$EXISTING_TASK_DEFINITION_ARN" || ( "$ENABLE_EXECUTE_COMMAND" == "true" && "$CURRENT_EXECUTE_COMMAND_ENABLED" != "true" ) || ( "$PROPAGATE_TAGS" == "TASK_DEFINITION" && "$CURRENT_PROPAGATE_TAGS" != "TASK_DEFINITION" ) ]]; then
+  if [[ "$PREVIOUS_TASK_DEFINITION_ARN" != "$EXISTING_TASK_DEFINITION_ARN" || ( "$ENABLE_EXECUTE_COMMAND" == "true" && "$CURRENT_EXECUTE_COMMAND_ENABLED" != "true" ) || ( "${PROPAGATE_TAGS:-}" == "TASK_DEFINITION" && "$CURRENT_PROPAGATE_TAGS" != "TASK_DEFINITION" ) ]]; then
     update_attempted=true
     update_state="UPDATE_ATTEMPTED"
     update_args=(aws ecs update-service \
@@ -802,57 +857,7 @@ aws ecs describe-services \
   >"$EXISTING_SERVICE_FILE"
 
 if [[ "$normal_backend_deployment" == "true" && "$AWS_REGION" == "eu-west-2" && "$CLUSTER_NAME" == "mscqr-prod-euw2-main" && "$SERVICE_NAME" == "mscqr-backend-servi-euw2" && "$CONTAINER_NAME" == "backend" ]]; then
-  aws elbv2 describe-target-groups \
-    --region "$AWS_REGION" \
-    --target-group-arns "arn:aws:elasticloadbalancing:eu-west-2:368992683803:targetgroup/mscqr-backend-tg-euw2-v2/f6673ff776f6e2ec" \
-    >"$TARGET_GROUPS_FILE"
-  aws elbv2 describe-load-balancers \
-    --region "$AWS_REGION" \
-    --load-balancer-arns "arn:aws:elasticloadbalancing:eu-west-2:368992683803:loadbalancer/app/mscqr-alb-euw2/cda0292be6e39608" \
-    >"$LOAD_BALANCERS_FILE"
-  ALB_SUBNET_IDS=()
-  while IFS= read -r subnet_id; do ALB_SUBNET_IDS+=("$subnet_id"); done < <(node --input-type=module - "$LOAD_BALANCERS_FILE" <<'NODE'
-import assert from "node:assert/strict";
-import fs from "node:fs";
-const value = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-assert.equal(value.LoadBalancers?.length, 1, "Exact production ALB was not discovered once.");
-const subnetIds = (value.LoadBalancers[0].AvailabilityZones || []).map(({ SubnetId }) => SubnetId).sort();
-assert.equal(subnetIds.length, 2, "Production ALB must use exactly two subnets.");
-assert.equal(new Set(subnetIds).size, subnetIds.length, "Production ALB subnet identity is duplicated.");
-for (const subnetId of subnetIds) assert.match(subnetId || "", /^subnet-[0-9a-f]+$/);
-process.stdout.write(`${subnetIds.join("\n")}\n`);
-NODE
-)
-  [[ "${#ALB_SUBNET_IDS[@]}" -eq 2 ]] || { echo "Production ALB subnet discovery is incomplete." >&2; exit 1; }
-  aws ec2 describe-subnets \
-    --region "$AWS_REGION" \
-    --subnet-ids "${ALB_SUBNET_IDS[@]}" \
-    >"$SUBNETS_FILE"
-  aws ec2 describe-managed-prefix-lists \
-    --region "$AWS_REGION" \
-    --filters "Name=prefix-list-name,Values=com.amazonaws.global.cloudfront.origin-facing" \
-    >"$PREFIX_LISTS_FILE"
-  CLOUDFRONT_PREFIX_LIST_ID="$(node --input-type=module - "$PREFIX_LISTS_FILE" <<'NODE'
-import assert from "node:assert/strict";
-import fs from "node:fs";
-const value = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-assert.equal(value.PrefixLists?.length, 1, "CloudFront origin-facing managed prefix list was not discovered once.");
-assert.match(value.PrefixLists[0].PrefixListId || "", /^pl-[a-f0-9]+$/);
-process.stdout.write(value.PrefixLists[0].PrefixListId);
-NODE
-)"
-  aws ec2 get-managed-prefix-list-entries \
-    --region "$AWS_REGION" \
-    --prefix-list-id "$CLOUDFRONT_PREFIX_LIST_ID" \
-    >"$PREFIX_LIST_ENTRIES_FILE"
-  node "$SCRIPT_DIR/production-client-ip-trust-runtime.mjs" \
-    --service "$EXISTING_SERVICE_FILE" \
-    --target-groups "$TARGET_GROUPS_FILE" \
-    --load-balancers "$LOAD_BALANCERS_FILE" \
-    --subnets "$SUBNETS_FILE" \
-    --prefix-lists "$PREFIX_LISTS_FILE" \
-    --prefix-list-entries "$PREFIX_LIST_ENTRIES_FILE" \
-    --output "$CLIENT_IP_RUNTIME_FILE"
+  prepare_production_client_ip_runtime
 else
   : >"$CLIENT_IP_RUNTIME_FILE"
 fi
