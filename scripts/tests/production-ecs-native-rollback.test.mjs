@@ -50,6 +50,8 @@ test("backend and frontend accept expanded ECS circuit-breaker readback without 
 test("native rollback rejects malformed or weakened circuit-breaker readback", () => {
   for (const circuitBreaker of [
     { enable: false, rollback: true }, { enable: true, rollback: false },
+    { enable: true, rollback: true, thresholdConfiguration: { type: "COUNT", value: 50 } },
+    { enable: true, rollback: true, thresholdConfiguration: { type: "BOUNDED_PERCENT", value: 51 } },
     { rollback: true }, { enable: true }, {}, null, [], "invalid", 1,
   ]) {
     const changed = response();
