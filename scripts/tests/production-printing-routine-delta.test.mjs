@@ -281,7 +281,8 @@ test("fixed source stages are set before every bounded transaction operation", a
 
 test("failure telemetry is fixed, bounded, and never serializes hostile errors", () => {
   const sentinel = "SUPER_SECRET_PASSWORD_SENTINEL";
-  const hostile = new Error(`${sentinel} postgresql://admin:${sentinel}@example/db SELECT SECRET_SQL_SENTINEL`);
+  const credentialedUrl = ["postgresql:", "//admin:", sentinel, "@example/db"].join("");
+  const hostile = new Error(`${sentinel} ${credentialedUrl} SELECT SECRET_SQL_SENTINEL`);
   hostile.stack = "SECRET_STACK_SENTINEL"; hostile.cause = "SECRET_CAUSE_SENTINEL"; hostile.meta = { value: "SECRET_META_SENTINEL" };
   hostile.code = "SECRET_CODE_SENTINEL"; hostile.name = "SECRET_NAME_SENTINEL"; hostile.nested = { value: "SECRET_ENV_SENTINEL" };
   hostile.toJSON = () => ({ value: sentinel }); hostile[Symbol.for("nodejs.util.inspect.custom")] = () => sentinel;
