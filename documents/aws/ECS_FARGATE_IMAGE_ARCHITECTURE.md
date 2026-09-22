@@ -299,3 +299,5 @@ The immutable `--existing-task-definition` production-backend activation path va
 When the normal production lane registers a new `mscqr-production-rls-green-backend-candidate` from a historical backend definition, it preserves inherited tags while atomically binding exactly one `MSCQRExecTarget=production-backend` destination-family marker. The historical predecessor is never retagged.
 
 The same authenticated service update fixes `propagateTags=TASK_DEFINITION`, so each newly launched backend task inherits that execution marker for the ECS Exec verifier. Caller input cannot weaken this normal-lane setting.
+
+During the one-time historical migration, the normal deployer may restore an exact `mscqr-backend:*` predecessor only on the production backend service. The workflow records that predecessor before mutation and the rollback script refuses to overwrite any service state other than the exact failed candidate.

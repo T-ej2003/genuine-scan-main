@@ -6,7 +6,7 @@ import { NORMAL_DEPLOYER_POLICY, convergeNormalDeployerPolicy } from "../aws/con
 
 const target = JSON.parse(fs.readFileSync("infra/aws/terraform/production-component-deployment-state/normal-deployer-policy.json", "utf8"));
 const predecessor = structuredClone(target);
-predecessor.Statement = predecessor.Statement.filter(({ Sid }) => !["ReadClientIpTrustTopology", "ReadCloudFrontOriginPrefixListEntries"].includes(Sid));
+predecessor.Statement = predecessor.Statement.filter(({ Sid }) => !["ReadClientIpTrustTopology", "ReadCloudFrontOriginPrefixListEntries", "RollbackHistoricalBackendPredecessor"].includes(Sid));
 assert.equal(digest(predecessor), NORMAL_DEPLOYER_POLICY.predecessorSha256);
 assert.equal(digest(target), NORMAL_DEPLOYER_POLICY.targetSha256);
 const discoveryActions = [
@@ -34,7 +34,7 @@ function fixture({ policy = predecessor, roleArn = NORMAL_DEPLOYER_POLICY.roleAr
   return { run, calls, live: () => live };
 }
 
-test("exact reviewed predecessor converges once to the topology-read policy and verifies readback", () => {
+test("exact reviewed predecessor converges once to topology reads and bounded historical-backend rollback", () => {
   const value = fixture();
   const result = convergeNormalDeployerPolicy({ run: value.run, sourceSha: "a".repeat(40) });
   assert.equal(result.iamWrites, 1);
@@ -56,6 +56,17 @@ test("exact reviewed predecessor converges once to the topology-read policy and 
     Resource: "arn:aws:ec2:eu-west-2:aws:prefix-list/*",
     Condition: { StringEquals: { "aws:RequestedRegion": "eu-west-2" } },
   });
+  assert.deepEqual(target.Statement.find(({ Sid }) => Sid === "RollbackHistoricalBackendPredecessor"), {
+    Sid: "RollbackHistoricalBackendPredecessor",
+    Effect: "Allow",
+    Action: "ecs:UpdateService",
+    Resource: "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2",
+    Condition: {
+      StringEquals: { "aws:RequestedRegion": "eu-west-2" },
+      ArnEquals: { "ecs:cluster": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main" },
+      ArnLikeIfExists: { "ecs:task-definition": "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:*" },
+    },
+  });
 });
 
 test("topology discovery adds only five read actions and no representative mutation authority", () => {
@@ -68,7 +79,7 @@ test("topology discovery adds only five read actions and no representative mutat
     "iam:PutRolePolicy", "iam:AttachRolePolicy",
   ]) assert.equal(targetActions.includes(action), false, `${action} must remain denied.`);
   assert.deepEqual(
-    target.Statement.filter(({ Sid }) => !["ReadClientIpTrustTopology", "ReadCloudFrontOriginPrefixListEntries"].includes(Sid)),
+    target.Statement.filter(({ Sid }) => !["ReadClientIpTrustTopology", "ReadCloudFrontOriginPrefixListEntries", "RollbackHistoricalBackendPredecessor"].includes(Sid)),
     predecessor.Statement,
     "existing bounded permissions changed",
   );

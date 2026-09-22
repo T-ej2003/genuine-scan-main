@@ -26,6 +26,17 @@ test("component deployment state Terraform fixes the table, key, and exact write
   assert.ok(publish.Action.includes("ecr:PutImage"));
   assert.equal(policy.Statement.find(({ Sid }) => Sid === "EcrAuthorizationTokenOnly").Action, "ecr:GetAuthorizationToken");
   assert.ok(policy.Statement.find(({ Sid }) => Sid === "ActivateExactServices").Action === "ecs:UpdateService");
+  assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "RollbackHistoricalBackendPredecessor"), {
+    Sid: "RollbackHistoricalBackendPredecessor",
+    Effect: "Allow",
+    Action: "ecs:UpdateService",
+    Resource: "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2",
+    Condition: {
+      StringEquals: { "aws:RequestedRegion": "eu-west-2" },
+      ArnEquals: { "ecs:cluster": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main" },
+      ArnLikeIfExists: { "ecs:task-definition": "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:*" },
+    },
+  });
   assert.ok(policy.Statement.find(({ Sid }) => Sid === "RegisterExactFamilies").Action === "ecs:RegisterTaskDefinition");
   assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "ReadDeploymentAlarms"), { Sid: "ReadDeploymentAlarms", Effect: "Allow", Action: "cloudwatch:DescribeAlarms", Resource: "*", Condition: { StringEquals: { "aws:RequestedRegion": "eu-west-2" } } });
   assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "ReadClientIpTrustTopology"), { Sid: "ReadClientIpTrustTopology", Effect: "Allow", Action: ["ec2:DescribeManagedPrefixLists", "ec2:DescribeSubnets", "elasticloadbalancing:DescribeTargetGroups", "elasticloadbalancing:DescribeLoadBalancers"], Resource: "*", Condition: { StringEquals: { "aws:RequestedRegion": "eu-west-2" } } });

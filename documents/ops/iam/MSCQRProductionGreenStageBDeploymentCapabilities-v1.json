@@ -12467,7 +12467,7 @@
         "sid": "ReadClientIpTrustTopology",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "db0474bd315ded004278b7654e88218054536200b0ccde61aed71de2465a62fd"
+        "expectedPolicySha256": "4d479902def065b7ae0bc231950973d58bb98501d70f2eef29fed848802d290f"
       },
       "required": true,
       "mutation": false
@@ -12496,7 +12496,7 @@
         "sid": "ReadClientIpTrustTopology",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "db0474bd315ded004278b7654e88218054536200b0ccde61aed71de2465a62fd"
+        "expectedPolicySha256": "4d479902def065b7ae0bc231950973d58bb98501d70f2eef29fed848802d290f"
       },
       "required": true,
       "mutation": false
@@ -12525,7 +12525,7 @@
         "sid": "ReadCloudFrontOriginPrefixListEntries",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "db0474bd315ded004278b7654e88218054536200b0ccde61aed71de2465a62fd"
+        "expectedPolicySha256": "4d479902def065b7ae0bc231950973d58bb98501d70f2eef29fed848802d290f"
       },
       "required": true,
       "mutation": false
@@ -12554,7 +12554,7 @@
         "sid": "ReadClientIpTrustTopology",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "db0474bd315ded004278b7654e88218054536200b0ccde61aed71de2465a62fd"
+        "expectedPolicySha256": "4d479902def065b7ae0bc231950973d58bb98501d70f2eef29fed848802d290f"
       },
       "required": true,
       "mutation": false
@@ -12583,7 +12583,7 @@
         "sid": "ReadClientIpTrustTopology",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "db0474bd315ded004278b7654e88218054536200b0ccde61aed71de2465a62fd"
+        "expectedPolicySha256": "4d479902def065b7ae0bc231950973d58bb98501d70f2eef29fed848802d290f"
       },
       "required": true,
       "mutation": false
