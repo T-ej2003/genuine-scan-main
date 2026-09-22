@@ -80,7 +80,7 @@ function writeFixture(data, options = {}) {
   const normal = {
     taskDefinition: {
       taskDefinitionArn: fromArn,
-      family: options.clientIpRuntime ? targetFamily : "mscqr-backend",
+      family: options.normalFamily || (options.clientIpRuntime ? targetFamily : "mscqr-backend"),
       containerDefinitions: [{ name: containerName, image: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${sourceDigest}`, portMappings: options.normalPortMappings === undefined ? validBackendPortMappings : options.normalPortMappings }],
       runtimePlatform: { cpuArchitecture: "X86_64" },
     },
@@ -135,7 +135,7 @@ elif [[ "$1 $2" == "ecs describe-task-definition" ]]; then
   for ((i=1; i<=$#; i++)); do
     if [[ "\${!i}" == "--task-definition" ]]; then j=$((i + 1)); task_definition="\${!j}"; fi
   done
-  if [[ "$task_definition" == "${fixtureTargetArn}" && -f "$FAKE_DATA/registered.json" ]]; then cat "$FAKE_DATA/registered.json"; elif [[ "$task_definition" == "${fromArn}" || "$task_definition" == "mscqr-backend" || "$task_definition" == "${fixtureTargetFamily}" ]]; then cat "$FAKE_DATA/normal.json"; else cat "$FAKE_DATA/target.json"; fi
+  if [[ "$task_definition" == "${fixtureTargetArn}" && -f "$FAKE_DATA/registered.json" ]]; then cat "$FAKE_DATA/registered.json"; elif [[ "$task_definition" == "${fromArn}" || "$task_definition" == mscqr-backend* || "$task_definition" == "${fixtureTargetFamily}" ]]; then cat "$FAKE_DATA/normal.json"; else cat "$FAKE_DATA/target.json"; fi
 elif [[ "$1 $2" == "ecs describe-services" ]]; then
   if [[ "$FAKE_SCENARIO" == "reconcile-failure" && -f "$FAKE_DATA/update-attempted" ]]; then exit 51; fi
   if [[ "$FAKE_SCENARIO" == "ownership-read-failure" && -f "$FAKE_DATA/stable-failed" ]]; then exit 51; fi
@@ -705,8 +705,8 @@ test("explicit new-revision mode still registers before updating the service", (
   assertTempClean({ fixture });
 });
 
-test("normal backend mode authenticates topology, injects client-IP trust, and verifies readback before UpdateService", () => {
-  const fixture = writeFixture({}, { clientIpRuntime: true, callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-normal-deployer/test" });
+test("normal backend mode from a historical predecessor authenticates topology, injects client-IP trust, and verifies readback before UpdateService", () => {
+  const fixture = writeFixture({}, { clientIpRuntime: true, normalFamily: "mscqr-backend", callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-normal-deployer/test" });
   const result = spawnSync("bash", [script], {
     cwd: path.resolve("."),
     encoding: "utf8",
@@ -718,7 +718,7 @@ test("normal backend mode authenticates topology, injects client-IP trust, and v
       AWS_REGION: region,
       CLUSTER_NAME: cluster,
       SERVICE_NAME: service,
-      TASK_DEFINITION: targetFamily,
+      TASK_DEFINITION: "mscqr-backend:47",
       CONTAINER_NAME: containerName,
       IMAGE_URI: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${digest}`,
       MSCQR_NORMAL_APPLICATION_DEPLOYMENT: "true",

@@ -228,17 +228,17 @@ reject_generic_stage_b_registration() {
   local family="${TASK_DEFINITION:-}"
   family="${family##*/}"
   family="${family%%:*}"
+  if [[ "${MSCQR_NORMAL_APPLICATION_DEPLOYMENT:-false}" == "true" && "$AWS_REGION" == "eu-west-2" && "$CLUSTER_NAME" == "mscqr-prod-euw2-main" && "$SERVICE_NAME" == "mscqr-backend-servi-euw2" && "$CONTAINER_NAME" == "backend" ]]; then
+    caller="$(aws sts get-caller-identity --query Arn --output text)"
+    [[ "$caller" =~ ^arn:aws:sts::368992683803:assumed-role/mscqr-production-normal-deployer/[^/]+$ ]] || {
+      echo "Normal application backend registration requires the production normal-deployer identity." >&2
+      exit 1
+    }
+    normal_backend_deployment=true
+    return
+  fi
   case "$family" in
     mscqr-production-rls-green-backend-candidate)
-      if [[ "${MSCQR_NORMAL_APPLICATION_DEPLOYMENT:-false}" == "true" ]]; then
-        caller="$(aws sts get-caller-identity --query Arn --output text)"
-        [[ "$caller" =~ ^arn:aws:sts::368992683803:assumed-role/mscqr-production-normal-deployer/[^/]+$ ]] || {
-          echo "Normal application backend registration requires the production normal-deployer identity." >&2
-          exit 1
-        }
-        normal_backend_deployment=true
-        return
-      fi
       echo "The production backend family requires the normal application deployment lane." >&2
       exit 1
       ;;
@@ -868,11 +868,11 @@ fi
 GIT_SHA="${GIT_SHA:-${EXPECTED_GIT_SHA:-}}"
 RELEASE_GIT_SHA="${RELEASE_GIT_SHA:-${EXPECTED_GIT_SHA:-}}"
 
-node --input-type=module - "$RAW_FILE" "$PAYLOAD_FILE" "$CONTAINER_NAME" "$IMAGE_URI" "$ENV_UPDATES" "$GIT_SHA" "$RELEASE_GIT_SHA" "${SECRET_UPDATES_JSON:-{}}" "$CLIENT_IP_RUNTIME_FILE" "$SCRIPT_DIR/production-client-ip-trust-runtime.mjs" <<'NODE'
+node --input-type=module - "$RAW_FILE" "$PAYLOAD_FILE" "$CONTAINER_NAME" "$IMAGE_URI" "$ENV_UPDATES" "$GIT_SHA" "$RELEASE_GIT_SHA" "${SECRET_UPDATES_JSON:-{}}" "$CLIENT_IP_RUNTIME_FILE" "$SCRIPT_DIR/production-client-ip-trust-runtime.mjs" "$normal_backend_deployment" <<'NODE'
 import fs from "node:fs";
 import { pathToFileURL } from "node:url";
 
-const [rawPath, payloadPath, containerName, imageUri, envUpdatesText, gitSha, releaseGitSha, secretUpdatesText, clientIpRuntimePath, clientIpModulePath] = process.argv.slice(2);
+const [rawPath, payloadPath, containerName, imageUri, envUpdatesText, gitSha, releaseGitSha, secretUpdatesText, clientIpRuntimePath, clientIpModulePath, normalBackendDeployment] = process.argv.slice(2);
 const raw = JSON.parse(fs.readFileSync(rawPath, "utf8"));
 const taskDefinition = raw.taskDefinition;
 
@@ -947,7 +947,7 @@ if (runtimePlatform?.cpuArchitecture && runtimePlatform.cpuArchitecture !== "X86
 }
 
 let payload = {
-  family: taskDefinition.family,
+  family: normalBackendDeployment === "true" ? "mscqr-production-rls-green-backend-candidate" : taskDefinition.family,
   taskRoleArn: taskDefinition.taskRoleArn,
   executionRoleArn: taskDefinition.executionRoleArn,
   networkMode: taskDefinition.networkMode,
