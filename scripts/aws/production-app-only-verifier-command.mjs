@@ -7,7 +7,7 @@ import { APP_ONLY, assertAppOnlyEvidenceIdentity } from "./production-app-only-c
 import { APP_ONLY_VERIFIER, appOnlyVerifierLauncherPolicy } from "./production-app-only-policy.mjs";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { assertEcsTaskDefinitionReadback } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/ecs-task-definition-readback.mjs";
-import { collectAppOnlyDatabaseCatalogue } from "./production-app-only-database-verifier.mjs";
+import { collectAppOnlyDatabaseCatalogue, collectAppOnlyDatabaseCatalogueRows } from "./production-app-only-database-verifier.mjs";
 import { appOnlyRequirementIdentity, assertAppOnlyRequirements, compactAppOnlyRequirements, compareCompactAppOnlyRequirements } from "./production-app-only-requirements.mjs";
 
 // The secret ARN is an authenticated Stage-A readback, never a dispatch input.
@@ -47,7 +47,7 @@ export function buildAppOnlyVerifierCommand({ requirements, identity, repository
   assertAppOnlyEvidenceIdentity({ ...validation, evidenceSha256: canonicalSha256(validation) }, identity);
   assert.match(identity.databaseHostname || "", /^[a-z0-9.-]+$/);
   assert.match(identity.verifierImageDigest || "", /^sha256:[a-f0-9]{64}$/);
-  const functions = [collectAppOnlyDatabaseCatalogue, appOnlyRequirementIdentity, compareCompactAppOnlyRequirements].map((fn) => fn.toString()).join("\n");
+  const functions = [collectAppOnlyDatabaseCatalogueRows, collectAppOnlyDatabaseCatalogue, appOnlyRequirementIdentity, compareCompactAppOnlyRequirements].map((fn) => fn.toString()).join("\n");
   const verificationContractSha256 = canonicalSha256({ functions, requirementsSha256: requirements.requirementsSha256 });
   const packed = compactAppOnlyRequirements(requirements);
   const payload = deflateSync(Buffer.from(JSON.stringify({ requirements: packed, identity, verificationContractSha256 }))).toString("base64");
