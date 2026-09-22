@@ -25,6 +25,7 @@ import { encodeWorkflowDispatchGzip } from "../aws/workflow-dispatch-gzip-transp
 import { assertEcsTaskDefinitionReadback } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/ecs-task-definition-readback.mjs";
 
 const runtime = createRequire(import.meta.url)("../aws/production-printing-routine-delta-executor.cjs");
+const stageValues = Object.values(runtime.stages);
 
 const hash = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const identities = Object.keys(EXPECTED_PRINTING_ROUTINE_PREDECESSORS).sort();
@@ -87,7 +88,7 @@ const artifactFixture = ({ records = [{ runId: 123, artifactId: 456, candidateSo
 };
 
 const harness = ({ classifications = [RLS_PROBE_CLASSIFICATIONS.EXPECTED, RLS_PROBE_CLASSIFICATIONS.MATCH], ownerRows = owners, failCreate = 0,
-  failStage = "", observedIdentity = identity, tamperedInput = input } = {}) => {
+  failStage = "", failObservedStage = "", observedIdentity = identity, tamperedInput = input } = {}) => {
   const commands = []; let creates = 0, reads = 0, ownerCreate = false;
   const tx = {
     async $executeRawUnsafe(sql) {
@@ -103,10 +104,13 @@ const harness = ({ classifications = [RLS_PROBE_CLASSIFICATIONS.EXPECTED, RLS_PR
       return ownerRows;
     },
   };
-  const collect = async (_tx, validateIdentity = () => {}) => { validateIdentity(observedIdentity); return { identity: observedIdentity, marker: reads++ }; };
+  const collect = async (_tx, validateIdentity = () => {}, afterIdentity = () => {}) => {
+    validateIdentity(observedIdentity); afterIdentity(); return { identity: observedIdentity, marker: reads++ };
+  };
   const classify = () => classifications.shift();
   const checkpoint = async (stage) => { if (stage === failStage) throw new Error(`injected ${stage} failure`); };
-  return { tx, commands, run: () => executePrintingRoutineDeltaTransaction({ tx, input: tamperedInput, collect, classify, checkpoint }) };
+  const observedStages = [], setStage = (stage) => { observedStages.push(stage); if (stage === failObservedStage) throw new Error(`injected ${stage} failure`); };
+  return { tx, commands, observedStages, run: () => executePrintingRoutineDeltaTransaction({ tx, input: tamperedInput, collect, classify, checkpoint, setStage }) };
 };
 
 test("canonical protected source yields exactly the three fixed routine replacements", () => {
@@ -262,6 +266,56 @@ test("every privilege-bridge failure stage aborts the transaction contract", asy
   }
 });
 
+test("fixed source stages are set before every bounded transaction operation", async () => {
+  const transactionStages = ["TRANSACTION_SETUP", "DATABASE_IDENTITY_AUTHENTICATION", "PREDECESSOR_COLLECTION", "PREDECESSOR_AUTHENTICATION", "PRIVILEGE_GRANT",
+    "ROUTINE_OWNER_SWITCH", "REPLACE_PRINTING_READINESS", "REPLACE_PRINTING_CREATE_JOB", "REPLACE_PRINTING_CONNECTOR_IDENTITY",
+    "PRIVILEGE_RESTORATION", "SUCCESSOR_AUTHENTICATION", "COMMIT"];
+  assert.deepEqual(Object.keys(runtime.stages), stageValues);
+  assert.ok(Object.isFrozen(runtime.stages));
+  for (const failObservedStage of transactionStages) {
+    const value = harness({ failObservedStage });
+    await assert.rejects(value.run(), new RegExp(`injected ${failObservedStage} failure`));
+    assert.equal(value.observedStages.at(-1), failObservedStage);
+  }
+});
+
+test("failure telemetry is fixed, bounded, and never serializes hostile errors", () => {
+  const sentinel = "SUPER_SECRET_PASSWORD_SENTINEL";
+  const credentialedUrl = ["postgresql:", "//admin:", sentinel, "@example/db"].join("");
+  const hostile = new Error(`${sentinel} ${credentialedUrl} SELECT SECRET_SQL_SENTINEL`);
+  hostile.stack = "SECRET_STACK_SENTINEL"; hostile.cause = "SECRET_CAUSE_SENTINEL"; hostile.meta = { value: "SECRET_META_SENTINEL" };
+  hostile.code = "SECRET_CODE_SENTINEL"; hostile.name = "SECRET_NAME_SENTINEL"; hostile.nested = { value: "SECRET_ENV_SENTINEL" };
+  hostile.toJSON = () => ({ value: sentinel }); hostile[Symbol.for("nodejs.util.inspect.custom")] = () => sentinel;
+  for (const stage of stageValues) {
+    const record = runtime.failureRecord(stage, hostile), output = JSON.stringify(record);
+    assert.deepEqual(Object.keys(record).sort(), ["errorClass", "stage", "status"]);
+    assert.equal(record.status, "PRODUCTION_PRINTING_ROUTINE_DELTA_FAILED"); assert.equal(record.stage, stage);
+    assert.ok(Object.values(runtime.errorClasses).includes(record.errorClass));
+    assert.doesNotMatch(output, /SUPER_SECRET|postgresql:|SECRET_(?:SQL|STACK|CAUSE|META|CODE|NAME|ENV)/);
+  }
+  assert.equal(runtime.failureRecord("CALLER_CONTROLLED", hostile).stage, runtime.stages.ARGV_VALIDATION);
+});
+
+test("every outer executor stage reports the attempted operation and stops", async () => {
+  const built = buildPrintingRoutineDeltaCommand({ sourceSha: contract.sourceSha, requirements, databaseHostname: input.databaseHostname });
+  class FakePrismaClient {
+    async $transaction() { return { status: "ALREADY_CONVERGED", writeCount: 0 }; }
+    async $disconnect() {}
+  }
+  for (const expected of ["ARGV_VALIDATION", "TRANSPORT_VALIDATION", "PAYLOAD_DECOMPRESSION", "PAYLOAD_AUTHENTICATION",
+    "CONTRACT_AUTHENTICATION", "SECRET_VALIDATION", "DATABASE_URL_CONSTRUCTION", "PRISMA_INITIALIZATION", "TRANSACTION_START",
+    "SUCCESS_EVIDENCE", "DISCONNECT"]) {
+    const visited = [];
+    await assert.rejects(runtime.main({ argv: [process.execPath, built.command[2], built.command[3]], execArgv: ["-e", built.command[1]],
+      env: { MSCQR_PRINTING_DELTA_ADMIN_PASSWORD: "synthetic-test-password" }, PrismaClient: FakePrismaClient, Prisma: {},
+      onStage: (stage) => { visited.push(stage); if (stage === expected) throw new Error("SECRET_STAGE_SENTINEL"); } }), (error) => {
+      assert.equal(error.record.stage, expected); assert.ok(Object.values(runtime.errorClasses).includes(error.record.errorClass)); return true;
+    });
+    assert.equal(visited.includes(expected), true);
+    assert.equal(visited.slice(visited.indexOf(expected) + 1).some((stage) => stage !== "DISCONNECT"), false);
+  }
+});
+
 test("task command is one bounded transaction with no caller-selected authority or secret output", () => {
   const built = buildPrintingRoutineDeltaCommand({ sourceSha: contract.sourceSha, requirements, databaseHostname: input.databaseHostname });
   const command = built.command[1];
@@ -382,12 +436,12 @@ test("payload transport rejects malformed, noncanonical, altered and oversized d
   assert.equal(result.status, 1); assert.equal(result.stdout, "");
 });
 
-test("fixed node-e executor parses authenticated data and fails generically before a missing secret", () => {
+test("fixed node-e executor emits one bounded stage record before a missing secret", () => {
   const built = buildPrintingRoutineDeltaCommand({ sourceSha: contract.sourceSha, requirements, databaseHostname: input.databaseHostname });
   const result = spawnSync(process.execPath, built.command, { cwd: "backend", env: { NODE_ENV: "production" }, encoding: "utf8" });
   assert.equal(result.status, 1); assert.equal(result.stdout, "");
-  assert.equal(result.stderr, '{"status":"PRODUCTION_PRINTING_ROUTINE_DELTA_FAILED"}\n');
-  assert.doesNotMatch(`${result.stdout}${result.stderr}`, /password|DATABASE_URL|secret|credential/i);
+  assert.equal(result.stderr, '{"status":"PRODUCTION_PRINTING_ROUTINE_DELTA_FAILED","stage":"SECRET_VALIDATION","errorClass":"ASSERTION"}\n');
+  assert.doesNotMatch(`${result.stdout}${result.stderr}`, /postgresql:|DATABASE_URL|credential|SUPER_SECRET/i);
 });
 
 test("only exact authenticated completion evidence is accepted", () => {

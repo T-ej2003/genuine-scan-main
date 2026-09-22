@@ -18,6 +18,8 @@ Terraform, IAM, networking, database infrastructure, Prisma/schema/migrations, R
 
 ## One-time baseline deployment
 
+The bounded printing-routine reconciler emits exactly one non-secret JSON failure record containing a source-owned stage and bounded error class. A stage names the operation being attempted; raw database, Prisma, SQL, URL, payload, stack, and secret data are never logged. This telemetry does not retry, alter transaction behavior, or authorize a deployment.
+
 Protected main currently contains application/security/infrastructure work newer than the live backend and frontend image source tags. It is therefore not eligible for the first Lane A deployment. The same workflow has one manual `baseline: true` route that accepts only GitHub's authenticated merge commit for PR #558 and the exact reviewed historical backend and frontend image identities, then uses the same protected environment, OIDC role, immutable-image build and scan, ECS rolling deployment, stability wait, smoke checks, and best-effort runner rollback as Lane A. Any later main commit or either live image advancing makes the escape hatch unusable.
 
 Both ECS services must already have circuit-breaker rollback and the exact source-owned target-5xx and unhealthy-host deployment alarms enabled. The workflow rejects the deployment before image publication when that AWS configuration is absent or different. ECS-native rollback is primary; the runner-local rollback remains secondary. No authenticated synthetic alarm exists today, so adding one is a separate AWS configuration decision rather than part of this source change.
