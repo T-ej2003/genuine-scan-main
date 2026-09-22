@@ -16,6 +16,38 @@ const expectedPredecessors = Object.freeze({
   "app_rls.printing_readiness(p_capability text, p_purpose text, p_request_id text, p_operation text, p_subject_id text, p_options jsonb)": "780215b4db85c6561e7ce8529838f15d72ce4d78f19507078d2e02f8f7e07f83",
 });
 const classification = Object.freeze({ MATCH: "MATCH", EXPECTED: "EXPECTED_THREE_ROUTINE_DELTA_ONLY", UNEXPECTED: "UNEXPECTED_DRIFT" });
+const stages = Object.freeze({
+  ARGV_VALIDATION: "ARGV_VALIDATION", TRANSPORT_VALIDATION: "TRANSPORT_VALIDATION", PAYLOAD_DECOMPRESSION: "PAYLOAD_DECOMPRESSION",
+  PAYLOAD_AUTHENTICATION: "PAYLOAD_AUTHENTICATION", CONTRACT_AUTHENTICATION: "CONTRACT_AUTHENTICATION", SECRET_VALIDATION: "SECRET_VALIDATION",
+  DATABASE_URL_CONSTRUCTION: "DATABASE_URL_CONSTRUCTION", PRISMA_INITIALIZATION: "PRISMA_INITIALIZATION", TRANSACTION_START: "TRANSACTION_START",
+  DATABASE_IDENTITY_AUTHENTICATION: "DATABASE_IDENTITY_AUTHENTICATION", PREDECESSOR_COLLECTION: "PREDECESSOR_COLLECTION",
+  PREDECESSOR_AUTHENTICATION: "PREDECESSOR_AUTHENTICATION", PRIVILEGE_GRANT: "PRIVILEGE_GRANT", ROUTINE_OWNER_SWITCH: "ROUTINE_OWNER_SWITCH",
+  REPLACE_PRINTING_READINESS: "REPLACE_PRINTING_READINESS", REPLACE_PRINTING_CREATE_JOB: "REPLACE_PRINTING_CREATE_JOB",
+  REPLACE_PRINTING_CONNECTOR_IDENTITY: "REPLACE_PRINTING_CONNECTOR_IDENTITY", PRIVILEGE_RESTORATION: "PRIVILEGE_RESTORATION",
+  SUCCESSOR_AUTHENTICATION: "SUCCESSOR_AUTHENTICATION", COMMIT: "COMMIT", SUCCESS_EVIDENCE: "SUCCESS_EVIDENCE", DISCONNECT: "DISCONNECT",
+});
+const errorClasses = Object.freeze({ ASSERTION: "ASSERTION", PRISMA_INITIALIZATION: "PRISMA_INITIALIZATION",
+  PRISMA_KNOWN_REQUEST: "PRISMA_KNOWN_REQUEST", PRISMA_UNKNOWN_REQUEST: "PRISMA_UNKNOWN_REQUEST", SERIALIZATION: "SERIALIZATION", UNKNOWN: "UNKNOWN" });
+const serializationStages = new Set([stages.TRANSPORT_VALIDATION, stages.PAYLOAD_DECOMPRESSION, stages.PAYLOAD_AUTHENTICATION]);
+const replacementStages = Object.freeze({ printing_readiness: stages.REPLACE_PRINTING_READINESS,
+  printing_create_job: stages.REPLACE_PRINTING_CREATE_JOB, printing_connector_identity: stages.REPLACE_PRINTING_CONNECTOR_IDENTITY });
+
+class PrintingRoutineDeltaFailure extends Error {
+  constructor(record) { super("Production printing routine delta failed"); this.record = Object.freeze(record); }
+}
+
+function failureRecord(stage, error, Prisma = {}) {
+  let errorClass = errorClasses.UNKNOWN;
+  try {
+    if (error instanceof assert.AssertionError) errorClass = errorClasses.ASSERTION;
+    else if (stage === stages.PRISMA_INITIALIZATION) errorClass = errorClasses.PRISMA_INITIALIZATION;
+    else if (Prisma.PrismaClientInitializationError && error instanceof Prisma.PrismaClientInitializationError) errorClass = errorClasses.PRISMA_INITIALIZATION;
+    else if (Prisma.PrismaClientKnownRequestError && error instanceof Prisma.PrismaClientKnownRequestError) errorClass = errorClasses.PRISMA_KNOWN_REQUEST;
+    else if (Prisma.PrismaClientUnknownRequestError && error instanceof Prisma.PrismaClientUnknownRequestError) errorClass = errorClasses.PRISMA_UNKNOWN_REQUEST;
+    else if (serializationStages.has(stage)) errorClass = errorClasses.SERIALIZATION;
+  } catch { errorClass = errorClasses.UNKNOWN; }
+  return Object.freeze({ status: "PRODUCTION_PRINTING_ROUTINE_DELTA_FAILED", stage: Object.values(stages).includes(stage) ? stage : stages.ARGV_VALIDATION, errorClass });
+}
 
 const canonicalJson = (value) => {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
@@ -47,7 +79,7 @@ function classifyPrintingRoutineTransactionCatalogue(catalogue, requirements) {
   return classification.UNEXPECTED;
 }
 
-async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity = () => {}) {
+async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity = () => {}, afterIdentity = () => {}) {
   const [identity] = await tx.$queryRawUnsafe(`SELECT current_user AS role, session_user AS session_role,
     current_database() AS database, current_setting('transaction_read_only') AS read_only,
     current_setting('default_transaction_read_only') AS default_read_only,
@@ -63,6 +95,7 @@ async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity = () => 
     pg_catalog.has_database_privilege(current_user,current_database(),'CREATE,TEMPORARY') AS database_write
     FROM pg_catalog.pg_roles r WHERE r.rolname=current_user`);
   validateIdentity(identity);
+  afterIdentity();
   const [routines] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.schema,x.name,x.arguments),'[]'::jsonb) AS rows FROM (
     SELECT n.nspname AS schema,p.proname AS name,pg_catalog.pg_get_function_identity_arguments(p.oid) AS arguments,
       pg_catalog.pg_get_function_result(p.oid) AS result,o.rolname AS owner,p.prosecdef AS security_definer,
@@ -120,7 +153,7 @@ async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity = () => 
 }
 
 async function executePrintingRoutineDeltaTransaction({ tx, input, collect = collectAppOnlyDatabaseCatalogueRows,
-  classify = classifyPrintingRoutineTransactionCatalogue, checkpoint = async () => {} } = {}) {
+  classify = classifyPrintingRoutineTransactionCatalogue, checkpoint = async () => {}, setStage = () => {} } = {}) {
   assert.deepEqual(input.routines.map(({ name }) => name), expectedRoutines);
   assert.deepEqual(input.contract.predecessorSha256, expectedPredecessors);
   await tx.$executeRawUnsafe("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE");
@@ -131,28 +164,34 @@ async function executePrintingRoutineDeltaTransaction({ tx, input, collect = col
     assert.equal(identity.rolsuper, false); assert.equal(identity.rolbypassrls, false);
     assert.equal(identity.rolcreaterole, true); assert.equal(identity.rolcreatedb, true);
   };
-  const before = await collect(tx, validateIdentity);
+  setStage(stages.DATABASE_IDENTITY_AUTHENTICATION);
+  const before = await collect(tx, validateIdentity, () => setStage(stages.PREDECESSOR_COLLECTION));
+  setStage(stages.PREDECESSOR_AUTHENTICATION);
   const owners = await tx.$queryRawUnsafe("SELECT n.nspname||'.'||p.proname||'('||pg_catalog.pg_get_function_identity_arguments(p.oid)||')' AS identity,o.rolname AS owner,s.rolname AS schema_owner,pg_catalog.pg_has_role(current_user,o.oid,'SET') AS owner_set,pg_catalog.pg_has_role(current_user,s.oid,'SET') AS schema_owner_set,pg_catalog.has_schema_privilege(o.oid,n.oid,'CREATE') AS owner_schema_create FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace JOIN pg_catalog.pg_roles o ON o.oid=p.proowner JOIN pg_catalog.pg_roles s ON s.oid=n.nspowner WHERE n.nspname='app_rls' AND p.proname=ANY(ARRAY['printing_readiness','printing_create_job','printing_connector_identity']) ORDER BY 1");
   assert.equal(owners.length, 3); assert.deepEqual(owners.map((value) => value.identity), input.contract.identities);
   assert.ok(owners.every((value) => value.owner === ownerRole && value.schema_owner === schemaOwnerRole
     && value.owner_set === true && value.schema_owner_set === true && value.owner_schema_create === false));
   const state = classify(before, input.requirements);
-  if (state === classification.MATCH) return { status: "ALREADY_CONVERGED", writeCount: 0 };
+  if (state === classification.MATCH) { setStage(stages.COMMIT); return { status: "ALREADY_CONVERGED", writeCount: 0 }; }
   assert.equal(state, classification.EXPECTED);
+  setStage(stages.PRIVILEGE_GRANT);
   await tx.$executeRawUnsafe("SET LOCAL ROLE mscqr_prd_rls_phase2_owner");
   await tx.$executeRawUnsafe("GRANT CREATE ON SCHEMA app_rls TO mscqr_prd_rls_phase2_auth_owner");
   await tx.$executeRawUnsafe("RESET ROLE");
   await checkpoint("after-grant");
   const [granted] = await tx.$queryRawUnsafe("SELECT pg_catalog.has_schema_privilege('mscqr_prd_rls_phase2_auth_owner','app_rls','CREATE') AS allowed");
   assert.equal(granted?.allowed, true);
+  setStage(stages.ROUTINE_OWNER_SWITCH);
   await tx.$executeRawUnsafe("SET LOCAL ROLE mscqr_prd_rls_phase2_auth_owner");
   await checkpoint("after-owner-role");
   let writeCount = 0;
   for (const routine of input.routines) {
+    setStage(replacementStages[routine.name]);
     assert.equal(sha256(routine.sql), input.contract.sqlSha256[routine.name]);
     await tx.$executeRawUnsafe(routine.sql); writeCount += 1; await checkpoint(`after-routine-${writeCount}`);
   }
   assert.equal(writeCount, 3);
+  setStage(stages.PRIVILEGE_RESTORATION);
   await tx.$executeRawUnsafe("RESET ROLE");
   await checkpoint("before-revoke");
   await tx.$executeRawUnsafe("SET LOCAL ROLE mscqr_prd_rls_phase2_owner");
@@ -161,9 +200,11 @@ async function executePrintingRoutineDeltaTransaction({ tx, input, collect = col
   await checkpoint("after-revoke");
   const [revoked] = await tx.$queryRawUnsafe("SELECT pg_catalog.has_schema_privilege('mscqr_prd_rls_phase2_auth_owner','app_rls','CREATE') AS allowed");
   assert.equal(revoked?.allowed, false);
+  setStage(stages.SUCCESSOR_AUTHENTICATION);
   const after = await collect(tx, validateIdentity);
   await checkpoint("after-successor-readback");
   assert.equal(classify(after, input.requirements), classification.MATCH);
+  setStage(stages.COMMIT);
   return { status: "APPLIED", writeCount };
 }
 
@@ -177,14 +218,17 @@ function gzipDeflateOffset(compressed) {
   return offset;
 }
 
-function decodeInput(encoded, expectedSha256) {
+function decodeInput(encoded, expectedSha256, setStage = () => {}) {
+  setStage(stages.TRANSPORT_VALIDATION);
   assert.ok(typeof encoded === "string" && encoded.length > 0 && encoded.length <= 32768);
   assert.match(encoded, /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/);
   const compressed = Buffer.from(encoded, "base64"); assert.equal(compressed.toString("base64"), encoded);
+  setStage(stages.PAYLOAD_DECOMPRESSION);
   const offset = gzipDeflateOffset(compressed);
   const deflateBytes = inflateRawSync(compressed.subarray(offset), { info: true, maxOutputLength: 65536 }).engine.bytesWritten;
   assert.equal(offset + deflateBytes + 8, compressed.length);
   const bytes = gunzipSync(compressed, { maxOutputLength: 65536 });
+  setStage(stages.PAYLOAD_AUTHENTICATION);
   assert.ok(bytes.length > 0 && bytes.length <= 65536); assert.equal(sha256(bytes), expectedSha256);
   const payload = JSON.parse(bytes.toString("utf8"));
   assert.equal(canonicalJson(payload), bytes.toString("utf8"));
@@ -216,27 +260,43 @@ function validateInput(input) {
   for (const routine of input.routines) assert.equal(sha256(routine.sql), input.contract.sqlSha256[routine.name]);
 }
 
-async function main({ argv = process.argv, env = process.env, PrismaClient = require("@prisma/client").PrismaClient } = {}) {
-  assert.equal(argv.length, 3); assert.match(argv[2] || "", /^[a-f0-9]{64}$/);
-  const { input, contractSha256 } = decodeInput(argv[1], argv[2]);
-  assert.equal(sha256(process.execArgv[1] || ""), input.contract.executorSourceSha256);
-  assert.equal(canonicalSha256(input.contract), contractSha256); validateInput(input);
-  const url = new URL(`postgresql://unused/${database}`);
-  url.username = administrator; url.password = env.MSCQR_PRINTING_DELTA_ADMIN_PASSWORD || ""; url.hostname = input.databaseHostname;
-  url.port = "5432"; url.searchParams.set("sslmode", "require"); url.searchParams.set("application_name", "mscqr-production-printing-routine-delta");
-  assert.ok(url.password);
-  const client = new PrismaClient({ datasources: { db: { url: url.toString() } } });
+async function main({ argv = process.argv, env = process.env, execArgv = process.execArgv,
+  PrismaClient, Prisma, onStage = () => {} } = {}) {
+  let stage = stages.ARGV_VALIDATION, client, evidence, failure, prismaTypes = Prisma || {};
+  const setStage = (value) => { assert.ok(Object.values(stages).includes(value)); stage = value; onStage(value); };
   try {
-    const result = await client.$transaction((tx) => executePrintingRoutineDeltaTransaction({ tx, input }), { maxWait: 10000, timeout: 120000 });
+    setStage(stages.ARGV_VALIDATION); assert.equal(argv.length, 3); assert.match(argv[2] || "", /^[a-f0-9]{64}$/);
+    const { input, contractSha256 } = decodeInput(argv[1], argv[2], setStage);
+    setStage(stages.CONTRACT_AUTHENTICATION);
+    assert.equal(sha256(execArgv[1] || ""), input.contract.executorSourceSha256);
+    assert.equal(canonicalSha256(input.contract), contractSha256); validateInput(input);
+    setStage(stages.SECRET_VALIDATION); const password = env.MSCQR_PRINTING_DELTA_ADMIN_PASSWORD || ""; assert.ok(password);
+    setStage(stages.DATABASE_URL_CONSTRUCTION);
+    const url = new URL(`postgresql://unused/${database}`);
+    url.username = administrator; url.password = password; url.hostname = input.databaseHostname;
+    url.port = "5432"; url.searchParams.set("sslmode", "require"); url.searchParams.set("application_name", "mscqr-production-printing-routine-delta");
+    setStage(stages.PRISMA_INITIALIZATION);
+    if (!PrismaClient) { const module = require("@prisma/client"); PrismaClient = module.PrismaClient; prismaTypes = module.Prisma; }
+    client = new PrismaClient({ datasources: { db: { url: url.toString() } } });
+    setStage(stages.TRANSACTION_START);
+    const result = await client.$transaction((tx) => executePrintingRoutineDeltaTransaction({ tx, input, setStage }), { maxWait: 10000, timeout: 120000 });
+    setStage(stages.SUCCESS_EVIDENCE);
     const body = { schemaVersion: 1, kind: "PRODUCTION_PRINTING_ROUTINE_DELTA_RESULT", sourceSha: input.contract.sourceSha,
       requirementsSha256: input.contract.requirementsSha256, contractSha256, database, databaseRole: administrator,
       status: result.status, writeCount: result.writeCount };
-    console.log(JSON.stringify({ ...body, evidenceSha256: canonicalSha256(body) }));
-  } finally { await client.$disconnect(); }
+    evidence = JSON.stringify({ ...body, evidenceSha256: canonicalSha256(body) });
+  } catch (error) { failure = new PrintingRoutineDeltaFailure(failureRecord(stage, error, prismaTypes)); }
+  if (client) {
+    try { setStage(stages.DISCONNECT); await client.$disconnect(); }
+    catch (error) { if (!failure) failure = new PrintingRoutineDeltaFailure(failureRecord(stage, error, prismaTypes)); }
+  }
+  if (failure) throw failure;
+  setStage(stages.SUCCESS_EVIDENCE); console.log(evidence);
 }
 
-module.exports = { canonicalJson, decodeInput, executePrintingRoutineDeltaTransaction, main, validateInput };
+module.exports = { canonicalJson, decodeInput, errorClasses, executePrintingRoutineDeltaTransaction, failureRecord, main, stages, validateInput };
 
-if (module.id === "[eval]") main().catch(() => {
-  console.error(JSON.stringify({ status: "PRODUCTION_PRINTING_ROUTINE_DELTA_FAILED" })); process.exitCode = 1;
+if (module.id === "[eval]") main().catch((error) => {
+  const record = error instanceof PrintingRoutineDeltaFailure ? error.record : failureRecord(stages.ARGV_VALIDATION, error);
+  console.error(JSON.stringify(record)); process.exitCode = 1;
 });
