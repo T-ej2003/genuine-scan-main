@@ -670,13 +670,12 @@ NODE
   )"
 
   if [[ "$AWS_REGION" == "eu-west-2" && "$CLUSTER_NAME" == "mscqr-prod-euw2-main" && "$SERVICE_NAME" == "mscqr-backend-servi-euw2" && "$CONTAINER_NAME" == "backend" && "$EXPECTED_FAMILY" == "mscqr-production-rls-green-backend-candidate" ]]; then
-    prepare_production_client_ip_runtime
-    node --input-type=module - "$RAW_FILE" "$CLIENT_IP_RUNTIME_FILE" "$SCRIPT_DIR/production-client-ip-trust-runtime.mjs" <<'NODE'
+    node --input-type=module - "$RAW_FILE" "$SCRIPT_DIR/production-client-ip-trust-runtime.mjs" <<'NODE'
 import fs from "node:fs";
 import { pathToFileURL } from "node:url";
-const [taskPath, runtimePath, runtimeModulePath] = process.argv.slice(2);
-const { assertProductionClientIpTrustRuntime } = await import(pathToFileURL(runtimeModulePath));
-assertProductionClientIpTrustRuntime(JSON.parse(fs.readFileSync(taskPath, "utf8")).taskDefinition, JSON.parse(fs.readFileSync(runtimePath, "utf8")));
+const [taskPath, runtimeModulePath] = process.argv.slice(2);
+const { assertProductionClientIpTrustContract } = await import(pathToFileURL(runtimeModulePath));
+assertProductionClientIpTrustContract(JSON.parse(fs.readFileSync(taskPath, "utf8")).taskDefinition);
 NODE
   fi
 

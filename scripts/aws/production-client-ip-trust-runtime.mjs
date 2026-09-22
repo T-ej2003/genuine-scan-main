@@ -136,6 +136,26 @@ export function assertProductionClientIpTrustRuntime(definition, runtime) {
   return true;
 }
 
+export function assertProductionClientIpTrustContract(definition) {
+  const containers = definition?.containerDefinitions?.filter(({ name }) => name === PRODUCTION_CLIENT_IP_TRUST.container) || [];
+  assert.equal(containers.length, 1, "Candidate must contain the exact production backend container.");
+  const environment = containers[0].environment;
+  assert(Array.isArray(environment), "Candidate backend environment is missing.");
+  const values = {};
+  for (const name of CLIENT_IP_ENVIRONMENT_NAMES) {
+    const entries = environment.filter((entry) => entry?.name === name);
+    assert.equal(entries.length, 1, `Candidate backend ${name} must appear exactly once.`);
+    values[name] = entries[0].value;
+  }
+  assert.equal(values.CLIENT_IP_TRUST_MODE, "cloudfront-alb");
+  for (const [name, label] of [["CLIENT_IP_TRUSTED_ALB_CIDRS", "ALB CIDRs"], ["CLIENT_IP_TRUSTED_CLOUDFRONT_CIDRS", "CloudFront CIDRs"]]) {
+    assert.equal(typeof values[name], "string", `Candidate backend ${name} must be a string.`);
+    const cidrs = values[name].split(",");
+    assert.deepEqual(cidrs, canonicalCidrs(cidrs, label), `Candidate backend ${name} is not canonical.`);
+  }
+  return true;
+}
+
 const argsMap = (argv) => {
   const values = new Map();
   for (let index = 0; index < argv.length; index += 2) {

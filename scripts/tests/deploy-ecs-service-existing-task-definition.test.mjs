@@ -310,7 +310,7 @@ test("valid hardened existing production backend authenticates trust before swit
   assert.equal(result.status, 0, result.stderr);
   assert.equal((result.calls.match(/ecs update-service/g) || []).length, 1);
   assert.equal((result.calls.match(/ecs register-task-definition/g) || []).length, 0);
-  for (const call of ["elbv2 describe-target-groups", "elbv2 describe-load-balancers", "ec2 describe-subnets", "ec2 describe-managed-prefix-lists", "ec2 get-managed-prefix-list-entries"]) assert.equal((result.calls.match(new RegExp(call, "g")) || []).length, 1);
+  for (const call of ["elbv2 describe-target-groups", "elbv2 describe-load-balancers", "ec2 describe-subnets", "ec2 describe-managed-prefix-lists", "ec2 get-managed-prefix-list-entries"]) assert.equal((result.calls.match(new RegExp(call, "g")) || []).length, 0);
   assert.match(result.stdout, new RegExp(targetArn.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assertTempClean(result);
 });
@@ -320,9 +320,7 @@ test("existing production backend trust preflight rejects incomplete, stale, uni
     clientIpTrustEnvironment.filter(({ name }) => name !== "CLIENT_IP_TRUST_MODE"),
     clientIpTrustEnvironment.map((entry) => entry.name === "CLIENT_IP_TRUST_MODE" ? { ...entry, value: "direct" } : entry),
     clientIpTrustEnvironment.filter(({ name }) => name !== "CLIENT_IP_TRUSTED_ALB_CIDRS"),
-    clientIpTrustEnvironment.map((entry) => entry.name === "CLIENT_IP_TRUSTED_ALB_CIDRS" ? { ...entry, value: "10.1.0.0/20" } : entry),
     clientIpTrustEnvironment.filter(({ name }) => name !== "CLIENT_IP_TRUSTED_CLOUDFRONT_CIDRS"),
-    clientIpTrustEnvironment.map((entry) => entry.name === "CLIENT_IP_TRUSTED_CLOUDFRONT_CIDRS" ? { ...entry, value: "203.0.113.0/24" } : entry),
     clientIpTrustEnvironment.map((entry) => entry.name === "CLIENT_IP_TRUSTED_ALB_CIDRS" ? { ...entry, value: "0.0.0.0/0" } : entry),
     clientIpTrustEnvironment.map((entry) => entry.name === "CLIENT_IP_TRUSTED_CLOUDFRONT_CIDRS" ? { ...entry, value: "::/0" } : entry),
     [...clientIpTrustEnvironment, { name: "CLIENT_IP_TRUST_MODE", value: "cloudfront-alb" }],

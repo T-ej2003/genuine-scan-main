@@ -294,4 +294,4 @@ The normal backend deployment derives `CLIENT_IP_TRUST_MODE=cloudfront-alb` and 
 
 Before `UpdateService`, the deployment authenticates the registered task-definition readback and requires the exact derived mode and CIDRs. Missing, changed, empty, universal, or unauthenticated values fail before service activation.
 
-The immutable `--existing-task-definition` production-backend activation path performs the same authentication; it never rewrites a supplied revision to repair missing runtime values.
+The immutable `--existing-task-definition` production-backend activation path validates the same structural fail-closed trust contract without live topology reads; it never rewrites a supplied revision to repair missing runtime values.
