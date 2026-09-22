@@ -52,6 +52,8 @@ export function assertNormalDeploymentNativeRollback(response) {
     assert.equal(circuitBreaker.rollback, true, `${service.serviceName} must enable ECS circuit-breaker rollback.`);
     if (circuitBreaker.thresholdConfiguration !== undefined)
       assert.deepEqual(circuitBreaker.thresholdConfiguration, { type: "BOUNDED_PERCENT", value: 50 }, `${service.serviceName} ECS circuit-breaker threshold does not match the reviewed contract.`);
+    if (circuitBreaker.resetOnHealthyTask !== undefined)
+      assert.equal(circuitBreaker.resetOnHealthyTask, true, `${service.serviceName} ECS circuit-breaker failure count must reset after a healthy task.`);
     assert.equal(service.deploymentConfiguration?.alarms?.enable, true, `${service.serviceName} must enable ECS deployment alarms.`);
     assert.equal(service.deploymentConfiguration?.alarms?.rollback, true, `${service.serviceName} alarms must roll back failed deployments.`);
     assert.deepEqual([...(service.deploymentConfiguration?.alarms?.alarmNames || [])].sort(), [...alarms].sort(), `${service.serviceName} deployment alarms do not match the reviewed contract.`);

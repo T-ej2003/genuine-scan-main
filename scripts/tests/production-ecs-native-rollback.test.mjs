@@ -52,6 +52,7 @@ test("native rollback rejects malformed or weakened circuit-breaker readback", (
     { enable: false, rollback: true }, { enable: true, rollback: false },
     { enable: true, rollback: true, thresholdConfiguration: { type: "COUNT", value: 50 } },
     { enable: true, rollback: true, thresholdConfiguration: { type: "BOUNDED_PERCENT", value: 51 } },
+    { enable: true, rollback: true, resetOnHealthyTask: false },
     { rollback: true }, { enable: true }, {}, null, [], "invalid", 1,
   ]) {
     const changed = response();
