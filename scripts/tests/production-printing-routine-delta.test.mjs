@@ -34,7 +34,7 @@ const contract = { sourceSha: "f".repeat(40), requirementsSha256: requirements.r
 const input = { contract, requirements, databaseHostname: "production.example.invalid", routines };
 const identity = { role: PRINTING_ROUTINE_DELTA.administrator, session_role: PRINTING_ROUTINE_DELTA.administrator,
   database: "mscqr_production_rls_green_phase2", read_only: "off", rolsuper: false, rolbypassrls: false, rolcreaterole: true, rolcreatedb: true };
-const owners = identities.map((value) => ({ identity: value, owner: PRINTING_ROUTINE_DELTA.ownerRole }));
+const owners = identities.map((value) => ({ identity: value, owner: PRINTING_ROUTINE_DELTA.ownerRole, owner_member: true, schema_create: true }));
 
 const artifactFixture = () => {
   const bytes = Buffer.from(JSON.stringify(requirements));
@@ -91,8 +91,7 @@ test("exact predecessor mutates exactly three routines once and authenticates th
   const value = harness(), result = await value.run();
   assert.deepEqual(result, { status: "APPLIED", writeCount: 3 });
   assert.equal(value.commands.filter((sql) => sql.startsWith("CREATE OR REPLACE FUNCTION")).length, 3);
-  assert.equal(value.commands.filter((sql) => sql === `SET LOCAL ROLE "${PRINTING_ROUTINE_DELTA.ownerRole}"`).length, 1);
-  assert.equal(value.commands.filter((sql) => sql === "RESET ROLE").length, 1);
+  assert.equal(value.commands.filter((sql) => /\bSET (?:LOCAL )?ROLE\b|\bRESET ROLE\b/.test(sql)).length, 0);
 });
 
 test("already-converged successor performs zero routine writes", async () => {
@@ -106,6 +105,8 @@ test("stale catalogue, missing/duplicate routine, wrong owner or database identi
     harness({ classifications: [RLS_PROBE_CLASSIFICATIONS.UNEXPECTED] }),
     harness({ ownerRows: owners.slice(1) }), harness({ ownerRows: [...owners, owners[0]] }),
     harness({ ownerRows: owners.map((row, index) => index ? row : { ...row, owner: "wrong" }) }),
+    harness({ ownerRows: owners.map((row, index) => index ? row : { ...row, owner_member: false }) }),
+    harness({ ownerRows: owners.map((row, index) => index ? row : { ...row, schema_create: false }) }),
     harness({ observedIdentity: { ...identity, database: "wrong" } }), harness({ observedIdentity: { ...identity, role: "wrong" } }),
   ];
   for (const value of cases) { await assert.rejects(value.run()); assert.equal(value.commands.filter((sql) => sql.startsWith("CREATE OR REPLACE FUNCTION")).length, 0); }

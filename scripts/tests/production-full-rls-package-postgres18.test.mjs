@@ -262,7 +262,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
 
       const predecessorSource = run("git", ["show", "6d5a48ce7c32b12ce8671731392f92ddfa625a88:backend/src/rls-waves/session-c/c02/printingLifecycle.sql"]);
       const predecessorSql = canonicalPrintingRoutineDelta().map(({ name }) => printingRoutine(predecessorSource, name)).join("\n");
-      psql(greenUrl, ["-q", "-c", `BEGIN;SET LOCAL ROLE mscqr_prd_rls_phase2_auth_owner;${predecessorSql}COMMIT;`], "install exact printing-routine predecessor");
+      psql(greenUrl, ["-q", "-c", `BEGIN;${predecessorSql}COMMIT;`], "install exact printing-routine predecessor");
       const builtDelta = buildPrintingRoutineDeltaCommand({ sourceSha, requirements, databaseHostname: adminUrl.hostname });
       const deltaInput = printingDeltaRuntime.decodeInput(builtDelta.command[2], builtDelta.command[3]).input;
       const administratorClient = new PrismaClient({ datasources: { db: { url: greenUrl } } });

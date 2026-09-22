@@ -130,20 +130,18 @@ async function executePrintingRoutineDeltaTransaction({ tx, input, collect = col
     assert.equal(identity.rolcreaterole, true); assert.equal(identity.rolcreatedb, true);
   };
   const before = await collect(tx, validateIdentity);
-  const owners = await tx.$queryRawUnsafe("SELECT n.nspname||'.'||p.proname||'('||pg_catalog.pg_get_function_identity_arguments(p.oid)||')' AS identity,o.rolname AS owner FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace JOIN pg_catalog.pg_roles o ON o.oid=p.proowner WHERE n.nspname='app_rls' AND p.proname=ANY(ARRAY['printing_readiness','printing_create_job','printing_connector_identity']) ORDER BY 1");
+  const owners = await tx.$queryRawUnsafe("SELECT n.nspname||'.'||p.proname||'('||pg_catalog.pg_get_function_identity_arguments(p.oid)||')' AS identity,o.rolname AS owner,pg_catalog.pg_has_role(current_user,o.oid,'MEMBER') AS owner_member,pg_catalog.has_schema_privilege(current_user,n.oid,'CREATE') AS schema_create FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace JOIN pg_catalog.pg_roles o ON o.oid=p.proowner WHERE n.nspname='app_rls' AND p.proname=ANY(ARRAY['printing_readiness','printing_create_job','printing_connector_identity']) ORDER BY 1");
   assert.equal(owners.length, 3); assert.deepEqual(owners.map((value) => value.identity), input.contract.identities);
-  assert.ok(owners.every((value) => value.owner === ownerRole));
+  assert.ok(owners.every((value) => value.owner === ownerRole && value.owner_member === true && value.schema_create === true));
   const state = classify(before, input.requirements);
   if (state === classification.MATCH) return { status: "ALREADY_CONVERGED", writeCount: 0 };
   assert.equal(state, classification.EXPECTED);
-  await tx.$executeRawUnsafe('SET LOCAL ROLE "mscqr_prd_rls_phase2_auth_owner"');
   let writeCount = 0;
   for (const routine of input.routines) {
     assert.equal(sha256(routine.sql), input.contract.sqlSha256[routine.name]);
     await tx.$executeRawUnsafe(routine.sql); writeCount += 1;
   }
   assert.equal(writeCount, 3);
-  await tx.$executeRawUnsafe("RESET ROLE");
   const after = await collect(tx, validateIdentity);
   assert.equal(classify(after, input.requirements), classification.MATCH);
   return { status: "APPLIED", writeCount };
