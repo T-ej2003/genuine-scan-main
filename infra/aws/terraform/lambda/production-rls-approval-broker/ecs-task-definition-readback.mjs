@@ -9,6 +9,15 @@ export function normalizeEcsTaskDefinitionReadback(definition) {
   // it enables task fault-injection endpoints and is executable configuration.
   if (normalized.enableFaultInjection === false) delete normalized.enableFaultInjection;
   for (const field of ROOT_EMPTY_DEFAULT_FIELDS) if (Array.isArray(normalized[field]) && normalized[field].length === 0) delete normalized[field];
+  if (Array.isArray(normalized.volumes)) normalized.volumes = normalized.volumes.map((volume) => {
+    const normalizedVolume = structuredClone(volume);
+    const host = normalizedVolume.host;
+    // ECS materializes an omitted host volume configuration as {}. Preserve
+    // every non-empty or non-object value as reviewed executable configuration.
+    if (host !== null && typeof host === "object" && !Array.isArray(host)
+        && Object.getPrototypeOf(host) === Object.prototype && Object.keys(host).length === 0) delete normalizedVolume.host;
+    return normalizedVolume;
+  });
   if (Array.isArray(normalized.containerDefinitions)) {
     normalized.containerDefinitions = normalized.containerDefinitions.map((container) => {
       const normalizedContainer = structuredClone(container);

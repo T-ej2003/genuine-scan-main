@@ -22,6 +22,7 @@ import { canonicalJson, canonicalSha256 } from "../aws/production-green-stage-b-
 import { createAppOnlyRequirements } from "../aws/production-app-only-requirements.mjs";
 import { createProductionGithubCommandRunner } from "../aws/production-credential-source-contract.mjs";
 import { encodeWorkflowDispatchGzip } from "../aws/workflow-dispatch-gzip-transport.mjs";
+import { assertEcsTaskDefinitionReadback } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/ecs-task-definition-readback.mjs";
 
 const runtime = createRequire(import.meta.url)("../aws/production-printing-routine-delta-executor.cjs");
 
@@ -302,6 +303,35 @@ test("task definition pins the authenticated historical image and removes its ta
   ]) { const changed = structuredClone(exact); change(changed); assert.throws(() => authenticatePrintingRoutineExecutorPredecessor(changed)); }
 });
 
+test("exact production writer readback accepts only ECS empty-host materialization", () => {
+  const built = buildPrintingRoutineDeltaDefinition({ sourceSha: contract.sourceSha, requirements, databaseHostname: input.databaseHostname });
+  const taskDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-printing-routine-delta:1";
+  const readback = { ...structuredClone(built.definition), taskDefinitionArn, revision: 1, status: "ACTIVE" };
+  readback.volumes[0].host = {};
+  assert.equal(assertEcsTaskDefinitionReadback({ definition: readback, taskDefinitionArn, expected: built.definition, label: "Bounded printing routine delta" }), true);
+
+  const changes = [
+    (value) => { value.containerDefinitions[0].image += "-changed"; },
+    (value) => { value.containerDefinitions[0].command[1] += " "; },
+    (value) => { value.containerDefinitions[0].command[2] = "changed-payload"; },
+    (value) => { value.containerDefinitions[0].command[3] = "0".repeat(64); },
+    (value) => { value.taskRoleArn = "arn:aws:iam::368992683803:role/changed"; },
+    (value) => { value.executionRoleArn += "-changed"; },
+    (value) => { value.cpu = "2048"; },
+    (value) => { value.memory = "4096"; },
+    (value) => { value.networkMode = "bridge"; },
+    (value) => { value.runtimePlatform.cpuArchitecture = "ARM64"; },
+    (value) => { value.volumes[0].name = "changed"; },
+    (value) => { value.containerDefinitions[0].mountPoints[0].containerPath = "/changed"; },
+    (value) => { value.containerDefinitions[0].logConfiguration.options["awslogs-stream-prefix"] = "changed"; },
+    (value) => { value.containerDefinitions[0].secrets[0].valueFrom += "-changed"; },
+  ];
+  for (const change of changes) {
+    const changed = structuredClone(readback); change(changed);
+    assert.throws(() => assertEcsTaskDefinitionReadback({ definition: changed, taskDefinitionArn, expected: built.definition, label: "Bounded printing routine delta" }));
+  }
+});
+
 test("hostile structured values remain canonical data and cannot alter the fixed executor", () => {
   const hostile = ["\"", "'", "`", "\\", "${process.exit(0)}", ";)}", "</script>", "\u2028", "\u2029", "line\nfeed", "carriage\rreturn", "nul\0byte", "require('node:child_process').execSync('id')"];
   const baseline = buildPrintingRoutineDeltaCommand({ sourceSha: contract.sourceSha, requirements, databaseHostname: input.databaseHostname });
@@ -376,6 +406,7 @@ test("only exact authenticated completion evidence is accepted", () => {
 test("task/run ambiguity is fail-closed and never contains an automatic relaunch", () => {
   const source = fs.readFileSync("scripts/aws/apply-production-printing-routine-delta.mjs", "utf8");
   assert.equal((source.match(/\["ecs", "run-task"/g) || []).length, 1);
+  assert.ok(source.indexOf("assertEcsTaskDefinitionReadback") < source.indexOf('["ecs", "run-task"'));
   assert.match(source, /do not relaunch automatically/g); assert.doesNotMatch(source, /run-task[\s\S]{0,300}(?:retry|attempt\+\+)/i);
   assert.match(source, /enableExecuteCommand: false/); assert.match(source, /assert\.equal\(events\.length, 1\)/);
   assert.match(source, /assert\.equal\(task\.containers\[0\]\.exitCode, 0/);

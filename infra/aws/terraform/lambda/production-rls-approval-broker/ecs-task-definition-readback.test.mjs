@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { canonicalizeEcsTaskDefinition, normalizeEcsTaskDefinitionReadback } from "./ecs-task-definition-readback.mjs";
+import { assertEcsTaskDefinitionReadback, canonicalizeEcsTaskDefinition, normalizeEcsTaskDefinitionReadback } from "./ecs-task-definition-readback.mjs";
 
 const fixture = JSON.parse(readFileSync(new URL("../../../../../scripts/tests/fixtures/mscqr-backend-47.task-definition.json", import.meta.url)));
 const productionCapture = readFileSync(new URL("../../../../../documents/ops/evidence/aws-elasticache-rightsize-inventory-20260603T184059Z/07-ecs-services-and-taskdefs.txt", import.meta.url), "utf8");
@@ -52,6 +52,44 @@ test("canonical ECS readback accepts only the empty awslogs secretOptions defaul
   assert.equal(equivalent(empty, omitted), true);
   assert.equal(equivalent(omitted, omitted), true);
   assert.equal(equivalent(empty, empty), true);
+});
+
+test("canonical ECS readback normalizes only an empty host volume configuration", () => {
+  const omitted = { ...base(), volumes: [{ name: "tmp" }] };
+  const empty = structuredClone(omitted); empty.volumes[0].host = {};
+  assert.equal(equivalent(omitted, empty), true);
+  assert.equal(equivalent(empty, omitted), true);
+
+  for (const host of [{ sourcePath: "/tmp" }, null, [], "", { unexpected: "value" }]) {
+    const changed = structuredClone(omitted); changed.volumes[0].host = host;
+    assert.equal(equivalent(omitted, changed), false);
+    assert.equal(equivalent(empty, changed), false);
+  }
+  for (const configuration of [
+    { efsVolumeConfiguration: { fileSystemId: "fs-reviewed" } },
+    { dockerVolumeConfiguration: { scope: "task" } },
+    { fsxWindowsFileServerVolumeConfiguration: { fileSystemId: "fs-reviewed" } },
+    { unknownVolumeConfiguration: {} },
+  ]) {
+    const changed = structuredClone(omitted); Object.assign(changed.volumes[0], configuration);
+    assert.equal(equivalent(omitted, changed), false);
+  }
+
+  const multiple = { ...base(), volumes: [{ name: "first" }, { name: "second" }] };
+  const materialized = structuredClone(multiple); materialized.volumes[0].host = {};
+  assert.equal(equivalent(multiple, materialized), true);
+  materialized.volumes.reverse();
+  assert.equal(equivalent(multiple, materialized), false);
+});
+
+test("exact task-definition readback accepts empty host materialization and rejects material host drift", () => {
+  const expected = { ...base(), volumes: [{ name: "tmp" }] };
+  const taskDefinitionArn = "arn:aws:ecs:eu-west-2:111122223333:task-definition/reviewed:1";
+  const readback = { ...structuredClone(expected), taskDefinitionArn, revision: 1, status: "ACTIVE" };
+  readback.volumes[0].host = {};
+  assert.equal(assertEcsTaskDefinitionReadback({ definition: readback, taskDefinitionArn, expected }), true);
+  readback.volumes[0].host = { sourcePath: "/tmp" };
+  assert.throws(() => assertEcsTaskDefinitionReadback({ definition: readback, taskDefinitionArn, expected }), /exact approved execution contract/);
 });
 
 test("independent production-shaped ECS evidence contains and normalizes AWS defaults", () => {
