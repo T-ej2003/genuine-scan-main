@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
+import { selectTargetTask } from "../aws/ecs-exec-target-selection.mjs";
 
 const script = path.resolve("scripts/aws/deploy-ecs-service.sh");
 const region = "eu-west-2";
@@ -92,7 +93,7 @@ function writeFixture(data, options = {}) {
       { status: "ACTIVE", taskDefinition: fromArn, pendingCount: 1, runningCount: 1 },
     ]
     : undefined, options.initialExecEnabled === true, options.currentPropagateTags);
-  const post = serviceResponse(fixtureTargetArn, undefined, options.postExecEnabled ?? options.enableExecuteCommand === true, options.postPropagateTags ?? options.currentPropagateTags ?? (options.propagateTags ? "TASK_DEFINITION" : undefined));
+  const post = serviceResponse(fixtureTargetArn, undefined, options.postExecEnabled ?? options.enableExecuteCommand === true, options.postPropagateTags ?? (options.clientIpRuntime || options.propagateTags ? "TASK_DEFINITION" : options.currentPropagateTags));
   const targetDeployment = serviceResponse(fromArn, [
     { status: "PRIMARY", taskDefinition: fromArn, pendingCount: 1, runningCount: 2, rolloutState: "IN_PROGRESS" },
     { status: "ACTIVE", taskDefinition: fixtureTargetArn, pendingCount: 0, runningCount: 0 },
@@ -117,6 +118,7 @@ function writeFixture(data, options = {}) {
   for (const [name, value] of Object.entries({ target, normal, pre, post, targetDeployment, unrelated, foreignDeployment, tasks, taskArns })) {
     fs.writeFileSync(path.join(dir, `${name}.json`), JSON.stringify(value));
   }
+  if (options.registeredTags !== undefined) fs.writeFileSync(path.join(dir, "registered-tags.json"), JSON.stringify(options.registeredTags));
   if (options.clientIpRuntime || options.existingClientIpRuntime !== false) {
     fs.writeFileSync(path.join(dir, "target-groups.json"), JSON.stringify({ TargetGroups: [{ TargetGroupArn: serviceLoadBalancers[0].targetGroupArn.replace("/example", "/f6673ff776f6e2ec"), LoadBalancerArns: ["arn:aws:elasticloadbalancing:eu-west-2:368992683803:loadbalancer/app/mscqr-alb-euw2/cda0292be6e39608"], VpcId: "vpc-example", TargetType: "ip", Protocol: "HTTP", Port: 4000 }] }));
     pre.services[0].loadBalancers[0].targetGroupArn = "arn:aws:elasticloadbalancing:eu-west-2:368992683803:targetgroup/mscqr-backend-tg-euw2-v2/f6673ff776f6e2ec";
@@ -212,7 +214,7 @@ elif [[ "$1 $2" == "ec2 get-managed-prefix-list-entries" ]]; then cat "$FAKE_DAT
 elif [[ "$1 $2" == "ecs register-task-definition" ]]; then
   input=""
   for ((i=1; i<=$#; i++)); do if [[ "\${!i}" == "--cli-input-json" ]]; then j=$((i + 1)); input="\${!j#file://}"; fi; done
-  node --input-type=module -e 'import fs from "node:fs"; const [input,out,arn]=process.argv.slice(1); const payload=JSON.parse(fs.readFileSync(input)); const {tags=[], ...taskDefinition}=payload; Object.assign(taskDefinition,{taskDefinitionArn:arn,revision:7,status:"ACTIVE"}); fs.writeFileSync(out,JSON.stringify({taskDefinition,tags}));' "$input" "$FAKE_DATA/registered.json" "${targetArn}"
+  node --input-type=module -e 'import fs from "node:fs"; const [input,out,arn,override]=process.argv.slice(1); const payload=JSON.parse(fs.readFileSync(input)); const {tags:payloadTags=[], ...taskDefinition}=payload; const tags=fs.existsSync(override)?JSON.parse(fs.readFileSync(override)):payloadTags; Object.assign(taskDefinition,{taskDefinitionArn:arn,revision:7,status:"ACTIVE"}); fs.writeFileSync(out,JSON.stringify({taskDefinition,tags}));' "$input" "$FAKE_DATA/registered.json" "${targetArn}" "$FAKE_DATA/registered-tags.json"
   printf '%s\\n' "${targetArn}"
 fi
 `;
@@ -294,6 +296,40 @@ function runExisting(options = {}, extraArgs = []) {
   const calls = fs.existsSync(fixture.calls) ? fs.readFileSync(fixture.calls, "utf8") : "";
   const outcome = fs.existsSync(normalOutcome) ? JSON.parse(fs.readFileSync(normalOutcome, "utf8")) : null;
   return { ...result, calls, fixture, outcome };
+}
+
+function runNormalBackend(options = {}) {
+  const fixture = writeFixture({}, {
+    clientIpRuntime: true,
+    normalFamily: "mscqr-backend",
+    callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-normal-deployer/test",
+    enableExecuteCommand: true,
+    ...options,
+  });
+  const result = spawnSync("bash", [script], {
+    cwd: path.resolve("."),
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: `${fixture.fakeBin}:${process.env.PATH}`,
+      MSCQR_AWS_CREDENTIAL_SOURCE: "named-profile",
+      MSCQR_AWS_NAMED_PROFILE: "mscqr-production-release-deployer",
+      AWS_REGION: region,
+      CLUSTER_NAME: cluster,
+      SERVICE_NAME: service,
+      TASK_DEFINITION: "mscqr-backend:47",
+      CONTAINER_NAME: containerName,
+      IMAGE_URI: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${digest}`,
+      ENABLE_EXECUTE_COMMAND: "true",
+      MSCQR_NORMAL_APPLICATION_DEPLOYMENT: "true",
+      ...(Object.hasOwn(options, "propagateTags") ? { PROPAGATE_TAGS: options.propagateTags } : {}),
+      FAKE_DATA: fixture.dir,
+      FAKE_SCENARIO: "",
+      TMPDIR: fixture.tempDir,
+    },
+  });
+  const calls = fs.existsSync(fixture.calls) ? fs.readFileSync(fixture.calls, "utf8") : "";
+  return { ...result, calls, fixture };
 }
 
 function assertFailure(result, pattern) {
@@ -710,27 +746,8 @@ test("explicit new-revision mode still registers before updating the service", (
 });
 
 test("normal backend mode from a historical predecessor authenticates topology, injects client-IP trust, and verifies readback before UpdateService", () => {
-  const fixture = writeFixture({}, { clientIpRuntime: true, normalFamily: "mscqr-backend", callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-normal-deployer/test" });
-  const result = spawnSync("bash", [script], {
-    cwd: path.resolve("."),
-    encoding: "utf8",
-    env: {
-      ...process.env,
-      PATH: `${fixture.fakeBin}:${process.env.PATH}`,
-      MSCQR_AWS_CREDENTIAL_SOURCE: "named-profile",
-      MSCQR_AWS_NAMED_PROFILE: "mscqr-production-release-deployer",
-      AWS_REGION: region,
-      CLUSTER_NAME: cluster,
-      SERVICE_NAME: service,
-      TASK_DEFINITION: "mscqr-backend:47",
-      CONTAINER_NAME: containerName,
-      IMAGE_URI: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${digest}`,
-      MSCQR_NORMAL_APPLICATION_DEPLOYMENT: "true",
-      FAKE_DATA: fixture.dir,
-      FAKE_SCENARIO: "",
-      TMPDIR: fixture.tempDir,
-    },
-  });
+  const result = runNormalBackend();
+  const { fixture } = result;
   assert.equal(result.status, 0, result.stderr);
   const calls = fs.readFileSync(fixture.calls, "utf8").trim().split("\n");
   for (const expected of ["elbv2 describe-target-groups", "elbv2 describe-load-balancers", "ec2 describe-subnets", "ec2 describe-managed-prefix-lists", "ec2 get-managed-prefix-list-entries"]) {
@@ -751,6 +768,20 @@ test("normal backend mode from a historical predecessor authenticates topology, 
   const readback = calls.findIndex((call, index) => index > registration && call.startsWith("ecs describe-task-definition"));
   const update = calls.findIndex((call) => call.startsWith("ecs update-service"));
   assert(registration >= 0 && readback > registration && update > readback);
+  assert.match(calls[update], new RegExp(`--task-definition ${targetArn.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  assert.match(calls[update], /--enable-execute-command/);
+  assert.match(calls[update], /--propagate-tags TASK_DEFINITION/);
+  const selected = selectTargetTask({
+    tasks: [{ taskArn: `arn:aws:ecs:${region}:${account}:task/${cluster}/normal`, clusterArn: `arn:aws:ecs:${region}:${account}:cluster/${cluster}`, taskDefinitionArn: targetArn, lastStatus: "RUNNING", group: `service:${service}`, healthStatus: "HEALTHY", containers: [{ name: containerName, imageDigest: digest }], tags: registered.tags, managedAgents: [{ name: "ExecuteCommandAgent", lastStatus: "RUNNING" }] }],
+    expectedClusterArn: `arn:aws:ecs:${region}:${account}:cluster/${cluster}`,
+    expectedTaskDefinitionArn: targetArn,
+    expectedImageDigest: digest,
+    serviceName: service,
+    containerName,
+    expectedTaskTagKey: "MSCQRExecTarget",
+    expectedTaskTagValue: "production-backend",
+  });
+  assert.equal(selected.matchingTaskCount, 1);
   assertTempClean({ fixture });
 });
 
@@ -761,16 +792,8 @@ test("normal backend migration preserves unrelated inherited tags and canonicali
     [{ key: "MSCQRExecTarget", value: "wrong-value" }],
     [{ key: "MSCQRExecTarget", value: "wrong-value" }, { key: "MSCQRExecTarget", value: "production-backend" }],
   ]) {
-    const fixture = writeFixture({}, { clientIpRuntime: true, normalFamily: "mscqr-backend", normalTags, callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-normal-deployer/test" });
-    const result = spawnSync("bash", [script], {
-      cwd: path.resolve("."), encoding: "utf8", env: {
-        ...process.env, PATH: `${fixture.fakeBin}:${process.env.PATH}`,
-        MSCQR_AWS_CREDENTIAL_SOURCE: "named-profile", MSCQR_AWS_NAMED_PROFILE: "mscqr-production-release-deployer",
-        AWS_REGION: region, CLUSTER_NAME: cluster, SERVICE_NAME: service, TASK_DEFINITION: "mscqr-backend:47", CONTAINER_NAME: containerName,
-        IMAGE_URI: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${digest}`,
-        MSCQR_NORMAL_APPLICATION_DEPLOYMENT: "true", FAKE_DATA: fixture.dir, FAKE_SCENARIO: "", TMPDIR: fixture.tempDir,
-      },
-    });
+    const result = runNormalBackend({ normalTags });
+    const { fixture } = result;
     assert.equal(result.status, 0, result.stderr);
     const tags = JSON.parse(fs.readFileSync(path.join(fixture.dir, "registered.json"), "utf8")).tags;
     assert.deepEqual(tags.filter(({ key }) => key === "MSCQRExecTarget"), [{ key: "MSCQRExecTarget", value: "production-backend" }]);
@@ -779,6 +802,31 @@ test("normal backend migration preserves unrelated inherited tags and canonicali
     assert.equal(updates.length, 1);
     assert.match(updates[0], new RegExp(targetArn.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     assertTempClean({ fixture });
+  }
+});
+
+test("normal backend activation source-owns TASK_DEFINITION propagation for every predecessor service state", () => {
+  for (const currentPropagateTags of [undefined, "NONE", "TASK_DEFINITION"]) {
+    const result = runNormalBackend({ currentPropagateTags });
+    assert.equal(result.status, 0, result.stderr);
+    const updates = result.calls.split("\n").filter((call) => call.startsWith("ecs update-service"));
+    assert.equal(updates.length, 1);
+    assert.match(updates[0], /--propagate-tags TASK_DEFINITION/);
+    assert.doesNotMatch(updates[0], /--propagate-tags (?:NONE|SERVICE)/);
+    assertTempClean(result);
+  }
+});
+
+test("normal backend rejects caller propagation overrides and candidate marker readback drift before UpdateService", () => {
+  for (const propagateTags of ["NONE", "SERVICE", "TASK_DEFINITION"]) {
+    const result = runNormalBackend({ propagateTags });
+    assertFailure(result, /PROPAGATE_TAGS/);
+    assert.equal((result.calls.match(/ecs update-service/g) || []).length, 0);
+  }
+  for (const registeredTags of [[], [{ key: "MSCQRExecTarget", value: "wrong" }]]) {
+    const result = runNormalBackend({ registeredTags });
+    assertFailure(result, /MSCQRExecTarget|exact approved execution contract/);
+    assert.equal((result.calls.match(/ecs update-service/g) || []).length, 0);
   }
 });
 

@@ -224,6 +224,7 @@ require_env SERVICE_NAME
 require_env CONTAINER_NAME
 
 normal_backend_deployment=false
+normal_backend_propagate_tags=""
 reject_generic_stage_b_registration() {
   local family="${TASK_DEFINITION:-}"
   family="${family##*/}"
@@ -235,6 +236,7 @@ reject_generic_stage_b_registration() {
       exit 1
     }
     normal_backend_deployment=true
+    normal_backend_propagate_tags="TASK_DEFINITION"
     return
   fi
   case "$family" in
@@ -1052,7 +1054,7 @@ update_args=(aws ecs update-service \
   --service "$SERVICE_NAME" \
   --task-definition "$NEW_TASK_DEFINITION_ARN")
 if [[ "$ENABLE_EXECUTE_COMMAND" == "true" ]]; then update_args+=(--enable-execute-command); fi
-if [[ -n "${PROPAGATE_TAGS:-}" ]]; then update_args+=(--propagate-tags "$PROPAGATE_TAGS"); fi
+if [[ -n "$normal_backend_propagate_tags" ]]; then update_args+=(--propagate-tags "$normal_backend_propagate_tags"); fi
 "${update_args[@]}" >/dev/null
 
 if [[ "$WAIT_FOR_STABLE" == "true" ]]; then
@@ -1091,7 +1093,7 @@ if (!Array.isArray(response.failures) || response.failures.length !== 0 || respo
 }
 NODE
 fi
-if [[ -n "${PROPAGATE_TAGS:-}" ]]; then
+if [[ -n "$normal_backend_propagate_tags" ]]; then
   aws ecs describe-services \
     --region "$AWS_REGION" \
     --cluster "$CLUSTER_NAME" \
@@ -1100,7 +1102,7 @@ if [[ -n "${PROPAGATE_TAGS:-}" ]]; then
   node --input-type=module - "$EXISTING_POST_SERVICE_FILE" <<'NODE'
 import fs from "node:fs";
 const response = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-if (response.services?.[0]?.propagateTags !== "TASK_DEFINITION") throw new Error("Post-switch service does not propagate task-definition tags.");
+if (!Array.isArray(response.failures) || response.failures.length !== 0 || response.services?.length !== 1 || response.services[0].propagateTags !== "TASK_DEFINITION") throw new Error("Post-switch service does not propagate task-definition tags.");
 NODE
 fi
 

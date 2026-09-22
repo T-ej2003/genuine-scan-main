@@ -297,3 +297,5 @@ Before `UpdateService`, the deployment authenticates the registered task-definit
 The immutable `--existing-task-definition` production-backend activation path validates the same structural fail-closed trust contract without live topology reads; it never rewrites a supplied revision to repair missing runtime values.
 
 When the normal production lane registers a new `mscqr-production-rls-green-backend-candidate` from a historical backend definition, it preserves inherited tags while atomically binding exactly one `MSCQRExecTarget=production-backend` destination-family marker. The historical predecessor is never retagged.
+
+The same authenticated service update fixes `propagateTags=TASK_DEFINITION`, so each newly launched backend task inherits that execution marker for the ECS Exec verifier. Caller input cannot weaken this normal-lane setting.
