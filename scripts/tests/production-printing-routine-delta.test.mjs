@@ -34,7 +34,8 @@ const contract = { sourceSha: "f".repeat(40), requirementsSha256: requirements.r
 const input = { contract, requirements, databaseHostname: "production.example.invalid", routines };
 const identity = { role: PRINTING_ROUTINE_DELTA.administrator, session_role: PRINTING_ROUTINE_DELTA.administrator,
   database: "mscqr_production_rls_green_phase2", read_only: "off", rolsuper: false, rolbypassrls: false, rolcreaterole: true, rolcreatedb: true };
-const owners = identities.map((value) => ({ identity: value, owner: PRINTING_ROUTINE_DELTA.ownerRole, owner_member: true, schema_create: true }));
+const owners = identities.map((value) => ({ identity: value, owner: PRINTING_ROUTINE_DELTA.ownerRole,
+  schema_owner: "mscqr_prd_rls_phase2_owner", owner_set: true, schema_owner_set: true, owner_schema_create: false }));
 
 const artifactFixture = () => {
   const bytes = Buffer.from(JSON.stringify(requirements));
@@ -51,15 +52,26 @@ sys.stdout.buffer.write(b.getvalue())`], { input: bytes });
 };
 
 const harness = ({ classifications = [RLS_PROBE_CLASSIFICATIONS.EXPECTED, RLS_PROBE_CLASSIFICATIONS.MATCH], ownerRows = owners, failCreate = 0,
-  observedIdentity = identity, tamperedInput = input } = {}) => {
-  const commands = []; let creates = 0, reads = 0;
+  failStage = "", observedIdentity = identity, tamperedInput = input } = {}) => {
+  const commands = []; let creates = 0, reads = 0, ownerCreate = false;
   const tx = {
-    async $executeRawUnsafe(sql) { commands.push(sql); if (sql.startsWith("CREATE OR REPLACE FUNCTION")) { creates++; if (creates === failCreate) throw new Error("injected replacement failure"); } },
-    async $queryRawUnsafe(sql) { commands.push(sql); return sql.includes("pg_advisory_xact_lock") ? [] : ownerRows; },
+    async $executeRawUnsafe(sql) {
+      commands.push(sql);
+      if (sql.startsWith("GRANT CREATE")) ownerCreate = true;
+      if (sql.startsWith("REVOKE CREATE")) ownerCreate = false;
+      if (sql.startsWith("CREATE OR REPLACE FUNCTION")) { creates++; if (creates === failCreate) throw new Error("injected replacement failure"); }
+    },
+    async $queryRawUnsafe(sql) {
+      commands.push(sql);
+      if (sql.includes("pg_advisory_xact_lock")) return [];
+      if (sql.startsWith("SELECT pg_catalog.has_schema_privilege")) return [{ allowed: ownerCreate }];
+      return ownerRows;
+    },
   };
   const collect = async (_tx, validateIdentity = () => {}) => { validateIdentity(observedIdentity); return { identity: observedIdentity, marker: reads++ }; };
   const classify = () => classifications.shift();
-  return { tx, commands, run: () => executePrintingRoutineDeltaTransaction({ tx, input: tamperedInput, collect, classify }) };
+  const checkpoint = async (stage) => { if (stage === failStage) throw new Error(`injected ${stage} failure`); };
+  return { tx, commands, run: () => executePrintingRoutineDeltaTransaction({ tx, input: tamperedInput, collect, classify, checkpoint }) };
 };
 
 test("canonical protected source yields exactly the three fixed routine replacements", () => {
@@ -91,13 +103,19 @@ test("exact predecessor mutates exactly three routines once and authenticates th
   const value = harness(), result = await value.run();
   assert.deepEqual(result, { status: "APPLIED", writeCount: 3 });
   assert.equal(value.commands.filter((sql) => sql.startsWith("CREATE OR REPLACE FUNCTION")).length, 3);
-  assert.equal(value.commands.filter((sql) => /\bSET (?:LOCAL )?ROLE\b|\bRESET ROLE\b/.test(sql)).length, 0);
+  assert.equal(value.commands.filter((sql) => sql === "GRANT CREATE ON SCHEMA app_rls TO mscqr_prd_rls_phase2_auth_owner").length, 1);
+  assert.equal(value.commands.filter((sql) => sql === "REVOKE CREATE ON SCHEMA app_rls FROM mscqr_prd_rls_phase2_auth_owner").length, 1);
+  assert.deepEqual(value.commands.filter((sql) => /^(?:SET LOCAL ROLE|RESET ROLE)/.test(sql)), [
+    "SET LOCAL ROLE mscqr_prd_rls_phase2_owner", "RESET ROLE", "SET LOCAL ROLE mscqr_prd_rls_phase2_auth_owner",
+    "RESET ROLE", "SET LOCAL ROLE mscqr_prd_rls_phase2_owner", "RESET ROLE",
+  ]);
 });
 
 test("already-converged successor performs zero routine writes", async () => {
   const value = harness({ classifications: [RLS_PROBE_CLASSIFICATIONS.MATCH] });
   assert.deepEqual(await value.run(), { status: "ALREADY_CONVERGED", writeCount: 0 });
   assert.equal(value.commands.filter((sql) => sql.startsWith("CREATE OR REPLACE FUNCTION")).length, 0);
+  assert.equal(value.commands.filter((sql) => /^(?:GRANT|REVOKE) CREATE/.test(sql)).length, 0);
 });
 
 test("stale catalogue, missing/duplicate routine, wrong owner or database identity fails before writing", async () => {
@@ -105,8 +123,10 @@ test("stale catalogue, missing/duplicate routine, wrong owner or database identi
     harness({ classifications: [RLS_PROBE_CLASSIFICATIONS.UNEXPECTED] }),
     harness({ ownerRows: owners.slice(1) }), harness({ ownerRows: [...owners, owners[0]] }),
     harness({ ownerRows: owners.map((row, index) => index ? row : { ...row, owner: "wrong" }) }),
-    harness({ ownerRows: owners.map((row, index) => index ? row : { ...row, owner_member: false }) }),
-    harness({ ownerRows: owners.map((row, index) => index ? row : { ...row, schema_create: false }) }),
+    harness({ ownerRows: owners.map((row, index) => index ? row : { ...row, schema_owner: "wrong" }) }),
+    harness({ ownerRows: owners.map((row, index) => index ? row : { ...row, owner_set: false }) }),
+    harness({ ownerRows: owners.map((row, index) => index ? row : { ...row, schema_owner_set: false }) }),
+    harness({ ownerRows: owners.map((row, index) => index ? row : { ...row, owner_schema_create: true }) }),
     harness({ observedIdentity: { ...identity, database: "wrong" } }), harness({ observedIdentity: { ...identity, role: "wrong" } }),
   ];
   for (const value of cases) { await assert.rejects(value.run()); assert.equal(value.commands.filter((sql) => sql.startsWith("CREATE OR REPLACE FUNCTION")).length, 0); }
@@ -121,6 +141,14 @@ test("replacement failures and successor mismatch reject the one transaction", a
   for (const routineSet of [[...input.routines].reverse(), [...input.routines, { name: "fourth", sql: "SELECT 1" }]]) {
     const value = harness({ tamperedInput: { ...input, routines: routineSet } });
     await assert.rejects(value.run()); assert.equal(value.commands.filter((sql) => sql.startsWith("CREATE OR REPLACE FUNCTION")).length, 0);
+  }
+});
+
+test("every privilege-bridge failure stage aborts the transaction contract", async () => {
+  for (const failStage of ["after-grant", "after-owner-role", "after-routine-1", "after-routine-2", "after-routine-3",
+    "before-revoke", "after-revoke", "after-successor-readback"]) {
+    const value = harness({ failStage });
+    await assert.rejects(value.run(), new RegExp(`injected ${failStage} failure`));
   }
 });
 

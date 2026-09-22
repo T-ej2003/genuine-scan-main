@@ -5,6 +5,7 @@ const crypto = require("node:crypto");
 
 const administrator = "mscqr_prod_admin";
 const ownerRole = "mscqr_prd_rls_phase2_auth_owner";
+const schemaOwnerRole = "mscqr_prd_rls_phase2_owner";
 const database = "mscqr_production_rls_green_phase2";
 const collections = Object.freeze(["routines", "tables", "policies", "schemas", "roles"]);
 const expectedRoutines = Object.freeze(["printing_readiness", "printing_create_job", "printing_connector_identity"]);
@@ -118,11 +119,11 @@ async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity = () => 
 }
 
 async function executePrintingRoutineDeltaTransaction({ tx, input, collect = collectAppOnlyDatabaseCatalogueRows,
-  classify = classifyPrintingRoutineTransactionCatalogue } = {}) {
+  classify = classifyPrintingRoutineTransactionCatalogue, checkpoint = async () => {} } = {}) {
   assert.deepEqual(input.routines.map(({ name }) => name), expectedRoutines);
   assert.deepEqual(input.contract.predecessorSha256, expectedPredecessors);
   await tx.$executeRawUnsafe("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE");
-  await tx.$queryRawUnsafe("SELECT pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('mscqr-production-printing-routine-delta',0))");
+  await tx.$executeRawUnsafe("SELECT pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('mscqr-production-printing-routine-delta',0))");
   const validateIdentity = (identity) => {
     assert.equal(identity.role, administrator); assert.equal(identity.session_role, administrator);
     assert.equal(identity.database, database); assert.equal(identity.read_only, "off");
@@ -130,19 +131,37 @@ async function executePrintingRoutineDeltaTransaction({ tx, input, collect = col
     assert.equal(identity.rolcreaterole, true); assert.equal(identity.rolcreatedb, true);
   };
   const before = await collect(tx, validateIdentity);
-  const owners = await tx.$queryRawUnsafe("SELECT n.nspname||'.'||p.proname||'('||pg_catalog.pg_get_function_identity_arguments(p.oid)||')' AS identity,o.rolname AS owner,pg_catalog.pg_has_role(current_user,o.oid,'MEMBER') AS owner_member,pg_catalog.has_schema_privilege(current_user,n.oid,'CREATE') AS schema_create FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace JOIN pg_catalog.pg_roles o ON o.oid=p.proowner WHERE n.nspname='app_rls' AND p.proname=ANY(ARRAY['printing_readiness','printing_create_job','printing_connector_identity']) ORDER BY 1");
+  const owners = await tx.$queryRawUnsafe("SELECT n.nspname||'.'||p.proname||'('||pg_catalog.pg_get_function_identity_arguments(p.oid)||')' AS identity,o.rolname AS owner,s.rolname AS schema_owner,pg_catalog.pg_has_role(current_user,o.oid,'SET') AS owner_set,pg_catalog.pg_has_role(current_user,s.oid,'SET') AS schema_owner_set,pg_catalog.has_schema_privilege(o.oid,n.oid,'CREATE') AS owner_schema_create FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace JOIN pg_catalog.pg_roles o ON o.oid=p.proowner JOIN pg_catalog.pg_roles s ON s.oid=n.nspowner WHERE n.nspname='app_rls' AND p.proname=ANY(ARRAY['printing_readiness','printing_create_job','printing_connector_identity']) ORDER BY 1");
   assert.equal(owners.length, 3); assert.deepEqual(owners.map((value) => value.identity), input.contract.identities);
-  assert.ok(owners.every((value) => value.owner === ownerRole && value.owner_member === true && value.schema_create === true));
+  assert.ok(owners.every((value) => value.owner === ownerRole && value.schema_owner === schemaOwnerRole
+    && value.owner_set === true && value.schema_owner_set === true && value.owner_schema_create === false));
   const state = classify(before, input.requirements);
   if (state === classification.MATCH) return { status: "ALREADY_CONVERGED", writeCount: 0 };
   assert.equal(state, classification.EXPECTED);
+  await tx.$executeRawUnsafe("SET LOCAL ROLE mscqr_prd_rls_phase2_owner");
+  await tx.$executeRawUnsafe("GRANT CREATE ON SCHEMA app_rls TO mscqr_prd_rls_phase2_auth_owner");
+  await tx.$executeRawUnsafe("RESET ROLE");
+  await checkpoint("after-grant");
+  const [granted] = await tx.$queryRawUnsafe("SELECT pg_catalog.has_schema_privilege('mscqr_prd_rls_phase2_auth_owner','app_rls','CREATE') AS allowed");
+  assert.equal(granted?.allowed, true);
+  await tx.$executeRawUnsafe("SET LOCAL ROLE mscqr_prd_rls_phase2_auth_owner");
+  await checkpoint("after-owner-role");
   let writeCount = 0;
   for (const routine of input.routines) {
     assert.equal(sha256(routine.sql), input.contract.sqlSha256[routine.name]);
-    await tx.$executeRawUnsafe(routine.sql); writeCount += 1;
+    await tx.$executeRawUnsafe(routine.sql); writeCount += 1; await checkpoint(`after-routine-${writeCount}`);
   }
   assert.equal(writeCount, 3);
+  await tx.$executeRawUnsafe("RESET ROLE");
+  await checkpoint("before-revoke");
+  await tx.$executeRawUnsafe("SET LOCAL ROLE mscqr_prd_rls_phase2_owner");
+  await tx.$executeRawUnsafe("REVOKE CREATE ON SCHEMA app_rls FROM mscqr_prd_rls_phase2_auth_owner");
+  await tx.$executeRawUnsafe("RESET ROLE");
+  await checkpoint("after-revoke");
+  const [revoked] = await tx.$queryRawUnsafe("SELECT pg_catalog.has_schema_privilege('mscqr_prd_rls_phase2_auth_owner','app_rls','CREATE') AS allowed");
+  assert.equal(revoked?.allowed, false);
   const after = await collect(tx, validateIdentity);
+  await checkpoint("after-successor-readback");
   assert.equal(classify(after, input.requirements), classification.MATCH);
   return { status: "APPLIED", writeCount };
 }
