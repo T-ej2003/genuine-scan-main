@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
+import yaml from "js-yaml";
 import { PRODUCTION_RELEASE_CLASS, classifyProductionChanges, classifyProductionComponentRanges } from "../aws/production-deployment-classification.mjs";
 import { classifyLaneAComponentRanges } from "../aws/classify-production-lane-a.mjs";
 import { buildNormalReleasePlan, buildNormalBackendPreparation, assertNormalBackendExactCandidate, classifyNormalLiveComponentState, executeNormalFrontendActivation, executeNormalRelease, executeNormalComponentTransaction, NORMAL_RELEASE, parseNormalReleaseArgs } from "../aws/production-normal-release.mjs";
@@ -303,7 +306,10 @@ test("normal production workflow is fixed, OIDC-only, gated by main, and smoke-t
   assert.match(workflow, /GH_HOST=github\.com gh api --hostname github\.com repos\/T-ej2003\/genuine-scan-main\/pulls\/558/);
   assert.match(workflow, /\.merged_at != null and \.base\.ref == "main" and \.base\.repo\.full_name == "T-ej2003\/genuine-scan-main" and \.head\.repo\.full_name == "T-ej2003\/genuine-scan-main"/);
   assert.match(workflow, /\[\[ "\$baseline_merge_sha" =~ \^\[a-f0-9\]\{40\}\$ \]\]/);
-  assert.match(workflow, /test "\$GITHUB_SHA" = "\$baseline_merge_sha"/);
+  assert.match(workflow, /test "\$GITHUB_REF" = "refs\/heads\/main"/);
+  assert.match(workflow, /test "\$GITHUB_SHA" != "\$baseline_merge_sha"/);
+  assert.match(workflow, /git merge-base --is-ancestor "\$baseline_merge_sha" "\$GITHUB_SHA"/);
+  assert.doesNotMatch(workflow, /test "\$GITHUB_SHA" = "\$baseline_merge_sha"/);
   assert.doesNotMatch(workflow, /pulls\/556/);
   assert.match(workflow, /test "\$GITHUB_SHA" = "\$\(git rev-parse refs\/remotes\/origin\/main\)"/);
   assert.match(workflow, /configure-aws-credentials@v6/);
@@ -342,4 +348,67 @@ test("normal production workflow is fixed, OIDC-only, gated by main, and smoke-t
   assert.match(workflow, /frontend_base=d355a77675d4320c2bfa975ebf3682995ba54a2f/);
   assert.match(workflow, /frontend_digest=sha256:5053d6a6481b3bcacb414adf82c41d7504c4a91a93c8c52dd3b11aae0e01c277/);
   assert.doesNotMatch(workflow, /terraform|broker|component-deployment-state/i);
+});
+
+test("one-time baseline separates current protected main from its reviewed historical lineage", (t) => {
+  const workflow = yaml.load(fs.readFileSync(".github/workflows/production-deploy.yml", "utf8"));
+  const step = workflow.jobs.classify.steps.find(({ name }) => name === "Classify Lane A eligibility");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-baseline-binding-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const output = path.join(directory, "output"), summary = path.join(directory, "summary");
+  const historical = "b".repeat(40), current = "a".repeat(40);
+  const run = ({ githubSha = current, protectedSha = current, checkoutSha = current, historicalSha = historical,
+    githubRef = "refs/heads/main", ancestor = true } = {}) => execFileSync("bash", ["-c", step.run], {
+    encoding: "utf8", env: { ...process.env, PATH: `${directory}:${process.env.PATH}`, GITHUB_EVENT_NAME: "workflow_dispatch",
+      GITHUB_RUN_ATTEMPT: "1", GITHUB_REF: githubRef, GITHUB_SHA: githubSha, BASELINE_REQUESTED: "true", GH_TOKEN: "fixture",
+      GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: summary, FIXTURE_CHECKOUT_SHA: checkoutSha,
+      FIXTURE_PROTECTED_SHA: protectedSha, FIXTURE_HISTORICAL_SHA: historicalSha, FIXTURE_ANCESTOR: String(ancestor) },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  fs.writeFileSync(path.join(directory, "git"), `#!/bin/sh
+case "$1 $2" in
+  "rev-parse HEAD") printf '%s\\n' "$FIXTURE_CHECKOUT_SHA" ;;
+  "rev-parse refs/remotes/origin/main") printf '%s\\n' "$FIXTURE_PROTECTED_SHA" ;;
+  "fetch --no-tags") exit 0 ;;
+  "merge-base --is-ancestor") test "$3" = "$FIXTURE_HISTORICAL_SHA" && test "$4" = "$GITHUB_SHA" && test "$FIXTURE_ANCESTOR" = true ;;
+  *) exit 90 ;;
+esac
+`);
+  fs.writeFileSync(path.join(directory, "gh"), `#!/bin/sh
+test "$1" = api && test "$3" = github.com && test "$4" = repos/T-ej2003/genuine-scan-main/pulls/558 || exit 91
+printf '%s\\n' "$FIXTURE_HISTORICAL_SHA"
+`);
+  fs.chmodSync(path.join(directory, "git"), 0o700); fs.chmodSync(path.join(directory, "gh"), 0o700);
+
+  assert.doesNotThrow(() => run());
+  assert.match(fs.readFileSync(output, "utf8"), /release_class=NORMAL_APPLICATION[\s\S]*baseline=true/);
+  assert.throws(() => run({ protectedSha: "c".repeat(40) }));
+  assert.throws(() => run({ githubSha: historical, checkoutSha: historical }));
+  assert.throws(() => run({ historicalSha: current }));
+  assert.throws(() => run({ githubRef: "refs/heads/not-main" }));
+  assert.throws(() => run({ ancestor: false }));
+});
+
+test("one-time baseline retains exact historical backend and frontend image guards", (t) => {
+  const workflow = yaml.load(fs.readFileSync(".github/workflows/production-deploy.yml", "utf8"));
+  const step = workflow.jobs.deploy.steps.find(({ name }) => name === "Authenticate live deployment baseline");
+  const start = step.run.indexOf('if [[ "$BASELINE_MODE" == "true" ]]; then');
+  const end = step.run.indexOf("\nelse\n", start);
+  const guard = start >= 0 && end > start ? `set -euo pipefail\n${step.run.slice(start, end)}\nfi` : "";
+  assert.ok(guard);
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-baseline-images-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const output = path.join(directory, "output");
+  const expected = {
+    backend_base: "bcec05a421bff28eb2216f399d0a9e7cd2389d5e",
+    backend_digest: `sha256:${"d2a6f641f44e27454a80d502914a9e168c61cdace1201f9d7af9d85a87ea208c"}`,
+    frontend_base: "d355a77675d4320c2bfa975ebf3682995ba54a2f",
+    frontend_digest: `sha256:${"5053d6a6481b3bcacb414adf82c41d7504c4a91a93c8c52dd3b11aae0e01c277"}`,
+  };
+  const run = (values) => { fs.writeFileSync(output, `${Object.entries(values).map(([key, value]) => `${key}=${value}`).join("\n")}\n`);
+    return execFileSync("bash", ["-c", guard], { env: { ...process.env, BASELINE_MODE: "true", GITHUB_OUTPUT: output }, stdio: ["ignore", "pipe", "pipe"] }); };
+  assert.doesNotThrow(() => run(expected));
+  assert.throws(() => run({ ...expected, backend_digest: `sha256:${"0".repeat(64)}` }));
+  assert.throws(() => run({ ...expected, frontend_digest: `sha256:${"0".repeat(64)}` }));
+  assert.throws(() => run({ ...expected, backend_base: "a".repeat(40) }));
 });
