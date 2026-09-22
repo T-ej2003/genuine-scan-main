@@ -45,7 +45,11 @@ export function assertNormalDeploymentNativeRollback(response) {
     const alarms = NORMAL_DEPLOYMENT_ROLLBACK[service?.serviceName];
     assert.ok(alarms && !seen.has(service.serviceName), "Unexpected or duplicate production ECS service.");
     seen.add(service.serviceName);
-    assert.deepEqual(service.deploymentConfiguration?.deploymentCircuitBreaker, { enable: true, rollback: true }, `${service.serviceName} must enable ECS circuit-breaker rollback.`);
+    const circuitBreaker = service.deploymentConfiguration?.deploymentCircuitBreaker;
+    // AWS may add readback fields; the two required rollback properties remain authoritative.
+    assert.ok(circuitBreaker !== null && typeof circuitBreaker === "object" && !Array.isArray(circuitBreaker) && Object.getPrototypeOf(circuitBreaker) === Object.prototype, `${service.serviceName} must have a valid ECS circuit-breaker configuration.`);
+    assert.equal(circuitBreaker.enable, true, `${service.serviceName} must enable the ECS circuit breaker.`);
+    assert.equal(circuitBreaker.rollback, true, `${service.serviceName} must enable ECS circuit-breaker rollback.`);
     assert.equal(service.deploymentConfiguration?.alarms?.enable, true, `${service.serviceName} must enable ECS deployment alarms.`);
     assert.equal(service.deploymentConfiguration?.alarms?.rollback, true, `${service.serviceName} alarms must roll back failed deployments.`);
     assert.deepEqual([...(service.deploymentConfiguration?.alarms?.alarmNames || [])].sort(), [...alarms].sort(), `${service.serviceName} deployment alarms do not match the reviewed contract.`);
