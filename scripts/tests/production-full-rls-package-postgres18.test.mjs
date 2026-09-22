@@ -11,6 +11,8 @@ import { createAppOnlyRequirements, assertAppOnlyRequirements, compareAppOnlyReq
 import { writeStageBPrivateFileExclusive } from "../aws/stage-b-artifact-contract.mjs";
 import { APP_ONLY } from "../aws/production-app-only-contract.mjs";
 import { buildAppOnlyVerifierCommand, authenticateAppOnlyVerifierResult } from "../aws/production-app-only-verifier-command.mjs";
+import { buildPrintingRoutineDeltaCommand, canonicalPrintingRoutineDelta } from "../aws/apply-production-printing-routine-delta.mjs";
+import { classifyProductionRlsCatalogue, hashProductionRlsCatalogue, RLS_PROBE_CLASSIFICATIONS } from "../aws/probe-production-rls-catalogue.mjs";
 import {
   PRODUCTION_RLS_APPROVAL_ALGORITHM,
   canonicalProductionApprovalPayload,
@@ -25,6 +27,14 @@ const targetDatabase = "mscqr_production_rls_green_phase2";
 const administrator = "mscqr_prod_admin";
 const randomMfaSecret = () =>
   [...crypto.randomBytes(32)].map((value) => "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"[value & 31]).join("");
+const printingDeltaRuntime = createRequire(import.meta.url)("../aws/production-printing-routine-delta-executor.cjs");
+const printingRoutine = (source, name) => {
+  const marker = `CREATE OR REPLACE FUNCTION app_rls.${name}(`;
+  assert.equal(source.split(marker).length, 2);
+  const start = source.indexOf(marker), end = source.indexOf("\n$fn$;", start);
+  assert.ok(end > start);
+  return source.slice(start, end + 6).replaceAll("{{APP_ROLE}}", "'mscqr_prd_rls_phase2_app'");
+};
 
 const run = (command, args, options = {}) => {
   const result = spawnSync(command, args, {
@@ -250,6 +260,53 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
       hostile.routines[0].security_definer = !hostile.routines[0].security_definer;
       assert.equal(compareAppOnlyRequirements(hostile, requirements).RLS_FUNCTIONS, "INCOMPATIBLE");
       appOnlyRequirements = requirements;
+
+      const predecessorSource = run("git", ["show", "6d5a48ce7c32b12ce8671731392f92ddfa625a88:backend/src/rls-waves/session-c/c02/printingLifecycle.sql"]);
+      const predecessorSql = canonicalPrintingRoutineDelta().map(({ name }) => printingRoutine(predecessorSource, name)).join("\n");
+      assert.equal(scalar(greenUrl, "SELECT has_schema_privilege('mscqr_prd_rls_phase2_auth_owner','app_rls','CREATE')", "routine owner schema CREATE absent"), "f");
+      assert.throws(() => psql(greenUrl, ["-q", "-c", `BEGIN;${predecessorSql}COMMIT;`], "direct administrator routine replacement"), /permission denied|must be owner/);
+      assert.equal(scalar(greenUrl, "SELECT has_schema_privilege('mscqr_prd_rls_phase2_auth_owner','app_rls','CREATE')", "failed direct replacement preserved privilege"), "f");
+      assert.throws(() => psql(greenUrl, ["-q", "-c", `BEGIN;
+        SET LOCAL ROLE mscqr_prd_rls_phase2_owner;
+        GRANT CREATE ON SCHEMA app_rls TO mscqr_prd_rls_phase2_auth_owner;
+        RESET ROLE;
+        ${predecessorSql}
+        COMMIT;`], "grant without routine-owner role switch"), /permission denied|must be owner/);
+      assert.equal(scalar(greenUrl, "SELECT has_schema_privilege('mscqr_prd_rls_phase2_auth_owner','app_rls','CREATE')", "failed no-switch replacement rolled back privilege"), "f");
+      psql(greenUrl, ["-q", "-c", `BEGIN;
+        SET LOCAL ROLE mscqr_prd_rls_phase2_owner;
+        GRANT CREATE ON SCHEMA app_rls TO mscqr_prd_rls_phase2_auth_owner;
+        RESET ROLE;
+        SET LOCAL ROLE mscqr_prd_rls_phase2_auth_owner;
+        ${predecessorSql}
+        RESET ROLE;
+        SET LOCAL ROLE mscqr_prd_rls_phase2_owner;
+        REVOKE CREATE ON SCHEMA app_rls FROM mscqr_prd_rls_phase2_auth_owner;
+        RESET ROLE;
+        COMMIT;`], "install exact printing-routine predecessor through minimum privilege bridge");
+      assert.equal(scalar(greenUrl, "SELECT has_schema_privilege('mscqr_prd_rls_phase2_auth_owner','app_rls','CREATE')", "predecessor privilege restored"), "f");
+      const builtDelta = buildPrintingRoutineDeltaCommand({ sourceSha, requirements, databaseHostname: adminUrl.hostname });
+      const deltaInput = printingDeltaRuntime.decodeInput(builtDelta.command[2], builtDelta.command[3]).input;
+      const administratorClient = new PrismaClient({ datasources: { db: { url: greenUrl } } });
+      try {
+        const classifyLive = async () => classifyProductionRlsCatalogue(hashProductionRlsCatalogue(await collectAppOnlyDatabaseCatalogue(verifier)), requirements).classification;
+        assert.equal(await classifyLive(), RLS_PROBE_CLASSIFICATIONS.EXPECTED);
+        for (const failStage of ["after-grant", "after-owner-role", "after-routine-1", "after-routine-2", "after-routine-3",
+          "before-revoke", "after-revoke", "after-successor-readback"]) {
+          await assert.rejects(administratorClient.$transaction((tx) => printingDeltaRuntime.executePrintingRoutineDeltaTransaction({
+            tx, input: deltaInput, checkpoint: async (stage) => { if (stage === failStage) throw new Error(`injected ${stage} failure`); },
+          }), { maxWait: 10000, timeout: 120000 }), new RegExp(`injected ${failStage} failure`));
+          assert.equal(scalar(greenUrl, "SELECT has_schema_privilege('mscqr_prd_rls_phase2_auth_owner','app_rls','CREATE')", `${failStage} privilege rollback`), "f");
+          assert.equal(await classifyLive(), RLS_PROBE_CLASSIFICATIONS.EXPECTED);
+        }
+        const applied = await administratorClient.$transaction((tx) => printingDeltaRuntime.executePrintingRoutineDeltaTransaction({ tx, input: deltaInput }), { maxWait: 10000, timeout: 120000 });
+        assert.deepEqual(applied, { status: "APPLIED", writeCount: 3 });
+        assert.equal(scalar(greenUrl, "SELECT has_schema_privilege('mscqr_prd_rls_phase2_auth_owner','app_rls','CREATE')", "successful privilege restoration"), "f");
+        assert.equal(await classifyLive(), RLS_PROBE_CLASSIFICATIONS.MATCH);
+        const converged = await administratorClient.$transaction((tx) => printingDeltaRuntime.executePrintingRoutineDeltaTransaction({ tx, input: deltaInput }), { maxWait: 10000, timeout: 120000 });
+        assert.deepEqual(converged, { status: "ALREADY_CONVERGED", writeCount: 0 });
+        assert.equal(scalar(greenUrl, "SELECT has_schema_privilege('mscqr_prd_rls_phase2_auth_owner','app_rls','CREATE')", "already-converged privilege unchanged"), "f");
+      } finally { await administratorClient.$disconnect(); }
     } finally { await verifier.$disconnect(); }
     restoreDisposableMemberships();
     rdsMembershipsNormalized = false;

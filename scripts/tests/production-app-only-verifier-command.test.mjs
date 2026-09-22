@@ -47,6 +47,7 @@ test("verifier registration is the exact source-owned read-only boundary with fi
   const input = { requirements, identity, repositoryRoot, databaseSecretArn };
   const { definition } = buildAppOnlyVerifierDefinition(input);
   assert.doesNotThrow(() => new Function(definition.containerDefinitions[0].command[1]));
+  assert.match(definition.containerDefinitions[0].command[1], /async function collectAppOnlyDatabaseCatalogueRows/);
   const taskDefinitionArn = `arn:aws:ecs:${APP_ONLY.region}:${APP_ONLY.account}:task-definition/${APP_ONLY_VERIFIER.family}:17`;
   const observed = { ...structuredClone(definition), taskDefinitionArn, status: "ACTIVE", revision: 17, volumes: [], placementConstraints: [], enableFaultInjection: false };
   observed.containerDefinitions[0].cpu = 0;

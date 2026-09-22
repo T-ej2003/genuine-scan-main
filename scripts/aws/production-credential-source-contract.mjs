@@ -123,9 +123,10 @@ export function createProductionGithubCommandRunner({ env = process.env, exec = 
   return (command, args, { encoding = "utf8", maxBuffer } = {}) => {
     if (command === "gh") {
       const endpoint = args?.[1];
-      const allowedFlags = new Set(["--paginate", "--slurp"]);
-      const allowedEndpoint = new RegExp(`^repos/T-ej2003/genuine-scan-main/(?:branches/main|environments/(?:${GITHUB_ENVIRONMENT_ENDPOINTS.join("|")})|environments/production-mixed-dual-slot-recovery/(?:deployment-branch-policies|deployment_protection_rules|secrets)|actions/(?:runs/[1-9][0-9]*(?:/(?:approvals|artifacts))?|artifacts/[1-9][0-9]*/zip))$`).test(endpoint || "");
-      if (!Array.isArray(args) || args[0] !== "api" || !allowedEndpoint || args.slice(2).some((value) => !allowedFlags.has(value))) throw new Error("Production GitHub runner permits only the reviewed read-only authorization API calls.");
+      const allowedEndpoint = new RegExp(`^repos/T-ej2003/genuine-scan-main/(?:branches/main|environments/(?:${GITHUB_ENVIRONMENT_ENDPOINTS.join("|")})|environments/production-mixed-dual-slot-recovery/(?:deployment-branch-policies|deployment_protection_rules|secrets)|actions/(?:workflows/produce-production-app-only-requirements\\.yml/runs\\?branch=main&event=workflow_dispatch&status=success&per_page=100|runs/[1-9][0-9]*(?:/approvals|/artifacts(?:\\?per_page=100)?)?|artifacts/[1-9][0-9]*/zip))$`).test(endpoint || "");
+      const paginatedEndpoint = new RegExp(`^repos/T-ej2003/genuine-scan-main/(?:environments/production-mixed-dual-slot-recovery/deployment-branch-policies|actions/(?:workflows/produce-production-app-only-requirements\\.yml/runs\\?branch=main&event=workflow_dispatch&status=success&per_page=100|runs/[1-9][0-9]*/(?:approvals|artifacts(?:\\?per_page=100)?)))$`).test(endpoint || "");
+      const flags = args?.slice(2) || [], allowedFlags = flags.length === 0 || paginatedEndpoint && flags.length === 2 && flags[0] === "--paginate" && flags[1] === "--slurp";
+      if (!Array.isArray(args) || args[0] !== "api" || !allowedEndpoint || !allowedFlags) throw new Error("Production GitHub runner permits only the reviewed read-only authorization API calls.");
       const executable = exec === execFileSync ? productionGithubExecutable() : "gh";
       return exec(executable, args, { cwd: process.cwd(), env: githubEnvironment, encoding, stdio: ["ignore", "pipe", "pipe"], ...(maxBuffer === undefined ? {} : { maxBuffer }) });
     }

@@ -1,9 +1,7 @@
 // This function is also serialized as the fixed, protected-source task command.
 // It has no CLI/SQL/command overrides and requires one explicit Prisma
 // transaction, avoiding pool-dependent BEGIN/query/COMMIT on different sessions.
-export async function collectAppOnlyDatabaseCatalogue(client) {
-  return client.$transaction(async (tx) => {
-    await tx.$executeRawUnsafe("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
+export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity = () => {}) {
     const [identity] = await tx.$queryRawUnsafe(`SELECT current_user AS role, session_user AS session_role,
       current_database() AS database, current_setting('transaction_read_only') AS read_only,
       current_setting('default_transaction_read_only') AS default_read_only,
@@ -18,12 +16,7 @@ export async function collectAppOnlyDatabaseCatalogue(client) {
         AND (n.nspowner=r.oid OR pg_catalog.has_schema_privilege(r.oid,n.oid,'CREATE'))) AS schema_write,
       pg_catalog.has_database_privilege(current_user,current_database(),'CREATE,TEMPORARY') AS database_write
       FROM pg_catalog.pg_roles r WHERE r.rolname=current_user`);
-    if (!identity || identity.role !== "mscqr_prod_rls_canary_read" || identity.session_role !== identity.role
-      || identity.database !== "mscqr_production_rls_green_phase2" || identity.read_only !== "on"
-      || identity.default_read_only !== "on"
-      || ["rolsuper", "rolinherit", "rolcreaterole", "rolcreatedb", "rolreplication", "rolbypassrls", "memberships", "write_privileges", "schema_write", "database_write"].some((key) => identity[key] !== false)) {
-      throw new Error("Verifier database identity is not the restricted read-only contract");
-    }
+    validateIdentity(identity);
     // Metadata only: never invoke application functions, including SECURITY
     // DEFINER canaries. Qualify all catalogue functions and relations.
     const [routines] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.schema,x.name,x.arguments),'[]'::jsonb) AS rows FROM (
@@ -95,6 +88,19 @@ export async function collectAppOnlyDatabaseCatalogue(client) {
         OR r.rolname='mscqr_prod_rls_canary_read'
     ) x`);
     return { identity, routines: routines.rows, tables: tables.rows, policies: policies.rows, schemas: schemas.rows, roles: roles.rows };
+}
+
+export async function collectAppOnlyDatabaseCatalogue(client) {
+  return client.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
+    return collectAppOnlyDatabaseCatalogueRows(tx, (identity) => {
+      if (!identity || identity.role !== "mscqr_prod_rls_canary_read" || identity.session_role !== identity.role
+      || identity.database !== "mscqr_production_rls_green_phase2" || identity.read_only !== "on"
+      || identity.default_read_only !== "on"
+      || ["rolsuper", "rolinherit", "rolcreaterole", "rolcreatedb", "rolreplication", "rolbypassrls", "memberships", "write_privileges", "schema_write", "database_write"].some((key) => identity[key] !== false)) {
+        throw new Error("Verifier database identity is not the restricted read-only contract");
+      }
+    });
   }, { maxWait: 5000, timeout: 30000 });
 }
 

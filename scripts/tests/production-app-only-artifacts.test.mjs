@@ -50,7 +50,7 @@ test("download authenticates and consumes the same immutable bytes in private st
   const githubRun = (command, args) => {
     calls.push(args[1]); assert.equal(command, "gh");
     if (args[1].endsWith("/zip")) return bytes;
-    if (args[1].endsWith("/artifacts")) return JSON.stringify([{ artifacts: [input.artifact] }]);
+    if (args[1].endsWith("/artifacts?per_page=100")) return JSON.stringify([{ total_count: 1, artifacts: [input.artifact] }]);
     return JSON.stringify(input.run);
   };
   const result = downloadAppOnlyArtifact({ ...input, githubRun, repositoryRoot: process.cwd() });
@@ -71,13 +71,13 @@ test("artifact expiry, replacement and run rerun during download fail before mat
     let downloaded = false;
     const githubRun = (_command, args) => {
       if (args[1].endsWith("/zip")) { downloaded = true; return bytes; }
-      if (args[1].endsWith("/artifacts")) {
+      if (args[1].endsWith("/artifacts?per_page=100")) {
         const artifact = structuredClone(input.artifact);
         if (downloaded && attack === "expired") artifact.expired = true;
         if (downloaded && attack === "replacement") artifact.id++;
         const artifacts = downloaded && attack === "deleted" ? [] : [artifact];
         if (downloaded && attack === "duplicate") artifacts.push({ ...artifact, id: 789 });
-        return JSON.stringify([{ artifacts }]);
+        return JSON.stringify([{ total_count: artifacts.length, artifacts }]);
       }
       return JSON.stringify({ ...input.run, run_attempt: downloaded && attack === "rerun" ? 2 : 1 });
     };

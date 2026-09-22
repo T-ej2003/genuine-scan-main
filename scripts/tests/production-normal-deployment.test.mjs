@@ -300,9 +300,12 @@ test("normal production workflow is fixed, OIDC-only, gated by main, and smoke-t
   assert.match(workflow, /branches: \[main\]/);
   assert.match(workflow, /workflow_dispatch:[\s\S]*baseline:/);
   assert.match(workflow, /test "\$GITHUB_RUN_ATTEMPT" = "1"/);
-  assert.match(workflow, /repos\/\$GITHUB_REPOSITORY\/pulls\/556/);
-  assert.match(workflow, /select\(\.merged == true and \.base\.ref == "main"\)/);
-  assert.match(workflow, /test "\$baseline_merge_sha" = "\$GITHUB_SHA"/);
+  assert.match(workflow, /GH_HOST=github\.com gh api --hostname github\.com repos\/T-ej2003\/genuine-scan-main\/pulls\/558/);
+  assert.match(workflow, /\.merged_at != null and \.base\.ref == "main" and \.base\.repo\.full_name == "T-ej2003\/genuine-scan-main" and \.head\.repo\.full_name == "T-ej2003\/genuine-scan-main"/);
+  assert.match(workflow, /\[\[ "\$baseline_merge_sha" =~ \^\[a-f0-9\]\{40\}\$ \]\]/);
+  assert.match(workflow, /test "\$GITHUB_SHA" = "\$baseline_merge_sha"/);
+  assert.doesNotMatch(workflow, /pulls\/556/);
+  assert.match(workflow, /test "\$GITHUB_SHA" = "\$\(git rev-parse refs\/remotes\/origin\/main\)"/);
   assert.match(workflow, /configure-aws-credentials@v6/);
   assert.match(workflow, /MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-release-deployer/);
   assert.match(workflow, /SMOKE_AUTHENTICATED_REQUIRED: "true"/);
