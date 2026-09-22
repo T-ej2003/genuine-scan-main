@@ -12,6 +12,7 @@ name: Normal Production Deployment
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: production-deploy
@@ -51,9 +52,11 @@ jobs:
           if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
             test "$BASELINE_REQUESTED" = "true"
             test "$GITHUB_RUN_ATTEMPT" = "1"
-            # The exact protected-main tip is authenticated above. The deploy
-            # job separately requires both historical image digests, making
-            # this route ineligible after its first successful activation.
+            baseline_merge_sha="$(GH_HOST=github.com gh api --hostname github.com repos/T-ej2003/genuine-scan-main/pulls/558 --jq 'select(.merged_at != null and .base.ref == "main" and .base.repo.full_name == "T-ej2003/genuine-scan-main" and .head.repo.full_name == "T-ej2003/genuine-scan-main") | .merge_commit_sha')"
+            [[ "$baseline_merge_sha" =~ ^[a-f0-9]{40}$ ]]
+            test "$GITHUB_SHA" = "$baseline_merge_sha"
+            # The exact reviewed PR merge and both historical image digests
+            # make this route ineligible after main or either service advances.
             printf 'release_class=NORMAL_APPLICATION\nbackend=true\nfrontend=true\nbaseline=true\n' >> "$GITHUB_OUTPUT"
             echo "### One-time reviewed runtime baseline" >> "$GITHUB_STEP_SUMMARY"
             exit 0
