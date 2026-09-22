@@ -92,14 +92,22 @@ export function authenticateProductionRlsProbeResult(message, { sourceSha, requi
 }
 
 const parse = (value) => JSON.parse(Buffer.isBuffer(value) ? value.toString("utf8") : value);
-export function authenticateCanonicalProductionRequirements({ sourceSha, requirementsReference, repositoryRoot = root, githubRun = createProductionGithubCommandRunner() }) {
+export function authenticateCanonicalProductionRequirementsArtifact({ sourceSha, requirementsReference, repositoryRoot = root, githubRun = createProductionGithubCommandRunner() }) {
   assert.equal(requirementsReference.sourceSha, sourceSha, "Canonical requirements source does not match protected source");
   const branch = parse(githubRun("gh", ["api", "repos/T-ej2003/genuine-scan-main/branches/main"]));
   assert.equal(branch.commit?.sha, sourceSha, "Canonical requirements source is not current protected main");
   const artifact = downloadAppOnlyArtifact({ kind: "requirements", reference: requirementsReference, repositoryRoot, githubRun });
-  const requirements = assertAppOnlyRequirements(JSON.parse(artifact.bytes), { sourceSha, candidateSourceSha: sourceSha, repositoryRoot });
+  const parsed = JSON.parse(artifact.bytes);
+  assert.match(parsed.candidateSourceSha || "", /^[a-f0-9]{40}$/, "Canonical requirements candidate source is invalid");
+  const requirements = assertAppOnlyRequirements(parsed, { sourceSha, candidateSourceSha: parsed.candidateSourceSha, repositoryRoot });
   assert.equal(artifact.sha256, requirementsReference.fileSha256);
   return Object.freeze({ requirements, provenance: Object.freeze({ runId: String(artifact.run.id), runAttempt: String(artifact.run.run_attempt), artifactId: String(artifact.artifact.id), artifactDigest: artifact.artifact.digest, fileSha256: artifact.sha256 }) });
+}
+
+export function authenticateCanonicalProductionRequirements(options) {
+  const authenticated = authenticateCanonicalProductionRequirementsArtifact(options);
+  assert.equal(authenticated.requirements.candidateSourceSha, options.sourceSha, "Canonical requirements candidate does not match protected source");
+  return authenticated;
 }
 
 export async function runProductionRlsCatalogueProbe({ sourceSha, requirementsReference, awsProfile, run = (command, args, options) => execFileSync(command, args, options), githubRun = createProductionGithubCommandRunner(), wait = sleep, repositoryRoot = root, env = process.env }) {

@@ -16,6 +16,7 @@ import {
 } from "../aws/apply-production-printing-routine-delta.mjs";
 import { EXPECTED_PRINTING_ROUTINE_PREDECESSORS, RLS_PROBE_CLASSIFICATIONS } from "../aws/probe-production-rls-catalogue.mjs";
 import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
+import { createAppOnlyRequirements } from "../aws/production-app-only-requirements.mjs";
 
 const runtime = createRequire(import.meta.url)("../aws/production-printing-routine-delta-executor.cjs");
 
@@ -37,18 +38,46 @@ const identity = { role: PRINTING_ROUTINE_DELTA.administrator, session_role: PRI
 const owners = identities.map((value) => ({ identity: value, owner: PRINTING_ROUTINE_DELTA.ownerRole,
   schema_owner: "mscqr_prd_rls_phase2_owner", owner_set: true, schema_owner_set: true, owner_schema_create: false }));
 
-const artifactFixture = () => {
-  const bytes = Buffer.from(JSON.stringify(requirements));
+const zipRequirements = (value) => {
+  const bytes = Buffer.from(JSON.stringify(value));
   const archive = execFileSync("/usr/bin/python3", ["-c", `import io,sys,zipfile
 b=io.BytesIO()
 with zipfile.ZipFile(b,'w',compression=zipfile.ZIP_DEFLATED) as z:
  i=zipfile.ZipInfo('app-only-requirements.json');i.create_system=3;i.external_attr=33152<<16
  z.writestr(i,sys.stdin.buffer.read(),compress_type=zipfile.ZIP_DEFLATED)
 sys.stdout.buffer.write(b.getvalue())`], { input: bytes });
-  const run = { id: 123, run_attempt: 1, head_sha: contract.sourceSha, head_branch: "main", path: ".github/workflows/produce-production-app-only-requirements.yml", event: "workflow_dispatch", status: "completed", conclusion: "success", repository: { id: 9, full_name: "T-ej2003/genuine-scan-main" }, head_repository: { id: 9, full_name: "T-ej2003/genuine-scan-main" } };
-  const artifact = { id: 456, name: "production-app-only-requirements", expired: false, digest: `sha256:${hash(archive)}`, workflow_run: { id: 123, head_sha: contract.sourceSha, repository_id: 9, head_repository_id: 9 } };
-  const githubRun = (_command, args) => args[1].includes("/workflows/") ? JSON.stringify({ workflow_runs: [run] }) : args[1].endsWith("/artifacts") ? JSON.stringify({ artifacts: [artifact] }) : archive;
-  return { archive, run, artifact, githubRun };
+  return { bytes, archive };
+};
+const producerRequirements = (candidateSourceSha = contract.sourceSha) => createAppOnlyRequirements({ repositoryRoot: process.cwd(), sourceSha: contract.sourceSha, candidateSourceSha,
+  catalogue: { routines: identities.map((value) => { const match = /^(.*?)\.(.*?)\((.*)\)$/.exec(value); return { schema: match[1], name: match[2], arguments: match[3] }; }),
+    tables: [{ name: "User" }], policies: [{ table: "User", name: "tenant" }], schemas: [{ name: "app_rls" }], roles: [{ name: "mscqr_prd_rls_phase2_app" }] }, packageChecksums: { fixture: true } });
+const artifactFixture = ({ records = [{ runId: 123, artifactId: 456, candidateSourceSha: contract.sourceSha }], runPages, artifactPages = {} } = {}) => {
+  const values = records.map(({ runId, artifactId, candidateSourceSha, requirements: supplied, ...changes }) => {
+    const requirement = supplied || producerRequirements(candidateSourceSha);
+    const { bytes, archive } = zipRequirements(requirement);
+    const run = { id: runId, run_attempt: 1, head_sha: contract.sourceSha, head_branch: "main", path: ".github/workflows/produce-production-app-only-requirements.yml", event: "workflow_dispatch", status: "completed", conclusion: "success", repository: { id: 9, full_name: "T-ej2003/genuine-scan-main" }, head_repository: { id: 9, full_name: "T-ej2003/genuine-scan-main" }, ...(changes.run || {}) };
+    const artifact = { id: artifactId, name: "production-app-only-requirements", expired: false, digest: `sha256:${hash(archive)}`, size_in_bytes: archive.length, workflow_run: { id: runId, head_sha: contract.sourceSha, repository_id: 9, head_repository_id: 9 }, ...(changes.artifact || {}) };
+    return { bytes, archive, requirements: requirement, run, artifact };
+  });
+  const byRun = new Map(values.map((value) => [String(value.run.id), value]));
+  const byArtifact = new Map(values.map((value) => [String(value.artifact.id), value]));
+  const pages = runPages || [{ total_count: values.length, workflow_runs: values.map(({ run }) => run) }];
+  const githubRun = (_command, args) => {
+    const endpoint = args[1];
+    if (endpoint.includes("/workflows/")) return JSON.stringify(pages);
+    if (endpoint.endsWith("/branches/main")) return JSON.stringify({ commit: { sha: contract.sourceSha } });
+    const runMatch = /\/actions\/runs\/([0-9]+)$/.exec(endpoint);
+    if (runMatch) return JSON.stringify(byRun.get(runMatch[1])?.run);
+    const artifactsMatch = /\/actions\/runs\/([0-9]+)\/artifacts\?per_page=100$/.exec(endpoint);
+    if (artifactsMatch) {
+      const value = byRun.get(artifactsMatch[1]);
+      return JSON.stringify(artifactPages[artifactsMatch[1]] || [{ total_count: value ? 1 : 0, artifacts: value ? [value.artifact] : [] }]);
+    }
+    const archiveMatch = /\/actions\/artifacts\/([0-9]+)\/zip$/.exec(endpoint);
+    if (archiveMatch) return byArtifact.get(archiveMatch[1])?.archive;
+    throw new Error(`Unexpected fixture endpoint: ${endpoint}`);
+  };
+  return { values, pages, githubRun };
 };
 
 const harness = ({ classifications = [RLS_PROBE_CLASSIFICATIONS.EXPECTED, RLS_PROBE_CLASSIFICATIONS.MATCH], ownerRows = owners, failCreate = 0,
@@ -86,17 +115,90 @@ test("canonical protected source yields exactly the three fixed routine replacem
 
 test("requirements discovery accepts only the exact protected producer run and immutable artifact", () => {
   const fixture = artifactFixture();
+  const [{ run, artifact, bytes }] = fixture.values;
   assert.deepEqual(discoverCanonicalRequirementsReference({ sourceSha: contract.sourceSha, githubRun: fixture.githubRun }), {
-    sourceSha: contract.sourceSha, runId: "123", runAttempt: "1", artifactId: "456", artifactDigest: fixture.artifact.digest, fileSha256: hash(Buffer.from(JSON.stringify(requirements))),
+    sourceSha: contract.sourceSha, runId: "123", runAttempt: "1", artifactId: "456", artifactDigest: artifact.digest, fileSha256: hash(bytes),
   });
-  for (const change of [
-    (value) => { value.run.head_sha = "0".repeat(40); }, (value) => { value.run.path = ".github/workflows/other.yml"; },
-    (value) => { value.artifact.expired = true; }, (value) => { value.artifact.digest = `sha256:${"0".repeat(64)}`; },
-    (value) => { value.artifact.workflow_run.repository_id = 8; },
+  assert.equal(run.id, 123);
+});
+
+test("requirements discovery skips authenticated different candidates and deterministically selects the newest exact match", () => {
+  const different = "e".repeat(40);
+  const mixed = artifactFixture({ records: [
+    { runId: 300, artifactId: 600, candidateSourceSha: different },
+    { runId: 100, artifactId: 400, candidateSourceSha: contract.sourceSha },
+    { runId: 200, artifactId: 500, candidateSourceSha: different },
+  ] });
+  assert.equal(discoverCanonicalRequirementsReference({ sourceSha: contract.sourceSha, githubRun: mixed.githubRun }).runId, "100");
+  const exact = artifactFixture({ records: [
+    { runId: 100, artifactId: 400, candidateSourceSha: contract.sourceSha },
+    { runId: 300, artifactId: 600, candidateSourceSha: contract.sourceSha },
+    { runId: 200, artifactId: 500, candidateSourceSha: contract.sourceSha },
+  ], runPages: [{ total_count: 3, workflow_runs: [] }] });
+  exact.pages[0].workflow_runs = [exact.values[0].run, exact.values[2].run, exact.values[1].run];
+  assert.equal(discoverCanonicalRequirementsReference({ sourceSha: contract.sourceSha, githubRun: exact.githubRun }).runId, "300");
+});
+
+test("requirements discovery is complete across pages and rejects partial, duplicate, or exhausted searches", () => {
+  const records = [{ runId: 300, artifactId: 600, candidateSourceSha: "e".repeat(40) }, { runId: 100, artifactId: 400, candidateSourceSha: contract.sourceSha }];
+  const paged = artifactFixture({ records });
+  paged.pages.splice(0, 1, { total_count: 2, workflow_runs: [paged.values[0].run] }, { total_count: 2, workflow_runs: [paged.values[1].run] });
+  assert.equal(discoverCanonicalRequirementsReference({ sourceSha: contract.sourceSha, githubRun: paged.githubRun }).runId, "100");
+  for (const runPages of [
+    [{ total_count: 2, workflow_runs: [paged.values[0].run] }],
+    [{ total_count: 2, workflow_runs: [paged.values[0].run, paged.values[0].run] }],
+    Array.from({ length: 11 }, () => ({ total_count: 0, workflow_runs: [] })),
+  ]) assert.throws(() => discoverCanonicalRequirementsReference({ sourceSha: contract.sourceSha, githubRun: artifactFixture({ records, runPages }).githubRun }));
+  const noMatch = artifactFixture({ records: [{ runId: 300, artifactId: 600, candidateSourceSha: "e".repeat(40) }] });
+  assert.throws(() => discoverCanonicalRequirementsReference({ sourceSha: contract.sourceSha, githubRun: noMatch.githubRun }), /absent or ambiguous/);
+  const partialArtifacts = artifactFixture();
+  const partialArtifact = partialArtifacts.values[0].artifact;
+  assert.throws(() => discoverCanonicalRequirementsReference({ sourceSha: contract.sourceSha,
+    githubRun: artifactFixture({ artifactPages: { "123": [{ total_count: 2, artifacts: [partialArtifact] }] } }).githubRun }), /Partial artifacts pagination/);
+});
+
+test("requirements discovery fails closed for malformed or tampered eligible artifacts", () => {
+  for (const attack of [
+    ({ run }) => { run.path = ".github/workflows/other.yml"; },
+    ({ run }) => { run.head_sha = "0".repeat(40); },
+    ({ artifact }) => { artifact.digest = `sha256:${"0".repeat(64)}`; },
+    ({ artifact }) => { artifact.workflow_run.repository_id = 8; },
+    ({ artifact }) => { artifact.workflow_run.id = 999; },
   ]) {
-    const changed = artifactFixture(); change(changed);
-    assert.throws(() => discoverCanonicalRequirementsReference({ sourceSha: contract.sourceSha, githubRun: changed.githubRun }));
+    const fixture = artifactFixture(); attack(fixture.values[0]);
+    assert.throws(() => discoverCanonicalRequirementsReference({ sourceSha: contract.sourceSha, githubRun: fixture.githubRun }));
   }
+  for (const attack of [
+    (value) => { delete value.candidateSourceSha; },
+    (value) => { value.sourceSha = "0".repeat(40); },
+    (value) => { value.sourceContractSha256 = "0".repeat(64); },
+  ]) {
+    const changed = producerRequirements(); attack(changed);
+    const { requirementsSha256: _old, ...body } = changed; changed.requirementsSha256 = canonicalSha256(body);
+    const fixture = artifactFixture({ records: [{ runId: 123, artifactId: 456, requirements: changed }] });
+    assert.throws(() => discoverCanonicalRequirementsReference({ sourceSha: contract.sourceSha, githubRun: fixture.githubRun }));
+  }
+  const duplicate = artifactFixture(); duplicate.pages[0].workflow_runs.push(duplicate.values[0].run); duplicate.pages[0].total_count = 2;
+  assert.throws(() => discoverCanonicalRequirementsReference({ sourceSha: contract.sourceSha, githubRun: duplicate.githubRun }), /Duplicate/);
+  const first = artifactFixture().values[0];
+  const pages = [{ total_count: 2, artifacts: [first.artifact, { ...first.artifact, id: 789 }] }];
+  assert.throws(() => discoverCanonicalRequirementsReference({ sourceSha: contract.sourceSha, githubRun: artifactFixture({ artifactPages: { "123": pages } }).githubRun }), /Ambiguous/);
+  const interrupted = artifactFixture();
+  assert.throws(() => discoverCanonicalRequirementsReference({ sourceSha: contract.sourceSha, githubRun: (command, args, options) => {
+    if (args[1].endsWith("/zip")) throw new Error("network interrupted");
+    return interrupted.githubRun(command, args, options);
+  } }), /network interrupted/);
+  let downloads = 0;
+  assert.throws(() => discoverCanonicalRequirementsReference({ sourceSha: contract.sourceSha, githubRun: (command, args, options) => {
+    if (args[1].endsWith("/zip") && ++downloads === 2) return Buffer.from("substituted after selection");
+    return interrupted.githubRun(command, args, options);
+  } }));
+  const matchingInvalid = artifactFixture({ records: [
+    { runId: 300, artifactId: 600, candidateSourceSha: contract.sourceSha },
+    { runId: 100, artifactId: 400, candidateSourceSha: contract.sourceSha },
+  ] });
+  matchingInvalid.values[0].artifact.digest = `sha256:${"0".repeat(64)}`;
+  assert.throws(() => discoverCanonicalRequirementsReference({ sourceSha: contract.sourceSha, githubRun: matchingInvalid.githubRun }));
 });
 
 test("exact predecessor mutates exactly three routines once and authenticates the successor", async () => {

@@ -39,7 +39,7 @@ function fixture() {
   const githubRun = (command, args) => {
     assert.equal(command, "gh");
     const item = args[1].includes(`/runs/${publication.reference.runId}`) || args[1].includes("/artifacts/501/") ? publication : auth;
-    return args[1].endsWith("/zip") ? item.archive : JSON.stringify(args[1].endsWith("/artifacts") ? [{ artifacts: [item.artifact] }] : item.run);
+    return args[1].endsWith("/zip") ? item.archive : JSON.stringify(args[1].endsWith("/artifacts?per_page=100") ? [{ total_count: 1, artifacts: [item.artifact] }] : item.run);
   };
   const calls = [];
   const run = (args) => {

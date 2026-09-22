@@ -10,12 +10,12 @@ import { parseArgs } from "node:util";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { APP_ONLY } from "./production-app-only-contract.mjs";
 import { appOnlyVerifierNetwork } from "./production-app-only-policy.mjs";
-import { readAppOnlyArtifactArchive } from "./production-app-only-artifacts.mjs";
+import { completeGithubCollection, readAppOnlyArtifactArchive } from "./production-app-only-artifacts.mjs";
 import { canonicalJson, canonicalSha256, STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { assertEcsTaskDefinitionReadback } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/ecs-task-definition-readback.mjs";
 import { assertProtectedCheckout } from "./prepare-production-initial-activation-reconciler-installation.mjs";
 import { createProductionAwsCredentialEnvironment, createProductionGithubCommandRunner, productionAwsExecutable, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
-import { authenticateCanonicalProductionRequirements, EXPECTED_PRINTING_ROUTINE_PREDECESSORS, EXPECTED_PRINTING_ROUTINES, hashProductionRlsCatalogue, RLS_PROBE_CLASSIFICATIONS } from "./probe-production-rls-catalogue.mjs";
+import { authenticateCanonicalProductionRequirements, authenticateCanonicalProductionRequirementsArtifact, EXPECTED_PRINTING_ROUTINE_PREDECESSORS, EXPECTED_PRINTING_ROUTINES, hashProductionRlsCatalogue, RLS_PROBE_CLASSIFICATIONS } from "./probe-production-rls-catalogue.mjs";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const require = createRequire(import.meta.url);
@@ -44,29 +44,38 @@ export const PRINTING_ROUTINE_DELTA = Object.freeze({
   routineNames: EXPECTED_PRINTING_ROUTINES,
 });
 
-export function discoverCanonicalRequirementsReference({ sourceSha, githubRun = createProductionGithubCommandRunner() }) {
+export function discoverCanonicalRequirementsReference({ sourceSha, repositoryRoot = root, githubRun = createProductionGithubCommandRunner() }) {
   assert.match(sourceSha || "", /^[a-f0-9]{40}$/);
-  const get = (endpoint, options = {}) => parse(githubRun("gh", ["api", endpoint], { maxBuffer: 8 * 1024 * 1024, ...options }));
-  const listed = get(`repos/${repository}/actions/workflows/produce-production-app-only-requirements.yml/runs?branch=main&event=workflow_dispatch&status=success&per_page=100`);
-  const runs = (listed.workflow_runs || []).filter((run) => run.head_sha === sourceSha && run.head_branch === "main"
-    && run.path === ".github/workflows/produce-production-app-only-requirements.yml" && run.event === "workflow_dispatch"
-    && run.status === "completed" && run.conclusion === "success" && run.repository?.full_name === repository
-    && run.head_repository?.full_name === repository && run.repository.id === run.head_repository.id)
-    .sort((left, right) => Number(right.id) - Number(left.id));
+  const get = (endpoint, { flags = [], ...options } = {}) => parse(githubRun("gh", ["api", endpoint, ...flags], { maxBuffer: 8 * 1024 * 1024, ...options }));
+  const endpoint = `repos/${repository}/actions/workflows/produce-production-app-only-requirements.yml/runs?branch=main&event=workflow_dispatch&status=success&per_page=100`;
+  const listedRuns = completeGithubCollection(get(endpoint, { flags: ["--paginate", "--slurp"] }), "workflow_runs");
+  for (const run of listedRuns) {
+    assert.match(String(run.id), /^[1-9][0-9]*$/); assert.match(String(run.run_attempt), /^[1-9][0-9]*$/);
+    assert.equal(run.head_branch, "main"); assert.equal(run.path, ".github/workflows/produce-production-app-only-requirements.yml");
+    assert.equal(run.event, "workflow_dispatch"); assert.equal(run.status, "completed"); assert.equal(run.conclusion, "success");
+    assert.equal(run.repository?.full_name, repository); assert.equal(run.head_repository?.full_name, repository);
+    assert.ok(Number.isSafeInteger(run.repository?.id) && run.repository.id > 0); assert.equal(run.repository.id, run.head_repository.id);
+  }
+  const runs = listedRuns.filter((run) => run.head_sha === sourceSha)
+    .sort((left, right) => BigInt(right.id) > BigInt(left.id) ? 1 : BigInt(right.id) < BigInt(left.id) ? -1 : 0);
   assert.ok(runs.length > 0, "No successful canonical requirements producer exists for protected main");
   for (const run of runs) {
-    const artifacts = get(`repos/${repository}/actions/runs/${run.id}/artifacts`).artifacts || [];
-    const matches = artifacts.filter((artifact) => artifact.name === "production-app-only-requirements" && !artifact.expired
-      && artifact.workflow_run?.id === run.id && artifact.workflow_run?.head_sha === sourceSha
-      && artifact.workflow_run?.repository_id === run.repository.id && artifact.workflow_run?.head_repository_id === run.head_repository.id);
-    if (matches.length !== 1) continue;
+    const artifactPages = get(`repos/${repository}/actions/runs/${run.id}/artifacts?per_page=100`, { flags: ["--paginate", "--slurp"] });
+    const artifacts = completeGithubCollection(artifactPages, "artifacts");
+    const matches = artifacts.filter((artifact) => artifact.name === "production-app-only-requirements" && !artifact.expired);
+    if (matches.length === 0) continue;
+    assert.equal(matches.length, 1, "Ambiguous canonical requirements artifact");
     const artifact = matches[0];
     assert.match(artifact.digest || "", /^sha256:[a-f0-9]{64}$/);
+    const reference = Object.freeze({ sourceSha, runId: String(run.id), runAttempt: String(run.run_attempt), artifactId: String(artifact.id),
+      artifactDigest: artifact.digest, fileSha256: null });
     const archive = Buffer.from(githubRun("gh", ["api", `repos/${repository}/actions/artifacts/${artifact.id}/zip`], { encoding: null, maxBuffer: 8 * 1024 * 1024 }));
     assert.equal(`sha256:${sha256(archive)}`, artifact.digest);
     const bytes = readAppOnlyArtifactArchive(archive, "requirements");
-    return Object.freeze({ sourceSha, runId: String(run.id), runAttempt: String(run.run_attempt), artifactId: String(artifact.id),
-      artifactDigest: artifact.digest, fileSha256: sha256(bytes) });
+    const bound = Object.freeze({ ...reference, fileSha256: sha256(bytes) });
+    const { requirements } = authenticateCanonicalProductionRequirementsArtifact({ sourceSha, requirementsReference: bound, repositoryRoot, githubRun });
+    if (requirements.candidateSourceSha !== sourceSha) continue;
+    return bound;
   }
   throw new Error("Canonical requirements artifact is absent or ambiguous");
 }
@@ -170,7 +179,7 @@ export function authenticatePrintingRoutineExecutorPredecessor({ serviceResponse
 export async function applyProductionPrintingRoutineDelta({ sourceSha, awsProfile, run = (command, args, options) => execFileSync(command, args, options),
   githubRun = createProductionGithubCommandRunner(), wait = sleep, repositoryRoot = root, env = process.env } = {}) {
   assertProtectedCheckout({ sourceSha, repositoryRoot });
-  const reference = discoverCanonicalRequirementsReference({ sourceSha, githubRun });
+  const reference = discoverCanonicalRequirementsReference({ sourceSha, repositoryRoot, githubRun });
   const { requirements } = authenticateCanonicalProductionRequirements({ sourceSha, requirementsReference: reference, repositoryRoot, githubRun });
   const commandEnvironment = createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: awsProfile, env });
   const awsExecutable = productionAwsExecutable();

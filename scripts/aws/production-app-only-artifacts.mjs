@@ -21,6 +21,21 @@ const contracts = Object.freeze({
 });
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 
+export function completeGithubCollection(pages, key, { maxPages = 10 } = {}) {
+  assert.ok(Array.isArray(pages) && pages.length > 0 && pages.length <= maxPages, `Incomplete ${key} pagination`);
+  const totals = new Set(pages.map((page) => page?.total_count));
+  assert.equal(totals.size, 1, `Inconsistent ${key} pagination`);
+  const [total] = totals;
+  assert.ok(Number.isSafeInteger(total) && total >= 0 && total <= maxPages * 100, `Unbounded ${key} pagination`);
+  const values = pages.flatMap((page) => {
+    assert.ok(Array.isArray(page?.[key]) && page[key].length <= 100, `Invalid ${key} page`);
+    return page[key];
+  });
+  assert.equal(values.length, total, `Partial ${key} pagination`);
+  assert.equal(new Set(values.map(({ id }) => String(id))).size, values.length, `Duplicate ${key} identity`);
+  return values;
+}
+
 export function parseAppOnlyArtifactReference(text) {
   assert.ok(typeof text === "string" && Buffer.byteLength(text) <= 2048, "Only compact artifact references are accepted");
   const value = JSON.parse(text);
@@ -123,10 +138,8 @@ export function downloadAppOnlyArtifact({ kind, reference, repositoryRoot, githu
   const get = (url, flags = []) => JSON.parse(githubRun("gh", ["api", url, ...flags], { maxBuffer: 8 * 1024 * 1024 }));
   const run = get(endpoint);
   const readArtifact = () => {
-    const pages = get(`${endpoint}/artifacts`, ["--paginate", "--slurp"]);
-    assert.ok(Array.isArray(pages) && pages.length > 0 && pages.length <= 10);
-    const artifacts = pages.flatMap((page) => page.artifacts);
-    assert.equal(new Set(artifacts.map((artifact) => artifact.id)).size, artifacts.length);
+    const pages = get(`${endpoint}/artifacts?per_page=100`, ["--paginate", "--slurp"]);
+    const artifacts = completeGithubCollection(pages, "artifacts");
     const matches = artifacts.filter((artifact) => artifact.name === contracts[kind].artifact);
     assert.equal(matches.length, 1, "Ambiguous or absent app-only artifact");
     return matches[0];

@@ -96,7 +96,7 @@ const canonicalRequirementsFixture = () => {
   const reference = { sourceSha, runId: "123", runAttempt: "1", artifactId: "456", artifactDigest: `sha256:${sha256(archive)}`, fileSha256: sha256(bytes) };
   const run = { id: 123, run_attempt: 1, repository: { id: 9, full_name: "T-ej2003/genuine-scan-main" }, head_repository: { id: 9, full_name: "T-ej2003/genuine-scan-main" }, head_sha: sourceSha, head_branch: "main", path: ".github/workflows/produce-production-app-only-requirements.yml", event: "workflow_dispatch", status: "completed", conclusion: "success" };
   const artifact = { id: 456, name: "production-app-only-requirements", expired: false, digest: reference.artifactDigest, size_in_bytes: archive.length, workflow_run: { id: 123, head_sha: sourceSha, head_repository_id: 9, repository_id: 9 } };
-  const githubRun = (_command, args) => args[1].endsWith("/branches/main") ? JSON.stringify({ commit: { sha: sourceSha } }) : args[1].endsWith("/zip") ? archive : args[1].endsWith("/artifacts") ? JSON.stringify([{ artifacts: [artifact] }]) : JSON.stringify(run);
+  const githubRun = (_command, args) => args[1].endsWith("/branches/main") ? JSON.stringify({ commit: { sha: sourceSha } }) : args[1].endsWith("/zip") ? archive : args[1].endsWith("/artifacts?per_page=100") ? JSON.stringify([{ total_count: 1, artifacts: [artifact] }]) : JSON.stringify(run);
   return { sourceSha, requirements, bytes, archive, reference, run, artifact, githubRun };
 };
 
@@ -127,7 +127,7 @@ test("production RLS requirements come only from the authenticated canonical pro
     (run) => { run.run_attempt = 2; },
   ]) {
     const changed = structuredClone(fixture.run); mutate(changed);
-    assert.throws(() => authenticateCanonicalProductionRequirements({ sourceSha: fixture.sourceSha, requirementsReference: fixture.reference, repositoryRoot: process.cwd(), githubRun: (_command, args) => args[1].includes("/runs/123") && !args[1].endsWith("/artifacts") ? JSON.stringify(changed) : fixture.githubRun(_command, args) }));
+    assert.throws(() => authenticateCanonicalProductionRequirements({ sourceSha: fixture.sourceSha, requirementsReference: fixture.reference, repositoryRoot: process.cwd(), githubRun: (_command, args) => args[1].includes("/runs/123") && !args[1].endsWith("/artifacts?per_page=100") ? JSON.stringify(changed) : fixture.githubRun(_command, args) }));
   }
 });
 
