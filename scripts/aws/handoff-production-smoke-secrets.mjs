@@ -53,7 +53,7 @@ export function executeSmokeSecretHandoff({ awsProfile, run, contract }) {
     const output = aws(["secretsmanager", "get-secret-value", "--region", "eu-west-2", "--secret-id", entry.arn, "--query", "SecretString", "--output", "text"]);
     const value = secretBytes(output);
     try {
-      run("gh", ["secret", "set", entry.destination, "--repo", SMOKE_REPOSITORY, "--env", SMOKE_ENVIRONMENT, "--body", "-"], { input: value, stdio: ["pipe", "pipe", "pipe"] });
+      run("gh", ["secret", "set", entry.destination, "--repo", SMOKE_REPOSITORY, "--env", SMOKE_ENVIRONMENT], { input: value, stdio: ["pipe", "pipe", "pipe"] });
     } finally { value.fill(0); if (Buffer.isBuffer(output)) output.fill(0); }
     installed.push(entry.destination);
   }

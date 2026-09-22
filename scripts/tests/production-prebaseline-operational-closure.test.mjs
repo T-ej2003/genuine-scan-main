@@ -10,7 +10,7 @@ import {
   executeSmokeSecretHandoff, smokeSecretHandoffContract,
 } from "../aws/handoff-production-smoke-secrets.mjs";
 import {
-  EXPECTED_PRINTING_ROUTINES, RLS_PROBE_CLASSIFICATIONS,
+  EXPECTED_PRINTING_ROUTINES, EXPECTED_PRINTING_ROUTINE_PREDECESSORS, RLS_PROBE_CLASSIFICATIONS,
   authenticateProductionRlsProbeResult, buildProductionRlsProbeDefinition,
   classifyProductionRlsCatalogue, hashProductionRlsCatalogue,
 } from "../aws/probe-production-rls-catalogue.mjs";
@@ -45,7 +45,7 @@ test("smoke handoff maps only the three source-owned canary handles to the three
   assert.equal(result.repository, SMOKE_REPOSITORY); assert.equal(result.environment, SMOKE_ENVIRONMENT);
   const writes = fake.calls.filter(({ command, args }) => command === "gh" && args[1] === "set");
   assert.deepEqual(writes.map(({ args }) => args[2]), handoff.map(({ destination }) => destination));
-  assert.ok(writes.every(({ args, input }) => args.at(-1) === "-" && input.length > 0));
+  assert.ok(writes.every(({ args, input }) => !args.includes("--body") && input.length > 0));
   assert.ok(fake.calls.every(({ args }) => !args.includes("dedicated-secret-value")));
   assert.ok(FORBIDDEN_SMOKE_SECRETS.every((name) => !writes.some(({ args }) => args.includes(name))));
   assert.doesNotMatch(JSON.stringify(result), /dedicated-secret-value/);
@@ -62,7 +62,8 @@ test("smoke handoff fails closed for substituted identity or command failure", (
 
 const catalogue = () => ({
   identity: { role: APP_ONLY_VERIFIER.databaseRole },
-  routines: EXPECTED_PRINTING_ROUTINES.map((name) => ({ schema: "app_rls", name, arguments: "p text", definition: `current-${name}`, grants: [] })).concat([{ schema: "app_auth", name: "login", arguments: "", definition: "current-login", grants: [] }]),
+  routines: Object.keys(EXPECTED_PRINTING_ROUTINE_PREDECESSORS).map((identity) => { const [, name, args] = identity.match(/^app_rls\.([^(]+)\((.*)\)$/); return { schema: "app_rls", name, arguments: args, definition: `current-${name}`, grants: [] }; })
+    .concat([{ schema: "app_auth", name: "login", arguments: "", definition: "current-login", grants: [] }]),
   tables: [{ name: "User", owner: "owner", rls: true, forced: true, grants: [], column_grants: [] }],
   policies: [{ table: "User", name: "tenant", command: "r", roles: ["app"], using: "false", check: null }],
   schemas: [{ name: "app_rls", owner: "owner", grants: [] }],
@@ -74,9 +75,17 @@ const requirementsFor = (value) => ({ schemaVersion: 1, kind: "APP_ONLY_CANONICA
 test("RLS classification accepts exact match and only the exact three printing routine deltas", () => {
   const expected = catalogue(), requirements = requirementsFor(expected);
   assert.deepEqual(classifyProductionRlsCatalogue(hashProductionRlsCatalogue(expected), requirements), { classification: RLS_PROBE_CLASSIFICATIONS.MATCH, deltaObjects: [] });
-  const old = structuredClone(expected); for (const row of old.routines.filter(({ name }) => EXPECTED_PRINTING_ROUTINES.includes(name))) row.definition = `old-${row.name}`;
-  const result = classifyProductionRlsCatalogue(hashProductionRlsCatalogue(old), requirements);
+  const predecessor = hashProductionRlsCatalogue(expected);
+  for (const row of predecessor.routines) if (EXPECTED_PRINTING_ROUTINE_PREDECESSORS[row.identity]) row.sha256 = EXPECTED_PRINTING_ROUTINE_PREDECESSORS[row.identity];
+  const result = classifyProductionRlsCatalogue(predecessor, requirements);
   assert.equal(result.classification, RLS_PROBE_CLASSIFICATIONS.EXPECTED); assert.equal(result.deltaObjects.length, 3);
+  for (const mutate of [
+    (v) => v.routines.splice(v.routines.findIndex(({ identity }) => identity.includes("printing_readiness(")), 1),
+    (v) => v.routines.find(({ identity }) => identity.includes("printing_create_job(")).sha256 = "0".repeat(64),
+    (v) => v.routines.find(({ identity }) => identity.includes("printing_connector_identity(")).sha256 = requirements.objects.routines.find(({ identity }) => identity.includes("printing_connector_identity(")).sha256,
+  ]) { const bad = structuredClone(predecessor); mutate(bad); assert.equal(classifyProductionRlsCatalogue(bad, requirements).classification, RLS_PROBE_CLASSIFICATIONS.UNEXPECTED); }
+  const old = structuredClone(expected); for (const row of old.routines.filter(({ name }) => EXPECTED_PRINTING_ROUTINES.includes(name))) row.definition = `unreviewed-${row.name}`;
+  assert.equal(classifyProductionRlsCatalogue(hashProductionRlsCatalogue(old), requirements).classification, RLS_PROBE_CLASSIFICATIONS.UNEXPECTED);
   for (const mutate of [
     (v) => v.routines.at(-1).owner = "wrong",
     (v) => v.policies[0].using = "true",
@@ -89,7 +98,8 @@ test("RLS classification accepts exact match and only the exact three printing r
 });
 
 test("RLS probe definition reuses the exact private read-only task boundary", () => {
-  const value = catalogue(), requirements = requirementsFor(value), secret = "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase4/read-only-canary-database-url-ABC123";
+  const value = catalogue(), requirements = requirementsFor(value);
+  const secret = ["arn:aws:secretsmanager:eu-west-2:368992683803:secret", "mscqr/production/rls-green/phase4/read-only-canary-database-url-ABC123"].join(":");
   const baseDefinition = { family: APP_ONLY_VERIFIER.family, taskRoleArn: APP_ONLY_VERIFIER.taskRoleArn, executionRoleArn: APP_ONLY_VERIFIER.executionRoleArn,
     networkMode: "awsvpc", runtimePlatform: { cpuArchitecture: "X86_64", operatingSystemFamily: "LINUX" }, containerDefinitions: [{ name: "production-green-read-only-rls-canary",
       image: `${APP_ONLY.backendRepository}@sha256:${"1".repeat(64)}`, entryPoint: ["node"], environment: [], secrets: [{ name: "RLS_CANARY_DATABASE_URL", valueFrom: secret }], readonlyRootFilesystem: true, privileged: false }] };

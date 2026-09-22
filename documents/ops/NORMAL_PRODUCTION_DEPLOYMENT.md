@@ -54,6 +54,8 @@ npm run production:rls-catalogue-probe -- --source-sha <protected-main-sha> --re
 
 This registers only a new revision of the existing compatibility-verifier task definition and runs it once with no overrides. Its PostgreSQL transaction is repeatable-read and read-only under `mscqr_prod_rls_canary_read`; the result is exactly `MATCH`, `EXPECTED_THREE_ROUTINE_DELTA_ONLY`, or `UNEXPECTED_DRIFT`. It never applies an RLS change.
 
+`EXPECTED_THREE_ROUTINE_DELTA_ONLY` is not a name-only exception. It requires all three routines to be present with the exact catalogue hashes authenticated by the last compatible production proof at source `6d5a48ce7c32b12ce8671731392f92ddfa625a88` (requirements `647841407b6bbba43d45ecc880dca713e73cacae4e1d27e74ce3dcdf977a2f88`). A missing routine, another predecessor definition, or any additional catalogue difference is `UNEXPECTED_DRIFT`.
+
 Do not use `seed-launch-smoke-users.js` in production: that executable deliberately refuses protected-environment mutation. The already-provisioned ordinary canary is reused instead of creating a second identity system.
 
 A permanent public-verification fixture must use the normal QR lifecycle: the dedicated canary licensee submits one QR allocation request, a human platform operator approves it with normal MFA in the application, governed printing/issuance completes, and the resulting non-customer raw QR code is transferred directly into the GitHub environment secret without terminal or workflow-log output. Do not use a customer QR, a generated random string, the risk-blocked platform canary, or the operator's human credentials in CI. Until that fixture exists, leave `PRODUCTION_SMOKE_VERIFY_CODE` unset.

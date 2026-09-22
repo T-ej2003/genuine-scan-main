@@ -16,6 +16,13 @@ import { assertProtectedCheckout } from "./prepare-production-initial-activation
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const collections = Object.freeze(["routines", "tables", "policies", "schemas", "roles"]);
 export const EXPECTED_PRINTING_ROUTINES = Object.freeze(["printing_readiness", "printing_create_job", "printing_connector_identity"]);
+// Exact catalogue hashes authenticated by the last compatible production proof:
+// source 6d5a48ce7c32b12ce8671731392f92ddfa625a88, requirements 647841407b6bbba43d45ecc880dca713e73cacae4e1d27e74ce3dcdf977a2f88.
+export const EXPECTED_PRINTING_ROUTINE_PREDECESSORS = Object.freeze({
+  "app_rls.printing_connector_identity(p_kind text, p_agent_id text, p_device_fingerprint text, p_printer_selector text, p_gateway_id text, p_gateway_secret_hash text, p_operation text)": "aec14f16d5bf85cc48809a63d3e1a34c8a35c0eb51ac1f46899cfc05a24673b1",
+  "app_rls.printing_create_job(p_capability text, p_purpose text, p_request_id text, p_batch_id text, p_printer_id text, p_quantity integer, p_range_start text, p_range_end text, p_print_mode text, p_payload_type text, p_print_lock_token_hash text, p_items jsonb)": "fafcc5b92873b51b786cf937b834f7991bc2eda8ba00b8d5e5a618edd2b1bd1c",
+  "app_rls.printing_readiness(p_capability text, p_purpose text, p_request_id text, p_operation text, p_subject_id text, p_options jsonb)": "780215b4db85c6561e7ce8529838f15d72ce4d78f19507078d2e02f8f7e07f83",
+});
 export const RLS_PROBE_CLASSIFICATIONS = Object.freeze({ MATCH: "MATCH", EXPECTED: "EXPECTED_THREE_ROUTINE_DELTA_ONLY", UNEXPECTED: "UNEXPECTED_DRIFT" });
 
 export function hashProductionRlsCatalogue(catalogue) {
@@ -24,9 +31,11 @@ export function hashProductionRlsCatalogue(catalogue) {
 
 export function classifyProductionRlsCatalogue(catalogue, requirements) {
   const differences = [];
+  let observedRoutines;
   for (const name of collections) {
     const observed = new Map(catalogue[name].map(({ identity, sha256 }) => [identity, sha256]));
     assert.equal(observed.size, catalogue[name].length, `Duplicate ${name} catalogue identity`);
+    if (name === "routines") observedRoutines = observed;
     const expected = new Map(requirements.objects[name].map(({ identity, sha256 }) => [identity, sha256]));
     for (const identity of new Set([...expected.keys(), ...observed.keys()]))
       if (expected.get(identity) !== observed.get(identity)) differences.push({ collection: name, identity });
@@ -34,8 +43,10 @@ export function classifyProductionRlsCatalogue(catalogue, requirements) {
   if (!differences.length) return { classification: RLS_PROBE_CLASSIFICATIONS.MATCH, deltaObjects: [] };
   const target = requirements.objects.routines.filter(({ identity }) => EXPECTED_PRINTING_ROUTINES.some((name) => identity.startsWith(`app_rls.${name}(`))).map(({ identity }) => identity).sort();
   assert.equal(target.length, EXPECTED_PRINTING_ROUTINES.length, "Canonical printing routine set is incomplete or ambiguous");
+  assert.deepEqual(target, Object.keys(EXPECTED_PRINTING_ROUTINE_PREDECESSORS).sort(), "Canonical printing routine signatures changed");
   const actual = differences.filter(({ collection }) => collection === "routines").map(({ identity }) => identity).sort();
-  const expectedOnly = differences.length === target.length && canonicalJson(actual) === canonicalJson(target);
+  const expectedOnly = differences.length === target.length && canonicalJson(actual) === canonicalJson(target)
+    && target.every((identity) => observedRoutines.get(identity) === EXPECTED_PRINTING_ROUTINE_PREDECESSORS[identity]);
   return { classification: expectedOnly ? RLS_PROBE_CLASSIFICATIONS.EXPECTED : RLS_PROBE_CLASSIFICATIONS.UNEXPECTED,
     deltaObjects: differences.map(({ identity }) => identity).sort() };
 }
