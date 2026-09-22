@@ -4,8 +4,11 @@ import crypto from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
+import { gzipSync } from "node:zlib";
 import {
+  AWS_TASK_DEFINITION_LIMIT_BYTES,
   PRINTING_ROUTINE_DELTA,
+  SAFE_TASK_DEFINITION_CEILING_BYTES,
   authenticatePrintingRoutineExecutorPredecessor,
   authenticatePrintingRoutineDeltaResult,
   buildPrintingRoutineDeltaCommand,
@@ -15,9 +18,10 @@ import {
   executePrintingRoutineDeltaTransaction,
 } from "../aws/apply-production-printing-routine-delta.mjs";
 import { EXPECTED_PRINTING_ROUTINE_PREDECESSORS, RLS_PROBE_CLASSIFICATIONS } from "../aws/probe-production-rls-catalogue.mjs";
-import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
+import { canonicalJson, canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
 import { createAppOnlyRequirements } from "../aws/production-app-only-requirements.mjs";
 import { createProductionGithubCommandRunner } from "../aws/production-credential-source-contract.mjs";
+import { encodeWorkflowDispatchGzip } from "../aws/workflow-dispatch-gzip-transport.mjs";
 
 const runtime = createRequire(import.meta.url)("../aws/production-printing-routine-delta-executor.cjs");
 
@@ -281,6 +285,11 @@ test("task definition pins the authenticated historical image and removes its ta
   assert.equal(value.definition.family, "mscqr-production-printing-routine-delta"); assert.equal(value.definition.taskRoleArn, undefined);
   assert.equal(value.definition.containerDefinitions[0].image, PRINTING_ROUTINE_DELTA.executorImage);
   assert.deepEqual(value.definition.containerDefinitions[0].secrets, [{ name: "MSCQR_PRINTING_DELTA_ADMIN_PASSWORD", valueFrom: PRINTING_ROUTINE_DELTA.administratorSecretArn }]);
+  assert.equal(value.registrationPayload, JSON.stringify(value.definition));
+  assert.equal(value.serializedTaskDefinitionBytes, Buffer.byteLength(value.registrationPayload, "utf8"));
+  assert.ok(value.serializedTaskDefinitionBytes <= SAFE_TASK_DEFINITION_CEILING_BYTES);
+  assert.ok(value.serializedTaskDefinitionBytes < AWS_TASK_DEFINITION_LIMIT_BYTES);
+  assert.ok(Buffer.from(value.command[2], "base64").length < Buffer.byteLength(JSON.stringify(runtime.decodeInput(value.command[2], value.command[3]))));
   const taskDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:1";
   const exact = { serviceResponse: { failures: [], services: [{ taskDefinition: taskDefinitionArn, deployments: [{}], desiredCount: 2, runningCount: 2, pendingCount: 0 }] },
     taskDefinition: { taskDefinitionArn, containerDefinitions: [{ name: "backend", image: PRINTING_ROUTINE_DELTA.executorImage }] },
@@ -307,12 +316,21 @@ test("hostile structured values remain canonical data and cannot alter the fixed
 
 test("payload transport rejects malformed, noncanonical, altered and oversized data", () => {
   const built = buildPrintingRoutineDeltaCommand({ sourceSha: contract.sourceSha, requirements, databaseHostname: input.databaseHostname });
-  assert.throws(() => runtime.decodeInput(`${built.command[2]}\n`, built.command[3]));
-  assert.throws(() => runtime.decodeInput(built.command[2].slice(0, -4), built.command[3]));
+  const compressed = Buffer.from(built.command[2], "base64");
+  assert.throws(() => runtime.decodeInput(`${built.command[2]}$`, built.command[3]));
+  const corrupted = Buffer.from(compressed); corrupted[Math.floor(corrupted.length / 2)] ^= 0xff;
+  assert.throws(() => runtime.decodeInput(corrupted.toString("base64"), built.command[3]));
+  assert.throws(() => runtime.decodeInput(compressed.subarray(0, -1).toString("base64"), built.command[3]));
+  assert.throws(() => runtime.decodeInput(Buffer.concat([compressed, Buffer.from([0])]).toString("base64"), built.command[3]));
+  assert.throws(() => runtime.decodeInput(Buffer.concat([compressed, compressed]).toString("base64"), built.command[3]));
   assert.throws(() => runtime.decodeInput(built.command[2], "0".repeat(64)));
-  assert.throws(() => runtime.decodeInput("A".repeat(87388), hash(Buffer.from("x"))));
-  const noncanonical = Buffer.from(JSON.stringify({ z: 1, a: 2 }));
-  assert.throws(() => runtime.decodeInput(noncanonical.toString("base64"), hash(noncanonical)));
+  for (const bytes of [Buffer.alloc(65537), crypto.randomBytes(65537)]) {
+    const encoded = gzipSync(bytes, { level: 9 }).toString("base64");
+    assert.throws(() => runtime.decodeInput(encoded, hash(bytes)));
+  }
+  const empty = Buffer.alloc(0), malformed = Buffer.from("not-json");
+  assert.throws(() => runtime.decodeInput(gzipSync(empty).toString("base64"), hash(empty)));
+  assert.throws(() => runtime.decodeInput(gzipSync(malformed).toString("base64"), hash(malformed)));
   const decoded = runtime.decodeInput(built.command[2], built.command[3]);
   for (const change of [
     (value) => { value.input.contract.sourceSha = "x"; },
@@ -323,6 +341,15 @@ test("payload transport rejects malformed, noncanonical, altered and oversized d
     (value) => { value.input.databaseHostname = "host;injection"; },
     (value) => { value.input.unreviewed = true; },
   ]) { const altered = structuredClone(decoded); change(altered); assert.throws(() => runtime.validateInput(altered.input)); }
+  const altered = structuredClone(decoded); altered.input.databaseHostname = "other.example.invalid";
+  const alteredBytes = Buffer.from(canonicalJson(altered));
+  const alteredTransport = encodeWorkflowDispatchGzip(alteredBytes, { maxDecompressedBytes: 65536 });
+  assert.throws(() => runtime.decodeInput(alteredTransport, built.command[3]));
+  const wrongContract = structuredClone(decoded); wrongContract.contractSha256 = "0".repeat(64);
+  const wrongContractBytes = Buffer.from(canonicalJson(wrongContract));
+  const wrongContractTransport = encodeWorkflowDispatchGzip(wrongContractBytes, { maxDecompressedBytes: 65536 });
+  const result = spawnSync(process.execPath, ["-e", built.command[1], wrongContractTransport, hash(wrongContractBytes)], { cwd: "backend", env: { NODE_ENV: "production" }, encoding: "utf8" });
+  assert.equal(result.status, 1); assert.equal(result.stdout, "");
 });
 
 test("fixed node-e executor parses authenticated data and fails generically before a missing secret", () => {

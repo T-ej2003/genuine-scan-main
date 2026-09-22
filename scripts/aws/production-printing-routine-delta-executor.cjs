@@ -2,6 +2,7 @@
 
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
+const { gunzipSync, inflateRawSync } = require("node:zlib");
 
 const administrator = "mscqr_prod_admin";
 const ownerRole = "mscqr_prd_rls_phase2_auth_owner";
@@ -166,11 +167,25 @@ async function executePrintingRoutineDeltaTransaction({ tx, input, collect = col
   return { status: "APPLIED", writeCount };
 }
 
+function gzipDeflateOffset(compressed) {
+  assert.ok(compressed.length >= 18 && compressed[0] === 0x1f && compressed[1] === 0x8b && compressed[2] === 8 && (compressed[3] & 0xe0) === 0);
+  const flags = compressed[3]; let offset = 10;
+  if (flags & 0x04) { assert.ok(offset + 2 <= compressed.length); const length = compressed.readUInt16LE(offset); offset += 2; assert.ok(offset + length <= compressed.length); offset += length; }
+  for (const flag of [0x08, 0x10]) if (flags & flag) { const end = compressed.indexOf(0, offset); assert.notEqual(end, -1); offset = end + 1; }
+  if (flags & 0x02) offset += 2;
+  assert.ok(offset + 8 < compressed.length);
+  return offset;
+}
+
 function decodeInput(encoded, expectedSha256) {
-  assert.ok(typeof encoded === "string" && encoded.length > 0 && encoded.length <= 87384);
+  assert.ok(typeof encoded === "string" && encoded.length > 0 && encoded.length <= 32768);
   assert.match(encoded, /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/);
-  const bytes = Buffer.from(encoded, "base64");
-  assert.ok(bytes.length <= 65536); assert.equal(bytes.toString("base64"), encoded); assert.equal(sha256(bytes), expectedSha256);
+  const compressed = Buffer.from(encoded, "base64"); assert.equal(compressed.toString("base64"), encoded);
+  const offset = gzipDeflateOffset(compressed);
+  const deflateBytes = inflateRawSync(compressed.subarray(offset), { info: true, maxOutputLength: 65536 }).engine.bytesWritten;
+  assert.equal(offset + deflateBytes + 8, compressed.length);
+  const bytes = gunzipSync(compressed, { maxOutputLength: 65536 });
+  assert.ok(bytes.length > 0 && bytes.length <= 65536); assert.equal(sha256(bytes), expectedSha256);
   const payload = JSON.parse(bytes.toString("utf8"));
   assert.equal(canonicalJson(payload), bytes.toString("utf8"));
   return payload;

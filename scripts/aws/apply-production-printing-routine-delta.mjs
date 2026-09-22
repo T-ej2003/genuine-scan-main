@@ -16,6 +16,7 @@ import { assertEcsTaskDefinitionReadback } from "../../infra/aws/terraform/lambd
 import { assertProtectedCheckout } from "./prepare-production-initial-activation-reconciler-installation.mjs";
 import { createProductionAwsCredentialEnvironment, createProductionGithubCommandRunner, productionAwsExecutable, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { authenticateCanonicalProductionRequirements, authenticateCanonicalProductionRequirementsArtifact, EXPECTED_PRINTING_ROUTINE_PREDECESSORS, EXPECTED_PRINTING_ROUTINES, hashProductionRlsCatalogue, RLS_PROBE_CLASSIFICATIONS } from "./probe-production-rls-catalogue.mjs";
+import { encodeWorkflowDispatchGzip } from "./workflow-dispatch-gzip-transport.mjs";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const require = createRequire(import.meta.url);
@@ -35,6 +36,10 @@ const executionRoleArn = `arn:aws:iam::${APP_ONLY.account}:role/mscqr-production
 const administratorSecretArn = "arn:aws:secretsmanager:eu-west-2:368992683803:secret:rds!db-70d459ec-4f6f-45da-aafc-618e83d660a1-Dy9GLo:password::";
 const logGroup = STAGE_B.executorLogGroupName;
 const collections = Object.freeze(["routines", "tables", "policies", "schemas", "roles"]);
+export const AWS_TASK_DEFINITION_LIMIT_BYTES = 64 * 1024;
+export const SAFE_TASK_DEFINITION_CEILING_BYTES = 60 * 1024;
+const MAX_DECOMPRESSED_PAYLOAD_BYTES = 64 * 1024;
+const MAX_ENCODED_TRANSPORT_BYTES = 32 * 1024;
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 const parse = (value) => JSON.parse(Buffer.isBuffer(value) ? value.toString("utf8") : value);
 
@@ -133,10 +138,9 @@ export function buildPrintingRoutineDeltaCommand({ sourceSha, requirements, data
     sqlSha256: Object.fromEntries(routines.map(({ name, sql }) => [name, sha256(sql)])), executorSourceSha256: sha256(executorSource) };
   const input = { contract, requirements: packed, databaseHostname, routines };
   const payload = Buffer.from(canonicalJson({ input, contractSha256: canonicalSha256(contract) }));
-  assert.ok(payload.length <= 65536, "Bounded printing routine payload exceeds data budget");
-  const encodedPayload = payload.toString("base64");
-  assert.equal(Buffer.from(encodedPayload, "base64").toString("base64"), encodedPayload);
-  assert.ok(Buffer.byteLength(executorSource) + Buffer.byteLength(encodedPayload) <= 98304, "Bounded printing routine command exceeds task-definition budget");
+  assert.ok(payload.length <= MAX_DECOMPRESSED_PAYLOAD_BYTES, "Bounded printing routine payload exceeds data budget");
+  const encodedPayload = encodeWorkflowDispatchGzip(payload, { label: "Bounded printing routine payload", maxDecompressedBytes: MAX_DECOMPRESSED_PAYLOAD_BYTES });
+  assert.ok(Buffer.byteLength(encodedPayload) <= MAX_ENCODED_TRANSPORT_BYTES, "Bounded printing routine transport exceeds encoded budget");
   return Object.freeze({ command: ["-e", executorSource, encodedPayload, sha256(payload)], contract: Object.freeze(contract), contractSha256: canonicalSha256(contract) });
 }
 
@@ -151,7 +155,11 @@ export function buildPrintingRoutineDeltaDefinition({ sourceSha, requirements, d
       secrets: [{ name: "MSCQR_PRINTING_DELTA_ADMIN_PASSWORD", valueFrom: administratorSecretArn }],
       logConfiguration: { logDriver: "awslogs", options: { "awslogs-region": APP_ONLY.region, "awslogs-group": logGroup, "awslogs-stream-prefix": "printing-routine-delta" } },
     }] };
-  return Object.freeze({ definition, ...built });
+  const registrationPayload = JSON.stringify(definition);
+  const serializedTaskDefinitionBytes = Buffer.byteLength(registrationPayload, "utf8");
+  assert.ok(serializedTaskDefinitionBytes <= SAFE_TASK_DEFINITION_CEILING_BYTES, "Bounded printing routine task definition exceeds safe ECS budget");
+  assert.ok(serializedTaskDefinitionBytes < AWS_TASK_DEFINITION_LIMIT_BYTES, "Bounded printing routine task definition exceeds AWS ECS limit");
+  return Object.freeze({ definition, registrationPayload, serializedTaskDefinitionBytes, ...built });
 }
 
 export function authenticatePrintingRoutineDeltaResult(message, { sourceSha, requirementsSha256, contractSha256 }) {
@@ -194,7 +202,7 @@ export async function applyProductionPrintingRoutineDelta({ sourceSha, awsProfil
   assert.match(databaseHostname || "", /^[a-z0-9.-]+$/);
   const built = buildPrintingRoutineDeltaDefinition({ sourceSha, requirements, databaseHostname, repositoryRoot });
   assertProtectedCheckout({ sourceSha, repositoryRoot });
-  const registered = aws(["ecs", "register-task-definition", "--region", APP_ONLY.region, "--cli-input-json", JSON.stringify(built.definition)]).taskDefinition;
+  const registered = aws(["ecs", "register-task-definition", "--region", APP_ONLY.region, "--cli-input-json", built.registrationPayload]).taskDefinition;
   const taskDefinitionArn = registered?.taskDefinitionArn; assert.match(taskDefinitionArn || "", new RegExp(`^arn:aws:ecs:${APP_ONLY.region}:${APP_ONLY.account}:task-definition/${family}:[1-9][0-9]*$`));
   const readback = aws(["ecs", "describe-task-definition", "--region", APP_ONLY.region, "--task-definition", taskDefinitionArn, "--include", "TAGS"]);
   assertEcsTaskDefinitionReadback({ definition: { ...readback.taskDefinition, tags: readback.tags || [] }, taskDefinitionArn, expected: built.definition, label: "Bounded printing routine delta" });
