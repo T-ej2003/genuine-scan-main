@@ -87,6 +87,11 @@ const CALLS = Object.freeze([
   ["scripts/aws/production-green-stage-b-identity-capabilities.mjs", "ecr:GetRepositoryPolicy", "manifest-backend-health-recovery-runtime-repository-policy", RUNTIME_REPOSITORIES],
   ["scripts/aws/production-normal-backend-activation.mjs", "ecr:DescribeImages", "manifest-backend-health-recovery-describe-images", [REPOSITORY]],
   ["scripts/aws/deploy-ecs-service.sh", "ecr:DescribeImages", "manifest-backend-health-recovery-describe-images", [REPOSITORY]],
+  ["scripts/aws/deploy-ecs-service.sh", "ec2:DescribeManagedPrefixLists", "normal-deployer-ec2-describemanagedprefixlists", ["*"], "NORMAL_DEPLOYER"],
+  ["scripts/aws/deploy-ecs-service.sh", "ec2:GetManagedPrefixListEntries", "normal-deployer-ec2-getmanagedprefixlistentries", ["arn:aws:ec2:eu-west-2:aws:prefix-list/*"], "NORMAL_DEPLOYER"],
+  ["scripts/aws/deploy-ecs-service.sh", "ec2:DescribeSubnets", "normal-deployer-ec2-describesubnets", ["*"], "NORMAL_DEPLOYER"],
+  ["scripts/aws/deploy-ecs-service.sh", "elasticloadbalancing:DescribeTargetGroups", "normal-deployer-elasticloadbalancing-describetargetgroups", ["*"], "NORMAL_DEPLOYER"],
+  ["scripts/aws/deploy-ecs-service.sh", "elasticloadbalancing:DescribeLoadBalancers", "normal-deployer-elasticloadbalancing-describeloadbalancers", ["*"], "NORMAL_DEPLOYER"],
   ["scripts/aws/converge-production-ecs-runtime-policy.mjs", "iam:GetRole", "runtime-admin-get-role", ["arn:aws:iam::368992683803:role/mscqr-ecs-execution-role"], "ADMINISTRATOR"],
   ["scripts/aws/converge-production-ecs-runtime-policy.mjs", "iam:GetRolePolicy", "runtime-admin-get-inline", ["arn:aws:iam::368992683803:role/mscqr-ecs-execution-role"], "ADMINISTRATOR"],
   ["scripts/aws/converge-production-ecs-runtime-policy.mjs", "iam:ListAttachedRolePolicies", "runtime-admin-list-attached", ["*"], "ADMINISTRATOR"],
@@ -375,12 +380,14 @@ export function assertChangedAwsCallClosure(scanned, graph) {
       || !capability.policy?.sourceFile || !releaseProbe || stageAModes && capability.mutation !== STAGE_A_MUTATING_CAPABILITIES.has(contract.capabilityId)) {
       throw new Error(`Production AWS call lacks exact IAM/capability/preflight closure: ${contract.sourceFile} ${contract.action}.`);
     }
-    if (contract.sourceFile.endsWith("deploy-ecs-service.sh")) {
+    if (contract.sourceFile.endsWith("deploy-ecs-service.sh") && contract.action === "ecr:DescribeImages") {
       const rotation = capabilityById.get("manifest-backend-health-recovery-describe-images");
       if (!rotation || rotation.identity !== "RELEASE_DEPLOYER" || rotation.action !== contract.action || !same(rotation.resources, contract.resources) || !rotation.policy?.sourceFile) throw new Error("Rotation rollback-image read lacks exact IAM/capability closure.");
     }
     const reachableMode = stageAModes
       ? [...stageAModes, ...(stageARootVerifierCapability(contract.capabilityId) ? ["BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"] : [])]
+      : contract.sourceFile.endsWith("deploy-ecs-service.sh") && contract.identity === "NORMAL_DEPLOYER"
+      ? ["NORMAL"]
       : contract.sourceFile.endsWith("deploy-ecs-service.sh")
       ? ["NORMAL", "ROTATION_OVERLAP", "ROTATION_CLEANUP"]
       : contract.sourceFile.endsWith("production-normal-backend-activation.mjs") ? ["NORMAL"]

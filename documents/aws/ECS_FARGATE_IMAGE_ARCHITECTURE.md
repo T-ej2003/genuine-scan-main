@@ -288,3 +288,18 @@ For the ECS object-storage credential contract, see:
 For a future ChatGPT/operator handoff version of this runbook, see:
 
 - [documents/aws/chatgpt-handoff-ecs-image-architecture.md](/Users/abhiramteja/Downloads/genuine-scan-main/documents/aws/chatgpt-handoff-ecs-image-architecture.md:1)
+### Production client-IP trust runtime
+
+The normal backend deployment derives `CLIENT_IP_TRUST_MODE=cloudfront-alb` and both trusted proxy CIDR lists from the authenticated production ECS service, target group, ALB subnets, and AWS-managed `com.amazonaws.global.cloudfront.origin-facing` prefix list. The normal deployer may only read those topology APIs; its existing ECS/ECR mutation scope is unchanged. AWS does not expose resource-level authorization for the four required Describe/List calls, so they use the existing region condition with `Resource: "*"`; prefix-list entry reads are restricted to AWS-owned prefix lists in `eu-west-2`.
+
+Before `UpdateService`, the deployment authenticates the registered task-definition readback and requires the exact derived mode and CIDRs. Missing, changed, empty, universal, or unauthenticated values fail before service activation.
+
+The immutable `--existing-task-definition` production-backend activation path validates the same structural fail-closed trust contract without live topology reads; it never rewrites a supplied revision to repair missing runtime values.
+
+When the normal production lane registers a new `mscqr-production-rls-green-backend-candidate` from a historical backend definition, it preserves inherited tags while atomically binding exactly one `MSCQRExecTarget=production-backend` destination-family marker. The historical predecessor is never retagged.
+
+The same authenticated service update fixes `propagateTags=TASK_DEFINITION`, so each newly launched backend task inherits that execution marker for the ECS Exec verifier. Caller input cannot weaken this normal-lane setting.
+
+During the one-time historical migration, the normal deployer may restore an exact `mscqr-backend:*` predecessor only on the production backend service. The workflow records that predecessor before mutation and the rollback script refuses to overwrite any service state other than the exact failed candidate.
+
+CloudFront topology discovery accepts only AWS-documented usable managed-prefix-list completion states: `create-complete`, `modify-complete`, or `restore-complete`. Transitional, failed, deleted, and unknown states fail closed.

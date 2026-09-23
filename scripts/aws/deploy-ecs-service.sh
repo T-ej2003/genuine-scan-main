@@ -223,20 +223,24 @@ require_env CLUSTER_NAME
 require_env SERVICE_NAME
 require_env CONTAINER_NAME
 
+normal_backend_deployment=false
+normal_backend_propagate_tags=""
 reject_generic_stage_b_registration() {
   local family="${TASK_DEFINITION:-}"
   family="${family##*/}"
   family="${family%%:*}"
+  if [[ "${MSCQR_NORMAL_APPLICATION_DEPLOYMENT:-false}" == "true" && "$AWS_REGION" == "eu-west-2" && "$CLUSTER_NAME" == "mscqr-prod-euw2-main" && "$SERVICE_NAME" == "mscqr-backend-servi-euw2" && "$CONTAINER_NAME" == "backend" ]]; then
+    caller="$(aws sts get-caller-identity --query Arn --output text)"
+    [[ "$caller" =~ ^arn:aws:sts::368992683803:assumed-role/mscqr-production-normal-deployer/[^/]+$ ]] || {
+      echo "Normal application backend registration requires the production normal-deployer identity." >&2
+      exit 1
+    }
+    normal_backend_deployment=true
+    normal_backend_propagate_tags="TASK_DEFINITION"
+    return
+  fi
   case "$family" in
     mscqr-production-rls-green-backend-candidate)
-      if [[ "${MSCQR_NORMAL_APPLICATION_DEPLOYMENT:-false}" == "true" ]]; then
-        caller="$(aws sts get-caller-identity --query Arn --output text)"
-        [[ "$caller" =~ ^arn:aws:sts::368992683803:assumed-role/mscqr-production-normal-deployer/[^/]+$ ]] || {
-          echo "Normal application backend registration requires the production normal-deployer identity." >&2
-          exit 1
-        }
-        return
-      fi
       echo "The production backend family requires the normal application deployment lane." >&2
       exit 1
       ;;
@@ -301,6 +305,13 @@ EXISTING_TASKS_FILE="$(mktemp)"
 EXISTING_CALLER_FILE="$(mktemp)"
 ROLLBACK_TASK_DEFINITION_FILE="$(mktemp)"
 ROLLBACK_IMAGE_FILE="$(mktemp)"
+CLIENT_IP_RUNTIME_FILE="$(mktemp)"
+TARGET_GROUPS_FILE="$(mktemp)"
+LOAD_BALANCERS_FILE="$(mktemp)"
+SUBNETS_FILE="$(mktemp)"
+PREFIX_LISTS_FILE="$(mktemp)"
+PREFIX_LIST_ENTRIES_FILE="$(mktemp)"
+REGISTERED_TASK_DEFINITION_FILE="$(mktemp)"
 existing_mode_active=false
 existing_switch_started=false
 update_attempted=false
@@ -494,10 +505,61 @@ NODE
     "$EXISTING_TASKS_FILE" \
     "$EXISTING_CALLER_FILE" \
     "$ROLLBACK_TASK_DEFINITION_FILE" \
-    "$ROLLBACK_IMAGE_FILE"
+    "$ROLLBACK_IMAGE_FILE" \
+    "$CLIENT_IP_RUNTIME_FILE" \
+    "$TARGET_GROUPS_FILE" \
+    "$LOAD_BALANCERS_FILE" \
+    "$SUBNETS_FILE" \
+    "$PREFIX_LISTS_FILE" \
+    "$PREFIX_LIST_ENTRIES_FILE" \
+    "$REGISTERED_TASK_DEFINITION_FILE"
   exit "$exit_code"
 }
 trap cleanup_and_rollback_on_exit EXIT
+
+prepare_production_client_ip_runtime() {
+  aws elbv2 describe-target-groups \
+    --region "$AWS_REGION" \
+    --target-group-arns "arn:aws:elasticloadbalancing:eu-west-2:368992683803:targetgroup/mscqr-backend-tg-euw2-v2/f6673ff776f6e2ec" \
+    >"$TARGET_GROUPS_FILE"
+  aws elbv2 describe-load-balancers \
+    --region "$AWS_REGION" \
+    --load-balancer-arns "arn:aws:elasticloadbalancing:eu-west-2:368992683803:loadbalancer/app/mscqr-alb-euw2/cda0292be6e39608" \
+    >"$LOAD_BALANCERS_FILE"
+  ALB_SUBNET_IDS=()
+  while IFS= read -r subnet_id; do ALB_SUBNET_IDS+=("$subnet_id"); done < <(node --input-type=module - "$LOAD_BALANCERS_FILE" <<'NODE'
+import assert from "node:assert/strict";
+import fs from "node:fs";
+const value = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+assert.equal(value.LoadBalancers?.length, 1, "Exact production ALB was not discovered once.");
+const subnetIds = (value.LoadBalancers[0].AvailabilityZones || []).map(({ SubnetId }) => SubnetId).sort();
+assert.equal(subnetIds.length, 2, "Production ALB must use exactly two subnets.");
+assert.equal(new Set(subnetIds).size, subnetIds.length, "Production ALB subnet identity is duplicated.");
+for (const subnetId of subnetIds) assert.match(subnetId || "", /^subnet-[0-9a-f]+$/);
+process.stdout.write(`${subnetIds.join("\n")}\n`);
+NODE
+)
+  [[ "${#ALB_SUBNET_IDS[@]}" -eq 2 ]] || { echo "Production ALB subnet discovery is incomplete." >&2; exit 1; }
+  aws ec2 describe-subnets --region "$AWS_REGION" --subnet-ids "${ALB_SUBNET_IDS[@]}" >"$SUBNETS_FILE"
+  aws ec2 describe-managed-prefix-lists \
+    --region "$AWS_REGION" \
+    --filters "Name=prefix-list-name,Values=com.amazonaws.global.cloudfront.origin-facing" \
+    >"$PREFIX_LISTS_FILE"
+  CLOUDFRONT_PREFIX_LIST_ID="$(node --input-type=module - "$PREFIX_LISTS_FILE" <<'NODE'
+import assert from "node:assert/strict";
+import fs from "node:fs";
+const value = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+assert.equal(value.PrefixLists?.length, 1, "CloudFront origin-facing managed prefix list was not discovered once.");
+assert.match(value.PrefixLists[0].PrefixListId || "", /^pl-[a-f0-9]+$/);
+process.stdout.write(value.PrefixLists[0].PrefixListId);
+NODE
+)"
+  aws ec2 get-managed-prefix-list-entries --region "$AWS_REGION" --prefix-list-id "$CLOUDFRONT_PREFIX_LIST_ID" >"$PREFIX_LIST_ENTRIES_FILE"
+  node "$SCRIPT_DIR/production-client-ip-trust-runtime.mjs" \
+    --service "$EXISTING_SERVICE_FILE" --target-groups "$TARGET_GROUPS_FILE" --load-balancers "$LOAD_BALANCERS_FILE" \
+    --subnets "$SUBNETS_FILE" --prefix-lists "$PREFIX_LISTS_FILE" --prefix-list-entries "$PREFIX_LIST_ENTRIES_FILE" \
+    --output "$CLIENT_IP_RUNTIME_FILE"
+}
 
 if [[ -n "$EXISTING_TASK_DEFINITION_ARN" ]]; then
   existing_mode_active=true
@@ -581,8 +643,8 @@ const target = targetResponse.taskDefinition;
 if (!target || target.taskDefinitionArn !== targetArn) fail("Described task definition did not match the exact requested ARN.");
 if (target.status !== "ACTIVE") fail(`Target task definition status is ${target.status || "missing"}; expected ACTIVE.`);
 if (target.family !== expectedFamily || targetMatch[3] !== expectedFamily) fail("Target task-definition family does not match the expected family.");
-const targetTags = new Map((targetResponse.tags || []).map((tag) => [tag?.key, tag?.value]));
-if (targetTags.get("MSCQRExecTarget") !== "production-backend") fail("Target task definition lacks the reviewed MSCQRExecTarget marker.");
+const targetExecutionMarkers = (targetResponse.tags || []).filter((tag) => tag?.key === "MSCQRExecTarget");
+if (targetExecutionMarkers.length !== 1 || targetExecutionMarkers[0].value !== "production-backend") fail("Target task definition lacks exactly one reviewed MSCQRExecTarget marker.");
 const runtimePlatform = target.runtimePlatform || null;
 if (runtimePlatform?.cpuArchitecture && runtimePlatform.cpuArchitecture !== "X86_64") fail(`Target runtimePlatform.cpuArchitecture is ${runtimePlatform.cpuArchitecture}; expected X86_64.`);
 const containers = Array.isArray(target.containerDefinitions) ? target.containerDefinitions : [];
@@ -609,6 +671,16 @@ process.stdout.write(expectedCurrentArn);
 NODE
   )"
 
+  if [[ "$AWS_REGION" == "eu-west-2" && "$CLUSTER_NAME" == "mscqr-prod-euw2-main" && "$SERVICE_NAME" == "mscqr-backend-servi-euw2" && "$CONTAINER_NAME" == "backend" && "$EXPECTED_FAMILY" == "mscqr-production-rls-green-backend-candidate" ]]; then
+    node --input-type=module - "$RAW_FILE" "$SCRIPT_DIR/production-client-ip-trust-runtime.mjs" <<'NODE'
+import fs from "node:fs";
+import { pathToFileURL } from "node:url";
+const [taskPath, runtimeModulePath] = process.argv.slice(2);
+const { assertProductionClientIpTrustContract } = await import(pathToFileURL(runtimeModulePath));
+assertProductionClientIpTrustContract(JSON.parse(fs.readFileSync(taskPath, "utf8")).taskDefinition);
+NODE
+  fi
+
   aws ecs describe-task-definition --region "$AWS_REGION" --task-definition "$PREVIOUS_TASK_DEFINITION_ARN" >"$ROLLBACK_TASK_DEFINITION_FILE"
   ROLLBACK_IMAGE_DIGEST="$(node --input-type=module - "$ROLLBACK_TASK_DEFINITION_FILE" "$PREVIOUS_TASK_DEFINITION_ARN" "$CONTAINER_NAME" <<'NODE'
 import fs from "node:fs";
@@ -631,7 +703,7 @@ const details = JSON.parse(fs.readFileSync(file, "utf8")).imageDetails;
 if (!Array.isArray(details) || details.length !== 1 || details[0]?.imageDigest !== digest) throw new Error("Rollback candidate image readback does not match the exact immutable digest.");
 NODE
 
-  if [[ "$PREVIOUS_TASK_DEFINITION_ARN" != "$EXISTING_TASK_DEFINITION_ARN" || ( "$ENABLE_EXECUTE_COMMAND" == "true" && "$CURRENT_EXECUTE_COMMAND_ENABLED" != "true" ) || ( "$PROPAGATE_TAGS" == "TASK_DEFINITION" && "$CURRENT_PROPAGATE_TAGS" != "TASK_DEFINITION" ) ]]; then
+  if [[ "$PREVIOUS_TASK_DEFINITION_ARN" != "$EXISTING_TASK_DEFINITION_ARN" || ( "$ENABLE_EXECUTE_COMMAND" == "true" && "$CURRENT_EXECUTE_COMMAND_ENABLED" != "true" ) || ( "${PROPAGATE_TAGS:-}" == "TASK_DEFINITION" && "$CURRENT_PROPAGATE_TAGS" != "TASK_DEFINITION" ) ]]; then
     update_attempted=true
     update_state="UPDATE_ATTEMPTED"
     update_args=(aws ecs update-service \
@@ -779,6 +851,18 @@ aws ecs describe-task-definition \
   --include TAGS \
   >"$RAW_FILE"
 
+aws ecs describe-services \
+  --region "$AWS_REGION" \
+  --cluster "$CLUSTER_NAME" \
+  --services "$SERVICE_NAME" \
+  >"$EXISTING_SERVICE_FILE"
+
+if [[ "$normal_backend_deployment" == "true" && "$AWS_REGION" == "eu-west-2" && "$CLUSTER_NAME" == "mscqr-prod-euw2-main" && "$SERVICE_NAME" == "mscqr-backend-servi-euw2" && "$CONTAINER_NAME" == "backend" ]]; then
+  prepare_production_client_ip_runtime
+else
+  : >"$CLIENT_IP_RUNTIME_FILE"
+fi
+
 ENV_UPDATES="${ENV_UPDATES:-}"
 if [[ -z "$ENV_UPDATES" && -n "${EXPECTED_GIT_SHA:-}" ]]; then
   ENV_UPDATES="GIT_SHA,RELEASE_GIT_SHA"
@@ -786,10 +870,11 @@ fi
 GIT_SHA="${GIT_SHA:-${EXPECTED_GIT_SHA:-}}"
 RELEASE_GIT_SHA="${RELEASE_GIT_SHA:-${EXPECTED_GIT_SHA:-}}"
 
-node --input-type=module - "$RAW_FILE" "$PAYLOAD_FILE" "$CONTAINER_NAME" "$IMAGE_URI" "$ENV_UPDATES" "$GIT_SHA" "$RELEASE_GIT_SHA" "${SECRET_UPDATES_JSON:-{}}" <<'NODE'
+node --input-type=module - "$RAW_FILE" "$PAYLOAD_FILE" "$CONTAINER_NAME" "$IMAGE_URI" "$ENV_UPDATES" "$GIT_SHA" "$RELEASE_GIT_SHA" "${SECRET_UPDATES_JSON:-{}}" "$CLIENT_IP_RUNTIME_FILE" "$SCRIPT_DIR/production-client-ip-trust-runtime.mjs" "$normal_backend_deployment" <<'NODE'
 import fs from "node:fs";
+import { pathToFileURL } from "node:url";
 
-const [rawPath, payloadPath, containerName, imageUri, envUpdatesText, gitSha, releaseGitSha, secretUpdatesText] = process.argv.slice(2);
+const [rawPath, payloadPath, containerName, imageUri, envUpdatesText, gitSha, releaseGitSha, secretUpdatesText, clientIpRuntimePath, clientIpModulePath, normalBackendDeployment] = process.argv.slice(2);
 const raw = JSON.parse(fs.readFileSync(rawPath, "utf8"));
 const taskDefinition = raw.taskDefinition;
 
@@ -863,8 +948,8 @@ if (runtimePlatform?.cpuArchitecture && runtimePlatform.cpuArchitecture !== "X86
   );
 }
 
-const payload = {
-  family: taskDefinition.family,
+let payload = {
+  family: normalBackendDeployment === "true" ? "mscqr-production-rls-green-backend-candidate" : taskDefinition.family,
   taskRoleArn: taskDefinition.taskRoleArn,
   executionRoleArn: taskDefinition.executionRoleArn,
   networkMode: taskDefinition.networkMode,
@@ -876,8 +961,23 @@ const payload = {
   memory: taskDefinition.memory,
 };
 
-if (Array.isArray(raw.tags) && raw.tags.length > 0) {
-  payload.tags = raw.tags;
+if (fs.statSync(clientIpRuntimePath).size > 0) {
+  const { applyProductionClientIpTrustRuntime, assertProductionClientIpTrustRuntime } = await import(pathToFileURL(clientIpModulePath));
+  const runtime = JSON.parse(fs.readFileSync(clientIpRuntimePath, "utf8"));
+  payload = applyProductionClientIpTrustRuntime(payload, runtime);
+  assertProductionClientIpTrustRuntime(payload, runtime);
+}
+
+const inheritedTags = Array.isArray(raw.tags) ? raw.tags : [];
+if (normalBackendDeployment === "true") {
+  // The normal candidate's execution target is a destination-family invariant;
+  // inherited historical tags cannot override or duplicate it.
+  payload.tags = [
+    ...inheritedTags.filter((tag) => tag?.key !== "MSCQRExecTarget"),
+    { key: "MSCQRExecTarget", value: "production-backend" },
+  ];
+} else if (inheritedTags.length > 0) {
+  payload.tags = inheritedTags;
 }
 
 for (const optionalField of [
@@ -896,11 +996,6 @@ for (const optionalField of [
 fs.writeFileSync(payloadPath, JSON.stringify(payload, null, 2));
 NODE
 
-aws ecs describe-services \
-  --region "$AWS_REGION" \
-  --cluster "$CLUSTER_NAME" \
-  --services "$SERVICE_NAME" \
-  >"$EXISTING_SERVICE_FILE"
 validate_service_load_balancer_compatibility "$EXISTING_SERVICE_FILE" "$RAW_FILE" true
 validate_service_load_balancer_compatibility "$EXISTING_SERVICE_FILE" "$PAYLOAD_FILE"
 
@@ -921,6 +1016,30 @@ NEW_TASK_DEFINITION_ARN="$(
     --output text
 )"
 
+if [[ -s "$CLIENT_IP_RUNTIME_FILE" ]]; then
+  aws ecs describe-task-definition \
+    --region "$AWS_REGION" \
+    --task-definition "$NEW_TASK_DEFINITION_ARN" \
+    --include TAGS \
+    >"$REGISTERED_TASK_DEFINITION_FILE"
+  node --input-type=module - "$PAYLOAD_FILE" "$REGISTERED_TASK_DEFINITION_FILE" "$CLIENT_IP_RUNTIME_FILE" "$NEW_TASK_DEFINITION_ARN" "$REPO_ROOT/infra/aws/terraform/lambda/production-rls-approval-broker/ecs-task-definition-readback.mjs" "$SCRIPT_DIR/production-client-ip-trust-runtime.mjs" <<'NODE'
+import fs from "node:fs";
+import { pathToFileURL } from "node:url";
+const [payloadPath, readbackPath, runtimePath, taskDefinitionArn, readbackModulePath, runtimeModulePath] = process.argv.slice(2);
+const [{ assertEcsTaskDefinitionReadback }, { assertProductionClientIpTrustRuntime }] = await Promise.all([
+  import(pathToFileURL(readbackModulePath)),
+  import(pathToFileURL(runtimeModulePath)),
+]);
+const expected = JSON.parse(fs.readFileSync(payloadPath, "utf8"));
+const readback = JSON.parse(fs.readFileSync(readbackPath, "utf8"));
+const definition = { ...readback.taskDefinition, tags: readback.tags || [] };
+assertEcsTaskDefinitionReadback({ definition, taskDefinitionArn, expected, label: "Normal production backend task definition" });
+assertProductionClientIpTrustRuntime(definition, JSON.parse(fs.readFileSync(runtimePath, "utf8")));
+const executionMarkers = (readback.tags || []).filter((tag) => tag?.key === "MSCQRExecTarget");
+if (executionMarkers.length !== 1 || executionMarkers[0].value !== "production-backend") throw new Error("Normal production backend task definition lacks exactly one reviewed MSCQRExecTarget marker.");
+NODE
+fi
+
 if [[ -n "${METADATA_FILE:-}" ]]; then
   node --input-type=module - "$METADATA_FILE" "$CLUSTER_NAME" "$SERVICE_NAME" "$CONTAINER_NAME" "$IMAGE_URI" "$PREVIOUS_TASK_DEFINITION_ARN" "$NEW_TASK_DEFINITION_ARN" <<'NODE'
 import fs from "node:fs";
@@ -935,7 +1054,7 @@ update_args=(aws ecs update-service \
   --service "$SERVICE_NAME" \
   --task-definition "$NEW_TASK_DEFINITION_ARN")
 if [[ "$ENABLE_EXECUTE_COMMAND" == "true" ]]; then update_args+=(--enable-execute-command); fi
-if [[ -n "${PROPAGATE_TAGS:-}" ]]; then update_args+=(--propagate-tags "$PROPAGATE_TAGS"); fi
+if [[ -n "$normal_backend_propagate_tags" ]]; then update_args+=(--propagate-tags "$normal_backend_propagate_tags"); fi
 "${update_args[@]}" >/dev/null
 
 if [[ "$WAIT_FOR_STABLE" == "true" ]]; then
@@ -974,7 +1093,7 @@ if (!Array.isArray(response.failures) || response.failures.length !== 0 || respo
 }
 NODE
 fi
-if [[ -n "${PROPAGATE_TAGS:-}" ]]; then
+if [[ -n "$normal_backend_propagate_tags" ]]; then
   aws ecs describe-services \
     --region "$AWS_REGION" \
     --cluster "$CLUSTER_NAME" \
@@ -983,7 +1102,7 @@ if [[ -n "${PROPAGATE_TAGS:-}" ]]; then
   node --input-type=module - "$EXISTING_POST_SERVICE_FILE" <<'NODE'
 import fs from "node:fs";
 const response = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-if (response.services?.[0]?.propagateTags !== "TASK_DEFINITION") throw new Error("Post-switch service does not propagate task-definition tags.");
+if (!Array.isArray(response.failures) || response.failures.length !== 0 || response.services?.length !== 1 || response.services[0].propagateTags !== "TASK_DEFINITION") throw new Error("Post-switch service does not propagate task-definition tags.");
 NODE
 fi
 
