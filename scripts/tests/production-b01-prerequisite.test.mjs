@@ -154,11 +154,11 @@ test("read-only collector classifies exact predecessor, successor, partial, and 
 test("structured executor telemetry exposes only allowlisted stages and sanitized codes", () => {
   assert.deepEqual(runtime.FAILURE_STAGES, ["BOOTSTRAP","INPUT_AUTHENTICATION","SECRET_ACCESS","DATABASE_CONNECTIVITY","PREDECESSOR_COLLECTION",
     "PREDECESSOR_CLASSIFICATION","TRANSACTION_BEGIN","AUTHORIZED_MUTATION","SUCCESSOR_COLLECTION","SUCCESSOR_CLASSIFICATION","COMMIT","RECEIPT_PRECONDITION"]);
-  const secret = "postgresql://admin:secret@private-db/user-data";
+  const secret = "synthetic-sensitive-canary-value";
   for (const stage of runtime.FAILURE_STAGES) {
     const evidence = runtime.safeFailure(stage, Object.assign(new Error(secret), { code: "P1001" }));
     assert.deepEqual(evidence, { status: "PRODUCTION_B01_PREREQUISITE_FAILED", stage, code: "P1001" });
-    assert.doesNotMatch(JSON.stringify(evidence), /secret|private-db|user-data/);
+    assert.doesNotMatch(JSON.stringify(evidence), /synthetic-sensitive-canary-value/);
   }
   assert.equal(runtime.safeFailure("BOOTSTRAP", Object.assign(new Error(secret), { code: "SENSITIVE_CUSTOM_CODE" })).code, "UNEXPECTED_FAILURE");
   assert.throws(() => runtime.safeFailure("NOT_A_STAGE", new Error(secret)));
