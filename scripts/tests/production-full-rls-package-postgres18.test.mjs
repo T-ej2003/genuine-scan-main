@@ -12,6 +12,7 @@ import { writeStageBPrivateFileExclusive } from "../aws/stage-b-artifact-contrac
 import { APP_ONLY } from "../aws/production-app-only-contract.mjs";
 import { buildAppOnlyVerifierCommand, authenticateAppOnlyVerifierResult } from "../aws/production-app-only-verifier-command.mjs";
 import { buildPrintingRoutineDeltaCommand, canonicalPrintingRoutineDelta } from "../aws/apply-production-printing-routine-delta.mjs";
+import { buildB01ExecutorInput, canonicalB01Prerequisite, collectB01State, executeB01Transaction } from "../aws/apply-production-b01-prerequisite.mjs";
 import { classifyProductionRlsCatalogue, hashProductionRlsCatalogue, RLS_PROBE_CLASSIFICATIONS } from "../aws/probe-production-rls-catalogue.mjs";
 import {
   PRODUCTION_RLS_APPROVAL_ALGORITHM,
@@ -328,6 +329,102 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
       hostile.routines[0].security_definer = !hostile.routines[0].security_definer;
       assert.equal(compareAppOnlyRequirements(hostile, requirements).RLS_FUNCTIONS, "INCOMPATIBLE");
       appOnlyRequirements = requirements;
+
+      psql(maintenanceUrl, ["-q", "-c", `ALTER ROLE "${administrator}" NOINHERIT; REVOKE pg_read_all_data FROM "${administrator}"`], "restore production administrator identity");
+
+      const b01Delta = canonicalB01Prerequisite();
+      psql(greenUrl, ["-q", "-c", `BEGIN;
+        SET LOCAL ROLE mscqr_prd_rls_phase2_auth_owner;
+        DROP FUNCTION app_auth.finalize_refresh_token_rotation(text,text[],text,timestamp without time zone,text);
+        ${b01Delta.predecessorBindSql}
+        RESET ROLE;
+        COMMIT;`], "install B01 predecessor functions");
+      psql(greenUrl, ["-q", "-c", `BEGIN;
+        SET LOCAL ROLE mscqr_prd_rls_phase2_owner;
+        DROP POLICY b01_auditlogoutbox_select ON public."AuditLogOutbox";
+        RESET ROLE;
+        COMMIT;`], "install exact B01 predecessor policy state");
+      const b01Input = buildB01ExecutorInput({ deploymentSourceSha: sourceSha, databaseHostname: adminUrl.hostname });
+      const b01Predecessor = await administratorClient.$transaction((tx) => collectB01State(tx));
+      assert.deepEqual(b01Predecessor.functions, b01Delta.predecessor.functions);
+      assert.deepEqual(b01Predecessor.roles, b01Delta.predecessor.roles);
+      assert.deepEqual(b01Predecessor.policies, b01Delta.predecessor.policies);
+      assert.deepEqual(b01Predecessor.catalogue, b01Delta.predecessor.catalogue);
+      const policyPredicate = (name, field) => scalar(greenUrl, `SELECT pg_get_expr(p.${field},p.polrelid) FROM pg_policy p WHERE p.polname='${name}'`, `${name} ${field}`);
+      const refreshSelectUsing = policyPredicate("b01_refreshtoken_select", "polqual");
+      const refreshUpdateUsing = policyPredicate("b01_refreshtoken_update", "polqual");
+      const refreshUpdateCheck = policyPredicate("b01_refreshtoken_update", "polwithcheck");
+      const generatedPolicies = fs.readFileSync(path.join(sqlRoot, "30-policies.sql"), "utf8").split("\n");
+      const restorePolicy = (name) => { const index = generatedPolicies.findIndex((line) => line.startsWith(`CREATE POLICY "${name}"`));
+        assert.ok(index >= 0 && generatedPolicies[index + 1].startsWith(`COMMENT ON POLICY "${name}"`)); return `${generatedPolicies[index]};${generatedPolicies[index + 1]}`; };
+      const hostilePredecessors = [
+        ["wrong function", `SET LOCAL ROLE mscqr_prd_rls_phase2_auth_owner; ALTER FUNCTION app_auth.b01_bind_predecessor(text,text,text,text) STABLE`,
+          `SET LOCAL ROLE mscqr_prd_rls_phase2_auth_owner; ALTER FUNCTION app_auth.b01_bind_predecessor(text,text,text,text) VOLATILE`],
+        ["unexpected policy", `SET LOCAL ROLE mscqr_prd_rls_phase2_owner; CREATE POLICY b01_bridge_conflict ON public."User" FOR SELECT TO mscqr_prd_rls_phase2_auth_owner USING (true)`,
+          `SET LOCAL ROLE mscqr_prd_rls_phase2_owner; DROP POLICY b01_bridge_conflict ON public."User"`],
+        ["unexpected grant", `SET LOCAL ROLE mscqr_prd_rls_phase2_auth_owner; GRANT EXECUTE ON FUNCTION app_auth.b01_bind_predecessor(text,text,text,text) TO mscqr_prd_rls_phase2_preauth`,
+          `SET LOCAL ROLE mscqr_prd_rls_phase2_auth_owner; REVOKE EXECUTE ON FUNCTION app_auth.b01_bind_predecessor(text,text,text,text) FROM mscqr_prd_rls_phase2_preauth`],
+        ["missing predecessor object", `SET LOCAL ROLE mscqr_prd_rls_phase2_owner; REVOKE SELECT (payload) ON public."AuditLogOutbox" FROM mscqr_prd_rls_phase2_auth_owner`,
+          `SET LOCAL ROLE mscqr_prd_rls_phase2_owner; GRANT SELECT (payload) ON public."AuditLogOutbox" TO mscqr_prd_rls_phase2_auth_owner`],
+        ["extra conflicting object", `SET LOCAL ROLE mscqr_prd_rls_phase2_auth_owner; ${b01Delta.mutations.find(({ name }) => name === "finalizer").sql}`,
+          `SET LOCAL ROLE mscqr_prd_rls_phase2_auth_owner; DROP FUNCTION app_auth.finalize_refresh_token_rotation(text,text[],text,timestamp without time zone,text)`],
+        ["B01 USING predicate drift", `SET LOCAL ROLE mscqr_prd_rls_phase2_owner; ALTER POLICY b01_refreshtoken_select ON public."RefreshToken" USING (true)`,
+          `SET LOCAL ROLE mscqr_prd_rls_phase2_owner; ALTER POLICY b01_refreshtoken_select ON public."RefreshToken" USING (${refreshSelectUsing})`],
+        ["B01 WITH CHECK predicate drift", `SET LOCAL ROLE mscqr_prd_rls_phase2_owner; ALTER POLICY b01_refreshtoken_update ON public."RefreshToken" WITH CHECK (true)`,
+          `SET LOCAL ROLE mscqr_prd_rls_phase2_owner; ALTER POLICY b01_refreshtoken_update ON public."RefreshToken" USING (${refreshUpdateUsing}) WITH CHECK (${refreshUpdateCheck})`],
+        ["B01 policy role drift", `SET LOCAL ROLE mscqr_prd_rls_phase2_owner; ALTER POLICY b01_refreshtoken_select ON public."RefreshToken" TO mscqr_prd_rls_phase2_preauth`,
+          `SET LOCAL ROLE mscqr_prd_rls_phase2_owner; ALTER POLICY b01_refreshtoken_select ON public."RefreshToken" TO mscqr_prd_rls_phase2_auth_owner`],
+        ["B01 policy command drift", `SET LOCAL ROLE mscqr_prd_rls_phase2_owner; DROP POLICY b01_refreshtoken_select ON public."RefreshToken";
+          CREATE POLICY b01_refreshtoken_select ON public."RefreshToken" AS PERMISSIVE FOR DELETE TO mscqr_prd_rls_phase2_auth_owner USING (${refreshSelectUsing})`,
+          `SET LOCAL ROLE mscqr_prd_rls_phase2_owner; DROP POLICY b01_refreshtoken_select ON public."RefreshToken";${restorePolicy("b01_refreshtoken_select")}`],
+        ["B01 policy permissiveness drift", `SET LOCAL ROLE mscqr_prd_rls_phase2_owner; DROP POLICY b01_refreshtoken_select ON public."RefreshToken";
+          CREATE POLICY b01_refreshtoken_select ON public."RefreshToken" AS RESTRICTIVE FOR SELECT TO mscqr_prd_rls_phase2_auth_owner USING (${refreshSelectUsing})`,
+          `SET LOCAL ROLE mscqr_prd_rls_phase2_owner; DROP POLICY b01_refreshtoken_select ON public."RefreshToken";${restorePolicy("b01_refreshtoken_select")}`],
+      ];
+      for (const [label, mutation, restore] of hostilePredecessors) {
+        psql(greenUrl, ["-q", "-c", `BEGIN;${mutation};RESET ROLE;COMMIT;`], `install ${label}`);
+        let checkpointReached = false;
+        try {
+          await assert.rejects(administratorClient.$transaction((tx) => executeB01Transaction({ tx, input: { contract: b01Input.contract },
+            checkpoint: async () => { checkpointReached = true; } }), { maxWait: 10000, timeout: 120000 }), /neither the exact predecessor nor successor/);
+          assert.equal(checkpointReached, false, `${label} reached a mutation checkpoint`);
+        } finally {
+          psql(greenUrl, ["-q", "-c", `BEGIN;${restore};RESET ROLE;COMMIT;`], `restore ${label}`);
+        }
+      }
+      for (const failAfter of b01Input.contract.mutations.map(({ name }) => name)) {
+        await assert.rejects(administratorClient.$transaction((tx) => executeB01Transaction({ tx, input: { contract: b01Input.contract },
+          checkpoint: async (name) => { if (name === failAfter) throw new Error(`injected ${name}`); } }), { maxWait: 10000, timeout: 120000 }), new RegExp(`injected ${failAfter}`));
+        const rolledBack = await administratorClient.$transaction((tx) => collectB01State(tx));
+        assert.deepEqual(rolledBack.roles, b01Delta.predecessor.roles); assert.deepEqual(rolledBack.functions, b01Delta.predecessor.functions); assert.deepEqual(rolledBack.policies, b01Delta.predecessor.policies);
+        assert.deepEqual(rolledBack.catalogue, b01Delta.predecessor.catalogue);
+      }
+      let b01CollectCount = 0;
+      const b01Applied = await administratorClient.$transaction((tx) => executeB01Transaction({ tx, input: { contract: b01Input.contract }, collect: async (inner) => {
+        const state = await collectB01State(inner);
+        if (++b01CollectCount === 2) {
+          assert.deepEqual(state.functions, b01Delta.successor.functions);
+          assert.deepEqual(state.roles, b01Delta.successor.roles);
+          assert.deepEqual(state.policies, b01Delta.successor.policies);
+          assert.deepEqual(state.catalogue, b01Delta.successor.catalogue);
+        }
+        return state;
+      } }), { maxWait: 10000, timeout: 120000 });
+      assert.deepEqual(b01Applied, { status: "APPLIED", writeCount: 7, predecessorRlsIdentity: b01Delta.predecessorRlsIdentity,
+        successorRlsIdentity: b01Delta.successorRlsIdentity, liveRlsIdentity: b01Delta.successorRlsIdentity });
+      const b01Converged = await administratorClient.$transaction((tx) => executeB01Transaction({ tx, input: { contract: b01Input.contract } }), { maxWait: 10000, timeout: 120000 });
+      assert.equal(b01Converged.status, "ALREADY_CONVERGED"); assert.equal(b01Converged.writeCount, 0);
+      psql(greenUrl, ["-q", "-c", `BEGIN;SET LOCAL ROLE mscqr_prd_rls_phase2_owner;
+        ALTER POLICY b01_refreshtoken_select ON public."RefreshToken" USING (true);RESET ROLE;COMMIT;`], "install successor predicate drift");
+      try {
+        await assert.rejects(administratorClient.$transaction((tx) => executeB01Transaction({ tx, input: { contract: b01Input.contract } }),
+          { maxWait: 10000, timeout: 120000 }), /neither the exact predecessor nor successor/);
+      } finally {
+        psql(greenUrl, ["-q", "-c", `BEGIN;SET LOCAL ROLE mscqr_prd_rls_phase2_owner;
+          ALTER POLICY b01_refreshtoken_select ON public."RefreshToken" USING (${refreshSelectUsing});RESET ROLE;COMMIT;`], "restore successor predicate drift");
+      }
+      assert.equal(classifyProductionRlsCatalogue(hashProductionRlsCatalogue(await collectCatalogueRows(verifier)), requirements).classification,
+        RLS_PROBE_CLASSIFICATIONS.MATCH);
 
       const predecessorSource = run("git", ["show", "6d5a48ce7c32b12ce8671731392f92ddfa625a88:backend/src/rls-waves/session-c/c02/printingLifecycle.sql"]);
       const predecessorSql = canonicalPrintingRoutineDelta().map(({ name }) => printingRoutine(predecessorSource, name)).join("\n");

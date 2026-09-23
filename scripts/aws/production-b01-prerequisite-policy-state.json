@@ -1,0 +1,851 @@
+{
+  "schemaVersion": 1,
+  "postgresMajor": 18,
+  "policies": [
+    {
+      "schema": "public",
+      "table": "AdminMfaCredential",
+      "name": "b01_adminmfacredential_select",
+      "command": "r",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-refresh-rotation\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"transaction-local bearer-derived context\"}",
+      "using_sha256": "ed54892cb7f90b729e6d82012dfcb2d2ff4f0eca2f536b28723ef44be2939f21",
+      "with_check_sha256": null
+    },
+    {
+      "schema": "public",
+      "table": "AdminMfaCredential",
+      "name": "b01_auth_closure_adminmfacredential_insert",
+      "command": "a",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-authentication-closure\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"capability-derived actor or live password-login subject\"}",
+      "using_sha256": null,
+      "with_check_sha256": "c383270ea32e3b95cb603df8346f4da19023caf32bc8475e26627f4193ebc97e"
+    },
+    {
+      "schema": "public",
+      "table": "AdminMfaCredential",
+      "name": "b01_auth_closure_adminmfacredential_select",
+      "command": "r",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-authentication-closure\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"capability-derived actor or live password-login subject\"}",
+      "using_sha256": "99fe25439f53acb07e32e49e82d81ef8dd929533978adb2a5bd8361d478a5da9",
+      "with_check_sha256": null
+    },
+    {
+      "schema": "public",
+      "table": "AdminMfaCredential",
+      "name": "b01_auth_closure_adminmfacredential_update",
+      "command": "w",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-authentication-closure\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"capability-derived actor or live password-login subject\"}",
+      "using_sha256": "2abf19fb76f04a2f827969bed880b24cf621d5e2878d014f8f7c8b9e0447de20",
+      "with_check_sha256": "2abf19fb76f04a2f827969bed880b24cf621d5e2878d014f8f7c8b9e0447de20"
+    },
+    {
+      "schema": "public",
+      "table": "AdminWebAuthnCredential",
+      "name": "b01_adminwebauthncredential_select",
+      "command": "r",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-refresh-rotation\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"transaction-local bearer-derived context\"}",
+      "using_sha256": "ed54892cb7f90b729e6d82012dfcb2d2ff4f0eca2f536b28723ef44be2939f21",
+      "with_check_sha256": null
+    },
+    {
+      "schema": "public",
+      "table": "AdminWebAuthnCredential",
+      "name": "b01_auth_closure_adminwebauthncredential_delete",
+      "command": "d",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-authentication-closure\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"capability-derived actor or live password-login subject\"}",
+      "using_sha256": "04ec678fc3dc87056e41d60fd1fe96691ae08c27ff8e04e78238d76f14c0c726",
+      "with_check_sha256": null
+    },
+    {
+      "schema": "public",
+      "table": "AdminWebAuthnCredential",
+      "name": "b01_auth_closure_adminwebauthncredential_insert",
+      "command": "a",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-authentication-closure\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"capability-derived actor or live password-login subject\"}",
+      "using_sha256": null,
+      "with_check_sha256": "2b6894fa677ef7f5a8f46b0fad527350b02b111f325be112c134c2766b8d6555"
+    },
+    {
+      "schema": "public",
+      "table": "AdminWebAuthnCredential",
+      "name": "b01_auth_closure_adminwebauthncredential_select",
+      "command": "r",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-authentication-closure\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"capability-derived actor or live password-login subject\"}",
+      "using_sha256": "99fe25439f53acb07e32e49e82d81ef8dd929533978adb2a5bd8361d478a5da9",
+      "with_check_sha256": null
+    },
+    {
+      "schema": "public",
+      "table": "AdminWebAuthnCredential",
+      "name": "b01_auth_closure_adminwebauthncredential_update",
+      "command": "w",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-authentication-closure\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"capability-derived actor or live password-login subject\"}",
+      "using_sha256": "497afeef7b8b32f1a0d7f5eae48e7e5724eff003a2e188bdb918c4243c88b589",
+      "with_check_sha256": "497afeef7b8b32f1a0d7f5eae48e7e5724eff003a2e188bdb918c4243c88b589"
+    },
+    {
+      "schema": "public",
+      "table": "AuditLogOutbox",
+      "name": "b01_auditlogoutbox_insert",
+      "command": "a",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-refresh-rotation\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"transaction-local bearer-derived context\"}",
+      "using_sha256": null,
+      "with_check_sha256": "5fab4689810efcb088bd73154669c107a518aea4abebea1da1331005438b2f3e"
+    },
+    {
+      "schema": "public",
+      "table": "AuditLogOutbox",
+      "name": "b01_auditlogoutbox_select",
+      "command": "r",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-refresh-rotation\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"transaction-local bearer-derived context\"}",
+      "using_sha256": "864c91a14bc4e5b0d81e6ba12556054c90999d1ee59d851b240b7997fd953da9",
+      "with_check_sha256": null
+    },
+    {
+      "schema": "public",
+      "table": "AuditLogOutbox",
+      "name": "b01_auth_closure_auditlogoutbox_insert",
+      "command": "a",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-authentication-closure\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"capability-derived actor or live password-login subject\"}",
+      "using_sha256": null,
+      "with_check_sha256": "b33e448159c0399b22c10bfc107d997363edaa70b3014ea2816cf55518077d49"
+    },
+    {
+      "schema": "public",
+      "table": "AuditLogOutbox",
+      "name": "b01_preauth_auditlogoutbox_insert",
+      "command": "a",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-preauth-bearer\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"operation-specific selector rebound to locked token or account\"}",
+      "using_sha256": null,
+      "with_check_sha256": "f93ff9c5e32fd5223f275ea13d53dc387881b568924f4a501aa5f1f514d36fd1"
+    },
+    {
+      "schema": "public",
+      "table": "AuthMfaChallenge",
+      "name": "b01_auth_closure_authmfachallenge_insert",
+      "command": "a",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-authentication-closure\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"capability-derived actor or live password-login subject\"}",
+      "using_sha256": null,
+      "with_check_sha256": "a166c5a308255ddcb6df85bb61c9155e35f398dfa00317fca380df3b0be53db3"
+    },
+    {
+      "schema": "public",
+      "table": "AuthMfaChallenge",
+      "name": "b01_auth_closure_authmfachallenge_select",
+      "command": "r",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-authentication-closure\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"capability-derived actor or live password-login subject\"}",
+      "using_sha256": "b6bca4373632d39ea1156cea7d181b3b20981a6414e1ae869d366115ba0e8a89",
+      "with_check_sha256": null
+    },
+    {
+      "schema": "public",
+      "table": "AuthMfaChallenge",
+      "name": "b01_auth_closure_authmfachallenge_update",
+      "command": "w",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-authentication-closure\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"capability-derived actor or live password-login subject\"}",
+      "using_sha256": "735388835335952cc0dd8343a891161ce563bc3ddf03fa443294335632b82dd0",
+      "with_check_sha256": "735388835335952cc0dd8343a891161ce563bc3ddf03fa443294335632b82dd0"
+    },
+    {
+      "schema": "public",
+      "table": "AuthMfaChallenge",
+      "name": "b01_authmfachallenge_insert",
+      "command": "a",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-refresh-rotation\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"transaction-local bearer-derived context\"}",
+      "using_sha256": null,
+      "with_check_sha256": "c75a66f8c523936ffef5e6377a89cd318ca3c683d9bf87319eeb80544a780809"
+    },
+    {
+      "schema": "public",
+      "table": "AuthSessionRiskSignal",
+      "name": "b01_auth_closure_authsessionrisksignal_insert",
+      "command": "a",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-authentication-closure\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"capability-derived actor or live password-login subject\"}",
+      "using_sha256": null,
+      "with_check_sha256": "051dd0f77b64d6e25290d20940d96c01c8f4ecc7d2ffb895e7358fb5930ac8f2"
+    },
+    {
+      "schema": "public",
+      "table": "AuthWebAuthnChallenge",
+      "name": "b01_auth_closure_authwebauthnchallenge_insert",
+      "command": "a",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-authentication-closure\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"capability-derived actor or live password-login subject\"}",
+      "using_sha256": null,
+      "with_check_sha256": "95daea05d21a00ce8710d3a1b150876dd817759b788f0d2d10a2f00db3a12979"
+    },
+    {
+      "schema": "public",
+      "table": "AuthWebAuthnChallenge",
+      "name": "b01_auth_closure_authwebauthnchallenge_select",
+      "command": "r",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-authentication-closure\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"capability-derived actor or live password-login subject\"}",
+      "using_sha256": "f120ef1313e977dbbe43ab04bed9bbfb8f237ce46dbaab288c5a00fa87cb9572",
+      "with_check_sha256": null
+    },
+    {
+      "schema": "public",
+      "table": "AuthWebAuthnChallenge",
+      "name": "b01_auth_closure_authwebauthnchallenge_update",
+      "command": "w",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-authentication-closure\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"capability-derived actor or live password-login subject\"}",
+      "using_sha256": "e61dc271854f66fd3972fc9430da1ac1d32b5e8b816c7926c7fe60e8ae7d06cc",
+      "with_check_sha256": "e61dc271854f66fd3972fc9430da1ac1d32b5e8b816c7926c7fe60e8ae7d06cc"
+    },
+    {
+      "schema": "public",
+      "table": "EmailVerificationToken",
+      "name": "b01_auth_closure_emailverificationtoken_insert",
+      "command": "a",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-authentication-closure\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"capability-derived actor or live password-login subject\"}",
+      "using_sha256": null,
+      "with_check_sha256": "64394a0b9e128cd5ccd4b47f81689abbcb48e62a8134d1248ec9ccdb4ee15e58"
+    },
+    {
+      "schema": "public",
+      "table": "EmailVerificationToken",
+      "name": "b01_auth_closure_emailverificationtoken_select",
+      "command": "r",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-authentication-closure\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"capability-derived actor or live password-login subject\"}",
+      "using_sha256": "f57bf36f75b2a02299be61c3e246a671be42307d28e036f5535a60d6161eca72",
+      "with_check_sha256": null
+    },
+    {
+      "schema": "public",
+      "table": "EmailVerificationToken",
+      "name": "b01_auth_closure_emailverificationtoken_update",
+      "command": "w",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-authentication-closure\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"capability-derived actor or live password-login subject\"}",
+      "using_sha256": "829469581f9a93fc3510ee944bc35e6f94b0393c6f026f25983d41a8157af856",
+      "with_check_sha256": "829469581f9a93fc3510ee944bc35e6f94b0393c6f026f25983d41a8157af856"
+    },
+    {
+      "schema": "public",
+      "table": "EmailVerificationToken",
+      "name": "b01_preauth_emailverificationtoken_select",
+      "command": "r",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-preauth-bearer\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"operation-specific selector rebound to locked token or account\"}",
+      "using_sha256": "55f18a83a734daa0522c74364c9f624b1b36254df7c58954150fd3e88574eafb",
+      "with_check_sha256": null
+    },
+    {
+      "schema": "public",
+      "table": "EmailVerificationToken",
+      "name": "b01_preauth_emailverificationtoken_update",
+      "command": "w",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-preauth-bearer\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"operation-specific selector rebound to locked token or account\"}",
+      "using_sha256": "4e3c2e2d5298938662a06788b9bb177795c4e3d3d61326ece926351a5ae92d1c",
+      "with_check_sha256": "4e3c2e2d5298938662a06788b9bb177795c4e3d3d61326ece926351a5ae92d1c"
+    },
+    {
+      "schema": "public",
+      "table": "Invite",
+      "name": "b01_preauth_invite_select",
+      "command": "r",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-preauth-bearer\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"operation-specific selector rebound to locked token or account\"}",
+      "using_sha256": "727838d963a5159e02bf2b8396538fad72155a970c458b02d472d58a77f51fcc",
+      "with_check_sha256": null
+    },
+    {
+      "schema": "public",
+      "table": "Invite",
+      "name": "b01_preauth_invite_update",
+      "command": "w",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-preauth-bearer\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"operation-specific selector rebound to locked token or account\"}",
+      "using_sha256": "13332b45529933bf9794da853f11b10837733d2b053e12ff7c17f1a5a1a87cc9",
+      "with_check_sha256": "13332b45529933bf9794da853f11b10837733d2b053e12ff7c17f1a5a1a87cc9"
+    },
+    {
+      "schema": "public",
+      "table": "Licensee",
+      "name": "b01_auth_closure_licensee_select",
+      "command": "r",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-authentication-closure\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"capability-derived actor or live password-login subject\"}",
+      "using_sha256": "a762a779a1bad33ad0ca9e8c3e03307909ef7c8c7e74d69d4a6d7cc1ebcbf679",
+      "with_check_sha256": null
+    },
+    {
+      "schema": "public",
+      "table": "Licensee",
+      "name": "b01_licensee_select",
+      "command": "r",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-refresh-rotation\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"transaction-local bearer-derived context\"}",
+      "using_sha256": "0ae90b0d01232baa53abbcf66ecaee59d2c3a6c1d3eb06d1e7f9b74507410f6f",
+      "with_check_sha256": null
+    },
+    {
+      "schema": "public",
+      "table": "Licensee",
+      "name": "b01_preauth_licensee_select",
+      "command": "r",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-preauth-bearer\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"operation-specific selector rebound to locked token or account\"}",
+      "using_sha256": "27c942ac37c57808c511504c0235f2b8c6e0e16ce0c46e12ebf64a8b2ef5d9e8",
+      "with_check_sha256": null
+    },
+    {
+      "schema": "public",
+      "table": "ManufacturerLicenseeLink",
+      "name": "b01_auth_closure_manufacturerlicenseelink_select",
+      "command": "r",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-authentication-closure\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"capability-derived actor or live password-login subject\"}",
+      "using_sha256": "528f790cae6b135167bcff96bec6abe7556d6b44d617b0ac5fbcbe2492956d60",
+      "with_check_sha256": null
+    },
+    {
+      "schema": "public",
+      "table": "ManufacturerLicenseeLink",
+      "name": "b01_manufacturerlicenseelink_select",
+      "command": "r",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-refresh-rotation\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"transaction-local bearer-derived context\"}",
+      "using_sha256": "312a7e30a6f9b2cc88b7ec04d76855ef3eacb34d560b034634b5f2dc9678959f",
+      "with_check_sha256": null
+    },
+    {
+      "schema": "public",
+      "table": "MfaLoginChallenge",
+      "name": "b01_auth_closure_mfaloginchallenge_insert",
+      "command": "a",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-authentication-closure\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"capability-derived actor or live password-login subject\"}",
+      "using_sha256": null,
+      "with_check_sha256": "1c7a5f1e6d22ecde782dc471bf6a212929d0d3cf57da57413f88f5b02db0b673"
+    },
+    {
+      "schema": "public",
+      "table": "MfaLoginChallenge",
+      "name": "b01_auth_closure_mfaloginchallenge_select",
+      "command": "r",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-authentication-closure\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"capability-derived actor or live password-login subject\"}",
+      "using_sha256": "b6bca4373632d39ea1156cea7d181b3b20981a6414e1ae869d366115ba0e8a89",
+      "with_check_sha256": null
+    },
+    {
+      "schema": "public",
+      "table": "MfaLoginChallenge",
+      "name": "b01_auth_closure_mfaloginchallenge_update",
+      "command": "w",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-authentication-closure\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"capability-derived actor or live password-login subject\"}",
+      "using_sha256": "b0b31c19de9c1943237343de9a547d4c466cedb1236109d0137b98ee82768f34",
+      "with_check_sha256": "b0b31c19de9c1943237343de9a547d4c466cedb1236109d0137b98ee82768f34"
+    },
+    {
+      "schema": "public",
+      "table": "Organization",
+      "name": "b01_auth_closure_organization_select",
+      "command": "r",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-authentication-closure\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"capability-derived actor or live password-login subject\"}",
+      "using_sha256": "7673ff688efa860d348b684799370970980e254be9067d23f266c6b74b4c22e6",
+      "with_check_sha256": null
+    },
+    {
+      "schema": "public",
+      "table": "Organization",
+      "name": "b01_organization_select",
+      "command": "r",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-refresh-rotation\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"transaction-local bearer-derived context\"}",
+      "using_sha256": "b9f85beec4944d5e93dfd016db2f1ebdf52fc1457462a16b72d5f05861f65968",
+      "with_check_sha256": null
+    },
+    {
+      "schema": "public",
+      "table": "Organization",
+      "name": "b01_preauth_organization_select",
+      "command": "r",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-preauth-bearer\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"operation-specific selector rebound to locked token or account\"}",
+      "using_sha256": "d04ddc0b38c355063b800c6de7780dae32870a9a4a1f1c8bbf4e9c2b4f38ec00",
+      "with_check_sha256": null
+    },
+    {
+      "schema": "public",
+      "table": "PasswordReset",
+      "name": "b01_preauth_passwordreset_insert",
+      "command": "a",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-preauth-bearer\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"operation-specific selector rebound to locked token or account\"}",
+      "using_sha256": null,
+      "with_check_sha256": "176604235ecdaf1d1c74f87012251bc710205c7c02d5c63c21dd235cc7fece1c"
+    },
+    {
+      "schema": "public",
+      "table": "PasswordReset",
+      "name": "b01_preauth_passwordreset_select",
+      "command": "r",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-preauth-bearer\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"operation-specific selector rebound to locked token or account\"}",
+      "using_sha256": "f661fdcad2dc0dfde4f46efb5eb1849d319e57f4aa543b105bbde622bddedef5",
+      "with_check_sha256": null
+    },
+    {
+      "schema": "public",
+      "table": "PasswordReset",
+      "name": "b01_preauth_passwordreset_update",
+      "command": "w",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-preauth-bearer\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"operation-specific selector rebound to locked token or account\"}",
+      "using_sha256": "a81f0fb43052d0a8850b39196566d75f217ef28b848396f3ffb757b8dab14662",
+      "with_check_sha256": "a81f0fb43052d0a8850b39196566d75f217ef28b848396f3ffb757b8dab14662"
+    },
+    {
+      "schema": "public",
+      "table": "RefreshToken",
+      "name": "b01_auth_closure_refreshtoken_insert",
+      "command": "a",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-authentication-closure\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"capability-derived actor or live password-login subject\"}",
+      "using_sha256": null,
+      "with_check_sha256": "8511eca51e966891e165da2244d8bf32ac827197efb81a60f2895fd825b32385"
+    },
+    {
+      "schema": "public",
+      "table": "RefreshToken",
+      "name": "b01_auth_closure_refreshtoken_select",
+      "command": "r",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-authentication-closure\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"capability-derived actor or live password-login subject\"}",
+      "using_sha256": "31c0c67c847883a21545f400b9258a37432ae841fb0bca6be5b04edf620121c4",
+      "with_check_sha256": null
+    },
+    {
+      "schema": "public",
+      "table": "RefreshToken",
+      "name": "b01_auth_closure_refreshtoken_update",
+      "command": "w",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-authentication-closure\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"capability-derived actor or live password-login subject\"}",
+      "using_sha256": "15cb2a63a11dbd42ad1e77d261ce23f6ae52b6aa3fb1290086a94426609801a5",
+      "with_check_sha256": "15cb2a63a11dbd42ad1e77d261ce23f6ae52b6aa3fb1290086a94426609801a5"
+    },
+    {
+      "schema": "public",
+      "table": "RefreshToken",
+      "name": "b01_preauth_refreshtoken_select",
+      "command": "r",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-preauth-bearer\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"operation-specific selector rebound to locked token or account\"}",
+      "using_sha256": "5b4c994f3847a8aca76a5ee25b03910f99e358d5907032c9c429e0c4dad8206b",
+      "with_check_sha256": null
+    },
+    {
+      "schema": "public",
+      "table": "RefreshToken",
+      "name": "b01_preauth_refreshtoken_update",
+      "command": "w",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-preauth-bearer\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"operation-specific selector rebound to locked token or account\"}",
+      "using_sha256": "5b4c994f3847a8aca76a5ee25b03910f99e358d5907032c9c429e0c4dad8206b",
+      "with_check_sha256": "5b4c994f3847a8aca76a5ee25b03910f99e358d5907032c9c429e0c4dad8206b"
+    },
+    {
+      "schema": "public",
+      "table": "RefreshToken",
+      "name": "b01_refreshtoken_insert",
+      "command": "a",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-refresh-rotation\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"transaction-local bearer-derived context\"}",
+      "using_sha256": null,
+      "with_check_sha256": "7ad4fcf9ecf0615c2f1b6de2f6e1a213474c54331b5438d454eaa7cf6aea6696"
+    },
+    {
+      "schema": "public",
+      "table": "RefreshToken",
+      "name": "b01_refreshtoken_select",
+      "command": "r",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-refresh-rotation\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"transaction-local bearer-derived context\"}",
+      "using_sha256": "8e3cc816f10d4ef13da4998f45a50821029f74be262f2883d388f83e0a1fb7a2",
+      "with_check_sha256": null
+    },
+    {
+      "schema": "public",
+      "table": "RefreshToken",
+      "name": "b01_refreshtoken_update",
+      "command": "w",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-refresh-rotation\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"transaction-local bearer-derived context\"}",
+      "using_sha256": "3386dfca0af70ea3e1673e5659c81ebad325a0f8d4584f6ce9879140a1446e28",
+      "with_check_sha256": "3386dfca0af70ea3e1673e5659c81ebad325a0f8d4584f6ce9879140a1446e28"
+    },
+    {
+      "schema": "public",
+      "table": "User",
+      "name": "b01_auth_closure_user_select",
+      "command": "r",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-authentication-closure\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"capability-derived actor or live password-login subject\"}",
+      "using_sha256": "3e74997263ac4e02e5eecb88ad85a38a55a0800d496ee4a9c3ef40728f625dcc",
+      "with_check_sha256": null
+    },
+    {
+      "schema": "public",
+      "table": "User",
+      "name": "b01_auth_closure_user_update",
+      "command": "w",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-authentication-closure\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"capability-derived actor or live password-login subject\"}",
+      "using_sha256": "4d03604bf5fe54f638225e431dfe889fb5dcd2af1e3436be61f67632e57f9a54",
+      "with_check_sha256": "4d03604bf5fe54f638225e431dfe889fb5dcd2af1e3436be61f67632e57f9a54"
+    },
+    {
+      "schema": "public",
+      "table": "User",
+      "name": "b01_preauth_user_select",
+      "command": "r",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-preauth-bearer\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"operation-specific selector rebound to locked token or account\"}",
+      "using_sha256": "400377fc22d41c53cd0e9aa911cfae82d29499713998d015197a366def6963f9",
+      "with_check_sha256": null
+    },
+    {
+      "schema": "public",
+      "table": "User",
+      "name": "b01_preauth_user_update",
+      "command": "w",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-preauth-bearer\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"operation-specific selector rebound to locked token or account\"}",
+      "using_sha256": "e6b97f9fcfa00a7e315a0be04c43721073907b547b09ea724b4a479e36273e91",
+      "with_check_sha256": "e6b97f9fcfa00a7e315a0be04c43721073907b547b09ea724b4a479e36273e91"
+    },
+    {
+      "schema": "public",
+      "table": "User",
+      "name": "b01_user_select",
+      "command": "r",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-refresh-rotation\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"transaction-local bearer-derived context\"}",
+      "using_sha256": "31c113b828405d5641b3ba76fa626f47ef081fd7211334b6cf796f6b66872827",
+      "with_check_sha256": null
+    },
+    {
+      "schema": "public",
+      "table": "UserBackupCode",
+      "name": "b01_auth_closure_userbackupcode_delete",
+      "command": "d",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-authentication-closure\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"capability-derived actor or live password-login subject\"}",
+      "using_sha256": "32fd31195303dd5b1b8dd99fc49cb241d8a94a48fcf215eb74f7479adccaed94",
+      "with_check_sha256": null
+    },
+    {
+      "schema": "public",
+      "table": "UserBackupCode",
+      "name": "b01_auth_closure_userbackupcode_insert",
+      "command": "a",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-authentication-closure\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"capability-derived actor or live password-login subject\"}",
+      "using_sha256": null,
+      "with_check_sha256": "1f4d4921d8dcb37ad97bf6109f2444f856f9884679e19b6683ea7662c01c018c"
+    },
+    {
+      "schema": "public",
+      "table": "UserBackupCode",
+      "name": "b01_auth_closure_userbackupcode_select",
+      "command": "r",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-authentication-closure\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"capability-derived actor or live password-login subject\"}",
+      "using_sha256": "99fe25439f53acb07e32e49e82d81ef8dd929533978adb2a5bd8361d478a5da9",
+      "with_check_sha256": null
+    },
+    {
+      "schema": "public",
+      "table": "UserBackupCode",
+      "name": "b01_auth_closure_userbackupcode_update",
+      "command": "w",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-authentication-closure\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"capability-derived actor or live password-login subject\"}",
+      "using_sha256": "5babcd5aed010649a5a31b3695d0bfe82fbc1c73905f6f8e9f02945962eb4009",
+      "with_check_sha256": "5babcd5aed010649a5a31b3695d0bfe82fbc1c73905f6f8e9f02945962eb4009"
+    },
+    {
+      "schema": "public",
+      "table": "UserBackupCode",
+      "name": "b01_userbackupcode_select",
+      "command": "r",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-refresh-rotation\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"transaction-local bearer-derived context\"}",
+      "using_sha256": "ed54892cb7f90b729e6d82012dfcb2d2ff4f0eca2f536b28723ef44be2939f21",
+      "with_check_sha256": null
+    },
+    {
+      "schema": "public",
+      "table": "UserMfaFactor",
+      "name": "b01_auth_closure_usermfafactor_delete",
+      "command": "d",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-authentication-closure\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"capability-derived actor or live password-login subject\"}",
+      "using_sha256": "c383270ea32e3b95cb603df8346f4da19023caf32bc8475e26627f4193ebc97e",
+      "with_check_sha256": null
+    },
+    {
+      "schema": "public",
+      "table": "UserMfaFactor",
+      "name": "b01_auth_closure_usermfafactor_insert",
+      "command": "a",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-authentication-closure\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"capability-derived actor or live password-login subject\"}",
+      "using_sha256": null,
+      "with_check_sha256": "d28f402dceec1dd87b9ac3f081bbdc1a9901da98e4ab76c8bd1382d92154f3eb"
+    },
+    {
+      "schema": "public",
+      "table": "UserMfaFactor",
+      "name": "b01_auth_closure_usermfafactor_select",
+      "command": "r",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-authentication-closure\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"capability-derived actor or live password-login subject\"}",
+      "using_sha256": "99fe25439f53acb07e32e49e82d81ef8dd929533978adb2a5bd8361d478a5da9",
+      "with_check_sha256": null
+    },
+    {
+      "schema": "public",
+      "table": "UserMfaFactor",
+      "name": "b01_auth_closure_usermfafactor_update",
+      "command": "w",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-authentication-closure\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"capability-derived actor or live password-login subject\"}",
+      "using_sha256": "a08c8495e7ffee72f4f91b4b692b0c2c123cc3577d126825f68f281c7acee1e4",
+      "with_check_sha256": "a08c8495e7ffee72f4f91b4b692b0c2c123cc3577d126825f68f281c7acee1e4"
+    },
+    {
+      "schema": "public",
+      "table": "UserMfaFactor",
+      "name": "b01_usermfafactor_select",
+      "command": "r",
+      "permissive": true,
+      "roles": [
+        "mscqr_prd_rls_phase2_auth_owner"
+      ],
+      "comment": "{\"boundary\":\"b01-refresh-rotation\",\"ownerIdentity\":\"identity-auth-function-owner\",\"scope\":\"transaction-local bearer-derived context\"}",
+      "using_sha256": "ed54892cb7f90b729e6d82012dfcb2d2ff4f0eca2f536b28723ef44be2939f21",
+      "with_check_sha256": null
+    }
+  ]
+}
