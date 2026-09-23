@@ -2,6 +2,21 @@ const READBACK_METADATA_FIELDS = Object.freeze(["taskDefinitionArn", "revision",
 const ROOT_EMPTY_DEFAULT_FIELDS = Object.freeze(["placementConstraints", "volumes"]);
 const CONTAINER_EMPTY_DEFAULT_FIELDS = Object.freeze(["environment", "environmentFiles", "mountPoints", "portMappings", "systemControls", "ulimits", "volumesFrom"]);
 
+function normalizeEnvironment(environment) {
+  if (!Array.isArray(environment)) throw new TypeError("ECS container environment must be an array.");
+  const names = new Set();
+  for (const entry of environment) {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry) || Object.getPrototypeOf(entry) !== Object.prototype
+        || Object.keys(entry).length !== 2 || !Object.hasOwn(entry, "name") || !Object.hasOwn(entry, "value")
+        || typeof entry.name !== "string" || entry.name.length === 0 || typeof entry.value !== "string") {
+      throw new TypeError("ECS container environment entries must be plain { name, value } string objects.");
+    }
+    if (names.has(entry.name)) throw new TypeError("ECS container environment names must be unique.");
+    names.add(entry.name);
+  }
+  return environment.toSorted((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0);
+}
+
 export function normalizeEcsTaskDefinitionReadback(definition) {
   const normalized = structuredClone(definition);
   for (const field of READBACK_METADATA_FIELDS) delete normalized[field];
@@ -22,6 +37,7 @@ export function normalizeEcsTaskDefinitionReadback(definition) {
     normalized.containerDefinitions = normalized.containerDefinitions.map((container) => {
       const normalizedContainer = structuredClone(container);
       if (!Object.hasOwn(normalizedContainer, "cpu")) normalizedContainer.cpu = 0;
+      if (Object.hasOwn(normalizedContainer, "environment")) normalizedContainer.environment = normalizeEnvironment(normalizedContainer.environment);
       for (const field of CONTAINER_EMPTY_DEFAULT_FIELDS) if (Array.isArray(normalizedContainer[field]) && normalizedContainer[field].length === 0) delete normalizedContainer[field];
       // ECS materializes an omitted awslogs secretOptions list as []; an actual
       // non-empty list remains part of the reviewed executable configuration.
