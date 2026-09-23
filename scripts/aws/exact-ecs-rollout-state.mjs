@@ -66,6 +66,7 @@ export function waitForExactEcsRollout({
 }
 
 function describeServicesWithAwsCli({ responsePath, region, clusterName, serviceName, timeoutMs }) {
+  // Credential provenance is established by deploy-ecs-service.sh before this subprocess inherits its AWS environment.
   const remainingSeconds = Math.floor(timeoutMs / 1000);
   if (remainingSeconds < 1) fail("rollout deadline leaves no bounded AWS call budget.");
   const connectTimeout = Math.min(AWS_CLI_CONNECT_TIMEOUT_SECONDS, remainingSeconds);
