@@ -6,6 +6,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { selectTargetTask } from "../aws/ecs-exec-target-selection.mjs";
+import { classifyExactEcsRollout } from "../aws/exact-ecs-rollout-state.mjs";
 
 const script = path.resolve("scripts/aws/deploy-ecs-service.sh");
 const region = "eu-west-2";
@@ -28,8 +29,8 @@ const clientIpTrustEnvironment = Object.freeze([
 ]);
 
 const serviceResponse = (taskDefinition, deployments = [
-  { status: "PRIMARY", taskDefinition, pendingCount: 0, runningCount: 2, rolloutState: "COMPLETED" },
-], enableExecuteCommand = false, propagateTags) => ({ failures: [], services: [{ serviceName: service, serviceArn: `arn:aws:ecs:${region}:${account}:service/${cluster}/${service}`, clusterArn: `arn:aws:ecs:${region}:${account}:cluster/${cluster}`, status: "ACTIVE", taskDefinition, desiredCount: 2, loadBalancers: serviceLoadBalancers, deployments, enableExecuteCommand, ...(propagateTags ? { propagateTags } : {}) }] });
+  { status: "PRIMARY", taskDefinition, desiredCount: 2, pendingCount: 0, runningCount: 2, rolloutState: "COMPLETED" },
+], enableExecuteCommand = false, propagateTags) => ({ failures: [], services: [{ serviceName: service, serviceArn: `arn:aws:ecs:${region}:${account}:service/${cluster}/${service}`, clusterArn: `arn:aws:ecs:${region}:${account}:cluster/${cluster}`, status: "ACTIVE", taskDefinition, desiredCount: 2, runningCount: 2, pendingCount: 0, loadBalancers: serviceLoadBalancers, deployments, enableExecuteCommand, ...(propagateTags ? { propagateTags } : {}) }] });
 
 function writeFixture(data, options = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ecs-existing-target-"));
@@ -101,8 +102,11 @@ function writeFixture(data, options = {}) {
   const unrelatedTaskDefinition = `arn:aws:ecs:${region}:${account}:task-definition/unreviewed:9`;
   const unrelated = serviceResponse(unrelatedTaskDefinition);
   const foreignDeployment = serviceResponse(fixtureTargetArn, [
-    { status: "PRIMARY", taskDefinition: fixtureTargetArn, pendingCount: 0, runningCount: 2, rolloutState: "COMPLETED" },
+    { status: "PRIMARY", taskDefinition: fixtureTargetArn, desiredCount: 2, pendingCount: 0, runningCount: 2, rolloutState: "COMPLETED" },
     { status: "ACTIVE", taskDefinition: unrelatedTaskDefinition, pendingCount: 0, runningCount: 0 },
+  ]);
+  const rolloutInProgress = serviceResponse(fixtureTargetArn, [
+    { id: "ecs-svc/35851374390", status: "PRIMARY", taskDefinition: fixtureTargetArn, desiredCount: 2, pendingCount: 0, runningCount: 2, rolloutState: "IN_PROGRESS" },
   ]);
   const tasks = {
     failures: [],
@@ -115,7 +119,7 @@ function writeFixture(data, options = {}) {
     })),
   };
   const taskArns = options.taskArnsResponse || { taskArns: tasks.tasks.map((task) => task.taskArn) };
-  for (const [name, value] of Object.entries({ target, normal, pre, post, targetDeployment, unrelated, foreignDeployment, tasks, taskArns })) {
+  for (const [name, value] of Object.entries({ target, normal, pre, post, targetDeployment, unrelated, foreignDeployment, rolloutInProgress, tasks, taskArns })) {
     fs.writeFileSync(path.join(dir, `${name}.json`), JSON.stringify(value));
   }
   if (options.registeredTags !== undefined) fs.writeFileSync(path.join(dir, "registered-tags.json"), JSON.stringify(options.registeredTags));
@@ -140,6 +144,11 @@ elif [[ "$1 $2" == "ecs describe-task-definition" ]]; then
   done
   if [[ "$task_definition" == "${fixtureTargetArn}" && -f "$FAKE_DATA/registered.json" ]]; then cat "$FAKE_DATA/registered.json"; elif [[ "$task_definition" == "${fromArn}" || "$task_definition" == mscqr-backend* || "$task_definition" == "${fixtureTargetFamily}" ]]; then cat "$FAKE_DATA/normal.json"; else cat "$FAKE_DATA/target.json"; fi
 elif [[ "$1 $2" == "ecs describe-services" ]]; then
+  if [[ "$FAKE_SCENARIO" == "rollout-describe-failure" && -f "$FAKE_DATA/update-attempted" ]]; then exit 51; fi
+  if [[ "$FAKE_SCENARIO" == "rollout-timeout" && -f "$FAKE_DATA/update-attempted" ]]; then cat "$FAKE_DATA/rolloutInProgress.json"; exit 0; fi
+  if [[ "$FAKE_SCENARIO" == "rollout-race" && -f "$FAKE_DATA/update-attempted" ]]; then
+    if [[ ! -f "$FAKE_DATA/rollout-observed" ]]; then touch "$FAKE_DATA/rollout-observed"; cat "$FAKE_DATA/rolloutInProgress.json"; exit 0; fi
+  fi
   if [[ "$FAKE_SCENARIO" == "reconcile-failure" && -f "$FAKE_DATA/update-attempted" ]]; then exit 51; fi
   if [[ "$FAKE_SCENARIO" == "ownership-read-failure" && -f "$FAKE_DATA/stable-failed" ]]; then exit 51; fi
   if [[ "$FAKE_SCENARIO" == "malformed-then-target" && -f "$FAKE_DATA/update-attempted" && ! -f "$FAKE_DATA/rollback-attempted" ]]; then
@@ -324,13 +333,81 @@ function runNormalBackend(options = {}) {
       MSCQR_NORMAL_APPLICATION_DEPLOYMENT: "true",
       ...(Object.hasOwn(options, "propagateTags") ? { PROPAGATE_TAGS: options.propagateTags } : {}),
       FAKE_DATA: fixture.dir,
-      FAKE_SCENARIO: "",
+      FAKE_SCENARIO: options.scenario || "",
       TMPDIR: fixture.tempDir,
     },
   });
   const calls = fs.existsSync(fixture.calls) ? fs.readFileSync(fixture.calls, "utf8") : "";
   return { ...result, calls, fixture };
 }
+
+const exactRollout = (overrides = {}) => {
+  const response = serviceResponse(targetArn);
+  Object.assign(response.services[0], overrides.service);
+  Object.assign(response.services[0].deployments[0], overrides.deployment);
+  return { response, expectedTaskDefinitionArn: targetArn, expectedClusterName: cluster, expectedServiceName: service, expectedDesiredCount: 2 };
+};
+
+test("exact rollout polling closes the revision-18 IN_PROGRESS race without accepting it as success", () => {
+  const observed = exactRollout({ deployment: { id: "ecs-svc/35851374390", rolloutState: "IN_PROGRESS" } });
+  assert.equal(classifyExactEcsRollout(observed), "CONTINUE");
+  assert.equal(classifyExactEcsRollout(exactRollout({ service: { runningCount: 1, pendingCount: 1 }, deployment: { runningCount: 1, pendingCount: 1, rolloutState: "IN_PROGRESS" } })), "CONTINUE");
+  assert.equal(classifyExactEcsRollout(exactRollout({ deployment: { id: "ecs-svc/35851374390", rolloutState: "COMPLETED" } })), "SUCCESS");
+  const result = runNormalBackend({ scenario: "rollout-race" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal((result.calls.match(/ecs describe-services/g) || []).length >= 3, true);
+  assert.equal((result.calls.match(/ecs update-service/g) || []).length, 1);
+  assertTempClean(result);
+});
+
+test("exact rollout classification fails closed on terminal, displaced, malformed, and contradictory states", () => {
+  const cases = [
+    [exactRollout({ deployment: { rolloutState: "FAILED" } }), /rollout failed/],
+    [exactRollout({ deployment: { status: "ACTIVE" } }), /PRIMARY/],
+    [exactRollout({ service: { taskDefinition: fromArn } }), /task definition/],
+    [exactRollout({ deployment: { taskDefinition: fromArn } }), /PRIMARY/],
+    [exactRollout({ deployment: { rolloutState: "UNKNOWN" } }), /unrecognized/],
+    [exactRollout({ deployment: { rolloutState: undefined } }), /unrecognized/],
+    [exactRollout({ service: { runningCount: 1 } }), /task counts/],
+    [exactRollout({ service: { pendingCount: 1 } }), /task counts/],
+    [exactRollout({ service: { desiredCount: 3 } }), /desired count/],
+    [exactRollout({ deployment: { desiredCount: 3 } }), /PRIMARY/],
+    [exactRollout({ deployment: { runningCount: 1 } }), /task counts/],
+    [exactRollout({ deployment: { pendingCount: 1 } }), /task counts/],
+  ];
+  for (const [input, pattern] of cases) assert.throws(() => classifyExactEcsRollout(input), pattern);
+
+  const extra = exactRollout({ deployment: { rolloutState: "IN_PROGRESS" } });
+  extra.response.services[0].deployments.push({ ...extra.response.services[0].deployments[0], id: "ecs-svc/unexpected", status: "ACTIVE" });
+  assert.throws(() => classifyExactEcsRollout(extra), /sole deployment/);
+
+  const missing = exactRollout();
+  missing.response.services = [];
+  assert.throws(() => classifyExactEcsRollout(missing), /malformed/);
+  const failedResponse = exactRollout();
+  failedResponse.response.failures.push({ arn: service, reason: "MISSING" });
+  assert.throws(() => classifyExactEcsRollout(failedResponse), /reports a failure/);
+
+  const frontendArn = `arn:aws:ecs:${region}:${account}:task-definition/mscqr-frontend:21`;
+  const frontendService = "mscqr-frontend-servi-euw2";
+  assert.equal(classifyExactEcsRollout({
+    response: { failures: [], services: [{ ...serviceResponse(frontendArn).services[0], serviceName: frontendService, serviceArn: `arn:aws:ecs:${region}:${account}:service/${cluster}/${frontendService}` }] },
+    expectedTaskDefinitionArn: frontendArn,
+    expectedClusterName: cluster,
+    expectedServiceName: frontendService,
+    expectedDesiredCount: 2,
+  }), "SUCCESS");
+});
+
+test("exact rollout polling times out and DescribeServices command failure fails closed", () => {
+  const timeout = runNormalBackend({ scenario: "rollout-timeout" });
+  assertFailure(timeout, /remained IN_PROGRESS beyond 600 seconds/);
+  assert.equal((timeout.calls.match(/ecs update-service/g) || []).length, 1);
+
+  const describeFailure = runNormalBackend({ scenario: "rollout-describe-failure" });
+  assertFailure(describeFailure);
+  assert.equal((describeFailure.calls.match(/ecs update-service/g) || []).length, 1);
+});
 
 function assertFailure(result, pattern) {
   assert.notEqual(result.status, 0, result.stdout + result.stderr);

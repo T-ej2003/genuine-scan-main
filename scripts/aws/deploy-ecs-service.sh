@@ -1062,21 +1062,26 @@ if [[ "$WAIT_FOR_STABLE" == "true" ]]; then
     --region "$AWS_REGION" \
     --cluster "$CLUSTER_NAME" \
     --services "$SERVICE_NAME"
-  aws ecs describe-services \
-    --region "$AWS_REGION" \
-    --cluster "$CLUSTER_NAME" \
-    --services "$SERVICE_NAME" \
-    >"$EXISTING_POST_SERVICE_FILE"
-  node --input-type=module - "$EXISTING_POST_SERVICE_FILE" "$NEW_TASK_DEFINITION_ARN" <<'NODE'
-import fs from "node:fs";
-const [file, expectedArn] = process.argv.slice(2);
-const response = JSON.parse(fs.readFileSync(file, "utf8"));
-const service = response.services?.length === 1 ? response.services[0] : null;
-const deployment = service?.deployments?.length === 1 ? service.deployments[0] : null;
-if (!Array.isArray(response.failures) || response.failures.length !== 0 || !service || service.status !== "ACTIVE" || service.taskDefinition !== expectedArn || !deployment || deployment.status !== "PRIMARY" || deployment.taskDefinition !== expectedArn || deployment.pendingCount !== 0 || deployment.runningCount !== service.desiredCount || (deployment.rolloutState && deployment.rolloutState !== "COMPLETED")) {
-  throw new Error("ECS-native rollback or concurrent change prevented the exact candidate from becoming stable.");
-}
-NODE
+  EXPECTED_DESIRED_COUNT="$(node --input-type=module -e 'import fs from "node:fs"; const response=JSON.parse(fs.readFileSync(process.argv[1])); const count=response.services?.[0]?.desiredCount; if (!Number.isInteger(count) || count < 1) throw new Error("Pre-update service desired count is invalid."); process.stdout.write(String(count));' "$EXISTING_SERVICE_FILE")"
+  readonly ROLLOUT_POLL_INTERVAL_SECONDS=15
+  readonly MAX_ROLLOUT_WAIT_SECONDS=600
+  rollout_waited_seconds=0
+  while true; do
+    aws ecs describe-services \
+      --region "$AWS_REGION" \
+      --cluster "$CLUSTER_NAME" \
+      --services "$SERVICE_NAME" \
+      >"$EXISTING_POST_SERVICE_FILE"
+    rollout_result="$(node "$SCRIPT_DIR/exact-ecs-rollout-state.mjs" "$EXISTING_POST_SERVICE_FILE" "$NEW_TASK_DEFINITION_ARN" "$CLUSTER_NAME" "$SERVICE_NAME" "$EXPECTED_DESIRED_COUNT")"
+    [[ "$rollout_result" == "SUCCESS" ]] && break
+    [[ "$rollout_result" == "CONTINUE" ]] || { echo "Unexpected exact ECS rollout result: $rollout_result" >&2; exit 1; }
+    if ((rollout_waited_seconds >= MAX_ROLLOUT_WAIT_SECONDS)); then
+      echo "Exact ECS rollout remained IN_PROGRESS beyond ${MAX_ROLLOUT_WAIT_SECONDS} seconds." >&2
+      exit 1
+    fi
+    sleep "$ROLLOUT_POLL_INTERVAL_SECONDS"
+    rollout_waited_seconds=$((rollout_waited_seconds + ROLLOUT_POLL_INTERVAL_SECONDS))
+  done
 fi
 
 if [[ "$ENABLE_EXECUTE_COMMAND" == "true" ]]; then
