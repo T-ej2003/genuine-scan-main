@@ -99,10 +99,10 @@ export function canonicalB01Prerequisite({ repositoryRoot = root, readOld = (fil
   return Object.freeze({ predecessor, successor, mutations, predecessorBindSql: oldBind, predecessorRlsIdentity, successorRlsIdentity });
 }
 
-export function buildB01ExecutorInput({ deploymentSourceSha, databaseHostname, repositoryRoot = root } = {}) {
+export function buildB01ExecutorInput({ deploymentSourceSha, databaseHostname, repositoryRoot = root, executorSource } = {}) {
   assert.match(deploymentSourceSha || "", /^[a-f0-9]{40}$/); assert.match(databaseHostname || "", /^[a-z0-9.-]+$/);
   const delta = canonicalB01Prerequisite({ repositoryRoot });
-  const executorSource = fs.readFileSync(path.join(repositoryRoot, path.relative(root, runtimePath)), "utf8");
+  executorSource ||= fs.readFileSync(path.join(repositoryRoot, path.relative(root, runtimePath)), "utf8");
   const contract = { rlsDeltaOriginSha: B01_PREREQUISITE.rlsDeltaOriginSha, deploymentSourceSha,
     migrationSetDigest: B01_PREREQUISITE.migrationSetDigest, sourceContractSha256: B01_PREREQUISITE.sourceContractSha256,
     predecessorRlsIdentity: delta.predecessorRlsIdentity, successorRlsIdentity: delta.successorRlsIdentity,
@@ -120,12 +120,14 @@ export function b01CatalogueRuntimeSource({ repositoryRoot = root } = {}) {
   return match[1];
 }
 
-export function buildB01ReadOnlyInput({ deploymentSourceSha, databaseHostname, repositoryRoot = root } = {}) {
+export function buildB01ReadOnlyInput({ deploymentSourceSha, databaseHostname, ambiguousMutationTaskEvidenceSha256, repositoryRoot = root } = {}) {
   assert.match(deploymentSourceSha || "", /^[a-f0-9]{40}$/); assert.match(databaseHostname || "", /^[a-z0-9.-]+$/);
+  assert.match(ambiguousMutationTaskEvidenceSha256 || "", /^[a-f0-9]{64}$/);
   const delta = canonicalB01Prerequisite({ repositoryRoot });
   const contract = { rlsDeltaOriginSha: B01_PREREQUISITE.rlsDeltaOriginSha, deploymentSourceSha,
     migrationSetDigest: B01_PREREQUISITE.migrationSetDigest, sourceContractSha256: B01_PREREQUISITE.sourceContractSha256,
-    predecessorRlsIdentity: delta.predecessorRlsIdentity, successorRlsIdentity: delta.successorRlsIdentity };
+    predecessorRlsIdentity: delta.predecessorRlsIdentity, successorRlsIdentity: delta.successorRlsIdentity,
+    ambiguousMutationTaskEvidenceSha256 };
   const tail = fs.readFileSync(path.join(repositoryRoot, path.relative(root, readOnlyRuntimePath)), "utf8");
   const source = `"use strict";\nconst assert=require("node:assert/strict"),crypto=require("node:crypto");\n${b01CatalogueRuntimeSource({ repositoryRoot })}\n${tail}`;
   const envelope = { databaseHostname, contract, contractSha256: canonicalSha256(contract) };
@@ -155,12 +157,12 @@ export function authenticateB01Result(message, contract) {
   assert.ok(body.status === "APPLIED" && body.writeCount === 7 || body.status === "ALREADY_CONVERGED" && body.writeCount === 0); return value;
 }
 
-export function authenticateB01ExecutorCommand({ command, deploymentSourceSha, repositoryRoot = root } = {}) {
+export function authenticateB01ExecutorCommand({ command, deploymentSourceSha, repositoryRoot = root, executorSource } = {}) {
   assert.equal(command?.length, 4); assert.equal(command[0], "-e");
-  const executorSource = fs.readFileSync(path.join(repositoryRoot, path.relative(root, runtimePath)), "utf8"); assert.equal(command[1], executorSource);
+  executorSource ||= fs.readFileSync(path.join(repositoryRoot, path.relative(root, runtimePath)), "utf8"); assert.equal(command[1], executorSource);
   const bytes = gunzipSync(Buffer.from(command[2], "base64"), { maxOutputLength: 128 * 1024 });
   assert.equal(hash(bytes), command[3]); const envelope = JSON.parse(bytes); assert.equal(canonicalJson(envelope), bytes.toString("utf8"));
-  const expected = buildB01ExecutorInput({ deploymentSourceSha, databaseHostname: envelope.databaseHostname, repositoryRoot });
+  const expected = buildB01ExecutorInput({ deploymentSourceSha, databaseHostname: envelope.databaseHostname, repositoryRoot, executorSource });
   assert.deepEqual(command, expected.command); assert.deepEqual(envelope.contract, expected.contract); assert.equal(envelope.contractSha256, expected.contractSha256);
   return expected;
 }

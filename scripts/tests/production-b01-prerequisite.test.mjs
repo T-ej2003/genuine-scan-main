@@ -9,7 +9,8 @@ import { B01_PREREQUISITE, assertB01ExecutorAwsEvidence, assertB01LivePredecesso
   buildB01ReadOnlyDefinition, buildB01RunTaskRequest, canonicalSha256, classifyBridgeFiles } from "../aws/production-b01-prerequisite-contract.mjs";
 import { authenticateB01RunTaskCloudTrail, b01CatalogueRuntimeSource, buildB01ExecutorInput, buildB01ReadOnlyInput,
   canonicalB01Prerequisite, executeB01Transaction } from "../aws/apply-production-b01-prerequisite.mjs";
-import { authenticateB01ReadOnlyResult } from "../aws/probe-production-b01-prerequisite.mjs";
+import { authenticateB01AmbiguousMutationTask, authenticateB01MutationTaskListing, authenticateB01ReadOnlyResult,
+  findNonTerminalB01MutationTasks } from "../aws/probe-production-b01-prerequisite.mjs";
 
 const require = createRequire(import.meta.url), runtime = require("../aws/production-b01-prerequisite-executor.cjs");
 const readOnlyRuntime = require("../aws/production-b01-prerequisite-readonly.cjs");
@@ -23,6 +24,7 @@ bridgeDiffAttestation.attestationSha256 = canonicalSha256(bridgeDiffAttestation)
 const executor = fs.readFileSync("scripts/aws/production-b01-prerequisite-executor.cjs", "utf8"), executorSourceSha256 = crypto.createHash("sha256").update(executor).digest("hex");
 const taskArn = "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/" + "a".repeat(32);
 const taskDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-b01-prerequisite:1";
+const ambiguousMutationTaskEvidenceSha256 = "7".repeat(64);
 const runTaskRequest = buildB01RunTaskRequest({ taskDefinitionArn, deploymentSourceSha });
 const runTaskRequestBody = { eventId: "12345678-1234-1234-1234-123456789abc", eventTime: new Date(now.getTime() - 20_000).toISOString(), taskArn, taskDefinitionArn,
   cluster: "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main", launchType: "FARGATE", count: 1, enableExecuteCommand: false, overridesPresent: false };
@@ -119,12 +121,15 @@ test("executor command contains only the seven source-fixed #567 mutations", asy
 });
 
 test("read-only command reuses the exact mutation catalogue collector and cannot reach mutation code", () => {
-  const built = buildB01ReadOnlyInput({ deploymentSourceSha, databaseHostname: "db.synthetic.invalid" });
+  const built = buildB01ReadOnlyInput({ deploymentSourceSha, databaseHostname: "db.synthetic.invalid", ambiguousMutationTaskEvidenceSha256 });
   const source = built.command[1], shared = b01CatalogueRuntimeSource();
   assert.ok(source.includes(shared));
-  assert.match(source, /SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY/);
+  assert.match(source, /SET TRANSACTION ISOLATION LEVEL READ COMMITTED, READ ONLY/);
+  assert.ok(source.includes(runtime.B01_MUTATION_ADVISORY_LOCK_SQL));
   assert.doesNotMatch(shared, /EXPECTED_MUTATIONS|CREATE POLICY|GRANT EXECUTE|executeB01Transaction|AUTHORIZED_MUTATION/);
   assert.doesNotMatch(source, /executeB01Transaction|mutation\.sql|SET LOCAL ROLE/);
+  assert.equal((source.match(/\.\$transaction\(/g) || []).length, 1);
+  assert.doesNotMatch(source, /\bCOMMIT\b|SET TRANSACTION READ WRITE|SET LOCAL ROLE/);
   const definition = buildB01ReadOnlyDefinition(built.command);
   assert.equal(definition.family, B01_PREREQUISITE.readOnlyFamily);
   assert.equal(definition.containerDefinitions[0].name, B01_PREREQUISITE.readOnlyContainer);
@@ -132,15 +137,19 @@ test("read-only command reuses the exact mutation catalogue collector and cannot
   assert.deepEqual(definition.containerDefinitions[0].command, built.command);
   assert.throws(() => buildB01ReadOnlyInput({ deploymentSourceSha: "main", databaseHostname: "db.synthetic.invalid" }));
   assert.throws(() => buildB01ReadOnlyInput({ deploymentSourceSha, databaseHostname: "db.invalid/other" }));
+  assert.throws(() => buildB01ReadOnlyInput({ deploymentSourceSha, databaseHostname: "db.synthetic.invalid", ambiguousMutationTaskEvidenceSha256: "bad" }));
 });
 
 test("read-only collector classifies exact predecessor, successor, partial, and unknown safely", async () => {
-  const delta = canonicalB01Prerequisite(), contract = buildB01ReadOnlyInput({ deploymentSourceSha, databaseHostname: "db.synthetic.invalid" }).contract;
+  const delta = canonicalB01Prerequisite(), contract = buildB01ReadOnlyInput({ deploymentSourceSha, databaseHostname: "db.synthetic.invalid", ambiguousMutationTaskEvidenceSha256 }).contract;
+  const statements = [];
   const execute = async (state) => readOnlyRuntime.executeB01ReadOnlyTransaction({
-    client: { $transaction: async (callback) => callback({ $executeRawUnsafe: async (sql) => assert.equal(sql, "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY") }) },
-    input: { contract }, collect: async () => state, inspect: runtime.inspectB01State,
+    client: { $transaction: async (callback) => callback({ $executeRawUnsafe: async (sql) => { statements.push(sql); } }) },
+    input: { contract }, collect: async () => state, inspect: runtime.inspectB01State, lockSql: runtime.B01_MUTATION_ADVISORY_LOCK_SQL,
   });
   assert.equal((await execute(stateFixture(delta.predecessor, { identity: { ...identity, read_only: "on" } }))).classification, "PREDECESSOR");
+  assert.deepEqual(statements.slice(0, 4), ["SET TRANSACTION ISOLATION LEVEL READ COMMITTED, READ ONLY",
+    "SET LOCAL statement_timeout = '10000ms'", runtime.B01_MUTATION_ADVISORY_LOCK_SQL, "SET LOCAL statement_timeout = '0'"]);
   assert.equal((await execute(stateFixture(delta.successor, { identity: { ...identity, read_only: "on" } }))).classification, "SUCCESSOR");
   const partial = await execute(stateFixture(delta.predecessor, { identity: { ...identity, read_only: "on" }, functions: [] }));
   assert.deepEqual({ classification: partial.classification, unauthorizedCatalogueDelta: partial.unauthorizedCatalogueDelta,
@@ -310,6 +319,44 @@ test("CloudTrail proves the RunTask request supplied no runtime overrides", () =
   const activeDefault = structuredClone(cloudTrail), changedDefault = JSON.parse(activeDefault[0].CloudTrailEvent); changedDefault.requestParameters.enableECSManagedTags = true;
   activeDefault[0].CloudTrailEvent = JSON.stringify(changedDefault);
   assert.throws(() => authenticateB01RunTaskCloudTrail(activeDefault, { taskArn, taskDefinitionArn, deploymentSourceSha }));
+});
+
+test("reconciliation authenticates the exact stopped ambiguous mutation task and rejects non-quiescent substitutes", () => {
+  const command = buildB01ExecutorInput({ deploymentSourceSha, databaseHostname: "db.synthetic.invalid" }).command;
+  const taskDefinition = { ...buildB01ExecutorDefinition(command), taskDefinitionArn, revision: 1, status: "ACTIVE", tags: [] };
+  const task = { taskArn, taskDefinitionArn, clusterArn: `arn:aws:ecs:${B01_PREREQUISITE.region}:${B01_PREREQUISITE.account}:cluster/${B01_PREREQUISITE.cluster}`,
+    group: `family:${B01_PREREQUISITE.executorFamily}`, launchType: "FARGATE", lastStatus: "STOPPED", desiredStatus: "STOPPED",
+    stopCode: "EssentialContainerExited", enableExecuteCommand: false, createdAt: new Date(now.getTime() - 30_000).toISOString(),
+    executionStoppedAt: new Date(now.getTime() - 5_000).toISOString(), stoppedAt: now.toISOString(),
+    overrides: { containerOverrides: [{ name: B01_PREREQUISITE.executorContainer }], inferenceAcceleratorOverrides: [] },
+    containers: [{ name: B01_PREREQUISITE.executorContainer, lastStatus: "STOPPED", image: B01_PREREQUISITE.executorImage,
+      imageDigest: B01_PREREQUISITE.executorImage.split("@")[1], exitCode: 1 }] };
+  const events = [{ EventId: runTaskRequestBody.eventId, CloudTrailEvent: JSON.stringify({ eventID: runTaskRequestBody.eventId,
+    eventTime: runTaskRequestBody.eventTime, eventSource: "ecs.amazonaws.com", eventName: "RunTask",
+    requestParameters: { ...runTaskRequest, dryrun: false, enableECSManagedTags: false }, responseElements: { tasks: [{ taskArn }] } }) }];
+  const authenticate = (changes = {}) => authenticateB01AmbiguousMutationTask({ expectedTaskArn: taskArn, task: { ...task, ...(changes.task || {}) },
+    taskDefinition: changes.taskDefinition || taskDefinition, taskDefinitionTags: [], events: changes.events || events,
+    activeMutationTaskArns: changes.activeMutationTaskArns || [], ambiguousDeploymentSourceSha: deploymentSourceSha,
+    deploymentSourceSha, readExecutorSource: () => executor });
+  assert.match(authenticate().evidenceSha256, /^[a-f0-9]{64}$/);
+  for (const lastStatus of ["RUNNING", "PENDING", "PROVISIONING", "ACTIVATING", "DEACTIVATING"]) {
+    assert.throws(() => authenticate({ task: { lastStatus, desiredStatus: "RUNNING" } }));
+  }
+  assert.throws(() => authenticate({ activeMutationTaskArns: [taskArn] }));
+  assert.throws(() => authenticate({ activeMutationTaskArns: [taskArn, taskArn.replace(/a$/, "b")] }));
+  assert.throws(() => authenticate({ task: { taskArn: taskArn.replace(/a$/, "b") } }));
+  assert.throws(() => authenticate({ task: { taskDefinitionArn: taskDefinitionArn.replace(":1", ":2") } }));
+  assert.throws(() => authenticate({ task: { containers: [{ ...task.containers[0], imageDigest: `sha256:${"0".repeat(64)}` }] } }));
+  const wrongSourceCommand = buildB01ExecutorInput({ deploymentSourceSha: "8".repeat(40), databaseHostname: "db.synthetic.invalid" }).command;
+  assert.throws(() => authenticate({ taskDefinition: { ...taskDefinition,
+    containerDefinitions: [{ ...taskDefinition.containerDefinitions[0], command: wrongSourceCommand }] } }));
+  assert.deepEqual(authenticateB01MutationTaskListing({ taskArns: [] }), []);
+  assert.throws(() => authenticateB01MutationTaskListing({ taskArns: [], nextToken: "unread-page" }));
+  assert.throws(() => authenticateB01MutationTaskListing({ taskArns: ["wrong-task"] }));
+  assert.throws(() => authenticateB01MutationTaskListing({ taskArns: [taskArn, taskArn] }));
+  assert.deepEqual(findNonTerminalB01MutationTasks({ tasks: [{ taskArn, lastStatus: "STOPPED" }] }, [taskArn]), []);
+  assert.deepEqual(findNonTerminalB01MutationTasks({ tasks: [{ taskArn, lastStatus: "DEACTIVATING" }] }, [taskArn]), [taskArn]);
+  assert.throws(() => findNonTerminalB01MutationTasks({ tasks: [] }, [taskArn]));
 });
 
 test("handoff accepts only observed inert DescribeTasks materialization and rejects all real overrides", () => {

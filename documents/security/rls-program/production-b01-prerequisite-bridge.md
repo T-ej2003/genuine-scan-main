@@ -26,7 +26,9 @@ Do not rerun an ambiguous executor failure. After separate authorization, reconc
 ```sh
 node scripts/aws/probe-production-b01-prerequisite.mjs \
   --deployment-source-sha "$(git rev-parse HEAD)" \
+  --ambiguous-task-arn <exact-failed-mutation-task-arn> \
+  --ambiguous-deployment-source-sha <exact-failed-attempt-source-sha> \
   --aws-profile <approved-root-profile>
 ```
 
-The registered task definition fixes the read-only command; RunTask supplies no overrides. The process executes the same canonical collector and classifier as the mutation executor inside one PostgreSQL `READ ONLY` transaction, reports only `PREDECESSOR`, `SUCCESSOR`, `PARTIAL`, or `UNKNOWN` plus bounded identities/invariants, and exits without a mutation path.
+Before registering the probe, the entry point authenticates the exact failed mutation task, its historical source-built command, fixed launch evidence, and terminal ECS state. Complete RUNNING, PENDING, and STOPPED-desired mutation-family censuses also reject active siblings, including tasks still deactivating toward STOPPED; pagination fails closed. The registered probe task definition fixes the read-only command; RunTask supplies no overrides. Inside PostgreSQL, one `READ COMMITTED, READ ONLY` transaction waits with a bounded timeout on the exact transaction-scoped advisory lock used by the mutation executor, then establishes the catalogue snapshots used by the shared collector and classifier. It reports only `PREDECESSOR`, `SUCCESSOR`, `PARTIAL`, or `UNKNOWN` plus bounded identities/invariants and exits without a mutation path. A non-terminal/alternate task, active sibling executor, lock timeout, or synchronization failure yields no retry-safe catalogue classification.

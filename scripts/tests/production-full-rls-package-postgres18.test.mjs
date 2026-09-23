@@ -352,22 +352,90 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
       assert.deepEqual(b01Predecessor.roles, b01Delta.predecessor.roles);
       assert.deepEqual(b01Predecessor.policies, b01Delta.predecessor.policies);
       assert.deepEqual(b01Predecessor.catalogue, b01Delta.predecessor.catalogue);
+      const applyB01Mutations = async (tx) => {
+        await tx.$executeRawUnsafe("SET LOCAL ROLE mscqr_prd_rls_phase2_auth_owner");
+        for (const mutation of b01Input.contract.mutations.slice(0, 4)) await tx.$executeRawUnsafe(mutation.sql);
+        await tx.$executeRawUnsafe("RESET ROLE");
+        await tx.$executeRawUnsafe("SET LOCAL ROLE mscqr_prd_rls_phase2_owner");
+        for (const mutation of b01Input.contract.mutations.slice(4)) await tx.$executeRawUnsafe(mutation.sql);
+        await tx.$executeRawUnsafe("RESET ROLE");
+      };
+      const waitForAdvisoryWaiter = async () => {
+        for (let attempt = 0; attempt < 100; attempt++) {
+          const [{ waiting }] = await maintenanceClient.$queryRawUnsafe(`SELECT count(*)::integer AS waiting FROM pg_catalog.pg_locks
+            WHERE locktype='advisory' AND NOT granted`);
+          if (waiting > 0) return;
+          await new Promise((resolve) => setImmediate(resolve));
+        }
+        assert.fail("read-only reconciliation never waited on the B01 advisory lock");
+      };
+      const startLockHolder = ({ apply = false, fail = false } = {}) => {
+        let release, ready;
+        const released = new Promise((resolve) => { release = resolve; });
+        const acquired = new Promise((resolve) => { ready = resolve; });
+        const transaction = administratorClient.$transaction(async (tx) => {
+          await tx.$executeRawUnsafe("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE");
+          await tx.$executeRawUnsafe(b01Runtime.B01_MUTATION_ADVISORY_LOCK_SQL);
+          ready(); await released;
+          if (apply) await applyB01Mutations(tx);
+          if (fail) throw new Error("injected ambiguous rollback");
+        }, { maxWait: 10000, timeout: 120000 });
+        return { acquired, release, transaction };
+      };
+      const committed = startLockHolder({ apply: true }); await committed.acquired;
+      let commitProbeStarted;
+      const commitProbeSync = new Promise((resolve) => { commitProbeStarted = resolve; });
+      const commitProbe = b01ReadOnlyRuntime.executeB01ReadOnlyTransaction({ client: administratorClient,
+        input: { contract: b01Input.contract }, collect: collectB01State, inspect: b01Runtime.inspectB01State,
+        lockSql: b01Runtime.B01_MUTATION_ADVISORY_LOCK_SQL,
+        stage: (stage) => { if (stage === "DATABASE_SYNCHRONIZATION") commitProbeStarted(); } });
+      await commitProbeSync; await waitForAdvisoryWaiter(); committed.release(); await committed.transaction;
+      assert.equal((await commitProbe).classification, "SUCCESSOR");
+      psql(greenUrl, ["-q", "-c", `BEGIN;
+        SET LOCAL ROLE mscqr_prd_rls_phase2_auth_owner;
+        DROP FUNCTION app_auth.finalize_refresh_token_rotation(text,text[],text,timestamp without time zone,text);
+        ${b01Delta.predecessorBindSql}
+        RESET ROLE;
+        SET LOCAL ROLE mscqr_prd_rls_phase2_owner;
+        DROP POLICY b01_auditlogoutbox_select ON public."AuditLogOutbox";
+        RESET ROLE;
+        COMMIT;`], "restore predecessor after synchronized commit test");
+      const rolledBackHolder = startLockHolder({ fail: true }); await rolledBackHolder.acquired;
+      let rollbackProbeStarted;
+      const rollbackProbeSync = new Promise((resolve) => { rollbackProbeStarted = resolve; });
+      const rollbackProbe = b01ReadOnlyRuntime.executeB01ReadOnlyTransaction({ client: administratorClient,
+        input: { contract: b01Input.contract }, collect: collectB01State, inspect: b01Runtime.inspectB01State,
+        lockSql: b01Runtime.B01_MUTATION_ADVISORY_LOCK_SQL,
+        stage: (stage) => { if (stage === "DATABASE_SYNCHRONIZATION") rollbackProbeStarted(); } });
+      await rollbackProbeSync; await waitForAdvisoryWaiter(); rolledBackHolder.release(); await assert.rejects(rolledBackHolder.transaction, /injected ambiguous rollback/);
+      assert.equal((await rollbackProbe).classification, "PREDECESSOR");
+      const timedOut = startLockHolder({ fail: true }); await timedOut.acquired;
+      await assert.rejects(b01ReadOnlyRuntime.executeB01ReadOnlyTransaction({ client: administratorClient,
+        input: { contract: b01Input.contract }, collect: collectB01State, inspect: b01Runtime.inspectB01State,
+        lockSql: b01Runtime.B01_MUTATION_ADVISORY_LOCK_SQL, lockTimeoutMs: 100 }));
+      timedOut.release(); await assert.rejects(timedOut.transaction, /injected ambiguous rollback/);
       const readOnlyPredecessor = await b01ReadOnlyRuntime.executeB01ReadOnlyTransaction({ client: administratorClient,
-        input: { contract: b01Input.contract }, collect: collectB01State, inspect: b01Runtime.inspectB01State });
+        input: { contract: b01Input.contract }, collect: collectB01State, inspect: b01Runtime.inspectB01State,
+        lockSql: b01Runtime.B01_MUTATION_ADVISORY_LOCK_SQL });
       assert.deepEqual({ classification: readOnlyPredecessor.classification, transactionReadOnly: readOnlyPredecessor.transactionReadOnly,
         livePredecessorMatch: readOnlyPredecessor.livePredecessorMatch, liveSuccessorMatch: readOnlyPredecessor.liveSuccessorMatch },
       { classification: "PREDECESSOR", transactionReadOnly: true, livePredecessorMatch: true, liveSuccessorMatch: false });
       for (const sql of ['INSERT INTO public."User" DEFAULT VALUES', 'UPDATE public."User" SET id=id WHERE false',
         'DELETE FROM public."User" WHERE false', 'CREATE TABLE public.b01_readonly_forbidden(id integer)']) {
         await assert.rejects(administratorClient.$transaction(async (tx) => {
-          await tx.$executeRawUnsafe("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
+          await tx.$executeRawUnsafe("SET TRANSACTION ISOLATION LEVEL READ COMMITTED, READ ONLY");
           await tx.$executeRawUnsafe("SET LOCAL ROLE mscqr_prd_rls_phase2_owner"); await tx.$executeRawUnsafe(sql);
         }), /read-only transaction/);
       }
       await assert.rejects(administratorClient.$transaction(async (tx) => {
-        await tx.$executeRawUnsafe("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
+        await tx.$executeRawUnsafe("SET TRANSACTION ISOLATION LEVEL READ COMMITTED, READ ONLY");
         return executeB01Transaction({ tx, input: { contract: b01Input.contract } });
       }), /read-only transaction|transaction characteristics|read_only/);
+      await assert.rejects(administratorClient.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe("SET TRANSACTION ISOLATION LEVEL READ COMMITTED, READ ONLY");
+        await tx.$executeRawUnsafe("SET LOCAL ROLE mscqr_prd_rls_phase2_auth_owner");
+        await tx.$queryRawUnsafe("SELECT app_auth.b01_audit('B01_READONLY_DENIED','synthetic-token',statement_timestamp()::timestamp without time zone)");
+      }), /read-only transaction/);
       const policyPredicate = (name, field) => scalar(greenUrl, `SELECT pg_get_expr(p.${field},p.polrelid) FROM pg_policy p WHERE p.polname='${name}'`, `${name} ${field}`);
       const refreshSelectUsing = policyPredicate("b01_refreshtoken_select", "polqual");
       const refreshUpdateUsing = policyPredicate("b01_refreshtoken_update", "polqual");
@@ -431,7 +499,8 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
       assert.deepEqual(b01Applied, { status: "APPLIED", writeCount: 7, predecessorRlsIdentity: b01Delta.predecessorRlsIdentity,
         successorRlsIdentity: b01Delta.successorRlsIdentity, liveRlsIdentity: b01Delta.successorRlsIdentity });
       const readOnlySuccessor = await b01ReadOnlyRuntime.executeB01ReadOnlyTransaction({ client: administratorClient,
-        input: { contract: b01Input.contract }, collect: collectB01State, inspect: b01Runtime.inspectB01State });
+        input: { contract: b01Input.contract }, collect: collectB01State, inspect: b01Runtime.inspectB01State,
+        lockSql: b01Runtime.B01_MUTATION_ADVISORY_LOCK_SQL });
       assert.equal(readOnlySuccessor.classification, "SUCCESSOR"); assert.equal(readOnlySuccessor.liveSuccessorMatch, true);
       const b01Converged = await administratorClient.$transaction((tx) => executeB01Transaction({ tx, input: { contract: b01Input.contract } }), { maxWait: 10000, timeout: 120000 });
       assert.equal(b01Converged.status, "ALREADY_CONVERGED"); assert.equal(b01Converged.writeCount, 0);
@@ -439,7 +508,8 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         ALTER POLICY b01_refreshtoken_select ON public."RefreshToken" USING (true);RESET ROLE;COMMIT;`], "install successor predicate drift");
       try {
         const readOnlyPartial = await b01ReadOnlyRuntime.executeB01ReadOnlyTransaction({ client: administratorClient,
-          input: { contract: b01Input.contract }, collect: collectB01State, inspect: b01Runtime.inspectB01State });
+          input: { contract: b01Input.contract }, collect: collectB01State, inspect: b01Runtime.inspectB01State,
+          lockSql: b01Runtime.B01_MUTATION_ADVISORY_LOCK_SQL });
         assert.equal(readOnlyPartial.classification, "PARTIAL"); assert.equal(readOnlyPartial.unauthorizedCatalogueDelta, true);
         await assert.rejects(administratorClient.$transaction((tx) => executeB01Transaction({ tx, input: { contract: b01Input.contract } }),
           { maxWait: 10000, timeout: 120000 }), /neither the exact predecessor nor successor/);

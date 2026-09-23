@@ -22,6 +22,7 @@ const OWNER = ["mscqr", "prd", "rls", "phase2", "auth", "owner"].join("_");
 const SCHEMA_OWNER = ["mscqr", "prd", "rls", "phase2", "owner"].join("_");
 const PREAUTH = ["mscqr", "prd", "rls", "phase2", "preauth"].join("_");
 const DATABASE = ["mscqr", "production", "rls", "green", "phase2"].join("_");
+const B01_MUTATION_ADVISORY_LOCK_SQL = "SELECT pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('mscqr-production-b01-prerequisite',0))";
 const canonicalJson = (value) => Array.isArray(value) ? `[${value.map(canonicalJson).join(",")}]`
   : value && typeof value === "object" ? `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}` : JSON.stringify(value);
 const hash = (value) => crypto.createHash("sha256").update(typeof value === "string" || Buffer.isBuffer(value) ? value : canonicalJson(value)).digest("hex");
@@ -108,7 +109,7 @@ async function executeB01Transaction({ tx, input, collect = collectB01State, che
   assert.deepEqual(input.contract.mutations.map(({ name }) => name), ["bind-predecessor","finalizer","public-revoke","preauth-execute","payload-select","select-policy","select-policy-comment"]);
   for (const mutation of input.contract.mutations) { assert.equal(hash(mutation.sql), mutation.sha256); assert.equal(mutation.sha256, EXPECTED_MUTATIONS[mutation.name]); }
   await tx.$executeRawUnsafe("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE");
-  await tx.$executeRawUnsafe("SELECT pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('mscqr-production-b01-prerequisite',0))");
+  await tx.$executeRawUnsafe(B01_MUTATION_ADVISORY_LOCK_SQL);
   stage("PREDECESSOR_COLLECTION"); const before = await collect(tx);
   stage("PREDECESSOR_CLASSIFICATION"); const state = classify(before, input.contract);
   if (state === "SUCCESSOR") { stage("COMMIT"); return { status: "ALREADY_CONVERGED", writeCount: 0, predecessorRlsIdentity: input.contract.predecessorRlsIdentity, successorRlsIdentity: input.contract.successorRlsIdentity, liveRlsIdentity: input.contract.successorRlsIdentity }; }
@@ -160,5 +161,5 @@ async function main(argv = process.argv.slice(2)) {
   finally { if (client) try { await client.$disconnect(); } catch {} }
 }
 
-module.exports = { collectB01State, executeB01Transaction, inspectB01State, classify, canonicalJson, hash, safeFailure, FAILURE_STAGES };
+module.exports = { B01_MUTATION_ADVISORY_LOCK_SQL, collectB01State, executeB01Transaction, inspectB01State, classify, canonicalJson, hash, safeFailure, FAILURE_STAGES };
 if (module.id === "[eval]") main(process.argv.slice(1));

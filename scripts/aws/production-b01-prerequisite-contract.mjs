@@ -106,6 +106,30 @@ export function assertB01RunTaskRequestEvidence(evidence, { taskArn, taskDefinit
   return true;
 }
 
+export function assertB01AmbiguousMutationTaskQuiescent({ task, taskArn, deploymentSourceSha, runTaskRequestEvidence,
+  activeMutationTaskArns = [] } = {}) {
+  assert.match(taskArn || "", TASK); assert.equal(task?.taskArn, taskArn);
+  assert.match(task?.taskDefinitionArn || "", TASK_DEFINITION);
+  assert.equal(task?.clusterArn, `arn:aws:ecs:${B01_PREREQUISITE.region}:${B01_PREREQUISITE.account}:cluster/${B01_PREREQUISITE.cluster}`);
+  assert.equal(task?.group, `family:${B01_PREREQUISITE.executorFamily}`); assert.equal(task?.launchType, "FARGATE");
+  assert.equal(task?.lastStatus, "STOPPED"); assert.equal(task?.desiredStatus, "STOPPED");
+  assert.equal(task?.stopCode, "EssentialContainerExited"); assert.ok(Number.isFinite(Date.parse(task?.stoppedAt)));
+  assert.ok(Number.isFinite(Date.parse(task?.executionStoppedAt)));
+  assert.ok(Date.parse(task.createdAt) <= Date.parse(task.executionStoppedAt));
+  assert.ok(Date.parse(task.executionStoppedAt) <= Date.parse(task.stoppedAt));
+  assert.equal(task?.enableExecuteCommand, false); assertSemanticallyEmptyB01TaskOverrides(task?.overrides);
+  assert.deepEqual(activeMutationTaskArns, []);
+  assert.equal(task?.containers?.length, 1); const container = task.containers[0];
+  assert.equal(container?.name, B01_PREREQUISITE.executorContainer); assert.equal(container?.lastStatus, "STOPPED");
+  assert.equal(container?.image, B01_PREREQUISITE.executorImage); assert.equal(container?.imageDigest, B01_PREREQUISITE.executorImage.split("@")[1]);
+  assert.ok(Number.isInteger(container?.exitCode));
+  assertB01RunTaskRequestEvidence(runTaskRequestEvidence, { taskArn, taskDefinitionArn: task.taskDefinitionArn, deploymentSourceSha });
+  const body = { schemaVersion: 1, kind: "PRODUCTION_B01_AMBIGUOUS_TASK_QUIESCENCE", taskArn,
+    taskDefinitionArn: task.taskDefinitionArn, deploymentSourceSha, stoppedAt: new Date(task.stoppedAt).toISOString(),
+    executionStoppedAt: new Date(task.executionStoppedAt).toISOString(), runTaskRequestEvidence };
+  return Object.freeze({ ...body, evidenceSha256: canonicalSha256(body) });
+}
+
 export function assertB01LivePredecessor({ service, taskDefinition, repository, imageDetails } = {}) {
   assert.equal(service?.serviceArn, B01_PREREQUISITE.predecessorServiceArn);
   assert.equal(service?.serviceName, "mscqr-backend-servi-euw2");
