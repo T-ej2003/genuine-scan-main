@@ -7,8 +7,12 @@ name: Normal Production Deployment
     inputs:
       baseline:
         description: Deploy the one-time reviewed runtime baseline from the exact historical images
-        required: true
+        required: false
         type: boolean
+      b01_prerequisite_receipt_base64:
+        description: Canonical B01 prerequisite receipt for the exact protected-main bridge source
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -35,6 +39,7 @@ jobs:
       backend: ${{ steps.classify.outputs.backend }}
       frontend: ${{ steps.classify.outputs.frontend }}
       baseline: ${{ steps.classify.outputs.baseline }}
+      receipt_sha256: ${{ steps.classify.outputs.receipt_sha256 }}
     steps:
       - uses: actions/checkout@v6
         with: { ref: '${{ github.sha }}', fetch-depth: 0, persist-credentials: false }
@@ -43,6 +48,7 @@ jobs:
         env:
           BEFORE_SHA: '${{ github.event.before }}'
           BASELINE_REQUESTED: '${{ inputs.baseline || false }}'
+          B01_RECEIPT_BASE64: '${{ inputs.b01_prerequisite_receipt_base64 }}'
           GH_TOKEN: '${{ github.token }}'
         run: |
           set -euo pipefail
@@ -51,6 +57,14 @@ jobs:
           git fetch --no-tags origin main
           test "$GITHUB_SHA" = "$(git rev-parse refs/remotes/origin/main)"
           if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            if [[ -n "${B01_RECEIPT_BASE64:-}" ]]; then
+              test "$BASELINE_REQUESTED" = "false"
+              test "$GITHUB_RUN_ATTEMPT" = "1"
+              printf '%s' "$B01_RECEIPT_BASE64" | base64 --decode > "$RUNNER_TEMP/b01-prerequisite-receipt.json"
+              node scripts/aws/verify-production-b01-prerequisite-handoff.mjs --deployment-source-sha "$GITHUB_SHA" --receipt "$RUNNER_TEMP/b01-prerequisite-receipt.json" --github-output "$GITHUB_OUTPUT"
+              echo "### Privileged prerequisite authenticated; normal backend deploy authorized" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
             test "$BASELINE_REQUESTED" = "true"
             test "$GITHUB_RUN_ATTEMPT" = "1"
             baseline_merge_sha="$(GH_HOST=github.com gh api --hostname github.com repos/T-ej2003/genuine-scan-main/pulls/558 --jq 'select(.merged_at != null and .base.ref == "main" and .base.repo.full_name == "T-ej2003/genuine-scan-main" and .head.repo.full_name == "T-ej2003/genuine-scan-main") | .merge_commit_sha')"
@@ -76,7 +90,7 @@ jobs:
   deploy:
     name: Build, deploy, verify, and roll back on failure
     needs: classify
-    if: needs.classify.outputs.release_class == 'NORMAL_APPLICATION' && (needs.classify.outputs.backend == 'true' || needs.classify.outputs.frontend == 'true')
+    if: (needs.classify.outputs.release_class == 'NORMAL_APPLICATION' || needs.classify.outputs.release_class == 'PRIVILEGED_PREREQUISITE_BACKEND') && (needs.classify.outputs.backend == 'true' || needs.classify.outputs.frontend == 'true')
     runs-on: ubuntu-latest
     environment: production-normal-deploy
     permissions: { contents: read, id-token: write }
@@ -104,12 +118,25 @@ jobs:
           aws-region: eu-west-2
           role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-normal-deployer
           unset-current-credentials: true
+      - name: Authenticate bounded B01 prerequisite evidence
+        if: needs.classify.outputs.release_class == 'PRIVILEGED_PREREQUISITE_BACKEND'
+        env:
+          B01_RECEIPT_BASE64: '${{ inputs.b01_prerequisite_receipt_base64 }}'
+        run: |
+          set -euo pipefail
+          printf '%s' "$B01_RECEIPT_BASE64" | base64 --decode > "$RUNNER_TEMP/b01-prerequisite-receipt.json"
+          task_arn="$(jq -er .taskArn "$RUNNER_TEMP/b01-prerequisite-receipt.json")"
+          task_definition_arn="$(jq -er .taskDefinitionArn "$RUNNER_TEMP/b01-prerequisite-receipt.json")"
+          aws ecs describe-tasks --region "$AWS_REGION" --cluster mscqr-prod-euw2-main --tasks "$task_arn" > "$RUNNER_TEMP/b01-prerequisite-task.json"
+          aws ecs describe-task-definition --region "$AWS_REGION" --task-definition "$task_definition_arn" > "$RUNNER_TEMP/b01-prerequisite-task-definition.json"
+          node scripts/aws/verify-production-b01-prerequisite-handoff.mjs --deployment-source-sha "$GITHUB_SHA" --receipt "$RUNNER_TEMP/b01-prerequisite-receipt.json" --task "$RUNNER_TEMP/b01-prerequisite-task.json" --task-definition "$RUNNER_TEMP/b01-prerequisite-task-definition.json"
       - name: Authenticate live deployment baseline
         id: live
         env:
           EXPECT_BACKEND: ${{ needs.classify.outputs.backend }}
           EXPECT_FRONTEND: ${{ needs.classify.outputs.frontend }}
           BASELINE_MODE: ${{ needs.classify.outputs.baseline }}
+          PREREQUISITE_MODE: ${{ needs.classify.outputs.release_class == 'PRIVILEGED_PREREQUISITE_BACKEND' }}
         run: |
           set -euo pipefail
           git fetch --no-tags origin main
@@ -151,6 +178,9 @@ jobs:
             grep -q '^backend_digest=sha256:d2a6f641f44e27454a80d502914a9e168c61cdace1201f9d7af9d85a87ea208c$' "$GITHUB_OUTPUT"
             grep -q '^frontend_base=d355a77675d4320c2bfa975ebf3682995ba54a2f$' "$GITHUB_OUTPUT"
             grep -q '^frontend_digest=sha256:5053d6a6481b3bcacb414adf82c41d7504c4a91a93c8c52dd3b11aae0e01c277$' "$GITHUB_OUTPUT"
+          elif [[ "$PREREQUISITE_MODE" == "true" ]]; then
+            test "$EXPECT_BACKEND" = "true"
+            test "$EXPECT_FRONTEND" = "false"
           else
             node scripts/aws/classify-production-lane-a.mjs --backend-base="$(grep '^backend_base=' "$GITHUB_OUTPUT" | cut -d= -f2-)" --frontend-base="$(grep '^frontend_base=' "$GITHUB_OUTPUT" | cut -d= -f2-)" --target="$GITHUB_SHA" --github-output="$RUNNER_TEMP/live-classification"
             grep -q "^backend=${EXPECT_BACKEND}$" "$RUNNER_TEMP/live-classification"
