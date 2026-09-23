@@ -157,7 +157,7 @@ async function main() {
   assert.equal(verified.email, "b01-app-verify@example.invalid");
   assert.equal(psql(bootstrap, `SELECT count(*) FROM public."AuditLogOutbox" WHERE payload->>'userId' IN ('${ids.appInviteUser}','${ids.appResetUser}','${ids.appVerifyUser}')`), "3");
 
-  const executeGrants = psql(bootstrap, `SELECT count(*) FROM information_schema.routine_privileges WHERE specific_schema='app_auth' AND grantee=(SELECT rolname FROM pg_roles WHERE rolname LIKE 'mscqr%preauth') AND privilege_type='EXECUTE' AND routine_name IN ('lookup_password_user','record_password_failure','request_password_reset','consume_password_reset_token','lookup_invitation_token','consume_invitation_token','consume_email_verification_token')`);
+  const executeGrants = psql(preauth, `SELECT count(*) FROM information_schema.routine_privileges WHERE specific_schema='app_auth' AND grantee=current_user AND privilege_type='EXECUTE' AND routine_name IN ('lookup_password_user','record_password_failure','request_password_reset','consume_password_reset_token','lookup_invitation_token','consume_invitation_token','consume_email_verification_token')`);
   assert.equal(executeGrants, "7");
   console.log("B01 pre-auth security application-path proof passed");
 }

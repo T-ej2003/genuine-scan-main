@@ -156,7 +156,7 @@ const { normalizeAuthError } = require("../dist/controllers/authControllerShared
 
 const baseUser = {
   id: "admin-1",
-  email: "administration@mscqr.com",
+  email: "admin-a@synthetic.invalid",
   name: "Admin",
   passwordHash: "hash",
   role: UserRole.SUPER_ADMIN,
@@ -197,7 +197,7 @@ const run = async () => {
   const secondSuperAdmin = {
     ...baseUser,
     id: "admin-2",
-    email: "victoria@mscqr.com",
+    email: "admin-b@synthetic.invalid",
     passwordHash: "different-hash",
   };
   assert.notEqual(prismaUser.id, secondSuperAdmin.id);

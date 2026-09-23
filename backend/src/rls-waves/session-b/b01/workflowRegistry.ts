@@ -126,9 +126,19 @@ export const b01InvitationApplicationPathProof = {
   focusedProofs: [
     "backend/tests/rls-wave-b/b01/invitationBoundary.test.js",
     "backend/tests/rls-wave-b/b01/invitationPostgres18.test.js",
+    "backend/tests/currentRuntimeSuperAdminInvitationPostgres18.test.js",
+    "backend/tests/authAdminLoginMfaCycle.test.js",
+    "backend/tests/authMfaChallengeStateMachine.test.js",
+    "backend/tests/csrfSecurity.test.js",
+    "backend/tests/rls-wave-b/b01/recentAdminMfaMiddleware.test.js",
   ],
   postgresScope: "wave-local-exact-function-contract",
-  integrationStatus: "session-a-function-grant-and-accept-login-integration-pending",
+  canonicalCertification: {
+    family: "current-runtime-super-admin-invitation",
+    testFile: "backend/tests/currentRuntimeSuperAdminInvitationPostgres18.test.js",
+    requiredResult: "application-path-certified",
+  },
+  integrationStatus: "current-runtime-two-admin-integration-certified",
 } as const;
 
 export const b01SessionAIntegrationRequests = [
@@ -150,7 +160,7 @@ export const b01SessionAIntegrationRequests = [
   },
   {
     targetSymbol: "app_rls.prepare_invitation",
-    callShape: "Add prepare_invitation(text,text,text,text,text,text,text,text,text,boolean,boolean,text,timestamp without time zone,timestamp without time zone,text,text), matching invitationRepository.ts exactly: actor user/session/request/purpose first, then target and delivery metadata.",
+    callShape: "Add prepare_invitation(text,text,text,text,text,text,text,text,text,text,boolean,boolean,text,timestamp without time zone,timestamp without time zone,text,text), matching invitationRepository.ts exactly: authenticated-session capability, actor user/session/request/purpose, then target and delivery metadata.",
     ordering: "Revalidate and lock the active actor/session and current membership, lock the target licensee/user/live invites, prepare the account/link/invite and durable audit/outbox in one transaction, then serialize and attempt delivery only after commit.",
     invariant: "Platform or same-licensee admin, MFA/step-up assurance, exact purpose and role ceiling are database-revalidated; caller-set app.* settings alone never authorize access; concurrent preparation leaves one live invite.",
     responsePreservation: "Return the exact 17-field projection enforced by invitationRepository.ts and retain current create/resend/link response behavior.",

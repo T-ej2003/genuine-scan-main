@@ -54,8 +54,8 @@ const main = async () => {
   process.env.IP_HASH_SALT_CURRENT = "b01-refresh-ip-secret";
   process.env.NODE_ENV = "production";
   process.env.DATABASE_URL = adminUrl;
-  process.env.PREAUTH_DATABASE_URL = roleUrl(adminUrl, "mscqr_dev_preauth");
-  process.env.AUTHENTICATED_APP_DATABASE_URL = roleUrl(adminUrl, "mscqr_dev_app");
+  process.env.PREAUTH_DATABASE_URL = roleUrl(adminUrl, "mscqr_dev_rls_b01_preauth");
+  process.env.AUTHENTICATED_APP_DATABASE_URL = roleUrl(adminUrl, "mscqr_dev_rls_b01_app");
   process.env.MSCQR_RLS_B03_WORKER_BOUNDARIES_ENABLED = "true";
 
   const { PrismaClient } = require("@prisma/client");
@@ -69,16 +69,15 @@ const main = async () => {
   const { installCanonicalDbContext } = require("../../../dist/lib/canonicalDbContext");
   const {
     createRefreshToken,
-    findRefreshTokenByRaw,
+    findRefreshTokenById,
     listActiveRefreshTokensForUser,
     revokeAllUserRefreshTokens,
-    revokePasswordOnlyRefreshTokensForUser,
     revokeRefreshTokenById,
-    revokeRefreshTokenByRaw,
     rotateRefreshToken,
   } = require("../../../dist/services/auth/refreshTokenService");
   const { hashRefreshToken, signAccessToken } = require("../../../dist/services/auth/tokenService");
   const { sealCookieToken } = require("../../../dist/services/auth/cookieTokenProtectionService");
+  const { createAuthenticatedSessionCapability } = require("../../../dist/services/auth/authenticatedSessionCapabilityService");
   const { createAuthRoutes } = require("../../../dist/routes/modules/authRoutes");
   const {
     claimRefreshTokenRotation,
@@ -89,6 +88,7 @@ const main = async () => {
   const now = new Date();
   const later = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
   const scopeVersion = now.toISOString();
+  const sessionCapabilities = new Map();
 
   const seedActor = async ({ id, active = true, membershipActive = true, mfaEnabled = false, role = "MANUFACTURER" }) => {
     const tenantScoped = role.startsWith("MANUFACTURER") || ["LICENSEE_ADMIN", "ORG_ADMIN"].includes(role);
@@ -127,6 +127,15 @@ const main = async () => {
         ${revokedAt ? "PRESEEDED_REVOKED" : null},${replacedByHash}
       )
     `;
+    if (!revokedAt && expiresAt > now) {
+      const capability = await createAuthenticatedSessionCapability(preauth, {
+        refreshTokenId: id,
+        refreshTokenHash: tokenHash,
+        assurance: mfaVerifiedAt ? "ADMIN_MFA" : "PASSWORD",
+        expiresAt: new Date(Math.min(expiresAt.getTime(), now.getTime() + 30 * 60_000)),
+      });
+      sessionCapabilities.set(id, sealCookieToken(capability.rawCapability, "auth.database-session"));
+    }
     return tokenHash;
   };
 
@@ -161,6 +170,8 @@ const main = async () => {
         authenticatedAt: now.toISOString(),
         mfaVerifiedAt: null,
       })}`;
+      const capability = sessionCapabilities.get(sessionId);
+      if (capability) headers["x-database-session-capability"] = capability;
     }
     if (rawRefreshToken) {
       const csrf = "postgres-route-csrf";
@@ -282,10 +293,10 @@ const main = async () => {
         (SELECT count(*)::int FROM b01_refresh_wave.audit_outbox
          WHERE user_id='controller-mfa-bootstrap' AND action='AUTH_REFRESH_REVOKED') AS "revokeAudits"
     `;
-    assert.equal(bootstrapRevoked, "MFA_REQUIRED_AFTER_POLICY_CHANGE");
+    assert.equal(bootstrapRevoked, "ROTATED");
     assert.equal(challengeCount, 1);
     assert.equal(challengeAudits, 1);
-    assert.equal(revokeAudits, 1);
+    assert.equal(revokeAudits, 0);
 
     const controllerDenied = await routeRequest({
       method: "POST",
@@ -702,7 +713,7 @@ const main = async () => {
     assert(created.row.id);
     const sessions = await authenticated.$transaction(async (tx) => {
       await installCanonicalDbContext(tx, authContext({ purpose: "auth-session-list" }));
-      const found = await findRefreshTokenByRaw("raw-authenticated", tx);
+      const found = await findRefreshTokenById({ sessionId: created.row.id, userId: "auth-user" }, tx);
       assert.equal(found.id, created.row.id);
       return listActiveRefreshTokensForUser("auth-user", tx, now);
     });
@@ -738,7 +749,7 @@ const main = async () => {
         await installCanonicalDbContext(tx, recentMfaContext);
         return requireRecentMfaSession({ sessionId: "recent-mfa-token", checkedAt: now, maxAgeMinutes: 15 }, tx);
       }),
-      /invalid row count/
+      /RECENT_MFA_REQUIRED/
     );
 
     await reject(
@@ -770,11 +781,11 @@ const main = async () => {
       /B01_AUTHENTICATED_CONTEXT_DENIED/
     );
 
-    const revokedRaw = await authenticated.$transaction(async (tx) => {
+    const revokedSession = await authenticated.$transaction(async (tx) => {
       await installCanonicalDbContext(tx, authContext({ purpose: "auth-logout" }));
-      return revokeRefreshTokenByRaw({ rawToken: "raw-authenticated", reason: "LOGOUT", now }, tx);
+      return revokeRefreshTokenById({ sessionId: created.row.id, userId: "auth-user", reason: "LOGOUT", now }, tx);
     });
-    assert.equal(revokedRaw.revokedCount, 1);
+    assert.equal(revokedSession, true);
 
     await seedActor({ id: "revoke-user", role: "LICENSEE_ADMIN" });
     for (const rawToken of ["raw-revoke-a", "raw-revoke-b"]) {
@@ -805,25 +816,20 @@ const main = async () => {
       ...authContext({ purpose, authAssurance: assurance }), userId: "policy-user",
       organizationId: "policy-user-org", licenseeId: "policy-user-licensee",
     });
+    const policySessionIds = [];
     for (const [rawToken, mfaVerifiedAt] of [["raw-policy-password", null], ["raw-policy-mfa", now]]) {
-      await authenticated.$transaction(async (tx) => {
+      const createdPolicySession = await authenticated.$transaction(async (tx) => {
         await installCanonicalDbContext(tx, policyContext("auth-password-login-session"));
-        await createRefreshToken({
+        return createRefreshToken({
           userId: "policy-user", orgId: "policy-user-org", rawToken, ipHash: null,
           userAgent: null, authenticatedAt: now, mfaVerifiedAt, now,
         }, tx);
       });
+      policySessionIds.push(createdPolicySession.row.id);
     }
-    const passwordOnly = await authenticated.$transaction(async (tx) => {
-      await installCanonicalDbContext(tx, policyContext("auth-refresh-policy-change"));
-      return revokePasswordOnlyRefreshTokensForUser({
-        userId: "policy-user", reason: "MFA_REQUIRED_AFTER_POLICY_CHANGE", now,
-      }, tx);
-    });
-    assert.equal(passwordOnly.revokedCount, 1);
     const byId = await authenticated.$transaction(async (tx) => {
       await installCanonicalDbContext(tx, policyContext("auth-session-revoke"));
-      const remaining = await findRefreshTokenByRaw("raw-policy-mfa", tx);
+      const remaining = await findRefreshTokenById({ sessionId: policySessionIds[1], userId: "policy-user" }, tx);
       assert(remaining);
       return revokeRefreshTokenById({
         sessionId: remaining.id, userId: "policy-user", reason: "SESSION_REVOKED_BY_USER", now,
@@ -878,7 +884,7 @@ const main = async () => {
         'app_auth.load_refresh_session_state(text,text[],text,text,timestamp without time zone,text)'::regprocedure,
         'app_auth.create_refresh_mfa_challenge(text,text[],text,text,text,integer,text,text[],text,text,integer,timestamp without time zone,timestamp without time zone,text)'::regprocedure,
         'app_auth.revoke_refresh_token_scope(text,text[],text,text,text,timestamp without time zone)'::regprocedure,
-        'app_auth.complete_refresh_token_rotation(text,text[],text,text,text,timestamp without time zone,text,text,timestamp without time zone,timestamp without time zone,timestamp without time zone)'::regprocedure,
+        'app_auth.complete_refresh_token_rotation(text,text[],text,text,text,timestamp without time zone,text,text,timestamp without time zone,timestamp without time zone,timestamp without time zone,text)'::regprocedure,
         'app_rls.revalidate_authenticated_actor(text,text,text,text,timestamp without time zone,text)'::regprocedure,
         'app_rls.require_recent_mfa_session(text,timestamp without time zone,integer)'::regprocedure,
         'b01_refresh_wave.require_authenticated_context(text,text[],text[])'::regprocedure,
@@ -926,16 +932,16 @@ const main = async () => {
     const privilege = await admin.$queryRaw`
       SELECT
         has_function_privilege('public','app_auth.claim_refresh_token_rotation(text[],timestamp without time zone,text)','EXECUTE') AS "publicClaim",
-        has_function_privilege('mscqr_dev_app','app_auth.claim_refresh_token_rotation(text[],timestamp without time zone,text)','EXECUTE') AS "authClaim",
-        has_function_privilege('mscqr_dev_preauth','app_auth.claim_refresh_token_rotation(text[],timestamp without time zone,text)','EXECUTE') AS "preauthClaim",
-        has_function_privilege('mscqr_dev_preauth','app_rls.list_active_refresh_tokens(text,timestamp without time zone)','EXECUTE') AS "preauthList",
-        has_function_privilege('mscqr_dev_app','app_rls.list_active_refresh_tokens(text,timestamp without time zone)','EXECUTE') AS "appList",
-        has_function_privilege('mscqr_dev_app','app_rls.revalidate_authenticated_actor(text,text,text,text,timestamp without time zone,text)','EXECUTE') AS "appRevalidate",
+        has_function_privilege('mscqr_dev_rls_b01_app','app_auth.claim_refresh_token_rotation(text[],timestamp without time zone,text)','EXECUTE') AS "authClaim",
+        has_function_privilege('mscqr_dev_rls_b01_preauth','app_auth.claim_refresh_token_rotation(text[],timestamp without time zone,text)','EXECUTE') AS "preauthClaim",
+        has_function_privilege('mscqr_dev_rls_b01_preauth','app_rls.list_active_refresh_tokens(text,timestamp without time zone)','EXECUTE') AS "preauthList",
+        has_function_privilege('mscqr_dev_rls_b01_app','app_rls.list_active_refresh_tokens(text,timestamp without time zone)','EXECUTE') AS "appList",
+        has_function_privilege('mscqr_dev_rls_b01_app','app_rls.revalidate_authenticated_actor(text,text,text,text,timestamp without time zone,text)','EXECUTE') AS "appRevalidate",
         has_function_privilege('public','app_rls.require_recent_mfa_session(text,timestamp without time zone,integer)','EXECUTE') AS "publicRecentMfa",
-        has_function_privilege('mscqr_dev_preauth','app_rls.require_recent_mfa_session(text,timestamp without time zone,integer)','EXECUTE') AS "preauthRecentMfa",
-        has_function_privilege('mscqr_dev_app','app_rls.require_recent_mfa_session(text,timestamp without time zone,integer)','EXECUTE') AS "appRecentMfa",
-        has_function_privilege('mscqr_dev_app','app_rls.load_authenticated_actor()','EXECUTE') AS "appLoadActor",
-        has_function_privilege('mscqr_dev_app','app_rls.enqueue_audit_log_outbox(jsonb,text,text,text,text,text,text,text,text,timestamp without time zone,text)','EXECUTE') AS "appEnqueue"
+        has_function_privilege('mscqr_dev_rls_b01_preauth','app_rls.require_recent_mfa_session(text,timestamp without time zone,integer)','EXECUTE') AS "preauthRecentMfa",
+        has_function_privilege('mscqr_dev_rls_b01_app','app_rls.require_recent_mfa_session(text,timestamp without time zone,integer)','EXECUTE') AS "appRecentMfa",
+        has_function_privilege('mscqr_dev_rls_b01_app','app_rls.load_authenticated_actor()','EXECUTE') AS "appLoadActor",
+        has_function_privilege('mscqr_dev_rls_b01_app','app_rls.enqueue_audit_log_outbox(jsonb,text,text,text,text,text,text,text,text,timestamp without time zone,text)','EXECUTE') AS "appEnqueue"
     `;
     assert.deepEqual(privilege, [{
       publicClaim: false,

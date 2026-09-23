@@ -1,10 +1,10 @@
 DO $roles$
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'mscqr_dev_preauth') THEN
-    CREATE ROLE mscqr_dev_preauth LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT;
+  IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'mscqr_dev_rls_b01_preauth') THEN
+    CREATE ROLE mscqr_dev_rls_b01_preauth LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT;
   END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'mscqr_dev_app') THEN
-    CREATE ROLE mscqr_dev_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT;
+  IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'mscqr_dev_rls_b01_app') THEN
+    CREATE ROLE mscqr_dev_rls_b01_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'mscqr_dev_rls_function_owner') THEN
     CREATE ROLE mscqr_dev_rls_function_owner NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT;
@@ -23,8 +23,9 @@ DROP FUNCTION IF EXISTS app_auth.revoke_refresh_token_scope(text,text,text,text,
 DROP FUNCTION IF EXISTS app_auth.complete_refresh_token_rotation(text,text,text,text,timestamp without time zone,text,text,timestamp without time zone,timestamp without time zone,timestamp without time zone);
 
 REVOKE ALL ON SCHEMA b01_refresh_wave FROM PUBLIC;
-GRANT USAGE ON SCHEMA app_auth TO mscqr_dev_preauth;
-GRANT USAGE ON SCHEMA app_rls TO mscqr_dev_app;
+GRANT USAGE ON SCHEMA app_auth TO mscqr_dev_rls_b01_preauth;
+GRANT USAGE ON SCHEMA app_rls TO mscqr_dev_rls_b01_app;
+GRANT USAGE ON SCHEMA app_auth TO mscqr_dev_rls_b01_app;
 GRANT USAGE ON SCHEMA app_auth, app_rls, b01_refresh_wave TO mscqr_dev_rls_function_owner;
 
 CREATE TABLE b01_refresh_wave.actor (
@@ -70,7 +71,11 @@ CREATE TABLE b01_refresh_wave.refresh_token (
   revoked_at timestamp without time zone,
   revoked_reason text,
   replaced_by_token_hash text,
-  rotation_request_id text
+  rotation_request_id text,
+  session_capability_hash text UNIQUE,
+  session_capability_assurance text,
+  session_capability_expires_at timestamp without time zone,
+  session_capability_revoked_at timestamp without time zone
 );
 
 CREATE TABLE b01_refresh_wave.mfa_challenge (
@@ -152,14 +157,16 @@ GRANT SELECT (
 GRANT UPDATE (user_id) ON b01_refresh_wave.membership TO mscqr_dev_rls_function_owner;
 GRANT SELECT (
   id,user_id,organization_id,token_hash,expires_at,created_at,created_ip_hash,created_user_agent,
-  authenticated_at,mfa_verified_at,last_used_at,revoked_at,revoked_reason,replaced_by_token_hash,rotation_request_id
+  authenticated_at,mfa_verified_at,last_used_at,revoked_at,revoked_reason,replaced_by_token_hash,rotation_request_id,
+  session_capability_hash,session_capability_assurance,session_capability_expires_at,session_capability_revoked_at
 ) ON b01_refresh_wave.refresh_token TO mscqr_dev_rls_function_owner;
 GRANT INSERT (
   id,user_id,organization_id,token_hash,expires_at,created_at,created_ip_hash,created_user_agent,
-  authenticated_at,mfa_verified_at,last_used_at
+  authenticated_at,mfa_verified_at,last_used_at,rotation_request_id
 ) ON b01_refresh_wave.refresh_token TO mscqr_dev_rls_function_owner;
 GRANT UPDATE (
-  last_used_at,revoked_at,revoked_reason,replaced_by_token_hash,rotation_request_id
+  last_used_at,revoked_at,revoked_reason,replaced_by_token_hash,rotation_request_id,
+  session_capability_hash,session_capability_assurance,session_capability_expires_at,session_capability_revoked_at
 ) ON b01_refresh_wave.refresh_token TO mscqr_dev_rls_function_owner;
 GRANT INSERT (
   id,token_id,user_id,ticket_hash,session_binding_hash,risk_score,risk_level,reasons,ip_hash,
@@ -209,7 +216,7 @@ DECLARE
   v_manufacturer_id text;
   v_assurance text;
 BEGIN
-  IF session_user <> 'mscqr_dev_preauth'
+  IF session_user <> 'mscqr_dev_rls_b01_preauth'
      OR p_action NOT IN ('load', 'challenge', 'revoke', 'complete')
      OR p_checked_at IS NULL
      OR abs(extract(epoch FROM (p_checked_at - (clock_timestamp() AT TIME ZONE 'UTC')))) > 300
@@ -271,8 +278,7 @@ BEGIN
   END IF;
 
   v_assurance := CASE WHEN v_token.mfa_verified_at IS NULL THEN 'password-verified' ELSE 'mfa-verified' END;
-  IF (p_action = 'challenge' AND (NOT v_actor.mfa_required OR NOT v_actor.mfa_enabled OR v_token.mfa_verified_at IS NOT NULL))
-     OR (p_action = 'complete' AND v_actor.mfa_required AND (NOT v_actor.mfa_enabled OR v_token.mfa_verified_at IS NULL)) THEN
+  IF p_action = 'challenge' AND (NOT v_actor.mfa_required OR NOT v_actor.mfa_enabled OR v_token.mfa_verified_at IS NOT NULL) THEN
     RAISE EXCEPTION 'B01_REFRESH_BEARER_DENIED';
   END IF;
 
@@ -318,7 +324,7 @@ DECLARE
   v_actor b01_refresh_wave.actor%ROWTYPE;
   v_membership b01_refresh_wave.membership%ROWTYPE;
 BEGIN
-  IF session_user <> 'mscqr_dev_preauth' THEN
+  IF session_user <> 'mscqr_dev_rls_b01_preauth' THEN
     RAISE EXCEPTION 'B01_PREAUTH_IDENTITY_REQUIRED';
   END IF;
   IF coalesce(array_length(p_hashes, 1), 0) NOT BETWEEN 1 AND 3
@@ -673,7 +679,7 @@ CREATE OR REPLACE FUNCTION app_auth.complete_refresh_token_rotation(
   p_token_id text, p_hashes text[], p_user_id text, p_organization_id text, p_token_hash text,
   p_expires_at timestamp without time zone, p_ip_hash text, p_user_agent text,
   p_authenticated_at timestamp without time zone, p_mfa_verified_at timestamp without time zone,
-  p_rotated_at timestamp without time zone
+  p_rotated_at timestamp without time zone, p_request_id text
 )
 RETURNS TABLE("id" text, "expiresAt" timestamp without time zone)
 LANGUAGE plpgsql
@@ -689,7 +695,7 @@ DECLARE
 BEGIN
   SELECT * INTO STRICT v_authority
   FROM b01_refresh_wave.require_refresh_bearer(
-    p_token_id, p_user_id, p_hashes, p_rotated_at, 'complete', NULL
+    p_token_id, p_user_id, p_hashes, p_rotated_at, 'complete', p_request_id
   );
   SELECT token.* INTO STRICT v_original
   FROM b01_refresh_wave.refresh_token AS token
@@ -720,10 +726,10 @@ BEGIN
 
   INSERT INTO b01_refresh_wave.refresh_token(
     id, user_id, organization_id, token_hash, expires_at, created_at, created_ip_hash,
-    created_user_agent, authenticated_at, mfa_verified_at, last_used_at
+    created_user_agent, authenticated_at, mfa_verified_at, last_used_at, rotation_request_id
   ) VALUES (
     v_id, p_user_id, p_organization_id, p_token_hash, p_expires_at, p_rotated_at,
-    p_ip_hash, p_user_agent, p_authenticated_at, p_mfa_verified_at, p_rotated_at
+    p_ip_hash, p_user_agent, p_authenticated_at, p_mfa_verified_at, p_rotated_at, p_request_id
   );
   UPDATE b01_refresh_wave.refresh_token AS token
   SET revoked_at = p_rotated_at, revoked_reason = 'ROTATED', replaced_by_token_hash = p_token_hash, last_used_at = p_rotated_at
@@ -764,7 +770,7 @@ DECLARE
   v_token b01_refresh_wave.refresh_token%ROWTYPE;
   v_membership b01_refresh_wave.membership%ROWTYPE;
 BEGIN
-  IF session_user <> 'mscqr_dev_app'
+  IF session_user <> 'mscqr_dev_rls_b01_app'
      OR p_user_id IS NULL OR p_session_id IS NULL
      OR p_request_id IS NULL OR length(p_request_id) NOT BETWEEN 1 AND 128
      OR p_request_id !~ '^[!-~]+$'
@@ -855,7 +861,7 @@ SET search_path = pg_catalog
 AS $fn$
 DECLARE v_actor b01_refresh_wave.actor%ROWTYPE;
 BEGIN
-  IF session_user <> 'mscqr_dev_app'
+  IF session_user <> 'mscqr_dev_rls_b01_app'
      OR current_setting('app.user_id', true) <> p_user_id
      OR current_setting('app.purpose', true) <> ALL (p_allowed_purposes)
      OR current_setting('app.auth_assurance', true) <> ALL (p_allowed_assurances) THEN
@@ -883,7 +889,7 @@ DECLARE
   v_token b01_refresh_wave.refresh_token%ROWTYPE;
   v_membership b01_refresh_wave.membership%ROWTYPE;
 BEGIN
-  IF session_user <> 'mscqr_dev_app'
+  IF session_user <> 'mscqr_dev_rls_b01_app'
      OR p_session_id IS NULL OR p_session_id !~ '^[A-Za-z0-9._:-]{1,191}$'
      OR p_checked_at IS NULL
      OR abs(extract(epoch FROM (p_checked_at - (clock_timestamp() AT TIME ZONE 'UTC')))) > 300
@@ -1030,7 +1036,7 @@ SET search_path = pg_catalog
 AS $fn$
 DECLARE v_id text;
 BEGIN
-  IF session_user <> 'mscqr_dev_app'
+  IF session_user <> 'mscqr_dev_rls_b01_app'
      OR current_setting('app.user_id', true) IS DISTINCT FROM p_initiating_user_id
      OR current_setting('app.role', true) IS DISTINCT FROM p_initiating_actor_role
      OR current_setting('app.request_id', true) IS DISTINCT FROM p_request_id
@@ -1255,7 +1261,7 @@ ALTER FUNCTION app_auth.create_refresh_mfa_challenge(text,text[],text,text,text,
   OWNER TO mscqr_dev_rls_function_owner;
 ALTER FUNCTION app_auth.revoke_refresh_token_scope(text,text[],text,text,text,timestamp without time zone)
   OWNER TO mscqr_dev_rls_function_owner;
-ALTER FUNCTION app_auth.complete_refresh_token_rotation(text,text[],text,text,text,timestamp without time zone,text,text,timestamp without time zone,timestamp without time zone,timestamp without time zone)
+ALTER FUNCTION app_auth.complete_refresh_token_rotation(text,text[],text,text,text,timestamp without time zone,text,text,timestamp without time zone,timestamp without time zone,timestamp without time zone,text)
   OWNER TO mscqr_dev_rls_function_owner;
 ALTER FUNCTION app_rls.revalidate_authenticated_actor(text,text,text,text,timestamp without time zone,text)
   OWNER TO mscqr_dev_rls_function_owner;
@@ -1288,7 +1294,7 @@ REVOKE ALL ON FUNCTION app_auth.claim_refresh_token_rotation(text[],timestamp wi
 REVOKE ALL ON FUNCTION app_auth.load_refresh_session_state(text,text[],text,text,timestamp without time zone,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_auth.create_refresh_mfa_challenge(text,text[],text,text,text,integer,text,text[],text,text,integer,timestamp without time zone,timestamp without time zone,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_auth.revoke_refresh_token_scope(text,text[],text,text,text,timestamp without time zone) FROM PUBLIC;
-REVOKE ALL ON FUNCTION app_auth.complete_refresh_token_rotation(text,text[],text,text,text,timestamp without time zone,text,text,timestamp without time zone,timestamp without time zone,timestamp without time zone) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_auth.complete_refresh_token_rotation(text,text[],text,text,text,timestamp without time zone,text,text,timestamp without time zone,timestamp without time zone,timestamp without time zone,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.create_refresh_token(text,text,text,timestamp without time zone,text,text,timestamp without time zone,timestamp without time zone,timestamp without time zone) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.find_refresh_token_by_hashes(text[]) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.find_refresh_token_by_id(text,text) FROM PUBLIC;
@@ -1297,6 +1303,83 @@ REVOKE ALL ON FUNCTION app_rls.revoke_refresh_token_by_hashes(text[],text,timest
 REVOKE ALL ON FUNCTION app_rls.revoke_all_refresh_tokens(text,text,timestamp without time zone) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.revoke_password_only_refresh_tokens(text,text,timestamp without time zone) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.revoke_refresh_token_by_id(text,text,text,timestamp without time zone) FROM PUBLIC;
+CREATE OR REPLACE FUNCTION app_auth.issue_authenticated_session_capability(
+  p_refresh_token_id text,
+  p_refresh_token_hash text,
+  p_capability text,
+  p_assurance text,
+  p_expires_at timestamp without time zone
+) RETURNS TABLE("id" text,"expiresAt" timestamp without time zone)
+LANGUAGE plpgsql SECURITY DEFINER VOLATILE SET search_path=pg_catalog AS $fn$
+DECLARE v_token b01_refresh_wave.refresh_token%ROWTYPE;
+BEGIN
+  IF session_user NOT IN ('mscqr_dev_rls_b01_preauth','mscqr_dev_rls_b01_app')
+     OR p_capability !~ '^[A-Za-z0-9_-]{43}$'
+     OR p_assurance NOT IN ('PASSWORD','ADMIN_MFA') THEN
+    RAISE EXCEPTION 'AUTH_SESSION_CAPABILITY_DENIED';
+  END IF;
+  SELECT token.* INTO v_token FROM b01_refresh_wave.refresh_token AS token
+   WHERE token.id=p_refresh_token_id AND token.token_hash=p_refresh_token_hash
+     AND token.revoked_at IS NULL AND token.expires_at>clock_timestamp()
+   FOR UPDATE;
+  IF NOT FOUND OR p_expires_at<=clock_timestamp() OR p_expires_at>v_token.expires_at
+     OR (p_assurance='ADMIN_MFA') IS DISTINCT FROM (v_token.mfa_verified_at IS NOT NULL) THEN
+    RAISE EXCEPTION 'AUTH_SESSION_CAPABILITY_DENIED';
+  END IF;
+  UPDATE b01_refresh_wave.refresh_token AS token SET
+    session_capability_hash=encode(sha256(convert_to(p_capability,'UTF8')),'hex'),
+    session_capability_assurance=p_assurance,
+    session_capability_expires_at=p_expires_at,
+    session_capability_revoked_at=NULL
+  WHERE token.id=p_refresh_token_id;
+  RETURN QUERY SELECT v_token.id,v_token.expires_at;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_auth.require_authenticated_session(
+  p_capability text,
+  p_purpose text,
+  p_request_id text
+) RETURNS TABLE("sessionId" text,"userId" text,"role" text,"organizationId" text,"licenseeId" text,"assurance" text)
+LANGUAGE plpgsql SECURITY DEFINER VOLATILE SET search_path=pg_catalog AS $fn$
+DECLARE v_token b01_refresh_wave.refresh_token%ROWTYPE; v_actor b01_refresh_wave.actor%ROWTYPE;
+BEGIN
+  IF session_user<>'mscqr_dev_rls_b01_app' OR p_capability !~ '^[A-Za-z0-9_-]{43}$'
+     OR length(btrim(coalesce(p_purpose,''))) NOT BETWEEN 1 AND 240
+     OR length(btrim(coalesce(p_request_id,''))) NOT BETWEEN 1 AND 128 THEN
+    RAISE EXCEPTION 'AUTH_SESSION_CAPABILITY_DENIED';
+  END IF;
+  SELECT token.* INTO v_token FROM b01_refresh_wave.refresh_token AS token
+   WHERE token.session_capability_hash=encode(sha256(convert_to(p_capability,'UTF8')),'hex')
+     AND token.session_capability_revoked_at IS NULL
+     AND token.session_capability_expires_at>clock_timestamp()
+     AND token.revoked_at IS NULL AND token.expires_at>clock_timestamp()
+   FOR SHARE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'AUTH_SESSION_CAPABILITY_DENIED'; END IF;
+  SELECT actor.* INTO v_actor FROM b01_refresh_wave.actor AS actor
+   WHERE actor.id=v_token.user_id AND actor.active AND actor.email_verified_at IS NOT NULL
+   FOR SHARE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'AUTH_SESSION_CAPABILITY_DENIED'; END IF;
+  PERFORM set_config('app.auth_session_id',v_token.id,true),
+          set_config('app.user_id',v_actor.id,true),
+          set_config('app.role',v_actor.role,true),
+          set_config('app.organization_id',coalesce(v_actor.organization_id,''),true),
+          set_config('app.licensee_id',coalesce(v_actor.licensee_id,''),true),
+          set_config('app.manufacturer_id',coalesce(v_actor.manufacturer_id,''),true),
+          set_config('app.auth_assurance',CASE v_token.session_capability_assurance WHEN 'ADMIN_MFA' THEN 'mfa-verified' ELSE 'password-verified' END,true),
+          set_config('app.request_id',p_request_id,true),
+          set_config('app.purpose',p_purpose,true);
+  RETURN QUERY SELECT v_token.id,v_actor.id,v_actor.role,v_actor.organization_id,v_actor.licensee_id,v_token.session_capability_assurance;
+END
+$fn$;
+
+ALTER FUNCTION app_auth.issue_authenticated_session_capability(text,text,text,text,timestamp without time zone)
+  OWNER TO mscqr_dev_rls_function_owner;
+ALTER FUNCTION app_auth.require_authenticated_session(text,text,text)
+  OWNER TO mscqr_dev_rls_function_owner;
+
+REVOKE ALL ON FUNCTION app_auth.issue_authenticated_session_capability(text,text,text,text,timestamp without time zone) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_auth.require_authenticated_session(text,text,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION b01_refresh_wave.require_authenticated_context(text,text[],text[]) FROM PUBLIC;
 REVOKE ALL ON FUNCTION b01_refresh_wave.require_refresh_bearer(text,text,text[],timestamp without time zone,text,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.revalidate_authenticated_actor(text,text,text,text,timestamp without time zone,text) FROM PUBLIC;
@@ -1304,21 +1387,24 @@ REVOKE ALL ON FUNCTION app_rls.require_recent_mfa_session(text,timestamp without
 REVOKE ALL ON FUNCTION app_rls.load_authenticated_actor() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.enqueue_audit_log_outbox(jsonb,text,text,text,text,text,text,text,text,timestamp without time zone,text) FROM PUBLIC;
 
-GRANT EXECUTE ON FUNCTION app_auth.claim_refresh_token_rotation(text[],timestamp without time zone,text) TO mscqr_dev_preauth;
-GRANT EXECUTE ON FUNCTION app_auth.load_refresh_session_state(text,text[],text,text,timestamp without time zone,text) TO mscqr_dev_preauth;
-GRANT EXECUTE ON FUNCTION app_auth.create_refresh_mfa_challenge(text,text[],text,text,text,integer,text,text[],text,text,integer,timestamp without time zone,timestamp without time zone,text) TO mscqr_dev_preauth;
-GRANT EXECUTE ON FUNCTION app_auth.revoke_refresh_token_scope(text,text[],text,text,text,timestamp without time zone) TO mscqr_dev_preauth;
-GRANT EXECUTE ON FUNCTION app_auth.complete_refresh_token_rotation(text,text[],text,text,text,timestamp without time zone,text,text,timestamp without time zone,timestamp without time zone,timestamp without time zone) TO mscqr_dev_preauth;
+GRANT EXECUTE ON FUNCTION app_auth.claim_refresh_token_rotation(text[],timestamp without time zone,text) TO mscqr_dev_rls_b01_preauth;
+GRANT EXECUTE ON FUNCTION app_auth.load_refresh_session_state(text,text[],text,text,timestamp without time zone,text) TO mscqr_dev_rls_b01_preauth;
+GRANT EXECUTE ON FUNCTION app_auth.create_refresh_mfa_challenge(text,text[],text,text,text,integer,text,text[],text,text,integer,timestamp without time zone,timestamp without time zone,text) TO mscqr_dev_rls_b01_preauth;
+GRANT EXECUTE ON FUNCTION app_auth.revoke_refresh_token_scope(text,text[],text,text,text,timestamp without time zone) TO mscqr_dev_rls_b01_preauth;
+GRANT EXECUTE ON FUNCTION app_auth.complete_refresh_token_rotation(text,text[],text,text,text,timestamp without time zone,text,text,timestamp without time zone,timestamp without time zone,timestamp without time zone,text) TO mscqr_dev_rls_b01_preauth;
+GRANT EXECUTE ON FUNCTION app_auth.issue_authenticated_session_capability(text,text,text,text,timestamp without time zone) TO mscqr_dev_rls_b01_preauth;
+GRANT EXECUTE ON FUNCTION app_auth.issue_authenticated_session_capability(text,text,text,text,timestamp without time zone) TO mscqr_dev_rls_b01_app;
+GRANT EXECUTE ON FUNCTION app_auth.require_authenticated_session(text,text,text) TO mscqr_dev_rls_b01_app;
 
-GRANT EXECUTE ON FUNCTION app_rls.revalidate_authenticated_actor(text,text,text,text,timestamp without time zone,text) TO mscqr_dev_app;
-GRANT EXECUTE ON FUNCTION app_rls.require_recent_mfa_session(text,timestamp without time zone,integer) TO mscqr_dev_app;
-GRANT EXECUTE ON FUNCTION app_rls.load_authenticated_actor() TO mscqr_dev_app;
-GRANT EXECUTE ON FUNCTION app_rls.enqueue_audit_log_outbox(jsonb,text,text,text,text,text,text,text,text,timestamp without time zone,text) TO mscqr_dev_app;
-GRANT EXECUTE ON FUNCTION app_rls.create_refresh_token(text,text,text,timestamp without time zone,text,text,timestamp without time zone,timestamp without time zone,timestamp without time zone) TO mscqr_dev_app;
-GRANT EXECUTE ON FUNCTION app_rls.find_refresh_token_by_hashes(text[]) TO mscqr_dev_app;
-GRANT EXECUTE ON FUNCTION app_rls.find_refresh_token_by_id(text,text) TO mscqr_dev_app;
-GRANT EXECUTE ON FUNCTION app_rls.list_active_refresh_tokens(text,timestamp without time zone) TO mscqr_dev_app;
-GRANT EXECUTE ON FUNCTION app_rls.revoke_refresh_token_by_hashes(text[],text,timestamp without time zone) TO mscqr_dev_app;
-GRANT EXECUTE ON FUNCTION app_rls.revoke_all_refresh_tokens(text,text,timestamp without time zone) TO mscqr_dev_app;
-GRANT EXECUTE ON FUNCTION app_rls.revoke_password_only_refresh_tokens(text,text,timestamp without time zone) TO mscqr_dev_app;
-GRANT EXECUTE ON FUNCTION app_rls.revoke_refresh_token_by_id(text,text,text,timestamp without time zone) TO mscqr_dev_app;
+GRANT EXECUTE ON FUNCTION app_rls.revalidate_authenticated_actor(text,text,text,text,timestamp without time zone,text) TO mscqr_dev_rls_b01_app;
+GRANT EXECUTE ON FUNCTION app_rls.require_recent_mfa_session(text,timestamp without time zone,integer) TO mscqr_dev_rls_b01_app;
+GRANT EXECUTE ON FUNCTION app_rls.load_authenticated_actor() TO mscqr_dev_rls_b01_app;
+GRANT EXECUTE ON FUNCTION app_rls.enqueue_audit_log_outbox(jsonb,text,text,text,text,text,text,text,text,timestamp without time zone,text) TO mscqr_dev_rls_b01_app;
+GRANT EXECUTE ON FUNCTION app_rls.create_refresh_token(text,text,text,timestamp without time zone,text,text,timestamp without time zone,timestamp without time zone,timestamp without time zone) TO mscqr_dev_rls_b01_app;
+GRANT EXECUTE ON FUNCTION app_rls.find_refresh_token_by_hashes(text[]) TO mscqr_dev_rls_b01_app;
+GRANT EXECUTE ON FUNCTION app_rls.find_refresh_token_by_id(text,text) TO mscqr_dev_rls_b01_app;
+GRANT EXECUTE ON FUNCTION app_rls.list_active_refresh_tokens(text,timestamp without time zone) TO mscqr_dev_rls_b01_app;
+GRANT EXECUTE ON FUNCTION app_rls.revoke_refresh_token_by_hashes(text[],text,timestamp without time zone) TO mscqr_dev_rls_b01_app;
+GRANT EXECUTE ON FUNCTION app_rls.revoke_all_refresh_tokens(text,text,timestamp without time zone) TO mscqr_dev_rls_b01_app;
+GRANT EXECUTE ON FUNCTION app_rls.revoke_password_only_refresh_tokens(text,text,timestamp without time zone) TO mscqr_dev_rls_b01_app;
+GRANT EXECUTE ON FUNCTION app_rls.revoke_refresh_token_by_id(text,text,text,timestamp without time zone) TO mscqr_dev_rls_b01_app;
