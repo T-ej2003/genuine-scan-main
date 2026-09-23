@@ -7,12 +7,15 @@ import { NAMED_SQL_FUNCTION_CONTRACTS, validateNamedSqlFunctionContracts } from 
 
 const root = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const source = fs.readFileSync(path.join(root, "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql"), "utf8");
+const generator = fs.readFileSync(path.join(root, "scripts/rls/generate-clean-room-rls-sql.mjs"), "utf8");
+const generatedPolicies = fs.readFileSync(path.join(root, "scripts/rls/sql/generated/30-policies.sql"), "utf8");
+const b01AuditSelect = /CREATE POLICY "b01_auditlogoutbox_select"[\s\S]*?FOR SELECT TO "mscqr_rls_cert_auth_owner" USING \(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting\('app\.b01_operation',true\)='finalize-successor'[\s\S]*?payload->>'userId'=current_setting\('app\.b01_user_id',true\)[\s\S]*?payload->>'action'='AUTH_REFRESH_MFA_CHALLENGE_REQUIRED'[\s\S]*?payload->>'entityType'='RefreshToken'[\s\S]*?payload->>'entityId'=current_setting\('app\.b01_predecessor_id',true\)[\s\S]*?payload->'details'->>'requestId'=current_setting\('app\.b01_request_id',true\)[\s\S]*?payload->'details'->>'boundary'='b01-refresh-rotation'\);/;
 
 test("B01 production refresh functions use the reviewed owner-and-bearer FORCE-RLS contract", () => {
   const contracts = validateNamedSqlFunctionContracts().filter((contract) =>
     contract.definitionLocation.endsWith("b01RefreshRotationFunctions.sql")
   );
-  assert.equal(contracts.length, 5);
+  assert.equal(contracts.length, 6);
   assert(contracts.every((contract) => contract.security.ownerIdentity === "identity-auth-function-owner"));
   assert(contracts.every((contract) => contract.security.publicExecute === "revoked"));
   assert(contracts.every((contract) => contract.security.runtimeExecuteGrantees.join(",") === "preauth"));
@@ -28,10 +31,19 @@ test("B01 production refresh functions use the reviewed owner-and-bearer FORCE-R
   assert.match(source, /"replacedByTokenHash"=p_token_hash,"rotationCompletedAt"=p_rotated_at/);
   assert.match(source, /revoke_refresh_token_scope\([^)]*p_request_id text\)/);
   assert.match(source, /complete_refresh_token_rotation\([^)]*p_request_id text\)/);
+  assert.match(source, /finalize_refresh_token_rotation\([^)]*p_request_id text\)/);
   assert.match(source, /t\."rotationRequestId" IS DISTINCT FROM p_request_id OR t\."rotationCompletedAt" IS NOT NULL/);
+  assert.match(source, /"sessionCapabilityHash" IS NULL[\s\S]*AUTH_REFRESH_MFA_CHALLENGE_REQUIRED[\s\S]*SET "rotationRequestId"=NULL/);
   assert.match(source, /B01_REFRESH_CLAIM_AMBIGUOUS/);
   assert.match(source, /gen_random_uuid\(\)::text/);
   assert.match(source, /AUTH_REFRESH_REUSE_DETECTED/);
   assert.match(source, /REVOKE ALL ON FUNCTION app_auth\.claim_refresh_token_rotation/);
   assert.doesNotMatch(source, /USING\s*\(\s*true\s*\)|WITH CHECK\s*\(\s*true\s*\)|BYPASSRLS|raw successor|md5\(random/i);
+});
+
+test("B01 finalization audit visibility is exact and generated-package bound", () => {
+  assert.match(generator, /\["AuditLogOutbox", "SELECT", \["payload"\]\]/);
+  assert.match(generator, /session_user=\$\{lit\(roleNames\.preauth\)\}[\s\S]*?b01Operation\}='finalize-successor'[\s\S]*?AUTH_REFRESH_MFA_CHALLENGE_REQUIRED[\s\S]*?b01-refresh-rotation/);
+  assert.match(generatedPolicies, b01AuditSelect);
+  assert.throws(() => assert.match(generatedPolicies.replace(b01AuditSelect, ""), b01AuditSelect));
 });

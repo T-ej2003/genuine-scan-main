@@ -12,6 +12,7 @@ const family = "current-runtime-super-admin-invitation";
 test("current-runtime Super Admin invitation is an explicit certification family", () => {
   assert.match(runner, new RegExp(`if \\(env\\.MSCQR_FULL_RLS_CERTIFICATION_FAMILY !== "${family}"\\) return null`));
   assert.match(runner, /backend\/tests\/currentRuntimeSuperAdminInvitationPostgres18\.test\.js/);
+  assert.match(runner, /Current-runtime super-admin invitation PostgreSQL 18 proof passed/);
   assert.match(runner, new RegExp(`if \\(env\\.MSCQR_FULL_RLS_CERTIFICATION_FAMILY === "${family}"\\) \\{[\\s\\S]*?runCurrentRuntimeSuperAdminInvitationCertification\\(connections, env\\)`));
   assert.match(runner, /result\.currentRuntimeSuperAdminInvitationCertification = finalRun\.currentRuntimeSuperAdminInvitationCertification;/);
   assert.match(runner, /result\.status = result\.certificationFamily === "current-runtime-super-admin-invitation"[\s\S]*?"current-runtime-super-admin-invitation-certified"/);

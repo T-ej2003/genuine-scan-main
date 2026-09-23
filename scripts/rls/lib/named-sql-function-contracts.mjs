@@ -42,6 +42,13 @@ export const NAMED_SQL_FUNCTION_DEFINITION_EVIDENCE = Object.freeze([
     definitionLocation: refreshFixture,
     definitionStatus: "fixture-only-non-production",
   },
+  {
+    schema: "app_auth",
+    name: "finalize_refresh_token_rotation",
+    signature: "text,text[],text,timestamp without time zone,text",
+    definitionLocation: refreshFixture,
+    definitionStatus: "fixture-only-non-production",
+  },
 ]);
 
 const b01Source = "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql";
@@ -112,6 +119,7 @@ const b01Tables = Object.freeze({
   challenge: [["RefreshToken", "SELECT"], ["User", "SELECT"], ["AuthMfaChallenge", "INSERT"], ["AuditLogOutbox", "INSERT"]],
   revoke: [["RefreshToken", "SELECT"], ["RefreshToken", "UPDATE"], ["User", "SELECT"], ["AuditLogOutbox", "INSERT"]],
   complete: [["RefreshToken", "SELECT"], ["RefreshToken", "INSERT"], ["RefreshToken", "UPDATE"], ["User", "SELECT"], ["ManufacturerLicenseeLink", "SELECT"], ["Licensee", "SELECT"], ["Organization", "SELECT"], ["AuditLogOutbox", "INSERT"]],
+  finalize: [["RefreshToken", "SELECT"], ["RefreshToken", "UPDATE"], ["User", "SELECT"], ["AuditLogOutbox", "SELECT"]],
 });
 
 const preAuthOwner = `current_user={{AUTH_OWNER}}`;
@@ -1981,6 +1989,15 @@ export const NAMED_SQL_FUNCTION_CONTRACTS = Object.freeze([
     security: b01Security, tableCommands: b01Tables.complete, context: b01Context, canonicalWorkflowIds: [b01Workflow],
     repositoryCallers: ["backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:completeRefreshTokenRotation"],
     inputAuthority: "claimed predecessor identity; successor hash is supplied by the application and raw successor is never accepted or retained", outputColumns: ["id", "expiresAt"], disposableProbes: ["b01-refresh-rotation-real-schema"],
+  },
+  {
+    id: "b01-finalize-refresh-token-rotation", schema: "app_auth", name: "finalize_refresh_token_rotation",
+    signature: "text,text[],text,timestamp without time zone,text", returnType: "TABLE(finalized boolean)",
+    identityArguments: "p_token_id text, p_hashes text[], p_user_id text, p_finalized_at timestamp without time zone, p_request_id text",
+    definitionLocation: b01Source, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed",
+    security: b01Security, tableCommands: b01Tables.finalize, context: b01Context, canonicalWorkflowIds: [b01Workflow],
+    repositoryCallers: ["backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:finalizeRefreshTokenRotation"],
+    inputAuthority: "the claimed successor and same request identity; finalization requires the protected session capability and any required MFA bootstrap challenge before releasing the temporary claim", outputColumns: ["finalized"], disposableProbes: ["b01-refresh-rotation-real-schema"],
   },
 ]);
 

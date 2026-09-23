@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "count": 351,
+  "count": 352,
   "rows": [
     {
       "tableId": "table-action-idempotency-key",
@@ -1376,6 +1376,29 @@
       "columns": [],
       "sourceCommandRuleIds": [
         "command-audit-log-outbox-insert-65b85bc0759d"
+      ],
+      "workflowId": "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session",
+      "route": "POST /auth/refresh",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-audit-log-outbox",
+      "table": "AuditLogOutbox",
+      "policyName": "b01_auditlogoutbox_select",
+      "command": "SELECT",
+      "actors": [
+        "pre-auth"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "b01-refresh-rotation"
+      ],
+      "scopeType": "security-definer-owner-and-bearer-derived-transaction-context",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.b01_operation',true)='finalize-successor' AND current_setting('app.b01_predecessor_id',true)<>'' AND current_setting('app.b01_user_id',true)<>'' AND payload->>'userId'=current_setting('app.b01_user_id',true) AND payload->>'action'='AUTH_REFRESH_MFA_CHALLENGE_REQUIRED' AND payload->>'entityType'='RefreshToken' AND payload->>'entityId'=current_setting('app.b01_predecessor_id',true) AND payload->'details'->>'requestId'=current_setting('app.b01_request_id',true) AND payload->'details'->>'boundary'='b01-refresh-rotation')",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:b01-finalize-refresh-token-rotation:AuditLogOutbox:SELECT"
       ],
       "workflowId": "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session",
       "route": "POST /auth/refresh",

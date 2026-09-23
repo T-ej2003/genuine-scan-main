@@ -30,7 +30,7 @@ CREATE OR REPLACE FUNCTION app_auth.b01_bind_predecessor(
 BEGIN
   IF p_token_id IS NULL THEN RAISE EXCEPTION 'B01_REFRESH_TOKEN_CONTEXT_DENIED' USING ERRCODE='42501'; END IF;
   IF p_user_id IS NULL THEN RAISE EXCEPTION 'B01_REFRESH_USER_CONTEXT_DENIED' USING ERRCODE='42501'; END IF;
-  IF p_operation NOT IN ('claim','load-state','create-mfa','revoke-scope','complete-rotation','reuse-revoke','account-unavailable','stale-membership') THEN
+  IF p_operation NOT IN ('claim','load-state','create-mfa','revoke-scope','complete-rotation','finalize-successor','reuse-revoke','account-unavailable','stale-membership') THEN
     RAISE EXCEPTION 'B01_REFRESH_OPERATION_DENIED' USING ERRCODE='42501';
   END IF;
   PERFORM set_config('app.b01_predecessor_id',p_token_id,true),
@@ -230,6 +230,45 @@ BEGIN
 END
 $fn$;
 
+CREATE OR REPLACE FUNCTION app_auth.finalize_refresh_token_rotation(p_token_id text,p_hashes text[],p_user_id text,p_finalized_at timestamp without time zone,p_request_id text)
+RETURNS TABLE("finalized" boolean) LANGUAGE plpgsql SECURITY DEFINER VOLATILE SET search_path=pg_catalog,public AS $fn$
+DECLARE t record; actor_role text; changed integer;
+BEGIN
+  PERFORM app_auth.b01_bind_bearer(p_hashes,p_request_id);
+  IF p_finalized_at IS NULL OR abs(extract(epoch FROM p_finalized_at-clock_timestamp())) > 300 THEN
+    RAISE EXCEPTION 'B01_REFRESH_FINALIZATION_DENIED' USING ERRCODE='42501';
+  END IF;
+  SELECT rt.id,rt."userId",rt."orgId",rt."revokedAt",rt."expiresAt",rt."rotationRequestId",
+    rt."rotationCompletedAt",rt."mfaVerifiedAt",rt."sessionCapabilityHash",rt."sessionCapabilityAssurance",
+    rt."sessionCapabilityExpiresAt",rt."sessionCapabilityRevokedAt"
+    INTO t FROM public."RefreshToken" rt
+    WHERE rt.id=p_token_id AND rt."tokenHash"=ANY(p_hashes) FOR UPDATE OF rt;
+  IF NOT FOUND THEN RAISE EXCEPTION 'B01_REFRESH_FINALIZATION_DENIED' USING ERRCODE='42501'; END IF;
+  PERFORM app_auth.b01_bind_predecessor(t.id,t."userId",t."orgId",'finalize-successor');
+  SELECT usr.role::text INTO actor_role FROM public."User" usr WHERE usr.id=t."userId";
+  IF NOT FOUND THEN RAISE EXCEPTION 'B01_REFRESH_FINALIZATION_DENIED' USING ERRCODE='42501'; END IF;
+  IF t."userId" IS DISTINCT FROM p_user_id OR t."revokedAt" IS NOT NULL OR t."expiresAt"<=p_finalized_at
+     OR t."rotationRequestId" IS DISTINCT FROM p_request_id OR t."rotationCompletedAt" IS NOT NULL
+     OR t."sessionCapabilityHash" IS NULL OR t."sessionCapabilityRevokedAt" IS NOT NULL
+     OR t."sessionCapabilityExpiresAt"<=p_finalized_at
+     OR t."sessionCapabilityAssurance" IS DISTINCT FROM (CASE WHEN t."mfaVerifiedAt" IS NULL THEN 'PASSWORD' ELSE 'ADMIN_MFA' END)
+     OR (actor_role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN','LICENSEE_ADMIN','ORG_ADMIN','MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER')
+       AND t."mfaVerifiedAt" IS NULL AND NOT EXISTS (
+         SELECT 1 FROM public."AuditLogOutbox" outbox
+         WHERE outbox.payload->>'action'='AUTH_REFRESH_MFA_CHALLENGE_REQUIRED'
+           AND outbox.payload->>'entityType'='RefreshToken'
+           AND outbox.payload->>'entityId'=t.id
+           AND outbox.payload->'details'->>'requestId'=p_request_id
+       ))
+  THEN RAISE EXCEPTION 'B01_REFRESH_FINALIZATION_DENIED' USING ERRCODE='42501'; END IF;
+  UPDATE public."RefreshToken" rt SET "rotationRequestId"=NULL
+    WHERE rt.id=t.id AND rt."rotationRequestId"=p_request_id;
+  GET DIAGNOSTICS changed=ROW_COUNT;
+  IF changed<>1 THEN RAISE EXCEPTION 'B01_REFRESH_FINALIZATION_DENIED' USING ERRCODE='42501'; END IF;
+  RETURN QUERY SELECT TRUE;
+END
+$fn$;
+
 REVOKE ALL ON FUNCTION app_auth.b01_bind_bearer(text[],text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_auth.b01_bind_predecessor(text,text,text,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_auth.b01_audit(text,text,timestamp without time zone) FROM PUBLIC;
@@ -238,3 +277,4 @@ REVOKE ALL ON FUNCTION app_auth.load_refresh_session_state(text,text[],text,text
 REVOKE ALL ON FUNCTION app_auth.create_refresh_mfa_challenge(text,text[],text,text,text,integer,text,text[],text,text,integer,timestamp without time zone,timestamp without time zone,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_auth.revoke_refresh_token_scope(text,text[],text,text,text,timestamp without time zone,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_auth.complete_refresh_token_rotation(text,text[],text,text,text,timestamp without time zone,text,text,timestamp without time zone,timestamp without time zone,timestamp without time zone,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_auth.finalize_refresh_token_rotation(text,text[],text,timestamp without time zone,text) FROM PUBLIC;

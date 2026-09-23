@@ -77,8 +77,8 @@ const main = async () => {
   process.env.IP_HASH_SALT_CURRENT = "b01-invitation-ip-secret";
   process.env.NODE_ENV = "production";
   process.env.DATABASE_URL = adminUrl;
-  process.env.PREAUTH_DATABASE_URL = roleUrl(adminUrl, "mscqr_dev_preauth");
-  process.env.AUTHENTICATED_APP_DATABASE_URL = roleUrl(adminUrl, "mscqr_dev_app");
+  process.env.PREAUTH_DATABASE_URL = roleUrl(adminUrl, "mscqr_dev_rls_b01_preauth");
+  process.env.AUTHENTICATED_APP_DATABASE_URL = roleUrl(adminUrl, "mscqr_dev_rls_b01_app");
   process.env.EMAIL_DISABLED = "true";
   process.env.MSCQR_FULL_RLS_REDUCED_SURFACE_ENABLED = "false";
   process.env.MSCQR_RLS_B03_WORKER_BOUNDARIES_ENABLED = "true";
@@ -92,11 +92,15 @@ const main = async () => {
   const authenticated = getB01AuthenticatedPrisma();
   const preauth = getB01PreAuthPrisma();
   const { installCanonicalDbContext } = require("../../../dist/lib/canonicalDbContext");
+  const { withDatabaseAuthenticatedSession } = require("../../../dist/rls-waves/session-b/b01/canonicalAuthContext");
   const applicationRoutes = require("../../../dist/routes").default;
   const { acceptInvite } = require("../../../dist/services/auth/inviteService");
+  const { createAuthenticatedSessionCapability, requireAuthenticatedSessionCapability } = require("../../../dist/services/auth/authenticatedSessionCapabilityService");
+  const { openCookieToken, sealCookieToken } = require("../../../dist/services/auth/cookieTokenProtectionService");
   const { hashPassword } = require("../../../dist/services/auth/passwordService");
-  const { hashRefreshToken, signAccessToken } = require("../../../dist/services/auth/tokenService");
+  const { hashRefreshToken, signAccessToken, verifyAccessToken } = require("../../../dist/services/auth/tokenService");
   const { buildTokenHashCandidates, hashToken } = require("../../../dist/utils/security");
+  const sessionCapabilities = new Map();
 
   const now = new Date();
   const later = new Date(now.getTime() + 24 * 60 * 60 * 1000);
@@ -163,6 +167,18 @@ const main = async () => {
         ${"a".repeat(64)},${"invitation-postgres-proof"},${now},${mfaVerifiedAt},${now}
       )
     `;
+    if (expiresAt > now) {
+      const capability = await createAuthenticatedSessionCapability(preauth, {
+        refreshTokenId: sessionId,
+        refreshTokenHash: sessionHash,
+        assurance: mfaVerifiedAt ? "ADMIN_MFA" : "PASSWORD",
+        expiresAt: new Date(now.getTime() + 30 * 60_000),
+      });
+      sessionCapabilities.set(sessionId, {
+        raw: capability.rawCapability,
+        sealed: sealCookieToken(capability.rawCapability, "auth.database-session"),
+      });
+    }
   };
 
   const claimsFor = ({ id, sessionId, role, licenseeId = null, organizationId = null, mfaVerifiedAt = now }) =>
@@ -183,9 +199,9 @@ const main = async () => {
 
   const prepareSql = `
     SELECT * FROM app_rls.prepare_invitation(
-      $1::text,$2::text,$3::text,$4::text,$5::text,$6::text,$7::text,$8::text,$9::text,
-      $10::boolean,$11::boolean,$12::text,$13::timestamp without time zone,
-      $14::timestamp without time zone,$15::text,$16::text
+      $1::text,$2::text,$3::text,$4::text,$5::text,$6::text,$7::text,$8::text,$9::text,$10::text,
+      $11::boolean,$12::boolean,$13::text,$14::timestamp without time zone,
+      $15::timestamp without time zone,$16::text,$17::text
     )
   `;
   const defaultPrepareInput = (email, tokenHashValue) => ({
@@ -206,6 +222,7 @@ const main = async () => {
     await installCanonicalDbContext(tx, context);
     return tx.$queryRawUnsafe(
       prepareSql,
+      sessionCapabilities.get(actorSessionId).raw,
       context.userId,
       actorSessionId,
       context.requestId,
@@ -255,7 +272,14 @@ const main = async () => {
   let baseUrl;
   const routeRequest = async ({ method, route, requestId, token, body }) => {
     const headers = { "user-agent": "invitation-route-proof", "x-request-id": requestId };
-    if (token) headers.authorization = `Bearer ${token}`;
+    if (token) {
+      headers.authorization = `Bearer ${token}`;
+      const sessionCapability = sessionCapabilities.get(verifyAccessToken(token).sessionId);
+      if (sessionCapability) {
+        assert.equal(openCookieToken(sessionCapability.sealed, "auth.database-session"), sessionCapability.raw);
+        headers["x-database-session-capability"] = sessionCapability.sealed;
+      }
+    }
     if (body !== undefined) headers["content-type"] = "application/json";
     const response = await fetch(`${baseUrl}${route}`, {
       method,
@@ -337,6 +361,13 @@ const main = async () => {
       expiresAt: new Date(now.getTime() - 60_000),
     });
 
+    const platformCapability = await requireAuthenticatedSessionCapability(authenticated, {
+      capability: sessionCapabilities.get(ids.platformSession).raw,
+      purpose: "invitation-route-proof",
+      requestId: "route-capability-preflight",
+    });
+    assert.equal(platformCapability.userId, ids.platformActor);
+
     const app = express();
     app.use(express.json());
     app.use("/api", applicationRoutes);
@@ -352,6 +383,11 @@ const main = async () => {
       sessionId: ids.platformSession,
       role: "PLATFORM_SUPER_ADMIN",
     });
+    await withDatabaseAuthenticatedSession(
+      verifyAccessToken(platformToken),
+      { capability: sessionCapabilities.get(ids.platformSession).raw, requestId: "route-auth-preflight", purpose: "invitation-route-proof" },
+      async () => true
+    );
     const licenseeToken = claimsFor({
       id: ids.licenseeActor,
       sessionId: ids.licenseeSession,
@@ -372,7 +408,7 @@ const main = async () => {
         licenseeId: ids.licenseeOne,
       },
     });
-    assert.equal(platformCreate.status, 201);
+    assert.equal(platformCreate.status, 201, JSON.stringify(platformCreate.body));
     assert.equal(platformCreate.body.success, true);
     assert.equal(platformCreate.body.data.created, true);
     const platformRawToken = new URL(platformCreate.body.data.inviteLink).searchParams.get("token");
@@ -452,7 +488,7 @@ const main = async () => {
         id,email,name,role,licensee_id,organization_id,status,active,updated_at
       ) VALUES (
         ${"50000000-0000-4000-8000-000000000001"},${"resend-admin@example.test"},${"Resend Admin"},
-        ${"ORG_ADMIN"},${ids.licenseeOne},${ids.organizationOne},${"INVITED"},true,${now}
+        ${"LICENSEE_ADMIN"},${ids.licenseeOne},${ids.organizationOne},${"INVITED"},true,${now}
       )
     `;
     const resend = await routeRequest({
@@ -462,7 +498,7 @@ const main = async () => {
       token: platformToken,
       body: { email: "resend-admin@example.test" },
     });
-    assert.equal(resend.status, 200);
+    assert.equal(resend.status, 200, JSON.stringify(resend.body));
     assert.equal(resend.body.success, true);
     assert.equal(resend.body.data.created, true);
     const resendRawToken = new URL(resend.body.data.inviteLink).searchParams.get("token");
@@ -475,7 +511,7 @@ const main = async () => {
       ipHash: "a".repeat(64),
       userAgent: "invitation-service-proof",
     });
-    assert.equal(acceptedResend.role, "ORG_ADMIN");
+    assert.equal(acceptedResend.role, "LICENSEE_ADMIN");
     assert.equal(acceptedResend.status, "ACTIVE");
     const [{ resendAuditCount }] = await admin.$queryRaw`
       SELECT count(*)::int AS "resendAuditCount"
@@ -676,9 +712,10 @@ const main = async () => {
       /B01_INVITE_SCOPE_DENIED/
     );
     await reject(
-      () => admin.$queryRawUnsafe(
+      () => authenticated.$queryRawUnsafe(
         prepareSql,
-        ids.platformActor,
+        sessionCapabilities.get(ids.platformSession).raw,
+        ids.licenseeActor,
         ids.platformSession,
         "wrong-identity",
         "auth-invite-create",
@@ -695,7 +732,7 @@ const main = async () => {
         "d".repeat(64),
         "wrong-identity-proof"
       ),
-      /B01_INVITE_ACTOR_DENIED/
+      /B01_INVITE_SCOPE_DENIED/
     );
 
     const rollbackCreateEmail = "rollback-create@example.test";
@@ -1022,7 +1059,7 @@ const main = async () => {
     assert.deepEqual(appFunctionSignatures.map((row) => row.signature), [
       "app_auth.consume_invitation_token(text[],text,text,timestamp without time zone,text,text,text)",
       "app_auth.lookup_invitation_token(text[],timestamp without time zone)",
-      "app_rls.prepare_invitation(text,text,text,text,text,text,text,text,text,boolean,boolean,text,timestamp without time zone,timestamp without time zone,text,text)",
+      "app_rls.prepare_invitation(text,text,text,text,text,text,text,text,text,text,boolean,boolean,text,timestamp without time zone,timestamp without time zone,text,text)",
     ]);
 
     const functionRows = await admin.$queryRaw`
@@ -1031,7 +1068,7 @@ const main = async () => {
       FROM pg_catalog.pg_proc AS procedure
       JOIN pg_catalog.pg_roles AS owner ON owner.oid=procedure.proowner
       WHERE procedure.oid IN (
-        'app_rls.prepare_invitation(text,text,text,text,text,text,text,text,text,boolean,boolean,text,timestamp without time zone,timestamp without time zone,text,text)'::regprocedure,
+        'app_rls.prepare_invitation(text,text,text,text,text,text,text,text,text,text,boolean,boolean,text,timestamp without time zone,timestamp without time zone,text,text)'::regprocedure,
         'app_auth.lookup_invitation_token(text[],timestamp without time zone)'::regprocedure,
         'app_auth.consume_invitation_token(text[],text,text,timestamp without time zone,text,text,text)'::regprocedure,
         'b01_invite_wave.require_actor(text,text,text,text,timestamp without time zone)'::regprocedure
@@ -1052,12 +1089,12 @@ const main = async () => {
 
     const [privileges] = await admin.$queryRaw`
       SELECT
-        has_function_privilege('mscqr_dev_app','app_rls.prepare_invitation(text,text,text,text,text,text,text,text,text,boolean,boolean,text,timestamp without time zone,timestamp without time zone,text,text)','EXECUTE') AS "appPrepare",
-        has_function_privilege('mscqr_dev_preauth','app_rls.prepare_invitation(text,text,text,text,text,text,text,text,text,boolean,boolean,text,timestamp without time zone,timestamp without time zone,text,text)','EXECUTE') AS "preauthPrepare",
-        has_function_privilege('mscqr_dev_preauth','app_auth.lookup_invitation_token(text[],timestamp without time zone)','EXECUTE') AS "preauthLookup",
-        has_function_privilege('mscqr_dev_app','app_auth.lookup_invitation_token(text[],timestamp without time zone)','EXECUTE') AS "appLookup",
-        has_function_privilege('mscqr_dev_preauth','app_auth.consume_invitation_token(text[],text,text,timestamp without time zone,text,text,text)','EXECUTE') AS "preauthConsume",
-        has_function_privilege('mscqr_dev_app','app_auth.consume_invitation_token(text[],text,text,timestamp without time zone,text,text,text)','EXECUTE') AS "appConsume"
+        has_function_privilege('mscqr_dev_rls_b01_app','app_rls.prepare_invitation(text,text,text,text,text,text,text,text,text,text,boolean,boolean,text,timestamp without time zone,timestamp without time zone,text,text)','EXECUTE') AS "appPrepare",
+        has_function_privilege('mscqr_dev_rls_b01_preauth','app_rls.prepare_invitation(text,text,text,text,text,text,text,text,text,text,boolean,boolean,text,timestamp without time zone,timestamp without time zone,text,text)','EXECUTE') AS "preauthPrepare",
+        has_function_privilege('mscqr_dev_rls_b01_preauth','app_auth.lookup_invitation_token(text[],timestamp without time zone)','EXECUTE') AS "preauthLookup",
+        has_function_privilege('mscqr_dev_rls_b01_app','app_auth.lookup_invitation_token(text[],timestamp without time zone)','EXECUTE') AS "appLookup",
+        has_function_privilege('mscqr_dev_rls_b01_preauth','app_auth.consume_invitation_token(text[],text,text,timestamp without time zone,text,text,text)','EXECUTE') AS "preauthConsume",
+        has_function_privilege('mscqr_dev_rls_b01_app','app_auth.consume_invitation_token(text[],text,text,timestamp without time zone,text,text,text)','EXECUTE') AS "appConsume"
     `;
     assert.deepEqual(privileges, {
       appPrepare: true,

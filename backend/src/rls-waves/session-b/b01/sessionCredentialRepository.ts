@@ -549,3 +549,22 @@ export const completeRefreshTokenRotation = async (
     )
   `, "app_auth.complete_refresh_token_rotation", [["id", "string"], ["expiresAt", "date"]]);
 };
+
+export const finalizeRefreshTokenRotation = async (
+  db: SessionCredentialClient,
+  input: {
+    tokenId: string;
+    tokenHashCandidates: string[];
+    userId: string;
+    finalizedAt: Date;
+    requestId: string;
+  }
+) => one(await db.$queryRaw<Array<{ finalized: boolean }>>`
+  SELECT * FROM app_auth.finalize_refresh_token_rotation(
+    ${text(input.tokenId, "a successor token ID")},
+    ${tokenHashes(input.tokenHashCandidates)}::text[],
+    ${text(input.userId, "a target user ID")},
+    ${timestamp(input.finalizedAt, "a finalization timestamp")}::timestamp without time zone,
+    ${requestId(input.requestId)}
+  )
+`, "app_auth.finalize_refresh_token_rotation", [["finalized", "boolean"]]).finalized;

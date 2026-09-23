@@ -192,7 +192,7 @@ DECLARE
   v_membership b01_refresh_wave.membership%ROWTYPE;
   v_assurance text := current_setting('app.auth_assurance', true);
 BEGIN
-  IF session_user <> 'mscqr_dev_app'
+  IF session_user <> 'mscqr_dev_rls_b01_app'
      OR p_purpose NOT IN ('auth-invite-create','licensee-admin-invite-resend')
      OR p_actor_user_id IS NULL OR p_actor_session_id IS NULL
      OR p_request_id IS NULL OR length(p_request_id) NOT BETWEEN 1 AND 128
@@ -261,6 +261,7 @@ END
 $fn$;
 
 CREATE OR REPLACE FUNCTION app_rls.prepare_invitation(
+  p_capability text,
   p_actor_user_id text,
   p_actor_session_id text,
   p_request_id text,
@@ -303,6 +304,7 @@ VOLATILE
 SET search_path = pg_catalog
 AS $fn$
 DECLARE
+  v_session record;
   v_actor record;
   v_licensee b01_invite_wave.licensee%ROWTYPE;
   v_user b01_invite_wave.invite_user%ROWTYPE;
@@ -316,6 +318,11 @@ DECLARE
   v_inserted integer;
   v_organization_id text;
 BEGIN
+  SELECT * INTO STRICT v_session
+  FROM app_auth.require_authenticated_session(p_capability,p_purpose,p_request_id);
+  IF v_session."userId"<>p_actor_user_id OR v_session."sessionId"<>p_actor_session_id THEN
+    RAISE EXCEPTION 'B01_INVITE_SCOPE_DENIED';
+  END IF;
   SELECT * INTO STRICT v_actor
   FROM b01_invite_wave.require_actor(
     p_actor_user_id,p_actor_session_id,p_request_id,p_purpose,p_created_at
@@ -642,7 +649,7 @@ AS $fn$
 DECLARE
   v_count integer;
 BEGIN
-  IF session_user<>'mscqr_dev_preauth'
+  IF session_user<>'mscqr_dev_rls_b01_preauth'
      OR p_checked_at IS NULL
      OR abs(extract(epoch FROM (p_checked_at-(clock_timestamp() AT TIME ZONE 'UTC'))))>300
      OR coalesce(array_length(p_token_hashes,1),0) NOT BETWEEN 1 AND 3
@@ -779,7 +786,7 @@ DECLARE
   v_name text := nullif(btrim(coalesce(p_requested_name,'')),'');
   v_updated integer;
 BEGIN
-  IF session_user<>'mscqr_dev_preauth'
+  IF session_user<>'mscqr_dev_rls_b01_preauth'
      OR p_consumed_at IS NULL
      OR abs(extract(epoch FROM (p_consumed_at-(clock_timestamp() AT TIME ZONE 'UTC'))))>300
      OR coalesce(array_length(p_token_hashes,1),0) NOT BETWEEN 1 AND 3
@@ -899,7 +906,7 @@ $fn$;
 ALTER FUNCTION b01_invite_wave.require_actor(text,text,text,text,timestamp without time zone)
   OWNER TO mscqr_dev_rls_function_owner;
 ALTER FUNCTION app_rls.prepare_invitation(
-  text,text,text,text,text,text,text,text,text,boolean,boolean,text,
+  text,text,text,text,text,text,text,text,text,text,boolean,boolean,text,
   timestamp without time zone,timestamp without time zone,text,text
 ) OWNER TO mscqr_dev_rls_function_owner;
 ALTER FUNCTION app_auth.lookup_invitation_token(text[],timestamp without time zone)
@@ -910,7 +917,7 @@ ALTER FUNCTION app_auth.consume_invitation_token(
 
 REVOKE ALL ON FUNCTION b01_invite_wave.require_actor(text,text,text,text,timestamp without time zone) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.prepare_invitation(
-  text,text,text,text,text,text,text,text,text,boolean,boolean,text,
+  text,text,text,text,text,text,text,text,text,text,boolean,boolean,text,
   timestamp without time zone,timestamp without time zone,text,text
 ) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_auth.lookup_invitation_token(text[],timestamp without time zone) FROM PUBLIC;
@@ -919,11 +926,11 @@ REVOKE ALL ON FUNCTION app_auth.consume_invitation_token(
 ) FROM PUBLIC;
 
 GRANT EXECUTE ON FUNCTION app_rls.prepare_invitation(
-  text,text,text,text,text,text,text,text,text,boolean,boolean,text,
+  text,text,text,text,text,text,text,text,text,text,boolean,boolean,text,
   timestamp without time zone,timestamp without time zone,text,text
-) TO mscqr_dev_app;
+) TO mscqr_dev_rls_b01_app;
 GRANT EXECUTE ON FUNCTION app_auth.lookup_invitation_token(text[],timestamp without time zone)
-  TO mscqr_dev_preauth;
+  TO mscqr_dev_rls_b01_preauth;
 GRANT EXECUTE ON FUNCTION app_auth.consume_invitation_token(
   text[],text,text,timestamp without time zone,text,text,text
-) TO mscqr_dev_preauth;
+) TO mscqr_dev_rls_b01_preauth;

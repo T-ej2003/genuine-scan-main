@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='65241a246c1ea2fb79c5c5e68942035cafc70efe67960466b5f539264be6be64'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:65241a246c1ea2fb79c5c5e68942035cafc70efe67960466b5f539264be6be64'
+    AND source_contract_sha256='099399a7d3f4b2392acdba6c54bf1ac6a919ff60691e69d31023d32161d99e71'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:099399a7d3f4b2392acdba6c54bf1ac6a919ff60691e69d31023d32161d99e71'
     AND administrator_role='certification-administrator'
 
     AND phase='context-helpers-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:65241a246c1ea2fb79c5c5e68942035cafc70efe67960466b5f539264be6be64')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:099399a7d3f4b2392acdba6c54bf1ac6a919ff60691e69d31023d32161d99e71')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -72,6 +72,7 @@ GRANT SELECT ("userId", "type", "lastUsedAt", "disabledAt") ON TABLE public."Use
 GRANT SELECT ("userId", "usedAt") ON TABLE public."UserBackupCode" TO "mscqr_rls_cert_auth_owner";
 GRANT INSERT ("id", "userId", "ticketHash", "sessionBindingHash", "purpose", "riskScore", "riskLevel", "reasons", "createdIpHash", "createdUserAgentHash", "maxAttempts", "createdAt", "updatedAt", "expiresAt") ON TABLE public."AuthMfaChallenge" TO "mscqr_rls_cert_auth_owner";
 GRANT INSERT ("id", "payload", "updatedAt") ON TABLE public."AuditLogOutbox" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("payload") ON TABLE public."AuditLogOutbox" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("id", "email", "pendingEmail", "passwordHash", "name", "role", "orgId", "licenseeId", "status", "isActive", "disabledAt", "deletedAt", "failedLoginAttempts", "lockedUntil", "lastLoginAt", "emailVerifiedAt", "pendingEmailRequestedAt") ON TABLE public."User" TO "mscqr_rls_cert_auth_owner";
 GRANT UPDATE ("email", "pendingEmail", "pendingEmailRequestedAt", "passwordHash", "name", "status", "failedLoginAttempts", "lockedUntil", "emailVerifiedAt", "updatedAt") ON TABLE public."User" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("id", "orgId", "licenseeId", "email", "role", "manufacturerId", "tokenHash", "expiresAt", "usedAt") ON TABLE public."Invite" TO "mscqr_rls_cert_auth_owner";
@@ -419,6 +420,7 @@ SET ROLE "mscqr_rls_cert_auth_owner";
 GRANT EXECUTE ON FUNCTION app_auth.claim_refresh_token_rotation(text[],timestamp without time zone,text) TO "mscqr_rls_cert_preauth";
 GRANT EXECUTE ON FUNCTION app_auth.complete_refresh_token_rotation(text,text[],text,text,text,timestamp without time zone,text,text,timestamp without time zone,timestamp without time zone,timestamp without time zone,text) TO "mscqr_rls_cert_preauth";
 GRANT EXECUTE ON FUNCTION app_auth.create_refresh_mfa_challenge(text,text[],text,text,text,integer,text,text[],text,text,integer,timestamp without time zone,timestamp without time zone,text) TO "mscqr_rls_cert_preauth";
+GRANT EXECUTE ON FUNCTION app_auth.finalize_refresh_token_rotation(text,text[],text,timestamp without time zone,text) TO "mscqr_rls_cert_preauth";
 GRANT EXECUTE ON FUNCTION app_auth.load_refresh_session_state(text,text[],text,text,timestamp without time zone,text) TO "mscqr_rls_cert_preauth";
 GRANT EXECUTE ON FUNCTION app_auth.revoke_refresh_token_scope(text,text[],text,text,text,timestamp without time zone,text) TO "mscqr_rls_cert_preauth";
 RESET ROLE;

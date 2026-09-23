@@ -331,6 +331,15 @@
       "ownerIdentity": "identity-auth-function-owner"
     },
     {
+      "table": "AuditLogOutbox",
+      "command": "SELECT",
+      "columns": [
+        "payload"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
       "table": "User",
       "command": "SELECT",
       "columns": [

@@ -461,6 +461,7 @@ const b01FunctionOwnerGrants = [
   ["UserBackupCode", "SELECT", ["userId","usedAt"]],
   ["AuthMfaChallenge", "INSERT", ["id","userId","ticketHash","sessionBindingHash","purpose","riskScore","riskLevel","reasons","createdIpHash","createdUserAgentHash","maxAttempts","createdAt","updatedAt","expiresAt"]],
   ["AuditLogOutbox", "INSERT", ["id","payload","updatedAt"]],
+  ["AuditLogOutbox", "SELECT", ["payload"]],
 ];
 const b01OwnerGrantSql = b01FunctionOwnerGrants.map(([table, command, columns]) => `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
 const preAuthOwnerGrantSql = preAuthOwnerPrivileges.map(([table, command, columns]) => `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
@@ -527,6 +528,7 @@ const b01TablePolicies = [
   ["UserBackupCode", "SELECT", `(${b01PolicyOwner} AND ${b01BoundUser})`],
   ["AuthMfaChallenge", "INSERT", `(${b01PolicyOwner} AND ${b01Operation}='create-mfa' AND "userId"=${b01User} AND purpose='admin_login' AND "consumedAt" IS NULL AND "supersededAt" IS NULL)`],
   ["AuditLogOutbox", "INSERT", `(${b01PolicyOwner} AND ${b01Predecessor}<>'' AND payload->>'userId'=${b01User} AND payload->'details'->>'requestId'=current_setting('app.b01_request_id',true) AND payload->>'action' IN ('AUTH_REFRESH_DISABLED_DENIED','AUTH_REFRESH_REUSE_DETECTED','AUTH_REFRESH_EXPIRED','AUTH_REFRESH_STALE_MEMBERSHIP_DENIED','MANUFACTURER_SCOPE_SWITCH','AUTH_REFRESH_MFA_CHALLENGE_REQUIRED','AUTH_REFRESH_REVOKED','AUTH_REFRESH_ROTATED'))`],
+  ["AuditLogOutbox", "SELECT", `(${b01PolicyOwner} AND session_user=${lit(roleNames.preauth)} AND ${b01Operation}='finalize-successor' AND ${b01Predecessor}<>'' AND ${b01User}<>'' AND payload->>'userId'=${b01User} AND payload->>'action'='AUTH_REFRESH_MFA_CHALLENGE_REQUIRED' AND payload->>'entityType'='RefreshToken' AND payload->>'entityId'=${b01Predecessor} AND payload->'details'->>'requestId'=current_setting('app.b01_request_id',true) AND payload->'details'->>'boundary'='b01-refresh-rotation')`],
 ];
 const authenticatedSessionPolicy = `(current_setting('app.auth_session_operation',true)='verify' AND "sessionCapabilityHash"=current_setting('app.auth_session_hash',true) OR current_setting('app.auth_session_operation',true)='issue' AND id=current_setting('app.auth_session_id',true) AND "tokenHash"=current_setting('app.auth_session_refresh_hash',true) OR current_setting('app.auth_session_operation',true)='revoke-one' AND "userId"=current_setting('app.user_id',true) AND id=current_setting('app.auth_session_target_id',true) OR current_setting('app.auth_session_operation',true)='revoke-user' AND "userId"=current_setting('app.user_id',true))`;
 const authenticatedSessionUserPolicy = `(current_setting('app.auth_session_operation',true)='verify' AND public."User".id=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public."RefreshToken" s WHERE s."userId"=public."User".id AND s."sessionCapabilityHash"=current_setting('app.auth_session_hash',true) AND s."sessionCapabilityHashVersion"='sha256-v1' AND s."sessionCapabilityRevokedAt" IS NULL AND s."sessionCapabilityExpiresAt">clock_timestamp() AND s."revokedAt" IS NULL AND s."expiresAt">clock_timestamp()))`;
@@ -535,6 +537,7 @@ const b01SourceRuleIds = new Map([
   ["User:SELECT", "command-user-select-65b85bc0759d"], ["ManufacturerLicenseeLink:SELECT", "command-manufacturer-licensee-link-select-65b85bc0759d"], ["Licensee:SELECT", "command-licensee-select-65b85bc0759d"], ["Organization:SELECT", "command-organization-select-65b85bc0759d"],
   ["AdminMfaCredential:SELECT", "command-admin-mfa-credential-select-65b85bc0759d"], ["AdminWebAuthnCredential:SELECT", "command-admin-web-authn-credential-select-65b85bc0759d"], ["UserMfaFactor:SELECT", "command-user-mfa-factor-select-65b85bc0759d"], ["UserBackupCode:SELECT", "command-user-backup-code-select-65b85bc0759d"],
   ["AuthMfaChallenge:INSERT", "command-auth-mfa-challenge-insert-65b85bc0759d"], ["AuditLogOutbox:INSERT", "command-audit-log-outbox-insert-65b85bc0759d"],
+  ["AuditLogOutbox:SELECT", "contract:b01-finalize-refresh-token-rotation:AuditLogOutbox:SELECT"],
 ]);
 
 const assuranceGuard = (slice) => {

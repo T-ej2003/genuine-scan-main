@@ -1,13 +1,14 @@
 # Session B invitation/account-activation application-path proof
 
-Status: local PostgreSQL 18 exact-function proof GREEN; Session A package/grant integration and the subsequent login/delivery families remain pending.
+Status: current-runtime two-administrator onboarding certification GREEN on disposable PostgreSQL 18. Production onboarding remains a separate, explicitly authorized operation.
 
-- Foundation SHA: `f1163b83e039af7129c5879f0957a441d1219fa9`
-- Branch: `rls-wave-auth-public-workers`
+- Certified source: protected main `945692f49c6d262b0a54b9b8e4240ef4c21688eb`
 - Database: `mscqr_rls_wave_b_auth_public_workers` (PostgreSQL 18; five invitation tables plus the shared six-table session foundation, all with RLS enabled and forced)
-- Real registered roots exercised: `POST /api/auth/invite`, `POST /api/licensees/:id/admin-invite/resend`, `GET /api/auth/invite-preview`
-- Activation exercised through the production `acceptInvite` service and pre-authentication runtime identity. The registered `POST /api/auth/accept-invite` root is mapped but its post-activation automatic-login response will be certified with the next login/session family.
-- Focused checks: backend build; `invitationBoundary.test.js`; `recentAdminMfaMiddleware.test.js`; `workflowRegistry.test.js`; `securityBoundary.test.js`; `authenticatedControllerDenial.test.js`; `authInviteEmailSenderPolicy.test.js`; `refreshSessionPostgres18.test.js`; `invitationPostgres18.test.js`.
+- Runtime roles: environment-scoped `mscqr_dev_rls_b01_preauth` and `mscqr_dev_rls_b01_app`, validated by the production role-name contract.
+- Registered roots exercised: `POST /api/auth/invite`, `POST /api/licensees/:id/admin-invite/resend`, `GET /api/auth/invite-preview`, and `POST /api/auth/accept-invite`.
+- Canonical lifecycle: distinct synthetic Admin A invites synthetic Admin B; B previews and consumes the replacement-bound invitation exactly once, establishes an independent password, enrolls independent TOTP MFA, obtains independent sessions, completes MFA-authenticated login, performs a SUPER_ADMIN action, and produces audit evidence under B's actor ID. A remains independently authenticated.
+- Hostile coverage: expiry, modified/replayed/replaced tokens, wrong identity, non-admin and stale-MFA issuance, CSRF, tenantless SUPER_ADMIN scope, wrong TOTP, MFA-bootstrap replay, cross-user state isolation, and invitation-consumption replay.
+- Focused checks: backend build; `invitationBoundary.test.js`; `recentAdminMfaMiddleware.test.js`; `workflowRegistry.test.js`; `csrfSecurity.test.js`; `authAdminLoginMfaCycle.test.js`; `authMfaChallengeStateMachine.test.js`; `refreshSessionPostgres18.test.js`; `invitationPostgres18.test.js`; `currentRuntimeSuperAdminInvitationPostgres18.test.js`.
 - Application guard contracts: canonical session denial clears authentication cookies and returns 401; only a typed stale-MFA result returns 428; database/configuration/projection faults continue to the central error handler. Invite acceptance uses the registered 120-character name ceiling and rejects 121 characters before database access.
 
 The proof covers platform create/resend, same-tenant create, active-manufacturer link, exact preview and activation projections, database-derived actor/session/scope/assurance/purpose, deterministic same-request retry, one live invite under concurrent preparation, one activation winner, replay/expiry/ambiguity/stale/disabled/foreign/wrong-role/wrong-assurance/wrong-purpose/wrong-identity denial, rollback on forced audit-outbox failure, post-commit serialization, exact grants, direct-table denial and a non-login/non-superuser/non-`BYPASSRLS` function owner.
@@ -28,7 +29,7 @@ The last three legacy helper workflows are absorbed by the single atomic `prepar
 
 Install these fixed-search-path `SECURITY DEFINER` contracts under the reviewed non-bypass function owner:
 
-- Authenticated-app only: `app_rls.prepare_invitation(text,text,text,text,text,text,text,text,text,boolean,boolean,text,timestamp without time zone,timestamp without time zone,text,text)`.
+- Authenticated-app only: `app_rls.prepare_invitation(text,text,text,text,text,text,text,text,text,text,boolean,boolean,text,timestamp without time zone,timestamp without time zone,text,text)`.
 - Authenticated-app only: `app_rls.require_recent_mfa_session(text,timestamp without time zone,integer)`.
 - Pre-authentication only: `app_auth.lookup_invitation_token(text[],timestamp without time zone)`.
 - Pre-authentication only: `app_auth.consume_invitation_token(text[],text,text,timestamp without time zone,text,text,text)`.
@@ -39,6 +40,6 @@ Install these fixed-search-path `SECURITY DEFINER` contracts under the reviewed 
 
 Update the Session A-owned pre-auth contract projection to include `inviteId` and the request/IP/user-agent arguments above. In Session A-owned `licenseeController.ts:createLicensee`, pass the live actor session ID and canonical authenticated transaction boundary to the existing `createInvite` call; do not add a global-Prisma fallback.
 
-The worker/outbox family must replace the current post-commit best-effort email-delivery audit with a durable encrypted delivery job before production activation. The login family must then exercise the complete `POST /api/auth/accept-invite` activation-to-session response. These are ordered follow-on families, not certified by this local invitation proof.
+The disposable proof suppresses external delivery and uses only reserved synthetic identities. It does not authorize or perform a production invitation.
 
 No Session A-owned generator/global artifact, staging endpoint or production endpoint was changed or used.
