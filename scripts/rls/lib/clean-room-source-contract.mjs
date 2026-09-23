@@ -56,6 +56,7 @@ export const cleanRoomSourcePaths = [...new Set([
   "scripts/aws/create-production-green-stage-b-approval.mjs",
   "scripts/aws/apply-production-full-rls-release.mjs",
   "scripts/aws/deploy-ecs-service.sh",
+  "scripts/aws/exact-ecs-rollout-state.mjs",
   "scripts/aws/publish-ecs-images.sh",
   "scripts/aws/production-credential-source-contract.mjs",
   "scripts/aws/production-credential-source.sh",

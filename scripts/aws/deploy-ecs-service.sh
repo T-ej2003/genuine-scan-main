@@ -857,6 +857,11 @@ aws ecs describe-services \
   --services "$SERVICE_NAME" \
   >"$EXISTING_SERVICE_FILE"
 
+EXPECTED_DESIRED_COUNT=""
+if [[ "$WAIT_FOR_STABLE" == "true" ]]; then
+  EXPECTED_DESIRED_COUNT="$(node --input-type=module -e 'import fs from "node:fs"; const response=JSON.parse(fs.readFileSync(process.argv[1])); const count=response.services?.[0]?.desiredCount; if (!Number.isInteger(count) || count < 1) throw new Error("Pre-update service desired count is invalid."); process.stdout.write(String(count));' "$EXISTING_SERVICE_FILE")"
+fi
+
 if [[ "$normal_backend_deployment" == "true" && "$AWS_REGION" == "eu-west-2" && "$CLUSTER_NAME" == "mscqr-prod-euw2-main" && "$SERVICE_NAME" == "mscqr-backend-servi-euw2" && "$CONTAINER_NAME" == "backend" ]]; then
   prepare_production_client_ip_runtime
 else
@@ -1062,21 +1067,9 @@ if [[ "$WAIT_FOR_STABLE" == "true" ]]; then
     --region "$AWS_REGION" \
     --cluster "$CLUSTER_NAME" \
     --services "$SERVICE_NAME"
-  aws ecs describe-services \
-    --region "$AWS_REGION" \
-    --cluster "$CLUSTER_NAME" \
-    --services "$SERVICE_NAME" \
-    >"$EXISTING_POST_SERVICE_FILE"
-  node --input-type=module - "$EXISTING_POST_SERVICE_FILE" "$NEW_TASK_DEFINITION_ARN" <<'NODE'
-import fs from "node:fs";
-const [file, expectedArn] = process.argv.slice(2);
-const response = JSON.parse(fs.readFileSync(file, "utf8"));
-const service = response.services?.length === 1 ? response.services[0] : null;
-const deployment = service?.deployments?.length === 1 ? service.deployments[0] : null;
-if (!Array.isArray(response.failures) || response.failures.length !== 0 || !service || service.status !== "ACTIVE" || service.taskDefinition !== expectedArn || !deployment || deployment.status !== "PRIMARY" || deployment.taskDefinition !== expectedArn || deployment.pendingCount !== 0 || deployment.runningCount !== service.desiredCount || (deployment.rolloutState && deployment.rolloutState !== "COMPLETED")) {
-  throw new Error("ECS-native rollback or concurrent change prevented the exact candidate from becoming stable.");
-}
-NODE
+  node "$SCRIPT_DIR/exact-ecs-rollout-state.mjs" \
+    --poll "$EXISTING_POST_SERVICE_FILE" "$AWS_REGION" "$CLUSTER_NAME" "$SERVICE_NAME" \
+    "$NEW_TASK_DEFINITION_ARN" "$EXPECTED_DESIRED_COUNT"
 fi
 
 if [[ "$ENABLE_EXECUTE_COMMAND" == "true" ]]; then

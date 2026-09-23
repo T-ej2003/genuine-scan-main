@@ -15,7 +15,7 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "92822590f39cbb145d619583b2d61480a14e668c85354c8d209630cca00335cd",
+  "sourceContractSha256": "65241a246c1ea2fb79c5c5e68942035cafc70efe67960466b5f539264be6be64",
   "migrationSetDigest": "6642442a81cd98c7a132d241fa98e50ae231510896c9da67ab70d86b050d02db",
   "sourceContractInputs": [
     {
@@ -76,7 +76,7 @@
     },
     {
       "path": "scripts/rls/lib/clean-room-source-contract.mjs",
-      "sha256": "13fc293a6681661d45b73c205ff2fa517382b36a741488527f5e51b1f37d59ab"
+      "sha256": "f621fff7569d5b71bca7980ed9a5c82d5c297156d237e9830903a67526c7ee0d"
     },
     {
       "path": "scripts/rls/lib/program-inventory.mjs",
@@ -216,7 +216,11 @@
     },
     {
       "path": "scripts/aws/deploy-ecs-service.sh",
-      "sha256": "be837bf90a1e9ee6b3801329cdd5e9a789278ae7d33d2bfa7fb4213e91f92546"
+      "sha256": "047d7c5fd5217ff50fbb3ba256677e7522bab649ea06868affaa811e66ce3b00"
+    },
+    {
+      "path": "scripts/aws/exact-ecs-rollout-state.mjs",
+      "sha256": "40fce046c5a569ac531372a52ffa840293dc64203e765e1207e60a0d00a1bfaa"
     },
     {
       "path": "scripts/aws/publish-ecs-images.sh",
@@ -348,7 +352,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:92822590f39cbb145d619583b2d61480a14e668c85354c8d209630cca00335cd",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:65241a246c1ea2fb79c5c5e68942035cafc70efe67960466b5f539264be6be64",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,
