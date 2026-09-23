@@ -13,7 +13,7 @@ import { APP_ONLY } from "./production-app-only-contract.mjs";
 import { appOnlyVerifierNetwork } from "./production-app-only-policy.mjs";
 import { createProductionAwsCredentialEnvironment, productionAwsExecutable, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { assertEcsTaskDefinitionReadback } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/ecs-task-definition-readback.mjs";
-import { B01_PREREQUISITE, attestBridgeDiff, buildB01ExecutorDefinition, buildB01PrerequisiteReceipt, canonicalJson, canonicalSha256 } from "./production-b01-prerequisite-contract.mjs";
+import { B01_PREREQUISITE, assertB01LivePredecessor, attestBridgeDiff, buildB01ExecutorDefinition, buildB01PrerequisiteReceipt, canonicalJson, canonicalSha256 } from "./production-b01-prerequisite-contract.mjs";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const require = createRequire(import.meta.url);
@@ -142,12 +142,11 @@ export async function applyProductionB01Prerequisite({ deploymentSourceSha, awsP
   const aws = (args, timeout = 30000) => JSON.parse(run(productionAwsExecutable(), [...args, "--output", "json", "--no-cli-pager"], { env, encoding: "utf8", timeout, maxBuffer: 8 * 1024 * 1024 }));
   const caller = aws(["sts","get-caller-identity"]); assert.equal(caller.Account, APP_ONLY.account); assert.equal(caller.Arn, `arn:aws:iam::${APP_ONLY.account}:root`);
   const service = aws(["ecs","describe-services","--region",APP_ONLY.region,"--cluster",APP_ONLY.cluster,"--services",APP_ONLY.service]).services?.[0];
-  assert.equal(service?.status, "ACTIVE"); assert.equal(service.desiredCount, 2); assert.equal(service.runningCount, 2); assert.equal(service.pendingCount, 0);
-  assert.equal(service.deployments?.length, 1); assert.equal(service.deployments[0].status, "PRIMARY"); assert.equal(service.deployments[0].rolloutState, "COMPLETED");
-  assert.equal(service.taskDefinition, B01_PREREQUISITE.predecessorTaskDefinitionArn);
-  assert.equal(service.deployments[0].taskDefinition, service.taskDefinition);
   const liveDefinition = aws(["ecs","describe-task-definition","--region",APP_ONLY.region,"--task-definition",service.taskDefinition]).taskDefinition;
-  const backend = liveDefinition?.containerDefinitions?.filter(({ name }) => name === APP_ONLY.container) || []; assert.equal(backend.length, 1); assert.equal(backend[0].image, B01_PREREQUISITE.executorImage);
+  const imageDigest = B01_PREREQUISITE.executorImage.split("@")[1];
+  const repository = aws(["ecr","describe-repositories","--region",APP_ONLY.region,"--repository-names","mscqr-backend"]).repositories?.[0];
+  const imageDetails = aws(["ecr","describe-images","--region",APP_ONLY.region,"--repository-name","mscqr-backend","--image-ids",`imageDigest=${imageDigest}`]).imageDetails;
+  assertB01LivePredecessor({ service, taskDefinition: liveDefinition, repository, imageDetails });
   const database = aws(["rds","describe-db-instances","--region",APP_ONLY.region,"--db-instance-identifier",B01_PREREQUISITE.databaseIdentifier]).DBInstances?.[0];
   assert.equal(database?.DBInstanceIdentifier, B01_PREREQUISITE.databaseIdentifier); assert.equal(database?.DBInstanceStatus, "available");
   const databaseHostname = database.Endpoint?.Address;

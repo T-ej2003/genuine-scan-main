@@ -3,14 +3,16 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import { createRequire } from "node:module";
-import { B01_PREREQUISITE, assertB01ExecutorAwsEvidence, assertB01PrerequisiteReceipt, assertB01ReceiptExecutorContract, attestBridgeDiff, buildB01ExecutorDefinition, buildB01PrerequisiteReceipt,
+import { B01_PREREQUISITE, assertB01ExecutorAwsEvidence, assertB01LivePredecessor, assertB01PrerequisiteReceipt, assertB01ReceiptExecutorContract, attestBridgeDiff, buildB01ExecutorDefinition, buildB01PrerequisiteReceipt,
   canonicalSha256, classifyBridgeFiles } from "../aws/production-b01-prerequisite-contract.mjs";
 import { buildB01ExecutorInput, canonicalB01Prerequisite, executeB01Transaction } from "../aws/apply-production-b01-prerequisite.mjs";
 
 const require = createRequire(import.meta.url), runtime = require("../aws/production-b01-prerequisite-executor.cjs");
 const deploymentSourceSha = "1".repeat(40), now = new Date("2026-09-23T12:00:00.000Z");
-const bridgeDiffAttestation = { schemaVersion: 1, rlsDeltaOriginSha: B01_PREREQUISITE.rlsDeltaOriginSha, deploymentSourceSha,
-  entries: [{ file: "scripts/aws/production-b01-prerequisite-contract.mjs", classification: "BRIDGE_DEPLOYMENT_TOOLING" }], patchSha256: "2".repeat(64) };
+const bridgeEntry = { file: "scripts/aws/production-b01-prerequisite-contract.mjs", classification: "BRIDGE_DEPLOYMENT_TOOLING", hunkCount: 1 };
+const bridgeDiffAttestation = { schemaVersion: 2, rlsDeltaOriginSha: B01_PREREQUISITE.rlsDeltaOriginSha, bridgeOriginSha: B01_PREREQUISITE.bridgeOriginSha, deploymentSourceSha,
+  bridge: { base: B01_PREREQUISITE.rlsDeltaOriginSha, target: B01_PREREQUISITE.bridgeOriginSha, entries: [bridgeEntry], patchSha256: "2".repeat(64) },
+  correction: { base: B01_PREREQUISITE.bridgeOriginSha, target: deploymentSourceSha, entries: [bridgeEntry], patchSha256: "3".repeat(64) } };
 bridgeDiffAttestation.attestationSha256 = canonicalSha256(bridgeDiffAttestation);
 const executor = fs.readFileSync("scripts/aws/production-b01-prerequisite-executor.cjs", "utf8"), executorSourceSha256 = crypto.createHash("sha256").update(executor).digest("hex");
 const taskArn = "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/" + "a".repeat(32);
@@ -26,15 +28,21 @@ test("bridge diff accepts only the reviewed bridge inventory and binds exact pat
   const files = [".github/workflows/production-deploy.yml", "scripts/aws/production-b01-prerequisite-contract.mjs", "scripts/tests/production-b01-prerequisite.test.mjs"];
   const patch = files.map((file) => `diff --git a/${file} b/${file}\n@@ -1 +1 @@\n-old\n+new`).join("\n");
   const calls = [], attestation = attestBridgeDiff({ deploymentSourceSha, git: (args) => { calls.push(args); if (args[0] === "merge-base") return "";
-    if (args[0] === "rev-parse") return B01_PREREQUISITE.rlsDeltaOriginSha; if (args.includes("--name-only")) return files.join("\n"); return patch; } });
+    if (args[0] === "rev-parse") return args[1] === `${B01_PREREQUISITE.bridgeOriginSha}^1` ? B01_PREREQUISITE.rlsDeltaOriginSha : B01_PREREQUISITE.bridgeOriginSha;
+    if (args.includes("--name-only")) return files.join("\n"); return patch; } });
   assert.equal(attestation.rlsDeltaOriginSha, B01_PREREQUISITE.rlsDeltaOriginSha); assert.equal(attestation.deploymentSourceSha, deploymentSourceSha);
-  assert.equal(attestation.entries.length, 3); assert.ok(attestation.entries.every(({ hunkCount }) => hunkCount === 1));
-  assert.match(attestation.patchSha256, /^[a-f0-9]{64}$/); assert.equal(calls[0][2], B01_PREREQUISITE.rlsDeltaOriginSha);
+  assert.equal(attestation.bridgeOriginSha, B01_PREREQUISITE.bridgeOriginSha); assert.equal(attestation.bridge.entries.length, 3); assert.equal(attestation.correction.entries.length, 3);
+  assert.ok([...attestation.bridge.entries, ...attestation.correction.entries].every(({ hunkCount }) => hunkCount === 1));
+  assert.match(attestation.bridge.patchSha256, /^[a-f0-9]{64}$/); assert.match(attestation.correction.patchSha256, /^[a-f0-9]{64}$/);
+  assert.deepEqual(calls.filter(([name]) => name === "merge-base").map((args) => args.slice(2)), [[B01_PREREQUISITE.rlsDeltaOriginSha, B01_PREREQUISITE.bridgeOriginSha], [B01_PREREQUISITE.bridgeOriginSha, deploymentSourceSha]]);
 });
 
-test("bridge attestation rejects every protected-main advance after the bridge commit", () => {
+test("bridge attestation accepts only the immediate reviewed correction successor", () => {
   assert.throws(() => attestBridgeDiff({ deploymentSourceSha, git: (args) => args[0] === "merge-base" ? "" : args[0] === "rev-parse" ? "f".repeat(40) : "" }),
-    /immediate protected-main bridge successor/);
+    /Reviewed bridge origin|immediate protected-main prerequisite-correction successor/);
+  assert.throws(() => attestBridgeDiff({ deploymentSourceSha, git: (args) => args[0] === "merge-base" ? "" : args[0] === "rev-parse"
+    ? args[1] === `${B01_PREREQUISITE.bridgeOriginSha}^1` ? B01_PREREQUISITE.rlsDeltaOriginSha : "f".repeat(40) : "" }),
+  /immediate protected-main prerequisite-correction successor/);
 });
 
 test("application, auth, RLS, schema, and unclassified bridge changes fail closed", () => {
@@ -43,11 +51,42 @@ test("application, auth, RLS, schema, and unclassified bridge changes fail close
   assert.throws(() => classifyBridgeFiles(["scripts/aws/production-b01-prerequisite-contract.mjs", "scripts/aws/production-b01-prerequisite-contract.mjs"]), /duplicate/);
 });
 
+test("live B01 executor predecessor is exact revision 19, immutable image, and source", () => {
+  const service = { serviceArn: B01_PREREQUISITE.predecessorServiceArn, serviceName: "mscqr-backend-servi-euw2",
+    clusterArn: `arn:aws:ecs:${B01_PREREQUISITE.region}:${B01_PREREQUISITE.account}:cluster/${B01_PREREQUISITE.cluster}`,
+    status: "ACTIVE", taskDefinition: B01_PREREQUISITE.predecessorTaskDefinitionArn, desiredCount: 2, runningCount: 2, pendingCount: 0,
+    enableExecuteCommand: true, propagateTags: "TASK_DEFINITION", deploymentConfiguration: { deploymentCircuitBreaker: { enable: true, rollback: true },
+      alarms: { alarmNames: ["mscqr-production-backend-unhealthy-hosts", "mscqr-production-backend-target-5xx"], rollback: true, enable: true } },
+    deployments: [{ status: "PRIMARY", taskDefinition: B01_PREREQUISITE.predecessorTaskDefinitionArn, desiredCount: 2, runningCount: 2, pendingCount: 0, failedTasks: 0, rolloutState: "COMPLETED" }] };
+  const taskDefinition = { taskDefinitionArn: B01_PREREQUISITE.predecessorTaskDefinitionArn, family: "mscqr-production-rls-green-backend-candidate", revision: 19,
+    status: "ACTIVE", networkMode: "awsvpc", requiresCompatibilities: ["FARGATE"], cpu: "2048", memory: "4096",
+    executionRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution",
+    taskRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task", runtimePlatform: B01_PREREQUISITE.runtimePlatform,
+    containerDefinitions: [{ name: "backend", image: B01_PREREQUISITE.executorImage, essential: true, entryPoint: [], command: [], readonlyRootFilesystem: true, privileged: false }] };
+  const repository = { repositoryArn: "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend", repositoryName: "mscqr-backend", registryId: B01_PREREQUISITE.account, imageTagMutability: "IMMUTABLE" };
+  const imageDetails = [{ imageDigest: B01_PREREQUISITE.executorImage.split("@")[1], imageTags: [B01_PREREQUISITE.predecessorSourceSha, "production"] }];
+  assert.equal(assertB01LivePredecessor({ service, taskDefinition, repository, imageDetails }), true);
+  const historical = structuredClone(taskDefinition); historical.containerDefinitions[0].image = "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:d2a6f641f44e27454a80d502914a9e168c61cdace1201f9d7af9d85a87ea208c";
+  assert.throws(() => assertB01LivePredecessor({ service, taskDefinition: historical, repository, imageDetails }));
+  assert.throws(() => assertB01LivePredecessor({ service, taskDefinition, repository, imageDetails: [{ ...imageDetails[0], imageDigest: `sha256:${"0".repeat(64)}` }] }));
+  assert.throws(() => assertB01LivePredecessor({ service, taskDefinition, repository, imageDetails: [{ ...imageDetails[0], imageTags: ["0".repeat(40)] }] }));
+  assert.throws(() => assertB01LivePredecessor({ service: { ...service, taskDefinition: service.taskDefinition.replace(":19", ":18") }, taskDefinition, repository, imageDetails }));
+  assert.throws(() => assertB01LivePredecessor({ service, taskDefinition, repository: { ...repository, imageTagMutability: "MUTABLE" }, imageDetails }));
+});
+
+test("revision 19 backend runtime contains the fixed inline executor dependencies", () => {
+  const dockerfile = fs.readFileSync("backend/Dockerfile", "utf8"), runtimeStage = dockerfile.split("FROM node:24-bookworm-slim AS production-rls-executor")[0];
+  const backendPackage = JSON.parse(fs.readFileSync("backend/package.json", "utf8"));
+  assert.match(runtimeStage, /FROM node:24-bookworm-slim AS runtime/); assert.match(runtimeStage, /COPY --from=builder[^\n]+node_modules \.\/node_modules/);
+  assert.ok(backendPackage.dependencies["@prisma/client"]); assert.deepEqual(buildB01ExecutorDefinition(["-e", "source"]).containerDefinitions[0].entryPoint, ["node"]);
+});
+
 test("receipt binds different RLS origin and current deployment source and rejects tampering or staleness", () => {
   const value = receipt(); assert.notEqual(value.rlsDeltaOriginSha, value.deploymentSourceSha);
   assert.equal(assertB01PrerequisiteReceipt(value, { deploymentSourceSha, bridgeDiffAttestation, now: now.getTime() }).receiptSha256, value.receiptSha256);
   for (const changed of [{ rlsDeltaOriginSha: "0".repeat(40) }, { deploymentSourceSha: "9".repeat(40) }, { environment: "staging" },
-    { successorRlsIdentity: "8".repeat(64) }, { migrationSetDigest: "8".repeat(64) }, { bridgeDiffAttestation: { ...bridgeDiffAttestation, patchSha256: "8".repeat(64) } }]) {
+    { successorRlsIdentity: "8".repeat(64) }, { migrationSetDigest: "8".repeat(64) }, { bridgeDiffAttestation: { ...bridgeDiffAttestation,
+      correction: { ...bridgeDiffAttestation.correction, patchSha256: "8".repeat(64) } } }]) {
     assert.throws(() => assertB01PrerequisiteReceipt({ ...value, ...changed }, { deploymentSourceSha, bridgeDiffAttestation, now: now.getTime() }));
   }
   assert.throws(() => assertB01PrerequisiteReceipt(value, { deploymentSourceSha, bridgeDiffAttestation, now: now.getTime() + B01_PREREQUISITE.maxReceiptAgeMs }));
