@@ -7,6 +7,38 @@ const fixture = JSON.parse(readFileSync(new URL("../../../../../scripts/tests/fi
 const productionCapture = readFileSync(new URL("../../../../../documents/ops/evidence/aws-elasticache-rightsize-inventory-20260603T184059Z/07-ecs-services-and-taskdefs.txt", import.meta.url), "utf8");
 const base = () => ({ family: "reviewed", containerDefinitions: [{ name: "reviewed", image: "example@sha256:abc", logConfiguration: { logDriver: "awslogs", options: { "awslogs-group": "/ecs/reviewed" } } }] });
 const equivalent = (expected, readback) => canonicalizeEcsTaskDefinition(expected) === canonicalizeEcsTaskDefinition(readback);
+const revision17EnvironmentNames = Object.freeze([
+  "PUBLIC_APP_URL", "WEBAUTHN_ALLOWED_ORIGINS", "WEB_APP_BASE_URL", "SMTP_USER", "PRINT_AGENT_REQUIRE_MTLS", "WEBAUTHN_RP_ID",
+  "SMTP_REQUIRE_TLS", "OBJECT_STORAGE_REGION", "SMTP_SECURE", "SUPERADMIN_ALERT_EMAILS", "WEBAUTHN_ORIGIN", "SMTP_PORT", "COOKIE_SECURE",
+  "AUTH_MFA_CHALLENGE_TTL_MINUTES", "SUPER_ADMIN_EMAIL", "APP_URL", "MSCQR_FULL_RLS_SOURCE_CONTRACT_SHA256", "QR_TOKEN_EXP_DAYS",
+  "CUSTOMER_WEBAUTHN_CHALLENGE_TTL_MINUTES", "SCAN_RATE_LIMIT_PER_MIN", "PORT", "AUTH_RISK_STEPUP_THRESHOLD", "PRINT_JOB_MAX_RUN_LABELS",
+  "SMTP_FROM", "SMTP_HOST", "OBJECT_STORAGE_BUCKET", "PRINT_AGENT_REQUIRE_SIGNATURE", "AUTH_EMAIL_FROM", "SENTRY_ENVIRONMENT",
+  "PRINT_AGENT_MTLS_TRUSTED_PROXY_IPS", "CORS_ORIGIN", "PUBLIC_SCAN_WEB_BASE_URL", "FRONTEND_URL", "PUBLIC_VERIFY_WEB_BASE_URL",
+  "RUN_DB_MIGRATIONS_ON_START", "RUN_BACKGROUND_WORKERS", "MSCQR_FULL_RLS_MIGRATION_SET_DIGEST", "PRINT_AGENT_SESSION_MODE", "NODE_ENV",
+  "OBJECT_STORAGE_FORCE_PATH_STYLE", "PUBLIC_ADMIN_WEB_BASE_URL", "WEBAUTHN_RP_NAME", "GIT_SHA", "RELEASE_GIT_SHA", "CLIENT_IP_TRUST_MODE",
+  "CLIENT_IP_TRUSTED_ALB_CIDRS", "CLIENT_IP_TRUSTED_CLOUDFRONT_CIDRS",
+]);
+const revision17ReadbackOrder = Object.freeze([
+  "PUBLIC_APP_URL", "WEBAUTHN_ALLOWED_ORIGINS", "WEB_APP_BASE_URL", "GIT_SHA", "SMTP_USER", "PRINT_AGENT_REQUIRE_MTLS", "WEBAUTHN_RP_ID",
+  "SMTP_REQUIRE_TLS", "OBJECT_STORAGE_REGION", "SMTP_SECURE", "SUPERADMIN_ALERT_EMAILS", "WEBAUTHN_ORIGIN", "SMTP_PORT", "COOKIE_SECURE",
+  "AUTH_MFA_CHALLENGE_TTL_MINUTES", "RELEASE_GIT_SHA", "SUPER_ADMIN_EMAIL", "CLIENT_IP_TRUSTED_ALB_CIDRS", "APP_URL", "CLIENT_IP_TRUST_MODE",
+  "MSCQR_FULL_RLS_SOURCE_CONTRACT_SHA256", "QR_TOKEN_EXP_DAYS", "CUSTOMER_WEBAUTHN_CHALLENGE_TTL_MINUTES", "CLIENT_IP_TRUSTED_CLOUDFRONT_CIDRS",
+  "SCAN_RATE_LIMIT_PER_MIN", "PORT", "AUTH_RISK_STEPUP_THRESHOLD", "PRINT_JOB_MAX_RUN_LABELS", "SMTP_FROM", "SMTP_HOST", "OBJECT_STORAGE_BUCKET",
+  "PRINT_AGENT_REQUIRE_SIGNATURE", "AUTH_EMAIL_FROM", "SENTRY_ENVIRONMENT", "PRINT_AGENT_MTLS_TRUSTED_PROXY_IPS", "CORS_ORIGIN",
+  "PUBLIC_SCAN_WEB_BASE_URL", "FRONTEND_URL", "PUBLIC_VERIFY_WEB_BASE_URL", "RUN_DB_MIGRATIONS_ON_START", "RUN_BACKGROUND_WORKERS",
+  "MSCQR_FULL_RLS_MIGRATION_SET_DIGEST", "PRINT_AGENT_SESSION_MODE", "NODE_ENV", "OBJECT_STORAGE_FORCE_PATH_STYLE", "PUBLIC_ADMIN_WEB_BASE_URL",
+  "WEBAUTHN_RP_NAME",
+]);
+
+const revision17Pair = () => {
+  const values = new Map(revision17EnvironmentNames.map((name, index) => [name, `sanitized-${index}`]));
+  const expected = base();
+  expected.containerDefinitions[0].environment = revision17EnvironmentNames.map((name) => ({ name, value: values.get(name) }));
+  const taskDefinitionArn = "arn:aws:ecs:eu-west-2:111122223333:task-definition/reviewed:17";
+  const readback = { ...structuredClone(expected), taskDefinitionArn, revision: 17, status: "ACTIVE" };
+  readback.containerDefinitions[0].environment = revision17ReadbackOrder.map((name) => ({ name, value: values.get(name) }));
+  return { expected, readback, taskDefinitionArn };
+};
 
 test("canonical ECS readback normalizes only the proven AWS default materializations", () => {
   const defaults = [
@@ -52,6 +84,53 @@ test("canonical ECS readback accepts only the empty awslogs secretOptions defaul
   assert.equal(equivalent(empty, omitted), true);
   assert.equal(equivalent(omitted, omitted), true);
   assert.equal(equivalent(empty, empty), true);
+});
+
+test("exact readback accepts the revision-17 environment set in AWS readback order", () => {
+  const { expected, readback, taskDefinitionArn } = revision17Pair();
+  assert.notDeepEqual(expected.containerDefinitions[0].environment, readback.containerDefinitions[0].environment);
+  assert.equal(assertEcsTaskDefinitionReadback({ definition: readback, taskDefinitionArn, expected }), true);
+
+  for (const mutate of [
+    (environment) => { environment[0].value += "-changed"; },
+    (environment) => { environment.pop(); },
+    (environment) => { environment.push({ name: "ADDITIONAL", value: "sanitized" }); },
+  ]) {
+    const changed = structuredClone(readback);
+    mutate(changed.containerDefinitions[0].environment);
+    assert.throws(() => assertEcsTaskDefinitionReadback({ definition: changed, taskDefinitionArn, expected }), /exact approved execution contract/);
+  }
+});
+
+test("environment normalization rejects ambiguous or malformed entries", () => {
+  const invalidEnvironments = [
+    [{ name: "DUPLICATE", value: "first" }, { name: "DUPLICATE", value: "second" }],
+    [{ name: "", value: "value" }],
+    [{ name: 1, value: "value" }],
+    [{ name: "NAME", value: 1 }],
+    [null],
+    [{ name: "NAME", value: "value", unexpected: true }],
+    { name: "NAME", value: "value" },
+  ];
+  for (const environment of invalidEnvironments) {
+    const definition = base();
+    definition.containerDefinitions[0].environment = environment;
+    assert.throws(() => normalizeEcsTaskDefinitionReadback(definition), /ECS container environment/);
+  }
+});
+
+test("environment remains optional and only its entry ordering is normalized", () => {
+  const omitted = base();
+  const empty = base(); empty.containerDefinitions[0].environment = [];
+  assert.equal(equivalent(omitted, empty), true);
+
+  const expected = base();
+  expected.containerDefinitions[0].secrets = [{ name: "FIRST", valueFrom: "first" }, { name: "SECOND", valueFrom: "second" }];
+  expected.containerDefinitions[0].mountPoints = [{ sourceVolume: "first", containerPath: "/first" }, { sourceVolume: "second", containerPath: "/second" }];
+  const reorderedSecrets = structuredClone(expected); reorderedSecrets.containerDefinitions[0].secrets.reverse();
+  const reorderedMounts = structuredClone(expected); reorderedMounts.containerDefinitions[0].mountPoints.reverse();
+  assert.equal(equivalent(expected, reorderedSecrets), false);
+  assert.equal(equivalent(expected, reorderedMounts), false);
 });
 
 test("canonical ECS readback normalizes only an empty host volume configuration", () => {
