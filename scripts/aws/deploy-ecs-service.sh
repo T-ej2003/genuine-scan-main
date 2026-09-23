@@ -857,6 +857,11 @@ aws ecs describe-services \
   --services "$SERVICE_NAME" \
   >"$EXISTING_SERVICE_FILE"
 
+EXPECTED_DESIRED_COUNT=""
+if [[ "$WAIT_FOR_STABLE" == "true" ]]; then
+  EXPECTED_DESIRED_COUNT="$(node --input-type=module -e 'import fs from "node:fs"; const response=JSON.parse(fs.readFileSync(process.argv[1])); const count=response.services?.[0]?.desiredCount; if (!Number.isInteger(count) || count < 1) throw new Error("Pre-update service desired count is invalid."); process.stdout.write(String(count));' "$EXISTING_SERVICE_FILE")"
+fi
+
 if [[ "$normal_backend_deployment" == "true" && "$AWS_REGION" == "eu-west-2" && "$CLUSTER_NAME" == "mscqr-prod-euw2-main" && "$SERVICE_NAME" == "mscqr-backend-servi-euw2" && "$CONTAINER_NAME" == "backend" ]]; then
   prepare_production_client_ip_runtime
 else
@@ -1062,7 +1067,6 @@ if [[ "$WAIT_FOR_STABLE" == "true" ]]; then
     --region "$AWS_REGION" \
     --cluster "$CLUSTER_NAME" \
     --services "$SERVICE_NAME"
-  EXPECTED_DESIRED_COUNT="$(node --input-type=module -e 'import fs from "node:fs"; const response=JSON.parse(fs.readFileSync(process.argv[1])); const count=response.services?.[0]?.desiredCount; if (!Number.isInteger(count) || count < 1) throw new Error("Pre-update service desired count is invalid."); process.stdout.write(String(count));' "$EXISTING_SERVICE_FILE")"
   readonly ROLLOUT_POLL_INTERVAL_SECONDS=15
   readonly MAX_ROLLOUT_WAIT_SECONDS=600
   rollout_waited_seconds=0

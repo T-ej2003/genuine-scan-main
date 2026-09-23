@@ -94,6 +94,10 @@ function writeFixture(data, options = {}) {
       { status: "ACTIVE", taskDefinition: fromArn, pendingCount: 1, runningCount: 1 },
     ]
     : undefined, options.initialExecEnabled === true, options.currentPropagateTags);
+  if (Object.hasOwn(options, "serviceDesiredCount")) {
+    Object.assign(pre.services[0], { desiredCount: options.serviceDesiredCount, runningCount: options.serviceDesiredCount, pendingCount: 0 });
+    Object.assign(pre.services[0].deployments[0], { desiredCount: options.serviceDesiredCount, runningCount: options.serviceDesiredCount, pendingCount: 0 });
+  }
   const post = serviceResponse(fixtureTargetArn, undefined, options.postExecEnabled ?? options.enableExecuteCommand === true, options.postPropagateTags ?? (options.clientIpRuntime || options.propagateTags ? "TASK_DEFINITION" : options.currentPropagateTags));
   const targetDeployment = serviceResponse(fromArn, [
     { status: "PRIMARY", taskDefinition: fromArn, pendingCount: 1, runningCount: 2, rolloutState: "IN_PROGRESS" },
@@ -351,7 +355,7 @@ const exactRollout = (overrides = {}) => {
 test("exact rollout polling closes the revision-18 IN_PROGRESS race without accepting it as success", () => {
   const observed = exactRollout({ deployment: { id: "ecs-svc/35851374390", rolloutState: "IN_PROGRESS" } });
   assert.equal(classifyExactEcsRollout(observed), "CONTINUE");
-  assert.equal(classifyExactEcsRollout(exactRollout({ service: { runningCount: 1, pendingCount: 1 }, deployment: { runningCount: 1, pendingCount: 1, rolloutState: "IN_PROGRESS" } })), "CONTINUE");
+  assert.equal(classifyExactEcsRollout(exactRollout({ service: { runningCount: 1, pendingCount: 1 }, deployment: { failedTasks: 1, runningCount: 1, pendingCount: 1, rolloutState: "IN_PROGRESS" } })), "CONTINUE");
   assert.equal(classifyExactEcsRollout(exactRollout({ deployment: { id: "ecs-svc/35851374390", rolloutState: "COMPLETED" } })), "SUCCESS");
   const result = runNormalBackend({ scenario: "rollout-race" });
   assert.equal(result.status, 0, result.stderr);
@@ -374,6 +378,9 @@ test("exact rollout classification fails closed on terminal, displaced, malforme
     [exactRollout({ deployment: { desiredCount: 3 } }), /PRIMARY/],
     [exactRollout({ deployment: { runningCount: 1 } }), /task counts/],
     [exactRollout({ deployment: { pendingCount: 1 } }), /task counts/],
+    [{ ...exactRollout(), expectedClusterName: "other-cluster" }, /service identity/],
+    [{ ...exactRollout(), expectedServiceName: "other-service" }, /service identity/],
+    [{ ...exactRollout(), expectedDesiredCount: 0 }, /identity is malformed/],
   ];
   for (const [input, pattern] of cases) assert.throws(() => classifyExactEcsRollout(input), pattern);
 
@@ -384,6 +391,9 @@ test("exact rollout classification fails closed on terminal, displaced, malforme
   const missing = exactRollout();
   missing.response.services = [];
   assert.throws(() => classifyExactEcsRollout(missing), /malformed/);
+  const disappeared = exactRollout();
+  disappeared.response.services[0].deployments = [];
+  assert.throws(() => classifyExactEcsRollout(disappeared), /sole deployment/);
   const failedResponse = exactRollout();
   failedResponse.response.failures.push({ arn: service, reason: "MISSING" });
   assert.throws(() => classifyExactEcsRollout(failedResponse), /reports a failure/);
@@ -402,11 +412,19 @@ test("exact rollout classification fails closed on terminal, displaced, malforme
 test("exact rollout polling times out and DescribeServices command failure fails closed", () => {
   const timeout = runNormalBackend({ scenario: "rollout-timeout" });
   assertFailure(timeout, /remained IN_PROGRESS beyond 600 seconds/);
+  assert.equal((timeout.calls.match(/ecs describe-services/g) || []).length, 42);
   assert.equal((timeout.calls.match(/ecs update-service/g) || []).length, 1);
 
   const describeFailure = runNormalBackend({ scenario: "rollout-describe-failure" });
   assertFailure(describeFailure);
   assert.equal((describeFailure.calls.match(/ecs update-service/g) || []).length, 1);
+});
+
+test("normal deployment rejects an unsupported zero desired count before registration or service update", () => {
+  const result = runNormalBackend({ serviceDesiredCount: 0 });
+  assertFailure(result, /Pre-update service desired count is invalid/);
+  assert.equal((result.calls.match(/ecs register-task-definition/g) || []).length, 0);
+  assert.equal((result.calls.match(/ecs update-service/g) || []).length, 0);
 });
 
 function assertFailure(result, pattern) {
