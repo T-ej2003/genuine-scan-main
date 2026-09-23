@@ -3,8 +3,10 @@ import test from "node:test";
 import {
   applyProductionClientIpTrustRuntime,
   assertProductionClientIpTrustRuntime,
+  AWS_MANAGED_PREFIX_LIST_STATES,
   deriveProductionClientIpTrustRuntime,
   PRODUCTION_CLIENT_IP_TRUST,
+  USABLE_MANAGED_PREFIX_LIST_STATES,
 } from "../aws/production-client-ip-trust-runtime.mjs";
 
 const topology = () => ({
@@ -28,6 +30,22 @@ test("authenticated topology deterministically produces and injects the producti
   assert.equal(runtime.prefixListId, "pl-93a247fa");
   assert.equal(runtime.cidrCount, 2);
   assertProductionClientIpTrustRuntime(applyProductionClientIpTrustRuntime(definition(), runtime), runtime);
+});
+
+test("every documented managed-prefix-list state has an explicit fail-closed disposition", () => {
+  assert.deepEqual(AWS_MANAGED_PREFIX_LIST_STATES, [
+    "create-in-progress", "create-complete", "create-failed",
+    "modify-in-progress", "modify-complete", "modify-failed",
+    "restore-in-progress", "restore-complete", "restore-failed",
+    "delete-in-progress", "delete-complete", "delete-failed",
+  ]);
+  assert.deepEqual(USABLE_MANAGED_PREFIX_LIST_STATES, ["create-complete", "modify-complete", "restore-complete"]);
+  for (const state of [...AWS_MANAGED_PREFIX_LIST_STATES, "future-complete"]) {
+    const value = topology();
+    value.prefixLists.PrefixLists[0].State = state;
+    if (USABLE_MANAGED_PREFIX_LIST_STATES.includes(state)) assert.doesNotThrow(() => deriveProductionClientIpTrustRuntime(value), state);
+    else assert.throws(() => deriveProductionClientIpTrustRuntime(value), /usable completed state/, state);
+  }
 });
 
 test("topology authority and unsafe CIDRs fail closed", () => {

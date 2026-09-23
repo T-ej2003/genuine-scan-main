@@ -301,3 +301,5 @@ When the normal production lane registers a new `mscqr-production-rls-green-back
 The same authenticated service update fixes `propagateTags=TASK_DEFINITION`, so each newly launched backend task inherits that execution marker for the ECS Exec verifier. Caller input cannot weaken this normal-lane setting.
 
 During the one-time historical migration, the normal deployer may restore an exact `mscqr-backend:*` predecessor only on the production backend service. The workflow records that predecessor before mutation and the rollback script refuses to overwrite any service state other than the exact failed candidate.
+
+CloudFront topology discovery accepts only AWS-documented usable managed-prefix-list completion states: `create-complete`, `modify-complete`, or `restore-complete`. Transitional, failed, deleted, and unknown states fail closed.

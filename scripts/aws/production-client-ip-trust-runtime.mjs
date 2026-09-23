@@ -24,6 +24,14 @@ export const CLIENT_IP_ENVIRONMENT_NAMES = Object.freeze([
   "CLIENT_IP_TRUSTED_CLOUDFRONT_CIDRS",
 ]);
 
+export const AWS_MANAGED_PREFIX_LIST_STATES = Object.freeze([
+  "create-in-progress", "create-complete", "create-failed",
+  "modify-in-progress", "modify-complete", "modify-failed",
+  "restore-in-progress", "restore-complete", "restore-failed",
+  "delete-in-progress", "delete-complete", "delete-failed",
+]);
+export const USABLE_MANAGED_PREFIX_LIST_STATES = Object.freeze(["create-complete", "modify-complete", "restore-complete"]);
+
 const plainObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
 const canonicalCidrs = (values, label) => {
   assert(Array.isArray(values) && values.length > 0, `${label} must be non-empty.`);
@@ -86,7 +94,7 @@ export function deriveProductionClientIpTrustRuntime({ service, targetGroups, lo
   assert.equal(prefixList.PrefixListName, contract.cloudFrontPrefixListName);
   assert.equal(prefixList.OwnerId, "AWS");
   assert.equal(prefixList.AddressFamily, "IPv4");
-  assert.equal(prefixList.State, "create-complete");
+  assert(USABLE_MANAGED_PREFIX_LIST_STATES.includes(prefixList.State), "CloudFront managed prefix list is not in a usable completed state.");
   assert.match(prefixList.PrefixListId || "", /^pl-[a-f0-9]+$/);
   assert.equal(prefixList.PrefixListArn, `arn:aws:ec2:${contract.region}:aws:prefix-list/${prefixList.PrefixListId}`);
   assert.equal(prefixListEntries?.NextToken, undefined, "CloudFront managed prefix-list entries are incomplete.");
