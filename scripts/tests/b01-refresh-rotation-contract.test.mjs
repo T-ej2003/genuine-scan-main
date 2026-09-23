@@ -12,7 +12,7 @@ test("B01 production refresh functions use the reviewed owner-and-bearer FORCE-R
   const contracts = validateNamedSqlFunctionContracts().filter((contract) =>
     contract.definitionLocation.endsWith("b01RefreshRotationFunctions.sql")
   );
-  assert.equal(contracts.length, 5);
+  assert.equal(contracts.length, 6);
   assert(contracts.every((contract) => contract.security.ownerIdentity === "identity-auth-function-owner"));
   assert(contracts.every((contract) => contract.security.publicExecute === "revoked"));
   assert(contracts.every((contract) => contract.security.runtimeExecuteGrantees.join(",") === "preauth"));
@@ -28,7 +28,9 @@ test("B01 production refresh functions use the reviewed owner-and-bearer FORCE-R
   assert.match(source, /"replacedByTokenHash"=p_token_hash,"rotationCompletedAt"=p_rotated_at/);
   assert.match(source, /revoke_refresh_token_scope\([^)]*p_request_id text\)/);
   assert.match(source, /complete_refresh_token_rotation\([^)]*p_request_id text\)/);
+  assert.match(source, /finalize_refresh_token_rotation\([^)]*p_request_id text\)/);
   assert.match(source, /t\."rotationRequestId" IS DISTINCT FROM p_request_id OR t\."rotationCompletedAt" IS NOT NULL/);
+  assert.match(source, /"sessionCapabilityHash" IS NULL[\s\S]*AUTH_REFRESH_MFA_CHALLENGE_REQUIRED[\s\S]*SET "rotationRequestId"=NULL/);
   assert.match(source, /B01_REFRESH_CLAIM_AMBIGUOUS/);
   assert.match(source, /gen_random_uuid\(\)::text/);
   assert.match(source, /AUTH_REFRESH_REUSE_DETECTED/);

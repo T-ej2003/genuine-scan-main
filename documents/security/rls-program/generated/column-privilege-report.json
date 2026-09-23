@@ -159,6 +159,7 @@
         "b01-claim-refresh-token-rotation",
         "b01-complete-refresh-token-rotation",
         "b01-create-refresh-mfa-challenge",
+        "b01-finalize-refresh-token-rotation",
         "b01-load-refresh-session-state",
         "b01-revoke-refresh-token-scope"
       ]
@@ -185,6 +186,7 @@
         "b01-claim-refresh-token-rotation",
         "b01-complete-refresh-token-rotation",
         "b01-create-refresh-mfa-challenge",
+        "b01-finalize-refresh-token-rotation",
         "b01-load-refresh-session-state",
         "b01-revoke-refresh-token-scope"
       ]
@@ -214,6 +216,7 @@
         "b01-claim-refresh-token-rotation",
         "b01-complete-refresh-token-rotation",
         "b01-create-refresh-mfa-challenge",
+        "b01-finalize-refresh-token-rotation",
         "b01-load-refresh-session-state",
         "b01-revoke-refresh-token-scope"
       ]
@@ -240,6 +243,7 @@
         "b01-claim-refresh-token-rotation",
         "b01-complete-refresh-token-rotation",
         "b01-create-refresh-mfa-challenge",
+        "b01-finalize-refresh-token-rotation",
         "b01-load-refresh-session-state",
         "b01-revoke-refresh-token-scope"
       ]
@@ -260,6 +264,7 @@
         "b01-claim-refresh-token-rotation",
         "b01-complete-refresh-token-rotation",
         "b01-create-refresh-mfa-challenge",
+        "b01-finalize-refresh-token-rotation",
         "b01-load-refresh-session-state",
         "b01-revoke-refresh-token-scope"
       ]
@@ -282,6 +287,7 @@
         "b01-claim-refresh-token-rotation",
         "b01-complete-refresh-token-rotation",
         "b01-create-refresh-mfa-challenge",
+        "b01-finalize-refresh-token-rotation",
         "b01-load-refresh-session-state",
         "b01-revoke-refresh-token-scope"
       ]
@@ -299,6 +305,7 @@
         "b01-claim-refresh-token-rotation",
         "b01-complete-refresh-token-rotation",
         "b01-create-refresh-mfa-challenge",
+        "b01-finalize-refresh-token-rotation",
         "b01-load-refresh-session-state",
         "b01-revoke-refresh-token-scope"
       ]
@@ -317,6 +324,7 @@
         "b01-claim-refresh-token-rotation",
         "b01-complete-refresh-token-rotation",
         "b01-create-refresh-mfa-challenge",
+        "b01-finalize-refresh-token-rotation",
         "b01-load-refresh-session-state",
         "b01-revoke-refresh-token-scope"
       ]
@@ -334,6 +342,7 @@
         "b01-claim-refresh-token-rotation",
         "b01-complete-refresh-token-rotation",
         "b01-create-refresh-mfa-challenge",
+        "b01-finalize-refresh-token-rotation",
         "b01-load-refresh-session-state",
         "b01-revoke-refresh-token-scope"
       ]
@@ -353,6 +362,7 @@
         "b01-claim-refresh-token-rotation",
         "b01-complete-refresh-token-rotation",
         "b01-create-refresh-mfa-challenge",
+        "b01-finalize-refresh-token-rotation",
         "b01-load-refresh-session-state",
         "b01-revoke-refresh-token-scope"
       ]
@@ -370,6 +380,7 @@
         "b01-claim-refresh-token-rotation",
         "b01-complete-refresh-token-rotation",
         "b01-create-refresh-mfa-challenge",
+        "b01-finalize-refresh-token-rotation",
         "b01-load-refresh-session-state",
         "b01-revoke-refresh-token-scope"
       ]
@@ -399,6 +410,7 @@
         "b01-claim-refresh-token-rotation",
         "b01-complete-refresh-token-rotation",
         "b01-create-refresh-mfa-challenge",
+        "b01-finalize-refresh-token-rotation",
         "b01-load-refresh-session-state",
         "b01-revoke-refresh-token-scope"
       ]
@@ -417,6 +429,7 @@
         "b01-claim-refresh-token-rotation",
         "b01-complete-refresh-token-rotation",
         "b01-create-refresh-mfa-challenge",
+        "b01-finalize-refresh-token-rotation",
         "b01-load-refresh-session-state",
         "b01-revoke-refresh-token-scope"
       ]

@@ -15,7 +15,7 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "65241a246c1ea2fb79c5c5e68942035cafc70efe67960466b5f539264be6be64",
+  "sourceContractSha256": "4aa88e99d438541e48445272149f7cd882df69f2a93bd9e8aa823c95f1c656fe",
   "migrationSetDigest": "6642442a81cd98c7a132d241fa98e50ae231510896c9da67ab70d86b050d02db",
   "sourceContractInputs": [
     {
@@ -92,7 +92,7 @@
     },
     {
       "path": "scripts/rls/lib/named-sql-function-contracts.mjs",
-      "sha256": "9dd0f4884268d7e3f33ddff7902780f36a4751ea32c28436da00a0c6785890f1"
+      "sha256": "f1ef4096df58a4978e5223333c1caa4ffc200e9871efd60ce21e8b05f99be7f2"
     },
     {
       "path": "scripts/rls/lib/restricted-owner-projection-contract.mjs",
@@ -252,11 +252,11 @@
     },
     {
       "path": "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
-      "sha256": "397ee0206b9956882dc034167054d502bf080738b168023cffc3e4d4b65b475e"
+      "sha256": "87e4ce1ab991371d05537fbbbce59ccfb97c34d5386d81e312c502d74f944ad2"
     },
     {
       "path": "backend/src/rls-waves/session-b/b01/b01RefreshRotationRollback.sql",
-      "sha256": "aa56cd6220367bb27b72eabcab9e5f2a93245df1a2cbc9e6bf2bbdb7e7bad1dd"
+      "sha256": "39a510d723d1817f641fb85479aea08380b2f52f96bcecb7d0615049bbbd48c1"
     },
     {
       "path": "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql",
@@ -352,7 +352,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:65241a246c1ea2fb79c5c5e68942035cafc70efe67960466b5f539264be6be64",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:4aa88e99d438541e48445272149f7cd882df69f2a93bd9e8aa823c95f1c656fe",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,

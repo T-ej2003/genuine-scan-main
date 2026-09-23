@@ -5,6 +5,7 @@ import {
   claimRefreshTokenRotation,
   completeRefreshTokenRotation,
   createRefreshTokenRecord,
+  finalizeRefreshTokenRotation,
   findRefreshTokenByIdentifier,
   listActiveRefreshTokenRecords,
   revokeAllRefreshTokenRecords,
@@ -245,19 +246,28 @@ export async function rotateRefreshToken<TRotated = undefined, TConsumed = TRota
       rotatedAt: now,
       requestId: input.requestId,
     });
-    const successorClaim = await claimRefreshTokenRotation(tx, {
-      tokenHashCandidates: [newHash],
-      checkedAt: now,
-      requestId: input.requestId,
-    });
-    if (successorClaim?.disposition !== "ACTIVE"
-      || successorClaim.tokenId !== successor.id
-      || successorClaim.userId !== tokenRow.userId) {
-      throw new Error("Refresh successor claim failed");
+    let rotation = undefined as TRotation;
+    if (input.afterRotate) {
+      const successorClaim = await claimRefreshTokenRotation(tx, {
+        tokenHashCandidates: [newHash],
+        checkedAt: now,
+        requestId: input.requestId,
+      });
+      if (successorClaim?.disposition !== "ACTIVE"
+        || successorClaim.tokenId !== successor.id
+        || successorClaim.userId !== tokenRow.userId) {
+        throw new Error("Refresh successor claim failed");
+      }
+      rotation = await input.afterRotate({ tx, predecessor: tokenRow, successor: { ...successor, tokenHash: newHash }, now, value: decision.value });
+      const finalized = await finalizeRefreshTokenRotation(tx, {
+        tokenId: successor.id,
+        tokenHashCandidates: [newHash],
+        userId: tokenRow.userId,
+        finalizedAt: now,
+        requestId: input.requestId,
+      });
+      if (!finalized) throw new Error("Refresh successor finalization failed");
     }
-    const rotation = input.afterRotate
-      ? await input.afterRotate({ tx, predecessor: tokenRow, successor: { ...successor, tokenHash: newHash }, now, value: decision.value })
-      : undefined as TRotation;
 
     return {
       ok: true,

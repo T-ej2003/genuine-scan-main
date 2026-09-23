@@ -82,6 +82,8 @@ const main = async () => {
   const {
     claimRefreshTokenRotation,
     completeRefreshTokenRotation,
+    createRefreshMfaChallengeRecord,
+    finalizeRefreshTokenRotation,
     loadRefreshSessionState,
   } = require("../../../dist/rls-waves/session-b/b01/sessionCredentialRepository");
   const { requireRecentMfaSession } = require("../../../dist/rls-waves/session-b/b01/authenticatedSecurityRepository");
@@ -140,14 +142,31 @@ const main = async () => {
     return tokenHash;
   };
 
-  const rotate = (rawToken, requestId, decide) => rotateRefreshToken({
+  const rotate = (rawToken, requestId, decide, afterRotate) => rotateRefreshToken({
     rawToken,
     ipHash: "b".repeat(64),
     userAgent: "postgres-18-proof",
     requestId,
     now,
     ...(decide ? { decide } : {}),
+    ...(afterRotate ? { afterRotate } : {}),
   });
+  const rotateWithCapability = (rawToken, requestId, decide) => rotate(
+    rawToken,
+    requestId,
+    decide,
+    async ({ tx, predecessor, successor }) => {
+      const capability = await createAuthenticatedSessionCapability(tx, {
+        refreshTokenId: successor.id,
+        refreshTokenHash: successor.tokenHash,
+        assurance: predecessor.mfaVerifiedAt ? "ADMIN_MFA" : "PASSWORD",
+        expiresAt: successor.expiresAt,
+        now,
+      });
+      sessionCapabilities.set(successor.id, sealCookieToken(capability.rawCapability, "auth.database-session"));
+      return capability.rawCapability;
+    }
+  );
 
   let server;
   let baseUrl;
@@ -205,7 +224,7 @@ const main = async () => {
 
     await seedActor({ id: "actor-main", mfaEnabled: true });
     await seedToken({ id: "token-main", userId: "actor-main", rawToken: "raw-main", mfaVerifiedAt: now });
-    const successful = await rotate("raw-main", "request-main", async ({ tx, token, tokenHashCandidates, now: checkedAt }) => {
+    const successful = await rotateWithCapability("raw-main", "request-main", async ({ tx, token, tokenHashCandidates, now: checkedAt }) => {
       const state = await loadRefreshSessionState(tx, {
         tokenId: token.id,
         tokenHashCandidates,
@@ -238,6 +257,32 @@ const main = async () => {
       revokedReason: "ROTATED",
       hasSuccessor: true,
     });
+    const successive = await rotateWithCapability(successful.newRawToken, "request-main-next");
+    const third = await rotateWithCapability(successive.newRawToken, "request-main-third");
+    assert.equal(successive.ok && successive.rotated, true);
+    assert.equal(third.ok && third.rotated, true);
+
+    await seedActor({ id: "actor-follow-on-failure", mfaEnabled: true });
+    await seedToken({
+      id: "token-follow-on-failure",
+      userId: "actor-follow-on-failure",
+      rawToken: "raw-follow-on-failure",
+      mfaVerifiedAt: now,
+    });
+    await reject(
+      () => rotate("raw-follow-on-failure", "request-follow-on-failure", undefined, async () => {
+        throw new Error("injected protected follow-on failure");
+      }),
+      /injected protected follow-on failure/
+    );
+    const [{ activeAfterFollowOnFailure, successorsAfterFollowOnFailure }] = await admin.$queryRaw`
+      SELECT
+        count(*) FILTER (WHERE id='token-follow-on-failure' AND revoked_at IS NULL)::int AS "activeAfterFollowOnFailure",
+        count(*) FILTER (WHERE id<>'token-follow-on-failure')::int AS "successorsAfterFollowOnFailure"
+      FROM b01_refresh_wave.refresh_token WHERE user_id='actor-follow-on-failure'
+    `;
+    assert.equal(activeAfterFollowOnFailure, 1);
+    assert.equal(successorsAfterFollowOnFailure, 0);
 
     await seedActor({ id: "controller-root", role: "LICENSEE_ADMIN", mfaEnabled: true });
     await seedToken({
@@ -618,7 +663,7 @@ const main = async () => {
       /B01_REFRESH_CLAIM_AMBIGUOUS/
     );
 
-    await seedActor({ id: "actor-claim-order", role: "LICENSEE_ADMIN" });
+    await seedActor({ id: "actor-claim-order", role: "LICENSEE_ADMIN", mfaEnabled: true });
     const claimOrderPredecessorHash = await seedToken({
       id: "token-claim-order",
       userId: "actor-claim-order",
@@ -705,6 +750,88 @@ const main = async () => {
       FROM b01_refresh_wave.refresh_token WHERE id=${claimOrderSuccessor.id}
     `;
     assert.equal(claimStillBound.rotationRequestId, "request-claim-order");
+    await reject(
+      () => preauth.$transaction((tx) => finalizeRefreshTokenRotation(tx, {
+        tokenId: claimOrderSuccessor.id,
+        tokenHashCandidates: [claimOrderSuccessorHash],
+        userId: "actor-claim-order",
+        finalizedAt: now,
+        requestId: "request-claim-order",
+      })),
+      /B01_REFRESH_FINALIZATION_DENIED/
+    );
+    await createAuthenticatedSessionCapability(preauth, {
+      refreshTokenId: claimOrderSuccessor.id,
+      refreshTokenHash: claimOrderSuccessorHash,
+      assurance: "PASSWORD",
+      expiresAt: later,
+      now,
+    });
+    await reject(
+      () => preauth.$transaction((tx) => finalizeRefreshTokenRotation(tx, {
+        tokenId: claimOrderSuccessor.id,
+        tokenHashCandidates: [claimOrderSuccessorHash],
+        userId: "actor-claim-order",
+        finalizedAt: now,
+        requestId: "request-claim-order",
+      })),
+      /B01_REFRESH_FINALIZATION_DENIED/
+    );
+    await preauth.$transaction((tx) => createRefreshMfaChallengeRecord(tx, {
+      tokenId: claimOrderSuccessor.id,
+      tokenHashCandidates: [claimOrderSuccessorHash],
+      userId: "actor-claim-order",
+      ticketHash: "1".repeat(64),
+      sessionBindingHash: "2".repeat(64),
+      riskScore: 10,
+      riskLevel: "LOW",
+      reasons: ["Explicit successor claim proof"],
+      ipHash: null,
+      userAgentHash: null,
+      maxAttempts: 5,
+      expiresAt: new Date(now.getTime() + 5 * 60_000),
+      createdAt: now,
+      requestId: "request-claim-order",
+    }));
+    await reject(
+      () => preauth.$transaction((tx) => finalizeRefreshTokenRotation(tx, {
+        tokenId: claimOrderSuccessor.id,
+        tokenHashCandidates: [claimOrderSuccessorHash],
+        userId: "actor-claim-order",
+        finalizedAt: now,
+        requestId: "request-claim-order-wrong",
+      })),
+      /B01_REFRESH_FINALIZATION_DENIED/
+    );
+    assert.equal(await preauth.$transaction((tx) => finalizeRefreshTokenRotation(tx, {
+      tokenId: claimOrderSuccessor.id,
+      tokenHashCandidates: [claimOrderSuccessorHash],
+      userId: "actor-claim-order",
+      finalizedAt: now,
+      requestId: "request-claim-order",
+    })), true);
+    const [finalizedSuccessor] = await admin.$queryRaw`
+      SELECT rotation_request_id AS "rotationRequestId"
+      FROM b01_refresh_wave.refresh_token WHERE id=${claimOrderSuccessor.id}
+    `;
+    assert.equal(finalizedSuccessor.rotationRequestId, null);
+    await reject(
+      () => preauth.$transaction((tx) => finalizeRefreshTokenRotation(tx, {
+        tokenId: claimOrderSuccessor.id,
+        tokenHashCandidates: [claimOrderSuccessorHash],
+        userId: "actor-claim-order",
+        finalizedAt: now,
+        requestId: "request-claim-order",
+      })),
+      /B01_REFRESH_FINALIZATION_DENIED/
+    );
+    const nextRequestClaim = await preauth.$transaction((tx) => claimRefreshTokenRotation(tx, {
+      tokenHashCandidates: [claimOrderSuccessorHash],
+      checkedAt: now,
+      requestId: "request-claim-order-next",
+    }));
+    assert.equal(nextRequestClaim.disposition, "ACTIVE");
+    assert.equal(nextRequestClaim.tokenId, claimOrderSuccessor.id);
 
     await seedActor({ id: "actor-concurrent", mfaEnabled: true });
     await seedToken({
@@ -717,7 +844,7 @@ const main = async () => {
     let winnerClaimed;
     const winnerHold = new Promise((resolve) => { releaseWinner = resolve; });
     const winnerReady = new Promise((resolve) => { winnerClaimed = resolve; });
-    const winningRotation = rotate(
+    const winningRotation = rotateWithCapability(
       "raw-concurrent",
       "request-concurrent-a",
       async ({ token, now: checkedAt }) => {
@@ -733,7 +860,7 @@ const main = async () => {
       }
     );
     await winnerReady;
-    const losingRotation = await rotate("raw-concurrent", "request-concurrent-b");
+    const losingRotation = await rotateWithCapability("raw-concurrent", "request-concurrent-b");
     releaseWinner();
     const concurrent = [await winningRotation, losingRotation];
     assert.equal(concurrent.filter((result) => result.ok && result.rotated).length, 1);
@@ -751,12 +878,11 @@ const main = async () => {
     assert.equal(activeAfterContention, 1);
     assert.equal(lostAudits, 1);
     assert.equal(plaintextPersisted, false);
-    const winnerRequestId = concurrent[0] === winner ? "request-concurrent-a" : "request-concurrent-b";
     const [claimedWinner] = await admin.$queryRaw`
       SELECT rotation_request_id AS "rotationRequestId"
       FROM b01_refresh_wave.refresh_token WHERE id=${winner.newTokenId}
     `;
-    assert.equal(claimedWinner.rotationRequestId, winnerRequestId);
+    assert.equal(claimedWinner.rotationRequestId, null);
 
     assert.deepEqual(await rotate("raw-concurrent", "request-later-replay"), {
       ok: false,
@@ -972,6 +1098,7 @@ const main = async () => {
         'app_auth.create_refresh_mfa_challenge(text,text[],text,text,text,integer,text,text[],text,text,integer,timestamp without time zone,timestamp without time zone,text)'::regprocedure,
         'app_auth.revoke_refresh_token_scope(text,text[],text,text,text,timestamp without time zone)'::regprocedure,
         'app_auth.complete_refresh_token_rotation(text,text[],text,text,text,timestamp without time zone,text,text,timestamp without time zone,timestamp without time zone,timestamp without time zone,text)'::regprocedure,
+        'app_auth.finalize_refresh_token_rotation(text,text[],text,timestamp without time zone,text)'::regprocedure,
         'app_rls.revalidate_authenticated_actor(text,text,text,text,timestamp without time zone,text)'::regprocedure,
         'app_rls.require_recent_mfa_session(text,timestamp without time zone,integer)'::regprocedure,
         'b01_refresh_wave.require_authenticated_context(text,text[],text[])'::regprocedure,
@@ -988,7 +1115,7 @@ const main = async () => {
       ])
       AND pg_catalog.pg_get_userbyid(proc.proowner)='mscqr_dev_rls_function_owner'
     `;
-    assert.equal(ownedFunctionCount, 19);
+    assert.equal(ownedFunctionCount, 20);
     const [functionOwnerPrivileges] = await admin.$queryRaw`
       SELECT
         has_table_privilege('mscqr_dev_rls_function_owner','b01_refresh_wave.actor','INSERT') AS "actorInsert",
@@ -1021,6 +1148,9 @@ const main = async () => {
         has_function_privilege('public','app_auth.claim_refresh_token_rotation(text[],timestamp without time zone,text)','EXECUTE') AS "publicClaim",
         has_function_privilege('mscqr_dev_rls_b01_app','app_auth.claim_refresh_token_rotation(text[],timestamp without time zone,text)','EXECUTE') AS "authClaim",
         has_function_privilege('mscqr_dev_rls_b01_preauth','app_auth.claim_refresh_token_rotation(text[],timestamp without time zone,text)','EXECUTE') AS "preauthClaim",
+        has_function_privilege('public','app_auth.finalize_refresh_token_rotation(text,text[],text,timestamp without time zone,text)','EXECUTE') AS "publicFinalize",
+        has_function_privilege('mscqr_dev_rls_b01_app','app_auth.finalize_refresh_token_rotation(text,text[],text,timestamp without time zone,text)','EXECUTE') AS "authFinalize",
+        has_function_privilege('mscqr_dev_rls_b01_preauth','app_auth.finalize_refresh_token_rotation(text,text[],text,timestamp without time zone,text)','EXECUTE') AS "preauthFinalize",
         has_function_privilege('mscqr_dev_rls_b01_preauth','app_rls.list_active_refresh_tokens(text,timestamp without time zone)','EXECUTE') AS "preauthList",
         has_function_privilege('mscqr_dev_rls_b01_app','app_rls.list_active_refresh_tokens(text,timestamp without time zone)','EXECUTE') AS "appList",
         has_function_privilege('mscqr_dev_rls_b01_app','app_rls.revalidate_authenticated_actor(text,text,text,text,timestamp without time zone,text)','EXECUTE') AS "appRevalidate",
@@ -1034,6 +1164,9 @@ const main = async () => {
       publicClaim: false,
       authClaim: false,
       preauthClaim: true,
+      publicFinalize: false,
+      authFinalize: false,
+      preauthFinalize: true,
       preauthList: false,
       appList: true,
       appRevalidate: true,

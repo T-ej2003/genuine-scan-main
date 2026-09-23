@@ -21,6 +21,7 @@ DROP FUNCTION IF EXISTS app_auth.load_refresh_session_state(text,text,text,times
 DROP FUNCTION IF EXISTS app_auth.create_refresh_mfa_challenge(text,text,text,text,integer,text,text[],text,text,integer,timestamp without time zone,timestamp without time zone,text);
 DROP FUNCTION IF EXISTS app_auth.revoke_refresh_token_scope(text,text,text,text,timestamp without time zone);
 DROP FUNCTION IF EXISTS app_auth.complete_refresh_token_rotation(text,text,text,text,timestamp without time zone,text,text,timestamp without time zone,timestamp without time zone,timestamp without time zone);
+DROP FUNCTION IF EXISTS app_auth.finalize_refresh_token_rotation(text,text[],text,timestamp without time zone,text);
 
 REVOKE ALL ON SCHEMA b01_refresh_wave FROM PUBLIC;
 GRANT USAGE ON SCHEMA app_auth TO mscqr_dev_rls_b01_preauth;
@@ -174,7 +175,7 @@ GRANT INSERT (
 ) ON b01_refresh_wave.mfa_challenge TO mscqr_dev_rls_function_owner;
 GRANT INSERT (idempotency_key,user_id,action,token_id,request_id,created_at)
   ON b01_refresh_wave.audit_outbox TO mscqr_dev_rls_function_owner;
-GRANT SELECT (idempotency_key)
+GRANT SELECT (idempotency_key,action,token_id,request_id)
   ON b01_refresh_wave.audit_outbox TO mscqr_dev_rls_function_owner;
 GRANT INSERT (
   payload,payload_digest,idempotency_key,request_id,organization_id,licensee_id,manufacturer_id,
@@ -751,6 +752,56 @@ BEGIN
 END
 $fn$;
 
+CREATE OR REPLACE FUNCTION app_auth.finalize_refresh_token_rotation(
+  p_token_id text, p_hashes text[], p_user_id text,
+  p_finalized_at timestamp without time zone, p_request_id text
+)
+RETURNS TABLE("finalized" boolean)
+LANGUAGE plpgsql
+SECURITY DEFINER
+VOLATILE
+SET search_path = pg_catalog
+AS $fn$
+DECLARE
+  v_token b01_refresh_wave.refresh_token%ROWTYPE;
+  v_actor b01_refresh_wave.actor%ROWTYPE;
+  v_count integer;
+BEGIN
+  IF session_user <> 'mscqr_dev_rls_b01_preauth'
+     OR p_finalized_at IS NULL
+     OR abs(extract(epoch FROM (p_finalized_at - (clock_timestamp() AT TIME ZONE 'UTC')))) > 300
+     OR coalesce(array_length(p_hashes, 1), 0) NOT BETWEEN 1 AND 3
+     OR EXISTS (SELECT 1 FROM unnest(p_hashes) AS hash WHERE hash !~ '^([0-9a-f]{12}:)?[0-9a-f]{64}$')
+     OR (SELECT count(DISTINCT hash) FROM unnest(p_hashes) AS hash) <> array_length(p_hashes, 1) THEN
+    RAISE EXCEPTION 'B01_REFRESH_FINALIZATION_DENIED';
+  END IF;
+  SELECT token.* INTO v_token FROM b01_refresh_wave.refresh_token AS token
+  WHERE token.id=p_token_id AND token.user_id=p_user_id AND token.token_hash=ANY(p_hashes)
+  FOR UPDATE;
+  IF NOT FOUND OR v_token.revoked_at IS NOT NULL OR v_token.expires_at<=p_finalized_at
+     OR v_token.rotation_request_id IS DISTINCT FROM p_request_id
+     OR v_token.session_capability_hash IS NULL OR v_token.session_capability_revoked_at IS NOT NULL
+     OR v_token.session_capability_expires_at<=p_finalized_at
+     OR v_token.session_capability_assurance IS DISTINCT FROM (CASE WHEN v_token.mfa_verified_at IS NULL THEN 'PASSWORD' ELSE 'ADMIN_MFA' END) THEN
+    RAISE EXCEPTION 'B01_REFRESH_FINALIZATION_DENIED';
+  END IF;
+  SELECT actor.* INTO v_actor FROM b01_refresh_wave.actor AS actor
+  WHERE actor.id=v_token.user_id AND actor.active FOR SHARE;
+  IF NOT FOUND OR (v_actor.mfa_required AND v_token.mfa_verified_at IS NULL AND NOT EXISTS (
+    SELECT 1 FROM b01_refresh_wave.audit_outbox AS outbox
+    WHERE outbox.action='AUTH_REFRESH_MFA_CHALLENGE_REQUIRED'
+      AND outbox.token_id=v_token.id AND outbox.request_id=p_request_id
+  )) THEN
+    RAISE EXCEPTION 'B01_REFRESH_FINALIZATION_DENIED';
+  END IF;
+  UPDATE b01_refresh_wave.refresh_token AS token SET rotation_request_id=NULL
+  WHERE token.id=v_token.id AND token.rotation_request_id=p_request_id;
+  GET DIAGNOSTICS v_count=ROW_COUNT;
+  IF v_count<>1 THEN RAISE EXCEPTION 'B01_REFRESH_FINALIZATION_DENIED'; END IF;
+  RETURN QUERY SELECT TRUE;
+END
+$fn$;
+
 CREATE OR REPLACE FUNCTION app_rls.revalidate_authenticated_actor(
   p_user_id text,
   p_session_id text,
@@ -1270,6 +1321,8 @@ ALTER FUNCTION app_auth.revoke_refresh_token_scope(text,text[],text,text,text,ti
   OWNER TO mscqr_dev_rls_function_owner;
 ALTER FUNCTION app_auth.complete_refresh_token_rotation(text,text[],text,text,text,timestamp without time zone,text,text,timestamp without time zone,timestamp without time zone,timestamp without time zone,text)
   OWNER TO mscqr_dev_rls_function_owner;
+ALTER FUNCTION app_auth.finalize_refresh_token_rotation(text,text[],text,timestamp without time zone,text)
+  OWNER TO mscqr_dev_rls_function_owner;
 ALTER FUNCTION app_rls.revalidate_authenticated_actor(text,text,text,text,timestamp without time zone,text)
   OWNER TO mscqr_dev_rls_function_owner;
 ALTER FUNCTION b01_refresh_wave.require_authenticated_context(text,text[],text[])
@@ -1302,6 +1355,7 @@ REVOKE ALL ON FUNCTION app_auth.load_refresh_session_state(text,text[],text,text
 REVOKE ALL ON FUNCTION app_auth.create_refresh_mfa_challenge(text,text[],text,text,text,integer,text,text[],text,text,integer,timestamp without time zone,timestamp without time zone,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_auth.revoke_refresh_token_scope(text,text[],text,text,text,timestamp without time zone) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_auth.complete_refresh_token_rotation(text,text[],text,text,text,timestamp without time zone,text,text,timestamp without time zone,timestamp without time zone,timestamp without time zone,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_auth.finalize_refresh_token_rotation(text,text[],text,timestamp without time zone,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.create_refresh_token(text,text,text,timestamp without time zone,text,text,timestamp without time zone,timestamp without time zone,timestamp without time zone) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.find_refresh_token_by_hashes(text[]) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.find_refresh_token_by_id(text,text) FROM PUBLIC;
@@ -1399,6 +1453,7 @@ GRANT EXECUTE ON FUNCTION app_auth.load_refresh_session_state(text,text[],text,t
 GRANT EXECUTE ON FUNCTION app_auth.create_refresh_mfa_challenge(text,text[],text,text,text,integer,text,text[],text,text,integer,timestamp without time zone,timestamp without time zone,text) TO mscqr_dev_rls_b01_preauth;
 GRANT EXECUTE ON FUNCTION app_auth.revoke_refresh_token_scope(text,text[],text,text,text,timestamp without time zone) TO mscqr_dev_rls_b01_preauth;
 GRANT EXECUTE ON FUNCTION app_auth.complete_refresh_token_rotation(text,text[],text,text,text,timestamp without time zone,text,text,timestamp without time zone,timestamp without time zone,timestamp without time zone,text) TO mscqr_dev_rls_b01_preauth;
+GRANT EXECUTE ON FUNCTION app_auth.finalize_refresh_token_rotation(text,text[],text,timestamp without time zone,text) TO mscqr_dev_rls_b01_preauth;
 GRANT EXECUTE ON FUNCTION app_auth.issue_authenticated_session_capability(text,text,text,text,timestamp without time zone) TO mscqr_dev_rls_b01_preauth;
 GRANT EXECUTE ON FUNCTION app_auth.issue_authenticated_session_capability(text,text,text,text,timestamp without time zone) TO mscqr_dev_rls_b01_app;
 GRANT EXECUTE ON FUNCTION app_auth.require_authenticated_session(text,text,text) TO mscqr_dev_rls_b01_app;

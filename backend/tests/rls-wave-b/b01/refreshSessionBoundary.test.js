@@ -20,6 +20,7 @@ for (const functionName of [
   "app_auth.create_refresh_mfa_challenge",
   "app_auth.revoke_refresh_token_scope",
   "app_auth.complete_refresh_token_rotation",
+  "app_auth.finalize_refresh_token_rotation",
   "app_rls.create_refresh_token",
   "app_rls.find_refresh_token_by_id",
   "app_rls.list_active_refresh_tokens",
@@ -44,11 +45,15 @@ assert.match(rotationBody, /tokenHashCandidates: presentedHashCandidates/);
 const successorCreated = rotationBody.indexOf("const successor = await completeRefreshTokenRotation");
 const successorClaimed = rotationBody.indexOf("const successorClaim = await claimRefreshTokenRotation", successorCreated);
 const successorFollowOn = rotationBody.indexOf("input.afterRotate", successorClaimed);
-assert.ok(successorCreated < successorClaimed && successorClaimed < successorFollowOn);
+const successorFinalized = rotationBody.indexOf("finalizeRefreshTokenRotation", successorFollowOn);
+assert.ok(successorCreated < successorClaimed && successorClaimed < successorFollowOn && successorFollowOn < successorFinalized);
 assert.match(rotationBody.slice(successorClaimed, successorFollowOn), /tokenHashCandidates: \[newHash\]/);
 assert.match(rotationBody.slice(successorClaimed, successorFollowOn), /successorClaim\?\.disposition !== "ACTIVE"/);
 assert.match(rotationBody.slice(successorClaimed, successorFollowOn), /successorClaim\.tokenId !== successor\.id/);
 assert.match(rotationBody.slice(successorClaimed, successorFollowOn), /successorClaim\.userId !== tokenRow\.userId/);
+assert.match(rotationBody.slice(successorFollowOn - 20, successorFinalized), /rotation = await input\.afterRotate/);
+assert.match(rotationBody.slice(successorFinalized), /tokenHashCandidates: \[newHash\]/);
+assert.match(rotationBody.slice(successorFinalized), /if \(!finalized\)/);
 const claimContract = repository.slice(
   repository.indexOf("export type RefreshRotationClaim"),
   repository.indexOf("export type RefreshLinkedLicensee")
@@ -64,6 +69,7 @@ for (const functionName of [
   "create_refresh_mfa_challenge",
   "revoke_refresh_token_scope",
   "complete_refresh_token_rotation",
+  "finalize_refresh_token_rotation",
 ]) {
   const sqlCall = repository.indexOf(`SELECT * FROM app_auth.${functionName}`);
   assert.notEqual(sqlCall, -1, `${functionName} must use a static SQL call`);
