@@ -81,6 +81,7 @@ const main = async () => {
   const { createAuthRoutes } = require("../../../dist/routes/modules/authRoutes");
   const {
     claimRefreshTokenRotation,
+    completeRefreshTokenRotation,
     loadRefreshSessionState,
   } = require("../../../dist/rls-waves/session-b/b01/sessionCredentialRepository");
   const { requireRecentMfaSession } = require("../../../dist/rls-waves/session-b/b01/authenticatedSecurityRepository");
@@ -617,6 +618,94 @@ const main = async () => {
       /B01_REFRESH_CLAIM_AMBIGUOUS/
     );
 
+    await seedActor({ id: "actor-claim-order", role: "LICENSEE_ADMIN" });
+    const claimOrderPredecessorHash = await seedToken({
+      id: "token-claim-order",
+      userId: "actor-claim-order",
+      rawToken: "raw-claim-order",
+    });
+    const claimOrderPredecessor = await preauth.$transaction((tx) => claimRefreshTokenRotation(tx, {
+      tokenHashCandidates: [claimOrderPredecessorHash],
+      checkedAt: now,
+      requestId: "request-claim-order",
+    }));
+    assert.equal(claimOrderPredecessor.disposition, "ACTIVE");
+    const claimOrderSuccessorHash = "d".repeat(64);
+    const claimOrderSuccessor = await preauth.$transaction((tx) => completeRefreshTokenRotation(tx, {
+      tokenId: "token-claim-order",
+      tokenHashCandidates: [claimOrderPredecessorHash],
+      userId: "actor-claim-order",
+      orgId: "actor-claim-order-org",
+      tokenHash: claimOrderSuccessorHash,
+      expiresAt: later,
+      ipHash: null,
+      userAgent: "claim-order-proof",
+      authenticatedAt: now,
+      mfaVerifiedAt: null,
+      rotatedAt: now,
+      requestId: "request-claim-order",
+    }));
+    const [unclaimedSuccessor] = await admin.$queryRaw`
+      SELECT rotation_request_id AS "rotationRequestId"
+      FROM b01_refresh_wave.refresh_token WHERE id=${claimOrderSuccessor.id}
+    `;
+    assert.equal(unclaimedSuccessor.rotationRequestId, null);
+    await reject(
+      () => preauth.$transaction((tx) => loadRefreshSessionState(tx, {
+        tokenId: claimOrderSuccessor.id,
+        tokenHashCandidates: [claimOrderSuccessorHash],
+        requestedLicenseeId: null,
+        requestedScopeVersion: null,
+        checkedAt: now,
+        requestId: "request-claim-order",
+      })),
+      /B01_REFRESH_BEARER_DENIED/
+    );
+    await reject(
+      () => preauth.$transaction((tx) => completeRefreshTokenRotation(tx, {
+        tokenId: claimOrderSuccessor.id,
+        tokenHashCandidates: [claimOrderSuccessorHash],
+        userId: "actor-claim-order",
+        orgId: "actor-claim-order-org",
+        tokenHash: "e".repeat(64),
+        expiresAt: later,
+        ipHash: null,
+        userAgent: "unclaimed-follow-on-proof",
+        authenticatedAt: now,
+        mfaVerifiedAt: null,
+        rotatedAt: now,
+        requestId: "request-claim-order",
+      })),
+      /B01_REFRESH_BEARER_DENIED/
+    );
+    const claimedSuccessor = await preauth.$transaction((tx) => claimRefreshTokenRotation(tx, {
+      tokenHashCandidates: [claimOrderSuccessorHash],
+      checkedAt: now,
+      requestId: "request-claim-order",
+    }));
+    assert.equal(claimedSuccessor.disposition, "ACTIVE");
+    assert.equal(claimedSuccessor.tokenId, claimOrderSuccessor.id);
+    const claimedSuccessorState = await preauth.$transaction((tx) => loadRefreshSessionState(tx, {
+      tokenId: claimOrderSuccessor.id,
+      tokenHashCandidates: [claimOrderSuccessorHash],
+      requestedLicenseeId: null,
+      requestedScopeVersion: null,
+      checkedAt: now,
+      requestId: "request-claim-order",
+    }));
+    assert.equal(claimedSuccessorState.userId, "actor-claim-order");
+    const incompatibleClaim = await preauth.$transaction((tx) => claimRefreshTokenRotation(tx, {
+      tokenHashCandidates: [claimOrderSuccessorHash],
+      checkedAt: now,
+      requestId: "request-claim-order-wrong",
+    }));
+    assert.equal(incompatibleClaim.disposition, "REVOKED");
+    const [claimStillBound] = await admin.$queryRaw`
+      SELECT rotation_request_id AS "rotationRequestId"
+      FROM b01_refresh_wave.refresh_token WHERE id=${claimOrderSuccessor.id}
+    `;
+    assert.equal(claimStillBound.rotationRequestId, "request-claim-order");
+
     await seedActor({ id: "actor-concurrent", mfaEnabled: true });
     await seedToken({
       id: "token-concurrent",
@@ -651,7 +740,6 @@ const main = async () => {
     assert.equal(concurrent.filter((result) => !result.ok && result.reason === "REVOKED").length, 1);
     const winner = concurrent.find((result) => result.ok && result.rotated);
     assert(winner);
-    const winnerHash = hashRefreshToken(winner.newRawToken);
     const [{ activeAfterContention, lostAudits, plaintextPersisted }] = await admin.$queryRaw`
       SELECT
         count(*) FILTER (WHERE token.revoked_at IS NULL)::int AS "activeAfterContention",
@@ -663,13 +751,12 @@ const main = async () => {
     assert.equal(activeAfterContention, 1);
     assert.equal(lostAudits, 1);
     assert.equal(plaintextPersisted, false);
-    const usableSuccessor = await preauth.$transaction((tx) => claimRefreshTokenRotation(tx, {
-      tokenHashCandidates: [winnerHash],
-      checkedAt: new Date(now.getTime() + 1),
-      requestId: "request-successor-usable",
-    }));
-    assert.equal(usableSuccessor.disposition, "ACTIVE");
-    assert.equal(usableSuccessor.tokenId, winner.newTokenId);
+    const winnerRequestId = concurrent[0] === winner ? "request-concurrent-a" : "request-concurrent-b";
+    const [claimedWinner] = await admin.$queryRaw`
+      SELECT rotation_request_id AS "rotationRequestId"
+      FROM b01_refresh_wave.refresh_token WHERE id=${winner.newTokenId}
+    `;
+    assert.equal(claimedWinner.rotationRequestId, winnerRequestId);
 
     assert.deepEqual(await rotate("raw-concurrent", "request-later-replay"), {
       ok: false,

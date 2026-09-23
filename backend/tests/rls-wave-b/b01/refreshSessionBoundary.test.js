@@ -41,6 +41,14 @@ assert.match(rotationBody, /\}, \{ timeout: 15_000 \}\);/);
 assert.doesNotMatch(rotationBody, /installCanonicalDbContext/);
 assert.ok(rotationBody.indexOf("input.decide") < rotationBody.indexOf("completeRefreshTokenRotation"));
 assert.match(rotationBody, /tokenHashCandidates: presentedHashCandidates/);
+const successorCreated = rotationBody.indexOf("const successor = await completeRefreshTokenRotation");
+const successorClaimed = rotationBody.indexOf("const successorClaim = await claimRefreshTokenRotation", successorCreated);
+const successorFollowOn = rotationBody.indexOf("input.afterRotate", successorClaimed);
+assert.ok(successorCreated < successorClaimed && successorClaimed < successorFollowOn);
+assert.match(rotationBody.slice(successorClaimed, successorFollowOn), /tokenHashCandidates: \[newHash\]/);
+assert.match(rotationBody.slice(successorClaimed, successorFollowOn), /successorClaim\?\.disposition !== "ACTIVE"/);
+assert.match(rotationBody.slice(successorClaimed, successorFollowOn), /successorClaim\.tokenId !== successor\.id/);
+assert.match(rotationBody.slice(successorClaimed, successorFollowOn), /successorClaim\.userId !== tokenRow\.userId/);
 const claimContract = repository.slice(
   repository.indexOf("export type RefreshRotationClaim"),
   repository.indexOf("export type RefreshLinkedLicensee")

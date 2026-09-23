@@ -245,6 +245,16 @@ export async function rotateRefreshToken<TRotated = undefined, TConsumed = TRota
       rotatedAt: now,
       requestId: input.requestId,
     });
+    const successorClaim = await claimRefreshTokenRotation(tx, {
+      tokenHashCandidates: [newHash],
+      checkedAt: now,
+      requestId: input.requestId,
+    });
+    if (successorClaim?.disposition !== "ACTIVE"
+      || successorClaim.tokenId !== successor.id
+      || successorClaim.userId !== tokenRow.userId) {
+      throw new Error("Refresh successor claim failed");
+    }
     const rotation = input.afterRotate
       ? await input.afterRotate({ tx, predecessor: tokenRow, successor: { ...successor, tokenHash: newHash }, now, value: decision.value })
       : undefined as TRotation;

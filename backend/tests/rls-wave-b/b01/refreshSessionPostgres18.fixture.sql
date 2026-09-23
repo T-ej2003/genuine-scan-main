@@ -236,7 +236,7 @@ BEGIN
     RAISE EXCEPTION 'B01_REFRESH_BEARER_DENIED';
   END IF;
   IF v_token.rotation_request_id IS NULL
-     OR (p_action IN ('load', 'challenge') AND p_request_id IS DISTINCT FROM v_token.rotation_request_id) THEN
+     OR (p_action IN ('load', 'challenge', 'complete') AND p_request_id IS DISTINCT FROM v_token.rotation_request_id) THEN
     RAISE EXCEPTION 'B01_REFRESH_BEARER_DENIED';
   END IF;
 
@@ -409,6 +409,13 @@ BEGIN
     VALUES ('expired:' || v_token.id, v_actor.id, 'AUTH_REFRESH_EXPIRED', v_token.id, p_request_id, p_checked_at)
     ON CONFLICT (idempotency_key) DO NOTHING;
     RETURN QUERY SELECT 'EXPIRED', v_token.id, v_actor.id, NULL::text, NULL::text, NULL::text,
+      NULL::text, NULL::text, v_token.expires_at, v_token.authenticated_at, v_token.mfa_verified_at;
+    RETURN;
+  END IF;
+
+  IF v_token.rotation_request_id IS NOT NULL
+     AND v_token.rotation_request_id IS DISTINCT FROM p_request_id THEN
+    RETURN QUERY SELECT 'REVOKED', v_token.id, v_actor.id, NULL::text, NULL::text, NULL::text,
       NULL::text, NULL::text, v_token.expires_at, v_token.authenticated_at, v_token.mfa_verified_at;
     RETURN;
   END IF;
@@ -726,10 +733,10 @@ BEGIN
 
   INSERT INTO b01_refresh_wave.refresh_token(
     id, user_id, organization_id, token_hash, expires_at, created_at, created_ip_hash,
-    created_user_agent, authenticated_at, mfa_verified_at, last_used_at, rotation_request_id
+    created_user_agent, authenticated_at, mfa_verified_at, last_used_at
   ) VALUES (
     v_id, p_user_id, p_organization_id, p_token_hash, p_expires_at, p_rotated_at,
-    p_ip_hash, p_user_agent, p_authenticated_at, p_mfa_verified_at, p_rotated_at, p_request_id
+    p_ip_hash, p_user_agent, p_authenticated_at, p_mfa_verified_at, p_rotated_at
   );
   UPDATE b01_refresh_wave.refresh_token AS token
   SET revoked_at = p_rotated_at, revoked_reason = 'ROTATED', replaced_by_token_hash = p_token_hash, last_used_at = p_rotated_at

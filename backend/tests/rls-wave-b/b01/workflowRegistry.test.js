@@ -12,8 +12,57 @@ const {
 );
 
 const repoRoot = path.resolve(__dirname, "../../../..");
-assert.ok(b01WorkflowProofs.length > 0, "registry must retain B01 workflow evidence");
-assert.equal(new Set(b01WorkflowProofs.map((proof) => proof.workflowId)).size, b01WorkflowProofs.length, "registry IDs must be unique");
+const partition = JSON.parse(fs.readFileSync(
+  path.join(repoRoot, "documents/security/rls-program/workflow-three-session-partition.json"),
+  "utf8"
+));
+const authoritativeB01Assignments = partition.assignments.filter(
+  (assignment) => assignment.sessionId === "session-b"
+    && assignment.waveId === "b-01-auth-preauth-session-account-security"
+);
+
+const assertExactB01Assignments = (assignments, proofs) => {
+  const assignmentIds = assignments.map(({ workflowId }) => workflowId);
+  const proofIds = proofs.map(({ workflowId }) => workflowId);
+  assert.equal(new Set(assignmentIds).size, assignmentIds.length, "authoritative B01 workflow IDs must be unique");
+  assert.equal(new Set(proofIds).size, proofIds.length, "registry B01 workflow IDs must be unique");
+  assert.deepEqual([...proofIds].sort(), [...assignmentIds].sort(), "registry must exactly match authoritative B01 assignments");
+
+  const assignmentsById = new Map(assignments.map((assignment) => [assignment.workflowId, assignment]));
+  for (const proof of proofs) {
+    const assignment = assignmentsById.get(proof.workflowId);
+    assert.equal(proof.entryPoint, assignment.entryPoint, `B01 entry point drifted: ${proof.workflowId}`);
+    assert.ok(
+      assignment.canonicalSourceFiles.includes(proof.productionRoot),
+      `B01 production root drifted: ${proof.workflowId}`
+    );
+  }
+};
+
+assert.equal(authoritativeB01Assignments.length, 46);
+assertExactB01Assignments(authoritativeB01Assignments, b01WorkflowProofs);
+assert.throws(
+  () => assertExactB01Assignments(authoritativeB01Assignments, b01WorkflowProofs.slice(1)),
+  /exactly match/
+);
+assert.throws(
+  () => assertExactB01Assignments(authoritativeB01Assignments, [
+    ...b01WorkflowProofs,
+    { ...b01WorkflowProofs[0], workflowId: "workflow-obsolete-b01-assignment" },
+  ]),
+  /exactly match/
+);
+assert.throws(
+  () => assertExactB01Assignments(authoritativeB01Assignments, [
+    { ...b01WorkflowProofs[0], entryPoint: "http:metadataDrift" },
+    ...b01WorkflowProofs.slice(1),
+  ]),
+  /entry point drifted/
+);
+assert.throws(
+  () => assertExactB01Assignments(authoritativeB01Assignments, [...b01WorkflowProofs, b01WorkflowProofs[0]]),
+  /registry B01 workflow IDs must be unique/
+);
 
 const invitationIds = new Set(b01InvitationApplicationPathProof.workflowIds);
 for (const proof of b01WorkflowProofs) {
