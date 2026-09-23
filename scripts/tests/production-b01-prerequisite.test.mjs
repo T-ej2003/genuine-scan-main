@@ -1,26 +1,36 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
-import { B01_PREREQUISITE, assertB01ExecutorAwsEvidence, assertB01LivePredecessor, assertB01PrerequisiteReceipt, assertB01ReceiptExecutorContract, attestBridgeDiff, buildB01ExecutorDefinition, buildB01PrerequisiteReceipt,
-  canonicalSha256, classifyBridgeFiles } from "../aws/production-b01-prerequisite-contract.mjs";
-import { buildB01ExecutorInput, canonicalB01Prerequisite, executeB01Transaction } from "../aws/apply-production-b01-prerequisite.mjs";
+import { B01_PREREQUISITE, assertB01ExecutorAwsEvidence, assertB01LivePredecessor, assertB01PrerequisiteReceipt, assertB01ReceiptExecutorContract,
+  assertB01RunTaskRequestEvidence, assertSemanticallyEmptyB01TaskOverrides, attestBridgeDiff, buildB01ExecutorDefinition, buildB01PrerequisiteReceipt,
+  buildB01ReadOnlyDefinition, buildB01RunTaskRequest, canonicalSha256, classifyBridgeFiles } from "../aws/production-b01-prerequisite-contract.mjs";
+import { authenticateB01RunTaskCloudTrail, b01CatalogueRuntimeSource, buildB01ExecutorInput, buildB01ReadOnlyInput,
+  canonicalB01Prerequisite, executeB01Transaction } from "../aws/apply-production-b01-prerequisite.mjs";
+import { authenticateB01ReadOnlyResult } from "../aws/probe-production-b01-prerequisite.mjs";
 
 const require = createRequire(import.meta.url), runtime = require("../aws/production-b01-prerequisite-executor.cjs");
+const readOnlyRuntime = require("../aws/production-b01-prerequisite-readonly.cjs");
 const deploymentSourceSha = "1".repeat(40), now = new Date("2026-09-23T12:00:00.000Z");
 const bridgeEntry = { file: "scripts/aws/production-b01-prerequisite-contract.mjs", classification: "BRIDGE_DEPLOYMENT_TOOLING", hunkCount: 1 };
 const bridgeDiffAttestation = { schemaVersion: 2, rlsDeltaOriginSha: B01_PREREQUISITE.rlsDeltaOriginSha, bridgeOriginSha: B01_PREREQUISITE.bridgeOriginSha, deploymentSourceSha,
   bridge: { base: B01_PREREQUISITE.rlsDeltaOriginSha, target: B01_PREREQUISITE.bridgeOriginSha, entries: [bridgeEntry], patchSha256: "2".repeat(64) },
-  correction: { base: B01_PREREQUISITE.bridgeOriginSha, target: deploymentSourceSha, entries: [bridgeEntry], patchSha256: "3".repeat(64) } };
+  predecessorCorrection: { base: B01_PREREQUISITE.bridgeOriginSha, target: B01_PREREQUISITE.correctionBaseSha, entries: [bridgeEntry], patchSha256: "3".repeat(64) },
+  correction: { base: B01_PREREQUISITE.correctionBaseSha, target: deploymentSourceSha, entries: [bridgeEntry], patchSha256: "4".repeat(64) } };
 bridgeDiffAttestation.attestationSha256 = canonicalSha256(bridgeDiffAttestation);
 const executor = fs.readFileSync("scripts/aws/production-b01-prerequisite-executor.cjs", "utf8"), executorSourceSha256 = crypto.createHash("sha256").update(executor).digest("hex");
 const taskArn = "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/" + "a".repeat(32);
 const taskDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-b01-prerequisite:1";
+const runTaskRequest = buildB01RunTaskRequest({ taskDefinitionArn, deploymentSourceSha });
+const runTaskRequestBody = { eventId: "12345678-1234-1234-1234-123456789abc", eventTime: new Date(now.getTime() - 20_000).toISOString(), taskArn, taskDefinitionArn,
+  cluster: "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main", launchType: "FARGATE", count: 1, enableExecuteCommand: false, overridesPresent: false };
+const runTaskRequestEvidence = { ...runTaskRequestBody, requestSha256: canonicalSha256(runTaskRequest) };
 
 const receipt = (changes = {}) => buildB01PrerequisiteReceipt({ deploymentSourceSha, predecessorRlsIdentity: "3".repeat(64), successorRlsIdentity: "4".repeat(64),
   liveRlsIdentity: "4".repeat(64), executorSourceSha256, executorContractSha256: "5".repeat(64), executorCommandSha256: "6".repeat(64),
-  executionResult: "APPLIED", writeCount: 7, taskArn, taskDefinitionArn, bridgeDiffAttestation,
+  executionResult: "APPLIED", writeCount: 7, taskArn, taskDefinitionArn, runTaskRequestEvidence, bridgeDiffAttestation,
   executedAt: now.toISOString(), expiresAt: new Date(now.getTime() + B01_PREREQUISITE.maxReceiptAgeMs).toISOString(), ...changes });
 const reseal = (value, changes) => { const body = { ...value, ...changes }; delete body.receiptSha256; return { ...body, receiptSha256: canonicalSha256(body) }; };
 
@@ -28,21 +38,26 @@ test("bridge diff accepts only the reviewed bridge inventory and binds exact pat
   const files = [".github/workflows/production-deploy.yml", "scripts/aws/production-b01-prerequisite-contract.mjs", "scripts/tests/production-b01-prerequisite.test.mjs"];
   const patch = files.map((file) => `diff --git a/${file} b/${file}\n@@ -1 +1 @@\n-old\n+new`).join("\n");
   const calls = [], attestation = attestBridgeDiff({ deploymentSourceSha, git: (args) => { calls.push(args); if (args[0] === "merge-base") return "";
-    if (args[0] === "rev-parse") return args[1] === `${B01_PREREQUISITE.bridgeOriginSha}^1` ? B01_PREREQUISITE.rlsDeltaOriginSha : B01_PREREQUISITE.bridgeOriginSha;
+    if (args[0] === "rev-parse") return args[1] === `${B01_PREREQUISITE.bridgeOriginSha}^1` ? B01_PREREQUISITE.rlsDeltaOriginSha
+      : args[1] === `${B01_PREREQUISITE.correctionBaseSha}^1` ? B01_PREREQUISITE.bridgeOriginSha : B01_PREREQUISITE.correctionBaseSha;
     if (args.includes("--name-only")) return files.join("\n"); return patch; } });
   assert.equal(attestation.rlsDeltaOriginSha, B01_PREREQUISITE.rlsDeltaOriginSha); assert.equal(attestation.deploymentSourceSha, deploymentSourceSha);
-  assert.equal(attestation.bridgeOriginSha, B01_PREREQUISITE.bridgeOriginSha); assert.equal(attestation.bridge.entries.length, 3); assert.equal(attestation.correction.entries.length, 3);
-  assert.ok([...attestation.bridge.entries, ...attestation.correction.entries].every(({ hunkCount }) => hunkCount === 1));
-  assert.match(attestation.bridge.patchSha256, /^[a-f0-9]{64}$/); assert.match(attestation.correction.patchSha256, /^[a-f0-9]{64}$/);
-  assert.deepEqual(calls.filter(([name]) => name === "merge-base").map((args) => args.slice(2)), [[B01_PREREQUISITE.rlsDeltaOriginSha, B01_PREREQUISITE.bridgeOriginSha], [B01_PREREQUISITE.bridgeOriginSha, deploymentSourceSha]]);
+  assert.equal(attestation.bridgeOriginSha, B01_PREREQUISITE.bridgeOriginSha); assert.equal(attestation.bridge.entries.length, 3);
+  assert.equal(attestation.predecessorCorrection.entries.length, 3); assert.equal(attestation.correction.entries.length, 3);
+  assert.ok([...attestation.bridge.entries, ...attestation.predecessorCorrection.entries, ...attestation.correction.entries].every(({ hunkCount }) => hunkCount === 1));
+  assert.match(attestation.bridge.patchSha256, /^[a-f0-9]{64}$/); assert.match(attestation.predecessorCorrection.patchSha256, /^[a-f0-9]{64}$/);
+  assert.match(attestation.correction.patchSha256, /^[a-f0-9]{64}$/);
+  assert.deepEqual(calls.filter(([name]) => name === "merge-base").map((args) => args.slice(2)), [[B01_PREREQUISITE.rlsDeltaOriginSha, B01_PREREQUISITE.bridgeOriginSha],
+    [B01_PREREQUISITE.bridgeOriginSha, B01_PREREQUISITE.correctionBaseSha], [B01_PREREQUISITE.correctionBaseSha, deploymentSourceSha]]);
 });
 
 test("bridge attestation accepts only the immediate reviewed correction successor", () => {
   assert.throws(() => attestBridgeDiff({ deploymentSourceSha, git: (args) => args[0] === "merge-base" ? "" : args[0] === "rev-parse" ? "f".repeat(40) : "" }),
     /Reviewed bridge origin|immediate protected-main prerequisite-correction successor/);
   assert.throws(() => attestBridgeDiff({ deploymentSourceSha, git: (args) => args[0] === "merge-base" ? "" : args[0] === "rev-parse"
-    ? args[1] === `${B01_PREREQUISITE.bridgeOriginSha}^1` ? B01_PREREQUISITE.rlsDeltaOriginSha : "f".repeat(40) : "" }),
-  /immediate protected-main prerequisite-correction successor/);
+    ? args[1] === `${B01_PREREQUISITE.bridgeOriginSha}^1` ? B01_PREREQUISITE.rlsDeltaOriginSha
+      : args[1] === `${B01_PREREQUISITE.correctionBaseSha}^1` ? B01_PREREQUISITE.bridgeOriginSha : "f".repeat(40) : "" }),
+  /immediate protected-main runtime-evidence successor/);
 });
 
 test("application, auth, RLS, schema, and unclassified bridge changes fail closed", () => {
@@ -101,6 +116,56 @@ test("executor command contains only the seven source-fixed #567 mutations", asy
   const attacked = structuredClone(built); attacked.contract.mutations[0].sql += "\nDELETE FROM public.\"User\"";
   const state = stateFixture(delta.predecessor); const harness = transactionHarness([state]);
   await assert.rejects(executeB01Transaction({ tx: harness.tx, input: attacked, collect: harness.collect })); assert.equal(harness.writes.length, 0);
+});
+
+test("read-only command reuses the exact mutation catalogue collector and cannot reach mutation code", () => {
+  const built = buildB01ReadOnlyInput({ deploymentSourceSha, databaseHostname: "db.synthetic.invalid" });
+  const source = built.command[1], shared = b01CatalogueRuntimeSource();
+  assert.ok(source.includes(shared));
+  assert.match(source, /SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY/);
+  assert.doesNotMatch(shared, /EXPECTED_MUTATIONS|CREATE POLICY|GRANT EXECUTE|executeB01Transaction|AUTHORIZED_MUTATION/);
+  assert.doesNotMatch(source, /executeB01Transaction|mutation\.sql|SET LOCAL ROLE/);
+  const definition = buildB01ReadOnlyDefinition(built.command);
+  assert.equal(definition.family, B01_PREREQUISITE.readOnlyFamily);
+  assert.equal(definition.containerDefinitions[0].name, B01_PREREQUISITE.readOnlyContainer);
+  assert.deepEqual(definition.containerDefinitions[0].entryPoint, ["node"]);
+  assert.deepEqual(definition.containerDefinitions[0].command, built.command);
+  assert.throws(() => buildB01ReadOnlyInput({ deploymentSourceSha: "main", databaseHostname: "db.synthetic.invalid" }));
+  assert.throws(() => buildB01ReadOnlyInput({ deploymentSourceSha, databaseHostname: "db.invalid/other" }));
+});
+
+test("read-only collector classifies exact predecessor, successor, partial, and unknown safely", async () => {
+  const delta = canonicalB01Prerequisite(), contract = buildB01ReadOnlyInput({ deploymentSourceSha, databaseHostname: "db.synthetic.invalid" }).contract;
+  const execute = async (state) => readOnlyRuntime.executeB01ReadOnlyTransaction({
+    client: { $transaction: async (callback) => callback({ $executeRawUnsafe: async (sql) => assert.equal(sql, "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY") }) },
+    input: { contract }, collect: async () => state, inspect: runtime.inspectB01State,
+  });
+  assert.equal((await execute(stateFixture(delta.predecessor, { identity: { ...identity, read_only: "on" } }))).classification, "PREDECESSOR");
+  assert.equal((await execute(stateFixture(delta.successor, { identity: { ...identity, read_only: "on" } }))).classification, "SUCCESSOR");
+  const partial = await execute(stateFixture(delta.predecessor, { identity: { ...identity, read_only: "on" }, functions: [] }));
+  assert.deepEqual({ classification: partial.classification, unauthorizedCatalogueDelta: partial.unauthorizedCatalogueDelta,
+    mismatchIdentifiers: partial.mismatchIdentifiers }, { classification: "PARTIAL", unauthorizedCatalogueDelta: true, mismatchIdentifiers: ["CATALOGUE_IDENTITY"] });
+  await assert.rejects(() => execute(stateFixture(delta.predecessor)), /read_only/);
+  const unknownBody = { schemaVersion: 1, kind: "PRODUCTION_B01_READONLY_RESULT", mode: "READ_ONLY", classification: "UNKNOWN",
+    stage: "DATABASE_CONNECTIVITY", code: "UNEXPECTED_FAILURE" };
+  assert.equal(authenticateB01ReadOnlyResult(JSON.stringify({ ...unknownBody, evidenceSha256: canonicalSha256(unknownBody) }), contract).classification, "UNKNOWN");
+});
+
+test("structured executor telemetry exposes only allowlisted stages and sanitized codes", () => {
+  assert.deepEqual(runtime.FAILURE_STAGES, ["BOOTSTRAP","INPUT_AUTHENTICATION","SECRET_ACCESS","DATABASE_CONNECTIVITY","PREDECESSOR_COLLECTION",
+    "PREDECESSOR_CLASSIFICATION","TRANSACTION_BEGIN","AUTHORIZED_MUTATION","SUCCESSOR_COLLECTION","SUCCESSOR_CLASSIFICATION","COMMIT","RECEIPT_PRECONDITION"]);
+  const secret = "postgresql://admin:secret@private-db/user-data";
+  for (const stage of runtime.FAILURE_STAGES) {
+    const evidence = runtime.safeFailure(stage, Object.assign(new Error(secret), { code: "P1001" }));
+    assert.deepEqual(evidence, { status: "PRODUCTION_B01_PREREQUISITE_FAILED", stage, code: "P1001" });
+    assert.doesNotMatch(JSON.stringify(evidence), /secret|private-db|user-data/);
+  }
+  assert.equal(runtime.safeFailure("BOOTSTRAP", Object.assign(new Error(secret), { code: "SENSITIVE_CUSTOM_CODE" })).code, "UNEXPECTED_FAILURE");
+  assert.throws(() => runtime.safeFailure("NOT_A_STAGE", new Error(secret)));
+  const executed = spawnSync(process.execPath, ["-e", executor], { encoding: "utf8", env: { MSCQR_B01_PREREQUISITE_ADMIN_PASSWORD: secret } });
+  assert.equal(executed.status, 1); const emitted = JSON.parse(executed.stderr);
+  assert.deepEqual(emitted, { status: "PRODUCTION_B01_PREREQUISITE_FAILED", stage: "INPUT_AUTHENTICATION", code: "CONTRACT_REJECTED" });
+  assert.doesNotMatch(executed.stderr, /admin:secret|private-db|user-data/); assert.equal(executed.stdout, "");
 });
 
 test("receipt RLS identities must match the reconstructed source-fixed executor contract", () => {
@@ -197,27 +262,62 @@ test("transaction failure prevents successor authentication and is surfaced", as
   await assert.rejects(executeB01Transaction({ tx: harness.tx, input: { contract: built.contract }, collect: harness.collect }), /injected/);
 });
 
-test("handoff authenticates stopped exact executor task and rejects definition command substitution", () => {
+const exactExecutorEvidence = () => {
   let value = { ...receipt() }; const command = ["node-command"];
   const task = { taskArn, taskDefinitionArn, clusterArn: "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main", lastStatus: "STOPPED", stopCode: "EssentialContainerExited",
     enableExecuteCommand: false, startedAt: new Date(now.getTime() - 10_000).toISOString(), stoppedAt: new Date(now.getTime() + 10_000).toISOString(),
+    overrides: { containerOverrides: [{ name: B01_PREREQUISITE.executorContainer }], inferenceAcceleratorOverrides: [] },
     containers: [{ name: B01_PREREQUISITE.executorContainer, exitCode: 0 }] };
   const taskDefinition = { ...buildB01ExecutorDefinition(command), taskDefinitionArn, status: "ACTIVE" };
   // Use an executor command whose inline source is the real executor bytes.
   command.splice(0, 1, "-e", executor); value = { ...value, executorCommandSha256: canonicalSha256(command) }; const payload = { ...value }; delete payload.receiptSha256; value.receiptSha256 = canonicalSha256(payload);
+  return { value, task, taskDefinition };
+};
+
+test("handoff authenticates stopped exact executor task and rejects definition command substitution", () => {
+  const { value, task, taskDefinition } = exactExecutorEvidence();
   assert.equal(assertB01ExecutorAwsEvidence({ receipt: value, task, taskDefinition, expectedExecutorSourceSha256: executorSourceSha256 }), true);
   assert.throws(() => assertB01ExecutorAwsEvidence({ receipt: value, task, taskDefinition: { ...taskDefinition, containerDefinitions: [{ ...taskDefinition.containerDefinitions[0], command: ["-e", "substituted"] }] }, expectedExecutorSourceSha256: executorSourceSha256 }));
+  const oldRequest = { ...value.runTaskRequestEvidence, eventTime: new Date(now.getTime() - 10 * 60 * 1000).toISOString() };
+  const stale = reseal(value, { runTaskRequestEvidence: oldRequest });
+  assert.throws(() => assertB01ExecutorAwsEvidence({ receipt: stale, task, taskDefinition, expectedExecutorSourceSha256: executorSourceSha256 }));
 });
 
-test("handoff rejects every executable or security-relevant RunTask override", () => {
-  let value = { ...receipt() }; const command = ["-e", executor];
-  value = { ...value, executorCommandSha256: canonicalSha256(command) }; const payload = { ...value }; delete payload.receiptSha256; value.receiptSha256 = canonicalSha256(payload);
-  const task = { taskArn, taskDefinitionArn, clusterArn: "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main", lastStatus: "STOPPED", stopCode: "EssentialContainerExited",
-    enableExecuteCommand: false, startedAt: new Date(now.getTime() - 10_000).toISOString(), stoppedAt: new Date(now.getTime() + 10_000).toISOString(),
-    containers: [{ name: B01_PREREQUISITE.executorContainer, exitCode: 0 }] };
-  const taskDefinition = { ...buildB01ExecutorDefinition(command), taskDefinitionArn, status: "ACTIVE" };
+test("task-definition evidence accepts only reviewed ECS materialized defaults", () => {
+  const { value, task, taskDefinition } = exactExecutorEvidence(), observed = structuredClone(taskDefinition);
+  Object.assign(observed, { revision: 1, placementConstraints: [], enableFaultInjection: false, requiresAttributes: [], compatibilities: ["EC2", "FARGATE"] });
+  observed.volumes[0].host = {}; Object.assign(observed.containerDefinitions[0], { cpu: 0, environmentFiles: [], portMappings: [], systemControls: [],
+    ulimits: [], volumesFrom: [] }); observed.containerDefinitions[0].logConfiguration.secretOptions = [];
+  assert.equal(assertB01ExecutorAwsEvidence({ receipt: value, task, taskDefinition: observed, expectedExecutorSourceSha256: executorSourceSha256 }), true);
+  assert.throws(() => assertB01ExecutorAwsEvidence({ receipt: value, task, taskDefinition: { ...observed, ipcMode: "host" }, expectedExecutorSourceSha256: executorSourceSha256 }));
+  assert.throws(() => assertB01ExecutorAwsEvidence({ receipt: value, task, taskDefinition: { ...observed, enableFaultInjection: true }, expectedExecutorSourceSha256: executorSourceSha256 }));
+});
+
+test("CloudTrail proves the RunTask request supplied no runtime overrides", () => {
+  const cloudTrail = [{ EventId: runTaskRequestBody.eventId, CloudTrailEvent: JSON.stringify({ eventID: runTaskRequestBody.eventId,
+    eventTime: runTaskRequestBody.eventTime, eventSource: "ecs.amazonaws.com", eventName: "RunTask",
+    requestParameters: { ...runTaskRequest, dryrun: false, enableECSManagedTags: false },
+    responseElements: { tasks: [{ taskArn }] } }) }];
+  assert.deepEqual(authenticateB01RunTaskCloudTrail(cloudTrail, { taskArn, taskDefinitionArn, deploymentSourceSha }), runTaskRequestEvidence);
+  const contradictory = structuredClone(cloudTrail);
+  const event = JSON.parse(contradictory[0].CloudTrailEvent); event.requestParameters.overrides = { containerOverrides: [{ name: B01_PREREQUISITE.executorContainer, command: ["true"] }] };
+  contradictory[0].CloudTrailEvent = JSON.stringify(event);
+  assert.throws(() => authenticateB01RunTaskCloudTrail(contradictory, { taskArn, taskDefinitionArn, deploymentSourceSha }));
+  assert.throws(() => assertB01RunTaskRequestEvidence({ ...runTaskRequestEvidence, overridesPresent: true }, { taskArn, taskDefinitionArn, deploymentSourceSha }));
+  const extra = structuredClone(cloudTrail), tagged = JSON.parse(extra[0].CloudTrailEvent); tagged.requestParameters.tags = [{ key: "mode", value: "other" }];
+  extra[0].CloudTrailEvent = JSON.stringify(tagged);
+  assert.throws(() => authenticateB01RunTaskCloudTrail(extra, { taskArn, taskDefinitionArn, deploymentSourceSha }));
+  const activeDefault = structuredClone(cloudTrail), changedDefault = JSON.parse(activeDefault[0].CloudTrailEvent); changedDefault.requestParameters.enableECSManagedTags = true;
+  activeDefault[0].CloudTrailEvent = JSON.stringify(changedDefault);
+  assert.throws(() => authenticateB01RunTaskCloudTrail(activeDefault, { taskArn, taskDefinitionArn, deploymentSourceSha }));
+});
+
+test("handoff accepts only observed inert DescribeTasks materialization and rejects all real overrides", () => {
+  const { value, task, taskDefinition } = exactExecutorEvidence();
   const verify = (overrides) => assertB01ExecutorAwsEvidence({ receipt: value, task: overrides === undefined ? task : { ...task, overrides }, taskDefinition, expectedExecutorSourceSha256: executorSourceSha256 });
-  for (const empty of [undefined, {}, { containerOverrides: [] }]) assert.equal(verify(empty), true);
+  for (const empty of [{}, { containerOverrides: [] }, { inferenceAcceleratorOverrides: [] },
+    { containerOverrides: [{ name: B01_PREREQUISITE.executorContainer }] },
+    { containerOverrides: [{ name: B01_PREREQUISITE.executorContainer }], inferenceAcceleratorOverrides: [] }]) assert.equal(verify(empty), true);
   const rejected = [
     { containerOverrides: [{ name: B01_PREREQUISITE.executorContainer, command: ["sh", "-c", "exit 0"] }] },
     { containerOverrides: [{ name: B01_PREREQUISITE.executorContainer, environment: [{ name: "NODE_OPTIONS", value: "--require=/tmp/noop" }] }] },
@@ -225,13 +325,16 @@ test("handoff rejects every executable or security-relevant RunTask override", (
     { taskRoleArn: "arn:aws:iam::368992683803:role/other" }, { executionRoleArn: "arn:aws:iam::368992683803:role/other" },
     { cpu: "2048" }, { memory: "4096" }, { ephemeralStorage: { sizeInGiB: 40 } },
     { inferenceAcceleratorOverrides: [{ deviceName: "device", deviceType: "synthetic" }] },
-    { containerOverrides: [{ name: B01_PREREQUISITE.executorContainer, cpu: 2, memory: 4, memoryReservation: 2,
-      resourceRequirements: [{ type: "GPU", value: "1" }] }] },
+    { containerOverrides: [{ name: B01_PREREQUISITE.executorContainer, cpu: 2 }] },
+    { containerOverrides: [{ name: B01_PREREQUISITE.executorContainer, memory: 4 }] },
+    { containerOverrides: [{ name: B01_PREREQUISITE.executorContainer, memoryReservation: 2 }] },
+    { containerOverrides: [{ name: B01_PREREQUISITE.executorContainer, resourceRequirements: [{ type: "GPU", value: "1" }] }] },
     { unknownOverride: true }, { containerOverrides: [{ name: "wrong" }] },
     { containerOverrides: [{ name: B01_PREREQUISITE.executorContainer }, { name: B01_PREREQUISITE.executorContainer }] },
     null, [], { containerOverrides: {} }, { containerOverrides: undefined },
   ];
   for (const overrides of rejected) assert.throws(() => verify(overrides));
+  assert.throws(() => assertSemanticallyEmptyB01TaskOverrides({ containerOverrides: [{ name: B01_PREREQUISITE.executorContainer, command: ["sh", "-c", "exit 0"] }] }));
 });
 
 test("workflow keeps security classification and reuses the existing backend-only deploy job", () => {

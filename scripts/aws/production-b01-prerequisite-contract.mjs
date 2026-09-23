@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { assertEcsTaskDefinitionReadback } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/ecs-task-definition-readback.mjs";
+import { appOnlyVerifierNetwork } from "./production-app-only-policy.mjs";
 
 export const B01_PREREQUISITE = Object.freeze({
   schemaVersion: 1,
   kind: "PRODUCTION_B01_PREREQUISITE_RECEIPT",
   rlsDeltaOriginSha: "0f7ae1a70eec588ef4fdcb2b53e9f42e831c4414",
   bridgeOriginSha: "e1c16977e9fdce7a19dc267ba3c816ef4ff14597",
+  correctionBaseSha: "69e71ab21c847d27f8a76795a6de6f623313c8ad",
   environment: "production",
   migrationSetDigest: "6642442a81cd98c7a132d241fa98e50ae231510896c9da67ab70d86b050d02db",
   sourceContractSha256: "099399a7d3f4b2392acdba6c54bf1ac6a919ff60691e69d31023d32161d99e71",
@@ -16,6 +18,8 @@ export const B01_PREREQUISITE = Object.freeze({
   cluster: "mscqr-prod-euw2-main",
   executorFamily: "mscqr-production-b01-prerequisite",
   executorContainer: "production-b01-prerequisite",
+  readOnlyFamily: "mscqr-production-b01-prerequisite-readonly",
+  readOnlyContainer: "production-b01-prerequisite-readonly",
   executorImage: "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:5b7809608386fed5c54ff2e09b0edb221664607c7cc5fb93b66b617ca08c28cc",
   predecessorSourceSha: "945692f49c6d262b0a54b9b8e4240ef4c21688eb",
   predecessorServiceArn: "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2",
@@ -51,6 +55,56 @@ export const buildB01ExecutorDefinition = (command) => ({
     logConfiguration: { logDriver: "awslogs", options: { "awslogs-region": B01_PREREQUISITE.region, "awslogs-group": B01_PREREQUISITE.logGroup,
       "awslogs-stream-prefix": "b01-prerequisite" } } }],
 });
+
+export const buildB01ReadOnlyDefinition = (command) => {
+  const definition = buildB01ExecutorDefinition(command);
+  definition.family = B01_PREREQUISITE.readOnlyFamily;
+  definition.containerDefinitions[0].name = B01_PREREQUISITE.readOnlyContainer;
+  definition.containerDefinitions[0].logConfiguration.options["awslogs-stream-prefix"] = "b01-prerequisite-readonly";
+  return definition;
+};
+
+export const buildB01RunTaskRequest = ({ taskDefinitionArn, deploymentSourceSha, readOnly = false }) => {
+  assert.match(taskDefinitionArn || "", /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/mscqr-production-b01-prerequisite(?:-readonly)?:[1-9][0-9]*$/);
+  assert.match(deploymentSourceSha || "", SHA);
+  return Object.freeze({ cluster: `arn:aws:ecs:${B01_PREREQUISITE.region}:${B01_PREREQUISITE.account}:cluster/${B01_PREREQUISITE.cluster}`,
+    taskDefinition: taskDefinitionArn, launchType: "FARGATE", count: 1, enableExecuteCommand: false,
+    clientToken: canonicalSha256({ deploymentSourceSha, taskDefinitionArn, ...(readOnly ? { mode: "READ_ONLY" } : {}) }),
+    networkConfiguration: appOnlyVerifierNetwork() });
+};
+
+export function normalizeB01RunTaskCloudTrailRequest(request, options) {
+  assert.ok(request && typeof request === "object" && !Array.isArray(request));
+  const expected = buildB01RunTaskRequest(options);
+  assert.deepEqual(Object.keys(request).sort(), [...Object.keys(expected), "dryrun", "enableECSManagedTags"].sort());
+  assert.equal(request.dryrun, false); assert.equal(request.enableECSManagedTags, false);
+  const normalized = { ...request }; delete normalized.dryrun; delete normalized.enableECSManagedTags;
+  assert.deepEqual(normalized, expected); return expected;
+}
+
+export function assertSemanticallyEmptyB01TaskOverrides(overrides, expectedContainer = B01_PREREQUISITE.executorContainer) {
+  if (overrides === undefined) return true;
+  assert.ok(overrides && typeof overrides === "object" && !Array.isArray(overrides), "B01 task overrides are malformed.");
+  assert.ok(Object.keys(overrides).every((key) => key === "containerOverrides" || key === "inferenceAcceleratorOverrides"), "B01 task has an unknown runtime override.");
+  if (Object.hasOwn(overrides, "inferenceAcceleratorOverrides")) assert.deepEqual(overrides.inferenceAcceleratorOverrides, []);
+  if (Object.hasOwn(overrides, "containerOverrides")) {
+    assert.ok(Array.isArray(overrides.containerOverrides));
+    assert.ok(overrides.containerOverrides.length === 0 || overrides.containerOverrides.length === 1);
+    if (overrides.containerOverrides.length === 1) assert.deepEqual(overrides.containerOverrides[0], { name: expectedContainer });
+  }
+  return true;
+}
+
+export function assertB01RunTaskRequestEvidence(evidence, { taskArn, taskDefinitionArn, deploymentSourceSha, readOnly = false } = {}) {
+  assert.deepEqual(Object.keys(evidence || {}).sort(), ["cluster","count","enableExecuteCommand","eventId","eventTime","launchType","overridesPresent","requestSha256","taskArn","taskDefinitionArn"].sort());
+  assert.match(evidence.eventId, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/); assert.ok(Number.isFinite(Date.parse(evidence.eventTime)));
+  assert.equal(evidence.taskArn, taskArn); assert.equal(evidence.taskDefinitionArn, taskDefinitionArn);
+  assert.equal(evidence.cluster, `arn:aws:ecs:${B01_PREREQUISITE.region}:${B01_PREREQUISITE.account}:cluster/${B01_PREREQUISITE.cluster}`);
+  assert.equal(evidence.launchType, "FARGATE"); assert.equal(evidence.count, 1); assert.equal(evidence.enableExecuteCommand, false);
+  assert.equal(evidence.overridesPresent, false);
+  assert.equal(evidence.requestSha256, canonicalSha256(buildB01RunTaskRequest({ taskDefinitionArn, deploymentSourceSha, readOnly })));
+  return true;
+}
 
 export function assertB01LivePredecessor({ service, taskDefinition, repository, imageDetails } = {}) {
   assert.equal(service?.serviceArn, B01_PREREQUISITE.predecessorServiceArn);
@@ -91,11 +145,14 @@ const bridgeFiles = Object.freeze(new Map([
   ["scripts/aws/apply-production-b01-prerequisite.mjs", "BRIDGE_DEPLOYMENT_TOOLING"],
   ["scripts/aws/production-b01-prerequisite-contract.mjs", "BRIDGE_DEPLOYMENT_TOOLING"],
   ["scripts/aws/production-b01-prerequisite-executor.cjs", "BRIDGE_DEPLOYMENT_TOOLING"],
+  ["scripts/aws/production-b01-prerequisite-readonly.cjs", "BRIDGE_DEPLOYMENT_TOOLING"],
+  ["scripts/aws/probe-production-b01-prerequisite.mjs", "BRIDGE_DEPLOYMENT_TOOLING"],
   ["scripts/aws/production-b01-prerequisite-policy-state.json", "GENERATED_CONSEQUENCE_DIRECTLY_REQUIRED_BY_BRIDGE"],
   ["scripts/aws/verify-production-b01-prerequisite-handoff.mjs", "BRIDGE_DEPLOYMENT_TOOLING"],
   ["scripts/tests/production-b01-prerequisite.test.mjs", "BRIDGE_TEST"],
   ["scripts/tests/production-full-rls-package-postgres18.test.mjs", "BRIDGE_TEST"],
   ["documents/security/rls-program/production-b01-prerequisite-bridge.md", "BRIDGE_DOCUMENTATION"],
+  ["package.json", "BRIDGE_DEPLOYMENT_TOOLING"],
 ]));
 
 export function classifyBridgeFiles(files) {
@@ -124,9 +181,11 @@ export function attestBridgeDiff({ deploymentSourceSha, repositoryRoot = process
     return Object.freeze({ base, target, entries, patchSha256: crypto.createHash("sha256").update(patch).digest("hex") });
   };
   assert.equal(git(["rev-parse", `${B01_PREREQUISITE.bridgeOriginSha}^1`]), B01_PREREQUISITE.rlsDeltaOriginSha, "Reviewed bridge origin does not immediately follow the RLS delta origin.");
-  assert.equal(git(["rev-parse", `${deploymentSourceSha}^1`]), B01_PREREQUISITE.bridgeOriginSha, "Deployment source is not the immediate protected-main prerequisite-correction successor.");
+  assert.equal(git(["rev-parse", `${B01_PREREQUISITE.correctionBaseSha}^1`]), B01_PREREQUISITE.bridgeOriginSha, "Reviewed predecessor correction does not immediately follow the bridge origin.");
+  assert.equal(git(["rev-parse", `${deploymentSourceSha}^1`]), B01_PREREQUISITE.correctionBaseSha, "Deployment source is not the immediate protected-main runtime-evidence successor.");
   const body = { schemaVersion: 2, rlsDeltaOriginSha: B01_PREREQUISITE.rlsDeltaOriginSha, bridgeOriginSha: B01_PREREQUISITE.bridgeOriginSha, deploymentSourceSha,
-    bridge: attestRange(B01_PREREQUISITE.rlsDeltaOriginSha, B01_PREREQUISITE.bridgeOriginSha), correction: attestRange(B01_PREREQUISITE.bridgeOriginSha, deploymentSourceSha) };
+    bridge: attestRange(B01_PREREQUISITE.rlsDeltaOriginSha, B01_PREREQUISITE.bridgeOriginSha), predecessorCorrection: attestRange(B01_PREREQUISITE.bridgeOriginSha, B01_PREREQUISITE.correctionBaseSha),
+    correction: attestRange(B01_PREREQUISITE.correctionBaseSha, deploymentSourceSha) };
   return Object.freeze({ ...body, attestationSha256: canonicalSha256(body) });
 }
 
@@ -148,6 +207,7 @@ export function buildB01PrerequisiteReceipt(input) {
     writeCount: input.writeCount,
     taskArn: input.taskArn,
     taskDefinitionArn: input.taskDefinitionArn,
+    runTaskRequestEvidence: input.runTaskRequestEvidence,
     bridgeDiffAttestation: input.bridgeDiffAttestation,
     executedAt: input.executedAt,
     expiresAt: input.expiresAt,
@@ -167,6 +227,7 @@ export function assertB01PrerequisiteReceipt(value, { deploymentSourceSha, bridg
   assert.equal(value.migrationSetDigest, B01_PREREQUISITE.migrationSetDigest);
   assert.ok(value.executionResult === "APPLIED" && value.writeCount === 7 || value.executionResult === "ALREADY_CONVERGED" && value.writeCount === 0);
   assert.match(value.taskArn || "", TASK); assert.match(value.taskDefinitionArn || "", TASK_DEFINITION);
+  assertB01RunTaskRequestEvidence(value.runTaskRequestEvidence, { taskArn: value.taskArn, taskDefinitionArn: value.taskDefinitionArn, deploymentSourceSha });
   assert.deepEqual(value.bridgeDiffAttestation, bridgeDiffAttestation);
   assert.equal(value.bridgeDiffAttestation?.rlsDeltaOriginSha, B01_PREREQUISITE.rlsDeltaOriginSha);
   assert.equal(value.bridgeDiffAttestation?.bridgeOriginSha, B01_PREREQUISITE.bridgeOriginSha);
@@ -196,14 +257,13 @@ export function assertB01ExecutorAwsEvidence({ receipt, task, taskDefinition, ex
   assert.equal(task?.clusterArn, `arn:aws:ecs:${B01_PREREQUISITE.region}:${B01_PREREQUISITE.account}:cluster/${B01_PREREQUISITE.cluster}`);
   assert.equal(task?.lastStatus, "STOPPED"); assert.equal(task?.stopCode, "EssentialContainerExited");
   assert.equal(task?.enableExecuteCommand, false);
-  if (task?.overrides !== undefined) {
-    assert.ok(task.overrides && typeof task.overrides === "object" && !Array.isArray(task.overrides), "B01 executor task overrides are malformed.");
-    assert.deepEqual(task.overrides, Object.hasOwn(task.overrides, "containerOverrides") ? { containerOverrides: [] } : {},
-      "B01 executor task must use its fixed task-definition launch contract without runtime overrides.");
-  }
+  assertB01RunTaskRequestEvidence(receipt.runTaskRequestEvidence, { taskArn: task.taskArn, taskDefinitionArn: task.taskDefinitionArn,
+    deploymentSourceSha: receipt.deploymentSourceSha });
+  assertSemanticallyEmptyB01TaskOverrides(task?.overrides, B01_PREREQUISITE.executorContainer);
   assert.equal(task?.containers?.length, 1); assert.equal(task.containers[0].name, B01_PREREQUISITE.executorContainer); assert.equal(task.containers[0].exitCode, 0);
-  const startedAt = Date.parse(task.startedAt), stoppedAt = Date.parse(task.stoppedAt), executedAt = Date.parse(receipt.executedAt);
-  assert.ok(Number.isFinite(startedAt) && Number.isFinite(stoppedAt) && startedAt <= executedAt && executedAt <= stoppedAt);
+  const requestedAt = Date.parse(receipt.runTaskRequestEvidence.eventTime), startedAt = Date.parse(task.startedAt), stoppedAt = Date.parse(task.stoppedAt), executedAt = Date.parse(receipt.executedAt);
+  assert.ok(Number.isFinite(requestedAt) && Number.isFinite(startedAt) && Number.isFinite(stoppedAt) && requestedAt <= startedAt
+    && startedAt - requestedAt < 5 * 60 * 1000 && startedAt <= executedAt && executedAt <= stoppedAt);
   assertEcsTaskDefinitionReadback({ definition: taskDefinition, taskDefinitionArn: receipt.taskDefinitionArn,
     expected: buildB01ExecutorDefinition(taskDefinition?.containerDefinitions?.find(({ name }) => name === B01_PREREQUISITE.executorContainer)?.command), label: "B01 prerequisite evidence" });
   const containers = taskDefinition?.containerDefinitions?.filter(({ name }) => name === B01_PREREQUISITE.executorContainer) || [];

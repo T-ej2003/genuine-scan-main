@@ -29,6 +29,8 @@ const administrator = "mscqr_prod_admin";
 const randomMfaSecret = () =>
   [...crypto.randomBytes(32)].map((value) => "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"[value & 31]).join("");
 const printingDeltaRuntime = createRequire(import.meta.url)("../aws/production-printing-routine-delta-executor.cjs");
+const b01Runtime = createRequire(import.meta.url)("../aws/production-b01-prerequisite-executor.cjs");
+const b01ReadOnlyRuntime = createRequire(import.meta.url)("../aws/production-b01-prerequisite-readonly.cjs");
 const printingRoutine = (source, name) => {
   const marker = `CREATE OR REPLACE FUNCTION app_rls.${name}(`;
   assert.equal(source.split(marker).length, 2);
@@ -350,6 +352,22 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
       assert.deepEqual(b01Predecessor.roles, b01Delta.predecessor.roles);
       assert.deepEqual(b01Predecessor.policies, b01Delta.predecessor.policies);
       assert.deepEqual(b01Predecessor.catalogue, b01Delta.predecessor.catalogue);
+      const readOnlyPredecessor = await b01ReadOnlyRuntime.executeB01ReadOnlyTransaction({ client: administratorClient,
+        input: { contract: b01Input.contract }, collect: collectB01State, inspect: b01Runtime.inspectB01State });
+      assert.deepEqual({ classification: readOnlyPredecessor.classification, transactionReadOnly: readOnlyPredecessor.transactionReadOnly,
+        livePredecessorMatch: readOnlyPredecessor.livePredecessorMatch, liveSuccessorMatch: readOnlyPredecessor.liveSuccessorMatch },
+      { classification: "PREDECESSOR", transactionReadOnly: true, livePredecessorMatch: true, liveSuccessorMatch: false });
+      for (const sql of ['INSERT INTO public."User" DEFAULT VALUES', 'UPDATE public."User" SET id=id WHERE false',
+        'DELETE FROM public."User" WHERE false', 'CREATE TABLE public.b01_readonly_forbidden(id integer)']) {
+        await assert.rejects(administratorClient.$transaction(async (tx) => {
+          await tx.$executeRawUnsafe("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
+          await tx.$executeRawUnsafe("SET LOCAL ROLE mscqr_prd_rls_phase2_owner"); await tx.$executeRawUnsafe(sql);
+        }), /read-only transaction/);
+      }
+      await assert.rejects(administratorClient.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
+        return executeB01Transaction({ tx, input: { contract: b01Input.contract } });
+      }), /read-only transaction|transaction characteristics|read_only/);
       const policyPredicate = (name, field) => scalar(greenUrl, `SELECT pg_get_expr(p.${field},p.polrelid) FROM pg_policy p WHERE p.polname='${name}'`, `${name} ${field}`);
       const refreshSelectUsing = policyPredicate("b01_refreshtoken_select", "polqual");
       const refreshUpdateUsing = policyPredicate("b01_refreshtoken_update", "polqual");
@@ -412,11 +430,17 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
       } }), { maxWait: 10000, timeout: 120000 });
       assert.deepEqual(b01Applied, { status: "APPLIED", writeCount: 7, predecessorRlsIdentity: b01Delta.predecessorRlsIdentity,
         successorRlsIdentity: b01Delta.successorRlsIdentity, liveRlsIdentity: b01Delta.successorRlsIdentity });
+      const readOnlySuccessor = await b01ReadOnlyRuntime.executeB01ReadOnlyTransaction({ client: administratorClient,
+        input: { contract: b01Input.contract }, collect: collectB01State, inspect: b01Runtime.inspectB01State });
+      assert.equal(readOnlySuccessor.classification, "SUCCESSOR"); assert.equal(readOnlySuccessor.liveSuccessorMatch, true);
       const b01Converged = await administratorClient.$transaction((tx) => executeB01Transaction({ tx, input: { contract: b01Input.contract } }), { maxWait: 10000, timeout: 120000 });
       assert.equal(b01Converged.status, "ALREADY_CONVERGED"); assert.equal(b01Converged.writeCount, 0);
       psql(greenUrl, ["-q", "-c", `BEGIN;SET LOCAL ROLE mscqr_prd_rls_phase2_owner;
         ALTER POLICY b01_refreshtoken_select ON public."RefreshToken" USING (true);RESET ROLE;COMMIT;`], "install successor predicate drift");
       try {
+        const readOnlyPartial = await b01ReadOnlyRuntime.executeB01ReadOnlyTransaction({ client: administratorClient,
+          input: { contract: b01Input.contract }, collect: collectB01State, inspect: b01Runtime.inspectB01State });
+        assert.equal(readOnlyPartial.classification, "PARTIAL"); assert.equal(readOnlyPartial.unauthorizedCatalogueDelta, true);
         await assert.rejects(administratorClient.$transaction((tx) => executeB01Transaction({ tx, input: { contract: b01Input.contract } }),
           { maxWait: 10000, timeout: 120000 }), /neither the exact predecessor nor successor/);
       } finally {
