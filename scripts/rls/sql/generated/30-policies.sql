@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='4aa88e99d438541e48445272149f7cd882df69f2a93bd9e8aa823c95f1c656fe'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:4aa88e99d438541e48445272149f7cd882df69f2a93bd9e8aa823c95f1c656fe'
+    AND source_contract_sha256='099399a7d3f4b2392acdba6c54bf1ac6a919ff60691e69d31023d32161d99e71'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:099399a7d3f4b2392acdba6c54bf1ac6a919ff60691e69d31023d32161d99e71'
     AND administrator_role='certification-administrator'
 
     AND phase='runtime-grants-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:4aa88e99d438541e48445272149f7cd882df69f2a93bd9e8aa823c95f1c656fe')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:099399a7d3f4b2392acdba6c54bf1ac6a919ff60691e69d31023d32161d99e71')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -378,6 +378,8 @@ CREATE POLICY "b01_authmfachallenge_insert" ON public."AuthMfaChallenge" AS PERM
 COMMENT ON POLICY "b01_authmfachallenge_insert" ON public."AuthMfaChallenge" IS '{"boundary":"b01-refresh-rotation","ownerIdentity":"identity-auth-function-owner","scope":"transaction-local bearer-derived context"}';
 CREATE POLICY "b01_auditlogoutbox_insert" ON public."AuditLogOutbox" AS PERMISSIVE FOR INSERT TO "mscqr_rls_cert_auth_owner" WITH CHECK (current_user='mscqr_rls_cert_auth_owner' AND current_setting('app.b01_predecessor_id',true)<>'' AND payload->>'userId'=current_setting('app.b01_user_id',true) AND payload->'details'->>'requestId'=current_setting('app.b01_request_id',true) AND payload->>'action' IN ('AUTH_REFRESH_DISABLED_DENIED','AUTH_REFRESH_REUSE_DETECTED','AUTH_REFRESH_EXPIRED','AUTH_REFRESH_STALE_MEMBERSHIP_DENIED','MANUFACTURER_SCOPE_SWITCH','AUTH_REFRESH_MFA_CHALLENGE_REQUIRED','AUTH_REFRESH_REVOKED','AUTH_REFRESH_ROTATED'));
 COMMENT ON POLICY "b01_auditlogoutbox_insert" ON public."AuditLogOutbox" IS '{"boundary":"b01-refresh-rotation","ownerIdentity":"identity-auth-function-owner","scope":"transaction-local bearer-derived context"}';
+CREATE POLICY "b01_auditlogoutbox_select" ON public."AuditLogOutbox" AS PERMISSIVE FOR SELECT TO "mscqr_rls_cert_auth_owner" USING (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.b01_operation',true)='finalize-successor' AND current_setting('app.b01_predecessor_id',true)<>'' AND current_setting('app.b01_user_id',true)<>'' AND payload->>'userId'=current_setting('app.b01_user_id',true) AND payload->>'action'='AUTH_REFRESH_MFA_CHALLENGE_REQUIRED' AND payload->>'entityType'='RefreshToken' AND payload->>'entityId'=current_setting('app.b01_predecessor_id',true) AND payload->'details'->>'requestId'=current_setting('app.b01_request_id',true) AND payload->'details'->>'boundary'='b01-refresh-rotation');
+COMMENT ON POLICY "b01_auditlogoutbox_select" ON public."AuditLogOutbox" IS '{"boundary":"b01-refresh-rotation","ownerIdentity":"identity-auth-function-owner","scope":"transaction-local bearer-derived context"}';
 CREATE POLICY "b01_preauth_user_select" ON public."User" AS PERMISSIVE FOR SELECT TO "mscqr_rls_cert_auth_owner" USING ((current_user='mscqr_rls_cert_auth_owner' AND ((current_setting('app.b01_preauth_operation',true) IN ('password-lookup','password-failure','reset-request','invite-lookup','invite-consume') AND lower(email)=current_setting('app.b01_preauth_email',true)) OR (current_setting('app.b01_preauth_user_id',true)<>'' AND id=current_setting('app.b01_preauth_user_id',true)) OR (current_setting('app.b01_preauth_operation',true)='email-consume' AND current_setting('app.b01_preauth_pending_email',true)<>'' AND lower(email)=current_setting('app.b01_preauth_pending_email',true)))));
 COMMENT ON POLICY "b01_preauth_user_select" ON public."User" IS '{"boundary":"b01-preauth-bearer","ownerIdentity":"identity-auth-function-owner","scope":"operation-specific selector rebound to locked token or account"}';
 CREATE POLICY "b01_preauth_user_update" ON public."User" AS PERMISSIVE FOR UPDATE TO "mscqr_rls_cert_auth_owner" USING ((current_user='mscqr_rls_cert_auth_owner' AND ((current_setting('app.b01_preauth_operation',true)='password-failure' AND lower(email)=current_setting('app.b01_preauth_email',true)) OR (current_setting('app.b01_preauth_operation',true) IN ('reset-consume','invite-consume','email-consume') AND current_setting('app.b01_preauth_user_id',true)<>'' AND id=current_setting('app.b01_preauth_user_id',true))))) WITH CHECK ((current_user='mscqr_rls_cert_auth_owner' AND ((current_setting('app.b01_preauth_operation',true)='password-failure' AND lower(email)=current_setting('app.b01_preauth_email',true)) OR (current_setting('app.b01_preauth_operation',true) IN ('reset-consume','invite-consume','email-consume') AND current_setting('app.b01_preauth_user_id',true)<>'' AND id=current_setting('app.b01_preauth_user_id',true)))));

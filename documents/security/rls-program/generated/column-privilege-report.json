@@ -435,6 +435,23 @@
       ]
     },
     {
+      "table": "AuditLogOutbox",
+      "command": "SELECT",
+      "columns": [
+        "payload"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b01-claim-refresh-token-rotation",
+        "b01-complete-refresh-token-rotation",
+        "b01-create-refresh-mfa-challenge",
+        "b01-finalize-refresh-token-rotation",
+        "b01-load-refresh-session-state",
+        "b01-revoke-refresh-token-scope"
+      ]
+    },
+    {
       "table": "User",
       "command": "SELECT",
       "columns": [

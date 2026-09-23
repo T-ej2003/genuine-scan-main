@@ -43,6 +43,51 @@ const tokenFromInviteLink = (link) => {
   assert(token, "invite response must contain a tokenized acceptance link");
   return token;
 };
+const certifyB01AuditVisibility = (bootstrap, preauth, appUrl) => {
+  const row = (id, payload) => `('${id}','${JSON.stringify(payload).replaceAll("'", "''")}'::jsonb,transaction_timestamp())`;
+  const exact = {
+    userId: "b01-policy-user", action: "AUTH_REFRESH_MFA_CHALLENGE_REQUIRED",
+    entityType: "RefreshToken", entityId: "b01-policy-successor",
+    details: { requestId: "b01-policy-request", boundary: "b01-refresh-rotation" }, probe: "exact",
+  };
+  const rows = [
+    exact,
+    { ...exact, userId: "other-user", probe: "wrong-user" },
+    { ...exact, entityId: "other-token", probe: "wrong-token" },
+    { ...exact, action: "AUTH_REFRESH_ROTATED", probe: "wrong-action" },
+    { ...exact, details: { ...exact.details, requestId: "other-request" }, probe: "wrong-request" },
+    { ...exact, details: { ...exact.details, boundary: "other-boundary" }, probe: "wrong-boundary" },
+    { ...exact, userId: "other-admin", probe: "other-admin" },
+    { ...exact, userId: "ordinary-user", probe: "other-user" },
+    { action: "AUTH_LOGIN_SUCCESS", userId: exact.userId, entityType: "RefreshToken", entityId: exact.entityId, details: exact.details, probe: "b03-row" },
+    { ...exact, details: { ...exact.details, requestId: "historical-request" }, probe: "historical-generation" },
+    { ...exact, details: { ...exact.details, requestId: "future-request" }, probe: "future-generation" },
+    { userId: exact.userId, action: exact.action, entityType: exact.entityType, entityId: exact.entityId, details: {}, probe: "missing-binding" },
+  ];
+  psql(bootstrap, `
+    INSERT INTO public."AuditLogOutbox" (id,payload,"updatedAt") VALUES
+      ${rows.map((payload, index) => row(`b01-policy-${index}`, payload)).join(",\n")};
+    CREATE OR REPLACE FUNCTION app_auth.b01_audit_visibility_probe(p_user text,p_token text,p_request text,p_operation text)
+    RETURNS text[] LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+    BEGIN
+      PERFORM set_config('app.b01_user_id',coalesce(p_user,''),true),
+              set_config('app.b01_predecessor_id',coalesce(p_token,''),true),
+              set_config('app.b01_request_id',coalesce(p_request,''),true),
+              set_config('app.b01_operation',coalesce(p_operation,''),true);
+      RETURN ARRAY(SELECT payload->>'probe' FROM public."AuditLogOutbox" ORDER BY payload->>'probe');
+    END $fn$;
+    ALTER FUNCTION app_auth.b01_audit_visibility_probe(text,text,text,text) OWNER TO mscqr_rls_cert_auth_owner;
+    REVOKE ALL ON FUNCTION app_auth.b01_audit_visibility_probe(text,text,text,text) FROM PUBLIC;
+    GRANT EXECUTE ON FUNCTION app_auth.b01_audit_visibility_probe(text,text,text,text) TO mscqr_rls_cert_preauth,mscqr_rls_cert_app;
+  `);
+  const visible = (url, user, token, requestId, operation) => JSON.parse(psql(url,
+    `SELECT to_json(app_auth.b01_audit_visibility_probe('${user}','${token}','${requestId}','${operation}'))::text`));
+  assert.deepEqual(visible(preauth, exact.userId, exact.entityId, exact.details.requestId, "finalize-successor"), ["exact"]);
+  assert.deepEqual(visible(preauth, "", "", "", ""), []);
+  assert.deepEqual(visible(preauth, exact.userId, exact.entityId, "malformed", "finalize-successor"), []);
+  assert.deepEqual(visible(appUrl, exact.userId, exact.entityId, exact.details.requestId, "finalize-successor"), []);
+  assert.throws(() => psql(preauth, `SELECT count(*) FROM public."AuditLogOutbox"`), /permission denied/);
+};
 
 async function main() {
   if (!enabled) return console.log("Current-runtime independent super-admin onboarding PostgreSQL 18 proof skipped");
@@ -55,6 +100,7 @@ async function main() {
     assert(["127.0.0.1", "localhost", "::1"].includes(parsed.hostname));
   }
   assert.equal(Number(psql(bootstrap, "select current_setting('server_version_num')::int/10000")), 18);
+  certifyB01AuditVisibility(bootstrap, preauthUrl, appUrl);
 
   const passwordHash = "$argon2id$v=19$m=65536,t=3,p=4$QmFzZTY0U2FsdDEyMzQ1Ng$H5LxEgFqUlRkM9wkkSbzu1dO3zJI2GBWB6IlupXMTP0";
   const refreshHash = crypto.createHash("sha256").update("current-runtime-super-admin-refresh").digest("hex");
@@ -64,6 +110,8 @@ async function main() {
     UPDATE public."User" SET email='${emails.adminA}', role='SUPER_ADMIN', "orgId"=NULL, "licenseeId"=NULL,
       "passwordHash"='${passwordHash}', "emailVerifiedAt"=transaction_timestamp(), "isActive"=true, status='ACTIVE', "disabledAt"=NULL, "deletedAt"=NULL
       WHERE id='${ids.adminA}';
+    INSERT INTO public."UserMfaFactor" (id,"userId",type,transports,"createdAt","updatedAt")
+      VALUES ('00000000-0000-4000-9000-000000000703','${ids.adminA}','TOTP',ARRAY[]::text[],transaction_timestamp(),transaction_timestamp());
     DELETE FROM public."RefreshToken" WHERE id='${ids.adminASession}';
     INSERT INTO public."RefreshToken" (id,"userId","tokenHash","expiresAt","authenticatedAt","mfaVerifiedAt")
       VALUES ('${ids.adminASession}','${ids.adminA}','${refreshHash}',transaction_timestamp()+interval '1 hour',transaction_timestamp(),transaction_timestamp());
@@ -82,7 +130,7 @@ async function main() {
   const { generateSync } = require("otplib");
   const { createAuthenticatedSessionCapability } = require("../dist/services/auth/authenticatedSessionCapabilityService");
   const { getB01PreAuthPrisma } = require("../dist/rls-waves/session-b/b01/runtimeClients");
-  const { signAccessToken } = require("../dist/services/auth/tokenService");
+  const { hashRefreshToken, signAccessToken } = require("../dist/services/auth/tokenService");
   const { sealCookieToken } = require("../dist/services/auth/cookieTokenProtectionService");
   const { DATABASE_SESSION_CAPABILITY_HEADER } = require("../dist/middleware/auth");
   const { createAuthRoutes } = require("../dist/routes/modules/authRoutes");
@@ -146,6 +194,22 @@ async function main() {
     assert.equal(accepted.body.data.user.orgId, null);
     assert.notEqual(accepted.body.data.user.id, ids.adminA);
     assert.equal(accepted.body.data.auth.sessionStage, "MFA_BOOTSTRAP");
+    const adminBId = accepted.body.data.user.id;
+    const passwordOnlyRawRefresh = "current-runtime-password-only-admin-refresh";
+    const passwordOnlyRefreshHash = hashRefreshToken(passwordOnlyRawRefresh);
+    assert(adminABefore.mfaFactors + adminABefore.mfaCredentials > 0, "password-only refresh proof requires an enrolled administrator");
+    psql(bootstrap, `INSERT INTO public."RefreshToken" (id,"userId","tokenHash","expiresAt","authenticatedAt","mfaVerifiedAt")
+      VALUES ('00000000-0000-4000-9000-000000000702','${ids.adminA}','${passwordOnlyRefreshHash}',transaction_timestamp()+interval '1 hour',transaction_timestamp(),NULL)`);
+    const passwordOnlyJar = cookieJar();
+    passwordOnlyJar.absorb({ getSetCookie: () => [
+      `aq_refresh=${sealCookieToken(passwordOnlyRawRefresh, "auth.refresh")}; Path=/`,
+      `aq_csrf=${bootstrapJar.csrf()}; Path=/`,
+    ] });
+    const passwordOnlyRefresh = await request("/api/auth/refresh", {
+      method: "POST", jar: passwordOnlyJar, headers: { "x-csrf-token": passwordOnlyJar.csrf() }, body: {},
+    });
+    assert.equal(passwordOnlyRefresh.response.status, 200, JSON.stringify(passwordOnlyRefresh.body));
+    assert.equal(passwordOnlyRefresh.body.data.auth.sessionStage, "MFA_BOOTSTRAP");
 
     const replay = await request("/api/auth/accept-invite", {
       method: "POST", body: { token: inviteToken, password: passwordB, name: "Synthetic Admin B" },
@@ -182,7 +246,6 @@ async function main() {
     });
     assert.notEqual(enrollmentReplay.response.status, 200, "consumed MFA bootstrap state must not be replayable");
 
-    const adminBId = accepted.body.data.user.id;
     const firstActiveSessionId = psql(bootstrap, `SELECT id FROM public."RefreshToken" WHERE "userId"='${adminBId}' AND "revokedAt" IS NULL ORDER BY "createdAt" DESC LIMIT 1`);
     assert(firstActiveSessionId);
     assert.notEqual(firstActiveSessionId, ids.adminASession, "Admin B bootstrap session must be independent from Admin A");
@@ -192,6 +255,13 @@ async function main() {
     assert.equal(loggedIn.body.data.user.id, adminBId);
     assert.equal(loggedIn.body.data.auth.sessionStage, "ACTIVE");
     assert.equal(loggedIn.body.data.auth.authAssurance, "ADMIN_MFA");
+    for (const generation of ["first", "successive"]) {
+      const refreshed = await request("/api/auth/refresh", {
+        method: "POST", jar: loginJar, headers: { "x-csrf-token": loginJar.csrf() }, body: {},
+      });
+      assert.equal(refreshed.response.status, 200, `${generation} active refresh failed: ${JSON.stringify(refreshed.body)}`);
+      assert.equal(refreshed.body.data.auth.sessionStage, "ACTIVE");
+    }
     const secondActiveSessionId = psql(bootstrap, `SELECT id FROM public."RefreshToken" WHERE "userId"='${adminBId}' AND "revokedAt" IS NULL ORDER BY "createdAt" DESC LIMIT 1`);
     assert.notEqual(secondActiveSessionId, firstActiveSessionId, "subsequent MFA-authenticated login must create an independent session");
     assert.notEqual(secondActiveSessionId, ids.adminASession, "Admin B login session must be independent from Admin A");
