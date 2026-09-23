@@ -7,6 +7,7 @@ export const B01_PREREQUISITE = Object.freeze({
   schemaVersion: 1,
   kind: "PRODUCTION_B01_PREREQUISITE_RECEIPT",
   rlsDeltaOriginSha: "0f7ae1a70eec588ef4fdcb2b53e9f42e831c4414",
+  bridgeOriginSha: "e1c16977e9fdce7a19dc267ba3c816ef4ff14597",
   environment: "production",
   migrationSetDigest: "6642442a81cd98c7a132d241fa98e50ae231510896c9da67ab70d86b050d02db",
   sourceContractSha256: "099399a7d3f4b2392acdba6c54bf1ac6a919ff60691e69d31023d32161d99e71",
@@ -15,7 +16,9 @@ export const B01_PREREQUISITE = Object.freeze({
   cluster: "mscqr-prod-euw2-main",
   executorFamily: "mscqr-production-b01-prerequisite",
   executorContainer: "production-b01-prerequisite",
-  executorImage: "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:d2a6f641f44e27454a80d502914a9e168c61cdace1201f9d7af9d85a87ea208c",
+  executorImage: "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:5b7809608386fed5c54ff2e09b0edb221664607c7cc5fb93b66b617ca08c28cc",
+  predecessorSourceSha: "945692f49c6d262b0a54b9b8e4240ef4c21688eb",
+  predecessorServiceArn: "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2",
   predecessorTaskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:19",
   databaseIdentifier: "mscqr-production-rls-green-phase2",
   databaseName: "mscqr_production_rls_green_phase2",
@@ -49,6 +52,40 @@ export const buildB01ExecutorDefinition = (command) => ({
       "awslogs-stream-prefix": "b01-prerequisite" } } }],
 });
 
+export function assertB01LivePredecessor({ service, taskDefinition, repository, imageDetails } = {}) {
+  assert.equal(service?.serviceArn, B01_PREREQUISITE.predecessorServiceArn);
+  assert.equal(service?.serviceName, "mscqr-backend-servi-euw2");
+  assert.equal(service?.clusterArn, `arn:aws:ecs:${B01_PREREQUISITE.region}:${B01_PREREQUISITE.account}:cluster/${B01_PREREQUISITE.cluster}`);
+  assert.equal(service?.status, "ACTIVE"); assert.equal(service?.taskDefinition, B01_PREREQUISITE.predecessorTaskDefinitionArn);
+  assert.equal(service?.desiredCount, 2); assert.equal(service?.runningCount, 2); assert.equal(service?.pendingCount, 0);
+  assert.equal(service?.enableExecuteCommand, true); assert.equal(service?.propagateTags, "TASK_DEFINITION");
+  assert.deepEqual(service?.deploymentConfiguration?.deploymentCircuitBreaker, { enable: true, rollback: true });
+  assert.equal(service?.deploymentConfiguration?.alarms?.rollback, true); assert.equal(service?.deploymentConfiguration?.alarms?.enable, true);
+  assert.deepEqual([...(service?.deploymentConfiguration?.alarms?.alarmNames || [])].sort(), ["mscqr-production-backend-target-5xx", "mscqr-production-backend-unhealthy-hosts"].sort());
+  assert.equal(service?.deployments?.length, 1); const deployment = service.deployments[0];
+  assert.equal(deployment?.status, "PRIMARY"); assert.equal(deployment?.taskDefinition, service.taskDefinition);
+  assert.equal(deployment?.desiredCount, 2); assert.equal(deployment?.runningCount, 2); assert.equal(deployment?.pendingCount, 0);
+  assert.equal(deployment?.failedTasks, 0); assert.equal(deployment?.rolloutState, "COMPLETED");
+
+  assert.equal(taskDefinition?.taskDefinitionArn, B01_PREREQUISITE.predecessorTaskDefinitionArn);
+  assert.equal(taskDefinition?.family, "mscqr-production-rls-green-backend-candidate"); assert.equal(taskDefinition?.revision, 19);
+  assert.equal(taskDefinition?.status, "ACTIVE"); assert.equal(taskDefinition?.networkMode, "awsvpc");
+  assert.deepEqual(taskDefinition?.requiresCompatibilities, ["FARGATE"]); assert.equal(taskDefinition?.cpu, "2048"); assert.equal(taskDefinition?.memory, "4096");
+  assert.equal(taskDefinition?.executionRoleArn, "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution");
+  assert.equal(taskDefinition?.taskRoleArn, "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task");
+  assert.deepEqual(taskDefinition?.runtimePlatform, B01_PREREQUISITE.runtimePlatform);
+  assert.equal(taskDefinition?.containerDefinitions?.length, 1); const backend = taskDefinition.containerDefinitions[0];
+  assert.equal(backend?.name, "backend"); assert.equal(backend?.image, B01_PREREQUISITE.executorImage); assert.equal(backend?.essential, true);
+  assert.deepEqual(backend?.entryPoint || [], []); assert.deepEqual(backend?.command || [], []);
+  assert.equal(backend?.readonlyRootFilesystem, true); assert.equal(backend?.privileged, false);
+
+  assert.equal(repository?.repositoryArn, `arn:aws:ecr:${B01_PREREQUISITE.region}:${B01_PREREQUISITE.account}:repository/mscqr-backend`);
+  assert.equal(repository?.repositoryName, "mscqr-backend"); assert.equal(repository?.registryId, B01_PREREQUISITE.account); assert.equal(repository?.imageTagMutability, "IMMUTABLE");
+  assert.equal(imageDetails?.length, 1); assert.equal(imageDetails[0]?.imageDigest, B01_PREREQUISITE.executorImage.split("@")[1]);
+  assert.deepEqual((imageDetails[0]?.imageTags || []).filter((tag) => SHA.test(tag)), [B01_PREREQUISITE.predecessorSourceSha]);
+  return true;
+}
+
 const bridgeFiles = Object.freeze(new Map([
   [".github/workflows/production-deploy.yml", "BRIDGE_WORKFLOW_WIRING"],
   ["scripts/aws/apply-production-b01-prerequisite.mjs", "BRIDGE_DEPLOYMENT_TOOLING"],
@@ -74,22 +111,22 @@ export function classifyBridgeFiles(files) {
 
 export function attestBridgeDiff({ deploymentSourceSha, repositoryRoot = process.cwd(), git = (args) => execFileSync("git", args, { cwd: repositoryRoot, encoding: "utf8" }).trim() } = {}) {
   assert.match(deploymentSourceSha || "", SHA);
-  git(["merge-base", "--is-ancestor", B01_PREREQUISITE.rlsDeltaOriginSha, deploymentSourceSha]);
-  assert.equal(git(["rev-parse", `${deploymentSourceSha}^1`]), B01_PREREQUISITE.rlsDeltaOriginSha,
-    "Deployment source is not the immediate protected-main bridge successor.");
-  const names = git(["diff", "--name-only", `${B01_PREREQUISITE.rlsDeltaOriginSha}..${deploymentSourceSha}`]);
-  const classified = classifyBridgeFiles(names ? names.split("\n") : []);
-  assert.ok(classified.length > 0, "Bridge diff is empty.");
-  const patch = git(["diff", "--binary", "--full-index", `${B01_PREREQUISITE.rlsDeltaOriginSha}..${deploymentSourceSha}`, "--", ...classified.map(({ file }) => file)]);
-  assert.ok(patch.length > 0, "Bridge patch is empty.");
-  const hunkCounts = new Map(classified.map(({ file }) => [file, 0])); let current;
-  for (const line of patch.split("\n")) {
-    const header = /^diff --git a\/(.+) b\/(.+)$/.exec(line);
-    if (header) { assert.equal(header[1], header[2]); assert.ok(hunkCounts.has(header[1]), "Bridge patch contains an unclassified path."); current = header[1]; }
-    else if (line.startsWith("@@ ")) { assert.ok(current); hunkCounts.set(current, hunkCounts.get(current) + 1); }
-  }
-  const entries = Object.freeze(classified.map((entry) => { const hunkCount = hunkCounts.get(entry.file); assert.ok(hunkCount > 0, `Bridge file ${entry.file} has no classified hunk.`); return Object.freeze({ ...entry, hunkCount }); }));
-  const body = { schemaVersion: 1, rlsDeltaOriginSha: B01_PREREQUISITE.rlsDeltaOriginSha, deploymentSourceSha, entries, patchSha256: crypto.createHash("sha256").update(patch).digest("hex") };
+  const attestRange = (base, target) => {
+    git(["merge-base", "--is-ancestor", base, target]);
+    const names = git(["diff", "--name-only", `${base}..${target}`]);
+    const classified = classifyBridgeFiles(names ? names.split("\n") : []); assert.ok(classified.length > 0, "Bridge diff is empty.");
+    const patch = git(["diff", "--binary", "--full-index", `${base}..${target}`, "--", ...classified.map(({ file }) => file)]); assert.ok(patch.length > 0, "Bridge patch is empty.");
+    const hunkCounts = new Map(classified.map(({ file }) => [file, 0])); let current;
+    for (const line of patch.split("\n")) { const header = /^diff --git a\/(.+) b\/(.+)$/.exec(line);
+      if (header) { assert.equal(header[1], header[2]); assert.ok(hunkCounts.has(header[1]), "Bridge patch contains an unclassified path."); current = header[1]; }
+      else if (line.startsWith("@@ ")) { assert.ok(current); hunkCounts.set(current, hunkCounts.get(current) + 1); } }
+    const entries = Object.freeze(classified.map((entry) => { const hunkCount = hunkCounts.get(entry.file); assert.ok(hunkCount > 0, `Bridge file ${entry.file} has no classified hunk.`); return Object.freeze({ ...entry, hunkCount }); }));
+    return Object.freeze({ base, target, entries, patchSha256: crypto.createHash("sha256").update(patch).digest("hex") });
+  };
+  assert.equal(git(["rev-parse", `${B01_PREREQUISITE.bridgeOriginSha}^1`]), B01_PREREQUISITE.rlsDeltaOriginSha, "Reviewed bridge origin does not immediately follow the RLS delta origin.");
+  assert.equal(git(["rev-parse", `${deploymentSourceSha}^1`]), B01_PREREQUISITE.bridgeOriginSha, "Deployment source is not the immediate protected-main prerequisite-correction successor.");
+  const body = { schemaVersion: 2, rlsDeltaOriginSha: B01_PREREQUISITE.rlsDeltaOriginSha, bridgeOriginSha: B01_PREREQUISITE.bridgeOriginSha, deploymentSourceSha,
+    bridge: attestRange(B01_PREREQUISITE.rlsDeltaOriginSha, B01_PREREQUISITE.bridgeOriginSha), correction: attestRange(B01_PREREQUISITE.bridgeOriginSha, deploymentSourceSha) };
   return Object.freeze({ ...body, attestationSha256: canonicalSha256(body) });
 }
 
@@ -132,6 +169,7 @@ export function assertB01PrerequisiteReceipt(value, { deploymentSourceSha, bridg
   assert.match(value.taskArn || "", TASK); assert.match(value.taskDefinitionArn || "", TASK_DEFINITION);
   assert.deepEqual(value.bridgeDiffAttestation, bridgeDiffAttestation);
   assert.equal(value.bridgeDiffAttestation?.rlsDeltaOriginSha, B01_PREREQUISITE.rlsDeltaOriginSha);
+  assert.equal(value.bridgeDiffAttestation?.bridgeOriginSha, B01_PREREQUISITE.bridgeOriginSha);
   assert.equal(value.bridgeDiffAttestation?.deploymentSourceSha, deploymentSourceSha);
   assert.equal(value.bridgeDiffAttestation?.attestationSha256, canonicalSha256((({ attestationSha256: _, ...body }) => body)(value.bridgeDiffAttestation)));
   const executed = Date.parse(value.executedAt), expires = Date.parse(value.expiresAt);
