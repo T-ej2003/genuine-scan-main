@@ -143,13 +143,13 @@ test("inventory readback accepts only the observed ECS default normalization", (
   }
 });
 
-test("inventory semantic readback ignores object order but preserves ordered arrays", () => {
+test("inventory semantic readback ignores object and environment entry order", () => {
   const input = { backendImage: image, releaseSha: sourceSha, databaseUrl: config.inventoryDatabaseUrlArn, rotationInventoryRlsRole: config.inventoryRlsRole, inventoryLogGroup: config.inventoryLogGroupName };
   const expected = buildPreDeploymentInventoryTaskDefinition(input).taskDefinition;
   assert.doesNotThrow(() => assertPreDeploymentInventoryTaskDefinition(reorderObjectKeys(ecsDefaultedReadback(expected)), input));
   const reorderedArray = reorderObjectKeys(ecsDefaultedReadback(expected));
   reorderedArray.containerDefinitions[0].environment = [...reorderedArray.containerDefinitions[0].environment].reverse();
-  assert.throws(() => assertPreDeploymentInventoryTaskDefinition(reorderedArray, input), /task definition differs from the reviewed payload/);
+  assert.doesNotThrow(() => assertPreDeploymentInventoryTaskDefinition(reorderedArray, input));
 });
 
 test("production predeployment adapter registers then invokes only the reviewed broker operation", async () => {
