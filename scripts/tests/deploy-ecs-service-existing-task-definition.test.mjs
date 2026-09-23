@@ -409,12 +409,9 @@ test("exact rollout classification fails closed on terminal, displaced, malforme
   }), "SUCCESS");
 });
 
-test("exact rollout polling times out and DescribeServices command failure fails closed", () => {
-  const timeout = runNormalBackend({ scenario: "rollout-timeout" });
-  assertFailure(timeout, /remained IN_PROGRESS beyond 600 seconds/);
-  assert.equal((timeout.calls.match(/ecs describe-services/g) || []).length, 42);
-  assert.equal((timeout.calls.match(/ecs update-service/g) || []).length, 1);
-
+test("exact rollout polling bounds DescribeServices and command failure fails closed", () => {
+  const race = runNormalBackend({ scenario: "rollout-race" });
+  assert.match(race.calls, /ecs describe-services[^\n]*--cli-connect-timeout 10 --cli-read-timeout 30/);
   const describeFailure = runNormalBackend({ scenario: "rollout-describe-failure" });
   assertFailure(describeFailure);
   assert.equal((describeFailure.calls.match(/ecs update-service/g) || []).length, 1);

@@ -1067,25 +1067,9 @@ if [[ "$WAIT_FOR_STABLE" == "true" ]]; then
     --region "$AWS_REGION" \
     --cluster "$CLUSTER_NAME" \
     --services "$SERVICE_NAME"
-  readonly ROLLOUT_POLL_INTERVAL_SECONDS=15
-  readonly MAX_ROLLOUT_WAIT_SECONDS=600
-  rollout_waited_seconds=0
-  while true; do
-    aws ecs describe-services \
-      --region "$AWS_REGION" \
-      --cluster "$CLUSTER_NAME" \
-      --services "$SERVICE_NAME" \
-      >"$EXISTING_POST_SERVICE_FILE"
-    rollout_result="$(node "$SCRIPT_DIR/exact-ecs-rollout-state.mjs" "$EXISTING_POST_SERVICE_FILE" "$NEW_TASK_DEFINITION_ARN" "$CLUSTER_NAME" "$SERVICE_NAME" "$EXPECTED_DESIRED_COUNT")"
-    [[ "$rollout_result" == "SUCCESS" ]] && break
-    [[ "$rollout_result" == "CONTINUE" ]] || { echo "Unexpected exact ECS rollout result: $rollout_result" >&2; exit 1; }
-    if ((rollout_waited_seconds >= MAX_ROLLOUT_WAIT_SECONDS)); then
-      echo "Exact ECS rollout remained IN_PROGRESS beyond ${MAX_ROLLOUT_WAIT_SECONDS} seconds." >&2
-      exit 1
-    fi
-    sleep "$ROLLOUT_POLL_INTERVAL_SECONDS"
-    rollout_waited_seconds=$((rollout_waited_seconds + ROLLOUT_POLL_INTERVAL_SECONDS))
-  done
+  node "$SCRIPT_DIR/exact-ecs-rollout-state.mjs" \
+    --poll "$EXISTING_POST_SERVICE_FILE" "$AWS_REGION" "$CLUSTER_NAME" "$SERVICE_NAME" \
+    "$NEW_TASK_DEFINITION_ARN" "$EXPECTED_DESIRED_COUNT"
 fi
 
 if [[ "$ENABLE_EXECUTE_COMMAND" == "true" ]]; then

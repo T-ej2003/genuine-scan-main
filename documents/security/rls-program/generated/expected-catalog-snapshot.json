@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "deploymentModel": "clean-room-blue-green",
-  "sourceContractSha256": "0ff2c8da0d84a36c936cd430ae76a6e50a709c5e78748a528f2880cf50c949c0",
+  "sourceContractSha256": "f7b51f8b305de6b38509708210a2c56cde63fdb9d715b7a2ed66cd52ee77c306",
   "migrationSetDigest": "6642442a81cd98c7a132d241fa98e50ae231510896c9da67ab70d86b050d02db",
   "sourceContractInputs": [
     {
@@ -202,11 +202,11 @@
     },
     {
       "path": "scripts/aws/deploy-ecs-service.sh",
-      "sha256": "e95351daf20f3796d84bfe2b639aeba0083bf5d897db2b16ad20b6971f346964"
+      "sha256": "047d7c5fd5217ff50fbb3ba256677e7522bab649ea06868affaa811e66ce3b00"
     },
     {
       "path": "scripts/aws/exact-ecs-rollout-state.mjs",
-      "sha256": "b57eac8a61014cc58e3ecb7ce2a6d4b8795f0a034d948678be6665f1d76c5a78"
+      "sha256": "9024048788f7a32e5d90f514c82db3e8913466778b3931417c950f2f6b0551e4"
     },
     {
       "path": "scripts/aws/publish-ecs-images.sh",
@@ -11487,55 +11487,55 @@
       "key": "owner",
       "name": "mscqr_rls_cert_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:0ff2c8da0d84a36c936cd430ae76a6e50a709c5e78748a528f2880cf50c949c0"
+      "marker": "mscqr-full-rls-clean-room:certification:f7b51f8b305de6b38509708210a2c56cde63fdb9d715b7a2ed66cd52ee77c306"
     },
     {
       "key": "authOwner",
       "name": "mscqr_rls_cert_auth_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:0ff2c8da0d84a36c936cd430ae76a6e50a709c5e78748a528f2880cf50c949c0"
+      "marker": "mscqr-full-rls-clean-room:certification:f7b51f8b305de6b38509708210a2c56cde63fdb9d715b7a2ed66cd52ee77c306"
     },
     {
       "key": "app",
       "name": "mscqr_rls_cert_app",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:0ff2c8da0d84a36c936cd430ae76a6e50a709c5e78748a528f2880cf50c949c0"
+      "marker": "mscqr-full-rls-clean-room:certification:f7b51f8b305de6b38509708210a2c56cde63fdb9d715b7a2ed66cd52ee77c306"
     },
     {
       "key": "read",
       "name": "mscqr_rls_cert_read",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:0ff2c8da0d84a36c936cd430ae76a6e50a709c5e78748a528f2880cf50c949c0"
+      "marker": "mscqr-full-rls-clean-room:certification:f7b51f8b305de6b38509708210a2c56cde63fdb9d715b7a2ed66cd52ee77c306"
     },
     {
       "key": "preauth",
       "name": "mscqr_rls_cert_preauth",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:0ff2c8da0d84a36c936cd430ae76a6e50a709c5e78748a528f2880cf50c949c0"
+      "marker": "mscqr-full-rls-clean-room:certification:f7b51f8b305de6b38509708210a2c56cde63fdb9d715b7a2ed66cd52ee77c306"
     },
     {
       "key": "worker",
       "name": "mscqr_rls_cert_worker",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:0ff2c8da0d84a36c936cd430ae76a6e50a709c5e78748a528f2880cf50c949c0"
+      "marker": "mscqr-full-rls-clean-room:certification:f7b51f8b305de6b38509708210a2c56cde63fdb9d715b7a2ed66cd52ee77c306"
     },
     {
       "key": "scheduled",
       "name": "mscqr_rls_cert_scheduled",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:0ff2c8da0d84a36c936cd430ae76a6e50a709c5e78748a528f2880cf50c949c0"
+      "marker": "mscqr-full-rls-clean-room:certification:f7b51f8b305de6b38509708210a2c56cde63fdb9d715b7a2ed66cd52ee77c306"
     },
     {
       "key": "operator",
       "name": "mscqr_rls_cert_operator",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:0ff2c8da0d84a36c936cd430ae76a6e50a709c5e78748a528f2880cf50c949c0"
+      "marker": "mscqr-full-rls-clean-room:certification:f7b51f8b305de6b38509708210a2c56cde63fdb9d715b7a2ed66cd52ee77c306"
     },
     {
       "key": "migration",
       "name": "mscqr_rls_cert_migration",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:0ff2c8da0d84a36c936cd430ae76a6e50a709c5e78748a528f2880cf50c949c0"
+      "marker": "mscqr-full-rls-clean-room:certification:f7b51f8b305de6b38509708210a2c56cde63fdb9d715b7a2ed66cd52ee77c306"
     }
   ]
 }
