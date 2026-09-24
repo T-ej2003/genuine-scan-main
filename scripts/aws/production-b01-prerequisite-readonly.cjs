@@ -56,11 +56,18 @@ async function readOnlyMain(argv = process.argv.slice(2)) {
       contractSha256: input.contractSha256, ...result };
     process.stdout.write(`${JSON.stringify({ ...body, evidenceSha256: hash(body) })}\n`);
   } catch (error) {
-    const body = { schemaVersion: 1, kind: "PRODUCTION_B01_READONLY_RESULT", mode: "READ_ONLY", classification: "UNKNOWN",
-      stage, code: error?.name === "AssertionError" ? "CONTRACT_REJECTED" : "UNEXPECTED_FAILURE" };
+    const body = safeB01ReadOnlyFailure(stage, error, B01_CLASSIFICATION_INVARIANTS);
     process.stdout.write(`${JSON.stringify({ ...body, evidenceSha256: hash(body) })}\n`); process.exitCode = 2;
   } finally { if (client) try { await client.$disconnect(); } catch {} }
 }
 
-module.exports = { executeB01ReadOnlyTransaction };
+function safeB01ReadOnlyFailure(stage, error, allowedInvariants) {
+  const taggedInvariant = Object.getOwnPropertyDescriptor(error || {}, "b01ClassificationInvariant")?.value;
+  const invariant = stage === "PREDECESSOR_CLASSIFICATION" && error?.name === "AssertionError"
+    && allowedInvariants.includes(taggedInvariant) ? taggedInvariant : undefined;
+  return { schemaVersion: 1, kind: "PRODUCTION_B01_READONLY_RESULT", mode: "READ_ONLY", classification: "UNKNOWN",
+    stage, code: error?.name === "AssertionError" ? "CONTRACT_REJECTED" : "UNEXPECTED_FAILURE", ...(invariant ? { classificationInvariant: invariant } : {}) };
+}
+
+module.exports = { executeB01ReadOnlyTransaction, safeB01ReadOnlyFailure };
 if (module.id === "[eval]") readOnlyMain(process.argv.slice(1));

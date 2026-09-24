@@ -8,7 +8,7 @@ import { B01_PREREQUISITE, assertB01ExecutorAwsEvidence, assertB01ExpiredMutatio
   assertB01RunTaskRequestEvidence, assertSemanticallyEmptyB01TaskOverrides, attestBridgeDiff, buildB01ExecutorDefinition, buildB01PrerequisiteReceipt,
   buildB01ReadOnlyDefinition, buildB01RunTaskRequest, canonicalSha256, classifyBridgeFiles, assertB01EcsEventCapture,
   authenticateB01TerminalTaskEvents, collectB01TerminalTaskEvents } from "../aws/production-b01-prerequisite-contract.mjs";
-import { authenticateB01RunTaskCloudTrail, b01CatalogueRuntimeSource, buildB01ExecutorInput, buildB01ReadOnlyInput,
+import { B01_CLASSIFICATION_INVARIANTS, authenticateB01RunTaskCloudTrail, b01CatalogueRuntimeSource, buildB01ExecutorInput, buildB01ReadOnlyInput,
   canonicalB01Prerequisite, executeB01Transaction } from "../aws/apply-production-b01-prerequisite.mjs";
 import { authenticateB01AmbiguousMutationTask, authenticateB01ExpiredMutationTask, authenticateB01MissingTask,
   authenticateB01MutationLaunchHistory, authenticateB01MutationTaskListing, authenticateB01ReadOnlyResult, collectB01RecoveryPostflight,
@@ -18,13 +18,14 @@ const require = createRequire(import.meta.url), runtime = require("../aws/produc
 const readOnlyRuntime = require("../aws/production-b01-prerequisite-readonly.cjs");
 const deploymentSourceSha = "1".repeat(40), now = new Date("2026-09-23T12:00:00.000Z");
 const bridgeEntry = { file: "scripts/aws/production-b01-prerequisite-contract.mjs", classification: "BRIDGE_DEPLOYMENT_TOOLING", hunkCount: 1 };
-const bridgeDiffAttestation = { schemaVersion: 4, rlsDeltaOriginSha: B01_PREREQUISITE.rlsDeltaOriginSha, bridgeOriginSha: B01_PREREQUISITE.bridgeOriginSha, deploymentSourceSha,
+const bridgeDiffAttestation = { schemaVersion: 5, rlsDeltaOriginSha: B01_PREREQUISITE.rlsDeltaOriginSha, bridgeOriginSha: B01_PREREQUISITE.bridgeOriginSha, deploymentSourceSha,
   bridge: { base: B01_PREREQUISITE.rlsDeltaOriginSha, target: B01_PREREQUISITE.bridgeOriginSha, entries: [bridgeEntry], patchSha256: "2".repeat(64) },
   predecessorCorrection: { base: B01_PREREQUISITE.bridgeOriginSha, target: B01_PREREQUISITE.correctionBaseSha, entries: [bridgeEntry], patchSha256: "3".repeat(64) },
   runtimeEvidence: { base: B01_PREREQUISITE.correctionBaseSha, target: B01_PREREQUISITE.recoveryBaseSha, entries: [bridgeEntry], patchSha256: "4".repeat(64) },
   expiredTaskRecovery: { base: B01_PREREQUISITE.recoveryBaseSha, target: B01_PREREQUISITE.expiredTaskRecoverySha, entries: [bridgeEntry], patchSha256: "5".repeat(64) },
   terminalEventRecovery: { base: B01_PREREQUISITE.expiredTaskRecoverySha, target: B01_PREREQUISITE.terminalEventRecoverySha, entries: [bridgeEntry], patchSha256: "6".repeat(64) },
-  provenanceCorrection: { base: B01_PREREQUISITE.terminalEventRecoverySha, target: deploymentSourceSha, entries: [bridgeEntry], patchSha256: "7".repeat(64) } };
+  provenanceCorrection: { base: B01_PREREQUISITE.terminalEventRecoverySha, target: B01_PREREQUISITE.provenanceBaseSha, entries: [bridgeEntry], patchSha256: "7".repeat(64) },
+  classificationTelemetry: { base: B01_PREREQUISITE.provenanceBaseSha, target: deploymentSourceSha, entries: [bridgeEntry], patchSha256: "8".repeat(64) } };
 bridgeDiffAttestation.attestationSha256 = canonicalSha256(bridgeDiffAttestation);
 const executor = fs.readFileSync("scripts/aws/production-b01-prerequisite-executor.cjs", "utf8"), executorSourceSha256 = crypto.createHash("sha256").update(executor).digest("hex");
 const taskArn = "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/" + "a".repeat(32);
@@ -52,21 +53,24 @@ test("bridge diff accepts only the reviewed bridge inventory and binds exact pat
       : args[1] === `${B01_PREREQUISITE.correctionBaseSha}^1` ? B01_PREREQUISITE.bridgeOriginSha
         : args[1] === `${B01_PREREQUISITE.recoveryBaseSha}^1` ? B01_PREREQUISITE.correctionBaseSha
           : args[1] === `${B01_PREREQUISITE.expiredTaskRecoverySha}^1` ? B01_PREREQUISITE.recoveryBaseSha
-            : args[1] === `${B01_PREREQUISITE.terminalEventRecoverySha}^1` ? B01_PREREQUISITE.expiredTaskRecoverySha : B01_PREREQUISITE.terminalEventRecoverySha;
+            : args[1] === `${B01_PREREQUISITE.terminalEventRecoverySha}^1` ? B01_PREREQUISITE.expiredTaskRecoverySha
+              : args[1] === `${B01_PREREQUISITE.provenanceBaseSha}^1` ? B01_PREREQUISITE.terminalEventRecoverySha : B01_PREREQUISITE.provenanceBaseSha;
     if (args.includes("--name-only")) return files.join("\n"); return patch; } });
   assert.equal(attestation.rlsDeltaOriginSha, B01_PREREQUISITE.rlsDeltaOriginSha); assert.equal(attestation.deploymentSourceSha, deploymentSourceSha);
   assert.equal(attestation.bridgeOriginSha, B01_PREREQUISITE.bridgeOriginSha); assert.equal(attestation.bridge.entries.length, 3);
   assert.equal(attestation.predecessorCorrection.entries.length, 3); assert.equal(attestation.runtimeEvidence.entries.length, 3); assert.equal(attestation.expiredTaskRecovery.entries.length, 3);
-  assert.equal(attestation.terminalEventRecovery.entries.length, 3); assert.equal(attestation.provenanceCorrection.entries.length, 3);
+  assert.equal(attestation.terminalEventRecovery.entries.length, 3); assert.equal(attestation.provenanceCorrection.entries.length, 3); assert.equal(attestation.classificationTelemetry.entries.length, 3);
   assert.ok([...attestation.bridge.entries, ...attestation.predecessorCorrection.entries, ...attestation.runtimeEvidence.entries,
-    ...attestation.expiredTaskRecovery.entries, ...attestation.terminalEventRecovery.entries, ...attestation.provenanceCorrection.entries].every(({ hunkCount }) => hunkCount === 1));
+    ...attestation.expiredTaskRecovery.entries, ...attestation.terminalEventRecovery.entries, ...attestation.provenanceCorrection.entries,
+    ...attestation.classificationTelemetry.entries].every(({ hunkCount }) => hunkCount === 1));
   assert.match(attestation.bridge.patchSha256, /^[a-f0-9]{64}$/); assert.match(attestation.predecessorCorrection.patchSha256, /^[a-f0-9]{64}$/);
   assert.match(attestation.runtimeEvidence.patchSha256, /^[a-f0-9]{64}$/); assert.match(attestation.expiredTaskRecovery.patchSha256, /^[a-f0-9]{64}$/);
   assert.match(attestation.terminalEventRecovery.patchSha256, /^[a-f0-9]{64}$/); assert.match(attestation.provenanceCorrection.patchSha256, /^[a-f0-9]{64}$/);
+  assert.match(attestation.classificationTelemetry.patchSha256, /^[a-f0-9]{64}$/);
   assert.deepEqual(calls.filter(([name]) => name === "merge-base").map((args) => args.slice(2)), [[B01_PREREQUISITE.rlsDeltaOriginSha, B01_PREREQUISITE.bridgeOriginSha],
     [B01_PREREQUISITE.bridgeOriginSha, B01_PREREQUISITE.correctionBaseSha], [B01_PREREQUISITE.correctionBaseSha, B01_PREREQUISITE.recoveryBaseSha],
     [B01_PREREQUISITE.recoveryBaseSha, B01_PREREQUISITE.expiredTaskRecoverySha], [B01_PREREQUISITE.expiredTaskRecoverySha, B01_PREREQUISITE.terminalEventRecoverySha],
-    [B01_PREREQUISITE.terminalEventRecoverySha, deploymentSourceSha]]);
+    [B01_PREREQUISITE.terminalEventRecoverySha, B01_PREREQUISITE.provenanceBaseSha], [B01_PREREQUISITE.provenanceBaseSha, deploymentSourceSha]]);
 });
 
 test("bridge attestation accepts only the complete reviewed recovery lineage and its immediate correction successor", () => {
@@ -77,8 +81,9 @@ test("bridge attestation accepts only the complete reviewed recovery lineage and
       : args[1] === `${B01_PREREQUISITE.correctionBaseSha}^1` ? B01_PREREQUISITE.bridgeOriginSha
         : args[1] === `${B01_PREREQUISITE.recoveryBaseSha}^1` ? B01_PREREQUISITE.correctionBaseSha
           : args[1] === `${B01_PREREQUISITE.expiredTaskRecoverySha}^1` ? B01_PREREQUISITE.recoveryBaseSha
-            : args[1] === `${B01_PREREQUISITE.terminalEventRecoverySha}^1` ? B01_PREREQUISITE.expiredTaskRecoverySha : "f".repeat(40) : "" }),
-  /immediate protected-main provenance-correction successor/);
+            : args[1] === `${B01_PREREQUISITE.terminalEventRecoverySha}^1` ? B01_PREREQUISITE.expiredTaskRecoverySha
+              : args[1] === `${B01_PREREQUISITE.provenanceBaseSha}^1` ? B01_PREREQUISITE.terminalEventRecoverySha : "f".repeat(40) : "" }),
+  /immediate protected-main classification-telemetry successor/);
 });
 
 test("reviewed #571 and #572 merge lineage is immutable and every substitution fails closed", () => {
@@ -88,25 +93,28 @@ test("reviewed #571 and #572 merge lineage is immutable and every substitution f
     [`${B01_PREREQUISITE.recoveryBaseSha}^1`, B01_PREREQUISITE.correctionBaseSha],
     [`${B01_PREREQUISITE.expiredTaskRecoverySha}^1`, B01_PREREQUISITE.recoveryBaseSha],
     [`${B01_PREREQUISITE.terminalEventRecoverySha}^1`, B01_PREREQUISITE.expiredTaskRecoverySha],
-    [`${deploymentSourceSha}^1`, B01_PREREQUISITE.terminalEventRecoverySha],
+    [`${B01_PREREQUISITE.provenanceBaseSha}^1`, B01_PREREQUISITE.terminalEventRecoverySha],
+    [`${deploymentSourceSha}^1`, B01_PREREQUISITE.provenanceBaseSha],
   ]);
   const files = "scripts/aws/production-b01-prerequisite-contract.mjs";
   const patch = `diff --git a/${files} b/${files}\n@@ -1 +1 @@\n-old\n+new`;
   const git = (changes = new Map()) => (args) => args[0] === "merge-base" ? "" : args[0] === "rev-parse" ? changes.get(args[1]) || parents.get(args[1])
     : args.includes("--name-only") ? files : patch;
   for (const [ref, expected] of [[`${B01_PREREQUISITE.expiredTaskRecoverySha}^1`, B01_PREREQUISITE.recoveryBaseSha],
-    [`${B01_PREREQUISITE.terminalEventRecoverySha}^1`, B01_PREREQUISITE.expiredTaskRecoverySha]]) {
+    [`${B01_PREREQUISITE.terminalEventRecoverySha}^1`, B01_PREREQUISITE.expiredTaskRecoverySha],
+    [`${B01_PREREQUISITE.provenanceBaseSha}^1`, B01_PREREQUISITE.terminalEventRecoverySha]]) {
     assert.equal(spawnSync("git", ["rev-parse", ref], { encoding: "utf8" }).stdout.trim(), expected);
   }
   assert.equal(attestBridgeDiff({ deploymentSourceSha, git: git() }).terminalEventRecovery.target, B01_PREREQUISITE.terminalEventRecoverySha);
   for (const [ref, message] of [[`${B01_PREREQUISITE.expiredTaskRecoverySha}^1`, /expired-task recovery/],
-    [`${B01_PREREQUISITE.terminalEventRecoverySha}^1`, /terminal-event recovery/], [`${deploymentSourceSha}^1`, /provenance-correction successor/]]) {
+    [`${B01_PREREQUISITE.terminalEventRecoverySha}^1`, /terminal-event recovery/], [`${B01_PREREQUISITE.provenanceBaseSha}^1`, /provenance correction/],
+    [`${deploymentSourceSha}^1`, /classification-telemetry successor/]]) {
     assert.throws(() => attestBridgeDiff({ deploymentSourceSha, git: git(new Map([[ref, "f".repeat(40)]])) }), message);
   }
-  const alteredRecoveryFile = "scripts/aws/probe-production-b01-prerequisite.mjs";
+  const alteredRecoveryFile = ".github/workflows/production-deploy.yml";
   assert.throws(() => attestBridgeDiff({ deploymentSourceSha, git: (args) => {
     if (args[0] === "merge-base") return ""; if (args[0] === "rev-parse") return parents.get(args[1]);
-    const finalRange = args.includes(`${B01_PREREQUISITE.terminalEventRecoverySha}..${deploymentSourceSha}`);
+    const finalRange = args.includes(`${B01_PREREQUISITE.provenanceBaseSha}..${deploymentSourceSha}`);
     if (args.includes("--name-only")) return finalRange ? alteredRecoveryFile : files;
     const file = finalRange ? alteredRecoveryFile : files; return `diff --git a/${file} b/${file}\n@@ -1 +1 @@\n-old\n+new`;
   } }), /outside its reviewed scope/);
@@ -225,6 +233,38 @@ test("structured executor telemetry exposes only allowlisted stages and sanitize
   assert.equal(executed.status, 1); const emitted = JSON.parse(executed.stderr);
   assert.deepEqual(emitted, { status: "PRODUCTION_B01_PREREQUISITE_FAILED", stage: "INPUT_AUTHENTICATION", code: "CONTRACT_REJECTED" });
   assert.doesNotMatch(executed.stderr, /admin:secret|private-db|user-data/); assert.equal(executed.stdout, "");
+});
+
+test("read-only classification rejection telemetry exposes only closed invariant identifiers", () => {
+  assert.deepEqual(B01_CLASSIFICATION_INVARIANTS, ["B01_EXECUTION_IDENTITY","B01_AUDIT_OUTBOX_RLS_ENABLED","B01_AUDIT_OUTBOX_FORCE_RLS_ENABLED",
+    "B01_AUDIT_OUTBOX_TABLE_OWNER","B01_AUTH_SCHEMA_OWNER","B01_AUTH_OWNER_SET_CAPABILITY","B01_SCHEMA_OWNER_SET_CAPABILITY"]);
+  const delta = canonicalB01Prerequisite(), contract = buildB01ReadOnlyInput({ deploymentSourceSha, databaseHostname: "db.synthetic.invalid", ambiguousMutationTaskEvidenceSha256 }).contract;
+  const secret = ["postgresql", "://", "secret-user", ":", "secret-password", "@", "private-db.invalid/secret"].join("");
+  const cases = [
+    ["B01_EXECUTION_IDENTITY", (state) => { state.identity.database = secret; }],
+    ["B01_AUDIT_OUTBOX_RLS_ENABLED", (state) => { state.catalogue.rls = false; }],
+    ["B01_AUDIT_OUTBOX_FORCE_RLS_ENABLED", (state) => { state.catalogue.forced = false; }],
+    ["B01_AUDIT_OUTBOX_TABLE_OWNER", (state) => { state.catalogue.table_owner = secret; }],
+    ["B01_AUTH_SCHEMA_OWNER", (state) => { state.catalogue.schema_owner = secret; }],
+    ["B01_AUTH_OWNER_SET_CAPABILITY", (state) => { state.catalogue.owner_set = false; }],
+    ["B01_SCHEMA_OWNER_SET_CAPABILITY", (state) => { state.catalogue.schema_owner_set = false; }],
+  ];
+  for (const [identifier, mutate] of cases) {
+    const state = structuredClone(stateFixture(delta.predecessor, { identity: { ...identity, read_only: "on" } })); mutate(state);
+    let rejection; try { runtime.inspectB01State(state, contract, "on"); } catch (error) { rejection = error; }
+    assert.ok(rejection); const body = readOnlyRuntime.safeB01ReadOnlyFailure("PREDECESSOR_CLASSIFICATION", rejection, B01_CLASSIFICATION_INVARIANTS);
+    assert.equal(body.classificationInvariant, identifier); assert.doesNotMatch(JSON.stringify(body), /secret|private-db|postgresql|SELECT|POLICY/i);
+    assert.equal(authenticateB01ReadOnlyResult(JSON.stringify({ ...body, evidenceSha256: canonicalSha256(body) }), contract).classificationInvariant, identifier);
+    assert.deepEqual(runtime.safeFailure("PREDECESSOR_CLASSIFICATION", rejection),
+      { status: "PRODUCTION_B01_PREREQUISITE_FAILED", stage: "PREDECESSOR_CLASSIFICATION", code: "CONTRACT_REJECTED" });
+  }
+  const malicious = Object.assign(new assert.AssertionError({ message: secret }), { b01ClassificationInvariant: secret });
+  const generic = readOnlyRuntime.safeB01ReadOnlyFailure("PREDECESSOR_CLASSIFICATION", malicious, B01_CLASSIFICATION_INVARIANTS);
+  assert.deepEqual(generic, { schemaVersion: 1, kind: "PRODUCTION_B01_READONLY_RESULT", mode: "READ_ONLY", classification: "UNKNOWN",
+    stage: "PREDECESSOR_CLASSIFICATION", code: "CONTRACT_REJECTED" });
+  assert.doesNotMatch(JSON.stringify(generic), /secret|private-db|postgresql/i);
+  const forged = { ...generic, classificationInvariant: "B01_DYNAMIC_DATABASE_VALUE" };
+  assert.throws(() => authenticateB01ReadOnlyResult(JSON.stringify({ ...forged, evidenceSha256: canonicalSha256(forged) }), contract));
 });
 
 test("receipt RLS identities must match the reconstructed source-fixed executor contract", () => {

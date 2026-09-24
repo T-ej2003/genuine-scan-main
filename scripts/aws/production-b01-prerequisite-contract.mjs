@@ -13,6 +13,7 @@ export const B01_PREREQUISITE = Object.freeze({
   recoveryBaseSha: "a2bed229ddfb893d4dcc53232ea5466d23d4e80a",
   expiredTaskRecoverySha: "61b1eeceb5462e70830737fd5e697c2c55d321ab",
   terminalEventRecoverySha: "d00a8783be458719597b8b7124ff70ac76119e4f",
+  provenanceBaseSha: "374feb5f8853d06f88af99ab632c03928e579495",
   environment: "production",
   migrationSetDigest: "6642442a81cd98c7a132d241fa98e50ae231510896c9da67ab70d86b050d02db",
   sourceContractSha256: "099399a7d3f4b2392acdba6c54bf1ac6a919ff60691e69d31023d32161d99e71",
@@ -278,6 +279,15 @@ const provenanceCorrectionFiles = new Set([
   "scripts/tests/production-b01-prerequisite.test.mjs",
   "documents/security/rls-program/production-b01-prerequisite-bridge.md",
 ]);
+const classificationTelemetryFiles = new Set([
+  "scripts/aws/apply-production-b01-prerequisite.mjs",
+  "scripts/aws/probe-production-b01-prerequisite.mjs",
+  "scripts/aws/production-b01-prerequisite-contract.mjs",
+  "scripts/aws/production-b01-prerequisite-executor.cjs",
+  "scripts/aws/production-b01-prerequisite-readonly.cjs",
+  "scripts/tests/production-b01-prerequisite.test.mjs",
+  "documents/security/rls-program/production-b01-prerequisite-bridge.md",
+]);
 
 export function classifyBridgeFiles(files) {
   assert.ok(Array.isArray(files));
@@ -296,7 +306,7 @@ export function attestBridgeDiff({ deploymentSourceSha, repositoryRoot = process
     git(["merge-base", "--is-ancestor", base, target]);
     const names = git(["diff", "--name-only", `${base}..${target}`]);
     const classified = classifyBridgeFiles(names ? names.split("\n") : []); assert.ok(classified.length > 0, "Bridge diff is empty.");
-    if (allowedFiles) assert.ok(classified.every(({ file }) => allowedFiles.has(file)), "Provenance correction contains a change outside its reviewed scope.");
+    if (allowedFiles) assert.ok(classified.every(({ file }) => allowedFiles.has(file)), "Attested correction contains a change outside its reviewed scope.");
     const patch = git(["diff", "--binary", "--full-index", `${base}..${target}`, "--", ...classified.map(({ file }) => file)]); assert.ok(patch.length > 0, "Bridge patch is empty.");
     const hunkCounts = new Map(classified.map(({ file }) => [file, 0])); let current;
     for (const line of patch.split("\n")) { const header = /^diff --git a\/(.+) b\/(.+)$/.exec(line);
@@ -310,13 +320,15 @@ export function attestBridgeDiff({ deploymentSourceSha, repositoryRoot = process
   assert.equal(git(["rev-parse", `${B01_PREREQUISITE.recoveryBaseSha}^1`]), B01_PREREQUISITE.correctionBaseSha, "Reviewed recovery base does not immediately follow the predecessor correction.");
   assert.equal(git(["rev-parse", `${B01_PREREQUISITE.expiredTaskRecoverySha}^1`]), B01_PREREQUISITE.recoveryBaseSha, "Reviewed expired-task recovery does not immediately follow the recovery base.");
   assert.equal(git(["rev-parse", `${B01_PREREQUISITE.terminalEventRecoverySha}^1`]), B01_PREREQUISITE.expiredTaskRecoverySha, "Reviewed terminal-event recovery does not immediately follow the expired-task recovery.");
-  assert.equal(git(["rev-parse", `${deploymentSourceSha}^1`]), B01_PREREQUISITE.terminalEventRecoverySha, "Deployment source is not the immediate protected-main provenance-correction successor.");
-  const body = { schemaVersion: 4, rlsDeltaOriginSha: B01_PREREQUISITE.rlsDeltaOriginSha, bridgeOriginSha: B01_PREREQUISITE.bridgeOriginSha, deploymentSourceSha,
+  assert.equal(git(["rev-parse", `${B01_PREREQUISITE.provenanceBaseSha}^1`]), B01_PREREQUISITE.terminalEventRecoverySha, "Reviewed provenance correction does not immediately follow the terminal-event recovery.");
+  assert.equal(git(["rev-parse", `${deploymentSourceSha}^1`]), B01_PREREQUISITE.provenanceBaseSha, "Deployment source is not the immediate protected-main classification-telemetry successor.");
+  const body = { schemaVersion: 5, rlsDeltaOriginSha: B01_PREREQUISITE.rlsDeltaOriginSha, bridgeOriginSha: B01_PREREQUISITE.bridgeOriginSha, deploymentSourceSha,
     bridge: attestRange(B01_PREREQUISITE.rlsDeltaOriginSha, B01_PREREQUISITE.bridgeOriginSha), predecessorCorrection: attestRange(B01_PREREQUISITE.bridgeOriginSha, B01_PREREQUISITE.correctionBaseSha),
     runtimeEvidence: attestRange(B01_PREREQUISITE.correctionBaseSha, B01_PREREQUISITE.recoveryBaseSha),
     expiredTaskRecovery: attestRange(B01_PREREQUISITE.recoveryBaseSha, B01_PREREQUISITE.expiredTaskRecoverySha),
     terminalEventRecovery: attestRange(B01_PREREQUISITE.expiredTaskRecoverySha, B01_PREREQUISITE.terminalEventRecoverySha),
-    provenanceCorrection: attestRange(B01_PREREQUISITE.terminalEventRecoverySha, deploymentSourceSha, provenanceCorrectionFiles) };
+    provenanceCorrection: attestRange(B01_PREREQUISITE.terminalEventRecoverySha, B01_PREREQUISITE.provenanceBaseSha, provenanceCorrectionFiles),
+    classificationTelemetry: attestRange(B01_PREREQUISITE.provenanceBaseSha, deploymentSourceSha, classificationTelemetryFiles) };
   return Object.freeze({ ...body, attestationSha256: canonicalSha256(body) });
 }
 

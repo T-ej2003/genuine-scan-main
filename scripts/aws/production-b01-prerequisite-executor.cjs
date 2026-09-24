@@ -23,6 +23,8 @@ const SCHEMA_OWNER = ["mscqr", "prd", "rls", "phase2", "owner"].join("_");
 const PREAUTH = ["mscqr", "prd", "rls", "phase2", "preauth"].join("_");
 const DATABASE = ["mscqr", "production", "rls", "green", "phase2"].join("_");
 const B01_MUTATION_ADVISORY_LOCK_SQL = "SELECT pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('mscqr-production-b01-prerequisite',0))";
+const B01_CLASSIFICATION_INVARIANTS = Object.freeze(["B01_EXECUTION_IDENTITY","B01_AUDIT_OUTBOX_RLS_ENABLED","B01_AUDIT_OUTBOX_FORCE_RLS_ENABLED",
+  "B01_AUDIT_OUTBOX_TABLE_OWNER","B01_AUTH_SCHEMA_OWNER","B01_AUTH_OWNER_SET_CAPABILITY","B01_SCHEMA_OWNER_SET_CAPABILITY"]);
 const canonicalJson = (value) => Array.isArray(value) ? `[${value.map(canonicalJson).join(",")}]`
   : value && typeof value === "object" ? `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}` : JSON.stringify(value);
 const hash = (value) => crypto.createHash("sha256").update(typeof value === "string" || Buffer.isBuffer(value) ? value : canonicalJson(value)).digest("hex");
@@ -80,15 +82,27 @@ async function collectB01State(tx) {
 }
 
 function authenticateIdentity(identity, readOnly = "off") {
-  assert.deepEqual(identity, { role: ADMIN, session_role: ADMIN, database: DATABASE, read_only: readOnly, server_major: 18, rolcanlogin: true,
-    rolsuper: false, rolinherit: false, rolcreaterole: true, rolcreatedb: true, rolreplication: false, rolbypassrls: false });
+  assertB01ClassificationInvariant("B01_EXECUTION_IDENTITY", () => assert.deepEqual(identity,
+    { role: ADMIN, session_role: ADMIN, database: DATABASE, read_only: readOnly, server_major: 18, rolcanlogin: true,
+      rolsuper: false, rolinherit: false, rolcreaterole: true, rolcreatedb: true, rolreplication: false, rolbypassrls: false }));
+}
+
+function assertB01ClassificationInvariant(identifier, check) {
+  assert.ok(B01_CLASSIFICATION_INVARIANTS.includes(identifier));
+  try { check(); } catch (error) {
+    if (error?.name === "AssertionError") Object.defineProperty(error, "b01ClassificationInvariant", { value: identifier });
+    throw error;
+  }
 }
 
 function inspectB01State(state, contract, readOnly = "off") {
   authenticateIdentity(state.identity, readOnly);
-  assert.equal(state.catalogue?.rls, true); assert.equal(state.catalogue?.forced, true);
-  assert.equal(state.catalogue?.table_owner, SCHEMA_OWNER); assert.equal(state.catalogue?.schema_owner, OWNER);
-  assert.equal(state.catalogue?.owner_set, true); assert.equal(state.catalogue?.schema_owner_set, true);
+  assertB01ClassificationInvariant("B01_AUDIT_OUTBOX_RLS_ENABLED", () => assert.equal(state.catalogue?.rls, true));
+  assertB01ClassificationInvariant("B01_AUDIT_OUTBOX_FORCE_RLS_ENABLED", () => assert.equal(state.catalogue?.forced, true));
+  assertB01ClassificationInvariant("B01_AUDIT_OUTBOX_TABLE_OWNER", () => assert.equal(state.catalogue?.table_owner, SCHEMA_OWNER));
+  assertB01ClassificationInvariant("B01_AUTH_SCHEMA_OWNER", () => assert.equal(state.catalogue?.schema_owner, OWNER));
+  assertB01ClassificationInvariant("B01_AUTH_OWNER_SET_CAPABILITY", () => assert.equal(state.catalogue?.owner_set, true));
+  assertB01ClassificationInvariant("B01_SCHEMA_OWNER_SET_CAPABILITY", () => assert.equal(state.catalogue?.schema_owner_set, true));
   const identity = hash({ roles: state.roles, functions: state.functions, policies: state.policies, catalogue: state.catalogue });
   if (identity === contract.successorRlsIdentity) return { classification: "SUCCESSOR", identity };
   if (identity === contract.predecessorRlsIdentity) return { classification: "PREDECESSOR", identity };
@@ -161,5 +175,5 @@ async function main(argv = process.argv.slice(2)) {
   finally { if (client) try { await client.$disconnect(); } catch {} }
 }
 
-module.exports = { B01_MUTATION_ADVISORY_LOCK_SQL, collectB01State, executeB01Transaction, inspectB01State, classify, canonicalJson, hash, safeFailure, FAILURE_STAGES };
+module.exports = { B01_MUTATION_ADVISORY_LOCK_SQL, B01_CLASSIFICATION_INVARIANTS, collectB01State, executeB01Transaction, inspectB01State, classify, canonicalJson, hash, safeFailure, FAILURE_STAGES };
 if (module.id === "[eval]") main(process.argv.slice(1));
