@@ -18,11 +18,13 @@ const require = createRequire(import.meta.url), runtime = require("../aws/produc
 const readOnlyRuntime = require("../aws/production-b01-prerequisite-readonly.cjs");
 const deploymentSourceSha = "1".repeat(40), now = new Date("2026-09-23T12:00:00.000Z");
 const bridgeEntry = { file: "scripts/aws/production-b01-prerequisite-contract.mjs", classification: "BRIDGE_DEPLOYMENT_TOOLING", hunkCount: 1 };
-const bridgeDiffAttestation = { schemaVersion: 3, rlsDeltaOriginSha: B01_PREREQUISITE.rlsDeltaOriginSha, bridgeOriginSha: B01_PREREQUISITE.bridgeOriginSha, deploymentSourceSha,
+const bridgeDiffAttestation = { schemaVersion: 4, rlsDeltaOriginSha: B01_PREREQUISITE.rlsDeltaOriginSha, bridgeOriginSha: B01_PREREQUISITE.bridgeOriginSha, deploymentSourceSha,
   bridge: { base: B01_PREREQUISITE.rlsDeltaOriginSha, target: B01_PREREQUISITE.bridgeOriginSha, entries: [bridgeEntry], patchSha256: "2".repeat(64) },
   predecessorCorrection: { base: B01_PREREQUISITE.bridgeOriginSha, target: B01_PREREQUISITE.correctionBaseSha, entries: [bridgeEntry], patchSha256: "3".repeat(64) },
   runtimeEvidence: { base: B01_PREREQUISITE.correctionBaseSha, target: B01_PREREQUISITE.recoveryBaseSha, entries: [bridgeEntry], patchSha256: "4".repeat(64) },
-  recovery: { base: B01_PREREQUISITE.recoveryBaseSha, target: deploymentSourceSha, entries: [bridgeEntry], patchSha256: "5".repeat(64) } };
+  expiredTaskRecovery: { base: B01_PREREQUISITE.recoveryBaseSha, target: B01_PREREQUISITE.expiredTaskRecoverySha, entries: [bridgeEntry], patchSha256: "5".repeat(64) },
+  terminalEventRecovery: { base: B01_PREREQUISITE.expiredTaskRecoverySha, target: B01_PREREQUISITE.terminalEventRecoverySha, entries: [bridgeEntry], patchSha256: "6".repeat(64) },
+  provenanceCorrection: { base: B01_PREREQUISITE.terminalEventRecoverySha, target: deploymentSourceSha, entries: [bridgeEntry], patchSha256: "7".repeat(64) } };
 bridgeDiffAttestation.attestationSha256 = canonicalSha256(bridgeDiffAttestation);
 const executor = fs.readFileSync("scripts/aws/production-b01-prerequisite-executor.cjs", "utf8"), executorSourceSha256 = crypto.createHash("sha256").update(executor).digest("hex");
 const taskArn = "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/" + "a".repeat(32);
@@ -43,32 +45,71 @@ const receipt = (changes = {}) => buildB01PrerequisiteReceipt({ deploymentSource
 const reseal = (value, changes) => { const body = { ...value, ...changes }; delete body.receiptSha256; return { ...body, receiptSha256: canonicalSha256(body) }; };
 
 test("bridge diff accepts only the reviewed bridge inventory and binds exact patch bytes", () => {
-  const files = [".github/workflows/production-deploy.yml", "scripts/aws/production-b01-prerequisite-contract.mjs", "scripts/tests/production-b01-prerequisite.test.mjs"];
+  const files = ["documents/security/rls-program/production-b01-prerequisite-bridge.md", "scripts/aws/production-b01-prerequisite-contract.mjs", "scripts/tests/production-b01-prerequisite.test.mjs"];
   const patch = files.map((file) => `diff --git a/${file} b/${file}\n@@ -1 +1 @@\n-old\n+new`).join("\n");
   const calls = [], attestation = attestBridgeDiff({ deploymentSourceSha, git: (args) => { calls.push(args); if (args[0] === "merge-base") return "";
     if (args[0] === "rev-parse") return args[1] === `${B01_PREREQUISITE.bridgeOriginSha}^1` ? B01_PREREQUISITE.rlsDeltaOriginSha
       : args[1] === `${B01_PREREQUISITE.correctionBaseSha}^1` ? B01_PREREQUISITE.bridgeOriginSha
-        : args[1] === `${B01_PREREQUISITE.recoveryBaseSha}^1` ? B01_PREREQUISITE.correctionBaseSha : B01_PREREQUISITE.recoveryBaseSha;
+        : args[1] === `${B01_PREREQUISITE.recoveryBaseSha}^1` ? B01_PREREQUISITE.correctionBaseSha
+          : args[1] === `${B01_PREREQUISITE.expiredTaskRecoverySha}^1` ? B01_PREREQUISITE.recoveryBaseSha
+            : args[1] === `${B01_PREREQUISITE.terminalEventRecoverySha}^1` ? B01_PREREQUISITE.expiredTaskRecoverySha : B01_PREREQUISITE.terminalEventRecoverySha;
     if (args.includes("--name-only")) return files.join("\n"); return patch; } });
   assert.equal(attestation.rlsDeltaOriginSha, B01_PREREQUISITE.rlsDeltaOriginSha); assert.equal(attestation.deploymentSourceSha, deploymentSourceSha);
   assert.equal(attestation.bridgeOriginSha, B01_PREREQUISITE.bridgeOriginSha); assert.equal(attestation.bridge.entries.length, 3);
-  assert.equal(attestation.predecessorCorrection.entries.length, 3); assert.equal(attestation.runtimeEvidence.entries.length, 3); assert.equal(attestation.recovery.entries.length, 3);
-  assert.ok([...attestation.bridge.entries, ...attestation.predecessorCorrection.entries, ...attestation.runtimeEvidence.entries, ...attestation.recovery.entries].every(({ hunkCount }) => hunkCount === 1));
+  assert.equal(attestation.predecessorCorrection.entries.length, 3); assert.equal(attestation.runtimeEvidence.entries.length, 3); assert.equal(attestation.expiredTaskRecovery.entries.length, 3);
+  assert.equal(attestation.terminalEventRecovery.entries.length, 3); assert.equal(attestation.provenanceCorrection.entries.length, 3);
+  assert.ok([...attestation.bridge.entries, ...attestation.predecessorCorrection.entries, ...attestation.runtimeEvidence.entries,
+    ...attestation.expiredTaskRecovery.entries, ...attestation.terminalEventRecovery.entries, ...attestation.provenanceCorrection.entries].every(({ hunkCount }) => hunkCount === 1));
   assert.match(attestation.bridge.patchSha256, /^[a-f0-9]{64}$/); assert.match(attestation.predecessorCorrection.patchSha256, /^[a-f0-9]{64}$/);
-  assert.match(attestation.runtimeEvidence.patchSha256, /^[a-f0-9]{64}$/); assert.match(attestation.recovery.patchSha256, /^[a-f0-9]{64}$/);
+  assert.match(attestation.runtimeEvidence.patchSha256, /^[a-f0-9]{64}$/); assert.match(attestation.expiredTaskRecovery.patchSha256, /^[a-f0-9]{64}$/);
+  assert.match(attestation.terminalEventRecovery.patchSha256, /^[a-f0-9]{64}$/); assert.match(attestation.provenanceCorrection.patchSha256, /^[a-f0-9]{64}$/);
   assert.deepEqual(calls.filter(([name]) => name === "merge-base").map((args) => args.slice(2)), [[B01_PREREQUISITE.rlsDeltaOriginSha, B01_PREREQUISITE.bridgeOriginSha],
     [B01_PREREQUISITE.bridgeOriginSha, B01_PREREQUISITE.correctionBaseSha], [B01_PREREQUISITE.correctionBaseSha, B01_PREREQUISITE.recoveryBaseSha],
-    [B01_PREREQUISITE.recoveryBaseSha, deploymentSourceSha]]);
+    [B01_PREREQUISITE.recoveryBaseSha, B01_PREREQUISITE.expiredTaskRecoverySha], [B01_PREREQUISITE.expiredTaskRecoverySha, B01_PREREQUISITE.terminalEventRecoverySha],
+    [B01_PREREQUISITE.terminalEventRecoverySha, deploymentSourceSha]]);
 });
 
-test("bridge attestation accepts only the immediate reviewed correction successor", () => {
+test("bridge attestation accepts only the complete reviewed recovery lineage and its immediate correction successor", () => {
   assert.throws(() => attestBridgeDiff({ deploymentSourceSha, git: (args) => args[0] === "merge-base" ? "" : args[0] === "rev-parse" ? "f".repeat(40) : "" }),
     /Reviewed bridge origin|immediate protected-main prerequisite-correction successor/);
   assert.throws(() => attestBridgeDiff({ deploymentSourceSha, git: (args) => args[0] === "merge-base" ? "" : args[0] === "rev-parse"
     ? args[1] === `${B01_PREREQUISITE.bridgeOriginSha}^1` ? B01_PREREQUISITE.rlsDeltaOriginSha
       : args[1] === `${B01_PREREQUISITE.correctionBaseSha}^1` ? B01_PREREQUISITE.bridgeOriginSha
-        : args[1] === `${B01_PREREQUISITE.recoveryBaseSha}^1` ? B01_PREREQUISITE.correctionBaseSha : "f".repeat(40) : "" }),
-  /immediate protected-main expired-task recovery successor/);
+        : args[1] === `${B01_PREREQUISITE.recoveryBaseSha}^1` ? B01_PREREQUISITE.correctionBaseSha
+          : args[1] === `${B01_PREREQUISITE.expiredTaskRecoverySha}^1` ? B01_PREREQUISITE.recoveryBaseSha
+            : args[1] === `${B01_PREREQUISITE.terminalEventRecoverySha}^1` ? B01_PREREQUISITE.expiredTaskRecoverySha : "f".repeat(40) : "" }),
+  /immediate protected-main provenance-correction successor/);
+});
+
+test("reviewed #571 and #572 merge lineage is immutable and every substitution fails closed", () => {
+  const parents = new Map([
+    [`${B01_PREREQUISITE.bridgeOriginSha}^1`, B01_PREREQUISITE.rlsDeltaOriginSha],
+    [`${B01_PREREQUISITE.correctionBaseSha}^1`, B01_PREREQUISITE.bridgeOriginSha],
+    [`${B01_PREREQUISITE.recoveryBaseSha}^1`, B01_PREREQUISITE.correctionBaseSha],
+    [`${B01_PREREQUISITE.expiredTaskRecoverySha}^1`, B01_PREREQUISITE.recoveryBaseSha],
+    [`${B01_PREREQUISITE.terminalEventRecoverySha}^1`, B01_PREREQUISITE.expiredTaskRecoverySha],
+    [`${deploymentSourceSha}^1`, B01_PREREQUISITE.terminalEventRecoverySha],
+  ]);
+  const files = "scripts/aws/production-b01-prerequisite-contract.mjs";
+  const patch = `diff --git a/${files} b/${files}\n@@ -1 +1 @@\n-old\n+new`;
+  const git = (changes = new Map()) => (args) => args[0] === "merge-base" ? "" : args[0] === "rev-parse" ? changes.get(args[1]) || parents.get(args[1])
+    : args.includes("--name-only") ? files : patch;
+  for (const [ref, expected] of [[`${B01_PREREQUISITE.expiredTaskRecoverySha}^1`, B01_PREREQUISITE.recoveryBaseSha],
+    [`${B01_PREREQUISITE.terminalEventRecoverySha}^1`, B01_PREREQUISITE.expiredTaskRecoverySha]]) {
+    assert.equal(spawnSync("git", ["rev-parse", ref], { encoding: "utf8" }).stdout.trim(), expected);
+  }
+  assert.equal(attestBridgeDiff({ deploymentSourceSha, git: git() }).terminalEventRecovery.target, B01_PREREQUISITE.terminalEventRecoverySha);
+  for (const [ref, message] of [[`${B01_PREREQUISITE.expiredTaskRecoverySha}^1`, /expired-task recovery/],
+    [`${B01_PREREQUISITE.terminalEventRecoverySha}^1`, /terminal-event recovery/], [`${deploymentSourceSha}^1`, /provenance-correction successor/]]) {
+    assert.throws(() => attestBridgeDiff({ deploymentSourceSha, git: git(new Map([[ref, "f".repeat(40)]])) }), message);
+  }
+  const alteredRecoveryFile = "scripts/aws/probe-production-b01-prerequisite.mjs";
+  assert.throws(() => attestBridgeDiff({ deploymentSourceSha, git: (args) => {
+    if (args[0] === "merge-base") return ""; if (args[0] === "rev-parse") return parents.get(args[1]);
+    const finalRange = args.includes(`${B01_PREREQUISITE.terminalEventRecoverySha}..${deploymentSourceSha}`);
+    if (args.includes("--name-only")) return finalRange ? alteredRecoveryFile : files;
+    const file = finalRange ? alteredRecoveryFile : files; return `diff --git a/${file} b/${file}\n@@ -1 +1 @@\n-old\n+new`;
+  } }), /outside its reviewed scope/);
 });
 
 test("application, auth, RLS, schema, and unclassified bridge changes fail closed", () => {
@@ -112,7 +153,7 @@ test("receipt binds different RLS origin and current deployment source and rejec
   assert.equal(assertB01PrerequisiteReceipt(value, { deploymentSourceSha, bridgeDiffAttestation, now: now.getTime() }).receiptSha256, value.receiptSha256);
   for (const changed of [{ rlsDeltaOriginSha: "0".repeat(40) }, { deploymentSourceSha: "9".repeat(40) }, { environment: "staging" },
     { successorRlsIdentity: "8".repeat(64) }, { migrationSetDigest: "8".repeat(64) }, { bridgeDiffAttestation: { ...bridgeDiffAttestation,
-      recovery: { ...bridgeDiffAttestation.recovery, patchSha256: "8".repeat(64) } } }]) {
+      provenanceCorrection: { ...bridgeDiffAttestation.provenanceCorrection, patchSha256: "8".repeat(64) } } }]) {
     assert.throws(() => assertB01PrerequisiteReceipt({ ...value, ...changed }, { deploymentSourceSha, bridgeDiffAttestation, now: now.getTime() }));
   }
   assert.throws(() => assertB01PrerequisiteReceipt(value, { deploymentSourceSha, bridgeDiffAttestation, now: now.getTime() + B01_PREREQUISITE.maxReceiptAgeMs }));
