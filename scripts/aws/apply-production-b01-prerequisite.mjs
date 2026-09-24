@@ -212,8 +212,10 @@ export async function applyProductionB01Prerequisite({ deploymentSourceSha, awsP
   }
   let terminalTaskEvidence;
   for (let attempt = 0; attempt < 12 && !terminalTaskEvidence; attempt++) {
-    try { terminalTaskEvidence = authenticateB01TerminalTaskEvents(collectB01TerminalTaskEvents(aws, taskArn), { taskArn, taskDefinitionArn,
-      launchEventTime: runTaskRequestEvidence.eventTime }); } catch { if (attempt === 11) throw new Error("Durable ECS terminal evidence unavailable; reconcile before retry."); await wait(5000); }
+    const observationEventTime = now().toISOString();
+    try { terminalTaskEvidence = authenticateB01TerminalTaskEvents(collectB01TerminalTaskEvents(aws, taskArn, {
+      launchEventTime: runTaskRequestEvidence.eventTime, observationEventTime }), { taskArn, taskDefinitionArn,
+      launchEventTime: runTaskRequestEvidence.eventTime, observationEventTime }); } catch { if (attempt === 11) throw new Error("Durable ECS terminal evidence unavailable; reconcile before retry."); await wait(5000); }
   }
   const stream = `b01-prerequisite/${B01_PREREQUISITE.executorContainer}/${taskArn.split("/").at(-1)}`; let message;
   for (let attempt = 0; attempt < 12 && !message; attempt++) { const logs = aws(["logs","get-log-events","--region",APP_ONLY.region,"--log-group-name",B01_PREREQUISITE.logGroup,"--log-stream-name",stream,"--start-from-head","--limit","10"]); if (logs.events?.length) { assert.equal(logs.events.length, 1); message = logs.events[0].message; } else await wait(5000); }

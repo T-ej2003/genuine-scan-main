@@ -417,9 +417,31 @@ test("durable ECS terminal events bind the exact mutation task and survive Descr
   contradictory.detail.desiredStatus = "RUNNING";
   assert.throws(() => authenticateB01TerminalTaskEvents([...events, { message: JSON.stringify(contradictory) }],
     { taskArn, taskDefinitionArn, launchEventTime: runTaskRequestBody.eventTime }));
-  const pages = [{ events, nextToken: "page-2" }, { events: [] }], calls = [];
-  assert.deepEqual(collectB01TerminalTaskEvents((args) => { calls.push(args); return pages.shift(); }, taskArn), events);
-  assert.ok(calls[1].includes("--next-token")); assert.throws(() => collectB01TerminalTaskEvents(() => ({ events: [], nextToken: "same" }), taskArn));
+  const bounds = { launchEventTime: runTaskRequestBody.eventTime, observationEventTime: body.time };
+  const partial = Array.from({ length: 99 }, (_, index) => ({ eventId: `old-${index}`, message: JSON.stringify({ source: "aws.ecs" }) }));
+  const pages = [{ events: [], nextToken: "page-2" }, { events: partial, nextToken: "page-3" }, { events }], calls = [];
+  assert.deepEqual(collectB01TerminalTaskEvents((args) => { calls.push(args); return pages.shift(); }, taskArn, bounds), [...partial, ...events]);
+  assert.ok(calls[1].includes("--next-token")); assert.ok(calls[2].includes("--next-token"));
+  assert.equal(calls[0][calls[0].indexOf("--start-time") + 1], String(Date.parse(bounds.launchEventTime)));
+  assert.equal(calls[0][calls[0].indexOf("--end-time") + 1], String(Date.parse(bounds.observationEventTime) + 1));
+  const collected = collectB01TerminalTaskEvents((args) => ({ events, nextToken: undefined }), taskArn, bounds);
+  assert.equal(authenticateB01TerminalTaskEvents(collected, { taskArn, taskDefinitionArn, ...bounds }).containerExitCode, 1);
+  assert.throws(() => authenticateB01TerminalTaskEvents([], { taskArn, taskDefinitionArn, ...bounds }));
+  const beforeLaunch = structuredClone(body); beforeLaunch.time = new Date(Date.parse(bounds.launchEventTime) - 1).toISOString();
+  assert.throws(() => authenticateB01TerminalTaskEvents([{ message: JSON.stringify(beforeLaunch) }],
+    { taskArn, taskDefinitionArn, ...bounds }));
+  const unrelated = structuredClone(body); unrelated.detail.taskArn = taskArn.replace(/a$/, "b"); unrelated.resources = [unrelated.detail.taskArn];
+  assert.throws(() => authenticateB01TerminalTaskEvents([{ message: JSON.stringify(unrelated) }],
+    { taskArn, taskDefinitionArn, ...bounds }));
+  assert.throws(() => collectB01TerminalTaskEvents(() => ({ events: [] }), taskArn));
+  assert.throws(() => collectB01TerminalTaskEvents(() => ({ events: [] }), taskArn,
+    { launchEventTime: bounds.observationEventTime, observationEventTime: bounds.launchEventTime }));
+  assert.throws(() => collectB01TerminalTaskEvents(() => ({ events: [], nextToken: "same" }), taskArn, bounds));
+  let page = 0; assert.throws(() => collectB01TerminalTaskEvents(() => ({ events: [], nextToken: `page-${++page}` }), taskArn, bounds),
+    /bounded page limit/);
+  const afterObservation = structuredClone(body); afterObservation.time = new Date(Date.parse(bounds.observationEventTime) + 1).toISOString();
+  assert.throws(() => authenticateB01TerminalTaskEvents([{ message: JSON.stringify(afterObservation) }],
+    { taskArn, taskDefinitionArn, ...bounds }));
 });
 
 test("future mutation launch requires exact native durable ECS event capture", () => {

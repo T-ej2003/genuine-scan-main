@@ -201,7 +201,7 @@ export function collectB01RecoveryPostflight({ collectLaunchHistory, collectMuta
 }
 
 export async function probeProductionB01Prerequisite({ deploymentSourceSha, ambiguousTaskArn, ambiguousDeploymentSourceSha, awsProfile, repositoryRoot = root,
-  run = (file, args, options) => execFileSync(file, args, options), wait = sleep } = {}) {
+  run = (file, args, options) => execFileSync(file, args, options), wait = sleep, now = () => new Date() } = {}) {
   assertProtectedCheckout({ sourceSha: deploymentSourceSha, repositoryRoot }); attestBridgeDiff({ deploymentSourceSha, repositoryRoot });
   const env = createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: awsProfile });
   const aws = (args) => parse(run(productionAwsExecutable(), [...args,"--output","json","--no-cli-pager"], { env, encoding: "utf8", timeout: 30000, maxBuffer: 8*1024*1024 }));
@@ -239,9 +239,11 @@ export async function probeProductionB01Prerequisite({ deploymentSourceSha, ambi
     const legacyExpired = ambiguousTaskArn === B01_PREREQUISITE.legacyExpiredTaskArn
       && ambiguousTaskDefinitionArn === B01_PREREQUISITE.legacyExpiredTaskDefinitionArn
       && ambiguousDeploymentSourceSha === B01_PREREQUISITE.legacyExpiredDeploymentSourceSha;
+    const observationEventTime = now().toISOString();
     const terminalEvidence = legacyExpired ? undefined : authenticateB01TerminalTaskEvents(
-      collectB01TerminalTaskEvents(aws, ambiguousTaskArn), { taskArn: ambiguousTaskArn,
-        taskDefinitionArn: ambiguousTaskDefinitionArn, launchEventTime: launchHistory.targetEventTime });
+      collectB01TerminalTaskEvents(aws, ambiguousTaskArn, { launchEventTime: launchHistory.targetEventTime,
+        observationEventTime }), { taskArn: ambiguousTaskArn,
+        taskDefinitionArn: ambiguousTaskDefinitionArn, launchEventTime: launchHistory.targetEventTime, observationEventTime });
     quiescence = authenticateB01ExpiredMutationTask({ expectedTaskArn: ambiguousTaskArn, taskDefinitionArn: ambiguousTaskDefinitionArn,
       taskDefinition: ambiguousDefinition.taskDefinition, taskDefinitionTags: ambiguousDefinition.tags || [], events: ambiguousEvents,
       launchHistoryEvidenceSha256: launchHistory.evidenceSha256, terminalTaskEvidence: terminalEvidence,

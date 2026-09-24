@@ -102,9 +102,10 @@ export function assertSemanticallyEmptyB01TaskOverrides(overrides, expectedConta
   return true;
 }
 
-export function authenticateB01TerminalTaskEvents(events, { taskArn, taskDefinitionArn, launchEventTime } = {}) {
+export function authenticateB01TerminalTaskEvents(events, { taskArn, taskDefinitionArn, launchEventTime, observationEventTime } = {}) {
   assert.ok(Array.isArray(events)); assert.match(taskArn || "", TASK); assert.match(taskDefinitionArn || "", TASK_DEFINITION);
-  const launchTime = Date.parse(launchEventTime); assert.ok(Number.isFinite(launchTime));
+  const launchTime = Date.parse(launchEventTime), observationTime = Date.parse(observationEventTime);
+  assert.ok(Number.isFinite(launchTime)); if (observationEventTime !== undefined) assert.ok(Number.isFinite(observationTime) && observationTime >= launchTime);
   const matches = events.map((event) => JSON.parse(event.message)).filter((event) => event?.source === "aws.ecs"
     && event["detail-type"] === "ECS Task State Change" && event.detail?.taskArn === taskArn);
   assert.ok(matches.length > 0, "Durable ECS terminal evidence is unavailable.");
@@ -116,7 +117,8 @@ export function authenticateB01TerminalTaskEvents(events, { taskArn, taskDefinit
     if (existing) assert.deepEqual(event, existing, "Contradictory ECS terminal evidence shares a task version."); else byVersion.set(version, event); }
   ordered.sort((left, right) => left.detail.version - right.detail.version); const event = ordered.at(-1), detail = event.detail;
   assert.equal(event.account, B01_PREREQUISITE.account); assert.equal(event.region, B01_PREREQUISITE.region); assert.deepEqual(event.resources, [taskArn]);
-  assert.ok(Date.parse(event.time) >= launchTime); assert.equal(detail.clusterArn, `arn:aws:ecs:${B01_PREREQUISITE.region}:${B01_PREREQUISITE.account}:cluster/${B01_PREREQUISITE.cluster}`);
+  const eventTime = Date.parse(event.time); assert.ok(eventTime >= launchTime); if (observationEventTime !== undefined) assert.ok(eventTime <= observationTime);
+  assert.equal(detail.clusterArn, `arn:aws:ecs:${B01_PREREQUISITE.region}:${B01_PREREQUISITE.account}:cluster/${B01_PREREQUISITE.cluster}`);
   assert.equal(detail.taskArn, taskArn); assert.equal(detail.taskDefinitionArn, taskDefinitionArn); assert.equal(detail.group, `family:${B01_PREREQUISITE.executorFamily}`);
   assert.equal(detail.launchType, "FARGATE"); assert.equal(detail.desiredStatus, "STOPPED"); assert.equal(detail.lastStatus, "STOPPED");
   assert.equal(detail.containers?.length, 1); const container = detail.containers[0];
@@ -127,11 +129,15 @@ export function authenticateB01TerminalTaskEvents(events, { taskArn, taskDefinit
   return Object.freeze({ ...body, evidenceSha256: canonicalSha256(body) });
 }
 
-export function collectB01TerminalTaskEvents(aws, taskArn) {
-  assert.equal(typeof aws, "function"); assert.match(taskArn || "", TASK); const events = [], tokens = new Set(); let token;
+export function collectB01TerminalTaskEvents(aws, taskArn, { launchEventTime, observationEventTime } = {}) {
+  assert.equal(typeof aws, "function"); assert.match(taskArn || "", TASK);
+  const startTime = Date.parse(launchEventTime), endTime = Date.parse(observationEventTime);
+  assert.ok(Number.isFinite(startTime) && Number.isFinite(endTime) && endTime >= startTime, "ECS terminal evidence window is invalid.");
+  const events = [], tokens = new Set(); let token;
   for (let page = 0; page < 20; page += 1) {
     const args = ["logs","filter-log-events","--region",B01_PREREQUISITE.region,"--log-group-name",B01_PREREQUISITE.eventCaptureLogGroup,
-      "--filter-pattern",`\"${taskArn}\"`,"--limit","100","--no-paginate",...(token ? ["--next-token",token] : [])];
+      "--filter-pattern",`\"${taskArn}\"`,"--start-time",String(startTime),"--end-time",String(endTime + 1),
+      "--limit","100","--no-paginate",...(token ? ["--next-token",token] : [])];
     const response = aws(args); assert.ok(Array.isArray(response?.events) && response.events.length <= 100); events.push(...response.events);
     const next = response.nextToken; if (next === undefined) return Object.freeze(events);
     assert.ok(typeof next === "string" && next && !tokens.has(next), "ECS terminal evidence pagination is incomplete or cyclic."); tokens.add(next); token = next;
