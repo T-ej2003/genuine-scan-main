@@ -12,7 +12,7 @@ import { assertEcsTaskDefinitionReadback } from "../../infra/aws/terraform/lambd
 import { B01_PREREQUISITE, assertB01AmbiguousMutationTaskQuiescent, assertB01ExpiredMutationTaskQuiescent, assertB01LivePredecessor, assertB01RunTaskRequestEvidence,
   assertSemanticallyEmptyB01TaskOverrides, attestBridgeDiff, buildB01ExecutorDefinition, buildB01ReadOnlyDefinition,
   buildB01RunTaskRequest, canonicalSha256, authenticateB01TerminalTaskEvents, collectB01TerminalTaskEvents } from "./production-b01-prerequisite-contract.mjs";
-import { authenticateB01ExecutorCommand, authenticateB01RunTaskCloudTrail, buildB01ReadOnlyInput } from "./apply-production-b01-prerequisite.mjs";
+import { B01_CLASSIFICATION_INVARIANTS, authenticateB01ExecutorCommand, authenticateB01RunTaskCloudTrail, buildB01ReadOnlyInput } from "./apply-production-b01-prerequisite.mjs";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const parse = (value) => JSON.parse(Buffer.isBuffer(value) ? value.toString("utf8") : value);
@@ -25,13 +25,28 @@ export function authenticateB01ReadOnlyResult(message, contract) {
   assert.ok(["PREDECESSOR","SUCCESSOR","PARTIAL","UNKNOWN"].includes(body.classification));
   if (body.classification === "UNKNOWN") { assert.ok(["BOOTSTRAP","INPUT_AUTHENTICATION","SECRET_ACCESS","DATABASE_CONNECTIVITY",
     "DATABASE_SYNCHRONIZATION","PREDECESSOR_COLLECTION","PREDECESSOR_CLASSIFICATION"].includes(body.stage));
-    assert.ok(["CONTRACT_REJECTED","UNEXPECTED_FAILURE"].includes(body.code)); return Object.freeze(value); }
+    assert.ok(["CONTRACT_REJECTED","UNEXPECTED_FAILURE"].includes(body.code));
+    const keys = ["schemaVersion","kind","mode","classification","stage","code",...(body.classificationInvariant === undefined ? [] : ["classificationInvariant"])];
+    assert.deepEqual(Object.keys(body).sort(), keys.sort());
+    if (body.classificationInvariant !== undefined) { assert.equal(body.stage, "PREDECESSOR_CLASSIFICATION"); assert.equal(body.code, "CONTRACT_REJECTED");
+      assert.ok(B01_CLASSIFICATION_INVARIANTS.includes(body.classificationInvariant)); }
+    return Object.freeze(value); }
   assert.equal(body.rlsDeltaOriginSha, B01_PREREQUISITE.rlsDeltaOriginSha); assert.equal(body.contractSha256, canonicalSha256(contract));
   assert.match(body.liveRlsIdentity, /^[a-f0-9]{64}$/); assert.equal(body.transactionReadOnly, true);
   assert.equal(body.livePredecessorMatch, body.classification === "PREDECESSOR"); assert.equal(body.liveSuccessorMatch, body.classification === "SUCCESSOR");
   assert.equal(body.unauthorizedCatalogueDelta, body.classification === "PARTIAL");
   assert.deepEqual(body.mismatchIdentifiers, body.classification === "PARTIAL" ? ["CATALOGUE_IDENTITY"] : []);
   return Object.freeze(value);
+}
+
+export function buildB01ReconciliationResult({ quiescence, taskArn, taskDefinitionArn, requestEvidence, result }) {
+  const classificationInvariant = result.classificationInvariant;
+  if (classificationInvariant !== undefined) assert.ok(B01_CLASSIFICATION_INVARIANTS.includes(classificationInvariant));
+  return Object.freeze({ status:"PRODUCTION_B01_READONLY_RECONCILED",ambiguousMutationTaskEvidenceSha256:quiescence.evidenceSha256,
+    taskArn,taskDefinitionArn,requestEvidence,classification:result.classification,liveRlsIdentity:result.liveRlsIdentity||null,
+    livePredecessorMatch:result.livePredecessorMatch??false,liveSuccessorMatch:result.liveSuccessorMatch??false,unauthorizedCatalogueDelta:result.unauthorizedCatalogueDelta??null,
+    temporaryPrivilegeResidue:result.temporaryPrivilegeResidue??null,transactionReadOnly:result.transactionReadOnly??null,
+    ...(classificationInvariant === undefined ? {} : { classificationInvariant }) });
 }
 
 export function authenticateB01AmbiguousMutationTask({ expectedTaskArn, task, taskDefinition, taskDefinitionTags = [], events,
@@ -277,10 +292,7 @@ export async function probeProductionB01Prerequisite({ deploymentSourceSha, ambi
     collectLaunchHistory: () => authenticateB01MutationLaunchHistory(collectB01RunTaskEvents(aws), { expectedTaskArn: ambiguousTaskArn,
       taskDefinitionArn: ambiguousTaskDefinitionArn, deploymentSourceSha: ambiguousDeploymentSourceSha }),
     collectMutationCensus: mutationCensus });
-  return Object.freeze({ status:"PRODUCTION_B01_READONLY_RECONCILED",ambiguousMutationTaskEvidenceSha256:quiescence.evidenceSha256,
-    taskArn,taskDefinitionArn,requestEvidence,classification:result.classification,liveRlsIdentity:result.liveRlsIdentity||null,
-    livePredecessorMatch:result.livePredecessorMatch??false,liveSuccessorMatch:result.liveSuccessorMatch??false,unauthorizedCatalogueDelta:result.unauthorizedCatalogueDelta??null,
-    temporaryPrivilegeResidue:result.temporaryPrivilegeResidue??null,transactionReadOnly:result.transactionReadOnly??null });
+  return buildB01ReconciliationResult({ quiescence, taskArn, taskDefinitionArn, requestEvidence, result });
 }
 
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href===import.meta.url) {

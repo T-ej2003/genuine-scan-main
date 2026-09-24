@@ -170,6 +170,7 @@ export function authenticateB01ExecutorCommand({ command, deploymentSourceSha, r
 
 export const executeB01Transaction = runtime.executeB01Transaction;
 export const collectB01State = runtime.collectB01State;
+export const B01_CLASSIFICATION_INVARIANTS = runtime.B01_CLASSIFICATION_INVARIANTS;
 
 export async function applyProductionB01Prerequisite({ deploymentSourceSha, awsProfile, receiptOut, repositoryRoot = root,
   run = (file, args, options) => execFileSync(file, args, options), wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), now = () => new Date() } = {}) {
