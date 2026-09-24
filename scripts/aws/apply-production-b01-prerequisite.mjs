@@ -10,14 +10,15 @@ import { gzipSync, gunzipSync } from "node:zlib";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { assertProtectedCheckout } from "./prepare-production-initial-activation-reconciler-installation.mjs";
 import { APP_ONLY } from "./production-app-only-contract.mjs";
-import { appOnlyVerifierNetwork } from "./production-app-only-policy.mjs";
 import { createProductionAwsCredentialEnvironment, productionAwsExecutable, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { assertEcsTaskDefinitionReadback } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/ecs-task-definition-readback.mjs";
-import { B01_PREREQUISITE, assertB01LivePredecessor, attestBridgeDiff, buildB01ExecutorDefinition, buildB01PrerequisiteReceipt, canonicalJson, canonicalSha256 } from "./production-b01-prerequisite-contract.mjs";
+import { B01_PREREQUISITE, assertB01LivePredecessor, assertB01RunTaskRequestEvidence, attestBridgeDiff, buildB01ExecutorDefinition, buildB01PrerequisiteReceipt,
+  buildB01RunTaskRequest, canonicalJson, canonicalSha256, normalizeB01RunTaskCloudTrailRequest } from "./production-b01-prerequisite-contract.mjs";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const require = createRequire(import.meta.url);
 const runtimePath = fileURLToPath(new URL("./production-b01-prerequisite-executor.cjs", import.meta.url));
+const readOnlyRuntimePath = fileURLToPath(new URL("./production-b01-prerequisite-readonly.cjs", import.meta.url));
 const runtime = require(runtimePath);
 const AUTH_OWNER = ["mscqr", "prd", "rls", "phase2", "auth", "owner"].join("_"),
   SCHEMA_OWNER = ["mscqr", "prd", "rls", "phase2", "owner"].join("_"), PREAUTH = ["mscqr", "prd", "rls", "phase2", "preauth"].join("_");
@@ -98,10 +99,10 @@ export function canonicalB01Prerequisite({ repositoryRoot = root, readOld = (fil
   return Object.freeze({ predecessor, successor, mutations, predecessorBindSql: oldBind, predecessorRlsIdentity, successorRlsIdentity });
 }
 
-export function buildB01ExecutorInput({ deploymentSourceSha, databaseHostname, repositoryRoot = root } = {}) {
+export function buildB01ExecutorInput({ deploymentSourceSha, databaseHostname, repositoryRoot = root, executorSource } = {}) {
   assert.match(deploymentSourceSha || "", /^[a-f0-9]{40}$/); assert.match(databaseHostname || "", /^[a-z0-9.-]+$/);
   const delta = canonicalB01Prerequisite({ repositoryRoot });
-  const executorSource = fs.readFileSync(path.join(repositoryRoot, path.relative(root, runtimePath)), "utf8");
+  executorSource ||= fs.readFileSync(path.join(repositoryRoot, path.relative(root, runtimePath)), "utf8");
   const contract = { rlsDeltaOriginSha: B01_PREREQUISITE.rlsDeltaOriginSha, deploymentSourceSha,
     migrationSetDigest: B01_PREREQUISITE.migrationSetDigest, sourceContractSha256: B01_PREREQUISITE.sourceContractSha256,
     predecessorRlsIdentity: delta.predecessorRlsIdentity, successorRlsIdentity: delta.successorRlsIdentity,
@@ -113,6 +114,41 @@ export function buildB01ExecutorInput({ deploymentSourceSha, databaseHostname, r
     commandSha256: canonicalSha256(["-e", executorSource, payload, hash(bytes)]) });
 }
 
+export function b01CatalogueRuntimeSource({ repositoryRoot = root } = {}) {
+  const source = fs.readFileSync(path.join(repositoryRoot, path.relative(root, runtimePath)), "utf8");
+  const match = /\/\/ B01_CATALOGUE_START\n([\s\S]+?)\n\/\/ B01_CATALOGUE_END/.exec(source); assert.ok(match);
+  return match[1];
+}
+
+export function buildB01ReadOnlyInput({ deploymentSourceSha, databaseHostname, ambiguousMutationTaskEvidenceSha256, repositoryRoot = root } = {}) {
+  assert.match(deploymentSourceSha || "", /^[a-f0-9]{40}$/); assert.match(databaseHostname || "", /^[a-z0-9.-]+$/);
+  assert.match(ambiguousMutationTaskEvidenceSha256 || "", /^[a-f0-9]{64}$/);
+  const delta = canonicalB01Prerequisite({ repositoryRoot });
+  const contract = { rlsDeltaOriginSha: B01_PREREQUISITE.rlsDeltaOriginSha, deploymentSourceSha,
+    migrationSetDigest: B01_PREREQUISITE.migrationSetDigest, sourceContractSha256: B01_PREREQUISITE.sourceContractSha256,
+    predecessorRlsIdentity: delta.predecessorRlsIdentity, successorRlsIdentity: delta.successorRlsIdentity,
+    ambiguousMutationTaskEvidenceSha256 };
+  const tail = fs.readFileSync(path.join(repositoryRoot, path.relative(root, readOnlyRuntimePath)), "utf8");
+  const source = `"use strict";\nconst assert=require("node:assert/strict"),crypto=require("node:crypto");\n${b01CatalogueRuntimeSource({ repositoryRoot })}\n${tail}`;
+  const envelope = { databaseHostname, contract, contractSha256: canonicalSha256(contract) };
+  const bytes = Buffer.from(canonicalJson(envelope)), payload = gzipSync(bytes, { level: 9, mtime: 0 }).toString("base64");
+  return Object.freeze({ command: ["-e", source, payload, hash(bytes)], contract, contractSha256: envelope.contractSha256,
+    commandSha256: canonicalSha256(["-e", source, payload, hash(bytes)]), sourceSha256: hash(source) });
+}
+
+export function authenticateB01RunTaskCloudTrail(events, { taskArn, taskDefinitionArn, deploymentSourceSha, readOnly = false } = {}) {
+  const matches = (events || []).map((event) => ({ event, body: JSON.parse(event.CloudTrailEvent) })).filter(({ body }) =>
+    body.eventSource === "ecs.amazonaws.com" && body.eventName === "RunTask" && body.responseElements?.tasks?.some((task) => task.taskArn === taskArn));
+  assert.equal(matches.length, 1, "Exact RunTask CloudTrail evidence is unavailable or ambiguous.");
+  const { event, body } = matches[0], request = body.requestParameters || {};
+  const normalizedRequest = normalizeB01RunTaskCloudTrailRequest(request, { taskDefinitionArn, deploymentSourceSha, readOnly });
+  const evidenceBody = { eventId: body.eventID, eventTime: body.eventTime, taskArn, taskDefinitionArn: request.taskDefinition,
+    cluster: request.cluster, launchType: request.launchType, count: request.count, enableExecuteCommand: request.enableExecuteCommand,
+    overridesPresent: Object.hasOwn(request, "overrides") };
+  const evidence = Object.freeze({ ...evidenceBody, requestSha256: canonicalSha256(normalizedRequest) });
+  assert.equal(event.EventId, evidence.eventId); assertB01RunTaskRequestEvidence(evidence, { taskArn, taskDefinitionArn, deploymentSourceSha, readOnly }); return evidence;
+}
+
 export function authenticateB01Result(message, contract) {
   const value = JSON.parse(message), { evidenceSha256, ...body } = value; assert.equal(evidenceSha256, canonicalSha256(body));
   assert.equal(body.kind, "PRODUCTION_B01_PREREQUISITE_RESULT"); assert.equal(body.rlsDeltaOriginSha, B01_PREREQUISITE.rlsDeltaOriginSha);
@@ -121,12 +157,12 @@ export function authenticateB01Result(message, contract) {
   assert.ok(body.status === "APPLIED" && body.writeCount === 7 || body.status === "ALREADY_CONVERGED" && body.writeCount === 0); return value;
 }
 
-export function authenticateB01ExecutorCommand({ command, deploymentSourceSha, repositoryRoot = root } = {}) {
+export function authenticateB01ExecutorCommand({ command, deploymentSourceSha, repositoryRoot = root, executorSource } = {}) {
   assert.equal(command?.length, 4); assert.equal(command[0], "-e");
-  const executorSource = fs.readFileSync(path.join(repositoryRoot, path.relative(root, runtimePath)), "utf8"); assert.equal(command[1], executorSource);
+  executorSource ||= fs.readFileSync(path.join(repositoryRoot, path.relative(root, runtimePath)), "utf8"); assert.equal(command[1], executorSource);
   const bytes = gunzipSync(Buffer.from(command[2], "base64"), { maxOutputLength: 128 * 1024 });
   assert.equal(hash(bytes), command[3]); const envelope = JSON.parse(bytes); assert.equal(canonicalJson(envelope), bytes.toString("utf8"));
-  const expected = buildB01ExecutorInput({ deploymentSourceSha, databaseHostname: envelope.databaseHostname, repositoryRoot });
+  const expected = buildB01ExecutorInput({ deploymentSourceSha, databaseHostname: envelope.databaseHostname, repositoryRoot, executorSource });
   assert.deepEqual(command, expected.command); assert.deepEqual(envelope.contract, expected.contract); assert.equal(envelope.contractSha256, expected.contractSha256);
   return expected;
 }
@@ -157,11 +193,16 @@ export async function applyProductionB01Prerequisite({ deploymentSourceSha, awsP
   const taskDefinitionArn = registered?.taskDefinitionArn; assert.match(taskDefinitionArn || "", new RegExp(`/${B01_PREREQUISITE.executorFamily}:[1-9][0-9]*$`));
   const readback = aws(["ecs","describe-task-definition","--region",APP_ONLY.region,"--task-definition",taskDefinitionArn,"--include","TAGS"]);
   assertEcsTaskDefinitionReadback({ definition: { ...readback.taskDefinition, tags: readback.tags || [] }, taskDefinitionArn, expected: definition, label: "B01 prerequisite" });
-  const launched = aws(["ecs","run-task","--region",APP_ONLY.region,"--cli-input-json",JSON.stringify({ cluster: APP_ONLY.clusterArn, taskDefinition: taskDefinitionArn,
-    launchType: "FARGATE", count: 1, enableExecuteCommand: false, clientToken: canonicalSha256({ deploymentSourceSha, taskDefinitionArn }), networkConfiguration: appOnlyVerifierNetwork() })]);
+  const request = buildB01RunTaskRequest({ taskDefinitionArn, deploymentSourceSha });
+  const launched = aws(["ecs","run-task","--region",APP_ONLY.region,"--cli-input-json",JSON.stringify(request)]);
   assert.deepEqual(launched.failures || [], []); assert.equal(launched.tasks?.length, 1); const taskArn = launched.tasks[0].taskArn;
   let task; for (let attempt = 0; attempt < 60; attempt++) { const response = aws(["ecs","describe-tasks","--region",APP_ONLY.region,"--cluster",APP_ONLY.cluster,"--tasks",taskArn]); assert.deepEqual(response.failures || [], []); task = response.tasks?.[0]; if (task?.lastStatus === "STOPPED") break; await wait(5000); }
   assert.equal(task?.lastStatus, "STOPPED", "B01 prerequisite timed out; reconcile read-only and do not retry.");
+  let runTaskRequestEvidence;
+  for (let attempt = 0; attempt < 12 && !runTaskRequestEvidence; attempt++) {
+    const events = aws(["cloudtrail","lookup-events","--region",APP_ONLY.region,"--lookup-attributes","AttributeKey=EventName,AttributeValue=RunTask","--start-time",new Date(new Date(task.createdAt).getTime() - 60_000).toISOString(),"--end-time",new Date(new Date(task.stoppedAt).getTime() + 60_000).toISOString(),"--max-results","50"]).Events || [];
+    try { runTaskRequestEvidence = authenticateB01RunTaskCloudTrail(events, { taskArn, taskDefinitionArn, deploymentSourceSha }); } catch { if (attempt === 11) throw new Error("RunTask request evidence unavailable; reconcile before retry."); await wait(5000); }
+  }
   const stream = `b01-prerequisite/${B01_PREREQUISITE.executorContainer}/${taskArn.split("/").at(-1)}`; let message;
   for (let attempt = 0; attempt < 12 && !message; attempt++) { const logs = aws(["logs","get-log-events","--region",APP_ONLY.region,"--log-group-name",B01_PREREQUISITE.logGroup,"--log-stream-name",stream,"--start-from-head","--limit","10"]); if (logs.events?.length) { assert.equal(logs.events.length, 1); message = logs.events[0].message; } else await wait(5000); }
   assert.ok(message); assert.equal(task.containers?.[0]?.exitCode, 0); const result = authenticateB01Result(message, built.contract);
@@ -169,7 +210,7 @@ export async function applyProductionB01Prerequisite({ deploymentSourceSha, awsP
   const receipt = buildB01PrerequisiteReceipt({ deploymentSourceSha, predecessorRlsIdentity: result.predecessorRlsIdentity,
     successorRlsIdentity: result.successorRlsIdentity, liveRlsIdentity: result.liveRlsIdentity, executorSourceSha256: built.contract.executorSourceSha256,
     executorContractSha256: built.contractSha256, executorCommandSha256: built.commandSha256, executionResult: result.status, writeCount: result.writeCount, taskArn, taskDefinitionArn, bridgeDiffAttestation,
-    executedAt: executedAt.toISOString(), expiresAt: new Date(executedAt.getTime() + B01_PREREQUISITE.maxReceiptAgeMs).toISOString() });
+    runTaskRequestEvidence, executedAt: executedAt.toISOString(), expiresAt: new Date(executedAt.getTime() + B01_PREREQUISITE.maxReceiptAgeMs).toISOString() });
   fs.writeFileSync(receiptOut, `${canonicalJson(receipt)}\n`, { mode: 0o600, flag: "wx" }); return receipt;
 }
 

@@ -4,12 +4,8 @@ const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const { gunzipSync } = require("node:zlib");
 
-const ORIGIN = "0f7ae1a70eec588ef4fdcb2b53e9f42e831c4414";
-const ADMIN = ["mscqr", "prod", "admin"].join("_");
-const OWNER = ["mscqr", "prd", "rls", "phase2", "auth", "owner"].join("_");
-const SCHEMA_OWNER = ["mscqr", "prd", "rls", "phase2", "owner"].join("_");
-const PREAUTH = ["mscqr", "prd", "rls", "phase2", "preauth"].join("_");
-const DATABASE = ["mscqr", "production", "rls", "green", "phase2"].join("_");
+const FAILURE_STAGES = Object.freeze(["BOOTSTRAP","INPUT_AUTHENTICATION","SECRET_ACCESS","DATABASE_CONNECTIVITY","PREDECESSOR_COLLECTION","PREDECESSOR_CLASSIFICATION","TRANSACTION_BEGIN","AUTHORIZED_MUTATION","SUCCESSOR_COLLECTION","SUCCESSOR_CLASSIFICATION","COMMIT","RECEIPT_PRECONDITION"]);
+
 const EXPECTED_MUTATIONS = Object.freeze({
   "bind-predecessor": "72622e72f55b190c36823cd236d98209c4774d3224b902d3891da9991555ffea",
   finalizer: "dda320f80d84478ecf8dea8544456cf203e8ae5f5d27be7c533456c8ef3ffe14",
@@ -19,6 +15,14 @@ const EXPECTED_MUTATIONS = Object.freeze({
   "select-policy": "6918201a91575d6d350bb305c6914aaaddc8d874a05ef70c39197ee6e0c1cb41",
   "select-policy-comment": "15ed39f488602730bf3b7a99c0d81a13770babe48c9a8755dea68007dc0d7586",
 });
+// B01_CATALOGUE_START
+const ORIGIN = "0f7ae1a70eec588ef4fdcb2b53e9f42e831c4414";
+const ADMIN = ["mscqr", "prod", "admin"].join("_");
+const OWNER = ["mscqr", "prd", "rls", "phase2", "auth", "owner"].join("_");
+const SCHEMA_OWNER = ["mscqr", "prd", "rls", "phase2", "owner"].join("_");
+const PREAUTH = ["mscqr", "prd", "rls", "phase2", "preauth"].join("_");
+const DATABASE = ["mscqr", "production", "rls", "green", "phase2"].join("_");
+const B01_MUTATION_ADVISORY_LOCK_SQL = "SELECT pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('mscqr-production-b01-prerequisite',0))";
 const canonicalJson = (value) => Array.isArray(value) ? `[${value.map(canonicalJson).join(",")}]`
   : value && typeof value === "object" ? `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}` : JSON.stringify(value);
 const hash = (value) => crypto.createHash("sha256").update(typeof value === "string" || Buffer.isBuffer(value) ? value : canonicalJson(value)).digest("hex");
@@ -75,40 +79,57 @@ async function collectB01State(tx) {
   })), catalogue };
 }
 
-function authenticateIdentity(identity) {
-  assert.deepEqual(identity, { role: ADMIN, session_role: ADMIN, database: DATABASE, read_only: "off", server_major: 18, rolcanlogin: true,
+function authenticateIdentity(identity, readOnly = "off") {
+  assert.deepEqual(identity, { role: ADMIN, session_role: ADMIN, database: DATABASE, read_only: readOnly, server_major: 18, rolcanlogin: true,
     rolsuper: false, rolinherit: false, rolcreaterole: true, rolcreatedb: true, rolreplication: false, rolbypassrls: false });
 }
 
-function classify(state, contract) {
-  authenticateIdentity(state.identity);
+function inspectB01State(state, contract, readOnly = "off") {
+  authenticateIdentity(state.identity, readOnly);
   assert.equal(state.catalogue?.rls, true); assert.equal(state.catalogue?.forced, true);
   assert.equal(state.catalogue?.table_owner, SCHEMA_OWNER); assert.equal(state.catalogue?.schema_owner, OWNER);
   assert.equal(state.catalogue?.owner_set, true); assert.equal(state.catalogue?.schema_owner_set, true);
   const identity = hash({ roles: state.roles, functions: state.functions, policies: state.policies, catalogue: state.catalogue });
-  if (identity === contract.successorRlsIdentity) return "SUCCESSOR";
-  if (identity === contract.predecessorRlsIdentity) return "PREDECESSOR";
-  throw new Error("Live B01 catalogue is neither the exact predecessor nor successor.");
+  if (identity === contract.successorRlsIdentity) return { classification: "SUCCESSOR", identity };
+  if (identity === contract.predecessorRlsIdentity) return { classification: "PREDECESSOR", identity };
+  return { classification: "PARTIAL", identity };
 }
 
-async function executeB01Transaction({ tx, input, collect = collectB01State, checkpoint = async () => {} }) {
+function classify(state, contract, readOnly = "off") {
+  const result = inspectB01State(state, contract, readOnly);
+  if (result.classification !== "PARTIAL") return result.classification;
+  throw new Error("Live B01 catalogue is neither the exact predecessor nor successor.");
+}
+// B01_CATALOGUE_END
+
+async function executeB01Transaction({ tx, input, collect = collectB01State, checkpoint = async () => {}, stage = () => {} }) {
   assert.equal(input.contract.rlsDeltaOriginSha, ORIGIN);
   assert.equal(input.contract.migrationSetDigest, "6642442a81cd98c7a132d241fa98e50ae231510896c9da67ab70d86b050d02db");
   assert.equal(input.contract.mutations.length, 7);
   assert.deepEqual(input.contract.mutations.map(({ name }) => name), ["bind-predecessor","finalizer","public-revoke","preauth-execute","payload-select","select-policy","select-policy-comment"]);
   for (const mutation of input.contract.mutations) { assert.equal(hash(mutation.sql), mutation.sha256); assert.equal(mutation.sha256, EXPECTED_MUTATIONS[mutation.name]); }
   await tx.$executeRawUnsafe("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE");
-  await tx.$executeRawUnsafe("SELECT pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('mscqr-production-b01-prerequisite',0))");
-  const before = await collect(tx), state = classify(before, input.contract);
-  if (state === "SUCCESSOR") return { status: "ALREADY_CONVERGED", writeCount: 0, predecessorRlsIdentity: input.contract.predecessorRlsIdentity, successorRlsIdentity: input.contract.successorRlsIdentity, liveRlsIdentity: input.contract.successorRlsIdentity };
+  await tx.$executeRawUnsafe(B01_MUTATION_ADVISORY_LOCK_SQL);
+  stage("PREDECESSOR_COLLECTION"); const before = await collect(tx);
+  stage("PREDECESSOR_CLASSIFICATION"); const state = classify(before, input.contract);
+  if (state === "SUCCESSOR") { stage("COMMIT"); return { status: "ALREADY_CONVERGED", writeCount: 0, predecessorRlsIdentity: input.contract.predecessorRlsIdentity, successorRlsIdentity: input.contract.successorRlsIdentity, liveRlsIdentity: input.contract.successorRlsIdentity }; }
+  stage("AUTHORIZED_MUTATION");
   await tx.$executeRawUnsafe(`SET LOCAL ROLE ${OWNER}`);
   for (const mutation of input.contract.mutations.slice(0, 4)) { await tx.$executeRawUnsafe(mutation.sql); await checkpoint(mutation.name); }
   await tx.$executeRawUnsafe("RESET ROLE");
   await tx.$executeRawUnsafe(`SET LOCAL ROLE ${SCHEMA_OWNER}`);
   for (const mutation of input.contract.mutations.slice(4)) { await tx.$executeRawUnsafe(mutation.sql); await checkpoint(mutation.name); }
   await tx.$executeRawUnsafe("RESET ROLE");
-  const after = await collect(tx); assert.equal(classify(after, input.contract), "SUCCESSOR");
+  stage("SUCCESSOR_COLLECTION"); const after = await collect(tx);
+  stage("SUCCESSOR_CLASSIFICATION"); assert.equal(classify(after, input.contract), "SUCCESSOR");
+  stage("COMMIT");
   return { status: "APPLIED", writeCount: 7, predecessorRlsIdentity: input.contract.predecessorRlsIdentity, successorRlsIdentity: input.contract.successorRlsIdentity, liveRlsIdentity: input.contract.successorRlsIdentity };
+}
+
+function safeFailure(stage, error) {
+  assert.ok(FAILURE_STAGES.includes(stage));
+  const prismaCode = typeof error?.code === "string" && /^(?:P1000|P1001|P1002|P1010|P1011|P1017)$/.test(error.code) ? error.code : null;
+  return { status: "PRODUCTION_B01_PREREQUISITE_FAILED", stage, code: prismaCode || (error?.name === "AssertionError" ? "CONTRACT_REJECTED" : "UNEXPECTED_FAILURE") };
 }
 
 function decode(value, digest) {
@@ -118,22 +139,27 @@ function decode(value, digest) {
 }
 
 async function main(argv = process.argv.slice(2)) {
-  let client; try {
+  let client, stage = "BOOTSTRAP"; try {
+    stage = "INPUT_AUTHENTICATION";
     assert.equal(argv.length, 2); const envelope = decode(argv[0], argv[1]);
     assert.equal(hash(envelope.contract), envelope.contractSha256);
     assert.equal(hash(process.execArgv[1] || ""), envelope.contract.executorSourceSha256);
     assert.equal(envelope.contract.sourceContractSha256, "099399a7d3f4b2392acdba6c54bf1ac6a919ff60691e69d31023d32161d99e71");
-    const { PrismaClient } = require("@prisma/client");
+    const { PrismaClient } = require("@prisma/client"); stage = "SECRET_ACCESS";
+    assert.ok(typeof process.env.MSCQR_B01_PREREQUISITE_ADMIN_PASSWORD === "string" && process.env.MSCQR_B01_PREREQUISITE_ADMIN_PASSWORD.length > 0);
     const url = new URL(`postgresql://${ADMIN}:${encodeURIComponent(process.env.MSCQR_B01_PREREQUISITE_ADMIN_PASSWORD || "")}@${envelope.databaseHostname}:5432/${DATABASE}`);
     url.searchParams.set("sslmode", "require"); url.searchParams.set("application_name", "mscqr-production-b01-prerequisite");
     client = new PrismaClient({ datasources: { db: { url: url.toString() } } });
-    const result = await client.$transaction((tx) => executeB01Transaction({ tx, input: envelope }), { maxWait: 5000, timeout: 60000 });
+    stage = "DATABASE_CONNECTIVITY"; await client.$connect();
+    stage = "TRANSACTION_BEGIN";
+    const result = await client.$transaction((tx) => executeB01Transaction({ tx, input: envelope, stage: (value) => { stage = value; } }), { maxWait: 5000, timeout: 60000 });
+    stage = "COMMIT";
     const body = { schemaVersion: 1, kind: "PRODUCTION_B01_PREREQUISITE_RESULT", rlsDeltaOriginSha: ORIGIN,
       contractSha256: envelope.contractSha256, executedAt: new Date().toISOString(), ...result };
-    process.stdout.write(`${JSON.stringify({ ...body, evidenceSha256: hash(body) })}\n`);
-  } catch { process.stderr.write('{"status":"PRODUCTION_B01_PREREQUISITE_FAILED"}\n'); process.exitCode = 1; }
-  finally { if (client) await client.$disconnect(); }
+    stage = "RECEIPT_PRECONDITION"; process.stdout.write(`${JSON.stringify({ ...body, evidenceSha256: hash(body) })}\n`);
+  } catch (error) { process.stderr.write(`${JSON.stringify(safeFailure(stage, error))}\n`); process.exitCode = 1; }
+  finally { if (client) try { await client.$disconnect(); } catch {} }
 }
 
-module.exports = { collectB01State, executeB01Transaction, classify, canonicalJson, hash };
+module.exports = { B01_MUTATION_ADVISORY_LOCK_SQL, collectB01State, executeB01Transaction, inspectB01State, classify, canonicalJson, hash, safeFailure, FAILURE_STAGES };
 if (module.id === "[eval]") main(process.argv.slice(1));
