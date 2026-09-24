@@ -11,7 +11,7 @@ import { B01_PREREQUISITE, assertB01ExecutorAwsEvidence, assertB01ExpiredMutatio
 import { B01_CLASSIFICATION_INVARIANTS, authenticateB01RunTaskCloudTrail, b01CatalogueRuntimeSource, buildB01ExecutorInput, buildB01ReadOnlyInput,
   canonicalB01Prerequisite, executeB01Transaction } from "../aws/apply-production-b01-prerequisite.mjs";
 import { authenticateB01AmbiguousMutationTask, authenticateB01ExpiredMutationTask, authenticateB01MissingTask,
-  authenticateB01MutationLaunchHistory, authenticateB01MutationTaskListing, authenticateB01ReadOnlyResult, collectB01RecoveryPostflight,
+  authenticateB01MutationLaunchHistory, authenticateB01MutationTaskListing, authenticateB01ReadOnlyResult, buildB01ReconciliationResult, collectB01RecoveryPostflight,
   collectB01MutationCensus, collectB01MutationTaskArns, collectB01RunTaskEvents, findNonTerminalB01MutationTasks } from "../aws/probe-production-b01-prerequisite.mjs";
 
 const require = createRequire(import.meta.url), runtime = require("../aws/production-b01-prerequisite-executor.cjs");
@@ -265,6 +265,31 @@ test("read-only classification rejection telemetry exposes only closed invariant
   assert.doesNotMatch(JSON.stringify(generic), /secret|private-db|postgresql/i);
   const forged = { ...generic, classificationInvariant: "B01_DYNAMIC_DATABASE_VALUE" };
   assert.throws(() => authenticateB01ReadOnlyResult(JSON.stringify({ ...forged, evidenceSha256: canonicalSha256(forged) }), contract));
+});
+
+test("authenticated classification invariant reaches only the bounded CLI reconciliation result", () => {
+  const contract = buildB01ReadOnlyInput({ deploymentSourceSha, databaseHostname: "db.synthetic.invalid", ambiguousMutationTaskEvidenceSha256 }).contract;
+  const rejection = new assert.AssertionError({ message: "synthetic-sensitive-catalogue-value" });
+  Object.defineProperty(rejection, "b01ClassificationInvariant", { value: "B01_AUDIT_OUTBOX_RLS_ENABLED" });
+  const body = readOnlyRuntime.safeB01ReadOnlyFailure("PREDECESSOR_CLASSIFICATION", rejection, B01_CLASSIFICATION_INVARIANTS);
+  const authenticated = authenticateB01ReadOnlyResult(JSON.stringify({ ...body, evidenceSha256: canonicalSha256(body) }), contract);
+  const base = { quiescence: { evidenceSha256: ambiguousMutationTaskEvidenceSha256 }, taskArn, taskDefinitionArn, requestEvidence: runTaskRequestEvidence };
+  const cliVisible = JSON.parse(JSON.stringify(buildB01ReconciliationResult({ ...base, result: authenticated })));
+  assert.equal(cliVisible.classificationInvariant, "B01_AUDIT_OUTBOX_RLS_ENABLED");
+  assert.doesNotMatch(JSON.stringify(cliVisible), /synthetic-sensitive|catalogue-value/i);
+
+  const genericBody = { schemaVersion: 1, kind: "PRODUCTION_B01_READONLY_RESULT", mode: "READ_ONLY", classification: "UNKNOWN",
+    stage: "PREDECESSOR_CLASSIFICATION", code: "CONTRACT_REJECTED" };
+  const generic = authenticateB01ReadOnlyResult(JSON.stringify({ ...genericBody, evidenceSha256: canonicalSha256(genericBody) }), contract);
+  assert.equal(Object.hasOwn(buildB01ReconciliationResult({ ...base, result: generic }), "classificationInvariant"), false);
+  assert.throws(() => buildB01ReconciliationResult({ ...base, result: { ...generic, classificationInvariant: "B01_DYNAMIC_DATABASE_VALUE" } }));
+
+  for (const classification of ["PREDECESSOR", "SUCCESSOR"]) {
+    const success = { classification, liveRlsIdentity: "9".repeat(64), livePredecessorMatch: classification === "PREDECESSOR",
+      liveSuccessorMatch: classification === "SUCCESSOR", unauthorizedCatalogueDelta: false, temporaryPrivilegeResidue: false, transactionReadOnly: true };
+    const output = buildB01ReconciliationResult({ ...base, result: success });
+    assert.equal(output.classification, classification); assert.equal(Object.hasOwn(output, "classificationInvariant"), false);
+  }
 });
 
 test("receipt RLS identities must match the reconstructed source-fixed executor contract", () => {

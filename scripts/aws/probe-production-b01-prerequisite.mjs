@@ -39,6 +39,16 @@ export function authenticateB01ReadOnlyResult(message, contract) {
   return Object.freeze(value);
 }
 
+export function buildB01ReconciliationResult({ quiescence, taskArn, taskDefinitionArn, requestEvidence, result }) {
+  const classificationInvariant = result.classificationInvariant;
+  if (classificationInvariant !== undefined) assert.ok(B01_CLASSIFICATION_INVARIANTS.includes(classificationInvariant));
+  return Object.freeze({ status:"PRODUCTION_B01_READONLY_RECONCILED",ambiguousMutationTaskEvidenceSha256:quiescence.evidenceSha256,
+    taskArn,taskDefinitionArn,requestEvidence,classification:result.classification,liveRlsIdentity:result.liveRlsIdentity||null,
+    livePredecessorMatch:result.livePredecessorMatch??false,liveSuccessorMatch:result.liveSuccessorMatch??false,unauthorizedCatalogueDelta:result.unauthorizedCatalogueDelta??null,
+    temporaryPrivilegeResidue:result.temporaryPrivilegeResidue??null,transactionReadOnly:result.transactionReadOnly??null,
+    ...(classificationInvariant === undefined ? {} : { classificationInvariant }) });
+}
+
 export function authenticateB01AmbiguousMutationTask({ expectedTaskArn, task, taskDefinition, taskDefinitionTags = [], events,
   activeMutationTaskArns = [], ambiguousDeploymentSourceSha, deploymentSourceSha, repositoryRoot = root,
   readExecutorSource = (sha) => execFileSync("git", ["show", `${sha}:scripts/aws/production-b01-prerequisite-executor.cjs`],
@@ -282,10 +292,7 @@ export async function probeProductionB01Prerequisite({ deploymentSourceSha, ambi
     collectLaunchHistory: () => authenticateB01MutationLaunchHistory(collectB01RunTaskEvents(aws), { expectedTaskArn: ambiguousTaskArn,
       taskDefinitionArn: ambiguousTaskDefinitionArn, deploymentSourceSha: ambiguousDeploymentSourceSha }),
     collectMutationCensus: mutationCensus });
-  return Object.freeze({ status:"PRODUCTION_B01_READONLY_RECONCILED",ambiguousMutationTaskEvidenceSha256:quiescence.evidenceSha256,
-    taskArn,taskDefinitionArn,requestEvidence,classification:result.classification,liveRlsIdentity:result.liveRlsIdentity||null,
-    livePredecessorMatch:result.livePredecessorMatch??false,liveSuccessorMatch:result.liveSuccessorMatch??false,unauthorizedCatalogueDelta:result.unauthorizedCatalogueDelta??null,
-    temporaryPrivilegeResidue:result.temporaryPrivilegeResidue??null,transactionReadOnly:result.transactionReadOnly??null });
+  return buildB01ReconciliationResult({ quiescence, taskArn, taskDefinitionArn, requestEvidence, result });
 }
 
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href===import.meta.url) {
