@@ -152,12 +152,36 @@ export function findNonTerminalB01MutationTasks(response, expectedTaskArns) {
   return response.tasks.filter(({ lastStatus }) => lastStatus !== "STOPPED").map(({ taskArn }) => taskArn);
 }
 
-export function assertB01RecoveryPostflight({ initialLaunchHistorySha256, finalLaunchHistorySha256,
-  activeMutationTaskArns = [] } = {}) {
+export function assertB01RecoveryPostflight({ initialLaunchHistorySha256, beforeCensusLaunchHistorySha256,
+  afterCensusLaunchHistorySha256, firstCensus, finalCensus, ambiguousTaskArn } = {}) {
   assert.match(initialLaunchHistorySha256 || "", /^[a-f0-9]{64}$/);
-  assert.equal(finalLaunchHistorySha256, initialLaunchHistorySha256, "B01 mutation launch history changed during reconciliation.");
-  assert.deepEqual(activeMutationTaskArns, [], "A B01 mutation executor became active during reconciliation.");
+  assert.equal(beforeCensusLaunchHistorySha256, initialLaunchHistorySha256, "B01 mutation launch history changed before the final census.");
+  assert.match(ambiguousTaskArn || "", /^arn:aws:ecs:eu-west-2:368992683803:task\/mscqr-prod-euw2-main\/[a-f0-9]{32}$/);
+  const assertCensus = ({ taskCensus, activeMutationTaskArns } = {}) => {
+    assert.deepEqual(activeMutationTaskArns, [], "A B01 mutation executor became active during reconciliation.");
+    assert.deepEqual(Object.keys(taskCensus || {}).sort(), ["PENDING","RUNNING","STOPPED"].sort());
+    const observed = [...taskCensus.RUNNING, ...taskCensus.PENDING, ...taskCensus.STOPPED];
+    assert.equal(new Set(observed).size, observed.length); assert.ok(observed.every((taskArn) => taskArn === ambiguousTaskArn),
+      "An unaccounted B01 mutation task exists in the current family census.");
+    return observed.sort();
+  };
+  const firstObserved = assertCensus(firstCensus);
+  assert.equal(afterCensusLaunchHistorySha256, beforeCensusLaunchHistorySha256,
+    "B01 mutation launch history changed across the final census.");
+  assert.deepEqual(assertCensus(finalCensus), firstObserved, "B01 mutation family census changed after the history bracket.");
   return true;
+}
+
+export function collectB01RecoveryPostflight({ collectLaunchHistory, collectMutationCensus,
+  initialLaunchHistorySha256, ambiguousTaskArn } = {}) {
+  assert.equal(typeof collectLaunchHistory, "function"); assert.equal(typeof collectMutationCensus, "function");
+  const beforeCensus = collectLaunchHistory();
+  const firstCensus = collectMutationCensus();
+  const afterCensus = collectLaunchHistory();
+  const finalCensus = collectMutationCensus();
+  assertB01RecoveryPostflight({ initialLaunchHistorySha256, beforeCensusLaunchHistorySha256: beforeCensus.evidenceSha256,
+    afterCensusLaunchHistorySha256: afterCensus.evidenceSha256, firstCensus, finalCensus, ambiguousTaskArn });
+  return Object.freeze({ beforeCensus, firstCensus, afterCensus, finalCensus });
 }
 
 export async function probeProductionB01Prerequisite({ deploymentSourceSha, ambiguousTaskArn, ambiguousDeploymentSourceSha, awsProfile, repositoryRoot = root,
@@ -238,10 +262,10 @@ export async function probeProductionB01Prerequisite({ deploymentSourceSha, ambi
   for(let attempt=0; attempt<12 && !message; attempt++){const events=aws(["logs","get-log-events","--region",APP_ONLY.region,"--log-group-name",B01_PREREQUISITE.logGroup,"--log-stream-name",stream,"--start-from-head","--limit","10"]).events||[];if(events.length){assert.equal(events.length,1);message=events[0].message;}else await wait(5000);}
   assert.ok(message); const result=authenticateB01ReadOnlyResult(message,built.contract);
   assert.equal(task.containers[0].exitCode,result.classification==="UNKNOWN"?2:0);
-  const finalLaunchHistory = authenticateB01MutationLaunchHistory(collectB01RunTaskEvents(aws), { expectedTaskArn: ambiguousTaskArn,
-    taskDefinitionArn: ambiguousTaskDefinitionArn, deploymentSourceSha: ambiguousDeploymentSourceSha });
-  assertB01RecoveryPostflight({ initialLaunchHistorySha256: launchHistory.evidenceSha256,
-    finalLaunchHistorySha256: finalLaunchHistory.evidenceSha256, activeMutationTaskArns: mutationCensus().activeMutationTaskArns });
+  collectB01RecoveryPostflight({ initialLaunchHistorySha256: launchHistory.evidenceSha256, ambiguousTaskArn,
+    collectLaunchHistory: () => authenticateB01MutationLaunchHistory(collectB01RunTaskEvents(aws), { expectedTaskArn: ambiguousTaskArn,
+      taskDefinitionArn: ambiguousTaskDefinitionArn, deploymentSourceSha: ambiguousDeploymentSourceSha }),
+    collectMutationCensus: mutationCensus });
   return Object.freeze({ status:"PRODUCTION_B01_READONLY_RECONCILED",ambiguousMutationTaskEvidenceSha256:quiescence.evidenceSha256,
     taskArn,taskDefinitionArn,requestEvidence,classification:result.classification,liveRlsIdentity:result.liveRlsIdentity||null,
     livePredecessorMatch:result.livePredecessorMatch??false,liveSuccessorMatch:result.liveSuccessorMatch??false,unauthorizedCatalogueDelta:result.unauthorizedCatalogueDelta??null,

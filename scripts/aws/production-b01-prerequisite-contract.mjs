@@ -142,15 +142,22 @@ export function collectB01TerminalTaskEvents(aws, taskArn) {
 export function assertB01EcsEventCapture({ logGroups, rules, targetsByRule } = {}) {
   assert.ok(Array.isArray(logGroups)); const groups = logGroups.filter(({ logGroupName }) => logGroupName === B01_PREREQUISITE.eventCaptureLogGroup);
   assert.equal(groups.length, 1); assert.ok(Number.isInteger(groups[0].retentionInDays) && groups[0].retentionInDays >= 30);
-  assert.ok(Array.isArray(rules)); const candidates = rules.filter((rule) => {
-    try { return rule.State === "ENABLED" && JSON.parse(rule.EventPattern)?.source?.length === 1 && JSON.parse(rule.EventPattern).source[0] === "aws.ecs"; }
-    catch { return false; }
-  });
-  const matched = candidates.filter((rule) => (targetsByRule?.[rule.Name] || []).some((target) => target.Arn === groups[0].arn));
-  assert.equal(matched.length, 1, "Exact durable ECS event capture is unavailable or ambiguous.");
-  const targets = targetsByRule[matched[0].Name]; assert.equal(targets.length, 1); assert.deepEqual(Object.keys(targets[0]).sort(), ["Arn","Id"].sort());
-  return Object.freeze({ logGroupName: groups[0].logGroupName, logGroupArn: groups[0].arn, retentionInDays: groups[0].retentionInDays,
-    ruleName: matched[0].Name, targetId: targets[0].Id });
+  const expectedArn = `arn:aws:logs:${B01_PREREQUISITE.region}:${B01_PREREQUISITE.account}:log-group:${B01_PREREQUISITE.eventCaptureLogGroup}`;
+  if (groups[0].logGroupArn !== undefined) assert.equal(groups[0].logGroupArn, expectedArn);
+  if (groups[0].arn !== undefined) assert.ok(groups[0].arn === expectedArn || groups[0].arn === `${expectedArn}:*`, "CloudWatch Logs group ARN is not canonical.");
+  assert.ok(groups[0].logGroupArn !== undefined || groups[0].arn !== undefined, "CloudWatch Logs group ARN is missing.");
+  assert.ok(Array.isArray(rules)); const targeted = rules.filter((rule) => (targetsByRule?.[rule.Name] || []).some((target) => target.Arn === expectedArn));
+  assert.equal(targeted.length, 1, "Exact durable ECS event capture is unavailable or ambiguous.");
+  const rule = targeted[0]; assert.equal(rule.State, "ENABLED"); let pattern;
+  try { pattern = JSON.parse(rule.EventPattern); } catch { assert.fail("ECS event capture pattern is malformed."); }
+  assert.ok(pattern && typeof pattern === "object" && !Array.isArray(pattern));
+  assert.ok(Object.keys(pattern).every((key) => key === "source" || key === "detail-type"));
+  assert.deepEqual(pattern.source, ["aws.ecs"]);
+  if (Object.hasOwn(pattern, "detail-type")) assert.deepEqual(pattern["detail-type"], ["ECS Task State Change"]);
+  const targets = targetsByRule[rule.Name]; assert.equal(targets.length, 1); assert.deepEqual(Object.keys(targets[0]).sort(), ["Arn","Id"].sort());
+  assert.equal(targets[0].Arn, expectedArn);
+  return Object.freeze({ logGroupName: groups[0].logGroupName, logGroupArn: expectedArn, retentionInDays: groups[0].retentionInDays,
+    ruleName: rule.Name, targetId: targets[0].Id });
 }
 
 export function assertB01RunTaskRequestEvidence(evidence, { taskArn, taskDefinitionArn, deploymentSourceSha, readOnly = false } = {}) {

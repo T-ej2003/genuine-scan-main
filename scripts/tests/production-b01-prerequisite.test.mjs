@@ -11,7 +11,7 @@ import { B01_PREREQUISITE, assertB01ExecutorAwsEvidence, assertB01ExpiredMutatio
 import { authenticateB01RunTaskCloudTrail, b01CatalogueRuntimeSource, buildB01ExecutorInput, buildB01ReadOnlyInput,
   canonicalB01Prerequisite, executeB01Transaction } from "../aws/apply-production-b01-prerequisite.mjs";
 import { authenticateB01AmbiguousMutationTask, authenticateB01ExpiredMutationTask, authenticateB01MissingTask,
-  authenticateB01MutationLaunchHistory, authenticateB01MutationTaskListing, authenticateB01ReadOnlyResult, assertB01RecoveryPostflight,
+  authenticateB01MutationLaunchHistory, authenticateB01MutationTaskListing, authenticateB01ReadOnlyResult, collectB01RecoveryPostflight,
   collectB01MutationTaskArns, collectB01RunTaskEvents, findNonTerminalB01MutationTasks } from "../aws/probe-production-b01-prerequisite.mjs";
 
 const require = createRequire(import.meta.url), runtime = require("../aws/production-b01-prerequisite-executor.cjs");
@@ -424,18 +424,34 @@ test("durable ECS terminal events bind the exact mutation task and survive Descr
 
 test("future mutation launch requires exact native durable ECS event capture", () => {
   const arn = `arn:aws:logs:${B01_PREREQUISITE.region}:${B01_PREREQUISITE.account}:log-group:${B01_PREREQUISITE.eventCaptureLogGroup}`;
-  const input = { logGroups: [{ logGroupName: B01_PREREQUISITE.eventCaptureLogGroup, arn, retentionInDays: 30 }],
+  const input = { logGroups: [{ logGroupName: B01_PREREQUISITE.eventCaptureLogGroup, arn: `${arn}:*`, logGroupArn: arn, retentionInDays: 30 }],
     rules: [{ Name: "ecs-event-capture", State: "ENABLED", EventPattern: JSON.stringify({ source: ["aws.ecs"] }) }],
     targetsByRule: { "ecs-event-capture": [{ Id: "CloudWatchLogs", Arn: arn }] } };
-  assert.equal(assertB01EcsEventCapture(input).retentionInDays, 30);
+  assert.equal(assertB01EcsEventCapture(input).logGroupArn, arn);
+  assert.equal(assertB01EcsEventCapture({ ...input, logGroups: [{ ...input.logGroups[0], arn: undefined }] }).logGroupArn, arn);
+  assert.equal(assertB01EcsEventCapture({ ...input, rules: [{ ...input.rules[0],
+    EventPattern: JSON.stringify({ source: ["aws.ecs"], "detail-type": ["ECS Task State Change"] }) }] }).retentionInDays, 30);
   assert.throws(() => assertB01EcsEventCapture({ ...input, logGroups: [] }));
   assert.throws(() => assertB01EcsEventCapture({ ...input, logGroups: [{ ...input.logGroups[0], retentionInDays: 7 }] }));
+  assert.throws(() => assertB01EcsEventCapture({ ...input, logGroups: [{ ...input.logGroups[0], logGroupArn: `${arn}-lookalike` }] }));
+  assert.throws(() => assertB01EcsEventCapture({ ...input, logGroups: [{ ...input.logGroups[0], arn: `${arn}-lookalike:*` }] }));
+  assert.throws(() => assertB01EcsEventCapture({ ...input, logGroups: [{ ...input.logGroups[0], logGroupArn: arn.replace(B01_PREREQUISITE.account, "000000000000") }] }));
+  assert.throws(() => assertB01EcsEventCapture({ ...input, logGroups: [{ ...input.logGroups[0], logGroupArn: arn.replace(B01_PREREQUISITE.region, "us-east-1") }] }));
   assert.throws(() => assertB01EcsEventCapture({ ...input, rules: [{ ...input.rules[0], State: "DISABLED" }] }));
   assert.throws(() => assertB01EcsEventCapture({ ...input, targetsByRule: { "ecs-event-capture": [{ Id: "wrong", Arn: "wrong" }] } }));
+  assert.throws(() => assertB01EcsEventCapture({ ...input, rules: [{ ...input.rules[0], EventPattern: "{" }] }));
+  assert.throws(() => assertB01EcsEventCapture({ ...input, rules: [{ ...input.rules[0], EventPattern: JSON.stringify({ source: ["aws.s3"] }) }] }));
+  assert.throws(() => assertB01EcsEventCapture({ ...input, rules: [{ ...input.rules[0],
+    EventPattern: JSON.stringify({ source: ["aws.ecs"], "detail-type": ["ECS Deployment State Change"] }) }] }));
+  assert.throws(() => assertB01EcsEventCapture({ ...input, rules: [{ ...input.rules[0],
+    EventPattern: JSON.stringify({ source: ["aws.ecs"], detail: { clusterArn: ["wrong"] } }) }] }));
   assert.throws(() => assertB01EcsEventCapture({ ...input, targetsByRule: { "ecs-event-capture": [
     ...input.targetsByRule["ecs-event-capture"], { Id: "extra", Arn: arn }] } }));
   assert.throws(() => assertB01EcsEventCapture({ ...input, targetsByRule: { "ecs-event-capture": [{
     ...input.targetsByRule["ecs-event-capture"][0], Input: "{}" }] } }));
+  assert.throws(() => assertB01EcsEventCapture({ ...input, rules: [...input.rules,
+    { Name: "unrelated", State: "ENABLED", EventPattern: JSON.stringify({ source: ["aws.s3"] }) }],
+  targetsByRule: { ...input.targetsByRule, unrelated: [{ Id: "other", Arn: arn }] } }));
   const apply = fs.readFileSync("scripts/aws/apply-production-b01-prerequisite.mjs", "utf8");
   assert.ok(apply.indexOf("assertB01EcsEventCapture") < apply.indexOf('"ecs","register-task-definition"'));
   assert.ok(apply.lastIndexOf("authenticateB01TerminalTaskEvents") < apply.lastIndexOf("buildB01PrerequisiteReceipt({"));
@@ -464,13 +480,30 @@ test("mutation family census consumes every bounded page and rejects malformed h
   assert.throws(() => collectB01MutationTaskArns(() => ({ taskArns: [taskArn, taskArn] }), "RUNNING"));
 });
 
-test("reconciliation result is invalidated by a later launch or active executor", () => {
-  const evidence = "7".repeat(64);
-  assert.equal(assertB01RecoveryPostflight({ initialLaunchHistorySha256: evidence, finalLaunchHistorySha256: evidence }), true);
-  assert.throws(() => assertB01RecoveryPostflight({ initialLaunchHistorySha256: evidence,
-    finalLaunchHistorySha256: "8".repeat(64) }), /history changed/);
-  assert.throws(() => assertB01RecoveryPostflight({ initialLaunchHistorySha256: evidence,
-    finalLaunchHistorySha256: evidence, activeMutationTaskArns: [taskArn] }), /became active/);
+test("reconciliation result requires a stable history-census-history-census bracket", () => {
+  const evidence = "7".repeat(64), stable = () => ({ evidenceSha256: evidence });
+  const empty = () => ({ taskCensus: { RUNNING: [], PENDING: [], STOPPED: [] }, activeMutationTaskArns: [] });
+  const calls = [];
+  assert.equal(collectB01RecoveryPostflight({ initialLaunchHistorySha256: evidence, ambiguousTaskArn: taskArn,
+    collectLaunchHistory: () => { calls.push("history"); return stable(); },
+    collectMutationCensus: () => { calls.push("census"); return empty(); } }).afterCensus.evidenceSha256, evidence);
+  assert.deepEqual(calls, ["history","census","history","census"]);
+  const probe = fs.readFileSync("scripts/aws/probe-production-b01-prerequisite.mjs", "utf8");
+  assert.ok(probe.lastIndexOf("authenticateB01ReadOnlyResult") < probe.lastIndexOf("collectB01RecoveryPostflight"));
+  assert.throws(() => collectB01RecoveryPostflight({ initialLaunchHistorySha256: evidence, ambiguousTaskArn: taskArn,
+    collectLaunchHistory: stable, collectMutationCensus: () => ({ ...empty(), taskCensus: { RUNNING: [taskArn.replace(/a$/, "b")], PENDING: [], STOPPED: [] },
+      activeMutationTaskArns: [taskArn.replace(/a$/, "b")] }) }), /became active/);
+  assert.throws(() => collectB01RecoveryPostflight({ initialLaunchHistorySha256: evidence, ambiguousTaskArn: taskArn,
+    collectLaunchHistory: stable, collectMutationCensus: () => ({ ...empty(), taskCensus: { RUNNING: [], PENDING: [], STOPPED: [taskArn.replace(/a$/, "b")] } }) }), /unaccounted/);
+  let reads = 0;
+  assert.throws(() => collectB01RecoveryPostflight({ initialLaunchHistorySha256: evidence, ambiguousTaskArn: taskArn,
+    collectLaunchHistory: () => ({ evidenceSha256: ++reads === 1 ? evidence : "8".repeat(64) }), collectMutationCensus: empty }), /across the final census/);
+  assert.throws(() => collectB01RecoveryPostflight({ initialLaunchHistorySha256: evidence, ambiguousTaskArn: taskArn,
+    collectLaunchHistory: () => ({ evidenceSha256: "8".repeat(64) }), collectMutationCensus: empty }), /before the final census/);
+  let censusReads = 0;
+  assert.throws(() => collectB01RecoveryPostflight({ initialLaunchHistorySha256: evidence, ambiguousTaskArn: taskArn,
+    collectLaunchHistory: stable, collectMutationCensus: () => ++censusReads === 1 ? empty() : ({ ...empty(),
+      taskCensus: { RUNNING: [], PENDING: [], STOPPED: [taskArn.replace(/a$/, "b")] } }) }), /unaccounted/);
 });
 
 test("reconciliation authenticates the exact stopped ambiguous mutation task and rejects non-quiescent substitutes", () => {
