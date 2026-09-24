@@ -4,22 +4,25 @@ import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
-import { B01_PREREQUISITE, assertB01ExecutorAwsEvidence, assertB01LivePredecessor, assertB01PrerequisiteReceipt, assertB01ReceiptExecutorContract,
+import { B01_PREREQUISITE, assertB01ExecutorAwsEvidence, assertB01ExpiredMutationTaskQuiescent, assertB01LivePredecessor, assertB01PrerequisiteReceipt, assertB01ReceiptExecutorContract,
   assertB01RunTaskRequestEvidence, assertSemanticallyEmptyB01TaskOverrides, attestBridgeDiff, buildB01ExecutorDefinition, buildB01PrerequisiteReceipt,
-  buildB01ReadOnlyDefinition, buildB01RunTaskRequest, canonicalSha256, classifyBridgeFiles } from "../aws/production-b01-prerequisite-contract.mjs";
+  buildB01ReadOnlyDefinition, buildB01RunTaskRequest, canonicalSha256, classifyBridgeFiles, assertB01EcsEventCapture,
+  authenticateB01TerminalTaskEvents, collectB01TerminalTaskEvents } from "../aws/production-b01-prerequisite-contract.mjs";
 import { authenticateB01RunTaskCloudTrail, b01CatalogueRuntimeSource, buildB01ExecutorInput, buildB01ReadOnlyInput,
   canonicalB01Prerequisite, executeB01Transaction } from "../aws/apply-production-b01-prerequisite.mjs";
-import { authenticateB01AmbiguousMutationTask, authenticateB01MutationTaskListing, authenticateB01ReadOnlyResult,
-  findNonTerminalB01MutationTasks } from "../aws/probe-production-b01-prerequisite.mjs";
+import { authenticateB01AmbiguousMutationTask, authenticateB01ExpiredMutationTask, authenticateB01MissingTask,
+  authenticateB01MutationLaunchHistory, authenticateB01MutationTaskListing, authenticateB01ReadOnlyResult, collectB01RecoveryPostflight,
+  collectB01MutationCensus, collectB01MutationTaskArns, collectB01RunTaskEvents, findNonTerminalB01MutationTasks } from "../aws/probe-production-b01-prerequisite.mjs";
 
 const require = createRequire(import.meta.url), runtime = require("../aws/production-b01-prerequisite-executor.cjs");
 const readOnlyRuntime = require("../aws/production-b01-prerequisite-readonly.cjs");
 const deploymentSourceSha = "1".repeat(40), now = new Date("2026-09-23T12:00:00.000Z");
 const bridgeEntry = { file: "scripts/aws/production-b01-prerequisite-contract.mjs", classification: "BRIDGE_DEPLOYMENT_TOOLING", hunkCount: 1 };
-const bridgeDiffAttestation = { schemaVersion: 2, rlsDeltaOriginSha: B01_PREREQUISITE.rlsDeltaOriginSha, bridgeOriginSha: B01_PREREQUISITE.bridgeOriginSha, deploymentSourceSha,
+const bridgeDiffAttestation = { schemaVersion: 3, rlsDeltaOriginSha: B01_PREREQUISITE.rlsDeltaOriginSha, bridgeOriginSha: B01_PREREQUISITE.bridgeOriginSha, deploymentSourceSha,
   bridge: { base: B01_PREREQUISITE.rlsDeltaOriginSha, target: B01_PREREQUISITE.bridgeOriginSha, entries: [bridgeEntry], patchSha256: "2".repeat(64) },
   predecessorCorrection: { base: B01_PREREQUISITE.bridgeOriginSha, target: B01_PREREQUISITE.correctionBaseSha, entries: [bridgeEntry], patchSha256: "3".repeat(64) },
-  correction: { base: B01_PREREQUISITE.correctionBaseSha, target: deploymentSourceSha, entries: [bridgeEntry], patchSha256: "4".repeat(64) } };
+  runtimeEvidence: { base: B01_PREREQUISITE.correctionBaseSha, target: B01_PREREQUISITE.recoveryBaseSha, entries: [bridgeEntry], patchSha256: "4".repeat(64) },
+  recovery: { base: B01_PREREQUISITE.recoveryBaseSha, target: deploymentSourceSha, entries: [bridgeEntry], patchSha256: "5".repeat(64) } };
 bridgeDiffAttestation.attestationSha256 = canonicalSha256(bridgeDiffAttestation);
 const executor = fs.readFileSync("scripts/aws/production-b01-prerequisite-executor.cjs", "utf8"), executorSourceSha256 = crypto.createHash("sha256").update(executor).digest("hex");
 const taskArn = "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/" + "a".repeat(32);
@@ -29,10 +32,13 @@ const runTaskRequest = buildB01RunTaskRequest({ taskDefinitionArn, deploymentSou
 const runTaskRequestBody = { eventId: "12345678-1234-1234-1234-123456789abc", eventTime: new Date(now.getTime() - 20_000).toISOString(), taskArn, taskDefinitionArn,
   cluster: "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main", launchType: "FARGATE", count: 1, enableExecuteCommand: false, overridesPresent: false };
 const runTaskRequestEvidence = { ...runTaskRequestBody, requestSha256: canonicalSha256(runTaskRequest) };
+const terminalTaskEvidenceBody = { schemaVersion: 1, kind: "PRODUCTION_B01_TERMINAL_TASK_EVIDENCE",
+  eventId: "32345678-1234-1234-1234-123456789abc", eventTime: now.toISOString(), taskArn, taskDefinitionArn, taskVersion: 4, containerExitCode: 0 };
+const terminalTaskEvidence = { ...terminalTaskEvidenceBody, evidenceSha256: canonicalSha256(terminalTaskEvidenceBody) };
 
 const receipt = (changes = {}) => buildB01PrerequisiteReceipt({ deploymentSourceSha, predecessorRlsIdentity: "3".repeat(64), successorRlsIdentity: "4".repeat(64),
   liveRlsIdentity: "4".repeat(64), executorSourceSha256, executorContractSha256: "5".repeat(64), executorCommandSha256: "6".repeat(64),
-  executionResult: "APPLIED", writeCount: 7, taskArn, taskDefinitionArn, runTaskRequestEvidence, bridgeDiffAttestation,
+  executionResult: "APPLIED", writeCount: 7, taskArn, taskDefinitionArn, runTaskRequestEvidence, terminalTaskEvidence, bridgeDiffAttestation,
   executedAt: now.toISOString(), expiresAt: new Date(now.getTime() + B01_PREREQUISITE.maxReceiptAgeMs).toISOString(), ...changes });
 const reseal = (value, changes) => { const body = { ...value, ...changes }; delete body.receiptSha256; return { ...body, receiptSha256: canonicalSha256(body) }; };
 
@@ -41,16 +47,18 @@ test("bridge diff accepts only the reviewed bridge inventory and binds exact pat
   const patch = files.map((file) => `diff --git a/${file} b/${file}\n@@ -1 +1 @@\n-old\n+new`).join("\n");
   const calls = [], attestation = attestBridgeDiff({ deploymentSourceSha, git: (args) => { calls.push(args); if (args[0] === "merge-base") return "";
     if (args[0] === "rev-parse") return args[1] === `${B01_PREREQUISITE.bridgeOriginSha}^1` ? B01_PREREQUISITE.rlsDeltaOriginSha
-      : args[1] === `${B01_PREREQUISITE.correctionBaseSha}^1` ? B01_PREREQUISITE.bridgeOriginSha : B01_PREREQUISITE.correctionBaseSha;
+      : args[1] === `${B01_PREREQUISITE.correctionBaseSha}^1` ? B01_PREREQUISITE.bridgeOriginSha
+        : args[1] === `${B01_PREREQUISITE.recoveryBaseSha}^1` ? B01_PREREQUISITE.correctionBaseSha : B01_PREREQUISITE.recoveryBaseSha;
     if (args.includes("--name-only")) return files.join("\n"); return patch; } });
   assert.equal(attestation.rlsDeltaOriginSha, B01_PREREQUISITE.rlsDeltaOriginSha); assert.equal(attestation.deploymentSourceSha, deploymentSourceSha);
   assert.equal(attestation.bridgeOriginSha, B01_PREREQUISITE.bridgeOriginSha); assert.equal(attestation.bridge.entries.length, 3);
-  assert.equal(attestation.predecessorCorrection.entries.length, 3); assert.equal(attestation.correction.entries.length, 3);
-  assert.ok([...attestation.bridge.entries, ...attestation.predecessorCorrection.entries, ...attestation.correction.entries].every(({ hunkCount }) => hunkCount === 1));
+  assert.equal(attestation.predecessorCorrection.entries.length, 3); assert.equal(attestation.runtimeEvidence.entries.length, 3); assert.equal(attestation.recovery.entries.length, 3);
+  assert.ok([...attestation.bridge.entries, ...attestation.predecessorCorrection.entries, ...attestation.runtimeEvidence.entries, ...attestation.recovery.entries].every(({ hunkCount }) => hunkCount === 1));
   assert.match(attestation.bridge.patchSha256, /^[a-f0-9]{64}$/); assert.match(attestation.predecessorCorrection.patchSha256, /^[a-f0-9]{64}$/);
-  assert.match(attestation.correction.patchSha256, /^[a-f0-9]{64}$/);
+  assert.match(attestation.runtimeEvidence.patchSha256, /^[a-f0-9]{64}$/); assert.match(attestation.recovery.patchSha256, /^[a-f0-9]{64}$/);
   assert.deepEqual(calls.filter(([name]) => name === "merge-base").map((args) => args.slice(2)), [[B01_PREREQUISITE.rlsDeltaOriginSha, B01_PREREQUISITE.bridgeOriginSha],
-    [B01_PREREQUISITE.bridgeOriginSha, B01_PREREQUISITE.correctionBaseSha], [B01_PREREQUISITE.correctionBaseSha, deploymentSourceSha]]);
+    [B01_PREREQUISITE.bridgeOriginSha, B01_PREREQUISITE.correctionBaseSha], [B01_PREREQUISITE.correctionBaseSha, B01_PREREQUISITE.recoveryBaseSha],
+    [B01_PREREQUISITE.recoveryBaseSha, deploymentSourceSha]]);
 });
 
 test("bridge attestation accepts only the immediate reviewed correction successor", () => {
@@ -58,8 +66,9 @@ test("bridge attestation accepts only the immediate reviewed correction successo
     /Reviewed bridge origin|immediate protected-main prerequisite-correction successor/);
   assert.throws(() => attestBridgeDiff({ deploymentSourceSha, git: (args) => args[0] === "merge-base" ? "" : args[0] === "rev-parse"
     ? args[1] === `${B01_PREREQUISITE.bridgeOriginSha}^1` ? B01_PREREQUISITE.rlsDeltaOriginSha
-      : args[1] === `${B01_PREREQUISITE.correctionBaseSha}^1` ? B01_PREREQUISITE.bridgeOriginSha : "f".repeat(40) : "" }),
-  /immediate protected-main runtime-evidence successor/);
+      : args[1] === `${B01_PREREQUISITE.correctionBaseSha}^1` ? B01_PREREQUISITE.bridgeOriginSha
+        : args[1] === `${B01_PREREQUISITE.recoveryBaseSha}^1` ? B01_PREREQUISITE.correctionBaseSha : "f".repeat(40) : "" }),
+  /immediate protected-main expired-task recovery successor/);
 });
 
 test("application, auth, RLS, schema, and unclassified bridge changes fail closed", () => {
@@ -103,7 +112,7 @@ test("receipt binds different RLS origin and current deployment source and rejec
   assert.equal(assertB01PrerequisiteReceipt(value, { deploymentSourceSha, bridgeDiffAttestation, now: now.getTime() }).receiptSha256, value.receiptSha256);
   for (const changed of [{ rlsDeltaOriginSha: "0".repeat(40) }, { deploymentSourceSha: "9".repeat(40) }, { environment: "staging" },
     { successorRlsIdentity: "8".repeat(64) }, { migrationSetDigest: "8".repeat(64) }, { bridgeDiffAttestation: { ...bridgeDiffAttestation,
-      correction: { ...bridgeDiffAttestation.correction, patchSha256: "8".repeat(64) } } }]) {
+      recovery: { ...bridgeDiffAttestation.recovery, patchSha256: "8".repeat(64) } } }]) {
     assert.throws(() => assertB01PrerequisiteReceipt({ ...value, ...changed }, { deploymentSourceSha, bridgeDiffAttestation, now: now.getTime() }));
   }
   assert.throws(() => assertB01PrerequisiteReceipt(value, { deploymentSourceSha, bridgeDiffAttestation, now: now.getTime() + B01_PREREQUISITE.maxReceiptAgeMs }));
@@ -179,6 +188,7 @@ test("structured executor telemetry exposes only allowlisted stages and sanitize
 
 test("receipt RLS identities must match the reconstructed source-fixed executor contract", () => {
   const built = buildB01ExecutorInput({ deploymentSourceSha, databaseHostname: "db.synthetic.invalid" });
+  assert.equal(built.contract.successorRlsIdentity, "24b8389a47b2c120e88a080db3e751fa52577fb684356860d183499327275577");
   const value = receipt({ predecessorRlsIdentity: built.contract.predecessorRlsIdentity, successorRlsIdentity: built.contract.successorRlsIdentity,
     liveRlsIdentity: built.contract.successorRlsIdentity, executorSourceSha256: built.contract.executorSourceSha256,
     executorContractSha256: built.contractSha256, executorCommandSha256: built.commandSha256 });
@@ -319,6 +329,200 @@ test("CloudTrail proves the RunTask request supplied no runtime overrides", () =
   const activeDefault = structuredClone(cloudTrail), changedDefault = JSON.parse(activeDefault[0].CloudTrailEvent); changedDefault.requestParameters.enableECSManagedTags = true;
   activeDefault[0].CloudTrailEvent = JSON.stringify(changedDefault);
   assert.throws(() => authenticateB01RunTaskCloudTrail(activeDefault, { taskArn, taskDefinitionArn, deploymentSourceSha }));
+});
+
+const historicalRunTaskEvent = ({ arn = taskArn, definition = taskDefinitionArn, sourceSha = deploymentSourceSha,
+  eventId = runTaskRequestBody.eventId, eventTime = runTaskRequestBody.eventTime, request = {}, task = {}, account = B01_PREREQUISITE.account } = {}) => {
+  const exactRequest = buildB01RunTaskRequest({ taskDefinitionArn: definition, deploymentSourceSha: sourceSha });
+  const responseTask = { taskArn: arn, taskDefinitionArn: definition,
+    clusterArn: `arn:aws:ecs:${B01_PREREQUISITE.region}:${B01_PREREQUISITE.account}:cluster/${B01_PREREQUISITE.cluster}`,
+    group: `family:${B01_PREREQUISITE.executorFamily}`, launchType: "FARGATE", enableExecuteCommand: false,
+    desiredStatus: "RUNNING", lastStatus: "PROVISIONING",
+    overrides: { containerOverrides: [{ name: B01_PREREQUISITE.executorContainer }], inferenceAcceleratorOverrides: [] },
+    containers: [{ name: B01_PREREQUISITE.executorContainer, image: B01_PREREQUISITE.executorImage }], ...task };
+  return { EventId: eventId, EventName: "RunTask", EventSource: "ecs.amazonaws.com", EventTime: eventTime, ReadOnly: "false", Username: "root",
+    CloudTrailEvent: JSON.stringify({ eventID: eventId, eventTime, eventSource: "ecs.amazonaws.com", eventName: "RunTask",
+      awsRegion: B01_PREREQUISITE.region, recipientAccountId: account,
+      userIdentity: { accountId: account, arn: `arn:aws:iam::${account}:root` },
+      requestParameters: { ...exactRequest, dryrun: false, enableECSManagedTags: false, ...request },
+      responseElements: { failures: [], tasks: [responseTask] } }) };
+};
+
+test("expired mutation task requires exact durable launch history and fixed definition", () => {
+  const events = [historicalRunTaskEvent()];
+  const history = authenticateB01MutationLaunchHistory(events, { expectedTaskArn: taskArn, taskDefinitionArn, deploymentSourceSha });
+  assert.match(history.evidenceSha256, /^[a-f0-9]{64}$/); assert.equal(history.requestEvidence.overridesPresent, false);
+  const command = buildB01ExecutorInput({ deploymentSourceSha, databaseHostname: "db.synthetic.invalid" }).command;
+  const definition = { ...buildB01ExecutorDefinition(command), taskDefinitionArn, revision: 1, status: "ACTIVE", tags: [] };
+  const authenticate = (changes = {}) => authenticateB01ExpiredMutationTask({ expectedTaskArn: taskArn,
+    taskDefinitionArn: changes.taskDefinitionArn || taskDefinitionArn, taskDefinition: changes.taskDefinition || definition,
+    taskDefinitionTags: [], events: changes.events || events, launchHistoryEvidenceSha256: changes.launchHistoryEvidenceSha256 || history.evidenceSha256,
+    terminalTaskEvidence: changes.terminalTaskEvidence || terminalTaskEvidence,
+    activeMutationTaskArns: changes.activeMutationTaskArns || [], ambiguousDeploymentSourceSha: changes.sourceSha || deploymentSourceSha,
+    deploymentSourceSha, readExecutorSource: () => executor });
+  assert.equal(authenticate().kind, "PRODUCTION_B01_EXPIRED_TASK_QUIESCENCE");
+  assert.equal(authenticateB01MissingTask({ tasks: [], failures: [{ arn: taskArn, reason: "MISSING" }] }, taskArn), true);
+  assert.throws(() => authenticateB01MissingTask({ tasks: [], failures: [] }, taskArn));
+  assert.throws(() => authenticate({ activeMutationTaskArns: [taskArn] }));
+  const unrelatedBody = { ...terminalTaskEvidenceBody, taskArn: taskArn.replace(/a$/, "b") };
+  assert.throws(() => authenticate({ terminalTaskEvidence: { ...unrelatedBody, evidenceSha256: canonicalSha256(unrelatedBody) } }));
+  assert.throws(() => authenticate({ taskDefinitionArn: taskDefinitionArn.replace(":1", ":2") }));
+  assert.throws(() => authenticate({ sourceSha: "8".repeat(40) }));
+  const overridden = historicalRunTaskEvent({ request: { overrides: { containerOverrides: [{ name: B01_PREREQUISITE.executorContainer, command: ["true"] }] } } });
+  assert.throws(() => authenticateB01MutationLaunchHistory([overridden], { expectedTaskArn: taskArn, taskDefinitionArn, deploymentSourceSha }));
+  const wrongImage = historicalRunTaskEvent({ task: { containers: [{ name: B01_PREREQUISITE.executorContainer, image: "wrong" }] } });
+  assert.throws(() => authenticateB01MutationLaunchHistory([wrongImage], { expectedTaskArn: taskArn, taskDefinitionArn, deploymentSourceSha }));
+});
+
+test("the terminal-evidence exception is bounded to the one pre-capture production attempt", () => {
+  const request = buildB01RunTaskRequest({ taskDefinitionArn: B01_PREREQUISITE.legacyExpiredTaskDefinitionArn,
+    deploymentSourceSha: B01_PREREQUISITE.legacyExpiredDeploymentSourceSha });
+  const evidence = { eventId: B01_PREREQUISITE.legacyExpiredRunTaskEventId, eventTime: B01_PREREQUISITE.legacyExpiredRunTaskEventTime,
+    taskArn: B01_PREREQUISITE.legacyExpiredTaskArn, taskDefinitionArn: B01_PREREQUISITE.legacyExpiredTaskDefinitionArn,
+    cluster: `arn:aws:ecs:${B01_PREREQUISITE.region}:${B01_PREREQUISITE.account}:cluster/${B01_PREREQUISITE.cluster}`,
+    launchType: "FARGATE", count: 1, enableExecuteCommand: false, overridesPresent: false, requestSha256: canonicalSha256(request) };
+  const input = { taskArn: B01_PREREQUISITE.legacyExpiredTaskArn, taskDefinitionArn: B01_PREREQUISITE.legacyExpiredTaskDefinitionArn,
+    deploymentSourceSha: B01_PREREQUISITE.legacyExpiredDeploymentSourceSha, runTaskRequestEvidence: evidence,
+    launchHistoryEvidenceSha256: "7".repeat(64), activeMutationTaskArns: [] };
+  assert.equal(assertB01ExpiredMutationTaskQuiescent(input).legacyExpiredEvidence, true);
+  assert.throws(() => assertB01ExpiredMutationTaskQuiescent({ ...input, taskArn }));
+  assert.throws(() => assertB01ExpiredMutationTaskQuiescent({ ...input, deploymentSourceSha: deploymentSourceSha }));
+  assert.throws(() => assertB01ExpiredMutationTaskQuiescent({ ...input, runTaskRequestEvidence: { ...evidence, eventId: runTaskRequestBody.eventId } }));
+  assert.throws(() => assertB01ExpiredMutationTaskQuiescent({ ...input, taskArn, taskDefinitionArn,
+    deploymentSourceSha, runTaskRequestEvidence }), /lacks durable terminal evidence/);
+});
+
+test("durable ECS terminal events bind the exact mutation task and survive DescribeTasks expiry", () => {
+  const body = { version: "0", id: "42345678-1234-1234-1234-123456789abc", "detail-type": "ECS Task State Change", source: "aws.ecs",
+    account: B01_PREREQUISITE.account, time: now.toISOString(), region: B01_PREREQUISITE.region, resources: [taskArn],
+    detail: { version: 4, clusterArn: `arn:aws:ecs:${B01_PREREQUISITE.region}:${B01_PREREQUISITE.account}:cluster/${B01_PREREQUISITE.cluster}`,
+      taskArn, taskDefinitionArn, group: `family:${B01_PREREQUISITE.executorFamily}`, launchType: "FARGATE",
+      desiredStatus: "STOPPED", lastStatus: "STOPPED", containers: [{ name: B01_PREREQUISITE.executorContainer,
+        lastStatus: "STOPPED", exitCode: 1, image: B01_PREREQUISITE.executorImage, imageDigest: B01_PREREQUISITE.executorImage.split("@")[1] }] } };
+  const events = [{ eventId: "log-1", message: JSON.stringify(body) }];
+  const evidence = authenticateB01TerminalTaskEvents(events, { taskArn, taskDefinitionArn, launchEventTime: runTaskRequestBody.eventTime });
+  assert.equal(evidence.containerExitCode, 1); assert.match(evidence.evidenceSha256, /^[a-f0-9]{64}$/);
+  for (const mutate of [
+    (value) => { value.account = "000000000000"; }, (value) => { value.region = "us-east-1"; },
+    (value) => { value.detail.taskArn = taskArn.replace(/a$/, "b"); }, (value) => { value.detail.taskDefinitionArn = taskDefinitionArn.replace(":1", ":2"); },
+    (value) => { value.detail.containers[0].imageDigest = `sha256:${"0".repeat(64)}`; },
+  ]) { const attacked = structuredClone(body); mutate(attacked); assert.throws(() => authenticateB01TerminalTaskEvents([{ message: JSON.stringify(attacked) }],
+    { taskArn, taskDefinitionArn, launchEventTime: runTaskRequestBody.eventTime })); }
+  const laterRunning = structuredClone(body); laterRunning.id = "52345678-1234-1234-1234-123456789abc";
+  laterRunning.detail.version += 1; laterRunning.detail.lastStatus = "RUNNING"; laterRunning.detail.desiredStatus = "RUNNING";
+  laterRunning.detail.containers[0].lastStatus = "RUNNING";
+  assert.throws(() => authenticateB01TerminalTaskEvents([...events, { message: JSON.stringify(laterRunning) }],
+    { taskArn, taskDefinitionArn, launchEventTime: runTaskRequestBody.eventTime }));
+  const contradictory = structuredClone(body); contradictory.id = "62345678-1234-1234-1234-123456789abc";
+  contradictory.detail.desiredStatus = "RUNNING";
+  assert.throws(() => authenticateB01TerminalTaskEvents([...events, { message: JSON.stringify(contradictory) }],
+    { taskArn, taskDefinitionArn, launchEventTime: runTaskRequestBody.eventTime }));
+  const pages = [{ events, nextToken: "page-2" }, { events: [] }], calls = [];
+  assert.deepEqual(collectB01TerminalTaskEvents((args) => { calls.push(args); return pages.shift(); }, taskArn), events);
+  assert.ok(calls[1].includes("--next-token")); assert.throws(() => collectB01TerminalTaskEvents(() => ({ events: [], nextToken: "same" }), taskArn));
+});
+
+test("future mutation launch requires exact native durable ECS event capture", () => {
+  const arn = `arn:aws:logs:${B01_PREREQUISITE.region}:${B01_PREREQUISITE.account}:log-group:${B01_PREREQUISITE.eventCaptureLogGroup}`;
+  const input = { logGroups: [{ logGroupName: B01_PREREQUISITE.eventCaptureLogGroup, arn: `${arn}:*`, logGroupArn: arn, retentionInDays: 30 }],
+    rules: [{ Name: "ecs-event-capture", State: "ENABLED", EventPattern: JSON.stringify({ source: ["aws.ecs"] }) }],
+    targetsByRule: { "ecs-event-capture": [{ Id: "CloudWatchLogs", Arn: arn }] } };
+  assert.equal(assertB01EcsEventCapture(input).logGroupArn, arn);
+  assert.equal(assertB01EcsEventCapture({ ...input, logGroups: [{ ...input.logGroups[0], retentionInDays: undefined }] }).logGroupArn, arn);
+  assert.equal(assertB01EcsEventCapture({ ...input, logGroups: [{ ...input.logGroups[0], arn: undefined }] }).logGroupArn, arn);
+  assert.equal(assertB01EcsEventCapture({ ...input, rules: [{ ...input.rules[0],
+    EventPattern: JSON.stringify({ source: ["aws.ecs"], "detail-type": ["ECS Task State Change"] }) }] }).retentionInDays, 30);
+  assert.throws(() => assertB01EcsEventCapture({ ...input, logGroups: [] }));
+  assert.throws(() => assertB01EcsEventCapture({ ...input, logGroups: [{ ...input.logGroups[0], retentionInDays: 7 }] }));
+  assert.throws(() => assertB01EcsEventCapture({ ...input, logGroups: [{ ...input.logGroups[0], logGroupArn: `${arn}-lookalike` }] }));
+  assert.throws(() => assertB01EcsEventCapture({ ...input, logGroups: [{ ...input.logGroups[0], arn: `${arn}-lookalike:*` }] }));
+  assert.throws(() => assertB01EcsEventCapture({ ...input, logGroups: [{ ...input.logGroups[0], logGroupArn: arn.replace(B01_PREREQUISITE.account, "000000000000") }] }));
+  assert.throws(() => assertB01EcsEventCapture({ ...input, logGroups: [{ ...input.logGroups[0], logGroupArn: arn.replace(B01_PREREQUISITE.region, "us-east-1") }] }));
+  assert.throws(() => assertB01EcsEventCapture({ ...input, rules: [{ ...input.rules[0], State: "DISABLED" }] }));
+  assert.throws(() => assertB01EcsEventCapture({ ...input, targetsByRule: { "ecs-event-capture": [{ Id: "wrong", Arn: "wrong" }] } }));
+  assert.throws(() => assertB01EcsEventCapture({ ...input, rules: [{ ...input.rules[0], EventPattern: "{" }] }));
+  assert.throws(() => assertB01EcsEventCapture({ ...input, rules: [{ ...input.rules[0], EventPattern: JSON.stringify({ source: ["aws.s3"] }) }] }));
+  assert.throws(() => assertB01EcsEventCapture({ ...input, rules: [{ ...input.rules[0],
+    EventPattern: JSON.stringify({ source: ["aws.ecs"], "detail-type": ["ECS Deployment State Change"] }) }] }));
+  assert.throws(() => assertB01EcsEventCapture({ ...input, rules: [{ ...input.rules[0],
+    EventPattern: JSON.stringify({ source: ["aws.ecs"], detail: { clusterArn: ["wrong"] } }) }] }));
+  assert.throws(() => assertB01EcsEventCapture({ ...input, targetsByRule: { "ecs-event-capture": [
+    ...input.targetsByRule["ecs-event-capture"], { Id: "extra", Arn: arn }] } }));
+  assert.throws(() => assertB01EcsEventCapture({ ...input, targetsByRule: { "ecs-event-capture": [{
+    ...input.targetsByRule["ecs-event-capture"][0], Input: "{}" }] } }));
+  assert.throws(() => assertB01EcsEventCapture({ ...input, rules: [...input.rules,
+    { Name: "unrelated", State: "ENABLED", EventPattern: JSON.stringify({ source: ["aws.s3"] }) }],
+  targetsByRule: { ...input.targetsByRule, unrelated: [{ Id: "other", Arn: arn }] } }));
+  const apply = fs.readFileSync("scripts/aws/apply-production-b01-prerequisite.mjs", "utf8");
+  assert.ok(apply.indexOf("assertB01EcsEventCapture") < apply.indexOf('"ecs","register-task-definition"'));
+  assert.ok(apply.lastIndexOf("authenticateB01TerminalTaskEvents") < apply.lastIndexOf("buildB01PrerequisiteReceipt({"));
+});
+
+test("later historical launches, replayed evidence, and incomplete pagination fail closed", () => {
+  const exact = historicalRunTaskEvent(), laterArn = taskArn.replace(/a$/, "b");
+  const later = historicalRunTaskEvent({ arn: laterArn, eventId: "22345678-1234-1234-1234-123456789abc",
+    eventTime: new Date(Date.parse(runTaskRequestBody.eventTime) + 1_000).toISOString() });
+  assert.throws(() => authenticateB01MutationLaunchHistory([exact, later], { expectedTaskArn: taskArn, taskDefinitionArn, deploymentSourceSha }), /later or ambiguous/);
+  assert.throws(() => authenticateB01MutationLaunchHistory([exact, exact], { expectedTaskArn: taskArn, taskDefinitionArn, deploymentSourceSha }), /duplicate/);
+  assert.throws(() => authenticateB01MutationLaunchHistory([historicalRunTaskEvent({ account: "000000000000" })],
+    { expectedTaskArn: taskArn, taskDefinitionArn, deploymentSourceSha }));
+  const pages = [{ Events: [exact], NextToken: "page-2" }, { Events: [], NextToken: undefined }], calls = [];
+  assert.deepEqual(collectB01RunTaskEvents((args) => { calls.push(args); return pages.shift(); }), [exact]);
+  assert.ok(calls[1].includes("--next-token"));
+  assert.throws(() => collectB01RunTaskEvents(() => ({ Events: [], NextToken: "same" })), /incomplete or cyclic/);
+  assert.throws(() => collectB01RunTaskEvents(() => ({ Events: null })));
+});
+
+test("mutation family census consumes every bounded page and rejects malformed history", () => {
+  const second = taskArn.replace(/a$/, "b"), pages = [{ taskArns: [taskArn], nextToken: "page-2" }, { taskArns: [second] }], calls = [];
+  assert.deepEqual(collectB01MutationTaskArns((args) => { calls.push(args); return pages.shift(); }, "RUNNING"), [taskArn, second]);
+  assert.ok(calls[1].includes("--next-token"));
+  assert.throws(() => collectB01MutationTaskArns(() => ({ taskArns: [], nextToken: "same" }), "RUNNING"), /incomplete or cyclic/);
+  assert.throws(() => collectB01MutationTaskArns(() => ({ taskArns: [taskArn, taskArn] }), "RUNNING"));
+});
+
+test("mutation family census brackets RUNNING and STOPPED without the ineffective PENDING filter", () => {
+  const sibling = taskArn.replace(/a$/, "b"), calls = [];
+  const activeResponses = [{ taskArns: [] }, { taskArns: [] }, { taskArns: [sibling] }, { taskArns: [] }];
+  const active = collectB01MutationCensus((args) => { calls.push(args); return activeResponses.shift(); });
+  assert.deepEqual(calls.map((args) => args[args.indexOf("--desired-status") + 1]), ["RUNNING","STOPPED","RUNNING","STOPPED"]);
+  assert.deepEqual(active.activeMutationTaskArns, [sibling]);
+
+  const stoppedResponses = [{ taskArns: [] }, { taskArns: [] }, { taskArns: [] }, { taskArns: [sibling] }];
+  const stopped = collectB01MutationCensus((args) => args[1] === "describe-tasks"
+    ? { tasks: [{ taskArn: sibling, lastStatus: "STOPPED" }], failures: [] }
+    : stoppedResponses.shift());
+  assert.deepEqual(stopped.taskCensus.STOPPED, [sibling]); assert.deepEqual(stopped.activeMutationTaskArns, []);
+});
+
+test("reconciliation result requires a stable history-census-history-census-history bracket", () => {
+  const evidence = "7".repeat(64), stable = () => ({ evidenceSha256: evidence });
+  const empty = () => ({ taskCensus: { RUNNING: [], PENDING: [], STOPPED: [] }, activeMutationTaskArns: [] });
+  const calls = [];
+  assert.equal(collectB01RecoveryPostflight({ initialLaunchHistorySha256: evidence, ambiguousTaskArn: taskArn,
+    collectLaunchHistory: () => { calls.push("history"); return stable(); },
+    collectMutationCensus: () => { calls.push("census"); return empty(); } }).afterCensus.evidenceSha256, evidence);
+  assert.deepEqual(calls, ["history","census","history","census","history"]);
+  const probe = fs.readFileSync("scripts/aws/probe-production-b01-prerequisite.mjs", "utf8");
+  assert.ok(probe.lastIndexOf("authenticateB01ReadOnlyResult") < probe.lastIndexOf("collectB01RecoveryPostflight"));
+  assert.throws(() => collectB01RecoveryPostflight({ initialLaunchHistorySha256: evidence, ambiguousTaskArn: taskArn,
+    collectLaunchHistory: stable, collectMutationCensus: () => ({ ...empty(), taskCensus: { RUNNING: [taskArn.replace(/a$/, "b")], PENDING: [], STOPPED: [] },
+      activeMutationTaskArns: [taskArn.replace(/a$/, "b")] }) }), /became active/);
+  assert.throws(() => collectB01RecoveryPostflight({ initialLaunchHistorySha256: evidence, ambiguousTaskArn: taskArn,
+    collectLaunchHistory: stable, collectMutationCensus: () => ({ ...empty(), taskCensus: { RUNNING: [], PENDING: [], STOPPED: [taskArn.replace(/a$/, "b")] } }) }), /unaccounted/);
+  let reads = 0;
+  assert.throws(() => collectB01RecoveryPostflight({ initialLaunchHistorySha256: evidence, ambiguousTaskArn: taskArn,
+    collectLaunchHistory: () => ({ evidenceSha256: ++reads === 1 ? evidence : "8".repeat(64) }), collectMutationCensus: empty }), /across the final census/);
+  assert.throws(() => collectB01RecoveryPostflight({ initialLaunchHistorySha256: evidence, ambiguousTaskArn: taskArn,
+    collectLaunchHistory: () => ({ evidenceSha256: "8".repeat(64) }), collectMutationCensus: empty }), /before the final census/);
+  let censusReads = 0;
+  assert.throws(() => collectB01RecoveryPostflight({ initialLaunchHistorySha256: evidence, ambiguousTaskArn: taskArn,
+    collectLaunchHistory: stable, collectMutationCensus: () => ++censusReads === 1 ? empty() : ({ ...empty(),
+      taskCensus: { RUNNING: [], PENDING: [], STOPPED: [taskArn.replace(/a$/, "b")] } }) }), /unaccounted/);
+  let trailingReads = 0;
+  assert.throws(() => collectB01RecoveryPostflight({ initialLaunchHistorySha256: evidence, ambiguousTaskArn: taskArn,
+    collectLaunchHistory: () => ({ evidenceSha256: ++trailingReads < 3 ? evidence : "8".repeat(64) }),
+    collectMutationCensus: empty }), /after the final census/);
 });
 
 test("reconciliation authenticates the exact stopped ambiguous mutation task and rejects non-quiescent substitutes", () => {
