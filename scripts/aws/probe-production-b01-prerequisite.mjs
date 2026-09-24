@@ -9,13 +9,14 @@ import { APP_ONLY } from "./production-app-only-contract.mjs";
 import { createProductionAwsCredentialEnvironment, productionAwsExecutable, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { assertProtectedCheckout } from "./prepare-production-initial-activation-reconciler-installation.mjs";
 import { assertEcsTaskDefinitionReadback } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/ecs-task-definition-readback.mjs";
-import { B01_PREREQUISITE, assertB01AmbiguousMutationTaskQuiescent, assertB01LivePredecessor, assertB01RunTaskRequestEvidence,
+import { B01_PREREQUISITE, assertB01AmbiguousMutationTaskQuiescent, assertB01ExpiredMutationTaskQuiescent, assertB01LivePredecessor, assertB01RunTaskRequestEvidence,
   assertSemanticallyEmptyB01TaskOverrides, attestBridgeDiff, buildB01ExecutorDefinition, buildB01ReadOnlyDefinition,
-  buildB01RunTaskRequest, canonicalSha256 } from "./production-b01-prerequisite-contract.mjs";
+  buildB01RunTaskRequest, canonicalSha256, authenticateB01TerminalTaskEvents, collectB01TerminalTaskEvents } from "./production-b01-prerequisite-contract.mjs";
 import { authenticateB01ExecutorCommand, authenticateB01RunTaskCloudTrail, buildB01ReadOnlyInput } from "./apply-production-b01-prerequisite.mjs";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const parse = (value) => JSON.parse(Buffer.isBuffer(value) ? value.toString("utf8") : value);
+const MUTATION_TASK_DEFINITION = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/mscqr-production-b01-prerequisite:[1-9][0-9]*$/;
 
 export function authenticateB01ReadOnlyResult(message, contract) {
   assert.ok(typeof message === "string" && Buffer.byteLength(message) <= 4096);
@@ -51,6 +52,76 @@ export function authenticateB01AmbiguousMutationTask({ expectedTaskArn, task, ta
     runTaskRequestEvidence, activeMutationTaskArns });
 }
 
+export function authenticateB01ExpiredMutationTask({ expectedTaskArn, taskDefinitionArn, taskDefinition, taskDefinitionTags = [], events,
+  launchHistoryEvidenceSha256, terminalTaskEvidence, activeMutationTaskArns = [], ambiguousDeploymentSourceSha, deploymentSourceSha, repositoryRoot = root,
+  readExecutorSource = (sha) => execFileSync("git", ["show", `${sha}:scripts/aws/production-b01-prerequisite-executor.cjs`],
+    { cwd: repositoryRoot, encoding: "utf8" }) } = {}) {
+  assert.match(ambiguousDeploymentSourceSha || "", /^[a-f0-9]{40}$/); assert.match(deploymentSourceSha || "", /^[a-f0-9]{40}$/);
+  assert.ok([B01_PREREQUISITE.correctionBaseSha, deploymentSourceSha].includes(ambiguousDeploymentSourceSha));
+  assert.match(taskDefinitionArn || "", MUTATION_TASK_DEFINITION);
+  const command = taskDefinition?.containerDefinitions?.find(({ name }) => name === B01_PREREQUISITE.executorContainer)?.command;
+  const executorSource = readExecutorSource(ambiguousDeploymentSourceSha);
+  authenticateB01ExecutorCommand({ command, deploymentSourceSha: ambiguousDeploymentSourceSha, repositoryRoot, executorSource });
+  assertEcsTaskDefinitionReadback({ definition: { ...taskDefinition, tags: taskDefinitionTags }, taskDefinitionArn,
+    expected: buildB01ExecutorDefinition(command), label: "expired ambiguous B01 mutation task" });
+  const runTaskRequestEvidence = authenticateB01RunTaskCloudTrail(events, { taskArn: expectedTaskArn,
+    taskDefinitionArn, deploymentSourceSha: ambiguousDeploymentSourceSha });
+  return assertB01ExpiredMutationTaskQuiescent({ taskArn: expectedTaskArn, taskDefinitionArn,
+    deploymentSourceSha: ambiguousDeploymentSourceSha, runTaskRequestEvidence, launchHistoryEvidenceSha256, terminalTaskEvidence, activeMutationTaskArns });
+}
+
+export function authenticateB01MissingTask(response, expectedTaskArn) {
+  assert.deepEqual(response?.tasks || [], []); assert.equal(response?.failures?.length, 1);
+  assert.deepEqual(response.failures[0], { arn: expectedTaskArn, reason: "MISSING" }); return true;
+}
+
+export function authenticateB01MutationLaunchHistory(events, { expectedTaskArn, taskDefinitionArn, deploymentSourceSha } = {}) {
+  assert.ok(Array.isArray(events)); assert.match(expectedTaskArn || "", /^arn:aws:ecs:eu-west-2:368992683803:task\/mscqr-prod-euw2-main\/[a-f0-9]{32}$/);
+  assert.match(taskDefinitionArn || "", MUTATION_TASK_DEFINITION);
+  const parsed = events.map((event) => ({ event, body: JSON.parse(event.CloudTrailEvent) }));
+  assert.equal(new Set(parsed.map(({ event }) => event.EventId)).size, parsed.length, "CloudTrail RunTask history contains duplicate events.");
+  const target = parsed.filter(({ body }) => body.responseElements?.tasks?.some(({ taskArn }) => taskArn === expectedTaskArn));
+  assert.equal(target.length, 1, "Historical B01 RunTask event is unavailable or ambiguous.");
+  const targetTime = Date.parse(target[0].body.eventTime); assert.ok(Number.isFinite(targetTime));
+  const family = parsed.filter(({ body }) => MUTATION_TASK_DEFINITION.test(body.requestParameters?.taskDefinition || "")
+    || body.responseElements?.tasks?.some(({ group, taskDefinitionArn: definition }) => group === `family:${B01_PREREQUISITE.executorFamily}`
+      || MUTATION_TASK_DEFINITION.test(definition || "")));
+  const relevant = family.filter(({ body }) => Date.parse(body.eventTime) >= targetTime);
+  assert.equal(relevant.length, 1, "A later or ambiguous B01 mutation launch is not independently accounted for.");
+  const { event, body } = relevant[0]; assert.equal(body.eventSource, "ecs.amazonaws.com"); assert.equal(body.eventName, "RunTask");
+  assert.equal(body.recipientAccountId, B01_PREREQUISITE.account); assert.equal(body.awsRegion, B01_PREREQUISITE.region);
+  assert.equal(body.userIdentity?.accountId, B01_PREREQUISITE.account); assert.equal(body.userIdentity?.arn, `arn:aws:iam::${B01_PREREQUISITE.account}:root`);
+  assert.equal(event.EventId, body.eventID); assert.equal(Date.parse(event.EventTime), targetTime); assert.equal(event.EventSource, "ecs.amazonaws.com");
+  assert.equal(event.EventName, "RunTask"); assert.equal(event.ReadOnly, "false"); assert.deepEqual(body.responseElements?.failures || [], []);
+  assert.equal(body.responseElements?.tasks?.length, 1); const task = body.responseElements.tasks[0];
+  assert.equal(task.taskArn, expectedTaskArn); assert.equal(task.taskDefinitionArn, taskDefinitionArn);
+  assert.equal(task.clusterArn, `arn:aws:ecs:${B01_PREREQUISITE.region}:${B01_PREREQUISITE.account}:cluster/${B01_PREREQUISITE.cluster}`);
+  assert.equal(task.group, `family:${B01_PREREQUISITE.executorFamily}`); assert.equal(task.launchType, "FARGATE");
+  assert.equal(task.enableExecuteCommand, false); assert.equal(task.desiredStatus, "RUNNING");
+  assert.ok(["PROVISIONING", "PENDING", "ACTIVATING", "RUNNING"].includes(task.lastStatus));
+  assertSemanticallyEmptyB01TaskOverrides(task.overrides); assert.equal(task.containers?.length, 1);
+  assert.equal(task.containers[0]?.name, B01_PREREQUISITE.executorContainer); assert.equal(task.containers[0]?.image, B01_PREREQUISITE.executorImage);
+  const requestEvidence = authenticateB01RunTaskCloudTrail(events, { taskArn: expectedTaskArn, taskDefinitionArn, deploymentSourceSha });
+  const bodyEvidence = { schemaVersion: 1, kind: "PRODUCTION_B01_MUTATION_LAUNCH_HISTORY", expectedTaskArn,
+    taskDefinitionArn, deploymentSourceSha, targetEventId: body.eventID, targetEventTime: body.eventTime,
+    familyLaunchEventIds: relevant.map(({ body: value }) => value.eventID).sort(), requestEvidence };
+  return Object.freeze({ ...bodyEvidence, evidenceSha256: canonicalSha256(bodyEvidence), requestEvidence });
+}
+
+export function collectB01RunTaskEvents(aws) {
+  assert.equal(typeof aws, "function"); const events = [], tokens = new Set(); let token;
+  for (let page = 0; page < 20; page += 1) {
+    const args = ["cloudtrail","lookup-events","--region",APP_ONLY.region,"--lookup-attributes","AttributeKey=EventName,AttributeValue=RunTask",
+      "--max-results","50","--no-paginate",...(token ? ["--next-token",token] : [])];
+    const response = aws(args); assert.ok(Array.isArray(response?.Events) && response.Events.length <= 50);
+    events.push(...response.Events); const next = response.NextToken;
+    if (next === undefined) return Object.freeze(events);
+    assert.ok(typeof next === "string" && next && !tokens.has(next), "CloudTrail RunTask pagination is incomplete or cyclic.");
+    tokens.add(next); token = next;
+  }
+  throw new Error("CloudTrail RunTask history exceeds the bounded page limit.");
+}
+
 export function authenticateB01MutationTaskListing(response) {
   assert.ok(Array.isArray(response?.taskArns) && response.taskArns.length <= 100);
   assert.equal(response.nextToken, undefined, "B01 mutation task census is incomplete.");
@@ -59,10 +130,34 @@ export function authenticateB01MutationTaskListing(response) {
   return response.taskArns;
 }
 
+export function collectB01MutationTaskArns(aws, status) {
+  assert.equal(typeof aws, "function"); assert.ok(["RUNNING","PENDING","STOPPED"].includes(status));
+  const arns = new Set(), tokens = new Set(); let token;
+  for (let page = 0; page < 10; page += 1) {
+    const args = ["ecs","list-tasks","--region",APP_ONLY.region,"--cluster",APP_ONLY.cluster,"--family",B01_PREREQUISITE.executorFamily,
+      "--desired-status",status,"--max-results","100","--no-paginate",...(token ? ["--next-token",token] : [])];
+    const response = aws(args); assert.ok(Array.isArray(response?.taskArns) && response.taskArns.length <= 100);
+    for (const arn of response.taskArns) { assert.match(arn, /^arn:aws:ecs:eu-west-2:368992683803:task\/mscqr-prod-euw2-main\/[a-f0-9]{32}$/); assert.ok(!arns.has(arn)); arns.add(arn); }
+    const next = response.nextToken ?? response.NextToken;
+    if (next === undefined) return Object.freeze([...arns].sort());
+    assert.ok(typeof next === "string" && next && !tokens.has(next), "B01 mutation task census pagination is incomplete or cyclic.");
+    tokens.add(next); token = next;
+  }
+  throw new Error("B01 mutation task census exceeds the bounded page limit.");
+}
+
 export function findNonTerminalB01MutationTasks(response, expectedTaskArns) {
   assert.deepEqual(response?.failures || [], []); assert.ok(Array.isArray(response?.tasks));
   assert.deepEqual(response.tasks.map(({ taskArn }) => taskArn).sort(), [...expectedTaskArns].sort());
   return response.tasks.filter(({ lastStatus }) => lastStatus !== "STOPPED").map(({ taskArn }) => taskArn);
+}
+
+export function assertB01RecoveryPostflight({ initialLaunchHistorySha256, finalLaunchHistorySha256,
+  activeMutationTaskArns = [] } = {}) {
+  assert.match(initialLaunchHistorySha256 || "", /^[a-f0-9]{64}$/);
+  assert.equal(finalLaunchHistorySha256, initialLaunchHistorySha256, "B01 mutation launch history changed during reconciliation.");
+  assert.deepEqual(activeMutationTaskArns, [], "A B01 mutation executor became active during reconciliation.");
+  return true;
 }
 
 export async function probeProductionB01Prerequisite({ deploymentSourceSha, ambiguousTaskArn, ambiguousDeploymentSourceSha, awsProfile, repositoryRoot = root,
@@ -81,24 +176,45 @@ export async function probeProductionB01Prerequisite({ deploymentSourceSha, ambi
   assert.equal(database?.DBInstanceIdentifier,B01_PREREQUISITE.databaseIdentifier); assert.equal(database?.DBInstanceStatus, "available");
   assert.match(database?.Endpoint?.Address||"",/^[a-z0-9.-]+$/); assert.equal(database?.Endpoint?.Port,5432);
   assert.match(ambiguousTaskArn || "", /^arn:aws:ecs:eu-west-2:368992683803:task\/mscqr-prod-euw2-main\/[a-f0-9]{32}$/);
-  const taskCensus = Object.fromEntries(["RUNNING","PENDING","STOPPED"].map((status) => {
-    const response = aws(["ecs","list-tasks","--region",APP_ONLY.region,"--cluster",APP_ONLY.cluster,"--family",B01_PREREQUISITE.executorFamily,"--desired-status",status]);
-    return [status, authenticateB01MutationTaskListing(response)];
-  }));
-  const stoppedDesired = taskCensus.STOPPED;
-  const transitioningToStopped = stoppedDesired.length === 0 ? [] : findNonTerminalB01MutationTasks(
-    aws(["ecs","describe-tasks","--region",APP_ONLY.region,"--cluster",APP_ONLY.cluster,"--tasks",...stoppedDesired]), stoppedDesired);
-  const activeMutationTaskArns = [...taskCensus.RUNNING, ...taskCensus.PENDING, ...transitioningToStopped];
-  assert.equal(new Set(activeMutationTaskArns).size, activeMutationTaskArns.length);
+  const mutationCensus = () => {
+    const taskCensus = Object.fromEntries(["RUNNING","PENDING","STOPPED"].map((status) => [status, collectB01MutationTaskArns(aws, status)]));
+    const stoppedDesired = taskCensus.STOPPED;
+    const transitioningToStopped = stoppedDesired.length === 0 ? [] : findNonTerminalB01MutationTasks(
+      aws(["ecs","describe-tasks","--region",APP_ONLY.region,"--cluster",APP_ONLY.cluster,"--tasks",...stoppedDesired]), stoppedDesired);
+    const activeMutationTaskArns = [...taskCensus.RUNNING, ...taskCensus.PENDING, ...transitioningToStopped];
+    assert.equal(new Set(activeMutationTaskArns).size, activeMutationTaskArns.length); return { taskCensus, activeMutationTaskArns };
+  };
+  const ambiguousEvents = collectB01RunTaskEvents(aws);
+  const matchingEvents = ambiguousEvents.map((event) => ({ event, body: JSON.parse(event.CloudTrailEvent) })).filter(({ body }) =>
+    body.responseElements?.tasks?.some(({ taskArn }) => taskArn === ambiguousTaskArn));
+  assert.equal(matchingEvents.length, 1, "Historical B01 RunTask event is unavailable or ambiguous.");
+  const ambiguousTaskDefinitionArn = matchingEvents[0].body.requestParameters?.taskDefinition;
+  assert.match(ambiguousTaskDefinitionArn || "", MUTATION_TASK_DEFINITION);
+  const launchHistory = authenticateB01MutationLaunchHistory(ambiguousEvents, { expectedTaskArn: ambiguousTaskArn,
+    taskDefinitionArn: ambiguousTaskDefinitionArn, deploymentSourceSha: ambiguousDeploymentSourceSha });
+  const { activeMutationTaskArns } = mutationCensus(); assert.deepEqual(activeMutationTaskArns, []);
   const ambiguousResponse = aws(["ecs","describe-tasks","--region",APP_ONLY.region,"--cluster",APP_ONLY.cluster,"--tasks",ambiguousTaskArn]);
-  assert.deepEqual(ambiguousResponse.failures || [], []); assert.equal(ambiguousResponse.tasks?.length, 1);
-  const ambiguousTask = ambiguousResponse.tasks[0];
-  const ambiguousDefinition = aws(["ecs","describe-task-definition","--region",APP_ONLY.region,"--task-definition",ambiguousTask.taskDefinitionArn,"--include","TAGS"]);
-  const ambiguousEvents = aws(["cloudtrail","lookup-events","--region",APP_ONLY.region,"--lookup-attributes","AttributeKey=EventName,AttributeValue=RunTask",
-    "--start-time",new Date(new Date(ambiguousTask.createdAt).getTime()-60_000).toISOString(),"--end-time",new Date(new Date(ambiguousTask.stoppedAt).getTime()+60_000).toISOString(),"--max-results","50"]).Events||[];
-  const quiescence = authenticateB01AmbiguousMutationTask({ expectedTaskArn: ambiguousTaskArn, task: ambiguousTask, taskDefinition: ambiguousDefinition.taskDefinition,
-    taskDefinitionTags: ambiguousDefinition.tags || [], events: ambiguousEvents, activeMutationTaskArns, ambiguousDeploymentSourceSha,
-    deploymentSourceSha, repositoryRoot });
+  const ambiguousDefinition = aws(["ecs","describe-task-definition","--region",APP_ONLY.region,"--task-definition",ambiguousTaskDefinitionArn,"--include","TAGS"]);
+  let quiescence;
+  if ((ambiguousResponse.tasks || []).length === 1 && (ambiguousResponse.failures || []).length === 0) {
+    const ambiguousTask = ambiguousResponse.tasks[0]; assert.equal(ambiguousTask.taskDefinitionArn, ambiguousTaskDefinitionArn);
+    quiescence = authenticateB01AmbiguousMutationTask({ expectedTaskArn: ambiguousTaskArn, task: ambiguousTask, taskDefinition: ambiguousDefinition.taskDefinition,
+      taskDefinitionTags: ambiguousDefinition.tags || [], events: ambiguousEvents, activeMutationTaskArns, ambiguousDeploymentSourceSha,
+      deploymentSourceSha, repositoryRoot });
+  } else {
+    authenticateB01MissingTask(ambiguousResponse, ambiguousTaskArn);
+    const legacyExpired = ambiguousTaskArn === B01_PREREQUISITE.legacyExpiredTaskArn
+      && ambiguousTaskDefinitionArn === B01_PREREQUISITE.legacyExpiredTaskDefinitionArn
+      && ambiguousDeploymentSourceSha === B01_PREREQUISITE.legacyExpiredDeploymentSourceSha;
+    const terminalEvidence = legacyExpired ? undefined : authenticateB01TerminalTaskEvents(
+      collectB01TerminalTaskEvents(aws, ambiguousTaskArn), { taskArn: ambiguousTaskArn,
+        taskDefinitionArn: ambiguousTaskDefinitionArn, launchEventTime: launchHistory.targetEventTime });
+    quiescence = authenticateB01ExpiredMutationTask({ expectedTaskArn: ambiguousTaskArn, taskDefinitionArn: ambiguousTaskDefinitionArn,
+      taskDefinition: ambiguousDefinition.taskDefinition, taskDefinitionTags: ambiguousDefinition.tags || [], events: ambiguousEvents,
+      launchHistoryEvidenceSha256: launchHistory.evidenceSha256, terminalTaskEvidence: terminalEvidence,
+      activeMutationTaskArns, ambiguousDeploymentSourceSha,
+      deploymentSourceSha, repositoryRoot });
+  }
   const built = buildB01ReadOnlyInput({ deploymentSourceSha, databaseHostname: database.Endpoint?.Address,
     ambiguousMutationTaskEvidenceSha256: quiescence.evidenceSha256, repositoryRoot });
   const definition = buildB01ReadOnlyDefinition(built.command); assertProtectedCheckout({ sourceSha: deploymentSourceSha, repositoryRoot });
@@ -122,6 +238,10 @@ export async function probeProductionB01Prerequisite({ deploymentSourceSha, ambi
   for(let attempt=0; attempt<12 && !message; attempt++){const events=aws(["logs","get-log-events","--region",APP_ONLY.region,"--log-group-name",B01_PREREQUISITE.logGroup,"--log-stream-name",stream,"--start-from-head","--limit","10"]).events||[];if(events.length){assert.equal(events.length,1);message=events[0].message;}else await wait(5000);}
   assert.ok(message); const result=authenticateB01ReadOnlyResult(message,built.contract);
   assert.equal(task.containers[0].exitCode,result.classification==="UNKNOWN"?2:0);
+  const finalLaunchHistory = authenticateB01MutationLaunchHistory(collectB01RunTaskEvents(aws), { expectedTaskArn: ambiguousTaskArn,
+    taskDefinitionArn: ambiguousTaskDefinitionArn, deploymentSourceSha: ambiguousDeploymentSourceSha });
+  assertB01RecoveryPostflight({ initialLaunchHistorySha256: launchHistory.evidenceSha256,
+    finalLaunchHistorySha256: finalLaunchHistory.evidenceSha256, activeMutationTaskArns: mutationCensus().activeMutationTaskArns });
   return Object.freeze({ status:"PRODUCTION_B01_READONLY_RECONCILED",ambiguousMutationTaskEvidenceSha256:quiescence.evidenceSha256,
     taskArn,taskDefinitionArn,requestEvidence,classification:result.classification,liveRlsIdentity:result.liveRlsIdentity||null,
     livePredecessorMatch:result.livePredecessorMatch??false,liveSuccessorMatch:result.liveSuccessorMatch??false,unauthorizedCatalogueDelta:result.unauthorizedCatalogueDelta??null,

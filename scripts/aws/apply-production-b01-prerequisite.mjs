@@ -13,7 +13,8 @@ import { APP_ONLY } from "./production-app-only-contract.mjs";
 import { createProductionAwsCredentialEnvironment, productionAwsExecutable, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { assertEcsTaskDefinitionReadback } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/ecs-task-definition-readback.mjs";
 import { B01_PREREQUISITE, assertB01LivePredecessor, assertB01RunTaskRequestEvidence, attestBridgeDiff, buildB01ExecutorDefinition, buildB01PrerequisiteReceipt,
-  buildB01RunTaskRequest, canonicalJson, canonicalSha256, normalizeB01RunTaskCloudTrailRequest } from "./production-b01-prerequisite-contract.mjs";
+  buildB01RunTaskRequest, canonicalJson, canonicalSha256, normalizeB01RunTaskCloudTrailRequest, assertB01EcsEventCapture,
+  authenticateB01TerminalTaskEvents, collectB01TerminalTaskEvents } from "./production-b01-prerequisite-contract.mjs";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const require = createRequire(import.meta.url);
@@ -186,6 +187,12 @@ export async function applyProductionB01Prerequisite({ deploymentSourceSha, awsP
   const database = aws(["rds","describe-db-instances","--region",APP_ONLY.region,"--db-instance-identifier",B01_PREREQUISITE.databaseIdentifier]).DBInstances?.[0];
   assert.equal(database?.DBInstanceIdentifier, B01_PREREQUISITE.databaseIdentifier); assert.equal(database?.DBInstanceStatus, "available");
   const databaseHostname = database.Endpoint?.Address;
+  const logGroups = aws(["logs","describe-log-groups","--region",APP_ONLY.region,"--log-group-name-prefix",B01_PREREQUISITE.eventCaptureLogGroup,"--limit","50"]).logGroups || [];
+  const rulePage = aws(["events","list-rules","--region",APP_ONLY.region,"--event-bus-name","default","--limit","100"]);
+  assert.equal(rulePage.NextToken, undefined); assert.equal(rulePage.nextToken, undefined);
+  const targetsByRule = Object.fromEntries((rulePage.Rules || []).map((rule) => { const page = aws(["events","list-targets-by-rule","--region",APP_ONLY.region,
+    "--event-bus-name","default","--rule",rule.Name,"--limit","100"]); assert.equal(page.NextToken, undefined); assert.equal(page.nextToken, undefined); return [rule.Name, page.Targets || []]; }));
+  assertB01EcsEventCapture({ logGroups, rules: rulePage.Rules || [], targetsByRule });
   const built = buildB01ExecutorInput({ deploymentSourceSha, databaseHostname, repositoryRoot });
   const definition = buildB01ExecutorDefinition(built.command);
   assertProtectedCheckout({ sourceSha: deploymentSourceSha, repositoryRoot });
@@ -203,6 +210,11 @@ export async function applyProductionB01Prerequisite({ deploymentSourceSha, awsP
     const events = aws(["cloudtrail","lookup-events","--region",APP_ONLY.region,"--lookup-attributes","AttributeKey=EventName,AttributeValue=RunTask","--start-time",new Date(new Date(task.createdAt).getTime() - 60_000).toISOString(),"--end-time",new Date(new Date(task.stoppedAt).getTime() + 60_000).toISOString(),"--max-results","50"]).Events || [];
     try { runTaskRequestEvidence = authenticateB01RunTaskCloudTrail(events, { taskArn, taskDefinitionArn, deploymentSourceSha }); } catch { if (attempt === 11) throw new Error("RunTask request evidence unavailable; reconcile before retry."); await wait(5000); }
   }
+  let terminalTaskEvidence;
+  for (let attempt = 0; attempt < 12 && !terminalTaskEvidence; attempt++) {
+    try { terminalTaskEvidence = authenticateB01TerminalTaskEvents(collectB01TerminalTaskEvents(aws, taskArn), { taskArn, taskDefinitionArn,
+      launchEventTime: runTaskRequestEvidence.eventTime }); } catch { if (attempt === 11) throw new Error("Durable ECS terminal evidence unavailable; reconcile before retry."); await wait(5000); }
+  }
   const stream = `b01-prerequisite/${B01_PREREQUISITE.executorContainer}/${taskArn.split("/").at(-1)}`; let message;
   for (let attempt = 0; attempt < 12 && !message; attempt++) { const logs = aws(["logs","get-log-events","--region",APP_ONLY.region,"--log-group-name",B01_PREREQUISITE.logGroup,"--log-stream-name",stream,"--start-from-head","--limit","10"]); if (logs.events?.length) { assert.equal(logs.events.length, 1); message = logs.events[0].message; } else await wait(5000); }
   assert.ok(message); assert.equal(task.containers?.[0]?.exitCode, 0); const result = authenticateB01Result(message, built.contract);
@@ -210,7 +222,7 @@ export async function applyProductionB01Prerequisite({ deploymentSourceSha, awsP
   const receipt = buildB01PrerequisiteReceipt({ deploymentSourceSha, predecessorRlsIdentity: result.predecessorRlsIdentity,
     successorRlsIdentity: result.successorRlsIdentity, liveRlsIdentity: result.liveRlsIdentity, executorSourceSha256: built.contract.executorSourceSha256,
     executorContractSha256: built.contractSha256, executorCommandSha256: built.commandSha256, executionResult: result.status, writeCount: result.writeCount, taskArn, taskDefinitionArn, bridgeDiffAttestation,
-    runTaskRequestEvidence, executedAt: executedAt.toISOString(), expiresAt: new Date(executedAt.getTime() + B01_PREREQUISITE.maxReceiptAgeMs).toISOString() });
+    runTaskRequestEvidence, terminalTaskEvidence, executedAt: executedAt.toISOString(), expiresAt: new Date(executedAt.getTime() + B01_PREREQUISITE.maxReceiptAgeMs).toISOString() });
   fs.writeFileSync(receiptOut, `${canonicalJson(receipt)}\n`, { mode: 0o600, flag: "wx" }); return receipt;
 }
 

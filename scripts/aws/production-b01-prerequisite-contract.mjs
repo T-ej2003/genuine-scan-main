@@ -10,6 +10,7 @@ export const B01_PREREQUISITE = Object.freeze({
   rlsDeltaOriginSha: "0f7ae1a70eec588ef4fdcb2b53e9f42e831c4414",
   bridgeOriginSha: "e1c16977e9fdce7a19dc267ba3c816ef4ff14597",
   correctionBaseSha: "69e71ab21c847d27f8a76795a6de6f623313c8ad",
+  recoveryBaseSha: "a2bed229ddfb893d4dcc53232ea5466d23d4e80a",
   environment: "production",
   migrationSetDigest: "6642442a81cd98c7a132d241fa98e50ae231510896c9da67ab70d86b050d02db",
   sourceContractSha256: "099399a7d3f4b2392acdba6c54bf1ac6a919ff60691e69d31023d32161d99e71",
@@ -20,6 +21,12 @@ export const B01_PREREQUISITE = Object.freeze({
   executorContainer: "production-b01-prerequisite",
   readOnlyFamily: "mscqr-production-b01-prerequisite-readonly",
   readOnlyContainer: "production-b01-prerequisite-readonly",
+  eventCaptureLogGroup: "/aws/events/ecs/containerinsights/mscqr-prod-euw2-main/performance",
+  legacyExpiredTaskArn: "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/a74666b43a80488c95746f4b7f789fb2",
+  legacyExpiredTaskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-b01-prerequisite:1",
+  legacyExpiredDeploymentSourceSha: "69e71ab21c847d27f8a76795a6de6f623313c8ad",
+  legacyExpiredRunTaskEventId: "953c6a11-ee35-4a54-aa74-b6f01d12957f",
+  legacyExpiredRunTaskEventTime: "2026-09-23T22:43:02Z",
   executorImage: "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:5b7809608386fed5c54ff2e09b0edb221664607c7cc5fb93b66b617ca08c28cc",
   predecessorSourceSha: "945692f49c6d262b0a54b9b8e4240ef4c21688eb",
   predecessorServiceArn: "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2",
@@ -95,6 +102,57 @@ export function assertSemanticallyEmptyB01TaskOverrides(overrides, expectedConta
   return true;
 }
 
+export function authenticateB01TerminalTaskEvents(events, { taskArn, taskDefinitionArn, launchEventTime } = {}) {
+  assert.ok(Array.isArray(events)); assert.match(taskArn || "", TASK); assert.match(taskDefinitionArn || "", TASK_DEFINITION);
+  const launchTime = Date.parse(launchEventTime); assert.ok(Number.isFinite(launchTime));
+  const matches = events.map((event) => JSON.parse(event.message)).filter((event) => event?.source === "aws.ecs"
+    && event["detail-type"] === "ECS Task State Change" && event.detail?.taskArn === taskArn);
+  assert.ok(matches.length > 0, "Durable ECS terminal evidence is unavailable.");
+  const byId = new Map(); for (const event of matches) { assert.match(event.id || "", /^[0-9a-f-]{36}$/); const existing = byId.get(event.id);
+    if (existing) assert.deepEqual(event, existing); else byId.set(event.id, event); }
+  const ordered = [...byId.values()];
+  const byVersion = new Map(); for (const event of ordered) { const version = event.detail?.version; assert.ok(Number.isInteger(version) && version > 0);
+    const existing = byVersion.get(version);
+    if (existing) assert.deepEqual(event, existing, "Contradictory ECS terminal evidence shares a task version."); else byVersion.set(version, event); }
+  ordered.sort((left, right) => left.detail.version - right.detail.version); const event = ordered.at(-1), detail = event.detail;
+  assert.equal(event.account, B01_PREREQUISITE.account); assert.equal(event.region, B01_PREREQUISITE.region); assert.deepEqual(event.resources, [taskArn]);
+  assert.ok(Date.parse(event.time) >= launchTime); assert.equal(detail.clusterArn, `arn:aws:ecs:${B01_PREREQUISITE.region}:${B01_PREREQUISITE.account}:cluster/${B01_PREREQUISITE.cluster}`);
+  assert.equal(detail.taskArn, taskArn); assert.equal(detail.taskDefinitionArn, taskDefinitionArn); assert.equal(detail.group, `family:${B01_PREREQUISITE.executorFamily}`);
+  assert.equal(detail.launchType, "FARGATE"); assert.equal(detail.desiredStatus, "STOPPED"); assert.equal(detail.lastStatus, "STOPPED");
+  assert.equal(detail.containers?.length, 1); const container = detail.containers[0];
+  assert.equal(container.name, B01_PREREQUISITE.executorContainer); assert.equal(container.lastStatus, "STOPPED"); assert.ok(Number.isInteger(container.exitCode));
+  assert.equal(container.image, B01_PREREQUISITE.executorImage); assert.equal(container.imageDigest, B01_PREREQUISITE.executorImage.split("@")[1]);
+  const body = { schemaVersion: 1, kind: "PRODUCTION_B01_TERMINAL_TASK_EVIDENCE", eventId: event.id, eventTime: event.time,
+    taskArn, taskDefinitionArn, taskVersion: detail.version, containerExitCode: container.exitCode };
+  return Object.freeze({ ...body, evidenceSha256: canonicalSha256(body) });
+}
+
+export function collectB01TerminalTaskEvents(aws, taskArn) {
+  assert.equal(typeof aws, "function"); assert.match(taskArn || "", TASK); const events = [], tokens = new Set(); let token;
+  for (let page = 0; page < 20; page += 1) {
+    const args = ["logs","filter-log-events","--region",B01_PREREQUISITE.region,"--log-group-name",B01_PREREQUISITE.eventCaptureLogGroup,
+      "--filter-pattern",`\"${taskArn}\"`,"--limit","100","--no-paginate",...(token ? ["--next-token",token] : [])];
+    const response = aws(args); assert.ok(Array.isArray(response?.events) && response.events.length <= 100); events.push(...response.events);
+    const next = response.nextToken; if (next === undefined) return Object.freeze(events);
+    assert.ok(typeof next === "string" && next && !tokens.has(next), "ECS terminal evidence pagination is incomplete or cyclic."); tokens.add(next); token = next;
+  }
+  throw new Error("ECS terminal evidence exceeds the bounded page limit.");
+}
+
+export function assertB01EcsEventCapture({ logGroups, rules, targetsByRule } = {}) {
+  assert.ok(Array.isArray(logGroups)); const groups = logGroups.filter(({ logGroupName }) => logGroupName === B01_PREREQUISITE.eventCaptureLogGroup);
+  assert.equal(groups.length, 1); assert.ok(Number.isInteger(groups[0].retentionInDays) && groups[0].retentionInDays >= 30);
+  assert.ok(Array.isArray(rules)); const candidates = rules.filter((rule) => {
+    try { return rule.State === "ENABLED" && JSON.parse(rule.EventPattern)?.source?.length === 1 && JSON.parse(rule.EventPattern).source[0] === "aws.ecs"; }
+    catch { return false; }
+  });
+  const matched = candidates.filter((rule) => (targetsByRule?.[rule.Name] || []).some((target) => target.Arn === groups[0].arn));
+  assert.equal(matched.length, 1, "Exact durable ECS event capture is unavailable or ambiguous.");
+  const targets = targetsByRule[matched[0].Name]; assert.equal(targets.length, 1); assert.deepEqual(Object.keys(targets[0]).sort(), ["Arn","Id"].sort());
+  return Object.freeze({ logGroupName: groups[0].logGroupName, logGroupArn: groups[0].arn, retentionInDays: groups[0].retentionInDays,
+    ruleName: matched[0].Name, targetId: targets[0].Id });
+}
+
 export function assertB01RunTaskRequestEvidence(evidence, { taskArn, taskDefinitionArn, deploymentSourceSha, readOnly = false } = {}) {
   assert.deepEqual(Object.keys(evidence || {}).sort(), ["cluster","count","enableExecuteCommand","eventId","eventTime","launchType","overridesPresent","requestSha256","taskArn","taskDefinitionArn"].sort());
   assert.match(evidence.eventId, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/); assert.ok(Number.isFinite(Date.parse(evidence.eventTime)));
@@ -127,6 +185,27 @@ export function assertB01AmbiguousMutationTaskQuiescent({ task, taskArn, deploym
   const body = { schemaVersion: 1, kind: "PRODUCTION_B01_AMBIGUOUS_TASK_QUIESCENCE", taskArn,
     taskDefinitionArn: task.taskDefinitionArn, deploymentSourceSha, stoppedAt: new Date(task.stoppedAt).toISOString(),
     executionStoppedAt: new Date(task.executionStoppedAt).toISOString(), runTaskRequestEvidence };
+  return Object.freeze({ ...body, evidenceSha256: canonicalSha256(body) });
+}
+
+export function assertB01ExpiredMutationTaskQuiescent({ taskArn, taskDefinitionArn, deploymentSourceSha,
+  runTaskRequestEvidence, launchHistoryEvidenceSha256, terminalTaskEvidence, activeMutationTaskArns = [] } = {}) {
+  assert.match(taskArn || "", TASK); assert.match(taskDefinitionArn || "", TASK_DEFINITION);
+  assert.match(deploymentSourceSha || "", SHA); assert.match(launchHistoryEvidenceSha256 || "", HASH);
+  assert.deepEqual(activeMutationTaskArns, []);
+  const legacy = taskArn === B01_PREREQUISITE.legacyExpiredTaskArn
+    && taskDefinitionArn === B01_PREREQUISITE.legacyExpiredTaskDefinitionArn
+    && deploymentSourceSha === B01_PREREQUISITE.legacyExpiredDeploymentSourceSha
+    && runTaskRequestEvidence?.eventId === B01_PREREQUISITE.legacyExpiredRunTaskEventId
+    && Date.parse(runTaskRequestEvidence?.eventTime) === Date.parse(B01_PREREQUISITE.legacyExpiredRunTaskEventTime);
+  if (terminalTaskEvidence === undefined) assert.equal(legacy, true, "Expired task lacks durable terminal evidence.");
+  else { assert.equal(terminalTaskEvidence.taskArn, taskArn); assert.equal(terminalTaskEvidence.taskDefinitionArn, taskDefinitionArn);
+    assert.match(terminalTaskEvidence.evidenceSha256 || "", HASH);
+    assert.equal(terminalTaskEvidence.evidenceSha256, canonicalSha256((({ evidenceSha256: _, ...body }) => body)(terminalTaskEvidence))); }
+  assertB01RunTaskRequestEvidence(runTaskRequestEvidence, { taskArn, taskDefinitionArn, deploymentSourceSha });
+  const body = { schemaVersion: 1, kind: "PRODUCTION_B01_EXPIRED_TASK_QUIESCENCE", taskArn, taskDefinitionArn,
+    deploymentSourceSha, launchHistoryEvidenceSha256, terminalTaskEvidence: terminalTaskEvidence || null,
+    legacyExpiredEvidence: terminalTaskEvidence === undefined, runTaskRequestEvidence };
   return Object.freeze({ ...body, evidenceSha256: canonicalSha256(body) });
 }
 
@@ -206,10 +285,12 @@ export function attestBridgeDiff({ deploymentSourceSha, repositoryRoot = process
   };
   assert.equal(git(["rev-parse", `${B01_PREREQUISITE.bridgeOriginSha}^1`]), B01_PREREQUISITE.rlsDeltaOriginSha, "Reviewed bridge origin does not immediately follow the RLS delta origin.");
   assert.equal(git(["rev-parse", `${B01_PREREQUISITE.correctionBaseSha}^1`]), B01_PREREQUISITE.bridgeOriginSha, "Reviewed predecessor correction does not immediately follow the bridge origin.");
-  assert.equal(git(["rev-parse", `${deploymentSourceSha}^1`]), B01_PREREQUISITE.correctionBaseSha, "Deployment source is not the immediate protected-main runtime-evidence successor.");
-  const body = { schemaVersion: 2, rlsDeltaOriginSha: B01_PREREQUISITE.rlsDeltaOriginSha, bridgeOriginSha: B01_PREREQUISITE.bridgeOriginSha, deploymentSourceSha,
+  assert.equal(git(["rev-parse", `${B01_PREREQUISITE.recoveryBaseSha}^1`]), B01_PREREQUISITE.correctionBaseSha, "Reviewed recovery base does not immediately follow the predecessor correction.");
+  assert.equal(git(["rev-parse", `${deploymentSourceSha}^1`]), B01_PREREQUISITE.recoveryBaseSha, "Deployment source is not the immediate protected-main expired-task recovery successor.");
+  const body = { schemaVersion: 3, rlsDeltaOriginSha: B01_PREREQUISITE.rlsDeltaOriginSha, bridgeOriginSha: B01_PREREQUISITE.bridgeOriginSha, deploymentSourceSha,
     bridge: attestRange(B01_PREREQUISITE.rlsDeltaOriginSha, B01_PREREQUISITE.bridgeOriginSha), predecessorCorrection: attestRange(B01_PREREQUISITE.bridgeOriginSha, B01_PREREQUISITE.correctionBaseSha),
-    correction: attestRange(B01_PREREQUISITE.correctionBaseSha, deploymentSourceSha) };
+    runtimeEvidence: attestRange(B01_PREREQUISITE.correctionBaseSha, B01_PREREQUISITE.recoveryBaseSha),
+    recovery: attestRange(B01_PREREQUISITE.recoveryBaseSha, deploymentSourceSha) };
   return Object.freeze({ ...body, attestationSha256: canonicalSha256(body) });
 }
 
@@ -232,6 +313,7 @@ export function buildB01PrerequisiteReceipt(input) {
     taskArn: input.taskArn,
     taskDefinitionArn: input.taskDefinitionArn,
     runTaskRequestEvidence: input.runTaskRequestEvidence,
+    terminalTaskEvidence: input.terminalTaskEvidence,
     bridgeDiffAttestation: input.bridgeDiffAttestation,
     executedAt: input.executedAt,
     expiresAt: input.expiresAt,
@@ -252,6 +334,9 @@ export function assertB01PrerequisiteReceipt(value, { deploymentSourceSha, bridg
   assert.ok(value.executionResult === "APPLIED" && value.writeCount === 7 || value.executionResult === "ALREADY_CONVERGED" && value.writeCount === 0);
   assert.match(value.taskArn || "", TASK); assert.match(value.taskDefinitionArn || "", TASK_DEFINITION);
   assertB01RunTaskRequestEvidence(value.runTaskRequestEvidence, { taskArn: value.taskArn, taskDefinitionArn: value.taskDefinitionArn, deploymentSourceSha });
+  assert.equal(value.terminalTaskEvidence?.taskArn, value.taskArn); assert.equal(value.terminalTaskEvidence?.taskDefinitionArn, value.taskDefinitionArn);
+  assert.match(value.terminalTaskEvidence?.evidenceSha256 || "", HASH);
+  assert.equal(value.terminalTaskEvidence.evidenceSha256, canonicalSha256((({ evidenceSha256: _, ...body }) => body)(value.terminalTaskEvidence)));
   assert.deepEqual(value.bridgeDiffAttestation, bridgeDiffAttestation);
   assert.equal(value.bridgeDiffAttestation?.rlsDeltaOriginSha, B01_PREREQUISITE.rlsDeltaOriginSha);
   assert.equal(value.bridgeDiffAttestation?.bridgeOriginSha, B01_PREREQUISITE.bridgeOriginSha);
