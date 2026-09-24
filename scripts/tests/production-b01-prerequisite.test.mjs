@@ -12,7 +12,7 @@ import { authenticateB01RunTaskCloudTrail, b01CatalogueRuntimeSource, buildB01Ex
   canonicalB01Prerequisite, executeB01Transaction } from "../aws/apply-production-b01-prerequisite.mjs";
 import { authenticateB01AmbiguousMutationTask, authenticateB01ExpiredMutationTask, authenticateB01MissingTask,
   authenticateB01MutationLaunchHistory, authenticateB01MutationTaskListing, authenticateB01ReadOnlyResult, collectB01RecoveryPostflight,
-  collectB01MutationTaskArns, collectB01RunTaskEvents, findNonTerminalB01MutationTasks } from "../aws/probe-production-b01-prerequisite.mjs";
+  collectB01MutationCensus, collectB01MutationTaskArns, collectB01RunTaskEvents, findNonTerminalB01MutationTasks } from "../aws/probe-production-b01-prerequisite.mjs";
 
 const require = createRequire(import.meta.url), runtime = require("../aws/production-b01-prerequisite-executor.cjs");
 const readOnlyRuntime = require("../aws/production-b01-prerequisite-readonly.cjs");
@@ -428,6 +428,7 @@ test("future mutation launch requires exact native durable ECS event capture", (
     rules: [{ Name: "ecs-event-capture", State: "ENABLED", EventPattern: JSON.stringify({ source: ["aws.ecs"] }) }],
     targetsByRule: { "ecs-event-capture": [{ Id: "CloudWatchLogs", Arn: arn }] } };
   assert.equal(assertB01EcsEventCapture(input).logGroupArn, arn);
+  assert.equal(assertB01EcsEventCapture({ ...input, logGroups: [{ ...input.logGroups[0], retentionInDays: undefined }] }).logGroupArn, arn);
   assert.equal(assertB01EcsEventCapture({ ...input, logGroups: [{ ...input.logGroups[0], arn: undefined }] }).logGroupArn, arn);
   assert.equal(assertB01EcsEventCapture({ ...input, rules: [{ ...input.rules[0],
     EventPattern: JSON.stringify({ source: ["aws.ecs"], "detail-type": ["ECS Task State Change"] }) }] }).retentionInDays, 30);
@@ -480,14 +481,28 @@ test("mutation family census consumes every bounded page and rejects malformed h
   assert.throws(() => collectB01MutationTaskArns(() => ({ taskArns: [taskArn, taskArn] }), "RUNNING"));
 });
 
-test("reconciliation result requires a stable history-census-history-census bracket", () => {
+test("mutation family census brackets RUNNING and STOPPED without the ineffective PENDING filter", () => {
+  const sibling = taskArn.replace(/a$/, "b"), calls = [];
+  const activeResponses = [{ taskArns: [] }, { taskArns: [] }, { taskArns: [sibling] }, { taskArns: [] }];
+  const active = collectB01MutationCensus((args) => { calls.push(args); return activeResponses.shift(); });
+  assert.deepEqual(calls.map((args) => args[args.indexOf("--desired-status") + 1]), ["RUNNING","STOPPED","RUNNING","STOPPED"]);
+  assert.deepEqual(active.activeMutationTaskArns, [sibling]);
+
+  const stoppedResponses = [{ taskArns: [] }, { taskArns: [] }, { taskArns: [] }, { taskArns: [sibling] }];
+  const stopped = collectB01MutationCensus((args) => args[1] === "describe-tasks"
+    ? { tasks: [{ taskArn: sibling, lastStatus: "STOPPED" }], failures: [] }
+    : stoppedResponses.shift());
+  assert.deepEqual(stopped.taskCensus.STOPPED, [sibling]); assert.deepEqual(stopped.activeMutationTaskArns, []);
+});
+
+test("reconciliation result requires a stable history-census-history-census-history bracket", () => {
   const evidence = "7".repeat(64), stable = () => ({ evidenceSha256: evidence });
   const empty = () => ({ taskCensus: { RUNNING: [], PENDING: [], STOPPED: [] }, activeMutationTaskArns: [] });
   const calls = [];
   assert.equal(collectB01RecoveryPostflight({ initialLaunchHistorySha256: evidence, ambiguousTaskArn: taskArn,
     collectLaunchHistory: () => { calls.push("history"); return stable(); },
     collectMutationCensus: () => { calls.push("census"); return empty(); } }).afterCensus.evidenceSha256, evidence);
-  assert.deepEqual(calls, ["history","census","history","census"]);
+  assert.deepEqual(calls, ["history","census","history","census","history"]);
   const probe = fs.readFileSync("scripts/aws/probe-production-b01-prerequisite.mjs", "utf8");
   assert.ok(probe.lastIndexOf("authenticateB01ReadOnlyResult") < probe.lastIndexOf("collectB01RecoveryPostflight"));
   assert.throws(() => collectB01RecoveryPostflight({ initialLaunchHistorySha256: evidence, ambiguousTaskArn: taskArn,
@@ -504,6 +519,10 @@ test("reconciliation result requires a stable history-census-history-census brac
   assert.throws(() => collectB01RecoveryPostflight({ initialLaunchHistorySha256: evidence, ambiguousTaskArn: taskArn,
     collectLaunchHistory: stable, collectMutationCensus: () => ++censusReads === 1 ? empty() : ({ ...empty(),
       taskCensus: { RUNNING: [], PENDING: [], STOPPED: [taskArn.replace(/a$/, "b")] } }) }), /unaccounted/);
+  let trailingReads = 0;
+  assert.throws(() => collectB01RecoveryPostflight({ initialLaunchHistorySha256: evidence, ambiguousTaskArn: taskArn,
+    collectLaunchHistory: () => ({ evidenceSha256: ++trailingReads < 3 ? evidence : "8".repeat(64) }),
+    collectMutationCensus: empty }), /after the final census/);
 });
 
 test("reconciliation authenticates the exact stopped ambiguous mutation task and rejects non-quiescent substitutes", () => {

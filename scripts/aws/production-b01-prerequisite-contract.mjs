@@ -141,7 +141,8 @@ export function collectB01TerminalTaskEvents(aws, taskArn) {
 
 export function assertB01EcsEventCapture({ logGroups, rules, targetsByRule } = {}) {
   assert.ok(Array.isArray(logGroups)); const groups = logGroups.filter(({ logGroupName }) => logGroupName === B01_PREREQUISITE.eventCaptureLogGroup);
-  assert.equal(groups.length, 1); assert.ok(Number.isInteger(groups[0].retentionInDays) && groups[0].retentionInDays >= 30);
+  assert.equal(groups.length, 1); assert.ok(groups[0].retentionInDays === undefined
+    || (Number.isInteger(groups[0].retentionInDays) && groups[0].retentionInDays >= 30));
   const expectedArn = `arn:aws:logs:${B01_PREREQUISITE.region}:${B01_PREREQUISITE.account}:log-group:${B01_PREREQUISITE.eventCaptureLogGroup}`;
   if (groups[0].logGroupArn !== undefined) assert.equal(groups[0].logGroupArn, expectedArn);
   if (groups[0].arn !== undefined) assert.ok(groups[0].arn === expectedArn || groups[0].arn === `${expectedArn}:*`, "CloudWatch Logs group ARN is not canonical.");

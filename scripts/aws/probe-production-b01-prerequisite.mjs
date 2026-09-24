@@ -152,8 +152,20 @@ export function findNonTerminalB01MutationTasks(response, expectedTaskArns) {
   return response.tasks.filter(({ lastStatus }) => lastStatus !== "STOPPED").map(({ taskArn }) => taskArn);
 }
 
+export function collectB01MutationCensus(aws) {
+  const collect = (status) => collectB01MutationTaskArns(aws, status);
+  const runningBefore = collect("RUNNING"), stoppedBefore = collect("STOPPED");
+  const runningAfter = collect("RUNNING"), stoppedAfter = collect("STOPPED");
+  const taskCensus = { RUNNING: [...new Set([...runningBefore, ...runningAfter])].sort(), PENDING: [],
+    STOPPED: [...new Set([...stoppedBefore, ...stoppedAfter])].sort() };
+  const transitioningToStopped = taskCensus.STOPPED.length === 0 ? [] : findNonTerminalB01MutationTasks(
+    aws(["ecs","describe-tasks","--region",APP_ONLY.region,"--cluster",APP_ONLY.cluster,"--tasks",...taskCensus.STOPPED]), taskCensus.STOPPED);
+  const activeMutationTaskArns = [...taskCensus.RUNNING, ...transitioningToStopped];
+  assert.equal(new Set(activeMutationTaskArns).size, activeMutationTaskArns.length); return { taskCensus, activeMutationTaskArns };
+}
+
 export function assertB01RecoveryPostflight({ initialLaunchHistorySha256, beforeCensusLaunchHistorySha256,
-  afterCensusLaunchHistorySha256, firstCensus, finalCensus, ambiguousTaskArn } = {}) {
+  afterCensusLaunchHistorySha256, trailingLaunchHistorySha256, firstCensus, finalCensus, ambiguousTaskArn } = {}) {
   assert.match(initialLaunchHistorySha256 || "", /^[a-f0-9]{64}$/);
   assert.equal(beforeCensusLaunchHistorySha256, initialLaunchHistorySha256, "B01 mutation launch history changed before the final census.");
   assert.match(ambiguousTaskArn || "", /^arn:aws:ecs:eu-west-2:368992683803:task\/mscqr-prod-euw2-main\/[a-f0-9]{32}$/);
@@ -169,6 +181,8 @@ export function assertB01RecoveryPostflight({ initialLaunchHistorySha256, before
   assert.equal(afterCensusLaunchHistorySha256, beforeCensusLaunchHistorySha256,
     "B01 mutation launch history changed across the final census.");
   assert.deepEqual(assertCensus(finalCensus), firstObserved, "B01 mutation family census changed after the history bracket.");
+  assert.equal(trailingLaunchHistorySha256, afterCensusLaunchHistorySha256,
+    "B01 mutation launch history changed after the final census.");
   return true;
 }
 
@@ -179,9 +193,11 @@ export function collectB01RecoveryPostflight({ collectLaunchHistory, collectMuta
   const firstCensus = collectMutationCensus();
   const afterCensus = collectLaunchHistory();
   const finalCensus = collectMutationCensus();
+  const trailingHistory = collectLaunchHistory();
   assertB01RecoveryPostflight({ initialLaunchHistorySha256, beforeCensusLaunchHistorySha256: beforeCensus.evidenceSha256,
-    afterCensusLaunchHistorySha256: afterCensus.evidenceSha256, firstCensus, finalCensus, ambiguousTaskArn });
-  return Object.freeze({ beforeCensus, firstCensus, afterCensus, finalCensus });
+    afterCensusLaunchHistorySha256: afterCensus.evidenceSha256, trailingLaunchHistorySha256: trailingHistory.evidenceSha256,
+    firstCensus, finalCensus, ambiguousTaskArn });
+  return Object.freeze({ beforeCensus, firstCensus, afterCensus, finalCensus, trailingHistory });
 }
 
 export async function probeProductionB01Prerequisite({ deploymentSourceSha, ambiguousTaskArn, ambiguousDeploymentSourceSha, awsProfile, repositoryRoot = root,
@@ -200,14 +216,7 @@ export async function probeProductionB01Prerequisite({ deploymentSourceSha, ambi
   assert.equal(database?.DBInstanceIdentifier,B01_PREREQUISITE.databaseIdentifier); assert.equal(database?.DBInstanceStatus, "available");
   assert.match(database?.Endpoint?.Address||"",/^[a-z0-9.-]+$/); assert.equal(database?.Endpoint?.Port,5432);
   assert.match(ambiguousTaskArn || "", /^arn:aws:ecs:eu-west-2:368992683803:task\/mscqr-prod-euw2-main\/[a-f0-9]{32}$/);
-  const mutationCensus = () => {
-    const taskCensus = Object.fromEntries(["RUNNING","PENDING","STOPPED"].map((status) => [status, collectB01MutationTaskArns(aws, status)]));
-    const stoppedDesired = taskCensus.STOPPED;
-    const transitioningToStopped = stoppedDesired.length === 0 ? [] : findNonTerminalB01MutationTasks(
-      aws(["ecs","describe-tasks","--region",APP_ONLY.region,"--cluster",APP_ONLY.cluster,"--tasks",...stoppedDesired]), stoppedDesired);
-    const activeMutationTaskArns = [...taskCensus.RUNNING, ...taskCensus.PENDING, ...transitioningToStopped];
-    assert.equal(new Set(activeMutationTaskArns).size, activeMutationTaskArns.length); return { taskCensus, activeMutationTaskArns };
-  };
+  const mutationCensus = () => collectB01MutationCensus(aws);
   const ambiguousEvents = collectB01RunTaskEvents(aws);
   const matchingEvents = ambiguousEvents.map((event) => ({ event, body: JSON.parse(event.CloudTrailEvent) })).filter(({ body }) =>
     body.responseElements?.tasks?.some(({ taskArn }) => taskArn === ambiguousTaskArn));
