@@ -23,6 +23,14 @@ const readJson = (run, args) => JSON.parse(run([...args, "--output", "json", "--
 const source = (file) => JSON.parse(fs.readFileSync(path.join(root, "infra/aws/terraform/production-web-release", file), "utf8"));
 const canonical = (value) => JSON.stringify(normalizeIamPolicyDocument(value, "production web release IAM document"));
 const fileValue = (file) => `file://${path.join(root, "infra/aws/terraform/production-web-release", file)}`;
+function defaultPolicyVersionId(response) {
+  assert.equal(response?.IsTruncated, false, "Permissions boundary policy-version response is incomplete.");
+  assert.ok(Array.isArray(response.Versions) && response.Versions.length > 0, "Permissions boundary policy-version response is malformed.");
+  assert.ok(response.Versions.every((version) => version && typeof version.VersionId === "string" && /^v[1-9]\d*$/.test(version.VersionId) && typeof version.IsDefaultVersion === "boolean"), "Permissions boundary policy-version response is malformed.");
+  const defaults = response.Versions.filter(({ IsDefaultVersion }) => IsDefaultVersion);
+  assert.equal(defaults.length, 1, "Permissions boundary must have exactly one default policy version.");
+  return defaults[0].VersionId;
+}
 
 export const WEB_RELEASE_IAM = Object.freeze({ account, roleName, boundaryName, releaseRoleName, publisherPolicyName, activationPolicyName });
 
@@ -51,9 +59,8 @@ export function bootstrapProductionWebReleaseIam({ run, sourceSha }) {
     assert.equal(boundary.Path, "/", "Unexpected permissions boundary path.");
     assert.equal(boundary.Description, "Terraform-managed production web publisher permissions boundary.", "Permissions boundary description differs from Terraform source.");
     const versions = readJson(run, ["iam", "list-policy-versions", "--policy-arn", boundaryArn]);
-    assert.equal(versions.IsTruncated ?? false, false);
-    assert.equal(versions.PolicyVersions.filter(({ IsDefaultVersion }) => IsDefaultVersion).length, 1);
-    const liveBoundary = readJson(run, ["iam", "get-policy-version", "--policy-arn", boundaryArn, "--version-id", versions.PolicyVersions.find(({ IsDefaultVersion }) => IsDefaultVersion).VersionId]).PolicyVersion.Document;
+    const versionId = defaultPolicyVersionId(versions);
+    const liveBoundary = readJson(run, ["iam", "get-policy-version", "--policy-arn", boundaryArn, "--version-id", versionId]).PolicyVersion.Document;
     assert.equal(canonical(liveBoundary), canonical(publisher), "Permissions boundary differs from reviewed source.");
   }
 
@@ -89,7 +96,8 @@ export function bootstrapProductionWebReleaseIam({ run, sourceSha }) {
     assert.equal(created.Path, "/");
     assert.equal(created.Description, "Terraform-managed production web publisher permissions boundary.");
     const versions = readJson(run, ["iam", "list-policy-versions", "--policy-arn", boundaryArn]);
-    const live = readJson(run, ["iam", "get-policy-version", "--policy-arn", boundaryArn, "--version-id", versions.PolicyVersions.find(({ IsDefaultVersion }) => IsDefaultVersion).VersionId]).PolicyVersion.Document;
+    const versionId = defaultPolicyVersionId(versions);
+    const live = readJson(run, ["iam", "get-policy-version", "--policy-arn", boundaryArn, "--version-id", versionId]).PolicyVersion.Document;
     assert.equal(canonical(live), canonical(publisher), "Created boundary readback differs from source.");
   }
   if (!role) {
