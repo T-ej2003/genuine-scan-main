@@ -8563,7 +8563,7 @@
       "supportingEvidence": [
         "backend/src/controllers/auditController.ts",
         "backend/src/rls-waves/session-c/c02/auditTraceRepository.ts",
-        "backend/src/routes/auditRoutes.ts:227 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/auditRoutes.ts:228 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs INSERT within the recorded scope, column set, lifecycle, and boundary."
@@ -12941,7 +12941,7 @@
       "supportingEvidence": [
         "backend/src/controllers/auditController.ts",
         "backend/src/services/fraudReportQueryService.ts",
-        "backend/src/routes/auditRoutes.ts:208 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,enforceTenantIsolation"
+        "backend/src/routes/auditRoutes.ts:209 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,enforceTenantIsolation"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -13011,7 +13011,7 @@
       "supportingEvidence": [
         "backend/src/controllers/auditController.ts",
         "backend/src/rls-waves/session-c/c02/auditTraceRepository.ts",
-        "backend/src/routes/auditRoutes.ts:227 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/auditRoutes.ts:228 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -40125,7 +40125,7 @@
       "supportingEvidence": [
         "backend/src/controllers/auditController.ts",
         "backend/src/services/fraudReportQueryService.ts",
-        "backend/src/routes/auditRoutes.ts:208 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,enforceTenantIsolation"
+        "backend/src/routes/auditRoutes.ts:209 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,enforceTenantIsolation"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -40421,7 +40421,7 @@
       "supportingEvidence": [
         "backend/src/controllers/auditController.ts",
         "backend/src/rls-waves/session-c/c02/auditTraceRepository.ts",
-        "backend/src/routes/auditRoutes.ts:227 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/auditRoutes.ts:228 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -49519,7 +49519,7 @@
       "supportingEvidence": [
         "backend/src/controllers/auditController.ts",
         "backend/src/services/fraudReportQueryService.ts",
-        "backend/src/routes/auditRoutes.ts:208 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,enforceTenantIsolation"
+        "backend/src/routes/auditRoutes.ts:209 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,enforceTenantIsolation"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -49751,7 +49751,7 @@
       "supportingEvidence": [
         "backend/src/controllers/auditController.ts",
         "backend/src/rls-waves/session-c/c02/auditTraceRepository.ts",
-        "backend/src/routes/auditRoutes.ts:227 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/auditRoutes.ts:228 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -83762,7 +83762,7 @@
       "supportingEvidence": [
         "backend/src/controllers/auditController.ts",
         "backend/src/services/fraudReportQueryService.ts",
-        "backend/src/routes/auditRoutes.ts:208 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,enforceTenantIsolation"
+        "backend/src/routes/auditRoutes.ts:209 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,enforceTenantIsolation"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -84578,7 +84578,7 @@
       "supportingEvidence": [
         "backend/src/controllers/auditController.ts",
         "backend/src/rls-waves/session-c/c02/auditTraceRepository.ts",
-        "backend/src/routes/auditRoutes.ts:227 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/auditRoutes.ts:228 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -94501,7 +94501,7 @@
       "supportingEvidence": [
         "backend/src/controllers/auditController.ts",
         "backend/src/rls-waves/session-c/c02/auditTraceRepository.ts",
-        "backend/src/routes/auditRoutes.ts:227 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/auditRoutes.ts:228 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs INSERT within the recorded scope, column set, lifecycle, and boundary."
@@ -109912,7 +109912,7 @@
       "supportingEvidence": [
         "backend/src/controllers/auditController.ts",
         "backend/src/services/fraudReportQueryService.ts",
-        "backend/src/routes/auditRoutes.ts:208 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,enforceTenantIsolation"
+        "backend/src/routes/auditRoutes.ts:209 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,enforceTenantIsolation"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -110978,7 +110978,7 @@
       "supportingEvidence": [
         "backend/src/controllers/auditController.ts",
         "backend/src/rls-waves/session-c/c02/auditTraceRepository.ts",
-        "backend/src/routes/auditRoutes.ts:227 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/auditRoutes.ts:228 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."

@@ -199,6 +199,7 @@ export const createAuditReadRoutes = () => {
     auditStreamPreAuthRouteLimiter,
     authenticateSSE,
     requireAuditViewer,
+    requireRecentAdminMfa,
     enforceTenantIsolation,
     auditReadRouteLimiter,
     auditStreamIpLimiter,

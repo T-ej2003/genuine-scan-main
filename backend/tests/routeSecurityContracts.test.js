@@ -54,6 +54,10 @@ assert(
   auditRoutesSource.includes('"/logs", auditLogsReadPreAuthRouteLimiter, authenticate, requireAuditViewer, requireRecentAdminMfa, enforceTenantIsolation,'),
   "audit log reads must require the approved MFA ceiling before tenant isolation"
 );
+assert(
+  auditRoutesSource.includes('"/stream", auditStreamPreAuthRouteLimiter, authenticateSSE, requireAuditViewer, requireRecentAdminMfa, enforceTenantIsolation,'),
+  "audit stream connections must require the role-aware recent-authentication boundary before tenant isolation"
+);
 
 [
   "...verifyCodeLimiters",
@@ -149,7 +153,7 @@ assert(!authSecurityControllerSource.includes("console.error"), "auth security c
 [
   '"/logs", auditLogsReadPreAuthRouteLimiter, authenticate,',
   '"/logs/export", auditLogsExportPreAuthRouteLimiter, authenticate,',
-  '"/stream", auditStreamPreAuthRouteLimiter, authenticateSSE,',
+  '"/stream", auditStreamPreAuthRouteLimiter, authenticateSSE, requireAuditViewer, requireRecentAdminMfa,',
   '"/fraud-reports", auditFraudReportsReadPreAuthRouteLimiter, authenticate,',
   '"/fraud-reports/:id/respond", auditFraudReportsRespondPreAuthRouteLimiter, authenticate,',
 ].forEach((pattern) => {
