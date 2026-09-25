@@ -2277,6 +2277,7 @@ protectedReadRouter.get(
   requireAnyAdmin,
   incidentExportRouteLimiter,
   protectedReadRouteLimiter,
+  requireRecentAdminMfa,
   enforceTenantIsolation,
   serveIncidentEvidenceFile
 );
@@ -2328,6 +2329,7 @@ protectedReadRouter.get(
   requireAnyAdmin,
   incidentExportRouteLimiter,
   protectedReadRouteLimiter,
+  requireRecentAdminMfa,
   enforceTenantIsolation,
   exportIncidentPdfHook
 );

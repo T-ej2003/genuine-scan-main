@@ -1,5 +1,6 @@
 import { type ApiClientCore, type ApiResponse } from "@/lib/api/internal-client-core";
 import { coordinateProtectedRead } from "@/lib/api/request-coordinator";
+import type { AuthState } from "@/types";
 
 export const createAuthApi = (core: ApiClientCore) => ({
   async login(email: string, password: string) {
@@ -122,29 +123,26 @@ export const createAuthApi = (core: ApiClientCore) => ({
     return core.request("/auth/reset-password", { method: "POST", body: JSON.stringify({ token, password }) });
   },
 
-  async acceptInvite(payload: { token: string; password: string; name?: string }) {
-    const response = await core.request<{
-      user?: any;
-      auth?: {
-        sessionStage: "ACTIVE" | "MFA_BOOTSTRAP";
-        authAssurance: "PASSWORD" | "ADMIN_MFA";
-        mfaRequired: boolean;
-        mfaEnrolled: boolean;
-        availableMfaMethods?: Array<"TOTP" | "WEBAUTHN" | "BACKUP_CODE">;
-        preferredMfaMethod?: "TOTP" | "WEBAUTHN" | null;
-        authenticatedAt?: string | null;
-        mfaVerifiedAt?: string | null;
-        stepUpRequired?: boolean;
-        stepUpMethod?: "ADMIN_MFA" | "PASSWORD_REAUTH" | null;
-        sessionId?: string | null;
-        sessionExpiresAt?: string | null;
-        mfaChallenge?: { ticket: string; expiresAt: string } | null;
-      };
-    }>("/auth/accept-invite", {
+  async acceptInvite(payload: { token: string; password: string; confirmPassword: string; name?: string }) {
+    const response = await core.request<{ challengeId: string; expiresAt: string; delivered: boolean }>("/auth/accept-invite", {
       method: "POST",
       body: JSON.stringify(payload),
     });
     return response;
+  },
+
+  async verifyInviteActivation(challengeId: string, code: string) {
+    return core.request<{ user?: Record<string, unknown>; auth?: AuthState; activated?: boolean; loginRequired?: boolean }>("/auth/invite-activation/verify", {
+      method: "POST",
+      body: JSON.stringify({ challengeId, code }),
+    });
+  },
+
+  async resendInviteActivation(challengeId: string) {
+    return core.request<{ challengeId: string; expiresAt: string; delivered: boolean }>("/auth/invite-activation/resend", {
+      method: "POST",
+      body: JSON.stringify({ challengeId }),
+    });
   },
 
   async verifyEmail(token: string) {
@@ -162,6 +160,8 @@ export const createAuthApi = (core: ApiClientCore) => ({
       expiresAt: string;
       licenseeName: string | null;
       requiresConnector: boolean;
+      challengeId: string | null;
+      challengeCreatedAt: string | null;
     }>(`/auth/invite-preview${query}`);
   },
 

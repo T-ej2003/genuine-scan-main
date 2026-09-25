@@ -220,6 +220,10 @@ export const lookupInvitationBoundary = async (
     expiresAt: Date;
     licenseeName: string | null;
     requiresConnector: boolean;
+    inviteId: string;
+    userId: string;
+    challengeId: string | null;
+    challengeCreatedAt: Date | null;
   }>>`
     SELECT * FROM app_auth.lookup_invitation_token(
       ${candidates}::text[],
@@ -228,7 +232,7 @@ export const lookupInvitationBoundary = async (
   `;
   const result = oneOrNone(rows, "app_auth.lookup_invitation_token");
   if (!result) return null;
-  exactProjection(result, ["email", "role", "expiresAt", "licenseeName", "requiresConnector"], "app_auth.lookup_invitation_token");
+  exactProjection(result, ["email", "role", "expiresAt", "licenseeName", "requiresConnector", "inviteId", "userId", "challengeId", "challengeCreatedAt"], "app_auth.lookup_invitation_token");
   requireNormalizedEmail(result.email);
   if (!Object.values(UserRole).includes(result.role)) throw new Error("Invitation preview returned an unsupported role");
   validDate(result.expiresAt, "invitation expiry");
@@ -246,6 +250,9 @@ export const consumeInvitationBoundary = async (
     requestId: string;
     ipHash: string | null;
     userAgent: string | null;
+    challengeId: string;
+    codeVerifier: string;
+    challengeExpiresAt: Date;
   },
   db: PreAuthQueryClient = getB01PreAuthPrisma()
 ) => {
@@ -265,6 +272,8 @@ export const consumeInvitationBoundary = async (
     licenseeId: string | null;
     orgId: string | null;
     status: UserStatus;
+    challengeId: string;
+    challengeExpiresAt: Date;
   }>>`
     SELECT * FROM app_auth.consume_invitation_token(
       ${candidates}::text[],
@@ -273,18 +282,54 @@ export const consumeInvitationBoundary = async (
       ${consumedAt}::timestamp without time zone,
       ${requestId},
       ${optionalHash(input.ipHash, "IP hash")},
-      ${optionalText(input.userAgent, "user agent", 512)}
+      ${optionalText(input.userAgent, "user agent", 512)},
+      ${input.challengeId},
+      ${tokenHash(input.codeVerifier, "activation verifier")},
+      ${validDate(input.challengeExpiresAt, "activation expiry")}::timestamp without time zone
     )
   `;
   const result = oneOrNone(rows, "app_auth.consume_invitation_token");
   if (!result) return null;
-  exactProjection(result, ["inviteId", "id", "email", "name", "role", "licenseeId", "orgId", "status"], "app_auth.consume_invitation_token");
+  exactProjection(result, ["inviteId", "id", "email", "name", "role", "licenseeId", "orgId", "status", "challengeId", "challengeExpiresAt"], "app_auth.consume_invitation_token");
   if (!String(result.inviteId || "").trim()) throw new Error("app_auth.consume_invitation_token omitted required inviteId attribution");
   if (!String(result.id || "").trim() || !String(result.name || "").trim()) throw new Error("Invitation activation returned an invalid actor");
   requireNormalizedEmail(result.email);
   if (!Object.values(UserRole).includes(result.role) || !Object.values(UserStatus).includes(result.status)) {
     throw new Error("Invitation activation returned an unsupported account state");
   }
-  if (result.status !== UserStatus.ACTIVE) throw new Error("Invitation activation returned an inactive account");
+  if (result.status !== UserStatus.INVITED) throw new Error("Invitation password step activated the account");
   return result;
 };
+
+export type InviteActivationBinding = { challengeId: string; userId: string; inviteId: string; email: string; expiresAt: Date };
+
+export const lookupInviteActivationBinding = async (challengeId: string, db: PreAuthQueryClient = getB01PreAuthPrisma()) => {
+  const result = oneOrNone(await db.$queryRaw<InviteActivationBinding[]>`
+    SELECT * FROM app_auth.lookup_invite_activation_challenge(${challengeId})
+  `, "app_auth.lookup_invite_activation_challenge");
+  if (result) validDate(result.expiresAt, "activation expiry");
+  return result;
+};
+
+export const verifyInviteActivationBoundary = async (
+  input: { challengeId: string; verifierCandidates: string[]; verifiedAt: Date },
+  db: PreAuthQueryClient = getB01PreAuthPrisma()
+) => oneOrNone(await db.$queryRaw<Array<{ verified: boolean; userId: string | null; email: string | null; role: UserRole | null }>>`
+  SELECT * FROM app_auth.verify_invite_activation(
+    ${input.challengeId}, ${input.verifierCandidates.map((value) => tokenHash(value, "activation verifier"))}::text[],
+    ${validDate(input.verifiedAt, "activation verification time")}::timestamp without time zone
+  )
+`, "app_auth.verify_invite_activation");
+
+export const resendInviteActivationBoundary = async (
+  input: { challengeId: string; newChallengeId: string; codeVerifier: string; requestedAt: Date; expiresAt: Date },
+  db: PreAuthQueryClient = getB01PreAuthPrisma()
+) => oneOrNone(await db.$queryRaw<Array<{
+  challengeId: string; email: string; userId: string; inviteId: string; orgId: string | null; licenseeId: string | null; expiresAt: Date;
+}>>`
+  SELECT * FROM app_auth.resend_invite_activation(
+    ${input.challengeId}, ${input.newChallengeId}, ${tokenHash(input.codeVerifier, "activation verifier")},
+    ${validDate(input.requestedAt, "resend time")}::timestamp without time zone,
+    ${validDate(input.expiresAt, "resend expiry")}::timestamp without time zone
+  )
+`, "app_auth.resend_invite_activation");

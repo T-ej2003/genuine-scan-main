@@ -190,6 +190,7 @@ export const approveSensitiveActionApproval = async (input: {
         resourceType: "sensitiveActionApproval",
         allowedRoles: allApplicationRoles,
         requiredAssurance: "mfa-verified",
+        allowTemporaryRolePassword: true,
       },
       (tx) => approveSensitiveApprovalInTransaction<any>(tx, input.approvalId, note)
     );
@@ -219,6 +220,7 @@ export const rejectSensitiveActionApproval = async (input: {
         resourceType: "sensitiveActionApproval",
         allowedRoles: allApplicationRoles,
         requiredAssurance: "mfa-verified",
+        allowTemporaryRolePassword: true,
       },
       (tx) => rejectSensitiveApprovalInTransaction<any>(tx, input.approvalId, note)
     );

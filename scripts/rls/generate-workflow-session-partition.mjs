@@ -15,7 +15,9 @@ const coordinationBaseCommit = "33cbe7ff019efefad242f654f0aa96c44c5b963c";
 // are removed from the production inventory.
 // The final integration handoff maps the active support tracker and
 // manufacturer scope to their exact Session B capability repositories.
-const originalSessionBWorkflowSetSha256 = "0958f262478bf77b7f4064c4eefb31b6e99e54c37d8e60c011ee96908212ce66";
+// Reviewed Phase 4 handoff: three invite-activation B01 paths plus five
+// previously unregistered protected-main B01/B03 paths remain Session B-owned.
+const originalSessionBWorkflowSetSha256 = "d492dfd7bf33676e158e91330528358554457d11ca3646f72b7a98f3c132a240";
 const workflowSetSha256 = (ids) => crypto.createHash("sha256").update(`${[...ids].sort().join("\n")}\n`).digest("hex");
 
 const waves = [

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "workflowCount": 24,
+  "workflowCount": 25,
   "groups": {
     "account and security mutations": [
       {
@@ -122,10 +122,12 @@
         "boundaryClass": "batch/QR lifecycle",
         "implementationStatus": "contract-ready",
         "sourceCommandRuleIds": [
+          "command-audit-log-insert-b073f0a412d8",
           "command-customer-auth-session-select-b073f0a412d8",
           "command-customer-auth-session-update-b073f0a412d8",
           "command-customer-verification-session-insert-b073f0a412d8",
           "command-licensee-select-b073f0a412d8",
+          "command-security-event-outbox-insert-b073f0a412d8",
           "command-verification-decision-select-b073f0a412d8",
           "command-verification-evidence-snapshot-select-b073f0a412d8",
           "command-verification-evidence-snapshot-update-b073f0a412d8"
@@ -176,6 +178,20 @@
         ]
       }
     ],
+    "migration-only workflows": [
+      {
+        "workflowId": "workflow-startup-backend-src-rls-waves-session-c-operator-procedure-service-ts-bootstrap-configured-super-admin-procedure",
+        "familyId": "family-contract-identity-migration",
+        "boundaryClass": "migration-only workflows",
+        "implementationStatus": "contract-ready",
+        "sourceCommandRuleIds": [
+          "command-audit-log-insert-483d52e49c11",
+          "command-security-event-outbox-insert-483d52e49c11",
+          "command-user-insert-483d52e49c11",
+          "command-user-select-483d52e49c11"
+        ]
+      }
+    ],
     "pre-auth function-backed workflows": [
       {
         "workflowId": "workflow-internal-backend-src-services-auth-email-verification-service-ts-confirm-email-verification",
@@ -199,6 +215,7 @@
         "implementationStatus": "contract-ready",
         "sourceCommandRuleIds": [
           "command-audit-log-outbox-insert-93fe5e2f9580",
+          "command-invite-activation-challenge-insert-93fe5e2f9580",
           "command-invite-select-93fe5e2f9580",
           "command-invite-update-93fe5e2f9580",
           "command-licensee-select-93fe5e2f9580",
@@ -228,6 +245,7 @@
         "boundaryClass": "pre-auth function-backed workflows",
         "implementationStatus": "contract-ready",
         "sourceCommandRuleIds": [
+          "command-invite-activation-challenge-select-d113603cb7d4",
           "command-invite-select-d113603cb7d4",
           "command-licensee-select-d113603cb7d4",
           "command-organization-select-d113603cb7d4",
@@ -401,10 +419,12 @@
         "workflow-internal-backend-src-services-customer-verification-session-service-ts-create-customer-verification-session"
       ],
       "sourceCommandRuleIds": [
+        "command-audit-log-insert-b073f0a412d8",
         "command-customer-auth-session-select-b073f0a412d8",
         "command-customer-auth-session-update-b073f0a412d8",
         "command-customer-verification-session-insert-b073f0a412d8",
         "command-licensee-select-b073f0a412d8",
+        "command-security-event-outbox-insert-b073f0a412d8",
         "command-verification-decision-select-b073f0a412d8",
         "command-verification-evidence-snapshot-select-b073f0a412d8",
         "command-verification-evidence-snapshot-update-b073f0a412d8"
@@ -554,6 +574,7 @@
       ],
       "sourceCommandRuleIds": [
         "command-audit-log-outbox-insert-93fe5e2f9580",
+        "command-invite-activation-challenge-insert-93fe5e2f9580",
         "command-invite-select-93fe5e2f9580",
         "command-invite-update-93fe5e2f9580",
         "command-licensee-select-93fe5e2f9580",
@@ -587,6 +608,7 @@
         "workflow-internal-backend-src-services-auth-invite-service-ts-get-invite-preview"
       ],
       "sourceCommandRuleIds": [
+        "command-invite-activation-challenge-select-d113603cb7d4",
         "command-invite-select-d113603cb7d4",
         "command-licensee-select-d113603cb7d4",
         "command-organization-select-d113603cb7d4",
@@ -684,6 +706,20 @@
       "sourceCommandRuleIds": [
         "command-security-event-outbox-select-76e162f16ff9",
         "command-security-event-outbox-update-76e162f16ff9"
+      ]
+    },
+    {
+      "familyId": "family-contract-identity-migration",
+      "boundaryClass": "migration-only workflows",
+      "implementationStatus": "contract-ready",
+      "workflowIds": [
+        "workflow-startup-backend-src-rls-waves-session-c-operator-procedure-service-ts-bootstrap-configured-super-admin-procedure"
+      ],
+      "sourceCommandRuleIds": [
+        "command-audit-log-insert-483d52e49c11",
+        "command-security-event-outbox-insert-483d52e49c11",
+        "command-user-insert-483d52e49c11",
+        "command-user-select-483d52e49c11"
       ]
     },
     {

@@ -57,10 +57,15 @@ export const buildAuditLogBoundary = (
   if (!isPlatformAdmin && !isManufacturer && !tenantAdminRoles.has(user.role)) {
     throw new AuditLogQueryAccessError("Insufficient permissions");
   }
-  if (user.authAssurance !== "ADMIN_MFA") throw new AuditLogQueryAccessError("Fresh administrator MFA is required");
-  const mfaVerifiedAt = Date.parse(String(user.mfaVerifiedAt || ""));
-  if (!Number.isFinite(mfaVerifiedAt) || Date.now() - mfaVerifiedAt > getAdminStepUpWindowMinutes() * 60_000) {
-    throw new AuditLogQueryAccessError("Fresh administrator MFA is required");
+  const requiresMfa = isPlatformAdmin || user.role === UserRole.ORG_ADMIN;
+  if (requiresMfa) {
+    if (user.authAssurance !== "ADMIN_MFA") throw new AuditLogQueryAccessError("Fresh administrator MFA is required");
+    const mfaVerifiedAt = Date.parse(String(user.mfaVerifiedAt || ""));
+    if (!Number.isFinite(mfaVerifiedAt) || Date.now() - mfaVerifiedAt > getAdminStepUpWindowMinutes() * 60_000) {
+      throw new AuditLogQueryAccessError("Fresh administrator MFA is required");
+    }
+  } else if (user.authAssurance !== "PASSWORD" && user.authAssurance !== "ADMIN_MFA") {
+    throw new AuditLogQueryAccessError("Password authentication is required");
   }
 
   let licenseeId: string;
@@ -104,7 +109,7 @@ export const buildAuditLogBoundary = (
       organizationId: actorOrgId || null,
       licenseeId,
       manufacturerId: isManufacturer ? userId : null,
-      authAssurance: "mfa-verified",
+      authAssurance: user.authAssurance === "ADMIN_MFA" ? "mfa-verified" : "password-verified",
       requestId: normalizedRequestId,
       purpose: isPlatformAdmin ? "platform-audit-log-read" : "audit-log-read",
     },

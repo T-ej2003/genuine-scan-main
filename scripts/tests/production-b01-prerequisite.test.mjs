@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import { B01_PREREQUISITE, assertB01ExecutorAwsEvidence, assertB01ExpiredMutationTaskQuiescent, assertB01LivePredecessor, assertB01PrerequisiteReceipt, assertB01ReceiptExecutorContract,
@@ -176,6 +176,19 @@ test("executor command contains only the seven source-fixed #567 mutations", asy
   const attacked = structuredClone(built); attacked.contract.mutations[0].sql += "\nDELETE FROM public.\"User\"";
   const state = stateFixture(delta.predecessor); const harness = transactionHarness([state]);
   await assert.rejects(executeB01Transaction({ tx: harness.tx, input: attacked, collect: harness.collect })); assert.equal(harness.writes.length, 0);
+});
+
+test("canonical prerequisite reads its successor from the reviewed RLS origin, not the moving worktree", () => {
+  const reads = [];
+  const readOrigin = (file) => {
+    reads.push(file);
+    return execFileSync("git", ["show", `${B01_PREREQUISITE.rlsDeltaOriginSha}:${file}`], { encoding: "utf8" });
+  };
+  canonicalB01Prerequisite({ readOrigin });
+  assert.deepEqual(reads.sort(), [
+    "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
+    "scripts/rls/sql/generated/30-policies.sql",
+  ]);
 });
 
 test("read-only command reuses the exact mutation catalogue collector and cannot reach mutation code", () => {

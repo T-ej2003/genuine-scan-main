@@ -10,6 +10,7 @@ const ids = {
   licenseeA: "00000000-0000-4000-8000-000000000201",
   adminA: "00000000-0000-4000-8000-000000000301",
   refresh: "00000000-0000-4000-8000-000000001501",
+  passwordRefresh: "00000000-0000-4000-8000-000000001502",
   evidenceA: "00000000-0000-4000-8000-000000001601",
   evidenceB: "00000000-0000-4000-8000-000000001602",
   incidentA: "00000000-0000-4000-8000-000000000701",
@@ -122,6 +123,24 @@ async function main() {
   assert.equal(evidence.incidentId, ids.incidentA);
   await assert.rejects(withC03ResourceTransaction(resourceBoundary("incident-evidence-file-read", "c03-private-b", "incidentEvidenceStorage"),
     (tx, authority) => loadIncidentEvidenceFileInTransaction(tx, authority, "c03-private-b")), /C03_SCOPE_DENIED|C03_INCIDENT_EVIDENCE_DENIED/);
+
+  const temporaryRoleCapability = crypto.randomBytes(32).toString("base64url");
+  const temporaryRoleRefreshHash = crypto.randomBytes(32).toString("hex");
+  runPsql(bootstrapUrl, `INSERT INTO public."RefreshToken" (id,"orgId","userId","tokenHash","expiresAt","authenticatedAt")
+    VALUES ('${ids.passwordRefresh}','${ids.orgA}','${ids.adminA}','${temporaryRoleRefreshHash}',transaction_timestamp()+interval '1 day',transaction_timestamp())`);
+  runPsql(preauthUrl, `SELECT * FROM app_auth.issue_authenticated_session_capability('${ids.passwordRefresh}','${temporaryRoleRefreshHash}','${temporaryRoleCapability}','PASSWORD',(transaction_timestamp()+interval '12 hours')::timestamp)`);
+  const temporaryRoleEvidenceBoundary = (storageKey, allowTemporaryRolePassword = true) => ({
+    ...resourceBoundary("incident-evidence-file-read", storageKey, "incidentEvidenceStorage"),
+    databaseSessionCapability: temporaryRoleCapability,
+    allowTemporaryRolePassword,
+  });
+  const passwordEvidence = await withC03ResourceTransaction(temporaryRoleEvidenceBoundary("c03-private-a"),
+    (tx, authority) => loadIncidentEvidenceFileInTransaction(tx, authority, "c03-private-a"));
+  assert.equal(passwordEvidence.incidentId, ids.incidentA);
+  await assert.rejects(withC03ResourceTransaction(temporaryRoleEvidenceBoundary("c03-private-b"),
+    (tx, authority) => loadIncidentEvidenceFileInTransaction(tx, authority, "c03-private-b")), /C03_SCOPE_DENIED|C03_INCIDENT_EVIDENCE_DENIED/);
+  await assert.rejects(withC03ResourceTransaction(temporaryRoleEvidenceBoundary("c03-private-a", false),
+    (tx, authority) => loadIncidentEvidenceFileInTransaction(tx, authority, "c03-private-a")), /Fresh administrator MFA is required/);
 
   const raceJob = await start();
   const [completeRace, failRace] = await Promise.allSettled([

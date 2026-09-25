@@ -394,7 +394,8 @@
         "manufacturerId",
         "tokenHash",
         "expiresAt",
-        "usedAt"
+        "usedAt",
+        "acceptedByUserId"
       ],
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner"
@@ -405,6 +406,55 @@
       "columns": [
         "usedAt",
         "acceptedByUserId"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "InviteActivationChallenge",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "userId",
+        "inviteId",
+        "email",
+        "purpose",
+        "codeVerifier",
+        "expiresAt",
+        "attemptCount",
+        "maxAttempts",
+        "createdAt",
+        "consumedAt",
+        "supersededAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "InviteActivationChallenge",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "userId",
+        "inviteId",
+        "email",
+        "purpose",
+        "codeVerifier",
+        "expiresAt",
+        "attemptCount",
+        "maxAttempts",
+        "createdAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "InviteActivationChallenge",
+      "command": "UPDATE",
+      "columns": [
+        "attemptCount",
+        "consumedAt",
+        "supersededAt"
       ],
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner"
@@ -2014,6 +2064,7 @@
         "disabledAt",
         "deletedAt",
         "passwordHash",
+        "emailVerifiedAt",
         "location",
         "website",
         "createdAt"
@@ -2382,6 +2433,27 @@
       "command": "UPDATE",
       "columns": [
         "usedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "InviteActivationChallenge",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "userId",
+        "consumedAt",
+        "supersededAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "InviteActivationChallenge",
+      "command": "UPDATE",
+      "columns": [
+        "supersededAt"
       ],
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner"

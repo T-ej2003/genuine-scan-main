@@ -24,6 +24,22 @@ test("all Prisma models and production access sites are represented exactly and 
   assert.deepEqual([...mapped].sort(), detected.map((item) => item.id).sort());
 });
 
+test("discovered bootstrap audit write remains migration-only, never operator authority", () => {
+  const { tables, workflows, commandSemantics } = manifests();
+  const bootstrap = workflows.workflows.find((workflow) => workflow.id === "workflow-startup-backend-src-rls-waves-session-c-operator-procedure-service-ts-bootstrap-configured-super-admin-procedure");
+  assert.equal(bootstrap?.authorizationBoundaryType, "migration-owner");
+  assert.deepEqual(bootstrap.runtimeIdentities, ["identity-migration"]);
+  const audit = tables.tables.find((table) => table.prismaModel === "AuditLog");
+  assert(!audit.allowedCommandsByIdentity.find((entry) => entry.identityId === "identity-operator")?.commands.includes("INSERT"));
+  assert.deepEqual(audit.allowedCommandsByIdentity.find((entry) => entry.identityId === "identity-migration")?.commands, ["EXECUTE"]);
+  assert(audit.allowedCommandsByIdentity.find((entry) => entry.identityId === "identity-migration")?.conditions.some((condition) => condition.includes("no runtime direct table grant")));
+  const bootstrapRules = commandSemantics.rules.filter((rule) => rule.supportingWorkflowIds.includes(bootstrap.id));
+  assert(bootstrapRules.every((rule) => !rule.runtimeIdentities.includes("identity-operator")));
+  const grants = fs.readFileSync(path.join(repoRoot, "scripts/rls/sql/generated/20-context-helpers.sql"), "utf8");
+  assert.match(grants, /GRANT EXECUTE ON FUNCTION app_ops\.bootstrap_configured_super_admin\([^\n]+\) TO "mscqr_rls_cert_migration";/);
+  assert.doesNotMatch(grants, /GRANT EXECUTE ON FUNCTION app_ops\.bootstrap_configured_super_admin\([^\n]+\) TO "mscqr_rls_cert_operator";/);
+});
+
 test("raw SQL inventory recognizes table clauses without treating data literals as tables", () => {
   const accesses = scanProductionAccess().accesses.filter((entry) =>
     entry.sourceFile === "backend/src/services/printReservationService.ts" &&
@@ -45,7 +61,7 @@ test("route authorization evidence is isolated to the exact registered handler",
   for (const ruleId of workflow.commandRuleIds) {
     const rule = commandSemantics.rules.find((item) => item.id === ruleId);
     assert.deepEqual(rule.actorClasses, ["licensee-admin"]);
-    assert(rule.supportingEvidence.some((item) => item.includes("routes/index.ts:2138") && item.includes("requireAnyAdmin") && item.includes("enforceTenantIsolation")));
+    assert(rule.supportingEvidence.some((item) => item.includes("routes/index.ts:2147") && item.includes("requireAnyAdmin") && item.includes("enforceTenantIsolation")));
     assert(!rule.supportingEvidence.some((item) => item.includes("requirePlatformAdmin")), `${ruleId} inherited an adjacent route guard`);
   }
 });
@@ -688,7 +704,7 @@ test("policy dependency graph is complete, explicit, and acyclic", () => {
   const graph = JSON.parse(fs.readFileSync(policyDependencyGraphPath, "utf8"));
   const tableIds = new Set(manifests().tables.tables.map((table) => table.id));
   assert.deepEqual(new Set(graph.nodes.map((node) => node.id)), tableIds);
-  assert.equal(graph.edges.length, 38);
+  assert.equal(graph.edges.length, 39);
   const dependencies = new Map([...tableIds].map((id) => [id, graph.edges.filter((edge) => edge.sourceTable === id).map((edge) => edge.dependencyTable)]));
   const tableById = new Map(manifests().tables.tables.map((table) => [table.id, table]));
   const visit = (id, stack = new Set()) => {

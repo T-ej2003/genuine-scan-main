@@ -15,7 +15,6 @@ import { readCookie } from "../utils/cookies";
 import {
   getAdminStepUpWindowMinutes,
   getPasswordReauthWindowMinutes,
-  getSensitiveActionStepUpMethod,
   isAdminMfaRequiredRole,
 } from "../services/auth/authService";
 import { clearAuthCookies } from "../controllers/authControllerShared";
@@ -276,13 +275,42 @@ const stepUpRequired = (
     },
   });
 
-export const requireRecentAdminMfa = async (req: AuthRequest, res: Response, next: NextFunction) => {
+const requireRecentPasswordAuth = (
+  req: AuthRequest, res: Response, next: NextFunction
+): Response | void => {
+  if (req.user?.sessionStage !== "ACTIVE") {
+    return stepUpRequired(res, {
+      message: "A fresh password confirmation is required before continuing.",
+      method: "PASSWORD_REAUTH",
+    });
+  }
+
+  const authenticatedAt = req.user.authenticatedAt ? new Date(req.user.authenticatedAt) : null;
+  if (!authenticatedAt || Number.isNaN(authenticatedAt.getTime())) {
+    return stepUpRequired(res, {
+      message: "A fresh password confirmation is required before continuing.",
+      method: "PASSWORD_REAUTH",
+    });
+  }
+
+  const maxAgeMs = getPasswordReauthWindowMinutes() * 60_000;
+  if (Date.now() - authenticatedAt.getTime() > maxAgeMs) {
+    return stepUpRequired(res, {
+      message: "Your password confirmation is no longer fresh enough for this action. Confirm your password to continue.",
+      method: "PASSWORD_REAUTH",
+    });
+  }
+
+  return next();
+};
+
+export const requireRecentAdminMfa = async (req: AuthRequest, res: Response, next: NextFunction): Promise<Response | void> => {
   if (!req.user) {
     return res.status(401).json({ success: false, error: "Authentication required" });
   }
 
   if (!isAdminMfaRequiredRole(req.user.role)) {
-    return next();
+    return requireRecentPasswordAuth(req, res, next);
   }
 
   if (req.user.sessionStage !== "ACTIVE") {
@@ -332,7 +360,9 @@ export const requireRecentAdminMfa = async (req: AuthRequest, res: Response, nex
 export const requireRecentAdminMfaForSetup = (req: AuthRequest, res: Response, next: NextFunction) =>
   req.user?.sessionStage === "MFA_BOOTSTRAP" ? next() : requireRecentAdminMfa(req, res, next);
 
-export const requireRecentSensitiveAuth = (req: AuthRequest, res: Response, next: NextFunction) => {
+export const requireRecentSensitiveAuth = (
+  req: AuthRequest, res: Response, next: NextFunction
+): Response | void | Promise<Response | void> => {
   if (!req.user) {
     return res.status(401).json({ success: false, error: "Authentication required" });
   }
@@ -340,29 +370,5 @@ export const requireRecentSensitiveAuth = (req: AuthRequest, res: Response, next
   if (isAdminMfaRequiredRole(req.user.role)) {
     return requireRecentAdminMfa(req, res, next);
   }
-
-  if (req.user.sessionStage !== "ACTIVE") {
-    return stepUpRequired(res, {
-      message: "A fresh password confirmation is required before continuing.",
-      method: getSensitiveActionStepUpMethod(req.user.role),
-    });
-  }
-
-  const authenticatedAt = req.user.authenticatedAt ? new Date(req.user.authenticatedAt) : null;
-  if (!authenticatedAt || Number.isNaN(authenticatedAt.getTime())) {
-    return stepUpRequired(res, {
-      message: "A fresh password confirmation is required before continuing.",
-      method: getSensitiveActionStepUpMethod(req.user.role),
-    });
-  }
-
-  const maxAgeMs = getPasswordReauthWindowMinutes() * 60_000;
-  if (Date.now() - authenticatedAt.getTime() > maxAgeMs) {
-    return stepUpRequired(res, {
-      message: "Your password confirmation is no longer fresh enough for this action. Confirm your password to continue.",
-      method: getSensitiveActionStepUpMethod(req.user.role),
-    });
-  }
-
-  return next();
+  return requireRecentPasswordAuth(req, res, next);
 };

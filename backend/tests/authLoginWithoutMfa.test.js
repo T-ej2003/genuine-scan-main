@@ -19,6 +19,9 @@ const mockModule = (relativePath, exportsValue) => {
 
 let prismaUser = null;
 let refreshDecision = null;
+let riskStepUp = false;
+let riskBlock = false;
+const riskWrites = [];
 
 const prismaMock = {
   user: {
@@ -83,7 +86,7 @@ mockModule("services/auth/refreshTokenService.js", {
     assert.strictEqual(refreshDecision.action, "rotate");
     const successor = {
       id: "bootstrap-session-2",
-      expiresAt: refreshDecision.expiresAt,
+      expiresAt: refreshDecision.expiresAt || new Date("2026-03-17T12:00:00.000Z"),
       tokenHash: "bootstrap-refresh-hash",
     };
     const rotation = await input.afterRotate({
@@ -127,7 +130,8 @@ mockModule("services/auth/sessionRiskService.js", {
     score: 12,
     riskLevel: "LOW",
     reasons: ["Known device"],
-    shouldBlock: false,
+    shouldBlock: riskBlock,
+    shouldStepUp: riskStepUp,
     actorState: {
       userId: prismaUser.id,
       email: prismaUser.email,
@@ -139,13 +143,13 @@ mockModule("services/auth/sessionRiskService.js", {
       sessionLicenseeId: null,
       sessionOrganizationId: null,
       scopeVersion: null,
-      selectedLicenseeId: null,
-      selectedLicenseeName: null,
-      selectedLicenseePrefix: null,
+      selectedLicenseeId: "licensee-1",
+      selectedLicenseeName: "Local licensee",
+      selectedLicenseePrefix: "LCL",
       selectedLicenseeBrandName: null,
-      selectedLicenseeOrganizationId: null,
-      linkedLicensees: [],
-      mfaRequired: true,
+      selectedLicenseeOrganizationId: "org-1",
+      linkedLicensees: [{ id: "licensee-1", name: "Local licensee", prefix: "LCL", brandName: null, orgId: "org-1" }],
+      mfaRequired: [UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN, UserRole.ORG_ADMIN].includes(prismaUser.role),
       mfaEnabled: mockedMfaStatus.enabled,
       mfaEnrolled: mockedMfaStatus.enrolled,
       mfaLastUsedAt: mockedMfaStatus.lastUsedAt,
@@ -153,7 +157,7 @@ mockModule("services/auth/sessionRiskService.js", {
       mfaPreferredMethod: mockedMfaStatus.preferredMethod,
     },
   }),
-  persistAuthSessionRisk: async () => null,
+  persistAuthSessionRisk: async (input) => { riskWrites.push(input); },
 });
 
 mockModule("services/manufacturerScopeService.js", {
@@ -177,13 +181,13 @@ mockModule("rls-waves/session-b/b01/sessionCredentialRepository.js", {
     sessionLicenseeId: null,
     sessionOrganizationId: null,
     scopeVersion: null,
-    selectedLicenseeId: null,
-    selectedLicenseeName: null,
-    selectedLicenseePrefix: null,
+    selectedLicenseeId: "licensee-1",
+    selectedLicenseeName: "Local licensee",
+    selectedLicenseePrefix: "LCL",
     selectedLicenseeBrandName: null,
-    selectedLicenseeOrganizationId: null,
-    linkedLicensees: [],
-    mfaRequired: true,
+    selectedLicenseeOrganizationId: "org-1",
+    linkedLicensees: [{ id: "licensee-1", name: "Local licensee", prefix: "LCL", brandName: null, orgId: "org-1" }],
+    mfaRequired: [UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN, UserRole.ORG_ADMIN].includes(prismaUser.role),
     mfaEnabled: mockedMfaStatus.enabled,
     mfaEnrolled: mockedMfaStatus.enrolled,
     mfaLastUsedAt: mockedMfaStatus.lastUsedAt,
@@ -197,7 +201,7 @@ mockModule("services/auth/mfaService.js", {
   createAdminMfaChallenge: async () => null,
 });
 
-const { loginWithPassword, refreshSession } = require("../dist/services/auth/authService");
+const { issueSessionAfterInviteActivation, loginWithPassword, refreshSession } = require("../dist/services/auth/authService");
 
 const baseUser = {
   id: "user-1",
@@ -218,66 +222,74 @@ const baseUser = {
 };
 
 const run = async () => {
-  prismaUser = { ...baseUser };
+  for (const role of [UserRole.LICENSEE_ADMIN, UserRole.MANUFACTURER, UserRole.MANUFACTURER_ADMIN, UserRole.MANUFACTURER_USER]) {
+    prismaUser = { ...baseUser, role, licenseeId: "licensee-1", orgId: "org-1" };
+    for (const enabled of [false, true]) {
+      mockedMfaStatus = { enabled, enrolled: enabled, methods: enabled ? ["TOTP"] : [], preferredMethod: enabled ? "TOTP" : null, lastUsedAt: enabled ? new Date() : null };
+      const factorSnapshot = JSON.stringify(mockedMfaStatus);
+      const result = await loginWithPassword({ email: prismaUser.email, password: "correct-password", ipHash: "ip-hash", userAgent: "agent", requestId: `login-${role}-${enabled}` });
+      assert.strictEqual(result.sessionStage, "ACTIVE", `${role} must have a normal password session`);
+      assert.strictEqual(result.auth?.authAssurance, "PASSWORD", `${role} must not claim ADMIN_MFA`);
+      assert.strictEqual(result.auth?.mfaRequired, false, `${role} must not be forced to enroll or challenge`);
+      assert.ok(result.refreshToken, `${role} must receive a refresh credential`);
+      assert.strictEqual(JSON.stringify(mockedMfaStatus), factorSnapshot, `${role} existing factor state must remain unchanged`);
+      refreshDecision = null;
+      const refreshed = await refreshSession({ rawRefreshToken: "password-refresh", ipHash: "ip-hash", userAgent: "agent", requestId: `refresh-${role}-${enabled}` });
+      assert.strictEqual(refreshed.ok, true);
+      assert.strictEqual(refreshed.sessionStage, "ACTIVE", `${role} password refresh must remain active`);
+      assert.strictEqual(refreshed.auth?.authAssurance, "PASSWORD");
+      assert.ok(refreshed.refreshToken && !refreshed.auth?.stepUpRequired, `${role} refresh must not be converted to bootstrap`);
+    }
+  }
 
-  const result = await loginWithPassword({
-    email: prismaUser.email,
-    password: "correct-password",
-    ipHash: "ip-hash",
-    userAgent: "agent",
-    requestId: "login-request-1",
-  });
+  for (const role of [UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN, UserRole.ORG_ADMIN]) {
+    prismaUser = { ...baseUser, role, licenseeId: role === UserRole.ORG_ADMIN ? "licensee-1" : null, orgId: role === UserRole.ORG_ADMIN ? "org-1" : null };
+    mockedMfaStatus = { enabled: false, enrolled: false, methods: [], preferredMethod: null, lastUsedAt: null };
+    const result = await loginWithPassword({ email: prismaUser.email, password: "correct-password", ipHash: "ip-hash", userAgent: "agent", requestId: `login-${role}` });
+    assert.strictEqual(result.sessionStage, "MFA_BOOTSTRAP", `${role} must retain MFA enrollment`);
+    assert.strictEqual(result.refreshToken, null, `${role} must not receive a normal refresh credential`);
+    mockedMfaStatus = { enabled: true, enrolled: true, methods: ["TOTP"], preferredMethod: "TOTP", lastUsedAt: new Date() };
+    const enrolled = await loginWithPassword({ email: prismaUser.email, password: "correct-password", ipHash: "ip-hash", userAgent: "agent", requestId: `login-enrolled-${role}` });
+    assert.strictEqual(enrolled.sessionStage, "ACTIVE", `${role} enrolled login remains subject to the existing MFA freshness policy`);
+    assert.strictEqual(enrolled.auth?.authAssurance, "ADMIN_MFA", `${role} must never receive a PASSWORD active session`);
+  }
 
-  assert.strictEqual(result.sessionStage, "MFA_BOOTSTRAP", "manufacturer password login should require MFA setup");
-  assert.strictEqual(result.accessToken, "bootstrap-token", "login should issue only an MFA bootstrap token");
-  assert.strictEqual(result.refreshToken, null, "login should not issue a refresh token before MFA");
-  assert.ok(result.user, "login should return the authenticated user");
-  assert.strictEqual(result.auth?.mfaRequired, true, "manufacturer MFA should be required");
-  assert.strictEqual(result.auth?.mfaEnrolled, false, "unenrolled manufacturer should be sent to MFA setup");
-  assert.strictEqual(result.auth?.authAssurance, "PASSWORD", "bootstrap remains password-only until MFA is completed");
-
-  mockedMfaStatus = {
-    enabled: true,
-    enrolled: true,
-    methods: ["TOTP"],
-    preferredMethod: "TOTP",
-    lastUsedAt: new Date(),
-  };
-  const enrolledResult = await loginWithPassword({
-    email: prismaUser.email,
-    password: "correct-password",
-    ipHash: "ip-hash",
-    userAgent: "agent",
-    requestId: "login-request-2",
-  });
-
-  assert.strictEqual(enrolledResult.sessionStage, "MFA_BOOTSTRAP", "manufacturer logout/login should require MFA challenge even when MFA was used recently");
-  assert.strictEqual(enrolledResult.refreshToken, null, "manufacturer challenge session must not issue refresh before MFA");
-  assert.strictEqual(enrolledResult.auth?.mfaEnrolled, true, "enrolled manufacturer should enter challenge mode");
-
-  refreshDecision = null;
-
-  const refreshed = await refreshSession({
-    rawRefreshToken: "legacy-password-only-refresh",
-    ipHash: "ip-hash",
-    userAgent: "agent",
-    requestId: "refresh-request-1",
-  });
-
-  assert.strictEqual(refreshed.ok, true, "valid legacy refresh should convert into a bootstrap session");
-  assert.strictEqual(refreshed.sessionStage, "MFA_BOOTSTRAP", "password-only manufacturer refresh must not mint an active session");
-  assert.strictEqual(refreshed.accessToken, "bootstrap-token", "refresh should issue only an MFA bootstrap token");
-  assert.strictEqual(refreshed.refreshToken, null, "refresh bootstrap must not keep a password-only refresh token");
-  assert.strictEqual(refreshed.databaseSessionCapability, "A".repeat(43), "bootstrap must carry only the database capability");
-  assert.strictEqual(refreshed.auth?.authAssurance, "PASSWORD", "bootstrap remains password-only until MFA succeeds");
-  assert.strictEqual(refreshed.auth?.stepUpRequired, true, "converted refresh must require MFA step-up");
-  assert.strictEqual(
-    refreshDecision.expiresAt.getTime(),
-    new Date("2026-03-16T12:10:00.000Z").getTime(),
-    "bootstrap database authority must expire with the MFA bootstrap window"
+  prismaUser = { ...baseUser, role: UserRole.LICENSEE_ADMIN, licenseeId: "licensee-1", orgId: "org-1" };
+  riskStepUp = true;
+  riskWrites.length = 0;
+  await assert.rejects(
+    loginWithPassword({ email: prismaUser.email, password: "correct-password", ipHash: "ip-hash", userAgent: "agent", requestId: "risk-step-up-denial" }),
+    /High-risk login blocked/
   );
+  assert.equal(riskWrites.length, 1);
+  assert.equal(riskWrites[0].blockedLogin, true, "risk step-up must commit through the audited denial path");
+  riskStepUp = false;
+  riskBlock = true;
+  riskWrites.length = 0;
+  await assert.rejects(
+    loginWithPassword({ email: prismaUser.email, password: "correct-password", ipHash: "ip-hash", userAgent: "agent", requestId: "risk-block-denial" }),
+    /High-risk login blocked/
+  );
+  assert.equal(riskWrites.length, 1);
+  assert.equal(riskWrites[0].blockedLogin, true, "risk block must not depend on the step-up flag");
+  riskBlock = false;
 
-  console.log("manufacturer MFA login bootstrap tests passed");
+  for (const riskFlag of ["stepUp", "block"]) {
+    riskStepUp = riskFlag === "stepUp";
+    riskBlock = riskFlag === "block";
+    riskWrites.length = 0;
+    await assert.rejects(
+      issueSessionAfterInviteActivation({ userId: prismaUser.id, email: prismaUser.email, role: prismaUser.role,
+        ipHash: "ip-hash", userAgent: "agent", requestId: `activation-${riskFlag}-denial` }),
+      /trusted network/
+    );
+    assert.equal(riskWrites.length, 1);
+    assert.equal(riskWrites[0].blockedLogin, true, `activation ${riskFlag} denial must use the audited risk path`);
+  }
+  riskStepUp = false;
+  riskBlock = false;
+
+  console.log("temporary-role password login and privileged-role MFA policy tests passed");
 };
 
 run().catch((error) => {

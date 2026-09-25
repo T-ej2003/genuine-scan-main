@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
-import { loginWithPassword, logoutSession, refreshSession } from "../services/auth/authService";
-import { acceptInvite, createInvite, getInvitePreview } from "../services/auth/inviteService";
+import { issueSessionAfterInviteActivation, loginWithPassword, logoutSession, refreshSession } from "../services/auth/authService";
+import { acceptInvite, createInvite, getInvitePreview, resendInviteActivation, verifyInviteActivation } from "../services/auth/inviteService";
 import { requestPasswordReset, resetPasswordWithToken } from "../services/auth/passwordResetService";
 import { confirmEmailVerification } from "../services/auth/emailVerificationService";
 import { isManufacturerRole, resolveManufacturerSessionScope } from "../services/manufacturerScopeService";
@@ -25,6 +25,8 @@ import {
   getRequestId,
   hashIp,
   invitePreviewQuerySchema,
+  inviteActivationResendSchema,
+  inviteActivationVerifySchema,
   inviteSchema,
   loginSchema,
   normalizeAuthError,
@@ -366,7 +368,7 @@ export const acceptInviteController = async (req: Request, res: Response) => {
   }
 
   try {
-    const user = await acceptInvite({
+    const pending = await acceptInvite({
       rawToken: parsed.data.token,
       password: parsed.data.password,
       name: parsed.data.name || null,
@@ -375,18 +377,54 @@ export const acceptInviteController = async (req: Request, res: Response) => {
       userAgent: normalizeUserAgent(req.get("user-agent")),
     });
 
-    const session = await loginWithPassword({
-      email: user.email,
-      password: parsed.data.password,
+    return res.status(200).json({ success: true, data: pending });
+  } catch {
+    return res.status(400).json({ success: false, error: "Invite activation could not continue. Please use the invite link or contact your administrator." });
+  }
+};
+
+export const verifyInviteActivationController = async (req: Request, res: Response) => {
+  const parsed = inviteActivationVerifySchema.safeParse(req.body || {});
+  if (!parsed.success) return res.status(400).json({ success: false, error: "Invalid verification request" });
+  let result;
+  try {
+    result = await verifyInviteActivation(parsed.data);
+    if (!result?.verified || !result.userId || !result.email || !result.role) {
+      return res.status(400).json({ success: false, error: "The code could not be verified. Please check it or request a new code." });
+    }
+  } catch {
+    return res.status(400).json({ success: false, error: "The code could not be verified. Please check it or request a new code." });
+  }
+  try {
+    const session = await issueSessionAfterInviteActivation({
+      userId: result.userId,
+      email: result.email,
+      role: result.role,
       ipHash: hashIp(req.ip),
       userAgent: normalizeUserAgent(req.get("user-agent")),
       requestId: getRequestId(req),
     });
-
+    if (!session) return res.json({ success: true, data: { activated: true, loginRequired: true } });
     setAuthCookies(res, session);
-    return res.status(200).json({ success: true, data: authResponseData(session) });
-  } catch (error: any) {
-    return res.status(400).json({ success: false, error: error?.message || "Invite acceptance failed" });
+    return res.json({ success: true, data: authResponseData(session) });
+  } catch {
+    return res.json({ success: true, data: { activated: true, loginRequired: true } });
+  }
+};
+
+export const resendInviteActivationController = async (req: Request, res: Response) => {
+  const parsed = inviteActivationResendSchema.safeParse(req.body || {});
+  if (!parsed.success) return res.status(400).json({ success: false, error: "Invalid resend request" });
+  try {
+    const result = await resendInviteActivation({
+      challengeId: parsed.data.challengeId,
+      ipHash: hashIp(req.ip),
+      userAgent: normalizeUserAgent(req.get("user-agent")),
+    });
+    if (!result) return res.status(400).json({ success: false, error: "A new code is not available yet. Please wait or reopen your invite link." });
+    return res.json({ success: true, data: result });
+  } catch {
+    return res.status(400).json({ success: false, error: "A new code could not be sent. Please try again shortly." });
   }
 };
 

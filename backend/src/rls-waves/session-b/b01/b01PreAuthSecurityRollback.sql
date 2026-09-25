@@ -1,5 +1,8 @@
 DROP FUNCTION IF EXISTS app_auth.consume_email_verification_token(text[],timestamp without time zone);
-DROP FUNCTION IF EXISTS app_auth.consume_invitation_token(text[],text,text,timestamp without time zone,text,text,text);
+DROP FUNCTION IF EXISTS app_auth.resend_invite_activation(text,text,text,timestamp without time zone,timestamp without time zone);
+DROP FUNCTION IF EXISTS app_auth.verify_invite_activation(text,text[],timestamp without time zone);
+DROP FUNCTION IF EXISTS app_auth.lookup_invite_activation_challenge(text);
+DROP FUNCTION IF EXISTS app_auth.consume_invitation_token(text[],text,text,timestamp without time zone,text,text,text,text,text,timestamp without time zone);
 DROP FUNCTION IF EXISTS app_auth.lookup_invitation_token(text[],timestamp without time zone);
 DROP FUNCTION IF EXISTS app_auth.consume_password_reset_token(text[],text,timestamp without time zone);
 DROP FUNCTION IF EXISTS app_auth.request_password_reset(text,text,timestamp without time zone,timestamp without time zone,text,text);

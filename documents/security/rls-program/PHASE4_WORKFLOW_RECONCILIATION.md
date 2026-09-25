@@ -1,0 +1,20 @@
+# Phase 4 workflow-inventory reconciliation
+
+Protected-main base: `374feb5f8853d06f88af99ab632c03928e579495`. Its checked-in inventory has 321 workflows. Rescanning protected main without Phase 4 yields 327; rescanning the Phase 4 worktree yields 330. The intervening #571–#573 changes from `a2bed229ddfb893d4dcc53232ea5466d23d4e80a` affect only B01 production-prerequisite recovery and proof tooling, not this scanner or application/RLS inventory. The three additional Phase 4 paths are `lookupInviteActivationBinding`, `resendInviteActivationBoundary`, and `verifyInviteActivationBoundary` in B01 `preAuthRepository.ts`. No workflow was removed.
+
+The six baseline discoveries are not new authorization requests:
+
+| Existing path | Provenance and authority | Disposition |
+| --- | --- | --- |
+| B01 `finalizeRefreshTokenRotation` | PR #567 (`ba1632563`); `app_auth.finalize_refresh_token_rotation` is an existing reviewed B01 function, exercised by the PostgreSQL 18 refresh-rotation tests. It finalizes only the claimed successor under the same request identity. | Register its scanned internal call path; retain the existing refresh-session function contract. |
+| B03 `listSupportTickets` | PR #126 (`565803353`); existing platform-admin/recent-MFA `app_rls.b03_list_support_tickets` function and exact app EXECUTE grant. | Register and bind the named-function contract to the scanned path. |
+| B03 `getSupportTicket` | Same PR and boundary; `app_rls.b03_get_support_ticket` returns one explicit platform-only projection. | Register and bind the contract. |
+| B03 `updateSupportTicket` | Same PR and boundary; `app_rls.b03_update_support_ticket` locks one ticket and appends `SUPPORT_TICKET_UPDATED` audit evidence. | Register and bind the contract. |
+| B03 `addSupportTicketMessage` | Same PR and boundary; `app_rls.b03_add_support_ticket_message` appends one bounded message and `SUPPORT_TICKET_MESSAGE_ADDED` audit evidence. | Register and bind the contract. |
+| C04 `bootstrapConfiguredSuperAdminProcedure` | PR #126; `app_ops.bootstrap_configured_super_admin` accepts only deployment migration context, creates at most one initial SUPER_ADMIN, and audits created/skipped/blocked results. The clean-room package grants EXECUTE only to `identity-migration`; operator direct execution and direct table grants are denied by C04 PostgreSQL 18 proof. | Register as migration-only; correct the startup identity projection. |
+
+The C04 scanner classified a `startup` call as `identity-operator` in the table matrix, while command semantics already classified the same `migration-owner` workflow as `identity-migration`. That disagreement manufactured an `identity-operator → AuditLog → INSERT` requirement. The authored bootstrap SQL calls `session_c04_audit` only after `session_c04_assert_context(..., 'migration', ...)`; its audit actions are `AUTH_SUPER_ADMIN_BOOTSTRAPPED`, `AUTH_SUPER_ADMIN_BOOTSTRAP_SKIPPED_EXISTING`, and `AUTH_SUPER_ADMIN_BOOTSTRAP_BLOCKED`. This is not generic operator AuditLog write authority. The helper itself has PUBLIC EXECUTE revoked. C04's separate disposable operator-procedure fixture grants are not clean-room production grants.
+
+Three previously registered B02 customer-session workflows also gain already-authored AuditLog and SecurityEventOutbox INSERT command *evidence* when rescanned. Their `app_public` named-function contracts and SQL already contained those commands; this is baseline inventory drift, not a Phase 4 permission change. PR #570 changed deployment reconciliation/proof machinery, not the workflow scanner or these application/SQL paths. The checked-in 321-workflow manifest was stale relative to protected-main source.
+
+The reconciliation changes authored identity classification and named-function inventory links, then regenerates canonical inventories, SQL and checksums. It does not add an operator AuditLog command rule, direct table/column grant, operator EXECUTE grant, or RLS policy. Generated SQL authority changes must remain attributable solely to the approved Phase 4 activation model and temporary assurance policy; compare the final SQL diff against this base before release.

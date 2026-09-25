@@ -282,7 +282,7 @@ const main = async () => {
     const login = await jsonRequest("POST", "/api/auth/login", {
       email: emails.manufacturerA,
       password: passwords.manufacturerA,
-    });
+    }, { headers: { "user-agent": "p2-test-agent" } });
     assertStatus(login, 200, "seeded manufacturer login");
     if (!/MANUFACTURER/i.test(login.text)) throw new Error("seeded manufacturer login did not return manufacturer role");
 

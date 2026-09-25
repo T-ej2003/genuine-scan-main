@@ -55,7 +55,7 @@ const CATEGORY_MODELS = Object.freeze({
   "tenant-owned": ["Licensee", "ManufacturerLicenseeLink", "QRRange", "Batch", "InventoryStatusRollup", "QRCode", "QrAllocationRequest", "PolicyAlert", "TenantFeatureFlag", "EvidenceRetentionPolicy"],
   "actor-owned": ["PrinterRegistration", "Notification"],
   "parent-inherited": ["PrintJob", "PrintSession", "PrinterAgentSession", "PrintJobChunk", "PrintItem", "PrinterProfile", "PrinterProfileSnapshot", "PrintReissueRequest", "PrinterAttestation", "Ownership", "OwnershipTransfer", "ReplacementChain", "IncidentCommunication", "IncidentHandoff", "SupportTicket", "SupportTicketMessage"],
-  "security-sensitive": ["User", "Printer", "VerificationDecision", "VerificationEvidenceSnapshot", "CustomerTrustCredential", "CustomerWebAuthnCredential", "CustomerWebAuthnChallenge", "CustomerVerificationSession", "CustomerAuthSession", "CustomerTrustIntake", "Invite", "PasswordReset", "EmailVerificationToken", "RefreshToken", "ScheduledJobCredential", "AdminMfaCredential", "AdminWebAuthnCredential", "UserMfaFactor", "UserBackupCode", "MfaLoginChallenge", "AuthMfaChallenge", "AuthWebAuthnChallenge", "AuthSessionRiskSignal", "SensitiveActionApproval", "SecurityPolicy", "PolicyRule", "Incident", "RequestAccess", "SupportIssueReport"],
+  "security-sensitive": ["User", "Printer", "VerificationDecision", "VerificationEvidenceSnapshot", "CustomerTrustCredential", "CustomerWebAuthnCredential", "CustomerWebAuthnChallenge", "CustomerVerificationSession", "CustomerAuthSession", "CustomerTrustIntake", "Invite", "InviteActivationChallenge", "PasswordReset", "EmailVerificationToken", "RefreshToken", "ScheduledJobCredential", "AdminMfaCredential", "AdminWebAuthnCredential", "UserMfaFactor", "UserBackupCode", "MfaLoginChallenge", "AuthMfaChallenge", "AuthWebAuthnChallenge", "AuthSessionRiskSignal", "SensitiveActionApproval", "SecurityPolicy", "PolicyRule", "Incident", "RequestAccess", "SupportIssueReport"],
   "append-only-audit": ["PrintItemEvent", "PrintAuditEvent", "QrScanLog", "AuditLog", "AllocationEvent", "TraceEvent", "IncidentEvent", "IncidentEvidence", "ForensicEventChain", "RouteTransitionMetric"],
   "platform-reference": [],
   "operational-system": ["ScanMetricsHourlyRollup", "AuditLogOutbox", "SystemCheckpoint", "SecurityEventOutbox", "CompliancePackJob", "EvidenceRetentionJob", "IncidentEvidenceFingerprint", "ActionIdempotencyKey", "DegradationEvent"],
@@ -65,7 +65,7 @@ const CATEGORY_MODELS = Object.freeze({
 const CATEGORY_BY_MODEL = new Map(Object.entries(CATEGORY_MODELS).flatMap(([category, models]) => models.map((model) => [model, category])));
 
 const REVIEW_GROUP_MODELS = Object.freeze({
-  A: ["User", "PrintRenderToken", "BatchPrintPackToken", "CustomerTrustCredential", "CustomerWebAuthnCredential", "CustomerWebAuthnChallenge", "CustomerVerificationSession", "CustomerAuthSession", "CustomerTrustIntake", "Invite", "PasswordReset", "EmailVerificationToken", "RefreshToken", "ScheduledJobCredential", "AdminMfaCredential", "AdminWebAuthnCredential", "UserMfaFactor", "UserBackupCode", "MfaLoginChallenge", "AuthMfaChallenge", "AuthWebAuthnChallenge", "AuthSessionRiskSignal", "SensitiveActionApproval"],
+  A: ["User", "PrintRenderToken", "BatchPrintPackToken", "CustomerTrustCredential", "CustomerWebAuthnCredential", "CustomerWebAuthnChallenge", "CustomerVerificationSession", "CustomerAuthSession", "CustomerTrustIntake", "Invite", "InviteActivationChallenge", "PasswordReset", "EmailVerificationToken", "RefreshToken", "ScheduledJobCredential", "AdminMfaCredential", "AdminWebAuthnCredential", "UserMfaFactor", "UserBackupCode", "MfaLoginChallenge", "AuthMfaChallenge", "AuthWebAuthnChallenge", "AuthSessionRiskSignal", "SensitiveActionApproval"],
   B: ["Organization", "Licensee", "ManufacturerLicenseeLink"],
   C: ["QRRange", "Batch", "InventoryStatusRollup", "QRCode", "Ownership", "OwnershipTransfer", "QrScanLog", "VerificationDecision", "VerificationEvidenceSnapshot", "ReplacementChain", "DegradationEvent", "QrAllocationRequest", "AllocationEvent", "TraceEvent", "ScanMetricsHourlyRollup"],
   D: ["PrintJob", "PrintSession", "PrinterAgentSession", "PrintJobChunk", "PrintItem", "PrintItemEvent", "PrintAuditEvent", "PrinterRegistration", "Printer", "PrinterProfile", "PrinterProfileSnapshot", "PrintReissueRequest", "PrinterAttestation"],
@@ -96,6 +96,7 @@ const DEPENDENCY_RULES = Object.freeze({
   CustomerVerificationSession: ["VerificationDecision", ["verificationDecisionId"], ["id"]],
   CustomerTrustIntake: ["CustomerVerificationSession", ["sessionId"], ["id"]],
   Invite: ["Organization", ["orgId"], ["id"]],
+  InviteActivationChallenge: ["User", ["userId"], ["id"]],
   PasswordReset: ["User", ["userId"], ["id"]],
   EmailVerificationToken: ["User", ["userId"], ["id"]],
   RefreshToken: ["User", ["userId"], ["id"]],
@@ -141,7 +142,7 @@ const NULL_SEMANTICS = Object.freeze({
   RouteTransitionMetric: "userId/licenseeId NULL denotes anonymous platform telemetry; only append and aggregated system reads are permitted.",
 });
 
-const PREAUTH_NAMED_FUNCTION_MODELS = new Set(["User", "Invite", "PasswordReset", "EmailVerificationToken", "RefreshToken", "MfaLoginChallenge", "AuthMfaChallenge", "AuthWebAuthnChallenge", "AuthSessionRiskSignal"]);
+const PREAUTH_NAMED_FUNCTION_MODELS = new Set(["User", "Invite", "InviteActivationChallenge", "PasswordReset", "EmailVerificationToken", "RefreshToken", "MfaLoginChallenge", "AuthMfaChallenge", "AuthWebAuthnChallenge", "AuthSessionRiskSignal"]);
 const PUBLIC_BOUNDARY_MODELS = new Set(["VerificationDecision", "VerificationEvidenceSnapshot", "CustomerTrustCredential", "CustomerWebAuthnCredential", "CustomerWebAuthnChallenge", "CustomerVerificationSession", "CustomerTrustIntake", "Incident", "IncidentEvent", "IncidentCommunication", "IncidentEvidence", "SupportTicket", "SupportTicketMessage", "RequestAccess", "SupportIssueReport", "Ownership", "OwnershipTransfer"]);
 const READ_ROLE_MODELS = new Set(["Organization", "Licensee", "User", "ManufacturerLicenseeLink", "Batch", "InventoryStatusRollup", "QRCode", "PrintJob", "PrintSession", "PrintItem", "PrinterRegistration", "Printer", "PrinterAttestation", "PrinterAgentSession", "PrinterProfile", "PrinterProfileSnapshot"]);
 const RETENTION_DELETE_MODELS = new Set(["QrScanLog", "IncidentEvidence"]);
@@ -714,6 +715,7 @@ export const validateProtectedTransactionClients = (workflowManifest, scan = sca
 
 const displayName = (fn) => fn === "module" ? "Module database access" : fn.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/^./, (letter) => letter.toUpperCase());
 const identityForWorkflow = (workflow) => ["pre-auth-security-function", "public-proof-boundary"].includes(workflow.authorizationBoundaryType) ? "identity-pre-auth-app"
+  : workflow.authorizationBoundaryType === "migration-owner" ? "identity-migration"
   : workflow.executionSurface === "worker" ? "identity-worker"
     : workflow.executionSurface === "scheduled" ? "identity-scheduled-job"
       : ["cli", "startup"].includes(workflow.executionSurface) ? "identity-operator"
@@ -721,6 +723,7 @@ const identityForWorkflow = (workflow) => ["pre-auth-security-function", "public
 const expandCommands = (commandsToExpand) => [...new Set(commandsToExpand.flatMap((command) => command === "COUNT" ? ["SELECT"] : command === "UPSERT" ? ["INSERT", "UPDATE"] : [command]))].sort();
 const commandCondition = (identityId, table) => identityId === "identity-pre-auth-app" ? "EXECUTE only an exact named function signature; no direct table grant"
   : identityId === "identity-auth-function-owner" ? "Exact function-required column privileges only; NOLOGIN owner"
+    : identityId === "identity-migration" ? "Deployment-only migration identity through an exact reviewed function; no runtime direct table grant"
     : identityId === "identity-worker" ? "Durably verified job and tenant scope; queue payload is not authority"
       : identityId === "identity-scheduled-job" ? "Approved schedule and durable tenant/job scope"
         : identityId === "identity-operator" ? "Broker-controlled command allowlist with immutable audit"
@@ -745,6 +748,8 @@ const applyRuntimeCommandMatrix = (table, workflows) => {
     if (identityId === "identity-pre-auth-app") {
       add(identityId, ["EXECUTE"]);
       add("identity-auth-function-owner", commandsForTable, "Exact named function-required column privileges only; no generic query authority");
+    } else if (identityId === "identity-migration") {
+      add(identityId, ["EXECUTE"]);
     } else add(identityId, commandsForTable);
     if (hasRead) readers.add(identityId);
     if (hasWrite) writers.add(identityId);
@@ -997,7 +1002,7 @@ const assuranceForCommand = (workflow, actors, command, table, routeEvidence) =>
   if (workflow.platformReadRequiredAssurance) return workflow.platformReadRequiredAssurance;
   const guards = new Set(routeEvidence?.guards || []);
   if (workflow.id === AUDIT_CSV_EXPORT_WORKFLOW_ID) return "password-verified";
-  if (workflow.id === AUDIT_LOGS_WORKFLOW_ID) return "mfa-verified";
+  if (workflow.id === AUDIT_LOGS_WORKFLOW_ID) return "password-verified";
   if (workflow.id === FRAUD_REPORTS_WORKFLOW_ID) return "mfa-verified";
   if (actors.includes("break-glass")) return "dual-approved-break-glass";
   if (actors.includes("operator-admin")) return "operator-approved";
@@ -1330,12 +1335,17 @@ export const buildCommandSemantics = (tableManifest, workflowManifest) => {
     },
     {
       id: "sql-profile-audit-log-licensee-admin", workflowId: AUDIT_LOGS_WORKFLOW_ID, route: "GET /api/audit/logs",
-      actorClass: "licensee-admin", roleValues: ["LICENSEE_ADMIN", "ORG_ADMIN"], minimumAssurance: "mfa-verified", purposeCodes: ["audit-log-read"],
+      actorClass: "licensee-admin", roleValues: ["LICENSEE_ADMIN"], minimumAssurance: "password-verified", purposeCodes: ["audit-log-read"],
+      scopeType: "canonical-licensee-organization", status: "direct-policy-candidate", commandRuleIds: ruleIdsFor(AUDIT_LOGS_WORKFLOW_ID),
+    },
+    {
+      id: "sql-profile-audit-log-org-admin", workflowId: AUDIT_LOGS_WORKFLOW_ID, route: "GET /api/audit/logs",
+      actorClass: "licensee-admin", roleValues: ["ORG_ADMIN"], minimumAssurance: "mfa-verified", purposeCodes: ["audit-log-read"],
       scopeType: "canonical-licensee-organization", status: "direct-policy-candidate", commandRuleIds: ruleIdsFor(AUDIT_LOGS_WORKFLOW_ID),
     },
     {
       id: "sql-profile-audit-log-manufacturer", workflowId: AUDIT_LOGS_WORKFLOW_ID, route: "GET /api/audit/logs",
-      actorClass: "manufacturer", roleValues: ["MANUFACTURER", "MANUFACTURER_ADMIN", "MANUFACTURER_USER"], minimumAssurance: "mfa-verified", purposeCodes: ["audit-log-read"],
+      actorClass: "manufacturer", roleValues: ["MANUFACTURER", "MANUFACTURER_ADMIN", "MANUFACTURER_USER"], minimumAssurance: "password-verified", purposeCodes: ["audit-log-read"],
       scopeType: "canonical-manufacturer-linked-licensee", status: "direct-policy-candidate", commandRuleIds: ruleIdsFor(AUDIT_LOGS_WORKFLOW_ID),
     },
     {
@@ -1377,7 +1387,7 @@ export const buildCommandSemantics = (tableManifest, workflowManifest) => {
         functionSignature: index === 0 ? "app_rls.dashboard_snapshot_scope(text,text,text)" : "app_rls.dashboard_snapshot_data(text,text,text,text)",
         actorClass: "manufacturer",
         roleValues: ["MANUFACTURER", "MANUFACTURER_ADMIN", "MANUFACTURER_USER"],
-        minimumAssurance: "mfa-verified",
+        minimumAssurance: "password-verified",
         purposeCodes: ["dashboard-snapshot-read"],
         scopeType: "canonical-manufacturer-active-licensee-set",
         status: "named-function-candidate",
@@ -1400,7 +1410,7 @@ export const buildCommandSemantics = (tableManifest, workflowManifest) => {
     ]),
     ...BATCH_OPERATIONAL_READ_WORKFLOW_IDS.flatMap((workflowId) => [
       ["licensee-admin", ["LICENSEE_ADMIN", "ORG_ADMIN"], "password-verified", "canonical-licensee-organization"],
-      ["manufacturer", ["MANUFACTURER", "MANUFACTURER_ADMIN", "MANUFACTURER_USER"], "mfa-verified", "canonical-manufacturer-active-licensee-set"],
+      ["manufacturer", ["MANUFACTURER", "MANUFACTURER_ADMIN", "MANUFACTURER_USER"], "password-verified", "canonical-manufacturer-active-licensee-set"],
       ["platform-admin", ["SUPER_ADMIN", "PLATFORM_SUPER_ADMIN"], "mfa-verified", "database-validated-selected-licensee-organization"],
     ].map(([actorClass, roleValues, minimumAssurance, scopeType]) => ({
       id: `sql-profile-batch-operational-${workflowId.split("-").slice(-5).join("-")}-${actorClass}`,
@@ -2623,7 +2633,7 @@ const applyRuntimeImplementationAuthority = (workflowManifest) => {
       dashboardSnapshotAllowedColumnsByTableAndCommand: DASHBOARD_SNAPSHOT_COLUMNS,
       dashboardSnapshotRequiredAssuranceByActorClass: {
         "licensee-admin": "password-verified",
-        manufacturer: "mfa-verified",
+        manufacturer: "password-verified",
         "platform-admin": "mfa-verified",
       },
       contextBoundaryPlanningEvidence: {
@@ -2735,7 +2745,7 @@ const applyRuntimeImplementationAuthority = (workflowManifest) => {
       runtimeAllowedColumnsByTableAndCommand: BATCH_OPERATIONAL_READ_COLUMNS_BY_WORKFLOW.get(workflowId),
       runtimeRequiredAssuranceByActorClass: {
         "licensee-admin": "password-verified",
-        manufacturer: "mfa-verified",
+        manufacturer: "password-verified",
         "platform-admin": "mfa-verified",
       },
       contextBoundaryPlanningEvidence: {
@@ -3072,8 +3082,8 @@ export const validateManufacturerBootstrapBoundary = (boundary, workflowManifest
   assert.match(boundary.identityProofChain.authoritativeManufacturerUserId, /User\.id/, "manufacturer identity is not database verified");
   assert.match(boundary.identityProofChain.authoritativeRelationship, /manufacturerId equals the verified User\.id/, "manufacturer relationship is not actor-bound");
   assert.equal(boundary.requiredAssurance.bootstrapRead, "password-verified", "manufacturer bootstrap assurance");
-  assert.equal(boundary.requiredAssurance.activeApplicationSession, "mfa-verified", "manufacturer active-session assurance");
-  assert.equal(boundary.requiredAssurance.scopeSwitch, "mfa-verified", "manufacturer scope-switch assurance");
+  assert.equal(boundary.requiredAssurance.activeApplicationSession, "password-verified", "manufacturer active-session assurance");
+  assert.equal(boundary.requiredAssurance.scopeSwitch, "password-verified", "manufacturer scope-switch assurance");
 
   const requestedLicensee = boundary.inputFields.find((field) => field.name === "requestedLicenseeId");
   assert(requestedLicensee && requestedLicensee.establishesAuthority === false, "caller-selected licensee becomes authoritative");
