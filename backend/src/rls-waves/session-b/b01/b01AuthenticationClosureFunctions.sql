@@ -296,7 +296,7 @@ BEGIN
     'emailVerifiedAt',actor."emailVerifiedAt",'sessionLicenseeId',selected.id,'sessionOrganizationId',CASE WHEN selected.id IS NULL THEN actor."orgId" ELSE selected."orgId" END,
     'scopeVersion',CASE WHEN actor.role IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') THEN to_char(selected."updatedAt" AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') END,
     'selectedLicenseeId',selected.id,'selectedLicenseeName',selected.name,'selectedLicenseePrefix',selected.prefix,'selectedLicenseeBrandName',selected."brandName",'selectedLicenseeOrganizationId',selected."orgId",
-    'linkedLicensees',links,'mfaRequired',actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN','LICENSEE_ADMIN','ORG_ADMIN','MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER'),
+    'linkedLicensees',links,'mfaRequired',actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN','ORG_ADMIN'),
     'mfaEnabled',mfa_enabled,'mfaEnrolled',mfa_enabled,'mfaLastUsedAt',mfa_last,'mfaMethods',methods,
     'mfaPreferredMethod',CASE WHEN 'WEBAUTHN'=ANY(methods) THEN 'WEBAUTHN' WHEN 'TOTP'=ANY(methods) THEN 'TOTP' ELSE NULL END);
   RETURN QUERY SELECT recent."createdIpHash",recent."createdUserAgent",recent."createdAt",actor_state FROM (
@@ -336,7 +336,7 @@ BEGIN
   INSERT INTO public."AuthSessionRiskSignal"(id,"userId","riskScore","riskLevel",reasons,"ipHash","userAgentHash","createdAt")
   VALUES (gen_random_uuid()::text,user_id,p_risk_score,p_risk_level::public."AuthRiskLevel",p_reasons,p_ip_hash,p_user_agent_hash,p_recorded_at);
   IF p_blocked_login THEN
-    IF wants_challenge OR actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') THEN
+    IF wants_challenge OR actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN','LICENSEE_ADMIN','MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') THEN
       RAISE EXCEPTION 'AUTH_LOGIN_RISK_DENIED' USING ERRCODE='42501';
     END IF;
     PERFORM set_config('app.auth_closure_operation','login-risk-block-audit',true),

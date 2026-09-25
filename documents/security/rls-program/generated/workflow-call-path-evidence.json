@@ -5,12 +5,12 @@
     "documents/security/rls-program/workflow-three-session-partition.json",
     "scripts/rls/lib/application-path-certifications.mjs"
   ],
-  "workflowCount": 321,
+  "workflowCount": 330,
   "summary": {
     "applicationPathCertified": 11,
     "postgresqlApplicationPathPending": 4,
     "frozenProductProhibited": 1,
-    "implementationPending": 305
+    "implementationPending": 314
   },
   "workflows": [
     {
@@ -55,19 +55,19 @@
       "productionAccessPath": [
         {
           "accessId": "access-31c67a91b41c2f6a",
-          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:285",
+          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:287",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.change_authenticated_password"
         },
         {
           "accessId": "access-4d4766afde09d628",
-          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:285",
+          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:287",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.change_authenticated_password"
         },
         {
           "accessId": "access-545096e2a2b6eac5",
-          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:285",
+          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:287",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.change_authenticated_password"
         },
@@ -79,13 +79,13 @@
         },
         {
           "accessId": "access-6415a6495ad24634",
-          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:285",
+          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:287",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.change_authenticated_password"
         },
         {
           "accessId": "access-8ba0651d811d3c6e",
-          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:285",
+          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:287",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.change_authenticated_password"
         },
@@ -118,43 +118,43 @@
       "productionAccessPath": [
         {
           "accessId": "access-0ee8a32a807e64a2",
-          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:204",
+          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:206",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.update_authenticated_profile"
         },
         {
           "accessId": "access-3bd997553fe55da1",
-          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:204",
+          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:206",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.update_authenticated_profile"
         },
         {
           "accessId": "access-a188365dc0723d26",
-          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:269",
+          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:271",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.require_recent_sensitive_session"
         },
         {
           "accessId": "access-d020d8d1978ec501",
-          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:204",
+          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:206",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.update_authenticated_profile"
         },
         {
           "accessId": "access-db4770feca2baa89",
-          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:204",
+          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:206",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.update_authenticated_profile"
         },
         {
           "accessId": "access-f5f9a61a515a558d",
-          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:269",
+          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:271",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.require_recent_sensitive_session"
         },
         {
           "accessId": "access-fff12851b03c7fb7",
-          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:204",
+          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:206",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.update_authenticated_profile"
         }
@@ -288,52 +288,52 @@
       ],
       "productionAccessPath": [
         {
-          "accessId": "access-148f7ea5bb538a8d",
-          "source": "backend/src/services/auditLogQueryService.ts:178",
+          "accessId": "access-18a3874b7899502b",
+          "source": "backend/src/services/auditLogQueryService.ts:169",
           "registration": "reachable-from-registered-entrypoint",
-          "method": "findMany"
+          "method": "count"
         },
         {
           "accessId": "access-45b0367c009b90f3",
-          "source": "backend/src/services/auditLogQueryService.ts:167",
+          "source": "backend/src/services/auditLogQueryService.ts:172",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.platform_audit_log_details"
         },
         {
           "accessId": "access-47bed5dc3f26cdb4",
-          "source": "backend/src/services/auditLogQueryService.ts:167",
+          "source": "backend/src/services/auditLogQueryService.ts:172",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.platform_audit_log_details"
         },
         {
-          "accessId": "access-5305ff9b41351d82",
-          "source": "backend/src/services/auditLogQueryService.ts:147",
+          "accessId": "access-607bfc78e44cb02c",
+          "source": "backend/src/services/auditLogQueryService.ts:152",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         },
         {
           "accessId": "access-654420ff46478da2",
-          "source": "backend/src/services/auditLogQueryService.ts:167",
+          "source": "backend/src/services/auditLogQueryService.ts:172",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.platform_audit_log_details"
         },
         {
+          "accessId": "access-71f0f65d86c59e77",
+          "source": "backend/src/services/auditLogQueryService.ts:183",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "findMany"
+        },
+        {
           "accessId": "access-9a1e5a3d514f930c",
-          "source": "backend/src/services/auditLogQueryService.ts:167",
+          "source": "backend/src/services/auditLogQueryService.ts:172",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.platform_audit_log_details"
         },
         {
           "accessId": "access-afa4e724197ffd14",
-          "source": "backend/src/services/auditLogQueryService.ts:167",
+          "source": "backend/src/services/auditLogQueryService.ts:172",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.platform_audit_log_details"
-        },
-        {
-          "accessId": "access-eb2620aaa1d94c71",
-          "source": "backend/src/services/auditLogQueryService.ts:164",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "count"
         }
       ],
       "implementationFamilyId": "family-audit-read-context",
@@ -478,19 +478,19 @@
       "productionAccessPath": [
         {
           "accessId": "access-88f205aba5abb5c6",
-          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:254",
+          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:256",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.prove_authenticated_password_step_up"
         },
         {
           "accessId": "access-d7c1caeae7c29534",
-          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:254",
+          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:256",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.prove_authenticated_password_step_up"
         },
         {
           "accessId": "access-f981cf4da9060de7",
-          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:254",
+          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:256",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.prove_authenticated_password_step_up"
         }
@@ -1666,19 +1666,19 @@
       "productionAccessPath": [
         {
           "accessId": "access-31f161ed6d66ab74",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:877",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:879",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.submit_request_access"
         },
         {
           "accessId": "access-8d33befa2f2d7ab4",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:877",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:879",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.submit_request_access"
         },
         {
           "accessId": "access-e8fa1c04cad08882",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:877",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:879",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.submit_request_access"
         }
@@ -1705,25 +1705,25 @@
       "productionAccessPath": [
         {
           "accessId": "access-0bde24b28d0a19cc",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:923",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:925",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.submit_public_support"
         },
         {
           "accessId": "access-1846ecaf9d437ae1",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:923",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:925",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.submit_public_support"
         },
         {
           "accessId": "access-d7e7eb75c5371eba",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:923",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:925",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.submit_public_support"
         },
         {
           "accessId": "access-f5761f9e032bbcc6",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:923",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:925",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.submit_public_support"
         }
@@ -2241,55 +2241,55 @@
       "productionAccessPath": [
         {
           "accessId": "access-1571e8b5a86891c3",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:835",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:837",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.submit_public_incident"
         },
         {
           "accessId": "access-16852b6730420378",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:835",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:837",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.submit_public_incident"
         },
         {
           "accessId": "access-1db0e64a9e536b43",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:835",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:837",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.submit_public_incident"
         },
         {
           "accessId": "access-4f152cd3de968c31",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:835",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:837",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.submit_public_incident"
         },
         {
           "accessId": "access-a570b5a7746eeb31",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:835",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:837",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.submit_public_incident"
         },
         {
           "accessId": "access-b3cb6c487ae82cb6",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:835",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:837",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.submit_public_incident"
         },
         {
           "accessId": "access-b81ab7da460f8a1e",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:835",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:837",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.submit_public_incident"
         },
         {
           "accessId": "access-c996bd0e0eab3065",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:835",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:837",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.submit_public_incident"
         },
         {
           "accessId": "access-f1df2f2a98d73380",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:835",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:837",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.submit_public_incident"
         }
@@ -2316,25 +2316,25 @@
       "productionAccessPath": [
         {
           "accessId": "access-7f2f79b766385d7c",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:790",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:791",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.submit_product_feedback"
         },
         {
           "accessId": "access-ab4bffe73a76f3ce",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:790",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:791",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.submit_product_feedback"
         },
         {
           "accessId": "access-b9c587bdb0411d1b",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:790",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:791",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.submit_product_feedback"
         },
         {
           "accessId": "access-d8cd5bea129a9ef4",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:790",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:791",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.submit_product_feedback"
         }
@@ -2361,157 +2361,157 @@
       "productionAccessPath": [
         {
           "accessId": "access-01926ec50c61e41c",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:330",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:331",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.verify_raw_qr"
         },
         {
           "accessId": "access-110de8e4a7a09e76",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:330",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:331",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.verify_raw_qr"
         },
         {
           "accessId": "access-23c624c9a6273105",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:330",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:331",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.verify_raw_qr"
         },
         {
           "accessId": "access-30fdeaf7ca915415",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:384",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:385",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.verify_signed_qr"
         },
         {
           "accessId": "access-481d2bce568fdfe4",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:384",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:385",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.verify_signed_qr"
         },
         {
           "accessId": "access-551c84fbc676576b",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:384",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:385",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.verify_signed_qr"
         },
         {
           "accessId": "access-5743261e90940279",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:330",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:331",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.verify_raw_qr"
         },
         {
           "accessId": "access-5dd501d4e46710a7",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:384",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:385",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.verify_signed_qr"
         },
         {
           "accessId": "access-620ff5dcde7512fb",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:330",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:331",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.verify_raw_qr"
         },
         {
           "accessId": "access-651eb061f1b35b73",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:330",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:331",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.verify_raw_qr"
         },
         {
           "accessId": "access-659791fb6699d5b0",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:384",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:385",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.verify_signed_qr"
         },
         {
           "accessId": "access-679e36409b64a5af",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:384",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:385",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.verify_signed_qr"
         },
         {
           "accessId": "access-73aabbae5422d590",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:384",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:385",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.verify_signed_qr"
         },
         {
           "accessId": "access-79343168cc9dbf7c",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:384",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:385",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.verify_signed_qr"
         },
         {
           "accessId": "access-825bc43ffd10d0ea",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:384",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:385",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.verify_signed_qr"
         },
         {
           "accessId": "access-99ec9a6b3571d769",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:384",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:385",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.verify_signed_qr"
         },
         {
           "accessId": "access-a3e9bdba092a4afd",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:330",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:331",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.verify_raw_qr"
         },
         {
           "accessId": "access-c23676878c133de0",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:384",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:385",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.verify_signed_qr"
         },
         {
           "accessId": "access-c82d533db9922cda",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:330",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:331",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.verify_raw_qr"
         },
         {
           "accessId": "access-ce0a6a26a3c44f2a",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:330",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:331",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.verify_raw_qr"
         },
         {
           "accessId": "access-d9c767d4396cbb36",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:330",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:331",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.verify_raw_qr"
         },
         {
           "accessId": "access-e38364882a8dd969",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:330",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:331",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.verify_raw_qr"
         },
         {
           "accessId": "access-e97016b66ad2f581",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:330",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:331",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.verify_raw_qr"
         },
         {
           "accessId": "access-f6031862dcd4099b",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:384",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:385",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.verify_signed_qr"
         },
         {
           "accessId": "access-f976b8b5563003ac",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:384",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:385",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.verify_signed_qr"
         },
         {
           "accessId": "access-fef808c8b04e3fb2",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:330",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:331",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.verify_raw_qr"
         }
@@ -2788,73 +2788,73 @@
       "productionAccessPath": [
         {
           "accessId": "access-1b32300f7407fe28",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:589",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:592",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_attention_queue_projection"
         },
         {
           "accessId": "access-23773597d75a4fb6",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:589",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:592",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_attention_queue_projection"
         },
         {
           "accessId": "access-29f5a68ad6d39cbd",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:589",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:592",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_attention_queue_projection"
         },
         {
           "accessId": "access-4d9effaed7892d00",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:589",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:592",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_attention_queue_projection"
         },
         {
           "accessId": "access-8bb1400feb13c684",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:589",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:592",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_attention_queue_projection"
         },
         {
           "accessId": "access-aadf8c8d7089f85a",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:589",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:592",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_attention_queue_projection"
         },
         {
           "accessId": "access-ac76a44eac79c925",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:589",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:592",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_attention_queue_projection"
         },
         {
           "accessId": "access-dc49dca45de664e7",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:589",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:592",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_attention_queue_projection"
         },
         {
           "accessId": "access-e83016d0e0bf9de2",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:589",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:592",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_attention_queue_projection"
         },
         {
           "accessId": "access-ebf3fc4a00865860",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:589",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:592",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_attention_queue_projection"
         },
         {
           "accessId": "access-f0961d5a00f87102",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:589",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:592",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_attention_queue_projection"
         },
         {
           "accessId": "access-fc852d695843b699",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:589",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:592",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_attention_queue_projection"
         }
@@ -4067,6 +4067,182 @@
         "atomicAttributionVerified": true,
         "exactColumnPrivilegesVerified": true
       }
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-rls-waves-session-b-b01-pre-auth-repository-ts-lookup-invite-activation-binding",
+      "sessionId": "session-b",
+      "waveId": "b-01-auth-preauth-session-account-security",
+      "entryPoint": "internal:lookupInviteActivationBinding",
+      "executionSurface": "internal",
+      "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b01/preAuthRepository.ts"
+      ],
+      "registeredRoots": [
+        "internal:lookupInviteActivationBinding"
+      ],
+      "productionAccessPath": [
+        {
+          "accessId": "access-6f63a05c9d2576ce",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:307",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.lookup_invite_activation_challenge"
+        }
+      ],
+      "implementationFamilyId": null,
+      "canonicalContextInstalled": false,
+      "protectedQueryClient": null,
+      "disposition": "implementation-pending",
+      "certification": null
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-rls-waves-session-b-b01-pre-auth-repository-ts-resend-invite-activation-boundary",
+      "sessionId": "session-b",
+      "waveId": "b-01-auth-preauth-session-account-security",
+      "entryPoint": "internal:resendInviteActivationBoundary",
+      "executionSurface": "internal",
+      "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b01/preAuthRepository.ts"
+      ],
+      "registeredRoots": [
+        "internal:resendInviteActivationBoundary"
+      ],
+      "productionAccessPath": [
+        {
+          "accessId": "access-015ebe1d6b5903df",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:327",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.resend_invite_activation"
+        },
+        {
+          "accessId": "access-0862561e7dc70054",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:327",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.resend_invite_activation"
+        },
+        {
+          "accessId": "access-5c915d1378954766",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:327",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.resend_invite_activation"
+        },
+        {
+          "accessId": "access-8cb97030a14c4af2",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:327",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.resend_invite_activation"
+        },
+        {
+          "accessId": "access-b65f7d58b841d981",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:327",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.resend_invite_activation"
+        }
+      ],
+      "implementationFamilyId": null,
+      "canonicalContextInstalled": false,
+      "protectedQueryClient": null,
+      "disposition": "implementation-pending",
+      "certification": null
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-rls-waves-session-b-b01-pre-auth-repository-ts-verify-invite-activation-boundary",
+      "sessionId": "session-b",
+      "waveId": "b-01-auth-preauth-session-account-security",
+      "entryPoint": "internal:verifyInviteActivationBoundary",
+      "executionSurface": "internal",
+      "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b01/preAuthRepository.ts"
+      ],
+      "registeredRoots": [
+        "internal:verifyInviteActivationBoundary"
+      ],
+      "productionAccessPath": [
+        {
+          "accessId": "access-748bb6a71f3c6769",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:317",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.verify_invite_activation"
+        },
+        {
+          "accessId": "access-880c63051d3d3aaa",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:317",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.verify_invite_activation"
+        },
+        {
+          "accessId": "access-92e6da7425b3e04b",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:317",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.verify_invite_activation"
+        },
+        {
+          "accessId": "access-bb734801ce61f527",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:317",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.verify_invite_activation"
+        },
+        {
+          "accessId": "access-c55afdcf78d259fd",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:317",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.verify_invite_activation"
+        },
+        {
+          "accessId": "access-efdd17d38a0402d2",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:317",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.verify_invite_activation"
+        }
+      ],
+      "implementationFamilyId": null,
+      "canonicalContextInstalled": false,
+      "protectedQueryClient": null,
+      "disposition": "implementation-pending",
+      "certification": null
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-rls-waves-session-b-b01-session-credential-repository-ts-finalize-refresh-token-rotation",
+      "sessionId": "session-b",
+      "waveId": "b-01-auth-preauth-session-account-security",
+      "entryPoint": "internal:finalizeRefreshTokenRotation",
+      "executionSurface": "internal",
+      "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts"
+      ],
+      "registeredRoots": [
+        "internal:finalizeRefreshTokenRotation"
+      ],
+      "productionAccessPath": [
+        {
+          "accessId": "access-30205dae1aed5f9d",
+          "source": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:562",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.finalize_refresh_token_rotation"
+        },
+        {
+          "accessId": "access-67ed6dc8bd357aac",
+          "source": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:562",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.finalize_refresh_token_rotation"
+        },
+        {
+          "accessId": "access-7f95d526220f87b6",
+          "source": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:562",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.finalize_refresh_token_rotation"
+        },
+        {
+          "accessId": "access-f8be3b5d7eded531",
+          "source": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:562",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.finalize_refresh_token_rotation"
+        }
+      ],
+      "implementationFamilyId": null,
+      "canonicalContextInstalled": false,
+      "protectedQueryClient": null,
+      "disposition": "implementation-pending",
+      "certification": null
     },
     {
       "workflowId": "workflow-internal-backend-src-rls-waves-session-b-b02-authenticated-repositories-ts-accept-ownership-transfer-row",
@@ -5549,55 +5725,55 @@
       "productionAccessPath": [
         {
           "accessId": "access-021a8f35fb9287db",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:615",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:616",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.accept_customer_ownership_transfer"
         },
         {
           "accessId": "access-1f5f970f94ab3580",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:615",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:616",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.accept_customer_ownership_transfer"
         },
         {
           "accessId": "access-2c61b9f69e6d3092",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:615",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:616",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.accept_customer_ownership_transfer"
         },
         {
           "accessId": "access-4b811e857e3daf3d",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:615",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:616",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.accept_customer_ownership_transfer"
         },
         {
           "accessId": "access-5eb3c8035fde7790",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:615",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:616",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.accept_customer_ownership_transfer"
         },
         {
           "accessId": "access-65ec52528b346a77",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:615",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:616",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.accept_customer_ownership_transfer"
         },
         {
           "accessId": "access-80a3384256fed17b",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:615",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:616",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.accept_customer_ownership_transfer"
         },
         {
           "accessId": "access-d92ca14ea82b4317",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:615",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:616",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.accept_customer_ownership_transfer"
         },
         {
           "accessId": "access-f71d928a7364da3f",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:615",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:616",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.accept_customer_ownership_transfer"
         }
@@ -5623,25 +5799,25 @@
       "productionAccessPath": [
         {
           "accessId": "access-37817048c1f3a699",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:637",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:638",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.begin_customer_passkey"
         },
         {
           "accessId": "access-777ea0af5383a0a7",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:637",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:638",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.begin_customer_passkey"
         },
         {
           "accessId": "access-a61234d72d27d86c",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:637",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:638",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.begin_customer_passkey"
         },
         {
           "accessId": "access-b3d86b10fa751a59",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:637",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:638",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.begin_customer_passkey"
         }
@@ -5667,43 +5843,43 @@
       "productionAccessPath": [
         {
           "accessId": "access-09fff6d5ddc62cb4",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:590",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:591",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.cancel_customer_ownership_transfer"
         },
         {
           "accessId": "access-37392ae9d3dbe670",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:590",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:591",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.cancel_customer_ownership_transfer"
         },
         {
           "accessId": "access-4dd95d13f0a0b7d4",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:590",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:591",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.cancel_customer_ownership_transfer"
         },
         {
           "accessId": "access-64ef7c2d68d230d2",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:590",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:591",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.cancel_customer_ownership_transfer"
         },
         {
           "accessId": "access-83fdfb754a7ffd79",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:590",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:591",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.cancel_customer_ownership_transfer"
         },
         {
           "accessId": "access-e2d7d895e5597b40",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:590",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:591",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.cancel_customer_ownership_transfer"
         },
         {
           "accessId": "access-e2e9317a62f31e34",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:590",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:591",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.cancel_customer_ownership_transfer"
         }
@@ -5729,61 +5905,61 @@
       "productionAccessPath": [
         {
           "accessId": "access-1130a21835ab6a73",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:536",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:537",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.claim_customer_ownership"
         },
         {
           "accessId": "access-1faf97e36fd840bc",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:536",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:537",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.claim_customer_ownership"
         },
         {
           "accessId": "access-4eaed034e327de1d",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:536",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:537",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.claim_customer_ownership"
         },
         {
           "accessId": "access-7af92113b81943c1",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:536",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:537",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.claim_customer_ownership"
         },
         {
           "accessId": "access-8c8ec974219e197d",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:536",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:537",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.claim_customer_ownership"
         },
         {
           "accessId": "access-ca9c4e94ddb82f11",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:536",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:537",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.claim_customer_ownership"
         },
         {
           "accessId": "access-dfee944f3fb6471f",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:536",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:537",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.claim_customer_ownership"
         },
         {
           "accessId": "access-e4d775dd246a2cd5",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:536",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:537",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.claim_customer_ownership"
         },
         {
           "accessId": "access-eecdea5134f6306a",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:536",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:537",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.claim_customer_ownership"
         },
         {
           "accessId": "access-fda6c13b4243aa43",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:536",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:537",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.claim_customer_ownership"
         }
@@ -5809,37 +5985,37 @@
       "productionAccessPath": [
         {
           "accessId": "access-0ca93b7112b2c8f6",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:968",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:970",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.complete_public_support_delivery"
         },
         {
           "accessId": "access-32d8fe9cec66e3f6",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:968",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:970",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.complete_public_support_delivery"
         },
         {
           "accessId": "access-6fe98eb379bed438",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:963",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:965",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.complete_request_access_delivery"
         },
         {
           "accessId": "access-96fa05f8c2389253",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:963",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:965",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.complete_request_access_delivery"
         },
         {
           "accessId": "access-988b66b2c968ef66",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:968",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:970",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.complete_public_support_delivery"
         },
         {
           "accessId": "access-f044b6ee378572ea",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:963",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:965",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.complete_request_access_delivery"
         }
@@ -5865,49 +6041,49 @@
       "productionAccessPath": [
         {
           "accessId": "access-20c34eb3778c4e1d",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:566",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:567",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.create_customer_ownership_transfer"
         },
         {
           "accessId": "access-3d0bbb752f9ecf6d",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:566",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:567",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.create_customer_ownership_transfer"
         },
         {
           "accessId": "access-9bf4c4dee4fc88dc",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:566",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:567",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.create_customer_ownership_transfer"
         },
         {
           "accessId": "access-b9459c4c88724010",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:566",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:567",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.create_customer_ownership_transfer"
         },
         {
           "accessId": "access-c933a8eb0f46f883",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:566",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:567",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.create_customer_ownership_transfer"
         },
         {
           "accessId": "access-dad035d6e9107483",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:566",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:567",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.create_customer_ownership_transfer"
         },
         {
           "accessId": "access-f57939205e38d464",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:566",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:567",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.create_customer_ownership_transfer"
         },
         {
           "accessId": "access-feb8f6ac362bca83",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:566",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:567",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.create_customer_ownership_transfer"
         }
@@ -5933,19 +6109,19 @@
       "productionAccessPath": [
         {
           "accessId": "access-0a210e2344041055",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:721",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:722",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.delete_customer_passkey"
         },
         {
           "accessId": "access-77bc9ad6ca459445",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:721",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:722",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.delete_customer_passkey"
         },
         {
           "accessId": "access-92f6de5b3a4cf85a",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:721",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:722",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.delete_customer_passkey"
         }
@@ -5971,43 +6147,43 @@
       "productionAccessPath": [
         {
           "accessId": "access-218b32d26444a179",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:689",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:690",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.finish_customer_passkey"
         },
         {
           "accessId": "access-2a2afe7d3d84abf6",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:689",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:690",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.finish_customer_passkey"
         },
         {
           "accessId": "access-5ac0d389966b6faa",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:689",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:690",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.finish_customer_passkey"
         },
         {
           "accessId": "access-76f371a59eec3484",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:689",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:690",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.finish_customer_passkey"
         },
         {
           "accessId": "access-a254cf4a13895fb9",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:689",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:690",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.finish_customer_passkey"
         },
         {
           "accessId": "access-a43c7131b19e5d55",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:689",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:690",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.finish_customer_passkey"
         },
         {
           "accessId": "access-b9facedd27c16c0f",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:689",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:690",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.finish_customer_passkey"
         }
@@ -6032,8 +6208,20 @@
       ],
       "productionAccessPath": [
         {
+          "accessId": "access-50ea6d413d1c0435",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:263",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_public.issue_customer_auth_session"
+        },
+        {
           "accessId": "access-6ac27b59dc19b323",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:262",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:263",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_public.issue_customer_auth_session"
+        },
+        {
+          "accessId": "access-ab412db69e091767",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:263",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.issue_customer_auth_session"
         }
@@ -6059,19 +6247,19 @@
       "productionAccessPath": [
         {
           "accessId": "access-15ffc8824012eae4",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:706",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:707",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.list_customer_passkeys"
         },
         {
           "accessId": "access-6309ef7a48de7fe3",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:706",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:707",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.list_customer_passkeys"
         },
         {
           "accessId": "access-e7b2abdd577ead7f",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:706",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:707",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.list_customer_passkeys"
         }
@@ -6097,13 +6285,13 @@
       "productionAccessPath": [
         {
           "accessId": "access-2138dfc02fbccb4a",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:665",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:666",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.load_customer_passkey"
         },
         {
           "accessId": "access-f896d3eea2683a84",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:665",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:666",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.load_customer_passkey"
         }
@@ -6129,13 +6317,13 @@
       "productionAccessPath": [
         {
           "accessId": "access-14fa1704e8b0378b",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:296",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:297",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.read_customer_auth_session"
         },
         {
           "accessId": "access-35a861e9c6cf962d",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:296",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:297",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.read_customer_auth_session"
         }
@@ -6161,13 +6349,25 @@
       "productionAccessPath": [
         {
           "accessId": "access-2eeff99de5075932",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:282",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:283",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.revoke_customer_auth_session"
         },
         {
           "accessId": "access-8c6b9118535b73c1",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:282",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:283",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_public.revoke_customer_auth_session"
+        },
+        {
+          "accessId": "access-8e0aeab56cc896c8",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:283",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_public.revoke_customer_auth_session"
+        },
+        {
+          "accessId": "access-fe6efbf5466b9f26",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:283",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.revoke_customer_auth_session"
         }
@@ -6193,13 +6393,13 @@
       "productionAccessPath": [
         {
           "accessId": "access-441bf08765b322cd",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:747",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:748",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.track_support_status"
         },
         {
           "accessId": "access-62acd70c1bd0076a",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:747",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:748",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.track_support_status"
         }
@@ -6225,45 +6425,269 @@
       "productionAccessPath": [
         {
           "accessId": "access-46c59fcfdc98d5a9",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:490",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:491",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.write_verification_session"
         },
         {
           "accessId": "access-643db3cb67c1ae44",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:490",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:491",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.write_verification_session"
         },
         {
           "accessId": "access-6af0bccc540a866a",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:490",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:491",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.write_verification_session"
         },
         {
           "accessId": "access-8052402cdfd83952",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:490",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:491",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.write_verification_session"
         },
         {
           "accessId": "access-8e13c92ea95fefb2",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:490",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:491",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.write_verification_session"
         },
         {
           "accessId": "access-9f48c69fa0b3189a",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:490",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:491",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.write_verification_session"
         },
         {
           "accessId": "access-f156ee189991d4c3",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:490",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:491",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.write_verification_session"
+        }
+      ],
+      "implementationFamilyId": null,
+      "canonicalContextInstalled": false,
+      "protectedQueryClient": null,
+      "disposition": "implementation-pending",
+      "certification": null
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-rls-waves-session-b-b03-repository-functions-ts-add-support-ticket-message",
+      "sessionId": "session-b",
+      "waveId": "b-03-workers-scheduled-outbox-delivery",
+      "entryPoint": "internal:addSupportTicketMessage",
+      "executionSurface": "internal",
+      "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts"
+      ],
+      "registeredRoots": [
+        "internal:addSupportTicketMessage"
+      ],
+      "productionAccessPath": [
+        {
+          "accessId": "access-5d85f8adbe19d291",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:787",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.b03_add_support_ticket_message"
+        },
+        {
+          "accessId": "access-64811e3097ae50ba",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:787",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.b03_add_support_ticket_message"
+        },
+        {
+          "accessId": "access-783d68a5358b4648",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:787",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.b03_add_support_ticket_message"
+        },
+        {
+          "accessId": "access-7ca4f60de903420a",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:787",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.b03_add_support_ticket_message"
+        },
+        {
+          "accessId": "access-c69628c52bd96ba2",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:787",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.b03_add_support_ticket_message"
+        }
+      ],
+      "implementationFamilyId": null,
+      "canonicalContextInstalled": false,
+      "protectedQueryClient": null,
+      "disposition": "implementation-pending",
+      "certification": null
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-rls-waves-session-b-b03-repository-functions-ts-get-support-ticket",
+      "sessionId": "session-b",
+      "waveId": "b-03-workers-scheduled-outbox-delivery",
+      "entryPoint": "internal:getSupportTicket",
+      "executionSurface": "internal",
+      "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts"
+      ],
+      "registeredRoots": [
+        "internal:getSupportTicket"
+      ],
+      "productionAccessPath": [
+        {
+          "accessId": "access-204e743effe542d5",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:752",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.b03_get_support_ticket"
+        },
+        {
+          "accessId": "access-23714d791a78ffd2",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:752",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.b03_get_support_ticket"
+        },
+        {
+          "accessId": "access-2426e63eb1075da8",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:752",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.b03_get_support_ticket"
+        },
+        {
+          "accessId": "access-a00676e6c7b9d233",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:752",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.b03_get_support_ticket"
+        },
+        {
+          "accessId": "access-ce6d5f7719541477",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:752",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.b03_get_support_ticket"
+        },
+        {
+          "accessId": "access-f6b186d1aa2a5013",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:752",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.b03_get_support_ticket"
+        }
+      ],
+      "implementationFamilyId": null,
+      "canonicalContextInstalled": false,
+      "protectedQueryClient": null,
+      "disposition": "implementation-pending",
+      "certification": null
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-rls-waves-session-b-b03-repository-functions-ts-list-support-tickets",
+      "sessionId": "session-b",
+      "waveId": "b-03-workers-scheduled-outbox-delivery",
+      "entryPoint": "internal:listSupportTickets",
+      "executionSurface": "internal",
+      "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts"
+      ],
+      "registeredRoots": [
+        "internal:listSupportTickets"
+      ],
+      "productionAccessPath": [
+        {
+          "accessId": "access-2137d9d7149d6eff",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:730",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.b03_list_support_tickets"
+        },
+        {
+          "accessId": "access-27ec8fd15ab0a5ba",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:730",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.b03_list_support_tickets"
+        },
+        {
+          "accessId": "access-92a1ca96eba3fb18",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:730",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.b03_list_support_tickets"
+        },
+        {
+          "accessId": "access-97a41442a8d214fd",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:730",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.b03_list_support_tickets"
+        },
+        {
+          "accessId": "access-adfa9278f0f9d1ff",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:730",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.b03_list_support_tickets"
+        }
+      ],
+      "implementationFamilyId": null,
+      "canonicalContextInstalled": false,
+      "protectedQueryClient": null,
+      "disposition": "implementation-pending",
+      "certification": null
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-rls-waves-session-b-b03-repository-functions-ts-update-support-ticket",
+      "sessionId": "session-b",
+      "waveId": "b-03-workers-scheduled-outbox-delivery",
+      "entryPoint": "internal:updateSupportTicket",
+      "executionSurface": "internal",
+      "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts"
+      ],
+      "registeredRoots": [
+        "internal:updateSupportTicket"
+      ],
+      "productionAccessPath": [
+        {
+          "accessId": "access-066e861a4b0beae4",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:770",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.b03_update_support_ticket"
+        },
+        {
+          "accessId": "access-5f44b9187115847f",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:770",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.b03_update_support_ticket"
+        },
+        {
+          "accessId": "access-66431922faed7c2f",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:770",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.b03_update_support_ticket"
+        },
+        {
+          "accessId": "access-95e6cd8892704711",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:770",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.b03_update_support_ticket"
+        },
+        {
+          "accessId": "access-e5a28885001e6673",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:770",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.b03_update_support_ticket"
+        },
+        {
+          "accessId": "access-eef23ac92c7d8f4d",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:770",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.b03_update_support_ticket"
+        },
+        {
+          "accessId": "access-f093caf19408b93f",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:770",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.b03_update_support_ticket"
+        },
+        {
+          "accessId": "access-fac704cda245c867",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:770",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.b03_update_support_ticket"
         }
       ],
       "implementationFamilyId": null,
@@ -7111,31 +7535,31 @@
       "productionAccessPath": [
         {
           "accessId": "access-44ab5635bd9c79bf",
-          "source": "backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:308",
+          "source": "backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:333",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.printing_worker_reconcile"
         },
         {
           "accessId": "access-4d6b08efbfe62aa4",
-          "source": "backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:308",
+          "source": "backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:333",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.printing_worker_reconcile"
         },
         {
           "accessId": "access-b1490f43e5799378",
-          "source": "backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:308",
+          "source": "backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:333",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.printing_worker_reconcile"
         },
         {
           "accessId": "access-df01e6db704c42ae",
-          "source": "backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:308",
+          "source": "backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:333",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.printing_worker_reconcile"
         },
         {
           "accessId": "access-e3b8a5f29f768226",
-          "source": "backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:308",
+          "source": "backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:333",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.printing_worker_reconcile"
         }
@@ -8923,13 +9347,13 @@
       "productionAccessPath": [
         {
           "accessId": "access-593984076ed3e2fc",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:292",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:295",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.enqueue_audit_log_outbox"
         },
         {
           "accessId": "access-847e757341deb4bd",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:292",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:295",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.enqueue_audit_log_outbox"
         }
@@ -9499,37 +9923,37 @@
       "productionAccessPath": [
         {
           "accessId": "access-10936606d859767e",
-          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:227",
+          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:229",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.request_authenticated_email_change"
         },
         {
           "accessId": "access-14234a57ce2c6f2d",
-          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:227",
+          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:229",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.request_authenticated_email_change"
         },
         {
           "accessId": "access-2b44d93f90a5db97",
-          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:227",
+          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:229",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.request_authenticated_email_change"
         },
         {
           "accessId": "access-506e181811d4d609",
-          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:227",
+          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:229",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.request_authenticated_email_change"
         },
         {
           "accessId": "access-705835ed970a3323",
-          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:227",
+          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:229",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.request_authenticated_email_change"
         },
         {
           "accessId": "access-cb0a4b8848938992",
-          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:227",
+          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:229",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.request_authenticated_email_change"
         }
@@ -9556,43 +9980,49 @@
       "productionAccessPath": [
         {
           "accessId": "access-022c52272b1eadf3",
-          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:259",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:266",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_auth.consume_invitation_token"
         },
         {
           "accessId": "access-12c927a5f3299aa6",
-          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:259",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:266",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_auth.consume_invitation_token"
         },
         {
           "accessId": "access-1a6ce0ed6f14a008",
-          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:259",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:266",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_auth.consume_invitation_token"
         },
         {
           "accessId": "access-4d95825f9ea7f474",
-          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:259",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:266",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.consume_invitation_token"
+        },
+        {
+          "accessId": "access-7d29f9265fbed428",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:266",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_auth.consume_invitation_token"
         },
         {
           "accessId": "access-a8be0c5a969bd6cc",
-          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:259",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:266",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_auth.consume_invitation_token"
         },
         {
           "accessId": "access-bbd2cb4df23c1fee",
-          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:259",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:266",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_auth.consume_invitation_token"
         },
         {
           "accessId": "access-fdebd39fce4c39f7",
-          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:259",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:266",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_auth.consume_invitation_token"
         }
@@ -9636,6 +10066,12 @@
           "method": "$function:app_rls.prepare_invitation"
         },
         {
+          "accessId": "access-3b39c7d7518bc46a",
+          "source": "backend/src/rls-waves/session-b/b01/invitationRepository.ts:175",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.prepare_invitation"
+        },
+        {
           "accessId": "access-467143825f216c04",
           "source": "backend/src/rls-waves/session-b/b01/invitationRepository.ts:175",
           "registration": "reachable-from-registered-entrypoint",
@@ -9654,6 +10090,12 @@
           "method": "$function:app_rls.prepare_invitation"
         },
         {
+          "accessId": "access-6cb8ae6b8f3405f6",
+          "source": "backend/src/rls-waves/session-b/b01/invitationRepository.ts:175",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.prepare_invitation"
+        },
+        {
           "accessId": "access-77f901a817ffab50",
           "source": "backend/src/rls-waves/session-b/b01/invitationRepository.ts:175",
           "registration": "reachable-from-registered-entrypoint",
@@ -9661,6 +10103,12 @@
         },
         {
           "accessId": "access-788a49448f6ddfc7",
+          "source": "backend/src/rls-waves/session-b/b01/invitationRepository.ts:175",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.prepare_invitation"
+        },
+        {
+          "accessId": "access-7e774b969ea9b4a7",
           "source": "backend/src/rls-waves/session-b/b01/invitationRepository.ts:175",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.prepare_invitation"
@@ -9740,6 +10188,12 @@
         "internal:getInvitePreview"
       ],
       "productionAccessPath": [
+        {
+          "accessId": "access-36a86e6d419361d4",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:217",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.lookup_invitation_token"
+        },
         {
           "accessId": "access-6ffe119035256836",
           "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:217",
@@ -10207,31 +10661,31 @@
       "productionAccessPath": [
         {
           "accessId": "access-17fbde4516a64bb7",
-          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:176",
+          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:177",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.record_auth_session_risk_signal"
         },
         {
           "accessId": "access-2945dcd1c83783df",
-          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:176",
+          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:177",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.record_auth_session_risk_signal"
         },
         {
           "accessId": "access-80fb40316b987721",
-          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:176",
+          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:177",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.record_auth_session_risk_signal"
         },
         {
           "accessId": "access-c0a1c9a0d1e9ea32",
-          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:176",
+          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:177",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.record_auth_session_risk_signal"
         },
         {
           "accessId": "access-f66c92069d481244",
-          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:176",
+          "source": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts:177",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.record_auth_session_risk_signal"
         }
@@ -11265,7 +11719,7 @@
       "productionAccessPath": [
         {
           "accessId": "access-13c0ee805fb91a65",
-          "source": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:113",
+          "source": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:114",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.c03_require_authenticated_actor"
         },
@@ -11283,7 +11737,7 @@
         },
         {
           "accessId": "access-c945280a0500449f",
-          "source": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:113",
+          "source": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:114",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.c03_require_authenticated_actor"
         }
@@ -11431,44 +11885,56 @@
       ],
       "productionAccessPath": [
         {
+          "accessId": "access-01f7c9facfe49aa9",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:443",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_public.start_verification_session"
+        },
+        {
           "accessId": "access-3f349db387d1a392",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:442",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:443",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.start_verification_session"
         },
         {
           "accessId": "access-4c9482a375b63ccf",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:442",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:443",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.start_verification_session"
         },
         {
           "accessId": "access-5f09cf925d66786b",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:442",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:443",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.start_verification_session"
         },
         {
           "accessId": "access-7ffa8ee2adad0e6a",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:442",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:443",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_public.start_verification_session"
+        },
+        {
+          "accessId": "access-91ca29d6e8fc4c53",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:443",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.start_verification_session"
         },
         {
           "accessId": "access-b72cca95ab9b40e8",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:442",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:443",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.start_verification_session"
         },
         {
           "accessId": "access-be74b12bbb3ebbe3",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:442",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:443",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.start_verification_session"
         },
         {
           "accessId": "access-edf6bf077157b330",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:442",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:443",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.start_verification_session"
         }
@@ -11495,37 +11961,37 @@
       "productionAccessPath": [
         {
           "accessId": "access-4c5607a702f3c9dc",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:467",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:468",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.read_verification_session"
         },
         {
           "accessId": "access-823ef6abf61c7eb8",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:467",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:468",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.read_verification_session"
         },
         {
           "accessId": "access-a588ded86302bd03",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:467",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:468",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.read_verification_session"
         },
         {
           "accessId": "access-b81d271671dd6605",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:467",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:468",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.read_verification_session"
         },
         {
           "accessId": "access-bd38de262b1fe918",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:467",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:468",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.read_verification_session"
         },
         {
           "accessId": "access-f7ed95b40dedeed2",
-          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:467",
+          "source": "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts:468",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_public.read_verification_session"
         }
@@ -11973,13 +12439,13 @@
       "productionAccessPath": [
         {
           "accessId": "access-3db24208057399a1",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:467",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:470",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_superadmin_alert_emails"
         },
         {
           "accessId": "access-f662448d5b7c40ff",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:467",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:470",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_superadmin_alert_emails"
         }
@@ -12006,121 +12472,121 @@
       "productionAccessPath": [
         {
           "accessId": "access-215aedaf2fe422e3",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:653",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:656",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_claim_incident_email_delivery"
         },
         {
           "accessId": "access-3ca9407500d79c82",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:692",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:695",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_complete_incident_email_delivery"
         },
         {
           "accessId": "access-4088339c95e1ea91",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:653",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:656",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_claim_incident_email_delivery"
         },
         {
           "accessId": "access-4dde6114c0d8a24f",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:476",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:479",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_resolve_incident_email_actor"
         },
         {
           "accessId": "access-5a1a00ec6d570706",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:476",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:479",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_resolve_incident_email_actor"
         },
         {
           "accessId": "access-5d3a4020e0e0562c",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:653",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:656",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_claim_incident_email_delivery"
         },
         {
           "accessId": "access-6b734448dccb1857",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:653",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:656",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_claim_incident_email_delivery"
         },
         {
           "accessId": "access-8cd5c971d453a7be",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:692",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:695",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_complete_incident_email_delivery"
         },
         {
           "accessId": "access-9530530678885259",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:653",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:656",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_claim_incident_email_delivery"
         },
         {
           "accessId": "access-9547a144f80064e7",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:692",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:695",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_complete_incident_email_delivery"
         },
         {
           "accessId": "access-a6674b3adffb3ce5",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:692",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:695",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_complete_incident_email_delivery"
         },
         {
           "accessId": "access-a8ff3b7fc05a8b3a",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:692",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:695",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_complete_incident_email_delivery"
         },
         {
           "accessId": "access-ad8fa62fe92b9170",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:692",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:695",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_complete_incident_email_delivery"
         },
         {
           "accessId": "access-b8e073b06895fc2a",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:459",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:462",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_primary_superadmin_email"
         },
         {
           "accessId": "access-bc090384fc6b6d47",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:459",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:462",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_primary_superadmin_email"
         },
         {
           "accessId": "access-c6591659c70af905",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:692",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:695",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_complete_incident_email_delivery"
         },
         {
           "accessId": "access-d9f7bc15e6834cd2",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:653",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:656",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_claim_incident_email_delivery"
         },
         {
           "accessId": "access-de27fda974c2dfa1",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:692",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:695",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_complete_incident_email_delivery"
         },
         {
           "accessId": "access-f32cf695726ce16e",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:692",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:695",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_complete_incident_email_delivery"
         },
         {
           "accessId": "access-ff0dabe66f28cd0e",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:653",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:656",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_claim_incident_email_delivery"
         }
@@ -12765,43 +13231,43 @@
       "productionAccessPath": [
         {
           "accessId": "access-3d2a9187dbfdc9c0",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:497",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:500",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_create_role_notifications"
         },
         {
           "accessId": "access-648266c9b6902671",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:497",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:500",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_create_role_notifications"
         },
         {
           "accessId": "access-67259342f873bef4",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:497",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:500",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_create_role_notifications"
         },
         {
           "accessId": "access-6ccdc3e22d05a833",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:497",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:500",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_create_role_notifications"
         },
         {
           "accessId": "access-924b408a3336f186",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:497",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:500",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_create_role_notifications"
         },
         {
           "accessId": "access-c65a6c8c6df1f6f1",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:497",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:500",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_create_role_notifications"
         },
         {
           "accessId": "access-d13f69def202b592",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:497",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:500",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_create_role_notifications"
         }
@@ -12828,67 +13294,67 @@
       "productionAccessPath": [
         {
           "accessId": "access-132e3c9d98ee48fd",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:524",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:527",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_create_user_notification"
         },
         {
           "accessId": "access-5181e1549e9fd458",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:551",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:554",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_mark_notification_emailed"
         },
         {
           "accessId": "access-81f584a5f5b2cec2",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:524",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:527",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_create_user_notification"
         },
         {
           "accessId": "access-9437838bf307c013",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:524",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:527",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_create_user_notification"
         },
         {
           "accessId": "access-a88e86eb580d2f08",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:524",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:527",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_create_user_notification"
         },
         {
           "accessId": "access-addbac084774c8b3",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:524",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:527",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_create_user_notification"
         },
         {
           "accessId": "access-b8dc5aee4f794958",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:551",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:554",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_mark_notification_emailed"
         },
         {
           "accessId": "access-e5490475d58d0a23",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:524",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:527",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_create_user_notification"
         },
         {
           "accessId": "access-ea3fdec00d534ad8",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:551",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:554",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_mark_notification_emailed"
         },
         {
           "accessId": "access-f5490d9bffc3343a",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:524",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:527",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_create_user_notification"
         },
         {
           "accessId": "access-f863e2fa1da38e0f",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:551",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:554",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_mark_notification_emailed"
         }
@@ -12915,25 +13381,25 @@
       "productionAccessPath": [
         {
           "accessId": "access-116f0e7e00e689bc",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:565",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:568",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_list_notifications_for_user"
         },
         {
           "accessId": "access-773b3c0db4ab4268",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:565",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:568",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_list_notifications_for_user"
         },
         {
           "accessId": "access-8336cf68ad522415",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:565",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:568",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_list_notifications_for_user"
         },
         {
           "accessId": "access-c26d03ffb840fa8d",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:565",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:568",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_list_notifications_for_user"
         }
@@ -12960,19 +13426,19 @@
       "productionAccessPath": [
         {
           "accessId": "access-2d644769d91d121a",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:628",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:631",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_mark_all_notifications_read"
         },
         {
           "accessId": "access-3afbcbe63d4e458b",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:628",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:631",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_mark_all_notifications_read"
         },
         {
           "accessId": "access-b3748c0e170bb92d",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:628",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:631",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_mark_all_notifications_read"
         }
@@ -12999,25 +13465,25 @@
       "productionAccessPath": [
         {
           "accessId": "access-7a0b791f71b48e08",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:613",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:616",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_mark_notification_read"
         },
         {
           "accessId": "access-b0d4084fc18a15f0",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:613",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:616",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_mark_notification_read"
         },
         {
           "accessId": "access-b6e13ec415706687",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:613",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:616",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_mark_notification_read"
         },
         {
           "accessId": "access-c0088a7cc88cd89d",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:613",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:616",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_mark_notification_read"
         }
@@ -13044,37 +13510,37 @@
       "productionAccessPath": [
         {
           "accessId": "access-0a00522419fdfa43",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:639",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:642",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_resolve_incident_notification_scope"
         },
         {
           "accessId": "access-4ae01331e7047466",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:639",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:642",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_resolve_incident_notification_scope"
         },
         {
           "accessId": "access-7d21a53709eba49d",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:639",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:642",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_resolve_incident_notification_scope"
         },
         {
           "accessId": "access-a3aa6646423680dd",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:639",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:642",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_resolve_incident_notification_scope"
         },
         {
           "accessId": "access-afe959bd3a5256a5",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:639",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:642",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_resolve_incident_notification_scope"
         },
         {
           "accessId": "access-ba572c8015d6bf1e",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:639",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:642",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_resolve_incident_notification_scope"
         }
@@ -15163,13 +15629,13 @@
       "productionAccessPath": [
         {
           "accessId": "access-bc65a1ef54db1c5b",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:306",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:309",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.enqueue_security_event_outbox"
         },
         {
           "accessId": "access-c820c3e1fe97fbfd",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:306",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:309",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.enqueue_security_event_outbox"
         }
@@ -15560,19 +16026,19 @@
       "productionAccessPath": [
         {
           "accessId": "access-00c89a3a75b75f51",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:414",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:417",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.claim_compliance_pack_slice"
         },
         {
           "accessId": "access-07196e109a7342b1",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:414",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:417",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.claim_compliance_pack_slice"
         },
         {
           "accessId": "access-099e95ca92af0614",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:414",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:417",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.claim_compliance_pack_slice"
         },
@@ -15584,7 +16050,7 @@
         },
         {
           "accessId": "access-0c5a20f168376b8f",
-          "source": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:224",
+          "source": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:227",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.c03_bind_sensitive_approval_actor"
         },
@@ -15602,13 +16068,13 @@
         },
         {
           "accessId": "access-11251a442e92c5d0",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:414",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:417",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.claim_compliance_pack_slice"
         },
         {
           "accessId": "access-11d7c2457981b51a",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:451",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:454",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.scheduled_fail_compliance_pack_job"
         },
@@ -15632,7 +16098,7 @@
         },
         {
           "accessId": "access-1de6dc82999d9303",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:441",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:444",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.scheduled_complete_compliance_pack_job"
         },
@@ -15656,7 +16122,7 @@
         },
         {
           "accessId": "access-2cade4cfeaa70ab6",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:451",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:454",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.scheduled_fail_compliance_pack_job"
         },
@@ -15668,31 +16134,31 @@
         },
         {
           "accessId": "access-318988733caae620",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:414",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:417",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.claim_compliance_pack_slice"
         },
         {
           "accessId": "access-3387e520d464d439",
-          "source": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:199",
+          "source": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:202",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.c03_revalidate_compliance_pack_job_actor_scope"
         },
         {
           "accessId": "access-3510e882549d0975",
-          "source": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:199",
+          "source": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:202",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.c03_revalidate_compliance_pack_job_actor_scope"
         },
         {
           "accessId": "access-363175a92a620dfe",
-          "source": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:199",
+          "source": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:202",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.c03_revalidate_compliance_pack_job_actor_scope"
         },
         {
           "accessId": "access-36f9bf13cd8f062e",
-          "source": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:199",
+          "source": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:202",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.c03_revalidate_compliance_pack_job_actor_scope"
         },
@@ -15710,7 +16176,7 @@
         },
         {
           "accessId": "access-3ab25e4a8036aaef",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:414",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:417",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.claim_compliance_pack_slice"
         },
@@ -15722,7 +16188,7 @@
         },
         {
           "accessId": "access-3f737e27f5518271",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:414",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:417",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.claim_compliance_pack_slice"
         },
@@ -15746,7 +16212,7 @@
         },
         {
           "accessId": "access-4584935048ff183c",
-          "source": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:199",
+          "source": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:202",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.c03_revalidate_compliance_pack_job_actor_scope"
         },
@@ -15764,7 +16230,7 @@
         },
         {
           "accessId": "access-50a6c6b0ac368896",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:414",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:417",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.claim_compliance_pack_slice"
         },
@@ -15794,7 +16260,7 @@
         },
         {
           "accessId": "access-5a2342b9a976a574",
-          "source": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:199",
+          "source": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:202",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.c03_revalidate_compliance_pack_job_actor_scope"
         },
@@ -15818,7 +16284,7 @@
         },
         {
           "accessId": "access-65894586a3d4eb6a",
-          "source": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:224",
+          "source": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:227",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.c03_bind_sensitive_approval_actor"
         },
@@ -15830,13 +16296,13 @@
         },
         {
           "accessId": "access-6cfe7e148329053d",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:441",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:444",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.scheduled_complete_compliance_pack_job"
         },
         {
           "accessId": "access-7390c02b92e0d080",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:441",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:444",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.scheduled_complete_compliance_pack_job"
         },
@@ -15848,7 +16314,7 @@
         },
         {
           "accessId": "access-7dbc2e3cdc3e4067",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:414",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:417",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.claim_compliance_pack_slice"
         },
@@ -15860,13 +16326,13 @@
         },
         {
           "accessId": "access-803b4ba565764b91",
-          "source": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:224",
+          "source": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:227",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.c03_bind_sensitive_approval_actor"
         },
         {
           "accessId": "access-877239095688d7b1",
-          "source": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:199",
+          "source": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:202",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.c03_revalidate_compliance_pack_job_actor_scope"
         },
@@ -15914,19 +16380,19 @@
         },
         {
           "accessId": "access-ad1d12fcc43f34bd",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:414",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:417",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.claim_compliance_pack_slice"
         },
         {
           "accessId": "access-b0f6241615e4bbb9",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:451",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:454",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.scheduled_fail_compliance_pack_job"
         },
         {
           "accessId": "access-b0fe06494067fb1a",
-          "source": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:224",
+          "source": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:227",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.c03_bind_sensitive_approval_actor"
         },
@@ -15938,13 +16404,13 @@
         },
         {
           "accessId": "access-b8d58d791e5b0a3c",
-          "source": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:224",
+          "source": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:227",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.c03_bind_sensitive_approval_actor"
         },
         {
           "accessId": "access-bacfdd7d22f2d477",
-          "source": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:199",
+          "source": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:202",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.c03_revalidate_compliance_pack_job_actor_scope"
         },
@@ -15968,7 +16434,7 @@
         },
         {
           "accessId": "access-cb0748b29ae527f9",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:441",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:444",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.scheduled_complete_compliance_pack_job"
         },
@@ -15980,7 +16446,7 @@
         },
         {
           "accessId": "access-cf32378a00047c94",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:414",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:417",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.claim_compliance_pack_slice"
         },
@@ -15998,7 +16464,7 @@
         },
         {
           "accessId": "access-da77c5ccb594ab05",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:451",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:454",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.scheduled_fail_compliance_pack_job"
         },
@@ -16010,37 +16476,37 @@
         },
         {
           "accessId": "access-e4b70cf6a0e71595",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:414",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:417",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.claim_compliance_pack_slice"
         },
         {
           "accessId": "access-e4ec7875daa1a449",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:414",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:417",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.claim_compliance_pack_slice"
         },
         {
           "accessId": "access-eb32abab9e739140",
-          "source": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:199",
+          "source": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:202",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.c03_revalidate_compliance_pack_job_actor_scope"
         },
         {
           "accessId": "access-eea5bee4dd9750ad",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:451",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:454",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.scheduled_fail_compliance_pack_job"
         },
         {
           "accessId": "access-ef7bb11f9aa90609",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:414",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:417",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.claim_compliance_pack_slice"
         },
         {
           "accessId": "access-f23cdc2dac9af391",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:441",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:444",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.scheduled_complete_compliance_pack_job"
         },
@@ -16052,9 +16518,53 @@
         },
         {
           "accessId": "access-fce247ec88e7c9f1",
-          "source": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:224",
+          "source": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:227",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.c03_bind_sensitive_approval_actor"
+        }
+      ],
+      "implementationFamilyId": null,
+      "canonicalContextInstalled": false,
+      "protectedQueryClient": null,
+      "disposition": "implementation-pending",
+      "certification": null
+    },
+    {
+      "workflowId": "workflow-startup-backend-src-rls-waves-session-c-operator-procedure-service-ts-bootstrap-configured-super-admin-procedure",
+      "sessionId": "session-c",
+      "waveId": "c-04-operator-recovery-startup-migration-cli",
+      "entryPoint": "startup:bootstrapConfiguredSuperAdminProcedure",
+      "executionSurface": "startup",
+      "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-c/operatorProcedureService.ts"
+      ],
+      "registeredRoots": [
+        "startup:bootstrapConfiguredSuperAdminProcedure"
+      ],
+      "productionAccessPath": [
+        {
+          "accessId": "access-3fdc0711f4f2f7a2",
+          "source": "backend/src/rls-waves/session-c/operatorProcedureService.ts:224",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_ops.bootstrap_configured_super_admin"
+        },
+        {
+          "accessId": "access-6b544587018a93e8",
+          "source": "backend/src/rls-waves/session-c/operatorProcedureService.ts:224",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_ops.bootstrap_configured_super_admin"
+        },
+        {
+          "accessId": "access-8395409eb96c2b0d",
+          "source": "backend/src/rls-waves/session-c/operatorProcedureService.ts:224",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_ops.bootstrap_configured_super_admin"
+        },
+        {
+          "accessId": "access-9c5f6a50bae2c996",
+          "source": "backend/src/rls-waves/session-c/operatorProcedureService.ts:224",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_ops.bootstrap_configured_super_admin"
         }
       ],
       "implementationFamilyId": null,
@@ -16139,49 +16649,49 @@
       "productionAccessPath": [
         {
           "accessId": "access-409d820baab99d60",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:324",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:327",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.claim_audit_log_outbox_slice"
         },
         {
           "accessId": "access-4498407f45168a2b",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:350",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:353",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.fail_audit_log_outbox"
         },
         {
           "accessId": "access-80bc6b3491453e4a",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:324",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:327",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.claim_audit_log_outbox_slice"
         },
         {
           "accessId": "access-868ac480f3575a23",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:339",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:342",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.consume_audit_log_outbox"
         },
         {
           "accessId": "access-a20f59ec8484da73",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:339",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:342",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.consume_audit_log_outbox"
         },
         {
           "accessId": "access-d0b75da99bc397c6",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:339",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:342",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.consume_audit_log_outbox"
         },
         {
           "accessId": "access-d9ab8ebbd2d0b55b",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:339",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:342",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.consume_audit_log_outbox"
         },
         {
           "accessId": "access-df788005ebb1e26a",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:350",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:353",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.fail_audit_log_outbox"
         }
@@ -16208,37 +16718,37 @@
       "productionAccessPath": [
         {
           "accessId": "access-2648c7a6585e94a8",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:387",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:390",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.complete_security_event_outbox"
         },
         {
           "accessId": "access-557ed35b0d76b56a",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:387",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:390",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.complete_security_event_outbox"
         },
         {
           "accessId": "access-803ef2771e28b65c",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:399",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:402",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.fail_security_event_outbox"
         },
         {
           "accessId": "access-885348dc72781781",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:399",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:402",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.fail_security_event_outbox"
         },
         {
           "accessId": "access-9b48b4f7d77c1bb5",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:366",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:369",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.claim_security_event_outbox_slice"
         },
         {
           "accessId": "access-aee41e8c445d5244",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:366",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:369",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.claim_security_event_outbox_slice"
         }

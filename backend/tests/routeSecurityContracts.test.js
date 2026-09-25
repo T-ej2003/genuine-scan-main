@@ -19,6 +19,8 @@ const routesSource = readNormalized("src/routes/index.ts");
 const realtimeRoutesSource = readNormalized("src/routes/modules/realtimeRoutes.ts");
 const governanceRoutesSource = readNormalized("src/routes/modules/governanceRoutes.ts");
 const auditRoutesSource = readNormalized("src/routes/auditRoutes.ts");
+const authControllerSharedSource = readNormalized("src/controllers/authControllerShared.ts");
+const { buildPublicActorRateLimitKey, fromBodyFields } = require("../dist/middleware/publicRateLimit");
 
 assert(!indexSource.includes("app.use(cookieParser())"), "app root should not mount cookie parsing globally");
 assert(!appSource.includes("app.use(cookieParser())"), "app root should not mount cookie parsing globally");
@@ -51,6 +53,18 @@ assert(
 assert(
   auditRoutesSource.includes('"/logs", auditLogsReadPreAuthRouteLimiter, authenticate, requireAuditViewer, requireRecentAdminMfa, enforceTenantIsolation,'),
   "audit log reads must require the approved MFA ceiling before tenant isolation"
+);
+assert(
+  auditRoutesSource.includes('"/stream", auditStreamPreAuthRouteLimiter, authenticateSSE, requireAuditViewer, requireRecentAdminMfa, enforceTenantIsolation,'),
+  "audit stream connections must require the role-aware recent-authentication boundary before tenant isolation"
+);
+assert(
+  routesSource.includes('"/incidents/evidence-files/:fileName", incidentExportPreAuthRouteLimiter, authenticate, requireAnyAdmin, incidentExportRouteLimiter, protectedReadRouteLimiter, requireRecentAdminMfa, enforceTenantIsolation,'),
+  "incident evidence downloads must require role-aware recent authentication"
+);
+assert(
+  routesSource.includes('"/incidents/:id/export-pdf", incidentExportPreAuthRouteLimiter, authenticate, requireAnyAdmin, incidentExportRouteLimiter, protectedReadRouteLimiter, requireRecentAdminMfa, enforceTenantIsolation,'),
+  "incident PDF exports must require role-aware recent authentication"
 );
 
 [
@@ -87,13 +101,31 @@ assert(auditRoutesSource.includes("const auditFraudReportsRespondPreAuthRouteLim
 [
   'router.get("/auth/sessions", sessionReadPreAuthRouteLimiter, authenticate, sessionReadRouteLimiter, listSessions);',
   'router.post("/auth/sessions/revoke-all", secureSessionPreAuthRouteLimiter, authenticate, secureSessionRouteLimiter, secureSessionIpLimiter, secureSessionActorLimiter, requireCsrf, revokeAllSessionsController);',
-  'router.post("/auth/mfa/backup-codes/rotate", mfaPreAuthRouteLimiter, authenticate, requireRecentAdminMfa, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, rotateAdminMfaBackupCodesController);',
-  'router.post("/auth/mfa/setup/begin", mfaPreAuthRouteLimiter, authenticateAnySession, requireRecentAdminMfaForSetup, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, beginAdminMfaSetupController);',
-  'router.post("/auth/mfa/setup/confirm", mfaPreAuthRouteLimiter, authenticateAnySession, requireRecentAdminMfaForSetup, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, confirmAdminMfaSetupController);',
+  'router.post("/auth/mfa/backup-codes/rotate", mfaPreAuthRouteLimiter, authenticate, requireRecentAdminMfa, mfaRouteLimiter, requireMfaPolicyRole, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, rotateAdminMfaBackupCodesController);',
+  'router.post("/auth/mfa/setup/begin", mfaPreAuthRouteLimiter, authenticateAnySession, requireMfaPolicyRole, requireRecentAdminMfaForSetup, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, beginAdminMfaSetupController);',
+  'router.post("/auth/mfa/setup/confirm", mfaPreAuthRouteLimiter, authenticateAnySession, requireMfaPolicyRole, requireRecentAdminMfaForSetup, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, confirmAdminMfaSetupController);',
   'router.post("/auth/invite", adminInvitePreAuthRouteLimiter, authenticate, requireAdministrationMutator, requireRecentAdminMfa, adminInviteRouteLimiter, adminInviteIpLimiter, adminInviteActorLimiter, requireCsrf, invite);',
 ].forEach((pattern) => {
   assert(authRoutesSource.includes(pattern), `auth route contract missing: ${pattern}`);
 });
+
+for (const route of authRoutesSource.matchAll(/router\.(?:post|delete)\("\/auth\/mfa\/(?:setup|challenge|step-up|backup-codes|disable|webauthn)[^\n]+/g)) {
+  assert(route[0].includes("requireMfaPolicyRole"), `MFA-factor route must retain its role-policy guard: ${route[0]}`);
+}
+assert.match(authRoutesSource, /isTemporaryPasswordOnlyRole\(role\)/);
+assert(authRoutesSource.includes('export const inviteActivationActorResolver = fromBodyFields("challengeId");'));
+assert(authRoutesSource.includes('router.post("/auth/invite-activation/verify", inviteAcceptanceIpLimiter, inviteActivationActorLimiter,'));
+assert(authRoutesSource.includes('router.post("/auth/invite-activation/resend", inviteAcceptanceIpLimiter, inviteActivationActorLimiter,'));
+assert(authRoutesSource.includes('router.post("/auth/accept-invite", inviteAcceptanceIpLimiter, inviteAcceptanceActorLimiter,'));
+
+const activationActor = fromBodyFields("challengeId");
+const activationKey = (challengeId, ip = "192.0.2.1") => buildPublicActorRateLimitKey({
+  body: challengeId === undefined ? {} : { challengeId }, ip, socket: {},
+}, "auth.invite-activation:actor", activationActor);
+assert.equal(activationKey("00000000-0000-4000-8000-000000000001"), activationKey("00000000-0000-4000-8000-000000000001"));
+assert.notEqual(activationKey("00000000-0000-4000-8000-000000000001"), activationKey("00000000-0000-4000-8000-000000000002"));
+assert.notEqual(activationKey(undefined, "192.0.2.1"), activationKey(undefined, "192.0.2.2"), "missing challenge IDs must remain IP-bounded");
+assert(authControllerSharedSource.includes("challengeId: z.string().uuid()"), "malformed challenge IDs must be rejected before activation processing");
 
 assert.strictEqual(
   authClaimsContextSource.includes('mode: "FIRST_ENROLLMENT"') && authClaimsContextSource.includes('mode: "REPLACEMENT"'),
@@ -129,7 +161,7 @@ assert(!authSecurityControllerSource.includes("console.error"), "auth security c
 [
   '"/logs", auditLogsReadPreAuthRouteLimiter, authenticate,',
   '"/logs/export", auditLogsExportPreAuthRouteLimiter, authenticate,',
-  '"/stream", auditStreamPreAuthRouteLimiter, authenticateSSE,',
+  '"/stream", auditStreamPreAuthRouteLimiter, authenticateSSE, requireAuditViewer, requireRecentAdminMfa,',
   '"/fraud-reports", auditFraudReportsReadPreAuthRouteLimiter, authenticate,',
   '"/fraud-reports/:id/respond", auditFraudReportsRespondPreAuthRouteLimiter, authenticate,',
 ].forEach((pattern) => {

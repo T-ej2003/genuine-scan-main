@@ -14,6 +14,7 @@ import { APP_ONLY } from "../aws/production-app-only-contract.mjs";
 import { buildAppOnlyVerifierCommand, authenticateAppOnlyVerifierResult } from "../aws/production-app-only-verifier-command.mjs";
 import { buildPrintingRoutineDeltaCommand, canonicalPrintingRoutineDelta } from "../aws/apply-production-printing-routine-delta.mjs";
 import { buildB01ExecutorInput, canonicalB01Prerequisite, collectB01State, executeB01Transaction } from "../aws/apply-production-b01-prerequisite.mjs";
+import { B01_PREREQUISITE } from "../aws/production-b01-prerequisite-contract.mjs";
 import { classifyProductionRlsCatalogue, hashProductionRlsCatalogue, RLS_PROBE_CLASSIFICATIONS } from "../aws/probe-production-rls-catalogue.mjs";
 import {
   PRODUCTION_RLS_APPROVAL_ALGORITHM,
@@ -74,6 +75,20 @@ const databaseUrl = (base, database, user) => {
 
 const psql = (url, args, label) => run("psql", [url, "-X", "-v", "ON_ERROR_STOP=1", ...args], { label });
 const scalar = (url, sql, label) => psql(url, ["-q", "-t", "-A", "-c", sql], label).split("\n").at(-1);
+
+const b01PolicyFixtureSql = (installSource, dropSource) => {
+  const policyLines = (source) => source.split("\n").filter((line) =>
+    /^(?:CREATE POLICY|COMMENT ON POLICY) "b01_[^"]+" ON public\."[^"]+"/.test(line));
+  const drops = policyLines(dropSource).flatMap((line) => {
+    const match = /^CREATE POLICY "([^"]+)" ON public\."([^"]+)"/.exec(line);
+    return match ? [`DROP POLICY IF EXISTS "${match[1]}" ON public."${match[2]}";`] : [];
+  });
+  const installs = policyLines(installSource).map((line) => line
+    .replaceAll("mscqr_rls_cert_auth_owner", "mscqr_prd_rls_phase2_auth_owner")
+    .replaceAll("mscqr_rls_cert_preauth", "mscqr_prd_rls_phase2_preauth"));
+  assert.ok(drops.length > 0 && installs.length > 0 && installs.length % 2 === 0);
+  return `${drops.join("\n")}\n${installs.join("\n")}`;
+};
 
 const collectCatalogueRows = (client) => client.$transaction(async (tx) => {
   await tx.$executeRawUnsafe("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
@@ -338,6 +353,8 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
       psql(maintenanceUrl, ["-q", "-c", `ALTER ROLE "${administrator}" NOINHERIT; REVOKE pg_read_all_data FROM "${administrator}"`], "restore production administrator identity");
 
       const b01Delta = canonicalB01Prerequisite();
+      const currentB01PolicySource = fs.readFileSync(path.join(sqlRoot, "30-policies.sql"), "utf8");
+      const historicalB01PolicySource = run("git", ["show", `${B01_PREREQUISITE.rlsDeltaOriginSha}:scripts/rls/sql/generated/30-policies.sql`]);
       psql(greenUrl, ["-q", "-c", `BEGIN;
         SET LOCAL ROLE mscqr_prd_rls_phase2_auth_owner;
         DROP FUNCTION app_auth.finalize_refresh_token_rotation(text,text[],text,timestamp without time zone,text);
@@ -346,9 +363,10 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         COMMIT;`], "install B01 predecessor functions");
       psql(greenUrl, ["-q", "-c", `BEGIN;
         SET LOCAL ROLE mscqr_prd_rls_phase2_owner;
+        ${b01PolicyFixtureSql(historicalB01PolicySource, currentB01PolicySource)}
         DROP POLICY b01_auditlogoutbox_select ON public."AuditLogOutbox";
         RESET ROLE;
-        COMMIT;`], "install exact B01 predecessor policy state");
+        COMMIT;`], "reconstruct exact historical B01 predecessor policy state");
       const b01Input = buildB01ExecutorInput({ deploymentSourceSha: sourceSha, databaseHostname: adminUrl.hostname });
       const b01Predecessor = await administratorClient.$transaction((tx) => collectB01State(tx));
       assert.deepEqual(b01Predecessor.functions, b01Delta.predecessor.functions);
@@ -520,6 +538,15 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         psql(greenUrl, ["-q", "-c", `BEGIN;SET LOCAL ROLE mscqr_prd_rls_phase2_owner;
           ALTER POLICY b01_refreshtoken_select ON public."RefreshToken" USING (${refreshSelectUsing});RESET ROLE;COMMIT;`], "restore successor predicate drift");
       }
+      const currentB01Functions = fs.readFileSync(path.join(root, "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql"), "utf8");
+      psql(greenUrl, ["-q", "-c", `BEGIN;
+        SET LOCAL ROLE mscqr_prd_rls_phase2_auth_owner;
+        ${currentB01Functions}
+        RESET ROLE;
+        SET LOCAL ROLE mscqr_prd_rls_phase2_owner;
+        ${b01PolicyFixtureSql(currentB01PolicySource, currentB01PolicySource)}
+        RESET ROLE;
+        COMMIT;`], "restore current generated B01 package after historical prerequisite proof");
       assert.equal(classifyProductionRlsCatalogue(hashProductionRlsCatalogue(await collectCatalogueRows(verifier)), requirements).classification,
         RLS_PROBE_CLASSIFICATIONS.MATCH);
 

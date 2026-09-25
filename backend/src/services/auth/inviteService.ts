@@ -1,4 +1,5 @@
 import { UserRole } from "@prisma/client";
+import { randomUUID } from "crypto";
 import { hashPassword } from "./passwordService";
 import { newCsrfToken } from "./tokenService";
 import { buildTokenHashCandidates, hashToken, randomOpaqueToken } from "../../utils/security";
@@ -12,7 +13,11 @@ import { prepareInvitation } from "../../rls-waves/session-b/b01/invitationRepos
 import {
   consumeInvitationBoundary,
   lookupInvitationBoundary,
+  lookupInviteActivationBinding,
+  resendInviteActivationBoundary,
+  verifyInviteActivationBoundary,
 } from "../../rls-waves/session-b/b01/preAuthRepository";
+import { inviteActivationVerifier, inviteActivationVerifierCandidates, newInviteActivationCode } from "./inviteActivationCode";
 
 const addHours = (d: Date, hours: number) => new Date(d.getTime() + hours * 60 * 60 * 1000);
 
@@ -340,6 +345,11 @@ export const acceptInvite = async (input: {
 }) => {
   const now = new Date();
   const tokenHashCandidates = buildTokenHashCandidates(input.rawToken);
+  const invite = await lookupInvitationBoundary({ tokenHashCandidates, checkedAt: now });
+  if (!invite || invite.challengeId) throw new Error("Invalid or expired invite token");
+  const challengeId = randomUUID();
+  const code = newInviteActivationCode();
+  const challengeExpiresAt = new Date(now.getTime() + 10 * 60_000);
   const passwordHash = await hashPassword(input.password);
   const result = await consumeInvitationBoundary({
     tokenHashCandidates,
@@ -349,10 +359,65 @@ export const acceptInvite = async (input: {
     requestId: input.requestId,
     ipHash: input.ipHash,
     userAgent: input.userAgent,
+    challengeId,
+    codeVerifier: inviteActivationVerifier({ challengeId, userId: invite.userId, inviteId: invite.inviteId, email: invite.email }, code),
+    challengeExpiresAt,
   });
   if (!result) throw new Error("Invalid or expired invite token");
+  const delivered = await sendInviteActivationCode({
+    email: result.email, code, orgId: result.orgId, licenseeId: result.licenseeId,
+    ipHash: input.ipHash, userAgent: input.userAgent,
+  }).catch(() => false);
+  return { challengeId: result.challengeId, expiresAt: result.challengeExpiresAt, delivered };
+};
 
-  return result;
+const sendInviteActivationCode = async (input: {
+  email: string; code: string; orgId: string | null; licenseeId: string | null;
+  ipHash: string | null; userAgent: string | null;
+}) => {
+  const delivery = await sendAuthEmail({
+    toAddress: input.email,
+    subject: "Your MSCQR activation code",
+    text: `Your MSCQR activation code is ${input.code}. It expires when your 10-minute activation window ends. If you did not request activation, ignore this message.`,
+    html: `<p>Your MSCQR activation code is <strong>${input.code}</strong>.</p><p>It expires when your 10-minute activation window ends. If you did not request activation, ignore this message.</p>`,
+    template: "invite_activation_code",
+    orgId: input.orgId,
+    licenseeId: input.licenseeId,
+    ipHash: input.ipHash,
+    userAgent: input.userAgent,
+  });
+  return delivery.delivered;
+};
+
+export const verifyInviteActivation = async (input: { challengeId: string; code: string }) => {
+  const binding = await lookupInviteActivationBinding(input.challengeId);
+  if (!binding) return null;
+  return verifyInviteActivationBoundary({
+    challengeId: input.challengeId,
+    verifierCandidates: inviteActivationVerifierCandidates(binding, input.code),
+    verifiedAt: new Date(),
+  });
+};
+
+export const resendInviteActivation = async (input: { challengeId: string; ipHash: string | null; userAgent: string | null }) => {
+  const binding = await lookupInviteActivationBinding(input.challengeId);
+  if (!binding) return null;
+  const now = new Date();
+  const challengeId = randomUUID();
+  const code = newInviteActivationCode();
+  const result = await resendInviteActivationBoundary({
+    challengeId: input.challengeId,
+    newChallengeId: challengeId,
+    codeVerifier: inviteActivationVerifier({ ...binding, challengeId }, code),
+    requestedAt: now,
+    expiresAt: binding.expiresAt,
+  });
+  if (!result) return null;
+  const delivered = await sendInviteActivationCode({
+    email: result.email, code, orgId: result.orgId, licenseeId: result.licenseeId,
+    ipHash: input.ipHash, userAgent: input.userAgent,
+  }).catch(() => false);
+  return { challengeId: result.challengeId, expiresAt: result.expiresAt, delivered };
 };
 
 export const getInvitePreview = async (rawToken: string) => {
@@ -368,5 +433,7 @@ export const getInvitePreview = async (rawToken: string) => {
     expiresAt: invite.expiresAt,
     licenseeName: invite.licenseeName,
     requiresConnector: invite.requiresConnector,
+    challengeId: invite.challengeId,
+    challengeCreatedAt: invite.challengeCreatedAt,
   };
 };

@@ -1,11 +1,19 @@
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
+const fs = require("node:fs");
 const http = require("node:http");
+const os = require("node:os");
+const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 
 const enabled = process.env.MSCQR_CURRENT_RUNTIME_SUPER_ADMIN_INVITATION_POSTGRES18_TEST === "true";
 const confirmed = process.env.MSCQR_CURRENT_RUNTIME_SUPER_ADMIN_INVITATION_POSTGRES18_CONFIRM === "MSCQR_RUN_LOCAL_CURRENT_RUNTIME_SUPER_ADMIN_INVITATION_POSTGRES18_TEST";
-const ids = { adminA: "00000000-0000-4000-8000-000000000307", adminASession: "00000000-0000-4000-9000-000000000701" };
+const ids = {
+  adminA: "00000000-0000-4000-8000-000000000307", adminASession: "00000000-0000-4000-9000-000000000701",
+  tenantAdmin: "00000000-0000-4000-8000-000000000309", tenantSession: "00000000-0000-4000-9000-000000000710",
+  orgA: "00000000-0000-4000-8000-000000000101", licenseeA: "00000000-0000-4000-8000-000000000201",
+  licenseeB: "00000000-0000-4000-8000-000000000202",
+};
 const emails = {
   adminA: "admin-a@synthetic.invalid",
   adminB: "admin-b@synthetic.invalid",
@@ -127,6 +135,8 @@ async function main() {
   process.env.TOKEN_HASH_SECRET_CURRENT ||= "current-runtime-super-admin-invitation-token-secret";
   process.env.AUTH_MFA_ENCRYPTION_KEY ||= "current-runtime-super-admin-invitation-mfa-encryption";
   process.env.EMAIL_USE_JSON_TRANSPORT = "true";
+  const emailCaptureDir = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-invite-activation-cert-"));
+  process.env.EMAIL_CAPTURE_DIR = emailCaptureDir;
   const { generateSync } = require("otplib");
   const { createAuthenticatedSessionCapability } = require("../dist/services/auth/authenticatedSessionCapabilityService");
   const { getB01PreAuthPrisma } = require("../dist/rls-waves/session-b/b01/runtimeClients");
@@ -185,16 +195,29 @@ async function main() {
     const bootstrapJar = cookieJar();
     const accepted = await request("/api/auth/accept-invite", {
       method: "POST", jar: bootstrapJar,
-      body: { token: inviteToken, password: passwordB, name: "Synthetic Admin B" },
+      body: { token: inviteToken, password: passwordB, confirmPassword: passwordB, name: "Synthetic Admin B" },
     });
     assert.equal(accepted.response.status, 200, JSON.stringify(accepted.body));
-    assert.equal(accepted.body.data.user.email, emails.adminB);
-    assert.equal(accepted.body.data.user.role, "SUPER_ADMIN");
-    assert.equal(accepted.body.data.user.licenseeId, null);
-    assert.equal(accepted.body.data.user.orgId, null);
-    assert.notEqual(accepted.body.data.user.id, ids.adminA);
-    assert.equal(accepted.body.data.auth.sessionStage, "MFA_BOOTSTRAP");
-    const adminBId = accepted.body.data.user.id;
+    assert(accepted.body.data.challengeId);
+    assert.equal(bootstrapJar.header(), "", "password setup must not issue authentication cookies");
+    const adminBId = psql(bootstrap, `SELECT id FROM public."User" WHERE email='${emails.adminB}'`);
+    assert.notEqual(adminBId, ids.adminA);
+    assert.equal(psql(bootstrap, `SELECT status::text||':'||("emailVerifiedAt" IS NULL)::text FROM public."User" WHERE id='${adminBId}'`), "INVITED:true");
+    const captured = fs.readFileSync(path.join(emailCaptureDir, "emails.jsonl"), "utf8").trim().split("\n").map(JSON.parse)
+      .filter((entry) => entry.template === "invite_activation_code" && entry.toAddress === emails.adminB);
+    assert.equal(captured.length, 1);
+    const activationCode = captured[0].text.match(/\b\d{6}\b/)?.[0];
+    assert(activationCode, "test-only email capture must contain a six-digit activation code");
+    const activated = await request("/api/auth/invite-activation/verify", {
+      method: "POST", body: { challengeId: accepted.body.data.challengeId, code: activationCode },
+    });
+    assert.equal(activated.response.status, 200, JSON.stringify(activated.body));
+    assert.equal(activated.body.data.loginRequired, true, "super admin must not receive a password session");
+    const initialLogin = await request("/api/auth/login", {
+      method: "POST", jar: bootstrapJar, body: { email: emails.adminB, password: passwordB },
+    });
+    assert.equal(initialLogin.response.status, 200, JSON.stringify(initialLogin.body));
+    assert.equal(initialLogin.body.data.auth.sessionStage, "MFA_BOOTSTRAP");
     const passwordOnlyRawRefresh = "current-runtime-password-only-admin-refresh";
     const passwordOnlyRefreshHash = hashRefreshToken(passwordOnlyRawRefresh);
     assert(adminABefore.mfaFactors + adminABefore.mfaCredentials > 0, "password-only refresh proof requires an enrolled administrator");
@@ -212,7 +235,7 @@ async function main() {
     assert.equal(passwordOnlyRefresh.body.data.auth.sessionStage, "MFA_BOOTSTRAP");
 
     const replay = await request("/api/auth/accept-invite", {
-      method: "POST", body: { token: inviteToken, password: passwordB, name: "Synthetic Admin B" },
+      method: "POST", body: { token: inviteToken, password: passwordB, confirmPassword: passwordB, name: "Synthetic Admin B" },
     });
     assert.equal(replay.response.status, 400, "used invitation must not be accepted twice");
     const privilegedBeforeMfa = await request("/api/auth/invite", {
@@ -308,9 +331,57 @@ async function main() {
       'riskSignals',(SELECT count(*) FROM public."AuthSessionRiskSignal" WHERE "userId"='${ids.adminA}')
     )::text FROM public."User" WHERE id='${ids.adminA}'`));
     assert.deepEqual(adminAAfter, adminABefore, "Admin B onboarding must not mutate Admin A credential, MFA, or risk state");
+
+    const tenantRefreshHash = crypto.createHash("sha256").update("phase4-tenant-password-refresh").digest("hex");
+    psql(bootstrap, `INSERT INTO public."User" (id,email,name,role,"orgId","licenseeId",status,"isActive","passwordHash","emailVerifiedAt","updatedAt")
+      VALUES ('${ids.tenantAdmin}','phase4-tenant@synthetic.invalid','Phase 4 Tenant','LICENSEE_ADMIN','${ids.orgA}','${ids.licenseeA}','ACTIVE',true,'${passwordHash}',transaction_timestamp(),transaction_timestamp());
+      INSERT INTO public."RefreshToken" (id,"orgId","userId","tokenHash","expiresAt","authenticatedAt")
+      VALUES ('${ids.tenantSession}','${ids.orgA}','${ids.tenantAdmin}','${tenantRefreshHash}',transaction_timestamp()+interval '1 hour',transaction_timestamp())`);
+    const tenantCapability = await createAuthenticatedSessionCapability(getB01PreAuthPrisma(), {
+      refreshTokenId: ids.tenantSession, refreshTokenHash: tenantRefreshHash, assurance: "PASSWORD", expiresAt: new Date(Date.now() + 30 * 60_000),
+    });
+    const tenantClaims = {
+      userId: ids.tenantAdmin, email: "phase4-tenant@synthetic.invalid", role: "LICENSEE_ADMIN",
+      orgId: ids.orgA, licenseeId: ids.licenseeA, linkedLicenseeIds: [], sessionId: ids.tenantSession,
+      sessionStage: "ACTIVE", authAssurance: "PASSWORD", authenticatedAt: new Date().toISOString(), mfaVerifiedAt: null,
+    };
+    const tenantAccess = signAccessToken({ ...tenantClaims, scopeVersion: null });
+    const tenantHeaders = {
+      authorization: `Bearer ${tenantAccess}`,
+      [DATABASE_SESSION_CAPABILITY_HEADER]: sealCookieToken(tenantCapability.rawCapability, "auth.database-session"),
+    };
+    const inScopeInvite = await request("/api/auth/invite", {
+      method: "POST", headers: tenantHeaders,
+      body: { email: "phase4-manufacturer@synthetic.invalid", name: "Phase 4 Manufacturer", role: "MANUFACTURER_ADMIN", licenseeId: ids.licenseeA },
+    });
+    assert.equal(inScopeInvite.response.status, 201, JSON.stringify(inScopeInvite.body));
+    const foreignInvite = await request("/api/auth/invite", {
+      method: "POST", headers: tenantHeaders,
+      body: { email: "phase4-foreign@synthetic.invalid", name: "Foreign Manufacturer", role: "MANUFACTURER_ADMIN", licenseeId: ids.licenseeB },
+    });
+    assert.notEqual(foreignInvite.response.status, 201, "password assurance must not expand tenant invite authority");
+    assert.equal(psql(bootstrap, "SELECT count(*) FROM public.\"User\" WHERE email='phase4-foreign@synthetic.invalid'"), "0", "denied foreign invite must not create an account");
+    const { getLogs } = require("../dist/controllers/auditController");
+    const auditRead = async (licenseeId) => {
+      const response = { status: 200, body: null };
+      await getLogs({
+        user: tenantClaims, databaseSessionCapability: tenantCapability.rawCapability,
+        requestId: crypto.randomUUID(), query: { licenseeId, limit: "20" },
+      }, {
+        status(code) { response.status = code; return this; },
+        json(body) { response.body = body; return this; },
+      });
+      return response;
+    };
+    const inScopeAudit = await auditRead(ids.licenseeA);
+    assert.equal(inScopeAudit.status, 200, JSON.stringify(inScopeAudit.body));
+    assert(Array.isArray(inScopeAudit.body.data.logs));
+    const foreignAudit = await auditRead(ids.licenseeB);
+    assert.equal(foreignAudit.status, 403, "password assurance must not expand audit tenant scope");
     console.log("Current-runtime super-admin invitation PostgreSQL 18 proof passed");
   } finally {
     await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(emailCaptureDir, { recursive: true, force: true });
   }
 }
 

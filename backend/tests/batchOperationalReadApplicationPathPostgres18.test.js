@@ -36,7 +36,12 @@ const safeUrl = (raw, expectedUser) => {
   const database = decodeURIComponent(parsed.pathname.slice(1));
   assert(["postgres:", "postgresql:"].includes(parsed.protocol));
   assert(["127.0.0.1", "localhost", "::1"].includes(parsed.hostname));
-  assert.equal(decodeURIComponent(parsed.username), expectedUser);
+  if (expectedUser === "mscqr_rls_cert_admin" && decodeURIComponent(parsed.username) === "postgres") {
+    const maintenance = new URL(String(process.env.MSCQR_FULL_RLS_CERTIFICATION_ADMIN_URL || ""));
+    assert.equal(parsed.host, maintenance.host);
+    assert.equal(parsed.username, maintenance.username);
+    assert.match(decodeURIComponent(maintenance.pathname.slice(1)), /full_rls|disposable/i);
+  } else assert.equal(decodeURIComponent(parsed.username), expectedUser);
   assert.match(database, /^mscqr_full_rls_cert_[a-z0-9_]+_final$/);
   assert(!/(staging|prod|production|amazonaws|rds)/i.test(raw));
 };
@@ -64,9 +69,9 @@ const manufacturerClaims = (overrides = {}) => ({
   linkedLicenseeIds: [ids.licenseeA, ids.licenseeB],
   sessionId: "batch-operational-manufacturer",
   sessionStage: "ACTIVE",
-  authAssurance: "ADMIN_MFA",
+  authAssurance: "PASSWORD",
   authenticatedAt: new Date(),
-  mfaVerifiedAt: new Date(),
+  mfaVerifiedAt: null,
   ...overrides,
 });
 const platformClaims = (overrides = {}) => ({
@@ -193,7 +198,7 @@ const main = async () => {
     const sessionExpiry = new Date(Date.now() + 60 * 60_000);
     await bootstrap.refreshToken.createMany({ data: [
       [ids.tenantA, ids.orgA, "PASSWORD", capabilities.tenant],
-      [ids.manufacturerA, ids.orgA, "ADMIN_MFA", capabilities.manufacturer],
+      [ids.manufacturerA, ids.orgA, "PASSWORD", capabilities.manufacturer],
       [ids.platformA, null, "ADMIN_MFA", capabilities.platform],
     ].map(([userId, orgId, assurance, capability], index) => ({
       id: `10000000-0000-4000-9000-00000000003${index + 1}`,
@@ -283,7 +288,6 @@ const main = async () => {
       ["batch-pg-foreign-scope", getBatches, { user: tenantClaims(), query: { licenseeId: ids.licenseeB }, originalUrl: "/api/qr/batches" }],
       ["batch-pg-foreign-focus", getBatchAllocationMap, { user: tenantClaims(), params: { id: ids.foreign }, originalUrl: `/api/qr/batches/${ids.foreign}/allocation-map` }],
       ["batch-pg-missing-platform-selector", getBatches, { user: platformClaims(), originalUrl: "/api/qr/batches" }],
-      ["batch-pg-weak-manufacturer", getBatches, { user: manufacturerClaims({ authAssurance: "PASSWORD", mfaVerifiedAt: null }), originalUrl: "/api/qr/batches" }],
       ["batch-pg-weak-platform", getBatches, { user: platformClaims({ authAssurance: "PASSWORD", mfaVerifiedAt: null }), query: { licenseeId: ids.licenseeA }, originalUrl: "/api/qr/batches" }],
       ["batch-pg-forged-actor", getBatches, { user: manufacturerClaims({ userId: ids.tenantA, email: "batch-tenant-a@example.invalid" }), query: { licenseeId: ids.licenseeA }, originalUrl: "/api/qr/batches" }],
       ["", getBatches, { user: tenantClaims(), originalUrl: "/api/qr/batches" }],
@@ -353,7 +357,7 @@ const main = async () => {
     }
     for (const requestId of [
       "batch-pg-foreign-scope", "batch-pg-foreign-focus", "batch-pg-missing-platform-selector",
-      "batch-pg-weak-manufacturer", "batch-pg-weak-platform", "batch-pg-forged-actor",
+      "batch-pg-weak-platform", "batch-pg-forged-actor",
       "batch request with spaces", "batch-pg-inactive-actor", "batch-pg-stale-membership",
       "batch-pg-malformed-context", "batch-pg-wrong-purpose",
     ]) {

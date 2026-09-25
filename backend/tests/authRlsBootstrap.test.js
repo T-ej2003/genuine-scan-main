@@ -122,7 +122,7 @@ mockModule("services/auth/sessionRiskService.js", {
       emailVerifiedAt: user.emailVerifiedAt, sessionLicenseeId: null, sessionOrganizationId: null,
       scopeVersion: null, selectedLicenseeId: null, selectedLicenseeName: null,
       selectedLicenseePrefix: null, selectedLicenseeBrandName: null,
-      selectedLicenseeOrganizationId: null, linkedLicensees: [], mfaRequired: true,
+      selectedLicenseeOrganizationId: null, linkedLicensees: [], mfaRequired: false,
       mfaEnabled: false, mfaEnrolled: false, mfaLastUsedAt: null, mfaMethods: [], mfaPreferredMethod: null,
     },
   }),
@@ -215,7 +215,7 @@ const run = async () => {
   transactionCalls = 0;
   contextWrites = 0;
   const result = await login(user.email, validPassword);
-  assert.equal(result.sessionStage, "MFA_BOOTSTRAP");
+  assert.equal(result.sessionStage, "ACTIVE");
   assert.equal(result.databaseSessionCapability, "A".repeat(43));
   assert.equal(user.failedLoginAttempts, 0);
   assert.equal(user.lockedUntil, null);

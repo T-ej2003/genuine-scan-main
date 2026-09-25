@@ -136,6 +136,18 @@ test("generated direct policies preserve exact actor, assurance, purpose and col
   const auditInserts = inputs.policies.rows.filter((policy) => policy.table === "AuditLog" && policy.command === "INSERT" && !policy.internalHelperOnly);
   assert.ok(auditInserts.every((policy) => policy.scopePredicate.includes('"userId" = app_rls.current_user_id()') || policy.scopePredicate.includes('"userId"=app_rls.current_user_id()')));
   assert.ok(auditInserts.filter((policy) => policy.actors.includes("platform-admin")).every((policy) => policy.scopePredicate.includes('scope_licensee."orgId"="AuditLog"."orgId"')));
+  const orgAudit = inputs.commandSemantics.sqlCertificationProfiles.find((profile) => profile.id === "sql-profile-audit-log-org-admin");
+  assert.deepEqual(orgAudit.roleValues, ["ORG_ADMIN"]);
+  assert.equal(orgAudit.minimumAssurance, "mfa-verified");
+  assert.ok(inputs.policies.rows.some((policy) => policy.profileId === orgAudit.id && policy.assurance === "mfa-verified"));
+  const auditSql = fs.readFileSync(path.join(root, "scripts/rls/sql/generated/30-policies.sql"), "utf8");
+  const auditPolicy = (profileId) => {
+    const name = inputs.policies.rows.find((policy) => policy.table === "AuditLog" && policy.profileId === profileId)?.policyName;
+    return auditSql.split("\n").find((line) => line.startsWith(`CREATE POLICY "${name}" ON public."AuditLog"`));
+  };
+  assert.match(auditPolicy("sql-profile-audit-log-org-admin") || "", /current_role\(\) IN \('ORG_ADMIN'\).*current_assurance\(\) IN \('mfa-verified'/);
+  assert.doesNotMatch(auditPolicy("sql-profile-audit-log-org-admin") || "", /password-verified/);
+  assert.match(auditPolicy("sql-profile-audit-log-licensee-admin") || "", /current_role\(\) IN \('LICENSEE_ADMIN'\).*current_assurance\(\) IN \('password-verified'/);
 });
 
 test("owner-qualified Organization verification rejects missing or wrongly owned policies", () => {
@@ -174,7 +186,7 @@ test("risk analytics uses an exact function while direct User privilege stays au
   assert.match(riskPolicy.scopePredicate, /"id"=app_rls\.current_user_id\(\)/);
   assert.match(riskPolicy.scopePredicate, /current_purpose\(\)='tenant-risk-analytics'/);
   const auditPolicies = policies.rows.filter((policy) => policy.table === "User" && policy.workflowId === "workflow-http-backend-src-controllers-audit-controller-ts-get-logs");
-  assert.equal(auditPolicies.length, 2);
+  assert.equal(auditPolicies.length, 3);
   assert.ok(auditPolicies.every((policy) => policy.scopePredicate.includes('"id" = app_rls.current_user_id()')));
 });
 
@@ -216,12 +228,23 @@ test("package validation rejects an actor outside the exact certification profil
 
 test("package validation rejects dashboard named-function profile drift", () => {
   for (const mutate of [
-    (candidate) => { candidate.commandSemantics.sqlCertificationProfiles.find((profile) => profile.id === "sql-profile-dashboard-snapshot-scope-manufacturer").minimumAssurance = "password-verified"; },
+    (candidate) => { candidate.commandSemantics.sqlCertificationProfiles.find((profile) => profile.id === "sql-profile-dashboard-snapshot-scope-manufacturer").minimumAssurance = "mfa-verified"; },
     (candidate) => { candidate.commandSemantics.sqlCertificationProfiles.find((profile) => profile.id === "sql-profile-dashboard-snapshot-data-platform-admin").routes.pop(); },
   ]) {
     const candidate = clone(packageInputs());
     mutate(candidate);
     assert.throws(() => validateGeneratedPackage(candidate), /assurance|route/i);
+  }
+});
+
+test("ORG_ADMIN audit access keeps its prior MFA bound", () => {
+  for (const mutate of [
+    (profile) => { profile.minimumAssurance = "password-verified"; },
+    (profile) => { profile.roleValues.push("LICENSEE_ADMIN"); },
+  ]) {
+    const candidate = clone(packageInputs());
+    mutate(candidate.commandSemantics.sqlCertificationProfiles.find((profile) => profile.id === "sql-profile-audit-log-org-admin"));
+    assert.throws(() => validateGeneratedPackage(candidate), /assurance|source profile/i);
   }
 });
 

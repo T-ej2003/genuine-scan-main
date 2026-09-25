@@ -106,7 +106,7 @@ export const buildDashboardSnapshotBoundary = (
       throw new DashboardSnapshotAccessError();
     }
   }
-  if (platform || manufacturer) {
+  if (platform) {
     const verifiedAt = Date.parse(String(user.mfaVerifiedAt || ""));
     const ageMs = now - verifiedAt;
     if (

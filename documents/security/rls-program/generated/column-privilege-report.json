@@ -480,9 +480,12 @@
         "b01-consume-invitation",
         "b01-consume-password-reset",
         "b01-lookup-invitation",
+        "b01-lookup-invite-activation",
         "b01-lookup-password-user",
         "b01-record-password-failure",
-        "b01-request-password-reset"
+        "b01-request-password-reset",
+        "b01-resend-invite-activation",
+        "b01-verify-invite-activation"
       ]
     },
     {
@@ -507,9 +510,12 @@
         "b01-consume-invitation",
         "b01-consume-password-reset",
         "b01-lookup-invitation",
+        "b01-lookup-invite-activation",
         "b01-lookup-password-user",
         "b01-record-password-failure",
-        "b01-request-password-reset"
+        "b01-request-password-reset",
+        "b01-resend-invite-activation",
+        "b01-verify-invite-activation"
       ]
     },
     {
@@ -524,7 +530,8 @@
         "manufacturerId",
         "tokenHash",
         "expiresAt",
-        "usedAt"
+        "usedAt",
+        "acceptedByUserId"
       ],
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
@@ -533,9 +540,12 @@
         "b01-consume-invitation",
         "b01-consume-password-reset",
         "b01-lookup-invitation",
+        "b01-lookup-invite-activation",
         "b01-lookup-password-user",
         "b01-record-password-failure",
-        "b01-request-password-reset"
+        "b01-request-password-reset",
+        "b01-resend-invite-activation",
+        "b01-verify-invite-activation"
       ]
     },
     {
@@ -552,9 +562,97 @@
         "b01-consume-invitation",
         "b01-consume-password-reset",
         "b01-lookup-invitation",
+        "b01-lookup-invite-activation",
         "b01-lookup-password-user",
         "b01-record-password-failure",
-        "b01-request-password-reset"
+        "b01-request-password-reset",
+        "b01-resend-invite-activation",
+        "b01-verify-invite-activation"
+      ]
+    },
+    {
+      "table": "InviteActivationChallenge",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "userId",
+        "inviteId",
+        "email",
+        "purpose",
+        "codeVerifier",
+        "expiresAt",
+        "attemptCount",
+        "maxAttempts",
+        "createdAt",
+        "consumedAt",
+        "supersededAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b01-consume-email-verification",
+        "b01-consume-invitation",
+        "b01-consume-password-reset",
+        "b01-lookup-invitation",
+        "b01-lookup-invite-activation",
+        "b01-lookup-password-user",
+        "b01-record-password-failure",
+        "b01-request-password-reset",
+        "b01-resend-invite-activation",
+        "b01-verify-invite-activation"
+      ]
+    },
+    {
+      "table": "InviteActivationChallenge",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "userId",
+        "inviteId",
+        "email",
+        "purpose",
+        "codeVerifier",
+        "expiresAt",
+        "attemptCount",
+        "maxAttempts",
+        "createdAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b01-consume-email-verification",
+        "b01-consume-invitation",
+        "b01-consume-password-reset",
+        "b01-lookup-invitation",
+        "b01-lookup-invite-activation",
+        "b01-lookup-password-user",
+        "b01-record-password-failure",
+        "b01-request-password-reset",
+        "b01-resend-invite-activation",
+        "b01-verify-invite-activation"
+      ]
+    },
+    {
+      "table": "InviteActivationChallenge",
+      "command": "UPDATE",
+      "columns": [
+        "attemptCount",
+        "consumedAt",
+        "supersededAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b01-consume-email-verification",
+        "b01-consume-invitation",
+        "b01-consume-password-reset",
+        "b01-lookup-invitation",
+        "b01-lookup-invite-activation",
+        "b01-lookup-password-user",
+        "b01-record-password-failure",
+        "b01-request-password-reset",
+        "b01-resend-invite-activation",
+        "b01-verify-invite-activation"
       ]
     },
     {
@@ -575,9 +673,12 @@
         "b01-consume-invitation",
         "b01-consume-password-reset",
         "b01-lookup-invitation",
+        "b01-lookup-invite-activation",
         "b01-lookup-password-user",
         "b01-record-password-failure",
-        "b01-request-password-reset"
+        "b01-request-password-reset",
+        "b01-resend-invite-activation",
+        "b01-verify-invite-activation"
       ]
     },
     {
@@ -600,9 +701,12 @@
         "b01-consume-invitation",
         "b01-consume-password-reset",
         "b01-lookup-invitation",
+        "b01-lookup-invite-activation",
         "b01-lookup-password-user",
         "b01-record-password-failure",
-        "b01-request-password-reset"
+        "b01-request-password-reset",
+        "b01-resend-invite-activation",
+        "b01-verify-invite-activation"
       ]
     },
     {
@@ -618,9 +722,12 @@
         "b01-consume-invitation",
         "b01-consume-password-reset",
         "b01-lookup-invitation",
+        "b01-lookup-invite-activation",
         "b01-lookup-password-user",
         "b01-record-password-failure",
-        "b01-request-password-reset"
+        "b01-request-password-reset",
+        "b01-resend-invite-activation",
+        "b01-verify-invite-activation"
       ]
     },
     {
@@ -643,9 +750,12 @@
         "b01-consume-invitation",
         "b01-consume-password-reset",
         "b01-lookup-invitation",
+        "b01-lookup-invite-activation",
         "b01-lookup-password-user",
         "b01-record-password-failure",
-        "b01-request-password-reset"
+        "b01-request-password-reset",
+        "b01-resend-invite-activation",
+        "b01-verify-invite-activation"
       ]
     },
     {
@@ -661,9 +771,12 @@
         "b01-consume-invitation",
         "b01-consume-password-reset",
         "b01-lookup-invitation",
+        "b01-lookup-invite-activation",
         "b01-lookup-password-user",
         "b01-record-password-failure",
-        "b01-request-password-reset"
+        "b01-request-password-reset",
+        "b01-resend-invite-activation",
+        "b01-verify-invite-activation"
       ]
     },
     {
@@ -682,9 +795,12 @@
         "b01-consume-invitation",
         "b01-consume-password-reset",
         "b01-lookup-invitation",
+        "b01-lookup-invite-activation",
         "b01-lookup-password-user",
         "b01-record-password-failure",
-        "b01-request-password-reset"
+        "b01-request-password-reset",
+        "b01-resend-invite-activation",
+        "b01-verify-invite-activation"
       ]
     },
     {
@@ -704,9 +820,12 @@
         "b01-consume-invitation",
         "b01-consume-password-reset",
         "b01-lookup-invitation",
+        "b01-lookup-invite-activation",
         "b01-lookup-password-user",
         "b01-record-password-failure",
-        "b01-request-password-reset"
+        "b01-request-password-reset",
+        "b01-resend-invite-activation",
+        "b01-verify-invite-activation"
       ]
     },
     {
@@ -726,9 +845,12 @@
         "b01-consume-invitation",
         "b01-consume-password-reset",
         "b01-lookup-invitation",
+        "b01-lookup-invite-activation",
         "b01-lookup-password-user",
         "b01-record-password-failure",
-        "b01-request-password-reset"
+        "b01-request-password-reset",
+        "b01-resend-invite-activation",
+        "b01-verify-invite-activation"
       ]
     },
     {
@@ -745,9 +867,12 @@
         "b01-consume-invitation",
         "b01-consume-password-reset",
         "b01-lookup-invitation",
+        "b01-lookup-invite-activation",
         "b01-lookup-password-user",
         "b01-record-password-failure",
-        "b01-request-password-reset"
+        "b01-request-password-reset",
+        "b01-resend-invite-activation",
+        "b01-verify-invite-activation"
       ]
     },
     {
@@ -765,9 +890,12 @@
         "b01-consume-invitation",
         "b01-consume-password-reset",
         "b01-lookup-invitation",
+        "b01-lookup-invite-activation",
         "b01-lookup-password-user",
         "b01-record-password-failure",
-        "b01-request-password-reset"
+        "b01-request-password-reset",
+        "b01-resend-invite-activation",
+        "b01-verify-invite-activation"
       ]
     },
     {
@@ -5790,6 +5918,7 @@
         "disabledAt",
         "deletedAt",
         "passwordHash",
+        "emailVerifiedAt",
         "location",
         "website",
         "createdAt"
@@ -6428,6 +6557,47 @@
       "command": "UPDATE",
       "columns": [
         "usedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c01-administration-prepare-invitation",
+        "c01-administration-create-licensee",
+        "c01-administration-create-user",
+        "c01-administration-delete-licensee",
+        "c01-administration-delete-user",
+        "c01-administration-restore-manufacturer",
+        "c01-administration-update-licensee",
+        "c01-administration-update-user"
+      ]
+    },
+    {
+      "table": "InviteActivationChallenge",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "userId",
+        "consumedAt",
+        "supersededAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c01-administration-prepare-invitation",
+        "c01-administration-create-licensee",
+        "c01-administration-create-user",
+        "c01-administration-delete-licensee",
+        "c01-administration-delete-user",
+        "c01-administration-restore-manufacturer",
+        "c01-administration-update-licensee",
+        "c01-administration-update-user"
+      ]
+    },
+    {
+      "table": "InviteActivationChallenge",
+      "command": "UPDATE",
+      "columns": [
+        "supersededAt"
       ],
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",

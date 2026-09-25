@@ -40,6 +40,7 @@ type C03CapabilityBoundary = {
   purpose: string;
   allowedRoles: readonly UserRole[];
   requiredAssurance: C03RequiredAssurance;
+  allowTemporaryRolePassword?: boolean;
 };
 
 export type C03ActorBoundary = C03CapabilityBoundary & { licenseeId: string };
@@ -125,7 +126,9 @@ const verifyCapability = async (
   const role = actor.role as UserRole;
   if (!boundary.allowedRoles.includes(role)) throw new C03AccessError("Access denied");
   const assurance: CanonicalAssurance = actor.assurance === "ADMIN_MFA" ? "mfa-verified" : "password-verified";
-  if (boundary.requiredAssurance !== "password-verified" && assurance !== "mfa-verified") {
+  if (boundary.requiredAssurance !== "password-verified" && assurance !== "mfa-verified" &&
+      !(boundary.allowTemporaryRolePassword && boundary.requiredAssurance === "mfa-verified" && assurance === "password-verified" &&
+        (role === UserRole.LICENSEE_ADMIN || role === UserRole.MANUFACTURER_ADMIN))) {
     throw new C03AccessError("Fresh administrator MFA is required");
   }
   if (!["PASSWORD", "ADMIN_MFA"].includes(actor.assurance)) {

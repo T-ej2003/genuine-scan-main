@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "count": 77,
+  "count": 78,
   "tables": [
     "ActionIdempotencyKey",
     "AdminMfaCredential",
@@ -32,6 +32,7 @@
     "IncidentHandoff",
     "InventoryStatusRollup",
     "Invite",
+    "InviteActivationChallenge",
     "Licensee",
     "ManufacturerLicenseeLink",
     "MfaLoginChallenge",

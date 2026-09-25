@@ -15,28 +15,28 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "099399a7d3f4b2392acdba6c54bf1ac6a919ff60691e69d31023d32161d99e71",
-  "migrationSetDigest": "6642442a81cd98c7a132d241fa98e50ae231510896c9da67ab70d86b050d02db",
+  "sourceContractSha256": "20c01c9302f92959757c9175dc317145d2a3c9e443bd7d6240b227bc0f5a6902",
+  "migrationSetDigest": "65c30dc21bec8af4a44d3983761e9bd4e66b0d095a5387809b047b27dd1d2c9c",
   "sourceContractInputs": [
     {
       "path": "documents/security/rls-program/tables.json",
-      "sha256": "ff36a3bce025fe381f5b30379e275dd5077fe32af9b37f67748b5a9ea1ef7cf4"
+      "sha256": "9f6195ba85e36ea5beb734a6ce3769e23656e6458469ba1c52cc12692d5b0da5"
     },
     {
       "path": "documents/security/rls-program/workflows.json",
-      "sha256": "4ab67ba9192d82476d4947f72a313c138e138dea35bbd45f43c700ef4083262e"
+      "sha256": "ecece7b894b053a8ff297d62d64c08d0d5596fbdc734db381f6d409fc21e3d8d"
     },
     {
       "path": "documents/security/rls-program/command-semantics.json",
-      "sha256": "f0ebeea28dabfb9d23248cba62fe304d1b7773da6dbdb0bdec3e23af653e7583"
+      "sha256": "8aca06528406b9d934b0279addc444b3146bc4f3e5a975dc10f705a950c4834c"
     },
     {
       "path": "documents/security/rls-program/runtime-identities.json",
-      "sha256": "bf7a7438f3ff9779a78df0cb0796237d1a2e20fc204f08e92fc2cf999428894b"
+      "sha256": "02e4b506a6a581de6ec99e6d47d3fc951eed79be6925d23b71c331814b314860"
     },
     {
       "path": "documents/security/rls-program/object-ownership-chain.json",
-      "sha256": "08c33de9d5d468f8c6214202e48c418d88c65c2c1681fc192fcf80de21127077"
+      "sha256": "11dd203aec40efc8e5eb656cc0da1d2bea36c181cb57f41df79b99b8d76cc294"
     },
     {
       "path": "documents/security/rls-program/essential-workflow-allowlist.json",
@@ -44,15 +44,15 @@
     },
     {
       "path": "documents/security/rls-program/context-boundary-families.json",
-      "sha256": "7f93474253736f8a75320993f546a89c3e73e4420a5bbee951abc1f76a3e8f79"
+      "sha256": "428dd55f25786b07c2faeef07fe65b69a13787832fb5e2a5a2361f4ba8b47852"
     },
     {
       "path": "documents/security/rls-program/workflow-three-session-partition.json",
-      "sha256": "028491dbc0a13320db75184172ead9285a36e479974a467200ae11008bfe1d21"
+      "sha256": "b22306c54b5118ae6def2c5ad6f60c71e52251a39c68263e75870a2d59ae1cc1"
     },
     {
       "path": "backend/prisma/schema.prisma",
-      "sha256": "6610079b65d130370d4786ac3d0f8d8100c627a01f6e011fb5165127c0fc96d6"
+      "sha256": "dd1f15e67963534b47d83042baacb1984b707889ac672c0c549cde1ebeb96dca"
     },
     {
       "path": "scripts/rls/generate-full-rls-sql.mjs",
@@ -60,15 +60,15 @@
     },
     {
       "path": "scripts/rls/generate-clean-room-rls-sql.mjs",
-      "sha256": "f7c047406608e3374e1377df80cded92b1ae32bbe84cb415d667093145bb7c98"
+      "sha256": "d3720a79cc2a799dee8e49516db8763d2a7c9678c3d998df19b39d6251c7486f"
     },
     {
       "path": "scripts/rls/verify-full-rls-package.mjs",
-      "sha256": "d82763b21ac73dc176ba278b010f899b19e509f8cbaf65a2d93d77d040c1c16f"
+      "sha256": "4a273e76254285c9701144f0cb6de63f8eb721043db736143c63cd292d43b055"
     },
     {
       "path": "scripts/rls/certify-clean-room-database.mjs",
-      "sha256": "29572e4041a77848046b5c3f88ac2e14bdc558ca0abf2ad21398dd385dc81480"
+      "sha256": "31358dfa0a902b9ca818be0fb2948507e5ee3348ac1b733c2677d95e95b72a21"
     },
     {
       "path": "scripts/rls/create-production-rls-approval.mjs",
@@ -80,11 +80,11 @@
     },
     {
       "path": "scripts/rls/lib/program-inventory.mjs",
-      "sha256": "136f9f514c921681cbf3c3aaeceb53ada4b176c5809d788f226ee887f71098c7"
+      "sha256": "0dd2fcf0c0ad3c4f460410e4f6e000f0662ef4264be028a5731de83f68046247"
     },
     {
       "path": "scripts/rls/lib/table-inventory-baseline.mjs",
-      "sha256": "5f65980640aa1eca7a34ab0503affa0f631cbe2ef622e6ab8eb8716514efa767"
+      "sha256": "ae3ab7de581d9b9cb2fd708accadd6bce4cb65b831890aed9e05d84425ef5514"
     },
     {
       "path": "scripts/rls/lib/application-path-certifications.mjs",
@@ -92,7 +92,7 @@
     },
     {
       "path": "scripts/rls/lib/named-sql-function-contracts.mjs",
-      "sha256": "f1ef4096df58a4978e5223333c1caa4ffc200e9871efd60ce21e8b05f99be7f2"
+      "sha256": "4b9422e6cc43fd28c11a3ea62e47879335253549434085cb3d47aa7ee7c62ef8"
     },
     {
       "path": "scripts/rls/lib/restricted-owner-projection-contract.mjs",
@@ -252,7 +252,7 @@
     },
     {
       "path": "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
-      "sha256": "87e4ce1ab991371d05537fbbbce59ccfb97c34d5386d81e312c502d74f944ad2"
+      "sha256": "edda979c0cc75d6688c26b9b0885489b9d09f163a423af18a6bfe2c1d55e8a45"
     },
     {
       "path": "backend/src/rls-waves/session-b/b01/b01RefreshRotationRollback.sql",
@@ -284,7 +284,7 @@
     },
     {
       "path": "backend/src/rls-waves/session-c/c01/administration.sql",
-      "sha256": "20c1b86be3445e7a4e98f3c9725450f5d83738e07f0d7c3f5f5f1927e2394af7"
+      "sha256": "f31b27e2f679f1e0f5f1286bb69aa3a056e0ea5752121afbd761d453825e7dd3"
     },
     {
       "path": "backend/src/rls-waves/session-c/c01/administrationRollback.sql",
@@ -312,33 +312,33 @@
     },
     {
       "path": "backend/tests/rls-wave-b/b01/authenticationClosurePostgres18.test.js",
-      "sha256": "c181f3d57b17f6e6e26d3d043d208a1b36c5df7a6293bef2c3386321b329976f"
+      "sha256": "af9dd404fa09c350d11589f39e23fd9e29c5393fbb3e37cd634ac6598efe42e9"
     },
     {
       "path": "backend/tests/riskAnalyticsApplicationPathPostgres18.test.js",
-      "sha256": "104e03f160c37e3e9e126a5754b6c634d16f3d75587da2870e31e22bda8dee98"
+      "sha256": "c17ba08a5905a8ef6afd24ce9325801a529cee29c5bf1bd0378e4bf66f670323"
     },
     {
       "path": "backend/tests/dashboardSnapshotApplicationPathPostgres18.test.js",
-      "sha256": "5186ddecc7cb5b98342b99fe2226b29b2ab09b362d2767a5fe299d73c02f9563"
+      "sha256": "4b3c3a3c4a34837408d1dd2e8e854bb2cbe38a82f110b2fc0f8eaf4459f68d96"
     },
     {
       "path": "backend/tests/batchOperationalReadApplicationPathPostgres18.test.js",
-      "sha256": "4d5cdebc7b46be135b25b1decbb46f169d1d7b0329401ea6db0b15b0fc719c62"
+      "sha256": "dc850b911540191e6bf9ae4049844d59c48b604feeeec00d462764a75dd132a4"
     }
   ],
   "greenDatabasePattern": "^mscqr_full_rls_cert_[a-z0-9_]+$",
   "counts": {
-    "tables": 79,
-    "forceRlsTargets": 77,
+    "tables": 80,
+    "forceRlsTargets": 78,
     "migrationOnly": 2,
     "certificationCandidateWorkflows": 14,
-    "directPolicySlices": 13,
-    "generatedPolicies": 352,
+    "directPolicySlices": 18,
+    "generatedPolicies": 362,
     "columnPrivilegeCells": 60,
-    "prismaMigrations": 54,
+    "prismaMigrations": 55,
     "prismaEnums": 58,
-    "registeredWorkflowCallPaths": 321,
+    "registeredWorkflowCallPaths": 330,
     "applicationPathCertifiedWorkflows": 11
   },
   "roles": {
@@ -352,7 +352,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:099399a7d3f4b2392acdba6c54bf1ac6a919ff60691e69d31023d32161d99e71",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:20c01c9302f92959757c9175dc317145d2a3c9e443bd7d6240b227bc0f5a6902",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,
@@ -595,6 +595,10 @@
     {
       "name": "20260725190000_add_refresh_token_session_capability_hash_unique",
       "sha256": "527b505fbab91a9efd19f50f5df990a19bf823efd611cd9032a00789997b09c2"
+    },
+    {
+      "name": "20260924010000_invite_activation_challenge",
+      "sha256": "0e5013a3f94a491264ed48b7fd33cd8a3ede8a8d88da42d6e8ae090a6c41422f"
     }
   ],
   "prohibitions": [
@@ -623,9 +627,9 @@
       "owns": [
         "all 78 Prisma tables",
         "application sequences",
-        "public, app_rls, and app_ops schemas",
+        "public and app_rls schemas",
         "table-bound objects",
-        "approved app_rls SECURITY INVOKER helpers and app_ops SECURITY DEFINER operator/deployment boundaries"
+        "approved app_rls SECURITY INVOKER helpers"
       ],
       "forbiddenMemberships": "No runtime role and no standing migration membership."
     },
@@ -758,6 +762,7 @@
       "policyFamily": "exact-command-rule-slices",
       "policySlices": [
         "slice_sql_profile_audit_log_licensee_admin_command_a_f969c4430c",
+        "slice_sql_profile_audit_log_org_admin_command_audit__edd50ebd6a",
         "slice_sql_profile_audit_log_manufacturer_command_aud_03817808f8",
         "slice_sql_profile_audit_log_platform_admin_command_a_40b2c83843"
       ],
@@ -1098,6 +1103,18 @@
       "postgresqlCertification": "pending"
     },
     {
+      "tableId": "table-invite-activation-challenge",
+      "table": "InviteActivationChallenge",
+      "category": "security-sensitive",
+      "rls": "ENABLE AND FORCE",
+      "owner": "identity-table-owner",
+      "policyFamily": "deny-by-default-no-policy",
+      "policySlices": [],
+      "columnGrants": [],
+      "disposition": "fail-closed-no-runtime-grant",
+      "postgresqlCertification": "pending"
+    },
+    {
       "tableId": "table-licensee",
       "table": "Licensee",
       "category": "tenant-owned",
@@ -1106,6 +1123,7 @@
       "policyFamily": "exact-command-rule-slices",
       "policySlices": [
         "slice_sql_profile_audit_log_licensee_admin_command_l_f1e5f598a8",
+        "slice_sql_profile_audit_log_org_admin_command_licens_4e39bd29a2",
         "slice_sql_profile_audit_log_manufacturer_command_lic_076e4b1820"
       ],
       "columnGrants": [
@@ -1184,6 +1202,7 @@
       "policyFamily": "exact-command-rule-slices",
       "policySlices": [
         "slice_sql_profile_audit_log_licensee_admin_command_o_bd2468c1e2",
+        "slice_sql_profile_audit_log_org_admin_command_organi_67ded664cf",
         "slice_sql_profile_audit_log_manufacturer_command_org_95e059c91d"
       ],
       "columnGrants": [
@@ -1491,6 +1510,7 @@
       "policyFamily": "exact-command-rule-slices",
       "policySlices": [
         "slice_sql_profile_audit_log_licensee_admin_command_r_2152b85d1e",
+        "slice_sql_profile_audit_log_org_admin_command_refres_33084f09d3",
         "slice_sql_profile_audit_log_manufacturer_command_ref_08895ca8c6"
       ],
       "columnGrants": [
@@ -1727,6 +1747,7 @@
       "policyFamily": "exact-command-rule-slices",
       "policySlices": [
         "slice_sql_profile_audit_log_licensee_admin_command_u_6293132c5a",
+        "slice_sql_profile_audit_log_org_admin_command_user_s_35d0cdb308",
         "slice_sql_profile_audit_log_manufacturer_command_use_47bccd37ae"
       ],
       "columnGrants": [

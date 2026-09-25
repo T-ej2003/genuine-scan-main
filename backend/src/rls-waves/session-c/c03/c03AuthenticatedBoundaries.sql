@@ -201,7 +201,7 @@ BEGIN
 
   SELECT * INTO actor FROM app_rls.c03_require_authenticated_actor(p_capability,p_purpose,p_request_id);
   IF actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN','LICENSEE_ADMIN','MANUFACTURER_ADMIN')
-     OR actor.assurance<>'ADMIN_MFA'
+     OR (actor.assurance<>'ADMIN_MFA' AND NOT (actor.role IN ('LICENSEE_ADMIN','MANUFACTURER_ADMIN') AND actor.assurance='PASSWORD'))
   THEN RAISE EXCEPTION 'C03_APPROVAL_DENIED' USING ERRCODE='42501'; END IF;
 
   PERFORM set_config('app.c03_operation','sensitive-action-approval-revalidate',true),
@@ -383,7 +383,8 @@ BEGIN
   IF p_purpose<>'incident-evidence-file-read' OR p_storage_key IS NULL OR length(p_storage_key) NOT BETWEEN 1 AND 1000 OR p_storage_key ~ '[[:cntrl:]]'
   THEN RAISE EXCEPTION 'C03_INCIDENT_EVIDENCE_DENIED' USING ERRCODE='42501'; END IF;
   SELECT * INTO actor FROM app_rls.c03_require_authenticated_actor(p_capability,p_purpose,p_request_id);
-  IF actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN','LICENSEE_ADMIN','ORG_ADMIN') OR actor.assurance<>'ADMIN_MFA'
+  IF actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN','LICENSEE_ADMIN','ORG_ADMIN')
+     OR (actor.assurance<>'ADMIN_MFA' AND NOT (actor.role='LICENSEE_ADMIN' AND actor.assurance='PASSWORD'))
   THEN RAISE EXCEPTION 'C03_INCIDENT_EVIDENCE_DENIED' USING ERRCODE='42501'; END IF;
   PERFORM app_rls.c03_bind_operation('incident-evidence-read','','','',p_storage_key);
   SELECT count(*),min(e.id),min(e."incidentId") INTO candidate_count,evidence_id,incident_id

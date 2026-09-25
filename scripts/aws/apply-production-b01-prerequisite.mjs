@@ -69,11 +69,13 @@ function policyRows(source, canonical) {
   return sorted(structuredClone(canonical.policies));
 }
 
-export function canonicalB01Prerequisite({ repositoryRoot = root, readOld = (file) => execFileSync("git", ["show", `${B01_PREREQUISITE.rlsDeltaOriginSha}^:${file}`], { cwd: repositoryRoot, encoding: "utf8" }) } = {}) {
-  const current = fs.readFileSync(path.join(repositoryRoot, sourcePath), "utf8"), old = readOld(sourcePath);
+export function canonicalB01Prerequisite({ repositoryRoot = root,
+  readOrigin = (file) => execFileSync("git", ["show", `${B01_PREREQUISITE.rlsDeltaOriginSha}:${file}`], { cwd: repositoryRoot, encoding: "utf8" }),
+  readOld = (file) => execFileSync("git", ["show", `${B01_PREREQUISITE.rlsDeltaOriginSha}^:${file}`], { cwd: repositoryRoot, encoding: "utf8" }) } = {}) {
+  const current = readOrigin(sourcePath), old = readOld(sourcePath);
   const bind = functionSql(current, "b01_bind_predecessor"), oldBind = functionSql(old, "b01_bind_predecessor");
   const finalizer = functionSql(current, "finalize_refresh_token_rotation");
-  const policySource = fs.readFileSync(path.join(repositoryRoot, generatedPolicyPath), "utf8");
+  const policySource = readOrigin(generatedPolicyPath);
   const policyState = JSON.parse(fs.readFileSync(path.join(repositoryRoot, policyStatePath), "utf8"));
   const successorPolicies = policyRows(policySource, policyState);
   const policy = successorPolicies.find(({ name }) => name === "b01_auditlogoutbox_select"); assert.ok(policy);

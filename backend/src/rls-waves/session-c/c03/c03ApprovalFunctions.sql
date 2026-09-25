@@ -12,7 +12,8 @@ BEGIN
     FROM app_rls.c03_revalidate_actor_scope(
       current_setting('app.licensee_id', true),
       '["SUPER_ADMIN","PLATFORM_SUPER_ADMIN","LICENSEE_ADMIN","MANUFACTURER_ADMIN"]'::jsonb,
-      CASE WHEN p_purpose IN ('sensitive-action-approval-approve','sensitive-action-approval-reject') THEN 'mfa-verified' ELSE 'password-verified' END,
+      CASE WHEN p_purpose IN ('sensitive-action-approval-approve','sensitive-action-approval-reject')
+        AND current_setting('app.role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') THEN 'mfa-verified' ELSE 'password-verified' END,
       p_purpose
     ) actor;
   IF NOT FOUND THEN RAISE EXCEPTION 'C03_APPROVAL_DENIED' USING ERRCODE='42501'; END IF;

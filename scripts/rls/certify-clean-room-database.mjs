@@ -596,13 +596,13 @@ const issueSemanticCapabilities = ({ bootstrap, preauth }) => {
 };
 
 const certifySemantics = (bootstrapUrl, appUrl) => {
-  const tenantAudit = { user: ids.adminA, org: ids.orgA, licensee: ids.licenseeA, assurance: "mfa-verified", purpose: "audit-log-read" };
+  const tenantAudit = { user: ids.adminA, org: ids.orgA, licensee: ids.licenseeA, assurance: "password-verified", purpose: "audit-log-read" };
   requireDenial(denial(appUrl, tenantAudit, `SELECT count("id") FROM public."PolicyAlert"`, "direct risk analytics read"), "direct risk analytics read");
   if (Number(appScalar(appUrl, tenantAudit, `SELECT count("id") FROM public."AuditLog"`, "tenant-wide audit read")) !== 2) throw new Error("Tenant audit read was narrowed to actor-self instead of the approved tenant scope");
-  if (Number(appScalar(appUrl, { ...tenantAudit, assurance: "password-verified" }, `SELECT count("id") FROM public."AuditLog"`, "weak-assurance audit denial")) !== 0) throw new Error("Actor-specific audit MFA guard was flattened");
-  const manufacturerAudit = { user: ids.manufacturerA, org: ids.orgA, licensee: ids.licenseeA, actorClass: "manufacturer", assurance: "mfa-verified", purpose: "audit-log-read" };
+  const manufacturerAudit = { user: ids.manufacturerA, org: ids.orgA, licensee: ids.licenseeA, actorClass: "manufacturer", assurance: "password-verified", purpose: "audit-log-read" };
   if (appScalar(appUrl, manufacturerAudit, `SELECT string_agg("id",',' ORDER BY "id") FROM public."AuditLog"`, "manufacturer self-attributed audit read") !== ids.auditAOther) throw new Error("Manufacturer audit read escaped immutable self attribution");
   const platformAudit = { user: ids.platformA, org: "", licensee: ids.licenseeA, actorClass: "platform-admin", assurance: "mfa-verified", purpose: "platform-audit-log-read" };
+  if (Number(appScalar(appUrl, { ...platformAudit, assurance: "password-verified" }, `SELECT count("id") FROM public."AuditLog"`, "platform password-only audit denial")) !== 0) throw new Error("Platform audit MFA guard was flattened");
   const platformDetails = appScalar(appUrl, platformAudit, `SELECT string_agg(id||'|'||coalesce(user_name,'')||'|'||coalesce(ip_address,''),',' ORDER BY id) FROM app_rls.platform_audit_log_details(ARRAY[${lit(ids.auditA)},${lit(ids.auditAOther)}])`, "bounded platform audit metadata function");
   const expectedPlatformDetails = `${ids.auditA}|Admin A|192.0.2.10,${ids.auditAOther}|Manufacturer A|192.0.2.11`;
   if (platformDetails !== expectedPlatformDetails) throw new Error(`Bounded platform audit metadata projection drifted: ${platformDetails || "<empty>"}`);
@@ -613,7 +613,7 @@ const certifySemantics = (bootstrapUrl, appUrl) => {
   // insert is not a reviewed business command; it must fail closed.  Reviewed
   // service and SECURITY DEFINER boundaries are exercised in their own path
   // certification rather than by granting a synthetic table-write capability.
-  const manufacturer = { user: ids.manufacturerA, org: ids.orgA, licensee: ids.licenseeA, actorClass: "manufacturer", assurance: "mfa-verified", purpose: "audit-log-read" };
+  const manufacturer = { user: ids.manufacturerA, org: ids.orgA, licensee: ids.licenseeA, actorClass: "manufacturer", assurance: "password-verified", purpose: "audit-log-read" };
   const auditInsert = (user, org, licensee, action = "BATCH_OPERATIONAL_READ") => `INSERT INTO public."AuditLog" ("id","userId","orgId","licenseeId","action","entityType","entityId","details") VALUES ('00000000-0000-4000-8000-000000009999',${lit(user)},${lit(org)},${lit(licensee)},${lit(action)},'BatchOperationalRead','fixture',${lit(JSON.stringify({ requestId: "full-rls-cert-request", purposeCode: "batch-operational-read", route: "GET /api/qr/batches" }))}::jsonb)`;
   requireDenial(denial(appUrl, manufacturer, auditInsert(ids.manufacturerA, ids.orgA, ids.licenseeA), "unreviewed direct audit insert"), "unreviewed direct audit insert");
   for (const [label, context, user, org, licensee] of [

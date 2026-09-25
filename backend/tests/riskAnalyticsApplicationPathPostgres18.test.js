@@ -30,7 +30,15 @@ const assertSafeBootstrapUrl = (raw) => {
   const database = decodeURIComponent(parsed.pathname.slice(1));
   assert(["postgres:", "postgresql:"].includes(parsed.protocol), "Risk analytics bootstrap proof requires PostgreSQL");
   assert(["127.0.0.1", "localhost", "::1"].includes(parsed.hostname), "Risk analytics bootstrap proof requires loopback PostgreSQL");
-  assert.equal(decodeURIComponent(parsed.username), "mscqr_rls_cert_admin", "Risk analytics bootstrap proof requires the disposable certification administrator");
+  const administrator = decodeURIComponent(parsed.username);
+  if (administrator !== "mscqr_rls_cert_admin") {
+    // The clean-room certifier uses its loopback-only maintenance superuser for fixture inspection.
+    const maintenance = new URL(String(process.env.MSCQR_FULL_RLS_CERTIFICATION_ADMIN_URL || ""));
+    assert.equal(administrator, "postgres", "Risk analytics bootstrap proof requires the disposable certification administrator");
+    assert.equal(parsed.host, maintenance.host, "Risk analytics bootstrap proof must use the certifier's local cluster");
+    assert.equal(parsed.username, maintenance.username, "Risk analytics bootstrap proof must use the certifier's reviewed administrator");
+    assert.match(decodeURIComponent(maintenance.pathname.slice(1)), /full_rls|disposable/i, "Risk analytics bootstrap proof requires a disposable maintenance database");
+  }
   assert.match(database, /^mscqr_full_rls_cert_[a-z0-9_]+_final$/, "Risk analytics bootstrap proof requires the final disposable certification database");
   assert(!/(staging|prod|production|amazonaws|rds)/i.test(raw), "Risk analytics bootstrap proof refuses staging or production targets");
 };

@@ -4,7 +4,9 @@ Production web evidence is intentionally separate from the mature four-image Sta
 
 ## Publication and evidence
 
-Dispatch `.github/workflows/production-web-image.yml` from protected `main` with only `release_sha`. Environment `production-web-image-publish` requires review with self-review prevention and exposes only `PRODUCTION_WEB_IMAGE_PUBLISH_ROLE`. GitHub OIDC is the sole credential path. Account `368992683803`, region `eu-west-2`, repository `mscqr-web`, context `.`, `Dockerfile.ecs-frontend`, platform `linux/amd64`, and the full SHA tag are fixed in source.
+Dispatch `.github/workflows/production-web-image.yml` from protected `main` with only `release_sha`. Environment `production-web-image-publish` requires review by `T-ej2003`, permits that operator to approve their own deployment, and allows deployments only from protected `main`; it exposes only `PRODUCTION_WEB_IMAGE_PUBLISH_ROLE`. GitHub OIDC is the sole credential path. Account `368992683803`, region `eu-west-2`, repository `mscqr-web`, context `.`, `Dockerfile.ecs-frontend`, platform `linux/amd64`, and the full SHA tag are fixed in source.
+
+This environment is operator-configured, not managed by Terraform. After this contract change merges and before the next publication, configure the GitHub environment with required reviewer `T-ej2003`, self-review permitted, and protected-`main`-only deployment branches; verify those live settings before dispatch. The repository contract does not itself update GitHub environment settings.
 
 The workflow authenticates immutable ECR configuration, publishes and reads back one digest, scans critical vulnerabilities, produces SBOM and provenance attestations, applies and verifies keyless Cosign evidence, and retains `production-web-image/web-image.jsonl` for 90 days.
 
@@ -30,6 +32,47 @@ The release deployer captures stable `mscqr-frontend-servi-euw2`, derives `mscqr
 Registration failure performs no service update. Update, stabilization, `/login`, or health failure may roll back only to the exact captured predecessor while the service still points at the failed candidate. Arbitrary service, family, image, or rollback inputs are rejected.
 
 AWS IAM cannot resource-scope or field-constrain `ecs:RegisterTaskDefinition`. The release role therefore uses the AWS-supported wildcard resource for that API only. The security boundary is the isolated release principal, fixed source constructor, exact `iam:PassRole` closure, full AWS-materialized readback, and exact service/predecessor CAS; callers cannot supply task fields.
+
+## Terraform state and publisher provisioning
+
+The `infra/aws/terraform/production-web-release` root owns the publisher role, its boundary and permissions policy, and the narrowly scoped `MSCQRProductionFrontendActivation` inline policy on the existing `mscqr-production-release-deployer` role. That release-deployer role remains externally owned and is read as a Terraform data source; its frontend policy is required by the governed activation path.
+
+An MFA-backed, non-root production operator must use the dedicated encrypted production S3 state and S3 lockfile. AWS root must not plan or apply:
+
+```sh
+# Refuse to hide any prior local state; its ownership must be resolved first.
+for state_path in infra/aws/terraform/production-web-release/terraform.tfstate infra/aws/terraform/production-web-release/terraform.tfstate.backup infra/aws/terraform/production-web-release/terraform.tfstate.d; do
+  if [ -e "$state_path" ]; then echo "Unexpected local Terraform state: $state_path" >&2; exit 1; fi
+done
+# Isolate backend metadata from any previous local or alternate-backend init.
+TF_DATA_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mscqr-web-release-tfdata.XXXXXX")"
+chmod 700 "$TF_DATA_DIR"
+export TF_DATA_DIR
+TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-web-release init \
+  -upgrade=false -input=false \
+  -backend-config='bucket=mscqr-production-terraform-state-368992683803-eu-west-2' \
+  -backend-config='key=mscqr/production/web-release/terraform.tfstate' \
+  -backend-config='region=eu-west-2' \
+  -backend-config='encrypt=true' \
+  -backend-config='use_lockfile=true'
+test "$(TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-web-release workspace show)" = default
+aws sts get-caller-identity
+```
+
+Verify the caller is in account `368992683803` under the approved non-root operator role. Before creating the saved plan, compare every managed address with live AWS and import any pre-existing object with the pinned workspace, replacing both placeholders with the exact Terraform address and provider import ID:
+
+```sh
+TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-web-release import '<terraform-address>' '<provider-id>'
+```
+
+A plan created before an import must be discarded and recreated. Review the final plan and stop for any unexpected update, delete, or replacement:
+
+```sh
+TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-web-release plan -out=web-release.tfplan
+TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-web-release apply web-release.tfplan
+```
+
+After apply, verify the exact publisher trust/policy and boundary, then set `PRODUCTION_WEB_IMAGE_PUBLISH_ROLE` on the protected `production-web-image-publish` environment to the Terraform `publisher_role_arn` output. This procedure does not configure GitHub or mutate resources until the separately reviewed Terraform apply.
 
 ## Governed operator sequence
 

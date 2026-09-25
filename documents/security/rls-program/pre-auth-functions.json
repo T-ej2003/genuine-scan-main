@@ -306,6 +306,7 @@
       "tablesWritten": [
         "table-audit-log-outbox",
         "table-invite",
+        "table-invite-activation-challenge",
         "table-user"
       ],
       "exactAllowedColumns": [
@@ -663,6 +664,7 @@
       ],
       "tablesRead": [
         "table-invite",
+        "table-invite-activation-challenge",
         "table-licensee",
         "table-organization",
         "table-user"

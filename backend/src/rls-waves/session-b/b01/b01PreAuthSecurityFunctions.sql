@@ -6,7 +6,7 @@ CREATE OR REPLACE FUNCTION app_auth.b01_preauth_audit(
   p_action text, p_entity_type text, p_entity_id text, p_at timestamp without time zone, p_details jsonb DEFAULT '{}'::jsonb
 ) RETURNS void LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
 BEGIN
-  IF p_action NOT IN ('AUTH_LOGIN_FAIL','AUTH_LOGIN_LOCKED','AUTH_PASSWORD_RESET_REQUESTED','AUTH_PASSWORD_RESET_COMPLETED','AUTH_EMAIL_VERIFIED','AUTH_EMAIL_CHANGE_CONFIRMED','AUTH_INVITE_ACCEPTED')
+  IF p_action NOT IN ('AUTH_LOGIN_FAIL','AUTH_LOGIN_LOCKED','AUTH_PASSWORD_RESET_REQUESTED','AUTH_PASSWORD_RESET_COMPLETED','AUTH_EMAIL_VERIFIED','AUTH_EMAIL_CHANGE_CONFIRMED','AUTH_INVITE_ACCEPTED','AUTH_INVITE_PASSWORD_SET','AUTH_INVITE_ACTIVATED')
      OR current_setting('app.b01_preauth_user_id',true)='' THEN
     RAISE EXCEPTION 'B01_PREAUTH_AUDIT_DENIED' USING ERRCODE='42501';
   END IF;
@@ -122,7 +122,8 @@ BEGIN
   SELECT count(*)::integer INTO candidate_count FROM public."User" u WHERE lower(u.email)=p_requested_email;
   IF candidate_count<>1 THEN RETURN QUERY SELECT true,false,NULL::text,NULL::text,NULL::text,NULL::text,NULL::timestamp; RETURN; END IF;
   SELECT u.id,u.email,u."licenseeId",u."orgId" INTO actor_row FROM public."User" u
-    WHERE lower(u.email)=p_requested_email AND u."isActive" AND u."disabledAt" IS NULL AND u."deletedAt" IS NULL AND u.status<>'DISABLED'::public."UserStatus";
+    WHERE lower(u.email)=p_requested_email AND u."isActive" AND u."disabledAt" IS NULL AND u."deletedAt" IS NULL
+      AND u.status='ACTIVE'::public."UserStatus" AND u."emailVerifiedAt" IS NOT NULL;
   IF NOT FOUND THEN RETURN QUERY SELECT true,false,NULL::text,NULL::text,NULL::text,NULL::text,NULL::timestamp; RETURN; END IF;
   PERFORM set_config('app.b01_preauth_user_id',actor_row.id,true),
           set_config('app.b01_preauth_org_id',coalesce(actor_row."orgId",''),true),
@@ -160,7 +161,8 @@ BEGIN
   PERFORM set_config('app.b01_preauth_token_id',token_row.id,true),set_config('app.b01_preauth_user_id',token_row."userId",true);
   SELECT u.id,u.email,u.name,u.role,u."orgId",u."licenseeId",u.status,u."isActive",u."disabledAt",u."deletedAt",u."emailVerifiedAt"
     INTO actor_row FROM public."User" u WHERE u.id=token_row."userId" FOR UPDATE;
-  IF NOT FOUND OR NOT actor_row."isActive" OR actor_row."disabledAt" IS NOT NULL OR actor_row."deletedAt" IS NOT NULL OR actor_row.status='DISABLED'::public."UserStatus" THEN RETURN; END IF;
+  IF NOT FOUND OR NOT actor_row."isActive" OR actor_row."disabledAt" IS NOT NULL OR actor_row."deletedAt" IS NOT NULL
+     OR actor_row.status<>'ACTIVE'::public."UserStatus" OR actor_row."emailVerifiedAt" IS NULL THEN RETURN; END IF;
   SELECT r.id,r."orgId",r."userId",r."tokenHash",r."expiresAt",r."usedAt" INTO token_row
     FROM public."PasswordReset" r WHERE r.id=candidate_ids[1];
   IF NOT FOUND OR token_row."userId"<>actor_row.id OR token_row."usedAt" IS NOT NULL OR token_row."expiresAt"<=p_consumed_at THEN RETURN; END IF;
@@ -181,10 +183,11 @@ BEGIN
 END
 $fn$;
 
+DROP FUNCTION IF EXISTS app_auth.lookup_invitation_token(text[],timestamp without time zone);
 CREATE OR REPLACE FUNCTION app_auth.lookup_invitation_token(p_token_hash_candidates text[],p_checked_at timestamp without time zone)
-RETURNS TABLE("email" text,"role" text,"expiresAt" timestamp without time zone,"licenseeName" text,"requiresConnector" boolean)
+RETURNS TABLE("email" text,"role" text,"expiresAt" timestamp without time zone,"licenseeName" text,"requiresConnector" boolean,"inviteId" text,"userId" text,"challengeId" text,"challengeCreatedAt" timestamp without time zone)
 LANGUAGE plpgsql VOLATILE PARALLEL UNSAFE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
-DECLARE invite_row record; actor_row record; candidate_ids text[]; candidate_user_ids text[]; licensee_name text;
+DECLARE invite_row record; actor_row record; candidate_ids text[]; candidate_user_ids text[]; licensee_name text; challenge_id text; challenge_created_at timestamp; challenge_expires_at timestamp;
 BEGIN
   IF coalesce(array_length(p_token_hash_candidates,1),0) NOT BETWEEN 1 AND 3
      OR EXISTS (SELECT 1 FROM unnest(p_token_hash_candidates) h WHERE h IS NULL OR h !~ '^([0-9a-f]{12}:)?[0-9a-f]{64}$')
@@ -197,38 +200,52 @@ BEGIN
           set_config('app.b01_preauth_user_id','',true),set_config('app.b01_preauth_org_id','',true),
           set_config('app.b01_preauth_licensee_id','',true),set_config('app.b01_preauth_pending_email','',true);
   SELECT array_agg(i.id ORDER BY i.id) INTO candidate_ids FROM public."Invite" i
-    WHERE i."tokenHash"=ANY(p_token_hash_candidates) AND i."usedAt" IS NULL AND i."expiresAt">p_checked_at;
+    WHERE i."tokenHash"=ANY(p_token_hash_candidates);
   IF coalesce(array_length(candidate_ids,1),0)<>1 THEN RETURN; END IF;
-  SELECT i.id,i."orgId",i."licenseeId",i.email,i.role,i."manufacturerId",i."tokenHash",i."expiresAt",i."usedAt"
+  SELECT i.id,i."orgId",i."licenseeId",i.email,i.role,i."manufacturerId",i."tokenHash",i."expiresAt",i."usedAt",i."acceptedByUserId"
     INTO invite_row FROM public."Invite" i WHERE i.id=candidate_ids[1];
   PERFORM set_config('app.b01_preauth_token_id',invite_row.id,true),set_config('app.b01_preauth_email',invite_row.email,true),
           set_config('app.b01_preauth_org_id',invite_row."orgId",true),set_config('app.b01_preauth_licensee_id',coalesce(invite_row."licenseeId",''),true);
   SELECT array_agg(u.id ORDER BY u.id) INTO candidate_user_ids FROM public."User" u WHERE lower(u.email)=invite_row.email;
   IF coalesce(array_length(candidate_user_ids,1),0)<>1 THEN RETURN; END IF;
-  SELECT u.id,u.email,u.role,u."orgId",u."licenseeId",u.status,u."isActive",u."disabledAt",u."deletedAt",u."passwordHash"
+  SELECT u.id,u.email,u.role,u."orgId",u."licenseeId",u.status,u."isActive",u."disabledAt",u."deletedAt",u."passwordHash",u."emailVerifiedAt"
     INTO actor_row FROM public."User" u WHERE u.id=candidate_user_ids[1];
   IF NOT FOUND OR actor_row.email<>invite_row.email OR NOT actor_row."isActive" OR actor_row.status<>'INVITED'::public."UserStatus"
-     OR actor_row."disabledAt" IS NOT NULL OR actor_row."deletedAt" IS NOT NULL OR actor_row."passwordHash" IS NOT NULL
+     OR actor_row."disabledAt" IS NOT NULL OR actor_row."deletedAt" IS NOT NULL OR actor_row."emailVerifiedAt" IS NOT NULL
      OR (CASE WHEN actor_row.role::text IN ('LICENSEE_ADMIN','ORG_ADMIN') THEN 'LICENSEE_ADMIN' WHEN actor_row.role::text IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') THEN 'MANUFACTURER' ELSE actor_row.role::text END)
         IS DISTINCT FROM (CASE WHEN invite_row.role::text IN ('LICENSEE_ADMIN','ORG_ADMIN') THEN 'LICENSEE_ADMIN' WHEN invite_row.role::text IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') THEN 'MANUFACTURER' ELSE invite_row.role::text END)
      OR (invite_row.role::text IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND (actor_row."orgId" IS NOT NULL OR actor_row."licenseeId" IS NOT NULL))
      OR (invite_row.role::text NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND (actor_row."orgId" IS DISTINCT FROM invite_row."orgId" OR actor_row."licenseeId" IS DISTINCT FROM invite_row."licenseeId"))
      OR (invite_row."manufacturerId" IS NOT NULL AND actor_row.id IS DISTINCT FROM invite_row."manufacturerId") THEN RETURN; END IF;
   PERFORM set_config('app.b01_preauth_user_id',actor_row.id,true);
+  PERFORM set_config('app.b01_preauth_invite_id',invite_row.id,true);
+  IF invite_row."usedAt" IS NULL THEN
+    IF invite_row."expiresAt"<=p_checked_at OR actor_row."passwordHash" IS NOT NULL THEN RETURN; END IF;
+  ELSE
+    IF invite_row."acceptedByUserId" IS DISTINCT FROM actor_row.id OR actor_row."passwordHash" IS NULL THEN RETURN; END IF;
+    SELECT c.id,c."createdAt",c."expiresAt" INTO challenge_id,challenge_created_at,challenge_expires_at FROM public."InviteActivationChallenge" c
+      WHERE c."inviteId"=invite_row.id AND c."userId"=actor_row.id AND c.email=invite_row.email
+      AND c.purpose='INVITE_ACTIVATION' AND c."consumedAt" IS NULL AND c."supersededAt" IS NULL
+      AND c."expiresAt">p_checked_at
+      ORDER BY c."createdAt" DESC LIMIT 1;
+    IF challenge_id IS NULL THEN RETURN; END IF;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM public."Organization" o WHERE o.id=invite_row."orgId" AND o."isActive") THEN RETURN; END IF;
   IF invite_row."licenseeId" IS NOT NULL THEN
     SELECT l.name INTO licensee_name FROM public."Licensee" l WHERE l.id=invite_row."licenseeId" AND l."orgId"=invite_row."orgId" AND l."isActive" AND l."suspendedAt" IS NULL;
     IF NOT FOUND THEN RETURN; END IF;
   END IF;
-  RETURN QUERY SELECT invite_row.email,invite_row.role::text,invite_row."expiresAt",licensee_name,
-    invite_row.role::text IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER');
+  RETURN QUERY SELECT invite_row.email,invite_row.role::text,
+    CASE WHEN invite_row."usedAt" IS NULL THEN invite_row."expiresAt" ELSE challenge_expires_at END,licensee_name,
+    invite_row.role::text IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER'),invite_row.id,actor_row.id,challenge_id,challenge_created_at;
 END
 $fn$;
 
+DROP FUNCTION IF EXISTS app_auth.consume_invitation_token(text[],text,text,timestamp without time zone,text,text,text);
 CREATE OR REPLACE FUNCTION app_auth.consume_invitation_token(
   p_token_hash_candidates text[],p_new_password_hash text,p_requested_name text,p_consumed_at timestamp without time zone,
-  p_request_id text,p_ip_hash text,p_user_agent text
-) RETURNS TABLE("inviteId" text,"id" text,"email" text,"name" text,"role" text,"licenseeId" text,"orgId" text,"status" text)
+  p_request_id text,p_ip_hash text,p_user_agent text,p_challenge_id text,p_code_verifier text,p_expires_at timestamp without time zone
+) RETURNS TABLE("inviteId" text,"id" text,"email" text,"name" text,"role" text,"licenseeId" text,"orgId" text,"status" text,"challengeId" text,"challengeExpiresAt" timestamp without time zone)
 LANGUAGE plpgsql VOLATILE PARALLEL UNSAFE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
 DECLARE invite_row record; actor_row record; candidate_ids text[]; candidate_user_ids text[]; requested_name text:=nullif(btrim(coalesce(p_requested_name,'')),''); changed integer;
 BEGIN
@@ -240,7 +257,10 @@ BEGIN
      OR p_consumed_at IS NULL OR abs(extract(epoch FROM (p_consumed_at-(clock_timestamp() AT TIME ZONE 'UTC'))))>300
      OR p_request_id IS NULL OR length(p_request_id) NOT BETWEEN 1 AND 128 OR p_request_id !~ '^[!-~]+$'
      OR (p_ip_hash IS NOT NULL AND p_ip_hash !~ '^([0-9a-f]{12}:)?[0-9a-f]{64}$')
-     OR length(coalesce(p_user_agent,''))>512 OR coalesce(p_user_agent,'')~'[[:cntrl:]]' THEN
+     OR length(coalesce(p_user_agent,''))>512 OR coalesce(p_user_agent,'')~'[[:cntrl:]]'
+     OR p_challenge_id IS NULL OR p_challenge_id !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+     OR p_code_verifier IS NULL OR p_code_verifier !~ '^[0-9a-f]{12}:[0-9a-f]{64}$'
+     OR p_expires_at IS NULL OR p_expires_at<>p_consumed_at+interval '10 minutes' THEN
     RAISE EXCEPTION 'B01_INVITE_CONSUME_DENIED' USING ERRCODE='22023';
   END IF;
   PERFORM set_config('app.b01_preauth_operation','invite-consume',true),set_config('app.b01_preauth_email','',true),
@@ -267,22 +287,155 @@ BEGIN
   IF NOT FOUND OR invite_row.email<>actor_row.email OR invite_row."usedAt" IS NOT NULL OR invite_row."expiresAt"<=p_consumed_at THEN RETURN; END IF;
   IF NOT FOUND OR actor_row.email<>invite_row.email OR NOT actor_row."isActive" OR actor_row.status<>'INVITED'::public."UserStatus"
      OR actor_row."disabledAt" IS NOT NULL OR actor_row."deletedAt" IS NOT NULL OR actor_row."passwordHash" IS NOT NULL
+     OR EXISTS (SELECT 1 FROM public."User" u WHERE u.id=actor_row.id AND u."emailVerifiedAt" IS NOT NULL)
      OR (CASE WHEN actor_row.role::text IN ('LICENSEE_ADMIN','ORG_ADMIN') THEN 'LICENSEE_ADMIN' WHEN actor_row.role::text IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') THEN 'MANUFACTURER' ELSE actor_row.role::text END)
         IS DISTINCT FROM (CASE WHEN invite_row.role::text IN ('LICENSEE_ADMIN','ORG_ADMIN') THEN 'LICENSEE_ADMIN' WHEN invite_row.role::text IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') THEN 'MANUFACTURER' ELSE invite_row.role::text END)
      OR (invite_row.role::text IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND (actor_row."orgId" IS NOT NULL OR actor_row."licenseeId" IS NOT NULL))
      OR (invite_row.role::text NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND (actor_row."orgId" IS DISTINCT FROM invite_row."orgId" OR actor_row."licenseeId" IS DISTINCT FROM invite_row."licenseeId"))
      OR (invite_row."manufacturerId" IS NOT NULL AND actor_row.id IS DISTINCT FROM invite_row."manufacturerId") THEN RETURN; END IF;
   PERFORM set_config('app.b01_preauth_user_id',actor_row.id,true);
+  PERFORM set_config('app.b01_preauth_invite_id',invite_row.id,true),
+    set_config('app.b01_preauth_new_challenge_id',p_challenge_id,true);
   IF NOT EXISTS (SELECT 1 FROM public."Organization" o WHERE o.id=invite_row."orgId" AND o."isActive")
      OR (invite_row."licenseeId" IS NOT NULL AND NOT EXISTS (SELECT 1 FROM public."Licensee" l WHERE l.id=invite_row."licenseeId" AND l."orgId"=invite_row."orgId" AND l."isActive" AND l."suspendedAt" IS NULL)) THEN RETURN; END IF;
-  UPDATE public."User" u SET "passwordHash"=p_new_password_hash,name=coalesce(requested_name,u.name),status='ACTIVE'::public."UserStatus",
-    "emailVerifiedAt"=p_consumed_at,"failedLoginAttempts"=0,"lockedUntil"=NULL,"updatedAt"=p_consumed_at WHERE u.id=actor_row.id;
+  UPDATE public."User" u SET "passwordHash"=p_new_password_hash,name=coalesce(requested_name,u.name),
+    "failedLoginAttempts"=0,"lockedUntil"=NULL,"updatedAt"=p_consumed_at WHERE u.id=actor_row.id;
   UPDATE public."Invite" i SET "usedAt"=p_consumed_at,"acceptedByUserId"=actor_row.id WHERE i.id=invite_row.id AND i."usedAt" IS NULL;
   GET DIAGNOSTICS changed=ROW_COUNT; IF changed<>1 THEN RAISE EXCEPTION 'B01_INVITE_REPLAY' USING ERRCODE='40001'; END IF;
-  PERFORM app_auth.b01_preauth_audit('AUTH_INVITE_ACCEPTED','Invite',invite_row.id,p_consumed_at,
+  INSERT INTO public."InviteActivationChallenge" (id,"userId","inviteId",email,purpose,"codeVerifier","expiresAt","attemptCount","maxAttempts","createdAt")
+    VALUES (p_challenge_id,actor_row.id,invite_row.id,invite_row.email,'INVITE_ACTIVATION',p_code_verifier,p_expires_at,0,5,p_consumed_at);
+  PERFORM app_auth.b01_preauth_audit('AUTH_INVITE_PASSWORD_SET','Invite',invite_row.id,p_consumed_at,
     jsonb_build_object('requestId',p_request_id,'targetUserId',actor_row.id,'email',actor_row.email,'role',actor_row.role::text,'ipHash',p_ip_hash,'userAgent',p_user_agent));
   RETURN QUERY SELECT invite_row.id,actor_row.id,actor_row.email,coalesce(requested_name,actor_row.name),actor_row.role::text,
-    actor_row."licenseeId",actor_row."orgId",'ACTIVE'::text;
+    actor_row."licenseeId",actor_row."orgId",'INVITED'::text,p_challenge_id,p_expires_at;
+END
+$fn$;
+
+DROP FUNCTION IF EXISTS app_auth.lookup_invite_activation_challenge(text);
+CREATE OR REPLACE FUNCTION app_auth.lookup_invite_activation_challenge(p_challenge_id text)
+RETURNS TABLE("challengeId" text,"userId" text,"inviteId" text,"email" text,"expiresAt" timestamp without time zone)
+LANGUAGE plpgsql VOLATILE PARALLEL UNSAFE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE challenge_row record;
+BEGIN
+  IF p_challenge_id IS NULL OR p_challenge_id !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN RETURN; END IF;
+  PERFORM set_config('app.b01_preauth_operation','activation-lookup',true),
+    set_config('app.b01_preauth_token_id',p_challenge_id,true);
+  SELECT c.id,c."userId",c."inviteId",c.email,c."expiresAt" INTO challenge_row FROM public."InviteActivationChallenge" c
+    WHERE c.id=p_challenge_id AND c.purpose='INVITE_ACTIVATION' AND c."consumedAt" IS NULL AND c."supersededAt" IS NULL;
+  IF FOUND THEN RETURN QUERY SELECT challenge_row.id,challenge_row."userId",challenge_row."inviteId",challenge_row.email,challenge_row."expiresAt"; END IF;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_auth.verify_invite_activation(
+  p_challenge_id text,p_verifier_candidates text[],p_verified_at timestamp without time zone
+) RETURNS TABLE("verified" boolean,"userId" text,"email" text,"role" text)
+LANGUAGE plpgsql VOLATILE PARALLEL UNSAFE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE challenge_row record; actor_row record; invite_row record;
+BEGIN
+  IF p_challenge_id IS NULL OR p_challenge_id !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+     OR coalesce(array_length(p_verifier_candidates,1),0) NOT BETWEEN 1 AND 2
+     OR EXISTS (SELECT 1 FROM unnest(p_verifier_candidates) h WHERE h IS NULL OR h !~ '^[0-9a-f]{12}:[0-9a-f]{64}$')
+     OR p_verified_at IS NULL OR abs(extract(epoch FROM (p_verified_at-(clock_timestamp() AT TIME ZONE 'UTC'))))>300 THEN
+    RETURN QUERY SELECT false,NULL::text,NULL::text,NULL::text; RETURN;
+  END IF;
+  PERFORM set_config('app.b01_preauth_operation','activation-verify',true),
+    set_config('app.b01_preauth_token_id',p_challenge_id,true);
+  SELECT c.id,c."userId",c."inviteId",c.email,c.purpose,c."codeVerifier",c."expiresAt",c."attemptCount",c."maxAttempts",c."consumedAt",c."supersededAt"
+    INTO challenge_row FROM public."InviteActivationChallenge" c WHERE c.id=p_challenge_id;
+  IF NOT FOUND THEN RETURN QUERY SELECT false,NULL::text,NULL::text,NULL::text; RETURN; END IF;
+  PERFORM set_config('app.b01_preauth_user_id',challenge_row."userId",true),
+    set_config('app.b01_preauth_invite_id',challenge_row."inviteId",true);
+  SELECT u.id,u.email,u.role,u."orgId",u."licenseeId",u.status,u."isActive",u."emailVerifiedAt",u."passwordHash",u."disabledAt",u."deletedAt"
+    INTO actor_row FROM public."User" u WHERE u.id=challenge_row."userId" FOR UPDATE;
+  SELECT c.id,c."userId",c."inviteId",c.email,c.purpose,c."codeVerifier",c."expiresAt",c."attemptCount",c."maxAttempts",c."consumedAt",c."supersededAt"
+    INTO challenge_row FROM public."InviteActivationChallenge" c WHERE c.id=p_challenge_id FOR UPDATE;
+  SELECT i.id,i.email,i.role,i."orgId",i."licenseeId",i."manufacturerId",i."usedAt",i."acceptedByUserId"
+    INTO invite_row FROM public."Invite" i WHERE i.id=challenge_row."inviteId";
+  PERFORM set_config('app.b01_preauth_org_id',coalesce(invite_row."orgId",''),true),
+    set_config('app.b01_preauth_licensee_id',coalesce(invite_row."licenseeId",''),true);
+  IF actor_row.id IS NULL OR invite_row.id IS NULL OR challenge_row.purpose<>'INVITE_ACTIVATION'
+     OR challenge_row."consumedAt" IS NOT NULL OR challenge_row."supersededAt" IS NOT NULL
+     OR challenge_row."expiresAt"<=p_verified_at OR challenge_row."attemptCount">=5 OR challenge_row."maxAttempts"<>5
+     OR actor_row.status<>'INVITED'::public."UserStatus" OR NOT actor_row."isActive" OR actor_row."emailVerifiedAt" IS NOT NULL
+     OR actor_row."passwordHash" IS NULL OR actor_row."disabledAt" IS NOT NULL OR actor_row."deletedAt" IS NOT NULL
+     OR challenge_row.email<>actor_row.email OR invite_row.email<>actor_row.email
+     OR invite_row."acceptedByUserId" IS DISTINCT FROM actor_row.id OR invite_row."usedAt" IS NULL
+     OR (CASE WHEN actor_row.role::text IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
+          THEN actor_row."orgId" IS NOT NULL OR actor_row."licenseeId" IS NOT NULL
+          ELSE invite_row."orgId" IS DISTINCT FROM actor_row."orgId" OR invite_row."licenseeId" IS DISTINCT FROM actor_row."licenseeId" END)
+     OR NOT EXISTS (SELECT 1 FROM public."Organization" o WHERE o.id=invite_row."orgId" AND o."isActive")
+     OR (invite_row."licenseeId" IS NOT NULL AND NOT EXISTS (SELECT 1 FROM public."Licensee" l
+          WHERE l.id=invite_row."licenseeId" AND l."orgId"=invite_row."orgId" AND l."isActive" AND l."suspendedAt" IS NULL))
+     OR (CASE WHEN actor_row.role::text IN ('LICENSEE_ADMIN','ORG_ADMIN') THEN 'LICENSEE_ADMIN' WHEN actor_row.role::text IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') THEN 'MANUFACTURER' ELSE actor_row.role::text END)
+        IS DISTINCT FROM (CASE WHEN invite_row.role::text IN ('LICENSEE_ADMIN','ORG_ADMIN') THEN 'LICENSEE_ADMIN' WHEN invite_row.role::text IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') THEN 'MANUFACTURER' ELSE invite_row.role::text END)
+     OR (invite_row."manufacturerId" IS NOT NULL AND invite_row."manufacturerId" IS DISTINCT FROM actor_row.id) THEN
+    RETURN QUERY SELECT false,NULL::text,NULL::text,NULL::text; RETURN;
+  END IF;
+  IF challenge_row."codeVerifier"<>ALL(p_verifier_candidates) THEN
+    UPDATE public."InviteActivationChallenge" c SET "attemptCount"=c."attemptCount"+1 WHERE c.id=p_challenge_id;
+    RETURN QUERY SELECT false,NULL::text,NULL::text,NULL::text; RETURN;
+  END IF;
+  UPDATE public."InviteActivationChallenge" c SET "consumedAt"=p_verified_at WHERE c.id=p_challenge_id;
+  UPDATE public."User" u SET status='ACTIVE'::public."UserStatus","emailVerifiedAt"=p_verified_at,"updatedAt"=p_verified_at WHERE u.id=actor_row.id;
+  PERFORM set_config('app.b01_preauth_org_id',coalesce(actor_row."orgId",''),true),
+    set_config('app.b01_preauth_licensee_id',coalesce(actor_row."licenseeId",''),true);
+  PERFORM app_auth.b01_preauth_audit('AUTH_INVITE_ACTIVATED','Invite',invite_row.id,p_verified_at,'{}'::jsonb);
+  RETURN QUERY SELECT true,actor_row.id,actor_row.email,actor_row.role::text;
+END
+$fn$;
+
+DROP FUNCTION IF EXISTS app_auth.resend_invite_activation(text,text,text,timestamp without time zone,timestamp without time zone);
+CREATE OR REPLACE FUNCTION app_auth.resend_invite_activation(
+  p_challenge_id text,p_new_challenge_id text,p_code_verifier text,p_requested_at timestamp without time zone,p_expires_at timestamp without time zone
+) RETURNS TABLE("challengeId" text,"email" text,"userId" text,"inviteId" text,"orgId" text,"licenseeId" text,"expiresAt" timestamp without time zone)
+LANGUAGE plpgsql VOLATILE PARALLEL UNSAFE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE challenge_row record; actor_row record; invite_row record;
+BEGIN
+  IF p_challenge_id IS NULL OR p_challenge_id !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+     OR p_new_challenge_id IS NULL OR p_new_challenge_id !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+     OR p_code_verifier IS NULL OR p_code_verifier !~ '^[0-9a-f]{12}:[0-9a-f]{64}$'
+     OR p_requested_at IS NULL OR abs(extract(epoch FROM (p_requested_at-(clock_timestamp() AT TIME ZONE 'UTC'))))>300
+     OR p_expires_at IS NULL THEN RETURN; END IF;
+  PERFORM set_config('app.b01_preauth_operation','activation-resend',true),
+    set_config('app.b01_preauth_token_id',p_challenge_id,true),
+    set_config('app.b01_preauth_new_challenge_id',p_new_challenge_id,true);
+  SELECT c.id,c."userId",c."inviteId",c.email,c."createdAt",c."expiresAt",c."consumedAt",c."supersededAt",c.purpose
+    INTO challenge_row FROM public."InviteActivationChallenge" c WHERE c.id=p_challenge_id;
+  IF NOT FOUND THEN RETURN; END IF;
+  PERFORM set_config('app.b01_preauth_user_id',challenge_row."userId",true),
+    set_config('app.b01_preauth_invite_id',challenge_row."inviteId",true);
+  SELECT u.id,u.email,u.role,u."orgId",u."licenseeId",u.status,u."isActive",u."passwordHash",u."emailVerifiedAt",u."disabledAt",u."deletedAt"
+    INTO actor_row FROM public."User" u WHERE u.id=challenge_row."userId" FOR UPDATE;
+  SELECT c.id,c."userId",c."inviteId",c.email,c."createdAt",c."expiresAt",c."consumedAt",c."supersededAt",c.purpose
+    INTO challenge_row FROM public."InviteActivationChallenge" c WHERE c.id=p_challenge_id FOR UPDATE;
+  SELECT i.id,i.email,i.role,i."orgId",i."licenseeId",i."manufacturerId",i."usedAt",i."acceptedByUserId",i."expiresAt"
+    INTO invite_row FROM public."Invite" i WHERE i.id=challenge_row."inviteId";
+  PERFORM set_config('app.b01_preauth_org_id',coalesce(invite_row."orgId",''),true),
+    set_config('app.b01_preauth_licensee_id',coalesce(invite_row."licenseeId",''),true);
+  IF actor_row.id IS NULL OR invite_row.id IS NULL OR challenge_row.purpose<>'INVITE_ACTIVATION'
+     OR challenge_row."consumedAt" IS NOT NULL OR challenge_row."supersededAt" IS NOT NULL
+     OR challenge_row."createdAt"+interval '60 seconds'>p_requested_at
+     OR challenge_row."expiresAt"<=p_requested_at OR p_expires_at IS DISTINCT FROM challenge_row."expiresAt"
+     OR actor_row.status<>'INVITED'::public."UserStatus" OR NOT actor_row."isActive"
+     OR actor_row."passwordHash" IS NULL OR actor_row."emailVerifiedAt" IS NOT NULL
+     OR actor_row."disabledAt" IS NOT NULL OR actor_row."deletedAt" IS NOT NULL
+     OR actor_row.email<>challenge_row.email OR actor_row.email<>invite_row.email
+     OR invite_row."usedAt" IS NULL
+     OR invite_row."acceptedByUserId" IS DISTINCT FROM actor_row.id
+     OR (CASE WHEN actor_row.role::text IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
+          THEN actor_row."orgId" IS NOT NULL OR actor_row."licenseeId" IS NOT NULL
+          ELSE invite_row."orgId" IS DISTINCT FROM actor_row."orgId" OR invite_row."licenseeId" IS DISTINCT FROM actor_row."licenseeId" END)
+     OR (CASE WHEN actor_row.role::text IN ('LICENSEE_ADMIN','ORG_ADMIN') THEN 'LICENSEE_ADMIN' WHEN actor_row.role::text IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') THEN 'MANUFACTURER' ELSE actor_row.role::text END)
+        IS DISTINCT FROM (CASE WHEN invite_row.role::text IN ('LICENSEE_ADMIN','ORG_ADMIN') THEN 'LICENSEE_ADMIN' WHEN invite_row.role::text IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') THEN 'MANUFACTURER' ELSE invite_row.role::text END)
+     OR (invite_row."manufacturerId" IS NOT NULL AND invite_row."manufacturerId" IS DISTINCT FROM actor_row.id)
+     OR NOT EXISTS (SELECT 1 FROM public."Organization" o WHERE o.id=invite_row."orgId" AND o."isActive")
+     OR (invite_row."licenseeId" IS NOT NULL AND NOT EXISTS (SELECT 1 FROM public."Licensee" l
+          WHERE l.id=invite_row."licenseeId" AND l."orgId"=invite_row."orgId" AND l."isActive" AND l."suspendedAt" IS NULL)) THEN RETURN; END IF;
+  UPDATE public."InviteActivationChallenge" c SET "supersededAt"=p_requested_at WHERE c.id=p_challenge_id;
+  PERFORM set_config('app.b01_preauth_email',invite_row.email,true);
+  INSERT INTO public."InviteActivationChallenge" (id,"userId","inviteId",email,purpose,"codeVerifier","expiresAt","attemptCount","maxAttempts","createdAt")
+    VALUES (p_new_challenge_id,actor_row.id,invite_row.id,invite_row.email,'INVITE_ACTIVATION',p_code_verifier,p_expires_at,0,5,p_requested_at);
+  RETURN QUERY SELECT p_new_challenge_id,invite_row.email,actor_row.id,invite_row.id,invite_row."orgId",invite_row."licenseeId",p_expires_at;
 END
 $fn$;
 
@@ -311,14 +464,15 @@ BEGIN
           set_config('app.b01_preauth_pending_email',coalesce(token_row."pendingEmail",''),true);
   SELECT u.id,u.email,u."pendingEmail",u."orgId",u."licenseeId",u.status,u."isActive",u."disabledAt",u."deletedAt",u."emailVerifiedAt"
     INTO actor_row FROM public."User" u WHERE u.id=token_row."userId" FOR UPDATE;
-  IF NOT FOUND OR NOT actor_row."isActive" OR actor_row.status='DISABLED'::public."UserStatus" OR actor_row."disabledAt" IS NOT NULL OR actor_row."deletedAt" IS NOT NULL THEN RETURN; END IF;
+  IF NOT FOUND OR NOT actor_row."isActive" OR actor_row.status<>'ACTIVE'::public."UserStatus"
+     OR actor_row."disabledAt" IS NOT NULL OR actor_row."deletedAt" IS NOT NULL THEN RETURN; END IF;
   SELECT e.id,e."userId",e.email,e."pendingEmail",e.purpose,e."tokenHash",e."expiresAt",e."usedAt"
     INTO token_row FROM public."EmailVerificationToken" e WHERE e.id=candidate_ids[1];
   IF NOT FOUND OR token_row."userId"<>actor_row.id OR token_row."usedAt" IS NOT NULL OR token_row."expiresAt"<=p_consumed_at
      OR token_row.purpose NOT IN ('EMAIL_CHANGE','EMAIL_VERIFICATION') THEN RETURN; END IF;
   PERFORM set_config('app.b01_preauth_org_id',coalesce(actor_row."orgId",''),true),set_config('app.b01_preauth_licensee_id',coalesce(actor_row."licenseeId",''),true);
   IF token_row.purpose='EMAIL_CHANGE' THEN
-    IF token_row."pendingEmail" IS NULL OR lower(token_row."pendingEmail")<>token_row."pendingEmail"
+    IF actor_row."emailVerifiedAt" IS NULL OR token_row."pendingEmail" IS NULL OR lower(token_row."pendingEmail")<>token_row."pendingEmail"
        OR actor_row."pendingEmail" IS DISTINCT FROM token_row."pendingEmail"
        OR EXISTS (SELECT 1 FROM public."User" u WHERE lower(u.email)=token_row."pendingEmail" AND u.id<>actor_row.id) THEN RETURN; END IF;
     UPDATE public."User" u SET email=token_row."pendingEmail","pendingEmail"=NULL,"pendingEmailRequestedAt"=NULL,
@@ -345,5 +499,8 @@ REVOKE ALL ON FUNCTION app_auth.record_password_failure(text,timestamp without t
 REVOKE ALL ON FUNCTION app_auth.request_password_reset(text,text,timestamp without time zone,timestamp without time zone,text,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_auth.consume_password_reset_token(text[],text,timestamp without time zone) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_auth.lookup_invitation_token(text[],timestamp without time zone) FROM PUBLIC;
-REVOKE ALL ON FUNCTION app_auth.consume_invitation_token(text[],text,text,timestamp without time zone,text,text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_auth.consume_invitation_token(text[],text,text,timestamp without time zone,text,text,text,text,text,timestamp without time zone) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_auth.lookup_invite_activation_challenge(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_auth.verify_invite_activation(text,text[],timestamp without time zone) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_auth.resend_invite_activation(text,text,text,timestamp without time zone,timestamp without time zone) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_auth.consume_email_verification_token(text[],timestamp without time zone) FROM PUBLIC;

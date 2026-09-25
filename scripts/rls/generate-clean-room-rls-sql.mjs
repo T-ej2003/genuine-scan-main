@@ -157,7 +157,10 @@ for (const profile of directProfiles) {
     const table = rule && tableById.get(rule.tableId);
     if (!rule || !table || !rule.supportingWorkflowIds?.includes(profile.workflowId)) throw new Error(`SQL profile ${profile.id} has invalid source rule ${ruleId}`);
     if (!rule.actorClasses.includes(profile.actorClass)) throw new Error(`SQL profile ${profile.id} broadens actors beyond ${ruleId}`);
-    if (rule.minimumAssuranceByActorClass?.[profile.actorClass] !== profile.minimumAssurance) throw new Error(`SQL profile ${profile.id} weakens assurance from ${ruleId}`);
+    const required = rule.minimumAssuranceByActorClass?.[profile.actorClass];
+    const preservedOrgMfa = profile.id === "sql-profile-audit-log-org-admin" && profile.actorClass === "licensee-admin"
+      && JSON.stringify(profile.roleValues) === JSON.stringify(["ORG_ADMIN"]) && required === "password-verified" && profile.minimumAssurance === "mfa-verified";
+    if (required !== profile.minimumAssurance && !preservedOrgMfa) throw new Error(`SQL profile ${profile.id} weakens assurance from ${ruleId}`);
     if (rule.status !== "architecture-resolved" || rule.requiresNamedFunction || rule.authorizationBoundary !== "ordinary-rls") throw new Error(`SQL profile ${profile.id} attempts direct access for a blocked rule`);
     const columns = [...new Set(rule.allowedColumns || [])].sort();
     if (rule.command !== "DELETE" && !columns.length) throw new Error(`SQL rule ${ruleId} has no approved columns`);
@@ -977,8 +980,8 @@ BEGIN
   THEN RAISE EXCEPTION 'dashboard access denied: missing verified request context'; END IF;
   IF selector IS NOT NULL AND selector !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
   THEN RAISE EXCEPTION 'dashboard access denied: invalid licensee selector'; END IF;
-  IF ((${platformRoles} OR ${manufacturerRoles}) AND app_rls.current_assurance() NOT IN ('mfa-verified','step-up-verified','dual-approved-break-glass'))
-     OR (${tenantAdminRoles} AND app_rls.current_assurance() NOT IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass'))
+  IF (${platformRoles} AND app_rls.current_assurance() NOT IN ('mfa-verified','step-up-verified','dual-approved-break-glass'))
+     OR ((${tenantAdminRoles} OR ${manufacturerRoles}) AND app_rls.current_assurance() NOT IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass'))
      OR NOT (${platformRoles} OR ${tenantAdminRoles} OR ${manufacturerRoles})
   THEN RAISE EXCEPTION 'dashboard access denied: actor role or assurance'; END IF;
 
@@ -1241,7 +1244,7 @@ BEGIN
 END
 $function$;`;
 
-const batchOperationalAssurance = `((${tenantAdminRoles} AND app_rls.current_assurance() IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass')) OR ((${manufacturerRoles} OR ${platformRoles}) AND app_rls.current_assurance() IN ('mfa-verified','step-up-verified','dual-approved-break-glass')))`;
+const batchOperationalAssurance = `(((${tenantAdminRoles} OR ${manufacturerRoles}) AND app_rls.current_assurance() IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass')) OR (${platformRoles} AND app_rls.current_assurance() IN ('mfa-verified','step-up-verified','dual-approved-break-glass')))`;
 const operationalSessionBinding = `(current_user=${lit(roleNames.authOwner)} AND app_rls.operational_read_session_valid())`;
 const batchOperationalBase = `(${operationalSessionBinding} AND app_rls.attributed_request() AND app_rls.current_purpose()='batch-operational-read' AND app_rls.current_request_id() ~ '^[A-Za-z0-9._:-]{1,128}$' AND ${batchOperationalAssurance})`;
 const batchOperationalLinkedLicensee = (licenseeExpression) => `EXISTS (
@@ -1785,8 +1788,8 @@ const batchRuleIdsFor = (table, command) => {
   return ids;
 };
 const dashboardPolicyBase = `(${operationalSessionBinding} AND app_rls.attributed_request() AND app_rls.current_purpose()='dashboard-snapshot-read' AND (
-  ((${platformRoles} OR ${manufacturerRoles}) AND app_rls.current_assurance() IN ('mfa-verified','step-up-verified','dual-approved-break-glass'))
-  OR (${tenantAdminRoles} AND app_rls.current_assurance() IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass'))
+  (${platformRoles} AND app_rls.current_assurance() IN ('mfa-verified','step-up-verified','dual-approved-break-glass'))
+  OR ((${tenantAdminRoles} OR ${manufacturerRoles}) AND app_rls.current_assurance() IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass'))
 ))`;
 const operationalScopeLoading = `${operationalSessionBinding} AND current_setting('app.operational_scope_loading',true)='1'`;
 const operationalLicenseeScope = (column) =>
@@ -2333,6 +2336,7 @@ const routineIdentityColumns = [{ name: "schema_name", type: "text" }, { name: "
 const expectedRoutineIdentitySelect = expectedRowsSelect(expectedRoutineIdentities, routineIdentityColumns);
 const policyInventory = [
   ...slices.map((slice) => ({
+    profileId: slice.profileId,
     tableId: slice.tableId,
     table: slice.table,
     policyName: slice.policyName,

@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router";
 import { AlertCircle, CheckCircle2, KeyRound, Loader2, ShieldCheck, UserPlus } from "lucide-react";
 
 import apiClient from "@/lib/api-client";
+import { useAuth } from "@/contexts/AuthContext";
 import { AuthShell } from "@/components/auth/AuthShell";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -14,6 +15,7 @@ import { Label } from "@/components/ui/label";
 export default function AcceptInvite() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
+  const { completeMfaSession } = useAuth();
 
   const token = useMemo(() => String(params.get("token") || "").trim(), [params]);
 
@@ -22,6 +24,10 @@ export default function AcceptInvite() {
   const [confirm, setConfirm] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
+  const [challengeId, setChallengeId] = useState<string | null>(null);
+  const [code, setCode] = useState("");
+  const [resendAt, setResendAt] = useState(0);
+  const [now, setNow] = useState(Date.now());
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<null | {
     email: string;
@@ -29,6 +35,8 @@ export default function AcceptInvite() {
     expiresAt: string;
     licenseeName: string | null;
     requiresConnector: boolean;
+    challengeId: string | null;
+    challengeCreatedAt: string | null;
   }>(null);
 
   const canSubmit = token && password.length >= 8 && password === confirm;
@@ -42,13 +50,25 @@ export default function AcceptInvite() {
 
     void apiClient.getInvitePreview(token).then((res) => {
       if (cancelled) return;
-      if (res.success && res.data) setPreview(res.data);
+      if (res.success && res.data) {
+        setPreview(res.data);
+        if (res.data.challengeId) {
+          setChallengeId(res.data.challengeId);
+          setResendAt(new Date(res.data.challengeCreatedAt || 0).getTime() + 60_000);
+        }
+      }
     });
 
     return () => {
       cancelled = true;
     };
   }, [token]);
+
+  useEffect(() => {
+    if (!challengeId) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [challengeId]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -71,16 +91,68 @@ export default function AcceptInvite() {
       const res = await apiClient.acceptInvite({
         token,
         password,
+        confirmPassword: confirm,
         name: name.trim() || undefined,
       });
       if (!res.success) {
         setError(res.error || "Invite acceptance failed");
         return;
       }
+      if (!res.data?.challengeId) throw new Error("Could not start email verification.");
+      setChallengeId(res.data.challengeId);
+      setResendAt(Date.now() + 60_000);
+      setPassword("");
+      setConfirm("");
+      if (!res.data.delivered) setError("Your account is pending. Email delivery may be delayed; you can resend a code shortly.");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Invite acceptance failed");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const verifyCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!challengeId || !/^\d{6}$/.test(code)) return;
+    setError(null);
+    setSubmitting(true);
+    try {
+      const res = await apiClient.verifyInviteActivation(challengeId, code);
+      if (!res.success || !res.data) {
+        setError(res.error || "The code could not be verified. Try again or request a new code.");
+        return;
+      }
+      if (res.data.loginRequired) {
+        navigate("/login", { replace: true });
+        return;
+      }
+      if (!res.data.user || res.data.auth?.sessionStage !== "ACTIVE") throw new Error("Your account is active. Please sign in to continue.");
+      completeMfaSession({ user: res.data.user, auth: res.data.auth });
       setDone(true);
-      window.setTimeout(() => navigate("/dashboard"), 800);
-    } catch (err: any) {
-      setError(err?.message || "Invite acceptance failed");
+      navigate("/dashboard", { replace: true });
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Could not verify the code. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const resendCode = async () => {
+    if (!challengeId || now < resendAt) return;
+    setError(null);
+    setSubmitting(true);
+    try {
+      const res = await apiClient.resendInviteActivation(challengeId);
+      if (!res.success || !res.data?.challengeId) {
+        setError(res.error || "Please wait before requesting another code.");
+        return;
+      }
+      setChallengeId(res.data.challengeId);
+      setCode("");
+      setResendAt(Date.now() + 60_000);
+      if (!res.data.delivered) setError("Email delivery may be delayed. Please try again shortly.");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Could not resend the code.");
     } finally {
       setSubmitting(false);
     }
@@ -89,7 +161,7 @@ export default function AcceptInvite() {
   return (
     <AuthShell
       title="Activate your account"
-      description="Set your password to finish onboarding. This secure link works once and expires after 24 hours."
+      description={challengeId ? "Enter the code sent to your registered email to finish activation." : "Set your password, then verify your registered email to finish activation."}
       sideTitle="Secure activation for invited MSCQR users"
       sideDescription="Finish account setup here, then continue in MSCQR with the tools and visibility appropriate for your role. Manufacturer users can also open the connector download page from here before their first print run."
     >
@@ -149,6 +221,25 @@ export default function AcceptInvite() {
           </Alert>
         ) : null}
 
+        {challengeId && !done ? (
+          <form onSubmit={verifyCode} className="space-y-4">
+            <p className="text-sm text-muted-foreground">We've sent a 6-digit verification code to your registered email.</p>
+            <div className="space-y-2">
+              <Label htmlFor="activation-code">Verification code</Label>
+              <Input id="activation-code" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6}
+                value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))} disabled={submitting} required />
+            </div>
+            <Button type="submit" className="w-full" disabled={submitting || code.length !== 6}>
+              {submitting ? "Verifying…" : "Verify & Continue"}
+            </Button>
+            <div className="text-sm text-muted-foreground">
+              Didn't receive it?{" "}
+              <Button type="button" variant="link" className="p-0" onClick={resendCode} disabled={submitting || now < resendAt}>
+                {now < resendAt ? `Resend in ${Math.ceil((resendAt - now) / 1000)}s` : "Resend code"}
+              </Button>
+            </div>
+          </form>
+        ) : !done ? (
         <form onSubmit={submit} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="name">Name (optional)</Label>
@@ -203,12 +294,12 @@ export default function AcceptInvite() {
             {submitting ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Activating...
+                Continuing...
               </>
             ) : done ? (
               "Activated"
             ) : (
-              "Activate account"
+              "Continue"
             )}
           </Button>
 
@@ -223,6 +314,7 @@ export default function AcceptInvite() {
             ) : null}
           </div>
         </form>
+        ) : null}
       </div>
     </AuthShell>
   );
