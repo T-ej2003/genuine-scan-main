@@ -40,6 +40,39 @@ export const EVIDENCE_READER_EXPANSION_CHANGES = Object.freeze([...EVIDENCE_READ
 const SHA256 = /^[a-f0-9]{64}$/;
 const SHA40 = /^[a-f0-9]{40}$/;
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
+// Reject JSON decimals whose exact value JSON.parse would round before canonical hashing.
+const JSON_NUMBER = /-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/y;
+const normalizedDecimal = (lexeme) => {
+  const [, sign, integer, fraction = "", exponent = "0"] = /^(-?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/.exec(lexeme);
+  let digits = `${integer}${fraction}`.replace(/^0+/, "");
+  if (!digits) return "0";
+  let power = BigInt(exponent) - BigInt(fraction.length);
+  const significantDigits = digits.replace(/0+$/, "");
+  power += BigInt(digits.length - significantDigits.length);
+  return `${sign}${significantDigits}e${power}`;
+};
+const assertLosslessJsonNumbers = (text) => {
+  for (let index = 0; index < text.length;) {
+    if (text[index] === '"') {
+      for (index += 1; index < text.length;) {
+        if (text[index] === "\\") index += 2;
+        else if (text[index++] === '"') break;
+      }
+      continue;
+    }
+    if (text[index] === "-" || text[index] >= "0" && text[index] <= "9") {
+      JSON_NUMBER.lastIndex = index;
+      const match = JSON_NUMBER.exec(text);
+      if (match) {
+        const number = Number(match[0]);
+        if (!Number.isFinite(number) || normalizedDecimal(match[0]) !== normalizedDecimal(String(number))) throw new Error("Terraform state contains a JSON number that cannot be represented losslessly.");
+        index = JSON_NUMBER.lastIndex;
+        continue;
+      }
+    }
+    index += 1;
+  }
+};
 const read = (file) => fs.readFileSync(file);
 const sourceRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
 const sourceFile = (relative) => path.join(sourceRoot, relative);
@@ -358,10 +391,14 @@ export function assertInstallationPlan(plan, { livePredecessor } = {}) {
 }
 
 export function stateIdentity(rawBytes) {
-  if (rawBytes === undefined || rawBytes === null || rawBytes.length === 0) return Object.freeze({ stateExists: false });
+  if (rawBytes === undefined || rawBytes === null) return Object.freeze({ stateExists: false });
   const bytes = Buffer.isBuffer(rawBytes) ? rawBytes : Buffer.from(rawBytes);
+  if (!bytes.length) throw new Error("Terraform state is empty.");
+  let text;
+  try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); } catch { throw new Error("Terraform state is not valid UTF-8 JSON."); }
+  assertLosslessJsonNumbers(text);
   let state;
-  try { state = JSON.parse(bytes.toString("utf8")); } catch { throw new Error("Terraform state is not valid UTF-8 JSON."); }
+  try { state = JSON.parse(text); } catch { throw new Error("Terraform state is not valid UTF-8 JSON."); }
   // Terraform emits this exact empty state when the remote backend has no state object.
   if (state && typeof state === "object" && !Array.isArray(state)
     && canonicalJson(state) === canonicalJson({ version: 4, terraform_version: INSTALLATION.terraformVersion, serial: 0, lineage: "", outputs: {}, resources: [], check_results: null })) return Object.freeze({ stateExists: false });

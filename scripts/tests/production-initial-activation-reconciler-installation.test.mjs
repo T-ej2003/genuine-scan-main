@@ -488,8 +488,32 @@ test("state identity ignores JSON formatting only and hashes the complete parsed
   assert.notEqual(identity(JSON.stringify({ ...original, resources: [...original.resources].reverse() })).stateSha256, baseline.stateSha256, "array order remains significant");
   assert.deepEqual(stateIdentity(undefined), { stateExists: false });
   assert.deepEqual(stateIdentity(Buffer.from(emptyTerraformState)), { stateExists: false });
-  assert.deepEqual(identity(""), { stateExists: false });
-  for (const malformed of ["{", "not-json", "null", "[]", "\"state\""]) assert.throws(() => identity(malformed), /state identity|valid UTF-8 JSON/);
+  for (const malformed of ["", "{", "not-json", "null", "[]", "\"state\""]) assert.throws(() => identity(malformed), /state identity|valid UTF-8 JSON|empty/);
+  assert.throws(() => stateIdentity(Buffer.from([0x7b, 0x22, 0x78, 0x22, 0x3a, 0x22, 0xff, 0x22, 0x7d])), /valid UTF-8 JSON/);
+});
+
+test("state identity rejects lossy JSON numbers at every nesting depth", () => {
+  const original = JSON.parse(installedState);
+  original.resources[0].instances[0].attributes = { nested: [{ value: "NUMBER_SENTINEL" }] };
+  original.outputs = { nested: { value: "NUMBER_SENTINEL", type: "number", sensitive: false } };
+  original.outputs.text = { value: 'numbers "9007199254740993" and escaped quote \\" 0.10000000000000001', type: "string", sensitive: false };
+  const stateWith = (number) => JSON.stringify(original).replaceAll('"NUMBER_SENTINEL"', number);
+  const identity = (number) => stateIdentity(Buffer.from(stateWith(number)));
+  for (const number of ["0", "-0", "1", "-1", String(Number.MAX_SAFE_INTEGER), String(Number.MIN_SAFE_INTEGER), "9007199254740992", "0.1", "-0.125", "1e3", "1e308", "1e-300", "5e-324"]) assert.doesNotThrow(() => identity(number), number);
+  for (const [left, right] of [["0", "-0"], ["1", "1.0"], ["1e3", "1000"]]) assert.deepEqual(identity(left), identity(right));
+
+  assert.throws(() => identity("9007199254740993"), /cannot be represented losslessly/);
+  assert.throws(() => identity("-9007199254740993"), /cannot be represented losslessly/);
+  assert.throws(() => identity("0.10000000000000001"), /cannot be represented losslessly/);
+  assert.throws(() => identity("-0.10000000000000001"), /cannot be represented losslessly/);
+  assert.throws(() => identity("1.0000000000000001"), /cannot be represented losslessly/);
+  assert.throws(() => identity("1e309"), /cannot be represented losslessly/);
+  assert.throws(() => identity("1e-324"), /cannot be represented losslessly/);
+  assert.throws(() => identity("4e-324"), /cannot be represented losslessly/);
+
+  const unsafeA = identity("9007199254740992");
+  assert.throws(() => identity("9007199254740993"), /cannot be represented losslessly/);
+  assert.notEqual(unsafeA.stateSha256, stateIdentity(Buffer.from(stateWith('"9007199254740993"'))).stateSha256, "numeric-looking strings remain strings and cannot alias unsafe numbers");
 });
 
 test("preparation and installer accept state-pull newline but reject meaningful state drift", () => {
