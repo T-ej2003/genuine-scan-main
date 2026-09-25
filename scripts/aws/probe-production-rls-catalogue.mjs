@@ -61,7 +61,7 @@ export function buildProductionRlsProbeCommand(requirements, identity, { securit
   const input = { requirementsSha256: requirements.requirementsSha256, identity, securityTransportPublicKey };
   const functions = [collectAppOnlyDatabaseCatalogueRows, collectAppOnlyDatabaseCatalogue, appOnlyRequirementIdentity, hashProductionRlsCatalogue].map((fn) => fn.toString()).join("\n");
   const transport = securityTransportPublicKey ? `const {gzipSync}=require("node:zlib"),CHUNK_BYTES=${128 * 1024},MAX_CHUNKS=64,sha256=v=>crypto.createHash("sha256").update(v).digest("hex");const encryptSecurityCatalogueTransport=${encryptSecurityCatalogueTransport.toString()};` : "";
-  const command = `"use strict";const assert=require("node:assert/strict"),crypto=require("node:crypto");const {PrismaClient}=require("@prisma/client");const canonicalJson=${canonicalJson.toString()};const canonicalSha256=v=>crypto.createHash("sha256").update(canonicalJson(v)).digest("hex");const collections=${JSON.stringify(collections)};${transport}${functions};const input=${JSON.stringify(input)};(async()=>{const url=new URL(process.env.RLS_CANARY_DATABASE_URL||"");assert.equal(url.username,"mscqr_prod_rls_canary_read");assert.equal(url.hostname,input.identity.databaseHostname);assert.equal(url.pathname,"/mscqr_production_rls_green_phase2");assert.equal(url.searchParams.size,2);assert.equal(url.searchParams.get("sslmode"),"require");assert.equal(url.searchParams.get("application_name"),"mscqr-production-green-read-only-rls-canary");assert.equal(url.hash,"");const client=new PrismaClient({datasources:{db:{url:url.toString()}}});try{const catalogue=await collectAppOnlyDatabaseCatalogue(client);if(input.securityTransportPublicKey)for(const chunk of encryptSecurityCatalogueTransport(catalogue,input.securityTransportPublicKey,{sourceSha:input.identity.sourceSha,requirementsSha256:input.requirementsSha256}))console.log(chunk);const body={schemaVersion:1,kind:"PRODUCTION_RLS_CATALOGUE_PROBE",sourceSha:input.identity.sourceSha,requirementsSha256:input.requirementsSha256,databaseRole:catalogue.identity.role,catalogue:hashProductionRlsCatalogue(catalogue)};const output=JSON.stringify({...body,evidenceSha256:canonicalSha256(body)});assert.ok(Buffer.byteLength(output)<=196608);console.log(output);}finally{await client.$disconnect();}})().catch(()=>{console.error(JSON.stringify({status:"PRODUCTION_RLS_CATALOGUE_PROBE_FAILED"}));process.exitCode=1;});`;
+  const command = `"use strict";const assert=require("node:assert/strict"),crypto=require("node:crypto");const {PrismaClient}=require("@prisma/client");const canonicalJson=${canonicalJson.toString()};const canonicalSha256=v=>crypto.createHash("sha256").update(canonicalJson(v)).digest("hex");const collections=${JSON.stringify(collections)};${transport}${functions};const input=${JSON.stringify(input)};(async()=>{const url=new URL(process.env.RLS_CANARY_DATABASE_URL||"");assert.equal(url.username,"mscqr_prod_rls_canary_read");assert.equal(url.hostname,input.identity.databaseHostname);assert.equal(url.pathname,"/mscqr_production_rls_green_phase2");assert.equal(url.searchParams.size,2);assert.equal(url.searchParams.get("sslmode"),"require");assert.equal(url.searchParams.get("application_name"),"mscqr-production-green-read-only-rls-canary");assert.equal(url.hash,"");const client=new PrismaClient({datasources:{db:{url:url.toString()}}});try{const catalogue=await collectAppOnlyDatabaseCatalogue(client);let securityTransport=null;if(input.securityTransportPublicKey){const chunks=encryptSecurityCatalogueTransport(catalogue,input.securityTransportPublicKey,{sourceSha:input.identity.sourceSha,requirementsSha256:input.requirementsSha256}),first=JSON.parse(chunks[0]);securityTransport={transportSha256:first.transportSha256,count:first.count};for(const chunk of chunks)console.log(chunk);}const body={schemaVersion:1,kind:"PRODUCTION_RLS_CATALOGUE_PROBE",sourceSha:input.identity.sourceSha,requirementsSha256:input.requirementsSha256,databaseRole:catalogue.identity.role,catalogue:hashProductionRlsCatalogue(catalogue),...(securityTransport?{securityTransport}:{})};const output=JSON.stringify({...body,evidenceSha256:canonicalSha256(body)});assert.ok(Buffer.byteLength(output)<=196608);console.log(output);}finally{await client.$disconnect();}})().catch(()=>{console.error(JSON.stringify({status:"PRODUCTION_RLS_CATALOGUE_PROBE_FAILED"}));process.exitCode=1;});`;
   assert.ok(Buffer.byteLength(command) <= 48000, "RLS catalogue probe command exceeds task-definition budget");
   return ["-e", command];
 }
@@ -82,10 +82,10 @@ export function buildProductionRlsProbeDefinition({ baseDefinition, requirements
   return template;
 }
 
-export function authenticateProductionRlsProbeResult(message, { sourceSha, requirementsSha256 }) {
+export function authenticateProductionRlsProbeResult(message, { sourceSha, requirementsSha256, securityTransportExpected = false }) {
   assert.ok(typeof message === "string" && Buffer.byteLength(message) <= 196608, "RLS probe result is oversized");
   const result = JSON.parse(message), { evidenceSha256, ...body } = result;
-  assert.deepEqual(Object.keys(result).sort(), ["catalogue", "databaseRole", "evidenceSha256", "kind", "requirementsSha256", "schemaVersion", "sourceSha"]);
+  assert.deepEqual(Object.keys(result).sort(), ["catalogue", "databaseRole", "evidenceSha256", "kind", "requirementsSha256", "schemaVersion", "sourceSha", ...(securityTransportExpected ? ["securityTransport"] : [])].sort());
   assert.equal(evidenceSha256, canonicalSha256(body)); assert.equal(body.schemaVersion, 1); assert.equal(body.kind, "PRODUCTION_RLS_CATALOGUE_PROBE");
   assert.equal(body.sourceSha, sourceSha); assert.equal(body.requirementsSha256, requirementsSha256); assert.equal(body.databaseRole, APP_ONLY_VERIFIER.databaseRole);
   assert.deepEqual(Object.keys(body.catalogue || {}).sort(), [...collections].sort());
@@ -93,6 +93,7 @@ export function authenticateProductionRlsProbeResult(message, { sourceSha, requi
     assert.ok(Array.isArray(rows) && rows.length <= 2000);
     for (const row of rows) { assert.deepEqual(Object.keys(row).sort(), ["identity", "sha256"]); assert.match(row.identity || "", /^.{1,4096}$/s); assert.match(row.sha256 || "", /^[a-f0-9]{64}$/); }
   }
+  if (securityTransportExpected) { assert.deepEqual(Object.keys(body.securityTransport || {}).sort(), ["count","transportSha256"]); assert.ok(Number.isInteger(body.securityTransport.count) && body.securityTransport.count > 0 && body.securityTransport.count <= 64); assert.match(body.securityTransport.transportSha256 || "", /^[a-f0-9]{64}$/); }
   return result;
 }
 
@@ -135,6 +136,27 @@ export function collectCompleteRlsProbeLogEvents(pages, { maxPages = 100 } = {})
   return events.map(({ message }) => { assert.ok(typeof message === "string" && Buffer.byteLength(message) <= 256 * 1024); return message; });
 }
 
+export function authenticateCompleteRlsProbeObservation(messages, { sourceSha, requirementsSha256, securityMode }) {
+  assert.ok(Array.isArray(messages)); const parsed = messages.map((message) => { try { return { message, value: JSON.parse(message) }; } catch { return { message, value: null }; } });
+  const terminals = parsed.filter(({ value }) => value?.kind === "PRODUCTION_RLS_CATALOGUE_PROBE"); if (terminals.length === 0) return null; assert.equal(terminals.length, 1, "Ambiguous RLS probe terminal evidence");
+  const evidence = authenticateProductionRlsProbeResult(terminals[0].message, { sourceSha, requirementsSha256, securityTransportExpected: securityMode });
+  if (!securityMode) return Object.freeze({ evidence, chunks: Object.freeze([]) });
+  const chunks = parsed.filter(({ value }) => value?.kind === "PRODUCTION_SECURITY_CATALOGUE_CHUNK"); assert.ok(chunks.length <= evidence.securityTransport.count, "Duplicate or excess security catalogue chunks"); const indexes = new Set();
+  for (const { value } of chunks) { assert.deepEqual(Object.keys(value).sort(), ["count","data","index","kind","schemaVersion","transportSha256"].sort()); assert.equal(value.schemaVersion, 1); assert.equal(value.count, evidence.securityTransport.count); assert.equal(value.transportSha256, evidence.securityTransport.transportSha256); assert.ok(Number.isInteger(value.index) && value.index >= 0 && value.index < value.count); assert.ok(!indexes.has(value.index), "Duplicate security catalogue chunk"); indexes.add(value.index); }
+  if (chunks.length < evidence.securityTransport.count) return null; assert.deepEqual([...indexes].sort((a, b) => a - b), Array.from({ length: evidence.securityTransport.count }, (_, index) => index));
+  return Object.freeze({ evidence, chunks: Object.freeze(chunks.map(({ message }) => message)) });
+}
+
+export async function waitForCompleteRlsProbeObservation(readMessages, binding, { attempts = 12, wait = sleep } = {}) {
+  assert.equal(typeof readMessages, "function"); assert.ok(Number.isInteger(attempts) && attempts > 0 && attempts <= 12);
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const observation = authenticateCompleteRlsProbeObservation(await readMessages(), binding);
+    if (observation) return observation;
+    if (attempt + 1 < attempts) await wait(5000);
+  }
+  return null;
+}
+
 export async function runProductionRlsCatalogueProbe({ sourceSha, requirementsReference, awsProfile, securityRebaselineReference = null,
   securityRebaselineCanonicalOut = null, securityRebaselineLiveOut = null, run = (command, args, options) => execFileSync(command, args, options), githubRun = createProductionGithubCommandRunner(), wait = sleep, repositoryRoot = root, env = process.env }) {
   assertProtectedCheckout({ sourceSha, repositoryRoot });
@@ -174,11 +196,11 @@ export async function runProductionRlsCatalogueProbe({ sourceSha, requirementsRe
   assert.match(taskArn || "", /^arn:aws:ecs:eu-west-2:368992683803:task\/mscqr-prod-euw2-main\/[a-f0-9]{32}$/);
   for (let attempt = 0; attempt < 60; attempt++) { const response = aws(["ecs", "describe-tasks", "--region", APP_ONLY.region, "--cluster", APP_ONLY.cluster, "--tasks", taskArn]); assert.deepEqual(response.failures || [], []); task = response.tasks?.[0]; if (task?.lastStatus === "STOPPED") break; await wait(5000); }
   assert.equal(task?.lastStatus, "STOPPED", "RLS probe completion timeout; do not relaunch automatically"); assert.equal(task.taskArn, taskArn); assert.equal(task.clusterArn, APP_ONLY.clusterArn); assert.equal(task.taskDefinitionArn, taskDefinitionArn); assert.equal(task.launchType, "FARGATE"); assert.equal(task.enableExecuteCommand, false); assert.equal(task.containers?.length, 1); assert.equal(task.containers[0].name, "production-green-read-only-rls-canary"); assertSemanticallyEmptyRlsProbeOverrides(task.overrides, "production-green-read-only-rls-canary");
-  const stream = `prebaseline-rls/production-green-read-only-rls-canary/${taskArn.split("/").at(-1)}`; let messages;
-  for (let attempt = 0; attempt < 12 && !messages; attempt++) { const pages = []; let requestToken; for (let page = 0; page < 100; page++) { const args = ["logs", "get-log-events", "--region", APP_ONLY.region, "--log-group-name", APP_ONLY_VERIFIER.logGroup, "--log-stream-name", stream, "--start-from-head", "--limit", "10000"]; if (requestToken) args.push("--next-token", requestToken); const response = aws(args); pages.push({ ...response, requestToken }); if (response.nextForwardToken === requestToken) break; requestToken = response.nextForwardToken; } const collected = collectCompleteRlsProbeLogEvents(pages); if (collected.length) messages = collected; else await wait(5000); }
-  assert.ok(messages, "RLS probe evidence unavailable; do not relaunch automatically"); const evidenceMessages = messages.filter((message) => { try { return JSON.parse(message).kind === "PRODUCTION_RLS_CATALOGUE_PROBE"; } catch { return false; } }); assert.equal(evidenceMessages.length, 1); const evidence = authenticateProductionRlsProbeResult(evidenceMessages[0], { sourceSha, requirementsSha256: requirements.requirementsSha256 });
+  const stream = `prebaseline-rls/production-green-read-only-rls-canary/${taskArn.split("/").at(-1)}`;
+  const observation = await waitForCompleteRlsProbeObservation(() => { const pages = []; let requestToken; for (let page = 0; page < 100; page++) { const args = ["logs", "get-log-events", "--region", APP_ONLY.region, "--log-group-name", APP_ONLY_VERIFIER.logGroup, "--log-stream-name", stream, "--start-from-head", "--limit", "10000"]; if (requestToken) args.push("--next-token", requestToken); const response = aws(args); pages.push({ ...response, requestToken }); if (response.nextForwardToken === requestToken) break; requestToken = response.nextForwardToken; } return collectCompleteRlsProbeLogEvents(pages); }, { sourceSha, requirementsSha256: requirements.requirementsSha256, securityMode }, { attempts: 12, wait });
+  assert.ok(observation, "RLS probe evidence incomplete; do not relaunch automatically"); const { evidence } = observation;
   assert.equal(task.containers[0].exitCode, 0, "RLS probe task failed"); const result = classifyProductionRlsCatalogue(evidence.catalogue, requirements);
-  if (securityMode) { const chunks = messages.filter((message) => { try { return JSON.parse(message).kind === "PRODUCTION_SECURITY_CATALOGUE_CHUNK"; } catch { return false; } }); const binding = { sourceSha, requirementsSha256: requirements.requirementsSha256 }; const catalogue = decryptSecurityCatalogueTransport(chunks, transportKeys.privateKeyPem, binding); const liveInventory = createLiveSecurityRebaselineInventory({ protectedMainSha: sourceSha, catalogue, canonical: canonicalSecurity.inventory,
+  if (securityMode) { const binding = { sourceSha, requirementsSha256: requirements.requirementsSha256 }; const catalogue = decryptSecurityCatalogueTransport(observation.chunks, transportKeys.privateKeyPem, binding); const liveInventory = createLiveSecurityRebaselineInventory({ protectedMainSha: sourceSha, catalogue, canonical: canonicalSecurity.inventory,
       taskEvidence: { taskArn, taskDefinitionArn, containerName: task.containers[0].name, containerExitCode: task.containers[0].exitCode, requestSha256: canonicalSha256(request), verificationContractSha256: canonicalSha256(definition) } });
     writeStageBPrivateFileExclusive({ filePath: securityRebaselineLiveOut, bytes: Buffer.from(`${JSON.stringify(liveInventory)}\n`), repositoryRoot });
     return { status: "PRODUCTION_SECURITY_REBASELINE_INVENTORIED", sourceSha, taskDefinitionArn, taskArn, classification: result.classification, deltaObjectCount: result.deltaObjects.length, requirementsSha256: requirements.requirementsSha256, inventory: securityRebaselineLogSummary(liveInventory) }; }

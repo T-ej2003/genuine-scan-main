@@ -8,6 +8,8 @@ The protected-main producer builds the canonical package in disposable PostgreSQ
 
 The production task runs `REPEATABLE READ, READ ONLY`. Its complete catalogue is gzip-compressed and encrypted to an ephemeral local RSA public key before CloudWatch transport. The private key is never sent to AWS. Canonical, live, and diff files are created outside the checkout with mode `0600`; normal output contains only identities of the source/artifacts, collection/category counts, and digests.
 
+The shared security collector includes non-system, non-extension-owned routines in user schemas and relation kinds `r`, `p`, `v`, `m`, and `f`; sequences are collected separately. Indexes and TOAST relations have no separately managed application ACL boundary and are excluded. Operator inventory records direct memberships and the effective recursive role-membership closure, honoring both per-membership `INHERIT` and each role's `INHERIT` attribute. Unallowlisted role grants or memberships become hard-stop diff objects. The CloudWatch reader accepts the result only after its authenticated terminal record binds the complete encrypted chunk count and transport digest; incomplete ingestion times out without launching another task.
+
 Example operator shape (do not run without separate production authorization):
 
 ```sh

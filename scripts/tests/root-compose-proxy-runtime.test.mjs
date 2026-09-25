@@ -66,6 +66,17 @@ networks:
       fs.rmSync(directory, { recursive: true, force: true });
     }
   };
+  const waitForContainerExit = (compose, timeoutMs = 10_000) => {
+    const containerId = run([...compose, "ps", "-q", "frontend"]);
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const [status, exitCode] = run(["inspect", "--format", "{{.State.Status}} {{.State.ExitCode}}", containerId]).split(" ");
+      if (status === "exited") return Number(exitCode);
+      // Compose up returns before entrypoint validation necessarily finishes.
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+    }
+    return null;
+  };
   runFixture("valid", undefined, ({ compose, templates, project }) => {
     run([...compose, "up", "-d", "redis", "backend", "worker"]);
     const networkId = run(["network", "ls", "--filter", `name=${project}_app`, "--format", "{{.ID}}"]).split("\n")[0];
@@ -90,7 +101,9 @@ networks:
   });
   runFixture("malformed", (templates) => fs.appendFileSync(path.join(templates, "default.http.conf"), "\nproxy_set_header X-Forwarded-For unexpected;\n"), ({ compose }) => {
     run([...compose, "up", "-d", "frontend"]);
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);
+    const exitCode = waitForContainerExit(compose);
+    assert.notEqual(exitCode, null, "malformed proxy configuration must stop the frontend container");
+    assert.equal(exitCode, 1, "malformed proxy configuration must be rejected by the adapter");
     assert.equal(run([...compose, "ps", "--status", "running", "--services", "frontend"]), "");
   });
 });

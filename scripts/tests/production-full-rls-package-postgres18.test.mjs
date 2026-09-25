@@ -8,7 +8,7 @@ import test from "node:test";
 import { createRequire } from "node:module";
 import { collectAppOnlyDatabaseCatalogue, collectAppOnlyDatabaseCatalogueRows } from "../aws/production-app-only-database-verifier.mjs";
 import { createAppOnlyRequirements, assertAppOnlyRequirements, compareAppOnlyRequirements } from "../aws/production-app-only-requirements.mjs";
-import { createSecurityRebaselineInventory } from "../aws/production-security-rebaseline-inventory.mjs";
+import { createLiveSecurityRebaselineInventory, createSecurityRebaselineInventory, diffSecurityRebaselineInventories } from "../aws/production-security-rebaseline-inventory.mjs";
 import { writeStageBPrivateFileExclusive } from "../aws/stage-b-artifact-contract.mjs";
 import { APP_ONLY } from "../aws/production-app-only-contract.mjs";
 import { buildAppOnlyVerifierCommand, authenticateAppOnlyVerifierResult } from "../aws/production-app-only-verifier-command.mjs";
@@ -285,6 +285,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         policyCheck: changedFieldCount(rawCanary.policies, rawAdministrator.policies, "check"),
       };
       assert.ok(Object.values(rawDifferences).every((count) => count > 0));
+      psql(maintenanceUrl, ["-q", "-c", `ALTER ROLE "${administrator}" NOINHERIT; REVOKE pg_read_all_data FROM "${administrator}"`], "restore production administrator identity after privilege comparison");
       const [canaryCatalogue, administratorCatalogue] = await Promise.all([
         collectCatalogueRows(verifier), collectCatalogueRows(administratorClient),
       ]);
@@ -303,6 +304,61 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         packageChecksums: JSON.parse(fs.readFileSync(path.join(evidenceRoot, "checksums.json"), "utf8")) });
       securityRebaselineCanonical = createSecurityRebaselineInventory({ kind: "CANONICAL", protectedMainSha: sourceSha,
         catalogue, repositoryRoot: root, packageChecksums: JSON.parse(fs.readFileSync(path.join(evidenceRoot, "checksums.json"), "utf8")) });
+      const collectedSecurityDomains = new Set(securityRebaselineCanonical.objects.map(({ collection }) => collection));
+      for (const collection of ["routines","routineGrants","tables","tableGrants","columnGrants","policies","schemas","schemaGrants","roles","roleMetadata",
+        "roleMembers","databases","databaseGrants","defaultPrivileges","types","typeGrants","operatorCapabilities",
+        "operatorMemberships"]) assert.ok(collectedSecurityDomains.has(collection), `Real collector omitted ${collection}`);
+      assert.ok(catalogue.roles.every(({ memberships, members }) => Array.isArray(memberships) && Array.isArray(members)));
+      for (const collection of ["securityRoutines","securityTables","securityPolicies","securitySchemas","roleMetadata","databases","defaults","types","sequences","operatorCapabilities"]) assert.ok(Array.isArray(catalogue[collection]), `Real collector omitted ${collection}`);
+      assert.ok(catalogue.securityTables.every(({ kind }) => ["r","p","v","m","f"].includes(kind)));
+      assert.ok(catalogue.securityRoutines.every(({ schema }) => schema !== "information_schema" && !schema.startsWith("pg_")));
+      await assert.rejects(maintenanceClient.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe("CREATE VIEW public.rebaseline_unexpected_view AS SELECT 1 AS value");
+        await tx.$executeRawUnsafe('ALTER VIEW public.rebaseline_unexpected_view OWNER TO "mscqr_prod_admin"');
+        await tx.$executeRawUnsafe("CREATE FUNCTION public.rebaseline_unexpected() RETURNS integer LANGUAGE sql AS 'SELECT 1'");
+        await tx.$executeRawUnsafe('ALTER FUNCTION public.rebaseline_unexpected() OWNER TO "mscqr_prod_admin"');
+        await tx.$executeRawUnsafe("CREATE MATERIALIZED VIEW public.rebaseline_unexpected_materialized AS SELECT 1 AS value");
+        await tx.$executeRawUnsafe('ALTER MATERIALIZED VIEW public.rebaseline_unexpected_materialized OWNER TO "mscqr_prod_admin"');
+        await tx.$executeRawUnsafe("CREATE EXTENSION IF NOT EXISTS postgres_fdw");
+        await tx.$executeRawUnsafe("CREATE SERVER rebaseline_fixture_server FOREIGN DATA WRAPPER postgres_fdw OPTIONS (host '127.0.0.1', dbname 'postgres')");
+        await tx.$executeRawUnsafe("CREATE FOREIGN TABLE public.rebaseline_unexpected_foreign (id integer) SERVER rebaseline_fixture_server OPTIONS (schema_name 'public', table_name 'unused')");
+        await tx.$executeRawUnsafe("CREATE TYPE public.rebaseline_unexpected_enum AS ENUM ('one','two')");
+        await tx.$executeRawUnsafe("CREATE SEQUENCE public.rebaseline_unexpected_sequence");
+        const testCanonical = securityRebaselineCanonical;
+        await tx.$executeRawUnsafe("GRANT SELECT ON public.rebaseline_unexpected_view TO PUBLIC");
+        await tx.$executeRawUnsafe("CREATE ROLE rebaseline_intermediate_writer NOLOGIN");
+        await tx.$executeRawUnsafe("GRANT pg_write_all_data TO rebaseline_intermediate_writer");
+        await tx.$executeRawUnsafe('ALTER ROLE "mscqr_prod_admin" INHERIT');
+        await tx.$executeRawUnsafe('GRANT rebaseline_intermediate_writer TO "mscqr_prod_admin"');
+        await tx.$executeRawUnsafe('GRANT pg_write_all_data TO "mscqr_prod_admin"');
+        const changed = await collectAppOnlyDatabaseCatalogueRows(tx), taskDigest = "f".repeat(64);
+        assert.ok(changed.securityRoutines.some(({ schema, name }) => schema === "public" && name === "rebaseline_unexpected"));
+        assert.ok(changed.securityTables.some(({ schema, name, kind }) => schema === "public" && name === "rebaseline_unexpected_view" && kind === "v"));
+        assert.ok(changed.securityTables.some(({ schema, name, kind }) => schema === "public" && name === "rebaseline_unexpected_materialized" && kind === "m"));
+        assert.ok(changed.securityTables.some(({ schema, name, kind }) => schema === "public" && name === "rebaseline_unexpected_foreign" && kind === "f"));
+        assert.ok(changed.types.some(({ schema, name }) => schema === "public" && name === "rebaseline_unexpected_enum"));
+        assert.ok(changed.sequences.some(({ schema, name }) => schema === "public" && name === "rebaseline_unexpected_sequence"));
+        assert.ok(changed.operatorCapabilities[0].membership_closure.includes("pg_write_all_data"));
+        assert.ok(changed.operatorCapabilities[0].membership_closure.includes("rebaseline_intermediate_writer"));
+        const liveInventory = createLiveSecurityRebaselineInventory({ protectedMainSha: sourceSha, catalogue: changed, canonical: testCanonical,
+          taskEvidence: { taskArn: `arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/${"a".repeat(32)}`,
+            taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/security-rebaseline:1", containerName: "security-rebaseline",
+            containerExitCode: 0, requestSha256: taskDigest, verificationContractSha256: taskDigest } });
+        const diff = diffSecurityRebaselineInventories(liveInventory, testCanonical);
+        assert.equal(diff.safeToConstructConvergencePlan, false);
+        assert.ok(diff.differences.some(({ collection, identity }) => collection === "tableGrants" && identity.includes("public.rebaseline_unexpected_view")));
+        assert.ok(diff.differences.some(({ collection }) => collection === "operatorInheritedCapabilities"));
+        const sourceLive = createLiveSecurityRebaselineInventory({ protectedMainSha: sourceSha, catalogue: changed, canonical: securityRebaselineCanonical,
+          taskEvidence: liveInventory.taskEvidence }), sourceDiff = diffSecurityRebaselineInventories(sourceLive, securityRebaselineCanonical);
+        assert.equal(sourceDiff.safeToConstructConvergencePlan, false);
+        assert.ok(sourceDiff.differences.some(({ collection, identity, operation }) => collection === "tables" && identity === "public.rebaseline_unexpected_view" && operation === "UNEXPECTED_OBJECT"));
+        assert.ok(sourceDiff.differences.some(({ collection, identity, operation }) => collection === "tables" && identity === "public.rebaseline_unexpected_materialized" && operation === "UNEXPECTED_OBJECT"));
+        assert.ok(sourceDiff.differences.some(({ collection, identity, operation }) => collection === "tables" && identity === "public.rebaseline_unexpected_foreign" && operation === "UNEXPECTED_OBJECT"));
+        assert.ok(sourceDiff.differences.some(({ collection, identity, operation }) => collection === "types" && identity === "public.rebaseline_unexpected_enum" && operation === "UNEXPECTED_OBJECT"));
+        assert.ok(sourceDiff.differences.some(({ collection, identity, operation }) => collection === "sequences" && identity === "public.rebaseline_unexpected_sequence" && operation === "UNEXPECTED_OBJECT"));
+        assert.ok(sourceDiff.differences.some(({ collection, identity, operation }) => collection === "routines" && identity.startsWith("public.rebaseline_unexpected(") && operation === "UNEXPECTED_OBJECT"));
+        throw new Error("rollback real security collector drift");
+      }), /rollback real security collector drift/);
       assertAppOnlyRequirements(requirements, context);
       assert.ok(catalogue.tables.length >= 79 && catalogue.policies.length >= 351);
       assert.ok(Object.values(compareAppOnlyRequirements(catalogue, requirements)).every((value) => value === "COMPATIBLE"));
@@ -349,8 +405,6 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
       hostile.routines[0].security_definer = !hostile.routines[0].security_definer;
       assert.equal(compareAppOnlyRequirements(hostile, requirements).RLS_FUNCTIONS, "INCOMPATIBLE");
       appOnlyRequirements = requirements;
-
-      psql(maintenanceUrl, ["-q", "-c", `ALTER ROLE "${administrator}" NOINHERIT; REVOKE pg_read_all_data FROM "${administrator}"`], "restore production administrator identity");
 
       const b01Delta = canonicalB01Prerequisite();
       const currentB01PolicySource = fs.readFileSync(path.join(sqlRoot, "30-policies.sql"), "utf8");
