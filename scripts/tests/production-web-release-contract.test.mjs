@@ -18,6 +18,22 @@ const imageRef = `${WEB_RELEASE.account}.dkr.ecr.${WEB_RELEASE.region}.amazonaws
 const artifact = (changes = {}) => Buffer.from(`${JSON.stringify({ service: "frontend", repository: "mscqr-web", image_uri: `${WEB_RELEASE.account}.dkr.ecr.${WEB_RELEASE.region}.amazonaws.com/mscqr-web:${sourceSha}`, image_tag: sourceSha, image_digest: digest, image_ref: imageRef, platform: "linux/amd64", dockerfile: "Dockerfile.ecs-frontend", build_context: ".", critical_scan: "pass", sbom_sha256: "1".repeat(64), provenance_sha256: "2".repeat(64), cosign_signature_verified: true, sbom_attestation_verified: true, provenance_attestation_verified: true, ...changes })}\n`);
 const impact = Object.freeze({ schemaVersion: 1, toolingSha: sourceSha, webPublicationRequired: true, classifiedFiles: ["src/App.tsx"] });
 
+test("web publisher requires review, permits operator self-review, and stays protected-main-only", () => {
+  const contract = JSON.parse(fs.readFileSync("infra/aws/terraform/production-web-release/github-environment-contract.json", "utf8"));
+  assert.equal(WEB_RELEASE.reviewer, "T-ej2003");
+  assert.deepEqual(contract, {
+    name: "production-web-image-publish",
+    deploymentBranches: "protected-main-only",
+    requiredReviewers: true,
+    preventSelfReview: false,
+    forbidUnprotectedBranchesAndTags: true,
+    variables: ["PRODUCTION_WEB_IMAGE_PUBLISH_ROLE"],
+    forbiddenSecrets: ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"],
+    requiresEnvironmentSecrets: false,
+    activation: "operator-configured; not managed by Terraform",
+  });
+});
+
 function fixture() {
   const artifactBytes = artifact();
   const identity = buildWebPublicationIdentity({ sourceSha, artifactBytes, observedAt: createdAt, observed: { workflowRunId: "12", workflowDatabaseId: "34", workflowFile: WEB_RELEASE.workflowFile, workflowName: WEB_RELEASE.workflowName, event: "workflow_dispatch", workflowDefinitionSha: sourceSha, headBranch: "main", conclusion: "success", artifactId: "56", artifactName: WEB_RELEASE.artifactName, artifactExpired: false, reviewer: "reviewer-one" } });
