@@ -40,6 +40,14 @@ The `infra/aws/terraform/production-web-release` root owns the publisher role, i
 An MFA-backed, non-root production operator must use the dedicated encrypted production S3 state and S3 lockfile. AWS root must not plan or apply:
 
 ```sh
+# Refuse to hide any prior local state; its ownership must be resolved first.
+for state_path in infra/aws/terraform/production-web-release/terraform.tfstate infra/aws/terraform/production-web-release/terraform.tfstate.backup infra/aws/terraform/production-web-release/terraform.tfstate.d; do
+  if [ -e "$state_path" ]; then echo "Unexpected local Terraform state: $state_path" >&2; exit 1; fi
+done
+# Isolate backend metadata from any previous local or alternate-backend init.
+TF_DATA_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mscqr-web-release-tfdata.XXXXXX")"
+chmod 700 "$TF_DATA_DIR"
+export TF_DATA_DIR
 TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-web-release init \
   -upgrade=false -input=false \
   -backend-config='bucket=mscqr-production-terraform-state-368992683803-eu-west-2' \
