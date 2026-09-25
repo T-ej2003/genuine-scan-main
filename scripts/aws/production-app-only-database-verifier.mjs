@@ -6,7 +6,8 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
     // identical durable state hashes identically for every authorized principal.
     await tx.$executeRawUnsafe("SET LOCAL search_path = pg_catalog");
     const [identity] = await tx.$queryRawUnsafe(`SELECT current_user AS role, session_user AS session_role,
-      current_database() AS database, current_setting('transaction_read_only') AS read_only,
+      current_database() AS database, current_setting('server_version_num')::integer AS server_version_num,
+      current_setting('transaction_read_only') AS read_only,
       current_setting('default_transaction_read_only') AS default_read_only,
       r.rolsuper, r.rolinherit, r.rolcreaterole, r.rolcreatedb, r.rolreplication, r.rolbypassrls,
       EXISTS(SELECT 1 FROM pg_catalog.pg_auth_members m WHERE m.member=r.oid) AS memberships,
@@ -60,12 +61,39 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
       FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
       JOIN pg_catalog.pg_roles o ON o.oid=c.relowner WHERE n.nspname='public' AND c.relkind IN ('r','p')
     ) x`);
+    const [securityTables] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.schema,x.name),'[]'::jsonb) AS rows FROM (
+      SELECT n.nspname AS schema,c.relname AS name,c.relkind::text AS kind,c.relrowsecurity AS rls,c.relforcerowsecurity AS forced,
+        o.rolname AS owner,COALESCE((SELECT jsonb_agg(jsonb_build_object('name',a.attname,'type',pg_catalog.format_type(a.atttypid,a.atttypmod),'notNull',a.attnotnull,
+          'identity',a.attidentity::text,'generated',a.attgenerated::text,'default',pg_catalog.pg_get_expr(d.adbin,d.adrelid),
+          'enumLabels',COALESCE((SELECT jsonb_agg(e.enumlabel ORDER BY e.enumsortorder) FROM pg_catalog.pg_enum e
+            WHERE e.enumtypid IN (a.atttypid,(SELECT t.typelem FROM pg_catalog.pg_type t WHERE t.oid=a.atttypid))),'[]'::jsonb)) ORDER BY a.attnum)
+          FROM pg_catalog.pg_attribute a LEFT JOIN pg_catalog.pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum
+          WHERE a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped),'[]'::jsonb) AS columns,
+        COALESCE((SELECT jsonb_agg(jsonb_build_object('name',k.conname,'definition',pg_catalog.pg_get_constraintdef(k.oid),'validated',k.convalidated) ORDER BY k.conname)
+          FROM pg_catalog.pg_constraint k WHERE k.conrelid=c.oid),'[]'::jsonb) AS constraints,
+        COALESCE((SELECT jsonb_agg(jsonb_build_object('role',COALESCE(g.rolname,'PUBLIC'),'privilege',acl.privilege_type,'grantable',acl.is_grantable)
+          ORDER BY COALESCE(g.rolname,'PUBLIC'),acl.privilege_type,acl.is_grantable) FROM pg_catalog.aclexplode(COALESCE(c.relacl,pg_catalog.acldefault('r',c.relowner))) acl
+          LEFT JOIN pg_catalog.pg_roles g ON g.oid=acl.grantee),'[]'::jsonb) AS grants,
+        COALESCE((SELECT jsonb_agg(jsonb_build_object('column',a.attname,'role',COALESCE(g.rolname,'PUBLIC'),'privilege',acl.privilege_type,'grantable',acl.is_grantable)
+          ORDER BY a.attname,COALESCE(g.rolname,'PUBLIC'),acl.privilege_type,acl.is_grantable) FROM pg_catalog.pg_attribute a
+          CROSS JOIN LATERAL pg_catalog.aclexplode(a.attacl) acl LEFT JOIN pg_catalog.pg_roles g ON g.oid=acl.grantee
+          WHERE a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped),'[]'::jsonb) AS column_grants
+      FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace JOIN pg_catalog.pg_roles o ON o.oid=c.relowner
+      WHERE n.nspname<>'information_schema' AND n.nspname NOT LIKE 'pg\_%' ESCAPE '\\' AND c.relkind IN ('r','p')
+    ) x`);
     const [policies] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x."table",x.name),'[]'::jsonb) AS rows FROM (
       SELECT c.relname AS "table",p.polname AS name,p.polpermissive AS permissive,p.polcmd::text AS command,
         ARRAY(SELECT COALESCE(r.rolname,'PUBLIC') FROM unnest(p.polroles) i LEFT JOIN pg_catalog.pg_roles r ON r.oid=i ORDER BY COALESCE(r.rolname,'PUBLIC')) AS roles,
         pg_catalog.pg_get_expr(p.polqual,p.polrelid) AS "using",pg_catalog.pg_get_expr(p.polwithcheck,p.polrelid) AS "check"
       FROM pg_catalog.pg_policy p JOIN pg_catalog.pg_class c ON c.oid=p.polrelid
       JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public'
+    ) x`);
+    const [securityPolicies] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.schema,x."table",x.name),'[]'::jsonb) AS rows FROM (
+      SELECT n.nspname AS schema,c.relname AS "table",p.polname AS name,p.polpermissive AS permissive,p.polcmd::text AS command,
+        ARRAY(SELECT COALESCE(r.rolname,'PUBLIC') FROM unnest(p.polroles) i LEFT JOIN pg_catalog.pg_roles r ON r.oid=i ORDER BY COALESCE(r.rolname,'PUBLIC')) AS roles,
+        pg_catalog.pg_get_expr(p.polqual,p.polrelid) AS "using",pg_catalog.pg_get_expr(p.polwithcheck,p.polrelid) AS "check"
+      FROM pg_catalog.pg_policy p JOIN pg_catalog.pg_class c ON c.oid=p.polrelid JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+      WHERE n.nspname<>'information_schema' AND n.nspname NOT LIKE 'pg\_%' ESCAPE '\\'
     ) x`);
     const [schemas] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.name),'[]'::jsonb) AS rows FROM (
       SELECT n.nspname AS name,o.rolname AS owner,
@@ -75,6 +103,15 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
           LEFT JOIN pg_catalog.pg_roles g ON g.oid=a.grantee),'[]'::jsonb) AS grants
       FROM pg_catalog.pg_namespace n JOIN pg_catalog.pg_roles o ON o.oid=n.nspowner
       WHERE n.nspname IN ('public','app_rls','app_auth','app_public','app_ops')
+    ) x`);
+    const [securitySchemas] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.name),'[]'::jsonb) AS rows FROM (
+      SELECT n.nspname AS name,o.rolname AS owner,
+        COALESCE((SELECT jsonb_agg(jsonb_build_object('role',COALESCE(g.rolname,'PUBLIC'),'privilege',a.privilege_type,'grantable',a.is_grantable)
+          ORDER BY COALESCE(g.rolname,'PUBLIC'),a.privilege_type,a.is_grantable)
+          FROM pg_catalog.aclexplode(COALESCE(n.nspacl,pg_catalog.acldefault('n',n.nspowner))) a
+          LEFT JOIN pg_catalog.pg_roles g ON g.oid=a.grantee),'[]'::jsonb) AS grants
+      FROM pg_catalog.pg_namespace n JOIN pg_catalog.pg_roles o ON o.oid=n.nspowner
+      WHERE n.nspname<>'information_schema' AND n.nspname NOT LIKE 'pg\_%' ESCAPE '\\'
     ) x`);
     const [roles] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.name),'[]'::jsonb) AS rows FROM (
       SELECT r.rolname AS name,r.rolcanlogin AS login,r.rolsuper AS superuser,r.rolinherit AS inherit,
@@ -90,7 +127,63 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
       FROM pg_catalog.pg_roles r WHERE r.rolname LIKE 'mscqr\\_prd\\_rls\\_phase2\\_%' ESCAPE '\\'
         OR r.rolname='mscqr_prod_rls_canary_read'
     ) x`);
-    return { identity, routines: routines.rows, tables: tables.rows, policies: policies.rows, schemas: schemas.rows, roles: roles.rows };
+    const [roleMetadata] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.name),'[]'::jsonb) AS rows FROM (
+      SELECT r.rolname AS name,pg_catalog.shobj_description(r.oid,'pg_authid') IS NOT NULL AS comment_present,
+        pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(COALESCE(pg_catalog.shobj_description(r.oid,'pg_authid'),''),'UTF8')),'hex') AS comment_sha256,
+        COALESCE((SELECT jsonb_agg(jsonb_build_object('database',COALESCE(d.datname,'*'),'settings',s.safe_settings) ORDER BY COALESCE(d.datname,'*'))
+          FROM pg_catalog.pg_db_role_setting rs LEFT JOIN pg_catalog.pg_database d ON d.oid=rs.setdatabase
+          CROSS JOIN LATERAL (SELECT COALESCE(jsonb_agg(setting ORDER BY setting),'[]'::jsonb) AS safe_settings
+            FROM unnest(rs.setconfig) setting WHERE split_part(setting,'=',1) IN
+              ('statement_timeout','lock_timeout','idle_in_transaction_session_timeout','search_path','default_transaction_read_only','row_security')) s
+          WHERE rs.setrole=r.oid),'[]'::jsonb) AS settings,
+        EXISTS(SELECT 1 FROM pg_catalog.pg_db_role_setting rs CROSS JOIN LATERAL unnest(rs.setconfig) setting
+          WHERE rs.setrole=r.oid AND split_part(setting,'=',1) NOT IN
+            ('statement_timeout','lock_timeout','idle_in_transaction_session_timeout','search_path','default_transaction_read_only','row_security')) AS unsupported_settings
+      FROM pg_catalog.pg_roles r WHERE r.rolname LIKE 'mscqr\\_prd\\_rls\\_phase2\\_%' ESCAPE '\\'
+        OR r.rolname IN ('mscqr_prod_rls_canary_read','mscqr_prod_admin')
+    ) x`);
+    const [databases] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.database,x.role,x.privilege,x.grantable),'[]'::jsonb) AS rows FROM (
+      SELECT d.datname AS database,o.rolname AS owner,COALESCE(g.rolname,'PUBLIC') AS role,a.privilege_type AS privilege,a.is_grantable AS grantable
+      FROM pg_catalog.pg_database d JOIN pg_catalog.pg_roles o ON o.oid=d.datdba
+      CROSS JOIN LATERAL pg_catalog.aclexplode(COALESCE(d.datacl,pg_catalog.acldefault('d',d.datdba))) a
+      LEFT JOIN pg_catalog.pg_roles g ON g.oid=a.grantee WHERE d.datname=current_database()
+    ) x`);
+    const [defaults] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.owner,x.schema,x.object_type,x.role,x.privilege,x.grantable),'[]'::jsonb) AS rows FROM (
+      SELECT o.rolname AS owner,COALESCE(n.nspname,'*') AS schema,d.defaclobjtype::text AS object_type,
+        COALESCE(g.rolname,'PUBLIC') AS role,a.privilege_type AS privilege,a.is_grantable AS grantable
+      FROM pg_catalog.pg_default_acl d JOIN pg_catalog.pg_roles o ON o.oid=d.defaclrole
+      LEFT JOIN pg_catalog.pg_namespace n ON n.oid=d.defaclnamespace
+      CROSS JOIN LATERAL pg_catalog.aclexplode(d.defaclacl) a LEFT JOIN pg_catalog.pg_roles g ON g.oid=a.grantee
+      WHERE o.rolname LIKE 'mscqr\\_prd\\_rls\\_phase2\\_%' ESCAPE '\\' OR o.rolname IN ('mscqr_prod_rls_canary_read','mscqr_prod_admin')
+        OR n.nspname IN ('public','app_rls','app_auth','app_public','app_ops')
+    ) x`);
+    const [types] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.schema,x.name),'[]'::jsonb) AS rows FROM (
+      SELECT n.nspname AS schema,t.typname AS name,t.typtype::text AS kind,o.rolname AS owner,
+        COALESCE((SELECT jsonb_agg(jsonb_build_object('role',COALESCE(g.rolname,'PUBLIC'),'privilege',a.privilege_type,'grantable',a.is_grantable)
+          ORDER BY COALESCE(g.rolname,'PUBLIC'),a.privilege_type,a.is_grantable)
+          FROM pg_catalog.aclexplode(COALESCE(t.typacl,pg_catalog.acldefault('T',t.typowner))) a LEFT JOIN pg_catalog.pg_roles g ON g.oid=a.grantee),'[]'::jsonb) AS grants
+      FROM pg_catalog.pg_type t JOIN pg_catalog.pg_namespace n ON n.oid=t.typnamespace JOIN pg_catalog.pg_roles o ON o.oid=t.typowner
+      WHERE n.nspname IN ('public','app_rls','app_auth','app_public','app_ops') AND t.typtype<>'p' AND t.typcategory<>'A'
+    ) x`);
+    const [sequences] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.schema,x.name),'[]'::jsonb) AS rows FROM (
+      SELECT n.nspname AS schema,c.relname AS name,o.rolname AS owner,
+        COALESCE((SELECT jsonb_agg(jsonb_build_object('role',COALESCE(g.rolname,'PUBLIC'),'privilege',a.privilege_type,'grantable',a.is_grantable)
+          ORDER BY COALESCE(g.rolname,'PUBLIC'),a.privilege_type,a.is_grantable)
+          FROM pg_catalog.aclexplode(COALESCE(c.relacl,pg_catalog.acldefault('S',c.relowner))) a LEFT JOIN pg_catalog.pg_roles g ON g.oid=a.grantee),'[]'::jsonb) AS grants
+      FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace JOIN pg_catalog.pg_roles o ON o.oid=c.relowner
+      WHERE c.relkind='S' AND n.nspname IN ('public','app_rls','app_auth','app_public','app_ops')
+    ) x`);
+    const [operatorCapabilities] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.name),'[]'::jsonb) AS rows FROM (
+      SELECT r.rolname AS name,r.rolcanlogin AS login,r.rolsuper AS superuser,r.rolinherit AS inherit,r.rolcreaterole AS create_role,
+        r.rolcreatedb AS create_database,r.rolreplication AS replication,r.rolbypassrls AS bypass_rls,
+        pg_catalog.has_database_privilege(r.oid,current_database(),'CONNECT') AS database_connect,
+        pg_catalog.has_database_privilege(r.oid,current_database(),'CREATE') AS database_create,
+        pg_catalog.has_database_privilege(r.oid,current_database(),'TEMPORARY') AS database_temporary
+      FROM pg_catalog.pg_roles r WHERE r.rolname='mscqr_prod_admin'
+    ) x`);
+    return { identity, routines: routines.rows, tables: tables.rows, securityTables: securityTables.rows, policies: policies.rows, securityPolicies: securityPolicies.rows, schemas: schemas.rows,
+      securitySchemas: securitySchemas.rows, roles: roles.rows, roleMetadata: roleMetadata.rows, databases: databases.rows,
+      defaults: defaults.rows, types: types.rows, sequences: sequences.rows, operatorCapabilities: operatorCapabilities.rows };
 }
 
 export async function collectAppOnlyDatabaseCatalogue(client) {
@@ -98,7 +191,8 @@ export async function collectAppOnlyDatabaseCatalogue(client) {
     await tx.$executeRawUnsafe("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
     return collectAppOnlyDatabaseCatalogueRows(tx, (identity) => {
       if (!identity || identity.role !== "mscqr_prod_rls_canary_read" || identity.session_role !== identity.role
-      || identity.database !== "mscqr_production_rls_green_phase2" || identity.read_only !== "on"
+      || identity.database !== "mscqr_production_rls_green_phase2" || Math.trunc(Number(identity.server_version_num) / 10000) !== 18
+      || identity.read_only !== "on"
       || identity.default_read_only !== "on"
       || ["rolsuper", "rolinherit", "rolcreaterole", "rolcreatedb", "rolreplication", "rolbypassrls", "memberships", "write_privileges", "schema_write", "database_write"].some((key) => identity[key] !== false)) {
         throw new Error("Verifier database identity is not the restricted read-only contract");

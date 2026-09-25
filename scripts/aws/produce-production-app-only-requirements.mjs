@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { assertProtectedCheckout } from "./prepare-production-initial-activation-reconciler-installation.mjs";
 import { readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
 import { assertAppOnlyRequirements } from "./production-app-only-requirements.mjs";
+import { assertSecurityRebaselineInventory } from "./production-security-rebaseline-inventory.mjs";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 
@@ -27,18 +28,25 @@ export function produceAppOnlyRequirements({ sourceSha, candidateSourceSha }) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-app-only-requirements-"));
   fs.chmodSync(directory, 0o700);
   const artifactPath = path.join(directory, "app-only-requirements.json");
+  const securityRebaselinePath = path.join(directory, "security-rebaseline-canonical.json");
   // Deliberately omit inherited production credentials and DB configuration.
   const env = Object.fromEntries(["PATH", "HOME", "TMPDIR", "DOCKER_HOST", "DOCKER_CONTEXT"].filter((key) => process.env[key]).map((key) => [key, process.env[key]]));
   Object.assign(env, { NODE_ENV: "test", MSCQR_PRODUCTION_PACKAGE_POSTGRES18_TEST: "true",
     MSCQR_PRODUCTION_PACKAGE_POSTGRES18_ADMIN_URL: "postgresql://mscqr_p2_test@127.0.0.1:55432/mscqr_p2_admin_test",
-    MSCQR_APP_ONLY_CANDIDATE_SOURCE_SHA: candidateSourceSha, MSCQR_APP_ONLY_REQUIREMENTS_PATH: artifactPath });
+    MSCQR_APP_ONLY_CANDIDATE_SOURCE_SHA: candidateSourceSha, MSCQR_APP_ONLY_REQUIREMENTS_PATH: artifactPath,
+    MSCQR_SECURITY_REBASELINE_CANONICAL_PATH: securityRebaselinePath });
   execFileSync(process.execPath, ["--test", "scripts/tests/production-full-rls-package-postgres18.test.mjs"], {
     cwd: root, env, timeout: 10 * 60 * 1000, maxBuffer: 16 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"],
   });
   assertProtectedCheckout({ sourceSha, repositoryRoot: root });
   const artifact = readStageBPrivateFileBytes({ filePath: artifactPath, repositoryRoot: root });
   const requirements = assertAppOnlyRequirements(JSON.parse(artifact.bytes), { sourceSha, candidateSourceSha, repositoryRoot: root });
-  return { artifactPath, artifactSha256: artifact.sha256, requirementsSha256: requirements.requirementsSha256 };
+  const securityArtifact = readStageBPrivateFileBytes({ filePath: securityRebaselinePath, repositoryRoot: root });
+  const securityInventory = assertSecurityRebaselineInventory(JSON.parse(securityArtifact.bytes), { protectedMainSha: sourceSha });
+  assert.equal(securityInventory.kind, "PRODUCTION_SECURITY_REBASELINE_CANONICAL_INVENTORY");
+  assert.equal(securityInventory.appOnlyRequirementsSha256, requirements.requirementsSha256);
+  return { artifactPath, artifactSha256: artifact.sha256, requirementsSha256: requirements.requirementsSha256,
+    securityRebaselinePath, securityRebaselineSha256: securityArtifact.sha256, canonicalSecurityCatalogueSha256: securityInventory.catalogueSha256 };
 }
 
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {

@@ -15,6 +15,7 @@ const contracts = Object.freeze({
   publication: { workflow: ".github/workflows/production-green-stage-b-images.yml", artifact: "production-green-stage-b-images", file: "stage-b-images.jsonl" },
   imageAuthorization: { workflow: ".github/workflows/produce-production-green-stage-b-state-reconciliation-image-authorization.yml", artifact: "production-green-stage-b-state-reconciliation-image-authorization", file: "image-authorization.json" },
   requirements: { workflow: ".github/workflows/produce-production-app-only-requirements.yml", artifact: "production-app-only-requirements", file: "app-only-requirements.json" },
+  securityRebaselineCanonical: { workflow: ".github/workflows/produce-production-app-only-requirements.yml", artifact: "production-security-rebaseline-canonical", file: "security-rebaseline-canonical.json" },
   verifierPreparation: { workflow: ".github/workflows/prepare-production-app-only-verifier.yml", artifact: "production-app-only-verifier-preparation", file: "app-only-verifier-preparation.json" },
   compatibility: { workflow: ".github/workflows/verify-production-app-only-compatibility.yml", artifact: "production-app-only-compatibility", file: "app-only-compatibility.json" },
   preparation: { workflow: ".github/workflows/prepare-production-app-only-deployment.yml", artifact: "production-app-only-preparation", file: "app-only-preparation.json" },
@@ -91,7 +92,7 @@ with zipfile.ZipFile(io.BytesIO(data)) as z:
  assert m.filename==sys.argv[1] and m.orig_filename==m.filename and m.header_offset==0
  assert not m.is_dir() and not m.flag_bits&1
  assert stat.S_IFMT(m.external_attr>>16) in (0,stat.S_IFREG)
- assert 0<m.file_size<=1048576 and m.compress_type in (zipfile.ZIP_STORED,zipfile.ZIP_DEFLATED)
+ assert 0<m.file_size<=int(sys.argv[2]) and m.compress_type in (zipfile.ZIP_STORED,zipfile.ZIP_DEFLATED)
  value=z.read(m)
  assert len(value)==m.file_size
  sys.stdout.buffer.write(value)
@@ -100,8 +101,9 @@ with zipfile.ZipFile(io.BytesIO(data)) as z:
 export function readAppOnlyArtifactArchive(bytes, kind) {
   const contract = contracts[kind]; assert.ok(contract, "Unknown app-only artifact kind");
   assert.ok(Buffer.isBuffer(bytes) && bytes.length > 0 && bytes.length <= 8 * 1024 * 1024);
-  return execFileSync("/usr/bin/python3", ["-c", readMember, contract.file], {
-    input: bytes, timeout: 10000, maxBuffer: 1024 * 1024, stdio: ["pipe", "pipe", "pipe"],
+  const maxFileBytes = kind === "securityRebaselineCanonical" ? 8 * 1024 * 1024 : 1024 * 1024;
+  return execFileSync("/usr/bin/python3", ["-c", readMember, contract.file, String(maxFileBytes)], {
+    input: bytes, timeout: 10000, maxBuffer: maxFileBytes, stdio: ["pipe", "pipe", "pipe"],
   });
 }
 
@@ -115,6 +117,7 @@ export function assertAppOnlyArtifactProvenance({ kind, reference, run, artifact
   assert.equal(String(run.id), String(reference.runId));
   assert.equal(String(run.run_attempt), String(reference.runAttempt));
   assert.equal(run.repository?.full_name, repository); assert.equal(run.head_repository?.full_name, repository);
+  if (kind === "securityRebaselineCanonical") { assert.equal(run.repository.private, true, "Security catalogue artifacts require a private repository"); assert.equal(run.head_repository.private, true, "Security catalogue artifacts require a private source repository"); }
   assert.ok(Number.isSafeInteger(run.repository.id) && run.repository.id > 0);
   assert.equal(run.head_repository.id, run.repository.id);
   assert.equal(run.head_sha, reference.sourceSha); assert.equal(run.head_branch, "main");

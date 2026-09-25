@@ -38,17 +38,17 @@ test("additional permissive policy on a required table cannot pass", () => {
   assert.equal(evaluateAppOnlyDatabaseCatalogue(observed, required).RLS_POLICIES, "INCOMPATIBLE");
 });
 const identity = () => ({ role: "mscqr_prod_rls_canary_read", session_role: "mscqr_prod_rls_canary_read", database: "mscqr_production_rls_green_phase2",
-  read_only: "on", default_read_only: "on", ...Object.fromEntries(["rolsuper", "rolinherit", "rolcreaterole", "rolcreatedb", "rolreplication", "rolbypassrls", "memberships", "write_privileges", "schema_write", "database_write"].map((key) => [key, false])) });
+  server_version_num: 180004, read_only: "on", default_read_only: "on", ...Object.fromEntries(["rolsuper", "rolinherit", "rolcreaterole", "rolcreatedb", "rolreplication", "rolbypassrls", "memberships", "write_privileges", "schema_write", "database_write"].map((key) => [key, false])) });
 test("all fixed catalogue statements use one read-only repeatable-read transaction", async () => {
   const calls = [];
   const { observed } = fixture(); let read = 0;
-  const tx = { $executeRawUnsafe: async (sql) => calls.push(sql), $queryRawUnsafe: async (sql) => { calls.push(sql); return [[identity()], [{ rows: observed.routines }], [{ rows: observed.tables }], [{ rows: observed.policies }], [{ rows: observed.schemas }], [{ rows: observed.roles }]][read++]; } };
+  const tx = { $executeRawUnsafe: async (sql) => calls.push(sql), $queryRawUnsafe: async (sql) => { calls.push(sql); return [[identity()], [{ rows: observed.routines }], [{ rows: observed.tables }], [{ rows: observed.tables.map((row) => ({ schema: "public", ...row })) }], [{ rows: observed.policies }], [{ rows: observed.policies.map((row) => ({ schema: "public", ...row })) }], [{ rows: observed.schemas }], [{ rows: observed.schemas }], [{ rows: observed.roles }], ...Array.from({ length: 6 }, () => [{ rows: [] }])][read++]; } };
   const client = { $transaction: async (fn, options) => { assert.equal(options.timeout, 30000); return fn(tx); } };
   const result = await collectAppOnlyDatabaseCatalogue(client);
   assert.deepEqual(result.routines, observed.routines);
   assert.equal(calls[0], "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
   assert.equal(calls[1], "SET LOCAL search_path = pg_catalog");
-  assert.equal(read, 6);
+  assert.equal(read, 15);
   // Inspection check, not the security boundary: callers cannot supply SQL;
   // database privileges, fixed code and read-only transaction enforce the limit.
   assert.ok(calls.slice(2).every((sql) => sql.startsWith("SELECT ")));

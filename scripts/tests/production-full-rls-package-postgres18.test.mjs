@@ -8,6 +8,7 @@ import test from "node:test";
 import { createRequire } from "node:module";
 import { collectAppOnlyDatabaseCatalogue, collectAppOnlyDatabaseCatalogueRows } from "../aws/production-app-only-database-verifier.mjs";
 import { createAppOnlyRequirements, assertAppOnlyRequirements, compareAppOnlyRequirements } from "../aws/production-app-only-requirements.mjs";
+import { createSecurityRebaselineInventory } from "../aws/production-security-rebaseline-inventory.mjs";
 import { writeStageBPrivateFileExclusive } from "../aws/stage-b-artifact-contract.mjs";
 import { APP_ONLY } from "../aws/production-app-only-contract.mjs";
 import { buildAppOnlyVerifierCommand, authenticateAppOnlyVerifierResult } from "../aws/production-app-only-verifier-command.mjs";
@@ -145,7 +146,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
   const migrationUrl = databaseUrl(adminUrl, targetDatabase, "mscqr_prd_rls_phase2_migration");
   let residue = null;
   let verifierCreated = false;
-  let appOnlyRequirements;
+  let appOnlyRequirements, securityRebaselineCanonical;
   let rdsMembershipsNormalized = false;
   const verifierRole = "mscqr_prod_rls_canary_read";
   const restoreDisposableMemberships = () => psql(maintenanceUrl, ["-q", "-c", `DO $restore_disposable_memberships$
@@ -285,6 +286,8 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         candidateSourceSha: process.env.MSCQR_APP_ONLY_CANDIDATE_SOURCE_SHA || sourceSha };
       const requirements = createAppOnlyRequirements({ ...context, catalogue,
         packageChecksums: JSON.parse(fs.readFileSync(path.join(evidenceRoot, "checksums.json"), "utf8")) });
+      securityRebaselineCanonical = createSecurityRebaselineInventory({ kind: "CANONICAL", protectedMainSha: sourceSha,
+        catalogue, repositoryRoot: root, packageChecksums: JSON.parse(fs.readFileSync(path.join(evidenceRoot, "checksums.json"), "utf8")) });
       assertAppOnlyRequirements(requirements, context);
       assert.ok(catalogue.tables.length >= 79 && catalogue.policies.length >= 351);
       assert.ok(Object.values(compareAppOnlyRequirements(catalogue, requirements)).every((value) => value === "COMPATIBLE"));
@@ -622,5 +625,10 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
     assert.ok(appOnlyRequirements);
     writeStageBPrivateFileExclusive({ filePath: process.env.MSCQR_APP_ONLY_REQUIREMENTS_PATH,
       repositoryRoot: root, bytes: Buffer.from(`${JSON.stringify(appOnlyRequirements)}\n`) });
+  }
+  if (process.env.MSCQR_SECURITY_REBASELINE_CANONICAL_PATH) {
+    assert.ok(securityRebaselineCanonical);
+    writeStageBPrivateFileExclusive({ filePath: process.env.MSCQR_SECURITY_REBASELINE_CANONICAL_PATH,
+      repositoryRoot: root, bytes: Buffer.from(`${JSON.stringify(securityRebaselineCanonical)}\n`) });
   }
 });
