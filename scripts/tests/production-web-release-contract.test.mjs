@@ -36,7 +36,7 @@ test("web publisher requires review, permits operator self-review, and stays pro
 
 test("web release Terraform root uses its dedicated production S3 state and lockfile procedure", () => {
   const versions = fs.readFileSync("infra/aws/terraform/production-web-release/versions.tf", "utf8");
-  const runbook = fs.readFileSync("infra/aws/terraform/production-web-release/README.md", "utf8");
+  const runbook = fs.readFileSync("documents/ops/iam/MSCQR_PRODUCTION_WEB_RELEASE.md", "utf8");
   assert.match(versions, /backend\s+"s3"\s*\{\s*\}/);
   for (const required of [
     "mscqr-production-terraform-state-368992683803-eu-west-2",
