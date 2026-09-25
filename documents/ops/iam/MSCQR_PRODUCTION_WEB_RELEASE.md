@@ -48,11 +48,16 @@ terraform -chdir=infra/aws/terraform/production-web-release init \
   -backend-config='encrypt=true' \
   -backend-config='use_lockfile=true'
 aws sts get-caller-identity
+```
+
+Verify the caller is in account `368992683803` under the approved non-root operator role. Before creating the saved plan, compare every managed address with live AWS and import any pre-existing object; a plan created before an import must be discarded and recreated. Review the final plan and stop for any unexpected update, delete, or replacement:
+
+```sh
 terraform -chdir=infra/aws/terraform/production-web-release plan -out=web-release.tfplan
 terraform -chdir=infra/aws/terraform/production-web-release apply web-release.tfplan
 ```
 
-Verify the caller is in account `368992683803` under the approved non-root operator role before planning. Review every plan action; import any pre-existing Terraform-managed object before apply and stop for any unexpected update, delete, or replacement. After apply, verify the exact publisher trust/policy and boundary, then set `PRODUCTION_WEB_IMAGE_PUBLISH_ROLE` on the protected `production-web-image-publish` environment to the Terraform `publisher_role_arn` output. This procedure does not configure GitHub or mutate resources until the separately reviewed Terraform apply.
+After apply, verify the exact publisher trust/policy and boundary, then set `PRODUCTION_WEB_IMAGE_PUBLISH_ROLE` on the protected `production-web-image-publish` environment to the Terraform `publisher_role_arn` output. This procedure does not configure GitHub or mutate resources until the separately reviewed Terraform apply.
 
 ## Governed operator sequence
 

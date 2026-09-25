@@ -38,12 +38,15 @@ test("web release Terraform root uses its dedicated production S3 state and lock
   const versions = fs.readFileSync("infra/aws/terraform/production-web-release/versions.tf", "utf8");
   const runbook = fs.readFileSync("documents/ops/iam/MSCQR_PRODUCTION_WEB_RELEASE.md", "utf8");
   assert.match(versions, /backend\s+"s3"\s*\{\s*\}/);
+  assert.match(versions, /required_version\s*=\s*">= 1\.10\.0, < 2\.0\.0"/);
   for (const required of [
     "mscqr-production-terraform-state-368992683803-eu-west-2",
     "mscqr/production/web-release/terraform.tfstate",
     "region=eu-west-2",
     "encrypt=true",
     "use_lockfile=true",
+    "Before creating the saved plan",
+    "a plan created before an import must be discarded and recreated",
     "plan -out=web-release.tfplan",
     "apply web-release.tfplan",
     "mscqr-production-release-deployer",
