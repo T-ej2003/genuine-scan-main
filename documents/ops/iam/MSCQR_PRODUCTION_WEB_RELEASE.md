@@ -40,6 +40,7 @@ The `infra/aws/terraform/production-web-release` root owns the publisher role, i
 An MFA-backed, non-root production operator must use the dedicated encrypted production S3 state and S3 lockfile. AWS root must not plan or apply:
 
 ```sh
+export TF_WORKSPACE=default
 terraform -chdir=infra/aws/terraform/production-web-release init \
   -upgrade=false -input=false \
   -backend-config='bucket=mscqr-production-terraform-state-368992683803-eu-west-2' \
@@ -47,6 +48,7 @@ terraform -chdir=infra/aws/terraform/production-web-release init \
   -backend-config='region=eu-west-2' \
   -backend-config='encrypt=true' \
   -backend-config='use_lockfile=true'
+test "$(terraform -chdir=infra/aws/terraform/production-web-release workspace show)" = default
 aws sts get-caller-identity
 ```
 

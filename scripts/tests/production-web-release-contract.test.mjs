@@ -42,6 +42,9 @@ test("web release Terraform root uses its dedicated production S3 state and lock
   for (const required of [
     "mscqr-production-terraform-state-368992683803-eu-west-2",
     "mscqr/production/web-release/terraform.tfstate",
+    "export TF_WORKSPACE=default",
+    "workspace show)",
+    "= default",
     "region=eu-west-2",
     "encrypt=true",
     "use_lockfile=true",
