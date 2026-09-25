@@ -51,7 +51,13 @@ test "$(TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-web
 aws sts get-caller-identity
 ```
 
-Verify the caller is in account `368992683803` under the approved non-root operator role. Before creating the saved plan, compare every managed address with live AWS and import any pre-existing object; a plan created before an import must be discarded and recreated. Review the final plan and stop for any unexpected update, delete, or replacement:
+Verify the caller is in account `368992683803` under the approved non-root operator role. Before creating the saved plan, compare every managed address with live AWS and import any pre-existing object with the pinned workspace, replacing both placeholders with the exact Terraform address and provider import ID:
+
+```sh
+TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-web-release import '<terraform-address>' '<provider-id>'
+```
+
+A plan created before an import must be discarded and recreated. Review the final plan and stop for any unexpected update, delete, or replacement:
 
 ```sh
 TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-web-release plan -out=web-release.tfplan

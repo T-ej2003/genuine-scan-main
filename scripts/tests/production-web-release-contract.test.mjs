@@ -45,16 +45,17 @@ test("web release Terraform root uses its dedicated production S3 state and lock
     "TF_WORKSPACE=default terraform",
     "workspace show)",
     "= default",
+    "import '<terraform-address>' '<provider-id>'",
     "region=eu-west-2",
     "encrypt=true",
     "use_lockfile=true",
     "Before creating the saved plan",
-    "a plan created before an import must be discarded and recreated",
+    "A plan created before an import must be discarded and recreated.",
     "plan -out=web-release.tfplan",
     "apply web-release.tfplan",
     "mscqr-production-release-deployer",
   ]) assert.ok(runbook.includes(required), `web release Terraform procedure must include ${required}`);
-  assert.equal(runbook.match(/TF_WORKSPACE=default terraform/g)?.length, 4);
+  assert.equal(runbook.match(/TF_WORKSPACE=default terraform/g)?.length, 5);
   assert.match(runbook, /MFA-backed, non-root production operator/);
 });
 
