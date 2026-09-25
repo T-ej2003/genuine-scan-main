@@ -50,17 +50,23 @@ test("web release Terraform root uses its dedicated production S3 state and lock
     "terraform.tfstate.d",
     "workspace show)",
     "= default",
-    "import '<terraform-address>' '<provider-id>'",
     "region=eu-west-2",
     "encrypt=true",
     "use_lockfile=true",
-    "Before creating the saved plan",
+    "The one-time exact-source IAM bootstrap",
+    "bootstrap-production-web-release-iam.mjs",
+    "no IAM create, update, attach, pass-role, trust-policy, or delete action",
+    "aws_iam_policy.publisher_boundary",
+    "aws_iam_role.publisher",
+    "aws_iam_role_policy.publisher",
+    "aws_iam_role_policy.frontend_activation",
     "A plan created before an import must be discarded and recreated.",
+    "The imported plan must be a no-op",
     "plan -out=web-release.tfplan",
     "apply web-release.tfplan",
     "mscqr-production-release-deployer",
   ]) assert.ok(runbook.includes(required), `web release Terraform procedure must include ${required}`);
-  assert.equal(runbook.match(/TF_WORKSPACE=default terraform/g)?.length, 5);
+  assert.equal(runbook.match(/TF_WORKSPACE=default terraform/g)?.length, 8);
   assert.match(runbook, /MFA-backed, non-root production operator/);
 });
 

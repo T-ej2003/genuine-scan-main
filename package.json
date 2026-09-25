@@ -111,6 +111,8 @@
     "stage-b:produce-root-drop-evidence": "node scripts/aws/produce-production-root-drop-evidence.mjs",
     "production:release-oidc-trust": "node scripts/aws/converge-production-release-oidc-trust.mjs",
     "production:normal-deployer-policy": "node scripts/aws/converge-production-normal-deployer-policy.mjs",
+    "production:web-release-iam-bootstrap": "node scripts/aws/bootstrap-production-web-release-iam.mjs",
+    "test:production-web-release-iam-bootstrap": "node --test scripts/tests/production-web-release-iam-bootstrap.test.mjs scripts/tests/production-bootstrap-operator-policy-reconciliation.test.mjs scripts/tests/production-web-release-contract.test.mjs scripts/tests/production-credential-source-contract.test.mjs scripts/tests/production-dependency-closure.test.mjs",
     "production:smoke-secret-handoff": "node scripts/aws/handoff-production-smoke-secrets.mjs",
     "production:rls-catalogue-probe": "node scripts/aws/probe-production-rls-catalogue.mjs",
     "production:b01-readonly-reconcile": "node scripts/aws/probe-production-b01-prerequisite.mjs",

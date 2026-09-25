@@ -35,6 +35,35 @@
       }
     },
     {
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": "mscqr/production/web-release/terraform.tfstate"
+        }
+      }
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject"],
+      "Resource": ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/web-release/terraform.tfstate", "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/web-release/terraform.tfstate.tflock"]
+    },
+    {
+      "Effect": "Allow",
+      "Action": "s3:DeleteObject",
+      "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/web-release/terraform.tfstate.tflock"
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["iam:GetRole", "iam:GetRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies", "iam:GetPolicy", "iam:GetPolicyVersion"],
+      "Resource": [
+        "arn:aws:iam::368992683803:role/mscqr-production-web-image-publisher",
+        "arn:aws:iam::368992683803:role/mscqr-production-release-deployer",
+        "arn:aws:iam::368992683803:policy/MSCQRProductionWebImagePublisherBoundary"
+      ]
+    },
+    {
       "Sid": "ReadOwnMfaState",
       "Effect": "Allow",
       "Action": [

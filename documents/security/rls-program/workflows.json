@@ -2133,6 +2133,11 @@
         },
         {
           "packageFile": "package.json",
+          "name": "production:web-release-iam-bootstrap",
+          "command": "node scripts/aws/bootstrap-production-web-release-iam.mjs"
+        },
+        {
+          "packageFile": "package.json",
           "name": "report:lint:changed",
           "command": "node scripts/lint-changed.mjs"
         },
@@ -2690,6 +2695,11 @@
           "packageFile": "package.json",
           "name": "test:production-rotation-coordinator",
           "command": "npm --prefix backend run test:production-rotation-coordinator"
+        },
+        {
+          "packageFile": "package.json",
+          "name": "test:production-web-release-iam-bootstrap",
+          "command": "node --test scripts/tests/production-web-release-iam-bootstrap.test.mjs scripts/tests/production-bootstrap-operator-policy-reconciliation.test.mjs scripts/tests/production-web-release-contract.test.mjs scripts/tests/production-credential-source-contract.test.mjs scripts/tests/production-dependency-closure.test.mjs"
         },
         {
           "packageFile": "package.json",
