@@ -421,7 +421,7 @@ function sourcePolicies() {
 
 const BOOTSTRAP_OPERATOR_ASSUME_ROLE_AUTHORITIES = Object.freeze({
   "bootstrap-assume-release": Object.freeze({ sid: "AssumeReleaseRoleOnlyWithMfa", resource: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.releaseRoleArn }),
-  "bootstrap-assume-verifier": Object.freeze({ sid: "AssumeEcsExecVerifierRoleOnlyWithMfa", resource: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.verifierRoleArn }),
+  "bootstrap-assume-verifier": Object.freeze({ sid: "AssumeVerifierMfa", resource: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.verifierRoleArn }),
   "bootstrap-assume-publisher-bootstrap": Object.freeze({ sid: "AssumeStageBPublisherBootstrapRoleOnlyWithMfa", resource: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.publisherBootstrapRoleArn }),
 });
 

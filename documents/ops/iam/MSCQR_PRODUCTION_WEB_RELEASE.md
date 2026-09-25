@@ -35,7 +35,7 @@ AWS IAM cannot resource-scope or field-constrain `ecs:RegisterTaskDefinition`. T
 
 ## Terraform state and publisher provisioning
 
-The `infra/aws/terraform/production-web-release` root owns the publisher role, its boundary and permissions policy, and the narrowly scoped `MSCQRProductionFrontendActivation` inline policy on the existing `mscqr-production-release-deployer` role. That release-deployer role remains externally owned and is read as a Terraform data source; its frontend policy is required by the governed activation path.
+The `infra/aws/terraform/production-web-release` root is the canonical desired-state owner for the publisher role, its boundary and permissions policy, and the narrowly scoped `MSCQRProductionFrontendActivation` inline policy on the existing `mscqr-production-release-deployer` role. Its IAM resource mutations are bootstrapped only by `scripts/aws/bootstrap-production-web-release-iam.mjs`, which reads those exact documents, accepts only the production account root configuration profile, creates absent resources, and fails closed on any non-identical existing object. It never updates or deletes IAM resources. Terraform imports the resulting objects into its dedicated state and detects drift; the operator has no IAM mutation permissions.
 
 An MFA-backed, non-root production operator must use the dedicated encrypted production S3 state and S3 lockfile. AWS root must not plan or apply:
 
@@ -59,20 +59,33 @@ test "$(TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-web
 aws sts get-caller-identity
 ```
 
-Verify the caller is in account `368992683803` under the approved non-root operator role. Before creating the saved plan, compare every managed address with live AWS and import any pre-existing object with the pinned workspace, replacing both placeholders with the exact Terraform address and provider import ID:
+The one-time exact-source IAM bootstrap must run from a clean protected-main checkout before Terraform import. It is an exact-document executor, not Terraform and not a manual IAM edit. It creates only the four absent source-defined objects; an existing object is accepted only when its identity and policy/trust document match source exactly:
 
 ```sh
-TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-web-release import '<terraform-address>' '<provider-id>'
+node scripts/aws/bootstrap-production-web-release-iam.mjs \
+  --source-sha <exact-protected-main-sha> \
+  --admin-profile mscqr-production-root
 ```
 
-A plan created before an import must be discarded and recreated. Review the final plan and stop for any unexpected update, delete, or replacement:
+The operator policy reconciliation grants the MFA-backed non-root operator only the exact state/lock access and read access to the publisher role, release-deployer role, and publisher boundary required to import and plan. Its inline policy remains within IAM's 2,048-character quota and grants no IAM create, update, attach, pass-role, trust-policy, or delete action. Verify the caller is in account `368992683803` under the approved non-root operator identity.
+
+Use these exact Terraform imports after the source bootstrap and backend initialization. On a resumed partial import, first inspect `terraform state list`; skip an address only when `terraform state show` confirms its `id` is exactly the corresponding identifier below. Import only absent addresses. Stop if an address is bound to any other identifier or the state cannot be read; never remove or overwrite state to retry:
+
+```sh
+TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-web-release import aws_iam_policy.publisher_boundary arn:aws:iam::368992683803:policy/MSCQRProductionWebImagePublisherBoundary
+TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-web-release import aws_iam_role.publisher mscqr-production-web-image-publisher
+TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-web-release import aws_iam_role_policy.publisher mscqr-production-web-image-publisher:MSCQRProductionWebImagePublisher
+TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-web-release import aws_iam_role_policy.frontend_activation mscqr-production-release-deployer:MSCQRProductionFrontendActivation
+```
+
+Import every object before planning. A plan created before an import must be discarded and recreated. Generate a fresh plan only after every import, and require it to be a no-op. The imported plan must be a no-op; any IAM update, delete, or replacement is a stop condition because the non-root operator cannot mutate IAM. Apply only the reviewed no-op saved plan:
 
 ```sh
 TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-web-release plan -out=web-release.tfplan
 TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-web-release apply web-release.tfplan
 ```
 
-After apply, verify the exact publisher trust/policy and boundary, then set `PRODUCTION_WEB_IMAGE_PUBLISH_ROLE` on the protected `production-web-image-publish` environment to the Terraform `publisher_role_arn` output. This procedure does not configure GitHub or mutate resources until the separately reviewed Terraform apply.
+Read back the publisher trust/policy and boundary, then set `PRODUCTION_WEB_IMAGE_PUBLISH_ROLE` on the protected `production-web-image-publish` environment to the Terraform `publisher_role_arn` output. A later approved IAM-document change must add its exact live predecessor to the source bootstrap before it can converge; the bootstrap never overwrites unknown drift.
 
 ## Governed operator sequence
 

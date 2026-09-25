@@ -161,7 +161,7 @@ test("bootstrap AssumeRole capabilities are bound to their exact MFA-gated inlin
   const graph = buildStageBDeploymentCapabilityGraph();
   const expected = [
     ["bootstrap-assume-release", BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.releaseRoleArn, "AssumeReleaseRoleOnlyWithMfa"],
-    ["bootstrap-assume-verifier", BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.verifierRoleArn, "AssumeEcsExecVerifierRoleOnlyWithMfa"],
+    ["bootstrap-assume-verifier", BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.verifierRoleArn, "AssumeVerifierMfa"],
     ["bootstrap-assume-publisher-bootstrap", BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.publisherBootstrapRoleArn, "AssumeStageBPublisherBootstrapRoleOnlyWithMfa"],
   ];
   for (const [id, resource, sid] of expected) {
@@ -176,10 +176,10 @@ test("bootstrap AssumeRole capabilities are bound to their exact MFA-gated inlin
     assert.throws(() => assertStageBDeploymentCapabilityGraph(changed), /stale or incomplete/);
   }
   for (const mutate of [
-    (value) => { value.Statement = value.Statement.filter(({ Sid }) => Sid !== "AssumeEcsExecVerifierRoleOnlyWithMfa"); },
-    (value) => { value.Statement.find(({ Sid }) => Sid === "AssumeEcsExecVerifierRoleOnlyWithMfa").Action = "sts:GetCallerIdentity"; },
-    (value) => { value.Statement.find(({ Sid }) => Sid === "AssumeEcsExecVerifierRoleOnlyWithMfa").Resource = "*"; },
-    (value) => { delete value.Statement.find(({ Sid }) => Sid === "AssumeEcsExecVerifierRoleOnlyWithMfa").Condition; },
+    (value) => { value.Statement = value.Statement.filter(({ Sid }) => Sid !== "AssumeVerifierMfa"); },
+    (value) => { value.Statement.find(({ Sid }) => Sid === "AssumeVerifierMfa").Action = "sts:GetCallerIdentity"; },
+    (value) => { value.Statement.find(({ Sid }) => Sid === "AssumeVerifierMfa").Resource = "*"; },
+    (value) => { delete value.Statement.find(({ Sid }) => Sid === "AssumeVerifierMfa").Condition; },
   ]) {
     const changed = structuredClone(policy); mutate(changed);
     assert.throws(() => assertBootstrapOperatorVerifierAuthority(changed), /exact MFA-gated target set/);
