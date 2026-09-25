@@ -13,7 +13,7 @@
       }
     },
     {
-      "Sid": "AssumeEcsExecVerifierRoleOnlyWithMfa",
+      "Sid": "AssumeVerifierMfa",
       "Effect": "Allow",
       "Action": "sts:AssumeRole",
       "Resource": "arn:aws:iam::368992683803:role/mscqr-production-ecs-exec-verifier",
@@ -56,12 +56,16 @@
     },
     {
       "Effect": "Allow",
-      "Action": ["iam:GetRole", "iam:GetRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies", "iam:GetPolicy", "iam:GetPolicyVersion"],
+      "Action": ["iam:GetRole", "iam:GetRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies"],
       "Resource": [
         "arn:aws:iam::368992683803:role/mscqr-production-web-image-publisher",
-        "arn:aws:iam::368992683803:role/mscqr-production-release-deployer",
-        "arn:aws:iam::368992683803:policy/MSCQRProductionWebImagePublisherBoundary"
+        "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
       ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions"],
+      "Resource": "arn:aws:iam::368992683803:policy/MSCQRProductionWebImagePublisherBoundary"
     },
     {
       "Sid": "ReadOwnMfaState",

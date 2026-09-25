@@ -3513,7 +3513,7 @@
         "sid": "AssumeStageBPublisherBootstrapRoleOnlyWithMfa",
         "livePolicyArn": "inline-user-policy:arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator/MSCQRProductionBootstrapOperator",
         "expectedVersion": "governed-inline-policy",
-        "expectedPolicySha256": "8aea9b72d40c1b0fd620514f3dc99410626f3d6333fe0f8662796eb8ebc6d479"
+        "expectedPolicySha256": "56add5ffc091ebd58321b409d790b93ecdaa00254d607e8eaa38d7ae326d27cd"
       },
       "required": true,
       "mutation": false
@@ -3542,7 +3542,7 @@
         "sid": "AssumeReleaseRoleOnlyWithMfa",
         "livePolicyArn": "inline-user-policy:arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator/MSCQRProductionBootstrapOperator",
         "expectedVersion": "governed-inline-policy",
-        "expectedPolicySha256": "8aea9b72d40c1b0fd620514f3dc99410626f3d6333fe0f8662796eb8ebc6d479"
+        "expectedPolicySha256": "56add5ffc091ebd58321b409d790b93ecdaa00254d607e8eaa38d7ae326d27cd"
       },
       "required": true,
       "mutation": false
@@ -3568,10 +3568,10 @@
       "probeIds": [],
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionBootstrapOperator-v1.json",
-        "sid": "AssumeEcsExecVerifierRoleOnlyWithMfa",
+        "sid": "AssumeVerifierMfa",
         "livePolicyArn": "inline-user-policy:arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator/MSCQRProductionBootstrapOperator",
         "expectedVersion": "governed-inline-policy",
-        "expectedPolicySha256": "8aea9b72d40c1b0fd620514f3dc99410626f3d6333fe0f8662796eb8ebc6d479"
+        "expectedPolicySha256": "56add5ffc091ebd58321b409d790b93ecdaa00254d607e8eaa38d7ae326d27cd"
       },
       "required": true,
       "mutation": false

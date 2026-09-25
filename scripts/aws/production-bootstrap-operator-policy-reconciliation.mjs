@@ -212,19 +212,20 @@ export function readBootstrapOperatorDesiredPolicy({ repositoryRoot = root } = {
   const document = normalizeIamPolicyDocument(fs.readFileSync(path.resolve(repositoryRoot, BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.sourcePath), "utf8"), "bootstrap operator source policy");
   const expected = [
     { Sid: "AssumeReleaseRoleOnlyWithMfa", Effect: "Allow", Action: "sts:AssumeRole", Resource: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.releaseRoleArn, Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } },
-    { Sid: "AssumeEcsExecVerifierRoleOnlyWithMfa", Effect: "Allow", Action: "sts:AssumeRole", Resource: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.verifierRoleArn, Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } },
+    { Sid: "AssumeVerifierMfa", Effect: "Allow", Action: "sts:AssumeRole", Resource: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.verifierRoleArn, Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } },
     { Sid: "AssumeStageBPublisherBootstrapRoleOnlyWithMfa", Effect: "Allow", Action: "sts:AssumeRole", Resource: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.publisherBootstrapRoleArn, Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } },
     { Effect: "Allow", Action: "s3:ListBucket", Resource: "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2", Condition: { StringLike: { "s3:prefix": "mscqr/production/web-release/terraform.tfstate" } } },
     { Effect: "Allow", Action: ["s3:GetObject", "s3:PutObject"], Resource: ["arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/web-release/terraform.tfstate", "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/web-release/terraform.tfstate.tflock"] },
     { Effect: "Allow", Action: "s3:DeleteObject", Resource: "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/web-release/terraform.tfstate.tflock" },
-    { Effect: "Allow", Action: ["iam:GetRole", "iam:GetRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies", "iam:GetPolicy", "iam:GetPolicyVersion"], Resource: ["arn:aws:iam::368992683803:role/mscqr-production-web-image-publisher", "arn:aws:iam::368992683803:role/mscqr-production-release-deployer", "arn:aws:iam::368992683803:policy/MSCQRProductionWebImagePublisherBoundary"] },
+    { Effect: "Allow", Action: ["iam:GetRole", "iam:GetRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies"], Resource: ["arn:aws:iam::368992683803:role/mscqr-production-web-image-publisher", "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"] },
+    { Effect: "Allow", Action: ["iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions"], Resource: "arn:aws:iam::368992683803:policy/MSCQRProductionWebImagePublisherBoundary" },
     { Sid: "ReadOwnMfaState", Effect: "Allow", Action: ["iam:GetUser", "iam:ListMFADevices"], Resource: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn },
   ];
   if (document.Version !== "2012-10-17" || !Array.isArray(document.Statement) || document.Statement.length !== expected.length || expected.some((statement) => !document.Statement.some((candidate) => canonicalJson(candidate) === canonicalJson(statement)))) throw new Error("Bootstrap operator source policy is not the reviewed exact document.");
   const newlyGovernedWebCapabilities = expected.filter(({ Sid }) => !Sid);
   const isNewWebCapability = (statement) => newlyGovernedWebCapabilities.some((candidate) => canonicalJson(candidate) === canonicalJson(statement));
-  const predecessorDocument = { Version: "2012-10-17", Statement: document.Statement.filter((statement) => statement.Sid !== "AssumeEcsExecVerifierRoleOnlyWithMfa" && !isNewWebCapability(statement)) };
-  const legacyLivePredecessorDocument = { Version: "2012-10-17", Statement: document.Statement.filter((statement) => !["AssumeEcsExecVerifierRoleOnlyWithMfa", "AssumeStageBPublisherBootstrapRoleOnlyWithMfa"].includes(statement.Sid) && !isNewWebCapability(statement)) };
+  const predecessorDocument = { Version: "2012-10-17", Statement: document.Statement.filter((statement) => statement.Sid !== "AssumeVerifierMfa" && !isNewWebCapability(statement)) };
+  const legacyLivePredecessorDocument = { Version: "2012-10-17", Statement: document.Statement.filter((statement) => !["AssumeVerifierMfa", "AssumeStageBPublisherBootstrapRoleOnlyWithMfa"].includes(statement.Sid) && !isNewWebCapability(statement)) };
   const legacyLivePredecessorPolicySha256 = sha256(legacyLivePredecessorDocument);
   if (legacyLivePredecessorPolicySha256 !== LEGACY_BOOTSTRAP_TRANSITION_LIVE_PREDECESSOR_POLICY_SHA256) throw new Error("Bootstrap operator legacy live predecessor is not the authenticated production policy.");
   return Object.freeze({ document, predecessorDocument, legacyLivePredecessorDocument, sourcePolicySha256: sha256(document), predecessorPolicySha256: sha256(predecessorDocument), legacyLivePredecessorPolicySha256 });

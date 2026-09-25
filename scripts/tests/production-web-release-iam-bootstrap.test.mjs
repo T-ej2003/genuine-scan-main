@@ -147,7 +147,8 @@ test("operator backend policy has exact state/lock scope and no IAM mutation or 
   const state = statements.find(({ Action }) => Array.isArray(Action) && Action.includes("s3:GetObject"));
   const lock = statements.find(({ Action }) => Action === "s3:DeleteObject");
   const bucket = statements.find(({ Action }) => Action === "s3:ListBucket");
-  const reads = statements.find(({ Action }) => Array.isArray(Action) && Action.includes("iam:GetRole"));
+  const roleReads = statements.find(({ Action }) => Array.isArray(Action) && Action.includes("iam:GetRole"));
+  const boundaryReads = statements.find(({ Action }) => Array.isArray(Action) && Action.includes("iam:ListPolicyVersions"));
   assert.deepEqual(state.Action, ["s3:GetObject", "s3:PutObject"]);
   const stateObject = "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/web-release/terraform.tfstate";
   assert.deepEqual(state.Resource, [stateObject, `${stateObject}.tflock`]);
@@ -155,10 +156,11 @@ test("operator backend policy has exact state/lock scope and no IAM mutation or 
   assert.deepEqual(lock.Action, "s3:DeleteObject");
   assert.equal(state.Action.includes("s3:DeleteObject"), false);
   assert.equal(bucket.Condition.StringLike["s3:prefix"], "mscqr/production/web-release/terraform.tfstate");
-  assert.deepEqual(reads.Resource, ["arn:aws:iam::368992683803:role/mscqr-production-web-image-publisher", "arn:aws:iam::368992683803:role/mscqr-production-release-deployer", "arn:aws:iam::368992683803:policy/MSCQRProductionWebImagePublisherBoundary"]);
-  assert.deepEqual(reads.Action, ["iam:GetRole", "iam:GetRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies", "iam:GetPolicy", "iam:GetPolicyVersion"]);
+  assert.deepEqual(roleReads.Resource, ["arn:aws:iam::368992683803:role/mscqr-production-web-image-publisher", "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"]);
+  assert.deepEqual(roleReads.Action, ["iam:GetRole", "iam:GetRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies"]);
+  assert.deepEqual(boundaryReads, { Effect: "Allow", Action: ["iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions"], Resource: "arn:aws:iam::368992683803:policy/MSCQRProductionWebImagePublisherBoundary" });
   assert.equal(JSON.stringify(document).length <= 2048, true, "The bootstrap operator inline policy must remain within the AWS 2,048-character quota.");
   const allActions = statements.flatMap(({ Action }) => Array.isArray(Action) ? Action : [Action]);
-  for (const action of ["iam:CreateRole", "iam:CreatePolicy", "iam:PutRolePolicy", "iam:AttachRolePolicy", "iam:UpdateAssumeRolePolicy", "iam:PassRole", "iam:*"]) assert.equal(allActions.includes(action), false, action);
+  for (const action of ["iam:CreateRole", "iam:CreatePolicy", "iam:PutRolePolicy", "iam:AttachRolePolicy", "iam:UpdateAssumeRolePolicy", "iam:PassRole", "iam:List*", "iam:Get*", "iam:*"]) assert.equal(allActions.includes(action), false, action);
   assert.equal(statements.some(({ Resource }) => Resource === "*" || (Array.isArray(Resource) && Resource.includes("*"))), false);
 });
