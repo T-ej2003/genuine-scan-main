@@ -40,23 +40,22 @@ The `infra/aws/terraform/production-web-release` root owns the publisher role, i
 An MFA-backed, non-root production operator must use the dedicated encrypted production S3 state and S3 lockfile. AWS root must not plan or apply:
 
 ```sh
-export TF_WORKSPACE=default
-terraform -chdir=infra/aws/terraform/production-web-release init \
+TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-web-release init \
   -upgrade=false -input=false \
   -backend-config='bucket=mscqr-production-terraform-state-368992683803-eu-west-2' \
   -backend-config='key=mscqr/production/web-release/terraform.tfstate' \
   -backend-config='region=eu-west-2' \
   -backend-config='encrypt=true' \
   -backend-config='use_lockfile=true'
-test "$(terraform -chdir=infra/aws/terraform/production-web-release workspace show)" = default
+test "$(TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-web-release workspace show)" = default
 aws sts get-caller-identity
 ```
 
 Verify the caller is in account `368992683803` under the approved non-root operator role. Before creating the saved plan, compare every managed address with live AWS and import any pre-existing object; a plan created before an import must be discarded and recreated. Review the final plan and stop for any unexpected update, delete, or replacement:
 
 ```sh
-terraform -chdir=infra/aws/terraform/production-web-release plan -out=web-release.tfplan
-terraform -chdir=infra/aws/terraform/production-web-release apply web-release.tfplan
+TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-web-release plan -out=web-release.tfplan
+TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-web-release apply web-release.tfplan
 ```
 
 After apply, verify the exact publisher trust/policy and boundary, then set `PRODUCTION_WEB_IMAGE_PUBLISH_ROLE` on the protected `production-web-image-publish` environment to the Terraform `publisher_role_arn` output. This procedure does not configure GitHub or mutate resources until the separately reviewed Terraform apply.
