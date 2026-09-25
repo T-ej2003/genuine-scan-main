@@ -450,6 +450,78 @@ test("unsafe state and plan changes fail before apply", () => {
   fs.rmSync(directory, { recursive: true, force: true });
 });
 
+test("state identity ignores JSON formatting only and hashes the complete parsed state", () => {
+  const original = JSON.parse(installedState);
+  original.outputs = { result: { value: "before", type: "string", sensitive: true } };
+  original.resources[0].provider = 'provider["registry.terraform.io/hashicorp/aws"]';
+  original.resources[0].instances[0] = { schema_version: 1, index_key: 0, attributes: { id: "role-1", nested: { enabled: true } }, sensitive_attributes: [], dependencies: ["aws_iam_policy.reconciler"] };
+  const raw = JSON.stringify(original);
+  const reordered = (value) => Array.isArray(value) ? value.map(reordered) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).reverse().map(([key, child]) => [key, reordered(child)])) : value;
+  const identity = (value) => stateIdentity(Buffer.from(value));
+  const baseline = identity(raw);
+  for (const representation of [`${raw}\n`, JSON.stringify(original, null, 2), JSON.stringify(reordered(original)), raw.replace('"serial":1', '"serial":1.0')]) assert.deepEqual(identity(representation), baseline);
+
+  const mutations = [
+    (value) => { value.serial += 1; },
+    (value) => { value.lineage = "different-lineage"; },
+    (value) => { value.resources.push({ mode: "managed", type: "aws_iam_role", name: "added", instances: [{}] }); },
+    (value) => { value.resources.pop(); },
+    (value) => { value.resources[0].name = "renamed"; },
+    (value) => { value.resources[0].instances[0].attributes.id = "role-2"; },
+    (value) => { value.resources[0].instances[0].index_key = 1; },
+    (value) => { value.resources[0].instances[0].schema_version += 1; },
+    (value) => { value.resources[0].provider = 'provider["example/other"]'; },
+    (value) => { value.resources[0].instances[0].dependencies.push("aws_iam_role.other"); },
+    (value) => { value.outputs.added = { value: "new", type: "string", sensitive: false }; },
+    (value) => { delete value.outputs.result; },
+    (value) => { value.outputs.result.value = "after"; },
+    (value) => { value.outputs.result.sensitive = false; },
+    (value) => { value.version += 1; },
+    (value) => { value.resources[0].instances[0].attributes.nested.enabled = false; },
+    (value) => { value.meaningfulNewField = true; },
+  ];
+  for (const mutate of mutations) {
+    const changed = structuredClone(original);
+    mutate(changed);
+    assert.notEqual(identity(JSON.stringify(changed)).stateSha256, baseline.stateSha256);
+  }
+  assert.notEqual(identity(JSON.stringify({ ...original, resources: [...original.resources].reverse() })).stateSha256, baseline.stateSha256, "array order remains significant");
+  assert.deepEqual(stateIdentity(undefined), { stateExists: false });
+  assert.deepEqual(stateIdentity(Buffer.from(emptyTerraformState)), { stateExists: false });
+  assert.deepEqual(identity(""), { stateExists: false });
+  for (const malformed of ["{", "not-json", "null", "[]", "\"state\""]) assert.throws(() => identity(malformed), /state identity|valid UTF-8 JSON/);
+});
+
+test("preparation and installer accept state-pull newline but reject meaningful state drift", () => {
+  const preparationBytes = Buffer.from(installedState);
+  const preparationState = stateIdentity(preparationBytes);
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-install-cas-format-"));
+  let applies = 0;
+  const install = (installerState) => executeInstallation({
+    sourceSha,
+    preparation: createInstallationPreparation({ sourceSha, state: preparationState, livePredecessor: "EXACT_COMPLETE", livePredecessorAddresses: allAddresses, planJson: completePlan, planBytes: completePlanBytes, preparedAt: now.toISOString() }),
+    authorization: completeAuthorization,
+    planBytes: completePlanBytes,
+    planJson: completePlan,
+    executionRoleArn: INSTALLATION.executionRoleArn,
+    livePredecessor: "EXACT_COMPLETE",
+    livePredecessorAddresses: allAddresses,
+    applySavedPlan: () => { applies += 1; },
+    verifyInstalled: () => true,
+    readState: () => installerState,
+    resultPath: path.join(directory, "result.json"),
+    now,
+  });
+
+  assert.deepEqual(preparationState, stateIdentity(Buffer.from(`${preparationBytes.toString("utf8")}\n`)));
+  assert.equal(install(Buffer.from(`${preparationBytes.toString("utf8")}\n`)).applyCount, 0);
+  const changed = JSON.parse(installedState);
+  changed.resources[0].instances[0].attributes = { changed: true };
+  assert.throws(() => install(Buffer.from(JSON.stringify(changed))), /state changed after preparation/);
+  assert.equal(applies, 0);
+  fs.rmSync(directory, { recursive: true, force: true });
+});
+
 test("first-install preparation normalizes Terraform's canonical empty state sentinel", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-install-empty-state-"));
   fs.chmodSync(directory, 0o700);

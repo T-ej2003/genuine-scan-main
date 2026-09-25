@@ -366,7 +366,7 @@ export function stateIdentity(rawBytes) {
   if (state && typeof state === "object" && !Array.isArray(state)
     && canonicalJson(state) === canonicalJson({ version: 4, terraform_version: INSTALLATION.terraformVersion, serial: 0, lineage: "", outputs: {}, resources: [], check_results: null })) return Object.freeze({ stateExists: false });
   if (!state || typeof state !== "object" || Array.isArray(state) || typeof state.lineage !== "string" || !state.lineage || !Number.isSafeInteger(state.serial) || state.serial < 0) throw new Error("Terraform state identity is malformed.");
-  return Object.freeze({ stateExists: true, lineage: state.lineage, serial: state.serial, stateSha256: sha256(bytes) });
+  return Object.freeze({ stateExists: true, lineage: state.lineage, serial: state.serial, stateSha256: sha256(Buffer.from(canonicalJson(state))) });
 }
 
 export function assertInstallationStateResources(rawBytes, { requiredAddresses = INSTALLATION.expectedAddresses } = {}) {
