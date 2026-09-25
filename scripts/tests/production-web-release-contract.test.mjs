@@ -34,6 +34,23 @@ test("web publisher requires review, permits operator self-review, and stays pro
   });
 });
 
+test("web release Terraform root uses its dedicated production S3 state and lockfile procedure", () => {
+  const versions = fs.readFileSync("infra/aws/terraform/production-web-release/versions.tf", "utf8");
+  const runbook = fs.readFileSync("infra/aws/terraform/production-web-release/README.md", "utf8");
+  assert.match(versions, /backend\s+"s3"\s*\{\s*\}/);
+  for (const required of [
+    "mscqr-production-terraform-state-368992683803-eu-west-2",
+    "mscqr/production/web-release/terraform.tfstate",
+    "region=eu-west-2",
+    "encrypt=true",
+    "use_lockfile=true",
+    "plan -out=web-release.tfplan",
+    "apply web-release.tfplan",
+    "mscqr-production-release-deployer",
+  ]) assert.ok(runbook.includes(required), `web release Terraform procedure must include ${required}`);
+  assert.match(runbook, /MFA-backed, non-root production operator/);
+});
+
 function fixture() {
   const artifactBytes = artifact();
   const identity = buildWebPublicationIdentity({ sourceSha, artifactBytes, observedAt: createdAt, observed: { workflowRunId: "12", workflowDatabaseId: "34", workflowFile: WEB_RELEASE.workflowFile, workflowName: WEB_RELEASE.workflowName, event: "workflow_dispatch", workflowDefinitionSha: sourceSha, headBranch: "main", conclusion: "success", artifactId: "56", artifactName: WEB_RELEASE.artifactName, artifactExpired: false, reviewer: "reviewer-one" } });
