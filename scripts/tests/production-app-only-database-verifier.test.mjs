@@ -42,19 +42,21 @@ const identity = () => ({ role: "mscqr_prod_rls_canary_read", session_role: "msc
 test("all fixed catalogue statements use one read-only repeatable-read transaction", async () => {
   const calls = [];
   const { observed } = fixture(); let read = 0;
-  const tx = { $executeRawUnsafe: async (sql) => calls.push(sql), $queryRawUnsafe: async (sql) => { calls.push(sql); return [[identity()], [{ rows: observed.routines }], [{ rows: observed.routines }], [{ rows: observed.tables }], [{ rows: observed.tables.map((row) => ({ schema: "public", ...row })) }], ...Array.from({ length: 3 }, () => [{ rows: [] }]), [{ rows: observed.policies }], [{ rows: observed.policies.map((row) => ({ schema: "public", ...row })) }], [{ rows: observed.schemas }], [{ rows: observed.schemas }], [{ rows: observed.roles }], [{ rows: observed.roles }], ...Array.from({ length: 6 }, () => [{ rows: [] }])][read++]; } };
+  const tx = { $executeRawUnsafe: async (sql) => calls.push(sql), $queryRawUnsafe: async (sql) => { calls.push(sql); return [[identity()], ...Array.from({ length: 2 }, () => [{ rows: [] }]), [{ rows: observed.routines }], [{ rows: observed.routines }], [{ rows: observed.tables }], [{ rows: observed.tables.map((row) => ({ schema: "public", ...row })) }], ...Array.from({ length: 3 }, () => [{ rows: [] }]), [{ rows: observed.policies }], [{ rows: observed.policies.map((row) => ({ schema: "public", ...row })) }], [{ rows: observed.schemas }], [{ rows: observed.schemas }], [{ rows: observed.roles }], [{ rows: observed.roles }], ...Array.from({ length: 6 }, () => [{ rows: [] }])][read++]; } };
   const client = { $transaction: async (fn, options) => { assert.equal(options.timeout, 30000); return fn(tx); } };
   const result = await collectAppOnlyDatabaseCatalogue(client);
   assert.deepEqual(result.routines, observed.routines);
   assert.equal(calls[0], "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
   assert.equal(calls[1], "SET LOCAL search_path = pg_catalog");
-  assert.equal(read, 20);
+  assert.equal(read, 22);
   // Inspection check, not the security boundary: callers cannot supply SQL;
   // database privileges, fixed code and read-only transaction enforce the limit.
   assert.ok(calls.slice(2).every((sql) => /^(?:SELECT |WITH RECURSIVE )/.test(sql)));
   assert.ok(calls.some((sql) => sql.includes("c.relkind IN ('r','p','v','m','f')")), "security collector covers relation kinds with ACLs");
   assert.ok(calls.some((sql) => sql.includes("pg_catalog.pg_get_viewdef(c.oid,false)")), "view definitions are collected canonically");
   assert.ok(calls.some((sql) => sql.includes("pg_catalog.pg_trigger") && sql.includes("NOT t.tgisinternal") && sql.includes("pg_get_triggerdef")), "user triggers are collected, internal triggers excluded");
+  assert.ok(calls.some((sql) => sql.includes("FROM pg_catalog.pg_extension")), "installed extensions are inventoried before extension-owned members are excluded");
+  assert.ok(calls.some((sql) => sql.includes("FROM pg_catalog.pg_publication") && sql.includes("pg_catalog.pg_user_mappings")), "security-relevant attachment surfaces are collected without secret option values");
   for (const source of ["pg_proc p", "pg_class c", "pg_namespace n", "pg_database d", "pg_default_acl d", "pg_type t"]) {
     const sql = calls.find((query) => query.includes(`FROM pg_catalog.${source}`) && query.includes("aclexplode") && query.includes("grantor.rolname"));
     assert.ok(sql?.includes("grantor.rolname") && sql.includes("a.grantor") || sql?.includes("grantor.rolname") && sql.includes("acl.grantor"), `${source} security ACL collector preserves grantor`);
