@@ -309,9 +309,115 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         "roleMembers","databases","databaseGrants","defaultPrivileges","types","typeGrants","operatorCapabilities",
         "operatorMemberships"]) assert.ok(collectedSecurityDomains.has(collection), `Real collector omitted ${collection}`);
       assert.ok(catalogue.roles.every(({ memberships, members }) => Array.isArray(memberships) && Array.isArray(members)));
-      for (const collection of ["securityRoutines","securityTables","securityPolicies","securitySchemas","roleMetadata","databases","defaults","types","sequences","operatorCapabilities"]) assert.ok(Array.isArray(catalogue[collection]), `Real collector omitted ${collection}`);
+      for (const collection of ["securityRoutines","securityTables","securityTriggers","securityPolicies","securitySchemas","roleMetadata","databases","defaults","types","sequences","operatorCapabilities"]) assert.ok(Array.isArray(catalogue[collection]), `Real collector omitted ${collection}`);
       assert.ok(catalogue.securityTables.every(({ kind }) => ["r","p","v","m","f"].includes(kind)));
       assert.ok(catalogue.securityRoutines.every(({ schema }) => schema !== "information_schema" && !schema.startsWith("pg_")));
+      await assert.rejects(maintenanceClient.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe("CREATE VIEW public.rebaseline_view_contract AS SELECT 1::integer AS id");
+        await tx.$executeRawUnsafe("CREATE MATERIALIZED VIEW public.rebaseline_matview_contract AS SELECT 1::integer AS id");
+        await tx.$executeRawUnsafe("CREATE TABLE public.rebaseline_trigger_contract(id integer)");
+        await tx.$executeRawUnsafe("CREATE TABLE public.rebaseline_partition_contract(id integer) PARTITION BY RANGE (id)");
+        await tx.$executeRawUnsafe("CREATE TABLE public.rebaseline_partition_contract_low PARTITION OF public.rebaseline_partition_contract FOR VALUES FROM (0) TO (10)");
+        await tx.$executeRawUnsafe("CREATE FUNCTION public.rebaseline_trigger_one() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RETURN NEW; END'");
+        await tx.$executeRawUnsafe("CREATE FUNCTION public.rebaseline_trigger_two() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RETURN NEW; END'");
+        await tx.$executeRawUnsafe("CREATE TRIGGER rebaseline_contract_trigger BEFORE INSERT ON public.rebaseline_trigger_contract FOR EACH ROW EXECUTE FUNCTION public.rebaseline_trigger_one()");
+        await tx.$executeRawUnsafe("CREATE TABLE public.rebaseline_internal_parent(id integer PRIMARY KEY)");
+        await tx.$executeRawUnsafe("CREATE TABLE public.rebaseline_internal_child(parent_id integer REFERENCES public.rebaseline_internal_parent(id))");
+        const fixtureCatalogue = await collectAppOnlyDatabaseCatalogueRows(tx);
+        const fixtureCanonical = createSecurityRebaselineInventory({ kind: "CANONICAL", protectedMainSha: sourceSha,
+          catalogue: fixtureCatalogue, repositoryRoot: root, packageChecksums: JSON.parse(fs.readFileSync(path.join(evidenceRoot, "checksums.json"), "utf8")) });
+        const evidence = { taskArn: `arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/${"d".repeat(32)}`,
+          taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/security-rebaseline:1", containerName: "security-rebaseline",
+          containerExitCode: 0, requestSha256: "e".repeat(64), verificationContractSha256: "e".repeat(64) };
+        const compare = async () => {
+          const collected = await collectAppOnlyDatabaseCatalogueRows(tx);
+          const liveInventory = createLiveSecurityRebaselineInventory({ protectedMainSha: sourceSha, catalogue: collected, canonical: fixtureCanonical, taskEvidence: evidence });
+          return { collected, diff: diffSecurityRebaselineInventories(liveInventory, fixtureCanonical) };
+        };
+        let result = await compare();
+        assert.equal(result.diff.differences.filter(({ collection }) => ["tables","triggers"].includes(collection)).length, 0,
+          `identical real view/trigger catalogues have no drift (unrelated disposable-role differences are ignored): ${JSON.stringify(result.diff.differences.filter(({ collection }) => ["tables","triggers"].includes(collection)))} `);
+        const baselineView = result.collected.securityTables.find(({ name }) => name === "rebaseline_view_contract").view_definition;
+        await tx.$executeRawUnsafe("CREATE OR REPLACE VIEW public.rebaseline_view_contract AS SELECT 1 :: integer AS id");
+        result = await compare();
+        assert.equal(result.collected.securityTables.find(({ name }) => name === "rebaseline_view_contract").view_definition, baselineView,
+          "PostgreSQL canonicalizes formatting-only view SQL");
+        assert.equal(result.diff.differences.filter(({ collection }) => ["tables","triggers"].includes(collection)).length, 0);
+        await tx.$executeRawUnsafe("ALTER VIEW public.rebaseline_view_contract SET (security_barrier=true)");
+        result = await compare();
+        assert.ok(result.diff.differences.some(({ identity, field }) => identity === "public.rebaseline_view_contract" && field === "view_security_options"));
+        await tx.$executeRawUnsafe("ALTER VIEW public.rebaseline_view_contract RESET (security_barrier)");
+        result = await compare();
+        assert.equal(result.diff.differences.filter(({ collection }) => ["tables","triggers"].includes(collection)).length, 0);
+        for (const sql of [
+          "CREATE OR REPLACE VIEW public.rebaseline_view_contract AS SELECT 2::integer AS id",
+          "CREATE OR REPLACE VIEW public.rebaseline_view_contract AS SELECT 1::integer AS id WHERE 1=1",
+          "CREATE OR REPLACE VIEW public.rebaseline_view_contract AS SELECT c.oid::integer AS id FROM pg_catalog.pg_class AS c",
+          "CREATE OR REPLACE VIEW public.rebaseline_view_contract AS SELECT d.oid::integer AS id FROM pg_catalog.pg_database AS d",
+        ]) {
+          await tx.$executeRawUnsafe(sql);
+          result = await compare();
+          assert.ok(result.diff.differences.some(({ collection, identity, field }) => collection === "tables"
+            && identity === "public.rebaseline_view_contract" && field === "view_definition"), "real view definition change reaches diff");
+        }
+        await tx.$executeRawUnsafe("DROP MATERIALIZED VIEW public.rebaseline_matview_contract");
+        await tx.$executeRawUnsafe("CREATE MATERIALIZED VIEW public.rebaseline_matview_contract AS SELECT 2::integer AS id");
+        result = await compare();
+        assert.ok(result.diff.differences.some(({ identity, field }) => identity === "public.rebaseline_matview_contract" && field === "view_definition"));
+        await tx.$executeRawUnsafe("DROP TABLE public.rebaseline_partition_contract_low");
+        await tx.$executeRawUnsafe("CREATE TABLE public.rebaseline_partition_contract_low PARTITION OF public.rebaseline_partition_contract FOR VALUES FROM (0) TO (20)");
+        result = await compare();
+        assert.ok(result.diff.differences.some(({ identity, field }) => identity === "public.rebaseline_partition_contract_low" && field === "partition_bound"));
+        await tx.$executeRawUnsafe("CREATE TRIGGER rebaseline_unexpected_trigger AFTER INSERT ON public.rebaseline_trigger_contract FOR EACH ROW EXECUTE FUNCTION public.rebaseline_trigger_one()");
+        result = await compare();
+        assert.equal(result.diff.safeToConstructConvergencePlan, false, "unexpected user trigger blocks plan construction");
+        assert.ok(result.diff.differences.some(({ collection, identity }) => collection === "triggers" && identity.endsWith(".rebaseline_unexpected_trigger")));
+        await tx.$executeRawUnsafe("DROP TRIGGER rebaseline_contract_trigger ON public.rebaseline_trigger_contract");
+        await tx.$executeRawUnsafe("CREATE TRIGGER rebaseline_contract_trigger BEFORE INSERT ON public.rebaseline_trigger_contract FOR EACH ROW EXECUTE FUNCTION public.rebaseline_trigger_two()");
+        result = await compare();
+        assert.ok(result.diff.differences.some(({ collection, identity, field }) => collection === "triggers" && identity.endsWith(".rebaseline_contract_trigger") && field === "function"));
+        await tx.$executeRawUnsafe("DROP TRIGGER rebaseline_contract_trigger ON public.rebaseline_trigger_contract");
+        await tx.$executeRawUnsafe("CREATE TRIGGER rebaseline_contract_trigger AFTER INSERT ON public.rebaseline_trigger_contract FOR EACH ROW EXECUTE FUNCTION public.rebaseline_trigger_two()");
+        result = await compare();
+        assert.ok(result.diff.differences.some(({ collection, identity, field }) => collection === "triggers" && identity.endsWith(".rebaseline_contract_trigger") && field === "definition"));
+        await tx.$executeRawUnsafe("DROP TRIGGER rebaseline_contract_trigger ON public.rebaseline_trigger_contract");
+        await tx.$executeRawUnsafe("CREATE TRIGGER rebaseline_contract_trigger BEFORE INSERT ON public.rebaseline_trigger_contract FOR EACH ROW EXECUTE FUNCTION public.rebaseline_trigger_one()");
+        await tx.$executeRawUnsafe("ALTER TABLE public.rebaseline_trigger_contract DISABLE TRIGGER rebaseline_contract_trigger");
+        result = await compare();
+        assert.ok(result.diff.differences.some(({ collection, identity, field }) => collection === "triggers" && identity.endsWith(".rebaseline_contract_trigger") && field === "enabled"));
+        assert.ok(result.collected.securityTriggers.every(({ name }) => !name.startsWith("RI_ConstraintTrigger")), "internal FK triggers are excluded");
+        await tx.$executeRawUnsafe("CREATE TABLE public.rebaseline_acl_grantor_subject(id integer)");
+        await tx.$executeRawUnsafe('GRANT USAGE ON SCHEMA public TO "mscqr_prod_admin", pg_database_owner');
+        await tx.$executeRawUnsafe('GRANT SELECT ON public.rebaseline_acl_grantor_subject TO "mscqr_prod_admin" WITH GRANT OPTION');
+        await tx.$executeRawUnsafe("GRANT SELECT ON public.rebaseline_acl_grantor_subject TO pg_database_owner WITH GRANT OPTION");
+        await tx.$executeRawUnsafe('GRANT SELECT ON public.rebaseline_acl_grantor_subject TO "mscqr_prd_rls_phase2_app"');
+        await tx.$executeRawUnsafe('SET ROLE "mscqr_prod_admin"');
+        await tx.$executeRawUnsafe('GRANT SELECT ON public.rebaseline_acl_grantor_subject TO "mscqr_prd_rls_phase2_auth_owner"');
+        await tx.$executeRawUnsafe("RESET ROLE");
+        let aclState = await collectAppOnlyDatabaseCatalogueRows(tx);
+        const aclCanonical = createSecurityRebaselineInventory({ kind: "CANONICAL", protectedMainSha: sourceSha,
+          catalogue: aclState, repositoryRoot: root, packageChecksums: JSON.parse(fs.readFileSync(path.join(evidenceRoot, "checksums.json"), "utf8")) });
+        const firstGrant = aclState.securityTables.find(({ name }) => name === "rebaseline_acl_grantor_subject").grants
+          .find(({ role }) => role === "mscqr_prd_rls_phase2_auth_owner");
+        assert.equal(firstGrant.grantor, "mscqr_prod_admin");
+        let aclLive = createLiveSecurityRebaselineInventory({ protectedMainSha: sourceSha, catalogue: aclState, canonical: aclCanonical, taskEvidence: evidence });
+        const sameAclDiff = diffSecurityRebaselineInventories(aclLive, aclCanonical);
+        assert.equal(sameAclDiff.differences.filter(({ collection, identity }) => collection === "tableGrants" && identity.includes("rebaseline_acl_grantor_subject")).length, 0,
+          "same real PG18 grantor state has no grant diff");
+        await tx.$executeRawUnsafe('SET ROLE "mscqr_prod_admin"');
+        await tx.$executeRawUnsafe('REVOKE SELECT ON public.rebaseline_acl_grantor_subject FROM "mscqr_prd_rls_phase2_auth_owner"');
+        await tx.$executeRawUnsafe("RESET ROLE");
+        await tx.$executeRawUnsafe("SET ROLE pg_database_owner");
+        await tx.$executeRawUnsafe('GRANT SELECT ON public.rebaseline_acl_grantor_subject TO "mscqr_prd_rls_phase2_auth_owner"');
+        await tx.$executeRawUnsafe("RESET ROLE");
+        aclState = await collectAppOnlyDatabaseCatalogueRows(tx);
+        const secondGrant = aclState.securityTables.find(({ name }) => name === "rebaseline_acl_grantor_subject").grants
+          .find(({ role }) => role === "mscqr_prd_rls_phase2_auth_owner");
+        assert.equal(secondGrant.grantor, "pg_database_owner", "real PG18 ACL grantor change is collected");
+        aclLive = createLiveSecurityRebaselineInventory({ protectedMainSha: sourceSha, catalogue: aclState, canonical: aclCanonical, taskEvidence: evidence });
+        assert.ok(diffSecurityRebaselineInventories(aclLive, aclCanonical).differences.some(({ collection, identity }) => collection === "tableGrants" && identity.includes("rebaseline_acl_grantor_subject") && identity.includes("pg_database_owner")));
+        throw new Error("rollback real view and trigger inventory fixtures");
+      }, { timeout: 60000 }), /rollback real view and trigger inventory fixtures/);
       await assert.rejects(maintenanceClient.$transaction(async (tx) => {
         await tx.$executeRawUnsafe("CREATE VIEW public.rebaseline_unexpected_view AS SELECT 1 AS value");
         await tx.$executeRawUnsafe('ALTER VIEW public.rebaseline_unexpected_view OWNER TO "mscqr_prod_admin"');
@@ -325,7 +431,16 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         await tx.$executeRawUnsafe("CREATE SERVER rebaseline_fixture_server FOREIGN DATA WRAPPER postgres_fdw OPTIONS (host '127.0.0.1', dbname 'postgres')");
         await tx.$executeRawUnsafe("CREATE FOREIGN TABLE public.rebaseline_unexpected_foreign (id integer) SERVER rebaseline_fixture_server OPTIONS (schema_name 'public', table_name 'unused')");
         await tx.$executeRawUnsafe("CREATE TYPE public.rebaseline_unexpected_enum AS ENUM ('one','two')");
+        await tx.$executeRawUnsafe("CREATE DOMAIN public.rebaseline_security_domain AS integer NOT NULL CHECK (VALUE > 0)");
         await tx.$executeRawUnsafe("CREATE SEQUENCE public.rebaseline_unexpected_sequence");
+        await tx.$executeRawUnsafe("CREATE TABLE public.rebaseline_acl_grantor_subject(id integer)");
+        await tx.$executeRawUnsafe("GRANT UPDATE (id) ON TABLE public.rebaseline_acl_grantor_subject TO PUBLIC");
+        await tx.$executeRawUnsafe("GRANT EXECUTE ON FUNCTION public.rebaseline_unexpected() TO PUBLIC");
+        await tx.$executeRawUnsafe("CREATE SCHEMA rebaseline_acl_schema AUTHORIZATION mscqr_prod_admin");
+        await tx.$executeRawUnsafe("GRANT USAGE ON SCHEMA rebaseline_acl_schema TO PUBLIC");
+        await tx.$executeRawUnsafe("GRANT USAGE ON TYPE public.rebaseline_unexpected_enum TO PUBLIC");
+        await tx.$executeRawUnsafe("GRANT USAGE ON SEQUENCE public.rebaseline_unexpected_sequence TO PUBLIC");
+        await tx.$executeRawUnsafe(`GRANT CONNECT ON DATABASE "${targetDatabase}" TO PUBLIC`);
         const testCanonical = securityRebaselineCanonical;
         await tx.$executeRawUnsafe("GRANT SELECT ON public.rebaseline_unexpected_view TO PUBLIC");
         await tx.$executeRawUnsafe("CREATE ROLE rebaseline_intermediate_writer NOLOGIN");
@@ -348,6 +463,15 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         await tx.$executeRawUnsafe('GRANT rebaseline_intermediate_writer TO "mscqr_prod_admin"');
         await tx.$executeRawUnsafe('GRANT pg_write_all_data TO "mscqr_prod_admin"');
         const changed = await collectAppOnlyDatabaseCatalogueRows(tx), taskDigest = "f".repeat(64);
+        const publicViewGrant = changed.securityTables.find(({ name }) => name === "rebaseline_unexpected_view").grants.find(({ role }) => role === "PUBLIC");
+        assert.ok(publicViewGrant?.grantor, "PUBLIC relation ACL retains its real grantor");
+        assert.ok(changed.securityTables.find(({ name }) => name === "rebaseline_acl_grantor_subject").column_grants.some(({ role, grantor }) => role === "PUBLIC" && grantor));
+        assert.ok(changed.securityRoutines.find(({ name }) => name === "rebaseline_unexpected").grants.some(({ role, grantor }) => role === "PUBLIC" && grantor));
+        assert.ok(changed.securitySchemas.find(({ name }) => name === "rebaseline_acl_schema").grants.some(({ role, grantor }) => role === "PUBLIC" && grantor));
+        assert.ok(changed.databases.length > 0 && changed.databases.every(({ grantor }) => typeof grantor === "string"));
+        assert.ok(changed.defaults.some(({ owner, grantor }) => owner === "rebaseline_default_owner" && grantor === owner));
+        assert.ok(changed.types.find(({ name }) => name === "rebaseline_unexpected_enum").grants.some(({ role, grantor }) => role === "PUBLIC" && grantor));
+        assert.ok(changed.sequences.find(({ name }) => name === "rebaseline_unexpected_sequence").grants.some(({ role, grantor }) => role === "PUBLIC" && grantor));
         assert.ok(changed.securityRoutines.some(({ schema, name }) => schema === "public" && name === "rebaseline_unexpected"));
         assert.ok(changed.securityRoutines.some(({ schema, name, kind }) => schema === "public" && name === "rebaseline_unexpected_procedure" && kind === "p"));
         assert.ok(changed.securityRoutines.some(({ schema, name, kind, aggregate_state_sha256 }) => schema === "public" && name === "rebaseline_unexpected_aggregate" && kind === "a" && /^[a-f0-9]{64}$/.test(aggregate_state_sha256)));
@@ -355,7 +479,13 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         assert.ok(changed.securityTables.some(({ schema, name, kind }) => schema === "public" && name === "rebaseline_unexpected_materialized" && kind === "m"));
         assert.ok(changed.securityTables.some(({ schema, name, kind }) => schema === "public" && name === "rebaseline_unexpected_foreign" && kind === "f"));
         assert.ok(changed.types.some(({ schema, name }) => schema === "public" && name === "rebaseline_unexpected_enum"));
+        const domainState = changed.types.find(({ name }) => name === "rebaseline_security_domain");
+        assert.equal(domainState.base_type, "integer");
+        assert.equal(domainState.not_null, true);
+        assert.ok(domainState.constraints.some(({ definition }) => definition.includes("CHECK")), "real domain check constraint is collected alongside PG18's not-null constraint");
+        assert.deepEqual(changed.types.find(({ name }) => name === "rebaseline_unexpected_enum").enum_labels, ["one","two"]);
         assert.ok(changed.sequences.some(({ schema, name }) => schema === "public" && name === "rebaseline_unexpected_sequence"));
+        assert.equal(typeof changed.sequences.find(({ name }) => name === "rebaseline_unexpected_sequence").increment_by, "string");
         assert.ok(changed.securityRoles.some(({ name, login }) => name === "rebaseline_unexpected_login" && login));
         assert.ok(changed.securityRoles.some(({ name, bypass_rls }) => name === "rebaseline_unexpected_bypass" && bypass_rls));
         assert.ok(changed.securityRoles.some(({ name, create_role }) => name === "rebaseline_unexpected_createrole" && create_role));
