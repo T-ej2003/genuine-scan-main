@@ -51,12 +51,7 @@ export function buildAppOnlyVerifierCommand({ requirements, identity, repository
   const verificationContractSha256 = canonicalSha256({ functions, requirementsSha256: requirements.requirementsSha256 });
   const packed = compactAppOnlyRequirements(requirements);
   const payload = deflateSync(Buffer.from(JSON.stringify({ requirements: packed, identity, verificationContractSha256 }))).toString("base64");
-  const command = `"use strict";
-const assert=require("node:assert/strict"),crypto=require("node:crypto");
-const {PrismaClient}=require("@prisma/client");
-const canonicalJson=${canonicalJson.toString()};
-const canonicalSha256=value=>crypto.createHash("sha256").update(canonicalJson(value)).digest("hex");
-${functions}
+  const runtime = `${functions}
 const input=JSON.parse(require("node:zlib").inflateSync(Buffer.from(${JSON.stringify(payload)},"base64"),{maxOutputLength:1048576}));
 let phase="CONFIGURATION";
 (async()=>{
@@ -80,6 +75,13 @@ let phase="CONFIGURATION";
     if(!Object.values(domains).every(value=>value==="COMPATIBLE"))process.exitCode=1;
   } finally { await client.$disconnect(); }
 })().catch(()=>{console.error(JSON.stringify({status:"APP_ONLY_DATABASE_VERIFICATION_FAILED",phase}));process.exitCode=1;});`;
+  const compressedRuntime = deflateSync(Buffer.from(runtime)).toString("base64");
+  const command = `"use strict";
+const assert=require("node:assert/strict"),crypto=require("node:crypto");
+const {PrismaClient}=require("@prisma/client");
+const canonicalJson=${canonicalJson.toString()};
+const canonicalSha256=value=>crypto.createHash("sha256").update(canonicalJson(value)).digest("hex");
+eval(require("node:zlib").inflateSync(Buffer.from(${JSON.stringify(compressedRuntime)},"base64"),{maxOutputLength:8388608}).toString());`;
   assert.ok(Buffer.byteLength(command) <= 48000, "Verifier command exceeds fixed task-definition budget");
   return { entryPoint: ["node"], command: ["-e", command], verificationContractSha256 };
 }

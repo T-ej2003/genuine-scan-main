@@ -309,7 +309,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         "roleMembers","databases","databaseGrants","defaultPrivileges","types","typeGrants","operatorCapabilities",
         "operatorMemberships"]) assert.ok(collectedSecurityDomains.has(collection), `Real collector omitted ${collection}`);
       assert.ok(catalogue.roles.every(({ memberships, members }) => Array.isArray(memberships) && Array.isArray(members)));
-      for (const collection of ["securityRoutines","securityTables","securityTriggers","securityPolicies","securitySchemas","roleMetadata","databases","defaults","types","sequences","operatorCapabilities"]) assert.ok(Array.isArray(catalogue[collection]), `Real collector omitted ${collection}`);
+      for (const collection of ["securityRoutines","securityTables","securityTriggers","securityRules","securityEventTriggers","securityPolicies","securitySchemas","roleMetadata","databases","defaults","types","sequences","operatorCapabilities"]) assert.ok(Array.isArray(catalogue[collection]), `Real collector omitted ${collection}`);
       assert.ok(catalogue.securityTables.every(({ kind }) => ["r","p","v","m","f"].includes(kind)));
       assert.ok(catalogue.securityRoutines.every(({ schema }) => schema !== "information_schema" && !schema.startsWith("pg_")));
       await assert.rejects(maintenanceClient.$transaction(async (tx) => {
@@ -318,9 +318,13 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         await tx.$executeRawUnsafe("CREATE TABLE public.rebaseline_trigger_contract(id integer)");
         await tx.$executeRawUnsafe("CREATE TABLE public.rebaseline_partition_contract(id integer) PARTITION BY RANGE (id)");
         await tx.$executeRawUnsafe("CREATE TABLE public.rebaseline_partition_contract_low PARTITION OF public.rebaseline_partition_contract FOR VALUES FROM (0) TO (10)");
+        await tx.$executeRawUnsafe("ALTER TABLE public.rebaseline_partition_contract ADD CONSTRAINT rebaseline_partition_check CHECK (id > 0)");
         await tx.$executeRawUnsafe("CREATE FUNCTION public.rebaseline_trigger_one() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RETURN NEW; END'");
         await tx.$executeRawUnsafe("CREATE FUNCTION public.rebaseline_trigger_two() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RETURN NEW; END'");
+        await tx.$executeRawUnsafe("CREATE FUNCTION public.rebaseline_event_guard() RETURNS event_trigger LANGUAGE plpgsql AS 'BEGIN RETURN; END'");
+        await tx.$executeRawUnsafe("CREATE EVENT TRIGGER rebaseline_event_guard ON ddl_command_start EXECUTE FUNCTION public.rebaseline_event_guard()");
         await tx.$executeRawUnsafe("CREATE TRIGGER rebaseline_contract_trigger BEFORE INSERT ON public.rebaseline_trigger_contract FOR EACH ROW EXECUTE FUNCTION public.rebaseline_trigger_one()");
+        await tx.$executeRawUnsafe("CREATE RULE rebaseline_expected_rule AS ON UPDATE TO public.rebaseline_trigger_contract DO INSTEAD NOTHING");
         await tx.$executeRawUnsafe("CREATE TABLE public.rebaseline_internal_parent(id integer PRIMARY KEY)");
         await tx.$executeRawUnsafe("CREATE TABLE public.rebaseline_internal_child(parent_id integer REFERENCES public.rebaseline_internal_parent(id))");
         const fixtureCatalogue = await collectAppOnlyDatabaseCatalogueRows(tx);
@@ -335,8 +339,13 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
           return { collected, diff: diffSecurityRebaselineInventories(liveInventory, fixtureCanonical) };
         };
         let result = await compare();
-        assert.equal(result.diff.differences.filter(({ collection }) => ["tables","triggers"].includes(collection)).length, 0,
-          `identical real view/trigger catalogues have no drift (unrelated disposable-role differences are ignored): ${JSON.stringify(result.diff.differences.filter(({ collection }) => ["tables","triggers"].includes(collection)))} `);
+        assert.equal(result.diff.differences.filter(({ collection }) => ["tables","triggers","rules","eventTriggers"].includes(collection)).length, 0,
+          "identical real relation/view/trigger/rule/event-trigger catalogues have no drift");
+        const partitionChild = result.collected.securityTables.find(({ name }) => name === "rebaseline_partition_contract_low");
+        assert.equal(partitionChild.constraints.find(({ name }) => name === "rebaseline_partition_check").parent_identity,
+          "public.rebaseline_partition_contract.rebaseline_partition_check", "partition constraint parent identity is stable, not a backend-local OID");
+        assert.ok(result.collected.securityRules.some(({ name, definition }) => name === "rebaseline_expected_rule" && definition.includes("DO INSTEAD NOTHING")));
+        assert.ok(result.collected.securityEventTriggers.some(({ name, event, function: routine }) => name === "rebaseline_event_guard" && event === "ddl_command_start" && routine.endsWith("rebaseline_event_guard()")));
         const baselineView = result.collected.securityTables.find(({ name }) => name === "rebaseline_view_contract").view_definition;
         await tx.$executeRawUnsafe("CREATE OR REPLACE VIEW public.rebaseline_view_contract AS SELECT 1 :: integer AS id");
         result = await compare();
@@ -386,6 +395,14 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         result = await compare();
         assert.ok(result.diff.differences.some(({ collection, identity, field }) => collection === "triggers" && identity.endsWith(".rebaseline_contract_trigger") && field === "enabled"));
         assert.ok(result.collected.securityTriggers.every(({ name }) => !name.startsWith("RI_ConstraintTrigger")), "internal FK triggers are excluded");
+        await tx.$executeRawUnsafe("CREATE OR REPLACE RULE rebaseline_expected_rule AS ON UPDATE TO public.rebaseline_trigger_contract DO ALSO NOTHING");
+        result = await compare();
+        assert.equal(result.diff.safeToConstructConvergencePlan, false, "rewrite-rule drift blocks plan construction");
+        assert.ok(result.diff.differences.some(({ collection, identity, field }) => collection === "rules" && identity.endsWith(".rebaseline_expected_rule") && field === "definition"));
+        await tx.$executeRawUnsafe("ALTER EVENT TRIGGER rebaseline_event_guard DISABLE");
+        result = await compare();
+        assert.equal(result.diff.safeToConstructConvergencePlan, false, "event-trigger enablement drift blocks plan construction");
+        assert.ok(result.diff.differences.some(({ collection, identity, field }) => collection === "eventTriggers" && identity === "rebaseline_event_guard" && field === "enabled"));
         await tx.$executeRawUnsafe("CREATE TABLE public.rebaseline_acl_grantor_subject(id integer)");
         await tx.$executeRawUnsafe('GRANT USAGE ON SCHEMA public TO "mscqr_prod_admin", pg_database_owner');
         await tx.$executeRawUnsafe('GRANT SELECT ON public.rebaseline_acl_grantor_subject TO "mscqr_prod_admin" WITH GRANT OPTION');

@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { inflateSync } from "node:zlib";
 import { APP_ONLY } from "../aws/production-app-only-contract.mjs";
 import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
 import { authenticateAppOnlyVerifierResult, buildAppOnlyVerifierDefinition, assertRegisteredAppOnlyVerifier } from "../aws/production-app-only-verifier-command.mjs";
@@ -46,8 +47,11 @@ test("verifier registration is the exact source-owned read-only boundary with fi
   const databaseSecretArn = `arn:aws:secretsmanager:${APP_ONLY.region}:${APP_ONLY.account}:secret:mscqr/production/rls-green/phase4/read-only-canary-database-url-ABC123`;
   const input = { requirements, identity, repositoryRoot, databaseSecretArn };
   const { definition } = buildAppOnlyVerifierDefinition(input);
-  assert.doesNotThrow(() => new Function(definition.containerDefinitions[0].command[1]));
-  assert.match(definition.containerDefinitions[0].command[1], /async function collectAppOnlyDatabaseCatalogueRows/);
+  const command = definition.containerDefinitions[0].command[1];
+  assert.doesNotThrow(() => new Function(command));
+  const compressedRuntime = command.match(/inflateSync\(Buffer\.from\("([A-Za-z0-9+/=]+)","base64"\)/)?.[1];
+  assert.ok(compressedRuntime);
+  assert.match(inflateSync(Buffer.from(compressedRuntime, "base64")).toString(), /async function collectAppOnlyDatabaseCatalogueRows/);
   const taskDefinitionArn = `arn:aws:ecs:${APP_ONLY.region}:${APP_ONLY.account}:task-definition/${APP_ONLY_VERIFIER.family}:17`;
   const observed = { ...structuredClone(definition), taskDefinitionArn, status: "ACTIVE", revision: 17, volumes: [], placementConstraints: [], enableFaultInjection: false };
   observed.containerDefinitions[0].cpu = 0;

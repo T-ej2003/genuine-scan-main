@@ -42,13 +42,13 @@ const identity = () => ({ role: "mscqr_prod_rls_canary_read", session_role: "msc
 test("all fixed catalogue statements use one read-only repeatable-read transaction", async () => {
   const calls = [];
   const { observed } = fixture(); let read = 0;
-  const tx = { $executeRawUnsafe: async (sql) => calls.push(sql), $queryRawUnsafe: async (sql) => { calls.push(sql); return [[identity()], [{ rows: observed.routines }], [{ rows: observed.routines }], [{ rows: observed.tables }], [{ rows: observed.tables.map((row) => ({ schema: "public", ...row })) }], [{ rows: [] }], [{ rows: observed.policies }], [{ rows: observed.policies.map((row) => ({ schema: "public", ...row })) }], [{ rows: observed.schemas }], [{ rows: observed.schemas }], [{ rows: observed.roles }], [{ rows: observed.roles }], ...Array.from({ length: 6 }, () => [{ rows: [] }])][read++]; } };
+  const tx = { $executeRawUnsafe: async (sql) => calls.push(sql), $queryRawUnsafe: async (sql) => { calls.push(sql); return [[identity()], [{ rows: observed.routines }], [{ rows: observed.routines }], [{ rows: observed.tables }], [{ rows: observed.tables.map((row) => ({ schema: "public", ...row })) }], ...Array.from({ length: 3 }, () => [{ rows: [] }]), [{ rows: observed.policies }], [{ rows: observed.policies.map((row) => ({ schema: "public", ...row })) }], [{ rows: observed.schemas }], [{ rows: observed.schemas }], [{ rows: observed.roles }], [{ rows: observed.roles }], ...Array.from({ length: 6 }, () => [{ rows: [] }])][read++]; } };
   const client = { $transaction: async (fn, options) => { assert.equal(options.timeout, 30000); return fn(tx); } };
   const result = await collectAppOnlyDatabaseCatalogue(client);
   assert.deepEqual(result.routines, observed.routines);
   assert.equal(calls[0], "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
   assert.equal(calls[1], "SET LOCAL search_path = pg_catalog");
-  assert.equal(read, 18);
+  assert.equal(read, 20);
   // Inspection check, not the security boundary: callers cannot supply SQL;
   // database privileges, fixed code and read-only transaction enforce the limit.
   assert.ok(calls.slice(2).every((sql) => /^(?:SELECT |WITH RECURSIVE )/.test(sql)));
@@ -74,6 +74,10 @@ test("all fixed catalogue statements use one read-only repeatable-read transacti
   const routinesSql = calls.find((sql) => sql.includes("p.prokind::text AS kind"));
   assert.ok(routinesSql?.includes("pg_catalog.pg_aggregate") && routinesSql.includes("aggregate_state_sha256")
     && routinesSql.includes("CASE WHEN p.prokind='a'"), "functions, procedures, windows, and aggregates have stable distinct security identities");
+  assert.ok(calls.some((sql) => sql.includes("pg_catalog.pg_rewrite") && sql.includes("r.rulename<>'_RETURN'") && sql.includes("pg_get_ruledef")));
+  assert.ok(calls.some((sql) => sql.includes("pg_catalog.pg_event_trigger") && sql.includes("e.evtfoid") && sql.includes("evttags")));
+  assert.ok(calls.some((sql) => sql.includes("pg_get_constraintdef") && sql.includes("parent_identity") && sql.includes("pno.nspname")));
+  assert.ok(calls.some((sql) => sql.includes("r.rolvaliduntil::text AS valid_until")), "role credential expiry is included without exposing verifier/password fields");
 });
 for (const field of Object.keys(identity())) test(`database identity boundary rejects ${field} substitution`, async () => {
   const bad = { ...identity(), [field]: typeof identity()[field] === "boolean" ? true : "wrong" };
