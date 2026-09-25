@@ -157,13 +157,13 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
     const [securityRoles] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.name),'[]'::jsonb) AS rows FROM (
       SELECT r.rolname AS name,r.rolcanlogin AS login,r.rolsuper AS superuser,r.rolinherit AS inherit,
         r.rolcreaterole AS create_role,r.rolcreatedb AS create_database,r.rolreplication AS replication,r.rolbypassrls AS bypass_rls,
-        COALESCE((SELECT jsonb_agg(jsonb_build_object('role',parent.rolname,'admin',m.admin_option,'inherit',m.inherit_option,'set',m.set_option)
-          ORDER BY parent.rolname,m.admin_option,m.inherit_option,m.set_option)
-          FROM pg_catalog.pg_auth_members m JOIN pg_catalog.pg_roles parent ON parent.oid=m.roleid
+        COALESCE((SELECT jsonb_agg(jsonb_build_object('role',parent.rolname,'grantor',grantor.rolname,'admin',m.admin_option,'inherit',m.inherit_option,'set',m.set_option)
+          ORDER BY parent.rolname,grantor.rolname,m.admin_option,m.inherit_option,m.set_option)
+          FROM pg_catalog.pg_auth_members m JOIN pg_catalog.pg_roles parent ON parent.oid=m.roleid JOIN pg_catalog.pg_roles grantor ON grantor.oid=m.grantor
           WHERE m.member=r.oid),'[]'::jsonb) AS memberships,
-        COALESCE((SELECT jsonb_agg(jsonb_build_object('member',child.rolname,'admin',m.admin_option,'inherit',m.inherit_option,'set',m.set_option)
-          ORDER BY child.rolname,m.admin_option,m.inherit_option,m.set_option)
-          FROM pg_catalog.pg_auth_members m JOIN pg_catalog.pg_roles child ON child.oid=m.member
+        COALESCE((SELECT jsonb_agg(jsonb_build_object('member',child.rolname,'grantor',grantor.rolname,'admin',m.admin_option,'inherit',m.inherit_option,'set',m.set_option)
+          ORDER BY child.rolname,grantor.rolname,m.admin_option,m.inherit_option,m.set_option)
+          FROM pg_catalog.pg_auth_members m JOIN pg_catalog.pg_roles child ON child.oid=m.member JOIN pg_catalog.pg_roles grantor ON grantor.oid=m.grantor
           WHERE m.roleid=r.oid),'[]'::jsonb) AS members
       FROM pg_catalog.pg_roles r WHERE r.rolname !~ '^pg\\_' AND r.rolname NOT IN
         ('rdsadmin','rds_superuser','rds_password','rds_iam','rds_replication','rds_ad','rds_directory_service_role','rds_reserved','rdstopmgr')
@@ -225,9 +225,9 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
         pg_catalog.has_database_privilege(r.oid,current_database(),'CONNECT') AS database_connect,
         pg_catalog.has_database_privilege(r.oid,current_database(),'CREATE') AS database_create,
         pg_catalog.has_database_privilege(r.oid,current_database(),'TEMPORARY') AS database_temporary,
-        COALESCE((SELECT jsonb_agg(jsonb_build_object('role',parent.rolname,'admin',m.admin_option,'inherit',m.inherit_option,'set',m.set_option)
-          ORDER BY parent.rolname,m.admin_option,m.inherit_option,m.set_option) FROM pg_catalog.pg_auth_members m
-          JOIN pg_catalog.pg_roles parent ON parent.oid=m.roleid WHERE m.member=r.oid),'[]'::jsonb) AS memberships,
+        COALESCE((SELECT jsonb_agg(jsonb_build_object('role',parent.rolname,'grantor',grantor.rolname,'admin',m.admin_option,'inherit',m.inherit_option,'set',m.set_option)
+          ORDER BY parent.rolname,grantor.rolname,m.admin_option,m.inherit_option,m.set_option) FROM pg_catalog.pg_auth_members m
+          JOIN pg_catalog.pg_roles parent ON parent.oid=m.roleid JOIN pg_catalog.pg_roles grantor ON grantor.oid=m.grantor WHERE m.member=r.oid),'[]'::jsonb) AS memberships,
         COALESCE((SELECT jsonb_agg(parent.rolname ORDER BY parent.rolname) FROM membership_closure c
           JOIN pg_catalog.pg_roles parent ON parent.oid=c.roleid WHERE c.member=r.oid),'[]'::jsonb) AS membership_closure
       FROM pg_catalog.pg_roles r WHERE r.rolname='mscqr_prod_admin'

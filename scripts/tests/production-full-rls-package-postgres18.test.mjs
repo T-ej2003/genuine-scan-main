@@ -334,6 +334,12 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         await tx.$executeRawUnsafe("CREATE ROLE rebaseline_unexpected_bypass NOLOGIN BYPASSRLS");
         await tx.$executeRawUnsafe("CREATE ROLE rebaseline_unexpected_createrole NOLOGIN CREATEROLE");
         await tx.$executeRawUnsafe("CREATE ROLE rebaseline_unexpected_createdb NOLOGIN CREATEDB");
+        await tx.$executeRawUnsafe("CREATE ROLE rebaseline_membership_grantor NOLOGIN");
+        await tx.$executeRawUnsafe("CREATE ROLE rebaseline_membership_parent NOLOGIN");
+        await tx.$executeRawUnsafe("GRANT rebaseline_membership_parent TO rebaseline_membership_grantor WITH ADMIN OPTION");
+        await tx.$executeRawUnsafe("SET ROLE rebaseline_membership_grantor");
+        await tx.$executeRawUnsafe("GRANT rebaseline_membership_parent TO rebaseline_unexpected_login");
+        await tx.$executeRawUnsafe("RESET ROLE");
         await tx.$executeRawUnsafe("CREATE ROLE rebaseline_default_owner NOLOGIN");
         await tx.$executeRawUnsafe("ALTER DEFAULT PRIVILEGES FOR ROLE rebaseline_default_owner GRANT SELECT ON TABLES TO PUBLIC");
         await tx.$executeRawUnsafe("ALTER DEFAULT PRIVILEGES FOR ROLE rebaseline_default_owner GRANT INSERT ON TABLES TO mscqr_prd_rls_phase2_app");
@@ -354,6 +360,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         assert.ok(changed.securityRoles.some(({ name, bypass_rls }) => name === "rebaseline_unexpected_bypass" && bypass_rls));
         assert.ok(changed.securityRoles.some(({ name, create_role }) => name === "rebaseline_unexpected_createrole" && create_role));
         assert.ok(changed.securityRoles.some(({ name, create_database }) => name === "rebaseline_unexpected_createdb" && create_database));
+        assert.ok(changed.securityRoles.find(({ name }) => name === "rebaseline_unexpected_login").memberships.some(({ role, grantor }) => role === "rebaseline_membership_parent" && grantor === "rebaseline_membership_grantor"));
         assert.ok(changed.defaults.some(({ owner, schema, role }) => owner === "rebaseline_default_owner" && schema === "*" && role === "PUBLIC"));
         assert.ok(changed.defaults.some(({ owner, schema, role }) => owner === "rebaseline_default_owner" && schema === "*" && role === "mscqr_prd_rls_phase2_app"));
         assert.ok(changed.defaults.some(({ owner, schema, role, object_type }) => owner === "rebaseline_default_owner" && schema === "public" && role === "PUBLIC" && object_type === "S"));

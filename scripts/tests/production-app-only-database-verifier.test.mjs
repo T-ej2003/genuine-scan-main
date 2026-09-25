@@ -56,7 +56,8 @@ test("all fixed catalogue statements use one read-only repeatable-read transacti
   assert.ok(calls.some((sql) => sql.includes("d.classid='pg_catalog.pg_proc'") && sql.includes("d.deptype='e'")), "user-schema routines exclude extension-owned system objects only");
   const securityRolesSql = calls.find((sql) => sql.includes("FROM pg_catalog.pg_roles r WHERE r.rolname !~"));
   assert.ok(securityRolesSql?.includes("pg_catalog.pg_auth_members") && securityRolesSql.includes("m.admin_option")
-    && securityRolesSql.includes("m.inherit_option") && securityRolesSql.includes("m.set_option"), "security inventory observes membership edges and all PostgreSQL 18 options");
+    && securityRolesSql.includes("m.inherit_option") && securityRolesSql.includes("m.set_option") && securityRolesSql.includes("m.grantor")
+    && securityRolesSql.includes("grantor.rolname"), "security inventory observes membership grantors and all PostgreSQL 18 options");
   assert.ok(calls.some((sql) => sql.includes("WITH RECURSIVE membership_closure") && sql.includes("m.inherit_option") && sql.includes("intermediate.rolinherit")),
     "operator capability collection evaluates recursively inherited roles");
   assert.ok(calls.some((sql) => sql.includes("pg_catalog.pg_type") && sql.includes("t.typcategory<>'A'")),
