@@ -23,6 +23,63 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
     validateIdentity(identity);
     // Metadata only: never invoke application functions, including SECURITY
     // DEFINER canaries. Qualify all catalogue functions and relations.
+    const [securityExtensions] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.name),'[]'::jsonb) AS rows FROM (
+      SELECT e.extname AS name,e.extversion AS version,n.nspname AS schema,e.extrelocatable AS relocatable,o.rolname AS owner
+      FROM pg_catalog.pg_extension e JOIN pg_catalog.pg_namespace n ON n.oid=e.extnamespace
+      JOIN pg_catalog.pg_roles o ON o.oid=e.extowner
+    ) x`);
+    const [securityBindings] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.kind,x.name),'[]'::jsonb) AS rows FROM (
+      SELECT 'publication' AS kind,p.pubname AS name,o.rolname AS owner,jsonb_build_object('all_tables',p.puballtables,'insert',p.pubinsert,
+        'update',p.pubupdate,'delete',p.pubdelete,'truncate',p.pubtruncate,'via_root',p.pubviaroot,'generated_columns',p.pubgencols) AS definition
+      FROM pg_catalog.pg_publication p JOIN pg_catalog.pg_roles o ON o.oid=p.pubowner
+      UNION ALL
+      SELECT 'subscription',s.subname,o.rolname,jsonb_build_object('enabled',s.subenabled,'binary',s.subbinary,'streaming',s.substream,
+        'two_phase',s.subtwophasestate,'disable_on_error',s.subdisableonerr,'password_required',s.subpasswordrequired,'run_as_owner',s.subrunasowner,
+        'failover',s.subfailover,'slot_name',s.subslotname,'synchronous_commit',s.subsynccommit,'publications',s.subpublications,'origin',s.suborigin)
+      FROM pg_catalog.pg_subscription s JOIN pg_catalog.pg_roles o ON o.oid=s.subowner
+      WHERE s.subdbid=(SELECT d.oid FROM pg_catalog.pg_database d WHERE d.datname=current_database())
+      UNION ALL
+      SELECT 'operator',pg_catalog.format('%I.%I(%s,%s)',n.nspname,o.oprname,
+        CASE WHEN o.oprleft=0 THEN 'NONE' ELSE o.oprleft::pg_catalog.regtype::text END,
+        CASE WHEN o.oprright=0 THEN 'NONE' ELSE o.oprright::pg_catalog.regtype::text END),owner.rolname,
+        jsonb_build_object('result',o.oprresult::pg_catalog.regtype::text,'function',o.oprcode::pg_catalog.regprocedure::text,
+          'commutator',CASE WHEN o.oprcom=0 THEN NULL ELSE o.oprcom::pg_catalog.regoperator::text END,
+          'negator',CASE WHEN o.oprnegate=0 THEN NULL ELSE o.oprnegate::pg_catalog.regoperator::text END,'merge',o.oprcanmerge,'hash',o.oprcanhash)
+      FROM pg_catalog.pg_operator o JOIN pg_catalog.pg_namespace n ON n.oid=o.oprnamespace JOIN pg_catalog.pg_roles owner ON owner.oid=o.oprowner
+      WHERE n.nspname<>'information_schema' AND n.nspname NOT LIKE 'pg\_%' ESCAPE '\\'
+        AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_depend d WHERE d.classid='pg_catalog.pg_operator'::pg_catalog.regclass AND d.objid=o.oid AND d.deptype='e')
+      UNION ALL
+      SELECT 'cast',pg_catalog.format('%s AS %s',c.castsource::pg_catalog.regtype::text,c.casttarget::pg_catalog.regtype::text),NULL,
+        jsonb_build_object('context',c.castcontext::text,'method',c.castmethod::text,'function',CASE WHEN c.castfunc=0 THEN NULL ELSE c.castfunc::pg_catalog.regprocedure::text END)
+      FROM pg_catalog.pg_cast c JOIN pg_catalog.pg_type source_type ON source_type.oid=c.castsource JOIN pg_catalog.pg_namespace source_ns ON source_ns.oid=source_type.typnamespace
+      JOIN pg_catalog.pg_type target_type ON target_type.oid=c.casttarget JOIN pg_catalog.pg_namespace target_ns ON target_ns.oid=target_type.typnamespace
+      LEFT JOIN pg_catalog.pg_proc cast_function ON cast_function.oid=NULLIF(c.castfunc,0) LEFT JOIN pg_catalog.pg_namespace function_ns ON function_ns.oid=cast_function.pronamespace
+      WHERE (source_ns.nspname<>'information_schema' AND source_ns.nspname NOT LIKE 'pg\_%' ESCAPE '\\')
+         OR (target_ns.nspname<>'information_schema' AND target_ns.nspname NOT LIKE 'pg\_%' ESCAPE '\\')
+         OR (function_ns.nspname<>'information_schema' AND function_ns.nspname NOT LIKE 'pg\_%' ESCAPE '\\')
+      UNION ALL
+      SELECT 'foreign_server',s.srvname,o.rolname,jsonb_build_object('wrapper',f.fdwname,'type',s.srvtype,'version',s.srvversion,
+        'option_names',COALESCE((SELECT jsonb_agg(opt.option_name ORDER BY opt.option_name) FROM pg_catalog.pg_options_to_table(s.srvoptions) opt),'[]'::jsonb))
+      FROM pg_catalog.pg_foreign_server s JOIN pg_catalog.pg_roles o ON o.oid=s.srvowner JOIN pg_catalog.pg_foreign_data_wrapper f ON f.oid=s.srvfdw
+      UNION ALL
+      SELECT 'foreign_data_wrapper',f.fdwname,o.rolname,jsonb_build_object(
+        'handler',CASE WHEN f.fdwhandler=0 THEN NULL ELSE f.fdwhandler::pg_catalog.regprocedure::text END,
+        'validator',CASE WHEN f.fdwvalidator=0 THEN NULL ELSE f.fdwvalidator::pg_catalog.regprocedure::text END,
+        'option_names',COALESCE((SELECT jsonb_agg(opt.option_name ORDER BY opt.option_name) FROM pg_catalog.pg_options_to_table(f.fdwoptions) opt),'[]'::jsonb))
+      FROM pg_catalog.pg_foreign_data_wrapper f JOIN pg_catalog.pg_roles o ON o.oid=f.fdwowner
+      WHERE NOT EXISTS (SELECT 1 FROM pg_catalog.pg_depend d WHERE d.classid='pg_catalog.pg_foreign_data_wrapper'::pg_catalog.regclass AND d.objid=f.oid AND d.deptype='e')
+      UNION ALL
+      SELECT 'language',l.lanname,o.rolname,jsonb_build_object('trusted',l.lanpltrusted,
+        'handler',l.lanplcallfoid::pg_catalog.regprocedure::text,'inline',CASE WHEN l.laninline=0 THEN NULL ELSE l.laninline::pg_catalog.regprocedure::text END,
+        'validator',CASE WHEN l.lanvalidator=0 THEN NULL ELSE l.lanvalidator::pg_catalog.regprocedure::text END)
+      FROM pg_catalog.pg_language l JOIN pg_catalog.pg_roles o ON o.oid=l.lanowner
+      WHERE l.lanname NOT IN ('internal','c','sql')
+        AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_depend d WHERE d.classid='pg_catalog.pg_language'::pg_catalog.regclass AND d.objid=l.oid AND d.deptype='e')
+      UNION ALL
+      SELECT 'user_mapping',pg_catalog.format('%I:%s',m.srvname,COALESCE(m.usename,'PUBLIC')),NULL,
+        jsonb_build_object('option_names',COALESCE((SELECT jsonb_agg(opt.option_name ORDER BY opt.option_name) FROM pg_catalog.pg_options_to_table(m.umoptions) opt),'[]'::jsonb))
+      FROM pg_catalog.pg_user_mappings m
+    ) x`);
     const [routines] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.schema,x.name,x.arguments),'[]'::jsonb) AS rows FROM (
       SELECT n.nspname AS schema,p.proname AS name,pg_catalog.pg_get_function_identity_arguments(p.oid) AS arguments,
         pg_catalog.pg_get_function_result(p.oid) AS result,o.rolname AS owner,p.prosecdef AS security_definer,
@@ -281,7 +338,7 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
           JOIN pg_catalog.pg_roles parent ON parent.oid=c.roleid WHERE c.member=r.oid),'[]'::jsonb) AS membership_closure
       FROM pg_catalog.pg_roles r WHERE r.rolname='mscqr_prod_admin'
     ) x`);
-    return { identity, routines: routines.rows, securityRoutines: securityRoutines.rows, tables: tables.rows, securityTables: securityTables.rows, policies: policies.rows, securityPolicies: securityPolicies.rows, schemas: schemas.rows,
+    return { identity, routines: routines.rows, securityRoutines: securityRoutines.rows, securityExtensions: securityExtensions.rows, securityBindings: securityBindings.rows, tables: tables.rows, securityTables: securityTables.rows, policies: policies.rows, securityPolicies: securityPolicies.rows, schemas: schemas.rows,
       securitySchemas: securitySchemas.rows, securityTriggers: securityTriggers.rows, securityRules: securityRules.rows, securityEventTriggers: securityEventTriggers.rows,
       roles: roles.rows, securityRoles: securityRoles.rows, roleMetadata: roleMetadata.rows, databases: databases.rows,
       defaults: defaults.rows, types: types.rows, sequences: sequences.rows, operatorCapabilities: operatorCapabilities.rows };

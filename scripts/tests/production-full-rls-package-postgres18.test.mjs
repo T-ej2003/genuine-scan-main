@@ -304,12 +304,47 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         packageChecksums: JSON.parse(fs.readFileSync(path.join(evidenceRoot, "checksums.json"), "utf8")) });
       securityRebaselineCanonical = createSecurityRebaselineInventory({ kind: "CANONICAL", protectedMainSha: sourceSha,
         catalogue, repositoryRoot: root, packageChecksums: JSON.parse(fs.readFileSync(path.join(evidenceRoot, "checksums.json"), "utf8")) });
+      const canonicalMemberships = securityRebaselineCanonical.objects.filter(({ collection }) => ["roleMemberships","roleMembers","operatorMemberships"].includes(collection));
+      assert.ok(canonicalMemberships.length > 0 && canonicalMemberships.every(({ identity }) => !identity.includes("mscqr_p2_test")));
+      assert.ok(canonicalMemberships.some(({ identity }) => identity.includes("rdsadmin")), "canonical PG18 harness grantors map to the production semantic identity");
+      const productionEquivalentCatalogue = structuredClone(catalogue);
+      productionEquivalentCatalogue.securityRoles = productionEquivalentCatalogue.securityRoles.filter(({ name }) => !["mscqr_p2_test","certification-administrator"].includes(name));
+      productionEquivalentCatalogue.roleMetadata = productionEquivalentCatalogue.roleMetadata.filter(({ name }) => !["mscqr_p2_test","certification-administrator"].includes(name));
+      for (const roleRow of productionEquivalentCatalogue.securityRoles) {
+        for (const membership of [...roleRow.memberships, ...roleRow.members]) if (membership.grantor === "mscqr_p2_test") membership.grantor = "rdsadmin";
+      }
+      for (const operator of productionEquivalentCatalogue.operatorCapabilities)
+        for (const membership of operator.memberships) if (membership.grantor === "mscqr_p2_test") membership.grantor = "rdsadmin";
+      for (const extension of productionEquivalentCatalogue.securityExtensions)
+        if (extension.name === "plpgsql" && extension.owner === "mscqr_p2_test") extension.owner = "rdsadmin";
+      const productionEquivalentLive = createLiveSecurityRebaselineInventory({ protectedMainSha: sourceSha, catalogue: productionEquivalentCatalogue,
+        canonical: securityRebaselineCanonical, taskEvidence: { taskArn: `arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/${"9".repeat(32)}`,
+          taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/security-rebaseline:1", containerName: "security-rebaseline",
+          containerExitCode: 0, requestSha256: "8".repeat(64), verificationContractSha256: "8".repeat(64) } });
+      const productionEquivalentDiff = diffSecurityRebaselineInventories(productionEquivalentLive, securityRebaselineCanonical);
+      assert.equal(productionEquivalentDiff.differenceCount, 0,
+        `production-equivalent membership grantors do not create canonical harness drift: ${JSON.stringify(productionEquivalentDiff.differences.map(({collection,identity,field})=>({collection,identity,field})))}`);
+      await assert.rejects(maintenanceClient.$transaction(async (tx) => {
+        const parent = "mscqr_prd_rls_phase2_app";
+        await tx.$executeRawUnsafe("CREATE ROLE rebaseline_unexpected_canonical_grantor NOLOGIN");
+        await tx.$executeRawUnsafe(`GRANT "${parent}" TO rebaseline_unexpected_canonical_grantor WITH ADMIN OPTION`);
+        await tx.$executeRawUnsafe(`REVOKE "${parent}" FROM "${administrator}" GRANTED BY CURRENT_USER CASCADE`);
+        await tx.$executeRawUnsafe("SET ROLE rebaseline_unexpected_canonical_grantor");
+        await tx.$executeRawUnsafe(`GRANT "${parent}" TO "${administrator}" WITH ADMIN FALSE, INHERIT FALSE, SET TRUE`);
+        await tx.$executeRawUnsafe("RESET ROLE");
+        const unsupportedGrantorCatalogue = await collectAppOnlyDatabaseCatalogueRows(tx);
+        assert.throws(() => createSecurityRebaselineInventory({ kind: "CANONICAL", protectedMainSha: sourceSha,
+          catalogue: unsupportedGrantorCatalogue, repositoryRoot: root,
+          packageChecksums: JSON.parse(fs.readFileSync(path.join(evidenceRoot, "checksums.json"), "utf8")) }), /unsupported grantor/);
+        throw new Error("rollback unexpected canonical grantor fixture");
+      }), /rollback unexpected canonical grantor fixture/);
       const collectedSecurityDomains = new Set(securityRebaselineCanonical.objects.map(({ collection }) => collection));
-      for (const collection of ["routines","routineGrants","tables","tableGrants","columnGrants","policies","schemas","schemaGrants","roles","roleMetadata",
+      for (const collection of ["extensions","routines","routineGrants","tables","tableGrants","columnGrants","policies","schemas","schemaGrants","roles","roleMetadata",
         "roleMembers","databases","databaseGrants","defaultPrivileges","types","typeGrants","operatorCapabilities",
         "operatorMemberships"]) assert.ok(collectedSecurityDomains.has(collection), `Real collector omitted ${collection}`);
       assert.ok(catalogue.roles.every(({ memberships, members }) => Array.isArray(memberships) && Array.isArray(members)));
-      for (const collection of ["securityRoutines","securityTables","securityTriggers","securityRules","securityEventTriggers","securityPolicies","securitySchemas","roleMetadata","databases","defaults","types","sequences","operatorCapabilities"]) assert.ok(Array.isArray(catalogue[collection]), `Real collector omitted ${collection}`);
+      for (const collection of ["securityExtensions","securityBindings","securityRoutines","securityTables","securityTriggers","securityRules","securityEventTriggers","securityPolicies","securitySchemas","roleMetadata","databases","defaults","types","sequences","operatorCapabilities"]) assert.ok(Array.isArray(catalogue[collection]), `Real collector omitted ${collection}`);
+      assert.ok(catalogue.securityExtensions.some(({ name, version, schema, relocatable }) => name === "plpgsql" && typeof version === "string" && schema === "pg_catalog" && typeof relocatable === "boolean"));
       assert.ok(catalogue.securityTables.every(({ kind }) => ["r","p","v","m","f"].includes(kind)));
       assert.ok(catalogue.securityRoutines.every(({ schema }) => schema !== "information_schema" && !schema.startsWith("pg_")));
       await assert.rejects(maintenanceClient.$transaction(async (tx) => {
@@ -445,6 +480,8 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         await tx.$executeRawUnsafe("CREATE MATERIALIZED VIEW public.rebaseline_unexpected_materialized AS SELECT 1 AS value");
         await tx.$executeRawUnsafe('ALTER MATERIALIZED VIEW public.rebaseline_unexpected_materialized OWNER TO "mscqr_prod_admin"');
         await tx.$executeRawUnsafe("CREATE EXTENSION IF NOT EXISTS postgres_fdw");
+        await tx.$executeRawUnsafe("CREATE PUBLICATION rebaseline_unexpected_publication");
+        await tx.$executeRawUnsafe("CREATE OPERATOR public.=== (LEFTARG=integer, RIGHTARG=integer, FUNCTION=pg_catalog.int4eq)");
         await tx.$executeRawUnsafe("CREATE SERVER rebaseline_fixture_server FOREIGN DATA WRAPPER postgres_fdw OPTIONS (host '127.0.0.1', dbname 'postgres')");
         await tx.$executeRawUnsafe("CREATE FOREIGN TABLE public.rebaseline_unexpected_foreign (id integer) SERVER rebaseline_fixture_server OPTIONS (schema_name 'public', table_name 'unused')");
         await tx.$executeRawUnsafe("CREATE TYPE public.rebaseline_unexpected_enum AS ENUM ('one','two')");
@@ -492,6 +529,12 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         assert.ok(changed.securityRoutines.some(({ schema, name }) => schema === "public" && name === "rebaseline_unexpected"));
         assert.ok(changed.securityRoutines.some(({ schema, name, kind }) => schema === "public" && name === "rebaseline_unexpected_procedure" && kind === "p"));
         assert.ok(changed.securityRoutines.some(({ schema, name, kind, aggregate_state_sha256 }) => schema === "public" && name === "rebaseline_unexpected_aggregate" && kind === "a" && /^[a-f0-9]{64}$/.test(aggregate_state_sha256)));
+        assert.ok(changed.securityExtensions.some(({ name, version, schema, relocatable }) => name === "postgres_fdw" && typeof version === "string" && schema === "public" && typeof relocatable === "boolean"));
+        assert.ok(changed.securityBindings.some(({ kind, name }) => kind === "publication" && name === "rebaseline_unexpected_publication"));
+        assert.ok(changed.securityBindings.some(({ kind, name }) => kind === "operator" && name.includes("===") && name.includes("integer")));
+        assert.ok(changed.securityBindings.some(({ kind, name }) => kind === "foreign_server" && name === "rebaseline_fixture_server"));
+        assert.equal(changed.securityRoutines.some(({ name }) => name === "postgres_fdw_handler"), false,
+          "extension-owned routines are represented by their installed extension rather than duplicated as application routines");
         assert.ok(changed.securityTables.some(({ schema, name, kind }) => schema === "public" && name === "rebaseline_unexpected_view" && kind === "v"));
         assert.ok(changed.securityTables.some(({ schema, name, kind }) => schema === "public" && name === "rebaseline_unexpected_materialized" && kind === "m"));
         assert.ok(changed.securityTables.some(({ schema, name, kind }) => schema === "public" && name === "rebaseline_unexpected_foreign" && kind === "f"));
@@ -532,6 +575,10 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         assert.ok(sourceDiff.differences.some(({ collection, identity, operation }) => collection === "routines" && identity.startsWith("public.rebaseline_unexpected(") && operation === "UNEXPECTED_OBJECT"));
         assert.ok(sourceDiff.differences.some(({ collection, identity, operation }) => collection === "routines" && identity.startsWith("public.rebaseline_unexpected_procedure()") && operation === "UNEXPECTED_OBJECT"));
         assert.ok(sourceDiff.differences.some(({ collection, identity, operation }) => collection === "routines" && identity.startsWith("public.rebaseline_unexpected_aggregate(integer)") && operation === "UNEXPECTED_OBJECT"));
+        assert.ok(sourceDiff.differences.some(({ collection, identity }) => collection === "extensions" && identity === "postgres_fdw"));
+        assert.ok(sourceDiff.differences.some(({ collection, identity }) => collection === "bindings" && identity === "publication:rebaseline_unexpected_publication"));
+        assert.ok(sourceDiff.differences.some(({ collection, identity }) => collection === "bindings" && identity.startsWith('operator:public."==="')));
+        assert.ok(sourceDiff.differences.some(({ collection, identity }) => collection === "bindings" && identity === "foreign_server:rebaseline_fixture_server"));
         for (const name of ["rebaseline_unexpected_login","rebaseline_unexpected_bypass","rebaseline_unexpected_createrole","rebaseline_unexpected_createdb","rebaseline_default_owner"]) {
           assert.ok(sourceDiff.differences.some(({ collection, identity, operation }) => collection === "unexpectedRoles" && identity === name && operation === "UNEXPECTED_OBJECT"), `${name} must hard-stop as an unexpected role`);
         }
@@ -539,6 +586,25 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         assert.equal(sourceDiff.safeToConstructConvergencePlan, false);
         throw new Error("rollback real security collector drift");
       }), /rollback real security collector drift/);
+      await assert.rejects(maintenanceClient.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe("CREATE SCHEMA rebaseline_extension_schema AUTHORIZATION mscqr_prod_admin");
+        await tx.$executeRawUnsafe("CREATE EXTENSION postgres_fdw WITH SCHEMA rebaseline_extension_schema");
+        const extensionCatalogue = await collectAppOnlyDatabaseCatalogueRows(tx), extension = extensionCatalogue.securityExtensions.find(({ name }) => name === "postgres_fdw");
+        assert.equal(extension.schema, "rebaseline_extension_schema");
+        const extensionCanonical = createSecurityRebaselineInventory({ kind: "CANONICAL", protectedMainSha: sourceSha, catalogue: extensionCatalogue,
+          repositoryRoot: root, packageChecksums: JSON.parse(fs.readFileSync(path.join(evidenceRoot, "checksums.json"), "utf8")) });
+        await tx.$executeRawUnsafe("ALTER EXTENSION postgres_fdw SET SCHEMA public");
+        let changed = await collectAppOnlyDatabaseCatalogueRows(tx);
+        let extensionLive = createLiveSecurityRebaselineInventory({ protectedMainSha: sourceSha, catalogue: changed, canonical: extensionCanonical,
+          taskEvidence: productionEquivalentLive.taskEvidence });
+        assert.ok(diffSecurityRebaselineInventories(extensionLive, extensionCanonical).differences.some(({ collection, identity, field }) => collection === "extensions" && identity === "postgres_fdw" && field === "schema"));
+        await tx.$executeRawUnsafe("DROP EXTENSION postgres_fdw CASCADE");
+        changed = await collectAppOnlyDatabaseCatalogueRows(tx);
+        extensionLive = createLiveSecurityRebaselineInventory({ protectedMainSha: sourceSha, catalogue: changed, canonical: extensionCanonical,
+          taskEvidence: productionEquivalentLive.taskEvidence });
+        assert.ok(diffSecurityRebaselineInventories(extensionLive, extensionCanonical).differences.some(({ collection, identity }) => collection === "extensions" && identity === "postgres_fdw"));
+        throw new Error("rollback real extension inventory fixtures");
+      }), /rollback real extension inventory fixtures/);
       assertAppOnlyRequirements(requirements, context);
       assert.ok(catalogue.tables.length >= 79 && catalogue.policies.length >= 351);
       assert.ok(Object.values(compareAppOnlyRequirements(catalogue, requirements)).every((value) => value === "COMPATIBLE"));

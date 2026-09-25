@@ -8,7 +8,7 @@ import { compareProductionSecurityRebaseline } from "../aws/compare-production-s
 import { assertSemanticallyEmptyRlsProbeOverrides, authenticateCompleteRlsProbeObservation, buildProductionRlsProbeCommand, collectCompleteRlsProbeLogEvents, waitForCompleteRlsProbeObservation } from "../aws/probe-production-rls-catalogue.mjs";
 import { APP_ONLY_VERIFIER } from "../aws/production-app-only-policy.mjs";
 import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
-import { assertSecurityRebaselineInventory, createLiveSecurityRebaselineInventory, createSecurityRebaselineInventory, diffSecurityRebaselineInventories, SECURITY_REBASELINE_OPERATIONS } from "../aws/production-security-rebaseline-inventory.mjs";
+import { assertSecurityRebaselineInventory, createLiveSecurityRebaselineInventory, createSecurityRebaselineInventory, diffSecurityRebaselineInventories, SECURITY_REBASELINE_COVERAGE, SECURITY_REBASELINE_NORMALIZED_COLLECTIONS, SECURITY_REBASELINE_OPERATIONS } from "../aws/production-security-rebaseline-inventory.mjs";
 import { createSecurityCatalogueTransportKeyPair, decryptSecurityCatalogueTransport, encryptSecurityCatalogueTransport } from "../aws/production-security-rebaseline-transport.mjs";
 import { writeStageBPrivateFileExclusive } from "../aws/stage-b-artifact-contract.mjs";
 
@@ -17,6 +17,8 @@ const grant = (privilege = "SELECT", grantor = "mscqr_prod_admin") => ({ role, g
 function catalogue() { const table = { name: "User", kind: "r", rls: true, forced: true, owner: "mscqr_prod_admin", view_definition: null, columns: [{ name: "id", type: "text", notNull: true, identity: "", generated: "", default: null, enumLabels: [] }], constraints: [], grants: [grant()], column_grants: [{ column: "id", ...grant() }] }; const policy = { table: "User", name: "user_read", permissive: true, command: "r", roles: [role], using: "id = current_user", check: null }; return { identity: { role:"mscqr_prod_rls_canary_read",session_role:"mscqr_prod_rls_canary_read",database:"mscqr_production_rls_green_phase2",server_version_num:180004,read_only:"on",default_read_only:"on",rolsuper:false,rolinherit:false,rolcreaterole:false,rolcreatedb:false,rolreplication:false,rolbypassrls:false,memberships:false,write_privileges:false,schema_write:false,database_write:false },
   routines: [{ schema: "app_auth", name: "secure", arguments: "value text", result: "boolean", owner: "mscqr_prod_admin", security_definer: true, volatility: "s", parallel: "u", leakproof: false, strict: true, config: ["search_path=pg_catalog"], body: "SELECT true", language: "sql", definition: "CREATE FUNCTION app_auth.secure(value text) RETURNS boolean LANGUAGE sql AS 'SELECT true'", grants: [grant("EXECUTE")] }],
   securityRoutines: [{ schema: "app_auth", name: "secure", arguments: "value text", kind: "f", result: "boolean", owner: "mscqr_prod_admin", security_definer: true, volatility: "s", parallel: "u", leakproof: false, strict: true, config: ["search_path=pg_catalog"], body: "SELECT true", language: "sql", definition: "CREATE FUNCTION app_auth.secure(value text) RETURNS boolean LANGUAGE sql AS 'SELECT true'", aggregate_state_sha256: null, grants: [grant("EXECUTE")] }],
+  securityExtensions: [{ name: "plpgsql", version: "1.0", schema: "pg_catalog", relocatable: false, owner: "rdsadmin" }],
+  securityBindings: [],
   tables: [structuredClone(table)], securityTables: [{ schema:"public",...structuredClone(table), view_security_options:[], partition_key:null, partition_bound:null, columns:table.columns.map((column)=>({...column,collation:null})) }], securityTriggers: [], securityRules: [], securityEventTriggers: [],
   policies: [structuredClone(policy)], securityPolicies: [{ schema:"public",...structuredClone(policy) }],
   schemas: [{ name: "public", owner: "mscqr_prod_admin", grants: [] }, { name: "app_auth", owner: "mscqr_prod_admin", grants: [grant("USAGE")] }],
@@ -33,6 +35,51 @@ const canonical = (value = catalogue()) => createSecurityRebaselineInventory({ k
 const live = (value, target = canonical()) => createLiveSecurityRebaselineInventory({ protectedMainSha: sourceSha, catalogue: value, canonical: target, taskEvidence: { taskArn: "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/" + "c".repeat(32), taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/security-rebaseline:1", containerName: "production-green-read-only-rls-canary", containerExitCode: 0, requestSha256: digest, verificationContractSha256: digest } });
 
 test("identical catalogues have a deterministic zero diff", () => { const target = canonical(), a = diffSecurityRebaselineInventories(live(catalogue(), target), target), reversed = catalogue(); for (const key of Object.keys(reversed)) if (Array.isArray(reversed[key])) reversed[key].reverse(); const b = diffSecurityRebaselineInventories(live(reversed, target), target); assert.equal(a.differenceCount, 0); assert.equal(a.artifactSha256, b.artifactSha256); });
+
+test("canonical disposable membership grantors map only to the production semantic grantor", () => {
+  const targetValue = catalogue(), parent = targetValue.securityRoles.find(({ name }) => name === role), admin = targetValue.securityRoles.find(({ name }) => name === "mscqr_prod_admin");
+  const harness = { name:"mscqr_p2_test",login:true,valid_until:null,superuser:true,inherit:true,create_role:true,create_database:true,replication:true,bypass_rls:true,memberships:[],members:[] };
+  const memberOf = { role,grantor:"mscqr_p2_test",admin:false,inherit:false,set:true }, hasMember = { member:"mscqr_prod_admin",grantor:"mscqr_p2_test",admin:false,inherit:false,set:true };
+  admin.memberships=[memberOf]; parent.members=[hasMember]; targetValue.operatorCapabilities[0].memberships=[memberOf]; targetValue.securityRoles.push(harness);
+  targetValue.roleMetadata.push({name:"mscqr_p2_test",comment_present:false,comment_sha256:digest,settings:[],unsupported_settings:false});
+  const target = canonical(targetValue), liveValue = structuredClone(targetValue);
+  liveValue.securityRoles=liveValue.securityRoles.filter(({name})=>name!=="mscqr_p2_test"); liveValue.roleMetadata=liveValue.roleMetadata.filter(({name})=>name!=="mscqr_p2_test");
+  for (const entry of [liveValue.securityRoles.find(({name})=>name===role).members[0],liveValue.securityRoles.find(({name})=>name==="mscqr_prod_admin").memberships[0],liveValue.operatorCapabilities[0].memberships[0]]) entry.grantor="rdsadmin";
+  const result=diffSecurityRebaselineInventories(live(liveValue,target),target);
+  assert.equal(result.differences.filter(({collection})=>["roleMemberships","roleMembers","operatorMemberships"].includes(collection)).length,0);
+  const drift=structuredClone(liveValue); for (const entry of [drift.securityRoles.find(({name})=>name===role).members[0],drift.securityRoles.find(({name})=>name==="mscqr_prod_admin").memberships[0],drift.operatorCapabilities[0].memberships[0]]) entry.grantor="mscqr_prod_admin";
+  assert.ok(diffSecurityRebaselineInventories(live(drift,target),target).differences.some(({collection})=>collection==="operatorMemberships"));
+  const unsupported=structuredClone(targetValue); for (const entry of [unsupported.securityRoles.find(({name})=>name===role).members[0],unsupported.securityRoles.find(({name})=>name==="mscqr_prod_admin").memberships[0],unsupported.operatorCapabilities[0].memberships[0]]) entry.grantor="mscqr_prod_admin";
+  assert.throws(()=>canonical(unsupported),/unsupported grantor/);
+  const changedOptions=structuredClone(liveValue); changedOptions.operatorCapabilities[0].memberships[0].admin=true;
+  assert.ok(diffSecurityRebaselineInventories(live(changedOptions,target),target).differences.some(({collection})=>collection==="operatorMemberships"));
+});
+
+test("installed extension identity is deterministic and any extension drift blocks planning", () => {
+  const target=canonical();
+  for (const mutate of [
+    (value)=>value.securityExtensions.push({name:"postgres_fdw",version:"1.1",schema:"public",relocatable:true,owner:"mscqr_prod_admin"}),
+    (value)=>value.securityExtensions[0].version="1.1",
+    (value)=>value.securityExtensions[0].schema="public",
+    (value)=>value.securityExtensions.splice(0,1),
+  ]) { const value=catalogue(); mutate(value); const diff=diffSecurityRebaselineInventories(live(value,target),target); assert.equal(diff.safeToConstructConvergencePlan,false); assert.ok(diff.differences.some(({collection})=>collection==="extensions")); }
+});
+test("replication and user-defined security bindings are visible hard stops", () => {
+  const target=canonical(); for (const binding of [
+    {kind:"publication",name:"unexpected_publication",owner:"mscqr_prod_admin",definition:{all_tables:true}},
+    {kind:"operator",name:"public.===(integer,integer)",owner:"mscqr_prod_admin",definition:{function:"int4eq(integer,integer)"}},
+    {kind:"foreign_server",name:"unexpected_server",owner:"mscqr_prod_admin",definition:{wrapper:"postgres_fdw",option_names:["host"]}},
+  ]) { const value=catalogue(); value.securityBindings.push(binding); const diff=diffSecurityRebaselineInventories(live(value,target),target); assert.equal(diff.safeToConstructConvergencePlan,false); assert.ok(diff.differences.some(({collection,identity})=>collection==="bindings"&&identity===`${binding.kind}:${binding.name}`)); }
+});
+
+test("the explicit collector-to-diff coverage contract is complete", () => {
+  const raw = new Set(Object.keys(catalogue())), normalized = new Set(SECURITY_REBASELINE_NORMALIZED_COLLECTIONS);
+  for (const entry of SECURITY_REBASELINE_COVERAGE) {
+    assert.ok(raw.has(entry.rawCollection), `${entry.surface} has no real collector output`);
+    for (const collection of entry.normalizedCollections.split("/"))
+      assert.ok(normalized.has(collection), `${entry.surface} has no normalized collection contract for ${collection}`);
+  }
+});
 
 for (const [label, mutate, expected] of [
   ["policy command", (c) => c.securityPolicies[0].command="a", "ALTER"], ["policy role", (c) => c.securityPolicies[0].roles=["PUBLIC"], "ALTER"], ["USING", (c) => c.securityPolicies[0].using="true", "ALTER"], ["WITH CHECK", (c) => c.securityPolicies[0].check="true", "ALTER"],

@@ -2,14 +2,28 @@ import assert from "node:assert/strict";
 import { canonicalJson, canonicalSha256 } from "./production-green-stage-b-contract.mjs";
 import { appOnlyRequirementIdentity, createAppOnlyRequirements } from "./production-app-only-requirements.mjs";
 
-export const SECURITY_REBASELINE_COLLECTOR_VERSION = "production-security-catalogue-v5";
+export const SECURITY_REBASELINE_COLLECTOR_VERSION = "production-security-catalogue-v6";
 export const SECURITY_REBASELINE_OPERATIONS = Object.freeze(["CREATE", "ALTER", "DROP_POLICY_OR_MANAGED_ROUTINE", "GRANT", "REVOKE",
   "ENABLE_RLS", "FORCE_RLS", "OWNERSHIP_CHANGE", "ROLE_CHANGE", "UNEXPECTED_OBJECT"]);
+export const SECURITY_REBASELINE_COVERAGE = Object.freeze([
+  ["extensions", "pg_extension", "securityExtensions", "extensions"],
+  ["replication and user bindings", "pg_publication/pg_subscription/pg_operator/pg_cast/pg_foreign_data_wrapper/pg_foreign_server/pg_user_mapping/pg_language", "securityBindings", "bindings"],
+  ["routines", "pg_proc/pg_aggregate", "securityRoutines", "routines/routineGrants"],
+  ["relations", "pg_class/pg_attribute/pg_constraint", "securityTables", "tables/tableGrants/columnGrants"],
+  ["triggers", "pg_trigger", "securityTriggers", "triggers"], ["rewrite rules", "pg_rewrite", "securityRules", "rules"],
+  ["event triggers", "pg_event_trigger", "securityEventTriggers", "eventTriggers"], ["RLS policies", "pg_policy", "securityPolicies", "policies"],
+  ["schemas", "pg_namespace", "securitySchemas", "schemas/schemaGrants"], ["roles and membership graph", "pg_roles/pg_auth_members", "securityRoles", "roles/unexpectedRoles/roleMemberships/roleMembers"],
+  ["role metadata", "pg_shdescription/pg_db_role_setting", "roleMetadata", "roleMetadata"], ["database ACL", "pg_database", "databases", "databases/databaseGrants"],
+  ["default ACL", "pg_default_acl", "defaults", "defaultPrivileges"], ["types", "pg_type", "types", "types/typeGrants"],
+  ["sequences", "pg_sequence/pg_class", "sequences", "sequences/sequenceGrants"], ["operator capabilities", "pg_roles/pg_auth_members", "operatorCapabilities", "operatorCapabilities/operatorMemberships/operatorInheritedCapabilities"],
+].map(([surface, catalogue, rawCollection, normalizedCollections]) => Object.freeze({ surface, catalogue, rawCollection, normalizedCollections })));
 const SHA40 = /^[a-f0-9]{40}$/, SHA256 = /^[a-f0-9]{64}$/;
-const RAW_COLLECTIONS = Object.freeze(["routines", "securityRoutines", "tables", "securityTables", "securityTriggers", "securityRules", "securityEventTriggers", "policies", "securityPolicies", "schemas", "securitySchemas", "roles", "securityRoles", "roleMetadata", "databases", "defaults", "types", "sequences", "operatorCapabilities"]);
+const RAW_COLLECTIONS = Object.freeze(["routines", "securityRoutines", "securityExtensions", "securityBindings", "tables", "securityTables", "securityTriggers", "securityRules", "securityEventTriggers", "policies", "securityPolicies", "schemas", "securitySchemas", "roles", "securityRoles", "roleMetadata", "databases", "defaults", "types", "sequences", "operatorCapabilities"]);
 const GRANTS = new Set(["routineGrants", "tableGrants", "columnGrants", "schemaGrants", "typeGrants", "sequenceGrants", "databaseGrants", "defaultPrivileges"]);
 const FIELDS = Object.freeze({
   routines: ["kind","result","owner","security_definer","volatility","parallel","leakproof","strict","config","body","language","definition","aggregate_state_sha256"],
+  extensions: ["version","schema","relocatable","owner"],
+  bindings: ["kind","owner","definition"],
   tables: ["kind","rls","forced","owner","view_definition","view_security_options","partition_key","partition_bound","columns","constraints"], triggers: ["enabled","function","definition"],
   rules: ["event","enabled","definition"], eventTriggers: ["owner","event","enabled","tags","function"], policies: ["permissive","command","roles","using","check"], schemas: ["owner"],
   roles: ["login","valid_until","superuser","inherit","create_role","create_database","replication","bypass_rls"],
@@ -22,10 +36,13 @@ const FIELDS = Object.freeze({
   routineGrants: ["present"], tableGrants: ["present"], columnGrants: ["present"], schemaGrants: ["present"], typeGrants: ["present"], sequenceGrants: ["present"],
   databaseGrants: ["present"], defaultPrivileges: ["present"], roleMemberships: ["present"], roleMembers: ["present"],
 });
+export const SECURITY_REBASELINE_NORMALIZED_COLLECTIONS = Object.freeze(Object.keys(FIELDS));
 const MANAGED_SCHEMAS = new Set(["app_rls", "app_auth", "app_public", "app_ops"]);
 const MANAGED_ROLE = /^(?:mscqr_prd_rls_phase2_[a-z0-9_]+|mscqr_prod_rls_canary_read|mscqr_prod_admin)$/;
 const APP_ONLY_ROLE = /^(?:mscqr_prd_rls_phase2_[a-z0-9_]+|mscqr_prod_rls_canary_read)$/;
 const CANONICAL_HARNESS_ROLES = new Set(["mscqr_p2_test", "certification-administrator"]);
+const CANONICAL_MEMBERSHIP_GRANTOR = "mscqr_p2_test", PRODUCTION_MEMBERSHIP_GRANTOR = "rdsadmin";
+const CANONICAL_MEMBERSHIP_PARENT = /^mscqr_prd_rls_phase2_[a-z0-9_]+$/;
 // PostgreSQL reserves pg_*; these exact RDS roles are provider-owned. Other
 // rds_* names remain observable user roles rather than being hidden by prefix.
 const SYSTEM_ROLE = /^(?:pg_[A-Za-z0-9_]+|rdsadmin|rds_superuser|rds_password|rds_iam|rds_replication|rds_ad|rds_directory_service_role|rds_reserved|rdstopmgr)$/;
@@ -49,6 +66,38 @@ function assertSecurityMetadata(value, location = "catalogue") {
   for (const [key, entry] of Object.entries(value)) { assert.ok(!/^(?:password|password_hash|rolpassword|secret|credential|database_url|token)$/i.test(key), `${location} contains a forbidden field`); assertSecurityMetadata(entry, `${location}.${key}`); }
 }
 
+function canonicalizeDisposableHarness(catalogue) {
+  const result = structuredClone(catalogue);
+  const harness = result.securityRoles.find(({ name }) => name === CANONICAL_MEMBERSHIP_GRANTOR);
+  const authenticateHarness = () => {
+    assert.ok(harness, "Canonical membership grantor is not the source-owned disposable harness");
+    for (const field of ["login","superuser","inherit","create_role","create_database","replication","bypass_rls"])
+      assert.equal(harness[field], true, "Canonical disposable harness identity is not authenticated");
+  };
+  const normalize = (membership, parent, member) => {
+    const expected = member === "mscqr_prod_admin" && CANONICAL_MEMBERSHIP_PARENT.test(parent)
+      && membership.admin === false && membership.inherit === false && membership.set === true;
+    if (!expected && membership.grantor === CANONICAL_MEMBERSHIP_GRANTOR)
+      assert.fail("Disposable harness granted an unsupported canonical membership");
+    if (!expected) return membership;
+    assert.ok([CANONICAL_MEMBERSHIP_GRANTOR, PRODUCTION_MEMBERSHIP_GRANTOR].includes(membership.grantor),
+      "Canonical managed membership has an unsupported grantor");
+    if (membership.grantor === CANONICAL_MEMBERSHIP_GRANTOR) authenticateHarness();
+    return { ...membership, grantor: PRODUCTION_MEMBERSHIP_GRANTOR };
+  };
+  for (const role of result.securityRoles) {
+    role.memberships = role.memberships.map((membership) => normalize(membership, membership.role, role.name));
+    role.members = role.members.map((membership) => normalize(membership, role.name, membership.member));
+  }
+  for (const operator of result.operatorCapabilities)
+    operator.memberships = operator.memberships.map((membership) => normalize(membership, membership.role, operator.name));
+  for (const extension of result.securityExtensions)
+    if (extension.name === "plpgsql" && extension.schema === "pg_catalog" && extension.owner === CANONICAL_MEMBERSHIP_GRANTOR) {
+      authenticateHarness(); extension.owner = PRODUCTION_MEMBERSHIP_GRANTOR;
+    }
+  return result;
+}
+
 export function normalizeSecurityRebaselineCatalogue(catalogue, { kind = "LIVE" } = {}) {
   exactKeys(catalogue, ["identity", ...RAW_COLLECTIONS], "Security catalogue"); assertSecurityMetadata(catalogue);
   exactKeys(catalogue.identity, ["role","session_role","database","server_version_num","read_only","default_read_only","rolsuper","rolinherit","rolcreaterole","rolcreatedb","rolreplication","rolbypassrls","memberships","write_privileges","schema_write","database_write"], "Security catalogue identity");
@@ -62,6 +111,8 @@ export function normalizeSecurityRebaselineCatalogue(catalogue, { kind = "LIVE" 
   const roleNames = new Set(catalogue.securityRoles.map(({ name }) => name).filter((name) => !isCanonicalHarnessRole(name)));
   const addUnexpectedRole = (role) => { assert.match(role || "", ROLE_NAME, "Security catalogue role identity is malformed"); if (role !== "PUBLIC" && !MANAGED_ROLE.test(role) && !SYSTEM_ROLE.test(role) && !isCanonicalHarnessRole(role)) assert.ok(roleNames.has(role), "Security catalogue references an uncollected user role"); };
   const addGrants = (collection, owner, grants, columnKey = null) => { assert.ok(Array.isArray(grants)); for (const grant of grants) { exactKeys(grant, [...(columnKey ? [columnKey] : []), "role", "grantor", "privilege", "grantable"], `${collection} grant`); const identity = grantIdentity(owner, grant, columnKey ? grant[columnKey] : null); addUnexpectedRole(grant.role, `${collection}:${identity}`); addUnexpectedRole(grant.grantor, `${collection}-grantor:${identity}`); add(collection, identity, { present: true }); } };
+  for (const row of catalogue.securityExtensions) { exactKeys(row, ["name","version","schema","relocatable","owner"], "Extension"); const { name, ...fields } = row; addUnexpectedRole(row.owner); add("extensions", name, fields); }
+  for (const row of catalogue.securityBindings) { exactKeys(row, ["kind","name","owner","definition"], "Security binding"); if (row.owner !== null) addUnexpectedRole(row.owner); const { name, ...fields } = row; add("bindings", `${row.kind}:${name}`, fields); }
   for (const row of catalogue.securityRoutines) { exactKeys(row, ["schema","name","arguments","kind","result","owner","security_definer","volatility","parallel","leakproof","strict","config","body","language","definition","aggregate_state_sha256","grants"], "Routine"); const identity = rowIdentity("routines", row), fields = structuredClone(row), grants = fields.grants; delete fields.schema; delete fields.name; delete fields.arguments; delete fields.grants; add("routines", identity, fields); addGrants("routineGrants", identity, grants); }
   for (const row of catalogue.securityTables) { exactKeys(row, ["schema","name","kind","rls","forced","owner","view_definition","view_security_options","partition_key","partition_bound","columns","constraints","grants","column_grants"], "Table"); const identity=`${row.schema}.${row.name}`, { grants, column_grants: columnGrants, ...fields } = row; delete fields.schema; delete fields.name; add("tables", identity, fields); addGrants("tableGrants", identity, grants); addGrants("columnGrants", identity, columnGrants, "column"); }
   for (const row of catalogue.securityTriggers) { exactKeys(row, ["schema","relation","name","enabled","function","definition"], "Trigger"); const identity=rowIdentity("triggers", row), { schema, relation, name, ...fields } = row; add("triggers", identity, fields); }
@@ -85,7 +136,8 @@ export function normalizeSecurityRebaselineCatalogue(catalogue, { kind = "LIVE" 
 export function createSecurityRebaselineInventory({ kind, protectedMainSha, catalogue, repositoryRoot, packageChecksums, taskEvidence = null }) {
   assert.ok(["CANONICAL", "LIVE"].includes(kind)); assert.match(protectedMainSha || "", SHA40); assert.equal(Math.trunc(Number(catalogue?.identity?.server_version_num) / 10000), 18, "Security catalogue requires PostgreSQL 18");
   const requirements = createAppOnlyRequirements({ repositoryRoot, sourceSha: protectedMainSha, candidateSourceSha: protectedMainSha, catalogue, packageChecksums });
-  const objects = normalizeSecurityRebaselineCatalogue(catalogue, { kind }); if (kind === "CANONICAL") assert.ok(!objects.some(({ collection }) => collection === "unexpectedRoles"), "Canonical inventory contains a non-allowlisted role grant or membership"); const body = { schemaVersion: 1, kind: `PRODUCTION_SECURITY_REBASELINE_${kind}_INVENTORY`, protectedMainSha, postgresqlMajor: 18,
+  const normalizedCatalogue = kind === "CANONICAL" ? canonicalizeDisposableHarness(catalogue) : catalogue;
+  const objects = normalizeSecurityRebaselineCatalogue(normalizedCatalogue, { kind }); if (kind === "CANONICAL") assert.ok(!objects.some(({ collection }) => collection === "unexpectedRoles"), "Canonical inventory contains a non-allowlisted role grant or membership"); const body = { schemaVersion: 1, kind: `PRODUCTION_SECURITY_REBASELINE_${kind}_INVENTORY`, protectedMainSha, postgresqlMajor: 18,
     collectorVersion: SECURITY_REBASELINE_COLLECTOR_VERSION, sourceContractSha256: requirements.sourceContractSha256, migrationSetDigest: requirements.migrationSetDigest,
     packageChecksumsSha256: requirements.canonicalPackageChecksumsSha256, appOnlyRequirementsSha256: requirements.requirementsSha256, catalogueSha256: canonicalSha256(objects), objects, ...(taskEvidence ? { taskEvidence } : {}) };
   assertSecurityMetadata(body); return Object.freeze({ ...body, artifactSha256: canonicalSha256(body) });
@@ -114,15 +166,18 @@ const operationFor = ({ collection, identity, field, before, after }) => collect
         : ["tables","schemas","databases","types","sequences"].includes(collection) && (before === undefined || after === undefined || ["columns","constraints","kind"].includes(field)) ? "UNEXPECTED_OBJECT"
           : before === undefined ? "CREATE" : after === undefined && (collection === "policies" || collection === "routines" && MANAGED_SCHEMAS.has(identity.split(".")[0])) ? "DROP_POLICY_OR_MANAGED_ROUTINE" : after === undefined && collection === "routines" ? "UNEXPECTED_OBJECT" : "ALTER";
 const capabilityFor = (operation) => ({ CREATE:"CREATE_SECURITY_OBJECT", ALTER:"ALTER_SECURITY_OBJECT", DROP_POLICY_OR_MANAGED_ROUTINE:"DROP_REVIEWED_SECURITY_OBJECT", GRANT:"GRANT_SECURITY_PRIVILEGE", REVOKE:"REVOKE_SECURITY_PRIVILEGE", ENABLE_RLS:"ALTER_TABLE_OWNER", FORCE_RLS:"ALTER_TABLE_OWNER", OWNERSHIP_CHANGE:"SET_ROLE_AND_ALTER_OWNER", ROLE_CHANGE:"CREATEROLE", UNEXPECTED_OBJECT:"MANUAL_SECURITY_REVIEW" })[operation];
+const isBlockingDifference = ({ operation, collection, identity }) => operation === "UNEXPECTED_OBJECT"
+  || ["extensions","bindings","triggers","rules","eventTriggers","operatorMemberships","operatorInheritedCapabilities"].includes(collection)
+  || collection === "defaultPrivileges" && JSON.parse(identity)[1] === "*" && JSON.parse(identity)[3] === "PUBLIC";
 export function diffSecurityRebaselineInventories(liveInput, canonicalInput) {
   const live = assertSecurityRebaselineInventory(liveInput), canonical = assertSecurityRebaselineInventory(canonicalInput); assert.equal(live.kind, "PRODUCTION_SECURITY_REBASELINE_LIVE_INVENTORY"); assert.equal(canonical.kind, "PRODUCTION_SECURITY_REBASELINE_CANONICAL_INVENTORY");
   for (const field of ["protectedMainSha","postgresqlMajor","collectorVersion","sourceContractSha256","migrationSetDigest","packageChecksumsSha256","appOnlyRequirementsSha256"]) assert.equal(live[field], canonical[field], `Live/canonical ${field} mismatch`);
   const map = (inventory) => new Map(inventory.objects.map((entry) => [`${entry.collection}\0${entry.identity}`, entry])), before = map(live), after = map(canonical), differences = [];
   for (const key of [...new Set([...before.keys(), ...after.keys()])].sort()) { const observed = before.get(key), expected = after.get(key), collection = (observed || expected).collection, identity = (observed || expected).identity; const fields = observed && expected ? [...new Set([...Object.keys(observed.fields), ...Object.keys(expected.fields)])].sort() : ["__object__"]; for (const field of fields) { const oldValue = field === "__object__" ? observed?.fields : observed?.fields[field], newValue = field === "__object__" ? expected?.fields : expected?.fields[field]; if (observed && expected && canonicalJson(oldValue) === canonicalJson(newValue)) continue; const operation = operationFor({ collection, identity, field, before: observed ? oldValue : undefined, after: expected ? newValue : undefined }); differences.push({ collection, identity, field, operation, beforeSha256: observed ? canonicalSha256(oldValue) : null, afterSha256: expected ? canonicalSha256(newValue) : null, canonicalSourceIdentity: canonical.catalogueSha256, requiredCapability: capabilityFor(operation) }); } }
   differences.sort((a, b) => canonicalJson(a).localeCompare(canonicalJson(b)));
-  const blockingDifferences = differences.filter(({ operation, collection, identity }) => operation === "UNEXPECTED_OBJECT" || ["triggers","rules","eventTriggers"].includes(collection) || ["operatorMemberships","operatorInheritedCapabilities"].includes(collection) || collection === "defaultPrivileges" && JSON.parse(identity)[1] === "*" && JSON.parse(identity)[3] === "PUBLIC");
+  const blockingDifferences = differences.filter(isBlockingDifference);
   const body = { schemaVersion: 1, kind: "PRODUCTION_SECURITY_REBASELINE_DIFF", protectedMainSha: canonical.protectedMainSha, postgresqlMajor: canonical.postgresqlMajor, collectorVersion: canonical.collectorVersion, sourceContractSha256: canonical.sourceContractSha256, migrationSetDigest: canonical.migrationSetDigest, packageChecksumsSha256: canonical.packageChecksumsSha256, liveArtifactSha256: live.artifactSha256, canonicalArtifactSha256: canonical.artifactSha256, liveCatalogueSha256: live.catalogueSha256, canonicalCatalogueSha256: canonical.catalogueSha256, safeToConstructConvergencePlan: blockingDifferences.length === 0, differenceCount: differences.length, categoryCounts: Object.fromEntries(SECURITY_REBASELINE_OPERATIONS.map((operation) => [operation, differences.filter((item) => item.operation === operation).length])), blockerCount: blockingDifferences.length, differences };
   return Object.freeze({ ...body, artifactSha256: canonicalSha256(body) });
 }
-export function assertSecurityRebaselineDiff(value) { const { artifactSha256, ...body } = value || {}; assert.equal(artifactSha256, canonicalSha256(body)); exactKeys(body, ["schemaVersion","kind","protectedMainSha","postgresqlMajor","collectorVersion","sourceContractSha256","migrationSetDigest","packageChecksumsSha256","liveArtifactSha256","canonicalArtifactSha256","liveCatalogueSha256","canonicalCatalogueSha256","safeToConstructConvergencePlan","differenceCount","categoryCounts","blockerCount","differences"], "Security diff"); assert.equal(body.schemaVersion, 1); assert.equal(body.kind, "PRODUCTION_SECURITY_REBASELINE_DIFF"); assert.match(body.protectedMainSha || "", SHA40); assert.equal(body.postgresqlMajor, 18); assert.equal(body.collectorVersion, SECURITY_REBASELINE_COLLECTOR_VERSION); for (const field of ["sourceContractSha256","migrationSetDigest","packageChecksumsSha256","liveArtifactSha256","canonicalArtifactSha256","liveCatalogueSha256","canonicalCatalogueSha256"]) assert.match(body[field] || "", SHA256); assert.deepEqual(Object.keys(body.categoryCounts).sort(), [...SECURITY_REBASELINE_OPERATIONS].sort()); assert.equal(body.differences.length, body.differenceCount); for (const difference of body.differences) { exactKeys(difference, ["collection","identity","field","operation","beforeSha256","afterSha256","canonicalSourceIdentity","requiredCapability"], "Security difference"); assert.ok(Object.hasOwn(FIELDS, difference.collection)); assert.match(difference.identity || "", /^.{1,4096}$/s); assert.match(difference.field || "", /^.{1,128}$/s); assert.ok(SECURITY_REBASELINE_OPERATIONS.includes(difference.operation)); for (const digest of [difference.beforeSha256, difference.afterSha256]) if (digest !== null) assert.match(digest, SHA256); assert.equal(difference.canonicalSourceIdentity, body.canonicalCatalogueSha256); assert.match(difference.requiredCapability || "", /^[A-Z][A-Z_]+$/); } assert.equal(body.differenceCount, Object.values(body.categoryCounts).reduce((sum, count) => sum + count, 0)); const blockerCount = body.differences.filter(({ operation, collection, identity }) => operation === "UNEXPECTED_OBJECT" || ["triggers","rules","eventTriggers"].includes(collection) || ["operatorMemberships","operatorInheritedCapabilities"].includes(collection) || collection === "defaultPrivileges" && JSON.parse(identity)[1] === "*" && JSON.parse(identity)[3] === "PUBLIC").length; assert.equal(body.blockerCount, blockerCount); assert.equal(body.safeToConstructConvergencePlan, body.blockerCount === 0); assertSecurityMetadata(body); return Object.freeze(value); }
+export function assertSecurityRebaselineDiff(value) { const { artifactSha256, ...body } = value || {}; assert.equal(artifactSha256, canonicalSha256(body)); exactKeys(body, ["schemaVersion","kind","protectedMainSha","postgresqlMajor","collectorVersion","sourceContractSha256","migrationSetDigest","packageChecksumsSha256","liveArtifactSha256","canonicalArtifactSha256","liveCatalogueSha256","canonicalCatalogueSha256","safeToConstructConvergencePlan","differenceCount","categoryCounts","blockerCount","differences"], "Security diff"); assert.equal(body.schemaVersion, 1); assert.equal(body.kind, "PRODUCTION_SECURITY_REBASELINE_DIFF"); assert.match(body.protectedMainSha || "", SHA40); assert.equal(body.postgresqlMajor, 18); assert.equal(body.collectorVersion, SECURITY_REBASELINE_COLLECTOR_VERSION); for (const field of ["sourceContractSha256","migrationSetDigest","packageChecksumsSha256","liveArtifactSha256","canonicalArtifactSha256","liveCatalogueSha256","canonicalCatalogueSha256"]) assert.match(body[field] || "", SHA256); assert.deepEqual(Object.keys(body.categoryCounts).sort(), [...SECURITY_REBASELINE_OPERATIONS].sort()); assert.equal(body.differences.length, body.differenceCount); for (const difference of body.differences) { exactKeys(difference, ["collection","identity","field","operation","beforeSha256","afterSha256","canonicalSourceIdentity","requiredCapability"], "Security difference"); assert.ok(Object.hasOwn(FIELDS, difference.collection)); assert.match(difference.identity || "", /^.{1,4096}$/s); assert.match(difference.field || "", /^.{1,128}$/s); assert.ok(SECURITY_REBASELINE_OPERATIONS.includes(difference.operation)); for (const digest of [difference.beforeSha256, difference.afterSha256]) if (digest !== null) assert.match(digest, SHA256); assert.equal(difference.canonicalSourceIdentity, body.canonicalCatalogueSha256); assert.match(difference.requiredCapability || "", /^[A-Z][A-Z_]+$/); } assert.equal(body.differenceCount, Object.values(body.categoryCounts).reduce((sum, count) => sum + count, 0)); const blockerCount = body.differences.filter(isBlockingDifference).length; assert.equal(body.blockerCount, blockerCount); assert.equal(body.safeToConstructConvergencePlan, body.blockerCount === 0); assertSecurityMetadata(body); return Object.freeze(value); }
 export function securityRebaselineLogSummary(artifact) { if (artifact.kind === "PRODUCTION_SECURITY_REBASELINE_DIFF") { const value = assertSecurityRebaselineDiff(artifact); return Object.freeze({ kind: value.kind, protectedMainSha: value.protectedMainSha, artifactSha256: value.artifactSha256, canonicalCatalogueSha256: value.canonicalCatalogueSha256, differenceCount: value.differenceCount, categoryCounts: value.categoryCounts, blockerCount: value.blockerCount, safeToConstructConvergencePlan: value.safeToConstructConvergencePlan }); } const value = assertSecurityRebaselineInventory(artifact); return Object.freeze({ kind: value.kind, protectedMainSha: value.protectedMainSha, artifactSha256: value.artifactSha256, catalogueSha256: value.catalogueSha256, collectorVersion: value.collectorVersion, collectionCounts: Object.fromEntries([...new Set(value.objects.map(({ collection }) => collection))].sort().map((collection) => [collection, value.objects.filter((entry) => entry.collection === collection).length])) }); }
