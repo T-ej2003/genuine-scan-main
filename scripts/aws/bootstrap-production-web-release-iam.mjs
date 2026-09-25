@@ -48,6 +48,8 @@ export function bootstrapProductionWebReleaseIam({ run, sourceSha }) {
   if (boundary) {
     assert.equal(boundary.Arn, boundaryArn, "Unexpected permissions boundary identity.");
     assert.equal(boundary.PolicyName, boundaryName, "Unexpected permissions boundary name.");
+    assert.equal(boundary.Path, "/", "Unexpected permissions boundary path.");
+    assert.equal(boundary.Description, "Terraform-managed production web publisher permissions boundary.", "Permissions boundary description differs from Terraform source.");
     const versions = readJson(run, ["iam", "list-policy-versions", "--policy-arn", boundaryArn]);
     assert.equal(versions.IsTruncated ?? false, false);
     assert.equal(versions.PolicyVersions.filter(({ IsDefaultVersion }) => IsDefaultVersion).length, 1);
@@ -84,6 +86,8 @@ export function bootstrapProductionWebReleaseIam({ run, sourceSha }) {
     actions.push("CREATE_BOUNDARY");
     const created = readJson(run, ["iam", "get-policy", "--policy-arn", boundaryArn]).Policy;
     assert.equal(created.Arn, boundaryArn);
+    assert.equal(created.Path, "/");
+    assert.equal(created.Description, "Terraform-managed production web publisher permissions boundary.");
     const versions = readJson(run, ["iam", "list-policy-versions", "--policy-arn", boundaryArn]);
     const live = readJson(run, ["iam", "get-policy-version", "--policy-arn", boundaryArn, "--version-id", versions.PolicyVersions.find(({ IsDefaultVersion }) => IsDefaultVersion).VersionId]).PolicyVersion.Document;
     assert.equal(canonical(live), canonical(publisher), "Created boundary readback differs from source.");

@@ -8,8 +8,8 @@ const read = (name) => JSON.parse(fs.readFileSync(`${root}/${name}`, "utf8"));
 const policy = read("publisher-permissions-policy.json");
 const trust = read("publisher-trust-policy.json");
 const activation = read("frontend-activation-policy.json");
-function fixture({ liveActivation = null } = {}) {
-  let boundary = null, role = null, publisherPolicy = null, activationPolicy = liveActivation;
+function fixture({ liveActivation = null, existingBoundary = false, boundaryDescription = "Terraform-managed production web publisher permissions boundary." } = {}) {
+  let boundary = existingBoundary ? policy : null, role = null, publisherPolicy = null, activationPolicy = liveActivation;
   const calls = [];
   const run = (args) => {
     calls.push(args);
@@ -18,7 +18,7 @@ function fixture({ liveActivation = null } = {}) {
     const output = (data) => JSON.stringify(data);
     if (service === "sts" && operation === "get-caller-identity") return output({ Account: "368992683803", Arn: "arn:aws:iam::368992683803:root" });
     if (service !== "iam") throw new Error(`Unexpected call: ${service} ${operation}`);
-    if (operation === "get-policy") { if (!boundary) throw new Error("NoSuchEntity"); return output({ Policy: { Arn: `arn:aws:iam::368992683803:policy/${WEB_RELEASE_IAM.boundaryName}`, PolicyName: WEB_RELEASE_IAM.boundaryName } }); }
+    if (operation === "get-policy") { if (!boundary) throw new Error("NoSuchEntity"); return output({ Policy: { Arn: `arn:aws:iam::368992683803:policy/${WEB_RELEASE_IAM.boundaryName}`, PolicyName: WEB_RELEASE_IAM.boundaryName, Path: "/", Description: boundaryDescription } }); }
     if (operation === "create-policy") { boundary = policy; return ""; }
     if (operation === "list-policy-versions") return output({ IsTruncated: false, PolicyVersions: [{ VersionId: "v1", IsDefaultVersion: true }] });
     if (operation === "get-policy-version") return output({ PolicyVersion: { Document: boundary } });
@@ -68,6 +68,10 @@ test("web IAM bootstrap creates only source-defined resources and is idempotent"
   const source = fs.readFileSync("scripts/aws/bootstrap-production-web-release-iam.mjs", "utf8");
   assert.match(source, /readStageBProtectedMainCheckout\(\{ cwd: root, expectedSourceSha: sourceSha, requireCanonicalRepository: true \}\)/);
   assert.match(source, /checkout\.currentHead, sourceSha/);
+  const terraform = fs.readFileSync(`${root}/main.tf`, "utf8");
+  const boundaryDescription = terraform.match(/resource "aws_iam_policy" "publisher_boundary" \{[^}]*description\s*=\s*"([^"]+)"/s)?.[1];
+  assert.ok(boundaryDescription, "Terraform must own the imported boundary description.");
+  assert.ok(source.includes(`"--description", ${JSON.stringify(boundaryDescription)}`), "Bootstrap and Terraform must create the boundary with the same description to preserve a no-op import plan.");
 });
 
 test("unexpected caller, changed boundary or policy drift stops before further writes", () => {
@@ -97,6 +101,44 @@ test("release-deployer policy drift fails in the preflight before any IAM mutati
   const value = fixture({ liveActivation: { Version: "2012-10-17", Statement: [{ Effect: "Allow", Action: "iam:*", Resource: "*" }] } });
   assert.throws(() => bootstrapProductionWebReleaseIam({ run: value.run, sourceSha: "a".repeat(40) }), /Frontend activation policy differs/);
   assert.equal(value.calls.some((args) => args[0] === "iam" && ["create-policy", "create-role", "put-role-policy"].includes(args[1])), false);
+});
+
+test("existing permissions boundary metadata must converge with Terraform before import", () => {
+  const value = fixture({ existingBoundary: true, boundaryDescription: "Unexpected immutable description" });
+  assert.throws(() => bootstrapProductionWebReleaseIam({ run: value.run, sourceSha: "a".repeat(40) }), /description differs from Terraform source/);
+  assert.equal(value.calls.some((args) => args[0] === "iam" && /^(create|put|attach|update|delete)/.test(args[1])), false);
+});
+
+test("every bootstrapped IAM object matches the imported Terraform attributes", () => {
+  const terraform = fs.readFileSync(`${root}/main.tf`, "utf8");
+  const source = fs.readFileSync("scripts/aws/bootstrap-production-web-release-iam.mjs", "utf8");
+  const role = terraform.match(/resource "aws_iam_role" "publisher" \{([\s\S]*?)\n\}/)?.[1];
+  const boundary = terraform.match(/resource "aws_iam_policy" "publisher_boundary" \{([\s\S]*?)\n\}/)?.[1];
+  const publisherInline = terraform.match(/resource "aws_iam_role_policy" "publisher" \{([\s\S]*?)\n\}/)?.[1];
+  const activationInline = terraform.match(/resource "aws_iam_role_policy" "frontend_activation" \{([\s\S]*?)\n\}/)?.[1];
+  assert.ok(role && boundary && publisherInline && activationInline);
+  assert.match(role, /name\s*=\s*local\.publisher_role/);
+  assert.match(role, /description\s*=\s*"GitHub OIDC only: publish the reviewed production web image\."/);
+  assert.match(role, /max_session_duration\s*=\s*3600/);
+  assert.match(role, /assume_role_policy\s*=\s*file\("\$\{path\.module\}\/publisher-trust-policy\.json"\)/);
+  assert.match(role, /permissions_boundary\s*=\s*aws_iam_policy\.publisher_boundary\.arn/);
+  assert.match(role, /tags\s*=\s*local\.tags/);
+  assert.match(source, /"--description", "GitHub OIDC only: publish the reviewed production web image\."/);
+  assert.match(source, /"--max-session-duration", "3600"/);
+  for (const tag of ["Key=ManagedBy,Value=Terraform", "Key=Environment,Value=production", "Key=Stack,Value=production-web-release"]) assert.ok(source.includes(tag));
+  assert.equal(source.includes('"--path"'), false, "The bootstrap must use IAM's same default '/' path as Terraform.");
+  assert.match(boundary, /name\s*=\s*"MSCQRProductionWebImagePublisherBoundary"/);
+  assert.match(boundary, /description\s*=\s*"Terraform-managed production web publisher permissions boundary\."/);
+  assert.match(boundary, /policy\s*=\s*file\("\$\{path\.module\}\/publisher-permissions-policy\.json"\)/);
+  assert.match(source, /"--description", "Terraform-managed production web publisher permissions boundary\."/);
+  assert.match(publisherInline, /name\s*=\s*"MSCQRProductionWebImagePublisher"/);
+  assert.match(publisherInline, /role\s*=\s*aws_iam_role\.publisher\.id/);
+  assert.match(publisherInline, /publisher-permissions-policy\.json/);
+  assert.match(activationInline, /name\s*=\s*"MSCQRProductionFrontendActivation"/);
+  assert.match(activationInline, /role\s*=\s*data\.aws_iam_role\.release_deployer\.id/);
+  assert.match(activationInline, /frontend-activation-policy\.json/);
+  assert.match(source, /installIfStillAbsent\(roleName, publisherPolicyName, publisher\)/);
+  assert.match(source, /installIfStillAbsent\(releaseRoleName, activationPolicyName, activation\)/);
 });
 
 test("operator backend policy has exact state/lock scope and no IAM mutation or escalation", () => {

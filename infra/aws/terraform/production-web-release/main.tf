@@ -14,8 +14,9 @@ resource "aws_iam_role" "publisher" {
 }
 
 resource "aws_iam_policy" "publisher_boundary" {
-  name   = "MSCQRProductionWebImagePublisherBoundary"
-  policy = file("${path.module}/publisher-permissions-policy.json")
+  name        = "MSCQRProductionWebImagePublisherBoundary"
+  description = "Terraform-managed production web publisher permissions boundary."
+  policy      = file("${path.module}/publisher-permissions-policy.json")
 }
 
 resource "aws_iam_role_policy" "publisher" {

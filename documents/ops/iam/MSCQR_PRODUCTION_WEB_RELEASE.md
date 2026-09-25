@@ -69,7 +69,7 @@ node scripts/aws/bootstrap-production-web-release-iam.mjs \
 
 The operator policy reconciliation grants the MFA-backed non-root operator only the exact state/lock access and read access to the publisher role, release-deployer role, and publisher boundary required to import and plan. Its inline policy remains within IAM's 2,048-character quota and grants no IAM create, update, attach, pass-role, trust-policy, or delete action. Verify the caller is in account `368992683803` under the approved non-root operator identity.
 
-Use these exact Terraform imports after the source bootstrap and backend initialization:
+Use these exact Terraform imports after the source bootstrap and backend initialization. On a resumed partial import, first inspect `terraform state list`; skip an address only when `terraform state show` confirms its `id` is exactly the corresponding identifier below. Import only absent addresses. Stop if an address is bound to any other identifier or the state cannot be read; never remove or overwrite state to retry:
 
 ```sh
 TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-web-release import aws_iam_policy.publisher_boundary arn:aws:iam::368992683803:policy/MSCQRProductionWebImagePublisherBoundary
