@@ -42,18 +42,30 @@ const identity = () => ({ role: "mscqr_prod_rls_canary_read", session_role: "msc
 test("all fixed catalogue statements use one read-only repeatable-read transaction", async () => {
   const calls = [];
   const { observed } = fixture(); let read = 0;
-  const tx = { $executeRawUnsafe: async (sql) => calls.push(sql), $queryRawUnsafe: async (sql) => { calls.push(sql); return [[identity()], [{ rows: observed.routines }], [{ rows: observed.routines }], [{ rows: observed.tables }], [{ rows: observed.tables.map((row) => ({ schema: "public", ...row })) }], [{ rows: observed.policies }], [{ rows: observed.policies.map((row) => ({ schema: "public", ...row })) }], [{ rows: observed.schemas }], [{ rows: observed.schemas }], [{ rows: observed.roles }], ...Array.from({ length: 6 }, () => [{ rows: [] }])][read++]; } };
+  const tx = { $executeRawUnsafe: async (sql) => calls.push(sql), $queryRawUnsafe: async (sql) => { calls.push(sql); return [[identity()], [{ rows: observed.routines }], [{ rows: observed.routines }], [{ rows: observed.tables }], [{ rows: observed.tables.map((row) => ({ schema: "public", ...row })) }], [{ rows: observed.policies }], [{ rows: observed.policies.map((row) => ({ schema: "public", ...row })) }], [{ rows: observed.schemas }], [{ rows: observed.schemas }], [{ rows: observed.roles }], [{ rows: observed.roles }], ...Array.from({ length: 6 }, () => [{ rows: [] }])][read++]; } };
   const client = { $transaction: async (fn, options) => { assert.equal(options.timeout, 30000); return fn(tx); } };
   const result = await collectAppOnlyDatabaseCatalogue(client);
   assert.deepEqual(result.routines, observed.routines);
   assert.equal(calls[0], "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
   assert.equal(calls[1], "SET LOCAL search_path = pg_catalog");
-  assert.equal(read, 16);
+  assert.equal(read, 17);
   // Inspection check, not the security boundary: callers cannot supply SQL;
   // database privileges, fixed code and read-only transaction enforce the limit.
   assert.ok(calls.slice(2).every((sql) => /^(?:SELECT |WITH RECURSIVE )/.test(sql)));
   assert.ok(calls.some((sql) => sql.includes("c.relkind IN ('r','p','v','m','f')")), "security collector covers relation kinds with ACLs");
   assert.ok(calls.some((sql) => sql.includes("d.classid='pg_catalog.pg_proc'") && sql.includes("d.deptype='e'")), "user-schema routines exclude extension-owned system objects only");
+  const securityRolesSql = calls.find((sql) => sql.includes("FROM pg_catalog.pg_roles r WHERE r.rolname !~"));
+  assert.ok(securityRolesSql?.includes("pg_catalog.pg_auth_members") && securityRolesSql.includes("m.admin_option")
+    && securityRolesSql.includes("m.inherit_option") && securityRolesSql.includes("m.set_option"), "security inventory observes membership edges and all PostgreSQL 18 options");
+  assert.ok(calls.some((sql) => sql.includes("WITH RECURSIVE membership_closure") && sql.includes("m.inherit_option") && sql.includes("intermediate.rolinherit")),
+    "operator capability collection evaluates recursively inherited roles");
+  assert.ok(calls.some((sql) => sql.includes("pg_catalog.pg_type") && sql.includes("t.typcategory<>'A'")),
+    "generated array types are excluded because PostgreSQL does not allow independent ACLs on them; element-type ACLs are collected");
+  const defaultAclSql = calls.find((sql) => sql.includes("FROM pg_catalog.pg_default_acl d"));
+  assert.ok(defaultAclSql && !/\bWHERE\b/.test(defaultAclSql), "security inventory observes global and schema-specific default ACLs for every owner");
+  const routinesSql = calls.find((sql) => sql.includes("p.prokind::text AS kind"));
+  assert.ok(routinesSql?.includes("pg_catalog.pg_aggregate") && routinesSql.includes("aggregate_state_sha256")
+    && routinesSql.includes("CASE WHEN p.prokind='a'"), "functions, procedures, windows, and aggregates have stable distinct security identities");
 });
 for (const field of Object.keys(identity())) test(`database identity boundary rejects ${field} substitution`, async () => {
   const bad = { ...identity(), [field]: typeof identity()[field] === "boolean" ? true : "wrong" };

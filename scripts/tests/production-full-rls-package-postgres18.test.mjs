@@ -316,6 +316,8 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         await tx.$executeRawUnsafe("CREATE VIEW public.rebaseline_unexpected_view AS SELECT 1 AS value");
         await tx.$executeRawUnsafe('ALTER VIEW public.rebaseline_unexpected_view OWNER TO "mscqr_prod_admin"');
         await tx.$executeRawUnsafe("CREATE FUNCTION public.rebaseline_unexpected() RETURNS integer LANGUAGE sql AS 'SELECT 1'");
+        await tx.$executeRawUnsafe("CREATE PROCEDURE public.rebaseline_unexpected_procedure() LANGUAGE plpgsql AS 'BEGIN NULL; END'");
+        await tx.$executeRawUnsafe("CREATE AGGREGATE public.rebaseline_unexpected_aggregate(integer) (SFUNC = pg_catalog.int4pl, STYPE = integer, INITCOND = '0')");
         await tx.$executeRawUnsafe('ALTER FUNCTION public.rebaseline_unexpected() OWNER TO "mscqr_prod_admin"');
         await tx.$executeRawUnsafe("CREATE MATERIALIZED VIEW public.rebaseline_unexpected_materialized AS SELECT 1 AS value");
         await tx.$executeRawUnsafe('ALTER MATERIALIZED VIEW public.rebaseline_unexpected_materialized OWNER TO "mscqr_prod_admin"');
@@ -328,16 +330,33 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         await tx.$executeRawUnsafe("GRANT SELECT ON public.rebaseline_unexpected_view TO PUBLIC");
         await tx.$executeRawUnsafe("CREATE ROLE rebaseline_intermediate_writer NOLOGIN");
         await tx.$executeRawUnsafe("GRANT pg_write_all_data TO rebaseline_intermediate_writer");
+        await tx.$executeRawUnsafe("CREATE ROLE rebaseline_unexpected_login LOGIN");
+        await tx.$executeRawUnsafe("CREATE ROLE rebaseline_unexpected_bypass NOLOGIN BYPASSRLS");
+        await tx.$executeRawUnsafe("CREATE ROLE rebaseline_unexpected_createrole NOLOGIN CREATEROLE");
+        await tx.$executeRawUnsafe("CREATE ROLE rebaseline_unexpected_createdb NOLOGIN CREATEDB");
+        await tx.$executeRawUnsafe("CREATE ROLE rebaseline_default_owner NOLOGIN");
+        await tx.$executeRawUnsafe("ALTER DEFAULT PRIVILEGES FOR ROLE rebaseline_default_owner GRANT SELECT ON TABLES TO PUBLIC");
+        await tx.$executeRawUnsafe("ALTER DEFAULT PRIVILEGES FOR ROLE rebaseline_default_owner GRANT INSERT ON TABLES TO mscqr_prd_rls_phase2_app");
+        await tx.$executeRawUnsafe("ALTER DEFAULT PRIVILEGES FOR ROLE rebaseline_default_owner IN SCHEMA public GRANT USAGE ON SEQUENCES TO PUBLIC");
         await tx.$executeRawUnsafe('ALTER ROLE "mscqr_prod_admin" INHERIT');
         await tx.$executeRawUnsafe('GRANT rebaseline_intermediate_writer TO "mscqr_prod_admin"');
         await tx.$executeRawUnsafe('GRANT pg_write_all_data TO "mscqr_prod_admin"');
         const changed = await collectAppOnlyDatabaseCatalogueRows(tx), taskDigest = "f".repeat(64);
         assert.ok(changed.securityRoutines.some(({ schema, name }) => schema === "public" && name === "rebaseline_unexpected"));
+        assert.ok(changed.securityRoutines.some(({ schema, name, kind }) => schema === "public" && name === "rebaseline_unexpected_procedure" && kind === "p"));
+        assert.ok(changed.securityRoutines.some(({ schema, name, kind, aggregate_state_sha256 }) => schema === "public" && name === "rebaseline_unexpected_aggregate" && kind === "a" && /^[a-f0-9]{64}$/.test(aggregate_state_sha256)));
         assert.ok(changed.securityTables.some(({ schema, name, kind }) => schema === "public" && name === "rebaseline_unexpected_view" && kind === "v"));
         assert.ok(changed.securityTables.some(({ schema, name, kind }) => schema === "public" && name === "rebaseline_unexpected_materialized" && kind === "m"));
         assert.ok(changed.securityTables.some(({ schema, name, kind }) => schema === "public" && name === "rebaseline_unexpected_foreign" && kind === "f"));
         assert.ok(changed.types.some(({ schema, name }) => schema === "public" && name === "rebaseline_unexpected_enum"));
         assert.ok(changed.sequences.some(({ schema, name }) => schema === "public" && name === "rebaseline_unexpected_sequence"));
+        assert.ok(changed.securityRoles.some(({ name, login }) => name === "rebaseline_unexpected_login" && login));
+        assert.ok(changed.securityRoles.some(({ name, bypass_rls }) => name === "rebaseline_unexpected_bypass" && bypass_rls));
+        assert.ok(changed.securityRoles.some(({ name, create_role }) => name === "rebaseline_unexpected_createrole" && create_role));
+        assert.ok(changed.securityRoles.some(({ name, create_database }) => name === "rebaseline_unexpected_createdb" && create_database));
+        assert.ok(changed.defaults.some(({ owner, schema, role }) => owner === "rebaseline_default_owner" && schema === "*" && role === "PUBLIC"));
+        assert.ok(changed.defaults.some(({ owner, schema, role }) => owner === "rebaseline_default_owner" && schema === "*" && role === "mscqr_prd_rls_phase2_app"));
+        assert.ok(changed.defaults.some(({ owner, schema, role, object_type }) => owner === "rebaseline_default_owner" && schema === "public" && role === "PUBLIC" && object_type === "S"));
         assert.ok(changed.operatorCapabilities[0].membership_closure.includes("pg_write_all_data"));
         assert.ok(changed.operatorCapabilities[0].membership_closure.includes("rebaseline_intermediate_writer"));
         const liveInventory = createLiveSecurityRebaselineInventory({ protectedMainSha: sourceSha, catalogue: changed, canonical: testCanonical,
@@ -357,6 +376,13 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         assert.ok(sourceDiff.differences.some(({ collection, identity, operation }) => collection === "types" && identity === "public.rebaseline_unexpected_enum" && operation === "UNEXPECTED_OBJECT"));
         assert.ok(sourceDiff.differences.some(({ collection, identity, operation }) => collection === "sequences" && identity === "public.rebaseline_unexpected_sequence" && operation === "UNEXPECTED_OBJECT"));
         assert.ok(sourceDiff.differences.some(({ collection, identity, operation }) => collection === "routines" && identity.startsWith("public.rebaseline_unexpected(") && operation === "UNEXPECTED_OBJECT"));
+        assert.ok(sourceDiff.differences.some(({ collection, identity, operation }) => collection === "routines" && identity.startsWith("public.rebaseline_unexpected_procedure()") && operation === "UNEXPECTED_OBJECT"));
+        assert.ok(sourceDiff.differences.some(({ collection, identity, operation }) => collection === "routines" && identity.startsWith("public.rebaseline_unexpected_aggregate(integer)") && operation === "UNEXPECTED_OBJECT"));
+        for (const name of ["rebaseline_unexpected_login","rebaseline_unexpected_bypass","rebaseline_unexpected_createrole","rebaseline_unexpected_createdb","rebaseline_default_owner"]) {
+          assert.ok(sourceDiff.differences.some(({ collection, identity, operation }) => collection === "unexpectedRoles" && identity === name && operation === "UNEXPECTED_OBJECT"), `${name} must hard-stop as an unexpected role`);
+        }
+        assert.ok(sourceDiff.differences.some(({ collection, identity }) => collection === "defaultPrivileges" && identity.includes('"*"') && identity.includes('"PUBLIC"')));
+        assert.equal(sourceDiff.safeToConstructConvergencePlan, false);
         throw new Error("rollback real security collector drift");
       }), /rollback real security collector drift/);
       assertAppOnlyRequirements(requirements, context);
