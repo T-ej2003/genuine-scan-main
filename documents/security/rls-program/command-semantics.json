@@ -1563,7 +1563,7 @@
       "supportingEvidence": [
         "backend/src/controllers/irAlertController.ts",
         "backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts",
-        "backend/src/routes/index.ts:2373 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
+        "backend/src/routes/index.ts:2375 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
         "A database-verified active licensee administrator with fresh MFA, request ID, tenant-alert-review purpose, and canonical licensee reads at most 100 projected alerts for that licensee in one attributed transaction.",
@@ -2839,7 +2839,7 @@
       "supportingEvidence": [
         "backend/src/controllers/irAlertController.ts",
         "backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts",
-        "backend/src/routes/index.ts:2373 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
+        "backend/src/routes/index.ts:2375 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
         "A database-verified active licensee administrator with fresh MFA, request ID, tenant-alert-review purpose, and canonical licensee reads at most 100 projected alerts for that licensee in one attributed transaction.",
@@ -4157,7 +4157,7 @@
       "supportingEvidence": [
         "backend/src/controllers/irAlertController.ts",
         "backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts",
-        "backend/src/routes/index.ts:2373 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
+        "backend/src/routes/index.ts:2375 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
         "A database-verified active licensee administrator with fresh MFA, request ID, tenant-alert-review purpose, and canonical licensee reads at most 100 projected alerts for that licensee in one attributed transaction.",
@@ -10346,7 +10346,7 @@
       "supportingEvidence": [
         "backend/src/controllers/accountController.ts",
         "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
-        "backend/src/routes/index.ts:2381 guards=authenticate,requireRecentSensitiveAuth,requireCsrf"
+        "backend/src/routes/index.ts:2383 guards=authenticate,requireRecentSensitiveAuth,requireCsrf"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at step-up-verified performs INSERT within the recorded scope, column set, lifecycle, and boundary."
@@ -10427,7 +10427,7 @@
       "supportingEvidence": [
         "backend/src/controllers/accountController.ts",
         "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
-        "backend/src/routes/index.ts:2380 guards=authenticate,requireRecentSensitiveAuth,requireCsrf"
+        "backend/src/routes/index.ts:2382 guards=authenticate,requireRecentSensitiveAuth,requireCsrf"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at step-up-verified performs INSERT within the recorded scope, column set, lifecycle, and boundary."
@@ -16062,7 +16062,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/qrController.ts",
-        "backend/src/routes/index.ts:2377 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
+        "backend/src/routes/index.ts:2379 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -29407,7 +29407,7 @@
       "supportingEvidence": [
         "backend/src/controllers/incidentController.ts",
         "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
-        "backend/src/routes/index.ts:2273 guards=authenticate,requireAnyAdmin,enforceTenantIsolation"
+        "backend/src/routes/index.ts:2273 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation"
       ],
       "allowScenarios": [
         "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
@@ -30688,7 +30688,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/irIncidentController.ts",
-        "backend/src/routes/index.ts:2337 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
+        "backend/src/routes/index.ts:2339 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs INSERT within the recorded scope, column set, lifecycle, and boundary."
@@ -30953,7 +30953,7 @@
       "supportingEvidence": [
         "backend/src/controllers/incidentController.ts",
         "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
-        "backend/src/routes/index.ts:2273 guards=authenticate,requireAnyAdmin,enforceTenantIsolation"
+        "backend/src/routes/index.ts:2273 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation"
       ],
       "allowScenarios": [
         "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
@@ -31501,7 +31501,7 @@
       "supportingEvidence": [
         "backend/src/controllers/irAlertController.ts",
         "backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts",
-        "backend/src/routes/index.ts:2373 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
+        "backend/src/routes/index.ts:2375 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
         "A database-verified active licensee administrator with fresh MFA, request ID, tenant-alert-review purpose, and canonical licensee reads at most 100 projected alerts for that licensee in one attributed transaction.",
@@ -32050,7 +32050,7 @@
       "supportingEvidence": [
         "backend/src/controllers/irAlertController.ts",
         "backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts",
-        "backend/src/routes/index.ts:2372 guards=authenticate,requirePlatformAdmin"
+        "backend/src/routes/index.ts:2374 guards=authenticate,requirePlatformAdmin"
       ],
       "allowScenarios": [
         "A database-verified active licensee administrator with fresh MFA, request ID, tenant-alert-review purpose, and canonical licensee reads at most 100 projected alerts for that licensee in one attributed transaction.",
@@ -32841,7 +32841,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/irIncidentController.ts",
-        "backend/src/routes/index.ts:2339 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
+        "backend/src/routes/index.ts:2341 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -33066,7 +33066,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/irIncidentController.ts",
-        "backend/src/routes/index.ts:2338 guards=authenticate,requirePlatformAdmin"
+        "backend/src/routes/index.ts:2340 guards=authenticate,requirePlatformAdmin"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -33291,7 +33291,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/irIncidentController.ts",
-        "backend/src/routes/index.ts:2341 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
+        "backend/src/routes/index.ts:2343 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -33630,7 +33630,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/irIncidentController.ts",
-        "backend/src/routes/index.ts:2340 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
+        "backend/src/routes/index.ts:2342 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -33966,7 +33966,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/irIncidentController.ts",
-        "backend/src/routes/index.ts:2343 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
+        "backend/src/routes/index.ts:2345 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -34534,7 +34534,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/irIncidentController.ts",
-        "backend/src/routes/index.ts:2336 guards=authenticate,requirePlatformAdmin"
+        "backend/src/routes/index.ts:2338 guards=authenticate,requirePlatformAdmin"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -34641,7 +34641,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/irIncidentController.ts",
-        "backend/src/routes/index.ts:2339 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
+        "backend/src/routes/index.ts:2341 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
@@ -37119,7 +37119,7 @@
       "supportingEvidence": [
         "backend/src/controllers/incidentController.ts",
         "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
-        "backend/src/routes/index.ts:2273 guards=authenticate,requireAnyAdmin,enforceTenantIsolation"
+        "backend/src/routes/index.ts:2273 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation"
       ],
       "allowScenarios": [
         "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
@@ -37924,7 +37924,7 @@
       "supportingEvidence": [
         "backend/src/controllers/irAlertController.ts",
         "backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts",
-        "backend/src/routes/index.ts:2373 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
+        "backend/src/routes/index.ts:2375 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
         "A database-verified active licensee administrator with fresh MFA, request ID, tenant-alert-review purpose, and canonical licensee reads at most 100 projected alerts for that licensee in one attributed transaction.",
@@ -38302,7 +38302,7 @@
       "supportingEvidence": [
         "backend/src/controllers/accountController.ts",
         "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
-        "backend/src/routes/index.ts:2380 guards=authenticate,requireRecentSensitiveAuth,requireCsrf"
+        "backend/src/routes/index.ts:2382 guards=authenticate,requireRecentSensitiveAuth,requireCsrf"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at step-up-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -38578,7 +38578,7 @@
       "supportingEvidence": [
         "backend/src/controllers/irAlertController.ts",
         "backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts",
-        "backend/src/routes/index.ts:2372 guards=authenticate,requirePlatformAdmin"
+        "backend/src/routes/index.ts:2374 guards=authenticate,requirePlatformAdmin"
       ],
       "allowScenarios": [
         "A database-verified active licensee administrator with fresh MFA, request ID, tenant-alert-review purpose, and canonical licensee reads at most 100 projected alerts for that licensee in one attributed transaction.",
@@ -47364,7 +47364,7 @@
       "supportingEvidence": [
         "backend/src/controllers/incidentController.ts",
         "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
-        "backend/src/routes/index.ts:2273 guards=authenticate,requireAnyAdmin,enforceTenantIsolation"
+        "backend/src/routes/index.ts:2273 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation"
       ],
       "allowScenarios": [
         "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
@@ -48024,7 +48024,7 @@
       "supportingEvidence": [
         "backend/src/controllers/irAlertController.ts",
         "backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts",
-        "backend/src/routes/index.ts:2373 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
+        "backend/src/routes/index.ts:2375 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
         "A database-verified active licensee administrator with fresh MFA, request ID, tenant-alert-review purpose, and canonical licensee reads at most 100 projected alerts for that licensee in one attributed transaction.",
@@ -48489,7 +48489,7 @@
       "supportingEvidence": [
         "backend/src/controllers/irAlertController.ts",
         "backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts",
-        "backend/src/routes/index.ts:2372 guards=authenticate,requirePlatformAdmin"
+        "backend/src/routes/index.ts:2374 guards=authenticate,requirePlatformAdmin"
       ],
       "allowScenarios": [
         "A database-verified active licensee administrator with fresh MFA, request ID, tenant-alert-review purpose, and canonical licensee reads at most 100 projected alerts for that licensee in one attributed transaction.",
@@ -54768,7 +54768,7 @@
       "supportingEvidence": [
         "backend/src/controllers/irAlertController.ts",
         "backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts",
-        "backend/src/routes/index.ts:2372 guards=authenticate,requirePlatformAdmin"
+        "backend/src/routes/index.ts:2374 guards=authenticate,requirePlatformAdmin"
       ],
       "allowScenarios": [
         "A database-verified active licensee administrator with fresh MFA, request ID, tenant-alert-review purpose, and canonical licensee reads at most 100 projected alerts for that licensee in one attributed transaction.",
@@ -55340,7 +55340,7 @@
       "supportingEvidence": [
         "backend/src/controllers/irAlertController.ts",
         "backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts",
-        "backend/src/routes/index.ts:2373 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
+        "backend/src/routes/index.ts:2375 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
         "A database-verified active licensee administrator with fresh MFA, request ID, tenant-alert-review purpose, and canonical licensee reads at most 100 projected alerts for that licensee in one attributed transaction.",
@@ -72106,7 +72106,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/irIncidentController.ts",
-        "backend/src/routes/index.ts:2337 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
+        "backend/src/routes/index.ts:2339 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -78583,7 +78583,7 @@
       "supportingEvidence": [
         "backend/src/controllers/incidentController.ts",
         "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
-        "backend/src/routes/index.ts:2273 guards=authenticate,requireAnyAdmin,enforceTenantIsolation"
+        "backend/src/routes/index.ts:2273 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation"
       ],
       "allowScenarios": [
         "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
@@ -79200,7 +79200,7 @@
       "supportingEvidence": [
         "backend/src/controllers/accountController.ts",
         "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
-        "backend/src/routes/index.ts:2381 guards=authenticate,requireRecentSensitiveAuth,requireCsrf"
+        "backend/src/routes/index.ts:2383 guards=authenticate,requireRecentSensitiveAuth,requireCsrf"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at step-up-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -80005,7 +80005,7 @@
       "supportingEvidence": [
         "backend/src/controllers/irAlertController.ts",
         "backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts",
-        "backend/src/routes/index.ts:2373 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
+        "backend/src/routes/index.ts:2375 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
         "A database-verified active licensee administrator with fresh MFA, request ID, tenant-alert-review purpose, and canonical licensee reads at most 100 projected alerts for that licensee in one attributed transaction.",
@@ -80923,7 +80923,7 @@
       "supportingEvidence": [
         "backend/src/controllers/accountController.ts",
         "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
-        "backend/src/routes/index.ts:2380 guards=authenticate,requireRecentSensitiveAuth,requireCsrf"
+        "backend/src/routes/index.ts:2382 guards=authenticate,requireRecentSensitiveAuth,requireCsrf"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at step-up-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -81515,7 +81515,7 @@
       "supportingEvidence": [
         "backend/src/controllers/irAlertController.ts",
         "backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts",
-        "backend/src/routes/index.ts:2372 guards=authenticate,requirePlatformAdmin"
+        "backend/src/routes/index.ts:2374 guards=authenticate,requirePlatformAdmin"
       ],
       "allowScenarios": [
         "A database-verified active licensee administrator with fresh MFA, request ID, tenant-alert-review purpose, and canonical licensee reads at most 100 projected alerts for that licensee in one attributed transaction.",
@@ -89158,7 +89158,7 @@
       "supportingEvidence": [
         "backend/src/controllers/accountController.ts",
         "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
-        "backend/src/routes/index.ts:2381 guards=authenticate,requireRecentSensitiveAuth,requireCsrf"
+        "backend/src/routes/index.ts:2383 guards=authenticate,requireRecentSensitiveAuth,requireCsrf"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at step-up-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
@@ -104512,7 +104512,7 @@
       "supportingEvidence": [
         "backend/src/controllers/incidentController.ts",
         "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
-        "backend/src/routes/index.ts:2273 guards=authenticate,requireAnyAdmin,enforceTenantIsolation"
+        "backend/src/routes/index.ts:2273 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation"
       ],
       "allowScenarios": [
         "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
@@ -105275,7 +105275,7 @@
       "supportingEvidence": [
         "backend/src/controllers/accountController.ts",
         "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
-        "backend/src/routes/index.ts:2381 guards=authenticate,requireRecentSensitiveAuth,requireCsrf"
+        "backend/src/routes/index.ts:2383 guards=authenticate,requireRecentSensitiveAuth,requireCsrf"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at step-up-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -106278,7 +106278,7 @@
       "supportingEvidence": [
         "backend/src/controllers/irAlertController.ts",
         "backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts",
-        "backend/src/routes/index.ts:2373 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
+        "backend/src/routes/index.ts:2375 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
         "A database-verified active licensee administrator with fresh MFA, request ID, tenant-alert-review purpose, and canonical licensee reads at most 100 projected alerts for that licensee in one attributed transaction.",
@@ -107117,7 +107117,7 @@
       "supportingEvidence": [
         "backend/src/controllers/accountController.ts",
         "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
-        "backend/src/routes/index.ts:2380 guards=authenticate,requireRecentSensitiveAuth,requireCsrf"
+        "backend/src/routes/index.ts:2382 guards=authenticate,requireRecentSensitiveAuth,requireCsrf"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at step-up-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -107750,7 +107750,7 @@
       "supportingEvidence": [
         "backend/src/controllers/irAlertController.ts",
         "backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts",
-        "backend/src/routes/index.ts:2372 guards=authenticate,requirePlatformAdmin"
+        "backend/src/routes/index.ts:2374 guards=authenticate,requirePlatformAdmin"
       ],
       "allowScenarios": [
         "A database-verified active licensee administrator with fresh MFA, request ID, tenant-alert-review purpose, and canonical licensee reads at most 100 projected alerts for that licensee in one attributed transaction.",
@@ -115758,7 +115758,7 @@
       "supportingEvidence": [
         "backend/src/controllers/accountController.ts",
         "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
-        "backend/src/routes/index.ts:2381 guards=authenticate,requireRecentSensitiveAuth,requireCsrf"
+        "backend/src/routes/index.ts:2383 guards=authenticate,requireRecentSensitiveAuth,requireCsrf"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at step-up-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
@@ -115845,7 +115845,7 @@
       "supportingEvidence": [
         "backend/src/controllers/accountController.ts",
         "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
-        "backend/src/routes/index.ts:2380 guards=authenticate,requireRecentSensitiveAuth,requireCsrf"
+        "backend/src/routes/index.ts:2382 guards=authenticate,requireRecentSensitiveAuth,requireCsrf"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at step-up-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."

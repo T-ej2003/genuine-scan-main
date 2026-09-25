@@ -14,6 +14,7 @@ const binding = {
   email: "invited@example.invalid",
   orgId: "00000000-0000-4000-8000-000000000103",
   licenseeId: "00000000-0000-4000-8000-000000000105",
+  expiresAt: new Date(Date.now() + 600_000),
 };
 const deliveryAttempts = [];
 let deliveryShouldFail = false;
@@ -29,7 +30,7 @@ mock("rls-waves/session-b/b01/preAuthRepository.js", {
     ...binding, challengeId: input.challengeId, challengeExpiresAt: input.challengeExpiresAt,
   }),
   lookupInviteActivationBinding: async () => ({ ...binding, challengeId: "00000000-0000-4000-8000-000000000104" }),
-  resendInviteActivationBoundary: async (input) => ({ ...binding, ...resendScope, challengeId: input.newChallengeId }),
+  resendInviteActivationBoundary: async (input) => ({ ...binding, ...resendScope, challengeId: input.newChallengeId, expiresAt: input.expiresAt }),
 });
 
 const { acceptInvite, resendInviteActivation } = require("../dist/services/auth/inviteService");

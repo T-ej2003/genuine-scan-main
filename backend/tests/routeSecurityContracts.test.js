@@ -58,6 +58,14 @@ assert(
   auditRoutesSource.includes('"/stream", auditStreamPreAuthRouteLimiter, authenticateSSE, requireAuditViewer, requireRecentAdminMfa, enforceTenantIsolation,'),
   "audit stream connections must require the role-aware recent-authentication boundary before tenant isolation"
 );
+assert(
+  routesSource.includes('"/incidents/evidence-files/:fileName", incidentExportPreAuthRouteLimiter, authenticate, requireAnyAdmin, incidentExportRouteLimiter, protectedReadRouteLimiter, requireRecentAdminMfa, enforceTenantIsolation,'),
+  "incident evidence downloads must require role-aware recent authentication"
+);
+assert(
+  routesSource.includes('"/incidents/:id/export-pdf", incidentExportPreAuthRouteLimiter, authenticate, requireAnyAdmin, incidentExportRouteLimiter, protectedReadRouteLimiter, requireRecentAdminMfa, enforceTenantIsolation,'),
+  "incident PDF exports must require role-aware recent authentication"
+);
 
 [
   "...verifyCodeLimiters",

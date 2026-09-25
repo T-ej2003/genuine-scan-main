@@ -892,127 +892,127 @@
         {
           "method": "GET",
           "path": "/incidents/:id",
-          "source": "backend/src/routes/index.ts:2283"
+          "source": "backend/src/routes/index.ts:2284"
         },
         {
           "method": "PATCH",
           "path": "/incidents/:id",
-          "source": "backend/src/routes/index.ts:2284"
-        },
-        {
-          "method": "POST",
-          "path": "/incidents/:id/events",
           "source": "backend/src/routes/index.ts:2285"
         },
         {
           "method": "POST",
-          "path": "/incidents/:id/evidence",
+          "path": "/incidents/:id/events",
           "source": "backend/src/routes/index.ts:2286"
         },
         {
           "method": "POST",
+          "path": "/incidents/:id/evidence",
+          "source": "backend/src/routes/index.ts:2287"
+        },
+        {
+          "method": "POST",
           "path": "/incidents/:id/email",
-          "source": "backend/src/routes/index.ts:2300"
+          "source": "backend/src/routes/index.ts:2301"
         },
         {
           "method": "POST",
           "path": "/incidents/:id/notify-customer",
-          "source": "backend/src/routes/index.ts:2312"
+          "source": "backend/src/routes/index.ts:2313"
         },
         {
           "method": "GET",
           "path": "/incidents/:id/export-pdf",
-          "source": "backend/src/routes/index.ts:2324"
+          "source": "backend/src/routes/index.ts:2325"
         },
         {
           "method": "GET",
           "path": "/ir/incidents",
-          "source": "backend/src/routes/index.ts:2336"
+          "source": "backend/src/routes/index.ts:2338"
         },
         {
           "method": "POST",
           "path": "/ir/incidents",
-          "source": "backend/src/routes/index.ts:2337"
+          "source": "backend/src/routes/index.ts:2339"
         },
         {
           "method": "GET",
           "path": "/ir/incidents/:id",
-          "source": "backend/src/routes/index.ts:2338"
+          "source": "backend/src/routes/index.ts:2340"
         },
         {
           "method": "PATCH",
           "path": "/ir/incidents/:id",
-          "source": "backend/src/routes/index.ts:2339"
-        },
-        {
-          "method": "POST",
-          "path": "/ir/incidents/:id/events",
-          "source": "backend/src/routes/index.ts:2340"
-        },
-        {
-          "method": "POST",
-          "path": "/ir/incidents/:id/customer-trust/review",
           "source": "backend/src/routes/index.ts:2341"
         },
         {
           "method": "POST",
-          "path": "/ir/incidents/:id/actions",
+          "path": "/ir/incidents/:id/events",
           "source": "backend/src/routes/index.ts:2342"
         },
         {
           "method": "POST",
-          "path": "/ir/incidents/:id/communications",
+          "path": "/ir/incidents/:id/customer-trust/review",
           "source": "backend/src/routes/index.ts:2343"
         },
         {
           "method": "POST",
+          "path": "/ir/incidents/:id/actions",
+          "source": "backend/src/routes/index.ts:2344"
+        },
+        {
+          "method": "POST",
+          "path": "/ir/incidents/:id/communications",
+          "source": "backend/src/routes/index.ts:2345"
+        },
+        {
+          "method": "POST",
           "path": "/ir/incidents/:id/attachments",
-          "source": "backend/src/routes/index.ts:2354"
+          "source": "backend/src/routes/index.ts:2356"
         },
         {
           "method": "GET",
           "path": "/ir/policies",
-          "source": "backend/src/routes/index.ts:2368"
+          "source": "backend/src/routes/index.ts:2370"
         },
         {
           "method": "POST",
           "path": "/ir/policies",
-          "source": "backend/src/routes/index.ts:2369"
+          "source": "backend/src/routes/index.ts:2371"
         },
         {
           "method": "PATCH",
           "path": "/ir/policies/:id",
-          "source": "backend/src/routes/index.ts:2370"
+          "source": "backend/src/routes/index.ts:2372"
         },
         {
           "method": "GET",
           "path": "/ir/alerts",
-          "source": "backend/src/routes/index.ts:2372"
+          "source": "backend/src/routes/index.ts:2374"
         },
         {
           "method": "PATCH",
           "path": "/ir/alerts/:id",
-          "source": "backend/src/routes/index.ts:2373"
+          "source": "backend/src/routes/index.ts:2375"
         },
         {
           "method": "POST",
           "path": "/admin/qrs/:id/block",
-          "source": "backend/src/routes/index.ts:2376"
+          "source": "backend/src/routes/index.ts:2378"
         },
         {
           "method": "POST",
           "path": "/admin/batches/:id/block",
-          "source": "backend/src/routes/index.ts:2377"
+          "source": "backend/src/routes/index.ts:2379"
         },
         {
           "method": "PATCH",
           "path": "/account/profile",
-          "source": "backend/src/routes/index.ts:2380"
+          "source": "backend/src/routes/index.ts:2382"
         },
         {
           "method": "PATCH",
           "path": "/account/password",
-          "source": "backend/src/routes/index.ts:2381"
+          "source": "backend/src/routes/index.ts:2383"
         },
         {
           "method": "POST",
@@ -15248,31 +15248,31 @@
       "supportingEvidence": [
         {
           "accessId": "access-015ebe1d6b5903df",
-          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:324",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:327",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_auth.resend_invite_activation"
         },
         {
           "accessId": "access-0862561e7dc70054",
-          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:324",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:327",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_auth.resend_invite_activation"
         },
         {
           "accessId": "access-5c915d1378954766",
-          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:324",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:327",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_auth.resend_invite_activation"
         },
         {
           "accessId": "access-8cb97030a14c4af2",
-          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:324",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:327",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_auth.resend_invite_activation"
         },
         {
           "accessId": "access-b65f7d58b841d981",
-          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:324",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:327",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_auth.resend_invite_activation"
         }
@@ -15375,37 +15375,37 @@
       "supportingEvidence": [
         {
           "accessId": "access-748bb6a71f3c6769",
-          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:314",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:317",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_auth.verify_invite_activation"
         },
         {
           "accessId": "access-880c63051d3d3aaa",
-          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:314",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:317",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_auth.verify_invite_activation"
         },
         {
           "accessId": "access-92e6da7425b3e04b",
-          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:314",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:317",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_auth.verify_invite_activation"
         },
         {
           "accessId": "access-bb734801ce61f527",
-          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:314",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:317",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_auth.verify_invite_activation"
         },
         {
           "accessId": "access-c55afdcf78d259fd",
-          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:314",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:317",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_auth.verify_invite_activation"
         },
         {
           "accessId": "access-efdd17d38a0402d2",
-          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:314",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:317",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_auth.verify_invite_activation"
         }

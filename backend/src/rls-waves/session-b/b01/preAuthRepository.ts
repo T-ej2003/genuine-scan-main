@@ -301,12 +301,15 @@ export const consumeInvitationBoundary = async (
   return result;
 };
 
-export type InviteActivationBinding = { challengeId: string; userId: string; inviteId: string; email: string };
+export type InviteActivationBinding = { challengeId: string; userId: string; inviteId: string; email: string; expiresAt: Date };
 
-export const lookupInviteActivationBinding = async (challengeId: string, db: PreAuthQueryClient = getB01PreAuthPrisma()) =>
-  oneOrNone(await db.$queryRaw<InviteActivationBinding[]>`
+export const lookupInviteActivationBinding = async (challengeId: string, db: PreAuthQueryClient = getB01PreAuthPrisma()) => {
+  const result = oneOrNone(await db.$queryRaw<InviteActivationBinding[]>`
     SELECT * FROM app_auth.lookup_invite_activation_challenge(${challengeId})
   `, "app_auth.lookup_invite_activation_challenge");
+  if (result) validDate(result.expiresAt, "activation expiry");
+  return result;
+};
 
 export const verifyInviteActivationBoundary = async (
   input: { challengeId: string; verifierCandidates: string[]; verifiedAt: Date },
@@ -322,7 +325,7 @@ export const resendInviteActivationBoundary = async (
   input: { challengeId: string; newChallengeId: string; codeVerifier: string; requestedAt: Date; expiresAt: Date },
   db: PreAuthQueryClient = getB01PreAuthPrisma()
 ) => oneOrNone(await db.$queryRaw<Array<{
-  challengeId: string; email: string; userId: string; inviteId: string; orgId: string | null; licenseeId: string | null;
+  challengeId: string; email: string; userId: string; inviteId: string; orgId: string | null; licenseeId: string | null; expiresAt: Date;
 }>>`
   SELECT * FROM app_auth.resend_invite_activation(
     ${input.challengeId}, ${input.newChallengeId}, ${tokenHash(input.codeVerifier, "activation verifier")},

@@ -378,8 +378,8 @@ const sendInviteActivationCode = async (input: {
   const delivery = await sendAuthEmail({
     toAddress: input.email,
     subject: "Your MSCQR activation code",
-    text: `Your MSCQR activation code is ${input.code}. It expires in 10 minutes. If you did not request activation, ignore this message.`,
-    html: `<p>Your MSCQR activation code is <strong>${input.code}</strong>.</p><p>It expires in 10 minutes. If you did not request activation, ignore this message.</p>`,
+    text: `Your MSCQR activation code is ${input.code}. It expires when your 10-minute activation window ends. If you did not request activation, ignore this message.`,
+    html: `<p>Your MSCQR activation code is <strong>${input.code}</strong>.</p><p>It expires when your 10-minute activation window ends. If you did not request activation, ignore this message.</p>`,
     template: "invite_activation_code",
     orgId: input.orgId,
     licenseeId: input.licenseeId,
@@ -410,14 +410,14 @@ export const resendInviteActivation = async (input: { challengeId: string; ipHas
     newChallengeId: challengeId,
     codeVerifier: inviteActivationVerifier({ ...binding, challengeId }, code),
     requestedAt: now,
-    expiresAt: new Date(now.getTime() + 10 * 60_000),
+    expiresAt: binding.expiresAt,
   });
   if (!result) return null;
   const delivered = await sendInviteActivationCode({
     email: result.email, code, orgId: result.orgId, licenseeId: result.licenseeId,
     ipHash: input.ipHash, userAgent: input.userAgent,
   }).catch(() => false);
-  return { challengeId: result.challengeId, expiresAt: new Date(now.getTime() + 10 * 60_000), delivered };
+  return { challengeId: result.challengeId, expiresAt: result.expiresAt, delivered };
 };
 
 export const getInvitePreview = async (rawToken: string) => {

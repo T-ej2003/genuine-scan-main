@@ -4109,31 +4109,31 @@
       "productionAccessPath": [
         {
           "accessId": "access-015ebe1d6b5903df",
-          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:324",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:327",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_auth.resend_invite_activation"
         },
         {
           "accessId": "access-0862561e7dc70054",
-          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:324",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:327",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_auth.resend_invite_activation"
         },
         {
           "accessId": "access-5c915d1378954766",
-          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:324",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:327",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_auth.resend_invite_activation"
         },
         {
           "accessId": "access-8cb97030a14c4af2",
-          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:324",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:327",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_auth.resend_invite_activation"
         },
         {
           "accessId": "access-b65f7d58b841d981",
-          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:324",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:327",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_auth.resend_invite_activation"
         }
@@ -4159,37 +4159,37 @@
       "productionAccessPath": [
         {
           "accessId": "access-748bb6a71f3c6769",
-          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:314",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:317",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_auth.verify_invite_activation"
         },
         {
           "accessId": "access-880c63051d3d3aaa",
-          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:314",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:317",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_auth.verify_invite_activation"
         },
         {
           "accessId": "access-92e6da7425b3e04b",
-          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:314",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:317",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_auth.verify_invite_activation"
         },
         {
           "accessId": "access-bb734801ce61f527",
-          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:314",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:317",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_auth.verify_invite_activation"
         },
         {
           "accessId": "access-c55afdcf78d259fd",
-          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:314",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:317",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_auth.verify_invite_activation"
         },
         {
           "accessId": "access-efdd17d38a0402d2",
-          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:314",
+          "source": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts:317",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_auth.verify_invite_activation"
         }

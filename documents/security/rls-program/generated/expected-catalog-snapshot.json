@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "deploymentModel": "clean-room-blue-green",
-  "sourceContractSha256": "6fd37a028f0f7ab1aa9f3f4f7a3f94f18f45018484acfea858c2969d97e57b50",
+  "sourceContractSha256": "20c01c9302f92959757c9175dc317145d2a3c9e443bd7d6240b227bc0f5a6902",
   "migrationSetDigest": "65c30dc21bec8af4a44d3983761e9bd4e66b0d095a5387809b047b27dd1d2c9c",
   "sourceContractInputs": [
     {
@@ -10,11 +10,11 @@
     },
     {
       "path": "documents/security/rls-program/workflows.json",
-      "sha256": "ee29e9ce1492b5e2316acb45af2923489037a314b5f46e9ae93eeaa59ca829f6"
+      "sha256": "ecece7b894b053a8ff297d62d64c08d0d5596fbdc734db381f6d409fc21e3d8d"
     },
     {
       "path": "documents/security/rls-program/command-semantics.json",
-      "sha256": "bf66603a39f8d6d2601f6920c38e9a142a9c94b03ecabb67f2b14db49742ca35"
+      "sha256": "8aca06528406b9d934b0279addc444b3146bc4f3e5a975dc10f705a950c4834c"
     },
     {
       "path": "documents/security/rls-program/runtime-identities.json",
@@ -11855,55 +11855,55 @@
       "key": "owner",
       "name": "mscqr_rls_cert_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:6fd37a028f0f7ab1aa9f3f4f7a3f94f18f45018484acfea858c2969d97e57b50"
+      "marker": "mscqr-full-rls-clean-room:certification:20c01c9302f92959757c9175dc317145d2a3c9e443bd7d6240b227bc0f5a6902"
     },
     {
       "key": "authOwner",
       "name": "mscqr_rls_cert_auth_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:6fd37a028f0f7ab1aa9f3f4f7a3f94f18f45018484acfea858c2969d97e57b50"
+      "marker": "mscqr-full-rls-clean-room:certification:20c01c9302f92959757c9175dc317145d2a3c9e443bd7d6240b227bc0f5a6902"
     },
     {
       "key": "app",
       "name": "mscqr_rls_cert_app",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:6fd37a028f0f7ab1aa9f3f4f7a3f94f18f45018484acfea858c2969d97e57b50"
+      "marker": "mscqr-full-rls-clean-room:certification:20c01c9302f92959757c9175dc317145d2a3c9e443bd7d6240b227bc0f5a6902"
     },
     {
       "key": "read",
       "name": "mscqr_rls_cert_read",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:6fd37a028f0f7ab1aa9f3f4f7a3f94f18f45018484acfea858c2969d97e57b50"
+      "marker": "mscqr-full-rls-clean-room:certification:20c01c9302f92959757c9175dc317145d2a3c9e443bd7d6240b227bc0f5a6902"
     },
     {
       "key": "preauth",
       "name": "mscqr_rls_cert_preauth",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:6fd37a028f0f7ab1aa9f3f4f7a3f94f18f45018484acfea858c2969d97e57b50"
+      "marker": "mscqr-full-rls-clean-room:certification:20c01c9302f92959757c9175dc317145d2a3c9e443bd7d6240b227bc0f5a6902"
     },
     {
       "key": "worker",
       "name": "mscqr_rls_cert_worker",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:6fd37a028f0f7ab1aa9f3f4f7a3f94f18f45018484acfea858c2969d97e57b50"
+      "marker": "mscqr-full-rls-clean-room:certification:20c01c9302f92959757c9175dc317145d2a3c9e443bd7d6240b227bc0f5a6902"
     },
     {
       "key": "scheduled",
       "name": "mscqr_rls_cert_scheduled",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:6fd37a028f0f7ab1aa9f3f4f7a3f94f18f45018484acfea858c2969d97e57b50"
+      "marker": "mscqr-full-rls-clean-room:certification:20c01c9302f92959757c9175dc317145d2a3c9e443bd7d6240b227bc0f5a6902"
     },
     {
       "key": "operator",
       "name": "mscqr_rls_cert_operator",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:6fd37a028f0f7ab1aa9f3f4f7a3f94f18f45018484acfea858c2969d97e57b50"
+      "marker": "mscqr-full-rls-clean-room:certification:20c01c9302f92959757c9175dc317145d2a3c9e443bd7d6240b227bc0f5a6902"
     },
     {
       "key": "migration",
       "name": "mscqr_rls_cert_migration",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:6fd37a028f0f7ab1aa9f3f4f7a3f94f18f45018484acfea858c2969d97e57b50"
+      "marker": "mscqr-full-rls-clean-room:certification:20c01c9302f92959757c9175dc317145d2a3c9e443bd7d6240b227bc0f5a6902"
     }
   ]
 }

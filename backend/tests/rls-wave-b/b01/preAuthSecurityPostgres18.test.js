@@ -129,21 +129,29 @@ async function main() {
   assert.equal(psql(preauth, `SELECT id FROM app_auth.consume_password_reset_token(ARRAY['${rollbackHash}'],'${password}',transaction_timestamp()::timestamp)`), "", "a reset token issued while eligible must fail after the account becomes invited");
   assert.equal(psql(bootstrap, `SELECT "usedAt" IS NULL FROM public."PasswordReset" WHERE id='${ids.resetRollback}'`), "t");
 
-  assert.equal(psql(preauth, `SELECT email FROM app_auth.lookup_invitation_token(ARRAY['${inviteHash}'],transaction_timestamp()::timestamp)`), "b01-invited@example.invalid");
   const verifier = `000000000001:${"a".repeat(64)}`;
   const resentVerifier = `000000000001:${"b".repeat(64)}`;
+  psql(bootstrap, `UPDATE public."Invite" SET "expiresAt"=transaction_timestamp()-interval '1 second' WHERE id='${ids.invite}'`);
+  assert.equal(psql(preauth, `SELECT email FROM app_auth.lookup_invitation_token(ARRAY['${inviteHash}'],transaction_timestamp()::timestamp)`), "", "invite expiry must block TX1");
+  assert.equal(psql(preauth, `SELECT id FROM app_auth.consume_invitation_token(ARRAY['${inviteHash}'],'${password}',NULL,transaction_timestamp()::timestamp,'b01-expired',NULL,NULL,'${ids.activationChallenge}','${verifier}',(transaction_timestamp()+interval '10 minutes')::timestamp)`), "", "an expired invite cannot establish a password");
+  psql(bootstrap, `UPDATE public."Invite" SET "expiresAt"=transaction_timestamp()+interval '1 hour' WHERE id='${ids.invite}'`);
+  assert.equal(psql(preauth, `SELECT email FROM app_auth.lookup_invitation_token(ARRAY['${inviteHash}'],transaction_timestamp()::timestamp)`), "b01-invited@example.invalid");
   const inviteRace = await concurrent(preauth, `SELECT id FROM app_auth.consume_invitation_token(ARRAY['${inviteHash}'],'${password}',NULL,transaction_timestamp()::timestamp,'b01-race',NULL,NULL,'${ids.activationChallenge}','${verifier}',(transaction_timestamp()+interval '10 minutes')::timestamp)`);
   assert.equal(inviteRace.filter((value) => value===ids.invited).length, 1, `invitation consume must have one winner: ${JSON.stringify(inviteRace)}`);
   assert.equal(psql(preauth, `SELECT id FROM app_auth.consume_invitation_token(ARRAY['${inviteHash}'],'${password}',NULL,transaction_timestamp()::timestamp,'b01-replay',NULL,NULL,'${ids.resentChallenge}','${resentVerifier}',(transaction_timestamp()+interval '10 minutes')::timestamp)`), "");
   assert.equal(psql(bootstrap, `SELECT status::text||':'||("emailVerifiedAt" IS NULL)::text||':'||("passwordHash" IS NOT NULL)::text FROM public."User" WHERE id='${ids.invited}'`), "INVITED:true:true");
   assert.equal(psql(bootstrap, `SELECT ("usedAt" IS NOT NULL)::text||':'||"acceptedByUserId" FROM public."Invite" WHERE id='${ids.invite}'`), `true:${ids.invited}`);
   assert.equal(psql(preauth, `SELECT "challengeId" FROM app_auth.lookup_invitation_token(ARRAY['${inviteHash}'],transaction_timestamp()::timestamp)`), ids.activationChallenge);
+  psql(bootstrap, `UPDATE public."Invite" SET "expiresAt"=transaction_timestamp()-interval '1 second' WHERE id='${ids.invite}'`);
+  assert.equal(psql(preauth, `SELECT "challengeId" FROM app_auth.lookup_invitation_token(ARRAY['${inviteHash}'],transaction_timestamp()::timestamp)`), ids.activationChallenge, "a live accepted challenge must remain resumable after invite expiry");
   assert.equal(psql(preauth, `SELECT "deliveryRequired" FROM app_auth.request_password_reset('b01-invited@example.invalid','${"c".repeat(64)}',(transaction_timestamp()+interval '1 hour')::timestamp,transaction_timestamp()::timestamp,NULL,NULL)`), "f");
   assert.equal(psql(preauth, `SELECT id FROM app_auth.consume_password_reset_token(ARRAY['${"c".repeat(64)}'],'${password}',transaction_timestamp()::timestamp)`), "");
   assert.equal(psql(preauth, `SELECT "userId" FROM app_auth.consume_email_verification_token(ARRAY['${"d".repeat(64)}'],transaction_timestamp()::timestamp)`), "", "generic verification cannot activate an invited user");
-  assert.equal(psql(preauth, `SELECT "challengeId" FROM app_auth.resend_invite_activation('${ids.activationChallenge}','${ids.resentChallenge}','${resentVerifier}',transaction_timestamp()::timestamp,(transaction_timestamp()+interval '10 minutes')::timestamp)`), "");
+  const activationDeadline = psql(bootstrap, `SELECT "expiresAt"::text FROM public."InviteActivationChallenge" WHERE id='${ids.activationChallenge}'`);
+  assert.equal(psql(preauth, `SELECT "challengeId" FROM app_auth.resend_invite_activation('${ids.activationChallenge}','${ids.resentChallenge}','${resentVerifier}',transaction_timestamp()::timestamp,'${activationDeadline}'::timestamp)`), "");
   psql(bootstrap, `UPDATE public."InviteActivationChallenge" SET "createdAt"=transaction_timestamp()-interval '61 seconds' WHERE id='${ids.activationChallenge}'`);
-  assert.equal(psql(preauth, `SELECT "challengeId"||':'||"orgId"||':'||"licenseeId" FROM app_auth.resend_invite_activation('${ids.activationChallenge}','${ids.resentChallenge}','${resentVerifier}',transaction_timestamp()::timestamp,(transaction_timestamp()+interval '10 minutes')::timestamp)`), `${ids.resentChallenge}:${ids.org}:${ids.licensee}`);
+  assert.equal(psql(preauth, `SELECT "challengeId"||':'||"orgId"||':'||"licenseeId" FROM app_auth.resend_invite_activation('${ids.activationChallenge}','${ids.resentChallenge}','${resentVerifier}',transaction_timestamp()::timestamp,'${activationDeadline}'::timestamp)`), `${ids.resentChallenge}:${ids.org}:${ids.licensee}`);
+  assert.equal(psql(bootstrap, `SELECT (child."expiresAt"=parent."expiresAt")::text FROM public."InviteActivationChallenge" child JOIN public."InviteActivationChallenge" parent ON parent.id='${ids.activationChallenge}' WHERE child.id='${ids.resentChallenge}'`), "true", "resend must not extend the accepted activation deadline");
   assert.equal(psql(preauth, `SELECT verified FROM app_auth.verify_invite_activation('${ids.activationChallenge}',ARRAY['${verifier}'],transaction_timestamp()::timestamp)`), "f");
   const wrongVerifier = `000000000001:${"d".repeat(64)}`;
   for (let attempt = 1; attempt <= 5; attempt++) {
@@ -154,11 +162,15 @@ async function main() {
 
   const successVerifier = `000000000001:${"e".repeat(64)}`;
   psql(bootstrap, `UPDATE public."InviteActivationChallenge" SET "createdAt"=transaction_timestamp()-interval '61 seconds' WHERE id='${ids.resentChallenge}'`);
-  assert.equal(psql(preauth, `SELECT "challengeId" FROM app_auth.resend_invite_activation('${ids.resentChallenge}','${ids.successChallenge}','${successVerifier}',transaction_timestamp()::timestamp,(transaction_timestamp()+interval '10 minutes')::timestamp)`), ids.successChallenge);
-  psql(bootstrap, `UPDATE public."Invite" SET "expiresAt"=transaction_timestamp()-interval '1 second' WHERE id='${ids.invite}';
-    UPDATE public."InviteActivationChallenge" SET "createdAt"=transaction_timestamp()-interval '61 seconds' WHERE id='${ids.successChallenge}'`);
-  assert.equal(psql(preauth, `SELECT "challengeId" FROM app_auth.resend_invite_activation('${ids.successChallenge}','${ids.expiredResendProbe}','${successVerifier}',transaction_timestamp()::timestamp,(transaction_timestamp()+interval '10 minutes')::timestamp)`), "", "expired original invite cannot fund unlimited resend attempts");
-  psql(bootstrap, `UPDATE public."Invite" SET "expiresAt"=transaction_timestamp()+interval '1 hour' WHERE id='${ids.invite}'`);
+  assert.equal(psql(preauth, `SELECT "challengeId" FROM app_auth.resend_invite_activation('${ids.resentChallenge}','${ids.successChallenge}','${successVerifier}',transaction_timestamp()::timestamp,'${activationDeadline}'::timestamp)`), ids.successChallenge);
+  assert.equal(psql(bootstrap, `SELECT (child."expiresAt"=parent."expiresAt")::text FROM public."InviteActivationChallenge" child JOIN public."InviteActivationChallenge" parent ON parent.id='${ids.resentChallenge}' WHERE child.id='${ids.successChallenge}'`), "true", "successive resends must retain the original activation deadline");
+  assert.equal(psql(preauth, `SELECT "challengeId" FROM app_auth.lookup_invitation_token(ARRAY['${inviteHash}'],transaction_timestamp()::timestamp)`), ids.successChallenge, "reload after invite expiry must recover the current challenge");
+  psql(bootstrap, `UPDATE public."InviteActivationChallenge" SET "expiresAt"=transaction_timestamp()-interval '1 second',"createdAt"=transaction_timestamp()-interval '61 seconds' WHERE id='${ids.successChallenge}'`);
+  const expiredChallengeDeadline = psql(bootstrap, `SELECT "expiresAt"::text FROM public."InviteActivationChallenge" WHERE id='${ids.successChallenge}'`);
+  assert.equal(psql(preauth, `SELECT "challengeId" FROM app_auth.lookup_invitation_token(ARRAY['${inviteHash}'],transaction_timestamp()::timestamp)`), "", "an expired activation challenge is not resumable");
+  assert.equal(psql(preauth, `SELECT "challengeId" FROM app_auth.resend_invite_activation('${ids.successChallenge}','${ids.expiredResendProbe}','${successVerifier}',transaction_timestamp()::timestamp,'${expiredChallengeDeadline}'::timestamp)`), "", "an expired challenge cannot fund a new activation window");
+  assert.equal(psql(preauth, `SELECT verified FROM app_auth.verify_invite_activation('${ids.successChallenge}',ARRAY['${successVerifier}'],transaction_timestamp()::timestamp)`), "f", "an expired activation challenge cannot activate the user");
+  psql(bootstrap, `UPDATE public."InviteActivationChallenge" SET "expiresAt"=transaction_timestamp()+interval '5 minutes' WHERE id='${ids.successChallenge}'`);
   psql(bootstrap, `UPDATE public."InviteActivationChallenge" SET email='other@example.invalid' WHERE id='${ids.successChallenge}'`);
   assert.equal(psql(preauth, `SELECT verified FROM app_auth.verify_invite_activation('${ids.successChallenge}',ARRAY['${successVerifier}'],transaction_timestamp()::timestamp)`), "f", "registered-email substitution must fail");
   psql(bootstrap, `UPDATE public."InviteActivationChallenge" SET email='b01-invited@example.invalid',"userId"='${ids.active}' WHERE id='${ids.successChallenge}'`);
@@ -216,6 +228,9 @@ async function main() {
   const accepted = await acceptInvite({ rawToken: raw.invite, password: "Local-Certification-Password-23!", name: "App Invite", requestId: "b01-app-invite", ipHash: null, userAgent: "local-certification" });
   assert.ok(accepted.challengeId);
   assert.equal(psql(bootstrap, `SELECT status::text FROM public."User" WHERE id='${ids.appInviteUser}'`), "INVITED");
+  psql(bootstrap, `UPDATE public."Invite" SET "expiresAt"=transaction_timestamp()-interval '1 second' WHERE id='${ids.appInvite}'`);
+  const resumed = await getInvitePreview(raw.invite);
+  assert.equal(resumed.challengeId, accepted.challengeId, "the application preview must resume a live accepted challenge after invite expiry");
   const capturedCode = fs.readFileSync(path.join(emailCaptureDir, "emails.jsonl"), "utf8").trim().split("\n").map(JSON.parse)
     .find((entry) => entry.template === "invite_activation_code" && entry.toAddress === "b01-app-invite@example.invalid")?.text.match(/\b\d{6}\b/)?.[0];
   assert(capturedCode, "test-only email capture must contain the activation code");
