@@ -460,14 +460,14 @@ BEGIN
   SELECT u.id,u.email,u."pendingEmail",u."orgId",u."licenseeId",u.status,u."isActive",u."disabledAt",u."deletedAt",u."emailVerifiedAt"
     INTO actor_row FROM public."User" u WHERE u.id=token_row."userId" FOR UPDATE;
   IF NOT FOUND OR NOT actor_row."isActive" OR actor_row.status<>'ACTIVE'::public."UserStatus"
-     OR actor_row."emailVerifiedAt" IS NULL OR actor_row."disabledAt" IS NOT NULL OR actor_row."deletedAt" IS NOT NULL THEN RETURN; END IF;
+     OR actor_row."disabledAt" IS NOT NULL OR actor_row."deletedAt" IS NOT NULL THEN RETURN; END IF;
   SELECT e.id,e."userId",e.email,e."pendingEmail",e.purpose,e."tokenHash",e."expiresAt",e."usedAt"
     INTO token_row FROM public."EmailVerificationToken" e WHERE e.id=candidate_ids[1];
   IF NOT FOUND OR token_row."userId"<>actor_row.id OR token_row."usedAt" IS NOT NULL OR token_row."expiresAt"<=p_consumed_at
      OR token_row.purpose NOT IN ('EMAIL_CHANGE','EMAIL_VERIFICATION') THEN RETURN; END IF;
   PERFORM set_config('app.b01_preauth_org_id',coalesce(actor_row."orgId",''),true),set_config('app.b01_preauth_licensee_id',coalesce(actor_row."licenseeId",''),true);
   IF token_row.purpose='EMAIL_CHANGE' THEN
-    IF token_row."pendingEmail" IS NULL OR lower(token_row."pendingEmail")<>token_row."pendingEmail"
+    IF actor_row."emailVerifiedAt" IS NULL OR token_row."pendingEmail" IS NULL OR lower(token_row."pendingEmail")<>token_row."pendingEmail"
        OR actor_row."pendingEmail" IS DISTINCT FROM token_row."pendingEmail"
        OR EXISTS (SELECT 1 FROM public."User" u WHERE lower(u.email)=token_row."pendingEmail" AND u.id<>actor_row.id) THEN RETURN; END IF;
     UPDATE public."User" u SET email=token_row."pendingEmail","pendingEmail"=NULL,"pendingEmailRequestedAt"=NULL,

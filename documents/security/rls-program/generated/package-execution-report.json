@@ -639,7 +639,7 @@
       "failureDisposition": "drop-green-database-then-clean-marked-roles",
       "fileChecksums": {
         "runtime-policy.sql": "1e67b2ff32e6ef897fd1e5be408da1c6cdb0a481a84a7698c823cd37a244a531",
-        "20-context-helpers.sql": "fa61876496b628cc600124308b384c38a0aeb88969bf9899ad386ac7bdf04a20",
+        "20-context-helpers.sql": "04b5fa790f3877b7e189ad91d6fd318ea5342a18a0bd7670071f09aeff5e3281",
         "21-runtime-grants.sql": "4c5d4db79dd62dc8ec8af76af16698467fdf5fcfca1567a31ea2fc85ff4e2fb6",
         "30-policies.sql": "97126fb725d2e0ba7ff58fd95e1bb63219f3bddbc292565dfc58a8c2f6eaa4b4"
       }

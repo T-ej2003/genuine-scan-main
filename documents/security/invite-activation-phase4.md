@@ -6,7 +6,7 @@ The challenge stores a versioned HMAC verifier, never the code. The HMAC uses th
 
 Activation verification and resend use a challenge-derived actor rate-limit key plus the independent IP limit; invite acceptance retains its token-derived actor key. If OTP verification commits activation but the existing risk/session boundary declines session issuance, the API reports successful activation with `loginRequired`, and the page sends the user to normal sign-in instead of retrying the consumed code.
 
-Password reset issuance and consumption require an active, enabled, email-verified user. Generic email verification and email change cannot activate an invited user. Login, refresh, and session issuance continue to require an active, enabled, verified account.
+Password reset issuance and consumption require an active, enabled, email-verified user. Generic email verification remains available to an active, enabled user whose email is not yet verified; email change additionally requires prior verification. Neither path can activate an invited user. Login, refresh, and session issuance continue to require an active, enabled, verified account.
 
 The temporary password-only policy applies exactly to `LICENSEE_ADMIN`, `MANUFACTURER`, `MANUFACTURER_ADMIN`, and `MANUFACTURER_USER`. Their existing role and tenant permissions are unchanged. `SUPER_ADMIN`, `PLATFORM_SUPER_ADMIN`, and `ORG_ADMIN` remain MFA-required. Existing TOTP, WebAuthn, and backup-code records are not changed. MFA maintenance routes deny the temporarily exempt roles, so the exemption cannot become factor-removal proof. Elevated risk still denies their password login through the existing audited risk path.
 

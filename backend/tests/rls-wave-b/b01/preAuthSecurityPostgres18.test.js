@@ -88,7 +88,7 @@ async function main() {
       ('${ids.active}','b01-active@example.invalid','B01 Active','LICENSEE_ADMIN','${ids.org}','${ids.licensee}','ACTIVE',true,'${password}',transaction_timestamp(),transaction_timestamp()),
       ('${ids.invited}','b01-invited@example.invalid','B01 Invited','LICENSEE_ADMIN','${ids.org}','${ids.licensee}','INVITED',true,NULL,NULL,transaction_timestamp()),
       ('${ids.rollback}','b01-rollback@example.invalid','B01 Rollback','LICENSEE_ADMIN','${ids.org}','${ids.licensee}','ACTIVE',true,'${password}',transaction_timestamp(),transaction_timestamp()),
-      ('${ids.verify}','b01-verify@example.invalid','B01 Verify','LICENSEE_ADMIN','${ids.org}','${ids.licensee}','ACTIVE',true,'${password}',transaction_timestamp(),transaction_timestamp()),
+      ('${ids.verify}','b01-verify@example.invalid','B01 Verify','LICENSEE_ADMIN','${ids.org}','${ids.licensee}','ACTIVE',true,'${password}',NULL,transaction_timestamp()),
       ('${ids.disabled}','b01-disabled@example.invalid','B01 Disabled','LICENSEE_ADMIN','${ids.org}','${ids.licensee}','DISABLED',false,'${password}',NULL,transaction_timestamp());
     INSERT INTO public."Invite" (id,"orgId","licenseeId",email,role,"tokenHash","expiresAt") VALUES
       ('${ids.invite}','${ids.org}','${ids.licensee}','b01-invited@example.invalid','LICENSEE_ADMIN','${inviteHash}',transaction_timestamp()+interval '1 hour');
@@ -178,6 +178,7 @@ async function main() {
 
   const emailRace = await concurrent(preauth, `SELECT "userId" FROM app_auth.consume_email_verification_token(ARRAY['${emailHash}'],transaction_timestamp()::timestamp)`);
   assert.equal(emailRace.filter((value) => value===ids.verify).length, 1, `email verification must have one winner: ${JSON.stringify(emailRace)}`);
+  assert.equal(psql(bootstrap, `SELECT status::text||':'||("emailVerifiedAt" IS NOT NULL)::text FROM public."User" WHERE id='${ids.verify}'`), "ACTIVE:true");
   assert.equal(psql(preauth, `SELECT "userId" FROM app_auth.consume_email_verification_token(ARRAY['${emailHash}'],transaction_timestamp()::timestamp)`), "");
   assert.equal(psql(preauth, `BEGIN; SELECT email FROM app_auth.lookup_password_user('b01-active@example.invalid'); COMMIT; SELECT coalesce(current_setting('app.b01_preauth_user_id',true),'')=''`), "t");
   assert.equal(psql(bootstrap, `SELECT count(*) FROM public."AuditLogOutbox" WHERE payload->>'action' IN ('AUTH_PASSWORD_RESET_REQUESTED','AUTH_PASSWORD_RESET_COMPLETED','AUTH_INVITE_PASSWORD_SET','AUTH_EMAIL_VERIFIED') AND payload ? 'tokenHash'`), "0");
@@ -202,7 +203,7 @@ async function main() {
     INSERT INTO public."User" (id,email,name,role,"orgId","licenseeId",status,"isActive","passwordHash","emailVerifiedAt","updatedAt") VALUES
       ('${ids.appInviteUser}','b01-app-invite@example.invalid','App Invite','LICENSEE_ADMIN','${ids.org}','${ids.licensee}','INVITED',true,NULL,NULL,transaction_timestamp()),
       ('${ids.appResetUser}','b01-app-reset@example.invalid','App Reset','LICENSEE_ADMIN','${ids.org}','${ids.licensee}','ACTIVE',true,'${password}',transaction_timestamp(),transaction_timestamp()),
-      ('${ids.appVerifyUser}','b01-app-verify@example.invalid','App Verify','LICENSEE_ADMIN','${ids.org}','${ids.licensee}','ACTIVE',true,'${password}',transaction_timestamp(),transaction_timestamp());
+      ('${ids.appVerifyUser}','b01-app-verify@example.invalid','App Verify','LICENSEE_ADMIN','${ids.org}','${ids.licensee}','ACTIVE',true,'${password}',NULL,transaction_timestamp());
     INSERT INTO public."Invite" (id,"orgId","licenseeId",email,role,"tokenHash","expiresAt") VALUES
       ('${ids.appInvite}','${ids.org}','${ids.licensee}','b01-app-invite@example.invalid','LICENSEE_ADMIN','${hashToken(raw.invite)}',transaction_timestamp()+interval '1 hour');
     INSERT INTO public."PasswordReset" (id,"orgId","userId","tokenHash","expiresAt") VALUES
