@@ -321,7 +321,9 @@ export const verifyInviteActivationBoundary = async (
 export const resendInviteActivationBoundary = async (
   input: { challengeId: string; newChallengeId: string; codeVerifier: string; requestedAt: Date; expiresAt: Date },
   db: PreAuthQueryClient = getB01PreAuthPrisma()
-) => oneOrNone(await db.$queryRaw<Array<{ challengeId: string; email: string; userId: string; inviteId: string }>>`
+) => oneOrNone(await db.$queryRaw<Array<{
+  challengeId: string; email: string; userId: string; inviteId: string; orgId: string | null; licenseeId: string | null;
+}>>`
   SELECT * FROM app_auth.resend_invite_activation(
     ${input.challengeId}, ${input.newChallengeId}, ${tokenHash(input.codeVerifier, "activation verifier")},
     ${validDate(input.requestedAt, "resend time")}::timestamp without time zone,

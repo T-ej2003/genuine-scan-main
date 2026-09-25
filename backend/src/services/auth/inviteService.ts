@@ -414,7 +414,7 @@ export const resendInviteActivation = async (input: { challengeId: string; ipHas
   });
   if (!result) return null;
   const delivered = await sendInviteActivationCode({
-    email: result.email, code, orgId: null, licenseeId: null,
+    email: result.email, code, orgId: result.orgId, licenseeId: result.licenseeId,
     ipHash: input.ipHash, userAgent: input.userAgent,
   }).catch(() => false);
   return { challengeId: result.challengeId, expiresAt: new Date(now.getTime() + 10 * 60_000), delivered };

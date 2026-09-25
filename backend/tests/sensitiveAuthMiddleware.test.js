@@ -43,19 +43,11 @@ mockModule("services/auth/authService.js", {
   isAdminMfaRequiredRole: (role) =>
     role === UserRole.SUPER_ADMIN ||
     role === UserRole.PLATFORM_SUPER_ADMIN ||
-    role === UserRole.LICENSEE_ADMIN ||
-    role === UserRole.ORG_ADMIN ||
-    role === UserRole.MANUFACTURER ||
-    role === UserRole.MANUFACTURER_ADMIN ||
-    role === UserRole.MANUFACTURER_USER,
+    role === UserRole.ORG_ADMIN,
   getSensitiveActionStepUpMethod: (role) =>
     role === UserRole.SUPER_ADMIN ||
     role === UserRole.PLATFORM_SUPER_ADMIN ||
-    role === UserRole.LICENSEE_ADMIN ||
-    role === UserRole.ORG_ADMIN ||
-    role === UserRole.MANUFACTURER ||
-    role === UserRole.MANUFACTURER_ADMIN ||
-    role === UserRole.MANUFACTURER_USER
+    role === UserRole.ORG_ADMIN
       ? "ADMIN_MFA"
       : "PASSWORD_REAUTH",
   getAdminStepUpWindowMinutes: () => 30,
@@ -82,7 +74,7 @@ mockModule("rls-waves/session-b/b01/authenticatedSecurityRepository.js", {
   requireRecentMfaSession: async () => ({ verifiedAt: new Date() }),
 });
 
-const { requireRecentAdminMfaForSetup, requireRecentSensitiveAuth } = require("../dist/middleware/auth");
+const { requireRecentAdminMfa, requireRecentAdminMfaForSetup, requireRecentSensitiveAuth } = require("../dist/middleware/auth");
 
 const runMiddleware = (user, middleware = requireRecentSensitiveAuth) =>
   new Promise((resolve) => {
@@ -105,43 +97,42 @@ const runMiddleware = (user, middleware = requireRecentSensitiveAuth) =>
   });
 
 const run = async () => {
-  const manufacturerBlocked = await runMiddleware({
-    userId: "manufacturer-1",
-    role: UserRole.MANUFACTURER,
-    sessionStage: "ACTIVE",
-    authenticatedAt: new Date(Date.now() - 45 * 60_000).toISOString(),
-    mfaVerifiedAt: new Date().toISOString(),
-    databaseMfaFresh: false,
-  });
+  for (const middleware of [requireRecentAdminMfa, requireRecentSensitiveAuth]) {
+    for (const role of [
+      UserRole.LICENSEE_ADMIN,
+      UserRole.MANUFACTURER,
+      UserRole.MANUFACTURER_ADMIN,
+      UserRole.MANUFACTURER_USER,
+    ]) {
+      const stale = await runMiddleware({
+        userId: `${role}-user`, role, sessionStage: "ACTIVE",
+        authenticatedAt: new Date(Date.now() - 45 * 60_000).toISOString(),
+      }, middleware);
+      assert.strictEqual(stale.statusCode, 428, `${role} stale password session must be denied`);
+      assert.strictEqual(stale.payload.data.stepUpMethod, "PASSWORD_REAUTH");
 
-  assert.strictEqual(manufacturerBlocked.next, false);
-  assert.strictEqual(manufacturerBlocked.statusCode, 428);
-  assert.strictEqual(manufacturerBlocked.payload.code, "STEP_UP_REQUIRED");
-  assert.strictEqual(manufacturerBlocked.payload.data.stepUpMethod, "ADMIN_MFA");
+      const fresh = await runMiddleware({
+        userId: `${role}-user`, role, sessionStage: "ACTIVE",
+        authenticatedAt: new Date(Date.now() - 5 * 60_000).toISOString(),
+      }, middleware);
+      assert.strictEqual(fresh.next, true, `${role} fresh password session must satisfy the assurance gate`);
+    }
+  }
 
-  const manufacturerAllowed = await runMiddleware({
-    userId: "manufacturer-1",
-    role: UserRole.MANUFACTURER,
-    sessionStage: "ACTIVE",
-    authenticatedAt: new Date(Date.now() - 5 * 60_000).toISOString(),
-    mfaVerifiedAt: new Date(Date.now() - 45 * 60_000).toISOString(),
-    databaseMfaFresh: true,
-  });
+  for (const role of [UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN, UserRole.ORG_ADMIN]) {
+    const passwordOnly = await runMiddleware({
+      userId: `${role}-user`, role, sessionStage: "ACTIVE",
+      authenticatedAt: new Date().toISOString(), databaseMfaFresh: false,
+    });
+    assert.strictEqual(passwordOnly.statusCode, 428, `${role} password-only session must be denied`);
+    assert.strictEqual(passwordOnly.payload.data.stepUpMethod, "ADMIN_MFA");
 
-  assert.strictEqual(manufacturerAllowed.next, true);
-
-  const adminBlocked = await runMiddleware({
-    userId: "admin-1",
-    role: UserRole.SUPER_ADMIN,
-    sessionStage: "ACTIVE",
-    authenticatedAt: new Date().toISOString(),
-    mfaVerifiedAt: new Date().toISOString(),
-    databaseMfaFresh: false,
-  });
-
-  assert.strictEqual(adminBlocked.next, false);
-  assert.strictEqual(adminBlocked.statusCode, 428);
-  assert.strictEqual(adminBlocked.payload.data.stepUpMethod, "ADMIN_MFA");
+    const recentMfa = await runMiddleware({
+      userId: `${role}-user`, role, sessionStage: "ACTIVE",
+      authenticatedAt: new Date().toISOString(), databaseMfaFresh: true,
+    });
+    assert.strictEqual(recentMfa.next, true, `${role} recent MFA must satisfy the assurance gate`);
+  }
 
   const bootstrapSetupAllowed = await runMiddleware({
     userId: "admin-1",

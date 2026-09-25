@@ -143,7 +143,7 @@ async function main() {
   assert.equal(psql(preauth, `SELECT "userId" FROM app_auth.consume_email_verification_token(ARRAY['${"d".repeat(64)}'],transaction_timestamp()::timestamp)`), "", "generic verification cannot activate an invited user");
   assert.equal(psql(preauth, `SELECT "challengeId" FROM app_auth.resend_invite_activation('${ids.activationChallenge}','${ids.resentChallenge}','${resentVerifier}',transaction_timestamp()::timestamp,(transaction_timestamp()+interval '10 minutes')::timestamp)`), "");
   psql(bootstrap, `UPDATE public."InviteActivationChallenge" SET "createdAt"=transaction_timestamp()-interval '61 seconds' WHERE id='${ids.activationChallenge}'`);
-  assert.equal(psql(preauth, `SELECT "challengeId" FROM app_auth.resend_invite_activation('${ids.activationChallenge}','${ids.resentChallenge}','${resentVerifier}',transaction_timestamp()::timestamp,(transaction_timestamp()+interval '10 minutes')::timestamp)`), ids.resentChallenge);
+  assert.equal(psql(preauth, `SELECT "challengeId"||':'||"orgId"||':'||"licenseeId" FROM app_auth.resend_invite_activation('${ids.activationChallenge}','${ids.resentChallenge}','${resentVerifier}',transaction_timestamp()::timestamp,(transaction_timestamp()+interval '10 minutes')::timestamp)`), `${ids.resentChallenge}:${ids.org}:${ids.licensee}`);
   assert.equal(psql(preauth, `SELECT verified FROM app_auth.verify_invite_activation('${ids.activationChallenge}',ARRAY['${verifier}'],transaction_timestamp()::timestamp)`), "f");
   const wrongVerifier = `000000000001:${"d".repeat(64)}`;
   for (let attempt = 1; attempt <= 5; attempt++) {

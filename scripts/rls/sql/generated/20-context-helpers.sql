@@ -1927,7 +1927,7 @@ $fn$;
 
 CREATE OR REPLACE FUNCTION app_auth.resend_invite_activation(
   p_challenge_id text,p_new_challenge_id text,p_code_verifier text,p_requested_at timestamp without time zone,p_expires_at timestamp without time zone
-) RETURNS TABLE("challengeId" text,"email" text,"userId" text,"inviteId" text)
+) RETURNS TABLE("challengeId" text,"email" text,"userId" text,"inviteId" text,"orgId" text,"licenseeId" text)
 LANGUAGE plpgsql VOLATILE PARALLEL UNSAFE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
 DECLARE challenge_row record; actor_row record; invite_row record;
 BEGIN
@@ -1974,7 +1974,7 @@ BEGIN
   PERFORM set_config('app.b01_preauth_email',invite_row.email,true);
   INSERT INTO public."InviteActivationChallenge" (id,"userId","inviteId",email,purpose,"codeVerifier","expiresAt","attemptCount","maxAttempts","createdAt")
     VALUES (p_new_challenge_id,actor_row.id,invite_row.id,invite_row.email,'INVITE_ACTIVATION',p_code_verifier,p_expires_at,0,5,p_requested_at);
-  RETURN QUERY SELECT p_new_challenge_id,invite_row.email,actor_row.id,invite_row.id;
+  RETURN QUERY SELECT p_new_challenge_id,invite_row.email,actor_row.id,invite_row.id,invite_row."orgId",invite_row."licenseeId";
 END
 $fn$;
 
