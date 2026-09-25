@@ -8,7 +8,7 @@ const read = (name) => JSON.parse(fs.readFileSync(`${root}/${name}`, "utf8"));
 const policy = read("publisher-permissions-policy.json");
 const trust = read("publisher-trust-policy.json");
 const activation = read("frontend-activation-policy.json");
-function fixture({ liveActivation = null, existingBoundary = false, existingRole = false, boundaryDescription = "Terraform-managed production web publisher permissions boundary.", versionsResponse = { IsTruncated: false, Versions: [{ VersionId: "v1", IsDefaultVersion: true }] } } = {}) {
+function fixture({ liveActivation = null, existingBoundary = false, existingRole = false, boundaryDescription = "Terraform-managed production web publisher permissions boundary.", versionsResponse = { Versions: [{ VersionId: "v1", IsDefaultVersion: true }] } } = {}) {
   let boundary = existingBoundary ? policy : null;
   let role = existingRole ? { RoleName: WEB_RELEASE_IAM.roleName, Arn: `arn:aws:iam::368992683803:role/${WEB_RELEASE_IAM.roleName}`, Path: "/", Description: "GitHub OIDC only: publish the reviewed production web image.", PermissionsBoundary: { PermissionsBoundaryArn: `arn:aws:iam::368992683803:policy/${WEB_RELEASE_IAM.boundaryName}` }, MaxSessionDuration: 3600, AssumeRolePolicyDocument: trust, Tags: [{ Key: "ManagedBy", Value: "Terraform" }, { Key: "Environment", Value: "production" }, { Key: "Stack", Value: "production-web-release" }] } : null;
   let publisherPolicy = existingRole ? policy : null, activationPolicy = liveActivation;
@@ -86,6 +86,15 @@ test("AWS list-policy-versions Versions response selects the sole default even w
   }
 });
 
+test("AWS CLI aggregated Versions response without IsTruncated is accepted", () => {
+  const value = fixture({ versionsResponse: { Versions: [{ VersionId: "v1", IsDefaultVersion: true }] } });
+  bootstrapProductionWebReleaseIam({ run: value.run, sourceSha: "a".repeat(40) });
+  const call = value.calls.find((args) => args[0] === "iam" && args[1] === "list-policy-versions");
+  assert.ok(call);
+  assert.equal(call.some((arg) => ["--no-paginate", "--max-items", "--page-size", "--starting-token", "--query"].includes(arg)), false);
+  assert.equal(value.calls.some((args) => args[0] === "iam" && args[1] === "get-policy-version"), true);
+});
+
 test("canonical existing boundary is preserved while bootstrap recovers the production partial state", () => {
   const value = fixture({ existingBoundary: true });
   const result = bootstrapProductionWebReleaseIam({ run: value.run, sourceSha: "a".repeat(40) });
@@ -103,6 +112,9 @@ test("malformed policy-version responses fail closed on both existing and newly-
     { IsTruncated: false, Versions: null },
     { IsTruncated: false, Versions: [] },
     { IsTruncated: true, Versions: [{ VersionId: "v1", IsDefaultVersion: true }] },
+    { IsTruncated: "false", Versions: [{ VersionId: "v1", IsDefaultVersion: true }] },
+    { IsTruncated: false, Marker: "more-results", Versions: [{ VersionId: "v1", IsDefaultVersion: true }] },
+    { NextToken: "more-results", Versions: [{ VersionId: "v1", IsDefaultVersion: true }] },
     { IsTruncated: false, Versions: [{ IsDefaultVersion: true }] },
     { IsTruncated: false, Versions: [{ VersionId: "v1" }] },
     { IsTruncated: false, Versions: [{ VersionId: "v1", IsDefaultVersion: false }] },

@@ -24,7 +24,9 @@ const source = (file) => JSON.parse(fs.readFileSync(path.join(root, "infra/aws/t
 const canonical = (value) => JSON.stringify(normalizeIamPolicyDocument(value, "production web release IAM document"));
 const fileValue = (file) => `file://${path.join(root, "infra/aws/terraform/production-web-release", file)}`;
 function defaultPolicyVersionId(response) {
-  assert.equal(response?.IsTruncated, false, "Permissions boundary policy-version response is incomplete.");
+  assert.ok(response && typeof response === "object" && !Array.isArray(response), "Permissions boundary policy-version response is malformed.");
+  assert.ok(response.IsTruncated === undefined || response.IsTruncated === false, "Permissions boundary policy-version response is incomplete.");
+  assert.ok(!Object.hasOwn(response, "Marker") && !Object.hasOwn(response, "NextToken"), "Permissions boundary policy-version response is incomplete.");
   assert.ok(Array.isArray(response.Versions) && response.Versions.length > 0, "Permissions boundary policy-version response is malformed.");
   assert.ok(response.Versions.every((version) => version && typeof version.VersionId === "string" && /^v[1-9]\d*$/.test(version.VersionId) && typeof version.IsDefaultVersion === "boolean"), "Permissions boundary policy-version response is malformed.");
   const defaults = response.Versions.filter(({ IsDefaultVersion }) => IsDefaultVersion);
