@@ -78,7 +78,8 @@
     "workflow-internal-backend-src-services-trace-event-service-ts-backfill-trace-events-from-audit-logs",
     "workflow-internal-backend-src-services-trace-event-service-ts-create-trace-event",
     "workflow-internal-backend-src-services-trace-event-service-ts-create-trace-event-from-audit-log",
-    "workflow-internal-backend-src-services-trace-event-service-ts-get-trace-timeline"
+    "workflow-internal-backend-src-services-trace-event-service-ts-get-trace-timeline",
+    "workflow-startup-backend-src-rls-waves-session-c-operator-procedure-service-ts-bootstrap-configured-super-admin-procedure"
   ],
   "workflowFamilies": [
     {
@@ -174,7 +175,9 @@
     {
       "waveId": "c-04-operator-recovery-startup-migration-cli",
       "contract": "Finite operator, recovery, startup, migration and CLI procedures; test and seed paths remain frozen-product prohibited where already contracted.",
-      "workflowIds": []
+      "workflowIds": [
+        "workflow-startup-backend-src-rls-waves-session-c-operator-procedure-service-ts-bootstrap-configured-super-admin-procedure"
+      ]
     }
   ],
   "productionFiles": [
@@ -194,6 +197,7 @@
     "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
     "backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts",
     "backend/src/rls-waves/session-c/c03/c03RestrictedDatabase.ts",
+    "backend/src/rls-waves/session-c/operatorProcedureService.ts",
     "backend/src/services/auditCsvExportService.ts",
     "backend/src/services/auditLogQueryService.ts",
     "backend/src/services/auditService.ts",
@@ -265,8 +269,8 @@
   ],
   "waveLocalResultManifest": "documents/security/rls-program/waves/session-c-admin-governance-operator-result.json",
   "requiredBaseAncestor": "33cbe7ff019efefad242f654f0aa96c44c5b963c",
-  "workflowCount": 72,
+  "workflowCount": 73,
   "workflowFamilyCount": 4,
-  "productionFileCount": 29,
+  "productionFileCount": 30,
   "existingTestFileCount": 21
 }

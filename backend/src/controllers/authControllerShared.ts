@@ -54,8 +54,16 @@ export const inviteSchema = z.object({
 export const acceptInviteSchema = z.object({
   token: z.string().trim().min(10),
   password: z.string().min(8).max(200),
+  confirmPassword: z.string().min(8).max(200),
   name: z.string().trim().min(2).max(120).optional(),
+}).strict().refine((value) => value.password === value.confirmPassword, "Passwords do not match");
+
+export const inviteActivationVerifySchema = z.object({
+  challengeId: z.string().uuid(),
+  code: z.string().regex(/^\d{6}$/),
 }).strict();
+
+export const inviteActivationResendSchema = z.object({ challengeId: z.string().uuid() }).strict();
 
 export const invitePreviewQuerySchema = z.object({
   token: z.string().trim().min(10),

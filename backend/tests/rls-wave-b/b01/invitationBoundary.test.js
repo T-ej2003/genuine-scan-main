@@ -72,7 +72,9 @@ const run = async () => {
         role: UserRole.LICENSEE_ADMIN,
         licenseeId: "licensee-1",
         orgId: "organization-1",
-        status: UserStatus.ACTIVE,
+        status: UserStatus.INVITED,
+        challengeId: "00000000-0000-4000-8000-000000000001",
+        challengeExpiresAt: new Date(),
       }];
     },
   };
@@ -84,6 +86,9 @@ const run = async () => {
     requestId: "request-1",
     ipHash: null,
     userAgent: null,
+    challengeId: "00000000-0000-4000-8000-000000000001",
+    codeVerifier: `000000000001:${"b".repeat(64)}`,
+    challengeExpiresAt: new Date(Date.now() + 600_000),
   };
 
   assert.equal((await consumeInvitationBoundary(input, db)).name, acceptedName);

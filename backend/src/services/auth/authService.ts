@@ -64,7 +64,10 @@ export const isOrgAdminRole = (role: UserRole) =>
   role === UserRole.LICENSEE_ADMIN || role === UserRole.ORG_ADMIN;
 
 export const isAdminMfaRequiredRole = (role: UserRole) =>
-  isPlatformSuperAdminRole(role) || isOrgAdminRole(role) || isManufacturerRole(role);
+  isPlatformSuperAdminRole(role) || role === UserRole.ORG_ADMIN;
+
+export const isTemporaryPasswordOnlyRole = (role: UserRole) =>
+  role === UserRole.LICENSEE_ADMIN || isManufacturerRole(role);
 
 export const isManufacturerRole = (role: UserRole) =>
   role === UserRole.MANUFACTURER || role === UserRole.MANUFACTURER_ADMIN || role === UserRole.MANUFACTURER_USER;
@@ -646,7 +649,8 @@ export const loginWithPassword = async (input: {
     }, tx);
   });
 
-  if (risk.shouldBlock && isPlatformSuperAdminRole(user.role)) {
+  if ((risk.shouldBlock && (isPlatformSuperAdminRole(user.role) || isTemporaryPasswordOnlyRole(user.role))) ||
+      (risk.shouldStepUp && isTemporaryPasswordOnlyRole(user.role))) {
     await preAuthPrisma.$transaction(async (tx) => {
       await bindPasswordSubject(tx);
       await persistAuthSessionRisk({ ipHash: input.ipHash, userAgent: input.userAgent, requestId: input.requestId, blockedLogin: true }, risk, tx);
@@ -747,6 +751,41 @@ export const loginWithPassword = async (input: {
     }, tx);
     return session;
   });
+};
+
+export const issueSessionAfterInviteActivation = async (input: {
+  userId: string;
+  email: string;
+  role: UserRole;
+  ipHash: string | null;
+  userAgent: string | null;
+  requestId: string;
+}) => {
+  if (!isTemporaryPasswordOnlyRole(input.role)) return null;
+  const now = new Date();
+  const result = await getB01PreAuthPrisma().$transaction(async (tx) => {
+    const user = await lookupPasswordBootstrapUser(input.email, tx);
+    if (!user || user.id !== input.userId || user.role !== input.role || isDisabledUser(user)
+        || !isVerifiedAccount(user) || !user.passwordHash) throw new Error("ACTIVATION_SESSION_DENIED");
+    if (user.lockedUntil && user.lockedUntil > now) return null;
+    const risk = await assessAuthSessionRisk({
+      userId: user.id, role: user.role, ipHash: input.ipHash, userAgent: input.userAgent,
+      failedLoginAttempts: user.failedLoginAttempts || 0,
+    }, tx);
+    if (risk.shouldStepUp || risk.shouldBlock) {
+      await persistAuthSessionRisk({ ipHash: input.ipHash, userAgent: input.userAgent, requestId: input.requestId, blockedLogin: true }, risk, tx);
+      return null;
+    }
+    await persistAuthSessionRisk({ ipHash: input.ipHash, userAgent: input.userAgent, requestId: input.requestId }, risk, tx);
+    return issueSessionForUser({
+      userId: user.id, ipHash: input.ipHash, userAgent: input.userAgent,
+      authAssurance: "PASSWORD", authenticatedAt: now, mfaVerifiedAt: null, now,
+      requestId: input.requestId, purpose: "manufacturer-bootstrap",
+      preparedState: refreshBoundaryState(risk.actorState as unknown as RefreshSessionState),
+    }, tx);
+  });
+  if (!result) throw new Error("Activation completed. Please sign in from a trusted network.");
+  return result;
 };
 
 export const refreshSession = async (input: {

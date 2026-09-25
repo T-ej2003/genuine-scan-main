@@ -54,11 +54,11 @@ test("session ownership is exhaustive and editable production and test files nev
   assert.equal(sessionB.coordinationBaseCommit, partition.coordinationBaseCommit);
   assert.equal(sessionC.coordinationBaseCommit, partition.coordinationBaseCommit);
   assert.equal(sessionA.workflowIds.length, 88);
-  assert.equal(sessionB.workflowIds.length, 161);
-  assert.equal(sessionC.workflowIds.length, 72);
+  assert.equal(sessionB.workflowIds.length, 169);
+  assert.equal(sessionC.workflowIds.length, 73);
   assert.equal(sessionA.productionFileCount, 41);
-  assert.equal(sessionB.productionFileCount, 80);
-  assert.equal(sessionC.productionFileCount, 29);
+  assert.equal(sessionB.productionFileCount, 81);
+  assert.equal(sessionC.productionFileCount, 30);
   assert.equal(sessionB.existingTestFileCount, 46);
   assert.equal(sessionC.existingTestFileCount, 21);
   assert.equal(new Set([...sessionA.workflowIds, ...sessionB.workflowIds, ...sessionC.workflowIds]).size, EXPECTED_WORKFLOW_COUNT);
@@ -98,7 +98,7 @@ test("Session B is isolated from global generation, certification and staging st
   for (const file of sessionB.integrationOwnerOnlyFiles) assert.ok(sessionA.productionFiles.includes(file) || sessionC.productionFiles.includes(file));
   for (const file of sessionB.existingTestFiles) assert.ok(fs.existsSync(path.join(repoRoot, file)), file);
   assert.equal(partition.validationSummary.sessionBWorkflowOwnershipPreserved, true);
-  assert.equal(partition.validationSummary.sessionBWorkflowSetSha256, "0958f262478bf77b7f4064c4eefb31b6e99e54c37d8e60c011ee96908212ce66");
+  assert.equal(partition.validationSummary.sessionBWorkflowSetSha256, "d492dfd7bf33676e158e91330528358554457d11ca3646f72b7a98f3c132a240");
 });
 
 test("Session C owns exact administration, governance and operator families and remains isolated", () => {
@@ -110,7 +110,7 @@ test("Session C owns exact administration, governance and operator families and 
     "c-03-governance-policies-incidents-compliance",
     "c-04-operator-recovery-startup-migration-cli",
   ]);
-  assert.deepEqual(sessionC.workflowFamilies.map((family) => family.workflowIds.length), [12, 15, 45, 0]);
+  assert.deepEqual(sessionC.workflowFamilies.map((family) => family.workflowIds.length), [12, 15, 45, 1]);
   for (const requiredBoundary of [
     "documents/security/rls-program/generated/**",
     "scripts/rls/generate-*.mjs",

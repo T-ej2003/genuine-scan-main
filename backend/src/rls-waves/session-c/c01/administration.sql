@@ -12,7 +12,8 @@ BEGIN
     RAISE EXCEPTION 'SESSION_C_INVALID_CONTEXT' USING ERRCODE='42501';
   END IF;
   SELECT * INTO actor FROM app_auth.require_authenticated_session(p_capability,p_purpose,p_request_id);
-  IF actor.assurance<>'ADMIN_MFA' OR actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN','LICENSEE_ADMIN')
+  IF (actor.assurance<>'ADMIN_MFA' AND NOT (actor.role='LICENSEE_ADMIN' AND actor.assurance='PASSWORD'))
+     OR actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN','LICENSEE_ADMIN')
      OR (NOT p_allow_tenant AND actor.role='LICENSEE_ADMIN') THEN
     RAISE EXCEPTION 'SESSION_C_WRONG_ROLE' USING ERRCODE='42501';
   END IF;
@@ -423,11 +424,17 @@ BEGIN
     (gen_random_uuid()::text,key_hash,'invitation.prepare',actor."userId",request_hash,transaction_timestamp()+interval '24 hours');
 
   IF p_require_existing_user THEN
-    SELECT u.id,u.email,u.name,u.role,u."orgId",u."licenseeId",u.status,u."isActive",u."disabledAt",u."deletedAt",u."passwordHash"
+    SELECT u.id,u.email,u.name,u.role,u."orgId",u."licenseeId",u.status,u."isActive",u."disabledAt",u."deletedAt",u."passwordHash",u."emailVerifiedAt"
       INTO target_user FROM public."User" u WHERE u."licenseeId"=p_requested_licensee_id
       AND u.role='LICENSEE_ADMIN'::public."UserRole" AND (requested_email='' OR u.email=requested_email);
+    IF FOUND AND target_user.status='INVITED'::public."UserStatus" AND target_user."emailVerifiedAt" IS NULL THEN
+      PERFORM app_rls.session_c_set_target(p_requested_licensee_id,organization_id,target_user.id,target_user.email,NULL);
+      SELECT u.id,u.email,u.name,u.role,u."orgId",u."licenseeId",u.status,u."isActive",u."disabledAt",u."deletedAt",u."passwordHash",u."emailVerifiedAt"
+        INTO target_user FROM public."User" u WHERE u.id=target_user.id FOR UPDATE;
+      IF NOT FOUND THEN RAISE EXCEPTION 'SESSION_C_INVITE_TARGET_DENIED' USING ERRCODE='42501'; END IF;
+    END IF;
     IF NOT FOUND OR target_user.status<>'INVITED'::public."UserStatus" OR NOT target_user."isActive"
-       OR target_user."passwordHash" IS NOT NULL OR target_user."disabledAt" IS NOT NULL OR target_user."deletedAt" IS NOT NULL THEN
+       OR target_user."emailVerifiedAt" IS NOT NULL OR target_user."disabledAt" IS NOT NULL OR target_user."deletedAt" IS NOT NULL THEN
       RAISE EXCEPTION 'SESSION_C_INVITE_TARGET_DENIED' USING ERRCODE='42501';
     END IF;
     requested_email:=target_user.email;
@@ -439,15 +446,21 @@ BEGIN
       AND u."isActive" AND u."disabledAt" IS NULL AND u."deletedAt" IS NULL;
     IF NOT FOUND THEN RAISE EXCEPTION 'SESSION_C_INVITE_TARGET_DENIED' USING ERRCODE='42501'; END IF;
   ELSE
-    SELECT u.id,u.email,u.name,u.role,u."orgId",u."licenseeId",u.status,u."isActive",u."disabledAt",u."deletedAt",u."passwordHash"
+    SELECT u.id,u.email,u.name,u.role,u."orgId",u."licenseeId",u.status,u."isActive",u."disabledAt",u."deletedAt",u."passwordHash",u."emailVerifiedAt"
       INTO target_user FROM public."User" u WHERE u.email=requested_email;
+    IF FOUND AND target_user.status='INVITED'::public."UserStatus" AND target_user."emailVerifiedAt" IS NULL THEN
+      PERFORM app_rls.session_c_set_target(p_requested_licensee_id,organization_id,target_user.id,target_user.email,NULL);
+      SELECT u.id,u.email,u.name,u.role,u."orgId",u."licenseeId",u.status,u."isActive",u."disabledAt",u."deletedAt",u."passwordHash",u."emailVerifiedAt"
+        INTO target_user FROM public."User" u WHERE u.id=target_user.id FOR UPDATE;
+      IF NOT FOUND THEN RAISE EXCEPTION 'SESSION_C_INVITE_TARGET_DENIED' USING ERRCODE='42501'; END IF;
+    END IF;
     IF FOUND THEN
       IF NOT p_allow_existing_invited_user THEN RAISE EXCEPTION 'SESSION_C_INVITE_ACCOUNT_EXISTS' USING ERRCODE='23505'; END IF;
       IF target_user.role='MANUFACTURER_ADMIN'::public."UserRole" AND p_requested_role='MANUFACTURER_ADMIN'
          AND target_user.status='ACTIVE'::public."UserStatus" AND target_user."isActive"
          AND target_user."disabledAt" IS NULL AND target_user."deletedAt" IS NULL THEN NULL;
       ELSIF target_user.role::text IS DISTINCT FROM p_requested_role OR target_user.status<>'INVITED'::public."UserStatus"
-         OR NOT target_user."isActive" OR target_user."passwordHash" IS NOT NULL OR target_user."disabledAt" IS NOT NULL
+         OR NOT target_user."isActive" OR target_user."emailVerifiedAt" IS NOT NULL OR target_user."disabledAt" IS NOT NULL
          OR target_user."deletedAt" IS NOT NULL OR target_user."licenseeId" IS DISTINCT FROM p_requested_licensee_id
          OR target_user."orgId" IS DISTINCT FROM (CASE WHEN p_requested_role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') THEN NULL ELSE organization_id END) THEN
         RAISE EXCEPTION 'SESSION_C_INVITE_ACCOUNT_EXISTS' USING ERRCODE='23505';
@@ -465,6 +478,13 @@ BEGIN
   END IF;
   target_user_id:=target_user.id;
   PERFORM app_rls.session_c_set_target(p_requested_licensee_id,organization_id,target_user_id,requested_email,NULL);
+
+  IF target_user.status='INVITED'::public."UserStatus" AND target_user."passwordHash" IS NOT NULL THEN
+    UPDATE public."InviteActivationChallenge" SET "supersededAt"=transaction_timestamp()
+      WHERE "userId"=target_user_id AND "consumedAt" IS NULL AND "supersededAt" IS NULL;
+    UPDATE public."User" SET "passwordHash"=NULL,"updatedAt"=transaction_timestamp()
+      WHERE id=target_user_id AND status='INVITED'::public."UserStatus" AND "emailVerifiedAt" IS NULL;
+  END IF;
 
   IF target_user.role='MANUFACTURER_ADMIN'::public."UserRole" THEN
     INSERT INTO public."ManufacturerLicenseeLink" ("manufacturerId","licenseeId","isPrimary","updatedAt")

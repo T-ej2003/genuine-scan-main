@@ -91,7 +91,7 @@ BEGIN
        AND actor."orgId" = target_org_id
        AND actor_org_id = target_org_id
        AND actor_manufacturer_id IS NULL
-       AND (purpose_code <> 'audit-log-read' OR assurance IN ('mfa-verified', 'step-up-verified'));
+       AND (purpose_code <> 'audit-log-read' OR assurance IN ('password-verified', 'mfa-verified', 'step-up-verified'));
   END IF;
 
   IF actor_role = 'MANUFACTURER_ADMIN' THEN

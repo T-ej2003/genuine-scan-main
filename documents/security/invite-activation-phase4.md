@@ -1,0 +1,15 @@
+# Invite activation and temporary sign-in assurance
+
+This change separates password setup from activation. An unused, unexpired invite permits one password-setting transaction. That transaction consumes the invite, leaves the user `INVITED` with `emailVerifiedAt = null`, and creates one pending `InviteActivationChallenge`. It does not issue a session. A six-digit code sent to the invite's registered email completes activation in a second transaction; only then is the user `ACTIVE` and email-verified.
+
+The challenge stores a versioned HMAC verifier, never the code. The HMAC uses the existing token-hash secret, a distinct `INVITE_ACTIVATION:v1` domain, and the challenge, user, invite, normalized email, and code. Codes come from `crypto.randomInt`; each challenge lasts ten minutes and accepts at most five wrong attempts. Resend is available after sixty seconds while the original invite remains unexpired, and supersedes the preceding challenge. A consumed invite link can resume its own pending challenge while the original invite remains valid; it cannot set another password. An authorized replacement invite supersedes pending challenges and resets the still-invited user's password state. Delivery failure leaves the account pending; it does not activate or authenticate it.
+
+Activation verification and resend use a challenge-derived actor rate-limit key plus the independent IP limit; invite acceptance retains its token-derived actor key. If OTP verification commits activation but the existing risk/session boundary declines session issuance, the API reports successful activation with `loginRequired`, and the page sends the user to normal sign-in instead of retrying the consumed code.
+
+Password reset issuance and consumption require an active, enabled, email-verified user. Generic email verification and email change cannot activate an invited user. Login, refresh, and session issuance continue to require an active, enabled, verified account.
+
+The temporary password-only policy applies exactly to `LICENSEE_ADMIN`, `MANUFACTURER`, `MANUFACTURER_ADMIN`, and `MANUFACTURER_USER`. Their existing role and tenant permissions are unchanged. `SUPER_ADMIN`, `PLATFORM_SUPER_ADMIN`, and `ORG_ADMIN` remain MFA-required. Existing TOTP, WebAuthn, and backup-code records are not changed. MFA maintenance routes deny the temporarily exempt roles, so the exemption cannot become factor-removal proof. Elevated risk still denies their password login through the existing audited risk path.
+
+The existing `/accept-invite` page, auth email sender, session issuance, RLS program, and C01/C02/C03 business boundaries are reused. The C01/C02/C03 assurance exceptions are action-specific; they do not grant a role a new business action or relax platform/organization-admin assurance.
+
+Validation uses the canonical generated RLS package and a dedicated disposable PostgreSQL 18 container. The application never connects to production for these proofs. The implementation is not a migration or deployment instruction; production rollout requires separate review and authorization.

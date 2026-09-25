@@ -25,7 +25,12 @@ const safeUrl = (raw, expectedUser) => {
   const database = decodeURIComponent(parsed.pathname.slice(1));
   assert(["postgres:", "postgresql:"].includes(parsed.protocol));
   assert(["127.0.0.1", "localhost", "::1"].includes(parsed.hostname));
-  assert.equal(decodeURIComponent(parsed.username), expectedUser);
+  if (expectedUser === "mscqr_rls_cert_admin" && decodeURIComponent(parsed.username) === "postgres") {
+    const maintenance = new URL(String(process.env.MSCQR_FULL_RLS_CERTIFICATION_ADMIN_URL || ""));
+    assert.equal(parsed.host, maintenance.host);
+    assert.equal(parsed.username, maintenance.username);
+    assert.match(decodeURIComponent(maintenance.pathname.slice(1)), /full_rls|disposable/i);
+  } else assert.equal(decodeURIComponent(parsed.username), expectedUser);
   assert.match(database, /^mscqr_full_rls_cert_[a-z0-9_]+_final$/);
   assert(!/(staging|prod|production|amazonaws|rds)/i.test(raw));
 };
@@ -53,9 +58,9 @@ const manufacturerClaims = (overrides = {}) => ({
   linkedLicenseeIds: [ids.licenseeA, ids.licenseeB],
   sessionId: "dashboard-manufacturer",
   sessionStage: "ACTIVE",
-  authAssurance: "ADMIN_MFA",
+  authAssurance: "PASSWORD",
   authenticatedAt: new Date(),
-  mfaVerifiedAt: new Date(),
+  mfaVerifiedAt: null,
   ...overrides,
 });
 const platformClaims = (overrides = {}) => ({
@@ -156,7 +161,7 @@ const main = async () => {
     const sessionExpiry = new Date(Date.now() + 60 * 60_000);
     await bootstrap.refreshToken.createMany({ data: [
       [ids.adminA, ids.orgA, "PASSWORD"],
-      [ids.manufacturerA, ids.orgA, "ADMIN_MFA"],
+      [ids.manufacturerA, ids.orgA, "PASSWORD"],
       [ids.platformA, null, "ADMIN_MFA"],
       [ids.orgAdminA, ids.orgA, "PASSWORD"],
     ].map(([userId, orgId, assurance], index) => ({
@@ -252,7 +257,9 @@ const main = async () => {
 
     assert.equal((await invoke(getDashboardStats, request(tenantClaims(), "dashboard-pg-foreign", { licenseeId: ids.licenseeB }))).status, 404);
     assert.equal((await invoke(getDashboardStats, request(platformClaims({ authAssurance: "PASSWORD", mfaVerifiedAt: null }), "dashboard-pg-weak-platform"))).status, 404);
-    assert.equal((await invoke(getDashboardStats, request(manufacturerClaims({ authAssurance: "PASSWORD", mfaVerifiedAt: null }), "dashboard-pg-weak-manufacturer"))).status, 404);
+    expectStats(await invoke(getDashboardStats, request(manufacturerClaims(), success("dashboard-pg-password-manufacturer"))), {
+      totalQRCodes: 2, activeLicensees: 2, manufacturers: 1, totalBatches: 2,
+    }, "manufacturer password assurance retains its existing scoped dashboard");
     assert.equal((await invoke(getDashboardStats, request(
       manufacturerClaims({ userId: ids.adminA, email: "admin-a@example.invalid" }),
       "dashboard-pg-forged-role",
@@ -320,7 +327,6 @@ const main = async () => {
       "dashboard-pg-ambiguous-primary",
       "dashboard-pg-foreign",
       "dashboard-pg-weak-platform",
-      "dashboard-pg-weak-manufacturer",
       "dashboard-pg-forged-role",
       "dashboard-pg-disabled-actor",
       "dashboard-pg-wrong-purpose",

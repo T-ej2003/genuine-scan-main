@@ -44,9 +44,11 @@ export const validateGeneratedPackage = ({ manifest, policies, privileges, comma
       ensure(rule.supportingWorkflowIds?.includes(profile.workflowId), `${profile.id}/${ruleId} workflow mismatch`);
       ensure(rule.actorClasses?.includes(profile.actorClass), `${profile.id}/${ruleId} actor is broader than its source rule`);
       const required = rule.minimumAssuranceByActorClass?.[profile.actorClass] || rule.minimumAssurance;
-      ensure(required === profile.minimumAssurance, `${profile.id}/${ruleId} weakens actor-specific assurance`);
+      const preservedOrgMfa = profile.id === "sql-profile-audit-log-org-admin" && profile.actorClass === "licensee-admin"
+        && equal(profile.roleValues, ["ORG_ADMIN"]) && required === "password-verified" && profile.minimumAssurance === "mfa-verified";
+      ensure(required === profile.minimumAssurance || preservedOrgMfa, `${profile.id}/${ruleId} weakens actor-specific assurance`);
       ensure(rule.status === "architecture-resolved" && !rule.requiresNamedFunction, `${profile.id}/${ruleId} is not directly implementable`);
-      profileBySlice.set(`${profile.workflowId}|${profile.actorClass}|${ruleId}`, profile);
+      profileBySlice.set(`${profile.id}|${ruleId}`, profile);
     }
   }
   for (const profile of namedProfiles) {
@@ -98,8 +100,9 @@ export const validateGeneratedPackage = ({ manifest, policies, privileges, comma
     ensure(policy.sourceCommandRuleIds.length === 1, `${policy.policyName} merged incompatible command rules`);
     const ruleId = policy.sourceCommandRuleIds[0];
     const rule = rules.get(ruleId);
-    const profile = profileBySlice.get(`${policy.workflowId}|${policy.actors[0]}|${ruleId}`);
+    const profile = profileBySlice.get(`${policy.profileId}|${ruleId}`);
     ensure(profile, `${policy.policyName} has no compatible direct certification profile`);
+    ensure(policy.workflowId === profile.workflowId && policy.actors[0] === profile.actorClass, `${policy.policyName} drifted from its source profile actor or workflow`);
     ensure(policy.route === profile.route && policy.assurance === profile.minimumAssurance && equal(policy.purpose, profile.purposeCodes), `${policy.policyName} drifted from its source profile`);
     ensure(policy.command === rule.command && policy.table === manifest.tables.find((entry) => entry.tableId === rule.tableId)?.table, `${policy.policyName} table or command drifted`);
     ensure(equal(policy.columns, rule.allowedColumns || []), `${policy.policyName} columns drifted from its source rule`);
@@ -119,7 +122,8 @@ export const validateGeneratedPackage = ({ manifest, policies, privileges, comma
     riskUserPolicy.scopePredicate.includes("\"role\" IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER')"),
   "Risk analytics owner policy lost actor hydration or bounded manufacturer projection");
   const auditUserPolicies = directPolicies.filter((policy) => policy.table === "User" && policy.workflowId === "workflow-http-backend-src-controllers-audit-controller-ts-get-logs");
-  ensure(auditUserPolicies.length === 2 && auditUserPolicies.every((policy) => policy.scopePredicate.includes('"id" = app_rls.current_user_id()')), "Audit User policies lost actor-self scope");
+  ensure(equal(auditUserPolicies.map((policy) => policy.profileId), ["sql-profile-audit-log-licensee-admin", "sql-profile-audit-log-manufacturer", "sql-profile-audit-log-org-admin"]) &&
+    auditUserPolicies.every((policy) => policy.scopePredicate.includes('"id" = app_rls.current_user_id()')), "Audit User policies lost actor-self scope");
 
   const expectedGrants = new Map();
   for (const policy of directPolicies) {

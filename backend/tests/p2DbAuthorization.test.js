@@ -37,7 +37,7 @@ const assertNoCrossTenantLeak = (response, forbiddenMarker, label) => {
     const loginOk = await request("POST", "/api/auth/login", {
       email: emails.manufacturerA,
       password: passwords.manufacturerA,
-    });
+    }, { headers: { "user-agent": "p2-test-agent" } });
     assert.strictEqual(loginOk.status, 200, loginOk.text);
     assert.match(loginOk.text, /MANUFACTURER/i);
     assertSafeResponse(loginOk, "manufacturer login");

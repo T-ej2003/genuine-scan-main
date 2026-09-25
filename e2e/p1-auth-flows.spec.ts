@@ -97,6 +97,9 @@ async function installP1AuthMocks(page: Page) {
       });
     }
     if (path === "/auth/accept-invite") {
+      return json(route, { success: true, data: { challengeId: "00000000-0000-4000-8000-000000000575", delivered: true } });
+    }
+    if (path === "/auth/invite-activation/verify") {
       authenticated = true;
       return json(route, { success: true, data: activeSessionPayload() });
     }
@@ -161,7 +164,9 @@ test.describe("P1 auth flow automation", () => {
     await expect(page.getByText("invitee@brand.example")).toBeVisible();
     await page.getByLabel("Password", { exact: true }).fill("CorrectHorseBattery1!");
     await page.getByLabel("Confirm password", { exact: true }).fill("CorrectHorseBattery1!");
-    await page.getByRole("button", { name: /activate account/i }).click();
+    await page.getByRole("button", { name: /continue/i }).click();
+    await page.getByLabel("Verification code").fill("123456");
+    await page.getByRole("button", { name: /verify & continue/i }).click();
     await expect(page).toHaveURL(/\/dashboard/);
     await page.getByRole("button", { name: /P1 Admin/i }).click();
     await page.getByRole("menuitem", { name: /Log out/i }).click();

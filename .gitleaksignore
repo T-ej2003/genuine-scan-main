@@ -34,7 +34,7 @@ c1fbb3030c0a84c07299657822ac7b4faadef426:scripts/tests/production-cutover-produc
 39963baaad3f85f90e905d3563e80ecb2fdaf854:scripts/tests/fixtures/rotation-evidence-valid-stale.json:generic-api-key:40
 scripts/rls/generate-clean-room-rls-sql.mjs:generic-api-key:2121
 documents/security/rls-program/public-read-contract.json:generic-api-key:287
-scripts/rls/lib/program-inventory.mjs:generic-api-key:2073
+scripts/rls/lib/program-inventory.mjs:generic-api-key:2083
 8a967ae598fb2c82ed83447b826508bc89c79314:scratch/staging-database-role-credentials-20260714T105656Z/cutover-result.json:generic-api-key:5
 52d79688c485e08c6b18af4be2101871361b1e88:documents/ops/evidence/printer-websocket-recovery-20260626/waf-printer-websocket-allow.json:generic-api-key:180
 52d79688c485e08c6b18af4be2101871361b1e88:documents/ops/evidence/waf-printer-websocket-allow-20260626.json:generic-api-key:180

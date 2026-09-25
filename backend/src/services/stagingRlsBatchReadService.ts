@@ -152,7 +152,7 @@ export const buildBatchOperationalReadBoundary = (
     }
     where = { licenseeId };
   } else if (manufacturer) {
-    requireFreshMfa(user, now);
+    if (user.authAssurance !== "PASSWORD" && user.authAssurance !== "ADMIN_MFA") throw new BatchOperationalReadAccessError();
     manufacturerId = userId;
     licenseeId = requestedLicenseeId;
     where = { manufacturerId, ...(licenseeId ? { licenseeId } : {}) };

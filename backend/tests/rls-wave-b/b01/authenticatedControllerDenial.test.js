@@ -38,6 +38,8 @@ try {
 assert.equal(canonical.isCanonicalAuthDenial(caught), true, "an empty actor revalidation must be a typed denial");
 
 let boundaryError = new canonical.CanonicalAuthDenial();
+let activationSessionError = null;
+let activationVerificationCount = 0;
 mockModule("rls-waves/session-b/b01/canonicalAuthContext.js", {
   ...canonical,
   withCanonicalAuthClaims: async () => { throw boundaryError; },
@@ -58,6 +60,8 @@ mockModule("controllers/authControllerShared.js", {
   getRequestId: () => "request-1",
   hashIp: () => "ip-hash",
   invitePreviewQuerySchema: validSchema,
+  inviteActivationVerifySchema: validSchema,
+  inviteActivationResendSchema: validSchema,
   inviteSchema: validSchema,
   isAdminMfaRequiredRole: (role) => role === "SUPER_ADMIN",
   loginSchema: validSchema,
@@ -67,7 +71,7 @@ mockModule("controllers/authControllerShared.js", {
   passwordStepUpSchema: validSchema,
   refreshSessionSchema: validSchema,
   resetPasswordSchema: validSchema,
-  setAuthCookies: () => null,
+  setAuthCookies: (res) => { res.cookiesSet += 1; },
   verifyEmailSchema: validSchema,
 });
 mockModule("rls-waves/session-b/b01/authenticatedSessionProjection.js", {
@@ -76,6 +80,10 @@ mockModule("rls-waves/session-b/b01/authenticatedSessionProjection.js", {
 });
 mockModule("services/auth/authService.js", {
   issueSessionForUser: async () => ({}),
+  issueSessionAfterInviteActivation: async () => {
+    if (activationSessionError) throw activationSessionError;
+    return { sessionStage: "ACTIVE", auth: { authAssurance: "PASSWORD" } };
+  },
   loginWithPassword: async () => ({}),
   logoutSession: async () => null,
   refreshSession: async () => ({ ok: false }),
@@ -104,6 +112,11 @@ mockModule("services/auth/inviteService.js", {
     throw boundaryError;
   },
   getInvitePreview: async () => ({}),
+  verifyInviteActivation: async () => {
+    activationVerificationCount += 1;
+    return { verified: true, userId: "user-1", email: "invite@example.com", role: "LICENSEE_ADMIN" };
+  },
+  resendInviteActivation: async () => ({}),
 });
 mockModule("services/auth/passwordResetService.js", {
   requestPasswordReset: async () => null,
@@ -131,6 +144,7 @@ const response = () => ({
   statusCode: 200,
   body: null,
   cleared: 0,
+  cookiesSet: 0,
   status(code) { this.statusCode = code; return this; },
   json(body) { this.body = body; return this; },
 });
@@ -166,6 +180,22 @@ for (const category of ["MANUFACTURER_SCOPE_DENIED", "MANUFACTURER_SCOPE_STALE"]
   assert.equal(res.cleared, 0, `${category} must preserve the session for a valid scope switch`);
   assert.doesNotMatch(JSON.stringify(res.body), new RegExp(category));
 }
+
+activationSessionError = new Error("Activation completed. Please sign in from a trusted network.");
+const activatedWithoutSession = response();
+await authControllers.verifyInviteActivationController(request({ body: { challengeId: "challenge-1", code: "123456" } }), activatedWithoutSession);
+assert.equal(activatedWithoutSession.statusCode, 200);
+assert.deepEqual(activatedWithoutSession.body, { success: true, data: { activated: true, loginRequired: true } });
+assert.equal(activatedWithoutSession.cookiesSet, 0, "risk denial must not issue authentication cookies");
+assert.equal(activationVerificationCount, 1, "activation must not be retried after session denial");
+
+activationSessionError = null;
+const activatedWithSession = response();
+await authControllers.verifyInviteActivationController(request({ body: { challengeId: "challenge-2", code: "123456" } }), activatedWithSession);
+assert.equal(activatedWithSession.statusCode, 200);
+assert.equal(activatedWithSession.body.success, true);
+assert.equal(activatedWithSession.body.data.sessionStage, "ACTIVE");
+assert.equal(activatedWithSession.cookiesSet, 1, "successful session issuance must set authentication cookies");
 
 console.log("B01 authenticated controller denial tests passed");
 };

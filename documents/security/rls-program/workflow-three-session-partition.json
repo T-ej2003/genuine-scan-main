@@ -67,6 +67,7 @@
         "backend/src/services/auth/backupCodeMfaProvider.ts",
         "backend/src/services/auth/cookieTokenProtectionService.ts",
         "backend/src/services/auth/emailVerificationService.ts",
+        "backend/src/services/auth/inviteActivationCode.ts",
         "backend/src/services/auth/inviteService.ts",
         "backend/src/services/auth/mfaAdapter.ts",
         "backend/src/services/auth/mfaService.ts",
@@ -111,6 +112,7 @@
         "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
         "backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts",
         "backend/src/rls-waves/session-c/c03/c03RestrictedDatabase.ts",
+        "backend/src/rls-waves/session-c/operatorProcedureService.ts",
         "backend/src/services/auditCsvExportService.ts",
         "backend/src/services/auditLogQueryService.ts",
         "backend/src/services/auditService.ts",
@@ -184,9 +186,9 @@
       ],
       "waveLocalResultManifest": "documents/security/rls-program/waves/session-b-auth-public-workers-result.json",
       "originalBranchPoint": "061b3134ba89db84e0564b893e920a2601c14452",
-      "workflowCount": 161,
+      "workflowCount": 169,
       "workflowFamilyCount": 3,
-      "productionFileCount": 80,
+      "productionFileCount": 81,
       "existingTestFileCount": 46
     },
     {
@@ -229,9 +231,9 @@
       ],
       "waveLocalResultManifest": "documents/security/rls-program/waves/session-c-admin-governance-operator-result.json",
       "requiredBaseAncestor": "33cbe7ff019efefad242f654f0aa96c44c5b963c",
-      "workflowCount": 72,
+      "workflowCount": 73,
       "workflowFamilyCount": 4,
-      "productionFileCount": 29,
+      "productionFileCount": 30,
       "existingTestFileCount": 21
     }
   ],
@@ -1329,6 +1331,58 @@
       ]
     },
     {
+      "workflowId": "workflow-internal-backend-src-rls-waves-session-b-b01-pre-auth-repository-ts-lookup-invite-activation-binding",
+      "sessionId": "session-b",
+      "waveId": "b-01-auth-preauth-session-account-security",
+      "assignmentRuleId": "b01-auth-preauth-account-contract",
+      "corroboratingRuleIds": [],
+      "entryPoint": "internal:lookupInviteActivationBinding",
+      "executionSurface": "internal",
+      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
+      "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b01/preAuthRepository.ts"
+      ]
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-rls-waves-session-b-b01-pre-auth-repository-ts-resend-invite-activation-boundary",
+      "sessionId": "session-b",
+      "waveId": "b-01-auth-preauth-session-account-security",
+      "assignmentRuleId": "b01-auth-preauth-account-contract",
+      "corroboratingRuleIds": [],
+      "entryPoint": "internal:resendInviteActivationBoundary",
+      "executionSurface": "internal",
+      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
+      "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b01/preAuthRepository.ts"
+      ]
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-rls-waves-session-b-b01-pre-auth-repository-ts-verify-invite-activation-boundary",
+      "sessionId": "session-b",
+      "waveId": "b-01-auth-preauth-session-account-security",
+      "assignmentRuleId": "b01-auth-preauth-account-contract",
+      "corroboratingRuleIds": [],
+      "entryPoint": "internal:verifyInviteActivationBoundary",
+      "executionSurface": "internal",
+      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
+      "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b01/preAuthRepository.ts"
+      ]
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-rls-waves-session-b-b01-session-credential-repository-ts-finalize-refresh-token-rotation",
+      "sessionId": "session-b",
+      "waveId": "b-01-auth-preauth-session-account-security",
+      "assignmentRuleId": "b01-auth-preauth-account-contract",
+      "corroboratingRuleIds": [],
+      "entryPoint": "internal:finalizeRefreshTokenRotation",
+      "executionSurface": "internal",
+      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
+      "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts"
+      ]
+    },
+    {
       "workflowId": "workflow-internal-backend-src-rls-waves-session-b-b02-authenticated-repositories-ts-accept-ownership-transfer-row",
       "sessionId": "session-b",
       "waveId": "b-02-public-proof-support-intake",
@@ -2197,6 +2251,58 @@
       "contract": "Raw and signed QR verification, proof-bound public status, customer trust, ownership, support and intake with non-enumerable exact projections.",
       "canonicalSourceFiles": [
         "backend/src/rls-waves/session-b/b02/publicBoundaryRepository.ts"
+      ]
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-rls-waves-session-b-b03-repository-functions-ts-add-support-ticket-message",
+      "sessionId": "session-b",
+      "waveId": "b-03-workers-scheduled-outbox-delivery",
+      "assignmentRuleId": "b03-worker-schedule-delivery-contract",
+      "corroboratingRuleIds": [],
+      "entryPoint": "internal:addSupportTicketMessage",
+      "executionSurface": "internal",
+      "contract": "Workers, scheduled jobs, durable outbox and delivery with database-derived partitions, leases, bounded batches, idempotency and immutable attribution.",
+      "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts"
+      ]
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-rls-waves-session-b-b03-repository-functions-ts-get-support-ticket",
+      "sessionId": "session-b",
+      "waveId": "b-03-workers-scheduled-outbox-delivery",
+      "assignmentRuleId": "b03-worker-schedule-delivery-contract",
+      "corroboratingRuleIds": [],
+      "entryPoint": "internal:getSupportTicket",
+      "executionSurface": "internal",
+      "contract": "Workers, scheduled jobs, durable outbox and delivery with database-derived partitions, leases, bounded batches, idempotency and immutable attribution.",
+      "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts"
+      ]
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-rls-waves-session-b-b03-repository-functions-ts-list-support-tickets",
+      "sessionId": "session-b",
+      "waveId": "b-03-workers-scheduled-outbox-delivery",
+      "assignmentRuleId": "b03-worker-schedule-delivery-contract",
+      "corroboratingRuleIds": [],
+      "entryPoint": "internal:listSupportTickets",
+      "executionSurface": "internal",
+      "contract": "Workers, scheduled jobs, durable outbox and delivery with database-derived partitions, leases, bounded batches, idempotency and immutable attribution.",
+      "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts"
+      ]
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-rls-waves-session-b-b03-repository-functions-ts-update-support-ticket",
+      "sessionId": "session-b",
+      "waveId": "b-03-workers-scheduled-outbox-delivery",
+      "assignmentRuleId": "b03-worker-schedule-delivery-contract",
+      "corroboratingRuleIds": [],
+      "entryPoint": "internal:updateSupportTicket",
+      "executionSurface": "internal",
+      "contract": "Workers, scheduled jobs, durable outbox and delivery with database-derived partitions, leases, bounded batches, idempotency and immutable attribution.",
+      "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts"
       ]
     },
     {
@@ -4564,6 +4670,19 @@
       ]
     },
     {
+      "workflowId": "workflow-startup-backend-src-rls-waves-session-c-operator-procedure-service-ts-bootstrap-configured-super-admin-procedure",
+      "sessionId": "session-c",
+      "waveId": "c-04-operator-recovery-startup-migration-cli",
+      "assignmentRuleId": "c04-registered-operator-recovery-cli-or-startup",
+      "corroboratingRuleIds": [],
+      "entryPoint": "startup:bootstrapConfiguredSuperAdminProcedure",
+      "executionSurface": "startup",
+      "contract": "Finite operator, recovery, startup, migration and CLI procedures; test and seed paths remain frozen-product prohibited where already contracted.",
+      "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-c/operatorProcedureService.ts"
+      ]
+    },
+    {
       "workflowId": "workflow-startup-backend-src-services-auth-auth-bootstrap-repository-ts-find-pre-candidate-password-user",
       "sessionId": "session-b",
       "waveId": "b-01-auth-preauth-session-account-security",
@@ -4643,17 +4762,17 @@
     ]
   },
   "validationSummary": {
-    "authoritativeWorkflowCount": 321,
-    "assignmentCount": 321,
-    "uniqueAssignmentCount": 321,
+    "authoritativeWorkflowCount": 330,
+    "assignmentCount": 330,
+    "uniqueAssignmentCount": 330,
     "missingWorkflowIds": [],
     "duplicateWorkflowIds": [],
     "unknownWorkflowIds": [],
     "genericCatchAllAssignments": [],
     "sessionCounts": {
       "session-a": 88,
-      "session-b": 161,
-      "session-c": 72
+      "session-b": 169,
+      "session-c": 73
     },
     "waveCounts": {
       "a-01-tenant-manufacturer-platform-reads": 10,
@@ -4661,15 +4780,15 @@
       "a-04-printing-reissue-recovery-release": 47,
       "a-08-runtime-idempotency-telemetry": 5,
       "a-09-system-integration-owner": 1,
-      "b-01-auth-preauth-session-account-security": 46,
+      "b-01-auth-preauth-session-account-security": 50,
       "b-02-public-proof-support-intake": 99,
-      "b-03-workers-scheduled-outbox-delivery": 16,
+      "b-03-workers-scheduled-outbox-delivery": 20,
       "c-01-administration-general-mutations": 12,
       "c-02-audit-fraud-trace-alerts": 15,
       "c-03-governance-policies-incidents-compliance": 45,
-      "c-04-operator-recovery-startup-migration-cli": 0
+      "c-04-operator-recovery-startup-migration-cli": 1
     },
-    "sessionBWorkflowSetSha256": "0958f262478bf77b7f4064c4eefb31b6e99e54c37d8e60c011ee96908212ce66",
+    "sessionBWorkflowSetSha256": "d492dfd7bf33676e158e91330528358554457d11ca3646f72b7a98f3c132a240",
     "sessionBWorkflowOwnershipPreserved": true,
     "sharedReferencedProductionFiles": [
       "backend/src/controllers/incidentController.ts",

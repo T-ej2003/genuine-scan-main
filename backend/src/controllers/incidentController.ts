@@ -431,6 +431,7 @@ export const patchIncident = async (req: AuthRequest, res: Response) => {
         resourceType: "incident",
         allowedRoles: [UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN, UserRole.LICENSEE_ADMIN, UserRole.ORG_ADMIN],
         requiredAssurance: "mfa-verified",
+        allowTemporaryRolePassword: true,
       },
       async (tx, context) => {
         const changed = await patchIncidentInTransaction<any>(tx, incidentId, parsed.data);
@@ -472,6 +473,7 @@ export const addIncidentEventNote = async (req: AuthRequest, res: Response) => {
         resourceType: "incident",
         allowedRoles: [UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN, UserRole.LICENSEE_ADMIN, UserRole.ORG_ADMIN],
         requiredAssurance: "mfa-verified",
+        allowTemporaryRolePassword: true,
       },
       async (tx, context) => {
         const row = await recordIncidentEvent({
@@ -587,6 +589,7 @@ export const notifyIncidentCustomer = async (req: AuthRequest, res: Response) =>
         resourceType: "incident",
         allowedRoles: [UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN, UserRole.LICENSEE_ADMIN, UserRole.ORG_ADMIN],
         requiredAssurance: "mfa-verified",
+        allowTemporaryRolePassword: true,
       },
       (tx) => getIncidentByIdScoped(incidentId, {
         role: req.user!.role,
@@ -675,6 +678,7 @@ export const exportIncidentPdfHook = async (req: AuthRequest, res: Response) => 
         resourceType: "incident",
         allowedRoles: [UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN, UserRole.LICENSEE_ADMIN, UserRole.ORG_ADMIN],
         requiredAssurance: "mfa-verified",
+        allowTemporaryRolePassword: true,
       },
       async (tx, context) => {
         const row = await getIncidentByIdScoped(incidentId, {
@@ -730,6 +734,7 @@ export const serveIncidentEvidenceFile = async (req: AuthRequest, res: Response)
         resourceType: "incidentEvidenceStorage",
         allowedRoles: [UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN, UserRole.LICENSEE_ADMIN, UserRole.ORG_ADMIN],
         requiredAssurance: "mfa-verified",
+        allowTemporaryRolePassword: true,
       },
       async (tx, context) => {
         const row = await loadIncidentEvidenceFileInTransaction<any>(tx, context, fileName);

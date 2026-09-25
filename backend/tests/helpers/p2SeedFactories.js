@@ -309,19 +309,21 @@ const issueBearerTokenForUser = async (prisma, userId, email, assurance = "PASSW
   const { assessAuthSessionRisk } = loadDist("services/auth/sessionRiskService");
   const { lookupPasswordBootstrapUser } = loadDist("rls-waves/session-b/b01/preAuthRepository");
   const { sealCookieToken } = loadDist("services/auth/cookieTokenProtectionService");
+  const { hashIp } = loadDist("utils/security");
+  const ipHash = hashIp("127.0.0.1");
   const session = await prisma.$transaction(async (tx) => {
     const subject = await lookupPasswordBootstrapUser(email, tx);
     if (!subject || subject.id !== userId) throw new Error("P2 login subject binding failed");
     const risk = await assessAuthSessionRisk({
       userId,
       role: subject.role,
-      ipHash: "p2-test-ip",
+      ipHash,
       userAgent: "p2-test-agent",
       failedLoginAttempts: subject.failedLoginAttempts || 0,
     }, tx);
     return issueSessionForUser({
       userId,
-      ipHash: "p2-test-ip",
+      ipHash,
       userAgent: "p2-test-agent",
       authAssurance: assurance,
       authenticatedAt: new Date(),

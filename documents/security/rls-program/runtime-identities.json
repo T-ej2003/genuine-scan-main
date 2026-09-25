@@ -360,8 +360,8 @@
       "purpose": "Own protected tables and policies without providing an execution identity.",
       "loginExpectation": "NOLOGIN",
       "allowedSchemas": [
-        "app_rls",
         "app_ops",
+        "app_rls",
         "public"
       ],
       "allowedCommands": [
@@ -407,10 +407,10 @@
       "ownedObjectClasses": [
         "tables",
         "sequences",
-        "public/app_rls/app_ops schemas",
+        "public/app_rls schemas",
         "indexes/constraints/policies/triggers through tables",
         "application types/views/materialized views",
-        "approved app_rls SECURITY INVOKER and app_ops SECURITY DEFINER functions"
+        "approved app_rls SECURITY INVOKER functions"
       ]
     },
     {

@@ -106,8 +106,8 @@
   },
   "requiredAssurance": {
     "bootstrapRead": "password-verified",
-    "activeApplicationSession": "mfa-verified",
-    "scopeSwitch": "mfa-verified"
+    "activeApplicationSession": "password-verified",
+    "scopeSwitch": "password-verified"
   },
   "inputFields": [
     {

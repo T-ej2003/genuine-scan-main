@@ -127,6 +127,10 @@
       "expectedOwner": "mscqr_rls_cert_owner"
     },
     {
+      "table": "InviteActivationChallenge",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
       "table": "Licensee",
       "expectedOwner": "mscqr_rls_cert_owner"
     },

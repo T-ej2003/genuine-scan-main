@@ -157,7 +157,9 @@ BEGIN
   SELECT actor.user_id,actor.licensee_id
     FROM public."Incident" i
     CROSS JOIN LATERAL app_rls.c03_revalidate_actor_scope(
-      i."licenseeId",'["SUPER_ADMIN","PLATFORM_SUPER_ADMIN","LICENSEE_ADMIN","MANUFACTURER_ADMIN"]'::jsonb,p_assurance,p_purpose
+      i."licenseeId",'["SUPER_ADMIN","PLATFORM_SUPER_ADMIN","LICENSEE_ADMIN","MANUFACTURER_ADMIN"]'::jsonb,
+      CASE WHEN p_assurance='mfa-verified' AND p_purpose IN ('incident-update','incident-note-add','incident-pdf-export','incident-customer-notification-read')
+        AND current_setting('app.role',true)='LICENSEE_ADMIN' THEN 'password-verified' ELSE p_assurance END,p_purpose
     ) actor
    WHERE i.id=p_incident_id;
   IF NOT FOUND THEN RAISE EXCEPTION 'C03_INCIDENT_DENIED' USING ERRCODE='42501'; END IF;
