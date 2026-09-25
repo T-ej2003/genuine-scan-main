@@ -8,8 +8,10 @@ const read = (name) => JSON.parse(fs.readFileSync(`${root}/${name}`, "utf8"));
 const policy = read("publisher-permissions-policy.json");
 const trust = read("publisher-trust-policy.json");
 const activation = read("frontend-activation-policy.json");
-function fixture({ liveActivation = null, existingBoundary = false, boundaryDescription = "Terraform-managed production web publisher permissions boundary." } = {}) {
-  let boundary = existingBoundary ? policy : null, role = null, publisherPolicy = null, activationPolicy = liveActivation;
+function fixture({ liveActivation = null, existingBoundary = false, existingRole = false, boundaryDescription = "Terraform-managed production web publisher permissions boundary.", versionsResponse = { Versions: [{ VersionId: "v1", IsDefaultVersion: true }] } } = {}) {
+  let boundary = existingBoundary ? policy : null;
+  let role = existingRole ? { RoleName: WEB_RELEASE_IAM.roleName, Arn: `arn:aws:iam::368992683803:role/${WEB_RELEASE_IAM.roleName}`, Path: "/", Description: "GitHub OIDC only: publish the reviewed production web image.", PermissionsBoundary: { PermissionsBoundaryArn: `arn:aws:iam::368992683803:policy/${WEB_RELEASE_IAM.boundaryName}` }, MaxSessionDuration: 3600, AssumeRolePolicyDocument: trust, Tags: [{ Key: "ManagedBy", Value: "Terraform" }, { Key: "Environment", Value: "production" }, { Key: "Stack", Value: "production-web-release" }] } : null;
+  let publisherPolicy = existingRole ? policy : null, activationPolicy = liveActivation;
   const calls = [];
   const run = (args) => {
     calls.push(args);
@@ -20,7 +22,7 @@ function fixture({ liveActivation = null, existingBoundary = false, boundaryDesc
     if (service !== "iam") throw new Error(`Unexpected call: ${service} ${operation}`);
     if (operation === "get-policy") { if (!boundary) throw new Error("NoSuchEntity"); return output({ Policy: { Arn: `arn:aws:iam::368992683803:policy/${WEB_RELEASE_IAM.boundaryName}`, PolicyName: WEB_RELEASE_IAM.boundaryName, Path: "/", Description: boundaryDescription } }); }
     if (operation === "create-policy") { boundary = policy; return ""; }
-    if (operation === "list-policy-versions") return output({ IsTruncated: false, PolicyVersions: [{ VersionId: "v1", IsDefaultVersion: true }] });
+    if (operation === "list-policy-versions") return output(versionsResponse);
     if (operation === "get-policy-version") return output({ PolicyVersion: { Document: boundary } });
     if (operation === "get-role") {
       if (value("--role-name") === WEB_RELEASE_IAM.releaseRoleName) return output({ Role: { Arn: `arn:aws:iam::368992683803:role/${WEB_RELEASE_IAM.releaseRoleName}` } });
@@ -44,7 +46,7 @@ function fixture({ liveActivation = null, existingBoundary = false, boundaryDesc
     }
     throw new Error(`Unexpected IAM call: ${operation}`);
   };
-  return { run, calls };
+  return { run, calls, getState: () => ({ boundary, role, publisherPolicy, activationPolicy }) };
 }
 
 test("web IAM bootstrap creates only source-defined resources and is idempotent", () => {
@@ -65,6 +67,7 @@ test("web IAM bootstrap creates only source-defined resources and is idempotent"
   }
   const mutations = value.calls.filter(([service, operation]) => service === "iam" && /^(create|put|attach|update|delete)/.test(operation));
   assert.deepEqual(mutations.map(([, operation]) => operation).sort(), ["create-policy", "create-role", "put-role-policy", "put-role-policy"]);
+  assert.deepEqual(value.calls.filter(([service, operation]) => service === "iam" && operation === "get-policy-version").map((args) => args[args.indexOf("--version-id") + 1]), ["v1", "v1"]);
   const source = fs.readFileSync("scripts/aws/bootstrap-production-web-release-iam.mjs", "utf8");
   assert.match(source, /readStageBProtectedMainCheckout\(\{ cwd: root, expectedSourceSha: sourceSha, requireCanonicalRepository: true \}\)/);
   assert.match(source, /checkout\.currentHead, sourceSha/);
@@ -72,6 +75,66 @@ test("web IAM bootstrap creates only source-defined resources and is idempotent"
   const boundaryDescription = terraform.match(/resource "aws_iam_policy" "publisher_boundary" \{[^}]*description\s*=\s*"([^"]+)"/s)?.[1];
   assert.ok(boundaryDescription, "Terraform must own the imported boundary description.");
   assert.ok(source.includes(`"--description", ${JSON.stringify(boundaryDescription)}`), "Bootstrap and Terraform must create the boundary with the same description to preserve a no-op import plan.");
+});
+
+test("AWS list-policy-versions Versions response selects the sole default even when it is not first", () => {
+  for (const existingBoundary of [false, true]) {
+    const value = fixture({ existingBoundary, versionsResponse: { IsTruncated: false, Versions: [{ VersionId: "v1", IsDefaultVersion: false }, { VersionId: "v2", IsDefaultVersion: true }] } });
+    bootstrapProductionWebReleaseIam({ run: value.run, sourceSha: "a".repeat(40) });
+    assert.equal(value.calls.some((args) => args[0] === "iam" && args[1] === "get-policy-version" && args[args.indexOf("--version-id") + 1] === "v2"), true);
+    assert.equal(value.calls.some((args) => args[0] === "iam" && /^(create|delete)-policy-version$/.test(args[1])), false);
+  }
+});
+
+test("AWS CLI aggregated Versions response without IsTruncated is accepted", () => {
+  const value = fixture({ versionsResponse: { Versions: [{ VersionId: "v1", IsDefaultVersion: true }] } });
+  bootstrapProductionWebReleaseIam({ run: value.run, sourceSha: "a".repeat(40) });
+  const call = value.calls.find((args) => args[0] === "iam" && args[1] === "list-policy-versions");
+  assert.ok(call);
+  assert.equal(call.some((arg) => ["--no-paginate", "--max-items", "--page-size", "--starting-token", "--query"].includes(arg)), false);
+  assert.equal(value.calls.some((args) => args[0] === "iam" && args[1] === "get-policy-version"), true);
+});
+
+test("canonical existing boundary is preserved while bootstrap recovers the production partial state", () => {
+  const value = fixture({ existingBoundary: true });
+  const result = bootstrapProductionWebReleaseIam({ run: value.run, sourceSha: "a".repeat(40) });
+  assert.equal(result.actions.includes("CREATE_BOUNDARY"), false);
+  assert.deepEqual(result.actions, ["CREATE_PUBLISHER_ROLE", `INSTALL_${WEB_RELEASE_IAM.publisherPolicyName}`, `INSTALL_${WEB_RELEASE_IAM.activationPolicyName}`]);
+  assert.equal(value.calls.some((args) => args[0] === "iam" && args[1] === "create-policy"), false);
+  assert.deepEqual(value.getState().boundary, policy);
+});
+
+test("malformed policy-version responses fail closed on both existing and newly-created boundary paths", () => {
+  const malformed = [
+    {},
+    { IsTruncated: false, PolicyVersions: [{ VersionId: "v1", IsDefaultVersion: true }] },
+    { IsTruncated: false },
+    { IsTruncated: false, Versions: null },
+    { IsTruncated: false, Versions: [] },
+    { IsTruncated: true, Versions: [{ VersionId: "v1", IsDefaultVersion: true }] },
+    { IsTruncated: "false", Versions: [{ VersionId: "v1", IsDefaultVersion: true }] },
+    { IsTruncated: false, Marker: "more-results", Versions: [{ VersionId: "v1", IsDefaultVersion: true }] },
+    { NextToken: "more-results", Versions: [{ VersionId: "v1", IsDefaultVersion: true }] },
+    { IsTruncated: false, Versions: [{ IsDefaultVersion: true }] },
+    { IsTruncated: false, Versions: [{ VersionId: "v1" }] },
+    { IsTruncated: false, Versions: [{ VersionId: "v1", IsDefaultVersion: false }] },
+    { IsTruncated: false, Versions: [{ VersionId: "v1", IsDefaultVersion: true }, { VersionId: "v2", IsDefaultVersion: true }] },
+  ];
+  for (const existingBoundary of [false, true]) for (const versionsResponse of malformed) {
+    const value = fixture({ existingBoundary, versionsResponse });
+    assert.throws(() => bootstrapProductionWebReleaseIam({ run: value.run, sourceSha: "a".repeat(40) }));
+    assert.equal(value.calls.some((args) => args[0] === "iam" && ["create-role", "put-role-policy"].includes(args[1])), false);
+    if (existingBoundary) assert.equal(value.calls.some((args) => args[0] === "iam" && args[1] === "create-policy"), false);
+  }
+});
+
+test("fully converged bootstrap rerun is a no-op", () => {
+  const value = fixture();
+  bootstrapProductionWebReleaseIam({ run: value.run, sourceSha: "a".repeat(40) });
+  const callsBeforeRerun = value.calls.length;
+  const result = bootstrapProductionWebReleaseIam({ run: value.run, sourceSha: "a".repeat(40) });
+  assert.deepEqual(result.actions, []);
+  assert.equal(value.calls.slice(callsBeforeRerun).some((args) => args[0] === "iam" && /^(create|put|attach|update|delete)/.test(args[1])), false);
 });
 
 test("unexpected caller, changed boundary or policy drift stops before further writes", () => {
