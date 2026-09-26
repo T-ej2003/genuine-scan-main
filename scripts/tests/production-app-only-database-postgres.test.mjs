@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
+import fs from "node:fs";
+import path from "node:path";
 import test from "node:test";
 import { collectAppOnlyDatabaseCatalogue, evaluateAppOnlyDatabaseCatalogue } from "../aws/production-app-only-database-verifier.mjs";
 
@@ -10,6 +12,7 @@ const container = "mscqr-p2-auth-security-postgres";
 const database = "mscqr_production_rls_green_phase2";
 const role = "mscqr_prod_rls_canary_read";
 const appRole = "mscqr_prd_rls_phase2_app";
+const subscriptionObserver = "mscqr_prod_subscription_observer";
 const requireBackend = createRequire(new URL("../../backend/package.json", import.meta.url));
 const { PrismaClient } = requireBackend("@prisma/client");
 function sql(statement, db = database) {
@@ -34,12 +37,13 @@ test("real PostgreSQL catalogue and hostile read-only verifier regressions", { t
   assert.deepEqual(instance.HostConfig.PortBindings["5432/tcp"], [{ HostIp: "127.0.0.1", HostPort: "55432" }]);
   assert.equal(sql("SELECT current_database()", "mscqr_p2_admin_test"), "mscqr_p2_admin_test");
   assert.equal(sql(`SELECT count(*) FROM pg_database WHERE datname='${database}'`, "mscqr_p2_admin_test"), "0", "never overwrite an existing test database");
-  assert.equal(sql(`SELECT count(*) FROM pg_roles WHERE rolname IN ('${role}','${appRole}','app_only_fixture_member')`, "mscqr_p2_admin_test"), "0", "never replace existing roles");
-  let createdDb = false, createdRole = false, createdAppRole = false;
+  assert.equal(sql(`SELECT count(*) FROM pg_roles WHERE rolname IN ('${role}','${appRole}','${subscriptionObserver}','app_only_fixture_member','app_only_unexpected_subscription_reader','app_only_unexpected_subscription_member','app_only_subscription_provisioner','app_only_temporary_subscription_observer','app_only_projection_acl_grantor')`, "mscqr_p2_admin_test"), "0", "never replace existing roles");
+  let createdDb = false, createdRole = false, createdAppRole = false, createdSubscriptionObserver = false;
   try {
     sql(`CREATE DATABASE ${database}`, "mscqr_p2_admin_test"); createdDb = true;
     sql(`CREATE ROLE ${role} LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`); createdRole = true;
     sql(`CREATE ROLE ${appRole} NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`); createdAppRole = true;
+    sql(`CREATE ROLE ${subscriptionObserver} NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`); createdSubscriptionObserver = true;
     sql(`ALTER ROLE ${role} SET default_transaction_read_only=on;
       REVOKE ALL ON DATABASE ${database} FROM PUBLIC;
       GRANT CONNECT ON DATABASE ${database} TO ${role};
@@ -64,8 +68,120 @@ test("real PostgreSQL catalogue and hostile read-only verifier regressions", { t
       GRANT SELECT(tenant) ON public.app_only_fixture TO ${role};
       CREATE POLICY fixture_policy ON public.app_only_fixture FOR ALL TO ${role}
         USING (tenant = current_user) WITH CHECK (amount > 0);`);
+    const provisioning = fs.readFileSync(path.join(process.cwd(), "documents/ops/iam/production-green-phase-4-read-only-canary-provision.sql"), "utf8");
+    const projection = provisioning.match(/CREATE(?: OR REPLACE)? FUNCTION app_rls\.production_security_subscription_inventory\([\s\S]*?\$subscription_inventory\$;/)?.[0];
+    assert.ok(projection, "the test installs the exact source-owned restricted subscription projection");
+    sql(`CREATE SCHEMA app_rls AUTHORIZATION mscqr_p2_test;
+      GRANT SELECT (subconninfo) ON pg_catalog.pg_subscription TO ${subscriptionObserver};
+      GRANT USAGE, CREATE ON SCHEMA app_rls TO ${subscriptionObserver};
+      GRANT USAGE ON SCHEMA app_rls TO ${role};
+      SET ROLE ${subscriptionObserver};
+      ${projection}
+      RESET ROLE;
+      REVOKE USAGE, CREATE ON SCHEMA app_rls FROM ${subscriptionObserver};
+      REVOKE ALL ON FUNCTION app_rls.production_security_subscription_inventory() FROM PUBLIC;
+      GRANT EXECUTE ON FUNCTION app_rls.production_security_subscription_inventory() TO ${role};`);
     const baseline = await collect();
     const required = { ...structuredClone(baseline), contractSha256: "a".repeat(64) };
+    await t.test("database settings from an unrelated database do not create false drift", async () => {
+      sql("ALTER DATABASE mscqr_p2_admin_test SET row_security=off", "mscqr_p2_admin_test");
+      try {
+        const catalogue = await collect();
+        assert.equal(catalogue.securityBindings.some(({ kind, name }) => kind === "database_setting" && name === "mscqr_p2_admin_test"), false);
+      } finally {
+        sql("ALTER DATABASE mscqr_p2_admin_test RESET row_security", "mscqr_p2_admin_test");
+      }
+    });
+    await t.test("real large-object ownership and ACL metadata are collected without object IDs or contents", async () => {
+      const oid = sql("SELECT lo_create(0)::text");
+      try {
+        sql(`ALTER LARGE OBJECT ${oid} OWNER TO ${appRole}; GRANT SELECT ON LARGE OBJECT ${oid} TO ${role}`);
+        const catalogue = await collect();
+        const binding = catalogue.securityBindings.find(({ kind }) => kind === "large_objects");
+        assert.ok(binding, "restricted real collector includes large-object access metadata");
+        assert.equal(binding.owner, appRole);
+        assert.equal(binding.definition.count, 1);
+        assert.ok(binding.definition.grants.some(({ role: grantee, privilege }) => grantee === role && privilege === "SELECT"));
+        assert.equal(JSON.stringify(binding).includes(oid), false, "database-local OID is not used as inventory identity");
+      } finally {
+        sql(`SELECT lo_unlink(${oid})`);
+      }
+    });
+    await t.test("real non-system tablespace ownership and ACL metadata are collected", async () => {
+      const directory = "/tmp/mscqr-rebaseline-tablespace";
+      execFileSync("docker", ["exec", container, "sh", "-c", `install -d -o postgres -g postgres ${directory}`], { timeout: 10000 });
+      try {
+        sql(`CREATE TABLESPACE rebaseline_tablespace LOCATION '${directory}'; GRANT CREATE ON TABLESPACE rebaseline_tablespace TO ${appRole}`);
+        const binding = (await collect()).securityBindings.find(({ kind, name }) => kind === "tablespace" && name === "rebaseline_tablespace");
+        assert.equal(binding?.owner, "mscqr_p2_test");
+        assert.ok(binding.definition.grants.some(({ role: grantee, privilege }) => grantee === appRole && privilege === "CREATE"));
+      } finally {
+        sql("DROP TABLESPACE IF EXISTS rebaseline_tablespace");
+        execFileSync("docker", ["exec", container, "sh", "-c", `rmdir ${directory}`], { timeout: 10000 });
+      }
+    });
+    await t.test("real subscription projection grant option is rejected before invoking the function", async () => {
+      sql(`GRANT EXECUTE ON FUNCTION app_rls.production_security_subscription_inventory() TO ${role} WITH GRANT OPTION`);
+      try {
+        await assert.rejects(collect(), /projection_acl_valid/);
+      } finally {
+        sql(`REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION app_rls.production_security_subscription_inventory() FROM ${role}`);
+      }
+      assert.deepEqual(await collect(), baseline, "removing the grant option restores the authenticated projection contract");
+    });
+    await t.test("real subscription projection ACL with a different grantor is rejected", async () => {
+      const delegate = "app_only_projection_acl_grantor";
+      sql(`CREATE ROLE ${delegate} NOLOGIN`);
+      try {
+        sql(`GRANT USAGE ON SCHEMA app_rls TO ${delegate};
+          GRANT EXECUTE ON FUNCTION app_rls.production_security_subscription_inventory() TO ${delegate} WITH GRANT OPTION;
+          SET ROLE ${delegate};
+          GRANT EXECUTE ON FUNCTION app_rls.production_security_subscription_inventory() TO ${role};
+          RESET ROLE`);
+        await assert.rejects(collect(), /projection_acl_valid|unexpected_execute_roles/);
+      } finally {
+        sql(`SET ROLE ${delegate};
+          REVOKE EXECUTE ON FUNCTION app_rls.production_security_subscription_inventory() FROM ${role};
+          RESET ROLE;
+          REVOKE EXECUTE ON FUNCTION app_rls.production_security_subscription_inventory() FROM ${delegate};
+          REVOKE USAGE ON SCHEMA app_rls FROM ${delegate};
+          DROP ROLE ${delegate}`);
+      }
+      assert.deepEqual(await collect(), baseline, "removing the unexpected grantor ACL restores the reviewed grantor");
+    });
+    await t.test("real pg_subscription column ACL rejects an extra secret-capable grantee", async () => {
+      sql("CREATE ROLE app_only_unexpected_subscription_reader NOLOGIN");
+      try {
+        sql("GRANT SELECT (subconninfo) ON pg_catalog.pg_subscription TO app_only_unexpected_subscription_reader");
+        await assert.rejects(collect(), /subscription_conninfo_acl/);
+      } finally {
+        sql("REVOKE SELECT (subconninfo) ON pg_catalog.pg_subscription FROM app_only_unexpected_subscription_reader; DROP ROLE app_only_unexpected_subscription_reader");
+      }
+    });
+    await t.test("real observer membership graph rejects a role that can SET ROLE to the secret reader", async () => {
+      sql("CREATE ROLE app_only_unexpected_subscription_member NOLOGIN");
+      try {
+        sql("GRANT mscqr_prod_subscription_observer TO app_only_unexpected_subscription_member WITH ADMIN FALSE, INHERIT FALSE, SET TRUE");
+        await assert.rejects(collect(), /observer_memberships/);
+      } finally {
+        sql("REVOKE mscqr_prod_subscription_observer FROM app_only_unexpected_subscription_member; DROP ROLE app_only_unexpected_subscription_member");
+      }
+    });
+    await t.test("a non-superuser CREATEROLE provisioner can use and then revoke only its temporary SET membership", () => {
+      sql(`BEGIN;
+        CREATE ROLE app_only_subscription_provisioner CREATEROLE NOLOGIN;
+        SET SESSION AUTHORIZATION app_only_subscription_provisioner;
+        CREATE ROLE app_only_temporary_subscription_observer NOLOGIN;
+        GRANT app_only_temporary_subscription_observer TO app_only_subscription_provisioner WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
+        SET ROLE app_only_temporary_subscription_observer;
+        DO $$ BEGIN IF current_user<>'app_only_temporary_subscription_observer' THEN RAISE EXCEPTION 'SET ROLE did not switch to observer'; END IF; END $$;
+        RESET ROLE;
+        REVOKE app_only_temporary_subscription_observer FROM app_only_subscription_provisioner;
+        RESET SESSION AUTHORIZATION;
+        DROP ROLE app_only_temporary_subscription_observer;
+        DROP ROLE app_only_subscription_provisioner;
+        COMMIT;`);
+    });
     await t.test("catalogues expose ACLs, function security, policies, constraints and generated/default/identity columns", () => {
       const fn = baseline.routines.find((r) => r.name === "fixture");
       assert.equal(fn.security_definer, true); assert.equal(fn.body, "SELECT value > 0");
@@ -136,5 +252,6 @@ test("real PostgreSQL catalogue and hostile read-only verifier regressions", { t
     if (createdDb) sql(`DROP DATABASE ${database}`, "mscqr_p2_admin_test");
     if (createdRole) sql(`DROP ROLE ${role}`, "mscqr_p2_admin_test");
     if (createdAppRole) sql(`DROP ROLE ${appRole}`, "mscqr_p2_admin_test");
+    if (createdSubscriptionObserver) sql(`DROP ROLE ${subscriptionObserver}`, "mscqr_p2_admin_test");
   }
 });

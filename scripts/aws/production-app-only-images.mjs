@@ -24,6 +24,15 @@ export function authenticateAppOnlySessionRiskSource(repositoryRoot, candidateSo
   return { ...APP_ONLY_SESSION_RISK_CONTRACT };
 }
 
+export function authenticateProtectedMainBackendImage({ sourceSha, response }) {
+  assert.match(sourceSha || "", /^[a-f0-9]{40}$/);
+  const tag = `${sourceSha}-backend-only`, details = response?.imageDetails;
+  assert.ok(Array.isArray(details) && details.length === 1, "Protected-main backend image must resolve exactly once");
+  const image = details[0]; assert.equal(image.registryId, APP_ONLY.account); assert.equal(image.repositoryName, "mscqr-backend");
+  assert.match(image.imageDigest || "", /^sha256:[a-f0-9]{64}$/); assert.ok(Array.isArray(image.imageTags) && image.imageTags.includes(tag));
+  return Object.freeze({ sourceSha, digest: image.imageDigest, tag });
+}
+
 // A new app approval binds a separately derived current-source reuse proof. It
 // does not relabel the signed report's source or extend its 24-hour validity.
 // Neither this producer nor its consumers have a signing operation.

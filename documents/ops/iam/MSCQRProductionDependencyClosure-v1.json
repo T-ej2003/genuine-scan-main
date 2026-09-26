@@ -328,6 +328,22 @@
     },
     {
       "sourceFile": "scripts/aws/production-app-only-preparation.mjs",
+      "action": "ecr:DescribeImages",
+      "identity": "APP_ONLY_VERIFIER_LAUNCHER",
+      "capabilityId": "app-only-live-compatibility-readpublishedimages-ecr-describeimages",
+      "resources": [
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend",
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker"
+      ],
+      "reachableMode": [
+        "app-only-live-compatibility"
+      ],
+      "executionPrincipal": "APP_ONLY_VERIFIER_LAUNCHER",
+      "sourcePolicyPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-preparation.mjs",
       "action": "ecs:DescribeTasks",
       "identity": "APP_ONLY_VERIFIER_LAUNCHER",
       "capabilityId": "app-only-live-compatibility-readproductiontasks-ecs-describetasks",

@@ -10,7 +10,7 @@ const graph = () => JSON.parse(fs.readFileSync(CAPABILITY_GRAPH_PATH, "utf8"));
 
 test("app-only calls require exact source inventory and independent principal capability coverage", () => {
   const calls = discoverAwsCliActions(), current = graph();
-  assert.equal(assertAppOnlyAwsCallClosure(calls, current).length, 67);
+  assert.equal(assertAppOnlyAwsCallClosure(calls, current).length, 68);
   const app = current.capabilities.filter(({ identity }) => identity === "APP_ONLY_DEPLOYER");
   assert.deepEqual(app.filter(({ mutation }) => mutation).map(({ action }) => action).sort(), ["ecs:RegisterTaskDefinition", "ecs:TagResource", "ecs:UpdateService"]);
   for (const action of ["ecs:RunTask", "ecs:ExecuteCommand", "iam:PutRolePolicy", "s3:PutObject", "secretsmanager:GetSecretValue"])
@@ -58,8 +58,8 @@ test("complete production dependency closure is exact across modes and failure p
     ["scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs", "s3:PutObject", "stage-a-artifacts-recovery-release-lock-acquire"],
     ["scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs", "s3:DeleteObject", "stage-a-artifacts-recovery-release-lock-release"],
   ]);
-  assert.equal(report.newAwsCalls.filter(({ reachableMode }) => reachableMode.some((mode) => mode.startsWith("app-only-"))).length, 67);
-  assert.equal(report.newAwsCalls.length, 42 + stageAAdditions.length + 15 + 14 + 21 + 7 + 1 + 6 + 1 + 67 + 5); // Historical closure plus app-only calls and normal-deployer topology reads.
+  assert.equal(report.newAwsCalls.filter(({ reachableMode }) => reachableMode.some((mode) => mode.startsWith("app-only-"))).length, 68);
+  assert.equal(report.newAwsCalls.length, 42 + stageAAdditions.length + 15 + 14 + 21 + 7 + 1 + 6 + 1 + 68 + 5); // Historical closure plus app-only calls and normal-deployer topology reads.
   assert.deepEqual(report.newAwsCalls.filter(({ capabilityId }) => capabilityId?.startsWith("bootstrap-operator-policy-authorization-")).map(({ capabilityId, action, resources, identity, reachableMode }) => [capabilityId, action, resources, identity, reachableMode]), [
     ["bootstrap-operator-policy-authorization-identify", "sts:GetCallerIdentity", ["*"], "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],
     ["bootstrap-operator-policy-authorization-read-transition-consumption", "iam:ListUserTags", ["arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"], "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],

@@ -165,6 +165,11 @@ test("requirements producer is source-only, main-bound and uses compact identiti
   const tokenSteps = workflow.jobs.requirements.steps.filter((step) => step.env?.GITHUB_TOKEN);
   assert.equal(tokenSteps.length, 1);
   assert.match(tokenSteps[0].run, /gh api repos\/T-ej2003\/genuine-scan-main\/branches\/main/);
+  const identityStep = workflow.jobs.requirements.steps.find((step) => step.run?.includes("git merge-base --is-ancestor"));
+  assert.ok(identityStep, "the workflow authenticates candidate ancestry before producing requirements");
+  assert.match(identityStep.run, /test "\$SOURCE_SHA" = "\$GITHUB_SHA"/);
+  assert.match(identityStep.run, /test "\$SOURCE_SHA" = "\$\(gh api/);
+  assert.match(identityStep.run, /git merge-base --is-ancestor "\$CANDIDATE_SOURCE_SHA" "\$SOURCE_SHA"/);
   const upload = workflow.jobs.requirements.steps.find((step) => step.uses?.startsWith("actions/upload-artifact@"));
   assert.equal(upload.with.name, "production-app-only-requirements");
   assert.equal(upload.with["if-no-files-found"], "error");

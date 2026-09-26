@@ -45,6 +45,17 @@ test("ZIP closure rejects traversal, absolute, unicode, links, directories, dupl
   }
   assert.throws(() => readAppOnlyArtifactArchive(Buffer.from("malformed"), "requirements"));
 });
+
+test("canonical security inventory supports the bounded private 8 MiB contract", () => {
+  const canonical = "x".repeat(1048577);
+  assert.equal(readAppOnlyArtifactArchive(archive([{ name: "security-rebaseline-canonical.json", value: canonical }]), "securityRebaselineCanonical").length, canonical.length);
+});
+test("canonical security inventory provenance requires private repository access", () => {
+  const input = fixture(archive([{ name: file }])); input.kind = "securityRebaselineCanonical"; input.reference.fileSha256 = hash(Buffer.from("{}"));
+  input.run.path = ".github/workflows/produce-production-app-only-requirements.yml"; input.artifact.name = "production-security-rebaseline-canonical";
+  assert.throws(() => assertAppOnlyArtifactProvenance(input)); input.run.repository.private = true; input.run.head_repository.private = true;
+  assert.equal(assertAppOnlyArtifactProvenance(input), true);
+});
 test("download authenticates and consumes the same immutable bytes in private storage", () => {
   const bytes = archive([{ name: file }]), input = fixture(bytes), calls = [];
   const githubRun = (command, args) => {

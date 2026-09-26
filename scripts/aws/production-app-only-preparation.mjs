@@ -7,7 +7,7 @@ import { assertAppOnlyRequirements } from "./production-app-only-requirements.mj
 import { buildAppOnlyVerifierCommand, buildAppOnlyVerifierDefinition, authenticateAppOnlyVerifierResult } from "./production-app-only-verifier-command.mjs";
 import { APP_ONLY_VERIFIER, appOnlyVerifierNetwork } from "./production-app-only-policy.mjs";
 import { createAppOnlyEcsReaders, readAppOnlyVerifierResult } from "./production-app-only-adapters.mjs";
-import { authenticateAppOnlyImages, APP_ONLY_SESSION_RISK_CONTRACT } from "./production-app-only-images.mjs";
+import { authenticateAppOnlyImages, authenticateProtectedMainBackendImage, APP_ONLY_SESSION_RISK_CONTRACT } from "./production-app-only-images.mjs";
 import { collectAppOnlyLiveIamCompatibility, collectAppOnlyVerifierIamCompatibility } from "./production-app-only-iam-source.mjs";
 import { collectAppOnlyRuntimeCompatibility } from "./production-app-only-runtime.mjs";
 import { downloadAppOnlyArtifact } from "./production-app-only-artifacts.mjs";
@@ -34,6 +34,8 @@ export async function collectAppOnlyVerifierPreparation({ sourceSha, candidateDi
   const readers = createAppOnlyEcsReaders(run);
   const live = readers.readLive(), predecessor = captureAppOnlyPredecessor(live);
   const images = authenticateAppOnlyImages({ sourceSha, candidateDigest, publicationReference, authorizationReference, repositoryRoot, run, githubRun });
+  const verifierImage = authenticateProtectedMainBackendImage({ sourceSha, response: aws(["ecr", "describe-images", "--registry-id", APP_ONLY.account,
+    "--region", APP_ONLY.region, "--repository-name", "mscqr-backend", "--image-ids", `imageTag=${sourceSha}-backend-only`]) });
   const requirementArtifact = downloadAppOnlyArtifact({ kind: "requirements", reference: requirementsReference, repositoryRoot, githubRun });
   const requirements = assertAppOnlyRequirements(JSON.parse(requirementArtifact.bytes), { sourceSha, candidateSourceSha: images.candidateSourceSha, repositoryRoot });
   const identity = { sourceSha, candidateSourceSha: images.candidateSourceSha, candidateDigest,
@@ -47,9 +49,9 @@ export async function collectAppOnlyVerifierPreparation({ sourceSha, candidateDi
   assert.match(secret.ARN || "", new RegExp(`^arn:aws:secretsmanager:${APP_ONLY.region}:${APP_ONLY.account}:secret:${APP_ONLY_VERIFIER.databaseSecretName}-[A-Za-z0-9]{6}$`));
   const verifierIam = collectAppOnlyVerifierIamCompatibility({ repositoryRoot, identity, databaseSecretArn: secret.ARN, run });
   assertAppOnlyCas(predecessor, captureAppOnlyPredecessor(readers.readLive())); source();
-  const preparation = prepareAppOnlyVerifier({ sourceSha, live, images, iam, verifierIam, runtime, requirements, repositoryRoot, databaseSecretArn: secret.ARN });
+  const preparation = prepareAppOnlyVerifier({ sourceSha, live, images, verifierImage, iam, verifierIam, runtime, requirements, repositoryRoot, databaseSecretArn: secret.ARN });
   return { schemaVersion: 1, kind: "APP_ONLY_VERIFIER_INPUTS", preparation,
-    images, iam, verifierIam, runtime, requirements, requirementsReference: structuredClone(requirementsReference) };
+    images, verifierImage, iam, verifierIam, runtime, requirements, requirementsReference: structuredClone(requirementsReference) };
 }
 
 export async function collectAppOnlyDeploymentPreparation({ sourceSha, compatibilityReference, repositoryRoot, run, githubRun = createProductionGithubCommandRunner() }) {
@@ -90,13 +92,17 @@ export async function collectAppOnlyDeploymentPreparation({ sourceSha, compatibi
 // Internal producer closure, not a public JSON approval API. Every report must
 // first come from its canonical collector or authenticated workflow artifact.
 // The deployer consumes only the exact preparation producer's immutable artifact.
-function authenticatePreparationInputs({ sourceSha, live, images, iam, runtime,
+function authenticatePreparationInputs({ sourceSha, live, images, verifierImage, iam, runtime,
   requirements, repositoryRoot, now = Date.now() }) {
   const predecessor = captureAppOnlyPredecessor(live);
   const { evidenceSha256: imageHash, ...imageBody } = images;
   assert.equal(imageHash, canonicalSha256(imageBody));
   assert.equal(images.kind, "APP_ONLY_AUTHENTICATED_IMAGES"); assert.equal(images.schemaVersion, 1);
   assert.equal(images.sourceSha, sourceSha);
+  assert.deepEqual(Object.keys(verifierImage || {}).sort(), ["digest", "sourceSha", "tag"]);
+  assert.equal(verifierImage?.sourceSha, sourceSha, "Verifier runtime image is not bound to protected main");
+  assert.equal(verifierImage?.tag, `${sourceSha}-backend-only`, "Verifier runtime image tag is not source-bound");
+  assert.match(verifierImage?.digest || "", /^sha256:[a-f0-9]{64}$/);
   assert.deepEqual(images.sessionRisk, APP_ONLY_SESSION_RISK_CONTRACT, "Session-risk source proof is missing");
   const identity = { sourceSha, candidateSourceSha: images.candidateSourceSha, candidateDigest: images.candidateDigest,
     account: APP_ONLY.account, region: APP_ONLY.region, clusterArn: APP_ONLY.clusterArn, serviceArn: APP_ONLY.serviceArn,
@@ -110,18 +116,18 @@ function authenticatePreparationInputs({ sourceSha, live, images, iam, runtime,
   assert.equal(iam.kind, "APP_ONLY_LIVE_IAM_COMPATIBILITY"); assert.equal(iam.sourceToLiveIamSemanticDifferences, 0);
   assert.equal(iam.scope, "BACKEND_RUNTIME_ROLES"); assert.equal(runtime.kind, "APP_ONLY_RUNTIME_COMPATIBILITY");
   assertAppOnlyRequirements(requirements, { sourceSha, candidateSourceSha: images.candidateSourceSha, repositoryRoot });
-  const verifierIdentity = { ...identity, verifierImageDigest: images.candidateDigest,
+  const verifierIdentity = { ...identity, verifierImageDigest: verifierImage.digest,
     databaseHostname: runtime.networkDatabase.databaseHostname };
   const { verificationContractSha256 } = buildAppOnlyVerifierCommand({ requirements, identity: verifierIdentity, repositoryRoot });
-  return { predecessor, identity, verifierIdentity, verificationContractSha256, imageHash };
+  return { predecessor, identity, verifierIdentity, verificationContractSha256, imageHash, verifierImageHash: canonicalSha256(verifierImage) };
 }
 
 // This is a request to verify, never compatibility proof or deployment approval.
 // Registration/launch re-derive the task from these authenticated inputs; no
 // dispatch input can replace its JSON, networking or command.
 export function prepareAppOnlyVerifier(input) {
-  const { sourceSha, live, images, iam, runtime, requirements, repositoryRoot, databaseSecretArn, now = Date.now() } = input;
-  const { predecessor, identity, verifierIdentity, imageHash } = authenticatePreparationInputs(input);
+  const { sourceSha, live, images, verifierImage, iam, runtime, requirements, repositoryRoot, databaseSecretArn, now = Date.now() } = input;
+  const { predecessor, identity, verifierIdentity, imageHash, verifierImageHash } = authenticatePreparationInputs(input);
   assertAppOnlyEvidenceIdentity(input.verifierIam, identity, now);
   assert.equal(input.verifierIam.kind, "APP_ONLY_LIVE_IAM_COMPATIBILITY");
   assert.equal(input.verifierIam.scope, "READ_ONLY_VERIFIER_ROLES");
@@ -133,7 +139,7 @@ export function prepareAppOnlyVerifier(input) {
     generatedAt: new Date(now).toISOString(), identity: verifierIdentity, predecessor,
     definitionSha256: canonicalSha256(definition), networkSha256: canonicalSha256(appOnlyVerifierNetwork()),
     databaseSecretArn, verificationContractSha256,
-    evidence: { images: imageHash, iam: iam.evidenceSha256, verifierIam: input.verifierIam.evidenceSha256, runtime: runtime.evidenceSha256, requirements: requirements.requirementsSha256 },
+    evidence: { images: imageHash, verifierImage: verifierImageHash, iam: iam.evidenceSha256, verifierIam: input.verifierIam.evidenceSha256, runtime: runtime.evidenceSha256, requirements: requirements.requirementsSha256 },
     eligible: false };
   // Also reject an unusable backend candidate before requesting production work.
   buildAppOnlyCandidate(live.definition, images.candidateDigest);
@@ -145,7 +151,7 @@ export function prepareAppOnlyVerifier(input) {
 // authority. A content hash alone is not sufficient: the caller must use the
 // exact workflow/artifact downloader before entering this function.
 export function authenticateAppOnlyVerifierInputs({ inputs, sourceSha, live, repositoryRoot, now = Date.now() }) {
-  assert.deepEqual(Object.keys(inputs).sort(), ["schemaVersion", "kind", "preparation", "images", "iam", "verifierIam", "runtime", "requirements", "requirementsReference"].sort());
+  assert.deepEqual(Object.keys(inputs).sort(), ["schemaVersion", "kind", "preparation", "images", "verifierImage", "iam", "verifierIam", "runtime", "requirements", "requirementsReference"].sort());
   assert.equal(inputs.schemaVersion, 1); assert.equal(inputs.kind, "APP_ONLY_VERIFIER_INPUTS");
   const { preparationSha256, ...approved } = inputs.preparation;
   assert.equal(preparationSha256, canonicalSha256(approved));
