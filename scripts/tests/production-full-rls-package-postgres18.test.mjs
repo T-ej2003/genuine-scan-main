@@ -29,6 +29,10 @@ const sqlRoot = path.join(root, "scripts/rls/sql/generated");
 const evidenceRoot = path.join(root, "documents/security/rls-program/generated");
 const targetDatabase = "mscqr_production_rls_green_phase2";
 const administrator = "mscqr_prod_admin";
+const liveTaskEvidence = (sourceSha, candidateSourceSha, digest, taskId = "9") => ({ taskArn: `arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/${taskId.repeat(32)}`,
+  taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/security-rebaseline:1", containerName: "security-rebaseline", containerExitCode: 0,
+  probeRuntimeSourceSha: sourceSha, probeImageSourceSha: sourceSha, probeImageDigest: `sha256:${"a".repeat(64)}`,
+  applicationImageSourceSha: candidateSourceSha, applicationImageDigest: `sha256:${"b".repeat(64)}`, requestSha256: digest, verificationContractSha256: digest });
 const randomMfaSecret = () =>
   [...crypto.randomBytes(32)].map((value) => "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"[value & 31]).join("");
 const printingDeltaRuntime = createRequire(import.meta.url)("../aws/production-printing-routine-delta-executor.cjs");
@@ -333,9 +337,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
           }
         }
       const productionEquivalentLive = createLiveSecurityRebaselineInventory({ protectedMainSha: sourceSha, catalogue: productionEquivalentCatalogue,
-        canonical: securityRebaselineCanonical, taskEvidence: { taskArn: `arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/${"9".repeat(32)}`,
-          taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/security-rebaseline:1", containerName: "security-rebaseline",
-          containerExitCode: 0, requestSha256: "8".repeat(64), verificationContractSha256: "8".repeat(64) } });
+        canonical: securityRebaselineCanonical, taskEvidence: liveTaskEvidence(sourceSha, context.candidateSourceSha, "8".repeat(64)) });
       const productionEquivalentDiff = diffSecurityRebaselineInventories(productionEquivalentLive, securityRebaselineCanonical);
       assert.equal(productionEquivalentDiff.differenceCount, 0,
         `production-equivalent membership grantors do not create canonical harness drift: ${JSON.stringify(productionEquivalentDiff.differences.map(({collection,identity,field})=>({collection,identity,field})))}`);
@@ -396,9 +398,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         const fixtureCatalogue = await collectAppOnlyDatabaseCatalogueRows(tx);
         const fixtureCanonical = createSecurityRebaselineInventory({ kind: "CANONICAL", protectedMainSha: sourceSha, candidateSourceSha: context.candidateSourceSha,
           catalogue: fixtureCatalogue, repositoryRoot: root, packageChecksums: JSON.parse(fs.readFileSync(path.join(evidenceRoot, "checksums.json"), "utf8")) });
-        const evidence = { taskArn: `arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/${"d".repeat(32)}`,
-          taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/security-rebaseline:1", containerName: "security-rebaseline",
-          containerExitCode: 0, requestSha256: "e".repeat(64), verificationContractSha256: "e".repeat(64) };
+        const evidence = liveTaskEvidence(sourceSha, context.candidateSourceSha, "e".repeat(64), "d");
         const compare = async () => {
           const collected = await collectAppOnlyDatabaseCatalogueRows(tx);
           const simulatedProduction = structuredClone(collected);
@@ -614,9 +614,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         assert.ok(changed.operatorCapabilities[0].membership_closure.includes("pg_write_all_data"));
         assert.ok(changed.operatorCapabilities[0].membership_closure.includes("rebaseline_intermediate_writer"));
         const liveInventory = createLiveSecurityRebaselineInventory({ protectedMainSha: sourceSha, catalogue: changed, canonical: testCanonical,
-          taskEvidence: { taskArn: `arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/${"a".repeat(32)}`,
-            taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/security-rebaseline:1", containerName: "security-rebaseline",
-            containerExitCode: 0, requestSha256: taskDigest, verificationContractSha256: taskDigest } });
+          taskEvidence: liveTaskEvidence(sourceSha, context.candidateSourceSha, taskDigest, "a") });
         const diff = diffSecurityRebaselineInventories(liveInventory, testCanonical);
         assert.equal(diff.safeToConstructConvergencePlan, false);
         assert.ok(diff.differences.some(({ collection, identity }) => collection === "tableGrants" && identity.includes("public.rebaseline_unexpected_view")));
@@ -658,9 +656,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         const firstDigest = subscription(restrictedSubscriptionCatalogue)?.definition.connection_info_sha256;
         assert.match(firstDigest || "", /^[a-f0-9]{64}$/);
         assert.equal(JSON.stringify(restrictedSubscriptionCatalogue).includes("host=127.0.0.1"), false);
-        const evidence = { taskArn: `arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/${"a".repeat(32)}`,
-          taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/security-rebaseline:1", containerName: "security-rebaseline",
-          containerExitCode: 0, requestSha256: "f".repeat(64), verificationContractSha256: "f".repeat(64) };
+        const evidence = liveTaskEvidence(sourceSha, context.candidateSourceSha, "f".repeat(64), "a");
         const before = diffSecurityRebaselineInventories(createLiveSecurityRebaselineInventory({ protectedMainSha: sourceSha,
           catalogue: restrictedSubscriptionCatalogue, canonical: canonicalSubscription, taskEvidence: evidence }), canonicalSubscription);
         await maintenanceClient.$executeRawUnsafe("ALTER SUBSCRIPTION rebaseline_disabled_subscription SKIP (lsn = '0/16B6C50')");

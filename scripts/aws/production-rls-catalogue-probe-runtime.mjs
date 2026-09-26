@@ -20,7 +20,7 @@ export async function runProductionRlsCatalogueProbe({ env = process.env, write 
   let client;
   try {
     const input = parseProductionRlsProbeRuntimeConfig(env.RLS_PROBE_INPUT_JSON);
-    assertProductionRlsProbeImageSource(fs.readFileSync("/app/image-source.json", "utf8"), input.sourceSha);
+    assertProductionRlsProbeImageSource(fs.readFileSync("/app/image-source.json", "utf8"), input.probeImageSourceSha);
     const url = new URL(String(env.RLS_CANARY_DATABASE_URL || ""));
     assert.match(url.protocol, /^postgres(?:ql)?:$/);
     assert.equal(url.username, ROLE);
@@ -41,6 +41,8 @@ export async function runProductionRlsCatalogueProbe({ env = process.env, write 
       for (const chunk of chunks) write(chunk);
     }
     const body = { schemaVersion: 1, kind: "PRODUCTION_RLS_CATALOGUE_PROBE", sourceSha: input.sourceSha, candidateSourceSha: input.candidateSourceSha,
+      probeRuntimeSourceSha: input.probeRuntimeSourceSha, probeImageSourceSha: input.probeImageSourceSha, probeImageDigest: input.probeImageDigest,
+      applicationImageSourceSha: input.applicationImageSourceSha, applicationImageDigest: input.applicationImageDigest,
       requirementsSha256: input.requirementsSha256, databaseRole: catalogue.identity.role,
       catalogue: hashCatalogue(catalogue), ...(securityTransport ? { securityTransport } : {}) };
     const output = JSON.stringify({ ...body, evidenceSha256: canonicalSha256(body) });

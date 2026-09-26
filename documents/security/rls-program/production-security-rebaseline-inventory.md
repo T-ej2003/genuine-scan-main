@@ -6,9 +6,11 @@ This source-owned PR1 path inventories security metadata; it cannot apply SQL or
 
 The protected-main producer builds the canonical package in disposable PostgreSQL 18, then collects it with the same normalized catalogue collector used by the fixed production read-only task. The canonical inventory binds protected-main SHA, clean-room source contract, migration set, package checksums, collector version, and catalogue digest.
 
-Identity fields remain distinct: `protectedMainSha` is the exact current canonical source; `candidateSourceSha` is the candidate image source accepted by the requirements workflow only when it is the protected SHA or an authenticated ancestor; `appOnlyRequirementsSha256` binds both identities and the catalogue. Canonical and live inventory artifacts retain both SHAs, and comparison requires them to match. The read-only task executes the fixed image module `scripts/aws/production-rls-catalogue-probe-runtime.mjs`; its bounded JSON environment value is parsed and schema-validated as data. The task builder does not serialize functions or generate JavaScript.
+Identity fields remain distinct: `protectedMainSha` is the exact current canonical and probe-runtime source; `candidateSourceSha` is the application image source accepted by the requirements workflow only when it is the protected SHA or an authenticated ancestor; `appOnlyRequirementsSha256` binds both identities and the catalogue. Canonical and live inventory artifacts retain both SHAs, and comparison requires them to match. The read-only task executes the fixed module `scripts/aws/production-rls-catalogue-probe-runtime.mjs` from the immutable `${protectedMainSha}-backend-only` image, whose baked source identity and digest are authenticated separately from the candidate application image. The candidate source and digest remain bound as data and may legitimately name an older authenticated ancestor that does not contain the probe module. The task's bounded JSON environment value is parsed and schema-validated as data; the task builder does not serialize functions or generate JavaScript.
 
 The app-only compatibility verifier follows the same code/data boundary: its image contains `scripts/aws/production-app-only-verifier-runtime.mjs`, while its ECS command carries only bounded compressed JSON data. That payload binds the protected source SHA, the independently authenticated candidate source SHA, the complete requirements hash, and a versioned verification-contract digest. Candidate ancestry remains validated by the requirements producer; neither runtime substitutes protected main for a distinct candidate.
+
+The protected-main backend-only image must be published first by the existing deployment-free `production-green-backend-image-publish.yml` workflow. The probe authenticates the exact immutable ECR tag and digest, repository controls, task-definition image, baked image source, and terminal evidence; this publication does not deploy or select the candidate application image.
 
 The production task runs `REPEATABLE READ, READ ONLY`. Its complete catalogue is gzip-compressed and encrypted to an ephemeral local RSA public key before CloudWatch transport. The private key is never sent to AWS. Canonical, live, and diff files are created outside the checkout with mode `0600`; normal output contains only identities of the source/artifacts, collection/category counts, and digests.
 
@@ -34,6 +36,9 @@ Example operator shape (do not run without separate production authorization):
 node scripts/aws/probe-production-rls-catalogue.mjs \
   --source-sha "$PROTECTED_MAIN_SHA" \
   --candidate-source-sha "$CANDIDATE_SOURCE_SHA" \
+  --candidate-digest "$CANDIDATE_IMAGE_DIGEST" \
+  --publication-reference "$CANDIDATE_IMAGE_PUBLICATION_REFERENCE" \
+  --image-authorization-reference "$CANDIDATE_IMAGE_AUTHORIZATION_REFERENCE" \
   --requirements-reference "$REQUIREMENTS_REFERENCE" \
   --security-rebaseline-reference "$CANONICAL_REFERENCE" \
   --security-rebaseline-canonical-out "$PRIVATE_CANONICAL_PATH" \

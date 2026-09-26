@@ -14,7 +14,9 @@ export function assertProductionRlsProbeImageSource(encoded, sourceSha) {
 }
 
 export function createProductionRlsProbeRuntimeConfig(requirements, identity, securityTransportPublicKey) {
-  const value = { schemaVersion: 1, sourceSha: identity?.sourceSha, candidateSourceSha: identity?.candidateSourceSha, requirementsSha256: requirements?.requirementsSha256,
+  const value = { schemaVersion: 1, sourceSha: identity?.sourceSha, candidateSourceSha: identity?.candidateSourceSha,
+    probeRuntimeSourceSha: identity?.probeRuntimeSourceSha, probeImageSourceSha: identity?.probeImageSourceSha, probeImageDigest: identity?.probeImageDigest,
+    applicationImageSourceSha: identity?.applicationImageSourceSha, applicationImageDigest: identity?.applicationImageDigest, requirementsSha256: requirements?.requirementsSha256,
     databaseHostname: identity?.databaseHostname, securityTransportPublicKey };
   return JSON.stringify(parseProductionRlsProbeRuntimeConfig(JSON.stringify(value)));
 }
@@ -22,10 +24,16 @@ export function createProductionRlsProbeRuntimeConfig(requirements, identity, se
 export function parseProductionRlsProbeRuntimeConfig(encoded) {
   assert.ok(typeof encoded === "string" && Buffer.byteLength(encoded) <= 8192, "Probe runtime configuration is oversized");
   const value = JSON.parse(encoded);
-  assert.deepEqual(Object.keys(value).sort(), ["schemaVersion", "sourceSha", "candidateSourceSha", "requirementsSha256", "databaseHostname", "securityTransportPublicKey"].sort());
+  assert.deepEqual(Object.keys(value).sort(), ["schemaVersion", "sourceSha", "candidateSourceSha", "probeRuntimeSourceSha", "probeImageSourceSha", "probeImageDigest",
+    "applicationImageSourceSha", "applicationImageDigest", "requirementsSha256", "databaseHostname", "securityTransportPublicKey"].sort());
   assert.equal(value.schemaVersion, 1);
   assert.match(value.sourceSha || "", SHA40);
   assert.match(value.candidateSourceSha || "", SHA40);
+  assert.equal(value.probeRuntimeSourceSha, value.sourceSha);
+  assert.equal(value.probeImageSourceSha, value.sourceSha);
+  assert.equal(value.applicationImageSourceSha, value.candidateSourceSha);
+  assert.match(value.probeImageDigest || "", /^sha256:[a-f0-9]{64}$/);
+  assert.match(value.applicationImageDigest || "", /^sha256:[a-f0-9]{64}$/);
   assert.match(value.requirementsSha256 || "", SHA256);
   assert.match(value.databaseHostname || "", HOSTNAME);
   if (value.securityTransportPublicKey !== null) {

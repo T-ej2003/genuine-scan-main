@@ -14,7 +14,8 @@ import {
 } from "../aws/handoff-production-smoke-secrets.mjs";
 import {
   EXPECTED_PRINTING_ROUTINES, EXPECTED_PRINTING_ROUTINE_PREDECESSORS, RLS_PROBE_CLASSIFICATIONS,
-  authenticateCanonicalProductionRequirements, authenticateCanonicalProductionRequirementsArtifact, authenticateProductionRlsProbeResult, buildProductionRlsProbeDefinition,
+  authenticateCanonicalProductionRequirements, authenticateCanonicalProductionRequirementsArtifact, authenticateProductionRlsProbeResult, authenticateProtectedMainProbeImage,
+  bindProductionRlsProbeIdentities, buildProductionRlsProbeDefinition,
   classifyProductionRlsCatalogue, hashProductionRlsCatalogue,
 } from "../aws/probe-production-rls-catalogue.mjs";
 
@@ -170,16 +171,19 @@ test("RLS classification accepts exact match and only the exact three printing r
 
 test("RLS probe definition reuses the exact private read-only task boundary", () => {
   const value = catalogue(), requirements = requirementsFor(value);
+  const identity = { sourceSha: "a".repeat(40), candidateSourceSha: "a".repeat(40), probeRuntimeSourceSha: "a".repeat(40), probeImageSourceSha: "a".repeat(40),
+    probeImageDigest: `sha256:${"2".repeat(64)}`, applicationImageSourceSha: "a".repeat(40), applicationImageDigest: `sha256:${"3".repeat(64)}`, databaseHostname: "reviewed.eu-west-2.rds.amazonaws.com" };
   const secret = ["arn:aws:secretsmanager:eu-west-2:368992683803:secret", "mscqr/production/rls-green/phase4/read-only-canary-database-url-ABC123"].join(":");
   const baseDefinition = { family: APP_ONLY_VERIFIER.family, taskRoleArn: APP_ONLY_VERIFIER.taskRoleArn, executionRoleArn: APP_ONLY_VERIFIER.executionRoleArn,
     networkMode: "awsvpc", runtimePlatform: { cpuArchitecture: "X86_64", operatingSystemFamily: "LINUX" }, containerDefinitions: [{ name: "production-green-read-only-rls-canary",
       image: `${APP_ONLY.backendRepository}@sha256:${"1".repeat(64)}`, entryPoint: ["node"], environment: [], secrets: [{ name: "RLS_CANARY_DATABASE_URL", valueFrom: secret }], readonlyRootFilesystem: true, privileged: false }] };
-  const definition = buildProductionRlsProbeDefinition({ baseDefinition, requirements, identity: { sourceSha: "a".repeat(40), candidateSourceSha: "a".repeat(40), databaseHostname: "reviewed.eu-west-2.rds.amazonaws.com" }, databaseSecretArn: secret });
+  const definition = buildProductionRlsProbeDefinition({ baseDefinition, requirements, identity, databaseSecretArn: secret });
   assert.equal(definition.family, APP_ONLY_VERIFIER.family); assert.equal(definition.taskRoleArn, APP_ONLY_VERIFIER.taskRoleArn); assert.equal(definition.executionRoleArn, APP_ONLY_VERIFIER.executionRoleArn);
   assert.deepEqual(definition.containerDefinitions[0].secrets, [{ name: "RLS_CANARY_DATABASE_URL", valueFrom: secret }]); assert.equal(definition.containerDefinitions[0].readonlyRootFilesystem, true);
   assert.deepEqual(definition.containerDefinitions[0].entryPoint, ["node", "scripts/aws/production-rls-catalogue-probe-runtime.mjs"]);
+  assert.equal(definition.containerDefinitions[0].image, `${APP_ONLY.backendRepository}@${identity.probeImageDigest}`);
   assert.deepEqual(definition.containerDefinitions[0].command, []);
-  assert.deepEqual(JSON.parse(definition.containerDefinitions[0].environment[0].value), { schemaVersion: 1, sourceSha: "a".repeat(40), candidateSourceSha: "a".repeat(40), requirementsSha256: requirements.requirementsSha256, databaseHostname: "reviewed.eu-west-2.rds.amazonaws.com", securityTransportPublicKey: null });
+  assert.deepEqual(JSON.parse(definition.containerDefinitions[0].environment[0].value), { schemaVersion: 1, ...identity, requirementsSha256: requirements.requirementsSha256, securityTransportPublicKey: null });
   const wrapper = collectAppOnlyDatabaseCatalogue.toString(), collector = collectAppOnlyDatabaseCatalogueRows.toString();
   assert.equal((wrapper.match(/\$executeRawUnsafe/g) || []).length, 1); assert.match(wrapper, /SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY/);
   assert.equal((collector.match(/\$executeRawUnsafe/g) || []).length, 1); assert.match(collector, /SET LOCAL search_path = pg_catalog/);
@@ -191,15 +195,28 @@ test("RLS probe definition reuses the exact private read-only task boundary", ()
 });
 
 test("RLS execution failure or unauthenticated output can never become MATCH", () => {
-  const body = { schemaVersion: 1, kind: "PRODUCTION_RLS_CATALOGUE_PROBE", sourceSha: "a".repeat(40), candidateSourceSha: "b".repeat(40), requirementsSha256: "b".repeat(64), databaseRole: APP_ONLY_VERIFIER.databaseRole, catalogue: hashProductionRlsCatalogue(catalogue()) };
+  const body = { schemaVersion: 1, kind: "PRODUCTION_RLS_CATALOGUE_PROBE", sourceSha: "a".repeat(40), candidateSourceSha: "b".repeat(40), probeRuntimeSourceSha: "a".repeat(40), probeImageSourceSha: "a".repeat(40), probeImageDigest: `sha256:${"2".repeat(64)}`, applicationImageSourceSha: "b".repeat(40), applicationImageDigest: `sha256:${"3".repeat(64)}`, requirementsSha256: "b".repeat(64), databaseRole: APP_ONLY_VERIFIER.databaseRole, catalogue: hashProductionRlsCatalogue(catalogue()) };
+  const expected = { sourceSha: body.sourceSha, candidateSourceSha: body.candidateSourceSha, probeImageDigest: body.probeImageDigest, applicationImageDigest: body.applicationImageDigest, requirementsSha256: body.requirementsSha256 };
   const valid = JSON.stringify({ ...body, evidenceSha256: canonicalSha256(body) });
-  assert.deepEqual(authenticateProductionRlsProbeResult(valid, { sourceSha: body.sourceSha, candidateSourceSha: body.candidateSourceSha, requirementsSha256: body.requirementsSha256 }).catalogue, body.catalogue);
-  assert.throws(() => authenticateProductionRlsProbeResult(valid, { sourceSha: body.sourceSha, candidateSourceSha: body.sourceSha, requirementsSha256: body.requirementsSha256 }));
-  assert.throws(() => authenticateProductionRlsProbeResult(JSON.stringify({ status: "PRODUCTION_RLS_CATALOGUE_PROBE_FAILED" }), { sourceSha: body.sourceSha, candidateSourceSha: body.candidateSourceSha, requirementsSha256: body.requirementsSha256 }));
-  const changed = JSON.parse(valid); changed.sourceSha = "c".repeat(40); assert.throws(() => authenticateProductionRlsProbeResult(JSON.stringify(changed), { sourceSha: body.sourceSha, candidateSourceSha: body.candidateSourceSha, requirementsSha256: body.requirementsSha256 }));
-  const changedCandidate = JSON.parse(valid); changedCandidate.candidateSourceSha = "c".repeat(40); changedCandidate.evidenceSha256 = canonicalSha256(Object.fromEntries(Object.entries(changedCandidate).filter(([key]) => key !== "evidenceSha256"))); assert.throws(() => authenticateProductionRlsProbeResult(JSON.stringify(changedCandidate), { sourceSha: body.sourceSha, candidateSourceSha: body.candidateSourceSha, requirementsSha256: body.requirementsSha256 }));
-  const extra = JSON.parse(valid); extra.catalogue.tables[0].unexpected = true; extra.evidenceSha256 = canonicalSha256(Object.fromEntries(Object.entries(extra).filter(([key]) => key !== "evidenceSha256"))); assert.throws(() => authenticateProductionRlsProbeResult(JSON.stringify(extra), { sourceSha: body.sourceSha, candidateSourceSha: body.candidateSourceSha, requirementsSha256: body.requirementsSha256 }));
-  assert.throws(() => authenticateProductionRlsProbeResult("not-json", { sourceSha: body.sourceSha, candidateSourceSha: body.candidateSourceSha, requirementsSha256: body.requirementsSha256 }));
+  assert.deepEqual(authenticateProductionRlsProbeResult(valid, expected).catalogue, body.catalogue);
+  for (const field of ["candidateSourceSha", "probeImageDigest", "applicationImageDigest"]) assert.throws(() => authenticateProductionRlsProbeResult(valid, { ...expected, [field]: field.endsWith("Digest") ? `sha256:${"4".repeat(64)}` : body.sourceSha }));
+  assert.throws(() => authenticateProductionRlsProbeResult(JSON.stringify({ status: "PRODUCTION_RLS_CATALOGUE_PROBE_FAILED" }), expected));
+  const changed = JSON.parse(valid); changed.sourceSha = "c".repeat(40); assert.throws(() => authenticateProductionRlsProbeResult(JSON.stringify(changed), expected));
+  const changedCandidate = JSON.parse(valid); changedCandidate.candidateSourceSha = "c".repeat(40); changedCandidate.evidenceSha256 = canonicalSha256(Object.fromEntries(Object.entries(changedCandidate).filter(([key]) => key !== "evidenceSha256"))); assert.throws(() => authenticateProductionRlsProbeResult(JSON.stringify(changedCandidate), expected));
+  const extra = JSON.parse(valid); extra.catalogue.tables[0].unexpected = true; extra.evidenceSha256 = canonicalSha256(Object.fromEntries(Object.entries(extra).filter(([key]) => key !== "evidenceSha256"))); assert.throws(() => authenticateProductionRlsProbeResult(JSON.stringify(extra), expected));
+  assert.throws(() => authenticateProductionRlsProbeResult("not-json", expected));
+});
+
+test("protected-main probe and authenticated ancestor application identities remain distinct", () => {
+  const protectedMain = "a".repeat(40), candidate = "b".repeat(40), candidateDigest = `sha256:${"3".repeat(64)}`;
+  const requirements = { sourceSha: protectedMain, candidateSourceSha: candidate };
+  const imageBody = { kind: "APP_ONLY_AUTHENTICATED_IMAGES", sourceSha: protectedMain, candidateSourceSha: candidate, candidateDigest };
+  const images = { ...imageBody, evidenceSha256: canonicalSha256(imageBody) };
+  const probeImage = authenticateProtectedMainProbeImage({ sourceSha: protectedMain, response: { imageDetails: [{ registryId: APP_ONLY.account, repositoryName: "mscqr-backend", imageDigest: `sha256:${"2".repeat(64)}`, imageTags: [`${protectedMain}-backend-only`] }] } });
+  const identity = bindProductionRlsProbeIdentities({ sourceSha: protectedMain, requirements, images, probeImage, databaseHostname: "reviewed.eu-west-2.rds.amazonaws.com" });
+  assert.equal(identity.probeImageSourceSha, protectedMain); assert.equal(identity.applicationImageSourceSha, candidate); assert.notEqual(identity.probeImageDigest, identity.applicationImageDigest);
+  assert.throws(() => bindProductionRlsProbeIdentities({ sourceSha: protectedMain, requirements, images: { ...images, candidateSourceSha: protectedMain }, probeImage, databaseHostname: "reviewed.eu-west-2.rds.amazonaws.com" }));
+  assert.throws(() => authenticateProtectedMainProbeImage({ sourceSha: protectedMain, response: { imageDetails: [{ registryId: APP_ONLY.account, repositoryName: "mscqr-backend", imageDigest: probeImage.digest, imageTags: [`${candidate}-backend-only`] }] } }));
 });
 
 test("operator scripts contain no secret output or database mutation surface", () => {
