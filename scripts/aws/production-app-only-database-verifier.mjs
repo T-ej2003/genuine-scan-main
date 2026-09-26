@@ -1,7 +1,7 @@
 // Called only by the fixed verifier module baked into the authenticated image.
 // It has no SQL/command overrides and requires one explicit Prisma transaction,
 // avoiding pool-dependent BEGIN/query/COMMIT on different sessions.
-export const SUBSCRIPTION_PROJECTION_BODY_SHA256 = "2d08a32ad8c41fc2496eb77f5b9a368f0899da8836b22fe03af00b0ba11288d4";
+export const SUBSCRIPTION_PROJECTION_BODY_SHA256 = "ba305e220456f461a9099f8fc1c05e01ca3d96240d4c41536739a0af59830447";
 export const SUBSCRIPTION_PROJECTION_STATUS_CONTRACT = Object.freeze({
   role_exists: true, observer_login: false, observer_superuser: false, observer_inherit: false,
   observer_create_role: false, observer_create_db: false, observer_replication: false, observer_bypass_rls: false,
@@ -59,14 +59,15 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
       JOIN pg_catalog.pg_namespace n ON n.oid=pn.pnnspid
       UNION ALL
       SELECT 'replication_slot',s.slot_name,NULL,jsonb_build_object('plugin',s.plugin,'slot_type',s.slot_type,'database',s.database,
-        'temporary',s.temporary,'two_phase',s.two_phase,'failover',s.failover,'synced',s.synced)
+        'temporary',s.temporary,'two_phase',s.two_phase,'failover',s.failover)
       FROM pg_catalog.pg_replication_slots s
       UNION ALL
       SELECT 'database_setting',COALESCE(d.datname,'*'),NULL,jsonb_build_object('settings',COALESCE((SELECT jsonb_agg(
         jsonb_build_object('name',split_part(setting,'=',1),'value_sha256',pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
           pg_catalog.jsonb_build_array('mscqr-security-setting-v1',COALESCE(d.datname,'*'),setting)::text,'UTF8')),'hex')) ORDER BY split_part(setting,'=',1))
         FROM unnest(rs.setconfig) setting),'[]'::jsonb))
-      FROM pg_catalog.pg_db_role_setting rs LEFT JOIN pg_catalog.pg_database d ON d.oid=rs.setdatabase WHERE rs.setrole=0
+      FROM pg_catalog.pg_db_role_setting rs LEFT JOIN pg_catalog.pg_database d ON d.oid=rs.setdatabase
+      WHERE rs.setrole=0 AND (rs.setdatabase=0 OR d.datname=current_database())
       UNION ALL
       SELECT 'security_label',pg_catalog.format('%s:%s:%s:%s',label.provider,identified.type,COALESCE(identified.schema,''),identified.identity),NULL,
         jsonb_build_object('provider',label.provider,'label_sha256',pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
@@ -137,6 +138,14 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
       JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace JOIN pg_catalog.pg_roles o ON o.oid=c.relowner
       JOIN pg_catalog.pg_foreign_server s ON s.oid=ft.ftserver
       WHERE n.nspname<>'information_schema' AND n.nspname NOT LIKE 'pg\_%' ESCAPE '\\'
+      UNION ALL
+      SELECT 'tablespace',t.spcname,o.rolname,jsonb_build_object('grants',COALESCE((SELECT jsonb_agg(
+        jsonb_build_object('role',COALESCE(g.rolname,'PUBLIC'),'grantor',grantor.rolname,'privilege',a.privilege_type,'grantable',a.is_grantable)
+        ORDER BY COALESCE(g.rolname,'PUBLIC'),grantor.rolname,a.privilege_type,a.is_grantable)
+        FROM pg_catalog.aclexplode(COALESCE(t.spcacl,pg_catalog.acldefault('t',t.spcowner))) a
+        LEFT JOIN pg_catalog.pg_roles g ON g.oid=a.grantee JOIN pg_catalog.pg_roles grantor ON grantor.oid=a.grantor),'[]'::jsonb))
+      FROM pg_catalog.pg_tablespace t JOIN pg_catalog.pg_roles o ON o.oid=t.spcowner
+      WHERE t.spcname NOT IN ('pg_default','pg_global')
       UNION ALL
       SELECT 'large_objects',pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
         pg_catalog.jsonb_build_array(o.rolname,acl_state.grants)::text,'UTF8')),'hex'),o.rolname,
@@ -216,7 +225,13 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
           s.subdisableonerr AS disable_on_error,s.subpasswordrequired AS password_required,s.subrunasowner AS run_as_owner,
           s.subfailover AS failover,s.subslotname::text AS slot_name,s.subsynccommit AS synchronous_commit,
           ARRAY(SELECT publication FROM unnest(s.subpublications) publication ORDER BY publication) AS publications,
-          s.suborigin AS origin,s.subskiplsn::text AS skip_lsn,pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(pg_catalog.jsonb_build_array(
+          s.suborigin AS origin,s.subskiplsn::text AS skip_lsn,
+          COALESCE((SELECT pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('schema',n.nspname,'relation',c.relname,
+            'state',sr.srsubstate::text,'state_lsn',CASE WHEN sr.srsubstate IN ('s','r') THEN sr.srsublsn::text END)
+            ORDER BY n.nspname,c.relname) FROM pg_catalog.pg_subscription_rel sr
+            JOIN pg_catalog.pg_class c ON c.oid=sr.srrelid JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+            WHERE sr.srsubid=s.oid),'[]'::jsonb) AS relations,
+          pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(pg_catalog.jsonb_build_array(
             'mscqr-security-subscription-connection-v1',s.subname,s.subconninfo)::text,'UTF8')),'hex') AS connection_info_sha256
         FROM pg_catalog.pg_subscription s JOIN pg_catalog.pg_roles o ON o.oid=s.subowner ORDER BY s.subname`)
       : await tx.$queryRawUnsafe(`SELECT * FROM app_rls.production_security_subscription_inventory() ORDER BY subscription_name`);
@@ -227,6 +242,10 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
         slot_name: subscription.slot_name, synchronous_commit: subscription.synchronous_commit,
         publications: subscription.publications, origin: subscription.origin, skip_lsn: subscription.skip_lsn,
         connection_info_sha256: subscription.connection_info_sha256 } });
+    for (const subscription of subscriptions) for (const relation of subscription.relations) securityBindings.rows.push({
+      kind: "subscription_relation", name: `${subscription.subscription_name}:${relation.schema}.${relation.relation}`, owner: null,
+      definition: { subscription: subscription.subscription_name, schema: relation.schema, relation: relation.relation,
+        state: relation.state, state_lsn: relation.state_lsn } });
     const [routines] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.schema,x.name,x.arguments),'[]'::jsonb) AS rows FROM (
       SELECT n.nspname AS schema,p.proname AS name,pg_catalog.pg_get_function_identity_arguments(p.oid) AS arguments,
         pg_catalog.pg_get_function_result(p.oid) AS result,o.rolname AS owner,p.prosecdef AS security_definer,
@@ -294,15 +313,39 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
       JOIN pg_catalog.pg_roles o ON o.oid=c.relowner WHERE n.nspname='public' AND c.relkind IN ('r','p')
     ) x`);
     const [securityTables] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.schema,x.name),'[]'::jsonb) AS rows FROM (
-      SELECT n.nspname AS schema,c.relname AS name,c.relkind::text AS kind,c.relrowsecurity AS rls,c.relforcerowsecurity AS forced,
-        o.rolname AS owner,CASE WHEN c.relkind IN ('v','m') THEN pg_catalog.pg_get_viewdef(c.oid,false) END AS view_definition,
+      SELECT n.nspname AS schema,c.relname AS name,c.relkind::text AS kind,
+        CASE c.relpersistence WHEN 'p' THEN 'PERMANENT' WHEN 'u' THEN 'UNLOGGED' WHEN 't' THEN 'TEMPORARY' ELSE 'UNKNOWN' END AS persistence,
+        c.relrowsecurity AS rls,c.relforcerowsecurity AS forced,CASE WHEN c.relkind='m' THEN c.relispopulated END AS populated,
+        o.rolname AS owner,am.amname AS access_method,CASE WHEN c.reloftype=0 THEN NULL ELSE c.reloftype::pg_catalog.regtype::text END AS of_type,
+        CASE WHEN c.relkind IN ('v','m') THEN pg_catalog.pg_get_viewdef(c.oid,false) END AS view_definition,
         COALESCE((SELECT jsonb_agg(jsonb_build_object('name',opt.option_name,'value',opt.option_value) ORDER BY opt.option_name)
           FROM pg_catalog.pg_options_to_table(c.reloptions) opt WHERE opt.option_name IN ('security_barrier','security_invoker','check_option')),'[]'::jsonb) AS view_security_options,
         CASE WHEN c.relkind='p' THEN pg_catalog.pg_get_partkeydef(c.oid) END AS partition_key,
         CASE WHEN c.relispartition THEN pg_catalog.pg_get_expr(c.relpartbound,c.oid,false) END AS partition_bound,
+        COALESCE((SELECT jsonb_agg(jsonb_build_object('schema',parent_ns.nspname,'name',parent.relname,
+          'partition',c.relispartition,'detach_pending',i.inhdetachpending) ORDER BY i.inhseqno,parent_ns.nspname,parent.relname)
+          FROM pg_catalog.pg_inherits i JOIN pg_catalog.pg_class parent ON parent.oid=i.inhparent
+          JOIN pg_catalog.pg_namespace parent_ns ON parent_ns.oid=parent.relnamespace WHERE i.inhrelid=c.oid),'[]'::jsonb) AS parents,
+        jsonb_build_object('mode',CASE c.relreplident WHEN 'd' THEN 'DEFAULT' WHEN 'n' THEN 'NOTHING'
+          WHEN 'f' THEN 'FULL' WHEN 'i' THEN 'USING_INDEX' ELSE 'UNKNOWN' END,
+          'index',CASE WHEN c.relreplident='i' THEN (SELECT pg_catalog.format('%I.%I',index_ns.nspname,index_rel.relname)
+            FROM pg_catalog.pg_index ix JOIN pg_catalog.pg_class index_rel ON index_rel.oid=ix.indexrelid
+            JOIN pg_catalog.pg_namespace index_ns ON index_ns.oid=index_rel.relnamespace
+            WHERE ix.indrelid=c.oid AND ix.indisreplident ORDER BY index_ns.nspname,index_rel.relname LIMIT 1) END) AS replica_identity,
+        COALESCE((SELECT jsonb_agg(jsonb_build_object('schema',index_ns.nspname,'name',index_rel.relname,
+          'unique',ix.indisunique,'nulls_not_distinct',ix.indnullsnotdistinct,'exclusion',ix.indisexclusion,
+          'immediate',ix.indimmediate,'valid',ix.indisvalid,'ready',ix.indisready,'live',ix.indislive,
+          'replica_identity',ix.indisreplident,'definition',pg_catalog.pg_get_indexdef(ix.indexrelid,0,false))
+          ORDER BY index_ns.nspname,index_rel.relname)
+          FROM pg_catalog.pg_index ix JOIN pg_catalog.pg_class index_rel ON index_rel.oid=ix.indexrelid
+          JOIN pg_catalog.pg_namespace index_ns ON index_ns.oid=index_rel.relnamespace
+          WHERE ix.indrelid=c.oid AND (ix.indisunique OR ix.indisexclusion OR ix.indisreplident OR ix.indexprs IS NOT NULL OR ix.indpred IS NOT NULL)),'[]'::jsonb) AS behavior_indexes,
         COALESCE((SELECT jsonb_agg(jsonb_build_object('name',a.attname,'type',pg_catalog.format_type(a.atttypid,a.atttypmod),'notNull',a.attnotnull,
           'identity',a.attidentity::text,'generated',a.attgenerated::text,'default',pg_catalog.pg_get_expr(d.adbin,d.adrelid),
           'collation',CASE WHEN a.attcollation=0 THEN NULL ELSE a.attcollation::pg_catalog.regcollation::text END,
+          'foreign_options',COALESCE((SELECT jsonb_agg(jsonb_build_object('name',opt.option_name,'value_sha256',pg_catalog.encode(pg_catalog.sha256(
+            pg_catalog.convert_to(pg_catalog.jsonb_build_array('mscqr-security-option-v1','foreign_column',n.nspname,c.relname,a.attname,opt.option_name,opt.option_value)::text,'UTF8')),'hex')) ORDER BY opt.option_name)
+            FROM pg_catalog.pg_options_to_table(a.attfdwoptions) opt),'[]'::jsonb),
           'enumLabels',COALESCE((SELECT jsonb_agg(e.enumlabel ORDER BY e.enumsortorder) FROM pg_catalog.pg_enum e
             WHERE e.enumtypid IN (a.atttypid,(SELECT t.typelem FROM pg_catalog.pg_type t WHERE t.oid=a.atttypid))),'[]'::jsonb)) ORDER BY a.attnum)
           FROM pg_catalog.pg_attribute a LEFT JOIN pg_catalog.pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum
@@ -325,6 +368,7 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
           CROSS JOIN LATERAL pg_catalog.aclexplode(a.attacl) acl LEFT JOIN pg_catalog.pg_roles g ON g.oid=acl.grantee JOIN pg_catalog.pg_roles grantor ON grantor.oid=acl.grantor
           WHERE a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped),'[]'::jsonb) AS column_grants
       FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace JOIN pg_catalog.pg_roles o ON o.oid=c.relowner
+      LEFT JOIN pg_catalog.pg_am am ON am.oid=NULLIF(c.relam,0)
       WHERE n.nspname<>'information_schema' AND n.nspname NOT LIKE 'pg\_%' ESCAPE '\\' AND c.relkind IN ('r','p','v','m','f')
         AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_depend d WHERE d.classid='pg_catalog.pg_class'::pg_catalog.regclass AND d.objid=c.oid AND d.deptype='e')
     ) x`);
@@ -442,7 +486,8 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
         ('rdsadmin','rds_superuser','rds_password','rds_iam','rds_replication','rds_ad','rds_directory_service_role','rds_reserved','rdstopmgr')
     ) x`);
     const [databases] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.database,x.role,x.grantor,x.privilege,x.grantable),'[]'::jsonb) AS rows FROM (
-      SELECT d.datname AS database,o.rolname AS owner,COALESCE(g.rolname,'PUBLIC') AS role,grantor.rolname AS grantor,a.privilege_type AS privilege,a.is_grantable AS grantable
+      SELECT d.datname AS database,o.rolname AS owner,d.datallowconn AS allow_connections,d.datconnlimit AS connection_limit,
+        COALESCE(g.rolname,'PUBLIC') AS role,grantor.rolname AS grantor,a.privilege_type AS privilege,a.is_grantable AS grantable
       FROM pg_catalog.pg_database d JOIN pg_catalog.pg_roles o ON o.oid=d.datdba
       CROSS JOIN LATERAL pg_catalog.aclexplode(COALESCE(d.datacl,pg_catalog.acldefault('d',d.datdba))) a
       LEFT JOIN pg_catalog.pg_roles g ON g.oid=a.grantee JOIN pg_catalog.pg_roles grantor ON grantor.oid=a.grantor WHERE d.datname=current_database()
@@ -465,6 +510,25 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
         t.typnotnull AS not_null,CASE WHEN t.typbasetype=0 THEN NULL ELSE pg_catalog.format_type(t.typbasetype,t.typtypmod) END AS base_type,
         CASE WHEN t.typcollation=0 THEN NULL ELSE t.typcollation::pg_catalog.regcollation::text END AS collation,
         t.typdefault AS default_value,CASE WHEN t.typdefaultbin IS NULL THEN NULL ELSE pg_catalog.pg_get_expr(t.typdefaultbin,0,false) END AS default_expression,
+        jsonb_build_object('input',t.typinput::pg_catalog.regprocedure::text,'output',t.typoutput::pg_catalog.regprocedure::text,
+          'receive',CASE WHEN t.typreceive=0 THEN NULL ELSE t.typreceive::pg_catalog.regprocedure::text END,
+          'send',CASE WHEN t.typsend=0 THEN NULL ELSE t.typsend::pg_catalog.regprocedure::text END,
+          'modifier_input',CASE WHEN t.typmodin=0 THEN NULL ELSE t.typmodin::pg_catalog.regprocedure::text END,
+          'modifier_output',CASE WHEN t.typmodout=0 THEN NULL ELSE t.typmodout::pg_catalog.regprocedure::text END,
+          'analyze',CASE WHEN t.typanalyze=0 THEN NULL ELSE t.typanalyze::pg_catalog.regprocedure::text END,
+          'subscript',CASE WHEN t.typsubscript=0 THEN NULL ELSE t.typsubscript::pg_catalog.regprocedure::text END,
+          'length',t.typlen,'by_value',t.typbyval,'alignment',t.typalign::text,'storage',t.typstorage::text,'delimiter',t.typdelim,
+          'preferred',t.typispreferred,'defined',t.typisdefined,
+          'element_type',CASE WHEN t.typelem=0 THEN NULL ELSE t.typelem::pg_catalog.regtype::text END,'dimensions',t.typndims) AS implementation,
+        COALESCE((SELECT jsonb_agg(jsonb_build_object('name',a.attname,'type',pg_catalog.format_type(a.atttypid,a.atttypmod),
+          'not_null',a.attnotnull,'collation',CASE WHEN a.attcollation=0 THEN NULL ELSE a.attcollation::pg_catalog.regcollation::text END)
+          ORDER BY a.attnum) FROM pg_catalog.pg_attribute a WHERE a.attrelid=t.typrelid AND a.attnum>0 AND NOT a.attisdropped),'[]'::jsonb) AS composite_attributes,
+        (SELECT jsonb_build_object('subtype',r.rngsubtype::pg_catalog.regtype::text,
+          'multirange',r.rngmultitypid::pg_catalog.regtype::text,'collation',CASE WHEN r.rngcollation=0 THEN NULL ELSE r.rngcollation::pg_catalog.regcollation::text END,
+          'operator_class',pg_catalog.format('%I.%I',opclass_ns.nspname,opclass.opcname),'canonical',CASE WHEN r.rngcanonical=0 THEN NULL ELSE r.rngcanonical::pg_catalog.regprocedure::text END,
+          'subtype_difference',CASE WHEN r.rngsubdiff=0 THEN NULL ELSE r.rngsubdiff::pg_catalog.regprocedure::text END)
+          FROM pg_catalog.pg_range r JOIN pg_catalog.pg_opclass opclass ON opclass.oid=r.rngsubopc
+          JOIN pg_catalog.pg_namespace opclass_ns ON opclass_ns.oid=opclass.opcnamespace WHERE r.rngtypid=t.oid) AS range_definition,
         COALESCE((SELECT jsonb_agg(e.enumlabel ORDER BY e.enumsortorder) FROM pg_catalog.pg_enum e WHERE e.enumtypid=t.oid),'[]'::jsonb) AS enum_labels,
         COALESCE((SELECT jsonb_agg(jsonb_build_object('name',k.conname,'definition',pg_catalog.pg_get_constraintdef(k.oid),'validated',k.convalidated,'enforced',k.conenforced,
           'deferrable',k.condeferrable,'initially_deferred',k.condeferred) ORDER BY k.conname) FROM pg_catalog.pg_constraint k WHERE k.contypid=t.oid),'[]'::jsonb) AS constraints,
@@ -476,7 +540,9 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
         AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_depend d WHERE d.classid='pg_catalog.pg_type'::pg_catalog.regclass AND d.objid=t.oid AND d.deptype='e')
     ) x`);
     const [sequences] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.schema,x.name),'[]'::jsonb) AS rows FROM (
-      SELECT n.nspname AS schema,c.relname AS name,o.rolname AS owner,s.seqtypid::pg_catalog.regtype::text AS data_type,
+      SELECT n.nspname AS schema,c.relname AS name,o.rolname AS owner,
+        CASE c.relpersistence WHEN 'p' THEN 'PERMANENT' WHEN 'u' THEN 'UNLOGGED' WHEN 't' THEN 'TEMPORARY' ELSE 'UNKNOWN' END AS persistence,
+        s.seqtypid::pg_catalog.regtype::text AS data_type,
         s.seqstart::text AS start_value,s.seqincrement::text AS increment_by,s.seqmax::text AS maximum,s.seqmin::text AS minimum,s.seqcache::text AS cache_size,s.seqcycle AS cycle,
         COALESCE((SELECT jsonb_agg(jsonb_build_object('role',COALESCE(g.rolname,'PUBLIC'),'grantor',grantor.rolname,'privilege',a.privilege_type,'grantable',a.is_grantable)
           ORDER BY COALESCE(g.rolname,'PUBLIC'),grantor.rolname,a.privilege_type,a.is_grantable)

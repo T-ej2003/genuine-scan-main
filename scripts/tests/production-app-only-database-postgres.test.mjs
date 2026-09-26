@@ -83,6 +83,15 @@ test("real PostgreSQL catalogue and hostile read-only verifier regressions", { t
       GRANT EXECUTE ON FUNCTION app_rls.production_security_subscription_inventory() TO ${role};`);
     const baseline = await collect();
     const required = { ...structuredClone(baseline), contractSha256: "a".repeat(64) };
+    await t.test("database settings from an unrelated database do not create false drift", async () => {
+      sql("ALTER DATABASE mscqr_p2_admin_test SET row_security=off", "mscqr_p2_admin_test");
+      try {
+        const catalogue = await collect();
+        assert.equal(catalogue.securityBindings.some(({ kind, name }) => kind === "database_setting" && name === "mscqr_p2_admin_test"), false);
+      } finally {
+        sql("ALTER DATABASE mscqr_p2_admin_test RESET row_security", "mscqr_p2_admin_test");
+      }
+    });
     await t.test("real large-object ownership and ACL metadata are collected without object IDs or contents", async () => {
       const oid = sql("SELECT lo_create(0)::text");
       try {
@@ -96,6 +105,19 @@ test("real PostgreSQL catalogue and hostile read-only verifier regressions", { t
         assert.equal(JSON.stringify(binding).includes(oid), false, "database-local OID is not used as inventory identity");
       } finally {
         sql(`SELECT lo_unlink(${oid})`);
+      }
+    });
+    await t.test("real non-system tablespace ownership and ACL metadata are collected", async () => {
+      const directory = "/tmp/mscqr-rebaseline-tablespace";
+      execFileSync("docker", ["exec", container, "sh", "-c", `install -d -o postgres -g postgres ${directory}`], { timeout: 10000 });
+      try {
+        sql(`CREATE TABLESPACE rebaseline_tablespace LOCATION '${directory}'; GRANT CREATE ON TABLESPACE rebaseline_tablespace TO ${appRole}`);
+        const binding = (await collect()).securityBindings.find(({ kind, name }) => kind === "tablespace" && name === "rebaseline_tablespace");
+        assert.equal(binding?.owner, "mscqr_p2_test");
+        assert.ok(binding.definition.grants.some(({ role: grantee, privilege }) => grantee === appRole && privilege === "CREATE"));
+      } finally {
+        sql("DROP TABLESPACE IF EXISTS rebaseline_tablespace");
+        execFileSync("docker", ["exec", container, "sh", "-c", `rmdir ${directory}`], { timeout: 10000 });
       }
     });
     await t.test("real subscription projection grant option is rejected before invoking the function", async () => {

@@ -170,6 +170,21 @@ test("all fixed catalogue statements use one read-only repeatable-read transacti
   assert.ok(calls.some((sql) => sql.includes("pg_catalog.pg_rewrite") && sql.includes("r.rulename<>'_RETURN'") && sql.includes("pg_get_ruledef")));
   assert.ok(calls.some((sql) => sql.includes("pg_catalog.pg_event_trigger") && sql.includes("e.evtfoid") && sql.includes("evttags")));
   assert.ok(calls.some((sql) => sql.includes("pg_get_constraintdef") && sql.includes("parent_identity") && sql.includes("pno.nspname")));
+  const securityTablesSql = calls.find((sql) => sql.includes("AS replica_identity") && sql.includes("AS behavior_indexes"));
+  assert.ok(securityTablesSql?.includes("pg_catalog.pg_inherits") && securityTablesSql.includes("i.inhdetachpending")
+    && securityTablesSql.includes("c.relreplident") && securityTablesSql.includes("ix.indisreplident")
+    && securityTablesSql.includes("pg_catalog.pg_get_indexdef") && securityTablesSql.includes("c.relpersistence")
+    && securityTablesSql.includes("c.relispopulated") && securityTablesSql.includes("ix.indexprs IS NOT NULL")
+    && securityTablesSql.includes("ix.indpred IS NOT NULL") && securityTablesSql.includes("am.amname")
+    && securityTablesSql.includes("c.reloftype"), "relation inheritance, replica identity, behavioral indexes, access method, typed-table binding, persistence and materialized population are collected by real SQL");
+  assert.ok(calls.some((sql) => sql.includes("FROM pg_catalog.pg_tablespace") && sql.includes("t.spcname NOT IN ('pg_default','pg_global')")
+    && sql.includes("pg_catalog.aclexplode")), "non-system tablespace owner and ACL state is observable");
+  assert.ok(calls.some((sql) => sql.includes("FROM pg_catalog.pg_range") && sql.includes("composite_attributes")
+    && sql.includes("t.typinput") && sql.includes("r.rngcanonical")), "composite, range and base-type execution semantics are collected");
+  const projectionSql = fs.readFileSync("documents/ops/iam/production-green-phase-4-read-only-canary-provision.sql", "utf8");
+  assert.ok(projectionSql.includes("pg_catalog.pg_subscription_rel") && projectionSql.includes("sr.srsubstate")
+    && projectionSql.includes("sr.srsubstate IN ('s','r')") && projectionSql.includes("sr.srsublsn::text"),
+  "the authenticated restricted projection includes stable subscription relation synchronization state");
   assert.ok(calls.some((sql) => sql.includes("r.rolvaliduntil::text AS valid_until")), "role credential expiry is included without exposing verifier/password fields");
   responses[3] = [{ ...structuredClone(SUBSCRIPTION_PROJECTION_STATUS_CONTRACT), function_body_sha256: "0".repeat(64) }];
   read = 0;

@@ -384,6 +384,19 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         await tx.$executeRawUnsafe("CREATE TABLE public.rebaseline_partition_contract(id integer) PARTITION BY RANGE (id)");
         await tx.$executeRawUnsafe("CREATE TABLE public.rebaseline_partition_contract_low PARTITION OF public.rebaseline_partition_contract FOR VALUES FROM (0) TO (10)");
         await tx.$executeRawUnsafe("ALTER TABLE public.rebaseline_partition_contract ADD CONSTRAINT rebaseline_partition_check CHECK (id > 0)");
+        await tx.$executeRawUnsafe("CREATE TABLE public.rebaseline_inherit_parent_a(id integer)");
+        await tx.$executeRawUnsafe("CREATE TABLE public.rebaseline_inherit_parent_b(id integer)");
+        await tx.$executeRawUnsafe("CREATE TABLE public.rebaseline_inherit_child(extra integer) INHERITS (public.rebaseline_inherit_parent_a)");
+        await tx.$executeRawUnsafe("CREATE TABLE public.rebaseline_replica_contract(id integer NOT NULL, alternate integer NOT NULL)");
+        await tx.$executeRawUnsafe("CREATE UNIQUE INDEX rebaseline_replica_a ON public.rebaseline_replica_contract(id)");
+        await tx.$executeRawUnsafe("CREATE UNIQUE INDEX rebaseline_replica_b ON public.rebaseline_replica_contract(alternate)");
+        await tx.$executeRawUnsafe("CREATE TABLE public.rebaseline_index_contract(id integer)");
+        await tx.$executeRawUnsafe("CREATE TABLE public.rebaseline_persistence_contract(id integer)");
+        await tx.$executeRawUnsafe("CREATE TYPE public.rebaseline_typed_row AS (id integer)");
+        await tx.$executeRawUnsafe("CREATE TABLE public.rebaseline_typed_table OF public.rebaseline_typed_row");
+        await tx.$executeRawUnsafe("CREATE TYPE public.rebaseline_composite_contract AS (id integer)");
+        await tx.$executeRawUnsafe("CREATE TYPE public.rebaseline_range_contract AS RANGE (subtype=integer)");
+        await tx.$executeRawUnsafe("CREATE UNLOGGED SEQUENCE public.rebaseline_sequence_persistence_contract");
         await tx.$executeRawUnsafe("CREATE FUNCTION public.rebaseline_trigger_one() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RETURN NEW; END'");
         await tx.$executeRawUnsafe("CREATE FUNCTION public.rebaseline_trigger_two() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RETURN NEW; END'");
         await tx.$executeRawUnsafe("CREATE FUNCTION public.rebaseline_event_guard() RETURNS event_trigger LANGUAGE plpgsql AS 'BEGIN RETURN; END'");
@@ -418,11 +431,22 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         const partitionChild = result.collected.securityTables.find(({ name }) => name === "rebaseline_partition_contract_low");
         assert.equal(partitionChild.constraints.find(({ name }) => name === "rebaseline_partition_check").parent_identity,
           "public.rebaseline_partition_contract.rebaseline_partition_check", "partition constraint parent identity is stable, not a backend-local OID");
+        assert.deepEqual(partitionChild.parents, [{ schema:"public",name:"rebaseline_partition_contract",partition:true,detach_pending:false }],
+          "partition hierarchy uses stable relation identity");
+        const inherited = () => result.collected.securityTables.find(({ name }) => name === "rebaseline_inherit_child").parents;
+        assert.deepEqual(inherited(), [{ schema:"public",name:"rebaseline_inherit_parent_a",partition:false,detach_pending:false }]);
         assert.ok(result.collected.securityRules.some(({ name, definition }) => name === "rebaseline_expected_rule" && definition.includes("DO INSTEAD NOTHING")));
         assert.ok(result.collected.securityEventTriggers.some(({ name, event, function: routine }) => name === "rebaseline_event_guard" && event === "ddl_command_start" && routine.endsWith("rebaseline_event_guard()")));
         const publicationBinding = result.collected.securityBindings.find(({ kind, name }) => kind === "publication_relation" && name === "rebaseline_publication_contract:public.rebaseline_publication_a");
         assert.deepEqual(publicationBinding.definition.columns, ["id","tenant"]);
         assert.match(publicationBinding.definition.row_filter, /tenant > 0/);
+        const databaseState = result.collected.databases[0];
+        assert.equal(databaseState.allow_connections, true);
+        assert.equal(databaseState.connection_limit, -1);
+        await tx.$executeRawUnsafe(`ALTER DATABASE "${targetDatabase}" CONNECTION LIMIT 7`);
+        result = await compare();
+        assert.ok(result.diff.differences.some(({ collection, field }) => collection === "databases" && field === "connection_limit"));
+        await tx.$executeRawUnsafe(`ALTER DATABASE "${targetDatabase}" CONNECTION LIMIT -1`);
         const baselineView = result.collected.securityTables.find(({ name }) => name === "rebaseline_view_contract").view_definition;
         await tx.$executeRawUnsafe("CREATE OR REPLACE VIEW public.rebaseline_view_contract AS SELECT 1 :: integer AS id");
         result = await compare();
@@ -454,6 +478,63 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         await tx.$executeRawUnsafe("CREATE TABLE public.rebaseline_partition_contract_low PARTITION OF public.rebaseline_partition_contract FOR VALUES FROM (0) TO (20)");
         result = await compare();
         assert.ok(result.diff.differences.some(({ identity, field }) => identity === "public.rebaseline_partition_contract_low" && field === "partition_bound"));
+        await tx.$executeRawUnsafe("ALTER TABLE public.rebaseline_inherit_child NO INHERIT public.rebaseline_inherit_parent_a");
+        result = await compare();
+        assert.ok(result.diff.differences.some(({ identity, field }) => identity === "public.rebaseline_inherit_child" && field === "parents"));
+        await tx.$executeRawUnsafe("ALTER TABLE public.rebaseline_inherit_child INHERIT public.rebaseline_inherit_parent_a");
+        await tx.$executeRawUnsafe("ALTER TABLE public.rebaseline_inherit_child INHERIT public.rebaseline_inherit_parent_b");
+        result = await compare();
+        assert.deepEqual(inherited(), [
+          { schema:"public",name:"rebaseline_inherit_parent_a",partition:false,detach_pending:false },
+          { schema:"public",name:"rebaseline_inherit_parent_b",partition:false,detach_pending:false },
+        ], "multiple inheritance follows stable PostgreSQL parent order without OIDs");
+        assert.ok(result.diff.differences.some(({ identity, field }) => identity === "public.rebaseline_inherit_child" && field === "parents"));
+        await tx.$executeRawUnsafe("ALTER TABLE public.rebaseline_inherit_child NO INHERIT public.rebaseline_inherit_parent_b");
+        for (const [sql, mode, index] of [
+          ["ALTER TABLE public.rebaseline_replica_contract REPLICA IDENTITY FULL","FULL",null],
+          ["ALTER TABLE public.rebaseline_replica_contract REPLICA IDENTITY NOTHING","NOTHING",null],
+          ["ALTER TABLE public.rebaseline_replica_contract REPLICA IDENTITY USING INDEX rebaseline_replica_a","USING_INDEX","public.rebaseline_replica_a"],
+          ["ALTER TABLE public.rebaseline_replica_contract REPLICA IDENTITY USING INDEX rebaseline_replica_b","USING_INDEX","public.rebaseline_replica_b"],
+        ]) {
+          await tx.$executeRawUnsafe(sql); result = await compare();
+          assert.deepEqual(result.collected.securityTables.find(({ name }) => name === "rebaseline_replica_contract").replica_identity, { mode,index });
+          assert.ok(result.diff.differences.some(({ identity, field }) => identity === "public.rebaseline_replica_contract" && field === "replica_identity"));
+        }
+        await tx.$executeRawUnsafe("ALTER TABLE public.rebaseline_replica_contract REPLICA IDENTITY DEFAULT");
+        await tx.$executeRawUnsafe("CREATE UNIQUE INDEX rebaseline_index_contract_unique ON public.rebaseline_index_contract(id)");
+        result = await compare();
+        assert.ok(result.diff.differences.some(({ identity, field }) => identity === "public.rebaseline_index_contract" && field === "behavior_indexes"),
+          "a standalone unique index that changes accepted writes reaches the security diff");
+        await tx.$executeRawUnsafe("DROP INDEX public.rebaseline_index_contract_unique");
+        await tx.$executeRawUnsafe("CREATE INDEX rebaseline_index_contract_partial ON public.rebaseline_index_contract(id) WHERE id > 0");
+        result = await compare();
+        assert.ok(result.diff.differences.some(({ identity, field }) => identity === "public.rebaseline_index_contract" && field === "behavior_indexes"),
+          "a nonunique partial index whose predicate executes during writes reaches the security diff");
+        await tx.$executeRawUnsafe("DROP INDEX public.rebaseline_index_contract_partial");
+        await tx.$executeRawUnsafe("ALTER TABLE public.rebaseline_persistence_contract SET UNLOGGED");
+        result = await compare();
+        assert.ok(result.diff.differences.some(({ identity, field }) => identity === "public.rebaseline_persistence_contract" && field === "persistence"));
+        await tx.$executeRawUnsafe("ALTER TABLE public.rebaseline_persistence_contract SET LOGGED");
+        await tx.$executeRawUnsafe("ALTER SEQUENCE public.rebaseline_sequence_persistence_contract SET LOGGED");
+        result = await compare();
+        assert.ok(result.diff.differences.some(({ collection, identity, field }) => collection === "sequences"
+          && identity === "public.rebaseline_sequence_persistence_contract" && field === "persistence"));
+        await tx.$executeRawUnsafe("REFRESH MATERIALIZED VIEW public.rebaseline_matview_contract WITH NO DATA");
+        result = await compare();
+        assert.ok(result.diff.differences.some(({ identity, field }) => identity === "public.rebaseline_matview_contract" && field === "populated"));
+        await tx.$executeRawUnsafe("REFRESH MATERIALIZED VIEW public.rebaseline_matview_contract");
+        await tx.$executeRawUnsafe("ALTER TABLE public.rebaseline_typed_table NOT OF");
+        result = await compare();
+        assert.ok(result.diff.differences.some(({ identity, field }) => identity === "public.rebaseline_typed_table" && field === "of_type"));
+        await tx.$executeRawUnsafe("ALTER TYPE public.rebaseline_composite_contract ALTER ATTRIBUTE id TYPE bigint");
+        result = await compare();
+        assert.ok(result.diff.differences.some(({ collection, identity, field }) => collection === "types"
+          && identity === "public.rebaseline_composite_contract" && field === "composite_attributes"));
+        await tx.$executeRawUnsafe("DROP TYPE public.rebaseline_range_contract");
+        await tx.$executeRawUnsafe("CREATE TYPE public.rebaseline_range_contract AS RANGE (subtype=bigint)");
+        result = await compare();
+        assert.ok(result.diff.differences.some(({ collection, identity, field }) => collection === "types"
+          && identity === "public.rebaseline_range_contract" && field === "range_definition"));
         await tx.$executeRawUnsafe("CREATE TRIGGER rebaseline_unexpected_trigger AFTER INSERT ON public.rebaseline_trigger_contract FOR EACH ROW EXECUTE FUNCTION public.rebaseline_trigger_one()");
         result = await compare();
         assert.equal(result.diff.safeToConstructConvergencePlan, false, "unexpected user trigger blocks plan construction");
@@ -642,14 +723,31 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         assert.equal(sourceDiff.safeToConstructConvergencePlan, false);
         throw new Error("rollback real security collector drift");
       }), /rollback real security collector drift/);
+      await maintenanceClient.$executeRawUnsafe("CREATE TABLE public.rebaseline_subscription_target(id integer)");
       await maintenanceClient.$executeRawUnsafe("CREATE SUBSCRIPTION rebaseline_disabled_subscription CONNECTION 'host=127.0.0.1 dbname=unused password=synthetic_test_value' PUBLICATION rebaseline_remote_z, rebaseline_remote_a WITH (connect=false,slot_name=NONE)");
       try {
+        const withoutRelationCatalogue = await collectCatalogueRows(maintenanceClient);
+        const withoutRelationCanonical = createSecurityRebaselineInventory({ kind: "CANONICAL", protectedMainSha: sourceSha,
+          candidateSourceSha: context.candidateSourceSha, catalogue: withoutRelationCatalogue, repositoryRoot: root,
+          packageChecksums: JSON.parse(fs.readFileSync(path.join(evidenceRoot, "checksums.json"), "utf8")) });
+        await maintenanceClient.$executeRawUnsafe(`INSERT INTO pg_catalog.pg_subscription_rel(srsubid,srrelid,srsubstate,srsublsn)
+          SELECT s.oid,c.oid,'i',NULL FROM pg_catalog.pg_subscription s CROSS JOIN pg_catalog.pg_class c
+          JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+          WHERE s.subname='rebaseline_disabled_subscription' AND n.nspname='public' AND c.relname='rebaseline_subscription_target'`);
+        const appearedCatalogue = await collectCatalogueRows(verifier);
+        const appearedDiff = diffSecurityRebaselineInventories(createLiveSecurityRebaselineInventory({ protectedMainSha: sourceSha,
+          catalogue: appearedCatalogue, canonical: withoutRelationCanonical, taskEvidence: liveTaskEvidence(sourceSha, context.candidateSourceSha, "f".repeat(64), "a") }), withoutRelationCanonical);
+        assert.ok(appearedDiff.differences.some(({ collection, identity }) => collection === "bindings"
+          && identity === "subscription_relation:rebaseline_disabled_subscription:public.rebaseline_subscription_target"),
+        "a real pg_subscription_rel binding appearing reaches the restricted collector and diff");
         const canonicalSubscriptionCatalogue = await collectCatalogueRows(maintenanceClient);
         const canonicalSubscription = createSecurityRebaselineInventory({ kind: "CANONICAL", protectedMainSha: sourceSha,
           candidateSourceSha: context.candidateSourceSha, catalogue: canonicalSubscriptionCatalogue, repositoryRoot: root,
           packageChecksums: JSON.parse(fs.readFileSync(path.join(evidenceRoot, "checksums.json"), "utf8")) });
         const restrictedSubscriptionCatalogue = await collectCatalogueRows(verifier);
         const subscription = (catalogue) => catalogue.securityBindings.find(({ kind, name }) => kind === "subscription" && name === "rebaseline_disabled_subscription");
+        const subscriptionRelation = (catalogue) => catalogue.securityBindings.find(({ kind, name }) => kind === "subscription_relation"
+          && name === "rebaseline_disabled_subscription:public.rebaseline_subscription_target");
         assert.equal(subscription(restrictedSubscriptionCatalogue)?.definition.enabled, false);
         assert.deepEqual(subscription(restrictedSubscriptionCatalogue)?.definition.publications, ["rebaseline_remote_a","rebaseline_remote_z"]);
         assert.equal(subscription(restrictedSubscriptionCatalogue)?.definition.skip_lsn, "0/0");
@@ -659,6 +757,36 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         const evidence = liveTaskEvidence(sourceSha, context.candidateSourceSha, "f".repeat(64), "a");
         const before = diffSecurityRebaselineInventories(createLiveSecurityRebaselineInventory({ protectedMainSha: sourceSha,
           catalogue: restrictedSubscriptionCatalogue, canonical: canonicalSubscription, taskEvidence: evidence }), canonicalSubscription);
+        assert.deepEqual(subscriptionRelation(restrictedSubscriptionCatalogue)?.definition, { subscription:"rebaseline_disabled_subscription",
+          schema:"public",relation:"rebaseline_subscription_target",state:"i",state_lsn:null });
+        assert.equal(before.differences.filter(({ collection, identity }) => collection === "bindings"
+          && identity === "subscription_relation:rebaseline_disabled_subscription:public.rebaseline_subscription_target").length, 0,
+          "identical restricted and direct subscription-relation state has no drift");
+        await maintenanceClient.$executeRawUnsafe(`UPDATE pg_catalog.pg_subscription_rel SET srsubstate='s',srsublsn='0/16B6C50'
+          WHERE srsubid=(SELECT oid FROM pg_catalog.pg_subscription WHERE subname='rebaseline_disabled_subscription')`);
+        let changedRelationCatalogue = await collectCatalogueRows(verifier);
+        assert.equal(subscriptionRelation(changedRelationCatalogue)?.definition.state_lsn, "0/16B6C50");
+        let relationDiff = diffSecurityRebaselineInventories(createLiveSecurityRebaselineInventory({ protectedMainSha: sourceSha,
+          catalogue: changedRelationCatalogue, canonical: canonicalSubscription, taskEvidence: evidence }), canonicalSubscription);
+        assert.ok(relationDiff.differences.some(({ collection, identity }) => collection === "bindings"
+          && identity === "subscription_relation:rebaseline_disabled_subscription:public.rebaseline_subscription_target"),
+        "subscription synchronization state and its meaningful transition LSN reach the diff");
+        await maintenanceClient.$executeRawUnsafe(`UPDATE pg_catalog.pg_subscription_rel SET srsublsn='0/16B6D00'
+          WHERE srsubid=(SELECT oid FROM pg_catalog.pg_subscription WHERE subname='rebaseline_disabled_subscription')`);
+        changedRelationCatalogue = await collectCatalogueRows(verifier);
+        assert.equal(subscriptionRelation(changedRelationCatalogue)?.definition.state_lsn, "0/16B6D00");
+        await maintenanceClient.$executeRawUnsafe(`DELETE FROM pg_catalog.pg_subscription_rel
+          WHERE srsubid=(SELECT oid FROM pg_catalog.pg_subscription WHERE subname='rebaseline_disabled_subscription')`);
+        changedRelationCatalogue = await collectCatalogueRows(verifier);
+        relationDiff = diffSecurityRebaselineInventories(createLiveSecurityRebaselineInventory({ protectedMainSha: sourceSha,
+          catalogue: changedRelationCatalogue, canonical: canonicalSubscription, taskEvidence: evidence }), canonicalSubscription);
+        assert.ok(relationDiff.differences.some(({ collection, identity }) => collection === "bindings"
+          && identity === "subscription_relation:rebaseline_disabled_subscription:public.rebaseline_subscription_target"),
+        "a subscription relation disappearing reaches the diff");
+        await maintenanceClient.$executeRawUnsafe(`INSERT INTO pg_catalog.pg_subscription_rel(srsubid,srrelid,srsubstate,srsublsn)
+          SELECT s.oid,c.oid,'i',NULL FROM pg_catalog.pg_subscription s CROSS JOIN pg_catalog.pg_class c
+          JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+          WHERE s.subname='rebaseline_disabled_subscription' AND n.nspname='public' AND c.relname='rebaseline_subscription_target'`);
         await maintenanceClient.$executeRawUnsafe("ALTER SUBSCRIPTION rebaseline_disabled_subscription SKIP (lsn = '0/16B6C50')");
         const skippedSubscriptionCatalogue = await collectCatalogueRows(verifier), directSkippedSubscriptionCatalogue = await collectCatalogueRows(maintenanceClient);
         assert.equal(subscription(skippedSubscriptionCatalogue)?.definition.skip_lsn, "0/16B6C50");
@@ -681,6 +809,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
       } finally {
         await maintenanceClient.$executeRawUnsafe("ALTER SUBSCRIPTION rebaseline_disabled_subscription SET (slot_name=NONE)");
         await maintenanceClient.$executeRawUnsafe("DROP SUBSCRIPTION IF EXISTS rebaseline_disabled_subscription");
+        await maintenanceClient.$executeRawUnsafe("DROP TABLE IF EXISTS public.rebaseline_subscription_target");
       }
       await assert.rejects(maintenanceClient.$transaction(async (tx) => {
         await tx.$executeRawUnsafe("CREATE SCHEMA rebaseline_extension_schema AUTHORIZATION mscqr_prod_admin");
@@ -705,21 +834,24 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         await tx.$executeRawUnsafe("CREATE FOREIGN DATA WRAPPER rebaseline_digest_fdw OPTIONS (endpoint 'fdw_first')");
         await tx.$executeRawUnsafe("CREATE SERVER rebaseline_digest_server FOREIGN DATA WRAPPER rebaseline_digest_fdw OPTIONS (host 'first.invalid', dbname 'firstdb')");
         await tx.$executeRawUnsafe("CREATE USER MAPPING FOR mscqr_prod_admin SERVER rebaseline_digest_server OPTIONS (user 'remote_one', password 'fixture_secret_one')");
-        await tx.$executeRawUnsafe("CREATE FOREIGN TABLE public.rebaseline_digest_foreign(id integer) SERVER rebaseline_digest_server OPTIONS (schema_name 'public', table_name 'first_table')");
+        await tx.$executeRawUnsafe("CREATE FOREIGN TABLE public.rebaseline_digest_foreign(id integer OPTIONS (column_name 'first_id')) SERVER rebaseline_digest_server OPTIONS (schema_name 'public', table_name 'first_table')");
         const baseline = await collectAppOnlyDatabaseCatalogueRows(tx), serialized = JSON.stringify(baseline);
-        for (const secret of ["fdw_first","first.invalid","firstdb","remote_one","fixture_secret_one","first_table"]) assert.equal(serialized.includes(secret), false, `raw foreign option ${secret} escaped`);
+        for (const secret of ["fdw_first","first.invalid","firstdb","remote_one","fixture_secret_one","first_table","first_id"]) assert.equal(serialized.includes(secret), false, `raw foreign option ${secret} escaped`);
         const canonical = createSecurityRebaselineInventory({ kind: "CANONICAL", protectedMainSha: sourceSha, candidateSourceSha: context.candidateSourceSha, catalogue: baseline,
           repositoryRoot: root, packageChecksums: JSON.parse(fs.readFileSync(path.join(evidenceRoot, "checksums.json"), "utf8")) });
         await tx.$executeRawUnsafe("ALTER FOREIGN DATA WRAPPER rebaseline_digest_fdw OPTIONS (SET endpoint 'fdw_second')");
         await tx.$executeRawUnsafe("ALTER SERVER rebaseline_digest_server OPTIONS (SET host 'second.invalid')");
         await tx.$executeRawUnsafe("ALTER USER MAPPING FOR mscqr_prod_admin SERVER rebaseline_digest_server OPTIONS (SET user 'remote_two', SET password 'fixture_secret_two')");
         await tx.$executeRawUnsafe("ALTER FOREIGN TABLE public.rebaseline_digest_foreign OPTIONS (SET table_name 'second_table')");
+        await tx.$executeRawUnsafe("ALTER FOREIGN TABLE public.rebaseline_digest_foreign ALTER COLUMN id OPTIONS (SET column_name 'second_id')");
         const changed = await collectAppOnlyDatabaseCatalogueRows(tx), changedSerialized = JSON.stringify(changed);
-        for (const secret of ["fdw_second","second.invalid","remote_two","fixture_secret_two","second_table"]) assert.equal(changedSerialized.includes(secret), false, `changed foreign option ${secret} escaped`);
+        for (const secret of ["fdw_second","second.invalid","remote_two","fixture_secret_two","second_table","second_id"]) assert.equal(changedSerialized.includes(secret), false, `changed foreign option ${secret} escaped`);
         const live = createLiveSecurityRebaselineInventory({ protectedMainSha: sourceSha, catalogue: changed, canonical, taskEvidence: productionEquivalentLive.taskEvidence });
         const diff = diffSecurityRebaselineInventories(live, canonical);
         for (const identity of ["foreign_data_wrapper:rebaseline_digest_fdw","foreign_server:rebaseline_digest_server","user_mapping:rebaseline_digest_server:mscqr_prod_admin","foreign_table:public.rebaseline_digest_foreign"])
           assert.ok(diff.differences.some(({ collection, identity: observed }) => collection === "bindings" && observed === identity), `${identity} option digest drift is observable`);
+        assert.ok(diff.differences.some(({ collection, identity, field }) => collection === "tables" && identity === "public.rebaseline_digest_foreign" && field === "columns"),
+          "foreign-column option-value digest drift reaches the real normalized relation inventory");
         throw new Error("rollback real foreign binding digest fixtures");
       }), /rollback real foreign binding digest fixtures/);
       assertAppOnlyRequirements(requirements, context);
