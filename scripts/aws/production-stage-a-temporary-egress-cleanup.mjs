@@ -9,6 +9,7 @@ import { canonicalJson, PRODUCTION_ACTIVATION_LIFECYCLE } from "./production-gre
 import { PRODUCTION_ENVIRONMENT_APPROVAL, assertProductionEnvironmentApprovalIdentity, assertProductionEnvironmentActualReviewer, assertProductionEnvironmentReviewer, assertProductionEnvironmentApprovalFreshness } from "./production-github-environment-approval.mjs";
 import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { createStageATerraformBackendLock } from "./production-stage-a-root-drop-orphan-recovery.mjs";
+import { assertStageAProductionArtifactsJournalRetention } from "./run-production-stage-a-production-artifacts-recovery.mjs";
 
 export const STAGE_A_TEMPORARY_EGRESS_CLEANUP = Object.freeze({
   operation: "STAGE_A_EXACT_TEMPORARY_EXECUTOR_EGRESS_CLEANUP",
@@ -208,6 +209,21 @@ const readInventory = (run, { allowRuleAbsent = false } = {}) => {
   return { validated, ruleResponse, sourceNetworkInterfaceCount: network.NetworkInterfaces.length, activeTaskUsesSourceGroup: taskDependency, canonicalDependencyPresent };
 };
 
+export function assertStageATemporaryEgressCleanupJournalRetention({ versioning, lifecycle } = {}) {
+  if (versioning?.Status !== "Enabled") fail("Temporary egress cleanup journal requires production-artifacts bucket versioning.");
+  assertStageAProductionArtifactsJournalRetention(lifecycle, [STAGE_A_TEMPORARY_EGRESS_CLEANUP.journalPrefix]);
+  return true;
+}
+
+function verifyCleanupJournalRetention(rootRun) {
+  const bucket = PRODUCTION_ACTIVATION_LIFECYCLE.bucket;
+  const versioning = decodeJson(rootRun(["s3api", "get-bucket-versioning", "--bucket", bucket, "--output", "json", "--no-cli-pager"]), "Cleanup journal bucket versioning");
+  let lifecycle;
+  try { lifecycle = decodeJson(rootRun(["s3api", "get-bucket-lifecycle-configuration", "--bucket", bucket, "--output", "json", "--no-cli-pager"]), "Cleanup journal bucket lifecycle"); }
+  catch (error) { if (/NoSuchLifecycleConfiguration/i.test(`${error.message || ""}\n${error.stderr || ""}`)) lifecycle = { Rules: [] }; else throw error; }
+  return assertStageATemporaryEgressCleanupJournalRetention({ versioning, lifecycle });
+}
+
 export function readStageATemporaryEgressInventory({ run } = {}) {
   const reader = run || createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-root", region: STAGE_A_TEMPORARY_EGRESS_CLEANUP.region });
   if (typeof reader !== "function") fail("Temporary egress cleanup read-only inventory requires a command runner.");
@@ -262,6 +278,7 @@ export async function executeStageATemporaryEgressCleanup({ authorization, sourc
   try {
     const lockedBefore = read(rootRun);
     if (lockedBefore.validated.ruleId !== before.validated.ruleId) fail("Temporary egress cleanup target changed while acquiring the Stage-A lock.");
+    verifyCleanupJournalRetention(rootRun);
     await reserve({ releaseRun, authorization });
     const finalCheck = read(rootRun);
     if (finalCheck.validated.ruleId !== target.ruleId || canonicalJson(finalCheck.ruleResponse) !== canonicalJson(lockedBefore.ruleResponse)) fail("Temporary egress cleanup live rule changed after authorization; no mutation was performed.");

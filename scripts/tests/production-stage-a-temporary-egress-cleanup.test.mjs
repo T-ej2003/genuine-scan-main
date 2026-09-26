@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
 import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from "../aws/production-github-environment-approval.mjs";
-import { assertStageATemporaryEgressCleanupAuthorization, assertStageATemporaryEgressCloudTrailProvenance, createStageATemporaryEgressCleanupAuthorization, executeStageATemporaryEgressCleanup, resolveStageATemporaryEgressCleanupAuthorizationArtifact, STAGE_A_TEMPORARY_EGRESS_CLEANUP, validateStageATemporaryEgressLiveInventory } from "../aws/production-stage-a-temporary-egress-cleanup.mjs";
+import { assertStageATemporaryEgressCleanupAuthorization, assertStageATemporaryEgressCleanupJournalRetention, assertStageATemporaryEgressCloudTrailProvenance, createStageATemporaryEgressCleanupAuthorization, executeStageATemporaryEgressCleanup, resolveStageATemporaryEgressCleanupAuthorizationArtifact, STAGE_A_TEMPORARY_EGRESS_CLEANUP, validateStageATemporaryEgressLiveInventory } from "../aws/production-stage-a-temporary-egress-cleanup.mjs";
 import { canonicalJson } from "../aws/production-green-stage-b-contract.mjs";
 
 const sourceSha = "1d2bda9fd3e740d51fba199021b354724cf479d3";
@@ -25,6 +25,12 @@ const provenanceEvents = {
 };
 const inventory = (overrides = {}) => ({ caller: identity, ruleResponse: { SecurityGroupRules: [rule] }, sourceGroup, destinationGroup, endpointResponse, networkInterfaces: [], activeTaskUsesSourceGroup: false, canonicalDependencyPresent: false, provenanceEvents, ...overrides });
 const lock = () => ({ acquire: async () => {}, release: async () => {} });
+const rootRunner = (calls = []) => (args) => {
+  if (args[1] === "get-bucket-versioning") return JSON.stringify({ Status: "Enabled" });
+  if (args[1] === "get-bucket-lifecycle-configuration") throw Object.assign(new Error("NoSuchLifecycleConfiguration"), { stderr: "NoSuchLifecycleConfiguration" });
+  calls.push(args);
+  return "{}";
+};
 
 test("authorization binds one exact source, ticket, target, and actual protected-environment approval", () => {
   assert.doesNotThrow(() => assertStageATemporaryEgressCleanupAuthorization(authorization, { sourceSha, workflowRunId: "42", workflowRunAttempt: "1", now }));
@@ -77,6 +83,25 @@ test("post-revoke inventory accepts only absence of the exact rule with the rema
   assert.throws(() => validateStageATemporaryEgressLiveInventory(inventory({ allowRuleAbsent: true })), /still present/);
 });
 
+test("cleanup journals require versioning and protect the exact prefix from destructive lifecycle rules", () => {
+  assert.equal(assertStageATemporaryEgressCleanupJournalRetention({ versioning: { Status: "Enabled" }, lifecycle: { Rules: [] } }), true);
+  assert.throws(() => assertStageATemporaryEgressCleanupJournalRetention({ versioning: {}, lifecycle: { Rules: [] } }), /requires production-artifacts bucket versioning/);
+  assert.throws(() => assertStageATemporaryEgressCleanupJournalRetention({ versioning: { Status: "Enabled" }, lifecycle: { Rules: [{ ID: "cleanup-expiration", Status: "Enabled", Prefix: STAGE_A_TEMPORARY_EGRESS_CLEANUP.journalPrefix, Expiration: { Days: 1 } }] } }), /protected immutable record unavailable/);
+});
+
+test("cleanup refuses to consume authorization when journal retention is unsafe", async () => {
+  const awsCalls = []; let reservations = 0;
+  const rootRun = (args) => {
+    if (args[1] === "get-bucket-versioning") return JSON.stringify({ Status: "Enabled" });
+    if (args[1] === "get-bucket-lifecycle-configuration") return JSON.stringify({ Rules: [{ ID: "cleanup-expiration", Status: "Enabled", Prefix: STAGE_A_TEMPORARY_EGRESS_CLEANUP.journalPrefix, Expiration: { Days: 1 } }] });
+    awsCalls.push(args);
+    return "{}";
+  };
+  await assert.rejects(executeStageATemporaryEgressCleanup({ authorization, sourceSha, workflowRunId: "42", workflowRunAttempt: "1", rootRun, releaseRun: async () => {}, terraformStateLock: lock(), read: () => ({ validated: { ruleId: STAGE_A_TEMPORARY_EGRESS_CLEANUP.ruleId }, ruleResponse: { SecurityGroupRules: [rule] } }), reserve: async () => { reservations += 1; } }), /protected immutable record unavailable/);
+  assert.equal(reservations, 0);
+  assert.equal(awsCalls.filter((args) => args[1] === "revoke-security-group-egress").length, 0);
+});
+
 test("cleanup provenance authenticates the exact root-created endpoint and egress rule", () => {
   assert.equal(assertStageATemporaryEgressCloudTrailProvenance(provenanceEvents), true);
   assert.throws(() => assertStageATemporaryEgressCloudTrailProvenance({ ...provenanceEvents, ruleEvents: [] }));
@@ -111,23 +136,23 @@ test("executor consumes authorization before one exact revoke and refuses change
     const observed = readCount === 3 ? { ...rule, Description: "changed after authorization" } : rule;
     return { validated: { ruleId: STAGE_A_TEMPORARY_EGRESS_CLEANUP.ruleId }, ruleResponse: { SecurityGroupRules: [observed] } };
   };
-  await assert.rejects(executeStageATemporaryEgressCleanup({ authorization, sourceSha, workflowRunId: "42", workflowRunAttempt: "1", rootRun: async (args) => calls.push(args), releaseRun: async () => {}, terraformStateLock: lock(), read, reserve: async ({ authorization: value }) => reserves.push(value.authorizationSha256) }), /changed after authorization/);
+  await assert.rejects(executeStageATemporaryEgressCleanup({ authorization, sourceSha, workflowRunId: "42", workflowRunAttempt: "1", rootRun: rootRunner(calls), releaseRun: async () => {}, terraformStateLock: lock(), read, reserve: async ({ authorization: value }) => reserves.push(value.authorizationSha256) }), /changed after authorization/);
   assert.equal(reserves.length, 1);
   assert.equal(calls.length, 0);
 });
 
 test("executor refuses a replayed authorization before issuing any revoke", async () => {
   const awsCalls = [];
-  await assert.rejects(executeStageATemporaryEgressCleanup({ authorization, sourceSha, workflowRunId: "42", workflowRunAttempt: "1", rootRun: async (args) => awsCalls.push(args), releaseRun: async () => {}, terraformStateLock: lock(), read: () => ({ validated: { ruleId: STAGE_A_TEMPORARY_EGRESS_CLEANUP.ruleId }, ruleResponse: { SecurityGroupRules: [rule] } }), reserve: async () => { throw new Error("Temporary egress cleanup authorization has already been consumed; replay is forbidden."); } }), /already been consumed/);
-  assert.deepEqual(awsCalls, []);
+  await assert.rejects(executeStageATemporaryEgressCleanup({ authorization, sourceSha, workflowRunId: "42", workflowRunAttempt: "1", rootRun: rootRunner(awsCalls), releaseRun: async () => {}, terraformStateLock: lock(), read: () => ({ validated: { ruleId: STAGE_A_TEMPORARY_EGRESS_CLEANUP.ruleId }, ruleResponse: { SecurityGroupRules: [rule] } }), reserve: async () => { throw new Error("Temporary egress cleanup authorization has already been consumed; replay is forbidden."); } }), /already been consumed/);
+  assert.equal(awsCalls.filter((args) => args[1] === "revoke-security-group-egress").length, 0);
 });
 
 test("executor can emit only the exact rule-ID revoke and never bulk-revokes", async () => {
   let reads = 0; const awsCalls = []; let reservationCount = 0;
   const read = () => { reads += 1; const absent = reads >= 4; return { validated: { ruleId: STAGE_A_TEMPORARY_EGRESS_CLEANUP.ruleId, rulePresent: !absent }, ruleResponse: { SecurityGroupRules: absent ? [] : [rule] } }; };
-  const result = await executeStageATemporaryEgressCleanup({ authorization, sourceSha, workflowRunId: "42", workflowRunAttempt: "1", rootRun: async (args) => awsCalls.push(args), releaseRun: async (args) => { if (args.includes("put-object")) reservationCount += 1; }, terraformStateLock: lock(), read, reserve: async () => { reservationCount += 1; } });
+  const result = await executeStageATemporaryEgressCleanup({ authorization, sourceSha, workflowRunId: "42", workflowRunAttempt: "1", rootRun: rootRunner(awsCalls), releaseRun: async (args) => { if (args.includes("put-object")) reservationCount += 1; }, terraformStateLock: lock(), read, reserve: async () => { reservationCount += 1; } });
   assert.deepEqual(result, { completed: true, ruleId: "sgr-0b8c789e9694d4b77", revocationCount: 1 });
-  assert.deepEqual(awsCalls, [["ec2", "revoke-security-group-egress", "--security-group-rule-ids", "sgr-0b8c789e9694d4b77", "--output", "json", "--no-cli-pager"]]);
+  assert.deepEqual(awsCalls.filter((args) => args[1] === "revoke-security-group-egress"), [["ec2", "revoke-security-group-egress", "--security-group-rule-ids", "sgr-0b8c789e9694d4b77", "--output", "json", "--no-cli-pager"]]);
   assert.equal(reservationCount, 2); // immutable attempt and terminal result records
 });
 
