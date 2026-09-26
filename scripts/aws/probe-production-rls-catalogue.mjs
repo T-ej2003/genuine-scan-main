@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { APP_ONLY } from "./production-app-only-contract.mjs";
 import { APP_ONLY_VERIFIER, appOnlyVerifierNetwork } from "./production-app-only-policy.mjs";
 import { appOnlyRequirementIdentity, assertAppOnlyRequirements } from "./production-app-only-requirements.mjs";
-import { authenticateAppOnlyImages } from "./production-app-only-images.mjs";
+import { authenticateAppOnlyImages, authenticateProtectedMainBackendImage } from "./production-app-only-images.mjs";
 import { assertAppOnlyCandidateAncestor } from "./produce-production-app-only-requirements.mjs";
 import { canonicalJson, canonicalSha256, STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { assertEcsTaskDefinitionReadback } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/ecs-task-definition-readback.mjs";
@@ -67,14 +67,7 @@ export function buildProductionRlsProbeCommand(requirements, identity, { securit
     environment: [{ name: "RLS_PROBE_INPUT_JSON", value: configuration }] });
 }
 
-export function authenticateProtectedMainProbeImage({ sourceSha, response }) {
-  assert.match(sourceSha || "", /^[a-f0-9]{40}$/);
-  const tag = `${sourceSha}-backend-only`, details = response?.imageDetails;
-  assert.ok(Array.isArray(details) && details.length === 1, "Protected-main probe image must resolve exactly once");
-  const image = details[0]; assert.equal(image.registryId, APP_ONLY.account); assert.equal(image.repositoryName, "mscqr-backend");
-  assert.match(image.imageDigest || "", /^sha256:[a-f0-9]{64}$/); assert.ok(Array.isArray(image.imageTags) && image.imageTags.includes(tag));
-  return Object.freeze({ sourceSha, digest: image.imageDigest, tag });
-}
+export const authenticateProtectedMainProbeImage = authenticateProtectedMainBackendImage;
 
 export function bindProductionRlsProbeIdentities({ sourceSha, requirements, images, probeImage, databaseHostname }) {
   assert.match(sourceSha || "", /^[a-f0-9]{40}$/); assert.equal(requirements?.sourceSha, sourceSha);

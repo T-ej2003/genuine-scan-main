@@ -4,7 +4,7 @@ import { prepareAppOnlyDeployment, prepareAppOnlyVerifier, authenticateAppOnlyVe
 import { APP_ONLY } from "../aws/production-app-only-contract.mjs";
 import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
 import { createAppOnlyRequirements } from "../aws/production-app-only-requirements.mjs";
-import { buildAppOnlyVerifierCommand } from "../aws/production-app-only-verifier-command.mjs";
+import { buildAppOnlyVerifierCommand, buildAppOnlyVerifierDefinition } from "../aws/production-app-only-verifier-command.mjs";
 import { appOnlyVerifierNetwork } from "../aws/production-app-only-policy.mjs";
 import { APP_ONLY_SESSION_RISK_CONTRACT } from "../aws/production-app-only-images.mjs";
 
@@ -28,10 +28,11 @@ function fixture(deploymentId = "ecs-svc/100") {
   const requirements = createAppOnlyRequirements({ repositoryRoot: process.cwd(), sourceSha, candidateSourceSha,
     packageChecksums: { fixture: true }, catalogue: { routines: [{ schema: "app_auth", name: "fixed", arguments: "" }],
       tables: [{ name: "Example" }], policies: [{ table: "Example", name: "isolation" }], schemas: [{ name: "app_auth" }], roles: [{ name: "app" }] } });
-  const verifierIdentity = { ...identity, verifierImageDigest: candidateDigest, databaseHostname: "reviewed.eu-west-2.rds.amazonaws.com" };
+  const verifierImage = { sourceSha, digest: `sha256:${"4".repeat(64)}`, tag: `${sourceSha}-backend-only` };
+  const verifierIdentity = { ...identity, verifierImageDigest: verifierImage.digest, databaseHostname: "reviewed.eu-west-2.rds.amazonaws.com" };
   const { verificationContractSha256 } = buildAppOnlyVerifierCommand({ requirements, identity: verifierIdentity, repositoryRoot: process.cwd() });
   return { sourceSha, predecessorSourceSha, now, repositoryRoot: process.cwd(), live: { definition, service, tasks }, requirements,
-    images: signed({ schemaVersion: 1, kind: "APP_ONLY_AUTHENTICATED_IMAGES", sourceSha, candidateSourceSha, candidateDigest, generatedAt, sessionRisk: APP_ONLY_SESSION_RISK_CONTRACT }),
+    images: signed({ schemaVersion: 1, kind: "APP_ONLY_AUTHENTICATED_IMAGES", sourceSha, candidateSourceSha, candidateDigest, generatedAt, sessionRisk: APP_ONLY_SESSION_RISK_CONTRACT }), verifierImage,
     iam: signed({ schemaVersion: 1, kind: "APP_ONLY_LIVE_IAM_COMPATIBILITY", identity, generatedAt,
       status: "ALREADY_APPLIED_COMPATIBLE", sourceToLiveIamSemanticDifferences: 0, scope: "BACKEND_RUNTIME_ROLES" }),
     verifierIam: signed({ schemaVersion: 1, kind: "APP_ONLY_LIVE_IAM_COMPATIBILITY", identity, generatedAt,
@@ -61,23 +62,33 @@ test("verifier preparation binds exact task/network requirements without claimin
   assert.equal(result.eligible, false); assert.equal(result.kind, "APP_ONLY_VERIFIER_PREPARATION");
   assert.equal(result.evidence.requirements, input.requirements.requirementsSha256);
   assert.equal(result.evidence.verifierIam, input.verifierIam.evidenceSha256);
+  assert.equal(result.evidence.verifierImage, canonicalSha256(input.verifierImage));
   assert.throws(() => prepareAppOnlyVerifier({ ...input, verifierIam: input.iam }));
   assert.throws(() => prepareAppOnlyVerifier({ ...input, verifierIam: undefined }));
   assert.equal(result.networkSha256, canonicalSha256(appOnlyVerifierNetwork()));
   assert.equal(result.identity.candidateDigest, input.images.candidateDigest);
+  assert.equal(result.identity.verifierImageDigest, input.verifierImage.digest);
+  assert.notEqual(result.identity.verifierImageDigest, result.identity.candidateDigest, "Verifier code is pinned to protected main, not the older candidate image");
+  const { definition } = buildAppOnlyVerifierDefinition({ requirements: input.requirements, identity: result.identity,
+    repositoryRoot: input.repositoryRoot, databaseSecretArn: input.databaseSecretArn });
+  assert.equal(definition.containerDefinitions[0].image,
+    `${APP_ONLY.backendRepository}@${input.verifierImage.digest}`, "The verifier task must execute the protected-main runtime image");
   assert.equal(result.predecessor.taskDefinitionArn, input.live.definition.taskDefinitionArn);
   assert.throws(() => prepareAppOnlyDeployment(input), "A verifier request is not deployment eligibility");
   assert.throws(() => prepareAppOnlyVerifier({ ...input, databaseSecretArn: input.databaseSecretArn.replace("read-only-canary", "admin") }));
+  assert.throws(() => prepareAppOnlyVerifier({ ...input, verifierImage: { ...input.verifierImage, sourceSha: input.images.candidateSourceSha } }));
+  assert.throws(() => prepareAppOnlyVerifier({ ...input, verifierImage: { ...input.verifierImage, tag: `${input.images.candidateSourceSha}-backend-only` } }));
+  assert.throws(() => prepareAppOnlyVerifier({ ...input, verifierImage: { ...input.verifierImage, unexpected: true } }));
   assert.throws(() => prepareAppOnlyVerifier({ ...input, now: input.now + APP_ONLY.maxEvidenceAgeMs + 1 }));
 });
 
 test("consumer recomputes the full verifier closure and rejects altered proof or current ECS", () => {
   const input = fixture(); input.databaseSecretArn = input.verifierIam.databaseSecretArn;
   const inputs = { schemaVersion: 1, kind: "APP_ONLY_VERIFIER_INPUTS", preparation: prepareAppOnlyVerifier(input),
-    images: input.images, iam: input.iam, verifierIam: input.verifierIam, runtime: input.runtime, requirements: input.requirements, requirementsReference: {} };
+    images: input.images, verifierImage: input.verifierImage, iam: input.iam, verifierIam: input.verifierIam, runtime: input.runtime, requirements: input.requirements, requirementsReference: {} };
   const context = { inputs, sourceSha: input.sourceSha, live: input.live, repositoryRoot: input.repositoryRoot, now: input.now + 1000 };
   assert.equal(authenticateAppOnlyVerifierInputs(context).databaseSecretArn, input.databaseSecretArn);
-  for (const name of ["images", "iam", "verifierIam", "runtime", "requirements"]) {
+  for (const name of ["images", "verifierImage", "iam", "verifierIam", "runtime", "requirements"]) {
     const changed = structuredClone(inputs); changed[name] = {};
     assert.throws(() => authenticateAppOnlyVerifierInputs({ ...context, inputs: changed }), name);
   }
@@ -113,7 +124,7 @@ test(`deployment consumer preserves opaque ID and rejects substituted proof and 
   const input = fixture(deploymentId); input.databaseSecretArn = input.verifierIam.databaseSecretArn;
   const verifierInputs = { schemaVersion: 1, kind: "APP_ONLY_VERIFIER_INPUTS", preparation: prepareAppOnlyVerifier(input),
     images: input.images, iam: input.iam, verifierIam: input.verifierIam, runtime: input.runtime,
-    requirements: input.requirements, requirementsReference: {} };
+    verifierImage: input.verifierImage, requirements: input.requirements, requirementsReference: {} };
   const inputs = { schemaVersion: 1, kind: "APP_ONLY_DEPLOYMENT_INPUTS", preparation: prepareAppOnlyDeployment(input),
     inputs: verifierInputs, database: input.database, compatibilityReference: {}, verifierTaskArn: "fixture", verifierTaskDefinitionArn: "fixture" };
   const context = { inputs, sourceSha: input.sourceSha, live: input.live, repositoryRoot: input.repositoryRoot, now: input.now + 1000 };
