@@ -11,6 +11,8 @@ import {
   assertStageAResourceDrift,
   buildStageAProductionArtifactsBucketPolicy,
   buildStageAProductionArtifactsBucketPolicyPredecessor,
+  buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservationPredecessor,
+  buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection,
   createStageAProductionArtifactsRecoveryCompletion,
   createStageAProductionArtifactsReconciliationAuthorization,
   createStageAProductionArtifactsReconciliationPrepareEvidence,
@@ -20,6 +22,10 @@ import {
   STAGE_A_LOCKED_AWS_RESOURCE_STATE_SCHEMA_VERSIONS,
   STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY,
   STAGE_A_TERRAFORM_VERSION,
+  stageAProductionArtifactsLegacyReservationRepairTransition,
+  stageAProductionArtifactsRecoveryListBucketBootstrapTransition,
+  stageAProductionArtifactsProviderReadonlyJournalTransition,
+  stageAProductionArtifactsPolicySha256,
 } from "../aws/production-stage-a-control-plane.mjs";
 import { createStageAProductionArtifactsReservation } from "../aws/production-stage-a-production-artifacts-journal.mjs";
 
@@ -90,6 +96,44 @@ test("the production adapter rejects a raw backend identity from another state e
 test("exact recovery drift is accepted only with independently authenticated completion", () => {
   assert.doesNotThrow(() => assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(refreshPlan(), { sourceSha, recoveryCompletion: completion(), preStateSerial: 35, verifyRecoveryCompletion: verifier }));
   assert.throws(() => assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(refreshPlan(), { sourceSha, recoveryCompletion: completion(), preStateSerial: 35 }), /independent verifier/);
+});
+
+test("post-recovery refresh accepts the exact source-defined Terraform pre-state distinct from the authenticated live predecessor", () => {
+  const statePredecessor = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservationPredecessor();
+  const successor = buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection();
+  const transition = stageAProductionArtifactsLegacyReservationRepairTransition();
+  const recovery = createStageAProductionArtifactsRecoveryCompletion({ sourceSha, recoveryAuthorizationSha256: authSha, livePolicy: successor, predecessorPolicySha256: transition.predecessorPolicySha256, desiredPolicySha256: transition.desiredPolicySha256, stateLineage: lineage, preStateSerial: 35, preStateSha256: stateSha256 });
+  const exact = refreshPlan({ before: statePredecessor, after: successor });
+  assert.equal(stageAProductionArtifactsPolicySha256(statePredecessor), "0d5d20a784351f38712513252223fbdfaca52e4301bd00b5d0298882702842be");
+  assert.equal(transition.predecessorPolicySha256, "eb6f77c6a1901f9e37840e4f8d25171725fe831ac96e2a516ee11aaa76570afe");
+  assert.equal(transition.desiredPolicySha256, "eae5eb5c16bf63e33fd1056a425463fcdfd5f67f5957e22478981639c9a236ee");
+  assert.notEqual(stageAProductionArtifactsPolicySha256(statePredecessor), transition.predecessorPolicySha256, "the Terraform state pre-image is not the live recovery predecessor");
+  assert.equal(stageAProductionArtifactsPolicySha256(successor), transition.desiredPolicySha256);
+  assert.doesNotThrow(() => assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(exact, { sourceSha, recoveryCompletion: recovery, preStateSerial: 35, preStateSha256: stateSha256, verifyRecoveryCompletion: verifier }));
+
+  for (const [label, mutate] of [
+    ["unknown state predecessor", (plan) => { plan.resource_drift[0].change.before = resource({ ...statePredecessor, Statement: [...statePredecessor.Statement, { Sid: "Unreviewed", Effect: "Allow", Action: "s3:*", Resource: "*" }] }); }],
+    ["changed source-defined state predecessor", (plan) => { plan.resource_drift[0].change.before = resource({ ...statePredecessor, Statement: statePredecessor.Statement.map((statement, index) => index === 0 ? { ...statement, Resource: "*" } : statement) }); }],
+    ["wrong recovery predecessor binding", (plan) => { plan.resource_drift[0].change.before = resource(buildStageAProductionArtifactsBucketPolicyPredecessor()); }],
+    ["wrong successor", (plan) => { plan.resource_drift[0].change.after = resource(desired); }],
+    ["wrong resource action", (plan) => { plan.resource_drift[0].change.actions = ["delete", "create"]; }],
+  ]) {
+    const candidate = structuredClone(exact); mutate(candidate);
+    assert.throws(() => assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(candidate, { sourceSha, recoveryCompletion: recovery, preStateSerial: 35, preStateSha256: stateSha256, verifyRecoveryCompletion: verifier }), /not exact|uncontracted|policy/i, label);
+  }
+  assert.throws(() => assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(exact, { sourceSha, recoverySourceSha: "f".repeat(40), recoveryCompletion: recovery, preStateSerial: 35, preStateSha256: stateSha256, verifyRecoveryCompletion: verifier }), /completion binding/);
+  assert.throws(() => assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(exact, { sourceSha, recoveryCompletion: recovery, preStateSerial: 36, preStateSha256: stateSha256, verifyRecoveryCompletion: verifier }), /completion binding/);
+  assert.throws(() => assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(exact, { sourceSha, recoveryCompletion: recovery, preStateSerial: 35, preStateSha256: "d".repeat(64), verifyRecoveryCompletion: verifier }), /completion binding/);
+});
+
+test("incident Terraform pre-state is not accepted for another executable recovery transition", () => {
+  const statePredecessor = buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservationPredecessor();
+  for (const otherTransition of [stageAProductionArtifactsRecoveryListBucketBootstrapTransition(), stageAProductionArtifactsProviderReadonlyJournalTransition()]) {
+    const otherCompletion = createStageAProductionArtifactsRecoveryCompletion({ sourceSha, recoveryAuthorizationSha256: authSha, livePolicy: otherTransition.desired, predecessorPolicySha256: otherTransition.predecessorPolicySha256, desiredPolicySha256: otherTransition.desiredPolicySha256, stateLineage: lineage, preStateSerial: 35, preStateSha256: stateSha256 });
+    const plan = refreshPlan({ before: statePredecessor, after: otherTransition.desired });
+    assert.throws(() => assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(plan, { sourceSha, recoveryCompletion: otherCompletion, preStateSerial: 35, preStateSha256: stateSha256, verifyRecoveryCompletion: verifier }), /predecessor is not exact/);
+  }
+  assert.equal(stageAProductionArtifactsPolicySha256(stageAProductionArtifactsProviderReadonlyJournalTransition().desired), stageAProductionArtifactsLegacyReservationRepairTransition().desiredPolicySha256, "another transition can share the incident successor but not its predecessor identity");
 });
 
 test("recovery refresh validator is closed-world for policy and resource drift", () => {
