@@ -55,14 +55,15 @@ DO $$ BEGIN
   EXECUTE pg_catalog.format('GRANT mscqr_prod_subscription_observer TO %I WITH ADMIN FALSE, INHERIT FALSE, SET TRUE', current_user);
 END $$;
 SET ROLE mscqr_prod_subscription_observer;
-CREATE OR REPLACE FUNCTION app_rls.production_security_subscription_inventory()
+DROP FUNCTION IF EXISTS app_rls.production_security_subscription_inventory();
+CREATE FUNCTION app_rls.production_security_subscription_inventory()
 RETURNS TABLE(subscription_name text,subscription_owner text,enabled boolean,binary boolean,streaming text,two_phase text,
   disable_on_error boolean,password_required boolean,run_as_owner boolean,failover boolean,slot_name text,
-  synchronous_commit text,publications text[],origin text,connection_info_sha256 text)
+  synchronous_commit text,publications text[],origin text,skip_lsn text,connection_info_sha256 text)
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog AS $subscription_inventory$
   SELECT s.subname::text,o.rolname::text,s.subenabled,s.subbinary,s.substream::text,s.subtwophasestate::text,
     s.subdisableonerr,s.subpasswordrequired,s.subrunasowner,s.subfailover,s.subslotname::text,s.subsynccommit,
-    ARRAY(SELECT publication FROM pg_catalog.unnest(s.subpublications) publication ORDER BY publication),s.suborigin,
+    ARRAY(SELECT publication FROM pg_catalog.unnest(s.subpublications) publication ORDER BY publication),s.suborigin,s.subskiplsn::text,
     pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
       pg_catalog.jsonb_build_array('mscqr-security-subscription-connection-v1',s.subname,s.subconninfo)::text,'UTF8')),'hex')
   FROM pg_catalog.pg_subscription s JOIN pg_catalog.pg_roles o ON o.oid=s.subowner

@@ -654,6 +654,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         const subscription = (catalogue) => catalogue.securityBindings.find(({ kind, name }) => kind === "subscription" && name === "rebaseline_disabled_subscription");
         assert.equal(subscription(restrictedSubscriptionCatalogue)?.definition.enabled, false);
         assert.deepEqual(subscription(restrictedSubscriptionCatalogue)?.definition.publications, ["rebaseline_remote_a","rebaseline_remote_z"]);
+        assert.equal(subscription(restrictedSubscriptionCatalogue)?.definition.skip_lsn, "0/0");
         const firstDigest = subscription(restrictedSubscriptionCatalogue)?.definition.connection_info_sha256;
         assert.match(firstDigest || "", /^[a-f0-9]{64}$/);
         assert.equal(JSON.stringify(restrictedSubscriptionCatalogue).includes("host=127.0.0.1"), false);
@@ -662,6 +663,15 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
           containerExitCode: 0, requestSha256: "f".repeat(64), verificationContractSha256: "f".repeat(64) };
         const before = diffSecurityRebaselineInventories(createLiveSecurityRebaselineInventory({ protectedMainSha: sourceSha,
           catalogue: restrictedSubscriptionCatalogue, canonical: canonicalSubscription, taskEvidence: evidence }), canonicalSubscription);
+        await maintenanceClient.$executeRawUnsafe("ALTER SUBSCRIPTION rebaseline_disabled_subscription SKIP (lsn = '0/16B6C50')");
+        const skippedSubscriptionCatalogue = await collectCatalogueRows(verifier), directSkippedSubscriptionCatalogue = await collectCatalogueRows(maintenanceClient);
+        assert.equal(subscription(skippedSubscriptionCatalogue)?.definition.skip_lsn, "0/16B6C50");
+        assert.equal(subscription(directSkippedSubscriptionCatalogue)?.definition.skip_lsn, "0/16B6C50", "canonical and restricted collection use identical skip-state semantics");
+        const skipped = diffSecurityRebaselineInventories(createLiveSecurityRebaselineInventory({ protectedMainSha: sourceSha,
+          catalogue: skippedSubscriptionCatalogue, canonical: canonicalSubscription, taskEvidence: evidence }), canonicalSubscription);
+        assert.notDeepEqual(skipped.differences.find(({ collection, identity }) => collection === "bindings" && identity === "subscription:rebaseline_disabled_subscription")?.afterSha256,
+          before.differences.find(({ collection, identity }) => collection === "bindings" && identity === "subscription:rebaseline_disabled_subscription")?.afterSha256,
+          "the real restricted PG18 projection preserves and diffs a pending subscription skip LSN");
         await maintenanceClient.$executeRawUnsafe("ALTER SUBSCRIPTION rebaseline_disabled_subscription CONNECTION 'host=127.0.0.2 dbname=unused password=synthetic_test_value'");
         const changedSubscriptionCatalogue = await collectCatalogueRows(verifier);
         const secondDigest = subscription(changedSubscriptionCatalogue)?.definition.connection_info_sha256;

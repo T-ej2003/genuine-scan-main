@@ -10,8 +10,8 @@ const schemaOwnerRole = "mscqr_prd_rls_phase2_owner";
 const database = "mscqr_production_rls_green_phase2";
 const collections = Object.freeze(["routines", "tables", "policies", "schemas", "roles"]);
 const expectedRoutines = Object.freeze(["printing_readiness", "printing_create_job", "printing_connector_identity"]);
-const subscriptionProjection = Object.freeze({ owner: "mscqr_prod_subscription_observer", bodySha256: "0bdb8cc2687ed93da82dec724ecb2350f048b2fb9b8b5f4ccd5bbf31085c7958",
-  result: 'TABLE(subscription_name text, subscription_owner text, enabled boolean, "binary" boolean, streaming text, two_phase text, disable_on_error boolean, password_required boolean, run_as_owner boolean, failover boolean, slot_name text, synchronous_commit text, publications text[], origin text, connection_info_sha256 text)' });
+const subscriptionProjection = Object.freeze({ owner: "mscqr_prod_subscription_observer", bodySha256: "2d08a32ad8c41fc2496eb77f5b9a368f0899da8836b22fe03af00b0ba11288d4",
+  result: 'TABLE(subscription_name text, subscription_owner text, enabled boolean, "binary" boolean, streaming text, two_phase text, disable_on_error boolean, password_required boolean, run_as_owner boolean, failover boolean, slot_name text, synchronous_commit text, publications text[], origin text, skip_lsn text, connection_info_sha256 text)' });
 const expectedPredecessors = Object.freeze({
   "app_rls.printing_connector_identity(p_kind text, p_agent_id text, p_device_fingerprint text, p_printer_selector text, p_gateway_id text, p_gateway_secret_hash text, p_operation text)": "aec14f16d5bf85cc48809a63d3e1a34c8a35c0eb51ac1f46899cfc05a24673b1",
   "app_rls.printing_create_job(p_capability text, p_purpose text, p_request_id text, p_batch_id text, p_printer_id text, p_quantity integer, p_range_start text, p_range_end text, p_print_mode text, p_payload_type text, p_print_lock_token_hash text, p_items jsonb)": "fafcc5b92873b51b786cf937b834f7991bc2eda8ba00b8d5e5a618edd2b1bd1c",

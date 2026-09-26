@@ -74,6 +74,7 @@ test("replication and user-defined security bindings are visible hard stops", ()
 });
 test("parameter ACL, constraint enforcement, publication membership and foreign option digests are security identities", () => {
   const target=canonical(), value=catalogue();
+  value.securityBindings.push({kind:"subscription",name:"sub",owner:role,definition:{enabled:false,binary:false,streaming:"f",two_phase:"d",disable_on_error:false,password_required:true,run_as_owner:false,failover:false,slot_name:null,synchronous_commit:"off",publications:["pub"],origin:"any",skip_lsn:"0/16B6C50",connection_info_sha256:digest}});
   value.parameterPrivileges.push({parameter:"session_replication_role",role,grantor:"mscqr_prod_admin",privilege:"SET",grantable:false});
   value.securityConstraintTriggers.push({constraint_schema:"public",constraint_relation:"child",constraint_name:"child_parent_fkey",schema:"public",relation:"child",enabled:"D",function:"pg_catalog.RI_FKey_check_ins()",trigger_type:5,deferrable:false,initially_deferred:false});
   value.securityBindings.push(

@@ -69,7 +69,7 @@ test("real PostgreSQL catalogue and hostile read-only verifier regressions", { t
       CREATE POLICY fixture_policy ON public.app_only_fixture FOR ALL TO ${role}
         USING (tenant = current_user) WITH CHECK (amount > 0);`);
     const provisioning = fs.readFileSync(path.join(process.cwd(), "documents/ops/iam/production-green-phase-4-read-only-canary-provision.sql"), "utf8");
-    const projection = provisioning.match(/CREATE OR REPLACE FUNCTION app_rls\.production_security_subscription_inventory\([\s\S]*?\$subscription_inventory\$;/)?.[0];
+    const projection = provisioning.match(/CREATE(?: OR REPLACE)? FUNCTION app_rls\.production_security_subscription_inventory\([\s\S]*?\$subscription_inventory\$;/)?.[0];
     assert.ok(projection, "the test installs the exact source-owned restricted subscription projection");
     sql(`CREATE SCHEMA app_rls AUTHORIZATION mscqr_p2_test;
       GRANT SELECT (subconninfo) ON pg_catalog.pg_subscription TO ${subscriptionObserver};

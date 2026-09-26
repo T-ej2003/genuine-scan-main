@@ -121,6 +121,8 @@ test("all fixed catalogue statements use one read-only repeatable-read transacti
   assert.ok(calls.some((sql) => sql.includes("p.proname='production_security_subscription_inventory'")
     && sql.includes("has_column_privilege") && sql.includes("pg_catalog.pg_attribute") && sql.includes("projection.prosrc")
     && sql.includes("pg_catalog.aclexplode") && sql.includes("rolcanlogin")), "subscription projection body, ACL, role and exact column privileges are authenticated");
+  assert.ok(fs.readFileSync(new URL("../aws/production-app-only-database-verifier.mjs", import.meta.url), "utf8").includes("s.subskiplsn::text AS skip_lsn"),
+    "direct subscription collection retains the transaction-skip LSN");
   const subscriptionAclSql = calls.find((sql) => sql.includes("subscription_conninfo_acl"));
   assert.ok(subscriptionAclSql?.includes("pg_catalog.aclexplode(a.attacl)") && subscriptionAclSql.includes("acl.grantee")
     && subscriptionAclSql.includes("acl.grantor") && subscriptionAclSql.includes("acl.is_grantable"),
@@ -134,6 +136,9 @@ test("all fixed catalogue statements use one read-only repeatable-read transacti
   const provisioning = fs.readFileSync("documents/ops/iam/production-green-phase-4-read-only-canary-provision.sql", "utf8");
   assert.ok(provisioning.includes("acl.grantee<>'mscqr_prod_subscription_observer'::pg_catalog.regrole")
     && provisioning.includes("acl.is_grantable"), "provisioning verifies that the observer is the sole non-grantable subconninfo grantee");
+  assert.ok(provisioning.includes("s.subskiplsn::text") && provisioning.includes("skip_lsn text")
+    && provisioning.includes("DROP FUNCTION IF EXISTS app_rls.production_security_subscription_inventory()"),
+  "fixed projection includes subscription skip state and safely replaces its reviewed row type transactionally");
   assert.ok(provisioning.includes("m.roleid='mscqr_prod_subscription_observer'::pg_catalog.regrole")
     && provisioning.includes("member.rolname<>current_user") && provisioning.includes("SET TRUE")
     && provisioning.includes("REVOKE mscqr_prod_subscription_observer FROM %I"),

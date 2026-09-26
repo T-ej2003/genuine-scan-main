@@ -1,7 +1,7 @@
 // Called only by the fixed verifier module baked into the authenticated image.
 // It has no SQL/command overrides and requires one explicit Prisma transaction,
 // avoiding pool-dependent BEGIN/query/COMMIT on different sessions.
-export const SUBSCRIPTION_PROJECTION_BODY_SHA256 = "0bdb8cc2687ed93da82dec724ecb2350f048b2fb9b8b5f4ccd5bbf31085c7958";
+export const SUBSCRIPTION_PROJECTION_BODY_SHA256 = "2d08a32ad8c41fc2496eb77f5b9a368f0899da8836b22fe03af00b0ba11288d4";
 export const SUBSCRIPTION_PROJECTION_STATUS_CONTRACT = Object.freeze({
   role_exists: true, observer_login: false, observer_superuser: false, observer_inherit: false,
   observer_create_role: false, observer_create_db: false, observer_replication: false, observer_bypass_rls: false,
@@ -216,7 +216,7 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
           s.subdisableonerr AS disable_on_error,s.subpasswordrequired AS password_required,s.subrunasowner AS run_as_owner,
           s.subfailover AS failover,s.subslotname::text AS slot_name,s.subsynccommit AS synchronous_commit,
           ARRAY(SELECT publication FROM unnest(s.subpublications) publication ORDER BY publication) AS publications,
-          s.suborigin AS origin,pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(pg_catalog.jsonb_build_array(
+          s.suborigin AS origin,s.subskiplsn::text AS skip_lsn,pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(pg_catalog.jsonb_build_array(
             'mscqr-security-subscription-connection-v1',s.subname,s.subconninfo)::text,'UTF8')),'hex') AS connection_info_sha256
         FROM pg_catalog.pg_subscription s JOIN pg_catalog.pg_roles o ON o.oid=s.subowner ORDER BY s.subname`)
       : await tx.$queryRawUnsafe(`SELECT * FROM app_rls.production_security_subscription_inventory() ORDER BY subscription_name`);
@@ -225,7 +225,7 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
         streaming: subscription.streaming, two_phase: subscription.two_phase, disable_on_error: subscription.disable_on_error,
         password_required: subscription.password_required, run_as_owner: subscription.run_as_owner, failover: subscription.failover,
         slot_name: subscription.slot_name, synchronous_commit: subscription.synchronous_commit,
-        publications: subscription.publications, origin: subscription.origin,
+        publications: subscription.publications, origin: subscription.origin, skip_lsn: subscription.skip_lsn,
         connection_info_sha256: subscription.connection_info_sha256 } });
     const [routines] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.schema,x.name,x.arguments),'[]'::jsonb) AS rows FROM (
       SELECT n.nspname AS schema,p.proname AS name,pg_catalog.pg_get_function_identity_arguments(p.oid) AS arguments,
