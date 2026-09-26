@@ -120,6 +120,25 @@ const collectUnpinnedDeparserSurface = (client) => client.$transaction(async (tx
 
 const changedRowCount = (left, right) => left.filter((row, index) => JSON.stringify(row) !== JSON.stringify(right[index])).length;
 const changedFieldCount = (left, right, field) => left.filter((row, index) => row[field] !== right[index]?.[field]).length;
+const asProductionEquivalentCatalogue = (catalogue) => {
+  const result = structuredClone(catalogue);
+  result.securityRoles = result.securityRoles.filter(({ name }) => !["mscqr_p2_test","certification-administrator"].includes(name));
+  result.roleMetadata = result.roleMetadata.filter(({ name }) => !["mscqr_p2_test","certification-administrator"].includes(name));
+  for (const role of result.securityRoles) for (const membership of [...role.memberships, ...role.members])
+    if (membership.grantor === "mscqr_p2_test") membership.grantor = "rdsadmin";
+  for (const operator of result.operatorCapabilities) for (const membership of operator.memberships)
+    if (membership.grantor === "mscqr_p2_test") membership.grantor = "rdsadmin";
+  for (const extension of result.securityExtensions)
+    if (extension.name === "plpgsql" && extension.owner === "mscqr_p2_test") extension.owner = "rdsadmin";
+  for (const binding of result.securityBindings) if (binding.kind === "language" && binding.name === "plpgsql") {
+    if (binding.owner === "mscqr_p2_test") binding.owner = "rdsadmin";
+    for (const grant of binding.definition.grants) {
+      if (grant.grantor === "mscqr_p2_test") grant.grantor = "rdsadmin";
+      if (grant.role === "mscqr_p2_test") grant.role = "rdsadmin";
+    }
+  }
+  return result;
+};
 
 test("approved production package executes on disposable PostgreSQL 18 and rollback removes every managed role", { skip: !enabled }, async (t) => {
   const adminUrl = safeAdminUrl();
@@ -318,29 +337,52 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
       const canonicalMemberships = securityRebaselineCanonical.objects.filter(({ collection }) => ["roleMemberships","roleMembers","operatorMemberships"].includes(collection));
       assert.ok(canonicalMemberships.length > 0 && canonicalMemberships.every(({ identity }) => !identity.includes("mscqr_p2_test")));
       assert.ok(canonicalMemberships.some(({ identity }) => identity.includes("rdsadmin")), "canonical PG18 harness grantors map to the production semantic identity");
-      const productionEquivalentCatalogue = structuredClone(catalogue);
-      productionEquivalentCatalogue.securityRoles = productionEquivalentCatalogue.securityRoles.filter(({ name }) => !["mscqr_p2_test","certification-administrator"].includes(name));
-      productionEquivalentCatalogue.roleMetadata = productionEquivalentCatalogue.roleMetadata.filter(({ name }) => !["mscqr_p2_test","certification-administrator"].includes(name));
-      for (const roleRow of productionEquivalentCatalogue.securityRoles) {
-        for (const membership of [...roleRow.memberships, ...roleRow.members]) if (membership.grantor === "mscqr_p2_test") membership.grantor = "rdsadmin";
-      }
-      for (const operator of productionEquivalentCatalogue.operatorCapabilities)
-        for (const membership of operator.memberships) if (membership.grantor === "mscqr_p2_test") membership.grantor = "rdsadmin";
-      for (const extension of productionEquivalentCatalogue.securityExtensions)
-        if (extension.name === "plpgsql" && extension.owner === "mscqr_p2_test") extension.owner = "rdsadmin";
-      for (const binding of productionEquivalentCatalogue.securityBindings)
-        if (binding.kind === "language" && binding.name === "plpgsql") {
-          if (binding.owner === "mscqr_p2_test") binding.owner = "rdsadmin";
-          for (const grant of binding.definition.grants) {
-            if (grant.grantor === "mscqr_p2_test") grant.grantor = "rdsadmin";
-            if (grant.role === "mscqr_p2_test") grant.role = "rdsadmin";
-          }
-        }
+      const productionEquivalentCatalogue = asProductionEquivalentCatalogue(catalogue);
       const productionEquivalentLive = createLiveSecurityRebaselineInventory({ protectedMainSha: sourceSha, catalogue: productionEquivalentCatalogue,
         canonical: securityRebaselineCanonical, taskEvidence: liveTaskEvidence(sourceSha, context.candidateSourceSha, "8".repeat(64)) });
       const productionEquivalentDiff = diffSecurityRebaselineInventories(productionEquivalentLive, securityRebaselineCanonical);
       assert.equal(productionEquivalentDiff.differenceCount, 0,
         `production-equivalent membership grantors do not create canonical harness drift: ${JSON.stringify(productionEquivalentDiff.differences.map(({collection,identity,field})=>({collection,identity,field})))}`);
+      assert.equal(productionEquivalentDiff.safeToConstructConvergencePlan, true, "canonical managed-role membership topology is nonblocking");
+      await assert.rejects(maintenanceClient.$transaction(async (tx) => {
+        const assertManagedMembershipBlocks = async (label) => {
+          const observed = asProductionEquivalentCatalogue(await collectAppOnlyDatabaseCatalogueRows(tx));
+          const inventory = createLiveSecurityRebaselineInventory({ protectedMainSha: sourceSha, catalogue: observed,
+            canonical: securityRebaselineCanonical, taskEvidence: productionEquivalentLive.taskEvidence });
+          const diff = diffSecurityRebaselineInventories(inventory, securityRebaselineCanonical);
+          assert.equal(diff.safeToConstructConvergencePlan, false, `${label} must block plan construction`);
+          assert.ok(diff.differences.some(({ collection }) => ["roleMemberships","roleMembers"].includes(collection)),
+            `${label} must be represented in the ordinary membership topology`);
+        };
+        const app = '"mscqr_prd_rls_phase2_app"', admin = '"mscqr_prod_admin"';
+        for (const privilegedRole of ["pg_read_all_data","pg_write_all_data"]) {
+          assert.equal(catalogue.securityRoles.find(({ name }) => name === "mscqr_prd_rls_phase2_app").memberships
+            .some(({ role }) => role === privilegedRole), false, `canonical app role must not already belong to ${privilegedRole}`);
+          await tx.$executeRawUnsafe(`GRANT ${privilegedRole} TO ${app} WITH ADMIN FALSE, INHERIT TRUE, SET TRUE`);
+          await assertManagedMembershipBlocks(`managed application membership in ${privilegedRole}`);
+          await tx.$executeRawUnsafe(`REVOKE ${privilegedRole} FROM ${app}`);
+        }
+        await tx.$executeRawUnsafe("CREATE ROLE rebaseline_managed_intermediate NOLOGIN");
+        await tx.$executeRawUnsafe("GRANT pg_write_all_data TO rebaseline_managed_intermediate WITH ADMIN FALSE, INHERIT TRUE, SET TRUE");
+        await tx.$executeRawUnsafe(`GRANT rebaseline_managed_intermediate TO ${app} WITH ADMIN FALSE, INHERIT TRUE, SET TRUE`);
+        await assertManagedMembershipBlocks("managed role membership in an intermediate privileged role");
+        await tx.$executeRawUnsafe(`REVOKE rebaseline_managed_intermediate FROM ${app}`);
+        await tx.$executeRawUnsafe("DROP ROLE rebaseline_managed_intermediate");
+
+        await tx.$executeRawUnsafe(`REVOKE "mscqr_prd_rls_phase2_app" FROM ${admin}`);
+        await assertManagedMembershipBlocks("removal of a canonical managed membership");
+        await tx.$executeRawUnsafe(`GRANT "mscqr_prd_rls_phase2_app" TO ${admin} WITH ADMIN FALSE, INHERIT FALSE, SET TRUE`);
+        for (const options of [
+          { admin: "TRUE", inherit: "FALSE", set: "TRUE" },
+          { admin: "FALSE", inherit: "TRUE", set: "TRUE" },
+          { admin: "FALSE", inherit: "FALSE", set: "FALSE" },
+        ]) {
+          await tx.$executeRawUnsafe(`GRANT "mscqr_prd_rls_phase2_app" TO ${admin} WITH ADMIN ${options.admin}, INHERIT ${options.inherit}, SET ${options.set}`);
+          await assertManagedMembershipBlocks(`canonical membership option change ${JSON.stringify(options)}`);
+          await tx.$executeRawUnsafe(`GRANT "mscqr_prd_rls_phase2_app" TO ${admin} WITH ADMIN FALSE, INHERIT FALSE, SET TRUE`);
+        }
+        throw new Error("rollback managed role membership drift fixtures");
+      }, { maxWait: 5000, timeout: 30000 }), /rollback managed role membership drift fixtures/);
       const operatorCoverage = SECURITY_REBASELINE_COVERAGE.find(({ surface }) => surface === "operator capabilities");
       assert.equal(operatorCoverage.rawCollection, "operatorCapabilities");
       for (const collection of ["operatorInheritedCapabilities","operatorSetRoles","operatorSetRoleCapabilities","operatorAdminCapabilities"])
