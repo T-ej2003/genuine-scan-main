@@ -283,7 +283,7 @@ export async function executeStageATemporaryEgressCleanup({ authorization, sourc
     const finalCheck = read(rootRun);
     if (finalCheck.validated.ruleId !== target.ruleId || canonicalJson(finalCheck.ruleResponse) !== canonicalJson(lockedBefore.ruleResponse)) fail("Temporary egress cleanup live rule changed after authorization; no mutation was performed.");
     const hasTargetRule = (inventory) => Array.isArray(inventory.ruleResponse?.SecurityGroupRules) && inventory.ruleResponse.SecurityGroupRules.some(({ SecurityGroupRuleId }) => SecurityGroupRuleId === target.ruleId);
-    try { rootRun(["ec2", "revoke-security-group-egress", "--security-group-rule-ids", target.ruleId, "--output", "json", "--no-cli-pager"]); }
+    try { rootRun(["ec2", "revoke-security-group-egress", "--group-id", target.sourceGroupId, "--security-group-rule-ids", target.ruleId, "--output", "json", "--no-cli-pager"]); }
     catch (error) {
       const observed = read(rootRun, { allowRuleAbsent: true });
       if (hasTargetRule(observed)) throw new Error("Temporary egress cleanup revoke outcome is ambiguous; authorization consumed and no retry is permitted.", { cause: error });

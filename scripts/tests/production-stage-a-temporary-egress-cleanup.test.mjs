@@ -152,7 +152,7 @@ test("executor can emit only the exact rule-ID revoke and never bulk-revokes", a
   const read = () => { reads += 1; const absent = reads >= 4; return { validated: { ruleId: STAGE_A_TEMPORARY_EGRESS_CLEANUP.ruleId, rulePresent: !absent }, ruleResponse: { SecurityGroupRules: absent ? [] : [rule] } }; };
   const result = await executeStageATemporaryEgressCleanup({ authorization, sourceSha, workflowRunId: "42", workflowRunAttempt: "1", rootRun: rootRunner(awsCalls), releaseRun: async (args) => { if (args.includes("put-object")) reservationCount += 1; }, terraformStateLock: lock(), read, reserve: async () => { reservationCount += 1; } });
   assert.deepEqual(result, { completed: true, ruleId: "sgr-0b8c789e9694d4b77", revocationCount: 1 });
-  assert.deepEqual(awsCalls.filter((args) => args[1] === "revoke-security-group-egress"), [["ec2", "revoke-security-group-egress", "--security-group-rule-ids", "sgr-0b8c789e9694d4b77", "--output", "json", "--no-cli-pager"]]);
+  assert.deepEqual(awsCalls.filter((args) => args[1] === "revoke-security-group-egress"), [["ec2", "revoke-security-group-egress", "--group-id", "sg-051a24aedff773761", "--security-group-rule-ids", "sgr-0b8c789e9694d4b77", "--output", "json", "--no-cli-pager"]]);
   assert.equal(reservationCount, 2); // immutable attempt and terminal result records
 });
 
