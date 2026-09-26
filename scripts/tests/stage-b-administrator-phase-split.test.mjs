@@ -12,6 +12,7 @@ import {
   runPermissionPreflight,
   assertCutoverCriticalEvidence,
   sourcePolicyEvidence,
+  sourceReleaseRoleInlinePolicyEvidence,
 } from "../aws/validate-production-green-stage-b-permissions.mjs";
 import { parseStageBAdministratorPreflightArgs } from "../aws/stage-b-administrator-preflight-args.mjs";
 import { buildEcsExecOperatorEvidence, collectLiveEcsExecOperatorEvidence, ECS_EXEC_OPERATOR_POLICY_ARN, ECS_EXEC_OPERATOR_ROLE_ARN } from "../aws/production-ecs-exec-operator-contract.mjs";
@@ -22,7 +23,8 @@ const planBytes = fs.readFileSync(path.join(root, "scripts/tests/fixtures/produc
 const plan = JSON.parse(planBytes);
 const policyEvidence = (() => {
   const policies = sourcePolicyEvidence().map((policy) => ({ ...policy, defaultVersionId: "v1", liveSha256: policy.sourceSha256, attached: true, matchesSource: true }));
-  return { roleArn: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer", attachedPolicyArns: policies.map(({ arn }) => arn).sort(), inlinePolicyNames: [], inlinePolicies: [], permissionsBoundaryArn: null, policies, status: "valid" };
+  const inlinePolicies = sourceReleaseRoleInlinePolicyEvidence();
+  return { roleArn: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer", attachedPolicyArns: policies.map(({ arn }) => arn).sort(), inlinePolicyNames: inlinePolicies.map(({ policyName }) => policyName), inlinePolicies, permissionsBoundaryArn: null, policies, status: "valid" };
 })();
 const simulation = ({ evaluation: item }) => ({
   decision: item.expectedDecision || "allowed",

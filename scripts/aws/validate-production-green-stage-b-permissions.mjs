@@ -15,6 +15,7 @@ import { assertStageBImportedBackendRolloverActions, assertStageBTaskDefinitionR
 import { assertEcsExecOperatorEvidence, assertEcsExecOperatorLiveEvidence, assertEcsExecOperatorSourceContract, ECS_EXEC_OPERATOR_FORBIDDEN, ECS_EXEC_OPERATOR_REQUIRED, ECS_EXEC_OPERATOR_POLICY_PATH, ECS_EXEC_OPERATOR_ROLE_ARN } from "./production-ecs-exec-operator-contract.mjs";
 import { buildTemporaryCapabilityEvidence } from "./production-stage-a-temporary-kms-capability.mjs";
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
+import { installationDocuments } from "./component-iam-installation-contract.mjs";
 import { assertSimulationContextCardinality, iamSimulationContextArgs } from "./iam-simulation-context.mjs";
 import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { createRootAttestationKmsVerifier, ROOT_ATTESTATION_KEY_ALIAS_ARN, ROOT_ATTESTATION_SIGNING_ALGORITHM } from "./production-root-attestation-key.mjs";
@@ -232,6 +233,39 @@ export function sourcePolicyEvidence() {
   });
 }
 
+export function sourceReleaseRoleInlinePolicyEvidence() {
+  const terminalWriter = installationDocuments().find(({ role }) => role === RELEASE_ROLE_ARN.split("/").at(-1));
+  if (!terminalWriter) throw new Error("Canonical release-role terminal-state policy is missing.");
+  const frontendPath = "infra/aws/terraform/production-web-release/frontend-activation-policy.json";
+  const frontendTerraform = fs.readFileSync(path.join(stageBRoot, "infra/aws/terraform/production-web-release/main.tf"), "utf8");
+  const frontendResource = frontendTerraform.match(/resource\s+"aws_iam_role_policy"\s+"frontend_activation"\s*\{([\s\S]*?)^\}/m)?.[1];
+  const frontendPolicyName = frontendResource?.match(/^\s*name\s*=\s*"([^"]+)"/m)?.[1];
+  if (!frontendPolicyName || !/^\s*role\s*=\s*data\.aws_iam_role\.release_deployer\.id\s*$/m.test(frontendResource)
+    || !/^\s*policy\s*=\s*file\("\$\{path\.module\}\/frontend-activation-policy\.json"\)\s*$/m.test(frontendResource)) {
+    throw new Error("Canonical Terraform frontend-activation policy ownership is missing or ambiguous.");
+  }
+  const documents = [
+    { policyName: terminalWriter.policyName, document: terminalWriter.policy },
+    { policyName: frontendPolicyName, document: JSON.parse(fs.readFileSync(path.join(stageBRoot, frontendPath), "utf8")) },
+  ];
+  if (new Set(documents.map(({ policyName }) => policyName)).size !== documents.length) throw new Error("Canonical release-role inline-policy names are ambiguous.");
+  return documents.map(({ policyName, document }) => ({
+    policyName,
+    sha256: sha256(Buffer.from(canonicalizeJson(normalizeIamPolicyDocument(document, `Canonical ${policyName} policy`)))),
+  })).sort((left, right) => left.policyName.localeCompare(right.policyName));
+}
+
+function completeInlinePolicyNames(response) {
+  if (!response || typeof response !== "object" || Array.isArray(response) || !Array.isArray(response.PolicyNames)
+    || response.PolicyNames.some((name) => typeof name !== "string" || !name)
+    || new Set(response.PolicyNames).size !== response.PolicyNames.length
+    || response.IsTruncated === true || (response.IsTruncated !== undefined && response.IsTruncated !== false)
+    || Object.hasOwn(response, "Marker") || Object.hasOwn(response, "NextToken")) {
+    throw new Error("Release role inline-policy enumeration is malformed or incomplete.");
+  }
+  return response.PolicyNames;
+}
+
 function policyConditionKeyOrigins(document, { policy = "source", sourcePath = "" } = {}) {
   const origins = new Map();
   for (const statement of document?.Statement || []) {
@@ -274,7 +308,7 @@ export function collectLiveReleasePolicyEvidence({ run } = {}) {
   if (typeof run !== "function") throw new Error("Release policy evidence requires an explicit credential-bound AWS command runner.");
   const roleName = RELEASE_ROLE_ARN.split("/").at(-1);
   const attached = JSON.parse(run(["iam", "list-attached-role-policies", "--role-name", roleName, "--output", "json", "--no-cli-pager"])).AttachedPolicies || [];
-  const inlinePolicyNames = JSON.parse(run(["iam", "list-role-policies", "--role-name", roleName, "--output", "json", "--no-cli-pager"])).PolicyNames || [];
+  const inlinePolicyNames = completeInlinePolicyNames(JSON.parse(run(["iam", "list-role-policies", "--role-name", roleName, "--output", "json", "--no-cli-pager"])));
   const inlinePolicies = inlinePolicyNames.map((policyName) => {
     const response = JSON.parse(run(["iam", "get-role-policy", "--role-name", roleName, "--policy-name", policyName, "--output", "json", "--no-cli-pager"]));
     return { policyName, sha256: sha256(Buffer.from(canonicalizeJson(decodePolicyDocument(response.PolicyDocument)))) };
@@ -300,11 +334,21 @@ export function collectLiveReleasePolicyEvidence({ run } = {}) {
 export function assertReleasePolicyEvidence(evidence) {
   if (evidence?.roleArn !== RELEASE_ROLE_ARN || evidence.status !== "valid" || !Array.isArray(evidence.policies)) throw new Error("Release policy evidence is missing or invalid.");
   if (evidence.permissionsBoundaryArn !== null) throw new Error("Release policy evidence contains an unreviewed permissions boundary.");
-  if (!Array.isArray(evidence.inlinePolicyNames) || !Array.isArray(evidence.inlinePolicies || []) || evidence.inlinePolicyNames.length !== (evidence.inlinePolicies || []).length) throw new Error("Release inline-policy evidence is incomplete.");
+  if (!Array.isArray(evidence.inlinePolicyNames) || !Array.isArray(evidence.inlinePolicies) || evidence.inlinePolicyNames.length !== evidence.inlinePolicies.length
+    || evidence.inlinePolicyNames.some((name) => typeof name !== "string" || !name)
+    || JSON.stringify(evidence.inlinePolicyNames) !== JSON.stringify([...evidence.inlinePolicyNames].sort())
+    || new Set(evidence.inlinePolicyNames).size !== evidence.inlinePolicyNames.length
+    || evidence.inlinePolicies.some((policy) => !policy || typeof policy !== "object" || Array.isArray(policy) || typeof policy.policyName !== "string" || !policy.policyName)
+    || new Set(evidence.inlinePolicies.map(({ policyName }) => policyName)).size !== evidence.inlinePolicies.length) throw new Error("Release inline-policy evidence is incomplete or ambiguous.");
   const expected = sourcePolicyEvidence();
   const expectedAttachments = expected.map(({ arn }) => arn).sort();
   if (JSON.stringify(evidence.attachedPolicyArns || []) !== JSON.stringify(expectedAttachments)) throw new Error("Release role attachment set differs from the reviewed source policies.");
-  if (evidence.inlinePolicyNames.length !== 0) throw new Error("Release role has an unreviewed inline policy.");
+  const expectedInlinePolicies = sourceReleaseRoleInlinePolicyEvidence();
+  if (canonicalizeJson(evidence.inlinePolicyNames) !== canonicalizeJson(expectedInlinePolicies.map(({ policyName }) => policyName))) throw new Error("Release role inline-policy set differs from canonical source ownership.");
+  for (const expectedPolicy of expectedInlinePolicies) {
+    const actualPolicy = evidence.inlinePolicies.find(({ policyName }) => policyName === expectedPolicy.policyName);
+    if (!actualPolicy || actualPolicy.sha256 !== expectedPolicy.sha256) throw new Error(`Release role inline policy document differs from canonical source: ${expectedPolicy.policyName}.`);
+  }
   if (evidence.policies.length !== expected.length) throw new Error("Release policy evidence is incomplete.");
   for (const policy of expected) {
     const actual = evidence.policies.find(({ arn }) => arn === policy.arn);
