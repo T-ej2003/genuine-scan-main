@@ -521,9 +521,12 @@ export function assertStageAProductionArtifactsReconciliationAuthorization(autho
   return authorization;
 }
 
-function assertStageAProductionArtifactsPolicyResource(value, label, expectedPolicy) {
+function assertStageAProductionArtifactsPolicyResource(value, label, expectedPolicy, additionalExpectedPolicies = []) {
   let policyMatches = false;
-  try { policyMatches = stageAProductionArtifactsPolicySemanticallyEqual(decodePolicyDocument(value?.policy, `${label} policy`), expectedPolicy); } catch { policyMatches = false; }
+  try {
+    const policy = decodePolicyDocument(value?.policy, `${label} policy`);
+    policyMatches = [expectedPolicy, ...additionalExpectedPolicies].some((expected) => stageAProductionArtifactsPolicySemanticallyEqual(policy, expected));
+  } catch { policyMatches = false; }
   const optionalOwnerMayBeUnset = ["predecessor", "desired", "post-apply"].includes(label) && value && typeof value === "object" && !Array.isArray(value) && !Object.hasOwn(value, "expected_bucket_owner");
   const expectedKeys = optionalOwnerMayBeUnset ? STAGE_A_POLICY_RESOURCE_KEYS.filter((key) => key !== "expected_bucket_owner") : STAGE_A_POLICY_RESOURCE_KEYS;
   if (!value || typeof value !== "object" || Array.isArray(value) || JSON.stringify(Object.keys(value).sort()) !== JSON.stringify([...expectedKeys].sort()) || value.bucket !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket || (!optionalOwnerMayBeUnset && value.expected_bucket_owner !== null) || value.id !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.bucket || value.region !== STAGE_B.region || !policyMatches) throw new Error(`Stage A production-artifacts ${label} is not exact.`);
@@ -540,7 +543,13 @@ export function assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(plan, { s
   const entry = bucketDrift[0]; const change = entry.change;
   if (entry.mode !== "managed" || entry.type !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.type || entry.name !== "production_artifacts" || entry.provider_name !== "registry.terraform.io/hashicorp/aws" || !change || !exactActions(change.actions, ["update"]) || change.replace_paths?.length || !emptyObject(change.before_unknown) || !emptyObject(change.after_unknown) || !emptyObject(change.before_sensitive) || !emptyObject(change.after_sensitive)) throw new Error("Stage A production-artifacts refresh-only bucket drift is not exact.");
   const transition = resolveStageAProductionArtifactsBucketPolicyTransition(recoveryCompletion);
-  assertStageAProductionArtifactsPolicyResource(change.before, "predecessor", transition.predecessor);
+  const incidentTransition = stageAProductionArtifactsLegacyReservationRepairTransition();
+  const incidentStatePredecessors = stageAProductionArtifactsPolicySemanticallyEqual(transition.predecessor, incidentTransition.predecessor)
+    && stageAProductionArtifactsPolicySemanticallyEqual(transition.desired, incidentTransition.desired)
+    ? [buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservationPredecessor()]
+    : [];
+  // Only the exact incident live transition can account for Terraform's distinct legacy state pre-image.
+  assertStageAProductionArtifactsPolicyResource(change.before, "predecessor", transition.predecessor, incidentStatePredecessors);
   assertStageAProductionArtifactsPolicyResource(change.after, "desired", transition.desired);
   if (rdsDrift.length) assertStageARdsLatestRestorableTimeDrift(rdsDrift[0]);
   return Object.freeze({ valid: true, stateReconciliationRequired: true, address: entry.address, actions: change.actions, resourceDriftCount: plan.resource_drift.length, rdsLatestRestorableTimeRefreshed: rdsDrift.length === 1 });
