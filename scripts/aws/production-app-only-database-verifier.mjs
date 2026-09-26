@@ -486,7 +486,7 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
         ('rdsadmin','rds_superuser','rds_password','rds_iam','rds_replication','rds_ad','rds_directory_service_role','rds_reserved','rdstopmgr')
     ) x`);
     const [databases] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.database,x.role,x.grantor,x.privilege,x.grantable),'[]'::jsonb) AS rows FROM (
-      SELECT d.datname AS database,o.rolname AS owner,d.datallowconn AS allow_connections,d.datconnlimit AS connection_limit,
+      SELECT d.datname AS database,o.rolname AS owner,d.datallowconn AS allow_connections,d.datconnlimit AS connection_limit,d.datistemplate AS is_template,
         COALESCE(g.rolname,'PUBLIC') AS role,grantor.rolname AS grantor,a.privilege_type AS privilege,a.is_grantable AS grantable
       FROM pg_catalog.pg_database d JOIN pg_catalog.pg_roles o ON o.oid=d.datdba
       CROSS JOIN LATERAL pg_catalog.aclexplode(COALESCE(d.datacl,pg_catalog.acldefault('d',d.datdba))) a

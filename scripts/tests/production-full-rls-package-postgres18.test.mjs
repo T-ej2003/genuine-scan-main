@@ -426,6 +426,21 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         assert.ok(capabilities.admin_option_closure.includes("rebaseline_cap_admin_target"), "ADMIN OPTION administrative reachability is separately observed");
         throw new Error("rollback operator capability topology");
       }, { maxWait: 5000, timeout: 30000 }), /rollback operator capability topology/);
+      const databaseBeforeTemplateChange = await collectAppOnlyDatabaseCatalogue(verifier);
+      assert.equal(databaseBeforeTemplateChange.databases.find(({ database }) => database === targetDatabase)?.is_template, false);
+      psql(maintenanceUrl, ["-q", "-c", `ALTER DATABASE "${targetDatabase}" IS_TEMPLATE TRUE`], "enable template state on disposable test database");
+      try {
+        const templateCatalogue = await collectAppOnlyDatabaseCatalogue(verifier);
+        assert.equal(templateCatalogue.databases.find(({ database }) => database === targetDatabase)?.is_template, true);
+        const templateLive = createLiveSecurityRebaselineInventory({ protectedMainSha: sourceSha, catalogue: templateCatalogue,
+          canonical: securityRebaselineCanonical, taskEvidence: productionEquivalentLive.taskEvidence });
+        const templateDiff = diffSecurityRebaselineInventories(templateLive, securityRebaselineCanonical);
+        assert.equal(templateDiff.safeToConstructConvergencePlan, false);
+        assert.ok(templateDiff.differences.some(({ collection, field }) => collection === "databases" && field === "is_template"),
+          "real pg_database.datistemplate drift blocks security-plan construction");
+      } finally {
+        psql(maintenanceUrl, ["-q", "-c", `ALTER DATABASE "${targetDatabase}" IS_TEMPLATE FALSE`], "restore disposable database template state");
+      }
       await assert.rejects(maintenanceClient.$transaction(async (tx) => {
         const [created] = await tx.$queryRawUnsafe("SELECT pg_catalog.lo_create(0)::text AS oid");
         await tx.$executeRawUnsafe(`ALTER LARGE OBJECT ${created.oid} OWNER TO mscqr_prd_rls_phase2_app`);

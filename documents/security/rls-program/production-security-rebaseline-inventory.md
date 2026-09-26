@@ -24,6 +24,8 @@ View and materialized-view rows include `pg_get_viewdef(..., false)` output, pop
 
 ## Collector coverage contract
 
+The current database's `pg_database.datistemplate` flag is part of its normalized identity; changes block plan construction because a template database may be cloned by roles with `CREATEDB`.
+
 The executable `SECURITY_REBASELINE_COVERAGE` table binds each security surface to its real PostgreSQL catalogue, raw collector collection, and normalized diff collection. Tests assert that this table stays connected to both ends of the pipeline; the PG18 integration test supplies real rows for the behavioral surfaces.
 
 The final PostgreSQL 18 catalogue boundary is explicit:
