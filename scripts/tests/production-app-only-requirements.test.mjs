@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createAppOnlyRequirements, assertAppOnlyRequirements, compareAppOnlyRequirements, compactAppOnlyRequirements, compareCompactAppOnlyRequirements } from "../aws/production-app-only-requirements.mjs";
 import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
+import { execFileSync } from "node:child_process";
+import { assertAppOnlyCandidateAncestor } from "../aws/produce-production-app-only-requirements.mjs";
 
 const context = { repositoryRoot: process.cwd(), sourceSha: "a".repeat(40), candidateSourceSha: "b".repeat(40) };
 const fixture = () => ({ routines: [{ schema: "app_auth", name: "test", arguments: "value text", definition: "fixed", grants: [] }],
@@ -17,6 +19,17 @@ test("canonical requirements bind source, schema/migration contract and exact ca
     const bad = structuredClone(catalogue); bad[collection][0].extra = "substituted";
     assert.notEqual(compareAppOnlyRequirements(bad, expected).GENERATED_RLS_CONTRACT, "COMPATIBLE");
   }
+});
+test("candidate source stays distinct and only an actual protected-source ancestor is accepted", () => {
+  const sourceSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  const candidateSourceSha = execFileSync("git", ["rev-parse", "HEAD^"], { encoding: "utf8" }).trim();
+  assert.equal(assertAppOnlyCandidateAncestor({ sourceSha, candidateSourceSha }), true);
+  const sourceRequirements = createAppOnlyRequirements({ ...context, sourceSha, candidateSourceSha: sourceSha, catalogue: fixture(), packageChecksums: { immutable: "fixture" } });
+  const ancestorRequirements = createAppOnlyRequirements({ ...context, sourceSha, candidateSourceSha, catalogue: fixture(), packageChecksums: { immutable: "fixture" } });
+  assert.equal(ancestorRequirements.sourceSha, sourceSha); assert.equal(ancestorRequirements.candidateSourceSha, candidateSourceSha);
+  assert.notEqual(ancestorRequirements.requirementsSha256, sourceRequirements.requirementsSha256);
+  assert.throws(() => assertAppOnlyRequirements(ancestorRequirements, { ...context, sourceSha, candidateSourceSha: sourceSha }));
+  assert.throws(() => assertAppOnlyCandidateAncestor({ sourceSha, candidateSourceSha: "f".repeat(40) }));
 });
 test("wrong source, original contract replacement and hash substitution fail", () => {
   const original = requirements(fixture());

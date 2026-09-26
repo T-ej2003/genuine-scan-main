@@ -302,8 +302,11 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         candidateSourceSha: process.env.MSCQR_APP_ONLY_CANDIDATE_SOURCE_SHA || sourceSha };
       const requirements = createAppOnlyRequirements({ ...context, catalogue,
         packageChecksums: JSON.parse(fs.readFileSync(path.join(evidenceRoot, "checksums.json"), "utf8")) });
-      securityRebaselineCanonical = createSecurityRebaselineInventory({ kind: "CANONICAL", protectedMainSha: sourceSha,
+      securityRebaselineCanonical = createSecurityRebaselineInventory({ kind: "CANONICAL", protectedMainSha: sourceSha, candidateSourceSha: context.candidateSourceSha,
         catalogue, repositoryRoot: root, packageChecksums: JSON.parse(fs.readFileSync(path.join(evidenceRoot, "checksums.json"), "utf8")) });
+      assert.equal(securityRebaselineCanonical.protectedMainSha, sourceSha);
+      assert.equal(securityRebaselineCanonical.candidateSourceSha, context.candidateSourceSha);
+      assert.equal(securityRebaselineCanonical.appOnlyRequirementsSha256, requirements.requirementsSha256);
       const canonicalMemberships = securityRebaselineCanonical.objects.filter(({ collection }) => ["roleMemberships","roleMembers","operatorMemberships"].includes(collection));
       assert.ok(canonicalMemberships.length > 0 && canonicalMemberships.every(({ identity }) => !identity.includes("mscqr_p2_test")));
       assert.ok(canonicalMemberships.some(({ identity }) => identity.includes("rdsadmin")), "canonical PG18 harness grantors map to the production semantic identity");
@@ -341,7 +344,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         await tx.$executeRawUnsafe(`GRANT "${parent}" TO "${administrator}" WITH ADMIN FALSE, INHERIT FALSE, SET TRUE`);
         await tx.$executeRawUnsafe("RESET ROLE");
         const unsupportedGrantorCatalogue = await collectAppOnlyDatabaseCatalogueRows(tx);
-        assert.throws(() => createSecurityRebaselineInventory({ kind: "CANONICAL", protectedMainSha: sourceSha,
+        assert.throws(() => createSecurityRebaselineInventory({ kind: "CANONICAL", protectedMainSha: sourceSha, candidateSourceSha: context.candidateSourceSha,
           catalogue: unsupportedGrantorCatalogue, repositoryRoot: root,
           packageChecksums: JSON.parse(fs.readFileSync(path.join(evidenceRoot, "checksums.json"), "utf8")) }), /unsupported grantor/);
         throw new Error("rollback unexpected canonical grantor fixture");
@@ -374,7 +377,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         await tx.$executeRawUnsafe("CREATE TABLE public.rebaseline_publication_b(id integer)");
         await tx.$executeRawUnsafe("CREATE PUBLICATION rebaseline_publication_contract FOR TABLE public.rebaseline_publication_a (id, tenant) WHERE (tenant > 0)");
         const fixtureCatalogue = await collectAppOnlyDatabaseCatalogueRows(tx);
-        const fixtureCanonical = createSecurityRebaselineInventory({ kind: "CANONICAL", protectedMainSha: sourceSha,
+        const fixtureCanonical = createSecurityRebaselineInventory({ kind: "CANONICAL", protectedMainSha: sourceSha, candidateSourceSha: context.candidateSourceSha,
           catalogue: fixtureCatalogue, repositoryRoot: root, packageChecksums: JSON.parse(fs.readFileSync(path.join(evidenceRoot, "checksums.json"), "utf8")) });
         const evidence = { taskArn: `arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/${"d".repeat(32)}`,
           taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/security-rebaseline:1", containerName: "security-rebaseline",
@@ -482,7 +485,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         await tx.$executeRawUnsafe('GRANT SELECT ON public.rebaseline_acl_grantor_subject TO "mscqr_prd_rls_phase2_auth_owner"');
         await tx.$executeRawUnsafe("RESET ROLE");
         let aclState = await collectAppOnlyDatabaseCatalogueRows(tx);
-        const aclCanonical = createSecurityRebaselineInventory({ kind: "CANONICAL", protectedMainSha: sourceSha,
+        const aclCanonical = createSecurityRebaselineInventory({ kind: "CANONICAL", protectedMainSha: sourceSha, candidateSourceSha: context.candidateSourceSha,
           catalogue: aclState, repositoryRoot: root, packageChecksums: JSON.parse(fs.readFileSync(path.join(evidenceRoot, "checksums.json"), "utf8")) });
         const firstGrant = aclState.securityTables.find(({ name }) => name === "rebaseline_acl_grantor_subject").grants
           .find(({ role }) => role === "mscqr_prd_rls_phase2_auth_owner");
@@ -635,7 +638,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         await tx.$executeRawUnsafe("CREATE EXTENSION postgres_fdw WITH SCHEMA rebaseline_extension_schema");
         const extensionCatalogue = await collectAppOnlyDatabaseCatalogueRows(tx), extension = extensionCatalogue.securityExtensions.find(({ name }) => name === "postgres_fdw");
         assert.equal(extension.schema, "rebaseline_extension_schema");
-        const extensionCanonical = createSecurityRebaselineInventory({ kind: "CANONICAL", protectedMainSha: sourceSha, catalogue: extensionCatalogue,
+        const extensionCanonical = createSecurityRebaselineInventory({ kind: "CANONICAL", protectedMainSha: sourceSha, candidateSourceSha: context.candidateSourceSha, catalogue: extensionCatalogue,
           repositoryRoot: root, packageChecksums: JSON.parse(fs.readFileSync(path.join(evidenceRoot, "checksums.json"), "utf8")) });
         await tx.$executeRawUnsafe("ALTER EXTENSION postgres_fdw SET SCHEMA public");
         let changed = await collectAppOnlyDatabaseCatalogueRows(tx);
@@ -656,7 +659,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         await tx.$executeRawUnsafe("CREATE FOREIGN TABLE public.rebaseline_digest_foreign(id integer) SERVER rebaseline_digest_server OPTIONS (schema_name 'public', table_name 'first_table')");
         const baseline = await collectAppOnlyDatabaseCatalogueRows(tx), serialized = JSON.stringify(baseline);
         for (const secret of ["fdw_first","first.invalid","firstdb","remote_one","fixture_secret_one","first_table"]) assert.equal(serialized.includes(secret), false, `raw foreign option ${secret} escaped`);
-        const canonical = createSecurityRebaselineInventory({ kind: "CANONICAL", protectedMainSha: sourceSha, catalogue: baseline,
+        const canonical = createSecurityRebaselineInventory({ kind: "CANONICAL", protectedMainSha: sourceSha, candidateSourceSha: context.candidateSourceSha, catalogue: baseline,
           repositoryRoot: root, packageChecksums: JSON.parse(fs.readFileSync(path.join(evidenceRoot, "checksums.json"), "utf8")) });
         await tx.$executeRawUnsafe("ALTER FOREIGN DATA WRAPPER rebaseline_digest_fdw OPTIONS (SET endpoint 'fdw_second')");
         await tx.$executeRawUnsafe("ALTER SERVER rebaseline_digest_server OPTIONS (SET host 'second.invalid')");
@@ -990,7 +993,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         rdsMembershipsNormalized = false;
       }
       if (scalar(maintenanceUrl, `SELECT count(*) FROM pg_database WHERE datname='${targetDatabase}'`, "inspect green database") === "1") {
-        psql(maintenanceUrl, ["-q", "-c", `DROP DATABASE "${targetDatabase}" WITH (FORCE)`], "drop green database");
+        psql(databaseUrl(adminUrl, adminUrl.pathname.slice(1), administrator), ["-q", "-c", `DROP DATABASE "${targetDatabase}" WITH (FORCE)`], "drop green database");
       }
       if (verifierCreated) psql(maintenanceUrl, ["-q", "-c", `DROP ROLE ${verifierRole}`], "drop local verifier");
       if (scalar(maintenanceUrl, `SELECT count(*) FROM pg_roles WHERE rolname LIKE 'mscqr_prd_rls_phase2_%'`, "inspect managed roles") !== "0") {

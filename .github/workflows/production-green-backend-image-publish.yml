@@ -77,8 +77,8 @@ jobs:
           set -euo pipefail
           docker pull "$BACKEND_IMAGE"
           REQUIRED_PLATFORMS="$PLATFORMS" ./scripts/aws/verify-image-manifest.sh "$BACKEND_IMAGE"
-          docker run --rm --entrypoint sh "$BACKEND_IMAGE" -c 'test -f /app/scripts/production-green-read-only-rls-canary.mjs'
-          echo "- Canary script: present at /app/scripts/production-green-read-only-rls-canary.mjs" >> "$GITHUB_STEP_SUMMARY"
+          docker run --rm --entrypoint sh "$BACKEND_IMAGE" -c 'for file in /app/scripts/production-green-read-only-rls-canary.mjs /app/scripts/aws/production-app-only-database-verifier.mjs /app/scripts/aws/production-green-stage-b-contract.mjs /app/scripts/aws/production-security-rebaseline-transport.mjs /app/scripts/aws/production-rls-catalogue-probe-config.mjs /app/scripts/aws/production-rls-catalogue-probe-runtime.mjs; do test -f "$file"; done'
+          echo "- Fixed security-catalogue probe modules: present in /app/scripts" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify exact source labels and runtime provenance
         run: |

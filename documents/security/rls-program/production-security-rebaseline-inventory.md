@@ -6,6 +6,8 @@ This source-owned PR1 path inventories security metadata; it cannot apply SQL or
 
 The protected-main producer builds the canonical package in disposable PostgreSQL 18, then collects it with the same normalized catalogue collector used by the fixed production read-only task. The canonical inventory binds protected-main SHA, clean-room source contract, migration set, package checksums, collector version, and catalogue digest.
 
+Identity fields remain distinct: `protectedMainSha` is the exact current canonical source; `candidateSourceSha` is the candidate image source accepted by the requirements workflow only when it is the protected SHA or an authenticated ancestor; `appOnlyRequirementsSha256` binds both identities and the catalogue. Canonical and live inventory artifacts retain both SHAs, and comparison requires them to match. The read-only task executes the fixed image module `scripts/aws/production-rls-catalogue-probe-runtime.mjs`; its bounded JSON environment value is parsed and schema-validated as data. The task builder does not serialize functions or generate JavaScript.
+
 The production task runs `REPEATABLE READ, READ ONLY`. Its complete catalogue is gzip-compressed and encrypted to an ephemeral local RSA public key before CloudWatch transport. The private key is never sent to AWS. Canonical, live, and diff files are created outside the checkout with mode `0600`; normal output contains only identities of the source/artifacts, collection/category counts, and digests.
 
 The versioned shared security collector includes all non-system roles (including authentication expiry, connection limits, comments, safe settings, direct membership edges with grantor identity, and relevant ownership/grantee references), global and schema-specific default ACLs, parameter ACLs, installed extensions, non-system non-extension-owned functions, procedures, aggregates, and window routines in user schemas, and relation kinds `r`, `p`, `v`, `m`, and `f`; sequences are collected separately with owner, ACL, and sequence parameters. Extension identity contains name, version, schema, relocatability, and owner. Any extension drift blocks plan construction. The current canonical target permits only provider-managed `plpgsql` in `pg_catalog`; those extension-owned members are inside the explicit system boundary, while every other extension is a blocker before its members can be considered safe.
@@ -23,6 +25,7 @@ Example operator shape (do not run without separate production authorization):
 ```sh
 node scripts/aws/probe-production-rls-catalogue.mjs \
   --source-sha "$PROTECTED_MAIN_SHA" \
+  --candidate-source-sha "$CANDIDATE_SOURCE_SHA" \
   --requirements-reference "$REQUIREMENTS_REFERENCE" \
   --security-rebaseline-reference "$CANONICAL_REFERENCE" \
   --security-rebaseline-canonical-out "$PRIVATE_CANONICAL_PATH" \

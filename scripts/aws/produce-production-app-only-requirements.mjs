@@ -17,7 +17,7 @@ const root = fileURLToPath(new URL("../../", import.meta.url));
 export function produceAppOnlyRequirements({ sourceSha, candidateSourceSha }) {
   for (const sha of [sourceSha, candidateSourceSha]) assert.match(sha || "", /^[a-f0-9]{40}$/);
   assertProtectedCheckout({ sourceSha, repositoryRoot: root });
-  execFileSync("git", ["merge-base", "--is-ancestor", candidateSourceSha, sourceSha], { cwd: root, timeout: 30000 });
+  assertAppOnlyCandidateAncestor({ sourceSha, candidateSourceSha });
   const [instance] = JSON.parse(execFileSync("docker", ["inspect", "mscqr-p2-auth-security-postgres"], { encoding: "utf8", timeout: 10000 }));
   assert.equal(instance.Config.Labels["com.docker.compose.project"], "mscqr-p2-auth-security");
   assert.equal(instance.Config.Labels["com.docker.compose.service"], "p2-postgres");
@@ -42,11 +42,17 @@ export function produceAppOnlyRequirements({ sourceSha, candidateSourceSha }) {
   const artifact = readStageBPrivateFileBytes({ filePath: artifactPath, repositoryRoot: root });
   const requirements = assertAppOnlyRequirements(JSON.parse(artifact.bytes), { sourceSha, candidateSourceSha, repositoryRoot: root });
   const securityArtifact = readStageBPrivateFileBytes({ filePath: securityRebaselinePath, repositoryRoot: root });
-  const securityInventory = assertSecurityRebaselineInventory(JSON.parse(securityArtifact.bytes), { protectedMainSha: sourceSha });
+  const securityInventory = assertSecurityRebaselineInventory(JSON.parse(securityArtifact.bytes), { protectedMainSha: sourceSha, candidateSourceSha });
   assert.equal(securityInventory.kind, "PRODUCTION_SECURITY_REBASELINE_CANONICAL_INVENTORY");
   assert.equal(securityInventory.appOnlyRequirementsSha256, requirements.requirementsSha256);
   return { artifactPath, artifactSha256: artifact.sha256, requirementsSha256: requirements.requirementsSha256,
     securityRebaselinePath, securityRebaselineSha256: securityArtifact.sha256, canonicalSecurityCatalogueSha256: securityInventory.catalogueSha256 };
+}
+
+export function assertAppOnlyCandidateAncestor({ sourceSha, candidateSourceSha, repositoryRoot = root, run = execFileSync }) {
+  for (const sha of [sourceSha, candidateSourceSha]) assert.match(sha || "", /^[a-f0-9]{40}$/);
+  if (candidateSourceSha !== sourceSha) run("git", ["merge-base", "--is-ancestor", candidateSourceSha, sourceSha], { cwd: repositoryRoot, timeout: 30000, stdio: "ignore" });
+  return true;
 }
 
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {

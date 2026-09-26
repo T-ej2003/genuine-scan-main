@@ -14,7 +14,7 @@ import {
 } from "../aws/handoff-production-smoke-secrets.mjs";
 import {
   EXPECTED_PRINTING_ROUTINES, EXPECTED_PRINTING_ROUTINE_PREDECESSORS, RLS_PROBE_CLASSIFICATIONS,
-  authenticateCanonicalProductionRequirements, authenticateProductionRlsProbeResult, buildProductionRlsProbeDefinition,
+  authenticateCanonicalProductionRequirements, authenticateCanonicalProductionRequirementsArtifact, authenticateProductionRlsProbeResult, buildProductionRlsProbeDefinition,
   classifyProductionRlsCatalogue, hashProductionRlsCatalogue,
 } from "../aws/probe-production-rls-catalogue.mjs";
 
@@ -90,14 +90,14 @@ with zipfile.ZipFile(b,'w',compression=zipfile.ZIP_DEFLATED) as z:
  i=zipfile.ZipInfo(sys.argv[1]);i.create_system=3;i.external_attr=33152<<16
  z.writestr(i,sys.stdin.buffer.read(),compress_type=zipfile.ZIP_DEFLATED)
 sys.stdout.buffer.write(b.getvalue())`, name], { input: bytes });
-const canonicalRequirementsFixture = () => {
-  const requirements = createAppOnlyRequirements({ repositoryRoot: process.cwd(), sourceSha, candidateSourceSha: sourceSha, catalogue: catalogue(), packageChecksums: { package: "fixture" } });
+const canonicalRequirementsFixture = ({ protectedSourceSha = sourceSha, candidateSourceSha = protectedSourceSha } = {}) => {
+  const requirements = createAppOnlyRequirements({ repositoryRoot: process.cwd(), sourceSha: protectedSourceSha, candidateSourceSha, catalogue: catalogue(), packageChecksums: { package: "fixture" } });
   const bytes = Buffer.from(JSON.stringify(requirements)), archive = requirementsArchive("app-only-requirements.json", bytes);
-  const reference = { sourceSha, runId: "123", runAttempt: "1", artifactId: "456", artifactDigest: `sha256:${sha256(archive)}`, fileSha256: sha256(bytes) };
-  const run = { id: 123, run_attempt: 1, repository: { id: 9, full_name: "T-ej2003/genuine-scan-main" }, head_repository: { id: 9, full_name: "T-ej2003/genuine-scan-main" }, head_sha: sourceSha, head_branch: "main", path: ".github/workflows/produce-production-app-only-requirements.yml", event: "workflow_dispatch", status: "completed", conclusion: "success" };
-  const artifact = { id: 456, name: "production-app-only-requirements", expired: false, digest: reference.artifactDigest, size_in_bytes: archive.length, workflow_run: { id: 123, head_sha: sourceSha, head_repository_id: 9, repository_id: 9 } };
-  const githubRun = (_command, args) => args[1].endsWith("/branches/main") ? JSON.stringify({ commit: { sha: sourceSha } }) : args[1].endsWith("/zip") ? archive : args[1].endsWith("/artifacts?per_page=100") ? JSON.stringify([{ total_count: 1, artifacts: [artifact] }]) : JSON.stringify(run);
-  return { sourceSha, requirements, bytes, archive, reference, run, artifact, githubRun };
+  const reference = { sourceSha: protectedSourceSha, runId: "123", runAttempt: "1", artifactId: "456", artifactDigest: `sha256:${sha256(archive)}`, fileSha256: sha256(bytes) };
+  const run = { id: 123, run_attempt: 1, repository: { id: 9, full_name: "T-ej2003/genuine-scan-main" }, head_repository: { id: 9, full_name: "T-ej2003/genuine-scan-main" }, head_sha: protectedSourceSha, head_branch: "main", path: ".github/workflows/produce-production-app-only-requirements.yml", event: "workflow_dispatch", status: "completed", conclusion: "success" };
+  const artifact = { id: 456, name: "production-app-only-requirements", expired: false, digest: reference.artifactDigest, size_in_bytes: archive.length, workflow_run: { id: 123, head_sha: protectedSourceSha, head_repository_id: 9, repository_id: 9 } };
+  const githubRun = (_command, args) => args[1].endsWith("/branches/main") ? JSON.stringify({ commit: { sha: protectedSourceSha } }) : args[1].endsWith("/zip") ? archive : args[1].endsWith("/artifacts?per_page=100") ? JSON.stringify([{ total_count: 1, artifacts: [artifact] }]) : JSON.stringify(run);
+  return { sourceSha: protectedSourceSha, candidateSourceSha, requirements, bytes, archive, reference, run, artifact, githubRun };
 };
 
 test("production RLS requirements come only from the authenticated canonical producer artifact", () => {
@@ -131,6 +131,18 @@ test("production RLS requirements come only from the authenticated canonical pro
   }
 });
 
+test("authenticated ancestor candidate remains distinct through workflow artifact authentication", () => {
+  const protectedSourceSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  const candidateSourceSha = execFileSync("git", ["rev-parse", "HEAD^"], { encoding: "utf8" }).trim();
+  const fixture = canonicalRequirementsFixture({ protectedSourceSha, candidateSourceSha });
+  const accepted = authenticateCanonicalProductionRequirementsArtifact({ sourceSha: protectedSourceSha, candidateSourceSha,
+    requirementsReference: fixture.reference, repositoryRoot: process.cwd(), githubRun: fixture.githubRun });
+  assert.equal(accepted.requirements.sourceSha, protectedSourceSha);
+  assert.equal(accepted.requirements.candidateSourceSha, candidateSourceSha);
+  assert.throws(() => authenticateCanonicalProductionRequirementsArtifact({ sourceSha: protectedSourceSha,
+    candidateSourceSha: protectedSourceSha, requirementsReference: fixture.reference, repositoryRoot: process.cwd(), githubRun: fixture.githubRun }));
+});
+
 test("RLS classification accepts exact match and only the exact three printing routine deltas", () => {
   const expected = catalogue(), requirements = requirementsFor(expected);
   assert.deepEqual(classifyProductionRlsCatalogue(hashProductionRlsCatalogue(expected), requirements), { classification: RLS_PROBE_CLASSIFICATIONS.MATCH, deltaObjects: [] });
@@ -162,26 +174,32 @@ test("RLS probe definition reuses the exact private read-only task boundary", ()
   const baseDefinition = { family: APP_ONLY_VERIFIER.family, taskRoleArn: APP_ONLY_VERIFIER.taskRoleArn, executionRoleArn: APP_ONLY_VERIFIER.executionRoleArn,
     networkMode: "awsvpc", runtimePlatform: { cpuArchitecture: "X86_64", operatingSystemFamily: "LINUX" }, containerDefinitions: [{ name: "production-green-read-only-rls-canary",
       image: `${APP_ONLY.backendRepository}@sha256:${"1".repeat(64)}`, entryPoint: ["node"], environment: [], secrets: [{ name: "RLS_CANARY_DATABASE_URL", valueFrom: secret }], readonlyRootFilesystem: true, privileged: false }] };
-  const definition = buildProductionRlsProbeDefinition({ baseDefinition, requirements, identity: { sourceSha: "a".repeat(40) }, databaseSecretArn: secret });
+  const definition = buildProductionRlsProbeDefinition({ baseDefinition, requirements, identity: { sourceSha: "a".repeat(40), candidateSourceSha: "a".repeat(40), databaseHostname: "reviewed.eu-west-2.rds.amazonaws.com" }, databaseSecretArn: secret });
   assert.equal(definition.family, APP_ONLY_VERIFIER.family); assert.equal(definition.taskRoleArn, APP_ONLY_VERIFIER.taskRoleArn); assert.equal(definition.executionRoleArn, APP_ONLY_VERIFIER.executionRoleArn);
   assert.deepEqual(definition.containerDefinitions[0].secrets, [{ name: "RLS_CANARY_DATABASE_URL", valueFrom: secret }]); assert.equal(definition.containerDefinitions[0].readonlyRootFilesystem, true);
-  assert.doesNotMatch(definition.containerDefinitions[0].command.join("\n"), /\$executeRawUnsafe\(["'`](?:ALTER|CREATE|DROP|GRANT|REVOKE|INSERT|UPDATE|DELETE)/i);
-  assert.match(definition.containerDefinitions[0].command.join("\n"), /url\.hostname,input\.identity\.databaseHostname/);
-  assert.ok(Buffer.byteLength(definition.containerDefinitions[0].command[1]) < 48000);
+  assert.deepEqual(definition.containerDefinitions[0].entryPoint, ["node", "scripts/aws/production-rls-catalogue-probe-runtime.mjs"]);
+  assert.deepEqual(definition.containerDefinitions[0].command, []);
+  assert.deepEqual(JSON.parse(definition.containerDefinitions[0].environment[0].value), { schemaVersion: 1, sourceSha: "a".repeat(40), candidateSourceSha: "a".repeat(40), requirementsSha256: requirements.requirementsSha256, databaseHostname: "reviewed.eu-west-2.rds.amazonaws.com", securityTransportPublicKey: null });
   const wrapper = collectAppOnlyDatabaseCatalogue.toString(), collector = collectAppOnlyDatabaseCatalogueRows.toString();
   assert.equal((wrapper.match(/\$executeRawUnsafe/g) || []).length, 1); assert.match(wrapper, /SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY/);
   assert.equal((collector.match(/\$executeRawUnsafe/g) || []).length, 1); assert.match(collector, /SET LOCAL search_path = pg_catalog/);
-  assert.ok([...collector.matchAll(/\$queryRawUnsafe\(`([\s\S]*?)`\)/g)].every(([, sql]) => /^SELECT\b/.test(sql.trim())));
+  const queryCount = (collector.match(/\$queryRawUnsafe\(/g) || []).length;
+  assert.ok(queryCount > 0);
+  const queries = [...collector.matchAll(/\$queryRawUnsafe\(`([\s\S]*?)`\)/g)].map(([, sql]) => sql.trim());
+  assert.equal(queries.length, queryCount);
+  assert.ok(queries.every((sql) => /^(?:SELECT|WITH)\b/.test(sql)));
 });
 
 test("RLS execution failure or unauthenticated output can never become MATCH", () => {
-  const body = { schemaVersion: 1, kind: "PRODUCTION_RLS_CATALOGUE_PROBE", sourceSha: "a".repeat(40), requirementsSha256: "b".repeat(64), databaseRole: APP_ONLY_VERIFIER.databaseRole, catalogue: hashProductionRlsCatalogue(catalogue()) };
+  const body = { schemaVersion: 1, kind: "PRODUCTION_RLS_CATALOGUE_PROBE", sourceSha: "a".repeat(40), candidateSourceSha: "b".repeat(40), requirementsSha256: "b".repeat(64), databaseRole: APP_ONLY_VERIFIER.databaseRole, catalogue: hashProductionRlsCatalogue(catalogue()) };
   const valid = JSON.stringify({ ...body, evidenceSha256: canonicalSha256(body) });
-  assert.deepEqual(authenticateProductionRlsProbeResult(valid, { sourceSha: body.sourceSha, requirementsSha256: body.requirementsSha256 }).catalogue, body.catalogue);
-  assert.throws(() => authenticateProductionRlsProbeResult(JSON.stringify({ status: "PRODUCTION_RLS_CATALOGUE_PROBE_FAILED" }), { sourceSha: body.sourceSha, requirementsSha256: body.requirementsSha256 }));
-  const changed = JSON.parse(valid); changed.sourceSha = "c".repeat(40); assert.throws(() => authenticateProductionRlsProbeResult(JSON.stringify(changed), { sourceSha: body.sourceSha, requirementsSha256: body.requirementsSha256 }));
-  const extra = JSON.parse(valid); extra.catalogue.tables[0].unexpected = true; extra.evidenceSha256 = canonicalSha256(Object.fromEntries(Object.entries(extra).filter(([key]) => key !== "evidenceSha256"))); assert.throws(() => authenticateProductionRlsProbeResult(JSON.stringify(extra), { sourceSha: body.sourceSha, requirementsSha256: body.requirementsSha256 }));
-  assert.throws(() => authenticateProductionRlsProbeResult("not-json", { sourceSha: body.sourceSha, requirementsSha256: body.requirementsSha256 }));
+  assert.deepEqual(authenticateProductionRlsProbeResult(valid, { sourceSha: body.sourceSha, candidateSourceSha: body.candidateSourceSha, requirementsSha256: body.requirementsSha256 }).catalogue, body.catalogue);
+  assert.throws(() => authenticateProductionRlsProbeResult(valid, { sourceSha: body.sourceSha, candidateSourceSha: body.sourceSha, requirementsSha256: body.requirementsSha256 }));
+  assert.throws(() => authenticateProductionRlsProbeResult(JSON.stringify({ status: "PRODUCTION_RLS_CATALOGUE_PROBE_FAILED" }), { sourceSha: body.sourceSha, candidateSourceSha: body.candidateSourceSha, requirementsSha256: body.requirementsSha256 }));
+  const changed = JSON.parse(valid); changed.sourceSha = "c".repeat(40); assert.throws(() => authenticateProductionRlsProbeResult(JSON.stringify(changed), { sourceSha: body.sourceSha, candidateSourceSha: body.candidateSourceSha, requirementsSha256: body.requirementsSha256 }));
+  const changedCandidate = JSON.parse(valid); changedCandidate.candidateSourceSha = "c".repeat(40); changedCandidate.evidenceSha256 = canonicalSha256(Object.fromEntries(Object.entries(changedCandidate).filter(([key]) => key !== "evidenceSha256"))); assert.throws(() => authenticateProductionRlsProbeResult(JSON.stringify(changedCandidate), { sourceSha: body.sourceSha, candidateSourceSha: body.candidateSourceSha, requirementsSha256: body.requirementsSha256 }));
+  const extra = JSON.parse(valid); extra.catalogue.tables[0].unexpected = true; extra.evidenceSha256 = canonicalSha256(Object.fromEntries(Object.entries(extra).filter(([key]) => key !== "evidenceSha256"))); assert.throws(() => authenticateProductionRlsProbeResult(JSON.stringify(extra), { sourceSha: body.sourceSha, candidateSourceSha: body.candidateSourceSha, requirementsSha256: body.requirementsSha256 }));
+  assert.throws(() => authenticateProductionRlsProbeResult("not-json", { sourceSha: body.sourceSha, candidateSourceSha: body.candidateSourceSha, requirementsSha256: body.requirementsSha256 }));
 });
 
 test("operator scripts contain no secret output or database mutation surface", () => {

@@ -13,7 +13,8 @@ export function createSecurityCatalogueTransportKeyPair() {
 
 export function encryptSecurityCatalogueTransport(value, publicKeyPem, binding) {
   assert.ok(typeof publicKeyPem === "string" && publicKeyPem.includes("BEGIN PUBLIC KEY"));
-  assert.match(binding?.sourceSha || "", /^[a-f0-9]{40}$/); assert.match(binding?.requirementsSha256 || "", /^[a-f0-9]{64}$/);
+  assert.deepEqual(Object.keys(binding || {}).sort(), ["candidateSourceSha", "requirementsSha256", "sourceSha"].sort());
+  assert.match(binding.sourceSha || "", /^[a-f0-9]{40}$/); assert.match(binding.candidateSourceSha || "", /^[a-f0-9]{40}$/); assert.match(binding.requirementsSha256 || "", /^[a-f0-9]{64}$/);
   const plaintext = Buffer.from(JSON.stringify(value)); assert.ok(plaintext.length > 0 && plaintext.length <= 4 * 1024 * 1024);
   const compressed = gzipSync(plaintext, { level: 9 }), key = crypto.randomBytes(32), iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv("aes-256-gcm", key, iv); cipher.setAAD(Buffer.from(JSON.stringify(binding)));
