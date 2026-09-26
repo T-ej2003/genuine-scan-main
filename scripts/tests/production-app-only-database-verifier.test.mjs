@@ -39,6 +39,22 @@ test("additional permissive policy on a required table cannot pass", () => {
   observed.policies.push({ ...observed.policies[0], name: "public_bypass", using: "true" });
   assert.equal(evaluateAppOnlyDatabaseCatalogue(observed, required).RLS_POLICIES, "INCOMPATIBLE");
 });
+test("missing subscription projection is an explicit fail-closed provisioning prerequisite", async () => {
+  const calls = [];
+  const missingProjection = { ...structuredClone(SUBSCRIPTION_PROJECTION_STATUS_CONTRACT),
+    role_exists: false, function_exists: false, readable_columns: [] };
+  const responses = [[identity()], [{ rows: [] }], [{ rows: [] }], [missingProjection]];
+  let read = 0;
+  const client = { $transaction: async (fn) => fn({
+    $executeRawUnsafe: async (sql) => calls.push(sql),
+    $queryRawUnsafe: async (sql) => { calls.push(sql); return responses[read++] ?? []; },
+  }) };
+  await assert.rejects(collectAppOnlyDatabaseCatalogue(client), /Subscription security inventory capability is unavailable/);
+  assert.equal(calls.includes("SELECT * FROM app_rls.production_security_subscription_inventory() ORDER BY subscription_name"), false);
+  const runbook = fs.readFileSync("documents/security/rls-program/production-security-rebaseline-inventory.md", "utf8");
+  assert.match(runbook, /Required database prerequisite[\s\S]*?production-green-phase-4-read-only-canary-provision\.sql/);
+  assert.match(runbook, /distinct, explicitly authorized provisioning change/);
+});
 const identity = () => ({ role: "mscqr_prod_rls_canary_read", session_role: "mscqr_prod_rls_canary_read", database: "mscqr_production_rls_green_phase2",
   server_version_num: 180004, read_only: "on", default_read_only: "on", ...Object.fromEntries(["rolsuper", "rolinherit", "rolcreaterole", "rolcreatedb", "rolreplication", "rolbypassrls", "memberships", "write_privileges", "schema_write", "database_write"].map((key) => [key, false])) });
 test("all fixed catalogue statements use one read-only repeatable-read transaction", async () => {

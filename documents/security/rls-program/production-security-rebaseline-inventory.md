@@ -22,6 +22,10 @@ View and materialized-view rows include `pg_get_viewdef(..., false)` output and 
 
 The executable `SECURITY_REBASELINE_COVERAGE` table binds each security surface to its real PostgreSQL catalogue, raw collector collection, and normalized diff collection. Tests assert that this table stays connected to both ends of the pipeline; the PG18 integration test supplies real rows for the behavioral surfaces.
 
+## Required database prerequisite
+
+The fixed read-only task does not provision database objects. Before its first live inventory, the dedicated read-only canary and its restricted `production_security_subscription_inventory()` projection must already have been installed and authenticated by the separately reviewed `documents/ops/iam/production-green-phase-4-read-only-canary-provision.sql` procedure. That DBA operation is a distinct, explicitly authorized provisioning change; it is not run by this PR, the inventory command below, or the ECS task. Follow that procedure's hidden credential prompt and rotation rules. The inventory collector verifies the observer's exact NOLOGIN privileges, projection owner/body/search path/ACL, and canary invocation grant before calling it; if any prerequisite is absent or differs, collection fails closed before returning an inventory. Do not treat that failure as an empty subscription inventory or proceed to comparison.
+
 Example operator shape (do not run without separate production authorization):
 
 ```sh
