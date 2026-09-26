@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import JSZip from "jszip";
 import { canonicalJson, PRODUCTION_ACTIVATION_LIFECYCLE } from "./production-green-stage-b-contract.mjs";
 import { PRODUCTION_ENVIRONMENT_APPROVAL, assertProductionEnvironmentApprovalIdentity, assertProductionEnvironmentActualReviewer, assertProductionEnvironmentReviewer, assertProductionEnvironmentApprovalFreshness } from "./production-github-environment-approval.mjs";
 import { createProductionAwsCommandRunner, createProductionGithubCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
@@ -232,7 +233,7 @@ export function readStageATemporaryEgressInventory({ run } = {}) {
 
 function repositoryRoot() { return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.."); }
 
-export function resolveStageATemporaryEgressCleanupAuthorizationArtifact({ workflowRunId, workflowRunAttempt, sourceSha, githubRun = createProductionGithubCommandRunner() } = {}) {
+export async function resolveStageATemporaryEgressCleanupAuthorizationArtifact({ workflowRunId, workflowRunAttempt, sourceSha, githubRun = createProductionGithubCommandRunner() } = {}) {
   if (!/^[1-9][0-9]*$/.test(String(workflowRunId || "")) || !/^[1-9][0-9]*$/.test(String(workflowRunAttempt || ""))) fail("Temporary egress cleanup workflow coordinates are invalid.");
   const workflow = decodeJson(githubRun("gh", ["api", `repos/${PRODUCTION_ENVIRONMENT_APPROVAL.repository}/actions/runs/${workflowRunId}`]), "Authorization workflow");
   if (String(workflow.id) !== String(workflowRunId) || workflow.repository?.full_name !== PRODUCTION_ENVIRONMENT_APPROVAL.repository || workflow.head_repository?.full_name !== PRODUCTION_ENVIRONMENT_APPROVAL.repository
@@ -244,14 +245,14 @@ export function resolveStageATemporaryEgressCleanupAuthorizationArtifact({ workf
   const archive = githubRun("gh", ["api", `repos/${PRODUCTION_ENVIRONMENT_APPROVAL.repository}/actions/artifacts/${artifacts[0].id}/zip`], { encoding: null, maxBuffer: 16 * 1024 * 1024 }); const bytes = Buffer.isBuffer(archive) ? archive : Buffer.from(archive);
   const expectedDigest = Buffer.from(artifacts[0].digest.slice("sha256:".length), "hex"); const actualDigest = createHash("sha256").update(bytes).digest();
   if (!timingSafeEqual(expectedDigest, actualDigest)) fail("Temporary egress cleanup authorization artifact digest is invalid.");
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-a-egress-authorization-")); const zip = path.join(directory, "authorization.zip");
-  try {
-    fs.writeFileSync(zip, bytes, { mode: 0o600, flag: "wx" });
-    const members = githubRun("unzip", ["-Z1", zip]).trim().split(/\r?\n/).filter(Boolean);
-    if (members.length !== 1 || members[0] !== "authorization.json") fail("Temporary egress cleanup artifact contents are unexpected.");
-    const authorization = decodeJson(githubRun("unzip", ["-p", zip, "authorization.json"]), "Temporary egress cleanup authorization");
-    return assertStageATemporaryEgressCleanupAuthorization(authorization, { sourceSha, workflowRunId, workflowRunAttempt, executionActor: workflow.actor?.login });
-  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+  let zip;
+  try { zip = await JSZip.loadAsync(bytes); } catch { fail("Temporary egress cleanup authorization archive is malformed."); }
+  const members = Object.values(zip.files).filter((entry) => !entry.dir);
+  if (members.length !== 1 || members[0].name !== "authorization.json" || (Number(members[0].unixPermissions || 0) & 0o170000) === 0o120000) fail("Temporary egress cleanup artifact contents are unexpected.");
+  const payload = Buffer.from(await members[0].async("uint8array"));
+  if (!payload.length || payload.length > 1024 * 1024) fail("Temporary egress cleanup authorization payload size is invalid.");
+  const authorization = decodeJson(new TextDecoder("utf8", { fatal: true }).decode(payload), "Temporary egress cleanup authorization");
+  return assertStageATemporaryEgressCleanupAuthorization(authorization, { sourceSha, workflowRunId, workflowRunAttempt, executionActor: workflow.actor?.login });
 }
 
 function reserveCleanupAuthorization({ releaseRun, authorization }) {
@@ -314,7 +315,7 @@ export async function runStageATemporaryEgressCleanupCli(argv = process.argv.sli
   const githubRun = createProductionGithubCommandRunner();
   const protectedMainSha = decodeJson(githubRun("gh", ["api", `repos/${PRODUCTION_ENVIRONMENT_APPROVAL.repository}/branches/main`]), "Protected main branch").commit?.sha;
   if (head !== sourceSha || protectedMainSha !== sourceSha || branchStatus) fail("Stage-A temporary egress cleanup requires the exact clean current protected-main checkout.");
-  const authorization = resolveStageATemporaryEgressCleanupAuthorizationArtifact({ workflowRunId: runId, workflowRunAttempt: attempt, sourceSha, githubRun });
+  const authorization = await resolveStageATemporaryEgressCleanupAuthorizationArtifact({ workflowRunId: runId, workflowRunAttempt: attempt, sourceSha, githubRun });
   const rootRun = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: rootProfile, region: STAGE_A_TEMPORARY_EGRESS_CLEANUP.region });
   const releaseRun = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer", region: STAGE_A_TEMPORARY_EGRESS_CLEANUP.region });
   const terraformStateLock = createStageATerraformBackendLock({ run: releaseRun, lockFilePath: path.join(os.tmpdir(), `stage-a-exact-egress-cleanup-${authorization.authorizationSha256}.tflock`) });

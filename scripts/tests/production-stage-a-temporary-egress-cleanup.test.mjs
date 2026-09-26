@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
+import JSZip from "jszip";
 import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from "../aws/production-github-environment-approval.mjs";
 import { assertStageATemporaryEgressCleanupAuthorization, assertStageATemporaryEgressCleanupJournalRetention, assertStageATemporaryEgressCloudTrailProvenance, createStageATemporaryEgressCleanupAuthorization, executeStageATemporaryEgressCleanup, resolveStageATemporaryEgressCleanupAuthorizationArtifact, STAGE_A_TEMPORARY_EGRESS_CLEANUP, validateStageATemporaryEgressLiveInventory } from "../aws/production-stage-a-temporary-egress-cleanup.mjs";
 import { canonicalJson } from "../aws/production-green-stage-b-contract.mjs";
@@ -112,8 +113,8 @@ test("cleanup provenance authenticates the exact root-created endpoint and egres
   assert.throws(() => assertStageATemporaryEgressCloudTrailProvenance(wrongPort));
 });
 
-test("authorization artifact resolution uses gh api stdout for the exact source-bound archive", () => {
-  const archive = Buffer.from("fixture-zip-bytes"); const calls = [];
+test("authorization artifact resolution uses the hardened GitHub runner and exact source-bound archive", async () => {
+  const archive = await new JSZip().file("authorization.json", JSON.stringify(authorization)).generateAsync({ type: "nodebuffer" }); const calls = [];
   const run = (command, args, options = {}) => {
     calls.push({ command, args, options });
     if (command === "gh" && args[1] === "repos/T-ej2003/genuine-scan-main/actions/runs/42") return JSON.stringify({ id: 42, repository: { id: 77, full_name: "T-ej2003/genuine-scan-main" }, head_repository: { full_name: "T-ej2003/genuine-scan-main" }, path: ".github/workflows/authorize-stage-a-temporary-egress-cleanup.yml", event: "workflow_dispatch", head_sha: sourceSha, status: "completed", conclusion: "success", run_attempt: 1, actor: { login: "operator" } });
@@ -124,11 +125,12 @@ test("authorization artifact resolution uses gh api stdout for the exact source-
     throw new Error(`unexpected ${command} ${args.join(" ")}`);
   };
   const githubRun = createProductionGithubCommandRunner({ env: { PATH: process.env.PATH, GH_TOKEN: "fixture" }, exec: run });
-  const result = resolveStageATemporaryEgressCleanupAuthorizationArtifact({ workflowRunId: "42", workflowRunAttempt: "1", sourceSha, githubRun });
+  const result = await resolveStageATemporaryEgressCleanupAuthorizationArtifact({ workflowRunId: "42", workflowRunAttempt: "1", sourceSha, githubRun });
   assert.equal(result.authorizationSha256, authorization.authorizationSha256);
   const download = calls.find(({ command, args }) => command === "gh" && args[1].endsWith("/actions/artifacts/99/zip"));
   assert.deepEqual(download.args, ["api", "repos/T-ej2003/genuine-scan-main/actions/artifacts/99/zip"]);
   assert.equal(download.options.encoding, null);
+  assert.equal(calls.some(({ command }) => command === "unzip"), false);
 });
 
 test("executor consumes authorization before one exact revoke and refuses changed live rule", async () => {
