@@ -55,13 +55,30 @@ test("missing subscription projection is an explicit fail-closed provisioning pr
   assert.match(runbook, /Required database prerequisite[\s\S]*?production-green-phase-4-read-only-canary-provision\.sql/);
   assert.match(runbook, /distinct, explicitly authorized provisioning change/);
 });
+test("every extra subconninfo grantee fails closed before subscription projection invocation", async () => {
+  const calls = [];
+  const status = { ...structuredClone(SUBSCRIPTION_PROJECTION_STATUS_CONTRACT), subscription_conninfo_acl: [
+    { grantee: "mscqr_prod_subscription_observer", grantor: "rdsadmin", privilege: "SELECT", grantable: false },
+    { grantee: "unexpected_login", grantor: "rdsadmin", privilege: "SELECT", grantable: false },
+  ] };
+  const responses = [[identity()], [{ rows: [] }], [{ rows: [] }], [status]];
+  let read = 0;
+  const client = { $transaction: async (fn) => fn({
+    $executeRawUnsafe: async (sql) => calls.push(sql),
+    $queryRawUnsafe: async (sql) => { calls.push(sql); return responses[read++] ?? []; },
+  }) };
+  await assert.rejects(collectAppOnlyDatabaseCatalogue(client), /subscription_conninfo_acl/);
+  assert.equal(calls.includes("SELECT * FROM app_rls.production_security_subscription_inventory() ORDER BY subscription_name"), false);
+});
 const identity = () => ({ role: "mscqr_prod_rls_canary_read", session_role: "mscqr_prod_rls_canary_read", database: "mscqr_production_rls_green_phase2",
   server_version_num: 180004, read_only: "on", default_read_only: "on", ...Object.fromEntries(["rolsuper", "rolinherit", "rolcreaterole", "rolcreatedb", "rolreplication", "rolbypassrls", "memberships", "write_privileges", "schema_write", "database_write"].map((key) => [key, false])) });
 test("all fixed catalogue statements use one read-only repeatable-read transaction", async () => {
   const calls = [];
   const { observed } = fixture(); let read = 0;
   const responses = [[identity()], ...Array.from({ length: 2 }, () => [{ rows: [] }]),
-    [structuredClone(SUBSCRIPTION_PROJECTION_STATUS_CONTRACT)],
+    [{ ...structuredClone(SUBSCRIPTION_PROJECTION_STATUS_CONTRACT), subscription_conninfo_acl: [
+      { grantee: "mscqr_prod_subscription_observer", grantor: "rdsadmin", privilege: "SELECT", grantable: false },
+    ] }],
     [], [{ rows: observed.routines }], [{ rows: observed.routines }], [{ rows: observed.tables }],
     [{ rows: observed.tables.map((row) => ({ schema: "public", ...row })) }],
     ...Array.from({ length: 4 }, () => [{ rows: [] }]), [{ rows: observed.policies }],
@@ -90,9 +107,15 @@ test("all fixed catalogue statements use one read-only repeatable-read transacti
   assert.ok(calls.some((sql) => sql.includes("p.proname='production_security_subscription_inventory'")
     && sql.includes("has_column_privilege") && sql.includes("pg_catalog.pg_attribute") && sql.includes("projection.prosrc")
     && sql.includes("pg_catalog.aclexplode") && sql.includes("rolcanlogin")), "subscription projection body, ACL, role and exact column privileges are authenticated");
+  const subscriptionAclSql = calls.find((sql) => sql.includes("subscription_conninfo_acl"));
+  assert.ok(subscriptionAclSql?.includes("pg_catalog.aclexplode(a.attacl)") && subscriptionAclSql.includes("acl.grantee")
+    && subscriptionAclSql.includes("acl.grantor") && subscriptionAclSql.includes("acl.is_grantable"),
+  "the complete protected connection-info column ACL is observed, including every grantee and grantor");
   assert.ok(calls.includes("SELECT * FROM app_rls.production_security_subscription_inventory() ORDER BY subscription_name"),
     "the restricted collector invokes only the fixed safe subscription projection");
   const provisioning = fs.readFileSync("documents/ops/iam/production-green-phase-4-read-only-canary-provision.sql", "utf8");
+  assert.ok(provisioning.includes("acl.grantee<>'mscqr_prod_subscription_observer'::pg_catalog.regrole")
+    && provisioning.includes("acl.is_grantable"), "provisioning verifies that the observer is the sole non-grantable subconninfo grantee");
   const projectionBody = provisioning.match(/AS \$subscription_inventory\$(.*?)\$subscription_inventory\$;/s)?.[1];
   assert.ok(projectionBody, "the source-owned fixed projection definition is present");
   assert.equal(crypto.createHash("sha256").update(projectionBody, "utf8").digest("hex"), SUBSCRIPTION_PROJECTION_BODY_SHA256,

@@ -154,6 +154,13 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
       pg_catalog.has_column_privilege(current_user,'pg_catalog.pg_subscription','subconninfo','SELECT') AS collector_direct_conninfo,
       CASE WHEN pg_catalog.to_regrole('mscqr_prod_rls_canary_read') IS NULL THEN true ELSE
         pg_catalog.has_column_privilege('mscqr_prod_rls_canary_read','pg_catalog.pg_subscription','subconninfo','SELECT') END AS canary_direct_conninfo,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object('grantee',COALESCE(grantee.rolname,'PUBLIC'),
+        'grantor',COALESCE(grantor.rolname,'UNKNOWN'),'privilege',acl.privilege_type,'grantable',acl.is_grantable)
+        ORDER BY COALESCE(grantee.rolname,'PUBLIC'),COALESCE(grantor.rolname,'UNKNOWN'),acl.privilege_type,acl.is_grantable)
+        FROM pg_catalog.pg_attribute a CROSS JOIN LATERAL pg_catalog.aclexplode(a.attacl) acl
+        LEFT JOIN pg_catalog.pg_roles grantee ON grantee.oid=acl.grantee
+        LEFT JOIN pg_catalog.pg_roles grantor ON grantor.oid=acl.grantor
+        WHERE a.attrelid='pg_catalog.pg_subscription'::pg_catalog.regclass AND a.attname='subconninfo'), '[]'::jsonb) AS subscription_conninfo_acl,
       projection.oid IS NOT NULL AS function_exists, owner.rolname AS function_owner, COALESCE(projection.prosecdef,false) AS function_security_definer,
       projection.provolatile::text AS function_volatility, projection.proconfig[1] AS function_search_path,
       CASE WHEN projection.oid IS NULL THEN NULL ELSE pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(projection.prosrc,'UTF8')),'hex') END AS function_body_sha256,
@@ -173,8 +180,16 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
       LEFT JOIN pg_catalog.pg_roles canary ON canary.oid=canary_ref.oid`);
     const projectionColumns = [...subscriptionProjectionStatus.readable_columns].sort();
     const projectionStatus = { ...subscriptionProjectionStatus, readable_columns: projectionColumns };
+    const expectedGrantors = ["rdsadmin", "mscqr_prod_admin", "mscqr_p2_test"];
+    const conninfoAcl = subscriptionProjectionStatus.subscription_conninfo_acl;
+    const conninfoAclValid = Array.isArray(conninfoAcl) && conninfoAcl.length === 1
+      && conninfoAcl[0].grantee === "mscqr_prod_subscription_observer"
+      && expectedGrantors.includes(conninfoAcl[0].grantor)
+      && conninfoAcl[0].privilege === "SELECT" && conninfoAcl[0].grantable === false;
+    delete projectionStatus.subscription_conninfo_acl;
     const projectionMismatches = Object.entries(SUBSCRIPTION_PROJECTION_STATUS_CONTRACT)
       .filter(([key, value]) => JSON.stringify(projectionStatus[key]) !== JSON.stringify(value)).map(([key]) => key);
+    if (!conninfoAclValid) projectionMismatches.push("subscription_conninfo_acl");
     const projectionReady = projectionMismatches.length === 0;
     const directReadReady = ["certification-administrator", "mscqr_p2_test"].includes(identity.role)
       && subscriptionProjectionStatus.collector_direct_conninfo;

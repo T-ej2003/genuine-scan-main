@@ -37,7 +37,7 @@ test("real PostgreSQL catalogue and hostile read-only verifier regressions", { t
   assert.deepEqual(instance.HostConfig.PortBindings["5432/tcp"], [{ HostIp: "127.0.0.1", HostPort: "55432" }]);
   assert.equal(sql("SELECT current_database()", "mscqr_p2_admin_test"), "mscqr_p2_admin_test");
   assert.equal(sql(`SELECT count(*) FROM pg_database WHERE datname='${database}'`, "mscqr_p2_admin_test"), "0", "never overwrite an existing test database");
-  assert.equal(sql(`SELECT count(*) FROM pg_roles WHERE rolname IN ('${role}','${appRole}','${subscriptionObserver}','app_only_fixture_member')`, "mscqr_p2_admin_test"), "0", "never replace existing roles");
+    assert.equal(sql(`SELECT count(*) FROM pg_roles WHERE rolname IN ('${role}','${appRole}','${subscriptionObserver}','app_only_fixture_member','app_only_unexpected_subscription_reader')`, "mscqr_p2_admin_test"), "0", "never replace existing roles");
   let createdDb = false, createdRole = false, createdAppRole = false, createdSubscriptionObserver = false;
   try {
     sql(`CREATE DATABASE ${database}`, "mscqr_p2_admin_test"); createdDb = true;
@@ -83,6 +83,15 @@ test("real PostgreSQL catalogue and hostile read-only verifier regressions", { t
       GRANT EXECUTE ON FUNCTION app_rls.production_security_subscription_inventory() TO ${role};`);
     const baseline = await collect();
     const required = { ...structuredClone(baseline), contractSha256: "a".repeat(64) };
+    await t.test("real pg_subscription column ACL rejects an extra secret-capable grantee", async () => {
+      sql("CREATE ROLE app_only_unexpected_subscription_reader NOLOGIN");
+      try {
+        sql("GRANT SELECT (subconninfo) ON pg_catalog.pg_subscription TO app_only_unexpected_subscription_reader");
+        await assert.rejects(collect(), /subscription_conninfo_acl/);
+      } finally {
+        sql("REVOKE SELECT (subconninfo) ON pg_catalog.pg_subscription FROM app_only_unexpected_subscription_reader; DROP ROLE app_only_unexpected_subscription_reader");
+      }
+    });
     await t.test("catalogues expose ACLs, function security, policies, constraints and generated/default/identity columns", () => {
       const fn = baseline.routines.find((r) => r.name === "fixture");
       assert.equal(fn.security_definer, true); assert.equal(fn.body, "SELECT value > 0");

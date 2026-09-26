@@ -108,6 +108,11 @@ DO $$ BEGIN
      OR has_table_privilege('mscqr_prod_subscription_observer','pg_catalog.pg_subscription','SELECT')
      OR (SELECT count(*)<>1 FROM pg_catalog.pg_attribute a CROSS JOIN LATERAL pg_catalog.aclexplode(a.attacl) acl
        WHERE a.attrelid='pg_catalog.pg_subscription'::pg_catalog.regclass AND a.attname='subconninfo' AND acl.grantee='mscqr_prod_subscription_observer'::pg_catalog.regrole)
+     OR (SELECT count(*)<>1 FROM pg_catalog.pg_attribute a CROSS JOIN LATERAL pg_catalog.aclexplode(a.attacl) acl
+       WHERE a.attrelid='pg_catalog.pg_subscription'::pg_catalog.regclass AND a.attname='subconninfo')
+     OR EXISTS (SELECT 1 FROM pg_catalog.pg_attribute a CROSS JOIN LATERAL pg_catalog.aclexplode(a.attacl) acl
+       WHERE a.attrelid='pg_catalog.pg_subscription'::pg_catalog.regclass AND a.attname='subconninfo'
+         AND (acl.grantee<>'mscqr_prod_subscription_observer'::pg_catalog.regrole OR acl.privilege_type<>'SELECT' OR acl.is_grantable))
      OR EXISTS (SELECT 1 FROM pg_catalog.pg_attribute a CROSS JOIN LATERAL pg_catalog.aclexplode(a.attacl) acl
        WHERE a.attrelid='pg_catalog.pg_subscription'::pg_catalog.regclass AND acl.grantee='mscqr_prod_subscription_observer'::pg_catalog.regrole
          AND (a.attname<>'subconninfo' OR acl.privilege_type<>'SELECT' OR acl.is_grantable))
