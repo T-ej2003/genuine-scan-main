@@ -317,6 +317,14 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         for (const membership of operator.memberships) if (membership.grantor === "mscqr_p2_test") membership.grantor = "rdsadmin";
       for (const extension of productionEquivalentCatalogue.securityExtensions)
         if (extension.name === "plpgsql" && extension.owner === "mscqr_p2_test") extension.owner = "rdsadmin";
+      for (const binding of productionEquivalentCatalogue.securityBindings)
+        if (binding.kind === "language" && binding.name === "plpgsql") {
+          if (binding.owner === "mscqr_p2_test") binding.owner = "rdsadmin";
+          for (const grant of binding.definition.grants) {
+            if (grant.grantor === "mscqr_p2_test") grant.grantor = "rdsadmin";
+            if (grant.role === "mscqr_p2_test") grant.role = "rdsadmin";
+          }
+        }
       const productionEquivalentLive = createLiveSecurityRebaselineInventory({ protectedMainSha: sourceSha, catalogue: productionEquivalentCatalogue,
         canonical: securityRebaselineCanonical, taskEvidence: { taskArn: `arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/${"9".repeat(32)}`,
           taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/security-rebaseline:1", containerName: "security-rebaseline",
@@ -339,11 +347,11 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         throw new Error("rollback unexpected canonical grantor fixture");
       }), /rollback unexpected canonical grantor fixture/);
       const collectedSecurityDomains = new Set(securityRebaselineCanonical.objects.map(({ collection }) => collection));
-      for (const collection of ["extensions","routines","routineGrants","tables","tableGrants","columnGrants","policies","schemas","schemaGrants","roles","roleMetadata",
+      for (const collection of ["extensions","bindings","routines","routineGrants","tables","tableGrants","columnGrants","constraintTriggers","policies","schemas","schemaGrants","roles","roleMetadata",
         "roleMembers","databases","databaseGrants","defaultPrivileges","types","typeGrants","operatorCapabilities",
         "operatorMemberships"]) assert.ok(collectedSecurityDomains.has(collection), `Real collector omitted ${collection}`);
       assert.ok(catalogue.roles.every(({ memberships, members }) => Array.isArray(memberships) && Array.isArray(members)));
-      for (const collection of ["securityExtensions","securityBindings","securityRoutines","securityTables","securityTriggers","securityRules","securityEventTriggers","securityPolicies","securitySchemas","roleMetadata","databases","defaults","types","sequences","operatorCapabilities"]) assert.ok(Array.isArray(catalogue[collection]), `Real collector omitted ${collection}`);
+      for (const collection of ["securityExtensions","securityBindings","securityRoutines","securityTables","securityTriggers","securityConstraintTriggers","securityRules","securityEventTriggers","securityPolicies","securitySchemas","roleMetadata","databases","defaults","parameterPrivileges","types","sequences","operatorCapabilities"]) assert.ok(Array.isArray(catalogue[collection]), `Real collector omitted ${collection}`);
       assert.ok(catalogue.securityExtensions.some(({ name, version, schema, relocatable }) => name === "plpgsql" && typeof version === "string" && schema === "pg_catalog" && typeof relocatable === "boolean"));
       assert.ok(catalogue.securityTables.every(({ kind }) => ["r","p","v","m","f"].includes(kind)));
       assert.ok(catalogue.securityRoutines.every(({ schema }) => schema !== "information_schema" && !schema.startsWith("pg_")));
@@ -362,6 +370,9 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         await tx.$executeRawUnsafe("CREATE RULE rebaseline_expected_rule AS ON UPDATE TO public.rebaseline_trigger_contract DO INSTEAD NOTHING");
         await tx.$executeRawUnsafe("CREATE TABLE public.rebaseline_internal_parent(id integer PRIMARY KEY)");
         await tx.$executeRawUnsafe("CREATE TABLE public.rebaseline_internal_child(parent_id integer REFERENCES public.rebaseline_internal_parent(id))");
+        await tx.$executeRawUnsafe("CREATE TABLE public.rebaseline_publication_a(id integer, tenant integer)");
+        await tx.$executeRawUnsafe("CREATE TABLE public.rebaseline_publication_b(id integer)");
+        await tx.$executeRawUnsafe("CREATE PUBLICATION rebaseline_publication_contract FOR TABLE public.rebaseline_publication_a (id, tenant) WHERE (tenant > 0)");
         const fixtureCatalogue = await collectAppOnlyDatabaseCatalogueRows(tx);
         const fixtureCanonical = createSecurityRebaselineInventory({ kind: "CANONICAL", protectedMainSha: sourceSha,
           catalogue: fixtureCatalogue, repositoryRoot: root, packageChecksums: JSON.parse(fs.readFileSync(path.join(evidenceRoot, "checksums.json"), "utf8")) });
@@ -370,17 +381,28 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
           containerExitCode: 0, requestSha256: "e".repeat(64), verificationContractSha256: "e".repeat(64) };
         const compare = async () => {
           const collected = await collectAppOnlyDatabaseCatalogueRows(tx);
-          const liveInventory = createLiveSecurityRebaselineInventory({ protectedMainSha: sourceSha, catalogue: collected, canonical: fixtureCanonical, taskEvidence: evidence });
+          const simulatedProduction = structuredClone(collected);
+          for (const binding of simulatedProduction.securityBindings) if (binding.kind === "language" && binding.name === "plpgsql") {
+            if (binding.owner === "mscqr_p2_test") binding.owner = "rdsadmin";
+            for (const grant of binding.definition.grants) {
+              if (grant.role === "mscqr_p2_test") grant.role = "rdsadmin";
+              if (grant.grantor === "mscqr_p2_test") grant.grantor = "rdsadmin";
+            }
+          }
+          const liveInventory = createLiveSecurityRebaselineInventory({ protectedMainSha: sourceSha, catalogue: simulatedProduction, canonical: fixtureCanonical, taskEvidence: evidence });
           return { collected, diff: diffSecurityRebaselineInventories(liveInventory, fixtureCanonical) };
         };
         let result = await compare();
-        assert.equal(result.diff.differences.filter(({ collection }) => ["tables","triggers","rules","eventTriggers"].includes(collection)).length, 0,
+        assert.equal(result.diff.differences.filter(({ collection }) => ["tables","triggers","constraintTriggers","rules","eventTriggers","bindings"].includes(collection)).length, 0,
           "identical real relation/view/trigger/rule/event-trigger catalogues have no drift");
         const partitionChild = result.collected.securityTables.find(({ name }) => name === "rebaseline_partition_contract_low");
         assert.equal(partitionChild.constraints.find(({ name }) => name === "rebaseline_partition_check").parent_identity,
           "public.rebaseline_partition_contract.rebaseline_partition_check", "partition constraint parent identity is stable, not a backend-local OID");
         assert.ok(result.collected.securityRules.some(({ name, definition }) => name === "rebaseline_expected_rule" && definition.includes("DO INSTEAD NOTHING")));
         assert.ok(result.collected.securityEventTriggers.some(({ name, event, function: routine }) => name === "rebaseline_event_guard" && event === "ddl_command_start" && routine.endsWith("rebaseline_event_guard()")));
+        const publicationBinding = result.collected.securityBindings.find(({ kind, name }) => kind === "publication_relation" && name === "rebaseline_publication_contract:public.rebaseline_publication_a");
+        assert.deepEqual(publicationBinding.definition.columns, ["id","tenant"]);
+        assert.match(publicationBinding.definition.row_filter, /tenant > 0/);
         const baselineView = result.collected.securityTables.find(({ name }) => name === "rebaseline_view_contract").view_definition;
         await tx.$executeRawUnsafe("CREATE OR REPLACE VIEW public.rebaseline_view_contract AS SELECT 1 :: integer AS id");
         result = await compare();
@@ -429,7 +451,20 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         await tx.$executeRawUnsafe("ALTER TABLE public.rebaseline_trigger_contract DISABLE TRIGGER rebaseline_contract_trigger");
         result = await compare();
         assert.ok(result.diff.differences.some(({ collection, identity, field }) => collection === "triggers" && identity.endsWith(".rebaseline_contract_trigger") && field === "enabled"));
-        assert.ok(result.collected.securityTriggers.every(({ name }) => !name.startsWith("RI_ConstraintTrigger")), "internal FK triggers are excluded");
+        assert.ok(result.collected.securityConstraintTriggers.some(({ constraint_name, enabled }) => constraint_name === "rebaseline_internal_child_parent_id_fkey" && enabled === "O"));
+        await tx.$executeRawUnsafe("ALTER TABLE public.rebaseline_internal_child DISABLE TRIGGER ALL");
+        result = await compare();
+        assert.ok(result.diff.differences.some(({ collection, identity, field }) => collection === "constraintTriggers" && identity.includes("rebaseline_internal_child_parent_id_fkey") && field === "enabled"), "disabled internal FK enforcement reaches the diff");
+        await tx.$executeRawUnsafe("ALTER TABLE public.rebaseline_internal_child ENABLE TRIGGER ALL");
+        result = await compare();
+        assert.equal(result.diff.differences.filter(({ collection }) => collection === "constraintTriggers").length, 0);
+        await tx.$executeRawUnsafe("ALTER PUBLICATION rebaseline_publication_contract SET TABLE public.rebaseline_publication_a (id) WHERE (tenant > 1), public.rebaseline_publication_b");
+        result = await compare();
+        assert.ok(result.diff.differences.some(({ collection, identity }) => collection === "bindings" && identity === "publication_relation:rebaseline_publication_contract:public.rebaseline_publication_a"));
+        assert.ok(result.diff.differences.some(({ collection, identity }) => collection === "bindings" && identity === "publication_relation:rebaseline_publication_contract:public.rebaseline_publication_b"));
+        await tx.$executeRawUnsafe("ALTER PUBLICATION rebaseline_publication_contract SET TABLE public.rebaseline_publication_a (id, tenant) WHERE (tenant > 0)");
+        result = await compare();
+        assert.equal(result.diff.differences.filter(({ collection }) => collection === "bindings").length, 0);
         await tx.$executeRawUnsafe("CREATE OR REPLACE RULE rebaseline_expected_rule AS ON UPDATE TO public.rebaseline_trigger_contract DO ALSO NOTHING");
         result = await compare();
         assert.equal(result.diff.safeToConstructConvergencePlan, false, "rewrite-rule drift blocks plan construction");
@@ -481,6 +516,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         await tx.$executeRawUnsafe('ALTER MATERIALIZED VIEW public.rebaseline_unexpected_materialized OWNER TO "mscqr_prod_admin"');
         await tx.$executeRawUnsafe("CREATE EXTENSION IF NOT EXISTS postgres_fdw");
         await tx.$executeRawUnsafe("CREATE PUBLICATION rebaseline_unexpected_publication");
+        await tx.$executeRawUnsafe("CREATE SUBSCRIPTION rebaseline_disabled_subscription CONNECTION 'host=127.0.0.1 dbname=unused' PUBLICATION rebaseline_remote_publication WITH (connect=false)");
         await tx.$executeRawUnsafe("CREATE OPERATOR public.=== (LEFTARG=integer, RIGHTARG=integer, FUNCTION=pg_catalog.int4eq)");
         await tx.$executeRawUnsafe("CREATE SERVER rebaseline_fixture_server FOREIGN DATA WRAPPER postgres_fdw OPTIONS (host '127.0.0.1', dbname 'postgres')");
         await tx.$executeRawUnsafe("CREATE FOREIGN TABLE public.rebaseline_unexpected_foreign (id integer) SERVER rebaseline_fixture_server OPTIONS (schema_name 'public', table_name 'unused')");
@@ -513,6 +549,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         await tx.$executeRawUnsafe("ALTER DEFAULT PRIVILEGES FOR ROLE rebaseline_default_owner GRANT SELECT ON TABLES TO PUBLIC");
         await tx.$executeRawUnsafe("ALTER DEFAULT PRIVILEGES FOR ROLE rebaseline_default_owner GRANT INSERT ON TABLES TO mscqr_prd_rls_phase2_app");
         await tx.$executeRawUnsafe("ALTER DEFAULT PRIVILEGES FOR ROLE rebaseline_default_owner IN SCHEMA public GRANT USAGE ON SEQUENCES TO PUBLIC");
+        await tx.$executeRawUnsafe("GRANT SET ON PARAMETER session_replication_role TO mscqr_prd_rls_phase2_app");
         await tx.$executeRawUnsafe('ALTER ROLE "mscqr_prod_admin" INHERIT');
         await tx.$executeRawUnsafe('GRANT rebaseline_intermediate_writer TO "mscqr_prod_admin"');
         await tx.$executeRawUnsafe('GRANT pg_write_all_data TO "mscqr_prod_admin"');
@@ -531,6 +568,9 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         assert.ok(changed.securityRoutines.some(({ schema, name, kind, aggregate_state_sha256 }) => schema === "public" && name === "rebaseline_unexpected_aggregate" && kind === "a" && /^[a-f0-9]{64}$/.test(aggregate_state_sha256)));
         assert.ok(changed.securityExtensions.some(({ name, version, schema, relocatable }) => name === "postgres_fdw" && typeof version === "string" && schema === "public" && typeof relocatable === "boolean"));
         assert.ok(changed.securityBindings.some(({ kind, name }) => kind === "publication" && name === "rebaseline_unexpected_publication"));
+        const disabledSubscription = changed.securityBindings.find(({ kind, name }) => kind === "subscription" && name === "rebaseline_disabled_subscription");
+        assert.equal(disabledSubscription?.definition.enabled, false, "disabled subscriptions remain observable through pg_subscription");
+        assert.equal(JSON.stringify(changed).includes("host=127.0.0.1"), false, "subscription connection strings never enter the catalogue");
         assert.ok(changed.securityBindings.some(({ kind, name }) => kind === "operator" && name.includes("===") && name.includes("integer")));
         assert.ok(changed.securityBindings.some(({ kind, name }) => kind === "foreign_server" && name === "rebaseline_fixture_server"));
         assert.equal(changed.securityRoutines.some(({ name }) => name === "postgres_fdw_handler"), false,
@@ -554,6 +594,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         assert.ok(changed.defaults.some(({ owner, schema, role }) => owner === "rebaseline_default_owner" && schema === "*" && role === "PUBLIC"));
         assert.ok(changed.defaults.some(({ owner, schema, role }) => owner === "rebaseline_default_owner" && schema === "*" && role === "mscqr_prd_rls_phase2_app"));
         assert.ok(changed.defaults.some(({ owner, schema, role, object_type }) => owner === "rebaseline_default_owner" && schema === "public" && role === "PUBLIC" && object_type === "S"));
+        assert.ok(changed.parameterPrivileges.some(({ parameter, role, grantor, privilege }) => parameter === "session_replication_role" && role === "mscqr_prd_rls_phase2_app" && grantor && privilege === "SET"));
         assert.ok(changed.operatorCapabilities[0].membership_closure.includes("pg_write_all_data"));
         assert.ok(changed.operatorCapabilities[0].membership_closure.includes("rebaseline_intermediate_writer"));
         const liveInventory = createLiveSecurityRebaselineInventory({ protectedMainSha: sourceSha, catalogue: changed, canonical: testCanonical,
@@ -577,12 +618,14 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         assert.ok(sourceDiff.differences.some(({ collection, identity, operation }) => collection === "routines" && identity.startsWith("public.rebaseline_unexpected_aggregate(integer)") && operation === "UNEXPECTED_OBJECT"));
         assert.ok(sourceDiff.differences.some(({ collection, identity }) => collection === "extensions" && identity === "postgres_fdw"));
         assert.ok(sourceDiff.differences.some(({ collection, identity }) => collection === "bindings" && identity === "publication:rebaseline_unexpected_publication"));
+        assert.ok(sourceDiff.differences.some(({ collection, identity }) => collection === "bindings" && identity === "subscription:rebaseline_disabled_subscription"));
         assert.ok(sourceDiff.differences.some(({ collection, identity }) => collection === "bindings" && identity.startsWith('operator:public."==="')));
         assert.ok(sourceDiff.differences.some(({ collection, identity }) => collection === "bindings" && identity === "foreign_server:rebaseline_fixture_server"));
         for (const name of ["rebaseline_unexpected_login","rebaseline_unexpected_bypass","rebaseline_unexpected_createrole","rebaseline_unexpected_createdb","rebaseline_default_owner"]) {
           assert.ok(sourceDiff.differences.some(({ collection, identity, operation }) => collection === "unexpectedRoles" && identity === name && operation === "UNEXPECTED_OBJECT"), `${name} must hard-stop as an unexpected role`);
         }
         assert.ok(sourceDiff.differences.some(({ collection, identity }) => collection === "defaultPrivileges" && identity.includes('"*"') && identity.includes('"PUBLIC"')));
+        assert.ok(sourceDiff.differences.some(({ collection, identity }) => collection === "parameterPrivileges" && identity.includes("session_replication_role")));
         assert.equal(sourceDiff.safeToConstructConvergencePlan, false);
         throw new Error("rollback real security collector drift");
       }), /rollback real security collector drift/);
@@ -605,6 +648,27 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         assert.ok(diffSecurityRebaselineInventories(extensionLive, extensionCanonical).differences.some(({ collection, identity }) => collection === "extensions" && identity === "postgres_fdw"));
         throw new Error("rollback real extension inventory fixtures");
       }), /rollback real extension inventory fixtures/);
+      await assert.rejects(maintenanceClient.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe("CREATE FOREIGN DATA WRAPPER rebaseline_digest_fdw OPTIONS (endpoint 'fdw_first')");
+        await tx.$executeRawUnsafe("CREATE SERVER rebaseline_digest_server FOREIGN DATA WRAPPER rebaseline_digest_fdw OPTIONS (host 'first.invalid', dbname 'firstdb')");
+        await tx.$executeRawUnsafe("CREATE USER MAPPING FOR mscqr_prod_admin SERVER rebaseline_digest_server OPTIONS (user 'remote_one', password 'fixture_secret_one')");
+        await tx.$executeRawUnsafe("CREATE FOREIGN TABLE public.rebaseline_digest_foreign(id integer) SERVER rebaseline_digest_server OPTIONS (schema_name 'public', table_name 'first_table')");
+        const baseline = await collectAppOnlyDatabaseCatalogueRows(tx), serialized = JSON.stringify(baseline);
+        for (const secret of ["fdw_first","first.invalid","firstdb","remote_one","fixture_secret_one","first_table"]) assert.equal(serialized.includes(secret), false, `raw foreign option ${secret} escaped`);
+        const canonical = createSecurityRebaselineInventory({ kind: "CANONICAL", protectedMainSha: sourceSha, catalogue: baseline,
+          repositoryRoot: root, packageChecksums: JSON.parse(fs.readFileSync(path.join(evidenceRoot, "checksums.json"), "utf8")) });
+        await tx.$executeRawUnsafe("ALTER FOREIGN DATA WRAPPER rebaseline_digest_fdw OPTIONS (SET endpoint 'fdw_second')");
+        await tx.$executeRawUnsafe("ALTER SERVER rebaseline_digest_server OPTIONS (SET host 'second.invalid')");
+        await tx.$executeRawUnsafe("ALTER USER MAPPING FOR mscqr_prod_admin SERVER rebaseline_digest_server OPTIONS (SET user 'remote_two', SET password 'fixture_secret_two')");
+        await tx.$executeRawUnsafe("ALTER FOREIGN TABLE public.rebaseline_digest_foreign OPTIONS (SET table_name 'second_table')");
+        const changed = await collectAppOnlyDatabaseCatalogueRows(tx), changedSerialized = JSON.stringify(changed);
+        for (const secret of ["fdw_second","second.invalid","remote_two","fixture_secret_two","second_table"]) assert.equal(changedSerialized.includes(secret), false, `changed foreign option ${secret} escaped`);
+        const live = createLiveSecurityRebaselineInventory({ protectedMainSha: sourceSha, catalogue: changed, canonical, taskEvidence: productionEquivalentLive.taskEvidence });
+        const diff = diffSecurityRebaselineInventories(live, canonical);
+        for (const identity of ["foreign_data_wrapper:rebaseline_digest_fdw","foreign_server:rebaseline_digest_server","user_mapping:rebaseline_digest_server:mscqr_prod_admin","foreign_table:public.rebaseline_digest_foreign"])
+          assert.ok(diff.differences.some(({ collection, identity: observed }) => collection === "bindings" && observed === identity), `${identity} option digest drift is observable`);
+        throw new Error("rollback real foreign binding digest fixtures");
+      }), /rollback real foreign binding digest fixtures/);
       assertAppOnlyRequirements(requirements, context);
       assert.ok(catalogue.tables.length >= 79 && catalogue.policies.length >= 351);
       assert.ok(Object.values(compareAppOnlyRequirements(catalogue, requirements)).every((value) => value === "COMPATIBLE"));
