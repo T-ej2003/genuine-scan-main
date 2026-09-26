@@ -552,12 +552,7 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
       WHERE c.relkind='S' AND n.nspname<>'information_schema' AND n.nspname NOT LIKE 'pg\_%' ESCAPE '\\'
         AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_depend d WHERE d.classid='pg_catalog.pg_class'::pg_catalog.regclass AND d.objid=c.oid AND d.deptype='e')
     ) x`);
-    const [operatorCapabilities] = await tx.$queryRawUnsafe(`WITH RECURSIVE membership_closure(member,roleid) AS (
-      SELECT m.member,m.roleid FROM pg_catalog.pg_auth_members m JOIN pg_catalog.pg_roles member ON member.oid=m.member
-      WHERE m.inherit_option AND member.rolinherit
-      UNION SELECT c.member,m.roleid FROM membership_closure c JOIN pg_catalog.pg_roles intermediate ON intermediate.oid=c.roleid AND intermediate.rolinherit
-        JOIN pg_catalog.pg_auth_members m ON m.member=c.roleid WHERE m.inherit_option
-    ) SELECT COALESCE(jsonb_agg(x ORDER BY x.name),'[]'::jsonb) AS rows FROM (
+    const [operatorCapabilities] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.name),'[]'::jsonb) AS rows FROM (
       SELECT r.rolname AS name,r.rolcanlogin AS login,r.rolvaliduntil::text AS valid_until,r.rolconnlimit AS connection_limit,r.rolsuper AS superuser,r.rolinherit AS inherit,r.rolcreaterole AS create_role,
         r.rolcreatedb AS create_database,r.rolreplication AS replication,r.rolbypassrls AS bypass_rls,
         pg_catalog.has_database_privilege(r.oid,current_database(),'CONNECT') AS database_connect,
@@ -566,8 +561,15 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
         COALESCE((SELECT jsonb_agg(jsonb_build_object('role',parent.rolname,'grantor',grantor.rolname,'admin',m.admin_option,'inherit',m.inherit_option,'set',m.set_option)
           ORDER BY parent.rolname,grantor.rolname,m.admin_option,m.inherit_option,m.set_option) FROM pg_catalog.pg_auth_members m
           JOIN pg_catalog.pg_roles parent ON parent.oid=m.roleid JOIN pg_catalog.pg_roles grantor ON grantor.oid=m.grantor WHERE m.member=r.oid),'[]'::jsonb) AS memberships,
-        COALESCE((SELECT jsonb_agg(parent.rolname ORDER BY parent.rolname) FROM membership_closure c
-          JOIN pg_catalog.pg_roles parent ON parent.oid=c.roleid WHERE c.member=r.oid),'[]'::jsonb) AS membership_closure
+        COALESCE((SELECT jsonb_agg(target.rolname ORDER BY target.rolname) FROM pg_catalog.pg_roles target
+          WHERE target.oid<>r.oid AND pg_catalog.pg_has_role(r.oid,target.oid,'USAGE')),'[]'::jsonb) AS membership_closure,
+        COALESCE((SELECT jsonb_agg(target.rolname ORDER BY target.rolname) FROM pg_catalog.pg_roles target
+          WHERE target.oid<>r.oid AND pg_catalog.pg_has_role(r.oid,target.oid,'SET')),'[]'::jsonb) AS set_role_closure,
+        COALESCE((SELECT jsonb_agg(DISTINCT capability.rolname ORDER BY capability.rolname)
+          FROM pg_catalog.pg_roles settable JOIN pg_catalog.pg_roles capability ON pg_catalog.pg_has_role(settable.oid,capability.oid,'USAGE')
+          WHERE settable.oid<>r.oid AND pg_catalog.pg_has_role(r.oid,settable.oid,'SET')),'[]'::jsonb) AS set_role_capability_closure,
+        COALESCE((SELECT jsonb_agg(target.rolname ORDER BY target.rolname) FROM pg_catalog.pg_roles target
+          WHERE target.oid<>r.oid AND pg_catalog.pg_has_role(r.oid,target.oid,'MEMBER WITH ADMIN OPTION')),'[]'::jsonb) AS admin_option_closure
       FROM pg_catalog.pg_roles r WHERE r.rolname='mscqr_prod_admin'
     ) x`);
     if (projectionReady) {

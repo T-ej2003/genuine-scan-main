@@ -158,8 +158,12 @@ test("all fixed catalogue statements use one read-only repeatable-read transacti
   assert.ok(securityRolesSql?.includes("pg_catalog.pg_auth_members") && securityRolesSql.includes("m.admin_option")
     && securityRolesSql.includes("m.inherit_option") && securityRolesSql.includes("m.set_option") && securityRolesSql.includes("m.grantor")
     && securityRolesSql.includes("grantor.rolname"), "security inventory observes membership grantors and all PostgreSQL 18 options");
-  assert.ok(calls.some((sql) => sql.includes("WITH RECURSIVE membership_closure") && sql.includes("m.inherit_option") && sql.includes("intermediate.rolinherit")),
-    "operator capability collection evaluates recursively inherited roles");
+  const operatorSql = calls.find((sql) => sql.includes("AS set_role_capability_closure"));
+  assert.ok(operatorSql?.includes("pg_catalog.pg_has_role(r.oid,target.oid,'USAGE')")
+    && operatorSql.includes("pg_catalog.pg_has_role(r.oid,target.oid,'SET')")
+    && operatorSql.includes("pg_catalog.pg_has_role(settable.oid,capability.oid,'USAGE')")
+    && operatorSql.includes("'MEMBER WITH ADMIN OPTION'"),
+  "operator capability collection uses PostgreSQL's inherited, SET ROLE, post-SET inheritance, and ADMIN OPTION semantics");
   assert.ok(calls.some((sql) => sql.includes("pg_catalog.pg_type") && sql.includes("t.typcategory<>'A'")),
     "generated array types are excluded because PostgreSQL does not allow independent ACLs on them; element-type ACLs are collected");
   const defaultAclSql = calls.find((sql) => sql.includes("FROM pg_catalog.pg_default_acl d"));

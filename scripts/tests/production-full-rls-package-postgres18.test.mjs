@@ -9,7 +9,7 @@ import { createRequire } from "node:module";
 import { collectAppOnlyDatabaseCatalogue, collectAppOnlyDatabaseCatalogueRows } from "../aws/production-app-only-database-verifier.mjs";
 import { createAppOnlyRequirements, assertAppOnlyRequirements, compareAppOnlyRequirements } from "../aws/production-app-only-requirements.mjs";
 import { assertAppOnlyCandidateAncestor } from "../aws/produce-production-app-only-requirements.mjs";
-import { createLiveSecurityRebaselineInventory, createSecurityRebaselineInventory, diffSecurityRebaselineInventories } from "../aws/production-security-rebaseline-inventory.mjs";
+import { createLiveSecurityRebaselineInventory, createSecurityRebaselineInventory, diffSecurityRebaselineInventories, SECURITY_REBASELINE_COVERAGE, SECURITY_REBASELINE_NORMALIZED_COLLECTIONS } from "../aws/production-security-rebaseline-inventory.mjs";
 import { writeStageBPrivateFileExclusive } from "../aws/stage-b-artifact-contract.mjs";
 import { APP_ONLY } from "../aws/production-app-only-contract.mjs";
 import { buildAppOnlyVerifierCommand, authenticateAppOnlyVerifierResult } from "../aws/production-app-only-verifier-command.mjs";
@@ -341,6 +341,91 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
       const productionEquivalentDiff = diffSecurityRebaselineInventories(productionEquivalentLive, securityRebaselineCanonical);
       assert.equal(productionEquivalentDiff.differenceCount, 0,
         `production-equivalent membership grantors do not create canonical harness drift: ${JSON.stringify(productionEquivalentDiff.differences.map(({collection,identity,field})=>({collection,identity,field})))}`);
+      const operatorCoverage = SECURITY_REBASELINE_COVERAGE.find(({ surface }) => surface === "operator capabilities");
+      assert.equal(operatorCoverage.rawCollection, "operatorCapabilities");
+      for (const collection of ["operatorInheritedCapabilities","operatorSetRoles","operatorSetRoleCapabilities","operatorAdminCapabilities"])
+        assert.ok(operatorCoverage.normalizedCollections.split("/").includes(collection) && SECURITY_REBASELINE_NORMALIZED_COLLECTIONS.includes(collection));
+      await assert.rejects(maintenanceClient.$transaction(async (tx) => {
+        const admin = '"mscqr_prod_admin"';
+        const operator = async () => (await collectAppOnlyDatabaseCatalogueRows(tx)).operatorCapabilities[0];
+        const grant = async (role, member, options) => tx.$executeRawUnsafe(`GRANT "${role}" TO "${member}" WITH ADMIN FALSE, INHERIT ${options.inherit ? "TRUE" : "FALSE"}, SET ${options.set ? "TRUE" : "FALSE"}`);
+        await tx.$executeRawUnsafe("ALTER ROLE mscqr_prod_admin INHERIT");
+        const beforeSetOnlyGrant = await operator();
+        assert.ok(beforeSetOnlyGrant.set_role_closure.includes("mscqr_prd_rls_phase2_app"), "canonical operator can SET ROLE to its managed application role");
+        assert.equal(beforeSetOnlyGrant.set_role_capability_closure.includes("pg_write_all_data"), false);
+        await tx.$executeRawUnsafe("GRANT pg_write_all_data TO mscqr_prd_rls_phase2_app WITH ADMIN FALSE, INHERIT FALSE, SET TRUE");
+        const afterSetOnlyGrant = await operator();
+        assert.deepEqual(afterSetOnlyGrant.memberships, beforeSetOnlyGrant.memberships, "no direct operator membership changed");
+        for (const field of ["login","superuser","inherit","create_role","create_database","replication","bypass_rls","database_connect","database_create","database_temporary"])
+          assert.equal(afterSetOnlyGrant[field], beforeSetOnlyGrant[field], `operatorCapabilities.${field} is unchanged`);
+        assert.ok(afterSetOnlyGrant.set_role_capability_closure.includes("pg_write_all_data"));
+        const setOnlyCatalogue = await collectAppOnlyDatabaseCatalogueRows(tx);
+        const setOnlyLiveCatalogue = structuredClone(setOnlyCatalogue);
+        for (const membership of setOnlyLiveCatalogue.operatorCapabilities[0].memberships)
+          if (membership.grantor === "mscqr_p2_test") membership.grantor = "rdsadmin";
+        const setOnlyLive = createLiveSecurityRebaselineInventory({ protectedMainSha: sourceSha, catalogue: setOnlyLiveCatalogue,
+          canonical: securityRebaselineCanonical, taskEvidence: productionEquivalentLive.taskEvidence });
+        const setOnlyDiff = diffSecurityRebaselineInventories(setOnlyLive, securityRebaselineCanonical);
+        assert.equal(setOnlyDiff.safeToConstructConvergencePlan, false);
+        assert.ok(setOnlyDiff.differences.some(({ collection, identity }) => collection === "operatorSetRoleCapabilities" && identity.includes("pg_write_all_data")));
+        assert.equal(setOnlyDiff.differences.some(({ collection }) => collection === "operatorMemberships"), false,
+          "the blocker catches the new transitive SET capability even though the direct operator membership inventory is unchanged");
+        await tx.$executeRawUnsafe("REVOKE pg_write_all_data FROM mscqr_prd_rls_phase2_app");
+        await tx.$executeRawUnsafe("CREATE ROLE rebaseline_cap_ii NOLOGIN INHERIT");
+        await grant("pg_write_all_data", "rebaseline_cap_ii", { inherit:true,set:false });
+        await grant("rebaseline_cap_ii", "mscqr_prod_admin", { inherit:true,set:false });
+        let capabilities = await operator();
+        assert.ok(capabilities.membership_closure.includes("pg_write_all_data"), "INHERIT TRUE across both edges is immediately available");
+        await tx.$executeRawUnsafe(`REVOKE "rebaseline_cap_ii" FROM ${admin}`);
+        await tx.$executeRawUnsafe("CREATE ROLE rebaseline_cap_ss_a NOLOGIN NOINHERIT");
+        await tx.$executeRawUnsafe("CREATE ROLE rebaseline_cap_ss_b NOLOGIN NOINHERIT");
+        await grant("pg_read_all_data", "rebaseline_cap_ss_b", { inherit:false,set:true });
+        await grant("rebaseline_cap_ss_b", "rebaseline_cap_ss_a", { inherit:false,set:true });
+        await grant("rebaseline_cap_ss_a", "mscqr_prod_admin", { inherit:false,set:true });
+        capabilities = await operator();
+        assert.ok(capabilities.set_role_closure.includes("pg_read_all_data"), "SET TRUE transitive path reaches the terminal role");
+        assert.equal(capabilities.membership_closure.includes("pg_read_all_data"), false, "SET reachability is not reported as automatic inheritance");
+        await tx.$executeRawUnsafe("GRANT pg_read_all_data TO rebaseline_cap_ss_b WITH ADMIN FALSE, INHERIT FALSE, SET FALSE");
+        capabilities = await operator();
+        assert.equal(capabilities.set_role_closure.includes("pg_read_all_data"), false, "revoking SET removes SET-only reachability");
+        assert.equal(capabilities.set_role_capability_closure.includes("pg_read_all_data"), false);
+        await tx.$executeRawUnsafe(`REVOKE "rebaseline_cap_ss_a" FROM ${admin}`);
+        await tx.$executeRawUnsafe("CREATE ROLE rebaseline_cap_is_a NOLOGIN INHERIT");
+        await tx.$executeRawUnsafe("CREATE ROLE rebaseline_cap_is_b NOLOGIN NOINHERIT");
+        await grant("rebaseline_cap_is_b", "rebaseline_cap_is_a", { inherit:false,set:true });
+        await grant("rebaseline_cap_is_a", "mscqr_prod_admin", { inherit:true,set:false });
+        capabilities = await operator();
+        assert.ok(capabilities.membership_closure.includes("rebaseline_cap_is_a"));
+        assert.equal(capabilities.membership_closure.includes("rebaseline_cap_is_b"), false, "INHERIT then SET does not cross the non-inheriting edge");
+        assert.equal(capabilities.set_role_closure.includes("rebaseline_cap_is_b"), false, "SET must be true on every edge");
+        await tx.$executeRawUnsafe(`REVOKE "rebaseline_cap_is_a" FROM ${admin}`);
+        await tx.$executeRawUnsafe("CREATE ROLE rebaseline_cap_si NOLOGIN INHERIT");
+        await grant("pg_write_all_data", "rebaseline_cap_si", { inherit:true,set:false });
+        await grant("rebaseline_cap_si", "mscqr_prod_admin", { inherit:false,set:true });
+        capabilities = await operator();
+        assert.equal(capabilities.membership_closure.includes("pg_write_all_data"), false, "SET then INHERIT is not immediate operator inheritance");
+        assert.equal(capabilities.set_role_closure.includes("pg_write_all_data"), false, "the terminal membership does not permit SET directly");
+        assert.ok(capabilities.set_role_capability_closure.includes("pg_write_all_data"), "after SET to the intermediate, its automatic INHERIT grants the capability");
+        const hostileCatalogue = await collectAppOnlyDatabaseCatalogueRows(tx);
+        const hostileInventory = createLiveSecurityRebaselineInventory({ protectedMainSha: sourceSha, catalogue: hostileCatalogue,
+          canonical: securityRebaselineCanonical, taskEvidence: productionEquivalentLive.taskEvidence });
+        const hostileDiff = diffSecurityRebaselineInventories(hostileInventory, securityRebaselineCanonical);
+        assert.equal(hostileDiff.safeToConstructConvergencePlan, false);
+        assert.ok(hostileDiff.differences.some(({ collection, identity }) => collection === "operatorSetRoleCapabilities" && identity.includes("pg_write_all_data")),
+          "the actual SET->INHERIT privileged path blocks through the normalized inventory and diff");
+        await tx.$executeRawUnsafe(`REVOKE "rebaseline_cap_si" FROM ${admin}`);
+        await tx.$executeRawUnsafe("CREATE ROLE rebaseline_cap_none_a NOLOGIN NOINHERIT");
+        await grant("pg_monitor", "rebaseline_cap_none_a", { inherit:false,set:false });
+        await grant("rebaseline_cap_none_a", "mscqr_prod_admin", { inherit:false,set:false });
+        capabilities = await operator();
+        for (const field of ["membership_closure","set_role_closure","set_role_capability_closure"])
+          assert.equal(capabilities[field].includes("pg_monitor"), false, `neither option grants reachability in ${field}`);
+        await tx.$executeRawUnsafe("CREATE ROLE rebaseline_cap_admin_target NOLOGIN");
+        await tx.$executeRawUnsafe(`GRANT rebaseline_cap_admin_target TO ${admin} WITH ADMIN TRUE, INHERIT FALSE, SET FALSE`);
+        capabilities = await operator();
+        assert.ok(capabilities.admin_option_closure.includes("rebaseline_cap_admin_target"), "ADMIN OPTION administrative reachability is separately observed");
+        throw new Error("rollback operator capability topology");
+      }), /rollback operator capability topology/);
       await assert.rejects(maintenanceClient.$transaction(async (tx) => {
         const [created] = await tx.$queryRawUnsafe("SELECT pg_catalog.lo_create(0)::text AS oid");
         await tx.$executeRawUnsafe(`ALTER LARGE OBJECT ${created.oid} OWNER TO mscqr_prd_rls_phase2_app`);
@@ -371,7 +456,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
       const collectedSecurityDomains = new Set(securityRebaselineCanonical.objects.map(({ collection }) => collection));
       for (const collection of ["extensions","bindings","routines","routineGrants","tables","tableGrants","columnGrants","constraintTriggers","policies","schemas","schemaGrants","roles","roleMetadata",
         "roleMembers","databases","databaseGrants","defaultPrivileges","types","typeGrants","operatorCapabilities",
-        "operatorMemberships"]) assert.ok(collectedSecurityDomains.has(collection), `Real collector omitted ${collection}`);
+        "operatorMemberships","operatorInheritedCapabilities","operatorSetRoles","operatorSetRoleCapabilities"]) assert.ok(collectedSecurityDomains.has(collection), `Real collector omitted ${collection}`);
       assert.ok(catalogue.roles.every(({ memberships, members }) => Array.isArray(memberships) && Array.isArray(members)));
       for (const collection of ["securityExtensions","securityBindings","securityRoutines","securityTables","securityTriggers","securityConstraintTriggers","securityRules","securityEventTriggers","securityPolicies","securitySchemas","roleMetadata","databases","defaults","parameterPrivileges","types","sequences","operatorCapabilities"]) assert.ok(Array.isArray(catalogue[collection]), `Real collector omitted ${collection}`);
       assert.ok(catalogue.securityExtensions.some(({ name, version, schema, relocatable }) => name === "plpgsql" && typeof version === "string" && schema === "pg_catalog" && typeof relocatable === "boolean"));
@@ -651,7 +736,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         await tx.$executeRawUnsafe("ALTER DEFAULT PRIVILEGES FOR ROLE rebaseline_default_owner IN SCHEMA public GRANT USAGE ON SEQUENCES TO PUBLIC");
         await tx.$executeRawUnsafe("GRANT SET ON PARAMETER session_replication_role TO mscqr_prd_rls_phase2_app");
         await tx.$executeRawUnsafe('ALTER ROLE "mscqr_prod_admin" INHERIT');
-        await tx.$executeRawUnsafe('GRANT rebaseline_intermediate_writer TO "mscqr_prod_admin"');
+        await tx.$executeRawUnsafe('GRANT rebaseline_intermediate_writer TO "mscqr_prod_admin" WITH ADMIN TRUE, INHERIT FALSE, SET TRUE');
         await tx.$executeRawUnsafe('GRANT pg_write_all_data TO "mscqr_prod_admin"');
         const changed = await collectAppOnlyDatabaseCatalogueRows(tx), taskDigest = "f".repeat(64);
         const publicViewGrant = changed.securityTables.find(({ name }) => name === "rebaseline_unexpected_view").grants.find(({ role }) => role === "PUBLIC");
@@ -693,13 +778,18 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         assert.ok(changed.defaults.some(({ owner, schema, role, object_type }) => owner === "rebaseline_default_owner" && schema === "public" && role === "PUBLIC" && object_type === "S"));
         assert.ok(changed.parameterPrivileges.some(({ parameter, role, grantor, privilege }) => parameter === "session_replication_role" && role === "mscqr_prd_rls_phase2_app" && grantor && privilege === "SET"));
         assert.ok(changed.operatorCapabilities[0].membership_closure.includes("pg_write_all_data"));
-        assert.ok(changed.operatorCapabilities[0].membership_closure.includes("rebaseline_intermediate_writer"));
+        assert.ok(changed.operatorCapabilities[0].set_role_closure.includes("pg_write_all_data"));
+        assert.equal(changed.operatorCapabilities[0].membership_closure.includes("rebaseline_intermediate_writer"), false);
+        assert.ok(changed.operatorCapabilities[0].set_role_closure.includes("rebaseline_intermediate_writer"));
         const liveInventory = createLiveSecurityRebaselineInventory({ protectedMainSha: sourceSha, catalogue: changed, canonical: testCanonical,
           taskEvidence: liveTaskEvidence(sourceSha, context.candidateSourceSha, taskDigest, "a") });
         const diff = diffSecurityRebaselineInventories(liveInventory, testCanonical);
         assert.equal(diff.safeToConstructConvergencePlan, false);
         assert.ok(diff.differences.some(({ collection, identity }) => collection === "tableGrants" && identity.includes("public.rebaseline_unexpected_view")));
         assert.ok(diff.differences.some(({ collection }) => collection === "operatorInheritedCapabilities"));
+        assert.ok(diff.differences.some(({ collection }) => collection === "operatorSetRoles"));
+        assert.ok(diff.differences.some(({ collection }) => collection === "operatorSetRoleCapabilities"));
+        assert.ok(diff.differences.some(({ collection }) => collection === "operatorAdminCapabilities"));
         const sourceLive = createLiveSecurityRebaselineInventory({ protectedMainSha: sourceSha, catalogue: changed, canonical: securityRebaselineCanonical,
           taskEvidence: liveInventory.taskEvidence }), sourceDiff = diffSecurityRebaselineInventories(sourceLive, securityRebaselineCanonical);
         assert.equal(sourceDiff.safeToConstructConvergencePlan, false);
