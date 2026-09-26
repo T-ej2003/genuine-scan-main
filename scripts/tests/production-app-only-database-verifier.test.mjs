@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { collectAppOnlyDatabaseCatalogue, evaluateAppOnlyDatabaseCatalogue } from "../aws/production-app-only-database-verifier.mjs";
+import crypto from "node:crypto";
+import fs from "node:fs";
+import { collectAppOnlyDatabaseCatalogue, evaluateAppOnlyDatabaseCatalogue, SUBSCRIPTION_PROJECTION_BODY_SHA256, SUBSCRIPTION_PROJECTION_STATUS_CONTRACT } from "../aws/production-app-only-database-verifier.mjs";
 
 function fixture() {
   const observed = {
@@ -37,21 +39,167 @@ test("additional permissive policy on a required table cannot pass", () => {
   observed.policies.push({ ...observed.policies[0], name: "public_bypass", using: "true" });
   assert.equal(evaluateAppOnlyDatabaseCatalogue(observed, required).RLS_POLICIES, "INCOMPATIBLE");
 });
+test("missing subscription projection is an explicit fail-closed provisioning prerequisite", async () => {
+  const calls = [];
+  const missingProjection = { ...structuredClone(SUBSCRIPTION_PROJECTION_STATUS_CONTRACT),
+    role_exists: false, function_exists: false, readable_columns: [] };
+  const responses = [[identity()], [{ rows: [] }], [{ rows: [] }], [missingProjection]];
+  let read = 0;
+  const client = { $transaction: async (fn) => fn({
+    $executeRawUnsafe: async (sql) => calls.push(sql),
+    $queryRawUnsafe: async (sql) => { calls.push(sql); return responses[read++] ?? []; },
+  }) };
+  await assert.rejects(collectAppOnlyDatabaseCatalogue(client), /Subscription security inventory capability is unavailable/);
+  assert.equal(calls.includes("SELECT * FROM app_rls.production_security_subscription_inventory() ORDER BY subscription_name"), false);
+  const runbook = fs.readFileSync("documents/security/rls-program/production-security-rebaseline-inventory.md", "utf8");
+  assert.match(runbook, /Required database prerequisite[\s\S]*?production-green-phase-4-read-only-canary-provision\.sql/);
+  assert.match(runbook, /distinct, explicitly authorized provisioning change/);
+});
+test("every extra subconninfo grantee fails closed before subscription projection invocation", async () => {
+  const calls = [];
+  const status = { ...structuredClone(SUBSCRIPTION_PROJECTION_STATUS_CONTRACT), subscription_conninfo_acl: [
+    { grantee: "mscqr_prod_subscription_observer", grantor: "rdsadmin", privilege: "SELECT", grantable: false },
+    { grantee: "unexpected_login", grantor: "rdsadmin", privilege: "SELECT", grantable: false },
+  ] };
+  const responses = [[identity()], [{ rows: [] }], [{ rows: [] }], [status]];
+  let read = 0;
+  const client = { $transaction: async (fn) => fn({
+    $executeRawUnsafe: async (sql) => calls.push(sql),
+    $queryRawUnsafe: async (sql) => { calls.push(sql); return responses[read++] ?? []; },
+  }) };
+  await assert.rejects(collectAppOnlyDatabaseCatalogue(client), /subscription_conninfo_acl/);
+  assert.equal(calls.includes("SELECT * FROM app_rls.production_security_subscription_inventory() ORDER BY subscription_name"), false);
+});
+test("subscription projection grant-option drift fails closed before function invocation", async () => {
+  const calls = [];
+  const invalid = { ...structuredClone(SUBSCRIPTION_PROJECTION_STATUS_CONTRACT), projection_acl_valid: false };
+  const responses = [[identity()], [{ rows: [] }], [{ rows: [] }], [invalid]];
+  let read = 0;
+  const client = { $transaction: async (fn) => fn({
+    $executeRawUnsafe: async (sql) => calls.push(sql),
+    $queryRawUnsafe: async (sql) => { calls.push(sql); return responses[read++] ?? []; },
+  }) };
+  await assert.rejects(collectAppOnlyDatabaseCatalogue(client), /projection_acl_valid/);
+  assert.equal(calls.includes("SELECT * FROM app_rls.production_security_subscription_inventory() ORDER BY subscription_name"), false);
+});
 const identity = () => ({ role: "mscqr_prod_rls_canary_read", session_role: "mscqr_prod_rls_canary_read", database: "mscqr_production_rls_green_phase2",
-  read_only: "on", default_read_only: "on", ...Object.fromEntries(["rolsuper", "rolinherit", "rolcreaterole", "rolcreatedb", "rolreplication", "rolbypassrls", "memberships", "write_privileges", "schema_write", "database_write"].map((key) => [key, false])) });
+  server_version_num: 180004, read_only: "on", default_read_only: "on", ...Object.fromEntries(["rolsuper", "rolinherit", "rolcreaterole", "rolcreatedb", "rolreplication", "rolbypassrls", "memberships", "write_privileges", "schema_write", "database_write"].map((key) => [key, false])) });
 test("all fixed catalogue statements use one read-only repeatable-read transaction", async () => {
   const calls = [];
   const { observed } = fixture(); let read = 0;
-  const tx = { $executeRawUnsafe: async (sql) => calls.push(sql), $queryRawUnsafe: async (sql) => { calls.push(sql); return [[identity()], [{ rows: observed.routines }], [{ rows: observed.tables }], [{ rows: observed.policies }], [{ rows: observed.schemas }], [{ rows: observed.roles }]][read++]; } };
+  const responses = [[identity()], ...Array.from({ length: 2 }, () => [{ rows: [] }]),
+    [{ ...structuredClone(SUBSCRIPTION_PROJECTION_STATUS_CONTRACT), subscription_conninfo_acl: [
+      { grantee: "mscqr_prod_subscription_observer", grantor: "rdsadmin", privilege: "SELECT", grantable: false },
+    ] }],
+    [], [{ rows: observed.routines }], [{ rows: observed.routines }], [{ rows: observed.tables }],
+    [{ rows: observed.tables.map((row) => ({ schema: "public", ...row })) }],
+    ...Array.from({ length: 4 }, () => [{ rows: [] }]), [{ rows: observed.policies }],
+    [{ rows: observed.policies.map((row) => ({ schema: "public", ...row })) }], [{ rows: observed.schemas }],
+    [{ rows: observed.schemas }], [{ rows: observed.roles }], [{ rows: observed.roles }],
+    ...Array.from({ length: 7 }, () => [{ rows: [] }])];
+  const tx = { $executeRawUnsafe: async (sql) => calls.push(sql), $queryRawUnsafe: async (sql) => { calls.push(sql); return responses[read++]; } };
   const client = { $transaction: async (fn, options) => { assert.equal(options.timeout, 30000); return fn(tx); } };
   const result = await collectAppOnlyDatabaseCatalogue(client);
   assert.deepEqual(result.routines, observed.routines);
   assert.equal(calls[0], "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
   assert.equal(calls[1], "SET LOCAL search_path = pg_catalog");
-  assert.equal(read, 6);
+  assert.equal(read, 26);
   // Inspection check, not the security boundary: callers cannot supply SQL;
   // database privileges, fixed code and read-only transaction enforce the limit.
-  assert.ok(calls.slice(2).every((sql) => sql.startsWith("SELECT ")));
+  assert.ok(calls.slice(2).every((sql) => /^\s*(?:SELECT\b|WITH RECURSIVE\b)/.test(sql)), JSON.stringify(calls.slice(2).filter((sql) => !/^\s*(?:SELECT\b|WITH RECURSIVE\b)/.test(sql))));
+  assert.ok(calls.some((sql) => sql.includes("c.relkind IN ('r','p','v','m','f')")), "security collector covers relation kinds with ACLs");
+  assert.ok(calls.some((sql) => sql.includes("pg_catalog.pg_get_viewdef(c.oid,false)")), "view definitions are collected canonically");
+  assert.ok(calls.some((sql) => sql.includes("pg_catalog.pg_trigger") && sql.includes("NOT t.tgisinternal") && sql.includes("pg_get_triggerdef")), "user triggers are collected separately");
+  assert.ok(calls.some((sql) => sql.includes("pg_catalog.pg_trigger") && sql.includes("t.tgisinternal") && sql.includes("t.tgconstraint<>0") && sql.includes("t.tgenabled")), "stable internal constraint-trigger enforcement is collected");
+  assert.ok(calls.some((sql) => sql.includes("FROM pg_catalog.pg_extension")), "installed extensions are inventoried before extension-owned members are excluded");
+  assert.ok(calls.some((sql) => sql.includes("FROM pg_catalog.pg_largeobject_metadata") && sql.includes("acl_state.grants")
+    && !sql.includes("FROM pg_catalog.pg_largeobject ")), "large-object access metadata is inventoried without reading large-object contents");
+  const bindingsSql=calls.find((sql) => sql.includes("FROM pg_catalog.pg_publication") && sql.includes("pg_catalog.pg_user_mappings"));
+  assert.ok(bindingsSql?.includes("pg_catalog.pg_publication_rel") && bindingsSql.includes("pg_get_expr(pr.prqual") && bindingsSql.includes("value_sha256") && bindingsSql.includes("mscqr-security-option-v1"), "publication membership and hashed foreign bindings are collected without raw option values");
+  assert.ok(bindingsSql?.includes("pg_catalog.pg_publication_rel") && !bindingsSql.includes("pg_catalog.pg_subscription"),
+    "restricted collector does not read the protected subscription catalog directly");
+  assert.ok(calls.some((sql) => sql.includes("p.proname='production_security_subscription_inventory'")
+    && sql.includes("has_column_privilege") && sql.includes("pg_catalog.pg_attribute") && sql.includes("projection.prosrc")
+    && sql.includes("pg_catalog.aclexplode") && sql.includes("rolcanlogin")), "subscription projection body, ACL, role and exact column privileges are authenticated");
+  assert.ok(fs.readFileSync(new URL("../aws/production-app-only-database-verifier.mjs", import.meta.url), "utf8").includes("s.subskiplsn::text AS skip_lsn"),
+    "direct subscription collection retains the transaction-skip LSN");
+  const subscriptionAclSql = calls.find((sql) => sql.includes("subscription_conninfo_acl"));
+  assert.ok(subscriptionAclSql?.includes("pg_catalog.aclexplode(a.attacl)") && subscriptionAclSql.includes("acl.grantee")
+    && subscriptionAclSql.includes("acl.grantor") && subscriptionAclSql.includes("acl.is_grantable"),
+  "the complete protected connection-info column ACL is observed, including every grantee and grantor");
+  assert.ok(calls.some((sql) => sql.includes("projection_acl_valid") && sql.includes("a.is_grantable") && sql.includes("a.grantor")),
+    "the complete subscription projection ACL rejects grant option and unexpected grantors");
+  assert.ok(calls.some((sql) => sql.includes("observer_memberships") && sql.includes("m.member=observer.oid OR m.roleid=observer.oid")),
+    "membership both into and out of the secret-reading observer is rejected");
+  assert.ok(calls.includes("SELECT * FROM app_rls.production_security_subscription_inventory() ORDER BY subscription_name"),
+    "the restricted collector invokes only the fixed safe subscription projection");
+  const provisioning = fs.readFileSync("documents/ops/iam/production-green-phase-4-read-only-canary-provision.sql", "utf8");
+  assert.ok(provisioning.includes("acl.grantee<>'mscqr_prod_subscription_observer'::pg_catalog.regrole")
+    && provisioning.includes("acl.is_grantable"), "provisioning verifies that the observer is the sole non-grantable subconninfo grantee");
+  assert.ok(provisioning.includes("s.subskiplsn::text") && provisioning.includes("skip_lsn text")
+    && provisioning.includes("DROP FUNCTION IF EXISTS app_rls.production_security_subscription_inventory()"),
+  "fixed projection includes subscription skip state and safely replaces its reviewed row type transactionally");
+  assert.ok(provisioning.includes("m.roleid='mscqr_prod_subscription_observer'::pg_catalog.regrole")
+    && provisioning.includes("member.rolname<>current_user") && provisioning.includes("SET TRUE")
+    && provisioning.includes("REVOKE mscqr_prod_subscription_observer FROM %I"),
+  "provisioning permits only its temporary self SET membership and revokes it before commit");
+  const projectionBody = provisioning.match(/AS \$subscription_inventory\$(.*?)\$subscription_inventory\$;/s)?.[1];
+  assert.ok(projectionBody, "the source-owned fixed projection definition is present");
+  assert.equal(crypto.createHash("sha256").update(projectionBody, "utf8").digest("hex"), SUBSCRIPTION_PROJECTION_BODY_SHA256,
+    "the runtime authenticates exactly the reviewed projection body before calling SECURITY DEFINER");
+  assert.ok(calls.some((sql) => sql.includes("FROM pg_catalog.pg_parameter_acl") && sql.includes("a.grantor") && sql.includes("a.is_grantable")), "parameter ACL grants are collected with grantor identity");
+  for (const source of ["pg_proc p", "pg_class c", "pg_namespace n", "pg_database d", "pg_default_acl d", "pg_type t"]) {
+    const sql = calls.find((query) => query.includes(`FROM pg_catalog.${source}`) && query.includes("aclexplode") && query.includes("grantor.rolname"));
+    assert.ok(sql?.includes("grantor.rolname") && sql.includes("a.grantor") || sql?.includes("grantor.rolname") && sql.includes("acl.grantor"), `${source} security ACL collector preserves grantor`);
+  }
+  assert.ok(calls.some((sql) => sql.includes("c.relkind='S'") && sql.includes("grantor.rolname") && sql.includes("a.grantor")), "sequence ACL collector preserves grantor");
+  assert.ok(calls.some((sql) => sql.includes("d.classid='pg_catalog.pg_proc'") && sql.includes("d.deptype='e'")), "user-schema routines exclude extension-owned system objects only");
+  const securityRolesSql = calls.find((sql) => sql.includes("FROM pg_catalog.pg_roles r WHERE r.rolname !~"));
+  assert.ok(securityRolesSql?.includes("pg_catalog.pg_auth_members") && securityRolesSql.includes("m.admin_option")
+    && securityRolesSql.includes("m.inherit_option") && securityRolesSql.includes("m.set_option") && securityRolesSql.includes("m.grantor")
+    && securityRolesSql.includes("grantor.rolname"), "security inventory observes membership grantors and all PostgreSQL 18 options");
+  const operatorSql = calls.find((sql) => sql.includes("AS set_role_capability_closure"));
+  assert.ok(operatorSql?.includes("pg_catalog.pg_has_role(r.oid,target.oid,'USAGE')")
+    && operatorSql.includes("pg_catalog.pg_has_role(r.oid,target.oid,'SET')")
+    && operatorSql.includes("pg_catalog.pg_has_role(settable.oid,capability.oid,'USAGE')")
+    && operatorSql.includes("'MEMBER WITH ADMIN OPTION'"),
+  "operator capability collection uses PostgreSQL's inherited, SET ROLE, post-SET inheritance, and ADMIN OPTION semantics");
+  assert.ok(calls.some((sql) => sql.includes("pg_catalog.pg_type") && sql.includes("t.typcategory<>'A'")),
+    "generated array types are excluded because PostgreSQL does not allow independent ACLs on them; element-type ACLs are collected");
+  const defaultAclSql = calls.find((sql) => sql.includes("FROM pg_catalog.pg_default_acl d"));
+  assert.ok(defaultAclSql && !/\bWHERE\b/.test(defaultAclSql), "security inventory observes global and schema-specific default ACLs for every owner");
+  const routinesSql = calls.find((sql) => sql.includes("p.prokind::text AS kind"));
+  assert.ok(routinesSql?.includes("pg_catalog.pg_aggregate") && routinesSql.includes("aggregate_state_sha256")
+    && routinesSql.includes("CASE WHEN p.prokind='a'"), "functions, procedures, windows, and aggregates have stable distinct security identities");
+  assert.ok(calls.some((sql) => sql.includes("pg_catalog.pg_rewrite") && sql.includes("r.rulename<>'_RETURN'") && sql.includes("pg_get_ruledef")));
+  assert.ok(calls.some((sql) => sql.includes("pg_catalog.pg_event_trigger") && sql.includes("e.evtfoid") && sql.includes("evttags")));
+  assert.ok(calls.some((sql) => sql.includes("pg_get_constraintdef") && sql.includes("parent_identity") && sql.includes("pno.nspname")));
+  const securityTablesSql = calls.find((sql) => sql.includes("AS replica_identity") && sql.includes("AS behavior_indexes"));
+  assert.ok(securityTablesSql?.includes("pg_catalog.pg_inherits") && securityTablesSql.includes("i.inhdetachpending")
+    && securityTablesSql.includes("c.relreplident") && securityTablesSql.includes("ix.indisreplident")
+    && securityTablesSql.includes("pg_catalog.pg_get_indexdef") && securityTablesSql.includes("c.relpersistence")
+    && securityTablesSql.includes("c.relispopulated") && securityTablesSql.includes("ix.indexprs IS NOT NULL")
+    && securityTablesSql.includes("ix.indpred IS NOT NULL") && securityTablesSql.includes("am.amname")
+    && securityTablesSql.includes("c.reloftype"), "relation inheritance, replica identity, behavioral indexes, access method, typed-table binding, persistence and materialized population are collected by real SQL");
+  assert.ok(calls.some((sql) => sql.includes("FROM pg_catalog.pg_tablespace") && sql.includes("t.spcname NOT IN ('pg_default','pg_global')")
+    && sql.includes("pg_catalog.aclexplode")), "non-system tablespace owner and ACL state is observable");
+  assert.ok(calls.some((sql) => sql.includes("FROM pg_catalog.pg_range") && sql.includes("composite_attributes")
+    && sql.includes("t.typinput") && sql.includes("r.rngcanonical")), "composite, range and base-type execution semantics are collected");
+  const projectionSql = fs.readFileSync("documents/ops/iam/production-green-phase-4-read-only-canary-provision.sql", "utf8");
+  assert.ok(projectionSql.includes("pg_catalog.pg_subscription_rel") && projectionSql.includes("sr.srsubstate")
+    && projectionSql.includes("sr.srsubstate IN ('s','r')") && projectionSql.includes("sr.srsublsn::text"),
+  "the authenticated restricted projection includes stable subscription relation synchronization state");
+  assert.ok(calls.some((sql) => sql.includes("r.rolvaliduntil::text AS valid_until")), "role credential expiry is included without exposing verifier/password fields");
+  responses[3] = [{ ...structuredClone(SUBSCRIPTION_PROJECTION_STATUS_CONTRACT), function_body_sha256: "0".repeat(64) }];
+  read = 0;
+  const hostileCalls = [];
+  const hostileClient = { $transaction: async (fn) => fn({
+    $executeRawUnsafe: async (sql) => hostileCalls.push(sql),
+    $queryRawUnsafe: async (sql) => { hostileCalls.push(sql); return responses[read++]; },
+  }) };
+  await assert.rejects(collectAppOnlyDatabaseCatalogue(hostileClient), /Subscription security inventory capability is unavailable: function_body_sha256/);
+  assert.equal(hostileCalls.includes("SELECT * FROM app_rls.production_security_subscription_inventory() ORDER BY subscription_name"), false,
+    "a replaced SECURITY DEFINER projection is never invoked");
 });
 for (const field of Object.keys(identity())) test(`database identity boundary rejects ${field} substitution`, async () => {
   const bad = { ...identity(), [field]: typeof identity()[field] === "boolean" ? true : "wrong" };

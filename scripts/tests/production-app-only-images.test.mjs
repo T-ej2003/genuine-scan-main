@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { authenticateAppOnlyImages, authenticateAppOnlySessionRiskSource, APP_ONLY_SESSION_RISK_CONTRACT } from "../aws/production-app-only-images.mjs";
+import { authenticateAppOnlyImages, authenticateAppOnlySessionRiskSource, authenticateProtectedMainBackendImage, APP_ONLY_SESSION_RISK_CONTRACT } from "../aws/production-app-only-images.mjs";
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
 import { APP_ONLY } from "../aws/production-app-only-contract.mjs";
 
@@ -11,6 +11,19 @@ test("candidate source must contain the reviewed session-risk fallback, not the 
   assert.deepEqual(authenticateAppOnlySessionRiskSource(process.cwd(), imageReleaseSha), APP_ONLY_SESSION_RISK_CONTRACT);
   assert.throws(() => authenticateAppOnlySessionRiskSource(process.cwd(), "7e93853e6c48ad3020915f551ef89155825ae403"));
   assert.throws(() => authenticateAppOnlySessionRiskSource(process.cwd(), "main:attacker"));
+});
+test("protected-main verifier image resolves only the exact source tag in the expected ECR repository/account", () => {
+  const digest = `sha256:${"a".repeat(64)}`;
+  const response = { imageDetails: [{ registryId: APP_ONLY.account, repositoryName: "mscqr-backend", imageDigest: digest, imageTags: [`${sourceSha}-backend-only`] }] };
+  assert.deepEqual(authenticateProtectedMainBackendImage({ sourceSha, response }), { sourceSha, digest, tag: `${sourceSha}-backend-only` });
+  for (const bad of [
+    { imageDetails: [] },
+    { imageDetails: [...response.imageDetails, ...response.imageDetails] },
+    { imageDetails: [{ ...response.imageDetails[0], registryId: "000000000000" }] },
+    { imageDetails: [{ ...response.imageDetails[0], repositoryName: "other" }] },
+    { imageDetails: [{ ...response.imageDetails[0], imageTags: ["latest"] }] },
+  ]) assert.throws(() => authenticateProtectedMainBackendImage({ sourceSha, response: bad }));
+  assert.throws(() => authenticateProtectedMainBackendImage({ sourceSha: "main", response }));
 });
 const hash = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 const zip = (filename, bytes) => execFileSync("python3", ["-c", "import io,sys,zipfile\nb=io.BytesIO()\nwith zipfile.ZipFile(b,'w') as z:z.writestr(sys.argv[1],sys.stdin.buffer.read())\nsys.stdout.buffer.write(b.getvalue())", filename], { input: bytes });

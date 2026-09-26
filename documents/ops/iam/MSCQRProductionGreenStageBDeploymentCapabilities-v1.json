@@ -22086,6 +22086,10 @@
     },
     {
       "sourceFile": "scripts/aws/production-app-only-preparation.mjs",
+      "action": "ecr:DescribeImages"
+    },
+    {
+      "sourceFile": "scripts/aws/production-app-only-preparation.mjs",
       "action": "ecs:DescribeTasks"
     },
     {

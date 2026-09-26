@@ -66,6 +66,16 @@ networks:
       fs.rmSync(directory, { recursive: true, force: true });
     }
   };
+  const startAndWaitForContainerExit = (compose) => {
+    run([...compose, "create", "frontend"]);
+    const containerId = run([...compose, "ps", "-a", "-q", "frontend"]);
+    assert.match(containerId, /^[a-f0-9]{12,64}$/i, "created frontend container must remain inspectable");
+    const start = spawnSync("docker", ["start", "--attach", containerId], { cwd: root, encoding: "utf8", timeout: 10_000 });
+    assert.equal(start.error, undefined, start.error?.message);
+    const [status, exitCode] = run(["inspect", "--format", "{{.State.Status}} {{.State.ExitCode}}", containerId]).split(" ");
+    assert.equal(status, "exited", "attached start returns only after process termination");
+    return { exitCode: Number(exitCode), startStatus: start.status };
+  };
   runFixture("valid", undefined, ({ compose, templates, project }) => {
     run([...compose, "up", "-d", "redis", "backend", "worker"]);
     const networkId = run(["network", "ls", "--filter", `name=${project}_app`, "--format", "{{.ID}}"]).split("\n")[0];
@@ -89,8 +99,9 @@ networks:
     assert.equal(run([...compose, "exec", "-T", "frontend", "hostname", "-i"]), testFrontend);
   });
   runFixture("malformed", (templates) => fs.appendFileSync(path.join(templates, "default.http.conf"), "\nproxy_set_header X-Forwarded-For unexpected;\n"), ({ compose }) => {
-    run([...compose, "up", "-d", "frontend"]);
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);
+    const { exitCode, startStatus } = startAndWaitForContainerExit(compose);
+    assert.equal(exitCode, 1, "malformed proxy configuration must be rejected by the adapter");
+    assert.equal(startStatus, 1, "attached frontend start must expose the rejected configuration exit status");
     assert.equal(run([...compose, "ps", "--status", "running", "--services", "frontend"]), "");
   });
 });
