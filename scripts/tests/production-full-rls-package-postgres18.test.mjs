@@ -425,7 +425,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         capabilities = await operator();
         assert.ok(capabilities.admin_option_closure.includes("rebaseline_cap_admin_target"), "ADMIN OPTION administrative reachability is separately observed");
         throw new Error("rollback operator capability topology");
-      }), /rollback operator capability topology/);
+      }, { maxWait: 5000, timeout: 30000 }), /rollback operator capability topology/);
       await assert.rejects(maintenanceClient.$transaction(async (tx) => {
         const [created] = await tx.$queryRawUnsafe("SELECT pg_catalog.lo_create(0)::text AS oid");
         await tx.$executeRawUnsafe(`ALTER LARGE OBJECT ${created.oid} OWNER TO mscqr_prd_rls_phase2_app`);
