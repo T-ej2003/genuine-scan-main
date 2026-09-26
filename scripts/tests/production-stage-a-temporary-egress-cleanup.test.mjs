@@ -4,6 +4,7 @@ import test from "node:test";
 import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from "../aws/production-github-environment-approval.mjs";
 import { assertStageATemporaryEgressCleanupAuthorization, assertStageATemporaryEgressCleanupJournalRetention, assertStageATemporaryEgressCloudTrailProvenance, createStageATemporaryEgressCleanupAuthorization, executeStageATemporaryEgressCleanup, resolveStageATemporaryEgressCleanupAuthorizationArtifact, STAGE_A_TEMPORARY_EGRESS_CLEANUP, validateStageATemporaryEgressLiveInventory } from "../aws/production-stage-a-temporary-egress-cleanup.mjs";
 import { canonicalJson } from "../aws/production-green-stage-b-contract.mjs";
+import { createProductionGithubCommandRunner } from "../aws/production-credential-source-contract.mjs";
 
 const sourceSha = "1d2bda9fd3e740d51fba199021b354724cf479d3";
 const now = new Date();
@@ -122,7 +123,8 @@ test("authorization artifact resolution uses gh api stdout for the exact source-
     if (command === "unzip" && args[0] === "-p") return JSON.stringify(authorization);
     throw new Error(`unexpected ${command} ${args.join(" ")}`);
   };
-  const result = resolveStageATemporaryEgressCleanupAuthorizationArtifact({ workflowRunId: "42", workflowRunAttempt: "1", sourceSha, run });
+  const githubRun = createProductionGithubCommandRunner({ env: { PATH: process.env.PATH, GH_TOKEN: "fixture" }, exec: run });
+  const result = resolveStageATemporaryEgressCleanupAuthorizationArtifact({ workflowRunId: "42", workflowRunAttempt: "1", sourceSha, githubRun });
   assert.equal(result.authorizationSha256, authorization.authorizationSha256);
   const download = calls.find(({ command, args }) => command === "gh" && args[1].endsWith("/actions/artifacts/99/zip"));
   assert.deepEqual(download.args, ["api", "repos/T-ej2003/genuine-scan-main/actions/artifacts/99/zip"]);
