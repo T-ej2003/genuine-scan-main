@@ -50,7 +50,8 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
       SELECT 'subscription',s.subname,o.rolname,jsonb_build_object('enabled',s.subenabled,'binary',s.subbinary,
         'streaming',s.substream::text,'two_phase',s.subtwophasestate::text,'disable_on_error',s.subdisableonerr,
         'password_required',s.subpasswordrequired,'run_as_owner',s.subrunasowner,'failover',s.subfailover,
-        'slot_name',s.subslotname,'synchronous_commit',s.subsynccommit,'publications',to_jsonb(s.subpublications),'origin',s.suborigin)
+        'slot_name',s.subslotname,'synchronous_commit',s.subsynccommit,'publications',
+          (SELECT jsonb_agg(publication ORDER BY publication) FROM unnest(s.subpublications) publication),'origin',s.suborigin)
       FROM pg_catalog.pg_subscription s JOIN pg_catalog.pg_roles o ON o.oid=s.subowner
       UNION ALL
       SELECT 'replication_slot',s.slot_name,NULL,jsonb_build_object('plugin',s.plugin,'slot_type',s.slot_type,'database',s.database,
@@ -63,7 +64,7 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
         FROM unnest(rs.setconfig) setting),'[]'::jsonb))
       FROM pg_catalog.pg_db_role_setting rs LEFT JOIN pg_catalog.pg_database d ON d.oid=rs.setdatabase WHERE rs.setrole=0
       UNION ALL
-      SELECT 'security_label',pg_catalog.format('%s:%s:%s',identified.type,COALESCE(identified.schema,''),identified.identity),NULL,
+      SELECT 'security_label',pg_catalog.format('%s:%s:%s:%s',label.provider,identified.type,COALESCE(identified.schema,''),identified.identity),NULL,
         jsonb_build_object('provider',label.provider,'label_sha256',pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
           pg_catalog.jsonb_build_array('mscqr-security-label-v1',label.provider,label.label)::text,'UTF8')),'hex'))
       FROM pg_catalog.pg_seclabel label CROSS JOIN LATERAL pg_catalog.pg_identify_object(label.classoid,label.objoid,label.objsubid) identified

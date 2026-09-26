@@ -516,7 +516,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         await tx.$executeRawUnsafe('ALTER MATERIALIZED VIEW public.rebaseline_unexpected_materialized OWNER TO "mscqr_prod_admin"');
         await tx.$executeRawUnsafe("CREATE EXTENSION IF NOT EXISTS postgres_fdw");
         await tx.$executeRawUnsafe("CREATE PUBLICATION rebaseline_unexpected_publication");
-        await tx.$executeRawUnsafe("CREATE SUBSCRIPTION rebaseline_disabled_subscription CONNECTION 'host=127.0.0.1 dbname=unused' PUBLICATION rebaseline_remote_publication WITH (connect=false)");
+        await tx.$executeRawUnsafe("CREATE SUBSCRIPTION rebaseline_disabled_subscription CONNECTION 'host=127.0.0.1 dbname=unused' PUBLICATION rebaseline_remote_z, rebaseline_remote_a WITH (connect=false)");
         await tx.$executeRawUnsafe("CREATE OPERATOR public.=== (LEFTARG=integer, RIGHTARG=integer, FUNCTION=pg_catalog.int4eq)");
         await tx.$executeRawUnsafe("CREATE SERVER rebaseline_fixture_server FOREIGN DATA WRAPPER postgres_fdw OPTIONS (host '127.0.0.1', dbname 'postgres')");
         await tx.$executeRawUnsafe("CREATE FOREIGN TABLE public.rebaseline_unexpected_foreign (id integer) SERVER rebaseline_fixture_server OPTIONS (schema_name 'public', table_name 'unused')");
@@ -570,6 +570,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         assert.ok(changed.securityBindings.some(({ kind, name }) => kind === "publication" && name === "rebaseline_unexpected_publication"));
         const disabledSubscription = changed.securityBindings.find(({ kind, name }) => kind === "subscription" && name === "rebaseline_disabled_subscription");
         assert.equal(disabledSubscription?.definition.enabled, false, "disabled subscriptions remain observable through pg_subscription");
+        assert.deepEqual(disabledSubscription?.definition.publications, ["rebaseline_remote_a","rebaseline_remote_z"], "subscription publication membership is canonicalized as a set");
         assert.equal(JSON.stringify(changed).includes("host=127.0.0.1"), false, "subscription connection strings never enter the catalogue");
         assert.ok(changed.securityBindings.some(({ kind, name }) => kind === "operator" && name.includes("===") && name.includes("integer")));
         assert.ok(changed.securityBindings.some(({ kind, name }) => kind === "foreign_server" && name === "rebaseline_fixture_server"));
