@@ -34,6 +34,8 @@ import {
   assertReviewedSimulationContextRegistry,
   assertDiscoveredSimulationContextKeys,
   assertReleasePolicyEvidence,
+  collectLiveReleasePolicyEvidence,
+  sourceReleaseRoleInlinePolicyEvidence,
   runCli,
   runPermissionPreflight as runPermissionPreflightRaw,
   signPermissionReport,
@@ -67,7 +69,8 @@ const brokerRoleArn = "arn:aws:iam::368992683803:role/mscqr-production-rls-appro
 const generatorArn = "arn:aws:iam::368992683803:root";
 const policyEvidence = (() => {
   const policies = sourcePolicyEvidence().map((policy) => ({ ...policy, defaultVersionId: "v1", liveSha256: policy.sourceSha256, attached: true, matchesSource: true }));
-  return { roleArn, attachedPolicyArns: policies.map(({ arn }) => arn).sort(), inlinePolicyNames: [], inlinePolicies: [], permissionsBoundaryArn: null, policies, status: "valid" };
+  const inlinePolicies = sourceReleaseRoleInlinePolicyEvidence();
+  return { roleArn, attachedPolicyArns: policies.map(({ arn }) => arn).sort(), inlinePolicyNames: inlinePolicies.map(({ policyName }) => policyName), inlinePolicies, permissionsBoundaryArn: null, policies, status: "valid" };
 })();
 const runPermissionPreflight = (input) => {
   if (!input.savedPlanBytes) return runPermissionPreflightRaw({ policyEvidence, ecsExecVerifierEvidence: buildEcsExecOperatorEvidence(), ...input });
@@ -1378,6 +1381,97 @@ test("permission evidence fails closed on stale versions, source drift, and deta
   assert.throws(() => assertReleasePolicyEvidence(bounded), /permissions boundary/);
   const extraAttachment = structuredClone(policyEvidence); extraAttachment.attachedPolicyArns.push("arn:aws:iam::aws:policy/AdministratorAccess");
   assert.throws(() => assertReleasePolicyEvidence(extraAttachment), /attachment set/);
+});
+
+test("release inline policies must exactly match source-owned names and documents", () => {
+  assert.equal(assertReleasePolicyEvidence(policyEvidence), true);
+  const expectedNames = sourceReleaseRoleInlinePolicyEvidence().map(({ policyName }) => policyName);
+  assert.deepEqual(policyEvidence.inlinePolicyNames, expectedNames);
+
+  for (const name of expectedNames) {
+    const missing = structuredClone(policyEvidence);
+    missing.inlinePolicyNames = missing.inlinePolicyNames.filter((value) => value !== name);
+    missing.inlinePolicies = missing.inlinePolicies.filter((value) => value.policyName !== name);
+    assert.throws(() => assertReleasePolicyEvidence(missing), /inline-policy set/);
+
+    const drifted = structuredClone(policyEvidence);
+    drifted.inlinePolicies.find((value) => value.policyName === name).sha256 = "0".repeat(64);
+    assert.throws(() => assertReleasePolicyEvidence(drifted), new RegExp(`inline policy document differs.*${name}`));
+  }
+
+  const extra = structuredClone(policyEvidence);
+  extra.inlinePolicyNames.push("UnexpectedPolicy"); extra.inlinePolicyNames.sort();
+  extra.inlinePolicies.push({ policyName: "UnexpectedPolicy", sha256: "0".repeat(64) });
+  assert.throws(() => assertReleasePolicyEvidence(extra), /inline-policy set/);
+  const expanded = structuredClone(policyEvidence);
+  expanded.inlinePolicies[0].sha256 = "f".repeat(64);
+  assert.throws(() => assertReleasePolicyEvidence(expanded), /inline policy document differs/);
+  const ambiguous = structuredClone(policyEvidence);
+  ambiguous.inlinePolicies.push(structuredClone(ambiguous.inlinePolicies[0]));
+  assert.throws(() => assertReleasePolicyEvidence(ambiguous), /incomplete or ambiguous/);
+  const unsorted = structuredClone(policyEvidence);
+  unsorted.inlinePolicyNames.reverse();
+  assert.throws(() => assertReleasePolicyEvidence(unsorted), /incomplete or ambiguous/);
+});
+
+test("live release inline-policy collection validates complete enumeration and canonical documents", () => {
+  const expectedInline = sourceReleaseRoleInlinePolicyEvidence();
+  const sourcePolicies = sourcePolicyEvidence();
+  const readJsonFile = (sourcePath) => JSON.parse(fs.readFileSync(path.join(process.cwd(), sourcePath), "utf8"));
+  let mutateFrontendDocument;
+  const run = (args) => {
+    const [service, operation, ...rest] = args;
+    const value = (flag) => rest[rest.indexOf(flag) + 1];
+    if (service !== "iam") throw new Error(`unexpected AWS service: ${service}`);
+    if (operation === "list-attached-role-policies") return JSON.stringify({ AttachedPolicies: sourcePolicies.map(({ arn }) => ({ PolicyArn: arn })) });
+    if (operation === "list-role-policies") return JSON.stringify({ PolicyNames: expectedInline.map(({ policyName }) => policyName) });
+    if (operation === "get-role-policy") {
+      const match = expectedInline.find(({ policyName }) => policyName === value("--policy-name"));
+      if (!match) throw new Error("unexpected inline policy requested");
+      const doc = match.policyName === "MSCQRProductionComponentStateTerminalWriter"
+        ? readJsonFile("infra/aws/terraform/production-component-deployment-state/release-terminal-state-policy.json")
+        : readJsonFile("infra/aws/terraform/production-web-release/frontend-activation-policy.json");
+      if (match.policyName === "MSCQRProductionFrontendActivation" && mutateFrontendDocument) mutateFrontendDocument(doc);
+      return JSON.stringify({ PolicyDocument: match.policyName === "MSCQRProductionFrontendActivation" ? encodeURIComponent(JSON.stringify(doc)) : doc });
+    }
+    if (operation === "get-role") return JSON.stringify({ Role: { Arn: roleArn } });
+    if (operation === "get-policy") {
+      const policy = sourcePolicies.find(({ arn }) => arn === value("--policy-arn"));
+      if (!policy) throw new Error("unexpected managed policy requested");
+      return JSON.stringify({ Policy: { Arn: policy.arn, DefaultVersionId: "v1" } });
+    }
+    if (operation === "get-policy-version") {
+      const policy = sourcePolicies.find(({ arn }) => arn === value("--policy-arn"));
+      return JSON.stringify({ PolicyVersion: { Document: readJsonFile(policy.sourcePath) } });
+    }
+    throw new Error(`unexpected IAM operation: ${operation}`);
+  };
+  const evidence = collectLiveReleasePolicyEvidence({ run });
+  assert.deepEqual(evidence.inlinePolicyNames, expectedInline.map(({ policyName }) => policyName));
+  assert.equal(assertReleasePolicyEvidence(evidence), true);
+
+  for (const incomplete of [
+    {}, { PolicyNames: null }, { PolicyNames: "not-an-array" }, { PolicyNames: ["duplicate", "duplicate"] },
+    { PolicyNames: ["one"], IsTruncated: true }, { PolicyNames: ["one"], Marker: "next" },
+    { PolicyNames: ["one"], NextToken: "next" },
+  ]) {
+    assert.throws(() => collectLiveReleasePolicyEvidence({ run: (args) => args[1] === "list-role-policies" ? JSON.stringify(incomplete) : run(args) }), /enumeration is malformed or incomplete/);
+  }
+
+  const malformedDocument = (args) => args[1] === "get-role-policy"
+    ? JSON.stringify({ PolicyDocument: "%7Bbad%7D" })
+    : run(args);
+  assert.throws(() => collectLiveReleasePolicyEvidence({ run: malformedDocument }), /is malformed/);
+
+  for (const mutate of [
+    (doc) => { doc.Statement[0].Action = "*"; },
+    (doc) => { doc.Statement[1].Resource = "*"; },
+    (doc) => { doc.Statement[0].Effect = "Deny"; },
+  ]) {
+    mutateFrontendDocument = mutate;
+    const drift = collectLiveReleasePolicyEvidence({ run });
+    assert.throws(() => assertReleasePolicyEvidence(drift), /inline policy document differs.*MSCQRProductionFrontendActivation/);
+  }
 });
 
 test("preflight requires a manifest and rejects an unapproved generator", () => {
