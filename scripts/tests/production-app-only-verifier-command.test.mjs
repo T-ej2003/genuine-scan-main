@@ -1,11 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { inflateSync } from "node:zlib";
+import { deflateSync } from "node:zlib";
 import { APP_ONLY } from "../aws/production-app-only-contract.mjs";
 import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
 import { authenticateAppOnlyVerifierResult, buildAppOnlyVerifierDefinition, assertRegisteredAppOnlyVerifier } from "../aws/production-app-only-verifier-command.mjs";
 import { createAppOnlyRequirements } from "../aws/production-app-only-requirements.mjs";
 import { APP_ONLY_VERIFIER } from "../aws/production-app-only-policy.mjs";
+import { parseVerifierPayload } from "../aws/production-app-only-verifier-runtime.mjs";
 
 const identity = { sourceSha: "a".repeat(40), candidateSourceSha: "b".repeat(40), account: APP_ONLY.account, region: APP_ONLY.region,
   clusterArn: APP_ONLY.clusterArn, serviceArn: APP_ONLY.serviceArn,
@@ -47,11 +48,15 @@ test("verifier registration is the exact source-owned read-only boundary with fi
   const databaseSecretArn = `arn:aws:secretsmanager:${APP_ONLY.region}:${APP_ONLY.account}:secret:mscqr/production/rls-green/phase4/read-only-canary-database-url-ABC123`;
   const input = { requirements, identity, repositoryRoot, databaseSecretArn };
   const { definition } = buildAppOnlyVerifierDefinition(input);
-  const command = definition.containerDefinitions[0].command[1];
-  assert.doesNotThrow(() => new Function(command));
-  const compressedRuntime = command.match(/inflateSync\(Buffer\.from\("([A-Za-z0-9+/=]+)","base64"\)/)?.[1];
-  assert.ok(compressedRuntime);
-  assert.match(inflateSync(Buffer.from(compressedRuntime, "base64")).toString(), /async function collectAppOnlyDatabaseCatalogueRows/);
+  const container = definition.containerDefinitions[0];
+  assert.deepEqual(container.entryPoint, ["node"]);
+  assert.deepEqual(container.command.slice(0, 2), ["scripts/aws/production-app-only-verifier-runtime.mjs", "--payload"]);
+  const payload = parseVerifierPayload(container.command[2]);
+  assert.deepEqual(payload.identity, identity);
+  assert.equal(payload.requirements.requirementsSha256, requirements.requirementsSha256);
+  assert.throws(() => parseVerifierPayload(`${container.command[2]}!`));
+  const substitutedCandidate = structuredClone(payload); substitutedCandidate.identity.candidateSourceSha = "c".repeat(40);
+  assert.throws(() => parseVerifierPayload(deflateSync(Buffer.from(JSON.stringify(substitutedCandidate))).toString("base64")));
   const taskDefinitionArn = `arn:aws:ecs:${APP_ONLY.region}:${APP_ONLY.account}:task-definition/${APP_ONLY_VERIFIER.family}:17`;
   const observed = { ...structuredClone(definition), taskDefinitionArn, status: "ACTIVE", revision: 17, volumes: [], placementConstraints: [], enableFaultInjection: false };
   observed.containerDefinitions[0].cpu = 0;
@@ -73,4 +78,26 @@ test("verifier registration is the exact source-owned read-only boundary with fi
     assert.throws(() => assertRegisteredAppOnlyVerifier({ ...input, definition: bad, taskDefinitionArn }));
   }
   assert.throws(() => buildAppOnlyVerifierDefinition({ ...input, databaseSecretArn: databaseSecretArn.replace("read-only-canary", "executor") }));
+  for (const badSha of [`${identity.sourceSha};process.exit(0)`, `\"\n${identity.candidateSourceSha}`]) {
+    assert.throws(() => buildAppOnlyVerifierDefinition({ ...input, identity: { ...identity, candidateSourceSha: badSha } }));
+  }
+});
+
+test("verifier payload treats hostile-looking catalogue identities as data", () => {
+  const repositoryRoot = process.cwd();
+  const catalogue = { routines: [{ schema: "app_auth", name: "fixed", arguments: "" }], tables: [{ name: "Example" }],
+    policies: [{ table: "Example", name: "isolation" }], schemas: [{ name: "app_auth" }], roles: [{ name: "mscqr_prod_rls_canary_read" }] };
+  const requirements = createAppOnlyRequirements({ repositoryRoot, ...identity, catalogue, packageChecksums: { fixture: true } });
+  const { definition } = buildAppOnlyVerifierDefinition({ requirements, identity, repositoryRoot,
+    databaseSecretArn: `arn:aws:secretsmanager:${APP_ONLY.region}:${APP_ONLY.account}:secret:mscqr/production/rls-green/phase4/read-only-canary-database-url-ABC123` });
+  const encoded = definition.containerDefinitions[0].command[2];
+  const decoded = parseVerifierPayload(encoded);
+  const hostile = `x\"\\\n\u2028\u2029\u0024{process.exit(9)};(()=>{})() eyJ4IjoxfQ==`;
+  const changed = structuredClone(decoded);
+  changed.requirements.objects.tables.identities.push(hostile);
+  changed.requirements.objects.tables.identities.sort((a, b) => a.localeCompare(b));
+  changed.packedRequirementsSha256 = canonicalSha256(changed.requirements);
+  const compressed = deflateSync(Buffer.from(JSON.stringify(changed))).toString("base64");
+  assert.equal(parseVerifierPayload(compressed).requirements.objects.tables.identities.includes(hostile), true);
+  assert.equal(process.exitCode, undefined);
 });

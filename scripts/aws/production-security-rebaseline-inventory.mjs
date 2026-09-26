@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import { canonicalJson, canonicalSha256 } from "./production-green-stage-b-contract.mjs";
 import { appOnlyRequirementIdentity, createAppOnlyRequirements } from "./production-app-only-requirements.mjs";
 
-export const SECURITY_REBASELINE_COLLECTOR_VERSION = "production-security-catalogue-v7";
+export const SECURITY_REBASELINE_COLLECTOR_VERSION = "production-security-catalogue-v8";
 export const SECURITY_REBASELINE_OPERATIONS = Object.freeze(["CREATE", "ALTER", "DROP_POLICY_OR_MANAGED_ROUTINE", "GRANT", "REVOKE",
   "ENABLE_RLS", "FORCE_RLS", "OWNERSHIP_CHANGE", "ROLE_CHANGE", "UNEXPECTED_OBJECT"]);
 export const SECURITY_REBASELINE_COVERAGE = Object.freeze([
   ["extensions", "pg_extension", "securityExtensions", "extensions"],
-  ["replication and user bindings", "pg_publication/pg_publication_rel/pg_publication_namespace/pg_subscription/pg_replication_slots/pg_db_role_setting/pg_seclabel/pg_operator/pg_cast/pg_foreign_data_wrapper/pg_foreign_server/pg_user_mapping/pg_foreign_table/pg_language", "securityBindings", "bindings"],
+  ["replication and user bindings", "pg_publication/pg_publication_rel/pg_publication_namespace/pg_subscription via app_rls.production_security_subscription_inventory (subconninfo represented only by a domain-separated digest)/pg_replication_slots/pg_db_role_setting/pg_seclabel/pg_operator/pg_cast/pg_foreign_data_wrapper/pg_foreign_server/pg_user_mapping/pg_foreign_table/pg_language", "securityBindings", "bindings"],
   ["routines", "pg_proc/pg_aggregate", "securityRoutines", "routines/routineGrants"],
   ["relations", "pg_class/pg_attribute/pg_constraint", "securityTables", "tables/tableGrants/columnGrants"],
   ["triggers", "pg_trigger", "securityTriggers", "triggers"], ["constraint enforcement", "pg_trigger/pg_constraint", "securityConstraintTriggers", "constraintTriggers"], ["rewrite rules", "pg_rewrite", "securityRules", "rules"],
@@ -39,7 +39,7 @@ const FIELDS = Object.freeze({
 });
 export const SECURITY_REBASELINE_NORMALIZED_COLLECTIONS = Object.freeze(Object.keys(FIELDS));
 const MANAGED_SCHEMAS = new Set(["app_rls", "app_auth", "app_public", "app_ops"]);
-const MANAGED_ROLE = /^(?:mscqr_prd_rls_phase2_[a-z0-9_]+|mscqr_prod_rls_canary_read|mscqr_prod_admin)$/;
+const MANAGED_ROLE = /^(?:mscqr_prd_rls_phase2_[a-z0-9_]+|mscqr_prod_rls_canary_read|mscqr_prod_admin|mscqr_prod_subscription_observer)$/;
 const APP_ONLY_ROLE = /^(?:mscqr_prd_rls_phase2_[a-z0-9_]+|mscqr_prod_rls_canary_read)$/;
 const CANONICAL_HARNESS_ROLES = new Set(["mscqr_p2_test", "certification-administrator"]);
 const CANONICAL_MEMBERSHIP_GRANTOR = "mscqr_p2_test", PRODUCTION_MEMBERSHIP_GRANTOR = "rdsadmin";
@@ -125,11 +125,12 @@ export function normalizeSecurityRebaselineCatalogue(catalogue, { kind = "LIVE" 
   const addGrants = (collection, owner, grants, columnKey = null) => { assert.ok(Array.isArray(grants)); for (const grant of grants) { exactKeys(grant, [...(columnKey ? [columnKey] : []), "role", "grantor", "privilege", "grantable"], `${collection} grant`); const identity = grantIdentity(owner, grant, columnKey ? grant[columnKey] : null); addUnexpectedRole(grant.role, `${collection}:${identity}`); addUnexpectedRole(grant.grantor, `${collection}-grantor:${identity}`); add(collection, identity, { present: true }); } };
   const assertOptions = (options, label) => { assert.ok(Array.isArray(options)); for (const option of options) { exactKeys(option, ["name","value_sha256"], `${label} option`); assert.match(option.name || "", /^[A-Za-z_][A-Za-z0-9_.-]{0,127}$/); assert.match(option.value_sha256 || "", SHA256); } assert.equal(new Set(options.map(({ name }) => name)).size, options.length, `${label} has duplicate options`); };
   const assertBinding = (row) => {
-    const fields = ({ publication:["all_tables","insert","update","delete","truncate","via_root","generated_columns"], publication_relation:["publication","schema","relation","columns","row_filter"], publication_schema:["publication","schema"], subscription:["enabled","binary","streaming","two_phase","disable_on_error","password_required","run_as_owner","failover","slot_name","synchronous_commit","publications","origin"], replication_slot:["plugin","slot_type","database","temporary","two_phase","failover","synced"], database_setting:["settings"], security_label:["provider","label_sha256"], operator:["result","function","commutator","negator","merge","hash"], cast:["context","method","function"], foreign_server:["wrapper","type","version","options","grants"], foreign_data_wrapper:["handler","validator","options","grants"], language:["trusted","handler","inline","validator","grants"], user_mapping:["options_visible","options"], foreign_table:["server","options"] })[row.kind];
+    const fields = ({ publication:["all_tables","insert","update","delete","truncate","via_root","generated_columns"], publication_relation:["publication","schema","relation","columns","row_filter"], publication_schema:["publication","schema"], subscription:["enabled","binary","streaming","two_phase","disable_on_error","password_required","run_as_owner","failover","slot_name","synchronous_commit","publications","origin","connection_info_sha256"], replication_slot:["plugin","slot_type","database","temporary","two_phase","failover","synced"], database_setting:["settings"], security_label:["provider","label_sha256"], operator:["result","function","commutator","negator","merge","hash"], cast:["context","method","function"], foreign_server:["wrapper","type","version","options","grants"], foreign_data_wrapper:["handler","validator","options","grants"], language:["trusted","handler","inline","validator","grants"], user_mapping:["options_visible","options"], foreign_table:["server","options"] })[row.kind];
     assert.ok(fields, `Unsupported security binding kind ${row.kind}`); exactKeys(row.definition, fields, `${row.kind} definition`);
     if (["foreign_server","foreign_data_wrapper","foreign_table"].includes(row.kind)) assertOptions(row.definition.options, row.kind);
     if (row.kind === "database_setting") assertOptions(row.definition.settings, row.kind);
     if (row.kind === "security_label") assert.match(row.definition.label_sha256 || "", SHA256);
+    if (row.kind === "subscription") assert.match(row.definition.connection_info_sha256 || "", SHA256, "Subscription connection identity must be represented only by its digest");
     if (row.kind === "user_mapping") { assert.equal(row.definition.options_visible, true, "User-mapping options are not visible to the restricted collector"); assertOptions(row.definition.options, row.kind); }
     for (const grant of row.definition.grants || []) { exactKeys(grant, ["role","grantor","privilege","grantable"], `${row.kind} grant`); addUnexpectedRole(grant.role); addUnexpectedRole(grant.grantor); }
   };

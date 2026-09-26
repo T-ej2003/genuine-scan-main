@@ -2,13 +2,12 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { deflateSync } from "node:zlib";
-import { canonicalJson, canonicalSha256 } from "./production-green-stage-b-contract.mjs";
+import { canonicalSha256 } from "./production-green-stage-b-contract.mjs";
 import { APP_ONLY, assertAppOnlyEvidenceIdentity } from "./production-app-only-contract.mjs";
 import { APP_ONLY_VERIFIER, appOnlyVerifierLauncherPolicy } from "./production-app-only-policy.mjs";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { assertEcsTaskDefinitionReadback } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/ecs-task-definition-readback.mjs";
-import { collectAppOnlyDatabaseCatalogue, collectAppOnlyDatabaseCatalogueRows } from "./production-app-only-database-verifier.mjs";
-import { appOnlyRequirementIdentity, assertAppOnlyRequirements, compactAppOnlyRequirements, compareCompactAppOnlyRequirements } from "./production-app-only-requirements.mjs";
+import { assertAppOnlyRequirements, compactAppOnlyRequirements } from "./production-app-only-requirements.mjs";
 
 // The secret ARN is an authenticated Stage-A readback, never a dispatch input.
 // Reuse the source-managed read-only boundary, not the write-capable executor.
@@ -47,43 +46,13 @@ export function buildAppOnlyVerifierCommand({ requirements, identity, repository
   assertAppOnlyEvidenceIdentity({ ...validation, evidenceSha256: canonicalSha256(validation) }, identity);
   assert.match(identity.databaseHostname || "", /^[a-z0-9.-]+$/);
   assert.match(identity.verifierImageDigest || "", /^sha256:[a-f0-9]{64}$/);
-  const functions = [collectAppOnlyDatabaseCatalogueRows, collectAppOnlyDatabaseCatalogue, appOnlyRequirementIdentity, compareCompactAppOnlyRequirements].map((fn) => fn.toString()).join("\n");
-  const verificationContractSha256 = canonicalSha256({ functions, requirementsSha256: requirements.requirementsSha256 });
+  const verificationContractSha256 = canonicalSha256({ version: "app-only-database-verifier-v1",
+    sourceSha: identity.sourceSha, candidateSourceSha: identity.candidateSourceSha,
+    requirementsSha256: requirements.requirementsSha256 });
   const packed = compactAppOnlyRequirements(requirements);
-  const payload = deflateSync(Buffer.from(JSON.stringify({ requirements: packed, identity, verificationContractSha256 }))).toString("base64");
-  const runtime = `${functions}
-const input=JSON.parse(require("node:zlib").inflateSync(Buffer.from(${JSON.stringify(payload)},"base64"),{maxOutputLength:1048576}));
-let phase="CONFIGURATION";
-(async()=>{
-  const {requirementsSha256}=input.requirements;
-  assert.equal(canonicalSha256(input.requirements),${JSON.stringify(canonicalSha256(packed))});
-  const {validateConfiguration}=await import("./scripts/production-green-read-only-rls-canary.mjs");
-  if(process.env.ECS_AGENT_URI)assert.match(process.env.ECS_AGENT_URI,/^http:\\/\\/169\\.254\\.170\\.2\\/api\\/[^?#]+$/);
-  const {ECS_AGENT_URI,...validationEnv}=process.env;
-  const url=validateConfiguration({env:validationEnv,argv:[]});
-  assert.equal(new URL(url).hostname,input.identity.databaseHostname);
-  const client=new PrismaClient({datasources:{db:{url}}});
-  try {
-    phase="CATALOGUE";
-    const catalogue=await collectAppOnlyDatabaseCatalogue(client);
-    phase="COMPARISON";
-    const domains=compareCompactAppOnlyRequirements(catalogue,input.requirements);
-    const evidence={schemaVersion:1,kind:"APP_ONLY_DATABASE_COMPATIBILITY",identity:input.identity,
-      generatedAt:new Date().toISOString(),verificationContractSha256:input.verificationContractSha256,
-      requirementsSha256,domains};
-    console.log(JSON.stringify({...evidence,evidenceSha256:canonicalSha256(evidence)}));
-    if(!Object.values(domains).every(value=>value==="COMPATIBLE"))process.exitCode=1;
-  } finally { await client.$disconnect(); }
-})().catch(()=>{console.error(JSON.stringify({status:"APP_ONLY_DATABASE_VERIFICATION_FAILED",phase}));process.exitCode=1;});`;
-  const compressedRuntime = deflateSync(Buffer.from(runtime)).toString("base64");
-  const command = `"use strict";
-const assert=require("node:assert/strict"),crypto=require("node:crypto");
-const {PrismaClient}=require("@prisma/client");
-const canonicalJson=${canonicalJson.toString()};
-const canonicalSha256=value=>crypto.createHash("sha256").update(canonicalJson(value)).digest("hex");
-eval(require("node:zlib").inflateSync(Buffer.from(${JSON.stringify(compressedRuntime)},"base64"),{maxOutputLength:8388608}).toString());`;
-  assert.ok(Buffer.byteLength(command) <= 48000, "Verifier command exceeds fixed task-definition budget");
-  return { entryPoint: ["node"], command: ["-e", command], verificationContractSha256 };
+  const payload = deflateSync(Buffer.from(JSON.stringify({ requirements: packed, packedRequirementsSha256: canonicalSha256(packed), identity, verificationContractSha256 }))).toString("base64");
+  assert.ok(Buffer.byteLength(payload) <= 48000, "Verifier payload exceeds fixed task-definition budget");
+  return { entryPoint: ["node"], command: ["scripts/aws/production-app-only-verifier-runtime.mjs", "--payload", payload], verificationContractSha256 };
 }
 
 export function authenticateAppOnlyVerifierResult({ message, identity, requirementsSha256, verificationContractSha256, now = Date.now() }) {

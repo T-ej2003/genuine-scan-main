@@ -8,6 +8,7 @@ import test from "node:test";
 import { createRequire } from "node:module";
 import { collectAppOnlyDatabaseCatalogue, collectAppOnlyDatabaseCatalogueRows } from "../aws/production-app-only-database-verifier.mjs";
 import { createAppOnlyRequirements, assertAppOnlyRequirements, compareAppOnlyRequirements } from "../aws/production-app-only-requirements.mjs";
+import { assertAppOnlyCandidateAncestor } from "../aws/produce-production-app-only-requirements.mjs";
 import { createLiveSecurityRebaselineInventory, createSecurityRebaselineInventory, diffSecurityRebaselineInventories } from "../aws/production-security-rebaseline-inventory.mjs";
 import { writeStageBPrivateFileExclusive } from "../aws/stage-b-artifact-contract.mjs";
 import { APP_ONLY } from "../aws/production-app-only-contract.mjs";
@@ -164,6 +165,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
   let appOnlyRequirements, securityRebaselineCanonical;
   let rdsMembershipsNormalized = false;
   const verifierRole = "mscqr_prod_rls_canary_read";
+  let subscriptionObserverProvisionStarted = false;
   const restoreDisposableMemberships = () => psql(maintenanceUrl, ["-q", "-c", `DO $restore_disposable_memberships$
     DECLARE managed_role text;
     BEGIN
@@ -176,7 +178,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
       END LOOP;
     END $restore_disposable_memberships$;`], "restore disposable-superuser membership topology");
   try {
-    assert.equal(scalar(maintenanceUrl, `SELECT count(*) FROM pg_roles WHERE rolname=${JSON.stringify(administrator).replaceAll('"', "'")} OR rolname LIKE 'mscqr_prd_rls_phase2_%'`, "clean roles"), "0");
+    assert.equal(scalar(maintenanceUrl, `SELECT count(*) FROM pg_roles WHERE rolname=${JSON.stringify(administrator).replaceAll('"', "'")} OR rolname LIKE 'mscqr_prd_rls_phase2_%' OR rolname IN ('${verifierRole}','mscqr_prod_subscription_observer')`, "clean roles"), "0");
     assert.equal(scalar(maintenanceUrl, `SELECT count(*) FROM pg_database WHERE datname='${targetDatabase}'`, "clean database"), "0");
     run(process.execPath, [
       "scripts/rls/generate-clean-room-rls-sql.mjs",
@@ -263,6 +265,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
       CREATE TABLE app_rls.production_read_only_canary_control(scope_name text PRIMARY KEY, scope_id text UNIQUE);
       INSERT INTO app_rls.production_read_only_canary_control VALUES ('canary','00000000-0000-4000-8000-000000000001');
       RESET ROLE;`], "local canary initializer fixture");
+    subscriptionObserverProvisionStarted = true;
     psql(databaseUrl(adminUrl, targetDatabase, adminUrl.username), ["-q", "-v", "canary_credential_rotation=false", "-f",
       path.join(root, "documents/ops/iam/production-green-phase-4-read-only-canary-provision.sql")], "canonical local read-only canary provisioning");
     psql(databaseUrl(adminUrl, targetDatabase, adminUrl.username), ["-q", "-c", "REVOKE CREATE ON SCHEMA app_rls FROM mscqr_prd_rls_phase2_auth_owner"], "restore canonical schema privilege boundary after local fixture setup");
@@ -287,7 +290,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
       assert.ok(Object.values(rawDifferences).every((count) => count > 0));
       psql(maintenanceUrl, ["-q", "-c", `ALTER ROLE "${administrator}" NOINHERIT; REVOKE pg_read_all_data FROM "${administrator}"`], "restore production administrator identity after privilege comparison");
       const [canaryCatalogue, administratorCatalogue] = await Promise.all([
-        collectCatalogueRows(verifier), collectCatalogueRows(administratorClient),
+        collectCatalogueRows(verifier), collectCatalogueRows(maintenanceClient),
       ]);
       for (const collection of ["routines", "tables", "policies", "schemas", "roles"]) {
         assert.deepEqual(administratorCatalogue[collection], canaryCatalogue[collection]);
@@ -300,6 +303,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
       const sourceSha = run("git", ["rev-parse", "HEAD"]);
       const context = { repositoryRoot: root, sourceSha,
         candidateSourceSha: process.env.MSCQR_APP_ONLY_CANDIDATE_SOURCE_SHA || sourceSha };
+      assertAppOnlyCandidateAncestor(context);
       const requirements = createAppOnlyRequirements({ ...context, catalogue,
         packageChecksums: JSON.parse(fs.readFileSync(path.join(evidenceRoot, "checksums.json"), "utf8")) });
       securityRebaselineCanonical = createSecurityRebaselineInventory({ kind: "CANONICAL", protectedMainSha: sourceSha, candidateSourceSha: context.candidateSourceSha,
@@ -519,7 +523,6 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         await tx.$executeRawUnsafe('ALTER MATERIALIZED VIEW public.rebaseline_unexpected_materialized OWNER TO "mscqr_prod_admin"');
         await tx.$executeRawUnsafe("CREATE EXTENSION IF NOT EXISTS postgres_fdw");
         await tx.$executeRawUnsafe("CREATE PUBLICATION rebaseline_unexpected_publication");
-        await tx.$executeRawUnsafe("CREATE SUBSCRIPTION rebaseline_disabled_subscription CONNECTION 'host=127.0.0.1 dbname=unused' PUBLICATION rebaseline_remote_z, rebaseline_remote_a WITH (connect=false)");
         await tx.$executeRawUnsafe("CREATE OPERATOR public.=== (LEFTARG=integer, RIGHTARG=integer, FUNCTION=pg_catalog.int4eq)");
         await tx.$executeRawUnsafe("CREATE SERVER rebaseline_fixture_server FOREIGN DATA WRAPPER postgres_fdw OPTIONS (host '127.0.0.1', dbname 'postgres')");
         await tx.$executeRawUnsafe("CREATE FOREIGN TABLE public.rebaseline_unexpected_foreign (id integer) SERVER rebaseline_fixture_server OPTIONS (schema_name 'public', table_name 'unused')");
@@ -571,10 +574,6 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         assert.ok(changed.securityRoutines.some(({ schema, name, kind, aggregate_state_sha256 }) => schema === "public" && name === "rebaseline_unexpected_aggregate" && kind === "a" && /^[a-f0-9]{64}$/.test(aggregate_state_sha256)));
         assert.ok(changed.securityExtensions.some(({ name, version, schema, relocatable }) => name === "postgres_fdw" && typeof version === "string" && schema === "public" && typeof relocatable === "boolean"));
         assert.ok(changed.securityBindings.some(({ kind, name }) => kind === "publication" && name === "rebaseline_unexpected_publication"));
-        const disabledSubscription = changed.securityBindings.find(({ kind, name }) => kind === "subscription" && name === "rebaseline_disabled_subscription");
-        assert.equal(disabledSubscription?.definition.enabled, false, "disabled subscriptions remain observable through pg_subscription");
-        assert.deepEqual(disabledSubscription?.definition.publications, ["rebaseline_remote_a","rebaseline_remote_z"], "subscription publication membership is canonicalized as a set");
-        assert.equal(JSON.stringify(changed).includes("host=127.0.0.1"), false, "subscription connection strings never enter the catalogue");
         assert.ok(changed.securityBindings.some(({ kind, name }) => kind === "operator" && name.includes("===") && name.includes("integer")));
         assert.ok(changed.securityBindings.some(({ kind, name }) => kind === "foreign_server" && name === "rebaseline_fixture_server"));
         assert.equal(changed.securityRoutines.some(({ name }) => name === "postgres_fdw_handler"), false,
@@ -622,7 +621,6 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         assert.ok(sourceDiff.differences.some(({ collection, identity, operation }) => collection === "routines" && identity.startsWith("public.rebaseline_unexpected_aggregate(integer)") && operation === "UNEXPECTED_OBJECT"));
         assert.ok(sourceDiff.differences.some(({ collection, identity }) => collection === "extensions" && identity === "postgres_fdw"));
         assert.ok(sourceDiff.differences.some(({ collection, identity }) => collection === "bindings" && identity === "publication:rebaseline_unexpected_publication"));
-        assert.ok(sourceDiff.differences.some(({ collection, identity }) => collection === "bindings" && identity === "subscription:rebaseline_disabled_subscription"));
         assert.ok(sourceDiff.differences.some(({ collection, identity }) => collection === "bindings" && identity.startsWith('operator:public."==="')));
         assert.ok(sourceDiff.differences.some(({ collection, identity }) => collection === "bindings" && identity === "foreign_server:rebaseline_fixture_server"));
         for (const name of ["rebaseline_unexpected_login","rebaseline_unexpected_bypass","rebaseline_unexpected_createrole","rebaseline_unexpected_createdb","rebaseline_default_owner"]) {
@@ -633,6 +631,38 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         assert.equal(sourceDiff.safeToConstructConvergencePlan, false);
         throw new Error("rollback real security collector drift");
       }), /rollback real security collector drift/);
+      await maintenanceClient.$executeRawUnsafe("CREATE SUBSCRIPTION rebaseline_disabled_subscription CONNECTION 'host=127.0.0.1 dbname=unused password=synthetic_test_value' PUBLICATION rebaseline_remote_z, rebaseline_remote_a WITH (connect=false,slot_name=NONE)");
+      try {
+        const canonicalSubscriptionCatalogue = await collectCatalogueRows(maintenanceClient);
+        const canonicalSubscription = createSecurityRebaselineInventory({ kind: "CANONICAL", protectedMainSha: sourceSha,
+          candidateSourceSha: context.candidateSourceSha, catalogue: canonicalSubscriptionCatalogue, repositoryRoot: root,
+          packageChecksums: JSON.parse(fs.readFileSync(path.join(evidenceRoot, "checksums.json"), "utf8")) });
+        const restrictedSubscriptionCatalogue = await collectCatalogueRows(verifier);
+        const subscription = (catalogue) => catalogue.securityBindings.find(({ kind, name }) => kind === "subscription" && name === "rebaseline_disabled_subscription");
+        assert.equal(subscription(restrictedSubscriptionCatalogue)?.definition.enabled, false);
+        assert.deepEqual(subscription(restrictedSubscriptionCatalogue)?.definition.publications, ["rebaseline_remote_a","rebaseline_remote_z"]);
+        const firstDigest = subscription(restrictedSubscriptionCatalogue)?.definition.connection_info_sha256;
+        assert.match(firstDigest || "", /^[a-f0-9]{64}$/);
+        assert.equal(JSON.stringify(restrictedSubscriptionCatalogue).includes("host=127.0.0.1"), false);
+        const evidence = { taskArn: `arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/${"a".repeat(32)}`,
+          taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/security-rebaseline:1", containerName: "security-rebaseline",
+          containerExitCode: 0, requestSha256: "f".repeat(64), verificationContractSha256: "f".repeat(64) };
+        const before = diffSecurityRebaselineInventories(createLiveSecurityRebaselineInventory({ protectedMainSha: sourceSha,
+          catalogue: restrictedSubscriptionCatalogue, canonical: canonicalSubscription, taskEvidence: evidence }), canonicalSubscription);
+        await maintenanceClient.$executeRawUnsafe("ALTER SUBSCRIPTION rebaseline_disabled_subscription CONNECTION 'host=127.0.0.2 dbname=unused password=synthetic_test_value'");
+        const changedSubscriptionCatalogue = await collectCatalogueRows(verifier);
+        const secondDigest = subscription(changedSubscriptionCatalogue)?.definition.connection_info_sha256;
+        assert.match(secondDigest || "", /^[a-f0-9]{64}$/);
+        assert.notEqual(secondDigest, firstDigest, "endpoint change changes the restricted digest");
+        assert.equal(JSON.stringify(changedSubscriptionCatalogue).includes("host=127.0.0.2"), false);
+        const after = diffSecurityRebaselineInventories(createLiveSecurityRebaselineInventory({ protectedMainSha: sourceSha,
+          catalogue: changedSubscriptionCatalogue, canonical: canonicalSubscription, taskEvidence: evidence }), canonicalSubscription);
+        const row = (diff) => diff.differences.find(({ collection, identity }) => collection === "bindings" && identity === "subscription:rebaseline_disabled_subscription");
+        assert.notEqual(row(after)?.afterSha256, row(before)?.afterSha256, "the real restricted collector-to-diff path detects changed connection binding");
+      } finally {
+        await maintenanceClient.$executeRawUnsafe("ALTER SUBSCRIPTION rebaseline_disabled_subscription SET (slot_name=NONE)");
+        await maintenanceClient.$executeRawUnsafe("DROP SUBSCRIPTION IF EXISTS rebaseline_disabled_subscription");
+      }
       await assert.rejects(maintenanceClient.$transaction(async (tx) => {
         await tx.$executeRawUnsafe("CREATE SCHEMA rebaseline_extension_schema AUTHORIZATION mscqr_prod_admin");
         await tx.$executeRawUnsafe("CREATE EXTENSION postgres_fdw WITH SCHEMA rebaseline_extension_schema");
@@ -704,8 +734,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
       verifierUrl.searchParams.set("application_name", "mscqr-production-green-read-only-rls-canary");
       // macOS injects this process-launch variable even with a clean env. It is
       // not present in ECS/Linux and must not widen the production allowlist.
-      const localCommand = [...command.command];
-      if (process.platform === "darwin") localCommand[1] = `delete process.env.__CF_USER_TEXT_ENCODING;\n${localCommand[1]}`;
+      const localCommand = [path.join(root, "scripts/aws/production-app-only-verifier-runtime.mjs"), ...command.command.slice(1)];
       const message = run(process.execPath, localCommand, { cwd: path.join(root, "backend"),
         cleanEnv: true, env: { RLS_CANARY_DATABASE_URL: verifierUrl.toString(), NODE_ENV: "production", PORT: "4000",
           RUN_DB_MIGRATIONS_ON_START: "false", GIT_SHA: sourceSha, RELEASE_GIT_SHA: sourceSha,
@@ -946,6 +975,15 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
       const deltaInput = printingDeltaRuntime.decodeInput(builtDelta.command[2], builtDelta.command[3]).input;
       const classifyLive = async () => classifyProductionRlsCatalogue(hashProductionRlsCatalogue(await collectAppOnlyDatabaseCatalogue(verifier)), requirements).classification;
       assert.equal(await classifyLive(), RLS_PROBE_CLASSIFICATIONS.EXPECTED);
+      const privilegedGreenUrl = databaseUrl(adminUrl, targetDatabase, adminUrl.username);
+      psql(privilegedGreenUrl, ["-q", "-c", "ALTER FUNCTION app_rls.production_security_subscription_inventory() RESET search_path"], "tamper subscription inventory helper contract");
+      try {
+        await assert.rejects(administratorClient.$transaction((tx) => printingDeltaRuntime.executePrintingRoutineDeltaTransaction({ tx, input: deltaInput }),
+          { maxWait: 10000, timeout: 120000 }));
+      } finally {
+        psql(privilegedGreenUrl, ["-q", "-c", "ALTER FUNCTION app_rls.production_security_subscription_inventory() SET search_path=pg_catalog"], "restore subscription inventory helper contract");
+      }
+      assert.equal(await classifyLive(), RLS_PROBE_CLASSIFICATIONS.EXPECTED);
       for (const failStage of ["after-grant", "after-owner-role", "after-routine-1", "after-routine-2", "after-routine-3",
         "before-revoke", "after-revoke", "after-successor-readback"]) {
         await assert.rejects(administratorClient.$transaction((tx) => printingDeltaRuntime.executePrintingRoutineDeltaTransaction({
@@ -993,7 +1031,10 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         rdsMembershipsNormalized = false;
       }
       if (scalar(maintenanceUrl, `SELECT count(*) FROM pg_database WHERE datname='${targetDatabase}'`, "inspect green database") === "1") {
-        psql(databaseUrl(adminUrl, adminUrl.pathname.slice(1), administrator), ["-q", "-c", `DROP DATABASE "${targetDatabase}" WITH (FORCE)`], "drop green database");
+        psql(maintenanceUrl, ["-q", "-c", `DROP DATABASE "${targetDatabase}" WITH (FORCE)`], "drop disposable green database with harness administrator");
+      }
+      if (subscriptionObserverProvisionStarted && scalar(maintenanceUrl, "SELECT count(*) FROM pg_roles WHERE rolname='mscqr_prod_subscription_observer'", "inspect disposable observer") === "1") {
+        psql(maintenanceUrl, ["-q", "-c", "REVOKE SELECT (subconninfo) ON pg_catalog.pg_subscription FROM mscqr_prod_subscription_observer; DROP ROLE mscqr_prod_subscription_observer"], "remove disposable subscription observer role and global catalogue grant");
       }
       if (verifierCreated) psql(maintenanceUrl, ["-q", "-c", `DROP ROLE ${verifierRole}`], "drop local verifier");
       if (scalar(maintenanceUrl, `SELECT count(*) FROM pg_roles WHERE rolname LIKE 'mscqr_prd_rls_phase2_%'`, "inspect managed roles") !== "0") {

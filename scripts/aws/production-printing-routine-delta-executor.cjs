@@ -10,6 +10,8 @@ const schemaOwnerRole = "mscqr_prd_rls_phase2_owner";
 const database = "mscqr_production_rls_green_phase2";
 const collections = Object.freeze(["routines", "tables", "policies", "schemas", "roles"]);
 const expectedRoutines = Object.freeze(["printing_readiness", "printing_create_job", "printing_connector_identity"]);
+const subscriptionProjection = Object.freeze({ owner: "mscqr_prod_subscription_observer", bodySha256: "0bdb8cc2687ed93da82dec724ecb2350f048b2fb9b8b5f4ccd5bbf31085c7958",
+  result: 'TABLE(subscription_name text, subscription_owner text, enabled boolean, "binary" boolean, streaming text, two_phase text, disable_on_error boolean, password_required boolean, run_as_owner boolean, failover boolean, slot_name text, synchronous_commit text, publications text[], origin text, connection_info_sha256 text)' });
 const expectedPredecessors = Object.freeze({
   "app_rls.printing_connector_identity(p_kind text, p_agent_id text, p_device_fingerprint text, p_printer_selector text, p_gateway_id text, p_gateway_secret_hash text, p_operation text)": "aec14f16d5bf85cc48809a63d3e1a34c8a35c0eb51ac1f46899cfc05a24673b1",
   "app_rls.printing_create_job(p_capability text, p_purpose text, p_request_id text, p_batch_id text, p_printer_id text, p_quantity integer, p_range_start text, p_range_end text, p_print_mode text, p_payload_type text, p_print_lock_token_hash text, p_items jsonb)": "fafcc5b92873b51b786cf937b834f7991bc2eda8ba00b8d5e5a618edd2b1bd1c",
@@ -112,6 +114,24 @@ async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity = () => 
     FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
     JOIN pg_catalog.pg_roles o ON o.oid=p.proowner JOIN pg_catalog.pg_language l ON l.oid=p.prolang
     WHERE n.nspname IN ('app_rls','app_auth','app_public','app_ops')) x`);
+  const projectionRows = routines.rows.filter((row) => row.schema === "app_rls" && row.name === "production_security_subscription_inventory");
+  assert.ok(projectionRows.length <= 1, "Ambiguous subscription inventory projection");
+  if (projectionRows.length) {
+    const projection = projectionRows[0];
+    assert.equal(projection.arguments, ""); assert.equal(projection.result, subscriptionProjection.result);
+    assert.equal(projection.owner, subscriptionProjection.owner); assert.equal(projection.security_definer, true);
+    assert.equal(projection.volatility, "s"); assert.deepEqual(projection.config, ["search_path=pg_catalog"]);
+    assert.equal(sha256(projection.body), subscriptionProjection.bodySha256);
+    const [properties] = await tx.$queryRawUnsafe(`SELECT p.prokind::text AS kind,p.proparallel::text AS parallel,p.proleakproof AS leakproof,p.proisstrict AS strict
+      FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
+      WHERE n.nspname='app_rls' AND p.proname='production_security_subscription_inventory' AND p.pronargs=0`);
+    assert.deepEqual(properties, { kind: "f", parallel: "u", leakproof: false, strict: false });
+    assert.deepEqual(projection.grants, [
+      { role: "mscqr_prod_rls_canary_read", privilege: "EXECUTE", grantable: false },
+      { role: subscriptionProjection.owner, privilege: "EXECUTE", grantable: false },
+    ]);
+    routines.rows.splice(routines.rows.indexOf(projection), 1);
+  }
   const [tables] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.name),'[]'::jsonb) AS rows FROM (
     SELECT c.relname AS name,c.relkind::text AS kind,c.relrowsecurity AS rls,c.relforcerowsecurity AS forced,o.rolname AS owner,
       COALESCE((SELECT jsonb_agg(jsonb_build_object('name',a.attname,'type',pg_catalog.format_type(a.atttypid,a.atttypmod),'notNull',a.attnotnull,

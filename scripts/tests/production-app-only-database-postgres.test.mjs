@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
+import fs from "node:fs";
+import path from "node:path";
 import test from "node:test";
 import { collectAppOnlyDatabaseCatalogue, evaluateAppOnlyDatabaseCatalogue } from "../aws/production-app-only-database-verifier.mjs";
 
@@ -10,6 +12,7 @@ const container = "mscqr-p2-auth-security-postgres";
 const database = "mscqr_production_rls_green_phase2";
 const role = "mscqr_prod_rls_canary_read";
 const appRole = "mscqr_prd_rls_phase2_app";
+const subscriptionObserver = "mscqr_prod_subscription_observer";
 const requireBackend = createRequire(new URL("../../backend/package.json", import.meta.url));
 const { PrismaClient } = requireBackend("@prisma/client");
 function sql(statement, db = database) {
@@ -34,12 +37,13 @@ test("real PostgreSQL catalogue and hostile read-only verifier regressions", { t
   assert.deepEqual(instance.HostConfig.PortBindings["5432/tcp"], [{ HostIp: "127.0.0.1", HostPort: "55432" }]);
   assert.equal(sql("SELECT current_database()", "mscqr_p2_admin_test"), "mscqr_p2_admin_test");
   assert.equal(sql(`SELECT count(*) FROM pg_database WHERE datname='${database}'`, "mscqr_p2_admin_test"), "0", "never overwrite an existing test database");
-  assert.equal(sql(`SELECT count(*) FROM pg_roles WHERE rolname IN ('${role}','${appRole}','app_only_fixture_member')`, "mscqr_p2_admin_test"), "0", "never replace existing roles");
-  let createdDb = false, createdRole = false, createdAppRole = false;
+  assert.equal(sql(`SELECT count(*) FROM pg_roles WHERE rolname IN ('${role}','${appRole}','${subscriptionObserver}','app_only_fixture_member')`, "mscqr_p2_admin_test"), "0", "never replace existing roles");
+  let createdDb = false, createdRole = false, createdAppRole = false, createdSubscriptionObserver = false;
   try {
     sql(`CREATE DATABASE ${database}`, "mscqr_p2_admin_test"); createdDb = true;
     sql(`CREATE ROLE ${role} LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`); createdRole = true;
     sql(`CREATE ROLE ${appRole} NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`); createdAppRole = true;
+    sql(`CREATE ROLE ${subscriptionObserver} NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`); createdSubscriptionObserver = true;
     sql(`ALTER ROLE ${role} SET default_transaction_read_only=on;
       REVOKE ALL ON DATABASE ${database} FROM PUBLIC;
       GRANT CONNECT ON DATABASE ${database} TO ${role};
@@ -64,6 +68,19 @@ test("real PostgreSQL catalogue and hostile read-only verifier regressions", { t
       GRANT SELECT(tenant) ON public.app_only_fixture TO ${role};
       CREATE POLICY fixture_policy ON public.app_only_fixture FOR ALL TO ${role}
         USING (tenant = current_user) WITH CHECK (amount > 0);`);
+    const provisioning = fs.readFileSync(path.join(process.cwd(), "documents/ops/iam/production-green-phase-4-read-only-canary-provision.sql"), "utf8");
+    const projection = provisioning.match(/CREATE OR REPLACE FUNCTION app_rls\.production_security_subscription_inventory\([\s\S]*?\$subscription_inventory\$;/)?.[0];
+    assert.ok(projection, "the test installs the exact source-owned restricted subscription projection");
+    sql(`CREATE SCHEMA app_rls AUTHORIZATION mscqr_p2_test;
+      GRANT SELECT (subconninfo) ON pg_catalog.pg_subscription TO ${subscriptionObserver};
+      GRANT USAGE, CREATE ON SCHEMA app_rls TO ${subscriptionObserver};
+      GRANT USAGE ON SCHEMA app_rls TO ${role};
+      SET ROLE ${subscriptionObserver};
+      ${projection}
+      RESET ROLE;
+      REVOKE USAGE, CREATE ON SCHEMA app_rls FROM ${subscriptionObserver};
+      REVOKE ALL ON FUNCTION app_rls.production_security_subscription_inventory() FROM PUBLIC;
+      GRANT EXECUTE ON FUNCTION app_rls.production_security_subscription_inventory() TO ${role};`);
     const baseline = await collect();
     const required = { ...structuredClone(baseline), contractSha256: "a".repeat(64) };
     await t.test("catalogues expose ACLs, function security, policies, constraints and generated/default/identity columns", () => {
@@ -136,5 +153,6 @@ test("real PostgreSQL catalogue and hostile read-only verifier regressions", { t
     if (createdDb) sql(`DROP DATABASE ${database}`, "mscqr_p2_admin_test");
     if (createdRole) sql(`DROP ROLE ${role}`, "mscqr_p2_admin_test");
     if (createdAppRole) sql(`DROP ROLE ${appRole}`, "mscqr_p2_admin_test");
+    if (createdSubscriptionObserver) sql(`DROP ROLE ${subscriptionObserver}`, "mscqr_p2_admin_test");
   }
 });
