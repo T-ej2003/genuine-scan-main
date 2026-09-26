@@ -543,10 +543,13 @@ export function assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(plan, { s
   const entry = bucketDrift[0]; const change = entry.change;
   if (entry.mode !== "managed" || entry.type !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.type || entry.name !== "production_artifacts" || entry.provider_name !== "registry.terraform.io/hashicorp/aws" || !change || !exactActions(change.actions, ["update"]) || change.replace_paths?.length || !emptyObject(change.before_unknown) || !emptyObject(change.after_unknown) || !emptyObject(change.before_sensitive) || !emptyObject(change.after_sensitive)) throw new Error("Stage A production-artifacts refresh-only bucket drift is not exact.");
   const transition = resolveStageAProductionArtifactsBucketPolicyTransition(recoveryCompletion);
-  // The signed recovery predecessor authenticates the live policy that was replaced.
-  // Terraform's saved state can still contain the exact source-defined pre-recovery
-  // policy, so this state-only refresh also accepts that one known state predecessor.
-  assertStageAProductionArtifactsPolicyResource(change.before, "predecessor", transition.predecessor, [buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservationPredecessor()]);
+  const incidentTransition = stageAProductionArtifactsLegacyReservationRepairTransition();
+  const incidentStatePredecessors = stageAProductionArtifactsPolicySemanticallyEqual(transition.predecessor, incidentTransition.predecessor)
+    && stageAProductionArtifactsPolicySemanticallyEqual(transition.desired, incidentTransition.desired)
+    ? [buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservationPredecessor()]
+    : [];
+  // Only the exact incident live transition can account for Terraform's distinct legacy state pre-image.
+  assertStageAProductionArtifactsPolicyResource(change.before, "predecessor", transition.predecessor, incidentStatePredecessors);
   assertStageAProductionArtifactsPolicyResource(change.after, "desired", transition.desired);
   if (rdsDrift.length) assertStageARdsLatestRestorableTimeDrift(rdsDrift[0]);
   return Object.freeze({ valid: true, stateReconciliationRequired: true, address: entry.address, actions: change.actions, resourceDriftCount: plan.resource_drift.length, rdsLatestRestorableTimeRefreshed: rdsDrift.length === 1 });

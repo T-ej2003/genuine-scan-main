@@ -148,7 +148,10 @@ bind the exact saved refresh-only plan SHA and be independently authenticated
 before the one state apply is consumed. The completion authenticates the live
 predecessor that recovery replaced; Terraform's `change.before` is separately
 restricted to the exact current-main source-defined pre-recovery state policy
-or that same live predecessor. Accepting this known state pre-image does not
+or that same live predecessor. The distinct initial-activation legacy state
+pre-image is accepted only for the exact `B_LEGACY_RESERVATION_TO_B` transition;
+it is not an alternate predecessor for other executable transitions, even when
+they share its successor. Accepting this known state pre-image does not
 authorize it as a live-policy predecessor. Arbitrary resource or policy drift
 is never accepted.
 
