@@ -143,7 +143,7 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
       COALESCE(observer.rolsuper,false) AS observer_superuser, COALESCE(observer.rolinherit,true) AS observer_inherit,
       COALESCE(observer.rolcreaterole,false) AS observer_create_role, COALESCE(observer.rolcreatedb,false) AS observer_create_db,
       COALESCE(observer.rolreplication,false) AS observer_replication, COALESCE(observer.rolbypassrls,false) AS observer_bypass_rls,
-      EXISTS(SELECT 1 FROM pg_catalog.pg_auth_members m WHERE m.member=observer.oid) AS observer_memberships,
+      EXISTS(SELECT 1 FROM pg_catalog.pg_auth_members m WHERE m.member=observer.oid OR m.roleid=observer.oid) AS observer_memberships,
       CASE WHEN observer.oid IS NULL THEN false ELSE pg_catalog.has_table_privilege(observer.oid,'pg_catalog.pg_subscription','SELECT') END AS table_select,
       CASE WHEN observer.oid IS NULL THEN '[]'::jsonb ELSE COALESCE((
         SELECT jsonb_agg(a.attname ORDER BY a.attname) FROM pg_catalog.pg_attribute a

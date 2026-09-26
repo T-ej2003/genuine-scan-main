@@ -37,7 +37,7 @@ test("real PostgreSQL catalogue and hostile read-only verifier regressions", { t
   assert.deepEqual(instance.HostConfig.PortBindings["5432/tcp"], [{ HostIp: "127.0.0.1", HostPort: "55432" }]);
   assert.equal(sql("SELECT current_database()", "mscqr_p2_admin_test"), "mscqr_p2_admin_test");
   assert.equal(sql(`SELECT count(*) FROM pg_database WHERE datname='${database}'`, "mscqr_p2_admin_test"), "0", "never overwrite an existing test database");
-    assert.equal(sql(`SELECT count(*) FROM pg_roles WHERE rolname IN ('${role}','${appRole}','${subscriptionObserver}','app_only_fixture_member','app_only_unexpected_subscription_reader')`, "mscqr_p2_admin_test"), "0", "never replace existing roles");
+  assert.equal(sql(`SELECT count(*) FROM pg_roles WHERE rolname IN ('${role}','${appRole}','${subscriptionObserver}','app_only_fixture_member','app_only_unexpected_subscription_reader','app_only_unexpected_subscription_member','app_only_subscription_provisioner','app_only_temporary_subscription_observer')`, "mscqr_p2_admin_test"), "0", "never replace existing roles");
   let createdDb = false, createdRole = false, createdAppRole = false, createdSubscriptionObserver = false;
   try {
     sql(`CREATE DATABASE ${database}`, "mscqr_p2_admin_test"); createdDb = true;
@@ -91,6 +91,30 @@ test("real PostgreSQL catalogue and hostile read-only verifier regressions", { t
       } finally {
         sql("REVOKE SELECT (subconninfo) ON pg_catalog.pg_subscription FROM app_only_unexpected_subscription_reader; DROP ROLE app_only_unexpected_subscription_reader");
       }
+    });
+    await t.test("real observer membership graph rejects a role that can SET ROLE to the secret reader", async () => {
+      sql("CREATE ROLE app_only_unexpected_subscription_member NOLOGIN");
+      try {
+        sql("GRANT mscqr_prod_subscription_observer TO app_only_unexpected_subscription_member WITH ADMIN FALSE, INHERIT FALSE, SET TRUE");
+        await assert.rejects(collect(), /observer_memberships/);
+      } finally {
+        sql("REVOKE mscqr_prod_subscription_observer FROM app_only_unexpected_subscription_member; DROP ROLE app_only_unexpected_subscription_member");
+      }
+    });
+    await t.test("a non-superuser CREATEROLE provisioner can use and then revoke only its temporary SET membership", () => {
+      sql(`BEGIN;
+        CREATE ROLE app_only_subscription_provisioner CREATEROLE NOLOGIN;
+        SET SESSION AUTHORIZATION app_only_subscription_provisioner;
+        CREATE ROLE app_only_temporary_subscription_observer NOLOGIN;
+        GRANT app_only_temporary_subscription_observer TO app_only_subscription_provisioner WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
+        SET ROLE app_only_temporary_subscription_observer;
+        DO $$ BEGIN IF current_user<>'app_only_temporary_subscription_observer' THEN RAISE EXCEPTION 'SET ROLE did not switch to observer'; END IF; END $$;
+        RESET ROLE;
+        REVOKE app_only_temporary_subscription_observer FROM app_only_subscription_provisioner;
+        RESET SESSION AUTHORIZATION;
+        DROP ROLE app_only_temporary_subscription_observer;
+        DROP ROLE app_only_subscription_provisioner;
+        COMMIT;`);
     });
     await t.test("catalogues expose ACLs, function security, policies, constraints and generated/default/identity columns", () => {
       const fn = baseline.routines.find((r) => r.name === "fixture");

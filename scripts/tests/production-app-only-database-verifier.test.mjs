@@ -111,11 +111,17 @@ test("all fixed catalogue statements use one read-only repeatable-read transacti
   assert.ok(subscriptionAclSql?.includes("pg_catalog.aclexplode(a.attacl)") && subscriptionAclSql.includes("acl.grantee")
     && subscriptionAclSql.includes("acl.grantor") && subscriptionAclSql.includes("acl.is_grantable"),
   "the complete protected connection-info column ACL is observed, including every grantee and grantor");
+  assert.ok(calls.some((sql) => sql.includes("observer_memberships") && sql.includes("m.member=observer.oid OR m.roleid=observer.oid")),
+    "membership both into and out of the secret-reading observer is rejected");
   assert.ok(calls.includes("SELECT * FROM app_rls.production_security_subscription_inventory() ORDER BY subscription_name"),
     "the restricted collector invokes only the fixed safe subscription projection");
   const provisioning = fs.readFileSync("documents/ops/iam/production-green-phase-4-read-only-canary-provision.sql", "utf8");
   assert.ok(provisioning.includes("acl.grantee<>'mscqr_prod_subscription_observer'::pg_catalog.regrole")
     && provisioning.includes("acl.is_grantable"), "provisioning verifies that the observer is the sole non-grantable subconninfo grantee");
+  assert.ok(provisioning.includes("m.roleid='mscqr_prod_subscription_observer'::pg_catalog.regrole")
+    && provisioning.includes("member.rolname<>current_user") && provisioning.includes("SET TRUE")
+    && provisioning.includes("REVOKE mscqr_prod_subscription_observer FROM %I"),
+  "provisioning permits only its temporary self SET membership and revokes it before commit");
   const projectionBody = provisioning.match(/AS \$subscription_inventory\$(.*?)\$subscription_inventory\$;/s)?.[1];
   assert.ok(projectionBody, "the source-owned fixed projection definition is present");
   assert.equal(crypto.createHash("sha256").update(projectionBody, "utf8").digest("hex"), SUBSCRIPTION_PROJECTION_BODY_SHA256,

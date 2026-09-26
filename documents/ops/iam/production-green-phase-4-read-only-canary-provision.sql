@@ -34,9 +34,12 @@ BEGIN
     EXECUTE 'CREATE ROLE mscqr_prod_subscription_observer NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS';
   END IF;
   IF EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname='mscqr_prod_subscription_observer'
-      AND (rolcanlogin OR rolsuper OR rolinherit OR rolcreaterole OR rolcreatedb OR rolreplication OR rolbypassrls))
+     AND (rolcanlogin OR rolsuper OR rolinherit OR rolcreaterole OR rolcreatedb OR rolreplication OR rolbypassrls))
      OR EXISTS (SELECT 1 FROM pg_catalog.pg_auth_members m JOIN pg_catalog.pg_roles member ON member.oid=m.member
-       WHERE member.rolname='mscqr_prod_subscription_observer') THEN
+       WHERE member.rolname='mscqr_prod_subscription_observer')
+     OR EXISTS (SELECT 1 FROM pg_catalog.pg_auth_members m JOIN pg_catalog.pg_roles member ON member.oid=m.member
+       WHERE m.roleid='mscqr_prod_subscription_observer'::pg_catalog.regrole
+         AND (member.rolname<>current_user OR NOT m.admin_option OR m.inherit_option OR m.set_option)) THEN
     RAISE EXCEPTION 'subscription observer role is not the exact isolated NOLOGIN principal';
   END IF;
 END $subscription_observer_role$;
@@ -48,6 +51,9 @@ REVOKE ALL ON ALL TABLES IN SCHEMA public FROM mscqr_prod_rls_canary_read;
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA app_rls FROM mscqr_prod_rls_canary_read;
 GRANT SELECT (subconninfo) ON pg_catalog.pg_subscription TO mscqr_prod_subscription_observer;
 GRANT USAGE, CREATE ON SCHEMA app_rls TO mscqr_prod_subscription_observer;
+DO $$ BEGIN
+  EXECUTE pg_catalog.format('GRANT mscqr_prod_subscription_observer TO %I WITH ADMIN FALSE, INHERIT FALSE, SET TRUE', current_user);
+END $$;
 SET ROLE mscqr_prod_subscription_observer;
 CREATE OR REPLACE FUNCTION app_rls.production_security_subscription_inventory()
 RETURNS TABLE(subscription_name text,subscription_owner text,enabled boolean,binary boolean,streaming text,two_phase text,
@@ -64,6 +70,9 @@ $subscription_inventory$;
 REVOKE ALL ON FUNCTION app_rls.production_security_subscription_inventory() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app_rls.production_security_subscription_inventory() TO mscqr_prod_rls_canary_read;
 RESET ROLE;
+DO $$ BEGIN
+  EXECUTE pg_catalog.format('REVOKE mscqr_prod_subscription_observer FROM %I', current_user);
+END $$;
 REVOKE USAGE, CREATE ON SCHEMA app_rls FROM mscqr_prod_subscription_observer;
 ALTER ROLE mscqr_prod_rls_canary_read SET statement_timeout = '5s';
 ALTER ROLE mscqr_prod_rls_canary_read SET lock_timeout = '1s';
@@ -105,6 +114,7 @@ DO $$ BEGIN
      OR EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname='mscqr_prod_subscription_observer' AND
        (rolcanlogin OR rolsuper OR rolinherit OR rolcreaterole OR rolcreatedb OR rolreplication OR rolbypassrls))
      OR EXISTS (SELECT 1 FROM pg_catalog.pg_auth_members m JOIN pg_catalog.pg_roles member ON member.oid=m.member WHERE member.rolname='mscqr_prod_subscription_observer')
+     OR EXISTS (SELECT 1 FROM pg_catalog.pg_auth_members m JOIN pg_catalog.pg_roles member ON member.oid=m.member WHERE m.roleid='mscqr_prod_subscription_observer'::pg_catalog.regrole)
      OR has_table_privilege('mscqr_prod_subscription_observer','pg_catalog.pg_subscription','SELECT')
      OR (SELECT count(*)<>1 FROM pg_catalog.pg_attribute a CROSS JOIN LATERAL pg_catalog.aclexplode(a.attacl) acl
        WHERE a.attrelid='pg_catalog.pg_subscription'::pg_catalog.regclass AND a.attname='subconninfo' AND acl.grantee='mscqr_prod_subscription_observer'::pg_catalog.regrole)
@@ -119,6 +129,7 @@ DO $$ BEGIN
      OR pg_catalog.has_column_privilege('mscqr_prod_rls_canary_read','pg_catalog.pg_subscription','subconninfo','SELECT')
      OR NOT pg_catalog.has_function_privilege('mscqr_prod_rls_canary_read','app_rls.production_security_subscription_inventory()','EXECUTE')
      OR pg_catalog.has_schema_privilege('mscqr_prod_subscription_observer','app_rls','CREATE')
+     OR EXISTS (SELECT 1 FROM pg_catalog.pg_auth_members m WHERE m.roleid='mscqr_prod_subscription_observer'::pg_catalog.regrole OR m.member='mscqr_prod_subscription_observer'::pg_catalog.regrole)
      OR EXISTS (SELECT 1 FROM information_schema.role_table_grants WHERE grantee='mscqr_prod_rls_canary_read') THEN RAISE EXCEPTION 'canary privilege verification failed'; END IF;
 END $$;
 COMMIT;
