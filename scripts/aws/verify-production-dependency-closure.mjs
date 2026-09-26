@@ -406,7 +406,7 @@ const APP_ONLY_CALLS = Object.freeze(Object.fromEntries([
   ["run-production-app-only-bootstrap", "ADMINISTRATOR", ["iam:GetPolicy", "iam:GetPolicyVersion", "iam:GetRole", "iam:GetRolePolicy", "iam:ListAttachedRolePolicies", "iam:ListPolicyVersions", "iam:ListRolePolicies", "sts:GetCallerIdentity"]],
   ["production-app-only-iam-source", "APP_ONLY_VERIFIER_LAUNCHER", ["iam:GetRole", "iam:GetRolePolicy", "iam:ListAttachedRolePolicies", "iam:ListRolePolicies", "sts:GetCallerIdentity"]],
   ["production-app-only-images", "APP_ONLY_VERIFIER_LAUNCHER", ["ecr:DescribeImages", "ecr:DescribeRepositories", "sts:GetCallerIdentity"]],
-  ["production-app-only-preparation", "APP_ONLY_VERIFIER_LAUNCHER", ["ecs:DescribeTasks", "secretsmanager:DescribeSecret"]],
+  ["production-app-only-preparation", "APP_ONLY_VERIFIER_LAUNCHER", ["ecr:DescribeImages", "ecs:DescribeTasks", "secretsmanager:DescribeSecret"]],
   ["production-app-only-runtime", "APP_ONLY_VERIFIER_LAUNCHER", ["ec2:DescribeRouteTables", "ec2:DescribeSecurityGroups", "ec2:DescribeSubnets", "kms:DescribeKey", "kms:GetKeyPolicy", "rds:DescribeDBInstances", "rds:DescribeDBParameters", "sts:GetCallerIdentity"]],
   ["production-app-only-provisioning", "APP_ONLY_PERMISSION_PROVISIONER", ["iam:CreateRole", "iam:GetPolicy", "iam:GetPolicyVersion", "iam:GetRole", "iam:GetRolePolicy", "iam:ListAttachedRolePolicies", "iam:ListRolePolicies", "iam:PutRolePolicy", "iam:SimulatePrincipalPolicy", "iam:UpdateAssumeRolePolicy", "sts:GetCallerIdentity"]],
   ["run-production-app-only-deployment", ["APP_ONLY_DEPLOYER", "APP_ONLY_PERMISSION_PROVISIONER"], ["sts:GetCallerIdentity"]],
