@@ -70,6 +70,18 @@ test("every extra subconninfo grantee fails closed before subscription projectio
   await assert.rejects(collectAppOnlyDatabaseCatalogue(client), /subscription_conninfo_acl/);
   assert.equal(calls.includes("SELECT * FROM app_rls.production_security_subscription_inventory() ORDER BY subscription_name"), false);
 });
+test("subscription projection grant-option drift fails closed before function invocation", async () => {
+  const calls = [];
+  const invalid = { ...structuredClone(SUBSCRIPTION_PROJECTION_STATUS_CONTRACT), projection_acl_valid: false };
+  const responses = [[identity()], [{ rows: [] }], [{ rows: [] }], [invalid]];
+  let read = 0;
+  const client = { $transaction: async (fn) => fn({
+    $executeRawUnsafe: async (sql) => calls.push(sql),
+    $queryRawUnsafe: async (sql) => { calls.push(sql); return responses[read++] ?? []; },
+  }) };
+  await assert.rejects(collectAppOnlyDatabaseCatalogue(client), /projection_acl_valid/);
+  assert.equal(calls.includes("SELECT * FROM app_rls.production_security_subscription_inventory() ORDER BY subscription_name"), false);
+});
 const identity = () => ({ role: "mscqr_prod_rls_canary_read", session_role: "mscqr_prod_rls_canary_read", database: "mscqr_production_rls_green_phase2",
   server_version_num: 180004, read_only: "on", default_read_only: "on", ...Object.fromEntries(["rolsuper", "rolinherit", "rolcreaterole", "rolcreatedb", "rolreplication", "rolbypassrls", "memberships", "write_privileges", "schema_write", "database_write"].map((key) => [key, false])) });
 test("all fixed catalogue statements use one read-only repeatable-read transaction", async () => {
@@ -100,6 +112,8 @@ test("all fixed catalogue statements use one read-only repeatable-read transacti
   assert.ok(calls.some((sql) => sql.includes("pg_catalog.pg_trigger") && sql.includes("NOT t.tgisinternal") && sql.includes("pg_get_triggerdef")), "user triggers are collected separately");
   assert.ok(calls.some((sql) => sql.includes("pg_catalog.pg_trigger") && sql.includes("t.tgisinternal") && sql.includes("t.tgconstraint<>0") && sql.includes("t.tgenabled")), "stable internal constraint-trigger enforcement is collected");
   assert.ok(calls.some((sql) => sql.includes("FROM pg_catalog.pg_extension")), "installed extensions are inventoried before extension-owned members are excluded");
+  assert.ok(calls.some((sql) => sql.includes("FROM pg_catalog.pg_largeobject_metadata") && sql.includes("acl_state.grants")
+    && !sql.includes("FROM pg_catalog.pg_largeobject ")), "large-object access metadata is inventoried without reading large-object contents");
   const bindingsSql=calls.find((sql) => sql.includes("FROM pg_catalog.pg_publication") && sql.includes("pg_catalog.pg_user_mappings"));
   assert.ok(bindingsSql?.includes("pg_catalog.pg_publication_rel") && bindingsSql.includes("pg_get_expr(pr.prqual") && bindingsSql.includes("value_sha256") && bindingsSql.includes("mscqr-security-option-v1"), "publication membership and hashed foreign bindings are collected without raw option values");
   assert.ok(bindingsSql?.includes("pg_catalog.pg_publication_rel") && !bindingsSql.includes("pg_catalog.pg_subscription"),
@@ -111,6 +125,8 @@ test("all fixed catalogue statements use one read-only repeatable-read transacti
   assert.ok(subscriptionAclSql?.includes("pg_catalog.aclexplode(a.attacl)") && subscriptionAclSql.includes("acl.grantee")
     && subscriptionAclSql.includes("acl.grantor") && subscriptionAclSql.includes("acl.is_grantable"),
   "the complete protected connection-info column ACL is observed, including every grantee and grantor");
+  assert.ok(calls.some((sql) => sql.includes("projection_acl_valid") && sql.includes("a.is_grantable") && sql.includes("a.grantor")),
+    "the complete subscription projection ACL rejects grant option and unexpected grantors");
   assert.ok(calls.some((sql) => sql.includes("observer_memberships") && sql.includes("m.member=observer.oid OR m.roleid=observer.oid")),
     "membership both into and out of the secret-reading observer is rejected");
   assert.ok(calls.includes("SELECT * FROM app_rls.production_security_subscription_inventory() ORDER BY subscription_name"),

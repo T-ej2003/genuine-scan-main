@@ -9,7 +9,7 @@ export const SUBSCRIPTION_PROJECTION_STATUS_CONTRACT = Object.freeze({
   observer_schema_usage: false, observer_schema_create: false, canary_direct_conninfo: false,
   function_exists: true, function_owner: "mscqr_prod_subscription_observer", function_security_definer: true,
   function_volatility: "s", function_search_path: "search_path=pg_catalog", function_body_sha256: SUBSCRIPTION_PROJECTION_BODY_SHA256,
-  public_execute: false, canary_execute: true, unexpected_execute_roles: false,
+  public_execute: false, canary_execute: true, unexpected_execute_roles: false, projection_acl_valid: true,
 });
 
 export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity = () => {}) {
@@ -137,6 +137,18 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
       JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace JOIN pg_catalog.pg_roles o ON o.oid=c.relowner
       JOIN pg_catalog.pg_foreign_server s ON s.oid=ft.ftserver
       WHERE n.nspname<>'information_schema' AND n.nspname NOT LIKE 'pg\_%' ESCAPE '\\'
+      UNION ALL
+      SELECT 'large_objects',pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
+        pg_catalog.jsonb_build_array(o.rolname,acl_state.grants)::text,'UTF8')),'hex'),o.rolname,
+        jsonb_build_object('count',count(*),'grants',acl_state.grants)
+      FROM pg_catalog.pg_largeobject_metadata lo JOIN pg_catalog.pg_roles o ON o.oid=lo.lomowner
+      CROSS JOIN LATERAL (SELECT COALESCE(jsonb_agg(jsonb_build_object('role',COALESCE(grantee.rolname,'PUBLIC'),
+        'grantor',COALESCE(grantor.rolname,'UNKNOWN'),'privilege',acl.privilege_type,'grantable',acl.is_grantable)
+        ORDER BY COALESCE(grantee.rolname,'PUBLIC'),COALESCE(grantor.rolname,'UNKNOWN'),acl.privilege_type,acl.is_grantable),'[]'::jsonb) AS grants
+        FROM pg_catalog.aclexplode(COALESCE(lo.lomacl,pg_catalog.acldefault('L',lo.lomowner))) acl
+        LEFT JOIN pg_catalog.pg_roles grantee ON grantee.oid=acl.grantee
+        LEFT JOIN pg_catalog.pg_roles grantor ON grantor.oid=acl.grantor) acl_state
+      GROUP BY o.rolname,acl_state.grants
     ) x`);
     const [subscriptionProjectionStatus] = await tx.$queryRawUnsafe(`SELECT
       observer.oid IS NOT NULL AS role_exists, COALESCE(observer.rolcanlogin,false) AS observer_login,
@@ -169,7 +181,11 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
       COALESCE((SELECT bool_or(a.grantee=canary.oid AND a.privilege_type='EXECUTE') FROM pg_catalog.aclexplode(
         COALESCE(projection.proacl,pg_catalog.acldefault('f',projection.proowner))) a),false) AS canary_execute,
       COALESCE((SELECT bool_or(a.privilege_type='EXECUTE' AND a.grantee NOT IN (projection.proowner,canary.oid)) FROM pg_catalog.aclexplode(
-        COALESCE(projection.proacl,pg_catalog.acldefault('f',projection.proowner))) a),false) AS unexpected_execute_roles
+        COALESCE(projection.proacl,pg_catalog.acldefault('f',projection.proowner))) a),false) AS unexpected_execute_roles,
+      COALESCE((SELECT bool_and(
+        (a.grantee=projection.proowner AND a.grantor=projection.proowner AND a.privilege_type='EXECUTE' AND NOT a.is_grantable)
+        OR (a.grantee=canary.oid AND a.grantor=projection.proowner AND a.privilege_type='EXECUTE' AND NOT a.is_grantable))
+        FROM pg_catalog.aclexplode(COALESCE(projection.proacl,pg_catalog.acldefault('f',projection.proowner))) a),false) AS projection_acl_valid
       FROM (SELECT pg_catalog.to_regrole('mscqr_prod_subscription_observer') AS oid) observer_ref
       LEFT JOIN pg_catalog.pg_roles observer ON observer.oid=observer_ref.oid
       CROSS JOIN (SELECT p.oid FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace

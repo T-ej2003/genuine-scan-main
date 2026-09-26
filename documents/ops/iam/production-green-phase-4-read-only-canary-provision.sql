@@ -127,6 +127,11 @@ DO $$ BEGIN
        WHERE a.attrelid='pg_catalog.pg_subscription'::pg_catalog.regclass AND acl.grantee='mscqr_prod_subscription_observer'::pg_catalog.regrole
          AND (a.attname<>'subconninfo' OR acl.privilege_type<>'SELECT' OR acl.is_grantable))
      OR pg_catalog.has_column_privilege('mscqr_prod_rls_canary_read','pg_catalog.pg_subscription','subconninfo','SELECT')
+     OR (SELECT COALESCE(bool_and(
+       (acl.grantee=p.proowner AND acl.grantor=p.proowner AND acl.privilege_type='EXECUTE' AND NOT acl.is_grantable)
+       OR (acl.grantee='mscqr_prod_rls_canary_read'::pg_catalog.regrole AND acl.grantor=p.proowner AND acl.privilege_type='EXECUTE' AND NOT acl.is_grantable)),false)
+       FROM pg_catalog.pg_proc p CROSS JOIN LATERAL pg_catalog.aclexplode(COALESCE(p.proacl,pg_catalog.acldefault('f',p.proowner))) acl
+       WHERE p.oid='app_rls.production_security_subscription_inventory()'::pg_catalog.regprocedure) IS NOT TRUE
      OR NOT pg_catalog.has_function_privilege('mscqr_prod_rls_canary_read','app_rls.production_security_subscription_inventory()','EXECUTE')
      OR pg_catalog.has_schema_privilege('mscqr_prod_subscription_observer','app_rls','CREATE')
      OR EXISTS (SELECT 1 FROM pg_catalog.pg_auth_members m WHERE m.roleid='mscqr_prod_subscription_observer'::pg_catalog.regrole OR m.member='mscqr_prod_subscription_observer'::pg_catalog.regrole)

@@ -340,6 +340,19 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
       assert.equal(productionEquivalentDiff.differenceCount, 0,
         `production-equivalent membership grantors do not create canonical harness drift: ${JSON.stringify(productionEquivalentDiff.differences.map(({collection,identity,field})=>({collection,identity,field})))}`);
       await assert.rejects(maintenanceClient.$transaction(async (tx) => {
+        const [created] = await tx.$queryRawUnsafe("SELECT pg_catalog.lo_create(0)::text AS oid");
+        await tx.$executeRawUnsafe(`ALTER LARGE OBJECT ${created.oid} OWNER TO mscqr_prd_rls_phase2_app`);
+        await tx.$executeRawUnsafe(`GRANT SELECT ON LARGE OBJECT ${created.oid} TO mscqr_prod_rls_canary_read`);
+        const liveCatalogue = await collectAppOnlyDatabaseCatalogueRows(tx);
+        const liveInventory = createLiveSecurityRebaselineInventory({ protectedMainSha: sourceSha, catalogue: liveCatalogue,
+          canonical: securityRebaselineCanonical, taskEvidence: productionEquivalentLive.taskEvidence });
+        const liveDiff = diffSecurityRebaselineInventories(liveInventory, securityRebaselineCanonical);
+        assert.equal(liveDiff.safeToConstructConvergencePlan, false, "large-object access absent from the canonical target blocks planning");
+        assert.ok(liveDiff.differences.some(({ collection, identity }) => collection === "bindings" && identity.startsWith("large_objects:")),
+          "real PG18 LO metadata survives collection, normalization and diffing");
+        throw new Error("rollback live large-object inventory fixture");
+      }), /rollback live large-object inventory fixture/);
+      await assert.rejects(maintenanceClient.$transaction(async (tx) => {
         const parent = "mscqr_prd_rls_phase2_app";
         await tx.$executeRawUnsafe("CREATE ROLE rebaseline_unexpected_canonical_grantor NOLOGIN");
         await tx.$executeRawUnsafe(`GRANT "${parent}" TO rebaseline_unexpected_canonical_grantor WITH ADMIN OPTION`);

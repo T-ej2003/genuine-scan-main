@@ -37,7 +37,7 @@ test("real PostgreSQL catalogue and hostile read-only verifier regressions", { t
   assert.deepEqual(instance.HostConfig.PortBindings["5432/tcp"], [{ HostIp: "127.0.0.1", HostPort: "55432" }]);
   assert.equal(sql("SELECT current_database()", "mscqr_p2_admin_test"), "mscqr_p2_admin_test");
   assert.equal(sql(`SELECT count(*) FROM pg_database WHERE datname='${database}'`, "mscqr_p2_admin_test"), "0", "never overwrite an existing test database");
-  assert.equal(sql(`SELECT count(*) FROM pg_roles WHERE rolname IN ('${role}','${appRole}','${subscriptionObserver}','app_only_fixture_member','app_only_unexpected_subscription_reader','app_only_unexpected_subscription_member','app_only_subscription_provisioner','app_only_temporary_subscription_observer')`, "mscqr_p2_admin_test"), "0", "never replace existing roles");
+  assert.equal(sql(`SELECT count(*) FROM pg_roles WHERE rolname IN ('${role}','${appRole}','${subscriptionObserver}','app_only_fixture_member','app_only_unexpected_subscription_reader','app_only_unexpected_subscription_member','app_only_subscription_provisioner','app_only_temporary_subscription_observer','app_only_projection_acl_grantor')`, "mscqr_p2_admin_test"), "0", "never replace existing roles");
   let createdDb = false, createdRole = false, createdAppRole = false, createdSubscriptionObserver = false;
   try {
     sql(`CREATE DATABASE ${database}`, "mscqr_p2_admin_test"); createdDb = true;
@@ -83,6 +83,50 @@ test("real PostgreSQL catalogue and hostile read-only verifier regressions", { t
       GRANT EXECUTE ON FUNCTION app_rls.production_security_subscription_inventory() TO ${role};`);
     const baseline = await collect();
     const required = { ...structuredClone(baseline), contractSha256: "a".repeat(64) };
+    await t.test("real large-object ownership and ACL metadata are collected without object IDs or contents", async () => {
+      const oid = sql("SELECT lo_create(0)::text");
+      try {
+        sql(`ALTER LARGE OBJECT ${oid} OWNER TO ${appRole}; GRANT SELECT ON LARGE OBJECT ${oid} TO ${role}`);
+        const catalogue = await collect();
+        const binding = catalogue.securityBindings.find(({ kind }) => kind === "large_objects");
+        assert.ok(binding, "restricted real collector includes large-object access metadata");
+        assert.equal(binding.owner, appRole);
+        assert.equal(binding.definition.count, 1);
+        assert.ok(binding.definition.grants.some(({ role: grantee, privilege }) => grantee === role && privilege === "SELECT"));
+        assert.equal(JSON.stringify(binding).includes(oid), false, "database-local OID is not used as inventory identity");
+      } finally {
+        sql(`SELECT lo_unlink(${oid})`);
+      }
+    });
+    await t.test("real subscription projection grant option is rejected before invoking the function", async () => {
+      sql(`GRANT EXECUTE ON FUNCTION app_rls.production_security_subscription_inventory() TO ${role} WITH GRANT OPTION`);
+      try {
+        await assert.rejects(collect(), /projection_acl_valid/);
+      } finally {
+        sql(`REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION app_rls.production_security_subscription_inventory() FROM ${role}`);
+      }
+      assert.deepEqual(await collect(), baseline, "removing the grant option restores the authenticated projection contract");
+    });
+    await t.test("real subscription projection ACL with a different grantor is rejected", async () => {
+      const delegate = "app_only_projection_acl_grantor";
+      sql(`CREATE ROLE ${delegate} NOLOGIN`);
+      try {
+        sql(`GRANT USAGE ON SCHEMA app_rls TO ${delegate};
+          GRANT EXECUTE ON FUNCTION app_rls.production_security_subscription_inventory() TO ${delegate} WITH GRANT OPTION;
+          SET ROLE ${delegate};
+          GRANT EXECUTE ON FUNCTION app_rls.production_security_subscription_inventory() TO ${role};
+          RESET ROLE`);
+        await assert.rejects(collect(), /projection_acl_valid|unexpected_execute_roles/);
+      } finally {
+        sql(`SET ROLE ${delegate};
+          REVOKE EXECUTE ON FUNCTION app_rls.production_security_subscription_inventory() FROM ${role};
+          RESET ROLE;
+          REVOKE EXECUTE ON FUNCTION app_rls.production_security_subscription_inventory() FROM ${delegate};
+          REVOKE USAGE ON SCHEMA app_rls FROM ${delegate};
+          DROP ROLE ${delegate}`);
+      }
+      assert.deepEqual(await collect(), baseline, "removing the unexpected grantor ACL restores the reviewed grantor");
+    });
     await t.test("real pg_subscription column ACL rejects an extra secret-capable grantee", async () => {
       sql("CREATE ROLE app_only_unexpected_subscription_reader NOLOGIN");
       try {
