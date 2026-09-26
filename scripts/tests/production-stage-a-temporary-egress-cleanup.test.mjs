@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
 import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from "../aws/production-github-environment-approval.mjs";
-import { assertStageATemporaryEgressCleanupAuthorization, assertStageATemporaryEgressCloudTrailProvenance, createStageATemporaryEgressCleanupAuthorization, executeStageATemporaryEgressCleanup, STAGE_A_TEMPORARY_EGRESS_CLEANUP, validateStageATemporaryEgressLiveInventory } from "../aws/production-stage-a-temporary-egress-cleanup.mjs";
+import { assertStageATemporaryEgressCleanupAuthorization, assertStageATemporaryEgressCloudTrailProvenance, createStageATemporaryEgressCleanupAuthorization, executeStageATemporaryEgressCleanup, resolveStageATemporaryEgressCleanupAuthorizationArtifact, STAGE_A_TEMPORARY_EGRESS_CLEANUP, validateStageATemporaryEgressLiveInventory } from "../aws/production-stage-a-temporary-egress-cleanup.mjs";
 import { canonicalJson } from "../aws/production-green-stage-b-contract.mjs";
 
 const sourceSha = "1d2bda9fd3e740d51fba199021b354724cf479d3";
@@ -69,6 +69,14 @@ test("live cleanup readback accepts only exact SG, endpoint, rule, and dependenc
   ]) assert.throws(() => validateStageATemporaryEgressLiveInventory(inventory(overrides)));
 });
 
+test("post-revoke inventory accepts only absence of the exact rule with the remaining topology unchanged", () => {
+  const withoutRule = structuredClone(sourceGroup);
+  withoutRule.SecurityGroups[0].IpPermissionsEgress = [];
+  const result = validateStageATemporaryEgressLiveInventory(inventory({ ruleResponse: { SecurityGroupRules: [] }, sourceGroup: withoutRule, allowRuleAbsent: true }));
+  assert.equal(result.rulePresent, false);
+  assert.throws(() => validateStageATemporaryEgressLiveInventory(inventory({ allowRuleAbsent: true })), /still present/);
+});
+
 test("cleanup provenance authenticates the exact root-created endpoint and egress rule", () => {
   assert.equal(assertStageATemporaryEgressCloudTrailProvenance(provenanceEvents), true);
   assert.throws(() => assertStageATemporaryEgressCloudTrailProvenance({ ...provenanceEvents, ruleEvents: [] }));
@@ -76,6 +84,24 @@ test("cleanup provenance authenticates the exact root-created endpoint and egres
   assert.throws(() => assertStageATemporaryEgressCloudTrailProvenance(wrong));
   const wrongPort = structuredClone(provenanceEvents); const event = JSON.parse(wrongPort.ruleEvents[0].CloudTrailEvent); event.requestParameters.ipPermissions.items[0].toPort = 444; wrongPort.ruleEvents[0].CloudTrailEvent = JSON.stringify(event);
   assert.throws(() => assertStageATemporaryEgressCloudTrailProvenance(wrongPort));
+});
+
+test("authorization artifact resolution uses gh api stdout for the exact source-bound archive", () => {
+  const archive = Buffer.from("fixture-zip-bytes"); const calls = [];
+  const run = (command, args, options = {}) => {
+    calls.push({ command, args, options });
+    if (command === "gh" && args[1] === "repos/T-ej2003/genuine-scan-main/actions/runs/42") return JSON.stringify({ id: 42, repository: { id: 77, full_name: "T-ej2003/genuine-scan-main" }, head_repository: { full_name: "T-ej2003/genuine-scan-main" }, path: ".github/workflows/authorize-stage-a-temporary-egress-cleanup.yml", event: "workflow_dispatch", head_sha: sourceSha, status: "completed", conclusion: "success", run_attempt: 1, actor: { login: "operator" } });
+    if (command === "gh" && args[1].endsWith("/actions/runs/42/artifacts")) return JSON.stringify([{ artifacts: [{ id: 99, name: "stage-a-temporary-egress-cleanup-authorization", expired: false, workflow_run: { id: 42, head_sha: sourceSha, repository_id: 77 }, digest: `sha256:${createHash("sha256").update(archive).digest("hex")}` }] }]);
+    if (command === "gh" && args[1].endsWith("/actions/artifacts/99/zip")) return archive;
+    if (command === "unzip" && args[0] === "-Z1") return "authorization.json\n";
+    if (command === "unzip" && args[0] === "-p") return JSON.stringify(authorization);
+    throw new Error(`unexpected ${command} ${args.join(" ")}`);
+  };
+  const result = resolveStageATemporaryEgressCleanupAuthorizationArtifact({ workflowRunId: "42", workflowRunAttempt: "1", sourceSha, run });
+  assert.equal(result.authorizationSha256, authorization.authorizationSha256);
+  const download = calls.find(({ command, args }) => command === "gh" && args[1].endsWith("/actions/artifacts/99/zip"));
+  assert.deepEqual(download.args, ["api", "repos/T-ej2003/genuine-scan-main/actions/artifacts/99/zip"]);
+  assert.equal(download.options.encoding, null);
 });
 
 test("executor consumes authorization before one exact revoke and refuses changed live rule", async () => {
@@ -98,7 +124,7 @@ test("executor refuses a replayed authorization before issuing any revoke", asyn
 
 test("executor can emit only the exact rule-ID revoke and never bulk-revokes", async () => {
   let reads = 0; const awsCalls = []; let reservationCount = 0;
-  const read = () => { reads += 1; return { validated: { ruleId: STAGE_A_TEMPORARY_EGRESS_CLEANUP.ruleId }, ruleResponse: { SecurityGroupRules: reads >= 4 ? [] : [rule] } }; };
+  const read = () => { reads += 1; const absent = reads >= 4; return { validated: { ruleId: STAGE_A_TEMPORARY_EGRESS_CLEANUP.ruleId, rulePresent: !absent }, ruleResponse: { SecurityGroupRules: absent ? [] : [rule] } }; };
   const result = await executeStageATemporaryEgressCleanup({ authorization, sourceSha, workflowRunId: "42", workflowRunAttempt: "1", rootRun: async (args) => awsCalls.push(args), releaseRun: async (args) => { if (args.includes("put-object")) reservationCount += 1; }, terraformStateLock: lock(), read, reserve: async () => { reservationCount += 1; } });
   assert.deepEqual(result, { completed: true, ruleId: "sgr-0b8c789e9694d4b77", revocationCount: 1 });
   assert.deepEqual(awsCalls, [["ec2", "revoke-security-group-egress", "--security-group-rule-ids", "sgr-0b8c789e9694d4b77", "--output", "json", "--no-cli-pager"]]);

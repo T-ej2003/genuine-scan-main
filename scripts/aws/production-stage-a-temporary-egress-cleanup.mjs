@@ -114,16 +114,18 @@ export function assertStageATemporaryEgressCloudTrailProvenance({ endpointEvents
   return true;
 }
 
-export function validateStageATemporaryEgressLiveInventory({ caller, region = STAGE_A_TEMPORARY_EGRESS_CLEANUP.region, ruleResponse, sourceGroup, destinationGroup, endpointResponse, networkInterfaces, activeTaskUsesSourceGroup, canonicalDependencyPresent = false, provenanceEvents } = {}) {
+export function validateStageATemporaryEgressLiveInventory({ caller, region = STAGE_A_TEMPORARY_EGRESS_CLEANUP.region, ruleResponse, sourceGroup, destinationGroup, endpointResponse, networkInterfaces, activeTaskUsesSourceGroup, canonicalDependencyPresent = false, provenanceEvents, allowRuleAbsent = false } = {}) {
   const target = STAGE_A_TEMPORARY_EGRESS_CLEANUP;
   if (region !== target.region || caller?.Account !== target.account || caller?.Arn !== `arn:aws:iam::${target.account}:root`) fail("Temporary egress cleanup requires the exact production root caller and region.");
   const rules = ruleResponse?.SecurityGroupRules;
-  if (!Array.isArray(rules) || rules.length !== 1) fail("Temporary egress cleanup rule readback is missing or ambiguous.");
-  const [rule] = rules;
-  if (rule?.SecurityGroupRuleId !== target.ruleId || rule.GroupId !== target.sourceGroupId || rule.IsEgress !== true
+  if (!Array.isArray(rules)) fail("Temporary egress cleanup rule readback is incomplete.");
+  const matchingRules = rules.filter(({ SecurityGroupRuleId } = {}) => SecurityGroupRuleId === target.ruleId);
+  if (matchingRules.length !== (allowRuleAbsent ? 0 : 1)) fail(allowRuleAbsent ? "Temporary egress cleanup exact rule is still present or ambiguous." : "Temporary egress cleanup rule readback is missing or ambiguous.");
+  const rule = matchingRules[0];
+  if (rule && (rule.GroupId !== target.sourceGroupId || rule.IsEgress !== true
     || rule.IpProtocol !== target.protocol || rule.FromPort !== target.fromPort || rule.ToPort !== target.toPort
     || rule.ReferencedGroupInfo?.GroupId !== target.destinationGroupId || rule.ReferencedGroupInfo?.UserId !== target.account
-    || rule.Description !== target.ruleDescription || rule.GroupOwnerId !== target.account || (rule.VpcId !== undefined && rule.VpcId !== target.vpcId)) fail("Temporary egress cleanup rule identity changed.");
+    || rule.Description !== target.ruleDescription || rule.GroupOwnerId !== target.account || (rule.VpcId !== undefined && rule.VpcId !== target.vpcId))) fail("Temporary egress cleanup rule identity changed.");
   const source = sourceGroup?.SecurityGroups;
   const destination = destinationGroup?.SecurityGroups;
   if (!Array.isArray(source) || source.length !== 1 || !Array.isArray(destination) || destination.length !== 1) fail("Temporary egress cleanup security-group readback is incomplete.");
@@ -138,7 +140,7 @@ export function validateStageATemporaryEgressLiveInventory({ caller, region = ST
   const endpointIngress = dst.IpPermissions;
   const endpointPairs = Array.isArray(endpointIngress) ? endpointIngress.flatMap(({ UserIdGroupPairs = [] }) => UserIdGroupPairs).filter(({ GroupId, Description, UserId }) => GroupId === target.sourceGroupId && UserId === target.account && Description === "Temporary ECS Exec from isolated DBA task only") : [];
   const endpointRule = endpointIngress?.[0];
-  if (sourcePairs.length !== 1 || endpointIngress?.length !== 1 || endpointRule?.IpProtocol !== target.protocol || endpointRule?.FromPort !== target.fromPort || endpointRule?.ToPort !== target.toPort
+  if (sourcePairs.length !== (allowRuleAbsent ? 0 : 1) || endpointIngress?.length !== 1 || endpointRule?.IpProtocol !== target.protocol || endpointRule?.FromPort !== target.fromPort || endpointRule?.ToPort !== target.toPort
     || endpointPairs.length !== 1 || endpointRule.IpRanges?.length !== 0 || endpointRule.Ipv6Ranges?.length !== 0 || endpointRule.PrefixListIds?.length !== 0 || (dst.IpPermissionsEgress || []).length !== 0) fail("Temporary egress cleanup security-group rule topology is incomplete or ambiguous.");
   const endpoints = endpointResponse?.VpcEndpoints;
   if (!Array.isArray(endpoints) || endpoints.length !== 1) fail("Temporary egress cleanup endpoint readback is incomplete.");
@@ -149,7 +151,7 @@ export function validateStageATemporaryEgressLiveInventory({ caller, region = ST
   assertStageATemporaryEgressCloudTrailProvenance(provenanceEvents);
   if (!Array.isArray(networkInterfaces) || networkInterfaces.length !== 0) fail("Temporary egress cleanup has an active source security-group ENI dependency.");
   if (activeTaskUsesSourceGroup !== false || canonicalDependencyPresent !== false) fail("Temporary egress cleanup has an active task or canonical source dependency.");
-  return Object.freeze({ ruleId: target.ruleId, sourceGroupId: target.sourceGroupId, destinationGroupId: target.destinationGroupId, endpointId: target.endpointId, revocationCount: 1 });
+  return Object.freeze({ ruleId: target.ruleId, sourceGroupId: target.sourceGroupId, destinationGroupId: target.destinationGroupId, endpointId: target.endpointId, rulePresent: !allowRuleAbsent, revocationCount: allowRuleAbsent ? 0 : 1 });
 }
 
 function decodeJson(output, label) { try { return JSON.parse(output); } catch { fail(`${label} response is malformed.`); } }
@@ -187,10 +189,10 @@ function activeTaskUsesSourceGroup(run, sourceNetworkInterfaces) {
   return sourceNetworkInterfaces.some(({ NetworkInterfaceId }) => enis.has(NetworkInterfaceId));
 }
 
-const readInventory = (run) => {
+const readInventory = (run, { allowRuleAbsent = false } = {}) => {
   const target = STAGE_A_TEMPORARY_EGRESS_CLEANUP;
   const caller = decodeJson(run(["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"]), "Caller identity");
-  const ruleResponse = decodeJson(run(["ec2", "describe-security-group-rules", "--security-group-rule-ids", target.ruleId, "--output", "json", "--no-cli-pager"]), "Security-group rule");
+  const ruleResponse = decodeJson(run(["ec2", "describe-security-group-rules", "--filters", `Name=group-id,Values=${target.sourceGroupId}`, "--output", "json", "--no-cli-pager"]), "Source security-group rules");
   const sourceGroup = decodeJson(run(["ec2", "describe-security-groups", "--group-ids", target.sourceGroupId, "--output", "json", "--no-cli-pager"]), "Source security group");
   const destinationGroup = decodeJson(run(["ec2", "describe-security-groups", "--group-ids", target.destinationGroupId, "--output", "json", "--no-cli-pager"]), "Destination security group");
   const endpointResponse = decodeJson(run(["ec2", "describe-vpc-endpoints", "--vpc-endpoint-ids", target.endpointId, "--output", "json", "--no-cli-pager"]), "VPC endpoint");
@@ -202,7 +204,7 @@ const readInventory = (run) => {
   const source = fs.readFileSync(path.join(repositoryRoot(), "infra/aws/terraform/production-green-stage-a/main.tf"), "utf8");
   const canonicalExecutorEndpointRule = /resource "aws_vpc_security_group_egress_rule" "executor_interface_endpoints" \{\s+security_group_id\s+=\s+aws_security_group\.executor\.id\s+referenced_security_group_id\s+=\s+aws_security_group\.executor_endpoints\.id\s+from_port\s+=\s+443\s+to_port\s+=\s+443\s+ip_protocol\s+=\s+"tcp"\s+description\s+=\s+"Reviewed AWS interface endpoints only"\s+\}/.test(source);
   const canonicalDependencyPresent = source.includes(target.destinationGroupId) || source.includes(target.endpointService) || !canonicalExecutorEndpointRule;
-  const validated = validateStageATemporaryEgressLiveInventory({ caller, ruleResponse, sourceGroup, destinationGroup, endpointResponse, networkInterfaces: network.NetworkInterfaces, activeTaskUsesSourceGroup: taskDependency, canonicalDependencyPresent, provenanceEvents: { endpointEvents, ruleEvents } });
+  const validated = validateStageATemporaryEgressLiveInventory({ caller, ruleResponse, sourceGroup, destinationGroup, endpointResponse, networkInterfaces: network.NetworkInterfaces, activeTaskUsesSourceGroup: taskDependency, canonicalDependencyPresent, provenanceEvents: { endpointEvents, ruleEvents }, allowRuleAbsent });
   return { validated, ruleResponse, sourceNetworkInterfaceCount: network.NetworkInterfaces.length, activeTaskUsesSourceGroup: taskDependency, canonicalDependencyPresent };
 };
 
@@ -214,7 +216,7 @@ export function readStageATemporaryEgressInventory({ run } = {}) {
 
 function repositoryRoot() { return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.."); }
 
-function resolveAuthorizationArtifact({ workflowRunId, workflowRunAttempt, sourceSha, run = (command, args, options = {}) => execFileSync(command, args, { encoding: options.encoding === null ? null : "utf8", stdio: ["ignore", "pipe", "pipe"] }) } = {}) {
+export function resolveStageATemporaryEgressCleanupAuthorizationArtifact({ workflowRunId, workflowRunAttempt, sourceSha, run = (command, args, options = {}) => execFileSync(command, args, { encoding: options.encoding === null ? null : "utf8", stdio: ["ignore", "pipe", "pipe"] }) } = {}) {
   if (!/^[1-9][0-9]*$/.test(String(workflowRunId || "")) || !/^[1-9][0-9]*$/.test(String(workflowRunAttempt || ""))) fail("Temporary egress cleanup workflow coordinates are invalid.");
   const workflow = decodeJson(run("gh", ["api", `repos/${PRODUCTION_ENVIRONMENT_APPROVAL.repository}/actions/runs/${workflowRunId}`]), "Authorization workflow");
   if (String(workflow.id) !== String(workflowRunId) || workflow.repository?.full_name !== PRODUCTION_ENVIRONMENT_APPROVAL.repository || workflow.head_repository?.full_name !== PRODUCTION_ENVIRONMENT_APPROVAL.repository
@@ -223,7 +225,7 @@ function resolveAuthorizationArtifact({ workflowRunId, workflowRunAttempt, sourc
   const pages = decodeJson(run("gh", ["api", `repos/${PRODUCTION_ENVIRONMENT_APPROVAL.repository}/actions/runs/${workflowRunId}/artifacts`, "--paginate", "--slurp"]), "Authorization artifact index");
   const artifacts = pages.flatMap((page) => page.artifacts || []).filter((item) => item.name === "stage-a-temporary-egress-cleanup-authorization" && item.expired === false && String(item.workflow_run?.id) === String(workflowRunId) && item.workflow_run?.head_sha === sourceSha && item.workflow_run?.repository_id === workflow.repository?.id && /^sha256:[a-f0-9]{64}$/.test(item.digest || ""));
   if (artifacts.length !== 1) fail("Temporary egress cleanup authorization artifact is missing, duplicated, or unbound.");
-  const archive = run("gh", ["api", `repos/${PRODUCTION_ENVIRONMENT_APPROVAL.repository}/actions/artifacts/${artifacts[0].id}/zip`, "--header", "Accept: application/vnd.github+json", "--output", "-"], { encoding: null }); const bytes = Buffer.isBuffer(archive) ? archive : Buffer.from(archive);
+  const archive = run("gh", ["api", `repos/${PRODUCTION_ENVIRONMENT_APPROVAL.repository}/actions/artifacts/${artifacts[0].id}/zip`], { encoding: null, maxBuffer: 16 * 1024 * 1024 }); const bytes = Buffer.isBuffer(archive) ? archive : Buffer.from(archive);
   const expectedDigest = Buffer.from(artifacts[0].digest.slice("sha256:".length), "hex"); const actualDigest = createHash("sha256").update(bytes).digest();
   if (!timingSafeEqual(expectedDigest, actualDigest)) fail("Temporary egress cleanup authorization artifact digest is invalid.");
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-a-egress-authorization-")); const zip = path.join(directory, "authorization.zip");
@@ -263,13 +265,14 @@ export async function executeStageATemporaryEgressCleanup({ authorization, sourc
     await reserve({ releaseRun, authorization });
     const finalCheck = read(rootRun);
     if (finalCheck.validated.ruleId !== target.ruleId || canonicalJson(finalCheck.ruleResponse) !== canonicalJson(lockedBefore.ruleResponse)) fail("Temporary egress cleanup live rule changed after authorization; no mutation was performed.");
+    const hasTargetRule = (inventory) => Array.isArray(inventory.ruleResponse?.SecurityGroupRules) && inventory.ruleResponse.SecurityGroupRules.some(({ SecurityGroupRuleId }) => SecurityGroupRuleId === target.ruleId);
     try { rootRun(["ec2", "revoke-security-group-egress", "--security-group-rule-ids", target.ruleId, "--output", "json", "--no-cli-pager"]); }
     catch (error) {
-      const observed = read(rootRun);
-      if (observed.ruleResponse?.SecurityGroupRules?.length !== 0) throw new Error("Temporary egress cleanup revoke outcome is ambiguous; authorization consumed and no retry is permitted.", { cause: error });
+      const observed = read(rootRun, { allowRuleAbsent: true });
+      if (hasTargetRule(observed)) throw new Error("Temporary egress cleanup revoke outcome is ambiguous; authorization consumed and no retry is permitted.", { cause: error });
     }
-    const after = read(rootRun);
-    if (after.ruleResponse?.SecurityGroupRules?.length !== 0) fail("Temporary egress cleanup rule remains after the exact revoke.");
+    const after = read(rootRun, { allowRuleAbsent: true });
+    if (hasTargetRule(after) || after.validated.rulePresent !== false) fail("Temporary egress cleanup rule remains after the exact revoke.");
     const result = { schemaVersion: 1, kind: "STAGE_A_TEMPORARY_EGRESS_CLEANUP_RESULT", operation: target.operation, sourceSha, changeTicket: authorization.changeTicket, authorizationSha256: authorization.authorizationSha256, ruleId: target.ruleId, revocationCount: 1, completedAt: new Date().toISOString() };
     writeCleanupResult({ releaseRun, authorization, result });
     return Object.freeze({ completed: true, ruleId: target.ruleId, revocationCount: 1 });
@@ -293,7 +296,7 @@ export async function runStageATemporaryEgressCleanupCli(argv = process.argv.sli
   const branchStatus = execFileSync("git", ["status", "--porcelain=v1", "--untracked-files=all"], { cwd: checkout, encoding: "utf8" });
   const protectedMainSha = execFileSync("gh", ["api", `repos/${PRODUCTION_ENVIRONMENT_APPROVAL.repository}/branches/main`, "--jq", ".commit.sha"], { encoding: "utf8" }).trim();
   if (head !== sourceSha || protectedMainSha !== sourceSha || branchStatus) fail("Stage-A temporary egress cleanup requires the exact clean current protected-main checkout.");
-  const authorization = resolveAuthorizationArtifact({ workflowRunId: runId, workflowRunAttempt: attempt, sourceSha });
+  const authorization = resolveStageATemporaryEgressCleanupAuthorizationArtifact({ workflowRunId: runId, workflowRunAttempt: attempt, sourceSha });
   const rootRun = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: rootProfile, region: STAGE_A_TEMPORARY_EGRESS_CLEANUP.region });
   const releaseRun = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer", region: STAGE_A_TEMPORARY_EGRESS_CLEANUP.region });
   const terraformStateLock = createStageATerraformBackendLock({ run: releaseRun, lockFilePath: path.join(os.tmpdir(), `stage-a-exact-egress-cleanup-${authorization.authorizationSha256}.tflock`) });
