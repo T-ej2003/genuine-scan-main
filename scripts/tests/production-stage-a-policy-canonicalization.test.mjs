@@ -9,6 +9,7 @@ import {
   buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservationPredecessor,
   buildStageAProductionArtifactsBucketPolicyWithRecoveryListBucketBootstrap,
   buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection,
+  stageAProductionArtifactsLegacyReservationRepairTransition,
   buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation,
   assertStageAProductionArtifactsExecutableTransition,
   canonicalizeStageAProductionArtifactsPolicy,
@@ -101,6 +102,31 @@ test("installed six-statement reservation policy upgrades only to the canonical 
   assert.equal(oldReservation.Statement.some(({ Sid }) => Sid === "DenyNonConditionalInitialActivationPolicyReconciliationReservationWrites"), true);
   assert.equal(reservation.Statement.some(({ Sid }) => Sid === "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationReplace"), true);
   assert.equal(reservation.Statement.some(({ Sid }) => Sid === "DenyUnconditionalInitialActivationPolicyReconciliationReservationWrites"), true);
+});
+
+test("exact live legacy reservation predecessor upgrades only to current ProviderReadOnly-protected canonical policy", () => {
+  const { predecessor, desired } = stageAProductionArtifactsLegacyReservationRepairTransition();
+  const transition = resolveStageAProductionArtifactsBucketPolicyTransition({ predecessorPolicySha256: stageAProductionArtifactsPolicySha256(predecessor), desiredPolicySha256: stageAProductionArtifactsPolicySha256(desired) });
+  assert.deepEqual(transition, { predecessor, desired });
+  const before = new Set(predecessor.Statement.map(({ Sid }) => Sid)); const after = new Set(desired.Statement.map(({ Sid }) => Sid));
+  assert.deepEqual([...after].filter((sid) => !before.has(sid)), [
+    "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationReplace",
+    "DenyUnconditionalInitialActivationPolicyReconciliationReservationWrites",
+    "DenyNonTargetInitialActivationPolicyReconciliationReservationReplacements",
+  ]);
+  assert.deepEqual([...before].filter((sid) => !after.has(sid)), ["DenyNonConditionalInitialActivationPolicyReconciliationReservationWrites"]);
+  for (const mutated of [
+    { ...predecessor, Statement: predecessor.Statement.filter(({ Sid }) => Sid !== "AllowReleaseDeployerReadActivationLifecycle") },
+    { ...predecessor, Statement: predecessor.Statement.map((statement) => statement.Sid === "AllowRootOperatorReadInitialActivationPolicyReconciliationReservations" ? { ...statement, Resource: "*" } : statement) },
+    { ...predecessor, Statement: [...predecessor.Statement, { Sid: "Unexpected", Effect: "Allow", Principal: "*", Action: "s3:GetObject", Resource: "*" }] },
+    { ...predecessor, Statement: predecessor.Statement.map((statement) => statement.Sid === "AllowReleaseDeployerReadActivationLifecycle" ? { ...statement, Principal: { AWS: "*" } } : statement) },
+    { ...predecessor, Statement: predecessor.Statement.map((statement) => statement.Sid === "AllowReleaseDeployerReadActivationLifecycle" ? { ...statement, Action: "s3:*" } : statement) },
+    { ...predecessor, Statement: predecessor.Statement.map((statement) => statement.Sid === "AllowReleaseDeployerReadActivationLifecycle" ? { ...statement, Resource: "arn:aws:s3:::*/*" } : statement) },
+  ]) assert.throws(() => resolveStageAProductionArtifactsBucketPolicyTransition({ predecessorPolicySha256: stageAProductionArtifactsPolicySha256(mutated), desiredPolicySha256: stageAProductionArtifactsPolicySha256(desired) }), /not exact or reviewed/);
+  for (const mutated of [
+    { ...desired, Statement: desired.Statement.filter(({ Sid }) => Sid !== "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationReplace") },
+    { ...desired, Statement: [...desired.Statement, { Sid: "Unexpected", Effect: "Allow", Principal: "*", Action: "s3:PutObject", Resource: "*" }] },
+  ]) assert.throws(() => resolveStageAProductionArtifactsBucketPolicyTransition({ predecessorPolicySha256: stageAProductionArtifactsPolicySha256(predecessor), desiredPolicySha256: stageAProductionArtifactsPolicySha256(mutated) }), /not exact or reviewed/);
 });
 
 test("Terraform's current Stage-A desired policy retains reservations, so State C stays classification-only", () => {

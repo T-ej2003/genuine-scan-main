@@ -29,7 +29,7 @@ import {
   stageAProductionArtifactsGovernedExecutableManifest,
   stageAProductionArtifactsGovernedExecutableManifestSha256,
 } from "../aws/production-stage-a-production-artifacts-recovery-governance.mjs";
-import { buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifactsBucketPolicyPredecessor, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservationPredecessor, buildStageAProductionArtifactsBucketPolicyWithRecoveryListBucketBootstrap, buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection, buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation, createStageAProductionArtifactsReconciliationPrepareEvidence, currentStageAProductionArtifactsBucketPolicyTransition, stageAProductionArtifactsPolicySha256 } from "../aws/production-stage-a-control-plane.mjs";
+import { buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifactsBucketPolicyPredecessor, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservationPredecessor, buildStageAProductionArtifactsBucketPolicyWithRecoveryListBucketBootstrap, buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection, buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation, stageAProductionArtifactsLegacyReservationRepairTransition, createStageAProductionArtifactsReconciliationPrepareEvidence, currentStageAProductionArtifactsBucketPolicyTransition, stageAProductionArtifactsPolicySha256 } from "../aws/production-stage-a-control-plane.mjs";
 import { STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_OPERATION } from "../aws/production-stage-a-production-artifacts-journal.mjs";
 import { canonicalJson } from "../aws/production-green-stage-b-contract.mjs";
 import { authorizeStageAProductionArtifactsReconciliation } from "../aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs";
@@ -85,6 +85,7 @@ test("production recovery authorizer accepts each reviewed Terraform-compatible 
     ["A_PREDECESSOR_TO_A", { predecessorPolicySha256: stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservationPredecessor()), desiredPolicySha256: stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation()) }],
     ["A_TO_A_PRIME", currentStageAProductionArtifactsBucketPolicyTransition()],
     ["A_PRIME_TO_B", { predecessorPolicySha256: stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicyWithRecoveryListBucketBootstrap()), desiredPolicySha256: stageAProductionArtifactsPolicySha256(buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection()) }],
+    ["B_LEGACY_RESERVATION_TO_B", stageAProductionArtifactsLegacyReservationRepairTransition()],
   ]);
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-a-current-authorizer-"));
   const source = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
@@ -100,7 +101,7 @@ test("production recovery authorizer accepts each reviewed Terraform-compatible 
     }
     assert.throws(() => authorizeStageAProductionArtifactsRecovery(["--source-sha", source, "--state-lineage", preState.lineage, "--state-serial", String(preState.serial), "--state-sha256", preState.stateSha256, "--transition", "B_TO_C", "--verification-ref", "retire", "--environment-approval", approvalPath, "--output", path.join(directory, "B_TO_C.json")]), /not executable/);
     const workflow = fs.readFileSync(".github/workflows/authorize-production-stage-a-production-artifacts-recovery.yml", "utf8");
-    assert.match(workflow, /options: \[A_PREDECESSOR_TO_A, A_TO_A_PRIME, A_PRIME_TO_B\]/);
+    assert.match(workflow, /options: \[A_PREDECESSOR_TO_A, A_TO_A_PRIME, A_PRIME_TO_B, B_LEGACY_RESERVATION_TO_B\]/);
     assert.doesNotMatch(workflow, /B_TO_C/);
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
