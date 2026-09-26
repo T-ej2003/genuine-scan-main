@@ -125,15 +125,15 @@ The canonical post-recovery state path is
 Terraform adapter. It is a separate refresh-only state boundary, not a normal
 bucket-policy apply and not a root Terraform path. Its completion evidence must
 be independently authenticated and bind the exact protected source, bucket,
-six-statement predecessor, PR435 desired policy, recovery authorization,
+authorized transition predecessor and desired policy, recovery authorization,
 Stage-A state lineage, and pre-reconciliation serial. The live policy readback
 must hash to the exact desired policy both as recovery completion evidence and
 immediately before the state transition is reserved/consumed.
 
 The adapter initializes the canonical backend once before any state read. The
 operation captures one exact `terraform plan -refresh-only`, validates that
-the only resource drift is the exact production-artifacts predecessor-to-desired
-policy transition (plus the existing forward RDS computed timestamp refresh),
+the only resource drift is the exact production-artifacts state-predecessor-to-
+desired policy transition (plus the existing forward RDS computed timestamp refresh),
 revalidates the saved plan and state CAS, acquires a reversible exclusive
 reservation, then revalidates state and the canonical live-policy hash
 immediately adjacent to applying it. A failed final CAS releases the
@@ -145,8 +145,12 @@ must contain no bucket-policy drift and the bucket-policy action must be
 `NO_OP`. Missing, stale, replayed, or mismatched completion/source/lineage/
 serial evidence fails closed. A separate reconciliation authorization must also
 bind the exact saved refresh-only plan SHA and be independently authenticated
-before the one state apply is consumed. Arbitrary resource or policy drift is
-never accepted.
+before the one state apply is consumed. The completion authenticates the live
+predecessor that recovery replaced; Terraform's `change.before` is separately
+restricted to the exact current-main source-defined pre-recovery state policy
+or that same live predecessor. Accepting this known state pre-image does not
+authorize it as a live-policy predecessor. Arbitrary resource or policy drift
+is never accepted.
 
 All Stage-A refresh validators use the locked Terraform `1.15.8` and AWS
 provider `6.56.0` envelope contract. The green RDS computed-time refresh uses
