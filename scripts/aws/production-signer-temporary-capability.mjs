@@ -137,7 +137,7 @@ export function assertSignerCapabilityEvidence(value, { state, sourceSha, transi
     || value.stateKey !== SIGNER_TEMPORARY_CAPABILITY.stateKey || value.lockKey !== SIGNER_TEMPORARY_CAPABILITY.lockKey || value.policyArn !== SIGNER_TEMPORARY_CAPABILITY.sourcePolicyArn) fail("evidence is stale, replayed, or outside the exact signer boundary");
   const { evidenceSha256, ...body } = value;
   if (evidenceSha256 !== sha256(canonical(body))) fail("evidence integrity hash is invalid");
-  if (!/^[a-f0-9]{40}$/.test(value.sourceSha) || !/^[A-Za-z0-9._-]{8,128}$/.test(value.transitionId) || !["INSTALLED", "PLAN_GENERATED", "PLAN_REVIEWED", "APPLY_COMPLETED", "CONVERGED", "REVOKED", "ABSENCE_VERIFIED"].includes(value.state)) fail("evidence lifecycle identity or state is invalid");
+  if (!/^[a-f0-9]{40}$/.test(value.sourceSha) || !/^[A-Za-z0-9._-]{8,128}$/.test(value.transitionId) || !["INSTALLING", "INSTALLED", "PLAN_GENERATED", "PLAN_REVIEWED", "APPLY_COMPLETED", "CONVERGED", "REVOKED", "ABSENCE_VERIFIED"].includes(value.state)) fail("evidence lifecycle identity or state is invalid");
   if (["PLAN_GENERATED", "PLAN_REVIEWED", "APPLY_COMPLETED", "CONVERGED"].includes(value.state) && !/^[a-f0-9]{64}$/.test(value.planSha256 || "")) fail("plan-bound evidence is incomplete");
   if (["PLAN_REVIEWED", "APPLY_COMPLETED", "CONVERGED"].includes(value.state) && !/^[A-Za-z0-9._:/-]{6,160}$/.test(value.approvalReference || "")) fail("separate plan approval reference is missing");
   if (value.state === "CONVERGED" && !/^[a-f0-9]{64}$/.test(value.signerReadbackSha256 || "")) fail("signer live readback evidence is missing");

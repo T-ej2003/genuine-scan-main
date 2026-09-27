@@ -49,6 +49,8 @@ export function assertSignerCliArguments(argv, phase) {
     if (!switches.includes(name) && (!argv[i + 1] || argv[i + 1].startsWith("--"))) fail(`${name} requires one value`);
     if (!switches.includes(name)) i += 1;
   }
+  const required = new Set([...common, ...extra]);
+  for (const name of required) if (!seen.has(name)) fail(`${name} is required for ${phase}`);
 }
 function assertSource(sourceSha, { cleanupReadback = false } = {}) {
   if (!/^[a-f0-9]{40}$/.test(sourceSha || "") || execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim() !== sourceSha) fail("checkout HEAD differs from authorized source SHA");
@@ -200,6 +202,8 @@ export function runSignerTemporaryCapability(argv = process.argv.slice(2), { wri
     const temporary = buildSignerTemporaryPolicy(steadyPolicy, identity);
     assertSignerTemporaryPolicy(temporary, { steadyPolicy, ...identity });
     signerSession(bootstrap, transitionId); // Fail before changing the policy if the fresh MFA role chain is unavailable.
+    const pending = buildSignerCapabilityEvidence({ state: "INSTALLING", ...identity, steadyVersionId: current.active.VersionId, observedAt: now() });
+    protect(stateFile, pending); // Persist the recovery identity before the single policy-version mutation.
     const version = writePolicyVersion(bootstrap, temporary, current.active.VersionId);
     const installed = policyState(bootstrap); assertCanonicalPolicyHistory(installed, identity, true);
     if (installed.active.VersionId !== version || canonical(installed.active.document) !== canonical(temporary)) fail("temporary signer policy is not the exact active default after installation");
@@ -207,13 +211,15 @@ export function runSignerTemporaryCapability(argv = process.argv.slice(2), { wri
     const result = buildSignerCapabilityEvidence({ state: "INSTALLED", ...identity, steadyVersionId: current.active.VersionId, temporaryVersionId: version, observedAt: now() });
     protect(stateFile, result); write(`${JSON.stringify({ state: result.state, evidenceSha256: result.evidenceSha256, temporaryVersionId: version })}\n`); return result;
   }
-  if (phase === "recover-install" && !evidence) {
+  if (phase === "recover-install" && (!evidence || evidence.state === "INSTALLING")) {
     assertCanonicalPolicyHistory(current, identity, true);
     const active = current.active;
     if (!exactSignerTemporaryVersion(active.document, identity)) fail("there is no exact active signer capability to recover");
     const base = current.versions.filter(({ document }) => canonical(document) === canonical(steadyPolicy));
-    if (base.length !== 1) fail("canonical pre-install policy version cannot be identified uniquely");
-    const result = buildSignerCapabilityEvidence({ state: "INSTALLED", ...identity, steadyVersionId: base[0].VersionId, temporaryVersionId: active.VersionId, observedAt: now() });
+    const steadyVersionId = evidence?.steadyVersionId || (base.length === 1 ? base[0].VersionId : null);
+    if (!base.some(({ VersionId }) => VersionId === steadyVersionId)) fail("canonical pre-install policy version cannot be identified uniquely");
+    signerSession(bootstrap, transitionId);
+    const result = buildSignerCapabilityEvidence({ state: "INSTALLED", ...identity, steadyVersionId, temporaryVersionId: active.VersionId, observedAt: now() });
     protect(stateFile, result); write(`${JSON.stringify({ state: result.state, evidenceSha256: result.evidenceSha256, recovered: true })}\n`); return result;
   }
   if (!evidence) fail("private authorization evidence is required");

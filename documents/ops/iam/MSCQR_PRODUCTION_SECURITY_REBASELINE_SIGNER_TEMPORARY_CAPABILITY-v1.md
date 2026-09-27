@@ -70,6 +70,22 @@ npm run production:signer-temporary-capability -- \
   --state-file /private/tmp/signer-convergence/capability.json
 ```
 
+The installer records the source, transition ID, and prior default version in
+the private evidence file before issuing the one policy-version mutation. If
+the process stops before it reports `INSTALLED`, retry only the readback
+recovery phase with the same values; it never repeats the mutation:
+
+```sh
+npm run production:signer-temporary-capability -- \
+  --phase recover-install --source-sha "$SOURCE_SHA" --transition-id "$TRANSITION_ID" \
+  --bootstrap-profile "$BOOTSTRAP_PROFILE" \
+  --state-file /private/tmp/signer-convergence/capability.json
+```
+
+Recovery succeeds only when AWS readback proves that exact transition's
+temporary policy is active and the recorded steady version is still present.
+If it cannot prove that state, stop and preserve the evidence for review.
+
 Initialize only the documented backend through the restricted signer session, then generate a saved plan:
 
 ```sh

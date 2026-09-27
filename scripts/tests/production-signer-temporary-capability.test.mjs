@@ -37,6 +37,9 @@ test("only the MFA bootstrap operator can invoke a closed signer lifecycle CLI",
   ]) assert.throws(() => assertSignerBootstrapIdentity(profile, caller));
   const base = ["--phase", "install", "--source-sha", sourceSha, "--transition-id", transitionId, "--bootstrap-profile", "mscqr-production-bootstrap-mfa", "--state-file", "/tmp/capability.json"];
   assert.doesNotThrow(() => assertSignerCliArguments(base, "install"));
+  assert.throws(() => assertSignerCliArguments(base.slice(0, -2), "install"), /--state-file is required/);
+  assert.throws(() => assertSignerCliArguments(base, "plan"), /--plan-output is required/);
+  assert.doesNotThrow(() => assertSignerCliArguments(["--phase", "verify-absent", ...base.slice(2)], "verify-absent"));
   for (const option of ["--admin-profile", "--policy-arn", "--policy-name", "--policy-document", "--policy-file", "--state-key", "--role-arn", "--kms-key"]) assert.throws(() => assertSignerCliArguments([...base, option, "attacker-value"], "install"));
   assert.throws(() => assertSignerCliArguments([...base, "--bootstrap-profile", "attacker-profile"], "install"));
 });
@@ -78,6 +81,7 @@ test("temporary delta is source/nonce bound and excludes unrelated state, IAM, a
   assert.equal(grants(temporary, "kms:Decrypt", "arn:aws:kms:eu-west-2:368992683803:key/unrelated"), false);
   assert.throws(() => assertSignerRevocation({ activePolicy: temporary, temporaryPolicy: temporary, activeVersionId: "v2", temporaryVersionId: "v2", steadyPolicy: steady, identity: { sourceSha, transitionId } }));
   assert.equal(assertSignerRevocation({ activePolicy: steady, temporaryPolicy: temporary, activeVersionId: "v3", temporaryVersionId: "v2", steadyPolicy: steady, identity: { sourceSha, transitionId } }), true);
+  assert.throws(() => assertSignerRevocation({ activePolicy: steady, temporaryPolicy: temporary, activeVersionId: "v3", temporaryVersionId: "v2", steadyPolicy: steady, identity: { sourceSha, transitionId: "different-transition" } }));
   assert.equal(grants(steady, "s3:GetObject", stateArn), false, "revocation restores the prior operator boundary");
   for (const [action, resources] of expectedOps) {
     const grants = statements.filter((item) => (Array.isArray(item.Action) ? item.Action : [item.Action]).includes(action));
@@ -106,6 +110,8 @@ test("apply remains unreachable unless the exact temporary policy is still activ
   assert.match(source, /workspace", "show"\].*, env: sessionEnv/);
   assert.match(source, /terraformSessionEnvironment\(session\)/);
   assert.doesNotMatch(source, /--release-profile/);
+  assert.ok(source.indexOf("protect(stateFile, pending)") < source.indexOf("writePolicyVersion(bootstrap, temporary"), "transition identity is durable before the policy mutation");
+  assert.match(source, /phase === "recover-install" && \(!evidence \|\| evidence\.state === "INSTALLING"\)/);
 });
 
 test("policy transitions reject other consumers and make CreatePolicyVersion a single AWS CLI attempt", () => {
@@ -155,7 +161,10 @@ test("evidence binds one source, account, region, purpose, root, state key, and 
   const evidence = buildSignerCapabilityEvidence({ state: "INSTALLED", sourceSha, transitionId, steadyVersionId: "v1", temporaryVersionId: "v2", observedAt: "2026-09-27T00:00:00.000Z" });
   assertSignerCapabilityEvidence(evidence, { state: "INSTALLED", sourceSha, transitionId });
   assert.throws(() => assertSignerCapabilityEvidence(evidence, { state: "INSTALLED", sourceSha: "f".repeat(40), transitionId }));
+  assert.throws(() => assertSignerCapabilityEvidence(evidence, { state: "INSTALLED", sourceSha, transitionId: "other-signer-transition" }));
   assert.throws(() => assertSignerCapabilityEvidence({ ...evidence, stateKey: "other/terraform.tfstate" }, { state: "INSTALLED", sourceSha, transitionId }));
+  const pending = buildSignerCapabilityEvidence({ state: "INSTALLING", sourceSha, transitionId, steadyVersionId: "v1", observedAt: "2026-09-27T00:00:00.000Z" });
+  assertSignerCapabilityEvidence(pending, { state: "INSTALLING", sourceSha, transitionId });
   assert.notDeepEqual(signerTemporaryStatements({ sourceSha, transitionId }), signerTemporaryStatements({ sourceSha, transitionId: "signer-once-replayed" }));
 });
 
