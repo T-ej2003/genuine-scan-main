@@ -80,6 +80,17 @@ export function assertSignerTemporaryPolicy(policy, { steadyPolicy, sourceSha, t
   return true;
 }
 
+export function resolveSignerTemporaryVersionId({ versions, activeVersionId, evidence, steadyPolicy, identity } = {}) {
+  const recoveringInstall = evidence?.temporaryVersionId == null;
+  if (recoveringInstall && evidence?.state !== "INSTALLING") return null;
+  const versionId = recoveringInstall ? activeVersionId : evidence.temporaryVersionId;
+  const version = versions?.find(({ VersionId }) => VersionId === versionId);
+  if (!version) return null;
+  try { assertSignerTemporaryPolicy(version.document, { steadyPolicy, ...identity }); }
+  catch (error) { if (recoveringInstall) return null; throw error; }
+  return version.VersionId;
+}
+
 const expectedAddresses = new Set(["aws_iam_role.signer", "aws_kms_key.image_authorization", "aws_kms_alias.image_authorization", "aws_iam_role_policy.sign_only"]);
 export function assertSignerCreationPlan(plan, { trustPolicy } = {}) {
   if (!Array.isArray(plan?.resource_changes)) fail("machine-readable Terraform plan is required");

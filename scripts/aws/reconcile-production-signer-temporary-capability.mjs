@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { SIGNER_TEMPORARY_CAPABILITY as C, assertSignerCapabilityEvidence, assertSignerCreationPlan, assertSignerInitializedBackendMetadata, assertSignerPolicySoleConsumer, assertSignerRevocation, assertSignerTemporaryPolicy, buildSignerCapabilityEvidence, buildSignerTemporaryPolicy } from "./production-signer-temporary-capability.mjs";
+import { SIGNER_TEMPORARY_CAPABILITY as C, assertSignerCapabilityEvidence, assertSignerCreationPlan, assertSignerInitializedBackendMetadata, assertSignerPolicySoleConsumer, assertSignerRevocation, assertSignerTemporaryPolicy, buildSignerCapabilityEvidence, buildSignerTemporaryPolicy, resolveSignerTemporaryVersionId } from "./production-signer-temporary-capability.mjs";
 import { verifyProductionSecurityRebaselineSigner } from "./verify-production-security-rebaseline-signer.mjs";
 import { buildRecoveryAwsEnvironment } from "./recover-stage-b-backend-task-definition.mjs";
 import { createAssumedRoleSessionEnvironment, productionAwsExecutable } from "./production-credential-source-contract.mjs";
@@ -229,9 +229,10 @@ export function runSignerTemporaryCapability(argv = process.argv.slice(2), { wri
   }
   if (!evidence) fail("private authorization evidence is required");
   assertCanonicalPolicyHistory(current, identity, true);
-  const temp = current.versions.find(({ VersionId }) => VersionId === evidence.temporaryVersionId);
+  const temporaryVersionId = resolveSignerTemporaryVersionId({ versions: current.versions, activeVersionId: current.active.VersionId, evidence, steadyPolicy, identity });
+  const temp = current.versions.find(({ VersionId }) => VersionId === temporaryVersionId);
   if (!temp || !exactSignerTemporaryVersion(temp.document, identity)) fail("exact temporary policy version is not present");
-  if (["plan", "verify-plan", "apply", "verify-convergence"].includes(phase) && current.active.VersionId !== evidence.temporaryVersionId) fail("temporary capability is not the active policy version");
+  if (["plan", "verify-plan", "apply", "verify-convergence"].includes(phase) && current.active.VersionId !== temporaryVersionId) fail("temporary capability is not the active policy version");
   const session = ["init", "plan", "apply", "verify-convergence"].includes(phase) ? signerSession(bootstrap, transitionId) : null;
   if (phase === "init") {
     const terraformRoot = path.join(root, C.root);

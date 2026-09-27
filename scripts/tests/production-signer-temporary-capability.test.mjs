@@ -5,7 +5,7 @@ import { assertSignerBootstrapIdentity, assertSignerCliArguments } from "../aws/
 import {
   SIGNER_TEMPORARY_CAPABILITY as C, assertSignerCapabilityEvidence, assertSignerCreationPlan, assertSignerRevocation,
   assertSignerInitializedBackendMetadata, assertSignerPolicySoleConsumer, assertSignerTemporaryPolicy, buildSignerCapabilityEvidence, buildSignerTemporaryPolicy,
-  signerTemporaryStatements,
+  resolveSignerTemporaryVersionId, signerTemporaryStatements,
 } from "../aws/production-signer-temporary-capability.mjs";
 
 const sourceSha = "0cbce2080bf38f7f071047fef3b982805336ffb5", transitionId = "signer-once-20260927";
@@ -111,10 +111,23 @@ test("temporary delta is source/nonce bound and excludes unrelated state, IAM, a
   assert.ok(Buffer.byteLength(JSON.stringify(temporary)) < 6144, "temporary policy fits the AWS managed-policy limit");
 });
 
+test("INSTALLING recovery identifies only the active canonical temporary version for revocation", () => {
+  const identity = { sourceSha, transitionId };
+  const temporary = buildSignerTemporaryPolicy(steady, identity);
+  const versions = [{ VersionId: "v1", document: steady }, { VersionId: "v2", document: temporary }];
+  const pending = buildSignerCapabilityEvidence({ state: "INSTALLING", ...identity, steadyVersionId: "v1", observedAt: "2026-09-27T00:00:00.000Z" });
+  assert.equal(resolveSignerTemporaryVersionId({ versions, activeVersionId: "v2", evidence: pending, steadyPolicy: steady, identity }), "v2");
+  assert.equal(resolveSignerTemporaryVersionId({ versions, activeVersionId: "v1", evidence: pending, steadyPolicy: steady, identity }), null);
+  assert.equal(resolveSignerTemporaryVersionId({ versions, activeVersionId: "v2", evidence: { ...pending, state: "INSTALLED" }, steadyPolicy: steady, identity }), null);
+  assert.throws(() => resolveSignerTemporaryVersionId({ versions: [{ VersionId: "v2", document: { ...temporary, Statement: [] } }], activeVersionId: "v2", evidence: { ...pending, temporaryVersionId: "v2" }, steadyPolicy: steady, identity }));
+  const source = fs.readFileSync("scripts/aws/reconcile-production-signer-temporary-capability.mjs", "utf8");
+  assert.match(source, /resolveSignerTemporaryVersionId\(\{ versions: current\.versions, activeVersionId: current\.active\.VersionId, evidence, steadyPolicy, identity \}\)/);
+});
+
 test("apply remains unreachable unless the exact temporary policy is still active", () => {
   const source = fs.readFileSync("scripts/aws/reconcile-production-signer-temporary-capability.mjs", "utf8");
   assert.match(source, /arn:aws:iam::\$\{C\.accountId\}:user\/mscqr-production-bootstrap-operator/);
-  assert.match(source, /\["plan", "verify-plan", "apply", "verify-convergence"\]\.includes\(phase\).*current\.active\.VersionId !== evidence\.temporaryVersionId/);
+  assert.match(source, /\["plan", "verify-plan", "apply", "verify-convergence"\]\.includes\(phase\).*current\.active\.VersionId !== temporaryVersionId/);
   assert.match(source, /"init", "-input=false", "-lockfile=readonly"/);
   assert.match(source, /"--policy-arns", `arn=\$\{C\.sourcePolicyArn\}`/);
   assert.match(source, /createAssumedRoleSessionEnvironment\(\{ credentials \}\)/);
