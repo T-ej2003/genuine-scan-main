@@ -60,6 +60,7 @@ test("temporary delta is source/nonce bound and excludes unrelated state, IAM, a
 
 test("apply remains unreachable unless the exact temporary policy is still active", () => {
   const source = fs.readFileSync("scripts/aws/reconcile-production-signer-temporary-capability.mjs", "utf8");
+  assert.match(source, /arn:aws:iam::\$\{C\.accountId\}:user\/mscqr-production-bootstrap-operator/);
   assert.match(source, /\["plan", "verify-plan", "apply", "verify-convergence"\]\.includes\(phase\).*current\.active\.VersionId !== evidence\.temporaryVersionId/);
   assert.match(source, /"--policy-arns", `arn=\$\{C\.sourcePolicyArn\}`/);
   assert.match(source, /createAssumedRoleSessionEnvironment\(\{ credentials \}\)/);

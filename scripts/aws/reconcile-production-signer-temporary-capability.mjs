@@ -33,7 +33,7 @@ const profileIdentity = (profile, expectedRole, bootstrapUser = false) => {
   const expected = expectedRole
     ? new RegExp(`^arn:aws:sts::${C.accountId}:assumed-role/${expectedRole}/[^/]+$`)
     : bootstrapUser
-      ? new RegExp(`^arn:aws:sts::${C.accountId}:federated-user/mscqr-production-bootstrap-operator$`)
+      ? new RegExp(`^arn:aws:iam::${C.accountId}:user/mscqr-production-bootstrap-operator$`)
       : new RegExp(`^arn:aws:sts::${C.accountId}:(?:federated-user/mscqr-production-bootstrap-operator|assumed-role/[A-Za-z0-9+=,.@_-]+/[^/]+)$`);
   if (caller.Account !== C.accountId || !expected.test(caller.Arn || "") || caller.Arn.endsWith(":root")) fail(`${profile} is not an approved non-root production session`);
   return caller.Arn;
