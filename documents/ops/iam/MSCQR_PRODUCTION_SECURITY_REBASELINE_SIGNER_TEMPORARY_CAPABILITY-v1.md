@@ -17,6 +17,11 @@ deployer are unchanged. Do not run Stage-A operations while this window is
 open. After convergence, the canonical source policy is restored as the
 default. The consumed temporary policy version remains non-default as a
 replay marker; only the bootstrap MFA administrator can change the default.
+Before each policy-version change, the controller proves the managed policy
+is attached only to the release-deployer and is not used as a permissions
+boundary. `CreatePolicyVersion` is issued once with AWS CLI retries disabled;
+an ambiguous response is resolved only by AWS readback, never by retrying the
+mutation.
 
 ## Preconditions
 
@@ -33,7 +38,8 @@ replay marker; only the bootstrap MFA administrator can change the default.
   directories with mode `0700`; files must be mode `0600`.
 - The script fails closed if the role/alias already exists, any key already
   carries the exact signer tags, the managed policy differs from protected
-  source, or fewer than two policy-version slots are free.
+  source, it has another consumer or permissions-boundary use, or fewer than
+  two policy-version slots are free.
 
 ## Procedure
 

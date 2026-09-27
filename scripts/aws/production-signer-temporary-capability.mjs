@@ -57,6 +57,12 @@ export function assertSignerSteadyPolicy(policy) {
   return true;
 }
 
+export function assertSignerPolicySoleConsumer({ policy, entities } = {}) {
+  const roles = entities?.PolicyRoles, users = entities?.PolicyUsers, groups = entities?.PolicyGroups;
+  if (policy?.PermissionsBoundaryUsageCount !== 0 || !Array.isArray(roles) || roles.length !== 1 || roles[0]?.RoleName !== "mscqr-production-release-deployer" || !Array.isArray(users) || users.length !== 0 || !Array.isArray(groups) || groups.length !== 0) fail("release policy must be attached only to the governed release-deployer and unused as a permissions boundary");
+  return true;
+}
+
 export function assertSignerRevocation({ activePolicy, temporaryPolicy, activeVersionId, temporaryVersionId, steadyPolicy, identity } = {}) {
   if (!same(activePolicy, steadyPolicy) || activeVersionId === temporaryVersionId) fail("steady-state policy is not active or temporary policy remains the default");
   assertSignerTemporaryPolicy(temporaryPolicy, { steadyPolicy, ...identity });

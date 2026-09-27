@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { SIGNER_TEMPORARY_CAPABILITY as C, assertSignerCapabilityEvidence, assertSignerCreationPlan, assertSignerInitializedBackendMetadata, assertSignerRevocation, assertSignerTemporaryPolicy, buildSignerCapabilityEvidence, buildSignerTemporaryPolicy } from "./production-signer-temporary-capability.mjs";
+import { SIGNER_TEMPORARY_CAPABILITY as C, assertSignerCapabilityEvidence, assertSignerCreationPlan, assertSignerInitializedBackendMetadata, assertSignerPolicySoleConsumer, assertSignerRevocation, assertSignerTemporaryPolicy, buildSignerCapabilityEvidence, buildSignerTemporaryPolicy } from "./production-signer-temporary-capability.mjs";
 import { verifyProductionSecurityRebaselineSigner } from "./verify-production-security-rebaseline-signer.mjs";
 import { buildRecoveryAwsEnvironment } from "./recover-stage-b-backend-task-definition.mjs";
 import { createAssumedRoleSessionEnvironment, productionAwsExecutable } from "./production-credential-source-contract.mjs";
@@ -18,7 +18,7 @@ const opt = (argv, name, required = true) => { const i = argv.indexOf(name), val
 const readJson = (file) => JSON.parse(fs.readFileSync(file, "utf8"));
 const steadyPolicy = readJson(path.join(root, "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json"));
 const trustPolicy = readJson(path.join(root, `${C.root}/trust-policy.json`));
-const aws = (profile, args, sessionEnv) => JSON.parse(execFileSync(productionAwsExecutable(), [...args, "--region", C.region, ...(profile ? ["--profile", profile] : []), "--output", "json", "--no-cli-pager"], { cwd: root, env: sessionEnv || buildRecoveryAwsEnvironment(profile), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
+const aws = (profile, args, sessionEnv, singleAttempt = false) => JSON.parse(execFileSync(productionAwsExecutable(), [...args, "--region", C.region, ...(profile ? ["--profile", profile] : []), "--output", "json", "--no-cli-pager"], { cwd: root, env: { ...(sessionEnv || buildRecoveryAwsEnvironment(profile)), ...(singleAttempt ? { AWS_RETRY_MODE: "standard", AWS_MAX_ATTEMPTS: "1" } : {}) }, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
 const protect = (file, value) => {
   const parent = path.dirname(file); fs.mkdirSync(parent, { recursive: true, mode: 0o700 }); fs.chmodSync(parent, 0o700);
   const stat = fs.lstatSync(parent); if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o077)) fail("evidence directory must be a private non-symlink directory");
@@ -85,12 +85,22 @@ function assertCapabilityPolicyAttached(profile) {
 }
 function writePolicyVersion(profile, document, expectedDefault) {
   const before = policyState(profile); if (before.active.VersionId !== expectedDefault) fail("managed policy changed before transition");
+  let marker, pages = 0; const seen = new Set(), entities = { PolicyRoles: [], PolicyUsers: [], PolicyGroups: [] };
+  do {
+    if (++pages > 100 || (marker && seen.has(marker))) fail("managed policy consumer pagination is invalid");
+    if (marker) seen.add(marker);
+    const page = aws(profile, ["iam", "list-entities-for-policy", "--no-paginate", "--policy-arn", C.sourcePolicyArn, ...(marker ? ["--marker", marker] : [])]);
+    for (const key of Object.keys(entities)) entities[key].push(...(page[key] || []));
+    if (typeof page.IsTruncated !== "boolean" || (page.IsTruncated && (typeof page.Marker !== "string" || !page.Marker))) fail("managed policy consumer readback is incomplete");
+    marker = page.IsTruncated ? page.Marker : undefined;
+  } while (marker);
+  assertSignerPolicySoleConsumer({ policy: before.policy, entities });
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-signer-policy-")), file = path.join(dir, "policy.json");
   try {
     fs.writeFileSync(file, JSON.stringify(document), { flag: "wx", mode: 0o600 });
     let version;
     try {
-      const result = aws(profile, ["iam", "create-policy-version", "--policy-arn", C.sourcePolicyArn, "--policy-document", `file://${file}`, "--set-as-default"]);
+      const result = aws(profile, ["iam", "create-policy-version", "--policy-arn", C.sourcePolicyArn, "--policy-document", `file://${file}`, "--set-as-default"], undefined, true);
       version = result.PolicyVersion?.VersionId;
     } catch {
       const recovered = policyState(profile);

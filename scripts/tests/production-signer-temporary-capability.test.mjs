@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import {
   SIGNER_TEMPORARY_CAPABILITY as C, assertSignerCapabilityEvidence, assertSignerCreationPlan, assertSignerRevocation,
-  assertSignerInitializedBackendMetadata, assertSignerTemporaryPolicy, buildSignerCapabilityEvidence, buildSignerTemporaryPolicy,
+  assertSignerInitializedBackendMetadata, assertSignerPolicySoleConsumer, assertSignerTemporaryPolicy, buildSignerCapabilityEvidence, buildSignerTemporaryPolicy,
   signerTemporaryStatements,
 } from "../aws/production-signer-temporary-capability.mjs";
 
@@ -72,6 +72,25 @@ test("apply remains unreachable unless the exact temporary policy is still activ
   assert.match(source, /workspace", "show"\].*, env: sessionEnv/);
   assert.match(source, /terraformSessionEnvironment\(session\)/);
   assert.doesNotMatch(source, /--release-profile/);
+});
+
+test("policy transitions reject other consumers and make CreatePolicyVersion a single AWS CLI attempt", () => {
+  const source = fs.readFileSync("scripts/aws/reconcile-production-signer-temporary-capability.mjs", "utf8");
+  const policy = { PermissionsBoundaryUsageCount: 0 };
+  const onlyDeployer = { PolicyRoles: [{ RoleName: "mscqr-production-release-deployer" }], PolicyUsers: [], PolicyGroups: [] };
+  assert.equal(assertSignerPolicySoleConsumer({ policy, entities: onlyDeployer }), true);
+  for (const entities of [
+    { ...onlyDeployer, PolicyRoles: [...onlyDeployer.PolicyRoles, { RoleName: "unrelated" }] },
+    { ...onlyDeployer, PolicyUsers: [{ UserName: "unrelated" }] },
+    { ...onlyDeployer, PolicyGroups: [{ GroupName: "unrelated" }] },
+  ]) assert.throws(() => assertSignerPolicySoleConsumer({ policy, entities }));
+  assert.throws(() => assertSignerPolicySoleConsumer({ policy: { PermissionsBoundaryUsageCount: 1 }, entities: onlyDeployer }));
+  assert.throws(() => assertSignerPolicySoleConsumer({ policy: {}, entities: onlyDeployer }));
+  assert.match(source, /list-entities-for-policy", "--no-paginate"/);
+  assert.match(source, /typeof page\.IsTruncated !== "boolean"[\s\S]*?typeof page\.Marker !== "string"/);
+  assert.match(source, /assertSignerPolicySoleConsumer\(\{ policy: before\.policy, entities \}\)/);
+  assert.match(source, /AWS_RETRY_MODE: "standard", AWS_MAX_ATTEMPTS: "1"/);
+  assert.match(source, /"create-policy-version"[\s\S]*?\], undefined, true\)/);
 });
 
 test("only the exact four create-only signer Terraform plan is accepted", () => {
