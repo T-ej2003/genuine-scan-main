@@ -17,6 +17,7 @@ const expectedOps = new Map([
   ["s3:ListBucket", [`arn:aws:s3:::${C.bucket}`]],
   ["iam:CreateRole", [C.roleArn]], ["iam:PutRolePolicy", [C.roleArn]], ["iam:ListAttachedRolePolicies", [C.roleArn]],
   ["kms:CreateKey", ["*"]], ["kms:PutKeyPolicy", ["arn:aws:kms:eu-west-2:368992683803:key/*"]],
+  ["kms:GetKeyRotationStatus", ["arn:aws:kms:eu-west-2:368992683803:key/*"]],
   ["kms:CreateAlias", [`arn:aws:kms:eu-west-2:368992683803:alias/${C.alias.slice(6)}`]],
 ]);
 const grants = (policy, action, resource) => policy.Statement.some((statement) => {
@@ -51,6 +52,10 @@ test("temporary delta is source/nonce bound and excludes unrelated state, IAM, a
     const actual = grants.flatMap(({ Resource }) => Array.isArray(Resource) ? Resource : [Resource]);
     for (const resource of resources) assert.ok(actual.includes(resource), `${action} missing ${resource}`);
   }
+  const rotationRead = statements.find(({ Action }) => (Array.isArray(Action) ? Action : [Action]).includes("kms:GetKeyRotationStatus"));
+  assert.equal(rotationRead.Condition.StringEquals["aws:RequestedRegion"], C.region);
+  assert.equal(rotationRead.Condition.StringEquals["kms:KeySpec"], "RSA_3072");
+  assert.equal(rotationRead.Condition.StringEquals["kms:KeyUsage"], "SIGN_VERIFY");
   assert.equal(statements.some(({ Resource }) => JSON.stringify(Resource).includes("stage-a/terraform.tfstate")), false);
   assert.equal(statements.some(({ Action }) => JSON.stringify(Action).match(/kms:(Decrypt|Encrypt|GenerateDataKey|CreateGrant)/)), false);
   assert.throws(() => assertSignerTemporaryPolicy({ ...temporary, Statement: [...temporary.Statement, { Effect: "Allow", Action: "iam:CreateRole", Resource: "*" }] }, { steadyPolicy: steady, sourceSha, transitionId }));
