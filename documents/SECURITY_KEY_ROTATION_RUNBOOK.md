@@ -453,7 +453,10 @@ the current protected-main SHA and change ticket, then checks the exact live
 task revision, secret identity, JSON key, and current version ID. The protected-
 main SHA may be newer than an existing rotation manifest's source SHA. A
 missing or mismatched resolution never falls back to treating the ARN as a key
-version.
+version. During rebaseline, the resolution remains bound to the current service
+revision; coexisting older live revisions may use the resolved identifier only
+when their QR selector has the same exact secret ARN, `value` key, and default-
+current semantics. Their other baseline fields remain independently compared.
 
 - Production should use the `CURRENT` / `PREVIOUS` variables, not only the legacy single-slot names.
 - `AUTH_LEGACY_TOKEN_RESPONSE_ENABLED` and `AUTH_SSE_QUERY_TOKEN_ENABLED` should remain `false` in production after the cookie-only auth rollout.

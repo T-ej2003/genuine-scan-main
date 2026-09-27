@@ -18,6 +18,7 @@ import {
 import { auditLiveProductionDualSlotReferences, readAuthenticatedRebaselineCheckout, readDualSlotTopology, readPreparedDualSlotTopology, runProductionDualSlotRebaselineCli, verifyLiveProductionDualSlotRebaseline } from "../aws/rebaseline-production-dual-slot.mjs";
 import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from "../aws/production-github-environment-approval.mjs";
 import { assertBindings, buildInitialMigrationSourceAdvance, buildProductionRotationConfig } from "../aws/production-cutover-runtime-bootstrap.mjs";
+import { assertQrVersionSelector, resolveQrVersionSelectorValue } from "../aws/production-qr-version-selector-resolution.mjs";
 import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "../aws/production-cutover-production-adapters.mjs";
 import { createProductionGithubCommandRunner } from "../aws/production-credential-source-contract.mjs";
 import { productionSupersessionEvidenceIdentity } from "../security/production-initial-migration-source-advance.mjs";
@@ -1055,6 +1056,37 @@ test("ECS audit requires one canonical legacy baseline across every live service
     assert.equal(result.legacyRuntimeAuthoritative, false, field);
     assert.equal(result.liveLegacyBaselineCount, 2, field);
   }
+});
+
+test("QR resolution for the current revision also audits older revisions only when their selector is identical", () => {
+  const currentDefinition = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:61";
+  const replacementDefinition = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:60";
+  const currentTask = "arn:aws:ecs:eu-west-2:368992683803:task/current/11111111111111111111111111111111";
+  const replacementTask = "arn:aws:ecs:eu-west-2:368992683803:task/replacement/22222222222222222222222222222222";
+  const qrArn = syntheticSecretArn("mscqr/prod/rotation/qr-current-version-AbCd12");
+  const otherQrArn = syntheticSecretArn("mscqr/prod/rotation/qr-current-version-EfGh34");
+  const definition = (arn, selectedQrArn = qrArn) => ({ taskDefinition: { taskDefinitionArn: arn, containerDefinitions: [{ name: "backend", secrets: [
+    { name: "JWT_SECRET", valueFrom: `${legacyBaseline.jwtCurrent}:value::` },
+    { name: "QR_SIGN_PRIVATE_KEY", valueFrom: `${legacyBaseline.qrPrivateCurrent}:value::` },
+    { name: "QR_SIGN_PUBLIC_KEY", valueFrom: `${legacyBaseline.qrPublicCurrent}:value::` },
+    { name: "QR_SIGN_ACTIVE_KEY_VERSION", valueFrom: `${selectedQrArn}:value::` },
+  ], environment: [] }] } });
+  const currentTaskDefinition = definition(currentDefinition);
+  const binding = assertQrVersionSelector({ taskDefinition: currentTaskDefinition, expectedSecretArn: qrArn });
+  const qrVersionResolution = resolveQrVersionSelectorValue({ binding, response: { ARN: qrArn, VersionId: "a".repeat(32), VersionStages: ["AWSCURRENT"], SecretString: JSON.stringify({ value: "legacy-v1" }) } });
+  const auditFor = (olderQrArn = qrArn) => auditLiveProductionDualSlotReferences({ resources, qrVersionResolution, run: (args) => {
+    if (args[1] === "describe-services") return JSON.stringify({ services: [{ serviceArn: "arn:aws:ecs:eu-west-2:368992683803:service/mscqr", taskDefinition: currentDefinition, desiredCount: 2, runningCount: 2, pendingCount: 0, deployments: [{ id: "primary", status: "PRIMARY", taskDefinition: currentDefinition }, { id: "active", status: "ACTIVE", taskDefinition: replacementDefinition }], deploymentController: { type: "ECS" } }] });
+    if (args[1] === "list-tasks") return JSON.stringify({ taskArns: [currentTask, replacementTask] });
+    if (args[1] === "describe-tasks") return JSON.stringify({ tasks: [{ taskArn: currentTask, taskDefinitionArn: currentDefinition, desiredStatus: "RUNNING", lastStatus: "RUNNING" }, { taskArn: replacementTask, taskDefinitionArn: replacementDefinition, desiredStatus: "STOPPED", lastStatus: "RUNNING" }] });
+    if (args[1] === "describe-task-definition") return JSON.stringify(args[args.indexOf("--task-definition") + 1] === currentDefinition ? currentTaskDefinition : definition(replacementDefinition, olderQrArn));
+    if (args[1] === "describe-secret") return JSON.stringify({ ARN: qrArn, VersionIdsToStages: { ["a".repeat(32)]: ["AWSCURRENT"] } });
+    throw new Error(`unexpected ${args.join(" ")}`);
+  } });
+  const sameSelector = auditFor();
+  assert.equal(sameSelector.status, "PASS");
+  assert.equal(sameSelector.liveLegacyBaselineCount, 1);
+  assert.equal(sameSelector.legacy.qrCurrentVersion, "legacy-v1");
+  assert.throws(() => auditFor(otherQrArn), /selector|resolution/i);
 });
 
 test("ECS audit fails closed when no live service baseline can be authenticated", () => {

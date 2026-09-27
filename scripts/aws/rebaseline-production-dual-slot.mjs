@@ -9,7 +9,7 @@ import { createProductionGithubCommandRunner } from "./production-credential-sou
 import { createInitialDualSlotSecretsManagerClient } from "./production-initial-dual-slot-bootstrap.mjs";
 import { deriveLegacyRotationBaseline } from "./production-legacy-rotation-baseline.mjs";
 import { parseEcsSecretsManagerReference } from "./production-ecs-runtime-dependencies.mjs";
-import { readGitHubApiToken, resolveQrVersionResolutionArtifact } from "./production-qr-version-selector-resolution.mjs";
+import { assertQrVersionResolutionCurrent, readGitHubApiToken, resolveQrVersionResolutionArtifact } from "./production-qr-version-selector-resolution.mjs";
 import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 import { ensureStageBPrivateDirectory, readStageBPrivateFileBytes, writeStageBPrivateFileAtomicExclusive } from "./stage-b-artifact-contract.mjs";
@@ -198,7 +198,11 @@ export function auditLiveProductionDualSlotReferences({ run, resources, database
   const definitionsByArn = new Map(taskDefinitions.map(({ requestedArn, definition }) => [requestedArn, definition]));
   const liveServiceTaskDefinitionArns = [...new Set(liveTasks.filter(({ taskArn }) => serviceTaskArns.has(taskArn)).map(({ taskDefinitionArn }) => taskDefinitionArn))].sort();
   const deploymentTaskDefinitionCoverage = deployments.map(({ id, status, taskDefinition }) => ({ id, status, taskDefinitionArn: taskDefinition, representedByLiveServiceTask: liveServiceTaskDefinitionArns.includes(taskDefinition) }));
-  const liveLegacyBaselines = liveServiceTaskDefinitionArns.map((taskDefinitionArn) => ({ taskDefinitionArn, legacy: deriveLegacyRotationBaseline(definitionsByArn.get(taskDefinitionArn), { qrVersionResolution }) }));
+  if (qrVersionResolution) {
+    if (service.taskDefinition !== qrVersionResolution.taskDefinitionArn) throw new Error("QR version resolution does not bind the current production service task definition.");
+    assertQrVersionResolutionCurrent({ taskDefinition: definitionsByArn.get(service.taskDefinition), resolution: qrVersionResolution, secretMetadata: awsJson(run, ["describe-secret", "--secret-id", qrVersionResolution.secretArn, "--output", "json", "--no-cli-pager"]) });
+  }
+  const liveLegacyBaselines = liveServiceTaskDefinitionArns.map((taskDefinitionArn) => ({ taskDefinitionArn, legacy: deriveLegacyRotationBaseline(definitionsByArn.get(taskDefinitionArn), { qrVersionResolution, allowEquivalentQrSelector: Boolean(qrVersionResolution && taskDefinitionArn !== qrVersionResolution.taskDefinitionArn) }) }));
   const uniqueLegacyBaselines = [...new Map(liveLegacyBaselines.map(({ legacy }) => [canonicalSha256(legacy), legacy])).entries()].sort(([left], [right]) => left.localeCompare(right)).map(([identitySha256, legacy]) => ({ identitySha256, legacy }));
   const liveLegacyBaselineCount = uniqueLegacyBaselines.length;
   const legacy = liveLegacyBaselineCount === 1 ? uniqueLegacyBaselines[0].legacy : undefined;

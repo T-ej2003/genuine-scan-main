@@ -16,7 +16,8 @@ const backendContainer = (taskDefinition) => {
   return container;
 };
 
-export function deriveLegacyRotationBaseline(taskDefinition, { qrVersionResolution } = {}) {
+export function deriveLegacyRotationBaseline(taskDefinition, { qrVersionResolution, allowEquivalentQrSelector = false } = {}) {
+  if (typeof allowEquivalentQrSelector !== "boolean") throw new Error("QR selector equivalence mode must be explicit.");
   const container = backendContainer(taskDefinition);
   const environment = Object.fromEntries((container.environment || []).map(({ name, value }) => [name, value]));
   const baseline = {
@@ -38,7 +39,7 @@ export function deriveLegacyRotationBaseline(taskDefinition, { qrVersionResoluti
   }
   if (qrVersionResolution) {
     const selector = assertQrVersionSelector({ taskDefinition, expectedSecretArn: qrVersionResolution.secretArn });
-    if (selector.secretArn !== qrVersionResolution.secretArn || selector.taskDefinitionArn !== qrVersionResolution.taskDefinitionArn || selector.taskDefinitionSha256 !== qrVersionResolution.taskDefinitionSha256 || qrVersionResolution.jsonKey !== "value" || qrVersionResolution.versionSemantics !== "AWSCURRENT") throw new Error("Live QR active-version resolution is not bound to the exact task definition selector.");
+    if (selector.secretArn !== qrVersionResolution.secretArn || qrVersionResolution.jsonKey !== "value" || qrVersionResolution.versionSemantics !== "AWSCURRENT" || (!allowEquivalentQrSelector && (selector.taskDefinitionArn !== qrVersionResolution.taskDefinitionArn || selector.taskDefinitionSha256 !== qrVersionResolution.taskDefinitionSha256))) throw new Error("Live QR active-version resolution is not bound to the exact task definition selector.");
   }
   for (const [name, value] of Object.entries(baseline)) {
     if (name === "qrCurrentVersion") {
