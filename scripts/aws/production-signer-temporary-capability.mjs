@@ -83,12 +83,21 @@ export function assertSignerTemporaryPolicy(policy, { steadyPolicy, sourceSha, t
 export function resolveSignerTemporaryVersionId({ versions, activeVersionId, evidence, steadyPolicy, identity } = {}) {
   const recoveringInstall = evidence?.temporaryVersionId == null;
   if (recoveringInstall && evidence?.state !== "INSTALLING") return null;
-  const versionId = recoveringInstall ? activeVersionId : evidence.temporaryVersionId;
-  const version = versions?.find(({ VersionId }) => VersionId === versionId);
-  if (!version) return null;
-  try { assertSignerTemporaryPolicy(version.document, { steadyPolicy, ...identity }); }
-  catch (error) { if (recoveringInstall) return null; throw error; }
-  return version.VersionId;
+  const matches = (version) => {
+    try { assertSignerTemporaryPolicy(version.document, { steadyPolicy, ...identity }); return true; }
+    catch { return false; }
+  };
+  if (!recoveringInstall) {
+    const version = versions?.find(({ VersionId }) => VersionId === evidence.temporaryVersionId);
+    if (!version) return null;
+    assertSignerTemporaryPolicy(version.document, { steadyPolicy, ...identity });
+    return version.VersionId;
+  }
+  const active = versions?.find(({ VersionId }) => VersionId === activeVersionId);
+  if (active && matches(active)) return active.VersionId;
+  const historical = (versions || []).filter(matches);
+  if (historical.length > 1) fail("multiple exact temporary signer policy versions make recovery ambiguous");
+  return historical[0]?.VersionId ?? null;
 }
 
 const expectedAddresses = new Set(["aws_iam_role.signer", "aws_kms_key.image_authorization", "aws_kms_alias.image_authorization", "aws_iam_role_policy.sign_only"]);

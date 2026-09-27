@@ -306,14 +306,14 @@ export function runSignerTemporaryCapability(argv = process.argv.slice(2), { wri
     if (abort && evidence.state === "INSTALLING" && exactSignerTemporaryVersion(current.active.document, identity)) verifySignerResourceCensus(undefined, signerSession(bootstrap, transitionId), { allowExisting: true });
     if (abort && evidence.state !== "INSTALLING") verifySignerResourceCensus(undefined, signerSession(bootstrap, transitionId));
     if (canonical(current.active.document) === canonical(steadyPolicy) && current.active.VersionId !== evidence.temporaryVersionId) {
-      const result = buildSignerCapabilityEvidence({ ...evidence, state: "REVOKED", steadyVersionId: current.active.VersionId, observedAt: now() });
+      const result = buildSignerCapabilityEvidence({ ...evidence, state: "REVOKED", steadyVersionId: current.active.VersionId, temporaryVersionId, observedAt: now() });
       protect(stateFile, result); write(`${JSON.stringify({ state: result.state, steadyVersionId: current.active.VersionId, recovered: true })}\n`); return result;
     }
-    const temporaryVersionId = evidence.temporaryVersionId || current.active.VersionId;
-    if (current.active.VersionId !== temporaryVersionId || !exactSignerTemporaryVersion(current.active.document, identity)) fail("temporary policy is not the live default");
+    const revokedTemporaryVersionId = temporaryVersionId || current.active.VersionId;
+    if (current.active.VersionId !== revokedTemporaryVersionId || !exactSignerTemporaryVersion(current.active.document, identity)) fail("temporary policy is not the live default");
     if (current.versions.length >= 5) fail("no managed-policy version slot remains for safe revocation");
     const steadyVersion = writePolicyVersion(bootstrap, steadyPolicy, current.active.VersionId);
-    const result = buildSignerCapabilityEvidence({ ...evidence, state: "REVOKED", steadyVersionId: steadyVersion, temporaryVersionId, observedAt: now() });
+    const result = buildSignerCapabilityEvidence({ ...evidence, state: "REVOKED", steadyVersionId: steadyVersion, temporaryVersionId: revokedTemporaryVersionId, observedAt: now() });
     protect(stateFile, result); write(`${JSON.stringify({ state: result.state, steadyVersionId: steadyVersion })}\n`); return result;
   }
   if (phase === "verify-absent") {
