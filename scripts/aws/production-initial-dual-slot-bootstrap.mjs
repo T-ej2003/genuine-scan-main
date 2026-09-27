@@ -12,6 +12,7 @@ import {
   productionSupersessionEvidenceIdentity,
 } from "../security/production-initial-migration-source-advance.mjs";
 import { deriveLegacyRotationBaseline } from "./production-legacy-rotation-baseline.mjs";
+import { assertQrVersionResolutionCurrent } from "./production-qr-version-selector-resolution.mjs";
 import { assertCompletedRebaselinePayload, generateRebaselineMaterial, PARTIAL_REBASELINE_RECOVERY_ORIGINAL_SOURCE_SHA, fingerprint as secureFingerprint } from "./production-dual-slot-rebaseline-contract.mjs";
 import { MIXED_DUAL_SLOT_RECOVERY_ORDER, MIXED_DUAL_SLOT_RECOVERY_SUCCESSOR, MIXED_DUAL_SLOT_RECOVERY_SUCCESSOR_CANONICAL_ID, MIXED_DUAL_SLOT_RETAINED_HISTORY, MIXED_DUAL_SLOT_RETAINED_HISTORY_CANONICAL_ID } from "./production-mixed-dual-slot-recovery-contract.mjs";
 
@@ -433,6 +434,7 @@ export async function bootstrapInitialDualSlotRotation({ send, taskDefinition, q
   if (typeof send !== "function") throw new Error("Initial dual-slot bootstrap Secrets Manager sender is required.");
   if (!SHA40.test(sourceSha || "") || !ROTATION_ID.test(rotationId || "")) throw new Error("Initial dual-slot source/rotation identity is invalid.");
   if (typeof outputFile !== "string" || !outputFile) throw new Error("Initial dual-slot rotation binding output is required.");
+  if (qrVersionResolution) assertQrVersionResolutionCurrent({ taskDefinition, resolution: qrVersionResolution, secretMetadata: await send(new DescribeSecretCommand({ SecretId: qrVersionResolution.secretArn })) });
   const baseline = deriveLegacyRotationBaseline(taskDefinition, { qrVersionResolution });
   assertLegacyMatches(legacyBindings, baseline);
   if ((supersessionEvidence === undefined) !== (supersessionPredecessor === undefined)) throw new Error("Complete stale-supersession predecessor evidence is required.");

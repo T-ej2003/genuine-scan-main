@@ -40,7 +40,7 @@ const transactionDirectory = ({ sourceSha, staleRotationId, homeDirectory = os.u
 const imageDigest = (taskDefinition) => String(taskDefinition?.taskDefinition?.containerDefinitions?.find(({ name }) => name === "backend")?.image || "").split("@").at(-1);
 const now = (value) => value instanceof Date ? value : new Date(value || Date.now());
 const privateJsonBytes = (value) => Buffer.from(`${JSON.stringify(value, null, 2)}\n`);
-async function resolveQrBaseline({ taskDefinition, sourceSha, changeTicket, runId, secretArn, token } = {}) {
+async function resolveQrBaseline({ taskDefinition, sourceSha, changeTicket, runId, secretArn, token, run } = {}) {
   const binding = taskDefinition?.taskDefinition?.containerDefinitions?.find(({ name }) => name === "backend")?.secrets?.find(({ name }) => name === "QR_SIGN_ACTIVE_KEY_VERSION");
   if (!binding) {
     if (runId || secretArn) throw new Error("QR version resolution was supplied without a live QR selector.");
@@ -48,7 +48,8 @@ async function resolveQrBaseline({ taskDefinition, sourceSha, changeTicket, runI
   }
   if (!runId || !secretArn || !changeTicket) throw new Error("Stale rotation supersession requires the exact governed QR version resolution.");
   assertQrVersionSelector({ taskDefinition, expectedSecretArn: secretArn });
-  return resolveQrVersionResolutionArtifact({ workflowRunId: runId, sourceSha, changeTicket, expectedSecretArn: secretArn, token: token || readGitHubApiToken() });
+  const secretMetadata = JSON.parse(run(["secretsmanager", "describe-secret", "--secret-id", secretArn, "--output", "json", "--no-cli-pager"]));
+  return resolveQrVersionResolutionArtifact({ workflowRunId: runId, sourceSha, changeTicket, expectedSecretArn: secretArn, taskDefinition, secretMetadata, token: token || readGitHubApiToken() });
 }
 const refreshFixedBindings = (preparation) => ({
   sourceSha: preparation.sourceSha,
@@ -149,7 +150,7 @@ async function finalizeHistoricalStaleRotation(values, deps) {
   assertStaleRotationSupersessionAuthorizationProvenance(authorizationProvenance, { authorization, sourceSha });
   const executionStart = assertStaleRotationSupersessionExecutionStart(readJson(path.join(directory, "execution-start.json"), "Historical stale rotation supersession execution start").value, { authorization, authorizationProvenance, preparation });
   const liveBackend = readLiveBackend();
-  const qrVersionResolution = await resolveQrBaseline({ taskDefinition: liveBackend.taskDefinition, sourceSha: toolingSha, changeTicket: args["change-ticket"], runId: args["qr-version-resolution-run-id"], secretArn: args["qr-version-secret-arn"], token: deps.githubToken });
+  const qrVersionResolution = await resolveQrBaseline({ taskDefinition: liveBackend.taskDefinition, sourceSha: toolingSha, changeTicket: args["change-ticket"], runId: args["qr-version-resolution-run-id"], secretArn: args["qr-version-secret-arn"], token: deps.githubToken, run });
   if (preparation.liveBackend.taskDefinitionArn !== liveBackend.service.taskDefinition || preparation.liveBackend.imageDigest !== imageDigest(liveBackend.taskDefinition)) throw new Error("Live backend changed before historical stale rotation supersession finalization.");
   let evidenceCapture = lstatSync(evidenceFile, { throwIfNoEntry: false })
     ? readJson(evidenceFile, "Historical stale rotation supersession evidence")
@@ -222,7 +223,7 @@ export async function runCli(argv = process.argv.slice(2), deps = {}) {
     return current;
   };
   const { service, taskDefinition } = readLiveBackend();
-  const qrVersionResolution = await resolveQrBaseline({ taskDefinition, sourceSha, changeTicket: values.get("change-ticket"), runId: values.get("qr-version-resolution-run-id"), secretArn: values.get("qr-version-secret-arn"), token: deps.githubToken });
+  const qrVersionResolution = await resolveQrBaseline({ taskDefinition, sourceSha, changeTicket: values.get("change-ticket"), runId: values.get("qr-version-resolution-run-id"), secretArn: values.get("qr-version-secret-arn"), token: deps.githubToken, run });
   const directory = transactionDirectory({ sourceSha, staleRotationId, homeDirectory: deps.homeDirectory });
   ensureStageBPrivateDirectory({ directory, repositoryRoot: ROOT, create: true, label: "Stale rotation supersession transaction directory" });
   const preparationFile = path.join(directory, "preparation.json");

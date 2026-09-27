@@ -16,7 +16,7 @@ import { executeMixedDualSlotRecovery, prepareMixedDualSlotRecovery } from "./re
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const requireBackend = createRequire(path.join(root, "backend/package.json"));
-const { SecretsManagerClient } = requireBackend("@aws-sdk/client-secrets-manager");
+const { DescribeSecretCommand, SecretsManagerClient } = requireBackend("@aws-sdk/client-secrets-manager");
 const { STSClient, GetCallerIdentityCommand } = requireBackend("@aws-sdk/client-sts");
 const { fromIni } = requireBackend("@aws-sdk/credential-provider-ini");
 const option = (argv, name) => { const index = argv.indexOf(name); return index < 0 ? undefined : argv[index + 1]; };
@@ -47,7 +47,7 @@ async function assertExpectedPrincipal(sts, mode) {
   if (caller.Account !== "368992683803" || !new RegExp(`^arn:aws:sts::368992683803:assumed-role/${roleName}/[^/]+$`).test(caller.Arn || "")) throw new Error(`Mixed recovery requires the exact ${roleName} session.`);
 }
 
-async function readLivePredecessor({ sourceSha, changeTicket, qrVersionResolutionRunId, expectedQrSecretArn }) {
+async function readLivePredecessor({ sourceSha, changeTicket, qrVersionResolutionRunId, expectedQrSecretArn, secrets }) {
   const credentialSource = process.env.GITHUB_ACTIONS === "true" ? PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER : PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE;
   const run = createProductionCommandRunner({ credentialSource, ...(credentialSource === PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE ? { profile: "mscqr-production-release-deployer" } : {}), region: "eu-west-2" });
   const service = JSON.parse(run(["ecs", "describe-services", "--cluster", MIXED_DUAL_SLOT_RECOVERY_LIVE_PREDECESSOR.cluster, "--services", MIXED_DUAL_SLOT_RECOVERY_LIVE_PREDECESSOR.service])).services?.[0];
@@ -61,7 +61,8 @@ async function readLivePredecessor({ sourceSha, changeTicket, qrVersionResolutio
     let secretArn;
     try { secretArn = parseEcsSecretsManagerReference(selector.valueFrom).resource; } catch { throw new Error("Mixed recovery live QR version selector is malformed."); }
     if (secretArn !== expectedQrSecretArn || !qrVersionResolutionRunId || !changeTicket) throw new Error("Mixed recovery requires the exact governed QR version resolution.");
-    qrVersionResolution = await resolveQrVersionResolutionArtifact({ workflowRunId: qrVersionResolutionRunId, sourceSha, changeTicket, expectedSecretArn: secretArn, token: readGitHubApiToken() });
+    const secretMetadata = await secrets.send(new DescribeSecretCommand({ SecretId: secretArn }));
+    qrVersionResolution = await resolveQrVersionResolutionArtifact({ workflowRunId: qrVersionResolutionRunId, sourceSha, changeTicket, expectedSecretArn: secretArn, taskDefinition, secretMetadata, token: readGitHubApiToken() });
   }
   const baseline = deriveLegacyRotationBaseline(taskDefinition, { qrVersionResolution });
   const active = [baseline.jwtCurrent, baseline.qrPrivateCurrent, baseline.qrPublicCurrent].sort();
@@ -78,7 +79,7 @@ async function main(argv = process.argv.slice(2)) {
     const rootRun = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "default", region: "eu-west-2" });
     const iamCapabilityPreflight = readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, run: rootRun });
     const iamCapabilityAttestation = createMixedDualSlotRecoveryIamAttestation({ preflight: iamCapabilityPreflight, sign: createRootAttestationKmsSigner({ run: rootRun }) });
-    const preparation = await prepareMixedDualSlotRecovery({ send: (command) => secrets.send(command), sourceSha, livePredecessor: await readLivePredecessor({ sourceSha, changeTicket: option(argv, "--change-ticket"), qrVersionResolutionRunId: option(argv, "--qr-version-resolution-run-id"), expectedQrSecretArn: option(argv, "--qr-version-secret-arn") }), iamCapabilityPreflight });
+    const preparation = await prepareMixedDualSlotRecovery({ send: (command) => secrets.send(command), sourceSha, livePredecessor: await readLivePredecessor({ sourceSha, changeTicket: option(argv, "--change-ticket"), qrVersionResolutionRunId: option(argv, "--qr-version-resolution-run-id"), expectedQrSecretArn: option(argv, "--qr-version-secret-arn"), secrets }), iamCapabilityPreflight });
     const output = assertStageBArtifactPath({ artifactPath: path.resolve(required(argv, "--output")), repositoryRoot: root, label: "Mixed recovery preparation", allowExisting: false });
     const iamAttestationOutput = assertStageBArtifactPath({ artifactPath: `${output}.iam-attestation.json`, repositoryRoot: root, label: "Mixed recovery IAM attestation", allowExisting: false });
     ensureStageBPrivateDirectory({ directory: path.dirname(output), repositoryRoot: root, label: "Mixed recovery preparation directory" });
@@ -91,7 +92,7 @@ async function main(argv = process.argv.slice(2)) {
   if (captured.sha256 !== required(argv, "--preparation-file-sha256")) throw new Error("Mixed recovery preparation bytes changed after authorization.");
   const preparation = parseJson(captured.bytes, "Mixed recovery preparation"); assertMixedDualSlotRecoveryPreparation(preparation, { sourceSha });
   const resolved = resolveMixedDualSlotRecoveryAuthorizationArtifact({ workflowRunId: required(argv, "--authorization-run-id"), workflowRunAttempt: required(argv, "--authorization-run-attempt"), sourceSha, preparation, preparationFileSha256: captured.sha256 });
-  const reauthenticate = async () => { protectedSource(sourceSha); await readLivePredecessor({ sourceSha, changeTicket: option(argv, "--change-ticket"), qrVersionResolutionRunId: option(argv, "--qr-version-resolution-run-id"), expectedQrSecretArn: option(argv, "--qr-version-secret-arn") }); };
+  const reauthenticate = async () => { protectedSource(sourceSha); await readLivePredecessor({ sourceSha, changeTicket: option(argv, "--change-ticket"), qrVersionResolutionRunId: option(argv, "--qr-version-resolution-run-id"), expectedQrSecretArn: option(argv, "--qr-version-secret-arn"), secrets }); };
   const result = await executeMixedDualSlotRecovery({ send: (command) => secrets.send(command), preparation, preparationFileSha256: captured.sha256, sourceSha, authorization: resolved.authorization, reauthenticate });
   return { status: result.updateSecretVersionStageCalls === 0 ? "COMPLETED_CONSUMED" : "COMPLETED", authorizationSha256: resolved.authorization.authorizationSha256, ...result };
 }

@@ -6,7 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { PRODUCTION_ENVIRONMENT_APPROVAL, createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
 import { createProductionGithubCommandRunner } from "../aws/production-credential-source-contract.mjs";
-import { EVIDENCE_READER_EXPANSION_CHANGES, EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, INSTALLATION, INSTALLATION_BACKEND, assertInstallationAuthorization, assertInstallationAuthorizedPostState, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationPreparation, assertInstallationStateResources, bootstrapOperatorPolicyAuthorizerPermissionsPredecessor, classifyInstallationStatePullError, createInstallationAuthorization, createInstallationPreparation, installationPermissionsPredecessor, stateIdentity } from "../aws/production-initial-activation-reconciler-installation-contract.mjs";
+import { EVIDENCE_READER_EXPANSION_CHANGES, EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, INSTALLATION, INSTALLATION_BACKEND, assertInstallationAuthorization, assertInstallationAuthorizedPostState, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationPreparation, assertInstallationStateResources, bootstrapOperatorPolicyAuthorizerPermissionsPredecessor, bootstrapOperatorPolicyAuthorizerPermissionsPredecessors, classifyInstallationStatePullError, createInstallationAuthorization, createInstallationPreparation, installationPermissionsPredecessor, stateIdentity } from "../aws/production-initial-activation-reconciler-installation-contract.mjs";
 import { executeInstallation, runInstallCli } from "../aws/install-production-initial-activation-reconciler.mjs";
 import { discoverInstallationPredecessor, runPrepareCli } from "../aws/prepare-production-initial-activation-reconciler-installation.mjs";
 import { BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER, BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER, INITIAL_ACTIVATION_RECONCILER, MIXED_RECOVERY_EXECUTOR } from "../aws/verify-production-initial-activation-policy-reconciler.mjs";
@@ -785,6 +785,15 @@ test("installed seven-resource authorizer policy is one exact authorized Terrafo
   assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ authorizerDocument: extra }) }).classification, "UNEXPECTED");
   assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ authorizerDocument: authorizerPolicyPredecessor, versions: Array.from({ length: 5 }, (_, index) => ({ VersionId: `v${index + 1}`, IsDefaultVersion: index === 0 })) }) }).classification, "UNEXPECTED");
   assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ authorizerDocument: authorizerPolicyPredecessor, mixedRole: { AssumeRolePolicyDocument: JSON.parse(trust) } }) }).classification, "UNEXPECTED");
+});
+
+test("installed candidate-only task-definition read policy is an exact authorizer predecessor", () => {
+  const candidateOnly = bootstrapOperatorPolicyAuthorizerPermissionsPredecessors()[0];
+  assert.deepEqual(candidateOnly.Statement.find(({ Sid }) => Sid === "ReadRegionalTaskDefinitionMetadata").Resource, ["arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:*"]);
+  assert.deepEqual(discoverInstallationPredecessor({ run: discoveryRun({ authorizerDocument: candidateOnly }) }), { classification: "EXACT_AUTHORIZER_POLICY_UPDATE", existingAddresses: allAddresses });
+  const broader = structuredClone(candidateOnly);
+  broader.Statement.find(({ Sid }) => Sid === "ReadRegionalTaskDefinitionMetadata").Resource.push("arn:aws:ecs:eu-west-2:368992683803:task-definition/*");
+  assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ authorizerDocument: broader }) }).classification, "UNEXPECTED");
 });
 
 test("captured live predecessor expands exactly the absent evidence reader and authorizer policy", () => {

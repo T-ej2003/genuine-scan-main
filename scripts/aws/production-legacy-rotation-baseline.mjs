@@ -38,7 +38,7 @@ export function deriveLegacyRotationBaseline(taskDefinition, { qrVersionResoluti
   }
   if (qrVersionResolution) {
     const selector = assertQrVersionSelector({ taskDefinition, expectedSecretArn: qrVersionResolution.secretArn });
-    if (selector.secretArn !== qrVersionResolution.secretArn || qrVersionResolution.jsonKey !== "value" || qrVersionResolution.versionSemantics !== "AWSCURRENT") throw new Error("Live QR active-version resolution is not bound to the exact task definition selector.");
+    if (selector.secretArn !== qrVersionResolution.secretArn || selector.taskDefinitionArn !== qrVersionResolution.taskDefinitionArn || selector.taskDefinitionSha256 !== qrVersionResolution.taskDefinitionSha256 || qrVersionResolution.jsonKey !== "value" || qrVersionResolution.versionSemantics !== "AWSCURRENT") throw new Error("Live QR active-version resolution is not bound to the exact task definition selector.");
   }
   for (const [name, value] of Object.entries(baseline)) {
     if (name === "qrCurrentVersion") {

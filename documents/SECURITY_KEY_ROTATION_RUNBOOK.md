@@ -430,7 +430,10 @@ key-version identifier. Use the dedicated
 main SHA, change ticket, and live secret ARN. Its protected environment
 approval and one-run OIDC session authorize only the exact ECS metadata reads
 and `GetSecretValue`/`DescribeSecret` on that ARN in `eu-west-2`; the consumer
-independently checks the live service selector and requests `AWSCURRENT`.
+independently checks the live service selector and requests `AWSCURRENT`. The
+resolver and each consumer bind evidence to the exact task-definition ARN and
+digest, and re-read secret version-stage metadata to prove the recorded version
+remains the sole `AWSCURRENT` version before baseline use.
 
 The consumer parses and validates only the `value` field in memory. The
 identifier is non-secret QR `kid` metadata (the application emits it in QR
@@ -445,9 +448,11 @@ workflow before dispatch; no manual IAM edit is permitted.
 Pass the successful resolution run ID and the exact ARN into the initial
 dual-slot bootstrap, cutover-runtime preparation, rebaseline,
 mixed-topology-recovery, or stale-supersession consumer. Each consumer re-authenticates the workflow artifact against
-the current protected-main SHA and change ticket, then checks the live selector
-uses that same ARN and `value`/`AWSCURRENT` semantics. A missing or mismatched
-resolution never falls back to treating the ARN as a key version.
+the current protected-main SHA and change ticket, then checks the exact live
+task revision, secret identity, JSON key, and current version ID. The protected-
+main SHA may be newer than an existing rotation manifest's source SHA. A
+missing or mismatched resolution never falls back to treating the ARN as a key
+version.
 
 - Production should use the `CURRENT` / `PREVIOUS` variables, not only the legacy single-slot names.
 - `AUTH_LEGACY_TOKEN_RESPONSE_ENABLED` and `AUTH_SSE_QUERY_TOKEN_ENABLED` should remain `false` in production after the cookie-only auth rollout.

@@ -45,7 +45,8 @@ const hasQrSelector = Boolean(taskDefinition.taskDefinition?.containerDefinition
 let qrVersionResolution;
 if (hasQrSelector) {
   if (!changeTicket || !qrVersionResolutionRunId || !qrVersionSecretArn) throw new Error("Approved QR version resolution run, change ticket, and exact secret ARN are required.");
-  qrVersionResolution = await resolveQrVersionResolutionArtifact({ workflowRunId: qrVersionResolutionRunId, sourceSha, changeTicket, expectedSecretArn: qrVersionSecretArn, token: readGitHubApiToken() });
+  const secretMetadata = JSON.parse(run(["secretsmanager", "describe-secret", "--secret-id", qrVersionSecretArn, "--output", "json", "--no-cli-pager"]));
+  qrVersionResolution = await resolveQrVersionResolutionArtifact({ workflowRunId: qrVersionResolutionRunId, sourceSha, changeTicket, expectedSecretArn: qrVersionSecretArn, taskDefinition, secretMetadata, token: readGitHubApiToken() });
 } else if (qrVersionResolutionRunId || qrVersionSecretArn || changeTicket) throw new Error("QR version resolution was supplied without a live QR selector.");
 const result = await bootstrapInitialDualSlotRotation({
   send: (command) => client.send(command),

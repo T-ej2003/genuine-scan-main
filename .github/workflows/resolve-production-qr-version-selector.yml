@@ -43,7 +43,11 @@ jobs:
         with:
           node-version: 24
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
       - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm ci --prefix backend --ignore-scripts --no-audit --no-fund
       - name: Reauthenticate protected source after installation
         env:
           GH_TOKEN: ${{ github.token }}

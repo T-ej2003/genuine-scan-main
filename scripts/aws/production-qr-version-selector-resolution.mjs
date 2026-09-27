@@ -34,7 +34,7 @@ export function buildQrVersionReadSessionPolicy(secretArn) {
   return Object.freeze({ Version: "2012-10-17", Statement: [
     { Effect: "Allow", Action: "sts:GetCallerIdentity", Resource: "*" },
     { Effect: "Allow", Action: "ecs:DescribeServices", Resource: `arn:aws:ecs:${QR_VERSION_SELECTOR_RESOLUTION.region}:${QR_VERSION_SELECTOR_RESOLUTION.account}:service/${QR_VERSION_SELECTOR_RESOLUTION.cluster}/${QR_VERSION_SELECTOR_RESOLUTION.service}`, Condition: { StringEquals: { "aws:RequestedRegion": QR_VERSION_SELECTOR_RESOLUTION.region } } },
-    { Effect: "Allow", Action: "ecs:DescribeTaskDefinition", Resource: `arn:aws:ecs:${QR_VERSION_SELECTOR_RESOLUTION.region}:${QR_VERSION_SELECTOR_RESOLUTION.account}:task-definition/mscqr-production-rls-green-backend-candidate:*`, Condition: { StringEquals: { "aws:RequestedRegion": QR_VERSION_SELECTOR_RESOLUTION.region } } },
+    { Effect: "Allow", Action: "ecs:DescribeTaskDefinition", Resource: [`arn:aws:ecs:${QR_VERSION_SELECTOR_RESOLUTION.region}:${QR_VERSION_SELECTOR_RESOLUTION.account}:task-definition/mscqr-production-rls-green-backend-candidate:*`, `arn:aws:ecs:${QR_VERSION_SELECTOR_RESOLUTION.region}:${QR_VERSION_SELECTOR_RESOLUTION.account}:task-definition/mscqr-backend:*`], Condition: { StringEquals: { "aws:RequestedRegion": QR_VERSION_SELECTOR_RESOLUTION.region } } },
     { Effect: "Allow", Action: "secretsmanager:GetSecretValue", Resource: secretArn, Condition: { StringEquals: { "aws:RequestedRegion": QR_VERSION_SELECTOR_RESOLUTION.region } } },
     { Effect: "Allow", Action: "secretsmanager:DescribeSecret", Resource: secretArn, Condition: { StringEquals: { "aws:RequestedRegion": QR_VERSION_SELECTOR_RESOLUTION.region } } },
   ] });
@@ -52,6 +52,13 @@ export function assertQrVersionSelector({ taskDefinition, expectedSecretArn } = 
   try { selector = parseEcsSecretsManagerReference(matches[0].valueFrom); } catch { throw new Error("Live QR active-version secret selector is malformed."); }
   if (selector.resource !== expectedSecretArn || selector.jsonKey !== "value" || selector.versionStage || selector.versionId || selector.selectorMode !== "AWSCURRENT") throw new Error("Live QR active-version selector does not match the exact authorized default-current binding.");
   return Object.freeze({ taskDefinitionArn, taskDefinitionSha256: digest(definition), secretArn: selector.resource, jsonKey: selector.jsonKey, versionSemantics: "AWSCURRENT" });
+}
+
+export function assertQrVersionResolutionCurrent({ taskDefinition, resolution, secretMetadata } = {}) {
+  const binding = assertQrVersionSelector({ taskDefinition, expectedSecretArn: resolution?.secretArn });
+  const current = Object.entries(secretMetadata?.VersionIdsToStages || {}).filter(([, stages]) => Array.isArray(stages) && stages.includes("AWSCURRENT"));
+  if (resolution?.taskDefinitionArn !== binding.taskDefinitionArn || resolution?.taskDefinitionSha256 !== binding.taskDefinitionSha256 || resolution?.versionId !== current[0]?.[0] || current.length !== 1 || secretMetadata?.ARN !== binding.secretArn) throw new Error("QR version resolution no longer matches the live task definition and AWSCURRENT secret version.");
+  return true;
 }
 
 export function resolveQrVersionSelectorValue({ response, binding } = {}) {
@@ -79,8 +86,8 @@ export function createQrVersionResolutionEvidence({ binding, resolved, sourceSha
   return Object.freeze({ ...body, evidenceSha256: digest(body) });
 }
 
-export async function resolveQrVersionResolutionArtifact({ workflowRunId, sourceSha, changeTicket, expectedSecretArn, token, fetchImpl = fetch, now = new Date() } = {}) {
-  if (!/^[1-9][0-9]*$/.test(workflowRunId || "") || typeof token !== "string" || !token || typeof fetchImpl !== "function") throw new Error("QR version resolution artifact coordinates are invalid.");
+export async function resolveQrVersionResolutionArtifact({ workflowRunId, sourceSha, changeTicket, expectedSecretArn, taskDefinition, secretMetadata, token, fetchImpl = fetch, now = new Date() } = {}) {
+  if (!/^[1-9][0-9]*$/.test(workflowRunId || "") || typeof token !== "string" || !token || typeof fetchImpl !== "function" || !taskDefinition || !secretMetadata) throw new Error("QR version resolution artifact coordinates and fresh live bindings are required.");
   const base = "https://api.github.com/repos/T-ej2003/genuine-scan-main";
   const headers = { accept: "application/vnd.github+json", authorization: `Bearer ${token}`, "x-github-api-version": "2022-11-28" };
   const read = async (url) => { const response = await fetchImpl(url, { headers }); if (!response.ok) throw new Error("QR version resolution artifact could not be authenticated."); return response; };
@@ -103,5 +110,6 @@ export async function resolveQrVersionResolutionArtifact({ workflowRunId, source
   try { evidence = JSON.parse(await entries[0].async("string")); } catch { throw new Error("QR version resolution artifact payload is malformed."); }
   assertQrVersionResolutionEvidence(evidence, { sourceSha, changeTicket, expectedSecretArn, now });
   if (evidence.workflowRunId !== workflowRunId) throw new Error("QR version resolution artifact run binding is invalid.");
+  assertQrVersionResolutionCurrent({ taskDefinition, resolution: evidence, secretMetadata });
   return evidence;
 }

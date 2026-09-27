@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import JSZip from "jszip";
 import yaml from "js-yaml";
-import { assertQrVersionResolutionEvidence, assertQrVersionSelector, buildQrVersionReadSessionPolicy, createQrVersionResolutionEvidence, QR_VERSION_SELECTOR_RESOLUTION, resolveQrVersionResolutionArtifact, resolveQrVersionSelectorValue } from "../aws/production-qr-version-selector-resolution.mjs";
+import { assertQrVersionResolutionCurrent, assertQrVersionResolutionEvidence, assertQrVersionSelector, buildQrVersionReadSessionPolicy, createQrVersionResolutionEvidence, QR_VERSION_SELECTOR_RESOLUTION, resolveQrVersionResolutionArtifact, resolveQrVersionSelectorValue } from "../aws/production-qr-version-selector-resolution.mjs";
 import { deriveLegacyRotationBaseline } from "../aws/production-legacy-rotation-baseline.mjs";
 
 const secretArn = "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE";
@@ -22,6 +22,7 @@ const taskDefinition = {
 };
 const binding = assertQrVersionSelector({ taskDefinition, expectedSecretArn: secretArn });
 const response = { ARN: secretArn, VersionId: "a".repeat(32), VersionStages: ["AWSCURRENT"], SecretString: JSON.stringify({ value: "c41ca96ab047dd25", unrelated: "never copied" }) };
+const secretMetadata = { ARN: secretArn, VersionIdsToStages: { [response.VersionId]: ["AWSCURRENT"] } };
 
 test("canonical JWT identity and QR selected-value semantics stay distinct", () => {
   const resolved = resolveQrVersionSelectorValue({ response, binding });
@@ -73,6 +74,16 @@ test("secret response must be the exact current version and only the selected id
   assert.equal(QR_VERSION_SELECTOR_RESOLUTION.operation, "READ_ONLY_QR_VERSION_SELECTOR_RESOLUTION");
 });
 
+test("resolution consumption rebinds current task revision and AWSCURRENT version", () => {
+  const resolved = resolveQrVersionSelectorValue({ response, binding });
+  const evidence = createQrVersionResolutionEvidence({ binding, resolved, sourceSha: "a".repeat(40), changeTicket: "CHG-20260925-001", workflowRunId: "12345", createdAt: "2026-09-27T12:00:00.000Z" });
+  assert.equal(assertQrVersionResolutionCurrent({ taskDefinition, resolution: evidence, secretMetadata }), true);
+  assert.throws(() => assertQrVersionResolutionCurrent({ taskDefinition: { ...taskDefinition, taskDefinition: { ...taskDefinition.taskDefinition, taskDefinitionArn: `${taskDefinition.taskDefinition.taskDefinitionArn.slice(0, -2)}20` } }, resolution: evidence, secretMetadata }), /task definition and AWSCURRENT/);
+  assert.throws(() => assertQrVersionResolutionCurrent({ taskDefinition, resolution: evidence, secretMetadata: { ...secretMetadata, VersionIdsToStages: { ["b".repeat(32)]: ["AWSCURRENT"] } } }), /AWSCURRENT/);
+  assert.throws(() => assertQrVersionResolutionCurrent({ taskDefinition, resolution: evidence, secretMetadata: { ...secretMetadata, ARN: secretArn.replace("8fNOVE", "xxxxxx") } }), /AWSCURRENT/);
+  assert.throws(() => deriveLegacyRotationBaseline(taskDefinition, { qrVersionResolution: { ...evidence, taskDefinitionSha256: "b".repeat(64) } }), /exact task definition/);
+});
+
 test("artifact consumer authenticates the exact successful workflow run and single payload", async () => {
   const sourceSha = "a".repeat(40);
   const evidence = createQrVersionResolutionEvidence({ binding, resolved: resolveQrVersionSelectorValue({ response, binding }), sourceSha, changeTicket: "CHG-20260925-001", workflowRunId: "12345", createdAt: "2026-09-27T12:00:00.000Z" });
@@ -81,7 +92,8 @@ test("artifact consumer authenticates the exact successful workflow run and sing
   const workflow = { id: 12345, path: QR_VERSION_SELECTOR_RESOLUTION.workflowPath, repository: { full_name: "T-ej2003/genuine-scan-main" }, head_repository: { full_name: "T-ej2003/genuine-scan-main" }, event: "workflow_dispatch", head_sha: sourceSha, status: "completed", conclusion: "success", run_attempt: 1 };
   const artifact = { name: QR_VERSION_SELECTOR_RESOLUTION.artifactName, id: 9, expired: false, digest: artifactDigest, workflow_run: { id: 12345, head_sha: sourceSha } };
   const fetchImpl = async (url) => ({ ok: true, json: async () => url.endsWith("/12345") ? workflow : { artifacts: [artifact] }, arrayBuffer: async () => zip });
-  assert.equal((await resolveQrVersionResolutionArtifact({ workflowRunId: "12345", sourceSha, changeTicket: "CHG-20260925-001", expectedSecretArn: secretArn, token: "fixture-token", fetchImpl, now: new Date("2026-09-27T12:01:00.000Z") })).qrCurrentVersion, "c41ca96ab047dd25");
+  const current = { taskDefinition, secretMetadata };
+  assert.equal((await resolveQrVersionResolutionArtifact({ workflowRunId: "12345", sourceSha, changeTicket: "CHG-20260925-001", expectedSecretArn: secretArn, ...current, token: "fixture-token", fetchImpl, now: new Date("2026-09-27T12:01:00.000Z") })).qrCurrentVersion, "c41ca96ab047dd25");
   for (const alter of [
     (run) => ({ ...run, path: "attacker.yml" }),
     (run) => ({ ...run, head_repository: { full_name: "fork/repo" } }),
@@ -90,14 +102,15 @@ test("artifact consumer authenticates the exact successful workflow run and sing
     (run) => ({ ...run, run_attempt: 2 }),
   ]) {
     const badFetch = async (url, options) => { const result = await fetchImpl(url, options); return { ...result, json: async () => url.endsWith("/12345") ? alter(workflow) : { artifacts: [artifact] } }; };
-    await assert.rejects(resolveQrVersionResolutionArtifact({ workflowRunId: "12345", sourceSha, changeTicket: "CHG-20260925-001", expectedSecretArn: secretArn, token: "fixture-token", fetchImpl: badFetch, now: new Date("2026-09-27T12:01:00.000Z") }));
+    await assert.rejects(resolveQrVersionResolutionArtifact({ workflowRunId: "12345", sourceSha, changeTicket: "CHG-20260925-001", expectedSecretArn: secretArn, ...current, token: "fixture-token", fetchImpl: badFetch, now: new Date("2026-09-27T12:01:00.000Z") }));
   }
-  await assert.rejects(resolveQrVersionResolutionArtifact({ workflowRunId: "12345", sourceSha, changeTicket: "CHG-20260925-002", expectedSecretArn: secretArn, token: "fixture-token", fetchImpl, now: new Date("2026-09-27T12:01:00.000Z") }));
+  await assert.rejects(resolveQrVersionResolutionArtifact({ workflowRunId: "12345", sourceSha, changeTicket: "CHG-20260925-002", expectedSecretArn: secretArn, ...current, token: "fixture-token", fetchImpl, now: new Date("2026-09-27T12:01:00.000Z") }));
   const tampered = Buffer.from(zip); tampered[tampered.length - 1] ^= 1;
-  await assert.rejects(resolveQrVersionResolutionArtifact({ workflowRunId: "12345", sourceSha, changeTicket: "CHG-20260925-001", expectedSecretArn: secretArn, token: "fixture-token", fetchImpl: async (url) => ({ ok: true, json: async () => url.endsWith("/12345") ? workflow : { artifacts: [artifact] }, arrayBuffer: async () => tampered }), now: new Date("2026-09-27T12:01:00.000Z") }));
+  await assert.rejects(resolveQrVersionResolutionArtifact({ workflowRunId: "12345", sourceSha, changeTicket: "CHG-20260925-001", expectedSecretArn: secretArn, ...current, token: "fixture-token", fetchImpl: async (url) => ({ ok: true, json: async () => url.endsWith("/12345") ? workflow : { artifacts: [artifact] }, arrayBuffer: async () => tampered }), now: new Date("2026-09-27T12:01:00.000Z") }));
   const symlinkZip = await new JSZip().file("resolution.json", JSON.stringify(evidence), { unixPermissions: 0o120777 }).generateAsync({ type: "nodebuffer", platform: "UNIX" });
   const symlinkArtifact = { ...artifact, digest: `sha256:${crypto.createHash("sha256").update(symlinkZip).digest("hex")}` };
-  await assert.rejects(resolveQrVersionResolutionArtifact({ workflowRunId: "12345", sourceSha, changeTicket: "CHG-20260925-001", expectedSecretArn: secretArn, token: "fixture-token", fetchImpl: async (url) => ({ ok: true, json: async () => url.endsWith("/12345") ? workflow : { artifacts: [symlinkArtifact] }, arrayBuffer: async () => symlinkZip }), now: new Date("2026-09-27T12:01:00.000Z") }));
+  await assert.rejects(resolveQrVersionResolutionArtifact({ workflowRunId: "12345", sourceSha, changeTicket: "CHG-20260925-001", expectedSecretArn: secretArn, ...current, token: "fixture-token", fetchImpl: async (url) => ({ ok: true, json: async () => url.endsWith("/12345") ? workflow : { artifacts: [symlinkArtifact] }, arrayBuffer: async () => symlinkZip }), now: new Date("2026-09-27T12:01:00.000Z") }));
+  await assert.rejects(resolveQrVersionResolutionArtifact({ workflowRunId: "12345", sourceSha, changeTicket: "CHG-20260925-001", expectedSecretArn: secretArn, token: "fixture-token", fetchImpl, now: new Date("2026-09-27T12:01:00.000Z") }));
 });
 
 test("read session policy permits only exact production metadata and one secret read", () => {
@@ -105,7 +118,7 @@ test("read session policy permits only exact production metadata and one secret 
   assert.deepEqual(policy.Statement.map(({ Action, Resource }) => [Action, Resource]), [
     ["sts:GetCallerIdentity", "*"],
     ["ecs:DescribeServices", "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2"],
-    ["ecs:DescribeTaskDefinition", "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:*"],
+    ["ecs:DescribeTaskDefinition", ["arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:*", "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:*"]],
     ["secretsmanager:GetSecretValue", secretArn],
     ["secretsmanager:DescribeSecret", secretArn],
   ]);
@@ -121,10 +134,11 @@ test("workflow approval, read permissions and payload handling remain narrowly s
   const iam = JSON.parse(fs.readFileSync(path.join(root, "infra/aws/terraform/production-initial-activation-policy-reconciler/bootstrap-operator-policy-authorizer-permissions-policy.json"), "utf8"));
   assert.deepEqual(iam.Statement.slice(0, 2).map(({ Action, Resource }) => [Action, Resource]), [
     ["ecs:DescribeServices", "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2"],
-    ["ecs:DescribeTaskDefinition", "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:*"],
+    ["ecs:DescribeTaskDefinition", ["arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:*", "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:*"]],
   ]);
   assert.equal(iam.Statement.some(({ Action, Resource }) => String(Action).includes("secretsmanager:GetSecretValue") && (Resource === "*" || Array.isArray(Resource) && Resource.includes("*"))), false);
   const resolver = fs.readFileSync(path.join(root, "scripts/aws/resolve-production-qr-version-selector.mjs"), "utf8");
+  assert.match(workflow.jobs.resolve.steps.map(({ run }) => run || "").join("\n"), /npm ci --prefix backend/);
   assert.match(resolver, /process\.stdout\.write\("QR_VERSION_RESOLUTION=PASS/);
   assert.doesNotMatch(resolver, /console\.log\([^\n]*(SecretString|parsed|resolved)/);
   assert.match(resolver, /GITHUB_WORKFLOW_REF/);
