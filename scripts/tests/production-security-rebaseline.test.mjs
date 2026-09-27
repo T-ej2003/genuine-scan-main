@@ -11,6 +11,9 @@ import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
 import { assertSecurityRebaselineInventory, createLiveSecurityRebaselineInventory, createSecurityRebaselineInventory, diffSecurityRebaselineInventories, SECURITY_REBASELINE_COVERAGE, SECURITY_REBASELINE_NORMALIZED_COLLECTIONS, SECURITY_REBASELINE_OPERATIONS } from "../aws/production-security-rebaseline-inventory.mjs";
 import { createSecurityCatalogueTransportKeyPair, decryptSecurityCatalogueTransport, encryptSecurityCatalogueTransport } from "../aws/production-security-rebaseline-transport.mjs";
 import { assertProductionRlsProbeImageSource, parseProductionRlsProbeRuntimeConfig, PRODUCTION_RLS_PROBE_ENTRYPOINT } from "../aws/production-rls-catalogue-probe-config.mjs";
+import { buildSecurityRebaselineImageAuthorization, createProductionSecurityRebaselinePreparationManifest, assertProductionSecurityRebaselinePreparationManifest, verifyProductionSecurityRebaselinePreparationManifest, authenticateProductionSecurityRebaselinePreparation, assertSecurityRebaselineSigningEnvironment, assertPreparationWorkflowArtifacts, SECURITY_REBASELINE_IMAGE_PUBLISHER_WORKFLOW, SECURITY_REBASELINE_SIGNING_ALGORITHM, SECURITY_REBASELINE_SIGNING_KEY_ALIAS, SECURITY_REBASELINE_SIGNER_ENVIRONMENT, SECURITY_REBASELINE_SIGNER_JOB_WORKFLOW, SECURITY_REBASELINE_SIGNER_WORKFLOW } from "../aws/production-security-rebaseline-preparation.mjs";
+import { assertProductionSecurityRebaselineSignerReadback, verifyProductionSecurityRebaselineSigner } from "../aws/verify-production-security-rebaseline-signer.mjs";
+import { createAppOnlyRequirements } from "../aws/production-app-only-requirements.mjs";
 import { writeStageBPrivateFileExclusive } from "../aws/stage-b-artifact-contract.mjs";
 
 const root = process.cwd(), sourceSha = "a".repeat(40), digest = "b".repeat(64), role = "mscqr_prd_rls_phase2_app";
@@ -148,8 +151,185 @@ test("fixed module launch keeps structured configuration as data and contains no
   assert.throws(() => buildProductionRlsProbeCommand(requirements, { ...identity, candidateSourceSha: "c".repeat(40) }));
   for (const source of ["scripts/aws/probe-production-rls-catalogue.mjs", "scripts/aws/production-rls-catalogue-probe-runtime.mjs"])
     assert.doesNotMatch(fs.readFileSync(source, "utf8"), /\beval\s*\(|new Function|vm\.run/);
+  const probeSource = fs.readFileSync("scripts/aws/probe-production-rls-catalogue.mjs", "utf8");
+  assert.match(probeSource, /import os from ["']node:os["']/); assert.match(probeSource, /os\.tmpdir\(\)/);
   const runtime = fs.readFileSync("scripts/aws/production-rls-catalogue-probe-runtime.mjs", "utf8");
   assert.match(runtime, /readFileSync\("\/app\/image-source\.json"/); assert.match(runtime, /assertProductionRlsProbeImageSource/);
+});
+
+test("protected preparation producer binds exact PG18 artifacts, image publication, KMS authorization, and manifest", async () => {
+  const { produceSecurityRebaselinePreparation } = await import("../aws/produce-production-security-rebaseline-preparation.mjs");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "security-rebaseline-preparation-test-"));
+  try {
+    const source = sourceSha, runId = "77", imageDigest = `sha256:${"e".repeat(64)}`;
+    const requirements = createAppOnlyRequirements({ repositoryRoot: root, sourceSha: source, candidateSourceSha: source, catalogue: catalogue(), packageChecksums: { fixture: digest } });
+    const canonicalInventory = canonical(catalogue(), source);
+    const requirementsBytes = Buffer.from(JSON.stringify(requirements));
+    const canonicalBytes = Buffer.from(JSON.stringify(canonicalInventory));
+    const publicationBytes = Buffer.from(`${JSON.stringify({ service: "backend", repository: "mscqr-backend", image_tag: `${source}-backend-only`, image_uri: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend:${source}-backend-only`, image_digest: imageDigest, image_ref: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${imageDigest}` })}\n`);
+    const files = { requirements: path.join(directory, "requirements.json"), canonical: path.join(directory, "canonical.json"), publication: path.join(directory, "publication.jsonl"), manifest: path.join(directory, "manifest.json") };
+    fs.writeFileSync(files.requirements, requirementsBytes, { mode: 0o600 }); fs.writeFileSync(files.canonical, canonicalBytes, { mode: 0o600 }); fs.writeFileSync(files.publication, publicationBytes, { mode: 0o600 });
+    const reference = (artifactId, bytes) => ({ sourceSha: source, runId, runAttempt: "1", artifactId, artifactDigest: `sha256:${digest}`, fileSha256: crypto.createHash("sha256").update(bytes).digest("hex") });
+    const publicationReference = { workflowFile: SECURITY_REBASELINE_IMAGE_PUBLISHER_WORKFLOW, ...reference("103", publicationBytes) };
+    const env = { GITHUB_REPOSITORY: "T-ej2003/genuine-scan-main", GITHUB_REPOSITORY_ID: "1145608538", GITHUB_REPOSITORY_OWNER_ID: "183396573",
+      GITHUB_REF: "refs/heads/main", GITHUB_SHA: source, GITHUB_RUN_ATTEMPT: "1", GITHUB_RUN_ID: runId, GITHUB_WORKFLOW_REF: `T-ej2003/genuine-scan-main/${SECURITY_REBASELINE_SIGNER_WORKFLOW}@refs/heads/main`, GITHUB_ACTOR: "T-ej2003",
+      REQUIREMENTS_FILE: files.requirements, CANONICAL_FILE: files.canonical, PUBLICATION_FILE: files.publication, MANIFEST_OUTPUT: files.manifest, EXPECTED_IMAGE_REF: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${imageDigest}`,
+      REQUIREMENTS_REFERENCE_JSON: JSON.stringify(reference("101", requirementsBytes)), CANONICAL_REFERENCE_JSON: JSON.stringify(reference("102", canonicalBytes)), PUBLICATION_REFERENCE_JSON: JSON.stringify(publicationReference) };
+    const result = produceSecurityRebaselinePreparation({ sourceSha: source, repositoryRoot: root, env, sign: ({ keyArn, signingAlgorithm, messageType, digest: signedDigest }) => {
+      assert.equal(keyArn, SECURITY_REBASELINE_SIGNING_KEY_ALIAS); assert.equal(signingAlgorithm, SECURITY_REBASELINE_SIGNING_ALGORITHM); assert.equal(messageType, "DIGEST"); assert.equal(signedDigest.length, 32); return Buffer.alloc(384, 7).toString("base64");
+    } });
+    const manifest = JSON.parse(fs.readFileSync(files.manifest, "utf8"));
+    assert.equal(result.manifestSha256, manifest.manifestSha256); assert.equal(manifest.protectedMainSha, source); assert.equal(manifest.candidateSourceSha, source);
+    assert.equal(manifest.candidateImage.digest, imageDigest); assert.equal(manifest.probeRuntime.imageDigest, imageDigest);
+    assert.equal(manifest.requirements.requirementsSha256, requirements.requirementsSha256); assert.equal(manifest.canonicalInventory.catalogueSha256, canonicalInventory.catalogueSha256);
+    assert.deepEqual(manifest.publicationReference, publicationReference); assert.equal(manifest.subscriptionProjection.presence, "VERIFY_IN_SINGLE_READ_ONLY_PROBE_BEFORE_INVENTORY");
+    const verified = verifyProductionSecurityRebaselinePreparationManifest(manifest, { protectedMainSha: source, candidateSourceSha: source, workflowRunId: runId, workflowRunAttempt: "1" }, { verifyImageAuthorization: () => true });
+    assert.equal(verified.manifestSha256, result.manifestSha256);
+    const manifestBytes = fs.readFileSync(files.manifest);
+    const manifestReference = { sourceSha: source, runId, runAttempt: "1", artifactId: "104", artifactDigest: `sha256:${digest}`, fileSha256: crypto.createHash("sha256").update(manifestBytes).digest("hex") };
+    const authenticated = authenticateProductionSecurityRebaselinePreparation({ manifestBytes, manifestReference, requirementsBytes, requirementsReference: manifest.requirements.reference,
+      canonicalInventoryBytes: canonicalBytes, canonicalReference: manifest.canonicalInventory.reference, publicationBytes, publicationReference,
+      sourceSha: source, verifyImageAuthorization: () => true, repositoryRoot: root });
+    assert.equal(authenticated.canonicalInventory.catalogueSha256, canonicalInventory.catalogueSha256);
+    assert.equal(authenticated.publicationImage.image_ref, manifest.candidateImage.authorization.image.digest.replace(/^sha256:/, `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:`));
+    const wrongProjection = structuredClone(manifest);
+    wrongProjection.subscriptionProjection.expectedDefinitionSha256 = "f".repeat(64);
+    const { manifestSha256: _oldSha, ...wrongProjectionBody } = wrongProjection;
+    wrongProjection.manifestSha256 = canonicalSha256(wrongProjectionBody);
+    const wrongProjectionBytes = Buffer.from(JSON.stringify(wrongProjection));
+    assert.throws(() => authenticateProductionSecurityRebaselinePreparation({ manifestBytes: wrongProjectionBytes,
+      manifestReference: { ...manifestReference, fileSha256: crypto.createHash("sha256").update(wrongProjectionBytes).digest("hex") },
+      requirementsBytes, requirementsReference: manifest.requirements.reference, canonicalInventoryBytes: canonicalBytes,
+      canonicalReference: manifest.canonicalInventory.reference, publicationBytes, publicationReference,
+      sourceSha: source, verifyImageAuthorization: () => true, repositoryRoot: root }));
+    assert.throws(() => authenticateProductionSecurityRebaselinePreparation({ manifestBytes, manifestReference, requirementsBytes, requirementsReference: { ...manifest.requirements.reference, artifactId: "999" }, canonicalInventoryBytes: canonicalBytes, canonicalReference: manifest.canonicalInventory.reference, publicationBytes, publicationReference, sourceSha: source, verifyImageAuthorization: () => true, repositoryRoot: root }));
+    assert.throws(() => verifyProductionSecurityRebaselinePreparationManifest(manifest, { workflowRunId: "78" }, { verifyImageAuthorization: () => true }));
+    assert.throws(() => verifyProductionSecurityRebaselinePreparationManifest(manifest, {}, { verifyImageAuthorization: () => false }));
+    const changed = structuredClone(manifest); changed.candidateImage.digest = `sha256:${"f".repeat(64)}`;
+    assert.throws(() => assertProductionSecurityRebaselinePreparationManifest(changed));
+    assert.throws(() => verifyProductionSecurityRebaselinePreparationManifest(manifest, { now: Date.parse(manifest.candidateImage.authorization.expiresAt) + 1 }, { verifyImageAuthorization: () => true }));
+    assert.equal(manifest.candidateImage.authorization.purpose, "READ_ONLY_PRODUCTION_SECURITY_REBASELINE");
+    assert.equal(manifest.candidateImage.authorization.signatureBase64, Buffer.alloc(384, 7).toString("base64"));
+
+    const malformedPublication = Buffer.from(publicationBytes.toString().replace(`"image_digest":"${imageDigest}"`, `"image_digest":"${"e".repeat(64)}"`));
+    fs.writeFileSync(files.publication, malformedPublication);
+    assert.throws(() => produceSecurityRebaselinePreparation({ sourceSha: source, repositoryRoot: root,
+      env: { ...env, MANIFEST_OUTPUT: path.join(directory, "malformed-manifest.json"),
+        PUBLICATION_REFERENCE_JSON: JSON.stringify({ ...publicationReference, fileSha256: crypto.createHash("sha256").update(malformedPublication).digest("hex") }) },
+      sign: () => assert.fail("Malformed publisher digest must fail before KMS signing") }));
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("signing environment and purpose-specific OIDC/KMS source contracts fail closed", () => {
+  const environment = { name: SECURITY_REBASELINE_SIGNER_ENVIRONMENT, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "Team", reviewer: { id: 1 } }] }, { type: "branch_policy" }], deployment_branch_policy: { protected_branches: true, custom_branch_policies: false } };
+  assert.equal(assertSecurityRebaselineSigningEnvironment(environment), true);
+  for (const changed of [{ ...environment, protection_rules: [] }, { ...environment, protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{}] }] }, { ...environment, deployment_branch_policy: { protected_branches: false, custom_branch_policies: true } }]) assert.throws(() => assertSecurityRebaselineSigningEnvironment(changed));
+  const signingWorkflow = fs.readFileSync(".github/workflows/sign-production-security-rebaseline.yml", "utf8");
+  const preparationWorkflow = fs.readFileSync(".github/workflows/prepare-production-security-rebaseline.yml", "utf8");
+  assert.doesNotMatch(`${signingWorkflow}\n${preparationWorkflow}`, /administration:\s*read|environments\/[^\s]+\/(?:variables|secrets)/);
+  assert.match(signingWorkflow, /gh api .*\/environments\/production-security-rebaseline-signing/);
+  assert.match(signingWorkflow, /permissions:\s*\n\s*contents: read\n\s*actions: read/);
+  assert.match(preparationWorkflow, /sign-and-manifest:[\s\S]*?permissions:\s*\n\s*contents: read\n\s*actions: read\n\s*id-token: write/);
+  assert.match(signingWorkflow, /role-to-assume: \$\{\{ vars\.PRODUCTION_SECURITY_REBASELINE_SIGNER_ROLE_ARN \}\}/);
+  const trust = JSON.parse(fs.readFileSync("infra/aws/terraform/production-security-rebaseline-signer/trust-policy.json", "utf8"));
+  const condition = trust.Statement[0].Condition.StringEquals;
+  assert.equal(trust.Statement[0].Principal.Federated, "arn:aws:iam::368992683803:oidc-provider/token.actions.githubusercontent.com");
+  assert.equal(condition["token.actions.githubusercontent.com:aud"], "sts.amazonaws.com");
+  assert.equal(condition["token.actions.githubusercontent.com:sub"], `repo:T-ej2003/genuine-scan-main:environment:${SECURITY_REBASELINE_SIGNER_ENVIRONMENT}`);
+  assert.equal(condition["token.actions.githubusercontent.com:repository_id"], "1145608538"); assert.equal(condition["token.actions.githubusercontent.com:repository_owner_id"], "183396573");
+  assert.equal(condition["token.actions.githubusercontent.com:ref"], "refs/heads/main"); assert.equal(condition["token.actions.githubusercontent.com:job_workflow_ref"], `T-ej2003/genuine-scan-main/${SECURITY_REBASELINE_SIGNER_JOB_WORKFLOW}@refs/heads/main`);
+  const terraform = fs.readFileSync("infra/aws/terraform/production-security-rebaseline-signer/main.tf", "utf8");
+  assert.match(terraform, /Action\s*=\s*\["kms:Sign"\]/); assert.match(terraform, /Resource\s*=\s*aws_kms_key\.image_authorization\.arn/);
+  assert.doesNotMatch(terraform.match(/resource "aws_iam_role_policy" "sign_only"[\s\S]*?\n}/)?.[0] || "", /kms:\*/);
+  assert.match(terraform, /max_session_duration\s*=\s*3600/);
+  const signerPolicy = terraform.match(/resource "aws_iam_role_policy" "sign_only"[\s\S]*?\n}/)?.[0] || "";
+  assert.equal((signerPolicy.match(/Action\s*=/g) || []).length, 1);
+  assert.doesNotMatch(signerPolicy, /Resource\s*=\s*"\*"/);
+  assert.doesNotMatch(signerPolicy, /iam:|ecr:|ecs:|rds:|secretsmanager:/);
+  assert.match(terraform, /kms:SigningAlgorithm/); assert.match(terraform, /kms:MessageType/); assert.match(terraform, /kms:RequestAlias/);
+  const workflow = fs.readFileSync(".github/workflows/prepare-production-security-rebaseline.yml", "utf8");
+  const signerWorkflow = fs.readFileSync(".github/workflows/sign-production-security-rebaseline.yml", "utf8");
+  assert.match(workflow, /uses: \.\/\.github\/workflows\/sign-production-security-rebaseline\.yml/);
+  assert.match(signerWorkflow, /workflow_call:/); assert.match(signerWorkflow, new RegExp(`environment: ${SECURITY_REBASELINE_SIGNER_ENVIRONMENT}`));
+  assert.match(signerWorkflow, /aws-actions\/configure-aws-credentials@v6/); assert.match(signerWorkflow, /id-token: write/); assert.match(signerWorkflow, /role-duration-seconds: 3600/);
+  assert.match(signerWorkflow, /READY_FOR_READ_ONLY_PROBE=true/); assert.match(signerWorkflow, /retention-days: 90/);
+  assert.match(signerWorkflow, /test "\$SOURCE_SHA" = "\$GITHUB_SHA"/); assert.match(signerWorkflow, /test "\$SOURCE_SHA" = "\$\(gh api[^\n]+branches\/main/);
+  assert.doesNotMatch(signerWorkflow, /aws-access-key-id:|aws-secret-access-key:|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY/);
+  assert.doesNotMatch(`${workflow}\n${signerWorkflow}`, /ecs run-task|production:rls-catalogue-probe|production:apply/);
+  const environmentContract = JSON.parse(fs.readFileSync("infra/aws/terraform/production-security-rebaseline-signer/github-environment-contract.json", "utf8"));
+  assert.equal(environmentContract.name, SECURITY_REBASELINE_SIGNER_ENVIRONMENT);
+  assert.equal(environmentContract.signingJobWorkflow, `.github/workflows/sign-production-security-rebaseline.yml`);
+  assert.equal(environmentContract.requiredReviewers, true); assert.equal(environmentContract.preventSelfReview, true);
+  assert.deepEqual(environmentContract.variables, ["PRODUCTION_SECURITY_REBASELINE_SIGNER_ROLE_ARN"]);
+  assert.deepEqual(environmentContract.forbiddenSecrets, ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"]);
+});
+
+test("signer readback detects trust, permission, key, alias and grant drift", () => {
+  const trust = JSON.parse(fs.readFileSync("infra/aws/terraform/production-security-rebaseline-signer/trust-policy.json", "utf8"));
+  const roleArn = "arn:aws:iam::368992683803:role/mscqr-production-security-rebaseline-image-signer";
+  const keyArn = "arn:aws:kms:eu-west-2:368992683803:key/00000000-0000-4000-8000-000000000001";
+  const keyAlias = "alias/mscqr-production-security-rebaseline-image-evidence";
+  const signerPolicy = { Version: "2012-10-17", Statement: [{ Sid: "SignPurposeSpecificAuthorizationDigestsOnly", Effect: "Allow", Action: "kms:Sign", Resource: keyArn,
+    Condition: { StringEquals: { "kms:SigningAlgorithm": "RSASSA_PSS_SHA_256", "kms:MessageType": "DIGEST", "kms:RequestAlias": keyAlias } } }] };
+  const keyPolicy = { Version: "2012-10-17", Statement: [
+    { Sid: "AccountBreakGlassAdministration", Effect: "Allow", Principal: { AWS: "arn:aws:iam::368992683803:root" }, Action: "kms:*", Resource: "*" },
+    { Sid: "ProtectedWorkflowImageAuthorizationSigningOnly", Effect: "Allow", Principal: { AWS: roleArn }, Action: "kms:Sign", Resource: "*",
+      Condition: { StringEquals: { "kms:SigningAlgorithm": "RSASSA_PSS_SHA_256", "kms:MessageType": "DIGEST", "kms:RequestAlias": keyAlias } } },
+  ] };
+  const fixture = { role: { RoleName: "mscqr-production-security-rebaseline-image-signer", Arn: roleArn, MaxSessionDuration: 3600, AssumeRolePolicyDocument: trust },
+    signerPolicy, attachedPolicies: [], inlinePolicyNames: ["ProductionSecurityRebaselineImageAuthorizationSignOnly"],
+    key: { Arn: keyArn, KeyId: keyArn.split("/").at(-1), KeyState: "Enabled", KeyManager: "CUSTOMER", KeyUsage: "SIGN_VERIFY", KeySpec: "RSA_3072", Origin: "AWS_KMS", MultiRegion: false },
+    keyPolicy, aliases: [{ AliasName: keyAlias, TargetKeyId: keyArn.split("/").at(-1) }], grants: [] };
+  const result = assertProductionSecurityRebaselineSignerReadback(fixture);
+  assert.equal(result.unexpectedGrantCount, 0); assert.match(result.signerPolicySha256, /^[a-f0-9]{64}$/);
+  const calls = [];
+  const readback = verifyProductionSecurityRebaselineSigner({ profile: "readback-test", run: (_command, args) => {
+    assert.equal(_command, "aws");
+    calls.push(args.slice(0, 2).join(" "));
+    if (args[0] === "sts") return { Account: "368992683803" };
+    if (args[0] === "iam" && args[1] === "get-role") return { Role: fixture.role };
+    if (args[0] === "iam" && args[1] === "list-role-policies") return { PolicyNames: fixture.inlinePolicyNames };
+    if (args[0] === "iam" && args[1] === "list-attached-role-policies") return { AttachedPolicies: [] };
+    if (args[0] === "iam" && args[1] === "get-role-policy") return { PolicyDocument: fixture.signerPolicy };
+    if (args[0] === "kms" && args[1] === "describe-key") return { KeyMetadata: fixture.key };
+    if (args[0] === "kms" && args[1] === "get-key-policy") return { Policy: JSON.stringify(fixture.keyPolicy) };
+    if (args[0] === "kms" && args[1] === "list-aliases") return { Aliases: fixture.aliases };
+    if (args[0] === "kms" && args[1] === "list-grants") return { Grants: [] };
+    assert.fail(`Unexpected readback API ${args.slice(0, 2).join(" ")}`);
+  } });
+  assert.equal(readback.keyArn, keyArn);
+  assert.deepEqual(calls, ["sts get-caller-identity", "iam get-role", "iam list-role-policies", "iam list-attached-role-policies",
+    "iam get-role-policy", "kms describe-key", "kms get-key-policy", "kms list-aliases", "kms list-grants"]);
+  for (const changed of [
+    { role: { ...fixture.role, MaxSessionDuration: 7200 } },
+    { role: { ...fixture.role, AssumeRolePolicyDocument: { ...trust, Statement: [] } } },
+    { signerPolicy: { ...signerPolicy, Statement: [{ ...signerPolicy.Statement[0], Action: "kms:Decrypt" }] } },
+    { attachedPolicies: ["arn:aws:iam::aws:policy/AdministratorAccess"] },
+    { key: { ...fixture.key, KeySpec: "RSA_2048" } },
+    { aliases: [{ AliasName: keyAlias, TargetKeyId: "substituted" }] },
+    { grants: [{ GranteePrincipal: "arn:aws:iam::368992683803:role/other", Operations: ["Sign"] }] },
+  ]) assert.throws(() => assertProductionSecurityRebaselineSignerReadback({ ...fixture, ...changed }));
+});
+
+test("preparation artifact IDs, archive digests, repository privacy, run, and source are authenticated before signing", () => {
+  const reference = (artifactId) => ({ sourceSha, runId: "77", runAttempt: "1", artifactId, artifactDigest: `sha256:${digest}`, fileSha256: digest });
+  const requirementsReference = reference("101"), canonicalReference = reference("102"), publicationReference = { workflowFile: SECURITY_REBASELINE_IMAGE_PUBLISHER_WORKFLOW, ...reference("103") };
+  const run = { id: 77, run_attempt: 1, head_sha: sourceSha, head_branch: "main", event: "workflow_dispatch", path: SECURITY_REBASELINE_SIGNER_WORKFLOW,
+    repository: { id: 1145608538, full_name: "T-ej2003/genuine-scan-main", private: true },
+    head_repository: { id: 1145608538, full_name: "T-ej2003/genuine-scan-main", private: true } };
+  const artifact = (id, name) => ({ id, name, digest: `sha256:${digest}`, expired: false,
+    workflow_run: { id: 77, head_sha: sourceSha, repository_id: 1145608538, head_repository_id: 1145608538 } });
+  const artifacts = [artifact(101, "production-security-rebaseline-requirements"), artifact(102, "production-security-rebaseline-canonical"), artifact(103, "production-security-rebaseline-image-publication")];
+  const expected = { run, artifacts, sourceSha, runId: "77", runAttempt: "1", requirementsReference, canonicalReference, publicationReference };
+  assert.equal(assertPreparationWorkflowArtifacts(expected), true);
+  for (const attack of [
+    { run: { ...run, head_sha: "f".repeat(40) } },
+    { run: { ...run, path: ".github/workflows/other.yml" } },
+    { run: { ...run, repository: { ...run.repository, private: false } } },
+    { artifacts: artifacts.map((value) => value.id === 103 ? { ...value, digest: `sha256:${"f".repeat(64)}` } : value) },
+    { artifacts: artifacts.map((value) => value.id === 103 ? { ...value, expired: true } : value) },
+    { artifacts: [...artifacts, artifacts[0]] },
+  ]) assert.throws(() => assertPreparationWorkflowArtifacts({ ...expected, ...attack }));
 });
 test("runtime configuration rejects hostile code-shaped values and unknown keys", () => { const valid={schemaVersion:1,...probeIdentity,requirementsSha256:digest,databaseHostname:"example.invalid",securityTransportPublicKey:null}; assert.deepEqual(parseProductionRlsProbeRuntimeConfig(JSON.stringify(valid)),valid); const attacks=["'\\\n\u2028\u2029${process.exit(9)};()","`;require('node:child_process')()","{\"sourceSha\":\"attacker\"}",Buffer.from("process.exit(9)").toString("base64")]; for (const value of attacks) { for (const field of ["sourceSha","candidateSourceSha","probeRuntimeSourceSha","probeImageSourceSha","probeImageDigest","applicationImageSourceSha","applicationImageDigest","requirementsSha256","databaseHostname","securityTransportPublicKey"]) { const changed={...valid,[field]:value}; assert.throws(()=>parseProductionRlsProbeRuntimeConfig(JSON.stringify(changed))); } } assert.throws(()=>parseProductionRlsProbeRuntimeConfig(JSON.stringify({...valid,code:"process.exit(9)"}))); });
 test("probe image source comes from the immutable baked identity, not mutable task environment", () => { assert.equal(assertProductionRlsProbeImageSource(JSON.stringify({gitSha:sourceSha}),sourceSha),true); assert.throws(()=>assertProductionRlsProbeImageSource(JSON.stringify({gitSha:"c".repeat(40)}),sourceSha)); assert.throws(()=>assertProductionRlsProbeImageSource(JSON.stringify({gitSha:sourceSha,sourceSha}),sourceSha)); });

@@ -56,6 +56,26 @@ test("canonical security inventory provenance requires private repository access
   assert.throws(() => assertAppOnlyArtifactProvenance(input)); input.run.repository.private = true; input.run.head_repository.private = true;
   assert.equal(assertAppOnlyArtifactProvenance(input), true);
 });
+test("preparation artifacts have exact filenames and private source-bound workflow provenance", () => {
+  const cases = [
+    ["securityRebaselineRequirements", "production-security-rebaseline-requirements", "app-only-requirements.json"],
+    ["securityRebaselineCanonical", "production-security-rebaseline-canonical", "security-rebaseline-canonical.json"],
+    ["securityRebaselinePreparation", "production-security-rebaseline-preparation", "preparation-manifest.json"],
+    ["securityRebaselineImagePublication", "production-security-rebaseline-image-publication", "production-green-backend-image.jsonl"],
+  ];
+  for (const [kind, name, member] of cases) {
+    const bytes = archive([{ name: member }]);
+    assert.equal(readAppOnlyArtifactArchive(bytes, kind).toString(), "{}");
+    const input = fixture(bytes);
+    input.kind = kind; input.run.path = ".github/workflows/prepare-production-security-rebaseline.yml";
+    input.run.repository.private = true; input.run.head_repository.private = true;
+    input.artifact.name = name; input.artifact.digest = `sha256:${hash(bytes)}`;
+    input.reference.artifactDigest = input.artifact.digest;
+    assert.equal(assertAppOnlyArtifactProvenance(input), true, kind);
+    input.run.repository.private = false;
+    assert.throws(() => assertAppOnlyArtifactProvenance(input), `${kind} must remain private`);
+  }
+});
 test("download authenticates and consumes the same immutable bytes in private storage", () => {
   const bytes = archive([{ name: file }]), input = fixture(bytes), calls = [];
   const githubRun = (command, args) => {

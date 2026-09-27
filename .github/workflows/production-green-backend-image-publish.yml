@@ -1,6 +1,25 @@
 name: Production Green Backend Image Publish
 
 on:
+  workflow_call:
+    inputs:
+      release_sha:
+        description: Exact protected-main SHA to publish
+        required: true
+        type: string
+    outputs:
+      image_ref:
+        description: Immutable published backend image reference
+        value: ${{ jobs.publish-and-verify.outputs.image_ref }}
+      artifact_id:
+        description: Immutable GitHub artifact ID for image provenance
+        value: ${{ jobs.publish-and-verify.outputs.security_artifact_id }}
+      artifact_digest:
+        description: GitHub artifact archive digest
+        value: ${{ jobs.publish-and-verify.outputs.security_artifact_digest }}
+      publication_reference:
+        description: Source-bound immutable image publication evidence reference
+        value: ${{ jobs.publish-and-verify.outputs.publication_reference }}
   workflow_dispatch:
     inputs:
       release_sha:
@@ -20,6 +39,11 @@ jobs:
 
   publish-and-verify:
     needs: authorize-operator
+    outputs:
+      image_ref: ${{ steps.image.outputs.image_ref }}
+      security_artifact_id: ${{ steps.security-publication.outputs.artifact-id }}
+      security_artifact_digest: ${{ steps.security-publication.outputs.artifact-digest }}
+      publication_reference: ${{ steps.reference.outputs.value }}
     runs-on: ubuntu-latest
     environment: production-stage-b-image-publish
     permissions:
@@ -166,6 +190,7 @@ jobs:
           COSIGN_CERT_IDENTITY_REGEXP="^https://github.com/${GITHUB_REPOSITORY}/.github/workflows/production-green-backend-image-publish.yml@.*$" REQUIRED_PLATFORMS="$PLATFORMS" PROVENANCE_ATTESTATION_TYPE="$PROVENANCE_ATTESTATION_TYPE" ./scripts/aws/verify-release-artifacts.sh "$BACKEND_IMAGE"
 
       - uses: actions/upload-artifact@v7
+        id: publication
         with:
           name: production-green-backend-image-evidence
           path: |
@@ -177,3 +202,30 @@ jobs:
             ${{ runner.temp }}/backend-image-history.jsonl
           if-no-files-found: error
           retention-days: 90
+      - uses: actions/upload-artifact@v7
+        id: security-publication
+        with:
+          name: production-security-rebaseline-image-publication
+          path: ${{ runner.temp }}/production-green-backend-image.jsonl
+          if-no-files-found: error
+          retention-days: 90
+      - name: Bind publication evidence to run, artifact, and image source
+        id: reference
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+          ARTIFACT_ID: ${{ steps.security-publication.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.security-publication.outputs.artifact-digest }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE' >> "$GITHUB_OUTPUT"
+          import crypto from 'node:crypto';
+          import fs from 'node:fs';
+          const file = `${process.env.RUNNER_TEMP}/production-green-backend-image.jsonl`;
+          const reference = { workflowFile: '.github/workflows/production-green-backend-image-publish.yml', sourceSha: process.env.RELEASE_SHA,
+            runId: process.env.GITHUB_RUN_ID, runAttempt: process.env.GITHUB_RUN_ATTEMPT, artifactId: process.env.ARTIFACT_ID,
+            artifactDigest: process.env.ARTIFACT_DIGEST, fileSha256: crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex') };
+          if (!/^[a-f0-9]{40}$/.test(reference.sourceSha) || !/^[1-9][0-9]*$/.test(reference.runId)
+            || !/^[1-9][0-9]*$/.test(reference.runAttempt) || !/^[1-9][0-9]*$/.test(reference.artifactId)
+            || !/^sha256:[a-f0-9]{64}$/.test(reference.artifactDigest)) throw new Error('Image publication reference is invalid.');
+          console.log(`value=${JSON.stringify(reference)}`);
+          NODE

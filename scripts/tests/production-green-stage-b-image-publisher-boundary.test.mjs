@@ -293,6 +293,10 @@ test("Terraform OIDC trust policies use only the repository-approved AWS claim k
   const allowed = new Set([
     "token.actions.githubusercontent.com:aud",
     "token.actions.githubusercontent.com:sub",
+    "token.actions.githubusercontent.com:repository_id",
+    "token.actions.githubusercontent.com:repository_owner_id",
+    "token.actions.githubusercontent.com:ref",
+    "token.actions.githubusercontent.com:job_workflow_ref",
   ]);
   for (const file of fs.readdirSync("infra/aws/terraform", { recursive: true }).filter((entry) => entry.endsWith("trust-policy.json"))) {
     const document = JSON.parse(fs.readFileSync(`infra/aws/terraform/${file}`, "utf8"));
@@ -304,6 +308,22 @@ test("Terraform OIDC trust policies use only the repository-approved AWS claim k
       }
     }
   }
+});
+
+test("security rebaseline signer trust is exact-repository, exact-workflow, protected-main and environment scoped", () => {
+  const trust = JSON.parse(fs.readFileSync("infra/aws/terraform/production-security-rebaseline-signer/trust-policy.json", "utf8"));
+  const statement = trust.Statement.find(({ Sid }) => Sid === "ProtectedSecurityRebaselineEnvironmentOnly");
+  assert.equal(statement.Effect, "Allow");
+  assert.equal(statement.Principal.Federated, "arn:aws:iam::368992683803:oidc-provider/token.actions.githubusercontent.com");
+  assert.equal(statement.Action, "sts:AssumeRoleWithWebIdentity");
+  assert.deepEqual(statement.Condition.StringEquals, {
+    "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+    "token.actions.githubusercontent.com:sub": "repo:T-ej2003/genuine-scan-main:environment:production-security-rebaseline-signing",
+    "token.actions.githubusercontent.com:repository_id": "1145608538",
+    "token.actions.githubusercontent.com:repository_owner_id": "183396573",
+    "token.actions.githubusercontent.com:ref": "refs/heads/main",
+    "token.actions.githubusercontent.com:job_workflow_ref": "T-ej2003/genuine-scan-main/.github/workflows/sign-production-security-rebaseline.yml@refs/heads/main",
+  });
 });
 
 test("publisher permissions are ECR-only for the reviewed repositories", () => {
