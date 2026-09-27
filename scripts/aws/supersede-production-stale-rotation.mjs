@@ -98,9 +98,11 @@ export const createStaleRotationReadOnlySecretsManagerSender = (run) => async (c
 };
 
 const assertHistoricalFinalizationArguments = (values) => {
-  const expected = new Set(["mode", "tooling-sha", "transaction-source-sha", "stale-source-sha", "stale-rotation-id", "transaction-preparation-sha256", "preparation-file-sha256", "authorization-workflow-run-id", "authorization-workflow-run-attempt", "change-ticket", "qr-version-resolution-run-id", "qr-version-secret-arn"]);
-  if ([...values.keys()].some((key) => !expected.has(key))) throw new Error("Historical stale-supersession finalization arguments are not exact.");
-  return Object.fromEntries([...expected].map((key) => [key, required(values, key)]));
+  const requiredArguments = ["mode", "tooling-sha", "transaction-source-sha", "stale-source-sha", "stale-rotation-id", "transaction-preparation-sha256", "preparation-file-sha256", "authorization-workflow-run-id", "authorization-workflow-run-attempt"];
+  const qrArguments = ["change-ticket", "qr-version-resolution-run-id", "qr-version-secret-arn"];
+  const keys = [...values.keys()];
+  if (requiredArguments.some((key) => !values.has(key)) || keys.some((key) => !requiredArguments.includes(key) && !qrArguments.includes(key)) || qrArguments.some((key) => values.has(key) !== values.has(qrArguments[0]))) throw new Error("Historical stale-supersession finalization arguments are not exact.");
+  return Object.fromEntries(keys.map((key) => [key, required(values, key)]));
 };
 
 async function finalizeHistoricalStaleRotation(values, deps) {
