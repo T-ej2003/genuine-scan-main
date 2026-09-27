@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { assertSignerBootstrapIdentity, assertSignerCliArguments } from "../aws/reconcile-production-signer-temporary-capability.mjs";
+import { assertCanonicalPolicyHistory, assertSignerBootstrapIdentity, assertSignerCliArguments } from "../aws/reconcile-production-signer-temporary-capability.mjs";
 import {
   SIGNER_TEMPORARY_CAPABILITY as C, assertSignerCapabilityEvidence, assertSignerCreationPlan, assertSignerRevocation,
   assertSignerInitializedBackendMetadata, assertSignerPolicySoleConsumer, assertSignerTemporaryPolicy, buildSignerCapabilityEvidence, buildSignerTemporaryPolicy,
@@ -10,6 +10,7 @@ import {
 
 const sourceSha = "0cbce2080bf38f7f071047fef3b982805336ffb5", transitionId = "signer-once-20260927";
 const steady = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json", "utf8"));
+const historicalPolicies = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-stage-a-historical-policies.json", "utf8"));
 const trust = JSON.parse(fs.readFileSync("infra/aws/terraform/production-security-rebaseline-signer/trust-policy.json", "utf8"));
 const expectedOps = new Map([
   ["s3:GetObject", [`arn:aws:s3:::${C.bucket}/${C.stateKey}`, `arn:aws:s3:::${C.bucket}/${C.lockKey}`]],
@@ -124,6 +125,25 @@ test("INSTALLING recovery identifies only the active canonical temporary version
   const source = fs.readFileSync("scripts/aws/reconcile-production-signer-temporary-capability.mjs", "utf8");
   assert.match(source, /resolveSignerTemporaryVersionId\(\{ versions: current\.versions, activeVersionId: current\.active\.VersionId, evidence, steadyPolicy, identity \}\)/);
   assert.match(source, /state: "REVOKED", steadyVersionId: current\.active\.VersionId, temporaryVersionId/);
+});
+
+test("signer transitions accept only authenticated historical steady policy versions", () => {
+  const identity = { sourceSha, transitionId };
+  const versions = [
+    ...historicalPolicies.map(({ versionId: VersionId, document }) => ({ VersionId, document, IsDefaultVersion: false })),
+    { VersionId: "v8", document: steady, IsDefaultVersion: true },
+  ];
+  assert.equal(assertCanonicalPolicyHistory({ versions }, identity, false), true);
+  const modified = structuredClone(versions[0]);
+  modified.document.Statement.push({ Effect: "Allow", Action: "iam:CreateRole", Resource: "*" });
+  assert.throws(() => assertCanonicalPolicyHistory({ versions: [modified, versions.at(-1)] }, identity, false));
+  assert.throws(() => assertCanonicalPolicyHistory({ versions: [{ ...versions[0], IsDefaultVersion: true }, ...versions.slice(1, -1), versions.at(-1)] }, identity, false));
+  const temporary = buildSignerTemporaryPolicy(steady, identity);
+  assert.throws(() => assertCanonicalPolicyHistory({ versions: [...versions.slice(0, -1), { VersionId: "v9", document: temporary, IsDefaultVersion: false }, versions.at(-1)] }, identity, false));
+  const source = fs.readFileSync("scripts/aws/reconcile-production-signer-temporary-capability.mjs", "utf8");
+  assert.match(source, /phase === "revoke" && argv\.includes\("--abort-before-apply-confirmed"\).*evidence\?\.state === "INSTALLING".*canonical\(current\.active\.document\) === canonical\(steadyPolicy\)/);
+  assert.match(source, /temporaryCapabilityInstalled: false/);
+  assert.match(source, /phase === "verify-absent" && evidence\.state === "REVOKED" && evidence\.temporaryVersionId === null/);
 });
 
 test("apply remains unreachable unless the exact temporary policy is still active", () => {

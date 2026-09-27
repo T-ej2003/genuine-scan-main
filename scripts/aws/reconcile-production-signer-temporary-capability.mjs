@@ -9,6 +9,7 @@ import { SIGNER_TEMPORARY_CAPABILITY as C, assertSignerCapabilityEvidence, asser
 import { verifyProductionSecurityRebaselineSigner } from "./verify-production-security-rebaseline-signer.mjs";
 import { buildRecoveryAwsEnvironment } from "./recover-stage-b-backend-task-definition.mjs";
 import { createAssumedRoleSessionEnvironment, productionAwsExecutable } from "./production-credential-source-contract.mjs";
+import { AUTHENTICATED_HISTORICAL_STEADY_STATE_POLICY_SOURCES } from "./reconcile-production-stage-a-temporary-kms-capability.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const sha = (value) => crypto.createHash("sha256").update(value).digest("hex");
@@ -134,14 +135,17 @@ function writePolicyVersion(profile, document, expectedDefault) {
 function exactSignerTemporaryVersion(doc, identity) {
   try { assertSignerTemporaryPolicy(doc, { steadyPolicy, ...identity }); return true; } catch { return false; }
 }
-function assertCanonicalPolicyHistory(state, identity, allowTemporary) {
+export function assertCanonicalPolicyHistory(state, identity, allowTemporary) {
   const temporary = buildSignerTemporaryPolicy(steadyPolicy, identity);
+  const historical = new Set(AUTHENTICATED_HISTORICAL_STEADY_STATE_POLICY_SOURCES.map(({ policySha256 }) => policySha256));
   for (const version of state.versions) {
     const steady = canonical(version.document) === canonical(steadyPolicy);
+    const recognizedHistoricalSteady = !version.IsDefaultVersion && historical.has(sha(canonical(version.document)));
     const signer = allowTemporary && canonical(version.document) === canonical(temporary);
-    if (!steady && !signer) fail("managed policy contains an unexpected version document");
+    if (!steady && !recognizedHistoricalSteady && !signer) fail("managed policy contains an unexpected version document");
   }
   if (allowTemporary && state.versions.filter(({ document }) => canonical(document) === canonical(temporary)).length !== 1) fail("exactly one signer transition marker is required");
+  return true;
 }
 function verifySignerResourceCensus(profile, sessionEnv, { allowExisting = false } = {}) {
   let rolePresent = false;
@@ -227,7 +231,18 @@ export function runSignerTemporaryCapability(argv = process.argv.slice(2), { wri
     const result = buildSignerCapabilityEvidence({ state: "INSTALLED", ...identity, steadyVersionId, temporaryVersionId: active.VersionId, observedAt: now() });
     protect(stateFile, result); write(`${JSON.stringify({ state: result.state, evidenceSha256: result.evidenceSha256, recovered: true })}\n`); return result;
   }
+  if (phase === "revoke" && argv.includes("--abort-before-apply-confirmed") && evidence?.state === "INSTALLING" && canonical(current.active.document) === canonical(steadyPolicy) && !current.versions.some(({ document }) => exactSignerTemporaryVersion(document, identity))) {
+    assertCanonicalPolicyHistory(current, identity, false);
+    const result = buildSignerCapabilityEvidence({ ...evidence, state: "REVOKED", steadyVersionId: current.active.VersionId, temporaryVersionId: null, observedAt: now() });
+    protect(stateFile, result); write(`${JSON.stringify({ state: result.state, steadyVersionId: current.active.VersionId, recovered: true, temporaryCapabilityInstalled: false })}\n`); return result;
+  }
   if (!evidence) fail("private authorization evidence is required");
+  if (phase === "verify-absent" && evidence.state === "REVOKED" && evidence.temporaryVersionId === null) {
+    assertCanonicalPolicyHistory(current, identity, false);
+    if (current.active.VersionId !== evidence.steadyVersionId || canonical(current.active.document) !== canonical(steadyPolicy)) fail("canonical steady policy readback differs after no-mutation recovery");
+    const result = buildSignerCapabilityEvidence({ ...evidence, state: "ABSENCE_VERIFIED", observedAt: now() });
+    protect(stateFile, result); write(`${JSON.stringify({ state: result.state, restoredPolicy: "VALID", temporaryVersion: "NEVER_INSTALLED" })}\n`); return result;
+  }
   assertCanonicalPolicyHistory(current, identity, true);
   const temporaryVersionId = resolveSignerTemporaryVersionId({ versions: current.versions, activeVersionId: current.active.VersionId, evidence, steadyPolicy, identity });
   const temp = current.versions.find(({ VersionId }) => VersionId === temporaryVersionId);
