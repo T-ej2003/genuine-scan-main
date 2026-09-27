@@ -83,7 +83,7 @@ export function assertSignerCreationPlan(plan, { trustPolicy } = {}) {
   if (!Array.isArray(plan?.resource_changes)) fail("machine-readable Terraform plan is required");
   const priorRoot = plan.prior_state?.values?.root_module;
   const priorResources = (module) => [...(module?.resources || []), ...(module?.child_modules || []).flatMap(priorResources)];
-  if (!plan.prior_state || !priorRoot || !Array.isArray(priorRoot.resources) || priorResources(priorRoot).length) fail("signer initial convergence requires a valid empty Terraform state");
+  if (!plan.prior_state || !priorRoot || (priorRoot.resources !== undefined && !Array.isArray(priorRoot.resources)) || priorResources(priorRoot).length) fail("signer initial convergence requires a valid empty Terraform state");
   const configured = plan.configuration?.root_module?.resources;
   if (!Array.isArray(configured) || configured.length !== expectedAddresses.size || new Set(configured.map(({ address }) => address)).size !== expectedAddresses.size || configured.some(({ address }) => !expectedAddresses.has(address)) || Object.keys(plan.configuration.root_module.child_modules || {}).length) fail("saved plan configuration is not the exact signer Terraform root");
   const provider = plan.configuration.provider_config?.aws?.expressions;
