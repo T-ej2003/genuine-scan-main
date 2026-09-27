@@ -38,7 +38,7 @@ const profileIdentity = (profile) => assertSignerBootstrapIdentity(profile, aws(
 export function assertSignerCliArguments(argv, phase) {
   const common = ["--phase", "--source-sha", "--transition-id", "--bootstrap-profile", "--state-file"];
   const extra = ({ plan: ["--plan-output"], "verify-plan": ["--saved-plan", "--approval-reference"], apply: ["--saved-plan", "--approval-reference"], "verify-convergence": ["--saved-plan", "--terraform-state"], revoke: [] })[phase] || [];
-  const switches = phase === "revoke" ? ["--abort-confirmed-no-resources"] : [];
+  const switches = phase === "revoke" ? ["--abort-before-apply-confirmed"] : [];
   if (!["install", "recover-install", "init", "plan", "verify-plan", "apply", "verify-convergence", "revoke", "verify-absent"].includes(phase)) fail(`unsupported phase ${phase}`);
   const allowed = new Set([...common, ...extra, ...switches]);
   const seen = new Set();
@@ -143,14 +143,16 @@ function assertCanonicalPolicyHistory(state, identity, allowTemporary) {
   }
   if (allowTemporary && state.versions.filter(({ document }) => canonical(document) === canonical(temporary)).length !== 1) fail("exactly one signer transition marker is required");
 }
-function assertAbsentSignerResources(profile) {
-  try { aws(profile, ["iam", "get-role", "--role-name", C.roleName]); fail("signer role already exists; initial convergence refuses adoption"); } catch (error) { if (error.message.startsWith("Signer temporary capability:")) throw error; if (!String(error.stderr || "").includes("NoSuchEntity")) fail("cannot prove the signer role is absent"); }
+function verifySignerResourceCensus(profile, sessionEnv, { allowExisting = false } = {}) {
+  let rolePresent = false;
+  try { aws(profile, ["iam", "get-role", "--role-name", C.roleName], sessionEnv); rolePresent = true; } catch (error) { if (!String(error.stderr || "").includes("NoSuchEntity")) fail("cannot prove the signer role is absent"); }
+  if (rolePresent && !allowExisting) fail("signer role already exists; initial convergence refuses adoption");
   let aliasMarker, aliasPages = 0; const seenAliases = new Set();
   do {
     if (++aliasPages > 100 || (aliasMarker && seenAliases.has(aliasMarker))) fail("KMS alias census pagination is invalid");
     if (aliasMarker) seenAliases.add(aliasMarker);
-    const page = aws(profile, ["kms", "list-aliases", ...(aliasMarker ? ["--marker", aliasMarker] : [])]);
-    if ((page.Aliases || []).some(({ AliasName }) => AliasName === C.alias)) fail("signer alias already exists; initial convergence refuses adoption");
+    const page = aws(profile, ["kms", "list-aliases", "--no-paginate", ...(aliasMarker ? ["--marker", aliasMarker] : [])], sessionEnv);
+    if (!allowExisting && (page.Aliases || []).some(({ AliasName }) => AliasName === C.alias)) fail("signer alias already exists; initial convergence refuses adoption");
     if (typeof page.Truncated !== "boolean" || (page.Truncated && (typeof page.NextMarker !== "string" || !page.NextMarker))) fail("KMS alias census pagination is incomplete");
     aliasMarker = page.Truncated ? page.NextMarker : undefined;
   } while (aliasMarker);
@@ -158,15 +160,16 @@ function assertAbsentSignerResources(profile) {
   do {
     if (++pages > 100 || (marker && seen.has(marker))) fail("KMS key census pagination is invalid");
     if (marker) seen.add(marker);
-    const page = aws(profile, ["kms", "list-keys", ...(marker ? ["--marker", marker] : [])]);
+    const page = aws(profile, ["kms", "list-keys", "--no-paginate", ...(marker ? ["--marker", marker] : [])], sessionEnv);
     for (const { KeyId } of page.Keys || []) {
-      const tags = aws(profile, ["kms", "list-resource-tags", "--key-id", KeyId]).Tags || [];
+      const tags = aws(profile, ["kms", "list-resource-tags", "--key-id", KeyId], sessionEnv).Tags || [];
       const actual = Object.fromEntries(tags.map(({ TagKey, TagValue }) => [TagKey, TagValue]));
-      if (Object.entries(C.tags).every(([key, value]) => actual[key] === value)) fail("a key already carries the exact signer tags; refusing ambiguous ownership");
+      if (!allowExisting && Object.entries(C.tags).every(([key, value]) => actual[key] === value)) fail("a key already carries the exact signer tags; refusing ambiguous ownership");
     }
     if (typeof page.Truncated !== "boolean" || (page.Truncated && (typeof page.NextMarker !== "string" || !page.NextMarker))) fail("KMS key census pagination is incomplete");
     marker = page.Truncated ? page.NextMarker : undefined;
   } while (marker);
+  return true;
 }
 function assertTerraformState(file) {
   const stat = fs.lstatSync(file); if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o077)) fail("Terraform state export must be a private regular file");
@@ -198,7 +201,7 @@ export function runSignerTemporaryCapability(argv = process.argv.slice(2), { wri
     if (evidence) fail("authorization evidence already exists; a new transition nonce is required");
     if (canonical(current.active.document) !== canonical(steadyPolicy)) fail("live steady-state policy differs from protected source");
     if (current.versions.length > 3) fail("two policy-version slots are required for install and revocation; no versions were deleted");
-    assertCanonicalPolicyHistory(current, identity, false); assertAbsentSignerResources(bootstrap);
+    assertCanonicalPolicyHistory(current, identity, false);
     const temporary = buildSignerTemporaryPolicy(steadyPolicy, identity);
     assertSignerTemporaryPolicy(temporary, { steadyPolicy, ...identity });
     signerSession(bootstrap, transitionId); // Fail before changing the policy if the fresh MFA role chain is unavailable.
@@ -207,7 +210,8 @@ export function runSignerTemporaryCapability(argv = process.argv.slice(2), { wri
     const version = writePolicyVersion(bootstrap, temporary, current.active.VersionId);
     const installed = policyState(bootstrap); assertCanonicalPolicyHistory(installed, identity, true);
     if (installed.active.VersionId !== version || canonical(installed.active.document) !== canonical(temporary)) fail("temporary signer policy is not the exact active default after installation");
-    signerSession(bootstrap, transitionId);
+    const session = signerSession(bootstrap, transitionId);
+    verifySignerResourceCensus(undefined, session);
     const result = buildSignerCapabilityEvidence({ state: "INSTALLED", ...identity, steadyVersionId: current.active.VersionId, temporaryVersionId: version, observedAt: now() });
     protect(stateFile, result); write(`${JSON.stringify({ state: result.state, evidenceSha256: result.evidenceSha256, temporaryVersionId: version })}\n`); return result;
   }
@@ -218,7 +222,8 @@ export function runSignerTemporaryCapability(argv = process.argv.slice(2), { wri
     const base = current.versions.filter(({ document }) => canonical(document) === canonical(steadyPolicy));
     const steadyVersionId = evidence?.steadyVersionId || (base.length === 1 ? base[0].VersionId : null);
     if (!base.some(({ VersionId }) => VersionId === steadyVersionId)) fail("canonical pre-install policy version cannot be identified uniquely");
-    signerSession(bootstrap, transitionId);
+    const session = signerSession(bootstrap, transitionId);
+    verifySignerResourceCensus(undefined, session);
     const result = buildSignerCapabilityEvidence({ state: "INSTALLED", ...identity, steadyVersionId, temporaryVersionId: active.VersionId, observedAt: now() });
     protect(stateFile, result); write(`${JSON.stringify({ state: result.state, evidenceSha256: result.evidenceSha256, recovered: true })}\n`); return result;
   }
@@ -294,18 +299,20 @@ export function runSignerTemporaryCapability(argv = process.argv.slice(2), { wri
     protect(stateFile, result); write(`${JSON.stringify({ state: result.state, evidenceSha256: result.evidenceSha256, signerReadback: "VALID" })}\n`); return result;
   }
   if (phase === "revoke") {
-    const abort = argv.includes("--abort-confirmed-no-resources");
+    const abort = argv.includes("--abort-before-apply-confirmed");
     if (!abort && evidence.state !== "CONVERGED") fail("signer convergence readback is required before normal revocation");
-    if (abort && !["INSTALLED", "PLAN_GENERATED", "PLAN_REVIEWED"].includes(evidence.state)) fail("abort revocation is allowed only before apply authorization");
-    if (abort) assertAbsentSignerResources(bootstrap);
+    if (abort && !["INSTALLING", "INSTALLED", "PLAN_GENERATED", "PLAN_REVIEWED"].includes(evidence.state)) fail("abort revocation is allowed only before apply authorization");
+    if (abort && evidence.state === "INSTALLING" && exactSignerTemporaryVersion(current.active.document, identity)) verifySignerResourceCensus(undefined, signerSession(bootstrap, transitionId), { allowExisting: true });
+    if (abort && evidence.state !== "INSTALLING") verifySignerResourceCensus(undefined, signerSession(bootstrap, transitionId));
     if (canonical(current.active.document) === canonical(steadyPolicy) && current.active.VersionId !== evidence.temporaryVersionId) {
       const result = buildSignerCapabilityEvidence({ ...evidence, state: "REVOKED", steadyVersionId: current.active.VersionId, observedAt: now() });
       protect(stateFile, result); write(`${JSON.stringify({ state: result.state, steadyVersionId: current.active.VersionId, recovered: true })}\n`); return result;
     }
-    if (current.active.VersionId !== evidence.temporaryVersionId) fail("temporary policy is not the live default");
+    const temporaryVersionId = evidence.temporaryVersionId || current.active.VersionId;
+    if (current.active.VersionId !== temporaryVersionId || !exactSignerTemporaryVersion(current.active.document, identity)) fail("temporary policy is not the live default");
     if (current.versions.length >= 5) fail("no managed-policy version slot remains for safe revocation");
     const steadyVersion = writePolicyVersion(bootstrap, steadyPolicy, current.active.VersionId);
-    const result = buildSignerCapabilityEvidence({ ...evidence, state: "REVOKED", steadyVersionId: steadyVersion, temporaryVersionId: evidence.temporaryVersionId, observedAt: now() });
+    const result = buildSignerCapabilityEvidence({ ...evidence, state: "REVOKED", steadyVersionId: steadyVersion, temporaryVersionId, observedAt: now() });
     protect(stateFile, result); write(`${JSON.stringify({ state: result.state, steadyVersionId: steadyVersion })}\n`); return result;
   }
   if (phase === "verify-absent") {

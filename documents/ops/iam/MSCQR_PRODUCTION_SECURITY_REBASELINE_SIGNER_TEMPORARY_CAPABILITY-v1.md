@@ -9,16 +9,21 @@ policy as its STS session policy. This prevents its other attached release
 permissions from being available to signer Terraform. It does not create a
 role, backend, workflow, or production bootstrap.
 
-Before the first signer transition, reconcile the canonical
-`MSCQRProductionBootstrapOperatorSignerCapability` inline policy through the
-existing source-bound `production-bootstrap-operator-policy-reconciliation`
-workflow. It grants MFA-gated `iam:CreatePolicyVersion` only on
-`MSCQRProductionGreenStageARelease` and the exact policy, signer-role, and
-regional KMS readback actions. Do not edit the live user policy manually.
+Before the first signer transition, reconcile
+`MSCQRProductionBootstrapOperator-v2.json` through the existing source-bound
+`production-bootstrap-operator-policy-reconciliation` workflow. It folds the
+MFA-gated exact-policy read/`iam:CreatePolicyVersion` grant into the existing
+bootstrap inline policy, whose non-whitespace size is 1,963 of IAM's 2,048
+aggregate user-policy character limit. It adds no second inline policy and no
+permanent KMS or signer-role read permission. Do not edit the live user policy
+manually.
 
-The managed policy is temporarily replaced with a signer-only document
-because the canonical Stage-A policy plus the signer statements would exceed
-AWS's managed-policy size limit. The other policies attached to the release
+The managed policy is temporarily replaced with a signer-only document. The
+temporary release-deployer session includes the exact signer IAM/KMS
+permissions plus the read-only IAM-role/KMS census needed to prove signer
+resources are absent. The census is performed after the temporary policy is
+active, before Terraform initialization or planning; KMS key/alias pagination
+is read one service page at a time. The other policies attached to the release
 deployer are unchanged. Do not run Stage-A operations while this window is
 open. After convergence, the canonical source policy is restored as the
 default. The consumed temporary policy version remains non-default as a
@@ -148,12 +153,17 @@ npm run production:signer-temporary-capability -- \
   --state-file /private/tmp/signer-convergence/capability.json
 ```
 
-For a plan failure before apply, `revoke --abort-confirmed-no-resources` is
-available only while evidence is `INSTALLED` or `PLAN_REVIEWED` and the role
-and alias are authoritatively absent. If apply partially creates resources,
-stop: do not claim cleanup or remove the capability until the exact signer
-state/live resource condition is reconciled through a separately approved
-Terraform operation.
+For a stop before Terraform apply, `revoke --abort-before-apply-confirmed`
+requires confirmation that no apply ran. An `INSTALLING` record can be
+revoked even when the post-install census found pre-existing signer resources:
+that state cannot enter init, plan, or apply. Revocation still requires a
+complete IAM/KMS census; pagination or read errors leave the capability in
+place and preserve the pending evidence for retry. `INSTALLED`, `PLAN_GENERATED`,
+and `PLAN_REVIEWED` evidence additionally require an authoritative absent-role
+and absent-alias readback before abort revocation. If apply partially creates
+resources, stop: do not claim cleanup or remove the capability until the exact
+signer state/live resource condition is reconciled through a separately
+approved Terraform operation.
 
 ## Boundary
 

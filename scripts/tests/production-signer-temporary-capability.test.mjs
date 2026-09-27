@@ -39,23 +39,29 @@ test("only the MFA bootstrap operator can invoke a closed signer lifecycle CLI",
   assert.doesNotThrow(() => assertSignerCliArguments(base, "install"));
   assert.throws(() => assertSignerCliArguments(base.slice(0, -2), "install"), /--state-file is required/);
   assert.throws(() => assertSignerCliArguments(base, "plan"), /--plan-output is required/);
+  const revocation = [...base]; revocation[1] = "revoke";
+  assert.doesNotThrow(() => assertSignerCliArguments([...revocation, "--abort-before-apply-confirmed"], "revoke"));
+  assert.throws(() => assertSignerCliArguments([...revocation, "--abort-confirmed-no-resources"], "revoke"));
   assert.doesNotThrow(() => assertSignerCliArguments(["--phase", "verify-absent", ...base.slice(2)], "verify-absent"));
   for (const option of ["--admin-profile", "--policy-arn", "--policy-name", "--policy-document", "--policy-file", "--state-key", "--role-arn", "--kms-key"]) assert.throws(() => assertSignerCliArguments([...base, option, "attacker-value"], "install"));
   assert.throws(() => assertSignerCliArguments([...base, "--bootstrap-profile", "attacker-profile"], "install"));
 });
 
 test("bootstrap policy transition is MFA-gated and pinned to the one canonical managed policy", () => {
-  const policy = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionBootstrapOperatorSignerCapability-v1.json", "utf8"));
+  const predecessor = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionBootstrapOperator-v1.json", "utf8"));
+  const policy = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionBootstrapOperator-v2.json", "utf8"));
   const target = "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease";
-  const bootstrapBase = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionBootstrapOperator-v1.json", "utf8"));
-  assert.equal(bootstrapBase.Statement.some(({ Action, Resource }) => (Array.isArray(Action) ? Action : [Action]).includes("iam:CreatePolicyVersion") && Resource === target), false, "pre-fix bootstrap policy could not install or revoke the signer version");
-  const transition = policy.Statement.find(({ Sid }) => Sid === "TransitionSignerCapabilityPolicyWithMfa");
-  assert.deepEqual(transition, { Sid: "TransitionSignerCapabilityPolicyWithMfa", Effect: "Allow", Action: "iam:CreatePolicyVersion", Resource: target, Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } });
-  const read = policy.Statement.find(({ Sid }) => Sid === "ReadSignerCapabilityPolicyWithMfa");
-  assert.deepEqual(read, { Sid: "ReadSignerCapabilityPolicyWithMfa", Effect: "Allow", Action: ["iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions", "iam:ListEntitiesForPolicy"], Resource: target, Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } });
-  assert.equal(policy.Statement.some(({ Action, Resource }) => (Array.isArray(Action) ? Action : [Action]).includes("iam:CreatePolicyVersion") && Resource !== target), false);
-  for (const denied of ["iam:*", "iam:CreatePolicy", "iam:CreateRole", "iam:UpdateAssumeRolePolicy", "iam:AttachRolePolicy", "iam:PutRolePolicy", "iam:PassRole", "iam:DeletePolicyVersion", "kms:PutKeyPolicy", "kms:Decrypt", "kms:CreateGrant", "s3:GetObject", "s3:PutObject"]) assert.equal(policy.Statement.some(({ Action }) => (Array.isArray(Action) ? Action : [Action]).includes(denied)), false, denied);
-  assert.equal(JSON.stringify(policy).length < 2048, true, "purpose policy fits the IAM inline-policy limit");
+  assert.equal(predecessor.Statement.some(({ Action, Resource }) => (Array.isArray(Action) ? Action : [Action]).includes("iam:CreatePolicyVersion") && Resource === target), false, "the pre-fix bootstrap policy could not install or revoke the signer version");
+  const transition = policy.Statement.find(({ Action, Resource }) => Array.isArray(Action) && Action.includes("iam:CreatePolicyVersion") && Resource === target);
+  assert.deepEqual(transition.Action, ["iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions", "iam:ListEntitiesForPolicy", "iam:CreatePolicyVersion"]);
+  assert.deepEqual(transition.Condition, { Bool: { "aws:MultiFactorAuthPresent": "true" } });
+  assert.equal(policy.Statement.filter(({ Action }) => (Array.isArray(Action) ? Action : [Action]).includes("iam:CreatePolicyVersion")).length, 1);
+  assert.equal(transition.Resource, target);
+  for (const denied of ["iam:*", "iam:CreatePolicy", "iam:CreateRole", "iam:UpdateAssumeRolePolicy", "iam:AttachRolePolicy", "iam:PutRolePolicy", "iam:PassRole", "iam:DeletePolicyVersion", "kms:ListKeys", "kms:ListResourceTags", "kms:PutKeyPolicy", "kms:Decrypt", "kms:CreateGrant"]) assert.equal(policy.Statement.some(({ Action }) => (Array.isArray(Action) ? Action : [Action]).includes(denied)), false, denied);
+  assert.equal(JSON.stringify(policy).replace(/\s/g, "").length, 1963);
+  assert.equal(grants(policy, "s3:GetObject", `arn:aws:s3:::${C.bucket}/${C.stateKey}`), false);
+  assert.equal(grants(policy, "s3:PutObject", `arn:aws:s3:::${C.bucket}/${C.stateKey}`), false);
+  assert.equal(JSON.stringify(policy).replace(/\s/g, "").length <= 2048, true, "bootstrap's single canonical inline policy fits IAM's aggregate user quota");
   const source = fs.readFileSync("scripts/aws/reconcile-production-signer-temporary-capability.mjs", "utf8");
   assert.doesNotMatch(source, /--admin-profile|admin\s*=\s*opt\(/);
   assert.match(source, /writePolicyVersion\(bootstrap, temporary/);
@@ -64,7 +70,7 @@ test("bootstrap policy transition is MFA-gated and pinned to the one canonical m
 
 test("temporary delta is source/nonce bound and excludes unrelated state, IAM, and KMS data actions", () => {
   const statements = signerTemporaryStatements({ sourceSha, transitionId });
-  assert.equal(statements.length, 13);
+  assert.equal(statements.length, 15);
   const temporary = buildSignerTemporaryPolicy(steady, { sourceSha, transitionId });
   assertSignerTemporaryPolicy(temporary, { steadyPolicy: steady, sourceSha, transitionId });
   const stateArn = `arn:aws:s3:::${C.bucket}/${C.stateKey}`;
@@ -78,6 +84,11 @@ test("temporary delta is source/nonce bound and excludes unrelated state, IAM, a
   assert.deepEqual(list.Condition.StringLike["s3:prefix"], [C.stateKey, C.lockKey]);
   assert.equal(grants(temporary, "iam:CreateRole", C.roleArn), true);
   assert.equal(grants(temporary, "iam:CreateRole", "arn:aws:iam::368992683803:role/unrelated"), false);
+  assert.equal(grants(temporary, "iam:GetRole", C.roleArn), true);
+  assert.equal(grants(temporary, "kms:ListKeys", "*"), true);
+  const census = statements.find(({ Action, Sid }) => Action === "kms:ListResourceTags" && Sid.startsWith("TemporarySignerKeyCensus"));
+  assert.deepEqual(census.Resource, "arn:aws:kms:eu-west-2:368992683803:key/*");
+  assert.deepEqual(census.Condition, { StringEquals: { "aws:RequestedRegion": C.region } });
   assert.equal(grants(temporary, "kms:Decrypt", "arn:aws:kms:eu-west-2:368992683803:key/unrelated"), false);
   assert.throws(() => assertSignerRevocation({ activePolicy: temporary, temporaryPolicy: temporary, activeVersionId: "v2", temporaryVersionId: "v2", steadyPolicy: steady, identity: { sourceSha, transitionId } }));
   assert.equal(assertSignerRevocation({ activePolicy: steady, temporaryPolicy: temporary, activeVersionId: "v3", temporaryVersionId: "v2", steadyPolicy: steady, identity: { sourceSha, transitionId } }), true);
@@ -107,10 +118,16 @@ test("apply remains unreachable unless the exact temporary policy is still activ
   assert.match(source, /"init", "-input=false", "-lockfile=readonly"/);
   assert.match(source, /"--policy-arns", `arn=\$\{C\.sourcePolicyArn\}`/);
   assert.match(source, /createAssumedRoleSessionEnvironment\(\{ credentials \}\)/);
+  assert.match(source, /list-aliases", "--no-paginate"/);
+  assert.match(source, /list-keys", "--no-paginate"/);
+  assert.match(source, /verifySignerResourceCensus\(undefined, session\)/);
+  assert.match(source, /evidence\.state === "INSTALLING" && exactSignerTemporaryVersion\(current\.active\.document, identity\)\) verifySignerResourceCensus\(undefined, signerSession\(bootstrap, transitionId\), \{ allowExisting: true \}\)/);
+  assert.match(source, /if \(abort && evidence\.state !== "INSTALLING"\) verifySignerResourceCensus\(undefined, signerSession\(bootstrap, transitionId\)\)/);
   assert.match(source, /workspace", "show"\].*, env: sessionEnv/);
   assert.match(source, /terraformSessionEnvironment\(session\)/);
   assert.doesNotMatch(source, /--release-profile/);
   assert.ok(source.indexOf("protect(stateFile, pending)") < source.indexOf("writePolicyVersion(bootstrap, temporary"), "transition identity is durable before the policy mutation");
+  assert.ok(source.indexOf("writePolicyVersion(bootstrap, temporary") < source.indexOf("verifySignerResourceCensus(undefined, session)"), "signer absence census uses the temporary session before init or plan");
   assert.match(source, /phase === "recover-install" && \(!evidence \|\| evidence\.state === "INSTALLING"\)/);
 });
 

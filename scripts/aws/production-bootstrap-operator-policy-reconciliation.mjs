@@ -39,12 +39,11 @@ export const BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION = Object.freeze({
   userName: "mscqr-production-bootstrap-operator",
   userArn: "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator",
   inlinePolicyName: "MSCQRProductionBootstrapOperator",
-  signerCapabilityInlinePolicyName: "MSCQRProductionBootstrapOperatorSignerCapability",
   releaseRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer",
   verifierRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-ecs-exec-verifier",
   publisherBootstrapRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-stage-b-publisher-bootstrap",
-  sourcePath: "documents/ops/iam/MSCQRProductionBootstrapOperator-v1.json",
-  signerCapabilitySourcePath: "documents/ops/iam/MSCQRProductionBootstrapOperatorSignerCapability-v1.json",
+  sourcePath: "documents/ops/iam/MSCQRProductionBootstrapOperator-v2.json",
+  predecessorSourcePath: "documents/ops/iam/MSCQRProductionBootstrapOperator-v1.json",
   workflowPath: ".github/workflows/authorize-production-bootstrap-operator-policy-reconciliation.yml",
   workflowRef: PRODUCTION_ENVIRONMENT_APPROVAL.bootstrapOperatorPolicyReconciliationWorkflowRef,
   artifactName: "production-bootstrap-operator-policy-reconciliation-authorization",
@@ -55,7 +54,7 @@ export const BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION = Object.freeze({
   legacyTransitionReservationKey: `${PRODUCTION_ACTIVATION_LIFECYCLE.initialActivationPolicyReconciliationReservationPrefix}bootstrap-operator-legacy-mfa-transition.json`,
   authorizationFilename: "authorization.json",
   maxAgeMs: 30 * 60 * 1000,
-  maxAwsMutations: Object.freeze({ "iam:PutUserPolicy": 2, "iam:TagUser": 2, "s3:PutObject": 1 }),
+  maxAwsMutations: Object.freeze({ "iam:PutUserPolicy": 1, "iam:TagUser": 2, "s3:PutObject": 1 }),
   postWriteReadDelaysMs: Object.freeze([250, 500, 1000, 2000, 4000]),
 });
 
@@ -211,8 +210,8 @@ const credentialTopology = ({ accessKeys, consoleLoginPresent, mfaDevices, trans
 };
 
 export function readBootstrapOperatorDesiredPolicy({ repositoryRoot = root } = {}) {
-  const document = normalizeIamPolicyDocument(fs.readFileSync(path.resolve(repositoryRoot, BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.sourcePath), "utf8"), "bootstrap operator source policy");
-  const expected = [
+  const predecessorDocument = normalizeIamPolicyDocument(fs.readFileSync(path.resolve(repositoryRoot, BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.predecessorSourcePath), "utf8"), "bootstrap operator predecessor source policy");
+  const predecessorExpected = [
     { Sid: "AssumeReleaseRoleOnlyWithMfa", Effect: "Allow", Action: "sts:AssumeRole", Resource: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.releaseRoleArn, Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } },
     { Sid: "AssumeVerifierMfa", Effect: "Allow", Action: "sts:AssumeRole", Resource: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.verifierRoleArn, Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } },
     { Sid: "AssumeStageBPublisherBootstrapRoleOnlyWithMfa", Effect: "Allow", Action: "sts:AssumeRole", Resource: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.publisherBootstrapRoleArn, Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } },
@@ -223,51 +222,41 @@ export function readBootstrapOperatorDesiredPolicy({ repositoryRoot = root } = {
     { Effect: "Allow", Action: ["iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions"], Resource: "arn:aws:iam::368992683803:policy/MSCQRProductionWebImagePublisherBoundary" },
     { Sid: "ReadOwnMfaState", Effect: "Allow", Action: ["iam:GetUser", "iam:ListMFADevices"], Resource: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn },
   ];
-  if (document.Version !== "2012-10-17" || !Array.isArray(document.Statement) || document.Statement.length !== expected.length || expected.some((statement) => !document.Statement.some((candidate) => canonicalJson(candidate) === canonicalJson(statement)))) throw new Error("Bootstrap operator source policy is not the reviewed exact document.");
-  const newlyGovernedWebCapabilities = expected.filter(({ Sid }) => !Sid);
-  const isNewWebCapability = (statement) => newlyGovernedWebCapabilities.some((candidate) => canonicalJson(candidate) === canonicalJson(statement));
-  const predecessorDocument = { Version: "2012-10-17", Statement: document.Statement.filter((statement) => statement.Sid !== "AssumeVerifierMfa" && !isNewWebCapability(statement)) };
-  const legacyLivePredecessorDocument = { Version: "2012-10-17", Statement: document.Statement.filter((statement) => !["AssumeVerifierMfa", "AssumeStageBPublisherBootstrapRoleOnlyWithMfa"].includes(statement.Sid) && !isNewWebCapability(statement)) };
+  if (predecessorDocument.Version !== "2012-10-17" || !Array.isArray(predecessorDocument.Statement) || predecessorDocument.Statement.length !== predecessorExpected.length || predecessorExpected.some((statement) => !predecessorDocument.Statement.some((candidate) => canonicalJson(candidate) === canonicalJson(statement)))) throw new Error("Bootstrap operator predecessor source policy is not the reviewed exact document.");
+  const document = normalizeIamPolicyDocument(fs.readFileSync(path.resolve(repositoryRoot, BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.sourcePath), "utf8"), "bootstrap operator source policy");
+  const expected = [
+    { Effect: "Allow", Action: "sts:AssumeRole", Resource: [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.releaseRoleArn, BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.verifierRoleArn, BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.publisherBootstrapRoleArn], Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } },
+    ...predecessorDocument.Statement.filter((statement) => !["AssumeReleaseRoleOnlyWithMfa", "AssumeVerifierMfa", "AssumeStageBPublisherBootstrapRoleOnlyWithMfa"].includes(statement.Sid)).map(({ Sid, ...statement }) => statement),
+    { Effect: "Allow", Action: ["iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions", "iam:ListEntitiesForPolicy", "iam:CreatePolicyVersion"], Resource: "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease", Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } },
+  ];
+  if (document.Version !== "2012-10-17" || !Array.isArray(document.Statement) || document.Statement.length !== expected.length || expected.some((statement) => !document.Statement.some((candidate) => canonicalJson(candidate) === canonicalJson(statement))) || JSON.stringify(document).replace(/\s/g, "").length > 2048) throw new Error("Bootstrap operator source policy is not the reviewed exact document or exceeds the IAM user inline-policy quota.");
+  const legacyLivePredecessorDocument = { Version: "2012-10-17", Statement: predecessorDocument.Statement.filter(({ Sid }) => ["AssumeReleaseRoleOnlyWithMfa", "ReadOwnMfaState"].includes(Sid)) };
   const legacyLivePredecessorPolicySha256 = sha256(legacyLivePredecessorDocument);
   if (legacyLivePredecessorPolicySha256 !== LEGACY_BOOTSTRAP_TRANSITION_LIVE_PREDECESSOR_POLICY_SHA256) throw new Error("Bootstrap operator legacy live predecessor is not the authenticated production policy.");
-  const signerCapabilityDocument = normalizeIamPolicyDocument(fs.readFileSync(path.resolve(repositoryRoot, BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.signerCapabilitySourcePath), "utf8"), "bootstrap signer capability source policy");
-  const expectedSignerCapability = [
-    { Sid: "ReadSignerCapabilityPolicyWithMfa", Effect: "Allow", Action: ["iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions", "iam:ListEntitiesForPolicy"], Resource: "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease", Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } },
-    { Sid: "TransitionSignerCapabilityPolicyWithMfa", Effect: "Allow", Action: "iam:CreatePolicyVersion", Resource: "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease", Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } },
-    { Sid: "ReadSignerRoleWithMfa", Effect: "Allow", Action: "iam:GetRole", Resource: "arn:aws:iam::368992683803:role/mscqr-production-security-rebaseline-image-signer", Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } },
-    { Sid: "ListProductionKmsKeysWithMfa", Effect: "Allow", Action: "kms:ListKeys", Resource: "*", Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" }, StringEquals: { "aws:RequestedRegion": "eu-west-2" } } },
-    { Sid: "ReadProductionKmsTagsWithMfa", Effect: "Allow", Action: "kms:ListResourceTags", Resource: "arn:aws:kms:eu-west-2:368992683803:key/*", Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" }, StringEquals: { "aws:RequestedRegion": "eu-west-2" } } },
-    { Sid: "ListProductionKmsAliasesWithMfa", Effect: "Allow", Action: "kms:ListAliases", Resource: "*", Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" }, StringEquals: { "aws:RequestedRegion": "eu-west-2" } } },
-  ];
-  if (signerCapabilityDocument.Version !== "2012-10-17" || canonicalJson(signerCapabilityDocument.Statement) !== canonicalJson(expectedSignerCapability)) throw new Error("Bootstrap signer capability source policy is not the reviewed exact document.");
-  return Object.freeze({ document, predecessorDocument, legacyLivePredecessorDocument, sourcePolicySha256: sha256(document), predecessorPolicySha256: sha256(predecessorDocument), legacyLivePredecessorPolicySha256, signerCapabilityDocument, signerCapabilityPolicySha256: sha256(signerCapabilityDocument) });
+  return Object.freeze({ document, predecessorDocument, legacyLivePredecessorDocument, sourcePolicySha256: sha256(document), predecessorPolicySha256: sha256(predecessorDocument), legacyLivePredecessorPolicySha256 });
 }
 
 export function authenticateBootstrapOperatorLiveState(value, { desired = readBootstrapOperatorDesiredPolicy(), allowPostState = true, transition } = {}) {
-  exactKeys(value, ["user", "attachedPolicies", "inlinePolicyNames", "groups", "consoleLoginPresent", "accessKeys", "mfaDevices", "document", "signerDocument"], "Bootstrap operator live state");
+  exactKeys(value, ["user", "attachedPolicies", "inlinePolicyNames", "groups", "consoleLoginPresent", "accessKeys", "mfaDevices", "document"], "Bootstrap operator live state");
   if (value.user?.Arn !== BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn || value.user?.UserName !== BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userName || value.user?.Path !== "/" || Object.hasOwn(value.user, "PermissionsBoundary")) throw new Error("Bootstrap operator user identity is unexpected.");
-  const signerInstalled = value.signerDocument !== undefined && value.signerDocument !== null;
-  const expectedPolicyNames = [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.inlinePolicyName, ...(signerInstalled ? [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.signerCapabilityInlinePolicyName] : [])].sort();
+  const expectedPolicyNames = [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.inlinePolicyName];
   if (!Array.isArray(value.attachedPolicies) || value.attachedPolicies.length || !Array.isArray(value.groups) || value.groups.length || canonicalJson([...(value.inlinePolicyNames || [])].sort()) !== canonicalJson(expectedPolicyNames)) throw new Error("Bootstrap operator policy topology is unexpected.");
   const credentialState = credentialTopology({ accessKeys: value.accessKeys, consoleLoginPresent: value.consoleLoginPresent, mfaDevices: value.mfaDevices, transition });
   const document = normalizeIamPolicyDocument(value.document, "bootstrap operator live policy");
   const documentSha256 = sha256(document);
   const pre = documentSha256 === desired.predecessorPolicySha256;
   const legacyPre = legacyTransition(transition) && documentSha256 === desired.legacyLivePredecessorPolicySha256;
-  const basePost = documentSha256 === desired.sourcePolicySha256;
-  const signerDocument = signerInstalled ? normalizeIamPolicyDocument(value.signerDocument, "bootstrap signer capability live policy") : null;
-  if (signerDocument && canonicalJson(signerDocument) !== canonicalJson(desired.signerCapabilityDocument)) throw new Error("Bootstrap signer capability policy contains unexpected drift.");
-  const signerPost = signerDocument !== null;
-  if ((!pre && !legacyPre && !basePost) || (signerPost && !allowPostState) || (!signerPost && !pre && !legacyPre && !basePost) || (signerPost && !pre && !legacyPre && !basePost)) throw new Error("Bootstrap operator policy state has unexpected drift or an incomplete transition.");
-  const status = basePost && signerPost && allowPostState ? "EXACT_COMPLETE" : (pre || legacyPre) && signerPost ? "INCOMPLETE_WRITE_READBACK" : basePost && !signerPost ? "EXACT_BASE_COMPLETE" : legacyPre ? "EXACT_LEGACY_LIVE_PREDECESSOR" : "EXACT_PREDECESSOR";
-  return Object.freeze({ ...value, document, documentSha256, signerDocument, signerDocumentSha256: signerDocument ? sha256(signerDocument) : null, credentialState, status });
+  const post = documentSha256 === desired.sourcePolicySha256;
+  if ((!pre && !legacyPre && !post) || (post && !allowPostState)) throw new Error("Bootstrap operator policy state has unexpected drift or an incomplete transition.");
+  const status = post ? "EXACT_COMPLETE" : legacyPre ? "EXACT_LEGACY_LIVE_PREDECESSOR" : "EXACT_PREDECESSOR";
+  return Object.freeze({ ...value, document, documentSha256, credentialState, status });
 }
 
 const authenticatePreparationLiveState = (value, transition) => {
-  const { documentSha256, signerDocumentSha256, credentialState, status, ...raw } = value || {};
+  const { documentSha256, credentialState, status, ...raw } = value || {};
   const state = authenticateBootstrapOperatorLiveState(raw, { transition });
   if (documentSha256 === undefined && credentialState === undefined && status === undefined) return state;
-  if (documentSha256 !== state.documentSha256 || signerDocumentSha256 !== state.signerDocumentSha256 || credentialState !== state.credentialState || status !== state.status) throw new Error("Bootstrap operator authenticated live state changed before preparation.");
+  if (documentSha256 !== state.documentSha256 || credentialState !== state.credentialState || status !== state.status) throw new Error("Bootstrap operator authenticated live state changed before preparation.");
   return state;
 };
 
@@ -283,10 +272,7 @@ export function readBootstrapOperatorLiveState({ run, transition } = {}) {
   try { runJson(run, ["iam", "get-login-profile", "--user-name", BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userName]); consoleLoginPresent = true; }
   catch (error) { if (!noSuchEntity(error)) throw error; consoleLoginPresent = false; }
   const document = runJson(run, ["iam", "get-user-policy", "--user-name", BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userName, "--policy-name", BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.inlinePolicyName]).PolicyDocument;
-  const signerDocument = inlinePolicyNames.includes(BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.signerCapabilityInlinePolicyName)
-    ? runJson(run, ["iam", "get-user-policy", "--user-name", BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userName, "--policy-name", BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.signerCapabilityInlinePolicyName]).PolicyDocument
-    : null;
-  return authenticateBootstrapOperatorLiveState({ user, attachedPolicies, inlinePolicyNames, groups, consoleLoginPresent, accessKeys, mfaDevices, document, signerDocument }, { transition });
+  return authenticateBootstrapOperatorLiveState({ user, attachedPolicies, inlinePolicyNames, groups, consoleLoginPresent, accessKeys, mfaDevices, document }, { transition });
 }
 
 const readBootstrapOperatorPostWriteState = ({ run, transition, sleep = bootstrapOperatorPolicyReconciliationSleep } = {}) => {
@@ -295,8 +281,8 @@ const readBootstrapOperatorPostWriteState = ({ run, transition, sleep = bootstra
     try {
       const state = readBootstrapOperatorLiveState({ run, transition });
       if (state.status === "EXACT_COMPLETE") return state;
-      if (state.status !== "INCOMPLETE_WRITE_READBACK") throw new Error("Bootstrap operator policy readback is not the exact authorized post-state.");
-      transient = new Error("Bootstrap operator inline policy writes are still converging.");
+      if (predecessorStatus(state.status)) transient = new Error("Bootstrap operator inline policy write is still converging.");
+      else throw new Error("Bootstrap operator policy readback is not the exact authorized post-state.");
     } catch (error) {
       if (!isTransientBootstrapOperatorRead(error)) throw error;
       transient = error;
@@ -310,23 +296,21 @@ const readBootstrapOperatorPostWriteState = ({ run, transition, sleep = bootstra
   throw new Error("Bootstrap operator policy readback did not converge to the exact authorized post-state.", { cause: transient });
 };
 
-const predecessorStatus = (status) => ["EXACT_PREDECESSOR", "EXACT_LEGACY_LIVE_PREDECESSOR", "EXACT_BASE_COMPLETE"].includes(status);
+const predecessorStatus = (status) => ["EXACT_PREDECESSOR", "EXACT_LEGACY_LIVE_PREDECESSOR"].includes(status);
 const writePlan = (state, transition) => {
   const desired = readBootstrapOperatorDesiredPolicy();
   const needsBasePolicy = ["EXACT_PREDECESSOR", "EXACT_LEGACY_LIVE_PREDECESSOR"].includes(state.status);
-  const addedStatements = needsBasePolicy ? desired.document.Statement.filter(({ Sid }) => !state.document.Statement.some((statement) => statement.Sid === Sid)) : [];
   return [
     ...(legacyTransition(transition) && (predecessorStatus(state.status) || state.status === "EXACT_COMPLETE") ? [{ action: "s3:PutObject", resource: `${PRODUCTION_ACTIVATION_LIFECYCLE.bucket}/${BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.legacyTransitionReservationKey}`, condition: "IF_NONE_MATCH_OR_EXACT_ETAG" }] : []),
     ...(legacyTransition(transition) && predecessorStatus(state.status) ? [{ action: "iam:TagUser", userArn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn, tagKey: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.legacyTransitionConsumptionTagKey, valueBinding: "RESERVED_AUTHORIZATION_SHA256_AND_EXPIRY" }] : []),
-    ...(needsBasePolicy ? [{ action: "iam:PutUserPolicy", userArn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn, inlinePolicyName: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.inlinePolicyName, policySha256: desired.sourcePolicySha256, addedStatements }] : []),
-    ...(!state.signerDocument ? [{ action: "iam:PutUserPolicy", userArn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn, inlinePolicyName: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.signerCapabilityInlinePolicyName, policySha256: desired.signerCapabilityPolicySha256 }] : []),
+    ...(needsBasePolicy ? [{ action: "iam:PutUserPolicy", userArn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn, inlinePolicyName: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.inlinePolicyName, policySha256: desired.sourcePolicySha256 }] : []),
     ...(legacyTransition(transition) ? [{ action: "iam:TagUser", userArn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn, tagKey: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.legacyTransitionConsumptionTagKey, valueBinding: "COMPLETED_AUTHORIZATION_SHA256" }] : []),
   ];
 };
 const preparationBody = ({ sourceSha, state, preparedAt, transition, legacyRotationBindings, legacyRotationBindingOrigin }) => ({
   schemaVersion: 1, kind: "PRODUCTION_BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION_PREPARATION", operation: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.operation,
   sourceSha, userArn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn, inlinePolicyName: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.inlinePolicyName,
-  predecessorClassification: state.status, predecessorPolicySha256: state.documentSha256, successorPolicySha256: sha256({ base: readBootstrapOperatorDesiredPolicy().sourcePolicySha256, signer: readBootstrapOperatorDesiredPolicy().signerCapabilityPolicySha256 }),
+  predecessorClassification: state.status, predecessorPolicySha256: state.documentSha256, successorPolicySha256: readBootstrapOperatorDesiredPolicy().sourcePolicySha256,
   credentialState: state.credentialState,
   transition: state.credentialState === LEGACY_BOOTSTRAP_TRANSITION_KIND ? transition : null,
   legacyRotationBindings: state.credentialState === LEGACY_BOOTSTRAP_TRANSITION_KIND ? legacyRotationBindings : null,
@@ -347,10 +331,10 @@ export function assertBootstrapOperatorPolicyPreparation(value, { sourceSha, now
   exactKeys(value, PREPARATION_KEYS, "Bootstrap operator preparation");
   const desired = readBootstrapOperatorDesiredPolicy(); const { preparationSha256, ...body } = value;
   const created = new Date(value.createdAt); const expires = new Date(value.expiresAt);
-  const state = value.predecessorClassification === "EXACT_PREDECESSOR" ? { status: "EXACT_PREDECESSOR", document: desired.predecessorDocument, documentSha256: desired.predecessorPolicySha256 } : value.predecessorClassification === "EXACT_LEGACY_LIVE_PREDECESSOR" ? { status: "EXACT_LEGACY_LIVE_PREDECESSOR", document: desired.legacyLivePredecessorDocument, documentSha256: desired.legacyLivePredecessorPolicySha256 } : value.predecessorClassification === "EXACT_BASE_COMPLETE" ? { status: "EXACT_BASE_COMPLETE", document: desired.document, documentSha256: desired.sourcePolicySha256, signerDocument: null } : value.predecessorClassification === "EXACT_COMPLETE" ? { status: "EXACT_COMPLETE", document: desired.document, documentSha256: desired.sourcePolicySha256, signerDocument: desired.signerCapabilityDocument, signerDocumentSha256: desired.signerCapabilityPolicySha256 } : null;
+  const state = value.predecessorClassification === "EXACT_PREDECESSOR" ? { status: "EXACT_PREDECESSOR", document: desired.predecessorDocument, documentSha256: desired.predecessorPolicySha256 } : value.predecessorClassification === "EXACT_LEGACY_LIVE_PREDECESSOR" ? { status: "EXACT_LEGACY_LIVE_PREDECESSOR", document: desired.legacyLivePredecessorDocument, documentSha256: desired.legacyLivePredecessorPolicySha256 } : value.predecessorClassification === "EXACT_COMPLETE" ? { status: "EXACT_COMPLETE", document: desired.document, documentSha256: desired.sourcePolicySha256 } : null;
   const transitionValid = value.credentialState === "ZERO_PERMANENT_ACCESS_KEYS" ? value.transition === null && value.legacyRotationBindings === null && value.legacyRotationBindingOrigin === null : value.credentialState === LEGACY_BOOTSTRAP_TRANSITION_KIND && (() => { try { assertLegacyBootstrapMfaTransitionBinding(value.legacyRotationBindings, value.transition, value.legacyRotationBindingOrigin); return true; } catch { return false; } })();
   const expectedState = state && { ...state, credentialState: value.credentialState };
-  if (!state || !transitionValid || value.schemaVersion !== 1 || value.kind !== "PRODUCTION_BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION_PREPARATION" || value.operation !== BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.operation || value.sourceSha !== sourceSha || value.userArn !== BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn || value.inlinePolicyName !== BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.inlinePolicyName || value.predecessorPolicySha256 !== state.documentSha256 || value.successorPolicySha256 !== sha256({ base: desired.sourcePolicySha256, signer: desired.signerCapabilityPolicySha256 }) || value.expectedWritePlanSha256 !== sha256(value.expectedWritePlan) || canonicalJson(value.expectedWritePlan) !== canonicalJson(preparationBody({ sourceSha, state: expectedState, preparedAt: value.createdAt, transition: value.transition, legacyRotationBindings: value.legacyRotationBindings, legacyRotationBindingOrigin: value.legacyRotationBindingOrigin }).expectedWritePlan) || preparationSha256 !== sha256(body) || !Number.isFinite(created.getTime()) || created.toISOString() !== value.createdAt || !Number.isFinite(expires.getTime()) || expires.toISOString() !== value.expiresAt || expires.getTime() - created.getTime() !== BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.maxAgeMs || (!allowExpired && now.getTime() > expires.getTime())) throw new Error("Bootstrap operator preparation is not exact or fresh.");
+  if (!state || !transitionValid || value.schemaVersion !== 1 || value.kind !== "PRODUCTION_BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION_PREPARATION" || value.operation !== BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.operation || value.sourceSha !== sourceSha || value.userArn !== BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn || value.inlinePolicyName !== BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.inlinePolicyName || value.predecessorPolicySha256 !== state.documentSha256 || value.successorPolicySha256 !== desired.sourcePolicySha256 || value.expectedWritePlanSha256 !== sha256(value.expectedWritePlan) || canonicalJson(value.expectedWritePlan) !== canonicalJson(preparationBody({ sourceSha, state: expectedState, preparedAt: value.createdAt, transition: value.transition, legacyRotationBindings: value.legacyRotationBindings, legacyRotationBindingOrigin: value.legacyRotationBindingOrigin }).expectedWritePlan) || preparationSha256 !== sha256(body) || !Number.isFinite(created.getTime()) || created.toISOString() !== value.createdAt || !Number.isFinite(expires.getTime()) || expires.toISOString() !== value.expiresAt || expires.getTime() - created.getTime() !== BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.maxAgeMs || (!allowExpired && now.getTime() > expires.getTime())) throw new Error("Bootstrap operator preparation is not exact or fresh.");
   return value;
 }
 
@@ -403,7 +387,7 @@ export function reconcileBootstrapOperatorPolicy({ run, authorization, sourceSha
     if (marker?.state === "COMPLETED" && marker.authorizationSha256 !== authorization.authorizationSha256) throw new Error("Legacy bootstrap MFA transition was consumed by a different authorization.");
     if (marker?.state === "RESERVED" && marker.authorizationSha256 !== authorization.authorizationSha256 && new Date(marker.expiresAt).getTime() >= now.getTime()) throw new Error("Legacy bootstrap MFA transition is reserved by another active authorization.");
   }
-  const completePolicySha256 = sha256({ base: before.documentSha256, signer: before.signerDocumentSha256 });
+  const completePolicySha256 = before.documentSha256;
   if (before.status === "EXACT_COMPLETE") {
     const sameTransitionResume = transition && marker?.state === "RESERVED" && marker.authorizationSha256 === authorization.authorizationSha256 && predecessorStatus(authorization.preparation.predecessorClassification) && completePolicySha256 === authorization.preparation.successorPolicySha256;
     const freshComplete = authorization.preparation.predecessorClassification === "EXACT_COMPLETE" && before.documentSha256 === authorization.preparation.predecessorPolicySha256;
@@ -436,7 +420,7 @@ export function reconcileBootstrapOperatorPolicy({ run, authorization, sourceSha
   const policyWrites = authorization.preparation.expectedWritePlan.filter(({ action }) => action === "iam:PutUserPolicy");
   for (const entry of policyWrites) {
     const sourcePath = entry.inlinePolicyName === BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.inlinePolicyName ? BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.sourcePath
-      : entry.inlinePolicyName === BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.signerCapabilityInlinePolicyName ? BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.signerCapabilitySourcePath : null;
+      : null;
     if (!sourcePath || entry.userArn !== BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn || entry.policySha256 !== sha256(JSON.parse(fs.readFileSync(path.join(root, sourcePath), "utf8")))) throw new Error("Bootstrap operator authorized policy write differs from canonical source.");
     try {
       run(["iam", "put-user-policy", "--user-name", BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userName, "--policy-name", entry.inlinePolicyName, "--policy-document", `file://${path.join(root, sourcePath)}`, "--no-cli-pager"]);

@@ -205,7 +205,7 @@ test("every bootstrapped IAM object matches the imported Terraform attributes", 
 });
 
 test("operator backend policy has exact state/lock scope and no IAM mutation or escalation", () => {
-  const document = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionBootstrapOperator-v1.json", "utf8"));
+  const document = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionBootstrapOperator-v2.json", "utf8"));
   const statements = document.Statement;
   const state = statements.find(({ Action }) => Array.isArray(Action) && Action.includes("s3:GetObject"));
   const lock = statements.find(({ Action }) => Action === "s3:DeleteObject");
@@ -222,7 +222,7 @@ test("operator backend policy has exact state/lock scope and no IAM mutation or 
   assert.deepEqual(roleReads.Resource, ["arn:aws:iam::368992683803:role/mscqr-production-web-image-publisher", "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"]);
   assert.deepEqual(roleReads.Action, ["iam:GetRole", "iam:GetRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies"]);
   assert.deepEqual(boundaryReads, { Effect: "Allow", Action: ["iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions"], Resource: "arn:aws:iam::368992683803:policy/MSCQRProductionWebImagePublisherBoundary" });
-  assert.equal(JSON.stringify(document).length <= 2048, true, "The bootstrap operator inline policy must remain within the AWS 2,048-character quota.");
+  assert.equal(JSON.stringify(document).replace(/\s/g, "").length <= 2048, true, "The bootstrap operator aggregate inline policy must remain within AWS's 2,048-character quota.");
   const allActions = statements.flatMap(({ Action }) => Array.isArray(Action) ? Action : [Action]);
   for (const action of ["iam:CreateRole", "iam:CreatePolicy", "iam:PutRolePolicy", "iam:AttachRolePolicy", "iam:UpdateAssumeRolePolicy", "iam:PassRole", "iam:List*", "iam:Get*", "iam:*"]) assert.equal(allActions.includes(action), false, action);
   assert.equal(statements.some(({ Resource }) => Resource === "*" || (Array.isArray(Resource) && Resource.includes("*"))), false);

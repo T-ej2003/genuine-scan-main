@@ -161,13 +161,13 @@ test("identity matrix assigns IAM simulation only to administrator", () => {
 test("bootstrap AssumeRole capabilities are bound to their exact MFA-gated inline-policy statements", () => {
   const graph = buildStageBDeploymentCapabilityGraph();
   const expected = [
-    ["bootstrap-assume-release", BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.releaseRoleArn, "AssumeReleaseRoleOnlyWithMfa"],
-    ["bootstrap-assume-verifier", BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.verifierRoleArn, "AssumeVerifierMfa"],
-    ["bootstrap-assume-publisher-bootstrap", BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.publisherBootstrapRoleArn, "AssumeStageBPublisherBootstrapRoleOnlyWithMfa"],
+    ["bootstrap-assume-release", BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.releaseRoleArn],
+    ["bootstrap-assume-verifier", BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.verifierRoleArn],
+    ["bootstrap-assume-publisher-bootstrap", BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.publisherBootstrapRoleArn],
   ];
-  for (const [id, resource, sid] of expected) {
+  for (const [id, resource] of expected) {
     const capability = graph.capabilities.find((value) => value.id === id);
-    assert.deepEqual(capability && [capability.action, capability.resources, capability.policy.sourceFile, capability.policy.sid, capability.context.mfaRequired], ["sts:AssumeRole", [resource], BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.sourcePath, sid, true]);
+    assert.deepEqual(capability && [capability.action, capability.resources, capability.policy.sourceFile, capability.policy.sid, capability.context.mfaRequired], ["sts:AssumeRole", [resource], BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.sourcePath, null, true]);
     assert.doesNotMatch(JSON.stringify(capability), /reviewed-exact-resource/);
   }
   const policy = JSON.parse(fs.readFileSync(BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.sourcePath, "utf8"));
@@ -177,10 +177,10 @@ test("bootstrap AssumeRole capabilities are bound to their exact MFA-gated inlin
     assert.throws(() => assertStageBDeploymentCapabilityGraph(changed), /stale or incomplete/);
   }
   for (const mutate of [
-    (value) => { value.Statement = value.Statement.filter(({ Sid }) => Sid !== "AssumeVerifierMfa"); },
-    (value) => { value.Statement.find(({ Sid }) => Sid === "AssumeVerifierMfa").Action = "sts:GetCallerIdentity"; },
-    (value) => { value.Statement.find(({ Sid }) => Sid === "AssumeVerifierMfa").Resource = "*"; },
-    (value) => { delete value.Statement.find(({ Sid }) => Sid === "AssumeVerifierMfa").Condition; },
+    (value) => { value.Statement = value.Statement.filter(({ Action }) => Action !== "sts:AssumeRole"); },
+    (value) => { value.Statement.find(({ Action }) => Action === "sts:AssumeRole").Action = "sts:GetCallerIdentity"; },
+    (value) => { value.Statement.find(({ Action }) => Action === "sts:AssumeRole").Resource = "*"; },
+    (value) => { delete value.Statement.find(({ Action }) => Action === "sts:AssumeRole").Condition; },
   ]) {
     const changed = structuredClone(policy); mutate(changed);
     assert.throws(() => assertBootstrapOperatorVerifierAuthority(changed), /exact MFA-gated target set/);
