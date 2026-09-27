@@ -450,14 +450,14 @@ test("the shell credential boundary preserves OIDC or access keys, or pins a loc
 
 test("every direct AWS source in scripts/aws has an explicit audited credential boundary", () => {
   const walk = (directory) => fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => entry.isDirectory() ? walk(`${directory}/${entry.name}`) : [`${directory}/${entry.name}`]);
-  const direct = walk("scripts/aws").filter((file) => /\.(mjs|sh)$/.test(file) && (file === "scripts/aws/component-broker-policy-successor-root-mfa.mjs" || /(?:execFileSync|execFile|spawnSync|spawn|run)\(["']aws["']|\baws\s+(?:sts|kms|ecr|ecs|iam|s3|secretsmanager|rds|cloudtrail)/.test(fs.readFileSync(file, "utf8")))).sort();
+  const direct = walk("scripts/aws").filter((file) => /\.(mjs|sh)$/.test(file) && (["scripts/aws/component-broker-policy-successor-root-mfa.mjs", "scripts/aws/reconcile-production-signer-temporary-capability.mjs"].includes(file) || /(?:execFileSync|execFile|spawnSync|spawn|run)\(["']aws["']|\baws\s+(?:sts|kms|ecr|ecs|iam|s3|secretsmanager|rds|cloudtrail)/.test(fs.readFileSync(file, "utf8")))).sort();
   const classified = [
     "scripts/aws/component-bootstrap-partial-recovery-cli.mjs",
     "scripts/aws/component-broker-change-cli.mjs",
     "scripts/aws/component-broker-policy-successor-root-mfa.mjs",
     "scripts/aws/component-identity-bootstrap-cli.mjs",
     "scripts/aws/component-installation-session.mjs",
-    "scripts/aws/apply-ecr-repository-controls.sh", "scripts/aws/apply-production-full-rls-release.mjs", "scripts/aws/deploy-ecs-service.sh", "scripts/aws/discover-staging-endpoints.mjs", "scripts/aws/exact-ecs-rollout-state.mjs", "scripts/aws/prepare-production-backend-failed-recovery-evidence.mjs", "scripts/aws/produce-production-security-rebaseline-preparation.mjs", "scripts/aws/production-cutover-production-adapters.mjs", "scripts/aws/production-dual-slot-rebaseline-contract.mjs", "scripts/aws/production-identity-adapters.mjs", "scripts/aws/production-initial-activation-lifecycle.mjs", "scripts/aws/publish-ecs-images.sh", "scripts/aws/reconcile-production-stage-a-temporary-kms-capability.mjs", "scripts/aws/recover-production-backend-health.mjs", "scripts/aws/recover-production-green-stage-a-root-drop-orphan.mjs", "scripts/aws/rollback-ecs-service.sh", "scripts/aws/staging-database-role-credentials.mjs", "scripts/aws/verify-production-dependency-closure.mjs", "scripts/aws/verify-production-rotation-via-ecs-exec.mjs", "scripts/aws/verify-production-security-rebaseline-signer.mjs",
+    "scripts/aws/apply-ecr-repository-controls.sh", "scripts/aws/apply-production-full-rls-release.mjs", "scripts/aws/deploy-ecs-service.sh", "scripts/aws/discover-staging-endpoints.mjs", "scripts/aws/exact-ecs-rollout-state.mjs", "scripts/aws/prepare-production-backend-failed-recovery-evidence.mjs", "scripts/aws/produce-production-security-rebaseline-preparation.mjs", "scripts/aws/production-cutover-production-adapters.mjs", "scripts/aws/production-dual-slot-rebaseline-contract.mjs", "scripts/aws/production-identity-adapters.mjs", "scripts/aws/production-initial-activation-lifecycle.mjs", "scripts/aws/publish-ecs-images.sh", "scripts/aws/reconcile-production-stage-a-temporary-kms-capability.mjs", "scripts/aws/reconcile-production-signer-temporary-capability.mjs", "scripts/aws/recover-production-backend-health.mjs", "scripts/aws/recover-production-green-stage-a-root-drop-orphan.mjs", "scripts/aws/rollback-ecs-service.sh", "scripts/aws/staging-database-role-credentials.mjs", "scripts/aws/verify-production-dependency-closure.mjs", "scripts/aws/verify-production-rotation-via-ecs-exec.mjs", "scripts/aws/verify-production-security-rebaseline-signer.mjs",
   ].sort();
   assert.deepEqual(direct, classified);
   const boundaries = {
@@ -479,6 +479,7 @@ test("every direct AWS source in scripts/aws has an explicit audited credential 
     "scripts/aws/production-initial-activation-lifecycle.mjs": /createProductionAwsCredentialEnvironment/,
     "scripts/aws/publish-ecs-images.sh": /configure_production_aws_credential_source/,
     "scripts/aws/reconcile-production-stage-a-temporary-kms-capability.mjs": /buildRecoveryAwsEnvironment/,
+    "scripts/aws/reconcile-production-signer-temporary-capability.mjs": /buildRecoveryAwsEnvironment/,
     "scripts/aws/recover-production-backend-health.mjs": /createProductionAwsCredentialEnvironment/,
     "scripts/aws/recover-production-green-stage-a-root-drop-orphan.mjs": /buildRecoveryAwsEnvironment/,
     "scripts/aws/rollback-ecs-service.sh": /configure_production_aws_credential_source/,
