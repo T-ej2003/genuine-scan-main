@@ -164,7 +164,7 @@ test("protected preparation producer binds exact PG18 artifacts, image publicati
     const canonicalInventory = canonical(catalogue(), source);
     const requirementsBytes = Buffer.from(JSON.stringify(requirements));
     const canonicalBytes = Buffer.from(JSON.stringify(canonicalInventory));
-    const publicationBytes = Buffer.from(`${JSON.stringify({ service: "backend", repository: "mscqr-backend", image_tag: `${source}-backend-only`, image_uri: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend:${source}-backend-only`, image_digest: "e".repeat(64), image_ref: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${imageDigest}` })}\n`);
+    const publicationBytes = Buffer.from(`${JSON.stringify({ service: "backend", repository: "mscqr-backend", image_tag: `${source}-backend-only`, image_uri: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend:${source}-backend-only`, image_digest: imageDigest, image_ref: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${imageDigest}` })}\n`);
     const files = { requirements: path.join(directory, "requirements.json"), canonical: path.join(directory, "canonical.json"), publication: path.join(directory, "publication.jsonl"), manifest: path.join(directory, "manifest.json") };
     fs.writeFileSync(files.requirements, requirementsBytes, { mode: 0o600 }); fs.writeFileSync(files.canonical, canonicalBytes, { mode: 0o600 }); fs.writeFileSync(files.publication, publicationBytes, { mode: 0o600 });
     const reference = (artifactId, bytes) => ({ sourceSha: source, runId, runAttempt: "1", artifactId, artifactDigest: `sha256:${digest}`, fileSha256: crypto.createHash("sha256").update(bytes).digest("hex") });
@@ -208,16 +208,25 @@ test("protected preparation producer binds exact PG18 artifacts, image publicati
     assert.throws(() => verifyProductionSecurityRebaselinePreparationManifest(manifest, { now: Date.parse(manifest.candidateImage.authorization.expiresAt) + 1 }, { verifyImageAuthorization: () => true }));
     assert.equal(manifest.candidateImage.authorization.purpose, "READ_ONLY_PRODUCTION_SECURITY_REBASELINE");
     assert.equal(manifest.candidateImage.authorization.signatureBase64, Buffer.alloc(384, 7).toString("base64"));
+
+    const malformedPublication = Buffer.from(publicationBytes.toString().replace(`"image_digest":"${imageDigest}"`, `"image_digest":"${"e".repeat(64)}"`));
+    fs.writeFileSync(files.publication, malformedPublication);
+    assert.throws(() => produceSecurityRebaselinePreparation({ sourceSha: source, repositoryRoot: root,
+      env: { ...env, MANIFEST_OUTPUT: path.join(directory, "malformed-manifest.json"),
+        PUBLICATION_REFERENCE_JSON: JSON.stringify({ ...publicationReference, fileSha256: crypto.createHash("sha256").update(malformedPublication).digest("hex") }) },
+      sign: () => assert.fail("Malformed publisher digest must fail before KMS signing") }));
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
 
 test("signing environment and purpose-specific OIDC/KMS source contracts fail closed", () => {
   const environment = { name: SECURITY_REBASELINE_SIGNER_ENVIRONMENT, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "Team", reviewer: { id: 1 } }] }, { type: "branch_policy" }], deployment_branch_policy: { protected_branches: true, custom_branch_policies: false } };
-  const environmentResources = { variables: { total_count: 1, variables: [{ name: "PRODUCTION_SECURITY_REBASELINE_SIGNER_ROLE_ARN" }] }, secrets: { total_count: 0, secrets: [] } };
-  assert.equal(assertSecurityRebaselineSigningEnvironment(environment, environmentResources), true);
+  assert.equal(assertSecurityRebaselineSigningEnvironment(environment), true);
   for (const changed of [{ ...environment, protection_rules: [] }, { ...environment, protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{}] }] }, { ...environment, deployment_branch_policy: { protected_branches: false, custom_branch_policies: true } }]) assert.throws(() => assertSecurityRebaselineSigningEnvironment(changed));
-  assert.throws(() => assertSecurityRebaselineSigningEnvironment(environment, { ...environmentResources, variables: { total_count: 2, variables: [...environmentResources.variables.variables, { name: "UNEXPECTED" }] } }));
-  assert.throws(() => assertSecurityRebaselineSigningEnvironment(environment, { ...environmentResources, secrets: { total_count: 1, secrets: [{ name: "AWS_ACCESS_KEY_ID" }] } }));
+  const signingWorkflow = fs.readFileSync(".github/workflows/sign-production-security-rebaseline.yml", "utf8");
+  const preparationWorkflow = fs.readFileSync(".github/workflows/prepare-production-security-rebaseline.yml", "utf8");
+  assert.doesNotMatch(`${signingWorkflow}\n${preparationWorkflow}`, /administration:\s*read|environments\/[^\s]+\/(?:variables|secrets)/);
+  assert.match(signingWorkflow, /gh api .*\/environments\/production-security-rebaseline-signing/);
+  assert.match(signingWorkflow, /role-to-assume: \$\{\{ vars\.PRODUCTION_SECURITY_REBASELINE_SIGNER_ROLE_ARN \}\}/);
   const trust = JSON.parse(fs.readFileSync("infra/aws/terraform/production-security-rebaseline-signer/trust-policy.json", "utf8"));
   const condition = trust.Statement[0].Condition.StringEquals;
   assert.equal(trust.Statement[0].Principal.Federated, "arn:aws:iam::368992683803:oidc-provider/token.actions.githubusercontent.com");
@@ -271,6 +280,7 @@ test("signer readback detects trust, permission, key, alias and grant drift", ()
   assert.equal(result.unexpectedGrantCount, 0); assert.match(result.signerPolicySha256, /^[a-f0-9]{64}$/);
   const calls = [];
   const readback = verifyProductionSecurityRebaselineSigner({ profile: "readback-test", run: (_command, args) => {
+    assert.equal(_command, "aws");
     calls.push(args.slice(0, 2).join(" "));
     if (args[0] === "sts") return { Account: "368992683803" };
     if (args[0] === "iam" && args[1] === "get-role") return { Role: fixture.role };

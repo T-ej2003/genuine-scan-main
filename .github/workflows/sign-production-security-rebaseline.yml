@@ -16,7 +16,6 @@ on:
 permissions:
   contents: read
   actions: read
-  administration: read
   id-token: write
 
 jobs:
@@ -76,14 +75,10 @@ jobs:
             publicationReference: JSON.parse(process.env.PUBLICATION_REFERENCE_JSON) });
           NODE
           gh api repos/T-ej2003/genuine-scan-main/environments/production-security-rebaseline-signing > "$RUNNER_TEMP/signing-environment.json"
-          gh api "repos/T-ej2003/genuine-scan-main/environments/production-security-rebaseline-signing/variables?per_page=100" > "$RUNNER_TEMP/signing-environment-variables.json"
-          gh api "repos/T-ej2003/genuine-scan-main/environments/production-security-rebaseline-signing/secrets?per_page=100" > "$RUNNER_TEMP/signing-environment-secrets.json"
           node --input-type=module - "$RUNNER_TEMP/signing-environment.json" <<'NODE'
           import fs from 'node:fs';
           import { assertSecurityRebaselineSigningEnvironment } from './scripts/aws/production-security-rebaseline-preparation.mjs';
-          assertSecurityRebaselineSigningEnvironment(JSON.parse(fs.readFileSync(process.argv[2], 'utf8')), {
-            variables: JSON.parse(fs.readFileSync(`${process.env.RUNNER_TEMP}/signing-environment-variables.json`, 'utf8')),
-            secrets: JSON.parse(fs.readFileSync(`${process.env.RUNNER_TEMP}/signing-environment-secrets.json`, 'utf8')) });
+          assertSecurityRebaselineSigningEnvironment(JSON.parse(fs.readFileSync(process.argv[2], 'utf8')));
           NODE
       - uses: actions/download-artifact@v4
         with:

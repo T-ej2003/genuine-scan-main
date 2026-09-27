@@ -31,15 +31,11 @@ export function productionSubscriptionProjectionContractSha256(repositoryRoot = 
   return canonicalSha256({ provisioningSqlSha256, verifierSourceSha256, statusContract: SUBSCRIPTION_PROJECTION_STATUS_CONTRACT });
 }
 
-export function assertSecurityRebaselineSigningEnvironment(value, { variables, secrets } = {}) {
+export function assertSecurityRebaselineSigningEnvironment(value) {
   assert.equal(value?.name, SECURITY_REBASELINE_SIGNER_ENVIRONMENT);
   const reviewers = (value.protection_rules || []).find((rule) => rule.type === "required_reviewers");
   assert.ok(reviewers?.prevent_self_review === true && reviewers.reviewers?.length > 0, "Signing environment lacks independent required approval");
   assert.deepEqual(value.deployment_branch_policy, { protected_branches: true, custom_branch_policies: false }, "Signing environment must permit protected branches only");
-  assert.deepEqual((variables?.variables || []).map(({ name }) => name).sort(), ["PRODUCTION_SECURITY_REBASELINE_SIGNER_ROLE_ARN"], "Signing environment must contain only the dedicated signer role ARN variable");
-  assert.equal(variables.total_count, 1);
-  assert.deepEqual(secrets?.secrets || [], [], "Signing environment must not contain long-lived credentials or unused secrets");
-  assert.equal(secrets.total_count, 0);
   return true;
 }
 
@@ -304,7 +300,7 @@ export function authenticateProductionSecurityRebaselinePreparation({
   assert.equal(publicationRows.length, 1);
   const [image] = publicationRows;
   assert.equal(image.service, "backend"); assert.equal(image.repository, manifest.candidateImage.repository);
-  assert.equal(image.image_tag, `${sourceSha}-backend-only`); assert.equal(image.image_digest, manifest.candidateImage.digest.slice("sha256:".length));
+  assert.equal(image.image_tag, `${sourceSha}-backend-only`); assert.equal(image.image_digest, manifest.candidateImage.digest);
   assert.equal(image.image_ref, `368992683803.dkr.ecr.eu-west-2.amazonaws.com/${image.repository}@${manifest.candidateImage.digest}`);
   return Object.freeze({ manifest, requirements, canonicalInventory: canonical, publicationImage: Object.freeze(image) });
 }

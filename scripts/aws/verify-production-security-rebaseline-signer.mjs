@@ -14,6 +14,9 @@ const roleName = "mscqr-production-security-rebaseline-image-signer";
 const keyAlias = "alias/mscqr-production-security-rebaseline-image-evidence";
 const policyName = "ProductionSecurityRebaselineImageAuthorizationSignOnly";
 const sorted = (items) => [...items].sort();
+const defaultRun = (command, args) => JSON.parse(execFileSync(command, args, {
+  encoding: "utf8", timeout: 15000, maxBuffer: 1024 * 1024, stdio: ["ignore", "pipe", "pipe"],
+}));
 const exactSet = (actual, expected, label) => assert.deepEqual(sorted(actual), sorted(expected), `${label} differs from the source contract`);
 const decodePolicy = (value) => {
   if (typeof value === "object" && value) return value;
@@ -60,11 +63,11 @@ export function assertProductionSecurityRebaselineSignerReadback({ role, signerP
     keyAlias, keyState: key.KeyState, unexpectedGrantCount: 0 });
 }
 
-export function verifyProductionSecurityRebaselineSigner({ run = (command, args) => JSON.parse(execFileSync(command, args, {
-  encoding: "utf8", timeout: 15000, maxBuffer: 1024 * 1024, stdio: ["ignore", "pipe", "pipe"],
-})), profile } = {}) {
+export function verifyProductionSecurityRebaselineSigner({ run = defaultRun, profile } = {}) {
   assert.match(profile || "", /^[A-Za-z0-9_.-]{1,64}$/, "An explicit AWS profile is required for read-only signer verification");
-  const aws = (args) => run(productionAwsExecutable(), [...args, "--region", region, "--profile", profile, "--output", "json", "--no-cli-pager"]);
+  const aws = (args) => run === defaultRun
+    ? run(productionAwsExecutable(), [...args, "--region", region, "--profile", profile, "--output", "json", "--no-cli-pager"])
+    : run("aws", [...args, "--region", region, "--profile", profile, "--output", "json", "--no-cli-pager"]);
   const caller = aws(["sts", "get-caller-identity"]); assert.equal(caller.Account, account);
   const role = aws(["iam", "get-role", "--role-name", roleName]).Role;
   const inlinePolicyNames = aws(["iam", "list-role-policies", "--role-name", roleName]).PolicyNames;

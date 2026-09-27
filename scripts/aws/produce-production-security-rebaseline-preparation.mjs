@@ -71,12 +71,12 @@ export function produceSecurityRebaselinePreparation({ sourceSha, repositoryRoot
   assert.equal(backend.service, "backend"); assert.equal(backend.repository, "mscqr-backend");
   assert.equal(backend.image_tag, `${sourceSha}-backend-only`);
   assert.equal(backend.image_uri, `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend:${sourceSha}-backend-only`);
-  assert.match(backend.image_digest || "", /^[a-f0-9]{64}$/);
-  assert.equal(backend.image_ref, `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:${backend.image_digest}`);
+  assert.match(backend.image_digest || "", /^sha256:[a-f0-9]{64}$/);
+  assert.equal(backend.image_ref, `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${backend.image_digest}`);
   assert.equal(backend.image_ref, env.EXPECTED_IMAGE_REF);
   const publication = { workflowFile: SECURITY_REBASELINE_IMAGE_PUBLISHER_WORKFLOW, ...references.publication };
   const authorization = buildSecurityRebaselineImageAuthorization({
-    protectedMainSha: sourceSha, candidateSourceSha: sourceSha, imageRepository: backend.repository, imageDigest: `sha256:${backend.image_digest}`,
+    protectedMainSha: sourceSha, candidateSourceSha: sourceSha, imageRepository: backend.repository, imageDigest: backend.image_digest,
     publication, workflowRunId: env.GITHUB_RUN_ID, workflowRunAttempt: env.GITHUB_RUN_ATTEMPT,
     workflowRef: env.GITHUB_WORKFLOW_REF, repositoryId: env.GITHUB_REPOSITORY_ID, ownerId: env.GITHUB_REPOSITORY_OWNER_ID,
     actor: env.GITHUB_ACTOR, sign,
