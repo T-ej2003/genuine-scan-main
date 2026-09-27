@@ -23,6 +23,7 @@ import {
   PRODUCTION_INITIAL_MIGRATION_SOURCE_ADVANCE_KIND,
 } from "../security/production-initial-migration-source-advance.mjs";
 import { assertBindingsMatchLegacyBaseline, deriveLegacyRotationBaseline } from "./production-legacy-rotation-baseline.mjs";
+import { assertQrVersionResolutionCurrent } from "./production-qr-version-selector-resolution.mjs";
 import { assertPreDeploymentInventoryTaskDefinitionArn } from "./production-predeployment-inventory-task.mjs";
 import { authenticateReleasePreflightCheckerTrustEvidence } from "./production-release-preflight-checker-attestation.mjs";
 import { assertPartialRebaselineRecoveryAuthorization, assertProductionDualSlotRebaselineAuthorization, assertRebaselineRotationBindings, BASELINE_COMPLETE, PRODUCTION_DUAL_SLOT_REBASELINE, REBASELINE_ROTATION_BINDINGS_KIND, REBASELINE_ROTATION_BINDINGS_PRODUCER } from "./production-dual-slot-rebaseline-contract.mjs";
@@ -133,12 +134,12 @@ function readInputFile(filePath, repositoryRoot, label, parse = (bytes) => JSON.
   return { path: captured.path, value, sha256: captured.sha256 };
 }
 
-export function deriveRuntimeMetadata(taskDefinition) {
+export function deriveRuntimeMetadata(taskDefinition, { legacyBaseline } = {}) {
   const environment = taskDefinition?.containerDefinitions?.find(({ name }) => name === "backend")?.environment || [];
   const baseUrl = environment.find(({ name }) => ["PUBLIC_APP_URL", "APP_URL", "WEB_APP_BASE_URL"].includes(name))?.value;
-  const currentKeyVersion = environment.find(({ name }) => name === "QR_SIGN_ACTIVE_KEY_VERSION")?.value;
+  const currentKeyVersion = legacyBaseline?.qrCurrentVersion ?? environment.find(({ name }) => name === "QR_SIGN_ACTIVE_KEY_VERSION")?.value;
   if (!/^https:\/\//.test(baseUrl || "")) throw new Error("Production onboarding base URL is not deterministically available from the live task definition.");
-  if (!/^[A-Za-z0-9._:-]{1,128}$/.test(currentKeyVersion || "")) throw new Error("Current QR key version is not deterministically available from the live task definition.");
+  if (!/^[A-Za-z0-9._-]{1,64}$/.test(currentKeyVersion || "")) throw new Error("Current QR key version is not deterministically available from the authenticated runtime binding.");
   return { baseUrl: baseUrl.replace(/\/+$/, ""), currentKeyVersion };
 }
 
@@ -268,6 +269,8 @@ export function prepareProductionCutoverRuntime({
   currentStageBStatePath,
   currentTaskDefinition,
   loadCurrentTaskDefinition,
+  loadCurrentQrSecretMetadata,
+  qrVersionResolution,
   inventoryApprovalId,
   inventoryTaskDefinitionArn,
   onboardingPaths,
@@ -379,8 +382,9 @@ export function prepareProductionCutoverRuntime({
     }
     const loadedTaskDefinition = typeof loadCurrentTaskDefinition === "function" ? loadCurrentTaskDefinition() : currentTaskDefinition;
     const taskDefinition = loadedTaskDefinition?.taskDefinition || loadedTaskDefinition;
-    const { baseUrl, currentKeyVersion } = deriveRuntimeMetadata(taskDefinition);
-    const liveLegacyBaseline = deriveLegacyRotationBaseline(taskDefinition);
+    if (qrVersionResolution) assertQrVersionResolutionCurrent({ taskDefinition, resolution: qrVersionResolution, secretMetadata: loadCurrentQrSecretMetadata?.(qrVersionResolution.secretArn) });
+    const liveLegacyBaseline = deriveLegacyRotationBaseline(taskDefinition, { qrVersionResolution });
+    const { baseUrl, currentKeyVersion } = deriveRuntimeMetadata(taskDefinition, { legacyBaseline: liveLegacyBaseline });
     const initialMigrationSourceAdvance = buildInitialMigrationSourceAdvance({
       currentSourceSha: protectedSha,
       rotationBindings,
@@ -560,7 +564,7 @@ export function parseBootstrapArgs(argv) {
     "output-directory", "ticket", "approved-by", "approver-role", "reason", "verification-ref",
     "minimum-grace-seconds", "rotation-bindings", "rotation-supersession-evidence", "rebaseline-authorization-run-id", "rebaseline-authorization-run-attempt", "recovery-envelope", "original-rebaseline-preparation", "image-authorization", "iam-evidence", "iam-evidence-signature", "release-preflight-evidence", "release-preflight-attestation", "release-preflight-attestation-signature",
     "artifact-binding", "root-drop-evidence", "temporary-kms-capability", "stage-a-plan", "stage-a-recovery-evidence", "stage-a-state", "stage-a-handoff", "stage-b-state", "current-stage-b-state", "inventory-approval-id", "inventory-task-definition-arn", "onboarding-paths",
-    "stage-b-tfvars", "stage-b-tfvars-binding-report", "stage-b-tfvars-binding-report-sha256", "stage-b-terraform-data-dir",
+    "stage-b-tfvars", "stage-b-tfvars-binding-report", "stage-b-tfvars-binding-report-sha256", "stage-b-terraform-data-dir", "qr-version-resolution-run-id", "qr-version-secret-arn",
   ]);
   const values = new Map();
   for (let index = 0; index < argv.length; index += 1) {

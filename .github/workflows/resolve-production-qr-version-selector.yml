@@ -1,0 +1,108 @@
+name: Resolve production QR version selector for rotation baseline
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha: { description: Exact protected main SHA, required: true, type: string }
+      change_ticket: { description: Approved change ticket, required: true, type: string }
+      secret_arn: { description: Exact live QR version secret ARN, required: true, type: string }
+
+permissions:
+  actions: read
+  contents: read
+  id-token: write
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    environment: production-bootstrap-operator-policy-authorization
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Authenticate protected source and exact target
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SECRET_ARN: ${{ inputs.secret_arn }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "T-ej2003/genuine-scan-main"
+          test "$GITHUB_RUN_ATTEMPT" = "1"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)" = "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          [[ "$SECRET_ARN" =~ ^arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-[A-Za-z0-9]{6}$ ]]
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm ci --prefix backend --ignore-scripts --no-audit --no-fund
+      - name: Reauthenticate protected source after installation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          test "$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)" = "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+      - name: Capture exact human approval evidence
+        id: approval
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$RUNNER_TEMP/qr-version-resolution"
+          node scripts/aws/production-github-environment-approval.mjs \
+            --output "$RUNNER_TEMP/qr-version-resolution/approval.json" \
+            --repository "$GITHUB_REPOSITORY" \
+            --environment production-bootstrap-operator-policy-authorization \
+            --source-sha "$SOURCE_SHA" --workflow-ref "$GITHUB_WORKFLOW_REF" \
+            --event-name "$GITHUB_EVENT_NAME" --workflow-run-id "$GITHUB_RUN_ID" \
+            --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" --execution-actor "$GITHUB_ACTOR" \
+            --require-actual-approval
+          echo "sha256=$(sha256sum "$RUNNER_TEMP/qr-version-resolution/approval.json" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+      - name: Build one-operation AWS session policy
+        id: session
+        env:
+          SECRET_ARN: ${{ inputs.secret_arn }}
+        run: |
+          set -euo pipefail
+          policy="$(node --input-type=module -e 'import {buildQrVersionReadSessionPolicy} from "./scripts/aws/production-qr-version-selector-resolution.mjs"; process.stdout.write(JSON.stringify(buildQrVersionReadSessionPolicy(process.env.SECRET_ARN)))')"
+          echo "policy=$policy" >> "$GITHUB_OUTPUT"
+      - name: Assume the existing exact read-only authorizer role
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: eu-west-2
+          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-bootstrap-operator-policy-authorizer
+          inline-session-policy: ${{ steps.session.outputs.policy }}
+      - name: Resolve and validate only the selected QR identifier
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          CHANGE_TICKET: ${{ inputs.change_ticket }}
+          EXPECTED_SECRET_ARN: ${{ inputs.secret_arn }}
+          APPROVAL_SHA256: ${{ steps.approval.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          node scripts/aws/resolve-production-qr-version-selector.mjs \
+            --approval-file "$RUNNER_TEMP/qr-version-resolution/approval.json" \
+            --approval-sha256 "$APPROVAL_SHA256" \
+            --output "$RUNNER_TEMP/qr-version-resolution/resolution.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-qr-version-selector-resolution
+          path: ${{ runner.temp }}/qr-version-resolution/resolution.json
+          if-no-files-found: error
+          retention-days: 30

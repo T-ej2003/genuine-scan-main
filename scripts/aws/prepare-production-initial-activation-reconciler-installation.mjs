@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createProductionAwsCommandRunner, createProductionAwsCredentialEnvironment, createProductionGithubCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { readMixedDualSlotRecoveryGithubEnvironmentGuard } from "./production-mixed-dual-slot-recovery-contract.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, ensureStageBPrivateFile, readStageBPrivateFileBytes, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
-import { EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, INSTALLATION, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationStateResources, bootstrapOperatorPolicyAuthorizerPermissionsPredecessor, classifyInstallationStatePullError, createInstallationPreparation, installationPermissionsPredecessor, stateIdentity } from "./production-initial-activation-reconciler-installation-contract.mjs";
+import { EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, INSTALLATION, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationStateResources, bootstrapOperatorPolicyAuthorizerPermissionsPredecessors, classifyInstallationStatePullError, createInstallationPreparation, installationPermissionsPredecessor, stateIdentity } from "./production-initial-activation-reconciler-installation-contract.mjs";
 import { BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER, BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER, INITIAL_ACTIVATION_RECONCILER, MIXED_RECOVERY_EXECUTOR, assertBootstrapOperatorPolicyAuthorizerPolicyMetadata, assertBootstrapOperatorPolicyAuthorizerRoleMetadata, assertBrokerRecoverySuccessorEvidenceReaderPolicyMetadata, assertBrokerRecoverySuccessorEvidenceReaderRoleMetadata, assertInitialActivationReconcilerPolicyMetadata, assertInitialActivationReconcilerRoleMetadata, assertMixedRecoveryExecutorPolicyMetadata, assertMixedRecoveryExecutorRoleMetadata, readPolicyEntities, verifyInitialActivationPolicyReconciler } from "./verify-production-initial-activation-policy-reconciler.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -114,7 +114,10 @@ export function discoverInstallationPredecessor({ run, expectedCallerArn } = {})
     const version = runJson(run, ["iam", "get-policy-version", "--policy-arn", BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.policyArn, "--version-id", authorizerPolicy.DefaultVersionId]).PolicyVersion;
     try { assertBootstrapOperatorPolicyAuthorizerPolicyMetadata(authorizerPolicy, version?.Document); }
     catch {
-      assertBootstrapOperatorPolicyAuthorizerPolicyMetadata(authorizerPolicy, version?.Document, { expectedDocument: bootstrapOperatorPolicyAuthorizerPermissionsPredecessor() });
+      const exactPredecessor = bootstrapOperatorPolicyAuthorizerPermissionsPredecessors().some((expectedDocument) => {
+        try { assertBootstrapOperatorPolicyAuthorizerPolicyMetadata(authorizerPolicy, version?.Document, { expectedDocument }); return true; } catch { return false; }
+      });
+      if (!exactPredecessor) throw new Error("Bootstrap-operator authorizer policy is not an exact governed predecessor.");
       const versions = runJson(run, ["iam", "list-policy-versions", "--policy-arn", BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.policyArn]).Versions;
       if (!Array.isArray(versions) || versions.length < 1 || versions.length > 4 || versions.filter(({ IsDefaultVersion }) => IsDefaultVersion).length !== 1 || !versions.some(({ VersionId, IsDefaultVersion }) => VersionId === authorizerPolicy.DefaultVersionId && IsDefaultVersion)) throw new Error("Bootstrap-operator authorizer policy version inventory cannot accept the exact update.");
       authorizerPolicyNeedsUpdate = true;

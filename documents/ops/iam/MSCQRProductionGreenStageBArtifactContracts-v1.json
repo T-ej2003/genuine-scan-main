@@ -377,6 +377,30 @@
       "rollback": "remove-committed-or-restore-backups"
     },
     {
+      "id": "qr-version-selector-resolution",
+      "kind": "file",
+      "producer": ".github/workflows/resolve-production-qr-version-selector.yml",
+      "consumers": [
+        "scripts/aws/bootstrap-production-initial-dual-slot.mjs",
+        "scripts/aws/prepare-production-cutover-runtime.mjs",
+        "scripts/aws/rebaseline-production-dual-slot.mjs",
+        "scripts/aws/run-production-mixed-dual-slot-topology-recovery.mjs",
+        "scripts/aws/supersede-production-stale-rotation.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": false,
+      "overwrite": false,
+      "hashBound": true,
+      "externalProducer": true,
+      "secretMaterial": false,
+      "atomicGroup": null,
+      "allOrNone": false,
+      "rollback": "none"
+    },
+    {
       "id": "stale-rotation-supersession-replacement-reservation",
       "kind": "file",
       "producer": "scripts/aws/supersede-production-stale-rotation.mjs:runCli --mode prepare",

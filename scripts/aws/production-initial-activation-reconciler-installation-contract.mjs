@@ -131,6 +131,14 @@ export const bootstrapOperatorPolicyAuthorizerPermissionsPredecessor = () => {
   const desired = sourceJson(`${INSTALLATION.terraformRoot}/bootstrap-operator-policy-authorizer-permissions-policy.json`);
   return { ...desired, Statement: desired.Statement.map((statement) => statement.Sid === "ReadExactInitialDualSlotBindingForBootstrapOperatorAuthorization" ? { ...statement, Resource: [...MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES] } : statement) };
 };
+export const bootstrapOperatorPolicyAuthorizerPermissionsPredecessors = () => {
+  const desired = sourceJson(`${INSTALLATION.terraformRoot}/bootstrap-operator-policy-authorizer-permissions-policy.json`);
+  const candidateOnly = { ...desired, Statement: desired.Statement.map((statement) => statement.Sid === "ReadRegionalTaskDefinitionMetadata" ? { ...statement, Resource: statement.Resource.filter((arn) => arn.includes("mscqr-production-rls-green-backend-candidate:")) } : statement) };
+  const prior = { ...desired, Statement: desired.Statement.filter(({ Sid }) => !["ReadExactProductionBackendSelectorSource", "ReadRegionalTaskDefinitionMetadata"].includes(Sid)) };
+  const sevenResourceNoEcs = bootstrapOperatorPolicyAuthorizerPermissionsPredecessor();
+  const sevenResourceNoEcsWithoutTaskReads = { ...sevenResourceNoEcs, Statement: sevenResourceNoEcs.Statement.filter(({ Sid }) => !["ReadExactProductionBackendSelectorSource", "ReadRegionalTaskDefinitionMetadata"].includes(Sid)) };
+  return [candidateOnly, prior, sevenResourceNoEcsWithoutTaskReads, sevenResourceNoEcs];
+};
 const EXPECTED_PROVIDER_CONFIGURATION = Object.freeze({
   aws: {
     name: "aws",
@@ -350,7 +358,8 @@ export function assertInstallationPlan(plan, { livePredecessor } = {}) {
       if (after.name !== AUTHORIZER_POLICY_NAME || after.path !== "/" || after.description !== AUTHORIZER_POLICY_DESCRIPTION || after.delay_after_policy_creation_in_ms !== null || canonicalJson(after.tags) !== canonicalJson(AUTHORIZER_TAGS) || canonicalJson(after.tags_all) !== canonicalJson(AUTHORIZER_TAGS) || canonicalJson(policyValue(after.policy, "Authorizer permissions policy")) !== canonicalJson(sourceJson(`${INSTALLATION.terraformRoot}/bootstrap-operator-policy-authorizer-permissions-policy.json`)) || !create && after.arn !== INSTALLATION.bootstrapOperatorPolicyAuthorizerPolicyArn) throw new Error("Authorizer policy contract is not exact.");
       if (update) {
         const before = entry.change.before;
-        if (!before || before.arn !== INSTALLATION.bootstrapOperatorPolicyAuthorizerPolicyArn || canonicalJson(policyValue(before.policy, "Authorizer predecessor permissions policy")) !== canonicalJson(bootstrapOperatorPolicyAuthorizerPermissionsPredecessor()) || canonicalJson({ ...before, policy: after.policy }) !== canonicalJson(after)) throw new Error("Authorizer policy update predecessor is not exact.");
+        const beforePolicy = before && policyValue(before.policy, "Authorizer predecessor permissions policy");
+        if (!before || before.arn !== INSTALLATION.bootstrapOperatorPolicyAuthorizerPolicyArn || !bootstrapOperatorPolicyAuthorizerPermissionsPredecessors().some((predecessor) => canonicalJson(beforePolicy) === canonicalJson(predecessor)) || canonicalJson({ ...before, policy: after.policy }) !== canonicalJson(after)) throw new Error("Authorizer policy update predecessor is not exact.");
       }
     } else if (entry.address === "aws_iam_role.broker_recovery_successor_evidence_reader") {
       if (after.name !== brokerRecoverySuccessorEvidenceReader.roleName || after.path !== "/" || after.description !== EVIDENCE_READER_ROLE_DESCRIPTION || after.force_detach_policies !== false || after.max_session_duration !== 3600 || !hasKnownNoPermissionsBoundary(after.permissions_boundary, entry.change.after_unknown?.permissions_boundary) || canonicalJson(after.tags) !== canonicalJson(EVIDENCE_READER_TAGS) || canonicalJson(after.tags_all) !== canonicalJson(EVIDENCE_READER_TAGS) || canonicalJson(policyValue(after.assume_role_policy, "Evidence reader trust policy")) !== canonicalJson(sourceJson(brokerRecoverySuccessorEvidenceReader.trustPath)) || !create && after.arn !== INSTALLATION.brokerRecoverySuccessorEvidenceReaderRoleArn) throw new Error("Evidence reader role contract is not exact.");

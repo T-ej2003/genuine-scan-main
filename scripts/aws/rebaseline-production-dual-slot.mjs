@@ -8,6 +8,8 @@ import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from 
 import { createProductionGithubCommandRunner } from "./production-credential-source-contract.mjs";
 import { createInitialDualSlotSecretsManagerClient } from "./production-initial-dual-slot-bootstrap.mjs";
 import { deriveLegacyRotationBaseline } from "./production-legacy-rotation-baseline.mjs";
+import { parseEcsSecretsManagerReference } from "./production-ecs-runtime-dependencies.mjs";
+import { assertQrVersionResolutionCurrent, readGitHubApiToken, resolveQrVersionResolutionArtifact } from "./production-qr-version-selector-resolution.mjs";
 import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 import { ensureStageBPrivateDirectory, readStageBPrivateFileBytes, writeStageBPrivateFileAtomicExclusive } from "./stage-b-artifact-contract.mjs";
@@ -154,7 +156,7 @@ function listAllTaskArns(run, args) {
   throw new Error("ECS task census exceeds the bounded page limit.");
 }
 
-export function auditLiveProductionDualSlotReferences({ run, resources, databaseDependencies = 0, externalConsumers = 0 } = {}) {
+export function auditLiveProductionDualSlotReferences({ run, resources, databaseDependencies = 0, externalConsumers = 0, qrVersionResolution } = {}) {
   const service = awsJson(run, ["describe-services", "--cluster", CLUSTER, "--services", SERVICE]).services?.[0];
   if (!service?.taskDefinition || !service.serviceArn) throw new Error("Current production ECS service topology is unavailable.");
   const deploymentController = service.deploymentController?.type || "ECS";
@@ -196,7 +198,12 @@ export function auditLiveProductionDualSlotReferences({ run, resources, database
   const definitionsByArn = new Map(taskDefinitions.map(({ requestedArn, definition }) => [requestedArn, definition]));
   const liveServiceTaskDefinitionArns = [...new Set(liveTasks.filter(({ taskArn }) => serviceTaskArns.has(taskArn)).map(({ taskDefinitionArn }) => taskDefinitionArn))].sort();
   const deploymentTaskDefinitionCoverage = deployments.map(({ id, status, taskDefinition }) => ({ id, status, taskDefinitionArn: taskDefinition, representedByLiveServiceTask: liveServiceTaskDefinitionArns.includes(taskDefinition) }));
-  const liveLegacyBaselines = liveServiceTaskDefinitionArns.map((taskDefinitionArn) => ({ taskDefinitionArn, legacy: deriveLegacyRotationBaseline(definitionsByArn.get(taskDefinitionArn)) }));
+  if (qrVersionResolution) {
+    if (service.taskDefinition !== qrVersionResolution.taskDefinitionArn) throw new Error("QR version resolution does not bind the current production service task definition.");
+    const secretMetadata = JSON.parse(run(["secretsmanager", "describe-secret", "--secret-id", qrVersionResolution.secretArn, "--output", "json", "--no-cli-pager"]));
+    assertQrVersionResolutionCurrent({ taskDefinition: definitionsByArn.get(service.taskDefinition), resolution: qrVersionResolution, secretMetadata });
+  }
+  const liveLegacyBaselines = liveServiceTaskDefinitionArns.map((taskDefinitionArn) => ({ taskDefinitionArn, legacy: deriveLegacyRotationBaseline(definitionsByArn.get(taskDefinitionArn), { qrVersionResolution, allowEquivalentQrSelector: Boolean(qrVersionResolution && taskDefinitionArn !== qrVersionResolution.taskDefinitionArn) }) }));
   const uniqueLegacyBaselines = [...new Map(liveLegacyBaselines.map(({ legacy }) => [canonicalSha256(legacy), legacy])).entries()].sort(([left], [right]) => left.localeCompare(right)).map(([identitySha256, legacy]) => ({ identitySha256, legacy }));
   const liveLegacyBaselineCount = uniqueLegacyBaselines.length;
   const legacy = liveLegacyBaselineCount === 1 ? uniqueLegacyBaselines[0].legacy : undefined;
@@ -208,18 +215,18 @@ export function auditLiveProductionDualSlotReferences({ run, resources, database
   return Object.freeze({ status: legacyRuntimeAuthoritative ? "PASS" : "FAIL", dualSlotReferences, legacyRuntimeAuthoritative, liveLegacyBaselineCount, liveLegacyBaselineIdentitySha256: legacyRuntimeAuthoritative ? canonicalSha256(legacy) : undefined, databaseDependencies, externalConsumers, runningTasks: service.runningCount, pendingTasks: service.pendingCount, activeTaskDefinition: service.taskDefinition, legacy, evidence, auditSha256, stableEvidence, stableAuditSha256 });
 }
 
-export function createProductionRebaselineAdapters({ client, run, resources, preparation } = {}) {
+export function createProductionRebaselineAdapters({ client, run, resources, preparation, qrVersionResolution } = {}) {
   return {
-    readReferenceAudit: async () => auditLiveProductionDualSlotReferences({ run, resources, databaseDependencies: preparation.databaseDependencies, externalConsumers: preparation.externalConsumers }),
+    readReferenceAudit: async () => auditLiveProductionDualSlotReferences({ run, resources, databaseDependencies: preparation.databaseDependencies, externalConsumers: preparation.externalConsumers, qrVersionResolution }),
     readSlot: (slot, secretArn, expectedVersionId, expectedIdentity) => readSlotSnapshot(client, slot, secretArn, expectedVersionId, expectedIdentity),
     writeSlot: ({ secretArn, clientRequestToken, payload }) => client.send(new PutSecretValueCommand({ SecretId: secretArn, ClientRequestToken: clientRequestToken, SecretString: JSON.stringify(payload) })).then((response) => ({ arn: secretArn, versionId: response.VersionId })),
   };
 }
 
-export function auditLegacyTaskDefinition(taskDefinition, resources, { runningTasks = 0, pendingTasks = 0, databaseDependencies = 0, externalConsumers = 0 } = {}) {
+export function auditLegacyTaskDefinition(taskDefinition, resources, { runningTasks = 0, pendingTasks = 0, databaseDependencies = 0, externalConsumers = 0, qrVersionResolution } = {}) {
   const serialized = JSON.stringify(taskDefinition);
   const dualSlotReferences = Object.values(resources).filter((arn) => serialized.includes(arn)).length;
-  const legacy = deriveLegacyRotationBaseline(taskDefinition);
+  const legacy = deriveLegacyRotationBaseline(taskDefinition, { qrVersionResolution });
   const taskDefinitionArn = taskDefinition.taskDefinitionArn || taskDefinition.family || "unknown";
   const perTaskDefinition = [{ taskDefinitionArn, dualSlotReferences: Object.values(resources).filter((arn) => serialized.includes(arn)).sort() }];
   const evidence = { service: { arn: "fixture", desiredCount: runningTasks, runningCount: runningTasks, pendingCount: pendingTasks, taskDefinition: taskDefinitionArn, deploymentController: "ECS" }, deployments: [], tasks: [], taskDefinitionArns: [taskDefinitionArn], serviceTaskDefinitionArns: [taskDefinitionArn], perTaskDefinition, databaseDependencies, externalConsumers };
@@ -233,11 +240,11 @@ export function readAuthenticatedRebaselineCheckout({ sourceSha, gitRun = (args)
   return checkout;
 }
 
-export async function prepareProductionDualSlotRebaseline({ sourceSha, rotationId, outputDirectory, gitRun = (args) => execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), client, topology: suppliedTopology, historicalTransitionEvidence, taskDefinition, liveReferenceAudit = {}, repositoryRoot = REPOSITORY_ROOT, historicalTopologySha256 = REBASELINE_ABANDONED_HISTORICAL_TOPOLOGY_SHA256, afterAbandonmentPersist, afterPreparationPersist } = {}) {
+export async function prepareProductionDualSlotRebaseline({ sourceSha, rotationId, outputDirectory, gitRun = (args) => execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), client, topology: suppliedTopology, historicalTransitionEvidence, taskDefinition, liveReferenceAudit = {}, qrVersionResolution, repositoryRoot = REPOSITORY_ROOT, historicalTopologySha256 = REBASELINE_ABANDONED_HISTORICAL_TOPOLOGY_SHA256, afterAbandonmentPersist, afterPreparationPersist } = {}) {
   const directory = ensureStageBPrivateDirectory({ directory: outputDirectory, repositoryRoot, create: true, normalize: true, label: "Dual-slot rebaseline preparation directory" });
   const checkout = readAuthenticatedRebaselineCheckout({ sourceSha, gitRun, repositoryRoot });
   const topology = suppliedTopology || await readDualSlotTopology({ client, historicalTransitionEvidence });
-  const audit = liveReferenceAudit?.stableAuditSha256 ? liveReferenceAudit : auditLegacyTaskDefinition(taskDefinition, topology.resources, liveReferenceAudit);
+  const audit = liveReferenceAudit?.stableAuditSha256 ? liveReferenceAudit : auditLegacyTaskDefinition(taskDefinition, topology.resources, { ...liveReferenceAudit, qrVersionResolution });
   const abandonmentFile = path.join(directory, "abandonment-evidence.json");
   let abandonmentEvidence;
   const existingAbandonment = lstatSync(abandonmentFile, { throwIfNoEntry: false });
@@ -313,6 +320,24 @@ export async function executeAuthenticatedPartialRebaselineRecovery({ recoveryEn
 
 export function createProductionRebaselineClient({ profile = "mscqr-production-release-deployer" } = {}) { return createInitialDualSlotSecretsManagerClient({ region: REGION, profile }); }
 
+async function resolveCliQrVersionResolution({ args, sourceSha, run }) {
+  const hasRun = args.has("qr-version-resolution-run-id");
+  if (!hasRun) {
+    if (args.has("qr-version-secret-arn")) throw new Error("QR version resolution run ID is required with its exact secret binding.");
+    return undefined;
+  }
+  const service = awsJson(run, ["describe-services", "--cluster", CLUSTER, "--services", SERVICE]).services?.[0];
+  if (!service?.taskDefinition) throw new Error("Current production ECS service topology is unavailable.");
+  const taskDefinition = awsJson(run, ["describe-task-definition", "--task-definition", service.taskDefinition, "--include", "TAGS"]);
+  const binding = taskDefinition.taskDefinition?.containerDefinitions?.find(({ name }) => name === "backend")?.secrets?.find(({ name }) => name === "QR_SIGN_ACTIVE_KEY_VERSION");
+  if (!binding) throw new Error("QR version resolution was supplied without a live QR selector.");
+  let expectedSecretArn;
+  try { expectedSecretArn = parseEcsSecretsManagerReference(binding.valueFrom).resource; } catch { throw new Error("Current QR active-version selector is malformed."); }
+  if (required(args, "qr-version-secret-arn") !== expectedSecretArn) throw new Error("QR version authorization secret does not match the live ECS selector.");
+  const secretMetadata = JSON.parse(run(["secretsmanager", "describe-secret", "--secret-id", expectedSecretArn, "--output", "json", "--no-cli-pager"]));
+  return resolveQrVersionResolutionArtifact({ workflowRunId: required(args, "qr-version-resolution-run-id"), sourceSha, changeTicket: required(args, "change-ticket"), expectedSecretArn, taskDefinition, secretMetadata, token: readGitHubApiToken() });
+}
+
 export async function runProductionDualSlotRebaselineCli({ argv = process.argv.slice(2), repositoryRoot = REPOSITORY_ROOT, readCheckout = readAuthenticatedRebaselineCheckout, gitRun = (args) => execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), createRun = () => createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer", region: REGION }), createClient = createProductionRebaselineClient, resolveAuthorization = resolveProductionDualSlotRebaselineAuthorizationArtifact, resolveRecoveryAuthorization = resolvePartialRebaselineRecoveryAuthorizationArtifact, readTopology = readDualSlotTopology, readPreparedTopology = readPreparedDualSlotTopology, auditReferences = auditLiveProductionDualSlotReferences, executePrepared = executePreparedProductionDualSlotRebaseline, executeRecovery = executeAuthenticatedPartialRebaselineRecovery, historicalTopologySha256 = REBASELINE_ABANDONED_HISTORICAL_TOPOLOGY_SHA256, afterAbandonmentPersist, afterPreparationPersist, output = (value) => process.stdout.write(`${JSON.stringify(value, null, 2)}\n`) } = {}) {
   const args = parseArgs(argv);
   const sourceSha = required(args, "source-sha");
@@ -320,12 +345,13 @@ export async function runProductionDualSlotRebaselineCli({ argv = process.argv.s
     const checkout = readCheckout({ sourceSha, repositoryRoot });
     const run = createRun();
     const client = createClient(); await client.assertCredentialIdentity();
+    const qrVersionResolution = await resolveCliQrVersionResolution({ args, sourceSha: checkout.toolingSha, run });
     const outputDirectory = path.resolve(required(args, "output-directory")); mkdirSync(outputDirectory, { recursive: true, mode: 0o700 });
     const historicalTransitionEvidence = args.has("historical-transition-evidence")
       ? json(readStageBPrivateFileBytes({ filePath: path.resolve(required(args, "historical-transition-evidence")), repositoryRoot, label: "Historical coordinator transition evidence" }).bytes)
       : undefined;
     const topology = await readTopology({ client, historicalTransitionEvidence });
-    const audit = auditReferences({ run, resources: topology.resources, databaseDependencies: Number(required(args, "database-dependencies")), externalConsumers: Number(required(args, "external-consumers")) });
+    const audit = auditReferences({ run, resources: topology.resources, databaseDependencies: Number(required(args, "database-dependencies")), externalConsumers: Number(required(args, "external-consumers")), qrVersionResolution });
     const result = await prepareProductionDualSlotRebaseline({ sourceSha: checkout.toolingSha, rotationId: required(args, "rotation-id"), outputDirectory, client, topology, historicalTransitionEvidence, liveReferenceAudit: audit, repositoryRoot, gitRun, historicalTopologySha256, afterAbandonmentPersist, afterPreparationPersist });
     output(result);
     return result;
@@ -336,13 +362,14 @@ export async function runProductionDualSlotRebaselineCli({ argv = process.argv.s
     assertRebaselinePreparation(preparation, { sourceSha: checkout.toolingSha, rotationId: requestedRotationId });
     const run = createRun();
     const client = createClient(); await client.assertCredentialIdentity();
+    const qrVersionResolution = await resolveCliQrVersionResolution({ args, sourceSha: checkout.toolingSha, run });
     const authorization = resolveAuthorization({ workflowRunId: required(args, "workflow-run-id"), workflowRunAttempt: required(args, "workflow-run-attempt"), sourceSha: checkout.toolingSha, rotationId: requestedRotationId, resources: preparation.resources, run: createProductionGithubCommandRunner() }).authorization;
     const journal = readRebaselineMaterialJournal({ filePath: path.resolve(required(args, "material-journal")), repositoryRoot, sourceSha: checkout.toolingSha, rotationId: requestedRotationId, baselineIdentitySha256: preparation.baselineIdentity.identitySha256 });
     const payloads = buildRebaselinePayloads({ sourceSha: checkout.toolingSha, rotationId: preparation.rotationId, generatedMaterial: journal.material, legacyBaseline: preparation.legacyBaseline });
     const writePlan = buildRebaselineWritePlan({ sourceSha: checkout.toolingSha, rotationId: preparation.rotationId, resources: preparation.resources, baselineIdentitySha256: preparation.baselineIdentity.identitySha256, payloads });
-    const topology = await readPreparedTopology({ client, preparation, writePlan }); const audit = auditReferences({ run, resources: topology.resources, databaseDependencies: preparation.databaseDependencies, externalConsumers: preparation.externalConsumers });
+    const topology = await readPreparedTopology({ client, preparation, writePlan }); const audit = auditReferences({ run, resources: topology.resources, databaseDependencies: preparation.databaseDependencies, externalConsumers: preparation.externalConsumers, qrVersionResolution });
     const currentPreconditions = { ...preparation, resources: topology.resources, abandonmentEvidence: preparation.abandonmentEvidence, liveReferenceAudit: audit.status, liveReferenceAuditSha256: audit.stableAuditSha256, legacyRuntimeAuthoritative: audit.legacyRuntimeAuthoritative, liveLegacyBaselineCount: audit.liveLegacyBaselineCount, dualSlotReferences: audit.dualSlotReferences, runningTasks: audit.runningTasks, pendingTasks: audit.pendingTasks, activeTaskDefinition: audit.activeTaskDefinition, legacyBaseline: audit.legacy };
-    const result = await executePrepared({ preparationFile, authorization, materialJournalFile: path.resolve(required(args, "material-journal")), completionFile: path.resolve(required(args, "completion-output")), bindingsFile: path.resolve(required(args, "rotation-bindings-output")), repositoryRoot, sourceSha: checkout.toolingSha, currentPreconditions, client, adapters: createProductionRebaselineAdapters({ client, run, resources: topology.resources, preparation }) });
+    const result = await executePrepared({ preparationFile, authorization, materialJournalFile: path.resolve(required(args, "material-journal")), completionFile: path.resolve(required(args, "completion-output")), bindingsFile: path.resolve(required(args, "rotation-bindings-output")), repositoryRoot, sourceSha: checkout.toolingSha, currentPreconditions, client, adapters: createProductionRebaselineAdapters({ client, run, resources: topology.resources, preparation, qrVersionResolution }) });
     const summary = { baselineComplete: result.baselineComplete, writes: result.writes, baselineBindingSha256: result.completion.baselineBindingSha256, completionPath: result.completionPath, completionSha256: result.completionSha256, rotationBindingsPath: result.bindingsPath, rotationBindingsSha256: result.bindingsSha256 };
     output(summary);
     return summary;
@@ -350,6 +377,7 @@ export async function runProductionDualSlotRebaselineCli({ argv = process.argv.s
     const checkout = readCheckout({ sourceSha, repositoryRoot });
     const run = createRun();
     const client = createClient(); await client.assertCredentialIdentity();
+    const qrVersionResolution = await resolveCliQrVersionResolution({ args, sourceSha: checkout.toolingSha, run });
     const envelope = assertAuthenticatedPartialRebaselineRecovery(json(readStageBPrivateFileBytes({ filePath: path.resolve(required(args, "recovery-envelope")), repositoryRoot, label: "Partial rebaseline recovery envelope" }).bytes));
     const preparationFile = path.resolve(required(args, "original-preparation"));
     const preparation = json(readStageBPrivateFileBytes({ filePath: preparationFile, repositoryRoot, label: "Original dual-slot rebaseline preparation" }).bytes);
@@ -359,13 +387,13 @@ export async function runProductionDualSlotRebaselineCli({ argv = process.argv.s
     const payloads = buildRebaselinePayloads({ sourceSha: envelope.originalSourceSha, rotationId: envelope.rotationId, generatedMaterial: journal.material, legacyBaseline: preparation.legacyBaseline });
     const writePlan = buildRebaselineWritePlan({ sourceSha: envelope.originalSourceSha, rotationId: envelope.rotationId, resources: envelope.resources, baselineIdentitySha256: preparation.baselineIdentity.identitySha256, payloads });
     const topology = await readPreparedTopology({ client, preparation, writePlan });
-    const audit = auditReferences({ run, resources: topology.resources, databaseDependencies: preparation.databaseDependencies, externalConsumers: preparation.externalConsumers });
+    const audit = auditReferences({ run, resources: topology.resources, databaseDependencies: preparation.databaseDependencies, externalConsumers: preparation.externalConsumers, qrVersionResolution });
     const currentPreconditions = { sourceSha: checkout.toolingSha, sourceCas: true, cleanWorktree: checkout.porcelainStatus === "", resources: topology.resources, liveReferenceAudit: audit.status, liveReferenceAuditSha256: audit.stableAuditSha256, liveLegacyBaselineIdentitySha256: audit.liveLegacyBaselineIdentitySha256, liveLegacyBaselineCount: audit.liveLegacyBaselineCount, dualSlotReferences: audit.dualSlotReferences };
     const imageAuthorization = json(readStageBPrivateFileBytes({ filePath: path.resolve(required(args, "image-authorization")), repositoryRoot, label: "Current image authorization" }).bytes);
     const imageAuthorizationValidation = { verifyImageEvidence: (options) => verifyImageEvidenceSignature({ ...options, run }) };
     const liveCas = { liveReferenceAuditSha256: currentPreconditions.liveReferenceAuditSha256, liveLegacyBaselineIdentitySha256: currentPreconditions.liveLegacyBaselineIdentitySha256, observedSlotIdentitiesSha256: canonicalSha256(topology.snapshots) };
     const authorization = resolveRecoveryAuthorization({ workflowRunId: required(args, "workflow-run-id"), workflowRunAttempt: required(args, "workflow-run-attempt"), sourceSha: checkout.toolingSha, recoveryEnvelope: envelope, imageAuthorization, imageAuthorizationValidation, liveCas, proveDescendant: ({ ancestorSha, descendantSha }) => { try { gitRun(["merge-base", "--is-ancestor", ancestorSha, descendantSha]); return true; } catch { return false; } }, run: createProductionGithubCommandRunner() }).authorization;
-    const result = await executeRecovery({ recoveryEnvelopeFile: path.resolve(required(args, "recovery-envelope")), originalPreparationFile: preparationFile, materialJournalFile: journalFile, authorization, imageAuthorization, imageAuthorizationValidation, sourceSha: checkout.toolingSha, currentPreconditions, completionFile: path.resolve(required(args, "completion-output")), bindingsFile: path.resolve(required(args, "rotation-bindings-output")), repositoryRoot, gitRun, client, adapters: createProductionRebaselineAdapters({ client, run, resources: topology.resources, preparation }) });
+    const result = await executeRecovery({ recoveryEnvelopeFile: path.resolve(required(args, "recovery-envelope")), originalPreparationFile: preparationFile, materialJournalFile: journalFile, authorization, imageAuthorization, imageAuthorizationValidation, sourceSha: checkout.toolingSha, currentPreconditions, completionFile: path.resolve(required(args, "completion-output")), bindingsFile: path.resolve(required(args, "rotation-bindings-output")), repositoryRoot, gitRun, client, adapters: createProductionRebaselineAdapters({ client, run, resources: topology.resources, preparation, qrVersionResolution }) });
     const summary = { baselineComplete: result.baselineComplete, writes: result.writes, completedSlots: result.completedSlots, remainingWrites: 0, completionPath: result.completionPath, bindingsPath: result.bindingsPath };
     output(summary);
     return summary;

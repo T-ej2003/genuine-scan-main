@@ -8,6 +8,9 @@ on:
       preparation_file_sha256: { description: Exact authorized private preparation file SHA256, required: true, type: string }
       authorization_run_id: { description: Protected authorization workflow run ID, required: true, type: string }
       authorization_run_attempt: { description: Protected authorization workflow run attempt, required: true, type: string }
+      change_ticket: { description: Exact governed change ticket, required: true, type: string }
+      qr_version_resolution_run_id: { description: Successful read-only QR version resolution workflow run ID, required: true, type: string }
+      qr_version_resource_arn: { description: Exact authorized live QR version secret ARN, required: true, type: string }
 
 permissions:
   contents: read
@@ -79,9 +82,14 @@ jobs:
           PREPARATION_FILE_SHA256: ${{ inputs.preparation_file_sha256 }}
           AUTHORIZATION_RUN_ID: ${{ inputs.authorization_run_id }}
           AUTHORIZATION_RUN_ATTEMPT: ${{ inputs.authorization_run_attempt }}
+          CHANGE_TICKET: ${{ inputs.change_ticket }}
+          QR_VERSION_RESOLUTION_RUN_ID: ${{ inputs.qr_version_resolution_run_id }}
+          QR_VERSION_RESOURCE_ARN: ${{ inputs.qr_version_resource_arn }}
         run: |
           set -euo pipefail
           node scripts/aws/run-production-mixed-dual-slot-topology-recovery.mjs --execute \
             --source-sha "$SOURCE_SHA" --preparation "$RUNNER_TEMP/mixed-recovery/preparation.json" \
             --preparation-file-sha256 "$PREPARATION_FILE_SHA256" \
-            --authorization-run-id "$AUTHORIZATION_RUN_ID" --authorization-run-attempt "$AUTHORIZATION_RUN_ATTEMPT"
+            --authorization-run-id "$AUTHORIZATION_RUN_ID" --authorization-run-attempt "$AUTHORIZATION_RUN_ATTEMPT" \
+            --change-ticket "$CHANGE_TICKET" --qr-version-resolution-run-id "$QR_VERSION_RESOLUTION_RUN_ID" \
+            --qr-version-secret-arn "$QR_VERSION_RESOURCE_ARN"

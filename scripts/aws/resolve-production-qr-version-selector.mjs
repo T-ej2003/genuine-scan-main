@@ -1,0 +1,53 @@
+#!/usr/bin/env node
+import crypto from "node:crypto";
+import { createRequire } from "node:module";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { assertProductionEnvironmentApprovalEvidence, assertProductionEnvironmentActualReviewer } from "./production-github-environment-approval.mjs";
+import { deriveLegacyRotationBaseline } from "./production-legacy-rotation-baseline.mjs";
+import { assertQrVersionSelector, createQrVersionResolutionEvidence, QR_VERSION_SELECTOR_RESOLUTION, resolveQrVersionSelectorValue } from "./production-qr-version-selector-resolution.mjs";
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const requireBackend = createRequire(path.join(root, "backend/package.json"));
+const { ECSClient, DescribeServicesCommand, DescribeTaskDefinitionCommand } = requireBackend("@aws-sdk/client-ecs");
+const { SecretsManagerClient, DescribeSecretCommand, GetSecretValueCommand } = requireBackend("@aws-sdk/client-secrets-manager");
+const { STSClient, GetCallerIdentityCommand } = requireBackend("@aws-sdk/client-sts");
+const SHA40 = /^[a-f0-9]{40}$/;
+const args = process.argv.slice(2);
+const exactArgs = ["--approval-file", "--approval-sha256", "--output"];
+if (args.length !== exactArgs.length * 2 || args.some((value, index) => index % 2 === 0 && value !== exactArgs[index / 2]) || args.some((value, index) => index % 2 === 1 && (!value || value.startsWith("--")))) throw new Error("QR version selector resolver arguments are invalid.");
+const options = Object.fromEntries(exactArgs.map((key, index) => [key, args[index * 2 + 1]]));
+const env = process.env;
+const sourceSha = env.SOURCE_SHA || "";
+const changeTicket = env.CHANGE_TICKET || "";
+const expectedSecretArn = env.EXPECTED_SECRET_ARN || "";
+const output = path.resolve(options["--output"]);
+if (!SHA40.test(sourceSha) || !/^CHG-[A-Za-z0-9-]{6,64}$/.test(changeTicket) || env.GITHUB_ACTIONS !== "true" || env.GITHUB_REPOSITORY !== "T-ej2003/genuine-scan-main" || env.GITHUB_WORKFLOW_REF !== QR_VERSION_SELECTOR_RESOLUTION.workflowRef || env.GITHUB_EVENT_NAME !== "workflow_dispatch" || env.GITHUB_RUN_ATTEMPT !== "1" || env.AWS_REGION !== QR_VERSION_SELECTOR_RESOLUTION.region) throw new Error("QR version selector resolution is outside its exact protected workflow context.");
+const approvalBytes = fs.readFileSync(options["--approval-file"]);
+if (crypto.createHash("sha256").update(approvalBytes).digest("hex") !== options["--approval-sha256"]) throw new Error("QR version selector approval bytes changed.");
+let approval;
+try { approval = JSON.parse(approvalBytes); } catch { throw new Error("QR version selector approval evidence is malformed."); }
+assertProductionEnvironmentApprovalEvidence(approval, { sourceSha, repository: QR_VERSION_SELECTOR_RESOLUTION.workflowRef.split("/").slice(0, 2).join("/"), environment: QR_VERSION_SELECTOR_RESOLUTION.environment, workflowRef: QR_VERSION_SELECTOR_RESOLUTION.workflowRef, eventName: env.GITHUB_EVENT_NAME, workflowRunId: env.GITHUB_RUN_ID, workflowRunAttempt: env.GITHUB_RUN_ATTEMPT, executionActor: env.GITHUB_ACTOR, githubActions: env.GITHUB_ACTIONS });
+assertProductionEnvironmentActualReviewer(approval, { sourceSha, repository: "T-ej2003/genuine-scan-main", executionActor: env.GITHUB_ACTOR });
+
+const sts = new STSClient({ region: QR_VERSION_SELECTOR_RESOLUTION.region });
+const identity = await sts.send(new GetCallerIdentityCommand({}));
+if (identity.Account !== QR_VERSION_SELECTOR_RESOLUTION.account || !/^arn:aws:sts::368992683803:assumed-role\/mscqr-production-bootstrap-operator-policy-authorizer\/[^/]+$/.test(identity.Arn || "")) throw new Error("QR version resolution requires the exact read-only authorization role.");
+const ecs = new ECSClient({ region: QR_VERSION_SELECTOR_RESOLUTION.region });
+const service = (await ecs.send(new DescribeServicesCommand({ cluster: QR_VERSION_SELECTOR_RESOLUTION.cluster, services: [QR_VERSION_SELECTOR_RESOLUTION.service] }))).services?.[0];
+if (!service?.taskDefinition || service.desiredCount < 1 || service.runningCount < 1 || service.pendingCount !== 0 || service.deployments?.length !== 1 || service.deployments[0]?.rolloutState !== "COMPLETED") throw new Error("Live production backend service is not in a stable readable state.");
+const taskDefinition = await ecs.send(new DescribeTaskDefinitionCommand({ taskDefinition: service.taskDefinition, include: ["TAGS"] }));
+const binding = assertQrVersionSelector({ taskDefinition, expectedSecretArn });
+const secrets = new SecretsManagerClient({ region: QR_VERSION_SELECTOR_RESOLUTION.region });
+const response = await secrets.send(new GetSecretValueCommand({ SecretId: binding.secretArn, VersionStage: "AWSCURRENT" }));
+const secretMetadata = await secrets.send(new DescribeSecretCommand({ SecretId: binding.secretArn }));
+if (secretMetadata.ARN !== binding.secretArn || JSON.stringify(secretMetadata.VersionIdsToStages?.[response.VersionId]) !== '["AWSCURRENT"]') throw new Error("QR version secret moved after the authorized read.");
+const serviceAfterRead = (await ecs.send(new DescribeServicesCommand({ cluster: QR_VERSION_SELECTOR_RESOLUTION.cluster, services: [QR_VERSION_SELECTOR_RESOLUTION.service] }))).services?.[0];
+if (serviceAfterRead?.taskDefinition !== service.taskDefinition || serviceAfterRead.desiredCount !== service.desiredCount || serviceAfterRead.runningCount !== service.runningCount || serviceAfterRead.pendingCount !== 0 || serviceAfterRead.deployments?.length !== 1 || serviceAfterRead.deployments[0]?.rolloutState !== "COMPLETED") throw new Error("Live backend task-definition selector changed during QR version resolution.");
+const resolved = resolveQrVersionSelectorValue({ response, binding });
+const baseline = deriveLegacyRotationBaseline(taskDefinition, { qrVersionResolution: resolved });
+if (baseline.qrCurrentVersion !== resolved.qrCurrentVersion) throw new Error("QR version baseline did not bind the resolved identifier.");
+const evidence = createQrVersionResolutionEvidence({ binding, resolved, sourceSha, changeTicket, workflowRunId: env.GITHUB_RUN_ID });
+fs.writeFileSync(output, `${JSON.stringify(evidence)}\n`, { flag: "wx", mode: 0o600 });
+process.stdout.write("QR_VERSION_RESOLUTION=PASS\nSECRET_IDENTITY_MATCH=true\nJSON_KEY_MATCH=true\nVERSION_SEMANTICS_MATCH=true\nIDENTIFIER_VALID=true\nLEGACY_ROTATION_BASELINE_DERIVABLE=true\nSECRETSTRING_LOGGED=false\nSECRETSTRING_PERSISTED=false\nAWS_RESOURCE_MUTATIONS=0\n");

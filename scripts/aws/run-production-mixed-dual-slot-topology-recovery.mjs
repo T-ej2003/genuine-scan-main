@@ -4,6 +4,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-cutover-production-adapters.mjs";
 import { deriveLegacyRotationBaseline } from "./production-initial-dual-slot-bootstrap.mjs";
+import { parseEcsSecretsManagerReference } from "./production-ecs-runtime-dependencies.mjs";
+import { readGitHubApiToken, resolveQrVersionResolutionArtifact } from "./production-qr-version-selector-resolution.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, readStageBPrivateFileBytes, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import { MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN, MIXED_DUAL_SLOT_RECOVERY_LIVE_PREDECESSOR, MIXED_DUAL_SLOT_RECOVERY_ORDER, MIXED_DUAL_SLOT_PREDECESSOR, assertMixedDualSlotRecoveryPreparation, resolveMixedDualSlotRecoveryAuthorizationArtifact } from "./production-mixed-dual-slot-recovery-contract.mjs";
@@ -14,7 +16,7 @@ import { executeMixedDualSlotRecovery, prepareMixedDualSlotRecovery } from "./re
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const requireBackend = createRequire(path.join(root, "backend/package.json"));
-const { SecretsManagerClient } = requireBackend("@aws-sdk/client-secrets-manager");
+const { DescribeSecretCommand, SecretsManagerClient } = requireBackend("@aws-sdk/client-secrets-manager");
 const { STSClient, GetCallerIdentityCommand } = requireBackend("@aws-sdk/client-sts");
 const { fromIni } = requireBackend("@aws-sdk/credential-provider-ini");
 const option = (argv, name) => { const index = argv.indexOf(name); return index < 0 ? undefined : argv[index + 1]; };
@@ -25,7 +27,7 @@ const EXECUTION_WORKFLOW_REF = "T-ej2003/genuine-scan-main/.github/workflows/exe
 function assertArgs(argv) {
   const modes = ["--prepare", "--execute"].filter((name) => argv.includes(name));
   if (modes.length !== 1) throw new Error("Exactly one of --prepare or --execute is required.");
-  const allowed = new Set(modes[0] === "--prepare" ? ["--prepare", "--source-sha", "--output"] : ["--execute", "--source-sha", "--preparation", "--preparation-file-sha256", "--authorization-run-id", "--authorization-run-attempt"]);
+  const allowed = new Set(modes[0] === "--prepare" ? ["--prepare", "--source-sha", "--output", "--change-ticket", "--qr-version-resolution-run-id", "--qr-version-secret-arn"] : ["--execute", "--source-sha", "--preparation", "--preparation-file-sha256", "--authorization-run-id", "--authorization-run-attempt", "--change-ticket", "--qr-version-resolution-run-id", "--qr-version-secret-arn"]);
   const seen = new Set();
   for (let index = 0; index < argv.length; index += 1) { const arg = argv[index]; if (!allowed.has(arg) || seen.has(arg)) throw new Error(`Unsupported or duplicate argument: ${arg}`); seen.add(arg); if (arg === modes[0]) continue; if (!argv[index + 1] || argv[index + 1].startsWith("--")) throw new Error(`${arg} is required.`); index += 1; }
   return modes[0];
@@ -45,7 +47,7 @@ async function assertExpectedPrincipal(sts, mode) {
   if (caller.Account !== "368992683803" || !new RegExp(`^arn:aws:sts::368992683803:assumed-role/${roleName}/[^/]+$`).test(caller.Arn || "")) throw new Error(`Mixed recovery requires the exact ${roleName} session.`);
 }
 
-function readLivePredecessor() {
+async function readLivePredecessor({ sourceSha, changeTicket, qrVersionResolutionRunId, expectedQrSecretArn, secrets }) {
   const credentialSource = process.env.GITHUB_ACTIONS === "true" ? PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER : PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE;
   const run = createProductionCommandRunner({ credentialSource, ...(credentialSource === PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE ? { profile: "mscqr-production-release-deployer" } : {}), region: "eu-west-2" });
   const service = JSON.parse(run(["ecs", "describe-services", "--cluster", MIXED_DUAL_SLOT_RECOVERY_LIVE_PREDECESSOR.cluster, "--services", MIXED_DUAL_SLOT_RECOVERY_LIVE_PREDECESSOR.service])).services?.[0];
@@ -53,7 +55,16 @@ function readLivePredecessor() {
   const taskDefinition = JSON.parse(run(["ecs", "describe-task-definition", "--task-definition", service.taskDefinition, "--include", "TAGS"]));
   const backend = taskDefinition.taskDefinition?.containerDefinitions?.find(({ name }) => name === "backend");
   if (backend?.image !== MIXED_DUAL_SLOT_RECOVERY_LIVE_PREDECESSOR.backendImage) throw new Error("Mixed recovery live backend image changed.");
-  const baseline = deriveLegacyRotationBaseline(taskDefinition);
+  const selector = backend?.secrets?.find(({ name }) => name === "QR_SIGN_ACTIVE_KEY_VERSION");
+  let qrVersionResolution;
+  if (selector) {
+    let secretArn;
+    try { secretArn = parseEcsSecretsManagerReference(selector.valueFrom).resource; } catch { throw new Error("Mixed recovery live QR version selector is malformed."); }
+    if (secretArn !== expectedQrSecretArn || !qrVersionResolutionRunId || !changeTicket) throw new Error("Mixed recovery requires the exact governed QR version resolution.");
+    const secretMetadata = await secrets.send(new DescribeSecretCommand({ SecretId: secretArn }));
+    qrVersionResolution = await resolveQrVersionResolutionArtifact({ workflowRunId: qrVersionResolutionRunId, sourceSha, changeTicket, expectedSecretArn: secretArn, taskDefinition, secretMetadata, token: readGitHubApiToken() });
+  }
+  const baseline = deriveLegacyRotationBaseline(taskDefinition, { qrVersionResolution });
   const active = [baseline.jwtCurrent, baseline.qrPrivateCurrent, baseline.qrPublicCurrent].sort();
   if (JSON.stringify(active) !== JSON.stringify([...MIXED_DUAL_SLOT_RECOVERY_LIVE_PREDECESSOR.legacySecretArns].sort())) throw new Error("Mixed recovery live legacy selectors changed.");
   if (active.some((arn) => MIXED_DUAL_SLOT_RECOVERY_ORDER.some((slot) => MIXED_DUAL_SLOT_PREDECESSOR[slot].arn === arn))) throw new Error("Mixed recovery targets intersect active legacy runtime material.");
@@ -68,7 +79,7 @@ async function main(argv = process.argv.slice(2)) {
     const rootRun = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "default", region: "eu-west-2" });
     const iamCapabilityPreflight = readMixedDualSlotRecoveryIamCapabilityPreflight({ sourceSha, run: rootRun });
     const iamCapabilityAttestation = createMixedDualSlotRecoveryIamAttestation({ preflight: iamCapabilityPreflight, sign: createRootAttestationKmsSigner({ run: rootRun }) });
-    const preparation = await prepareMixedDualSlotRecovery({ send: (command) => secrets.send(command), sourceSha, livePredecessor: readLivePredecessor(), iamCapabilityPreflight });
+    const preparation = await prepareMixedDualSlotRecovery({ send: (command) => secrets.send(command), sourceSha, livePredecessor: await readLivePredecessor({ sourceSha, changeTicket: option(argv, "--change-ticket"), qrVersionResolutionRunId: option(argv, "--qr-version-resolution-run-id"), expectedQrSecretArn: option(argv, "--qr-version-secret-arn"), secrets }), iamCapabilityPreflight });
     const output = assertStageBArtifactPath({ artifactPath: path.resolve(required(argv, "--output")), repositoryRoot: root, label: "Mixed recovery preparation", allowExisting: false });
     const iamAttestationOutput = assertStageBArtifactPath({ artifactPath: `${output}.iam-attestation.json`, repositoryRoot: root, label: "Mixed recovery IAM attestation", allowExisting: false });
     ensureStageBPrivateDirectory({ directory: path.dirname(output), repositoryRoot: root, label: "Mixed recovery preparation directory" });
@@ -81,7 +92,7 @@ async function main(argv = process.argv.slice(2)) {
   if (captured.sha256 !== required(argv, "--preparation-file-sha256")) throw new Error("Mixed recovery preparation bytes changed after authorization.");
   const preparation = parseJson(captured.bytes, "Mixed recovery preparation"); assertMixedDualSlotRecoveryPreparation(preparation, { sourceSha });
   const resolved = resolveMixedDualSlotRecoveryAuthorizationArtifact({ workflowRunId: required(argv, "--authorization-run-id"), workflowRunAttempt: required(argv, "--authorization-run-attempt"), sourceSha, preparation, preparationFileSha256: captured.sha256 });
-  const reauthenticate = async () => { protectedSource(sourceSha); readLivePredecessor(); };
+  const reauthenticate = async () => { protectedSource(sourceSha); await readLivePredecessor({ sourceSha, changeTicket: option(argv, "--change-ticket"), qrVersionResolutionRunId: option(argv, "--qr-version-resolution-run-id"), expectedQrSecretArn: option(argv, "--qr-version-secret-arn"), secrets }); };
   const result = await executeMixedDualSlotRecovery({ send: (command) => secrets.send(command), preparation, preparationFileSha256: captured.sha256, sourceSha, authorization: resolved.authorization, reauthenticate });
   return { status: result.updateSecretVersionStageCalls === 0 ? "COMPLETED_CONSUMED" : "COMPLETED", authorizationSha256: resolved.authorization.authorizationSha256, ...result };
 }

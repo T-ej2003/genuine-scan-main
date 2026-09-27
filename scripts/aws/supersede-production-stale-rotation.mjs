@@ -10,12 +10,13 @@ import { assertInitialDualSlotBindings, supersedeStalePendingRotation, bootstrap
 import { ensureStageBPrivateDirectory, readStageBPrivateFileBytes, writeStageBPrivateFileAtomicExclusive } from "./stage-b-artifact-contract.mjs";
 import { assertApprovedStaleRotationSupersessionAuthorization, assertStaleRotationSupersessionAuthorizationProvenance, assertStaleRotationSupersessionConsumption, assertStaleRotationSupersessionExecutionStart, assertStaleRotationSupersessionExecutionStartForPreparation, assertStaleRotationSupersessionPreparation, assertStaleRotationSupersessionReplacementReservation, createStaleRotationSupersessionConsumption, createStaleRotationSupersessionExecutionStart, createStaleRotationSupersessionPreparation, createStaleRotationSupersessionReplacementReservation, deriveStaleRotationReplacementId, resolveStaleRotationSupersessionAuthorizationArtifact, resolveStaleRotationSupersessionPublication, staleRotationSupersessionSha256 } from "./production-stale-rotation-supersession-contract.mjs";
 import { readStageBTerraformStateIdentity } from "./stage-b-terraform-backend-contract.mjs";
+import { assertQrVersionSelector, readGitHubApiToken, resolveQrVersionResolutionArtifact } from "./production-qr-version-selector-resolution.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const SHA40 = /^[a-f0-9]{40}$/;
 const ROTATION_ID = /^[A-Za-z0-9._-]{8,128}$/;
 const HISTORICAL_FINALIZATION_MODE = "finalize-historical";
-const accepted = new Set(["mode", "stale-source-sha", "stale-rotation-id", "source-sha", "publication", "live-backend", "stage-b-state", "authorization-workflow-run-id", "authorization-workflow-run-attempt", "preparation-sha256", "tooling-sha", "transaction-source-sha", "transaction-preparation-sha256", "preparation-file-sha256"]);
+const accepted = new Set(["mode", "stale-source-sha", "stale-rotation-id", "source-sha", "publication", "live-backend", "stage-b-state", "authorization-workflow-run-id", "authorization-workflow-run-attempt", "preparation-sha256", "tooling-sha", "transaction-source-sha", "transaction-preparation-sha256", "preparation-file-sha256", "change-ticket", "qr-version-resolution-run-id", "qr-version-secret-arn"]);
 const parse = (argv) => {
   const values = new Map();
   for (let index = 0; index < argv.length; index += 2) {
@@ -39,6 +40,17 @@ const transactionDirectory = ({ sourceSha, staleRotationId, homeDirectory = os.u
 const imageDigest = (taskDefinition) => String(taskDefinition?.taskDefinition?.containerDefinitions?.find(({ name }) => name === "backend")?.image || "").split("@").at(-1);
 const now = (value) => value instanceof Date ? value : new Date(value || Date.now());
 const privateJsonBytes = (value) => Buffer.from(`${JSON.stringify(value, null, 2)}\n`);
+async function resolveQrBaseline({ taskDefinition, sourceSha, changeTicket, runId, secretArn, token, run } = {}) {
+  const binding = taskDefinition?.taskDefinition?.containerDefinitions?.find(({ name }) => name === "backend")?.secrets?.find(({ name }) => name === "QR_SIGN_ACTIVE_KEY_VERSION");
+  if (!binding) {
+    if (runId || secretArn) throw new Error("QR version resolution was supplied without a live QR selector.");
+    return undefined;
+  }
+  if (!runId || !secretArn || !changeTicket) throw new Error("Stale rotation supersession requires the exact governed QR version resolution.");
+  assertQrVersionSelector({ taskDefinition, expectedSecretArn: secretArn });
+  const secretMetadata = JSON.parse(run(["secretsmanager", "describe-secret", "--secret-id", secretArn, "--output", "json", "--no-cli-pager"]));
+  return resolveQrVersionResolutionArtifact({ workflowRunId: runId, sourceSha, changeTicket, expectedSecretArn: secretArn, taskDefinition, secretMetadata, token: token || readGitHubApiToken() });
+}
 const refreshFixedBindings = (preparation) => ({
   sourceSha: preparation.sourceSha,
   staleSourceSha: preparation.staleSourceSha,
@@ -87,9 +99,11 @@ export const createStaleRotationReadOnlySecretsManagerSender = (run) => async (c
 };
 
 const assertHistoricalFinalizationArguments = (values) => {
-  const expected = new Set(["mode", "tooling-sha", "transaction-source-sha", "stale-source-sha", "stale-rotation-id", "transaction-preparation-sha256", "preparation-file-sha256", "authorization-workflow-run-id", "authorization-workflow-run-attempt"]);
-  if ([...values.keys()].some((key) => !expected.has(key))) throw new Error("Historical stale-supersession finalization arguments are not exact.");
-  return Object.fromEntries([...expected].map((key) => [key, required(values, key)]));
+  const requiredArguments = ["mode", "tooling-sha", "transaction-source-sha", "stale-source-sha", "stale-rotation-id", "transaction-preparation-sha256", "preparation-file-sha256", "authorization-workflow-run-id", "authorization-workflow-run-attempt"];
+  const qrArguments = ["change-ticket", "qr-version-resolution-run-id", "qr-version-secret-arn"];
+  const keys = [...values.keys()];
+  if (requiredArguments.some((key) => !values.has(key)) || keys.some((key) => !requiredArguments.includes(key) && !qrArguments.includes(key)) || qrArguments.some((key) => values.has(key) !== values.has(qrArguments[0]))) throw new Error("Historical stale-supersession finalization arguments are not exact.");
+  return Object.fromEntries(keys.map((key) => [key, required(values, key)]));
 };
 
 async function finalizeHistoricalStaleRotation(values, deps) {
@@ -136,6 +150,7 @@ async function finalizeHistoricalStaleRotation(values, deps) {
   assertStaleRotationSupersessionAuthorizationProvenance(authorizationProvenance, { authorization, sourceSha });
   const executionStart = assertStaleRotationSupersessionExecutionStart(readJson(path.join(directory, "execution-start.json"), "Historical stale rotation supersession execution start").value, { authorization, authorizationProvenance, preparation });
   const liveBackend = readLiveBackend();
+  const qrVersionResolution = await resolveQrBaseline({ taskDefinition: liveBackend.taskDefinition, sourceSha: toolingSha, changeTicket: args["change-ticket"], runId: args["qr-version-resolution-run-id"], secretArn: args["qr-version-secret-arn"], token: deps.githubToken, run });
   if (preparation.liveBackend.taskDefinitionArn !== liveBackend.service.taskDefinition || preparation.liveBackend.imageDigest !== imageDigest(liveBackend.taskDefinition)) throw new Error("Live backend changed before historical stale rotation supersession finalization.");
   let evidenceCapture = lstatSync(evidenceFile, { throwIfNoEntry: false })
     ? readJson(evidenceFile, "Historical stale rotation supersession evidence")
@@ -150,14 +165,14 @@ async function finalizeHistoricalStaleRotation(values, deps) {
     assertInitialDualSlotBindings(binding.value);
     terminal = { predecessor: binding.value.supersessionPredecessor };
   } else {
-    terminal = await supersedeStalePendingRotation({ send: readOnlySend, taskDefinition: liveBackend.taskDefinition, sourceSha, staleSourceSha, rotationId: preparation.replacementRotationId, staleRotationId, proveDescendant, outputFile: evidenceFile, repositoryRoot: ROOT, mode: "prepare" });
+    terminal = await supersedeStalePendingRotation({ send: readOnlySend, taskDefinition: liveBackend.taskDefinition, qrVersionResolution, sourceSha, staleSourceSha, rotationId: preparation.replacementRotationId, staleRotationId, proveDescendant, outputFile: evidenceFile, repositoryRoot: ROOT, mode: "prepare" });
     if (terminal.completedWriteCount !== 7 || staleRotationSupersessionSha256(terminal.preparationInput.writePlan) !== preparation.writePlanSha256) throw new Error("Historical stale rotation supersession is not the exact completed seven-write transaction.");
     if (!evidenceCapture) {
       writeStageBPrivateFileAtomicExclusive({ filePath: evidenceFile, bytes: privateJsonBytes(terminal.evidence), repositoryRoot: ROOT, label: "Historical stale rotation supersession evidence" });
       evidenceCapture = readJson(evidenceFile, "Historical stale rotation supersession evidence");
     }
   }
-  const generatedBinding = await bootstrapInitialDualSlotRotation({ send: readOnlySend, taskDefinition: liveBackend.taskDefinition, sourceSha, rotationId: preparation.replacementRotationId, supersessionEvidence: evidenceCapture.value, supersessionPredecessor: terminal.predecessor, outputFile: bindingFile, repositoryRoot: ROOT, requireExisting: true, requiredWritePlan: preparation.writePlan });
+  const generatedBinding = await bootstrapInitialDualSlotRotation({ send: readOnlySend, taskDefinition: liveBackend.taskDefinition, qrVersionResolution, sourceSha, rotationId: preparation.replacementRotationId, supersessionEvidence: evidenceCapture.value, supersessionPredecessor: terminal.predecessor, outputFile: bindingFile, repositoryRoot: ROOT, requireExisting: true, requiredWritePlan: preparation.writePlan });
   if (generatedBinding.secretValueWrites !== 0 || generatedBinding.created.length !== 0) throw new Error("Historical stale rotation supersession finalization attempted a secret mutation.");
   binding = readJson(bindingFile, "Historical stale rotation supersession binding");
   assertInitialDualSlotBindings(binding.value);
@@ -208,6 +223,7 @@ export async function runCli(argv = process.argv.slice(2), deps = {}) {
     return current;
   };
   const { service, taskDefinition } = readLiveBackend();
+  const qrVersionResolution = await resolveQrBaseline({ taskDefinition, sourceSha, changeTicket: values.get("change-ticket"), runId: values.get("qr-version-resolution-run-id"), secretArn: values.get("qr-version-secret-arn"), token: deps.githubToken, run });
   const directory = transactionDirectory({ sourceSha, staleRotationId, homeDirectory: deps.homeDirectory });
   ensureStageBPrivateDirectory({ directory, repositoryRoot: ROOT, create: true, label: "Stale rotation supersession transaction directory" });
   const preparationFile = path.join(directory, "preparation.json");
@@ -234,7 +250,7 @@ export async function runCli(argv = process.argv.slice(2), deps = {}) {
     const reservation = existingReservation || createStaleRotationSupersessionReplacementReservation({ sourceSha, staleSourceSha, staleRotationId, publicationIdentitySha256: publication.identitySha256, replacementRotationId: deriveStaleRotationReplacementId({ sourceSha, staleRotationId, publicationIdentitySha256: publication.identitySha256, now: now(typeof deps.now === "function" ? deps.now() : deps.now) }), transactionDirectory: directory });
     if (!existingReservation) writeStageBPrivateFileAtomicExclusive({ filePath: replacementReservationFile, bytes: Buffer.from(`${JSON.stringify(reservation, null, 2)}\n`), repositoryRoot: ROOT, label: "Stale rotation supersession replacement reservation" });
     const rotationId = reservation.replacementRotationId;
-    const result = await supersedeStalePendingRotation({ send, taskDefinition, sourceSha, staleSourceSha, rotationId, staleRotationId, proveDescendant, outputFile: evidenceFile, repositoryRoot: ROOT, mode: "prepare" });
+    const result = await supersedeStalePendingRotation({ send, taskDefinition, qrVersionResolution, sourceSha, staleSourceSha, rotationId, staleRotationId, proveDescendant, outputFile: evidenceFile, repositoryRoot: ROOT, mode: "prepare" });
     deps.afterPrepareDiscovery?.({ reservation, result });
     const preparationFor = (preparedAt) => createStaleRotationSupersessionPreparation({ discovery: result.preparationInput, publication, liveBackend, stageBState, preparedAt });
     if (existingPreparation) {
@@ -280,7 +296,7 @@ export async function runCli(argv = process.argv.slice(2), deps = {}) {
     const rotationBinding = readJson(path.join(directory, "rotation-bindings.json"), "Stale rotation supersession bindings");
     if (supersessionEvidence.sha256 !== consumption.supersessionEvidenceSha256 || rotationBinding.sha256 !== consumption.rotationBindingSha256) throw new Error("Supersession terminal receipt does not match its exact execution evidence.");
     if (lstatSync(`${evidenceFile}.material`, { throwIfNoEntry: false })) {
-      const terminal = await supersedeStalePendingRotation({ send, taskDefinition: postAuthorizationLiveBackend.taskDefinition, sourceSha, staleSourceSha, rotationId: preparation.replacementRotationId, staleRotationId, proveDescendant, outputFile: evidenceFile, repositoryRoot: ROOT, mode: "prepare" });
+      const terminal = await supersedeStalePendingRotation({ send, taskDefinition: postAuthorizationLiveBackend.taskDefinition, qrVersionResolution, sourceSha, staleSourceSha, rotationId: preparation.replacementRotationId, staleRotationId, proveDescendant, outputFile: evidenceFile, repositoryRoot: ROOT, mode: "prepare" });
       if (terminal.completedWriteCount !== 7 || staleRotationSupersessionSha256(terminal.preparationInput.writePlan) !== preparation.writePlanSha256) throw new Error("Supersession terminal receipt is not backed by the completed live transaction.");
       assertInitialDualSlotBindings(rotationBinding.value);
       if (rotationBinding.value.sourceSha !== sourceSha || rotationBinding.value.rotationId !== preparation.replacementRotationId || JSON.stringify(rotationBinding.value.supersessionEvidence) !== JSON.stringify(terminal.evidence ?? supersessionEvidence.value)) throw new Error("Supersession terminal bindings do not match the completed live transaction.");
@@ -290,7 +306,7 @@ export async function runCli(argv = process.argv.slice(2), deps = {}) {
     throw new Error("Stale rotation supersession authorization is already durably consumed.");
   }
   const result = await supersedeStalePendingRotation({
-    send, taskDefinition, sourceSha, staleSourceSha, rotationId: preparation.replacementRotationId, staleRotationId, proveDescendant, outputFile: evidenceFile, repositoryRoot: ROOT, mode: "execute",
+    send, taskDefinition, qrVersionResolution, sourceSha, staleSourceSha, rotationId: preparation.replacementRotationId, staleRotationId, proveDescendant, outputFile: evidenceFile, repositoryRoot: ROOT, mode: "execute",
     authorizeWritePlan: async (discovery, { completedWriteCount } = {}) => {
       const recomputed = createStaleRotationSupersessionPreparation({ discovery, publication: preparation.publication, liveBackend: preparation.liveBackend, stageBState: preparation.stageBState, preparedAt: preparation.preparedAt });
       if (recomputed.preparationSha256 !== preparation.preparationSha256 || staleRotationSupersessionSha256(discovery.writePlan) !== preparation.writePlanSha256) throw new Error("Final supersession topology differs from the approved preparation.");
@@ -312,7 +328,7 @@ export async function runCli(argv = process.argv.slice(2), deps = {}) {
   });
   const preBindingLiveBackend = readLiveBackend();
   if (preparation.liveBackend.taskDefinitionArn !== preBindingLiveBackend.service.taskDefinition || preparation.liveBackend.imageDigest !== imageDigest(preBindingLiveBackend.taskDefinition)) throw new Error("Live backend changed before stale rotation supersession binding generation.");
-  const binding = await bootstrapInitialDualSlotRotation({ send, taskDefinition: preBindingLiveBackend.taskDefinition, sourceSha, rotationId: preparation.replacementRotationId, supersessionEvidence: result.evidence, supersessionPredecessor: result.predecessor, outputFile: path.join(directory, "rotation-bindings.json"), repositoryRoot: ROOT, requireExisting: true, requiredWritePlan: preparation.writePlan });
+  const binding = await bootstrapInitialDualSlotRotation({ send, taskDefinition: preBindingLiveBackend.taskDefinition, qrVersionResolution, sourceSha, rotationId: preparation.replacementRotationId, supersessionEvidence: result.evidence, supersessionPredecessor: result.predecessor, outputFile: path.join(directory, "rotation-bindings.json"), repositoryRoot: ROOT, requireExisting: true, requiredWritePlan: preparation.writePlan });
   deps.afterBootstrap?.({ result, binding });
   const consumption = createStaleRotationSupersessionConsumption({ authorization, authorizationProvenance, preparation, supersessionEvidenceSha256: result.evidenceSha256, rotationBindingSha256: binding.evidenceSha256 });
   writeStageBPrivateFileAtomicExclusive({ filePath: consumptionFile, bytes: Buffer.from(`${JSON.stringify(consumption, null, 2)}\n`), repositoryRoot: ROOT, label: "Stale rotation supersession consumption" });
