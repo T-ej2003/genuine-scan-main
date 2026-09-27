@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { createProductionCutoverAdapters, createProductionRotationInfrastructureAdapter } from "../aws/production-cutover-production-adapters.mjs";
 import { assertImageAuthorization } from "../aws/production-cutover-control-plane.mjs";
 import { createProductionRotationPrepareAdapter } from "../aws/production-rotation-prepare-adapter.mjs";
-import { buildInitialMigrationSourceAdvance, parseBootstrapArgs, prepareProductionCutoverRuntime, rotationBindingsToPostPrepareTaskBindings, rotationBindingsToTaskBindings } from "../aws/production-cutover-runtime-bootstrap.mjs";
+import { buildInitialMigrationSourceAdvance, deriveRuntimeMetadata, parseBootstrapArgs, prepareProductionCutoverRuntime, rotationBindingsToPostPrepareTaskBindings, rotationBindingsToTaskBindings } from "../aws/production-cutover-runtime-bootstrap.mjs";
 import { productionSupersessionEvidenceIdentity, productionSupersessionVersionId } from "../security/production-initial-migration-source-advance.mjs";
 import { assertUniqueSecretBindingNames, buildOverlapTaskDefinition } from "../aws/production-overlap-task-definition.mjs";
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
@@ -16,6 +16,12 @@ import { PRODUCTION_ONBOARDING_PATHS } from "../security/production-onboarding-c
 import { stageBApprovalIdForReleaseSha } from "../aws/production-green-stage-b-contract.mjs";
 import { buildRootDropEvidence, buildRootDropPayload } from "../aws/production-root-drop-evidence.mjs";
 import { buildTemporaryCapabilityEvidence } from "../aws/production-stage-a-temporary-kms-capability.mjs";
+
+test("cutover runtime consumes the resolved QR identifier, not the task-definition selector", () => {
+  const taskDefinition = { containerDefinitions: [{ name: "backend", environment: [{ name: "PUBLIC_APP_URL", value: "https://example.test" }], secrets: [{ name: "QR_SIGN_ACTIVE_KEY_VERSION", valueFrom: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE:value::" }] }] };
+  assert.throws(() => deriveRuntimeMetadata(taskDefinition), /QR key version/i);
+  assert.deepEqual(deriveRuntimeMetadata(taskDefinition, { legacyBaseline: { qrCurrentVersion: "current-key-version" } }), { baseUrl: "https://example.test", currentKeyVersion: "current-key-version" });
+});
 import {
   assertProductionRotationGraceSeconds,
   deriveProductionRotationCleanupEligibleAt,

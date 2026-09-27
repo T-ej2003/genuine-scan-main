@@ -1,4 +1,5 @@
 import { parseEcsSecretsManagerReference } from "./production-ecs-runtime-dependencies.mjs";
+import { assertQrVersionSelector } from "./production-qr-version-selector-resolution.mjs";
 
 const ACCOUNT = "368992683803";
 const REGION = "eu-west-2";
@@ -15,24 +16,33 @@ const backendContainer = (taskDefinition) => {
   return container;
 };
 
-export function deriveLegacyRotationBaseline(taskDefinition) {
+export function deriveLegacyRotationBaseline(taskDefinition, { qrVersionResolution } = {}) {
   const container = backendContainer(taskDefinition);
   const environment = Object.fromEntries((container.environment || []).map(({ name, value }) => [name, value]));
   const baseline = {
     jwtCurrent: container.secrets?.find(({ name }) => name === "JWT_SECRET")?.valueFrom,
     qrPrivateCurrent: container.secrets?.find(({ name }) => name === "QR_SIGN_PRIVATE_KEY")?.valueFrom,
     qrPublicCurrent: container.secrets?.find(({ name }) => name === "QR_SIGN_PUBLIC_KEY")?.valueFrom,
-    qrCurrentVersion: environment.QR_SIGN_ACTIVE_KEY_VERSION,
+    qrCurrentVersion: qrVersionResolution?.qrCurrentVersion ?? environment.QR_SIGN_ACTIVE_KEY_VERSION,
   };
+  // Rotation binds the secret identity, but only accepts the canonical current `value` selection.
+  let jwtSelector;
+  try { jwtSelector = parseEcsSecretsManagerReference(baseline.jwtCurrent); } catch { throw new Error("Live legacy jwtCurrent binding is invalid."); }
+  if ((jwtSelector.jsonKey !== null && jwtSelector.jsonKey !== "value") || jwtSelector.versionStage || jwtSelector.versionId) throw new Error("Live legacy jwtCurrent binding is invalid.");
+  baseline.jwtCurrent = jwtSelector.resource;
   for (const [name, expectedResource] of Object.entries(QR_SECRET_RESOURCES)) {
     let selector;
     try { selector = parseEcsSecretsManagerReference(baseline[name]); } catch { throw new Error(`Live legacy ${name} binding is invalid.`); }
     if (!expectedResource.test(selector.resource) || selector.jsonKey !== "value" || selector.versionStage || selector.versionId) throw new Error(`Live legacy ${name} binding is invalid.`);
     baseline[name] = selector.resource;
   }
+  if (qrVersionResolution) {
+    const selector = assertQrVersionSelector({ taskDefinition, expectedSecretArn: qrVersionResolution.secretArn });
+    if (selector.secretArn !== qrVersionResolution.secretArn || qrVersionResolution.jsonKey !== "value" || qrVersionResolution.versionSemantics !== "AWSCURRENT") throw new Error("Live QR active-version resolution is not bound to the exact task definition selector.");
+  }
   for (const [name, value] of Object.entries(baseline)) {
     if (name === "qrCurrentVersion") {
-      if (!VERSION.test(String(value || ""))) throw new Error("Live QR active key version is invalid.");
+      if (!/^[A-Za-z0-9._-]{1,64}$/.test(String(value || ""))) throw new Error("Live QR active key version is invalid.");
     } else if (!SECRET_ARN.test(String(value || ""))) {
       throw new Error(`Live legacy ${name} binding is invalid.`);
     }

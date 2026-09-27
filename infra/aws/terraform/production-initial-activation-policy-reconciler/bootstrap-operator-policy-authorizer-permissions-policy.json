@@ -2,6 +2,20 @@
   "Version": "2012-10-17",
   "Statement": [
     {
+      "Sid": "ReadExactProductionBackendSelectorSource",
+      "Effect": "Allow",
+      "Action": "ecs:DescribeServices",
+      "Resource": "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2",
+      "Condition": { "StringEquals": { "aws:RequestedRegion": "eu-west-2" } }
+    },
+    {
+      "Sid": "ReadRegionalTaskDefinitionMetadata",
+      "Effect": "Allow",
+      "Action": "ecs:DescribeTaskDefinition",
+      "Resource": "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:*",
+      "Condition": { "StringEquals": { "aws:RequestedRegion": "eu-west-2" } }
+    },
+    {
       "Sid": "IdentifyCurrentSession",
       "Effect": "Allow",
       "Action": "sts:GetCallerIdentity",

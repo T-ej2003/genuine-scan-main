@@ -8,6 +8,7 @@ import { ensureStageBPrivateDirectory, readStageBPrivateFileBytes } from "./stag
 import { parseBootstrapArgs, prepareProductionCutoverRuntime } from "./production-cutover-runtime-bootstrap.mjs";
 import { REBASELINE_ABANDONED_HISTORICAL_TOPOLOGY_SHA256, resolvePartialRebaselineRecoveryAuthorizationArtifact, resolveProductionDualSlotRebaselineAuthorizationArtifact, verifyLiveProductionDualSlotRebaselineWithRunner } from "./production-dual-slot-rebaseline-contract.mjs";
 import { verifyLiveInitialDualSlotBindingWithRunner } from "./production-initial-dual-slot-bootstrap.mjs";
+import { readGitHubApiToken, resolveQrVersionResolutionArtifact } from "./production-qr-version-selector-resolution.mjs";
 
 const args = parseBootstrapArgs(process.argv.slice(2));
 const required = (name) => { const value = args.get(name); if (!value) throw new Error(`--${name} is required.`); return value; };
@@ -76,6 +77,11 @@ const loadCurrentTaskDefinition = () => {
   if (!currentService?.taskDefinition) throw new Error("Current production task definition is unavailable.");
   return JSON.parse(releaseRun(["ecs", "describe-task-definition", "--task-definition", currentService.taskDefinition, "--include", "TAGS"]));
 };
+let qrVersionResolution;
+if (args.has("qr-version-resolution-run-id") || args.has("qr-version-secret-arn")) {
+  if (!args.get("qr-version-resolution-run-id") || !args.get("qr-version-secret-arn")) throw new Error("QR version resolution requires both its authenticated run ID and exact secret ARN.");
+  qrVersionResolution = await resolveQrVersionResolutionArtifact({ workflowRunId: args.get("qr-version-resolution-run-id"), sourceSha: rotationBindings?.sourceSha, changeTicket: required("ticket"), expectedSecretArn: args.get("qr-version-secret-arn"), token: readGitHubApiToken() });
+}
 const approval = {
   ticket: required("ticket"),
   approvedBy: required("approved-by"),
@@ -113,6 +119,7 @@ const result = prepareProductionCutoverRuntime({
   stageBStatePath: args.get("stage-b-state"),
   currentStageBStatePath: args.get("current-stage-b-state"),
   loadCurrentTaskDefinition,
+  qrVersionResolution,
   inventoryApprovalId: args.get("inventory-approval-id"),
   inventoryTaskDefinitionArn: args.get("inventory-task-definition-arn"),
   onboardingPaths,

@@ -420,6 +420,35 @@ allow the strict freshness gate to pass.
 
 ## Operational Notes
 
+### Resolving the ECS QR version selector for a legacy baseline
+
+When the live backend task definition supplies `QR_SIGN_ACTIVE_KEY_VERSION`
+through the canonical `mscqr/prod/rotation/qr-current-version-*` Secrets
+Manager `:value::` selector, the task-definition ARN is not the active
+key-version identifier. Use the dedicated
+`resolve-production-qr-version-selector.yml` workflow with the exact protected
+main SHA, change ticket, and live secret ARN. Its protected environment
+approval and one-run OIDC session authorize only the exact ECS metadata reads
+and `GetSecretValue`/`DescribeSecret` on that ARN in `eu-west-2`; the consumer
+independently checks the live service selector and requests `AWSCURRENT`.
+
+The consumer parses and validates only the `value` field in memory. The
+identifier is non-secret QR `kid` metadata (the application emits it in QR
+tokens and rotation bindings), so the authenticated resolution artifact may
+carry that identifier for the following baseline derivation. It must never
+contain `SecretString`, other JSON fields, or secret payloads. The operation
+does not write Secrets Manager or any AWS resource. Its additional ECS read
+permissions are owned by the existing initial-activation reconciler Terraform
+root and must be converged through that root's existing approved installation
+workflow before dispatch; no manual IAM edit is permitted.
+
+Pass the successful resolution run ID and the exact ARN into the initial
+dual-slot bootstrap, cutover-runtime preparation, rebaseline,
+mixed-topology-recovery, or stale-supersession consumer. Each consumer re-authenticates the workflow artifact against
+the current protected-main SHA and change ticket, then checks the live selector
+uses that same ARN and `value`/`AWSCURRENT` semantics. A missing or mismatched
+resolution never falls back to treating the ARN as a key version.
+
 - Production should use the `CURRENT` / `PREVIOUS` variables, not only the legacy single-slot names.
 - `AUTH_LEGACY_TOKEN_RESPONSE_ENABLED` and `AUTH_SSE_QUERY_TOKEN_ENABLED` should remain `false` in production after the cookie-only auth rollout.
 - `AUTH_MFA_ENCRYPTION_KEY` is required in production and should be rotated separately from JWT secrets.

@@ -202,8 +202,8 @@ function assertCurrentPayload(payload, { family, slot, qr = false } = {}) {
   return payload;
 }
 
-async function authenticateSupersessionPredecessor({ send, taskDefinition, sourceSha, staleSourceSha, rotationId, staleRotationId, supersessionEvidenceIdentitySha256, slotIdentities }) {
-  const baseline = deriveLegacyRotationBaseline(taskDefinition);
+async function authenticateSupersessionPredecessor({ send, taskDefinition, qrVersionResolution, sourceSha, staleSourceSha, rotationId, staleRotationId, supersessionEvidenceIdentitySha256, slotIdentities }) {
+  const baseline = deriveLegacyRotationBaseline(taskDefinition, { qrVersionResolution });
   const specifications = {
     jwt: [baseline.jwtCurrent, "jwt_secrets", "current", false],
     qrPrivate: [baseline.qrPrivateCurrent, "qr_signing_keys", "current-private", true],
@@ -429,18 +429,18 @@ export function verifyLiveInitialDualSlotBindingWithRunner({ run, bindings, prov
   return Object.freeze({ ...body, bindingSha256: canonicalSha256(bindings), originSha256: canonicalSha256(body) });
 }
 
-export async function bootstrapInitialDualSlotRotation({ send, taskDefinition, sourceSha, rotationId, legacyBindings, supersessionEvidence, supersessionPredecessor, outputFile, repositoryRoot = process.cwd(), requireExisting = false, requiredWritePlan, retainedHistoryPayloadHash } = {}) {
+export async function bootstrapInitialDualSlotRotation({ send, taskDefinition, qrVersionResolution, sourceSha, rotationId, legacyBindings, supersessionEvidence, supersessionPredecessor, outputFile, repositoryRoot = process.cwd(), requireExisting = false, requiredWritePlan, retainedHistoryPayloadHash } = {}) {
   if (typeof send !== "function") throw new Error("Initial dual-slot bootstrap Secrets Manager sender is required.");
   if (!SHA40.test(sourceSha || "") || !ROTATION_ID.test(rotationId || "")) throw new Error("Initial dual-slot source/rotation identity is invalid.");
   if (typeof outputFile !== "string" || !outputFile) throw new Error("Initial dual-slot rotation binding output is required.");
-  const baseline = deriveLegacyRotationBaseline(taskDefinition);
+  const baseline = deriveLegacyRotationBaseline(taskDefinition, { qrVersionResolution });
   assertLegacyMatches(legacyBindings, baseline);
   if ((supersessionEvidence === undefined) !== (supersessionPredecessor === undefined)) throw new Error("Complete stale-supersession predecessor evidence is required.");
   const checkedSupersessionEvidence = supersessionEvidence === undefined ? undefined : assertProductionSupersessionEvidence(supersessionEvidence);
   let checkedSupersessionPredecessor;
   if (checkedSupersessionEvidence) {
     checkedSupersessionPredecessor = assertProductionStaleSupersessionPredecessor(supersessionPredecessor, { sourceSha, rotationId, supersessionEvidence: checkedSupersessionEvidence });
-    const observed = await authenticateSupersessionPredecessor({ send, taskDefinition, sourceSha, staleSourceSha: checkedSupersessionEvidence.staleSourceSha, rotationId, staleRotationId: checkedSupersessionEvidence.staleRotationId, supersessionEvidenceIdentitySha256: checkedSupersessionEvidence.evidenceIdentitySha256, slotIdentities: checkedSupersessionPredecessor.slotIdentities });
+    const observed = await authenticateSupersessionPredecessor({ send, taskDefinition, qrVersionResolution, sourceSha, staleSourceSha: checkedSupersessionEvidence.staleSourceSha, rotationId, staleRotationId: checkedSupersessionEvidence.staleRotationId, supersessionEvidenceIdentitySha256: checkedSupersessionEvidence.evidenceIdentitySha256, slotIdentities: checkedSupersessionPredecessor.slotIdentities });
     if (canonical(observed.predecessor) !== canonical(checkedSupersessionPredecessor)) throw new Error("Live stale-supersession predecessor changed before binding generation.");
   }
   const resources = {};

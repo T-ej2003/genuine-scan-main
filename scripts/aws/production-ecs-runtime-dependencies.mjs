@@ -18,6 +18,7 @@ export function parseEcsSecretsManagerReference(value) {
   if (!SECRET_ARN.test(resource)) throw new Error("Production ECS Secrets Manager reference is outside the canonical production scope.");
   const [jsonKey = "", versionStage = "", versionId = ""] = fields.slice(7);
   if ((jsonKey && !/^[^:\s]{1,256}$/.test(jsonKey)) || (versionStage && !/^[A-Za-z0-9/_+=.@-]{1,256}$/.test(versionStage))
+    || (versionStage && versionId)
     || (versionId && !/^[A-Za-z0-9_-]{32,64}$/.test(versionId)) || (fields.length === 10 && !jsonKey && !versionStage && !versionId)) throw new Error("Production ECS Secrets Manager selector is malformed or ambiguous.");
   return Object.freeze({ resource, jsonKey: jsonKey || null, versionStage: versionStage || null, versionId: versionId || null,
     selectorMode: versionStage && versionId ? "STAGE_AND_VERSION" : versionStage ? "VERSION_STAGE" : versionId ? "VERSION_ID" : "AWSCURRENT" });

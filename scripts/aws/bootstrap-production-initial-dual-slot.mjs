@@ -4,6 +4,7 @@ import { mkdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { readGitHubApiToken, resolveQrVersionResolutionArtifact } from "./production-qr-version-selector-resolution.mjs";
 import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-cutover-production-adapters.mjs";
 import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
 import { bootstrapInitialDualSlotRotation, createInitialDualSlotSecretsManagerClient } from "./production-initial-dual-slot-bootstrap.mjs";
@@ -18,7 +19,7 @@ function parseArgs(argv) {
   const values = new Map();
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
-    if (!["--output-directory", "--rotation-id", "--source-sha"].includes(arg) || !argv[index + 1] || argv[index + 1].startsWith("--") || values.has(arg)) throw new Error(`Invalid or duplicate argument: ${arg}`);
+    if (!["--output-directory", "--rotation-id", "--source-sha", "--change-ticket", "--qr-version-resolution-run-id", "--qr-version-secret-arn"].includes(arg) || !argv[index + 1] || argv[index + 1].startsWith("--") || values.has(arg)) throw new Error(`Invalid or duplicate argument: ${arg}`);
     values.set(arg, argv[++index]);
   }
   return values;
@@ -30,6 +31,9 @@ mkdirSync(outputDirectory, { recursive: true, mode: 0o700 });
 const gitRun = (args) => execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 const fresh = readFreshProtectedMainIdentity({ run: gitRun, expectedSourceSha: values.get("--source-sha") });
 const sourceSha = fresh.headSha;
+const changeTicket = values.get("--change-ticket");
+const qrVersionResolutionRunId = values.get("--qr-version-resolution-run-id");
+const qrVersionSecretArn = values.get("--qr-version-secret-arn");
 const rotationId = values.get("--rotation-id") || `rotation-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${randomUUID().slice(0, 8)}`;
 const run = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer", region: REGION });
 const client = createInitialDualSlotSecretsManagerClient({ region: REGION, profile: "mscqr-production-release-deployer" });
@@ -37,9 +41,16 @@ await client.assertCredentialIdentity();
 const service = JSON.parse(run(["ecs", "describe-services", "--cluster", CLUSTER, "--services", SERVICE])).services?.[0];
 if (!service?.taskDefinition) throw new Error("Current production task definition is unavailable.");
 const taskDefinition = JSON.parse(run(["ecs", "describe-task-definition", "--task-definition", service.taskDefinition, "--include", "TAGS"]));
+const hasQrSelector = Boolean(taskDefinition.taskDefinition?.containerDefinitions?.find(({ name }) => name === "backend")?.secrets?.some(({ name }) => name === "QR_SIGN_ACTIVE_KEY_VERSION"));
+let qrVersionResolution;
+if (hasQrSelector) {
+  if (!changeTicket || !qrVersionResolutionRunId || !qrVersionSecretArn) throw new Error("Approved QR version resolution run, change ticket, and exact secret ARN are required.");
+  qrVersionResolution = await resolveQrVersionResolutionArtifact({ workflowRunId: qrVersionResolutionRunId, sourceSha, changeTicket, expectedSecretArn: qrVersionSecretArn, token: readGitHubApiToken() });
+} else if (qrVersionResolutionRunId || qrVersionSecretArn || changeTicket) throw new Error("QR version resolution was supplied without a live QR selector.");
 const result = await bootstrapInitialDualSlotRotation({
   send: (command) => client.send(command),
   taskDefinition,
+  qrVersionResolution,
   sourceSha,
   rotationId,
   outputFile: path.join(outputDirectory, "rotation-bindings.json"),
@@ -55,7 +66,9 @@ const manifest = {
   secretResourceCount: result.secretResourceCount,
   secretValueWrites: result.secretValueWrites,
   pendingMaterialGenerated: result.pendingMaterialGenerated,
-  next: `npm run stage-b:prepare-cutover-runtime -- --rotation-bindings ${result.bindingFile}`,
+  qrVersionResolutionRunId,
+  qrVersionSecretArn,
+  next: `npm run stage-b:prepare-cutover-runtime -- --rotation-bindings ${result.bindingFile}${qrVersionResolutionRunId ? ` --qr-version-resolution-run-id ${qrVersionResolutionRunId} --qr-version-secret-arn ${qrVersionSecretArn}` : ""}`,
 };
 const manifestPath = path.join(outputDirectory, "initial-dual-slot-bootstrap-manifest.json");
 writeStageBPrivateFileAtomic({ filePath: manifestPath, bytes: Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`), repositoryRoot: process.cwd(), label: "Initial dual-slot bootstrap manifest" });
