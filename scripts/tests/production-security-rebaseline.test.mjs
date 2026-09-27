@@ -151,6 +151,8 @@ test("fixed module launch keeps structured configuration as data and contains no
   assert.throws(() => buildProductionRlsProbeCommand(requirements, { ...identity, candidateSourceSha: "c".repeat(40) }));
   for (const source of ["scripts/aws/probe-production-rls-catalogue.mjs", "scripts/aws/production-rls-catalogue-probe-runtime.mjs"])
     assert.doesNotMatch(fs.readFileSync(source, "utf8"), /\beval\s*\(|new Function|vm\.run/);
+  const probeSource = fs.readFileSync("scripts/aws/probe-production-rls-catalogue.mjs", "utf8");
+  assert.match(probeSource, /import os from ["']node:os["']/); assert.match(probeSource, /os\.tmpdir\(\)/);
   const runtime = fs.readFileSync("scripts/aws/production-rls-catalogue-probe-runtime.mjs", "utf8");
   assert.match(runtime, /readFileSync\("\/app\/image-source\.json"/); assert.match(runtime, /assertProductionRlsProbeImageSource/);
 });
@@ -226,6 +228,8 @@ test("signing environment and purpose-specific OIDC/KMS source contracts fail cl
   const preparationWorkflow = fs.readFileSync(".github/workflows/prepare-production-security-rebaseline.yml", "utf8");
   assert.doesNotMatch(`${signingWorkflow}\n${preparationWorkflow}`, /administration:\s*read|environments\/[^\s]+\/(?:variables|secrets)/);
   assert.match(signingWorkflow, /gh api .*\/environments\/production-security-rebaseline-signing/);
+  assert.match(signingWorkflow, /permissions:\s*\n\s*contents: read\n\s*actions: read/);
+  assert.match(preparationWorkflow, /sign-and-manifest:[\s\S]*?permissions:\s*\n\s*contents: read\n\s*actions: read\n\s*id-token: write/);
   assert.match(signingWorkflow, /role-to-assume: \$\{\{ vars\.PRODUCTION_SECURITY_REBASELINE_SIGNER_ROLE_ARN \}\}/);
   const trust = JSON.parse(fs.readFileSync("infra/aws/terraform/production-security-rebaseline-signer/trust-policy.json", "utf8"));
   const condition = trust.Statement[0].Condition.StringEquals;
