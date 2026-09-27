@@ -1,0 +1,133 @@
+name: Prepare production security rebaseline
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact protected-main SHA to prepare
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+  administration: read
+
+concurrency:
+  group: production-security-rebaseline-preparation
+  cancel-in-progress: false
+
+jobs:
+  canonical:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    outputs:
+      requirements_reference: ${{ steps.references.outputs.requirements }}
+      canonical_reference: ${{ steps.references.outputs.canonical }}
+      requirements_artifact_id: ${{ steps.requirements-upload.outputs.artifact-id }}
+      canonical_artifact_id: ${{ steps.canonical-upload.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Authenticate exact protected-main input
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          test "$SOURCE_SHA" = "$GITHUB_SHA"
+          test "$SOURCE_SHA" = "$(gh api repos/T-ej2003/genuine-scan-main/branches/main --jq .commit.sha)"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+      - uses: actions/setup-node@v6
+        with: { node-version: 24, cache: npm }
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: backend
+      - run: npx --no-install prisma generate
+        working-directory: backend
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Start clean PostgreSQL 18 harness
+        run: npm run test:p2:db:up
+      - name: Generate requirements and canonical inventory from real PG18
+        id: generate
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          umask 077
+          result="$(node scripts/aws/produce-production-app-only-requirements.mjs "$SOURCE_SHA" "$SOURCE_SHA")"
+          install -m 600 "$(jq -r .artifactPath <<<"$result")" "$RUNNER_TEMP/app-only-requirements.json"
+          install -m 600 "$(jq -r .securityRebaselinePath <<<"$result")" "$RUNNER_TEMP/security-rebaseline-canonical.json"
+          printf 'requirements_sha=%s\n' "$(jq -r .requirementsSha256 <<<"$result")" >> "$GITHUB_OUTPUT"
+          printf 'canonical_sha=%s\n' "$(jq -r .canonicalSecurityCatalogueSha256 <<<"$result")" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        id: requirements-upload
+        with:
+          name: production-security-rebaseline-requirements
+          path: ${{ runner.temp }}/app-only-requirements.json
+          if-no-files-found: error
+          retention-days: 90
+      - uses: actions/upload-artifact@v4
+        id: canonical-upload
+        with:
+          name: production-security-rebaseline-canonical
+          path: ${{ runner.temp }}/security-rebaseline-canonical.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Bind exact artifact references
+        id: references
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          REQUIREMENTS_ID: ${{ steps.requirements-upload.outputs.artifact-id }}
+          REQUIREMENTS_DIGEST: ${{ steps.requirements-upload.outputs.artifact-digest }}
+          CANONICAL_ID: ${{ steps.canonical-upload.outputs.artifact-id }}
+          CANONICAL_DIGEST: ${{ steps.canonical-upload.outputs.artifact-digest }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE' >> "$GITHUB_OUTPUT"
+          import fs from 'node:fs';
+          import crypto from 'node:crypto';
+          const hash = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+          const make = (id, digest, file) => {
+            if (!/^[1-9][0-9]*$/.test(id) || !/^sha256:[a-f0-9]{64}$/.test(digest)) throw new Error('Invalid immutable artifact output.');
+            return JSON.stringify({ sourceSha: process.env.SOURCE_SHA, runId: process.env.GITHUB_RUN_ID, runAttempt: process.env.GITHUB_RUN_ATTEMPT, artifactId: id, artifactDigest: digest, fileSha256: hash(file) });
+          };
+          console.log(`requirements=${make(process.env.REQUIREMENTS_ID, process.env.REQUIREMENTS_DIGEST, `${process.env.RUNNER_TEMP}/app-only-requirements.json`)}`);
+          console.log(`canonical=${make(process.env.CANONICAL_ID, process.env.CANONICAL_DIGEST, `${process.env.RUNNER_TEMP}/security-rebaseline-canonical.json`)}`);
+          NODE
+      - run: |
+          printf '## Canonical security rebaseline inputs\n\n- Source: `%s`\n- Requirements SHA-256: `%s`\n- Canonical inventory SHA-256: `%s`\n- PostgreSQL: 18\n' "$GITHUB_SHA" "${{ steps.generate.outputs.requirements_sha }}" "${{ steps.generate.outputs.canonical_sha }}" >> "$GITHUB_STEP_SUMMARY"
+
+  publish-image:
+    needs: canonical
+    uses: ./.github/workflows/production-green-backend-image-publish.yml
+    with:
+      release_sha: ${{ inputs.source_sha }}
+    permissions:
+      contents: read
+      id-token: write
+
+  sign-and-manifest:
+    needs: [canonical, publish-image]
+    uses: ./.github/workflows/sign-production-security-rebaseline.yml
+    with:
+      source_sha: ${{ inputs.source_sha }}
+      image_ref: ${{ needs.publish-image.outputs.image_ref }}
+      publish_artifact_id: ${{ needs.publish-image.outputs.artifact_id }}
+      publish_artifact_digest: ${{ needs.publish-image.outputs.artifact_digest }}
+      publication_reference: ${{ needs.publish-image.outputs.publication_reference }}
+      requirements_artifact_id: ${{ needs.canonical.outputs.requirements_artifact_id }}
+      requirements_reference: ${{ needs.canonical.outputs.requirements_reference }}
+      canonical_artifact_id: ${{ needs.canonical.outputs.canonical_artifact_id }}
+      canonical_reference: ${{ needs.canonical.outputs.canonical_reference }}
+    permissions:
+      contents: read
+      actions: read
+      administration: read
+      id-token: write

@@ -1,0 +1,19 @@
+{
+  "name": "production-security-rebaseline-signing",
+  "deploymentBranches": "protected-main-only",
+  "requiredReviewers": true,
+  "preventSelfReview": true,
+  "forbidUnprotectedBranchesAndTags": true,
+  "workflow": ".github/workflows/prepare-production-security-rebaseline.yml",
+  "signingJobWorkflow": ".github/workflows/sign-production-security-rebaseline.yml",
+  "variables": [
+    "PRODUCTION_SECURITY_REBASELINE_SIGNER_ROLE_ARN"
+  ],
+  "forbiddenSecrets": [
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN"
+  ],
+  "requiresEnvironmentSecrets": false,
+  "activation": "operator-configured-after-separately-approved-terraform-apply"
+}

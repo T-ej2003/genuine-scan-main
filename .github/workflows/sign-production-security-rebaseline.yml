@@ -1,0 +1,152 @@
+name: Sign production security rebaseline preparation
+
+on:
+  workflow_call:
+    inputs:
+      source_sha: { required: true, type: string }
+      image_ref: { required: true, type: string }
+      publish_artifact_id: { required: true, type: string }
+      publish_artifact_digest: { required: true, type: string }
+      publication_reference: { required: true, type: string }
+      requirements_artifact_id: { required: true, type: string }
+      requirements_reference: { required: true, type: string }
+      canonical_artifact_id: { required: true, type: string }
+      canonical_reference: { required: true, type: string }
+
+permissions:
+  contents: read
+  actions: read
+  administration: read
+  id-token: write
+
+jobs:
+  sign-and-manifest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production-security-rebaseline-signing
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Authenticate invocation before requesting AWS credentials
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          IMAGE_REF: ${{ inputs.image_ref }}
+          PUBLISH_ARTIFACT_ID: ${{ inputs.publish_artifact_id }}
+          PUBLISH_ARTIFACT_DIGEST: ${{ inputs.publish_artifact_digest }}
+          REQUIREMENTS_ARTIFACT_ID: ${{ inputs.requirements_artifact_id }}
+          REQUIREMENTS_REFERENCE_JSON: ${{ inputs.requirements_reference }}
+          CANONICAL_ARTIFACT_ID: ${{ inputs.canonical_artifact_id }}
+          CANONICAL_REFERENCE_JSON: ${{ inputs.canonical_reference }}
+          PUBLICATION_REFERENCE_JSON: ${{ inputs.publication_reference }}
+          GH_TOKEN: ${{ github.token }}
+          SIGNER_ROLE_ARN: ${{ vars.PRODUCTION_SECURITY_REBASELINE_SIGNER_ROLE_ARN }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          test "$SOURCE_SHA" = "$GITHUB_SHA"
+          test "$SOURCE_SHA" = "$(gh api repos/T-ej2003/genuine-scan-main/branches/main --jq .commit.sha)"
+          test "$GITHUB_REPOSITORY" = T-ej2003/genuine-scan-main
+          test "$GITHUB_REPOSITORY_ID" = 1145608538
+          test "$GITHUB_REPOSITORY_OWNER_ID" = 183396573
+          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          test "$GITHUB_WORKFLOW_REF" = T-ej2003/genuine-scan-main/.github/workflows/prepare-production-security-rebaseline.yml@refs/heads/main
+          test "$GITHUB_ACTOR" = T-ej2003
+          [[ "$IMAGE_REF" =~ ^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com/mscqr-backend@sha256:[a-f0-9]{64}$ ]]
+          [[ "$PUBLISH_ARTIFACT_ID" =~ ^[1-9][0-9]*$ && "$PUBLISH_ARTIFACT_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+          test "$PUBLISH_ARTIFACT_ID" = "$(jq -r .artifactId <<<"$PUBLICATION_REFERENCE_JSON")"
+          test "$PUBLISH_ARTIFACT_DIGEST" = "$(jq -r .artifactDigest <<<"$PUBLICATION_REFERENCE_JSON")"
+          test "$REQUIREMENTS_ARTIFACT_ID" = "$(jq -r .artifactId <<<"$REQUIREMENTS_REFERENCE_JSON")"
+          test "$CANONICAL_ARTIFACT_ID" = "$(jq -r .artifactId <<<"$CANONICAL_REFERENCE_JSON")"
+          [[ "$SIGNER_ROLE_ARN" =~ ^arn:aws:iam::368992683803:role/mscqr-production-security-rebaseline-image-signer$ ]]
+          gh api "repos/T-ej2003/genuine-scan-main/actions/runs/$GITHUB_RUN_ID" > "$RUNNER_TEMP/preparation-run.json"
+          gh api "repos/T-ej2003/genuine-scan-main/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/preparation-artifacts.json"
+          node --input-type=module - "$RUNNER_TEMP/preparation-run.json" "$RUNNER_TEMP/preparation-artifacts.json" <<'NODE'
+          import fs from 'node:fs';
+          import { assertPreparationWorkflowArtifacts } from './scripts/aws/production-security-rebaseline-preparation.mjs';
+          const run = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          const page = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
+          if (!Array.isArray(page.artifacts) || page.total_count !== page.artifacts.length || page.total_count > 100) throw new Error('Preparation artifact collection is incomplete.');
+          assertPreparationWorkflowArtifacts({ run, artifacts: page.artifacts, sourceSha: process.env.SOURCE_SHA,
+            runId: process.env.GITHUB_RUN_ID, runAttempt: process.env.GITHUB_RUN_ATTEMPT,
+            requirementsReference: JSON.parse(process.env.REQUIREMENTS_REFERENCE_JSON),
+            canonicalReference: JSON.parse(process.env.CANONICAL_REFERENCE_JSON),
+            publicationReference: JSON.parse(process.env.PUBLICATION_REFERENCE_JSON) });
+          NODE
+          gh api repos/T-ej2003/genuine-scan-main/environments/production-security-rebaseline-signing > "$RUNNER_TEMP/signing-environment.json"
+          gh api "repos/T-ej2003/genuine-scan-main/environments/production-security-rebaseline-signing/variables?per_page=100" > "$RUNNER_TEMP/signing-environment-variables.json"
+          gh api "repos/T-ej2003/genuine-scan-main/environments/production-security-rebaseline-signing/secrets?per_page=100" > "$RUNNER_TEMP/signing-environment-secrets.json"
+          node --input-type=module - "$RUNNER_TEMP/signing-environment.json" <<'NODE'
+          import fs from 'node:fs';
+          import { assertSecurityRebaselineSigningEnvironment } from './scripts/aws/production-security-rebaseline-preparation.mjs';
+          assertSecurityRebaselineSigningEnvironment(JSON.parse(fs.readFileSync(process.argv[2], 'utf8')), {
+            variables: JSON.parse(fs.readFileSync(`${process.env.RUNNER_TEMP}/signing-environment-variables.json`, 'utf8')),
+            secrets: JSON.parse(fs.readFileSync(`${process.env.RUNNER_TEMP}/signing-environment-secrets.json`, 'utf8')) });
+          NODE
+      - uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ inputs.requirements_artifact_id }}
+          path: ${{ runner.temp }}/requirements
+      - uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ inputs.canonical_artifact_id }}
+          path: ${{ runner.temp }}/canonical
+      - uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ inputs.publish_artifact_id }}
+          path: ${{ runner.temp }}/publication
+      - name: Configure dedicated OIDC signing role
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: eu-west-2
+          role-to-assume: ${{ vars.PRODUCTION_SECURITY_REBASELINE_SIGNER_ROLE_ARN }}
+          role-session-name: security-rebaseline-${{ github.run_id }}
+          allowed-account-ids: "368992683803"
+          role-duration-seconds: 3600
+      - uses: actions/setup-node@v6
+        with: { node-version: 24 }
+      - name: Build image authorization and preparation manifest
+        id: manifest
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          REQUIREMENTS_FILE: ${{ runner.temp }}/requirements/app-only-requirements.json
+          CANONICAL_FILE: ${{ runner.temp }}/canonical/security-rebaseline-canonical.json
+          PUBLICATION_FILE: ${{ runner.temp }}/publication/production-green-backend-image.jsonl
+          EXPECTED_IMAGE_REF: ${{ inputs.image_ref }}
+          MANIFEST_OUTPUT: ${{ runner.temp }}/preparation-manifest.json
+          REQUIREMENTS_REFERENCE_JSON: ${{ inputs.requirements_reference }}
+          CANONICAL_REFERENCE_JSON: ${{ inputs.canonical_reference }}
+          PUBLICATION_REFERENCE_JSON: ${{ inputs.publication_reference }}
+        run: |
+          set -euo pipefail
+          result="$(node scripts/aws/produce-production-security-rebaseline-preparation.mjs --source-sha "$SOURCE_SHA")"
+          printf 'manifest_sha256=%s\n' "$(jq -r .manifestSha256 <<<"$result")" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        id: manifest-upload
+        with:
+          name: production-security-rebaseline-preparation
+          path: ${{ runner.temp }}/preparation-manifest.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Report bounded readiness and immutable manifest reference
+        env:
+          MANIFEST_SHA: ${{ steps.manifest.outputs.manifest_sha256 }}
+          MANIFEST_ID: ${{ steps.manifest-upload.outputs.artifact-id }}
+          MANIFEST_DIGEST: ${{ steps.manifest-upload.outputs.artifact-digest }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          test -n "$MANIFEST_SHA"
+          node --input-type=module <<'NODE' >> "$GITHUB_STEP_SUMMARY"
+          import crypto from 'node:crypto';
+          import fs from 'node:fs';
+          const file = `${process.env.RUNNER_TEMP}/preparation-manifest.json`;
+          const reference = { sourceSha: process.env.SOURCE_SHA, runId: process.env.GITHUB_RUN_ID,
+            runAttempt: process.env.GITHUB_RUN_ATTEMPT, artifactId: process.env.MANIFEST_ID,
+            artifactDigest: process.env.MANIFEST_DIGEST,
+            fileSha256: crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex') };
+          if (JSON.parse(fs.readFileSync(file, 'utf8')).manifestSha256 !== process.env.MANIFEST_SHA) throw new Error('Manifest digest changed after upload.');
+          if (!/^[1-9][0-9]*$/.test(reference.artifactId) || !/^sha256:[a-f0-9]{64}$/.test(reference.artifactDigest)) throw new Error('Manifest artifact reference is invalid.');
+          console.log(`READY_FOR_READ_ONLY_PROBE=true\nPREPARATION_MANIFEST_SHA256=${process.env.MANIFEST_SHA}\nPREPARATION_MANIFEST_REFERENCE=${JSON.stringify(reference)}`);
+          NODE

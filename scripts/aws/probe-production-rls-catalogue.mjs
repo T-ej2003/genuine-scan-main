@@ -17,6 +17,7 @@ import { downloadAppOnlyArtifact, parseAppOnlyArtifactReference } from "./produc
 import { createProductionAwsCredentialEnvironment, createProductionGithubCommandRunner, productionAwsExecutable, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { writeStageBPrivateFileExclusive } from "./stage-b-artifact-contract.mjs";
 import { assertSecurityRebaselineInventory, createLiveSecurityRebaselineInventory, securityRebaselineLogSummary } from "./production-security-rebaseline-inventory.mjs";
+import { assertProductionSecurityRebaselinePreparationManifest, authenticateProductionSecurityRebaselinePreparation } from "./production-security-rebaseline-preparation.mjs";
 import { createSecurityCatalogueTransportKeyPair, decryptSecurityCatalogueTransport } from "./production-security-rebaseline-transport.mjs";
 import { createProductionRlsProbeRuntimeConfig, PRODUCTION_RLS_PROBE_ENTRYPOINT } from "./production-rls-catalogue-probe-config.mjs";
 import { readImageRepositoryEvidence } from "./production-green-stage-b-image-evidence.mjs";
@@ -117,18 +118,30 @@ export function authenticateProductionRlsProbeResult(message, { sourceSha, candi
 }
 
 const parse = (value) => JSON.parse(Buffer.isBuffer(value) ? value.toString("utf8") : value);
-export function authenticateCanonicalProductionRequirementsArtifact({ sourceSha, candidateSourceSha, requirementsReference, repositoryRoot = root, githubRun = createProductionGithubCommandRunner() }) {
+function verifySecurityRebaselineKmsSignature(aws, { keyArn, signingAlgorithm, messageType, digest, signature }) {
+  assert.ok(Buffer.isBuffer(digest) && digest.length === 32); assert.ok(Buffer.isBuffer(signature) && signature.length === 384);
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "security-rebaseline-verify-"));
+  try {
+    fs.chmodSync(directory, 0o700);
+    const digestPath = path.join(directory, "digest"), signaturePath = path.join(directory, "signature");
+    fs.writeFileSync(digestPath, digest, { flag: "wx", mode: 0o600 }); fs.writeFileSync(signaturePath, signature, { flag: "wx", mode: 0o600 });
+    return aws(["kms", "verify", "--region", APP_ONLY.region, "--key-id", keyArn, "--message", `fileb://${digestPath}`,
+      "--message-type", messageType, "--signing-algorithm", signingAlgorithm, "--signature", `fileb://${signaturePath}`]).SignatureValid === true;
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+}
+
+export function authenticateCanonicalProductionRequirementsArtifact({ sourceSha, candidateSourceSha, requirementsReference, requirementsArtifactKind = "requirements", repositoryRoot = root, githubRun = createProductionGithubCommandRunner() }) {
   assert.equal(requirementsReference.sourceSha, sourceSha, "Canonical requirements source does not match protected source");
   const branch = parse(githubRun("gh", ["api", "repos/T-ej2003/genuine-scan-main/branches/main"]));
   assert.equal(branch.commit?.sha, sourceSha, "Canonical requirements source is not current protected main");
-  const artifact = downloadAppOnlyArtifact({ kind: "requirements", reference: requirementsReference, repositoryRoot, githubRun });
+  const artifact = downloadAppOnlyArtifact({ kind: requirementsArtifactKind, reference: requirementsReference, repositoryRoot, githubRun });
   const parsed = JSON.parse(artifact.bytes);
   assert.match(parsed.candidateSourceSha || "", /^[a-f0-9]{40}$/, "Canonical requirements candidate source is invalid");
   assertAppOnlyCandidateAncestor({ sourceSha, candidateSourceSha: parsed.candidateSourceSha, repositoryRoot });
   if (candidateSourceSha !== undefined) assert.equal(parsed.candidateSourceSha, candidateSourceSha, "Canonical requirements candidate does not match the requested candidate");
   const requirements = assertAppOnlyRequirements(parsed, { sourceSha, candidateSourceSha: parsed.candidateSourceSha, repositoryRoot });
   assert.equal(artifact.sha256, requirementsReference.fileSha256);
-  return Object.freeze({ requirements, provenance: Object.freeze({ runId: String(artifact.run.id), runAttempt: String(artifact.run.run_attempt), artifactId: String(artifact.artifact.id), artifactDigest: artifact.artifact.digest, fileSha256: artifact.sha256 }) });
+  return Object.freeze({ requirements, bytes: artifact.bytes, provenance: Object.freeze({ runId: String(artifact.run.id), runAttempt: String(artifact.run.run_attempt), artifactId: String(artifact.artifact.id), artifactDigest: artifact.artifact.digest, fileSha256: artifact.sha256 }) });
 }
 
 export function authenticateCanonicalProductionRequirements(options) {
@@ -178,29 +191,62 @@ export async function waitForCompleteRlsProbeObservation(readMessages, binding, 
   return null;
 }
 
-export async function runProductionRlsCatalogueProbe({ sourceSha, requirementsReference, awsProfile, securityRebaselineReference = null,
+export async function runProductionRlsCatalogueProbe({ sourceSha, requirementsReference, awsProfile, securityRebaselineReference = null, preparationReference = null,
   candidateSourceSha, candidateDigest, publicationReference, authorizationReference, securityRebaselineCanonicalOut = null, securityRebaselineLiveOut = null,
   run = (command, args, options) => execFileSync(command, args, options), githubRun = createProductionGithubCommandRunner(), wait = sleep, repositoryRoot = root, env = process.env,
   authenticateImages = authenticateAppOnlyImages }) {
   assertProtectedCheckout({ sourceSha, repositoryRoot });
-  assert.match(candidateSourceSha || "", /^[a-f0-9]{40}$/, "Explicit candidate source SHA is required");
-  const { requirements } = authenticateCanonicalProductionRequirementsArtifact({ sourceSha, candidateSourceSha, requirementsReference, repositoryRoot, githubRun });
-  const securityMode = [securityRebaselineReference, securityRebaselineCanonicalOut, securityRebaselineLiveOut].some(Boolean);
-  assert.equal([securityRebaselineReference, securityRebaselineCanonicalOut, securityRebaselineLiveOut].every(Boolean), securityMode, "Security inventory arguments are all-or-none");
+  assert.match(sourceSha || "", /^[a-f0-9]{40}$/);
+  const prepared = preparationReference ? downloadAppOnlyArtifact({ kind: "securityRebaselinePreparation", reference: preparationReference, repositoryRoot, githubRun }) : null;
+  const preparedManifest = prepared ? assertProductionSecurityRebaselinePreparationManifest(JSON.parse(prepared.bytes), { protectedMainSha: sourceSha,
+    workflowRunId: preparationReference.runId, workflowRunAttempt: preparationReference.runAttempt }) : null;
+  if (preparedManifest) {
+    if (candidateSourceSha !== undefined) assert.equal(candidateSourceSha, preparedManifest.candidateSourceSha);
+    candidateSourceSha = preparedManifest.candidateSourceSha;
+    if (candidateDigest !== undefined) assert.equal(candidateDigest, preparedManifest.candidateImage.digest);
+    candidateDigest = preparedManifest.candidateImage.digest;
+    requirementsReference = preparedManifest.requirements.reference;
+  }
+  assert.match(candidateSourceSha || "", /^[a-f0-9]{40}$/, "Explicit candidate source SHA or authenticated preparation manifest is required");
+  const { requirements, bytes: requirementsBytes } = authenticateCanonicalProductionRequirementsArtifact({ sourceSha, candidateSourceSha, requirementsReference,
+    ...(preparedManifest ? { requirementsArtifactKind: "securityRebaselineRequirements" } : {}), repositoryRoot, githubRun });
+  const securityMode = Boolean(preparedManifest) || [securityRebaselineReference, securityRebaselineCanonicalOut, securityRebaselineLiveOut].some(Boolean);
+  assert.equal(Boolean(securityRebaselineCanonicalOut && securityRebaselineLiveOut), securityMode, "Security inventory output paths are all-or-none");
+  assert.equal(Boolean(securityRebaselineReference), securityMode && !preparedManifest, "Legacy canonical reference is required only without a preparation manifest");
   if (securityMode) { assert.notEqual(path.resolve(securityRebaselineCanonicalOut), path.resolve(securityRebaselineLiveOut)); assert.equal(fs.existsSync(securityRebaselineLiveOut), false, "Live security inventory destination already exists"); }
-  const canonicalSecurity = securityMode ? authenticateCanonicalSecurityRebaselineArtifact({ sourceSha, candidateSourceSha: requirements.candidateSourceSha, reference: securityRebaselineReference, requirementsSha256: requirements.requirementsSha256, repositoryRoot, githubRun }) : null;
+  if (preparedManifest) assert.equal(securityRebaselineReference, null, "Preparation and legacy canonical references cannot be mixed");
+  const canonicalReference = preparedManifest?.canonicalInventory.reference || securityRebaselineReference;
+  const canonicalSecurity = securityMode ? authenticateCanonicalSecurityRebaselineArtifact({ sourceSha, candidateSourceSha: requirements.candidateSourceSha, reference: canonicalReference, requirementsSha256: requirements.requirementsSha256, repositoryRoot, githubRun }) : null;
   if (securityMode) writeStageBPrivateFileExclusive({ filePath: securityRebaselineCanonicalOut, bytes: canonicalSecurity.bytes, repositoryRoot });
   const transportKeys = securityMode ? createSecurityCatalogueTransportKeyPair() : null;
   const commandEnvironment = createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: awsProfile, env });
   const awsExecutable = productionAwsExecutable();
   const aws = (args) => parse(run(awsExecutable, [...args, "--output", "json", "--no-cli-pager"], { env: commandEnvironment, encoding: "utf8", timeout: 30000, maxBuffer: 8 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] }));
   const caller = aws(["sts", "get-caller-identity"]); assert.equal(caller.Account, APP_ONLY.account); assert.equal(caller.Arn, `arn:aws:iam::${APP_ONLY.account}:root`);
-  const images = authenticateImages({ sourceSha, candidateDigest, publicationReference, authorizationReference, repositoryRoot, githubRun,
-    run: (args) => JSON.stringify(aws(args)) });
+  let images;
+  if (preparedManifest) {
+    const publicationReferenceFromManifest = preparedManifest.publicationReference;
+    const publicationReferenceForDownload = Object.fromEntries(Object.entries(publicationReferenceFromManifest).filter(([key]) => key !== "workflowFile"));
+    const publication = downloadAppOnlyArtifact({ kind: "securityRebaselineImagePublication", reference: publicationReferenceForDownload, repositoryRoot, githubRun });
+    const authenticated = authenticateProductionSecurityRebaselinePreparation({
+      manifestBytes: prepared.bytes, manifestReference: preparationReference,
+      requirementsBytes, requirementsReference: preparedManifest.requirements.reference,
+      canonicalInventoryBytes: canonicalSecurity.bytes, canonicalReference: canonicalReference,
+      publicationBytes: publication.bytes, publicationReference: publicationReferenceFromManifest,
+      sourceSha, repositoryRoot, verifyImageAuthorization: (args) => verifySecurityRebaselineKmsSignature(aws, args),
+    });
+    const imageBody = { kind: "APP_ONLY_AUTHENTICATED_IMAGES", sourceSha, candidateSourceSha: authenticated.manifest.candidateSourceSha,
+      candidateDigest: authenticated.manifest.candidateImage.digest, preparationManifestSha256: authenticated.manifest.manifestSha256 };
+    images = { ...imageBody, evidenceSha256: canonicalSha256(imageBody) };
+  } else {
+    images = authenticateImages({ sourceSha, candidateDigest, publicationReference, authorizationReference, repositoryRoot, githubRun,
+      run: (args) => JSON.stringify(aws(args)) });
+  }
   assert.equal(images.candidateSourceSha, requirements.candidateSourceSha, "Authenticated application image source differs from requirements");
   readImageRepositoryEvidence("mscqr-backend", { describe: () => aws(["ecr", "describe-repositories", "--region", APP_ONLY.region, "--registry-id", APP_ONLY.account, "--repository-names", "mscqr-backend"]) });
   const probeImage = authenticateProtectedMainProbeImage({ sourceSha, response: aws(["ecr", "describe-images", "--region", APP_ONLY.region, "--registry-id", APP_ONLY.account,
     "--repository-name", "mscqr-backend", "--image-ids", `imageTag=${sourceSha}-backend-only`]) });
+  if (preparedManifest) assert.equal(probeImage.digest, preparedManifest.probeRuntime.imageDigest, "Published probe runtime differs from the signed preparation manifest image digest");
   const live = aws(["ecs", "describe-services", "--region", APP_ONLY.region, "--cluster", APP_ONLY.cluster, "--services", APP_ONLY.service]);
   assert.deepEqual(live.failures || [], []); assert.equal(live.services?.length, 1); const service = live.services[0]; assert.equal(service.deployments?.length, 1); assert.equal(service.runningCount, service.desiredCount);
   const backend = aws(["ecs", "describe-task-definition", "--region", APP_ONLY.region, "--task-definition", service.taskDefinition]).taskDefinition;
@@ -247,13 +293,18 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
   try {
     const { values } = parseArgs({ options: { "source-sha": { type: "string" }, "candidate-source-sha": { type: "string" }, "candidate-digest": { type: "string" },
       "publication-reference": { type: "string" }, "image-authorization-reference": { type: "string" }, "requirements-reference": { type: "string" }, "aws-profile": { type: "string" },
-      "security-rebaseline-reference": { type: "string" }, "security-rebaseline-canonical-out": { type: "string" }, "security-rebaseline-live-out": { type: "string" } }, strict: true });
-    assert.match(values["source-sha"] || "", /^[a-f0-9]{40}$/); assert.match(values["candidate-source-sha"] || "", /^[a-f0-9]{40}$/); assert.match(values["candidate-digest"] || "", /^sha256:[a-f0-9]{64}$/); assert.ok(values["aws-profile"]);
-    const requirementsReference = parseAppOnlyArtifactReference(values["requirements-reference"]);
-    const publicationReference = parseAppOnlyArtifactReference(values["publication-reference"]), authorizationReference = parseAppOnlyArtifactReference(values["image-authorization-reference"]);
+      "preparation-reference": { type: "string" }, "security-rebaseline-reference": { type: "string" }, "security-rebaseline-canonical-out": { type: "string" }, "security-rebaseline-live-out": { type: "string" } }, strict: true });
+    assert.match(values["source-sha"] || "", /^[a-f0-9]{40}$/); assert.ok(values["aws-profile"]);
+    const preparationReference = values["preparation-reference"] ? parseAppOnlyArtifactReference(values["preparation-reference"]) : null;
+    if (preparationReference) assert.ok(values["security-rebaseline-canonical-out"] && values["security-rebaseline-live-out"]);
+    else { assert.match(values["candidate-source-sha"] || "", /^[a-f0-9]{40}$/); assert.match(values["candidate-digest"] || "", /^sha256:[a-f0-9]{64}$/); }
+    const requirementsReference = values["requirements-reference"] ? parseAppOnlyArtifactReference(values["requirements-reference"]) : null;
+    const publicationReference = values["publication-reference"] ? parseAppOnlyArtifactReference(values["publication-reference"]) : null;
+    const authorizationReference = values["image-authorization-reference"] ? parseAppOnlyArtifactReference(values["image-authorization-reference"]) : null;
+    if (!preparationReference) assert.ok(requirementsReference && publicationReference && authorizationReference);
     const securityRebaselineReference = values["security-rebaseline-reference"] ? parseAppOnlyArtifactReference(values["security-rebaseline-reference"]) : null;
     const result = await runProductionRlsCatalogueProbe({ sourceSha: values["source-sha"], candidateSourceSha: values["candidate-source-sha"], candidateDigest: values["candidate-digest"],
-      publicationReference, authorizationReference, requirementsReference, awsProfile: values["aws-profile"], securityRebaselineReference,
+      publicationReference, authorizationReference, requirementsReference, preparationReference, awsProfile: values["aws-profile"], securityRebaselineReference,
       securityRebaselineCanonicalOut: values["security-rebaseline-canonical-out"], securityRebaselineLiveOut: values["security-rebaseline-live-out"] });
     process.stdout.write(`${JSON.stringify(result)}\n`); if (result.classification === RLS_PROBE_CLASSIFICATIONS.UNEXPECTED) process.exitCode = 2;
   } catch { process.stderr.write("Production RLS catalogue probe failed closed; no database mutation was attempted.\n"); process.exitCode = 1; }

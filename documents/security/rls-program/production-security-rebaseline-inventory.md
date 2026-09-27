@@ -40,17 +40,27 @@ The final PostgreSQL 18 catalogue boundary is explicit:
 
 The fixed read-only task does not provision database objects. Before its first live inventory, the dedicated read-only canary and its restricted `production_security_subscription_inventory()` projection must already have been installed and authenticated by the separately reviewed `documents/ops/iam/production-green-phase-4-read-only-canary-provision.sql` procedure. That DBA operation is a distinct, explicitly authorized provisioning change; it is not run by this PR, the inventory command below, or the ECS task. Follow that procedure's hidden credential prompt and rotation rules. The inventory collector verifies the observer's exact NOLOGIN privileges, the complete `pg_subscription.subconninfo` ACL (only the observer may hold non-grantable SELECT, from an approved provisioning principal), projection owner/body/search path/ACL, and canary invocation grant before calling it; if any prerequisite is absent or differs, collection fails closed before returning an inventory. Do not treat that failure as an empty subscription inventory or proceed to comparison.
 
-Example operator shape (do not run without separate production authorization):
+## Preparation and image authorization
+
+Start preparation only from the exact current protected-main SHA using the `Prepare production security rebaseline` workflow. It reuses the existing source-bound requirements producer, disposable PostgreSQL 18 canonical producer, and deployment-free backend image publisher; all three outputs are tied to the same workflow run and exact source. It emits one private `production-security-rebaseline-preparation` artifact and a bounded readiness summary. Artifacts are retained for 90 days for audit and regeneration coordination, but are never selected by recency: the probe consumes immutable run/artifact IDs and digests from that preparation run. Missing or expired evidence requires a new exact-source preparation run.
+
+The image authorization is signed by the dedicated `production-security-rebaseline-signing` GitHub environment after its independent reviewer gate. The environment must be restricted to protected `main`, require an independent reviewer, prevent self-review, and supply only the Terraform-managed signer-role ARN. The signing job is a reusable workflow so GitHub emits `job_workflow_ref`; the OIDC role pins that claim to `sign-production-security-rebaseline.yml` and also requires the exact repository/environment subject, repository and owner IDs, and `main` ref. The signer verifies the caller is the exact preparation workflow before requesting credentials. It can perform only `kms:Sign` on the purpose-specific key with the required RSA-PSS-SHA256 digest parameters. The signature binds protected and candidate source SHAs, immutable backend image digest, publication artifact identity, AWS account/region, purpose, workflow/run, a random nonce, and a 24-hour validity window. The AWS account root remains break-glass authority only, not the routine signer. The probe verifies the signature and every referenced artifact before starting its fixed read-only task.
+
+The signer role and key are source-managed under `infra/aws/terraform/production-security-rebaseline-signer`. They are not created by this workflow. After this PR is reviewed and merged, a separately authorized production Terraform plan/apply and protected GitHub-environment configuration/readback are required before preparation can become ready. This preparation PR performs no IAM/KMS change, production probe, or projection provisioning.
+
+After the infrastructure apply, Terraform `plan -detailed-exitcode` is the drift gate; `scripts/aws/verify-production-security-rebaseline-signer.mjs` performs a separate read-only exact-policy/key/alias/grant readback. The preparation signer itself does not receive IAM/KMS read or administration permission.
+
+Preparation and later probe invocation shape (do not run without separate production authorization):
 
 ```sh
+gh workflow run prepare-production-security-rebaseline.yml \
+  --ref main \
+  -f source_sha="$PROTECTED_MAIN_SHA"
+
+# After authenticating that completed run and its immutable manifest artifact:
 node scripts/aws/probe-production-rls-catalogue.mjs \
   --source-sha "$PROTECTED_MAIN_SHA" \
-  --candidate-source-sha "$CANDIDATE_SOURCE_SHA" \
-  --candidate-digest "$CANDIDATE_IMAGE_DIGEST" \
-  --publication-reference "$CANDIDATE_IMAGE_PUBLICATION_REFERENCE" \
-  --image-authorization-reference "$CANDIDATE_IMAGE_AUTHORIZATION_REFERENCE" \
-  --requirements-reference "$REQUIREMENTS_REFERENCE" \
-  --security-rebaseline-reference "$CANONICAL_REFERENCE" \
+  --preparation-reference "$PREPARATION_MANIFEST_REFERENCE" \
   --security-rebaseline-canonical-out "$PRIVATE_CANONICAL_PATH" \
   --security-rebaseline-live-out "$PRIVATE_LIVE_PATH" \
   --aws-profile mscqr-production-root
@@ -63,6 +73,8 @@ node scripts/aws/compare-production-security-rebaseline.mjs \
 ```
 
 The comparison hard-stops on unexpected business objects, schemas, or roles. Its closed categories cannot express business DML, `DROP TABLE`, or `DROP SCHEMA`.
+
+The current source-owned probe still validates that its operator AWS CLI profile is the production account-root identity for control-plane read calls. This is separate from image-authorization signing: preparation uses the dedicated GitHub OIDC/KMS signer and never receives root credentials. The profile above reflects the existing probe contract and must not be used to sign authorization.
 
 ## Required follow-up
 
