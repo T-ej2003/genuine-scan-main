@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import JSZip from "jszip";
 import { parseEcsSecretsManagerReference } from "./production-ecs-runtime-dependencies.mjs";
+import { canonicalJson } from "./production-green-stage-b-contract.mjs";
 
 export const QR_VERSION_SELECTOR_RESOLUTION = Object.freeze({
   operation: "READ_ONLY_QR_VERSION_SELECTOR_RESOLUTION",
@@ -22,6 +23,19 @@ const SHA40 = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const QR_VERSION = /^[A-Za-z0-9._-]{1,64}$/;
 const digest = (value) => crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex");
+const taskDefinitionDigest = (value) => crypto.createHash("sha256").update(canonicalJson(normalizeTaskDefinition(value))).digest("hex");
+function normalizeTaskDefinition(value, key) {
+  if (value instanceof Date) return value.toISOString();
+  if (key === "registeredAt" || key === "deregisteredAt") {
+    if (value === undefined) return undefined;
+    const timestamp = typeof value === "string" || value instanceof Date ? new Date(value) : null;
+    if (!timestamp || !Number.isFinite(timestamp.getTime())) throw new Error("Task-definition timestamp is malformed.");
+    return timestamp.toISOString();
+  }
+  if (Array.isArray(value)) return value.map((item) => normalizeTaskDefinition(item));
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined).map(([childKey, item]) => [childKey, normalizeTaskDefinition(item, childKey)]));
+  return value;
+}
 
 export function readGitHubApiToken({ env = process.env, run = (args) => execFileSync("gh", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) } = {}) {
   const token = env.GITHUB_TOKEN || run(["auth", "token"]).trim();
@@ -51,7 +65,7 @@ export function assertQrVersionSelector({ taskDefinition, expectedSecretArn } = 
   let selector;
   try { selector = parseEcsSecretsManagerReference(matches[0].valueFrom); } catch { throw new Error("Live QR active-version secret selector is malformed."); }
   if (selector.resource !== expectedSecretArn || selector.jsonKey !== "value" || selector.versionStage || selector.versionId || selector.selectorMode !== "AWSCURRENT") throw new Error("Live QR active-version selector does not match the exact authorized default-current binding.");
-  return Object.freeze({ taskDefinitionArn, taskDefinitionSha256: digest(definition), secretArn: selector.resource, jsonKey: selector.jsonKey, versionSemantics: "AWSCURRENT" });
+  return Object.freeze({ taskDefinitionArn, taskDefinitionSha256: taskDefinitionDigest(definition), secretArn: selector.resource, jsonKey: selector.jsonKey, versionSemantics: "AWSCURRENT" });
 }
 
 export function assertQrVersionResolutionCurrent({ taskDefinition, resolution, secretMetadata } = {}) {

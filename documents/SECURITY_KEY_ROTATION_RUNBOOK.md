@@ -432,8 +432,9 @@ approval and one-run OIDC session authorize only the exact ECS metadata reads
 and `GetSecretValue`/`DescribeSecret` on that ARN in `eu-west-2`; the consumer
 independently checks the live service selector and requests `AWSCURRENT`. The
 resolver and each consumer bind evidence to the exact task-definition ARN and
-digest, and re-read secret version-stage metadata to prove the recorded version
-remains the sole `AWSCURRENT` version before baseline use.
+canonically normalized digest (including AWS timestamp and object-key-order
+normalization), and re-read secret version-stage metadata to prove the recorded
+version remains the sole `AWSCURRENT` version before baseline use.
 
 The consumer parses and validates only the `value` field in memory. The
 identifier is non-secret QR `kid` metadata (the application emits it in QR

@@ -796,6 +796,17 @@ test("installed candidate-only task-definition read policy is an exact authorize
   assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ authorizerDocument: broader }) }).classification, "UNEXPECTED");
 });
 
+test("installed seven-resource authorizer policy without ECS reads is an exact predecessor", () => {
+  const sevenResource = bootstrapOperatorPolicyAuthorizerPermissionsPredecessor();
+  const noEcs = { ...sevenResource, Statement: sevenResource.Statement.filter(({ Sid }) => !["ReadExactProductionBackendSelectorSource", "ReadRegionalTaskDefinitionMetadata"].includes(Sid)) };
+  assert.equal(noEcs.Statement.find(({ Sid }) => Sid === "ReadExactInitialDualSlotBindingForBootstrapOperatorAuthorization").Resource.length, 7);
+  assert.ok(bootstrapOperatorPolicyAuthorizerPermissionsPredecessors().some((predecessor) => JSON.stringify(predecessor) === JSON.stringify(noEcs)));
+  assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ authorizerDocument: noEcs }) }).classification, "EXACT_AUTHORIZER_POLICY_UPDATE");
+  const broadened = structuredClone(noEcs);
+  broadened.Statement.find(({ Sid }) => Sid === "ReadExactInitialDualSlotBindingForBootstrapOperatorAuthorization").Resource.push("*");
+  assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ authorizerDocument: broadened }) }).classification, "UNEXPECTED");
+});
+
 test("captured live predecessor expands exactly the absent evidence reader and authorizer policy", () => {
   const expectedAddresses = liveEvidenceReaderPredecessor.expectedExistingAddresses;
   assert.equal(liveEvidenceReaderPredecessor.protectedMainSha, "81c631ca6a92fd470615b064d99132b55eef2748");

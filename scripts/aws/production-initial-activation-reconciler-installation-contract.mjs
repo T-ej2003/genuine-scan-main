@@ -135,7 +135,9 @@ export const bootstrapOperatorPolicyAuthorizerPermissionsPredecessors = () => {
   const desired = sourceJson(`${INSTALLATION.terraformRoot}/bootstrap-operator-policy-authorizer-permissions-policy.json`);
   const candidateOnly = { ...desired, Statement: desired.Statement.map((statement) => statement.Sid === "ReadRegionalTaskDefinitionMetadata" ? { ...statement, Resource: statement.Resource.filter((arn) => arn.includes("mscqr-production-rls-green-backend-candidate:")) } : statement) };
   const prior = { ...desired, Statement: desired.Statement.filter(({ Sid }) => !["ReadExactProductionBackendSelectorSource", "ReadRegionalTaskDefinitionMetadata"].includes(Sid)) };
-  return [candidateOnly, prior, bootstrapOperatorPolicyAuthorizerPermissionsPredecessor()];
+  const sevenResourceNoEcs = bootstrapOperatorPolicyAuthorizerPermissionsPredecessor();
+  const sevenResourceNoEcsWithoutTaskReads = { ...sevenResourceNoEcs, Statement: sevenResourceNoEcs.Statement.filter(({ Sid }) => !["ReadExactProductionBackendSelectorSource", "ReadRegionalTaskDefinitionMetadata"].includes(Sid)) };
+  return [candidateOnly, prior, sevenResourceNoEcsWithoutTaskReads, sevenResourceNoEcs];
 };
 const EXPECTED_PROVIDER_CONFIGURATION = Object.freeze({
   aws: {

@@ -84,6 +84,18 @@ test("resolution consumption rebinds current task revision and AWSCURRENT versio
   assert.throws(() => deriveLegacyRotationBaseline(taskDefinition, { qrVersionResolution: { ...evidence, taskDefinitionSha256: "b".repeat(64) } }), /exact task definition/);
 });
 
+test("task-definition identity normalizes AWS SDK dates to CLI JSON timestamps", () => {
+  const sdkTaskDefinition = structuredClone(taskDefinition);
+  sdkTaskDefinition.taskDefinition.registeredAt = new Date("2026-09-27T12:00:00.000Z");
+  sdkTaskDefinition.taskDefinition.deregisteredAt = new Date("2026-09-27T12:30:00.000Z");
+  const cliTaskDefinition = Object.fromEntries(Object.entries(JSON.parse(JSON.stringify(sdkTaskDefinition, (key, value) => key === "registeredAt" ? "2026-09-27T12:00:00+00:00" : key === "deregisteredAt" ? "2026-09-27T12:30:00+00:00" : value))).reverse());
+  const sdkBinding = assertQrVersionSelector({ taskDefinition: sdkTaskDefinition, expectedSecretArn: secretArn });
+  const resolved = resolveQrVersionSelectorValue({ response, binding: sdkBinding });
+  const evidence = createQrVersionResolutionEvidence({ binding: sdkBinding, resolved, sourceSha: "a".repeat(40), changeTicket: "CHG-20260925-001", workflowRunId: "12345", createdAt: "2026-09-27T12:00:00.000Z" });
+  assert.equal(assertQrVersionResolutionCurrent({ taskDefinition: cliTaskDefinition, resolution: evidence, secretMetadata }), true);
+  assert.throws(() => assertQrVersionResolutionCurrent({ taskDefinition: { ...cliTaskDefinition, taskDefinition: { ...cliTaskDefinition.taskDefinition, family: "unexpected-backend" } }, resolution: evidence, secretMetadata }), /task definition and AWSCURRENT/);
+});
+
 test("artifact consumer authenticates the exact successful workflow run and single payload", async () => {
   const sourceSha = "a".repeat(40);
   const evidence = createQrVersionResolutionEvidence({ binding, resolved: resolveQrVersionSelectorValue({ response, binding }), sourceSha, changeTicket: "CHG-20260925-001", workflowRunId: "12345", createdAt: "2026-09-27T12:00:00.000Z" });
