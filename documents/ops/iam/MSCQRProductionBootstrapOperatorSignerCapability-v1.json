@@ -1,0 +1,47 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadSignerCapabilityPolicyWithMfa",
+      "Effect": "Allow",
+      "Action": ["iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions", "iam:ListEntitiesForPolicy"],
+      "Resource": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+      "Condition": {"Bool": {"aws:MultiFactorAuthPresent": "true"}}
+    },
+    {
+      "Sid": "TransitionSignerCapabilityPolicyWithMfa",
+      "Effect": "Allow",
+      "Action": "iam:CreatePolicyVersion",
+      "Resource": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+      "Condition": {"Bool": {"aws:MultiFactorAuthPresent": "true"}}
+    },
+    {
+      "Sid": "ReadSignerRoleWithMfa",
+      "Effect": "Allow",
+      "Action": "iam:GetRole",
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-security-rebaseline-image-signer",
+      "Condition": {"Bool": {"aws:MultiFactorAuthPresent": "true"}}
+    },
+    {
+      "Sid": "ListProductionKmsKeysWithMfa",
+      "Effect": "Allow",
+      "Action": "kms:ListKeys",
+      "Resource": "*",
+      "Condition": {"Bool": {"aws:MultiFactorAuthPresent": "true"}, "StringEquals": {"aws:RequestedRegion": "eu-west-2"}}
+    },
+    {
+      "Sid": "ReadProductionKmsTagsWithMfa",
+      "Effect": "Allow",
+      "Action": "kms:ListResourceTags",
+      "Resource": "arn:aws:kms:eu-west-2:368992683803:key/*",
+      "Condition": {"Bool": {"aws:MultiFactorAuthPresent": "true"}, "StringEquals": {"aws:RequestedRegion": "eu-west-2"}}
+    },
+    {
+      "Sid": "ListProductionKmsAliasesWithMfa",
+      "Effect": "Allow",
+      "Action": "kms:ListAliases",
+      "Resource": "*",
+      "Condition": {"Bool": {"aws:MultiFactorAuthPresent": "true"}, "StringEquals": {"aws:RequestedRegion": "eu-west-2"}}
+    }
+  ]
+}

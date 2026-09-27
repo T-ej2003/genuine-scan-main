@@ -28,16 +28,28 @@ const readEvidence = (file, identity) => {
   const stat = fs.lstatSync(file); if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o077)) fail("evidence must be a private regular file");
   const value = readJson(file); assertSignerCapabilityEvidence(value, identity); return value;
 };
-const profileIdentity = (profile, expectedRole, bootstrapUser = false) => {
-  const caller = aws(profile, ["sts", "get-caller-identity"]);
-  const expected = expectedRole
-    ? new RegExp(`^arn:aws:sts::${C.accountId}:assumed-role/${expectedRole}/[^/]+$`)
-    : bootstrapUser
-      ? new RegExp(`^arn:aws:iam::${C.accountId}:user/mscqr-production-bootstrap-operator$`)
-      : new RegExp(`^arn:aws:sts::${C.accountId}:(?:federated-user/mscqr-production-bootstrap-operator|assumed-role/[A-Za-z0-9+=,.@_-]+/[^/]+)$`);
-  if (caller.Account !== C.accountId || !expected.test(caller.Arn || "") || caller.Arn.endsWith(":root")) fail(`${profile} is not an approved non-root production session`);
+const BOOTSTRAP_PROFILE = "mscqr-production-bootstrap-mfa";
+export function assertSignerBootstrapIdentity(profile, caller) {
+  if (profile !== BOOTSTRAP_PROFILE) fail(`only ${BOOTSTRAP_PROFILE} may install or revoke the signer capability`);
+  if (caller.Account !== C.accountId || caller.Arn !== `arn:aws:iam::${C.accountId}:user/mscqr-production-bootstrap-operator`) fail(`${profile} is not the exact non-root production bootstrap operator`);
   return caller.Arn;
-};
+}
+const profileIdentity = (profile) => assertSignerBootstrapIdentity(profile, aws(profile, ["sts", "get-caller-identity"]));
+export function assertSignerCliArguments(argv, phase) {
+  const common = ["--phase", "--source-sha", "--transition-id", "--bootstrap-profile", "--state-file"];
+  const extra = ({ plan: ["--plan-output"], "verify-plan": ["--saved-plan", "--approval-reference"], apply: ["--saved-plan", "--approval-reference"], "verify-convergence": ["--saved-plan", "--terraform-state"], revoke: [] })[phase] || [];
+  const switches = phase === "revoke" ? ["--abort-confirmed-no-resources"] : [];
+  if (!["install", "recover-install", "init", "plan", "verify-plan", "apply", "verify-convergence", "revoke", "verify-absent"].includes(phase)) fail(`unsupported phase ${phase}`);
+  const allowed = new Set([...common, ...extra, ...switches]);
+  const seen = new Set();
+  for (let i = 0; i < argv.length; i += 1) {
+    const name = argv[i];
+    if (!allowed.has(name) || seen.has(name)) fail(`unsupported or duplicate option ${name}`);
+    seen.add(name);
+    if (!switches.includes(name) && (!argv[i + 1] || argv[i + 1].startsWith("--"))) fail(`${name} requires one value`);
+    if (!switches.includes(name)) i += 1;
+  }
+}
 function assertSource(sourceSha, { cleanupReadback = false } = {}) {
   if (!/^[a-f0-9]{40}$/.test(sourceSha || "") || execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim() !== sourceSha) fail("checkout HEAD differs from authorized source SHA");
   if (execFileSync("git", ["status", "--porcelain=v1", "--untracked-files=all"], { cwd: root, encoding: "utf8" }).trim()) fail("source checkout is not clean");
@@ -120,12 +132,26 @@ function writePolicyVersion(profile, document, expectedDefault) {
 function exactSignerTemporaryVersion(doc, identity) {
   try { assertSignerTemporaryPolicy(doc, { steadyPolicy, ...identity }); return true; } catch { return false; }
 }
-function rejectExistingSignerVersion(state) {
-  if (state.versions.some(({ document }) => document.Statement?.some(({ Sid = "" }) => Sid.startsWith("TemporarySigner")))) fail("a signer temporary policy version already exists; initial convergence cannot be replayed");
+function assertCanonicalPolicyHistory(state, identity, allowTemporary) {
+  const temporary = buildSignerTemporaryPolicy(steadyPolicy, identity);
+  for (const version of state.versions) {
+    const steady = canonical(version.document) === canonical(steadyPolicy);
+    const signer = allowTemporary && canonical(version.document) === canonical(temporary);
+    if (!steady && !signer) fail("managed policy contains an unexpected version document");
+  }
+  if (allowTemporary && state.versions.filter(({ document }) => canonical(document) === canonical(temporary)).length !== 1) fail("exactly one signer transition marker is required");
 }
 function assertAbsentSignerResources(profile) {
   try { aws(profile, ["iam", "get-role", "--role-name", C.roleName]); fail("signer role already exists; initial convergence refuses adoption"); } catch (error) { if (error.message.startsWith("Signer temporary capability:")) throw error; if (!String(error.stderr || "").includes("NoSuchEntity")) fail("cannot prove the signer role is absent"); }
-  try { aws(profile, ["kms", "describe-key", "--key-id", C.alias]); fail("signer alias already exists; initial convergence refuses adoption"); } catch (error) { if (error.message.startsWith("Signer temporary capability:")) throw error; if (!String(error.stderr || "").includes("NotFoundException")) fail("cannot prove the signer alias is absent"); }
+  let aliasMarker, aliasPages = 0; const seenAliases = new Set();
+  do {
+    if (++aliasPages > 100 || (aliasMarker && seenAliases.has(aliasMarker))) fail("KMS alias census pagination is invalid");
+    if (aliasMarker) seenAliases.add(aliasMarker);
+    const page = aws(profile, ["kms", "list-aliases", ...(aliasMarker ? ["--marker", aliasMarker] : [])]);
+    if ((page.Aliases || []).some(({ AliasName }) => AliasName === C.alias)) fail("signer alias already exists; initial convergence refuses adoption");
+    if (typeof page.Truncated !== "boolean" || (page.Truncated && (typeof page.NextMarker !== "string" || !page.NextMarker))) fail("KMS alias census pagination is incomplete");
+    aliasMarker = page.Truncated ? page.NextMarker : undefined;
+  } while (aliasMarker);
   let marker, pages = 0; const seen = new Set();
   do {
     if (++pages > 100 || (marker && seen.has(marker))) fail("KMS key census pagination is invalid");
@@ -136,6 +162,7 @@ function assertAbsentSignerResources(profile) {
       const actual = Object.fromEntries(tags.map(({ TagKey, TagValue }) => [TagKey, TagValue]));
       if (Object.entries(C.tags).every(([key, value]) => actual[key] === value)) fail("a key already carries the exact signer tags; refusing ambiguous ownership");
     }
+    if (typeof page.Truncated !== "boolean" || (page.Truncated && (typeof page.NextMarker !== "string" || !page.NextMarker))) fail("KMS key census pagination is incomplete");
     marker = page.Truncated ? page.NextMarker : undefined;
   } while (marker);
 }
@@ -158,27 +185,30 @@ function assertInitializedSignerBackend(sessionEnv) {
 
 export function runSignerTemporaryCapability(argv = process.argv.slice(2), { write = (s) => process.stdout.write(s), now = () => new Date().toISOString() } = {}) {
   const phase = opt(argv, "--phase"), sourceSha = opt(argv, "--source-sha"), transitionId = opt(argv, "--transition-id"), stateFile = path.resolve(opt(argv, "--state-file"));
-  const identity = { sourceSha, transitionId }, admin = opt(argv, "--admin-profile"), bootstrap = opt(argv, "--bootstrap-profile");
-  if (admin && bootstrap && admin === bootstrap) fail("administrator and MFA bootstrap profiles must be distinct");
+  assertSignerCliArguments(argv, phase);
+  const identity = { sourceSha, transitionId }, bootstrap = opt(argv, "--bootstrap-profile");
   assertSource(sourceSha, { cleanupReadback: ["verify-convergence", "revoke", "verify-absent"].includes(phase) });
-  if (admin) profileIdentity(admin, null);
-  if (bootstrap) profileIdentity(bootstrap, null, true);
-  const current = policyState(admin);
-  assertCapabilityPolicyAttached(admin);
+  profileIdentity(bootstrap);
+  const current = policyState(bootstrap);
+  assertCapabilityPolicyAttached(bootstrap);
   const evidence = fs.existsSync(stateFile) ? readEvidence(stateFile, identity) : null;
   if (phase === "install") {
     if (evidence) fail("authorization evidence already exists; a new transition nonce is required");
     if (canonical(current.active.document) !== canonical(steadyPolicy)) fail("live steady-state policy differs from protected source");
     if (current.versions.length > 3) fail("two policy-version slots are required for install and revocation; no versions were deleted");
-    rejectExistingSignerVersion(current); assertAbsentSignerResources(admin);
+    assertCanonicalPolicyHistory(current, identity, false); assertAbsentSignerResources(bootstrap);
     const temporary = buildSignerTemporaryPolicy(steadyPolicy, identity);
     assertSignerTemporaryPolicy(temporary, { steadyPolicy, ...identity });
-    const version = writePolicyVersion(admin, temporary, current.active.VersionId);
+    signerSession(bootstrap, transitionId); // Fail before changing the policy if the fresh MFA role chain is unavailable.
+    const version = writePolicyVersion(bootstrap, temporary, current.active.VersionId);
+    const installed = policyState(bootstrap); assertCanonicalPolicyHistory(installed, identity, true);
+    if (installed.active.VersionId !== version || canonical(installed.active.document) !== canonical(temporary)) fail("temporary signer policy is not the exact active default after installation");
     signerSession(bootstrap, transitionId);
     const result = buildSignerCapabilityEvidence({ state: "INSTALLED", ...identity, steadyVersionId: current.active.VersionId, temporaryVersionId: version, observedAt: now() });
     protect(stateFile, result); write(`${JSON.stringify({ state: result.state, evidenceSha256: result.evidenceSha256, temporaryVersionId: version })}\n`); return result;
   }
   if (phase === "recover-install" && !evidence) {
+    assertCanonicalPolicyHistory(current, identity, true);
     const active = current.active;
     if (!exactSignerTemporaryVersion(active.document, identity)) fail("there is no exact active signer capability to recover");
     const base = current.versions.filter(({ document }) => canonical(document) === canonical(steadyPolicy));
@@ -187,6 +217,7 @@ export function runSignerTemporaryCapability(argv = process.argv.slice(2), { wri
     protect(stateFile, result); write(`${JSON.stringify({ state: result.state, evidenceSha256: result.evidenceSha256, recovered: true })}\n`); return result;
   }
   if (!evidence) fail("private authorization evidence is required");
+  assertCanonicalPolicyHistory(current, identity, true);
   const temp = current.versions.find(({ VersionId }) => VersionId === evidence.temporaryVersionId);
   if (!temp || !exactSignerTemporaryVersion(temp.document, identity)) fail("exact temporary policy version is not present");
   if (["plan", "verify-plan", "apply", "verify-convergence"].includes(phase) && current.active.VersionId !== evidence.temporaryVersionId) fail("temporary capability is not the active policy version");
@@ -260,13 +291,14 @@ export function runSignerTemporaryCapability(argv = process.argv.slice(2), { wri
     const abort = argv.includes("--abort-confirmed-no-resources");
     if (!abort && evidence.state !== "CONVERGED") fail("signer convergence readback is required before normal revocation");
     if (abort && !["INSTALLED", "PLAN_GENERATED", "PLAN_REVIEWED"].includes(evidence.state)) fail("abort revocation is allowed only before apply authorization");
-    if (abort) assertAbsentSignerResources(admin);
+    if (abort) assertAbsentSignerResources(bootstrap);
     if (canonical(current.active.document) === canonical(steadyPolicy) && current.active.VersionId !== evidence.temporaryVersionId) {
       const result = buildSignerCapabilityEvidence({ ...evidence, state: "REVOKED", steadyVersionId: current.active.VersionId, observedAt: now() });
       protect(stateFile, result); write(`${JSON.stringify({ state: result.state, steadyVersionId: current.active.VersionId, recovered: true })}\n`); return result;
     }
     if (current.active.VersionId !== evidence.temporaryVersionId) fail("temporary policy is not the live default");
-    const steadyVersion = writePolicyVersion(admin, steadyPolicy, current.active.VersionId);
+    if (current.versions.length >= 5) fail("no managed-policy version slot remains for safe revocation");
+    const steadyVersion = writePolicyVersion(bootstrap, steadyPolicy, current.active.VersionId);
     const result = buildSignerCapabilityEvidence({ ...evidence, state: "REVOKED", steadyVersionId: steadyVersion, temporaryVersionId: evidence.temporaryVersionId, observedAt: now() });
     protect(stateFile, result); write(`${JSON.stringify({ state: result.state, steadyVersionId: steadyVersion })}\n`); return result;
   }

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { assertSignerBootstrapIdentity, assertSignerCliArguments } from "../aws/reconcile-production-signer-temporary-capability.mjs";
 import {
   SIGNER_TEMPORARY_CAPABILITY as C, assertSignerCapabilityEvidence, assertSignerCreationPlan, assertSignerRevocation,
   assertSignerInitializedBackendMetadata, assertSignerPolicySoleConsumer, assertSignerTemporaryPolicy, buildSignerCapabilityEvidence, buildSignerTemporaryPolicy,
@@ -24,6 +25,38 @@ const grants = (policy, action, resource) => policy.Statement.some((statement) =
   const actions = Array.isArray(statement.Action) ? statement.Action : [statement.Action];
   const resources = Array.isArray(statement.Resource) ? statement.Resource : [statement.Resource];
   return actions.includes(action) && resources.some((candidate) => candidate === "*" || candidate === resource);
+});
+
+test("only the MFA bootstrap operator can invoke a closed signer lifecycle CLI", () => {
+  assert.equal(assertSignerBootstrapIdentity("mscqr-production-bootstrap-mfa", { Account: C.accountId, Arn: `arn:aws:iam::${C.accountId}:user/mscqr-production-bootstrap-operator` }), `arn:aws:iam::${C.accountId}:user/mscqr-production-bootstrap-operator`);
+  for (const [profile, caller] of [
+    ["default", { Account: C.accountId, Arn: `arn:aws:iam::${C.accountId}:root` }],
+    ["mscqr-production-release-deployer", { Account: C.accountId, Arn: `arn:aws:sts::${C.accountId}:assumed-role/mscqr-production-release-deployer/session` }],
+    ["another-profile", { Account: C.accountId, Arn: `arn:aws:iam::${C.accountId}:user/mscqr-production-bootstrap-operator` }],
+    ["mscqr-production-bootstrap-mfa", { Account: "111111111111", Arn: "arn:aws:iam::111111111111:user/mscqr-production-bootstrap-operator" }],
+  ]) assert.throws(() => assertSignerBootstrapIdentity(profile, caller));
+  const base = ["--phase", "install", "--source-sha", sourceSha, "--transition-id", transitionId, "--bootstrap-profile", "mscqr-production-bootstrap-mfa", "--state-file", "/tmp/capability.json"];
+  assert.doesNotThrow(() => assertSignerCliArguments(base, "install"));
+  for (const option of ["--admin-profile", "--policy-arn", "--policy-name", "--policy-document", "--policy-file", "--state-key", "--role-arn", "--kms-key"]) assert.throws(() => assertSignerCliArguments([...base, option, "attacker-value"], "install"));
+  assert.throws(() => assertSignerCliArguments([...base, "--bootstrap-profile", "attacker-profile"], "install"));
+});
+
+test("bootstrap policy transition is MFA-gated and pinned to the one canonical managed policy", () => {
+  const policy = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionBootstrapOperatorSignerCapability-v1.json", "utf8"));
+  const target = "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease";
+  const bootstrapBase = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionBootstrapOperator-v1.json", "utf8"));
+  assert.equal(bootstrapBase.Statement.some(({ Action, Resource }) => (Array.isArray(Action) ? Action : [Action]).includes("iam:CreatePolicyVersion") && Resource === target), false, "pre-fix bootstrap policy could not install or revoke the signer version");
+  const transition = policy.Statement.find(({ Sid }) => Sid === "TransitionSignerCapabilityPolicyWithMfa");
+  assert.deepEqual(transition, { Sid: "TransitionSignerCapabilityPolicyWithMfa", Effect: "Allow", Action: "iam:CreatePolicyVersion", Resource: target, Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } });
+  const read = policy.Statement.find(({ Sid }) => Sid === "ReadSignerCapabilityPolicyWithMfa");
+  assert.deepEqual(read, { Sid: "ReadSignerCapabilityPolicyWithMfa", Effect: "Allow", Action: ["iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions", "iam:ListEntitiesForPolicy"], Resource: target, Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } });
+  assert.equal(policy.Statement.some(({ Action, Resource }) => (Array.isArray(Action) ? Action : [Action]).includes("iam:CreatePolicyVersion") && Resource !== target), false);
+  for (const denied of ["iam:*", "iam:CreatePolicy", "iam:CreateRole", "iam:UpdateAssumeRolePolicy", "iam:AttachRolePolicy", "iam:PutRolePolicy", "iam:PassRole", "iam:DeletePolicyVersion", "kms:PutKeyPolicy", "kms:Decrypt", "kms:CreateGrant", "s3:GetObject", "s3:PutObject"]) assert.equal(policy.Statement.some(({ Action }) => (Array.isArray(Action) ? Action : [Action]).includes(denied)), false, denied);
+  assert.equal(JSON.stringify(policy).length < 2048, true, "purpose policy fits the IAM inline-policy limit");
+  const source = fs.readFileSync("scripts/aws/reconcile-production-signer-temporary-capability.mjs", "utf8");
+  assert.doesNotMatch(source, /--admin-profile|admin\s*=\s*opt\(/);
+  assert.match(source, /writePolicyVersion\(bootstrap, temporary/);
+  assert.match(source, /writePolicyVersion\(bootstrap, steadyPolicy/);
 });
 
 test("temporary delta is source/nonce bound and excludes unrelated state, IAM, and KMS data actions", () => {
