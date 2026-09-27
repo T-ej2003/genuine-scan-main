@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { createRequire } from "node:module";
+import os from "node:os";
 import test from "node:test";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -23,6 +26,38 @@ const taskDefinition = {
 const binding = assertQrVersionSelector({ taskDefinition, expectedSecretArn: secretArn });
 const response = { ARN: secretArn, VersionId: "a".repeat(32), VersionStages: ["AWSCURRENT"], SecretString: JSON.stringify({ value: "c41ca96ab047dd25", unrelated: "never copied" }) };
 const secretMetadata = { ARN: secretArn, VersionIdsToStages: { [response.VersionId]: ["AWSCURRENT"] } };
+
+test("resolver AWS SDK dependencies resolve from a clean install of its backend dependency tree", { timeout: 180_000 }, (t) => {
+  const root = path.resolve(".");
+  const sourceBackend = path.join(root, "backend");
+  const resolver = fs.readFileSync(path.join(root, "scripts/aws/resolve-production-qr-version-selector.mjs"), "utf8");
+  assert.match(resolver, /createRequire\(path\.join\(root, "backend\/package\.json"\)\)/);
+  const manifest = JSON.parse(fs.readFileSync(path.join(sourceBackend, "package.json"), "utf8"));
+  const lock = JSON.parse(fs.readFileSync(path.join(sourceBackend, "package-lock.json"), "utf8"));
+  const version = "3.1055.0";
+  assert.equal(manifest.dependencies["@aws-sdk/client-ecs"], version);
+  assert.equal(lock.packages[""].dependencies["@aws-sdk/client-ecs"], version);
+  assert.equal(lock.packages["node_modules/@aws-sdk/client-ecs"].version, version);
+
+  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), "qr-selector-backend-clean-install-"));
+  t.after(() => fs.rmSync(temporaryRoot, { recursive: true, force: true }));
+  const cleanBackend = path.join(temporaryRoot, "backend");
+  fs.mkdirSync(cleanBackend);
+  fs.copyFileSync(path.join(sourceBackend, "package.json"), path.join(cleanBackend, "package.json"));
+  fs.copyFileSync(path.join(sourceBackend, "package-lock.json"), path.join(cleanBackend, "package-lock.json"));
+  execFileSync("npm", ["ci", "--prefix", cleanBackend, "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund"], { cwd: temporaryRoot, stdio: "pipe", timeout: 150_000 });
+
+  const requireBackend = createRequire(path.join(cleanBackend, "package.json"));
+  const cleanNodeModules = `${fs.realpathSync(path.join(cleanBackend, "node_modules"))}${path.sep}`;
+  for (const packageName of ["@aws-sdk/client-ecs", "@aws-sdk/client-secrets-manager", "@aws-sdk/client-sts"]) {
+    assert.ok(resolver.includes(`requireBackend("${packageName}")`), `resolver does not load ${packageName} from the canonical backend dependency tree`);
+    const resolved = requireBackend.resolve(packageName);
+    assert.ok(resolved.startsWith(cleanNodeModules), `${packageName} resolved outside the clean backend install: ${resolved}`);
+  }
+  assert.equal(typeof requireBackend("@aws-sdk/client-ecs").ECSClient, "function");
+  assert.equal(typeof requireBackend("@aws-sdk/client-secrets-manager").SecretsManagerClient, "function");
+  assert.equal(typeof requireBackend("@aws-sdk/client-sts").STSClient, "function");
+});
 
 test("canonical JWT identity and QR selected-value semantics stay distinct", () => {
   const resolved = resolveQrVersionSelectorValue({ response, binding });

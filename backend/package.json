@@ -84,8 +84,9 @@
     "print:agent:uninstall:windows": "powershell -ExecutionPolicy Bypass -File local-print-agent/install/windows/uninstall-startup-task.ps1"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1055.0",
+    "@aws-sdk/client-ecs": "3.1055.0",
     "@aws-sdk/client-kms": "3.1055.0",
+    "@aws-sdk/client-s3": "^3.1055.0",
     "@aws-sdk/client-secrets-manager": "3.1055.0",
     "@aws-sdk/client-sts": "3.1055.0",
     "@aws-sdk/credential-provider-ini": "3.972.44",
