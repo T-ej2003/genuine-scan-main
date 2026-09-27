@@ -67,6 +67,7 @@ test("apply remains unreachable unless the exact temporary policy is still activ
   const source = fs.readFileSync("scripts/aws/reconcile-production-signer-temporary-capability.mjs", "utf8");
   assert.match(source, /arn:aws:iam::\$\{C\.accountId\}:user\/mscqr-production-bootstrap-operator/);
   assert.match(source, /\["plan", "verify-plan", "apply", "verify-convergence"\]\.includes\(phase\).*current\.active\.VersionId !== evidence\.temporaryVersionId/);
+  assert.match(source, /"init", "-input=false", "-lockfile=readonly"/);
   assert.match(source, /"--policy-arns", `arn=\$\{C\.sourcePolicyArn\}`/);
   assert.match(source, /createAssumedRoleSessionEnvironment\(\{ credentials \}\)/);
   assert.match(source, /workspace", "show"\].*, env: sessionEnv/);

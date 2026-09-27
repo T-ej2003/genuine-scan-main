@@ -33,6 +33,9 @@ mutation.
   `mscqr-production-bootstrap-operator` IAM user. The controller assumes the
   release-deployer role with only the temporary signer policy as its STS
   session policy; the release role trust enforces MFA.
+- The signer `init` phase uses the committed provider lock in read-only mode;
+  if the locked provider cannot satisfy the root, stop before planning and
+  update the lock through reviewed source first.
 - Confirm the approved change reference for the separate Terraform apply.
 - Keep the saved plan, Terraform state export, and evidence file in private
   directories with mode `0700`; files must be mode `0600`.

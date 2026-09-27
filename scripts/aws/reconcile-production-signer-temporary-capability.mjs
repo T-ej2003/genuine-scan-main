@@ -194,7 +194,7 @@ export function runSignerTemporaryCapability(argv = process.argv.slice(2), { wri
   if (phase === "init") {
     const terraformRoot = path.join(root, C.root);
     const previousUmask = process.umask(0o077);
-    try { execFileSync("terraform", [`-chdir=${terraformRoot}`, "init", "-input=false", `-backend-config=bucket=${C.bucket}`, `-backend-config=key=${C.stateKey}`, `-backend-config=region=${C.region}`, "-backend-config=encrypt=true", "-backend-config=use_lockfile=true"], { cwd: root, env: terraformSessionEnvironment(session), stdio: "ignore" }); }
+    try { execFileSync("terraform", [`-chdir=${terraformRoot}`, "init", "-input=false", "-lockfile=readonly", `-backend-config=bucket=${C.bucket}`, `-backend-config=key=${C.stateKey}`, `-backend-config=region=${C.region}`, "-backend-config=encrypt=true", "-backend-config=use_lockfile=true"], { cwd: root, env: terraformSessionEnvironment(session), stdio: "ignore" }); }
     finally { process.umask(previousUmask); }
     assertInitializedSignerBackend(session);
     write(`${JSON.stringify({ state: "BACKEND_INITIALIZED", accountId: C.accountId, region: C.region, stateKey: C.stateKey })}\n`); return evidence;
