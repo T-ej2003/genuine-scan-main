@@ -200,7 +200,8 @@ export function auditLiveProductionDualSlotReferences({ run, resources, database
   const deploymentTaskDefinitionCoverage = deployments.map(({ id, status, taskDefinition }) => ({ id, status, taskDefinitionArn: taskDefinition, representedByLiveServiceTask: liveServiceTaskDefinitionArns.includes(taskDefinition) }));
   if (qrVersionResolution) {
     if (service.taskDefinition !== qrVersionResolution.taskDefinitionArn) throw new Error("QR version resolution does not bind the current production service task definition.");
-    assertQrVersionResolutionCurrent({ taskDefinition: definitionsByArn.get(service.taskDefinition), resolution: qrVersionResolution, secretMetadata: awsJson(run, ["describe-secret", "--secret-id", qrVersionResolution.secretArn, "--output", "json", "--no-cli-pager"]) });
+    const secretMetadata = JSON.parse(run(["secretsmanager", "describe-secret", "--secret-id", qrVersionResolution.secretArn, "--output", "json", "--no-cli-pager"]));
+    assertQrVersionResolutionCurrent({ taskDefinition: definitionsByArn.get(service.taskDefinition), resolution: qrVersionResolution, secretMetadata });
   }
   const liveLegacyBaselines = liveServiceTaskDefinitionArns.map((taskDefinitionArn) => ({ taskDefinitionArn, legacy: deriveLegacyRotationBaseline(definitionsByArn.get(taskDefinitionArn), { qrVersionResolution, allowEquivalentQrSelector: Boolean(qrVersionResolution && taskDefinitionArn !== qrVersionResolution.taskDefinitionArn) }) }));
   const uniqueLegacyBaselines = [...new Map(liveLegacyBaselines.map(({ legacy }) => [canonicalSha256(legacy), legacy])).entries()].sort(([left], [right]) => left.localeCompare(right)).map(([identitySha256, legacy]) => ({ identitySha256, legacy }));
@@ -325,15 +326,15 @@ async function resolveCliQrVersionResolution({ args, sourceSha, run }) {
     if (args.has("qr-version-secret-arn")) throw new Error("QR version resolution run ID is required with its exact secret binding.");
     return undefined;
   }
-  const service = awsJson(run, ["ecs", "describe-services", "--cluster", CLUSTER, "--services", SERVICE]).services?.[0];
+  const service = awsJson(run, ["describe-services", "--cluster", CLUSTER, "--services", SERVICE]).services?.[0];
   if (!service?.taskDefinition) throw new Error("Current production ECS service topology is unavailable.");
-  const taskDefinition = awsJson(run, ["ecs", "describe-task-definition", "--task-definition", service.taskDefinition, "--include", "TAGS"]);
+  const taskDefinition = awsJson(run, ["describe-task-definition", "--task-definition", service.taskDefinition, "--include", "TAGS"]);
   const binding = taskDefinition.taskDefinition?.containerDefinitions?.find(({ name }) => name === "backend")?.secrets?.find(({ name }) => name === "QR_SIGN_ACTIVE_KEY_VERSION");
   if (!binding) throw new Error("QR version resolution was supplied without a live QR selector.");
   let expectedSecretArn;
   try { expectedSecretArn = parseEcsSecretsManagerReference(binding.valueFrom).resource; } catch { throw new Error("Current QR active-version selector is malformed."); }
   if (required(args, "qr-version-secret-arn") !== expectedSecretArn) throw new Error("QR version authorization secret does not match the live ECS selector.");
-  const secretMetadata = awsJson(run, ["secretsmanager", "describe-secret", "--secret-id", expectedSecretArn]);
+  const secretMetadata = JSON.parse(run(["secretsmanager", "describe-secret", "--secret-id", expectedSecretArn, "--output", "json", "--no-cli-pager"]));
   return resolveQrVersionResolutionArtifact({ workflowRunId: required(args, "qr-version-resolution-run-id"), sourceSha, changeTicket: required(args, "change-ticket"), expectedSecretArn, taskDefinition, secretMetadata, token: readGitHubApiToken() });
 }
 

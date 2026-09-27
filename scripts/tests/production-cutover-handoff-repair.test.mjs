@@ -25,6 +25,7 @@ import { assertApprovedStaleRotationSupersessionAuthorization, assertStaleRotati
 import { createStaleRotationReadOnlySecretsManagerSender, createStaleRotationSecretsManagerSender, runCli as runStaleSupersessionCli } from "../aws/supersede-production-stale-rotation.mjs";
 import { runCli as runStaleSupersessionAuthorizationCli } from "../aws/authorize-production-stale-rotation-supersession.mjs";
 import { buildStageBImagePublicationIdentity, publicationIdentitySha256 } from "../aws/stage-b-image-publication-identity.mjs";
+import { assertQrVersionSelector } from "../aws/production-qr-version-selector-resolution.mjs";
 
 const sourceSha = "8".repeat(40);
 const staleSourceSha = "e".repeat(40);
@@ -1318,6 +1319,31 @@ test("every stale supersession retains schema-v3 origin verification when legacy
     const context = { config, sm: { send: sender.send }, identity: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/fixture", clock: () => Date.parse("2026-09-07T00:00:00.000Z"), proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === sourceSha && descendantSha === sourceSha, values: new Map([["state-file", path.join(directory, "state.json")], ["fixture-file", path.join(directory, "fixture.json")]]) };
     await prepare(context);
     assert.equal(readCurrentState(context).phase, "overlap-deploy-required");
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("stale supersession receives the authenticated QR selector resolution instead of treating its ARN as a version", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-supersession-qr-selector-resolution-"));
+  const store = rotationStore();
+  const taskDefinition = structuredClone(staleTaskDefinition);
+  const runtimeVersion = store.get(currentNames.qrPublic).value.keyVersion;
+  store.get(INITIAL_DUAL_SLOT_NAMES.qrCurrentVersion).value.value = runtimeVersion;
+  const qrVersionSecretArn = arn("mscqr/prod/rotation/qr-current-version");
+  const backend = taskDefinition.taskDefinition.containerDefinitions[0];
+  taskDefinition.taskDefinition.taskDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:47";
+  backend.environment = backend.environment.filter(({ name }) => name !== "QR_SIGN_ACTIVE_KEY_VERSION");
+  backend.secrets.push({ name: "QR_SIGN_ACTIVE_KEY_VERSION", valueFrom: `${qrVersionSecretArn}:value::` });
+  const selector = assertQrVersionSelector({ taskDefinition, expectedSecretArn: qrVersionSecretArn });
+  const qrVersionResolution = { ...selector, versionId: "d".repeat(32), qrCurrentVersion: runtimeVersion };
+  const sender = rotationSender(store);
+  try {
+    await assert.rejects(() => supersedeStalePendingRotation({ send: sender.send, ...supersessionArgs({ taskDefinition, mode: "prepare" }), outputFile: path.join(directory, "missing-resolution.json"), repositoryRoot: process.cwd() }), /QR active key version is invalid/);
+    assert.equal(sender.writes, 0);
+    const result = await supersedeStalePendingRotation({ send: sender.send, ...supersessionArgs({ taskDefinition, mode: "prepare" }), qrVersionResolution, outputFile: path.join(directory, "resolved.json"), repositoryRoot: process.cwd() });
+    assert.equal(result.writes, 0);
+    assert.equal(result.predecessor.current.qrPublic.keyVersion, runtimeVersion);
+    assert.equal(sender.writes, 0);
+    assert.equal(sender.updates, 0);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 

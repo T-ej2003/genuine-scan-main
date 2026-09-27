@@ -1074,18 +1074,24 @@ test("QR resolution for the current revision also audits older revisions only wh
   const currentTaskDefinition = definition(currentDefinition);
   const binding = assertQrVersionSelector({ taskDefinition: currentTaskDefinition, expectedSecretArn: qrArn });
   const qrVersionResolution = resolveQrVersionSelectorValue({ binding, response: { ARN: qrArn, VersionId: "a".repeat(32), VersionStages: ["AWSCURRENT"], SecretString: JSON.stringify({ value: "legacy-v1" }) } });
-  const auditFor = (olderQrArn = qrArn) => auditLiveProductionDualSlotReferences({ resources, qrVersionResolution, run: (args) => {
+  const auditFor = (olderQrArn = qrArn) => {
+    const calls = [];
+    const audit = auditLiveProductionDualSlotReferences({ resources, qrVersionResolution, run: (args) => {
+    calls.push(args);
     if (args[1] === "describe-services") return JSON.stringify({ services: [{ serviceArn: "arn:aws:ecs:eu-west-2:368992683803:service/mscqr", taskDefinition: currentDefinition, desiredCount: 2, runningCount: 2, pendingCount: 0, deployments: [{ id: "primary", status: "PRIMARY", taskDefinition: currentDefinition }, { id: "active", status: "ACTIVE", taskDefinition: replacementDefinition }], deploymentController: { type: "ECS" } }] });
     if (args[1] === "list-tasks") return JSON.stringify({ taskArns: [currentTask, replacementTask] });
     if (args[1] === "describe-tasks") return JSON.stringify({ tasks: [{ taskArn: currentTask, taskDefinitionArn: currentDefinition, desiredStatus: "RUNNING", lastStatus: "RUNNING" }, { taskArn: replacementTask, taskDefinitionArn: replacementDefinition, desiredStatus: "STOPPED", lastStatus: "RUNNING" }] });
     if (args[1] === "describe-task-definition") return JSON.stringify(args[args.indexOf("--task-definition") + 1] === currentDefinition ? currentTaskDefinition : definition(replacementDefinition, olderQrArn));
     if (args[1] === "describe-secret") return JSON.stringify({ ARN: qrArn, VersionIdsToStages: { ["a".repeat(32)]: ["AWSCURRENT"] } });
     throw new Error(`unexpected ${args.join(" ")}`);
-  } });
-  const sameSelector = auditFor();
+    } });
+    return { audit, calls };
+  };
+  const { audit: sameSelector, calls } = auditFor();
   assert.equal(sameSelector.status, "PASS");
   assert.equal(sameSelector.liveLegacyBaselineCount, 1);
   assert.equal(sameSelector.legacy.qrCurrentVersion, "legacy-v1");
+  assert.deepEqual(calls.find((args) => args[1] === "describe-secret").slice(0, 2), ["secretsmanager", "describe-secret"]);
   assert.throws(() => auditFor(otherQrArn), /selector|resolution/i);
 });
 

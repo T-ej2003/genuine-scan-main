@@ -567,7 +567,7 @@ function readExistingSupersessionEvidence({ outputFile, repositoryRoot, sourceSh
   return { evidence: checked, sha256: sha256(bytes) };
 }
 
-export async function supersedeStalePendingRotation({ send, taskDefinition, sourceSha, staleSourceSha, rotationId, staleRotationId, outputFile, repositoryRoot = process.cwd(), proveDescendant, mode, authorizeWritePlan } = {}) {
+export async function supersedeStalePendingRotation({ send, taskDefinition, qrVersionResolution, sourceSha, staleSourceSha, rotationId, staleRotationId, outputFile, repositoryRoot = process.cwd(), proveDescendant, mode, authorizeWritePlan } = {}) {
   if (typeof send !== "function") throw new Error("Stale rotation supersession Secrets Manager sender is required.");
   if (!["prepare", "execute"].includes(mode)) throw new Error("Stale rotation supersession requires an explicit prepare or execute mode.");
   if (!SHA40.test(sourceSha || "") || !SHA40.test(staleSourceSha || "") || !ROTATION_ID.test(rotationId || "") || !ROTATION_ID.test(staleRotationId || "")) throw new Error("Stale rotation supersession identity is invalid.");
@@ -657,7 +657,7 @@ export async function supersedeStalePendingRotation({ send, taskDefinition, sour
   }
   if (existingEvidence && canonical(existingEvidence.evidence.predecessorSlotIdentities) !== canonical(slotIdentities)) throw new Error("Existing stale rotation supersession predecessor evidence does not match live state.");
   const supersessionEvidenceIdentitySha256 = productionSupersessionEvidenceIdentity({ sourceSha, staleSourceSha, rotationId, staleRotationId, resources: expectedEvidenceResources, predecessorSlotIdentities: slotIdentities });
-  const { baseline, predecessor } = await authenticateSupersessionPredecessor({ send, taskDefinition, sourceSha, staleSourceSha, rotationId, staleRotationId, supersessionEvidenceIdentitySha256, slotIdentities });
+  const { baseline, predecessor } = await authenticateSupersessionPredecessor({ send, taskDefinition, qrVersionResolution, sourceSha, staleSourceSha, rotationId, staleRotationId, supersessionEvidenceIdentitySha256, slotIdentities });
   if (logicalPredecessors.qrCurrentVersion.material.value !== baseline.qrCurrentVersion) throw new Error("Stale QR current key-version marker does not match the authenticated runtime baseline.");
   if (existingEvidence && !allNew) throw new Error("Existing stale rotation supersession evidence conflicts with a non-converged secret topology.");
   ensureStageBPrivateDirectory({ directory: path.dirname(path.resolve(outputFile)), repositoryRoot, create: true, label: "Stale rotation supersession transaction directory" });
