@@ -1,10 +1,11 @@
 # Initial-activation reconciler installation contract
 
 `PRODUCTION_INITIAL_ACTIVATION_POLICY_RECONCILER_INSTALLATION` installs only
-the six resources owned by
+the fourteen resources owned by
 `infra/aws/terraform/production-initial-activation-policy-reconciler`: the
-reconciler role/policy/attachment and the dedicated mixed-recovery
-role/policy/attachment.
+reconciler, mixed-recovery executor, bootstrap-operator policy authorizer, and
+successor evidence-reader role/policy/attachment groups, plus the signer policy
+installer role and inline policy.
 
 Preparation remains a read-only local-root operation. It authenticates protected
 main, the exact backend and workspace, Terraform state, live IAM predecessor,
@@ -36,9 +37,15 @@ with zero apply. An ambiguous apply is never retried; exact post-state and the
 canonical live verifier must both authenticate before completion evidence is
 written. Unexpected or partial ambiguous outcomes fail closed.
 
+Predecessor discovery carries every observed canonical Terraform address into
+preparation, including the signer policy-installer role and inline policy. A
+role-only signer prefix is resumable; during the evidence-reader expansion,
+already-created signer resources must be plan no-ops and only missing resources
+may be created. Mixed evidence-reader attachment states remain fail-closed.
+
 For the reviewed exact legacy-to-dedicated-role expansion, completion additionally requires remote
 Terraform state to advance from the authenticated predecessor and to contain
-all six exact resource attributes from the authorized saved
+all fourteen exact resource attributes from the authorized saved
 plan, including the target ARN and canonical desired policy document. Live IAM convergence with
 the predecessor still in Terraform state is classified as
 `LIVE_DESIRED_TERRAFORM_STATE_STALE`; it is not completion and never triggers a

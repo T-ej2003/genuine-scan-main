@@ -38,6 +38,25 @@ export const EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE = "EXACT_EV
 export const EVIDENCE_READER_ADDRESSES = Object.freeze(INSTALLATION.expectedAddresses.filter((address) => address.endsWith(".broker_recovery_successor_evidence_reader")));
 export const EVIDENCE_READER_EXPANSION_CHANGES = Object.freeze([...EVIDENCE_READER_ADDRESSES, "aws_iam_policy.bootstrap_operator_policy_authorizer", "aws_iam_role.signer_policy_installer", "aws_iam_role_policy.signer_policy_installer"].sort());
 
+export function assertInstallationEvidenceReaderExpansion(semantics) {
+  const byAddress = new Map(semantics.resourceChanges.map((change) => [change.address, canonicalJson(change.actions)]));
+  const signerRole = "aws_iam_role.signer_policy_installer";
+  const signerPolicy = "aws_iam_role_policy.signer_policy_installer";
+  const roleAction = byAddress.get(signerRole);
+  const policyAction = byAddress.get(signerPolicy);
+  if (![canonicalJson(["create"]), canonicalJson(["no-op"])].includes(roleAction)
+    || ![canonicalJson(["create"]), canonicalJson(["no-op"])].includes(policyAction)
+    || roleAction === canonicalJson(["create"]) && policyAction === canonicalJson(["no-op"])) return false;
+  const changed = [...EVIDENCE_READER_ADDRESSES, "aws_iam_policy.bootstrap_operator_policy_authorizer",
+    ...(roleAction === canonicalJson(["create"]) ? [signerRole] : []),
+    ...(policyAction === canonicalJson(["create"]) ? [signerPolicy] : [])].sort();
+  return semantics.updateCount === 1
+    && semantics.changedAddresses.includes("aws_iam_policy.bootstrap_operator_policy_authorizer")
+    && canonicalJson(semantics.changedAddresses) === canonicalJson(changed)
+    && semantics.createCount === changed.length - 1
+    && semantics.noOpCount === INSTALLATION.expectedAddresses.length - changed.length;
+}
+
 const SHA256 = /^[a-f0-9]{64}$/;
 const SHA40 = /^[a-f0-9]{40}$/;
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
@@ -500,7 +519,7 @@ export function createInstallationPreparation({ sourceSha, state, livePredecesso
     || livePredecessor === "EXACT_TRUST_UPDATE" && (semantics.createCount !== 0 || semantics.updateCount !== 1 || semantics.changedAddresses[0] !== "aws_iam_role.mixed_recovery" || semantics.noOpCount !== INSTALLATION.expectedAddresses.length - 1)
     || livePredecessor === "EXACT_AUTHORIZER_TRUST_UPDATE" && (semantics.createCount !== 0 || semantics.updateCount !== 1 || semantics.changedAddresses[0] !== "aws_iam_role.bootstrap_operator_policy_authorizer" || semantics.noOpCount !== INSTALLATION.expectedAddresses.length - 1)
     || livePredecessor === "EXACT_AUTHORIZER_POLICY_UPDATE" && (semantics.createCount !== 0 || semantics.updateCount !== 1 || semantics.changedAddresses[0] !== "aws_iam_policy.bootstrap_operator_policy_authorizer" || semantics.noOpCount !== INSTALLATION.expectedAddresses.length - 1)
-    || livePredecessor === EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE && (semantics.createCount !== 5 || semantics.updateCount !== 1 || canonicalJson(semantics.changedAddresses) !== canonicalJson(EVIDENCE_READER_EXPANSION_CHANGES) || semantics.noOpCount !== INSTALLATION.expectedAddresses.length - 6)
+    || livePredecessor === EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE && !assertInstallationEvidenceReaderExpansion(semantics)
     || livePredecessor === "EXACT_EXPANSION" && (semantics.createCount < 1 || semantics.createCount > 11 || semantics.updateCount > 1 || semantics.updateCount === 1 && !semantics.changedAddresses.includes("aws_iam_policy.reconciler") || semantics.noOpCount !== INSTALLATION.expectedAddresses.length - semantics.createCount - semantics.updateCount)
     || livePredecessor === "EXACT_COMPLETE" && (semantics.createCount !== 0 || semantics.updateCount !== 0 || semantics.noOpCount !== INSTALLATION.expectedAddresses.length)
     || JSON.stringify(livePredecessorAddresses) !== JSON.stringify(["EXACT_UPDATE", "EXACT_TRUST_UPDATE", "EXACT_AUTHORIZER_TRUST_UPDATE", "EXACT_AUTHORIZER_POLICY_UPDATE"].includes(livePredecessor) ? [...INSTALLATION.expectedAddresses].sort() : ["EXACT_EXPANSION", EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE].includes(livePredecessor) ? planPredecessorAddresses : semantics.noOpAddresses)) throw new Error("Installation plan does not match the authenticated live predecessor.");
@@ -543,7 +562,7 @@ export function assertInstallationPreparation(value, { sourceSha, planBytes } = 
     || value.livePredecessor === "EXACT_TRUST_UPDATE" && (value.planSemantics.updateCount !== 1 || value.planSemantics.changedAddresses[0] !== "aws_iam_role.mixed_recovery")
     || value.livePredecessor === "EXACT_AUTHORIZER_TRUST_UPDATE" && (value.planSemantics.updateCount !== 1 || value.planSemantics.changedAddresses[0] !== "aws_iam_role.bootstrap_operator_policy_authorizer")
     || value.livePredecessor === "EXACT_AUTHORIZER_POLICY_UPDATE" && (value.planSemantics.updateCount !== 1 || value.planSemantics.changedAddresses[0] !== "aws_iam_policy.bootstrap_operator_policy_authorizer")
-    || value.livePredecessor === EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE && (value.planSemantics.createCount !== 5 || value.planSemantics.updateCount !== 1 || canonicalJson(value.planSemantics.changedAddresses) !== canonicalJson(EVIDENCE_READER_EXPANSION_CHANGES))
+    || value.livePredecessor === EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE && !assertInstallationEvidenceReaderExpansion(value.planSemantics)
     || value.livePredecessor === "EXACT_EXPANSION" && (value.planSemantics.createCount < 1 || value.planSemantics.createCount > 11 || value.planSemantics.updateCount > 1 || value.planSemantics.updateCount === 1 && !value.planSemantics.changedAddresses.includes("aws_iam_policy.reconciler"))
     || value.livePredecessor === "EXACT_COMPLETE" && value.planSemantics.resourceChangeCount !== 0) throw new Error("Installation preparation plan semantics are not exact.");
   return value;

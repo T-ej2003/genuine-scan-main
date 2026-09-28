@@ -6,7 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { PRODUCTION_ENVIRONMENT_APPROVAL, createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
 import { createProductionGithubCommandRunner } from "../aws/production-credential-source-contract.mjs";
-import { EVIDENCE_READER_EXPANSION_CHANGES, EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, INSTALLATION, INSTALLATION_BACKEND, assertInstallationAuthorization, assertInstallationAuthorizedPostState, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationPreparation, assertInstallationStateResources, bootstrapOperatorPolicyAuthorizerPermissionsPredecessor, bootstrapOperatorPolicyAuthorizerPermissionsPredecessors, classifyInstallationStatePullError, createInstallationAuthorization, createInstallationPreparation, installationPermissionsPredecessor, stateIdentity } from "../aws/production-initial-activation-reconciler-installation-contract.mjs";
+import { EVIDENCE_READER_ADDRESSES, EVIDENCE_READER_EXPANSION_CHANGES, EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, INSTALLATION, INSTALLATION_BACKEND, assertInstallationAuthorization, assertInstallationAuthorizedPostState, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationPreparation, assertInstallationStateResources, bootstrapOperatorPolicyAuthorizerPermissionsPredecessor, bootstrapOperatorPolicyAuthorizerPermissionsPredecessors, classifyInstallationStatePullError, createInstallationAuthorization, createInstallationPreparation, installationPermissionsPredecessor, stateIdentity } from "../aws/production-initial-activation-reconciler-installation-contract.mjs";
 import { executeInstallation, runInstallCli } from "../aws/install-production-initial-activation-reconciler.mjs";
 import { discoverInstallationPredecessor, runPrepareCli } from "../aws/prepare-production-initial-activation-reconciler-installation.mjs";
 import { BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER, BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER, INITIAL_ACTIVATION_RECONCILER, MIXED_RECOVERY_EXECUTOR } from "../aws/verify-production-initial-activation-policy-reconciler.mjs";
@@ -237,6 +237,70 @@ test("late partial discovery includes already-created signer installer resources
   assert.equal(result.classification, "EXACT_PARTIAL");
   for (const address of ["aws_iam_role.signer_policy_installer", "aws_iam_role_policy.signer_policy_installer", "aws_iam_role.mixed_recovery", "aws_iam_policy.mixed_recovery"]) {
     assert.ok(result.existingAddresses.includes(address), `${address} remains in the discovered Terraform predecessor`);
+  }
+});
+
+test("signer installer prefixes agree across discovery, preparation, and recovery plans", () => {
+  const absentReaderAndOldPolicy = { authorizerDocument: bootstrapOperatorPolicyAuthorizerPermissionsPredecessor(), readerRole: false, readerPolicy: false };
+  for (const [label, signerInstallerRole, signerInstallerPolicy, present] of [
+    ["no signer resources", false, false, []],
+    ["signer role only", true, false, ["aws_iam_role.signer_policy_installer"]],
+    ["complete signer resources", true, true, ["aws_iam_role.signer_policy_installer", "aws_iam_role_policy.signer_policy_installer"]],
+  ]) {
+    const result = discoverInstallationPredecessor({ run: discoveryRun({ ...absentReaderAndOldPolicy, signerInstallerRole, signerInstallerPolicy }) });
+    assert.deepEqual(discoverInstallationPredecessor({ run: discoveryRun({ ...absentReaderAndOldPolicy, signerInstallerRole, signerInstallerPolicy }) }), result, `${label} retry discovery`);
+    assert.equal(result.classification, EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, label);
+    const candidate = structuredClone(liveEvidenceReaderExpansionPlan);
+    for (const address of present) {
+      const change = candidate.resource_changes.find((entry) => entry.address === address).change;
+      change.after = structuredClone(completePlan.resource_changes.find((entry) => entry.address === address).change.after);
+      change.actions = ["no-op"];
+      change.before = structuredClone(change.after);
+    }
+    const discoveryAddresses = [...result.existingAddresses].sort();
+    const stateValue = JSON.parse(liveEvidenceReaderPredecessorState);
+    stateValue.resources = stateValue.resources.filter((resource) => present.includes(`aws_${resource.type}.${resource.name}`) || !resource.name.includes("signer_policy_installer"));
+    const stateBytes = Buffer.from(JSON.stringify(stateValue));
+    const prepared = createInstallationPreparation({ sourceSha, state: stateIdentity(stateBytes), livePredecessor: result.classification, livePredecessorAddresses: discoveryAddresses, planJson: candidate, planBytes, preparedAt: now.toISOString() });
+    assert.equal(createInstallationPreparation({ sourceSha, state: stateIdentity(stateBytes), livePredecessor: result.classification, livePredecessorAddresses: discoveryAddresses, planJson: candidate, planBytes, preparedAt: now.toISOString() }).preparationArtifactSha256, prepared.preparationArtifactSha256, `${label} retry preparation`);
+    assert.deepEqual(prepared.planSemantics.resourceChanges.filter(({ actions }) => JSON.stringify(actions) !== JSON.stringify(["create"])).map(({ address }) => address).sort(), discoveryAddresses, label);
+    assert.ok(prepared.planSemantics.changedAddresses.every((address) => address === "aws_iam_policy.bootstrap_operator_policy_authorizer" || EVIDENCE_READER_ADDRESSES.includes(address) || !present.includes(address)), label);
+  }
+  const readerAndSignerRoleOnly = discoverInstallationPredecessor({ run: discoveryRun({ signerInstallerPolicy: false }) });
+  assert.equal(readerAndSignerRoleOnly.classification, "EXACT_EXPANSION");
+  const expansionPlan = structuredClone(completePlan);
+  const signerPolicyChange = expansionPlan.resource_changes.find(({ address }) => address === "aws_iam_role_policy.signer_policy_installer").change;
+  signerPolicyChange.actions = ["create"];
+  signerPolicyChange.before = null;
+  const signerRoleChange = expansionPlan.resource_changes.find(({ address }) => address === "aws_iam_role.signer_policy_installer").change;
+  signerRoleChange.actions = ["no-op"];
+  signerRoleChange.before = structuredClone(signerRoleChange.after);
+  const signerRoleOnlyState = JSON.parse(installedState);
+  signerRoleOnlyState.resources = signerRoleOnlyState.resources.filter((resource) => !(resource.type === "aws_iam_role_policy" && resource.name === "signer_policy_installer"));
+  const expandedPreparation = createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(JSON.stringify(signerRoleOnlyState))), livePredecessor: readerAndSignerRoleOnly.classification, livePredecessorAddresses: readerAndSignerRoleOnly.existingAddresses, planJson: expansionPlan, planBytes, preparedAt: now.toISOString() });
+  assert.equal(expandedPreparation.planSemantics.createCount, 1);
+  assert.deepEqual(expandedPreparation.planSemantics.resourceChanges.filter(({ actions }) => JSON.stringify(actions) !== JSON.stringify(["create"])).map(({ address }) => address).sort(), [...readerAndSignerRoleOnly.existingAddresses].sort());
+});
+
+test("mixed signer and incomplete evidence-reader topology fails closed without dropping discoveries", () => {
+  for (const topology of [
+    { readerRole: true, readerPolicy: false, readerAttached: [] },
+    { readerRole: false, readerPolicy: true, readerEntities: [{ PolicyRoles: [], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }] },
+    { readerRole: true, readerPolicy: true, readerAttached: [], readerEntities: [{ PolicyRoles: [], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }] },
+  ]) {
+    const result = discoverInstallationPredecessor({ run: discoveryRun({ ...topology, signerInstallerRole: true, signerInstallerPolicy: true }) });
+    assert.equal(result.classification, "UNEXPECTED");
+    assert.ok(result.existingAddresses.includes("aws_iam_role.signer_policy_installer"));
+    assert.ok(result.existingAddresses.includes("aws_iam_role_policy.signer_policy_installer"));
+  }
+  for (const topology of [
+    { authorizerRole: true, authorizerPolicy: false, authorizerAttached: [] },
+    { authorizerRole: false, authorizerPolicy: true, authorizerEntities: [{ PolicyRoles: [], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }] },
+  ]) {
+    const result = discoverInstallationPredecessor({ run: discoveryRun({ ...topology, signerInstallerRole: true, signerInstallerPolicy: true }) });
+    assert.equal(result.classification, "EXACT_EXPANSION");
+    assert.ok(result.existingAddresses.includes("aws_iam_role.signer_policy_installer"));
+    assert.ok(result.existingAddresses.includes("aws_iam_role_policy.signer_policy_installer"));
   }
 });
 
@@ -841,7 +905,7 @@ test("captured live predecessor expands exactly the absent evidence reader and a
   assert.equal(liveEvidenceReaderPredecessor.protectedMainSha, "81c631ca6a92fd470615b064d99132b55eef2748");
   assert.equal(liveEvidenceReaderPredecessor.bootstrapPolicyProvenanceSha, "49cf9d6314cdb599b602a913eaa724a5189dfefb");
   assert.deepEqual(liveEvidenceReaderPredecessor.evidenceReader, { roleExists: false, policyExists: false, attachmentExists: false });
-  assert.deepEqual(discoverInstallationPredecessor({ run: discoveryRun({ authorizerDocument: authorizerPolicyPredecessor, readerRole: false, readerPolicy: false }) }), { classification: EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, existingAddresses: expectedAddresses });
+  assert.deepEqual(discoverInstallationPredecessor({ run: discoveryRun({ authorizerDocument: authorizerPolicyPredecessor, readerRole: false, readerPolicy: false, signerInstallerRole: false, signerInstallerPolicy: false }) }), { classification: EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, existingAddresses: expectedAddresses });
   const semantics = assertInstallationPlan(liveEvidenceReaderExpansionPlan, { livePredecessor: EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE });
   assert.equal(semantics.createCount, 5);
   assert.equal(semantics.updateCount, 1);

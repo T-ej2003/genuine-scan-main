@@ -172,7 +172,8 @@ export function discoverInstallationPredecessor({ run, expectedCallerArn } = {})
   const authorizerEntities = authorizerPolicy ? readPolicyEntities(run, BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.policyArn) : { roles: [], users: [], groups: [] };
   const authorizerComplete = Boolean(authorizerRole && authorizerPolicy) && Array.isArray(authorizerAttached) && authorizerAttached.length === 1 && authorizerAttached[0]?.PolicyArn === BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.policyArn && Array.isArray(authorizerInline) && authorizerInline.length === 0 && authorizerEntities.roles.length === 1 && authorizerEntities.roles[0]?.RoleName === BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.roleName && authorizerEntities.users.length === 0 && authorizerEntities.groups.length === 0;
   const authorizerUnattached = Array.isArray(authorizerAttached) && authorizerAttached.length === 0 && Array.isArray(authorizerInline) && authorizerInline.length === 0 && authorizerEntities.roles.length === 0 && authorizerEntities.users.length === 0 && authorizerEntities.groups.length === 0;
-  if (!authorizerComplete && !authorizerUnattached || authorizerRoleNeedsTrustUpdate && (!role || !policy || policyNeedsUpdate || !mixedComplete || mixedRoleNeedsTrustUpdate || !authorizerComplete)) return predecessor("UNEXPECTED", existingAddresses);
+  if (!authorizerComplete && !authorizerUnattached
+    || authorizerRoleNeedsTrustUpdate && (!role || !policy || policyNeedsUpdate || !mixedComplete || mixedRoleNeedsTrustUpdate || !authorizerComplete)) return predecessor("UNEXPECTED", existingAddresses);
   if ([policyNeedsUpdate, mixedRoleNeedsTrustUpdate, authorizerRoleNeedsTrustUpdate, authorizerPolicyNeedsUpdate].filter(Boolean).length > 1) return predecessor("UNEXPECTED", existingAddresses);
   const authorizerAddresses = [authorizerRole && "aws_iam_role.bootstrap_operator_policy_authorizer", authorizerPolicy && "aws_iam_policy.bootstrap_operator_policy_authorizer", authorizerComplete && "aws_iam_role_policy_attachment.bootstrap_operator_policy_authorizer"].filter(Boolean);
   const evidenceReaderAttached = evidenceReaderRole ? runJson(run, ["iam", "list-attached-role-policies", "--role-name", BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER.roleName]).AttachedPolicies : [];
@@ -213,11 +214,13 @@ export function discoverInstallationPredecessor({ run, expectedCallerArn } = {})
   if (reconcilerUnattached) return predecessor("EXACT_PARTIAL", [...existingAddresses, ...mixedAddresses, ...authorizerAddresses, ...evidenceReaderAddresses, ...signerInstallerAddresses].filter((value, index, values) => values.indexOf(value) === index));
   if (!mixedRole && !mixedPolicy) return predecessor("EXACT_EXPANSION", [...reconcilerAddresses, ...authorizerAddresses, ...evidenceReaderAddresses, ...signerInstallerAddresses].sort());
   if (mixedComplete) {
-    if (authorizerRoleNeedsTrustUpdate) return predecessor("EXACT_AUTHORIZER_TRUST_UPDATE", [...INSTALLATION.expectedAddresses]);
+  if (authorizerRoleNeedsTrustUpdate) return evidenceReaderComplete && signerInstallerRole && signerInstallerPolicy
+    ? predecessor("EXACT_AUTHORIZER_TRUST_UPDATE", [...INSTALLATION.expectedAddresses]) : predecessor("UNEXPECTED", existingAddresses);
     if (authorizerPolicyNeedsUpdate) return evidenceReaderAbsent && authorizerComplete
-      ? predecessor(EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, [...reconcilerAddresses, ...mixedAddresses, ...authorizerAddresses].sort())
-      : evidenceReaderComplete && authorizerComplete ? predecessor("EXACT_AUTHORIZER_POLICY_UPDATE", [...INSTALLATION.expectedAddresses]) : predecessor("UNEXPECTED", existingAddresses);
-    if (mixedRoleNeedsTrustUpdate) return predecessor("EXACT_TRUST_UPDATE", [...INSTALLATION.expectedAddresses]);
+      ? predecessor(EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, [...reconcilerAddresses, ...mixedAddresses, ...authorizerAddresses, ...signerInstallerAddresses].sort())
+      : evidenceReaderComplete && authorizerComplete && signerInstallerRole && signerInstallerPolicy ? predecessor("EXACT_AUTHORIZER_POLICY_UPDATE", [...INSTALLATION.expectedAddresses]) : predecessor("UNEXPECTED", existingAddresses);
+    if (mixedRoleNeedsTrustUpdate) return evidenceReaderComplete && signerInstallerRole && signerInstallerPolicy
+      ? predecessor("EXACT_TRUST_UPDATE", [...INSTALLATION.expectedAddresses]) : predecessor("UNEXPECTED", existingAddresses);
     if (!authorizerComplete || !evidenceReaderComplete || !signerInstallerRole || !signerInstallerPolicy) return predecessor("EXACT_EXPANSION", [...reconcilerAddresses, ...mixedAddresses, ...authorizerAddresses, ...evidenceReaderAddresses, ...signerInstallerAddresses].sort());
     verifyInitialActivationPolicyReconciler({ run, ...(expectedCallerArn ? { expectedCallerArn } : {}) }); return predecessor("EXACT_COMPLETE", INSTALLATION.expectedAddresses);
   }
