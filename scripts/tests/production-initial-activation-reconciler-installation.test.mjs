@@ -238,6 +238,11 @@ test("late partial discovery includes already-created signer installer resources
   for (const address of ["aws_iam_role.signer_policy_installer", "aws_iam_role_policy.signer_policy_installer", "aws_iam_role.mixed_recovery", "aws_iam_policy.mixed_recovery"]) {
     assert.ok(result.existingAddresses.includes(address), `${address} remains in the discovered Terraform predecessor`);
   }
+  const finalPartial = discoverInstallationPredecessor({ run: discoveryRun({ mixedRole: true, mixedPolicy: false, mixedAttached: [] }) });
+  assert.equal(finalPartial.classification, "EXACT_PARTIAL");
+  for (const address of ["aws_iam_role.signer_policy_installer", "aws_iam_role_policy.signer_policy_installer"]) {
+    assert.ok(finalPartial.existingAddresses.includes(address), `${address} is retained in final EXACT_PARTIAL recovery`);
+  }
 });
 
 test("signer installer prefixes agree across discovery, preparation, and recovery plans", () => {
@@ -1124,7 +1129,7 @@ test("canonical signer Terraform PutRolePolicy is allowed only for its exact rol
   const terraform = fs.readFileSync("infra/aws/terraform/production-initial-activation-policy-reconciler/main.tf", "utf8");
   const exactRoleArn = "arn:aws:iam::368992683803:role/mscqr-production-signer-policy-installer";
   const matchingAllows = policy.Statement.filter(({ Effect, Action }) => Effect === "Allow" && (Array.isArray(Action) ? Action : [Action]).includes("iam:PutRolePolicy"));
-  assert.equal(terraform.includes('role   = aws_iam_role.signer_policy_installer.id'), true, "the canonical Terraform inline policy targets the installer role");
+  assert.equal(terraform.includes('role   = aws_iam_role.signer_policy_installer.name'), true, "the canonical Terraform inline policy targets the installer role by name");
   assert.equal(matchingAllows.length, 1);
   assert.equal(matchingAllows[0].Resource, exactRoleArn);
   assert.equal(Object.hasOwn(matchingAllows[0], "Condition"), false, "PutRolePolicy has no unsupported condition key");

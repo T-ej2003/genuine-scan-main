@@ -182,12 +182,16 @@ test("INSTALLING recovery identifies only the active canonical temporary version
   const versions = [{ VersionId: "v1", document: steady }, { VersionId: "v2", document: temporary }];
   const pending = buildSignerCapabilityEvidence({ state: "INSTALLING", ...identity, steadyVersionId: "v1", observedAt: "2026-09-27T00:00:00.000Z" });
   assert.equal(resolveSignerTemporaryVersionId({ versions, activeVersionId: "v2", evidence: pending, steadyPolicy: steady, identity }), "v2");
+  assert.throws(() => assertSignerRevocation({ activePolicy: temporary, temporaryPolicy: temporary, activeVersionId: "v2", temporaryVersionId: "v2", steadyPolicy: steady, identity }), /steady-state policy is not active/);
+  assert.equal(assertSignerRevocation({ activePolicy: steady, temporaryPolicy: temporary, activeVersionId: "v1", temporaryVersionId: "v2", steadyPolicy: steady, identity }), true, "revocation readback confirms the retained marker is no longer active");
   assert.equal(resolveSignerTemporaryVersionId({ versions, activeVersionId: "v1", evidence: pending, steadyPolicy: steady, identity }), "v2", "recover a completed revocation from its retained non-default marker");
   assert.equal(resolveSignerTemporaryVersionId({ versions: [versions[0]], activeVersionId: "v1", evidence: pending, steadyPolicy: steady, identity }), null);
   assert.equal(resolveSignerTemporaryVersionId({ versions, activeVersionId: "v2", evidence: { ...pending, state: "INSTALLED" }, steadyPolicy: steady, identity }), null);
   assert.throws(() => resolveSignerTemporaryVersionId({ versions: [{ VersionId: "v2", document: { ...temporary, Statement: [] } }], activeVersionId: "v2", evidence: { ...pending, temporaryVersionId: "v2" }, steadyPolicy: steady, identity }));
   const source = fs.readFileSync("scripts/aws/reconcile-production-signer-temporary-capability.mjs", "utf8");
   assert.match(source, /resolveSignerTemporaryVersionId\(\{ versions: current\.versions, activeVersionId: current\.active\.VersionId, evidence, steadyPolicy, identity \}\)/);
+  assert.match(source, /const abortable = \["INSTALLING", "INSTALLED", "PLAN_GENERATED", "PLAN_REVIEWED"\]/);
+  assert.match(source, /writePolicyVersion\(undefined, steadyPolicy, temporaryVersionId, env\)/);
   assert.match(source, /state: "REVOKED", steadyVersionId: current\.active\.VersionId, temporaryVersionId/);
   const workflow = fs.readFileSync(".github/workflows/production-signer-policy-transition-operation.yml", "utf8");
   assert.ok(workflow.indexOf("Prepare and durably record canonical install transition") < workflow.indexOf("Preserve pending install recovery evidence before policy mutation"));

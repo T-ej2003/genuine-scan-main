@@ -132,6 +132,6 @@ resource "aws_iam_role" "signer_policy_installer" {
 
 resource "aws_iam_role_policy" "signer_policy_installer" {
   name   = "ProductionSignerPolicyInstaller"
-  role   = aws_iam_role.signer_policy_installer.id
+  role   = aws_iam_role.signer_policy_installer.name
   policy = file("${path.module}/signer-policy-installer-permissions-policy.json")
 }

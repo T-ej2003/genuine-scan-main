@@ -224,7 +224,7 @@ export function discoverInstallationPredecessor({ run, expectedCallerArn } = {})
     if (!authorizerComplete || !evidenceReaderComplete || !signerInstallerRole || !signerInstallerPolicy) return predecessor("EXACT_EXPANSION", [...reconcilerAddresses, ...mixedAddresses, ...authorizerAddresses, ...evidenceReaderAddresses, ...signerInstallerAddresses].sort());
     verifyInitialActivationPolicyReconciler({ run, ...(expectedCallerArn ? { expectedCallerArn } : {}) }); return predecessor("EXACT_COMPLETE", INSTALLATION.expectedAddresses);
   }
-  return predecessor("EXACT_PARTIAL", [...existingAddresses, ...reconcilerAddresses, "aws_iam_role_policy_attachment.reconciler", ...authorizerAddresses, ...evidenceReaderAddresses].filter((value, index, values) => values.indexOf(value) === index));
+  return predecessor("EXACT_PARTIAL", [...existingAddresses, ...reconcilerAddresses, "aws_iam_role_policy_attachment.reconciler", ...authorizerAddresses, ...evidenceReaderAddresses, ...signerInstallerAddresses].filter((value, index, values) => values.indexOf(value) === index));
 }
 
 function terraformPlan({ terraformDataDir, outputDir, profile, exec = execFileSync, parentEnvironment = process.env } = {}) {
