@@ -1,0 +1,36 @@
+name: Production signer policy transition
+
+on:
+  workflow_dispatch:
+    inputs:
+      phase:
+        description: Canonical signer policy transition phase
+        required: true
+        type: choice
+        options: [policy-install, policy-recover, policy-revoke]
+      source_sha:
+        description: Exact protected main SHA
+        required: true
+        type: string
+      transition_source_sha:
+        description: Original signer transition source SHA (same as source_sha for install)
+        required: true
+        type: string
+      transition_id:
+        description: One-time transition nonce
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+
+jobs:
+  transition:
+    uses: ./.github/workflows/production-signer-policy-transition-operation.yml
+    with:
+      phase: ${{ inputs.phase }}
+      source_sha: ${{ inputs.source_sha }}
+      transition_source_sha: ${{ inputs.transition_source_sha }}
+      transition_id: ${{ inputs.transition_id }}

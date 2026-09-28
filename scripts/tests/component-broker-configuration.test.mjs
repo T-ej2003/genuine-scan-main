@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { brokerConfiguration, assertBrokerConfiguration, assertBrokerEntryPoint, brokerPolicySuccessorEntryPoints, brokerRecoverySuccessorEntryPoints, redactBrokerDiagnostic } from "../aws/component-broker-configuration.mjs";
+import { brokerConfiguration, assertBrokerConfiguration, assertBrokerEntryPoint, brokerPolicySuccessorEntryPoints, brokerRecoverySuccessorEntryPoints, brokerSignerSuccessorEntryPoints, redactBrokerDiagnostic } from "../aws/component-broker-configuration.mjs";
 import { componentBrokerArn } from "../aws/component-installation-identity-contract.mjs";
 import { installationIdentity } from "../aws/component-iam-installation-contract.mjs";
 
@@ -76,4 +76,11 @@ test("successor package routes install, cleanup and authorization only through i
 test("recovery successor package routes Terraform only through immutable version 10", () => {
   assert.equal(assertBrokerEntryPoint({ functionVersion: "10", invokedFunctionArn: `${componentBrokerArn}:10` }, "TERRAFORM_CONTEXT", brokerRecoverySuccessorEntryPoints), "10");
   for (const version of ["7", "8", "9", "11", "12"]) assert.throws(() => assertBrokerEntryPoint({ functionVersion: version, invokedFunctionArn: `${componentBrokerArn}:${version}` }, "TERRAFORM_CONTEXT", brokerRecoverySuccessorEntryPoints));
+});
+test("signer successor routes fixed signer operations only through immutable versions 13-15", () => {
+  for (const [operation, version] of Object.entries({ SIGNER_PROVE_INSTALL_SESSION: "13", SIGNER_INSTALL: "13", SIGNER_ADVANCE: "13", SIGNER_RECOVERY: "13", SIGNER_PROVE_REVOKE_SESSION: "14", SIGNER_REVOKE: "14", SIGNER_AUTHORIZE: "15" })) {
+    const context = { functionVersion: version, invokedFunctionArn: `${componentBrokerArn}:${version}` };
+    assert.equal(assertBrokerEntryPoint(context, operation, brokerSignerSuccessorEntryPoints), version);
+    for (const wrong of ["10", "11", "12", "$LATEST"]) assert.throws(() => assertBrokerEntryPoint({ functionVersion: wrong, invokedFunctionArn: `${componentBrokerArn}:${wrong}` }, operation, brokerSignerSuccessorEntryPoints));
+  }
 });

@@ -20,16 +20,18 @@
     "aws_iam_role_policy_attachment.bootstrap_operator_policy_authorizer",
     "aws_iam_role.broker_recovery_successor_evidence_reader",
     "aws_iam_policy.broker_recovery_successor_evidence_reader",
-    "aws_iam_role_policy_attachment.broker_recovery_successor_evidence_reader"
+    "aws_iam_role_policy_attachment.broker_recovery_successor_evidence_reader",
+    "aws_iam_role.signer_policy_installer",
+    "aws_iam_role_policy.signer_policy_installer"
   ],
   "maxAwsMutations": {
-    "iam:CreateRole": 4,
+    "iam:CreateRole": 5,
     "iam:CreatePolicy": 4,
     "iam:AttachRolePolicy": 4,
     "iam:UpdateAssumeRolePolicy": 1,
-    "iam:PutRolePolicy": 0,
+    "iam:PutRolePolicy": 1,
     "iam:CreatePolicyVersion": 2
   },
-  "replay": "exact-complete-live-topology-is-zero-apply; the exact prior mixed-recovery trust has one source-bound trust-only update; exact legacy reconciler topology expands only by the dedicated mixed-recovery and bootstrap-operator policy-authorizer roles, policies, and attachments; five-version or unexpected state fails closed",
-  "postcondition": "canonical-read-only verification passes for the reconciler, dedicated mixed-recovery executor, and bootstrap-operator policy authorizer"
+  "replay": "exact-complete live topology is zero apply; supported authenticated partial topology resumes only missing resources; five-version or unexpected state fails closed; the signer transition OIDC role can publish only canonical broker authorization to immutable broker version 15 and has no IAM policy-version mutation authority",
+  "postcondition": "canonical-read-only verification passes for the reconciler, mixed-recovery executor, bootstrap-operator policy authorizer, evidence reader, and signer broker authorization publisher"
 }

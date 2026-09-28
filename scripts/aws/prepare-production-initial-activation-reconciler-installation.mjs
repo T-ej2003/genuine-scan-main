@@ -5,6 +5,8 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { canonicalJson } from "./production-green-stage-b-contract.mjs";
+import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 import { createProductionAwsCommandRunner, createProductionAwsCredentialEnvironment, createProductionGithubCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { readMixedDualSlotRecoveryGithubEnvironmentGuard } from "./production-mixed-dual-slot-recovery-contract.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, ensureStageBPrivateFile, readStageBPrivateFileBytes, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
@@ -16,6 +18,9 @@ const required = (argv, name) => { const index = argv.indexOf(name); const value
 const option = (argv, name) => { const index = argv.indexOf(name); return index < 0 ? undefined : argv[index + 1]; };
 const runJson = (run, args) => JSON.parse(run([...args, "--output", "json", "--no-cli-pager"]));
 const noSuchEntity = (error) => /\bNoSuchEntity(?:Exception)?\b/.test(`${error?.stderr || ""} ${error?.message || ""}`);
+const SIGNER_INSTALLER_ROLE = "mscqr-production-signer-policy-installer";
+const SIGNER_INSTALLER_POLICY = "ProductionSignerPolicyInstaller";
+const SIGNER_INSTALLER_ROLE_ARN = "arn:aws:iam::368992683803:role/mscqr-production-signer-policy-installer";
 
 function readReservedPolicies(run, policyName = INITIAL_ACTIVATION_RECONCILER.policyName) {
   const policies = [];
@@ -63,6 +68,8 @@ export function discoverInstallationPredecessor({ run, expectedCallerArn } = {})
   let authorizerPolicy;
   let evidenceReaderRole;
   let evidenceReaderPolicy;
+  let signerInstallerRole;
+  let signerInstallerPolicy;
   try { role = runJson(run, ["iam", "get-role", "--role-name", INSTALLATION.roleArn.split("/").at(-1)]).Role; } catch (error) { if (!noSuchEntity(error)) throw error; }
   try { policy = runJson(run, ["iam", "get-policy", "--policy-arn", INSTALLATION.policyArn]).Policy; } catch (error) { if (!noSuchEntity(error)) throw error; }
   try { mixedRole = runJson(run, ["iam", "get-role", "--role-name", MIXED_RECOVERY_EXECUTOR.roleName]).Role; } catch (error) { if (!noSuchEntity(error)) throw error; }
@@ -71,16 +78,39 @@ export function discoverInstallationPredecessor({ run, expectedCallerArn } = {})
   try { authorizerPolicy = runJson(run, ["iam", "get-policy", "--policy-arn", BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.policyArn]).Policy; } catch (error) { if (!noSuchEntity(error)) throw error; }
   try { evidenceReaderRole = runJson(run, ["iam", "get-role", "--role-name", BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER.roleName]).Role; } catch (error) { if (!noSuchEntity(error)) throw error; }
   try { evidenceReaderPolicy = runJson(run, ["iam", "get-policy", "--policy-arn", BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER.policyArn]).Policy; } catch (error) { if (!noSuchEntity(error)) throw error; }
+  try { signerInstallerRole = runJson(run, ["iam", "get-role", "--role-name", SIGNER_INSTALLER_ROLE]).Role; } catch (error) { if (!noSuchEntity(error)) throw error; }
+  if (signerInstallerRole) {
+    try { signerInstallerPolicy = runJson(run, ["iam", "get-role-policy", "--role-name", SIGNER_INSTALLER_ROLE, "--policy-name", SIGNER_INSTALLER_POLICY]); }
+    catch (error) { if (!noSuchEntity(error)) throw error; }
+  }
   const reservedPolicies = readReservedPolicies(run);
   const reservedMixedPolicies = readReservedPolicies(run, MIXED_RECOVERY_EXECUTOR.policyName);
   const reservedAuthorizerPolicies = readReservedPolicies(run, BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.policyName);
   const reservedEvidenceReaderPolicies = readReservedPolicies(run, BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER.policyName);
-  const existingAddresses = [role && "aws_iam_role.reconciler", policy && "aws_iam_policy.reconciler", mixedRole && "aws_iam_role.mixed_recovery", mixedPolicy && "aws_iam_policy.mixed_recovery", authorizerRole && "aws_iam_role.bootstrap_operator_policy_authorizer", authorizerPolicy && "aws_iam_policy.bootstrap_operator_policy_authorizer", evidenceReaderRole && "aws_iam_role.broker_recovery_successor_evidence_reader", evidenceReaderPolicy && "aws_iam_policy.broker_recovery_successor_evidence_reader"].filter(Boolean);
+  const existingAddresses = [role && "aws_iam_role.reconciler", policy && "aws_iam_policy.reconciler", mixedRole && "aws_iam_role.mixed_recovery", mixedPolicy && "aws_iam_policy.mixed_recovery", authorizerRole && "aws_iam_role.bootstrap_operator_policy_authorizer", authorizerPolicy && "aws_iam_policy.bootstrap_operator_policy_authorizer", evidenceReaderRole && "aws_iam_role.broker_recovery_successor_evidence_reader", evidenceReaderPolicy && "aws_iam_policy.broker_recovery_successor_evidence_reader", signerInstallerRole && "aws_iam_role.signer_policy_installer", signerInstallerPolicy && "aws_iam_role_policy.signer_policy_installer"].filter(Boolean);
   if (reservedPolicies.length !== (policy ? 1 : 0) || policy && reservedPolicies[0]?.Arn !== INSTALLATION.policyArn) return predecessor("UNEXPECTED", existingAddresses);
   if (reservedMixedPolicies.length !== (mixedPolicy ? 1 : 0) || mixedPolicy && reservedMixedPolicies[0]?.Arn !== INSTALLATION.mixedRecoveryPolicyArn) return predecessor("UNEXPECTED", existingAddresses);
   if (reservedAuthorizerPolicies.length !== (authorizerPolicy ? 1 : 0) || authorizerPolicy && reservedAuthorizerPolicies[0]?.Arn !== INSTALLATION.bootstrapOperatorPolicyAuthorizerPolicyArn) return predecessor("UNEXPECTED", existingAddresses);
   if (reservedEvidenceReaderPolicies.length !== (evidenceReaderPolicy ? 1 : 0) || evidenceReaderPolicy && reservedEvidenceReaderPolicies[0]?.Arn !== INSTALLATION.brokerRecoverySuccessorEvidenceReaderPolicyArn) return predecessor("UNEXPECTED", existingAddresses);
-  if (!role && !policy && !mixedRole && !mixedPolicy && !authorizerRole && !authorizerPolicy && !evidenceReaderRole && !evidenceReaderPolicy) return predecessor("ABSENT");
+  if (!role && !policy && !mixedRole && !mixedPolicy && !authorizerRole && !authorizerPolicy && !evidenceReaderRole && !evidenceReaderPolicy && !signerInstallerRole) return predecessor("ABSENT");
+  let signerInstallerExact = !signerInstallerRole && !signerInstallerPolicy;
+  if (signerInstallerRole) {
+    try {
+      const expectedTrust = JSON.parse(fs.readFileSync(path.join(root, `${INSTALLATION.terraformRoot}/signer-policy-installer-trust-policy.json`), "utf8"));
+      const expectedPermissions = JSON.parse(fs.readFileSync(path.join(root, `${INSTALLATION.terraformRoot}/signer-policy-installer-permissions-policy.json`), "utf8"));
+      const trust = normalizeIamPolicyDocument(signerInstallerRole.AssumeRolePolicyDocument, "Signer installer trust policy");
+      const tags = signerInstallerRole.Tags || [];
+      signerInstallerExact = signerInstallerRole.Arn === SIGNER_INSTALLER_ROLE_ARN && signerInstallerRole.RoleName === SIGNER_INSTALLER_ROLE && signerInstallerRole.Path === "/" && signerInstallerRole.Description === "Protected GitHub OIDC publisher for canonical signer broker authorization only." && signerInstallerRole.MaxSessionDuration === 3600 && !Object.hasOwn(signerInstallerRole, "PermissionsBoundary") && Array.isArray(tags) && tags.length === 0 && canonicalJson(trust) === canonicalJson(expectedTrust);
+      const attached = runJson(run, ["iam", "list-attached-role-policies", "--role-name", SIGNER_INSTALLER_ROLE]).AttachedPolicies;
+      const inlineNames = runJson(run, ["iam", "list-role-policies", "--role-name", SIGNER_INSTALLER_ROLE]).PolicyNames;
+      if (!Array.isArray(attached) || attached.length !== 0 || !Array.isArray(inlineNames) || inlineNames.some((name) => name !== SIGNER_INSTALLER_POLICY) || inlineNames.length !== (signerInstallerPolicy ? 1 : 0)) signerInstallerExact = false;
+      if (signerInstallerPolicy) {
+        const permissions = normalizeIamPolicyDocument(signerInstallerPolicy.PolicyDocument, "Signer installer permissions policy");
+        signerInstallerExact &&= signerInstallerPolicy.RoleName === SIGNER_INSTALLER_ROLE && signerInstallerPolicy.PolicyName === SIGNER_INSTALLER_POLICY && canonicalJson(permissions) === canonicalJson(expectedPermissions);
+      }
+      if (!signerInstallerExact) return predecessor("UNEXPECTED", existingAddresses);
+    } catch { return predecessor("UNEXPECTED", existingAddresses); }
+  } else if (signerInstallerPolicy) return predecessor("UNEXPECTED", existingAddresses);
   let roleExact = !role;
   if (role) try { assertInitialActivationReconcilerRoleMetadata(role); roleExact = true; } catch { roleExact = false; }
   let policyExact = !policy;
@@ -142,7 +172,8 @@ export function discoverInstallationPredecessor({ run, expectedCallerArn } = {})
   const authorizerEntities = authorizerPolicy ? readPolicyEntities(run, BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.policyArn) : { roles: [], users: [], groups: [] };
   const authorizerComplete = Boolean(authorizerRole && authorizerPolicy) && Array.isArray(authorizerAttached) && authorizerAttached.length === 1 && authorizerAttached[0]?.PolicyArn === BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.policyArn && Array.isArray(authorizerInline) && authorizerInline.length === 0 && authorizerEntities.roles.length === 1 && authorizerEntities.roles[0]?.RoleName === BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.roleName && authorizerEntities.users.length === 0 && authorizerEntities.groups.length === 0;
   const authorizerUnattached = Array.isArray(authorizerAttached) && authorizerAttached.length === 0 && Array.isArray(authorizerInline) && authorizerInline.length === 0 && authorizerEntities.roles.length === 0 && authorizerEntities.users.length === 0 && authorizerEntities.groups.length === 0;
-  if (!authorizerComplete && !authorizerUnattached || authorizerRoleNeedsTrustUpdate && (!role || !policy || policyNeedsUpdate || !mixedComplete || mixedRoleNeedsTrustUpdate || !authorizerComplete)) return predecessor("UNEXPECTED", existingAddresses);
+  if (!authorizerComplete && !authorizerUnattached
+    || authorizerRoleNeedsTrustUpdate && (!role || !policy || policyNeedsUpdate || !mixedComplete || mixedRoleNeedsTrustUpdate || !authorizerComplete)) return predecessor("UNEXPECTED", existingAddresses);
   if ([policyNeedsUpdate, mixedRoleNeedsTrustUpdate, authorizerRoleNeedsTrustUpdate, authorizerPolicyNeedsUpdate].filter(Boolean).length > 1) return predecessor("UNEXPECTED", existingAddresses);
   const authorizerAddresses = [authorizerRole && "aws_iam_role.bootstrap_operator_policy_authorizer", authorizerPolicy && "aws_iam_policy.bootstrap_operator_policy_authorizer", authorizerComplete && "aws_iam_role_policy_attachment.bootstrap_operator_policy_authorizer"].filter(Boolean);
   const evidenceReaderAttached = evidenceReaderRole ? runJson(run, ["iam", "list-attached-role-policies", "--role-name", BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER.roleName]).AttachedPolicies : [];
@@ -152,6 +183,7 @@ export function discoverInstallationPredecessor({ run, expectedCallerArn } = {})
   const evidenceReaderAbsent = !evidenceReaderRole && !evidenceReaderPolicy;
   if (!evidenceReaderComplete && !evidenceReaderAbsent) return predecessor("UNEXPECTED", existingAddresses);
   const evidenceReaderAddresses = [evidenceReaderRole && "aws_iam_role.broker_recovery_successor_evidence_reader", evidenceReaderPolicy && "aws_iam_policy.broker_recovery_successor_evidence_reader", evidenceReaderComplete && "aws_iam_role_policy_attachment.broker_recovery_successor_evidence_reader"].filter(Boolean);
+  const signerInstallerAddresses = [signerInstallerRole && "aws_iam_role.signer_policy_installer", signerInstallerPolicy && "aws_iam_role_policy.signer_policy_installer"].filter(Boolean);
   if (!role || !policy) {
     if (role) {
       const attached = runJson(run, ["iam", "list-attached-role-policies", "--role-name", INSTALLATION.roleArn.split("/").at(-1)]).AttachedPolicies;
@@ -162,14 +194,14 @@ export function discoverInstallationPredecessor({ run, expectedCallerArn } = {})
       const entities = readPolicyEntities(run);
       if (entities.roles.length !== 0 || entities.users.length !== 0 || entities.groups.length !== 0) return predecessor("UNEXPECTED", existingAddresses);
     }
-    return predecessor("EXACT_PARTIAL", [...existingAddresses, ...mixedAddresses, ...authorizerAddresses, ...evidenceReaderAddresses].filter((value, index, values) => values.indexOf(value) === index));
+    return predecessor("EXACT_PARTIAL", [...existingAddresses, ...mixedAddresses, ...authorizerAddresses, ...evidenceReaderAddresses, ...signerInstallerAddresses].filter((value, index, values) => values.indexOf(value) === index));
   }
   if (policyNeedsUpdate) {
     const attached = runJson(run, ["iam", "list-attached-role-policies", "--role-name", INSTALLATION.roleArn.split("/").at(-1)]).AttachedPolicies;
     const inline = runJson(run, ["iam", "list-role-policies", "--role-name", INSTALLATION.roleArn.split("/").at(-1)]).PolicyNames;
     const entities = readPolicyEntities(run);
     if (!Array.isArray(attached) || attached.length !== 1 || attached[0]?.PolicyArn !== INSTALLATION.policyArn || !Array.isArray(inline) || inline.length !== 0 || entities.users.length || entities.groups.length || entities.roles.length !== 1 || entities.roles[0]?.RoleName !== INSTALLATION.roleArn.split("/").at(-1)) return predecessor("UNEXPECTED", existingAddresses);
-    const expansionAddresses = ["aws_iam_policy.reconciler", "aws_iam_role.reconciler", "aws_iam_role_policy_attachment.reconciler", ...mixedAddresses, ...authorizerAddresses, ...evidenceReaderAddresses].sort();
+    const expansionAddresses = ["aws_iam_policy.reconciler", "aws_iam_role.reconciler", "aws_iam_role_policy_attachment.reconciler", ...mixedAddresses, ...authorizerAddresses, ...evidenceReaderAddresses, ...signerInstallerAddresses].sort();
     return predecessor(expansionAddresses.length === INSTALLATION.expectedAddresses.length ? "EXACT_UPDATE" : "EXACT_EXPANSION", expansionAddresses);
   }
   const attached = runJson(run, ["iam", "list-attached-role-policies", "--role-name", INSTALLATION.roleArn.split("/").at(-1)]).AttachedPolicies;
@@ -179,18 +211,20 @@ export function discoverInstallationPredecessor({ run, expectedCallerArn } = {})
   const reconcilerUnattached = Array.isArray(attached) && attached.length === 0 && Array.isArray(inline) && inline.length === 0 && entities.users.length === 0 && entities.groups.length === 0 && entities.roles.length === 0;
   if (!reconcilerComplete && !reconcilerUnattached) return predecessor("UNEXPECTED", existingAddresses);
   const reconcilerAddresses = ["aws_iam_policy.reconciler", "aws_iam_role.reconciler", "aws_iam_role_policy_attachment.reconciler"];
-  if (reconcilerUnattached) return predecessor("EXACT_PARTIAL", [...existingAddresses, ...mixedAddresses, ...authorizerAddresses, ...evidenceReaderAddresses].filter((value, index, values) => values.indexOf(value) === index));
-  if (!mixedRole && !mixedPolicy) return predecessor("EXACT_EXPANSION", [...reconcilerAddresses, ...authorizerAddresses, ...evidenceReaderAddresses].sort());
+  if (reconcilerUnattached) return predecessor("EXACT_PARTIAL", [...existingAddresses, ...mixedAddresses, ...authorizerAddresses, ...evidenceReaderAddresses, ...signerInstallerAddresses].filter((value, index, values) => values.indexOf(value) === index));
+  if (!mixedRole && !mixedPolicy) return predecessor("EXACT_EXPANSION", [...reconcilerAddresses, ...authorizerAddresses, ...evidenceReaderAddresses, ...signerInstallerAddresses].sort());
   if (mixedComplete) {
-    if (authorizerRoleNeedsTrustUpdate) return predecessor("EXACT_AUTHORIZER_TRUST_UPDATE", [...INSTALLATION.expectedAddresses]);
+  if (authorizerRoleNeedsTrustUpdate) return evidenceReaderComplete && signerInstallerRole && signerInstallerPolicy
+    ? predecessor("EXACT_AUTHORIZER_TRUST_UPDATE", [...INSTALLATION.expectedAddresses]) : predecessor("UNEXPECTED", existingAddresses);
     if (authorizerPolicyNeedsUpdate) return evidenceReaderAbsent && authorizerComplete
-      ? predecessor(EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, [...reconcilerAddresses, ...mixedAddresses, ...authorizerAddresses].sort())
-      : evidenceReaderComplete && authorizerComplete ? predecessor("EXACT_AUTHORIZER_POLICY_UPDATE", [...INSTALLATION.expectedAddresses]) : predecessor("UNEXPECTED", existingAddresses);
-    if (mixedRoleNeedsTrustUpdate) return predecessor("EXACT_TRUST_UPDATE", [...INSTALLATION.expectedAddresses]);
-    if (!authorizerComplete || !evidenceReaderComplete) return predecessor("EXACT_EXPANSION", [...reconcilerAddresses, ...mixedAddresses, ...authorizerAddresses, ...evidenceReaderAddresses].sort());
+      ? predecessor(EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, [...reconcilerAddresses, ...mixedAddresses, ...authorizerAddresses, ...signerInstallerAddresses].sort())
+      : evidenceReaderComplete && authorizerComplete && signerInstallerRole && signerInstallerPolicy ? predecessor("EXACT_AUTHORIZER_POLICY_UPDATE", [...INSTALLATION.expectedAddresses]) : predecessor("UNEXPECTED", existingAddresses);
+    if (mixedRoleNeedsTrustUpdate) return evidenceReaderComplete && signerInstallerRole && signerInstallerPolicy
+      ? predecessor("EXACT_TRUST_UPDATE", [...INSTALLATION.expectedAddresses]) : predecessor("UNEXPECTED", existingAddresses);
+    if (!authorizerComplete || !evidenceReaderComplete || !signerInstallerRole || !signerInstallerPolicy) return predecessor("EXACT_EXPANSION", [...reconcilerAddresses, ...mixedAddresses, ...authorizerAddresses, ...evidenceReaderAddresses, ...signerInstallerAddresses].sort());
     verifyInitialActivationPolicyReconciler({ run, ...(expectedCallerArn ? { expectedCallerArn } : {}) }); return predecessor("EXACT_COMPLETE", INSTALLATION.expectedAddresses);
   }
-  return predecessor("EXACT_PARTIAL", [...existingAddresses, ...reconcilerAddresses, "aws_iam_role_policy_attachment.reconciler", ...authorizerAddresses, ...evidenceReaderAddresses].filter((value, index, values) => values.indexOf(value) === index));
+  return predecessor("EXACT_PARTIAL", [...existingAddresses, ...reconcilerAddresses, "aws_iam_role_policy_attachment.reconciler", ...authorizerAddresses, ...evidenceReaderAddresses, ...signerInstallerAddresses].filter((value, index, values) => values.indexOf(value) === index));
 }
 
 function terraformPlan({ terraformDataDir, outputDir, profile, exec = execFileSync, parentEnvironment = process.env } = {}) {

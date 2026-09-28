@@ -7,7 +7,7 @@ import test from "node:test";
 import { persistProductionBackendRecoveryCandidate, prepareProductionBackendRecoveryCandidate } from "../aws/prepare-production-backend-recovery-candidate.mjs";
 import { prepareProductionEcsRuntimeConsumability, prepareProductionEcsRuntimeInventory } from "../aws/prepare-production-ecs-runtime-consumability.mjs";
 import { createAwsCliAdapter, createRuntimePolicyConvergenceAuthorization, planProductionEcsRuntimePolicyConvergence, runCli as convergeRuntimePolicy } from "../aws/converge-production-ecs-runtime-policy.mjs";
-import { RUNTIME_CONSUMABILITY } from "../aws/production-ecs-runtime-consumability.mjs";
+import { RUNTIME_CONSUMABILITY, assertSignedRuntimeDependencyInventory } from "../aws/production-ecs-runtime-consumability.mjs";
 import { assertLegacyBackendRecoveryCandidate } from "../aws/production-backend-health-recovery-contract.mjs";
 import { assertAuthenticatedFailedRecoveryEvidence } from "../aws/production-backend-failed-recovery-evidence.mjs";
 import { prepareProductionBackendFailedRecoveryEvidence } from "../aws/prepare-production-backend-failed-recovery-evidence.mjs";
@@ -34,6 +34,8 @@ const noRepositoryPolicy = () => {
 };
 
 test("real file boundaries support inventory, CAS convergence, post-convergence closure, and recovery candidate consumption", async (context) => {
+  // The signed rehearsal evidence is dated 2026-08-24; keep only this test's clock inside its 35-day validity window.
+  context.mock.timers.enable({ apis: ["Date"], now: new Date("2026-08-24T18:02:00.000Z") });
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-recovery-runtime-rehearsal-")); fs.chmodSync(directory, 0o700);
   context.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const candidateFile = path.join(directory, "candidate.json"); const inventoryFile = path.join(directory, "inventory.json"); const evidenceFile = path.join(directory, "consumability.json"); const authorizationFile = path.join(directory, "convergence-authorization.json"); const failedEvidenceFile = path.join(directory, "failed-recovery-evidence.json"); const failedReferenceFile = path.join(directory, "failed-recovery-evidence-reference.json");
@@ -76,9 +78,23 @@ test("real file boundaries support inventory, CAS convergence, post-convergence 
   const inventoryResult = await prepareProductionEcsRuntimeInventory({ sourceSha, candidateFile, candidateFileSha256: candidateArtifact.candidateFileSha256, outputFile: inventoryFile, run, protectedMain: () => {}, now: "2026-08-24T18:00:00.000Z" });
   assert.equal(simulations, 0, "read-only inventory must not require corrected runtime authority");
   const inventoryEnvelope = JSON.parse(fs.readFileSync(inventoryFile)); const plan = planProductionEcsRuntimePolicyConvergence({ candidate: prepared.candidate, candidateFileSha256: candidateArtifact.candidateFileSha256, runtimeInventory: inventoryEnvelope.inventory, livePolicyDocument: runtimePolicy });
+  assert.equal(hashFile(inventoryFile), inventoryResult.outputSha256, "the consumer receives the exact producer bytes");
+  const verifySigned = ({ digest, signature }) => digest.equals(Buffer.from(inventoryEnvelope.signedBindingSha256, "hex")) && signature.equals(Buffer.from("AQ==", "base64"));
+  const signedContext = { sourceSha, candidate: prepared.candidate, candidateFileSha256: candidateArtifact.candidateFileSha256, verify: verifySigned };
+  assert.equal(assertSignedRuntimeDependencyInventory(inventoryEnvelope, { ...signedContext, now: Date.now() }).inventorySha256, inventoryResult.inventorySha256);
+  assert.throws(() => assertSignedRuntimeDependencyInventory(inventoryEnvelope, { ...signedContext, now: Date.parse(inventoryEnvelope.signedAt) + RUNTIME_CONSUMABILITY.authorizationMaxAgeMs + 1 }), /stale/);
+  assert.throws(() => assertSignedRuntimeDependencyInventory(inventoryEnvelope, { ...signedContext, sourceSha: "f".repeat(40), now: Date.now() }), /stale|tampered/);
+  const wrongSignature = { ...inventoryEnvelope, signatureBase64: "Ag==" };
+  wrongSignature.envelopeSha256 = canonicalSha256(Object.fromEntries(Object.entries(wrongSignature).filter(([key]) => key !== "envelopeSha256")));
+  assert.throws(() => assertSignedRuntimeDependencyInventory(wrongSignature, { ...signedContext, now: Date.now() }), /signature/);
   writeJson(authorizationFile, createRuntimePolicyConvergenceAuthorization({ sourceSha, plan, ticket: "INC-49", approvedBy: "operator", approverRole: "Production Operator", reason: "candidate-derived runtime closure", verificationRef: "https://example.invalid/49" }));
   const convergenceAws = createAwsCliAdapter((_command, args) => args[1] === "put-role-policy" ? (aws(args), "") : JSON.stringify(aws(args)));
-  const convergence = await convergeRuntimePolicy(["--source-sha", sourceSha, "--candidate", candidateFile, "--candidate-file-sha256", candidateArtifact.candidateFileSha256, "--runtime-inventory", inventoryFile, "--runtime-inventory-sha256", inventoryResult.outputSha256, "--authorization", authorizationFile, "--authorization-sha256", hashFile(authorizationFile), "--execute"], { run: convergenceAws, protectedMain: () => {}, verifyInventory: () => true });
+  const convergenceArgs = ["--source-sha", sourceSha, "--candidate", candidateFile, "--candidate-file-sha256", candidateArtifact.candidateFileSha256, "--runtime-inventory", inventoryFile, "--runtime-inventory-sha256", inventoryResult.outputSha256, "--authorization", authorizationFile, "--authorization-sha256", hashFile(authorizationFile), "--execute"];
+  const tamperedInventory = path.join(directory, "tampered-inventory.json"), tamperedBytes = fs.readFileSync(inventoryFile);
+  tamperedBytes[tamperedBytes.length - 1] = 0x20; fs.writeFileSync(tamperedInventory, tamperedBytes, { mode: 0o600 });
+  await assert.rejects(() => convergeRuntimePolicy(convergenceArgs.map(value => value === inventoryFile ? tamperedInventory : value), { run: convergenceAws, protectedMain: () => {}, verifyInventory: verifySigned }), /bytes changed/);
+  assert.equal(writes, 0);
+  const convergence = await convergeRuntimePolicy(convergenceArgs, { run: convergenceAws, protectedMain: () => {}, verifyInventory: verifySigned });
   assert.equal(convergence.applied, true); assert.equal(writes, 1);
 
   const consumability = await prepareProductionEcsRuntimeConsumability({ sourceSha, candidateFile, candidateFileSha256: candidateArtifact.candidateFileSha256, inventoryFile, inventoryFileSha256: inventoryResult.outputSha256, outputFile: evidenceFile, run, protectedMain: () => {}, now: "2026-08-24T18:01:00.000Z" });

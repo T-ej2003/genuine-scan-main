@@ -6,6 +6,7 @@ run-name: Authorize component broker recovery successor ${{ inputs.transition_id
     inputs:
       source_sha: {description: Exact current protected-main SHA containing the reviewed successor, required: true, type: string}
       transition_id: {description: Unique broker recovery successor transition UUID, required: true, type: string}
+      successor: {description: Immutable successor generation to authorize, required: true, type: choice, options: [recovery, signer]}
 
 permissions:
   contents: read
@@ -33,14 +34,30 @@ jobs:
           role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-broker-recovery-successor-evidence-reader
           aws-region: eu-west-2
       - name: Authenticate historical lineage and authorize exact second successor
+        if: inputs.successor == 'recovery'
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ inputs.source_sha }}
           TRANSITION_ID: ${{ inputs.transition_id }}
         run: node scripts/aws/component-broker-recovery-successor-authorization.mjs prepare
+      - name: Authenticate historical lineage and authorize exact signer successor
+        if: inputs.successor == 'signer'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          TRANSITION_ID: ${{ inputs.transition_id }}
+        run: node scripts/aws/component-broker-signer-successor-authorization.mjs prepare
       - uses: actions/upload-artifact@v7
+        if: inputs.successor == 'recovery'
         with:
           name: component-broker-recovery-successor-authorization
           path: ${{ runner.temp }}/component-broker-recovery-successor-authorization.json
+          if-no-files-found: error
+          retention-days: 90
+      - uses: actions/upload-artifact@v7
+        if: inputs.successor == 'signer'
+        with:
+          name: component-broker-signer-successor-authorization
+          path: ${{ runner.temp }}/component-broker-signer-successor-authorization.json
           if-no-files-found: error
           retention-days: 90

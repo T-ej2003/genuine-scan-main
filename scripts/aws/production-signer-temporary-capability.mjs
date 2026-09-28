@@ -6,6 +6,7 @@ export const SIGNER_TEMPORARY_CAPABILITY = Object.freeze({
   root: "infra/aws/terraform/production-security-rebaseline-signer", bucket: "mscqr-production-terraform-state-368992683803-eu-west-2",
   stateKey: "mscqr/production/security-rebaseline/signer/terraform.tfstate", lockKey: "mscqr/production/security-rebaseline/signer/terraform.tfstate.tflock",
   roleName: "mscqr-production-security-rebaseline-image-signer", roleArn: "arn:aws:iam::368992683803:role/mscqr-production-security-rebaseline-image-signer",
+  installerRoleName: "mscqr-production-signer-policy-installer", installerRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-signer-policy-installer",
   inlinePolicyName: "ProductionSecurityRebaselineImageAuthorizationSignOnly", alias: "alias/mscqr-production-security-rebaseline-image-evidence",
   tags: { ManagedBy: "Terraform", Environment: "production", Stack: "production-security-rebaseline-signer", Purpose: "read-only-security-rebaseline-image-authorization" },
 });
@@ -36,6 +37,8 @@ export function signerTemporaryStatements({ sourceSha, transitionId } = {}) {
     { Sid: `TemporarySignerKeyCreate${suffix}`, Effect: "Allow", Action: "kms:CreateKey", Resource: "*", Condition: { StringEquals: { "aws:RequestedRegion": SIGNER_TEMPORARY_CAPABILITY.region, "kms:CallerAccount": SIGNER_TEMPORARY_CAPABILITY.accountId, "kms:KeySpec": "RSA_3072", "kms:KeyUsage": "SIGN_VERIFY", ...tagConditions }, "ForAllValues:StringEquals": { "aws:TagKeys": Object.keys(SIGNER_TEMPORARY_CAPABILITY.tags) }, Bool: { "kms:BypassPolicyLockoutSafetyCheck": "false" } } },
     { Sid: `TemporarySignerKeyTag${suffix}`, Effect: "Allow", Action: "kms:TagResource", Resource: keyArn, Condition: { StringEquals: { "aws:RequestedRegion": SIGNER_TEMPORARY_CAPABILITY.region, "kms:KeySpec": "RSA_3072", "kms:KeyUsage": "SIGN_VERIFY", ...tagConditions }, "ForAllValues:StringEquals": { "aws:TagKeys": Object.keys(SIGNER_TEMPORARY_CAPABILITY.tags) } } },
     { Sid: `TemporarySignerKeyPolicy${suffix}`, Effect: "Allow", Action: ["kms:DescribeKey", "kms:GetKeyPolicy", "kms:GetKeyRotationStatus", "kms:PutKeyPolicy", "kms:ListResourceTags", "kms:ListGrants"], Resource: keyArn, Condition: { StringEquals: { "aws:RequestedRegion": SIGNER_TEMPORARY_CAPABILITY.region, "kms:KeySpec": "RSA_3072", "kms:KeyUsage": "SIGN_VERIFY", ...resourceTagConditions } } },
+    { Sid: `TemporarySignerKeyCensus${suffix}`, Effect: "Allow", Action: "kms:ListResourceTags", Resource: keyArn, Condition: { StringEquals: { "aws:RequestedRegion": SIGNER_TEMPORARY_CAPABILITY.region } } },
+    { Sid: `TemporarySignerKeyList${suffix}`, Effect: "Allow", Action: "kms:ListKeys", Resource: "*", Condition: { StringEquals: { "aws:RequestedRegion": SIGNER_TEMPORARY_CAPABILITY.region } } },
     { Sid: `TemporarySignerAlias${suffix}`, Effect: "Allow", Action: "kms:CreateAlias", Resource: aliasArn, Condition: { StringEquals: { "aws:RequestedRegion": SIGNER_TEMPORARY_CAPABILITY.region } } },
     { Sid: `TemporarySignerAliasKey${suffix}`, Effect: "Allow", Action: "kms:CreateAlias", Resource: keyArn, Condition: { StringEquals: { "aws:RequestedRegion": SIGNER_TEMPORARY_CAPABILITY.region, "kms:KeySpec": "RSA_3072", "kms:KeyUsage": "SIGN_VERIFY", ...resourceTagConditions } } },
     { Sid: `TemporarySignerAliasReadback${suffix}`, Effect: "Allow", Action: "kms:ListAliases", Resource: "*", Condition: { StringEquals: { "aws:RequestedRegion": SIGNER_TEMPORARY_CAPABILITY.region } } },
@@ -78,19 +81,46 @@ export function assertSignerTemporaryPolicy(policy, { steadyPolicy, sourceSha, t
   return true;
 }
 
+export function resolveSignerTemporaryVersionId({ versions, activeVersionId, evidence, steadyPolicy, identity } = {}) {
+  const recoveringInstall = evidence?.temporaryVersionId == null;
+  if (recoveringInstall && evidence?.state !== "INSTALLING") return null;
+  const matches = (version) => {
+    try { assertSignerTemporaryPolicy(version.document, { steadyPolicy, ...identity }); return true; }
+    catch { return false; }
+  };
+  if (!recoveringInstall) {
+    const version = versions?.find(({ VersionId }) => VersionId === evidence.temporaryVersionId);
+    if (!version) return null;
+    assertSignerTemporaryPolicy(version.document, { steadyPolicy, ...identity });
+    return version.VersionId;
+  }
+  const active = versions?.find(({ VersionId }) => VersionId === activeVersionId);
+  if (active && matches(active)) return active.VersionId;
+  const historical = (versions || []).filter(matches);
+  if (historical.length > 1) fail("multiple exact temporary signer policy versions make recovery ambiguous");
+  return historical[0]?.VersionId ?? null;
+}
+
 const expectedAddresses = new Set(["aws_iam_role.signer", "aws_kms_key.image_authorization", "aws_kms_alias.image_authorization", "aws_iam_role_policy.sign_only"]);
-export function assertSignerCreationPlan(plan, { trustPolicy } = {}) {
+export function assertSignerCreationPlan(plan, { trustPolicy, allowPartial = false } = {}) {
   if (!Array.isArray(plan?.resource_changes)) fail("machine-readable Terraform plan is required");
   const priorRoot = plan.prior_state?.values?.root_module;
   const priorResources = (module) => [...(module?.resources || []), ...(module?.child_modules || []).flatMap(priorResources)];
-  if (!plan.prior_state || !priorRoot || (priorRoot.resources !== undefined && !Array.isArray(priorRoot.resources)) || priorResources(priorRoot).length) fail("signer initial convergence requires a valid empty Terraform state");
+  const prior = priorResources(priorRoot);
+  if (!plan.prior_state || !priorRoot || (priorRoot.resources !== undefined && !Array.isArray(priorRoot.resources)) || (!allowPartial && prior.length)
+    || prior.some(({ address }) => !expectedAddresses.has(address)) || new Set(prior.map(({ address }) => address)).size !== prior.length) fail("signer convergence prior state is outside the exact signer root");
   const configured = plan.configuration?.root_module?.resources;
   if (!Array.isArray(configured) || configured.length !== expectedAddresses.size || new Set(configured.map(({ address }) => address)).size !== expectedAddresses.size || configured.some(({ address }) => !expectedAddresses.has(address)) || Object.keys(plan.configuration.root_module.child_modules || {}).length) fail("saved plan configuration is not the exact signer Terraform root");
   const provider = plan.configuration.provider_config?.aws?.expressions;
   if (provider?.region?.constant_value !== SIGNER_TEMPORARY_CAPABILITY.region || !same(provider?.allowed_account_ids?.constant_value, [SIGNER_TEMPORARY_CAPABILITY.accountId])) fail("saved plan provider account or region differs from the signer boundary");
-  const changed = plan.resource_changes.filter(({ change }) => JSON.stringify(change?.actions || []) !== '["no-op"]');
-  if (changed.length !== 4 || new Set(changed.map(({ address }) => address)).size !== 4 || changed.some(({ address, change }) => !expectedAddresses.has(address) || JSON.stringify(change.actions) !== '["create"]')) fail("Terraform plan must create only the four exact signer resources");
-  const change = (address) => changed.find((item) => item.address === address)?.change;
+  const resources = plan.resource_changes;
+  if (resources.length !== 4 || new Set(resources.map(({ address }) => address)).size !== 4 || resources.some(({ address }) => !expectedAddresses.has(address))) fail("Terraform plan must contain only the four exact signer resources");
+  const changed = resources.filter(({ change }) => JSON.stringify(change?.actions || []) !== '["no-op"]');
+  if ((!allowPartial && changed.length !== 4) || (allowPartial && (changed.length < 1 || changed.length > 4)) || changed.some(({ change }) => JSON.stringify(change.actions) !== '["create"]')
+    || changed.some(({ address }) => prior.some(resource => resource.address === address))
+    || resources.filter(({ change }) => JSON.stringify(change?.actions || []) === '["no-op"]').some(({ address }) => !prior.some(resource => resource.address === address))
+    || prior.some(({ address }) => !resources.some(resource => resource.address === address && JSON.stringify(resource.change?.actions || []) === '["no-op"]'))) fail("Terraform plan must create only missing exact signer resources");
+  const change = (address) => resources.find((item) => item.address === address)?.change;
   const roleChange = change("aws_iam_role.signer"), keyChange = change("aws_kms_key.image_authorization"), aliasChange = change("aws_kms_alias.image_authorization"), inlineChange = change("aws_iam_role_policy.sign_only");
   const role = roleChange.after, key = keyChange.after, alias = aliasChange.after, inline = inlineChange.after;
   let trust, keyPolicy, signerPolicy;
@@ -137,9 +167,9 @@ export function assertSignerCapabilityEvidence(value, { state, sourceSha, transi
     || value.stateKey !== SIGNER_TEMPORARY_CAPABILITY.stateKey || value.lockKey !== SIGNER_TEMPORARY_CAPABILITY.lockKey || value.policyArn !== SIGNER_TEMPORARY_CAPABILITY.sourcePolicyArn) fail("evidence is stale, replayed, or outside the exact signer boundary");
   const { evidenceSha256, ...body } = value;
   if (evidenceSha256 !== sha256(canonical(body))) fail("evidence integrity hash is invalid");
-  if (!/^[a-f0-9]{40}$/.test(value.sourceSha) || !/^[A-Za-z0-9._-]{8,128}$/.test(value.transitionId) || !["INSTALLED", "PLAN_GENERATED", "PLAN_REVIEWED", "APPLY_COMPLETED", "CONVERGED", "REVOKED", "ABSENCE_VERIFIED"].includes(value.state)) fail("evidence lifecycle identity or state is invalid");
-  if (["PLAN_GENERATED", "PLAN_REVIEWED", "APPLY_COMPLETED", "CONVERGED"].includes(value.state) && !/^[a-f0-9]{64}$/.test(value.planSha256 || "")) fail("plan-bound evidence is incomplete");
-  if (["PLAN_REVIEWED", "APPLY_COMPLETED", "CONVERGED"].includes(value.state) && !/^[A-Za-z0-9._:/-]{6,160}$/.test(value.approvalReference || "")) fail("separate plan approval reference is missing");
+  if (!/^[a-f0-9]{40}$/.test(value.sourceSha) || !/^[A-Za-z0-9._-]{8,128}$/.test(value.transitionId) || !["INSTALLING", "INSTALLED", "PLAN_GENERATED", "PLAN_REVIEWED", "APPLY_STARTED", "RECOVERY_PLAN_GENERATED", "RECOVERY_PLAN_REVIEWED", "RECOVERY_APPLY_STARTED", "APPLY_COMPLETED", "CONVERGED", "REVOKED", "ABSENCE_VERIFIED"].includes(value.state)) fail("evidence lifecycle identity or state is invalid");
+  if (["PLAN_GENERATED", "PLAN_REVIEWED", "APPLY_STARTED", "RECOVERY_PLAN_GENERATED", "RECOVERY_PLAN_REVIEWED", "RECOVERY_APPLY_STARTED", "APPLY_COMPLETED", "CONVERGED"].includes(value.state) && !/^[a-f0-9]{64}$/.test(value.planSha256 || "")) fail("plan-bound evidence is incomplete");
+  if (["PLAN_REVIEWED", "APPLY_STARTED", "RECOVERY_PLAN_REVIEWED", "RECOVERY_APPLY_STARTED", "APPLY_COMPLETED", "CONVERGED"].includes(value.state) && !/^[A-Za-z0-9._:/-]{6,160}$/.test(value.approvalReference || "")) fail("separate plan approval reference is missing");
   if (value.state === "CONVERGED" && !/^[a-f0-9]{64}$/.test(value.signerReadbackSha256 || "")) fail("signer live readback evidence is missing");
   return true;
 }

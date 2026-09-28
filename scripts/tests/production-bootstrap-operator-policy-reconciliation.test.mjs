@@ -24,6 +24,7 @@ import {
   verifyLegacyBootstrapMfaTransitionBinding,
 } from "../aws/production-bootstrap-operator-policy-reconciliation.mjs";
 import { assertEcsExecOperatorTrustDocument, ECS_EXEC_OPERATOR_BOOTSTRAP_MFA_SERIAL_ARN } from "../aws/production-ecs-exec-operator-contract.mjs";
+import { brokerSignerSuccessorManagedIdentities, identityBootstrap } from "../aws/component-installation-identity-contract.mjs";
 import { rotationBindingsToTaskBindings } from "../aws/production-cutover-runtime-bootstrap.mjs";
 import { canonicalJson } from "../aws/production-green-stage-b-contract.mjs";
 import { productionStaleSupersessionPredecessorIdentity, productionSupersessionEvidenceIdentity, productionSupersessionVersionId } from "../security/production-initial-migration-source-advance.mjs";
@@ -36,7 +37,9 @@ const approval = createProductionEnvironmentApprovalEvidence({
   repository: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.repository, environment: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.environment, sourceSha,
   workflowRef: PRODUCTION_ENVIRONMENT_APPROVAL.bootstrapOperatorPolicyReconciliationWorkflowRef, eventName: "workflow_dispatch", workflowRunId: "100", workflowRunAttempt: "1", executionActor: "operator", observedAt: now.toISOString(), actualApproval: { state: "approved", environmentId: 7, environmentName: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.environment, userId: 3, userLogin: "reviewer" },
 });
-const live = (document, credentialTopology = {}) => ({ user: { Arn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn, UserName: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userName, Path: "/" }, attachedPolicies: [], inlinePolicyNames: [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.inlinePolicyName], groups: [], consoleLoginPresent: false, accessKeys: [], mfaDevices: [{ UserName: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userName, SerialNumber: ECS_EXEC_OPERATOR_BOOTSTRAP_MFA_SERIAL_ARN }], ...credentialTopology, document });
+const live = (document, credentialTopology = {}) => {
+  return { user: { Arn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn, UserName: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userName, Path: "/" }, attachedPolicies: [], inlinePolicyNames: [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.inlinePolicyName], groups: [], consoleLoginPresent: false, accessKeys: [], mfaDevices: [{ UserName: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userName, SerialNumber: ECS_EXEC_OPERATOR_BOOTSTRAP_MFA_SERIAL_ARN }], ...credentialTopology, document };
+};
 const authorized = () => {
   const preparation = createBootstrapOperatorPolicyPreparation({ sourceSha, liveState: live(desired.predecessorDocument), preparedAt: now.toISOString() });
   return createBootstrapOperatorPolicyAuthorization({ sourceSha, preparation, protectedEnvironmentApprovalEvidence: approval, authorizedAt: now.toISOString() });
@@ -61,7 +64,7 @@ const legacyLivePredecessorAuthorized = () => {
 };
 const legacyRecoveredAuthorization = (credentialTopology = {}) => {
   const transition = { kind: LEGACY_BOOTSTRAP_TRANSITION_KIND, rotationBindingsFileSha256: LEGACY_BOOTSTRAP_TRANSITION_ROTATION_BINDINGS_FILE_SHA256 };
-  const preparation = createBootstrapOperatorPolicyPreparation({ sourceSha, liveState: live(desired.document, { accessKeys: legacyAccessKeys }), transition, legacyRotationBindings: legacyBindings(), legacyRotationBindingOrigin: legacyBindingOrigin(), preparedAt: now.toISOString() });
+  const preparation = createBootstrapOperatorPolicyPreparation({ sourceSha, liveState: live(desired.document, { accessKeys: legacyAccessKeys, ...credentialTopology }), transition, legacyRotationBindings: legacyBindings(), legacyRotationBindingOrigin: legacyBindingOrigin(), preparedAt: now.toISOString() });
   return createBootstrapOperatorPolicyAuthorization({ sourceSha, preparation, protectedEnvironmentApprovalEvidence: approval, authorizedAt: now.toISOString() });
 };
 const legacyBindings = () => {
@@ -102,7 +105,7 @@ const legacyBindingOrigin = (bindings = legacyBindings()) => {
   const hash = (value) => createHash("sha256").update(Buffer.from(canonicalJson(value))).digest("hex");
   return { ...body, bindingSha256: hash(bindings), originSha256: hash(body) };
 };
-const runner = (initial, credentialTopology = {}, { stalePostWriteReads = 0, transientPostWriteReads = 0 } = {}) => {
+const runner = (initial, credentialTopology = {}, { stalePostWriteReads = 0, transientPostWriteReads = 0, policyWriteError = false } = {}) => {
   let document = structuredClone(initial); let writes = 0; let tagWrites = 0; let reservationWrites = 0; const commands = []; let tags = structuredClone(credentialTopology.tags || []); let reservation = credentialTopology.reservation ? structuredClone(credentialTopology.reservation) : null; let reservationVersion = 0; let staleReads = 0; let transientReads = 0;
   const run = (args) => {
     commands.push([...args]);
@@ -122,7 +125,14 @@ const runner = (initial, credentialTopology = {}, { stalePostWriteReads = 0, tra
       if (writes && transientReads++ < transientPostWriteReads) throw Object.assign(new Error("ThrottlingException"), { stderr: "ThrottlingException" });
       return JSON.stringify({ PolicyDocument: writes && staleReads++ < stalePostWriteReads ? initial : document });
     }
-    if (args[1] === "put-user-policy") { writes += 1; document = structuredClone(desired.document); return ""; }
+    if (args[1] === "put-user-policy") {
+      writes += 1;
+      const name = args[args.indexOf("--policy-name") + 1];
+      if (name !== BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.inlinePolicyName) throw new Error("unexpected inline policy name");
+      document = structuredClone(desired.document);
+      if (policyWriteError) throw Object.assign(new Error("transport failure after successful PutUserPolicy"), { stderr: "connection reset" });
+      return "";
+    }
     if (args[1] === "tag-user") {
       tagWrites += 1;
       const [Key, Value] = args[args.indexOf("--tags") + 1].split(",").map((part) => part.split("=")[1]);
@@ -144,19 +154,19 @@ const runner = (initial, credentialTopology = {}, { stalePostWriteReads = 0, tra
   };
   return { run, writes: () => writes, tagWrites: () => tagWrites, reservationWrites: () => reservationWrites, document: () => document, tags: () => tags, reservation: () => reservation, commands: () => commands };
 };
-const permitsAssumeRole = ({ roleArn, mfa }) => desired.document.Statement.some((statement) => statement.Effect === "Allow" && statement.Action === "sts:AssumeRole" && statement.Resource === roleArn && statement.Condition?.Bool?.["aws:MultiFactorAuthPresent"] === "true" && mfa === true);
+const permitsAssumeRole = ({ roleArn, mfa }) => desired.document.Statement.some((statement) => statement.Effect === "Allow" && statement.Action === "sts:AssumeRole" && (Array.isArray(statement.Resource) ? statement.Resource : [statement.Resource]).includes(roleArn) && statement.Condition?.Bool?.["aws:MultiFactorAuthPresent"] === "true" && mfa === true);
 
-test("bootstrap policy retains three MFA-gated targets and adds only exact web state/read access", () => {
-  const statements = new Map(desired.document.Statement.map((statement) => [statement.Sid, statement]));
-  assert.deepEqual(statements.get("AssumeReleaseRoleOnlyWithMfa"), { Sid: "AssumeReleaseRoleOnlyWithMfa", Effect: "Allow", Action: "sts:AssumeRole", Resource: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.releaseRoleArn, Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } });
-  assert.deepEqual(statements.get("AssumeVerifierMfa"), { Sid: "AssumeVerifierMfa", Effect: "Allow", Action: "sts:AssumeRole", Resource: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.verifierRoleArn, Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } });
-  assert.deepEqual(statements.get("AssumeStageBPublisherBootstrapRoleOnlyWithMfa"), { Sid: "AssumeStageBPublisherBootstrapRoleOnlyWithMfa", Effect: "Allow", Action: "sts:AssumeRole", Resource: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.publisherBootstrapRoleArn, Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } });
+test("bootstrap policy stays constrained and delegates signer policy transition to the protected installer", () => {
+  const assume = desired.document.Statement.find(({ Action }) => Action === "sts:AssumeRole");
+  assert.deepEqual(assume, { Effect: "Allow", Action: "sts:AssumeRole", Resource: [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.releaseRoleArn, BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.verifierRoleArn, BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.publisherBootstrapRoleArn], Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } });
   assert.equal(desired.document.Statement.some(({ Resource }) => Resource === "*" || (Array.isArray(Resource) && Resource.includes("*"))), false);
-  const permittedActions = new Set(["sts:AssumeRole", "iam:GetUser", "iam:ListMFADevices", "s3:ListBucket", "s3:GetObject", "s3:PutObject", "s3:DeleteObject", "iam:GetRole", "iam:GetRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies", "iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions"]);
+  const permittedActions = new Set(["sts:AssumeRole", "iam:GetUser", "iam:ListMFADevices", "s3:ListBucket", "s3:GetObject", "s3:PutObject", "s3:DeleteObject", "iam:GetRole", "iam:GetRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies", "iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions", "iam:ListEntitiesForPolicy"]);
   assert.equal(desired.document.Statement.flatMap(({ Action }) => Array.isArray(Action) ? Action : [Action]).every((action) => permittedActions.has(action)), true);
   const policyRead = desired.document.Statement.find(({ Action, Resource }) => Array.isArray(Action) && Action.includes("iam:ListPolicyVersions") && Resource === "arn:aws:iam::368992683803:policy/MSCQRProductionWebImagePublisherBoundary");
   assert.deepEqual(policyRead, { Effect: "Allow", Action: ["iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions"], Resource: "arn:aws:iam::368992683803:policy/MSCQRProductionWebImagePublisherBoundary" });
-  assert.equal(desired.document.Statement.some(({ Action, Resource }) => (Array.isArray(Action) ? Action : [Action]).includes("iam:ListPolicyVersions") && Resource !== "arn:aws:iam::368992683803:policy/MSCQRProductionWebImagePublisherBoundary"), false);
+  assert.equal(desired.document.Statement.some(({ Action }) => (Array.isArray(Action) ? Action : [Action]).includes("iam:CreatePolicyVersion")), false);
+  assert.equal(desired.document.Statement.some(({ Action, Resource }) => Action === "sts:AssumeRole" && (Array.isArray(Resource) ? Resource : [Resource]).includes("arn:aws:iam::368992683803:role/mscqr-production-signer-policy-installer")), false);
+  assert.equal(JSON.stringify(desired.document).replace(/\s/g, "").length <= 2048, true);
   for (const denied of ["iam:CreateRole", "iam:CreatePolicy", "iam:PutRolePolicy", "iam:AttachRolePolicy", "iam:UpdateAssumeRolePolicy", "iam:DeleteRole", "iam:PassRole"]) assert.equal(desired.document.Statement.flatMap(({ Action }) => Array.isArray(Action) ? Action : [Action]).includes(denied), false);
   const stateObjects = desired.document.Statement.find(({ Action }) => Array.isArray(Action) && Action.includes("s3:GetObject"));
   const lockDelete = desired.document.Statement.find(({ Action }) => Action === "s3:DeleteObject");
@@ -177,22 +187,34 @@ test("bootstrap policy retains three MFA-gated targets and adds only exact web s
   assert.equal(permitsAssumeRole({ roleArn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.releaseRoleArn, mfa: false }), false);
   assert.equal(permitsAssumeRole({ roleArn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.verifierRoleArn, mfa: false }), false);
   assert.equal(permitsAssumeRole({ roleArn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.publisherBootstrapRoleArn, mfa: false }), false);
+  assert.equal(permitsAssumeRole({ roleArn: "arn:aws:iam::368992683803:role/mscqr-production-signer-policy-installer", mfa: true }), false);
   assert.equal(permitsAssumeRole({ roleArn: "arn:aws:iam::368992683803:role/unrelated", mfa: true }), false);
   const trust = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQR_PRODUCTION_ECS_EXEC_OPERATOR_TRUST_POLICY.json", "utf8"));
   assert.doesNotThrow(() => assertEcsExecOperatorTrustDocument(trust));
 });
 
+test("same-account component session roles trust only the exact MFA bootstrap user", () => {
+  const roles = brokerSignerSuccessorManagedIdentities();
+  for (const name of [identityBootstrap.installationRole, identityBootstrap.cleanupRole]) {
+    const role = roles.find(({ role }) => role === name);
+    assert.deepEqual(role.trust.Statement, [{ Effect: "Allow", Principal: { AWS: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn },
+      Action: "sts:AssumeRole", Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } }]);
+    assert.equal(permitsAssumeRole({ roleArn: role.arn, mfa: true }), false,
+      "the same-account resource trust, not the bootstrap identity policy, authorizes this exact role");
+  }
+});
+
 test("RLS operator contract and canonical policy enumerate the same three MFA-gated targets", () => {
   const contract = JSON.parse(fs.readFileSync("documents/security/rls-program/production-full-rls-executor-contract.json", "utf8"));
   const requirement = contract.stageAOperatorPath.bootstrapOperatorRequirements.find((value) => value.startsWith("only sts:AssumeRole"));
-  const targets = desired.document.Statement.filter(({ Action }) => Action === "sts:AssumeRole").map(({ Resource }) => Resource).sort();
+  const targets = desired.document.Statement.filter(({ Action }) => Action === "sts:AssumeRole").flatMap(({ Resource }) => Array.isArray(Resource) ? Resource : [Resource]).sort();
   assert.deepEqual(targets, [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.releaseRoleArn, BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.verifierRoleArn, BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.publisherBootstrapRoleArn].sort());
   assert.equal(targets.every((target) => requirement.includes(target)), true);
   assert.equal(requirement.includes("*"), false);
   assert.equal(desired.document.Statement.filter(({ Action }) => Action === "sts:AssumeRole").every((statement) => statement.Condition?.Bool?.["aws:MultiFactorAuthPresent"] === "true"), true);
 });
 
-test("governed reconciliation accepts only the exact predecessor and converges with one PutUserPolicy", () => {
+test("governed reconciliation accepts only the exact predecessor and installs one canonical bounded inline policy", () => {
   const authorization = authorized(); const fixture = runner(desired.predecessorDocument);
   assert.equal(authenticateBootstrapOperatorLiveState(live(desired.predecessorDocument)).status, "EXACT_PREDECESSOR");
   const result = reconcileBootstrapOperatorPolicy({ run: fixture.run, authorization, sourceSha, now });
@@ -201,13 +223,24 @@ test("governed reconciliation accepts only the exact predecessor and converges w
   assert.equal(authenticateBootstrapOperatorLiveState(live(fixture.document())).status, "EXACT_COMPLETE");
 });
 
+test("canonical bootstrap readback policy requires no follow-up inline write", () => {
+  const preparation = createBootstrapOperatorPolicyPreparation({ sourceSha, liveState: live(desired.document), preparedAt: now.toISOString() });
+  const authorization = createBootstrapOperatorPolicyAuthorization({ sourceSha, preparation, protectedEnvironmentApprovalEvidence: approval, authorizedAt: now.toISOString() });
+  assert.equal(preparation.predecessorClassification, "EXACT_COMPLETE");
+  assert.deepEqual(preparation.expectedWritePlan, []);
+  assert.deepEqual(authorization.maxAwsMutations, {});
+  const fixture = runner(desired.document);
+  assert.deepEqual(reconcileBootstrapOperatorPolicy({ run: fixture.run, authorization, sourceSha, now }), { status: "COMPLETE", iamPutUserPolicyCount: 0, recovered: true });
+  assert.equal(fixture.writes(), 0);
+});
+
 test("legacy transition authenticates the real live predecessor and binds its exact two-statement delta", () => {
   const authorization = legacyLivePredecessorAuthorized();
   const policyWrite = authorization.preparation.expectedWritePlan.find(({ action }) => action === "iam:PutUserPolicy");
   assert.equal(desired.legacyLivePredecessorPolicySha256, LEGACY_BOOTSTRAP_TRANSITION_LIVE_PREDECESSOR_POLICY_SHA256);
   assert.equal(authorization.preparation.predecessorClassification, "EXACT_LEGACY_LIVE_PREDECESSOR");
   assert.equal(authorization.preparation.predecessorPolicySha256, LEGACY_BOOTSTRAP_TRANSITION_LIVE_PREDECESSOR_POLICY_SHA256);
-  assert.deepEqual(policyWrite.addedStatements, desired.document.Statement.filter((statement) => !statement.Sid || ["AssumeVerifierMfa", "AssumeStageBPublisherBootstrapRoleOnlyWithMfa"].includes(statement.Sid)));
+  assert.deepEqual(policyWrite, { action: "iam:PutUserPolicy", userArn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn, inlinePolicyName: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.inlinePolicyName, policySha256: desired.sourcePolicySha256 });
   assert.equal(authorization.preparation.expectedWritePlan.filter(({ action }) => action === "iam:PutUserPolicy").length, 1);
   assert.deepEqual(authorization.maxAwsMutations, { "iam:PutUserPolicy": 1, "iam:TagUser": 2, "s3:PutObject": 1 });
 
@@ -230,16 +263,15 @@ test("legacy live predecessor classification is exact and transition-only", () =
   for (const mutate of [
     (document) => { document.Statement = document.Statement.filter(({ Sid }) => Sid !== "AssumeReleaseRoleOnlyWithMfa"); },
     (document) => { document.Statement = document.Statement.filter(({ Sid }) => Sid !== "ReadOwnMfaState"); },
-    (document) => { document.Statement.find(({ Sid }) => Sid === "AssumeReleaseRoleOnlyWithMfa").Resource = "arn:aws:iam::368992683803:role/substituted"; },
-    (document) => { delete document.Statement.find(({ Sid }) => Sid === "AssumeReleaseRoleOnlyWithMfa").Condition; },
+    (document) => { document.Statement.find(({ Action }) => Action === "sts:AssumeRole").Resource = "arn:aws:iam::368992683803:role/substituted"; },
+    (document) => { delete document.Statement.find(({ Action }) => Action === "sts:AssumeRole").Condition; },
     (document) => { document.Statement.push({ Sid: "ArbitraryThirdRole", Effect: "Allow", Action: "sts:AssumeRole", Resource: "arn:aws:iam::368992683803:role/unrelated", Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } }); },
     (document) => { document.Statement[0].Resource = "*"; },
     (document) => { document.Statement[0].Action = "sts:*"; },
-    (document) => { document.Statement.push({ ...desired.document.Statement.find(({ Sid }) => Sid === "AssumeStageBPublisherBootstrapRoleOnlyWithMfa"), Condition: undefined }); },
-    (document) => { document.Statement.push({ ...desired.document.Statement.find(({ Sid }) => Sid === "AssumeVerifierMfa"), Condition: undefined }); },
-    (document) => { document.Statement.push({ ...desired.document.Statement.find(({ Sid }) => Sid === "AssumeStageBPublisherBootstrapRoleOnlyWithMfa"), Resource: "arn:aws:iam::368992683803:role/substituted-publisher" }); },
-    (document) => { document.Statement.push({ ...desired.document.Statement.find(({ Sid }) => Sid === "AssumeVerifierMfa"), Resource: "arn:aws:iam::368992683803:role/substituted-verifier" }); },
-    (document) => { document.Statement.push(desired.document.Statement.find(({ Sid }) => Sid === "AssumeVerifierMfa")); },
+    (document) => { delete document.Statement.find(({ Action }) => Action === "sts:AssumeRole").Condition; },
+    (document) => { const statement = document.Statement.find(({ Action }) => Action === "sts:AssumeRole"); statement.Resource = [...statement.Resource, "arn:aws:iam::368992683803:role/substituted-publisher"]; },
+    (document) => { const statement = structuredClone(document.Statement.find(({ Action }) => Action === "sts:AssumeRole")); statement.Resource = "arn:aws:iam::368992683803:role/substituted-verifier"; document.Statement.push(statement); },
+    (document) => { document.Statement.push(structuredClone(document.Statement.find(({ Action }) => Action === "sts:AssumeRole"))); },
     (document) => { document.Statement.push({ Sid: "Extra", Effect: "Allow", Action: "iam:GetUser", Resource: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn }); },
   ]) {
     const altered = structuredClone(desired.legacyLivePredecessorDocument); mutate(altered);
@@ -262,6 +294,13 @@ test("post-write convergence exhaustion never repeats the authorized IAM mutatio
   assert.throws(() => reconcileBootstrapOperatorPolicy({ run: fixture.run, authorization: authorized(), sourceSha, now, sleep: (milliseconds) => waits.push(milliseconds) }), /did not converge/);
   assert.equal(fixture.writes(), 1);
   assert.deepEqual(waits, BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.postWriteReadDelaysMs);
+});
+
+test("an ambiguous successful single policy write is recovered by exact readback without a retry", () => {
+  const fixture = runner(desired.predecessorDocument, {}, { policyWriteError: true });
+  assert.deepEqual(reconcileBootstrapOperatorPolicy({ run: fixture.run, authorization: authorized(), sourceSha, now }), { status: "COMPLETE", iamPutUserPolicyCount: 0, recovered: true });
+  assert.equal(fixture.writes(), 1);
+  assert.equal(authenticateBootstrapOperatorLiveState(live(fixture.document())).status, "EXACT_COMPLETE");
 });
 
 test("fresh exact-complete recovery authorization finalizes without another IAM mutation", () => {
@@ -307,7 +346,7 @@ test("legacy exact-complete authorization includes every reachable reservation a
 
 test("missing verifier capability, malformed policy topology, and unrelated roles fail closed", () => {
   const extraRole = structuredClone(desired.document);
-  extraRole.Statement.find(({ Sid }) => Sid === "AssumeVerifierMfa").Resource = "arn:aws:iam::368992683803:role/unrelated";
+  extraRole.Statement.find(({ Action }) => Action === "sts:AssumeRole").Resource[1] = "arn:aws:iam::368992683803:role/unrelated";
   assert.throws(() => authenticateBootstrapOperatorLiveState(live(extraRole)), /unexpected drift/);
   assert.throws(() => authenticateBootstrapOperatorLiveState({ ...live(desired.predecessorDocument), attachedPolicies: [{ PolicyArn: "arn:aws:iam::368992683803:policy/unexpected" }] }), /topology/);
   assert.doesNotThrow(() => createBootstrapOperatorPolicyPreparation({ sourceSha, liveState: live(desired.document), preparedAt: now.toISOString() }));
@@ -362,7 +401,6 @@ test("the source-bound legacy MFA transition requires the exact historical bindi
   assert.deepEqual(authorization.preparation.legacyRotationBindingOrigin, legacyBindingOrigin());
   assert.deepEqual(authorization.maxAwsMutations, { "iam:PutUserPolicy": 1, "iam:TagUser": 2, "s3:PutObject": 1 });
   assert.deepEqual(authorization.preparation.expectedWritePlan.map(({ action }) => action), ["s3:PutObject", "iam:TagUser", "iam:PutUserPolicy", "iam:TagUser"]);
-  assert.deepEqual(authorization.preparation.expectedWritePlan.find(({ action }) => action === "iam:PutUserPolicy").addedStatements, desired.document.Statement.filter((statement) => !statement.Sid || statement.Sid === "AssumeVerifierMfa"));
   assert.doesNotMatch(JSON.stringify(authorization), /key-a|key-b/);
   const fixture = runner(desired.predecessorDocument, { accessKeys: legacyAccessKeys });
   assert.deepEqual(reconcileBootstrapOperatorPolicy({ run: fixture.run, authorization, sourceSha, proveDescendant: () => true, verifyLiveBinding: () => legacyBindingOrigin(), now, clock: () => now }), { status: "COMPLETE", iamPutUserPolicyCount: 1, iamTagUserCount: 2, s3PutObjectCount: 1, recovered: false });
@@ -520,5 +558,7 @@ test("authorization workflow uses exact read-only OIDC authority and produces a 
   assert.equal(authorization.preparation.predecessorPolicySha256, desired.predecessorPolicySha256);
   assert.equal(authorization.preparation.successorPolicySha256, desired.sourcePolicySha256);
   assert.deepEqual(authorization.maxAwsMutations, { "iam:PutUserPolicy": 1 });
-  assert.deepEqual(authorization.preparation.expectedWritePlan, [{ action: "iam:PutUserPolicy", userArn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn, inlinePolicyName: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.inlinePolicyName, policySha256: desired.sourcePolicySha256, addedStatements: desired.document.Statement.filter((statement) => !statement.Sid || statement.Sid === "AssumeVerifierMfa") }]);
+  assert.deepEqual(authorization.preparation.expectedWritePlan, [
+    { action: "iam:PutUserPolicy", userArn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn, inlinePolicyName: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.inlinePolicyName, policySha256: desired.sourcePolicySha256 },
+  ]);
 });

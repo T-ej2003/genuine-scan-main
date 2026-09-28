@@ -38,6 +38,8 @@ export const PRODUCTION_ENVIRONMENT_APPROVAL = Object.freeze({
   exactCompleteStateReconciliationWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-initial-activation-exact-complete-state-reconciliation.yml@refs/heads/main",
   exactCompleteStateReconciliationRecoveryWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-initial-activation-exact-complete-state-reconciliation-recovery.yml@refs/heads/main",
   installationBootstrapEnvironment: "production-initial-activation-reconciler-bootstrap",
+  signerPolicyTransitionEnvironment: "production-signer-policy-transition",
+  signerPolicyTransitionWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/production-signer-policy-transition.yml@refs/heads/main",
   eventName: "workflow_dispatch",
   maxAgeMs: 30 * 60 * 1000,
 });
@@ -70,11 +72,14 @@ const approvedWorkflowRefs = new Set([
   PRODUCTION_ENVIRONMENT_APPROVAL.reconcilerStateReconciliationRecoveryWorkflowRef,
   PRODUCTION_ENVIRONMENT_APPROVAL.exactCompleteStateReconciliationWorkflowRef,
   PRODUCTION_ENVIRONMENT_APPROVAL.exactCompleteStateReconciliationRecoveryWorkflowRef,
+  PRODUCTION_ENVIRONMENT_APPROVAL.signerPolicyTransitionWorkflowRef,
 ]);
 
 const environmentForWorkflow = (workflowRef) => workflowRef === PRODUCTION_ENVIRONMENT_APPROVAL.bootstrapOperatorPolicyReconciliationWorkflowRef
   || workflowRef === PRODUCTION_ENVIRONMENT_APPROVAL.qrVersionSelectorResolutionWorkflowRef
   ? PRODUCTION_ENVIRONMENT_APPROVAL.bootstrapOperatorPolicyAuthorizationEnvironment
+  : workflowRef === PRODUCTION_ENVIRONMENT_APPROVAL.signerPolicyTransitionWorkflowRef
+  ? PRODUCTION_ENVIRONMENT_APPROVAL.signerPolicyTransitionEnvironment
   : [PRODUCTION_ENVIRONMENT_APPROVAL.installationBootstrapWorkflowRef, PRODUCTION_ENVIRONMENT_APPROVAL.installationWorkflowRef, PRODUCTION_ENVIRONMENT_APPROVAL.reconcilerStateReconciliationWorkflowRef, PRODUCTION_ENVIRONMENT_APPROVAL.reconcilerStateReconciliationRecoveryWorkflowRef, PRODUCTION_ENVIRONMENT_APPROVAL.exactCompleteStateReconciliationWorkflowRef, PRODUCTION_ENVIRONMENT_APPROVAL.exactCompleteStateReconciliationRecoveryWorkflowRef].includes(workflowRef)
   ? PRODUCTION_ENVIRONMENT_APPROVAL.installationBootstrapEnvironment
   : PRODUCTION_ENVIRONMENT_APPROVAL.environment;

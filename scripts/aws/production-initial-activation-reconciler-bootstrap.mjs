@@ -48,30 +48,47 @@ const bootstrapPermissions = () => {
 const bootstrapPermissionsSha256 = () => canonicalSha256(bootstrapPermissions());
 const bootstrapPermissionsPredecessors = () => {
   const desired = bootstrapPermissions();
-  const expansionSids = ["ReadExactMixedRecoveryRole", "UpdateExactMixedRecoveryRoleTrust", "ReadExactMixedRecoveryPolicy", "CreateExactMixedRecoveryRole", "CreateExactMixedRecoveryPolicy", "AttachExactMixedRecoveryPolicyToRole"];
-  const authorizerSids = ["ReadExactBootstrapOperatorPolicyAuthorizerRole", "ReadExactBootstrapOperatorPolicyAuthorizerPolicy", "UpdateExactBootstrapOperatorPolicyAuthorizerRoleTrust", "CreateExactBootstrapOperatorPolicyAuthorizerRole", "CreateExactBootstrapOperatorPolicyAuthorizerPolicy", "AttachExactBootstrapOperatorPolicyAuthorizerPolicyToRole"];
-  const evidenceReaderSids = ["CreateExactBrokerRecoverySuccessorEvidenceReaderIdentity", "AttachExactBrokerRecoverySuccessorEvidenceReaderPolicyToRole"];
+  const expansionSids = ["MixedRecoveryRoleRead", "MixedRecoveryTrustUpdate", "MixedRecoveryPolicyRead", "MixedRoleCreate", "MixedPolicyCreate", "MixedPolicyAttach"];
+  const authorizerSids = ["BootstrapAuthorizerRoleRead", "BootstrapAuthorizerPolicyRead", "BootstrapAuthorizerTrustUpdate", "BootstrapAuthorizerRoleCreate", "BootstrapAuthorizerPolicyCreate", "BootstrapAuthorizerPolicyAttach"];
+  const evidenceReaderSids = ["BrokerEvidenceCreate", "BrokerEvidencePolicyAttach"];
+  const signerInstallerSids = ["SignerRoleCreate", "SignerPolicyPut", "SignerPolicyInstallerInlineRead"];
+  const historicalSids = Object.freeze({
+    BackendPrefixRead: "ReadExactBackendPrefix", BackendObjectsRead: "ReadExactBackendObjects", ArtifactsBucketRead: "ReadExactProductionArtifactsBucketPolicy", BootstrapInlineRead: "ReadOwnExactBootstrapInlinePolicy", BackendObjectsWrite: "WriteEncryptedExactBackendObjects", NativeLockRelease: "DeleteExactNativeLockOnly", OidcProviderRead: "ReadOidcProvider", ReconcilerRoleRead: "ReadExactReconcilerRole", MixedRecoveryRoleRead: "ReadExactMixedRecoveryRole", BootstrapAuthorizerRoleRead: "ReadExactBootstrapOperatorPolicyAuthorizerRole", MixedRecoveryTrustUpdate: "UpdateExactMixedRecoveryRoleTrust", BootstrapAuthorizerTrustUpdate: "UpdateExactBootstrapOperatorPolicyAuthorizerRoleTrust", ReconcilerPolicyRead: "ReadExactReconcilerPolicy", MixedRecoveryPolicyRead: "ReadExactMixedRecoveryPolicy", BootstrapAuthorizerPolicyRead: "ReadExactBootstrapOperatorPolicyAuthorizerPolicy", ReconcilerPolicyVersion: "UpdateExactReconcilerPolicyVersion", PolicyNameInventory: "InventoryReservedPolicyName", ReconcilerRoleCreate: "CreateExactReconcilerRole", ReconcilerPolicyCreate: "CreateExactReconcilerPolicy", MixedRoleCreate: "CreateExactMixedRecoveryRole", MixedPolicyCreate: "CreateExactMixedRecoveryPolicy", BootstrapAuthorizerRoleCreate: "CreateExactBootstrapOperatorPolicyAuthorizerRole", BootstrapAuthorizerPolicyCreate: "CreateExactBootstrapOperatorPolicyAuthorizerPolicy", BrokerEvidenceCreate: "CreateExactBrokerRecoverySuccessorEvidenceReaderIdentity", ReconcilerPolicyAttach: "AttachExactPolicyToExactRole", BrokerEvidencePolicyAttach: "AttachExactBrokerRecoverySuccessorEvidenceReaderPolicyToRole", MixedPolicyAttach: "AttachExactMixedRecoveryPolicyToRole", BootstrapAuthorizerPolicyAttach: "AttachExactBootstrapOperatorPolicyAuthorizerPolicyToRole",
+  });
   const evidenceReaderResources = new Set([
     "arn:aws:iam::368992683803:role/mscqr-production-broker-recovery-successor-evidence-reader",
     "arn:aws:iam::368992683803:policy/MSCQRProductionBrokerRecoverySuccessorEvidenceRead",
   ]);
   const omitEvidenceReaderResources = (document) => {
-    for (const Sid of ["ReadExactReconcilerRole", "ReadExactReconcilerPolicy"]) {
+    for (const Sid of ["ReconcilerRoleRead", "ReconcilerPolicyRead"]) {
       const statement = document.Statement.find((entry) => entry.Sid === Sid);
       const resources = [].concat(statement.Resource).filter((resource) => !evidenceReaderResources.has(resource));
       statement.Resource = resources.length === 1 ? resources[0] : resources;
     }
   };
-  const previousSelfRead = (document) => { document.Statement.find(({ Sid }) => Sid === "ReadOwnExactBootstrapInlinePolicy").Action = "iam:GetRolePolicy"; };
+  const previousSelfRead = (document) => { document.Statement.find(({ Sid }) => Sid === "BootstrapInlineRead").Action = "iam:GetRolePolicy"; };
+  const currentSidByHistorical = Object.fromEntries(Object.entries(historicalSids).map(([current, historical]) => [historical, current]));
   const exact = (generation, omittedSids, sha256, omitExpansion = true, mutate, omitAuthorizer = true, omitEvidenceReader = true, retainAuthorizerPolicyUpdate = false) => {
     const document = structuredClone(desired);
-    document.Statement = document.Statement.filter(({ Sid }) => ![...(omitExpansion ? expansionSids : []), ...(omitAuthorizer ? authorizerSids : []), ...(omitEvidenceReader ? evidenceReaderSids : []), ...omittedSids].includes(Sid));
-    const update = document.Statement.find(({ Sid }) => Sid === "UpdateExactReconcilerPolicyVersion");
+    const omittedCurrentSids = omittedSids.map((sid) => currentSidByHistorical[sid] || sid);
+    document.Statement = document.Statement.filter(({ Sid }) => ![...signerInstallerSids, ...(omitExpansion ? expansionSids : []), ...(omitAuthorizer ? authorizerSids : []), ...(omitEvidenceReader ? evidenceReaderSids : []), ...omittedCurrentSids].includes(Sid));
+    const update = document.Statement.find(({ Sid }) => Sid === "ReconcilerPolicyVersion");
     if (update && omitExpansion) update.Resource = "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler";
     else if (update && !retainAuthorizerPolicyUpdate) update.Resource = [].concat(update.Resource).filter((resource) => resource !== "arn:aws:iam::368992683803:policy/MSCQRProductionBootstrapOperatorPolicyAuthorizer");
     if (omitEvidenceReader) omitEvidenceReaderResources(document);
+    const mixedRoleRead = document.Statement.find(({ Sid }) => Sid === "MixedRecoveryRoleRead");
+    if (mixedRoleRead) {
+      const resources = [].concat(mixedRoleRead.Resource).filter((resource) => resource !== "arn:aws:iam::368992683803:role/mscqr-production-signer-policy-installer");
+      mixedRoleRead.Resource = resources.length === 1 ? resources[0] : resources;
+    }
+    const bootstrapInlineRead = document.Statement.find(({ Sid }) => Sid === "BootstrapInlineRead");
+    if (bootstrapInlineRead) {
+      const resources = [].concat(bootstrapInlineRead.Resource).filter((resource) => resource !== "arn:aws:iam::368992683803:role/mscqr-production-signer-policy-installer");
+      bootstrapInlineRead.Resource = resources.length === 1 ? resources[0] : resources;
+    }
     mutate?.(document);
-    if (canonicalSha256(document) !== sha256) throw new Error(`Bootstrap predecessor ${generation} source document drifted.`);
+    for (const statement of document.Statement) if (historicalSids[statement.Sid]) statement.Sid = historicalSids[statement.Sid];
+    if (canonicalSha256(document) !== sha256) throw new Error(`Bootstrap predecessor ${generation} source document drifted: ${canonicalSha256(document)} expected ${sha256}.`);
     return Object.freeze({ generation, document, sha256 });
   };
   return Object.freeze([

@@ -53,7 +53,8 @@ const accessKeys = Object.freeze({
 
 test("app-only identities use isolated OIDC sessions and cannot fall back to local profiles", () => {
   for (const credentialSource of [PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_CHECKER_SESSION,
-    PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_POLICY_RECONCILER, PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER]) {
+    PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_POLICY_RECONCILER, PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER,
+    PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_BROKER_SIGNER_SUCCESSOR_EVIDENCE]) {
     const calls = [];
     const run = createProductionAwsCommandRunner({ credentialSource, env: oidc,
       exec: (file, args, options) => { calls.push({ file, args, options }); return "{}"; } });
@@ -328,6 +329,7 @@ test("every GitHub workflow credential root is classified by its authenticated m
     ".github/workflows/deploy-production-app-only-operation.yml",
     ".github/workflows/verify-production-app-only-compatibility-operation.yml",
     ".github/workflows/authorize-production-bootstrap-operator-policy-reconciliation.yml",
+    ".github/workflows/production-signer-policy-transition-operation.yml",
     ".github/workflows/sign-production-security-rebaseline.yml",
     ".github/workflows/produce-production-green-stage-b-release-preflight.yml",
     ".github/workflows/produce-production-green-stage-b-state-reconciliation-image-authorization.yml",
@@ -457,6 +459,7 @@ test("every direct AWS source in scripts/aws has an explicit audited credential 
     "scripts/aws/component-broker-policy-successor-root-mfa.mjs",
     "scripts/aws/component-identity-bootstrap-cli.mjs",
     "scripts/aws/component-installation-session.mjs",
+    "scripts/aws/production-signer-broker-transition-cli.mjs",
     "scripts/aws/apply-ecr-repository-controls.sh", "scripts/aws/apply-production-full-rls-release.mjs", "scripts/aws/deploy-ecs-service.sh", "scripts/aws/discover-staging-endpoints.mjs", "scripts/aws/exact-ecs-rollout-state.mjs", "scripts/aws/prepare-production-backend-failed-recovery-evidence.mjs", "scripts/aws/produce-production-security-rebaseline-preparation.mjs", "scripts/aws/production-cutover-production-adapters.mjs", "scripts/aws/production-dual-slot-rebaseline-contract.mjs", "scripts/aws/production-identity-adapters.mjs", "scripts/aws/production-initial-activation-lifecycle.mjs", "scripts/aws/publish-ecs-images.sh", "scripts/aws/reconcile-production-stage-a-temporary-kms-capability.mjs", "scripts/aws/reconcile-production-signer-temporary-capability.mjs", "scripts/aws/recover-production-backend-health.mjs", "scripts/aws/recover-production-green-stage-a-root-drop-orphan.mjs", "scripts/aws/rollback-ecs-service.sh", "scripts/aws/staging-database-role-credentials.mjs", "scripts/aws/verify-production-dependency-closure.mjs", "scripts/aws/verify-production-rotation-via-ecs-exec.mjs", "scripts/aws/verify-production-security-rebaseline-signer.mjs",
   ].sort();
   assert.deepEqual(direct, classified);
@@ -466,6 +469,7 @@ test("every direct AWS source in scripts/aws has an explicit audited credential 
     "scripts/aws/component-broker-policy-successor-root-mfa.mjs": /createProductionAwsCredentialEnvironment/,
     "scripts/aws/component-identity-bootstrap-cli.mjs": /createProductionAwsCredentialEnvironment/,
     "scripts/aws/component-installation-session.mjs": /createProductionAwsCredentialEnvironment/,
+    "scripts/aws/production-signer-broker-transition-cli.mjs": /createProductionAwsCredentialEnvironment/,
     "scripts/aws/apply-ecr-repository-controls.sh": /configure_production_aws_credential_source/,
     "scripts/aws/apply-production-full-rls-release.mjs": /createProductionAwsCredentialEnvironment/,
     "scripts/aws/deploy-ecs-service.sh": /configure_production_aws_credential_source/,

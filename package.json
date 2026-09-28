@@ -133,6 +133,8 @@
     "test:production-provider-readonly-reconciliation": "node --test scripts/tests/production-provider-readonly-policy-reconciliation.test.mjs",
     "stage-a:temporary-kms-capability": "node scripts/aws/reconcile-production-stage-a-temporary-kms-capability.mjs",
     "production:signer-temporary-capability": "node scripts/aws/reconcile-production-signer-temporary-capability.mjs",
+    "production:component-broker-signer-successor": "node scripts/aws/component-broker-signer-successor-cli.mjs",
+    "production:signer-broker-transition": "node scripts/aws/production-signer-broker-transition-cli.mjs",
     "test:production-signer-temporary-capability": "node --test scripts/tests/production-signer-temporary-capability.test.mjs scripts/tests/production-security-rebaseline.test.mjs scripts/tests/production-credential-source-contract.test.mjs",
     "stage-a:approval-key-reconciliation": "node scripts/aws/run-production-stage-a-approval-key-reconciliation.mjs",
     "test:stage-a-production-artifacts-reconciliation": "node --test scripts/tests/production-stage-a-production-artifacts-reconciliation.test.mjs",

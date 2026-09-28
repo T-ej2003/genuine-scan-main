@@ -95,3 +95,14 @@ export function assertBrokerRecoverySuccessorClosureMetadata(metadata, bindings,
   assert.equal(new Date(Date.parse(value.closedAt)).toISOString(), value.closedAt);
   return Object.freeze(structuredClone(value));
 }
+
+export function authenticateSecondSuccessorReservation(value, closure, reservationEtag) {
+  assert.deepEqual(Object.keys(value || {}).sort(), ["authorizationExpiresAt", "authorizationHistory", "authorizationSha256", "bindings", "owner", "schemaVersion", "sessionExpiresAt", "state", "transitionId"].sort());
+  assert.equal(value.schemaVersion, 1); assert.equal(value.state, "VERIFIED"); uuid(value.transitionId); sha(value.authorizationSha256);
+  assert.equal(value.transitionId, closure.transitionId); assert.equal(value.authorizationSha256, closure.authorizationSha256);
+  assert.equal(digest(value), closure.reservationSha256, "Historical second-successor reservation digest differs");
+  assert(typeof reservationEtag === "string" && reservationEtag); assert.equal(digest(reservationEtag), closure.reservationEtagSha256, "Historical second-successor reservation ETag differs");
+  assert.equal(digest(value.bindings), closure.bindingsSha256, "Historical second-successor binding digest differs");
+  assert.deepEqual(Object.keys(closure.runtimeVersions || {}).sort(), Object.values(brokerRecoverySuccessorEntryPoints));
+  return Object.freeze(structuredClone(value.bindings));
+}

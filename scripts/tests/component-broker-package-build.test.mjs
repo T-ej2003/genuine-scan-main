@@ -15,6 +15,8 @@ test("real locked package builds reproducibly from a clean source tree and refus
   const stack = "infra/aws/terraform/production-component-deployment-state";
   try {
     fs.cpSync(path.join(root, "scripts/aws"), path.join(fixture, "scripts/aws"), { recursive: true });
+    fs.mkdirSync(path.join(fixture, "documents/ops/iam"), { recursive: true });
+    fs.copyFileSync(path.join(root, "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json"), path.join(fixture, "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json"));
     fs.cpSync(path.join(root, stack), path.join(fixture, stack), { recursive: true, filter: (name) => !name.includes("/.terraform") && !name.endsWith(".tfstate") });
     fs.symlinkSync(fs.realpathSync(path.join(root, "node_modules")), path.join(fixture, "node_modules"));
     fs.writeFileSync(path.join(fixture, ".gitignore"), "node_modules\n");

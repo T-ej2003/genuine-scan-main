@@ -57,7 +57,7 @@ export const BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER = Object.freeze({
   permissionsPath: "infra/aws/terraform/production-initial-activation-policy-reconciler/broker-recovery-successor-evidence-reader-permissions-policy.json",
   path: "/",
   roleDescription: "Temporary GitHub OIDC reader for exact broker successor lineage evidence.",
-  policyDescription: "Read only the two immutable component broker successor lineage objects.",
+  policyDescription: "Read only the three immutable component broker lineage objects.",
   tags: Object.freeze({ ...INITIAL_ACTIVATION_RECONCILER.tags, Component: "broker-recovery-successor-evidence" }),
 });
 

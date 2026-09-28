@@ -420,9 +420,9 @@ function sourcePolicies() {
 }
 
 const BOOTSTRAP_OPERATOR_ASSUME_ROLE_AUTHORITIES = Object.freeze({
-  "bootstrap-assume-release": Object.freeze({ sid: "AssumeReleaseRoleOnlyWithMfa", resource: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.releaseRoleArn }),
-  "bootstrap-assume-verifier": Object.freeze({ sid: "AssumeVerifierMfa", resource: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.verifierRoleArn }),
-  "bootstrap-assume-publisher-bootstrap": Object.freeze({ sid: "AssumeStageBPublisherBootstrapRoleOnlyWithMfa", resource: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.publisherBootstrapRoleArn }),
+  "bootstrap-assume-release": Object.freeze({ resource: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.releaseRoleArn }),
+  "bootstrap-assume-verifier": Object.freeze({ resource: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.verifierRoleArn }),
+  "bootstrap-assume-publisher-bootstrap": Object.freeze({ resource: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.publisherBootstrapRoleArn }),
 });
 
 export function assertBootstrapOperatorAssumeRoleAuthority(capabilityId, policy = readJson(bootstrapOperatorPolicyPath)) {
@@ -430,13 +430,12 @@ export function assertBootstrapOperatorAssumeRoleAuthority(capabilityId, policy 
   if (!authority) throw new Error("Bootstrap operator AssumeRole capability is unknown.");
   const assumeRoleStatements = policy?.Statement?.filter((statement) => statement.Effect === "Allow" && asArray(statement.Action).includes("sts:AssumeRole")) || [];
   const expected = Object.values(BOOTSTRAP_OPERATOR_ASSUME_ROLE_AUTHORITIES);
-  if (assumeRoleStatements.length !== expected.length || expected.some(({ sid, resource }) => {
-    const statement = assumeRoleStatements.find((candidate) => candidate.Sid === sid);
-    return !statement || canonicalizeJson(statement) !== canonicalizeJson({ Sid: sid, Effect: "Allow", Action: "sts:AssumeRole", Resource: resource, Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } });
-  })) throw new Error("Bootstrap operator AssumeRole policy is not the reviewed exact MFA-gated target set.");
+  const statement = assumeRoleStatements[0];
+  const resources = expected.map(({ resource }) => resource);
+  if (assumeRoleStatements.length !== 1 || canonicalizeJson(statement) !== canonicalizeJson({ Effect: "Allow", Action: "sts:AssumeRole", Resource: resources, Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } })) throw new Error("Bootstrap operator AssumeRole policy is not the reviewed exact MFA-gated target set.");
   return {
     sourceFile: bootstrapOperatorPolicyPath,
-    sid: authority.sid,
+    sid: null,
     livePolicyArn: `inline-user-policy:${BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn}/${BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.inlinePolicyName}`,
     expectedVersion: "governed-inline-policy",
     expectedPolicySha256: sha256(Buffer.from(canonicalizeJson(policy))),

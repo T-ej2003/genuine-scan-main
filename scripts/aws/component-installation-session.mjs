@@ -12,7 +12,7 @@ import { createTerraformStateBoundary } from "./component-terraform-state.mjs";
 
 const requireSdk = createRequire(new URL("../../infra/aws/terraform/production-component-deployment-state/broker-package/package.json", import.meta.url));
 const operator = "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator";
-const roles = { INSTALL: identityBootstrap.installationRole, CLEANUP: identityBootstrap.cleanupRole, TERRAFORM: "mscqr-production-component-table-installer" };
+const roles = { INSTALL: identityBootstrap.installationRole, CLEANUP: identityBootstrap.cleanupRole, SIGNER_INSTALL: identityBootstrap.installationRole, SIGNER_REVOKE: identityBootstrap.cleanupRole, TERRAFORM: "mscqr-production-component-table-installer" };
 const credentialsForSdk = (value) => ({ accessKeyId: value.AccessKeyId, secretAccessKey: value.SecretAccessKey, ...(value.SessionToken ? { sessionToken: value.SessionToken } : {}) });
 const options = (credentials, service) => ({ region: identityBootstrap.region, credentials: credentialsForSdk(credentials), endpoint: `https://${service}.eu-west-2.amazonaws.com`, maxAttempts: 1 });
 function stsTransport(credentials) {
@@ -54,7 +54,17 @@ export async function establishComponentRecoveryTerraformSession(binding, depend
   return establish({ ...binding, purpose: "TERRAFORM" }, dependencies, "TERRAFORM", [brokerRecoverySuccessorEntryPoints.INSTALL]);
 }
 
-async function establish(binding, { loadUser = loadOperator, sts = stsTransport, mfa = () => promptProductionMfaCode({ prompt: "Component installation operator MFA code: " }), invoke, isolated = executeIsolatedTerraform, state = createTerraformStateBoundary, now = Date.now, sleep = delay } = {}, discovery = null, requiredVersions = null) {
+export async function establishSignerInstallSession(binding, dependencies = {}) {
+  sessionProofBinding({ ...binding, purpose: "SIGNER_INSTALL" });
+  return establish({ ...binding, purpose: "SIGNER_INSTALL" }, dependencies, null, ["13"], ["SIGNER_INSTALL", "SIGNER_ADVANCE", "SIGNER_RECOVERY"]);
+}
+
+export async function establishSignerRevokeSession(binding, dependencies = {}) {
+  sessionProofBinding({ ...binding, purpose: "SIGNER_REVOKE" });
+  return establish({ ...binding, purpose: "SIGNER_REVOKE" }, dependencies, null, ["14"], ["SIGNER_REVOKE"]);
+}
+
+async function establish(binding, { loadUser = loadOperator, sts = stsTransport, mfa = () => promptProductionMfaCode({ prompt: "Component installation operator MFA code: " }), invoke, isolated = executeIsolatedTerraform, state = createTerraformStateBoundary, now = Date.now, sleep = delay } = {}, discovery = null, requiredVersions = null, sessionOperations = null) {
   const fixedBinding = structuredClone(binding);
   if (!discovery) sessionProofBinding(fixedBinding);
   assert(Object.hasOwn(roles, fixedBinding.purpose));
@@ -94,7 +104,7 @@ async function establish(binding, { loadUser = loadOperator, sts = stsTransport,
     const signer = new SignatureV4({ credentials: credentialsForSdk(scoped), region: identityBootstrap.region, service: "sts", sha256: Sha256 });
     const send = async (payload) => {
       assert(now() < expires, "AWS session expired");
-      const versions = requiredVersions || brokerEntryPointCandidates(fixedBinding.purpose === "CLEANUP" ? "CLEANUP" : "INSTALL");
+      const versions = requiredVersions || brokerEntryPointCandidates(["CLEANUP", "SIGNER_REVOKE"].includes(fixedBinding.purpose) ? "CLEANUP" : "INSTALL");
       let result, version;
       for (const candidate of versions) {
         const input = { FunctionName: `${componentBrokerArn}:${candidate}`, InvocationType: "RequestResponse", Payload: Buffer.from(JSON.stringify(payload)) };
@@ -133,14 +143,15 @@ async function establish(binding, { loadUser = loadOperator, sts = stsTransport,
     }
     const signedPayload = async operation => {
       const signed = await signer.presign({ protocol: "https:", hostname: "sts.eu-west-2.amazonaws.com", method: "GET", path: "/", headers: { host: "sts.eu-west-2.amazonaws.com", "x-mscqr-component-binding": sessionProofBinding(fixedBinding) }, query: { Action: "GetCallerIdentity", Version: "2011-06-15" } }, { expiresIn: 60, signingDate: new Date(now()) });
-      return { operation, transitionId: fixedBinding.transitionId, authorizationSha256: fixedBinding.authorizationSha256, proof: { query: signed.query } };
+      return { operation, transitionId: fixedBinding.transitionId, authorizationSha256: fixedBinding.authorizationSha256,
+        ...(fixedBinding.purpose.startsWith("SIGNER_") ? { sourceSha: fixedBinding.sourceSha } : {}), proof: { query: signed.query } };
     };
     const prove = async () => {
         assert(now() < expires, "AWS session expired");
         const deadline = Math.min(now() + 300000, expires - 120000);
         for (let attempt = 0; attempt < 60 && now() < deadline; attempt++) {
           try {
-            const proof = await send(await signedPayload({ INSTALL: "PROVE_INSTALL_SESSION", CLEANUP: "PROVE_CLEANUP_SESSION", TERRAFORM: "PROVE_TERRAFORM_SESSION" }[fixedBinding.purpose]));
+            const proof = await send(await signedPayload({ INSTALL: "PROVE_INSTALL_SESSION", CLEANUP: "PROVE_CLEANUP_SESSION", SIGNER_INSTALL: "SIGNER_PROVE_INSTALL_SESSION", SIGNER_REVOKE: "SIGNER_PROVE_REVOKE_SESSION", TERRAFORM: "PROVE_TERRAFORM_SESSION" }[fixedBinding.purpose]));
             const { session, ...envelope } = proof;
             if (fixedBinding.purpose === "TERRAFORM") {
               assertComponentSessionRecord(session); assert.equal(session.purpose, "TERRAFORM");
@@ -202,10 +213,12 @@ async function establish(binding, { loadUser = loadOperator, sts = stsTransport,
     }
     return Object.freeze({
       principal, expiresAt: new Date(expires).toISOString(),
-      async invoke(operation) {
-        assert((fixedBinding.purpose === "INSTALL" ? ["INSTALL", "INSPECT"] : ["CLOSE"]).includes(operation), "Unsupported session operation");
+      async invoke(operation, input = {}) {
+        assert((sessionOperations || (fixedBinding.purpose === "INSTALL" ? ["INSTALL", "INSPECT"] : ["CLOSE"])).includes(operation), "Unsupported session operation");
+        assert(input && typeof input === "object" && !Array.isArray(input));
+        for (const key of ["operation", "sourceSha", "transitionId", "authorizationSha256", "proof"]) assert(!Object.hasOwn(input, key), `Caller cannot override ${key}`);
         await prove();
-        return send(await signedPayload(operation));
+        return send({ ...(await signedPayload(operation)), ...input });
       },
     });
   } finally {

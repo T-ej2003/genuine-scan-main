@@ -3509,11 +3509,11 @@
       "probe": "structural",
       "probeIds": [],
       "policy": {
-        "sourceFile": "documents/ops/iam/MSCQRProductionBootstrapOperator-v1.json",
-        "sid": "AssumeStageBPublisherBootstrapRoleOnlyWithMfa",
+        "sourceFile": "documents/ops/iam/MSCQRProductionBootstrapOperator-v2.json",
+        "sid": null,
         "livePolicyArn": "inline-user-policy:arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator/MSCQRProductionBootstrapOperator",
         "expectedVersion": "governed-inline-policy",
-        "expectedPolicySha256": "56add5ffc091ebd58321b409d790b93ecdaa00254d607e8eaa38d7ae326d27cd"
+        "expectedPolicySha256": "ef1b727556f7e195c002c2268b7556161f89c466639b791880de75c1ce7e9bbe"
       },
       "required": true,
       "mutation": false
@@ -3538,11 +3538,11 @@
       "probe": "structural",
       "probeIds": [],
       "policy": {
-        "sourceFile": "documents/ops/iam/MSCQRProductionBootstrapOperator-v1.json",
-        "sid": "AssumeReleaseRoleOnlyWithMfa",
+        "sourceFile": "documents/ops/iam/MSCQRProductionBootstrapOperator-v2.json",
+        "sid": null,
         "livePolicyArn": "inline-user-policy:arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator/MSCQRProductionBootstrapOperator",
         "expectedVersion": "governed-inline-policy",
-        "expectedPolicySha256": "56add5ffc091ebd58321b409d790b93ecdaa00254d607e8eaa38d7ae326d27cd"
+        "expectedPolicySha256": "ef1b727556f7e195c002c2268b7556161f89c466639b791880de75c1ce7e9bbe"
       },
       "required": true,
       "mutation": false
@@ -3567,11 +3567,11 @@
       "probe": "structural",
       "probeIds": [],
       "policy": {
-        "sourceFile": "documents/ops/iam/MSCQRProductionBootstrapOperator-v1.json",
-        "sid": "AssumeVerifierMfa",
+        "sourceFile": "documents/ops/iam/MSCQRProductionBootstrapOperator-v2.json",
+        "sid": null,
         "livePolicyArn": "inline-user-policy:arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator/MSCQRProductionBootstrapOperator",
         "expectedVersion": "governed-inline-policy",
-        "expectedPolicySha256": "56add5ffc091ebd58321b409d790b93ecdaa00254d607e8eaa38d7ae326d27cd"
+        "expectedPolicySha256": "ef1b727556f7e195c002c2268b7556161f89c466639b791880de75c1ce7e9bbe"
       },
       "required": true,
       "mutation": false

@@ -42,7 +42,8 @@ export const BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION = Object.freeze({
   releaseRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer",
   verifierRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-ecs-exec-verifier",
   publisherBootstrapRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-stage-b-publisher-bootstrap",
-  sourcePath: "documents/ops/iam/MSCQRProductionBootstrapOperator-v1.json",
+  sourcePath: "documents/ops/iam/MSCQRProductionBootstrapOperator-v2.json",
+  predecessorSourcePath: "documents/ops/iam/MSCQRProductionBootstrapOperator-v1.json",
   workflowPath: ".github/workflows/authorize-production-bootstrap-operator-policy-reconciliation.yml",
   workflowRef: PRODUCTION_ENVIRONMENT_APPROVAL.bootstrapOperatorPolicyReconciliationWorkflowRef,
   artifactName: "production-bootstrap-operator-policy-reconciliation-authorization",
@@ -209,8 +210,8 @@ const credentialTopology = ({ accessKeys, consoleLoginPresent, mfaDevices, trans
 };
 
 export function readBootstrapOperatorDesiredPolicy({ repositoryRoot = root } = {}) {
-  const document = normalizeIamPolicyDocument(fs.readFileSync(path.resolve(repositoryRoot, BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.sourcePath), "utf8"), "bootstrap operator source policy");
-  const expected = [
+  const predecessorDocument = normalizeIamPolicyDocument(fs.readFileSync(path.resolve(repositoryRoot, BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.predecessorSourcePath), "utf8"), "bootstrap operator predecessor source policy");
+  const predecessorExpected = [
     { Sid: "AssumeReleaseRoleOnlyWithMfa", Effect: "Allow", Action: "sts:AssumeRole", Resource: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.releaseRoleArn, Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } },
     { Sid: "AssumeVerifierMfa", Effect: "Allow", Action: "sts:AssumeRole", Resource: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.verifierRoleArn, Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } },
     { Sid: "AssumeStageBPublisherBootstrapRoleOnlyWithMfa", Effect: "Allow", Action: "sts:AssumeRole", Resource: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.publisherBootstrapRoleArn, Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } },
@@ -221,11 +222,15 @@ export function readBootstrapOperatorDesiredPolicy({ repositoryRoot = root } = {
     { Effect: "Allow", Action: ["iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions"], Resource: "arn:aws:iam::368992683803:policy/MSCQRProductionWebImagePublisherBoundary" },
     { Sid: "ReadOwnMfaState", Effect: "Allow", Action: ["iam:GetUser", "iam:ListMFADevices"], Resource: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn },
   ];
-  if (document.Version !== "2012-10-17" || !Array.isArray(document.Statement) || document.Statement.length !== expected.length || expected.some((statement) => !document.Statement.some((candidate) => canonicalJson(candidate) === canonicalJson(statement)))) throw new Error("Bootstrap operator source policy is not the reviewed exact document.");
-  const newlyGovernedWebCapabilities = expected.filter(({ Sid }) => !Sid);
-  const isNewWebCapability = (statement) => newlyGovernedWebCapabilities.some((candidate) => canonicalJson(candidate) === canonicalJson(statement));
-  const predecessorDocument = { Version: "2012-10-17", Statement: document.Statement.filter((statement) => statement.Sid !== "AssumeVerifierMfa" && !isNewWebCapability(statement)) };
-  const legacyLivePredecessorDocument = { Version: "2012-10-17", Statement: document.Statement.filter((statement) => !["AssumeVerifierMfa", "AssumeStageBPublisherBootstrapRoleOnlyWithMfa"].includes(statement.Sid) && !isNewWebCapability(statement)) };
+  if (predecessorDocument.Version !== "2012-10-17" || !Array.isArray(predecessorDocument.Statement) || predecessorDocument.Statement.length !== predecessorExpected.length || predecessorExpected.some((statement) => !predecessorDocument.Statement.some((candidate) => canonicalJson(candidate) === canonicalJson(statement)))) throw new Error("Bootstrap operator predecessor source policy is not the reviewed exact document.");
+  const document = normalizeIamPolicyDocument(fs.readFileSync(path.resolve(repositoryRoot, BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.sourcePath), "utf8"), "bootstrap operator source policy");
+  const expected = [
+    { Effect: "Allow", Action: "sts:AssumeRole", Resource: [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.releaseRoleArn, BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.verifierRoleArn, BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.publisherBootstrapRoleArn], Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } },
+    ...predecessorDocument.Statement.filter((statement) => !["AssumeReleaseRoleOnlyWithMfa", "AssumeVerifierMfa", "AssumeStageBPublisherBootstrapRoleOnlyWithMfa"].includes(statement.Sid)).map(({ Sid, ...statement }) => statement),
+    { Effect: "Allow", Action: ["iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions", "iam:ListEntitiesForPolicy"], Resource: "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease", Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } },
+  ];
+  if (document.Version !== "2012-10-17" || !Array.isArray(document.Statement) || document.Statement.length !== expected.length || expected.some((statement) => !document.Statement.some((candidate) => canonicalJson(candidate) === canonicalJson(statement))) || JSON.stringify(document).replace(/\s/g, "").length > 2048) throw new Error("Bootstrap operator source policy is not the reviewed exact document or exceeds the IAM user inline-policy quota.");
+  const legacyLivePredecessorDocument = { Version: "2012-10-17", Statement: predecessorDocument.Statement.filter(({ Sid }) => ["AssumeReleaseRoleOnlyWithMfa", "ReadOwnMfaState"].includes(Sid)) };
   const legacyLivePredecessorPolicySha256 = sha256(legacyLivePredecessorDocument);
   if (legacyLivePredecessorPolicySha256 !== LEGACY_BOOTSTRAP_TRANSITION_LIVE_PREDECESSOR_POLICY_SHA256) throw new Error("Bootstrap operator legacy live predecessor is not the authenticated production policy.");
   return Object.freeze({ document, predecessorDocument, legacyLivePredecessorDocument, sourcePolicySha256: sha256(document), predecessorPolicySha256: sha256(predecessorDocument), legacyLivePredecessorPolicySha256 });
@@ -234,15 +239,17 @@ export function readBootstrapOperatorDesiredPolicy({ repositoryRoot = root } = {
 export function authenticateBootstrapOperatorLiveState(value, { desired = readBootstrapOperatorDesiredPolicy(), allowPostState = true, transition } = {}) {
   exactKeys(value, ["user", "attachedPolicies", "inlinePolicyNames", "groups", "consoleLoginPresent", "accessKeys", "mfaDevices", "document"], "Bootstrap operator live state");
   if (value.user?.Arn !== BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn || value.user?.UserName !== BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userName || value.user?.Path !== "/" || Object.hasOwn(value.user, "PermissionsBoundary")) throw new Error("Bootstrap operator user identity is unexpected.");
-  if (!Array.isArray(value.attachedPolicies) || value.attachedPolicies.length || !Array.isArray(value.groups) || value.groups.length || canonicalJson(value.inlinePolicyNames) !== canonicalJson([BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.inlinePolicyName])) throw new Error("Bootstrap operator policy topology is unexpected.");
+  const expectedPolicyNames = [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.inlinePolicyName];
+  if (!Array.isArray(value.attachedPolicies) || value.attachedPolicies.length || !Array.isArray(value.groups) || value.groups.length || canonicalJson([...(value.inlinePolicyNames || [])].sort()) !== canonicalJson(expectedPolicyNames)) throw new Error("Bootstrap operator policy topology is unexpected.");
   const credentialState = credentialTopology({ accessKeys: value.accessKeys, consoleLoginPresent: value.consoleLoginPresent, mfaDevices: value.mfaDevices, transition });
   const document = normalizeIamPolicyDocument(value.document, "bootstrap operator live policy");
   const documentSha256 = sha256(document);
   const pre = documentSha256 === desired.predecessorPolicySha256;
   const legacyPre = legacyTransition(transition) && documentSha256 === desired.legacyLivePredecessorPolicySha256;
-  const post = allowPostState && documentSha256 === desired.sourcePolicySha256;
-  if (!pre && !legacyPre && !post) throw new Error("Bootstrap operator policy contains unexpected drift.");
-  return Object.freeze({ ...value, document, documentSha256, credentialState, status: post ? "EXACT_COMPLETE" : legacyPre ? "EXACT_LEGACY_LIVE_PREDECESSOR" : "EXACT_PREDECESSOR" });
+  const post = documentSha256 === desired.sourcePolicySha256;
+  if ((!pre && !legacyPre && !post) || (post && !allowPostState)) throw new Error("Bootstrap operator policy state has unexpected drift or an incomplete transition.");
+  const status = post ? "EXACT_COMPLETE" : legacyPre ? "EXACT_LEGACY_LIVE_PREDECESSOR" : "EXACT_PREDECESSOR";
+  return Object.freeze({ ...value, document, documentSha256, credentialState, status });
 }
 
 const authenticatePreparationLiveState = (value, transition) => {
@@ -274,6 +281,8 @@ const readBootstrapOperatorPostWriteState = ({ run, transition, sleep = bootstra
     try {
       const state = readBootstrapOperatorLiveState({ run, transition });
       if (state.status === "EXACT_COMPLETE") return state;
+      if (predecessorStatus(state.status)) transient = new Error("Bootstrap operator inline policy write is still converging.");
+      else throw new Error("Bootstrap operator policy readback is not the exact authorized post-state.");
     } catch (error) {
       if (!isTransientBootstrapOperatorRead(error)) throw error;
       transient = error;
@@ -290,11 +299,11 @@ const readBootstrapOperatorPostWriteState = ({ run, transition, sleep = bootstra
 const predecessorStatus = (status) => ["EXACT_PREDECESSOR", "EXACT_LEGACY_LIVE_PREDECESSOR"].includes(status);
 const writePlan = (state, transition) => {
   const desired = readBootstrapOperatorDesiredPolicy();
-  const addedStatements = predecessorStatus(state.status) ? desired.document.Statement.filter(({ Sid }) => !state.document.Statement.some((statement) => statement.Sid === Sid)) : [];
+  const needsBasePolicy = ["EXACT_PREDECESSOR", "EXACT_LEGACY_LIVE_PREDECESSOR"].includes(state.status);
   return [
     ...(legacyTransition(transition) && (predecessorStatus(state.status) || state.status === "EXACT_COMPLETE") ? [{ action: "s3:PutObject", resource: `${PRODUCTION_ACTIVATION_LIFECYCLE.bucket}/${BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.legacyTransitionReservationKey}`, condition: "IF_NONE_MATCH_OR_EXACT_ETAG" }] : []),
     ...(legacyTransition(transition) && predecessorStatus(state.status) ? [{ action: "iam:TagUser", userArn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn, tagKey: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.legacyTransitionConsumptionTagKey, valueBinding: "RESERVED_AUTHORIZATION_SHA256_AND_EXPIRY" }] : []),
-    ...(predecessorStatus(state.status) ? [{ action: "iam:PutUserPolicy", userArn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn, inlinePolicyName: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.inlinePolicyName, policySha256: desired.sourcePolicySha256, addedStatements }] : []),
+    ...(needsBasePolicy ? [{ action: "iam:PutUserPolicy", userArn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn, inlinePolicyName: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.inlinePolicyName, policySha256: desired.sourcePolicySha256 }] : []),
     ...(legacyTransition(transition) ? [{ action: "iam:TagUser", userArn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn, tagKey: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.legacyTransitionConsumptionTagKey, valueBinding: "COMPLETED_AUTHORIZATION_SHA256" }] : []),
   ];
 };
@@ -378,10 +387,11 @@ export function reconcileBootstrapOperatorPolicy({ run, authorization, sourceSha
     if (marker?.state === "COMPLETED" && marker.authorizationSha256 !== authorization.authorizationSha256) throw new Error("Legacy bootstrap MFA transition was consumed by a different authorization.");
     if (marker?.state === "RESERVED" && marker.authorizationSha256 !== authorization.authorizationSha256 && new Date(marker.expiresAt).getTime() >= now.getTime()) throw new Error("Legacy bootstrap MFA transition is reserved by another active authorization.");
   }
+  const completePolicySha256 = before.documentSha256;
   if (before.status === "EXACT_COMPLETE") {
-    const sameTransitionResume = transition && marker?.state === "RESERVED" && marker.authorizationSha256 === authorization.authorizationSha256 && predecessorStatus(authorization.preparation.predecessorClassification) && before.documentSha256 === authorization.preparation.successorPolicySha256;
+    const sameTransitionResume = transition && marker?.state === "RESERVED" && marker.authorizationSha256 === authorization.authorizationSha256 && predecessorStatus(authorization.preparation.predecessorClassification) && completePolicySha256 === authorization.preparation.successorPolicySha256;
     const freshComplete = authorization.preparation.predecessorClassification === "EXACT_COMPLETE" && before.documentSha256 === authorization.preparation.predecessorPolicySha256;
-    const completedReplay = transition && marker?.state === "COMPLETED" && marker.authorizationSha256 === authorization.authorizationSha256 && before.documentSha256 === authorization.preparation.successorPolicySha256;
+    const completedReplay = transition && marker?.state === "COMPLETED" && marker.authorizationSha256 === authorization.authorizationSha256 && completePolicySha256 === authorization.preparation.successorPolicySha256;
     if (!sameTransitionResume && !freshComplete && !completedReplay) throw new Error("Bootstrap operator completed state differs from the authorized transaction.");
     if (transition && marker?.state !== "COMPLETED") {
       ownedReservation = acquireLegacyTransitionReservation(run, authorization, now);
@@ -407,12 +417,19 @@ export function reconcileBootstrapOperatorPolicy({ run, authorization, sourceSha
   }
   let recovered = false;
   if (transition) assertOwnedUnexpiredLegacyTransitionReservation(run, authorization, clock(), ownedReservation);
-  try {
-    run(["iam", "put-user-policy", "--user-name", BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userName, "--policy-name", BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.inlinePolicyName, "--policy-document", `file://${path.join(root, BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.sourcePath)}`, "--no-cli-pager"]);
-  } catch (error) {
-    try { readBootstrapOperatorPostWriteState({ run, transition, sleep }); }
-    catch { throw error; }
-    recovered = true;
+  const policyWrites = authorization.preparation.expectedWritePlan.filter(({ action }) => action === "iam:PutUserPolicy");
+  for (const entry of policyWrites) {
+    const sourcePath = entry.inlinePolicyName === BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.inlinePolicyName ? BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.sourcePath
+      : null;
+    if (!sourcePath || entry.userArn !== BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn || entry.policySha256 !== sha256(JSON.parse(fs.readFileSync(path.join(root, sourcePath), "utf8")))) throw new Error("Bootstrap operator authorized policy write differs from canonical source.");
+    try {
+      run(["iam", "put-user-policy", "--user-name", BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userName, "--policy-name", entry.inlinePolicyName, "--policy-document", `file://${path.join(root, sourcePath)}`, "--no-cli-pager"]);
+    } catch (error) {
+      try { readBootstrapOperatorPostWriteState({ run, transition, sleep }); }
+      catch { throw error; }
+      recovered = true;
+      break;
+    }
   }
   if (!recovered) readBootstrapOperatorPostWriteState({ run, transition, sleep });
   if (transition) {
@@ -421,7 +438,7 @@ export function reconcileBootstrapOperatorPolicy({ run, authorization, sourceSha
     const completed = readLegacyTransitionConsumption(run);
     if (completed?.state !== "COMPLETED" || completed.authorizationSha256 !== authorization.authorizationSha256) throw new Error("Legacy bootstrap MFA transition completion marker did not converge.");
   }
-  return Object.freeze({ status: "COMPLETE", iamPutUserPolicyCount: 1, ...(transition ? { iamTagUserCount, s3PutObjectCount } : {}), recovered });
+  return Object.freeze({ status: "COMPLETE", iamPutUserPolicyCount: recovered ? 0 : policyWrites.length, ...(transition ? { iamTagUserCount, s3PutObjectCount } : {}), recovered });
 }
 
 export function resolveBootstrapOperatorPolicyAuthorization({ workflowRunId, workflowRunAttempt, sourceSha, githubRun = createProductionGithubCommandRunner(), now = new Date() } = {}) {
