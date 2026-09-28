@@ -24,6 +24,7 @@ import {
   verifyLegacyBootstrapMfaTransitionBinding,
 } from "../aws/production-bootstrap-operator-policy-reconciliation.mjs";
 import { assertEcsExecOperatorTrustDocument, ECS_EXEC_OPERATOR_BOOTSTRAP_MFA_SERIAL_ARN } from "../aws/production-ecs-exec-operator-contract.mjs";
+import { brokerSignerSuccessorManagedIdentities, identityBootstrap } from "../aws/component-installation-identity-contract.mjs";
 import { rotationBindingsToTaskBindings } from "../aws/production-cutover-runtime-bootstrap.mjs";
 import { canonicalJson } from "../aws/production-green-stage-b-contract.mjs";
 import { productionStaleSupersessionPredecessorIdentity, productionSupersessionEvidenceIdentity, productionSupersessionVersionId } from "../security/production-initial-migration-source-advance.mjs";
@@ -190,6 +191,17 @@ test("bootstrap policy stays constrained and delegates signer policy transition 
   assert.equal(permitsAssumeRole({ roleArn: "arn:aws:iam::368992683803:role/unrelated", mfa: true }), false);
   const trust = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQR_PRODUCTION_ECS_EXEC_OPERATOR_TRUST_POLICY.json", "utf8"));
   assert.doesNotThrow(() => assertEcsExecOperatorTrustDocument(trust));
+});
+
+test("same-account component session roles trust only the exact MFA bootstrap user", () => {
+  const roles = brokerSignerSuccessorManagedIdentities();
+  for (const name of [identityBootstrap.installationRole, identityBootstrap.cleanupRole]) {
+    const role = roles.find(({ role }) => role === name);
+    assert.deepEqual(role.trust.Statement, [{ Effect: "Allow", Principal: { AWS: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.userArn },
+      Action: "sts:AssumeRole", Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } }]);
+    assert.equal(permitsAssumeRole({ roleArn: role.arn, mfa: true }), false,
+      "the same-account resource trust, not the bootstrap identity policy, authorizes this exact role");
+  }
 });
 
 test("RLS operator contract and canonical policy enumerate the same three MFA-gated targets", () => {

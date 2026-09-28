@@ -86,6 +86,20 @@ test("exact signer successor publishes 13/14/15, installs exact policies, closes
   await assert.rejects(f.state.execute(), /already closed/);
 });
 
+test("signer broker can read every immutable lineage reservation before dispatch", () => {
+  const broker = brokerSignerSuccessorManagedIdentities().find(({ role }) => role === installationIdentity.provisionerRole);
+  const reads = broker.policy.Statement.filter(({ Action }) => Action === "s3:GetObject")
+    .flatMap(({ Resource }) => Array.isArray(Resource) ? Resource : [Resource]);
+  const expected = ["broker-policy-successor.json", "broker-recovery-successor.json", "broker-signer-successor.json", "signer-policy-transition.json"]
+    .map(name => `arn:aws:s3:::${identityBootstrap.bucket}/${identityBootstrap.prefix}${name}`);
+  for (const arn of expected) assert(reads.includes(arn), `missing pre-dispatch read: ${arn}`);
+  assert.equal(reads.some(arn => arn.includes("*") || arn.endsWith("/unrelated.json")), false);
+  const earlier = brokerRecoverySuccessorManagedIdentities().find(({ role }) => role === installationIdentity.provisionerRole);
+  assert.equal(earlier.policy.Statement.filter(({ Action }) => Action === "s3:GetObject")
+    .flatMap(({ Resource }) => Array.isArray(Resource) ? Resource : [Resource]).includes(expected[2]), false,
+    "signer reservation read remains scoped to the signer successor");
+});
+
 test("second successor rejects missing historical reservation, mixed predecessor and arbitrary published versions before mutation", async () => {
   for (const mutate of [
     f => f.state.objects.delete(`${identityBootstrap.prefix}broker-policy-successor.json`),

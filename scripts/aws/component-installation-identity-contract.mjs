@@ -165,7 +165,12 @@ export function brokerSignerSuccessorManagedIdentities() {
   const identities = managedIdentities(signerSuccessorEntryPoints);
   const broker = identities.find(({ role }) => role === installationIdentity.provisionerRole);
   const signerLedger = `arn:aws:s3:::${identityBootstrap.bucket}/${identityBootstrap.prefix}signer-policy-transition.json`;
-  broker.policy.Statement.find(({ Action }) => Action === "s3:GetObject").Resource.push(signerLedger);
+  broker.policy.Statement.find(({ Action }) => Action === "s3:GetObject").Resource.push(
+    `arn:aws:s3:::${identityBootstrap.bucket}/${identityBootstrap.prefix}broker-policy-successor.json`,
+    `arn:aws:s3:::${identityBootstrap.bucket}/${identityBootstrap.prefix}broker-recovery-successor.json`,
+    `arn:aws:s3:::${identityBootstrap.bucket}/${identityBootstrap.prefix}broker-signer-successor.json`,
+    signerLedger,
+  );
   broker.policy.Statement.find(({ Action }) => Action === "s3:PutObject").Resource.push(signerLedger);
   broker.policy.Statement.push({ Effect: "Allow", Action: ["iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions", "iam:ListEntitiesForPolicy", "iam:CreatePolicyVersion", "iam:DeletePolicyVersion"], Resource: "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease", Condition: { ArnEquals: { "lambda:SourceFunctionArn": componentBrokerArn } } });
   broker.policySha256 = digest(broker.policy);

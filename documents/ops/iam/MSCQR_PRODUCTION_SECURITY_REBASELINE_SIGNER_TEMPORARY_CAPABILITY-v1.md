@@ -198,8 +198,18 @@ application deployment authority.
 
 ### Signer session authority
 
+The two existing component session roles directly trust the exact same-account
+`mscqr-production-bootstrap-operator` IAM user with MFA. AWS STS permits that
+same-account user to assume a role through its direct resource-based trust
+without another `sts:AssumeRole` allow in the user policy; the user has no
+permissions boundary. The normal release-deployer assumption remains separately
+listed in the bootstrap policy. See the [AWS AssumeRole API authorization rules](https://docs.aws.amazon.com/STS/latest/APIReference/API_AssumeRole.html).
+
 The protected workflow publishes `SIGNER_AUTHORIZE` to broker version 15. The
 broker persists that authorization in the signer policy transition ledger.
+Before dispatch, the signer successor broker reads the exact policy, recovery,
+and signer successor reservation objects to authenticate its immutable lineage;
+its execution policy grants those three object reads and the signer ledger read.
 `production-signer-broker-transition-cli.mjs` obtains an MFA-backed bootstrap
 session and asks version 13 or 14 for `SIGNER_PROVE_INSTALL_SESSION` or
 `SIGNER_PROVE_REVOKE_SESSION`. Those read-only operations authenticate against
