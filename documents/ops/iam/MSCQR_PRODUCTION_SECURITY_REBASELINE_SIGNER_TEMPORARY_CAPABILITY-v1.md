@@ -16,8 +16,13 @@ disallow administrator bypass, and allow only the `main` branch; its workflow
 checks that exact branch allowlist before requesting AWS credentials. The
 reconciler bootstrap workflow may create
 that exact role and write the exact named inline policy as part of its
-source-bound, reviewed Terraform installation. Neither production operator
-identity can assume or modify the installer role. The signer transition
+source-bound, reviewed Terraform installation. Its permanent `iam:PutRolePolicy`
+grant is scoped to the exact installer role ARN; IAM does not support an inline
+policy-name condition for that API, so the reviewed source-bound plan and
+canonical Terraform policy document enforce the inline policy name and content.
+The bootstrap workflow can provision the role's policy but cannot change its
+trust or assume the installer role. The release-deployer has no permission to
+modify or assume it. The signer transition
 workflow accepts only the fixed install/revoke phases, verifies protected-main
 SHA and actual environment approval, and derives both policy documents from
 repository source. The workflow does not accept an ARN or policy document.

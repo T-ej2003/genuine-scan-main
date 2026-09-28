@@ -410,12 +410,7 @@
       "Sid": "SignerPolicyPut",
       "Effect": "Allow",
       "Action": "iam:PutRolePolicy",
-      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-signer-policy-installer",
-      "Condition": {
-        "StringEquals": {
-          "iam:PolicyName": "ProductionSignerPolicyInstaller"
-        }
-      }
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-signer-policy-installer"
     }
   ]
 }

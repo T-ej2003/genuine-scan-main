@@ -1099,7 +1099,7 @@ test("bootstrap role trust and permissions are exact and non-administrative", ()
   const serialized = JSON.stringify(policy);
   assert.doesNotMatch(serialized, /AdministratorAccess|PowerUserAccess|"iam:\*"|"s3:\*"/);
   assert.doesNotMatch(serialized, /CreateUser|CreateAccessKey|DeleteRole|PassRole/);
-  assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "SignerPolicyPut"), { Sid: "SignerPolicyPut", Effect: "Allow", Action: "iam:PutRolePolicy", Resource: INSTALLATION.signerPolicyInstallerRoleArn, Condition: { StringEquals: { "iam:PolicyName": "ProductionSignerPolicyInstaller" } } });
+  assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "SignerPolicyPut"), { Sid: "SignerPolicyPut", Effect: "Allow", Action: "iam:PutRolePolicy", Resource: INSTALLATION.signerPolicyInstallerRoleArn });
   assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "UpdateExactMixedRecoveryRoleTrust"), { Sid: "UpdateExactMixedRecoveryRoleTrust", Effect: "Allow", Action: "iam:UpdateAssumeRolePolicy", Resource: MIXED_RECOVERY_EXECUTOR.roleArn });
   assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "UpdateExactBootstrapOperatorPolicyAuthorizerRoleTrust"), { Sid: "UpdateExactBootstrapOperatorPolicyAuthorizerRoleTrust", Effect: "Allow", Action: "iam:UpdateAssumeRolePolicy", Resource: BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.roleArn });
   assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "UpdateExactReconcilerPolicyVersion"), { Sid: "UpdateExactReconcilerPolicyVersion", Effect: "Allow", Action: "iam:CreatePolicyVersion", Resource: [INITIAL_ACTIVATION_RECONCILER.policyArn, MIXED_RECOVERY_EXECUTOR.policyArn, BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.policyArn] });
@@ -1179,8 +1179,8 @@ test("bootstrap inline-policy quota accounting matches IAM replacement semantics
   assert.throws(() => assertIamRoleInlinePolicyReplacementQuota({ inlinePolicies: [{ policyName: "Other", document: sizedPolicy(100) }], replacedPolicyName: "Target", proposedPolicy: sizedPolicy(100) }), /target is ambiguous/);
   assert.throws(() => assertIamRoleInlinePolicyReplacementQuota({ inlinePolicies: [{ policyName: "Target", document: sizedPolicy(100) }, { policyName: "Target", document: sizedPolicy(100) }], replacedPolicyName: "Target", proposedPolicy: sizedPolicy(100) }), /inventory is ambiguous/);
   const realPolicy = fs.readFileSync(INSTALLATION_BOOTSTRAP.permissionsPath, "utf8");
-  assert.equal(iamInlinePolicySize(realPolicy), 10_221);
-  assert.equal(assertIamRoleInlinePolicyReplacementQuota({ inlinePolicies: [], replacedPolicyName: INSTALLATION_BOOTSTRAP.inlinePolicyName, proposedPolicy: realPolicy, replacementRequired: false }).headroom, 19);
+  assert.equal(iamInlinePolicySize(realPolicy), 10_139);
+  assert.equal(assertIamRoleInlinePolicyReplacementQuota({ inlinePolicies: [], replacedPolicyName: INSTALLATION_BOOTSTRAP.inlinePolicyName, proposedPolicy: realPolicy, replacementRequired: false }).headroom, 101);
 });
 
 test("bootstrap live discovery rejects aggregate inline-policy quota overflow before preparation", () => {
@@ -1412,7 +1412,7 @@ test("bootstrap accepts only exact historical predecessors and binds authorizati
   inline = generation8;
   assert.equal(crypto.createHash("sha256").update(canonicalJson(generation8)).digest("hex"), liveEvidenceReaderPredecessor.bootstrapPolicySha256);
   assert.equal(iamInlinePolicySize(generation8), 8_817);
-  assert.equal(assertIamRoleInlinePolicyReplacementQuota({ inlinePolicies: [{ policyName: INSTALLATION_BOOTSTRAP.inlinePolicyName, document: generation8 }], replacedPolicyName: INSTALLATION_BOOTSTRAP.inlinePolicyName, proposedPolicy: desired }).resultingAggregateSize, 10_221);
+  assert.equal(assertIamRoleInlinePolicyReplacementQuota({ inlinePolicies: [{ policyName: INSTALLATION_BOOTSTRAP.inlinePolicyName, document: generation8 }], replacedPolicyName: INSTALLATION_BOOTSTRAP.inlinePolicyName, proposedPolicy: desired }).resultingAggregateSize, iamInlinePolicySize(desired));
   assert.ok(generation8.Statement.find(({ Sid }) => Sid === "UpdateExactReconcilerPolicyVersion").Resource.includes(liveEvidenceReaderPredecessor.requiredAuthorizerPolicyArn));
   assert.deepEqual(discoverBootstrapRole({ run }), { classification: "EXACT_PREDECESSOR_GENERATION_8", predecessorPolicySha256: liveEvidenceReaderPredecessor.bootstrapPolicySha256 });
   const generation8Authorization = createBootstrapAuthorization({ sourceSha, preparation: bootstrapPreparation("EXACT_PREDECESSOR_GENERATION_8", liveEvidenceReaderPredecessor.bootstrapPolicySha256), approval: bootstrapApproval, authorizedAt: now.toISOString() });

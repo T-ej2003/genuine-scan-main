@@ -125,10 +125,9 @@ test("bootstrap cannot create policy versions; the independent installer can tra
   const roleArn = `arn:aws:iam::${C.accountId}:role/${C.installerRoleName}`;
   const signerStatements = bootstrapProvisioner.Statement.filter((statement) => JSON.stringify(statement.Resource).includes(roleArn));
   assert.deepEqual(signerStatements.find(({ Action }) => Action === "iam:CreateRole"), { Sid: "SignerRoleCreate", Effect: "Allow", Action: "iam:CreateRole", Resource: roleArn });
-  assert.deepEqual(signerStatements.find(({ Action }) => Action === "iam:PutRolePolicy"), { Sid: "SignerPolicyPut", Effect: "Allow", Action: "iam:PutRolePolicy", Resource: roleArn, Condition: { StringEquals: { "iam:PolicyName": "ProductionSignerPolicyInstaller" } } });
+  assert.deepEqual(signerStatements.find(({ Action }) => Action === "iam:PutRolePolicy"), { Sid: "SignerPolicyPut", Effect: "Allow", Action: "iam:PutRolePolicy", Resource: roleArn });
   assert.deepEqual(signerStatements.find(({ Sid }) => Sid === "MixedRecoveryRoleRead").Action, ["iam:GetRole", "iam:ListAttachedRolePolicies", "iam:ListRolePolicies", "iam:ListRoleTags"]);
   assert.deepEqual(signerStatements.find(({ Sid }) => Sid === "BootstrapInlineRead"), { Sid: "BootstrapInlineRead", Effect: "Allow", Action: ["iam:GetRole", "iam:GetRolePolicy", "iam:ListAttachedRolePolicies", "iam:ListRolePolicies"], Resource: ["arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler-bootstrap", roleArn] });
-  assert.equal(signerStatements.find(({ Action }) => Action === "iam:PutRolePolicy").Condition.StringEquals["iam:PolicyName"], "ProductionSignerPolicyInstaller");
   assert.equal(signerStatements.some(({ Action }) => (Array.isArray(Action) ? Action : [Action]).some((action) => ["iam:UpdateAssumeRolePolicy", "iam:AttachRolePolicy", "iam:PassRole"].includes(action))), false);
   const bootstrapTrust = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionInitialActivationPolicyReconcilerBootstrapTrust-v1.json", "utf8"));
   assert.equal(bootstrapTrust.Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:sub"], "repo:T-ej2003/genuine-scan-main:environment:production-initial-activation-reconciler-bootstrap");
