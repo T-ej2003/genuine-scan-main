@@ -155,18 +155,16 @@ const runner = (initial, credentialTopology = {}, { stalePostWriteReads = 0, tra
 };
 const permitsAssumeRole = ({ roleArn, mfa }) => desired.document.Statement.some((statement) => statement.Effect === "Allow" && statement.Action === "sts:AssumeRole" && (Array.isArray(statement.Resource) ? statement.Resource : [statement.Resource]).includes(roleArn) && statement.Condition?.Bool?.["aws:MultiFactorAuthPresent"] === "true" && mfa === true);
 
-test("bootstrap policy stays within the inline quota and adds only exact signer-policy transition authority", () => {
+test("bootstrap policy stays constrained and delegates signer policy transition to the protected installer", () => {
   const assume = desired.document.Statement.find(({ Action }) => Action === "sts:AssumeRole");
   assert.deepEqual(assume, { Effect: "Allow", Action: "sts:AssumeRole", Resource: [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.releaseRoleArn, BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.verifierRoleArn, BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.publisherBootstrapRoleArn], Condition: { Bool: { "aws:MultiFactorAuthPresent": "true" } } });
   assert.equal(desired.document.Statement.some(({ Resource }) => Resource === "*" || (Array.isArray(Resource) && Resource.includes("*"))), false);
-  const permittedActions = new Set(["sts:AssumeRole", "iam:GetUser", "iam:ListMFADevices", "s3:ListBucket", "s3:GetObject", "s3:PutObject", "s3:DeleteObject", "iam:GetRole", "iam:GetRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies", "iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions", "iam:ListEntitiesForPolicy", "iam:CreatePolicyVersion"]);
+  const permittedActions = new Set(["sts:AssumeRole", "iam:GetUser", "iam:ListMFADevices", "s3:ListBucket", "s3:GetObject", "s3:PutObject", "s3:DeleteObject", "iam:GetRole", "iam:GetRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies", "iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions", "iam:ListEntitiesForPolicy"]);
   assert.equal(desired.document.Statement.flatMap(({ Action }) => Array.isArray(Action) ? Action : [Action]).every((action) => permittedActions.has(action)), true);
   const policyRead = desired.document.Statement.find(({ Action, Resource }) => Array.isArray(Action) && Action.includes("iam:ListPolicyVersions") && Resource === "arn:aws:iam::368992683803:policy/MSCQRProductionWebImagePublisherBoundary");
   assert.deepEqual(policyRead, { Effect: "Allow", Action: ["iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions"], Resource: "arn:aws:iam::368992683803:policy/MSCQRProductionWebImagePublisherBoundary" });
-  const signerPolicyTransition = desired.document.Statement.find(({ Action, Resource }) => Array.isArray(Action) && Action.includes("iam:CreatePolicyVersion") && Resource === "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease");
-  assert.deepEqual(signerPolicyTransition.Action, ["iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions", "iam:ListEntitiesForPolicy", "iam:CreatePolicyVersion"]);
-  assert.deepEqual(signerPolicyTransition.Condition, { Bool: { "aws:MultiFactorAuthPresent": "true" } });
-  assert.equal(JSON.stringify(desired.document).replace(/\s/g, "").length, 1963);
+  assert.equal(desired.document.Statement.some(({ Action }) => (Array.isArray(Action) ? Action : [Action]).includes("iam:CreatePolicyVersion")), false);
+  assert.equal(desired.document.Statement.some(({ Action, Resource }) => Action === "sts:AssumeRole" && (Array.isArray(Resource) ? Resource : [Resource]).includes("arn:aws:iam::368992683803:role/mscqr-production-signer-policy-installer")), false);
   assert.equal(JSON.stringify(desired.document).replace(/\s/g, "").length <= 2048, true);
   for (const denied of ["iam:CreateRole", "iam:CreatePolicy", "iam:PutRolePolicy", "iam:AttachRolePolicy", "iam:UpdateAssumeRolePolicy", "iam:DeleteRole", "iam:PassRole"]) assert.equal(desired.document.Statement.flatMap(({ Action }) => Array.isArray(Action) ? Action : [Action]).includes(denied), false);
   const stateObjects = desired.document.Statement.find(({ Action }) => Array.isArray(Action) && Action.includes("s3:GetObject"));
@@ -188,6 +186,7 @@ test("bootstrap policy stays within the inline quota and adds only exact signer-
   assert.equal(permitsAssumeRole({ roleArn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.releaseRoleArn, mfa: false }), false);
   assert.equal(permitsAssumeRole({ roleArn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.verifierRoleArn, mfa: false }), false);
   assert.equal(permitsAssumeRole({ roleArn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.publisherBootstrapRoleArn, mfa: false }), false);
+  assert.equal(permitsAssumeRole({ roleArn: "arn:aws:iam::368992683803:role/mscqr-production-signer-policy-installer", mfa: true }), false);
   assert.equal(permitsAssumeRole({ roleArn: "arn:aws:iam::368992683803:role/unrelated", mfa: true }), false);
   const trust = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQR_PRODUCTION_ECS_EXEC_OPERATOR_TRUST_POLICY.json", "utf8"));
   assert.doesNotThrow(() => assertEcsExecOperatorTrustDocument(trust));
@@ -212,7 +211,7 @@ test("governed reconciliation accepts only the exact predecessor and installs on
   assert.equal(authenticateBootstrapOperatorLiveState(live(fixture.document())).status, "EXACT_COMPLETE");
 });
 
-test("canonical signer-capable bootstrap policy requires no follow-up inline write", () => {
+test("canonical bootstrap readback policy requires no follow-up inline write", () => {
   const preparation = createBootstrapOperatorPolicyPreparation({ sourceSha, liveState: live(desired.document), preparedAt: now.toISOString() });
   const authorization = createBootstrapOperatorPolicyAuthorization({ sourceSha, preparation, protectedEnvironmentApprovalEvidence: approval, authorizedAt: now.toISOString() });
   assert.equal(preparation.predecessorClassification, "EXACT_COMPLETE");
