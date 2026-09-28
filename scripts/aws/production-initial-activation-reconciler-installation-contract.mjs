@@ -343,25 +343,38 @@ const AUTHORIZER_ATTACHMENT_DRIFT_ADDRESSES = Object.freeze([
   "aws_iam_role.bootstrap_operator_policy_authorizer",
 ]);
 
-function assertInstallationResourceDrift(resourceDrift, livePredecessor) {
-  const drift = resourceDrift ?? [];
+function assertInstallationResourceDrift(plan, livePredecessor) {
+  const drift = plan.resource_drift ?? [];
   if (!Array.isArray(drift)) throw new Error("Installation Terraform resource drift is malformed.");
-  if (livePredecessor !== EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE) {
+  if (livePredecessor === SIGNER_BOTH_POLICY_EXPANSION && drift.length === 0) return Object.freeze({ resourceDriftCount: 0, resourceDriftSha256: EMPTY_RESOURCE_DRIFT_SHA256 });
+  if (livePredecessor !== EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE && livePredecessor !== SIGNER_BOTH_POLICY_EXPANSION) {
     if (drift.length !== 0) throw new Error("Installation Terraform plan envelope is not exact.");
     return Object.freeze({ resourceDriftCount: 0, resourceDriftSha256: EMPTY_RESOURCE_DRIFT_SHA256 });
   }
+  const signer = livePredecessor === SIGNER_BOTH_POLICY_EXPANSION;
+  const policyName = signer ? "broker_recovery_successor_evidence_reader" : "bootstrap_operator_policy_authorizer";
+  const policyArn = signer ? INSTALLATION.brokerRecoverySuccessorEvidenceReaderPolicyArn : INSTALLATION.bootstrapOperatorPolicyAuthorizerPolicyArn;
+  const addresses = signer ? ["aws_iam_policy.broker_recovery_successor_evidence_reader", "aws_iam_role.broker_recovery_successor_evidence_reader"] : AUTHORIZER_ATTACHMENT_DRIFT_ADDRESSES;
+  if (signer) {
+    const actions = plan.resource_changes.filter((entry) => canonicalJson(entry?.change?.actions) !== canonicalJson(["no-op"])).map(({ address, change }) => [address, change.actions]).sort(([left], [right]) => left.localeCompare(right));
+    const expected = [["aws_iam_policy.bootstrap_operator_policy_authorizer", ["update"]], ["aws_iam_policy.broker_recovery_successor_evidence_reader", ["update"]], ["aws_iam_role.signer_policy_installer", ["create"]], ["aws_iam_role_policy.signer_policy_installer", ["create"]]].sort(([left], [right]) => left.localeCompare(right));
+    const attachment = plan.resource_changes.find((entry) => entry?.address === "aws_iam_role_policy_attachment.broker_recovery_successor_evidence_reader");
+    const attached = { id: `mscqr-production-broker-recovery-successor-evidence-reader/${policyArn}`, role: "mscqr-production-broker-recovery-successor-evidence-reader", policy_arn: policyArn };
+    if (canonicalJson(actions) !== canonicalJson(expected) || !attachment || canonicalJson(attachment.change?.actions) !== canonicalJson(["no-op"]) || canonicalJson(attachment.change?.before) !== canonicalJson(attached) || canonicalJson(attachment.change?.after) !== canonicalJson(attached) || canonicalJson(attachment.change?.after_unknown) !== canonicalJson({})) throw new Error("Installation evidence-reader attachment reflection requires the exact incremental actions and existing no-op attachment.");
+  }
   if (drift.length !== 2) throw new Error("Installation authorizer attachment-reflection drift count is not exact.");
   const ordered = [...drift].sort((left, right) => left?.address?.localeCompare(right?.address));
-  if (canonicalJson(ordered.map(({ address }) => address)) !== canonicalJson(AUTHORIZER_ATTACHMENT_DRIFT_ADDRESSES)) throw new Error("Installation authorizer attachment-reflection drift addresses are not exact.");
+  if (canonicalJson(ordered.map(({ address }) => address)) !== canonicalJson(addresses)) throw new Error("Installation authorizer attachment-reflection drift addresses are not exact.");
   for (const entry of ordered) {
     exactFields(entry, new Set(["address", "change", "mode", "name", "provider_name", "type"]), "Installation authorizer attachment-reflection drift");
     exactFields(entry.change, new Set(["actions", "after", "after_sensitive", "after_unknown", "before", "before_sensitive"]), "Installation authorizer attachment-reflection drift change");
     if (entry.mode !== "managed" || entry.provider_name !== "registry.terraform.io/hashicorp/aws" || canonicalJson(entry.change.actions) !== canonicalJson(["update"]) || canonicalJson(entry.change.after_unknown) !== canonicalJson({})) throw new Error("Installation authorizer attachment-reflection drift action is not exact.");
     const { before, after } = entry.change;
     if (!before || !after || typeof before !== "object" || typeof after !== "object" || Array.isArray(before) || Array.isArray(after)) throw new Error("Installation authorizer attachment-reflection drift values are malformed.");
-    if (entry.address === AUTHORIZER_ATTACHMENT_DRIFT_ADDRESSES[0]) {
-      if (entry.type !== "aws_iam_policy" || entry.name !== "bootstrap_operator_policy_authorizer" || before.attachment_count !== 0 || after.attachment_count !== 1 || canonicalJson({ ...before, attachment_count: 1 }) !== canonicalJson(after) || canonicalJson(entry.change.before_sensitive) !== canonicalJson({ tags: {}, tags_all: {} }) || canonicalJson(entry.change.after_sensitive) !== canonicalJson({ tags: {}, tags_all: {} })) throw new Error("Installation authorizer policy attachment-reflection drift is not exact.");
-    } else if (entry.type !== "aws_iam_role" || entry.name !== "bootstrap_operator_policy_authorizer" || canonicalJson(before.managed_policy_arns) !== canonicalJson([]) || canonicalJson(after.managed_policy_arns) !== canonicalJson([INSTALLATION.bootstrapOperatorPolicyAuthorizerPolicyArn]) || canonicalJson({ ...before, managed_policy_arns: [INSTALLATION.bootstrapOperatorPolicyAuthorizerPolicyArn] }) !== canonicalJson(after) || canonicalJson(entry.change.before_sensitive) !== canonicalJson({ inline_policy: [], managed_policy_arns: [], tags: {}, tags_all: {} }) || canonicalJson(entry.change.after_sensitive) !== canonicalJson({ inline_policy: [], managed_policy_arns: [false], tags: {}, tags_all: {} })) throw new Error("Installation authorizer role attachment-reflection drift is not exact.");
+    if (entry.address === addresses[0]) {
+      if (entry.type !== "aws_iam_policy" || entry.name !== policyName || before.attachment_count !== 0 || after.attachment_count !== 1 || canonicalJson({ ...before, attachment_count: 1 }) !== canonicalJson(after) || canonicalJson(entry.change.before_sensitive) !== canonicalJson({ tags: {}, tags_all: {} }) || canonicalJson(entry.change.after_sensitive) !== canonicalJson({ tags: {}, tags_all: {} })) throw new Error("Installation authorizer policy attachment-reflection drift is not exact.");
+    } else if (entry.type !== "aws_iam_role" || entry.name !== policyName || canonicalJson(before.managed_policy_arns) !== canonicalJson([]) || canonicalJson(after.managed_policy_arns) !== canonicalJson([policyArn]) || canonicalJson({ ...before, managed_policy_arns: [policyArn] }) !== canonicalJson(after) || canonicalJson(entry.change.before_sensitive) !== canonicalJson({ inline_policy: [], managed_policy_arns: [], tags: {}, tags_all: {} }) || canonicalJson(entry.change.after_sensitive) !== canonicalJson({ inline_policy: [], managed_policy_arns: [false], tags: {}, tags_all: {} })) throw new Error("Installation authorizer role attachment-reflection drift is not exact.");
+    if (signer && canonicalJson(after) !== canonicalJson(plan.resource_changes.find((change) => change.address === entry.address)?.change?.before)) throw new Error("Installation evidence-reader attachment reflection differs from the actionable plan predecessor.");
   }
   return Object.freeze({ resourceDriftCount: ordered.length, resourceDriftSha256: canonicalSha256(ordered) });
 }
@@ -369,7 +382,7 @@ function assertInstallationResourceDrift(resourceDrift, livePredecessor) {
 export function assertInstallationPlan(plan, { livePredecessor } = {}) {
   if (!plan || typeof plan !== "object" || !Array.isArray(plan.resource_changes)) throw new Error("Installation Terraform plan JSON is malformed.");
   if (plan.format_version !== "1.2" || plan.terraform_version !== INSTALLATION.terraformVersion || plan.errored !== false || plan.complete !== true || plan.applyable !== true) throw new Error("Installation Terraform plan envelope is not exact.");
-  const resourceDrift = assertInstallationResourceDrift(plan.resource_drift, livePredecessor);
+  const resourceDrift = assertInstallationResourceDrift(plan, livePredecessor);
   const rootModule = assertInstallationPlanConfiguration(plan);
   const changes = plan.resource_changes;
   if (changes.length !== INSTALLATION.expectedAddresses.length) throw new Error("Installation plan resource count is not exact.");
@@ -584,7 +597,7 @@ export function assertInstallationPreparation(value, { sourceSha, planBytes } = 
     || value.planSemantics.noOpCount !== INSTALLATION.expectedAddresses.length - value.planSemantics.resourceChangeCount
     || ![0, 1, 2].includes(value.planSemantics.updateCount) || value.planSemantics.deleteCount !== 0 || value.planSemantics.replaceCount !== 0
     || !Number.isSafeInteger(value.planSemantics.resourceDriftCount) || !SHA256.test(value.planSemantics.resourceDriftSha256 || "")
-    || (value.livePredecessor === EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE ? value.planSemantics.resourceDriftCount !== 2 || value.planSemantics.resourceDriftSha256 === EMPTY_RESOURCE_DRIFT_SHA256 : value.planSemantics.resourceDriftCount !== 0 || value.planSemantics.resourceDriftSha256 !== EMPTY_RESOURCE_DRIFT_SHA256)
+    || (value.livePredecessor === EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE ? value.planSemantics.resourceDriftCount !== 2 || value.planSemantics.resourceDriftSha256 === EMPTY_RESOURCE_DRIFT_SHA256 : value.livePredecessor === SIGNER_BOTH_POLICY_EXPANSION ? ![0, 2].includes(value.planSemantics.resourceDriftCount) || (value.planSemantics.resourceDriftCount === 0) !== (value.planSemantics.resourceDriftSha256 === EMPTY_RESOURCE_DRIFT_SHA256) : value.planSemantics.resourceDriftCount !== 0 || value.planSemantics.resourceDriftSha256 !== EMPTY_RESOURCE_DRIFT_SHA256)
     || value.planSemantics.changedAddresses.length !== value.planSemantics.resourceChangeCount || JSON.stringify(value.planSemantics.changedAddresses) !== JSON.stringify([...value.planSemantics.changedAddresses].sort()) || value.planSemantics.changedAddresses.some((address) => !INSTALLATION.expectedAddresses.includes(address))
     || value.planSemantics.noOpAddresses.length !== value.planSemantics.noOpCount || JSON.stringify(value.planSemantics.noOpAddresses) !== JSON.stringify([...value.planSemantics.noOpAddresses].sort()) || value.planSemantics.noOpAddresses.some((address) => !INSTALLATION.expectedAddresses.includes(address))
     || JSON.stringify(value.livePredecessorAddresses) !== JSON.stringify(["EXACT_UPDATE", "EXACT_TRUST_UPDATE", "EXACT_AUTHORIZER_TRUST_UPDATE", "EXACT_AUTHORIZER_POLICY_UPDATE"].includes(value.livePredecessor) ? [...INSTALLATION.expectedAddresses].sort() : ["EXACT_EXPANSION", EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, ...SIGNER_POLICY_EXPANSIONS].includes(value.livePredecessor) ? planPredecessorAddresses : value.planSemantics.noOpAddresses)
