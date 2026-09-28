@@ -56,7 +56,7 @@ export async function establishComponentRecoveryTerraformSession(binding, depend
 
 export async function establishSignerInstallSession(binding, dependencies = {}) {
   sessionProofBinding({ ...binding, purpose: "INSTALL" });
-  return establish({ ...binding, purpose: "INSTALL" }, dependencies, null, ["13"], ["SIGNER_INSTALL", "SIGNER_ADVANCE"]);
+  return establish({ ...binding, purpose: "INSTALL" }, dependencies, null, ["13"], ["SIGNER_INSTALL", "SIGNER_ADVANCE", "SIGNER_RECOVERY"]);
 }
 
 export async function establishSignerRevokeSession(binding, dependencies = {}) {
