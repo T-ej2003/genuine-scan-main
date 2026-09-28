@@ -102,6 +102,10 @@ test("bootstrap cannot create policy versions; the independent installer can tra
   assert.match(transitionWorkflow, /type: choice[\s\S]*?options: \[policy-install, policy-revoke\]/);
   assert.match(transitionWorkflow, /abort_before_apply:[\s\S]*?type: boolean/);
   assert.match(transitionOperation, /args\+=\(--abort-before-apply-confirmed\)/);
+  const approvalStep = transitionOperation.split("- name: Authenticate independent production approval")[1].split("\n      - ")[0];
+  const mutationStep = transitionOperation.split("- name: Apply canonical transition only")[1].split("\n      - ")[0];
+  assert.match(approvalStep, /GITHUB_TOKEN: \$\{\{ github\.token \}\}/);
+  assert.match(mutationStep, /ABORT_BEFORE_APPLY: \$\{\{ inputs\.abort_before_apply \}\}/);
   assert.match(transitionWorkflow, /uses: \.\/\.github\/workflows\/production-signer-policy-transition-operation\.yml/);
   assert.match(transitionOperation, /workflow_call:/);
   assert.match(transitionOperation, /environment: production-signer-policy-transition/);
