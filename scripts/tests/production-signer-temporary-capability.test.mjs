@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import path from "node:path";
+import yaml from "js-yaml";
 import { assertCanonicalPolicyHistory, assertSignerBootstrapIdentity, assertSignerCliArguments, assertSignerInstallerIdentity } from "../aws/reconcile-production-signer-temporary-capability.mjs";
 import {
   SIGNER_TEMPORARY_CAPABILITY as C, assertSignerCapabilityEvidence, assertSignerCreationPlan, assertSignerRevocation,
@@ -193,6 +195,41 @@ test("INSTALLING recovery identifies only the active canonical temporary version
   assert.ok(workflow.indexOf("Preserve pending install recovery evidence before policy mutation") < workflow.indexOf("Apply canonical transition only"));
   assert.ok(workflow.indexOf("Preserve revoke recovery evidence before policy mutation") < workflow.indexOf("Apply canonical transition only"));
   assert.match(workflow, /name: production-signer-policy-transition-recovery[\s\S]*?retention-days: 7/);
+});
+
+test("signer environment-approval API permission and private evidence path reach every workflow step", () => {
+  const workflowDirectory = ".github/workflows";
+  const callerName = "production-signer-policy-transition.yml";
+  const operationName = "production-signer-policy-transition-operation.yml";
+  const caller = yaml.load(fs.readFileSync(path.join(workflowDirectory, callerName), "utf8"));
+  const operation = yaml.load(fs.readFileSync(path.join(workflowDirectory, operationName), "utf8"));
+  const permissions = (workflow) => Object.fromEntries(Object.entries(workflow.permissions || {}).sort(([a], [b]) => a.localeCompare(b)));
+  assert.deepEqual(permissions(operation), { "actions": "read", "contents": "read", "id-token": "write" });
+
+  const callerJobs = fs.readdirSync(workflowDirectory).filter((name) => /\.ya?ml$/.test(name)).flatMap((name) => {
+    const parsed = yaml.load(fs.readFileSync(path.join(workflowDirectory, name), "utf8"));
+    return Object.entries(parsed.jobs || {}).filter(([, job]) => job.uses === `./.github/workflows/${operationName}`).map(([id, job]) => ({ name, id, permissions: job.permissions }));
+  });
+  assert.deepEqual(callerJobs.map(({ name }) => name), [callerName]);
+  assert.deepEqual(permissions(caller), { "actions": "read", "contents": "read", "id-token": "write" });
+  for (const job of callerJobs) if (job.permissions) assert.equal(job.permissions.actions, "read", `${job.name}:${job.id} must not strip actions:read`);
+
+  const steps = operation.jobs.transition.steps;
+  const approval = steps.find(({ name }) => name === "Authenticate independent production approval");
+  assert.equal(approval.env.GITHUB_TOKEN, "${{ github.token }}");
+  const setup = approval.run;
+  const approvalInvocation = setup.indexOf("production-github-environment-approval.mjs");
+  assert.ok(setup.indexOf('mkdir -p -m 700 "$approval_dir"') < approvalInvocation);
+  assert.ok(setup.indexOf('chmod 700 "$approval_dir"') < approvalInvocation);
+  assert.ok(setup.indexOf("stat -c '%a' \"$approval_dir\"") < approvalInvocation);
+  assert.ok(setup.includes('test "$(stat -c \'%a\' "$approval_dir")" = 700'));
+  assert.ok(setup.includes('test "$(stat -c \'%u\' "$approval_dir")" = "$(id -u)"'));
+  assert.ok(setup.includes('--output "$approval_dir/approval.json"'));
+  assert.equal(setup.includes('--output "$RUNNER_TEMP/signer-policy-environment-approval.json"'), false);
+  const approvalSource = fs.readFileSync("scripts/aws/production-github-environment-approval.mjs", "utf8");
+  assert.ok(approvalSource.includes("actions/runs/${input.workflowRunId}/approvals"));
+  assert.ok(approvalSource.includes("token: (deps.env || process.env).GITHUB_TOKEN"));
+  assert.ok(approvalSource.includes("ensureStageBPrivateDirectory({ directory: path.dirname(output)"));
 });
 
 test("signer transitions accept only authenticated historical steady policy versions", () => {

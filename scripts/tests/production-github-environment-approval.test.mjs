@@ -125,6 +125,7 @@ test("workflow-shaped private directory publishes consumable evidence without to
 
 test("non-private and symlink approval evidence parents remain rejected", async (t) => {
   const runnerTemp = fs.mkdtempSync(path.join(os.tmpdir(), "production-approval-parent-"));
+  fs.chmodSync(runnerTemp, 0o755);
   const unsafe = path.join(runnerTemp, "unsafe");
   const target = path.join(runnerTemp, "target");
   fs.mkdirSync(unsafe, { mode: 0o755 });
@@ -139,6 +140,7 @@ test("non-private and symlink approval evidence parents remain rejected", async 
   ];
   let fetchCalls = 0;
   const deps = { env: { GITHUB_TOKEN: "fixture-token" }, fetchImpl: async () => { fetchCalls += 1; return { ok: true, json: async () => config() }; } };
+  await assert.rejects(() => runProductionEnvironmentApprovalCli(args(path.join(runnerTemp, "direct-runner-temp.json")), deps), /mode 0700/);
   await assert.rejects(() => runProductionEnvironmentApprovalCli(args(path.join(unsafe, "evidence.json")), deps), /mode 0700/);
   await assert.rejects(() => runProductionEnvironmentApprovalCli(args(path.join(linked, "evidence.json")), deps), /symlink|non-symlink/);
   assert.equal(fetchCalls, 0);

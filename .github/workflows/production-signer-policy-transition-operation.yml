@@ -31,6 +31,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
   id-token: write
 
 jobs:
@@ -72,8 +73,16 @@ jobs:
           SOURCE_SHA: ${{ inputs.source_sha }}
         run: |
           set -euo pipefail
+          umask 077
+          approval_dir="$RUNNER_TEMP/signer-policy-transition-approval"
+          mkdir -p -m 700 "$approval_dir"
+          test ! -L "$approval_dir"
+          chmod 700 "$approval_dir"
+          test ! -L "$approval_dir"
+          test "$(stat -c '%a' "$approval_dir")" = 700
+          test "$(stat -c '%u' "$approval_dir")" = "$(id -u)"
           node scripts/aws/production-github-environment-approval.mjs \
-            --output "$RUNNER_TEMP/signer-policy-environment-approval.json" \
+            --output "$approval_dir/approval.json" \
             --repository "$GITHUB_REPOSITORY" --environment production-signer-policy-transition \
             --source-sha "$SOURCE_SHA" --workflow-ref "$GITHUB_WORKFLOW_REF" \
             --event-name "$GITHUB_EVENT_NAME" --workflow-run-id "$GITHUB_RUN_ID" \

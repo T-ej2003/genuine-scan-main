@@ -21,6 +21,11 @@ identity can assume or modify the installer role. The signer transition
 workflow accepts only the fixed install/revoke phases, verifies protected-main
 SHA and actual environment approval, and derives both policy documents from
 repository source. The workflow does not accept an ARN or policy document.
+Its caller and reusable workflow both grant the required `actions: read`
+permission for approval-history verification, alongside the existing source
+read and OIDC permissions. Approval evidence is written only after creating
+and verifying a runner-temporary directory owned by the job with mode `0700`;
+the evidence writer independently enforces that private-parent contract.
 
 Policy installation and revocation are performed only by
 `.github/workflows/production-signer-policy-transition.yml`. The MFA bootstrap
