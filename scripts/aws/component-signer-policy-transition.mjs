@@ -104,10 +104,26 @@ async function listVersions(iam) {
   return Promise.all(values.map(async version => ({ ...version, document: decode((await iam("GetPolicyVersion", { PolicyArn: C.sourcePolicyArn, VersionId: version.VersionId })).PolicyVersion.Document) })));
 }
 
+async function listEntities(iam) {
+  const entities = { PolicyRoles: [], PolicyUsers: [], PolicyGroups: [] }, markers = new Set(); let Marker;
+  do {
+    const page = await iam("ListEntitiesForPolicy", { PolicyArn: C.sourcePolicyArn, ...(Marker ? { Marker } : {}) });
+    for (const key of Object.keys(entities)) {
+      assert(Array.isArray(page[key]), "Signer policy entity inventory is malformed");
+      entities[key].push(...page[key]);
+    }
+    assert(typeof page.IsTruncated === "boolean", "Signer policy entity inventory is malformed");
+    if (!page.IsTruncated) break;
+    assert(typeof page.Marker === "string" && page.Marker && !markers.has(page.Marker) && markers.size < 20, "Signer policy entity pagination is invalid");
+    Marker = page.Marker; markers.add(Marker);
+  } while (Marker);
+  return entities;
+}
+
 async function observe(iam, identity) {
   const [policy, entities, versions] = await Promise.all([
     iam("GetPolicy", { PolicyArn: C.sourcePolicyArn }),
-    iam("ListEntitiesForPolicy", { PolicyArn: C.sourcePolicyArn }),
+    listEntities(iam),
     listVersions(iam),
   ]);
   assertSignerPolicySoleConsumer({ policy: policy.Policy, entities });

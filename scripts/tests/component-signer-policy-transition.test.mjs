@@ -9,13 +9,13 @@ const steady = JSON.parse(fs.readFileSync(new URL("../../documents/ops/iam/MSCQR
 const temporary = buildSignerTemporaryPolicy(steady, { sourceSha, transitionId });
 const authorization = (operation, offset = -1000, workflowRunId = "42", protectedMainSha = sourceSha, authorizedAt = now) => buildSignerBrokerAuthorization({ sourceSha, protectedMainSha, transitionId, operation, workflowRunId, approvedAt: new Date(authorizedAt + offset).toISOString(), expiresAt: new Date(authorizedAt + offset + 30 * 60 * 1000).toISOString() });
 
-function fixture({ main = { sha: sourceSha }, clock = { value: now } } = {}) {
+function fixture({ main = { sha: sourceSha }, clock = { value: now }, entityPages = [{ PolicyRoles: [{ RoleName: "mscqr-production-release-deployer" }], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }] } = {}) {
   let object, etag = 0, versions = [{ VersionId: "v1", IsDefaultVersion: true, CreateDate: "2026-09-01T00:00:00Z", document: steady }];
   const calls = [];
   const iam = async (operation, input) => {
     calls.push({ operation, input });
     if (operation === "GetPolicy") return { Policy: { Arn: C.sourcePolicyArn, DefaultVersionId: versions.find(value => value.IsDefaultVersion).VersionId, PermissionsBoundaryUsageCount: 0 } };
-    if (operation === "ListEntitiesForPolicy") return { PolicyRoles: [{ RoleName: "mscqr-production-release-deployer" }], PolicyUsers: [], PolicyGroups: [] };
+    if (operation === "ListEntitiesForPolicy") return entityPages[input.Marker ? Number(input.Marker) : 0];
     if (operation === "ListPolicyVersions") return { Versions: versions.map(({ document, ...value }) => value), IsTruncated: false };
     if (operation === "GetPolicyVersion") return { PolicyVersion: { Document: versions.find(value => value.VersionId === input.VersionId).document } };
     if (operation === "CreatePolicyVersion") {
@@ -53,6 +53,18 @@ test("broker alone performs the fixed canonical install and revoke", async () =>
   const mutations = f.calls.filter(({ operation }) => ["CreatePolicyVersion", "DeletePolicyVersion"].includes(operation));
   assert(mutations.every(({ input }) => input.PolicyArn === C.sourcePolicyArn));
   assert.deepEqual(mutations.filter(({ operation }) => operation === "CreatePolicyVersion").map(({ input }) => JSON.parse(input.PolicyDocument)), [temporary, steady]);
+});
+
+test("broker rejects hidden managed-policy consumers on later IAM pages", async () => {
+  const f = fixture({ entityPages: [
+    { PolicyRoles: [{ RoleName: "mscqr-production-release-deployer" }], PolicyUsers: [], PolicyGroups: [], IsTruncated: true, Marker: "1" },
+    { PolicyRoles: [], PolicyUsers: [{ UserName: "unexpected" }], PolicyGroups: [], IsTruncated: false },
+  ] });
+  await assert.rejects(f.broker({ operation: "SIGNER_AUTHORIZE", authorization: authorization("INSTALL") }), /sole|consumer|attached/i);
+  assert.deepEqual(f.calls.filter(({ operation }) => operation === "ListEntitiesForPolicy").map(({ input }) => input), [
+    { PolicyArn: C.sourcePolicyArn }, { PolicyArn: C.sourcePolicyArn, Marker: "1" },
+  ]);
+  assert.equal(f.calls.some(({ operation }) => operation === "CreatePolicyVersion"), false);
 });
 
 test("authoritative lifecycle is monotonic and stale pre-apply evidence cannot abort after APPLY_STARTED", async () => {
