@@ -90,7 +90,7 @@ test("runtime policy has exact target mutation and readback-only companion actio
   assert.equal(policy.Statement.find(({ Sid }) => Sid === "ReadExactInitialActivationReleaseRole").Resource, INITIAL_ACTIVATION_RECONCILER.releaseRoleArn);
 });
 
-test("Terraform root owns only the purpose-bound role, policy, and attachment", () => {
+test("Terraform root owns only its governed roles, policies, and exact bindings", () => {
   assert.match(terraform, /aws_iam_role" "reconciler/);
   assert.match(terraform, /aws_iam_policy" "reconciler/);
   assert.match(terraform, /aws_iam_role_policy_attachment" "reconciler/);
@@ -99,7 +99,7 @@ test("Terraform root owns only the purpose-bound role, policy, and attachment", 
   assert.equal(backend.productionExecutionEnabled, true);
   assert.equal(backend.rootApplyRequired, false);
   assert.equal(installation.administratorBoundary, "GitHub production-environment OIDC session for mscqr-production-initial-activation-policy-reconciler-bootstrap");
-  assert.deepEqual(installation.maxAwsMutations, { "iam:CreateRole": 4, "iam:CreatePolicy": 4, "iam:AttachRolePolicy": 4, "iam:UpdateAssumeRolePolicy": 1, "iam:PutRolePolicy": 0, "iam:CreatePolicyVersion": 2 });
+  assert.deepEqual(installation.maxAwsMutations, { "iam:CreateRole": 5, "iam:CreatePolicy": 4, "iam:AttachRolePolicy": 4, "iam:UpdateAssumeRolePolicy": 1, "iam:PutRolePolicy": 1, "iam:CreatePolicyVersion": 2 });
   assert.equal(installation.executionPerformedInThisSource, true);
   assert.equal(installation.terraformVersion, "1.15.8");
   assert.equal(installation.concurrencyGroup, "production-deploy");

@@ -1,49 +1,44 @@
 # One-time signer Terraform capability
 
 This procedure closes the authorization gap for the initial convergence of
-`infra/aws/terraform/production-security-rebaseline-signer`. It uses the
-existing MFA-backed `mscqr-production-bootstrap-operator` identity to create an authenticated temporary version of the existing
-`MSCQRProductionGreenStageARelease` managed policy, then assumes the existing
-`mscqr-production-release-deployer` role with that exact temporary managed
-policy as its STS session policy. This prevents its other attached release
-permissions from being available to signer Terraform. It does not create a
-role, backend, workflow, or production bootstrap.
+`infra/aws/terraform/production-security-rebaseline-signer`. The normal
+MFA-backed `mscqr-production-bootstrap-operator` and the
+`mscqr-production-release-deployer` cannot create policy versions. A separate
+GitHub OIDC role, `mscqr-production-signer-policy-installer`, is assumed only
+by the exact `production-signer-policy-transition` environment workflow after
+its independent environment approval. That role can create versions only on
+the existing `MSCQRProductionGreenStageARelease` policy.
 
-Before the first signer transition, reconcile
-`MSCQRProductionBootstrapOperator-v2.json` through the existing source-bound
-`production-bootstrap-operator-policy-reconciliation` workflow. It folds the
-MFA-gated exact-policy read/`iam:CreatePolicyVersion` grant into the existing
-bootstrap inline policy, whose non-whitespace size is 1,963 of IAM's 2,048
-aggregate user-policy character limit. It adds no second inline policy and no
-permanent KMS or signer-role read permission. Do not edit the live user policy
-manually.
+The existing governed InitialActivation reconciler installation root creates
+the installer role and its inline policy. The separate GitHub
+`production-signer-policy-transition` environment must require reviewers,
+disallow administrator bypass, and allow only the `main` branch; its workflow
+checks that exact branch allowlist before requesting AWS credentials. The
+reconciler bootstrap workflow may create
+that exact role and write the exact named inline policy as part of its
+source-bound, reviewed Terraform installation. Neither production operator
+identity can assume or modify the installer role. The signer transition
+workflow accepts only the fixed install/revoke phases, verifies protected-main
+SHA and actual environment approval, and derives both policy documents from
+repository source. The workflow does not accept an ARN or policy document.
 
-The managed policy is temporarily replaced with a signer-only document. The
-temporary release-deployer session includes the exact signer IAM/KMS
-permissions plus the read-only IAM-role/KMS census needed to prove signer
-resources are absent. The census is performed after the temporary policy is
-active, before Terraform initialization or planning; KMS key/alias pagination
-is read one service page at a time. The other policies attached to the release
-deployer are unchanged. Do not run Stage-A operations while this window is
-open. After convergence, the canonical source policy is restored as the
-default. The consumed temporary policy version remains non-default as a
-replay marker; only the MFA-backed bootstrap operator can change the default.
-Before each policy-version change, the controller proves the managed policy
-is attached only to the release-deployer and is not used as a permissions
-boundary. `CreatePolicyVersion` is issued once with AWS CLI retries disabled;
-an ambiguous response is resolved only by AWS readback, never by retrying the
-mutation.
+Policy installation and revocation are performed only by
+`.github/workflows/production-signer-policy-transition.yml`. The MFA bootstrap
+profile remains the identity for signer state readback and the separately
+authorized Terraform plan/apply path through the release-deployer role. The
+replay marker is retained as a non-default managed-policy version after
+revocation; no workflow deletes policy versions.
 
 ## Preconditions
 
 - Use a clean checkout whose `HEAD`, fetched `origin/main`, and authorized
   `--source-sha` are identical. The script enforces this before each phase.
 - Use the fresh MFA `GetSessionToken` profile `mscqr-production-bootstrap-mfa`
-  for the exact `mscqr-production-bootstrap-operator` IAM user. Its canonical
-  signer capability policy permits only the source-bound signer policy
-  transition and exact readback needed here. The controller assumes the
-  release-deployer role with only the temporary signer policy as its STS
-  session policy; the release role trust enforces MFA.
+  for the exact `mscqr-production-bootstrap-operator` IAM user. That identity
+  has no `iam:CreatePolicyVersion` permission. The separately approved OIDC
+  installer workflow performs policy transitions. Terraform access continues
+  through `mscqr-production-release-deployer` with the exact temporary signer
+  policy as its STS session policy; the release role trust enforces MFA.
 - The signer `init` phase uses the committed provider lock in read-only mode;
   if the locked provider cannot satisfy the root, stop before planning and
   update the lock through reviewed source first.
@@ -57,113 +52,109 @@ mutation.
 
 ## Procedure
 
-Set `SOURCE_SHA` to the exact protected-main SHA, use the established
-`BOOTSTRAP_PROFILE`, and generate a unique `TRANSITION_ID` for this one-time
-authorization.
-Use an evidence file outside
-the repository. Set a restrictive shell umask before creating local plan or
-state files:
+Use the full exact protected-main SHA and a unique transition ID. Keep local
+outputs in a private directory:
 
 ```sh
 umask 077
+mkdir -m 700 /private/tmp/signer-convergence
 SOURCE_SHA=$(git rev-parse HEAD)
 TRANSITION_ID=$(uuidgen)
-BOOTSTRAP_PROFILE='mscqr-production-bootstrap-mfa'
-npm run production:signer-temporary-capability -- \
-  --phase install --source-sha "$SOURCE_SHA" --transition-id "$TRANSITION_ID" \
-  --bootstrap-profile "$BOOTSTRAP_PROFILE" \
-  --state-file /private/tmp/signer-convergence/capability.json
+BOOTSTRAP_PROFILE=mscqr-production-bootstrap-mfa
 ```
 
-The installer records the source, transition ID, and prior default version in
-the private evidence file before issuing the one policy-version mutation. If
-the process stops before it reports `INSTALLED`, retry only the readback
-recovery phase with the same values; it never repeats the mutation:
+The independently approved GitHub environment is the only path that changes
+the managed policy version. Trigger installation and save the resulting
+`capability.json` artifact privately:
+
+```sh
+gh workflow run production-signer-policy-transition.yml \
+  -f phase=policy-install -f source_sha="$SOURCE_SHA" \
+  -f transition_id="$TRANSITION_ID"
+```
+
+Download that run's `production-signer-policy-transition-evidence` artifact.
+The workflow also uploads a `production-signer-policy-transition-recovery`
+artifact before the policy write. If the run fails after installation starts,
+use that pending `INSTALLING` evidence with `recover-install`; do not dispatch
+a second install transition. The protected environment accepts only the exact
+`main` branch deployment rule and rejects additional branch or tag rules.
+Then establish the fresh MFA bootstrap session and use the artifact as
+`--state-file` with `recover-install`. Recovery performs the authenticated
+signer-resource absence census and writes the source-bound `INSTALLED`
+evidence locally. If this readback fails, stop; do not initialize Terraform.
 
 ```sh
 npm run production:signer-temporary-capability -- \
   --phase recover-install --source-sha "$SOURCE_SHA" --transition-id "$TRANSITION_ID" \
-  --bootstrap-profile "$BOOTSTRAP_PROFILE" \
-  --state-file /private/tmp/signer-convergence/capability.json
-```
-
-Recovery succeeds only when AWS readback proves that exact transition's
-temporary policy is active and the recorded steady version is still present.
-If it cannot prove that state, stop and preserve the evidence for review.
-
-Initialize only the documented backend through the restricted signer session, then generate a saved plan:
-
-```sh
+  --bootstrap-profile "$BOOTSTRAP_PROFILE" --state-file /private/tmp/signer-convergence/capability.json
 npm run production:signer-temporary-capability -- \
   --phase init --source-sha "$SOURCE_SHA" --transition-id "$TRANSITION_ID" \
-  --bootstrap-profile "$BOOTSTRAP_PROFILE" \
-  --state-file /private/tmp/signer-convergence/capability.json
+  --bootstrap-profile "$BOOTSTRAP_PROFILE" --state-file /private/tmp/signer-convergence/capability.json
 npm run production:signer-temporary-capability -- \
   --phase plan --source-sha "$SOURCE_SHA" --transition-id "$TRANSITION_ID" \
-  --bootstrap-profile "$BOOTSTRAP_PROFILE" \
-  --plan-output /private/tmp/signer-convergence/signer.tfplan \
+  --bootstrap-profile "$BOOTSTRAP_PROFILE" --plan-output /private/tmp/signer-convergence/signer.tfplan \
   --state-file /private/tmp/signer-convergence/capability.json
-terraform -chdir=infra/aws/terraform/production-security-rebaseline-signer show \
-  -no-color /private/tmp/signer-convergence/signer.tfplan
+terraform -chdir=infra/aws/terraform/production-security-rebaseline-signer show -no-color \
+  /private/tmp/signer-convergence/signer.tfplan
 ```
 
-Review the displayed plan and obtain the separate human apply approval. The
-following check derives JSON from the saved plan itself, accepts only creates
-of the exact four source-defined signer resources, binds its bytes, and
-records the approval reference:
+Review the saved plan and obtain the separate human apply authorization. Bind
+that authorization reference to the plan, apply, and verify convergence:
 
 ```sh
 npm run production:signer-temporary-capability -- \
   --phase verify-plan --source-sha "$SOURCE_SHA" --transition-id "$TRANSITION_ID" \
-  --bootstrap-profile "$BOOTSTRAP_PROFILE" \
-  --saved-plan /private/tmp/signer-convergence/signer.tfplan \
-  --approval-reference '<approved-change-ticket>' \
-  --state-file /private/tmp/signer-convergence/capability.json
-```
-
-Apply remains a separate operator phase, rechecks protected main and the
-saved-plan hash, and requires the same separately approved change reference:
-
-```sh
+  --bootstrap-profile "$BOOTSTRAP_PROFILE" --saved-plan /private/tmp/signer-convergence/signer.tfplan \
+  --approval-reference "$CHANGE_REFERENCE" --state-file /private/tmp/signer-convergence/capability.json
 npm run production:signer-temporary-capability -- \
   --phase apply --source-sha "$SOURCE_SHA" --transition-id "$TRANSITION_ID" \
-  --bootstrap-profile "$BOOTSTRAP_PROFILE" \
-  --saved-plan /private/tmp/signer-convergence/signer.tfplan \
-  --approval-reference '<approved-change-ticket>' \
+  --bootstrap-profile "$BOOTSTRAP_PROFILE" --saved-plan /private/tmp/signer-convergence/signer.tfplan \
+  --approval-reference "$CHANGE_REFERENCE" --state-file /private/tmp/signer-convergence/capability.json
+npm run production:signer-temporary-capability -- \
+  --phase verify-convergence --source-sha "$SOURCE_SHA" --transition-id "$TRANSITION_ID" \
+  --bootstrap-profile "$BOOTSTRAP_PROFILE" --saved-plan /private/tmp/signer-convergence/signer.tfplan \
+  --terraform-state /private/tmp/signer-convergence/terraform.tfstate \
   --state-file /private/tmp/signer-convergence/capability.json
 ```
 
-Verify exact Terraform ownership and live IAM/KMS/OIDC readback, then revoke
-the temporary version by restoring the source policy:
+Keep the plan, Terraform state export, and evidence in private mode-0700
+directories and files with mode 0600.
+
+After `verify-convergence` records `CONVERGED`, base64-encode that evidence
+file and compute its SHA-256. Trigger revocation through the same protected
+environment workflow, supplying the same source SHA and transition ID plus
+that evidence payload and digest:
+
+```sh
+gh workflow run production-signer-policy-transition.yml \
+  -f phase=policy-revoke -f source_sha="$SOURCE_SHA" \
+  -f transition_id="$TRANSITION_ID" \
+  -f evidence_base64="$EVIDENCE_BASE64" \
+  -f evidence_sha256="$EVIDENCE_SHA256"
+```
+
+Download the workflow's `REVOKED` evidence artifact, replacing the prior local
+state file, then run the local `verify-absent` phase with the bootstrap
+profile. That phase proves the canonical steady policy is active and the exact
+temporary version remains only as a non-default replay marker.
+If the revoke run stops after AWS has restored the steady policy but before
+the final evidence upload, rerun the same protected revoke transition with the
+original `CONVERGED` evidence. It performs exact readback and completes the
+`REVOKED` evidence without creating another policy version.
 
 ```sh
 npm run production:signer-temporary-capability -- \
-  --phase verify-convergence --source-sha "$SOURCE_SHA" --transition-id "$TRANSITION_ID" \
-  --bootstrap-profile "$BOOTSTRAP_PROFILE" \
-  --saved-plan /private/tmp/signer-convergence/signer.tfplan \
-  --terraform-state /private/tmp/signer-convergence/terraform.tfstate \
-  --state-file /private/tmp/signer-convergence/capability.json
-npm run production:signer-temporary-capability -- \
-  --phase revoke --source-sha "$SOURCE_SHA" --transition-id "$TRANSITION_ID" \
-  --bootstrap-profile "$BOOTSTRAP_PROFILE" \
-  --state-file /private/tmp/signer-convergence/capability.json
-npm run production:signer-temporary-capability -- \
   --phase verify-absent --source-sha "$SOURCE_SHA" --transition-id "$TRANSITION_ID" \
-  --bootstrap-profile "$BOOTSTRAP_PROFILE" \
-  --state-file /private/tmp/signer-convergence/capability.json
+  --bootstrap-profile "$BOOTSTRAP_PROFILE" --state-file /private/tmp/signer-convergence/capability.json
 ```
 
-For a stop before Terraform apply, `revoke --abort-before-apply-confirmed`
-requires confirmation that no apply ran. An `INSTALLING` record can be
-revoked even when the post-install census found pre-existing signer resources:
-that state cannot enter init, plan, or apply. Revocation still requires a
-complete IAM/KMS census; pagination or read errors leave the capability in
-place and preserve the pending evidence for retry. `INSTALLED`, `PLAN_GENERATED`,
-and `PLAN_REVIEWED` evidence additionally require an authoritative absent-role
-and absent-alias readback before abort revocation. If apply partially creates
-resources, stop: do not claim cleanup or remove the capability until the exact
-signer state/live resource condition is reconciled through a separately
-approved Terraform operation.
+A stop before Terraform apply still requires a protected
+`policy-revoke` workflow run. Use only the canonical abort path when its
+preconditions prove no apply ran. An `INSTALLING` record can be recovered
+read-only; it never repeats the policy mutation. If apply partially creates
+resources, stop and preserve the capability until a separately approved
+Terraform operation resolves the exact signer state.
 
 ## Boundary
 

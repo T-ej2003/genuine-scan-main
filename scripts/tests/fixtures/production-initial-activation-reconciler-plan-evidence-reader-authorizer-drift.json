@@ -8,6 +8,8 @@
     "create": [
       "aws_iam_policy.broker_recovery_successor_evidence_reader",
       "aws_iam_role.broker_recovery_successor_evidence_reader",
+      "aws_iam_role.signer_policy_installer",
+      "aws_iam_role_policy.signer_policy_installer",
       "aws_iam_role_policy_attachment.broker_recovery_successor_evidence_reader"
     ],
     "update": [
@@ -23,7 +25,9 @@
       "type": "aws_iam_policy",
       "name": "bootstrap_operator_policy_authorizer",
       "provider_name": "registry.terraform.io/hashicorp/aws",
-      "actions": ["update"],
+      "actions": [
+        "update"
+      ],
       "changedAttribute": "attachment_count",
       "before": 0,
       "after": 1
@@ -34,7 +38,9 @@
       "type": "aws_iam_role",
       "name": "bootstrap_operator_policy_authorizer",
       "provider_name": "registry.terraform.io/hashicorp/aws",
-      "actions": ["update"],
+      "actions": [
+        "update"
+      ],
       "changedAttribute": "managed_policy_arns",
       "before": [],
       "after": [

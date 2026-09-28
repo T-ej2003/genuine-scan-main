@@ -6,6 +6,7 @@ export const SIGNER_TEMPORARY_CAPABILITY = Object.freeze({
   root: "infra/aws/terraform/production-security-rebaseline-signer", bucket: "mscqr-production-terraform-state-368992683803-eu-west-2",
   stateKey: "mscqr/production/security-rebaseline/signer/terraform.tfstate", lockKey: "mscqr/production/security-rebaseline/signer/terraform.tfstate.tflock",
   roleName: "mscqr-production-security-rebaseline-image-signer", roleArn: "arn:aws:iam::368992683803:role/mscqr-production-security-rebaseline-image-signer",
+  installerRoleName: "mscqr-production-signer-policy-installer", installerRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-signer-policy-installer",
   inlinePolicyName: "ProductionSecurityRebaselineImageAuthorizationSignOnly", alias: "alias/mscqr-production-security-rebaseline-image-evidence",
   tags: { ManagedBy: "Terraform", Environment: "production", Stack: "production-security-rebaseline-signer", Purpose: "read-only-security-rebaseline-image-authorization" },
 });

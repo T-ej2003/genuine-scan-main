@@ -77,8 +77,7 @@
         "iam:GetPolicy",
         "iam:GetPolicyVersion",
         "iam:ListPolicyVersions",
-        "iam:ListEntitiesForPolicy",
-        "iam:CreatePolicyVersion"
+        "iam:ListEntitiesForPolicy"
       ],
       "Resource": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
       "Condition": {

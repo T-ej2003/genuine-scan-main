@@ -1,0 +1,40 @@
+name: Production signer policy transition
+
+on:
+  workflow_dispatch:
+    inputs:
+      phase:
+        description: Canonical signer policy transition phase
+        required: true
+        type: choice
+        options: [policy-install, policy-revoke]
+      source_sha:
+        description: Exact protected main SHA
+        required: true
+        type: string
+      transition_id:
+        description: One-time transition nonce
+        required: true
+        type: string
+      evidence_base64:
+        description: Required only for policy-revoke; exact private lifecycle evidence
+        required: false
+        type: string
+      evidence_sha256:
+        description: SHA-256 of evidence_base64 payload bytes
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  transition:
+    uses: ./.github/workflows/production-signer-policy-transition-operation.yml
+    with:
+      phase: ${{ inputs.phase }}
+      source_sha: ${{ inputs.source_sha }}
+      transition_id: ${{ inputs.transition_id }}
+      evidence_base64: ${{ inputs.evidence_base64 }}
+      evidence_sha256: ${{ inputs.evidence_sha256 }}

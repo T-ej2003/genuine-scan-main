@@ -328,6 +328,7 @@ test("every GitHub workflow credential root is classified by its authenticated m
     ".github/workflows/deploy-production-app-only-operation.yml",
     ".github/workflows/verify-production-app-only-compatibility-operation.yml",
     ".github/workflows/authorize-production-bootstrap-operator-policy-reconciliation.yml",
+    ".github/workflows/production-signer-policy-transition-operation.yml",
     ".github/workflows/sign-production-security-rebaseline.yml",
     ".github/workflows/produce-production-green-stage-b-release-preflight.yml",
     ".github/workflows/produce-production-green-stage-b-state-reconciliation-image-authorization.yml",

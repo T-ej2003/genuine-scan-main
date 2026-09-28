@@ -12,6 +12,11 @@ const policyName = "MSCQRProductionBootstrapOperatorPolicyAuthorizer";
 const readerTags = { Component: "broker-recovery-successor-evidence", Environment: "production", ManagedBy: "Terraform", Stack: "production-initial-activation-policy-reconciler" };
 const readerRoleName = "mscqr-production-broker-recovery-successor-evidence-reader";
 const readerPolicyName = "MSCQRProductionBrokerRecoverySuccessorEvidenceRead";
+const signerTrust = fs.readFileSync(`${root}/signer-policy-installer-trust-policy.json`, "utf8");
+const signerPolicy = fs.readFileSync(`${root}/signer-policy-installer-permissions-policy.json`, "utf8");
+const signerTags = { Component: "signer-policy-transition", Environment: "production", ManagedBy: "Terraform", Stack: "production-initial-activation-policy-reconciler" };
+const signerRoleName = "mscqr-production-signer-policy-installer";
+const signerPolicyName = "MSCQRProductionSignerPolicyInstaller";
 
 const resource = (type, name, expressions) => ({ address: `${type}.${name}`, mode: "managed", type, name, provider_config_key: "aws", expressions, schema_version: 0 });
 const authorizerResources = () => [
@@ -80,6 +85,18 @@ export const currentInstallationPlan = (plan, { legacyAuthorizer = false } = {})
     delete readerAdditions.at(-1).change.after.policy_arn; readerAdditions.at(-1).change.after_unknown = { ...readerAdditions.at(-1).change.after_unknown, policy_arn: true };
   } else delete readerAdditions.at(-1).change.after_unknown.policy_arn;
   current.resource_changes.push(...readerAdditions);
+  const signerRole = { ...structuredClone(roleTemplate.change.after), assume_role_policy: signerTrust, description: "Protected GitHub OIDC installer for the canonical signer temporary-policy transition only.", name: signerRoleName, ...(legacy ? {} : { arn: `arn:aws:iam::368992683803:role/${signerRoleName}` }) };
+  const signerInlinePolicy = { name: "ProductionSignerPolicyInstaller", policy: signerPolicy, role: signerRoleName };
+  current.configuration.root_module.resources.push(
+    resource("aws_iam_role", "signer_policy_installer", { assume_role_policy: { references: ["path.module"] }, description: { constant_value: "Protected GitHub OIDC installer for the canonical signer temporary-policy transition only." }, max_session_duration: { constant_value: 3600 }, name: { references: ["local.signer_policy_installer_role_name"] } }),
+    resource("aws_iam_role_policy", "signer_policy_installer", { name: { constant_value: "ProductionSignerPolicyInstaller" }, policy: { references: ["path.module"] }, role: { references: ["aws_iam_role.signer_policy_installer.name", "aws_iam_role.signer_policy_installer"] } }),
+  );
+  const signerRoleAddition = clone(roleTemplate, "aws_iam_role.signer_policy_installer", "aws_iam_role", "signer_policy_installer", signerRole);
+  const signerInlineAddition = {
+    ...structuredClone(attachmentTemplate), address: "aws_iam_role_policy.signer_policy_installer", type: "aws_iam_role_policy", name: "signer_policy_installer",
+    change: { ...structuredClone(attachmentTemplate.change), actions, before: actions[0] === "create" ? null : signerInlinePolicy, after: signerInlinePolicy },
+  };
+  current.resource_changes.push(signerRoleAddition, signerInlineAddition);
   Object.assign(current.configuration.root_module.outputs, {
     broker_recovery_successor_evidence_reader_permissions_policy_sha256: { expression: { references: ["path.module"] } },
     broker_recovery_successor_evidence_reader_policy_arn: { expression: { references: ["aws_iam_policy.broker_recovery_successor_evidence_reader.arn", "aws_iam_policy.broker_recovery_successor_evidence_reader"] } },
@@ -104,5 +121,9 @@ export const currentInstallationState = (raw) => {
     ["aws_iam_role_policy_attachment", { role: readerRoleName, policy_arn: `arn:aws:iam::368992683803:policy/${readerPolicyName}` }],
   ];
   for (const [type, attributes] of readerResources) if (!existing.has(`${type}.broker_recovery_successor_evidence_reader`)) state.resources.push({ mode: "managed", type, name: "broker_recovery_successor_evidence_reader", instances: [{ attributes }] });
+  const signerRoleAttributes = { assume_role_policy: signerTrust, description: "Protected GitHub OIDC installer for the canonical signer temporary-policy transition only.", force_detach_policies: false, max_session_duration: 3600, name: signerRoleName, path: "/", permissions_boundary: null, tags: {}, tags_all: {}, arn: `arn:aws:iam::368992683803:role/${signerRoleName}` };
+  const signerInlineAttributes = { name: "ProductionSignerPolicyInstaller", policy: signerPolicy, role: signerRoleName };
+  if (!existing.has("aws_iam_role.signer_policy_installer")) state.resources.push({ mode: "managed", type: "aws_iam_role", name: "signer_policy_installer", instances: [{ attributes: signerRoleAttributes }] });
+  if (!existing.has("aws_iam_role_policy.signer_policy_installer")) state.resources.push({ mode: "managed", type: "aws_iam_role_policy", name: "signer_policy_installer", instances: [{ attributes: signerInlineAttributes }] });
   return JSON.stringify(state);
 };

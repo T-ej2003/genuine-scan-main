@@ -5,6 +5,7 @@ locals {
   mixed_recovery_policy_name                            = "MSCQRProductionMixedDualSlotRecoveryExecutor"
   broker_recovery_successor_evidence_reader_role_name   = "mscqr-production-broker-recovery-successor-evidence-reader"
   broker_recovery_successor_evidence_reader_policy_name = "MSCQRProductionBrokerRecoverySuccessorEvidenceRead"
+  signer_policy_installer_role_name                     = "mscqr-production-signer-policy-installer"
   tags = {
     ManagedBy   = "Terraform"
     Environment = "production"
@@ -119,4 +120,18 @@ resource "aws_iam_policy" "bootstrap_operator_policy_authorizer" {
 resource "aws_iam_role_policy_attachment" "bootstrap_operator_policy_authorizer" {
   role       = aws_iam_role.bootstrap_operator_policy_authorizer.name
   policy_arn = aws_iam_policy.bootstrap_operator_policy_authorizer.arn
+}
+
+resource "aws_iam_role" "signer_policy_installer" {
+  name                 = local.signer_policy_installer_role_name
+  description          = "Protected GitHub OIDC installer for the canonical signer temporary-policy transition only."
+  max_session_duration = 3600
+  assume_role_policy   = file("${path.module}/signer-policy-installer-trust-policy.json")
+  lifecycle { prevent_destroy = true }
+}
+
+resource "aws_iam_role_policy" "signer_policy_installer" {
+  name   = "ProductionSignerPolicyInstaller"
+  role   = aws_iam_role.signer_policy_installer.id
+  policy = file("${path.module}/signer-policy-installer-permissions-policy.json")
 }
