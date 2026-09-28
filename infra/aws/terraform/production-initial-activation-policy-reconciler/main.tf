@@ -26,7 +26,7 @@ resource "aws_iam_role" "broker_recovery_successor_evidence_reader" {
 
 resource "aws_iam_policy" "broker_recovery_successor_evidence_reader" {
   name        = local.broker_recovery_successor_evidence_reader_policy_name
-  description = "Read only the three immutable component broker lineage objects."
+  description = "Read only the two immutable component broker successor lineage objects."
   policy      = file("${path.module}/broker-recovery-successor-evidence-reader-permissions-policy.json")
   tags        = merge(local.tags, { Component = "broker-recovery-successor-evidence" })
 

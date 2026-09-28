@@ -57,7 +57,7 @@ export const BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER = Object.freeze({
   permissionsPath: "infra/aws/terraform/production-initial-activation-policy-reconciler/broker-recovery-successor-evidence-reader-permissions-policy.json",
   path: "/",
   roleDescription: "Temporary GitHub OIDC reader for exact broker successor lineage evidence.",
-  policyDescription: "Read only the three immutable component broker lineage objects.",
+  policyDescription: "Read only the two immutable component broker successor lineage objects.",
   tags: Object.freeze({ ...INITIAL_ACTIVATION_RECONCILER.tags, Component: "broker-recovery-successor-evidence" }),
 });
 
@@ -176,10 +176,10 @@ export function assertBrokerRecoverySuccessorEvidenceReaderRoleMetadata(role) {
   return role;
 }
 
-export function assertBrokerRecoverySuccessorEvidenceReaderPolicyMetadata(policy, document) {
+export function assertBrokerRecoverySuccessorEvidenceReaderPolicyMetadata(policy, document, { expectedDocument = readJson(BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER.permissionsPath) } = {}) {
   const expected = BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER;
   if (policy?.Arn !== expected.policyArn || policy?.PolicyName !== expected.policyName || policy?.Path !== expected.path || policy?.Description !== expected.policyDescription || !/^v[1-9][0-9]*$/.test(policy?.DefaultVersionId || "") || policy?.PermissionsBoundaryUsageCount !== 0) throw new Error("Broker recovery successor evidence reader policy metadata is not exact.");
-  exactJson(decodeAwsDocument(document, "evidence reader permissions policy"), readJson(expected.permissionsPath), "evidence reader permissions policy");
+  exactJson(decodeAwsDocument(document, "evidence reader permissions policy"), expectedDocument, "evidence reader permissions policy");
   exactJson(Object.fromEntries((policy.Tags || []).map(({ Key, Value }) => [Key, Value])), expected.tags, "evidence reader policy tags");
   return policy;
 }
