@@ -23,7 +23,8 @@ test("bootstrap operator source uses the shared canonical absolute AWS CLI befor
   assert.throws(() => loadBootstrapOperatorSource(() => assert.fail("untrusted executable reached"), awsInstallation({ resolved: "/tmp/fake-cwd/aws" })), /outside canonical safelist/);
   assert.throws(() => loadBootstrapOperatorSource(() => "fixture-secret-not-json", awsInstallation()), error => error.message === "Bootstrap operator credential source is unavailable" && !error.message.includes("fixture-secret"));
 });
-function fixture() {
+function fixture(purpose = binding.purpose) {
+  const currentBinding = { ...binding, purpose };
   const principal = `arn:aws:sts::${account}:assumed-role/mscqr-production-release-deployer/component-${binding.transitionId}`;
   const key = ["A", "S", "I", "A"].join("") + "0".repeat(16);
   const f = { calls: [], clock: start + 1000, identity: { Account: account, Arn: operator }, missing: false, closed: 0 };
@@ -35,7 +36,7 @@ function fixture() {
     requestParameters: { roleArn: `arn:aws:iam::${account}:role/mscqr-production-release-deployer`, roleSessionName: `component-${binding.transitionId}`, durationSeconds: 900 },
     responseElements: { credentials: { accessKeyId: key, expiration: scoped.Expiration.toISOString() }, assumedRoleUser: { arn: principal, assumedRoleId: "role:session" } } };
   f.base = base; f.secrets = [base, human, scoped];
-  f.run = () => authenticateBootstrapOperator(binding, {
+  f.run = () => authenticateBootstrapOperator(currentBinding, {
     load: async () => base, mfa: async () => "123456", now: () => f.clock, sleep: async ms => { f.clock += ms; },
     issuanceEvents: async () => f.missing ? [] : [f.event], verify: async () => ({ Account: account, Arn: principal, UserId: "role:session" }),
     sts: value => ({ close: () => { f.closed++; }, send: async (operation, input) => {
@@ -56,6 +57,11 @@ test("first bootstrap obtains only existing human MFA release proof, never root 
   assert.equal(f.closed, 3);
   for (const value of f.secrets) for (const key of ["AccessKeyId", "SecretAccessKey", "SessionToken"]) assert.equal(value[key], undefined);
   for (const key of ["AccessKeyId", "SecretAccessKey", "SessionToken", "TokenCode"]) assert(!JSON.stringify(evidence).includes(key));
+});
+test("signer successor obtains the same existing MFA-backed operator proof", async () => {
+  const f = fixture("BROKER_SIGNER_SUCCESSOR"), evidence = await f.run();
+  assert.equal(evidence.purpose, "BROKER_SIGNER_SUCCESSOR");
+  assert.equal(evidence.operatorArn, operator);
 });
 for (const arn of [`arn:aws:iam::${account}:root`, `arn:aws:sts::${account}:assumed-role/mscqr-production-release-deployer/other`, `arn:aws:iam::${account}:user/other`]) test(`bootstrap MFA rejects alternate principal ${arn} before MFA/STS issuance`, async () => {
   const f = fixture(); f.identity.Arn = arn;

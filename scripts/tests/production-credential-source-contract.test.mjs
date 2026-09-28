@@ -53,7 +53,8 @@ const accessKeys = Object.freeze({
 
 test("app-only identities use isolated OIDC sessions and cannot fall back to local profiles", () => {
   for (const credentialSource of [PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_CHECKER_SESSION,
-    PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_POLICY_RECONCILER, PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER]) {
+    PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_POLICY_RECONCILER, PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER,
+    PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_BROKER_SIGNER_SUCCESSOR_EVIDENCE]) {
     const calls = [];
     const run = createProductionAwsCommandRunner({ credentialSource, env: oidc,
       exec: (file, args, options) => { calls.push({ file, args, options }); return "{}"; } });
