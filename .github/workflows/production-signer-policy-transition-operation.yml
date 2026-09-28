@@ -23,6 +23,11 @@ on:
         description: SHA-256 of evidence_base64 payload bytes
         required: false
         type: string
+      abort_before_apply:
+        description: Separately approved pre-apply policy abort
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -79,12 +84,15 @@ jobs:
           TRANSITION_ID: ${{ inputs.transition_id }}
           EVIDENCE_BASE64: ${{ inputs.evidence_base64 }}
           EVIDENCE_SHA256: ${{ inputs.evidence_sha256 }}
+          ABORT_BEFORE_APPLY: ${{ inputs.abort_before_apply }}
         run: |
           set -euo pipefail
           [[ "$TRANSITION_ID" =~ ^[A-Za-z0-9._-]{8,128}$ ]]
           if [ "$PHASE" = "policy-install" ]; then
+            test "$ABORT_BEFORE_APPLY" = "false"
             test -z "$EVIDENCE_BASE64" && test -z "$EVIDENCE_SHA256"
           elif [ "$PHASE" = "policy-revoke" ]; then
+            [[ "$ABORT_BEFORE_APPLY" = "true" || "$ABORT_BEFORE_APPLY" = "false" ]]
             test -n "$EVIDENCE_BASE64" && test -n "$EVIDENCE_SHA256"
             test "${#EVIDENCE_BASE64}" -le 16384
             [[ "$EVIDENCE_BASE64" =~ ^[A-Za-z0-9+/]+={0,2}$ && "$EVIDENCE_SHA256" =~ ^[a-f0-9]{64}$ ]]
@@ -129,6 +137,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           EVIDENCE_BASE64: ${{ inputs.evidence_base64 }}
           EVIDENCE_SHA256: ${{ inputs.evidence_sha256 }}
+          ABORT_BEFORE_APPLY: ${{ inputs.abort_before_apply }}
         run: |
           set -euo pipefail
           umask 077
@@ -162,9 +171,13 @@ jobs:
         run: |
           set -euo pipefail
           state="$RUNNER_TEMP/signer-policy-transition/capability.json"
-          npm run production:signer-temporary-capability -- \
-            --phase "$PHASE" --source-sha "$SOURCE_SHA" --transition-id "$TRANSITION_ID" \
-            --state-file "$state"
+          args=(--phase "$PHASE" --source-sha "$SOURCE_SHA" --transition-id "$TRANSITION_ID" --state-file "$state")
+          if [ "$PHASE" = "policy-revoke" ] && [ "$ABORT_BEFORE_APPLY" = "true" ]; then
+            args+=(--abort-before-apply-confirmed)
+          elif [ "$ABORT_BEFORE_APPLY" != "false" ]; then
+            echo "Abort mode is valid only for policy-revoke" >&2; exit 1
+          fi
+          npm run production:signer-temporary-capability -- "${args[@]}"
       - uses: actions/upload-artifact@v4
         with:
           name: production-signer-policy-transition-evidence

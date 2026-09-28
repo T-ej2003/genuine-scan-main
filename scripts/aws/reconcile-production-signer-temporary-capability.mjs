@@ -45,7 +45,7 @@ export function assertSignerCliArguments(argv, phase) {
   const installerPhase = ["policy-install-prepare", "policy-install", "policy-revoke"].includes(phase);
   const common = ["--phase", "--source-sha", "--transition-id", "--state-file", ...(!installerPhase ? ["--bootstrap-profile"] : [])];
   const extra = ({ plan: ["--plan-output"], "verify-plan": ["--saved-plan", "--approval-reference"], apply: ["--saved-plan", "--approval-reference"], "verify-convergence": ["--saved-plan", "--terraform-state"], revoke: [] })[phase] || [];
-  const switches = phase === "revoke" ? ["--abort-before-apply-confirmed"] : [];
+  const switches = ["revoke", "policy-revoke"].includes(phase) ? ["--abort-before-apply-confirmed"] : [];
   if (!["policy-install-prepare", "policy-install", "policy-revoke", "recover-install", "init", "plan", "verify-plan", "apply", "verify-convergence", "revoke", "verify-absent"].includes(phase)) fail(`unsupported phase ${phase}`);
   const allowed = new Set([...common, ...extra, ...switches]);
   const seen = new Set();
@@ -239,10 +239,20 @@ export function runSignerTemporaryCapability(argv = process.argv.slice(2), { wri
       if (after.active.VersionId !== version || canonical(after.active.document) !== canonical(temporary)) fail("temporary signer policy is not active after installation");
       write(`${JSON.stringify({ state: "INSTALLING", temporaryVersionId: version, evidenceSha256: evidence.evidenceSha256 })}\n`); return evidence;
     }
-    if (!evidence || evidence.state !== "CONVERGED") fail("source-bound convergence evidence is required before policy revocation");
+    const abort = argv.includes("--abort-before-apply-confirmed");
+    const abortable = ["INSTALLING", "INSTALLED", "PLAN_GENERATED", "PLAN_REVIEWED"];
+    if (!evidence || (!abort && evidence.state !== "CONVERGED") || (abort && !abortable.includes(evidence.state))) fail("source-bound convergence or separately approved pre-apply abort evidence is required before policy revocation");
+    if (abort && evidence.state === "INSTALLING" && canonical(current.active.document) === canonical(steadyPolicy) && !current.versions.some(({ document }) => exactSignerTemporaryVersion(document, identity))) {
+      assertCanonicalPolicyHistory(current, identity, false);
+      if (evidence.steadyVersionId !== current.active.VersionId) fail("no-write install recovery no longer matches its exact steady predecessor");
+      const result = buildSignerCapabilityEvidence({ ...evidence, state: "REVOKED", temporaryVersionId: null, observedAt: now() });
+      protect(stateFile, result); write(`${JSON.stringify({ state: result.state, steadyVersionId: current.active.VersionId, recovered: true, temporaryCapabilityInstalled: false, evidenceSha256: result.evidenceSha256 })}\n`); return result;
+    }
     assertCanonicalPolicyHistory(current, identity, true);
     const temporaryVersionId = resolveSignerTemporaryVersionId({ versions: current.versions, activeVersionId: current.active.VersionId, evidence, steadyPolicy, identity });
     if (!temporaryVersionId || !exactSignerTemporaryVersion(current.versions.find(({ VersionId }) => VersionId === temporaryVersionId)?.document, identity)) fail("the exact signer policy version is required for revocation");
+    const steadyPredecessor = current.versions.find(({ VersionId }) => VersionId === evidence.steadyVersionId);
+    if (!steadyPredecessor || canonical(steadyPredecessor.document) !== canonical(steadyPolicy)) fail("the exact pre-install steady policy version is unavailable");
     if (current.active.VersionId !== temporaryVersionId) {
       if (canonical(current.active.document) !== canonical(steadyPolicy)) fail("the policy is neither the active signer version nor its verified completed-revocation state");
       const result = buildSignerCapabilityEvidence({ ...evidence, state: "REVOKED", steadyVersionId: current.active.VersionId, temporaryVersionId, observedAt: now() });
@@ -262,6 +272,12 @@ export function runSignerTemporaryCapability(argv = process.argv.slice(2), { wri
   assertCapabilityPolicyAttached(bootstrap);
   const evidence = fs.existsSync(stateFile) ? readEvidence(stateFile, identity) : null;
   if (phase === "recover-install" && (!evidence || evidence.state === "INSTALLING")) {
+    if (evidence?.state === "INSTALLING" && canonical(current.active.document) === canonical(steadyPolicy) && !current.versions.some(({ document }) => exactSignerTemporaryVersion(document, identity))) {
+      assertCanonicalPolicyHistory(current, identity, false);
+      if (current.active.VersionId !== evidence.steadyVersionId) fail("no-write install recovery no longer matches its exact steady predecessor");
+      const result = buildSignerCapabilityEvidence({ ...evidence, state: "REVOKED", temporaryVersionId: null, observedAt: now() });
+      protect(stateFile, result); write(`${JSON.stringify({ state: result.state, steadyVersionId: current.active.VersionId, recovered: true, temporaryCapabilityInstalled: false, evidenceSha256: result.evidenceSha256 })}\n`); return result;
+    }
     assertCanonicalPolicyHistory(current, identity, true);
     const active = current.active;
     if (!exactSignerTemporaryVersion(active.document, identity)) fail("there is no exact active signer capability to recover");
@@ -335,13 +351,15 @@ export function runSignerTemporaryCapability(argv = process.argv.slice(2), { wri
     const stat = fs.lstatSync(savedPlanFile); if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o077) || sha(fs.readFileSync(savedPlanFile)) !== evidence.planSha256) fail("saved plan changed or is not private");
     const planJson = execFileSync("terraform", ["show", "-json", savedPlanFile], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
     assertSignerCreationPlan(JSON.parse(planJson), { trustPolicy });
+    const started = buildSignerCapabilityEvidence({ ...evidence, state: "APPLY_STARTED", observedAt: now() });
+    protect(stateFile, started);
     try { execFileSync("terraform", [`-chdir=${path.join(root, C.root)}`, "apply", "-input=false", savedPlanFile], { cwd: root, env: terraformSessionEnvironment(session), stdio: "ignore" }); }
     catch (error) { fail(`separately authorized Terraform apply failed with exit status ${error.status ?? "unknown"}; reconcile exact state and AWS readback before retrying`); }
-    const result = buildSignerCapabilityEvidence({ ...evidence, state: "APPLY_COMPLETED", observedAt: now() });
+    const result = buildSignerCapabilityEvidence({ ...started, state: "APPLY_COMPLETED", observedAt: now() });
     protect(stateFile, result); write(`${JSON.stringify({ state: result.state, planSha256: result.planSha256, approvalReference })}\n`); return result;
   }
   if (phase === "verify-convergence") {
-    if (!["PLAN_REVIEWED", "APPLY_COMPLETED"].includes(evidence.state)) fail("separately reviewed saved plan is required before convergence readback");
+    if (!["PLAN_REVIEWED", "APPLY_STARTED", "APPLY_COMPLETED"].includes(evidence.state)) fail("separately reviewed saved plan is required before convergence readback");
     if (sha(fs.readFileSync(opt(argv, "--saved-plan"))) !== evidence.planSha256) fail("saved plan bytes changed after review");
     const statePath = path.resolve(opt(argv, "--terraform-state"));
     if (fs.existsSync(statePath)) fail("Terraform state evidence output already exists");

@@ -39,7 +39,10 @@
         "iam:ListAttachedRolePolicies",
         "iam:ListRolePolicies"
       ],
-      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler-bootstrap"
+      "Resource": [
+        "arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler-bootstrap",
+        "arn:aws:iam::368992683803:role/mscqr-production-signer-policy-installer"
+      ]
     },
     {
       "Sid": "BackendObjectsWrite",

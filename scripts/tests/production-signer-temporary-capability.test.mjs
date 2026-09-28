@@ -48,7 +48,8 @@ test("policy-version mutations require the independent workflow installer, while
   assert.throws(() => assertSignerCliArguments(planArgs, "plan"), /--plan-output is required/);
   const revocation = [...base]; revocation[1] = "policy-revoke";
   assert.doesNotThrow(() => assertSignerCliArguments(revocation, "policy-revoke"));
-  assert.throws(() => assertSignerCliArguments([...revocation, "--abort-before-apply-confirmed"], "policy-revoke"));
+  assert.doesNotThrow(() => assertSignerCliArguments([...revocation, "--abort-before-apply-confirmed"], "policy-revoke"));
+  assert.throws(() => assertSignerCliArguments([...base, "--abort-before-apply-confirmed"], "policy-install"));
   const local = ["--phase", "verify-absent", "--source-sha", sourceSha, "--transition-id", transitionId, "--bootstrap-profile", "mscqr-production-bootstrap-mfa", "--state-file", "/tmp/capability.json"];
   assert.doesNotThrow(() => assertSignerCliArguments(local, "verify-absent"));
   for (const option of ["--admin-profile", "--policy-arn", "--policy-name", "--policy-document", "--policy-file", "--state-key", "--role-arn", "--kms-key"]) assert.throws(() => assertSignerCliArguments([...base, option, "attacker-value"], "policy-install"));
@@ -99,6 +100,8 @@ test("bootstrap cannot create policy versions; the independent installer can tra
   const transitionWorkflow = fs.readFileSync(".github/workflows/production-signer-policy-transition.yml", "utf8");
   const transitionOperation = fs.readFileSync(".github/workflows/production-signer-policy-transition-operation.yml", "utf8");
   assert.match(transitionWorkflow, /type: choice[\s\S]*?options: \[policy-install, policy-revoke\]/);
+  assert.match(transitionWorkflow, /abort_before_apply:[\s\S]*?type: boolean/);
+  assert.match(transitionOperation, /args\+=\(--abort-before-apply-confirmed\)/);
   assert.match(transitionWorkflow, /uses: \.\/\.github\/workflows\/production-signer-policy-transition-operation\.yml/);
   assert.match(transitionOperation, /workflow_call:/);
   assert.match(transitionOperation, /environment: production-signer-policy-transition/);
@@ -117,7 +120,8 @@ test("bootstrap cannot create policy versions; the independent installer can tra
   const signerStatements = bootstrapProvisioner.Statement.filter((statement) => JSON.stringify(statement.Resource).includes(roleArn));
   assert.deepEqual(signerStatements.find(({ Action }) => Action === "iam:CreateRole"), { Sid: "SignerRoleCreate", Effect: "Allow", Action: "iam:CreateRole", Resource: roleArn });
   assert.deepEqual(signerStatements.find(({ Action }) => Action === "iam:PutRolePolicy"), { Sid: "SignerPolicyPut", Effect: "Allow", Action: "iam:PutRolePolicy", Resource: roleArn, Condition: { StringEquals: { "iam:PolicyName": "ProductionSignerPolicyInstaller" } } });
-  assert.deepEqual(signerStatements.find(({ Action }) => Array.isArray(Action)).Action, ["iam:GetRole", "iam:ListAttachedRolePolicies", "iam:ListRolePolicies", "iam:ListRoleTags"]);
+  assert.deepEqual(signerStatements.find(({ Sid }) => Sid === "MixedRecoveryRoleRead").Action, ["iam:GetRole", "iam:ListAttachedRolePolicies", "iam:ListRolePolicies", "iam:ListRoleTags"]);
+  assert.deepEqual(signerStatements.find(({ Sid }) => Sid === "BootstrapInlineRead"), { Sid: "BootstrapInlineRead", Effect: "Allow", Action: ["iam:GetRole", "iam:GetRolePolicy", "iam:ListAttachedRolePolicies", "iam:ListRolePolicies"], Resource: ["arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler-bootstrap", roleArn] });
   assert.equal(signerStatements.find(({ Action }) => Action === "iam:PutRolePolicy").Condition.StringEquals["iam:PolicyName"], "ProductionSignerPolicyInstaller");
   assert.equal(signerStatements.some(({ Action }) => (Array.isArray(Action) ? Action : [Action]).some((action) => ["iam:UpdateAssumeRolePolicy", "iam:AttachRolePolicy", "iam:PassRole"].includes(action))), false);
   const bootstrapTrust = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionInitialActivationPolicyReconcilerBootstrapTrust-v1.json", "utf8"));
@@ -204,6 +208,10 @@ test("signer transitions accept only authenticated historical steady policy vers
   assert.match(source, /phase === "revoke" && argv\.includes\("--abort-before-apply-confirmed"\).*evidence\?\.state === "INSTALLING".*canonical\(current\.active\.document\) === canonical\(steadyPolicy\)/);
   assert.match(source, /temporaryCapabilityInstalled: false/);
   assert.match(source, /phase === "verify-absent" && evidence\.state === "REVOKED" && evidence\.temporaryVersionId === null/);
+  assert.match(source, /if \(evidence\?\.state === "INSTALLING" && canonical\(current\.active\.document\) === canonical\(steadyPolicy\) && !current\.versions\.some/);
+  assert.match(source, /temporaryCapabilityInstalled: false/);
+  assert.match(source, /const abortable = \["INSTALLING", "INSTALLED", "PLAN_GENERATED", "PLAN_REVIEWED"\]/);
+  assert.doesNotMatch(source, /const abortable = \[[^\]]*APPLY_STARTED/);
 });
 
 test("apply remains unreachable unless the exact temporary policy is still active", () => {
@@ -224,6 +232,8 @@ test("apply remains unreachable unless the exact temporary policy is still activ
   assert.ok(source.indexOf("protect(stateFile, pending)") < source.indexOf("writePolicyVersion(undefined, temporary"), "transition identity is durable before the policy mutation");
   assert.ok(source.indexOf("writePolicyVersion(undefined, temporary") < source.indexOf("verifySignerResourceCensus(undefined, session)"), "signer absence census uses the temporary session before init or plan");
   assert.match(source, /phase === "recover-install" && \(!evidence \|\| evidence\.state === "INSTALLING"\)/);
+  assert.match(source, /const started = buildSignerCapabilityEvidence\(\{ \.\.\.evidence, state: "APPLY_STARTED"/);
+  assert.ok(source.indexOf("protect(stateFile, started)") < source.indexOf('"apply", "-input=false", savedPlanFile'), "apply intent is durable before Terraform can mutate");
 });
 
 test("policy transitions reject other consumers and make CreatePolicyVersion a single AWS CLI attempt", () => {
@@ -277,6 +287,10 @@ test("evidence binds one source, account, region, purpose, root, state key, and 
   assert.throws(() => assertSignerCapabilityEvidence({ ...evidence, stateKey: "other/terraform.tfstate" }, { state: "INSTALLED", sourceSha, transitionId }));
   const pending = buildSignerCapabilityEvidence({ state: "INSTALLING", sourceSha, transitionId, steadyVersionId: "v1", observedAt: "2026-09-27T00:00:00.000Z" });
   assertSignerCapabilityEvidence(pending, { state: "INSTALLING", sourceSha, transitionId });
+  const applyStarted = buildSignerCapabilityEvidence({ state: "APPLY_STARTED", sourceSha, transitionId, steadyVersionId: "v1", temporaryVersionId: "v2", planSha256: "a".repeat(64), approvalReference: "change:signer-approved", observedAt: "2026-09-27T00:00:00.000Z" });
+  assertSignerCapabilityEvidence(applyStarted, { state: "APPLY_STARTED", sourceSha, transitionId });
+  const incompleteApply = buildSignerCapabilityEvidence({ state: "APPLY_STARTED", sourceSha, transitionId, steadyVersionId: "v1", temporaryVersionId: "v2", observedAt: "2026-09-27T00:00:00.000Z" });
+  assert.throws(() => assertSignerCapabilityEvidence(incompleteApply, { state: "APPLY_STARTED", sourceSha, transitionId }), /incomplete/);
   assert.notDeepEqual(signerTemporaryStatements({ sourceSha, transitionId }), signerTemporaryStatements({ sourceSha, transitionId: "signer-once-replayed" }));
 });
 

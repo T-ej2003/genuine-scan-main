@@ -80,9 +80,12 @@ use that pending `INSTALLING` evidence with `recover-install`; do not dispatch
 a second install transition. The protected environment accepts only the exact
 `main` branch deployment rule and rejects additional branch or tag rules.
 Then establish the fresh MFA bootstrap session and use the artifact as
-`--state-file` with `recover-install`. Recovery performs the authenticated
-signer-resource absence census and writes the source-bound `INSTALLED`
-evidence locally. If this readback fails, stop; do not initialize Terraform.
+`--state-file` with `recover-install`. If the exact temporary policy is active,
+recovery performs the authenticated signer-resource absence census and writes
+`INSTALLED`. If the durable record exists but AWS still has the unchanged
+steady policy and no matching temporary version, recovery writes `REVOKED`
+without an AWS write; run `verify-absent` and start a new transition ID. If
+readback is ambiguous, stop; do not initialize Terraform.
 
 ```sh
 npm run production:signer-temporary-capability -- \
@@ -149,12 +152,14 @@ npm run production:signer-temporary-capability -- \
   --bootstrap-profile "$BOOTSTRAP_PROFILE" --state-file /private/tmp/signer-convergence/capability.json
 ```
 
-A stop before Terraform apply still requires a protected
-`policy-revoke` workflow run. Use only the canonical abort path when its
-preconditions prove no apply ran. An `INSTALLING` record can be recovered
-read-only; it never repeats the policy mutation. If apply partially creates
-resources, stop and preserve the capability until a separately approved
-Terraform operation resolves the exact signer state.
+A stop before Terraform apply still requires the protected `policy-revoke`
+workflow. Set `abort_before_apply=true` and submit the exact evidence artifact;
+the environment approval authorizes restoring steady policy only from
+`INSTALLING`, `INSTALLED`, `PLAN_GENERATED`, or `PLAN_REVIEWED`. The apply path
+records `APPLY_STARTED` before Terraform runs, and that state cannot use the
+abort path. If apply started or partially created resources, stop and preserve
+the capability until a separately approved Terraform operation resolves the
+exact signer state.
 
 ## Boundary
 
