@@ -3513,7 +3513,7 @@
         "sid": null,
         "livePolicyArn": "inline-user-policy:arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator/MSCQRProductionBootstrapOperator",
         "expectedVersion": "governed-inline-policy",
-        "expectedPolicySha256": "76adc33195c05e058def97d7bcb9ef5caee2f633786c55f246415c28e6ecf55f"
+        "expectedPolicySha256": "ef1b727556f7e195c002c2268b7556161f89c466639b791880de75c1ce7e9bbe"
       },
       "required": true,
       "mutation": false
@@ -3542,7 +3542,7 @@
         "sid": null,
         "livePolicyArn": "inline-user-policy:arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator/MSCQRProductionBootstrapOperator",
         "expectedVersion": "governed-inline-policy",
-        "expectedPolicySha256": "76adc33195c05e058def97d7bcb9ef5caee2f633786c55f246415c28e6ecf55f"
+        "expectedPolicySha256": "ef1b727556f7e195c002c2268b7556161f89c466639b791880de75c1ce7e9bbe"
       },
       "required": true,
       "mutation": false
@@ -3571,7 +3571,7 @@
         "sid": null,
         "livePolicyArn": "inline-user-policy:arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator/MSCQRProductionBootstrapOperator",
         "expectedVersion": "governed-inline-policy",
-        "expectedPolicySha256": "76adc33195c05e058def97d7bcb9ef5caee2f633786c55f246415c28e6ecf55f"
+        "expectedPolicySha256": "ef1b727556f7e195c002c2268b7556161f89c466639b791880de75c1ce7e9bbe"
       },
       "required": true,
       "mutation": false
