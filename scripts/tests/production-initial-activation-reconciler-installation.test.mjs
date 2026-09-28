@@ -178,6 +178,21 @@ for (const [address, predecessorDocument] of [
   change.actions = ["update"];
   change.before = { ...change.after, policy: JSON.stringify(predecessorDocument) };
 }
+const productionReflectionPlan = structuredClone(productionPredecessorPlan);
+const readerRole = productionReflectionPlan.resource_changes.find(({ address }) => address === "aws_iam_role.broker_recovery_successor_evidence_reader");
+readerRole.change.before.managed_policy_arns = readerRole.change.after.managed_policy_arns = [INSTALLATION.brokerRecoverySuccessorEvidenceReaderPolicyArn];
+const readerAttachment = productionReflectionPlan.resource_changes.find(({ address }) => address === "aws_iam_role_policy_attachment.broker_recovery_successor_evidence_reader");
+readerAttachment.change.before.id = readerAttachment.change.after.id = `${BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER.roleName}/${INSTALLATION.brokerRecoverySuccessorEvidenceReaderPolicyArn}`;
+productionReflectionPlan.resource_drift = [
+  {
+    address: "aws_iam_policy.broker_recovery_successor_evidence_reader", mode: "managed", type: "aws_iam_policy", name: "broker_recovery_successor_evidence_reader", provider_name: "registry.terraform.io/hashicorp/aws",
+    change: { actions: ["update"], before: { ...structuredClone(productionReflectionPlan.resource_changes.find(({ address }) => address === "aws_iam_policy.broker_recovery_successor_evidence_reader").change.before), attachment_count: 0 }, after: { ...structuredClone(productionReflectionPlan.resource_changes.find(({ address }) => address === "aws_iam_policy.broker_recovery_successor_evidence_reader").change.before), attachment_count: 1 }, after_unknown: {}, before_sensitive: { tags: {}, tags_all: {} }, after_sensitive: { tags: {}, tags_all: {} } },
+  },
+  {
+    address: "aws_iam_role.broker_recovery_successor_evidence_reader", mode: "managed", type: "aws_iam_role", name: "broker_recovery_successor_evidence_reader", provider_name: "registry.terraform.io/hashicorp/aws",
+    change: { actions: ["update"], before: { ...structuredClone(productionReflectionPlan.resource_changes.find(({ address }) => address === "aws_iam_role.broker_recovery_successor_evidence_reader").change.before), managed_policy_arns: [] }, after: { ...structuredClone(productionReflectionPlan.resource_changes.find(({ address }) => address === "aws_iam_role.broker_recovery_successor_evidence_reader").change.before), managed_policy_arns: [INSTALLATION.brokerRecoverySuccessorEvidenceReaderPolicyArn] }, after_unknown: {}, before_sensitive: { inline_policy: [], managed_policy_arns: [], tags: {}, tags_all: {} }, after_sensitive: { inline_policy: [], managed_policy_arns: [false], tags: {}, tags_all: {} } },
+  },
+];
 const productionPredecessorState = JSON.stringify({
   ...JSON.parse(currentInstallationState(installedState)),
   resources: JSON.parse(currentInstallationState(installedState)).resources
@@ -207,6 +222,45 @@ test("authenticated 12-resource production predecessor permits only two exact po
   const readerResource = terraform.split('resource "aws_iam_policy" "broker_recovery_successor_evidence_reader" {')[1]?.split("\nresource ")[0];
   assert.match(readerResource, /description = "Read only the two immutable component broker successor lineage objects\."/);
   assert.match(readerResource, /prevent_destroy = true/);
+});
+
+test("the authenticated production plan accepts only the exact evidence-reader attachment reflections", () => {
+  const options = { livePredecessor: SIGNER_BOTH_POLICY_EXPANSION };
+  const semantics = assertInstallationPlan(productionReflectionPlan, options);
+  assert.deepEqual([semantics.resourceDriftCount, semantics.createCount, semantics.updateCount, semantics.deleteCount, semantics.replaceCount], [2, 2, 2, 0, 0]);
+  const discovered = discoverInstallationPredecessor({ run: discoveryRun(productionPredecessor) });
+  const prepared = createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(productionPredecessorState)), livePredecessor: discovered.classification, livePredecessorAddresses: discovered.existingAddresses, planJson: productionReflectionPlan, planBytes, preparedAt: now.toISOString() });
+  assert.doesNotThrow(() => assertInstallationPreparation(prepared, { sourceSha, planBytes }));
+  const reject = (mutate) => { const candidate = structuredClone(productionReflectionPlan); mutate(candidate); assert.throws(() => assertInstallationPlan(candidate, options)); };
+  for (const mutate of [
+    (p) => { p.resource_drift[0].change.after.attachment_count = 2; },
+    (p) => { p.resource_drift[0].change.before.attachment_count = 1; p.resource_drift[0].change.after.attachment_count = 0; },
+    (p) => { p.resource_drift[0].address = "aws_iam_policy.reconciler"; },
+    (p) => { p.resource_drift[0].name = "reconciler"; },
+    (p) => { p.resource_drift[0].change.actions = ["create"]; },
+    (p) => { p.resource_drift[0].change.after.policy = "{}"; },
+    (p) => { p.resource_drift[0].change.before.policy = p.resource_drift[0].change.after.policy = "{}"; },
+    (p) => { p.resource_drift[1].change.after.managed_policy_arns = [INSTALLATION.policyArn]; },
+    (p) => { p.resource_drift[1].change.after.managed_policy_arns.push(INSTALLATION.policyArn); },
+    (p) => { p.resource_drift[1].change.before.managed_policy_arns = [INSTALLATION.brokerRecoverySuccessorEvidenceReaderPolicyArn]; p.resource_drift[1].change.after.managed_policy_arns = []; },
+    (p) => { p.resource_drift[1].address = "aws_iam_role.reconciler"; },
+    (p) => { p.resource_drift[1].name = "reconciler"; },
+    (p) => { p.resource_drift[1].change.after_unknown.managed_policy_arns = true; },
+    (p) => { p.resource_drift[1].change.before.description = p.resource_drift[1].change.after.description = "another role"; },
+    (p) => { p.resource_drift.pop(); },
+    (p) => { p.resource_drift.push(structuredClone(p.resource_drift[0])); },
+    (p) => { p.resource_changes = p.resource_changes.filter(({ address }) => address !== readerAttachment.address); },
+    ...[["create"], ["update"], ["delete"], ["delete", "create"]].map((actions) => (p) => { p.resource_changes.find(({ address }) => address === readerAttachment.address).change.actions = actions; }),
+    (p) => { p.resource_changes.find(({ address }) => address === readerAttachment.address).change.before.role = "another-role"; },
+    (p) => { p.resource_changes.find(({ address }) => address === readerAttachment.address).change.before.policy_arn = INSTALLATION.policyArn; },
+    (p) => { p.resource_changes.find(({ address }) => address === readerAttachment.address).change.after.policy_arn = INSTALLATION.policyArn; },
+    (p) => { p.resource_changes.find(({ address }) => address === readerAttachment.address).change.after_unknown.role = true; },
+    (p) => { p.resource_changes.push({ ...structuredClone(p.resource_changes[0]), address: "aws_iam_role.unrelated", change: { actions: ["create"], before: null, after: {} } }); },
+    (p) => { p.resource_changes.find(({ address }) => address === "aws_iam_role_policy.signer_policy_installer").change.actions = ["no-op"]; },
+    (p) => { p.resource_changes.find(({ address }) => address === "aws_iam_role_policy.signer_policy_installer").change.actions = ["delete"]; },
+    (p) => { p.resource_changes.find(({ address }) => address === "aws_iam_role_policy.signer_policy_installer").change.actions = ["delete", "create"]; },
+  ]) reject(mutate);
+  assert.throws(() => assertInstallationPlan(productionReflectionPlan, { livePredecessor: SIGNER_EVIDENCE_READER_POLICY_EXPANSION }));
 });
 
 test("each independently converged policy has a distinct predecessor and exact remaining update", () => {
