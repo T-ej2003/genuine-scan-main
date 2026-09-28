@@ -129,6 +129,19 @@ If a process loses an acknowledgement, rerun the same phase with the same
 private files. The client reauthenticates the exact broker transition; an
 existing saved plan is reused only by byte digest. After an ambiguous Terraform
 apply, run `verify-convergence` instead of applying the saved plan again.
+If readback proves the apply stopped after creating only a canonical subset,
+dispatch `policy-recover` with the original `transition_source_sha`, current
+protected-main `source_sha`, and the same transition ID, then replace the
+private broker-state artifact. This authority is accepted only after the
+broker's durable ledger has reached `APPLY_STARTED`. Create a new private plan
+with `--phase recover-plan`, review it with
+`--phase recover-verify-plan`, and execute it with `--phase recover-apply`.
+Each command uses the same common source, transition, profile, broker-state,
+and capability-state arguments; the plan phases additionally use
+`--plan-output` or `--saved-plan` and the review/apply phases use a fresh
+`--approval-reference`. The broker binds every recovery attempt after
+`APPLY_STARTED`; another partial failure requires a newly generated and
+separately reviewed plan. Old recovery plans cannot replay.
 
 After convergence, dispatch `policy-revoke` with the original transition source
 and the then-current protected main. The workflow accepts a descendant only

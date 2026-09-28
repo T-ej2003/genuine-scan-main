@@ -45,9 +45,9 @@ const profileIdentity = (profile) => assertSignerBootstrapIdentity(profile, aws(
 const installerEnvironment = () => Object.fromEntries(["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_REGION", "AWS_DEFAULT_REGION"].filter((key) => process.env[key]).map((key) => [key, process.env[key]]));
 export function assertSignerCliArguments(argv, phase) {
   const common = ["--phase", "--source-sha", "--transition-id", "--state-file", "--broker-state-file", "--bootstrap-profile"];
-  const extra = ({ plan: ["--plan-output"], "verify-plan": ["--saved-plan", "--approval-reference"], apply: ["--saved-plan", "--approval-reference"], "verify-convergence": ["--saved-plan", "--terraform-state"], revoke: [] })[phase] || [];
+  const extra = ({ plan: ["--plan-output"], "verify-plan": ["--saved-plan", "--approval-reference"], apply: ["--saved-plan", "--approval-reference"], "recover-plan": ["--plan-output"], "recover-verify-plan": ["--saved-plan", "--approval-reference"], "recover-apply": ["--saved-plan", "--approval-reference"], "verify-convergence": ["--saved-plan", "--terraform-state"], revoke: [] })[phase] || [];
   const switches = phase === "revoke" ? ["--abort-before-apply-confirmed"] : [];
-  if (!["recover-install", "init", "plan", "verify-plan", "apply", "verify-convergence", "revoke", "verify-absent"].includes(phase)) fail(`unsupported phase ${phase}`);
+  if (!["recover-install", "init", "plan", "verify-plan", "apply", "recover-plan", "recover-verify-plan", "recover-apply", "verify-convergence", "revoke", "verify-absent"].includes(phase)) fail(`unsupported phase ${phase}`);
   const allowed = new Set([...common, ...extra, ...switches]);
   const seen = new Set();
   for (let i = 0; i < argv.length; i += 1) {
@@ -189,7 +189,7 @@ export function runSignerTemporaryCapability(argv = process.argv.slice(2), { wri
   const phase = opt(argv, "--phase"), sourceSha = opt(argv, "--source-sha"), transitionId = opt(argv, "--transition-id"), stateFile = path.resolve(opt(argv, "--state-file")), brokerStateFile = path.resolve(opt(argv, "--broker-state-file"));
   assertSignerCliArguments(argv, phase);
   const identity = { sourceSha, transitionId }, bootstrap = opt(argv, "--bootstrap-profile");
-  assertSource(sourceSha, { cleanupReadback: ["verify-convergence", "revoke", "verify-absent"].includes(phase) });
+  assertSource(sourceSha, { cleanupReadback: ["recover-plan", "recover-verify-plan", "recover-apply", "verify-convergence", "revoke", "verify-absent"].includes(phase) });
   profileIdentity(bootstrap);
   let current = policyState(bootstrap);
   assertCapabilityPolicyAttached(bootstrap);
@@ -220,8 +220,8 @@ export function runSignerTemporaryCapability(argv = process.argv.slice(2), { wri
   const temporaryVersionId = resolveSignerTemporaryVersionId({ versions: current.versions, activeVersionId: current.active.VersionId, evidence, steadyPolicy, identity });
   const temp = current.versions.find(({ VersionId }) => VersionId === temporaryVersionId);
   if (!temp || !exactSignerTemporaryVersion(temp.document, identity)) fail("exact temporary policy version is not present");
-  if (["plan", "verify-plan", "apply", "verify-convergence"].includes(phase) && current.active.VersionId !== temporaryVersionId) fail("temporary capability is not the active policy version");
-  const session = ["init", "plan", "apply", "verify-convergence"].includes(phase) ? signerSession(bootstrap, transitionId) : null;
+  if (["plan", "verify-plan", "apply", "recover-plan", "recover-verify-plan", "recover-apply", "verify-convergence"].includes(phase) && current.active.VersionId !== temporaryVersionId) fail("temporary capability is not the active policy version");
+  const session = ["init", "plan", "apply", "recover-plan", "recover-apply", "verify-convergence"].includes(phase) ? signerSession(bootstrap, transitionId) : null;
   if (phase === "init") {
     const terraformRoot = path.join(root, C.root);
     const previousUmask = process.umask(0o077);
@@ -278,8 +278,48 @@ export function runSignerTemporaryCapability(argv = process.argv.slice(2), { wri
     const result = buildSignerCapabilityEvidence({ ...started, state: "APPLY_COMPLETED", observedAt: now() });
     protect(stateFile, result); write(`${JSON.stringify({ state: result.state, planSha256: result.planSha256, approvalReference })}\n`); return result;
   }
+  if (phase === "recover-plan") {
+    if (!["APPLY_STARTED", "RECOVERY_APPLY_STARTED"].includes(evidence.state) || brokerLedger.state !== "APPLY_STARTED") fail("authoritative partial-apply recovery is not available");
+    assertInitializedSignerBackend(session);
+    const output = path.resolve(opt(argv, "--plan-output")); fs.mkdirSync(path.dirname(output), { recursive: true, mode: 0o700 }); fs.chmodSync(path.dirname(output), 0o700);
+    if (!fs.existsSync(output)) {
+      const previousUmask = process.umask(0o077);
+      try { execFileSync("terraform", [`-chdir=${path.join(root, C.root)}`, "plan", "-input=false", `-out=${output}`], { cwd: root, env: terraformSessionEnvironment(session), stdio: "ignore" }); }
+      finally { process.umask(previousUmask); }
+    }
+    const stat = fs.lstatSync(output); if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o077)) fail("Terraform did not create a private recovery plan");
+    const planSha256 = sha(fs.readFileSync(output)), planJson = JSON.parse(execFileSync("terraform", ["show", "-json", output], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
+    assertSignerCreationPlan(planJson, { trustPolicy, allowPartial: true });
+    brokerTransition(brokerStateFile, "recovery", { state: "PLAN_GENERATED", planSha256 });
+    const result = buildSignerCapabilityEvidence({ ...evidence, state: "RECOVERY_PLAN_GENERATED", planSha256, approvalReference: null, observedAt: now() });
+    protect(stateFile, result); write(`${JSON.stringify({ state: result.state, planSha256, planFile: output })}\n`); return result;
+  }
+  if (phase === "recover-verify-plan") {
+    if (evidence.state !== "RECOVERY_PLAN_GENERATED") fail("a fresh partial-apply recovery plan is required");
+    const savedPlanFile = path.resolve(opt(argv, "--saved-plan")), stat = fs.lstatSync(savedPlanFile);
+    if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o077) || sha(fs.readFileSync(savedPlanFile)) !== evidence.planSha256) fail("recovery plan changed or is not private");
+    assertSignerCreationPlan(JSON.parse(execFileSync("terraform", ["show", "-json", savedPlanFile], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })), { trustPolicy, allowPartial: true });
+    const approvalReference = opt(argv, "--approval-reference"); if (!/^[A-Za-z0-9._:/-]{6,160}$/.test(approvalReference)) fail("recovery approval reference is malformed");
+    brokerTransition(brokerStateFile, "recovery", { state: "PLAN_REVIEWED", planSha256: evidence.planSha256, approvalReference });
+    const result = buildSignerCapabilityEvidence({ ...evidence, state: "RECOVERY_PLAN_REVIEWED", approvalReference, observedAt: now() });
+    protect(stateFile, result); write(`${JSON.stringify({ state: result.state, planSha256: result.planSha256, approvalReference })}\n`); return result;
+  }
+  if (phase === "recover-apply") {
+    if (evidence.state !== "RECOVERY_PLAN_REVIEWED") fail("a separately reviewed partial-apply recovery plan is required");
+    assertInitializedSignerBackend(session);
+    const savedPlanFile = path.resolve(opt(argv, "--saved-plan")), approvalReference = opt(argv, "--approval-reference"), stat = fs.lstatSync(savedPlanFile);
+    if (approvalReference !== evidence.approvalReference || !stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o077) || sha(fs.readFileSync(savedPlanFile)) !== evidence.planSha256) fail("recovery apply binding differs");
+    assertSignerCreationPlan(JSON.parse(execFileSync("terraform", ["show", "-json", savedPlanFile], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })), { trustPolicy, allowPartial: true });
+    brokerTransition(brokerStateFile, "recovery", { state: "APPLY_STARTED", planSha256: evidence.planSha256, approvalReference });
+    const started = buildSignerCapabilityEvidence({ ...evidence, state: "RECOVERY_APPLY_STARTED", observedAt: now() }); protect(stateFile, started);
+    try { execFileSync("terraform", [`-chdir=${path.join(root, C.root)}`, "apply", "-input=false", savedPlanFile], { cwd: root, env: terraformSessionEnvironment(session), stdio: "ignore" }); }
+    catch (error) { fail(`partial-apply recovery failed with exit status ${error.status ?? "unknown"}; produce and review a new recovery plan before retrying`); }
+    brokerTransition(brokerStateFile, "advance", { state: "APPLIED", planSha256: evidence.planSha256, approvalReference });
+    const result = buildSignerCapabilityEvidence({ ...started, state: "APPLY_COMPLETED", observedAt: now() }); protect(stateFile, result);
+    write(`${JSON.stringify({ state: result.state, planSha256: result.planSha256, approvalReference })}\n`); return result;
+  }
   if (phase === "verify-convergence") {
-    if (!["PLAN_REVIEWED", "APPLY_STARTED", "APPLY_COMPLETED"].includes(evidence.state)) fail("separately reviewed saved plan is required before convergence readback");
+    if (!["PLAN_REVIEWED", "APPLY_STARTED", "RECOVERY_APPLY_STARTED", "APPLY_COMPLETED"].includes(evidence.state)) fail("separately reviewed saved plan is required before convergence readback");
     if (sha(fs.readFileSync(opt(argv, "--saved-plan"))) !== evidence.planSha256) fail("saved plan bytes changed after review");
     const statePath = path.resolve(opt(argv, "--terraform-state"));
     if (fs.existsSync(statePath)) fail("Terraform state evidence output already exists");

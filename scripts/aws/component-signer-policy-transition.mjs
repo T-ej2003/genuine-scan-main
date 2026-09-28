@@ -43,7 +43,7 @@ function exactKeys(value, keys, label) {
 
 export function buildSignerBrokerAuthorization({ sourceSha, protectedMainSha = sourceSha, transitionId, operation, approvedAt, expiresAt, workflowRunId } = {}) {
   assert.match(sourceSha || "", /^[a-f0-9]{40}$/); assert.match(protectedMainSha || "", /^[a-f0-9]{40}$/); uuid(transitionId);
-  assert(["INSTALL", "REVOKE"].includes(operation));
+  assert(["INSTALL", "RECOVER", "REVOKE"].includes(operation));
   assert.match(String(workflowRunId || ""), /^[1-9][0-9]*$/);
   const approved = Date.parse(approvedAt), expires = Date.parse(expiresAt);
   assert(Number.isFinite(approved) && Number.isFinite(expires) && expires - approved === signerBrokerContract.maxAuthorizationAgeMs);
@@ -142,10 +142,18 @@ async function writeLedger(s3, value, prior) {
 }
 
 function assertLedger(value) {
-  exactKeys(value, ["schemaVersion", "kind", "authorization", "authorizationHistory", "state", "steadyVersionId", "temporaryVersionId", "planSha256", "approvalReference", "signerReadbackSha256", "history", "updatedAt"], "Signer lifecycle ledger");
+  exactKeys(value, ["schemaVersion", "kind", "authorization", "authorizationHistory", "state", "steadyVersionId", "temporaryVersionId", "planSha256", "approvalReference", "signerReadbackSha256", "recovery", "recoveryPlanHistory", "history", "updatedAt"], "Signer lifecycle ledger");
   assert.equal(value.schemaVersion, 1); assert.equal(value.kind, "MSCQR_SIGNER_POLICY_BROKER_LEDGER"); rank(value.state);
   assert(Array.isArray(value.authorizationHistory) && value.authorizationHistory.length <= 32);
   assert(Array.isArray(value.history) && value.history.length <= 32);
+  assert(Array.isArray(value.recoveryPlanHistory) && value.recoveryPlanHistory.length <= 32); value.recoveryPlanHistory.forEach(hex);
+  if (value.recovery !== null) {
+    exactKeys(value.recovery, ["attempt", "state", "planSha256", "approvalReference"], "Signer apply recovery");
+    assert(Number.isSafeInteger(value.recovery.attempt) && value.recovery.attempt > 0);
+    assert(["PLAN_GENERATED", "PLAN_REVIEWED", "APPLY_STARTED"].includes(value.recovery.state)); hex(value.recovery.planSha256);
+    if (value.recovery.state === "PLAN_GENERATED") assert.equal(value.recovery.approvalReference, null);
+    else assert.match(value.recovery.approvalReference || "", /^[A-Za-z0-9][A-Za-z0-9:._/-]{0,255}$/);
+  }
   for (let index = 1; index < value.history.length; index++) assert(rank(value.history[index - 1].state) <= rank(value.history[index].state), "Signer lifecycle history moved backwards");
   return value;
 }
@@ -185,7 +193,7 @@ export function createSignerPolicyBroker({ iam, s3, currentMain, now = Date.now 
         assert.equal(authorization.sourceSha, authorization.protectedMainSha, "Initial signer authorization must bind current protected main");
         assert(canonical(live.active.document) === canonical(steadyPolicy), "Signer authorization requires canonical steady policy");
         const ledger = { schemaVersion: 1, kind: "MSCQR_SIGNER_POLICY_BROKER_LEDGER", authorization, authorizationHistory: [], state: "INSTALLING", steadyVersionId: live.active.VersionId,
-          temporaryVersionId: null, planSha256: null, approvalReference: null, signerReadbackSha256: null, history: [], updatedAt: new Date(now()).toISOString() };
+          temporaryVersionId: null, planSha256: null, approvalReference: null, signerReadbackSha256: null, recovery: null, recoveryPlanHistory: [], history: [], updatedAt: new Date(now()).toISOString() };
         return (await writeLedger(s3, ledger, null)).value;
       }
       const ledger = assertLedger(prior.value);
@@ -194,19 +202,49 @@ export function createSignerPolicyBroker({ iam, s3, currentMain, now = Date.now 
       assert(!ledger.authorizationHistory.some(value => value.authorizationSha256 === authorization.authorizationSha256), "Consumed signer authorization replay rejected");
       assert(Date.parse(authorization.approvedAt) > Date.parse(ledger.authorization.approvedAt), "Signer authorization does not advance approval time");
       assert(ledger.state !== "REVOKED", "Signer transition is already revoked");
-      if (authorization.operation === "INSTALL") assert.equal(ledger.authorization.operation, "INSTALL", "Install authorization cannot replace revoke authority");
-      else assert(["INSTALL", "REVOKE"].includes(ledger.authorization.operation), "Signer revoke authorization predecessor is invalid");
-      const next = { ...ledger, authorization, authorizationHistory: [...ledger.authorizationHistory, ledger.authorization], updatedAt: new Date(now()).toISOString() };
+      if (authorization.operation === "INSTALL") assert.equal(ledger.authorization.operation, "INSTALL", "Install authorization cannot replace later authority");
+      else if (authorization.operation === "RECOVER") { assert.equal(ledger.state, "APPLY_STARTED", "Recovery authorization requires authoritative apply start"); assert(["INSTALL", "RECOVER"].includes(ledger.authorization.operation), "Signer recovery authorization predecessor is invalid"); }
+      else {
+        assert(signerAbortAllowed(ledger.state) || ledger.state === "CONVERGED" || ledger.authorization.operation === "REVOKE", "Revoke authorization cannot interrupt apply or convergence recovery");
+        assert(["INSTALL", "RECOVER", "REVOKE"].includes(ledger.authorization.operation), "Signer revoke authorization predecessor is invalid");
+      }
+      const next = { ...ledger, authorization, authorizationHistory: [...ledger.authorizationHistory, ledger.authorization].slice(-32), updatedAt: new Date(now()).toISOString() };
       return (await writeLedger(s3, next, prior)).value;
     }
     const prior = await readLedger(s3); assert(prior, "Signer lifecycle ledger is absent"); const ledger = assertLedger(prior.value);
     const authorization = ledger.authorization;
-    exactKeys(event, event.operation === "SIGNER_ADVANCE" ? ["operation", "sourceSha", "transitionId", "authorizationSha256", "state", "evidenceSha256", "planSha256", "approvalReference", "signerReadbackSha256"] : event.operation === "SIGNER_INSTALL" ? ["operation", "sourceSha", "transitionId", "authorizationSha256"] : ["operation", "sourceSha", "transitionId", "authorizationSha256", "evidenceState", "evidenceSha256", "abort"], "Signer broker request");
+    exactKeys(event, event.operation === "SIGNER_ADVANCE" ? ["operation", "sourceSha", "transitionId", "authorizationSha256", "state", "evidenceSha256", "planSha256", "approvalReference", "signerReadbackSha256"] : event.operation === "SIGNER_RECOVERY" ? ["operation", "sourceSha", "transitionId", "authorizationSha256", "state", "planSha256", "approvalReference"] : event.operation === "SIGNER_INSTALL" ? ["operation", "sourceSha", "transitionId", "authorizationSha256"] : ["operation", "sourceSha", "transitionId", "authorizationSha256", "evidenceState", "evidenceSha256", "abort"], "Signer broker request");
     for (const [name, value] of Object.entries({ sourceSha: authorization.sourceSha, transitionId: authorization.transitionId, authorizationSha256: authorization.authorizationSha256 })) assert.equal(event[name], value, `Signer ${name} differs`);
     await authenticate(authorization, { sourceSha: event.sourceSha, transitionId: event.transitionId, operation: authorization.operation });
+    if (event.operation === "SIGNER_RECOVERY") {
+      assert(["INSTALL", "RECOVER"].includes(authorization.operation), "Apply recovery requires install or recovery authorization");
+      assert.equal(ledger.state, "APPLY_STARTED", "Apply recovery is available only after authoritative apply start");
+      assert(["PLAN_GENERATED", "PLAN_REVIEWED", "APPLY_STARTED"].includes(event.state)); hex(event.planSha256);
+      const current = ledger.recovery;
+      if (event.state === "PLAN_GENERATED") {
+        assert.equal(event.approvalReference, null);
+        if (current?.state === "PLAN_GENERATED" && current.planSha256 === event.planSha256) return ledger;
+        assert(current === null || current.state === "APPLY_STARTED", "A reviewed recovery attempt cannot be replaced before apply starts");
+        assert(!ledger.recoveryPlanHistory.includes(event.planSha256) || current?.planSha256 === event.planSha256, "Consumed signer recovery plan replay rejected");
+        const recovery = { attempt: (current?.attempt || 0) + 1, state: event.state, planSha256: event.planSha256, approvalReference: null };
+        const recoveryPlanHistory = current ? [...ledger.recoveryPlanHistory, current.planSha256].slice(-32) : ledger.recoveryPlanHistory;
+        return (await writeLedger(s3, { ...ledger, recovery, recoveryPlanHistory, updatedAt: new Date(now()).toISOString() }, prior)).value;
+      }
+      assert(current && current.planSha256 === event.planSha256, "Signer recovery plan binding changed");
+      assert.match(event.approvalReference || "", /^[A-Za-z0-9][A-Za-z0-9:._/-]{0,255}$/);
+      if (event.state === current.state) { assert.equal(event.approvalReference, current.approvalReference); return ledger; }
+      const expected = current.state === "PLAN_GENERATED" ? "PLAN_REVIEWED" : current.state === "PLAN_REVIEWED" ? "APPLY_STARTED" : null;
+      assert.equal(event.state, expected, "Signer recovery lifecycle cannot skip or move backwards");
+      const recovery = { ...current, state: event.state, approvalReference: event.approvalReference };
+      return (await writeLedger(s3, { ...ledger, recovery, updatedAt: new Date(now()).toISOString() }, prior)).value;
+    }
     if (event.operation === "SIGNER_ADVANCE") {
-      assert.equal(authorization.operation, "INSTALL", "Lifecycle advance requires install authorization");
-      assertAdvanceFields(ledger, event);
+      if (rank(ledger.state) < rank("APPLY_STARTED")) assert.equal(authorization.operation, "INSTALL", "Pre-apply lifecycle advance requires install authorization");
+      else assert(["INSTALL", "RECOVER"].includes(authorization.operation), "Post-apply lifecycle advance requires install or recovery authorization");
+      if (ledger.recovery && event.state === "APPLIED") {
+        assert.equal(ledger.state, "APPLY_STARTED"); assert.equal(ledger.recovery.state, "APPLY_STARTED");
+        assert.equal(event.planSha256, ledger.recovery.planSha256); assert.equal(event.approvalReference, ledger.recovery.approvalReference); assert.equal(event.signerReadbackSha256, null);
+      } else assertAdvanceFields(ledger, event);
       if (event.state === ledger.state) {
         const predecessor = priorStateFor(ledger.state), last = ledger.history.at(-1);
         assert(predecessor && last?.state === predecessor, "Signer lifecycle retry does not match the authoritative transition");
@@ -215,7 +253,7 @@ export function createSignerPolicyBroker({ iam, s3, currentMain, now = Date.now 
       }
       assert(event.evidenceSha256 === sha256({ state: ledger.state, sourceSha: event.sourceSha, transitionId: event.transitionId, authorizationSha256: event.authorizationSha256 }), "Signer lifecycle evidence does not bind current authoritative state");
       assertSignerLifecycleAdvance(ledger.state, event.state);
-      const next = { ...ledger, state: event.state, planSha256: event.planSha256, approvalReference: event.approvalReference,
+      const next = { ...ledger, state: event.state, planSha256: event.planSha256, approvalReference: event.approvalReference, recovery: event.state === "APPLIED" ? null : ledger.recovery,
         signerReadbackSha256: event.signerReadbackSha256, history: [...ledger.history, { state: ledger.state, updatedAt: ledger.updatedAt }], updatedAt: new Date(now()).toISOString() };
       return (await writeLedger(s3, next, prior)).value;
     }

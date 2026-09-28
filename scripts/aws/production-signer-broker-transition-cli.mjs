@@ -25,8 +25,8 @@ function writeLedger(file, value) {
 
 export async function run(argv = process.argv.slice(2), { installSession = establishSignerInstallSession, revokeSession = establishSignerRevokeSession, loadUser = loadBootstrap } = {}) {
   const phase = required(argv, "--phase"), file = path.resolve(required(argv, "--state-file")), ledger = readLedger(file), authorization = ledger.authorization;
-  assert(["install", "advance", "revoke"].includes(phase));
-  const values = new Set(["--phase", "--state-file", ...(phase === "advance" ? ["--state", "--plan-sha256", "--approval-reference", "--signer-readback-sha256"] : [])]);
+  assert(["install", "advance", "recovery", "revoke"].includes(phase));
+  const values = new Set(["--phase", "--state-file", ...(["advance", "recovery"].includes(phase) ? ["--state", "--plan-sha256", "--approval-reference"] : []), ...(phase === "advance" ? ["--signer-readback-sha256"] : [])]);
   const switches = new Set(phase === "revoke" ? ["--abort-before-apply-confirmed"] : []), seen = new Set();
   for (let index = 0; index < argv.length; index++) {
     const name = argv[index]; assert((values.has(name) || switches.has(name)) && !seen.has(name), "Unsupported signer broker option"); seen.add(name);
@@ -36,6 +36,11 @@ export async function run(argv = process.argv.slice(2), { installSession = estab
   if (phase === "install") {
     const session = await installSession(binding, { loadUser });
     const result = await session.invoke("SIGNER_INSTALL"); writeLedger(file, result); return result;
+  }
+  if (phase === "recovery") {
+    const state = required(argv, "--state"), planSha256 = required(argv, "--plan-sha256"), approvalReference = argv.includes("--approval-reference") ? required(argv, "--approval-reference") : null;
+    const session = await installSession(binding, { loadUser });
+    const result = await session.invoke("SIGNER_RECOVERY", { state, planSha256, approvalReference }); writeLedger(file, result); return result;
   }
   let evidenceState = ledger.state;
   if (phase === "advance") {

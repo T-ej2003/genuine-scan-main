@@ -159,6 +159,8 @@ test("actual GitHub approval observation produces a fresh fixed broker request",
   assert.equal(Object.hasOwn(request.authorization, "policyDocument"), false); assert.equal(Object.hasOwn(request.authorization, "policyArn") && request.authorization.policyArn !== C.sourcePolicyArn, false);
   const predecessor = "a".repeat(40), cleanup = buildSignerBrokerRequest({ sourceSha, transitionSourceSha: predecessor, transitionId: "123e4567-e89b-42d3-a456-426614174000", operation: "REVOKE", workflowRunId, approvalEvidence, now: Date.parse(observedAt) + 1000 });
   assert.equal(cleanup.authorization.sourceSha, predecessor); assert.equal(cleanup.authorization.protectedMainSha, sourceSha);
+  const recovery = buildSignerBrokerRequest({ sourceSha, transitionSourceSha: predecessor, transitionId: "123e4567-e89b-42d3-a456-426614174000", operation: "RECOVER", workflowRunId, approvalEvidence, now: Date.parse(observedAt) + 1000 });
+  assert.equal(recovery.authorization.operation, "RECOVER"); assert.equal(recovery.authorization.protectedMainSha, sourceSha);
   assert.throws(() => buildSignerBrokerRequest({ sourceSha, transitionSourceSha: predecessor, transitionId: "123e4567-e89b-42d3-a456-426614174000", operation: "INSTALL", workflowRunId, approvalEvidence, now: Date.parse(observedAt) + 1000 }), /current protected main/);
 })
 
@@ -174,9 +176,11 @@ test("signer transitions accept only authenticated historical steady policy vers
 
 test("apply remains unreachable unless the exact temporary policy is still active", () => {
   const source = fs.readFileSync("scripts/aws/reconcile-production-signer-temporary-capability.mjs", "utf8");
-  assert.match(source, /\["plan", "verify-plan", "apply", "verify-convergence"\]\.includes\(phase\).*current\.active\.VersionId !== temporaryVersionId/);
+  assert.match(source, /\["plan", "verify-plan", "apply", "recover-plan", "recover-verify-plan", "recover-apply", "verify-convergence"\]\.includes\(phase\).*current\.active\.VersionId !== temporaryVersionId/);
   assert.match(source, /const started = buildSignerCapabilityEvidence\(\{ \.\.\.evidence, state: "APPLY_STARTED"/);
   assert.ok(source.indexOf("protect(stateFile, started)") < source.indexOf('\"apply\", \"-input=false\", savedPlanFile'));
+  assert.match(source, /phase === "recover-plan"/); assert.match(source, /allowPartial: true/);
+  assert.ok(source.indexOf('brokerTransition(brokerStateFile, "recovery", { state: "APPLY_STARTED"') < source.indexOf('state: "RECOVERY_APPLY_STARTED"'));
   assert.doesNotMatch(source, /create-policy-version|writePolicyVersion/);
 })
 
@@ -208,6 +212,13 @@ test("only the exact four create-only signer Terraform plan is accepted", () => 
   assertSignerCreationPlan(plan, { trustPolicy: trust });
   const omittedEmptyResources = structuredClone(plan); delete omittedEmptyResources.prior_state.values.root_module.resources;
   assertSignerCreationPlan(omittedEmptyResources, { trustPolicy: trust });
+  const partial = structuredClone(plan);
+  partial.prior_state.values.root_module.resources = [{ address: addresses[0] }];
+  partial.resource_changes[0].change.actions = ["no-op"];
+  assertSignerCreationPlan(partial, { trustPolicy: trust, allowPartial: true });
+  assert.throws(() => assertSignerCreationPlan(partial, { trustPolicy: trust }));
+  const partialMutation = structuredClone(partial); partialMutation.resource_changes[1].change.actions = ["update"];
+  assert.throws(() => assertSignerCreationPlan(partialMutation, { trustPolicy: trust, allowPartial: true }));
   assert.throws(() => assertSignerCreationPlan({ ...plan, prior_state: { values: { root_module: { resources: {}, child_modules: [] } } } }, { trustPolicy: trust }));
   assert.throws(() => assertSignerCreationPlan({ ...plan, configuration: { ...plan.configuration, root_module: { ...plan.configuration.root_module, resources: [addresses[0], addresses[0], ...addresses.slice(2)].map((address, i) => ({ address, mode: "managed", type: types[i], name: address.split(".").at(-1) })) } } }, { trustPolicy: trust }));
   assert.throws(() => assertSignerCreationPlan({ ...plan, prior_state: { values: { root_module: { resources: [{ address: "aws_iam_role.unrelated" }] } } } }, { trustPolicy: trust }));

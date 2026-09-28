@@ -60,8 +60,13 @@ test("authoritative lifecycle is monotonic and stale pre-apply evidence cannot a
     for (const stale of ["INSTALLING", "INSTALLED", "PLAN_GENERATED", "PLAN_REVIEWED"]) {
       const f = fixture(); await f.broker({ operation: "SIGNER_AUTHORIZE", authorization: authorization("INSTALL") }); let ledger = await f.broker(request(f.ledger(), "SIGNER_INSTALL"));
       for (const state of SIGNER_BROKER_LIFECYCLE.slice(2, SIGNER_BROKER_LIFECYCLE.indexOf(authoritative) + 1)) ledger = await f.broker(request(ledger, "SIGNER_ADVANCE", advance(ledger, state)));
-      await f.broker({ operation: "SIGNER_AUTHORIZE", authorization: authorization("REVOKE", -500, "43") }); ledger = f.ledger();
-      await assert.rejects(f.broker(request(ledger, "SIGNER_REVOKE", { evidenceState: stale, evidenceSha256: signerLifecycleEvidenceBinding({ state: stale, sourceSha, transitionId, authorizationSha256: ledger.authorization.authorizationSha256 }), abort: true })), /stale|APPLY_STARTED|current authoritative/);
+      if (authoritative === "CONVERGED") {
+        await f.broker({ operation: "SIGNER_AUTHORIZE", authorization: authorization("REVOKE", -500, "43") }); ledger = f.ledger();
+        await assert.rejects(f.broker(request(ledger, "SIGNER_REVOKE", { evidenceState: stale, evidenceSha256: signerLifecycleEvidenceBinding({ state: stale, sourceSha, transitionId, authorizationSha256: ledger.authorization.authorizationSha256 }), abort: true })), /stale|APPLY_STARTED|current authoritative/);
+      } else {
+        await assert.rejects(f.broker({ operation: "SIGNER_AUTHORIZE", authorization: authorization("REVOKE", -500, "43") }), /cannot interrupt/);
+        assert.notEqual(signerLifecycleEvidenceBinding({ state: stale, sourceSha, transitionId, authorizationSha256: ledger.authorization.authorizationSha256 }), evidence(ledger));
+      }
       assert.notEqual(f.ledger().state, "REVOKED");
     }
   }
@@ -156,4 +161,39 @@ test("expired revoke authorization can be renewed without replaying prior author
   assert.equal(f.ledger().authorization.authorizationSha256, renewed.authorizationSha256);
   assert(f.ledger().authorizationHistory.some(value => value.authorizationSha256 === expired.authorizationSha256));
   await assert.rejects(f.broker({ operation: "SIGNER_AUTHORIZE", authorization: expired }), /stale|replay|approval time/);
+});
+
+test("authorization renewal retains a readable bounded replay window", async () => {
+  const f = fixture();
+  for (let index = 0; index < 40; index++) await f.broker({ operation: "SIGNER_AUTHORIZE", authorization: authorization("INSTALL", -40000 + index * 1000, String(100 + index)) });
+  assert.equal(f.ledger().authorizationHistory.length, 32);
+  assert.equal((await f.broker(request(f.ledger(), "SIGNER_INSTALL"))).state, "INSTALLED");
+});
+
+test("partial apply recovery binds each reviewed plan and permits deterministic repeated attempts", async () => {
+  const f = fixture(); await f.broker({ operation: "SIGNER_AUTHORIZE", authorization: authorization("INSTALL") });
+  let ledger = await f.broker(request(f.ledger(), "SIGNER_INSTALL"));
+  for (const state of ["PLAN_GENERATED", "PLAN_REVIEWED", "APPLY_AUTHORIZED", "APPLY_STARTED"]) ledger = await f.broker(request(ledger, "SIGNER_ADVANCE", advance(ledger, state)));
+  const recover = (state, planSha256, approvalReference = null) => f.broker(request(f.ledger(), "SIGNER_RECOVERY", { state, planSha256, approvalReference }));
+  const first = "d".repeat(64), second = "e".repeat(64);
+  await recover("PLAN_GENERATED", first); await recover("PLAN_REVIEWED", first, "change:recovery-1"); await recover("APPLY_STARTED", first, "change:recovery-1");
+  await recover("PLAN_GENERATED", first); await recover("PLAN_REVIEWED", first, "change:recovery-2"); await recover("APPLY_STARTED", first, "change:recovery-2");
+  await recover("PLAN_GENERATED", second); await recover("PLAN_REVIEWED", second, "change:recovery-3"); await recover("APPLY_STARTED", second, "change:recovery-3");
+  ledger = f.ledger();
+  await assert.rejects(recover("PLAN_GENERATED", first), /cannot be replaced|binding|replay/);
+  ledger = await f.broker(request(ledger, "SIGNER_ADVANCE", { ...advance(ledger, "APPLIED"), planSha256: second, approvalReference: "change:recovery-3" }));
+  assert.equal(ledger.state, "APPLIED"); assert.equal(ledger.recovery, null); assert.equal(ledger.planSha256, second);
+});
+
+test("post-apply recovery authority can rebind to unchanged descendant main only after APPLY_STARTED", async () => {
+  const main = { sha: sourceSha }, descendant = "d".repeat(40), f = fixture({ main });
+  await f.broker({ operation: "SIGNER_AUTHORIZE", authorization: authorization("INSTALL") });
+  await assert.rejects(f.broker({ operation: "SIGNER_AUTHORIZE", authorization: authorization("RECOVER", -500, "43") }), /apply start/);
+  let ledger = await f.broker(request(f.ledger(), "SIGNER_INSTALL"));
+  for (const state of ["PLAN_GENERATED", "PLAN_REVIEWED", "APPLY_AUTHORIZED", "APPLY_STARTED"]) ledger = await f.broker(request(ledger, "SIGNER_ADVANCE", advance(ledger, state)));
+  main.sha = descendant;
+  await assert.rejects(f.broker({ operation: "SIGNER_AUTHORIZE", authorization: authorization("REVOKE", -600, "43", descendant) }), /cannot interrupt/);
+  await f.broker({ operation: "SIGNER_AUTHORIZE", authorization: authorization("RECOVER", -500, "44", descendant) });
+  ledger = f.ledger(); assert.equal(ledger.authorization.operation, "RECOVER"); assert.equal(ledger.authorization.protectedMainSha, descendant);
+  assert.equal((await f.broker(request(ledger, "SIGNER_RECOVERY", { state: "PLAN_GENERATED", planSha256: "f".repeat(64), approvalReference: null }))).recovery.state, "PLAN_GENERATED");
 });

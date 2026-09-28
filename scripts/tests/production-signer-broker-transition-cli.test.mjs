@@ -47,3 +47,12 @@ test("local catch-up always reauthenticates the matching authoritative broker tr
     assert.equal(f.calls[0].input.evidenceSha256, signerLifecycleEvidenceBinding({ state: "INSTALLED", sourceSha, transitionId, authorizationSha256: authorization.authorizationSha256 }));
   } finally { f.close(); }
 });
+
+test("CLI exposes only the broker-bound partial-apply recovery state machine", async () => {
+  const f = fixture("APPLY_STARTED");
+  try {
+    await run(["--phase", "recovery", "--state-file", f.file, "--state", "PLAN_GENERATED", "--plan-sha256", "d".repeat(64)], { installSession: f.session, loadUser: async () => ({}) });
+    assert.equal(f.calls[0].operation, "SIGNER_RECOVERY");
+    assert.deepEqual(f.calls[0].input, { state: "PLAN_GENERATED", planSha256: "d".repeat(64), approvalReference: null });
+  } finally { f.close(); }
+});

@@ -43,7 +43,7 @@ jobs:
           test "$SOURCE_SHA" = "$(git rev-parse HEAD)"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
           [[ "$TRANSITION_ID" =~ ^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-4[a-fA-F0-9]{3}-[89aAbB][a-fA-F0-9]{3}-[a-fA-F0-9]{12}$ ]]
-          [[ "$PHASE" = policy-install || "$PHASE" = policy-revoke ]]
+          [[ "$PHASE" = policy-install || "$PHASE" = policy-recover || "$PHASE" = policy-revoke ]]
           if [ "$PHASE" = policy-install ]; then
             test "$TRANSITION_SOURCE_SHA" = "$SOURCE_SHA"
           else
@@ -97,6 +97,7 @@ jobs:
           request_dir="$RUNNER_TEMP/signer-policy-transition-request"
           mkdir -p -m 700 "$request_dir"
           operation=INSTALL
+          if [ "$PHASE" = policy-recover ]; then operation=RECOVER; fi
           if [ "$PHASE" = policy-revoke ]; then operation=REVOKE; fi
           node scripts/aws/publish-production-signer-policy-transition-authorization.mjs \
             --source-sha "$SOURCE_SHA" --transition-id "$TRANSITION_ID" --operation "$operation" \

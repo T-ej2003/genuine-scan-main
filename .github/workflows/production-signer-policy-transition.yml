@@ -7,7 +7,7 @@ on:
         description: Canonical signer policy transition phase
         required: true
         type: choice
-        options: [policy-install, policy-revoke]
+        options: [policy-install, policy-recover, policy-revoke]
       source_sha:
         description: Exact protected main SHA
         required: true
