@@ -6,7 +6,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { buildComponentBrokerPackage } from "./component-broker-package.mjs";
 import { digest, installationIdentity } from "./component-iam-installation-contract.mjs";
-import { brokerRecoverySuccessor, brokerRecoverySuccessorBindings, brokerRecoverySuccessorCapabilitySet } from "./component-broker-recovery-successor-contract.mjs";
+import { assertVerifiedRecoveryClosurePredecessor, brokerRecoverySuccessor, brokerRecoverySuccessorBindings, brokerRecoverySuccessorCapabilitySet, recoveryClosurePredecessor } from "./component-broker-recovery-successor-contract.mjs";
 import { authenticateFirstSuccessorReservation } from "./component-broker-recovery-successor-contract.mjs";
 import { assertHistoricalBrokerPolicySuccessorClosure, brokerPolicySuccessor } from "./component-broker-policy-successor-contract.mjs";
 import { identityBootstrap } from "./component-installation-identity-contract.mjs";
@@ -39,7 +39,7 @@ export function brokerRecoverySuccessorSourceBindings(packageEvidence, firstClos
   return Object.freeze({ ...bindings, capabilitySetSha256: digest(brokerRecoverySuccessorCapabilitySet()) });
 }
 
-export function approveBrokerRecoverySuccessor({ sourceSha, transitionId, runId, main, run, environment, branches, approvals, packageEvidence, firstClosure, now }) {
+export function approveBrokerRecoverySuccessor({ sourceSha, transitionId, runId, main, run, environment, branches, approvals, packageEvidence, firstClosure, resume, now }) {
   assert.match(sourceSha || "", /^[a-f0-9]{40}$/); assert.match(transitionId || "", uuid); assert.match(runId || "", /^[1-9][0-9]*$/); assert(Number.isFinite(now));
   assert.deepEqual({ name: main?.name, protected: main?.protected, sha: main?.commit?.sha }, { name: "main", protected: true, sha: sourceSha });
   assert.equal(run?.head_sha, sourceSha); assert.equal(run?.head_branch, "main"); assert.equal(run?.path, brokerRecoverySuccessor.workflow); assert.equal(run?.event, "workflow_dispatch"); assert.equal(run?.status, "in_progress"); assert.equal(run?.run_attempt, 1); assert.equal(String(run?.id), runId);
@@ -48,15 +48,17 @@ export function approveBrokerRecoverySuccessor({ sourceSha, transitionId, runId,
   assertEnvironment(environment, branches, approvals);
   const bindings = brokerRecoverySuccessorSourceBindings(packageEvidence, firstClosure);
   assert.equal(bindings.successor.sourceSha, sourceSha);
-  return Object.freeze({ schemaVersion: 1, transitionType: brokerRecoverySuccessor.transitionType, account: "368992683803", region: "eu-west-2", ...bindings, transitionId, runId, environment: brokerRecoverySuccessor.environment, operator: actor, reviewer: actor, approvalObservedAt: new Date(now).toISOString(), expiresAt: new Date(now + brokerRecoverySuccessor.maxAgeMs).toISOString() });
+  if (resume) { assert.equal(transitionId, recoveryClosurePredecessor.transitionId); assert.deepEqual(Object.keys(resume).sort(), ["reservationEtagSha256", "reservationSha256"]); for (const value of Object.values(resume)) assert.match(value, /^[a-f0-9]{64}$/); }
+  return Object.freeze({ schemaVersion: 1, transitionType: brokerRecoverySuccessor.transitionType, account: "368992683803", region: "eu-west-2", ...bindings, transitionId, ...(resume ? { resume } : {}), runId, environment: brokerRecoverySuccessor.environment, operator: actor, reviewer: actor, approvalObservedAt: new Date(now).toISOString(), expiresAt: new Date(now + brokerRecoverySuccessor.maxAgeMs).toISOString() });
 }
 
 export function assertBrokerRecoverySuccessorAuthorization(value, packageEvidence, firstClosure, now) {
   const bindings = brokerRecoverySuccessorSourceBindings(packageEvidence, firstClosure);
   const expected = { schemaVersion: 1, transitionType: brokerRecoverySuccessor.transitionType, account: "368992683803", region: "eu-west-2", ...bindings,
-    transitionId: value?.transitionId, runId: value?.runId, environment: brokerRecoverySuccessor.environment, operator: actor, reviewer: actor,
+    transitionId: value?.transitionId, ...(Object.hasOwn(value || {}, "resume") ? { resume: value.resume } : {}), runId: value?.runId, environment: brokerRecoverySuccessor.environment, operator: actor, reviewer: actor,
     approvalObservedAt: value?.approvalObservedAt, expiresAt: value?.expiresAt };
   assert.deepEqual(value, expected, "Second successor authorization bindings differ");
+  if (value.resume) { assert.equal(value.transitionId, recoveryClosurePredecessor.transitionId); assert.deepEqual(Object.keys(value.resume).sort(), ["reservationEtagSha256", "reservationSha256"]); for (const item of Object.values(value.resume)) assert.match(item, /^[a-f0-9]{64}$/); }
   assert.match(value.transitionId || "", uuid); assert.match(value.runId || "", /^[1-9][0-9]*$/);
   const approved = Date.parse(value.approvalObservedAt), expires = Date.parse(value.expiresAt); assert.equal(new Date(approved).toISOString(), value.approvalObservedAt); assert.equal(new Date(expires).toISOString(), value.expiresAt);
   assert(Number.isFinite(now) && approved <= now && now < expires && expires - approved === brokerRecoverySuccessor.maxAgeMs, "Second successor authorization expired");
@@ -68,7 +70,20 @@ export async function prepareBrokerRecoverySuccessorAuthorization({ sourceSha, t
   const candidate = packageEvidence || await buildComponentBrokerPackage(); assert.equal(candidate.manifest.sourceSha, sourceSha, "Candidate package source differs");
   const [reservation, bootstrap] = await Promise.all([readEvidence(brokerPolicySuccessor.reservationKey), readEvidence(`${identityBootstrap.prefix}identity-bootstrap.json`)]);
   const lineage = authenticateFirstSuccessorLineage({ reservation: reservation.value, reservationEtag: reservation.etag, metadata: bootstrap.metadata });
-  const approval = approveBrokerRecoverySuccessor({ sourceSha, transitionId, runId, main, run, environment, branches, approvals, packageEvidence: candidate, firstClosure: lineage.closure, now });
+  let partial;
+  try { partial = await readEvidence(brokerRecoverySuccessor.reservationKey); } catch (error) { if (!["NoSuchKey", "NotFound"].includes(error?.name)) throw error; }
+  let resume;
+  if (partial) {
+    assert(!Object.hasOwn(bootstrap.metadata, brokerRecoverySuccessor.metadataKey), "Second successor already closed");
+    assert.equal(transitionId, partial.value.transitionId, "Closure transition differs");
+    if (partial.value.bindings?.successor?.sourceSha === recoveryClosurePredecessor.sourceSha) {
+      assertVerifiedRecoveryClosurePredecessor(partial.value, lineage.closure);
+      resume = { reservationSha256: digest(partial.value), reservationEtagSha256: digest(partial.etag) };
+    } else {
+      assert.deepEqual(partial.value.bindings, brokerRecoverySuccessorBindings(candidate, lineage.closure), "Existing successor reservation differs from current source");
+    }
+  }
+  const approval = approveBrokerRecoverySuccessor({ sourceSha, transitionId, runId, main, run, environment, branches, approvals, packageEvidence: candidate, firstClosure: lineage.closure, resume, now });
   assertBrokerRecoverySuccessorAuthorization(approval, candidate, lineage.closure, now);
   return Object.freeze({ approval, lineage });
 }
@@ -78,7 +93,7 @@ function githubApi(suffix, exec = execFileSync, env = process.env) {
 }
 
 function createEvidenceReader({ exec = execFileSync, env = process.env } = {}) {
-  const allowed = new Set([brokerPolicySuccessor.reservationKey, `${identityBootstrap.prefix}identity-bootstrap.json`]);
+  const allowed = new Set([brokerPolicySuccessor.reservationKey, brokerRecoverySuccessor.reservationKey, `${identityBootstrap.prefix}identity-bootstrap.json`]);
   const commandEnv = createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_BROKER_RECOVERY_SUCCESSOR_EVIDENCE, env });
   const aws = productionAwsExecutable();
   return async key => {

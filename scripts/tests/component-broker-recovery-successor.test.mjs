@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { executeBrokerRecoverySuccessor } from "../aws/component-broker-recovery-successor.mjs";
 import { assertEffectiveBootstrapTrustAnchor } from "../aws/component-bootstrap-trust-anchor.mjs";
 import { brokerRecoverySuccessorSourceBindings } from "../aws/component-broker-recovery-successor-authorization.mjs";
-import { assertBrokerRecoverySuccessorClosureMetadata, brokerRecoverySuccessor, brokerRecoverySuccessorBindings, recoverySuccessorExecutorPolicy } from "../aws/component-broker-recovery-successor-contract.mjs";
+import { assertBrokerRecoverySuccessorClosureMetadata, brokerRecoverySuccessor, brokerRecoverySuccessorBindings, brokerRecoverySuccessorConfigurations, recoverySuccessorExecutorPolicy } from "../aws/component-broker-recovery-successor-contract.mjs";
 import { brokerConfiguration, brokerPolicySuccessorEntryPoints, brokerRecoverySuccessorEntryPoints } from "../aws/component-broker-configuration.mjs";
 import { brokerPolicyPredecessor, brokerPolicySuccessorBindings, brokerPolicySuccessorClosureMetadata } from "../aws/component-broker-policy-successor-contract.mjs";
 import { brokerChangeOperations, brokerChangePredecessor } from "../aws/component-broker-change-contract.mjs";
@@ -104,11 +104,29 @@ test("second successor rejects stale authorization and substituted operator proo
   }
 });
 
+test("fenced current-source partial 10, 10/11 and 10/11/12 resume without duplicate Lambda or IAM writes", async () => {
+  for (const existing of [["10"], ["10", "11"], ["10", "11", "12"]]) {
+    const f = fixture(), configurations = brokerRecoverySuccessorConfigurations(f.candidate);
+    for (const version of existing) {
+      const entryPoint = Object.keys(brokerRecoverySuccessorEntryPoints).find(name => brokerRecoverySuccessorEntryPoints[name] === version);
+      const value = { ...configurations[entryPoint], CodeSize: 1000, State: "Active", LastUpdateStatus: "Successful", RuntimeVersionConfig: { RuntimeVersionArn: `arn:aws:lambda:eu-west-2::runtime:${"c".repeat(64)}` }, FunctionArn: `${componentBrokerArn}:${version}`, Version: version, RevisionId: `v${version}` };
+      f.state.versions[version] = value; f.state.versions.$LATEST = { ...value, FunctionArn: componentBrokerArn, Version: "$LATEST", RevisionId: "latest" };
+    }
+    const bindings = brokerRecoverySuccessorBindings(f.candidate, f.firstClosure);
+    f.state.objects.set(brokerRecoverySuccessor.reservationKey, { schemaVersion: 1, state: ["", "INSTALL_VERSION_PUBLISHED", "CLEANUP_VERSION_PUBLISHED", "AUTHORIZE_VERSION_PUBLISHED"][existing.length], transitionId: f.authorization.transitionId, owner: "22222222-2222-4222-8222-222222222222", authorizationSha256: "e".repeat(64), authorizationExpiresAt: new Date(f.state.now - 600000).toISOString(), sessionExpiresAt: new Date(f.state.now - 900000).toISOString(), authorizationHistory: [], bindings });
+    f.state.etags.set(brokerRecoverySuccessor.reservationKey, '"partial"');
+    f.policies.set(installationIdentity.provisionerRole, f.successor.find(value => value.role === installationIdentity.provisionerRole).policy);
+    await f.state.execute();
+    assert.equal(f.state.writes.filter(value => value === "PublishVersion").length, 3 - existing.length);
+    assert.equal(f.state.writes.filter(value => value === "PutRolePolicy").length, 4);
+  }
+});
+
 test("second closure authentication rejects reservation substitution and preserves first metadata", async () => {
   const f = fixture(); await f.state.execute();
-  const metadata = f.state.metadata.get(`${identityBootstrap.prefix}identity-bootstrap.json`), bindings = brokerRecoverySuccessorBindings(f.candidate, f.firstClosure), reservation = f.state.objects.get(brokerRecoverySuccessor.reservationKey), etag = f.state.etags.get(brokerRecoverySuccessor.reservationKey);
-  assertBrokerRecoverySuccessorClosureMetadata(metadata, bindings, reservation, etag);
-  assert.throws(() => assertBrokerRecoverySuccessorClosureMetadata(metadata, bindings, { ...reservation, transitionId: "55555555-5555-4555-8555-555555555555" }, etag));
-  assert.throws(() => assertBrokerRecoverySuccessorClosureMetadata(metadata, bindings, reservation, '"substituted"'));
-  const altered = structuredClone(metadata); altered["broker-policy-successor"] = "changed"; assert.throws(() => assertBrokerRecoverySuccessorClosureMetadata(altered, bindings, reservation, etag));
+  const key = `${identityBootstrap.prefix}identity-bootstrap.json`, metadata = f.state.metadata.get(key), body = f.state.objects.get(key), bindings = brokerRecoverySuccessorBindings(f.candidate, f.firstClosure), reservation = f.state.objects.get(brokerRecoverySuccessor.reservationKey), etag = f.state.etags.get(brokerRecoverySuccessor.reservationKey);
+  assertBrokerRecoverySuccessorClosureMetadata(metadata, bindings, reservation, etag, body);
+  assert.throws(() => assertBrokerRecoverySuccessorClosureMetadata(metadata, bindings, { ...reservation, transitionId: "55555555-5555-4555-8555-555555555555" }, etag, body));
+  assert.throws(() => assertBrokerRecoverySuccessorClosureMetadata(metadata, bindings, reservation, '"substituted"', body));
+  const altered = structuredClone(metadata); altered["broker-policy-successor"] = "changed"; assert.throws(() => assertBrokerRecoverySuccessorClosureMetadata(altered, bindings, reservation, etag, body));
 });

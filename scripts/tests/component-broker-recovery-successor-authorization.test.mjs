@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import yaml from "js-yaml";
 import { approveBrokerRecoverySuccessor, assertBrokerRecoverySuccessorAuthorization, prepareBrokerRecoverySuccessorAuthorization } from "../aws/component-broker-recovery-successor-authorization.mjs";
-import { brokerRecoverySuccessor } from "../aws/component-broker-recovery-successor-contract.mjs";
+import { brokerRecoverySuccessor, brokerRecoverySuccessorBindings } from "../aws/component-broker-recovery-successor-contract.mjs";
 import { assertBrokerRecoverySuccessorEvidenceReaderSource, brokerRecoverySuccessorEvidenceReader } from "../aws/component-broker-recovery-successor-evidence-reader-contract.mjs";
 import { brokerPolicySuccessor, brokerPolicySuccessorBindings, brokerPolicySuccessorClosureMetadata } from "../aws/component-broker-policy-successor-contract.mjs";
 import { componentBrokerPackageManifest } from "../aws/component-broker-package.mjs";
@@ -20,7 +20,7 @@ function fixture() {
   const actor = { type: "User", login: "T-ej2003", id: 183396573 }, repository = { full_name: "T-ej2003/genuine-scan-main", id: 1145608538 };
   const governance = { sourceSha, transitionId: "33333333-3333-4333-8333-333333333333", runId: "456", now, main: { name: "main", protected: true, commit: { sha: sourceSha } }, run: { id: 456, head_sha: sourceSha, head_branch: "main", path: brokerRecoverySuccessor.workflow, event: "workflow_dispatch", status: "in_progress", run_attempt: 1, repository, head_repository: repository, actor, triggering_actor: actor }, environment: { id: 97, name: brokerRecoverySuccessor.environment, can_admins_bypass: false, deployment_branch_policy: { protected_branches: false, custom_branch_policies: true }, protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{ type: "User", reviewer: actor }] }] }, branches: { total_count: 1, branch_policies: [{ name: "main", type: "branch" }] }, approvals: [{ state: "approved", user: actor, environments: [{ id: 97, name: brokerRecoverySuccessor.environment }] }] };
   const f = { ...governance, packageEvidence, reservation, reservationEtag: '"etag"', metadata, reads: [] };
-  f.readEvidence = async key => { f.reads.push(key); if (key === brokerPolicySuccessor.reservationKey) return { value: f.reservation, etag: f.reservationEtag }; if (key === `${identityBootstrap.prefix}identity-bootstrap.json`) return { value: { state: "BOOTSTRAP_CLOSED" }, metadata: f.metadata }; throw new Error("unexpected key"); };
+  f.readEvidence = async key => { f.reads.push(key); if (key === brokerPolicySuccessor.reservationKey) return { value: f.reservation, etag: f.reservationEtag }; if (key === `${identityBootstrap.prefix}identity-bootstrap.json`) return { value: { state: "BOOTSTRAP_CLOSED" }, metadata: f.metadata }; if (key === brokerRecoverySuccessor.reservationKey) throw Object.assign(new Error("absent"), { name: "NoSuchKey" }); throw new Error("unexpected key"); };
   return f;
 }
 
@@ -28,7 +28,18 @@ test("prepare reads only immutable lineage and deterministically authorizes exac
   const f = fixture(), one = await prepareBrokerRecoverySuccessorAuthorization(f), two = await prepareBrokerRecoverySuccessorAuthorization({ ...f, reads: [] });
   assert.deepEqual(one.approval, two.approval); assert.equal(assertBrokerRecoverySuccessorAuthorization(one.approval, f.packageEvidence, one.lineage.closure, f.now), digest(one.approval));
   assert.deepEqual(one.approval.predecessor.entryPoints, brokerPolicySuccessorEntryPoints); assert.deepEqual(one.approval.successor.entryPoints, brokerRecoverySuccessorEntryPoints);
-  assert.deepEqual(f.reads, [brokerPolicySuccessor.reservationKey, `${identityBootstrap.prefix}identity-bootstrap.json`, brokerPolicySuccessor.reservationKey, `${identityBootstrap.prefix}identity-bootstrap.json`]);
+  assert.deepEqual(f.reads, [brokerPolicySuccessor.reservationKey, `${identityBootstrap.prefix}identity-bootstrap.json`, brokerRecoverySuccessor.reservationKey, brokerPolicySuccessor.reservationKey, `${identityBootstrap.prefix}identity-bootstrap.json`, brokerRecoverySuccessor.reservationKey]);
+});
+
+test("a current-source interrupted generation keeps the normal fenced resume path", async () => {
+  const f = fixture();
+  const firstClosure = JSON.parse(Buffer.from(f.metadata["broker-policy-successor"], "base64url").toString("utf8"));
+  const current = { schemaVersion: 1, state: "INSTALL_VERSION_PUBLISHED", transitionId: f.transitionId, owner: "22222222-2222-4222-8222-222222222222", authorizationSha256: "e".repeat(64), authorizationExpiresAt: new Date(f.now - 600000).toISOString(), sessionExpiresAt: new Date(f.now - 900000).toISOString(), authorizationHistory: [], bindings: brokerRecoverySuccessorBindings(f.packageEvidence, firstClosure) };
+  const original = f.readEvidence;
+  f.readEvidence = key => key === brokerRecoverySuccessor.reservationKey ? { value: current, etag: '"partial"' } : original(key);
+  const { approval } = await prepareBrokerRecoverySuccessorAuthorization(f);
+  assert.equal(Object.hasOwn(approval, "resume"), false);
+  assert.equal(approval.transitionId, current.transitionId);
 });
 
 test("prepare fails closed for substituted historical, candidate, governance, and transition evidence", async () => {

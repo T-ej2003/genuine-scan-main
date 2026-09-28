@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { buildComponentBrokerPackage } from "./component-broker-package.mjs";
 import { digest, installationIdentity } from "./component-iam-installation-contract.mjs";
 import { brokerSignerSuccessor, brokerSignerSuccessorBindings, brokerSignerSuccessorCapabilitySet } from "./component-broker-signer-successor-contract.mjs";
-import { authenticateSecondSuccessorReservation, brokerRecoverySuccessor } from "./component-broker-recovery-successor-contract.mjs";
+import { assertBrokerRecoverySuccessorClosureMetadata, authenticateSecondSuccessorReservation, brokerRecoverySuccessor } from "./component-broker-recovery-successor-contract.mjs";
 import { identityBootstrap } from "./component-installation-identity-contract.mjs";
 import { createProductionAwsCredentialEnvironment, createProductionGithubCredentialEnvironment, productionAwsExecutable, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 
@@ -23,11 +23,14 @@ function assertEnvironment(config, branches, approvals) {
   assert.deepEqual(approvals.map(({ state, user, environments }) => ({ state, user: { type: user?.type, login: user?.login, id: user?.id }, environments: environments.map(({ id, name }) => ({ id, name })) })), [{ state: "approved", user: actor, environments: [{ id: config.id, name: brokerSignerSuccessor.environment }] }]);
 }
 
-export function authenticateSecondSuccessorLineage({ reservation, reservationEtag, metadata }) {
+export function authenticateSecondSuccessorLineage({ reservation, reservationEtag, metadata, bootstrap }) {
   const encoded = metadata?.[brokerRecoverySuccessor.metadataKey];
   assert(typeof encoded === "string" && encoded, "Second successor closure missing");
-  const closure = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+  const closure = bootstrap?.brokerRecoverySuccessorClosure;
+  assert.equal(encoded, digest(closure), "Second successor body and metadata differ");
   const bindings = authenticateSecondSuccessorReservation(reservation, closure, reservationEtag);
+  assert.deepEqual(Object.keys(metadata).sort(), ["broker-policy-successor", brokerRecoverySuccessor.metadataKey, ...(Object.hasOwn(metadata, "broker-signer-successor") ? ["broker-signer-successor"] : [])].sort());
+  assertBrokerRecoverySuccessorClosureMetadata({ "broker-policy-successor": metadata["broker-policy-successor"], [brokerRecoverySuccessor.metadataKey]: encoded }, bindings, reservation, reservationEtag, bootstrap);
   assert.deepEqual(Object.keys(closure.runtimeVersions || {}).sort(), ["10", "11", "12"]);
   return Object.freeze({ reservation: Object.freeze(structuredClone(reservation)), closure: Object.freeze(structuredClone(closure)), bindings });
 }
@@ -65,7 +68,7 @@ export async function prepareBrokerSignerSuccessorAuthorization({ sourceSha, tra
   assert.match(sourceSha || "", /^[a-f0-9]{40}$/); assert.match(transitionId || "", uuid); assert.match(runId || "", /^[1-9][0-9]*$/);
   const candidate = packageEvidence || await buildComponentBrokerPackage(); assert.equal(candidate.manifest.sourceSha, sourceSha, "Candidate package source differs");
   const [reservation, bootstrap] = await Promise.all([readEvidence(brokerRecoverySuccessor.reservationKey), readEvidence(`${identityBootstrap.prefix}identity-bootstrap.json`)]);
-  const lineage = authenticateSecondSuccessorLineage({ reservation: reservation.value, reservationEtag: reservation.etag, metadata: bootstrap.metadata });
+  const lineage = authenticateSecondSuccessorLineage({ reservation: reservation.value, reservationEtag: reservation.etag, metadata: bootstrap.metadata, bootstrap: bootstrap.value });
   const approval = approveBrokerSignerSuccessor({ sourceSha, transitionId, runId, main, run, environment, branches, approvals, packageEvidence: candidate, secondClosure: lineage.closure, now });
   assertBrokerSignerSuccessorAuthorization(approval, candidate, lineage.closure, now);
   return Object.freeze({ approval, lineage });

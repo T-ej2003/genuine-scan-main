@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { assertBrokerRecoverySuccessorIamRequest, assertBrokerRecoverySuccessorS3Request, run } from "../aws/component-broker-recovery-successor-cli.mjs";
+import { assertBrokerRecoverySuccessorIamRequest, assertBrokerRecoverySuccessorS3Request, classifyRecoverySuccessorFailure, run } from "../aws/component-broker-recovery-successor-cli.mjs";
 import { brokerRecoverySuccessor } from "../aws/component-broker-recovery-successor-contract.mjs";
 import { brokerRecoverySuccessorManagedIdentities, identityBootstrap } from "../aws/component-installation-identity-contract.mjs";
 import { canonical } from "../aws/component-iam-installation-contract.mjs";
@@ -35,6 +35,13 @@ test("root adapter permits S3 writes only to the mutable successor records", () 
   assert.throws(() => assertBrokerRecoverySuccessorS3Request("PutObject", request(journalKey)));
 });
 
+test("closure persistence failure is classed without printing AWS payloads", () => {
+  assert.equal(classifyRecoverySuccessorFailure(Object.assign(new Error("opaque"), { name: "MetadataTooLarge" })), "AWS_PERSISTENCE_FAILURE");
+  assert.equal(classifyRecoverySuccessorFailure(new Error("Recovery closure persistence failed after InvalidRequest")), "AWS_PERSISTENCE_FAILURE");
+  assert.equal(classifyRecoverySuccessorFailure(new Error("Second successor authorization expired")), "AUTHORIZATION_FAILURE");
+  assert.equal(classifyRecoverySuccessorFailure(new Error("First successor lineage changed")), "JOURNAL_MISMATCH");
+});
+
 test("recovery successor CLI authenticates approval before root/MFA and always closes local credentials", async () => {
   const calls = [], sourceSha = "a".repeat(40), transitionId = "12345678-1234-4234-8234-123456789abc", packageEvidence = { manifest: { sourceSha }, bytes: Buffer.from("x") };
   const dependencies = {
@@ -51,6 +58,20 @@ test("recovery successor CLI authenticates approval before root/MFA and always c
   dependencies.authorize = input => { calls.push("authorize"); return { authorizationSha256: "b".repeat(64), transitionId: input.transitionId }; };
   calls.length = 0; dependencies.execute = async () => { calls.push("execute"); throw new Error("execution denied"); };
   await assert.rejects(run(["execute", "456", transitionId], dependencies), /execution denied/); assert.equal(calls.at(-1), "close");
+});
+
+test("production CLI routes a VERIFIED reservation only to closure, never generation writes", async () => {
+  const calls = [], sourceSha = "a".repeat(40), transitionId = "22955a47-da8b-4d7f-a01d-cc39fbef5a5c";
+  const result = await run(["execute", "456", transitionId], {
+    source: () => sourceSha,
+    build: async () => ({ manifest: { sourceSha }, bytes: Buffer.from("x") }),
+    authorize: () => ({ authorizationSha256: "b".repeat(64), transitionId, resume: { reservationSha256: "c".repeat(64), reservationEtagSha256: "d".repeat(64) } }),
+    admin: async () => ({ issuanceEvents: async () => [], authenticate: async () => {}, close: () => calls.push("close") }),
+    human: async () => ({}),
+    execute: async () => assert.fail("Generation executor reached"),
+    close: async () => { calls.push("closure"); return { state: "BROKER_RECOVERY_SUCCESSOR_CLOSED" }; },
+  });
+  assert.equal(result.state, "BROKER_RECOVERY_SUCCESSOR_CLOSED"); assert.deepEqual(calls, ["closure", "close"]);
 });
 
 for (const argv of [[], ["execute"], ["execute", "456", "bad"], ["execute", "456", "12345678-1234-4234-8234-123456789abc", "extra"]]) test(`actual recovery-successor CLI rejects unsupported surface ${JSON.stringify(argv)}`, () => {

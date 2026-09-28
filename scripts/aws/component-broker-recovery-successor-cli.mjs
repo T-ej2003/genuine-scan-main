@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { cleanSource } from "./component-iam-installation.mjs";
 import { buildComponentBrokerPackage } from "./component-broker-package.mjs";
 import { authenticateBrokerRecoverySuccessorPublication } from "./component-iam-authorization.mjs";
-import { executeBrokerRecoverySuccessor } from "./component-broker-recovery-successor.mjs";
+import { closeVerifiedBrokerRecoverySuccessor, executeBrokerRecoverySuccessor } from "./component-broker-recovery-successor.mjs";
 import { brokerRecoverySuccessorCapabilitySet, brokerRecoverySuccessorConfigurations } from "./component-broker-recovery-successor-contract.mjs";
 import { authenticateBootstrapOperator } from "./component-bootstrap-operator.mjs";
 import { brokerRecoverySuccessorManagedIdentities, componentBrokerArn, identityBootstrap } from "./component-installation-identity-contract.mjs";
@@ -114,13 +114,23 @@ export async function administrativeAdapter(packageEvidence, { root = createBrok
   } catch (error) { for (const client of clients) client.destroy(); session.close(); throw error; }
 }
 
-export async function run(argv = process.argv.slice(2), { source = cleanSource, build = buildComponentBrokerPackage, authorize = authenticateBrokerRecoverySuccessorPublication, admin = administrativeAdapter, human = authenticateBootstrapOperator, execute = executeBrokerRecoverySuccessor } = {}) {
+export async function run(argv = process.argv.slice(2), { source = cleanSource, build = buildComponentBrokerPackage, authorize = authenticateBrokerRecoverySuccessorPublication, admin = administrativeAdapter, human = authenticateBootstrapOperator, execute = executeBrokerRecoverySuccessor, close = closeVerifiedBrokerRecoverySuccessor } = {}) {
   const [mode, runId, transitionId] = argv; assert.deepEqual([mode, argv.length], ["execute", 3]); assert.match(runId || "", /^[1-9][0-9]*$/); assert.match(transitionId || "", /^[a-f0-9-]{36}$/);
   const sourceSha = source(), packageEvidence = await build(); assert.equal(packageEvidence.manifest.sourceSha, sourceSha);
   const approved = authorize({ runId, transitionId, sourceSha }, packageEvidence), { authorizationSha256, ...authorization } = approved; assert.equal(source(), sourceSha);
   const authority = await admin(packageEvidence);
-  try { const operatorProof = await human({ sourceSha, transitionId, authorizationSha256, purpose: "BROKER_RECOVERY_SUCCESSOR" }, { issuanceEvents: authority.issuanceEvents }); const result = await execute({ authorization, packageEvidence, operatorProof }, { ...authority, authenticate: async () => { assert.equal(source(), sourceSha); await authority.authenticate(); } }); return { state: result.brokerRecoverySuccessor.state, sourceSha, transitionId, authorizationSha256 }; }
+  try { const operatorProof = await human({ sourceSha, transitionId, authorizationSha256, purpose: "BROKER_RECOVERY_SUCCESSOR" }, { issuanceEvents: authority.issuanceEvents }); const result = await (authorization.resume ? close : execute)({ authorization, packageEvidence, operatorProof }, { ...authority, authenticate: async () => { assert.equal(source(), sourceSha); await authority.authenticate(); } }); return { state: result.brokerRecoverySuccessor?.state || result.state, sourceSha, transitionId, authorizationSha256 }; }
   finally { authority.close(); }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || "").href) run().then(result => process.stdout.write(`${JSON.stringify(result)}\n`)).catch(() => { process.stderr.write("Component broker recovery successor rejected; preserve both journals and reconcile exact generation state.\n"); process.exitCode = 1; });
+export function classifyRecoverySuccessorFailure(error) {
+  const message = String(error?.message || "");
+  if (["MetadataTooLarge", "EntityTooLarge"].includes(error?.name) || /closure persistence failed|S3 user metadata exceeds|checkpoint CAS lost after MetadataTooLarge/.test(message)) return "AWS_PERSISTENCE_FAILURE";
+  if (/MFA|GetSessionToken|issuance evidence|session proof/.test(message)) return "MFA_SESSION_FAILURE";
+  if (/authorization|approval|protected source|artifact/.test(message)) return "AUTHORIZATION_FAILURE";
+  if (/journal|reservation|closure|lineage/.test(message)) return "JOURNAL_MISMATCH";
+  if (/generation|version|policy|configuration/.test(message)) return "GENERATION_MISMATCH";
+  return "UNCLASSIFIED_FAILURE";
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1] || "").href) run().then(result => process.stdout.write(`${JSON.stringify(result)}\n`)).catch(error => { process.stderr.write(`Component broker recovery successor rejected (${classifyRecoverySuccessorFailure(error)}); preserve both journals and reconcile exact generation state.\n`); process.exitCode = 1; });

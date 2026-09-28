@@ -20,6 +20,38 @@ downloaded pre-apply artifact cannot authorize abort after the broker records
 
 ## One-time broker generation convergence
 
+### Resume the verified second successor after the S3 metadata limit
+
+The 2026-09-28 recovery attempt already published immutable broker versions
+`10/11/12` and converged all five successor IAM policies. Its recovery
+reservation is `VERIFIED`; only the second closure on `identity-bootstrap.json`
+is missing. Preserve both existing journals and those live generations. The
+closure controller pins this exact historical reservation, verifies the live
+versions and policies, fences the consumed owner, and writes only the new
+reservation owner and missing closure. It cannot republish Lambda versions or
+reapply IAM policies on this path.
+
+After this source change merges, authorize from the **new** protected-main SHA
+using the existing workflow, `successor=recovery`, and the **same** transition
+ID `22955a47-da8b-4d7f-a01d-cc39fbef5a5c`. The workflow reads the existing
+`VERIFIED` reservation and binds its exact body digest and ETag in a fresh
+authorization. Do not reuse the consumed run or choose a new transition ID.
+After the protected environment approves the new run, execute from that exact
+clean source in an interactive terminal:
+
+```sh
+node scripts/aws/component-broker-recovery-successor-cli.mjs execute RUN_ID \
+  22955a47-da8b-4d7f-a01d-cc39fbef5a5c
+```
+
+Authenticate the resulting `identity-bootstrap.json` body, compact closure
+metadata digest, `VERIFIED` reservation, and live versions `10/11/12` before
+starting the signer successor. The original first-successor metadata remains
+unchanged. The full second and later third closure records live in the
+versioned journal body; each S3 metadata value is its canonical SHA-256 digest.
+The executor checks the aggregate UTF-8 bytes of every metadata key and value
+against S3's 2,048-byte limit before `PutObject`.
+
 Merging source does not change the deployed immutable broker. Before the signer
 transition, converge the additive broker generation through the existing
 successor mechanism:

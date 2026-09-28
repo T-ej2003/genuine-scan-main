@@ -17,10 +17,58 @@ export const brokerRecoverySuccessor = Object.freeze({
   maxAgeMs: 30 * 60 * 1000,
 });
 
+// Authenticated production checkpoint at the metadata-size failure. This is
+// the only historical package allowed to cross a new protected-main SHA.
+export const recoveryClosurePredecessor = Object.freeze({
+  transitionId: "22955a47-da8b-4d7f-a01d-cc39fbef5a5c",
+  sourceSha: "14419fd8ff13336777c83e1f2e7b025adea09a55",
+  bindingsSha256: "df78583447af83b2a246007297ece8d6b7a2069c93423e0b1e82d07eeed1179c",
+  authorizationSha256: "8cd96d3c78c9d8e3768bdae4ffdc9447cd97d4c5bbe39e1adf9fd92916dc9d5e",
+  owner: "97940a83-3936-4c2d-95eb-22fb3b44a68b",
+  authorizationExpiresAt: "2026-09-28T22:39:20.815Z",
+  sessionExpiresAt: "2026-09-28T22:32:43.000Z",
+  initialReservationSha256: "2a28491074b92cb234d1c79efbab156c2b3e245a76f885f36d215da5d66df99f",
+});
+
+export function assertVerifiedRecoveryClosurePredecessor(record, firstClosure) {
+  assert.deepEqual(Object.keys(record || {}).sort(), ["authorizationExpiresAt", "authorizationHistory", "authorizationSha256", "bindings", "owner", "schemaVersion", "sessionExpiresAt", "state", "transitionId"].sort());
+  assert.equal(record.schemaVersion, 1); assert.equal(record.state, "VERIFIED");
+  assert.equal(record.transitionId, recoveryClosurePredecessor.transitionId);
+  assert.equal(record.bindings?.successor?.sourceSha, recoveryClosurePredecessor.sourceSha);
+  assert.equal(digest(record.bindings), recoveryClosurePredecessor.bindingsSha256);
+  assert.deepEqual(record.bindings.firstClosure, firstClosure);
+  assert(Array.isArray(record.authorizationHistory));
+  if (record.authorizationHistory.length === 0) {
+    assert.equal(digest(record), recoveryClosurePredecessor.initialReservationSha256);
+  } else {
+    assert.deepEqual(record.authorizationHistory[0], {
+      authorizationSha256: recoveryClosurePredecessor.authorizationSha256,
+      authorizationExpiresAt: recoveryClosurePredecessor.authorizationExpiresAt,
+      sessionExpiresAt: recoveryClosurePredecessor.sessionExpiresAt,
+      owner: recoveryClosurePredecessor.owner,
+    });
+    const seen = new Set();
+    for (const prior of record.authorizationHistory) { sha(prior.authorizationSha256); uuid(prior.owner); assert(!seen.has(prior.authorizationSha256)); seen.add(prior.authorizationSha256); for (const field of ["authorizationExpiresAt", "sessionExpiresAt"]) assert.equal(new Date(Date.parse(prior[field])).toISOString(), prior[field]); }
+    assert(!seen.has(record.authorizationSha256));
+  }
+  uuid(record.owner); sha(record.authorizationSha256);
+  for (const field of ["authorizationExpiresAt", "sessionExpiresAt"]) assert.equal(new Date(Date.parse(record[field])).toISOString(), record[field]);
+  return record.bindings;
+}
+
 export const recoverySuccessorPredecessorPolicy = () => terraformExecutorPolicyGeneration("7", true);
 export const recoverySuccessorExecutorPolicy = () => terraformExecutorPolicyGeneration("10", true);
 export const recoverySuccessorPredecessorPolicySha256 = digest(recoverySuccessorPredecessorPolicy());
 export const recoverySuccessorExecutorPolicySha256 = digest(recoverySuccessorExecutorPolicy());
+export const s3UserMetadataLimitBytes = 2048;
+export function assertS3UserMetadataSize(metadata) {
+  const bytes = Object.entries(metadata).reduce((total, [key, value]) => {
+    assert.equal(typeof value, "string");
+    return total + Buffer.byteLength(key, "utf8") + Buffer.byteLength(value, "utf8");
+  }, 0);
+  assert(bytes <= s3UserMetadataLimitBytes, `S3 user metadata exceeds ${s3UserMetadataLimitBytes} bytes`);
+  return bytes;
+}
 
 export function authenticateFirstSuccessorReservation(value, firstClosure, reservationEtag) {
   assert.deepEqual(Object.keys(value || {}).sort(), ["authorizationExpiresAt", "authorizationHistory", "authorizationSha256", "bindings", "owner", "schemaVersion", "sessionExpiresAt", "state", "transitionId"].sort());
@@ -67,21 +115,25 @@ export function brokerRecoverySuccessorCapabilitySet() {
   ] };
 }
 
-export function brokerRecoverySuccessorClosureMetadata(record, bindings, runtimeVersions, reservationEtag, closedAt, historicalMetadata) {
+export function brokerRecoverySuccessorClosure(record, bindings, runtimeVersions, reservationEtag, closedAt, historicalMetadata) {
   assert.equal(record.state, "VERIFIED"); assert.deepEqual(record.bindings, bindings); assert(typeof reservationEtag === "string" && reservationEtag);
   assert.equal(new Date(Date.parse(closedAt)).toISOString(), closedAt);
   assert.deepEqual(Object.keys(runtimeVersions || {}).sort(), Object.values(brokerRecoverySuccessorEntryPoints));
   assert.deepEqual(Object.keys(historicalMetadata || {}), ["broker-policy-successor"]);
   const value = { schemaVersion: 1, state: "BROKER_RECOVERY_SUCCESSOR_CLOSED", transitionId: record.transitionId, authorizationSha256: record.authorizationSha256,
     bindingsSha256: digest(bindings), reservationSha256: digest(record), reservationEtagSha256: digest(reservationEtag), firstAuthorizationSha256: bindings.firstClosure.authorizationSha256, closedAt, runtimeVersions };
-  return Object.freeze({ ...historicalMetadata, [brokerRecoverySuccessor.metadataKey]: Buffer.from(canonical(value)).toString("base64url") });
+  const metadata = Object.freeze({ ...historicalMetadata, [brokerRecoverySuccessor.metadataKey]: digest(value) });
+  assertS3UserMetadataSize(metadata);
+  return Object.freeze({ value: Object.freeze(value), metadata });
 }
 
-export function assertBrokerRecoverySuccessorClosureMetadata(metadata, bindings, reservation, reservationEtag) {
+export function assertBrokerRecoverySuccessorClosureMetadata(metadata, bindings, reservation, reservationEtag, bootstrap) {
   assert.deepEqual(Object.keys(metadata || {}).sort(), ["broker-policy-successor", brokerRecoverySuccessor.metadataKey].sort());
+  assertS3UserMetadataSize(metadata);
   const firstClosure = JSON.parse(Buffer.from(metadata["broker-policy-successor"], "base64url").toString("utf8"));
   assert.equal(canonical(firstClosure), canonical(bindings.firstClosure), "First successor closure differs");
-  const value = JSON.parse(Buffer.from(metadata[brokerRecoverySuccessor.metadataKey], "base64url").toString("utf8"));
+  const value = bootstrap?.brokerRecoverySuccessorClosure;
+  assert.equal(metadata[brokerRecoverySuccessor.metadataKey], digest(value), "Second successor body and metadata differ");
   assert.deepEqual(Object.keys(value || {}).sort(), ["authorizationSha256", "bindingsSha256", "closedAt", "firstAuthorizationSha256", "reservationEtagSha256", "reservationSha256", "runtimeVersions", "schemaVersion", "state", "transitionId"].sort());
   assert.equal(value.schemaVersion, 1); assert.equal(value.state, "BROKER_RECOVERY_SUCCESSOR_CLOSED"); uuid(value.transitionId); for (const field of ["authorizationSha256", "bindingsSha256", "firstAuthorizationSha256", "reservationEtagSha256", "reservationSha256"]) sha(value[field]);
   assert.equal(value.firstAuthorizationSha256, bindings.firstClosure.authorizationSha256); assert.equal(value.bindingsSha256, digest(bindings));
