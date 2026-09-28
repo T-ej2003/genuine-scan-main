@@ -125,6 +125,11 @@ Each broker authorization is valid for 30 minutes. If it expires before a
 pre-apply advance, dispatch `policy-install` again with the same source and
 transition, then replace `broker-state.json` with the new artifact. The broker
 accepts only a later approval and retains consumed authorization history.
+If recovery authority expires after the ledger reaches `APPLIED`, renew
+`policy-recover` and run `verify-convergence`; do not run Terraform apply again.
+If a revoke acknowledgement is lost and its authority expires after the ledger
+reaches `REVOKED`, renew `policy-revoke` and retry readback. The broker verifies
+canonical steady state without creating another policy version.
 If a process loses an acknowledgement, rerun the same phase with the same
 private files. The client reauthenticates the exact broker transition; an
 existing saved plan is reused only by byte digest. After an ambiguous Terraform

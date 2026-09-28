@@ -159,11 +159,142 @@ test("composed signer retries keep the signer ledger authoritative and block sta
   assert.deepEqual(f.ordinaryArchive, []);
 });
 
+test("expired recovery after APPLIED renews through the real signer session and verifies without reapply", async () => {
+  const f = composedFixture(); await f.authorize("INSTALL");
+  let client = await f.installSession(), ledger = await client.invoke("SIGNER_INSTALL");
+  for (const state of ["PLAN_GENERATED", "PLAN_REVIEWED", "APPLY_AUTHORIZED", "APPLY_STARTED"]) ledger = await client.invoke("SIGNER_ADVANCE", advance(ledger, state));
+  await f.dispatch({ operation: "SIGNER_AUTHORIZE", authorization: authorization("RECOVER", -500, "43") }, "15");
+  client = await f.installSession();
+  const planSha256 = "d".repeat(64), approvalReference = "change:recovery-apply";
+  for (const state of ["PLAN_GENERATED", "PLAN_REVIEWED", "APPLY_STARTED"]) await client.invoke("SIGNER_RECOVERY", { state, planSha256, approvalReference: state === "PLAN_GENERATED" ? null : approvalReference });
+  let applyCount = 0;
+  const terraformApply = async () => { applyCount++; return client.invoke("SIGNER_ADVANCE", { ...advance(f.ledger(), "APPLIED"), planSha256, approvalReference }); };
+  ledger = await terraformApply(); assert.equal(ledger.state, "APPLIED");
+  f.clock.value += 31 * 60 * 1000;
+  await assert.rejects(f.dispatch({ operation: "SIGNER_AUTHORIZE", authorization: authorization("REVOKE", -600, "44", sourceSha, f.clock.value) }, "15"), /cannot interrupt/);
+  await f.dispatch({ operation: "SIGNER_AUTHORIZE", authorization: authorization("RECOVER", -500, "45", sourceSha, f.clock.value) }, "15");
+  client = await f.installSession(); ledger = f.ledger();
+  await assert.rejects(client.invoke("SIGNER_RECOVERY", { state: "PLAN_GENERATED", planSha256: "e".repeat(64), approvalReference: null }), /only after authoritative apply start/);
+  ledger = await client.invoke("SIGNER_ADVANCE", { ...advance(ledger, "CONVERGED"), planSha256, approvalReference });
+  assert.equal(ledger.state, "CONVERGED"); assert.equal(applyCount, 1);
+  await assert.rejects(f.dispatch({ operation: "SIGNER_AUTHORIZE", authorization: authorization("RECOVER", -250, "46", sourceSha, f.clock.value) }, "15"), /authoritative apply start or completion/);
+  await f.dispatch({ operation: "SIGNER_AUTHORIZE", authorization: authorization("REVOKE", -250, "47", sourceSha, f.clock.value) }, "15");
+  client = await f.revokeSession(); ledger = f.ledger();
+  ledger = await client.invoke("SIGNER_REVOKE", { evidenceState: ledger.state, evidenceSha256: evidence(ledger), abort: false });
+  assert.equal(ledger.state, "REVOKED"); assert.equal(applyCount, 1);
+  assert.deepEqual(f.versions().find(value => value.IsDefaultVersion).document, steady);
+  const versionWrites = f.calls.filter(({ operation }) => operation === "CreatePolicyVersion").length;
+  f.clock.value += 31 * 60 * 1000;
+  await f.dispatch({ operation: "SIGNER_AUTHORIZE", authorization: authorization("REVOKE", -500, "48", sourceSha, f.clock.value) }, "15");
+  client = await f.revokeSession(); ledger = f.ledger();
+  assert.equal((await client.invoke("SIGNER_REVOKE", { evidenceState: ledger.history.at(-1).state,
+    evidenceSha256: signerLifecycleEvidenceBinding({ state: ledger.history.at(-1).state, ...f.binding() }), abort: false })).state, "REVOKED");
+  assert.equal(f.calls.filter(({ operation }) => operation === "CreatePolicyVersion").length, versionWrites, "revoke retry must not recreate the temporary policy");
+  assert.deepEqual(f.ordinaryArchive, []);
+  const reconciliation = fs.readFileSync(new URL("../aws/reconcile-production-signer-temporary-capability.mjs", import.meta.url), "utf8");
+  const verify = reconciliation.slice(reconciliation.indexOf('if (phase === "verify-convergence")'), reconciliation.indexOf('if (phase === "revoke")'));
+  assert.doesNotMatch(verify, /terraform[^\n]*"apply"|recover-apply/);
+});
+
 const request = (ledger, operation, extra = {}) => ({ operation, sourceSha, transitionId, authorizationSha256: ledger.authorization.authorizationSha256, ...extra });
 const evidence = ledger => signerLifecycleEvidenceBinding({ state: ledger.state, sourceSha, transitionId, authorizationSha256: ledger.authorization.authorizationSha256 });
 const advance = (ledger, state) => ({ state, evidenceSha256: evidence(ledger), planSha256: "b".repeat(64),
   approvalReference: state === "PLAN_GENERATED" ? null : "change:signer-approved",
   signerReadbackSha256: state === "CONVERGED" ? "c".repeat(64) : null });
+
+test("authorization expiry and replacement matrix covers every authoritative signer state", async () => {
+  for (const state of SIGNER_BROKER_LIFECYCLE) {
+    const clock = { value: now }, f = fixture({ clock });
+    const original = authorization("INSTALL"); await f.broker({ operation: "SIGNER_AUTHORIZE", authorization: original });
+    let ledger = f.ledger();
+    if (state !== "INSTALLING") ledger = await f.broker(request(ledger, "SIGNER_INSTALL"));
+    for (const next of SIGNER_BROKER_LIFECYCLE.slice(2, SIGNER_BROKER_LIFECYCLE.indexOf(state) + 1)) {
+      if (next === "REVOKED") {
+        await f.broker({ operation: "SIGNER_AUTHORIZE", authorization: authorization("REVOKE", -500, "43") }); ledger = f.ledger();
+        ledger = await f.broker(request(ledger, "SIGNER_REVOKE", { evidenceState: ledger.state, evidenceSha256: evidence(ledger), abort: false }));
+      } else ledger = await f.broker(request(ledger, "SIGNER_ADVANCE", advance(ledger, next)));
+    }
+    const proofOperation = state === "REVOKED" ? "SIGNER_PROVE_REVOKE_SESSION" : "SIGNER_PROVE_INSTALL_SESSION";
+    assert.equal((await f.broker(request(ledger, proofOperation))).sourceSha, sourceSha, `${state}: valid authorization`);
+    clock.value += 31 * 60 * 1000;
+    await assert.rejects(f.broker(request(ledger, proofOperation)), /stale/, `${state}: expired authorization`);
+    await assert.rejects(f.broker({ operation: "SIGNER_AUTHORIZE", authorization: original }), /stale|replay/, `${state}: older authorization`);
+    const fresh = operation => authorization(operation, -500, "44", sourceSha, clock.value);
+    await assert.rejects(f.broker({ operation: "SIGNER_AUTHORIZE", authorization: { ...fresh("INSTALL"), transitionId: "123e4567-e89b-42d3-a456-426614174001" } }), /binding differs/, `${state}: wrong transition`);
+    await assert.rejects(f.broker({ operation: "SIGNER_AUTHORIZE", authorization: { ...fresh("INSTALL"), sourceSha: "d".repeat(40) } }), /binding differs/, `${state}: wrong source`);
+    await assert.rejects(f.broker({ operation: "SIGNER_AUTHORIZE", authorization: { ...fresh("INSTALL"), purpose: "other" } }), /binding differs/, `${state}: wrong purpose`);
+    const wrong = ["APPLY_STARTED", "APPLIED"].includes(state) ? "REVOKE" : "RECOVER";
+    await assert.rejects(f.broker({ operation: "SIGNER_AUTHORIZE", authorization: fresh(wrong) }), /apply start|cannot interrupt|already revoked/, `${state}: wrong operation`);
+    const same = state === "REVOKED" ? "REVOKE" : "INSTALL";
+    if (state === "CONVERGED") await assert.rejects(f.broker({ operation: "SIGNER_AUTHORIZE", authorization: fresh(same) }), /convergence/, `${state}: install cannot renew`);
+    else {
+      await f.broker({ operation: "SIGNER_AUTHORIZE", authorization: fresh(same) });
+      assert.equal(f.ledger().state, state, `${state}: renewal cannot move the lifecycle`);
+      if (["APPLY_STARTED", "APPLIED"].includes(state)) {
+        await f.broker({ operation: "SIGNER_AUTHORIZE", authorization: authorization("RECOVER", -400, "45", sourceSha, clock.value) });
+        assert.equal(f.ledger().state, state, `${state}: fresh recovery cannot move the lifecycle`);
+      }
+      if (state === "REVOKED") {
+        const retry = f.ledger();
+        assert.equal((await f.broker(request(retry, "SIGNER_REVOKE", { evidenceState: retry.history.at(-1).state,
+          evidenceSha256: signerLifecycleEvidenceBinding({ state: retry.history.at(-1).state, sourceSha, transitionId, authorizationSha256: retry.authorization.authorizationSha256 }), abort: false }))).state, "REVOKED");
+        assert.deepEqual(f.versions().find(value => value.IsDefaultVersion).document, steady);
+      }
+    }
+    if (state === "CONVERGED") {
+      await f.broker({ operation: "SIGNER_AUTHORIZE", authorization: fresh("REVOKE") });
+      assert.equal(f.ledger().state, "CONVERGED", "revoke authorization precedes actual revocation");
+    }
+  }
+});
+
+test("real signer sessions resume after an expired authorization at each durable state", async () => {
+  for (const interrupted of SIGNER_BROKER_LIFECYCLE) {
+    const f = composedFixture(); await f.authorize("INSTALL");
+    let client = await f.installSession(), ledger = f.ledger();
+    if (interrupted !== "INSTALLING") ledger = await client.invoke("SIGNER_INSTALL");
+    for (const state of SIGNER_BROKER_LIFECYCLE.slice(2, SIGNER_BROKER_LIFECYCLE.indexOf(interrupted) + 1)) {
+      if (state === "REVOKED") {
+        await f.authorize("REVOKE"); client = await f.revokeSession(); ledger = f.ledger();
+        ledger = await client.invoke("SIGNER_REVOKE", { evidenceState: ledger.state, evidenceSha256: evidence(ledger), abort: false });
+      } else ledger = await client.invoke("SIGNER_ADVANCE", advance(ledger, state));
+    }
+    const writes = f.calls.filter(({ operation }) => operation === "CreatePolicyVersion").length;
+    f.clock.value += 31 * 60 * 1000;
+    const renewal = ["APPLY_STARTED", "APPLIED"].includes(interrupted) ? "RECOVER" : ["CONVERGED", "REVOKED"].includes(interrupted) ? "REVOKE" : "INSTALL";
+    await f.dispatch({ operation: "SIGNER_AUTHORIZE", authorization: authorization(renewal, -500, "55", sourceSha, f.clock.value) }, "15");
+    client = renewal === "REVOKE" ? await f.revokeSession() : await f.installSession(); ledger = f.ledger();
+    if (interrupted === "INSTALLING") ledger = await client.invoke("SIGNER_INSTALL");
+    else if (interrupted === "CONVERGED" || interrupted === "REVOKED") ledger = await client.invoke("SIGNER_REVOKE", {
+      evidenceState: interrupted === "REVOKED" ? ledger.history.at(-1).state : ledger.state,
+      evidenceSha256: signerLifecycleEvidenceBinding({ state: interrupted === "REVOKED" ? ledger.history.at(-1).state : ledger.state, ...f.binding() }), abort: false });
+    else ledger = await client.invoke("SIGNER_ADVANCE", advance(ledger, SIGNER_BROKER_LIFECYCLE[SIGNER_BROKER_LIFECYCLE.indexOf(interrupted) + 1]));
+    assert.equal(ledger.state, interrupted === "REVOKED" ? "REVOKED" : SIGNER_BROKER_LIFECYCLE[SIGNER_BROKER_LIFECYCLE.indexOf(interrupted) + 1], `${interrupted}: resume`);
+    if (interrupted === "REVOKED") assert.equal(f.calls.filter(({ operation }) => operation === "CreatePolicyVersion").length, writes, "terminal retry must not mutate IAM");
+    assert.deepEqual(f.ordinaryArchive, [], `${interrupted}: ordinary archive must remain unused`);
+  }
+});
+
+test("expired authorization after ambiguous IAM install or revoke resumes by readback without another write", async () => {
+  const install = composedFixture(); await install.authorize("INSTALL");
+  await install.iam("CreatePolicyVersion", { PolicyArn: C.sourcePolicyArn, PolicyDocument: JSON.stringify(temporary), SetAsDefault: true });
+  install.clock.value += 31 * 60 * 1000;
+  await install.dispatch({ operation: "SIGNER_AUTHORIZE", authorization: authorization("INSTALL", -500, "49", sourceSha, install.clock.value) }, "15");
+  let client = await install.installSession(), writes = install.calls.filter(({ operation }) => operation === "CreatePolicyVersion").length;
+  assert.equal((await client.invoke("SIGNER_INSTALL")).state, "INSTALLED");
+  assert.equal(install.calls.filter(({ operation }) => operation === "CreatePolicyVersion").length, writes, "install readback must not repeat AWS mutation");
+
+  const revoke = composedFixture(); await revoke.authorize("INSTALL");
+  client = await revoke.installSession(); let ledger = await client.invoke("SIGNER_INSTALL");
+  for (const state of ["PLAN_GENERATED", "PLAN_REVIEWED", "APPLY_AUTHORIZED", "APPLY_STARTED", "APPLIED", "CONVERGED"]) ledger = await client.invoke("SIGNER_ADVANCE", advance(ledger, state));
+  await revoke.authorize("REVOKE");
+  await revoke.iam("CreatePolicyVersion", { PolicyArn: C.sourcePolicyArn, PolicyDocument: JSON.stringify(steady), SetAsDefault: true });
+  revoke.clock.value += 31 * 60 * 1000;
+  await revoke.dispatch({ operation: "SIGNER_AUTHORIZE", authorization: authorization("REVOKE", -500, "49", sourceSha, revoke.clock.value) }, "15");
+  client = await revoke.revokeSession(); ledger = revoke.ledger(); writes = revoke.calls.filter(({ operation }) => operation === "CreatePolicyVersion").length;
+  assert.equal((await client.invoke("SIGNER_REVOKE", { evidenceState: ledger.state, evidenceSha256: evidence(ledger), abort: false })).state, "REVOKED");
+  assert.equal(revoke.calls.filter(({ operation }) => operation === "CreatePolicyVersion").length, writes, "revoke readback must not repeat AWS mutation");
+});
 
 test("broker alone performs the fixed canonical install and revoke", async () => {
   const f = fixture();

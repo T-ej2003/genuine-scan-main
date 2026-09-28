@@ -217,9 +217,9 @@ export function createSignerPolicyBroker({ iam, s3, currentMain, now = Date.now 
       assert.notEqual(authorization.authorizationSha256, ledger.authorization.authorizationSha256, "Signer authorization replay rejected");
       assert(!ledger.authorizationHistory.some(value => value.authorizationSha256 === authorization.authorizationSha256), "Consumed signer authorization replay rejected");
       assert(Date.parse(authorization.approvedAt) > Date.parse(ledger.authorization.approvedAt), "Signer authorization does not advance approval time");
-      assert(ledger.state !== "REVOKED", "Signer transition is already revoked");
-      if (authorization.operation === "INSTALL") assert.equal(ledger.authorization.operation, "INSTALL", "Install authorization cannot replace later authority");
-      else if (authorization.operation === "RECOVER") { assert.equal(ledger.state, "APPLY_STARTED", "Recovery authorization requires authoritative apply start"); assert(["INSTALL", "RECOVER"].includes(ledger.authorization.operation), "Signer recovery authorization predecessor is invalid"); }
+      assert(ledger.state !== "REVOKED" || (authorization.operation === "REVOKE" && ledger.authorization.operation === "REVOKE"), "Signer transition is already revoked");
+      if (authorization.operation === "INSTALL") { assert.equal(ledger.authorization.operation, "INSTALL", "Install authorization cannot replace later authority"); assert(rank(ledger.state) < rank("CONVERGED"), "Install authorization cannot renew after convergence"); }
+      else if (authorization.operation === "RECOVER") { assert(["APPLY_STARTED", "APPLIED"].includes(ledger.state), "Recovery authorization requires authoritative apply start or completion"); assert(["INSTALL", "RECOVER"].includes(ledger.authorization.operation), "Signer recovery authorization predecessor is invalid"); }
       else {
         assert(signerAbortAllowed(ledger.state) || ledger.state === "CONVERGED" || ledger.authorization.operation === "REVOKE", "Revoke authorization cannot interrupt apply or convergence recovery");
         assert(["INSTALL", "RECOVER", "REVOKE"].includes(ledger.authorization.operation), "Signer revoke authorization predecessor is invalid");
