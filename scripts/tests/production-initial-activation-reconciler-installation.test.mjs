@@ -1119,6 +1119,24 @@ test("bootstrap role trust and permissions are exact and non-administrative", ()
   assert.notEqual(trustPolicy.Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:sub"], "repo:T-ej2003/genuine-scan-main:environment:production");
 });
 
+test("canonical signer Terraform PutRolePolicy is allowed only for its exact role", () => {
+  const policy = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionInitialActivationPolicyReconcilerBootstrapPermissions-v1.json", "utf8"));
+  const terraform = fs.readFileSync("infra/aws/terraform/production-initial-activation-policy-reconciler/main.tf", "utf8");
+  const exactRoleArn = "arn:aws:iam::368992683803:role/mscqr-production-signer-policy-installer";
+  const matchingAllows = policy.Statement.filter(({ Effect, Action }) => Effect === "Allow" && (Array.isArray(Action) ? Action : [Action]).includes("iam:PutRolePolicy"));
+  assert.equal(terraform.includes('role   = aws_iam_role.signer_policy_installer.id'), true, "the canonical Terraform inline policy targets the installer role");
+  assert.equal(matchingAllows.length, 1);
+  assert.equal(matchingAllows[0].Resource, exactRoleArn);
+  assert.equal(Object.hasOwn(matchingAllows[0], "Condition"), false, "PutRolePolicy has no unsupported condition key");
+  const authorized = (resource) => matchingAllows.some(({ Resource }) => Resource === resource);
+  assert.equal(authorized(exactRoleArn), true, "canonical Terraform PutRolePolicy is authorized");
+  for (const otherRole of [
+    "arn:aws:iam::368992683803:role/mscqr-production-release-deployer",
+    "arn:aws:iam::368992683803:role/other",
+    "arn:aws:iam::111122223333:role/mscqr-production-signer-policy-installer",
+  ]) assert.equal(authorized(otherRole), false, `PutRolePolicy remains denied for ${otherRole}`);
+});
+
 test("bootstrap policy covers the exact complete-state execution read set without broadening", () => {
   const policy = historicalBootstrapPolicy();
   const statement = (sid) => policy.Statement.find((value) => value.Sid === sid);

@@ -58,5 +58,11 @@ root transition is convergent and is documented in
 never enter GitHub, and neither the release-deployer nor legacy GitHub role is
 expanded.
 
+The bootstrap permissions document allows `iam:PutRolePolicy` only on
+`arn:aws:iam::368992683803:role/mscqr-production-signer-policy-installer`, the
+role targeted by the Terraform `aws_iam_role_policy.signer_policy_installer`
+resource. It has no `iam:PolicyName` condition: AWS does not list that key for
+`PutRolePolicy`, so the exact role resource is the supported IAM boundary.
+
 This lifecycle does not mutate the InitialActivationLifecycle target policy,
 reopen Stage A, change Stage B, publish images, or modify PR #448.
