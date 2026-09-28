@@ -54,7 +54,17 @@ export async function establishComponentRecoveryTerraformSession(binding, depend
   return establish({ ...binding, purpose: "TERRAFORM" }, dependencies, "TERRAFORM", [brokerRecoverySuccessorEntryPoints.INSTALL]);
 }
 
-async function establish(binding, { loadUser = loadOperator, sts = stsTransport, mfa = () => promptProductionMfaCode({ prompt: "Component installation operator MFA code: " }), invoke, isolated = executeIsolatedTerraform, state = createTerraformStateBoundary, now = Date.now, sleep = delay } = {}, discovery = null, requiredVersions = null) {
+export async function establishSignerInstallSession(binding, dependencies = {}) {
+  sessionProofBinding({ ...binding, purpose: "INSTALL" });
+  return establish({ ...binding, purpose: "INSTALL" }, dependencies, null, ["13"], ["SIGNER_INSTALL", "SIGNER_ADVANCE"]);
+}
+
+export async function establishSignerRevokeSession(binding, dependencies = {}) {
+  sessionProofBinding({ ...binding, purpose: "CLEANUP" });
+  return establish({ ...binding, purpose: "CLEANUP" }, dependencies, null, ["14"], ["SIGNER_REVOKE"]);
+}
+
+async function establish(binding, { loadUser = loadOperator, sts = stsTransport, mfa = () => promptProductionMfaCode({ prompt: "Component installation operator MFA code: " }), invoke, isolated = executeIsolatedTerraform, state = createTerraformStateBoundary, now = Date.now, sleep = delay } = {}, discovery = null, requiredVersions = null, sessionOperations = null) {
   const fixedBinding = structuredClone(binding);
   if (!discovery) sessionProofBinding(fixedBinding);
   assert(Object.hasOwn(roles, fixedBinding.purpose));
@@ -202,10 +212,12 @@ async function establish(binding, { loadUser = loadOperator, sts = stsTransport,
     }
     return Object.freeze({
       principal, expiresAt: new Date(expires).toISOString(),
-      async invoke(operation) {
-        assert((fixedBinding.purpose === "INSTALL" ? ["INSTALL", "INSPECT"] : ["CLOSE"]).includes(operation), "Unsupported session operation");
+      async invoke(operation, input = {}) {
+        assert((sessionOperations || (fixedBinding.purpose === "INSTALL" ? ["INSTALL", "INSPECT"] : ["CLOSE"])).includes(operation), "Unsupported session operation");
+        assert(input && typeof input === "object" && !Array.isArray(input));
+        for (const key of ["operation", "transitionId", "authorizationSha256", "proof"]) assert(!Object.hasOwn(input, key), `Caller cannot override ${key}`);
         await prove();
-        return send(await signedPayload(operation));
+        return send({ ...(await signedPayload(operation)), ...(operation.startsWith("SIGNER_") ? { sourceSha: fixedBinding.sourceSha } : {}), ...input });
       },
     });
   } finally {

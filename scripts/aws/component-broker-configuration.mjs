@@ -10,8 +10,9 @@ export const brokerPolicySuccessorEntryPoints = Object.freeze({ INSTALL: "7", CL
 // This repair is a separate, governed immutable generation.  It is not a
 // caller-selected or extensible version map.
 export const brokerRecoverySuccessorEntryPoints = Object.freeze({ INSTALL: "10", CLEANUP: "11", AUTHORIZE: "12" });
+export const brokerSignerSuccessorEntryPoints = Object.freeze({ INSTALL: "13", CLEANUP: "14", AUTHORIZE: "15" });
 function assertEntryPoints(value) {
-  assert(value === brokerEntryPoints || value === brokerChangeEntryPoints || value === brokerPolicySuccessorEntryPoints || value === brokerRecoverySuccessorEntryPoints, "Unreviewed broker entry-point set");
+  assert(value === brokerEntryPoints || value === brokerChangeEntryPoints || value === brokerPolicySuccessorEntryPoints || value === brokerRecoverySuccessorEntryPoints || value === brokerSignerSuccessorEntryPoints, "Unreviewed broker entry-point set");
   return value;
 }
 
@@ -20,7 +21,7 @@ function assertEntryPoints(value) {
 // first and may reach the successor only after AWS denies that exact version.
 export function brokerEntryPointCandidates(entryPoint) {
   assert(["INSTALL", "CLEANUP", "AUTHORIZE"].includes(entryPoint), "Unsupported broker entry point");
-  return [...new Set([brokerEntryPoints[entryPoint], brokerChangeEntryPoints[entryPoint], brokerPolicySuccessorEntryPoints[entryPoint], brokerRecoverySuccessorEntryPoints[entryPoint]])];
+  return [...new Set([brokerEntryPoints[entryPoint], brokerChangeEntryPoints[entryPoint], brokerPolicySuccessorEntryPoints[entryPoint], brokerRecoverySuccessorEntryPoints[entryPoint], brokerSignerSuccessorEntryPoints[entryPoint]])];
 }
 export function brokerConfiguration({ packageSha256, manifestSha256, entryPoint, entryPoints = brokerEntryPoints }) {
   assert.match(packageSha256 || "", /^[a-f0-9]{64}$/);
@@ -94,7 +95,7 @@ export function redactBrokerDiagnostic(value) {
 
 export function assertBrokerEntryPoint(context, operation, entryPoints = brokerEntryPoints) {
   assertEntryPoints(entryPoints);
-  const entry = { INSTALL: "INSTALL", INSPECT: "INSTALL", PROVE_INSTALL_SESSION: "INSTALL", TERRAFORM_CONTEXT: "INSTALL", PROVE_TERRAFORM_SESSION: "INSTALL", CLOSE: "CLEANUP", CLEANUP_CONTEXT: "CLEANUP", PROVE_CLEANUP_SESSION: "CLEANUP", AUTHORIZE: "AUTHORIZE" }[operation];
+  const entry = { INSTALL: "INSTALL", INSPECT: "INSTALL", PROVE_INSTALL_SESSION: "INSTALL", TERRAFORM_CONTEXT: "INSTALL", PROVE_TERRAFORM_SESSION: "INSTALL", SIGNER_INSTALL: "INSTALL", SIGNER_ADVANCE: "INSTALL", CLOSE: "CLEANUP", CLEANUP_CONTEXT: "CLEANUP", PROVE_CLEANUP_SESSION: "CLEANUP", SIGNER_REVOKE: "CLEANUP", AUTHORIZE: "AUTHORIZE", SIGNER_AUTHORIZE: "AUTHORIZE" }[operation];
   const version = entry && entryPoints[entry];
   assert(version, "Unsupported broker operation");
   assert.equal(context.functionVersion, version, "Operation not authorized on this immutable entry point");

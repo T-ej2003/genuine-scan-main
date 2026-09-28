@@ -32,8 +32,9 @@ const bootstrapEntryPoints = Object.freeze({ INSTALL: "1", CLEANUP: "2", AUTHORI
 const changedEntryPoints = Object.freeze({ INSTALL: "4", CLEANUP: "5", AUTHORIZE: "6" });
 const successorEntryPoints = Object.freeze({ INSTALL: "7", CLEANUP: "8", AUTHORIZE: "9" });
 const recoverySuccessorEntryPoints = Object.freeze({ INSTALL: "10", CLEANUP: "11", AUTHORIZE: "12" });
+const signerSuccessorEntryPoints = Object.freeze({ INSTALL: "13", CLEANUP: "14", AUTHORIZE: "15" });
 const assertEntryPoints = (entryPoints) => {
-  assert([bootstrapEntryPoints, changedEntryPoints, successorEntryPoints, recoverySuccessorEntryPoints].includes(entryPoints), "Identity entry-point override forbidden");
+  assert([bootstrapEntryPoints, changedEntryPoints, successorEntryPoints, recoverySuccessorEntryPoints, signerSuccessorEntryPoints].includes(entryPoints), "Identity entry-point override forbidden");
   return entryPoints;
 };
 
@@ -113,7 +114,7 @@ function managedIdentities(entryPoints) {
   // The successor broker still rejects a resource-policy bypass on every
   // retained immutable version, but it has no mutation capability for any of
   // them. Fresh bootstrap keeps the original three-version read surface.
-  const brokerVersions = entryPoints === bootstrapEntryPoints ? Object.values(entryPoints) : [...Object.values(bootstrapEntryPoints), ...Object.values(changedEntryPoints), ...(entryPoints === successorEntryPoints || entryPoints === recoverySuccessorEntryPoints ? Object.values(successorEntryPoints) : []), ...(entryPoints === recoverySuccessorEntryPoints ? Object.values(recoverySuccessorEntryPoints) : [])];
+  const brokerVersions = entryPoints === bootstrapEntryPoints ? Object.values(entryPoints) : [...Object.values(bootstrapEntryPoints), ...Object.values(changedEntryPoints), ...(entryPoints !== changedEntryPoints ? Object.values(successorEntryPoints) : []), ...([recoverySuccessorEntryPoints, signerSuccessorEntryPoints].includes(entryPoints) ? Object.values(recoverySuccessorEntryPoints) : []), ...(entryPoints === signerSuccessorEntryPoints ? Object.values(signerSuccessorEntryPoints) : [])];
   const objects = ["installation-authorization.json", "iam-installation.json", "permission-installation.json", "installation-session.json"].map((name) => `arn:aws:s3:::${identityBootstrap.bucket}/${identityBootstrap.prefix}${name}`);
   const brokerPolicy = provisionerTargetPolicy();
   brokerPolicy.Statement.push(
@@ -121,9 +122,9 @@ function managedIdentities(entryPoints) {
     // callable only from this fixed broker; the handler selects AssumeRole only.
     { Effect: "Allow", Action: "cloudtrail:LookupEvents", Resource: "*", Condition: { StringEquals: { "aws:RequestedRegion": identityBootstrap.region } } },
     { Effect: "Allow", Action: "s3:ListBucket", Resource: `arn:aws:s3:::${identityBootstrap.bucket}`, Condition: { StringEquals: { "s3:prefix": objects.map((arn) => arn.split(`${identityBootstrap.bucket}/`)[1]) } } },
-    { Effect: "Allow", Action: "s3:GetObject", Resource: objects },
+    { Effect: "Allow", Action: "s3:GetObject", Resource: [...objects] },
     { Effect: "Allow", Action: "s3:GetObject", Resource: `arn:aws:s3:::${identityBootstrap.bucket}/${identityBootstrap.prefix}identity-bootstrap.json` },
-    { Effect: "Allow", Action: "s3:PutObject", Resource: objects, Condition: { StringEquals: { "s3:x-amz-server-side-encryption": "AES256" } } },
+    { Effect: "Allow", Action: "s3:PutObject", Resource: [...objects], Condition: { StringEquals: { "s3:x-amz-server-side-encryption": "AES256" } } },
     { Effect: "Allow", Action: ["lambda:GetFunction", "lambda:GetFunctionConfiguration", "lambda:GetFunctionCodeSigningConfig", "lambda:GetRuntimeManagementConfig", "lambda:GetFunctionConcurrency", "lambda:GetPolicy"], Resource: [componentBrokerArn, ...brokerVersions.map((version) => `${componentBrokerArn}:${version}`)] },
     { Effect: "Allow", Action: ["iam:GetRole", "iam:GetRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies", "iam:ListRoleTags"], Resource: [installationIdentity.provisionerRole, installationIdentity.terraformRole, identityBootstrap.installationRole, identityBootstrap.cleanupRole, identityBootstrap.authorizationRole].map(componentRoleArn) },
   );
@@ -156,6 +157,20 @@ export function brokerRecoverySuccessorManagedIdentities() {
   broker.policySha256 = digest(broker.policy);
   const terraform = identities.find(({ role }) => role === installationIdentity.terraformRole);
   terraform.policy = terraformExecutorPolicyGeneration("10", true);
+  terraform.policySha256 = digest(terraform.policy);
+  return identities;
+}
+
+export function brokerSignerSuccessorManagedIdentities() {
+  const identities = managedIdentities(signerSuccessorEntryPoints);
+  const broker = identities.find(({ role }) => role === installationIdentity.provisionerRole);
+  const signerLedger = `arn:aws:s3:::${identityBootstrap.bucket}/${identityBootstrap.prefix}signer-policy-transition.json`;
+  broker.policy.Statement.find(({ Action }) => Action === "s3:GetObject").Resource.push(signerLedger);
+  broker.policy.Statement.find(({ Action }) => Action === "s3:PutObject").Resource.push(signerLedger);
+  broker.policy.Statement.push({ Effect: "Allow", Action: ["iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions", "iam:ListEntitiesForPolicy", "iam:CreatePolicyVersion", "iam:DeletePolicyVersion"], Resource: "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease", Condition: { ArnEquals: { "lambda:SourceFunctionArn": componentBrokerArn } } });
+  broker.policySha256 = digest(broker.policy);
+  const terraform = identities.find(({ role }) => role === installationIdentity.terraformRole);
+  terraform.policy = terraformExecutorPolicyGeneration("13", true);
   terraform.policySha256 = digest(terraform.policy);
   return identities;
 }
@@ -236,6 +251,11 @@ export async function inspectBrokerPolicySuccessorIdentities(iam) {
 export async function inspectBrokerRecoverySuccessorIdentities(iam) {
   assert.equal(arguments.length, 1, "Identity overrides are forbidden");
   return inspectManagedIdentities(iam, brokerRecoverySuccessorManagedIdentities());
+}
+
+export async function inspectBrokerSignerSuccessorIdentities(iam) {
+  assert.equal(arguments.length, 1, "Identity overrides are forbidden");
+  return inspectManagedIdentities(iam, brokerSignerSuccessorManagedIdentities());
 }
 
 // This is the source-owned mutation envelope for the exceptional first bootstrap,

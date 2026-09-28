@@ -458,6 +458,7 @@ test("every direct AWS source in scripts/aws has an explicit audited credential 
     "scripts/aws/component-broker-policy-successor-root-mfa.mjs",
     "scripts/aws/component-identity-bootstrap-cli.mjs",
     "scripts/aws/component-installation-session.mjs",
+    "scripts/aws/production-signer-broker-transition-cli.mjs",
     "scripts/aws/apply-ecr-repository-controls.sh", "scripts/aws/apply-production-full-rls-release.mjs", "scripts/aws/deploy-ecs-service.sh", "scripts/aws/discover-staging-endpoints.mjs", "scripts/aws/exact-ecs-rollout-state.mjs", "scripts/aws/prepare-production-backend-failed-recovery-evidence.mjs", "scripts/aws/produce-production-security-rebaseline-preparation.mjs", "scripts/aws/production-cutover-production-adapters.mjs", "scripts/aws/production-dual-slot-rebaseline-contract.mjs", "scripts/aws/production-identity-adapters.mjs", "scripts/aws/production-initial-activation-lifecycle.mjs", "scripts/aws/publish-ecs-images.sh", "scripts/aws/reconcile-production-stage-a-temporary-kms-capability.mjs", "scripts/aws/reconcile-production-signer-temporary-capability.mjs", "scripts/aws/recover-production-backend-health.mjs", "scripts/aws/recover-production-green-stage-a-root-drop-orphan.mjs", "scripts/aws/rollback-ecs-service.sh", "scripts/aws/staging-database-role-credentials.mjs", "scripts/aws/verify-production-dependency-closure.mjs", "scripts/aws/verify-production-rotation-via-ecs-exec.mjs", "scripts/aws/verify-production-security-rebaseline-signer.mjs",
   ].sort();
   assert.deepEqual(direct, classified);
@@ -467,6 +468,7 @@ test("every direct AWS source in scripts/aws has an explicit audited credential 
     "scripts/aws/component-broker-policy-successor-root-mfa.mjs": /createProductionAwsCredentialEnvironment/,
     "scripts/aws/component-identity-bootstrap-cli.mjs": /createProductionAwsCredentialEnvironment/,
     "scripts/aws/component-installation-session.mjs": /createProductionAwsCredentialEnvironment/,
+    "scripts/aws/production-signer-broker-transition-cli.mjs": /createProductionAwsCredentialEnvironment/,
     "scripts/aws/apply-ecr-repository-controls.sh": /configure_production_aws_credential_source/,
     "scripts/aws/apply-production-full-rls-release.mjs": /createProductionAwsCredentialEnvironment/,
     "scripts/aws/deploy-ecs-service.sh": /configure_production_aws_credential_source/,

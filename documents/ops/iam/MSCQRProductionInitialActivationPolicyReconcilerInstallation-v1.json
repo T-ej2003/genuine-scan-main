@@ -32,6 +32,6 @@
     "iam:PutRolePolicy": 1,
     "iam:CreatePolicyVersion": 2
   },
-  "replay": "exact-complete-live-topology-is-zero-apply; the exact prior mixed-recovery trust has one source-bound trust-only update; exact legacy reconciler topology expands only by the dedicated mixed-recovery and bootstrap-operator policy-authorizer roles, policies, and attachments; five-version or unexpected state fails closed; the independent signer-policy installer role is only assumable by the protected signer policy transition environment and carries CreatePolicyVersion on only the release policy",
-  "postcondition": "canonical-read-only verification passes for the reconciler, dedicated mixed-recovery executor, and bootstrap-operator policy authorizer and the signer policy installer trust and inline permissions"
+  "replay": "exact-complete live topology is zero apply; supported authenticated partial topology resumes only missing resources; five-version or unexpected state fails closed; the signer transition OIDC role can publish only canonical broker authorization to immutable broker version 15 and has no IAM policy-version mutation authority",
+  "postcondition": "canonical-read-only verification passes for the reconciler, mixed-recovery executor, bootstrap-operator policy authorizer, evidence reader, and signer broker authorization publisher"
 }

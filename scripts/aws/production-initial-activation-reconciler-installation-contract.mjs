@@ -142,10 +142,9 @@ const AUTHORIZER_ROLE_DESCRIPTION = "GitHub OIDC-only read-only authorizer for t
 const AUTHORIZER_POLICY_DESCRIPTION = "Exact read-only binding verification for bootstrap-operator policy authorization.";
 const EVIDENCE_READER_TAGS = Object.freeze({ ...EXPECTED_TAGS, Component: "broker-recovery-successor-evidence" });
 const EVIDENCE_READER_ROLE_DESCRIPTION = "Temporary GitHub OIDC reader for exact broker successor lineage evidence.";
-const EVIDENCE_READER_POLICY_DESCRIPTION = "Read only the two immutable component broker successor lineage objects.";
+const EVIDENCE_READER_POLICY_DESCRIPTION = "Read only the three immutable component broker lineage objects.";
 const SIGNER_INSTALLER_TAGS = Object.freeze({ ...EXPECTED_TAGS, Component: "signer-policy-transition" });
-const SIGNER_INSTALLER_ROLE_DESCRIPTION = "Protected GitHub OIDC installer for the canonical signer temporary-policy transition only.";
-const SIGNER_INSTALLER_POLICY_DESCRIPTION = "Create policy versions only on the exact release-deployer policy during the protected signer transition.";
+const SIGNER_INSTALLER_ROLE_DESCRIPTION = "Protected GitHub OIDC publisher for canonical signer broker authorization only.";
 const hasKnownNoPermissionsBoundary = (value, unknown) => (value === null || value === "") && unknown !== true;
 export const installationPermissionsPredecessor = () => {
   const desired = sourceJson(`${INSTALLATION.terraformRoot}/permissions-policy.json`);

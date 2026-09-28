@@ -16,19 +16,6 @@ on:
         description: One-time transition nonce
         required: true
         type: string
-      evidence_base64:
-        description: Required only for policy-revoke; exact private lifecycle evidence
-        required: false
-        type: string
-      evidence_sha256:
-        description: SHA-256 of evidence_base64 payload bytes
-        required: false
-        type: string
-      abort_before_apply:
-        description: Separately approved pre-apply policy abort
-        required: false
-        default: false
-        type: boolean
 
 permissions:
   contents: read
@@ -42,6 +29,3 @@ jobs:
       phase: ${{ inputs.phase }}
       source_sha: ${{ inputs.source_sha }}
       transition_id: ${{ inputs.transition_id }}
-      evidence_base64: ${{ inputs.evidence_base64 }}
-      evidence_sha256: ${{ inputs.evidence_sha256 }}
-      abort_before_apply: ${{ inputs.abort_before_apply }}

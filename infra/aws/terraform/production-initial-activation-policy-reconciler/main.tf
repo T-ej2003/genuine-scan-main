@@ -26,7 +26,7 @@ resource "aws_iam_role" "broker_recovery_successor_evidence_reader" {
 
 resource "aws_iam_policy" "broker_recovery_successor_evidence_reader" {
   name        = local.broker_recovery_successor_evidence_reader_policy_name
-  description = "Read only the two immutable component broker successor lineage objects."
+  description = "Read only the three immutable component broker lineage objects."
   policy      = file("${path.module}/broker-recovery-successor-evidence-reader-permissions-policy.json")
   tags        = merge(local.tags, { Component = "broker-recovery-successor-evidence" })
 
@@ -124,7 +124,7 @@ resource "aws_iam_role_policy_attachment" "bootstrap_operator_policy_authorizer"
 
 resource "aws_iam_role" "signer_policy_installer" {
   name                 = local.signer_policy_installer_role_name
-  description          = "Protected GitHub OIDC installer for the canonical signer temporary-policy transition only."
+  description          = "Protected GitHub OIDC publisher for canonical signer broker authorization only."
   max_session_duration = 3600
   assume_role_policy   = file("${path.module}/signer-policy-installer-trust-policy.json")
   lifecycle { prevent_destroy = true }

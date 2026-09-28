@@ -1,9 +1,10 @@
 {
   "Version": "2012-10-17",
-  "Statement": [
-    { "Sid": "ReadExactSignerTransitionPolicy", "Effect": "Allow", "Action": ["iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions", "iam:ListEntitiesForPolicy"], "Resource": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease" },
-    { "Sid": "ReadExactReleaseDeployer", "Effect": "Allow", "Action": ["iam:GetRole", "iam:ListAttachedRolePolicies"], "Resource": "arn:aws:iam::368992683803:role/mscqr-production-release-deployer" },
-    { "Sid": "IdentifySignerTransitionWorkflow", "Effect": "Allow", "Action": "sts:GetCallerIdentity", "Resource": "*" },
-    { "Sid": "CreateExactCanonicalSignerPolicyVersions", "Effect": "Allow", "Action": "iam:CreatePolicyVersion", "Resource": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease" }
-  ]
+  "Statement": [{
+    "Sid": "PublishExactSignerTransitionAuthorizationToBroker",
+    "Effect": "Allow",
+    "Action": "lambda:InvokeFunction",
+    "Resource": "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-component-iam-installer:15",
+    "Condition": { "StringEquals": { "aws:RequestedRegion": "eu-west-2" } }
+  }]
 }
