@@ -29,12 +29,13 @@ export async function executeSignerBrokerOperation(event, { iam, s3, currentMain
   const { proof, ...request } = event;
   assert(proof, "Signer broker mutation requires MFA session proof");
   const proving = ["SIGNER_PROVE_INSTALL_SESSION", "SIGNER_PROVE_REVOKE_SESSION"].includes(event.operation);
-  const authority = proving ? await signer(request) : null;
   const purpose = ["SIGNER_REVOKE", "SIGNER_PROVE_REVOKE_SESSION"].includes(event.operation) ? "SIGNER_REVOKE" : "SIGNER_INSTALL";
+  const authority = await signer(proving ? request : { operation: purpose === "SIGNER_REVOKE" ? "SIGNER_PROVE_REVOKE_SESSION" : "SIGNER_PROVE_INSTALL_SESSION",
+    sourceSha: event.sourceSha, transitionId: event.transitionId, authorizationSha256: event.authorizationSha256 });
   const session = await authenticateComponentSession(proof, { sourceSha: event.sourceSha, transitionId: event.transitionId, authorizationSha256: event.authorizationSha256, purpose }, { sts, issuanceEvents, now: now() });
   assert(now() < Date.parse(session.expiresAt), "Signer broker session expired");
+  assert(Date.parse(session.issuanceEventTime) >= Date.parse(authority.approvedAt) - 999, "Signer session predates current authorization");
   if (proving) {
-    assert(Date.parse(session.issuanceEventTime) >= Date.parse(authority.approvedAt) - 999, "Signer session predates current authorization");
     return { state: "SESSION_VERIFIED", principal: session.principal, expiresAt: session.expiresAt,
       sourceSha: authority.sourceSha, transitionId: authority.transitionId, authorizationSha256: authority.authorizationSha256 };
   }

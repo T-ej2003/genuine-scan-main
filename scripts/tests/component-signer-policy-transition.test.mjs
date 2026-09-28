@@ -43,13 +43,15 @@ function fixture({ main = { sha: sourceSha }, clock = { value: now }, entityPage
 }
 
 function composedFixture(options) {
-  const f = fixture(options), operations = [], ordinaryArchive = [];
+  const f = fixture(options), operations = [], payloads = [], ordinaryArchive = [];
+  f.issuanceOffset = 0;
   const accessKey = "ASIA" + "0".repeat(16), operator = `arn:aws:iam::${C.accountId}:user/mscqr-production-bootstrap-operator`;
   const base = () => ({ AccessKeyId: "base-fixture", SecretAccessKey: "base-placeholder" });
   const session = purpose => {
     const role = purpose === "SIGNER_REVOKE" ? identityBootstrap.cleanupRole : identityBootstrap.installationRole;
     const principal = `arn:aws:sts::${C.accountId}:assumed-role/${role}/component-${transitionId}`;
-    const issued = new Date(f.clock.value - 1000).toISOString(), expiration = new Date(f.clock.value + 899000).toISOString();
+    const issuedAt = f.clock.value + f.issuanceOffset;
+    const issued = new Date(issuedAt).toISOString(), expiration = new Date(issuedAt + 900000).toISOString();
     const scoped = { AccessKeyId: accessKey, SecretAccessKey: "scoped-placeholder", SessionToken: "scoped-session-placeholder", Expiration: new Date(expiration) };
     const issuance = { eventID: "12345678-1234-4234-8234-123456789def", eventTime: issued, eventSource: "sts.amazonaws.com", eventName: "AssumeRole", awsRegion: C.region, recipientAccountId: C.accountId,
       userIdentity: { type: "IAMUser", accountId: C.accountId, arn: operator, sessionContext: { attributes: { mfaAuthenticated: "true" } } },
@@ -58,7 +60,7 @@ function composedFixture(options) {
     return { role, principal, scoped, issuance };
   };
   const dispatch = async (event, version) => {
-    operations.push(event.operation);
+    operations.push(event.operation); payloads.push(event);
     assertBrokerEntryPoint({ functionVersion: version, invokedFunctionArn: `${componentBrokerArn}:${version}` }, event.operation, brokerSignerSuccessorEntryPoints);
     if (!event.operation.startsWith("SIGNER_")) { ordinaryArchive.push(event.operation); throw new Error("Ordinary component archive reached"); }
     const purpose = ["SIGNER_REVOKE", "SIGNER_PROVE_REVOKE_SESSION"].includes(event.operation) ? "SIGNER_REVOKE" : "SIGNER_INSTALL";
@@ -83,7 +85,7 @@ function composedFixture(options) {
       } };
   };
   const binding = () => ({ sourceSha, transitionId, authorizationSha256: f.ledger().authorization.authorizationSha256 });
-  return { ...f, operations, ordinaryArchive, dispatch, binding,
+  return { ...f, operations, payloads, ordinaryArchive, dispatch, binding, setIssuanceOffset: value => { f.issuanceOffset = value; },
     authorize: operation => dispatch({ operation: "SIGNER_AUTHORIZE", authorization: authorization(operation, operation === "INSTALL" ? -1000 : -500, operation === "INSTALL" ? "42" : "43") }, "15"),
     installSession: (selected = binding()) => establishSignerInstallSession(selected, deps("SIGNER_INSTALL")),
     revokeSession: (selected = binding()) => establishSignerRevokeSession(selected, deps("SIGNER_REVOKE")) };
@@ -102,6 +104,35 @@ test("real signer session composition uses the signer ledger from authorization 
   assert.equal(ledger.state, "REVOKED"); assert.deepEqual(f.versions().find(value => value.IsDefaultVersion).document, steady);
   assert.deepEqual(f.operations, ["SIGNER_AUTHORIZE", "SIGNER_PROVE_INSTALL_SESSION", "SIGNER_INSTALL", ...Array(6).fill(["SIGNER_PROVE_INSTALL_SESSION", "SIGNER_ADVANCE"]).flat(), "SIGNER_AUTHORIZE", "SIGNER_PROVE_REVOKE_SESSION", "SIGNER_REVOKE", "SIGNER_PROVE_REVOKE_SESSION", "SIGNER_REVOKE"]);
   assert.deepEqual(f.ordinaryArchive, []);
+});
+
+test("direct signer mutations reject MFA sessions issued before the current signer approval", async () => {
+  const f = composedFixture(); await f.authorize("INSTALL");
+  const rejectPredatingSession = async (operation, version) => {
+    const payload = f.payloads.findLast(value => value.operation === operation);
+    assert(payload, `${operation} payload missing`);
+    const writes = f.calls.filter(({ operation: call }) => call === "CreatePolicyVersion").length;
+    f.setIssuanceOffset(-2000);
+    try { await assert.rejects(f.dispatch(payload, version), /Signer session predates current authorization/, `${operation}: stale issuance`); }
+    finally { f.setIssuanceOffset(0); }
+    assert.equal(f.calls.filter(({ operation: call }) => call === "CreatePolicyVersion").length, writes, `${operation}: rejected before IAM mutation`);
+  };
+  let client = await f.installSession(), ledger = await client.invoke("SIGNER_INSTALL");
+  await rejectPredatingSession("SIGNER_INSTALL", "13");
+  ledger = await client.invoke("SIGNER_ADVANCE", advance(ledger, "PLAN_GENERATED"));
+  await rejectPredatingSession("SIGNER_ADVANCE", "13");
+  for (const state of ["PLAN_REVIEWED", "APPLY_AUTHORIZED", "APPLY_STARTED"]) ledger = await client.invoke("SIGNER_ADVANCE", advance(ledger, state));
+  await f.dispatch({ operation: "SIGNER_AUTHORIZE", authorization: authorization("RECOVER", -500, "43") }, "15");
+  client = await f.installSession();
+  const planSha256 = "d".repeat(64), approvalReference = "change:recovery-approved";
+  for (const state of ["PLAN_GENERATED", "PLAN_REVIEWED", "APPLY_STARTED"]) await client.invoke("SIGNER_RECOVERY", { state, planSha256, approvalReference: state === "PLAN_GENERATED" ? null : approvalReference });
+  await rejectPredatingSession("SIGNER_RECOVERY", "13");
+  ledger = await client.invoke("SIGNER_ADVANCE", { ...advance(f.ledger(), "APPLIED"), planSha256, approvalReference });
+  ledger = await client.invoke("SIGNER_ADVANCE", { ...advance(ledger, "CONVERGED"), planSha256, approvalReference });
+  await f.dispatch({ operation: "SIGNER_AUTHORIZE", authorization: authorization("REVOKE", -250, "44") }, "15"); client = await f.revokeSession(); ledger = f.ledger();
+  ledger = await client.invoke("SIGNER_REVOKE", { evidenceState: ledger.state, evidenceSha256: evidence(ledger), abort: false });
+  assert.equal(ledger.state, "REVOKED");
+  await rejectPredatingSession("SIGNER_REVOKE", "14");
 });
 
 test("production signer CLI install and revoke reach their signer broker operations", async () => {

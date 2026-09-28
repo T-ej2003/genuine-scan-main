@@ -197,4 +197,6 @@ the same signer ledger and validate the signer-specific session binding before
 `SIGNER_INSTALL`, `SIGNER_ADVANCE`, `SIGNER_RECOVERY`, or `SIGNER_REVOKE` can run.
 The ordinary component installation and cleanup archives cannot authorize a
 signer operation. The broker ledger remains authoritative if a local state
-artifact is stale; abort after `APPLY_STARTED` is rejected.
+artifact is stale; abort after `APPLY_STARTED` is rejected. Every signer
+mutation also requires an MFA session issued after the current signer
+authorization, including when an operator invokes the broker directly.
