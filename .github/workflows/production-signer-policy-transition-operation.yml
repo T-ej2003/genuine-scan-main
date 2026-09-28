@@ -5,6 +5,7 @@ on:
     inputs:
       phase: { description: Canonical signer policy transition phase, required: true, type: string }
       source_sha: { description: Exact protected main SHA, required: true, type: string }
+      transition_source_sha: { description: Original signer transition source SHA, required: true, type: string }
       transition_id: { description: One-time transition UUID, required: true, type: string }
 
 permissions:
@@ -31,6 +32,7 @@ jobs:
           SOURCE_SHA: ${{ inputs.source_sha }}
           PHASE: ${{ inputs.phase }}
           TRANSITION_ID: ${{ inputs.transition_id }}
+          TRANSITION_SOURCE_SHA: ${{ inputs.transition_source_sha }}
         run: |
           set -euo pipefail
           test "$GITHUB_REPOSITORY" = "T-ej2003/genuine-scan-main"
@@ -42,6 +44,24 @@ jobs:
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
           [[ "$TRANSITION_ID" =~ ^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-4[a-fA-F0-9]{3}-[89aAbB][a-fA-F0-9]{3}-[a-fA-F0-9]{12}$ ]]
           [[ "$PHASE" = policy-install || "$PHASE" = policy-revoke ]]
+          if [ "$PHASE" = policy-install ]; then
+            test "$TRANSITION_SOURCE_SHA" = "$SOURCE_SHA"
+          else
+            git merge-base --is-ancestor "$TRANSITION_SOURCE_SHA" "$SOURCE_SHA"
+            git diff --quiet "$TRANSITION_SOURCE_SHA..$SOURCE_SHA" -- \
+              documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json \
+              infra/aws/terraform/production-security-rebaseline-signer \
+              infra/aws/terraform/production-initial-activation-policy-reconciler/signer-policy-installer-trust-policy.json \
+              infra/aws/terraform/production-initial-activation-policy-reconciler/signer-policy-installer-permissions-policy.json \
+              .github/workflows/production-signer-policy-transition.yml \
+              .github/workflows/production-signer-policy-transition-operation.yml \
+              scripts/aws/component-signer-policy-transition.mjs \
+              scripts/aws/publish-production-signer-policy-transition-authorization.mjs \
+              scripts/aws/production-github-environment-approval.mjs \
+              scripts/aws/reconcile-production-signer-temporary-capability.mjs \
+              scripts/aws/verify-production-security-rebaseline-signer.mjs \
+              scripts/aws/production-signer-temporary-capability.mjs
+          fi
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Authenticate solo-operator protected-environment approval
         id: approval
@@ -69,6 +89,7 @@ jobs:
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
           TRANSITION_ID: ${{ inputs.transition_id }}
+          TRANSITION_SOURCE_SHA: ${{ inputs.transition_source_sha }}
           PHASE: ${{ inputs.phase }}
           APPROVAL_SHA256: ${{ steps.approval.outputs.sha256 }}
         run: |
@@ -79,6 +100,7 @@ jobs:
           if [ "$PHASE" = policy-revoke ]; then operation=REVOKE; fi
           node scripts/aws/publish-production-signer-policy-transition-authorization.mjs \
             --source-sha "$SOURCE_SHA" --transition-id "$TRANSITION_ID" --operation "$operation" \
+            --transition-source-sha "$TRANSITION_SOURCE_SHA" \
             --environment-approval "$RUNNER_TEMP/signer-policy-transition-approval/approval.json" \
             --environment-approval-sha256 "$APPROVAL_SHA256" --output "$request_dir/request.json"
       - name: Configure authorization-only signer publisher role

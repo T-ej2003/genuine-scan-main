@@ -59,6 +59,7 @@ Authorize installation through the solo-operator protected environment:
 ```sh
 gh workflow run production-signer-policy-transition.yml \
   -f phase=policy-install -f source_sha="$SOURCE_SHA" \
+  -f transition_source_sha="$SOURCE_SHA" \
   -f transition_id="$TRANSITION_ID"
 ```
 
@@ -129,7 +130,19 @@ private files. The client reauthenticates the exact broker transition; an
 existing saved plan is reused only by byte digest. After an ambiguous Terraform
 apply, run `verify-convergence` instead of applying the saved plan again.
 
-After convergence, dispatch `policy-revoke` with the same source and transition.
+After convergence, dispatch `policy-revoke` with the original transition source
+and the then-current protected main. The workflow accepts a descendant only
+when the signer cleanup contract is unchanged. A later approval can renew an
+expired revoke authorization without changing the transition identity:
+
+```sh
+CURRENT_MAIN_SHA=$(git rev-parse origin/main)
+gh workflow run production-signer-policy-transition.yml \
+  -f phase=policy-revoke -f source_sha="$CURRENT_MAIN_SHA" \
+  -f transition_source_sha="$SOURCE_SHA" \
+  -f transition_id="$TRANSITION_ID"
+```
+
 Replace `broker-state.json` with the returned artifact, then run:
 
 ```sh

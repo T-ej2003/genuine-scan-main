@@ -41,26 +41,28 @@ function exactKeys(value, keys, label) {
   assert.deepEqual(Object.keys(value).sort(), [...keys].sort(), `${label} fields differ`);
 }
 
-export function buildSignerBrokerAuthorization({ sourceSha, transitionId, operation, approvedAt, expiresAt, workflowRunId } = {}) {
-  assert.match(sourceSha || "", /^[a-f0-9]{40}$/); uuid(transitionId);
+export function buildSignerBrokerAuthorization({ sourceSha, protectedMainSha = sourceSha, transitionId, operation, approvedAt, expiresAt, workflowRunId } = {}) {
+  assert.match(sourceSha || "", /^[a-f0-9]{40}$/); assert.match(protectedMainSha || "", /^[a-f0-9]{40}$/); uuid(transitionId);
   assert(["INSTALL", "REVOKE"].includes(operation));
   assert.match(String(workflowRunId || ""), /^[1-9][0-9]*$/);
   const approved = Date.parse(approvedAt), expires = Date.parse(expiresAt);
   assert(Number.isFinite(approved) && Number.isFinite(expires) && expires - approved === signerBrokerContract.maxAuthorizationAgeMs);
   const body = { schemaVersion: 1, kind: "MSCQR_SIGNER_POLICY_BROKER_AUTHORIZATION", repository: signerBrokerContract.repository,
-    sourceSha, account: signerBrokerContract.account, region: signerBrokerContract.region, purpose: signerBrokerContract.purpose,
+    sourceSha, protectedMainSha, account: signerBrokerContract.account, region: signerBrokerContract.region, purpose: signerBrokerContract.purpose,
     transitionId, operation, policyArn: signerBrokerContract.policyArn, workflowRunId: String(workflowRunId), approvedAt, expiresAt };
   return Object.freeze({ ...body, authorizationSha256: sha256(body) });
 }
 
 export function assertSignerBrokerAuthorization(value, { sourceSha, transitionId, operation, now = Date.now() } = {}) {
-  exactKeys(value, ["schemaVersion", "kind", "repository", "sourceSha", "account", "region", "purpose", "transitionId", "operation", "policyArn", "workflowRunId", "approvedAt", "expiresAt", "authorizationSha256"], "Signer broker authorization");
+  exactKeys(value, ["schemaVersion", "kind", "repository", "sourceSha", "protectedMainSha", "account", "region", "purpose", "transitionId", "operation", "policyArn", "workflowRunId", "approvedAt", "expiresAt", "authorizationSha256"], "Signer broker authorization");
   const { authorizationSha256, ...body } = value;
   if (value.schemaVersion !== 1 || value.kind !== "MSCQR_SIGNER_POLICY_BROKER_AUTHORIZATION" || value.repository !== signerBrokerContract.repository
     || value.sourceSha !== sourceSha || value.account !== signerBrokerContract.account || value.region !== signerBrokerContract.region
     || value.purpose !== signerBrokerContract.purpose || value.transitionId !== transitionId || value.operation !== operation
     || value.policyArn !== signerBrokerContract.policyArn || authorizationSha256 !== sha256(body)) throw new Error("Signer broker authorization binding differs");
   uuid(value.transitionId); hex(value.authorizationSha256); assert.match(value.workflowRunId, /^[1-9][0-9]*$/);
+  assert.match(value.sourceSha || "", /^[a-f0-9]{40}$/); assert.match(value.protectedMainSha || "", /^[a-f0-9]{40}$/);
+  if (value.operation === "INSTALL") assert.equal(value.sourceSha, value.protectedMainSha, "Install authorization must bind current protected main");
   const approved = Date.parse(value.approvedAt), expires = Date.parse(value.expiresAt);
   assert(Number.isFinite(approved) && Number.isFinite(expires) && approved <= now && now < expires && expires - approved === signerBrokerContract.maxAuthorizationAgeMs, "Signer broker authorization is stale");
   return value;
@@ -168,18 +170,19 @@ export function createSignerPolicyBroker({ iam, s3, currentMain, now = Date.now 
   assert.equal(typeof iam, "function"); assert.equal(typeof s3, "function"); assert.equal(typeof currentMain, "function");
   const authenticate = async (authorization, expected) => {
     assertSignerBrokerAuthorization(authorization, { ...expected, now: now() });
-    assert.equal(await currentMain(), authorization.sourceSha, "Protected source moved");
+    assert.equal(await currentMain(), authorization.protectedMainSha, "Protected source moved");
   };
   return async event => {
     assert(event && typeof event === "object" && !Array.isArray(event));
     if (event.operation === "SIGNER_AUTHORIZE") {
       exactKeys(event, ["operation", "authorization"], "Signer authorization request");
       const authorization = assertSignerBrokerAuthorization(event.authorization, { sourceSha: event.authorization.sourceSha, transitionId: event.authorization.transitionId, operation: event.authorization.operation, now: now() });
-      assert.equal(await currentMain(), authorization.sourceSha, "Protected source moved");
+      assert.equal(await currentMain(), authorization.protectedMainSha, "Protected source moved");
       const prior = await readLedger(s3);
       const live = await observe(iam, authorization);
       if (!prior) {
         assert.equal(authorization.operation, "INSTALL");
+        assert.equal(authorization.sourceSha, authorization.protectedMainSha, "Initial signer authorization must bind current protected main");
         assert(canonical(live.active.document) === canonical(steadyPolicy), "Signer authorization requires canonical steady policy");
         const ledger = { schemaVersion: 1, kind: "MSCQR_SIGNER_POLICY_BROKER_LEDGER", authorization, authorizationHistory: [], state: "INSTALLING", steadyVersionId: live.active.VersionId,
           temporaryVersionId: null, planSha256: null, approvalReference: null, signerReadbackSha256: null, history: [], updatedAt: new Date(now()).toISOString() };
@@ -192,7 +195,7 @@ export function createSignerPolicyBroker({ iam, s3, currentMain, now = Date.now 
       assert(Date.parse(authorization.approvedAt) > Date.parse(ledger.authorization.approvedAt), "Signer authorization does not advance approval time");
       assert(ledger.state !== "REVOKED", "Signer transition is already revoked");
       if (authorization.operation === "INSTALL") assert.equal(ledger.authorization.operation, "INSTALL", "Install authorization cannot replace revoke authority");
-      else assert.equal(ledger.authorization.operation, "INSTALL", "Revoke authorization is already active");
+      else assert(["INSTALL", "REVOKE"].includes(ledger.authorization.operation), "Signer revoke authorization predecessor is invalid");
       const next = { ...ledger, authorization, authorizationHistory: [...ledger.authorizationHistory, ledger.authorization], updatedAt: new Date(now()).toISOString() };
       return (await writeLedger(s3, next, prior)).value;
     }

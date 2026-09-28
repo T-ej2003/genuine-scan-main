@@ -139,6 +139,11 @@ test("signer environment-approval API permission and private evidence path reach
   const invocation = approval.run.indexOf("production-github-environment-approval.mjs");
   for (const expected of ['mkdir -p -m 700 "$approval_dir"', 'chmod 700 "$approval_dir"', "stat -c '%a' \"$approval_dir\""]) assert.ok(approval.run.indexOf(expected) < invocation);
   assert.match(approval.run, /--output "\$approval_dir\/approval\.json"/);
+  const authenticate = steps.find(({ name }) => name === "Authenticate exact protected source and fixed operation");
+  assert.match(authenticate.run, /git merge-base --is-ancestor "\$TRANSITION_SOURCE_SHA" "\$SOURCE_SHA"/);
+  assert.match(authenticate.run, /git diff --quiet "\$TRANSITION_SOURCE_SHA\.\.\$SOURCE_SHA"/);
+  const request = steps.find(({ name }) => name === "Build canonical broker request");
+  assert.match(request.run, /--transition-source-sha "\$TRANSITION_SOURCE_SHA"/);
 })
 
 test("actual GitHub approval observation produces a fresh fixed broker request", () => {
@@ -150,7 +155,11 @@ test("actual GitHub approval observation produces a fresh fixed broker request",
     actualApproval: { state: "approved", environmentId: 8, environmentName: environment, userId: 183396573, userLogin: "T-ej2003" } });
   const request = buildSignerBrokerRequest({ sourceSha, transitionId: "123e4567-e89b-42d3-a456-426614174000", operation: "INSTALL", workflowRunId, approvalEvidence, now: Date.parse(observedAt) + 1000 });
   assert.equal(request.operation, "SIGNER_AUTHORIZE"); assert.equal(request.authorization.approvedAt, observedAt); assert.equal(request.authorization.workflowRunId, workflowRunId);
+  assert.equal(request.authorization.sourceSha, sourceSha); assert.equal(request.authorization.protectedMainSha, sourceSha);
   assert.equal(Object.hasOwn(request.authorization, "policyDocument"), false); assert.equal(Object.hasOwn(request.authorization, "policyArn") && request.authorization.policyArn !== C.sourcePolicyArn, false);
+  const predecessor = "a".repeat(40), cleanup = buildSignerBrokerRequest({ sourceSha, transitionSourceSha: predecessor, transitionId: "123e4567-e89b-42d3-a456-426614174000", operation: "REVOKE", workflowRunId, approvalEvidence, now: Date.parse(observedAt) + 1000 });
+  assert.equal(cleanup.authorization.sourceSha, predecessor); assert.equal(cleanup.authorization.protectedMainSha, sourceSha);
+  assert.throws(() => buildSignerBrokerRequest({ sourceSha, transitionSourceSha: predecessor, transitionId: "123e4567-e89b-42d3-a456-426614174000", operation: "INSTALL", workflowRunId, approvalEvidence, now: Date.parse(observedAt) + 1000 }), /current protected main/);
 })
 
 test("signer transitions accept only authenticated historical steady policy versions", () => {

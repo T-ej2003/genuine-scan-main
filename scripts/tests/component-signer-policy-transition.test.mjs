@@ -7,9 +7,9 @@ import { buildSignerTemporaryPolicy, SIGNER_TEMPORARY_CAPABILITY as C } from "..
 const sourceSha = "a".repeat(40), transitionId = "123e4567-e89b-42d3-a456-426614174000", now = Date.parse("2026-09-28T12:00:00.000Z");
 const steady = JSON.parse(fs.readFileSync(new URL("../../documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json", import.meta.url)));
 const temporary = buildSignerTemporaryPolicy(steady, { sourceSha, transitionId });
-const authorization = (operation, offset = -1000, workflowRunId = "42") => buildSignerBrokerAuthorization({ sourceSha, transitionId, operation, workflowRunId, approvedAt: new Date(now + offset).toISOString(), expiresAt: new Date(now + offset + 30 * 60 * 1000).toISOString() });
+const authorization = (operation, offset = -1000, workflowRunId = "42", protectedMainSha = sourceSha, authorizedAt = now) => buildSignerBrokerAuthorization({ sourceSha, protectedMainSha, transitionId, operation, workflowRunId, approvedAt: new Date(authorizedAt + offset).toISOString(), expiresAt: new Date(authorizedAt + offset + 30 * 60 * 1000).toISOString() });
 
-function fixture() {
+function fixture({ main = { sha: sourceSha }, clock = { value: now } } = {}) {
   let object, etag = 0, versions = [{ VersionId: "v1", IsDefaultVersion: true, CreateDate: "2026-09-01T00:00:00Z", document: steady }];
   const calls = [];
   const iam = async (operation, input) => {
@@ -30,7 +30,7 @@ function fixture() {
     if (operation === "PutObject") { if (input.IfNoneMatch && object) { const error = new Error(); error.name = "PreconditionFailed"; throw error; } assert(!input.IfMatch || input.IfMatch === `"${etag}"`); object = input.Body; etag += 1; return { ETag: `"${etag}"` }; }
     throw new Error(`unexpected S3 ${operation}`);
   };
-  return { broker: createSignerPolicyBroker({ iam, s3, currentMain: async () => sourceSha, now: () => now }), calls, ledger: () => JSON.parse(object), versions: () => versions };
+  return { broker: createSignerPolicyBroker({ iam, s3, currentMain: async () => main.sha, now: () => clock.value }), calls, ledger: () => JSON.parse(object), versions: () => versions };
 }
 
 const request = (ledger, operation, extra = {}) => ({ operation, sourceSha, transitionId, authorizationSha256: ledger.authorization.authorizationSha256, ...extra });
@@ -122,4 +122,38 @@ test("fresh install authorization renews monotonically and consumed authorizatio
   assert.equal(f.ledger().authorization.authorizationSha256, second.authorizationSha256);
   assert.deepEqual(f.ledger().authorizationHistory.map(value => value.authorizationSha256), [first.authorizationSha256]);
   await assert.rejects(f.broker({ operation: "SIGNER_AUTHORIZE", authorization: first }), /replay|approval time/);
+});
+
+test("revoke rebinds to unchanged descendant protected main without changing the transition source", async () => {
+  const main = { sha: sourceSha }, descendant = "d".repeat(40), f = fixture({ main });
+  await f.broker({ operation: "SIGNER_AUTHORIZE", authorization: authorization("INSTALL") });
+  await f.broker(request(f.ledger(), "SIGNER_INSTALL"));
+  main.sha = descendant;
+  await f.broker({ operation: "SIGNER_AUTHORIZE", authorization: authorization("REVOKE", -500, "43", descendant) });
+  assert.equal(f.ledger().authorization.sourceSha, sourceSha);
+  assert.equal(f.ledger().authorization.protectedMainSha, descendant);
+  const ledger = f.ledger();
+  assert.equal((await f.broker(request(ledger, "SIGNER_REVOKE", { evidenceState: ledger.state, evidenceSha256: evidence(ledger), abort: true }))).state, "REVOKED");
+});
+
+test("source rebind cannot authorize install or a non-current protected main", async () => {
+  const main = { sha: sourceSha }, descendant = "d".repeat(40), f = fixture({ main });
+  await f.broker({ operation: "SIGNER_AUTHORIZE", authorization: authorization("INSTALL") });
+  main.sha = descendant;
+  await assert.rejects(f.broker({ operation: "SIGNER_AUTHORIZE", authorization: buildSignerBrokerAuthorization({ sourceSha, protectedMainSha: descendant, transitionId, operation: "INSTALL", workflowRunId: "43", approvedAt: new Date(now - 500).toISOString(), expiresAt: new Date(now - 500 + 30 * 60 * 1000).toISOString() }) }), /current protected main/);
+  await assert.rejects(f.broker({ operation: "SIGNER_AUTHORIZE", authorization: authorization("REVOKE", -500, "44", "e".repeat(40)) }), /Protected source moved/);
+});
+
+test("expired revoke authorization can be renewed without replaying prior authority", async () => {
+  const clock = { value: now }, f = fixture({ clock });
+  await f.broker({ operation: "SIGNER_AUTHORIZE", authorization: authorization("INSTALL", -2000, "41") });
+  await f.broker(request(f.ledger(), "SIGNER_INSTALL"));
+  await f.broker({ operation: "SIGNER_AUTHORIZE", authorization: authorization("REVOKE", -1000, "42") });
+  const expired = f.ledger().authorization;
+  clock.value = now + 31 * 60 * 1000;
+  const renewed = authorization("REVOKE", -500, "43", sourceSha, clock.value);
+  await f.broker({ operation: "SIGNER_AUTHORIZE", authorization: renewed });
+  assert.equal(f.ledger().authorization.authorizationSha256, renewed.authorizationSha256);
+  assert(f.ledger().authorizationHistory.some(value => value.authorizationSha256 === expired.authorizationSha256));
+  await assert.rejects(f.broker({ operation: "SIGNER_AUTHORIZE", authorization: expired }), /stale|replay|approval time/);
 });
