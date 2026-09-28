@@ -25,7 +25,7 @@ const expectedOps = new Map([
 const grants = (policy, action, resource) => policy.Statement.some((statement) => {
   const actions = Array.isArray(statement.Action) ? statement.Action : [statement.Action];
   const resources = Array.isArray(statement.Resource) ? statement.Resource : [statement.Resource];
-  return actions.includes(action) && resources.some((candidate) => candidate === "*" || candidate === resource);
+  return statement.Effect === "Allow" && actions.includes(action) && resources.some((candidate) => candidate === "*" || candidate === resource);
 });
 
 test("policy-version mutations require the independent workflow installer, while release work requires the MFA bootstrap operator", () => {
@@ -61,7 +61,13 @@ test("bootstrap cannot create policy versions; the independent installer can tra
   const target = "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease";
   assert.equal(predecessor.Statement.some(({ Action, Resource }) => (Array.isArray(Action) ? Action : [Action]).includes("iam:CreatePolicyVersion") && Resource === target), false, "the pre-fix bootstrap policy could not install or revoke the signer version");
   assert.equal(policy.Statement.some(({ Action }) => (Array.isArray(Action) ? Action : [Action]).includes("iam:CreatePolicyVersion")), false);
+  assert.equal(grants(steady, "iam:CreatePolicyVersion", target), false, "release-deployer cannot write the signer policy directly");
+  const publisherBootstrap = JSON.parse(fs.readFileSync("infra/aws/terraform/production-green-stage-b-publisher-bootstrap/permissions-policy.json", "utf8"));
   const installerRoleArn = `arn:aws:iam::${C.accountId}:role/${C.installerRoleName}`;
+  for (const action of ["iam:CreateRole", "iam:PutRolePolicy", "iam:UpdateAssumeRolePolicy", "iam:AttachRolePolicy", "iam:PassRole", "iam:CreatePolicy", "iam:CreatePolicyVersion", "iam:SetDefaultPolicyVersion"]) {
+    assert.equal(grants(publisherBootstrap, action, target), false, `bootstrap's other assumable role cannot ${action} the signer policy`);
+    assert.equal(grants(publisherBootstrap, action, installerRoleArn), false, `bootstrap's other assumable role cannot ${action} the installer`);
+  }
   for (const action of ["iam:CreateRole", "iam:PutRolePolicy", "iam:UpdateAssumeRolePolicy", "iam:AttachRolePolicy", "iam:PassRole", "sts:AssumeRole"]) {
     assert.equal(grants(policy, action, installerRoleArn), false, `bootstrap cannot ${action} the installer role`);
     assert.equal(grants(steady, action, installerRoleArn), false, `release policy cannot ${action} the installer role`);
