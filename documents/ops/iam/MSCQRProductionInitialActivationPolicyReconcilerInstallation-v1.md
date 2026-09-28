@@ -43,6 +43,21 @@ role-only signer prefix is resumable; during the evidence-reader expansion,
 already-created signer resources must be plan no-ops and only missing resources
 may be created. Mixed evidence-reader attachment states remain fail-closed.
 
+The deployed twelve-resource installation is an authenticated predecessor:
+its evidence-reader policy has the retained two-object description and exact
+two-object read document, the bootstrap authorizer has the recognized v2
+document, and the signer installer is absent. The incremental successor keeps
+the existing policy identity and description, updates only its document to the
+canonical three-object read set, adds the two signer installer resources, and
+updates the authorizer only with its canonical ECS read statements. The live
+bootstrap inline policy is pinned as predecessor generation 9; its separately
+governed upgrade grants policy-version access only to the exact evidence-reader
+policy in addition to previously authorized policy ARNs. A saved plan that
+replaces or deletes the evidence-reader policy is rejected.
+The two predecessor policy documents are tracked independently: if one policy
+converges before execution, the old saved plan fails its live-state recheck and
+must be prepared again for the exact remaining update.
+
 For the reviewed exact legacy-to-dedicated-role expansion, completion additionally requires remote
 Terraform state to advance from the authenticated predecessor and to contain
 all fourteen exact resource attributes from the authorized saved

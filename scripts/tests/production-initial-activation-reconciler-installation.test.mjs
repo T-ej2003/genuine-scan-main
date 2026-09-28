@@ -6,7 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { PRODUCTION_ENVIRONMENT_APPROVAL, createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
 import { createProductionGithubCommandRunner } from "../aws/production-credential-source-contract.mjs";
-import { EVIDENCE_READER_ADDRESSES, EVIDENCE_READER_EXPANSION_CHANGES, EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, INSTALLATION, INSTALLATION_BACKEND, assertInstallationAuthorization, assertInstallationAuthorizedPostState, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationPreparation, assertInstallationStateResources, bootstrapOperatorPolicyAuthorizerPermissionsPredecessor, bootstrapOperatorPolicyAuthorizerPermissionsPredecessors, classifyInstallationStatePullError, createInstallationAuthorization, createInstallationPreparation, installationPermissionsPredecessor, stateIdentity } from "../aws/production-initial-activation-reconciler-installation-contract.mjs";
+import { EVIDENCE_READER_ADDRESSES, EVIDENCE_READER_EXPANSION_CHANGES, EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, SIGNER_EVIDENCE_READER_POLICY_EXPANSION, SIGNER_AUTHORIZER_POLICY_EXPANSION, SIGNER_BOTH_POLICY_EXPANSION, INSTALLATION, INSTALLATION_BACKEND, assertInstallationAuthorization, assertInstallationAuthorizedPostState, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationPreparation, assertInstallationStateResources, bootstrapOperatorPolicyAuthorizerPermissionsPredecessor, bootstrapOperatorPolicyAuthorizerPermissionsPredecessors, classifyInstallationStatePullError, createInstallationAuthorization, createInstallationPreparation, evidenceReaderPermissionsPredecessor, installationPermissionsPredecessor, stateIdentity } from "../aws/production-initial-activation-reconciler-installation-contract.mjs";
 import { executeInstallation, runInstallCli } from "../aws/install-production-initial-activation-reconciler.mjs";
 import { discoverInstallationPredecessor, runPrepareCli } from "../aws/prepare-production-initial-activation-reconciler-installation.mjs";
 import { BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER, BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER, INITIAL_ACTIVATION_RECONCILER, MIXED_RECOVERY_EXECUTOR } from "../aws/verify-production-initial-activation-policy-reconciler.mjs";
@@ -112,7 +112,7 @@ const mixedTags = Object.entries(MIXED_RECOVERY_EXECUTOR.tags).map(([Key, Value]
 const authorizerTags = Object.entries(BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.tags).map(([Key, Value]) => ({ Key, Value }));
 const readerTags = Object.entries(BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER.tags).map(([Key, Value]) => ({ Key, Value }));
 const bootstrapSidNames = Object.freeze({ BackendPrefixRead: "ReadExactBackendPrefix", BackendObjectsRead: "ReadExactBackendObjects", ArtifactsBucketRead: "ReadExactProductionArtifactsBucketPolicy", BootstrapInlineRead: "ReadOwnExactBootstrapInlinePolicy", BackendObjectsWrite: "WriteEncryptedExactBackendObjects", NativeLockRelease: "DeleteExactNativeLockOnly", OidcProviderRead: "ReadOidcProvider", ReconcilerRoleRead: "ReadExactReconcilerRole", MixedRecoveryRoleRead: "ReadExactMixedRecoveryRole", BootstrapAuthorizerRoleRead: "ReadExactBootstrapOperatorPolicyAuthorizerRole", MixedRecoveryTrustUpdate: "UpdateExactMixedRecoveryRoleTrust", BootstrapAuthorizerTrustUpdate: "UpdateExactBootstrapOperatorPolicyAuthorizerRoleTrust", ReconcilerPolicyRead: "ReadExactReconcilerPolicy", MixedRecoveryPolicyRead: "ReadExactMixedRecoveryPolicy", BootstrapAuthorizerPolicyRead: "ReadExactBootstrapOperatorPolicyAuthorizerPolicy", ReconcilerPolicyVersion: "UpdateExactReconcilerPolicyVersion", PolicyNameInventory: "InventoryReservedPolicyName", ReconcilerRoleCreate: "CreateExactReconcilerRole", ReconcilerPolicyCreate: "CreateExactReconcilerPolicy", MixedRoleCreate: "CreateExactMixedRecoveryRole", MixedPolicyCreate: "CreateExactMixedRecoveryPolicy", BootstrapAuthorizerRoleCreate: "CreateExactBootstrapOperatorPolicyAuthorizerRole", BootstrapAuthorizerPolicyCreate: "CreateExactBootstrapOperatorPolicyAuthorizerPolicy", BrokerEvidenceCreate: "CreateExactBrokerRecoverySuccessorEvidenceReaderIdentity", ReconcilerPolicyAttach: "AttachExactPolicyToExactRole", BrokerEvidencePolicyAttach: "AttachExactBrokerRecoverySuccessorEvidenceReaderPolicyToRole", MixedPolicyAttach: "AttachExactMixedRecoveryPolicyToRole", BootstrapAuthorizerPolicyAttach: "AttachExactBootstrapOperatorPolicyAuthorizerPolicyToRole" });
-const historicalBootstrapPolicy = () => { const value = JSON.parse(fs.readFileSync(INSTALLATION_BOOTSTRAP.permissionsPath, "utf8")); value.Statement = value.Statement.filter(({ Sid }) => !["SignerRoleCreate", "SignerPolicyPut", "SignerPolicyInstallerInlineRead"].includes(Sid)); for (const statement of value.Statement) statement.Sid = bootstrapSidNames[statement.Sid] || statement.Sid; for (const sid of ["ReadExactMixedRecoveryRole", "ReadOwnExactBootstrapInlinePolicy"]) { const statement = value.Statement.find(({ Sid }) => Sid === sid); statement.Resource = [].concat(statement.Resource).filter((resource) => resource !== "arn:aws:iam::368992683803:role/mscqr-production-signer-policy-installer"); if (statement.Resource.length === 1) statement.Resource = statement.Resource[0]; } return value; };
+const historicalBootstrapPolicy = () => { const value = JSON.parse(fs.readFileSync(INSTALLATION_BOOTSTRAP.permissionsPath, "utf8")); value.Statement = value.Statement.filter(({ Sid }) => !["SignerRoleCreate", "SignerPolicyPut", "SignerPolicyInstallerInlineRead"].includes(Sid)); for (const statement of value.Statement) statement.Sid = bootstrapSidNames[statement.Sid] || statement.Sid; for (const sid of ["ReadExactMixedRecoveryRole", "ReadOwnExactBootstrapInlinePolicy"]) { const statement = value.Statement.find(({ Sid }) => Sid === sid); statement.Resource = [].concat(statement.Resource).filter((resource) => resource !== "arn:aws:iam::368992683803:role/mscqr-production-signer-policy-installer"); if (statement.Resource.length === 1) statement.Resource = statement.Resource[0]; } const update = value.Statement.find(({ Sid }) => Sid === "UpdateExactReconcilerPolicyVersion"); update.Resource = [].concat(update.Resource).filter((resource) => resource !== BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER.policyArn); return value; };
 const legacyBootstrapPolicy = (generation) => {
   const value = historicalBootstrapPolicy();
   const readerSids = new Set(liveEvidenceReaderPredecessor.bootstrapPolicyOmittedStatementSids);
@@ -142,7 +142,7 @@ const legacyBootstrapPolicy = (generation) => {
   return value;
 };
 
-const discoveryRun = ({ role = true, policy = true, mixedRole = Boolean(role && policy), mixedPolicy = Boolean(role && policy), authorizerRole = Boolean(role && policy), authorizerPolicy = Boolean(role && policy), readerRole = Boolean(role && policy), readerPolicy = Boolean(role && policy), document = JSON.parse(permissions), authorizerDocument = JSON.parse(authorizerPermissions), versions = [{ VersionId: "v1", IsDefaultVersion: true }], attached = [{ PolicyArn: INITIAL_ACTIVATION_RECONCILER.policyArn }], inline = [], entities = [{ PolicyRoles: [{ RoleName: INITIAL_ACTIVATION_RECONCILER.roleName }], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }], mixedAttached = [{ PolicyArn: MIXED_RECOVERY_EXECUTOR.policyArn }], mixedInline = [], mixedEntities = [{ PolicyRoles: [{ RoleName: MIXED_RECOVERY_EXECUTOR.roleName }], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }], authorizerAttached = [{ PolicyArn: BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.policyArn }], authorizerInline = [], authorizerEntities = [{ PolicyRoles: [{ RoleName: BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.roleName }], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }], readerAttached = [{ PolicyArn: BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER.policyArn }], readerInline = [], readerEntities = [{ PolicyRoles: [{ RoleName: BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER.roleName }], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }], signerInstallerRole = Boolean(role && policy), signerInstallerPolicy = Boolean(role && policy), signerInstallerAttached = [], policyPages } = {}) => (args) => {
+const discoveryRun = ({ role = true, policy = true, mixedRole = Boolean(role && policy), mixedPolicy = Boolean(role && policy), authorizerRole = Boolean(role && policy), authorizerPolicy = Boolean(role && policy), readerRole = Boolean(role && policy), readerPolicy = Boolean(role && policy), readerDocument = JSON.parse(readerPermissions), document = JSON.parse(permissions), authorizerDocument = JSON.parse(authorizerPermissions), versions = [{ VersionId: "v1", IsDefaultVersion: true }], readerVersions = versions, attached = [{ PolicyArn: INITIAL_ACTIVATION_RECONCILER.policyArn }], inline = [], entities = [{ PolicyRoles: [{ RoleName: INITIAL_ACTIVATION_RECONCILER.roleName }], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }], mixedAttached = [{ PolicyArn: MIXED_RECOVERY_EXECUTOR.policyArn }], mixedInline = [], mixedEntities = [{ PolicyRoles: [{ RoleName: MIXED_RECOVERY_EXECUTOR.roleName }], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }], authorizerAttached = [{ PolicyArn: BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.policyArn }], authorizerInline = [], authorizerEntities = [{ PolicyRoles: [{ RoleName: BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.roleName }], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }], readerAttached = [{ PolicyArn: BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER.policyArn }], readerInline = [], readerEntities = [{ PolicyRoles: [{ RoleName: BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER.roleName }], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }], signerInstallerRole = Boolean(role && policy), signerInstallerPolicy = Boolean(role && policy), signerInstallerAttached = [], policyPages } = {}) => (args) => {
   if (args[0] === "sts") return JSON.stringify({ Arn: "arn:aws:iam::368992683803:root" });
   if (args[1] === "get-open-id-connect-provider") return JSON.stringify({ Url: "token.actions.githubusercontent.com", ClientIDList: ["sts.amazonaws.com"] });
   if (args[1] === "get-role") { const requested = args[args.indexOf("--role-name") + 1]; const reader = requested === BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER.roleName; const authorizer = requested === BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.roleName; const mixed = requested === MIXED_RECOVERY_EXECUTOR.roleName; const signerInstaller = requested === "mscqr-production-signer-policy-installer"; const value = signerInstaller ? signerInstallerRole : reader ? readerRole : authorizer ? authorizerRole : mixed ? mixedRole : role; const contract = reader ? BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER : authorizer ? BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER : mixed ? MIXED_RECOVERY_EXECUTOR : INITIAL_ACTIVATION_RECONCILER; if (!value) throw Object.assign(new Error("NoSuchEntity"), { stderr: "NoSuchEntity" }); return JSON.stringify({ Role: { Arn: signerInstaller ? INSTALLATION.signerPolicyInstallerRoleArn : contract.roleArn, RoleName: signerInstaller ? "mscqr-production-signer-policy-installer" : contract.roleName, Path: "/", Description: signerInstaller ? "Protected GitHub OIDC publisher for canonical signer broker authorization only." : contract.roleDescription, Tags: signerInstaller ? [] : reader ? readerTags : authorizer ? authorizerTags : mixed ? mixedTags : reconcilerTags, MaxSessionDuration: 3600, AssumeRolePolicyDocument: JSON.parse(signerInstaller ? signerInstallerTrust : reader ? readerTrust : authorizer ? authorizerTrust : mixed ? mixedTrust : trust), ...(typeof value === "object" ? value : {}) } }); }
@@ -151,14 +151,108 @@ const discoveryRun = ({ role = true, policy = true, mixedRole = Boolean(role && 
     const pages = policyPages || [{ Policies: [...(policy ? [{ Arn: INITIAL_ACTIVATION_RECONCILER.policyArn, PolicyName: INITIAL_ACTIVATION_RECONCILER.policyName }] : []), ...(mixedPolicy ? [{ Arn: MIXED_RECOVERY_EXECUTOR.policyArn, PolicyName: MIXED_RECOVERY_EXECUTOR.policyName }] : []), ...(authorizerPolicy ? [{ Arn: BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.policyArn, PolicyName: BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.policyName }] : []), ...(readerPolicy ? [{ Arn: BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER.policyArn, PolicyName: BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER.policyName }] : [])], IsTruncated: false }];
     return JSON.stringify(pages[args.includes("--marker") ? 1 : 0]);
   }
-  if (args[1] === "get-policy-version") { const requested = args[args.indexOf("--policy-arn") + 1]; return JSON.stringify({ PolicyVersion: { Document: requested === BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER.policyArn ? JSON.parse(readerPermissions) : requested === BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.policyArn ? authorizerDocument : requested === MIXED_RECOVERY_EXECUTOR.policyArn ? JSON.parse(mixedPermissions) : document } }); }
-  if (args[1] === "list-policy-versions") return JSON.stringify({ Versions: versions });
+  if (args[1] === "get-policy-version") { const requested = args[args.indexOf("--policy-arn") + 1]; return JSON.stringify({ PolicyVersion: { Document: requested === BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER.policyArn ? readerDocument : requested === BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.policyArn ? authorizerDocument : requested === MIXED_RECOVERY_EXECUTOR.policyArn ? JSON.parse(mixedPermissions) : document } }); }
+  if (args[1] === "list-policy-versions") return JSON.stringify({ Versions: args[args.indexOf("--policy-arn") + 1] === BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER.policyArn ? readerVersions : versions });
   if (args[1] === "list-attached-role-policies") { const requested = args[args.indexOf("--role-name") + 1]; return JSON.stringify({ AttachedPolicies: requested === "mscqr-production-signer-policy-installer" ? signerInstallerAttached : requested === BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER.roleName ? readerAttached : requested === BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.roleName ? authorizerAttached : requested === MIXED_RECOVERY_EXECUTOR.roleName ? mixedAttached : attached }); }
   if (args[1] === "get-role-policy" && args.includes("--role-name") && args.includes("--policy-name")) { if (!signerInstallerPolicy) throw Object.assign(new Error("NoSuchEntity"), { stderr: "NoSuchEntity" }); return JSON.stringify({ RoleName: "mscqr-production-signer-policy-installer", PolicyName: "ProductionSignerPolicyInstaller", PolicyDocument: JSON.parse(signerInstallerPermissions) }); }
   if (args[1] === "list-role-policies") { const requested = args[args.indexOf("--role-name") + 1]; return JSON.stringify({ PolicyNames: requested === "mscqr-production-signer-policy-installer" ? (signerInstallerPolicy ? ["ProductionSignerPolicyInstaller"] : []) : requested === BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER.roleName ? readerInline : requested === BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.roleName ? authorizerInline : requested === MIXED_RECOVERY_EXECUTOR.roleName ? mixedInline : inline }); }
   if (args[1] === "list-entities-for-policy") { const requested = args[args.indexOf("--policy-arn") + 1]; const selected = requested === BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER.policyArn ? readerEntities : requested === BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.policyArn ? authorizerEntities : requested === MIXED_RECOVERY_EXECUTOR.policyArn ? mixedEntities : entities; return JSON.stringify(selected[args.includes("--marker") ? 1 : 0]); }
   throw new Error(`unexpected discovery call: ${args.join(" ")}`);
 };
+
+const productionPredecessor = {
+  authorizerDocument: bootstrapOperatorPolicyAuthorizerPermissionsPredecessors()[1],
+  readerDocument: evidenceReaderPermissionsPredecessor(),
+  authorizerPolicy: { DefaultVersionId: "v2" },
+  versions: [{ VersionId: "v2", IsDefaultVersion: true }, { VersionId: "v1", IsDefaultVersion: false }],
+  readerVersions: [{ VersionId: "v1", IsDefaultVersion: true }],
+  signerInstallerRole: false,
+  signerInstallerPolicy: false,
+};
+const productionPredecessorPlan = createSignerInstaller(structuredClone(completePlan));
+for (const [address, predecessorDocument] of [
+  ["aws_iam_policy.bootstrap_operator_policy_authorizer", productionPredecessor.authorizerDocument],
+  ["aws_iam_policy.broker_recovery_successor_evidence_reader", productionPredecessor.readerDocument],
+]) {
+  const change = productionPredecessorPlan.resource_changes.find((entry) => entry.address === address).change;
+  change.actions = ["update"];
+  change.before = { ...change.after, policy: JSON.stringify(predecessorDocument) };
+}
+const productionPredecessorState = JSON.stringify({
+  ...JSON.parse(currentInstallationState(installedState)),
+  resources: JSON.parse(currentInstallationState(installedState)).resources
+    .filter(({ name }) => name !== "signer_policy_installer")
+    .map((resource) => {
+      const predecessorDocument = resource.name === "bootstrap_operator_policy_authorizer" ? productionPredecessor.authorizerDocument
+        : resource.name === "broker_recovery_successor_evidence_reader" ? productionPredecessor.readerDocument : undefined;
+      return resource.type === "aws_iam_policy" && predecessorDocument
+        ? { ...resource, instances: resource.instances.map((instance) => ({ ...instance, attributes: { ...instance.attributes, policy: JSON.stringify(predecessorDocument) } })) }
+        : resource;
+    }),
+});
+
+test("authenticated 12-resource production predecessor permits only two exact policy updates and signer creates", () => {
+  const discovered = discoverInstallationPredecessor({ run: discoveryRun(productionPredecessor) });
+  assert.equal(discovered.classification, SIGNER_BOTH_POLICY_EXPANSION);
+  assert.equal(discovered.existingAddresses.length, 12);
+  assert.deepEqual(discovered.existingAddresses, JSON.parse(productionPredecessorState).resources.map(({ type, name }) => `${type}.${name}`).sort());
+  const semantics = assertInstallationPlan(productionPredecessorPlan, { livePredecessor: discovered.classification });
+  assert.deepEqual([semantics.createCount, semantics.updateCount, semantics.deleteCount, semantics.replaceCount], [2, 2, 0, 0]);
+  assert.deepEqual(semantics.changedAddresses, ["aws_iam_policy.bootstrap_operator_policy_authorizer", "aws_iam_policy.broker_recovery_successor_evidence_reader", "aws_iam_role.signer_policy_installer", "aws_iam_role_policy.signer_policy_installer"]);
+  const prepared = createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(productionPredecessorState)), livePredecessor: discovered.classification, livePredecessorAddresses: discovered.existingAddresses, planJson: productionPredecessorPlan, planBytes, preparedAt: now.toISOString() });
+  assert.doesNotThrow(() => assertInstallationPreparation(prepared, { sourceSha, planBytes }));
+  assert.equal(JSON.parse(productionPredecessorState).resources.length, 12);
+  assert.equal(productionPredecessorPlan.resource_changes.find(({ address }) => address === "aws_iam_policy.broker_recovery_successor_evidence_reader").change.after.description, "Read only the two immutable component broker successor lineage objects.");
+  const terraform = fs.readFileSync("infra/aws/terraform/production-initial-activation-policy-reconciler/main.tf", "utf8");
+  const readerResource = terraform.split('resource "aws_iam_policy" "broker_recovery_successor_evidence_reader" {')[1]?.split("\nresource ")[0];
+  assert.match(readerResource, /description = "Read only the two immutable component broker successor lineage objects\."/);
+  assert.match(readerResource, /prevent_destroy = true/);
+});
+
+test("each independently converged policy has a distinct predecessor and exact remaining update", () => {
+  for (const [convergedAddress, readerCurrent, authorizerCurrent, expected] of [
+    ["aws_iam_policy.bootstrap_operator_policy_authorizer", false, true, SIGNER_EVIDENCE_READER_POLICY_EXPANSION],
+    ["aws_iam_policy.broker_recovery_successor_evidence_reader", true, false, SIGNER_AUTHORIZER_POLICY_EXPANSION],
+  ]) {
+    const live = { ...productionPredecessor,
+      authorizerDocument: authorizerCurrent ? JSON.parse(authorizerPermissions) : productionPredecessor.authorizerDocument,
+      readerDocument: readerCurrent ? JSON.parse(readerPermissions) : productionPredecessor.readerDocument,
+    };
+    const discovered = discoverInstallationPredecessor({ run: discoveryRun(live) });
+    assert.equal(discovered.classification, expected);
+    assert.deepEqual(discovered.existingAddresses, discoverInstallationPredecessor({ run: discoveryRun(productionPredecessor) }).existingAddresses);
+    const candidate = structuredClone(productionPredecessorPlan);
+    const converged = candidate.resource_changes.find(({ address }) => address === convergedAddress).change;
+    converged.actions = ["no-op"];
+    converged.before = structuredClone(converged.after);
+    const stateValue = JSON.parse(productionPredecessorState);
+    const stateResource = stateValue.resources.find(({ type, name }) => `${type}.${name}` === convergedAddress);
+    stateResource.instances[0].attributes.policy = converged.after.policy;
+    assert.doesNotThrow(() => createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(JSON.stringify(stateValue))), livePredecessor: expected, livePredecessorAddresses: discovered.existingAddresses, planJson: candidate, planBytes, preparedAt: now.toISOString() }));
+    assert.throws(() => createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(JSON.stringify(stateValue))), livePredecessor: SIGNER_BOTH_POLICY_EXPANSION, livePredecessorAddresses: discovered.existingAddresses, planJson: candidate, planBytes, preparedAt: now.toISOString() }), /does not match|semantics/);
+    assert.throws(() => createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(productionPredecessorState)), livePredecessor: expected, livePredecessorAddresses: discovered.existingAddresses, planJson: productionPredecessorPlan, planBytes, preparedAt: now.toISOString() }), /does not match|semantics/);
+  }
+});
+
+test("production evidence-reader predecessor and plan reject substitutions and destructive actions", () => {
+  const badReader = structuredClone(productionPredecessor.readerDocument);
+  for (const altered of [
+    { ...productionPredecessor, readerPolicy: { Arn: "arn:aws:iam::368992683803:policy/other" } },
+    { ...productionPredecessor, readerPolicy: { Description: "unreviewed description" } },
+    ...[[], ["arn:aws:s3:::unrelated/object"], ["arn:aws:s3:::unrelated/object", ...badReader.Statement[0].Resource]].map((resources) => ({ ...productionPredecessor, readerDocument: { ...badReader, Statement: [{ ...badReader.Statement[0], Resource: resources }] } })),
+    { ...productionPredecessor, authorizerDocument: { Version: "2012-10-17", Statement: [] } },
+  ]) assert.equal(discoverInstallationPredecessor({ run: discoveryRun(altered) }).classification, "UNEXPECTED");
+  for (const mutate of [
+    (plan) => { plan.resource_changes.find(({ address }) => address === "aws_iam_policy.broker_recovery_successor_evidence_reader").change.actions = ["delete", "create"]; },
+    (plan) => { plan.resource_changes.find(({ address }) => address === "aws_iam_policy.broker_recovery_successor_evidence_reader").change.actions = ["delete"]; },
+    (plan) => { plan.resource_changes.find(({ address }) => address === "aws_iam_policy.broker_recovery_successor_evidence_reader").change.before.policy = JSON.stringify({ Version: "2012-10-17", Statement: [] }); },
+    (plan) => { plan.resource_changes.find(({ address }) => address === "aws_iam_policy.broker_recovery_successor_evidence_reader").change.after.description = "new description"; },
+    (plan) => { plan.resource_changes.find(({ address }) => address === "aws_iam_policy.broker_recovery_successor_evidence_reader").change.after.policy = JSON.stringify({ ...badReader, Statement: [{ ...badReader.Statement[0], Resource: ["*"] }] }); },
+    (plan) => { plan.resource_changes.find(({ address }) => address === "aws_iam_policy.bootstrap_operator_policy_authorizer").change.after.policy = JSON.stringify({ Version: "2012-10-17", Statement: [] }); },
+    (plan) => { plan.resource_changes.find(({ address }) => address === "aws_iam_role_policy.signer_policy_installer").change.after.policy = "{}"; },
+    (plan) => { plan.resource_changes.push({ ...plan.resource_changes[0], address: "aws_iam_role.unrelated" }); },
+  ]) { const candidate = structuredClone(productionPredecessorPlan); mutate(candidate); assert.throws(() => assertInstallationPlan(candidate, { livePredecessor: SIGNER_BOTH_POLICY_EXPANSION })); }
+});
 
 test("first-install preparation binds absent state and exact plan addresses", () => {
   assert.equal(preparation.predecessorState.stateExists, false);
@@ -1107,7 +1201,7 @@ test("bootstrap role trust and permissions are exact and non-administrative", ()
   assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "SignerPolicyPut"), { Sid: "SignerPolicyPut", Effect: "Allow", Action: "iam:PutRolePolicy", Resource: INSTALLATION.signerPolicyInstallerRoleArn });
   assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "UpdateExactMixedRecoveryRoleTrust"), { Sid: "UpdateExactMixedRecoveryRoleTrust", Effect: "Allow", Action: "iam:UpdateAssumeRolePolicy", Resource: MIXED_RECOVERY_EXECUTOR.roleArn });
   assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "UpdateExactBootstrapOperatorPolicyAuthorizerRoleTrust"), { Sid: "UpdateExactBootstrapOperatorPolicyAuthorizerRoleTrust", Effect: "Allow", Action: "iam:UpdateAssumeRolePolicy", Resource: BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.roleArn });
-  assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "UpdateExactReconcilerPolicyVersion"), { Sid: "UpdateExactReconcilerPolicyVersion", Effect: "Allow", Action: "iam:CreatePolicyVersion", Resource: [INITIAL_ACTIVATION_RECONCILER.policyArn, MIXED_RECOVERY_EXECUTOR.policyArn, BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.policyArn] });
+  assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "UpdateExactReconcilerPolicyVersion"), { Sid: "UpdateExactReconcilerPolicyVersion", Effect: "Allow", Action: "iam:CreatePolicyVersion", Resource: [INITIAL_ACTIVATION_RECONCILER.policyArn, MIXED_RECOVERY_EXECUTOR.policyArn, BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER.policyArn, BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER.policyArn] });
   assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "ReadExactProductionArtifactsBucketPolicy"), { Sid: "ReadExactProductionArtifactsBucketPolicy", Effect: "Allow", Action: "s3:GetBucketPolicy", Resource: "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an" });
   assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "ReadOwnExactBootstrapInlinePolicy"), { Sid: "ReadOwnExactBootstrapInlinePolicy", Effect: "Allow", Action: ["iam:GetRole", "iam:GetRolePolicy", "iam:ListAttachedRolePolicies", "iam:ListRolePolicies"], Resource: [INSTALLATION_BOOTSTRAP.roleArn, INSTALLATION.signerPolicyInstallerRoleArn] });
   const mutations = policy.Statement.flatMap((statement) => (Array.isArray(statement.Action) ? statement.Action : [statement.Action])).filter((action) => /^(iam:(Create|Attach|Tag|Update|Put)|s3:(Put|Delete))/.test(action));
@@ -1202,8 +1296,8 @@ test("bootstrap inline-policy quota accounting matches IAM replacement semantics
   assert.throws(() => assertIamRoleInlinePolicyReplacementQuota({ inlinePolicies: [{ policyName: "Other", document: sizedPolicy(100) }], replacedPolicyName: "Target", proposedPolicy: sizedPolicy(100) }), /target is ambiguous/);
   assert.throws(() => assertIamRoleInlinePolicyReplacementQuota({ inlinePolicies: [{ policyName: "Target", document: sizedPolicy(100) }, { policyName: "Target", document: sizedPolicy(100) }], replacedPolicyName: "Target", proposedPolicy: sizedPolicy(100) }), /inventory is ambiguous/);
   const realPolicy = fs.readFileSync(INSTALLATION_BOOTSTRAP.permissionsPath, "utf8");
-  assert.equal(iamInlinePolicySize(realPolicy), 10_139);
-  assert.equal(assertIamRoleInlinePolicyReplacementQuota({ inlinePolicies: [], replacedPolicyName: INSTALLATION_BOOTSTRAP.inlinePolicyName, proposedPolicy: realPolicy, replacementRequired: false }).headroom, 101);
+  assert.equal(iamInlinePolicySize(realPolicy), 10_225);
+  assert.equal(assertIamRoleInlinePolicyReplacementQuota({ inlinePolicies: [], replacedPolicyName: INSTALLATION_BOOTSTRAP.inlinePolicyName, proposedPolicy: realPolicy, replacementRequired: false }).headroom, 15);
 });
 
 test("bootstrap live discovery rejects aggregate inline-policy quota overflow before preparation", () => {
@@ -1412,6 +1506,7 @@ test("bootstrap accepts only exact historical predecessors and binds authorizati
   const generation6 = legacyBootstrapPolicy(6);
   const generation7 = legacyBootstrapPolicy(7);
   const generation8 = legacyBootstrapPolicy(8);
+  const generation9 = historicalBootstrapPolicy();
   const generation7Sha256 = crypto.createHash("sha256").update(Buffer.from(canonicalJson(generation7))).digest("hex");
   let inline = generation1; let puts = 0;
   const run = (args) => {
@@ -1441,9 +1536,19 @@ test("bootstrap accepts only exact historical predecessors and binds authorizati
   const generation8Authorization = createBootstrapAuthorization({ sourceSha, preparation: bootstrapPreparation("EXACT_PREDECESSOR_GENERATION_8", liveEvidenceReaderPredecessor.bootstrapPolicySha256), approval: bootstrapApproval, authorizedAt: now.toISOString() });
   assert.equal(installBootstrapRole({ run, authorization: generation8Authorization, sourceSha, now }).putRolePolicyCount, 1);
   assert.equal(discoverBootstrapRole({ run }).classification, "EXACT_COMPLETE");
+  inline = generation9;
+  const generation9Sha256 = "0362ff7c1ea66fba1ab8587a32aab621e9cd87496af1c0bd9912c842782f58a1";
+  assert.equal(crypto.createHash("sha256").update(canonicalJson(generation9)).digest("hex"), generation9Sha256);
+  assert.deepEqual(discoverBootstrapRole({ run }), { classification: "EXACT_PREDECESSOR_GENERATION_9", predecessorPolicySha256: generation9Sha256 });
+  const generation9Authorization = createBootstrapAuthorization({ sourceSha, preparation: bootstrapPreparation("EXACT_PREDECESSOR_GENERATION_9", generation9Sha256), approval: bootstrapApproval, authorizedAt: now.toISOString() });
+  assert.equal(installBootstrapRole({ run, authorization: generation9Authorization, sourceSha, now }).putRolePolicyCount, 1);
+  assert.equal(discoverBootstrapRole({ run }).classification, "EXACT_COMPLETE");
+  inline = structuredClone(generation9);
+  inline.Statement.find(({ Sid }) => Sid === "UpdateExactReconcilerPolicyVersion").Resource.push("arn:aws:iam::368992683803:policy/Other");
+  assert.throws(() => discoverBootstrapRole({ run }), /not exact/);
   inline = generation2;
   assert.deepEqual(discoverBootstrapRole({ run }), { classification: "EXACT_PREDECESSOR_GENERATION_2", predecessorPolicySha256: "da875e515ee4139d05180cf6bebbe51c4b7eb95ae4185e47a4e4c5df6b07a612" });
-  assert.throws(() => installBootstrapRole({ run, authorization: generation1Authorization, sourceSha, now }), /predecessor changed/); assert.equal(puts, 3);
+  assert.throws(() => installBootstrapRole({ run, authorization: generation1Authorization, sourceSha, now }), /predecessor changed/); assert.equal(puts, 4);
   inline = generation3;
   assert.deepEqual(discoverBootstrapRole({ run }), { classification: "EXACT_PREDECESSOR_GENERATION_3", predecessorPolicySha256: "f7750b66517cc245fa54dc805ea21a33c975399e04ea97a8c6f0c21e16b0c263" });
   const generation3Authorization = createBootstrapAuthorization({ sourceSha, preparation: bootstrapPreparation("EXACT_PREDECESSOR_GENERATION_3", "f7750b66517cc245fa54dc805ea21a33c975399e04ea97a8c6f0c21e16b0c263"), approval: bootstrapApproval, authorizedAt: now.toISOString() });
