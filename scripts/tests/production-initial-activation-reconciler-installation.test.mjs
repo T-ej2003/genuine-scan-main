@@ -229,6 +229,17 @@ test("discovery admits every exact mixed-resource prefix during first installati
   assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ ...absentReconciler, mixedRole: { AssumeRolePolicyDocument: JSON.parse(trust) }, mixedPolicy: false, mixedAttached: [] }) }).classification, "UNEXPECTED");
 });
 
+test("late partial discovery includes already-created signer installer resources", () => {
+  const result = discoverInstallationPredecessor({ run: discoveryRun({
+    mixedRole: true, mixedPolicy: true, mixedAttached: [],
+    mixedEntities: [{ PolicyRoles: [], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }],
+  }) });
+  assert.equal(result.classification, "EXACT_PARTIAL");
+  for (const address of ["aws_iam_role.signer_policy_installer", "aws_iam_role_policy.signer_policy_installer", "aws_iam_role.mixed_recovery", "aws_iam_policy.mixed_recovery"]) {
+    assert.ok(result.existingAddresses.includes(address), `${address} remains in the discovered Terraform predecessor`);
+  }
+});
+
 test("discovery resumes exact executor-policy expansion prefixes", () => {
   const predecessorPolicy = installationPermissionsPredecessor();
   assert.deepEqual(discoverInstallationPredecessor({ run: discoveryRun({ document: predecessorPolicy, mixedRole: true, mixedPolicy: false, mixedAttached: [], authorizerRole: false, authorizerPolicy: false, readerRole: false, readerPolicy: false, signerInstallerRole: false, signerInstallerPolicy: false }) }), { classification: "EXACT_EXPANSION", existingAddresses: ["aws_iam_policy.reconciler", "aws_iam_role.mixed_recovery", "aws_iam_role.reconciler", "aws_iam_role_policy_attachment.reconciler"] });
@@ -1378,6 +1389,12 @@ test("bootstrap accepts only exact historical predecessors and binds authorizati
     (policy) => { policy.Statement.push({ Sid: "Unexpected", Effect: "Allow", Action: "iam:*", Resource: "*" }); },
     (policy) => { policy.Statement = policy.Statement.filter(({ Sid }) => Sid !== "ReadExactBackendObjects"); },
   ]) { inline = structuredClone(generation1); mutate(inline); assert.throws(() => discoverBootstrapRole({ run }), /not exact/); }
+});
+
+test("bootstrap predecessor diagnostics never write through a predictable shared temporary path", () => {
+  const source = fs.readFileSync("scripts/aws/production-initial-activation-reconciler-bootstrap.mjs", "utf8");
+  assert.doesNotMatch(source, /writeFileSync\(["']\/tmp\//);
+  assert.doesNotMatch(source, /\/tmp\/from-exact\.json/);
 });
 
 test("bootstrap prepares and replays EXACT_COMPLETE only as the exact zero-write state", () => {

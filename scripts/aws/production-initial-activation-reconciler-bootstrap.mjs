@@ -88,7 +88,7 @@ const bootstrapPermissionsPredecessors = () => {
     }
     mutate?.(document);
     for (const statement of document.Statement) if (historicalSids[statement.Sid]) statement.Sid = historicalSids[statement.Sid];
-    if (canonicalSha256(document) !== sha256) { fs.writeFileSync("/tmp/from-exact.json", JSON.stringify(document)); throw new Error(`Bootstrap predecessor ${generation} source document drifted: ${canonicalSha256(document)} expected ${sha256}.`); }
+    if (canonicalSha256(document) !== sha256) throw new Error(`Bootstrap predecessor ${generation} source document drifted: ${canonicalSha256(document)} expected ${sha256}.`);
     return Object.freeze({ generation, document, sha256 });
   };
   return Object.freeze([
