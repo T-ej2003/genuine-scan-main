@@ -1,11 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import yaml from "js-yaml";
 import { createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
 import { buildSignerBrokerRequest } from "../aws/publish-production-signer-policy-transition-authorization.mjs";
-import { assertCanonicalPolicyHistory, assertSignerBootstrapIdentity, assertSignerCliArguments } from "../aws/reconcile-production-signer-temporary-capability.mjs";
+import { assertCanonicalPolicyHistory, assertSignerBootstrapIdentity, assertSignerCliArguments, completeInstallingSignerAbort } from "../aws/reconcile-production-signer-temporary-capability.mjs";
 import { brokerSignerSuccessorManagedIdentities, componentBrokerArn } from "../aws/component-installation-identity-contract.mjs";
 import {
   SIGNER_TEMPORARY_CAPABILITY as C, assertSignerCapabilityEvidence, assertSignerCreationPlan, assertSignerRevocation,
@@ -125,6 +126,41 @@ test("INSTALLING recovery delegates policy mutation to the authoritative broker"
   assert.match(broker, /event\.evidenceState, ledger\.state/);
   assert.match(broker, /Submitted evidence is stale/);
 })
+
+test("no-write INSTALLING abort reaches the broker before local evidence or a temporary policy exists", (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "signer-no-write-abort-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const identity = { sourceSha, transitionId }, current = { active: { VersionId: "v1", document: steady },
+    versions: [{ VersionId: "v1", IsDefaultVersion: true, document: steady }] };
+  const ledger = { state: "INSTALLING" }, revoked = { state: "REVOKED", history: [{ state: "INSTALLING" }] };
+  const calls = [];
+  const deps = { transition: (...args) => calls.push(args), readLedger: () => revoked, readPolicy: () => current };
+  const stateFile = path.join(directory, "capability.json");
+  const input = { phase: "revoke", abort: true, evidence: null, brokerLedger: ledger, current, identity,
+    bootstrap: "mscqr-production-bootstrap-mfa", brokerStateFile: "broker.json", stateFile,
+    now: () => "2026-09-28T12:00:00.000Z", write: () => {} };
+  const result = completeInstallingSignerAbort(input, deps);
+  assert.equal(result.state, "REVOKED"); assert.equal(result.temporaryVersionId, null);
+  assert.deepEqual(calls, [["broker.json", "revoke", { abortBeforeApplyConfirmed: true }]]);
+  assertSignerCapabilityEvidence(JSON.parse(fs.readFileSync(stateFile, "utf8")), { state: "REVOKED", ...identity });
+  assert.equal(fs.statSync(stateFile).mode & 0o077, 0);
+  assert.equal(completeInstallingSignerAbort({ ...input, brokerLedger: revoked }, deps).state, "REVOKED", "lost acknowledgement is recoverable");
+  assert.equal(completeInstallingSignerAbort({ ...input, abort: false }, deps), false);
+  assert.equal(completeInstallingSignerAbort({ ...input, brokerLedger: { state: "APPLY_STARTED" } }, deps), false);
+  assert.throws(() => completeInstallingSignerAbort({ ...input, evidence: buildSignerCapabilityEvidence({ ...identity, state: "INSTALLING", steadyVersionId: "v2", observedAt: input.now() }) }, deps), /original steady policy/);
+  const temporary = buildSignerTemporaryPolicy(steady, identity), withMarker = { active: current.active, versions: [...current.versions,
+    { VersionId: "v2", IsDefaultVersion: false, document: temporary }] };
+  assert.equal(completeInstallingSignerAbort({ ...input, current: withMarker }, { ...deps, readPolicy: () => withMarker }).temporaryVersionId, "v2",
+    "lost acknowledgement after an IAM write retains the exact temporary marker for absence verification");
+  const temporaryActive = { ...withMarker, active: { VersionId: "v2", IsDefaultVersion: true, document: temporary },
+    versions: withMarker.versions.map(version => ({ ...version, IsDefaultVersion: version.VersionId === "v2" })) };
+  assert.equal(completeInstallingSignerAbort({ ...input, current: temporaryActive }, { ...deps, readPolicy: () => withMarker }).temporaryVersionId, "v2",
+    "an interrupted install can be broker-revoked without a local capability file");
+  assert.throws(() => completeInstallingSignerAbort(input, { ...deps, readLedger: () => ledger }), /authoritative steady state/);
+  assert.throws(() => completeInstallingSignerAbort({ ...input, current: { ...current, versions: [...current.versions, { VersionId: "v2", document: { Statement: [] } }] } }, deps), /unexpected version/);
+  const source = fs.readFileSync("scripts/aws/reconcile-production-signer-temporary-capability.mjs", "utf8");
+  assert.ok(source.indexOf("const installingAbort = completeInstallingSignerAbort") < source.indexOf('if (!evidence) fail("private authorization evidence is required")'));
+});
 
 test("signer environment-approval API permission and private evidence path reach every workflow step", () => {
   const workflowDirectory = ".github/workflows", callerName = "production-signer-policy-transition.yml", operationName = "production-signer-policy-transition-operation.yml";

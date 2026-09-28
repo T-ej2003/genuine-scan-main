@@ -185,6 +185,29 @@ function assertInitializedSignerBackend(sessionEnv) {
   if (workspace !== "default") fail("signer Terraform root must use the default workspace");
 }
 
+export function completeInstallingSignerAbort({ phase, abort, evidence, brokerLedger, current, identity, bootstrap, brokerStateFile, stateFile, now, write },
+  { transition = brokerTransition, readLedger = readBrokerLedger, readPolicy = policyState, save = protect } = {}) {
+  if (phase !== "revoke" || !abort || !["INSTALLING", "REVOKED"].includes(brokerLedger.state) ||
+      (brokerLedger.state === "REVOKED" && brokerLedger.history?.at(-1)?.state !== "INSTALLING") ||
+      (evidence && evidence.state !== "INSTALLING")) return false;
+  const hasTemporary = current.versions.some(({ document }) => exactSignerTemporaryVersion(document, identity));
+  assertCanonicalPolicyHistory(current, identity, hasTemporary);
+  if (canonical(current.active.document) !== canonical(steadyPolicy) && !exactSignerTemporaryVersion(current.active.document, identity))
+    fail("install abort requires the exact steady or signer temporary policy");
+  if (evidence && !current.versions.some(({ VersionId, document }) => VersionId === evidence.steadyVersionId && canonical(document) === canonical(steadyPolicy)))
+    fail("install abort requires the exact original steady policy");
+  transition(brokerStateFile, "revoke", { abortBeforeApplyConfirmed: true });
+  const afterLedger = readLedger(brokerStateFile, identity), after = readPolicy(bootstrap);
+  assertCanonicalPolicyHistory(after, identity, hasTemporary);
+  const temporary = after.versions.find(({ document }) => exactSignerTemporaryVersion(document, identity));
+  if (afterLedger.state !== "REVOKED" || afterLedger.history?.at(-1)?.state !== "INSTALLING" ||
+      canonical(after.active.document) !== canonical(steadyPolicy)) fail("broker install abort did not restore the authoritative steady state");
+  const result = buildSignerCapabilityEvidence({ ...identity, state: "REVOKED", steadyVersionId: after.active.VersionId,
+    temporaryVersionId: temporary?.VersionId ?? null, observedAt: now() });
+  save(stateFile, result); write(`${JSON.stringify({ state: result.state, steadyVersionId: result.steadyVersionId })}\n`);
+  return result;
+}
+
 export function runSignerTemporaryCapability(argv = process.argv.slice(2), { write = (s) => process.stdout.write(s), now = () => new Date().toISOString() } = {}) {
   const phase = opt(argv, "--phase"), sourceSha = opt(argv, "--source-sha"), transitionId = opt(argv, "--transition-id"), stateFile = path.resolve(opt(argv, "--state-file")), brokerStateFile = path.resolve(opt(argv, "--broker-state-file"));
   assertSignerCliArguments(argv, phase);
@@ -195,6 +218,9 @@ export function runSignerTemporaryCapability(argv = process.argv.slice(2), { wri
   assertCapabilityPolicyAttached(bootstrap);
   const evidence = fs.existsSync(stateFile) ? readEvidence(stateFile, identity) : null;
   const brokerLedger = readBrokerLedger(brokerStateFile, identity);
+  const installingAbort = completeInstallingSignerAbort({ phase, abort: argv.includes("--abort-before-apply-confirmed"), evidence,
+    brokerLedger, current, identity, bootstrap, brokerStateFile, stateFile, now, write });
+  if (installingAbort) return installingAbort;
   if (phase === "recover-install" && (!evidence || evidence.state === "INSTALLING")) {
     if (brokerLedger.state === "INSTALLING") { brokerTransition(brokerStateFile, "install"); current = policyState(bootstrap); }
     else if (brokerLedger.state !== "INSTALLED") fail("authoritative broker lifecycle is not ready for install recovery");

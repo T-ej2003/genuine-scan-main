@@ -180,6 +180,16 @@ For an authorized abort before apply, add `--abort-before-apply-confirmed` to
 the `revoke` phase. The broker compares submitted evidence with its current
 ledger and rejects abort at `APPLY_STARTED`, `APPLIED`, or `CONVERGED`, including
 when an older valid artifact is supplied.
+If the broker is still at `INSTALLING` and no temporary policy was created,
+the same `revoke` command works even when `capability.json` does not yet exist.
+It authenticates the exact canonical steady policy, asks the broker to record
+`REVOKED` without a policy-version write, then creates `capability.json` for
+the normal `verify-absent` step. A lost revoke acknowledgement can be retried
+with renewed `policy-revoke` authorization; the broker's durable ledger and
+steady-policy readback decide whether the retry is safe.
+If installation wrote the exact temporary policy before its acknowledgement was
+lost, the same abort path delegates restoration to the broker and records that
+temporary version for the normal absence readback.
 
 The temporary policy remains limited to the exact signer state and lock objects,
 signer role and inline policy, and tagged RSA-3072 `SIGN_VERIFY` key/alias. It
