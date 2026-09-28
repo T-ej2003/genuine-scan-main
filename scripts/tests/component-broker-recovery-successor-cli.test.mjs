@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { assertBrokerRecoverySuccessorIamRequest, assertBrokerRecoverySuccessorS3Request, classifyRecoverySuccessorFailure, run } from "../aws/component-broker-recovery-successor-cli.mjs";
 import { brokerRecoverySuccessor } from "../aws/component-broker-recovery-successor-contract.mjs";
-import { brokerRecoverySuccessorManagedIdentities, identityBootstrap } from "../aws/component-installation-identity-contract.mjs";
+import { brokerRecoverySuccessorManagedIdentities, brokerSignerSuccessorManagedIdentities, identityBootstrap } from "../aws/component-installation-identity-contract.mjs";
 import { canonical } from "../aws/component-iam-installation-contract.mjs";
 
 test("recovery successor root adapter permits only the five exact successor policy writes", () => {
@@ -12,6 +12,18 @@ test("recovery successor root adapter permits only the five exact successor poli
   assert.equal(writable.length, 5);
   for (const identity of writable) assert.doesNotThrow(() => assertBrokerRecoverySuccessorIamRequest("PutRolePolicy", { RoleName: identity.role, PolicyName: identity.policyName, PolicyDocument: canonical(identity.policy) }));
   assert.throws(() => assertBrokerRecoverySuccessorIamRequest("PutRolePolicy", { RoleName: "other", PolicyName: identities[0].policyName, PolicyDocument: canonical(identities[0].policy) }));
+});
+
+test("fenced partial resume permits only five exact compatible invocation policy writes", () => {
+  const previous = brokerRecoverySuccessorManagedIdentities(), compatible = brokerSignerSuccessorManagedIdentities();
+  for (const identity of compatible) {
+    const request = { RoleName: identity.role, PolicyName: identity.policyName, PolicyDocument: canonical(identity.policy) };
+    assert.doesNotThrow(() => assertBrokerRecoverySuccessorIamRequest("PutRolePolicy", request, true));
+    assert.throws(() => assertBrokerRecoverySuccessorIamRequest("PutRolePolicy", request));
+    assert.throws(() => assertBrokerRecoverySuccessorIamRequest("PutRolePolicy", { ...request, RoleName: "unrelated" }, true));
+    assert.doesNotThrow(() => assertBrokerRecoverySuccessorIamRequest("PutRolePolicy", { ...request, PolicyDocument: canonical(previous.find(({ role }) => role === identity.role).policy) }, true));
+    assert.throws(() => assertBrokerRecoverySuccessorIamRequest("PutRolePolicy", { ...request, PolicyDocument: canonical({ Version: "2012-10-17", Statement: [] }) }, true));
+  }
 });
 
 test("successor reservations are readable historical evidence but never broker write targets", () => {

@@ -26,8 +26,7 @@ function assertEnvironment(config, branches, approvals) {
 export function authenticateSecondSuccessorLineage({ reservation, reservationEtag, metadata, bootstrap }) {
   const encoded = metadata?.[brokerRecoverySuccessor.metadataKey];
   assert(typeof encoded === "string" && encoded, "Second successor closure missing");
-  const closure = bootstrap?.brokerRecoverySuccessorClosure;
-  assert.equal(encoded, digest(closure), "Second successor body and metadata differ");
+  const closure = /^sha256:[a-f0-9]{64}$/.test(encoded) ? bootstrap?.brokerRecoverySuccessorClosure : JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
   const bindings = authenticateSecondSuccessorReservation(reservation, closure, reservationEtag);
   assert.deepEqual(Object.keys(metadata).sort(), ["broker-policy-successor", brokerRecoverySuccessor.metadataKey, ...(Object.hasOwn(metadata, "broker-signer-successor") ? ["broker-signer-successor"] : [])].sort());
   assertBrokerRecoverySuccessorClosureMetadata({ "broker-policy-successor": metadata["broker-policy-successor"], [brokerRecoverySuccessor.metadataKey]: encoded }, bindings, reservation, reservationEtag, bootstrap);

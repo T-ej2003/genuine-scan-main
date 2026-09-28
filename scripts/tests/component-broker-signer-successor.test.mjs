@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { executeBrokerSignerSuccessor } from "../aws/component-broker-signer-successor.mjs";
 import { assertEffectiveBootstrapTrustAnchor } from "../aws/component-bootstrap-trust-anchor.mjs";
 import { brokerSignerSuccessorSourceBindings } from "../aws/component-broker-signer-successor-authorization.mjs";
-import { assertBrokerSignerSuccessorClosureMetadata, brokerSignerSuccessor, brokerSignerSuccessorBindings, signerSuccessorExecutorPolicy } from "../aws/component-broker-signer-successor-contract.mjs";
+import { assertBrokerSignerSuccessorClosureMetadata, brokerSignerSuccessor, brokerSignerSuccessorBindings, brokerSignerSuccessorConfigurations, signerSuccessorExecutorPolicy } from "../aws/component-broker-signer-successor-contract.mjs";
 import { brokerConfiguration, brokerPolicySuccessorEntryPoints, brokerRecoverySuccessorEntryPoints, brokerSignerSuccessorEntryPoints } from "../aws/component-broker-configuration.mjs";
 import { brokerPolicyPredecessor, brokerPolicySuccessorBindings, brokerPolicySuccessorClosureMetadata } from "../aws/component-broker-policy-successor-contract.mjs";
 import { assertS3UserMetadataSize, brokerRecoverySuccessor, brokerRecoverySuccessorBindings, brokerRecoverySuccessorClosure } from "../aws/component-broker-recovery-successor-contract.mjs";
@@ -25,7 +25,7 @@ function historicalBootstrap(runtime) {
     brokerChange: { schemaVersion: 1, state: "BROKER_CHANGE_CLOSED", transitionId: "12345678-1234-4234-8234-123456789abc", authorizationSha256: "d".repeat(64), authorizationExpiresAt: "2026-09-19T12:30:00.000Z", sessionExpiresAt: "2026-09-19T12:15:00.000Z", authorizationHistory: [], owner: "12345678-1234-4234-8234-123456789def", closedAt: "2026-09-19T12:01:00.000Z", predecessor: brokerChangePredecessor(), sourceSha: brokerPolicyPredecessor.sourceSha, configurationSha256: brokerPolicyPredecessor.configurationSha256, identitySetSha256: brokerPolicyPredecessor.identitySetSha256, identityReadbackSha256: digest(brokerChangeManagedIdentities().map(({ arn }) => ({ arn, role: "EXPECTED", policy: "EXPECTED" }))), remainingOperations: brokerChangeOperations, policyCheckpoints: brokerChangeManagedIdentities().map(({ role }) => role), runtimeVersions: { 4: runtime, 5: runtime, 6: runtime }, successor: { sourceSha: brokerPolicyPredecessor.sourceSha, packageSha256: brokerPolicyPredecessor.packageSha256, lambdaCodeSha256: Buffer.from(brokerPolicyPredecessor.packageSha256, "hex").toString("base64"), manifestSha256: brokerPolicyPredecessor.manifestSha256, configurationSha256: brokerPolicyPredecessor.configurationSha256, identitySetSha256: brokerPolicyPredecessor.identitySetSha256, versions: ["4", "5", "6"] } } };
 }
 
-function fixture() {
+function fixture(prepublished = false) {
   const now = Date.parse("2026-09-20T12:00:00.000Z"), runtime = `arn:aws:lambda:eu-west-2::runtime:${"c".repeat(64)}`;
   const firstPackage = packageEvidence("a".repeat(40), "immutable-v7-package"), secondPackage = packageEvidence("b".repeat(40), "immutable-v10-package"), candidate = packageEvidence("c".repeat(40), "reviewed-v13-package");
   const firstBindings = brokerPolicySuccessorBindings(firstPackage), firstRecord = { schemaVersion: 1, state: "VERIFIED", transitionId: "11111111-1111-4111-8111-111111111111", owner: "22222222-2222-4222-8222-222222222222", authorizationSha256: "1".repeat(64), authorizationExpiresAt: new Date(now + 1000).toISOString(), sessionExpiresAt: new Date(now + 2000).toISOString(), authorizationHistory: [], bindings: firstBindings };
@@ -70,8 +70,20 @@ function fixture() {
   };
   const exact = identities => identities.every(identity => digest(policies.get(identity.role)) === identity.policySha256);
   state.execute = () => executeBrokerSignerSuccessor({ authorization, packageEvidence: candidate, operatorProof }, { iam, lambda, s3, authenticate: async () => {}, now: () => state.now, sleep: async () => {}, inspectPredecessor: async () => [{ role: "EXPECTED", policy: exact(predecessor) ? "EXPECTED" : "DRIFT" }], inspectSuccessor: async () => [{ role: "EXPECTED", policy: exact(successor) ? "EXPECTED" : "DRIFT" }], verifyEffective: assertEffectiveBootstrapTrustAnchor });
+  if (prepublished) {
+    const configurations = brokerSignerSuccessorConfigurations(candidate);
+    state.versions.$LATEST = { ...config(configurations.AUTHORIZE), FunctionArn: componentBrokerArn, Version: "$LATEST", RevisionId: "compatible" };
+    for (const [entryPoint, version] of Object.entries(brokerSignerSuccessorEntryPoints)) state.versions[version] = { ...config(configurations[entryPoint]), FunctionArn: `${componentBrokerArn}:${version}`, Version: version, RevisionId: `v${version}` };
+    for (const identity of successor) policies.set(identity.role, identity.policy);
+  }
   return { state, candidate, firstRecord, secondRecord, secondClosure, authorization, operatorProof, policies, successor };
 }
+
+test("signer successor closes prepublished 13/14/15 without repeating Lambda or IAM mutations", async () => {
+  const f = fixture(true), result = await f.state.execute();
+  assert.equal(result.brokerSignerSuccessor.state, "BROKER_SIGNER_SUCCESSOR_CLOSED");
+  assert.equal(f.state.writes.some(value => ["UpdateFunctionCode", "UpdateFunctionConfiguration", "PublishVersion", "PutRolePolicy"].includes(value)), false);
+});
 
 test("exact signer successor publishes 13/14/15, installs exact policies, closes distinctly and blocks replay", async () => {
   const f = fixture(), result = await f.state.execute();

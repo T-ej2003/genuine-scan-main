@@ -69,6 +69,7 @@ export function assertS3UserMetadataSize(metadata) {
   assert(bytes <= s3UserMetadataLimitBytes, `S3 user metadata exceeds ${s3UserMetadataLimitBytes} bytes`);
   return bytes;
 }
+export const compactClosureMetadata = value => `sha256:${digest(value)}`;
 
 export function authenticateFirstSuccessorReservation(value, firstClosure, reservationEtag) {
   assert.deepEqual(Object.keys(value || {}).sort(), ["authorizationExpiresAt", "authorizationHistory", "authorizationSha256", "bindings", "owner", "schemaVersion", "sessionExpiresAt", "state", "transitionId"].sort());
@@ -109,7 +110,7 @@ export function brokerRecoverySuccessorCapabilitySet() {
   return { Version: "2012-10-17", Statement: [
     { Effect: "Allow", Action: ["iam:GetRole", "iam:GetRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies", "iam:ListRoleTags", "iam:PutRolePolicy"], Resource: identities.map(({ arn }) => arn) },
     { Effect: "Allow", Action: ["lambda:GetFunction", "lambda:GetFunctionConfiguration", "lambda:GetFunctionCodeSigningConfig", "lambda:GetFunctionConcurrency", "lambda:GetRuntimeManagementConfig", "lambda:ListVersionsByFunction", "lambda:GetPolicy", "lambda:UpdateFunctionCode", "lambda:UpdateFunctionConfiguration", "lambda:PublishVersion"], Resource: componentBrokerArn },
-    { Effect: "Allow", Action: ["lambda:GetFunction", "lambda:GetFunctionConfiguration", "lambda:GetRuntimeManagementConfig", "lambda:GetPolicy"], Resource: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"].map(version => `${componentBrokerArn}:${version}`) },
+    { Effect: "Allow", Action: ["lambda:GetFunction", "lambda:GetFunctionConfiguration", "lambda:GetRuntimeManagementConfig", "lambda:GetPolicy"], Resource: Array.from({ length: 15 }, (_, index) => `${componentBrokerArn}:${index + 1}`) },
     { Effect: "Allow", Action: "s3:GetObject", Resource: [`arn:aws:s3:::${identityBootstrap.bucket}/${identityBootstrap.prefix}broker-policy-successor.json`, `arn:aws:s3:::${identityBootstrap.bucket}/${identityBootstrap.prefix}identity-bootstrap.json`, `arn:aws:s3:::${identityBootstrap.bucket}/${brokerRecoverySuccessor.reservationKey}`] },
     { Effect: "Allow", Action: "s3:PutObject", Resource: [`arn:aws:s3:::${identityBootstrap.bucket}/${identityBootstrap.prefix}identity-bootstrap.json`, `arn:aws:s3:::${identityBootstrap.bucket}/${brokerRecoverySuccessor.reservationKey}`], Condition: { StringEquals: { "s3:x-amz-server-side-encryption": "AES256" } } },
   ] };
@@ -122,7 +123,7 @@ export function brokerRecoverySuccessorClosure(record, bindings, runtimeVersions
   assert.deepEqual(Object.keys(historicalMetadata || {}), ["broker-policy-successor"]);
   const value = { schemaVersion: 1, state: "BROKER_RECOVERY_SUCCESSOR_CLOSED", transitionId: record.transitionId, authorizationSha256: record.authorizationSha256,
     bindingsSha256: digest(bindings), reservationSha256: digest(record), reservationEtagSha256: digest(reservationEtag), firstAuthorizationSha256: bindings.firstClosure.authorizationSha256, closedAt, runtimeVersions };
-  const metadata = Object.freeze({ ...historicalMetadata, [brokerRecoverySuccessor.metadataKey]: digest(value) });
+  const metadata = Object.freeze({ ...historicalMetadata, [brokerRecoverySuccessor.metadataKey]: compactClosureMetadata(value) });
   assertS3UserMetadataSize(metadata);
   return Object.freeze({ value: Object.freeze(value), metadata });
 }
@@ -132,8 +133,14 @@ export function assertBrokerRecoverySuccessorClosureMetadata(metadata, bindings,
   assertS3UserMetadataSize(metadata);
   const firstClosure = JSON.parse(Buffer.from(metadata["broker-policy-successor"], "base64url").toString("utf8"));
   assert.equal(canonical(firstClosure), canonical(bindings.firstClosure), "First successor closure differs");
-  const value = bootstrap?.brokerRecoverySuccessorClosure;
-  assert.equal(metadata[brokerRecoverySuccessor.metadataKey], digest(value), "Second successor body and metadata differ");
+  const encoded = metadata[brokerRecoverySuccessor.metadataKey];
+  const compact = /^sha256:[a-f0-9]{64}$/.test(encoded || "");
+  const value = compact ? bootstrap?.brokerRecoverySuccessorClosure : JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+  if (compact) assert.equal(encoded, compactClosureMetadata(value), "Second successor body and metadata differ");
+  else {
+    assert.equal(Buffer.from(canonical(value)).toString("base64url"), encoded, "Noncanonical historical second closure");
+    if (bootstrap?.brokerRecoverySuccessorClosure) assert.equal(canonical(bootstrap.brokerRecoverySuccessorClosure), canonical(value), "Historical second closure body differs");
+  }
   assert.deepEqual(Object.keys(value || {}).sort(), ["authorizationSha256", "bindingsSha256", "closedAt", "firstAuthorizationSha256", "reservationEtagSha256", "reservationSha256", "runtimeVersions", "schemaVersion", "state", "transitionId"].sort());
   assert.equal(value.schemaVersion, 1); assert.equal(value.state, "BROKER_RECOVERY_SUCCESSOR_CLOSED"); uuid(value.transitionId); for (const field of ["authorizationSha256", "bindingsSha256", "firstAuthorizationSha256", "reservationEtagSha256", "reservationSha256"]) sha(value[field]);
   assert.equal(value.firstAuthorizationSha256, bindings.firstClosure.authorizationSha256); assert.equal(value.bindingsSha256, digest(bindings));

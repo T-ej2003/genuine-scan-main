@@ -241,7 +241,8 @@ export async function executeFixedBroker(event, context, { manifest, iam, s3, la
   let firstReservation = null;
   let secondReservation = null;
   let thirdReservation = null;
-  if (Object.hasOwn(bootstrapObject.Metadata || {}, "broker-recovery-successor")) {
+  const pendingSigner = ["13", "14", "15"].includes(context.functionVersion) && !Object.hasOwn(bootstrapObject.Metadata || {}, "broker-signer-successor");
+  if (Object.hasOwn(bootstrapObject.Metadata || {}, "broker-recovery-successor") || pendingSigner) {
     const historical = await s3("GetObject", { Bucket: bucket, Key: "mscqr/production/component-deployment-state/broker-policy-successor.json" });
     firstReservation = { value: JSON.parse(await historical.Body.transformToString()), etag: historical.ETag };
     const current = await s3("GetObject", { Bucket: bucket, Key: "mscqr/production/component-deployment-state/broker-recovery-successor.json" });
@@ -251,7 +252,8 @@ export async function executeFixedBroker(event, context, { manifest, iam, s3, la
     const current = await s3("GetObject", { Bucket: bucket, Key: "mscqr/production/component-deployment-state/broker-signer-successor.json" });
     thirdReservation = { value: JSON.parse(await current.Body.transformToString()), etag: current.ETag };
   }
-  const anchor = assertEffectiveBootstrapTrustAnchor(bootstrap, manifest, packageSha256, bootstrapObject.Metadata || {}, firstReservation, secondReservation, thirdReservation);
+  const anchor = assertEffectiveBootstrapTrustAnchor(bootstrap, manifest, packageSha256, bootstrapObject.Metadata || {}, firstReservation, secondReservation, thirdReservation, pendingSigner);
+  assert(!anchor.pendingSignerClosure, "Signer runtime authenticated the pending lineage; operations require completed closure");
   const version = assertBrokerEntryPoint(context, event?.operation, anchor.entryPoints);
   const identities = await (anchor.signerSuccessor ? inspectBrokerSignerSuccessorIdentities(iam) : anchor.recoverySuccessor ? inspectBrokerRecoverySuccessorIdentities(iam) : anchor.policySuccessor ? inspectBrokerPolicySuccessorIdentities(iam) : anchor.changed ? inspectBrokerChangeIdentities(iam) : inspectBootstrapIdentities(iam));
   assert(identities.every(({ role, policy }) => role === "EXPECTED" && policy === "EXPECTED"), "Bootstrap execution authority is incomplete");

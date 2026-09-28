@@ -7,9 +7,11 @@ import { fileURLToPath } from "node:url";
 import { buildComponentBrokerPackage } from "./component-broker-package.mjs";
 import { digest, installationIdentity } from "./component-iam-installation-contract.mjs";
 import { assertVerifiedRecoveryClosurePredecessor, brokerRecoverySuccessor, brokerRecoverySuccessorBindings, brokerRecoverySuccessorCapabilitySet, recoveryClosurePredecessor } from "./component-broker-recovery-successor-contract.mjs";
+import { brokerSignerSuccessorConfigurations } from "./component-broker-signer-successor-contract.mjs";
+import { brokerSignerSuccessorEntryPoints } from "./component-broker-configuration.mjs";
 import { authenticateFirstSuccessorReservation } from "./component-broker-recovery-successor-contract.mjs";
 import { assertHistoricalBrokerPolicySuccessorClosure, brokerPolicySuccessor } from "./component-broker-policy-successor-contract.mjs";
-import { identityBootstrap } from "./component-installation-identity-contract.mjs";
+import { brokerSignerSuccessorManagedIdentities, identityBootstrap } from "./component-installation-identity-contract.mjs";
 import { createProductionAwsCredentialEnvironment, createProductionGithubCredentialEnvironment, productionAwsExecutable, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 
 const actor = Object.freeze({ type: "User", login: "T-ej2003", id: 183396573 });
@@ -36,7 +38,11 @@ export function authenticateFirstSuccessorLineage({ reservation, reservationEtag
 
 export function brokerRecoverySuccessorSourceBindings(packageEvidence, firstClosure) {
   const bindings = brokerRecoverySuccessorBindings(packageEvidence, firstClosure);
-  return Object.freeze({ ...bindings, capabilitySetSha256: digest(brokerRecoverySuccessorCapabilitySet()) });
+  return Object.freeze({ ...bindings, capabilitySetSha256: digest(brokerRecoverySuccessorCapabilitySet()), compatibleSigner: {
+    entryPoints: brokerSignerSuccessorEntryPoints,
+    configurationSetSha256: digest(brokerSignerSuccessorConfigurations(packageEvidence)),
+    identitySetSha256: digest(brokerSignerSuccessorManagedIdentities()),
+  } });
 }
 
 export function approveBrokerRecoverySuccessor({ sourceSha, transitionId, runId, main, run, environment, branches, approvals, packageEvidence, firstClosure, resume, now }) {

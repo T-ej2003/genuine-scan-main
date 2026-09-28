@@ -23,13 +23,13 @@ downloaded pre-apply artifact cannot authorize abort after the broker records
 ### Resume the verified second successor after the S3 metadata limit
 
 The 2026-09-28 recovery attempt already published immutable broker versions
-`10/11/12` and converged all five successor IAM policies. Its recovery
+`10/11/12` and converged all five recovery IAM policies. Its recovery
 reservation is `VERIFIED`; only the second closure on `identity-bootstrap.json`
-is missing. Preserve both existing journals and those live generations. The
-closure controller pins this exact historical reservation, verifies the live
-versions and policies, fences the consumed owner, and writes only the new
-reservation owner and missing closure. It cannot republish Lambda versions or
-reapply IAM policies on this path.
+is missing. Preserve both journals and those live generations. The historical
+`10/11/12` package requires base64url JSON in the second closure metadata;
+that representation cannot fit alongside the first closure in S3's 2,048-byte
+metadata limit. **Do not close the journal while 10/11/12 has the active
+invocation grants.**
 
 After this source change merges, authorize from the **new** protected-main SHA
 using the existing workflow, `successor=recovery`, and the **same** transition
@@ -44,13 +44,25 @@ node scripts/aws/component-broker-recovery-successor-cli.mjs execute RUN_ID \
   22955a47-da8b-4d7f-a01d-cc39fbef5a5c
 ```
 
+The fenced recovery continuation authenticates live `10/11/12` and the five
+recovery IAM policies, then publishes **new** compatible versions `13/14/15`
+from the source-bound package. It switches only the five canonical invocation
+policies to those versions and verifies the new runtime can authenticate the
+pending first-closure plus `VERIFIED` recovery reservation. The pending runtime
+rejects broker operations until lineage closure. Only after the complete
+compatible reader and invocation-policy readback does the executor write the
+compact second closure. A retry accepts only exact published version prefixes
+and old/new canonical IAM policy documents; completed steps are read back and
+skipped. It never republishes `10/11/12` or reapplies their five policies.
+
 Authenticate the resulting `identity-bootstrap.json` body, compact closure
-metadata digest, `VERIFIED` reservation, and live versions `10/11/12` before
-starting the signer successor. The original first-successor metadata remains
-unchanged. The full second and later third closure records live in the
-versioned journal body; each S3 metadata value is its canonical SHA-256 digest.
-The executor checks the aggregate UTF-8 bytes of every metadata key and value
-against S3's 2,048-byte limit before `PutObject`.
+metadata digest, `VERIFIED` reservation, live versions `10/11/12/13/14/15`,
+and five signer-generation invocation policies before starting the signer
+successor. The original first-successor metadata remains unchanged. The full
+second and third closure records live in the versioned journal body; each new
+S3 metadata value is its canonical SHA-256 digest. The executor checks the
+aggregate UTF-8 bytes of every metadata key and value against S3's 2,048-byte
+limit before `PutObject`.
 
 Merging source does not change the deployed immutable broker. Before the signer
 transition, converge the additive broker generation through the existing
@@ -68,11 +80,11 @@ successor mechanism:
    npm run production:component-broker-signer-successor -- execute RUN_ID TRANSITION_ID
    ```
 
-The existing exceptional root-MFA successor controller can publish only versions
-`13`, `14`, and `15`, install only the five canonical broker/session inline
-policies, and close the third immutable lineage record. It cannot choose the
-signer managed-policy document. Normal signer operations after this convergence
-are non-root and MFA-backed.
+The signer-successor controller authenticates the already-published
+`13/14/15` and canonical invocation policies, skips those converged writes,
+and closes the third immutable lineage record. It cannot choose the signer
+managed-policy document. Normal signer operations after this convergence are
+non-root and MFA-backed.
 
 ## Signer transition
 
