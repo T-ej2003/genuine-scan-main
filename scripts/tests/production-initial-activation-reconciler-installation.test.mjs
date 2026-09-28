@@ -6,7 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { PRODUCTION_ENVIRONMENT_APPROVAL, createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
 import { createProductionGithubCommandRunner } from "../aws/production-credential-source-contract.mjs";
-import { EVIDENCE_READER_ADDRESSES, EVIDENCE_READER_EXPANSION_CHANGES, EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, SIGNER_EVIDENCE_READER_POLICY_EXPANSION, INSTALLATION, INSTALLATION_BACKEND, assertInstallationAuthorization, assertInstallationAuthorizedPostState, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationPreparation, assertInstallationStateResources, bootstrapOperatorPolicyAuthorizerPermissionsPredecessor, bootstrapOperatorPolicyAuthorizerPermissionsPredecessors, classifyInstallationStatePullError, createInstallationAuthorization, createInstallationPreparation, evidenceReaderPermissionsPredecessor, installationPermissionsPredecessor, stateIdentity } from "../aws/production-initial-activation-reconciler-installation-contract.mjs";
+import { EVIDENCE_READER_ADDRESSES, EVIDENCE_READER_EXPANSION_CHANGES, EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, SIGNER_EVIDENCE_READER_POLICY_EXPANSION, SIGNER_AUTHORIZER_POLICY_EXPANSION, SIGNER_BOTH_POLICY_EXPANSION, INSTALLATION, INSTALLATION_BACKEND, assertInstallationAuthorization, assertInstallationAuthorizedPostState, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationPreparation, assertInstallationStateResources, bootstrapOperatorPolicyAuthorizerPermissionsPredecessor, bootstrapOperatorPolicyAuthorizerPermissionsPredecessors, classifyInstallationStatePullError, createInstallationAuthorization, createInstallationPreparation, evidenceReaderPermissionsPredecessor, installationPermissionsPredecessor, stateIdentity } from "../aws/production-initial-activation-reconciler-installation-contract.mjs";
 import { executeInstallation, runInstallCli } from "../aws/install-production-initial-activation-reconciler.mjs";
 import { discoverInstallationPredecessor, runPrepareCli } from "../aws/prepare-production-initial-activation-reconciler-installation.mjs";
 import { BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER, BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER, INITIAL_ACTIVATION_RECONCILER, MIXED_RECOVERY_EXECUTOR } from "../aws/verify-production-initial-activation-policy-reconciler.mjs";
@@ -193,7 +193,7 @@ const productionPredecessorState = JSON.stringify({
 
 test("authenticated 12-resource production predecessor permits only two exact policy updates and signer creates", () => {
   const discovered = discoverInstallationPredecessor({ run: discoveryRun(productionPredecessor) });
-  assert.equal(discovered.classification, SIGNER_EVIDENCE_READER_POLICY_EXPANSION);
+  assert.equal(discovered.classification, SIGNER_BOTH_POLICY_EXPANSION);
   assert.equal(discovered.existingAddresses.length, 12);
   assert.deepEqual(discovered.existingAddresses, JSON.parse(productionPredecessorState).resources.map(({ type, name }) => `${type}.${name}`).sort());
   const semantics = assertInstallationPlan(productionPredecessorPlan, { livePredecessor: discovered.classification });
@@ -207,6 +207,31 @@ test("authenticated 12-resource production predecessor permits only two exact po
   const readerResource = terraform.split('resource "aws_iam_policy" "broker_recovery_successor_evidence_reader" {')[1]?.split("\nresource ")[0];
   assert.match(readerResource, /description = "Read only the two immutable component broker successor lineage objects\."/);
   assert.match(readerResource, /prevent_destroy = true/);
+});
+
+test("each independently converged policy has a distinct predecessor and exact remaining update", () => {
+  for (const [convergedAddress, readerCurrent, authorizerCurrent, expected] of [
+    ["aws_iam_policy.bootstrap_operator_policy_authorizer", false, true, SIGNER_EVIDENCE_READER_POLICY_EXPANSION],
+    ["aws_iam_policy.broker_recovery_successor_evidence_reader", true, false, SIGNER_AUTHORIZER_POLICY_EXPANSION],
+  ]) {
+    const live = { ...productionPredecessor,
+      authorizerDocument: authorizerCurrent ? JSON.parse(authorizerPermissions) : productionPredecessor.authorizerDocument,
+      readerDocument: readerCurrent ? JSON.parse(readerPermissions) : productionPredecessor.readerDocument,
+    };
+    const discovered = discoverInstallationPredecessor({ run: discoveryRun(live) });
+    assert.equal(discovered.classification, expected);
+    assert.deepEqual(discovered.existingAddresses, discoverInstallationPredecessor({ run: discoveryRun(productionPredecessor) }).existingAddresses);
+    const candidate = structuredClone(productionPredecessorPlan);
+    const converged = candidate.resource_changes.find(({ address }) => address === convergedAddress).change;
+    converged.actions = ["no-op"];
+    converged.before = structuredClone(converged.after);
+    const stateValue = JSON.parse(productionPredecessorState);
+    const stateResource = stateValue.resources.find(({ type, name }) => `${type}.${name}` === convergedAddress);
+    stateResource.instances[0].attributes.policy = converged.after.policy;
+    assert.doesNotThrow(() => createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(JSON.stringify(stateValue))), livePredecessor: expected, livePredecessorAddresses: discovered.existingAddresses, planJson: candidate, planBytes, preparedAt: now.toISOString() }));
+    assert.throws(() => createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(JSON.stringify(stateValue))), livePredecessor: SIGNER_BOTH_POLICY_EXPANSION, livePredecessorAddresses: discovered.existingAddresses, planJson: candidate, planBytes, preparedAt: now.toISOString() }), /does not match|semantics/);
+    assert.throws(() => createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(productionPredecessorState)), livePredecessor: expected, livePredecessorAddresses: discovered.existingAddresses, planJson: productionPredecessorPlan, planBytes, preparedAt: now.toISOString() }), /does not match|semantics/);
+  }
 });
 
 test("production evidence-reader predecessor and plan reject substitutions and destructive actions", () => {
@@ -226,7 +251,7 @@ test("production evidence-reader predecessor and plan reject substitutions and d
     (plan) => { plan.resource_changes.find(({ address }) => address === "aws_iam_policy.bootstrap_operator_policy_authorizer").change.after.policy = JSON.stringify({ Version: "2012-10-17", Statement: [] }); },
     (plan) => { plan.resource_changes.find(({ address }) => address === "aws_iam_role_policy.signer_policy_installer").change.after.policy = "{}"; },
     (plan) => { plan.resource_changes.push({ ...plan.resource_changes[0], address: "aws_iam_role.unrelated" }); },
-  ]) { const candidate = structuredClone(productionPredecessorPlan); mutate(candidate); assert.throws(() => assertInstallationPlan(candidate, { livePredecessor: SIGNER_EVIDENCE_READER_POLICY_EXPANSION })); }
+  ]) { const candidate = structuredClone(productionPredecessorPlan); mutate(candidate); assert.throws(() => assertInstallationPlan(candidate, { livePredecessor: SIGNER_BOTH_POLICY_EXPANSION })); }
 });
 
 test("first-install preparation binds absent state and exact plan addresses", () => {

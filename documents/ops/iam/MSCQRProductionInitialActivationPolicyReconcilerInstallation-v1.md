@@ -54,6 +54,9 @@ bootstrap inline policy is pinned as predecessor generation 9; its separately
 governed upgrade grants policy-version access only to the exact evidence-reader
 policy in addition to previously authorized policy ARNs. A saved plan that
 replaces or deletes the evidence-reader policy is rejected.
+The two predecessor policy documents are tracked independently: if one policy
+converges before execution, the old saved plan fails its live-state recheck and
+must be prepared again for the exact remaining update.
 
 For the reviewed exact legacy-to-dedicated-role expansion, completion additionally requires remote
 Terraform state to advance from the authenticated predecessor and to contain
