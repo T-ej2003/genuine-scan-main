@@ -78,7 +78,7 @@ test("recovery successor package routes Terraform only through immutable version
   for (const version of ["7", "8", "9", "11", "12"]) assert.throws(() => assertBrokerEntryPoint({ functionVersion: version, invokedFunctionArn: `${componentBrokerArn}:${version}` }, "TERRAFORM_CONTEXT", brokerRecoverySuccessorEntryPoints));
 });
 test("signer successor routes fixed signer operations only through immutable versions 13-15", () => {
-  for (const [operation, version] of Object.entries({ SIGNER_INSTALL: "13", SIGNER_ADVANCE: "13", SIGNER_RECOVERY: "13", SIGNER_REVOKE: "14", SIGNER_AUTHORIZE: "15" })) {
+  for (const [operation, version] of Object.entries({ SIGNER_PROVE_INSTALL_SESSION: "13", SIGNER_INSTALL: "13", SIGNER_ADVANCE: "13", SIGNER_RECOVERY: "13", SIGNER_PROVE_REVOKE_SESSION: "14", SIGNER_REVOKE: "14", SIGNER_AUTHORIZE: "15" })) {
     const context = { functionVersion: version, invokedFunctionArn: `${componentBrokerArn}:${version}` };
     assert.equal(assertBrokerEntryPoint(context, operation, brokerSignerSuccessorEntryPoints), version);
     for (const wrong of ["10", "11", "12", "$LATEST"]) assert.throws(() => assertBrokerEntryPoint({ functionVersion: wrong, invokedFunctionArn: `${componentBrokerArn}:${wrong}` }, operation, brokerSignerSuccessorEntryPoints));

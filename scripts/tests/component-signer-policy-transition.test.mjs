@@ -1,7 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { buildSignerBrokerAuthorization, createSignerPolicyBroker, signerAbortAllowed, signerLifecycleEvidenceBinding, SIGNER_BROKER_LIFECYCLE } from "../aws/component-signer-policy-transition.mjs";
+import os from "node:os";
+import path from "node:path";
+import { executeSignerBrokerOperation } from "../aws/component-iam-broker.mjs";
+import { establishSignerInstallSession, establishSignerRevokeSession } from "../aws/component-installation-session.mjs";
+import { assertBrokerEntryPoint, brokerSignerSuccessorEntryPoints } from "../aws/component-broker-configuration.mjs";
+import { componentBrokerArn, identityBootstrap } from "../aws/component-installation-identity-contract.mjs";
+import { sessionProofBinding } from "../aws/component-session-proof.mjs";
+import { run as runSignerCli } from "../aws/production-signer-broker-transition-cli.mjs";
+import { buildSignerBrokerAuthorization, createSignerPolicyBroker, signerAbortAllowed, signerBrokerContract, signerLifecycleEvidenceBinding, SIGNER_BROKER_LIFECYCLE } from "../aws/component-signer-policy-transition.mjs";
 import { buildSignerTemporaryPolicy, SIGNER_TEMPORARY_CAPABILITY as C } from "../aws/production-signer-temporary-capability.mjs";
 
 const sourceSha = "a".repeat(40), transitionId = "123e4567-e89b-42d3-a456-426614174000", now = Date.parse("2026-09-28T12:00:00.000Z");
@@ -26,12 +34,130 @@ function fixture({ main = { sha: sourceSha }, clock = { value: now }, entityPage
     throw new Error(`unexpected IAM ${operation}`);
   };
   const s3 = async (operation, input) => {
+    assert.equal(input.Key, signerBrokerContract.ledgerKey, "Signer operations must not read the ordinary component archive");
     if (operation === "GetObject") { if (!object) { const error = new Error(); error.name = "NoSuchKey"; throw error; } return { ETag: `"${etag}"`, Body: { transformToString: async () => object } }; }
     if (operation === "PutObject") { if (input.IfNoneMatch && object) { const error = new Error(); error.name = "PreconditionFailed"; throw error; } assert(!input.IfMatch || input.IfMatch === `"${etag}"`); object = input.Body; etag += 1; return { ETag: `"${etag}"` }; }
     throw new Error(`unexpected S3 ${operation}`);
   };
-  return { broker: createSignerPolicyBroker({ iam, s3, currentMain: async () => main.sha, now: () => clock.value }), calls, ledger: () => JSON.parse(object), versions: () => versions };
+  return { broker: createSignerPolicyBroker({ iam, s3, currentMain: async () => main.sha, now: () => clock.value }), iam, s3, main, clock, calls, ledger: () => object && JSON.parse(object), versions: () => versions };
 }
+
+function composedFixture(options) {
+  const f = fixture(options), operations = [], ordinaryArchive = [];
+  const accessKey = "ASIA" + "0".repeat(16), operator = `arn:aws:iam::${C.accountId}:user/mscqr-production-bootstrap-operator`;
+  const base = () => ({ AccessKeyId: "base-fixture", SecretAccessKey: "base-placeholder" });
+  const session = purpose => {
+    const role = purpose === "SIGNER_REVOKE" ? identityBootstrap.cleanupRole : identityBootstrap.installationRole;
+    const principal = `arn:aws:sts::${C.accountId}:assumed-role/${role}/component-${transitionId}`;
+    const issued = new Date(f.clock.value - 1000).toISOString(), expiration = new Date(f.clock.value + 899000).toISOString();
+    const scoped = { AccessKeyId: accessKey, SecretAccessKey: "scoped-placeholder", SessionToken: "scoped-session-placeholder", Expiration: new Date(expiration) };
+    const issuance = { eventID: "12345678-1234-4234-8234-123456789def", eventTime: issued, eventSource: "sts.amazonaws.com", eventName: "AssumeRole", awsRegion: C.region, recipientAccountId: C.accountId,
+      userIdentity: { type: "IAMUser", accountId: C.accountId, arn: operator, sessionContext: { attributes: { mfaAuthenticated: "true" } } },
+      requestParameters: { roleArn: `arn:aws:iam::${C.accountId}:role/${role}`, roleSessionName: `component-${transitionId}`, durationSeconds: 900 },
+      responseElements: { credentials: { accessKeyId: accessKey, expiration }, assumedRoleUser: { arn: principal, assumedRoleId: "role-id:session" } } };
+    return { role, principal, scoped, issuance };
+  };
+  const dispatch = async (event, version) => {
+    operations.push(event.operation);
+    assertBrokerEntryPoint({ functionVersion: version, invokedFunctionArn: `${componentBrokerArn}:${version}` }, event.operation, brokerSignerSuccessorEntryPoints);
+    if (!event.operation.startsWith("SIGNER_")) { ordinaryArchive.push(event.operation); throw new Error("Ordinary component archive reached"); }
+    const purpose = ["SIGNER_REVOKE", "SIGNER_PROVE_REVOKE_SESSION"].includes(event.operation) ? "SIGNER_REVOKE" : "SIGNER_INSTALL";
+    const current = session(purpose);
+    return executeSignerBrokerOperation(event, { iam: f.iam, s3: f.s3, currentMain: async () => f.main.sha, now: () => f.clock.value,
+      sts: async request => { assert.equal(request.headers["x-mscqr-component-binding"], sessionProofBinding({ sourceSha, transitionId, authorizationSha256: event.authorizationSha256, purpose })); return { Account: C.accountId, Arn: current.principal, UserId: "role-id:session" }; },
+      issuanceEvents: async () => [current.issuance] });
+  };
+  const deps = purpose => {
+    const current = session(purpose);
+    return { loadUser: async () => base(), mfa: async () => "123456", now: () => f.clock.value, sleep: async () => { throw new Error("AWS issuance proof unavailable: unexpected retry"); },
+      sts: credentials => ({ close: () => {}, send: async (operation, input) => {
+        if (operation === "GetCallerIdentity") return credentials.AccessKeyId === accessKey ? { Account: C.accountId, Arn: current.principal, UserId: "role-id:session" } : { Account: C.accountId, Arn: operator };
+        if (operation === "GetSessionToken") return { Credentials: { AccessKeyId: "human-fixture", SecretAccessKey: "human-placeholder", SessionToken: "human-session-placeholder" } };
+        assert.equal(operation, "AssumeRole"); assert.equal(input.RoleArn, `arn:aws:iam::${C.accountId}:role/${current.role}`);
+        return { Credentials: current.scoped, AssumedRoleUser: { Arn: current.principal, AssumedRoleId: "role-id:session" } };
+      } }),
+      invoke: async input => {
+        const version = input.FunctionName.split(":").at(-1), event = JSON.parse(Buffer.from(input.Payload).toString("utf8"));
+        const result = await dispatch(event, version);
+        return { StatusCode: 200, ExecutedVersion: version, Payload: Buffer.from(JSON.stringify(result)) };
+      } };
+  };
+  const binding = () => ({ sourceSha, transitionId, authorizationSha256: f.ledger().authorization.authorizationSha256 });
+  return { ...f, operations, ordinaryArchive, dispatch, binding,
+    authorize: operation => dispatch({ operation: "SIGNER_AUTHORIZE", authorization: authorization(operation, operation === "INSTALL" ? -1000 : -500, operation === "INSTALL" ? "42" : "43") }, "15"),
+    installSession: (selected = binding()) => establishSignerInstallSession(selected, deps("SIGNER_INSTALL")),
+    revokeSession: (selected = binding()) => establishSignerRevokeSession(selected, deps("SIGNER_REVOKE")) };
+}
+
+test("real signer session composition uses the signer ledger from authorization through revoke", async () => {
+  const f = composedFixture(); await f.authorize("INSTALL");
+  let client = await f.installSession(), ledger = await client.invoke("SIGNER_INSTALL");
+  for (const state of ["PLAN_GENERATED", "PLAN_REVIEWED", "APPLY_AUTHORIZED", "APPLY_STARTED", "APPLIED", "CONVERGED"]) {
+    ledger = await client.invoke("SIGNER_ADVANCE", advance(ledger, state));
+  }
+  await f.authorize("REVOKE"); client = await f.revokeSession(); ledger = f.ledger();
+  const revoke = { evidenceState: ledger.state, evidenceSha256: evidence(ledger), abort: false };
+  ledger = await client.invoke("SIGNER_REVOKE", revoke);
+  assert.equal((await client.invoke("SIGNER_REVOKE", revoke)).state, "REVOKED");
+  assert.equal(ledger.state, "REVOKED"); assert.deepEqual(f.versions().find(value => value.IsDefaultVersion).document, steady);
+  assert.deepEqual(f.operations, ["SIGNER_AUTHORIZE", "SIGNER_PROVE_INSTALL_SESSION", "SIGNER_INSTALL", ...Array(6).fill(["SIGNER_PROVE_INSTALL_SESSION", "SIGNER_ADVANCE"]).flat(), "SIGNER_AUTHORIZE", "SIGNER_PROVE_REVOKE_SESSION", "SIGNER_REVOKE", "SIGNER_PROVE_REVOKE_SESSION", "SIGNER_REVOKE"]);
+  assert.deepEqual(f.ordinaryArchive, []);
+});
+
+test("production signer CLI install and revoke reach their signer broker operations", async () => {
+  const f = composedFixture(); await f.authorize("INSTALL");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "signer-cli-composed-")), file = path.join(directory, "ledger.json");
+  try {
+    fs.chmodSync(directory, 0o700); fs.writeFileSync(file, JSON.stringify(f.ledger()), { mode: 0o600 });
+    const dependencies = { installSession: binding => f.installSession(binding), revokeSession: binding => f.revokeSession(binding) };
+    let ledger = await runSignerCli(["--phase", "install", "--state-file", file], dependencies);
+    assert.equal(ledger.state, "INSTALLED");
+    const client = await f.installSession();
+    for (const state of ["PLAN_GENERATED", "PLAN_REVIEWED", "APPLY_AUTHORIZED", "APPLY_STARTED", "APPLIED", "CONVERGED"]) ledger = await client.invoke("SIGNER_ADVANCE", advance(ledger, state));
+    await f.authorize("REVOKE"); fs.writeFileSync(file, JSON.stringify(f.ledger()), { mode: 0o600 });
+    ledger = await runSignerCli(["--phase", "revoke", "--state-file", file], dependencies);
+    assert.equal(ledger.state, "REVOKED");
+    assert(f.operations.includes("SIGNER_INSTALL") && f.operations.includes("SIGNER_REVOKE"));
+    assert.deepEqual(f.ordinaryArchive, []);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("composed signer proof rejects absent, unrelated, substituted, stale, and replayed authority", async () => {
+  const f = composedFixture(), initial = { sourceSha, transitionId, authorizationSha256: authorization("INSTALL").authorizationSha256 };
+  await assert.rejects((await f.installSession(initial)).invoke("SIGNER_INSTALL"), /Signer lifecycle ledger is absent|proof unavailable/);
+  await f.authorize("INSTALL");
+  assert.notEqual(sessionProofBinding({ ...f.binding(), purpose: "SIGNER_INSTALL" }), sessionProofBinding({ ...f.binding(), purpose: "INSTALL" }));
+  assert.notEqual(sessionProofBinding({ ...f.binding(), purpose: "SIGNER_REVOKE" }), sessionProofBinding({ ...f.binding(), purpose: "CLEANUP" }));
+  await assert.rejects((await f.installSession()).invoke("SIGNER_INSTALL", { sourceSha: "b".repeat(40) }), /Caller cannot override sourceSha/);
+  for (const changed of [{ sourceSha: "b".repeat(40) }, { transitionId: "123e4567-e89b-42d3-a456-426614174001" }, { authorizationSha256: "f".repeat(64) }]) {
+    await assert.rejects(async () => (await f.installSession({ ...f.binding(), ...changed })).invoke("SIGNER_INSTALL"));
+  }
+  await assert.rejects(f.dispatch({ operation: "SIGNER_AUTHORIZE", authorization: { ...authorization("INSTALL"), repository: "other/repository" } }, "15"), /binding differs/);
+  await assert.rejects(f.dispatch({ operation: "SIGNER_AUTHORIZE", authorization: { ...authorization("INSTALL"), purpose: "other" } }, "15"), /binding differs/);
+  await assert.rejects(f.authorize("INSTALL"), /replay/);
+  const older = f.clock.value; f.clock.value += 31 * 60 * 1000;
+  await assert.rejects((await f.installSession()).invoke("SIGNER_INSTALL"), /stale|proof unavailable/); f.clock.value = older;
+  assert.deepEqual(f.ordinaryArchive, []);
+});
+
+test("composed signer retries keep the signer ledger authoritative and block stale abort after apply", async () => {
+  const f = composedFixture(); await f.authorize("INSTALL");
+  let client = await f.installSession(), ledger = await client.invoke("SIGNER_INSTALL");
+  assert.equal((await client.invoke("SIGNER_INSTALL")).state, "INSTALLED");
+  for (const state of ["PLAN_GENERATED", "PLAN_REVIEWED", "APPLY_AUTHORIZED", "APPLY_STARTED"]) {
+    const input = advance(ledger, state); ledger = await client.invoke("SIGNER_ADVANCE", input);
+    assert.equal((await client.invoke("SIGNER_ADVANCE", input)).state, state);
+  }
+  await assert.rejects(f.authorize("REVOKE"), /cannot interrupt/);
+  for (const stale of ["INSTALLING", "INSTALLED", "PLAN_GENERATED", "PLAN_REVIEWED"]) {
+    assert.notEqual(signerLifecycleEvidenceBinding({ state: stale, ...f.binding() }), evidence(f.ledger()));
+  }
+  await f.dispatch({ operation: "SIGNER_AUTHORIZE", authorization: authorization("RECOVER", -500, "44") }, "15");
+  client = await f.installSession();
+  assert.equal((await client.invoke("SIGNER_RECOVERY", { state: "PLAN_GENERATED", planSha256: "d".repeat(64), approvalReference: null })).recovery.state, "PLAN_GENERATED");
+  assert.equal((await client.invoke("SIGNER_RECOVERY", { state: "PLAN_GENERATED", planSha256: "d".repeat(64), approvalReference: null })).recovery.state, "PLAN_GENERATED");
+  assert.deepEqual(f.ordinaryArchive, []);
+});
 
 const request = (ledger, operation, extra = {}) => ({ operation, sourceSha, transitionId, authorizationSha256: ledger.authorization.authorizationSha256, ...extra });
 const evidence = ledger => signerLifecycleEvidenceBinding({ state: ledger.state, sourceSha, transitionId, authorizationSha256: ledger.authorization.authorizationSha256 });

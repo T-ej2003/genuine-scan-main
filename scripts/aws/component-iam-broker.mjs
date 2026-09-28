@@ -23,6 +23,24 @@ const account = "368992683803";
 const bucket = "mscqr-production-terraform-state-368992683803-eu-west-2";
 const key = "mscqr/production/component-deployment-state/iam-installation.json";
 
+export async function executeSignerBrokerOperation(event, { iam, s3, currentMain, sts, issuanceEvents, now = Date.now }) {
+  const signer = createSignerPolicyBroker({ iam, s3, currentMain, now });
+  if (event.operation === "SIGNER_AUTHORIZE") return signer(event);
+  const { proof, ...request } = event;
+  assert(proof, "Signer broker mutation requires MFA session proof");
+  const proving = ["SIGNER_PROVE_INSTALL_SESSION", "SIGNER_PROVE_REVOKE_SESSION"].includes(event.operation);
+  const authority = proving ? await signer(request) : null;
+  const purpose = ["SIGNER_REVOKE", "SIGNER_PROVE_REVOKE_SESSION"].includes(event.operation) ? "SIGNER_REVOKE" : "SIGNER_INSTALL";
+  const session = await authenticateComponentSession(proof, { sourceSha: event.sourceSha, transitionId: event.transitionId, authorizationSha256: event.authorizationSha256, purpose }, { sts, issuanceEvents, now: now() });
+  assert(now() < Date.parse(session.expiresAt), "Signer broker session expired");
+  if (proving) {
+    assert(Date.parse(session.issuanceEventTime) >= Date.parse(authority.approvedAt) - 999, "Signer session predates current authorization");
+    return { state: "SESSION_VERIFIED", principal: session.principal, expiresAt: session.expiresAt,
+      sourceSha: authority.sourceSha, transitionId: authority.transitionId, authorizationSha256: authority.authorizationSha256 };
+  }
+  return signer(request);
+}
+
 // Dependency injection is test-only; the deployed handler below loads only its
 // immutable package, SDK clients and fixed public protected-main identity URL.
 export function createInstallationHandler({ manifest, iam, s3, currentMain, now = Date.now, cleanup = false }) {
@@ -257,14 +275,7 @@ export async function executeFixedBroker(event, context, { manifest, iam, s3, la
     assert(missingPolicy, "Unexpected broker resource-based invocation policy");
   }
   if (event?.operation?.startsWith("SIGNER_")) {
-    const signer = createSignerPolicyBroker({ iam, s3, currentMain, now });
-    if (event.operation === "SIGNER_AUTHORIZE") return signer(event);
-    const { proof, ...request } = event;
-    assert(proof, "Signer broker mutation requires MFA session proof");
-    const purpose = event.operation === "SIGNER_REVOKE" ? "CLEANUP" : "INSTALL";
-    const session = await authenticateComponentSession(proof, { sourceSha: event.sourceSha, transitionId: event.transitionId, authorizationSha256: event.authorizationSha256, purpose }, { sts, issuanceEvents, now: now() });
-    assert(now() < Date.parse(session.expiresAt), "Signer broker session expired");
-    return signer(request);
+    return executeSignerBrokerOperation(event, { iam, s3, currentMain, sts, issuanceEvents, now });
   }
   const bind = (authorization) => ({ ...manifest, ...authorization.authorization, authorizationSha256: authorization.authorizationSha256,
     authorizedPredecessors: authorization.history.map(({ authorization: prior, authorizationSha256 }) => ({ authorizationSha256,

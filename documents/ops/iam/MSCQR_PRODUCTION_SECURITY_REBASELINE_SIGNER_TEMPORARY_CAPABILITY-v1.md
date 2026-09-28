@@ -180,3 +180,16 @@ The temporary policy remains limited to the exact signer state and lock objects,
 signer role and inline policy, and tagged RSA-3072 `SIGN_VERIFY` key/alias. It
 grants no unrelated state, IAM, KMS data-plane, ECS, RDS, Secrets Manager, or
 application deployment authority.
+
+### Signer session authority
+
+The protected workflow publishes `SIGNER_AUTHORIZE` to broker version 15. The
+broker persists that authorization in the signer policy transition ledger.
+`production-signer-broker-transition-cli.mjs` obtains an MFA-backed bootstrap
+session and asks version 13 or 14 for `SIGNER_PROVE_INSTALL_SESSION` or
+`SIGNER_PROVE_REVOKE_SESSION`. Those read-only operations authenticate against
+the same signer ledger and validate the signer-specific session binding before
+`SIGNER_INSTALL`, `SIGNER_ADVANCE`, `SIGNER_RECOVERY`, or `SIGNER_REVOKE` can run.
+The ordinary component installation and cleanup archives cannot authorize a
+signer operation. The broker ledger remains authoritative if a local state
+artifact is stale; abort after `APPLY_STARTED` is rejected.

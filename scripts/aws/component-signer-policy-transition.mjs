@@ -229,6 +229,14 @@ export function createSignerPolicyBroker({ iam, s3, currentMain, now = Date.now 
     }
     const prior = await readLedger(s3); assert(prior, "Signer lifecycle ledger is absent"); const ledger = assertLedger(prior.value);
     const authorization = ledger.authorization;
+    if (["SIGNER_PROVE_INSTALL_SESSION", "SIGNER_PROVE_REVOKE_SESSION"].includes(event.operation)) {
+      exactKeys(event, ["operation", "sourceSha", "transitionId", "authorizationSha256"], "Signer session proof request");
+      for (const [name, value] of Object.entries({ sourceSha: authorization.sourceSha, transitionId: authorization.transitionId, authorizationSha256: authorization.authorizationSha256 })) assert.equal(event[name], value, `Signer ${name} differs`);
+      await authenticate(authorization, { sourceSha: event.sourceSha, transitionId: event.transitionId, operation: authorization.operation });
+      if (event.operation === "SIGNER_PROVE_INSTALL_SESSION") assert(["INSTALL", "RECOVER"].includes(authorization.operation) && ledger.state !== "REVOKED", "Signer install session authority is unavailable");
+      else assert.equal(authorization.operation, "REVOKE", "Signer revoke session authority is unavailable");
+      return { sourceSha: authorization.sourceSha, transitionId: authorization.transitionId, authorizationSha256: authorization.authorizationSha256, approvedAt: authorization.approvedAt };
+    }
     exactKeys(event, event.operation === "SIGNER_ADVANCE" ? ["operation", "sourceSha", "transitionId", "authorizationSha256", "state", "evidenceSha256", "planSha256", "approvalReference", "signerReadbackSha256"] : event.operation === "SIGNER_RECOVERY" ? ["operation", "sourceSha", "transitionId", "authorizationSha256", "state", "planSha256", "approvalReference"] : event.operation === "SIGNER_INSTALL" ? ["operation", "sourceSha", "transitionId", "authorizationSha256"] : ["operation", "sourceSha", "transitionId", "authorizationSha256", "evidenceState", "evidenceSha256", "abort"], "Signer broker request");
     for (const [name, value] of Object.entries({ sourceSha: authorization.sourceSha, transitionId: authorization.transitionId, authorizationSha256: authorization.authorizationSha256 })) assert.equal(event[name], value, `Signer ${name} differs`);
     await authenticate(authorization, { sourceSha: event.sourceSha, transitionId: event.transitionId, operation: authorization.operation });

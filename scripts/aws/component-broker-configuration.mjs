@@ -95,7 +95,7 @@ export function redactBrokerDiagnostic(value) {
 
 export function assertBrokerEntryPoint(context, operation, entryPoints = brokerEntryPoints) {
   assertEntryPoints(entryPoints);
-  const entry = { INSTALL: "INSTALL", INSPECT: "INSTALL", PROVE_INSTALL_SESSION: "INSTALL", TERRAFORM_CONTEXT: "INSTALL", PROVE_TERRAFORM_SESSION: "INSTALL", SIGNER_INSTALL: "INSTALL", SIGNER_ADVANCE: "INSTALL", SIGNER_RECOVERY: "INSTALL", CLOSE: "CLEANUP", CLEANUP_CONTEXT: "CLEANUP", PROVE_CLEANUP_SESSION: "CLEANUP", SIGNER_REVOKE: "CLEANUP", AUTHORIZE: "AUTHORIZE", SIGNER_AUTHORIZE: "AUTHORIZE" }[operation];
+  const entry = { INSTALL: "INSTALL", INSPECT: "INSTALL", PROVE_INSTALL_SESSION: "INSTALL", TERRAFORM_CONTEXT: "INSTALL", PROVE_TERRAFORM_SESSION: "INSTALL", SIGNER_PROVE_INSTALL_SESSION: "INSTALL", SIGNER_INSTALL: "INSTALL", SIGNER_ADVANCE: "INSTALL", SIGNER_RECOVERY: "INSTALL", CLOSE: "CLEANUP", CLEANUP_CONTEXT: "CLEANUP", PROVE_CLEANUP_SESSION: "CLEANUP", SIGNER_PROVE_REVOKE_SESSION: "CLEANUP", SIGNER_REVOKE: "CLEANUP", AUTHORIZE: "AUTHORIZE", SIGNER_AUTHORIZE: "AUTHORIZE" }[operation];
   const version = entry && entryPoints[entry];
   assert(version, "Unsupported broker operation");
   assert.equal(context.functionVersion, version, "Operation not authorized on this immutable entry point");

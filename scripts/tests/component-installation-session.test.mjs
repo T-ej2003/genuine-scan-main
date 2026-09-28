@@ -143,7 +143,7 @@ test("signer partial-apply recovery uses only immutable signer INSTALL version 1
   f.dependencies.invoke = async input => {
     invoked.push(input.FunctionName); assert.equal(input.FunctionName, `${componentBrokerArn}:13`);
     const payload = JSON.parse(Buffer.from(input.Payload).toString("utf8"));
-    const result = payload.operation === "PROVE_INSTALL_SESSION"
+    const result = payload.operation === "SIGNER_PROVE_INSTALL_SESSION"
       ? { state: "SESSION_VERIFIED", principal: f.principal, expiresAt: f.scoped.Expiration.toISOString(), sourceSha: f.binding.sourceSha, transitionId: f.binding.transitionId, authorizationSha256: f.binding.authorizationSha256 }
       : { state: "APPLY_STARTED", recovery: { state: "PLAN_GENERATED" } };
     return { StatusCode: 200, ExecutedVersion: "13", Payload: Buffer.from(JSON.stringify(result)) };
