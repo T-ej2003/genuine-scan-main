@@ -17358,6 +17358,33 @@
       "mutation": false
     },
     {
+      "id": "stage-b-state-reconciliation-producer-refresh-stage-b-backend-state-read",
+      "phase": "stage-b-exact-refresh-only-state-reconciliation",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/produce-production-green-stage-b-prerequisite-bundle.mjs",
+      "sourceFunction": "refresh-stage-b-backend-state-read",
+      "action": "s3:GetObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate"
+      ],
+      "context": [],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "stage-b-state"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json",
+        "sid": "ReadWriteStageBProductionStateOnly",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "5c45224bb53984f08d98ddeddb2210f26ebc8fc1c6de75beb6ba71ea30693d01"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
       "id": "stage-b-state-reconciliation-provider-refresh-read-only-canary-attached-policy-lists",
       "phase": "stage-b-exact-refresh-only-state-reconciliation",
       "identity": "RELEASE_DEPLOYER",

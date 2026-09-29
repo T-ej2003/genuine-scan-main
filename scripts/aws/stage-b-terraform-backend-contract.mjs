@@ -2,9 +2,11 @@ import fs from "node:fs";
 import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { ensureStageBPrivateDirectory, ensureStageBPrivateFile } from "./stage-b-artifact-contract.mjs";
 
 const bucketName = "mscqr-production-terraform-state-368992683803-eu-west-2";
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const bucketArn = `arn:aws:s3:::${bucketName}`;
 const legacyWorkspaceKey = "mscqr/production/rls-green/stage-b/terraform.tfstate";
 const stateKey = `env:/production/${legacyWorkspaceKey}`;
@@ -49,6 +51,12 @@ export function readStageBTerraformStateIdentity(run) {
     if (state?.version !== 4 || !/^[0-9a-f-]{36}$/.test(state.lineage || "") || !Number.isSafeInteger(state.serial) || state.serial < 0) throw new Error("Stage B state identity is invalid.");
     return Object.freeze({ lineage: state.lineage, serial: state.serial, stateSha256: crypto.createHash("sha256").update(bytes).digest("hex") });
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+}
+
+export function writeStageBTerraformStateBackup({ run, output } = {}) {
+  if (typeof run !== "function" || !path.isAbsolute(output || "")) throw new Error("Stage B state backup requires the credential-bound production runner and an absolute output path.");
+  run(["s3api", "get-object", "--bucket", STAGE_B_TERRAFORM_BACKEND.bucketName, "--key", STAGE_B_TERRAFORM_BACKEND.stateKey, "--expected-bucket-owner", "368992683803", output]);
+  return ensureStageBPrivateFile({ filePath: output, repositoryRoot: root, normalize: true, label: "Stage B state backup" });
 }
 
 export const STAGE_B_TERRAFORM_BACKEND_CONFIG = Object.freeze({
