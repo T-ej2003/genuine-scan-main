@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { installationPermissionsPredecessor } from "../../aws/production-initial-activation-reconciler-installation-contract.mjs";
 
 const root = "infra/aws/terraform/production-initial-activation-policy-reconciler";
 const trust = fs.readFileSync(`${root}/bootstrap-operator-policy-authorizer-trust-policy.json`, "utf8");
@@ -38,14 +39,14 @@ export const currentInstallationPlan = (plan, { legacyAuthorizer = false } = {})
   if ((legacy || reconciler.change.actions[0] === "update") && reconciler.change.actions[0] !== "create") {
     reconciler.change.actions = ["update"];
     reconciler.change.after.arn = "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler";
-    reconciler.change.before = { ...structuredClone(reconciler.change.after), policy: JSON.stringify({ ...JSON.parse(reconcilerPolicy), Statement: [...JSON.parse(reconcilerPolicy).Statement, ...JSON.parse(policy).Statement.filter(({ Sid }) => Sid !== "IdentifyCurrentSession")] }) };
+    reconciler.change.before = { ...structuredClone(reconciler.change.after), policy: JSON.stringify(installationPermissionsPredecessor()) };
   } else if (reconciler.change.actions[0] === "no-op") {
     reconciler.change.before.policy = reconcilerPolicy;
   }
   const clone = (template, address, type, name, after) => ({ ...structuredClone(template), address, type, name, change: { ...structuredClone(template.change), actions, before: actions[0] === "create" ? null : after, after } });
   const role = { ...structuredClone(roleTemplate.change.after), assume_role_policy: trust, description: "GitHub OIDC-only read-only authorizer for the exact bootstrap-operator legacy transition.", name: roleName, tags, tags_all: tags, ...(legacy ? {} : { arn: `arn:aws:iam::368992683803:role/${roleName}` }) };
   const managedPolicy = { ...structuredClone(policyTemplate.change.after), description: "Exact read-only binding verification for bootstrap-operator policy authorization.", name: policyName, policy, tags, tags_all: tags, ...(legacy ? {} : { arn: `arn:aws:iam::368992683803:policy/${policyName}`, id: `arn:aws:iam::368992683803:policy/${policyName}` }) };
-  const attachment = { ...structuredClone(attachmentTemplate.change.after), role: roleName, ...(legacy ? {} : { policy_arn: `arn:aws:iam::368992683803:policy/${policyName}` }) };
+  const attachment = { ...structuredClone(attachmentTemplate.change.after), role: roleName, id: `${roleName}/arn:aws:iam::368992683803:policy/${policyName}`, ...(legacy ? {} : { policy_arn: `arn:aws:iam::368992683803:policy/${policyName}` }) };
   current.configuration.root_module.resources.push(...authorizerResources());
   const additions = [
     clone(roleTemplate, "aws_iam_role.bootstrap_operator_policy_authorizer", "aws_iam_role", "bootstrap_operator_policy_authorizer", role),

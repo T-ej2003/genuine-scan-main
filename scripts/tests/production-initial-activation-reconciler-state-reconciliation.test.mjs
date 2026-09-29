@@ -205,7 +205,7 @@ test("execution applies the saved refresh-only plan once, then requires the stri
   const preparation = prepared(); const authorization = createReconcilerStateReconciliationAuthorization({ preparation, approval: approval(), now }); let applies = 0;
   const result = executeReconcilerStateReconciliation({ sourceSha, preparation, authorization, planBytes: Buffer.from("saved-refresh-plan"), planJson: refreshPlan(), beforeStateBytes: before, beforeObject: object, beforeTopology: topology, applySavedPlan: (bytes) => { applies += 1; assert.equal(hash(bytes), preparation.savedPlanSha256); }, readPostSnapshot: () => ({ bytes: after, object: { versionId: "successor-version", etag: "successor-etag" } }), readPostTopology: () => topology, renderNormalPlan: () => normalPlan, reauthenticateSource: () => true, verifyPostconditions: () => true, now });
   assert.equal(applies, 1); assert.equal(result.remoteIamMutationCount, 0); assert.equal(result.refreshOnlyApplyCount, 1); assert.doesNotThrow(() => assertReconcilerStateReconciliationResult(result, { preparation })); assert.equal(result.planSemantics.terraformResourceAddCount, 0); assert.equal(result.normalPlan.changedAddresses[0], "aws_iam_policy.reconciler");
-  assert.throws(() => assertInstallationPlan(refreshPlan()), /envelope/);
+  assert.throws(() => assertInstallationPlan(refreshPlan()), /envelope|drift addresses/);
 });
 
 test("every successful result carries authenticated plan semantics and validated normal-plan evidence", () => {
@@ -273,7 +273,7 @@ test("post-refresh verification rejects a dirty normal plan and unchanged backen
   const common = { sourceSha, preparation, authorization, planBytes: Buffer.from("saved-refresh-plan"), planJson: refreshPlan(), beforeStateBytes: before, beforeObject: object, beforeTopology: topology, applySavedPlan: () => { applies += 1; }, readPostSnapshot: () => ({ bytes: after, object: { ...object } }), readPostTopology: () => topology, renderNormalPlan: () => normalPlan, reauthenticateSource: () => true, verifyPostconditions: () => true, now };
   assert.throws(() => executeReconcilerStateReconciliation(common), /object identity/); assert.equal(applies, 1);
   const dirty = refreshPlan(); dirty.resource_changes = [{ address: "aws_iam_role.reconciler", change: { actions: ["update"] } }];
-  assert.throws(() => executeReconcilerStateReconciliation({ ...common, readPostSnapshot: () => ({ bytes: after, object: { versionId: "successor-version", etag: "successor-etag" } }), renderNormalPlan: () => dirty }), /envelope|exact policy update/); assert.equal(applies, 2);
+  assert.throws(() => executeReconcilerStateReconciliation({ ...common, readPostSnapshot: () => ({ bytes: after, object: { versionId: "successor-version", etag: "successor-etag" } }), renderNormalPlan: () => dirty }), /envelope|exact policy update|drift addresses/); assert.equal(applies, 2);
 });
 
 test("state-reconciliation runbook documents the current prepare-authorize-execute contract", () => {

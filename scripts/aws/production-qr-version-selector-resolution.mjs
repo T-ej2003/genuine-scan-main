@@ -48,7 +48,7 @@ export function buildQrVersionReadSessionPolicy(secretArn) {
   return Object.freeze({ Version: "2012-10-17", Statement: [
     { Effect: "Allow", Action: "sts:GetCallerIdentity", Resource: "*" },
     { Effect: "Allow", Action: "ecs:DescribeServices", Resource: `arn:aws:ecs:${QR_VERSION_SELECTOR_RESOLUTION.region}:${QR_VERSION_SELECTOR_RESOLUTION.account}:service/${QR_VERSION_SELECTOR_RESOLUTION.cluster}/${QR_VERSION_SELECTOR_RESOLUTION.service}`, Condition: { StringEquals: { "aws:RequestedRegion": QR_VERSION_SELECTOR_RESOLUTION.region } } },
-    { Effect: "Allow", Action: "ecs:DescribeTaskDefinition", Resource: [`arn:aws:ecs:${QR_VERSION_SELECTOR_RESOLUTION.region}:${QR_VERSION_SELECTOR_RESOLUTION.account}:task-definition/mscqr-production-rls-green-backend-candidate:*`, `arn:aws:ecs:${QR_VERSION_SELECTOR_RESOLUTION.region}:${QR_VERSION_SELECTOR_RESOLUTION.account}:task-definition/mscqr-backend:*`], Condition: { StringEquals: { "aws:RequestedRegion": QR_VERSION_SELECTOR_RESOLUTION.region } } },
+    { Effect: "Allow", Action: "ecs:DescribeTaskDefinition", Resource: "*", Condition: { StringEquals: { "aws:RequestedRegion": QR_VERSION_SELECTOR_RESOLUTION.region } } },
     { Effect: "Allow", Action: "secretsmanager:GetSecretValue", Resource: secretArn, Condition: { StringEquals: { "aws:RequestedRegion": QR_VERSION_SELECTOR_RESOLUTION.region } } },
     { Effect: "Allow", Action: "secretsmanager:DescribeSecret", Resource: secretArn, Condition: { StringEquals: { "aws:RequestedRegion": QR_VERSION_SELECTOR_RESOLUTION.region } } },
   ] });
