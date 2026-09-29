@@ -11,6 +11,7 @@ import { sessionProofBinding } from "../aws/component-session-proof.mjs";
 import { run as runSignerCli } from "../aws/production-signer-broker-transition-cli.mjs";
 import { buildSignerBrokerAuthorization, createSignerPolicyBroker, signerAbortAllowed, signerBrokerContract, signerLifecycleEvidenceBinding, SIGNER_BROKER_LIFECYCLE } from "../aws/component-signer-policy-transition.mjs";
 import { buildSignerTemporaryPolicy, SIGNER_TEMPORARY_CAPABILITY as C } from "../aws/production-signer-temporary-capability.mjs";
+import { signerLedgerAbsence, signerLedgerBucketPolicySuccessor } from "../aws/production-signer-ledger-absence-policy.mjs";
 
 const sourceSha = "a".repeat(40), transitionId = "123e4567-e89b-42d3-a456-426614174000", now = Date.parse("2026-09-28T12:00:00.000Z");
 const steady = JSON.parse(fs.readFileSync(new URL("../../documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json", import.meta.url)));
@@ -90,6 +91,35 @@ function composedFixture(options) {
     installSession: (selected = binding()) => establishSignerInstallSession(selected, deps("SIGNER_INSTALL")),
     revokeSession: (selected = binding()) => establishSignerRevokeSession(selected, deps("SIGNER_REVOKE")) };
 }
+
+test("first signer authorization authenticates a genuinely absent ledger with only its exact-key bucket listing", async () => {
+  const f = fixture();
+  const denied = createSignerPolicyBroker({ iam: f.iam, s3: async (operation, input) => {
+    if (operation === "GetObject") { const error = new Error("AccessDenied"); error.name = "AccessDenied"; throw error; }
+    return f.s3(operation, input);
+  }, currentMain: async () => sourceSha, now: () => now });
+  await assert.rejects(denied({ operation: "SIGNER_AUTHORIZE", authorization: authorization("INSTALL") }), /AccessDenied/);
+  assert.equal(f.ledger(), undefined);
+  const grant = signerLedgerBucketPolicySuccessor().Statement.at(-1);
+  const s3 = async (operation, input) => {
+    if (operation === "GetObject" && !f.ledger()) {
+      assert.equal(grant.Action, "s3:ListBucket");
+      assert.equal(grant.Principal.AWS, signerLedgerAbsence.principal);
+      assert.equal(grant.Resource, `arn:aws:s3:::${signerLedgerAbsence.bucket}`);
+      assert.deepEqual(grant.Condition, { StringEquals: { "s3:prefix": input.Key } });
+    }
+    return f.s3(operation, input);
+  };
+  const broker = createSignerPolicyBroker({ iam: f.iam, s3, currentMain: async () => sourceSha, now: () => now });
+  const first = await broker({ operation: "SIGNER_AUTHORIZE", authorization: authorization("INSTALL") });
+  assert.equal(first.state, "INSTALLING");
+  assert.equal(f.ledger().state, "INSTALLING");
+  assert.equal(signerLedgerAbsence.key, signerBrokerContract.ledgerKey);
+  await assert.rejects(broker({ operation: "SIGNER_AUTHORIZE", authorization: authorization("INSTALL") }), /replay/);
+  const renewed = await broker({ operation: "SIGNER_AUTHORIZE", authorization: authorization("INSTALL", -500, "43") });
+  assert.equal(renewed.state, "INSTALLING");
+  assert.equal(renewed.authorizationHistory.length, 1);
+});
 
 test("real signer session composition uses the signer ledger from authorization through revoke", async () => {
   const f = composedFixture(); await f.authorize("INSTALL");
