@@ -1,0 +1,67 @@
+{
+  "address": "aws_iam_role.signer_policy_installer",
+  "change": {
+    "actions": [
+      "update"
+    ],
+    "after": {
+      "arn": "arn:aws:iam::368992683803:role/mscqr-production-signer-policy-installer",
+      "assume_role_policy": "{\"Statement\":[{\"Action\":\"sts:AssumeRoleWithWebIdentity\",\"Condition\":{\"StringEquals\":{\"token.actions.githubusercontent.com:aud\":\"sts.amazonaws.com\",\"token.actions.githubusercontent.com:job_workflow_ref\":\"T-ej2003/genuine-scan-main/.github/workflows/production-signer-policy-transition-operation.yml@refs/heads/main\",\"token.actions.githubusercontent.com:ref\":\"refs/heads/main\",\"token.actions.githubusercontent.com:repository_id\":\"1145608538\",\"token.actions.githubusercontent.com:repository_owner_id\":\"183396573\",\"token.actions.githubusercontent.com:sub\":\"repo:T-ej2003/genuine-scan-main:environment:production-signer-policy-transition\"}},\"Effect\":\"Allow\",\"Principal\":{\"Federated\":\"arn:aws:iam::368992683803:oidc-provider/token.actions.githubusercontent.com\"},\"Sid\":\"ExactProtectedSignerPolicyTransitionWorkflow\"}],\"Version\":\"2012-10-17\"}",
+      "create_date": "2026-09-28T21:24:42Z",
+      "description": "Protected GitHub OIDC publisher for canonical signer broker authorization only.",
+      "force_detach_policies": false,
+      "id": "mscqr-production-signer-policy-installer",
+      "inline_policy": [
+        {
+          "name": "ProductionSignerPolicyInstaller",
+          "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Action\":\"lambda:InvokeFunction\",\"Condition\":{\"StringEquals\":{\"aws:RequestedRegion\":\"eu-west-2\"}},\"Effect\":\"Allow\",\"Resource\":\"arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-component-iam-installer:15\",\"Sid\":\"PublishExactSignerTransitionAuthorizationToBroker\"}]}"
+        }
+      ],
+      "managed_policy_arns": [],
+      "max_session_duration": 3600,
+      "name": "mscqr-production-signer-policy-installer",
+      "name_prefix": "",
+      "path": "/",
+      "permissions_boundary": "",
+      "tags": {},
+      "tags_all": {},
+      "unique_id": "AROAVL2NNQ4NSTJJLSLVW"
+    },
+    "after_sensitive": {
+      "inline_policy": [
+        {}
+      ],
+      "managed_policy_arns": [],
+      "tags": {},
+      "tags_all": {}
+    },
+    "after_unknown": {},
+    "before": {
+      "arn": "arn:aws:iam::368992683803:role/mscqr-production-signer-policy-installer",
+      "assume_role_policy": "{\"Statement\":[{\"Action\":\"sts:AssumeRoleWithWebIdentity\",\"Condition\":{\"StringEquals\":{\"token.actions.githubusercontent.com:aud\":\"sts.amazonaws.com\",\"token.actions.githubusercontent.com:job_workflow_ref\":\"T-ej2003/genuine-scan-main/.github/workflows/production-signer-policy-transition-operation.yml@refs/heads/main\",\"token.actions.githubusercontent.com:ref\":\"refs/heads/main\",\"token.actions.githubusercontent.com:repository_id\":\"1145608538\",\"token.actions.githubusercontent.com:repository_owner_id\":\"183396573\",\"token.actions.githubusercontent.com:sub\":\"repo:T-ej2003/genuine-scan-main:environment:production-signer-policy-transition\"}},\"Effect\":\"Allow\",\"Principal\":{\"Federated\":\"arn:aws:iam::368992683803:oidc-provider/token.actions.githubusercontent.com\"},\"Sid\":\"ExactProtectedSignerPolicyTransitionWorkflow\"}],\"Version\":\"2012-10-17\"}",
+      "create_date": "2026-09-28T21:24:42Z",
+      "description": "Protected GitHub OIDC publisher for canonical signer broker authorization only.",
+      "force_detach_policies": false,
+      "id": "mscqr-production-signer-policy-installer",
+      "inline_policy": [],
+      "managed_policy_arns": [],
+      "max_session_duration": 3600,
+      "name": "mscqr-production-signer-policy-installer",
+      "name_prefix": "",
+      "path": "/",
+      "permissions_boundary": "",
+      "tags": null,
+      "tags_all": {},
+      "unique_id": "AROAVL2NNQ4NSTJJLSLVW"
+    },
+    "before_sensitive": {
+      "inline_policy": [],
+      "managed_policy_arns": [],
+      "tags_all": {}
+    }
+  },
+  "mode": "managed",
+  "name": "signer_policy_installer",
+  "provider_name": "registry.terraform.io/hashicorp/aws",
+  "type": "aws_iam_role"
+}

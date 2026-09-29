@@ -130,9 +130,14 @@ const assertPlanSemantics = (value) => {
   return value;
 };
 
+export function assertRefreshOnlyResourceChangeActions(plan, { allowRead = true } = {}) {
+  const allowed = allowRead ? [["no-op"], ["read"]] : [["no-op"]];
+  if (plan.resource_changes !== undefined && (!Array.isArray(plan.resource_changes) || plan.resource_changes.some(({ change }) => !allowed.some((actions) => canonicalJson(change?.actions) === canonicalJson(actions))))) throw new Error("Refresh-only plan contains an actionable resource operation.");
+}
+
 export function assertExactReconcilerRefreshOnlyPlan(plan, { stateBytes, expectedOutputBefore } = {}) {
   if (!plan || plan.format_version !== "1.2" || plan.terraform_version !== INSTALLATION.terraformVersion || plan.errored !== false || plan.complete !== true || plan.applyable !== true || !Array.isArray(plan.resource_drift)) throw new Error("Refresh-only plan envelope is invalid.");
-  if (plan.resource_changes !== undefined && (!Array.isArray(plan.resource_changes) || plan.resource_changes.some(({ change }) => ![["no-op"], ["read"]].some((actions) => canonicalJson(change?.actions) === canonicalJson(actions))))) throw new Error("Refresh-only plan contains an actionable resource operation.");
+  assertRefreshOnlyResourceChangeActions(plan);
   if (!Buffer.isBuffer(stateBytes)) throw new Error("Refresh-only plan requires the authenticated predecessor state.");
   if (plan.resource_drift.length !== RECONCILER_STATE_RECONCILIATION.drift.length) throw new Error("Refresh-only plan drift count is not exact.");
   const byAddress = new Map(plan.resource_drift.map((entry) => [entry?.address, entry]));
