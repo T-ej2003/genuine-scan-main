@@ -197,6 +197,11 @@ const rotationMutableEnvironment = Object.freeze(new Map([
   ["MSCQR_FULL_RLS_MIGRATION_SET_DIGEST", "migration_set_digest"],
   ["MSCQR_FULL_RLS_PACKAGE_CHECKSUM_SHA256", "package_checksum_sha256"],
 ]));
+const canaryAddress = 'aws_ecs_task_definition.candidate["canary"]';
+const canaryEnvironmentAdditions = Object.freeze(new Map([
+  ["CLIENT_IP_TRUST_MODE", "direct-loopback-canary"],
+  ["MSCQR_PRODUCTION_GREEN_APPLICATION_CANARY", "true"],
+]));
 export const STAGE_B_TASK_DEFINITION_ROTATION_IMMUTABLE_FIELDS = Object.freeze([
   "family", "network_mode", "requires_compatibilities", "cpu", "memory",
   "execution_role_arn", "task_role_arn", "runtime_platform", "volume", "ipc_mode", "pid_mode", "tags",
@@ -316,8 +321,10 @@ function assertRotationContainers(beforeValue, afterValue, plan, address, strict
     if (strict && actualImage !== expectedImage) throw new Error(`Stage B task-definition rotation image is not bound to the plan input: ${address}`);
     const beforeEnvironment = new Map((beforeContainer.environment || []).map((item) => [item?.name, item?.value]));
     const afterEnvironment = new Map((afterContainer.environment || []).map((item) => [item?.name, item?.value]));
+    const additions = [...afterEnvironment].filter(([environmentName]) => !beforeEnvironment.has(environmentName));
     if (beforeEnvironment.size !== (beforeContainer.environment || []).length || afterEnvironment.size !== (afterContainer.environment || []).length
       || [...beforeEnvironment.keys()].some((name) => !afterEnvironment.has(name))) throw new Error(`Stage B task-definition rotation changes environment identity: ${address}`);
+    if (additions.length && (address !== canaryAddress || JSON.stringify(additions.sort(([left], [right]) => left.localeCompare(right))) !== JSON.stringify([...canaryEnvironmentAdditions].sort(([left], [right]) => left.localeCompare(right))))) throw new Error(`Stage B task-definition rotation adds an unreviewed environment binding: ${address}`);
     for (const [environmentName, beforeEnvironmentValue] of beforeEnvironment) {
       const afterEnvironmentValue = afterEnvironment.get(environmentName);
       const variable = rotationMutableEnvironment.get(environmentName);
@@ -329,6 +336,7 @@ function assertRotationContainers(beforeValue, afterValue, plan, address, strict
       delete copy.image;
       for (const field of rotationContainerEmptyArrayDefaults) if (copy[field] === undefined || copy[field] === null) copy[field] = [];
       if (Array.isArray(copy.environment)) copy.environment = copy.environment.map((item) => rotationMutableEnvironment.has(item?.name) ? { ...item, value: "<reviewed-provenance>" } : item);
+      if (address === canaryAddress && Array.isArray(copy.environment)) copy.environment = copy.environment.filter((item) => !canaryEnvironmentAdditions.has(item?.name));
       if (address === backendTaskDefinitionAddress
         && JSON.stringify(beforeContainer.portMappings) === "[]"
         && JSON.stringify(stableTaskDefinitionValue(afterContainer.portMappings)) === JSON.stringify(stableTaskDefinitionValue([STAGE_B_BACKEND_PORT_MAPPING]))) copy.portMappings = "<reviewed-backend-port-mapping>";

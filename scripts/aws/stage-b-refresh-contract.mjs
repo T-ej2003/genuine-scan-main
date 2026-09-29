@@ -6,7 +6,7 @@ import { assertStageBPrivateFile } from "./stage-b-artifact-contract.mjs";
 import { assertCanonicalTerraformSerialNumber } from "./stage-b-partial-apply-recovery-contract.mjs";
 import { STAGE_B_MODES } from "./production-green-stage-b-contract.mjs";
 import { assertStageBRecoveryRefreshStatus } from "./stage-b-deployment-contract.mjs";
-import { isTerraformDeposedInstance, validateCurrentTaskDefinitionState } from "./generate-production-green-stage-b-tfvars.mjs";
+import { isTerraformDeposedInstance, stageBBoundImagesFromBindingReport, validateCurrentTaskDefinitionState } from "./generate-production-green-stage-b-tfvars.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "./stage-b-reference-audit-contract.mjs";
 
 export const STAGE_B_REFRESH_SCHEMA_VERSION = 1;
@@ -466,9 +466,8 @@ export function inspectStageBRefreshChecks({ checks, checksSource, resourcePreco
 }
 
 function expectedImages(bindingReport) {
-  return Object.fromEntries(Object.values(requireObject(bindingReport.images, "Stage B image bindings"))
-    .map((image) => [String(image.terraformVariable).replace(/_image$/, ""), image.imageReference])
-    .sort(([left], [right]) => left.localeCompare(right)));
+  requireObject(bindingReport.images, "Stage B image bindings");
+  return stageBBoundImagesFromBindingReport(bindingReport);
 }
 
 function stateTaskDefinitionOutput(state) {

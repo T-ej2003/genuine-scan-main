@@ -266,7 +266,7 @@ const CONFIGURATION_REFERENCE_RULES = Object.freeze({
     tags: ["local.tags"],
   },
   "aws_iam_role_policy.candidate_object_storage": {
-    policy: ["var.receipt_bucket_arn"],
+    policy: ["each.key", "var.receipt_bucket_arn"],
     role: ["each.value", "each.value.id"],
   },
   "aws_iam_role_policy.execution": {
