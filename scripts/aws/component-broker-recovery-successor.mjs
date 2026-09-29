@@ -3,8 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { assertBrokerConfiguration, brokerConfiguration, brokerPolicySuccessorEntryPoints, brokerRecoverySuccessorEntryPoints, brokerSignerSuccessorEntryPoints } from "./component-broker-configuration.mjs";
 import { assertBrokerRecoverySuccessorAuthorization, authenticateFirstSuccessorLineage } from "./component-broker-recovery-successor-authorization.mjs";
-import { assertBrokerRecoverySuccessorClosureMetadata, assertS3UserMetadataSize, assertVerifiedRecoveryClosurePredecessor, brokerRecoverySuccessor, brokerRecoverySuccessorBindings, brokerRecoverySuccessorClosure, brokerRecoverySuccessorConfigurations } from "./component-broker-recovery-successor-contract.mjs";
-import { brokerSignerSuccessorConfigurations } from "./component-broker-signer-successor-contract.mjs";
+import { assertBrokerRecoverySuccessorClosureMetadata, assertCompatibleSignerCreation, assertS3UserMetadataSize, assertVerifiedRecoveryClosurePredecessor, brokerRecoverySuccessor, brokerRecoverySuccessorBindings, brokerRecoverySuccessorClosure, brokerRecoverySuccessorConfigurations, compatibleSignerCreation } from "./component-broker-recovery-successor-contract.mjs";
 import { assertEffectiveBootstrapTrustAnchor, assertHistoricalBrokerChangeClosure } from "./component-bootstrap-trust-anchor.mjs";
 import { canonical, digest, installationIdentity } from "./component-iam-installation-contract.mjs";
 import { brokerPolicySuccessorManagedIdentities, brokerRecoverySuccessorManagedIdentities, brokerSignerSuccessorManagedIdentities, identityBootstrap, inspectBrokerPolicySuccessorIdentities, inspectBrokerRecoverySuccessorIdentities, inspectBrokerSignerSuccessorIdentities } from "./component-installation-identity-contract.mjs";
@@ -51,7 +50,7 @@ export async function executeBrokerRecoverySuccessor({ authorization, packageEvi
     assert((await inspectPredecessor(iam)).every(({ role, policy: state }) => role === "EXPECTED" && state === "EXPECTED"), "Recovery predecessor identities differ");
   };
   const claim = { schemaVersion: 1, state: "EXECUTING", transitionId: approval.transitionId, owner, authorizationSha256, authorizationExpiresAt: approval.expiresAt, sessionExpiresAt: human.expiresAt, authorizationHistory: [], bindings };
-  const assertClaim = value => { assert.deepEqual(Object.keys(value || {}).sort(), ["authorizationExpiresAt", "authorizationHistory", "authorizationSha256", "bindings", "owner", "schemaVersion", "sessionExpiresAt", "state", "transitionId"].sort()); assert.equal(value.schemaVersion, 1); uuid(value.owner); assert.match(value.authorizationSha256 || "", /^[a-f0-9]{64}$/); for (const field of ["authorizationExpiresAt", "sessionExpiresAt"]) assert.equal(new Date(Date.parse(value[field])).toISOString(), value[field]); assert.equal(canonical(value.bindings), canonical(bindings)); assert(successorStates.includes(value.state)); assert(Array.isArray(value.authorizationHistory)); const seen = new Set([value.authorizationSha256]); for (const prior of value.authorizationHistory) { assert.deepEqual(Object.keys(prior).sort(), ["authorizationExpiresAt", "authorizationSha256", "owner", "sessionExpiresAt"]); assert.match(prior.authorizationSha256 || "", /^[a-f0-9]{64}$/); assert(!seen.has(prior.authorizationSha256)); seen.add(prior.authorizationSha256); uuid(prior.owner); for (const field of ["authorizationExpiresAt", "sessionExpiresAt"]) assert.equal(new Date(Date.parse(prior[field])).toISOString(), prior[field]); } };
+  const assertClaim = value => { assert.deepEqual(Object.keys(value || {}).sort(), ["authorizationExpiresAt", "authorizationHistory", "authorizationSha256", "bindings", ...(Object.hasOwn(value || {}, "compatibleSignerCreation") ? ["compatibleSignerCreation"] : []), "owner", "schemaVersion", "sessionExpiresAt", "state", "transitionId"].sort()); assert.equal(value.schemaVersion, 1); uuid(value.owner); assert.match(value.authorizationSha256 || "", /^[a-f0-9]{64}$/); for (const field of ["authorizationExpiresAt", "sessionExpiresAt"]) assert.equal(new Date(Date.parse(value[field])).toISOString(), value[field]); assert.equal(canonical(value.bindings), canonical(bindings)); assert(successorStates.includes(value.state)); assert(Array.isArray(value.authorizationHistory)); const seen = new Set([value.authorizationSha256]); for (const prior of value.authorizationHistory) { assert.deepEqual(Object.keys(prior).sort(), ["authorizationExpiresAt", "authorizationSha256", "owner", "sessionExpiresAt"]); assert.match(prior.authorizationSha256 || "", /^[a-f0-9]{64}$/); assert(!seen.has(prior.authorizationSha256)); seen.add(prior.authorizationSha256); uuid(prior.owner); for (const field of ["authorizationExpiresAt", "sessionExpiresAt"]) assert.equal(new Date(Date.parse(prior[field])).toISOString(), prior[field]); } if (value.compatibleSignerCreation) assertCompatibleSignerCreation(value.compatibleSignerCreation, value); };
   await authorize(); const journal = await readJournal(); assert.equal(journal.etag, initialJournal.etag, "First successor lineage changed before reservation");
   if (Object.hasOwn(journal.metadata, brokerRecoverySuccessor.metadataKey)) { assertBrokerRecoverySuccessorClosureMetadata(journal.metadata, bindings, undefined, undefined, journal.value); assert.fail("Broker recovery successor is already closed"); }
   let reservation = await readReservation(), reservationEtag;
@@ -124,32 +123,35 @@ export async function executeBrokerRecoverySuccessor({ authorization, packageEvi
   }
   if (!verifiedRecovery) { const identities = await inspectSuccessor(iam); assert(identities.every(({ role, policy: state }) => role === "EXPECTED" && state === "EXPECTED")); await noPolicies(); await checkpoint("VERIFIED"); }
   else await noPolicies();
-  const compatible = await convergeCompatibleSignerRuntime({ iam, lambda, packageEvidence, guard, oldPackageSha256: bindings.successor.packageSha256, sleep });
+  if (!record.compatibleSignerCreation) { record = { ...record, compatibleSignerCreation: compatibleSignerCreation(packageEvidence, approval.transitionId, authorizationSha256) }; ({ etag: reservationEtag } = await put(brokerRecoverySuccessor.reservationKey, record, { IfMatch: reservationEtag })); }
+  const creationEvidence = assertCompatibleSignerCreation(record.compatibleSignerCreation, record);
+  const compatible = await convergeCompatibleSignerRuntime({ iam, lambda, packageEvidence: creationEvidence, candidateBytes: creationEvidence.packageSha256 === packageEvidence.packageSha256 ? packageEvidence.bytes : null, guard, oldPackageSha256: bindings.successor.packageSha256, sleep });
   const closedAt = new Date(now()).toISOString(), runtimeVersions = Object.fromEntries(Object.entries(brokerRecoverySuccessorEntryPoints).map(([, version]) => [version, published[version].Configuration.RuntimeVersionConfig.RuntimeVersionArn]));
   const finalRecord = { ...record, state: "BROKER_RECOVERY_SUCCESSOR_CLOSED", closedAt, runtimeVersions };
   const currentJournal = await readJournal(); assert.equal(currentJournal.etag, journal.etag, "Bootstrap lineage changed during successor transition");
   assert.equal(canonical(authenticateFirstSuccessorLineage({ reservation: firstReservation.value, reservationEtag: firstReservation.etag, metadata: currentJournal.metadata }).closure), canonical(lineage.closure), "First successor closure changed during successor transition");
-  assert.equal(assertEffectiveBootstrapTrustAnchor(currentJournal.value, packageEvidence.manifest, packageEvidence.packageSha256, currentJournal.metadata, firstReservation, { value: record, etag: reservationEtag }, null, true).pendingSignerClosure, true);
+  assert.equal(assertEffectiveBootstrapTrustAnchor(currentJournal.value, creationEvidence.manifest, creationEvidence.packageSha256, currentJournal.metadata, firstReservation, { value: record, etag: reservationEtag }, null, true).pendingSignerClosure, true);
   const closure = brokerRecoverySuccessorClosure(record, bindings, runtimeVersions, reservationEtag, closedAt, currentJournal.metadata);
   const closedBody = { ...currentJournal.value, brokerRecoverySuccessorClosure: closure.value };
   await guard();
   assert.deepEqual(await inspectBrokerSignerSuccessorIdentities(iam), compatible.nextIdentities.map(({ arn }) => ({ arn, role: "EXPECTED", policy: "EXPECTED" })), "Active compatible reader changed before closure");
   for (const [entryPoint, version] of Object.entries(brokerSignerSuccessorEntryPoints)) assertBrokerConfiguration(await compatible.ready(version), compatible.successorConfigurations[entryPoint], await compatible.controls(version));
   await put(journalKey, closedBody, { IfMatch: currentJournal.etag }, closure.metadata); assertBrokerRecoverySuccessorClosureMetadata(closure.metadata, bindings, record, reservationEtag, closedBody);
-  const closedJournal = await readJournal(); verifyEffective(closedJournal.value, packageEvidence.manifest, packageEvidence.packageSha256, closedJournal.metadata, firstReservation, { value: record, etag: reservationEtag });
+  const closedJournal = await readJournal(); verifyEffective(closedJournal.value, creationEvidence.manifest, creationEvidence.packageSha256, closedJournal.metadata, firstReservation, { value: record, etag: reservationEtag });
   return { ...closedJournal.value, brokerRecoverySuccessor: finalRecord };
 }
 
-async function convergeCompatibleSignerRuntime({ iam, lambda, packageEvidence, guard, oldPackageSha256, sleep }) {
+async function convergeCompatibleSignerRuntime({ iam, lambda, packageEvidence, candidateBytes, guard, oldPackageSha256, sleep }) {
   const oldIdentities = brokerRecoverySuccessorManagedIdentities(), nextIdentities = brokerSignerSuccessorManagedIdentities();
   const ready = async qualifier => { for (let attempt = 0; attempt < 12; attempt++) { const fn = await lambda("GetFunction", { FunctionName: installationIdentity.functionName, ...(qualifier ? { Qualifier: qualifier } : {}) }); if (fn.Configuration.State === "Active" && fn.Configuration.LastUpdateStatus === "Successful") return fn; await sleep(1000); } assert.fail("Compatible broker runtime did not converge"); };
   const controls = async qualifier => ({ concurrency: await lambda("GetFunctionConcurrency", { FunctionName: installationIdentity.functionName }), signing: await lambda("GetFunctionCodeSigningConfig", { FunctionName: installationIdentity.functionName }), runtime: await lambda("GetRuntimeManagementConfig", { FunctionName: installationIdentity.functionName, ...(qualifier ? { Qualifier: qualifier } : {}) }) });
-  const successorConfigurations = brokerSignerSuccessorConfigurations(packageEvidence);
+  const successorConfigurations = packageEvidence.configurations;
   let latest = await ready();
   const candidateCode = Buffer.from(packageEvidence.packageSha256, "hex").toString("base64");
   if (latest.Configuration.CodeSha256 !== candidateCode) {
     assert.equal(latest.Configuration.CodeSha256, Buffer.from(oldPackageSha256, "hex").toString("base64"), "Unreviewed broker code predecessor");
-    await guard(); try { await lambda("UpdateFunctionCode", { FunctionName: installationIdentity.functionName, ZipFile: Buffer.from(packageEvidence.bytes), Publish: false, RevisionId: latest.Configuration.RevisionId }); } catch {}
+    assert(candidateBytes, "Original continuation package is unavailable before immutable publication");
+    await guard(); try { await lambda("UpdateFunctionCode", { FunctionName: installationIdentity.functionName, ZipFile: Buffer.from(candidateBytes), Publish: false, RevisionId: latest.Configuration.RevisionId }); } catch {}
     latest = await ready(); assert.equal(latest.Configuration.CodeSha256, candidateCode, "Compatible broker code did not converge");
   }
   for (const [entryPoint, version] of Object.entries(brokerSignerSuccessorEntryPoints)) {
@@ -238,17 +240,23 @@ export async function closeVerifiedBrokerRecoverySuccessor({ authorization, pack
   }
   const current = await read(brokerRecoverySuccessor.reservationKey); assert.equal(current.etag, partial.etag); assert.deepEqual(current.value, partial.value);
   const previous = { authorizationSha256: partial.value.authorizationSha256, authorizationExpiresAt: partial.value.authorizationExpiresAt, sessionExpiresAt: partial.value.sessionExpiresAt, owner: partial.value.owner };
-  const record = { ...partial.value, owner: randomUUID(), authorizationSha256, authorizationExpiresAt: approval.expiresAt, sessionExpiresAt: human.expiresAt, authorizationHistory: [...partial.value.authorizationHistory, previous] };
+  const staged = partial.value.compatibleSignerCreation;
+  const latestCode = (await lambda("GetFunction", { FunctionName: installationIdentity.functionName })).Configuration.CodeSha256;
+  const creation = listed.includes("13") || (staged && latestCode === Buffer.from(staged.packageSha256, "hex").toString("base64"))
+    ? staged : compatibleSignerCreation(packageEvidence, approval.transitionId, authorizationSha256);
+  assert(!listed.includes("13") || creation, "Published continuation lacks original creation evidence");
+  const record = { ...partial.value, owner: randomUUID(), authorizationSha256, authorizationExpiresAt: approval.expiresAt, sessionExpiresAt: human.expiresAt, authorizationHistory: [...partial.value.authorizationHistory, previous], compatibleSignerCreation: creation };
+  const creationEvidence = assertCompatibleSignerCreation(record.compatibleSignerCreation, record);
   await authorize();
   assertS3UserMetadataSize({});
   try { await s3("PutObject", { Bucket: identityBootstrap.bucket, Key: brokerRecoverySuccessor.reservationKey, Body: canonical(record), ServerSideEncryption: "AES256", IfMatch: partial.etag }); }
   catch (error) { const observed = await read(brokerRecoverySuccessor.reservationKey); assert.deepEqual(observed.value, record, `Recovery reservation CAS failed after ${error?.name || "AWS persistence failure"}`); }
   const reserved = await read(brokerRecoverySuccessor.reservationKey); assert.deepEqual(reserved.value, record);
   const guard = async () => { await authorize(); const observed = await read(brokerRecoverySuccessor.reservationKey); assert.deepEqual(observed.value, record, "Recovery owner changed"); assert.equal(observed.etag, reserved.etag, "Recovery reservation ETag changed"); };
-  const { successorConfigurations, ready, controls } = await convergeCompatibleSignerRuntime({ iam, lambda, packageEvidence, guard, oldPackageSha256: bindings.successor.packageSha256, sleep });
+  const { successorConfigurations, ready, controls } = await convergeCompatibleSignerRuntime({ iam, lambda, packageEvidence: creationEvidence, candidateBytes: creationEvidence.packageSha256 === packageEvidence.packageSha256 ? packageEvidence.bytes : null, guard, oldPackageSha256: bindings.successor.packageSha256, sleep });
   const currentJournal = await read(journalKey); assert.equal(currentJournal.etag, initial.etag, "Bootstrap journal changed during closure");
   assert.deepEqual(currentJournal.metadata, initial.metadata); assert.deepEqual(currentJournal.value, initial.value);
-  const pending = assertEffectiveBootstrapTrustAnchor(currentJournal.value, packageEvidence.manifest, packageEvidence.packageSha256, currentJournal.metadata, first, reserved, null, true);
+  const pending = assertEffectiveBootstrapTrustAnchor(currentJournal.value, creationEvidence.manifest, creationEvidence.packageSha256, currentJournal.metadata, first, reserved, null, true);
   assert.equal(pending.pendingSignerClosure, true, "Active compatible broker cannot authenticate pending lineage");
   const closure = brokerRecoverySuccessorClosure(record, bindings, runtimeVersions, reserved.etag, new Date(now()).toISOString(), currentJournal.metadata);
   const body = { ...currentJournal.value, brokerRecoverySuccessorClosure: closure.value };

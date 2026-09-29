@@ -55,6 +55,15 @@ compact second closure. A retry accepts only exact published version prefixes
 and old/new canonical IAM policy documents; completed steps are read back and
 skipped. It never republishes `10/11/12` or reapplies their five policies.
 
+If protected main advances after any of `13/14/15` is published, obtain a
+fresh authorization from the current main SHA for the same fenced recovery
+transition. The reservation preserves the original creation manifest, package
+digest, exact Lambda configurations, and authorization lineage. The controller
+authenticates current source for the new operation while validating each
+immutable published version against that original creation evidence. It
+publishes only the missing versions from the already staged original package;
+it never relabels those versions with the new source or republishes them.
+
 Authenticate the resulting `identity-bootstrap.json` body, compact closure
 metadata digest, `VERIFIED` reservation, live versions `10/11/12/13/14/15`,
 and five signer-generation invocation policies before starting the signer

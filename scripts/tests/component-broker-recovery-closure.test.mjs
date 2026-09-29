@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { closeVerifiedBrokerRecoverySuccessor } from "../aws/component-broker-recovery-successor.mjs";
 import { authenticateSecondSuccessorLineage } from "../aws/component-broker-signer-successor-authorization.mjs";
 import { approveBrokerRecoverySuccessor, prepareBrokerRecoverySuccessorAuthorization } from "../aws/component-broker-recovery-successor-authorization.mjs";
-import { assertBrokerRecoverySuccessorClosureMetadata, assertS3UserMetadataSize, brokerRecoverySuccessor, brokerRecoverySuccessorClosure, recoveryClosurePredecessor } from "../aws/component-broker-recovery-successor-contract.mjs";
+import { assertBrokerRecoverySuccessorClosureMetadata, assertS3UserMetadataSize, brokerRecoverySuccessor, brokerRecoverySuccessorClosure, compatibleSignerCreation, recoveryClosurePredecessor } from "../aws/component-broker-recovery-successor-contract.mjs";
 import { brokerConfiguration, brokerRecoverySuccessorEntryPoints, brokerSignerSuccessorEntryPoints } from "../aws/component-broker-configuration.mjs";
 import { brokerSignerSuccessorConfigurations } from "../aws/component-broker-signer-successor-contract.mjs";
 import { assertEffectiveBootstrapTrustAnchor } from "../aws/component-bootstrap-trust-anchor.mjs";
@@ -22,13 +22,16 @@ const journalKey = `${identityBootstrap.prefix}identity-bootstrap.json`;
 const firstKey = `${identityBootstrap.prefix}broker-policy-successor.json`;
 const runtime = `arn:aws:lambda:eu-west-2::runtime:${"c".repeat(64)}`;
 
-function fixture() {
-  const now = Date.parse("2026-09-28T23:00:00.000Z"), sourceSha = "a".repeat(40), bytes = Buffer.from("closure-only-review-package"), manifest = componentBrokerPackageManifest(sourceSha);
+function fixture(prepublishedVersionCount = 12, sourceAdvance = false, stagedOriginalCode = false) {
+  const now = Date.parse("2026-09-28T23:00:00.000Z"), sourceSha = (sourceAdvance ? "b" : "a").repeat(40), bytes = Buffer.from(sourceAdvance ? "new-protected-main-package" : "closure-only-review-package"), manifest = componentBrokerPackageManifest(sourceSha);
   const packageEvidence = { bytes, manifest, manifestSha256: digest(manifest), packageSha256: createHash("sha256").update(bytes).digest("hex") };
+  const originalBytes = Buffer.from("closure-only-review-package"), originalManifest = componentBrokerPackageManifest("a".repeat(40));
+  const creationPackage = sourceAdvance ? { bytes: originalBytes, manifest: originalManifest, manifestSha256: digest(originalManifest), packageSha256: createHash("sha256").update(originalBytes).digest("hex") } : packageEvidence;
   const first = load("broker-policy-successor"), partial = load("broker-recovery-successor"), bootstrap = load("identity-bootstrap");
   const firstClosure = partial.bindings.firstClosure;
   const firstMetadata = { "broker-policy-successor": Buffer.from(canonical(firstClosure)).toString("base64url") };
   assert.equal(digest(partial), recoveryClosurePredecessor.initialReservationSha256);
+  if (prepublishedVersionCount > 12 || stagedOriginalCode) partial.compatibleSignerCreation = compatibleSignerCreation(creationPackage, partial.transitionId, partial.authorizationSha256);
   assert.equal(assertS3UserMetadataSize(firstMetadata), 1141);
   const historical = brokerRecoverySuccessorClosure(partial, partial.bindings, { 10: runtime, 11: runtime, 12: runtime }, secondEtag, "2026-09-28T22:31:00.000Z", firstMetadata);
   const oversized = { ...firstMetadata, [brokerRecoverySuccessor.metadataKey]: Buffer.from(canonical(historical.value)).toString("base64url") };
@@ -36,8 +39,9 @@ function fixture() {
   assert.equal(assertS3UserMetadataSize(historical.metadata), 1237);
   const objects = new Map([[firstKey, first], [brokerRecoverySuccessor.reservationKey, partial], [journalKey, bootstrap]]);
   const metadata = new Map([[journalKey, firstMetadata]]), etags = new Map([[firstKey, firstEtag], [brokerRecoverySuccessor.reservationKey, secondEtag], [journalKey, journalEtag]]);
-  const writes = [], calls = [], state = { versionCount: 12, iamDrift: false, failClosure: false, failPolicyAfter: Infinity, ambiguousReservation: false, ambiguousClosure: false,
+  const writes = [], calls = [], state = { versionCount: prepublishedVersionCount, iamDrift: false, failClosure: false, failPolicyAfter: Infinity, ambiguousReservation: false, ambiguousClosure: false,
     codeSha: Buffer.from(partial.bindings.successor.packageSha256, "hex").toString("base64"), description: "old", policies: new Map() };
+  if (prepublishedVersionCount > 12 || stagedOriginalCode) state.codeSha = Buffer.from(creationPackage.packageSha256, "hex").toString("base64");
   const s3 = async (operation, input) => {
     calls.push(`s3:${operation}`);
     if (operation === "GetObject") return { ETag: etags.get(input.Key), Metadata: metadata.get(input.Key) || {}, Body: { transformToString: async () => JSON.stringify(objects.get(input.Key)) } };
@@ -45,7 +49,7 @@ function fixture() {
     if (input.Key === journalKey) {
       assert.equal(state.versionCount, 15, "Compatible runtime must be published before compact closure");
       for (const next of brokerSignerSuccessorManagedIdentities()) assert.equal(digest(state.policies.get(next.role)), next.policySha256, "Active invocation policy must switch before compact closure");
-      assert.equal(assertEffectiveBootstrapTrustAnchor(objects.get(journalKey), packageEvidence.manifest, packageEvidence.packageSha256, metadata.get(journalKey), { value: objects.get(firstKey), etag: etags.get(firstKey) }, { value: objects.get(brokerRecoverySuccessor.reservationKey), etag: etags.get(brokerRecoverySuccessor.reservationKey) }, null, true).pendingSignerClosure, true);
+      assert.equal(assertEffectiveBootstrapTrustAnchor(objects.get(journalKey), creationPackage.manifest, creationPackage.packageSha256, metadata.get(journalKey), { value: objects.get(firstKey), etag: etags.get(firstKey) }, { value: objects.get(brokerRecoverySuccessor.reservationKey), etag: etags.get(brokerRecoverySuccessor.reservationKey) }, null, true).pendingSignerClosure, true);
     }
     if (input.Key === journalKey && state.failClosure) throw Object.assign(new Error("rejected"), { name: "MetadataTooLarge" });
     if (input.Metadata) assertS3UserMetadataSize(input.Metadata);
@@ -55,7 +59,7 @@ function fixture() {
     return {};
   };
   const configs = Object.fromEntries(Object.keys(brokerRecoverySuccessorEntryPoints).map(entryPoint => [entryPoint, brokerConfiguration({ packageSha256: partial.bindings.successor.packageSha256, manifestSha256: partial.bindings.successor.manifestSha256, entryPoint, entryPoints: brokerRecoverySuccessorEntryPoints })]));
-  const nextConfigs = brokerSignerSuccessorConfigurations(packageEvidence);
+  const nextConfigs = brokerSignerSuccessorConfigurations(creationPackage);
   const lambda = async (operation, input) => {
     calls.push(`lambda:${operation}`);
     if (operation === "GetPolicy") throw Object.assign(new Error("absent"), { name: "ResourceNotFoundException" });
@@ -67,7 +71,7 @@ function fixture() {
       if (next && Number(input.Qualifier) > state.versionCount) throw Object.assign(new Error("absent"), { name: "ResourceNotFoundException" });
       assert(old || next); return { Configuration: { ...(old ? configs[old] : nextConfigs[next]), CodeSize: 1000, State: "Active", LastUpdateStatus: "Successful", RuntimeVersionConfig: { RuntimeVersionArn: runtime } } };
     }
-    if (operation === "UpdateFunctionCode") { assert.equal(state.codeSha, Buffer.from(partial.bindings.successor.packageSha256, "hex").toString("base64")); state.codeSha = Buffer.from(packageEvidence.packageSha256, "hex").toString("base64"); return {}; }
+    if (operation === "UpdateFunctionCode") { assert.equal(state.codeSha, Buffer.from(partial.bindings.successor.packageSha256, "hex").toString("base64")); state.codeSha = Buffer.from(creationPackage.packageSha256, "hex").toString("base64"); return {}; }
     if (operation === "UpdateFunctionConfiguration") { state.description = input.Description; return {}; }
     if (operation === "PublishVersion") { assert.equal(input.Description, nextConfigs[Object.keys(brokerSignerSuccessorEntryPoints)[state.versionCount - 12]].Description); state.versionCount++; return {}; }
     if (operation === "GetFunctionConcurrency") return { ReservedConcurrentExecutions: 1 };
@@ -93,12 +97,12 @@ function fixture() {
   const approval = approveBrokerRecoverySuccessor({ ...governance, packageEvidence, firstClosure, resume: { reservationSha256: digest(partial), reservationEtagSha256: digest(secondEtag) } });
   const operatorProof = { account: identityBootstrap.account, region: identityBootstrap.region, sourceSha, transitionId: partial.transitionId, authorizationSha256: digest(approval), purpose: "BROKER_RECOVERY_SUCCESSOR", principal: `arn:aws:sts::${identityBootstrap.account}:assumed-role/mscqr-production-release-deployer/component-${partial.transitionId}`, issuedAt: new Date(now).toISOString(), expiresAt: new Date(now + 900000).toISOString(), issuanceEventId: "44444444-4444-4444-8444-444444444444", issuanceEventTime: new Date(now).toISOString(), operatorArn: `arn:aws:iam::${identityBootstrap.account}:user/mscqr-production-bootstrap-operator`, mfaAuthenticated: true };
   const execute = (authorization = approval, proof = operatorProof, at = now) => closeVerifiedBrokerRecoverySuccessor({ authorization, packageEvidence, operatorProof: proof }, { iam, lambda, s3, authenticate: async () => {}, now: () => at });
-  return { approval, bootstrap, calls, etags, execute, firstClosure, governance, iam, lambda, metadata, objects, operatorProof, packageEvidence, partial, readEvidence, s3, state, writes };
+  return { approval, bootstrap, calls, creationPackage, etags, execute, firstClosure, governance, iam, lambda, metadata, objects, operatorProof, packageEvidence, partial, readEvidence, s3, state, writes };
 }
 
 test("new immutable broker authenticates pending and compact journals before operation dispatch", async () => {
-  const f = fixture(), context = { functionVersion: "13", invokedFunctionArn: `${componentBrokerArn}:13` };
-  f.state.versionCount = 15; f.state.codeSha = Buffer.from(f.packageEvidence.packageSha256, "hex").toString("base64");
+  const f = fixture(15), context = { functionVersion: "13", invokedFunctionArn: `${componentBrokerArn}:13` };
+  f.state.codeSha = Buffer.from(f.packageEvidence.packageSha256, "hex").toString("base64");
   for (const identity of brokerSignerSuccessorManagedIdentities()) f.state.policies.set(identity.role, identity.policy);
   const run = () => executeFixedBroker({ operation: "SIGNER_AUTHORIZE" }, context, { manifest: f.packageEvidence.manifest, iam: f.iam, lambda: f.lambda, s3: f.s3 });
   await assert.rejects(run(), /pending lineage; operations require completed closure/);
@@ -131,7 +135,7 @@ test("live VERIFIED 10/11/12 partial publishes only 13/14/15 and switches exact 
 
 test("exact partial compatible generations and IAM policies resume without duplicate writes", async () => {
   for (const versionCount of [13, 14, 15]) {
-    const f = fixture(); f.state.versionCount = versionCount;
+    const f = fixture(versionCount);
     f.state.codeSha = Buffer.from(f.packageEvidence.packageSha256, "hex").toString("base64");
     for (const identity of brokerSignerSuccessorManagedIdentities().slice(0, 2)) f.state.policies.set(identity.role, identity.policy);
     await f.execute();
@@ -139,6 +143,26 @@ test("exact partial compatible generations and IAM policies resume without dupli
     assert.equal(f.calls.filter(value => value === "iam:PutRolePolicy").length, 3);
     assert.match(f.metadata.get(journalKey)[brokerRecoverySuccessor.metadataKey], /^sha256:[a-f0-9]{64}$/);
   }
+});
+
+test("protected-main advance preserves original immutable creation evidence after each partial publication", async () => {
+  for (const versionCount of [13, 14, 15]) {
+    const f = fixture(versionCount, true);
+    await f.execute();
+    assert.equal(f.calls.filter(value => value === "lambda:UpdateFunctionCode").length, 0);
+    assert.equal(f.calls.filter(value => value === "lambda:PublishVersion").length, 15 - versionCount);
+    assert.equal(f.objects.get(brokerRecoverySuccessor.reservationKey).compatibleSignerCreation.sourceSha, "a".repeat(40));
+    assert.equal(f.approval.successor.sourceSha, "b".repeat(40));
+    assert.equal(f.metadata.get(journalKey)[brokerRecoverySuccessor.metadataKey].startsWith("sha256:"), true);
+  }
+});
+
+test("source advance resumes original staged code before the first immutable publication", async () => {
+  const f = fixture(12, true, true);
+  await f.execute();
+  assert.equal(f.calls.filter(value => value === "lambda:UpdateFunctionCode").length, 0);
+  assert.equal(f.calls.filter(value => value === "lambda:PublishVersion").length, 3);
+  assert.equal(f.objects.get(brokerRecoverySuccessor.reservationKey).compatibleSignerCreation.sourceSha, "a".repeat(40));
 });
 
 test("incompatible active invocation policy is rejected before bootstrap closure write", async () => {

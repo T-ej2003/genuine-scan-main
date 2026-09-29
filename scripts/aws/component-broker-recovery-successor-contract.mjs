@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { brokerConfiguration, brokerPolicySuccessorEntryPoints, brokerRecoverySuccessorEntryPoints } from "./component-broker-configuration.mjs";
+import { brokerConfiguration, brokerPolicySuccessorEntryPoints, brokerRecoverySuccessorEntryPoints, brokerSignerSuccessorEntryPoints } from "./component-broker-configuration.mjs";
 import { canonical, digest, installationIdentity, terraformExecutorPolicyGeneration } from "./component-iam-installation-contract.mjs";
 import { brokerPolicySuccessorManagedIdentities, brokerRecoverySuccessorManagedIdentities, componentBrokerArn, componentRoleArn, identityBootstrap } from "./component-installation-identity-contract.mjs";
 
@@ -30,8 +30,41 @@ export const recoveryClosurePredecessor = Object.freeze({
   initialReservationSha256: "2a28491074b92cb234d1c79efbab156c2b3e245a76f885f36d215da5d66df99f",
 });
 
+// Persisted before the first immutable continuation publication. A later
+// protected-main authorization may own the retry, but cannot relabel the
+// already-published package as its own source.
+export function compatibleSignerCreation(packageEvidence, transitionId, authorizationSha256) {
+  assert.equal(digest(packageEvidence.manifest), packageEvidence.manifestSha256);
+  const configurations = Object.fromEntries(Object.keys(brokerSignerSuccessorEntryPoints).map(entryPoint => [entryPoint,
+    brokerConfiguration({ packageSha256: packageEvidence.packageSha256, manifestSha256: packageEvidence.manifestSha256, entryPoint, entryPoints: brokerSignerSuccessorEntryPoints })]));
+  return { schemaVersion: 1, transitionId, authorizationSha256, sourceSha: packageEvidence.manifest.sourceSha,
+    manifest: packageEvidence.manifest, manifestSha256: packageEvidence.manifestSha256,
+    packageSha256: packageEvidence.packageSha256, configurations, configurationSetSha256: digest(configurations) };
+}
+
+export function assertCompatibleSignerCreation(value, record) {
+  assert.deepEqual(Object.keys(value || {}).sort(), ["authorizationSha256", "configurations", "configurationSetSha256", "manifest", "manifestSha256", "packageSha256", "schemaVersion", "sourceSha", "transitionId"].sort());
+  assert.equal(value.schemaVersion, 1); assert.equal(value.transitionId, record.transitionId);
+  assert.match(value.sourceSha || "", /^[a-f0-9]{40}$/); sha(value.authorizationSha256); sha(value.packageSha256); sha(value.manifestSha256); sha(value.configurationSetSha256);
+  assert.equal(value.manifest?.sourceSha, value.sourceSha);
+  assert.equal(value.authorizationSha256 === record.authorizationSha256 || record.authorizationHistory.some(prior => prior.authorizationSha256 === value.authorizationSha256), true, "Continuation creation authorization is outside fenced lineage");
+  assert.equal(digest(value.manifest), value.manifestSha256);
+  assert.equal(digest(value.configurations), value.configurationSetSha256);
+  assert.deepEqual(Object.keys(value.configurations || {}).sort(), Object.keys(brokerSignerSuccessorEntryPoints).sort());
+  for (const [entryPoint, version] of Object.entries(brokerSignerSuccessorEntryPoints)) {
+    const config = value.configurations[entryPoint];
+    assert.equal(config.FunctionName, installationIdentity.functionName);
+    assert.equal(config.FunctionArn, `${componentBrokerArn}:${version}`);
+    assert.equal(config.Version, version);
+    assert.equal(config.CodeSha256, Buffer.from(value.packageSha256, "hex").toString("base64"));
+    assert.equal(config.Description, `Component installation ${entryPoint} ${value.manifestSha256}`);
+    assert.equal(config.Role, componentRoleArn(installationIdentity.provisionerRole));
+  }
+  return { manifest: value.manifest, manifestSha256: value.manifestSha256, packageSha256: value.packageSha256, configurations: value.configurations };
+}
+
 export function assertVerifiedRecoveryClosurePredecessor(record, firstClosure) {
-  assert.deepEqual(Object.keys(record || {}).sort(), ["authorizationExpiresAt", "authorizationHistory", "authorizationSha256", "bindings", "owner", "schemaVersion", "sessionExpiresAt", "state", "transitionId"].sort());
+  assert.deepEqual(Object.keys(record || {}).sort(), ["authorizationExpiresAt", "authorizationHistory", "authorizationSha256", "bindings", ...(Object.hasOwn(record || {}, "compatibleSignerCreation") ? ["compatibleSignerCreation"] : []), "owner", "schemaVersion", "sessionExpiresAt", "state", "transitionId"].sort());
   assert.equal(record.schemaVersion, 1); assert.equal(record.state, "VERIFIED");
   assert.equal(record.transitionId, recoveryClosurePredecessor.transitionId);
   assert.equal(record.bindings?.successor?.sourceSha, recoveryClosurePredecessor.sourceSha);
@@ -39,7 +72,8 @@ export function assertVerifiedRecoveryClosurePredecessor(record, firstClosure) {
   assert.deepEqual(record.bindings.firstClosure, firstClosure);
   assert(Array.isArray(record.authorizationHistory));
   if (record.authorizationHistory.length === 0) {
-    assert.equal(digest(record), recoveryClosurePredecessor.initialReservationSha256);
+    const { compatibleSignerCreation: _creation, ...historical } = record;
+    assert.equal(digest(historical), recoveryClosurePredecessor.initialReservationSha256);
   } else {
     assert.deepEqual(record.authorizationHistory[0], {
       authorizationSha256: recoveryClosurePredecessor.authorizationSha256,
@@ -53,6 +87,7 @@ export function assertVerifiedRecoveryClosurePredecessor(record, firstClosure) {
   }
   uuid(record.owner); sha(record.authorizationSha256);
   for (const field of ["authorizationExpiresAt", "sessionExpiresAt"]) assert.equal(new Date(Date.parse(record[field])).toISOString(), record[field]);
+  if (record.compatibleSignerCreation) assertCompatibleSignerCreation(record.compatibleSignerCreation, record);
   return record.bindings;
 }
 
@@ -156,8 +191,9 @@ export function assertBrokerRecoverySuccessorClosureMetadata(metadata, bindings,
 }
 
 export function authenticateSecondSuccessorReservation(value, closure, reservationEtag) {
-  assert.deepEqual(Object.keys(value || {}).sort(), ["authorizationExpiresAt", "authorizationHistory", "authorizationSha256", "bindings", "owner", "schemaVersion", "sessionExpiresAt", "state", "transitionId"].sort());
+  assert.deepEqual(Object.keys(value || {}).sort(), ["authorizationExpiresAt", "authorizationHistory", "authorizationSha256", "bindings", ...(Object.hasOwn(value || {}, "compatibleSignerCreation") ? ["compatibleSignerCreation"] : []), "owner", "schemaVersion", "sessionExpiresAt", "state", "transitionId"].sort());
   assert.equal(value.schemaVersion, 1); assert.equal(value.state, "VERIFIED"); uuid(value.transitionId); sha(value.authorizationSha256);
+  if (value.compatibleSignerCreation) assertCompatibleSignerCreation(value.compatibleSignerCreation, value);
   assert.equal(value.transitionId, closure.transitionId); assert.equal(value.authorizationSha256, closure.authorizationSha256);
   assert.equal(digest(value), closure.reservationSha256, "Historical second-successor reservation digest differs");
   assert(typeof reservationEtag === "string" && reservationEtag); assert.equal(digest(reservationEtag), closure.reservationEtagSha256, "Historical second-successor reservation ETag differs");

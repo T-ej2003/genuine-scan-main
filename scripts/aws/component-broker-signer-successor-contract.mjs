@@ -37,7 +37,7 @@ export function brokerSignerSuccessorBindings(packageEvidence, secondClosure) {
   assert.deepEqual(Object.keys(secondClosure.runtimeVersions).sort(), Object.values(brokerRecoverySuccessorEntryPoints));
   const predecessor = brokerRecoverySuccessorManagedIdentities(), successor = brokerSignerSuccessorManagedIdentities();
   const identity = role => { const old = predecessor.find(value => value.role === role), next = successor.find(value => value.role === role); assert(old && next && old.policyName === next.policyName); return { role, policyName: old.policyName, predecessorPolicySha256: old.policySha256, successorPolicySha256: next.policySha256 }; };
-  const configurations = brokerSignerSuccessorConfigurations(packageEvidence);
+  const configurations = packageEvidence.configurations || brokerSignerSuccessorConfigurations(packageEvidence);
   return Object.freeze({
     secondClosure, predecessor: { entryPoints: brokerRecoverySuccessorEntryPoints, policySha256: signerSuccessorPredecessorPolicySha256 },
     successor: { sourceSha: packageEvidence.manifest.sourceSha, packageSha256: packageEvidence.packageSha256, manifestSha256: packageEvidence.manifestSha256, lambdaCodeSha256: Buffer.from(packageEvidence.packageSha256, "hex").toString("base64"), entryPoints: brokerSignerSuccessorEntryPoints, policySha256: signerSuccessorExecutorPolicySha256, configurationSetSha256: digest(configurations), identitySetSha256: digest(successor) },

@@ -8,11 +8,11 @@ import { cleanSource } from "./component-iam-installation.mjs";
 import { buildComponentBrokerPackage } from "./component-broker-package.mjs";
 import { authenticateBrokerRecoverySuccessorPublication } from "./component-iam-authorization.mjs";
 import { closeVerifiedBrokerRecoverySuccessor, executeBrokerRecoverySuccessor } from "./component-broker-recovery-successor.mjs";
-import { brokerRecoverySuccessorCapabilitySet, brokerRecoverySuccessorConfigurations } from "./component-broker-recovery-successor-contract.mjs";
+import { assertCompatibleSignerCreation, brokerRecoverySuccessor, brokerRecoverySuccessorCapabilitySet, brokerRecoverySuccessorConfigurations } from "./component-broker-recovery-successor-contract.mjs";
 import { brokerSignerSuccessorConfigurations } from "./component-broker-signer-successor-contract.mjs";
 import { authenticateBootstrapOperator } from "./component-bootstrap-operator.mjs";
 import { brokerRecoverySuccessorManagedIdentities, brokerSignerSuccessorManagedIdentities, componentBrokerArn, identityBootstrap } from "./component-installation-identity-contract.mjs";
-import { canonical, installationIdentity } from "./component-iam-installation-contract.mjs";
+import { canonical, digest, installationIdentity } from "./component-iam-installation-contract.mjs";
 import { createBrokerPolicySuccessorRootMfaSession } from "./component-broker-policy-successor-root-mfa.mjs";
 
 const sdk = createRequire(new URL("../../infra/aws/terraform/production-component-deployment-state/broker-package/package.json", import.meta.url));
@@ -87,7 +87,14 @@ export async function lookupCloudTrailEvents({ lookup, eventName, now = Date.now
   return values;
 }
 
-export async function administrativeAdapter(packageEvidence, { root = createBrokerPolicySuccessorRootMfaSession, now = Date.now, sleep = delay, compatible = false } = {}) {
+export function compatiblePublicationEvidence(packageEvidence, resume, reservation, etag) {
+  if (!resume) return packageEvidence;
+  assert.equal(digest(reservation), resume.reservationSha256, "Authorized recovery reservation differs");
+  assert.equal(digest(etag), resume.reservationEtagSha256, "Authorized recovery reservation version differs");
+  return reservation.compatibleSignerCreation ? assertCompatibleSignerCreation(reservation.compatibleSignerCreation, reservation) : packageEvidence;
+}
+
+export async function administrativeAdapter(packageEvidence, { root = createBrokerPolicySuccessorRootMfaSession, now = Date.now, sleep = delay, compatible = false, resume } = {}) {
   const session = await root(), credentials = session.credentials;
   const clients = [], create = (service, name, endpoint, region = identityBootstrap.region) => { const library = sdk(`@aws-sdk/client-${service}`), client = new library[`${name}Client`]({ credentials, region, endpoint, maxAttempts: 1 }); clients.push(client); return async (operation, input = {}) => client.send(new library[`${operation}Command`](input)); };
   try {
@@ -99,7 +106,12 @@ export async function administrativeAdapter(packageEvidence, { root = createBrok
     await convergeRootMfaIssuance({ events, accessKeyId, rootExpires, mfaSerial: session.mfaSerial, durationSeconds: session.durationSeconds, now, sleep });
     await convergeRootMfaSessionProof({ events, accessKeyId, rootExpires, now, sleep });
     const permitted = new Set(brokerRecoverySuccessorCapabilitySet().Statement.flatMap(({ Action }) => [].concat(Action)));
-    const configurations = [...Object.values(brokerRecoverySuccessorConfigurations(packageEvidence)), ...(compatible ? Object.values(brokerSignerSuccessorConfigurations(packageEvidence)) : [])];
+    let publicationEvidence = packageEvidence;
+    if (resume) {
+      const reservationObject = await create("s3", "S3", "https://s3.eu-west-2.amazonaws.com")("GetObject", { Bucket: identityBootstrap.bucket, Key: brokerRecoverySuccessor.reservationKey });
+      publicationEvidence = compatiblePublicationEvidence(packageEvidence, resume, JSON.parse(await reservationObject.Body.transformToString()), reservationObject.ETag);
+    }
+    const configurations = [...Object.values(brokerRecoverySuccessorConfigurations(packageEvidence)), ...(compatible ? Object.values(publicationEvidence.configurations || brokerSignerSuccessorConfigurations(publicationEvidence)) : [])];
     const confined = (service, name, endpoint, region) => { const send = create(service, name, endpoint, region); return (operation, input = {}) => {
       const action = `${service}:${service === "s3" && operation === "ListObjectsV2" ? "ListBucket" : operation}`; assert(permitted.has(action), "Unsupported broker recovery successor API");
       if (service === "lambda") {
@@ -120,7 +132,7 @@ export async function run(argv = process.argv.slice(2), { source = cleanSource, 
   const [mode, runId, transitionId] = argv; assert.deepEqual([mode, argv.length], ["execute", 3]); assert.match(runId || "", /^[1-9][0-9]*$/); assert.match(transitionId || "", /^[a-f0-9-]{36}$/);
   const sourceSha = source(), packageEvidence = await build(); assert.equal(packageEvidence.manifest.sourceSha, sourceSha);
   const approved = authorize({ runId, transitionId, sourceSha }, packageEvidence), { authorizationSha256, ...authorization } = approved; assert.equal(source(), sourceSha);
-  const authority = await admin(packageEvidence, { compatible: true });
+  const authority = await admin(packageEvidence, { compatible: true, resume: authorization.resume });
   try { const operatorProof = await human({ sourceSha, transitionId, authorizationSha256, purpose: "BROKER_RECOVERY_SUCCESSOR" }, { issuanceEvents: authority.issuanceEvents }); const result = await (authorization.resume ? close : execute)({ authorization, packageEvidence, operatorProof }, { ...authority, authenticate: async () => { assert.equal(source(), sourceSha); await authority.authenticate(); } }); return { state: result.brokerRecoverySuccessor?.state || result.state, sourceSha, transitionId, authorizationSha256 }; }
   finally { authority.close(); }
 }

@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { buildComponentBrokerPackage } from "./component-broker-package.mjs";
 import { digest, installationIdentity } from "./component-iam-installation-contract.mjs";
 import { brokerSignerSuccessor, brokerSignerSuccessorBindings, brokerSignerSuccessorCapabilitySet } from "./component-broker-signer-successor-contract.mjs";
-import { assertBrokerRecoverySuccessorClosureMetadata, authenticateSecondSuccessorReservation, brokerRecoverySuccessor } from "./component-broker-recovery-successor-contract.mjs";
+import { assertBrokerRecoverySuccessorClosureMetadata, assertCompatibleSignerCreation, authenticateSecondSuccessorReservation, brokerRecoverySuccessor } from "./component-broker-recovery-successor-contract.mjs";
 import { identityBootstrap } from "./component-installation-identity-contract.mjs";
 import { createProductionAwsCredentialEnvironment, createProductionGithubCredentialEnvironment, productionAwsExecutable, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 
@@ -34,25 +34,27 @@ export function authenticateSecondSuccessorLineage({ reservation, reservationEta
   return Object.freeze({ reservation: Object.freeze(structuredClone(reservation)), closure: Object.freeze(structuredClone(closure)), bindings });
 }
 
-export function brokerSignerSuccessorSourceBindings(packageEvidence, secondClosure) {
-  const bindings = brokerSignerSuccessorBindings(packageEvidence, secondClosure);
-  return Object.freeze({ ...bindings, capabilitySetSha256: digest(brokerSignerSuccessorCapabilitySet()) });
+export function brokerSignerSuccessorSourceBindings(packageEvidence, secondClosure, creation) {
+  const runtime = assertCompatibleSignerCreation(creation, { transitionId: secondClosure.transitionId, authorizationSha256: creation?.authorizationSha256, authorizationHistory: [] });
+  const bindings = brokerSignerSuccessorBindings(runtime, secondClosure);
+  return Object.freeze({ ...bindings, creation, currentSource: { sourceSha: packageEvidence.manifest.sourceSha, packageSha256: packageEvidence.packageSha256, manifestSha256: packageEvidence.manifestSha256 }, capabilitySetSha256: digest(brokerSignerSuccessorCapabilitySet()) });
 }
 
-export function approveBrokerSignerSuccessor({ sourceSha, transitionId, runId, main, run, environment, branches, approvals, packageEvidence, secondClosure, now }) {
+export function approveBrokerSignerSuccessor({ sourceSha, transitionId, runId, main, run, environment, branches, approvals, packageEvidence, secondClosure, reservation, now }) {
   assert.match(sourceSha || "", /^[a-f0-9]{40}$/); assert.match(transitionId || "", uuid); assert.match(runId || "", /^[1-9][0-9]*$/); assert(Number.isFinite(now));
   assert.deepEqual({ name: main?.name, protected: main?.protected, sha: main?.commit?.sha }, { name: "main", protected: true, sha: sourceSha });
   assert.equal(run?.head_sha, sourceSha); assert.equal(run?.head_branch, "main"); assert.equal(run?.path, brokerSignerSuccessor.workflow); assert.equal(run?.event, "workflow_dispatch"); assert.equal(run?.status, "in_progress"); assert.equal(run?.run_attempt, 1); assert.equal(String(run?.id), runId);
   for (const repository of [run?.repository, run?.head_repository]) assert.deepEqual({ id: repository?.id, full_name: repository?.full_name }, { id: 1145608538, full_name: installationIdentity.repository });
   for (const value of [run?.actor, run?.triggering_actor]) assert.deepEqual({ type: value?.type, login: value?.login, id: value?.id }, actor);
   assertEnvironment(environment, branches, approvals);
-  const bindings = brokerSignerSuccessorSourceBindings(packageEvidence, secondClosure);
-  assert.equal(bindings.successor.sourceSha, sourceSha);
+  assertCompatibleSignerCreation(reservation?.compatibleSignerCreation, reservation);
+  const bindings = brokerSignerSuccessorSourceBindings(packageEvidence, secondClosure, reservation.compatibleSignerCreation);
+  assert.equal(bindings.currentSource.sourceSha, sourceSha);
   return Object.freeze({ schemaVersion: 1, transitionType: brokerSignerSuccessor.transitionType, account: "368992683803", region: "eu-west-2", ...bindings, transitionId, runId, environment: brokerSignerSuccessor.environment, operator: actor, reviewer: actor, approvalObservedAt: new Date(now).toISOString(), expiresAt: new Date(now + brokerSignerSuccessor.maxAgeMs).toISOString() });
 }
 
 export function assertBrokerSignerSuccessorAuthorization(value, packageEvidence, secondClosure, now) {
-  const bindings = brokerSignerSuccessorSourceBindings(packageEvidence, secondClosure);
+  const bindings = brokerSignerSuccessorSourceBindings(packageEvidence, secondClosure, value?.creation);
   const expected = { schemaVersion: 1, transitionType: brokerSignerSuccessor.transitionType, account: "368992683803", region: "eu-west-2", ...bindings,
     transitionId: value?.transitionId, runId: value?.runId, environment: brokerSignerSuccessor.environment, operator: actor, reviewer: actor,
     approvalObservedAt: value?.approvalObservedAt, expiresAt: value?.expiresAt };
@@ -68,7 +70,8 @@ export async function prepareBrokerSignerSuccessorAuthorization({ sourceSha, tra
   const candidate = packageEvidence || await buildComponentBrokerPackage(); assert.equal(candidate.manifest.sourceSha, sourceSha, "Candidate package source differs");
   const [reservation, bootstrap] = await Promise.all([readEvidence(brokerRecoverySuccessor.reservationKey), readEvidence(`${identityBootstrap.prefix}identity-bootstrap.json`)]);
   const lineage = authenticateSecondSuccessorLineage({ reservation: reservation.value, reservationEtag: reservation.etag, metadata: bootstrap.metadata, bootstrap: bootstrap.value });
-  const approval = approveBrokerSignerSuccessor({ sourceSha, transitionId, runId, main, run, environment, branches, approvals, packageEvidence: candidate, secondClosure: lineage.closure, now });
+  assertCompatibleSignerCreation(reservation.value.compatibleSignerCreation, reservation.value);
+  const approval = approveBrokerSignerSuccessor({ sourceSha, transitionId, runId, main, run, environment, branches, approvals, packageEvidence: candidate, secondClosure: lineage.closure, reservation: reservation.value, now });
   assertBrokerSignerSuccessorAuthorization(approval, candidate, lineage.closure, now);
   return Object.freeze({ approval, lineage });
 }

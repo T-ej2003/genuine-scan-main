@@ -3,8 +3,9 @@ import { createHash, randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { assertBrokerConfiguration, brokerConfiguration, brokerRecoverySuccessorEntryPoints, brokerSignerSuccessorEntryPoints } from "./component-broker-configuration.mjs";
 import { assertBrokerSignerSuccessorAuthorization, authenticateSecondSuccessorLineage } from "./component-broker-signer-successor-authorization.mjs";
-import { assertBrokerSignerSuccessorClosureMetadata, brokerSignerSuccessor, brokerSignerSuccessorBindings, brokerSignerSuccessorClosure, brokerSignerSuccessorConfigurations } from "./component-broker-signer-successor-contract.mjs";
+import { assertBrokerSignerSuccessorClosureMetadata, brokerSignerSuccessor, brokerSignerSuccessorBindings, brokerSignerSuccessorClosure } from "./component-broker-signer-successor-contract.mjs";
 import { assertS3UserMetadataSize } from "./component-broker-recovery-successor-contract.mjs";
+import { assertCompatibleSignerCreation } from "./component-broker-recovery-successor-contract.mjs";
 import { assertEffectiveBootstrapTrustAnchor } from "./component-bootstrap-trust-anchor.mjs";
 import { canonical, digest, installationIdentity } from "./component-iam-installation-contract.mjs";
 import { brokerRecoverySuccessorManagedIdentities, brokerSignerSuccessorManagedIdentities, identityBootstrap, inspectBrokerRecoverySuccessorIdentities, inspectBrokerSignerSuccessorIdentities } from "./component-installation-identity-contract.mjs";
@@ -24,11 +25,13 @@ export async function executeBrokerSignerSuccessor({ authorization, packageEvide
   const firstReservation = await readObject(`${identityBootstrap.prefix}broker-policy-successor.json`);
   const secondReservation = await readObject(`${identityBootstrap.prefix}broker-recovery-successor.json`), initialJournal = await readJournal();
   const lineage = authenticateSecondSuccessorLineage({ reservation: secondReservation.value, reservationEtag: secondReservation.etag, metadata: initialJournal.metadata, bootstrap: initialJournal.value });
+  const runtimeEvidence = assertCompatibleSignerCreation(secondReservation.value.compatibleSignerCreation, secondReservation.value);
   const approval = structuredClone(authorization), authorizationSha256 = assertBrokerSignerSuccessorAuthorization(approval, packageEvidence, lineage.closure, now());
+  assert.deepEqual(approval.creation, secondReservation.value.compatibleSignerCreation, "Signer creation evidence differs from recovery reservation");
   const human = structuredClone(operatorProof); assertComponentSessionRecord(human); assert.equal(human.purpose, "BROKER_SIGNER_SUCCESSOR");
-  for (const [field, value] of Object.entries({ sourceSha: approval.successor.sourceSha, transitionId: approval.transitionId, authorizationSha256 })) assert.equal(human[field], value);
+  for (const [field, value] of Object.entries({ sourceSha: approval.currentSource.sourceSha, transitionId: approval.transitionId, authorizationSha256 })) assert.equal(human[field], value);
   assert(Date.parse(human.issuanceEventTime) >= Date.parse(approval.approvalObservedAt) - 999);
-  const bindings = brokerSignerSuccessorBindings(packageEvidence, lineage.closure), owner = randomUUID();
+  const bindings = brokerSignerSuccessorBindings(runtimeEvidence, lineage.closure), owner = randomUUID();
   const authorize = async () => { assertBrokerSignerSuccessorAuthorization(approval, packageEvidence, lineage.closure, now()); assert(now() < Date.parse(human.expiresAt)); await authenticate(); };
   const put = async (key, value, condition, metadata) => {
     await authorize(); assertS3UserMetadataSize(metadata || {}); const input = { Bucket: identityBootstrap.bucket, Key: key, Body: canonical(value), ServerSideEncryption: "AES256", ...(metadata ? { Metadata: metadata } : {}), ...condition };
@@ -48,7 +51,7 @@ export async function executeBrokerSignerSuccessor({ authorization, packageEvide
     const listed = await versions(), prepublished = listed.length === 15;
     assert.deepEqual(listed, Array.from({ length: prepublished ? 15 : 12 }, (_, i) => String(i + 1)), "Signer predecessor generations differ");
     for (const [entryPoint, version] of Object.entries(brokerRecoverySuccessorEntryPoints)) assertBrokerConfiguration(await ready(version), oldConfigurations[entryPoint], await controls(version));
-    if (prepublished) for (const [entryPoint, version] of Object.entries(brokerSignerSuccessorEntryPoints)) assertBrokerConfiguration(await ready(version), brokerSignerSuccessorConfigurations(packageEvidence)[entryPoint], await controls(version));
+    if (prepublished) for (const [entryPoint, version] of Object.entries(brokerSignerSuccessorEntryPoints)) assertBrokerConfiguration(await ready(version), runtimeEvidence.configurations[entryPoint], await controls(version));
     const live = (prepublished ? brokerSignerSuccessorManagedIdentities() : brokerRecoverySuccessorManagedIdentities()).find(({ role }) => role === installationIdentity.terraformRole), policy = await iam("GetRolePolicy", { RoleName: live.role, PolicyName: live.policyName });
     assert.equal(digest(normalizeIamPolicyDocument(policy.PolicyDocument)), live.policySha256, "Signer predecessor executor policy differs");
     assert((await (prepublished ? inspectSuccessor : inspectPredecessor)(iam)).every(({ role, policy: state }) => role === "EXPECTED" && state === "EXPECTED"), "Signer predecessor identities differ");
@@ -72,9 +75,10 @@ export async function executeBrokerSignerSuccessor({ authorization, packageEvide
   const checkpoint = async state => { record = { ...record, state }; ({ etag: reservationEtag } = await put(brokerSignerSuccessor.reservationKey, record, { IfMatch: reservationEtag })); };
   const guard = async () => { await authorize(); const observed = await readReservation(); assert.equal(canonical(observed?.value), canonical(record), "Successor owner changed"); reservationEtag = observed.etag; };
   const mutate = async (service, operation, input, reconcile) => { await guard(); try { await service(operation, input); } catch {} await reconcile(); };
-  const successorConfigurations = brokerSignerSuccessorConfigurations(packageEvidence), successorCode = bindings.successor.lambdaCodeSha256;
+  const successorConfigurations = runtimeEvidence.configurations, successorCode = bindings.successor.lambdaCodeSha256;
   let latest = await ready();
   if (latest.Configuration.CodeSha256 !== successorCode) {
+    assert.equal(packageEvidence.packageSha256, runtimeEvidence.packageSha256, "Original immutable package bytes unavailable for publication");
     assert.equal(latest.Configuration.CodeSha256, Buffer.from(lineage.bindings.successor.packageSha256, "hex").toString("base64"));
     await mutate(lambda, "UpdateFunctionCode", { FunctionName: installationIdentity.functionName, ZipFile: Buffer.from(packageEvidence.bytes), Publish: false, RevisionId: latest.Configuration.RevisionId }, async () => { latest = await ready(); assert.equal(latest.Configuration.CodeSha256, successorCode); });
     await checkpoint("CODE_UPDATED");
@@ -128,6 +132,6 @@ export async function executeBrokerSignerSuccessor({ authorization, packageEvide
   const closure = brokerSignerSuccessorClosure(record, bindings, runtimeVersions, reservationEtag, closedAt, currentJournal.metadata);
   const closedBody = { ...currentJournal.value, brokerSignerSuccessorClosure: closure.value };
   await put(journalKey, closedBody, { IfMatch: currentJournal.etag }, closure.metadata); assertBrokerSignerSuccessorClosureMetadata(closure.metadata, bindings, record, reservationEtag, closedBody);
-  const closedJournal = await readJournal(); verifyEffective(closedJournal.value, packageEvidence.manifest, packageEvidence.packageSha256, closedJournal.metadata, firstReservation, secondReservation, { value: record, etag: reservationEtag });
+  const closedJournal = await readJournal(); verifyEffective(closedJournal.value, runtimeEvidence.manifest, runtimeEvidence.packageSha256, closedJournal.metadata, firstReservation, secondReservation, { value: record, etag: reservationEtag });
   return { ...closedJournal.value, brokerSignerSuccessor: finalRecord };
 }

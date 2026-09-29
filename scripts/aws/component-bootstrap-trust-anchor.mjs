@@ -3,7 +3,7 @@ import { bootstrapPartialStateDigest, bootstrapRecoveryOperations, completedBoot
 import { brokerChangeConfigurationSha256, brokerChangeOperations, brokerChangePredecessor } from "./component-broker-change-contract.mjs";
 import { brokerChangeEntryPoints, brokerEntryPoints, brokerPolicySuccessorEntryPoints, brokerRecoverySuccessorEntryPoints, brokerSignerSuccessorEntryPoints } from "./component-broker-configuration.mjs";
 import { assertBrokerPolicySuccessorClosureMetadata, brokerPolicySuccessorBindings, brokerPolicySuccessorMetadataKey } from "./component-broker-policy-successor-contract.mjs";
-import { assertBrokerRecoverySuccessorClosureMetadata, assertVerifiedRecoveryClosurePredecessor, authenticateFirstSuccessorReservation, authenticateSecondSuccessorReservation, brokerRecoverySuccessor, brokerRecoverySuccessorBindings, compactClosureMetadata } from "./component-broker-recovery-successor-contract.mjs";
+import { assertBrokerRecoverySuccessorClosureMetadata, assertCompatibleSignerCreation, assertVerifiedRecoveryClosurePredecessor, authenticateFirstSuccessorReservation, authenticateSecondSuccessorReservation, brokerRecoverySuccessor, brokerRecoverySuccessorBindings, compactClosureMetadata } from "./component-broker-recovery-successor-contract.mjs";
 import { assertBrokerSignerSuccessorClosureMetadata, brokerSignerSuccessor, brokerSignerSuccessorBindings } from "./component-broker-signer-successor-contract.mjs";
 import { digest } from "./component-iam-installation-contract.mjs";
 import { bootstrapManagedIdentities, brokerChangeManagedIdentities, brokerPolicySuccessorManagedIdentities, componentBrokerArn } from "./component-installation-identity-contract.mjs";
@@ -135,6 +135,9 @@ function assertBrokerSignerSuccessorClosure(bootstrap, manifest, packageSha256, 
   const secondEncoded = metadata[brokerRecoverySuccessor.metadataKey];
   const secondClosure = /^sha256:[a-f0-9]{64}$/.test(secondEncoded || "") ? bootstrap.brokerRecoverySuccessorClosure : JSON.parse(Buffer.from(secondEncoded, "base64url").toString("utf8"));
   const secondBindings = authenticateSecondSuccessorReservation(secondReservation.value, secondClosure, secondReservation.etag);
+  const creation = assertCompatibleSignerCreation(secondReservation.value.compatibleSignerCreation, secondReservation.value);
+  assert.equal(creation.packageSha256, packageSha256, "Signer runtime differs from authenticated creation package");
+  assert.equal(creation.manifestSha256, digest(manifest), "Signer runtime manifest differs from authenticated creation package");
   assertBrokerRecoverySuccessorClosureMetadata({ [brokerPolicySuccessorMetadataKey]: metadata[brokerPolicySuccessorMetadataKey], [brokerRecoverySuccessor.metadataKey]: secondEncoded }, secondBindings, secondReservation.value, secondReservation.etag, bootstrap);
   assert.equal(digest(secondBindings), secondClosure.bindingsSha256);
   assert.equal(digest(secondBindings.firstClosure), digest(firstClosure), "Second successor does not bind the authenticated first closure");
@@ -217,8 +220,11 @@ export function assertEffectiveBootstrapTrustAnchor(bootstrap, manifest, package
       ? brokerRecoverySuccessorBindings({ manifest, manifestSha256: digest(manifest), packageSha256 }, firstClosure)
       : assertVerifiedRecoveryClosurePredecessor(pending, firstClosure);
     assert.equal(pending?.schemaVersion, 1); assert.equal(pending?.state, "VERIFIED");
-    assert.deepEqual(Object.keys(pending || {}).sort(), ["authorizationExpiresAt", "authorizationHistory", "authorizationSha256", "bindings", "owner", "schemaVersion", "sessionExpiresAt", "state", "transitionId"].sort());
+    assert.deepEqual(Object.keys(pending || {}).sort(), ["authorizationExpiresAt", "authorizationHistory", "authorizationSha256", "bindings", "compatibleSignerCreation", "owner", "schemaVersion", "sessionExpiresAt", "state", "transitionId"].sort());
     assert.deepEqual(pending.bindings, bindings, "Pending signer lineage bindings differ");
+    const creation = assertCompatibleSignerCreation(pending.compatibleSignerCreation, pending);
+    assert.equal(creation.packageSha256, packageSha256, "Pending signer runtime differs from creation package");
+    assert.equal(creation.manifestSha256, digest(manifest), "Pending signer manifest differs from creation package");
     uuid(pending.transitionId); uuid(pending.owner); sha256(pending.authorizationSha256);
     timestamp(pending.authorizationExpiresAt); timestamp(pending.sessionExpiresAt);
     assert(Array.isArray(pending.authorizationHistory)); const owners = new Set([pending.owner]), authorizations = new Set([pending.authorizationSha256]);

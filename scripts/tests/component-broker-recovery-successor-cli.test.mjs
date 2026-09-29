@@ -1,10 +1,27 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { assertBrokerRecoverySuccessorIamRequest, assertBrokerRecoverySuccessorS3Request, classifyRecoverySuccessorFailure, run } from "../aws/component-broker-recovery-successor-cli.mjs";
-import { brokerRecoverySuccessor } from "../aws/component-broker-recovery-successor-contract.mjs";
+import { assertBrokerRecoverySuccessorIamRequest, assertBrokerRecoverySuccessorS3Request, classifyRecoverySuccessorFailure, compatiblePublicationEvidence, run } from "../aws/component-broker-recovery-successor-cli.mjs";
+import { brokerRecoverySuccessor, compatibleSignerCreation } from "../aws/component-broker-recovery-successor-contract.mjs";
 import { brokerRecoverySuccessorManagedIdentities, brokerSignerSuccessorManagedIdentities, identityBootstrap } from "../aws/component-installation-identity-contract.mjs";
-import { canonical } from "../aws/component-iam-installation-contract.mjs";
+import { canonical, digest } from "../aws/component-iam-installation-contract.mjs";
+import { componentBrokerPackageManifest } from "../aws/component-broker-package.mjs";
+
+test("root adapter pins original publication package to exact authorized reservation", () => {
+  const evidence = sourceSha => { const manifest = componentBrokerPackageManifest(sourceSha); return { manifest, manifestSha256: digest(manifest), packageSha256: sourceSha.slice(0, 1).repeat(64) }; };
+  const original = evidence("a".repeat(40)), current = evidence("b".repeat(40)), transitionId = "12345678-1234-4234-8234-123456789abc", authorizationSha256 = "c".repeat(64), etag = '"original"';
+  const record = { transitionId, authorizationSha256, authorizationHistory: [], compatibleSignerCreation: compatibleSignerCreation(original, transitionId, authorizationSha256) };
+  const resume = { reservationSha256: digest(record), reservationEtagSha256: digest(etag) };
+  assert.deepEqual(compatiblePublicationEvidence(current, resume, record, etag), { ...original, configurations: record.compatibleSignerCreation.configurations });
+  assert.throws(() => compatiblePublicationEvidence(current, resume, record, '"other"'));
+  assert.throws(() => compatiblePublicationEvidence(current, { ...resume, reservationSha256: "0".repeat(64) }, record, etag));
+  for (const mutation of [
+    value => { value.compatibleSignerCreation.transitionId = "55555555-5555-4555-8555-555555555555"; },
+    value => { value.compatibleSignerCreation.packageSha256 = "d".repeat(64); },
+    value => { value.compatibleSignerCreation.authorizationSha256 = "d".repeat(64); },
+  ]) { const altered = structuredClone(record); mutation(altered); assert.throws(() => compatiblePublicationEvidence(current, { ...resume, reservationSha256: digest(altered) }, altered, etag)); }
+  assert.deepEqual(compatiblePublicationEvidence(current, null), current);
+});
 
 test("recovery successor root adapter permits only the five exact successor policy writes", () => {
   const identities = brokerRecoverySuccessorManagedIdentities();
