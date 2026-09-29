@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { canonicalJson } from "./production-green-stage-b-contract.mjs";
 import { INSTALLATION, assertInstallationPlan, assertInstallationPlanConfiguration, assertInstallationStateResources } from "./production-initial-activation-reconciler-installation-contract.mjs";
-import { assertStateObject } from "./production-initial-activation-reconciler-state-reconciliation.mjs";
+import { assertRefreshOnlyResourceChangeActions, assertStateObject } from "./production-initial-activation-reconciler-state-reconciliation.mjs";
 import { PRODUCTION_ENVIRONMENT_APPROVAL, assertProductionEnvironmentActualReviewer, assertProductionEnvironmentApprovalFreshness, assertProductionEnvironmentApprovalIdentity } from "./production-github-environment-approval.mjs";
 
 const sha256 = (value) => crypto.createHash("sha256").update(Buffer.isBuffer(value) ? value : Buffer.from(canonicalJson(value))).digest("hex");
@@ -74,12 +74,12 @@ const successor = (bytes, inline) => {
 export function assertSignerRefreshOnlyPlan(plan, stateBytes) {
   if (!plan || plan.format_version !== "1.2" || plan.terraform_version !== INSTALLATION.terraformVersion || plan.errored !== false || plan.complete !== true || plan.applyable !== true) throw new Error("Signer refresh-only plan envelope is invalid.");
   assertInstallationPlanConfiguration(plan);
-  if (!Buffer.isBuffer(stateBytes) || !Array.isArray(plan.resource_drift) || plan.resource_drift.length !== 1 || plan.resource_changes !== undefined && !Array.isArray(plan.resource_changes) || Object.values(plan.output_changes || {}).some((change) => !noOutputChange(change))) throw new Error("Signer refresh-only plan contains additional state or remote changes.");
+  if (!Buffer.isBuffer(stateBytes) || !Array.isArray(plan.resource_drift) || plan.resource_drift.length !== 1 || Object.values(plan.output_changes || {}).some((change) => !noOutputChange(change))) throw new Error("Signer refresh-only plan contains additional state or remote changes.");
+  assertRefreshOnlyResourceChangeActions(plan, { allowRead: false });
   const seen = new Set();
   for (const entry of plan.resource_changes || []) {
-    const expectedAddress = `${entry?.type}.${entry?.name}`;
     const change = entry?.change;
-    if (entry?.address !== expectedAddress || entry?.mode !== "managed" || entry?.provider_name !== "registry.terraform.io/hashicorp/aws" || !INSTALLATION.expectedAddresses.includes(entry.address) || seen.has(entry.address) || canonicalJson(change?.actions) !== canonicalJson(["no-op"]) || canonicalJson(change.before) !== canonicalJson(change.after) || canonicalJson(change.after_unknown) !== canonicalJson({}) || canonicalJson(change.before_sensitive) !== canonicalJson(change.after_sensitive)) throw new Error("Signer refresh-only plan contains an unauthenticated or actionable resource change.");
+    if (entry?.address !== `${entry?.type}.${entry?.name}` || entry?.mode !== "managed" || entry?.provider_name !== "registry.terraform.io/hashicorp/aws" || !INSTALLATION.expectedAddresses.includes(entry.address) || seen.has(entry.address) || canonicalJson(change.before) !== canonicalJson(change.after) || canonicalJson(change.after_unknown) !== canonicalJson({}) || canonicalJson(change.before_sensitive) !== canonicalJson(change.after_sensitive)) throw new Error("Signer refresh-only no-op resource is not exact.");
     seen.add(entry.address);
   }
   const entry = plan.resource_drift[0];

@@ -44,15 +44,18 @@ test("captured Terraform signer reflection is exactly one state-only transition"
 
 test("captured Terraform no-op resource changes remain non-actionable", () => {
   const captured = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-initial-activation-reconciler-plan-complete.json", "utf8"));
-  const unchanged = captured.resource_changes.filter(({ change }) => change.actions.join() === "no-op");
-  const candidate = plan(); candidate.resource_changes = structuredClone(unchanged);
+  const candidate = plan(); candidate.resource_changes = currentInstallationPlan(captured).resource_changes;
+  for (const entry of candidate.resource_changes) { entry.change.actions = ["no-op"]; entry.change.before = structuredClone(entry.change.after); entry.change.before_sensitive = structuredClone(entry.change.after_sensitive); entry.change.after_unknown = {}; }
   assert.equal(assertSignerRefreshOnlyPlan(candidate, before).remoteMutationCount, 0);
+  const subset = structuredClone(candidate); subset.resource_changes = subset.resource_changes.slice(0, 2);
+  assert.equal(assertSignerRefreshOnlyPlan(subset, before).remoteMutationCount, 0);
   for (const mutate of [
-    (p) => { p.resource_changes[0].change.actions = ["update"]; },
+    ...[["update"], ["create"], ["delete"], ["delete", "create"], ["read"], ["unexpected"]].map((actions) => (p) => { p.resource_changes[0].change.actions = actions; }),
     (p) => { p.resource_changes[0].change.after.name = "wrong"; },
     (p) => { p.resource_changes[0].address = "aws_iam_role.unrelated"; },
     (p) => { p.resource_changes.push(structuredClone(p.resource_changes[0])); },
     (p) => { p.resource_changes[0].change.after_unknown = { id: true }; },
+    (p) => { p.resource_changes.push({ ...structuredClone(p.resource_changes[0]), address: "aws_iam_role.unrelated" }); },
   ]) { const wrong = structuredClone(candidate); mutate(wrong); assert.throws(() => assertSignerRefreshOnlyPlan(wrong, before)); }
 });
 
