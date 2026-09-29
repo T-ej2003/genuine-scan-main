@@ -40,6 +40,7 @@ export const PRODUCTION_ENVIRONMENT_APPROVAL = Object.freeze({
   installationBootstrapEnvironment: "production-initial-activation-reconciler-bootstrap",
   signerPolicyTransitionEnvironment: "production-signer-policy-transition",
   signerPolicyTransitionWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/production-signer-policy-transition.yml@refs/heads/main",
+  signerLedgerAbsenceWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-signer-ledger-absence.yml@refs/heads/main",
   eventName: "workflow_dispatch",
   maxAgeMs: 30 * 60 * 1000,
 });
@@ -73,6 +74,7 @@ const approvedWorkflowRefs = new Set([
   PRODUCTION_ENVIRONMENT_APPROVAL.exactCompleteStateReconciliationWorkflowRef,
   PRODUCTION_ENVIRONMENT_APPROVAL.exactCompleteStateReconciliationRecoveryWorkflowRef,
   PRODUCTION_ENVIRONMENT_APPROVAL.signerPolicyTransitionWorkflowRef,
+  PRODUCTION_ENVIRONMENT_APPROVAL.signerLedgerAbsenceWorkflowRef,
 ]);
 
 const environmentForWorkflow = (workflowRef) => workflowRef === PRODUCTION_ENVIRONMENT_APPROVAL.bootstrapOperatorPolicyReconciliationWorkflowRef

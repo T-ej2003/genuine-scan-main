@@ -109,6 +109,13 @@ BOOTSTRAP_PROFILE=mscqr-production-bootstrap-mfa
 
 Authorize installation through the solo-operator protected environment:
 
+Before the first authorization while the signer ledger is absent, run the
+read-only preparation in [the exact-ledger absence repair](MSCQR_PRODUCTION_SIGNER_LEDGER_ABSENCE_READ-v1.md).
+If it reports `EXACT_PREDECESSOR`, complete that fixed, protected bucket-policy
+transition and verify `CONVERGED` before continuing. If it reports
+`EXACT_SUCCESSOR`, continue without another bucket-policy write. The repair
+does not republish broker versions or create the signer ledger.
+
 ```sh
 gh workflow run production-signer-policy-transition.yml \
   -f phase=policy-install -f source_sha="$SOURCE_SHA" \

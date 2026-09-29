@@ -1,0 +1,93 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowRootBootstrapAdministration",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "arn:aws:iam::368992683803:root"
+      },
+      "Action": "s3:*",
+      "Resource": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2",
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/*"
+      ]
+    },
+    {
+      "Sid": "AllowReleaseRoleStageAStateOnly",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
+      },
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": "mscqr/production/rls-green/stage-a/*"
+        }
+      }
+    },
+    {
+      "Sid": "AllowReleaseRoleStageAStateObjectsOnly",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
+      },
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate",
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/rls-green/stage-a/terraform.tfstate.tflock"
+      ]
+    },
+    {
+      "Sid": "DenyInsecureTransport",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:*",
+      "Resource": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2",
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/*"
+      ],
+      "Condition": {
+        "Bool": {
+          "aws:SecureTransport": "false"
+        }
+      }
+    },
+    {
+      "Sid": "DenyUnencryptedObjectWrites",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/*",
+      "Condition": {
+        "Null": {
+          "s3:x-amz-server-side-encryption": "true"
+        }
+      }
+    },
+    {
+      "Sid": "DenyApplicationRuntimeRoles",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:*",
+      "Resource": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2",
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/*"
+      ],
+      "Condition": {
+        "ArnLike": {
+          "aws:PrincipalArn": [
+            "arn:aws:iam::368992683803:role/mscqr-ecs-*",
+            "arn:aws:iam::368992683803:role/mscqr-rds-proxy-role-euw2",
+            "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task"
+          ]
+        }
+      }
+    }
+  ]
+}
