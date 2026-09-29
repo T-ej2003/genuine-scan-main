@@ -73,6 +73,23 @@ If an interrupted expansion leaves both the embedded reconciler policy and
 attached dedicated authorizer policy on their exact historical documents,
 the reconciler classifies both together and accepts only their two canonical
 policy updates plus creation of any still-missing canonical resources.
+The interruption contract for this migration is:
+
+| Authenticated state | Discovery | Saved-plan changes | Attachment reflection |
+| --- | --- | --- | --- |
+| Embedded historical; dedicated authorizer absent | `EXACT_EXPANSION` | Update reconciler; create missing canonical resources | Absent attachment: none |
+| Embedded historical; dedicated policy created but unattached | `EXACT_DUAL_POLICY_CONVERGENCE` | Update both exact policies; create missing role or attachment | None until attached |
+| Embedded historical; dedicated historical policy attached | `EXACT_DUAL_POLICY_CONVERGENCE` | Update both exact policies; create only other missing resources | Exact authorizer pair or none |
+| Embedded successor; dedicated historical policy still pending | `EXACT_AUTHORIZER_POLICY_CONVERGENCE` when topology is partial, otherwise the existing exact authorizer update classification | Update authorizer only; create missing resources | Exact authorizer pair only if attached |
+| Embedded historical; dedicated policy already successor | `EXACT_UPDATE` when complete, otherwise `EXACT_EXPANSION` | Update reconciler only; create missing resources | Exact authorizer pair only if attached |
+| Evidence reader expansion from its captured predecessor | Existing exact evidence-reader expansion classification | Existing exact reader creates and authorizer update | Captured exact authorizer pair |
+| Signer installer resources still missing | Existing exact signer expansion classifications | Create only missing signer resources and update only authenticated old policies | Exact authenticated pair for an already attached policy, or none |
+| Both policies successor | `EXACT_COMPLETE` | No IAM changes | Exact authorizer pair or none |
+
+Every reflection must be the exact `attachment_count: 0 -> 1` and
+`managed_policy_arns: [] -> [canonical authorizer policy ARN]` pair, bound
+to a no-op separate attachment and the refreshed predecessor fields of
+the saved plan. Other drift remains rejected.
 
 For the reviewed exact legacy-to-dedicated-role expansion, completion additionally requires remote
 Terraform state to advance from the authenticated predecessor and to contain

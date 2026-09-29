@@ -6,7 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { PRODUCTION_ENVIRONMENT_APPROVAL, createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
 import { createProductionGithubCommandRunner } from "../aws/production-credential-source-contract.mjs";
-import { DUAL_POLICY_CONVERGENCE, EVIDENCE_READER_ADDRESSES, EVIDENCE_READER_EXPANSION_CHANGES, EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, SIGNER_EVIDENCE_READER_POLICY_EXPANSION, SIGNER_AUTHORIZER_POLICY_EXPANSION, SIGNER_BOTH_POLICY_EXPANSION, INSTALLATION, INSTALLATION_BACKEND, assertInstallationAuthorization, assertInstallationAuthorizedPostState, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationPreparation, assertInstallationStateResources, bootstrapOperatorPolicyAuthorizerPermissionsPredecessor, bootstrapOperatorPolicyAuthorizerPermissionsPredecessors, classifyInstallationStatePullError, createInstallationAuthorization, createInstallationPreparation, evidenceReaderPermissionsPredecessor, installationPermissionsPredecessor, stateIdentity } from "../aws/production-initial-activation-reconciler-installation-contract.mjs";
+import { AUTHORIZER_POLICY_CONVERGENCE, DUAL_POLICY_CONVERGENCE, EVIDENCE_READER_ADDRESSES, EVIDENCE_READER_EXPANSION_CHANGES, EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, SIGNER_EVIDENCE_READER_POLICY_EXPANSION, SIGNER_AUTHORIZER_POLICY_EXPANSION, SIGNER_BOTH_POLICY_EXPANSION, INSTALLATION, INSTALLATION_BACKEND, assertInstallationAuthorization, assertInstallationAuthorizedPostState, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationPreparation, assertInstallationStateResources, bootstrapOperatorPolicyAuthorizerPermissionsPredecessor, bootstrapOperatorPolicyAuthorizerPermissionsPredecessors, classifyInstallationStatePullError, createInstallationAuthorization, createInstallationPreparation, evidenceReaderPermissionsPredecessor, installationPermissionsPredecessor, stateIdentity } from "../aws/production-initial-activation-reconciler-installation-contract.mjs";
 import { executeInstallation, runInstallCli } from "../aws/install-production-initial-activation-reconciler.mjs";
 import { discoverInstallationPredecessor, runPrepareCli } from "../aws/prepare-production-initial-activation-reconciler-installation.mjs";
 import { BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER, BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER, INITIAL_ACTIVATION_RECONCILER, MIXED_RECOVERY_EXECUTOR } from "../aws/verify-production-initial-activation-policy-reconciler.mjs";
@@ -82,6 +82,7 @@ authorizerPolicyUpdateChange.actions = ["update"];
 authorizerPolicyUpdateChange.before = { ...authorizerPolicyUpdateChange.after, policy: JSON.stringify(authorizerPolicyPredecessor) };
 const authorizerPolicyPredecessorState = JSON.stringify({ ...JSON.parse(installedState), resources: JSON.parse(installedState).resources.map((resource) => resource.type === "aws_iam_policy" && resource.name === "bootstrap_operator_policy_authorizer" ? { ...resource, instances: resource.instances.map((instance) => ({ ...instance, attributes: { ...instance.attributes, policy: JSON.stringify(authorizerPolicyPredecessor) } })) } : resource) });
 const liveEvidenceReaderExpansionPlan = structuredClone(authorizerPolicyUpdatePlan);
+for (const field of ["before", "after"]) liveEvidenceReaderExpansionPlan.resource_changes.find(({ address }) => address === "aws_iam_role.bootstrap_operator_policy_authorizer").change[field].managed_policy_arns = [INSTALLATION.bootstrapOperatorPolicyAuthorizerPolicyArn];
 for (const address of liveEvidenceReaderPredecessor.expectedCreateAddresses) {
   const change = liveEvidenceReaderExpansionPlan.resource_changes.find((entry) => entry.address === address).change;
   change.actions = ["create"];
@@ -921,7 +922,7 @@ test("saved plans bind the exact provider, resource configuration, and no-provis
   ]) {
     const changed = structuredClone(plan);
     mutate(changed);
-    assert.throws(() => assertInstallationPlan(changed), /plan envelope/);
+    assert.throws(() => assertInstallationPlan(changed), /plan envelope|drift count/);
   }
   for (const mutate of [
     (candidate) => { candidate.configuration.provider_config.aws.expressions.allowed_account_ids.constant_value = ["000000000000"]; },
@@ -1079,14 +1080,38 @@ test("interrupted embedded-to-dedicated transition resumes both exact historical
     change.actions = ["update"];
     change.before = { ...change.after, policy: JSON.stringify(predecessor) };
   }
-  const dualState = { version: 4, terraform_version: "1.15.8", serial: 2, lineage: "first-install-lineage", outputs: {}, resources: completePlan.resource_changes.map((entry) => ({ mode: entry.mode, type: entry.type, name: entry.name, provider: 'provider["registry.terraform.io/hashicorp/aws"]', instances: [{ schema_version: 0, attributes: stateAttributes(entry), sensitive_attributes: [] }] })) };
+  const authorizerRoleChange = dualPlan.resource_changes.find((entry) => entry.address === "aws_iam_role.bootstrap_operator_policy_authorizer").change;
+  authorizerRoleChange.before.managed_policy_arns = [INSTALLATION.bootstrapOperatorPolicyAuthorizerPolicyArn];
+  authorizerRoleChange.after.managed_policy_arns = [INSTALLATION.bootstrapOperatorPolicyAuthorizerPolicyArn];
+  const dualState = { version: 4, terraform_version: "1.15.8", serial: 2, lineage: "first-install-lineage", outputs: {}, resources: dualPlan.resource_changes.map((entry) => ({ mode: entry.mode, type: entry.type, name: entry.name, provider: 'provider["registry.terraform.io/hashicorp/aws"]', instances: [{ schema_version: 0, attributes: stateAttributes(entry), sensitive_attributes: [] }] })) };
   for (const [name, predecessor] of [["reconciler", embedded], ["bootstrap_operator_policy_authorizer", dedicated]]) {
     dualState.resources.find((resource) => resource.type === "aws_iam_policy" && resource.name === name).instances[0].attributes.policy = JSON.stringify(predecessor);
   }
   const stateBytes = Buffer.from(JSON.stringify(dualState));
   const prepare = (value, addresses = allAddresses) => createInstallationPreparation({ sourceSha, state: stateIdentity(stateBytes), livePredecessor: DUAL_POLICY_CONVERGENCE, livePredecessorAddresses: addresses, planJson: value, planBytes, preparedAt: now.toISOString() });
   assert.equal(assertInstallationPlan(dualPlan, { livePredecessor: DUAL_POLICY_CONVERGENCE }).updateCount, 2);
-  const prepared = prepare(dualPlan);
+  const reflectedPlan = structuredClone(dualPlan);
+  reflectedPlan.resource_drift = structuredClone(liveEvidenceReaderExpansionPlan.resource_drift);
+  for (const field of ["before", "after"]) reflectedPlan.resource_drift[0].change[field].policy = JSON.stringify(dedicated);
+  assert.equal(assertInstallationPlan(reflectedPlan, { livePredecessor: DUAL_POLICY_CONVERGENCE }).resourceDriftCount, 2);
+  assert.doesNotThrow(() => assertInstallationPreparation(prepare(reflectedPlan), { sourceSha, planBytes }));
+  for (const mutate of [
+    (value) => value.resource_drift.pop(),
+    (value) => value.resource_drift.push(structuredClone(value.resource_drift[0])),
+    (value) => { value.resource_drift[0].change.after.attachment_count = 2; },
+    (value) => { value.resource_drift[1].change.after.managed_policy_arns = [INSTALLATION.policyArn]; },
+    (value) => { value.resource_drift[1].address = "aws_iam_role.reconciler"; },
+    (value) => { value.resource_changes.find((entry) => entry.address === "aws_iam_role_policy_attachment.bootstrap_operator_policy_authorizer").change.actions = ["update"]; },
+    (value) => { value.resource_changes.find((entry) => entry.address === "aws_iam_role_policy_attachment.bootstrap_operator_policy_authorizer").change.before.id = "unrelated-attachment"; },
+    (value) => { value.resource_changes.find((entry) => entry.address === "aws_iam_role_policy_attachment.bootstrap_operator_policy_authorizer").change.after.role = "wrong-role"; },
+    (value) => { value.resource_changes.find((entry) => entry.address === "aws_iam_role.mixed_recovery").change.actions = ["update"]; },
+    (value) => { value.resource_changes.find((entry) => entry.address === "aws_iam_role.mixed_recovery").change.actions = ["delete"]; },
+    (value) => { value.resource_drift[0].change.after.policy = JSON.stringify(authorizerPolicyPredecessor); },
+  ]) {
+    const candidate = structuredClone(reflectedPlan); mutate(candidate);
+    assert.throws(() => prepare(candidate), /reflection|drift|predecessor|exact|unreviewed/i);
+  }
+  const prepared = prepare(reflectedPlan);
   assert.doesNotThrow(() => assertInstallationPreparation(prepared, { sourceSha, planBytes }));
   const authorized = createInstallationAuthorization({ preparation: prepared, preparationArtifactSha256: prepared.preparationArtifactSha256, protectedEnvironmentApprovalEvidence: approval, sourceSha });
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-dual-policy-"));
@@ -1096,7 +1121,7 @@ test("interrupted embedded-to-dedicated transition resumes both exact historical
       postState.resources.find((resource) => resource.type === "aws_iam_policy" && resource.name === name).instances[0].attributes.policy = dualPlan.resource_changes.find((entry) => entry.address === `aws_iam_policy.${name}`).change.after.policy;
     }
     let applies = 0; let reads = 0;
-    const result = executeInstallation({ sourceSha, preparation: prepared, authorization: authorized, planBytes, planJson: dualPlan, executionRoleArn: INSTALLATION.executionRoleArn, livePredecessor: DUAL_POLICY_CONVERGENCE, livePredecessorAddresses: allAddresses, applySavedPlan: () => { applies += 1; }, verifyInstalled: () => true, readState: () => Buffer.from(reads++ ? JSON.stringify(postState) : JSON.stringify(dualState)), resultPath: path.join(directory, "result.json"), now });
+    const result = executeInstallation({ sourceSha, preparation: prepared, authorization: authorized, planBytes, planJson: reflectedPlan, executionRoleArn: INSTALLATION.executionRoleArn, livePredecessor: DUAL_POLICY_CONVERGENCE, livePredecessorAddresses: allAddresses, applySavedPlan: () => { applies += 1; }, verifyInstalled: () => true, readState: () => Buffer.from(reads++ ? JSON.stringify(postState) : JSON.stringify(dualState)), resultPath: path.join(directory, "result.json"), now });
     assert.equal(applies, 1);
     assert.equal(result.status, "COMPLETE");
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
@@ -1105,6 +1130,81 @@ test("interrupted embedded-to-dedicated transition resumes both exact historical
   assert.deepEqual(discoverInstallationPredecessor({ run: discoveryRun({ document: embedded, authorizerDocument: dedicated, signerInstallerRole: false, signerInstallerPolicy: false }) }), { classification: DUAL_POLICY_CONVERGENCE, existingAddresses: partialAddresses });
   const partialState = { ...dualState, resources: dualState.resources.filter(({ name }) => name !== "signer_policy_installer") };
   assert.doesNotThrow(() => assertInstallationPreparation(createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(JSON.stringify(partialState))), livePredecessor: DUAL_POLICY_CONVERGENCE, livePredecessorAddresses: partialAddresses, planJson: partial, planBytes, preparedAt: now.toISOString() }), { sourceSha, planBytes }));
+  const unattached = structuredClone(dualPlan);
+  const attachment = unattached.resource_changes.find((entry) => entry.address === "aws_iam_role_policy_attachment.bootstrap_operator_policy_authorizer").change;
+  attachment.actions = ["create"]; attachment.before = null;
+  const unattachedAddresses = allAddresses.filter((address) => address !== "aws_iam_role_policy_attachment.bootstrap_operator_policy_authorizer");
+  const emptyEntities = [{ PolicyRoles: [], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }];
+  assert.deepEqual(discoverInstallationPredecessor({ run: discoveryRun({ document: embedded, authorizerDocument: dedicated, authorizerAttached: [], authorizerEntities: emptyEntities }) }), { classification: DUAL_POLICY_CONVERGENCE, existingAddresses: unattachedAddresses });
+  const unattachedState = { ...dualState, resources: dualState.resources.filter(({ type, name }) => !(type === "aws_iam_role_policy_attachment" && name === "bootstrap_operator_policy_authorizer")) };
+  assert.doesNotThrow(() => createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(JSON.stringify(unattachedState))), livePredecessor: DUAL_POLICY_CONVERGENCE, livePredecessorAddresses: unattachedAddresses, planJson: unattached, planBytes, preparedAt: now.toISOString() }));
+  assert.throws(() => prepare({ ...unattached, resource_drift: reflectedPlan.resource_drift }, unattachedAddresses), /attachment reflection/);
+  const policyOnly = structuredClone(unattached);
+  const missingRole = policyOnly.resource_changes.find((entry) => entry.address === "aws_iam_role.bootstrap_operator_policy_authorizer").change;
+  missingRole.actions = ["create"]; missingRole.before = null; delete missingRole.after.arn; missingRole.after_unknown.arn = true;
+  const policyOnlyAddresses = unattachedAddresses.filter((address) => address !== "aws_iam_role.bootstrap_operator_policy_authorizer");
+  assert.deepEqual(discoverInstallationPredecessor({ run: discoveryRun({ document: embedded, authorizerDocument: dedicated, authorizerRole: false, authorizerAttached: [], authorizerEntities: emptyEntities }) }), { classification: DUAL_POLICY_CONVERGENCE, existingAddresses: policyOnlyAddresses });
+  const policyOnlyState = { ...unattachedState, resources: unattachedState.resources.filter(({ type, name }) => !(type === "aws_iam_role" && name === "bootstrap_operator_policy_authorizer")) };
+  assert.doesNotThrow(() => createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(JSON.stringify(policyOnlyState))), livePredecessor: DUAL_POLICY_CONVERGENCE, livePredecessorAddresses: policyOnlyAddresses, planJson: policyOnly, planBytes, preparedAt: now.toISOString() }));
+  const authorizerRemaining = structuredClone(unattached);
+  const reconcilerChange = authorizerRemaining.resource_changes.find((entry) => entry.address === "aws_iam_policy.reconciler").change;
+  reconcilerChange.actions = ["no-op"]; reconcilerChange.before = structuredClone(reconcilerChange.after);
+  const authorizerRemainingState = structuredClone(unattachedState);
+  authorizerRemainingState.resources.find((resource) => resource.type === "aws_iam_policy" && resource.name === "reconciler").instances[0].attributes.policy = reconcilerChange.after.policy;
+  assert.deepEqual(discoverInstallationPredecessor({ run: discoveryRun({ authorizerDocument: dedicated, authorizerAttached: [], authorizerEntities: emptyEntities }) }), { classification: AUTHORIZER_POLICY_CONVERGENCE, existingAddresses: unattachedAddresses });
+  const remainingPreparation = createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(JSON.stringify(authorizerRemainingState))), livePredecessor: AUTHORIZER_POLICY_CONVERGENCE, livePredecessorAddresses: unattachedAddresses, planJson: authorizerRemaining, planBytes, preparedAt: now.toISOString() });
+  assert.doesNotThrow(() => assertInstallationPreparation(remainingPreparation, { sourceSha, planBytes }));
+  const remainingAuthorization = createInstallationAuthorization({ preparation: remainingPreparation, preparationArtifactSha256: remainingPreparation.preparationArtifactSha256, protectedEnvironmentApprovalEvidence: approval, sourceSha });
+  const recoveredState = { ...authorizerRemainingState, serial: authorizerRemainingState.serial + 1, resources: authorizerRemaining.resource_changes.map((entry) => ({ mode: entry.mode, type: entry.type, name: entry.name, provider: 'provider["registry.terraform.io/hashicorp/aws"]', instances: [{ schema_version: 0, attributes: stateAttributes(entry), sensitive_attributes: [] }] })) };
+  const recoveryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-authorizer-resume-"));
+  try {
+    let applies = 0; let reads = 0;
+    const recovered = executeInstallation({ sourceSha, preparation: remainingPreparation, authorization: remainingAuthorization, planBytes, planJson: authorizerRemaining, executionRoleArn: INSTALLATION.executionRoleArn, livePredecessor: AUTHORIZER_POLICY_CONVERGENCE, livePredecessorAddresses: unattachedAddresses, applySavedPlan: () => { applies += 1; throw new Error("lost response"); }, verifyInstalled: () => true, readState: () => Buffer.from(reads++ ? JSON.stringify(recoveredState) : JSON.stringify(authorizerRemainingState)), resultPath: path.join(recoveryDirectory, "result.json"), now });
+    assert.equal(applies, 1);
+    assert.equal(recovered.recoveredFromAmbiguousApply, true);
+  } finally { fs.rmSync(recoveryDirectory, { recursive: true, force: true }); }
+  const reconcilerRemaining = structuredClone(unattached);
+  const authorizerChange = reconcilerRemaining.resource_changes.find((entry) => entry.address === "aws_iam_policy.bootstrap_operator_policy_authorizer").change;
+  authorizerChange.actions = ["no-op"]; authorizerChange.before = structuredClone(authorizerChange.after);
+  assert.deepEqual(discoverInstallationPredecessor({ run: discoveryRun({ document: embedded, authorizerAttached: [], authorizerEntities: emptyEntities }) }), { classification: "EXACT_EXPANSION", existingAddresses: unattachedAddresses });
+  assert.doesNotThrow(() => createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(JSON.stringify(unattachedState))), livePredecessor: "EXACT_EXPANSION", livePredecessorAddresses: unattachedAddresses, planJson: reconcilerRemaining, planBytes, preparedAt: now.toISOString() }));
+  const dedicatedRemaining = structuredClone(reflectedPlan);
+  const dedicatedReconciler = dedicatedRemaining.resource_changes.find((entry) => entry.address === "aws_iam_policy.reconciler").change;
+  dedicatedReconciler.actions = ["no-op"]; dedicatedReconciler.before = structuredClone(dedicatedReconciler.after);
+  const embeddedRemaining = structuredClone(reflectedPlan);
+  const embeddedAuthorizer = embeddedRemaining.resource_changes.find((entry) => entry.address === "aws_iam_policy.bootstrap_operator_policy_authorizer").change;
+  embeddedAuthorizer.actions = ["no-op"]; embeddedAuthorizer.before = structuredClone(embeddedAuthorizer.after);
+  for (const field of ["before", "after"]) embeddedRemaining.resource_drift[0].change[field].policy = embeddedAuthorizer.after.policy;
+  const completeReflected = structuredClone(embeddedRemaining);
+  const completeReconciler = completeReflected.resource_changes.find((entry) => entry.address === "aws_iam_policy.reconciler").change;
+  completeReconciler.actions = ["no-op"]; completeReconciler.before = structuredClone(completeReconciler.after);
+  const signerPending = createSignerInstaller(structuredClone(embeddedRemaining));
+  const mixedPending = structuredClone(dedicatedRemaining);
+  for (const address of ["aws_iam_role.mixed_recovery", "aws_iam_policy.mixed_recovery", "aws_iam_role_policy_attachment.mixed_recovery"]) mixedPending.resource_changes.find((entry) => entry.address === address).change = structuredClone(legacyUpdatePlan.resource_changes.find((entry) => entry.address === address).change);
+  const mixedPendingAddresses = allAddresses.filter((address) => !address.endsWith(".mixed_recovery"));
+  const authorizerRoleOnly = structuredClone(legacyUpdatePlan);
+  const authorizerRoleOnlyChange = authorizerRoleOnly.resource_changes.find((entry) => entry.address === "aws_iam_role.bootstrap_operator_policy_authorizer");
+  authorizerRoleOnlyChange.change = structuredClone(completePlan.resource_changes.find((entry) => entry.address === "aws_iam_role.bootstrap_operator_policy_authorizer").change);
+  for (const field of ["before", "after"]) authorizerRoleOnlyChange.change[field].managed_policy_arns = [];
+  const authorizerRoleOnlyAddresses = ["aws_iam_policy.reconciler", "aws_iam_role.reconciler", "aws_iam_role_policy_attachment.reconciler", "aws_iam_role.bootstrap_operator_policy_authorizer"].sort();
+  const authorizerRoleOnlyState = { ...JSON.parse(legacyInstalledState), resources: [...JSON.parse(legacyInstalledState).resources, { mode: "managed", type: "aws_iam_role", name: "bootstrap_operator_policy_authorizer", provider: 'provider["registry.terraform.io/hashicorp/aws"]', instances: [{ schema_version: 0, attributes: stateAttributes(authorizerRoleOnlyChange), sensitive_attributes: [] }] }] };
+  const supported = [
+    ["historical embedded only", { document: embedded, mixedRole: false, mixedPolicy: false, authorizerRole: false, authorizerPolicy: false, readerRole: false, readerPolicy: false, signerInstallerRole: false, signerInstallerPolicy: false }, "EXACT_EXPANSION", legacyUpdatePlan, allAddresses.filter((address) => address.endsWith(".reconciler")), 1, 0, Buffer.from(legacyInstalledState)],
+    ["dedicated role created but policy absent", { document: embedded, mixedRole: false, mixedPolicy: false, authorizerRole: true, authorizerPolicy: false, authorizerAttached: [], readerRole: false, readerPolicy: false, signerInstallerRole: false, signerInstallerPolicy: false }, "EXACT_EXPANSION", authorizerRoleOnly, authorizerRoleOnlyAddresses, 1, 0, Buffer.from(JSON.stringify(authorizerRoleOnlyState))],
+    ["dual historical", { document: embedded, authorizerDocument: dedicated }, DUAL_POLICY_CONVERGENCE, reflectedPlan, allAddresses, 2],
+    ["dedicated historical after embedded update", { authorizerDocument: dedicated }, "EXACT_AUTHORIZER_POLICY_UPDATE", dedicatedRemaining, allAddresses, 1],
+    ["dedicated historical before mixed completion", { authorizerDocument: dedicated, mixedRole: false, mixedPolicy: false }, AUTHORIZER_POLICY_CONVERGENCE, mixedPending, mixedPendingAddresses, 1],
+    ["embedded historical after dedicated update", { document: embedded }, "EXACT_UPDATE", embeddedRemaining, allAddresses, 1],
+    ["embedded historical with signer pending", { document: embedded, signerInstallerRole: false, signerInstallerPolicy: false }, "EXACT_EXPANSION", signerPending, partialAddresses, 1],
+    ["converged with reflected attachment", {}, "EXACT_COMPLETE", completeReflected, allAddresses, 0],
+  ];
+  for (const [label, live, classification, currentPlan, addresses, updates, drift = 2, predecessorState = stateBytes] of supported) {
+    assert.deepEqual(discoverInstallationPredecessor({ run: discoveryRun(live) }), { classification, existingAddresses: addresses }, label);
+    const semantics = assertInstallationPlan(currentPlan, { livePredecessor: classification });
+    assert.equal(semantics.updateCount, updates, label);
+    assert.equal(semantics.resourceDriftCount, drift, label);
+    assert.doesNotThrow(() => createInstallationPreparation({ sourceSha, state: stateIdentity(predecessorState), livePredecessor: classification, livePredecessorAddresses: addresses, planJson: currentPlan, planBytes, preparedAt: now.toISOString() }), label);
+  }
   const extra = structuredClone(dualPlan);
   extra.resource_changes.find((entry) => entry.address === "aws_iam_role.mixed_recovery").change.actions = ["update"];
   assert.throws(() => prepare(extra), /scope|predecessor|exact/i);
@@ -1114,6 +1214,8 @@ test("interrupted embedded-to-dedicated transition resumes both exact historical
   assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ document: embedded, authorizerDocument: { ...dedicated, Statement: [] } }) }).classification, "UNEXPECTED");
   assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ document: { ...embedded, Statement: [] }, authorizerDocument: dedicated }) }).classification, "UNEXPECTED");
   assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ document: embedded, authorizerDocument: dedicated, mixedRole: { AssumeRolePolicyDocument: JSON.parse(trust) } }) }).classification, "UNEXPECTED");
+  assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ role: false, policy: true, document: embedded, authorizerDocument: dedicated }) }).classification, "UNEXPECTED");
+  assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ document: embedded, authorizerDocument: dedicated, readerDocument: evidenceReaderPermissionsPredecessor() }) }).classification, "UNEXPECTED");
 });
 
 test("installed seven-resource authorizer policy without ECS reads is an exact predecessor", () => {
@@ -1153,7 +1255,7 @@ test("captured live predecessor expands exactly the absent evidence reader and a
   const authorizerChange = createsOnly.resource_changes.find(({ address }) => address === "aws_iam_policy.bootstrap_operator_policy_authorizer").change;
   authorizerChange.actions = ["no-op"];
   authorizerChange.before = structuredClone(authorizerChange.after);
-  assert.throws(() => createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(liveEvidenceReaderPredecessorState)), livePredecessor: EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, livePredecessorAddresses: expectedAddresses, planJson: createsOnly, planBytes, preparedAt: now.toISOString() }), /plan does not match/);
+  assert.throws(() => createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(liveEvidenceReaderPredecessorState)), livePredecessor: EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, livePredecessorAddresses: expectedAddresses, planJson: createsOnly, planBytes, preparedAt: now.toISOString() }), /plan does not match|reflection differs/);
   const attachmentOnly = structuredClone(liveEvidenceReaderExpansionPlan);
   attachmentOnly.resource_changes.find(({ address }) => address === "aws_iam_role_policy_attachment.broker_recovery_successor_evidence_reader").change = structuredClone(completePlan.resource_changes.find(({ address }) => address === "aws_iam_role_policy_attachment.broker_recovery_successor_evidence_reader").change);
   assert.throws(() => createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(liveEvidenceReaderPredecessorState)), livePredecessor: EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, livePredecessorAddresses: expectedAddresses, planJson: attachmentOnly, planBytes, preparedAt: now.toISOString() }), /attachment contract|plan does not match/);
@@ -1181,7 +1283,7 @@ test("Terraform 1.15.8 attachment-reflection drift is predecessor-gated, exact, 
   const semantics = assertInstallationPlan(liveEvidenceReaderExpansionPlan, options);
   assert.equal(semantics.resourceDriftCount, 2);
   assert.match(semantics.resourceDriftSha256, /^[a-f0-9]{64}$/);
-  assert.throws(() => assertInstallationPlan(liveEvidenceReaderExpansionPlan), /plan envelope/);
+  assert.throws(() => assertInstallationPlan(liveEvidenceReaderExpansionPlan), /plan envelope|drift addresses/);
 
   const rejected = [
     (candidate) => candidate.resource_drift.push(structuredClone(candidate.resource_drift[0])),
@@ -1220,6 +1322,9 @@ test("Terraform 1.15.8 attachment-reflection drift is predecessor-gated, exact, 
   const roleDrift = changedAfterApproval.resource_drift[1].change;
   roleDrift.before.create_date = "2026-09-14T13:05:38Z";
   roleDrift.after.create_date = "2026-09-14T13:05:38Z";
+  const changedRole = changedAfterApproval.resource_changes.find(({ address }) => address === "aws_iam_role.bootstrap_operator_policy_authorizer").change;
+  changedRole.before.create_date = "2026-09-14T13:05:38Z";
+  changedRole.after.create_date = "2026-09-14T13:05:38Z";
   assert.throws(() => executeInstallation({ sourceSha, preparation: prepared, authorization: authorized, planBytes: bytes, planJson: changedAfterApproval, executionRoleArn: INSTALLATION.executionRoleArn, livePredecessor: EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, livePredecessorAddresses: liveEvidenceReaderPredecessor.expectedExistingAddresses, applySavedPlan: () => assert.fail("apply must not run"), readState: () => Buffer.from(liveEvidenceReaderPredecessorState), now }), /semantics differ/);
   const changedPreparation = createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(liveEvidenceReaderPredecessorState)), livePredecessor: EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, livePredecessorAddresses: liveEvidenceReaderPredecessor.expectedExistingAddresses, planJson: changedAfterApproval, planBytes: bytes, preparedAt: now.toISOString() });
   assert.throws(() => executeInstallation({ sourceSha, preparation: changedPreparation, authorization: authorized, planBytes: bytes, planJson: changedAfterApproval, executionRoleArn: INSTALLATION.executionRoleArn, livePredecessor: EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, livePredecessorAddresses: liveEvidenceReaderPredecessor.expectedExistingAddresses, applySavedPlan: () => assert.fail("apply must not run"), readState: () => Buffer.from(liveEvidenceReaderPredecessorState), now }), /authorization binding|preparation/i);

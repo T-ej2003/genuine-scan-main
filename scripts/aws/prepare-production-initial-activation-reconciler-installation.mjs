@@ -10,7 +10,7 @@ import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 import { createProductionAwsCommandRunner, createProductionAwsCredentialEnvironment, createProductionGithubCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { readMixedDualSlotRecoveryGithubEnvironmentGuard } from "./production-mixed-dual-slot-recovery-contract.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, ensureStageBPrivateFile, readStageBPrivateFileBytes, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
-import { DUAL_POLICY_CONVERGENCE, EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, SIGNER_EVIDENCE_READER_POLICY_EXPANSION, SIGNER_AUTHORIZER_POLICY_EXPANSION, SIGNER_BOTH_POLICY_EXPANSION, INSTALLATION, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationStateResources, bootstrapOperatorPolicyAuthorizerPermissionsPredecessors, classifyInstallationStatePullError, createInstallationPreparation, evidenceReaderPermissionsPredecessor, installationPermissionsPredecessor, stateIdentity } from "./production-initial-activation-reconciler-installation-contract.mjs";
+import { AUTHORIZER_POLICY_CONVERGENCE, DUAL_POLICY_CONVERGENCE, EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, SIGNER_EVIDENCE_READER_POLICY_EXPANSION, SIGNER_AUTHORIZER_POLICY_EXPANSION, SIGNER_BOTH_POLICY_EXPANSION, INSTALLATION, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationStateResources, bootstrapOperatorPolicyAuthorizerPermissionsPredecessors, classifyInstallationStatePullError, createInstallationPreparation, evidenceReaderPermissionsPredecessor, installationPermissionsPredecessor, stateIdentity } from "./production-initial-activation-reconciler-installation-contract.mjs";
 import { BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER, BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER, INITIAL_ACTIVATION_RECONCILER, MIXED_RECOVERY_EXECUTOR, assertBootstrapOperatorPolicyAuthorizerPolicyMetadata, assertBootstrapOperatorPolicyAuthorizerRoleMetadata, assertBrokerRecoverySuccessorEvidenceReaderPolicyMetadata, assertBrokerRecoverySuccessorEvidenceReaderRoleMetadata, assertInitialActivationReconcilerPolicyMetadata, assertInitialActivationReconcilerRoleMetadata, assertMixedRecoveryExecutorPolicyMetadata, assertMixedRecoveryExecutorRoleMetadata, readPolicyEntities, verifyInitialActivationPolicyReconciler } from "./verify-production-initial-activation-policy-reconciler.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -186,7 +186,7 @@ export function discoverInstallationPredecessor({ run, expectedCallerArn } = {})
   if (!authorizerComplete && !authorizerUnattached
     || authorizerRoleNeedsTrustUpdate && (!role || !policy || policyNeedsUpdate || !mixedComplete || mixedRoleNeedsTrustUpdate || !authorizerComplete)) return predecessor("UNEXPECTED", existingAddresses);
   if ([policyNeedsUpdate, mixedRoleNeedsTrustUpdate, authorizerRoleNeedsTrustUpdate, authorizerPolicyNeedsUpdate].filter(Boolean).length > 1
-    && !(policyNeedsUpdate && authorizerPolicyNeedsUpdate && authorizerComplete && !mixedRoleNeedsTrustUpdate && !authorizerRoleNeedsTrustUpdate)) return predecessor("UNEXPECTED", existingAddresses);
+    && !(policyNeedsUpdate && authorizerPolicyNeedsUpdate && (authorizerComplete || authorizerUnattached) && !mixedRoleNeedsTrustUpdate && !authorizerRoleNeedsTrustUpdate)) return predecessor("UNEXPECTED", existingAddresses);
   const authorizerAddresses = [authorizerRole && "aws_iam_role.bootstrap_operator_policy_authorizer", authorizerPolicy && "aws_iam_policy.bootstrap_operator_policy_authorizer", authorizerComplete && "aws_iam_role_policy_attachment.bootstrap_operator_policy_authorizer"].filter(Boolean);
   const evidenceReaderAttached = evidenceReaderRole ? runJson(run, ["iam", "list-attached-role-policies", "--role-name", BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER.roleName]).AttachedPolicies : [];
   const evidenceReaderInline = evidenceReaderRole ? runJson(run, ["iam", "list-role-policies", "--role-name", BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER.roleName]).PolicyNames : [];
@@ -197,6 +197,7 @@ export function discoverInstallationPredecessor({ run, expectedCallerArn } = {})
   const evidenceReaderAddresses = [evidenceReaderRole && "aws_iam_role.broker_recovery_successor_evidence_reader", evidenceReaderPolicy && "aws_iam_policy.broker_recovery_successor_evidence_reader", evidenceReaderComplete && "aws_iam_role_policy_attachment.broker_recovery_successor_evidence_reader"].filter(Boolean);
   const signerInstallerAddresses = [signerInstallerRole && "aws_iam_role.signer_policy_installer", signerInstallerPolicy && "aws_iam_role_policy.signer_policy_installer"].filter(Boolean);
   if (!role || !policy) {
+    if (policyNeedsUpdate || authorizerPolicyNeedsUpdate || evidenceReaderPolicyNeedsUpdate) return predecessor("UNEXPECTED", existingAddresses);
     if (role) {
       const attached = runJson(run, ["iam", "list-attached-role-policies", "--role-name", INSTALLATION.roleArn.split("/").at(-1)]).AttachedPolicies;
       const inline = runJson(run, ["iam", "list-role-policies", "--role-name", INSTALLATION.roleArn.split("/").at(-1)]).PolicyNames;
@@ -209,6 +210,7 @@ export function discoverInstallationPredecessor({ run, expectedCallerArn } = {})
     return predecessor("EXACT_PARTIAL", [...existingAddresses, ...mixedAddresses, ...authorizerAddresses, ...evidenceReaderAddresses, ...signerInstallerAddresses].filter((value, index, values) => values.indexOf(value) === index));
   }
   if (policyNeedsUpdate) {
+    if (evidenceReaderPolicyNeedsUpdate) return predecessor("UNEXPECTED", existingAddresses);
     const attached = runJson(run, ["iam", "list-attached-role-policies", "--role-name", INSTALLATION.roleArn.split("/").at(-1)]).AttachedPolicies;
     const inline = runJson(run, ["iam", "list-role-policies", "--role-name", INSTALLATION.roleArn.split("/").at(-1)]).PolicyNames;
     const entities = readPolicyEntities(run);
@@ -223,8 +225,10 @@ export function discoverInstallationPredecessor({ run, expectedCallerArn } = {})
   const reconcilerUnattached = Array.isArray(attached) && attached.length === 0 && Array.isArray(inline) && inline.length === 0 && entities.users.length === 0 && entities.groups.length === 0 && entities.roles.length === 0;
   if (!reconcilerComplete && !reconcilerUnattached) return predecessor("UNEXPECTED", existingAddresses);
   const reconcilerAddresses = ["aws_iam_policy.reconciler", "aws_iam_role.reconciler", "aws_iam_role_policy_attachment.reconciler"];
-  if (reconcilerUnattached) return predecessor("EXACT_PARTIAL", [...existingAddresses, ...mixedAddresses, ...authorizerAddresses, ...evidenceReaderAddresses, ...signerInstallerAddresses].filter((value, index, values) => values.indexOf(value) === index));
-  if (!mixedRole && !mixedPolicy) return predecessor("EXACT_EXPANSION", [...reconcilerAddresses, ...authorizerAddresses, ...evidenceReaderAddresses, ...signerInstallerAddresses].sort());
+  if (reconcilerUnattached) return predecessor(evidenceReaderPolicyNeedsUpdate ? "UNEXPECTED" : authorizerPolicyNeedsUpdate ? AUTHORIZER_POLICY_CONVERGENCE : "EXACT_PARTIAL", [...existingAddresses, ...mixedAddresses, ...authorizerAddresses, ...evidenceReaderAddresses, ...signerInstallerAddresses].filter((value, index, values) => values.indexOf(value) === index));
+  if (authorizerPolicyNeedsUpdate && !evidenceReaderPolicyNeedsUpdate && (authorizerUnattached || !mixedComplete))
+    return predecessor(AUTHORIZER_POLICY_CONVERGENCE, [...reconcilerAddresses, ...mixedAddresses, ...authorizerAddresses, ...evidenceReaderAddresses, ...signerInstallerAddresses].sort());
+  if (!mixedRole && !mixedPolicy) return predecessor(evidenceReaderPolicyNeedsUpdate ? "UNEXPECTED" : "EXACT_EXPANSION", [...reconcilerAddresses, ...authorizerAddresses, ...evidenceReaderAddresses, ...signerInstallerAddresses].sort());
   if (mixedComplete) {
   if (evidenceReaderPolicyNeedsUpdate) return authorizerComplete && evidenceReaderComplete && !authorizerRoleNeedsTrustUpdate && !mixedRoleNeedsTrustUpdate
     ? predecessor(authorizerPolicyNeedsUpdate ? SIGNER_BOTH_POLICY_EXPANSION : SIGNER_EVIDENCE_READER_POLICY_EXPANSION, [...reconcilerAddresses, ...mixedAddresses, ...authorizerAddresses, ...evidenceReaderAddresses, ...signerInstallerAddresses].sort()) : predecessor("UNEXPECTED", existingAddresses);

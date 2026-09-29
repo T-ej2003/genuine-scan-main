@@ -36,9 +36,17 @@ export const INSTALLATION = Object.freeze({
 export const INSTALLATION_BACKEND = Object.freeze({ type: "s3", bucket: INSTALLATION.backend.bucket, key: INSTALLATION.backend.key, region: INSTALLATION.backend.region, encrypt: INSTALLATION.backend.encrypt, use_lockfile: INSTALLATION.backend.useLockfile, workspace: INSTALLATION.backend.workspace });
 export const EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE = "EXACT_EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE";
 export const DUAL_POLICY_CONVERGENCE = "EXACT_DUAL_POLICY_CONVERGENCE";
+export const AUTHORIZER_POLICY_CONVERGENCE = "EXACT_AUTHORIZER_POLICY_CONVERGENCE";
+export function assertAuthorizerPolicyConvergence(semantics) {
+  const updates = semantics.resourceChanges.filter(({ actions }) => canonicalJson(actions) === canonicalJson(["update"])).map(({ address }) => address);
+  return canonicalJson(updates) === canonicalJson(["aws_iam_policy.bootstrap_operator_policy_authorizer"])
+    && ["aws_iam_policy.reconciler", "aws_iam_policy.bootstrap_operator_policy_authorizer"].every((address) => semantics.resourceChanges.some((entry) => entry.address === address && canonicalJson(entry.actions) !== canonicalJson(["create"])))
+    && semantics.createCount + semantics.noOpCount + semantics.updateCount === INSTALLATION.expectedAddresses.length
+    && semantics.deleteCount === 0 && semantics.replaceCount === 0;
+}
 export function assertDualPolicyConvergence(semantics) {
   const updates = semantics.resourceChanges.filter(({ actions }) => canonicalJson(actions) === canonicalJson(["update"])).map(({ address }) => address).sort();
-  const required = ["aws_iam_policy.reconciler", "aws_iam_role.reconciler", "aws_iam_role_policy_attachment.reconciler", "aws_iam_policy.bootstrap_operator_policy_authorizer", "aws_iam_role.bootstrap_operator_policy_authorizer", "aws_iam_role_policy_attachment.bootstrap_operator_policy_authorizer"];
+  const required = ["aws_iam_policy.reconciler", "aws_iam_role.reconciler", "aws_iam_role_policy_attachment.reconciler", "aws_iam_policy.bootstrap_operator_policy_authorizer"];
   return canonicalJson(updates) === canonicalJson(["aws_iam_policy.bootstrap_operator_policy_authorizer", "aws_iam_policy.reconciler"])
     && required.every((address) => semantics.resourceChanges.some((entry) => entry.address === address && canonicalJson(entry.actions) !== canonicalJson(["create"])))
     && semantics.createCount + semantics.noOpCount + semantics.updateCount === INSTALLATION.expectedAddresses.length
@@ -360,19 +368,31 @@ const AUTHORIZER_ATTACHMENT_DRIFT_ADDRESSES = Object.freeze([
   "aws_iam_policy.bootstrap_operator_policy_authorizer",
   "aws_iam_role.bootstrap_operator_policy_authorizer",
 ]);
+const AUTHORIZER_ATTACHMENT_REFLECTION_CLASSES = Object.freeze([
+  "EXACT_PARTIAL", "EXACT_UPDATE", "EXACT_TRUST_UPDATE", "EXACT_AUTHORIZER_TRUST_UPDATE", "EXACT_AUTHORIZER_POLICY_UPDATE",
+  DUAL_POLICY_CONVERGENCE, AUTHORIZER_POLICY_CONVERGENCE, "EXACT_EXPANSION", "EXACT_COMPLETE",
+  EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, ...SIGNER_POLICY_EXPANSIONS,
+]);
 
 function assertInstallationResourceDrift(plan, livePredecessor) {
   const drift = plan.resource_drift ?? [];
   if (!Array.isArray(drift)) throw new Error("Installation Terraform resource drift is malformed.");
-  if (livePredecessor === SIGNER_BOTH_POLICY_EXPANSION && drift.length === 0) return Object.freeze({ resourceDriftCount: 0, resourceDriftSha256: EMPTY_RESOURCE_DRIFT_SHA256 });
-  if (livePredecessor !== EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE && livePredecessor !== SIGNER_BOTH_POLICY_EXPANSION) {
-    if (drift.length !== 0) throw new Error("Installation Terraform plan envelope is not exact.");
+  if (drift.length === 0 && livePredecessor !== EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE) {
     return Object.freeze({ resourceDriftCount: 0, resourceDriftSha256: EMPTY_RESOURCE_DRIFT_SHA256 });
   }
-  const signer = livePredecessor === SIGNER_BOTH_POLICY_EXPANSION;
+  if (drift.length !== 2) throw new Error("Installation attachment-reflection drift count is not exact.");
+  const driftAddresses = [...drift].map(({ address }) => address).sort();
+  const signer = livePredecessor === SIGNER_BOTH_POLICY_EXPANSION
+    && canonicalJson(driftAddresses) === canonicalJson(["aws_iam_policy.broker_recovery_successor_evidence_reader", "aws_iam_role.broker_recovery_successor_evidence_reader"]);
+  if (!signer && (!AUTHORIZER_ATTACHMENT_REFLECTION_CLASSES.includes(livePredecessor) || canonicalJson(driftAddresses) !== canonicalJson(AUTHORIZER_ATTACHMENT_DRIFT_ADDRESSES))) throw new Error("Installation attachment-reflection drift addresses are not exact.");
   const policyName = signer ? "broker_recovery_successor_evidence_reader" : "bootstrap_operator_policy_authorizer";
   const policyArn = signer ? INSTALLATION.brokerRecoverySuccessorEvidenceReaderPolicyArn : INSTALLATION.bootstrapOperatorPolicyAuthorizerPolicyArn;
   const addresses = signer ? ["aws_iam_policy.broker_recovery_successor_evidence_reader", "aws_iam_role.broker_recovery_successor_evidence_reader"] : AUTHORIZER_ATTACHMENT_DRIFT_ADDRESSES;
+  if (!signer) {
+    const attachment = plan.resource_changes.find((entry) => entry?.address === "aws_iam_role_policy_attachment.bootstrap_operator_policy_authorizer");
+    const attached = attachment?.change?.before;
+    if (!attachment || canonicalJson(attachment.change?.actions) !== canonicalJson(["no-op"]) || Object.keys(attached || {}).sort().join(",") !== "id,policy_arn,role" || attached.id !== `mscqr-production-bootstrap-operator-policy-authorizer/${policyArn}` || attached.role !== "mscqr-production-bootstrap-operator-policy-authorizer" || attached.policy_arn !== policyArn || canonicalJson(attachment.change?.after) !== canonicalJson(attached) || canonicalJson(attachment.change?.after_unknown) !== canonicalJson({})) throw new Error("Authorizer attachment reflection requires an existing no-op attachment.");
+  }
   if (signer) {
     const actions = plan.resource_changes.filter((entry) => canonicalJson(entry?.change?.actions) !== canonicalJson(["no-op"])).map(({ address, change }) => [address, change.actions]).sort(([left], [right]) => left.localeCompare(right));
     const expected = [["aws_iam_policy.bootstrap_operator_policy_authorizer", ["update"]], ["aws_iam_policy.broker_recovery_successor_evidence_reader", ["update"]], ["aws_iam_role.signer_policy_installer", ["create"]], ["aws_iam_role_policy.signer_policy_installer", ["create"]]].sort(([left], [right]) => left.localeCompare(right));
@@ -380,7 +400,6 @@ function assertInstallationResourceDrift(plan, livePredecessor) {
     const attached = { id: `mscqr-production-broker-recovery-successor-evidence-reader/${policyArn}`, role: "mscqr-production-broker-recovery-successor-evidence-reader", policy_arn: policyArn };
     if (canonicalJson(actions) !== canonicalJson(expected) || !attachment || canonicalJson(attachment.change?.actions) !== canonicalJson(["no-op"]) || canonicalJson(attachment.change?.before) !== canonicalJson(attached) || canonicalJson(attachment.change?.after) !== canonicalJson(attached) || canonicalJson(attachment.change?.after_unknown) !== canonicalJson({})) throw new Error("Installation evidence-reader attachment reflection requires the exact incremental actions and existing no-op attachment.");
   }
-  if (drift.length !== 2) throw new Error("Installation authorizer attachment-reflection drift count is not exact.");
   const ordered = [...drift].sort((left, right) => left?.address?.localeCompare(right?.address));
   if (canonicalJson(ordered.map(({ address }) => address)) !== canonicalJson(addresses)) throw new Error("Installation authorizer attachment-reflection drift addresses are not exact.");
   for (const entry of ordered) {
@@ -392,7 +411,7 @@ function assertInstallationResourceDrift(plan, livePredecessor) {
     if (entry.address === addresses[0]) {
       if (entry.type !== "aws_iam_policy" || entry.name !== policyName || before.attachment_count !== 0 || after.attachment_count !== 1 || canonicalJson({ ...before, attachment_count: 1 }) !== canonicalJson(after) || canonicalJson(entry.change.before_sensitive) !== canonicalJson({ tags: {}, tags_all: {} }) || canonicalJson(entry.change.after_sensitive) !== canonicalJson({ tags: {}, tags_all: {} })) throw new Error("Installation authorizer policy attachment-reflection drift is not exact.");
     } else if (entry.type !== "aws_iam_role" || entry.name !== policyName || canonicalJson(before.managed_policy_arns) !== canonicalJson([]) || canonicalJson(after.managed_policy_arns) !== canonicalJson([policyArn]) || canonicalJson({ ...before, managed_policy_arns: [policyArn] }) !== canonicalJson(after) || canonicalJson(entry.change.before_sensitive) !== canonicalJson({ inline_policy: [], managed_policy_arns: [], tags: {}, tags_all: {} }) || canonicalJson(entry.change.after_sensitive) !== canonicalJson({ inline_policy: [], managed_policy_arns: [false], tags: {}, tags_all: {} })) throw new Error("Installation authorizer role attachment-reflection drift is not exact.");
-    if (signer && canonicalJson(after) !== canonicalJson(plan.resource_changes.find((change) => change.address === entry.address)?.change?.before)) throw new Error("Installation evidence-reader attachment reflection differs from the actionable plan predecessor.");
+    if (canonicalJson(after) !== canonicalJson(plan.resource_changes.find((change) => change.address === entry.address)?.change?.before)) throw new Error(`Installation ${entry.address} attachment reflection differs from the actionable plan predecessor.`);
   }
   return Object.freeze({ resourceDriftCount: ordered.length, resourceDriftSha256: canonicalSha256(ordered) });
 }
@@ -570,7 +589,7 @@ export function createInstallationPreparation({ sourceSha, state, livePredecesso
   if (!state || typeof state.stateExists !== "boolean") throw new Error("Installation predecessor state identity is required.");
   if (livePredecessor === "EXACT_PARTIAL" && !state.stateExists) throw new Error("Partial installation requires an authenticated Terraform state predecessor.");
   if (state.stateExists ? (Object.keys(state).sort().join(",") !== "lineage,serial,stateExists,stateSha256" || typeof state.lineage !== "string" || !Number.isSafeInteger(state.serial) || !SHA256.test(state.stateSha256 || "")) : Object.keys(state).length !== 1) throw new Error("Installation predecessor state identity is malformed.");
-  if (!["ABSENT", "EXACT_PARTIAL", "EXACT_UPDATE", "EXACT_TRUST_UPDATE", "EXACT_AUTHORIZER_TRUST_UPDATE", "EXACT_AUTHORIZER_POLICY_UPDATE", DUAL_POLICY_CONVERGENCE, EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, ...SIGNER_POLICY_EXPANSIONS, "EXACT_EXPANSION", "EXACT_COMPLETE"].includes(livePredecessor)) throw new Error("Installation live predecessor classification is invalid.");
+  if (!["ABSENT", "EXACT_PARTIAL", "EXACT_UPDATE", "EXACT_TRUST_UPDATE", "EXACT_AUTHORIZER_TRUST_UPDATE", "EXACT_AUTHORIZER_POLICY_UPDATE", DUAL_POLICY_CONVERGENCE, AUTHORIZER_POLICY_CONVERGENCE, EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, ...SIGNER_POLICY_EXPANSIONS, "EXACT_EXPANSION", "EXACT_COMPLETE"].includes(livePredecessor)) throw new Error("Installation live predecessor classification is invalid.");
   if (livePredecessor === "UNEXPECTED") throw new Error("Unexpected installation predecessor must fail closed.");
   if (!Array.isArray(livePredecessorAddresses) || new Set(livePredecessorAddresses).size !== livePredecessorAddresses.length || livePredecessorAddresses.some((address) => !INSTALLATION.expectedAddresses.includes(address)) || JSON.stringify(livePredecessorAddresses) !== JSON.stringify([...livePredecessorAddresses].sort())) throw new Error("Installation live predecessor resource set is invalid.");
   const semantics = assertInstallationPlan(planJson, { livePredecessor });
@@ -582,11 +601,12 @@ export function createInstallationPreparation({ sourceSha, state, livePredecesso
     || livePredecessor === "EXACT_AUTHORIZER_TRUST_UPDATE" && (semantics.createCount !== 0 || semantics.updateCount !== 1 || semantics.changedAddresses[0] !== "aws_iam_role.bootstrap_operator_policy_authorizer" || semantics.noOpCount !== INSTALLATION.expectedAddresses.length - 1)
     || livePredecessor === "EXACT_AUTHORIZER_POLICY_UPDATE" && (semantics.createCount !== 0 || semantics.updateCount !== 1 || semantics.changedAddresses[0] !== "aws_iam_policy.bootstrap_operator_policy_authorizer" || semantics.noOpCount !== INSTALLATION.expectedAddresses.length - 1)
     || livePredecessor === DUAL_POLICY_CONVERGENCE && !assertDualPolicyConvergence(semantics)
+    || livePredecessor === AUTHORIZER_POLICY_CONVERGENCE && !assertAuthorizerPolicyConvergence(semantics)
     || livePredecessor === EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE && !assertInstallationEvidenceReaderExpansion(semantics)
     || SIGNER_POLICY_EXPANSIONS.includes(livePredecessor) && !assertInstallationSignerEvidenceReaderPolicyExpansion(semantics, livePredecessor)
     || livePredecessor === "EXACT_EXPANSION" && (semantics.createCount < 1 || semantics.createCount > 11 || semantics.updateCount > 1 || semantics.updateCount === 1 && !semantics.changedAddresses.includes("aws_iam_policy.reconciler") || semantics.noOpCount !== INSTALLATION.expectedAddresses.length - semantics.createCount - semantics.updateCount)
     || livePredecessor === "EXACT_COMPLETE" && (semantics.createCount !== 0 || semantics.updateCount !== 0 || semantics.noOpCount !== INSTALLATION.expectedAddresses.length)
-    || JSON.stringify(livePredecessorAddresses) !== JSON.stringify(["EXACT_UPDATE", "EXACT_TRUST_UPDATE", "EXACT_AUTHORIZER_TRUST_UPDATE", "EXACT_AUTHORIZER_POLICY_UPDATE"].includes(livePredecessor) ? [...INSTALLATION.expectedAddresses].sort() : [DUAL_POLICY_CONVERGENCE, "EXACT_EXPANSION", EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, ...SIGNER_POLICY_EXPANSIONS].includes(livePredecessor) ? planPredecessorAddresses : semantics.noOpAddresses)) throw new Error("Installation plan does not match the authenticated live predecessor.");
+    || JSON.stringify(livePredecessorAddresses) !== JSON.stringify(["EXACT_UPDATE", "EXACT_TRUST_UPDATE", "EXACT_AUTHORIZER_TRUST_UPDATE", "EXACT_AUTHORIZER_POLICY_UPDATE"].includes(livePredecessor) ? [...INSTALLATION.expectedAddresses].sort() : [DUAL_POLICY_CONVERGENCE, AUTHORIZER_POLICY_CONVERGENCE, "EXACT_EXPANSION", EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, ...SIGNER_POLICY_EXPANSIONS].includes(livePredecessor) ? planPredecessorAddresses : semantics.noOpAddresses)) throw new Error("Installation plan does not match the authenticated live predecessor.");
   if (!Buffer.isBuffer(planBytes) || planBytes.length < 1) throw new Error("Saved Terraform plan bytes are required.");
   const body = {
     schemaVersion: INSTALLATION.schemaVersion, kind: "PRODUCTION_INITIAL_ACTIVATION_POLICY_RECONCILER_INSTALLATION_PREPARATION", operation: INSTALLATION.operation,
@@ -616,10 +636,10 @@ export function assertInstallationPreparation(value, { sourceSha, planBytes } = 
     || value.planSemantics.noOpCount !== INSTALLATION.expectedAddresses.length - value.planSemantics.resourceChangeCount
     || ![0, 1, 2].includes(value.planSemantics.updateCount) || value.planSemantics.deleteCount !== 0 || value.planSemantics.replaceCount !== 0
     || !Number.isSafeInteger(value.planSemantics.resourceDriftCount) || !SHA256.test(value.planSemantics.resourceDriftSha256 || "")
-    || (value.livePredecessor === EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE ? value.planSemantics.resourceDriftCount !== 2 || value.planSemantics.resourceDriftSha256 === EMPTY_RESOURCE_DRIFT_SHA256 : value.livePredecessor === SIGNER_BOTH_POLICY_EXPANSION ? ![0, 2].includes(value.planSemantics.resourceDriftCount) || (value.planSemantics.resourceDriftCount === 0) !== (value.planSemantics.resourceDriftSha256 === EMPTY_RESOURCE_DRIFT_SHA256) : value.planSemantics.resourceDriftCount !== 0 || value.planSemantics.resourceDriftSha256 !== EMPTY_RESOURCE_DRIFT_SHA256)
+    || (value.livePredecessor === EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE ? value.planSemantics.resourceDriftCount !== 2 || value.planSemantics.resourceDriftSha256 === EMPTY_RESOURCE_DRIFT_SHA256 : AUTHORIZER_ATTACHMENT_REFLECTION_CLASSES.includes(value.livePredecessor) ? ![0, 2].includes(value.planSemantics.resourceDriftCount) || (value.planSemantics.resourceDriftCount === 0) !== (value.planSemantics.resourceDriftSha256 === EMPTY_RESOURCE_DRIFT_SHA256) : value.planSemantics.resourceDriftCount !== 0 || value.planSemantics.resourceDriftSha256 !== EMPTY_RESOURCE_DRIFT_SHA256)
     || value.planSemantics.changedAddresses.length !== value.planSemantics.resourceChangeCount || JSON.stringify(value.planSemantics.changedAddresses) !== JSON.stringify([...value.planSemantics.changedAddresses].sort()) || value.planSemantics.changedAddresses.some((address) => !INSTALLATION.expectedAddresses.includes(address))
     || value.planSemantics.noOpAddresses.length !== value.planSemantics.noOpCount || JSON.stringify(value.planSemantics.noOpAddresses) !== JSON.stringify([...value.planSemantics.noOpAddresses].sort()) || value.planSemantics.noOpAddresses.some((address) => !INSTALLATION.expectedAddresses.includes(address))
-    || JSON.stringify(value.livePredecessorAddresses) !== JSON.stringify(["EXACT_UPDATE", "EXACT_TRUST_UPDATE", "EXACT_AUTHORIZER_TRUST_UPDATE", "EXACT_AUTHORIZER_POLICY_UPDATE"].includes(value.livePredecessor) ? [...INSTALLATION.expectedAddresses].sort() : [DUAL_POLICY_CONVERGENCE, "EXACT_EXPANSION", EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, ...SIGNER_POLICY_EXPANSIONS].includes(value.livePredecessor) ? planPredecessorAddresses : value.planSemantics.noOpAddresses)
+    || JSON.stringify(value.livePredecessorAddresses) !== JSON.stringify(["EXACT_UPDATE", "EXACT_TRUST_UPDATE", "EXACT_AUTHORIZER_TRUST_UPDATE", "EXACT_AUTHORIZER_POLICY_UPDATE"].includes(value.livePredecessor) ? [...INSTALLATION.expectedAddresses].sort() : [DUAL_POLICY_CONVERGENCE, AUTHORIZER_POLICY_CONVERGENCE, "EXACT_EXPANSION", EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, ...SIGNER_POLICY_EXPANSIONS].includes(value.livePredecessor) ? planPredecessorAddresses : value.planSemantics.noOpAddresses)
     || value.livePredecessor === "ABSENT" && value.planSemantics.createCount !== INSTALLATION.expectedAddresses.length
     || value.livePredecessor === "EXACT_PARTIAL" && (value.planSemantics.createCount < 1 || value.planSemantics.createCount >= INSTALLATION.expectedAddresses.length)
     || value.livePredecessor === "EXACT_UPDATE" && (value.planSemantics.updateCount !== 1 || value.planSemantics.changedAddresses[0] !== "aws_iam_policy.reconciler")
@@ -627,6 +647,7 @@ export function assertInstallationPreparation(value, { sourceSha, planBytes } = 
     || value.livePredecessor === "EXACT_AUTHORIZER_TRUST_UPDATE" && (value.planSemantics.updateCount !== 1 || value.planSemantics.changedAddresses[0] !== "aws_iam_role.bootstrap_operator_policy_authorizer")
     || value.livePredecessor === "EXACT_AUTHORIZER_POLICY_UPDATE" && (value.planSemantics.updateCount !== 1 || value.planSemantics.changedAddresses[0] !== "aws_iam_policy.bootstrap_operator_policy_authorizer")
     || value.livePredecessor === DUAL_POLICY_CONVERGENCE && !assertDualPolicyConvergence(value.planSemantics)
+    || value.livePredecessor === AUTHORIZER_POLICY_CONVERGENCE && !assertAuthorizerPolicyConvergence(value.planSemantics)
     || value.livePredecessor === EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE && !assertInstallationEvidenceReaderExpansion(value.planSemantics)
     || SIGNER_POLICY_EXPANSIONS.includes(value.livePredecessor) && !assertInstallationSignerEvidenceReaderPolicyExpansion(value.planSemantics, value.livePredecessor)
     || value.livePredecessor === "EXACT_EXPANSION" && (value.planSemantics.createCount < 1 || value.planSemantics.createCount > 11 || value.planSemantics.updateCount > 1 || value.planSemantics.updateCount === 1 && !value.planSemantics.changedAddresses.includes("aws_iam_policy.reconciler"))
