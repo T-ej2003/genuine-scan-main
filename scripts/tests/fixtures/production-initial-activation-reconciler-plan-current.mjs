@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { installationPermissionsPredecessor } from "../../aws/production-initial-activation-reconciler-installation-contract.mjs";
 
 const root = "infra/aws/terraform/production-initial-activation-policy-reconciler";
 const trust = fs.readFileSync(`${root}/bootstrap-operator-policy-authorizer-trust-policy.json`, "utf8");
@@ -38,7 +39,7 @@ export const currentInstallationPlan = (plan, { legacyAuthorizer = false } = {})
   if ((legacy || reconciler.change.actions[0] === "update") && reconciler.change.actions[0] !== "create") {
     reconciler.change.actions = ["update"];
     reconciler.change.after.arn = "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler";
-    reconciler.change.before = { ...structuredClone(reconciler.change.after), policy: JSON.stringify({ ...JSON.parse(reconcilerPolicy), Statement: [...JSON.parse(reconcilerPolicy).Statement, ...JSON.parse(policy).Statement.filter(({ Sid }) => Sid !== "IdentifyCurrentSession")] }) };
+    reconciler.change.before = { ...structuredClone(reconciler.change.after), policy: JSON.stringify(installationPermissionsPredecessor()) };
   } else if (reconciler.change.actions[0] === "no-op") {
     reconciler.change.before.policy = reconcilerPolicy;
   }

@@ -168,22 +168,26 @@ const EVIDENCE_READER_POLICY_DESCRIPTION = "Read only the two immutable componen
 const SIGNER_INSTALLER_TAGS = Object.freeze({ ...EXPECTED_TAGS, Component: "signer-policy-transition" });
 const SIGNER_INSTALLER_ROLE_DESCRIPTION = "Protected GitHub OIDC publisher for canonical signer broker authorization only.";
 const hasKnownNoPermissionsBoundary = (value, unknown) => (value === null || value === "") && unknown !== true;
-export const installationPermissionsPredecessor = () => {
-  const desired = sourceJson(`${INSTALLATION.terraformRoot}/permissions-policy.json`);
-  const readOnlyAuthorizer = sourceJson(`${INSTALLATION.terraformRoot}/bootstrap-operator-policy-authorizer-permissions-policy.json`);
-  return { ...desired, Statement: [...desired.Statement, ...readOnlyAuthorizer.Statement.filter(({ Sid }) => Sid !== "IdentifyCurrentSession")] };
-};
-export const bootstrapOperatorPolicyAuthorizerPermissionsPredecessor = () => {
-  const desired = sourceJson(`${INSTALLATION.terraformRoot}/bootstrap-operator-policy-authorizer-permissions-policy.json`);
-  return { ...desired, Statement: desired.Statement.map((statement) => statement.Sid === "ReadRegionalTaskDefinitionMetadata" ? { ...statement, Resource: historicalTaskDefinitionResources } : statement.Sid === "ReadExactInitialDualSlotBindingForBootstrapOperatorAuthorization" ? { ...statement, Resource: [...MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES] } : statement) };
-};
 const historicalTaskDefinitionResources = Object.freeze([
   "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:*",
   "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:*",
 ]);
+const scopedAuthorizerPermissionsPredecessor = () => {
+  const desired = sourceJson(`${INSTALLATION.terraformRoot}/bootstrap-operator-policy-authorizer-permissions-policy.json`);
+  return { ...desired, Statement: desired.Statement.map((statement) => statement.Sid === "ReadRegionalTaskDefinitionMetadata" ? { ...statement, Resource: [...historicalTaskDefinitionResources] } : statement) };
+};
+export const installationPermissionsPredecessor = () => {
+  const desired = sourceJson(`${INSTALLATION.terraformRoot}/permissions-policy.json`);
+  const readOnlyAuthorizer = scopedAuthorizerPermissionsPredecessor();
+  return { ...desired, Statement: [...desired.Statement, ...readOnlyAuthorizer.Statement.filter(({ Sid }) => Sid !== "IdentifyCurrentSession")] };
+};
+export const bootstrapOperatorPolicyAuthorizerPermissionsPredecessor = () => {
+  const scoped = scopedAuthorizerPermissionsPredecessor();
+  return { ...scoped, Statement: scoped.Statement.map((statement) => statement.Sid === "ReadExactInitialDualSlotBindingForBootstrapOperatorAuthorization" ? { ...statement, Resource: [...MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES] } : statement) };
+};
 export const bootstrapOperatorPolicyAuthorizerPermissionsPredecessors = () => {
   const desired = sourceJson(`${INSTALLATION.terraformRoot}/bootstrap-operator-policy-authorizer-permissions-policy.json`);
-  const scoped = { ...desired, Statement: desired.Statement.map((statement) => statement.Sid === "ReadRegionalTaskDefinitionMetadata" ? { ...statement, Resource: [...historicalTaskDefinitionResources] } : statement) };
+  const scoped = scopedAuthorizerPermissionsPredecessor();
   const candidateOnly = { ...scoped, Statement: scoped.Statement.map((statement) => statement.Sid === "ReadRegionalTaskDefinitionMetadata" ? { ...statement, Resource: [historicalTaskDefinitionResources[0]] } : statement) };
   const prior = { ...desired, Statement: desired.Statement.filter(({ Sid }) => !["ReadExactProductionBackendSelectorSource", "ReadRegionalTaskDefinitionMetadata"].includes(Sid)) };
   const sevenResourceNoEcs = bootstrapOperatorPolicyAuthorizerPermissionsPredecessor();
