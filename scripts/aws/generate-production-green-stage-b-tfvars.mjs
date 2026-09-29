@@ -58,6 +58,21 @@ const requireImageDigest = (value, label) => {
   return value;
 };
 const quote = (value) => JSON.stringify(value);
+export const stageBBoundImagesFromBindingReport = (report) => {
+  const expectedKeys = ["backend", "canary", "executor", "readOnlyCanary", "worker"];
+  if (!report?.images || JSON.stringify(Object.keys(report.images).sort()) !== JSON.stringify(expectedKeys)) throw new Error("Stage B image binding keys are not exact.");
+  return Object.freeze(Object.fromEntries([
+    ["backend", "backend", "backend_image"],
+    ["canary", "canary", "canary_image"],
+    ["executor", "executor", "executor_image"],
+    ["read_only_canary", "readOnlyCanary", "read_only_canary_image"],
+    ["worker", "worker", "worker_image"],
+  ].map(([output, key, variable]) => {
+    const image = report?.images?.[key];
+    if (image?.terraformVariable !== variable) throw new Error(`${output} image binding has the wrong Terraform variable.`);
+    return [output, image.imageReference];
+  })));
+};
 const sortedEntries = (value) => Object.entries(value || {}).sort(([a], [b]) => a.localeCompare(b));
 
 function assertAbsoluteFile(file, label) {
@@ -319,13 +334,7 @@ function assertRecoveryOnlyEvidence({ recovery, state, toolingSha } = {}) {
 
 function assertFreshImageOutputReconciliation(refreshReport, observationBinding, state) {
   const change = refreshReport.outputChanges?.[0];
-  const expectedAfter = {
-    backend: observationBinding.images?.backend?.imageReference,
-    canary: observationBinding.images?.canary?.imageReference,
-    executor: observationBinding.images?.executor?.imageReference,
-    read_only_canary: observationBinding.images?.readOnlyCanary?.imageReference,
-    worker: observationBinding.images?.worker?.imageReference,
-  };
+  const expectedAfter = stageBBoundImagesFromBindingReport(observationBinding);
   if (refreshReport.resourceChanges?.nonNoOp !== 0 || refreshReport.resourceChanges?.changes?.length !== 0
     || refreshReport.outputChanges?.length !== 1 || change?.name !== "bound_images" || change.classification !== "reviewed"
     || change.matchesEvidence !== true || canonicalJson(change.actions) !== canonicalJson(["update"])
