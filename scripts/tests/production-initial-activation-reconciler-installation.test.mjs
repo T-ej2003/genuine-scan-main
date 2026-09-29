@@ -6,7 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { PRODUCTION_ENVIRONMENT_APPROVAL, createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
 import { createProductionGithubCommandRunner } from "../aws/production-credential-source-contract.mjs";
-import { EVIDENCE_READER_ADDRESSES, EVIDENCE_READER_EXPANSION_CHANGES, EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, SIGNER_EVIDENCE_READER_POLICY_EXPANSION, SIGNER_AUTHORIZER_POLICY_EXPANSION, SIGNER_BOTH_POLICY_EXPANSION, INSTALLATION, INSTALLATION_BACKEND, assertInstallationAuthorization, assertInstallationAuthorizedPostState, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationPreparation, assertInstallationStateResources, bootstrapOperatorPolicyAuthorizerPermissionsPredecessor, bootstrapOperatorPolicyAuthorizerPermissionsPredecessors, classifyInstallationStatePullError, createInstallationAuthorization, createInstallationPreparation, evidenceReaderPermissionsPredecessor, installationPermissionsPredecessor, stateIdentity } from "../aws/production-initial-activation-reconciler-installation-contract.mjs";
+import { DUAL_POLICY_CONVERGENCE, EVIDENCE_READER_ADDRESSES, EVIDENCE_READER_EXPANSION_CHANGES, EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, SIGNER_EVIDENCE_READER_POLICY_EXPANSION, SIGNER_AUTHORIZER_POLICY_EXPANSION, SIGNER_BOTH_POLICY_EXPANSION, INSTALLATION, INSTALLATION_BACKEND, assertInstallationAuthorization, assertInstallationAuthorizedPostState, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationPreparation, assertInstallationStateResources, bootstrapOperatorPolicyAuthorizerPermissionsPredecessor, bootstrapOperatorPolicyAuthorizerPermissionsPredecessors, classifyInstallationStatePullError, createInstallationAuthorization, createInstallationPreparation, evidenceReaderPermissionsPredecessor, installationPermissionsPredecessor, stateIdentity } from "../aws/production-initial-activation-reconciler-installation-contract.mjs";
 import { executeInstallation, runInstallCli } from "../aws/install-production-initial-activation-reconciler.mjs";
 import { discoverInstallationPredecessor, runPrepareCli } from "../aws/prepare-production-initial-activation-reconciler-installation.mjs";
 import { BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER, BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER, INITIAL_ACTIVATION_RECONCILER, MIXED_RECOVERY_EXECUTOR } from "../aws/verify-production-initial-activation-policy-reconciler.mjs";
@@ -1067,6 +1067,53 @@ test("live ARN-scoped QR selector authorizer is accepted only for its exact read
   assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ authorizerDocument: unrelated }) }).classification, "UNEXPECTED");
   plan.resource_changes.find(({ address }) => address === "aws_iam_policy.bootstrap_operator_policy_authorizer").change.after.policy = JSON.stringify(unrelated);
   assert.throws(() => assertInstallationPlan(plan), /Authorizer policy contract/);
+});
+
+test("interrupted embedded-to-dedicated transition resumes both exact historical policy updates", () => {
+  const embedded = installationPermissionsPredecessor();
+  const dedicated = bootstrapOperatorPolicyAuthorizerPermissionsPredecessors()[4];
+  assert.deepEqual(discoverInstallationPredecessor({ run: discoveryRun({ document: embedded, authorizerDocument: dedicated }) }), { classification: DUAL_POLICY_CONVERGENCE, existingAddresses: allAddresses });
+  const dualPlan = structuredClone(completePlan);
+  for (const [address, predecessor] of [["aws_iam_policy.reconciler", embedded], ["aws_iam_policy.bootstrap_operator_policy_authorizer", dedicated]]) {
+    const change = dualPlan.resource_changes.find((entry) => entry.address === address).change;
+    change.actions = ["update"];
+    change.before = { ...change.after, policy: JSON.stringify(predecessor) };
+  }
+  const dualState = { version: 4, terraform_version: "1.15.8", serial: 2, lineage: "first-install-lineage", outputs: {}, resources: completePlan.resource_changes.map((entry) => ({ mode: entry.mode, type: entry.type, name: entry.name, provider: 'provider["registry.terraform.io/hashicorp/aws"]', instances: [{ schema_version: 0, attributes: stateAttributes(entry), sensitive_attributes: [] }] })) };
+  for (const [name, predecessor] of [["reconciler", embedded], ["bootstrap_operator_policy_authorizer", dedicated]]) {
+    dualState.resources.find((resource) => resource.type === "aws_iam_policy" && resource.name === name).instances[0].attributes.policy = JSON.stringify(predecessor);
+  }
+  const stateBytes = Buffer.from(JSON.stringify(dualState));
+  const prepare = (value, addresses = allAddresses) => createInstallationPreparation({ sourceSha, state: stateIdentity(stateBytes), livePredecessor: DUAL_POLICY_CONVERGENCE, livePredecessorAddresses: addresses, planJson: value, planBytes, preparedAt: now.toISOString() });
+  assert.equal(assertInstallationPlan(dualPlan, { livePredecessor: DUAL_POLICY_CONVERGENCE }).updateCount, 2);
+  const prepared = prepare(dualPlan);
+  assert.doesNotThrow(() => assertInstallationPreparation(prepared, { sourceSha, planBytes }));
+  const authorized = createInstallationAuthorization({ preparation: prepared, preparationArtifactSha256: prepared.preparationArtifactSha256, protectedEnvironmentApprovalEvidence: approval, sourceSha });
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-dual-policy-"));
+  try {
+    const postState = structuredClone(dualState); postState.serial = dualState.serial + 1;
+    for (const name of ["reconciler", "bootstrap_operator_policy_authorizer"]) {
+      postState.resources.find((resource) => resource.type === "aws_iam_policy" && resource.name === name).instances[0].attributes.policy = dualPlan.resource_changes.find((entry) => entry.address === `aws_iam_policy.${name}`).change.after.policy;
+    }
+    let applies = 0; let reads = 0;
+    const result = executeInstallation({ sourceSha, preparation: prepared, authorization: authorized, planBytes, planJson: dualPlan, executionRoleArn: INSTALLATION.executionRoleArn, livePredecessor: DUAL_POLICY_CONVERGENCE, livePredecessorAddresses: allAddresses, applySavedPlan: () => { applies += 1; }, verifyInstalled: () => true, readState: () => Buffer.from(reads++ ? JSON.stringify(postState) : JSON.stringify(dualState)), resultPath: path.join(directory, "result.json"), now });
+    assert.equal(applies, 1);
+    assert.equal(result.status, "COMPLETE");
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+  const partial = createSignerInstaller(structuredClone(dualPlan));
+  const partialAddresses = allAddresses.filter((address) => !address.includes("signer_policy_installer"));
+  assert.deepEqual(discoverInstallationPredecessor({ run: discoveryRun({ document: embedded, authorizerDocument: dedicated, signerInstallerRole: false, signerInstallerPolicy: false }) }), { classification: DUAL_POLICY_CONVERGENCE, existingAddresses: partialAddresses });
+  const partialState = { ...dualState, resources: dualState.resources.filter(({ name }) => name !== "signer_policy_installer") };
+  assert.doesNotThrow(() => assertInstallationPreparation(createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(JSON.stringify(partialState))), livePredecessor: DUAL_POLICY_CONVERGENCE, livePredecessorAddresses: partialAddresses, planJson: partial, planBytes, preparedAt: now.toISOString() }), { sourceSha, planBytes }));
+  const extra = structuredClone(dualPlan);
+  extra.resource_changes.find((entry) => entry.address === "aws_iam_role.mixed_recovery").change.actions = ["update"];
+  assert.throws(() => prepare(extra), /scope|predecessor|exact/i);
+  const wrong = structuredClone(dualPlan);
+  wrong.resource_changes.find((entry) => entry.address === "aws_iam_policy.bootstrap_operator_policy_authorizer").change.before.policy = JSON.stringify({ ...dedicated, Statement: [] });
+  assert.throws(() => prepare(wrong), /predecessor/);
+  assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ document: embedded, authorizerDocument: { ...dedicated, Statement: [] } }) }).classification, "UNEXPECTED");
+  assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ document: { ...embedded, Statement: [] }, authorizerDocument: dedicated }) }).classification, "UNEXPECTED");
+  assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ document: embedded, authorizerDocument: dedicated, mixedRole: { AssumeRolePolicyDocument: JSON.parse(trust) } }) }).classification, "UNEXPECTED");
 });
 
 test("installed seven-resource authorizer policy without ECS reads is an exact predecessor", () => {

@@ -69,6 +69,10 @@ definition referenced by the exact production backend service and checks its
 exact QR secret selector. After this source change merges, prepare a new live
 saved plan and obtain a fresh installation authorization; the failed selector
 run and its approval are not reused.
+If an interrupted expansion leaves both the embedded reconciler policy and
+attached dedicated authorizer policy on their exact historical documents,
+the reconciler classifies both together and accepts only their two canonical
+policy updates plus creation of any still-missing canonical resources.
 
 For the reviewed exact legacy-to-dedicated-role expansion, completion additionally requires remote
 Terraform state to advance from the authenticated predecessor and to contain
