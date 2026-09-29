@@ -42,6 +42,20 @@ test("captured Terraform signer reflection is exactly one state-only transition"
   assert.equal(assertSignerPostRefreshNormalPlan(normalPlan()).changedAddresses[0], "aws_iam_policy.bootstrap_operator_policy_authorizer");
 });
 
+test("captured Terraform no-op resource changes remain non-actionable", () => {
+  const captured = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-initial-activation-reconciler-plan-complete.json", "utf8"));
+  const unchanged = captured.resource_changes.filter(({ change }) => change.actions.join() === "no-op");
+  const candidate = plan(); candidate.resource_changes = structuredClone(unchanged);
+  assert.equal(assertSignerRefreshOnlyPlan(candidate, before).remoteMutationCount, 0);
+  for (const mutate of [
+    (p) => { p.resource_changes[0].change.actions = ["update"]; },
+    (p) => { p.resource_changes[0].change.after.name = "wrong"; },
+    (p) => { p.resource_changes[0].address = "aws_iam_role.unrelated"; },
+    (p) => { p.resource_changes.push(structuredClone(p.resource_changes[0])); },
+    (p) => { p.resource_changes[0].change.after_unknown = { id: true }; },
+  ]) { const wrong = structuredClone(candidate); mutate(wrong); assert.throws(() => assertSignerRefreshOnlyPlan(wrong, before)); }
+});
+
 test("fresh normal plan requires zero drift and only the intended authorizer update", () => {
   const drift = normalPlan(); drift.resource_drift = [structuredClone(capturedDrift)];
   assert.throws(() => assertSignerPostRefreshNormalPlan(drift));

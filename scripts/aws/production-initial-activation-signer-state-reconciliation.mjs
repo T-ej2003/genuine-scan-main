@@ -74,7 +74,14 @@ const successor = (bytes, inline) => {
 export function assertSignerRefreshOnlyPlan(plan, stateBytes) {
   if (!plan || plan.format_version !== "1.2" || plan.terraform_version !== INSTALLATION.terraformVersion || plan.errored !== false || plan.complete !== true || plan.applyable !== true) throw new Error("Signer refresh-only plan envelope is invalid.");
   assertInstallationPlanConfiguration(plan);
-  if (!Buffer.isBuffer(stateBytes) || !Array.isArray(plan.resource_drift) || plan.resource_drift.length !== 1 || !Array.isArray(plan.resource_changes) && plan.resource_changes !== undefined || plan.resource_changes?.length || Object.values(plan.output_changes || {}).some((change) => !noOutputChange(change))) throw new Error("Signer refresh-only plan contains additional state or remote changes.");
+  if (!Buffer.isBuffer(stateBytes) || !Array.isArray(plan.resource_drift) || plan.resource_drift.length !== 1 || plan.resource_changes !== undefined && !Array.isArray(plan.resource_changes) || Object.values(plan.output_changes || {}).some((change) => !noOutputChange(change))) throw new Error("Signer refresh-only plan contains additional state or remote changes.");
+  const seen = new Set();
+  for (const entry of plan.resource_changes || []) {
+    const expectedAddress = `${entry?.type}.${entry?.name}`;
+    const change = entry?.change;
+    if (entry?.address !== expectedAddress || entry?.mode !== "managed" || entry?.provider_name !== "registry.terraform.io/hashicorp/aws" || !INSTALLATION.expectedAddresses.includes(entry.address) || seen.has(entry.address) || canonicalJson(change?.actions) !== canonicalJson(["no-op"]) || canonicalJson(change.before) !== canonicalJson(change.after) || canonicalJson(change.after_unknown) !== canonicalJson({}) || canonicalJson(change.before_sensitive) !== canonicalJson(change.after_sensitive)) throw new Error("Signer refresh-only plan contains an unauthenticated or actionable resource change.");
+    seen.add(entry.address);
+  }
   const entry = plan.resource_drift[0];
   exact(entry, ["address", "change", "mode", "name", "provider_name", "type"], "Signer refresh-only drift");
   exact(entry.change, ["actions", "before", "after", "before_sensitive", "after_sensitive", "after_unknown"], "Signer refresh-only drift change");
