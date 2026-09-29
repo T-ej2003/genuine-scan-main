@@ -1832,6 +1832,146 @@
       "rollback": "remove-committed-or-restore-backups"
     },
     {
+      "id": "initial-activation-signer-state-reconciliation-saved-plan",
+      "kind": "file",
+      "producer": "scripts/aws/reconcile-production-initial-activation-signer-state.mjs:runSignerStateReconciliation --mode prepare",
+      "consumers": [
+        ".github/workflows/authorize-production-initial-activation-signer-state-reconciliation.yml",
+        ".github/workflows/execute-production-initial-activation-signer-state-reconciliation.yml",
+        "scripts/aws/reconcile-production-initial-activation-signer-state.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": false,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": null,
+      "allOrNone": false,
+      "rollback": "none"
+    },
+    {
+      "id": "initial-activation-signer-state-reconciliation-preparation",
+      "kind": "file",
+      "producer": "scripts/aws/reconcile-production-initial-activation-signer-state.mjs:runSignerStateReconciliation --mode prepare",
+      "consumers": [
+        ".github/workflows/authorize-production-initial-activation-signer-state-reconciliation.yml",
+        ".github/workflows/execute-production-initial-activation-signer-state-reconciliation.yml",
+        "scripts/aws/authorize-production-initial-activation-signer-state-reconciliation.mjs",
+        "scripts/aws/reconcile-production-initial-activation-signer-state.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "initial-activation-signer-state-reconciliation-preparation",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "initial-activation-signer-state-reconciliation-authorization",
+      "kind": "file",
+      "producer": ".github/workflows/authorize-production-initial-activation-signer-state-reconciliation.yml",
+      "consumers": [
+        ".github/workflows/execute-production-initial-activation-signer-state-reconciliation.yml",
+        "scripts/aws/reconcile-production-initial-activation-signer-state.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "externalProducer": true,
+      "atomicGroup": "initial-activation-signer-state-reconciliation-authorization",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "initial-activation-signer-state-reconciliation-result",
+      "kind": "file",
+      "producer": "scripts/aws/reconcile-production-initial-activation-signer-state.mjs:runSignerStateReconciliation --mode execute",
+      "consumers": [
+        ".github/workflows/execute-production-initial-activation-signer-state-reconciliation.yml",
+        "documents/ops/iam/MSCQRProductionInitialActivationSignerStateReconciliation-v1.md"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "initial-activation-signer-state-reconciliation-result",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "initial-activation-signer-state-reconciliation-recovery-preparation",
+      "kind": "file",
+      "producer": "scripts/aws/reconcile-production-initial-activation-signer-state.mjs:runSignerStateReconciliation --mode recovery-prepare",
+      "consumers": [
+        ".github/workflows/authorize-production-initial-activation-signer-state-reconciliation-recovery.yml",
+        ".github/workflows/execute-production-initial-activation-signer-state-reconciliation-recovery.yml",
+        "scripts/aws/authorize-production-initial-activation-signer-state-reconciliation.mjs",
+        "scripts/aws/reconcile-production-initial-activation-signer-state.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "initial-activation-signer-state-reconciliation-recovery-preparation",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "initial-activation-signer-state-reconciliation-recovery-authorization",
+      "kind": "file",
+      "producer": ".github/workflows/authorize-production-initial-activation-signer-state-reconciliation-recovery.yml",
+      "consumers": [
+        ".github/workflows/execute-production-initial-activation-signer-state-reconciliation-recovery.yml",
+        "scripts/aws/reconcile-production-initial-activation-signer-state.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "externalProducer": true,
+      "atomicGroup": "initial-activation-signer-state-reconciliation-recovery-authorization",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "initial-activation-signer-state-reconciliation-recovery-result",
+      "kind": "file",
+      "producer": "scripts/aws/reconcile-production-initial-activation-signer-state.mjs:runSignerStateReconciliation --mode recovery-execute",
+      "consumers": [
+        ".github/workflows/execute-production-initial-activation-signer-state-reconciliation-recovery.yml",
+        "documents/ops/iam/MSCQRProductionInitialActivationSignerStateReconciliation-v1.md"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "initial-activation-signer-state-reconciliation-recovery-result",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
       "id": "initial-activation-reconciler-exact-complete-state-reconciliation-saved-plan",
       "kind": "file",
       "producer": "scripts/aws/reconcile-production-initial-activation-exact-complete-state.mjs:runExactCompleteStateReconciliation --mode prepare",
