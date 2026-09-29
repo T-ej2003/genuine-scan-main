@@ -1042,6 +1042,25 @@ test("installed candidate-only task-definition read policy is an exact authorize
   assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ authorizerDocument: broader }) }).classification, "UNEXPECTED");
 });
 
+test("live ARN-scoped QR selector authorizer is accepted only for its exact read-only policy correction", () => {
+  const scoped = bootstrapOperatorPolicyAuthorizerPermissionsPredecessors()[4];
+  assert.deepEqual(scoped.Statement.find(({ Sid }) => Sid === "ReadRegionalTaskDefinitionMetadata").Resource, [
+    "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:*",
+    "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:*",
+  ]);
+  assert.deepEqual(discoverInstallationPredecessor({ run: discoveryRun({ authorizerDocument: scoped }) }), { classification: "EXACT_AUTHORIZER_POLICY_UPDATE", existingAddresses: allAddresses });
+  const plan = structuredClone(authorizerPolicyUpdatePlan);
+  plan.resource_changes.find(({ address }) => address === "aws_iam_policy.bootstrap_operator_policy_authorizer").change.before.policy = JSON.stringify(scoped);
+  const state = JSON.parse(installedState);
+  state.resources.find(({ type, name }) => type === "aws_iam_policy" && name === "bootstrap_operator_policy_authorizer").instances[0].attributes.policy = JSON.stringify(scoped);
+  assert.doesNotThrow(() => createInstallationPreparation({ sourceSha, state: stateIdentity(Buffer.from(JSON.stringify(state))), livePredecessor: "EXACT_AUTHORIZER_POLICY_UPDATE", livePredecessorAddresses: allAddresses, planJson: plan, planBytes, preparedAt: now.toISOString() }));
+  const unrelated = structuredClone(scoped);
+  unrelated.Statement.find(({ Sid }) => Sid === "ReadRegionalTaskDefinitionMetadata").Resource.push("arn:aws:ecs:eu-west-2:368992683803:task-definition/unrelated:*");
+  assert.equal(discoverInstallationPredecessor({ run: discoveryRun({ authorizerDocument: unrelated }) }).classification, "UNEXPECTED");
+  plan.resource_changes.find(({ address }) => address === "aws_iam_policy.bootstrap_operator_policy_authorizer").change.after.policy = JSON.stringify(unrelated);
+  assert.throws(() => assertInstallationPlan(plan), /Authorizer policy contract/);
+});
+
 test("installed seven-resource authorizer policy without ECS reads is an exact predecessor", () => {
   const sevenResource = bootstrapOperatorPolicyAuthorizerPermissionsPredecessor();
   const noEcs = { ...sevenResource, Statement: sevenResource.Statement.filter(({ Sid }) => !["ReadExactProductionBackendSelectorSource", "ReadRegionalTaskDefinitionMetadata"].includes(Sid)) };

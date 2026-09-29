@@ -175,15 +175,20 @@ export const installationPermissionsPredecessor = () => {
 };
 export const bootstrapOperatorPolicyAuthorizerPermissionsPredecessor = () => {
   const desired = sourceJson(`${INSTALLATION.terraformRoot}/bootstrap-operator-policy-authorizer-permissions-policy.json`);
-  return { ...desired, Statement: desired.Statement.map((statement) => statement.Sid === "ReadExactInitialDualSlotBindingForBootstrapOperatorAuthorization" ? { ...statement, Resource: [...MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES] } : statement) };
+  return { ...desired, Statement: desired.Statement.map((statement) => statement.Sid === "ReadRegionalTaskDefinitionMetadata" ? { ...statement, Resource: historicalTaskDefinitionResources } : statement.Sid === "ReadExactInitialDualSlotBindingForBootstrapOperatorAuthorization" ? { ...statement, Resource: [...MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES] } : statement) };
 };
+const historicalTaskDefinitionResources = Object.freeze([
+  "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:*",
+  "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:*",
+]);
 export const bootstrapOperatorPolicyAuthorizerPermissionsPredecessors = () => {
   const desired = sourceJson(`${INSTALLATION.terraformRoot}/bootstrap-operator-policy-authorizer-permissions-policy.json`);
-  const candidateOnly = { ...desired, Statement: desired.Statement.map((statement) => statement.Sid === "ReadRegionalTaskDefinitionMetadata" ? { ...statement, Resource: statement.Resource.filter((arn) => arn.includes("mscqr-production-rls-green-backend-candidate:")) } : statement) };
+  const scoped = { ...desired, Statement: desired.Statement.map((statement) => statement.Sid === "ReadRegionalTaskDefinitionMetadata" ? { ...statement, Resource: [...historicalTaskDefinitionResources] } : statement) };
+  const candidateOnly = { ...scoped, Statement: scoped.Statement.map((statement) => statement.Sid === "ReadRegionalTaskDefinitionMetadata" ? { ...statement, Resource: [historicalTaskDefinitionResources[0]] } : statement) };
   const prior = { ...desired, Statement: desired.Statement.filter(({ Sid }) => !["ReadExactProductionBackendSelectorSource", "ReadRegionalTaskDefinitionMetadata"].includes(Sid)) };
   const sevenResourceNoEcs = bootstrapOperatorPolicyAuthorizerPermissionsPredecessor();
   const sevenResourceNoEcsWithoutTaskReads = { ...sevenResourceNoEcs, Statement: sevenResourceNoEcs.Statement.filter(({ Sid }) => !["ReadExactProductionBackendSelectorSource", "ReadRegionalTaskDefinitionMetadata"].includes(Sid)) };
-  return [candidateOnly, prior, sevenResourceNoEcsWithoutTaskReads, sevenResourceNoEcs];
+  return [candidateOnly, prior, sevenResourceNoEcsWithoutTaskReads, sevenResourceNoEcs, scoped];
 };
 export const evidenceReaderPermissionsPredecessor = () => {
   const desired = sourceJson(`${INSTALLATION.terraformRoot}/broker-recovery-successor-evidence-reader-permissions-policy.json`);

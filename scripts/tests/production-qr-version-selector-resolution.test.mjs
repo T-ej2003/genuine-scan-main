@@ -165,11 +165,12 @@ test("read session policy permits only exact production metadata and one secret 
   assert.deepEqual(policy.Statement.map(({ Action, Resource }) => [Action, Resource]), [
     ["sts:GetCallerIdentity", "*"],
     ["ecs:DescribeServices", "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2"],
-    ["ecs:DescribeTaskDefinition", ["arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:*", "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:*"]],
+    ["ecs:DescribeTaskDefinition", "*"],
     ["secretsmanager:GetSecretValue", secretArn],
     ["secretsmanager:DescribeSecret", secretArn],
   ]);
   assert.equal(policy.Statement.some(({ Action }) => String(Action).includes("Put") || String(Action).includes("Update") || String(Action).includes("Delete") || String(Action).includes("List")), false);
+  assert.equal(policy.Statement.filter(({ Resource }) => Resource === "*").map(({ Action }) => Action).join(","), "sts:GetCallerIdentity,ecs:DescribeTaskDefinition");
   assert.throws(() => buildQrVersionReadSessionPolicy(secretArn.replace("qr-current-version", "other-secret")));
 });
 
@@ -181,9 +182,10 @@ test("workflow approval, read permissions and payload handling remain narrowly s
   const iam = JSON.parse(fs.readFileSync(path.join(root, "infra/aws/terraform/production-initial-activation-policy-reconciler/bootstrap-operator-policy-authorizer-permissions-policy.json"), "utf8"));
   assert.deepEqual(iam.Statement.slice(0, 2).map(({ Action, Resource }) => [Action, Resource]), [
     ["ecs:DescribeServices", "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2"],
-    ["ecs:DescribeTaskDefinition", ["arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:*", "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:*"]],
+    ["ecs:DescribeTaskDefinition", "*"],
   ]);
   assert.equal(iam.Statement.some(({ Action, Resource }) => String(Action).includes("secretsmanager:GetSecretValue") && (Resource === "*" || Array.isArray(Resource) && Resource.includes("*"))), false);
+  assert.equal(iam.Statement.filter(({ Resource }) => Resource === "*").map(({ Action }) => Action).join(","), "ecs:DescribeTaskDefinition,sts:GetCallerIdentity");
   const resolver = fs.readFileSync(path.join(root, "scripts/aws/resolve-production-qr-version-selector.mjs"), "utf8");
   assert.match(workflow.jobs.resolve.steps.map(({ run }) => run || "").join("\n"), /npm ci --prefix backend/);
   assert.match(resolver, /process\.stdout\.write\("QR_VERSION_RESOLUTION=PASS/);

@@ -3659,7 +3659,7 @@
         "sid": "IdentifyCurrentSession",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionBootstrapOperatorPolicyAuthorizer",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "04abffe66877d3115912ca1bf55262c688d08a158241dc78af654d6f4859c8ab"
+        "expectedPolicySha256": "425d24793dfbf0d59b8fdf6357f39ab3c27787190695bf821449773c4f5179b1"
       },
       "required": true,
       "mutation": false
@@ -3698,7 +3698,7 @@
         "sid": "ReadExactInitialDualSlotBindingForBootstrapOperatorAuthorization",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionBootstrapOperatorPolicyAuthorizer",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "04abffe66877d3115912ca1bf55262c688d08a158241dc78af654d6f4859c8ab"
+        "expectedPolicySha256": "425d24793dfbf0d59b8fdf6357f39ab3c27787190695bf821449773c4f5179b1"
       },
       "required": true,
       "mutation": false
@@ -3737,7 +3737,7 @@
         "sid": "ReadExactInitialDualSlotBindingForBootstrapOperatorAuthorization",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionBootstrapOperatorPolicyAuthorizer",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "04abffe66877d3115912ca1bf55262c688d08a158241dc78af654d6f4859c8ab"
+        "expectedPolicySha256": "425d24793dfbf0d59b8fdf6357f39ab3c27787190695bf821449773c4f5179b1"
       },
       "required": true,
       "mutation": false
@@ -3767,7 +3767,7 @@
         "sid": "ReadBootstrapOperatorTransitionConsumption",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionBootstrapOperatorPolicyAuthorizer",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "04abffe66877d3115912ca1bf55262c688d08a158241dc78af654d6f4859c8ab"
+        "expectedPolicySha256": "425d24793dfbf0d59b8fdf6357f39ab3c27787190695bf821449773c4f5179b1"
       },
       "required": true,
       "mutation": false

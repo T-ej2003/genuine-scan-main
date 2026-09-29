@@ -58,6 +58,17 @@ The two predecessor policy documents are tracked independently: if one policy
 converges before execution, the old saved plan fails its live-state recheck and
 must be prepared again for the exact remaining update.
 
+The QR version-selector authorizer's deployed policy can have the exact historical
+task-definition ARN list. ECS evaluates `DescribeTaskDefinition` against `*`, so
+that ARN-scoped read fails even for the current backend task definition. The
+reconciler recognizes only that authenticated policy as predecessor and updates
+only its document to the source-owned successor: `DescribeTaskDefinition` on
+`*`, conditioned on `eu-west-2`. The source-bound selector still reads the task
+definition referenced by the exact production backend service and checks its
+exact QR secret selector. After this source change merges, prepare a new live
+saved plan and obtain a fresh installation authorization; the failed selector
+run and its approval are not reused.
+
 For the reviewed exact legacy-to-dedicated-role expansion, completion additionally requires remote
 Terraform state to advance from the authenticated predecessor and to contain
 all fourteen exact resource attributes from the authorized saved
