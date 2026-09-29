@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertStageBBrokerPackageManifest, createDeterministicArchive, readZipCentralDirectory, zipEntryBytes } from "./package-production-green-stage-b-broker.mjs";
 import { assertStageAStateIdentity, parseAuthenticatedStateBytes, stageAStateSemanticSha256 } from "./generate-production-green-stage-a-prerequisites.mjs";
-import { validateStageBStageAInput } from "./generate-production-green-stage-b-tfvars.mjs";
+import { assertStageBCanonicalTfvarsFile, validateStageBStageAInput } from "./generate-production-green-stage-b-tfvars.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFileAtomic, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -15,7 +15,7 @@ const SHA256 = /^[a-f0-9]{64}$/;
 const TICKET = /^[A-Za-z0-9][A-Za-z0-9._:/-]{5,127}$/;
 const MAX_MEMBER_BYTES = 64 * 1024 * 1024;
 export const STAGE_B_PREREQUISITE_BUNDLE_WORKFLOW = ".github/workflows/produce-production-green-stage-b-prerequisite-bundle.yml";
-export const STAGE_B_PREREQUISITE_BUNDLE_FORMAT = "stage-b-prerequisite-bundle-v1";
+export const STAGE_B_PREREQUISITE_BUNDLE_FORMAT = "stage-b-prerequisite-bundle-v2";
 export const STAGE_B_RUNTIME_RELOCATABLE_FIELDS = Object.freeze(["stageAInputPath", "stageAStateBackupPath", "brokerPackagePath", "brokerPackageManifestPath"]);
 const STAGE_B_RUNTIME_FIELD_TO_ARTIFACT = Object.freeze({ stageAInputPath: "stage-a-handoff", stageAStateBackupPath: "stage-a-state-backup", brokerPackagePath: "broker-package", brokerPackageManifestPath: "broker-package-manifest" });
 export const STAGE_B_PREREQUISITE_BUNDLE_FILES = Object.freeze([
@@ -23,6 +23,8 @@ export const STAGE_B_PREREQUISITE_BUNDLE_FILES = Object.freeze([
   Object.freeze({ logicalArtifactId: "broker-package-manifest", canonicalFilename: "broker-package.manifest.json", existingContractIdentity: "broker-package-manifest" }),
   Object.freeze({ logicalArtifactId: "stage-a-handoff", canonicalFilename: "stage-a-input.json", existingContractIdentity: "stage-a-handoff" }),
   Object.freeze({ logicalArtifactId: "stage-a-state-backup", canonicalFilename: "stage-a-state-backup.json", existingContractIdentity: "stage-a-state-backup" }),
+  Object.freeze({ logicalArtifactId: "stage-b-tfvars", canonicalFilename: "stage-b.tfvars", existingContractIdentity: "tfvars" }),
+  Object.freeze({ logicalArtifactId: "stage-b-tfvars-binding", canonicalFilename: "stage-b-tfvars-binding.json", existingContractIdentity: "tfvars-binding-report" }),
 ]);
 const MANIFEST_FILENAME = "prerequisite-manifest.json";
 const allNames = [...STAGE_B_PREREQUISITE_BUNDLE_FILES.map(({ canonicalFilename }) => canonicalFilename), MANIFEST_FILENAME];
@@ -63,23 +65,25 @@ function assertArchive(bytes) {
 
 function manifestBody({ sourceSha, ticketId, repository, workflowRunId, workflowRunAttempt, headSha, members }) {
   return {
-    schemaVersion: 1, format: STAGE_B_PREREQUISITE_BUNDLE_FORMAT, operation: "PRODUCTION_GREEN_STAGE_B_TEN_ADDRESS_REFRESH_ONLY_STATE_RECONCILIATION", payloadMemberCount: 4,
+    schemaVersion: 2, format: STAGE_B_PREREQUISITE_BUNDLE_FORMAT, operation: "PRODUCTION_GREEN_STAGE_B_TEN_ADDRESS_REFRESH_ONLY_STATE_RECONCILIATION", payloadMemberCount: STAGE_B_PREREQUISITE_BUNDLE_FILES.length,
     repository, workflowPath: STAGE_B_PREREQUISITE_BUNDLE_WORKFLOW, workflowRunId: String(workflowRunId), workflowRunAttempt: String(workflowRunAttempt), headSha, sourceSha, changeTicketId: ticketId,
     members: members.map(({ logicalArtifactId, canonicalFilename, sha256: digest, byteSize, existingContractIdentity }) => ({ logicalArtifactId, canonicalFilename, sha256: digest, byteSize, sourceIdentity: { repository, workflowPath: STAGE_B_PREREQUISITE_BUNDLE_WORKFLOW, workflowRunId: String(workflowRunId), workflowRunAttempt: String(workflowRunAttempt), headSha, sourceSha, changeTicketId: ticketId }, existingContractIdentity })),
   };
 }
 
-export async function createStageBPrerequisiteBundle({ outputPath, sourceSha, ticketId, repository = "T-ej2003/genuine-scan-main", workflowRunId, workflowRunAttempt = "1", headSha = sourceSha, brokerPackagePath, brokerManifestPath = `${brokerPackagePath}.manifest.json`, stageAInputPath, stageAStateBackupPath } = {}) {
+export async function createStageBPrerequisiteBundle({ outputPath, sourceSha, ticketId, repository = "T-ej2003/genuine-scan-main", workflowRunId, workflowRunAttempt = "1", headSha = sourceSha, brokerPackagePath, brokerManifestPath = `${brokerPackagePath}.manifest.json`, stageAInputPath, stageAStateBackupPath, tfvarsPath, bindingReportPath } = {}) {
   assertIdentity({ repository, workflowPath: STAGE_B_PREREQUISITE_BUNDLE_WORKFLOW, workflowRunId, workflowRunAttempt, headSha, sourceSha, ticketId });
   if (!outputPath || !path.isAbsolute(outputPath)) throw new Error("Stage B prerequisite bundle output must be an absolute private path.");
   const files = [
     privateRegularFile(brokerPackagePath, "Stage B broker package"), privateRegularFile(brokerManifestPath, "Stage B broker package manifest"),
     privateRegularFile(stageAInputPath, "Stage-A prerequisite input"), privateRegularFile(stageAStateBackupPath, "Stage-A state backup"),
+    privateRegularFile(tfvarsPath, "Stage B tfvars"), privateRegularFile(bindingReportPath, "Stage B tfvars binding"),
   ];
   const brokerManifest = assertStageBBrokerPackageManifest({ brokerPackagePath: files[0].path, manifestPath: files[1].path, repositoryRoot: root, expectedToolingSha: sourceSha });
   const stageAInput = JSON.parse(fs.readFileSync(files[2].path, "utf8")); validateStageBStageAInput(stageAInput, { toolingSha: sourceSha, toolingTreeSha256: brokerManifest.manifest.toolingTreeSha256 });
   const stateBytes = fs.readFileSync(files[3].path); const state = parseAuthenticatedStateBytes(stateBytes); assertStageAStateIdentity(state, { stateObject: stageAInput.stageAStateObject });
   if (stageAInput.stageAStateLineage !== state.lineage || stageAInput.stageAStateSerial !== state.serial || stageAInput.stageAStateSha256 !== stageAStateSemanticSha256(state)) throw new Error("Stage-A prerequisite input and state backup are not the same authenticated state.");
+  const binding = JSON.parse(fs.readFileSync(files[5].path, "utf8")); assertStageBCanonicalTfvarsFile({ tfvarsPath: files[4].path, bindingReport: binding });
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-b-prerequisite-bundle-")); fs.chmodSync(directory, 0o700);
   try {
     const members = STAGE_B_PREREQUISITE_BUNDLE_FILES.map((contract, index) => { const destination = path.join(directory, contract.canonicalFilename); fs.copyFileSync(files[index].path, destination); fs.chmodSync(destination, 0o600); const bytes = fs.readFileSync(destination); return { ...contract, sha256: sha256(bytes), byteSize: bytes.length, path: destination }; });
@@ -88,7 +92,7 @@ export async function createStageBPrerequisiteBundle({ outputPath, sourceSha, ti
     const archive = await createDeterministicArchive(directory); const output = assertStageBArtifactPath({ artifactPath: outputPath, repositoryRoot: root, label: "Stage B prerequisite bundle", allowExisting: false });
     ensureStageBPrivateDirectory({ directory: path.dirname(output), repositoryRoot: root, create: true });
     const written = writeStageBPrivateFileAtomic({ filePath: output, bytes: archive, repositoryRoot: root, label: "Stage B prerequisite bundle" });
-    return Object.freeze({ bundlePath: written.path, bundleSha256: written.sha256, manifest, payloadMemberCount: 4 });
+    return Object.freeze({ bundlePath: written.path, bundleSha256: written.sha256, manifest, payloadMemberCount: STAGE_B_PREREQUISITE_BUNDLE_FILES.length });
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 }
 
@@ -97,7 +101,7 @@ export function assertStageBPrerequisiteBundle({ bundlePath, sourceSha, ticketId
   const bundle = privateRegularFile(bundlePath, "Stage B prerequisite bundle"); const bytes = fs.readFileSync(bundle.path); const entries = assertArchive(bytes); const contents = Object.fromEntries(entries.map((entry) => [entry.name, zipEntryBytes(bytes, entry)]));
   let manifest; try { manifest = JSON.parse(contents[MANIFEST_FILENAME]); } catch { throw new Error("Stage B prerequisite manifest is malformed."); }
   exactKeys(manifest, ["schemaVersion", "format", "operation", "payloadMemberCount", "repository", "workflowPath", "workflowRunId", "workflowRunAttempt", "headSha", "sourceSha", "changeTicketId", "members"], "Stage B prerequisite manifest");
-  if (manifest.schemaVersion !== 1 || manifest.format !== STAGE_B_PREREQUISITE_BUNDLE_FORMAT || manifest.operation !== "PRODUCTION_GREEN_STAGE_B_TEN_ADDRESS_REFRESH_ONLY_STATE_RECONCILIATION" || manifest.payloadMemberCount !== 4 || manifest.repository !== repository || manifest.workflowPath !== STAGE_B_PREREQUISITE_BUNDLE_WORKFLOW || manifest.workflowRunId !== String(workflowRunId) || manifest.workflowRunAttempt !== String(workflowRunAttempt) || manifest.headSha !== headSha || manifest.sourceSha !== sourceSha || manifest.changeTicketId !== ticketId || !Array.isArray(manifest.members) || manifest.members.length !== 4) throw new Error("Stage B prerequisite manifest provenance is invalid.");
+  if (manifest.schemaVersion !== 2 || manifest.format !== STAGE_B_PREREQUISITE_BUNDLE_FORMAT || manifest.operation !== "PRODUCTION_GREEN_STAGE_B_TEN_ADDRESS_REFRESH_ONLY_STATE_RECONCILIATION" || manifest.payloadMemberCount !== STAGE_B_PREREQUISITE_BUNDLE_FILES.length || manifest.repository !== repository || manifest.workflowPath !== STAGE_B_PREREQUISITE_BUNDLE_WORKFLOW || manifest.workflowRunId !== String(workflowRunId) || manifest.workflowRunAttempt !== String(workflowRunAttempt) || manifest.headSha !== headSha || manifest.sourceSha !== sourceSha || manifest.changeTicketId !== ticketId || !Array.isArray(manifest.members) || manifest.members.length !== STAGE_B_PREREQUISITE_BUNDLE_FILES.length) throw new Error("Stage B prerequisite manifest provenance is invalid.");
   const seen = new Set();
   for (const member of manifest.members) {
     exactKeys(member, ["logicalArtifactId", "canonicalFilename", "sha256", "byteSize", "sourceIdentity", "existingContractIdentity"], "Stage B prerequisite manifest member");
@@ -109,7 +113,7 @@ export function assertStageBPrerequisiteBundle({ bundlePath, sourceSha, ticketId
     assertIdentity({ ...member.sourceIdentity, ticketId: member.sourceIdentity.changeTicketId });
     if (JSON.stringify(member.sourceIdentity) !== JSON.stringify({ repository, workflowPath: STAGE_B_PREREQUISITE_BUNDLE_WORKFLOW, workflowRunId: String(workflowRunId), workflowRunAttempt: String(workflowRunAttempt), headSha, sourceSha, changeTicketId: ticketId })) throw new Error("Stage B prerequisite member source identity is substituted.");
   }
-  if (new Set(manifest.members.map(({ logicalArtifactId }) => logicalArtifactId)).size !== 4 || new Set(manifest.members.map(({ canonicalFilename }) => canonicalFilename)).size !== 4) throw new Error("Stage B prerequisite manifest payload set is not exact.");
+  if (new Set(manifest.members.map(({ logicalArtifactId }) => logicalArtifactId)).size !== STAGE_B_PREREQUISITE_BUNDLE_FILES.length || new Set(manifest.members.map(({ canonicalFilename }) => canonicalFilename)).size !== STAGE_B_PREREQUISITE_BUNDLE_FILES.length) throw new Error("Stage B prerequisite manifest payload set is not exact.");
   return Object.freeze({ bundle, bundleSha256: bundle.sha256, manifest, manifestSha256: sha256(contents[MANIFEST_FILENAME]), contents });
 }
 
@@ -120,17 +124,20 @@ export function materializeStageBPrerequisites({ bundlePath, sourceSha, ticketId
     for (const member of verified.manifest.members) { const filePath = path.join(directory, member.canonicalFilename); if (path.dirname(filePath) !== directory) throw new Error("Stage B prerequisite materialization escaped its private root."); fs.writeFileSync(filePath, verified.contents[member.canonicalFilename], { mode: 0o600, flag: "wx" }); if ((fs.lstatSync(filePath).mode & 0o777) !== 0o600 || sha256(fs.readFileSync(filePath)) !== member.sha256) throw new Error("Stage B prerequisite materialization changed authenticated bytes."); paths[member.logicalArtifactId] = filePath; }
     const brokerManifest = assertStageBBrokerPackageManifest({ brokerPackagePath: paths["broker-package"], manifestPath: paths["broker-package-manifest"], repositoryRoot: root, expectedToolingSha: sourceSha });
     const input = JSON.parse(fs.readFileSync(paths["stage-a-handoff"], "utf8")); const state = parseAuthenticatedStateBytes(fs.readFileSync(paths["stage-a-state-backup"])); validateStageBStageAInput(input, { toolingSha: sourceSha, toolingTreeSha256: brokerManifest.manifest.toolingTreeSha256 }); assertStageAStateIdentity(state, { stateObject: input.stageAStateObject }); if (input.stageAStateLineage !== state.lineage || input.stageAStateSerial !== state.serial || input.stageAStateSha256 !== stageAStateSemanticSha256(state)) throw new Error("Stage-A prerequisite input and state backup are not the same authenticated state.");
+    assertStageBCanonicalTfvarsFile({ tfvarsPath: paths["stage-b-tfvars"], bindingReport: JSON.parse(fs.readFileSync(paths["stage-b-tfvars-binding"], "utf8")) });
     return Object.freeze({ ...verified, privateRoot: directory, paths });
   } catch (error) { fs.rmSync(directory, { recursive: true, force: true }); throw error; }
 }
 
-export function writeStageBRuntimeMaterialization({ originalTfvarsBytes, originalBindingBytes, prerequisite, outputDirectory } = {}) {
-  if (!Buffer.isBuffer(originalTfvarsBytes) || !Buffer.isBuffer(originalBindingBytes) || !prerequisite?.paths || !prerequisite.privateRoot || outputDirectory !== undefined) throw new Error("Stage B runtime materialization inputs are invalid.");
-  outputDirectory = prerequisite.privateRoot;
+export function writeStageBRuntimeMaterialization({ prerequisite, outputDirectory } = {}) {
+  if (!prerequisite?.paths || !prerequisite.privateRoot || outputDirectory !== undefined) throw new Error("Stage B runtime materialization inputs are invalid.");
+  const originalTfvarsBytes = prerequisite.contents["stage-b.tfvars"]; const originalBindingBytes = prerequisite.contents["stage-b-tfvars-binding.json"];
+  if (!Buffer.isBuffer(originalTfvarsBytes) || !Buffer.isBuffer(originalBindingBytes)) throw new Error("Stage B runtime materialization is missing authenticated tfvars bytes.");
+  outputDirectory = path.join(prerequisite.privateRoot, "runtime");
   ensureStageBPrivateDirectory({ directory: outputDirectory, repositoryRoot: root, create: true, normalize: true });
   const originalTfvarsSha256 = sha256(originalTfvarsBytes); const originalBindingSha256 = sha256(originalBindingBytes); const binding = JSON.parse(originalBindingBytes); const pathFields = STAGE_B_RUNTIME_RELOCATABLE_FIELDS;
   if (pathFields.some((field) => typeof binding[field] !== "string" || !path.isAbsolute(binding[field]))) throw new Error("Stage B original binding does not contain the exact canonical prerequisite paths.");
-  const runtimeTfvarsPath = path.join(outputDirectory, "stage-b.runtime.tfvars"); const runtimeBindingPath = path.join(outputDirectory, "stage-b.runtime.binding.json"); const materializationPath = path.join(outputDirectory, "runtime-materialization.json");
+  const runtimeTfvarsPath = path.join(outputDirectory, "stage-b.tfvars"); const runtimeBindingPath = path.join(outputDirectory, "stage-b-tfvars-binding.json"); const materializationPath = path.join(outputDirectory, "runtime-materialization.json");
   const brokerPath = prerequisite.paths["broker-package"]; const tfvarsText = originalTfvarsBytes.toString("utf8"); const matches = [...tfvarsText.matchAll(/^broker_package_path\s*=\s*("(?:[^"\\]|\\.)*")\s*$/gm)];
   if (matches.length !== 1) throw new Error("Stage B tfvars must contain exactly one canonical broker_package_path field.");
   const runtimeLine = `broker_package_path = ${JSON.stringify(brokerPath)}`;

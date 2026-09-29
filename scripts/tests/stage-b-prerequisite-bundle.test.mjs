@@ -7,6 +7,7 @@ import test from "node:test";
 import JSZip from "jszip";
 import { generateStageAPrerequisites, STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_MINIMUM_STATE_SERIAL, STAGE_A_STATE_OBJECT, stageAStateSemanticSha256 } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
 import { packageStageBBroker } from "../aws/package-production-green-stage-b-broker.mjs";
+import { produceStageBPrerequisiteBundle } from "../aws/produce-production-green-stage-b-prerequisite-bundle.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { assertStageBPrerequisiteBundle, createStageBPrerequisiteBundle, materializeStageBPrerequisites, writeStageBRuntimeMaterialization, STAGE_B_PREREQUISITE_BUNDLE_WORKFLOW } from "../aws/stage-b-prerequisite-bundle.mjs";
 import { productionStageAState } from "./fixtures/production-stage-a-state.mjs";
@@ -26,30 +27,29 @@ async function fixture() {
   const statePath = path.join(directory, "stage-a-state.json"); const state = productionStageAState({ serial: STAGE_A_MINIMUM_STATE_SERIAL }); fs.writeFileSync(statePath, JSON.stringify(state), { mode: 0o600 });
   const stageAInputPath = path.join(directory, "stage-a-input.json"); generateStageAPrerequisites({ stateBackup: statePath, stateObject: STAGE_A_STATE_OBJECT, toolingSha: sourceSha, toolingTreeSha256, outputPath: stageAInputPath, phase: "POST_APPLY", run });
   const broker = await packageStageBBroker({ outputPath: path.join(directory, "broker-package.zip"), toolingSha: sourceSha, toolingTreeSha256, repositoryRoot });
-  const result = await createStageBPrerequisiteBundle({ outputPath: path.join(directory, "prerequisite-bundle.zip"), sourceSha, ticketId, workflowRunId: "123", workflowRunAttempt: "1", headSha: sourceSha, brokerPackagePath: broker.package.path, brokerManifestPath: broker.manifest.path, stageAInputPath, stageAStateBackupPath: statePath });
-  return { directory, statePath, stageAInputPath, broker, result };
+  const tfvarsPath = path.join(directory, "stage-b.tfvars"); const tfvarsBytes = Buffer.from(`broker_package_path = ${JSON.stringify(broker.package.path)}\n# ${"x".repeat(185184)}\n`); fs.writeFileSync(tfvarsPath, tfvarsBytes, { mode: 0o600 });
+  const bindingReportPath = path.join(directory, "stage-b-tfvars-binding.json"); fs.writeFileSync(bindingReportPath, `${JSON.stringify({ tfvarsFormat: "hcl", tfvarsFileName: "stage-b.tfvars", tfvarsExtension: ".tfvars", tfvarsSha256: crypto.createHash("sha256").update(tfvarsBytes).digest("hex"), stageAInputPath, stageAStateBackupPath: statePath, brokerPackagePath: broker.package.path, brokerPackageManifestPath: broker.manifest.path })}\n`, { mode: 0o600 });
+  const result = await createStageBPrerequisiteBundle({ outputPath: path.join(directory, "prerequisite-bundle.zip"), sourceSha, ticketId, workflowRunId: "123", workflowRunAttempt: "1", headSha: sourceSha, brokerPackagePath: broker.package.path, brokerManifestPath: broker.manifest.path, stageAInputPath, stageAStateBackupPath: statePath, tfvarsPath, bindingReportPath });
+  return { directory, statePath, stageAInputPath, broker, tfvarsPath, bindingReportPath, result };
 }
 
 test.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
-test("one deterministic producer bundle authenticates four payloads and private relocation", async () => {
-  const first = await fixture(); const second = await fixture();
-  assert.equal(first.result.bundleSha256, second.result.bundleSha256);
+test("one producer bundle authenticates realistic payloads and private relocation", async () => {
+  const first = await fixture();
   const verified = assertStageBPrerequisiteBundle({ bundlePath: first.result.bundlePath, sourceSha, ticketId, repository: "T-ej2003/genuine-scan-main", workflowRunId: "123", workflowRunAttempt: "1", headSha: sourceSha });
-  assert.equal(verified.manifest.payloadMemberCount, 4); assert.equal(verified.manifest.workflowPath, STAGE_B_PREREQUISITE_BUNDLE_WORKFLOW);
+  assert.equal(verified.manifest.payloadMemberCount, 6); assert.equal(verified.manifest.workflowPath, STAGE_B_PREREQUISITE_BUNDLE_WORKFLOW);
   const materialized = materializeStageBPrerequisites({ bundlePath: first.result.bundlePath, sourceSha, ticketId, repository: "T-ej2003/genuine-scan-main", workflowRunId: "123", workflowRunAttempt: "1", headSha: sourceSha });
   assert.equal(fs.statSync(materialized.privateRoot).mode & 0o777, 0o700); assert.equal(fs.statSync(materialized.paths["broker-package"]).mode & 0o777, 0o600);
-  const runtime = writeStageBRuntimeMaterialization({ originalTfvarsBytes: Buffer.from('broker_package_path = "/producer/broker.zip"\naccount_id = "368992683803"\n'), originalBindingBytes: Buffer.from(JSON.stringify({ tfvarsSha256: "c".repeat(64), stageAInputPath: "/producer/stage-a-input.json", stageAStateBackupPath: "/producer/stage-a-state-backup.json", brokerPackagePath: "/producer/broker.zip", brokerPackageManifestPath: "/producer/broker-package.manifest.json" }) + "\n"), prerequisite: materialized });
-  assert.equal(runtime.materialization.relocatableFields.length, 4); assert.match(fs.readFileSync(runtime.runtimeTfvarsPath, "utf8"), /consumer/); assert.throws(() => writeStageBRuntimeMaterialization({ originalTfvarsBytes: Buffer.from(""), originalBindingBytes: Buffer.from("{}"), prerequisite: materialized, outputDirectory: "/tmp/caller-chosen" }));
+  const runtime = writeStageBRuntimeMaterialization({ prerequisite: materialized });
+  assert.equal(runtime.materialization.relocatableFields.length, 4); assert.equal(path.basename(runtime.runtimeTfvarsPath), "stage-b.tfvars"); assert.match(fs.readFileSync(runtime.runtimeTfvarsPath, "utf8"), /consumer/); assert.throws(() => writeStageBRuntimeMaterialization({ prerequisite: materialized, outputDirectory: "/tmp/caller-chosen" }));
 });
 
 test("different preparation and execution roots preserve semantic relocation identity", async () => {
   const runFixture = await fixture(); const expected = { bundlePath: runFixture.result.bundlePath, sourceSha, ticketId, repository: "T-ej2003/genuine-scan-main", workflowRunId: "123", workflowRunAttempt: "1", headSha: sourceSha };
-  const originalTfvarsBytes = Buffer.from('broker_package_path = "/producer/broker.zip"\naccount_id = "368992683803"\n');
-  const originalBindingBytes = Buffer.from(`${JSON.stringify({ tfvarsSha256: "c".repeat(64), stageAInputPath: "/producer/stage-a-input.json", stageAStateBackupPath: "/producer/stage-a-state-backup.json", brokerPackagePath: "/producer/broker.zip", brokerPackageManifestPath: "/producer/broker-package.manifest.json" })}\n`);
   const preparationRoot = materializeStageBPrerequisites(expected); const executionRoot = materializeStageBPrerequisites(expected);
-  const preparation = writeStageBRuntimeMaterialization({ originalTfvarsBytes, originalBindingBytes, prerequisite: preparationRoot });
-  const execution = writeStageBRuntimeMaterialization({ originalTfvarsBytes, originalBindingBytes, prerequisite: executionRoot });
+  const preparation = writeStageBRuntimeMaterialization({ prerequisite: preparationRoot });
+  const execution = writeStageBRuntimeMaterialization({ prerequisite: executionRoot });
   assert.notEqual(preparation.runtimeTfvarsSha256, execution.runtimeTfvarsSha256);
   assert.notEqual(preparation.runtimeBindingSha256, execution.runtimeBindingSha256);
   assert.notEqual(preparation.runtimeMaterializationSha256, execution.runtimeMaterializationSha256);
@@ -72,13 +72,29 @@ test("producer, run, source, ticket, attempt, and archive identity substitutions
 
 test("every payload is required and archive names cannot escape the exact set", async () => {
   const runFixture = await fixture(); const expected = { bundlePath: runFixture.result.bundlePath, sourceSha, ticketId, repository: "T-ej2003/genuine-scan-main", workflowRunId: "123", workflowRunAttempt: "1", headSha: sourceSha };
-  for (const filename of ["broker-package.zip", "broker-package.manifest.json", "stage-a-input.json", "stage-a-state-backup.json"]) {
+  for (const filename of ["broker-package.zip", "broker-package.manifest.json", "stage-a-input.json", "stage-a-state-backup.json", "stage-b.tfvars", "stage-b-tfvars-binding.json"]) {
     const archive = await JSZip.loadAsync(fs.readFileSync(runFixture.result.bundlePath)); archive.remove(filename); const file = path.join(runFixture.directory, `missing-${filename}.zip`); fs.writeFileSync(file, await archive.generateAsync({ type: "nodebuffer" }), { mode: 0o600 }); assert.throws(() => assertStageBPrerequisiteBundle({ ...expected, bundlePath: file }), /archive|member|manifest/);
   }
-  for (const filename of ["broker-package.zip", "broker-package.manifest.json", "stage-a-input.json", "stage-a-state-backup.json"]) {
+  for (const filename of ["broker-package.zip", "broker-package.manifest.json", "stage-a-input.json", "stage-a-state-backup.json", "stage-b.tfvars", "stage-b-tfvars-binding.json"]) {
     const archive = await JSZip.loadAsync(fs.readFileSync(runFixture.result.bundlePath)); archive.file(filename, Buffer.from("substituted")); const file = path.join(runFixture.directory, `modified-${filename}.zip`); fs.writeFileSync(file, await archive.generateAsync({ type: "nodebuffer" }), { mode: 0o600 }); assert.throws(() => assertStageBPrerequisiteBundle({ ...expected, bundlePath: file }), /archive|member|manifest/);
   }
   for (const filename of ["unexpected.txt", "../escape", "/absolute"]) {
     const archive = await JSZip.loadAsync(fs.readFileSync(runFixture.result.bundlePath)); archive.file(filename, Buffer.from("x")); const file = path.join(runFixture.directory, `unsafe-${filename.replaceAll("/", "-")}.zip`); fs.writeFileSync(file, await archive.generateAsync({ type: "nodebuffer" }), { mode: 0o600 }); assert.throws(() => assertStageBPrerequisiteBundle({ ...expected, bundlePath: file }), /archive|member|filename/);
   }
+});
+
+test("the authenticated binding must name exactly stage-b.tfvars", async () => {
+  const f = await fixture(); const binding = JSON.parse(fs.readFileSync(f.bindingReportPath, "utf8")); binding.tfvarsFileName = "stage-b.runtime.tfvars"; fs.writeFileSync(f.bindingReportPath, `${JSON.stringify(binding)}\n`, { mode: 0o600 });
+  await assert.rejects(() => createStageBPrerequisiteBundle({ outputPath: path.join(f.directory, "filename-mismatch.zip"), sourceSha, ticketId, workflowRunId: "123", workflowRunAttempt: "1", headSha: sourceSha, brokerPackagePath: f.broker.package.path, brokerManifestPath: f.broker.manifest.path, stageAInputPath: f.stageAInputPath, stageAStateBackupPath: f.statePath, tfvarsPath: f.tfvarsPath, bindingReportPath: f.bindingReportPath }), /filename/);
+});
+
+test("the producer carries realistic tfvars through the authenticated artifact instead of dispatch inputs", async () => {
+  const f = await fixture(); const outputDirectory = path.join(f.directory, "producer"); fs.mkdirSync(outputDirectory, { mode: 0o700 }); const authorizationPath = path.join(f.directory, "image-authorization.json"); const authorization = { imageEvidence: { publicationIdentity: { imageReleaseSha: sourceSha }, workflowRunId: "321", canonicalArtifactSha256: "d".repeat(64) }, imageEvidenceSignature: {} }; const authorizationBytes = Buffer.from(`${JSON.stringify(authorization)}\n`); fs.writeFileSync(authorizationPath, authorizationBytes, { mode: 0o600 });
+  const producerRun = (args) => {
+    if (args[0] === "s3api" && args[1] === "get-object") { const output = args[args.indexOf("--expected-bucket-owner") + 2]; fs.copyFileSync(args.includes("mscqr/production/rls-green/stage-a/terraform.tfstate") ? f.statePath : path.join(f.directory, "stage-b-state.json"), output); fs.chmodSync(output, 0o600); return "{}"; }
+    return run(args);
+  };
+  fs.writeFileSync(path.join(f.directory, "stage-b-state.json"), "{}\n", { mode: 0o600 });
+  const result = await produceStageBPrerequisiteBundle({ sourceSha, ticketId, imageAuthorizationPath: authorizationPath, imageAuthorizationSha256: crypto.createHash("sha256").update(authorizationBytes).digest("hex"), outputDirectory, workflowRunId: "456", workflowRunAttempt: "1", run: producerRun, deriveToolingTree: () => toolingTreeSha256, packageBroker: async ({ outputPath, manifestPath }) => { fs.copyFileSync(f.broker.package.path, outputPath); fs.copyFileSync(f.broker.manifest.path, manifestPath); fs.chmodSync(outputPath, 0o600); fs.chmodSync(manifestPath, 0o600); }, verifyAuthorization: ({ authorization: value }) => assert.equal(value.imageEvidence.workflowRunId, "321"), verifyImageEvidence: () => true, generateTfvars: ({ outputPath, bindingReportPath, stageAInput, stageAStateBackup, brokerPackagePath }) => { const bytes = Buffer.from(`broker_package_path = ${JSON.stringify(brokerPackagePath)}\n# ${"x".repeat(185184)}\n`); fs.writeFileSync(outputPath, bytes, { mode: 0o600 }); fs.writeFileSync(bindingReportPath, `${JSON.stringify({ tfvarsFormat: "hcl", tfvarsFileName: "stage-b.tfvars", tfvarsExtension: ".tfvars", tfvarsSha256: crypto.createHash("sha256").update(bytes).digest("hex"), stageAInputPath: stageAInput, stageAStateBackupPath: stageAStateBackup, brokerPackagePath, brokerPackageManifestPath: `${brokerPackagePath}.manifest.json` })}\n`, { mode: 0o600 }); } });
+  const verified = assertStageBPrerequisiteBundle({ bundlePath: result.bundlePath, sourceSha, ticketId, workflowRunId: "456", workflowRunAttempt: "1", headSha: sourceSha }); assert.ok(verified.contents["stage-b.tfvars"].length > 185184); assert.equal(verified.manifest.payloadMemberCount, 6);
 });

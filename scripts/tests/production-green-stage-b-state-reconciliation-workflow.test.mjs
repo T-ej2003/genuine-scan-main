@@ -24,7 +24,9 @@ test("Stage B state reconciliation workflows are protected, artifact-bound, and 
   assert.ok(Object.keys(prepare.on.workflow_dispatch.inputs).length <= 10);
   assert.ok(Object.keys(authorize.on.workflow_dispatch.inputs).length <= 10);
   assert.ok(Object.keys(execute.on.workflow_dispatch.inputs).length <= 10);
-  for (const name of ["tfvars_base64", "binding_base64", "release_preflight_workflow_run_id", "release_preflight_workflow_run_attempt", "release_preflight_artifact_id", "release_preflight_artifact_digest"]) assert.equal(prepare.on.workflow_dispatch.inputs[name]?.required, true);
+  for (const name of ["prerequisite_bundle_artifact_id", "prerequisite_bundle_artifact_digest", "release_preflight_workflow_run_id", "release_preflight_workflow_run_attempt", "release_preflight_artifact_id", "release_preflight_artifact_digest"]) assert.equal(prepare.on.workflow_dispatch.inputs[name]?.required, true);
+  assert.doesNotMatch(read(names[0]), /tfvars_base64|binding_base64|base64 --decode/);
+  assert.match(read(names[0]), /PRODUCER_ARTIFACT/); assert.match(read(names[0]), /PRODUCER_DIGEST/); assert.match(read(names[0]), /select\(\(\.id\|tostring\) == \$id/);
   for (const workflow of [authorize, execute]) for (const name of ["preparation_workflow_run_id", "preparation_workflow_run_attempt"]) assert.equal(workflow.on.workflow_dispatch.inputs[name]?.required, true);
   for (const name of ["authorization_workflow_run_id", "authorization_workflow_run_attempt"]) assert.equal(execute.on.workflow_dispatch.inputs[name]?.required, true);
   const source = read(names[2]);
@@ -82,16 +84,18 @@ test("reconciliation readers authenticate and consume private JSON directly", ()
   assert.match(read("produce-production-green-stage-b-release-preflight.yml"), /GITHUB_TOKEN: \$\{\{ github\.token \}\}/);
 });
 
-test("the prerequisite producer is a single source-bound four-member producer", () => {
+test("the prerequisite producer is source-bound and transports generated inputs by authenticated artifact", () => {
   const name = "produce-production-green-stage-b-prerequisite-bundle.yml";
   const workflow = parse(name); const source = read(name); const producer = fs.readFileSync(path.join(root, "scripts/aws/produce-production-green-stage-b-prerequisite-bundle.mjs"), "utf8");
   assert.deepEqual(Object.keys(workflow.on), ["workflow_dispatch"]);
-  assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), ["source_sha", "ticket_id"]);
+  assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), ["image_authorization_artifact_digest", "image_authorization_artifact_id", "image_authorization_workflow_run_attempt", "image_authorization_workflow_run_id", "source_sha", "ticket_id"]);
   assert.deepEqual(workflow.permissions, { actions: "read", contents: "read", "id-token": "write" });
   assert.equal(workflow.jobs.produce.environment, "production");
-  assert.match(source, /produce-production-green-stage-b-prerequisite-bundle\.mjs --source-sha/);
+  assert.match(source, /produce-production-green-stage-b-prerequisite-bundle\.mjs[\s\\]+--source-sha/);
   assert.match(source, /production-green-stage-b-state-reconciliation-prerequisites/);
   assert.match(source, /prerequisite-bundle\.zip/);
   assert.match(source, /GITHUB_RUN_ATTEMPT/); assert.match(producer, /GITHUB_WORKFLOW_REF/); assert.match(producer, /GITHUB_RUN_ATTEMPT/);
-  assert.doesNotMatch(source, /(?:tfvars|binding|release_preflight|saved_plan|preparation)_base64|raw filesystem|artifact_id/);
+  assert.match(source, /produce-production-green-stage-b-state-reconciliation-image-authorization\.yml/); assert.match(source, /IMAGE_ARTIFACT/); assert.match(source, /IMAGE_DIGEST/);
+  assert.doesNotMatch(source, /(?:tfvars|binding|release_preflight|saved_plan|preparation)_base64|raw filesystem/);
+  assert.match(producer, /stage-b\.tfvars/); assert.match(producer, /stage-b-tfvars-binding\.json/);
 });
