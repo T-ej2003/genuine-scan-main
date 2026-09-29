@@ -20,7 +20,7 @@ export const STAGE_B_RUNTIME_RELOCATABLE_FIELDS = Object.freeze(["stageAInputPat
 const STAGE_B_RUNTIME_FIELD_TO_ARTIFACT = Object.freeze({ stageAInputPath: "stage-a-handoff", stageAStateBackupPath: "stage-a-state-backup", brokerPackagePath: "broker-package", brokerPackageManifestPath: "broker-package-manifest" });
 export const STAGE_B_PREREQUISITE_BUNDLE_FILES = Object.freeze([
   Object.freeze({ logicalArtifactId: "broker-package", canonicalFilename: "broker-package.zip", existingContractIdentity: "broker-package" }),
-  Object.freeze({ logicalArtifactId: "broker-package-manifest", canonicalFilename: "broker-package.manifest.json", existingContractIdentity: "broker-package-manifest" }),
+  Object.freeze({ logicalArtifactId: "broker-package-manifest", canonicalFilename: "broker-package.zip.manifest.json", existingContractIdentity: "broker-package-manifest" }),
   Object.freeze({ logicalArtifactId: "stage-a-handoff", canonicalFilename: "stage-a-input.json", existingContractIdentity: "stage-a-handoff" }),
   Object.freeze({ logicalArtifactId: "stage-a-state-backup", canonicalFilename: "stage-a-state-backup.json", existingContractIdentity: "stage-a-state-backup" }),
   Object.freeze({ logicalArtifactId: "stage-b-tfvars", canonicalFilename: "stage-b.tfvars", existingContractIdentity: "tfvars" }),
