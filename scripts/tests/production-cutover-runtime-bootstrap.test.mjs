@@ -16,6 +16,7 @@ import { PRODUCTION_ONBOARDING_PATHS } from "../security/production-onboarding-c
 import { stageBApprovalIdForReleaseSha } from "../aws/production-green-stage-b-contract.mjs";
 import { buildRootDropEvidence, buildRootDropPayload } from "../aws/production-root-drop-evidence.mjs";
 import { buildTemporaryCapabilityEvidence } from "../aws/production-stage-a-temporary-kms-capability.mjs";
+import { buildPreDeploymentInventoryTaskDefinition } from "../aws/production-predeployment-inventory-task.mjs";
 
 test("cutover runtime consumes the resolved QR identifier, not the task-definition selector", () => {
   const taskDefinition = { containerDefinitions: [{ name: "backend", environment: [{ name: "PUBLIC_APP_URL", value: "https://example.test" }], secrets: [{ name: "QR_SIGN_ACTIVE_KEY_VERSION", valueFrom: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE:value::" }] }] };
@@ -407,6 +408,48 @@ test("production adapters carry the independently authenticated root-drop contin
       administratorSignatureSha256: result.config.iamEvidenceSignatureFileSha256,
     });
   } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("production composition passes resolved AWS output to the predeployment inventory adapter", async () => {
+  const directory = fsTemp();
+  const taskDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:1";
+  try {
+    const input = fullInput(directory, process.cwd());
+    input.inventoryTaskDefinitionArn = taskDefinitionArn;
+    const prepared = prepareProductionCutoverRuntime(input);
+    const definition = buildPreDeploymentInventoryTaskDefinition({
+      backendImage: prepared.config.overlapTaskInput.backendImage,
+      releaseSha: sourceSha,
+      databaseUrl: prepared.config.inventoryDatabaseSecretArn || prepared.config.overlapTaskInput.databaseUrlSecretArn,
+      rotationInventoryRlsRole: prepared.config.rotationInventoryRlsRole || prepared.config.overlapTaskInput.secretBindings.ROTATION_INVENTORY_RLS_ROLE,
+      inventoryLogGroup: prepared.config.inventoryLogGroupName || prepared.config.overlapTaskInput.backendLogGroup,
+    }).taskDefinition;
+    const calls = [];
+    const commandRun = (args) => {
+      calls.push(args);
+      if (args[0] === "ecs" && args[1] === "describe-task-definition") return JSON.stringify({ taskDefinition: { ...definition, taskDefinitionArn, status: "ACTIVE" } });
+      if (args[0] === "lambda" && args[1] === "invoke") {
+        writeFileSync(args.at(-4), JSON.stringify({ status: "completed", sourceSha, rotationId: prepared.config.rotationId, taskDefinitionArn, taskArn: "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/inventory-1", inventory: {} }));
+        return JSON.stringify({ StatusCode: 200 });
+      }
+      throw new Error(`unexpected command: ${args.join(" ")}`);
+    };
+    const adapters = createProductionCutoverAdapters({
+      config: prepared.config,
+      sourceSha,
+      rotationId: prepared.config.rotationId,
+      runtimeConfigSha256: prepared.runtimeConfigSha256,
+      verifyReleasePreflightAttestationSignature: () => true,
+      createCommandRunner: () => commandRun,
+    });
+    const result = await adapters.preDeploymentInventory.execute({ rotationId: prepared.config.rotationId });
+    assert.equal(result.taskDefinitionArn, taskDefinitionArn);
+    assert.equal(calls.filter(([service, operation]) => service === "ecs" && operation === "describe-task-definition").length, 1);
+    assert.equal(calls.filter(([service, operation]) => service === "lambda" && operation === "invoke").length, 1);
+  } finally {
+    rmSync(artifactSigningRuntimeBindingPath(sourceSha), { force: true });
     rmSync(directory, { recursive: true, force: true });
   }
 });
