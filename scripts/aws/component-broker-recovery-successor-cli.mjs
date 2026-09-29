@@ -7,24 +7,26 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { cleanSource } from "./component-iam-installation.mjs";
 import { buildComponentBrokerPackage } from "./component-broker-package.mjs";
 import { authenticateBrokerRecoverySuccessorPublication } from "./component-iam-authorization.mjs";
-import { executeBrokerRecoverySuccessor } from "./component-broker-recovery-successor.mjs";
-import { brokerRecoverySuccessorCapabilitySet, brokerRecoverySuccessorConfigurations } from "./component-broker-recovery-successor-contract.mjs";
+import { closeVerifiedBrokerRecoverySuccessor, executeBrokerRecoverySuccessor } from "./component-broker-recovery-successor.mjs";
+import { assertCompatibleSignerCreation, brokerRecoverySuccessor, brokerRecoverySuccessorCapabilitySet, brokerRecoverySuccessorConfigurations } from "./component-broker-recovery-successor-contract.mjs";
+import { brokerSignerSuccessorConfigurations } from "./component-broker-signer-successor-contract.mjs";
 import { authenticateBootstrapOperator } from "./component-bootstrap-operator.mjs";
-import { brokerRecoverySuccessorManagedIdentities, componentBrokerArn, identityBootstrap } from "./component-installation-identity-contract.mjs";
-import { canonical, installationIdentity } from "./component-iam-installation-contract.mjs";
+import { brokerRecoverySuccessorManagedIdentities, brokerSignerSuccessorManagedIdentities, componentBrokerArn, identityBootstrap } from "./component-installation-identity-contract.mjs";
+import { canonical, digest, installationIdentity } from "./component-iam-installation-contract.mjs";
 import { createBrokerPolicySuccessorRootMfaSession } from "./component-broker-policy-successor-root-mfa.mjs";
 
 const sdk = createRequire(new URL("../../infra/aws/terraform/production-component-deployment-state/broker-package/package.json", import.meta.url));
 const rootArn = `arn:aws:iam::${identityBootstrap.account}:root`;
 const expiration = value => /^\d{4}-\d{2}-\d{2}T/.test(value || "") ? Date.parse(value) : Date.parse(`${value} UTC`);
 
-export function assertBrokerRecoverySuccessorIamRequest(operation, input) {
+export function assertBrokerRecoverySuccessorIamRequest(operation, input, compatible = false) {
   const identity = brokerRecoverySuccessorManagedIdentities().find(({ role }) => role === input.RoleName);
   assert(identity, "Alternate broker identity forbidden");
   if (input.PolicyName !== undefined) assert.equal(input.PolicyName, identity.policyName);
   if (operation === "PutRolePolicy") {
     assert([installationIdentity.provisionerRole, installationIdentity.terraformRole, identityBootstrap.installationRole, identityBootstrap.cleanupRole, identityBootstrap.authorizationRole].includes(identity.role), "Non-successor policy mutation forbidden");
-    assert.equal(input.PolicyDocument, canonical(identity.policy));
+    const successor = compatible ? brokerSignerSuccessorManagedIdentities().find(({ role }) => role === identity.role) : identity;
+    assert([canonical(successor.policy), ...(compatible ? [canonical(identity.policy)] : [])].includes(input.PolicyDocument), "Unreviewed broker identity policy document");
   }
 }
 
@@ -85,7 +87,14 @@ export async function lookupCloudTrailEvents({ lookup, eventName, now = Date.now
   return values;
 }
 
-export async function administrativeAdapter(packageEvidence, { root = createBrokerPolicySuccessorRootMfaSession, now = Date.now, sleep = delay } = {}) {
+export function compatiblePublicationEvidence(packageEvidence, resume, reservation, etag) {
+  if (!resume) return packageEvidence;
+  assert.equal(digest(reservation), resume.reservationSha256, "Authorized recovery reservation differs");
+  assert.equal(digest(etag), resume.reservationEtagSha256, "Authorized recovery reservation version differs");
+  return reservation.compatibleSignerCreation ? assertCompatibleSignerCreation(reservation.compatibleSignerCreation, reservation) : packageEvidence;
+}
+
+export async function administrativeAdapter(packageEvidence, { root = createBrokerPolicySuccessorRootMfaSession, now = Date.now, sleep = delay, compatible = false, resume } = {}) {
   const session = await root(), credentials = session.credentials;
   const clients = [], create = (service, name, endpoint, region = identityBootstrap.region) => { const library = sdk(`@aws-sdk/client-${service}`), client = new library[`${name}Client`]({ credentials, region, endpoint, maxAttempts: 1 }); clients.push(client); return async (operation, input = {}) => client.send(new library[`${operation}Command`](input)); };
   try {
@@ -97,15 +106,20 @@ export async function administrativeAdapter(packageEvidence, { root = createBrok
     await convergeRootMfaIssuance({ events, accessKeyId, rootExpires, mfaSerial: session.mfaSerial, durationSeconds: session.durationSeconds, now, sleep });
     await convergeRootMfaSessionProof({ events, accessKeyId, rootExpires, now, sleep });
     const permitted = new Set(brokerRecoverySuccessorCapabilitySet().Statement.flatMap(({ Action }) => [].concat(Action)));
-    const configurations = Object.values(brokerRecoverySuccessorConfigurations(packageEvidence));
+    let publicationEvidence = packageEvidence;
+    if (resume) {
+      const reservationObject = await create("s3", "S3", "https://s3.eu-west-2.amazonaws.com")("GetObject", { Bucket: identityBootstrap.bucket, Key: brokerRecoverySuccessor.reservationKey });
+      publicationEvidence = compatiblePublicationEvidence(packageEvidence, resume, JSON.parse(await reservationObject.Body.transformToString()), reservationObject.ETag);
+    }
+    const configurations = [...Object.values(brokerRecoverySuccessorConfigurations(packageEvidence)), ...(compatible ? Object.values(publicationEvidence.configurations || brokerSignerSuccessorConfigurations(publicationEvidence)) : [])];
     const confined = (service, name, endpoint, region) => { const send = create(service, name, endpoint, region); return (operation, input = {}) => {
       const action = `${service}:${service === "s3" && operation === "ListObjectsV2" ? "ListBucket" : operation}`; assert(permitted.has(action), "Unsupported broker recovery successor API");
       if (service === "lambda") {
-        assert.equal(input.FunctionName, installationIdentity.functionName); if (input.Qualifier !== undefined) assert(["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"].includes(input.Qualifier));
+        assert.equal(input.FunctionName, installationIdentity.functionName); if (input.Qualifier !== undefined) assert(Array.from({ length: compatible ? 15 : 12 }, (_, i) => String(i + 1)).includes(input.Qualifier));
         if (operation === "UpdateFunctionCode") { assert.deepEqual(Object.keys(input).sort(), ["FunctionName", "Publish", "RevisionId", "ZipFile"]); assert.equal(input.Publish, false); assert.equal(createHash("sha256").update(input.ZipFile).digest("hex"), packageEvidence.packageSha256); }
         if (operation === "UpdateFunctionConfiguration") assert(configurations.some(configuration => canonical(input) === canonical({ FunctionName: installationIdentity.functionName, Description: configuration.Description, RevisionId: input.RevisionId })), "Unreviewed successor configuration");
         if (operation === "PublishVersion") assert(configurations.some(configuration => canonical(input) === canonical({ FunctionName: installationIdentity.functionName, Description: configuration.Description, CodeSha256: configuration.CodeSha256, RevisionId: input.RevisionId })), "Unreviewed successor publication");
-      } else if (service === "iam") assertBrokerRecoverySuccessorIamRequest(operation, input);
+      } else if (service === "iam") assertBrokerRecoverySuccessorIamRequest(operation, input, compatible);
       else assertBrokerRecoverySuccessorS3Request(operation, input);
       return send(operation, input);
     }; };
@@ -114,13 +128,23 @@ export async function administrativeAdapter(packageEvidence, { root = createBrok
   } catch (error) { for (const client of clients) client.destroy(); session.close(); throw error; }
 }
 
-export async function run(argv = process.argv.slice(2), { source = cleanSource, build = buildComponentBrokerPackage, authorize = authenticateBrokerRecoverySuccessorPublication, admin = administrativeAdapter, human = authenticateBootstrapOperator, execute = executeBrokerRecoverySuccessor } = {}) {
+export async function run(argv = process.argv.slice(2), { source = cleanSource, build = buildComponentBrokerPackage, authorize = authenticateBrokerRecoverySuccessorPublication, admin = administrativeAdapter, human = authenticateBootstrapOperator, execute = executeBrokerRecoverySuccessor, close = closeVerifiedBrokerRecoverySuccessor } = {}) {
   const [mode, runId, transitionId] = argv; assert.deepEqual([mode, argv.length], ["execute", 3]); assert.match(runId || "", /^[1-9][0-9]*$/); assert.match(transitionId || "", /^[a-f0-9-]{36}$/);
   const sourceSha = source(), packageEvidence = await build(); assert.equal(packageEvidence.manifest.sourceSha, sourceSha);
   const approved = authorize({ runId, transitionId, sourceSha }, packageEvidence), { authorizationSha256, ...authorization } = approved; assert.equal(source(), sourceSha);
-  const authority = await admin(packageEvidence);
-  try { const operatorProof = await human({ sourceSha, transitionId, authorizationSha256, purpose: "BROKER_RECOVERY_SUCCESSOR" }, { issuanceEvents: authority.issuanceEvents }); const result = await execute({ authorization, packageEvidence, operatorProof }, { ...authority, authenticate: async () => { assert.equal(source(), sourceSha); await authority.authenticate(); } }); return { state: result.brokerRecoverySuccessor.state, sourceSha, transitionId, authorizationSha256 }; }
+  const authority = await admin(packageEvidence, { compatible: true, resume: authorization.resume });
+  try { const operatorProof = await human({ sourceSha, transitionId, authorizationSha256, purpose: "BROKER_RECOVERY_SUCCESSOR" }, { issuanceEvents: authority.issuanceEvents }); const result = await (authorization.resume ? close : execute)({ authorization, packageEvidence, operatorProof }, { ...authority, authenticate: async () => { assert.equal(source(), sourceSha); await authority.authenticate(); } }); return { state: result.brokerRecoverySuccessor?.state || result.state, sourceSha, transitionId, authorizationSha256 }; }
   finally { authority.close(); }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || "").href) run().then(result => process.stdout.write(`${JSON.stringify(result)}\n`)).catch(() => { process.stderr.write("Component broker recovery successor rejected; preserve both journals and reconcile exact generation state.\n"); process.exitCode = 1; });
+export function classifyRecoverySuccessorFailure(error) {
+  const message = String(error?.message || "");
+  if (["MetadataTooLarge", "EntityTooLarge"].includes(error?.name) || /closure persistence failed|S3 user metadata exceeds|checkpoint CAS lost after MetadataTooLarge/.test(message)) return "AWS_PERSISTENCE_FAILURE";
+  if (/MFA|GetSessionToken|issuance evidence|session proof/.test(message)) return "MFA_SESSION_FAILURE";
+  if (/authorization|approval|protected source|artifact/.test(message)) return "AUTHORIZATION_FAILURE";
+  if (/journal|reservation|closure|lineage/.test(message)) return "JOURNAL_MISMATCH";
+  if (/generation|version|policy|configuration/.test(message)) return "GENERATION_MISMATCH";
+  return "UNCLASSIFIED_FAILURE";
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1] || "").href) run().then(result => process.stdout.write(`${JSON.stringify(result)}\n`)).catch(error => { process.stderr.write(`Component broker recovery successor rejected (${classifyRecoverySuccessorFailure(error)}); preserve both journals and reconcile exact generation state.\n`); process.exitCode = 1; });

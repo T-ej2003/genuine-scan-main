@@ -1,10 +1,27 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { assertBrokerRecoverySuccessorIamRequest, assertBrokerRecoverySuccessorS3Request, run } from "../aws/component-broker-recovery-successor-cli.mjs";
-import { brokerRecoverySuccessor } from "../aws/component-broker-recovery-successor-contract.mjs";
-import { brokerRecoverySuccessorManagedIdentities, identityBootstrap } from "../aws/component-installation-identity-contract.mjs";
-import { canonical } from "../aws/component-iam-installation-contract.mjs";
+import { assertBrokerRecoverySuccessorIamRequest, assertBrokerRecoverySuccessorS3Request, classifyRecoverySuccessorFailure, compatiblePublicationEvidence, run } from "../aws/component-broker-recovery-successor-cli.mjs";
+import { brokerRecoverySuccessor, compatibleSignerCreation } from "../aws/component-broker-recovery-successor-contract.mjs";
+import { brokerRecoverySuccessorManagedIdentities, brokerSignerSuccessorManagedIdentities, identityBootstrap } from "../aws/component-installation-identity-contract.mjs";
+import { canonical, digest } from "../aws/component-iam-installation-contract.mjs";
+import { componentBrokerPackageManifest } from "../aws/component-broker-package.mjs";
+
+test("root adapter pins original publication package to exact authorized reservation", () => {
+  const evidence = sourceSha => { const manifest = componentBrokerPackageManifest(sourceSha); return { manifest, manifestSha256: digest(manifest), packageSha256: sourceSha.slice(0, 1).repeat(64) }; };
+  const original = evidence("a".repeat(40)), current = evidence("b".repeat(40)), transitionId = "12345678-1234-4234-8234-123456789abc", authorizationSha256 = "c".repeat(64), etag = '"original"';
+  const record = { transitionId, authorizationSha256, authorizationHistory: [], compatibleSignerCreation: compatibleSignerCreation(original, transitionId, authorizationSha256) };
+  const resume = { reservationSha256: digest(record), reservationEtagSha256: digest(etag) };
+  assert.deepEqual(compatiblePublicationEvidence(current, resume, record, etag), { ...original, configurations: record.compatibleSignerCreation.configurations });
+  assert.throws(() => compatiblePublicationEvidence(current, resume, record, '"other"'));
+  assert.throws(() => compatiblePublicationEvidence(current, { ...resume, reservationSha256: "0".repeat(64) }, record, etag));
+  for (const mutation of [
+    value => { value.compatibleSignerCreation.transitionId = "55555555-5555-4555-8555-555555555555"; },
+    value => { value.compatibleSignerCreation.packageSha256 = "d".repeat(64); },
+    value => { value.compatibleSignerCreation.authorizationSha256 = "d".repeat(64); },
+  ]) { const altered = structuredClone(record); mutation(altered); assert.throws(() => compatiblePublicationEvidence(current, { ...resume, reservationSha256: digest(altered) }, altered, etag)); }
+  assert.deepEqual(compatiblePublicationEvidence(current, null), current);
+});
 
 test("recovery successor root adapter permits only the five exact successor policy writes", () => {
   const identities = brokerRecoverySuccessorManagedIdentities();
@@ -12,6 +29,18 @@ test("recovery successor root adapter permits only the five exact successor poli
   assert.equal(writable.length, 5);
   for (const identity of writable) assert.doesNotThrow(() => assertBrokerRecoverySuccessorIamRequest("PutRolePolicy", { RoleName: identity.role, PolicyName: identity.policyName, PolicyDocument: canonical(identity.policy) }));
   assert.throws(() => assertBrokerRecoverySuccessorIamRequest("PutRolePolicy", { RoleName: "other", PolicyName: identities[0].policyName, PolicyDocument: canonical(identities[0].policy) }));
+});
+
+test("fenced partial resume permits only five exact compatible invocation policy writes", () => {
+  const previous = brokerRecoverySuccessorManagedIdentities(), compatible = brokerSignerSuccessorManagedIdentities();
+  for (const identity of compatible) {
+    const request = { RoleName: identity.role, PolicyName: identity.policyName, PolicyDocument: canonical(identity.policy) };
+    assert.doesNotThrow(() => assertBrokerRecoverySuccessorIamRequest("PutRolePolicy", request, true));
+    assert.throws(() => assertBrokerRecoverySuccessorIamRequest("PutRolePolicy", request));
+    assert.throws(() => assertBrokerRecoverySuccessorIamRequest("PutRolePolicy", { ...request, RoleName: "unrelated" }, true));
+    assert.doesNotThrow(() => assertBrokerRecoverySuccessorIamRequest("PutRolePolicy", { ...request, PolicyDocument: canonical(previous.find(({ role }) => role === identity.role).policy) }, true));
+    assert.throws(() => assertBrokerRecoverySuccessorIamRequest("PutRolePolicy", { ...request, PolicyDocument: canonical({ Version: "2012-10-17", Statement: [] }) }, true));
+  }
 });
 
 test("successor reservations are readable historical evidence but never broker write targets", () => {
@@ -35,6 +64,13 @@ test("root adapter permits S3 writes only to the mutable successor records", () 
   assert.throws(() => assertBrokerRecoverySuccessorS3Request("PutObject", request(journalKey)));
 });
 
+test("closure persistence failure is classed without printing AWS payloads", () => {
+  assert.equal(classifyRecoverySuccessorFailure(Object.assign(new Error("opaque"), { name: "MetadataTooLarge" })), "AWS_PERSISTENCE_FAILURE");
+  assert.equal(classifyRecoverySuccessorFailure(new Error("Recovery closure persistence failed after InvalidRequest")), "AWS_PERSISTENCE_FAILURE");
+  assert.equal(classifyRecoverySuccessorFailure(new Error("Second successor authorization expired")), "AUTHORIZATION_FAILURE");
+  assert.equal(classifyRecoverySuccessorFailure(new Error("First successor lineage changed")), "JOURNAL_MISMATCH");
+});
+
 test("recovery successor CLI authenticates approval before root/MFA and always closes local credentials", async () => {
   const calls = [], sourceSha = "a".repeat(40), transitionId = "12345678-1234-4234-8234-123456789abc", packageEvidence = { manifest: { sourceSha }, bytes: Buffer.from("x") };
   const dependencies = {
@@ -51,6 +87,20 @@ test("recovery successor CLI authenticates approval before root/MFA and always c
   dependencies.authorize = input => { calls.push("authorize"); return { authorizationSha256: "b".repeat(64), transitionId: input.transitionId }; };
   calls.length = 0; dependencies.execute = async () => { calls.push("execute"); throw new Error("execution denied"); };
   await assert.rejects(run(["execute", "456", transitionId], dependencies), /execution denied/); assert.equal(calls.at(-1), "close");
+});
+
+test("production CLI routes a VERIFIED reservation only to closure, never generation writes", async () => {
+  const calls = [], sourceSha = "a".repeat(40), transitionId = "22955a47-da8b-4d7f-a01d-cc39fbef5a5c";
+  const result = await run(["execute", "456", transitionId], {
+    source: () => sourceSha,
+    build: async () => ({ manifest: { sourceSha }, bytes: Buffer.from("x") }),
+    authorize: () => ({ authorizationSha256: "b".repeat(64), transitionId, resume: { reservationSha256: "c".repeat(64), reservationEtagSha256: "d".repeat(64) } }),
+    admin: async () => ({ issuanceEvents: async () => [], authenticate: async () => {}, close: () => calls.push("close") }),
+    human: async () => ({}),
+    execute: async () => assert.fail("Generation executor reached"),
+    close: async () => { calls.push("closure"); return { state: "BROKER_RECOVERY_SUCCESSOR_CLOSED" }; },
+  });
+  assert.equal(result.state, "BROKER_RECOVERY_SUCCESSOR_CLOSED"); assert.deepEqual(calls, ["closure", "close"]);
 });
 
 for (const argv of [[], ["execute"], ["execute", "456", "bad"], ["execute", "456", "12345678-1234-4234-8234-123456789abc", "extra"]]) test(`actual recovery-successor CLI rejects unsupported surface ${JSON.stringify(argv)}`, () => {

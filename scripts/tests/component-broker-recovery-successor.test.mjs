@@ -4,13 +4,13 @@ import { createHash } from "node:crypto";
 import { executeBrokerRecoverySuccessor } from "../aws/component-broker-recovery-successor.mjs";
 import { assertEffectiveBootstrapTrustAnchor } from "../aws/component-bootstrap-trust-anchor.mjs";
 import { brokerRecoverySuccessorSourceBindings } from "../aws/component-broker-recovery-successor-authorization.mjs";
-import { assertBrokerRecoverySuccessorClosureMetadata, brokerRecoverySuccessor, brokerRecoverySuccessorBindings, recoverySuccessorExecutorPolicy } from "../aws/component-broker-recovery-successor-contract.mjs";
+import { assertBrokerRecoverySuccessorClosureMetadata, brokerRecoverySuccessor, brokerRecoverySuccessorBindings, brokerRecoverySuccessorConfigurations } from "../aws/component-broker-recovery-successor-contract.mjs";
 import { brokerConfiguration, brokerPolicySuccessorEntryPoints, brokerRecoverySuccessorEntryPoints } from "../aws/component-broker-configuration.mjs";
 import { brokerPolicyPredecessor, brokerPolicySuccessorBindings, brokerPolicySuccessorClosureMetadata } from "../aws/component-broker-policy-successor-contract.mjs";
 import { brokerChangeOperations, brokerChangePredecessor } from "../aws/component-broker-change-contract.mjs";
 import { bootstrapPartialStateDigest, bootstrapRecoveryOperations, completedBootstrapRecovery, historicalBootstrapAuthorization, historicalBootstrapIncident } from "../aws/component-bootstrap-partial-recovery-contract.mjs";
 import { componentBrokerPackageManifest } from "../aws/component-broker-package.mjs";
-import { bootstrapManagedIdentities, brokerChangeManagedIdentities, brokerPolicySuccessorManagedIdentities, brokerRecoverySuccessorManagedIdentities, componentBrokerArn, identityBootstrap } from "../aws/component-installation-identity-contract.mjs";
+import { bootstrapManagedIdentities, brokerChangeManagedIdentities, brokerPolicySuccessorManagedIdentities, brokerRecoverySuccessorManagedIdentities, brokerSignerSuccessorManagedIdentities, componentBrokerArn, identityBootstrap } from "../aws/component-installation-identity-contract.mjs";
 import { canonical, digest, installationIdentity } from "../aws/component-iam-installation-contract.mjs";
 
 const fault = name => Object.assign(new Error(name), { name });
@@ -56,30 +56,53 @@ function fixture() {
     state.writes.push(operation); return {};
   };
   const iam = async (operation, input) => {
-    const target = predecessor.find(value => value.role === input.RoleName); assert(target); assert.equal(input.PolicyName, target.policyName);
+    const target = predecessor.find(value => value.role === input.RoleName); assert(target);
+    if (input.PolicyName !== undefined) assert.equal(input.PolicyName, target.policyName);
+    if (operation === "GetRole") return { Role: { RoleName: target.role, Arn: target.arn, Path: target.path, MaxSessionDuration: target.maxSessionDuration, AssumeRolePolicyDocument: target.trust } };
+    if (operation === "ListRoleTags") return { Tags: Object.entries(target.tags).map(([Key, Value]) => ({ Key, Value })), IsTruncated: false };
+    if (operation === "ListRolePolicies") return { PolicyNames: [target.policyName], IsTruncated: false };
+    if (operation === "ListAttachedRolePolicies") return { AttachedPolicies: [], IsTruncated: false };
     if (operation === "GetRolePolicy") return { RoleName: input.RoleName, PolicyName: input.PolicyName, PolicyDocument: policies.get(input.RoleName) };
     assert.equal(operation, "PutRolePolicy"); policies.set(input.RoleName, JSON.parse(input.PolicyDocument)); state.writes.push(operation); return {};
   };
   const s3 = async (operation, input) => {
     if (operation === "GetObject") { if (!state.objects.has(input.Key)) throw fault("NoSuchKey"); return { ETag: state.etags.get(input.Key), Metadata: state.metadata.get(input.Key) || {}, Body: { transformToString: async () => JSON.stringify(state.objects.get(input.Key)) } }; }
-    assert.equal(operation, "PutObject"); if (input.IfNoneMatch) assert(!state.objects.has(input.Key)); if (input.IfMatch) assert.equal(input.IfMatch, state.etags.get(input.Key)); state.objects.set(input.Key, JSON.parse(input.Body)); state.metadata.set(input.Key, input.Metadata || {}); state.etags.set(input.Key, `"etag-${state.writes.length}"`); state.writes.push(`PutObject:${input.Key}`); return {};
+    assert.equal(operation, "PutObject"); if (input.IfNoneMatch) assert(!state.objects.has(input.Key)); if (input.IfMatch) assert.equal(input.IfMatch, state.etags.get(input.Key));
+    if (state.failClosureOnce && input.Key === journalKey && input.Metadata?.[brokerRecoverySuccessor.metadataKey]) { state.failClosureOnce = false; throw fault("ServiceUnavailable"); }
+    state.objects.set(input.Key, JSON.parse(input.Body)); state.metadata.set(input.Key, input.Metadata || {}); state.etags.set(input.Key, `"etag-${state.writes.length}"`); state.writes.push(`PutObject:${input.Key}`); return {};
   };
   const exact = identities => identities.every(identity => digest(policies.get(identity.role)) === identity.policySha256);
-  state.execute = () => executeBrokerRecoverySuccessor({ authorization, packageEvidence: candidate, operatorProof }, { iam, lambda, s3, authenticate: async () => {}, now: () => state.now, sleep: async () => {}, inspectPredecessor: async () => [{ role: "EXPECTED", policy: exact(predecessor) ? "EXPECTED" : "DRIFT" }], inspectSuccessor: async () => [{ role: "EXPECTED", policy: exact(successor) ? "EXPECTED" : "DRIFT" }], verifyEffective: assertEffectiveBootstrapTrustAnchor });
+  state.execute = (approved = authorization, proof = operatorProof) => executeBrokerRecoverySuccessor({ authorization: approved, packageEvidence: candidate, operatorProof: proof }, { iam, lambda, s3, authenticate: async () => {}, now: () => state.now, sleep: async () => {}, inspectPredecessor: async () => [{ role: "EXPECTED", policy: exact(predecessor) ? "EXPECTED" : "DRIFT" }], inspectSuccessor: async () => [{ role: "EXPECTED", policy: exact(successor) ? "EXPECTED" : "DRIFT" }], verifyEffective: assertEffectiveBootstrapTrustAnchor });
   return { state, candidate, firstRecord, firstClosure, authorization, operatorProof, policies, successor };
 }
 
-test("exact second successor publishes 10/11/12, installs exact policies, closes distinctly and blocks replay", async () => {
+test("exact second successor publishes 10/11/12 then compatible 13/14/15 before compact closure", async () => {
   const f = fixture(), result = await f.state.execute();
   assert.equal(result.brokerRecoverySuccessor.state, "BROKER_RECOVERY_SUCCESSOR_CLOSED");
-  assert.deepEqual(Object.keys(f.state.versions).filter(value => value !== "$LATEST").sort((a, b) => Number(a) - Number(b)), Array.from({ length: 12 }, (_, index) => String(index + 1)));
-  assert.equal(digest(f.policies.get(installationIdentity.terraformRole)), digest(recoverySuccessorExecutorPolicy()));
-  assert(f.successor.every(identity => digest(f.policies.get(identity.role)) === identity.policySha256));
-  assert.deepEqual(f.state.writes.filter(value => ["UpdateFunctionCode", "UpdateFunctionConfiguration", "PublishVersion", "PutRolePolicy"].includes(value)), ["UpdateFunctionCode", "UpdateFunctionConfiguration", "PublishVersion", "UpdateFunctionConfiguration", "PublishVersion", "UpdateFunctionConfiguration", "PublishVersion", "PutRolePolicy", "PutRolePolicy", "PutRolePolicy", "PutRolePolicy", "PutRolePolicy"]);
+  assert.deepEqual(Object.keys(f.state.versions).filter(value => value !== "$LATEST").sort((a, b) => Number(a) - Number(b)), Array.from({ length: 15 }, (_, index) => String(index + 1)));
+  assert.equal(digest(f.policies.get(installationIdentity.terraformRole)), brokerSignerSuccessorManagedIdentities().find(({ role }) => role === installationIdentity.terraformRole).policySha256);
+  assert(brokerSignerSuccessorManagedIdentities().every(identity => digest(f.policies.get(identity.role)) === identity.policySha256));
+  assert.equal(f.state.writes.filter(value => value === "PublishVersion").length, 6);
+  assert.equal(f.state.writes.filter(value => value === "PutRolePolicy").length, 10);
   const metadata = f.state.metadata.get(`${identityBootstrap.prefix}identity-bootstrap.json`);
   assert(Object.hasOwn(metadata, "broker-policy-successor")); assert(Object.hasOwn(metadata, "broker-recovery-successor"));
   assert.equal(f.state.objects.get(`${identityBootstrap.prefix}broker-policy-successor.json`), f.firstRecord);
   await assert.rejects(f.state.execute(), /already closed/);
+});
+
+test("current-source VERIFIED retry closes after compatible publication without repeating Lambda or IAM writes", async () => {
+  const f = fixture(); f.state.failClosureOnce = true;
+  await assert.rejects(f.state.execute(), /ServiceUnavailable/);
+  assert.equal(f.state.objects.get(brokerRecoverySuccessor.reservationKey).state, "VERIFIED");
+  const publications = f.state.writes.filter(value => value === "PublishVersion").length;
+  const policies = f.state.writes.filter(value => value === "PutRolePolicy").length;
+  f.state.now += 40 * 60 * 1000;
+  const approved = { ...f.authorization, runId: "457", approvalObservedAt: new Date(f.state.now).toISOString(), expiresAt: new Date(f.state.now + brokerRecoverySuccessor.maxAgeMs).toISOString() };
+  const proof = { ...f.operatorProof, authorizationSha256: digest(approved), issuedAt: new Date(f.state.now).toISOString(), issuanceEventTime: new Date(f.state.now).toISOString(), expiresAt: new Date(f.state.now + 900000).toISOString(), issuanceEventId: "55555555-5555-4555-8555-555555555555" };
+  await f.state.execute(approved, proof);
+  assert.equal(f.state.writes.filter(value => value === "PublishVersion").length, publications);
+  assert.equal(f.state.writes.filter(value => value === "PutRolePolicy").length, policies);
+  assert.equal(f.state.objects.get(`${identityBootstrap.prefix}identity-bootstrap.json`).brokerRecoverySuccessorClosure.state, "BROKER_RECOVERY_SUCCESSOR_CLOSED");
 });
 
 test("second successor rejects missing historical reservation, mixed predecessor and arbitrary published versions before mutation", async () => {
@@ -104,11 +127,29 @@ test("second successor rejects stale authorization and substituted operator proo
   }
 });
 
+test("fenced current-source partial 10, 10/11 and 10/11/12 resume without duplicate Lambda or IAM writes", async () => {
+  for (const existing of [["10"], ["10", "11"], ["10", "11", "12"]]) {
+    const f = fixture(), configurations = brokerRecoverySuccessorConfigurations(f.candidate);
+    for (const version of existing) {
+      const entryPoint = Object.keys(brokerRecoverySuccessorEntryPoints).find(name => brokerRecoverySuccessorEntryPoints[name] === version);
+      const value = { ...configurations[entryPoint], CodeSize: 1000, State: "Active", LastUpdateStatus: "Successful", RuntimeVersionConfig: { RuntimeVersionArn: `arn:aws:lambda:eu-west-2::runtime:${"c".repeat(64)}` }, FunctionArn: `${componentBrokerArn}:${version}`, Version: version, RevisionId: `v${version}` };
+      f.state.versions[version] = value; f.state.versions.$LATEST = { ...value, FunctionArn: componentBrokerArn, Version: "$LATEST", RevisionId: "latest" };
+    }
+    const bindings = brokerRecoverySuccessorBindings(f.candidate, f.firstClosure);
+    f.state.objects.set(brokerRecoverySuccessor.reservationKey, { schemaVersion: 1, state: ["", "INSTALL_VERSION_PUBLISHED", "CLEANUP_VERSION_PUBLISHED", "AUTHORIZE_VERSION_PUBLISHED"][existing.length], transitionId: f.authorization.transitionId, owner: "22222222-2222-4222-8222-222222222222", authorizationSha256: "e".repeat(64), authorizationExpiresAt: new Date(f.state.now - 600000).toISOString(), sessionExpiresAt: new Date(f.state.now - 900000).toISOString(), authorizationHistory: [], bindings });
+    f.state.etags.set(brokerRecoverySuccessor.reservationKey, '"partial"');
+    f.policies.set(installationIdentity.provisionerRole, f.successor.find(value => value.role === installationIdentity.provisionerRole).policy);
+    await f.state.execute();
+    assert.equal(f.state.writes.filter(value => value === "PublishVersion").length, 6 - existing.length);
+    assert.equal(f.state.writes.filter(value => value === "PutRolePolicy").length, 9);
+  }
+});
+
 test("second closure authentication rejects reservation substitution and preserves first metadata", async () => {
   const f = fixture(); await f.state.execute();
-  const metadata = f.state.metadata.get(`${identityBootstrap.prefix}identity-bootstrap.json`), bindings = brokerRecoverySuccessorBindings(f.candidate, f.firstClosure), reservation = f.state.objects.get(brokerRecoverySuccessor.reservationKey), etag = f.state.etags.get(brokerRecoverySuccessor.reservationKey);
-  assertBrokerRecoverySuccessorClosureMetadata(metadata, bindings, reservation, etag);
-  assert.throws(() => assertBrokerRecoverySuccessorClosureMetadata(metadata, bindings, { ...reservation, transitionId: "55555555-5555-4555-8555-555555555555" }, etag));
-  assert.throws(() => assertBrokerRecoverySuccessorClosureMetadata(metadata, bindings, reservation, '"substituted"'));
-  const altered = structuredClone(metadata); altered["broker-policy-successor"] = "changed"; assert.throws(() => assertBrokerRecoverySuccessorClosureMetadata(altered, bindings, reservation, etag));
+  const key = `${identityBootstrap.prefix}identity-bootstrap.json`, metadata = f.state.metadata.get(key), body = f.state.objects.get(key), bindings = brokerRecoverySuccessorBindings(f.candidate, f.firstClosure), reservation = f.state.objects.get(brokerRecoverySuccessor.reservationKey), etag = f.state.etags.get(brokerRecoverySuccessor.reservationKey);
+  assertBrokerRecoverySuccessorClosureMetadata(metadata, bindings, reservation, etag, body);
+  assert.throws(() => assertBrokerRecoverySuccessorClosureMetadata(metadata, bindings, { ...reservation, transitionId: "55555555-5555-4555-8555-555555555555" }, etag, body));
+  assert.throws(() => assertBrokerRecoverySuccessorClosureMetadata(metadata, bindings, reservation, '"substituted"', body));
+  const altered = structuredClone(metadata); altered["broker-policy-successor"] = "changed"; assert.throws(() => assertBrokerRecoverySuccessorClosureMetadata(altered, bindings, reservation, etag, body));
 });

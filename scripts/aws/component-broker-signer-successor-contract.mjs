@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { brokerConfiguration, brokerRecoverySuccessorEntryPoints, brokerSignerSuccessorEntryPoints } from "./component-broker-configuration.mjs";
 import { canonical, digest, installationIdentity, terraformExecutorPolicyGeneration } from "./component-iam-installation-contract.mjs";
 import { brokerRecoverySuccessorManagedIdentities, brokerSignerSuccessorManagedIdentities, componentBrokerArn, identityBootstrap } from "./component-installation-identity-contract.mjs";
+import { assertS3UserMetadataSize, compactClosureMetadata } from "./component-broker-recovery-successor-contract.mjs";
 
 const sha = value => assert.match(value || "", /^[a-f0-9]{64}$/);
 const uuid = value => assert.match(value || "", /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
@@ -36,7 +37,7 @@ export function brokerSignerSuccessorBindings(packageEvidence, secondClosure) {
   assert.deepEqual(Object.keys(secondClosure.runtimeVersions).sort(), Object.values(brokerRecoverySuccessorEntryPoints));
   const predecessor = brokerRecoverySuccessorManagedIdentities(), successor = brokerSignerSuccessorManagedIdentities();
   const identity = role => { const old = predecessor.find(value => value.role === role), next = successor.find(value => value.role === role); assert(old && next && old.policyName === next.policyName); return { role, policyName: old.policyName, predecessorPolicySha256: old.policySha256, successorPolicySha256: next.policySha256 }; };
-  const configurations = brokerSignerSuccessorConfigurations(packageEvidence);
+  const configurations = packageEvidence.configurations || brokerSignerSuccessorConfigurations(packageEvidence);
   return Object.freeze({
     secondClosure, predecessor: { entryPoints: brokerRecoverySuccessorEntryPoints, policySha256: signerSuccessorPredecessorPolicySha256 },
     successor: { sourceSha: packageEvidence.manifest.sourceSha, packageSha256: packageEvidence.packageSha256, manifestSha256: packageEvidence.manifestSha256, lambdaCodeSha256: Buffer.from(packageEvidence.packageSha256, "hex").toString("base64"), entryPoints: brokerSignerSuccessorEntryPoints, policySha256: signerSuccessorExecutorPolicySha256, configurationSetSha256: digest(configurations), identitySetSha256: digest(successor) },
@@ -55,7 +56,7 @@ export function brokerSignerSuccessorCapabilitySet() {
   ] };
 }
 
-export function brokerSignerSuccessorClosureMetadata(record, bindings, runtimeVersions, reservationEtag, closedAt, historicalMetadata) {
+export function brokerSignerSuccessorClosure(record, bindings, runtimeVersions, reservationEtag, closedAt, historicalMetadata) {
   assert.equal(record.state, "VERIFIED"); assert.deepEqual(record.bindings, bindings); assert(typeof reservationEtag === "string" && reservationEtag);
   assert.equal(new Date(Date.parse(closedAt)).toISOString(), closedAt);
   assert.deepEqual(Object.keys(runtimeVersions || {}).sort(), Object.values(brokerSignerSuccessorEntryPoints));
@@ -63,14 +64,20 @@ export function brokerSignerSuccessorClosureMetadata(record, bindings, runtimeVe
   const value = { schemaVersion: 1, state: "BROKER_SIGNER_SUCCESSOR_CLOSED", transitionId: record.transitionId, authorizationSha256: record.authorizationSha256,
     bindingsSha256: digest(bindings), reservationSha256: digest(record), reservationEtagSha256: digest(reservationEtag), secondAuthorizationSha256: bindings.secondClosure.authorizationSha256,
     historicalMetadataSha256: digest(historicalMetadata), closedAt, runtimeVersions };
-  return Object.freeze({ ...historicalMetadata, [brokerSignerSuccessor.metadataKey]: Buffer.from(canonical(value)).toString("base64url") });
+  const metadata = Object.freeze({ ...historicalMetadata, [brokerSignerSuccessor.metadataKey]: compactClosureMetadata(value) });
+  assertS3UserMetadataSize(metadata);
+  return Object.freeze({ value: Object.freeze(value), metadata });
 }
 
-export function assertBrokerSignerSuccessorClosureMetadata(metadata, bindings, reservation, reservationEtag) {
+export function assertBrokerSignerSuccessorClosureMetadata(metadata, bindings, reservation, reservationEtag, bootstrap) {
   assert.deepEqual(Object.keys(metadata || {}).sort(), ["broker-policy-successor", "broker-recovery-successor", brokerSignerSuccessor.metadataKey].sort());
-  const secondClosure = JSON.parse(Buffer.from(metadata["broker-recovery-successor"], "base64url").toString("utf8"));
+  assertS3UserMetadataSize(metadata);
+  const secondEncoded = metadata["broker-recovery-successor"];
+  const secondClosure = /^sha256:[a-f0-9]{64}$/.test(secondEncoded || "") ? bootstrap?.brokerRecoverySuccessorClosure : JSON.parse(Buffer.from(secondEncoded, "base64url").toString("utf8"));
+  if (/^sha256:[a-f0-9]{64}$/.test(secondEncoded || "")) assert.equal(secondEncoded, compactClosureMetadata(secondClosure), "Second successor body and metadata differ");
   assert.equal(canonical(secondClosure), canonical(bindings.secondClosure), "Second successor closure differs");
-  const value = JSON.parse(Buffer.from(metadata[brokerSignerSuccessor.metadataKey], "base64url").toString("utf8"));
+  const value = bootstrap?.brokerSignerSuccessorClosure;
+  assert.equal(metadata[brokerSignerSuccessor.metadataKey], compactClosureMetadata(value), "Signer successor body and metadata differ");
   assert.deepEqual(Object.keys(value || {}).sort(), ["authorizationSha256", "bindingsSha256", "closedAt", "secondAuthorizationSha256", "historicalMetadataSha256", "reservationEtagSha256", "reservationSha256", "runtimeVersions", "schemaVersion", "state", "transitionId"].sort());
   assert.equal(value.schemaVersion, 1); assert.equal(value.state, "BROKER_SIGNER_SUCCESSOR_CLOSED"); uuid(value.transitionId); for (const field of ["authorizationSha256", "bindingsSha256", "secondAuthorizationSha256", "historicalMetadataSha256", "reservationEtagSha256", "reservationSha256"]) sha(value[field]);
   assert.equal(value.historicalMetadataSha256, digest({ "broker-policy-successor": metadata["broker-policy-successor"], "broker-recovery-successor": metadata["broker-recovery-successor"] }), "Historical successor metadata differs");
