@@ -23,7 +23,15 @@ const now = new Date("2026-09-30T10:00:00.000Z");
 const terraformConfiguration = fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
 const state = { lineage: CONTRACT.expectedLineage, serial: CONTRACT.expectedSerial, stateSha256: "bf09a728e39657f354f91a493631873ea43af6d486b96581a5052020dcd853df" };
 const refreshPlan = () => structuredClone(fixture.refreshPlan);
-const preWriteNormalPlan = () => structuredClone(fixture.preWriteNormalPlan);
+const preWriteNormalPlan = () => {
+  const plan = structuredClone(fixture.preWriteNormalPlan); const drift = new Map(fixture.refreshPlan.resource_drift.map((entry) => [entry.address, entry]));
+  plan.resource_drift = structuredClone(fixture.refreshPlan.resource_drift);
+  for (const entry of plan.resource_changes) {
+    const reviewed = drift.get(entry.address); if (!reviewed) continue;
+    entry.change = { ...entry.change, actions: ["no-op"], before: structuredClone(reviewed.change.after), after: structuredClone(reviewed.change.after), before_unknown: structuredClone(reviewed.change.after_unknown || {}), after_unknown: structuredClone(reviewed.change.after_unknown || {}), before_sensitive: structuredClone(reviewed.change.after_sensitive || {}), after_sensitive: structuredClone(reviewed.change.after_sensitive || {}), replace_paths: [] };
+  }
+  return plan;
+};
 const expectedImages = fixture.refreshPlan.output_changes.bound_images.after;
 const bindingReport = () => ({ images: {
   backend: { terraformVariable: "backend_image", imageReference: expectedImages.backend }, canary: { terraformVariable: "canary_image", imageReference: expectedImages.canary },
@@ -45,6 +53,7 @@ function postWriteNormalPlan() {
     entry.change.before_sensitive = structuredClone(entry.change.after_sensitive || {});
     if (entry.change.after_identity !== undefined) entry.change.before_identity = structuredClone(entry.change.after_identity);
   }
+  plan.resource_drift = [];
   delete plan.output_changes.bound_images;
   return plan;
 }
@@ -108,6 +117,19 @@ test("ordinary source alignment rejects unrelated topology, altered values, sour
     const changed = preWriteNormalPlan(); const entry = changed.resource_changes.find(({ address }) => address === 'aws_ecs_task_definition.candidate["canary"]'); const value = JSON.parse(entry.change.after.container_definitions); mutate(value[0].environment); entry.change.after.container_definitions = JSON.stringify(value);
     assert.throws(() => assertStageBStateReconciliationSourceAlignment(refreshPlan(), changed, options()));
   }
+});
+
+test("pre-write ordinary reflection evidence is exact and remains separate from ordinary authority", () => {
+  assert.doesNotThrow(() => assertStageBStateReconciliationSourceAlignment(refreshPlan(), preWriteNormalPlan(), options()));
+  const mutations = [
+    (plan) => { plan.resource_drift.push(structuredClone(plan.resource_drift[0])); },
+    (plan) => { plan.resource_drift[0].address = 'aws_iam_role.execution["other"]'; },
+    (plan) => { plan.resource_drift[0].change.after.inline_policy = []; },
+    (plan) => { plan.resource_changes.find(({ address }) => address === CONTRACT.addresses[0]).change.actions = ["update"]; },
+    (plan) => { plan.resource_changes.find(({ address }) => address === CONTRACT.addresses[0]).change.before.inline_policy = []; },
+    (plan) => { plan.resource_changes.find(({ address }) => address === CONTRACT.addresses[0]).change.after.inline_policy = []; },
+  ];
+  for (const mutate of mutations) { const plan = preWriteNormalPlan(); mutate(plan); assert.throws(() => assertStageBStateReconciliationSourceAlignment(refreshPlan(), plan, options())); }
 });
 
 test("candidate object policy configuration binds the exact each.key source reference", () => {
