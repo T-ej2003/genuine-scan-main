@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import yaml from "js-yaml";
+import { ensureStageBPrivateDirectory, readStageBPrivateFileBytes, writeStageBPrivateFileExclusive } from "../aws/stage-b-artifact-contract.mjs";
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
 const read = (name) => fs.readFileSync(path.join(root, ".github/workflows", name), "utf8");
@@ -34,6 +37,44 @@ test("Stage B state reconciliation workflows are protected, artifact-bound, and 
   assert.match(source, /install -m 600 \/dev\/null "\$d\/authorization\.json"/);
   assert.doesNotMatch(source, /saved_plan_base64|preparation_base64|release_preflight_base64|release_preflight_workflow_path/);
   assert.match(read(names[0]), /produce-production-green-stage-b-release-preflight\.yml/);
+});
+
+test("execution workflow creates the complete private staging hierarchy before reconciliation", () => {
+  const workflow = parse("execute-production-green-stage-b-state-reconciliation.yml");
+  const steps = workflow.jobs.execute.steps;
+  const authenticate = steps.find((step) => step.name === "Authenticate protected source and exact preparation artifact").run;
+  const authorization = steps.find((step) => step.name === "Download authenticated authorization artifact").run;
+  const setup = authenticate.split("\n").map((line) => line.trim()).find((line) => line.startsWith("umask 077; d="));
+  assert.equal(setup, 'umask 077; d="$RUNNER_TEMP/stage-b-state-reconciliation"; install -d -m 700 "$d" "$d/terraform-data"');
+  assert.match(authorization, /^set -euo pipefail\numask 077$/m);
+
+  const runnerTemp = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-execution-workflow-"));
+  const staging = path.join(runnerTemp, "stage-b-state-reconciliation");
+  const terraformData = path.join(staging, "terraform-data");
+  try {
+    assert.equal(fs.existsSync(staging), false);
+    execFileSync("/bin/bash", ["-c", setup], { env: { ...process.env, RUNNER_TEMP: runnerTemp } });
+    assert.equal(fs.statSync(staging).mode & 0o777, 0o700);
+    assert.equal(fs.statSync(terraformData).mode & 0o777, 0o700);
+    assert.equal(ensureStageBPrivateDirectory({ directory: staging, repositoryRoot: root }), staging);
+
+    const savedPlan = path.join(staging, "refresh.tfplan");
+    writeStageBPrivateFileExclusive({ filePath: savedPlan, bytes: Buffer.from("saved-plan"), repositoryRoot: root, label: "Saved refresh-only plan" });
+    assert.equal(readStageBPrivateFileBytes({ filePath: savedPlan, repositoryRoot: root }).sha256.length, 64);
+
+    const result = path.join(staging, "result.json");
+    writeStageBPrivateFileExclusive({ filePath: result, bytes: Buffer.from("{}\n"), repositoryRoot: root, label: "Stage B state reconciliation result" });
+    assert.equal(fs.statSync(result).mode & 0o777, 0o600);
+    assert.equal(readStageBPrivateFileBytes({ filePath: result, repositoryRoot: root }).bytes.toString(), "{}\n");
+
+    fs.chmodSync(staging, 0o755);
+    assert.throws(() => ensureStageBPrivateDirectory({ directory: staging, repositoryRoot: root, label: "Stage B state reconciliation result output" }), /mode 0700/);
+    fs.chmodSync(staging, 0o700);
+    fs.chmodSync(result, 0o644);
+    assert.throws(() => readStageBPrivateFileBytes({ filePath: result, repositoryRoot: root, label: "Stage B state reconciliation result" }), /mode 0600/);
+  } finally {
+    fs.rmSync(runnerTemp, { recursive: true, force: true });
+  }
 });
 
 test("the canonical release-preflight producer is real, source-bound, and artifact-backed", () => {

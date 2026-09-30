@@ -40,7 +40,7 @@ jobs:
           test "$SOURCE_SHA" = "$(git rev-parse HEAD)"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
           test "$PREPARATION_ATTEMPT" = 1
-          umask 077; d="$RUNNER_TEMP/stage-b-state-reconciliation"; install -d -m 700 "$d/terraform-data"
+          umask 077; d="$RUNNER_TEMP/stage-b-state-reconciliation"; install -d -m 700 "$d" "$d/terraform-data"
           run="$(gh api repos/$GITHUB_REPOSITORY/actions/runs/$PREPARATION_RUN)"
           test "$(jq -r .path <<<"$run")" = .github/workflows/prepare-production-green-stage-b-state-reconciliation.yml
           test "$(jq -r .head_sha <<<"$run")" = "$SOURCE_SHA"
@@ -71,6 +71,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          umask 077
           test "$AUTH_ATTEMPT" = 1
           d="$RUNNER_TEMP/stage-b-state-reconciliation"; run="$(gh api repos/$GITHUB_REPOSITORY/actions/runs/$AUTH_RUN)"
           test "$(jq -r .path <<<"$run")" = .github/workflows/authorize-production-green-stage-b-state-reconciliation.yml
