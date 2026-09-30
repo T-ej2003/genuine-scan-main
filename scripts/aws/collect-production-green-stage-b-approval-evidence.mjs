@@ -97,6 +97,7 @@ export function collectProductionGreenStageBApprovalEvidence({ sourceSha, imageA
   const brokerConfiguration = assertStageBBrokerLambdaConfiguration({ configuration: live.configuration, alias: live.alias, brokerPackageRawSha256: report.brokerPackageRawSha256 });
   const { broker, codeSha256: brokerCodeSha256 } = brokerConfiguration;
   const variables = live.configuration?.Environment?.Variables;
+  if (variables?.BROKER_IMAGE_RELEASE_SHA !== imageAuthorization.imageReleaseSha) throw new Error("Live broker image release SHA does not match authenticated image authorization.");
   const taskDefinitionArns = parse(variables?.BROKER_TASK_DEFINITIONS_JSON, "Live broker task-definition map");
   const approvalExpected = parse(variables?.BROKER_APPROVAL_EXPECTED_JSON, "Live broker approval bindings");
   const templateHashes = parse(variables?.BROKER_TASK_TEMPLATE_HASHES_JSON, "Live broker task-definition template hashes");
