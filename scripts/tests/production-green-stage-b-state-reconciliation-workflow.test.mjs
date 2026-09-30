@@ -84,6 +84,17 @@ test("reconciliation readers authenticate and consume private JSON directly", ()
   assert.match(read("produce-production-green-stage-b-release-preflight.yml"), /GITHUB_TOKEN: \$\{\{ github\.token \}\}/);
 });
 
+test("every specialized reconciliation subprocess uses streaming or file-backed output", () => {
+  const reconcile = fs.readFileSync(path.join(root, "scripts/aws/reconcile-production-green-stage-b-state.mjs"), "utf8");
+  assert.match(reconcile, /captureStageBTerraformJson/);
+  assert.match(reconcile, /stdio: \["ignore", "inherit", "inherit"\]/);
+  assert.doesNotMatch(reconcile, /execFileSync|stdio: \["ignore", "pipe", "pipe"\]|maxBuffer/);
+  assert.doesNotMatch(reconcile, /terraform\(\["show", "-json"/);
+  assert.match(reconcile, /const plan = renderPlan\(saved, env\)/);
+  assert.match(reconcile, /const normalPlan = renderPlan\(sourcePlanPath, env\)/);
+  assert.match(reconcile, /return renderPlan\(output, env\)/);
+});
+
 test("the prerequisite producer is source-bound and transports generated inputs by authenticated artifact", () => {
   const name = "produce-production-green-stage-b-prerequisite-bundle.yml";
   const workflow = parse(name); const source = read(name); const producer = fs.readFileSync(path.join(root, "scripts/aws/produce-production-green-stage-b-prerequisite-bundle.mjs"), "utf8");

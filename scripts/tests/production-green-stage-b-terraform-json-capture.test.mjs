@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { captureStageBTerraformJson, runStageBTerraformJson } from "../aws/capture-stage-b-terraform-json.mjs";
+import { renderStageBStateReconciliationPlan, runStageBStateReconciliationTerraform } from "../aws/reconcile-production-green-stage-b-state.mjs";
 
 const cwd = process.cwd();
 const runNode = (script, value) => ({ terraform: process.execPath, args: ["-e", script, ...(value === undefined ? [] : [value])], cwd });
@@ -13,6 +14,61 @@ test("large terraform show JSON is captured without child-process stdout bufferi
   const bytes = captureStageBTerraformJson({ ...runNode("process.stdout.write(JSON.stringify({ format_version: '1.2', payload: 'x'.repeat(Number(process.argv[1])) }))", String(2 * 1024 * 1024)) });
   assert.equal(bytes.toString("utf8"), payload);
   assert.ok(bytes.length > 1024 * 1024);
+});
+
+test("specialized reconciliation renders every production phase through file-backed capture", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-reconciliation-large-json-"));
+  const terraform = path.join(directory, "terraform");
+  fs.writeFileSync(terraform, "#!/usr/bin/env node\nprocess.stdout.write(require('node:fs').readFileSync(process.argv.at(-1)))\n", { mode: 0o700 });
+  const env = { ...process.env, PATH: `${directory}:${process.env.PATH}` };
+  const fixture = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-green-stage-b-state-reconciliation-serial-104.json", "utf8")).preWriteNormalPlan;
+  fixture.capture_padding = "x".repeat(2 * 1024 * 1024);
+  for (const phase of ["preparation", "execution", "pre-apply", "post-write-refresh", "post-write-ordinary"]) {
+    const plan = path.join(directory, `${phase}.tfplan`);
+    fs.writeFileSync(plan, JSON.stringify(fixture), { mode: 0o600 });
+    assert.equal(renderStageBStateReconciliationPlan(plan, env).capture_padding.length, 2 * 1024 * 1024);
+  }
+  fs.rmSync(directory, { recursive: true, force: true });
+});
+
+test("specialized reconciliation captures the production-sized source-alignment plan", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-reconciliation-production-size-"));
+  const terraform = path.join(directory, "terraform");
+  fs.writeFileSync(terraform, "#!/usr/bin/env node\nprocess.stdout.write(require('node:fs').readFileSync(process.argv.at(-1)))\n", { mode: 0o700 });
+  const plan = path.join(directory, "source-alignment.tfplan");
+  const fixture = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-green-stage-b-state-reconciliation-serial-104.json", "utf8")).preWriteNormalPlan;
+  fixture.capture_padding = "";
+  const targetBytes = 1_429_338;
+  fixture.capture_padding = "x".repeat(targetBytes - Buffer.byteLength(JSON.stringify(fixture)));
+  const bytes = Buffer.from(JSON.stringify(fixture));
+  assert.equal(bytes.length, targetBytes);
+  fs.writeFileSync(plan, bytes, { mode: 0o600 });
+  assert.equal(renderStageBStateReconciliationPlan(plan, { ...process.env, PATH: `${directory}:${process.env.PATH}` }).capture_padding.length, fixture.capture_padding.length);
+  fs.rmSync(directory, { recursive: true, force: true });
+});
+
+test("specialized reconciliation streams Terraform commands and rejects process failures", () => {
+  let options;
+  runStageBStateReconciliationTerraform(["plan"], {}, (_command, _args, received) => { options = received; return { status: 0, signal: null }; });
+  assert.deepEqual(options.stdio, ["ignore", "inherit", "inherit"]);
+  assert.equal("maxBuffer" in options, false);
+  assert.throws(() => runStageBStateReconciliationTerraform(["plan"], {}, () => ({ error: { code: "ENOENT" }, status: null, signal: null })), /failed to start: ENOENT/);
+  assert.throws(() => runStageBStateReconciliationTerraform(["plan"], {}, () => ({ status: null, signal: "SIGTERM" })), /terminated by SIGTERM/);
+  assert.throws(() => runStageBStateReconciliationTerraform(["plan"], {}, () => ({ status: 3, signal: null })), /failed with exit 3/);
+});
+
+test("specialized reconciliation rejects malformed, missing, nonzero, and signaled JSON producers", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-reconciliation-invalid-json-"));
+  const terraform = path.join(directory, "terraform");
+  const run = (body, expected) => {
+    fs.writeFileSync(terraform, `#!/usr/bin/env node\n${body}\n`, { mode: 0o700 });
+    assert.throws(() => renderStageBStateReconciliationPlan(path.join(directory, "plan.tfplan"), { ...process.env, PATH: `${directory}:${process.env.PATH}` }), expected);
+  };
+  run("process.stdout.write('{')", /malformed plan JSON/);
+  run("process.stderr.write('failed'); process.exit(3)", /exit 3/);
+  run("process.kill(process.pid, 'SIGTERM')", /SIGTERM/);
+  run("require('node:fs').readFileSync(process.argv.at(-1))", /exit 1/);
+  fs.rmSync(directory, { recursive: true, force: true });
 });
 
 test("file-backed command result preserves large stdout and bounded diagnostics for refresh consumers", () => {
