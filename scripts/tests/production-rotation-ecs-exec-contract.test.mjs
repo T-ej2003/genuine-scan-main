@@ -26,6 +26,13 @@ test("ECS Exec verifier binds the exact service deployment, task definition, dig
   assert.match(pty, /fixture in output/);
 });
 
+test("documented cleanup verifier accepts expected image release SHA without tooling SHA", () => {
+  assert.match(runbook, /--expected-release-sha/);
+  assert.match(helper, /args\.get\("expected-release-sha"\)/);
+  assert.doesNotMatch(helper, /fullSha\(args\.get\("release-sha"\)/);
+  assert.match(helper, /releaseSha !== expectedReleaseSha/);
+});
+
 test("ECS Exec runtime proof rejects a task from another deployment of the same task definition", () => {
   const taskDefinition = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:51";
   const service = { deployments: [{ id: "ecs-svc/123456789", status: "PRIMARY", taskDefinition }] };

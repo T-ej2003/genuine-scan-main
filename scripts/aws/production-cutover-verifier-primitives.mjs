@@ -22,13 +22,13 @@ export function createLazyProductionVerifierEcsAdapter(getRun, getInteractive) {
 }
 
 const quote = (value) => `'${String(value).replaceAll("'", "'\\''")}'`;
-export const productionOverlapRuntimeProofCommand = ({ sourceSha, rotationId, deploymentSha, healthUrl, invocationRef }) => {
-  if (!/^[a-f0-9]{40}$/.test(sourceSha || "") || !/^[A-Za-z0-9._-]{8,128}$/.test(rotationId || "") || !/^https:\/\//.test(healthUrl || "")) throw new Error("Runtime proof identity is invalid.");
+export const productionOverlapRuntimeProofCommand = ({ sourceSha, imageReleaseSha, rotationId, deploymentSha, healthUrl, invocationRef }) => {
+  if (!/^[a-f0-9]{40}$/.test(sourceSha || "") || !/^[a-f0-9]{40}$/.test(imageReleaseSha || "") || !/^[A-Za-z0-9._-]{8,128}$/.test(rotationId || "") || !/^https:\/\//.test(healthUrl || "")) throw new Error("Runtime proof identity is invalid.");
   const proofPath = `/app/uploads/.mscqr-rotation-proof-${rotationId}.json`;
   return [
     "stty -echo",
     `trap 'rm -f ${quote(proofPath)}; stty echo' EXIT HUP INT TERM`,
-    `ROTATION_RUNTIME_PHASE=overlap ROTATION_ID=${quote(rotationId)} ROTATION_DEPLOYMENT_SHA=${quote(deploymentSha || sourceSha)} ROTATION_RUNTIME_INVOCATION_REF=${quote(invocationRef || `cutover-${rotationId}`)} node /app/scripts/security/verify-production-rotation-runtime.mjs --fixture-stdin --output ${quote(proofPath)} --health-url ${quote(healthUrl)} --expected-release-sha ${quote(sourceSha)}`,
+    `ROTATION_RUNTIME_PHASE=overlap ROTATION_ID=${quote(rotationId)} ROTATION_DEPLOYMENT_SHA=${quote(deploymentSha || sourceSha)} ROTATION_RUNTIME_INVOCATION_REF=${quote(invocationRef || `cutover-${rotationId}`)} node /app/scripts/security/verify-production-rotation-runtime.mjs --fixture-stdin --output ${quote(proofPath)} --health-url ${quote(healthUrl)} --expected-release-sha ${quote(imageReleaseSha)}`,
     "status=$?",
     `if [ \"$status\" -eq 0 ]; then printf '\\nMSCQR_PROOF_BEGIN\\n'; cat ${quote(proofPath)}; printf '\\nMSCQR_PROOF_END\\n'; fi`,
     "exit $status",

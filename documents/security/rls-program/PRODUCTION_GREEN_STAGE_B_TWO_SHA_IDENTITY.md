@@ -74,3 +74,43 @@ only SHA rendered into task-definition `RELEASE_GIT_SHA`. Recovery requires the
 bindings, authorized backend digest, image-release SHA, and authorization envelope to
 match exactly. A legacy task definition whose `RELEASE_GIT_SHA` was populated from the
 tooling SHA is not relabeled or adopted; its complete semantic fingerprint fails closed.
+
+## Persisted-record compatibility (PR #604)
+
+The upgrade audit uses protected pre-PR source `68d8c76`, not an intermediate
+unmerged PR head. No historical object is rewritten to add image provenance.
+
+| Persisted structure | Historical authentication | New writes / upgrade behavior |
+| --- | --- | --- |
+| Rotation config | Approved exact byte SHA-256; no version/image field; runtime SHA was sourceSha | Version 2 requires explicit imageReleaseSha; original legacy bytes load with the original sourceSha runtime binding |
+| Rotation coordinator state and runtime proofs | Original config identity and persisted proof SHA | Legacy config retains original proof semantics; new config uses explicit image provenance |
+| Overlap readiness | Version 1, hashed bytes, exact original authorization/task bindings | Version 2 joins explicit authenticated image SHA; legacy cleanup derives sourceSha only from exact original binding shape |
+| Activation claim | Version 1 canonical bytes and original transaction hash | Version 2 includes imageReleaseSha; immutable v1 claim retries without replacement |
+| Activation completion | Version 1 canonical bytes, claim SHA and S3 version | Completion retains claim version and original identity; v2 records bind image SHA |
+| Inventory replay key and row | Original logical operation key and full-identity hash | Unchanged key prevents a legacy row becoming invisible or launching twice; new identityVersion 2 stores imageReleaseSha and hashes it; version-specific readback rejects mixed fields |
+| Onboarding evidence for legacy completion | Authenticated v1 claim plus evidence digest and source-bound health | Legacy interpretation enabled only by a validated v1 claim; fresh evidence requires explicit image SHA |
+| Signed image authorization / manifests | Existing versioned signed identity and digest | No historical shape rewritten; explicit image SHA is read from canonical authentication |
+| Schema-2 approval | Signed current governance releaseSha | Image provenance remains separately authenticated; approval schema unchanged |
+| RLS/release receipts | Existing source/image digest and package hashes | Receipt shape unchanged; regenerated package hashes follow authoritative source |
+| Component deployment records | Existing image source, digest and task ARN | Persisted field shape unchanged |
+| Normal backend activation metadata / web handoff | Exact historical v1 fields, authorization SHA, source-bound image provenance and live ECS/health readback | New v2 requires explicit image SHA; standalone web activation reads original hashed v1 bytes without rewriting them |
+| Runner-local cutover runtime config | File SHA-256 and protected-main source SHA; regenerated for each cutover | New config carries imageReleaseSha. A pre-upgrade file cannot be reused: the producer requires its output absent, and continuation requires the fresh protected-main SHA |
+| Broker Lambda environment | Immutable deployed version environment for inventory broker | New version requires BROKER_IMAGE_RELEASE_SHA. An old environment fails broker configuration validation before authorization or launch; deployment must publish a governed new version |
+
+The 14 persisted shapes above contain 12 with post-PR reader coverage: eight
+use explicit old serialized fixtures, while four have unchanged schemas and
+existing stored-item or signature coverage. The two remaining shapes require
+regeneration or governed convergence: runner-local runtime config and broker
+Lambda environment. Tests assert that existing runtime output is not
+overwritten and that a missing broker image SHA cannot proceed. Fresh paths
+use distinct tooling and image SHAs. State
+serial 107 remains authoritative; this PR performs no production or
+Terraform-state mutation.
+
+
+The normal backend artifact is durable handoff evidence, unlike the runner-local
+activation binding regenerated before apply. The compatibility sweep now tests
+that artifact through the standalone web CLI (file hashes, schema validation,
+live backend readback, and frontend handoff), using the original v1 field set.
+The legacy path requires authenticated image SHA equal to sourceSha; it cannot
+accept distinct-SHA reuse or a v1 object with an injected imageReleaseSha.

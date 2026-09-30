@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import yaml from "js-yaml";
 import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
@@ -10,8 +13,8 @@ import {
   buildFrontendUpdate, buildFrontendRollback,
   runGovernedFrontendActivation,
 } from "../aws/production-web-release-contract.mjs";
-import { activateAuthenticatedWebRelease, createWebActivationAwsRunner, assertBackendActivationLiveReadback, assertFrontendActivationAuthorized } from "../aws/run-production-web-activation.mjs";
-import { NORMAL_ACTIVATION } from "../aws/production-normal-backend-activation.mjs";
+import { activateAuthenticatedWebRelease, createAwsFrontendActivationAdapters, createWebActivationAwsRunner, assertBackendActivationLiveReadback, assertFrontendActivationAuthorized, runCli as runWebActivationCli } from "../aws/run-production-web-activation.mjs";
+import { assertNormalBackendActivationEvidence, NORMAL_ACTIVATION } from "../aws/production-normal-backend-activation.mjs";
 
 const sourceSha = "a".repeat(40); const digest = `sha256:${"b".repeat(64)}`; const createdAt = "2026-09-16T12:00:00.000Z"; const expiresAt = "2026-09-17T12:00:00.000Z";
 const imageRef = `${WEB_RELEASE.account}.dkr.ecr.${WEB_RELEASE.region}.amazonaws.com/${WEB_RELEASE.repository}@${digest}`;
@@ -144,11 +147,64 @@ test("frontend activation consumes the authenticated Stage-B web decision before
 });
 
 test("web activation requires completed same-source backend activation evidence", async () => {
-  const backend = { schemaVersion: 1, operation: "PRODUCTION_NORMAL_BACKEND_ACTIVATION", sourceSha, stageBAuthorizationSha256: "stage-auth", workflowRunId: "12", releaseTrainRunId: "34", sourceArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:20", targetArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:21", newTaskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:21", observedTaskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:21", imageRef: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:${"b".repeat(64)}`, imageDigest: `sha256:${"b".repeat(64)}`, clusterArn: NORMAL_ACTIVATION.clusterArn, serviceArn: NORMAL_ACTIVATION.serviceArn, serviceStable: true, desiredCount: 2, runningCount: 2, pendingCount: 0 };
-  const stageBAuthorization = { sourceSha, authorizationSha256: "stage-auth", imageReuseEvidence: { webPublicationRequired: false } };
+  const imageReleaseSha = "9".repeat(40);
+  const backend = { schemaVersion: 2, operation: "PRODUCTION_NORMAL_BACKEND_ACTIVATION", sourceSha, imageReleaseSha, stageBAuthorizationSha256: "stage-auth", workflowRunId: "12", releaseTrainRunId: "34", sourceArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:20", targetArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:21", newTaskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:21", observedTaskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:21", imageRef: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:${"b".repeat(64)}`, imageDigest: `sha256:${"b".repeat(64)}`, clusterArn: NORMAL_ACTIVATION.clusterArn, serviceArn: NORMAL_ACTIVATION.serviceArn, serviceStable: true, desiredCount: 2, runningCount: 2, pendingCount: 0 };
+  Object.assign(backend, { normalActivationSourceArn: backend.sourceArn, previousTaskDefinitionArn: backend.sourceArn, targetTaskDefinitionArn: backend.targetArn });
+  const stageBAuthorization = { sourceSha, imageReleaseSha, authorizationSha256: "stage-auth", images: [{ service: "backend", digest: backend.imageDigest }], imageReuseEvidence: { webPublicationRequired: false } };
   await assert.rejects(() => activateAuthenticatedWebRelease({ sourceSha, stageBAuthorization, webAuthorization: undefined, backendActivationEvidence: backend, verifyCoordinated: async () => ({ webRequired: false }), createAdapters: () => assert.fail("web=false must stop before adapters") }), /forbidden/);
   await assert.rejects(() => activateAuthenticatedWebRelease({ sourceSha, stageBAuthorization: { ...stageBAuthorization, imageReuseEvidence: { webPublicationRequired: true } }, webAuthorization: {}, backendActivationEvidence: { ...backend, sourceSha: "c".repeat(40) }, verifyCoordinated: async () => ({ webRequired: true }), createAdapters: () => assert.fail("invalid backend evidence must stop before adapters") }), /backend activation evidence/);
-  assert.throws(() => assertBackendActivationLiveReadback({ sourceSha, expectedDigest: backend.imageDigest, backendActivationEvidence: backend, service: { serviceArn: NORMAL_ACTIVATION.serviceArn, clusterArn: NORMAL_ACTIVATION.clusterArn, status: "ACTIVE", desiredCount: 2, runningCount: 2, pendingCount: 0, taskDefinition: backend.targetArn, deployments: [{ status: "PRIMARY", taskDefinition: backend.targetArn, rolloutState: "COMPLETED" }] }, tasks: [], healthStatus: 200, healthBody: { status: "ready", release: { gitSha: sourceSha } } }), /stable source-bound/);
+  assert.throws(() => assertBackendActivationLiveReadback({ sourceSha, imageReleaseSha, expectedDigest: backend.imageDigest, backendActivationEvidence: backend, service: { serviceArn: NORMAL_ACTIVATION.serviceArn, clusterArn: NORMAL_ACTIVATION.clusterArn, status: "ACTIVE", desiredCount: 2, runningCount: 2, pendingCount: 0, taskDefinition: backend.targetArn, deployments: [{ status: "PRIMARY", taskDefinition: backend.targetArn, rolloutState: "COMPLETED" }] }, tasks: [], healthStatus: 200, healthBody: { status: "ready", release: { gitSha: imageReleaseSha } } }), /stable source-bound/);
+  assert.equal(assertNormalBackendActivationEvidence(backend, { sourceSha, stageBAuthorization }), true);
+  assert.throws(() => assertNormalBackendActivationEvidence({ ...backend, imageReleaseSha: sourceSha }, { sourceSha, stageBAuthorization }), /backend activation evidence/);
+  assert.throws(() => assertNormalBackendActivationEvidence({ ...backend, imageDigest: `sha256:${"c".repeat(64)}` }, { sourceSha, stageBAuthorization }), /backend activation evidence/);
+  const legacy = { ...backend, schemaVersion: 1 };
+  delete legacy.imageReleaseSha;
+  const legacyAuthorization = { ...stageBAuthorization, imageReleaseSha: sourceSha };
+  assert.equal(assertNormalBackendActivationEvidence(legacy, { sourceSha, stageBAuthorization: legacyAuthorization }), true);
+  assert.throws(() => assertNormalBackendActivationEvidence(legacy, { sourceSha, stageBAuthorization }), /backend activation evidence/);
+  assert.throws(() => assertNormalBackendActivationEvidence({ ...legacy, imageReleaseSha: sourceSha }, { sourceSha, stageBAuthorization: legacyAuthorization }), /backend activation evidence/);
+
+  const liveService = { serviceArn: NORMAL_ACTIVATION.serviceArn, clusterArn: NORMAL_ACTIVATION.clusterArn, status: "ACTIVE", desiredCount: 2, runningCount: 2, pendingCount: 0, taskDefinition: backend.targetArn, deployments: [{ status: "PRIMARY", taskDefinition: backend.targetArn, rolloutState: "COMPLETED" }] };
+  const liveTasks = [1, 2].map(() => ({ lastStatus: "RUNNING", taskDefinitionArn: backend.targetArn, containers: [{ name: NORMAL_ACTIVATION.container, imageDigest: backend.imageDigest }] }));
+  const backendAdapter = (runtimeSha) => createAwsFrontendActivationAdapters({
+    execute: (args) => JSON.stringify(args[1] === "describe-services" ? { services: [liveService] } : args[1] === "list-tasks" ? { taskArns: ["task-1", "task-2"] } : { tasks: liveTasks }),
+    fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ status: "ready", release: { gitSha: runtimeSha } }) }),
+  });
+  await backendAdapter(sourceSha).verifyBackendActivation({ sourceSha, stageBAuthorization: legacyAuthorization, backendActivationEvidence: legacy });
+  await assert.rejects(() => backendAdapter(imageReleaseSha).verifyBackendActivation({ sourceSha, stageBAuthorization: legacyAuthorization, backendActivationEvidence: legacy }), /stable source-bound/);
+  await backendAdapter(imageReleaseSha).verifyBackendActivation({ sourceSha, stageBAuthorization, backendActivationEvidence: backend });
+
+  const { authorization: webAuthorization } = fixture();
+  const candidateArn = taskArn.replace(":20", ":21");
+  const result = await activateAuthenticatedWebRelease({ sourceSha, stageBAuthorization, webAuthorization, backendActivationEvidence: backend, verifyWeb: () => true, verifyCoordinated: async () => ({ webRequired: true }), now: createdAt, createAdapters: () => ({
+    verifyBackendActivation: backendAdapter(imageReleaseSha).verifyBackendActivation,
+    readService: async () => service, describeTaskDefinition: async (arn) => arn === taskArn ? task : { ...buildFrontendCandidate({ predecessor: captureFrontendPredecessor(service, task), authenticatedWebAuthorization: authenticateWebImageAuthorization({ sourceSha, webAuthorization, verify: () => true, now: createdAt }) }), taskDefinitionArn: candidateArn, revision: 21, status: "ACTIVE" },
+    registerTaskDefinition: async () => ({ taskDefinitionArn: candidateArn }), updateService: async () => {}, waitStable: async () => {}, verifyHealth: async () => ({ ready: true, loginStatus: 200 }),
+  }) });
+  assert.equal(result.updateCount, 1);
+
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-legacy-web-handoff-"));
+  try {
+    const boundFile = (name, value) => {
+      const file = path.join(directory, name);
+      const bytes = Buffer.from(`${JSON.stringify(value)}\n`);
+      fs.writeFileSync(file, bytes, { mode: 0o600 });
+      return [file, crypto.createHash("sha256").update(bytes).digest("hex")];
+    };
+    const [backendFile, backendHash] = boundFile("historical-backend-v1.json", legacy);
+    const [stageFile, stageHash] = boundFile("stage-b-authorization.json", { ...legacyAuthorization, imageReuseEvidence: impact });
+    const [webFile, webHash] = boundFile("web-authorization.json", webAuthorization);
+    const cliResult = await runWebActivationCli(["--source-sha", sourceSha, "--web-authorization", webFile, "--web-authorization-sha256", webHash, "--stage-b-authorization", stageFile, "--stage-b-authorization-sha256", stageHash, "--backend-activation-evidence", backendFile, "--backend-activation-evidence-sha256", backendHash], {
+      verifyWebAuthorization: () => true, verifyCoordinated: async (input) => assertCoordinatedImageAuthorization({ ...input, now: createdAt, webPublicationRequired: true }), releaseRun: () => {}, now: createdAt,
+      createAdapters: () => ({
+        verifyBackendActivation: backendAdapter(sourceSha).verifyBackendActivation,
+        readService: async () => service, describeTaskDefinition: async (arn) => arn === taskArn ? task : { ...buildFrontendCandidate({ predecessor: captureFrontendPredecessor(service, task), authenticatedWebAuthorization: authenticateWebImageAuthorization({ sourceSha, webAuthorization, verify: () => true, now: createdAt }) }), taskDefinitionArn: candidateArn, revision: 21, status: "ACTIVE" },
+        registerTaskDefinition: async () => ({ taskDefinitionArn: candidateArn }), updateService: async () => {}, waitStable: async () => {}, verifyHealth: async () => ({ ready: true, loginStatus: 200 }),
+      }),
+    });
+    assert.equal(cliResult.updateCount, 1);
+    await assert.rejects(() => runWebActivationCli(["--source-sha", sourceSha, "--web-authorization", webFile, "--web-authorization-sha256", webHash, "--stage-b-authorization", stageFile, "--stage-b-authorization-sha256", stageHash, "--backend-activation-evidence", backendFile, "--backend-activation-evidence-sha256", "0".repeat(64)], { verifyCoordinated: async () => ({ webRequired: true }) }), /bytes do not match/);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
   assert.equal(typeof backend.operation, "string");
 });
 

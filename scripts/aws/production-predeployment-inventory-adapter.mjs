@@ -22,12 +22,12 @@ if (PREDEPLOYMENT_BROKER_CALLER_TIMEOUT_HEADROOM_SECONDS <= 0
 
 const parseJson = (run, args) => JSON.parse(run([...args, "--output", "json", "--no-cli-pager"]));
 
-export function createProductionPreDeploymentInventoryAdapter({ run, sourceSha, imageDigest, config } = {}) {
-  if (typeof run !== "function" || !SHA.test(sourceSha || "") || !config || !STAGE_B.brokerAliasArn) throw new Error("Pre-deployment inventory adapter configuration is required.");
+export function createProductionPreDeploymentInventoryAdapter({ run, sourceSha, imageReleaseSha, imageDigest, config } = {}) {
+  if (typeof run !== "function" || !SHA.test(sourceSha || "") || !SHA.test(imageReleaseSha || "") || !config || !STAGE_B.brokerAliasArn) throw new Error("Pre-deployment inventory adapter configuration is required.");
   const inventorySecretArn = config.inventoryDatabaseSecretArn || config.overlapTaskInput?.databaseUrlSecretArn || canonicalBackendDatabaseSecretReference();
   const taskInput = {
     backendImage: imageDigest,
-    releaseSha: sourceSha,
+    releaseSha: imageReleaseSha,
     databaseUrl: inventorySecretArn,
     inventoryTaskRoleArn: config.inventoryTaskRoleArn || "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task",
     inventoryExecutionRoleArn: config.inventoryExecutionRoleArn || "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution",
@@ -70,6 +70,7 @@ export function createProductionPreDeploymentInventoryAdapter({ run, sourceSha, 
           operation: "production-predeployment-rotation-inventory",
           rotationId,
           sourceSha,
+          imageReleaseSha,
           taskDefinitionArn,
         };
         const invocation = parseJson(run, ["lambda", "invoke", "--function-name", STAGE_B.brokerAliasArn, "--invocation-type", "RequestResponse", "--cli-binary-format", "raw-in-base64-out", "--cli-read-timeout", String(PREDEPLOYMENT_BROKER_CALLER_READ_TIMEOUT_SECONDS), "--payload", JSON.stringify(brokerRequest), outputPath]);

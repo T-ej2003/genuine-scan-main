@@ -103,18 +103,18 @@ export function createStrictHttpOnboardingAdapter({ baseUrl, paths, credentials,
     }
     return auth?.mfaVerified === true;
   };
-  return async ({ sourceSha, imageDigest, taskDefinitionArn, taskArn, rotationId, rotationStateSha256, rotationFixtureSha256 }) => {
+  return async ({ sourceSha, imageReleaseSha, imageDigest, taskDefinitionArn, taskArn, rotationId, rotationStateSha256, rotationFixtureSha256 }) => {
     const rotationQrFixture = readRotationQrFixture(rotationFixtureFile, rotationFixtureSha256);
     const rotationQrToken = rotationQrFixture.token;
     return runStrictOnboardingProbes({
-    expected: { sourceSha, imageDigest, taskDefinitionArn, taskArn, rotationId, rotationStateSha256 },
+    expected: { sourceSha, imageReleaseSha, imageDigest, taskDefinitionArn, taskArn, rotationId, rotationStateSha256 },
     probes: {
-      deployedReleaseSha: async () => { const { response, payload } = await request("/version"); return response.ok && (payload?.releaseGitSha === sourceSha || payload?.gitSha === sourceSha); },
+      deployedReleaseSha: async () => { const { response, payload } = await request("/version"); return response.ok && (payload?.releaseGitSha === imageReleaseSha || payload?.gitSha === imageReleaseSha); },
       deployedImageDigest: async () => (await runtimeReadback({ sourceSha, imageDigest, taskDefinitionArn, taskArn })).imageDigest === imageDigest,
       serviceStable: async () => (await runtimeReadback({ sourceSha, imageDigest, taskDefinitionArn, taskArn })).serviceStable === true,
       taskDefinition: async () => (await runtimeReadback({ sourceSha, imageDigest, taskDefinitionArn, taskArn })).taskDefinitionArn === taskDefinitionArn,
       taskMarker: async () => (await runtimeReadback({ sourceSha, imageDigest, taskDefinitionArn, taskArn })).taskMarker === true,
-      ecsExecProof: async () => { const evidence = await ecsExecEvidence({ sourceSha, taskDefinitionArn, taskArn }); runtimeProof = evidence?.proof; return evidence?.valid === true && runtimeProof && typeof runtimeProof === "object"; },
+      ecsExecProof: async () => { const evidence = await ecsExecEvidence({ sourceSha, imageReleaseSha, taskDefinitionArn, taskArn }); runtimeProof = evidence?.proof; return evidence?.valid === true && runtimeProof && typeof runtimeProof === "object"; },
       health: async () => { const { payload } = await request("/api/health/ready"); return payload?.status === "ready" || payload?.status === "ok"; },
       databaseReady: async () => { const { payload } = await request("/api/health/ready"); return payload?.dependencies?.database?.ready === true; },
       redisReady: async () => { const { payload } = await request("/api/health/ready"); return payload?.dependencies?.redis?.ready === true; },

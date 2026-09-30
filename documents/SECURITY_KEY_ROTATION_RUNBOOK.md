@@ -159,6 +159,7 @@ gh workflow run release-gate.yml --ref main \
   -f rotation_deployment_sha=<exact-cleanup-deployment-sha>
 
 # Then invoke the deployment-side runtime proof inside the exact running task.
+# The cleanup runtime SHA is the image release SHA authenticated in overlap readiness; it may differ from the current protected-main tooling SHA when the immutable image is reused.
 ROTATION_RUNTIME_PHASE=cleanup \
 ROTATION_ID=<rotation-id> \
 ROTATION_DEPLOYMENT_SHA=<full-cleanup-deployment-sha> \
@@ -167,7 +168,7 @@ scripts/aws/verify-production-rotation-via-ecs-exec.sh \
   --credential-source inherited-ecs-exec-verifier-session \
   --cluster <exact-cluster-arn> --service <exact-service-name> \
   --task-definition <exact-cleanup-task-definition-arn> --image-digest sha256:<64-hex> \
-  --expected-release-sha <full-source-sha> --phase cleanup \
+  --expected-release-sha <authenticated-image-release-sha-from-overlap-readiness> --phase cleanup \
   --fixture-file /secure/operator/previous-qr-fixture.json \
   --health-url https://www.mscqr.com/api/health \
   --proof-output /secure/operator/cleanup-runtime.json

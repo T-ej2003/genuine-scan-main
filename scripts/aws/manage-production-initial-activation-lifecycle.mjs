@@ -8,6 +8,7 @@ import {
   createInitialActivationClaim,
   createInitialActivationCompletion,
   createProductionInitialActivationAws,
+  effectiveImageReleaseSha,
   readInitialActivationClaim,
 } from "./production-initial-activation-lifecycle.mjs";
 import { canonicalJson } from "./production-green-stage-b-contract.mjs";
@@ -37,7 +38,7 @@ export async function runCli(argv = process.argv.slice(2), dependencies = {}) {
   if (mode === "validate-candidate" || mode === "claim") {
     const rawState = readFileSync(required(values, "--state-file"));
     const expected = {
-      sourceSha: required(values, "--source-sha"), rotationId: required(values, "--rotation-id"), deploymentSha: required(values, "--deployment-sha"),
+      sourceSha: required(values, "--source-sha"), imageReleaseSha: required(values, "--image-release-sha"), rotationId: required(values, "--rotation-id"), deploymentSha: required(values, "--deployment-sha"),
       taskDefinitionArn: required(values, "--task-definition"), imageDigest: required(values, "--image-digest"),
     };
     const overlap = validateProductionInitialActivationClaimCandidateDuringAuthenticatedOverlap({ rawState, stateSha256: required(values, "--state-sha256"), expected });
@@ -48,7 +49,7 @@ export async function runCli(argv = process.argv.slice(2), dependencies = {}) {
     const claim = buildInitialActivationClaim({ ...expected, overlapDeploymentSha: expected.deploymentSha, activationTaskDefinitionArn: required(values, "--activation-task-definition"), overlapRuntimeProofSha256: overlap.overlapRuntimeProofSha256, createdAt: dependencies.now?.() || new Date().toISOString() });
     const result = await createInitialActivationClaim({ claim, aws });
     writeCanonical(required(values, "--claim-out"), result.value);
-    process.stdout.write(`${JSON.stringify({ status: result.status, claimSha256: result.sha256, claimVersionId: result.versionId, activationTransactionId: claim.activationTransactionId })}\n`);
+    process.stdout.write(`${JSON.stringify({ status: result.status, claimSha256: result.sha256, claimVersionId: result.versionId, activationTransactionId: result.value.activationTransactionId })}\n`);
     return result;
   }
   if (mode === "verify-claim") {
@@ -74,6 +75,7 @@ export async function runCli(argv = process.argv.slice(2), dependencies = {}) {
       claimSha256,
       expected: {
         sourceSha: claim.sourceSha,
+        imageReleaseSha: effectiveImageReleaseSha(claim),
         rotationId: claim.rotationId,
         deploymentSha: claim.overlapDeploymentSha,
         taskDefinitionArn: claim.taskDefinitionArn,
@@ -87,8 +89,9 @@ export async function runCli(argv = process.argv.slice(2), dependencies = {}) {
     assertProductionRlsReleaseReceipt(JSON.parse(receiptRaw), { sourceSha: claim.sourceSha, imageDigest: claim.imageDigest });
     if (onboardingBundle?.valid !== true || onboardingBundle.evidenceRef !== `onboarding:${claim.sourceSha}`
       || onboardingBundle.evidenceSha256 !== sha256(Buffer.from(JSON.stringify(onboarding)))) throw new Error("Strict onboarding evidence bundle is invalid.");
-    validateOnboardingContract(onboarding);
-    if (onboarding.sourceSha !== claim.sourceSha || onboarding.rotationId !== claim.rotationId
+    const legacyOnboarding = claim.schemaVersion === 1 && onboarding?.imageReleaseSha === undefined;
+    validateOnboardingContract(onboarding, { legacyImageSha: legacyOnboarding });
+    if (onboarding.sourceSha !== claim.sourceSha || (onboarding.imageReleaseSha ?? (legacyOnboarding ? claim.sourceSha : undefined)) !== effectiveImageReleaseSha(claim) || onboarding.rotationId !== claim.rotationId
       || onboarding.rotationStateSha256 !== stateSha256 || onboarding.taskDefinitionArn !== claim.activationTaskDefinitionArn
       || onboarding.imageDigest !== claim.imageDigest) throw new Error("Strict onboarding evidence is not bound to the activation claim and overlap runtime.");
     const completion = buildInitialActivationCompletion({ claim, claimSha256, claimVersionId: liveClaim.versionId, rlsReceiptSha256: sha256(receiptRaw), onboardingEvidenceSha256: sha256(onboardingRaw), completedAt: dependencies.now?.() || new Date().toISOString() });

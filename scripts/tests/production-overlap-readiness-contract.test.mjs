@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { assertReadyForOverlapDeployment, readAndAssertReadyForOverlapDeployment, READY_FOR_OVERLAP_DEPLOYMENT_STAGES } from "../aws/production-overlap-readiness-contract.mjs";
+import { assertReadyForOverlapDeployment, readAndAssertReadyForOverlapDeployment, rotationExpectedImageReleaseSha, READY_FOR_OVERLAP_DEPLOYMENT_STAGES } from "../aws/production-overlap-readiness-contract.mjs";
 
 const completeEvidence = () => Object.fromEntries([
   ["evidenceVersion", 1],
@@ -70,3 +70,30 @@ test("the release-gate cutover wrapper deploys only the exact readiness task def
   assert.match(source, /overlapTaskDefinition\?\.identityBindings\?\.taskDefinitionArn/);
   assert.match(source, /taskDefinitionArn !== authorizedTaskDefinitionArn/);
 });
+
+test("rotation overlap and cleanup use authenticated image SHA independent of tooling SHA", () => {
+  const evidence = completeEvidence();
+  evidence.evidenceVersion = 2;
+  evidence.imageAuthorization.identityBindings.imageReleaseSha = "d".repeat(40);
+  evidence.overlapTaskDefinition.identityBindings.imageReleaseSha = "d".repeat(40);
+  assert.equal(rotationExpectedImageReleaseSha(evidence), "d".repeat(40));
+  evidence.overlapTaskDefinition.identityBindings.imageReleaseSha = "e".repeat(40);
+  assert.throws(() => rotationExpectedImageReleaseSha(evidence), /authenticated readiness/);
+  const releaseGate = readFileSync(".github/workflows/release-gate.yml", "utf8");
+  const rotationStep = releaseGate.slice(releaseGate.indexOf("- name: Deploy rotation transition backend ECS service"), releaseGate.indexOf("- name: Upload overlap deployment receipt"));
+  assert.doesNotMatch(rotationStep, /steps\.images\.outputs\.image_release_sha/);
+  assert.match(rotationStep, /rotation-overlap.*rotation-cleanup/);
+  const cutover = readFileSync("scripts/aws/run-production-cutover.mjs", "utf8");
+  assert.match(cutover, /rotationExpectedImageReleaseSha\(readiness\.evidence\)/);
+  assert.match(cutover, /expectedGitSha \}/);
+});
+
+ test("legacy hashed readiness retains its original single-SHA cleanup semantics", () => {
+  const evidence = completeEvidence();
+  Object.assign(evidence.overlapTaskDefinition.identityBindings, { taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:19", imageDigest: `sha256:${"d".repeat(64)}` });
+  assert.equal(rotationExpectedImageReleaseSha(evidence), evidence.sourceSha);
+  evidence.imageAuthorization.identityBindings.imageReleaseSha = "e".repeat(40);
+  assert.throws(() => rotationExpectedImageReleaseSha(evidence), /legacy image authorization bindings/);
+  evidence.evidenceVersion = 2;
+  assert.throws(() => rotationExpectedImageReleaseSha(evidence), /authenticated readiness/);
+ });

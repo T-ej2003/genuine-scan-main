@@ -30,7 +30,7 @@ export function createAwsFrontendActivationAdapters({ execute, env = process.env
       const taskArns = awsJson(["ecs", "list-tasks", "--cluster", NORMAL_ACTIVATION.cluster, "--service-name", NORMAL_ACTIVATION.service, "--desired-status", "RUNNING"]).taskArns || [];
       const tasks = taskArns.length ? awsJson(["ecs", "describe-tasks", "--cluster", NORMAL_ACTIVATION.cluster, "--tasks", ...taskArns]).tasks || [] : [];
       const health = await fetchImpl("https://www.mscqr.com/api/health/ready"); const body = health.ok ? await health.json() : null;
-      assertBackendActivationLiveReadback({ sourceSha, expectedDigest, backendActivationEvidence, service, tasks, healthStatus: health.status, healthBody: body });
+      assertBackendActivationLiveReadback({ sourceSha, imageReleaseSha: stageBAuthorization.imageReleaseSha, expectedDigest, backendActivationEvidence, service, tasks, healthStatus: health.status, healthBody: body });
     },
     readService: async () => awsJson(["ecs", "describe-services", "--cluster", WEB_RELEASE.cluster, "--services", WEB_RELEASE.serviceName]).services?.[0],
     describeTaskDefinition: async (taskDefinition) => { const response = awsJson(["ecs", "describe-task-definition", "--task-definition", taskDefinition, "--include", "TAGS"]); return { ...response.taskDefinition, tags: response.tags || [] }; },
@@ -54,10 +54,11 @@ export function createAwsFrontendActivationAdapters({ execute, env = process.env
   });
 }
 
-export function assertBackendActivationLiveReadback({ sourceSha, expectedDigest, backendActivationEvidence, service, tasks, healthStatus, healthBody } = {}) {
+export function assertBackendActivationLiveReadback({ sourceSha, imageReleaseSha, expectedDigest, backendActivationEvidence, service, tasks, healthStatus, healthBody } = {}) {
   const primary = service?.deployments?.filter(({ status }) => status === "PRIMARY") || [];
   const backendContainers = (task) => (task?.containers || []).filter(({ name }) => name === NORMAL_ACTIVATION.container);
-  if (service?.taskDefinition !== backendActivationEvidence?.targetArn || service.serviceArn !== NORMAL_ACTIVATION.serviceArn || service.clusterArn !== NORMAL_ACTIVATION.clusterArn || service.status !== "ACTIVE" || service.desiredCount !== 2 || service.runningCount !== 2 || service.pendingCount !== 0 || primary.length !== 1 || primary[0].taskDefinition !== service.taskDefinition || primary[0].rolloutState !== "COMPLETED" || !Array.isArray(tasks) || tasks.length !== 2 || tasks.some((task) => task.lastStatus !== "RUNNING" || task.taskDefinitionArn !== service.taskDefinition || backendContainers(task).length !== 1 || backendContainers(task)[0].imageDigest !== expectedDigest) || healthStatus !== 200 || healthBody?.status !== "ready" || healthBody.release?.gitSha !== sourceSha) throw new Error("Backend activation is not the exact stable source-bound production release.");
+  const evidenceImageSha = backendActivationEvidence?.schemaVersion === 1 ? backendActivationEvidence.sourceSha : backendActivationEvidence?.imageReleaseSha;
+  if (![1, 2].includes(backendActivationEvidence?.schemaVersion) || backendActivationEvidence.schemaVersion === 1 && Object.hasOwn(backendActivationEvidence, "imageReleaseSha") || backendActivationEvidence?.sourceSha !== sourceSha || evidenceImageSha !== imageReleaseSha || backendActivationEvidence.imageDigest !== expectedDigest || service?.taskDefinition !== backendActivationEvidence.targetArn || service.serviceArn !== NORMAL_ACTIVATION.serviceArn || service.clusterArn !== NORMAL_ACTIVATION.clusterArn || service.status !== "ACTIVE" || service.desiredCount !== 2 || service.runningCount !== 2 || service.pendingCount !== 0 || primary.length !== 1 || primary[0].taskDefinition !== service.taskDefinition || primary[0].rolloutState !== "COMPLETED" || !Array.isArray(tasks) || tasks.length !== 2 || tasks.some((task) => task.lastStatus !== "RUNNING" || task.taskDefinitionArn !== service.taskDefinition || backendContainers(task).length !== 1 || backendContainers(task)[0].imageDigest !== expectedDigest) || healthStatus !== 200 || healthBody?.status !== "ready" || healthBody.release?.gitSha !== imageReleaseSha) throw new Error("Backend activation is not the exact stable source-bound production release.");
   return true;
 }
 

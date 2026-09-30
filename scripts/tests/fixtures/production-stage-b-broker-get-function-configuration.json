@@ -24,6 +24,7 @@
       "BROKER_CLUSTER_ARN": "value",
       "BROKER_EXECUTOR_SECURITY_GROUP_ID": "value",
       "BROKER_IMAGES_JSON": "{}",
+      "BROKER_IMAGE_RELEASE_SHA": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "BROKER_PRIVATE_SUBNETS_JSON": "[]",
       "BROKER_RECEIPT_BUCKET": "value",
       "BROKER_REPLAY_TABLE": "value",

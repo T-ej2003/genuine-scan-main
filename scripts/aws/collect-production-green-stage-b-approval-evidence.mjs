@@ -19,9 +19,9 @@ const exact = (left, right) => canonicalJson(left) === canonicalJson(right);
 const parse = (value, label) => { try { return JSON.parse(value); } catch { throw new Error(`${label} is malformed.`); } };
 const authenticatedEvidence = new WeakSet();
 
-function authenticateBrokerTaskDefinitions({ taskDefinitionArns, liveTaskDefinitions, sourceSha, contracts, images }) {
+function authenticateBrokerTaskDefinitions({ taskDefinitionArns, liveTaskDefinitions, imageReleaseSha, contracts, images }) {
   if (!liveTaskDefinitions || typeof liveTaskDefinitions !== "object" || Array.isArray(liveTaskDefinitions)) throw new Error("Exact live broker task-definition readbacks are required.");
-  const bindings = { imageReleaseSha: sourceSha, sourceContractSha256: contracts.sourceContractSha256, migrationSetDigest: contracts.migrationSetDigest, packageChecksumSha256: contracts.packageChecksumSha256, receiptBucket: STAGE_B.receiptBucket, executorLogGroup: STAGE_B.executorLogGroupName, canaryLogGroup: STAGE_B.canaryLogGroupName, backendLogGroup: "/ecs/mscqr-production/rls-green-backend", workerLogGroup: "/ecs/mscqr-production/rls-green-worker" };
+  const bindings = { imageReleaseSha, sourceContractSha256: contracts.sourceContractSha256, migrationSetDigest: contracts.migrationSetDigest, packageChecksumSha256: contracts.packageChecksumSha256, receiptBucket: STAGE_B.receiptBucket, executorLogGroup: STAGE_B.executorLogGroupName, canaryLogGroup: STAGE_B.canaryLogGroupName, backendLogGroup: "/ecs/mscqr-production/rls-green-backend", workerLogGroup: "/ecs/mscqr-production/rls-green-worker" };
   const contentHashes = {};
   for (const [mode, taskDefinitionArn] of Object.entries(taskDefinitionArns)) {
     const kind = mode === "full-rls-application-canary" ? "canary" : "executor";
@@ -97,6 +97,7 @@ export function collectProductionGreenStageBApprovalEvidence({ sourceSha, imageA
   const brokerConfiguration = assertStageBBrokerLambdaConfiguration({ configuration: live.configuration, alias: live.alias, brokerPackageRawSha256: report.brokerPackageRawSha256 });
   const { broker, codeSha256: brokerCodeSha256 } = brokerConfiguration;
   const variables = live.configuration?.Environment?.Variables;
+  if (variables?.BROKER_IMAGE_RELEASE_SHA !== imageAuthorization.imageReleaseSha) throw new Error("Live broker image release SHA does not match authenticated image authorization.");
   const taskDefinitionArns = parse(variables?.BROKER_TASK_DEFINITIONS_JSON, "Live broker task-definition map");
   const approvalExpected = parse(variables?.BROKER_APPROVAL_EXPECTED_JSON, "Live broker approval bindings");
   const templateHashes = parse(variables?.BROKER_TASK_TEMPLATE_HASHES_JSON, "Live broker task-definition template hashes");
@@ -114,7 +115,7 @@ export function collectProductionGreenStageBApprovalEvidence({ sourceSha, imageA
   assertStageBBrokerConfigurationBindings({ approvalExpected, images: liveImages, templateHashes });
   if (!exact(approvalExpected, expectedApproval)
       || !exact(liveImages, expectedImages) || !exact(templateHashes, stageBTemplateHashes())) throw new Error("Live broker bindings are stale or do not match the authenticated Stage B authorities.");
-  const taskDefinitionContentSha256 = authenticateBrokerTaskDefinitions({ taskDefinitionArns, liveTaskDefinitions: live.taskDefinitions, sourceSha, contracts, images: { executorImageDigest: report.images.executor.imageReference, canaryImageDigest: report.images.canary.imageReference } });
+  const taskDefinitionContentSha256 = authenticateBrokerTaskDefinitions({ taskDefinitionArns, liveTaskDefinitions: live.taskDefinitions, imageReleaseSha: imageAuthorization.imageReleaseSha, contracts, images: { executorImageDigest: report.images.executor.imageReference, canaryImageDigest: report.images.canary.imageReference } });
   const observedAt = live.observedAt;
   assertStageBDeploymentEvidenceFreshness(observedAt, { now, evidenceType: "Stage B approval live observation" });
   const evidence = Object.freeze({

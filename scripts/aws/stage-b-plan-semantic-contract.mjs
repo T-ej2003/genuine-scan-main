@@ -827,6 +827,7 @@ function assertConcreteBrokerEnvironment(variables) {
     || variables.BROKER_EXECUTOR_SECURITY_GROUP_ID !== STAGE_B.executorSecurityGroupId) {
     throw new Error("UNCLASSIFIED_CHANGED_PATH: aws_lambda_function.broker.environment[0].variables");
   }
+  if (!/^[a-f0-9]{40}$/.test(variables.BROKER_IMAGE_RELEASE_SHA || "")) throw new Error("UNCLASSIFIED_CHANGED_PATH: aws_lambda_function.broker.environment[0].variables.BROKER_IMAGE_RELEASE_SHA");
   const taskDefinitions = parseEnvironmentJson(variables.BROKER_TASK_DEFINITIONS_JSON, "BROKER_TASK_DEFINITIONS_JSON");
   if (!exactObjectKeys(taskDefinitions, Object.keys(brokerTaskDefinitionModes))) throw new Error("UNCLASSIFIED_CHANGED_PATH: aws_lambda_function.broker.environment[0].variables.BROKER_TASK_DEFINITIONS_JSON");
   for (const [mode, family] of Object.entries(brokerTaskDefinitionModes)) {

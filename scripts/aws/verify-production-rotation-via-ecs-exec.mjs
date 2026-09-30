@@ -49,7 +49,7 @@ const expectedTaskDefinition = safeReference(required("task-definition"), "task-
 const expectedImageDigest = required("image-digest");
 if (!/^sha256:[a-f0-9]{64}$/.test(expectedImageDigest)) throw new Error("image-digest must be an immutable digest");
 const expectedDeploymentSha = fullSha(args.get("deployment-sha") || process.env.ROTATION_DEPLOYMENT_SHA || "", "deployment-sha");
-const expectedReleaseSha = fullSha(args.get("release-sha") || args.get("expected-release-sha") || process.env.ROTATION_RELEASE_GIT_SHA || "", "release-sha");
+const expectedReleaseSha = fullSha(args.get("image-release-sha") || args.get("expected-release-sha") || process.env.ROTATION_RELEASE_GIT_SHA || "", "image-release-sha");
 const rotationId = safeIdentifier(args.get("rotation-id") || process.env.ROTATION_ID || "", "rotation-id");
 const invocationRef = safeIdentifier(args.get("invocation-ref") || process.env.ROTATION_RUNTIME_INVOCATION_REF || "", "invocation-ref");
 const credentialSource = required("credential-source");

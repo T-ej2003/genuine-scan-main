@@ -5,10 +5,10 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { assertStageAPlan, buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifactsBucketPolicyPredecessor, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservationPredecessor, buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection, createTerraformStageAAdapter, runStageAControlPlane, STAGE_A_CHECKER_POLICY, STAGE_A_CHECKER_PUBLICATION_POLICY, STAGE_A_CHECKER_ROLE_TRUST, STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY } from "../aws/production-stage-a-control-plane.mjs";
-import { describeStageAIngress } from "../aws/production-cutover-production-adapters.mjs";
-import { assertTransitionMatrix, buildTransitionMatrix, PRODUCTION_CUTOVER_MODE, runGovernedOverlapDeployment, runProductionCutoverControlPlane } from "../aws/production-cutover-control-plane.mjs";
+import { createProductionOverlapDeploymentAdapter, describeStageAIngress, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "../aws/production-cutover-production-adapters.mjs";
+import { assertTransitionMatrix, buildTransitionMatrix, PRODUCTION_CUTOVER_MODE, runGovernedOverlapDeployment, runProductionCutoverControlPlane, runProductionCutoverOverlapControlPlane } from "../aws/production-cutover-control-plane.mjs";
 import { persistOverlapReadinessEvidence } from "../aws/produce-production-overlap-readiness-evidence.mjs";
-import { readAndAssertReadyForOverlapDeployment } from "../aws/production-overlap-readiness-contract.mjs";
+import { readAndAssertReadyForOverlapDeployment, rotationExpectedImageReleaseSha } from "../aws/production-overlap-readiness-contract.mjs";
 import { ECS_EXEC_OPERATOR_REQUIRED, ECS_EXEC_OPERATOR_FORBIDDEN, buildEcsExecOperatorEvidence, ECS_EXEC_OPERATOR_ROLE_ARN } from "../aws/production-ecs-exec-operator-contract.mjs";
 import { buildOnboardingEvidenceFingerprint, runStrictOnboardingProbes, STRICT_ONBOARDING_CHECKS } from "../security/production-strict-onboarding.mjs";
 import { ROTATION_INVENTORY_CATEGORIES } from "../security/production-runtime-rotation-inventory.mjs";
@@ -127,6 +127,7 @@ export function fixtureInput(overrides = {}) {
   const mutations = [];
   let registeredOverlapDefinition;
   const imageAuthorizationFixture = makeCanonicalImageAuthorization({ sourceSha });
+  const imageReleaseSha = imageAuthorizationFixture.authorization.imageReleaseSha;
   const rootDropContinuity = {
     rotationId,
     imageAuthorizationSha256: imageAuthorizationFixture.authorization.authorizationSha256,
@@ -165,7 +166,7 @@ export function fixtureInput(overrides = {}) {
     stageA,
     artifactSigning: artifactFixture(),
     overlapTask: {
-      input: { backendImage: imageDigest, releaseSha: sourceSha, backendLogGroup: "/aws/ecs/rehearsal", secretBindings: { ...secretBindings, ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls_read" } },
+      input: { backendImage: imageDigest, imageReleaseSha, backendLogGroup: "/aws/ecs/rehearsal", secretBindings: { ...secretBindings, ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls_read" } },
       register: async ({ taskDefinition, tags }) => {
         mutations.push("M4_REGISTER_TASK_DEFINITION");
         registeredOverlapDefinition = structuredClone(taskDefinition);
@@ -653,6 +654,13 @@ test("prepare-overlap persists and authenticates readiness without reaching depl
   input.onboarding.run = async () => { throw new Error("prepare-overlap reached onboarding"); };
 
   const result = await runProductionCutoverControlPlane(input);
+  const authenticated = readAndAssertReadyForOverlapDeployment({ filePath: readinessFile, evidenceSha256: result.readinessSha256, sourceSha, rotationId, rotationStateSha256 });
+  assert.notEqual(sourceSha, input.imageAuthorization.imageReleaseSha);
+  assert.equal(rotationExpectedImageReleaseSha(authenticated.evidence), input.imageAuthorization.imageReleaseSha);
+  assert.equal(authenticated.evidence.overlapTaskDefinition.identityBindings.imageReleaseSha, input.imageAuthorization.imageReleaseSha);
+  const substituted = structuredClone(authenticated.evidence);
+  substituted.imageAuthorization.identityBindings.imageReleaseSha = sourceSha;
+  assert.throws(() => rotationExpectedImageReleaseSha(substituted), /authenticated readiness/);
   assert.equal(result.readyForOverlapDeployment, true);
   assert.equal(result.readinessFile, readinessFile);
   assert.match(result.readinessSha256, /^[a-f0-9]{64}$/);
@@ -666,6 +674,33 @@ test("prepare-overlap persists and authenticates readiness without reaching depl
   const resumed = await runGovernedOverlapDeployment({ readiness: result.readiness, sourceSha, rotationId, rotationStateSha256, taskDefinitionArn, readinessSha256: result.readinessSha256, deployOverlap: { run: async () => { overlapCalls += 1; return { updateServiceCount: 1, propagateTags: "TASK_DEFINITION", taskDefinitionArn }; } } });
   assert.equal(resumed.updateServiceCount, 1);
   assert.equal(overlapCalls, 1);
+
+  for (const transitionMode of ["rotation-overlap", "rotation-cleanup"]) {
+    let deploymentEnvironment;
+    const deployOverlap = createProductionOverlapDeploymentAdapter({
+      credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE,
+      profile: "mscqr-production-release-deployer",
+      run: () => JSON.stringify({ Account: "368992683803", Arn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/rehearsal" }),
+      readinessFile, readinessSha256: result.readinessSha256, sourceSha, rotationId,
+      imageDigest: digest, expectedGitSha: rotationExpectedImageReleaseSha(authenticated.evidence),
+      runScript: (_script, _args, options) => {
+        deploymentEnvironment = options.env;
+        writeFileSync(options.env.METADATA_FILE, JSON.stringify({ newTaskDefinitionArn: taskDefinitionArn }));
+      },
+    });
+    const receiptSha256 = "f".repeat(64);
+    const deployed = await runProductionCutoverOverlapControlPlane({
+      readiness: authenticated.evidence, sourceSha, rotationId, rotationStateSha256, taskDefinitionArn,
+      readinessSha256: result.readinessSha256, deployOverlap, transitionMode,
+      ...(transitionMode === "rotation-overlap" ? { deploymentReceipt: {
+        persist: async () => ({ receiptSha256 }),
+        authenticate: async () => ({ terminalState: "DEPLOYED_PENDING_VERIFICATION", receiptSha256 }),
+      } } : {}),
+    });
+    assert.equal(deploymentEnvironment.EXPECTED_GIT_SHA, input.imageAuthorization.imageReleaseSha);
+    assert.equal(deploymentEnvironment.DEPLOYMENT_SOURCE_SHA, sourceSha);
+    assert.equal(deployed.deployment.taskDefinitionArn, taskDefinitionArn);
+  }
 });
 
 test("prepare-overlap requires authenticated persistence and is not deployment authorization", async () => {
@@ -702,6 +737,7 @@ test("the real predeployment adapter feeds the same cutover spine before deploym
   let registeredDefinition;
   const preAdapter = createProductionPreDeploymentInventoryAdapter({
     sourceSha,
+    imageReleaseSha: input.imageAuthorization.imageReleaseSha,
     imageDigest: imageDigest,
     config: { inventoryApprovalId: stageBApprovalIdForReleaseSha(sourceSha), rotationInventoryRlsRole: "mscqr_prod_rls_read", inventoryLogGroupName: "/ecs/mscqr-production/rls-green-backend", overlapTaskInput: { backendLogGroup: "/ecs/mscqr-production/rls-green-backend", secretBindings: { ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls_read" } } },
     run: (args) => {
@@ -821,7 +857,7 @@ test("bootstrap ARNs replace stale overlap bindings on the real control-plane pa
   const registeredSecrets = Object.fromEntries(registeredPayload.taskDefinition.containerDefinitions.find(({ name }) => name === "backend").secrets.map(({ name, valueFrom }) => [name, valueFrom]));
   for (const name of Object.keys(runtimeBindings)) assert.equal(registeredSecrets[name], runtimeBindings[name]);
   assert.equal(registeredPayload.taskDefinition.containerDefinitions.find(({ name }) => name === "backend").image, imageDigest);
-  assert.equal(registeredPayload.taskDefinition.containerDefinitions.find(({ name }) => name === "backend").environment.find(({ name }) => name === "RELEASE_GIT_SHA").value, sourceSha);
+  assert.equal(registeredPayload.taskDefinition.containerDefinitions.find(({ name }) => name === "backend").environment.find(({ name }) => name === "RELEASE_GIT_SHA").value, input.imageAuthorization.imageReleaseSha);
   assert.equal(result.results.overlapTaskDefinition.valid, true);
 });
 
@@ -909,20 +945,21 @@ test("transition matrix rejects field, SHA, identity, and ARN handoff corruption
 test("strict onboarding has no skip path", async () => {
   const probes = Object.fromEntries(STRICT_ONBOARDING_CHECKS.map((name) => [name, async () => true]));
   delete probes.rbac;
-  await assert.rejects(() => runStrictOnboardingProbes({ probes, expected: { sourceSha, imageDigest: digest, taskDefinitionArn, taskArn, rotationId, rotationStateSha256 } }), /unavailable/);
+  await assert.rejects(() => runStrictOnboardingProbes({ probes, expected: { sourceSha, imageReleaseSha: fixtureInput().imageAuthorization.imageReleaseSha, imageDigest: digest, taskDefinitionArn, taskArn, rotationId, rotationStateSha256 } }), /unavailable/);
 });
 
 test("onboarding evidence fingerprint contains only non-secret metadata", async () => {
   const probes = Object.fromEntries(STRICT_ONBOARDING_CHECKS.map((name) => [name, async () => true]));
-  const evidence = await runStrictOnboardingProbes({ probes, expected: { sourceSha, imageDigest: digest, taskDefinitionArn, taskArn, rotationId, rotationStateSha256 } });
+  const evidence = await runStrictOnboardingProbes({ probes, expected: { sourceSha, imageReleaseSha: fixtureInput().imageAuthorization.imageReleaseSha, imageDigest: digest, taskDefinitionArn, taskArn, rotationId, rotationStateSha256 } });
   const fingerprint = buildOnboardingEvidenceFingerprint(evidence);
-  assert.deepEqual(Object.keys(fingerprint).sort(), ["checks", "imageDigest", "rotationId", "rotationStateSha256", "rotationPhase", "sourceSha", "taskArn", "taskDefinitionArn"].sort());
+  assert.deepEqual(Object.keys(fingerprint).sort(), ["checks", "imageDigest", "imageReleaseSha", "rotationId", "rotationStateSha256", "rotationPhase", "sourceSha", "taskArn", "taskDefinitionArn"].sort());
   assert.doesNotMatch(JSON.stringify(fingerprint), /password|database_url|private.?key|secret|bearer|qr.?payload/i);
 });
 
 const failCases = [
   ["wrong-protected-main-sha", (i) => { i.imageAuthorization.sourceSha = "f".repeat(40); }],
   ["wrong-image-sha", (i) => { i.imageAuthorization.sourceSha = "f".repeat(40); }],
+  ["overlap-image-source-substitution", (i) => { i.overlapTask.input.imageReleaseSha = "f".repeat(40); }],
   ["wrong-image-digest", (i) => { i.imageAuthorization.backendDigest = `sha256:${"e".repeat(64)}`; }],
   ["invalid-signature", (i) => { i.imageAuthorization.signatureVerified = false; }],
   ["invalid-attestation", (i) => { i.imageAuthorization.attestationVerified = false; }],
@@ -999,7 +1036,7 @@ test("every cutover failure injection fails closed", async () => {
     }
   }
   assert.equal(unexpectedPasses, 0);
-  assert.equal(failCases.length, 54);
+  assert.equal(failCases.length, 55);
   assert.equal(failureResults.length, failCases.length);
   assert.equal(failureResults.filter(({ result }) => result !== "EXPECTED_FAILURE").length, 0);
 });

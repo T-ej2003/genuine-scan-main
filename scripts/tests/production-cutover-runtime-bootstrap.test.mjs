@@ -421,7 +421,7 @@ test("production composition passes resolved AWS output to the predeployment inv
     const prepared = prepareProductionCutoverRuntime(input);
     const definition = buildPreDeploymentInventoryTaskDefinition({
       backendImage: prepared.config.overlapTaskInput.backendImage,
-      releaseSha: sourceSha,
+      releaseSha: prepared.config.imageReleaseSha,
       databaseUrl: prepared.config.inventoryDatabaseSecretArn || prepared.config.overlapTaskInput.databaseUrlSecretArn,
       rotationInventoryRlsRole: prepared.config.rotationInventoryRlsRole || prepared.config.overlapTaskInput.secretBindings.ROTATION_INVENTORY_RLS_ROLE,
       inventoryLogGroup: prepared.config.inventoryLogGroupName || prepared.config.overlapTaskInput.backendLogGroup,
@@ -542,6 +542,9 @@ test("generated cutover command binds runtime config and image authorization byt
   const directory = fsTemp();
   try {
     const result = prepareProductionCutoverRuntime(fullInput(directory, process.cwd()));
+    const rotationConfig = JSON.parse(readFileSync(result.config.rotationConfigFile, "utf8"));
+    assert.equal(rotationConfig.schemaVersion, 2);
+    assert.equal(rotationConfig.imageReleaseSha, result.config.imageReleaseSha);
     assert.throws(() => createProductionCutoverAdapters({ config: result.config, sourceSha, rotationId: result.config.rotationId }), /Hash-authenticated/);
     assert.match(result.nextCommand, /^npm run stage-b:run-cutover-operator -- --mode prepare-overlap --config /);
     assert.match(result.nextCommand, new RegExp(`--config-sha256 ${result.runtimeConfigSha256}`));
@@ -551,6 +554,20 @@ test("generated cutover command binds runtime config and image authorization byt
     writeFileSync(result.configPath, `${readFileSync(result.configPath, "utf8")} `, { mode: 0o600 });
     assert.throws(run, /Production cutover runtime config changed after runtime preparation/);
 
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("runner-local runtime config is not overwritten on regeneration", () => {
+  const directory = fsTemp();
+  try {
+    const input = fullInput(directory, process.cwd());
+    const prepared = prepareProductionCutoverRuntime(input);
+    const legacy = { ...prepared.config, overlapTaskInput: { ...prepared.config.overlapTaskInput, imageReleaseSha: prepared.config.sourceSha } };
+    delete legacy.imageReleaseSha;
+    writeFileSync(prepared.configPath, JSON.stringify(legacy), { mode: 0o600 });
+    assert.throws(() => prepareProductionCutoverRuntime(input), /rotationConfigFile must not exist before its producer phase/);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -819,7 +836,7 @@ test("overlap task rejects legacy/ECS reference confusion and double JSON-key su
   };
   const input = {
     backendImage: image,
-    releaseSha: sourceSha,
+    imageReleaseSha: sourceSha,
     backendLogGroup: "/ecs/mscqr-production/rls-green-backend",
     secretBindings,
   };

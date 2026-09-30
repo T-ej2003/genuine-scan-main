@@ -65,10 +65,11 @@ export function deriveNormalBackendCandidate({ state, stateBytes = Buffer.from(J
   const digest = /@(sha256:[a-f0-9]{64})$/.exec(image || "")?.[1];
   if (!digest || digest !== authorizedBackendDigest(imageAuthorization) || state.outputs?.bound_images?.value?.backend !== image) throw new Error("Stage-B backend candidate image is not bound to the current image authorization and state output.");
   const environment = new Map((selected[0].environment || []).map(({ name, value }) => [name, value]));
-  if (environment.get("RELEASE_GIT_SHA") !== sourceSha || (environment.has("GIT_SHA") && environment.get("GIT_SHA") !== sourceSha)) throw new Error("Stage-B backend candidate source metadata is stale or mismatched.");
+  const imageReleaseSha = imageAuthorization.imageReleaseSha;
+  if (environment.get("RELEASE_GIT_SHA") !== imageReleaseSha || (environment.has("GIT_SHA") && environment.get("GIT_SHA") !== imageReleaseSha)) throw new Error("Stage-B backend candidate image provenance metadata is stale or mismatched.");
   const tags = attributes.tags_all || attributes.tags || {};
   if (tags.Environment !== "production" || tags.ManagedBy !== "Terraform" || tags.Component !== "full-rls-green-stage-b" || tags.MSCQRExecTarget !== "production-backend") throw new Error("Stage-B backend candidate tags are outside the reviewed contract.");
-  return Object.freeze({ sourceSha, stateLineage: state.lineage, stateSerial: state.serial, stateSha256: sha256(stateBytes), targetArn, family: NORMAL_ACTIVATION.family, image, digest });
+  return Object.freeze({ sourceSha, imageReleaseSha, stateLineage: state.lineage, stateSerial: state.serial, stateSha256: sha256(stateBytes), targetArn, family: NORMAL_ACTIVATION.family, image, digest });
 }
 
 const parseJson = (run, args) => JSON.parse(run([...args, "--output", "json", "--no-cli-pager"]));
@@ -103,7 +104,8 @@ export function assertProductionRlsReleaseReceipt(receipt, { sourceSha, imageDig
 }
 
 export function assertNormalBackendActivationEvidence(value, { sourceSha, stageBAuthorization } = {}) {
-  if (value?.schemaVersion !== 1 || value.operation !== "PRODUCTION_NORMAL_BACKEND_ACTIVATION" || value.sourceSha !== sourceSha || value.stageBAuthorizationSha256 !== stageBAuthorization?.authorizationSha256 || !WORKFLOW_RUN_ID.test(String(value.workflowRunId || "")) || !WORKFLOW_RUN_ID.test(String(value.releaseTrainRunId || "")) || value.clusterArn !== NORMAL_ACTIVATION.clusterArn || value.serviceArn !== NORMAL_ACTIVATION.serviceArn || value.targetArn !== value.newTaskDefinitionArn || value.targetArn !== value.observedTaskDefinitionArn || !NORMAL_CANDIDATE_ARN.test(value.targetArn || "") || !TASK_ARN.test(value.sourceArn || "") || !BACKEND_IMAGE.test(value.imageRef || "") || value.imageDigest !== BACKEND_IMAGE.exec(value.imageRef)?.[1] || value.serviceStable !== true || value.desiredCount !== 2 || value.runningCount !== 2 || value.pendingCount !== 0) throw new Error("Normal backend activation evidence is invalid or not the completed coordinated release.");
+  const historicalFields = ["schemaVersion", "operation", "sourceSha", "stageBAuthorizationSha256", "workflowRunId", "releaseTrainRunId", "sourceArn", "targetArn", "normalActivationSourceArn", "previousTaskDefinitionArn", "targetTaskDefinitionArn", "newTaskDefinitionArn", "observedTaskDefinitionArn", "imageRef", "imageDigest", "clusterArn", "serviceArn", "serviceStable", "desiredCount", "runningCount", "pendingCount"];
+  if (![1, 2].includes(value?.schemaVersion) || Object.keys(value).sort().join(",") !== [...historicalFields, ...(value.schemaVersion === 2 ? ["imageReleaseSha"] : [])].sort().join(",") || (value.schemaVersion === 1 ? sourceSha !== stageBAuthorization?.imageReleaseSha : value.imageReleaseSha !== stageBAuthorization?.imageReleaseSha) || value.operation !== "PRODUCTION_NORMAL_BACKEND_ACTIVATION" || value.sourceSha !== sourceSha || value.stageBAuthorizationSha256 !== stageBAuthorization?.authorizationSha256 || !WORKFLOW_RUN_ID.test(String(value.workflowRunId || "")) || !WORKFLOW_RUN_ID.test(String(value.releaseTrainRunId || "")) || value.clusterArn !== NORMAL_ACTIVATION.clusterArn || value.serviceArn !== NORMAL_ACTIVATION.serviceArn || value.sourceArn !== value.normalActivationSourceArn || value.sourceArn !== value.previousTaskDefinitionArn || value.targetArn !== value.targetTaskDefinitionArn || value.targetArn !== value.newTaskDefinitionArn || value.targetArn !== value.observedTaskDefinitionArn || !NORMAL_CANDIDATE_ARN.test(value.targetArn || "") || !TASK_ARN.test(value.sourceArn || "") || !BACKEND_IMAGE.test(value.imageRef || "") || value.imageDigest !== BACKEND_IMAGE.exec(value.imageRef)?.[1] || value.imageDigest !== authorizedBackendDigest(stageBAuthorization) || value.serviceStable !== true || value.desiredCount !== 2 || value.runningCount !== 2 || value.pendingCount !== 0) throw new Error("Normal backend activation evidence is invalid or not the completed coordinated release.");
   return true;
 }
 
@@ -247,7 +249,7 @@ function publishNormalActivationPolicy({ run, before, expected, assertAfter, pro
   return { after, ambiguousMutationError };
 }
 
-function readNormalActivationStateTarget(run, sourceSha) {
+function readNormalActivationStateTarget(run, imageReleaseSha) {
   const liveState = readLiveState(run);
   const state = liveState.state;
   const attributes = backendResource(state);
@@ -256,7 +258,7 @@ function readNormalActivationStateTarget(run, sourceSha) {
   const backend = containers?.filter(({ name }) => name === NORMAL_ACTIVATION.container) || [];
   const releaseSha = new Map((backend[0]?.environment || []).map(({ name, value }) => [name, value])).get("RELEASE_GIT_SHA");
   const imageMatch = backend.length === 1 ? BACKEND_IMAGE.exec(backend[0].image || "") : null;
-  if (state.lineage !== NORMAL_ACTIVATION.lineage || !Number.isInteger(state.serial) || state.serial < NORMAL_ACTIVATION.minimumSerial || state.outputs?.task_definition_arns?.value?.backend !== targetArn || state.outputs?.bound_images?.value?.backend !== backend[0]?.image || releaseSha !== sourceSha || !NORMAL_CANDIDATE_ARN.test(targetArn || "") || !imageMatch) throw new Error("Normal activation IAM convergence requires the current-source authenticated Stage-B candidate state.");
+  if (state.lineage !== NORMAL_ACTIVATION.lineage || !Number.isInteger(state.serial) || state.serial < NORMAL_ACTIVATION.minimumSerial || state.outputs?.task_definition_arns?.value?.backend !== targetArn || state.outputs?.bound_images?.value?.backend !== backend[0]?.image || releaseSha !== imageReleaseSha || !NORMAL_CANDIDATE_ARN.test(targetArn || "") || !imageMatch) throw new Error("Normal activation IAM convergence requires the authenticated Stage-B image provenance in candidate state.");
   return { liveState, state, targetArn, targetDigest: imageMatch[1] };
 }
 
@@ -276,13 +278,13 @@ function normalActivationDeniedTargets(sourceArn, targetArn) {
   return [...new Set([...candidates, ...legacy])].filter((arn) => arn !== sourceArn && arn !== targetArn);
 }
 
-export function convergeNormalActivationPolicy({ run, sourceSha } = {}) {
+export function convergeNormalActivationPolicy({ run, sourceSha, imageReleaseSha } = {}) {
   const progress = { mutationAttempted: false, readbackVerified: false, confirmedIamWrites: 0 };
   try {
-    if (typeof run !== "function" || !SHA.test(sourceSha || "")) throw new Error("Governed normal activation convergence inputs are invalid.");
+    if (typeof run !== "function" || !SHA.test(sourceSha || "") || !SHA.test(imageReleaseSha || "")) throw new Error("Governed normal activation convergence inputs are invalid.");
     const caller = parseJson(run, ["sts", "get-caller-identity"]);
     if (caller.Account !== NORMAL_ACTIVATION.account || caller.Arn !== NORMAL_ACTIVATION.administratorArn) throw new Error("Normal activation IAM convergence requires the governed root administrator identity.");
-    const { liveState, state, targetArn } = readNormalActivationStateTarget(run, sourceSha);
+    const { liveState, state, targetArn } = readNormalActivationStateTarget(run, imageReleaseSha);
     const { service, sourceArn, source, alreadyAtTarget } = readNormalActivationServiceSource(run, targetArn);
     const expected = buildNormalActivationTransactionPolicy({ sourceArn, targetArn });
     const before = readLivePolicy(run);
@@ -291,20 +293,20 @@ export function convergeNormalActivationPolicy({ run, sourceSha } = {}) {
     const { after, ambiguousMutationError } = publication;
     for (const allowedTargetArn of new Set([sourceArn, targetArn])) if (simulateNormalActivationTarget(run, allowedTargetArn) !== "allowed") throw new Error("Exact normal activation SOURCE or TARGET revision is not authorized after IAM convergence.");
     for (const deniedTargetArn of normalActivationDeniedTargets(sourceArn, targetArn)) if (simulateNormalActivationTarget(run, deniedTargetArn) !== "implicitDeny") throw new Error("Unrelated normal or recovery task-definition revision is unexpectedly authorized during normal activation.");
-    return Object.freeze({ status: progress.mutationAttempted ? ambiguousMutationError ? "RECONCILED_AFTER_AMBIGUOUS_WRITE" : "CONVERGED" : "ALREADY_CONVERGED", sourceSha, sourceArn, sourceClass: source.sourceClass, sourceDigest: source.sourceDigest, targetArn, desiredCount: service.desiredCount, alreadyAtTarget, stateLineage: state.lineage, stateSerial: state.serial, stateSha256: sha256(liveState.bytes), policyVersionId: after.defaultVersionId, iamWrites: progress.confirmedIamWrites, mutationAttempted: progress.mutationAttempted, mutationOutcome: ambiguousMutationError ? "CONFIRMED_SUCCESS_READBACK" : progress.mutationAttempted ? "CONFIRMED_SUCCESS" : "NO_MUTATION", readbackVerified: progress.readbackVerified, validationComplete: true, unknownMutations: 0 });
+    return Object.freeze({ status: progress.mutationAttempted ? ambiguousMutationError ? "RECONCILED_AFTER_AMBIGUOUS_WRITE" : "CONVERGED" : "ALREADY_CONVERGED", sourceSha, imageReleaseSha, sourceArn, sourceClass: source.sourceClass, sourceDigest: source.sourceDigest, targetArn, desiredCount: service.desiredCount, alreadyAtTarget, stateLineage: state.lineage, stateSerial: state.serial, stateSha256: sha256(liveState.bytes), policyVersionId: after.defaultVersionId, iamWrites: progress.confirmedIamWrites, mutationAttempted: progress.mutationAttempted, mutationOutcome: ambiguousMutationError ? "CONFIRMED_SUCCESS_READBACK" : progress.mutationAttempted ? "CONFIRMED_SUCCESS" : "NO_MUTATION", readbackVerified: progress.readbackVerified, validationComplete: true, unknownMutations: 0 });
   } catch (error) {
     if (error instanceof NormalActivationPolicyConvergenceError) throw error;
     throw convergenceFailure(progress, error);
   }
 }
 
-export function contractNormalActivationPolicy({ run, sourceSha, sourceArn } = {}) {
+export function contractNormalActivationPolicy({ run, sourceSha, imageReleaseSha, sourceArn } = {}) {
   const progress = { mutationAttempted: false, readbackVerified: false, confirmedIamWrites: 0 };
   try {
-    if (typeof run !== "function" || !SHA.test(sourceSha || "") || !sourceArn) throw new Error("Governed normal activation contraction inputs are invalid.");
+    if (typeof run !== "function" || !SHA.test(sourceSha || "") || !SHA.test(imageReleaseSha || "") || !sourceArn) throw new Error("Governed normal activation contraction inputs are invalid.");
     const caller = parseJson(run, ["sts", "get-caller-identity"]);
     if (caller.Account !== NORMAL_ACTIVATION.account || caller.Arn !== NORMAL_ACTIVATION.administratorArn) throw new Error("Normal activation IAM contraction requires the governed root administrator identity.");
-    const { state, targetArn, targetDigest } = readNormalActivationStateTarget(run, sourceSha);
+    const { state, targetArn, targetDigest } = readNormalActivationStateTarget(run, imageReleaseSha);
     classifyNormalActivationSource(sourceArn);
     const service = parseJson(run, ["ecs", "describe-services", "--cluster", NORMAL_ACTIVATION.cluster, "--services", NORMAL_ACTIVATION.service]).services?.[0];
     assertService(service, targetArn);
@@ -317,7 +319,7 @@ export function contractNormalActivationPolicy({ run, sourceSha, sourceArn } = {
     const publication = publishNormalActivationPolicy({ run, before, expected, assertAfter: (document) => assertNormalActivationPolicy(document, targetArn), progress });
     const { after, ambiguousMutationError } = publication;
     if (simulateNormalActivationTarget(run, targetArn) !== "allowed") throw new Error("Exact steady-state TARGET is not authorized after contraction.");
-    return Object.freeze({ status: progress.mutationAttempted ? ambiguousMutationError ? "CONTRACTION_RECONCILED_AFTER_AMBIGUOUS_WRITE" : "CONTRACTED" : "ALREADY_CONTRACTED", sourceSha, sourceArn, targetArn, initialState, stateLineage: state.lineage, stateSerial: state.serial, policyVersionId: after.defaultVersionId, iamWrites: progress.confirmedIamWrites, readbackVerified: progress.readbackVerified, unknownMutations: 0 });
+    return Object.freeze({ status: progress.mutationAttempted ? ambiguousMutationError ? "CONTRACTION_RECONCILED_AFTER_AMBIGUOUS_WRITE" : "CONTRACTED" : "ALREADY_CONTRACTED", sourceSha, imageReleaseSha, sourceArn, targetArn, initialState, stateLineage: state.lineage, stateSerial: state.serial, policyVersionId: after.defaultVersionId, iamWrites: progress.confirmedIamWrites, readbackVerified: progress.readbackVerified, unknownMutations: 0 });
   } catch (error) {
     if (error instanceof NormalActivationPolicyConvergenceError) throw error;
     throw convergenceFailure(progress, error);
@@ -362,7 +364,8 @@ export function executeNormalBackendActivation({ run, runScript = execFileSync, 
       EXPECTED_CURRENT_TASK_DEFINITION_ARN: binding.expectedCurrentTaskDefinitionArn,
       EXPECTED_FAMILY: NORMAL_ACTIVATION.family,
       EXPECTED_IMAGE_DIGEST: binding.digest,
-      EXPECTED_GIT_SHA: sourceSha,
+      EXPECTED_GIT_SHA: binding.imageReleaseSha,
+      DEPLOYMENT_SOURCE_SHA: sourceSha,
       VERSION_URL: "https://www.mscqr.com/api/health",
       WAIT_FOR_STABLE: "true",
       ENABLE_EXECUTE_COMMAND: "true",
@@ -375,7 +378,7 @@ export function executeNormalBackendActivation({ run, runScript = execFileSync, 
       NORMAL_ACTIVATION_OUTCOME_FILE: outcomeFile,
     } });
     const metadata = JSON.parse(fs.readFileSync(metadataFile, "utf8"));
-    fs.writeFileSync(metadataFile, `${JSON.stringify({ schemaVersion: 1, operation: "PRODUCTION_NORMAL_BACKEND_ACTIVATION", sourceSha, stageBAuthorizationSha256: imageAuthorization.authorizationSha256, workflowRunId: runIdentity.workflowRunId, releaseTrainRunId: runIdentity.releaseTrainRunId, sourceArn: binding.sourceArn, targetArn: binding.targetArn, normalActivationSourceArn: binding.sourceArn, previousTaskDefinitionArn: binding.sourceArn, targetTaskDefinitionArn: binding.targetArn, newTaskDefinitionArn: metadata.newTaskDefinitionArn, observedTaskDefinitionArn: metadata.newTaskDefinitionArn, imageRef: binding.image, imageDigest: binding.digest, clusterArn: NORMAL_ACTIVATION.clusterArn, serviceArn: NORMAL_ACTIVATION.serviceArn, serviceStable: true, desiredCount: binding.desiredCount, runningCount: binding.desiredCount, pendingCount: 0 }, null, 2)}\n`, { mode: 0o600 });
+    fs.writeFileSync(metadataFile, `${JSON.stringify({ schemaVersion: 2, operation: "PRODUCTION_NORMAL_BACKEND_ACTIVATION", sourceSha, imageReleaseSha: binding.imageReleaseSha, stageBAuthorizationSha256: imageAuthorization.authorizationSha256, workflowRunId: runIdentity.workflowRunId, releaseTrainRunId: runIdentity.releaseTrainRunId, sourceArn: binding.sourceArn, targetArn: binding.targetArn, normalActivationSourceArn: binding.sourceArn, previousTaskDefinitionArn: binding.sourceArn, targetTaskDefinitionArn: binding.targetArn, newTaskDefinitionArn: metadata.newTaskDefinitionArn, observedTaskDefinitionArn: metadata.newTaskDefinitionArn, imageRef: binding.image, imageDigest: binding.digest, clusterArn: NORMAL_ACTIVATION.clusterArn, serviceArn: NORMAL_ACTIVATION.serviceArn, serviceStable: true, desiredCount: binding.desiredCount, runningCount: binding.desiredCount, pendingCount: 0 }, null, 2)}\n`, { mode: 0o600 });
     return Object.freeze({ status: binding.sourceArn === binding.targetArn ? "ALREADY_APPLIED_EXACT_TARGET" : "APPLIED_EXACT_TARGET", sourceArn: binding.sourceArn, targetArn: binding.targetArn, postSuccessAuthorityContractionRequired: true, exactNextAction: `RUN_GOVERNED_ADMIN_CONTRACTION_FOR_${binding.targetArn}` });
   } catch (error) {
     const outcome = classifyNormalActivationLiveOutcome({ run, binding });
@@ -408,14 +411,14 @@ export function runCli(argv = process.argv.slice(2)) {
   if (mode === "converge-policy") {
     const checkout = readStageBProtectedMainCheckout({ cwd: process.cwd() });
     if (checkout.currentHead !== sourceSha) throw new Error("Normal activation convergence must run from exact protected main.");
-    const result = convergeNormalActivationPolicy({ run: createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: required(values, "--admin-profile") }), sourceSha });
+    const result = convergeNormalActivationPolicy({ run: createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: required(values, "--admin-profile") }), sourceSha, imageReleaseSha: required(values, "--image-release-sha") });
     process.stdout.write(`${JSON.stringify(result)}\n`);
     return result;
   }
   if (mode === "contract-policy") {
     const checkout = readStageBProtectedMainCheckout({ cwd: process.cwd() });
     if (checkout.currentHead !== sourceSha) throw new Error("Normal activation contraction must run from exact protected main.");
-    const result = contractNormalActivationPolicy({ run: createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: required(values, "--admin-profile") }), sourceSha, sourceArn: required(values, "--source-task-definition") });
+    const result = contractNormalActivationPolicy({ run: createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: required(values, "--admin-profile") }), sourceSha, imageReleaseSha: required(values, "--image-release-sha"), sourceArn: required(values, "--source-task-definition") });
     process.stdout.write(`${JSON.stringify(result)}\n`);
     return result;
   }

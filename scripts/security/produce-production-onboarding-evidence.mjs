@@ -4,11 +4,11 @@ import { assertNoOnboardingEvidenceLeak } from "./production-strict-onboarding.m
 
 // The probe adapter is the production smoke caller; strict mode rejects every
 // skipped mandatory assertion rather than interpreting absence as success.
-export async function produceOnboardingEvidence({ runStrictProbes, expectedSourceSha, expectedImageDigest, expectedTaskDefinitionArn, expectedTaskArn, expectedRotationId, expectedRotationStateSha256, expectedRotationFixtureSha256 } = {}) {
+export async function produceOnboardingEvidence({ runStrictProbes, expectedSourceSha, expectedImageReleaseSha, expectedImageDigest, expectedTaskDefinitionArn, expectedTaskArn, expectedRotationId, expectedRotationStateSha256, expectedRotationFixtureSha256 } = {}) {
   if (typeof runStrictProbes !== "function") throw new Error("Strict onboarding probe adapter is required.");
-  const evidence = await runStrictProbes({ sourceSha: expectedSourceSha, imageDigest: expectedImageDigest, taskDefinitionArn: expectedTaskDefinitionArn, taskArn: expectedTaskArn, rotationId: expectedRotationId, rotationStateSha256: expectedRotationStateSha256, rotationFixtureSha256: expectedRotationFixtureSha256, strict: true });
+  const evidence = await runStrictProbes({ sourceSha: expectedSourceSha, imageReleaseSha: expectedImageReleaseSha, imageDigest: expectedImageDigest, taskDefinitionArn: expectedTaskDefinitionArn, taskArn: expectedTaskArn, rotationId: expectedRotationId, rotationStateSha256: expectedRotationStateSha256, rotationFixtureSha256: expectedRotationFixtureSha256, strict: true });
   assertNoOnboardingEvidenceLeak(evidence);
-  if (evidence?.sourceSha !== expectedSourceSha || evidence?.imageDigest !== expectedImageDigest
+  if (evidence?.sourceSha !== expectedSourceSha || evidence?.imageReleaseSha !== expectedImageReleaseSha || evidence?.imageDigest !== expectedImageDigest
     || evidence?.taskDefinitionArn !== expectedTaskDefinitionArn || evidence?.taskArn !== expectedTaskArn
     || evidence?.rotationId !== expectedRotationId || evidence?.rotationStateSha256 !== expectedRotationStateSha256) throw new Error("Strict onboarding evidence identity does not match the deployment.");
   validateOnboardingContract(evidence);

@@ -1,3 +1,4 @@
+import { rotationExpectedImageReleaseSha } from "./production-overlap-readiness-contract.mjs";
 import assert from "node:assert/strict";
 import { canonicalSha256 } from "./production-green-stage-b-contract.mjs";
 import { APP_ONLY, captureAppOnlyPredecessor, captureBackendServiceSnapshot } from "./production-app-only-contract.mjs";
@@ -11,6 +12,7 @@ export function authenticateRotationReconciliation({ readiness, current, readers
   assertRotationBackendTaskArn(expectedCurrentTaskDefinitionArn);
   assert.notEqual(expectedCurrentTaskDefinitionArn, taskDefinitionArn, "Rotation predecessor must differ from target.");
   if (bindings.imageDigest !== undefined) assert.equal(bindings.imageDigest, imageDigest, "Rotation digest differs from readiness.");
+  const imageReleaseSha = rotationExpectedImageReleaseSha(readiness);
   assert.equal(isProtectedMainAncestor(readiness.sourceSha), true, "Rotation source is not protected-main history.");
   const snapshot = readers.readLive();
   const containers = snapshot.definition.containerDefinitions.filter(({ name }) => name === APP_ONLY.container);
@@ -49,7 +51,7 @@ export function authenticateRotationReconciliation({ readiness, current, readers
   captureAppOnlyPredecessor(snapshot);
   assert.equal(snapshot.definition.tags?.filter(({ key, value }) => key === "MSCQRExecTarget" && value === "production-backend").length, 1, "Rotation execution-target marker mismatch.");
   for (const entry of containers[0].environment || []) {
-    if (["GIT_SHA", "RELEASE_GIT_SHA"].includes(entry.name)) assert.equal(entry.value, readiness.sourceSha, "Rotation runtime source mismatch.");
+    if (["GIT_SHA", "RELEASE_GIT_SHA"].includes(entry.name)) assert.equal(entry.value, imageReleaseSha, "Rotation runtime image provenance mismatch.");
   }
   assert.equal(snapshot.service.enableExecuteCommand, true, "Rotation ECS Exec setting mismatch.");
   assert.equal(snapshot.service.propagateTags, "TASK_DEFINITION", "Rotation task-tag propagation mismatch.");

@@ -73,7 +73,7 @@ const parseArgs = (argv) => {
   return { mode: modes[0], values };
 };
 
-const loadConfig = (file, expectedSha256) => {
+export const loadConfig = (file, expectedSha256) => {
   if (!/^[a-f0-9]{64}$/.test(expectedSha256 || "")) throw new Error("--config-sha256 must be an exact SHA-256");
   const bytes = readFileSync(file);
   if (sha256(bytes) !== expectedSha256) throw new Error("rotation config changed after approval");
@@ -84,6 +84,10 @@ const loadConfig = (file, expectedSha256) => {
   required(config.sourceSha, "config.sourceSha");
   if (!safeId(config.rotationId)) throw new Error("config.rotationId is invalid");
   if (!fullSha(config.sourceSha)) throw new Error("config.sourceSha must be a full SHA-1");
+  if (config.schemaVersion === undefined && !Object.hasOwn(config, "imageReleaseSha") && !Object.hasOwn(config.overlapTaskInput || {}, "imageReleaseSha")) config.imageReleaseSha = config.sourceSha;
+  else if (config.schemaVersion !== 2) throw new Error("rotation config schema is invalid");
+  required(config.imageReleaseSha, "config.imageReleaseSha");
+  if (!fullSha(config.imageReleaseSha)) throw new Error("config.imageReleaseSha must be a full SHA-1");
   assertLegacyProductionRotationGraceSeconds(config.minimumGraceSeconds, "config.minimumGraceSeconds");
   const ids = [
     config.jwt?.currentSecretId, config.jwt?.previousSecretId, config.jwt?.pendingSecretId,
@@ -362,7 +366,7 @@ const validateRuntimeProof = ({ file, proof: persistedProof, config, phase, expe
   if (!reference(proof.runtimeInvocationRef)) throw new Error(`${phase} runtime proof reference is invalid`);
   const observedAt = isoDate(proof.observedAt);
   if (observedAt === null || observedAt > clock()) throw new Error(`${phase} runtime proof timestamp is invalid`);
-  if (proof.serviceHealthy !== true || proof.healthHttpStatus !== 200 || proof.expectedReleaseGitSha !== config.sourceSha || proof.healthReleaseGitSha !== config.sourceSha) throw new Error(`${phase} runtime proof health is invalid`);
+  if (proof.serviceHealthy !== true || proof.healthHttpStatus !== 200 || proof.expectedReleaseGitSha !== config.imageReleaseSha || proof.healthReleaseGitSha !== config.imageReleaseSha) throw new Error(`${phase} runtime proof health is invalid`);
   const healthObservedAt = isoDate(proof.healthObservedAt);
   if (healthObservedAt === null || healthObservedAt > observedAt || observedAt - healthObservedAt > 300_000) throw new Error(`${phase} runtime proof health timestamp is invalid`);
   const requiredChecks = phase === "overlap"

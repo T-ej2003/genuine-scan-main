@@ -47,8 +47,8 @@ export function assertUniqueSecretBindingNames(definition) {
   return true;
 }
 
-export function buildOverlapTaskDefinition({ backendImage, releaseSha, backendLogGroup, secretBindings, postPrepare = false } = {}) {
-  if (!DIGEST.test(backendImage || "") || !SHA.test(releaseSha || "") || typeof backendLogGroup !== "string" || !backendLogGroup) throw new Error("Overlap task identity bindings are invalid.");
+export function buildOverlapTaskDefinition({ backendImage, imageReleaseSha, backendLogGroup, secretBindings, postPrepare = false } = {}) {
+  if (!DIGEST.test(backendImage || "") || !SHA.test(imageReleaseSha || "") || typeof backendLogGroup !== "string" || !backendLogGroup) throw new Error("Overlap task identity bindings are invalid.");
   if (!secretBindings || typeof secretBindings !== "object" || Array.isArray(secretBindings) || Object.keys(secretBindings).sort().join(",") !== [...REQUIRED_BINDINGS].sort().join(",")) throw new Error("Overlap task bindings are incomplete or contain an unreviewed target.");
   for (const name of REQUIRED_BINDINGS) {
     if (name === "ROTATION_INVENTORY_RLS_ROLE") { if (!/^[A-Za-z_][A-Za-z0-9_]{0,62}$/.test(secretBindings[name] || "")) throw new Error("Runtime inventory role binding is invalid."); }
@@ -57,7 +57,7 @@ export function buildOverlapTaskDefinition({ backendImage, releaseSha, backendLo
   }
   const definition = { ...replace(JSON.parse(fs.readFileSync(TEMPLATE_PATH, "utf8")), {
     BACKEND_IMAGE: backendImage,
-    RELEASE_SHA: releaseSha,
+    RELEASE_SHA: imageReleaseSha,
     BACKEND_LOG_GROUP: backendLogGroup,
     ...secretBindings,
   }), runtimePlatform: { ...STAGE_B.taskRuntimePlatform } };
@@ -67,7 +67,7 @@ export function buildOverlapTaskDefinition({ backendImage, releaseSha, backendLo
   assertFixedTaskDefinition(definition);
   const backend = definition.containerDefinitions?.find(({ name }) => name === "backend");
   if (!backend || definition.executionRoleArn !== "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution" || definition.taskRoleArn !== "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task"
-    || backend.image !== backendImage || backend.environment?.find(({ name }) => name === "RELEASE_GIT_SHA")?.value !== releaseSha
+    || backend.image !== backendImage || backend.environment?.find(({ name }) => name === "RELEASE_GIT_SHA")?.value !== imageReleaseSha
     || backend.environment?.find(({ name }) => name === "ROTATION_INVENTORY_APPROVED")?.value !== "true"
     || !/^[A-Za-z_][A-Za-z0-9_]{0,62}$/.test(backend.environment?.find(({ name }) => name === "ROTATION_INVENTORY_RLS_ROLE")?.value || "")
     || !["JWT_SECRET_CURRENT", "JWT_SECRET_PREVIOUS", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT", "QR_SIGN_ACTIVE_KEY_VERSION", "QR_SIGN_PUBLIC_KEY_PREVIOUS", "QR_SIGN_PREVIOUS_KEY_VERSION", "ARTIFACT_SIGN_PRIVATE_KEY_CURRENT", "ARTIFACT_SIGN_PUBLIC_KEY_CURRENT", "ARTIFACT_SIGN_ACTIVE_KEY_VERSION", "ARTIFACT_SIGN_PUBLIC_KEYS_JSON"].every((name) => backend.secrets?.some((secret) => secret.name === name && typeof secret.valueFrom === "string" && secret.valueFrom))) {

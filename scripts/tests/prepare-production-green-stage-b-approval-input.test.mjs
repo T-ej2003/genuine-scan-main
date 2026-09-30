@@ -15,6 +15,7 @@ import { assertStableBrokerAliasObservation, authenticateApprovalInputCheckerIde
 import { renderStageBTaskDefinition, stageBTemplateHashes } from "../aws/production-green-stage-b-task-definitions.mjs";
 
 const releaseSha = "8d7ecc53a0c8d0ec07dfce1aeb03dc22d0f43f82";
+const imageReleaseSha = "2004d1b936764ee0c4d5c92e509454cf85a5294b";
 const checkerIdentity = "arn:aws:sts::368992683803:assumed-role/mscqr-production-rls-independent-checker/checker-session";
 const deployerIdentity = "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/deployer-session";
 const digest = (character) => character.repeat(64);
@@ -25,12 +26,12 @@ const image = (repository, character) => ({ digest: `sha256:${character.repeat(6
 const tfvarsBytes = Buffer.from("canonical-tfvars\n");
 const report = { tfvarsSha256: sha256(tfvarsBytes), brokerPackageRawSha256: digest("e"), images: { backend: image("mscqr-backend", "b"), worker: image("mscqr-worker", "a"), executor: image("mscqr-backend", "e"), canary: image("mscqr-backend", "c") } };
 const bindingReportBytes = Buffer.from(`${JSON.stringify(report)}\n`);
-const authorization = { imageEvidenceSha256: digest("d"), authorizationSha256: digest("f"), imageReleaseSha: releaseSha, images: [{ service: "backend", digest: report.images.backend.digest }, { service: "worker", digest: report.images.worker.digest }, { service: "rls-executor", digest: report.images.executor.digest }, { service: "rls-canary", digest: report.images.canary.digest }] };
+const authorization = { imageEvidenceSha256: digest("d"), authorizationSha256: digest("f"), imageReleaseSha, images: [{ service: "backend", digest: report.images.backend.digest }, { service: "worker", digest: report.images.worker.digest }, { service: "rls-executor", digest: report.images.executor.digest }, { service: "rls-canary", digest: report.images.canary.digest }] };
 const brokerApprovalExpected = { releaseSha, sourceContractSha256: digest("a"), migrationSetDigest: digest("b"), packageChecksumSha256: digest("c"), deploymentId: "phase2", greenDatabaseName: "mscqr_production_rls_green_phase2", administratorIdentity: "mscqr_prod_admin", databaseSecurityGroupId: STAGE_B.databaseSecurityGroupId, executorSecurityGroupId: STAGE_B.executorSecurityGroupId };
 const brokerImages = { backendImageDigest: report.images.backend.imageReference, workerImageDigest: report.images.worker.imageReference, executorImageDigest: report.images.executor.imageReference, canaryImageDigest: report.images.canary.imageReference };
 const taskDefinitionReadbacks = Object.fromEntries(STAGE_B_MODES.map((mode) => {
   const kind = mode === "full-rls-application-canary" ? "canary" : "executor";
-  const definition = renderStageBTaskDefinition(kind, { imageReleaseSha: releaseSha, sourceContractSha256: brokerApprovalExpected.sourceContractSha256, migrationSetDigest: brokerApprovalExpected.migrationSetDigest, packageChecksumSha256: brokerApprovalExpected.packageChecksumSha256, receiptBucket: STAGE_B.receiptBucket, executorLogGroup: STAGE_B.executorLogGroupName, canaryLogGroup: STAGE_B.canaryLogGroupName, backendLogGroup: "/ecs/mscqr-production/rls-green-backend", workerLogGroup: "/ecs/mscqr-production/rls-green-worker", [`${kind}Image`]: kind === "canary" ? report.images.canary.imageReference : report.images.executor.imageReference, ...(kind === "executor" ? { mode } : {}) });
+  const definition = renderStageBTaskDefinition(kind, { imageReleaseSha, sourceContractSha256: brokerApprovalExpected.sourceContractSha256, migrationSetDigest: brokerApprovalExpected.migrationSetDigest, packageChecksumSha256: brokerApprovalExpected.packageChecksumSha256, receiptBucket: STAGE_B.receiptBucket, executorLogGroup: STAGE_B.executorLogGroupName, canaryLogGroup: STAGE_B.canaryLogGroupName, backendLogGroup: "/ecs/mscqr-production/rls-green-backend", workerLogGroup: "/ecs/mscqr-production/rls-green-worker", [`${kind}Image`]: kind === "canary" ? report.images.canary.imageReference : report.images.executor.imageReference, ...(kind === "executor" ? { mode } : {}) });
   return [mode, { taskDefinition: { ...definition, taskDefinitionArn: taskDefinitionArns[mode], revision: 4, status: "ACTIVE" } }];
 }));
 const awsNormalizedTaskDefinitionReadbacks = Object.fromEntries(Object.entries(taskDefinitionReadbacks).map(([mode, value]) => {
@@ -50,7 +51,7 @@ const awsNormalizedTaskDefinitionReadbacks = Object.fromEntries(Object.entries(t
 }));
 const preflight = (overrides = {}) => ({ status: "ready-for-plan", sourceSha: releaseSha, caller: deployerIdentity, account: STAGE_B.account, region: STAGE_B.region, backendReady: true, stateReady: true, handoffReady: true, tfvarsReady: true, failed: [], skipped: [], requiredReads: { "ecs:DescribeTasks": "allowed" }, total: 1, allowed: 1, checkerTrust: { exact: true, mfaRequired: true, principal: CHECKER_USER_ARN, roleArn: CHECKER_SOURCE_ROLE_ARN }, administratorReportSha256: digest("b"), releaseReadFailures: 0, configurationFailures: 0, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourceLivePolicyMismatches: 0, administratorSimulationFailures: 0, tfvarsSha256: report.tfvarsSha256, bindingReportSha256: sha256(bindingReportBytes), ...overrides });
 const live = (overrides = {}) => {
-  const base = { observedAt: now.toISOString(), configuration: { FunctionName: STAGE_B.brokerLambdaConfiguration.functionName, FunctionArn: STAGE_B.brokerAliasArn, Version: "4", CodeSha256: Buffer.from(report.brokerPackageRawSha256, "hex").toString("base64"), Role: STAGE_B.brokerLambdaConfiguration.role, Handler: STAGE_B.brokerLambdaConfiguration.handler, Runtime: STAGE_B.brokerLambdaConfiguration.runtime, Architectures: [...STAGE_B.brokerLambdaConfiguration.architectures], Timeout: STAGE_B.brokerLambdaConfiguration.timeout, MemorySize: STAGE_B.brokerLambdaConfiguration.memorySize, PackageType: STAGE_B.brokerLambdaConfiguration.packageType, EphemeralStorage: { ...STAGE_B.brokerLambdaConfiguration.ephemeralStorage }, Layers: [], FileSystemConfigs: [], DeadLetterConfig: {}, VpcConfig: { VpcId: "", SubnetIds: [], SecurityGroupIds: [], Ipv6AllowedForDualStack: false }, SnapStart: { ApplyOn: "None" }, TracingConfig: { Mode: "PassThrough" }, Environment: { Variables: { BROKER_CLUSTER_ARN: STAGE_B.clusterArn, BROKER_APPROVAL_SECRET_ARN: STAGE_B.approvalSecretArn, BROKER_EXECUTOR_SECURITY_GROUP_ID: STAGE_B.executorSecurityGroupId, BROKER_PRIVATE_SUBNETS_JSON: JSON.stringify(STAGE_B.privateSubnetIds), BROKER_REPLAY_TABLE: STAGE_B.replayTable, BROKER_RECEIPT_BUCKET: STAGE_B.receiptBucket, BROKER_TASK_DEFINITIONS_JSON: JSON.stringify(taskDefinitionArns), BROKER_TASK_TEMPLATE_HASHES_JSON: JSON.stringify(stageBTemplateHashes()), BROKER_APPROVAL_EXPECTED_JSON: JSON.stringify(brokerApprovalExpected), BROKER_IMAGES_JSON: JSON.stringify(brokerImages) } } }, alias: { AliasArn: STAGE_B.brokerAliasArn, Name: STAGE_B.brokerAliasQualifier, FunctionVersion: "4" }, taskDefinitions: taskDefinitionReadbacks };
+  const base = { observedAt: now.toISOString(), configuration: { FunctionName: STAGE_B.brokerLambdaConfiguration.functionName, FunctionArn: STAGE_B.brokerAliasArn, Version: "4", CodeSha256: Buffer.from(report.brokerPackageRawSha256, "hex").toString("base64"), Role: STAGE_B.brokerLambdaConfiguration.role, Handler: STAGE_B.brokerLambdaConfiguration.handler, Runtime: STAGE_B.brokerLambdaConfiguration.runtime, Architectures: [...STAGE_B.brokerLambdaConfiguration.architectures], Timeout: STAGE_B.brokerLambdaConfiguration.timeout, MemorySize: STAGE_B.brokerLambdaConfiguration.memorySize, PackageType: STAGE_B.brokerLambdaConfiguration.packageType, EphemeralStorage: { ...STAGE_B.brokerLambdaConfiguration.ephemeralStorage }, Layers: [], FileSystemConfigs: [], DeadLetterConfig: {}, VpcConfig: { VpcId: "", SubnetIds: [], SecurityGroupIds: [], Ipv6AllowedForDualStack: false }, SnapStart: { ApplyOn: "None" }, TracingConfig: { Mode: "PassThrough" }, Environment: { Variables: { BROKER_CLUSTER_ARN: STAGE_B.clusterArn, BROKER_APPROVAL_SECRET_ARN: STAGE_B.approvalSecretArn, BROKER_EXECUTOR_SECURITY_GROUP_ID: STAGE_B.executorSecurityGroupId, BROKER_PRIVATE_SUBNETS_JSON: JSON.stringify(STAGE_B.privateSubnetIds), BROKER_IMAGE_RELEASE_SHA: imageReleaseSha, BROKER_REPLAY_TABLE: STAGE_B.replayTable, BROKER_RECEIPT_BUCKET: STAGE_B.receiptBucket, BROKER_TASK_DEFINITIONS_JSON: JSON.stringify(taskDefinitionArns), BROKER_TASK_TEMPLATE_HASHES_JSON: JSON.stringify(stageBTemplateHashes()), BROKER_APPROVAL_EXPECTED_JSON: JSON.stringify(brokerApprovalExpected), BROKER_IMAGES_JSON: JSON.stringify(brokerImages) } } }, alias: { AliasArn: STAGE_B.brokerAliasArn, Name: STAGE_B.brokerAliasQualifier, FunctionVersion: "4" }, taskDefinitions: taskDefinitionReadbacks };
   return { ...base, ...overrides, configuration: overrides.configuration || base.configuration, alias: overrides.alias || base.alias, taskDefinitions: overrides.taskDefinitions || base.taskDefinitions };
 };
 
@@ -135,10 +136,34 @@ test("approval-input fails closed when either mandatory principal fails", async 
 
 test("canonical collector produces evidence accepted by the existing creator", async () => {
   const result = await prepareProductionGreenStageBApprovalInput({ evidence: evidence(), protectedSourceSha: releaseSha, operator: { ticketId: "CHG-STAGE-B-0001" }, now, randomUuid: () => "12345678-1234-1234-1234-123456789abc" });
+  assert.notEqual(imageReleaseSha, releaseSha);
+  assert.equal(result.input.releaseSha, releaseSha);
   assert.equal(result.input.approvalId, `APR-STAGE-B-${releaseSha}`);
   assert.equal(result.input.signatureAlgorithm, STAGE_B_APPROVAL_ALGORITHM);
   assert.deepEqual(result.input.taskDefinitionTemplateHashes, stageBTemplateHashes());
   await assert.doesNotReject(() => prepareStageBApproval(result.input, { now }));
+});
+
+test("collector rejects image-SHA broker approval and tooling-SHA task provenance under authenticated reuse", () => {
+  const staleApproval = { ...brokerApprovalExpected, releaseSha: imageReleaseSha };
+  const staleVariables = { ...live().configuration.Environment.Variables, BROKER_APPROVAL_EXPECTED_JSON: JSON.stringify(staleApproval) };
+  assert.throws(() => evidence({ live: { configuration: { ...live().configuration, Environment: { Variables: staleVariables } } } }), /broker|binding/i);
+
+  const wrongTaskDefinitions = structuredClone(taskDefinitionReadbacks);
+  const selected = wrongTaskDefinitions[STAGE_B_MODES[0]].taskDefinition.containerDefinitions[0];
+  selected.environment.find(({ name }) => name === "RELEASE_GIT_SHA").value = releaseSha;
+  assert.throws(() => evidence({ live: { taskDefinitions: wrongTaskDefinitions } }), /task definition|environment|readback/i);
+});
+
+test("collector requires the exact authenticated image SHA in the live broker runtime", () => {
+  assert.notEqual(releaseSha, imageReleaseSha);
+  assert.equal(evidence().runtimeBindingsCurrent, true);
+  for (const value of ["f".repeat(40), releaseSha, "a".repeat(40), undefined]) {
+    const variables = { ...live().configuration.Environment.Variables };
+    if (value === undefined) delete variables.BROKER_IMAGE_RELEASE_SHA;
+    else variables.BROKER_IMAGE_RELEASE_SHA = value;
+    assert.throws(() => evidence({ live: { configuration: { ...live().configuration, Environment: { Variables: variables } } } }), /image release SHA|Lambda configuration/i);
+  }
 });
 
 test("fabricated evidence and self-declared provenance cannot enter the producer", async () => {

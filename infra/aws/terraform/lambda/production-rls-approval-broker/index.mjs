@@ -24,19 +24,48 @@ const inventoryExecutionRoleArn = `arn:aws:iam::${STAGE_B.account}:role/mscqr-pr
 const exact = (left, right) => canonicalJson(left) === canonicalJson(right);
 const brokerReceipt = (value) => ({ ...value, receiptSha256: crypto.createHash("sha256").update(`${JSON.stringify(value)}\n`).digest("hex") });
 
-export function createPreDeploymentOperationIdentity({ approvalId, releaseSha, rotationId, operation = PREDEPLOYMENT_INVENTORY_OPERATION, taskDefinitionArn, imageDigest } = {}) {
-  if (!/^[A-Za-z0-9][A-Za-z0-9._:/-]{5,127}$/.test(approvalId || "") || !/^[a-f0-9]{40}$/.test(releaseSha || "")
+export function createPreDeploymentOperationIdentity({ approvalId, releaseSha, imageReleaseSha, rotationId, operation = PREDEPLOYMENT_INVENTORY_OPERATION, taskDefinitionArn, imageDigest } = {}) {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:/-]{5,127}$/.test(approvalId || "") || !/^[a-f0-9]{40}$/.test(releaseSha || "") || !/^[a-f0-9]{40}$/.test(imageReleaseSha || "")
     || !/^[A-Za-z0-9._-]{8,128}$/.test(rotationId || "") || operation !== PREDEPLOYMENT_INVENTORY_OPERATION
     || !inventoryTaskArnPattern.test(taskDefinitionArn || "") || !/^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/mscqr-backend@sha256:[a-f0-9]{64}$/.test(imageDigest || "")) {
     throw new Error("Pre-deployment inventory operation identity is outside the reviewed contract.");
   }
-  return Object.freeze({ approvalId, releaseSha, rotationId, operation, taskDefinitionArn, imageDigest });
+  return Object.freeze({ approvalId, releaseSha, imageReleaseSha, rotationId, operation, taskDefinitionArn, imageDigest });
 }
 
 export function preDeploymentOperationKey(identity) {
   const { approvalId, releaseSha, rotationId, operation, imageDigest } = createPreDeploymentOperationIdentity(identity);
   const logicalIdentity = JSON.stringify({ approvalId, releaseSha, rotationId, operation, imageDigest });
   return `${PREDEPLOYMENT_INVENTORY_REPLAY_MODE}#${crypto.createHash("sha256").update(logicalIdentity).digest("hex")}`;
+}
+
+export function preDeploymentOperationIdentitySha256(identity) {
+  return crypto.createHash("sha256").update(JSON.stringify({ identityVersion: 2, ...createPreDeploymentOperationIdentity(identity) })).digest("hex");
+}
+
+export function preDeploymentReplayItem({ operationKey, nonce, expiresAt, ...input } = {}) {
+  const identity = createPreDeploymentOperationIdentity(input);
+  if (Object.keys(input).sort().join(",") !== Object.keys(identity).sort().join(",") || operationKey !== preDeploymentOperationKey(identity) || typeof nonce !== "string" || !nonce || !Number.isFinite(Date.parse(expiresAt))) throw new Error("Pre-deployment replay claim is invalid.");
+  const strings = { approvalMode: operationKey, approvalId: identity.approvalId, releaseSha: identity.releaseSha, imageReleaseSha: identity.imageReleaseSha, rotationId: identity.rotationId, operation: identity.operation, taskDefinitionArn: identity.taskDefinitionArn, imageDigest: identity.imageDigest, operationIdentitySha256: preDeploymentOperationIdentitySha256(identity), approvalNonce: nonce, launchState: "launching" };
+  return { ...Object.fromEntries(Object.entries(strings).map(([key, value]) => [key, { S: value }])), identityVersion: { N: "2" }, expiresAt: { N: String(Math.floor(Date.parse(expiresAt) / 1000)) } };
+}
+
+export function assertPreDeploymentReplayRow(row, identity) {
+  const expected = createPreDeploymentOperationIdentity(identity);
+  const version = row?.identityVersion === undefined ? 1 : row.identityVersion;
+  if (![1, 2].includes(version) || (version === 1 && (row.identityVersion !== undefined || row.imageReleaseSha !== undefined))) throw new Error("Pre-deployment replay row version is invalid.");
+  const allowed = ["approvalMode", "approvalId", "releaseSha", "rotationId", "operation", "taskDefinitionArn", "imageDigest", "operationIdentitySha256", "approvalNonce", "launchState", "expiresAt", "taskArn", "taskArns", ...(version === 2 ? ["identityVersion", "imageReleaseSha"] : [])];
+  const required = allowed.filter((field) => !["taskArn", "taskArns"].includes(field));
+  if (!row || typeof row !== "object" || Array.isArray(row) || Object.keys(row).some((field) => !allowed.includes(field)) || required.some((field) => row[field] === undefined)) throw new Error("Pre-deployment replay row fields are invalid.");
+  for (const field of ["approvalId", "releaseSha", "rotationId", "operation", "taskDefinitionArn", "imageDigest"]) if (row[field] !== expected[field]) throw new Error("Pre-deployment replay row identity differs from the authorized operation.");
+  if (row.approvalMode !== preDeploymentOperationKey(expected) || (version === 2 && row.imageReleaseSha !== expected.imageReleaseSha)) throw new Error("Pre-deployment replay row logical or image identity is invalid.");
+  const legacy = (({ approvalId, releaseSha, rotationId, operation, taskDefinitionArn, imageDigest }) => ({ approvalId, releaseSha, rotationId, operation, taskDefinitionArn, imageDigest }))(expected);
+  const hash = version === 2 ? preDeploymentOperationIdentitySha256(expected) : crypto.createHash("sha256").update(JSON.stringify(legacy)).digest("hex");
+  const taskArn = /^arn:aws:ecs:eu-west-2:368992683803:task\/mscqr-prod-euw2-main\/[A-Za-z0-9_-]+$/;
+  const taskArns = row.taskArns instanceof Set ? [...row.taskArns] : row.taskArns;
+  if (row.operationIdentitySha256 !== hash || typeof row.approvalNonce !== "string" || !row.approvalNonce || !["launching", "launched", "launch-uncertain", "succeeded"].includes(row.launchState) || !Number.isInteger(row.expiresAt)
+    || (row.taskArn !== undefined && !taskArn.test(row.taskArn)) || (taskArns !== undefined && (!Array.isArray(taskArns) || taskArns.length === 0 || taskArns.some((arn) => !taskArn.test(arn))))) throw new Error("Pre-deployment replay row proof is invalid.");
+  return Object.freeze({ identityVersion: version, launchState: row.launchState, taskArn: row.taskArn });
 }
 
 export function validateBrokerConfiguration(config) {
@@ -138,11 +167,12 @@ export function validatePreDeploymentInventoryConfiguration(config) {
       || config.inventoryExecutionRoleArn !== inventoryExecutionRoleArn
       || config.inventoryDatabaseUrlArn !== inventoryDatabaseUrlArn
       || config.inventoryRlsRole !== inventoryRlsRole
-      || config.inventoryLogGroupName !== STAGE_B.inventoryLogGroupName) throw new Error("Pre-deployment inventory broker configuration is outside the reviewed contract.");
+      || config.inventoryLogGroupName !== STAGE_B.inventoryLogGroupName
+      || !/^[a-f0-9]{40}$/.test(config.inventoryImageReleaseSha || "")) throw new Error("Pre-deployment inventory broker configuration is outside the reviewed contract.");
   return config;
 }
 
-function assertExactInventoryTaskDefinition({ definition, taskDefinitionArn, sourceSha, config }) {
+function assertExactInventoryTaskDefinition({ definition, taskDefinitionArn, imageReleaseSha, config }) {
   const container = definition?.containerDefinitions?.[0];
   const expected = {
     family: inventoryTaskDefinitionFamily,
@@ -163,7 +193,7 @@ function assertExactInventoryTaskDefinition({ definition, taskDefinitionArn, sou
       interactive: false,
       pseudoTerminal: false,
       environment: [
-        { name: "RELEASE_GIT_SHA", value: sourceSha },
+        { name: "RELEASE_GIT_SHA", value: imageReleaseSha },
         { name: "ROTATION_INVENTORY_APPROVED", value: "true" },
         { name: "ROTATION_INVENTORY_RLS_ROLE", value: inventoryRlsRole },
       ],
@@ -208,14 +238,14 @@ export function createPreDeploymentInventoryHandler({ config, executingBrokerVer
         clearTimeout(timer);
       }
     };
-    if (!event || typeof event !== "object" || Object.keys(event).sort().join(",") !== "approvalId,operation,rotationId,sourceSha,taskDefinitionArn" || event.operation !== PREDEPLOYMENT_INVENTORY_OPERATION || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{5,127}$/.test(event.approvalId || "") || !/^[A-Za-z0-9._-]{8,128}$/.test(event.rotationId || "") || !/^[a-f0-9]{40}$/.test(event.sourceSha || "") || !inventoryTaskArnPattern.test(event.taskDefinitionArn || "")) throw new Error("Pre-deployment inventory broker request is outside the reviewed contract.");
+    if (!event || typeof event !== "object" || Object.keys(event).sort().join(",") !== "approvalId,imageReleaseSha,operation,rotationId,sourceSha,taskDefinitionArn" || event.operation !== PREDEPLOYMENT_INVENTORY_OPERATION || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{5,127}$/.test(event.approvalId || "") || !/^[A-Za-z0-9._-]{8,128}$/.test(event.rotationId || "") || !/^[a-f0-9]{40}$/.test(event.sourceSha || "") || !/^[a-f0-9]{40}$/.test(event.imageReleaseSha || "") || !inventoryTaskArnPattern.test(event.taskDefinitionArn || "")) throw new Error("Pre-deployment inventory broker request is outside the reviewed contract.");
     const approval = await runWithinDeadline("approval authorization", async () => validateStageBApproval(await readApproval(config.approvalSecretArn), { ...config.approvalExpected, approvalId: event.approvalId, brokerVersion }, { now: now(), verifySignature }), operationDeadlineMs);
-    if (approval.approval.releaseSha !== event.sourceSha || approval.approval.backendImageDigest !== config.inventoryImageDigest) throw new Error("Pre-deployment inventory request is not bound to the signed release/image.");
+    if (approval.approval.releaseSha !== event.sourceSha || approval.approval.backendImageDigest !== config.inventoryImageDigest || event.imageReleaseSha !== config.inventoryImageReleaseSha) throw new Error("Pre-deployment inventory request is not bound to the signed release/image.");
     const definitionResponse = await runWithinDeadline("task-definition authorization", () => describeTaskDefinition(event.taskDefinitionArn), operationDeadlineMs);
     const definition = definitionResponse?.taskDefinition;
     if (!definition || !exactTags(definitionResponse.tags, inventoryTaskDefinitionTags)) throw new Error("Pre-deployment inventory task definition response is missing the reviewed top-level tags.");
-    assertExactInventoryTaskDefinition({ definition, taskDefinitionArn: event.taskDefinitionArn, sourceSha: event.sourceSha, config });
-    const operationIdentity = createPreDeploymentOperationIdentity({ approvalId: event.approvalId, releaseSha: event.sourceSha, rotationId: event.rotationId, operation: event.operation, taskDefinitionArn: event.taskDefinitionArn, imageDigest: config.inventoryImageDigest });
+    assertExactInventoryTaskDefinition({ definition, taskDefinitionArn: event.taskDefinitionArn, imageReleaseSha: event.imageReleaseSha, config });
+    const operationIdentity = createPreDeploymentOperationIdentity({ approvalId: event.approvalId, releaseSha: event.sourceSha, imageReleaseSha: event.imageReleaseSha, rotationId: event.rotationId, operation: event.operation, taskDefinitionArn: event.taskDefinitionArn, imageDigest: config.inventoryImageDigest });
     const operationKey = preDeploymentOperationKey(operationIdentity);
     const replay = { ...operationIdentity, operationKey, nonce: approval.approval.nonce, expiresAt: approval.approval.expiresAt };
     await runWithinDeadline("replay claim", () => claimPreDeploymentOperation(replay), operationDeadlineMs);
@@ -325,6 +355,7 @@ export function createBrokerRuntimeConfig(env = process.env) {
     receiptBucket: env.BROKER_RECEIPT_BUCKET,
     inventoryTaskDefinitionFamilyArn: `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/${inventoryTaskDefinitionFamily}:1`,
     inventoryImageDigest: images.backendImageDigest,
+    inventoryImageReleaseSha: env.BROKER_IMAGE_RELEASE_SHA,
     inventoryTaskRoleArn,
     inventoryExecutionRoleArn,
     inventoryDatabaseUrlArn,
@@ -367,13 +398,9 @@ export async function handler(event, context) {
     recordTaskStarted: ({ approvalId, nonce, mode, taskArn }) => dynamo.send(new UpdateItemCommand({
       TableName: config.replayTable, Key: { approvalMode: { S: `${approvalId}#${mode}` } }, UpdateExpression: "SET launchState = :state, taskArn = :taskArn", ConditionExpression: "approvalNonce = :nonce AND launchState = :claimed", ExpressionAttributeValues: { ":nonce": { S: nonce }, ":claimed": { S: "claimed" }, ":state": { S: "started" }, ":taskArn": { S: taskArn } },
     })),
-    claimPreDeploymentOperation: ({ operationKey, approvalId, releaseSha, rotationId, operation, taskDefinitionArn, imageDigest, nonce, expiresAt }) => dynamo.send(new PutItemCommand({
+    claimPreDeploymentOperation: (replay) => dynamo.send(new PutItemCommand({
       TableName: config.replayTable,
-      Item: {
-        approvalMode: { S: operationKey }, approvalId: { S: approvalId }, releaseSha: { S: releaseSha }, rotationId: { S: rotationId }, operation: { S: operation },
-        taskDefinitionArn: { S: taskDefinitionArn }, imageDigest: { S: imageDigest }, operationIdentitySha256: { S: crypto.createHash("sha256").update(JSON.stringify({ approvalId, releaseSha, rotationId, operation, taskDefinitionArn, imageDigest })).digest("hex") },
-        approvalNonce: { S: nonce }, launchState: { S: "launching" }, expiresAt: { N: String(Math.floor(Date.parse(expiresAt) / 1000)) },
-      },
+      Item: preDeploymentReplayItem(replay),
       ConditionExpression: "attribute_not_exists(approvalMode)",
     })),
     releasePreDeploymentOperation: ({ operationKey, nonce }) => dynamo.send(new DeleteItemCommand({

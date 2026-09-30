@@ -20,9 +20,11 @@ const awsError = (code, operation, message) => new RegExp(`^(?:aws: \\[ERROR\\]:
 const exactKeys = (value, keys) => value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).sort().join(",") === [...keys].sort().join(",");
 const CLAIM_FIELDS = Object.freeze(["schemaVersion", "kind", "environment", "repository", "sourceSha", "rotationId", "overlapDeploymentSha", "taskDefinitionArn", "activationTaskDefinitionArn", "imageDigest", "overlapRuntimeProofSha256", "activationTransactionId", "createdAt"]);
 const COMPLETION_FIELDS = Object.freeze(["schemaVersion", "kind", "environment", "repository", "sourceSha", "rotationId", "overlapDeploymentSha", "taskDefinitionArn", "activationTaskDefinitionArn", "imageDigest", "activationTransactionId", "claimSha256", "claimVersionId", "rlsReceiptSha256", "onboardingEvidenceSha256", "completedAt"]);
+const fieldsFor = (value, fields) => value?.schemaVersion === 2 ? [...fields, "imageReleaseSha"] : fields;
+export const effectiveImageReleaseSha = (value) => value?.schemaVersion === 1 ? value.sourceSha : value?.imageReleaseSha;
 
 const canonicalBytes = (value) => Buffer.from(`${canonicalJson(value)}\n`);
-const identity = (value) => ({ sourceSha: value.sourceSha, rotationId: value.rotationId, overlapDeploymentSha: value.overlapDeploymentSha, taskDefinitionArn: value.taskDefinitionArn, activationTaskDefinitionArn: value.activationTaskDefinitionArn, imageDigest: value.imageDigest, activationTransactionId: value.activationTransactionId });
+const identity = (value) => ({ sourceSha: value.sourceSha, ...(value.schemaVersion === 2 ? { imageReleaseSha: value.imageReleaseSha } : {}), rotationId: value.rotationId, overlapDeploymentSha: value.overlapDeploymentSha, taskDefinitionArn: value.taskDefinitionArn, activationTaskDefinitionArn: value.activationTaskDefinitionArn, imageDigest: value.imageDigest, activationTransactionId: value.activationTransactionId });
 export function assertOpaqueS3VersionId(value, label = "S3 VersionId") {
   if (typeof value !== "string" || value.length === 0) throw new Error(`${label} must be a non-empty string.`);
   for (let index = 0; index < value.length; index += 1) {
@@ -38,22 +40,25 @@ export function assertOpaqueS3VersionId(value, label = "S3 VersionId") {
 }
 const claimVersionIdValue = (value) => value === undefined ? "UNVERSIONED" : assertOpaqueS3VersionId(value, "claimVersionId");
 const assertIdentity = (value) => {
-  if (!SHA40.test(value.sourceSha || "") || !ROTATION_ID.test(value.rotationId || "") || !SHA40.test(value.overlapDeploymentSha || "") || !TASK_DEFINITION.test(value.taskDefinitionArn || "") || !TASK_DEFINITION.test(value.activationTaskDefinitionArn || "") || !DIGEST.test(value.imageDigest || "") || !SHA256.test(value.activationTransactionId || "")) throw new Error("Production activation lifecycle identity is invalid.");
+  if (!SHA40.test(value.sourceSha || "") || !SHA40.test(effectiveImageReleaseSha(value) || "") || !ROTATION_ID.test(value.rotationId || "") || !SHA40.test(value.overlapDeploymentSha || "") || !TASK_DEFINITION.test(value.taskDefinitionArn || "") || !TASK_DEFINITION.test(value.activationTaskDefinitionArn || "") || !DIGEST.test(value.imageDigest || "") || !SHA256.test(value.activationTransactionId || "")) throw new Error("Production activation lifecycle identity is invalid.");
 };
-const transactionId = (value) => sha256(canonicalJson({ environment: "production", repository: REPOSITORY, sourceSha: value.sourceSha, rotationId: value.rotationId, overlapDeploymentSha: value.overlapDeploymentSha, taskDefinitionArn: value.taskDefinitionArn, activationTaskDefinitionArn: value.activationTaskDefinitionArn, imageDigest: value.imageDigest, overlapRuntimeProofSha256: value.overlapRuntimeProofSha256 }));
+const transactionId = (value) => sha256(canonicalJson({ environment: "production", repository: REPOSITORY, sourceSha: value.sourceSha, ...(value.schemaVersion === 2 ? { imageReleaseSha: value.imageReleaseSha } : {}), rotationId: value.rotationId, overlapDeploymentSha: value.overlapDeploymentSha, taskDefinitionArn: value.taskDefinitionArn, activationTaskDefinitionArn: value.activationTaskDefinitionArn, imageDigest: value.imageDigest, overlapRuntimeProofSha256: value.overlapRuntimeProofSha256 }));
 
-export function buildInitialActivationClaim({ sourceSha, rotationId, overlapDeploymentSha, taskDefinitionArn, activationTaskDefinitionArn, imageDigest, overlapRuntimeProofSha256, createdAt } = {}) {
-  const claim = { schemaVersion: 1, kind: CLAIM_KIND, environment: "production", repository: REPOSITORY, sourceSha, rotationId, overlapDeploymentSha, taskDefinitionArn, activationTaskDefinitionArn, imageDigest, overlapRuntimeProofSha256, activationTransactionId: "", createdAt };
+export function buildInitialActivationClaim({ sourceSha, imageReleaseSha, rotationId, overlapDeploymentSha, taskDefinitionArn, activationTaskDefinitionArn, imageDigest, overlapRuntimeProofSha256, createdAt } = {}) {
+  const claim = { schemaVersion: 2, kind: CLAIM_KIND, environment: "production", repository: REPOSITORY, sourceSha, imageReleaseSha, rotationId, overlapDeploymentSha, taskDefinitionArn, activationTaskDefinitionArn, imageDigest, overlapRuntimeProofSha256, activationTransactionId: "", createdAt };
   claim.activationTransactionId = transactionId(claim);
   validateInitialActivationClaim(claim);
   return Object.freeze(claim);
 }
 
 export function validateInitialActivationClaim(value, expected) {
-  if (!exactKeys(value, CLAIM_FIELDS) || value.schemaVersion !== 1 || value.kind !== CLAIM_KIND || value.environment !== "production" || value.repository !== REPOSITORY || !SHA256.test(value.overlapRuntimeProofSha256 || "") || !ISO(value.createdAt)) throw new Error("Production initial activation claim schema is invalid.");
+  if (![1, 2].includes(value?.schemaVersion) || !exactKeys(value, fieldsFor(value, CLAIM_FIELDS)) || value.kind !== CLAIM_KIND || value.environment !== "production" || value.repository !== REPOSITORY || !SHA256.test(value.overlapRuntimeProofSha256 || "") || !ISO(value.createdAt)) throw new Error("Production initial activation claim schema is invalid.");
   assertIdentity(value);
   if (value.activationTransactionId !== transactionId(value)) throw new Error("Production initial activation claim transaction identity is invalid.");
-  if (expected && Object.entries(identity(expected)).some(([key, expectedValue]) => expectedValue !== undefined && value[key] !== expectedValue)) throw new Error("Production initial activation claim conflicts with the authenticated transaction.");
+  if (expected && (Object.entries(identity(expected)).some(([key, expectedValue]) => key !== "activationTransactionId" && key !== "imageReleaseSha" && expectedValue !== undefined && value[key] !== expectedValue)
+    || expected.imageReleaseSha !== undefined && effectiveImageReleaseSha(value) !== expected.imageReleaseSha
+    || expected.overlapRuntimeProofSha256 !== undefined && value.overlapRuntimeProofSha256 !== expected.overlapRuntimeProofSha256
+    || expected.activationTransactionId !== undefined && value.activationTransactionId !== expected.activationTransactionId && !(value.schemaVersion === 1 && expected.schemaVersion === 2 && exactKeys(expected, fieldsFor(expected, CLAIM_FIELDS)) && expected.activationTransactionId === transactionId(expected)))) throw new Error("Production initial activation claim conflicts with the authenticated transaction.");
   return value;
 }
 
@@ -68,16 +73,19 @@ export function parseInitialActivationClaim(raw, expected) {
 
 export function buildInitialActivationCompletion({ claim, claimSha256, claimVersionId, rlsReceiptSha256, onboardingEvidenceSha256, completedAt } = {}) {
   validateInitialActivationClaim(claim);
-  const completion = { schemaVersion: 1, kind: COMPLETION_KIND, environment: "production", repository: REPOSITORY, ...identity(claim), claimSha256, claimVersionId: claimVersionIdValue(claimVersionId), rlsReceiptSha256, onboardingEvidenceSha256, completedAt };
+  const completion = { schemaVersion: claim.schemaVersion, kind: COMPLETION_KIND, environment: "production", repository: REPOSITORY, ...identity(claim), claimSha256, claimVersionId: claimVersionIdValue(claimVersionId), rlsReceiptSha256, onboardingEvidenceSha256, completedAt };
   validateInitialActivationCompletion(completion, { claim, claimSha256, claimVersionId });
   return Object.freeze(completion);
 }
 
 export function validateInitialActivationCompletion(value, { claim, claimSha256, claimVersionId, expected } = {}) {
-  if (!exactKeys(value, COMPLETION_FIELDS) || value.schemaVersion !== 1 || value.kind !== COMPLETION_KIND || value.environment !== "production" || value.repository !== REPOSITORY || !SHA256.test(value.claimSha256 || "") || !SHA256.test(value.rlsReceiptSha256 || "") || !SHA256.test(value.onboardingEvidenceSha256 || "") || !ISO(value.completedAt)) throw new Error("Production initial activation completion schema is invalid.");
+  if (![1, 2].includes(value?.schemaVersion) || !exactKeys(value, fieldsFor(value, COMPLETION_FIELDS)) || value.kind !== COMPLETION_KIND || value.environment !== "production" || value.repository !== REPOSITORY || !SHA256.test(value.claimSha256 || "") || !SHA256.test(value.rlsReceiptSha256 || "") || !SHA256.test(value.onboardingEvidenceSha256 || "") || !ISO(value.completedAt)) throw new Error("Production initial activation completion schema is invalid.");
   claimVersionIdValue(value.claimVersionId);
   assertIdentity(value);
-  if (claim) validateInitialActivationClaim(claim, value);
+  if (claim) {
+    if (claim.schemaVersion !== value.schemaVersion) throw new Error("Production activation completion claim schema is invalid.");
+    validateInitialActivationClaim(claim, value);
+  }
   if (claimSha256 && value.claimSha256 !== claimSha256) throw new Error("Production activation completion claim digest is invalid.");
   if (value.claimVersionId !== claimVersionIdValue(claimVersionId)) throw new Error("Production activation completion claim version is invalid.");
   if (expected) {

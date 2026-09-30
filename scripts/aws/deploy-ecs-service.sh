@@ -172,15 +172,15 @@ require_existing_activation_authorization() {
   if [[ "${MSCQR_EXISTING_TASK_DEPLOYMENT_MODE:-rotation}" == "normal-stage-b" ]]; then
     require_env NORMAL_ACTIVATION_BINDING_FILE
     require_env NORMAL_ACTIVATION_BINDING_SHA256
-    node --input-type=module - "$NORMAL_ACTIVATION_BINDING_FILE" "$NORMAL_ACTIVATION_BINDING_SHA256" "$EXISTING_TASK_DEFINITION_ARN" "$EXPECTED_CURRENT_TASK_DEFINITION_ARN" "$EXPECTED_IMAGE_DIGEST" "${EXPECTED_GIT_SHA:-}" <<'NODE'
+    node --input-type=module - "$NORMAL_ACTIVATION_BINDING_FILE" "$NORMAL_ACTIVATION_BINDING_SHA256" "$EXISTING_TASK_DEFINITION_ARN" "$EXPECTED_CURRENT_TASK_DEFINITION_ARN" "$EXPECTED_IMAGE_DIGEST" "${EXPECTED_GIT_SHA:-}" "${DEPLOYMENT_SOURCE_SHA:-}" <<'NODE'
 import crypto from "node:crypto";
 import fs from "node:fs";
-const [file, expectedSha, targetArn, currentArn, digest, sourceSha] = process.argv.slice(2);
+const [file, expectedSha, targetArn, currentArn, digest, imageReleaseSha, sourceSha] = process.argv.slice(2);
 const bytes = fs.readFileSync(file);
 if (crypto.createHash("sha256").update(bytes).digest("hex") !== expectedSha) throw new Error("Normal activation binding changed before the existing-task switch.");
 const value = JSON.parse(bytes);
 const sourcePattern = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/(mscqr-backend|mscqr-production-rls-green-backend-candidate):[1-9][0-9]*$/;
-if (value.schemaVersion !== 2 || value.releaseMode !== "normal" || value.targetArn !== targetArn || value.sourceArn !== currentArn || value.expectedCurrentTaskDefinitionArn !== currentArn || value.digest !== digest || !/^sha256:[a-f0-9]{64}$/.test(value.sourceDigest || "") || value.rollbackImageVerified !== true || !sourcePattern.test(value.sourceArn || "") || !Number.isInteger(value.desiredCount) || value.desiredCount < 1 || value.sourceSha !== sourceSha || value.clusterArn !== "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main" || value.serviceArn !== "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2") throw new Error("Normal activation binding does not match the exact SOURCE/TARGET switch inputs.");
+if (value.schemaVersion !== 2 || value.releaseMode !== "normal" || value.targetArn !== targetArn || value.sourceArn !== currentArn || value.expectedCurrentTaskDefinitionArn !== currentArn || value.digest !== digest || !/^sha256:[a-f0-9]{64}$/.test(value.sourceDigest || "") || value.rollbackImageVerified !== true || !sourcePattern.test(value.sourceArn || "") || !Number.isInteger(value.desiredCount) || value.desiredCount < 1 || value.sourceSha !== sourceSha || value.imageReleaseSha !== imageReleaseSha || value.clusterArn !== "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main" || value.serviceArn !== "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2") throw new Error("Normal activation binding does not match the exact SOURCE/TARGET switch inputs.");
 NODE
     return
   fi
