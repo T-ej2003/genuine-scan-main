@@ -15,7 +15,7 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "68b0a7662a432e213b7f7385a206fc279e4a442647c047f852bfd6861eb7a8ba",
+  "sourceContractSha256": "298db637015f076715e96194e2a909c9f3d8ba013768cb03e925ea319d8a4536",
   "migrationSetDigest": "65c30dc21bec8af4a44d3983761e9bd4e66b0d095a5387809b047b27dd1d2c9c",
   "sourceContractInputs": [
     {
@@ -196,7 +196,7 @@
     },
     {
       "path": "infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs",
-      "sha256": "1ea8d0bcacce3369e89f7da87f335b0972b88e2c7e1113de5abe41e058069b01"
+      "sha256": "cd8af2ab62c7653550e6890aa801aadf9d873738ecd3931533bfbc36b3997713"
     },
     {
       "path": "infra/aws/terraform/lambda/production-rls-approval-broker/ecs-task-definition-readback.mjs",
@@ -204,7 +204,7 @@
     },
     {
       "path": "scripts/aws/production-green-stage-b-contract.mjs",
-      "sha256": "8733b3fb53502fc390d0a99bd2b4d49bfadad07bab59e3efcffbc70d60954bb8"
+      "sha256": "10b34bbca47808bd42fdce34fbcdade207e52b9fc51cb3577916cf0337f00f62"
     },
     {
       "path": "scripts/aws/create-production-green-stage-b-approval.mjs",
@@ -216,7 +216,7 @@
     },
     {
       "path": "scripts/aws/deploy-ecs-service.sh",
-      "sha256": "047d7c5fd5217ff50fbb3ba256677e7522bab649ea06868affaa811e66ce3b00"
+      "sha256": "cca6880903a82b4f61ce02de4f628202bebb1a1def1bd155c22e6d81d54779e9"
     },
     {
       "path": "scripts/aws/exact-ecs-rollout-state.mjs",
@@ -244,7 +244,7 @@
     },
     {
       "path": ".github/workflows/release-gate.yml",
-      "sha256": "8450e336ae5e15671af29442869d3b86abb09173a2250357f838afd8d7487fbd"
+      "sha256": "c139fd14e9abf24b1b185d7165a2a474302e12c3b8cd240c72e6a8c9cdd6dbbe"
     },
     {
       "path": ".github/workflows/release-train.yml",
@@ -352,7 +352,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:68b0a7662a432e213b7f7385a206fc279e4a442647c047f852bfd6861eb7a8ba",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:298db637015f076715e96194e2a909c9f3d8ba013768cb03e925ea319d8a4536",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,
