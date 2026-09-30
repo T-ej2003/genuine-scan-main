@@ -392,15 +392,21 @@ export async function runProductionCutoverControlPlane(input = {}) {
   results.registrationReadback = { ...results.overlapTaskDefinition, registeredTaskDefinitionArn: task.taskDefinitionArn, sourceSha, rotationId, rotationStateSha256: rotation.rotationStateSha256, rotationPrepared: true, rotationInfraConverged: true };
 
   const expectedImageDigest = task.taskDefinition.containerDefinitions?.find(({ name }) => name === "backend")?.image?.split("@").at(-1);
+  const authorizedImageReleaseSha = imageAuthorization.imageReleaseSha;
+  const imageAuthorizationStage = stageEvidence("imageAuthorization", imageAuthorization, { sourceSha, imageReleaseSha: authorizedImageReleaseSha });
+  const overlapTaskStage = stageEvidence("overlapTaskDefinition", task, { sourceSha, imageReleaseSha: authorizedImageReleaseSha, taskDefinitionArn: task.taskDefinitionArn, imageDigest: expectedImageDigest });
+  if (imageAuthorizationStage.identityBindings.imageReleaseSha !== authorizedImageReleaseSha
+    || overlapTaskStage.identityBindings.imageReleaseSha !== authorizedImageReleaseSha
+    || overlapTaskStage.identityBindings.imageDigest !== expectedImageDigest) throw new Error("Overlap readiness image bindings diverge from authenticated image authorization and registered task definition.");
   const stages = {
-    imageAuthorization: stageEvidence("imageAuthorization", imageAuthorization, { sourceSha }),
+    imageAuthorization: imageAuthorizationStage,
     iamPreflight: stageEvidence("iamPreflight", iamReport.evidence || iamReport, { sourceSha }),
     rootDrop: stageEvidence("rootDrop", identities.rootDrop, { sourceSha }),
     releaseIdentity: stageEvidence("releaseIdentity", identities.releaseDeployer, { sourceSha }),
     verifierIdentity: stageEvidence("verifierIdentity", identities.verifier, { sourceSha }),
     stageA: stageEvidence("stageA", stageAResult, { sourceSha }),
     artifactSigning: stageEvidence("artifactSigning", results.artifactSigning, { sourceSha }),
-    overlapTaskDefinition: stageEvidence("overlapTaskDefinition", task, { sourceSha, imageReleaseSha: imageAuthorization.imageReleaseSha, taskDefinitionArn: task.taskDefinitionArn, imageDigest: expectedImageDigest }),
+    overlapTaskDefinition: overlapTaskStage,
     inventory: stageEvidence("inventory", inventoryResult, { sourceSha, rotationId }),
     rotationPrepare: stageEvidence("rotationPrepare", rotation, { sourceSha, rotationId }),
   };

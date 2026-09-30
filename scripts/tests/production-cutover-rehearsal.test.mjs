@@ -5,10 +5,10 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { assertStageAPlan, buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifactsBucketPolicyPredecessor, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservationPredecessor, buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection, createTerraformStageAAdapter, runStageAControlPlane, STAGE_A_CHECKER_POLICY, STAGE_A_CHECKER_PUBLICATION_POLICY, STAGE_A_CHECKER_ROLE_TRUST, STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY } from "../aws/production-stage-a-control-plane.mjs";
-import { describeStageAIngress } from "../aws/production-cutover-production-adapters.mjs";
-import { assertTransitionMatrix, buildTransitionMatrix, PRODUCTION_CUTOVER_MODE, runGovernedOverlapDeployment, runProductionCutoverControlPlane } from "../aws/production-cutover-control-plane.mjs";
+import { createProductionOverlapDeploymentAdapter, describeStageAIngress, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "../aws/production-cutover-production-adapters.mjs";
+import { assertTransitionMatrix, buildTransitionMatrix, PRODUCTION_CUTOVER_MODE, runGovernedOverlapDeployment, runProductionCutoverControlPlane, runProductionCutoverOverlapControlPlane } from "../aws/production-cutover-control-plane.mjs";
 import { persistOverlapReadinessEvidence } from "../aws/produce-production-overlap-readiness-evidence.mjs";
-import { readAndAssertReadyForOverlapDeployment } from "../aws/production-overlap-readiness-contract.mjs";
+import { readAndAssertReadyForOverlapDeployment, rotationExpectedImageReleaseSha } from "../aws/production-overlap-readiness-contract.mjs";
 import { ECS_EXEC_OPERATOR_REQUIRED, ECS_EXEC_OPERATOR_FORBIDDEN, buildEcsExecOperatorEvidence, ECS_EXEC_OPERATOR_ROLE_ARN } from "../aws/production-ecs-exec-operator-contract.mjs";
 import { buildOnboardingEvidenceFingerprint, runStrictOnboardingProbes, STRICT_ONBOARDING_CHECKS } from "../security/production-strict-onboarding.mjs";
 import { ROTATION_INVENTORY_CATEGORIES } from "../security/production-runtime-rotation-inventory.mjs";
@@ -654,6 +654,13 @@ test("prepare-overlap persists and authenticates readiness without reaching depl
   input.onboarding.run = async () => { throw new Error("prepare-overlap reached onboarding"); };
 
   const result = await runProductionCutoverControlPlane(input);
+  const authenticated = readAndAssertReadyForOverlapDeployment({ filePath: readinessFile, evidenceSha256: result.readinessSha256, sourceSha, rotationId, rotationStateSha256 });
+  assert.notEqual(sourceSha, input.imageAuthorization.imageReleaseSha);
+  assert.equal(rotationExpectedImageReleaseSha(authenticated.evidence), input.imageAuthorization.imageReleaseSha);
+  assert.equal(authenticated.evidence.overlapTaskDefinition.identityBindings.imageReleaseSha, input.imageAuthorization.imageReleaseSha);
+  const substituted = structuredClone(authenticated.evidence);
+  substituted.imageAuthorization.identityBindings.imageReleaseSha = sourceSha;
+  assert.throws(() => rotationExpectedImageReleaseSha(substituted), /authenticated readiness/);
   assert.equal(result.readyForOverlapDeployment, true);
   assert.equal(result.readinessFile, readinessFile);
   assert.match(result.readinessSha256, /^[a-f0-9]{64}$/);
@@ -667,6 +674,33 @@ test("prepare-overlap persists and authenticates readiness without reaching depl
   const resumed = await runGovernedOverlapDeployment({ readiness: result.readiness, sourceSha, rotationId, rotationStateSha256, taskDefinitionArn, readinessSha256: result.readinessSha256, deployOverlap: { run: async () => { overlapCalls += 1; return { updateServiceCount: 1, propagateTags: "TASK_DEFINITION", taskDefinitionArn }; } } });
   assert.equal(resumed.updateServiceCount, 1);
   assert.equal(overlapCalls, 1);
+
+  for (const transitionMode of ["rotation-overlap", "rotation-cleanup"]) {
+    let deploymentEnvironment;
+    const deployOverlap = createProductionOverlapDeploymentAdapter({
+      credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE,
+      profile: "mscqr-production-release-deployer",
+      run: () => JSON.stringify({ Account: "368992683803", Arn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/rehearsal" }),
+      readinessFile, readinessSha256: result.readinessSha256, sourceSha, rotationId,
+      imageDigest: digest, expectedGitSha: rotationExpectedImageReleaseSha(authenticated.evidence),
+      runScript: (_script, _args, options) => {
+        deploymentEnvironment = options.env;
+        writeFileSync(options.env.METADATA_FILE, JSON.stringify({ newTaskDefinitionArn: taskDefinitionArn }));
+      },
+    });
+    const receiptSha256 = "f".repeat(64);
+    const deployed = await runProductionCutoverOverlapControlPlane({
+      readiness: authenticated.evidence, sourceSha, rotationId, rotationStateSha256, taskDefinitionArn,
+      readinessSha256: result.readinessSha256, deployOverlap, transitionMode,
+      ...(transitionMode === "rotation-overlap" ? { deploymentReceipt: {
+        persist: async () => ({ receiptSha256 }),
+        authenticate: async () => ({ terminalState: "DEPLOYED_PENDING_VERIFICATION", receiptSha256 }),
+      } } : {}),
+    });
+    assert.equal(deploymentEnvironment.EXPECTED_GIT_SHA, input.imageAuthorization.imageReleaseSha);
+    assert.equal(deploymentEnvironment.DEPLOYMENT_SOURCE_SHA, sourceSha);
+    assert.equal(deployed.deployment.taskDefinitionArn, taskDefinitionArn);
+  }
 });
 
 test("prepare-overlap requires authenticated persistence and is not deployment authorization", async () => {

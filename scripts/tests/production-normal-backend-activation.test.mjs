@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import test from "node:test";
 import yaml from "js-yaml";
 import { NORMAL_ACTIVATION, NormalActivationPolicyConvergenceError, assertNormalActivationPolicy, assertNormalActivationTransactionPolicy, buildNormalActivationPolicy, buildNormalActivationTransactionPolicy, classifyNormalActivationLiveOutcome, collectNormalActivationLiveEvidence, contractNormalActivationPolicy, convergeNormalActivationPolicy, deriveNormalBackendCandidate, executeNormalBackendActivation, normalActivationSimulationContext } from "../aws/production-normal-backend-activation.mjs";
 import { iamSimulationContextArgs } from "../aws/iam-simulation-context.mjs";
 import { assertNormalActivationPolicyDeltaOnly } from "../aws/production-normal-backend-activation-policy.mjs";
+import { assertImageAuthorization } from "../aws/production-cutover-control-plane.mjs";
+import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
 
 const sourceSha = "a".repeat(40);
 const imageReleaseSha = "d".repeat(40);
@@ -59,6 +62,20 @@ test("normal activation derives one exact current-source candidate from Stage-B 
     assert.throws(() => deriveNormalBackendCandidate({ state: candidateState, sourceSha, imageAuthorization, validateImageAuthorization: validate }), /candidate|source|image|output/);
   }
   assert.throws(() => deriveNormalBackendCandidate({ state: state(), sourceSha: "c".repeat(40), imageAuthorization, validateImageAuthorization: validate }), /source|Expected values/);
+});
+
+test("normal image reuse binds authenticated image SHA through the real candidate producer", () => {
+  const protectedSourceSha = execFileSync("git", ["rev-parse", "96a4be6^{commit}"], { encoding: "utf8" }).trim();
+  const fixture = makeCanonicalImageAuthorization({ sourceSha: protectedSourceSha });
+  const candidateState = state();
+  const backend = candidateState.resources[0].instances[0].attributes;
+  const authorizedImage = image.replace(digest, fixture.digests.backend);
+  backend.container_definitions = JSON.stringify([{ name: "backend", image: authorizedImage, environment: [{ name: "RELEASE_GIT_SHA", value: fixture.imageReleaseSha }] }]);
+  candidateState.outputs.bound_images.value.backend = authorizedImage;
+  const candidate = deriveNormalBackendCandidate({ state: candidateState, sourceSha: protectedSourceSha, imageAuthorization: fixture.authorization, validateImageAuthorization: (value, sha) => assertImageAuthorization(value, sha, { now: fixture.now, verifyImageEvidence: fixture.verifyImageEvidence }) });
+  assert.notEqual(candidate.sourceSha, candidate.imageReleaseSha);
+  assert.equal(candidate.imageReleaseSha, fixture.authorization.imageReleaseSha);
+  assert.equal(candidate.digest, fixture.digests.backend);
 });
 
 test("normal activation policies separate steady recovery from exact SOURCE/TARGET transaction authority", () => {
