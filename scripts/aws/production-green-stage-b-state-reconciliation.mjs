@@ -4,7 +4,6 @@ import { classifyStageBPlan } from "./stage-b-deployment-contract.mjs";
 import { stageBBoundImagesFromBindingReport } from "./generate-production-green-stage-b-tfvars.mjs";
 import { assertStageBPlanSemanticCompleteness } from "./stage-b-plan-semantic-contract.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "./stage-b-reference-audit-contract.mjs";
-import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 import {
   PRODUCTION_ENVIRONMENT_APPROVAL,
   assertProductionEnvironmentActualReviewer,
@@ -59,21 +58,10 @@ export const STAGE_B_STATE_RECONCILIATION = Object.freeze({
 });
 
 const addressSet = new Set(STAGE_B_STATE_RECONCILIATION.addresses);
-const reflectionActionAddresses = new Set(STAGE_B_STATE_RECONCILIATION.addresses.filter((address) => address.startsWith("aws_iam_role_policy.")));
 const pendingConvergenceAddresses = Object.freeze([...Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES), "aws_iam_policy.broker", "aws_lambda_alias.reviewed", "aws_lambda_function.broker"].sort());
 const pendingConvergenceAddressSet = new Set(pendingConvergenceAddresses);
 const workflowRef = (path) => `${STAGE_B_STATE_RECONCILIATION.repository}/${path}@refs/heads/main`;
 const equal = (left, right) => canonicalJson(left) === canonicalJson(right);
-const canonicalPolicy = (value, label) => {
-  const document = structuredClone(normalizeIamPolicyDocument(value, label));
-  if (!Array.isArray(document.Statement)) throw new Error(`${label} has no statement array.`);
-  document.Statement = document.Statement.map((statement) => {
-    const normalized = { ...statement };
-    for (const field of ["Action", "NotAction", "Resource", "NotResource"]) if (field in normalized) normalized[field] = (Array.isArray(normalized[field]) ? normalized[field] : [normalized[field]]).sort();
-    return normalized;
-  }).sort((left, right) => canonicalJson(left).localeCompare(canonicalJson(right)));
-  return document;
-};
 
 function assertStateIdentity(value) {
   exactKeys(value, ["lineage", "serial", "stateSha256"], "Stage B state identity");
@@ -134,17 +122,20 @@ function assertReviewedReflectionChanges(normalPlan, refreshPlan, postWrite) {
   for (const address of STAGE_B_STATE_RECONCILIATION.addresses) {
     const normal = byAddress.get(address); const drift = driftByAddress.get(address);
     if (!normal || normal.type !== drift.type || normal.mode !== drift.mode) throw new Error("Stage B normal plan omits a reviewed state-reflection address.");
-    if (postWrite) {
-      if (!equal(normal.change?.actions, ["no-op"])) throw new Error("Stage B post-reconciliation normal plan retains a reviewed state-reflection action.");
-      continue;
-    }
-    const expectedActions = reflectionActionAddresses.has(address) ? ["update"] : ["no-op"];
-    if (!equal(normal.change?.actions, expectedActions)) throw new Error("Stage B normal plan state-reflection action is outside the serial-104 topology.");
-    if (reflectionActionAddresses.has(address)) {
-      const field = drift.type === "aws_iam_role_policy" ? "policy" : "inline_policy";
-      if (!equal(canonicalPolicy(normal.change?.before?.[field], `${address} normal predecessor`), canonicalPolicy(drift.change.before[field], `${address} refresh predecessor`)) || !equal(canonicalPolicy(normal.change?.after?.[field], `${address} normal successor`), canonicalPolicy(drift.change.after[field], `${address} refresh successor`))) throw new Error("Stage B normal plan state-reflection values differ from the refresh-only plan.");
-    }
+    if (!equal(normal.change?.actions, ["no-op"])) throw new Error(`Stage B ${postWrite ? "post-reconciliation " : ""}normal plan retains a reviewed state-reflection action.`);
+    if (!equal(normal.change?.before, drift.change.after) || !equal(normal.change?.after, drift.change.after)) throw new Error("Stage B normal plan state-reflection values differ from the authenticated live/source successor.");
   }
+}
+
+function assertReviewedReflectionDrift(normalPlan, refreshPlan, postWrite) {
+  const normalDrift = normalPlan.resource_drift || [];
+  if (postWrite) {
+    if (normalDrift.length) throw new Error("Stage B post-reconciliation ordinary plan retains reviewed resource drift.");
+    return;
+  }
+  if (!Array.isArray(normalDrift) || normalDrift.length !== STAGE_B_STATE_RECONCILIATION.addresses.length || new Set(normalDrift.map((entry) => entry?.address)).size !== normalDrift.length) throw new Error("Stage B pending ordinary plan drift is not the exact reviewed reflection envelope.");
+  const reviewed = new Map(refreshPlan.resource_drift.map((entry) => [entry.address, entry]));
+  for (const entry of normalDrift) if (!addressSet.has(entry?.address) || !equal(entry, reviewed.get(entry.address))) throw new Error("Stage B pending ordinary plan drift differs from the authenticated refresh-only reflection.");
 }
 
 function actionableEntries(entries = []) { return entries.filter((entry) => !equal(entry?.change?.actions, ["no-op"]) && !equal(entry?.change?.actions, ["read"])); }
@@ -161,7 +152,7 @@ function assertPendingOutputTopology(normalPlan, refreshPlan, postWrite) {
 
 function assertPendingStageBConvergence(normalPlan, refreshPlan, { sourceSha, terraformConfiguration, postWrite = false, expectedSemantics } = {}) {
   if (typeof terraformConfiguration !== "string" || !normalPlan || normalPlan.format_version !== "1.2" || normalPlan.terraform_version !== "1.15.8" || normalPlan.errored !== false || normalPlan.complete !== true || normalPlan.applyable !== true || normalPlan.variables?.tooling_sha?.value !== sourceSha) throw new Error("Stage B pending ordinary-plan source alignment envelope is invalid.");
-  if ((normalPlan.resource_drift || []).length !== 0) throw new Error("Stage B pending ordinary plan has unexpected resource drift.");
+  assertReviewedReflectionDrift(normalPlan, refreshPlan, postWrite);
   assertReviewedReflectionChanges(normalPlan, refreshPlan, postWrite);
   const output = assertPendingOutputTopology(normalPlan, refreshPlan, postWrite);
   const filtered = { ...normalPlan, resource_changes: (normalPlan.resource_changes || []).filter((entry) => !addressSet.has(entry.address)) };
