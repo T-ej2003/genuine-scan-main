@@ -26,7 +26,7 @@ import {
   STAGE_B_EXECUTOR_FOR_EACH_REFERENCES,
   STAGE_B_TASK_DEFINITION_FAMILIES,
 } from "../aws/stage-b-reference-audit-contract.mjs";
-import { assertStageBRuntimePlatform, assertStageBTerraformRuntimePlatformSource, assertStageBLambdaEnvironmentSize, STAGE_B, stageBLambdaEnvironmentUtf8Bytes } from "../aws/production-green-stage-b-contract.mjs";
+import { assertStageBRuntimePlatform, assertStageBTerraformRuntimePlatformSource, assertStageBLambdaEnvironmentSize, STAGE_B, STAGE_B_LAMBDA_ENVIRONMENT_TARGET_BYTES, STAGE_B_LAMBDA_ENVIRONMENT_HARD_LIMIT_BYTES, STAGE_B_BROKER_ENVIRONMENT_VARIABLES, stageBLambdaEnvironmentUtf8Bytes } from "../aws/production-green-stage-b-contract.mjs";
 
 const addresses = Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES);
 const BROKER_INITIAL_ADDRESSES = new Set(["aws_iam_policy.broker", "aws_lambda_function.broker", "aws_lambda_alias.reviewed"]);
@@ -600,10 +600,40 @@ test("broker environment stays below the safety bound using exact UTF-8 payload 
     INVENTORY_LOG_GROUP_NAME: STAGE_B.inventoryLogGroupName,
   };
   assert.ok(stageBLambdaEnvironmentUtf8Bytes(legacyEnvironment) > 4096);
-  assert.ok(stageBLambdaEnvironmentUtf8Bytes(environment) <= 3500);
-  assert.ok(stageBLambdaEnvironmentUtf8Bytes(environment) <= 3500);
+  assert.ok(stageBLambdaEnvironmentUtf8Bytes(environment) <= STAGE_B_LAMBDA_ENVIRONMENT_TARGET_BYTES);
   assert.equal(assertStageBLambdaEnvironmentSize(environment), stageBLambdaEnvironmentUtf8Bytes(environment));
   assert.throws(() => assertStageBLambdaEnvironmentSize({ ...environment, OVERSIZED: "x".repeat(4096) }), /UTF-8 bytes/);
+});
+
+test("serial-107 dual-SHA broker environment fits with a 512-byte quota reserve", () => {
+  const environment = resolvedBrokerEnvironment();
+  const definitions = JSON.parse(environment.BROKER_TASK_DEFINITIONS_JSON);
+  // Production revisions are two digits; keep all nine authenticated task mappings.
+  environment.BROKER_TASK_DEFINITIONS_JSON = JSON.stringify(Object.fromEntries(
+    Object.entries(definitions).map(([mode, arn]) => [mode, arn.replace(/:1$/, ":12")]),
+  ));
+  environment.BROKER_IMAGES_JSON = JSON.stringify(Object.fromEntries(
+    Object.entries(JSON.parse(environment.BROKER_IMAGES_JSON)).map(([key, reference]) => [key,
+      reference.replace("mscqr@", key === "workerImageDigest" ? "mscqr-worker@" : "mscqr-backend@"),
+    ]),
+  ));
+  assert.equal(stageBLambdaEnvironmentUtf8Bytes(environment), 3522);
+  assert.equal(assertStageBLambdaEnvironmentSize(environment), 3522);
+  assert.equal(STAGE_B_LAMBDA_ENVIRONMENT_HARD_LIMIT_BYTES - STAGE_B_LAMBDA_ENVIRONMENT_TARGET_BYTES, 512);
+  assert.notEqual(JSON.parse(environment.BROKER_APPROVAL_EXPECTED_JSON).releaseSha, environment.BROKER_IMAGE_RELEASE_SHA);
+  assert.deepEqual(Object.keys(environment).sort(), STAGE_B_BROKER_ENVIRONMENT_VARIABLES.slice().sort());
+
+  const boundary = structuredClone(environment);
+  // Pad an existing JSON value, never remove an authentication field to fit.
+  boundary.BROKER_APPROVAL_EXPECTED_JSON += " ".repeat(STAGE_B_LAMBDA_ENVIRONMENT_TARGET_BYTES - 3522);
+  assert.equal(assertStageBLambdaEnvironmentSize(boundary), STAGE_B_LAMBDA_ENVIRONMENT_TARGET_BYTES);
+  assert.throws(() => assertStageBLambdaEnvironmentSize({ ...boundary, BROKER_APPROVAL_EXPECTED_JSON: boundary.BROKER_APPROVAL_EXPECTED_JSON + " " }), /UTF-8 bytes/);
+  assert.throws(() => assertStageBLambdaEnvironmentSize({ ...boundary, BROKER_APPROVAL_EXPECTED_JSON: boundary.BROKER_APPROVAL_EXPECTED_JSON + "é" }), /UTF-8 bytes/);
+  assert.throws(() => assertStageBLambdaEnvironmentSize({ ...environment, BROKER_APPROVAL_EXPECTED_JSON: "x".repeat(4096) }, 5000), /AWS hard limit/);
+
+  const terraform = fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
+  assert.match(terraform, new RegExp(`length\\(jsonencode\\(local\\.broker_environment\\)\\) <= ${STAGE_B_LAMBDA_ENVIRONMENT_TARGET_BYTES}`));
+  assert.match(terraform, /BROKER_IMAGE_RELEASE_SHA\s*= var\.image_release_sha/);
 });
 
 function dependencyResolvedRetryPlan() {

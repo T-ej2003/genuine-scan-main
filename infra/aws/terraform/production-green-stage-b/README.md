@@ -109,3 +109,7 @@ MSCQR_STAGE_B_PLAN_ENABLED=true MSCQR_STAGE_B_PLAN_CONFIRM=MSCQR_GENERATE_STAGE_
 Review the saved JSON plan. Stop on any delete or any resource outside the listed control-plane types. A separately approved operator runbook must invoke scripts/apply-production-green-stage-b.mjs with the complete canonical tfvars provenance options; direct Terraform apply is not an approved path.
 
 Both wrapper modes run `terraform -chdir=infra/aws/terraform/production-green-stage-b show -json` against the selected saved plan and pass the reviewed deployment environment, including `TF_DATA_DIR`, `TF_WORKSPACE`, `HOME`, `PATH`, and Terraform CLI configuration. Provider discovery must therefore use the initialized release-local data directory; repository-root or ambient `.terraform` discovery is not an accepted fallback.
+
+## Broker environment size bound
+
+AWS limits the aggregate Lambda environment to 4096 bytes ([AWS quota](https://docs.aws.amazon.com/lambda/latest/dg/gettingstarted-limits.html)). The internal JSON payload guard is 3584 bytes, retaining a 512-byte reserve. The previous 3500-byte guard was repository headroom introduced after the historical oversized inventory configuration; it was not an AWS limit. The required dual-SHA environment is 3522 bytes, including the explicit authenticated `BROKER_IMAGE_RELEASE_SHA`, leaving 62 bytes inside the guard and 574 bytes below AWS's limit. Terraform and the JavaScript semantic validator enforce the same bound; image and tooling provenance checks remain unchanged.

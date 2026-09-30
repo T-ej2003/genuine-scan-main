@@ -236,7 +236,8 @@ export const canonicalJson = (value) => {
 };
 export const canonicalSha256 = (value) => sha256(canonicalJson(value));
 export const STAGE_B_LAMBDA_ENVIRONMENT_HARD_LIMIT_BYTES = 4096;
-export const STAGE_B_LAMBDA_ENVIRONMENT_TARGET_BYTES = 3500;
+// Reserve 512 bytes below AWS's 4 KiB quota; canonical dual-SHA configuration uses 3522 bytes.
+export const STAGE_B_LAMBDA_ENVIRONMENT_TARGET_BYTES = 3584;
 export const STAGE_B_BROKER_ENVIRONMENT_VARIABLES = Object.freeze([
   "BROKER_APPROVAL_EXPECTED_JSON", "BROKER_APPROVAL_SECRET_ARN", "BROKER_CLUSTER_ARN",
   "BROKER_EXECUTOR_SECURITY_GROUP_ID", "BROKER_IMAGES_JSON", "BROKER_PRIVATE_SUBNETS_JSON",
