@@ -4,6 +4,7 @@ import { assertStageBRuntimePlatform, STAGE_B_BROKER_TASK_DEFINITION_FAMILIES, S
 import { assertStageBDeploymentEvidenceFreshness, STAGE_B_DEPLOYMENT_EVIDENCE_CLOCK_SKEW_MS, STAGE_B_DEPLOYMENT_EVIDENCE_TTL_MS, STAGE_B_DEPLOYMENT_EVIDENCE_VALIDITY_MODEL } from "./stage-b-evidence-freshness.mjs";
 import { ECS_EXEC_OPERATOR_TASK_TAG_KEY, ECS_EXEC_OPERATOR_TASK_TAG_VALUE } from "./production-ecs-exec-operator-contract.mjs";
 import { STAGE_B_BACKEND_PORT_MAPPING } from "./production-green-stage-b-task-definitions.mjs";
+import { assertB01LivePredecessor, B01_PREREQUISITE } from "./production-b01-prerequisite-contract.mjs";
 
 export const STAGE_B_TASK_DEFINITION_FAMILIES = Object.freeze({
   'aws_ecs_task_definition.candidate["backend"]': "mscqr-production-rls-green-backend-candidate",
@@ -48,6 +49,34 @@ const canonicalBrokerFamily = (mode) => mode === "full-rls-application-canary"
   : `mscqr-production-full-rls-green-${mode}`;
 const sortStrings = (values) => [...values].sort();
 const sameStringSet = (left, right) => JSON.stringify(sortStrings(left)) === JSON.stringify(sortStrings(right));
+
+export function assertStageBB01LivePredecessorReference(audit) {
+  const reference = audit?.b01LivePredecessorReference;
+  if (reference === undefined) return undefined;
+  const expected = {
+    schemaVersion: 1,
+    kind: "STAGE_B_B01_LIVE_PREDECESSOR_REFERENCE",
+    authenticatedAt: audit.auditedAt,
+    auditSourceSha: audit.toolingSha,
+    account: B01_PREREQUISITE.account,
+    region: B01_PREREQUISITE.region,
+    serviceArn: B01_PREREQUISITE.predecessorServiceArn,
+    taskDefinitionArn: B01_PREREQUISITE.predecessorTaskDefinitionArn,
+    family: STAGE_B_TASK_DEFINITION_FAMILIES['aws_ecs_task_definition.candidate["backend"]'],
+    imageDigest: B01_PREREQUISITE.executorImage.split("@")[1],
+    imageSourceSha: B01_PREREQUISITE.predecessorSourceSha,
+  };
+  const { evidence, ...actual } = reference || {};
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error("Stage B B01 live-predecessor reference attestation is malformed or unbound.");
+  assertB01LivePredecessor(evidence);
+  const service = (audit.services || []).filter((entry) => entry?.serviceName === "mscqr-backend-servi-euw2");
+  const taskDefinition = (audit.taskDefinitions || []).filter((entry) => entry?.taskDefinitionArn === expected.taskDefinitionArn);
+  if (service.length !== 1 || service[0].taskDefinition !== expected.taskDefinitionArn || taskDefinition.length !== 1
+    || taskDefinition[0].family !== expected.family || taskDefinition[0].revision !== 19 || taskDefinition[0].status !== "ACTIVE" || taskDefinition[0].stageBScoped !== true) {
+    throw new Error("Stage B B01 live-predecessor reference does not match authoritative runtime observations.");
+  }
+  return reference;
+}
 
 function assertCurrentPredecessorReferences({ address, entry, observed }) {
   for (const [field, kind] of [["serviceReferences", "services"], ["runningTaskReferences", "runningTasks"], ["pendingTaskReferences", "pendingTasks"]]) {

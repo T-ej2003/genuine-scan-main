@@ -185,6 +185,8 @@ const COMMANDS = Object.freeze({
   listTasks: ["ecs", "list-tasks"],
   describeTasks: ["ecs", "describe-tasks"],
   describeTaskDefinition: ["ecs", "describe-task-definition"],
+  describeRepositories: ["ecr", "describe-repositories"],
+  describeImages: ["ecr", "describe-images"],
   getFunctionConfiguration: ["lambda", "get-function-configuration"],
   getAlias: ["lambda", "get-alias"],
 });
@@ -255,6 +257,8 @@ function createAwsReader({ region, clusterArn, run }) {
     },
     describeTasks: (taskArns) => call("describeTasks", ["--cluster", clusterArn, "--tasks", ...taskArns]),
     describeTaskDefinition: (taskDefinition) => call("describeTaskDefinition", ["--task-definition", taskDefinition]),
+    describeRepositories: (repositoryNames) => call("describeRepositories", ["--repository-names", ...repositoryNames]),
+    describeImages: (repositoryName, imageDigest) => call("describeImages", ["--repository-name", repositoryName, "--image-ids", `imageDigest=${imageDigest}`]),
     getFunctionConfiguration: (functionArn, qualifier) => call("getFunctionConfiguration", ["--function-name", functionArn, ...(qualifier ? ["--qualifier", qualifier] : [])]),
     getAlias: (functionArn = STAGE_B.brokerFunctionArn, aliasName = STAGE_B.brokerAliasQualifier) => call("getAlias", ["--function-name", functionArn, "--name", aliasName]),
   };
