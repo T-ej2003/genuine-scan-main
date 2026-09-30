@@ -76,7 +76,7 @@ const brokerApproval = {
 const brokerDefinition = () => ({ ...buildPreDeploymentInventoryTaskDefinition({ backendImage: image, releaseSha: imageReleaseSha, databaseUrl: config.inventoryDatabaseUrlArn, rotationInventoryRlsRole: config.inventoryRlsRole, inventoryLogGroup: config.inventoryLogGroupName }).taskDefinition, taskDefinitionArn: brokerTaskDefinitionArn, status: "ACTIVE", enableFaultInjection: false });
 
 test("broker runtime derives inventory configuration without duplicating it in Lambda environment", () => {
-  const runtime = createBrokerRuntimeConfig({
+  const env = {
     BROKER_REPLAY_TABLE: STAGE_B.replayTable,
     BROKER_RECEIPT_BUCKET: "receipts",
     BROKER_CLUSTER_ARN: STAGE_B.clusterArn,
@@ -88,7 +88,8 @@ test("broker runtime derives inventory configuration without duplicating it in L
     BROKER_APPROVAL_EXPECTED_JSON: JSON.stringify({}),
     BROKER_IMAGES_JSON: JSON.stringify({ backendImageDigest: image }),
     BROKER_IMAGE_RELEASE_SHA: imageReleaseSha,
-  });
+  };
+  const runtime = createBrokerRuntimeConfig(env);
   assert.equal(runtime.inventoryImageDigest, image);
   assert.equal(runtime.inventoryImageReleaseSha, imageReleaseSha);
   assert.deepEqual(runtime.inventoryPrivateSubnetIds, STAGE_B.privateSubnetIds);
@@ -96,6 +97,9 @@ test("broker runtime derives inventory configuration without duplicating it in L
   assert.equal(runtime.inventoryDatabaseUrlArn, STAGE_B.inventoryDatabaseSecretArn);
   assert.equal(runtime.inventoryRlsRole, STAGE_B.inventoryRlsRole);
   assert.equal(runtime.inventoryLogGroupName, STAGE_B.inventoryLogGroupName);
+  const legacyEnv = { ...env };
+  delete legacyEnv.BROKER_IMAGE_RELEASE_SHA;
+  assert.throws(() => validatePreDeploymentInventoryConfiguration(createBrokerRuntimeConfig(legacyEnv)), /broker configuration|contract|image release/i);
 });
 
 function makeBrokerHandler({ definition = brokerDefinition(), tags = brokerTags, readApproval = async () => brokerApproval, describeTaskDefinition = async () => ({ taskDefinition: definition, tags }), describeTasks = async () => ({ tasks: [{ taskArn: brokerTaskArn, taskDefinitionArn: brokerTaskDefinitionArn, lastStatus: "STOPPED", tags: [{ key: "MSCQRPreDeploymentInventory", value: "rotation-inventory" }, { key: "ReleaseSha", value: sourceSha }, { key: "RotationId", value: "rotation-1" }], containers: [{ name: "inventory", exitCode: 0 }] }] }), runTask = async () => ({ failures: [], tasks: [{ taskArn: brokerTaskArn }] }), verifySignature = async () => true, claimPreDeploymentOperation = async () => {}, releasePreDeploymentOperation = async () => {}, markPreDeploymentLaunchUncertain = async () => {}, recordPreDeploymentTaskStarted = async () => {}, recordPreDeploymentCompleted = async () => {}, stopTask, now = () => new Date("2026-07-29T12:00:00.000Z"), monotonicNow = () => 0, sleep = async () => {} } = {}) {

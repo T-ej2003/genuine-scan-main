@@ -559,6 +559,20 @@ test("generated cutover command binds runtime config and image authorization byt
   }
 });
 
+test("runner-local runtime config is not overwritten on regeneration", () => {
+  const directory = fsTemp();
+  try {
+    const input = fullInput(directory, process.cwd());
+    const prepared = prepareProductionCutoverRuntime(input);
+    const legacy = { ...prepared.config, overlapTaskInput: { ...prepared.config.overlapTaskInput, imageReleaseSha: prepared.config.sourceSha } };
+    delete legacy.imageReleaseSha;
+    writeFileSync(prepared.configPath, JSON.stringify(legacy), { mode: 0o600 });
+    assert.throws(() => prepareProductionCutoverRuntime(input), /rotationConfigFile must not exist before its producer phase/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("canonical IAM evidence is sufficient without a duplicate temporary-capability file", () => {
   const directory = fsTemp();
   try {

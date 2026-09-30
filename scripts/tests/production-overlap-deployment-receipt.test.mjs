@@ -10,13 +10,14 @@ import { READY_FOR_OVERLAP_DEPLOYMENT_STAGES } from "../aws/production-overlap-r
 import { assertVerifierContinuationReceiptBindings, collectPostDeploymentOnboardingCredentials } from "../aws/verify-production-cutover-overlap.mjs";
 
 const sourceSha = "a".repeat(40);
+const imageReleaseSha = "f".repeat(40);
 const rotationId = "rotation-20260829015311-765c8a16";
 const sha = (value) => value.repeat(64);
 const taskDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:1";
 const previousTaskDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend:9";
 const imageDigest = `sha256:${"b".repeat(64)}`;
 const approval = createProductionEnvironmentApprovalEvidence({ environmentConfig: { id: 1, name: "production", can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 2, login: "reviewer" } }] }] }, repository: "T-ej2003/genuine-scan-main", environment: "production", sourceSha, workflowRef: "T-ej2003/genuine-scan-main/.github/workflows/release-gate.yml@refs/heads/main", eventName: "workflow_dispatch", workflowRunId: "10", workflowRunAttempt: "1", executionActor: "operator", observedAt: "2026-09-01T10:00:00.000Z" });
-const readiness = buildOverlapReadinessEvidence({ sourceSha, rotationId, rotationStateSha256: sha("c"), generatedAt: "2026-09-01T10:00:00.000Z", stages: Object.fromEntries(READY_FOR_OVERLAP_DEPLOYMENT_STAGES.map((name) => [name, { valid: true, evidenceRef: name, evidenceSha256: sha("1"), identityBindings: { sourceSha, rotationId, ...(name === "overlapTaskDefinition" ? { taskDefinitionArn } : {}) } }])) });
+const readiness = buildOverlapReadinessEvidence({ sourceSha, rotationId, rotationStateSha256: sha("c"), generatedAt: "2026-09-01T10:00:00.000Z", stages: Object.fromEntries(READY_FOR_OVERLAP_DEPLOYMENT_STAGES.map((name) => [name, { valid: true, evidenceRef: name, evidenceSha256: sha("1"), identityBindings: { sourceSha, rotationId, ...(name === "imageAuthorization" ? { imageReleaseSha } : {}), ...(name === "overlapTaskDefinition" ? { taskDefinitionArn, imageReleaseSha } : {}) } }])) });
 
 const receipt = (updateServiceCount = 1, disposition = "APPLIED") => buildProductionOverlapDeploymentReceipt({ sourceSha, rotationId, rotationStateSha256: sha("c"), readinessSha256: sha("d"), rotationFixtureSha256: sha("e"), environmentApproval: approval, deployedAt: "2026-09-01T10:01:00.000Z", expectedCurrentTaskDefinitionArn: previousTaskDefinitionArn, taskDefinitionArn, imageDigest, deploymentSha: sourceSha, deployment: { updateServiceCount, disposition, metadata: { clusterName: "mscqr-prod-euw2-main", serviceName: "mscqr-backend-servi-euw2", observedTaskDefinitionArn: taskDefinitionArn, observedImageDigest: imageDigest, serviceStable: true } } });
 const boundarySteps = () => [
