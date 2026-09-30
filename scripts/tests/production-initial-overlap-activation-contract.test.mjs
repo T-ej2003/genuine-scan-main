@@ -20,6 +20,7 @@ import { validateOnboardingContract, validateRotationClosedContract } from "../s
 import { readCurrentState, verify as persistVerifiedOverlap, writeState } from "../../backend/scripts/security/rotate-production-signing-material.mjs";
 
 const sourceSha = "a".repeat(40);
+const imageReleaseSha = "b".repeat(40);
 const imageDigest = `sha256:${"b".repeat(64)}`;
 const rotationId = "rotation-initial-activation-1";
 const deploymentSha = "c".repeat(40);
@@ -51,8 +52,8 @@ const state = (phase = "verified", extra = {}) => ({
   pending: { jwtVersionId: "jwt-version-1", qrPrivateVersionId: "qr-private-1", qrPublicVersionId: "qr-public-1" },
   overlapRuntime: {
     rotationId, phase: "overlap", deploymentSha, runtimeInvocationRef: "runtime-proof-1", observedAt,
-    healthObservedAt: "2026-08-26T11:59:59.000Z", healthHttpStatus: 200, healthReleaseGitSha: sourceSha,
-    expectedReleaseGitSha: sourceSha, expectedReleaseSha: sourceSha,
+    healthObservedAt: "2026-08-26T11:59:59.000Z", healthHttpStatus: 200, healthReleaseGitSha: imageReleaseSha,
+    expectedReleaseGitSha: imageReleaseSha, expectedReleaseSha: imageReleaseSha,
     targetTaskArn: taskArn, selectedTaskArn: taskArn, targetTaskDefinitionArn: taskDefinitionArn,
     targetImageDigest: imageDigest, targetService: "mscqr-backend-servi-euw2", targetCluster: STAGE_B.clusterArn,
     targetDeploymentId: "ecs-svc/123456789", ...runtimeChecks,
@@ -60,7 +61,7 @@ const state = (phase = "verified", extra = {}) => ({
   verification: { runtimeInvocationRef: "runtime-proof-1", ...Object.fromEntries(Object.entries(runtimeChecks).filter(([name]) => !name.startsWith("artifact"))) },
   ...extra,
 });
-const expected = { sourceSha, rotationId, deploymentSha, taskDefinitionArn, imageDigest };
+const expected = { sourceSha, imageReleaseSha, rotationId, deploymentSha, taskDefinitionArn, imageDigest };
 const claimFor = (value, expectedValue = expected) => {
   const claim = buildInitialActivationClaim({ ...expectedValue, overlapDeploymentSha: expectedValue.deploymentSha, activationTaskDefinitionArn: expectedValue.taskDefinitionArn.replace(/:[1-9][0-9]*$/, ":52"), overlapRuntimeProofSha256: createHash("sha256").update(canonicalJson(value.overlapRuntime)).digest("hex"), createdAt: "2026-08-26T12:00:31.000Z" });
   const claimRaw = Buffer.from(`${canonicalJson(claim)}\n`);
@@ -229,7 +230,7 @@ test("state byte tampering and expected identity drift fail closed", () => {
   assert.throws(() => validateProductionInitialActivationDuringAuthenticatedOverlap({ state: value, rawState, stateSha256: "0".repeat(64), expected, now }), /bytes/);
   const unrelatedObject = state(); unrelatedObject.rotationId = "rotation-other";
   assert.equal(validateProductionInitialActivationDuringAuthenticatedOverlap({ state: unrelatedObject, rawState, stateSha256: createHash("sha256").update(rawState).digest("hex"), ...claimFor(value), expected, now }).rotationId, rotationId);
-  for (const [name, replacement] of [["sourceSha", "f".repeat(40)], ["rotationId", "rotation-other"], ["deploymentSha", "d".repeat(40)], ["taskDefinitionArn", taskDefinitionArn.replace(/:51$/, ":52")], ["imageDigest", `sha256:${"e".repeat(64)}`]]) {
+  for (const [name, replacement] of [["sourceSha", "f".repeat(40)], ["imageReleaseSha", "f".repeat(40)], ["rotationId", "rotation-other"], ["deploymentSha", "d".repeat(40)], ["taskDefinitionArn", taskDefinitionArn.replace(/:51$/, ":52")], ["imageDigest", `sha256:${"e".repeat(64)}`]]) {
     assert.throws(() => validate(value, { [name]: replacement }), undefined, name);
   }
   for (const rotationId of ["short", "rotation\ninjected", "rotation id spaces"]) assert.throws(() => validate(value, { rotationId }), /identity/);
@@ -239,7 +240,7 @@ test("verified overlap plus strict onboarding permits readiness while security f
   validate(state());
   const runtimeNames = ["jwtCurrentRuntimeVerify", "jwtPreviousRuntimeVerify", "jwtInvalidRuntimeRejected", "qrCurrentRuntimeVerify", "qrPreviousRuntimeVerify", "qrTamperMatchingKeyTest", "qrUnknownKeyRejected", "cookieCurrentSealOnly", "cookiePreviousOpenDuringOverlap", "artifactCurrentRuntimeVerify", "artifactHistoricalRuntimeVerify"];
   const acceptanceNames = ["superAdminLogin", "mfa", "authMe", "refresh", "dashboardStats", "qrStats", "tenantIsolation", "rbac", "auditPath", "printerTrust", "antiCloning", "dbReady", "redisReady", "objectStorageReady", "stageANetworkingReady"];
-  const onboarding = { valid: true, evidenceRef: "onboarding:test", evidenceSha256: "7".repeat(64), sourceSha, imageDigest, taskDefinitionArn, taskArn, rotationId, rotationStateSha256: "8".repeat(64), taskMarker: true, ecsExecProof: true, serviceStable: true, targetTaskDefinitionMatch: true, targetImageDigestMatch: true, health: { serviceHealthy: true, healthReleaseGitSha: sourceSha }, rotationPhase: "verified", runtime: Object.fromEntries(runtimeNames.map((name) => [name, true])), acceptance: Object.fromEntries(acceptanceNames.map((name) => [name, true])) };
+  const onboarding = { valid: true, evidenceRef: "onboarding:test", evidenceSha256: "7".repeat(64), sourceSha, imageReleaseSha, imageDigest, taskDefinitionArn, taskArn, rotationId, rotationStateSha256: "8".repeat(64), taskMarker: true, ecsExecProof: true, serviceStable: true, targetTaskDefinitionMatch: true, targetImageDigestMatch: true, health: { serviceHealthy: true, healthReleaseGitSha: imageReleaseSha }, rotationPhase: "verified", runtime: Object.fromEntries(runtimeNames.map((name) => [name, true])), acceptance: Object.fromEntries(acceptanceNames.map((name) => [name, true])) };
   assert.equal(validateOnboardingContract(onboarding), true);
   const unrecoverable = { ...onboarding, runtime: { ...onboarding.runtime, qrPreviousRuntimeVerify: false, legacyQrKeypairUnrecoverable: true } };
   assert.equal(validateOnboardingContract(unrecoverable), true);
@@ -344,6 +345,7 @@ test("production closure consumes the exact verified-overlap state bytes", async
         PRODUCTION_INITIAL_OVERLAP_STATE_FILE: stateFile,
         PRODUCTION_INITIAL_OVERLAP_STATE_SHA256: createHash("sha256").update(rawState).digest("hex"),
         PRODUCTION_INITIAL_OVERLAP_SOURCE_SHA: sourceSha,
+        PRODUCTION_INITIAL_OVERLAP_IMAGE_RELEASE_SHA: imageReleaseSha,
         PRODUCTION_INITIAL_OVERLAP_ROTATION_ID: rotationId,
         PRODUCTION_INITIAL_OVERLAP_DEPLOYMENT_SHA: deploymentSha,
         PRODUCTION_INITIAL_OVERLAP_TASK_DEFINITION: taskDefinitionArn,
@@ -374,11 +376,11 @@ test("real producer-consumer disk rehearsal accepts the documented cluster ARN a
       caller: { Arn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-ecs-exec-verifier/rehearsal" },
       service: { services: [{ serviceName: "mscqr-backend-servi-euw2", enableExecuteCommand: true, deployments: [{ id: deploymentId, status: "PRIMARY", taskDefinition: taskDefinitionArn }] }], failures: [] },
       cluster: { clusters: [{ clusterArn: STAGE_B.clusterArn, clusterName: PRODUCTION_ECS_CLUSTER_NAME, status: "ACTIVE" }], failures: [] },
-      taskDefinition: { taskDefinition: { taskDefinitionArn, containerDefinitions: [{ name: "backend", image: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${imageDigest}`, environment: [{ name: "RELEASE_GIT_SHA", value: sourceSha }] }] } },
+      taskDefinition: { taskDefinition: { taskDefinitionArn, containerDefinitions: [{ name: "backend", image: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${imageDigest}`, environment: [{ name: "RELEASE_GIT_SHA", value: imageReleaseSha }] }] } },
       listed: { taskArns: [taskArn] },
       described: { tasks: [{ taskArn, clusterArn: STAGE_B.clusterArn, taskDefinitionArn, lastStatus: "RUNNING", healthStatus: "HEALTHY", group: "service:mscqr-backend-servi-euw2", startedBy: deploymentId, containers: [{ name: "backend", imageDigest }], tags: [{ key: "MSCQRExecTarget", value: "production-backend" }], managedAgents: [{ name: "ExecuteCommandAgent", lastStatus: "RUNNING" }] }], failures: [] },
     };
-    const proof = { rotationId, phase: "overlap", deploymentSha, runtimeInvocationRef: "runtime-proof-roundtrip", observedAt: observed, healthObservedAt: healthObserved, healthHttpStatus: 200, healthReleaseGitSha: sourceSha, expectedReleaseGitSha: sourceSha, ...runtimeChecks };
+    const proof = { rotationId, phase: "overlap", deploymentSha, runtimeInvocationRef: "runtime-proof-roundtrip", observedAt: observed, healthObservedAt: healthObserved, healthHttpStatus: 200, healthReleaseGitSha: imageReleaseSha, expectedReleaseGitSha: imageReleaseSha, ...runtimeChecks };
     const fakeTranscript = `MSCQR_PROOF_BEGIN\n${JSON.stringify(proof)}\nMSCQR_PROOF_END\n`;
     const aws = path.join(bin, "aws");
     writeFileSync(aws, `#!/usr/bin/env node
@@ -393,7 +395,7 @@ else if (!responses[key]) process.exit(8); else process.stdout.write(JSON.string
     const runVerifier = (cluster, output) => execFileSync(process.execPath, [
       "scripts/aws/verify-production-rotation-via-ecs-exec.mjs",
       "--cluster", cluster, "--service", "mscqr-backend-servi-euw2", "--task-definition", taskDefinitionArn,
-      "--image-digest", imageDigest, "--release-sha", sourceSha, "--deployment-sha", deploymentSha,
+      "--image-digest", imageDigest, "--release-sha", sourceSha, "--image-release-sha", imageReleaseSha, "--deployment-sha", deploymentSha,
       "--rotation-id", rotationId, "--invocation-ref", "runtime-proof-roundtrip", "--phase", "overlap",
       "--credential-source", "inherited-ecs-exec-verifier-session",
       "--fixture-file", fixtureFile, "--health-url", "https://www.mscqr.com/api/health", "--proof-output", output,
@@ -407,14 +409,14 @@ else if (!responses[key]) process.exit(8); else process.stdout.write(JSON.string
     const stateFile = path.join(directory, "state.json");
     const longerGrace = PRODUCTION_ROTATION_MINIMUM_GRACE_SECONDS + 1;
     writeState(stateFile, { ...state("overlap-deploy-required"), stateVersion: PRODUCTION_ROTATION_STATE_VERSION, minimumGraceSeconds: longerGrace, cleanupEligibleAt: undefined, overlapReadyAt: undefined, verifiedAt: undefined, overlapRuntime: undefined, verification: undefined });
-    const coordinatorConfig = { rotationId, sourceSha, overlapDeploymentSha: deploymentSha, minimumGraceSeconds: longerGrace };
+    const coordinatorConfig = { rotationId, sourceSha, imageReleaseSha, overlapDeploymentSha: deploymentSha, minimumGraceSeconds: longerGrace };
     await persistVerifiedOverlap({ config: coordinatorConfig, values: new Map([["state-file", stateFile], ["runtime-verification-file", proofFile]]), clock: () => Date.parse(observed) + 60_000 });
     const produced = JSON.parse(readFileSync(stateFile, "utf8"));
     const legacy = { ...produced, stateVersion: PRODUCTION_ROTATION_LEGACY_STATE_VERSION }; delete legacy.minimumGraceSeconds;
     writeFileSync(stateFile, `${JSON.stringify(legacy, null, 2)}\n`, { mode: 0o600 });
     const legacyBytes = readFileSync(stateFile);
     const legacySha256 = createHash("sha256").update(legacyBytes).digest("hex");
-    assert.match(execFileSync(process.execPath, ["scripts/aws/manage-production-initial-activation-lifecycle.mjs", "--mode", "validate-candidate", "--state-file", stateFile, "--state-sha256", legacySha256, "--source-sha", sourceSha, "--rotation-id", rotationId, "--deployment-sha", deploymentSha, "--task-definition", taskDefinitionArn, "--image-digest", imageDigest], { encoding: "utf8" }), /PRODUCTION_INITIAL_ACTIVATION_DURING_AUTHENTICATED_OVERLAP/);
+    assert.match(execFileSync(process.execPath, ["scripts/aws/manage-production-initial-activation-lifecycle.mjs", "--mode", "validate-candidate", "--state-file", stateFile, "--state-sha256", legacySha256, "--source-sha", sourceSha, "--image-release-sha", imageReleaseSha, "--rotation-id", rotationId, "--deployment-sha", deploymentSha, "--task-definition", taskDefinitionArn, "--image-digest", imageDigest], { encoding: "utf8" }), /PRODUCTION_INITIAL_ACTIVATION_DURING_AUTHENTICATED_OVERLAP/);
     readCurrentState({ config: coordinatorConfig, values: new Map([["state-file", stateFile]]) });
     const persistedBytes = readFileSync(stateFile);
     const persisted = JSON.parse(persistedBytes);
@@ -436,7 +438,7 @@ else if (!responses[key]) process.exit(8); else process.stdout.write(JSON.string
     const at = (object, field) => field.split(".").reduce((value, key) => value?.[key], object);
     for (const field of roundTripFields) assert.notEqual(at(persisted, field), undefined, `real producer omitted ${field}`);
     const stateSha256 = createHash("sha256").update(persistedBytes).digest("hex");
-    const activationArgs = ["--state-file", stateFile, "--state-sha256", stateSha256, "--source-sha", sourceSha, "--rotation-id", rotationId, "--deployment-sha", deploymentSha, "--task-definition", taskDefinitionArn, "--image-digest", imageDigest];
+    const activationArgs = ["--state-file", stateFile, "--state-sha256", stateSha256, "--source-sha", sourceSha, "--image-release-sha", imageReleaseSha, "--rotation-id", rotationId, "--deployment-sha", deploymentSha, "--task-definition", taskDefinitionArn, "--image-digest", imageDigest];
     assert.match(execFileSync(process.execPath, ["scripts/aws/manage-production-initial-activation-lifecycle.mjs", "--mode", "validate-candidate", ...activationArgs], { encoding: "utf8" }), /PRODUCTION_INITIAL_ACTIVATION_DURING_AUTHENTICATED_OVERLAP/);
     const workflow = yaml.load(readFileSync(".github/workflows/release-gate.yml", "utf8"));
     const reconstruction = workflow.jobs["deploy-production-ecs"].steps.find(({ name }) => name === "Reconstruct activation rotation contract on deployment runner");
@@ -498,7 +500,7 @@ else if (!responses[key]) process.exit(8); else process.stdout.write(JSON.string
     const onboardingFile = path.join(directory, "onboarding.json");
     const runtimeNames = ["jwtCurrentRuntimeVerify", "jwtPreviousRuntimeVerify", "jwtInvalidRuntimeRejected", "qrCurrentRuntimeVerify", "qrPreviousRuntimeVerify", "qrTamperMatchingKeyTest", "qrUnknownKeyRejected", "cookieCurrentSealOnly", "cookiePreviousOpenDuringOverlap", "artifactCurrentRuntimeVerify", "artifactHistoricalRuntimeVerify"];
     const acceptanceNames = ["superAdminLogin", "mfa", "authMe", "refresh", "dashboardStats", "qrStats", "tenantIsolation", "rbac", "auditPath", "printerTrust", "antiCloning", "dbReady", "redisReady", "objectStorageReady", "stageANetworkingReady"];
-    writeFileSync(onboardingFile, JSON.stringify({ valid: true, evidenceRef: "onboarding:roundtrip", evidenceSha256: "7".repeat(64), sourceSha, imageDigest, taskDefinitionArn, taskArn, rotationId, rotationStateSha256: stateSha256, taskMarker: true, ecsExecProof: true, serviceStable: true, targetTaskDefinitionMatch: true, targetImageDigestMatch: true, health: { serviceHealthy: true, healthReleaseGitSha: sourceSha }, rotationPhase: persisted.phase, runtime: Object.fromEntries(runtimeNames.map((name) => [name, true])), acceptance: Object.fromEntries(acceptanceNames.map((name) => [name, true])) }), { mode: 0o600 });
+    writeFileSync(onboardingFile, JSON.stringify({ valid: true, evidenceRef: "onboarding:roundtrip", evidenceSha256: "7".repeat(64), sourceSha, imageReleaseSha, imageDigest, taskDefinitionArn, taskArn, rotationId, rotationStateSha256: stateSha256, taskMarker: true, ecsExecProof: true, serviceStable: true, targetTaskDefinitionMatch: true, targetImageDigestMatch: true, health: { serviceHealthy: true, healthReleaseGitSha: imageReleaseSha }, rotationPhase: persisted.phase, runtime: Object.fromEntries(runtimeNames.map((name) => [name, true])), acceptance: Object.fromEntries(acceptanceNames.map((name) => [name, true])) }), { mode: 0o600 });
     assert.equal(validateOnboardingContract(JSON.parse(readFileSync(onboardingFile, "utf8"))), true);
   } finally {
     rmSync(directory, { recursive: true, force: true });

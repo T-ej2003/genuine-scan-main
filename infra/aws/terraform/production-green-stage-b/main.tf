@@ -11,6 +11,7 @@ locals {
     BROKER_TASK_TEMPLATE_HASHES_JSON  = jsonencode(local.broker_template_hashes)
     BROKER_APPROVAL_EXPECTED_JSON     = jsonencode(local.broker_approval_expected)
     BROKER_IMAGES_JSON                = jsonencode(local.broker_images)
+    BROKER_IMAGE_RELEASE_SHA          = var.image_release_sha
   }
   tags = {
     Environment = "production"
@@ -315,7 +316,7 @@ locals {
     canaryImageDigest   = var.canary_image
   }
   broker_approval_expected = {
-    releaseSha              = var.image_release_sha
+    releaseSha              = var.tooling_sha
     sourceContractSha256    = var.source_contract_sha256
     migrationSetDigest      = var.migration_set_digest
     packageChecksumSha256   = var.package_checksum_sha256

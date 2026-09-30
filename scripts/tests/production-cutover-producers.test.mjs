@@ -73,7 +73,7 @@ test("strict onboarding never requests conditional MFA until its corresponding l
       const tenant = options.body?.includes("tenant@example.invalid");
       return response(200, { data: { auth: { sessionStage: "ACTIVE", mfaVerified: true }, user: tenant ? { role: "LICENSEE_ADMIN", licenseeId: "tenant-licensee" } : { role: "PLATFORM_SUPER_ADMIN", licenseeId: null } } });
     }
-    if (url.endsWith("/version")) return response(200, { releaseGitSha: "a".repeat(40) });
+    if (url.endsWith("/version")) return response(200, { releaseGitSha: "c".repeat(40) });
     if (url.endsWith("/api/health/ready")) return response(200, { status: "ready", dependencies: { database: { ready: true }, redis: { ready: true }, objectStorage: { ready: true } } });
     if (url.includes("/api/licensees/")) return response(403, {});
     if (url.endsWith("/api/manufacturer/printer-agent/status")) return response(403, {});
@@ -92,7 +92,7 @@ test("strict onboarding never requests conditional MFA until its corresponding l
       rotationStateReadback: async () => ({ state: { rotationId: "rotation-test-1", phase: "overlap-deploy-required" }, sha256: "b".repeat(64) }),
       rotationFixtureFile, fetchImpl,
     });
-    assert.equal((await run({ sourceSha: "a".repeat(40), imageDigest: digest, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskArn, rotationId: "rotation-test-1", rotationStateSha256: "b".repeat(64), rotationFixtureSha256 })).valid, true);
+    assert.equal((await run({ sourceSha: "a".repeat(40), imageReleaseSha: "c".repeat(40), imageDigest: digest, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskArn, rotationId: "rotation-test-1", rotationStateSha256: "b".repeat(64), rotationFixtureSha256 })).valid, true);
     assert.equal(mfaCalls, 0);
   } finally {
     fs.rmSync(rotationFixtureFile, { force: true });
@@ -326,7 +326,7 @@ test("strict onboarding adapter uses the cookie and CSRF boundary on its real pr
     if (url.endsWith("/api/auth/mfa/challenge/begin")) return response(200, { data: { ticket: "ticket" } });
     if (url.endsWith("/api/auth/mfa/challenge/complete")) return response(200, {});
     if (url.endsWith("/api/auth/refresh") && options.headers["x-csrf-token"] !== "csrf") return response(403, {});
-    if (url.endsWith("/version")) return response(200, { releaseGitSha: "a".repeat(40) });
+    if (url.endsWith("/version")) return response(200, { releaseGitSha: "c".repeat(40) });
     if (url.endsWith("/api/health/ready")) return response(200, { status: "ready", dependencies: { database: { ready: true }, redis: { ready: true }, objectStorage: { ready: true } } });
     if (url.includes("/api/licensees/")) return tenantLoginObserved ? response(403, {}) : response(500, {});
     if (url.endsWith("/api/manufacturer/printer-agent/status")) return response(403, {});
@@ -349,7 +349,7 @@ test("strict onboarding adapter uses the cookie and CSRF boundary on its real pr
     fetchImpl,
   });
   assert.equal(mfaReads, 0);
-  const evidence = await run({ sourceSha: "a".repeat(40), imageDigest: digest, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskArn, rotationId: "rotation-test-1", rotationStateSha256: "b".repeat(64), rotationFixtureSha256 });
+  const evidence = await run({ sourceSha: "a".repeat(40), imageReleaseSha: "c".repeat(40), imageDigest: digest, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskArn, rotationId: "rotation-test-1", rotationStateSha256: "b".repeat(64), rotationFixtureSha256 });
   assert.equal(evidence.valid, true);
   assert.equal(mfaReads, 1);
   assert.ok(requests.findIndex(({ url }) => url.endsWith("/mfa/challenge/begin")) > requests.findIndex(({ url }) => url.endsWith("/login")));
@@ -381,7 +381,7 @@ test("strict onboarding adapter uses the cookie and CSRF boundary on its real pr
     expectedRotationStatePhase: "verified",
     fetchImpl,
   });
-  await assert.rejects(() => missingCredentials({ sourceSha: "a".repeat(40), imageDigest: digest, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskArn, rotationId: "rotation-test-1", rotationStateSha256: "b".repeat(64), rotationFixtureSha256 }), /Mandatory onboarding check failed: superAdminLogin/);
+  await assert.rejects(() => missingCredentials({ sourceSha: "a".repeat(40), imageReleaseSha: "c".repeat(40), imageDigest: digest, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskArn, rotationId: "rotation-test-1", rotationStateSha256: "b".repeat(64), rotationFixtureSha256 }), /Mandatory onboarding check failed: superAdminLogin/);
 
   const staleRotationState = createStrictHttpOnboardingAdapter({
     baseUrl: "https://fixture.example",
@@ -397,7 +397,7 @@ test("strict onboarding adapter uses the cookie and CSRF boundary on its real pr
     expectedRotationStatePhase: "verified",
     fetchImpl,
   });
-  await assert.rejects(() => staleRotationState({ sourceSha: "a".repeat(40), imageDigest: digest, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskArn, rotationId: "rotation-test-1", rotationStateSha256: "b".repeat(64), rotationFixtureSha256 }), /Mandatory onboarding check failed: rotationState/);
+  await assert.rejects(() => staleRotationState({ sourceSha: "a".repeat(40), imageReleaseSha: "c".repeat(40), imageDigest: digest, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskArn, rotationId: "rotation-test-1", rotationStateSha256: "b".repeat(64), rotationFixtureSha256 }), /Mandatory onboarding check failed: rotationState/);
 
   currentMfaCode = undefined;
   const missing = createStrictHttpOnboardingAdapter({
@@ -412,13 +412,13 @@ test("strict onboarding adapter uses the cookie and CSRF boundary on its real pr
     expectedRotationStatePhase: "verified",
     fetchImpl,
   });
-  await assert.rejects(() => missing({ sourceSha: "a".repeat(40), imageDigest: digest, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskArn, rotationId: "rotation-test-1", rotationStateSha256: "b".repeat(64), rotationFixtureSha256 }), /Mandatory onboarding check failed: superAdminLogin/);
+  await assert.rejects(() => missing({ sourceSha: "a".repeat(40), imageReleaseSha: "c".repeat(40), imageDigest: digest, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskArn, rotationId: "rotation-test-1", rotationStateSha256: "b".repeat(64), rotationFixtureSha256 }), /Mandatory onboarding check failed: superAdminLogin/);
 
   const callsBeforeFixtureFailures = requests.length;
-  await assert.rejects(() => run({ sourceSha: "a".repeat(40), imageDigest: digest, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskArn, rotationId: "rotation-test-1", rotationStateSha256: "b".repeat(64) }), /Hash-bound rotation QR fixture/);
-  await assert.rejects(() => run({ sourceSha: "a".repeat(40), imageDigest: digest, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskArn, rotationId: "rotation-test-1", rotationStateSha256: "b".repeat(64), rotationFixtureSha256: "c".repeat(64) }), /unavailable, changed, or malformed/);
+  await assert.rejects(() => run({ sourceSha: "a".repeat(40), imageReleaseSha: "c".repeat(40), imageDigest: digest, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskArn, rotationId: "rotation-test-1", rotationStateSha256: "b".repeat(64) }), /Hash-bound rotation QR fixture/);
+  await assert.rejects(() => run({ sourceSha: "a".repeat(40), imageReleaseSha: "c".repeat(40), imageDigest: digest, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskArn, rotationId: "rotation-test-1", rotationStateSha256: "b".repeat(64), rotationFixtureSha256: "c".repeat(64) }), /unavailable, changed, or malformed/);
   fs.writeFileSync(rotationFixtureFile, JSON.stringify({ token: "replacement-token" }), { mode: 0o600 });
-  await assert.rejects(() => run({ sourceSha: "a".repeat(40), imageDigest: digest, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskArn, rotationId: "rotation-test-1", rotationStateSha256: "b".repeat(64), rotationFixtureSha256 }), /unavailable, changed, or malformed/);
+  await assert.rejects(() => run({ sourceSha: "a".repeat(40), imageReleaseSha: "c".repeat(40), imageDigest: digest, taskDefinitionArn: expected.expectedTaskDefinitionArn, taskArn, rotationId: "rotation-test-1", rotationStateSha256: "b".repeat(64), rotationFixtureSha256 }), /unavailable, changed, or malformed/);
   assert.equal(requests.length, callsBeforeFixtureFailures);
   fs.rmSync(rotationFixtureFile, { force: true });
 });

@@ -127,6 +127,7 @@ export function fixtureInput(overrides = {}) {
   const mutations = [];
   let registeredOverlapDefinition;
   const imageAuthorizationFixture = makeCanonicalImageAuthorization({ sourceSha });
+  const imageReleaseSha = imageAuthorizationFixture.authorization.imageReleaseSha;
   const rootDropContinuity = {
     rotationId,
     imageAuthorizationSha256: imageAuthorizationFixture.authorization.authorizationSha256,
@@ -165,7 +166,7 @@ export function fixtureInput(overrides = {}) {
     stageA,
     artifactSigning: artifactFixture(),
     overlapTask: {
-      input: { backendImage: imageDigest, releaseSha: sourceSha, backendLogGroup: "/aws/ecs/rehearsal", secretBindings: { ...secretBindings, ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls_read" } },
+      input: { backendImage: imageDigest, imageReleaseSha, backendLogGroup: "/aws/ecs/rehearsal", secretBindings: { ...secretBindings, ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls_read" } },
       register: async ({ taskDefinition, tags }) => {
         mutations.push("M4_REGISTER_TASK_DEFINITION");
         registeredOverlapDefinition = structuredClone(taskDefinition);
@@ -702,6 +703,7 @@ test("the real predeployment adapter feeds the same cutover spine before deploym
   let registeredDefinition;
   const preAdapter = createProductionPreDeploymentInventoryAdapter({
     sourceSha,
+    imageReleaseSha: input.imageAuthorization.imageReleaseSha,
     imageDigest: imageDigest,
     config: { inventoryApprovalId: stageBApprovalIdForReleaseSha(sourceSha), rotationInventoryRlsRole: "mscqr_prod_rls_read", inventoryLogGroupName: "/ecs/mscqr-production/rls-green-backend", overlapTaskInput: { backendLogGroup: "/ecs/mscqr-production/rls-green-backend", secretBindings: { ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls_read" } } },
     run: (args) => {
@@ -821,7 +823,7 @@ test("bootstrap ARNs replace stale overlap bindings on the real control-plane pa
   const registeredSecrets = Object.fromEntries(registeredPayload.taskDefinition.containerDefinitions.find(({ name }) => name === "backend").secrets.map(({ name, valueFrom }) => [name, valueFrom]));
   for (const name of Object.keys(runtimeBindings)) assert.equal(registeredSecrets[name], runtimeBindings[name]);
   assert.equal(registeredPayload.taskDefinition.containerDefinitions.find(({ name }) => name === "backend").image, imageDigest);
-  assert.equal(registeredPayload.taskDefinition.containerDefinitions.find(({ name }) => name === "backend").environment.find(({ name }) => name === "RELEASE_GIT_SHA").value, sourceSha);
+  assert.equal(registeredPayload.taskDefinition.containerDefinitions.find(({ name }) => name === "backend").environment.find(({ name }) => name === "RELEASE_GIT_SHA").value, input.imageAuthorization.imageReleaseSha);
   assert.equal(result.results.overlapTaskDefinition.valid, true);
 });
 
@@ -909,20 +911,21 @@ test("transition matrix rejects field, SHA, identity, and ARN handoff corruption
 test("strict onboarding has no skip path", async () => {
   const probes = Object.fromEntries(STRICT_ONBOARDING_CHECKS.map((name) => [name, async () => true]));
   delete probes.rbac;
-  await assert.rejects(() => runStrictOnboardingProbes({ probes, expected: { sourceSha, imageDigest: digest, taskDefinitionArn, taskArn, rotationId, rotationStateSha256 } }), /unavailable/);
+  await assert.rejects(() => runStrictOnboardingProbes({ probes, expected: { sourceSha, imageReleaseSha: fixtureInput().imageAuthorization.imageReleaseSha, imageDigest: digest, taskDefinitionArn, taskArn, rotationId, rotationStateSha256 } }), /unavailable/);
 });
 
 test("onboarding evidence fingerprint contains only non-secret metadata", async () => {
   const probes = Object.fromEntries(STRICT_ONBOARDING_CHECKS.map((name) => [name, async () => true]));
-  const evidence = await runStrictOnboardingProbes({ probes, expected: { sourceSha, imageDigest: digest, taskDefinitionArn, taskArn, rotationId, rotationStateSha256 } });
+  const evidence = await runStrictOnboardingProbes({ probes, expected: { sourceSha, imageReleaseSha: fixtureInput().imageAuthorization.imageReleaseSha, imageDigest: digest, taskDefinitionArn, taskArn, rotationId, rotationStateSha256 } });
   const fingerprint = buildOnboardingEvidenceFingerprint(evidence);
-  assert.deepEqual(Object.keys(fingerprint).sort(), ["checks", "imageDigest", "rotationId", "rotationStateSha256", "rotationPhase", "sourceSha", "taskArn", "taskDefinitionArn"].sort());
+  assert.deepEqual(Object.keys(fingerprint).sort(), ["checks", "imageDigest", "imageReleaseSha", "rotationId", "rotationStateSha256", "rotationPhase", "sourceSha", "taskArn", "taskDefinitionArn"].sort());
   assert.doesNotMatch(JSON.stringify(fingerprint), /password|database_url|private.?key|secret|bearer|qr.?payload/i);
 });
 
 const failCases = [
   ["wrong-protected-main-sha", (i) => { i.imageAuthorization.sourceSha = "f".repeat(40); }],
   ["wrong-image-sha", (i) => { i.imageAuthorization.sourceSha = "f".repeat(40); }],
+  ["overlap-image-source-substitution", (i) => { i.overlapTask.input.imageReleaseSha = "f".repeat(40); }],
   ["wrong-image-digest", (i) => { i.imageAuthorization.backendDigest = `sha256:${"e".repeat(64)}`; }],
   ["invalid-signature", (i) => { i.imageAuthorization.signatureVerified = false; }],
   ["invalid-attestation", (i) => { i.imageAuthorization.attestationVerified = false; }],
@@ -999,7 +1002,7 @@ test("every cutover failure injection fails closed", async () => {
     }
   }
   assert.equal(unexpectedPasses, 0);
-  assert.equal(failCases.length, 54);
+  assert.equal(failCases.length, 55);
   assert.equal(failureResults.length, failCases.length);
   assert.equal(failureResults.filter(({ result }) => result !== "EXPECTED_FAILURE").length, 0);
 });

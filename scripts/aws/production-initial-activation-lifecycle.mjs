@@ -18,11 +18,11 @@ const ISO = (value) => typeof value === "string" && Number.isFinite(Date.parse(v
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const awsError = (code, operation, message) => new RegExp(`^(?:aws: \\[ERROR\\]: )?An error occurred \\(${code}\\) when calling the ${operation} operation: ${message}\\s*$`);
 const exactKeys = (value, keys) => value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).sort().join(",") === [...keys].sort().join(",");
-const CLAIM_FIELDS = Object.freeze(["schemaVersion", "kind", "environment", "repository", "sourceSha", "rotationId", "overlapDeploymentSha", "taskDefinitionArn", "activationTaskDefinitionArn", "imageDigest", "overlapRuntimeProofSha256", "activationTransactionId", "createdAt"]);
-const COMPLETION_FIELDS = Object.freeze(["schemaVersion", "kind", "environment", "repository", "sourceSha", "rotationId", "overlapDeploymentSha", "taskDefinitionArn", "activationTaskDefinitionArn", "imageDigest", "activationTransactionId", "claimSha256", "claimVersionId", "rlsReceiptSha256", "onboardingEvidenceSha256", "completedAt"]);
+const CLAIM_FIELDS = Object.freeze(["schemaVersion", "kind", "environment", "repository", "sourceSha", "imageReleaseSha", "rotationId", "overlapDeploymentSha", "taskDefinitionArn", "activationTaskDefinitionArn", "imageDigest", "overlapRuntimeProofSha256", "activationTransactionId", "createdAt"]);
+const COMPLETION_FIELDS = Object.freeze(["schemaVersion", "kind", "environment", "repository", "sourceSha", "imageReleaseSha", "rotationId", "overlapDeploymentSha", "taskDefinitionArn", "activationTaskDefinitionArn", "imageDigest", "activationTransactionId", "claimSha256", "claimVersionId", "rlsReceiptSha256", "onboardingEvidenceSha256", "completedAt"]);
 
 const canonicalBytes = (value) => Buffer.from(`${canonicalJson(value)}\n`);
-const identity = (value) => ({ sourceSha: value.sourceSha, rotationId: value.rotationId, overlapDeploymentSha: value.overlapDeploymentSha, taskDefinitionArn: value.taskDefinitionArn, activationTaskDefinitionArn: value.activationTaskDefinitionArn, imageDigest: value.imageDigest, activationTransactionId: value.activationTransactionId });
+const identity = (value) => ({ sourceSha: value.sourceSha, imageReleaseSha: value.imageReleaseSha, rotationId: value.rotationId, overlapDeploymentSha: value.overlapDeploymentSha, taskDefinitionArn: value.taskDefinitionArn, activationTaskDefinitionArn: value.activationTaskDefinitionArn, imageDigest: value.imageDigest, activationTransactionId: value.activationTransactionId });
 export function assertOpaqueS3VersionId(value, label = "S3 VersionId") {
   if (typeof value !== "string" || value.length === 0) throw new Error(`${label} must be a non-empty string.`);
   for (let index = 0; index < value.length; index += 1) {
@@ -38,12 +38,12 @@ export function assertOpaqueS3VersionId(value, label = "S3 VersionId") {
 }
 const claimVersionIdValue = (value) => value === undefined ? "UNVERSIONED" : assertOpaqueS3VersionId(value, "claimVersionId");
 const assertIdentity = (value) => {
-  if (!SHA40.test(value.sourceSha || "") || !ROTATION_ID.test(value.rotationId || "") || !SHA40.test(value.overlapDeploymentSha || "") || !TASK_DEFINITION.test(value.taskDefinitionArn || "") || !TASK_DEFINITION.test(value.activationTaskDefinitionArn || "") || !DIGEST.test(value.imageDigest || "") || !SHA256.test(value.activationTransactionId || "")) throw new Error("Production activation lifecycle identity is invalid.");
+  if (!SHA40.test(value.sourceSha || "") || !SHA40.test(value.imageReleaseSha || "") || !ROTATION_ID.test(value.rotationId || "") || !SHA40.test(value.overlapDeploymentSha || "") || !TASK_DEFINITION.test(value.taskDefinitionArn || "") || !TASK_DEFINITION.test(value.activationTaskDefinitionArn || "") || !DIGEST.test(value.imageDigest || "") || !SHA256.test(value.activationTransactionId || "")) throw new Error("Production activation lifecycle identity is invalid.");
 };
-const transactionId = (value) => sha256(canonicalJson({ environment: "production", repository: REPOSITORY, sourceSha: value.sourceSha, rotationId: value.rotationId, overlapDeploymentSha: value.overlapDeploymentSha, taskDefinitionArn: value.taskDefinitionArn, activationTaskDefinitionArn: value.activationTaskDefinitionArn, imageDigest: value.imageDigest, overlapRuntimeProofSha256: value.overlapRuntimeProofSha256 }));
+const transactionId = (value) => sha256(canonicalJson({ environment: "production", repository: REPOSITORY, sourceSha: value.sourceSha, imageReleaseSha: value.imageReleaseSha, rotationId: value.rotationId, overlapDeploymentSha: value.overlapDeploymentSha, taskDefinitionArn: value.taskDefinitionArn, activationTaskDefinitionArn: value.activationTaskDefinitionArn, imageDigest: value.imageDigest, overlapRuntimeProofSha256: value.overlapRuntimeProofSha256 }));
 
-export function buildInitialActivationClaim({ sourceSha, rotationId, overlapDeploymentSha, taskDefinitionArn, activationTaskDefinitionArn, imageDigest, overlapRuntimeProofSha256, createdAt } = {}) {
-  const claim = { schemaVersion: 1, kind: CLAIM_KIND, environment: "production", repository: REPOSITORY, sourceSha, rotationId, overlapDeploymentSha, taskDefinitionArn, activationTaskDefinitionArn, imageDigest, overlapRuntimeProofSha256, activationTransactionId: "", createdAt };
+export function buildInitialActivationClaim({ sourceSha, imageReleaseSha, rotationId, overlapDeploymentSha, taskDefinitionArn, activationTaskDefinitionArn, imageDigest, overlapRuntimeProofSha256, createdAt } = {}) {
+  const claim = { schemaVersion: 1, kind: CLAIM_KIND, environment: "production", repository: REPOSITORY, sourceSha, imageReleaseSha, rotationId, overlapDeploymentSha, taskDefinitionArn, activationTaskDefinitionArn, imageDigest, overlapRuntimeProofSha256, activationTransactionId: "", createdAt };
   claim.activationTransactionId = transactionId(claim);
   validateInitialActivationClaim(claim);
   return Object.freeze(claim);

@@ -181,12 +181,12 @@ export async function runProductionCutoverOverlapControlPlane(input = {}) {
   return { terminalState: "DEPLOYED_PENDING_VERIFICATION", deploymentReceipt: authenticatedReceipt, deployment, mutationSequence: [{ name: "M6_ECS_UPDATE_SERVICE", count: deployment.updateServiceCount, payloadSha256: sha(deployment.mutationPayload || deployment) }] };
 }
 
-export async function runPostOverlapVerification({ deployment, sourceSha, rotationId, rotationStateSha256, rotationFixtureSha256, taskDefinitionArn, expectedImageDigest, verifierSession, postDeploy, ecsExec, rotationVerify } = {}) {
-  if (!deployment || !postDeploy?.run || !ecsExec?.run || !rotationVerify?.run) throw new Error("Post-overlap verification adapters are incomplete.");
+export async function runPostOverlapVerification({ deployment, sourceSha, imageReleaseSha, rotationId, rotationStateSha256, rotationFixtureSha256, taskDefinitionArn, expectedImageDigest, verifierSession, postDeploy, ecsExec, rotationVerify } = {}) {
+  if (!deployment || !SHA40.test(sourceSha || "") || !SHA40.test(imageReleaseSha || "") || !postDeploy?.run || !ecsExec?.run || !rotationVerify?.run) throw new Error("Post-overlap verification adapters or release identities are incomplete.");
   const resumed = deployment.resumePersistedProof === true || deployment.resumeVerified === true;
   const deployed = resumed ? deployment.persistedDeployed : await postDeploy.run({ deployment, taskDefinitionArn, verifierSession });
   if (deployed?.valid !== true || deployed.taskDefinitionArn !== taskDefinitionArn || deployed.imageDigest !== expectedImageDigest || deployed.taskTag !== "MSCQRExecTarget=production-backend" || typeof deployed.taskArn !== "string") throw new Error("Replacement task did not converge to the reviewed task-definition, digest, and execution marker.");
-  const execProof = resumed ? deployment.persistedExecProof : await ecsExec.run({ taskArn: deployed.taskArn, taskDefinitionArn, imageDigest: deployed.imageDigest, sourceSha, rotationId, rotationFixtureSha256, verifierSession });
+  const execProof = resumed ? deployment.persistedExecProof : await ecsExec.run({ taskArn: deployed.taskArn, taskDefinitionArn, imageDigest: deployed.imageDigest, sourceSha, imageReleaseSha, rotationId, rotationFixtureSha256, verifierSession });
   if (execProof?.valid !== true) throw new Error("ECS Exec runtime proof is invalid.");
   const verified = await rotationVerify.run({ execProof, sourceSha, rotationId, rotationStateSha256, rotationFixtureSha256, taskDefinitionArn, imageDigest: deployed.imageDigest, taskArn: deployed.taskArn });
   if (verified?.terminalState !== "VERIFIED_OVERLAP" || verified.rotationId !== rotationId || !SHA256.test(verified.rotationStateSha256 || "") || !verified.overlapReadyAt || !verified.cleanupEligibleAt) throw new Error("Coordinator overlap verification did not reach VERIFIED_OVERLAP.");
@@ -249,12 +249,17 @@ export function assertImageAuthorization(value, sourceSha, validation = {}) {
 
 export const authorizedBackendDigest = (value) => value?.backendDigest || value?.backend?.digest || value?.backend?.imageDigest || value?.backendImageDigest || value?.images?.find(({ service }) => service === "backend")?.digest;
 
-function assertOverlapInputBinding(overlapTask, imageAuthorization, artifact, sourceSha) {
+function assertOverlapImageBinding(overlapTask, imageAuthorization, sourceSha) {
   const input = overlapTask?.input;
-  if (!input || input.releaseSha !== sourceSha) throw new Error("Overlap task input is not bound to the protected-main source SHA.");
+  if (!input || imageAuthorization?.sourceSha !== sourceSha || input.imageReleaseSha !== imageAuthorization?.imageReleaseSha) throw new Error("Overlap task input is not bound to the protected-main release and authenticated image source.");
   const authorizedBackend = imageAuthorization?.imageEvidence?.images?.find(({ service }) => service === "backend");
   const expectedImage = authorizedBackend && `${STAGE_B.account}.dkr.ecr.${STAGE_B.region}.amazonaws.com/${authorizedBackend.repository}@${authorizedBackend.digest}`;
   if (!expectedImage || input.backendImage !== expectedImage) throw new Error("Overlap task input is not bound to the authorized backend image.");
+}
+
+function assertOverlapInputBinding(overlapTask, imageAuthorization, artifact, sourceSha) {
+  assertOverlapImageBinding(overlapTask, imageAuthorization, sourceSha);
+  const input = overlapTask.input;
   const artifactBindings = artifact?.bindings || {};
   for (const name of ["ARTIFACT_SIGN_PRIVATE_KEY_CURRENT", "ARTIFACT_SIGN_PUBLIC_KEY_CURRENT", "ARTIFACT_SIGN_ACTIVE_KEY_VERSION", "ARTIFACT_SIGN_PUBLIC_KEYS_JSON"]) {
     if (input.secretBindings?.[name] !== artifactBindings[name]) throw new Error(`Overlap task artifact binding diverges at ${name}.`);
@@ -285,6 +290,7 @@ export async function runProductionCutoverControlPlane(input = {}) {
   const results = { protectedMain: { valid: true, sourceSha, evidenceSha256: imageAuthorization?.evidenceSha256 } , imageAuthorization };
 
   assertImageAuthorization(imageAuthorization, sourceSha, imageAuthorizationValidation);
+  assertOverlapImageBinding(overlapTask, imageAuthorization, sourceSha);
 
   assertIamReport(iamReport, sourceSha);
   assertCheckerTrustEvidence(checkerTrustEvidence, sourceSha);
@@ -394,7 +400,7 @@ export async function runProductionCutoverControlPlane(input = {}) {
     verifierIdentity: stageEvidence("verifierIdentity", identities.verifier, { sourceSha }),
     stageA: stageEvidence("stageA", stageAResult, { sourceSha }),
     artifactSigning: stageEvidence("artifactSigning", results.artifactSigning, { sourceSha }),
-    overlapTaskDefinition: stageEvidence("overlapTaskDefinition", task, { sourceSha, taskDefinitionArn: task.taskDefinitionArn, imageDigest: expectedImageDigest }),
+    overlapTaskDefinition: stageEvidence("overlapTaskDefinition", task, { sourceSha, imageReleaseSha: imageAuthorization.imageReleaseSha, taskDefinitionArn: task.taskDefinitionArn, imageDigest: expectedImageDigest }),
     inventory: stageEvidence("inventory", inventoryResult, { sourceSha, rotationId }),
     rotationPrepare: stageEvidence("rotationPrepare", rotation, { sourceSha, rotationId }),
   };
@@ -416,14 +422,14 @@ export async function runProductionCutoverControlPlane(input = {}) {
   recordMutation(mutations, "M6_ECS_UPDATE_SERVICE", deployment);
   results.deployment = { ...deployment, sourceSha, rotationId, rotationStateSha256, ecsUpdateServiceCount: deployment.updateServiceCount };
 
-  const overlapVerification = await runPostOverlapVerification({ deployment, sourceSha, rotationId, rotationStateSha256, rotationFixtureSha256, taskDefinitionArn: task.taskDefinitionArn, expectedImageDigest, verifierSession, postDeploy, ecsExec, rotationVerify: rotationPrepare?.verifyOverlap });
+  const overlapVerification = await runPostOverlapVerification({ deployment, sourceSha, imageReleaseSha: imageAuthorization.imageReleaseSha, rotationId, rotationStateSha256, rotationFixtureSha256, taskDefinitionArn: task.taskDefinitionArn, expectedImageDigest, verifierSession, postDeploy, ecsExec, rotationVerify: rotationPrepare?.verifyOverlap });
   const { deployed, execProof } = overlapVerification;
   results.postDeploy = { ...deployed, sourceSha, rotationId, selectedTaskArn: deployed.taskArn, propagateTags: deployment.propagateTags, updateServiceCount: deployment.updateServiceCount };
   results.ecsExec = { ...execProof, sourceSha, rotationId, taskArn: deployed.taskArn, selectedTaskArn: deployed.taskArn, taskDefinitionArn: task.taskDefinitionArn, imageDigest: deployed.imageDigest, taskTag: "MSCQRExecTarget=production-backend", targetTaskArn: deployed.taskArn, revalidatedArn: deployed.taskArn, runtimeProof: true };
   results.ecsExecSelection = { valid: true, evidenceRef: execProof.evidenceRef, evidenceSha256: execProof.evidenceSha256, sourceSha, rotationId, taskArn: deployed.taskArn, selectedTaskArn: deployed.taskArn, targetTaskArn: deployed.taskArn, revalidatedArn: deployed.taskArn, taskDefinitionArn: task.taskDefinitionArn, imageDigest: deployed.imageDigest, taskTag: "MSCQRExecTarget=production-backend", runtimeProof: true };
   results.ecsExecRuntime = { ...results.ecsExecSelection };
 
-  const onboardingResult = await produceOnboardingEvidence({ runStrictProbes: onboarding?.run, expectedSourceSha: sourceSha, expectedImageDigest: deployed.imageDigest, expectedTaskDefinitionArn: task.taskDefinitionArn, expectedTaskArn: deployed.taskArn, expectedRotationId: rotationId, expectedRotationStateSha256: rotationStateSha256, expectedRotationFixtureSha256: rotationFixtureSha256 });
+  const onboardingResult = await produceOnboardingEvidence({ runStrictProbes: onboarding?.run, expectedSourceSha: sourceSha, expectedImageReleaseSha: imageAuthorization.imageReleaseSha, expectedImageDigest: deployed.imageDigest, expectedTaskDefinitionArn: task.taskDefinitionArn, expectedTaskArn: deployed.taskArn, expectedRotationId: rotationId, expectedRotationStateSha256: rotationStateSha256, expectedRotationFixtureSha256: rotationFixtureSha256 });
   validateOnboardingContract(onboardingResult.evidence);
   results.onboarding = { ...onboardingResult, runtimeProof: true, taskArn: deployed.taskArn, sourceSha, checks: onboardingResult.evidence?.checks };
   results.strictOnboarding = results.onboarding;

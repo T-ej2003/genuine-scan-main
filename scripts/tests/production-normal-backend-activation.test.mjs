@@ -8,14 +8,15 @@ import { iamSimulationContextArgs } from "../aws/iam-simulation-context.mjs";
 import { assertNormalActivationPolicyDeltaOnly } from "../aws/production-normal-backend-activation-policy.mjs";
 
 const sourceSha = "a".repeat(40);
+const imageReleaseSha = "d".repeat(40);
 const digest = `sha256:${"b".repeat(64)}`;
 const targetArn = `${NORMAL_ACTIVATION.clusterArn.replace("cluster/mscqr-prod-euw2-main", "task-definition/mscqr-production-rls-green-backend-candidate")}:12`;
 const image = `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${digest}`;
 const sourceArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:48";
 const sourceDigest = `sha256:${"c".repeat(64)}`;
 const sourceImage = `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${sourceDigest}`;
-const imageAuthorization = { images: [{ service: "backend", digest }] };
-const state = (arn = targetArn, releaseSha = sourceSha, serial = 103) => ({
+const imageAuthorization = { imageReleaseSha, images: [{ service: "backend", digest }] };
+const state = (arn = targetArn, releaseSha = imageReleaseSha, serial = 103) => ({
   version: 4, lineage: NORMAL_ACTIVATION.lineage, serial,
   outputs: { task_definition_arns: { value: { backend: arn } }, bound_images: { value: { backend: image } } },
   resources: [{ mode: "managed", type: "aws_ecs_task_definition", name: "candidate", instances: [{ index_key: "backend", attributes: {
@@ -23,7 +24,7 @@ const state = (arn = targetArn, releaseSha = sourceSha, serial = 103) => ({
     tags_all: { Environment: "production", ManagedBy: "Terraform", Component: "full-rls-green-stage-b", MSCQRExecTarget: "production-backend" },
   } }] }],
 });
-const validate = () => true;
+const validate = (authorization, expectedSourceSha) => { assert.equal(authorization, imageAuthorization); assert.equal(expectedSourceSha, sourceSha); return authorization; };
 const stableService = (taskDefinition = sourceArn) => ({ serviceArn: NORMAL_ACTIVATION.serviceArn, clusterArn: NORMAL_ACTIVATION.clusterArn, status: "ACTIVE", taskDefinition, desiredCount: 2, deployments: [{ id: "ecs-svc/123456789", status: "PRIMARY", taskDefinition, pendingCount: 0, runningCount: 2, rolloutState: "COMPLETED" }] });
 const sourceTask = (arn = sourceArn) => ({ taskDefinition: { taskDefinitionArn: arn, family: arn.includes("mscqr-backend:") ? "mscqr-backend" : NORMAL_ACTIVATION.family, status: "ACTIVE", containerDefinitions: [{ name: "backend", image: sourceImage }] }, tags: [] });
 const listedTasks = { taskArns: ["task-1", "task-2"] };
@@ -51,13 +52,13 @@ test("normal activation derives one exact current-source candidate from Stage-B 
   for (const mutate of [
     (value) => { value.serial = 102; value.outputs.task_definition_arns.value.backend = targetArn.replace(":12", ":11"); },
     (value) => { value.resources[0].instances[0].attributes.arn = targetArn.replace(":12", ":11"); },
-    (value) => { value.resources[0].instances[0].attributes.container_definitions = value.resources[0].instances[0].attributes.container_definitions.replace(sourceSha, "c".repeat(40)); },
+    (value) => { value.resources[0].instances[0].attributes.container_definitions = value.resources[0].instances[0].attributes.container_definitions.replace(imageReleaseSha, "c".repeat(40)); },
     (value) => { value.resources[0].instances[0].attributes.container_definitions = value.resources[0].instances[0].attributes.container_definitions.replace(digest, `sha256:${"d".repeat(64)}`); },
   ]) {
     const candidateState = structuredClone(state()); mutate(candidateState);
     assert.throws(() => deriveNormalBackendCandidate({ state: candidateState, sourceSha, imageAuthorization, validateImageAuthorization: validate }), /candidate|source|image|output/);
   }
-  assert.throws(() => deriveNormalBackendCandidate({ state: state(), sourceSha: "c".repeat(40), imageAuthorization, validateImageAuthorization: validate }), /source/);
+  assert.throws(() => deriveNormalBackendCandidate({ state: state(), sourceSha: "c".repeat(40), imageAuthorization, validateImageAuthorization: validate }), /source|Expected values/);
 });
 
 test("normal activation policies separate steady recovery from exact SOURCE/TARGET transaction authority", () => {
@@ -145,11 +146,11 @@ test("administrator convergence changes only the exact candidate binding and is 
     else throw new Error(`unexpected command ${joined}`);
     return JSON.stringify(response);
   };
-  const converged = convergeNormalActivationPolicy({ run, sourceSha });
+  const converged = convergeNormalActivationPolicy({ run, sourceSha, imageReleaseSha });
   assert.equal(converged.status, "CONVERGED");
   assert.equal(converged.iamWrites, 1);
   assertNormalActivationTransactionPolicy(livePolicy, { sourceArn, targetArn });
-  const noOp = convergeNormalActivationPolicy({ run, sourceSha });
+  const noOp = convergeNormalActivationPolicy({ run, sourceSha, imageReleaseSha });
   assert.equal(noOp.status, "ALREADY_CONVERGED");
   assert.equal(noOp.iamWrites, 0);
   assert.equal(writes, 1);
@@ -163,7 +164,7 @@ test("administrator convergence changes only the exact candidate binding and is 
   assert(new Set(simulatedArns).has(targetArn));
   assert(new Set(simulatedArns).has(sourceArn.replace(":48", ":1")));
   const wrongCaller = (command) => command[0] === "sts" ? JSON.stringify({ Account: NORMAL_ACTIVATION.account, Arn: NORMAL_ACTIVATION.roleArn }) : run(command);
-  assert.throws(() => convergeNormalActivationPolicy({ run: wrongCaller, sourceSha }), /root administrator/);
+  assert.throws(() => convergeNormalActivationPolicy({ run: wrongCaller, sourceSha, imageReleaseSha }), /root administrator/);
 });
 
 test("candidate predecessor and already-target sources produce exact bounded transactions", () => {
@@ -196,13 +197,13 @@ test("post-success administrator contraction restores exact steady-state authori
     else throw new Error(`unexpected command ${joined}`);
     return JSON.stringify(response);
   };
-  const contracted = contractNormalActivationPolicy({ run, sourceSha, sourceArn });
+  const contracted = contractNormalActivationPolicy({ run, sourceSha, imageReleaseSha, sourceArn });
   assert.equal(contracted.status, "CONTRACTED");
   assertNormalActivationPolicy(livePolicy, targetArn);
-  assert.equal(contractNormalActivationPolicy({ run, sourceSha, sourceArn }).status, "ALREADY_CONTRACTED");
+  assert.equal(contractNormalActivationPolicy({ run, sourceSha, imageReleaseSha, sourceArn }).status, "ALREADY_CONTRACTED");
   assert.equal(writes, 1);
   runningDigest = sourceDigest;
-  assert.throws(() => contractNormalActivationPolicy({ run, sourceSha, sourceArn }), /running task/);
+  assert.throws(() => contractNormalActivationPolicy({ run, sourceSha, imageReleaseSha, sourceArn }), /running task/);
   assert.equal(writes, 1);
 });
 
@@ -256,7 +257,7 @@ test("ambiguous policy publication is reconciled only by authenticated exact rea
       return JSON.stringify(response);
     };
   };
-  const reconciled = convergeNormalActivationPolicy({ run: makeRun({ publishTarget: true }), sourceSha });
+  const reconciled = convergeNormalActivationPolicy({ run: makeRun({ publishTarget: true }), sourceSha, imageReleaseSha });
   assert.equal(reconciled.status, "RECONCILED_AFTER_AMBIGUOUS_WRITE");
   assert.equal(reconciled.iamWrites, 1);
   assert.equal(reconciled.mutationOutcome, "CONFIRMED_SUCCESS_READBACK");
@@ -265,7 +266,7 @@ test("ambiguous policy publication is reconciled only by authenticated exact rea
   assert.equal(reconciled.validationComplete, true);
 
   for (const run of [makeRun({ publishTarget: false }), makeRun({ publishTarget: true, failReadback: true })]) {
-    assert.throws(() => convergeNormalActivationPolicy({ run, sourceSha }), (error) => {
+    assert.throws(() => convergeNormalActivationPolicy({ run, sourceSha, imageReleaseSha }), (error) => {
       assert(error instanceof NormalActivationPolicyConvergenceError);
       assert.equal(error.report.status, "PARTIAL_CONVERGENCE_LIVE_STATE_UNAUTHENTICATED");
       assert.equal(error.report.mutationAttempted, true);
@@ -297,7 +298,7 @@ test("post-mutation simulation failure reports authenticated convergence without
     else throw new Error(`unexpected command ${joined}`);
     return JSON.stringify(response);
   };
-  assert.throws(() => convergeNormalActivationPolicy({ run, sourceSha }), (error) => {
+  assert.throws(() => convergeNormalActivationPolicy({ run, sourceSha, imageReleaseSha }), (error) => {
     assert(error instanceof NormalActivationPolicyConvergenceError);
     assert.equal(error.report.status, "CONVERGENCE_MUTATION_READBACK_VERIFIED_VALIDATION_FAILED");
     assert.equal(error.report.readbackVerified, true);
@@ -327,7 +328,7 @@ test("policy-version pruning plus failed publication reports partial convergence
     else throw new Error(`unexpected command ${joined}`);
     return JSON.stringify(response);
   };
-  assert.throws(() => convergeNormalActivationPolicy({ run, sourceSha }), (error) => {
+  assert.throws(() => convergeNormalActivationPolicy({ run, sourceSha, imageReleaseSha }), (error) => {
     assert(error instanceof NormalActivationPolicyConvergenceError);
     assert.equal(error.report.status, "PARTIAL_CONVERGENCE_LIVE_STATE_UNAUTHENTICATED");
     assert.equal(error.report.confirmedIamWrites, 1);
@@ -342,7 +343,7 @@ test("pre-mutation rejection explicitly reports that no convergence mutation occ
   const run = (command) => command[0] === "sts"
     ? JSON.stringify({ Account: NORMAL_ACTIVATION.account, Arn: NORMAL_ACTIVATION.roleArn })
     : (() => { throw new Error("unexpected post-authentication command"); })();
-  assert.throws(() => convergeNormalActivationPolicy({ run, sourceSha }), (error) => {
+  assert.throws(() => convergeNormalActivationPolicy({ run, sourceSha, imageReleaseSha }), (error) => {
     assert(error instanceof NormalActivationPolicyConvergenceError);
     assert.equal(error.report.status, "NO_MUTATION_CONVERGENCE_FAILED");
     assert.equal(error.report.mutationAttempted, false);
@@ -376,7 +377,7 @@ test("malformed policy-version topology is rejected before deletion or publicati
       else throw new Error(`unexpected command ${joined}`);
       return JSON.stringify(response);
     };
-    assert.throws(() => convergeNormalActivationPolicy({ run, sourceSha }), (error) => error instanceof NormalActivationPolicyConvergenceError && error.report.status === "NO_MUTATION_CONVERGENCE_FAILED");
+    assert.throws(() => convergeNormalActivationPolicy({ run, sourceSha, imageReleaseSha }), (error) => error instanceof NormalActivationPolicyConvergenceError && error.report.status === "NO_MUTATION_CONVERGENCE_FAILED");
     assert.equal(mutations, 0);
   }
 });

@@ -21,8 +21,10 @@ import { buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifa
 import { produceOnboardingEvidence } from "../security/produce-production-onboarding-evidence.mjs";
 
 const sourceSha = "a".repeat(40);
+const imageReleaseSha = "b".repeat(40);
 const identity = {
   sourceSha,
+  imageReleaseSha,
   rotationId: "rotation-initial-activation-1",
   overlapDeploymentSha: "b".repeat(40),
   taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:51",
@@ -102,7 +104,7 @@ test("atomic fixed-key claim has one creator and matching retry", () => {
   assert.equal(s3.writes, 1);
   assert.equal(readInitialActivationClaim({ expected: claim(), aws: s3.aws }).sha256, first.sha256);
   for (const different of [
-    { sourceSha: "e".repeat(40) }, { rotationId: "rotation-different" }, { overlapDeploymentSha: "f".repeat(40) },
+    { sourceSha: "e".repeat(40) }, { imageReleaseSha: "f".repeat(40) }, { rotationId: "rotation-different" }, { overlapDeploymentSha: "f".repeat(40) },
     { taskDefinitionArn: identity.taskDefinitionArn.replace(/:51$/, ":53") },
     { activationTaskDefinitionArn: identity.activationTaskDefinitionArn.replace(/:52$/, ":53") }, { imageDigest: `sha256:${"e".repeat(64)}` },
   ]) assert.throws(() => createInitialActivationClaim({ claim: claim(different), aws: s3.aws }), /conflicts/);
@@ -153,10 +155,11 @@ test("completion publication requires authenticated RLS and strict onboarding ev
     writeFileSync(receiptFile, JSON.stringify(receipt));
     const runtime = Object.fromEntries(["jwtCurrentRuntimeVerify", "jwtPreviousRuntimeVerify", "jwtInvalidRuntimeRejected", "qrCurrentRuntimeVerify", "qrPreviousRuntimeVerify", "qrTamperMatchingKeyTest", "qrUnknownKeyRejected", "cookieCurrentSealOnly", "cookiePreviousOpenDuringOverlap", "artifactCurrentRuntimeVerify", "artifactHistoricalRuntimeVerify"].map((name) => [name, true]));
     const acceptance = Object.fromEntries(["superAdminLogin", "mfa", "authMe", "refresh", "dashboardStats", "qrStats", "tenantIsolation", "rbac", "auditPath", "printerTrust", "antiCloning", "dbReady", "redisReady", "objectStorageReady", "stageANetworkingReady"].map((name) => [name, true]));
-    const onboarding = { valid: true, evidenceRef: "onboarding:test", evidenceSha256: "7".repeat(64), sourceSha, imageDigest: identity.imageDigest, taskDefinitionArn: identity.activationTaskDefinitionArn, taskArn: "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/0123456789abcdef0123456789abcdef", rotationId: identity.rotationId, rotationStateSha256: stateSha256, taskMarker: true, ecsExecProof: true, serviceStable: true, targetTaskDefinitionMatch: true, targetImageDigestMatch: true, health: { serviceHealthy: true, healthReleaseGitSha: sourceSha }, rotationPhase: "verified", runtime, acceptance };
+    const onboarding = { valid: true, evidenceRef: "onboarding:test", evidenceSha256: "7".repeat(64), sourceSha, imageReleaseSha, imageDigest: identity.imageDigest, taskDefinitionArn: identity.activationTaskDefinitionArn, taskArn: "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/0123456789abcdef0123456789abcdef", rotationId: identity.rotationId, rotationStateSha256: stateSha256, taskMarker: true, ecsExecProof: true, serviceStable: true, targetTaskDefinitionMatch: true, targetImageDigestMatch: true, health: { serviceHealthy: true, healthReleaseGitSha: imageReleaseSha }, rotationPhase: "verified", runtime, acceptance };
     const onboardingBundle = await produceOnboardingEvidence({
       runStrictProbes: async () => onboarding,
       expectedSourceSha: sourceSha,
+      expectedImageReleaseSha: imageReleaseSha,
       expectedImageDigest: identity.imageDigest,
       expectedTaskDefinitionArn: identity.activationTaskDefinitionArn,
       expectedTaskArn: onboarding.taskArn,

@@ -35,6 +35,7 @@ const baseConfig = {
   region: "eu-west-2",
   rotationId: "rotation-test-2026",
   sourceSha: "a".repeat(40),
+  imageReleaseSha: "f".repeat(40),
   ticket: "SEC-ROTATION-TEST",
   approvedBy: "security@example.com",
   approverRole: "Security Lead",
@@ -175,13 +176,13 @@ const runtimeProof = (config, phase, observedAt, deploymentSha) => phase === "ov
       rotationId: config.rotationId, phase, deploymentSha, runtimeInvocationRef: "https://example.test/runtime-overlap",
       observedAt, jwtCurrentRuntimeVerify: true, jwtPreviousRuntimeVerify: true, jwtInvalidRuntimeRejected: true,
       qrCurrentRuntimeVerify: true, qrPreviousRuntimeVerify: true, qrTamperMatchingKeyTest: true, qrUnknownKeyRejected: true,
-      serviceHealthy: true, healthHttpStatus: 200, healthReleaseGitSha: config.sourceSha, expectedReleaseGitSha: config.sourceSha, healthObservedAt: observedAt,
+      serviceHealthy: true, healthHttpStatus: 200, healthReleaseGitSha: config.imageReleaseSha, expectedReleaseGitSha: config.imageReleaseSha, healthObservedAt: observedAt,
     }
   : {
       rotationId: config.rotationId, phase, deploymentSha, runtimeInvocationRef: "https://example.test/runtime-cleanup",
       observedAt, jwtCurrentRuntimeVerify: true, jwtPreviousRuntimeRejected: true, qrCurrentRuntimeVerify: true,
       qrPreviousRuntimeRejected: true, qrUnknownKeyRejected: true,
-      serviceHealthy: true, healthHttpStatus: 200, healthReleaseGitSha: config.sourceSha, expectedReleaseGitSha: config.sourceSha, healthObservedAt: observedAt,
+      serviceHealthy: true, healthHttpStatus: 200, healthReleaseGitSha: config.imageReleaseSha, expectedReleaseGitSha: config.imageReleaseSha, healthObservedAt: observedAt,
     };
 
 const writeProof = (directory, name, proof) => {
@@ -951,8 +952,8 @@ test("wrong release identity fails closed before secret operations", () => {
 test("runtime proof accepts only the expected deployment SHA for overlap and cleanup", () => {
   const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-runtime-proof-sha-"));
   try {
-    const config = { rotationId: "rotation-proof", sourceSha: "a".repeat(40) };
-    const common = { rotationId: config.rotationId, runtimeInvocationRef: "https://example.test/proof", observedAt: "2026-08-10T00:00:00.000Z", serviceHealthy: true, healthHttpStatus: 200, healthReleaseGitSha: "a".repeat(40), expectedReleaseGitSha: "a".repeat(40), healthObservedAt: "2026-08-10T00:00:00.000Z" };
+    const config = { rotationId: "rotation-proof", sourceSha: "a".repeat(40), imageReleaseSha: "f".repeat(40) };
+    const common = { rotationId: config.rotationId, runtimeInvocationRef: "https://example.test/proof", observedAt: "2026-08-10T00:00:00.000Z", serviceHealthy: true, healthHttpStatus: 200, healthReleaseGitSha: config.imageReleaseSha, expectedReleaseGitSha: config.imageReleaseSha, healthObservedAt: "2026-08-10T00:00:00.000Z" };
     const overlap = { ...common, phase: "overlap", deploymentSha: "a".repeat(40), jwtCurrentRuntimeVerify: true, jwtPreviousRuntimeVerify: true, jwtInvalidRuntimeRejected: true, qrCurrentRuntimeVerify: true, qrPreviousRuntimeVerify: true, historicalContinuity: "VERIFIED_PREVIOUS_QR", legacyQrKeypairUnrecoverable: false, qrPreviousSlotAbsent: false, qrTamperMatchingKeyTest: true, qrUnknownKeyRejected: true };
     const cleanupProof = { ...common, phase: "cleanup", deploymentSha: "b".repeat(40), jwtCurrentRuntimeVerify: true, jwtPreviousRuntimeRejected: true, qrCurrentRuntimeVerify: true, qrPreviousRuntimeRejected: true, historicalContinuity: "VERIFIED_PREVIOUS_QR", legacyQrKeypairUnrecoverable: false, qrPreviousSlotAbsent: true, qrUnknownKeyRejected: true };
     const overlapFile = writeProof(directory, "overlap.json", overlap);

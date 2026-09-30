@@ -24,18 +24,18 @@ const inventoryExecutionRoleArn = `arn:aws:iam::${STAGE_B.account}:role/mscqr-pr
 const exact = (left, right) => canonicalJson(left) === canonicalJson(right);
 const brokerReceipt = (value) => ({ ...value, receiptSha256: crypto.createHash("sha256").update(`${JSON.stringify(value)}\n`).digest("hex") });
 
-export function createPreDeploymentOperationIdentity({ approvalId, releaseSha, rotationId, operation = PREDEPLOYMENT_INVENTORY_OPERATION, taskDefinitionArn, imageDigest } = {}) {
-  if (!/^[A-Za-z0-9][A-Za-z0-9._:/-]{5,127}$/.test(approvalId || "") || !/^[a-f0-9]{40}$/.test(releaseSha || "")
+export function createPreDeploymentOperationIdentity({ approvalId, releaseSha, imageReleaseSha, rotationId, operation = PREDEPLOYMENT_INVENTORY_OPERATION, taskDefinitionArn, imageDigest } = {}) {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:/-]{5,127}$/.test(approvalId || "") || !/^[a-f0-9]{40}$/.test(releaseSha || "") || !/^[a-f0-9]{40}$/.test(imageReleaseSha || "")
     || !/^[A-Za-z0-9._-]{8,128}$/.test(rotationId || "") || operation !== PREDEPLOYMENT_INVENTORY_OPERATION
     || !inventoryTaskArnPattern.test(taskDefinitionArn || "") || !/^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/mscqr-backend@sha256:[a-f0-9]{64}$/.test(imageDigest || "")) {
     throw new Error("Pre-deployment inventory operation identity is outside the reviewed contract.");
   }
-  return Object.freeze({ approvalId, releaseSha, rotationId, operation, taskDefinitionArn, imageDigest });
+  return Object.freeze({ approvalId, releaseSha, imageReleaseSha, rotationId, operation, taskDefinitionArn, imageDigest });
 }
 
 export function preDeploymentOperationKey(identity) {
-  const { approvalId, releaseSha, rotationId, operation, imageDigest } = createPreDeploymentOperationIdentity(identity);
-  const logicalIdentity = JSON.stringify({ approvalId, releaseSha, rotationId, operation, imageDigest });
+  const { approvalId, releaseSha, imageReleaseSha, rotationId, operation, imageDigest } = createPreDeploymentOperationIdentity(identity);
+  const logicalIdentity = JSON.stringify({ approvalId, releaseSha, imageReleaseSha, rotationId, operation, imageDigest });
   return `${PREDEPLOYMENT_INVENTORY_REPLAY_MODE}#${crypto.createHash("sha256").update(logicalIdentity).digest("hex")}`;
 }
 
@@ -138,11 +138,12 @@ export function validatePreDeploymentInventoryConfiguration(config) {
       || config.inventoryExecutionRoleArn !== inventoryExecutionRoleArn
       || config.inventoryDatabaseUrlArn !== inventoryDatabaseUrlArn
       || config.inventoryRlsRole !== inventoryRlsRole
-      || config.inventoryLogGroupName !== STAGE_B.inventoryLogGroupName) throw new Error("Pre-deployment inventory broker configuration is outside the reviewed contract.");
+      || config.inventoryLogGroupName !== STAGE_B.inventoryLogGroupName
+      || !/^[a-f0-9]{40}$/.test(config.inventoryImageReleaseSha || "")) throw new Error("Pre-deployment inventory broker configuration is outside the reviewed contract.");
   return config;
 }
 
-function assertExactInventoryTaskDefinition({ definition, taskDefinitionArn, sourceSha, config }) {
+function assertExactInventoryTaskDefinition({ definition, taskDefinitionArn, imageReleaseSha, config }) {
   const container = definition?.containerDefinitions?.[0];
   const expected = {
     family: inventoryTaskDefinitionFamily,
@@ -163,7 +164,7 @@ function assertExactInventoryTaskDefinition({ definition, taskDefinitionArn, sou
       interactive: false,
       pseudoTerminal: false,
       environment: [
-        { name: "RELEASE_GIT_SHA", value: sourceSha },
+        { name: "RELEASE_GIT_SHA", value: imageReleaseSha },
         { name: "ROTATION_INVENTORY_APPROVED", value: "true" },
         { name: "ROTATION_INVENTORY_RLS_ROLE", value: inventoryRlsRole },
       ],
@@ -208,14 +209,14 @@ export function createPreDeploymentInventoryHandler({ config, executingBrokerVer
         clearTimeout(timer);
       }
     };
-    if (!event || typeof event !== "object" || Object.keys(event).sort().join(",") !== "approvalId,operation,rotationId,sourceSha,taskDefinitionArn" || event.operation !== PREDEPLOYMENT_INVENTORY_OPERATION || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{5,127}$/.test(event.approvalId || "") || !/^[A-Za-z0-9._-]{8,128}$/.test(event.rotationId || "") || !/^[a-f0-9]{40}$/.test(event.sourceSha || "") || !inventoryTaskArnPattern.test(event.taskDefinitionArn || "")) throw new Error("Pre-deployment inventory broker request is outside the reviewed contract.");
+    if (!event || typeof event !== "object" || Object.keys(event).sort().join(",") !== "approvalId,imageReleaseSha,operation,rotationId,sourceSha,taskDefinitionArn" || event.operation !== PREDEPLOYMENT_INVENTORY_OPERATION || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{5,127}$/.test(event.approvalId || "") || !/^[A-Za-z0-9._-]{8,128}$/.test(event.rotationId || "") || !/^[a-f0-9]{40}$/.test(event.sourceSha || "") || !/^[a-f0-9]{40}$/.test(event.imageReleaseSha || "") || !inventoryTaskArnPattern.test(event.taskDefinitionArn || "")) throw new Error("Pre-deployment inventory broker request is outside the reviewed contract.");
     const approval = await runWithinDeadline("approval authorization", async () => validateStageBApproval(await readApproval(config.approvalSecretArn), { ...config.approvalExpected, approvalId: event.approvalId, brokerVersion }, { now: now(), verifySignature }), operationDeadlineMs);
-    if (approval.approval.releaseSha !== event.sourceSha || approval.approval.backendImageDigest !== config.inventoryImageDigest) throw new Error("Pre-deployment inventory request is not bound to the signed release/image.");
+    if (approval.approval.releaseSha !== event.sourceSha || approval.approval.backendImageDigest !== config.inventoryImageDigest || event.imageReleaseSha !== config.inventoryImageReleaseSha) throw new Error("Pre-deployment inventory request is not bound to the signed release/image.");
     const definitionResponse = await runWithinDeadline("task-definition authorization", () => describeTaskDefinition(event.taskDefinitionArn), operationDeadlineMs);
     const definition = definitionResponse?.taskDefinition;
     if (!definition || !exactTags(definitionResponse.tags, inventoryTaskDefinitionTags)) throw new Error("Pre-deployment inventory task definition response is missing the reviewed top-level tags.");
-    assertExactInventoryTaskDefinition({ definition, taskDefinitionArn: event.taskDefinitionArn, sourceSha: event.sourceSha, config });
-    const operationIdentity = createPreDeploymentOperationIdentity({ approvalId: event.approvalId, releaseSha: event.sourceSha, rotationId: event.rotationId, operation: event.operation, taskDefinitionArn: event.taskDefinitionArn, imageDigest: config.inventoryImageDigest });
+    assertExactInventoryTaskDefinition({ definition, taskDefinitionArn: event.taskDefinitionArn, imageReleaseSha: event.imageReleaseSha, config });
+    const operationIdentity = createPreDeploymentOperationIdentity({ approvalId: event.approvalId, releaseSha: event.sourceSha, imageReleaseSha: event.imageReleaseSha, rotationId: event.rotationId, operation: event.operation, taskDefinitionArn: event.taskDefinitionArn, imageDigest: config.inventoryImageDigest });
     const operationKey = preDeploymentOperationKey(operationIdentity);
     const replay = { ...operationIdentity, operationKey, nonce: approval.approval.nonce, expiresAt: approval.approval.expiresAt };
     await runWithinDeadline("replay claim", () => claimPreDeploymentOperation(replay), operationDeadlineMs);
@@ -325,6 +326,7 @@ export function createBrokerRuntimeConfig(env = process.env) {
     receiptBucket: env.BROKER_RECEIPT_BUCKET,
     inventoryTaskDefinitionFamilyArn: `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/${inventoryTaskDefinitionFamily}:1`,
     inventoryImageDigest: images.backendImageDigest,
+    inventoryImageReleaseSha: env.BROKER_IMAGE_RELEASE_SHA,
     inventoryTaskRoleArn,
     inventoryExecutionRoleArn,
     inventoryDatabaseUrlArn,

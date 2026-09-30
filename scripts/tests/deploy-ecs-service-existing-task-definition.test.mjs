@@ -239,7 +239,7 @@ fi
 set -euo pipefail
 echo "curl $*" >> "$FAKE_DATA/calls.log"
 if [[ "$FAKE_SCENARIO" == "version-endpoint-failure" || "$FAKE_SCENARIO" == "version-timeout" ]]; then exit $([[ "$FAKE_SCENARIO" == "version-timeout" ]] && echo 28 || echo 41); fi
-if [[ "$FAKE_SCENARIO" == "malformed-health" ]]; then printf '%s\\n' '{"status":"ok","release":{"gitSha":"not-a-sha"}}'; elif [[ "$FAKE_SCENARIO" == "wrong-version" ]]; then printf '%s\\n' '{"status":"ok","release":{"gitSha":"${"a".repeat(40)}"}}'; else printf '%s\\n' '{"status":"ok","release":{"gitSha":"${sourceSha}"}}'; fi
+if [[ "$FAKE_SCENARIO" == "malformed-health" ]]; then printf '%s\\n' '{"status":"ok","release":{"gitSha":"not-a-sha"}}'; elif [[ "$FAKE_SCENARIO" == "wrong-version" ]]; then printf '%s\\n' '{"status":"ok","release":{"gitSha":"${"a".repeat(40)}"}}'; else printf '%s\\n' '{"status":"ok","release":{"gitSha":"${options.releaseGitSha || sourceSha}"}}'; fi
 `;
   const fakeCurl = path.join(fakeBin, "curl");
   fs.writeFileSync(fakeCurl, curl, { mode: 0o755 });
@@ -247,11 +247,12 @@ if [[ "$FAKE_SCENARIO" == "malformed-health" ]]; then printf '%s\\n' '{"status":
 }
 
 function runExisting(options = {}, extraArgs = []) {
-  const fixture = writeFixture({}, options);
+  const imageReleaseSha = options.imageReleaseSha || (options.normalStageB ? "6".repeat(40) : sourceSha);
+  const fixture = writeFixture({}, options.normalStageB ? { ...options, releaseGitSha: options.releaseGitSha || imageReleaseSha } : options);
   const expectedGitSha = options.includeExpectedGitSha === false
     ? undefined
     : options.includeExpectedGitSha === true || options.versionUrl || options.expectedGitSha || options.releaseGitSha
-    ? options.expectedGitSha || sourceSha
+    ? options.expectedGitSha || imageReleaseSha
     : undefined;
   const normalBinding = path.join(fixture.dir, "normal-activation-binding.json");
   const normalOutcome = path.join(fixture.dir, "normal-activation-outcome.json");
@@ -259,6 +260,7 @@ function runExisting(options = {}, extraArgs = []) {
     schemaVersion: 2,
     releaseMode: "normal",
     sourceSha,
+    imageReleaseSha,
     sourceArn: options.expectedCurrent || fromArn,
     sourceClass: "LEGACY_BACKEND",
     sourceDigest: options.sourceDigest || `sha256:${"e".repeat(64)}`,

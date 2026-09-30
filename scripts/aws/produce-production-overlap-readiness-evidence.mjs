@@ -8,7 +8,7 @@ const SHA256 = /^[a-f0-9]{64}$/;
 const identityBindings = (value, fallbackSourceSha) => {
   const candidate = value?.identityBindings && typeof value.identityBindings === "object" && !Array.isArray(value.identityBindings)
     ? value.identityBindings
-    : Object.fromEntries(["sourceSha", "callerArn", "roleArn", "taskDefinitionArn", "taskArn", "imageDigest", "rotationId"].filter((key) => typeof value?.[key] === "string" && value[key].trim()).map((key) => [key, value[key]]));
+    : Object.fromEntries(["sourceSha", "imageReleaseSha", "callerArn", "roleArn", "taskDefinitionArn", "taskArn", "imageDigest", "rotationId"].filter((key) => typeof value?.[key] === "string" && value[key].trim()).map((key) => [key, value[key]]));
   if (!candidate.sourceSha && fallbackSourceSha) candidate.sourceSha = fallbackSourceSha;
   return candidate;
 };

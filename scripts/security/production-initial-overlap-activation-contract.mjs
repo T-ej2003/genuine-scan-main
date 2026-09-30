@@ -51,7 +51,7 @@ export function validateProductionInitialActivationClaimCandidateDuringAuthentic
   if (!Buffer.isBuffer(rawState) || !SHA256.test(stateSha256 || "") || createHash("sha256").update(rawState).digest("hex") !== stateSha256) fail("Initial-overlap rotation state bytes do not match their SHA-256.");
   try { state = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(rawState)); } catch { fail("Initial-overlap rotation state bytes are not valid UTF-8 JSON."); }
   if (!state || typeof state !== "object" || Array.isArray(state) || containsSensitiveStateKey(state)) fail("Initial-overlap rotation state must be redacted metadata.");
-  if (!expected || !SHA40.test(expected.sourceSha || "") || !ROTATION_ID.test(expected.rotationId || "") || !TASK_DEFINITION.test(expected.taskDefinitionArn || "") || !DIGEST.test(expected.imageDigest || "") || !SHA40.test(expected.deploymentSha || "")) fail("Initial-overlap expected identity is incomplete.");
+  if (!expected || !SHA40.test(expected.sourceSha || "") || !SHA40.test(expected.imageReleaseSha || "") || !ROTATION_ID.test(expected.rotationId || "") || !TASK_DEFINITION.test(expected.taskDefinitionArn || "") || !DIGEST.test(expected.imageDigest || "") || !SHA40.test(expected.deploymentSha || "")) fail("Initial-overlap expected identity is incomplete.");
   if (![PRODUCTION_ROTATION_LEGACY_STATE_VERSION, PRODUCTION_ROTATION_STATE_VERSION].includes(state.stateVersion)
     || state.sourceSha !== expected.sourceSha || state.rotationId !== expected.rotationId || state.overlapDeploymentSha !== expected.deploymentSha) fail("Initial-overlap rotation identity does not match the authorized release.");
   if (state.phase !== "verified") fail("Initial activation requires OVERLAP_RUNTIME_VERIFIED state.");
@@ -67,7 +67,7 @@ export function validateProductionInitialActivationClaimCandidateDuringAuthentic
   if (!proof || typeof proof !== "object" || Array.isArray(proof) || proof.phase !== "overlap" || proof.rotationId !== state.rotationId || proof.deploymentSha !== state.overlapDeploymentSha) fail("Authenticated overlap runtime proof is missing or mismatched.");
   try { canonicalProductionEcsClusterArn(proof.targetCluster); } catch { fail("Overlap runtime proof is not bound to the exact ECS deployment."); }
   if (proof.targetService !== SERVICE || proof.targetTaskDefinitionArn !== expected.taskDefinitionArn || proof.targetImageDigest !== expected.imageDigest || !TASK.test(proof.targetTaskArn || "") || proof.selectedTaskArn !== proof.targetTaskArn || !DEPLOYMENT.test(proof.targetDeploymentId || "")) fail("Overlap runtime proof is not bound to the exact ECS deployment.");
-  if (proof.expectedReleaseSha !== expected.sourceSha || proof.expectedReleaseGitSha !== expected.sourceSha || proof.healthReleaseGitSha !== expected.sourceSha || proof.healthHttpStatus !== 200) fail("Overlap runtime health is not bound to protected source.");
+  if (proof.expectedReleaseSha !== expected.imageReleaseSha || proof.expectedReleaseGitSha !== expected.imageReleaseSha || proof.healthReleaseGitSha !== expected.imageReleaseSha || proof.healthHttpStatus !== 200) fail("Overlap runtime health is not bound to authenticated image source.");
   for (const name of REQUIRED_RUNTIME_CHECKS) if (proof[name] !== true) fail(`Overlap runtime proof is missing ${name}.`);
   const proofHasContinuity = [proof.historicalContinuity, proof.legacyQrKeypairUnrecoverable, proof.qrPreviousSlotAbsent].some((value) => value !== undefined);
   if ((legacyQrKeypairUnrecoverable || proofHasContinuity) && (proof.historicalContinuity !== historicalContinuity || proof.legacyQrKeypairUnrecoverable !== legacyQrKeypairUnrecoverable || proof.qrPreviousSlotAbsent !== legacyQrKeypairUnrecoverable) || proof.qrPreviousRuntimeVerify !== !legacyQrKeypairUnrecoverable) fail("Overlap runtime proof misrepresents QR historical continuity.");
@@ -94,6 +94,7 @@ export function validateProductionInitialActivationClaimCandidateDuringAuthentic
   return Object.freeze({
     contract: PRODUCTION_INITIAL_ACTIVATION_DURING_AUTHENTICATED_OVERLAP,
     sourceSha: state.sourceSha,
+    imageReleaseSha: expected.imageReleaseSha,
     rotationId: state.rotationId,
     taskDefinitionArn: proof.targetTaskDefinitionArn,
     deploymentId: proof.targetDeploymentId,
@@ -111,6 +112,7 @@ export function validateProductionInitialActivationDuringAuthenticatedOverlap({ 
   const overlap = validateProductionInitialActivationClaimCandidateDuringAuthenticatedOverlap(input);
   const claim = parseInitialActivationClaim(claimRaw, {
     sourceSha: overlap.sourceSha,
+    imageReleaseSha: overlap.imageReleaseSha,
     rotationId: overlap.rotationId,
     overlapDeploymentSha: input.expected.deploymentSha,
     taskDefinitionArn: overlap.taskDefinitionArn,

@@ -399,7 +399,7 @@ export function prepareProductionCutoverRuntime({
         try { (git || execFileSync)("git", ["merge-base", "--is-ancestor", ancestorSha, descendantSha], { stdio: "ignore" }); return true; } catch { return false; }
       }),
     });
-    const approvalConfig = { ...buildProductionRotationConfig({ sourceSha: protectedSha, rotationId, approval, bindings: rotationBindings, rebaselineAuthorization, rebaselineAuthorizationCoordinates, recoveryEnvelope, originalPreparation, imageAuthorization: preparedImageAuthorization.value, proveRecoveryDescendant, verifyRebaselineLivePostWrite, verifyInitialBindingOrigin, liveCurrentKeyVersion: currentKeyVersion }), ...(initialMigrationSourceAdvance ? { initialMigrationSourceAdvance } : {}) };
+    const approvalConfig = { ...buildProductionRotationConfig({ sourceSha: protectedSha, rotationId, approval, bindings: rotationBindings, rebaselineAuthorization, rebaselineAuthorizationCoordinates, recoveryEnvelope, originalPreparation, imageAuthorization: preparedImageAuthorization.value, proveRecoveryDescendant, verifyRebaselineLivePostWrite, verifyInitialBindingOrigin, liveCurrentKeyVersion: currentKeyVersion }), imageReleaseSha: preparedImageAuthorization.value.imageReleaseSha, ...(initialMigrationSourceAdvance ? { initialMigrationSourceAdvance } : {}) };
     assertRootDropEvidence(rootDrop.value, {
       sourceSha: protectedSha,
       rotationId: approvalConfig.rotationId,
@@ -411,7 +411,7 @@ export function prepareProductionCutoverRuntime({
     });
     const overlapTaskInput = buildOverlapTaskDefinition({
       backendImage: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${backendImageDigest}`,
-      releaseSha: protectedSha,
+      imageReleaseSha: preparedImageAuthorization.value.imageReleaseSha,
       backendLogGroup: STAGE_B.inventoryLogGroupName,
       secretBindings: {
         ...rotationBindingsToTaskBindings(rotationBindings),
@@ -469,7 +469,7 @@ export function prepareProductionCutoverRuntime({
       inventoryExecutionRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution",
       rotationInventoryRlsRole: "mscqr_prod_rls_read",
       inventoryLogGroupName: STAGE_B.inventoryLogGroupName,
-      overlapTaskInput: { backendImage: overlapTaskInput.containerDefinitions.find(({ name }) => name === "backend")?.image, releaseSha: protectedSha, backendLogGroup: STAGE_B.inventoryLogGroupName, secretBindings: { ...rotationBindingsToTaskBindings(rotationBindings), ...artifactBindings, ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls_read" } },
+      overlapTaskInput: { backendImage: overlapTaskInput.containerDefinitions.find(({ name }) => name === "backend")?.image, imageReleaseSha: preparedImageAuthorization.value.imageReleaseSha, backendLogGroup: STAGE_B.inventoryLogGroupName, secretBindings: { ...rotationBindingsToTaskBindings(rotationBindings), ...artifactBindings, ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls_read" } },
       ...paths,
       stageBTfvarsPath: path.resolve(stageBTfvarsPath),
       stageBTfvarsBindingReportPath: path.resolve(stageBTfvarsBindingReportPath),

@@ -56,7 +56,7 @@ if (mode === "rotation-overlap") {
     imageDigest: process.env.EXPECTED_IMAGE_DIGEST, mode: transitionMode,
     releaseIdentity: rotationReleaseIdentity({ mode: transitionMode, sourceSha, rotationId, rotationStateSha256, readinessSha256, readiness: readiness.evidence, expectedCurrentTaskDefinitionArn: process.env.EXPECTED_CURRENT_TASK_DEFINITION_ARN }),
     isProtectedMainAncestor: (sha) => { try { execFileSync("git", ["merge-base", "--is-ancestor", sha, "refs/remotes/origin/main"], { stdio: "ignore" }); return true; } catch { return false; } },
-    verifyApplied: () => { assert.equal(process.env.EXPECTED_GIT_SHA, sourceSha); execFileSync("scripts/aws/verify-version-endpoint.sh", [process.env.VERSION_URL, sourceSha], { stdio: ["ignore", "pipe", "pipe"] }); },
+    verifyApplied: () => execFileSync("scripts/aws/verify-version-endpoint.sh", [process.env.VERSION_URL, process.env.EXPECTED_GIT_SHA], { stdio: ["ignore", "pipe", "pipe"] }),
     deploy: () => createProductionOverlapDeploymentAdapter({ run, credentialSource, readinessFile, readinessSha256, sourceSha, rotationId, imageDigest: process.env.EXPECTED_IMAGE_DIGEST, cluster: process.env.CLUSTER_NAME, service: process.env.SERVICE_NAME, expectedCurrentTaskDefinitionArn: process.env.EXPECTED_CURRENT_TASK_DEFINITION_ARN, versionUrl: process.env.VERSION_URL, expectedGitSha: process.env.EXPECTED_GIT_SHA }).run({ taskDefinitionArn, readinessSha256, rotationStateSha256 }),
   }) };
   const result = await runProductionCutoverOverlapControlPlane({ readiness: readiness.evidence, sourceSha, rotationId, rotationStateSha256, taskDefinitionArn, readinessSha256, deployOverlap, deploymentReceipt, transitionMode });

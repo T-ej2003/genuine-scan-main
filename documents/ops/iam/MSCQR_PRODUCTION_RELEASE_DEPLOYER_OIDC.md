@@ -92,8 +92,13 @@ principal and is not changed or deleted by this contract.
 
 Normal release does not clone or register `mscqr-backend:*`. Terraform registers
 the reviewed `mscqr-production-rls-green-backend-candidate` revision, and the
-activation path derives its exact ARN, image digest, source SHA, lineage, and
-serial from the authenticated Stage-B state object. Worker images and candidate
+activation path derives its exact ARN, image digest, image-release SHA, lineage,
+and serial from the authenticated Stage-B state object. The protected-main SHA
+continues to identify the release governance and receipt while the image-release
+SHA identifies immutable task provenance; authenticated image reuse permits them
+to differ. The pre-deployment inventory task and post-deploy health readback also
+validate runtime `RELEASE_GIT_SHA` against that authenticated image-release SHA.
+Worker images and candidate
 definitions remain governed, but no worker service update is attempted while
 production has no worker ECS service.
 
@@ -104,6 +109,7 @@ Gate, the governed root administrator runs:
 npm run production:normal-backend-activation -- \
   --mode converge-policy \
   --source-sha "$(git rev-parse HEAD)" \
+  --image-release-sha '<authenticated image authorization imageReleaseSha>' \
   --admin-profile mscqr-production-root
 ```
 
@@ -140,6 +146,7 @@ administrator contraction using its `normalActivationSourceArn`:
 npm run production:normal-backend-activation -- \
   --mode contract-policy \
   --source-sha "$(git rev-parse HEAD)" \
+  --image-release-sha '<authenticated image authorization imageReleaseSha>' \
   --source-task-definition '<normalActivationSourceArn>' \
   --admin-profile mscqr-production-root
 ```

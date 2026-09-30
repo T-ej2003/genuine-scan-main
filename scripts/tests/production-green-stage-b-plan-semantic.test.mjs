@@ -39,7 +39,7 @@ const runtimePlatformExpression = () => [{
 const envNames = [
   "BROKER_APPROVAL_EXPECTED_JSON", "BROKER_APPROVAL_SECRET_ARN", "BROKER_CLUSTER_ARN",
   "BROKER_EXECUTOR_SECURITY_GROUP_ID", "BROKER_IMAGES_JSON", "BROKER_PRIVATE_SUBNETS_JSON",
-  "BROKER_RECEIPT_BUCKET", "BROKER_REPLAY_TABLE", "BROKER_TASK_DEFINITIONS_JSON", "BROKER_TASK_TEMPLATE_HASHES_JSON",
+  "BROKER_IMAGE_RELEASE_SHA", "BROKER_RECEIPT_BUCKET", "BROKER_REPLAY_TABLE", "BROKER_TASK_DEFINITIONS_JSON", "BROKER_TASK_TEMPLATE_HASHES_JSON",
 ];
 const SCOPED_REFERENCE_CENSUS_FIELDS = [
   ["aws_ecs_task_definition.candidate", "for_each_expression"],
@@ -397,7 +397,7 @@ test("broker environment conditional references match the source and exact seman
   for (const reference of [
     "aws_dynamodb_table.replay.name", "var.receipt_bucket_arn", "var.ecs_cluster_arn", "var.approval_secret_arn",
     "var.stage_a_executor_security_group_id", "var.private_subnet_ids", "local.active_broker_task_definition_arns",
-    "local.broker_template_hashes", "local.broker_approval_expected", "local.broker_images",
+    "local.broker_template_hashes", "local.broker_approval_expected", "local.broker_images", "var.image_release_sha",
     "var.stage_b_recovery_only", "var.stage_b_recovery_broker_environment",
   ]) assert.match(source, new RegExp(reference.replaceAll(".", "\\.")));
   assert.doesNotMatch(source, /BROKER_TASK_DEFINITIONS_JSON\s*=\s*jsonencode\(local\.broker_task_definition_arns\)/);
@@ -575,6 +575,7 @@ function resolvedBrokerEnvironment() {
     BROKER_CLUSTER_ARN: STAGE_B.clusterArn,
     BROKER_EXECUTOR_SECURITY_GROUP_ID: STAGE_B.executorSecurityGroupId,
     BROKER_IMAGES_JSON: JSON.stringify({ backendImageDigest: image("1"), workerImageDigest: image("2"), executorImageDigest: image("3"), canaryImageDigest: image("4") }),
+    BROKER_IMAGE_RELEASE_SHA: "9".repeat(40),
     BROKER_PRIVATE_SUBNETS_JSON: JSON.stringify(STAGE_B.privateSubnetIds),
     BROKER_RECEIPT_BUCKET: STAGE_B.receiptBucket,
     BROKER_REPLAY_TABLE: "mscqr-production-rls-stage-b-replay",

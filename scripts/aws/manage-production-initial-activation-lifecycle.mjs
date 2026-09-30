@@ -37,7 +37,7 @@ export async function runCli(argv = process.argv.slice(2), dependencies = {}) {
   if (mode === "validate-candidate" || mode === "claim") {
     const rawState = readFileSync(required(values, "--state-file"));
     const expected = {
-      sourceSha: required(values, "--source-sha"), rotationId: required(values, "--rotation-id"), deploymentSha: required(values, "--deployment-sha"),
+      sourceSha: required(values, "--source-sha"), imageReleaseSha: required(values, "--image-release-sha"), rotationId: required(values, "--rotation-id"), deploymentSha: required(values, "--deployment-sha"),
       taskDefinitionArn: required(values, "--task-definition"), imageDigest: required(values, "--image-digest"),
     };
     const overlap = validateProductionInitialActivationClaimCandidateDuringAuthenticatedOverlap({ rawState, stateSha256: required(values, "--state-sha256"), expected });
@@ -74,6 +74,7 @@ export async function runCli(argv = process.argv.slice(2), dependencies = {}) {
       claimSha256,
       expected: {
         sourceSha: claim.sourceSha,
+        imageReleaseSha: claim.imageReleaseSha,
         rotationId: claim.rotationId,
         deploymentSha: claim.overlapDeploymentSha,
         taskDefinitionArn: claim.taskDefinitionArn,
@@ -88,7 +89,7 @@ export async function runCli(argv = process.argv.slice(2), dependencies = {}) {
     if (onboardingBundle?.valid !== true || onboardingBundle.evidenceRef !== `onboarding:${claim.sourceSha}`
       || onboardingBundle.evidenceSha256 !== sha256(Buffer.from(JSON.stringify(onboarding)))) throw new Error("Strict onboarding evidence bundle is invalid.");
     validateOnboardingContract(onboarding);
-    if (onboarding.sourceSha !== claim.sourceSha || onboarding.rotationId !== claim.rotationId
+    if (onboarding.sourceSha !== claim.sourceSha || onboarding.imageReleaseSha !== claim.imageReleaseSha || onboarding.rotationId !== claim.rotationId
       || onboarding.rotationStateSha256 !== stateSha256 || onboarding.taskDefinitionArn !== claim.activationTaskDefinitionArn
       || onboarding.imageDigest !== claim.imageDigest) throw new Error("Strict onboarding evidence is not bound to the activation claim and overlap runtime.");
     const completion = buildInitialActivationCompletion({ claim, claimSha256, claimVersionId: liveClaim.versionId, rlsReceiptSha256: sha256(receiptRaw), onboardingEvidenceSha256: sha256(onboardingRaw), completedAt: dependencies.now?.() || new Date().toISOString() });

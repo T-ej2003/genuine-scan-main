@@ -819,7 +819,7 @@ test("overlap task rejects legacy/ECS reference confusion and double JSON-key su
   };
   const input = {
     backendImage: image,
-    releaseSha: sourceSha,
+    imageReleaseSha: sourceSha,
     backendLogGroup: "/ecs/mscqr-production/rls-green-backend",
     secretBindings,
   };
