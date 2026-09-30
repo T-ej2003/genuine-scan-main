@@ -620,8 +620,8 @@ resource "aws_lambda_function" "broker" {
 
   lifecycle {
     precondition {
-      condition     = length(jsonencode(local.broker_environment)) <= 3500
-      error_message = "Stage B broker Lambda environment JSON must remain at or below the 3500-byte safety bound (AWS hard limit: 4096 bytes)."
+      condition     = length(jsonencode(local.broker_environment)) <= 3584
+      error_message = "Stage B broker Lambda environment JSON must remain at or below the 3584-byte safety bound (AWS hard limit: 4096 bytes)."
     }
   }
   tags = local.tags

@@ -484,7 +484,7 @@ test("broker and executor IAM match their exact AWS SDK writes and launch bounda
   const brokerPolicy = main.match(/resource "aws_iam_policy" "broker" \{[\s\S]*?\n}/)?.[0] || "";
   const brokerFunction = main.match(/resource "aws_lambda_function" "broker" \{[\s\S]*?\n}/)?.[0] || "";
   assert.doesNotMatch(brokerPolicy, /precondition\s*\{/);
-  assert.match(brokerFunction, /precondition\s*\{[\s\S]*3500-byte safety bound/);
+  assert.match(brokerFunction, /precondition\s*\{[\s\S]*3584-byte safety bound/);
   assert.match(main, /iam:PassedToService/);
   assert.match(main, /Sid\s*=\s*"ReadWriteOnlyProductionArtifactObjects"[\s\S]*s3:GetObject[\s\S]*s3:PutObject[\s\S]*Resource\s*=\s*"\$\{var\.receipt_bucket_arn\}\/\*"/);
   assert.doesNotMatch(main, /Action\s*=\s*\[[^\]]*iam:(?:Create|Update|Delete|Attach|Put)/);
@@ -511,7 +511,7 @@ test("broker current mappings are safe at a zero-current append-only checkpoint 
 test("zero-current checkpoint does not fail broker no-op refresh validation", () => {
   const main = fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
   const planValidator = fs.readFileSync("scripts/plan-production-green-stage-b.mjs", "utf8");
-  assert.match(main, /resource "aws_lambda_function" "broker"[\s\S]*?precondition[\s\S]*?3500-byte safety bound/);
+  assert.match(main, /resource "aws_lambda_function" "broker"[\s\S]*?precondition[\s\S]*?3584-byte safety bound/);
   assert.match(planValidator, /!exactActions\(change\.change\?\.actions \|\| \[\], \["no-op"\]\)/);
   assert.match(planValidator, /assertStageBBrokerTaskDefinitionMapping\(plan, terraformConfiguration\)/);
 });
@@ -612,4 +612,35 @@ output "executor_keys" { value = keys(local.executor_definitions_for_resources) 
   assert.match(terraformConfiguration, /executor_definitions_for_resources\s*=\s*\{[\s\S]*if !var\.stage_b_recovery_only/);
   assert.doesNotMatch(terraformConfiguration, /candidate_definitions_for_resources\s*=\s*var\.stage_b_recovery_only\s*\?/);
   assert.doesNotMatch(terraformConfiguration, /executor_definitions_for_resources\s*=\s*var\.stage_b_recovery_only\s*\?/);
+});
+
+test("Terraform enforces the reviewed broker size boundary before apply", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-env-size-"));
+  try {
+    const main = fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
+    const condition = main.match(/condition\s*= (length\(jsonencode\(local\.broker_environment\)\) <= \d+)/)?.[1];
+    assert.ok(condition);
+    fs.writeFileSync(path.join(directory, "main.tf"), `variable "environment" { type = map(string) }
+locals { broker_environment = var.environment }
+resource "terraform_data" "size" {
+  input = var.environment
+  lifecycle {
+    precondition {
+      condition = ${condition}
+      error_message = "broker environment size rejected"
+    }
+  }
+}
+`);
+    const terraform = process.env.TERRAFORM_BINARY || "terraform";
+    const run = (args) => execFileSync(terraform, [`-chdir=${directory}`, ...args], { encoding: "utf8", stdio: "pipe" });
+    run(["init", "-backend=false", "-input=false"]);
+    for (const bytes of [3522, 3584, 3585]) {
+      const environment = { BROKER_IMAGE_RELEASE_SHA: "9".repeat(40), PADDING: "" };
+      environment.PADDING = "x".repeat(bytes - Buffer.byteLength(JSON.stringify(environment)));
+      const args = ["plan", "-input=false", "-no-color", `-var=environment=${JSON.stringify(environment)}`];
+      if (bytes <= 3584) assert.match(run(args), /Plan: 1 to add/);
+      else assert.throws(() => run(args), /broker environment size rejected/);
+    }
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });

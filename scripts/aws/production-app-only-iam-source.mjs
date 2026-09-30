@@ -26,7 +26,7 @@ export function evaluateAppOnlySourceIam({ repositoryRoot, databaseSecretArn }) 
   // This evaluator supports the reviewed Stage-B variable-to-policy wiring,
   // not arbitrary future HCL. A source change must extend and test this model;
   // otherwise it cannot assert that live IAM implements the new source.
-  assert.equal(canonicalSha256(source), "99ff978327eb5946a958b5acb377a2f5a9462ff851e7566586b0d547594dde1c", "Stage-B IAM source wiring is unreviewed by the app-only compatibility model");
+  assert.equal(canonicalSha256(source), "01ab0dd47e364c431ac69a6639265c3943baecc71d7d3fab62601c38a44a24aa", "Stage-B IAM source wiring is unreviewed by the app-only compatibility model");
   const block = (name) => {
     const matches = [...source.matchAll(new RegExp(`^resource "aws_iam_role_policy" "${name}" \\{\\n([\\s\\S]*?)^\\}`, "gm"))];
     assert.equal(matches.length, 1, `Ambiguous source IAM resource ${name}`);
