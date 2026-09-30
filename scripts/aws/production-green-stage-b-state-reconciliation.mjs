@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import path from "node:path";
 import { canonicalJson } from "./production-green-stage-b-contract.mjs";
 import { classifyStageBPlan } from "./stage-b-deployment-contract.mjs";
 import { stageBBoundImagesFromBindingReport } from "./generate-production-green-stage-b-tfvars.mjs";
@@ -140,6 +141,16 @@ function assertReviewedReflectionDrift(normalPlan, refreshPlan, postWrite) {
 
 function actionableEntries(entries = []) { return entries.filter((entry) => !equal(entry?.change?.actions, ["no-op"]) && !equal(entry?.change?.actions, ["read"])); }
 
+function pendingChangeSha256(entry, normalPlan) {
+  const change = structuredClone(entry.change);
+  if (entry.address === "aws_lambda_function.broker") {
+    const packagePath = normalPlan.variables?.broker_package_path?.value;
+    if (!path.isAbsolute(packagePath || "") || path.basename(packagePath) !== "broker-package.zip" || change.after?.filename !== packagePath) throw new Error("Stage B broker plan does not use the authenticated runtime package path.");
+    change.after.filename = "<authenticated-stage-b-broker-package>";
+  }
+  return sha256(change);
+}
+
 function assertPendingOutputTopology(normalPlan, refreshPlan, postWrite) {
   const actionable = Object.entries(normalPlan.output_changes || {}).filter(([, entry]) => !equal(entry?.actions, ["no-op"]));
   const allowed = postWrite ? ["task_definition_arns"] : ["bound_images", "task_definition_arns"];
@@ -163,7 +174,7 @@ function assertPendingStageBConvergence(normalPlan, refreshPlan, { sourceSha, te
     || classification.taskDefinitionRotations.length !== Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES).length
     || classification.actionCounts.replacement !== Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES).length || classification.actionCounts.update !== 3 || classification.unclassifiedResources.length) throw new Error("Stage B pending ordinary convergence topology is not exact.");
   for (const entry of changes) if (!pendingConvergenceAddressSet.has(entry.address)) throw new Error("Stage B pending ordinary convergence contains an unrelated mutation.");
-  const body = { planProfile: classification.planProfile, addresses: pendingConvergenceAddresses, actionCounts: { replacement: classification.actionCounts.replacement, update: classification.actionCounts.update }, resourceChanges: changes.map((entry) => ({ address: entry.address, type: entry.type, actions: entry.change.actions, changeSha256: sha256(entry.change) })).sort((left, right) => left.address.localeCompare(right.address)), output };
+  const body = { planProfile: classification.planProfile, addresses: pendingConvergenceAddresses, actionCounts: { replacement: classification.actionCounts.replacement, update: classification.actionCounts.update }, resourceChanges: changes.map((entry) => ({ address: entry.address, type: entry.type, actions: entry.change.actions, changeSha256: pendingChangeSha256(entry, normalPlan) })).sort((left, right) => left.address.localeCompare(right.address)), output };
   const semantics = Object.freeze({ ...body, semanticsSha256: sha256(body) });
   if (expectedSemantics && !equal(semantics, expectedSemantics)) throw new Error("Stage B pending ordinary convergence changed after preparation.");
   return semantics;
