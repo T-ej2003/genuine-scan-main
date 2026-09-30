@@ -2,7 +2,7 @@
 import { createProductionCommandRunner, createProductionOverlapDeploymentAdapter, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-cutover-production-adapters.mjs";
 import { createProductionCutoverRuntimeComposition } from "./production-cutover-runtime-composition.mjs";
 import { PRODUCTION_CUTOVER_MODE, runProductionCutoverControlPlane, runProductionCutoverOverlapControlPlane } from "./production-cutover-control-plane.mjs";
-import { readAndAssertReadyForOverlapDeployment } from "./production-overlap-readiness-contract.mjs";
+import { readAndAssertReadyForOverlapDeployment, rotationExpectedImageReleaseSha } from "./production-overlap-readiness-contract.mjs";
 import { buildProductionOverlapDeploymentReceipt, persistProductionOverlapDeploymentReceipt, readProductionOverlapDeploymentReceipt } from "./production-overlap-deployment-receipt.mjs";
 import { readBoundStageBPrivateJson, readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
 import assert from "node:assert/strict";
@@ -37,6 +37,7 @@ if (mode === "rotation-overlap") {
   const readiness = readAndAssertReadyForOverlapDeployment({ filePath: readinessFile, evidenceSha256: readinessSha256, sourceSha, rotationId, rotationStateSha256 });
   const authorizedTaskDefinitionArn = readiness.evidence?.overlapTaskDefinition?.identityBindings?.taskDefinitionArn;
   if (typeof authorizedTaskDefinitionArn !== "string" || taskDefinitionArn !== authorizedTaskDefinitionArn) throw new Error("Rotation overlap task definition is not the exact authenticated readiness candidate.");
+  const expectedGitSha = rotationExpectedImageReleaseSha(readiness.evidence);
   const run = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER });
   const caller = JSON.parse(run(["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"]));
   assert.equal(caller.Account, "368992683803");
@@ -56,8 +57,8 @@ if (mode === "rotation-overlap") {
     imageDigest: process.env.EXPECTED_IMAGE_DIGEST, mode: transitionMode,
     releaseIdentity: rotationReleaseIdentity({ mode: transitionMode, sourceSha, rotationId, rotationStateSha256, readinessSha256, readiness: readiness.evidence, expectedCurrentTaskDefinitionArn: process.env.EXPECTED_CURRENT_TASK_DEFINITION_ARN }),
     isProtectedMainAncestor: (sha) => { try { execFileSync("git", ["merge-base", "--is-ancestor", sha, "refs/remotes/origin/main"], { stdio: "ignore" }); return true; } catch { return false; } },
-    verifyApplied: () => execFileSync("scripts/aws/verify-version-endpoint.sh", [process.env.VERSION_URL, process.env.EXPECTED_GIT_SHA], { stdio: ["ignore", "pipe", "pipe"] }),
-    deploy: () => createProductionOverlapDeploymentAdapter({ run, credentialSource, readinessFile, readinessSha256, sourceSha, rotationId, imageDigest: process.env.EXPECTED_IMAGE_DIGEST, cluster: process.env.CLUSTER_NAME, service: process.env.SERVICE_NAME, expectedCurrentTaskDefinitionArn: process.env.EXPECTED_CURRENT_TASK_DEFINITION_ARN, versionUrl: process.env.VERSION_URL, expectedGitSha: process.env.EXPECTED_GIT_SHA }).run({ taskDefinitionArn, readinessSha256, rotationStateSha256 }),
+    verifyApplied: () => execFileSync("scripts/aws/verify-version-endpoint.sh", [process.env.VERSION_URL, expectedGitSha], { stdio: ["ignore", "pipe", "pipe"] }),
+    deploy: () => createProductionOverlapDeploymentAdapter({ run, credentialSource, readinessFile, readinessSha256, sourceSha, rotationId, imageDigest: process.env.EXPECTED_IMAGE_DIGEST, cluster: process.env.CLUSTER_NAME, service: process.env.SERVICE_NAME, expectedCurrentTaskDefinitionArn: process.env.EXPECTED_CURRENT_TASK_DEFINITION_ARN, versionUrl: process.env.VERSION_URL, expectedGitSha }).run({ taskDefinitionArn, readinessSha256, rotationStateSha256 }),
   }) };
   const result = await runProductionCutoverOverlapControlPlane({ readiness: readiness.evidence, sourceSha, rotationId, rotationStateSha256, taskDefinitionArn, readinessSha256, deployOverlap, deploymentReceipt, transitionMode });
   process.stdout.write(`${JSON.stringify({ disposition: result.deployment.disposition, terminalState: result.terminalState || "DEPLOYED", sourceSha, transitionMode, rotationId, rotationStateSha256, readinessSha256, workflowRunId: process.env.GITHUB_RUN_ID, workflowRunAttempt: process.env.GITHUB_RUN_ATTEMPT, metadata: result.deployment.metadata, ...(result.deploymentReceipt ? { deploymentReceiptSha256: result.deploymentReceipt.receiptSha256 } : {}), taskDefinitionArn: result.deployment.taskDefinitionArn, propagateTags: result.deployment.propagateTags, updateServiceCount: result.deployment.updateServiceCount, mutationSequence: result.mutationSequence })}\n`);

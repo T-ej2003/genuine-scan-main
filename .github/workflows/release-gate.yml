@@ -927,7 +927,6 @@ jobs:
           EXPECTED_FAMILY: ${{ env.ROTATION_BACKEND_TASK_DEFINITION_FAMILY }}
           EXPECTED_IMAGE_DIGEST: ${{ inputs.rotation_image_digest }}
           VERSION_URL: ${{ env.PUBLIC_BASE_URL }}/api/health
-          EXPECTED_GIT_SHA: ${{ steps.images.outputs.image_release_sha }}
           ENABLE_EXECUTE_COMMAND: "true"
           PROPAGATE_TAGS: "TASK_DEFINITION"
           WAIT_FOR_STABLE: "true"

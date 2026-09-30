@@ -66,6 +66,12 @@ export function assertReadyForOverlapDeployment(evidence, expected = {}) {
   return { readyForOverlapDeployment: true, stages: [...READY_FOR_OVERLAP_DEPLOYMENT_STAGES] };
 }
 
+export function rotationExpectedImageReleaseSha(evidence) {
+  const imageReleaseSha = evidence?.overlapTaskDefinition?.identityBindings?.imageReleaseSha;
+  if (!SHA40.test(imageReleaseSha || "") || imageReleaseSha !== evidence?.imageAuthorization?.identityBindings?.imageReleaseSha) fail("Rotation runtime image SHA is not bound to authenticated readiness.");
+  return imageReleaseSha;
+}
+
 export function readAndAssertReadyForOverlapDeployment({ filePath, evidenceSha256, sourceSha, rotationId, rotationStateSha256, now = Date.now() } = {}) {
   if (typeof filePath !== "string" || filePath.trim() === "") fail("READY_FOR_OVERLAP_DEPLOYMENT evidence file is required");
   if (!SHA256.test(evidenceSha256)) fail("READY_FOR_OVERLAP_DEPLOYMENT evidence SHA-256 is invalid");
