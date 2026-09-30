@@ -2,7 +2,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createProductionAwsCommandRunner, createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, ensureStageBPrivateFile, readBoundStageBPrivateJson, readStageBPrivateFileBytes, writeStageBPrivateFileExclusive } from "./stage-b-artifact-contract.mjs";
@@ -11,23 +11,31 @@ import { readStageBProtectedMainCheckout, assertStageBProtectedCheckoutMatchesDe
 import { assertStageBTfvarsBinding } from "./generate-production-green-stage-b-tfvars.mjs";
 import { assertExactStageBRefreshOnlyPlan, assertStageBStateReconciliationSourceAlignment, createStageBStateReconciliationPreparation, executeStageBStateReconciliation, STAGE_B_STATE_RECONCILIATION } from "./production-green-stage-b-state-reconciliation.mjs";
 import { materializeStageBPrerequisites, writeStageBRuntimeMaterialization } from "./stage-b-prerequisite-bundle.mjs";
+import { captureStageBTerraformJson } from "./capture-stage-b-terraform-json.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const terraformRoot = STAGE_B_STATE_RECONCILIATION.terraformRoot;
 const hash = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 const required = (argv, name) => { const index = argv.indexOf(name); const value = index < 0 ? undefined : argv[index + 1]; if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
 const exactArgs = (argv, allowed) => { const seen = new Set(); for (let index = 0; index < argv.length; index += 2) if (!allowed.has(argv[index]) || seen.has(argv[index]) || !argv[index + 1] || argv[index + 1].startsWith("--")) throw new Error("Stage B state reconciliation CLI arguments are not exact."); else seen.add(argv[index]); };
-const runTerraform = (args, env) => execFileSync("terraform", [`-chdir=${terraformRoot}`, ...args], { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+export function runStageBStateReconciliationTerraform(args, env, spawn = spawnSync) {
+  const result = spawn("terraform", [`-chdir=${terraformRoot}`, ...args], { cwd: root, env, stdio: ["ignore", "inherit", "inherit"] });
+  if (result.error) throw new Error(`Stage B state reconciliation Terraform failed to start: ${result.error.code || result.error.message}`);
+  if (result.signal) throw new Error(`Stage B state reconciliation Terraform terminated by ${result.signal}.`);
+  if (result.status !== 0) throw new Error(`Stage B state reconciliation Terraform failed with exit ${result.status}.`);
+}
 const privateJson = (filePath, expectedSha256, label) => readBoundStageBPrivateJson({ filePath: path.resolve(filePath), expectedSha256, repositoryRoot: root, label });
 const stateIdentity = (run) => readStageBTerraformStateIdentity(run);
 
-function initialize({ data, env, terraform = runTerraform }) {
+function initialize({ data, env, terraform = runStageBStateReconciliationTerraform }) {
   terraform(["init", "-input=false", "-lockfile=readonly", ...Object.entries(STAGE_B_TERRAFORM_BACKEND_CONFIG).map(([key, value]) => `-backend-config=${key}=${value}`)], env);
   const metadataPath = path.join(data, "terraform.tfstate"); ensureStageBPrivateFile({ filePath: metadataPath, repositoryRoot: root, normalize: true, label: "Stage B state reconciliation backend metadata" });
   assertStageBTerraformInitializedBackendMetadata(JSON.parse(fs.readFileSync(metadataPath, "utf8")).backend);
 }
 
-function renderPlan(planPath, env, terraform = runTerraform) { return JSON.parse(terraform(["show", "-json", planPath], env)); }
+export function renderStageBStateReconciliationPlan(planPath, env) {
+  return JSON.parse(captureStageBTerraformJson({ args: [`-chdir=${terraformRoot}`, "show", "-json", planPath], cwd: root, env }).toString("utf8"));
+}
 function assertSource(sourceSha) { const checkout = readStageBProtectedMainCheckout({ cwd: root, fetchOriginMain: true }); assertStageBProtectedCheckoutMatchesDeploymentIdentity({ protectedMainCheckout: checkout, deploymentIdentity: { toolingSha: sourceSha } }); return checkout; }
 function assertBindings({ sourceSha, tfvars, binding, preflight, preflightSha256, checkPreflight = true, validatePrerequisiteFiles = true }) {
   const bindingBytes = readStageBPrivateFileBytes({ filePath: binding, repositoryRoot: root, label: "Stage B state reconciliation binding" }).bytes;
@@ -49,7 +57,7 @@ export function runStageBStateReconciliation(argv = process.argv.slice(2), deps 
   const credentialOptions = credentialSource === PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE ? { profile: required(argv, "--admin-profile") } : { env: deps.env || process.env };
   const env = { ...createProductionAwsCredentialEnvironment({ credentialSource, ...credentialOptions }), TF_DATA_DIR: data, TF_WORKSPACE: "default" };
   const run = deps.run || createProductionAwsCommandRunner({ credentialSource, ...credentialOptions });
-  const terraform = deps.runTerraform || runTerraform; const reauthenticateSource = deps.assertSource || assertSource;
+  const terraform = deps.runTerraform || runStageBStateReconciliationTerraform; const renderPlan = deps.renderPlan || renderStageBStateReconciliationPlan; const reauthenticateSource = deps.assertSource || assertSource;
   if (prepare) {
     const caller = JSON.parse(run(["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"]));
     if (caller.Account !== STAGE_B_STATE_RECONCILIATION.account || !new RegExp(`^arn:aws:sts::${STAGE_B_STATE_RECONCILIATION.account}:assumed-role/mscqr-production-release-deployer/[^/]+$`).test(caller.Arn || "")) throw new Error("Stage B state reconciliation preparation requires the exact release-deployer session.");
@@ -63,8 +71,8 @@ export function runStageBStateReconciliation(argv = process.argv.slice(2), deps 
     terraform(["plan", "-refresh-only", `-var-file=${runtime.runtimeTfvarsPath}`, "-input=false", "-lock=true", "-out", saved], env); ensureStageBPrivateFile({ filePath: saved, repositoryRoot: root, normalize: true, label: "Stage B state reconciliation saved plan" });
     const terraformConfiguration = fs.readFileSync(path.join(root, terraformRoot, "main.tf"), "utf8");
     const planOptions = { sourceSha, stateIdentity: before, tfvarsSha256: bindings.tfvarsSha256, bindingSha256: bindings.bindingSha256, bindingReport: bindings.bindingReport, terraformConfiguration };
-    const bytes = readStageBPrivateFileBytes({ filePath: saved, repositoryRoot: root, label: "Stage B state reconciliation saved plan" }).bytes; const plan = renderPlan(saved, env, terraform); assertExactStageBRefreshOnlyPlan(plan, planOptions);
-    const sourcePlanPath = path.join(data, "source-alignment.tfplan"); terraform(["plan", `-var-file=${runtime.runtimeTfvarsPath}`, "-input=false", "-lock=true", "-out", sourcePlanPath], env); const normalPlan = renderPlan(sourcePlanPath, env, terraform); assertStageBStateReconciliationSourceAlignment(plan, normalPlan, planOptions);
+    const bytes = readStageBPrivateFileBytes({ filePath: saved, repositoryRoot: root, label: "Stage B state reconciliation saved plan" }).bytes; const plan = renderPlan(saved, env); assertExactStageBRefreshOnlyPlan(plan, planOptions);
+    const sourcePlanPath = path.join(data, "source-alignment.tfplan"); terraform(["plan", `-var-file=${runtime.runtimeTfvarsPath}`, "-input=false", "-lock=true", "-out", sourcePlanPath], env); const normalPlan = renderPlan(sourcePlanPath, env); assertStageBStateReconciliationSourceAlignment(plan, normalPlan, planOptions);
     const after = stateIdentity(run); if (JSON.stringify(after) !== JSON.stringify(before)) throw new Error("Stage B state changed during reconciliation preparation.");
     const preparation = createStageBStateReconciliationPreparation({ sourceSha, ticketId: required(argv, "--ticket-id"), stateIdentity: before, tfvarsSha256: originalBindings.tfvarsSha256, bindingSha256: originalBindings.bindingSha256, bindingReport: bindings.bindingReport, terraformConfiguration, preflightSha256: bindings.preflightSha256, runtimeTfvarsSha256: bindings.tfvarsSha256, runtimeBindingSha256: bindings.bindingSha256, runtimeMaterializationSha256: bindings.runtimeMaterializationSha256, relocationContractSha256: bindings.relocationContractSha256, prerequisiteManifestSha256: bindings.prerequisiteManifestSha256, brokerPackageSha256: bindings.brokerPackageSha256, brokerManifestSha256: bindings.brokerManifestSha256, stageAInputSha256: bindings.stageAInputSha256, stageAStateBackupSha256: bindings.stageAStateBackupSha256, prerequisiteProducerWorkflowRunId: required(argv, "--prerequisite-producer-workflow-run-id"), prerequisiteProducerWorkflowRunAttempt: required(argv, "--prerequisite-producer-workflow-run-attempt"), prerequisiteBundleArtifactId: required(argv, "--prerequisite-bundle-artifact-id"), prerequisiteBundleArtifactDigest: required(argv, "--prerequisite-bundle-artifact-digest"), planBytes: bytes, planJson: plan, normalPlan });
     const output = assertStageBArtifactPath({ artifactPath: path.resolve(required(argv, "--preparation-out")), repositoryRoot: root, label: "Stage B state reconciliation preparation", allowExisting: false }); ensureStageBPrivateDirectory({ directory: path.dirname(output), repositoryRoot: root, label: "Stage B state reconciliation output" }); writeStageBPrivateFileExclusive({ filePath: output, bytes: Buffer.from(`${JSON.stringify(preparation, null, 2)}\n`), repositoryRoot: root, label: "Stage B state reconciliation preparation" });
@@ -80,11 +88,11 @@ export function runStageBStateReconciliation(argv = process.argv.slice(2), deps 
   const bindings = { ...assertBindings({ sourceSha, tfvars: runtime.runtimeTfvarsPath, binding: runtime.runtimeBindingPath, preflight: required(argv, "--release-preflight"), preflightSha256: required(argv, "--release-preflight-sha256"), checkPreflight: false }), runtimeMaterializationSha256: runtime.runtimeMaterializationSha256, relocationContractSha256: runtime.relocationContractSha256, prerequisiteManifestSha256: prerequisite.manifestSha256, brokerPackageSha256: prerequisite.manifest.members.find(({ logicalArtifactId }) => logicalArtifactId === "broker-package").sha256, brokerManifestSha256: prerequisite.manifest.members.find(({ logicalArtifactId }) => logicalArtifactId === "broker-package-manifest").sha256, stageAInputSha256: prerequisite.manifest.members.find(({ logicalArtifactId }) => logicalArtifactId === "stage-a-handoff").sha256, stageAStateBackupSha256: prerequisite.manifest.members.find(({ logicalArtifactId }) => logicalArtifactId === "stage-a-state-backup").sha256 };
   const authorization = privateJson(required(argv, "--authorization"), required(argv, "--authorization-file-sha256"), "Stage B state reconciliation authorization");
   const saved = assertStageBArtifactPath({ artifactPath: path.resolve(required(argv, "--saved-plan")), repositoryRoot: root, label: "Stage B state reconciliation saved plan", allowExisting: true }); const bytes = readStageBPrivateFileBytes({ filePath: saved, repositoryRoot: root, label: "Stage B state reconciliation saved plan" }).bytes; if (hash(bytes) !== required(argv, "--saved-plan-sha256") || hash(bytes) !== preparation.refreshOnlyPlanSha256) throw new Error("Stage B state reconciliation saved plan is substituted.");
-  initialize({ data, env, terraform }); const plan = renderPlan(saved, env, terraform);
+  initialize({ data, env, terraform }); const plan = renderPlan(saved, env);
   const planPath = (name, refreshOnly) => {
     const output = path.join(data, name);
     terraform(["plan", ...(refreshOnly ? ["-refresh-only"] : []), `-var-file=${runtime.runtimeTfvarsPath}`, "-input=false", "-lock=true", "-out", output], env);
-    return renderPlan(output, env, terraform);
+    return renderPlan(output, env);
   };
   const resultPath = assertStageBArtifactPath({ artifactPath: path.resolve(required(argv, "--result-out")), repositoryRoot: root, label: "Stage B state reconciliation result", allowExisting: false }); ensureStageBPrivateDirectory({ directory: path.dirname(resultPath), repositoryRoot: root, label: "Stage B state reconciliation result output" });
   try {
