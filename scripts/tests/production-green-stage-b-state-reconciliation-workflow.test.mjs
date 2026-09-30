@@ -123,6 +123,8 @@ test("reconciliation readers authenticate and consume private JSON directly", ()
   assert.match(read("execute-production-green-stage-b-state-reconciliation.yml"), /--release-preflight-sha256/);
   assert.match(read("execute-production-green-stage-b-state-reconciliation.yml"), /--authorization-file-sha256/);
   assert.match(read("produce-production-green-stage-b-release-preflight.yml"), /GITHUB_TOKEN: \$\{\{ github\.token \}\}/);
+  assert.match(reconcile, /path\.join\(path\.dirname\(data\), "prerequisites"\)/);
+  assert.equal((reconcile.match(/outputDirectory: prerequisiteMaterializationDirectory/g) || []).length, 2);
 });
 
 test("every specialized reconciliation subprocess uses streaming or file-backed output", () => {

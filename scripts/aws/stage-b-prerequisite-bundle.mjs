@@ -117,9 +117,12 @@ export function assertStageBPrerequisiteBundle({ bundlePath, sourceSha, ticketId
   return Object.freeze({ bundle, bundleSha256: bundle.sha256, manifest, manifestSha256: sha256(contents[MANIFEST_FILENAME]), contents });
 }
 
-export function materializeStageBPrerequisites({ bundlePath, sourceSha, ticketId, repository, workflowRunId, workflowRunAttempt, headSha } = {}) {
+export function materializeStageBPrerequisites({ bundlePath, sourceSha, ticketId, repository, workflowRunId, workflowRunAttempt, headSha, outputDirectory } = {}) {
   const verified = assertStageBPrerequisiteBundle({ bundlePath, sourceSha, ticketId, repository, workflowRunId, workflowRunAttempt, headSha });
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-b-consumer-")); fs.chmodSync(directory, 0o700);
+  const directory = outputDirectory === undefined
+    ? fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-b-consumer-"))
+    : ensureStageBPrivateDirectory({ directory: path.resolve(outputDirectory), repositoryRoot: root, create: true, normalize: true, label: "Stage B prerequisite materialization" });
+  fs.chmodSync(directory, 0o700);
   const paths = {}; try {
     for (const member of verified.manifest.members) { const filePath = path.join(directory, member.canonicalFilename); if (path.dirname(filePath) !== directory) throw new Error("Stage B prerequisite materialization escaped its private root."); fs.writeFileSync(filePath, verified.contents[member.canonicalFilename], { mode: 0o600, flag: "wx" }); if ((fs.lstatSync(filePath).mode & 0o777) !== 0o600 || sha256(fs.readFileSync(filePath)) !== member.sha256) throw new Error("Stage B prerequisite materialization changed authenticated bytes."); paths[member.logicalArtifactId] = filePath; }
     const brokerManifest = assertStageBBrokerPackageManifest({ brokerPackagePath: paths["broker-package"], manifestPath: paths["broker-package-manifest"], repositoryRoot: root, expectedToolingSha: sourceSha });
