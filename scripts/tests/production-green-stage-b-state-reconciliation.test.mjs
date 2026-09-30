@@ -64,7 +64,13 @@ function refreshClosurePlan() {
   return plan;
 }
 
-const prepare = () => createStageBStateReconciliationPreparation({ sourceSha, ticketId: "CHG-20260925-001", stateIdentity: state, tfvarsSha256: digest, bindingSha256: digest, bindingReport: bindingReport(), terraformConfiguration, preflightSha256: digest, ...closure, planBytes: bytes, planJson: refreshPlan(), normalPlan: preWriteNormalPlan(), createdAt: now.toISOString() });
+const prepare = (normalPlan = preWriteNormalPlan()) => createStageBStateReconciliationPreparation({ sourceSha, ticketId: "CHG-20260925-001", stateIdentity: state, tfvarsSha256: digest, bindingSha256: digest, bindingReport: bindingReport(), terraformConfiguration, preflightSha256: digest, ...closure, planBytes: bytes, planJson: refreshPlan(), normalPlan, createdAt: now.toISOString() });
+
+function relocateBrokerPackage(plan, packagePath) {
+  plan.variables.broker_package_path.value = packagePath;
+  plan.resource_changes.find(({ address }) => address === "aws_lambda_function.broker").change.after.filename = packagePath;
+  return plan;
+}
 
 test("captured serial-104 plan authenticates the exact output and pending ordinary convergence", () => {
   const semantics = assertExactStageBRefreshOnlyPlan(refreshPlan(), options());
@@ -157,6 +163,22 @@ test("execution writes only the saved refresh plan and verifies the exact pendin
   let current = { ...state }; let applies = 0; let normalRenders = 0;
   const result = executeStageBStateReconciliation({ sourceSha, preparation, authorization, bindings: execBindings(), terraformConfiguration, planBytes: bytes, planJson: refreshPlan(), readState: () => current, applyRefreshOnlyPlan: (approvedBytes) => { assert.equal(approvedBytes, bytes); applies += 1; current = { ...current, serial: 105, stateSha256: "c".repeat(64) }; }, renderPreApplyNormalPlan: () => { normalRenders += 1; return preWriteNormalPlan(); }, renderRefreshClosurePlan: refreshClosurePlan, renderNormalClosurePlan: () => { normalRenders += 1; return postWriteNormalPlan(); }, reauthenticateSource: () => {}, now });
   assert.equal(applies, 1); assert.equal(normalRenders, 2); assert.equal(result.terraformStateMutationCount, 1); assert.equal(result.remoteResourceMutationCount, 0); assert.equal(result.pendingOrdinaryResourceMutationCount, 15);
+});
+
+test("production-shaped replay binds broker package content while allowing private runtime relocation", () => {
+  const preparedPlan = relocateBrokerPackage(preWriteNormalPlan(), "/tmp/mscqr-stage-b-consumer-akGaEM/broker-package.zip");
+  const executionPlan = relocateBrokerPackage(preWriteNormalPlan(), "/tmp/mscqr-stage-b-consumer-5J8mnn/broker-package.zip");
+  const preparation = prepare(preparedPlan); const authorization = createStageBStateReconciliationAuthorization({ preparation, approval: approval(), now }); let current = { ...state }; let applies = 0;
+  const result = executeStageBStateReconciliation({ sourceSha, preparation, authorization, bindings: execBindings(), terraformConfiguration, planBytes: bytes, planJson: refreshPlan(), readState: () => current, applyRefreshOnlyPlan: () => { applies += 1; current = { ...current, serial: 105, stateSha256: "c".repeat(64) }; }, renderPreApplyNormalPlan: () => executionPlan, renderRefreshClosurePlan: refreshClosurePlan, renderNormalClosurePlan: () => relocateBrokerPackage(postWriteNormalPlan(), "/tmp/mscqr-stage-b-consumer-5J8mnn/broker-package.zip"), reauthenticateSource: () => {}, now });
+  assert.equal(result.status, "complete"); assert.equal(applies, 1);
+
+  const mismatchedPath = relocateBrokerPackage(preWriteNormalPlan(), "/tmp/mscqr-stage-b-consumer-next/broker-package.zip");
+  mismatchedPath.resource_changes.find(({ address }) => address === "aws_lambda_function.broker").change.after.filename = "/tmp/substituted/broker-package.zip";
+  assert.throws(() => assertStageBStateReconciliationSourceAlignment(refreshPlan(), mismatchedPath, options()), /authenticated runtime package path/);
+
+  const changedPackage = relocateBrokerPackage(preWriteNormalPlan(), "/tmp/mscqr-stage-b-consumer-next/broker-package.zip");
+  changedPackage.resource_changes.find(({ address }) => address === "aws_lambda_function.broker").change.after.source_code_hash = Buffer.alloc(32, 7).toString("base64");
+  assert.throws(() => executeStageBStateReconciliation({ sourceSha, preparation, authorization, bindings: execBindings(), terraformConfiguration, planBytes: bytes, planJson: refreshPlan(), readState: () => state, applyRefreshOnlyPlan: () => {}, renderPreApplyNormalPlan: () => changedPackage, renderRefreshClosurePlan: refreshClosurePlan, renderNormalClosurePlan: postWriteNormalPlan, reauthenticateSource: () => {}, now }), /changed after preparation/);
 });
 
 test("execution preserves authenticated relocation while revalidating identical image bindings", () => {
