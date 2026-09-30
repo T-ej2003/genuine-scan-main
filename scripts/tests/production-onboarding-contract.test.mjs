@@ -19,6 +19,13 @@ test("onboarding fails closed for wrong release or missing runtime proof", () =>
   assert.throws(() => validateOnboardingContract({ ...overlap, runtime: { ...overlap.runtime, artifactHistoricalRuntimeVerify: false } }), /artifactHistoricalRuntimeVerify/);
   assert.throws(() => validateOnboardingContract({ ...overlap, rotationStateSha256: "e" }), /rotation state SHA/i);
 });
+test("legacy onboarding is accepted only with an explicit equal source and health SHA", () => {
+  const legacy = { ...overlap, sourceSha: "a".repeat(40), health: { ...overlap.health, healthReleaseGitSha: "a".repeat(40) } };
+  delete legacy.imageReleaseSha;
+  assert.throws(() => validateOnboardingContract(legacy), /imageReleaseSha/);
+  assert.equal(validateOnboardingContract(legacy, { legacyImageSha: true }), true);
+  assert.throws(() => validateOnboardingContract({ ...legacy, health: overlap.health }, { legacyImageSha: true }), /health release/);
+});
 test("rotation closure remains separate and requires cleanup evidence", () => {
   const evidence = { cleanupEligibleAt: new Date(Date.now() - 1000).toISOString(), previousSlotsRetired: true, pendingSlotsRetired: true, cleanupDeploymentAfterRetirement: true, cleanupRuntimeVerified: true, oldJwtRejected: true, oldQrRejected: true, freshFinalRotationEvidence: true };
   assert.equal(validateRotationClosedContract(evidence), true);

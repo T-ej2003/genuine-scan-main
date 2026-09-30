@@ -421,7 +421,7 @@ test("production composition passes resolved AWS output to the predeployment inv
     const prepared = prepareProductionCutoverRuntime(input);
     const definition = buildPreDeploymentInventoryTaskDefinition({
       backendImage: prepared.config.overlapTaskInput.backendImage,
-      releaseSha: sourceSha,
+      releaseSha: prepared.config.imageReleaseSha,
       databaseUrl: prepared.config.inventoryDatabaseSecretArn || prepared.config.overlapTaskInput.databaseUrlSecretArn,
       rotationInventoryRlsRole: prepared.config.rotationInventoryRlsRole || prepared.config.overlapTaskInput.secretBindings.ROTATION_INVENTORY_RLS_ROLE,
       inventoryLogGroup: prepared.config.inventoryLogGroupName || prepared.config.overlapTaskInput.backendLogGroup,
@@ -542,6 +542,9 @@ test("generated cutover command binds runtime config and image authorization byt
   const directory = fsTemp();
   try {
     const result = prepareProductionCutoverRuntime(fullInput(directory, process.cwd()));
+    const rotationConfig = JSON.parse(readFileSync(result.config.rotationConfigFile, "utf8"));
+    assert.equal(rotationConfig.schemaVersion, 2);
+    assert.equal(rotationConfig.imageReleaseSha, result.config.imageReleaseSha);
     assert.throws(() => createProductionCutoverAdapters({ config: result.config, sourceSha, rotationId: result.config.rotationId }), /Hash-authenticated/);
     assert.match(result.nextCommand, /^npm run stage-b:run-cutover-operator -- --mode prepare-overlap --config /);
     assert.match(result.nextCommand, new RegExp(`--config-sha256 ${result.runtimeConfigSha256}`));

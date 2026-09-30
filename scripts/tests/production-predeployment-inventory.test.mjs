@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import test from "node:test";
 import { createProductionPreDeploymentInventoryAdapter, PREDEPLOYMENT_BROKER_CALLER_READ_TIMEOUT_SECONDS, PREDEPLOYMENT_BROKER_CALLER_TIMEOUT_HEADROOM_SECONDS } from "../aws/production-predeployment-inventory-adapter.mjs";
-import { assertPreDeploymentInventoryResult, createBrokerRuntimeConfig, createPreDeploymentInventoryHandler, createPreDeploymentOperationIdentity, preDeploymentOperationKey, validatePreDeploymentInventoryConfiguration, PREDEPLOYMENT_INVENTORY_LAMBDA_TIMEOUT_SECONDS, PREDEPLOYMENT_INVENTORY_OPERATION_DEADLINE_MS, PREDEPLOYMENT_INVENTORY_CLEANUP_MARGIN_MS, PREDEPLOYMENT_INVENTORY_TOTAL_REQUEST_BUDGET_MS } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs";
+import { assertPreDeploymentInventoryResult, assertPreDeploymentReplayRow, createBrokerRuntimeConfig, createPreDeploymentInventoryHandler, createPreDeploymentOperationIdentity, preDeploymentOperationIdentitySha256, preDeploymentOperationKey, preDeploymentReplayItem, validatePreDeploymentInventoryConfiguration, PREDEPLOYMENT_INVENTORY_LAMBDA_TIMEOUT_SECONDS, PREDEPLOYMENT_INVENTORY_OPERATION_DEADLINE_MS, PREDEPLOYMENT_INVENTORY_CLEANUP_MARGIN_MS, PREDEPLOYMENT_INVENTORY_TOTAL_REQUEST_BUDGET_MS } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs";
 import { assertPreDeploymentInventoryTaskDefinition, buildPreDeploymentInventoryTaskDefinition, PREDEPLOYMENT_INVENTORY_TAG } from "../aws/production-predeployment-inventory-task.mjs";
 import { assertBoundedRotationInventory, ROTATION_INVENTORY_CATEGORIES } from "../security/production-runtime-rotation-inventory.mjs";
 import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM, STAGE_B_MODES, STAGE_B_TASK_TEMPLATE_KEYS, stageBApprovalIdForReleaseSha } from "../aws/production-green-stage-b-contract.mjs";
@@ -325,8 +326,39 @@ test("predeployment operation identity is release-bound and task-definition chan
   const identity = createPreDeploymentOperationIdentity({ approvalId, releaseSha: sourceSha, imageReleaseSha, rotationId: "rotation-1", taskDefinitionArn: brokerTaskDefinitionArn, imageDigest: image });
   assert.equal(preDeploymentOperationKey(identity), preDeploymentOperationKey({ ...identity, taskDefinitionArn: `${brokerTaskDefinitionArn.slice(0, -2)}20` }));
   assert.notEqual(preDeploymentOperationKey(identity), preDeploymentOperationKey({ ...identity, rotationId: "rotation-2" }));
-  assert.notEqual(preDeploymentOperationKey(identity), preDeploymentOperationKey({ ...identity, imageReleaseSha: "8".repeat(40) }));
+  assert.equal(preDeploymentOperationKey(identity), preDeploymentOperationKey({ ...identity, imageReleaseSha: "8".repeat(40) }));
+  assert.notEqual(preDeploymentOperationIdentitySha256(identity), preDeploymentOperationIdentitySha256({ ...identity, imageReleaseSha: "8".repeat(40) }));
   assert.equal(identity.taskDefinitionArn, brokerTaskDefinitionArn);
+});
+
+test("a pre-upgrade replay row blocks launch under the preserved logical key", async () => {
+  const legacyIdentity = { approvalId, releaseSha: sourceSha, rotationId: "rotation-1", operation: "production-predeployment-rotation-inventory", imageDigest: image };
+  const legacyKey = `production-predeployment-rotation-inventory#${createHash("sha256").update(JSON.stringify(legacyIdentity)).digest("hex")}`;
+  const identity = createPreDeploymentOperationIdentity({ ...legacyIdentity, imageReleaseSha, taskDefinitionArn: brokerTaskDefinitionArn });
+  const legacyRow = { ...legacyIdentity, taskDefinitionArn: brokerTaskDefinitionArn, approvalMode: legacyKey, operationIdentitySha256: createHash("sha256").update(JSON.stringify({ approvalId, releaseSha: sourceSha, rotationId: legacyIdentity.rotationId, operation: legacyIdentity.operation, taskDefinitionArn: brokerTaskDefinitionArn, imageDigest: image })).digest("hex"), approvalNonce: brokerApproval.nonce, launchState: "launch-uncertain", expiresAt: 1785320400 };
+  assert.equal(assertPreDeploymentReplayRow(legacyRow, identity).identityVersion, 1);
+  const item = preDeploymentReplayItem({ ...identity, operationKey: legacyKey, nonce: brokerApproval.nonce, expiresAt: brokerApproval.expiresAt });
+  const versionedRow = Object.fromEntries(Object.entries(item).map(([key, value]) => [key, value.S ?? Number(value.N)]));
+  assert.equal(assertPreDeploymentReplayRow(versionedRow, identity).identityVersion, 2);
+  assert.equal(assertPreDeploymentReplayRow({ ...legacyRow, taskArns: new Set([brokerTaskArn]) }, identity).identityVersion, 1);
+  assert.throws(() => preDeploymentReplayItem({ ...identity, operationKey: legacyKey, nonce: brokerApproval.nonce, expiresAt: brokerApproval.expiresAt, arbitrary: true }), /claim/);
+  assert.throws(() => assertPreDeploymentReplayRow({ ...versionedRow, imageReleaseSha: "8".repeat(40) }, identity), /image identity/);
+  assert.throws(() => assertPreDeploymentReplayRow({ ...versionedRow, operationIdentitySha256: legacyRow.operationIdentitySha256 }, identity), /proof/);
+  assert.throws(() => assertPreDeploymentReplayRow({ ...legacyRow, imageReleaseSha }, identity), /version/);
+  assert.throws(() => assertPreDeploymentReplayRow({ ...legacyRow, arbitrary: true }, identity), /fields/);
+  assert.throws(() => assertPreDeploymentReplayRow({ ...legacyRow, taskArn: "unreviewed-task" }, identity), /proof/);
+  const replayRows = new Map([[legacyKey, legacyRow]]);
+  let launches = 0;
+  const { handler } = makeBrokerHandler({
+    claimPreDeploymentOperation: async ({ operationKey }) => {
+      if (replayRows.has(operationKey)) throw new Error("ConditionalCheckFailedException: legacy replay row already exists");
+      replayRows.set(operationKey, { launchState: "launching" });
+    },
+    runTask: async () => { launches += 1; throw new Error("legacy replay launched another task"); },
+  });
+  await assert.rejects(() => handler({ approvalId, imageReleaseSha, operation: legacyIdentity.operation, rotationId: legacyIdentity.rotationId, sourceSha, taskDefinitionArn: brokerTaskDefinitionArn }), /legacy replay row already exists/);
+  assert.equal(launches, 0);
+  assert.equal(replayRows.get(legacyKey), legacyRow);
 });
 
 test("predeployment replay claim is after authorization and prevents concurrent and completed retries", async () => {

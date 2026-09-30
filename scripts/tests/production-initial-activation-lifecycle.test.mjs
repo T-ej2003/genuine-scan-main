@@ -13,8 +13,10 @@ import {
   assertOpaqueS3VersionId,
   readInitialActivationClaim,
   readInitialActivationCompletion,
+  effectiveImageReleaseSha,
+  validateInitialActivationClaim,
 } from "../aws/production-initial-activation-lifecycle.mjs";
-import { PRODUCTION_ACTIVATION_LIFECYCLE } from "../aws/production-green-stage-b-contract.mjs";
+import { canonicalJson, PRODUCTION_ACTIVATION_LIFECYCLE } from "../aws/production-green-stage-b-contract.mjs";
 import { runCli } from "../aws/manage-production-initial-activation-lifecycle.mjs";
 import { stageBApprovalIdForReleaseSha } from "../aws/production-green-stage-b-contract.mjs";
 import { buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation } from "../aws/production-stage-a-control-plane.mjs";
@@ -40,7 +42,9 @@ const terraformFiles = (directory) => readdirSync(directory, { withFileTypes: tr
 const asArray = (value) => Array.isArray(value) ? value : [value];
 const policyDecision = (policy, { action, resource, principalArn, ifNoneMatch, ifMatch } = {}) => {
   const matches = (statement) => asArray(statement.Action).includes(action)
-    && asArray(statement.Resource).some((candidate) => candidate === resource || candidate.endsWith("*") && resource.startsWith(candidate.slice(0, -1)))
+    && (statement.NotResource !== undefined
+      ? !asArray(statement.NotResource).some((candidate) => candidate === resource || candidate.endsWith("*") && resource.startsWith(candidate.slice(0, -1)))
+      : asArray(statement.Resource).some((candidate) => candidate === resource || candidate.endsWith("*") && resource.startsWith(candidate.slice(0, -1))))
     && (statement.Principal === "*" || asArray(statement.Principal?.AWS).includes(principalArn))
     && (statement.Condition?.StringEquals?.["s3:if-none-match"] === undefined || statement.Condition.StringEquals["s3:if-none-match"] === ifNoneMatch)
     && (statement.Condition?.StringNotEquals?.["s3:if-none-match"] === undefined || statement.Condition.StringNotEquals["s3:if-none-match"] !== ifNoneMatch)
@@ -110,6 +114,28 @@ test("atomic fixed-key claim has one creator and matching retry", () => {
   ]) assert.throws(() => createInitialActivationClaim({ claim: claim(different), aws: s3.aws }), /conflicts/);
 });
 
+test("immutable schema-v1 claim and completion retain exact bytes through schema-v2 retry", () => {
+  const s3 = memoryS3();
+  const newClaim = claim({ imageReleaseSha: sourceSha });
+  const legacy = { ...newClaim, schemaVersion: 1 };
+  delete legacy.imageReleaseSha;
+  legacy.activationTransactionId = createHash("sha256").update(canonicalJson({ environment: "production", repository: legacy.repository, sourceSha: legacy.sourceSha, rotationId: legacy.rotationId, overlapDeploymentSha: legacy.overlapDeploymentSha, taskDefinitionArn: legacy.taskDefinitionArn, activationTaskDefinitionArn: legacy.activationTaskDefinitionArn, imageDigest: legacy.imageDigest, overlapRuntimeProofSha256: legacy.overlapRuntimeProofSha256 })).digest("hex");
+  const bytes = Buffer.from(`${canonicalJson(legacy)}\n`);
+  s3.objects.set(PRODUCTION_ACTIVATION_LIFECYCLE.claimKey, bytes);
+  const retried = createInitialActivationClaim({ claim: newClaim, aws: s3.aws });
+  assert.equal(retried.status, "ALREADY_EXISTS_MATCHING");
+  assert.equal(retried.sha256, createHash("sha256").update(bytes).digest("hex"));
+  assert.deepEqual(retried.value, legacy);
+  assert.equal(effectiveImageReleaseSha(retried.value), sourceSha);
+  assert.equal(s3.writes, 0);
+  assert.throws(() => createInitialActivationClaim({ claim: claim(), aws: s3.aws }), /conflicts/);
+  const completion = buildInitialActivationCompletion({ claim: retried.value, claimSha256: retried.sha256, claimVersionId: retried.versionId, rlsReceiptSha256: "1".repeat(64), onboardingEvidenceSha256: "2".repeat(64), completedAt: "2026-08-26T13:00:00.000Z" });
+  assert.equal(completion.schemaVersion, 1);
+  assert.equal(Object.hasOwn(completion, "imageReleaseSha"), false);
+  const created = createInitialActivationCompletion({ completion, claim: retried.value, claimSha256: retried.sha256, claimVersionId: retried.versionId, aws: s3.aws });
+  assert.equal(readInitialActivationCompletion({ claim: retried.value, claimSha256: retried.sha256, claimVersionId: retried.versionId, aws: s3.aws }).sha256, created.sha256);
+});
+
 test("completion is conditional, immutable, and claim-bound", () => {
   const s3 = memoryS3();
   const createdClaim = createInitialActivationClaim({ claim: claim(), aws: s3.aws });
@@ -176,6 +202,21 @@ test("completion publication requires authenticated RLS and strict onboarding ev
     await assert.rejects(runCli(argv, { aws: s3.aws, validateOverlap }), /tenantIsolation/);
     writeFileSync(onboardingFile, JSON.stringify({ ...onboardingBundle, evidence: { ...onboarding, sourceSha: "e".repeat(40) } }));
     await assert.rejects(runCli(argv, { aws: s3.aws, validateOverlap }), /bundle|claim/);
+
+    const legacyS3 = memoryS3();
+    const legacyClaim = { ...created.value, schemaVersion: 1 };
+    delete legacyClaim.imageReleaseSha;
+    legacyClaim.activationTransactionId = createHash("sha256").update(canonicalJson({ environment: "production", repository: legacyClaim.repository, sourceSha: legacyClaim.sourceSha, rotationId: legacyClaim.rotationId, overlapDeploymentSha: legacyClaim.overlapDeploymentSha, taskDefinitionArn: legacyClaim.taskDefinitionArn, activationTaskDefinitionArn: legacyClaim.activationTaskDefinitionArn, imageDigest: legacyClaim.imageDigest, overlapRuntimeProofSha256: legacyClaim.overlapRuntimeProofSha256 })).digest("hex");
+    const legacyClaimBytes = Buffer.from(`${canonicalJson(legacyClaim)}\n`);
+    const legacyClaimSha = createHash("sha256").update(legacyClaimBytes).digest("hex");
+    legacyS3.objects.set(PRODUCTION_ACTIVATION_LIFECYCLE.claimKey, legacyClaimBytes);
+    writeFileSync(claimFile, legacyClaimBytes);
+    const legacyOnboarding = { ...onboarding, health: { ...onboarding.health, healthReleaseGitSha: sourceSha } };
+    delete legacyOnboarding.imageReleaseSha;
+    writeFileSync(onboardingFile, JSON.stringify({ ...onboardingBundle, evidenceSha256: createHash("sha256").update(JSON.stringify(legacyOnboarding)).digest("hex"), evidence: legacyOnboarding }));
+    const legacyArgs = argv.map((value, index) => index > 0 && argv[index - 1] === "--claim-sha256" ? legacyClaimSha : value);
+    assert.equal((await runCli(legacyArgs, { aws: legacyS3.aws, validateOverlap, now: () => "2026-08-26T13:00:00.000Z" })).status, "CREATED");
+    assert.equal(readInitialActivationCompletion({ claim: legacyClaim, claimSha256: legacyClaimSha, claimVersionId: "v1", aws: legacyS3.aws }).value.schemaVersion, 1);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
@@ -228,6 +269,7 @@ test("source policy and bucket policy enforce only exact conditional lifecycle o
     "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationCreate",
     "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationReplace",
     "DenyUnconditionalInitialActivationPolicyReconciliationReservationWrites",
+    "DenyNonTargetInitialActivationPolicyReconciliationReservationReplacements",
     "DenyOtherPrincipalsInitialActivationPolicyReconciliationReservationWrites",
     "DenyInitialActivationPolicyReconciliationReservationDeletion",
     "AllowReleaseDeployerListStageAProductionArtifactsRecovery",
@@ -268,7 +310,7 @@ test("initial-activation policy reconciliation reservation is exact, conditional
   const prefixArn = PRODUCTION_ACTIVATION_LIFECYCLE.initialActivationPolicyReconciliationReservationArn;
   const exactObjectArn = prefixArn.replace("*", `${"a".repeat(64)}.json`);
   assert.deepEqual(desired.Statement.slice(0, current.Statement.length), current.Statement);
-  assert.equal(desired.Statement.length, current.Statement.length + 7);
+  assert.equal(desired.Statement.length, current.Statement.length + 8);
   assert.equal(PRODUCTION_ACTIVATION_LIFECYCLE.initialActivationPolicyReconciliationReservationPrefix, "production-initial-activation-lifecycle-policy-reconciliation/reservations/");
   assert.equal(prefixArn, `arn:aws:s3:::${PRODUCTION_ACTIVATION_LIFECYCLE.bucket}/${PRODUCTION_ACTIVATION_LIFECYCLE.initialActivationPolicyReconciliationReservationPrefix}*`);
   assert.equal(policyDecision(desired, { action: "s3:GetObject", resource: exactObjectArn, principalArn: PRODUCTION_ACTIVATION_LIFECYCLE.rootOperatorArn }), "allowed");
@@ -276,7 +318,7 @@ test("initial-activation policy reconciliation reservation is exact, conditional
     assert.equal(policyDecision(desired, { action: "s3:GetObject", resource: exactObjectArn, principalArn }), "explicitDeny");
   }
   assert.equal(policyDecision(desired, { action: "s3:PutObject", resource: exactObjectArn, principalArn: PRODUCTION_ACTIVATION_LIFECYCLE.rootOperatorArn, ifNoneMatch: "*" }), "allowed");
-  assert.equal(policyDecision(desired, { action: "s3:PutObject", resource: exactObjectArn, principalArn: PRODUCTION_ACTIVATION_LIFECYCLE.rootOperatorArn, ifMatch: "\"0123456789abcdef0123456789abcdef\"" }), "allowed");
+  assert.equal(policyDecision(desired, { action: "s3:PutObject", resource: exactObjectArn, principalArn: PRODUCTION_ACTIVATION_LIFECYCLE.rootOperatorArn, ifMatch: "\"0123456789abcdef0123456789abcdef\"" }), "explicitDeny");
   assert.equal(policyDecision(desired, { action: "s3:PutObject", resource: exactObjectArn, principalArn: PRODUCTION_ACTIVATION_LIFECYCLE.rootOperatorArn }), "explicitDeny");
   assert.equal(policyDecision(desired, { action: "s3:PutObject", resource: exactObjectArn, principalArn: PRODUCTION_ACTIVATION_LIFECYCLE.releaseRoleArn, ifNoneMatch: "*" }), "explicitDeny");
   for (const action of ["s3:DeleteObject", "s3:DeleteObjectVersion"]) assert.equal(policyDecision(desired, { action, resource: exactObjectArn, principalArn: PRODUCTION_ACTIVATION_LIFECYCLE.rootOperatorArn }), "explicitDeny");
@@ -331,4 +373,10 @@ test("Release Gate binds the prepared activation target before the first RLS mut
   const rls = workflow.indexOf("Apply and verify checksum-bound production RLS package");
   assert(prepare > 0 && prepare < claim && claim < rls);
   assert.match(workflow.slice(claim, rls), /ACTIVATION_BINDING_FILE[\s\S]*targetArn[\s\S]*--activation-task-definition/);
+});
+
+test("expected transaction identities without a version remain exact", () => {
+  const value = claim();
+  assert.throws(() => validateInitialActivationClaim(value, { activationTransactionId: "f".repeat(64) }), /conflicts/);
+  assert.doesNotThrow(() => validateInitialActivationClaim(value, { activationTransactionId: value.activationTransactionId }));
 });

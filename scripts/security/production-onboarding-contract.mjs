@@ -27,17 +27,17 @@ export const assertOnboardingPaths = (paths = PRODUCTION_ONBOARDING_PATHS) => {
   return Object.freeze({ ...paths });
 };
 
-export const validateOnboardingContract = (evidence) => {
+export const validateOnboardingContract = (evidence, { legacyImageSha = false } = {}) => {
   if (!evidence || typeof evidence !== "object") throw new Error("onboarding evidence is required");
   if (evidence.valid !== true || typeof evidence.evidenceRef !== "string" || !/^[a-f0-9]{64}$/.test(evidence.evidenceSha256 || "")) throw new Error("onboarding evidence must be hash-bound and valid");
   if (!SHA.test(evidence.sourceSha)) throw new Error("sourceSha must be a full protected-main SHA");
-  if (!SHA.test(evidence.imageReleaseSha)) throw new Error("imageReleaseSha must be a full authenticated image source SHA");
+  if (!SHA.test(evidence.imageReleaseSha) && !(legacyImageSha && evidence.imageReleaseSha === undefined)) throw new Error("imageReleaseSha must be a full authenticated image source SHA");
   if (!DIGEST.test(evidence.imageDigest)) throw new Error("imageDigest must be a full image digest");
   if (typeof evidence.taskDefinitionArn !== "string" || typeof evidence.taskArn !== "string" || typeof evidence.rotationId !== "string" || !evidence.taskDefinitionArn || !evidence.taskArn || !evidence.rotationId) throw new Error("onboarding task and rotation identity are required");
   if (!SHA256.test(evidence.rotationStateSha256 || "")) throw new Error("onboarding rotation state SHA-256 is required");
   if (evidence.taskMarker !== true || evidence.ecsExecProof !== true) throw new Error("onboarding requires task marker and ECS Exec proof");
   for (const [name, value] of Object.entries({ serviceStable: evidence.serviceStable, targetTaskDefinitionMatch: evidence.targetTaskDefinitionMatch, targetImageDigestMatch: evidence.targetImageDigestMatch, health: evidence.health?.serviceHealthy })) requiredTrue(value, name);
-  if (evidence.health.healthReleaseGitSha !== evidence.imageReleaseSha) throw new Error("health release SHA does not match authenticated image source SHA");
+  if (evidence.health.healthReleaseGitSha !== (evidence.imageReleaseSha ?? (legacyImageSha ? evidence.sourceSha : undefined))) throw new Error("health release SHA does not match authenticated image source SHA");
   if (evidence.rotationPhase !== "verified") throw new Error("onboarding requires a fully verified overlap phase");
   for (const name of ["jwtCurrentRuntimeVerify", "jwtPreviousRuntimeVerify", "jwtInvalidRuntimeRejected", "qrCurrentRuntimeVerify", "qrTamperMatchingKeyTest", "qrUnknownKeyRejected", "cookieCurrentSealOnly", "cookiePreviousOpenDuringOverlap", "artifactCurrentRuntimeVerify", "artifactHistoricalRuntimeVerify"]) requiredTrue(evidence.runtime?.[name], `runtime.${name}`);
   if ((evidence.runtime?.qrPreviousRuntimeVerify === true) === (evidence.runtime?.legacyQrKeypairUnrecoverable === true)) throw new Error("runtime QR historical continuity must be either verified or explicitly unrecoverable");

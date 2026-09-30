@@ -74,3 +74,28 @@ only SHA rendered into task-definition `RELEASE_GIT_SHA`. Recovery requires the
 bindings, authorized backend digest, image-release SHA, and authorization envelope to
 match exactly. A legacy task definition whose `RELEASE_GIT_SHA` was populated from the
 tooling SHA is not relabeled or adopted; its complete semantic fingerprint fails closed.
+
+## Persisted-record compatibility (PR #604)
+
+The upgrade audit uses protected pre-PR source `68d8c76`, not an intermediate
+unmerged PR head. No historical object is rewritten to add image provenance.
+
+| Persisted structure | Historical authentication | New writes / upgrade behavior |
+| --- | --- | --- |
+| Rotation config | Approved exact byte SHA-256; no version/image field; runtime SHA was sourceSha | Version 2 requires explicit imageReleaseSha; original legacy bytes load with the original sourceSha runtime binding |
+| Rotation coordinator state and runtime proofs | Original config identity and persisted proof SHA | Legacy config retains original proof semantics; new config uses explicit image provenance |
+| Overlap readiness | Version 1, hashed bytes, exact original authorization/task bindings | Version 2 joins explicit authenticated image SHA; legacy cleanup derives sourceSha only from exact original binding shape |
+| Activation claim | Version 1 canonical bytes and original transaction hash | Version 2 includes imageReleaseSha; immutable v1 claim retries without replacement |
+| Activation completion | Version 1 canonical bytes, claim SHA and S3 version | Completion retains claim version and original identity; v2 records bind image SHA |
+| Inventory replay key | Original logical operation hash | Unchanged key prevents a legacy row becoming invisible or launching twice |
+| Inventory replay row | Original full-identity hash | New identityVersion 2 stores imageReleaseSha and hashes it; version-specific readback rejects mixed fields |
+| Onboarding evidence for legacy completion | Authenticated v1 claim plus evidence digest and source-bound health | Legacy interpretation enabled only by a validated v1 claim; fresh evidence requires explicit image SHA |
+| Signed image authorization / manifests | Existing versioned signed identity and digest | No historical shape rewritten; explicit image SHA is read from canonical authentication |
+| Schema-2 approval | Signed current governance releaseSha | Image provenance remains separately authenticated; approval schema unchanged |
+| RLS/release receipts | Existing source/image digest and package hashes | Receipt shape unchanged; regenerated package hashes follow authoritative source |
+| Component deployment records | Existing image source, digest and task ARN | Persisted field shape unchanged |
+
+Upgrade tests exercise pre-PR rotation configs, activation claim bytes/completion,
+and replay rows with the post-PR validators. Fresh paths use distinct tooling and
+image SHAs. State serial 107 remains authoritative; this PR performs no production
+or Terraform-state mutation.

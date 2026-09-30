@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import jwt from "jsonwebtoken";
-import { assertIdentity, cleanup, prepare, readCurrentState, validateRuntimeProof, verify } from "../scripts/security/rotate-production-signing-material.mjs";
+import { assertIdentity, cleanup, loadConfig, prepare, readCurrentState, validateRuntimeProof, verify } from "../scripts/security/rotate-production-signing-material.mjs";
 import {
   productionSupersessionEvidenceIdentity,
   productionSupersessionVersionId,
@@ -55,6 +55,38 @@ const baseConfig = {
     previousKeyVersionSecretId: "qr-previous-version",
   },
 };
+
+test("hash-approved legacy rotation config retains source-bound overlap and cleanup proofs", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-legacy-rotation-config-"));
+  try {
+    const legacy = { ...structuredClone(baseConfig), expectedRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer" };
+    delete legacy.imageReleaseSha;
+    const configFile = path.join(directory, "rotation.json");
+    const bytes = Buffer.from(`${JSON.stringify(legacy)}\n`);
+    writeFileSync(configFile, bytes, { mode: 0o600 });
+    const approvedSha256 = createHash("sha256").update(bytes).digest("hex");
+    const loaded = loadConfig(configFile, approvedSha256);
+    assert.equal(loaded.imageReleaseSha, legacy.sourceSha);
+    assert.deepEqual(readFileSync(configFile), bytes);
+    const clock = () => Date.parse("2026-08-10T00:01:00.000Z");
+    for (const [phase, deploymentSha] of [["overlap", legacy.overlapDeploymentSha], ["cleanup", "c".repeat(40)]]) {
+      const proofFile = writeProof(directory, `${phase}.json`, runtimeProof({ ...legacy, imageReleaseSha: legacy.sourceSha }, phase, "2026-08-10T00:00:00.000Z", deploymentSha));
+      assert.doesNotThrow(() => validateRuntimeProof({ file: proofFile, config: loaded, phase, expectedDeploymentSha: deploymentSha, clock }));
+    }
+    assert.throws(() => loadConfig(configFile, "0".repeat(64)), /changed after approval/);
+    const versioned = { ...legacy, schemaVersion: 2, imageReleaseSha: baseConfig.imageReleaseSha };
+    const versionedBytes = Buffer.from(`${JSON.stringify(versioned)}\n`);
+    writeFileSync(configFile, versionedBytes);
+    assert.equal(loadConfig(configFile, createHash("sha256").update(versionedBytes).digest("hex")).imageReleaseSha, baseConfig.imageReleaseSha);
+    for (const invalid of [{ ...legacy, schemaVersion: 2 }, { ...legacy, imageReleaseSha: baseConfig.imageReleaseSha }, { ...legacy, overlapTaskInput: { imageReleaseSha: baseConfig.imageReleaseSha } }]) {
+      const invalidBytes = Buffer.from(`${JSON.stringify(invalid)}\n`);
+      writeFileSync(configFile, invalidBytes);
+      assert.throws(() => loadConfig(configFile, createHash("sha256").update(invalidBytes).digest("hex")), /imageReleaseSha|schema/);
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 const material = (value, metadata = {}) => JSON.stringify({ ...metadata, value });
 const fingerprint = (value) => createHash("sha256").update(value).digest("hex").slice(0, 16);
@@ -640,26 +672,34 @@ test("prepare recovers when local state write fails after all secret writes and 
 test("full rotation enforces grace, retires every slot, deploys after retirement, and allows the next rotation", async () => {
   const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-full-"));
   try {
+    const legacy = { ...structuredClone(baseConfig), expectedRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer" };
+    delete legacy.imageReleaseSha;
+    const configFile = path.join(directory, "legacy-rotation.json");
+    const configBytes = Buffer.from(`${JSON.stringify(legacy)}\n`);
+    writeFileSync(configFile, configBytes, { mode: 0o600 });
+    const config = loadConfig(configFile, createHash("sha256").update(configBytes).digest("hex"));
     const { initial } = initialSecrets();
     const sm = fakeSecrets(initial);
     let currentTime = Date.parse("2026-08-10T00:00:00.000Z");
-    const context = contextFor(directory, baseConfig, sm, () => currentTime);
+    const context = contextFor(directory, config, sm, () => currentTime);
     await prepare(context);
-    const overlapFile = writeProof(directory, "overlap.json", runtimeProof(baseConfig, "overlap", new Date(currentTime).toISOString(), baseConfig.overlapDeploymentSha));
+    const overlapFile = writeProof(directory, "overlap.json", runtimeProof(config, "overlap", new Date(currentTime).toISOString(), config.overlapDeploymentSha));
     await verify({ ...context, values: new Map([...context.values, ["runtime-verification-file", overlapFile]]) });
     await assert.rejects(cleanup({ ...context, values: new Map([...context.values, ["cleanup-deployment-sha", "c".repeat(40)], ["cleanup-evidence-ref", "https://example.test/cleanup"]]) }), /cleanup grace window has not expired/);
-    currentTime += baseConfig.minimumGraceSeconds * 1000 - 1;
+    currentTime += config.minimumGraceSeconds * 1000 - 1;
     await assert.rejects(cleanup({ ...context, values: new Map([...context.values, ["cleanup-deployment-sha", "c".repeat(40)], ["cleanup-evidence-ref", "https://example.test/cleanup"]]) }), /cleanup grace window has not expired/);
     currentTime += 1;
     const cleanupSha = "c".repeat(40);
     const firstCleanup = { ...context, values: new Map([...context.values, ["cleanup-deployment-sha", cleanupSha], ["cleanup-evidence-ref", "https://example.test/cleanup"]]) };
     await cleanup(firstCleanup);
     const retirementTimestamp = JSON.parse(readFileSync(path.join(directory, "state.json"), "utf8")).retirementTimestamp;
-    const cleanupFile = writeProof(directory, "cleanup.json", runtimeProof(baseConfig, "cleanup", new Date(Date.parse(retirementTimestamp) + 1_000).toISOString(), cleanupSha));
+    const cleanupFile = writeProof(directory, "cleanup.json", runtimeProof(config, "cleanup", new Date(Date.parse(retirementTimestamp) + 1_000).toISOString(), cleanupSha));
     currentTime = Date.parse(retirementTimestamp) + 2_000;
     await cleanup({ ...firstCleanup, values: new Map([...firstCleanup.values, ["cleanup-runtime-file", cleanupFile]]) });
     const state = JSON.parse(readFileSync(path.join(directory, "state.json"), "utf8"));
     assert.equal(state.phase, "cleaned");
+    assert.equal(state.sourceSha, config.sourceSha);
+    assert.deepEqual(readFileSync(configFile), configBytes);
     for (const id of [baseConfig.jwt.previousSecretId, baseConfig.jwt.pendingSecretId, baseConfig.qr.privatePendingSecretId, baseConfig.qr.publicPendingSecretId, baseConfig.qr.publicPreviousSecretId]) {
       const record = JSON.parse(sm.values.get(id));
       assert.equal(record.value, "");

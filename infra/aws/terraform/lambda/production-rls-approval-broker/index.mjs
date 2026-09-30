@@ -34,9 +34,38 @@ export function createPreDeploymentOperationIdentity({ approvalId, releaseSha, i
 }
 
 export function preDeploymentOperationKey(identity) {
-  const { approvalId, releaseSha, imageReleaseSha, rotationId, operation, imageDigest } = createPreDeploymentOperationIdentity(identity);
-  const logicalIdentity = JSON.stringify({ approvalId, releaseSha, imageReleaseSha, rotationId, operation, imageDigest });
+  const { approvalId, releaseSha, rotationId, operation, imageDigest } = createPreDeploymentOperationIdentity(identity);
+  const logicalIdentity = JSON.stringify({ approvalId, releaseSha, rotationId, operation, imageDigest });
   return `${PREDEPLOYMENT_INVENTORY_REPLAY_MODE}#${crypto.createHash("sha256").update(logicalIdentity).digest("hex")}`;
+}
+
+export function preDeploymentOperationIdentitySha256(identity) {
+  return crypto.createHash("sha256").update(JSON.stringify({ identityVersion: 2, ...createPreDeploymentOperationIdentity(identity) })).digest("hex");
+}
+
+export function preDeploymentReplayItem({ operationKey, nonce, expiresAt, ...input } = {}) {
+  const identity = createPreDeploymentOperationIdentity(input);
+  if (Object.keys(input).sort().join(",") !== Object.keys(identity).sort().join(",") || operationKey !== preDeploymentOperationKey(identity) || typeof nonce !== "string" || !nonce || !Number.isFinite(Date.parse(expiresAt))) throw new Error("Pre-deployment replay claim is invalid.");
+  const strings = { approvalMode: operationKey, approvalId: identity.approvalId, releaseSha: identity.releaseSha, imageReleaseSha: identity.imageReleaseSha, rotationId: identity.rotationId, operation: identity.operation, taskDefinitionArn: identity.taskDefinitionArn, imageDigest: identity.imageDigest, operationIdentitySha256: preDeploymentOperationIdentitySha256(identity), approvalNonce: nonce, launchState: "launching" };
+  return { ...Object.fromEntries(Object.entries(strings).map(([key, value]) => [key, { S: value }])), identityVersion: { N: "2" }, expiresAt: { N: String(Math.floor(Date.parse(expiresAt) / 1000)) } };
+}
+
+export function assertPreDeploymentReplayRow(row, identity) {
+  const expected = createPreDeploymentOperationIdentity(identity);
+  const version = row?.identityVersion === undefined ? 1 : row.identityVersion;
+  if (![1, 2].includes(version) || (version === 1 && (row.identityVersion !== undefined || row.imageReleaseSha !== undefined))) throw new Error("Pre-deployment replay row version is invalid.");
+  const allowed = ["approvalMode", "approvalId", "releaseSha", "rotationId", "operation", "taskDefinitionArn", "imageDigest", "operationIdentitySha256", "approvalNonce", "launchState", "expiresAt", "taskArn", "taskArns", ...(version === 2 ? ["identityVersion", "imageReleaseSha"] : [])];
+  const required = allowed.filter((field) => !["taskArn", "taskArns"].includes(field));
+  if (!row || typeof row !== "object" || Array.isArray(row) || Object.keys(row).some((field) => !allowed.includes(field)) || required.some((field) => row[field] === undefined)) throw new Error("Pre-deployment replay row fields are invalid.");
+  for (const field of ["approvalId", "releaseSha", "rotationId", "operation", "taskDefinitionArn", "imageDigest"]) if (row[field] !== expected[field]) throw new Error("Pre-deployment replay row identity differs from the authorized operation.");
+  if (row.approvalMode !== preDeploymentOperationKey(expected) || (version === 2 && row.imageReleaseSha !== expected.imageReleaseSha)) throw new Error("Pre-deployment replay row logical or image identity is invalid.");
+  const legacy = (({ approvalId, releaseSha, rotationId, operation, taskDefinitionArn, imageDigest }) => ({ approvalId, releaseSha, rotationId, operation, taskDefinitionArn, imageDigest }))(expected);
+  const hash = version === 2 ? preDeploymentOperationIdentitySha256(expected) : crypto.createHash("sha256").update(JSON.stringify(legacy)).digest("hex");
+  const taskArn = /^arn:aws:ecs:eu-west-2:368992683803:task\/mscqr-prod-euw2-main\/[A-Za-z0-9_-]+$/;
+  const taskArns = row.taskArns instanceof Set ? [...row.taskArns] : row.taskArns;
+  if (row.operationIdentitySha256 !== hash || typeof row.approvalNonce !== "string" || !row.approvalNonce || !["launching", "launched", "launch-uncertain", "succeeded"].includes(row.launchState) || !Number.isInteger(row.expiresAt)
+    || (row.taskArn !== undefined && !taskArn.test(row.taskArn)) || (taskArns !== undefined && (!Array.isArray(taskArns) || taskArns.length === 0 || taskArns.some((arn) => !taskArn.test(arn))))) throw new Error("Pre-deployment replay row proof is invalid.");
+  return Object.freeze({ identityVersion: version, launchState: row.launchState, taskArn: row.taskArn });
 }
 
 export function validateBrokerConfiguration(config) {
@@ -369,13 +398,9 @@ export async function handler(event, context) {
     recordTaskStarted: ({ approvalId, nonce, mode, taskArn }) => dynamo.send(new UpdateItemCommand({
       TableName: config.replayTable, Key: { approvalMode: { S: `${approvalId}#${mode}` } }, UpdateExpression: "SET launchState = :state, taskArn = :taskArn", ConditionExpression: "approvalNonce = :nonce AND launchState = :claimed", ExpressionAttributeValues: { ":nonce": { S: nonce }, ":claimed": { S: "claimed" }, ":state": { S: "started" }, ":taskArn": { S: taskArn } },
     })),
-    claimPreDeploymentOperation: ({ operationKey, approvalId, releaseSha, rotationId, operation, taskDefinitionArn, imageDigest, nonce, expiresAt }) => dynamo.send(new PutItemCommand({
+    claimPreDeploymentOperation: (replay) => dynamo.send(new PutItemCommand({
       TableName: config.replayTable,
-      Item: {
-        approvalMode: { S: operationKey }, approvalId: { S: approvalId }, releaseSha: { S: releaseSha }, rotationId: { S: rotationId }, operation: { S: operation },
-        taskDefinitionArn: { S: taskDefinitionArn }, imageDigest: { S: imageDigest }, operationIdentitySha256: { S: crypto.createHash("sha256").update(JSON.stringify({ approvalId, releaseSha, rotationId, operation, taskDefinitionArn, imageDigest })).digest("hex") },
-        approvalNonce: { S: nonce }, launchState: { S: "launching" }, expiresAt: { N: String(Math.floor(Date.parse(expiresAt) / 1000)) },
-      },
+      Item: preDeploymentReplayItem(replay),
       ConditionExpression: "attribute_not_exists(approvalMode)",
     })),
     releasePreDeploymentOperation: ({ operationKey, nonce }) => dynamo.send(new DeleteItemCommand({

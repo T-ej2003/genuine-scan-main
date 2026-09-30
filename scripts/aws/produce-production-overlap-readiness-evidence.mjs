@@ -27,7 +27,7 @@ export function buildOverlapReadinessEvidence({ sourceSha, rotationId, rotationS
   if (!stages || typeof stages !== "object" || Array.isArray(stages)
     || Object.keys(stages).sort().join(",") !== [...READY_FOR_OVERLAP_DEPLOYMENT_STAGES].sort().join(",")) throw new Error("Overlap readiness stages are incomplete.");
   const evidence = {
-    evidenceVersion: 1,
+    evidenceVersion: 2,
     sourceSha,
     rotationId,
     rotationStateSha256,

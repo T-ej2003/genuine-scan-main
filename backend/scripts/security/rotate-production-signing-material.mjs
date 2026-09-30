@@ -73,7 +73,7 @@ const parseArgs = (argv) => {
   return { mode: modes[0], values };
 };
 
-const loadConfig = (file, expectedSha256) => {
+export const loadConfig = (file, expectedSha256) => {
   if (!/^[a-f0-9]{64}$/.test(expectedSha256 || "")) throw new Error("--config-sha256 must be an exact SHA-256");
   const bytes = readFileSync(file);
   if (sha256(bytes) !== expectedSha256) throw new Error("rotation config changed after approval");
@@ -82,9 +82,11 @@ const loadConfig = (file, expectedSha256) => {
   required(config.expectedRoleArn, "config.expectedRoleArn");
   required(config.rotationId, "config.rotationId");
   required(config.sourceSha, "config.sourceSha");
-  required(config.imageReleaseSha, "config.imageReleaseSha");
   if (!safeId(config.rotationId)) throw new Error("config.rotationId is invalid");
   if (!fullSha(config.sourceSha)) throw new Error("config.sourceSha must be a full SHA-1");
+  if (config.schemaVersion === undefined && !Object.hasOwn(config, "imageReleaseSha") && !Object.hasOwn(config.overlapTaskInput || {}, "imageReleaseSha")) config.imageReleaseSha = config.sourceSha;
+  else if (config.schemaVersion !== 2) throw new Error("rotation config schema is invalid");
+  required(config.imageReleaseSha, "config.imageReleaseSha");
   if (!fullSha(config.imageReleaseSha)) throw new Error("config.imageReleaseSha must be a full SHA-1");
   assertLegacyProductionRotationGraceSeconds(config.minimumGraceSeconds, "config.minimumGraceSeconds");
   const ids = [

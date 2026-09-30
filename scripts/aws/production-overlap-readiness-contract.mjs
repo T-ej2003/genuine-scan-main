@@ -47,7 +47,7 @@ function assertStageEvidence(stage, value) {
 
 export function assertReadyForOverlapDeployment(evidence, expected = {}) {
   exactKeys(evidence, REQUIRED_EVIDENCE_FIELDS, "overlap readiness evidence");
-  if (evidence.evidenceVersion !== 1) fail("READY_FOR_OVERLAP_DEPLOYMENT evidenceVersion must be 1");
+  if (![1, 2].includes(evidence.evidenceVersion)) fail("READY_FOR_OVERLAP_DEPLOYMENT evidenceVersion must be 1 or 2");
   if (!SHA40.test(evidence.sourceSha)) fail("READY_FOR_OVERLAP_DEPLOYMENT sourceSha is invalid");
   if (expected.sourceSha !== undefined && evidence.sourceSha !== expected.sourceSha) fail("READY_FOR_OVERLAP_DEPLOYMENT sourceSha does not match the release target");
   if (typeof evidence.rotationId !== "string" || evidence.rotationId.trim() === "") fail("READY_FOR_OVERLAP_DEPLOYMENT rotationId is invalid");
@@ -61,12 +61,19 @@ export function assertReadyForOverlapDeployment(evidence, expected = {}) {
     if (evidence[stage].identityBindings.sourceSha !== evidence.sourceSha) fail(`${stage} source SHA binding does not match readiness source SHA.`);
     if (evidence[stage].identityBindings.rotationId !== undefined && evidence[stage].identityBindings.rotationId !== evidence.rotationId) fail(`${stage} rotation ID binding does not match readiness rotation ID.`);
   }
+  if (evidence.evidenceVersion === 2) rotationExpectedImageReleaseSha(evidence);
   if (evidence.rotationPrepared !== true) fail("READY_FOR_OVERLAP_DEPLOYMENT requires rotationPrepared=true");
   if (evidence.ecsUpdateServiceCount !== 0) fail("READY_FOR_OVERLAP_DEPLOYMENT must be evaluated before ECS UpdateService");
   return { readyForOverlapDeployment: true, stages: [...READY_FOR_OVERLAP_DEPLOYMENT_STAGES] };
 }
 
 export function rotationExpectedImageReleaseSha(evidence) {
+  if (evidence?.evidenceVersion === 1) {
+    assertReadyForOverlapDeployment(evidence);
+    exactKeys(evidence.imageAuthorization.identityBindings, ["sourceSha"], "legacy image authorization bindings");
+    exactKeys(evidence.overlapTaskDefinition.identityBindings, ["sourceSha", "taskDefinitionArn", "imageDigest"], "legacy task definition bindings");
+    return evidence.sourceSha;
+  }
   const imageReleaseSha = evidence?.overlapTaskDefinition?.identityBindings?.imageReleaseSha;
   if (!SHA40.test(imageReleaseSha || "") || imageReleaseSha !== evidence?.imageAuthorization?.identityBindings?.imageReleaseSha) fail("Rotation runtime image SHA is not bound to authenticated readiness.");
   return imageReleaseSha;

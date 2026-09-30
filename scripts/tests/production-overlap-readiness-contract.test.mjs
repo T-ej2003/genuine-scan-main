@@ -73,6 +73,7 @@ test("the release-gate cutover wrapper deploys only the exact readiness task def
 
 test("rotation overlap and cleanup use authenticated image SHA independent of tooling SHA", () => {
   const evidence = completeEvidence();
+  evidence.evidenceVersion = 2;
   evidence.imageAuthorization.identityBindings.imageReleaseSha = "d".repeat(40);
   evidence.overlapTaskDefinition.identityBindings.imageReleaseSha = "d".repeat(40);
   assert.equal(rotationExpectedImageReleaseSha(evidence), "d".repeat(40));
@@ -86,3 +87,13 @@ test("rotation overlap and cleanup use authenticated image SHA independent of to
   assert.match(cutover, /rotationExpectedImageReleaseSha\(readiness\.evidence\)/);
   assert.match(cutover, /expectedGitSha \}/);
 });
+
+ test("legacy hashed readiness retains its original single-SHA cleanup semantics", () => {
+  const evidence = completeEvidence();
+  Object.assign(evidence.overlapTaskDefinition.identityBindings, { taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:19", imageDigest: `sha256:${"d".repeat(64)}` });
+  assert.equal(rotationExpectedImageReleaseSha(evidence), evidence.sourceSha);
+  evidence.imageAuthorization.identityBindings.imageReleaseSha = "e".repeat(40);
+  assert.throws(() => rotationExpectedImageReleaseSha(evidence), /legacy image authorization bindings/);
+  evidence.evidenceVersion = 2;
+  assert.throws(() => rotationExpectedImageReleaseSha(evidence), /authenticated readiness/);
+ });
