@@ -22,6 +22,7 @@ import { isTerraformDeposedKey } from "./generate-production-green-stage-b-tfvar
 import { assertStageBDeploymentIdentity } from "./stage-b-deployment-identity.mjs";
 import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import { assertB01LivePredecessor, B01_PREREQUISITE } from "./production-b01-prerequisite-contract.mjs";
 
 export { batch, createAwsReader } from "./production-green-stage-b-ecs-observations.mjs";
 
@@ -531,6 +532,31 @@ function assertStageBLiveReferences(items, allowedByFamily, createOnlyFamilies, 
   }
 }
 
+function authenticateB01LivePredecessorReference({ reader, services, auditedAt, toolingSha }) {
+  if (!services.some((service) => service.taskDefinition === B01_PREREQUISITE.predecessorTaskDefinitionArn)) return undefined;
+  const describedServices = requireObject(reader.describeServices([B01_PREREQUISITE.predecessorServiceArn]), "B01 predecessor service description");
+  const service = requireArray(describedServices.services, "B01 predecessor services")[0];
+  if (describedServices.services.length !== 1 || requireArray(describedServices.failures, "B01 predecessor service failures").length !== 0) throw new Error("B01 predecessor service observation is incomplete.");
+  const taskDefinition = requireObject(reader.describeTaskDefinition(B01_PREREQUISITE.predecessorTaskDefinitionArn), "B01 predecessor task definition").taskDefinition;
+  const repositories = requireArray(requireObject(reader.describeRepositories(["mscqr-backend"]), "B01 predecessor repository description").repositories, "B01 predecessor repositories");
+  const imageDetails = requireArray(requireObject(reader.describeImages("mscqr-backend", B01_PREREQUISITE.executorImage.split("@")[1]), "B01 predecessor image description").imageDetails, "B01 predecessor image details");
+  assertB01LivePredecessor({ service, taskDefinition, repository: repositories[0], imageDetails });
+  return Object.freeze({
+    schemaVersion: 1,
+    kind: "STAGE_B_B01_LIVE_PREDECESSOR_REFERENCE",
+    authenticatedAt: auditedAt,
+    auditSourceSha: toolingSha,
+    account: B01_PREREQUISITE.account,
+    region: B01_PREREQUISITE.region,
+    serviceArn: B01_PREREQUISITE.predecessorServiceArn,
+    taskDefinitionArn: B01_PREREQUISITE.predecessorTaskDefinitionArn,
+    family: STAGE_B_TASK_DEFINITION_FAMILIES['aws_ecs_task_definition.candidate["backend"]'],
+    imageDigest: B01_PREREQUISITE.executorImage.split("@")[1],
+    imageSourceSha: B01_PREREQUISITE.predecessorSourceSha,
+    evidence: { service, taskDefinition, repository: repositories[0], imageDetails },
+  });
+}
+
 export function generateReferenceAudit({
   plan,
   planBytes,
@@ -641,6 +667,8 @@ export function generateReferenceAudit({
   const stageBRunningTasks = runningTasks.filter((task) => task.stageBScoped);
   const stageBPendingTasks = pendingTasks.filter((task) => task.stageBScoped);
   const stageBTransitionalTasks = transitionalTasks.filter((task) => task.stageBScoped);
+  const b01LivePredecessorReference = authenticateB01LivePredecessorReference({ reader, services: stageBServices, auditedAt, toolingSha: deploymentIdentity.toolingSha });
+  if (b01LivePredecessorReference) allowedLiveArnsByFamily.get(b01LivePredecessorReference.family).add(b01LivePredecessorReference.taskDefinitionArn);
   const {
     summary: broker,
     referencesByFamily: brokerReferencesByFamily,
@@ -810,6 +838,7 @@ export function generateReferenceAudit({
     plannedAtomicBrokerRollovers,
     plannedAtomicPackageChecksumTransition,
     planJsonSha256: planSha,
+    ...(b01LivePredecessorReference ? { b01LivePredecessorReference } : {}),
     ...(recoveryAttestationSha256 ? { recoveryAttestationSha256 } : {}),
   };
 }

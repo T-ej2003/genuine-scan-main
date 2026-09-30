@@ -27,6 +27,7 @@ import {
   STAGE_B_TASK_DEFINITION_FAMILIES,
 } from "../aws/stage-b-reference-audit-contract.mjs";
 import { assertStageBFreshImageReferenceAuditBinding, assertStageBPlanApprovalReport, assertStageBPlanCaptureReport, createStageBPlanApprovalReport, createStageBPlanCaptureReport, stageBPlanHashes } from "../aws/stage-b-plan-approval-contract.mjs";
+import { B01_PREREQUISITE } from "../aws/production-b01-prerequisite-contract.mjs";
 
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const planSha256 = "a".repeat(64);
@@ -276,6 +277,59 @@ function generate(fixture, overrides = {}) {
     ...fixture.options,
     ...overrides,
   });
+}
+
+function makeB01LivePredecessorFixture({ liveTaskDefinitionArn = B01_PREREQUISITE.predecessorTaskDefinitionArn, mutateService, mutateTaskDefinition, includeEcrEvidence = true } = {}) {
+  const fixture = makeAtomicBrokerFixture({ appendOnly: true });
+  const backend = fixture.plan.resource_changes.find((change) => change.address === backendAddress);
+  backend.change.after.arn = `arn:aws:ecs:eu-west-2:368992683803:task-definition/${backend.change.after.family}:14`;
+  const retained = fixture.plan.resource_changes.find((change) => change.address === retainedAddressFor(backendAddress));
+  retained.change.before.arn = `arn:aws:ecs:eu-west-2:368992683803:task-definition/${retained.change.before.family}:13`;
+  const prior = fixture.plan.prior_state.values.root_module.resources.find((resource) => resource.address === retained.address);
+  prior.values.arn = retained.change.before.arn;
+  const service = {
+    serviceArn: B01_PREREQUISITE.predecessorServiceArn,
+    serviceName: "mscqr-backend-servi-euw2",
+    clusterArn: `arn:aws:ecs:${B01_PREREQUISITE.region}:${B01_PREREQUISITE.account}:cluster/${B01_PREREQUISITE.cluster}`,
+    status: "ACTIVE",
+    taskDefinition: liveTaskDefinitionArn,
+    desiredCount: 2,
+    runningCount: 2,
+    pendingCount: 0,
+    enableExecuteCommand: true,
+    propagateTags: "TASK_DEFINITION",
+    deploymentConfiguration: { deploymentCircuitBreaker: { enable: true, rollback: true }, alarms: { alarmNames: ["mscqr-production-backend-unhealthy-hosts", "mscqr-production-backend-target-5xx"], rollback: true, enable: true } },
+    deployments: [{ status: "PRIMARY", taskDefinition: liveTaskDefinitionArn, desiredCount: 2, runningCount: 2, pendingCount: 0, failedTasks: 0, rolloutState: "COMPLETED" }],
+  };
+  mutateService?.(service);
+  const b01TaskDefinition = {
+    taskDefinitionArn: liveTaskDefinitionArn,
+    family: liveTaskDefinitionArn.split("task-definition/")[1]?.replace(/:[0-9]+$/, ""),
+    revision: Number(liveTaskDefinitionArn.split(":").at(-1)),
+    status: "ACTIVE",
+    networkMode: "awsvpc",
+    requiresCompatibilities: ["FARGATE"],
+    cpu: "2048",
+    memory: "4096",
+    executionRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution",
+    taskRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task",
+    runtimePlatform: B01_PREREQUISITE.runtimePlatform,
+    containerDefinitions: [{ name: "backend", image: B01_PREREQUISITE.executorImage, essential: true, entryPoint: [], command: [], readonlyRootFilesystem: true, privileged: false }],
+  };
+  mutateTaskDefinition?.(b01TaskDefinition);
+  fixture.reader.listServices = () => [B01_PREREQUISITE.predecessorServiceArn];
+  fixture.reader.describeServices = () => ({ services: [structuredClone(service)], failures: [] });
+  const originalDescribeTaskDefinition = fixture.reader.describeTaskDefinition;
+  fixture.reader.describeTaskDefinition = (reference) => reference === liveTaskDefinitionArn
+    ? { taskDefinition: structuredClone(b01TaskDefinition) }
+    : originalDescribeTaskDefinition(reference);
+  if (includeEcrEvidence) {
+    fixture.reader.describeRepositories = () => ({ repositories: [{ repositoryArn: "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend", repositoryName: "mscqr-backend", registryId: B01_PREREQUISITE.account, imageTagMutability: "IMMUTABLE" }] });
+    fixture.reader.describeImages = () => ({ imageDetails: [{ imageDigest: B01_PREREQUISITE.executorImage.split("@")[1], imageTags: [B01_PREREQUISITE.predecessorSourceSha, "production"] }] });
+  }
+  fixture.planBytes = Buffer.from(JSON.stringify(fixture.plan));
+  fixture.planJsonSha256 = sha256(fixture.planBytes);
+  return fixture;
 }
 
 function validateBrokerPlan(fixture, audit) {
@@ -1329,6 +1383,56 @@ test("retained-history family corruption remains rejected", () => {
 test("current managed :5 and newest retained :4 pass full reference binding", () => {
   const fixture = makeAppendOnlyCurrentPredecessorFixture();
   validateBrokerPlan(fixture, generate(fixture));
+});
+
+test("exact fully authenticated B01 live predecessor revision 19 is accepted beside Terraform revision 13", () => {
+  const fixture = makeB01LivePredecessorFixture();
+  const audit = generate(fixture);
+  assert.equal(audit.b01LivePredecessorReference.taskDefinitionArn, B01_PREREQUISITE.predecessorTaskDefinitionArn);
+  validateBrokerPlan(fixture, audit);
+});
+
+for (const [name, taskDefinitionArn] of [
+  ["same-family revision 18", B01_PREREQUISITE.predecessorTaskDefinitionArn.replace(":19", ":18")],
+  ["same-family revision 20", B01_PREREQUISITE.predecessorTaskDefinitionArn.replace(":19", ":20")],
+  ["same-family revision 999", B01_PREREQUISITE.predecessorTaskDefinitionArn.replace(":19", ":999")],
+  ["different family", B01_PREREQUISITE.predecessorTaskDefinitionArn.replace("backend-candidate", "worker-candidate")],
+  ["different account", B01_PREREQUISITE.predecessorTaskDefinitionArn.replace("368992683803", "111111111111")],
+  ["different region", B01_PREREQUISITE.predecessorTaskDefinitionArn.replace("eu-west-2", "us-east-1")],
+  ["malformed ARN", "not-an-arn"],
+]) {
+  test(`B01 live predecessor rejects ${name}`, () => {
+    assert.throws(() => generate(makeB01LivePredecessorFixture({ liveTaskDefinitionArn: taskDefinitionArn })), /Create-only task-definition family remains referenced|unrecorded task-definition ARN|invalid task-definition ARN|unknown Stage B\/production ARN/);
+  });
+}
+
+test("B01 live predecessor rejects missing evidence, failed validation, and service binding mismatch", () => {
+  assert.throws(() => generate(makeB01LivePredecessorFixture({ includeEcrEvidence: false })), /describeRepositories/);
+  assert.throws(() => generate(makeB01LivePredecessorFixture({ mutateService: (service) => { service.desiredCount = 1; } })));
+  assert.throws(() => generate(makeB01LivePredecessorFixture({ mutateService: (service) => { service.deployments[0].taskDefinition = service.taskDefinition.replace(":19", ":18"); } })));
+});
+
+test("B01 attestation cannot authorize an absent, substituted, or arbitrary unrecorded revision", () => {
+  const fixture = makeB01LivePredecessorFixture();
+  const withoutEvidence = generate(fixture);
+  delete withoutEvidence.b01LivePredecessorReference;
+  assert.throws(() => validateBrokerPlan(fixture, withoutEvidence), /unrecorded task-definition ARN/);
+
+  const substituted = generate(fixture);
+  substituted.b01LivePredecessorReference = { ...substituted.b01LivePredecessorReference, taskDefinitionArn: B01_PREREQUISITE.predecessorTaskDefinitionArn.replace(":19", ":20") };
+  assert.throws(() => validateBrokerPlan(fixture, substituted), /malformed or unbound/);
+
+  const arbitrary = generate(fixture);
+  arbitrary.services[0].taskDefinition = B01_PREREQUISITE.predecessorTaskDefinitionArn.replace(":19", ":20");
+  assert.throws(() => validateBrokerPlan(fixture, arbitrary), /runtime observations/);
+
+  const forged = generate(fixture);
+  forged.b01LivePredecessorReference.evidence.taskDefinition.taskDefinitionArn = B01_PREREQUISITE.predecessorTaskDefinitionArn.replace(":19", ":20");
+  assert.throws(() => validateBrokerPlan(fixture, forged));
+
+  const crossSource = generate(fixture);
+  crossSource.b01LivePredecessorReference = { ...crossSource.b01LivePredecessorReference, auditSourceSha: "0".repeat(40) };
+  assert.throws(() => validateBrokerPlan(fixture, crossSource), /malformed or unbound/);
 });
 
 for (const status of ["ACTIVATING", "DEACTIVATING", "STOPPING"]) {
@@ -2629,6 +2733,8 @@ test("AWS reader uses argv arrays and only read-only commands", () => {
     "ecs list-tasks": { taskArns: [] },
     "ecs describe-tasks": { tasks: [], failures: [] },
     "ecs describe-task-definition": { taskDefinition: { taskDefinitionArn: oldArnFor("x"), family: "x", revision: 1, status: "ACTIVE" } },
+    "ecr describe-repositories": { repositories: [] },
+    "ecr describe-images": { imageDetails: [] },
     "lambda get-function-configuration": {},
     "lambda get-alias": {},
   };
@@ -2637,7 +2743,7 @@ test("AWS reader uses argv arrays and only read-only commands", () => {
     clusterArn,
     run: (args) => { calls.push(args); return JSON.stringify(responses[args.slice(0, 2).join(" ")] || {}); },
   });
-  reader.getCallerIdentity(); reader.listServices(); reader.describeServices([]); reader.listTasks("RUNNING"); reader.describeTasks([]); reader.describeTaskDefinition("safe"); reader.getFunctionConfiguration(brokerAliasArn); reader.getAlias();
+  reader.getCallerIdentity(); reader.listServices(); reader.describeServices([]); reader.listTasks("RUNNING"); reader.describeTasks([]); reader.describeTaskDefinition("safe"); reader.describeRepositories(["mscqr-backend"]); reader.describeImages("mscqr-backend", `sha256:${"a".repeat(64)}`); reader.getFunctionConfiguration(brokerAliasArn); reader.getAlias();
   assert.deepEqual(new Set(calls.map((args) => args.slice(0, 2).join(" "))), new Set(Object.keys(responses)));
   assert.ok(calls.every((args) => args.every((value) => !/[;&|`$()]/.test(value))));
   const source = fs.readFileSync("scripts/aws/generate-production-green-stage-b-reference-audit.mjs", "utf8");

@@ -40,3 +40,7 @@ This document records the governed incremental release path exercised after the 
 ## Stable pending-convergence identity
 
 The pending ordinary-plan contract binds the exact resource/action set and hashes every security-relevant Terraform change. For `aws_lambda_function.broker`, the local `filename` is a private materialization path and changes on every authenticated artifact extraction. The comparison requires that it equal the plan's `broker_package_path`, requires the canonical `broker-package.zip` basename, and canonicalizes only that path. Package bytes remain bound by the authenticated prerequisite manifest and Terraform `source_code_hash`; all Lambda configuration, environment, actions and computed-value topology remain in the change hash.
+
+## B01 live predecessor reference
+
+At state serial 105, Terraform records backend-candidate revision 13 while the stable production backend service legitimately runs revision 19 from the governed B01 prerequisite transition. The Stage-B reference audit accepts revision 19 only after `assertB01LivePredecessor()` revalidates the exact service, deployment, task definition, immutable ECR repository, image digest and source tag. The audit records that raw proof in its plan-bound artifact, and the ordinary-plan validator reruns the same B01 validator before adding only the exact revision-19 ARN to live execution references. It does not add the ARN to broker ownership, current-state or retained-state sets; any other revision, family, account, region, image or service binding remains rejected.

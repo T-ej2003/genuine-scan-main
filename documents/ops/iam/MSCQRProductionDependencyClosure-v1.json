@@ -1961,6 +1961,44 @@
       "negativeTestPresent": true
     },
     {
+      "sourceFile": "scripts/aws/production-green-stage-b-ecs-observations.mjs",
+      "action": "ecr:DescribeImages",
+      "capabilityId": "manifest-backend-health-recovery-describe-images",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-green-stage-b-ecs-observations.mjs",
+      "action": "ecr:DescribeRepositories",
+      "capabilityId": "manifest-backend-health-recovery-describe-repositories",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
       "sourceFile": "scripts/aws/production-ecs-rollback-viability.mjs",
       "action": "ecs:DescribeServiceDeployments",
       "capabilityId": "manifest-backend-health-recovery-describe-service-deployments",

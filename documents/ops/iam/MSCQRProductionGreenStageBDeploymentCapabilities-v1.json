@@ -22564,6 +22564,14 @@
     },
     {
       "sourceFile": "scripts/aws/production-green-stage-b-ecs-observations.mjs",
+      "action": "ecr:DescribeImages"
+    },
+    {
+      "sourceFile": "scripts/aws/production-green-stage-b-ecs-observations.mjs",
+      "action": "ecr:DescribeRepositories"
+    },
+    {
+      "sourceFile": "scripts/aws/production-green-stage-b-ecs-observations.mjs",
       "action": "ecs:DescribeServices"
     },
     {

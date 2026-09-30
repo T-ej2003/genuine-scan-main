@@ -59,7 +59,13 @@ test("complete production dependency closure is exact across modes and failure p
     ["scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs", "s3:DeleteObject", "stage-a-artifacts-recovery-release-lock-release"],
   ]);
   assert.equal(report.newAwsCalls.filter(({ reachableMode }) => reachableMode.some((mode) => mode.startsWith("app-only-"))).length, 68);
-  assert.equal(report.newAwsCalls.length, 42 + stageAAdditions.length + 15 + 14 + 21 + 7 + 1 + 6 + 1 + 68 + 5); // Historical closure plus app-only calls and normal-deployer topology reads.
+  assert.equal(report.newAwsCalls.length, 42 + stageAAdditions.length + 15 + 14 + 21 + 7 + 1 + 6 + 1 + 68 + 5 + 2); // Historical closure plus app-only calls, normal-deployer topology reads, and exact B01 image reads.
+  assert.deepEqual(report.newAwsCalls
+    .filter(({ sourceFile, action }) => sourceFile === "scripts/aws/production-green-stage-b-ecs-observations.mjs" && action.startsWith("ecr:"))
+    .map(({ action, capabilityId, resources, identity }) => ({ action, capabilityId, resources, identity })), [
+    { action: "ecr:DescribeImages", capabilityId: "manifest-backend-health-recovery-describe-images", resources: ["arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend"], identity: "RELEASE_DEPLOYER" },
+    { action: "ecr:DescribeRepositories", capabilityId: "manifest-backend-health-recovery-describe-repositories", resources: ["arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend"], identity: "RELEASE_DEPLOYER" },
+  ]);
   assert.deepEqual(report.newAwsCalls.filter(({ capabilityId }) => capabilityId?.startsWith("bootstrap-operator-policy-authorization-")).map(({ capabilityId, action, resources, identity, reachableMode }) => [capabilityId, action, resources, identity, reachableMode]), [
     ["bootstrap-operator-policy-authorization-identify", "sts:GetCallerIdentity", ["*"], "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],
     ["bootstrap-operator-policy-authorization-read-transition-consumption", "iam:ListUserTags", ["arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator"], "BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER", ["BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"]],
@@ -163,7 +169,7 @@ test("complete production dependency closure is exact across modes and failure p
   assert.equal(rootVerifierModes.length, 4);
   for (const { reachableMode } of rootVerifierModes) assert.deepEqual(reachableMode, ["STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY", "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION", "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"]);
   for (const sourceFile of ["scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "scripts/aws/authorize-production-stage-a-production-artifacts-reconciliation.mjs"]) assert.match(fs.readFileSync(sourceFile, "utf8"), /createRootAttestationKmsVerifier/);
-  assert.deepEqual(report.newAwsCalls.find(({ capabilityId }) => capabilityId === "manifest-backend-health-recovery-describe-images")?.reachableMode, ["BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"]);
+  for (const action of ["ecr:DescribeImages", "ecr:DescribeRepositories"]) assert.deepEqual(report.newAwsCalls.find(({ sourceFile, action: candidate }) => sourceFile === "scripts/aws/production-green-stage-b-ecs-observations.mjs" && candidate === action)?.reachableMode, ["NORMAL"]);
   assert.deepEqual(report.pathClosure, { forward: "PASS", rollback: "PASS", reconciliation: "PASS" });
   assert.deepEqual(new Set(Object.values(report.counters)), new Set([0]));
 });
