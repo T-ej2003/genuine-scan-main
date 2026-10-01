@@ -314,6 +314,31 @@ resource "aws_lambda_alias" "broker" {
   function_name    = aws_lambda_function.broker.function_name
   function_version = aws_lambda_function.broker.version
 }
+resource "aws_cloudwatch_event_rule" "task_stopped" {
+  name = "mscqr-production-victoria-recovery-task-stopped"
+  event_pattern = jsonencode({
+    source        = ["aws.ecs"]
+    "detail-type" = ["ECS Task State Change"]
+    detail = {
+      clusterArn = [local.cluster_arn]
+      group      = ["family:${local.family}"]
+      lastStatus = ["STOPPED"]
+    }
+  })
+  tags = local.common_tags
+}
+resource "aws_cloudwatch_event_target" "task_stopped" {
+  rule = aws_cloudwatch_event_rule.task_stopped.name
+  arn  = aws_lambda_alias.broker.arn
+}
+resource "aws_lambda_permission" "task_stopped_cleanup" {
+  statement_id  = "AllowFixedRecoveryTaskCleanupEvent"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.broker.function_name
+  qualifier     = aws_lambda_alias.broker.name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.task_stopped.arn
+}
 
 data "aws_iam_policy_document" "operator_trust" {
   statement {

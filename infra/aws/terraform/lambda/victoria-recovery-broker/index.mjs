@@ -29,12 +29,15 @@ async function activeRecoveryTasks(cluster) {
 const readJson = async (bucket, key) => JSON.parse(await (await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }))).Body.transformToString());
 
 export async function handler(event) {
+  const bucket = required("EVIDENCE_BUCKET");
+  if (event?.source === "aws.ecs" && event?.["detail-type"] === "ECS Task State Change") {
+    return cleanupStoppedTaskEvent(event, bucket);
+  }
   const isCleanup = event?.phase === "cleanup";
   if (!event || Object.keys(event).sort().join(",") !== (isCleanup ? "nonce,operation,phase,sourceSha" : "nonce,operation,sourceSha")
       || event.operation !== OPERATION || !uuid.test(event.nonce || "") || !/^[a-f0-9]{40}$/.test(event.sourceSha || "")) {
     throw new Error("RECOVERY_BROKER_REQUEST_INVALID");
   }
-  const bucket = required("EVIDENCE_BUCKET");
   if (isCleanup) return cleanup({ event, bucket });
   const keyArn = required("SIGNING_KEY_ARN");
   const taskRoleArn = required("TASK_ROLE_ARN");
@@ -201,4 +204,20 @@ async function cleanup({ event, bucket }) {
     ServerSideEncryption: "aws:kms", ContentType: "application/json" }));
   if (!cleanupComplete) throw new Error("RECOVERY_CLEANUP_INCOMPLETE_EVIDENCE_PERSISTED");
   return { operation: OPERATION, sourceSha: event.sourceSha, nonce: event.nonce, networkAuthorityRevoked: true, taskStopped: true };
+}
+
+async function cleanupStoppedTaskEvent(event, bucket) {
+  const detail = event.detail;
+  const cluster = required("ECS_CLUSTER_ARN");
+  if (event.source !== "aws.ecs" || event["detail-type"] !== "ECS Task State Change"
+      || detail?.clusterArn !== cluster || detail?.group !== `family:${FAMILY}`
+      || detail?.lastStatus !== "STOPPED" || typeof detail.taskArn !== "string"
+      || !detail.taskArn.startsWith(`${cluster.replace(":cluster/", ":task/")}/`)) throw new Error("RECOVERY_TASK_EVENT_INVALID");
+  const response = await ecs.send(new DescribeTasksCommand({ cluster, tasks: [detail.taskArn], include: ["TAGS"] }));
+  const task = response.tasks?.length === 1 ? response.tasks[0] : null;
+  const tags = Object.fromEntries((task?.tags || []).map(({ key, value }) => [key, value]));
+  if (!task || task.clusterArn !== cluster || task.group !== `family:${FAMILY}` || task.lastStatus !== "STOPPED"
+      || tags.Operation !== OPERATION || !uuid.test(tags.AuthorizationNonce || "")
+      || !/^[a-f0-9]{40}$/.test(tags.SourceSha || "")) throw new Error("RECOVERY_TASK_EVENT_IDENTITY_INVALID");
+  return cleanup({ event: { nonce: tags.AuthorizationNonce, operation: OPERATION, sourceSha: tags.SourceSha }, bucket });
 }

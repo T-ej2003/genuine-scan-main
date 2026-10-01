@@ -44,6 +44,9 @@ test("workflow and broker accept one fixed operation and always attempt authorit
   const broker = read("../../infra/aws/terraform/lambda/victoria-recovery-broker/index.mjs");
   const infrastructure = read("../../infra/aws/terraform/production-victoria-recovery/main.tf");
   assert.match(infrastructure, /timeout\s+=\s+120/);
+  assert.match(infrastructure, /aws_cloudwatch_event_rule" "task_stopped/);
+  assert.match(infrastructure, /lastStatus\s+=\s+\["STOPPED"\]/);
+  assert.match(infrastructure, /source_arn\s+=\s+aws_cloudwatch_event_rule\.task_stopped\.arn/);
   assert.match(workflow, /environment: production-victoria-recovery/);
   assert.match(workflow, /if: always\(\) && steps\.authorize\.outputs\.nonce != ''/);
   assert.match(workflow, /"phase":"cleanup"/);
@@ -57,6 +60,7 @@ test("workflow and broker accept one fixed operation and always attempt authorit
   assert.match(broker, /AuthorizationNonce/);
   assert.match(broker, /SourceSha/);
   assert.match(broker, /RECOVERY_CLEANUP_INCOMPLETE_EVIDENCE_PERSISTED/);
+  assert.match(broker, /cleanupStoppedTaskEvent/);
   assert.match(broker, /networkAuthorityRevoked, taskStopped/);
   assert.ok(broker.indexOf("cleanups/${event.nonce}.json") < broker.indexOf("RECOVERY_CLEANUP_INCOMPLETE_EVIDENCE_PERSISTED"),
     "cleanup failure evidence is written before the broker fails");
