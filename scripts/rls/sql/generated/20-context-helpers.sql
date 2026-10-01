@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='7868a2c2da38c8d08fd8f129f59c8356b11b63861396d35e7ecca9a3b5e08e87'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:7868a2c2da38c8d08fd8f129f59c8356b11b63861396d35e7ecca9a3b5e08e87'
+    AND source_contract_sha256='5b1e771b719e2f980687eea3d69895e08ae98b0a7c372168602824496a9e8a4d'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:5b1e771b719e2f980687eea3d69895e08ae98b0a7c372168602824496a9e8a4d'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:7868a2c2da38c8d08fd8f129f59c8356b11b63861396d35e7ecca9a3b5e08e87')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:5b1e771b719e2f980687eea3d69895e08ae98b0a7c372168602824496a9e8a4d')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -12547,9 +12547,9 @@ BEGIN
     nullif(current_setting('app.b01_request_id',true),''),nullif(current_setting('app.scheduled_request_id',true),''));
   IF original_request IS NOT NULL AND (length(original_request) NOT BETWEEN 1 AND 128 OR original_request !~ '^[!-~]+$')
   THEN RAISE EXCEPTION 'B03_AUDIT_REQUEST_DENIED' USING ERRCODE='42501'; END IF;
-  -- A fresh event with no UUID request gets its own existing immutable UUID
-  -- row identity; this is marked explicitly, not claimed to be a client request.
-  NEW."requestId":=CASE WHEN original_request ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+  -- Bare SQL INSERT producers emit distinct events, not replay-aware requests.
+  -- Use their immutable row ID; retain the original request only as provenance.
+  NEW."requestId":=CASE WHEN (NEW."payloadDigest" IS NOT NULL OR NEW."idempotencyKey" IS NOT NULL) AND original_request ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
     THEN lower(original_request) ELSE NEW.id END;
   encoding:=CASE WHEN current_setting('app.b03_outbox_operation',true)='audit-enqueue' AND current_setting('app.b03_outbox_id',true)=NEW.id THEN 'stable-json-v1' ELSE 'jsonb-text-v1' END;
   expected_digest:=encode(sha256(convert_to(CASE WHEN encoding='stable-json-v1' THEN app_rls.b03_stable_json(NEW.payload) ELSE NEW.payload::text END,'UTF8')),'hex');

@@ -175,8 +175,18 @@ async function main() {
     }
   }
   assert.equal(producedIds.length, 19);
+  // A reused client request and identical audit payload must not collapse
+  // two bare producer events or roll back the second business operation.
+  const reusedRequest = requestId();
+  const repeatedPayload = JSON.stringify(auditPayload("PROFILE_REPEATED"));
+  const repeatedIds = [requestId(), requestId()];
+  for (const id of repeatedIds) {
+    psql(bootstrapUrl, `INSERT INTO public."AuditLogOutbox" (id,payload,"requestId","updatedAt") VALUES ('${id}','${repeatedPayload}','${reusedRequest}',transaction_timestamp())`);
+    assert.equal(psql(bootstrapUrl, `SELECT "requestId"=id AND "authorityProvenance"->>'originalRequestId'='${reusedRequest}' AND app_rls.b03_audit_record_valid(q) FROM public."AuditLogOutbox" q WHERE id='${id}'`), "t");
+  }
+  assert.equal(Number(psql(bootstrapUrl, `SELECT count(DISTINCT "idempotencyKey") FROM public."AuditLogOutbox" WHERE id IN ('${repeatedIds.join("','")}')`)), 2);
   const shapeClaims = await worker.$transaction((tx) => repository.claimAuditLogOutboxSlice(tx, { attemptedAt: new Date(), batchSize: 250 }));
-  assert.equal(shapeClaims.length, 19);
+  assert.equal(shapeClaims.length, 21);
   for (const claim of shapeClaims) {
     await worker.$transaction((tx) => repository.consumeAuditLogOutbox(tx, { jobId: claim.id, payloadDigest: claim.payloadDigest, attemptedAt: new Date() }));
   }

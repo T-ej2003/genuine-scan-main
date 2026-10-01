@@ -103,6 +103,8 @@ test("legacy recovery retains provenance, fails closed, and is included in manda
   assert.match(source, /o\."payloadDigest" IS NOT NULL AND o\."idempotencyKey" IS NOT NULL/);
   const workflow = read(".github/workflows/quality-gate.yml");
   assert.match(workflow, /MSCQR_FULL_RLS_CERTIFICATION_FAMILY: b03-durable-outbox/);
+  assert.match(workflow, /docker compose -f docker-compose\.rls-certification\.yml up -d --wait rls-cert-postgres/);
+  assert.match(workflow, /MSCQR_FULL_RLS_CERTIFICATION_ADMIN_URL: postgresql:\/\/mscqr_rls_cert_admin@127\.0\.0\.1:55434\/mscqr_full_rls_admin/);
   assert.match(read("package.json"), /full-database-rls-enforcement\.test\.mjs scripts\/tests\/b03-outbox-contract\.test\.mjs/);
 });
 

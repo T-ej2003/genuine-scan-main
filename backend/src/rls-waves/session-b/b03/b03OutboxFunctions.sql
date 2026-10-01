@@ -43,9 +43,9 @@ BEGIN
     nullif(current_setting('app.b01_request_id',true),''),nullif(current_setting('app.scheduled_request_id',true),''));
   IF original_request IS NOT NULL AND (length(original_request) NOT BETWEEN 1 AND 128 OR original_request !~ '^[!-~]+$')
   THEN RAISE EXCEPTION 'B03_AUDIT_REQUEST_DENIED' USING ERRCODE='42501'; END IF;
-  -- A fresh event with no UUID request gets its own existing immutable UUID
-  -- row identity; this is marked explicitly, not claimed to be a client request.
-  NEW."requestId":=CASE WHEN original_request ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+  -- Bare SQL INSERT producers emit distinct events, not replay-aware requests.
+  -- Use their immutable row ID; retain the original request only as provenance.
+  NEW."requestId":=CASE WHEN (NEW."payloadDigest" IS NOT NULL OR NEW."idempotencyKey" IS NOT NULL) AND original_request ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
     THEN lower(original_request) ELSE NEW.id END;
   encoding:=CASE WHEN current_setting('app.b03_outbox_operation',true)='audit-enqueue' AND current_setting('app.b03_outbox_id',true)=NEW.id THEN 'stable-json-v1' ELSE 'jsonb-text-v1' END;
   expected_digest:=encode(sha256(convert_to(CASE WHEN encoding='stable-json-v1' THEN app_rls.b03_stable_json(NEW.payload) ELSE NEW.payload::text END,'UTF8')),'hex');

@@ -81,3 +81,7 @@ Recommendation: use the durable failure classifications as the operational backl
 ## Local verification checkpoint
 
 The focused worker/audit/security unit run passed 9 tests; the canonical full RLS verification passed 24 tests. The dedicated PostgreSQL 18 application proof passed, including old-shape fixtures and transaction failure injection. The local Codex diff review reported no actionable defects. Exact-head GitHub CI and review remain required before the merge decision. Production queue classification and recovery have not been executed: the retained aggregate evidence establishes 156 incomplete records, not their individual recoverability. No production changes are part of this PR preparation.
+
+CI harness isolation: the B03 proof uses the existing docker-compose.rls-certification.yml cluster. The P2 harness deliberately pre-creates certification-administrator, so it cannot satisfy the independent clean-room provenance guard. The guard remains unchanged; the workflow regression checks the separate harness and URL.
+
+Bare SQL INSERT producers use their immutable event-row UUID for identity even when a client request UUID is reused; the original request remains explicit provenance. Existing replay-aware producers with supplied digest/identity preserve their original canonical request tuple. PostgreSQL coverage proves two equal payloads under one client request persist and complete as distinct events.
