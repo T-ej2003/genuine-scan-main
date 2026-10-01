@@ -27,7 +27,7 @@ const allow = (Sid, Action, Resource, Condition = regional) => ({ Sid, Effect: "
 const passRoles = (roles) => allow("PassExactTaskRoles", "iam:PassRole", roles, { StringEquals: { "iam:PassedToService": "ecs-tasks.amazonaws.com" } });
 const stageBSource = new URL("../../infra/aws/terraform/production-green-stage-b/main.tf", import.meta.url);
 export function appOnlyRuntimeSecretArns(source = fs.readFileSync(stageBSource, "utf8")) {
-  assert.equal(canonicalSha256(source), "01ab0dd47e364c431ac69a6639265c3943baecc71d7d3fab62601c38a44a24aa",
+  assert.equal(canonicalSha256(source), "b3f21fba81466f4d101ac9777e8d32095c21b9eee3608cad75924b0a49030f80",
     "Stage-B IAM source wiring is unreviewed by the app-only compatibility model");
   const matches = [...source.matchAll(/^  runtime_rotation_and_artifact_secret_arns = (\[[\s\S]*?^  \])$/gm)];
   assert.equal(matches.length, 1, "Ambiguous runtime rotation/artifact secret source");

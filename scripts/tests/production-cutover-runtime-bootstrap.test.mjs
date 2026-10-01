@@ -423,7 +423,7 @@ test("production composition passes resolved AWS output to the predeployment inv
       backendImage: prepared.config.overlapTaskInput.backendImage,
       releaseSha: prepared.config.imageReleaseSha,
       databaseUrl: prepared.config.inventoryDatabaseSecretArn || prepared.config.overlapTaskInput.databaseUrlSecretArn,
-      rotationInventoryRlsRole: prepared.config.rotationInventoryRlsRole || prepared.config.overlapTaskInput.secretBindings.ROTATION_INVENTORY_RLS_ROLE,
+      rotationInventoryOperation: prepared.config.rotationInventoryOperation || prepared.config.overlapTaskInput.secretBindings.ROTATION_INVENTORY_OPERATION,
       inventoryLogGroup: prepared.config.inventoryLogGroupName || prepared.config.overlapTaskInput.backendLogGroup,
     }).taskDefinition;
     const calls = [];
@@ -832,7 +832,7 @@ test("overlap task rejects legacy/ECS reference confusion and double JSON-key su
     ARTIFACT_SIGN_PUBLIC_KEY_CURRENT: secretArn("artifact-public"),
     ARTIFACT_SIGN_ACTIVE_KEY_VERSION: secretArn("artifact-version"),
     ARTIFACT_SIGN_PUBLIC_KEYS_JSON: secretArn("artifact-registry"),
-    ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls_read",
+    ROTATION_INVENTORY_OPERATION: "rotation-inventory-v1",
   };
   const input = {
     backendImage: image,

@@ -1,0 +1,10 @@
+DROP FUNCTION app_rls.production_rotation_inventory();
+DROP POLICY "rotation_inventory_refreshtoken" ON public."RefreshToken";
+DROP POLICY "rotation_inventory_user" ON public."User";
+DROP POLICY "rotation_inventory_customerauthsession" ON public."CustomerAuthSession";
+DROP POLICY "rotation_inventory_customerverificationsession" ON public."CustomerVerificationSession";
+DROP POLICY "rotation_inventory_invite" ON public."Invite";
+DROP POLICY "rotation_inventory_passwordreset" ON public."PasswordReset";
+DROP POLICY "rotation_inventory_emailverificationtoken" ON public."EmailVerificationToken";
+DROP POLICY "rotation_inventory_qrcode" ON public."QRCode";
+DROP POLICY "rotation_inventory_compliancepackjob" ON public."CompliancePackJob";

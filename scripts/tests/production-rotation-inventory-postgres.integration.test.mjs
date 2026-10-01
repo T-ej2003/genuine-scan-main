@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import test from "node:test";
+import { rotationInventoryFunctionSql } from "../rls/lib/rotation-inventory-contract.mjs";
 import { assertBoundedRotationInventory, ROTATION_INVENTORY_CATEGORIES } from "../security/production-runtime-rotation-inventory.mjs";
 import { buildRotationInventorySql, executeProductionRotationInventory } from "../security/production-rotation-state-inventory.mjs";
 
@@ -14,7 +15,7 @@ const artifactIds = ["00000000-0000-4000-8000-000000000021", "00000000-0000-4000
 const runSql = (sql) => execFileSync("psql", [fixtureUrl, "-v", "ON_ERROR_STOP=1", "-c", sql], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 const runInventory = () => {
   try {
-    return executeProductionRotationInventory({ env: { ...process.env, DATABASE_URL: fixtureUrl, ROTATION_INVENTORY_APPROVED: "true", ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls" } });
+    return executeProductionRotationInventory({ env: { ...process.env, DATABASE_URL: fixtureUrl, ROTATION_INVENTORY_APPROVED: "true", ROTATION_INVENTORY_OPERATION: "rotation-inventory-v1" } });
   } catch (error) {
     execFileSync("psql", [fixtureUrl, "-v", "ON_ERROR_STOP=1", "--command", buildRotationInventorySql("mscqr_prod_rls")], { stdio: ["ignore", "inherit", "inherit"] });
     throw error;
@@ -38,15 +39,10 @@ function assertInventoryShape(inventory) {
 
 test("production-shaped rotation inventory executes against PostgreSQL for empty and representative data", { skip: skipOutsideCi }, () => {
   assert.ok(fixtureUrl, "MSCQR_ROTATION_INVENTORY_FIXTURE_DATABASE_URL is required in CI");
-  runSql(`
-    DO $$ BEGIN
-      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mscqr_prod_rls') THEN
-        CREATE ROLE mscqr_prod_rls NOLOGIN;
-      END IF;
-    END $$;
-    GRANT USAGE ON SCHEMA public TO mscqr_prod_rls;
-    GRANT SELECT ON TABLE public."RefreshToken", public."User", public."CustomerAuthSession", public."CustomerVerificationSession", public."Invite", public."PasswordReset", public."EmailVerificationToken", public."QRCode", public."CompliancePackJob" TO mscqr_prod_rls;
-  `);
+  // This fixture tests the unchanged aggregate shape. The companion boundary
+  // test uses a NOLOGIN/NOBYPASSRLS owner, forced RLS and an isolated app login.
+  const fixtureRole = new URL(fixtureUrl).username;
+  runSql(`CREATE SCHEMA IF NOT EXISTS app_rls; ${rotationInventoryFunctionSql({ owner: fixtureRole, app: fixtureRole })}`);
 
   try {
     runSql(`DELETE FROM public."CompliancePackJob"; DELETE FROM public."QRCode"; DELETE FROM public."Licensee" WHERE id = '${licenseeId}'; DELETE FROM public."Organization" WHERE id = '${organizationId}';`);
@@ -81,6 +77,6 @@ test("production-shaped rotation inventory executes against PostgreSQL for empty
     assert.equal(new Date(representative.artifactRecords.maxFinishedAt).toISOString(), "2030-02-03T00:00:00.000Z");
     assert.deepEqual(representative.artifactRecords.signatureAlgorithms, { Ed25519: 2, RSA: 1 });
   } finally {
-    runSql(`DELETE FROM public."CompliancePackJob" WHERE id IN ('${artifactIds.join("','")}'); DELETE FROM public."QRCode" WHERE id IN ('${qrIds.join("','")}'); DELETE FROM public."Licensee" WHERE id = '${licenseeId}'; DELETE FROM public."Organization" WHERE id = '${organizationId}'; REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM mscqr_prod_rls; REVOKE ALL PRIVILEGES ON SCHEMA public FROM mscqr_prod_rls; DROP ROLE IF EXISTS mscqr_prod_rls;`);
+    runSql(`DELETE FROM public."CompliancePackJob" WHERE id IN ('${artifactIds.join("','")}'); DELETE FROM public."QRCode" WHERE id IN ('${qrIds.join("','")}'); DELETE FROM public."Licensee" WHERE id = '${licenseeId}'; DELETE FROM public."Organization" WHERE id = '${organizationId}'; DROP FUNCTION app_rls.production_rotation_inventory();`);
   }
 });

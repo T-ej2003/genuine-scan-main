@@ -6,7 +6,7 @@ import { createProductionPreDeploymentInventoryAdapter, PREDEPLOYMENT_BROKER_CAL
 import { assertPreDeploymentInventoryResult, assertPreDeploymentReplayRow, createBrokerRuntimeConfig, createPreDeploymentInventoryHandler, createPreDeploymentOperationIdentity, preDeploymentOperationIdentitySha256, preDeploymentOperationKey, preDeploymentReplayItem, validatePreDeploymentInventoryConfiguration, PREDEPLOYMENT_INVENTORY_LAMBDA_TIMEOUT_SECONDS, PREDEPLOYMENT_INVENTORY_OPERATION_DEADLINE_MS, PREDEPLOYMENT_INVENTORY_CLEANUP_MARGIN_MS, PREDEPLOYMENT_INVENTORY_TOTAL_REQUEST_BUDGET_MS } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs";
 import { assertPreDeploymentInventoryTaskDefinition, buildPreDeploymentInventoryTaskDefinition, PREDEPLOYMENT_INVENTORY_TAG } from "../aws/production-predeployment-inventory-task.mjs";
 import { assertBoundedRotationInventory, ROTATION_INVENTORY_CATEGORIES } from "../security/production-runtime-rotation-inventory.mjs";
-import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM, STAGE_B_MODES, STAGE_B_TASK_TEMPLATE_KEYS, stageBApprovalIdForReleaseSha } from "../aws/production-green-stage-b-contract.mjs";
+import { PRESERVED_INVENTORY_PREDECESSOR, STAGE_B, STAGE_B_APPROVAL_ALGORITHM, STAGE_B_MODES, STAGE_B_TASK_TEMPLATE_KEYS, stageBApprovalIdForReleaseSha } from "../aws/production-green-stage-b-contract.mjs";
 
 const sourceSha = "a".repeat(40);
 const imageReleaseSha = "9".repeat(40);
@@ -25,13 +25,13 @@ const inventory = Object.fromEntries(ROTATION_INVENTORY_CATEGORIES.map((name) =>
 
 const config = {
   inventoryApprovalId: stageBApprovalIdForReleaseSha(sourceSha),
-  rotationInventoryRlsRole: "mscqr_prod_rls_read",
+  rotationInventoryOperation: "rotation-inventory-v1",
   inventoryLogGroupName: "/ecs/mscqr-production/rls-green-backend",
   inventoryPrivateSubnetIds: ["subnet-068d949017bd2ce45", "subnet-07e0a76e3a5241138"],
   inventorySecurityGroupIds: ["sg-051a24aedff773761"],
   inventoryDatabaseUrlArn: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/app-XNeSfh",
-  inventoryRlsRole: "mscqr_prod_rls_read",
-  overlapTaskInput: { backendLogGroup: "/ecs/mscqr-production/rls-green-backend", secretBindings: { ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls_read" } },
+  inventoryOperation: "rotation-inventory-v1",
+  overlapTaskInput: { backendLogGroup: "/ecs/mscqr-production/rls-green-backend", secretBindings: { ROTATION_INVENTORY_OPERATION: "rotation-inventory-v1" } },
 };
 
 const brokerTaskDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:19";
@@ -73,7 +73,7 @@ const brokerApproval = {
   taskDefinitionArns: Object.fromEntries(STAGE_B_MODES.map((mode) => [mode, `arn:aws:ecs:eu-west-2:368992683803:task-definition/${mode}:1`])),
   taskDefinitionTemplateHashes: Object.fromEntries(STAGE_B_TASK_TEMPLATE_KEYS.map((key) => [key, "f".repeat(64)])),
 };
-const brokerDefinition = () => ({ ...buildPreDeploymentInventoryTaskDefinition({ backendImage: image, releaseSha: imageReleaseSha, databaseUrl: config.inventoryDatabaseUrlArn, rotationInventoryRlsRole: config.inventoryRlsRole, inventoryLogGroup: config.inventoryLogGroupName }).taskDefinition, taskDefinitionArn: brokerTaskDefinitionArn, status: "ACTIVE", enableFaultInjection: false });
+const brokerDefinition = () => ({ ...buildPreDeploymentInventoryTaskDefinition({ backendImage: image, releaseSha: imageReleaseSha, databaseUrl: config.inventoryDatabaseUrlArn, rotationInventoryOperation: config.inventoryOperation, inventoryLogGroup: config.inventoryLogGroupName }).taskDefinition, taskDefinitionArn: brokerTaskDefinitionArn, status: "ACTIVE", enableFaultInjection: false });
 
 test("broker runtime derives inventory configuration without duplicating it in Lambda environment", () => {
   const env = {
@@ -95,31 +95,31 @@ test("broker runtime derives inventory configuration without duplicating it in L
   assert.deepEqual(runtime.inventoryPrivateSubnetIds, STAGE_B.privateSubnetIds);
   assert.deepEqual(runtime.inventorySecurityGroupIds, [STAGE_B.executorSecurityGroupId]);
   assert.equal(runtime.inventoryDatabaseUrlArn, STAGE_B.inventoryDatabaseSecretArn);
-  assert.equal(runtime.inventoryRlsRole, STAGE_B.inventoryRlsRole);
+  assert.equal(runtime.inventoryOperation, STAGE_B.inventoryOperation);
   assert.equal(runtime.inventoryLogGroupName, STAGE_B.inventoryLogGroupName);
   const legacyEnv = { ...env };
   delete legacyEnv.BROKER_IMAGE_RELEASE_SHA;
   assert.throws(() => validatePreDeploymentInventoryConfiguration(createBrokerRuntimeConfig(legacyEnv)), /broker configuration|contract|image release/i);
 });
 
-function makeBrokerHandler({ definition = brokerDefinition(), tags = brokerTags, readApproval = async () => brokerApproval, describeTaskDefinition = async () => ({ taskDefinition: definition, tags }), describeTasks = async () => ({ tasks: [{ taskArn: brokerTaskArn, taskDefinitionArn: brokerTaskDefinitionArn, lastStatus: "STOPPED", tags: [{ key: "MSCQRPreDeploymentInventory", value: "rotation-inventory" }, { key: "ReleaseSha", value: sourceSha }, { key: "RotationId", value: "rotation-1" }], containers: [{ name: "inventory", exitCode: 0 }] }] }), runTask = async () => ({ failures: [], tasks: [{ taskArn: brokerTaskArn }] }), verifySignature = async () => true, claimPreDeploymentOperation = async () => {}, releasePreDeploymentOperation = async () => {}, markPreDeploymentLaunchUncertain = async () => {}, recordPreDeploymentTaskStarted = async () => {}, recordPreDeploymentCompleted = async () => {}, stopTask, now = () => new Date("2026-07-29T12:00:00.000Z"), monotonicNow = () => 0, sleep = async () => {} } = {}) {
+function makeBrokerHandler({ definition = brokerDefinition(), tags = brokerTags, readApproval = async () => brokerApproval, describeTaskDefinition = async () => ({ taskDefinition: definition, tags }), describeTasks = async () => ({ tasks: [{ taskArn: brokerTaskArn, taskDefinitionArn: brokerTaskDefinitionArn, lastStatus: "STOPPED", tags: [{ key: "MSCQRPreDeploymentInventory", value: "rotation-inventory" }, { key: "ReleaseSha", value: sourceSha }, { key: "RotationId", value: "rotation-1" }], containers: [{ name: "inventory", exitCode: 0 }] }] }), runTask = async () => ({ failures: [], tasks: [{ taskArn: brokerTaskArn }] }), verifySignature = async () => true, claimPreDeploymentOperation = async () => {}, releasePreDeploymentOperation = async () => {}, markPreDeploymentLaunchUncertain = async () => {}, recordPreDeploymentTaskStarted = async () => {}, recordPreDeploymentCompleted = async () => {}, readPreDeploymentOperation, recoverPreDeploymentOperation, lookupInventoryStopEvents, getLogEvents, stopTask, now = () => new Date("2026-07-29T12:00:00.000Z"), monotonicNow = () => 0, sleep = async () => {} } = {}) {
   const calls = [];
   const cleanup = stopTask || (async (request) => { calls.push(["stopTask", request]); });
   const handler = createPreDeploymentInventoryHandler({
     config: brokerConfig, executingBrokerVersion: "1", readApproval, verifySignature,
-    claimPreDeploymentOperation, releasePreDeploymentOperation, markPreDeploymentLaunchUncertain, recordPreDeploymentTaskStarted, recordPreDeploymentCompleted,
+    claimPreDeploymentOperation, releasePreDeploymentOperation, markPreDeploymentLaunchUncertain, recordPreDeploymentTaskStarted, recordPreDeploymentCompleted, readPreDeploymentOperation, recoverPreDeploymentOperation, lookupInventoryStopEvents,
     describeTaskDefinition,
     runTask: async (request) => { calls.push(["runTask", request]); return runTask(request); },
     describeTasks: async (request) => { calls.push(["describeTasks", request]); return describeTasks(request); },
     describeLogStreams: async (request) => { calls.push(["describeLogStreams", request]); return { logStreams: [{ logStreamName: "predeployment-inventory/inventory/inventory-19" }] }; },
-    getLogEvents: async (request) => { calls.push(["getLogEvents", request]); return { events: [{ message: JSON.stringify(inventory) }] }; },
+    getLogEvents: async (request) => { calls.push(["getLogEvents", request]); return getLogEvents ? getLogEvents(request) : { events: [{ message: JSON.stringify(inventory) }] }; },
     stopTask: cleanup, now, monotonicNow, sleep,
   });
   return { handler, calls };
 }
 
 test("predeployment task is fixed, terminating, and not a governed ECS Exec target", () => {
-  const { taskDefinition, tags } = buildPreDeploymentInventoryTaskDefinition({ backendImage: image, releaseSha: sourceSha, databaseUrl: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/app-XNeSfh", rotationInventoryRlsRole: "mscqr_prod_rls_read", inventoryLogGroup: config.inventoryLogGroupName });
+  const { taskDefinition, tags } = buildPreDeploymentInventoryTaskDefinition({ backendImage: image, releaseSha: sourceSha, databaseUrl: config.inventoryDatabaseUrlArn, rotationInventoryOperation: "rotation-inventory-v1", inventoryLogGroup: config.inventoryLogGroupName });
   assert.deepEqual(taskDefinition.containerDefinitions[0].entryPoint, ["node"]);
   assert.deepEqual(taskDefinition.containerDefinitions[0].command, ["/app/scripts/production-rotation-state-inventory.mjs"]);
   assert.equal(taskDefinition.containerDefinitions[0].portMappings, undefined);
@@ -128,7 +128,7 @@ test("predeployment task is fixed, terminating, and not a governed ECS Exec targ
 });
 
 test("inventory readback accepts only the observed ECS default normalization", () => {
-  const input = { backendImage: image, releaseSha: sourceSha, databaseUrl: config.inventoryDatabaseUrlArn, rotationInventoryRlsRole: config.inventoryRlsRole, inventoryLogGroup: config.inventoryLogGroupName, inventoryTaskRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task", inventoryExecutionRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution" };
+  const input = { backendImage: image, releaseSha: sourceSha, databaseUrl: config.inventoryDatabaseUrlArn, rotationInventoryOperation: config.inventoryOperation, inventoryLogGroup: config.inventoryLogGroupName, inventoryTaskRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task", inventoryExecutionRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution" };
   const expected = buildPreDeploymentInventoryTaskDefinition(input).taskDefinition;
   assert.doesNotThrow(() => assertPreDeploymentInventoryTaskDefinition(ecsDefaultedReadback(expected), input));
   const rejected = [
@@ -153,7 +153,7 @@ test("inventory readback accepts only the observed ECS default normalization", (
 });
 
 test("inventory semantic readback ignores object and environment entry order", () => {
-  const input = { backendImage: image, releaseSha: sourceSha, databaseUrl: config.inventoryDatabaseUrlArn, rotationInventoryRlsRole: config.inventoryRlsRole, inventoryLogGroup: config.inventoryLogGroupName };
+  const input = { backendImage: image, releaseSha: sourceSha, databaseUrl: config.inventoryDatabaseUrlArn, rotationInventoryOperation: config.inventoryOperation, inventoryLogGroup: config.inventoryLogGroupName };
   const expected = buildPreDeploymentInventoryTaskDefinition(input).taskDefinition;
   assert.doesNotThrow(() => assertPreDeploymentInventoryTaskDefinition(reorderObjectKeys(ecsDefaultedReadback(expected)), input));
   const reorderedArray = reorderObjectKeys(ecsDefaultedReadback(expected));
@@ -200,7 +200,7 @@ test("production predeployment adapter reuses an exact existing revision after a
   const taskDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:1";
   const taskArn = "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/inventory-1";
   const input = { ...config, inventoryTaskDefinitionArn: taskDefinitionArn };
-  const definition = buildPreDeploymentInventoryTaskDefinition({ backendImage: image, releaseSha: imageReleaseSha, databaseUrl: config.inventoryDatabaseUrlArn, rotationInventoryRlsRole: config.inventoryRlsRole, inventoryLogGroup: config.inventoryLogGroupName }).taskDefinition;
+  const definition = buildPreDeploymentInventoryTaskDefinition({ backendImage: image, releaseSha: imageReleaseSha, databaseUrl: config.inventoryDatabaseUrlArn, rotationInventoryOperation: config.inventoryOperation, inventoryLogGroup: config.inventoryLogGroupName }).taskDefinition;
   const adapter = createProductionPreDeploymentInventoryAdapter({ run: (args) => {
     calls.push(args);
     if (args[0] === "ecs" && args[1] === "describe-task-definition") return JSON.stringify({ taskDefinition: { ...ecsDefaultedReadback(definition), taskDefinitionArn, status: "ACTIVE" } });
@@ -281,7 +281,7 @@ test("real broker handler runs one bounded task and reads only its exact log str
     inventoryTaskRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task",
     inventoryExecutionRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution",
     inventoryDatabaseUrlArn: config.inventoryDatabaseUrlArn,
-    inventoryRlsRole: config.inventoryRlsRole,
+    inventoryOperation: config.inventoryOperation,
     inventoryPrivateSubnetIds: config.inventoryPrivateSubnetIds,
     inventorySecurityGroupIds: config.inventorySecurityGroupIds,
     inventoryAssignPublicIp: "DISABLED",
@@ -293,7 +293,7 @@ test("real broker handler runs one bounded task and reads only its exact log str
     readApproval: async () => approval,
     verifySignature: async () => true,
     runTask: async (request) => { handlerCalls.push(["runTask", request]); return { failures: [], tasks: [{ taskArn }] }; },
-    describeTaskDefinition: async (arn) => ({ taskDefinition: reorderObjectKeys({ ...ecsDefaultedReadback(buildPreDeploymentInventoryTaskDefinition({ backendImage: image, releaseSha: imageReleaseSha, databaseUrl: config.inventoryDatabaseUrlArn, rotationInventoryRlsRole: config.inventoryRlsRole, inventoryLogGroup: config.inventoryLogGroupName }).taskDefinition), taskDefinitionArn: arn, status: "ACTIVE" }), tags: [{ key: "Component", value: "full-rls-green-stage-b" }, { key: "Environment", value: "production" }, { key: "ManagedBy", value: "Terraform" }, { key: "MSCQRPreDeploymentInventory", value: "rotation-inventory" }] }),
+    describeTaskDefinition: async (arn) => ({ taskDefinition: reorderObjectKeys({ ...ecsDefaultedReadback(buildPreDeploymentInventoryTaskDefinition({ backendImage: image, releaseSha: imageReleaseSha, databaseUrl: config.inventoryDatabaseUrlArn, rotationInventoryOperation: config.inventoryOperation, inventoryLogGroup: config.inventoryLogGroupName }).taskDefinition), taskDefinitionArn: arn, status: "ACTIVE" }), tags: [{ key: "Component", value: "full-rls-green-stage-b" }, { key: "Environment", value: "production" }, { key: "ManagedBy", value: "Terraform" }, { key: "MSCQRPreDeploymentInventory", value: "rotation-inventory" }] }),
     describeTasks: async (request) => { handlerCalls.push(["describeTasks", request]); describeCount += 1; return { tasks: [{ taskArn, taskDefinitionArn, lastStatus: describeCount === 1 ? "RUNNING" : "STOPPED", tags: [{ key: "MSCQRPreDeploymentInventory", value: "rotation-inventory" }, { key: "ReleaseSha", value: sourceSha }, { key: "RotationId", value: "rotation-1" }], containers: [{ name: "inventory", exitCode: describeCount === 1 ? undefined : 0 }] }] }; },
     describeLogStreams: async (request) => { handlerCalls.push(["describeLogStreams", request]); return { logStreams: [{ logStreamName: "predeployment-inventory/inventory/inventory-19" }] }; },
     getLogEvents: async (request) => { handlerCalls.push(["getLogEvents", request]); return { events: [{ message: JSON.stringify(inventory) }] }; },
@@ -315,7 +315,7 @@ test("real broker handler runs one bounded task and reads only its exact log str
     config: handlerConfig, executingBrokerVersion: "1",
     readApproval: async () => approval,
     verifySignature: async () => true,
-    describeTaskDefinition: async () => ({ taskDefinition: { ...buildPreDeploymentInventoryTaskDefinition({ backendImage: image, releaseSha: imageReleaseSha, databaseUrl: config.inventoryDatabaseUrlArn, rotationInventoryRlsRole: config.inventoryRlsRole, inventoryLogGroup: config.inventoryLogGroupName }).taskDefinition, taskDefinitionArn, status: "ACTIVE", tags: [{ key: "MSCQRPreDeploymentInventory", value: "rotation-inventory" }] } }),
+    describeTaskDefinition: async () => ({ taskDefinition: { ...buildPreDeploymentInventoryTaskDefinition({ backendImage: image, releaseSha: imageReleaseSha, databaseUrl: config.inventoryDatabaseUrlArn, rotationInventoryOperation: config.inventoryOperation, inventoryLogGroup: config.inventoryLogGroupName }).taskDefinition, taskDefinitionArn, status: "ACTIVE", tags: [{ key: "MSCQRPreDeploymentInventory", value: "rotation-inventory" }] } }),
     runTask: async () => { throw new Error("RunTask must not be reached for nested-only tags."); },
     describeTasks: async () => ({ tasks: [] }),
     describeLogStreams: async () => ({ logStreams: [] }),
@@ -569,7 +569,7 @@ test("broker configuration fixes cluster, task, network, roles, and log scope", 
     inventoryTaskRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task",
     inventoryExecutionRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution",
     inventoryDatabaseUrlArn: config.inventoryDatabaseUrlArn,
-    inventoryRlsRole: config.inventoryRlsRole,
+    inventoryOperation: config.inventoryOperation,
     inventoryPrivateSubnetIds: config.inventoryPrivateSubnetIds,
     inventorySecurityGroupIds: config.inventorySecurityGroupIds,
     inventoryAssignPublicIp: "DISABLED",
@@ -612,4 +612,38 @@ test("broker SDK clients are fixed to the reviewed production region and endpoin
   assert.match(source, /new CloudWatchLogsClient\(\{ region: STAGE_B\.region \}\)/);
   assert.doesNotMatch(source, /endpoint\s*:/i);
   assert.doesNotMatch(source, /AWS_ENDPOINT_URL|AWS_REGION\s*\}|process\.env\.AWS_REGION/);
+});
+
+for (const launchFails of [false, true]) test(`canonical failed-predecessor recovery preserves the successor (launchFails=${launchFails})`, async () => {
+  const oldSha = "2f296dfe5546765a4b762568cbaa7fc26af97660";
+  const oldIdentity = createPreDeploymentOperationIdentity(PRESERVED_INVENTORY_PREDECESSOR);
+  const oldItem = preDeploymentReplayItem({ ...oldIdentity, operationKey: preDeploymentOperationKey(oldIdentity), nonce: "old-claim-nonce", expiresAt: "2026-07-29T13:00:00Z" });
+  const row = Object.fromEntries(Object.entries(oldItem).map(([k,v]) => [k, v.S ?? Number(v.N)]));
+  row.launchState = "launch-uncertain"; row.taskArn = "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/fa5ad8eb6aa9443cad6ec600bfa8e82c";
+  const oldDefinition = structuredClone(brokerDefinition()); oldDefinition.containerDefinitions[0].image = oldIdentity.imageDigest; oldDefinition.taskDefinitionArn = oldIdentity.taskDefinitionArn;
+  for (const binding of oldDefinition.containerDefinitions[0].environment) {
+    if (binding.name === "RELEASE_GIT_SHA") binding.value = oldSha;
+    if (binding.name === "ROTATION_INVENTORY_OPERATION") { binding.name = "ROTATION_INVENTORY_RLS_ROLE"; binding.value = "mscqr_prod_rls_read"; }
+  }
+  let launches = 0, recoveries = 0, released = 0, uncertain = 0;
+  const { handler } = makeBrokerHandler({
+    readPreDeploymentOperation: async () => row,
+    releasePreDeploymentOperation: async () => { released++; },
+    markPreDeploymentLaunchUncertain: async () => { uncertain++; },
+    recoverPreDeploymentOperation: async ({ predecessor, successor }) => {
+      assert.equal(predecessor.row, row); assert.equal(row.launchState, "launch-uncertain");
+      row.launchState = "failed-recovered"; row.successorOperationKey = successor.operationKey; row.recoveryEvidenceSha256 = "e".repeat(64); recoveries++;
+    },
+    describeTaskDefinition: async (arn) => ({ taskDefinition: arn === oldIdentity.taskDefinitionArn ? oldDefinition : brokerDefinition(), tags: brokerTags }),
+    describeTasks: async ({ tasks }) => ({ tasks: [{ taskArn: tasks[0], taskDefinitionArn: tasks[0] === row.taskArn ? oldIdentity.taskDefinitionArn : brokerTaskDefinitionArn, clusterArn: STAGE_B.clusterArn, lastStatus: "STOPPED", stopCode: "EssentialContainerExited", tags: [{ key: "MSCQRPreDeploymentInventory", value: "rotation-inventory" }, { key: "ReleaseSha", value: tasks[0] === row.taskArn ? oldSha : sourceSha }, { key: "RotationId", value: oldIdentity.rotationId }], containers: [{ name: "inventory", exitCode: tasks[0] === row.taskArn ? 1 : 0, image: tasks[0] === row.taskArn ? oldIdentity.imageDigest : image }] }] }),
+    getLogEvents: async ({ logStreamName }) => ({ events: [{ message: logStreamName.includes("fa5ad8") ? "Error: read-only rotation inventory query failed" : JSON.stringify(inventory) }] }),
+    runTask: async () => { launches++; return launchFails ? { tasks: [], failures: [{ reason: "fixture capacity rejection" }] } : { tasks: [{ taskArn: brokerTaskArn }], failures: [] }; },
+  });
+  const event = { approvalId, sourceSha, imageReleaseSha, operation: oldIdentity.operation, rotationId: oldIdentity.rotationId, taskDefinitionArn: brokerTaskDefinitionArn, failedPredecessor: oldIdentity };
+  await assert.rejects(() => handler({ ...event, failedPredecessor: undefined }), /exact forward recovery binding/);
+  if (launchFails) await assert.rejects(() => handler(event), /did not start exactly once/);
+  else assert.equal((await handler(event)).status, "completed");
+  assert.equal(released, 0); assert.equal(uncertain, launchFails ? 1 : 0);
+  await assert.rejects(() => handler(event), /not recoverable/);
+  assert.equal(launches, 1); assert.equal(recoveries, 1);
 });

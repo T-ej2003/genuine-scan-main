@@ -166,7 +166,7 @@ export function fixtureInput(overrides = {}) {
     stageA,
     artifactSigning: artifactFixture(),
     overlapTask: {
-      input: { backendImage: imageDigest, imageReleaseSha, backendLogGroup: "/aws/ecs/rehearsal", secretBindings: { ...secretBindings, ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls_read" } },
+      input: { backendImage: imageDigest, imageReleaseSha, backendLogGroup: "/aws/ecs/rehearsal", secretBindings: { ...secretBindings, ROTATION_INVENTORY_OPERATION: "rotation-inventory-v1" } },
       register: async ({ taskDefinition, tags }) => {
         mutations.push("M4_REGISTER_TASK_DEFINITION");
         registeredOverlapDefinition = structuredClone(taskDefinition);
@@ -739,7 +739,7 @@ test("the real predeployment adapter feeds the same cutover spine before deploym
     sourceSha,
     imageReleaseSha: input.imageAuthorization.imageReleaseSha,
     imageDigest: imageDigest,
-    config: { inventoryApprovalId: stageBApprovalIdForReleaseSha(sourceSha), rotationInventoryRlsRole: "mscqr_prod_rls_read", inventoryLogGroupName: "/ecs/mscqr-production/rls-green-backend", overlapTaskInput: { backendLogGroup: "/ecs/mscqr-production/rls-green-backend", secretBindings: { ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls_read" } } },
+    config: { inventoryApprovalId: stageBApprovalIdForReleaseSha(sourceSha), rotationInventoryOperation: "rotation-inventory-v1", inventoryLogGroupName: "/ecs/mscqr-production/rls-green-backend", overlapTaskInput: { backendLogGroup: "/ecs/mscqr-production/rls-green-backend", secretBindings: { ROTATION_INVENTORY_OPERATION: "rotation-inventory-v1" } } },
     run: (args) => {
       if (args[0] === "ecs" && args[1] === "register-task-definition") {
         const payload = JSON.parse(args[3]);
@@ -980,11 +980,11 @@ const failCases = [
   ["artifact-registry-mismatch", (i) => { const read = i.artifactSigning.readSecret; i.artifactSigning.readSecret = async (ref) => ref.includes("PUBLIC_KEYS") ? "{}" : read(ref); }],
   ["artifact-unapproved-secret", (i) => { i.artifactSigning.bindings.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT = "*"; }],
   ["artifact-evidence-leak", (i) => { i.artifactSigning.evidenceRef = "secret=leak"; }],
-  ["td-wrong-family", (i) => { i.overlapTask.input.secretBindings.ROTATION_INVENTORY_RLS_ROLE = "bad role"; }],
+  ["td-wrong-family", (i) => { i.overlapTask.input.secretBindings.ROTATION_INVENTORY_OPERATION = "bad role"; }],
   ["td-wrong-digest", (i) => { i.overlapTask.input.backendImage = "bad"; }],
   ["td-wrong-role", (i) => { i.overlapTask.input.secretBindings.BAD_ROLE = "x"; }],
   ["td-wrong-secret-ref", (i) => { i.overlapTask.input.secretBindings.JWT_SECRET_CURRENT = "not-an-arn"; }],
-  ["td-missing-execution-marker", (i) => { i.overlapTask.input.secretBindings.ROTATION_INVENTORY_RLS_ROLE = ""; }],
+  ["td-missing-execution-marker", (i) => { i.overlapTask.input.secretBindings.ROTATION_INVENTORY_OPERATION = ""; }],
   ["td-payload-hash-mismatch", (i) => { i.overlapTask.register = async () => ({ taskDefinition: { taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/wrong:1" } }); }],
   ["registration-readback-mismatch", (i) => { i.overlapTask.describe = async () => ({ taskDefinitionArn: "wrong", family: "wrong", status: "ACTIVE" }); }],
   ["inventory-missing-category", (i) => { i.inventory.execute = async () => ({ refreshSessions: { count: 0 } }); }],

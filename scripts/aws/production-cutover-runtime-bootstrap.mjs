@@ -1,3 +1,4 @@
+import { PRESERVED_INVENTORY_PREDECESSOR } from "./production-green-stage-b-contract.mjs";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { lstatSync, rmSync } from "node:fs";
@@ -416,7 +417,7 @@ export function prepareProductionCutoverRuntime({
       secretBindings: {
         ...rotationBindingsToTaskBindings(rotationBindings),
         ...artifactBindings,
-        ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls_read",
+        ROTATION_INVENTORY_OPERATION: STAGE_B.inventoryOperation,
       },
     }).taskDefinition;
     const rotationTerraformInputs = buildRotationTerraformInputs({
@@ -463,13 +464,14 @@ export function prepareProductionCutoverRuntime({
       backendImageDigest,
       expectedCurrentTaskDefinitionArn: taskDefinition?.taskDefinitionArn,
       inventoryApprovalId,
+      ...(rotationBindings.rotationId === PRESERVED_INVENTORY_PREDECESSOR.rotationId ? { inventoryFailedPredecessor: PRESERVED_INVENTORY_PREDECESSOR } : {}),
       ...(inventoryTaskDefinitionArn === undefined ? {} : { inventoryTaskDefinitionArn }),
       inventoryDatabaseSecretArn: overlapTaskInput.containerDefinitions.find(({ name }) => name === "backend")?.secrets?.find(({ name }) => name === "DATABASE_URL")?.valueFrom,
       inventoryTaskRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task",
       inventoryExecutionRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution",
-      rotationInventoryRlsRole: "mscqr_prod_rls_read",
+      rotationInventoryOperation: STAGE_B.inventoryOperation,
       inventoryLogGroupName: STAGE_B.inventoryLogGroupName,
-      overlapTaskInput: { backendImage: overlapTaskInput.containerDefinitions.find(({ name }) => name === "backend")?.image, imageReleaseSha: preparedImageAuthorization.value.imageReleaseSha, backendLogGroup: STAGE_B.inventoryLogGroupName, secretBindings: { ...rotationBindingsToTaskBindings(rotationBindings), ...artifactBindings, ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls_read" } },
+      overlapTaskInput: { backendImage: overlapTaskInput.containerDefinitions.find(({ name }) => name === "backend")?.image, imageReleaseSha: preparedImageAuthorization.value.imageReleaseSha, backendLogGroup: STAGE_B.inventoryLogGroupName, secretBindings: { ...rotationBindingsToTaskBindings(rotationBindings), ...artifactBindings, ROTATION_INVENTORY_OPERATION: STAGE_B.inventoryOperation } },
       ...paths,
       stageBTfvarsPath: path.resolve(stageBTfvarsPath),
       stageBTfvarsBindingReportPath: path.resolve(stageBTfvarsBindingReportPath),

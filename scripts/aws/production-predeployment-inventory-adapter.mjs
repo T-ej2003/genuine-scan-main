@@ -31,7 +31,7 @@ export function createProductionPreDeploymentInventoryAdapter({ run, sourceSha, 
     databaseUrl: inventorySecretArn,
     inventoryTaskRoleArn: config.inventoryTaskRoleArn || "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task",
     inventoryExecutionRoleArn: config.inventoryExecutionRoleArn || "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution",
-    rotationInventoryRlsRole: config.rotationInventoryRlsRole || config.overlapTaskInput?.secretBindings?.ROTATION_INVENTORY_RLS_ROLE,
+    rotationInventoryOperation: config.rotationInventoryOperation || config.overlapTaskInput?.secretBindings?.ROTATION_INVENTORY_OPERATION,
     inventoryLogGroup: config.inventoryLogGroupName || config.overlapTaskInput?.backendLogGroup,
   };
   let registeredTaskDefinition;
@@ -72,6 +72,7 @@ export function createProductionPreDeploymentInventoryAdapter({ run, sourceSha, 
           sourceSha,
           imageReleaseSha,
           taskDefinitionArn,
+          ...(config.inventoryFailedPredecessor ? { failedPredecessor: config.inventoryFailedPredecessor } : {}),
         };
         const invocation = parseJson(run, ["lambda", "invoke", "--function-name", STAGE_B.brokerAliasArn, "--invocation-type", "RequestResponse", "--cli-binary-format", "raw-in-base64-out", "--cli-read-timeout", String(PREDEPLOYMENT_BROKER_CALLER_READ_TIMEOUT_SECONDS), "--payload", JSON.stringify(brokerRequest), outputPath]);
         if (invocation.FunctionError) throw new Error("Pre-deployment inventory broker returned a function error.");

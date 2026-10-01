@@ -15,7 +15,7 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "22b2012433e319d59c678257f254f74859d9e3e2a1dd9861069309930fdb3b06",
+  "sourceContractSha256": "47c52f3bdbb1e5b4abdca677aeed3c3a85fe467996ec032bf37cae6f3298b374",
   "migrationSetDigest": "65c30dc21bec8af4a44d3983761e9bd4e66b0d095a5387809b047b27dd1d2c9c",
   "sourceContractInputs": [
     {
@@ -55,12 +55,24 @@
       "sha256": "dd1f15e67963534b47d83042baacb1984b707889ac672c0c549cde1ebeb96dca"
     },
     {
+      "path": "backend/src/rls-waves/session-a/productionRotationInventory.sql",
+      "sha256": "37c2c0d6d4b9cdbd1c60011fd47a9930622ac94ac8d62ae88a73f4717c42ed52"
+    },
+    {
+      "path": "backend/src/rls-waves/session-a/productionRotationInventoryRollback.sql",
+      "sha256": "a60a696db5aad8fc88c28794596d2f04e1ee5e99ccf9013d6b1e45e546467ead"
+    },
+    {
+      "path": "scripts/rls/lib/rotation-inventory-contract.mjs",
+      "sha256": "ba5204fd9b052a3d576fe72952b526d5d254184fa0060ed5daf3345d7bdfead4"
+    },
+    {
       "path": "scripts/rls/generate-full-rls-sql.mjs",
       "sha256": "abbde9d1583b1ccd4a63403e3770fd5bad1cb9616ee3bb611ebbb6434fc69c6a"
     },
     {
       "path": "scripts/rls/generate-clean-room-rls-sql.mjs",
-      "sha256": "d3720a79cc2a799dee8e49516db8763d2a7c9678c3d998df19b39d6251c7486f"
+      "sha256": "c2e7e7974610297de8c41cb196dfa62f710022a400e53347adae48281712584a"
     },
     {
       "path": "scripts/rls/verify-full-rls-package.mjs",
@@ -76,7 +88,7 @@
     },
     {
       "path": "scripts/rls/lib/clean-room-source-contract.mjs",
-      "sha256": "f621fff7569d5b71bca7980ed9a5c82d5c297156d237e9830903a67526c7ee0d"
+      "sha256": "4b457e5878b91325f620b881c78b27df67d2fac4b4961fae2ba567c99528155e"
     },
     {
       "path": "scripts/rls/lib/program-inventory.mjs",
@@ -92,7 +104,7 @@
     },
     {
       "path": "scripts/rls/lib/named-sql-function-contracts.mjs",
-      "sha256": "4b9422e6cc43fd28c11a3ea62e47879335253549434085cb3d47aa7ee7c62ef8"
+      "sha256": "083b1fbe5b868c185e0759669b3cdc07934d3d5ae2fc877f0fea0cf033e29863"
     },
     {
       "path": "scripts/rls/lib/restricted-owner-projection-contract.mjs",
@@ -196,7 +208,7 @@
     },
     {
       "path": "infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs",
-      "sha256": "f62c3f0a3d4a7241560f2190c420fdf6422a57623a092d2ed400269f919ef1df"
+      "sha256": "33d62ee11052a7b84e6e5c49c99fc1d8a63841a3dd93246ba0aa1f9ec9a00879"
     },
     {
       "path": "infra/aws/terraform/lambda/production-rls-approval-broker/ecs-task-definition-readback.mjs",
@@ -204,7 +216,7 @@
     },
     {
       "path": "scripts/aws/production-green-stage-b-contract.mjs",
-      "sha256": "0d2fcb8b6be823e0af127b4203bd83f9474abe382831dca4f9ea43370a9b43d9"
+      "sha256": "694eba610c3cf04976a194c6bb7fb3102c3b8d4553b4f7dde6ab2315e2599ddd"
     },
     {
       "path": "scripts/aws/create-production-green-stage-b-approval.mjs",
@@ -334,7 +346,7 @@
     "migrationOnly": 2,
     "certificationCandidateWorkflows": 14,
     "directPolicySlices": 18,
-    "generatedPolicies": 362,
+    "generatedPolicies": 371,
     "columnPrivilegeCells": 60,
     "prismaMigrations": 55,
     "prismaEnums": 58,
@@ -352,7 +364,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:22b2012433e319d59c678257f254f74859d9e3e2a1dd9861069309930fdb3b06",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:47c52f3bdbb1e5b4abdca677aeed3c3a85fe467996ec032bf37cae6f3298b374",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,

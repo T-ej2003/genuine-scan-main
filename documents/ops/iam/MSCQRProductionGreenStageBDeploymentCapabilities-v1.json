@@ -15639,6 +15639,30 @@
       "mutation": false
     },
     {
+      "id": "runtime-cloudtrail-lookupevents",
+      "phase": "runtime-activation-boundary",
+      "identity": "SERVICE_RUNTIME",
+      "executor": "lambda-or-ecs-role",
+      "sourceFile": "infra/aws/terraform/production-green-stage-b/main.tf",
+      "sourceFunction": "generated runtime IAM policy",
+      "action": "cloudtrail:LookupEvents",
+      "resources": [
+        "terraform-derived-runtime-resource"
+      ],
+      "context": {},
+      "classification": "SERVICE_RUNTIME_ACTION",
+      "probe": "structural",
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-b/main.tf",
+        "sid": "terraform-generated",
+        "livePolicyArn": "created-or-updated-by-stage-b",
+        "expectedVersion": "saved-plan",
+        "expectedPolicySha256": null
+      },
+      "required": false,
+      "mutation": true
+    },
+    {
       "id": "runtime-dynamodb-deleteitem",
       "phase": "runtime-activation-boundary",
       "identity": "SERVICE_RUNTIME",
@@ -15663,6 +15687,30 @@
       "mutation": true
     },
     {
+      "id": "runtime-dynamodb-getitem",
+      "phase": "runtime-activation-boundary",
+      "identity": "SERVICE_RUNTIME",
+      "executor": "lambda-or-ecs-role",
+      "sourceFile": "infra/aws/terraform/production-green-stage-b/main.tf",
+      "sourceFunction": "generated runtime IAM policy",
+      "action": "dynamodb:GetItem",
+      "resources": [
+        "terraform-derived-runtime-resource"
+      ],
+      "context": {},
+      "classification": "SERVICE_RUNTIME_ACTION",
+      "probe": "structural",
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-b/main.tf",
+        "sid": "terraform-generated",
+        "livePolicyArn": "created-or-updated-by-stage-b",
+        "expectedVersion": "saved-plan",
+        "expectedPolicySha256": null
+      },
+      "required": false,
+      "mutation": true
+    },
+    {
       "id": "runtime-dynamodb-putitem",
       "phase": "runtime-activation-boundary",
       "identity": "SERVICE_RUNTIME",
@@ -15670,6 +15718,30 @@
       "sourceFile": "infra/aws/terraform/production-green-stage-b/main.tf",
       "sourceFunction": "generated runtime IAM policy",
       "action": "dynamodb:PutItem",
+      "resources": [
+        "terraform-derived-runtime-resource"
+      ],
+      "context": {},
+      "classification": "SERVICE_RUNTIME_ACTION",
+      "probe": "structural",
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-b/main.tf",
+        "sid": "terraform-generated",
+        "livePolicyArn": "created-or-updated-by-stage-b",
+        "expectedVersion": "saved-plan",
+        "expectedPolicySha256": null
+      },
+      "required": false,
+      "mutation": true
+    },
+    {
+      "id": "runtime-dynamodb-transactwriteitems",
+      "phase": "runtime-activation-boundary",
+      "identity": "SERVICE_RUNTIME",
+      "executor": "lambda-or-ecs-role",
+      "sourceFile": "infra/aws/terraform/production-green-stage-b/main.tf",
+      "sourceFunction": "generated runtime IAM policy",
+      "action": "dynamodb:TransactWriteItems",
       "resources": [
         "terraform-derived-runtime-resource"
       ],
