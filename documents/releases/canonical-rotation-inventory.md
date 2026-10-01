@@ -89,3 +89,49 @@ Both new PostgreSQL tests reject non-loopback or unexpected fixture identities
 before SQL; the scanner exception applies only to this test's database cleanup.
 The source evaluator passed 4/4, guarded PostgreSQL18 proof passed 2/2, and the
 full source-security guardrail suite passed after these corrections.
+
+## Emergency absent-claim recovery (one preserved operation only)
+
+The original task `fa5ad8eb6aa9443cad6ec600bfa8e82c` has durable broker-issued
+RunTask/StopTask events and an uncaught inventory failure, but its replay row
+is absent. This branch never reconstructs that row. Existing row-based recovery
+continues to require its original identity, nonce and task.
+
+Immediately before the canonical prepare-overlap command, the independent
+checker signs a 15-minute attestation produced by:
+
+```sh
+node scripts/aws/prepare-absent-inventory-recovery.mjs --config /private/release/rotation-config.json
+```
+
+Use the existing inherited checker session for signing and the authenticated
+`mscqr-production-root` profile for read-only AWS collection. The producer
+requires clean protected-main source, exact current config, absent canonical
+state/fixture/readiness files, no rotation replay rows or recovery reservation,
+exact historical approval signature, complete RunTask history, and complete
+failed-task logs. It writes only a private sibling
+`inventory-absent-claim-evidence.json`; the config and its hash are unchanged.
+No MFA token is included in the evidence or command. An expired local attestation
+can be atomically replaced by rerunning this same producer: all absence checks
+run again before signing. Once the permanent recovery reservation exists, the
+producer refuses refresh; local evidence replacement never resets replay state.
+
+The normal prepare-overlap adapter reads this sibling, checks its exact config
+hash and state absence, and passes it to the broker. The broker independently
+verifies both KMS signatures, the retained original task definition, complete
+launch history and failed-task output. Unknown/successful/substituted outcomes
+fail closed. This is bounded to the exact original rotation, source, task,
+authorization version and AWS event identities, not a generic recovery mode.
+
+Before RunTask, one DynamoDB transaction checks predecessor absence, creates a
+permanent recovery reservation, and conditionally creates the successor claim.
+The reservation has **no TTL**, is independent of successor source SHA, and is
+never deleted by failure cleanup. Existing row-based recovery also atomically
+checks that reservation is absent, preventing a late predecessor restoration
+from authorizing a second successor. Concurrent, repeated or cross-source
+recovery attempts fail closed. If launch/reporting fails, inspect actual task
+and successor claim; never repeat the operation or delete its reservation.
+
+Post-deployment follow-up only: missing claim cause, PITR/backups, ECS Exec
+readiness, catalogue-probe compatibility, and recovery retention hardening.
+No Terraform state, SQL, RLS, IAM policy or inventory query changes are included.

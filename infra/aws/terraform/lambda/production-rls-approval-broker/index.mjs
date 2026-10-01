@@ -131,6 +131,81 @@ export function preDeploymentRecoveryTransaction({ table, predecessor, successor
       ConditionExpression: "launchState = :uncertain AND approvalNonce = :nonce AND operationIdentitySha256 = :identity AND taskArn = :task AND attribute_not_exists(successorOperationKey)",
       ExpressionAttributeValues: { ":recovered": { S: "failed-recovered" }, ":uncertain": { S: "launch-uncertain" }, ":nonce": { S: predecessor.row.approvalNonce }, ":identity": { S: predecessor.row.operationIdentitySha256 }, ":task": { S: predecessor.row.taskArn }, ":successor": { S: newKey }, ":evidence": { S: recoveryEvidenceSha256 } } } },
     { Put: { TableName: table, Item: { ...preDeploymentReplayItem(successor), predecessorOperationKey: { S: oldKey }, recoveryEvidenceSha256: { S: recoveryEvidenceSha256 } }, ConditionExpression: "attribute_not_exists(approvalMode)" } },
+    { ConditionCheck: { TableName: table, Key: { approvalMode: { S: `absent-inventory-recovery#${oldKey}` } }, ConditionExpression: "attribute_not_exists(approvalMode)" } },
+  ] };
+}
+
+// One emergency recovery identity, independently authenticated; never a replacement replay row.
+export const ABSENT_INVENTORY_PREDECESSOR = Object.freeze({
+  taskArn: "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/fa5ad8eb6aa9443cad6ec600bfa8e82c",
+  runTaskEventId: "59663555-3ade-490c-8880-b1ec8af0857a",
+  stopTaskEventId: "56033bd5-383f-4ed1-8655-fa67dcbe78d6",
+  approvalVersionId: "5af71a88c8f324cecd1b38422308c86f87ff6f9cd8300061130e8b98974eedf7",
+  configSha256: "74a3e281f707684629e3865ae657c88d2b124d7cec8080e855ca120244c79c5b",
+  startedAt: "2026-09-30T22:39:06Z",
+});
+const absentRecoveryFields = ["schemaVersion", "purpose", "sourceSha", "imageReleaseSha", "configSha256", "rotationId", "originalConfigSha256", "originalAuthorizationSha256", "taskArn", "runTaskEventId", "stopTaskEventId", "logEventsSha256", "successfulInventoryOutputAbsent", "rotationStateAbsent", "verifiedOverlapAbsent", "issuedAt", "expiresAt"];
+export function assertAbsentInventoryRecoveryPayload(payload, expected, now = new Date()) {
+  if (!exact(Object.keys(payload || {}).sort(), [...absentRecoveryFields].sort()) || payload.schemaVersion !== 1
+      || payload.purpose !== "recover-exact-absent-inventory-predecessor" || payload.sourceSha !== expected.sourceSha
+      || payload.imageReleaseSha !== expected.imageReleaseSha || payload.rotationId !== PRESERVED_INVENTORY_PREDECESSOR.rotationId
+      || payload.rotationId !== expected.rotationId || payload.sourceSha === PRESERVED_INVENTORY_PREDECESSOR.releaseSha
+      || !/^[a-f0-9]{40}$/.test(payload.sourceSha) || !/^[a-f0-9]{40}$/.test(payload.imageReleaseSha)
+      || !/^[a-f0-9]{64}$/.test(payload.configSha256 || "") || payload.configSha256 !== expected.configSha256
+      || !/^[a-f0-9]{64}$/.test(payload.originalAuthorizationSha256 || "") || !/^[a-f0-9]{64}$/.test(payload.logEventsSha256 || "")
+      || payload.originalConfigSha256 !== ABSENT_INVENTORY_PREDECESSOR.configSha256
+      || payload.taskArn !== ABSENT_INVENTORY_PREDECESSOR.taskArn || payload.runTaskEventId !== ABSENT_INVENTORY_PREDECESSOR.runTaskEventId
+      || payload.stopTaskEventId !== ABSENT_INVENTORY_PREDECESSOR.stopTaskEventId
+      || payload.successfulInventoryOutputAbsent !== true || payload.rotationStateAbsent !== true || payload.verifiedOverlapAbsent !== true
+      || !Number.isFinite(Date.parse(payload.issuedAt)) || !Number.isFinite(Date.parse(payload.expiresAt))
+      || Date.parse(payload.issuedAt) > now.getTime() || Date.parse(payload.expiresAt) <= now.getTime()
+      || Date.parse(payload.expiresAt) - Date.parse(payload.issuedAt) > 15 * 60 * 1000) throw new Error("Absent inventory recovery attestation is invalid.");
+  return payload;
+}
+export function assertIndependentFailedInventoryEvidence({ runEvents, stopEvents, logEvents, authorizationSha256, payload }) {
+  const original = PRESERVED_INVENTORY_PREDECESSOR, fixed = ABSENT_INVENTORY_PREDECESSOR;
+  const runs = runEvents.filter(event => event.requestParameters?.taskDefinition === original.taskDefinitionArn
+    || event.requestParameters?.tags?.some(tag => tag.key === "RotationId" && tag.value === original.rotationId)
+    || String(event.requestParameters?.taskDefinition || "").includes("predeployment-inventory"));
+  if (runs.length !== 1) throw new Error("Inventory successor launch exists or predecessor launch is ambiguous.");
+  const run = runs[0], stop = stopEvents.filter(event => event.requestParameters?.task === fixed.taskArn);
+  const issuer = event => event.userIdentity?.sessionContext?.sessionIssuer?.arn === STAGE_B.brokerRoleArn;
+  if (run.eventID !== fixed.runTaskEventId || run.eventSource !== "ecs.amazonaws.com" || run.eventName !== "RunTask"
+      || run.awsRegion !== STAGE_B.region || run.recipientAccountId !== STAGE_B.account || run.errorCode || !issuer(run)
+      || Date.parse(run.eventTime) !== Date.parse(fixed.startedAt) || run.requestParameters?.taskDefinition !== original.taskDefinitionArn || run.requestParameters?.cluster !== STAGE_B.clusterArn
+      || !exactTags(run.requestParameters?.tags, { MSCQRPreDeploymentInventory: "rotation-inventory", ReleaseSha: original.releaseSha, RotationId: original.rotationId })
+      || run.responseElements?.tasks?.length !== 1 || run.responseElements.tasks[0].taskArn !== fixed.taskArn || stop.length !== 1) throw new Error("Independent inventory launch is not authenticated.");
+  const event = stop[0], task = event.responseElements?.task;
+  if (event.eventID !== fixed.stopTaskEventId || event.eventSource !== "ecs.amazonaws.com" || event.eventName !== "StopTask"
+      || event.awsRegion !== STAGE_B.region || event.recipientAccountId !== STAGE_B.account || event.errorCode || !issuer(event)
+      || event.requestParameters?.cluster !== STAGE_B.clusterArn || task?.taskArn !== fixed.taskArn || task.taskDefinitionArn !== original.taskDefinitionArn
+      || task.clusterArn !== STAGE_B.clusterArn || task.lastStatus !== "STOPPED" || task.stopCode !== "EssentialContainerExited"
+      || (task.containers?.length && (task.containers.length !== 1 || task.containers[0].name !== "inventory" || task.containers[0].exitCode !== 1))
+      || Date.parse(event.eventTime) < Date.parse(task.stoppedAt) || !Number.isFinite(Date.parse(task.stoppedAt))
+      || Date.parse(event.eventTime) - Date.parse(task.stoppedAt) > 60000) throw new Error("Independent inventory failed outcome is not authenticated.");
+  if (!Array.isArray(logEvents) || !logEvents.some(({ message }) => message === "Error: read-only rotation inventory query failed")
+      || !logEvents.some(({ message }) => typeof message === "string" && message.includes("at executeProductionRotationInventory (file:///app/scripts/production-rotation-state-inventory.mjs:"))
+      || logEvents.some(({ message }) => typeof message !== "string" || message.trim().startsWith("{"))) throw new Error("Independent inventory output is successful or unknown.");
+  const logEventsSha256 = crypto.createHash("sha256").update(canonicalJson(logEvents)).digest("hex");
+  if (payload && (payload.logEventsSha256 !== logEventsSha256 || payload.originalAuthorizationSha256 !== authorizationSha256)) throw new Error("Independent inventory evidence hash differs.");
+  return { authorizationSha256, logEventsSha256, runTaskEventId: run.eventID, stopTaskEventId: event.eventID, taskArn: fixed.taskArn };
+}
+export async function authenticateAbsentInventoryRecovery({ evidence, expected, originalApproval, runEvents, stopEvents, logEvents, verifySignature, now = new Date() }) {
+  if (!exact(Object.keys(evidence || {}).sort(), ["payload", "signatureBase64"]) || !/^[A-Za-z0-9+/]+={0,2}$/.test(evidence.signatureBase64 || "")) throw new Error("Absent inventory recovery envelope is invalid.");
+  const payload = assertAbsentInventoryRecoveryPayload(evidence.payload, expected, now);
+  if (!await verifySignature({ keyId: STAGE_B.approvalKmsKeyArn, message: Buffer.from(canonicalJson(payload)), signature: Buffer.from(evidence.signatureBase64, "base64") })) throw new Error("Absent inventory recovery signature is invalid.");
+  const historical = await validateStageBApproval(originalApproval, { releaseSha: PRESERVED_INVENTORY_PREDECESSOR.releaseSha, approvalId: PRESERVED_INVENTORY_PREDECESSOR.approvalId, images: { backendImageDigest: PRESERVED_INVENTORY_PREDECESSOR.imageDigest } }, { now: new Date(ABSENT_INVENTORY_PREDECESSOR.startedAt), verifySignature });
+  return assertIndependentFailedInventoryEvidence({ runEvents, stopEvents, logEvents, authorizationSha256: historical.approvalContractSha256, payload });
+}
+export function absentInventoryRecoveryTransaction({ table, successor, evidence, expected, now = new Date() }) {
+  const payload = assertAbsentInventoryRecoveryPayload(evidence.payload, expected, now), originalKey = preDeploymentOperationKey(PRESERVED_INVENTORY_PREDECESSOR);
+  if (successor.releaseSha !== payload.sourceSha || successor.imageReleaseSha !== payload.imageReleaseSha || successor.rotationId !== payload.rotationId) throw new Error("Absent inventory successor differs from its authorization.");
+  const evidenceSha256 = crypto.createHash("sha256").update(canonicalJson(evidence)).digest("hex");
+  return { TransactItems: [
+    { ConditionCheck: { TableName: table, Key: { approvalMode: { S: originalKey } }, ConditionExpression: "attribute_not_exists(approvalMode)" } },
+    // No TTL: this reservation survives authorization expiry and source advances.
+    { Put: { TableName: table, Item: { approvalMode: { S: `absent-inventory-recovery#${originalKey}` }, successorOperationKey: { S: successor.operationKey }, recoveryEvidenceSha256: { S: evidenceSha256 } }, ConditionExpression: "attribute_not_exists(approvalMode)" } },
+    { Put: { TableName: table, Item: { ...preDeploymentReplayItem(successor), predecessorOperationKey: { S: originalKey }, recoveryEvidenceSha256: { S: evidenceSha256 } }, ConditionExpression: "attribute_not_exists(approvalMode)" } },
   ] };
 }
 
@@ -275,7 +350,7 @@ function assertExactInventoryTaskDefinition({ definition, taskDefinitionArn, ima
   return true;
 }
 
-export function createPreDeploymentInventoryHandler({ config, executingBrokerVersion, readApproval, verifySignature, claimPreDeploymentOperation = async () => {}, releasePreDeploymentOperation = async () => {}, markPreDeploymentLaunchUncertain = async () => {}, recordPreDeploymentTaskStarted = async () => {}, recordPreDeploymentCompleted = async () => {}, readPreDeploymentOperation, recoverPreDeploymentOperation, lookupInventoryStopEvents, runTask, describeTaskDefinition, describeTasks, describeLogStreams, getLogEvents, stopTask, now = () => new Date(), monotonicNow = () => performance.now(), sleep = async (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)) }) {
+export function createPreDeploymentInventoryHandler({ config, executingBrokerVersion, readApproval, verifySignature, claimPreDeploymentOperation = async () => {}, releasePreDeploymentOperation = async () => {}, markPreDeploymentLaunchUncertain = async () => {}, recordPreDeploymentTaskStarted = async () => {}, recordPreDeploymentCompleted = async () => {}, readPreDeploymentOperation, recoverPreDeploymentOperation, recoverAbsentInventoryOperation, readHistoricalApproval, lookupInventoryRunEvents, lookupInventoryStopEvents, runTask, describeTaskDefinition, describeTasks, describeLogStreams, getLogEvents, stopTask, now = () => new Date(), monotonicNow = () => performance.now(), sleep = async (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)) }) {
   validatePreDeploymentInventoryConfiguration(config);
   const brokerVersion = assertStageBBrokerRuntimeVersion(executingBrokerVersion);
   return async (event, context = {}) => {
@@ -304,7 +379,7 @@ export function createPreDeploymentInventoryHandler({ config, executingBrokerVer
         clearTimeout(timer);
       }
     };
-    if (!event || typeof event !== "object" || Object.keys(event).filter((key) => key !== "failedPredecessor").sort().join(",") !== "approvalId,imageReleaseSha,operation,rotationId,sourceSha,taskDefinitionArn" || event.operation !== PREDEPLOYMENT_INVENTORY_OPERATION || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{5,127}$/.test(event.approvalId || "") || !/^[A-Za-z0-9._-]{8,128}$/.test(event.rotationId || "") || !/^[a-f0-9]{40}$/.test(event.sourceSha || "") || !/^[a-f0-9]{40}$/.test(event.imageReleaseSha || "") || !inventoryTaskArnPattern.test(event.taskDefinitionArn || "")) throw new Error("Pre-deployment inventory broker request is outside the reviewed contract.");
+    if (!event || typeof event !== "object" || Object.keys(event).filter((key) => !["failedPredecessor", "absentClaimRecovery"].includes(key)).sort().join(",") !== "approvalId,imageReleaseSha,operation,rotationId,sourceSha,taskDefinitionArn" || event.operation !== PREDEPLOYMENT_INVENTORY_OPERATION || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{5,127}$/.test(event.approvalId || "") || !/^[A-Za-z0-9._-]{8,128}$/.test(event.rotationId || "") || !/^[a-f0-9]{40}$/.test(event.sourceSha || "") || !/^[a-f0-9]{40}$/.test(event.imageReleaseSha || "") || !inventoryTaskArnPattern.test(event.taskDefinitionArn || "")) throw new Error("Pre-deployment inventory broker request is outside the reviewed contract.");
     const approval = await runWithinDeadline("approval authorization", async () => validateStageBApproval(await readApproval(config.approvalSecretArn), { ...config.approvalExpected, approvalId: event.approvalId, brokerVersion }, { now: now(), verifySignature }), operationDeadlineMs);
     if (approval.approval.releaseSha !== event.sourceSha || approval.approval.backendImageDigest !== config.inventoryImageDigest || event.imageReleaseSha !== config.inventoryImageReleaseSha) throw new Error("Pre-deployment inventory request is not bound to the signed release/image.");
     const definitionResponse = await runWithinDeadline("task-definition authorization", () => describeTaskDefinition(event.taskDefinitionArn), operationDeadlineMs);
@@ -320,6 +395,28 @@ export function createPreDeploymentInventoryHandler({ config, executingBrokerVer
       const identity = createPreDeploymentOperationIdentity(event.failedPredecessor);
       if (!exact(identity, PRESERVED_INVENTORY_PREDECESSOR) || !exact(event.failedPredecessor, identity) || identity.rotationId !== event.rotationId || identity.releaseSha === event.sourceSha) throw new Error("Inventory predecessor identity differs from the reviewed successor.");
       const row = await runWithinDeadline("predecessor claim readback", () => readPreDeploymentOperation(preDeploymentOperationKey(identity)), operationDeadlineMs);
+      if (row === null && event.absentClaimRecovery) {
+        if (![recoverAbsentInventoryOperation, readHistoricalApproval, lookupInventoryRunEvents, lookupInventoryStopEvents].every(value => typeof value === "function")) throw new Error("Absent inventory recovery adapters are required.");
+        const old = await runWithinDeadline("absent predecessor task definition", () => describeTaskDefinition(identity.taskDefinitionArn), operationDeadlineMs);
+        if (!exactTags(old?.tags, inventoryTaskDefinitionTags)) throw new Error("Absent predecessor task tags differ.");
+        assertExactInventoryTaskDefinition({ definition: old.taskDefinition, taskDefinitionArn: identity.taskDefinitionArn, imageReleaseSha: identity.imageReleaseSha, config: { ...config, inventoryImageDigest: identity.imageDigest }, legacyRecovery: true });
+        const logEvents = []; let token;
+        for (let page = 0; ; page++) {
+          if (page >= 20) throw new Error("Absent inventory logs are incomplete.");
+          const logs = await runWithinDeadline("absent predecessor output", () => getLogEvents({ logGroupName: config.inventoryLogGroupName, logStreamName: `predeployment-inventory/inventory/${ABSENT_INVENTORY_PREDECESSOR.taskArn.split("/").pop()}`, startFromHead: true, ...(token ? { nextToken: token } : {}) }), operationDeadlineMs);
+          logEvents.push(...(logs.events || []));
+          if (Buffer.byteLength(JSON.stringify(logEvents)) > 128 * 1024) throw new Error("Absent inventory logs exceed their bound.");
+          if (!logs.nextForwardToken || logs.nextForwardToken === token) break;
+          token = logs.nextForwardToken;
+        }
+        const expected = { sourceSha: event.sourceSha, imageReleaseSha: event.imageReleaseSha, rotationId: event.rotationId, configSha256: event.absentClaimRecovery.payload?.configSha256 };
+        const originalApproval = await runWithinDeadline("original inventory authorization", readHistoricalApproval, operationDeadlineMs);
+        const runEvents = await runWithinDeadline("inventory successor absence", () => lookupInventoryRunEvents({ endTime: now() }), operationDeadlineMs);
+        const stopEvents = await runWithinDeadline("absent predecessor outcome", () => lookupInventoryStopEvents({ taskArn: ABSENT_INVENTORY_PREDECESSOR.taskArn, expiresAt: 1790812875 }), operationDeadlineMs);
+        await runWithinDeadline("absent inventory evidence authentication", () => authenticateAbsentInventoryRecovery({ evidence: event.absentClaimRecovery, expected, originalApproval, runEvents, stopEvents, logEvents, verifySignature, now: now() }), operationDeadlineMs);
+        await runWithinDeadline("atomic absent inventory recovery", () => recoverAbsentInventoryOperation({ successor: replay, evidence: event.absentClaimRecovery, expected, now: now() }), operationDeadlineMs);
+      } else {
+        if (event.absentClaimRecovery) throw new Error("Absent inventory recovery requires an absent predecessor.");
       const proof = assertPreDeploymentReplayRow(row, identity);
       if (proof.launchState !== "launch-uncertain" || !proof.taskArn) throw new Error("Inventory predecessor is not recoverable.");
       const oldDefinition = await runWithinDeadline("predecessor task definition", () => describeTaskDefinition(identity.taskDefinitionArn), operationDeadlineMs);
@@ -348,7 +445,9 @@ export function createPreDeploymentInventoryHandler({ config, executingBrokerVer
       }
       const recoveryEvidenceSha256 = crypto.createHash("sha256").update(canonicalJson({ failure, successorIdentitySha256: preDeploymentOperationIdentitySha256(operationIdentity), task: observed.tasks[0], logEvents })).digest("hex");
       await runWithinDeadline("atomic inventory forward recovery", () => recoverPreDeploymentOperation({ predecessor: { row, identity }, successor: replay, recoveryEvidenceSha256 }), operationDeadlineMs);
+      }
     } else {
+      if (event.absentClaimRecovery) throw new Error("Absent recovery requires the exact predecessor binding.");
       await runWithinDeadline("replay claim", () => claimPreDeploymentOperation(replay), operationDeadlineMs);
     }
     const networkConfiguration = { awsvpcConfiguration: { subnets: [...config.inventoryPrivateSubnetIds].sort(), securityGroups: [...config.inventorySecurityGroupIds].sort(), assignPublicIp: "DISABLED" } };
@@ -518,9 +617,27 @@ export async function handler(event, context) {
     },
     readPreDeploymentOperation: async (key) => {
       const response = await dynamo.send(new GetItemCommand({ TableName: config.replayTable, Key: { approvalMode: { S: key } }, ConsistentRead: true }));
-      if (!response.Item) throw new Error("Inventory predecessor replay claim is absent.");
+      if (!response.Item) return null;
       return Object.fromEntries(Object.entries(response.Item).map(([name, value]) => [name, value.S ?? (value.N !== undefined ? Number(value.N) : value.SS)]));
     },
+    readHistoricalApproval: async () => {
+      const response = await secrets.send(new GetSecretValueCommand({ SecretId: config.approvalSecretArn, VersionId: ABSENT_INVENTORY_PREDECESSOR.approvalVersionId }));
+      if (!response.SecretString) throw new Error("Original inventory approval is absent.");
+      return response.SecretString;
+    },
+    lookupInventoryRunEvents: async ({ endTime }) => {
+      const events = []; let NextToken;
+      for (let page = 0; ; page++) {
+        if (page >= 100) throw new Error("Inventory launch history is incomplete.");
+        const response = await cloudTrail.send(new LookupEventsCommand({ LookupAttributes: [{ AttributeKey: "EventName", AttributeValue: "RunTask" }], StartTime: new Date("2026-09-30T22:38:00Z"), EndTime: endTime, MaxResults: 50, ...(NextToken ? { NextToken } : {}) }));
+        for (const entry of response.Events || []) events.push(JSON.parse(entry.CloudTrailEvent));
+        if (!response.NextToken) break;
+        if (response.NextToken === NextToken) throw new Error("Inventory launch pagination stalled.");
+        NextToken = response.NextToken;
+      }
+      return events;
+    },
+    recoverAbsentInventoryOperation: recovery => dynamo.send(new TransactWriteItemsCommand(absentInventoryRecoveryTransaction({ table: config.replayTable, ...recovery }))),
     recoverPreDeploymentOperation: (recovery) => dynamo.send(new TransactWriteItemsCommand(preDeploymentRecoveryTransaction({ table: config.replayTable, ...recovery }))),
     claimPreDeploymentOperation: (replay) => dynamo.send(new PutItemCommand({
       TableName: config.replayTable,

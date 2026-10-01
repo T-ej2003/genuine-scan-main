@@ -647,3 +647,126 @@ for (const launchFails of [false, true]) test(`canonical failed-predecessor reco
   await assert.rejects(() => handler(event), /not recoverable/);
   assert.equal(launches, 1); assert.equal(recoveries, 1);
 });
+
+// Upgrade replay uses the real handler and authentication validators; only AWS I/O is replaced.
+test("absent predecessor authenticates signed historical evidence and claims one durable successor", async () => {
+  const { ABSENT_INVENTORY_PREDECESSOR: fixed, absentInventoryRecoveryTransaction, assertAbsentInventoryRecoveryPayload, assertIndependentFailedInventoryEvidence, authenticateAbsentInventoryRecovery } = await import("../../infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs");
+  const { PRESERVED_INVENTORY_PREDECESSOR: old, canonicalJson, stageBApprovalSha256 } = await import("../aws/production-green-stage-b-contract.mjs");
+  const { generateKeyPairSync, sign, verify, constants } = await import("node:crypto");
+  const keys = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const signature = value => sign("sha256", Buffer.from(canonicalJson(value)), { key: keys.privateKey, padding: constants.RSA_PKCS1_PSS_PADDING, saltLength: 32 }).toString("base64");
+  const verifySignature = async ({ message, signature: bytes }) => verify("sha256", message, { key: keys.publicKey, padding: constants.RSA_PKCS1_PSS_PADDING, saltLength: 32 }, bytes);
+  const time = new Date("2026-10-01T10:00:00Z");
+  const historical = { ...brokerApproval, releaseSha: old.releaseSha, approvalId: old.approvalId, backendImageDigest: old.imageDigest, issuedAt: "2026-09-30T22:01:15.574Z", expiresAt: "2026-10-01T00:01:15.574Z" };
+  const { canonicalStageBApproval } = await import("../aws/production-green-stage-b-contract.mjs");
+  historical.signatureBase64 = sign("sha256", Buffer.from(canonicalStageBApproval(historical)), { key: keys.privateKey, padding: constants.RSA_PKCS1_PSS_PADDING, saltLength: 32 }).toString("base64");
+  const tags = [{ key: "MSCQRPreDeploymentInventory", value: "rotation-inventory" }, { key: "ReleaseSha", value: old.releaseSha }, { key: "RotationId", value: old.rotationId }];
+  const common = { eventSource: "ecs.amazonaws.com", awsRegion: STAGE_B.region, recipientAccountId: STAGE_B.account, userIdentity: { sessionContext: { sessionIssuer: { arn: STAGE_B.brokerRoleArn } } } };
+  const runEvents = [{ ...common, eventName: "RunTask", eventID: fixed.runTaskEventId, eventTime: fixed.startedAt, requestParameters: { cluster: STAGE_B.clusterArn, taskDefinition: old.taskDefinitionArn, tags }, responseElements: { tasks: [{ taskArn: fixed.taskArn }] } }];
+  const stopEvents = [{ ...common, eventName: "StopTask", eventID: fixed.stopTaskEventId, eventTime: "2026-09-30T22:40:08Z", requestParameters: { cluster: STAGE_B.clusterArn, task: fixed.taskArn }, responseElements: { task: { taskArn: fixed.taskArn, taskDefinitionArn: old.taskDefinitionArn, clusterArn: STAGE_B.clusterArn, lastStatus: "STOPPED", stopCode: "EssentialContainerExited", stoppedAt: "2026-09-30T22:40:06Z" } } }];
+  const logEvents = [{ message: "Error: read-only rotation inventory query failed" }, { message: "    at executeProductionRotationInventory (file:///app/scripts/production-rotation-state-inventory.mjs:30:34)" }];
+  const payload = { schemaVersion: 1, purpose: "recover-exact-absent-inventory-predecessor", sourceSha, imageReleaseSha, configSha256: "f".repeat(64), rotationId: old.rotationId, originalConfigSha256: fixed.configSha256, originalAuthorizationSha256: stageBApprovalSha256(historical), taskArn: fixed.taskArn, runTaskEventId: fixed.runTaskEventId, stopTaskEventId: fixed.stopTaskEventId, logEventsSha256: createHash("sha256").update(canonicalJson(logEvents)).digest("hex"), successfulInventoryOutputAbsent: true, rotationStateAbsent: true, verifiedOverlapAbsent: true, issuedAt: time.toISOString(), expiresAt: "2026-10-01T10:10:00Z" };
+  const expected = { sourceSha, imageReleaseSha, configSha256: payload.configSha256, rotationId: old.rotationId };
+  const evidence = { payload, signatureBase64: signature(payload) };
+  const auth = overrides => authenticateAbsentInventoryRecovery({ evidence, expected, originalApproval: historical, runEvents, stopEvents, logEvents, verifySignature, now: time, ...overrides });
+  await auth();
+  for (const field of ["rotationStateAbsent", "verifiedOverlapAbsent", "successfulInventoryOutputAbsent"]) {
+    const changed = { ...payload, [field]: false };
+    await assert.rejects(auth({ evidence: { payload: changed, signatureBase64: signature(changed) } }));
+  }
+  for (const field of ["sourceSha", "imageReleaseSha", "configSha256", "rotationId", "taskArn", "originalConfigSha256"]) assert.throws(() => assertAbsentInventoryRecoveryPayload({ ...payload, [field]: "substitution" }, expected, time));
+  await assert.rejects(auth({ evidence: { ...evidence, signatureBase64: "AA==" } }));
+  await assert.rejects(auth({ originalApproval: { ...historical, backendImageDigest: image } }));
+  await assert.rejects(auth({ runEvents: [...runEvents, { ...runEvents[0], eventID: "successor" }] }));
+  await assert.rejects(auth({ stopEvents: [] }));
+  await assert.rejects(auth({ stopEvents: [{ ...stopEvents[0], responseElements: { task: { ...stopEvents[0].responseElements.task, containers: [{ name: "inventory", exitCode: 0 }] } } }] }));
+  await assert.rejects(auth({ stopEvents: [{ ...stopEvents[0], responseElements: { task: { ...stopEvents[0].responseElements.task, stopCode: "UserInitiated" } } }] }));
+  await assert.rejects(auth({ logEvents: [...logEvents, { message: '{"inventory":"success"}' }] }));
+  assert.throws(() => assertIndependentFailedInventoryEvidence({ runEvents: [], stopEvents, logEvents, authorizationSha256: payload.originalAuthorizationSha256 }));
+  const oldDefinition = structuredClone(brokerDefinition()); oldDefinition.containerDefinitions[0].image = old.imageDigest; oldDefinition.taskDefinitionArn = old.taskDefinitionArn;
+  for (const binding of oldDefinition.containerDefinitions[0].environment) {
+    if (binding.name === "RELEASE_GIT_SHA") binding.value = old.imageReleaseSha;
+    if (binding.name === "ROTATION_INVENTORY_OPERATION") { binding.name = "ROTATION_INVENTORY_RLS_ROLE"; binding.value = "mscqr_prod_rls_read"; }
+  }
+  const currentApproval = { ...brokerApproval, issuedAt: "2026-10-01T09:55:00Z", expiresAt: "2026-10-01T11:00:00Z" };
+  currentApproval.signatureBase64 = sign("sha256", Buffer.from(canonicalStageBApproval(currentApproval)), { key: keys.privateKey, padding: constants.RSA_PKCS1_PSS_PADDING, saltLength: 32 }).toString("base64");
+  const store = new Map(); let launches = 0;
+  const apply = tx => {
+    // An atomic DynamoDB condition check is simulated as one synchronous commit.
+    for (const action of tx.TransactItems) {
+      const value = action.ConditionCheck || action.Put;
+      const key = (value.Key || value.Item).approvalMode.S;
+      if (store.has(key)) throw new Error("ConditionalCheckFailed");
+    }
+    for (const action of tx.TransactItems) if (action.Put) store.set(action.Put.Item.approvalMode.S, action.Put.Item);
+  };
+  const event = { approvalId: currentApproval.approvalId, operation: "production-predeployment-rotation-inventory", sourceSha, imageReleaseSha, rotationId: old.rotationId, taskDefinitionArn: brokerTaskDefinitionArn, failedPredecessor: old, absentClaimRecovery: evidence };
+  const handler = createPreDeploymentInventoryHandler({ config: brokerConfig, executingBrokerVersion: "1", now: () => time, readApproval: async () => currentApproval, verifySignature,
+    readPreDeploymentOperation: async () => null, readHistoricalApproval: async () => historical, lookupInventoryRunEvents: async () => runEvents, lookupInventoryStopEvents: async () => stopEvents,
+    describeTaskDefinition: async arn => ({ taskDefinition: arn === old.taskDefinitionArn ? oldDefinition : brokerDefinition(), tags: brokerTags }),
+    getLogEvents: async () => ({ events: logEvents }), recoverAbsentInventoryOperation: async input => apply(absentInventoryRecoveryTransaction({ table: STAGE_B.replayTable, ...input })), recoverPreDeploymentOperation: async () => { throw new Error("must not use normal recovery"); },
+    runTask: async () => { launches++; throw new Error("mutation boundary deliberately stopped"); }, stopTask: async () => {}, markPreDeploymentLaunchUncertain: async () => {},
+  });
+  const results = await Promise.allSettled([handler(event), handler(event)]);
+  assert.equal(results.filter(result => result.status === "rejected").length, 2); assert.equal(launches, 1);
+  assert.equal([...store.keys()].some(key => key.startsWith("absent-inventory-recovery#")), true);
+  const reservation = [...store.values()].find(item => item.approvalMode.S.startsWith("absent-inventory-recovery#")); assert.equal(reservation.expiresAt, undefined);
+  const oldKey = preDeploymentOperationKey(old); assert.equal(store.has(oldKey), false);
+  await assert.rejects(handler(event)); assert.equal(launches, 1);
+  store.clear(); store.set(oldKey, {}); await assert.rejects(handler(event)); assert.equal(launches, 1);
+  store.clear(); store.set(preDeploymentOperationKey(createPreDeploymentOperationIdentity({ approvalId: event.approvalId, releaseSha: sourceSha, imageReleaseSha, rotationId: old.rotationId, taskDefinitionArn: brokerTaskDefinitionArn, imageDigest: image })), {}); await assert.rejects(handler(event)); assert.equal(launches, 1);
+});
+
+test("canonical absent-claim producer serializes a config-bound proof consumed by the real adapter", async () => {
+  const fs = await import("node:fs"), os = await import("node:os"), path = await import("node:path");
+  const { execFileSync } = await import("node:child_process");
+  const { generateKeyPairSync, sign, verify, constants } = await import("node:crypto");
+  const { prepareAbsentInventoryRecovery } = await import("../aws/prepare-absent-inventory-recovery.mjs");
+  const { PRESERVED_INVENTORY_PREDECESSOR: old, canonicalStageBApproval, canonicalJson } = await import("../aws/production-green-stage-b-contract.mjs");
+  const { ABSENT_INVENTORY_PREDECESSOR: fixed } = await import("../../infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-absent-producer-test-")); fs.chmodSync(directory, 0o700);
+  const repository = path.join(directory, "repo"), evidenceDirectory = path.join(directory, "evidence");fs.mkdirSync(repository);fs.mkdirSync(evidenceDirectory, { mode: 0o700 });
+  const previous = process.cwd(), keys = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const rsaSign = message => sign("sha256", message, { key: keys.privateKey, padding: constants.RSA_PKCS1_PSS_PADDING, saltLength: 32 }).toString("base64");
+  try {
+    execFileSync("git", ["init", "-q"], { cwd: repository });
+    execFileSync("git", ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--allow-empty", "-qm", "source fixture"], { cwd: repository });
+    const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repository, encoding: "utf8" }).trim();execFileSync("git", ["update-ref", "refs/remotes/origin/main", head], { cwd: repository });
+    process.chdir(repository);
+    const cfg = { ...config, sourceSha: head, imageReleaseSha, rotationId: old.rotationId, inventoryFailedPredecessor: old, inventoryTaskDefinitionArn: brokerTaskDefinitionArn,
+      rotationStateFile: path.join(evidenceDirectory, "rotation-state.json"), rotationFixtureFile: path.join(evidenceDirectory, "rotation-fixture.json"), overlapRuntimeProofFile: path.join(evidenceDirectory, "overlap-runtime-proof.json"), readinessEvidenceFile: path.join(evidenceDirectory, "readiness.json") };
+    const configPath = path.join(evidenceDirectory, "rotation-config.json"), configBytes = Buffer.from(`${JSON.stringify(cfg)}\n`);fs.writeFileSync(configPath, configBytes, { mode: 0o600 });
+    const historical = { ...brokerApproval, releaseSha: old.releaseSha, approvalId: old.approvalId, backendImageDigest: old.imageDigest, issuedAt: "2026-09-30T22:01:15.574Z", expiresAt: "2026-10-01T00:01:15.574Z" };historical.signatureBase64 = rsaSign(Buffer.from(canonicalStageBApproval(historical)));
+    const common = { eventSource: "ecs.amazonaws.com", awsRegion: STAGE_B.region, recipientAccountId: STAGE_B.account, userIdentity: { sessionContext: { sessionIssuer: { arn: STAGE_B.brokerRoleArn } } } };
+    const launch = { ...common, eventName: "RunTask", eventID: fixed.runTaskEventId, eventTime: fixed.startedAt, requestParameters: { cluster: STAGE_B.clusterArn, taskDefinition: old.taskDefinitionArn, tags: [{ key: "MSCQRPreDeploymentInventory", value: "rotation-inventory" }, { key: "ReleaseSha", value: old.releaseSha }, { key: "RotationId", value: old.rotationId }] }, responseElements: { tasks: [{ taskArn: fixed.taskArn }] } };
+    const stop = { ...common, eventName: "StopTask", eventID: fixed.stopTaskEventId, eventTime: "2026-09-30T22:40:08Z", requestParameters: { task: fixed.taskArn, cluster: STAGE_B.clusterArn }, responseElements: { task: { taskArn: fixed.taskArn, taskDefinitionArn: old.taskDefinitionArn, clusterArn: STAGE_B.clusterArn, lastStatus: "STOPPED", stopCode: "EssentialContainerExited", stoppedAt: "2026-09-30T22:40:06Z" } } };
+    let rows = [], successorLaunch = false;
+    const runRead = args => {
+      let value;
+      if (args[0] === "sts") value = { Arn: `arn:aws:iam::${STAGE_B.account}:root` };
+      else if (args[0] === "dynamodb") value = args[1] === "get-item" ? {} : { Items: rows };
+      else if (args[0] === "cloudtrail") value = { Events: (args.join().includes("AttributeValue=RunTask") ? [launch, ...(successorLaunch ? [launch] : [])] : [stop]).map(event => ({ CloudTrailEvent: JSON.stringify(event) })) };
+      else if (args[0] === "logs") value = { events: [{ message: "Error: read-only rotation inventory query failed" }, { message: "at executeProductionRotationInventory (file:///app/scripts/production-rotation-state-inventory.mjs:30:34)" }] };
+      else if (args[0] === "secretsmanager") value = { SecretString: JSON.stringify(historical) };
+      else if (args[0] === "kms") value = { SignatureValid: verify("sha256", fs.readFileSync(args[args.indexOf("--message") + 1].slice(8)), { key: keys.publicKey, padding: constants.RSA_PKCS1_PSS_PADDING, saltLength: 32 }, Buffer.from(args[args.indexOf("--signature") + 1], "base64")) };
+      else throw new Error("unexpected read");return JSON.stringify(value);
+    };
+    const runSign = args => JSON.stringify(args[0] === "sts" ? { Arn: `arn:aws:sts::${STAGE_B.account}:assumed-role/mscqr-production-rls-independent-checker/checker` } : { Signature: rsaSign(fs.readFileSync(args[args.indexOf("--message") + 1].slice(8))) });
+    const run = () => prepareAbsentInventoryRecovery({ configPath, runRead, runSign, now: new Date("2026-10-01T10:00:00Z") });
+    fs.writeFileSync(cfg.rotationStateFile, "{}", { mode: 0o600 });await assert.rejects(run());fs.unlinkSync(cfg.rotationStateFile);
+    rows = [{}];await assert.rejects(run());rows = [];successorLaunch = true;await assert.rejects(run());successorLaunch = false;
+    const produced = await run();assert.deepEqual(fs.readFileSync(configPath), configBytes);assert.equal(fs.statSync(produced.filePath).mode & 0o777, 0o600);
+    // Local evidence may expire before claiming. Refresh repeats every absence check;
+    // the permanent production reservation still prohibits a second recovery.
+    await run(); rows = [{ approvalMode: { S: "permanent-recovery-reservation" } }];await assert.rejects(run());rows = [];
+    const certificate = JSON.parse(fs.readFileSync(produced.filePath));assert.equal(certificate.payload.configSha256, createHash("sha256").update(configBytes).digest("hex"));
+    let received;
+    const adapter = createProductionPreDeploymentInventoryAdapter({ sourceSha: head, imageReleaseSha, imageDigest: image, config: cfg, runtimeConfigSha256: produced.configSha256, run: args => {
+      if (args[0] === "ecs") return JSON.stringify({ taskDefinition: brokerDefinition(), tags: brokerTags });
+      if (args[0] === "lambda") { received = JSON.parse(args[args.indexOf("--payload") + 1]);fs.writeFileSync(args[args.indexOf("--payload") + 2], JSON.stringify({ status: "completed", sourceSha: head, rotationId: old.rotationId, taskDefinitionArn: brokerTaskDefinitionArn, taskArn: brokerTaskArn, inventory }));return JSON.stringify({ StatusCode: 200 }); }
+      throw new Error("unexpected adapter operation");
+    } });
+    await adapter.run({ rotationId: old.rotationId });assert.deepEqual(received.absentClaimRecovery, certificate);
+    fs.writeFileSync(cfg.readinessEvidenceFile, "{}", { mode: 0o600 });await assert.rejects(adapter.run({ rotationId: old.rotationId }));
+  } finally { process.chdir(previous);fs.rmSync(directory, { recursive: true, force: true }); }
+});

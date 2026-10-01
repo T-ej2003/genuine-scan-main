@@ -14,7 +14,8 @@ test("exact preserved launch-uncertain row authenticates and creates an atomic f
   assert.equal(assertPreDeploymentReplayRow(row, identity).launchState, "launch-uncertain");
   const proof = assertFailedPreDeploymentPredecessor({ row, identity, task, logEvents: logs }); assert.equal(proof.taskArn, row.taskArn);
   const tx = preDeploymentRecoveryTransaction({ table: "reviewed-replay-table", predecessor: { row, identity }, successor, recoveryEvidenceSha256: "b".repeat(64) });
-  assert.equal(tx.TransactItems.length, 2);
+  assert.equal(tx.TransactItems.length, 3);
+  assert.match(tx.TransactItems[2].ConditionCheck.Key.approvalMode.S, /^absent-inventory-recovery#/);
   assert.match(tx.TransactItems[0].Update.ConditionExpression, /attribute_not_exists\(successorOperationKey\)/);
   assert.equal(tx.TransactItems[1].Put.ConditionExpression, "attribute_not_exists(approvalMode)");
   assert.equal(tx.TransactItems[1].Put.Item.predecessorOperationKey.S, row.approvalMode);
