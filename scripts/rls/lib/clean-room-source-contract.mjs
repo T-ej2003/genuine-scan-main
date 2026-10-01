@@ -70,6 +70,7 @@ export const cleanRoomSourcePaths = [...new Set([
   "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
   "backend/src/rls-waves/session-b/b03/b03OutboxRollback.sql",
   "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+  "backend/src/services/auditLogOutboxService.ts",
   "backend/tests/rls-wave-b/b03/outboxPostgres18.test.js",
   "backend/tests/rls-wave-b/b03/legacyAuditFixtures.sql",
   "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",

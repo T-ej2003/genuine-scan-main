@@ -191,6 +191,19 @@ async function main() {
     await worker.$transaction((tx) => repository.consumeAuditLogOutbox(tx, { jobId: claim.id, payloadDigest: claim.payloadDigest, attemptedAt: new Date() }));
   }
 
+  const uppercaseRequest = "AABBCCDD-1234-4000-8000-ABCDEFABCDEF";
+  const casePayload = auditPayload("UUID_CASE");
+  const caseId = await authenticated("b03-audit-enqueue", (tx) => auditOutbox.queueAuditLogOutbox(casePayload, undefined, tx, authority(uppercaseRequest)));
+  const caseReplay = await authenticated("b03-audit-enqueue", (tx) => auditOutbox.queueAuditLogOutbox(casePayload, undefined, tx, authority(uppercaseRequest.toLowerCase())));
+  assert.equal(caseReplay, caseId);
+  assert.equal(psql(bootstrapUrl, `SELECT "requestId" FROM public."AuditLogOutbox" WHERE id='${caseId}'`), uppercaseRequest.toLowerCase());
+  psql(bootstrapUrl, `UPDATE public."AuditLogOutbox" SET "initiatingActorRoleSnapshot"='MANUFACTURER' WHERE id='${caseId}'`);
+  await assert.rejects(authenticated("b03-audit-enqueue", (tx) => auditOutbox.queueAuditLogOutbox(casePayload, undefined, tx, authority(uppercaseRequest))), /B03_OUTBOX_REPLAY_MISMATCH|Unique constraint failed/);
+  psql(bootstrapUrl, `UPDATE public."AuditLogOutbox" SET "initiatingActorRoleSnapshot"='LICENSEE_ADMIN' WHERE id='${caseId}'`);
+  const [caseClaim] = await worker.$transaction((tx) => repository.claimAuditLogOutboxSlice(tx, { attemptedAt: new Date(), batchSize: 1 }));
+  assert.equal(caseClaim.id, caseId);
+  await worker.$transaction((tx) => repository.consumeAuditLogOutbox(tx, { jobId: caseClaim.id, payloadDigest: caseClaim.payloadDigest, attemptedAt: new Date() }));
+
   const raceRequest = requestId();
   const raceId = await authenticated("b03-audit-enqueue", (tx) => auditOutbox.queueAuditLogOutbox(auditPayload("RACE"), undefined, tx, authority(raceRequest)));
   const attemptedAt = new Date();

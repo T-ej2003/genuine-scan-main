@@ -4,6 +4,7 @@ import { createHash, randomUUID } from "crypto";
 import {
   B03AuditEnqueueInput,
   b03PayloadDigest,
+  b03RequestId,
   claimAuditLogOutboxSlice,
   consumeAuditLogOutbox,
   enqueueAuditLogOutbox,
@@ -43,15 +44,17 @@ export const queueAuditLogOutbox = async (
   if (!db?.$queryRaw || !authority) {
     throw new Error("B03 audit enqueue requires an attributed transaction and durable authority");
   }
+  const requestId = b03RequestId(authority.requestId);
   const payloadDigest = b03PayloadDigest(payload);
   const idempotencyKey = createHash("sha256")
     // SHA-256 is intentional here: this fixed workflow/request/payload tuple is
     // an outbox idempotency key, never a password or credential verifier.
     // codeql[js/insufficient-password-hash]
-    .update(`AUDIT_LOG_RECOVERY:${authority.requestId}:${payloadDigest}`)
+    .update(`AUDIT_LOG_RECOVERY:${requestId}:${payloadDigest}`)
     .digest("hex");
   const row = await enqueueAuditLogOutbox(db as any, {
     ...authority,
+    requestId,
     payload,
     payloadDigest,
     idempotencyKey,

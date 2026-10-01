@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='5b1e771b719e2f980687eea3d69895e08ae98b0a7c372168602824496a9e8a4d'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:5b1e771b719e2f980687eea3d69895e08ae98b0a7c372168602824496a9e8a4d'
+    AND source_contract_sha256='3974af1f749c9d5f82f4d636b6e750e110e2e4fe489b135d12330465ab04b3d5'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:3974af1f749c9d5f82f4d636b6e750e110e2e4fe489b135d12330465ab04b3d5'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:5b1e771b719e2f980687eea3d69895e08ae98b0a7c372168602824496a9e8a4d')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:3974af1f749c9d5f82f4d636b6e750e110e2e4fe489b135d12330465ab04b3d5')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -12667,7 +12667,8 @@ BEGIN
      WHERE o."idempotencyKey"=p_idempotency_key AND o."payloadDigest"=p_payload_digest
        AND o."requestId"=p_request_id AND o."initiatingUserId" IS NOT DISTINCT FROM p_initiating_user_id
        AND o."organizationId" IS NOT DISTINCT FROM p_organization_id AND o."licenseeId" IS NOT DISTINCT FROM p_licensee_id
-       AND o."manufacturerId" IS NOT DISTINCT FROM p_manufacturer_id;
+       AND o."manufacturerId" IS NOT DISTINCT FROM p_manufacturer_id
+       AND o."initiatingActorRoleSnapshot" IS NOT DISTINCT FROM p_initiating_actor_role;
     IF NOT FOUND THEN RAISE EXCEPTION 'B03_OUTBOX_REPLAY_MISMATCH' USING ERRCODE='23505'; END IF;
   END IF;
   RETURN QUERY SELECT v_id;
@@ -12685,7 +12686,7 @@ BEGIN
   -- Each normalised row remains the same durable record. SKIP LOCKED and
   -- the surrounding worker transaction make concurrent recovery/claim atomic.
   FOR legacy_record IN
-    SELECT q.id,q.payload,q."requestId",q."initiatingUserId",q."organizationId",q."licenseeId",q."manufacturerId" FROM public."AuditLogOutbox" q
+    SELECT q.id,q.payload,q."requestId",q."initiatingUserId",q."organizationId",q."licenseeId",q."manufacturerId",q."initiatingActorRoleSnapshot" FROM public."AuditLogOutbox" q
     WHERE q.status IN ('QUEUED','FAILED') AND q."authorityProvenance" IS NULL
       AND q."payloadDigest" IS NULL AND q."idempotencyKey" IS NULL
       AND coalesce(q."lastError",'') NOT IN ('B03_AUDIT_RECORD_DUPLICATE','B03_AUDIT_IDENTITY_COLLISION','B03_AUDIT_RECORD_UNRECONSTRUCTABLE')
@@ -12702,7 +12703,8 @@ BEGIN
           AND existing."initiatingUserId" IS NOT DISTINCT FROM legacy_record."initiatingUserId"
           AND existing."organizationId" IS NOT DISTINCT FROM legacy_record."organizationId"
           AND existing."licenseeId" IS NOT DISTINCT FROM legacy_record."licenseeId"
-          AND existing."manufacturerId" IS NOT DISTINCT FROM legacy_record."manufacturerId")
+          AND existing."manufacturerId" IS NOT DISTINCT FROM legacy_record."manufacturerId"
+          AND existing."initiatingActorRoleSnapshot" IS NOT DISTINCT FROM legacy_record."initiatingActorRoleSnapshot")
         THEN 'B03_AUDIT_RECORD_DUPLICATE' ELSE 'B03_AUDIT_IDENTITY_COLLISION' END WHERE q.id=legacy_record.id;
       CONTINUE;
     END IF;
@@ -12718,7 +12720,8 @@ BEGIN
           AND existing."initiatingUserId" IS NOT DISTINCT FROM legacy_record."initiatingUserId"
           AND existing."organizationId" IS NOT DISTINCT FROM legacy_record."organizationId"
           AND existing."licenseeId" IS NOT DISTINCT FROM legacy_record."licenseeId"
-          AND existing."manufacturerId" IS NOT DISTINCT FROM legacy_record."manufacturerId")
+          AND existing."manufacturerId" IS NOT DISTINCT FROM legacy_record."manufacturerId"
+          AND existing."initiatingActorRoleSnapshot" IS NOT DISTINCT FROM legacy_record."initiatingActorRoleSnapshot")
         THEN 'B03_AUDIT_RECORD_DUPLICATE' ELSE 'B03_AUDIT_IDENTITY_COLLISION' END WHERE q.id=legacy_record.id;
     END;
   END LOOP;

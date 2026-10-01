@@ -85,3 +85,5 @@ The focused worker/audit/security unit run passed 9 tests; the canonical full RL
 CI harness isolation: the B03 proof uses the existing docker-compose.rls-certification.yml cluster. The P2 harness deliberately pre-creates certification-administrator, so it cannot satisfy the independent clean-room provenance guard. The guard remains unchanged; the workflow regression checks the separate harness and URL.
 
 Bare SQL INSERT producers use their immutable event-row UUID for identity even when a client request UUID is reused; the original request remains explicit provenance. Existing replay-aware producers with supplied digest/identity preserve their original canonical request tuple. PostgreSQL coverage proves two equal payloads under one client request persist and complete as distinct events.
+
+Replay-aware requests are normalised by the existing repository UUID validator before deriving the key; uppercase/lowercase representations converge. Replay and legacy duplicate checks also compare the original actor-role snapshot in addition to user and tenant scope. Regression coverage rejects changed-role substitution.

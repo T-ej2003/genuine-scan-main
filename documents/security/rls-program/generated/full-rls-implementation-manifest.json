@@ -15,7 +15,7 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "5b1e771b719e2f980687eea3d69895e08ae98b0a7c372168602824496a9e8a4d",
+  "sourceContractSha256": "3974af1f749c9d5f82f4d636b6e750e110e2e4fe489b135d12330465ab04b3d5",
   "migrationSetDigest": "b783cab33f40cddaa8aa9bf3bef3dbbbabb218af5891bbda36eb1724514f8dc9",
   "sourceContractInputs": [
     {
@@ -88,7 +88,7 @@
     },
     {
       "path": "scripts/rls/lib/clean-room-source-contract.mjs",
-      "sha256": "76ee1ff6611912c11c3d399e05d1886117d9d142753e79e45cb752ca4328c306"
+      "sha256": "be70fde769adb49a778d8453e2cc2dbc06e81b598afd31fe6d55e8fefd400ca2"
     },
     {
       "path": "scripts/rls/lib/program-inventory.mjs",
@@ -264,7 +264,7 @@
     },
     {
       "path": "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
-      "sha256": "91615e9e8b0e49770cae604fb273065c5e3eb8b0dfeb2634031a3caaf7683e63"
+      "sha256": "90758516173e5f5ab7e70114c0270a1a86149e1d07a59715b733e77adef571ea"
     },
     {
       "path": "backend/src/rls-waves/session-b/b03/b03OutboxRollback.sql",
@@ -272,11 +272,15 @@
     },
     {
       "path": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
-      "sha256": "d2ac176793ddcc04e243781e5f8eaaa8ccd8ab33ec42473ff9bc8059f39e431d"
+      "sha256": "1fb9b8cf8077436407ba110379a1f3b9a6ceac544dc943d0f106ae0e28df3263"
+    },
+    {
+      "path": "backend/src/services/auditLogOutboxService.ts",
+      "sha256": "a982f87ae203b1aca4d78c3ba415525610064959115c6cde245bda32cd1b2b26"
     },
     {
       "path": "backend/tests/rls-wave-b/b03/outboxPostgres18.test.js",
-      "sha256": "dded09e0b66c3e9ee94b5e9da6d45531325aa095a2d27d31c90b064b34476776"
+      "sha256": "b68cc58fc0f2aadb1c1098e24380c871b07777ff43b9d0a551fc8ef12b31f625"
     },
     {
       "path": "backend/tests/rls-wave-b/b03/legacyAuditFixtures.sql",
@@ -384,7 +388,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:5b1e771b719e2f980687eea3d69895e08ae98b0a7c372168602824496a9e8a4d",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:3974af1f749c9d5f82f4d636b6e750e110e2e4fe489b135d12330465ab04b3d5",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,

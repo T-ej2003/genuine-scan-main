@@ -187,6 +187,7 @@ const uuid = (value: unknown) => {
   }
   return normalized;
 };
+export const b03RequestId = uuid;
 const authenticatedRequestId = (value: unknown) => {
   const normalized = text(value, "requestId", 128);
   if (!/^[\x21-\x7e]+$/.test(normalized)) {
