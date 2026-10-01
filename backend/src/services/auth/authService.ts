@@ -649,8 +649,7 @@ export const loginWithPassword = async (input: {
     }, tx);
   });
 
-  if ((risk.shouldBlock && (isPlatformSuperAdminRole(user.role) || isTemporaryPasswordOnlyRole(user.role))) ||
-      (risk.shouldStepUp && isTemporaryPasswordOnlyRole(user.role))) {
+  if ((risk.shouldStepUp || risk.shouldBlock) && isTemporaryPasswordOnlyRole(user.role)) {
     await preAuthPrisma.$transaction(async (tx) => {
       await bindPasswordSubject(tx);
       await persistAuthSessionRisk({ ipHash: input.ipHash, userAgent: input.userAgent, requestId: input.requestId, blockedLogin: true }, risk, tx);
@@ -665,12 +664,13 @@ export const loginWithPassword = async (input: {
     const mfaStatus = preparedState.mfaStatus || { enabled: false, lastUsedAt: null, methods: [], preferredMethod: null };
 
     if (isAdminMfaRequiredRole(user.role)) {
+      const requiresMfaStepUp = risk.environmentalStepUpRequired || risk.shouldStepUp || risk.shouldBlock;
       const lastUsedAt = mfaStatus?.lastUsedAt ? new Date(mfaStatus.lastUsedAt) : null;
       const hasValidLastUsedAt = Boolean(lastUsedAt && Number.isFinite(lastUsedAt.getTime()));
       const loginCycleDays = Math.max(1, getAdminLoginMfaCycleDays());
       const cycleThreshold = addDays(now, -loginCycleDays);
       const mfaFreshForLogin = Boolean(
-        !risk.shouldStepUp &&
+        !requiresMfaStepUp &&
         !isManufacturerRole(user.role) &&
           mfaStatus?.enabled &&
           hasValidLastUsedAt &&

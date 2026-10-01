@@ -24,6 +24,7 @@ let riskWrites = [];
 let createdSessions = [];
 let riskBlocked = false;
 let riskStepUp = false;
+let environmentalStepUpRequired = false;
 let riskScore = 10;
 let riskWriteError = null;
 let ordinaryAuditWrites = 0;
@@ -103,6 +104,7 @@ mockModule("services/auth/sessionRiskService.js", {
       score: riskScore,
       riskLevel: riskBlocked ? "CRITICAL" : "LOW",
       reasons: [riskBlocked ? "Untrusted network" : "Known device"],
+      environmentalStepUpRequired,
       shouldBlock: riskBlocked,
       shouldStepUp: riskStepUp,
       actorState: {
@@ -237,59 +239,56 @@ const run = async () => {
   riskStepUp = false;
   riskScore = 85;
 
+  environmentalStepUpRequired = true;
+  riskScore = 45;
+  const changedIpSession = await loginWithPassword({
+    email: prismaUser.email,
+    password: "correct-password",
+    ipHash: "changed-ip-hash",
+    userAgent: "agent",
+    requestId: "changed-ip-admin-login",
+  });
+  assert.strictEqual(changedIpSession.sessionStage, "MFA_BOOTSTRAP", "an environmental change must override a recent MFA cycle even below the score threshold");
+  assert(changedIpSession.auth?.mfaChallenge?.ticket);
+  environmentalStepUpRequired = false;
+  riskScore = 85;
+
   riskBlocked = true;
+  riskStepUp = true;
   auditEvents = [];
   riskWrites = [];
   ordinaryAuditWrites = 0;
-  let blockedError;
-  try {
-    await loginWithPassword({
-      email: prismaUser.email,
-      password: "correct-password",
-      ipHash: "blocked-ip-hash",
-      userAgent: "blocked-agent",
-      requestId: "blocked-admin-risk-login",
-    });
-  } catch (error) {
-    blockedError = error;
-  }
-  assert.match(String(blockedError?.message || ""), /High-risk login blocked/);
-  assert.deepEqual(normalizeAuthError(blockedError), {
-    status: 403,
-    error: "High-risk login blocked. Try from a trusted network or contact administrator.",
+  const criticalRiskSession = await loginWithPassword({
+    email: prismaUser.email,
+    password: "correct-password",
+    ipHash: "blocked-ip-hash",
+    userAgent: "blocked-agent",
+    requestId: "critical-admin-risk-login",
   });
+  assert.strictEqual(criticalRiskSession.sessionStage, "MFA_BOOTSTRAP", "critical environmental risk must use the existing MFA step-up path");
+  assert.strictEqual(criticalRiskSession.refreshToken, null, "critical risk must not issue an active session before MFA");
+  assert(criticalRiskSession.auth?.mfaChallenge?.ticket, "critical risk must issue the canonical MFA challenge");
   assert.equal(riskWrites.length, 1);
-  assert.equal(riskWrites[0].blockedLogin, true, "blocked risk must request the governed audit write");
-  assert.deepEqual(auditEvents.map(({ action }) => action), ["AUTH_LOGIN_BLOCKED_RISK"]);
-  assert.equal(ordinaryAuditWrites, 0, "blocked risk must not use the ordinary Prisma audit client");
+  assert(riskWrites[0].challenge, "critical risk evidence and MFA challenge must be persisted atomically");
+  assert.equal(riskWrites[0].blockedLogin, undefined, "recoverable environmental risk must not be audited as a terminal block");
+  assert.deepEqual(auditEvents, []);
+  assert.equal(ordinaryAuditWrites, 0);
 
-  riskWriteError = new Error("AUTH_LOGIN_BLOCKED_RISK_AUDIT_FAILED");
+  riskWriteError = new Error("AUTH_LOGIN_RISK_WRITE_FAILED");
   await assert.rejects(
     loginWithPassword({
       email: prismaUser.email,
       password: "correct-password",
       ipHash: "blocked-ip-hash",
       userAgent: "blocked-agent",
-      requestId: "blocked-admin-risk-audit-failure",
+      requestId: "critical-admin-risk-audit-failure",
     }),
-    /AUTH_LOGIN_BLOCKED_RISK_AUDIT_FAILED/,
-    "mandatory audit failure must fail the blocked-login transaction closed",
+    /AUTH_LOGIN_RISK_WRITE_FAILED/,
+    "risk evidence or challenge persistence failure must fail closed",
   );
   riskWriteError = null;
   riskBlocked = false;
-  riskScore = 86;
-  riskBlocked = true;
-  await assert.rejects(
-    loginWithPassword({
-      email: prismaUser.email,
-      password: "correct-password",
-      ipHash: "blocked-ip-hash",
-      userAgent: "blocked-agent",
-      requestId: "blocked-admin-risk-login-above-threshold",
-    }),
-    /High-risk login blocked/
-  );
-  riskBlocked = false;
+  riskStepUp = false;
   riskScore = 10;
 
   mockedMfaStatus = {

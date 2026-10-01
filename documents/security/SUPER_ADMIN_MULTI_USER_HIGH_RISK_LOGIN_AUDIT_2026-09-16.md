@@ -4,6 +4,8 @@
 
 This review used protected commit `6d5a48ce7c32b12ce8671731392f92ddfa625a88` in an isolated worktree. It made no production calls or writes. The initial-super-admin bootstrap was not invoked.
 
+The 2026-10-01 adaptive-authentication update changes the terminal platform-admin risk decision described below. Environmental changes now route roles that already require MFA through the existing MFA bootstrap/challenge flow. It also limits the trusted login baseline to unrevoked, unexpired refresh credentials without deleting historical rows.
+
 ## Login decision
 
 `POST /api/auth/login` validates the request, derives `ipHash` from `req.ip`, and calls `loginWithPassword`. That function requires one existing active, non-disabled user with a password, a verified email, and a valid password. It then calculates risk from the user's recent sessions in a pre-auth transaction.
@@ -34,14 +36,18 @@ Scores in the step-up range were calculated but ignored; a recent 28-day MFA use
 
 ## After
 
-`risk.shouldStepUp` now prevents the recent-MFA-cycle fast path. Scores from the step-up threshold through one below the block threshold return only `MFA_BOOTSTRAP`; no access or refresh token is returned before a bound MFA challenge is completed. Score 85 and above remains a blocked-login transaction with the existing governed audit write.
+Environmental changes and `risk.shouldStepUp` prevent the recent-MFA-cycle fast path for `SUPER_ADMIN`, `PLATFORM_SUPER_ADMIN`, and `ORG_ADMIN`. This includes a first valid session, changed source IP, changed user agent, and three or more current session IPs. A score at or above the block threshold also returns only the existing `MFA_BOOTSTRAP` response for those MFA-required roles; no active access or refresh token is returned before the bound MFA challenge succeeds. Roles without an existing MFA requirement keep their prior policy, including the fail-closed behavior for temporary-password-only roles.
+
+`app_rls.load_recent_auth_session_risk_inputs(5)` now derives the baseline only from refresh credentials whose `revokedAt` is null and whose `expiresAt` remains in the future. Revoked and expired rows remain stored for audit and investigation.
 
 The canonical setting is `AUTH_RISK_STEP_UP_THRESHOLD`. The legacy `AUTH_RISK_STEPUP_THRESHOLD` remains supported only when it is the sole supplied value or matches the canonical value. Invalid values, conflicting values, and `step-up >= block` fail closed. Defaults remain 55 and 85.
 
 ## Security invariants
 
-- A block-risk platform login writes the governed `AUTH_LOGIN_BLOCKED_RISK` event before returning 403; an audit failure denies login.
+- Environmental high risk for an MFA-required role records the existing risk evidence and bound MFA challenge atomically; a persistence failure denies login.
 - A risk-triggered MFA bootstrap has no full refresh token and uses the existing user-bound, session-bound, expiring, replay-protected MFA challenge flow.
+- Successful MFA uses the existing ACTIVE-session issuance path and revokes the bootstrap refresh/session capability as `STEP_UP_REPLACED`.
+- Revoked refresh credentials and database-session capabilities remain invalid and remain stored; they do not become reusable when excluded from the future login baseline.
 - Two platform-admin users continue to have separate `User` identities. Every session, MFA credential/factor, challenge, refresh token, risk signal, and audit record is keyed by user ID.
 - Role authorization remains role-based: `SUPER_ADMIN` and `PLATFORM_SUPER_ADMIN` normalize to the frontend super-admin surface; no email is an authorization key.
 
@@ -64,8 +70,8 @@ The governed Stage-B application canary is a separate self-hosted topology. Its 
 
 ## Test evidence
 
-`npm run build` passed in `backend`. The focused suite passed: `sessionRiskThresholds`, `authAdminLoginMfaCycle`, `clientIpTrust`, and `authMfaChallengeStateMachine`.
+For the 2026-10-01 update, the backend build, trust-critical suite, authentication bootstrap suite, client-IP trust tests, MFA state-machine tests, B01 authentication-closure contract, full RLS package verification, and RLS prototype guard passed.
 
-The risk suite proves fallback/config rejection, low/new-IP/new-agent/new-device scoring, normal new-device step-up without hard block, three-IP and combined block scoring. The login suite proves 55, 70, and 84 force MFA bootstrap despite recent MFA and that 85 and 86 preserve hard block. The proxy suite proves CloudFront -> ALB resolution, spoofed prefixes, direct/short/untrusted paths, and IPv4/IPv6 chain handling.
+The risk suite proves fallback/config rejection, low/new-IP/new-agent/new-device scoring, first-valid-session routing, three-IP routing, and combined critical scoring. The login suite proves changed environmental context and scores through the block range use the existing MFA bootstrap despite a recent MFA cycle. Existing tests continue to prove wrong-password equivalence, account lockout, disabled/deleted denial, proxy-chain rejection, MFA challenge completion, ACTIVE-session cookie issuance, refresh revocation, and temporary-role fail-closed behavior.
 
 The PostgreSQL invitation application-path test was run against a new loopback-only, disposable PostgreSQL 18 container. It stopped before the invitation cases because the fixture does not provision the authenticated-session capability required by current authenticated routes; the route returns 401 rather than bypassing that boundary. The fixture's runtime role names were aligned with the current runtime-role validator, but the missing capability setup remains a separate test-harness defect. No security requirement was bypassed. Consequently, full two-principal invitation/MFA/session/risk end-to-end proof remains incomplete.

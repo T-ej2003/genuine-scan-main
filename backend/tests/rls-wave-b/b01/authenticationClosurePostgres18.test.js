@@ -73,6 +73,13 @@ async function main() {
 
   const primaryId = loginSession(preauth, hash("a"), "auth-login-primary");
   assert.match(primaryId, /^[0-9a-f-]{36}$/i);
+  psql(bootstrap, `
+    INSERT INTO public."RefreshToken" (id,"orgId","userId","tokenHash","expiresAt","createdAt","createdIpHash","createdUserAgent","revokedAt","revokedReason") VALUES
+      ('10000000-0000-4000-8000-000000000301','${ids.orgA}','${ids.userA}','${hash("revoked-baseline")}',now()+interval '1 day',now()+interval '2 seconds','revoked-ip','revoked-agent',now(),'SESSION_REVOKED_BY_USER'),
+      ('10000000-0000-4000-8000-000000000302','${ids.orgA}','${ids.userA}','${hash("expired-baseline")}',now()-interval '1 second',now()+interval '1 second','expired-ip','expired-agent',NULL,NULL)
+  `);
+  assert.equal(last(preauth, `BEGIN; SELECT id FROM app_auth.lookup_password_user('auth-a@example.invalid'); SELECT count(*) FROM app_rls.load_recent_auth_session_risk_inputs(5); ROLLBACK`), "1");
+  assert.equal(last(bootstrap, `SELECT count(*) FROM public."RefreshToken" WHERE "userId"='${ids.userA}'`), "3", "revoked and expired rows must remain available for audit");
   assert.equal(last(bootstrap, `SELECT count(*) FROM public."AuthSessionRiskSignal" WHERE "userId"='${ids.userA}'`), "1");
   assert.equal(last(bootstrap, `SELECT count(*) FROM public."AuthSessionRiskSignal" WHERE "userId"='${ids.userB}'`), "0");
   denied(preauth, `SELECT "recorded" FROM app_rls.record_auth_session_risk_signal(90,'CRITICAL',ARRAY['UNTRUSTED_NETWORK'],NULL,NULL,transaction_timestamp()::timestamp,NULL,NULL,NULL,NULL,NULL,true,'missing-password-subject')`, /AUTH_LOGIN_RISK_DENIED/);
