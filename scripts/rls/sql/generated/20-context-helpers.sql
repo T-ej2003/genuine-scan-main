@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='5e0b169e8255dcdd05bc4523ad66aa9cbd48c1244155febbae63a68568b02ce2'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:5e0b169e8255dcdd05bc4523ad66aa9cbd48c1244155febbae63a68568b02ce2'
+    AND source_contract_sha256='7868a2c2da38c8d08fd8f129f59c8356b11b63861396d35e7ecca9a3b5e08e87'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:7868a2c2da38c8d08fd8f129f59c8356b11b63861396d35e7ecca9a3b5e08e87'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:5e0b169e8255dcdd05bc4523ad66aa9cbd48c1244155febbae63a68568b02ce2')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:7868a2c2da38c8d08fd8f129f59c8356b11b63861396d35e7ecca9a3b5e08e87')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -12502,6 +12502,124 @@ DO $$ BEGIN
   IF NOT pg_has_role(session_user,'mscqr_rls_cert_auth_owner','SET') THEN RAISE EXCEPTION 'administrative executor lacks SET authority for mscqr_rls_cert_auth_owner'; END IF;
 END $$;
 SET ROLE "mscqr_rls_cert_auth_owner";
+-- Historical TypeScript B03 stable JSON encoding. Private; no runtime grants.
+CREATE OR REPLACE FUNCTION app_rls.b03_stable_json(p_value jsonb)
+RETURNS text LANGUAGE plpgsql IMMUTABLE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE result text; value text; digits text; exponent integer; magnitude numeric;
+BEGIN
+  CASE jsonb_typeof(p_value)
+  WHEN 'object' THEN
+    SELECT '{'||coalesce(string_agg(to_json(k)::text||':'||app_rls.b03_stable_json(v),',' ORDER BY
+      ARRAY(SELECT unnest(CASE WHEN ascii(c)>65535 THEN ARRAY[55296+(ascii(c)-65536)/1024,56320+(ascii(c)-65536)%1024] ELSE ARRAY[ascii(c)] END)
+        FROM regexp_split_to_table(k,'') WITH ORDINALITY AS chars(c,n) ORDER BY n)), '')||'}'
+    INTO result FROM jsonb_each(p_value) AS entries(k,v);
+  WHEN 'array' THEN
+    SELECT '['||coalesce(string_agg(app_rls.b03_stable_json(v),',' ORDER BY n),'')||']'
+    INTO result FROM jsonb_array_elements(p_value) WITH ORDINALITY AS entries(v,n);
+  WHEN 'number' THEN
+    magnitude:=abs(p_value::text::numeric);
+    IF magnitude=0 THEN RETURN '0'; END IF;
+    value:=magnitude::text;
+    IF magnitude>=0.000001 AND magnitude<1e21 THEN
+      result:=CASE WHEN position('.' IN value)>0 THEN rtrim(rtrim(value,'0'),'.') ELSE value END;
+    ELSE
+      exponent:=floor(log(10,magnitude));
+      digits:=rtrim(replace((magnitude/power(10::numeric,exponent))::text,'.',''),'0');
+      result:=left(digits,1)||CASE WHEN length(digits)>1 THEN '.'||substr(digits,2) ELSE '' END||'e'||CASE WHEN exponent>=0 THEN '+' ELSE '' END||exponent::text;
+    END IF;
+    IF p_value::text::numeric<0 THEN result:='-'||result; END IF;
+  ELSE result:=p_value::text;
+  END CASE;
+  RETURN result;
+END
+$fn$;
+
+-- All producer bodies retain their existing RLS/actor checks. This trigger
+-- only completes NEW, never reads or writes another row and grants no access.
+CREATE OR REPLACE FUNCTION app_rls.b03_complete_audit_record()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE original_request text; expected_digest text; encoding text;
+BEGIN
+  IF TG_OP<>'INSERT' OR TG_TABLE_SCHEMA<>'public' OR TG_TABLE_NAME<>'AuditLogOutbox'
+     OR NEW."authorityProvenance" IS NOT NULL OR NEW.payload->'details' ? 'auditRecovery' OR jsonb_typeof(NEW.payload) IS DISTINCT FROM 'object'
+  THEN RAISE EXCEPTION 'B03_AUDIT_RECORD_DENIED' USING ERRCODE='42501'; END IF;
+  original_request:=coalesce(NEW."requestId",nullif(current_setting('app.request_id',true),''),
+    nullif(current_setting('app.b01_request_id',true),''),nullif(current_setting('app.scheduled_request_id',true),''));
+  IF original_request IS NOT NULL AND (length(original_request) NOT BETWEEN 1 AND 128 OR original_request !~ '^[!-~]+$')
+  THEN RAISE EXCEPTION 'B03_AUDIT_REQUEST_DENIED' USING ERRCODE='42501'; END IF;
+  -- A fresh event with no UUID request gets its own existing immutable UUID
+  -- row identity; this is marked explicitly, not claimed to be a client request.
+  NEW."requestId":=CASE WHEN original_request ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+    THEN lower(original_request) ELSE NEW.id END;
+  encoding:=CASE WHEN current_setting('app.b03_outbox_operation',true)='audit-enqueue' AND current_setting('app.b03_outbox_id',true)=NEW.id THEN 'stable-json-v1' ELSE 'jsonb-text-v1' END;
+  expected_digest:=encode(sha256(convert_to(CASE WHEN encoding='stable-json-v1' THEN app_rls.b03_stable_json(NEW.payload) ELSE NEW.payload::text END,'UTF8')),'hex');
+  IF NEW."payloadDigest" IS NOT NULL AND NEW."payloadDigest" IS DISTINCT FROM expected_digest
+  THEN RAISE EXCEPTION 'B03_AUDIT_DIGEST_MISMATCH' USING ERRCODE='23505'; END IF;
+  NEW."payloadDigest":=expected_digest;
+  expected_digest:=encode(sha256(convert_to('AUDIT_LOG_RECOVERY:'||NEW."requestId"||':'||NEW."payloadDigest",'UTF8')),'hex');
+  IF NEW."idempotencyKey" IS NOT NULL AND NEW."idempotencyKey" IS DISTINCT FROM expected_digest
+  THEN RAISE EXCEPTION 'B03_OUTBOX_REPLAY_MISMATCH' USING ERRCODE='23505'; END IF;
+  NEW."idempotencyKey":=expected_digest;
+  NEW."initiatingUserId":=coalesce(NEW."initiatingUserId",nullif(NEW.payload->>'userId',''));
+  NEW."organizationId":=coalesce(NEW."organizationId",nullif(NEW.payload->>'orgId',''));
+  NEW."licenseeId":=coalesce(NEW."licenseeId",nullif(NEW.payload->>'licenseeId',''));
+  NEW."expiresAt":=coalesce(NEW."expiresAt",NEW."createdAt"+interval '1 day');
+  IF NEW."jobType" IS DISTINCT FROM 'AUDIT_LOG_RECOVERY'
+     OR NEW."requestId" !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+     OR (NEW."initiatingUserId" IS NULL AND NEW.payload->'details'->>'systemIdentity' IS DISTINCT FROM 'identity-scheduled-job')
+     OR octet_length(NEW.payload::text)>65536 OR NEW."expiresAt"<=NEW."createdAt" OR coalesce(NEW.payload->>'action','')='' OR coalesce(NEW.payload->>'entityType','')=''
+     OR (NEW.payload ? 'userId' AND NEW."initiatingUserId" IS DISTINCT FROM nullif(NEW.payload->>'userId',''))
+     OR (NEW.payload ? 'orgId' AND NEW."organizationId" IS DISTINCT FROM nullif(NEW.payload->>'orgId',''))
+     OR (NEW.payload ? 'licenseeId' AND NEW."licenseeId" IS DISTINCT FROM nullif(NEW.payload->>'licenseeId',''))
+  THEN RAISE EXCEPTION 'B03_AUDIT_RECORD_DENIED' USING ERRCODE='42501'; END IF;
+  NEW."authorityProvenance":=jsonb_build_object('version',1,'origin','producer','digestEncoding',encoding,
+    'requestIdSource',CASE WHEN NEW."requestId"=lower(original_request) THEN 'original-request' ELSE 'new-event-id' END,
+    'originalRequestId',original_request);
+  RETURN NEW;
+END
+$fn$;
+
+-- Exact persisted legacy shape. No request, actor, tenant or expiry is invented.
+CREATE OR REPLACE FUNCTION app_rls.b03_audit_record_valid(p_record public."AuditLogOutbox")
+RETURNS boolean LANGUAGE sql IMMUTABLE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+  SELECT coalesce(p_record."jobType"='AUDIT_LOG_RECOVERY'
+    AND p_record."requestId" ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+    AND jsonb_typeof(p_record.payload)='object' AND octet_length(p_record.payload::text)<=65536
+    AND coalesce(p_record.payload->>'action','')<>'' AND coalesce(p_record.payload->>'entityType','')<>''
+    AND (NOT p_record.payload ? 'userId' OR p_record."initiatingUserId" IS NOT DISTINCT FROM nullif(p_record.payload->>'userId',''))
+    AND (NOT p_record.payload ? 'orgId' OR p_record."organizationId" IS NOT DISTINCT FROM nullif(p_record.payload->>'orgId',''))
+    AND (NOT p_record.payload ? 'licenseeId' OR p_record."licenseeId" IS NOT DISTINCT FROM nullif(p_record.payload->>'licenseeId',''))
+    AND (p_record."initiatingUserId" IS NOT NULL OR p_record.payload->'details'->>'systemIdentity'='identity-scheduled-job')
+    AND p_record."expiresAt" IS NOT NULL
+    AND CASE WHEN p_record."authorityProvenance" IS NULL THEN
+      (p_record."payloadDigest" IS NULL AND p_record."idempotencyKey" IS NULL AND p_record."flushedAuditLogId" IS NULL AND p_record.attempts=0)
+      OR (p_record."payloadDigest" IN (encode(sha256(convert_to(p_record.payload::text,'UTF8')),'hex'),
+          encode(sha256(convert_to(app_rls.b03_stable_json(p_record.payload),'UTF8')),'hex'))
+        AND p_record."idempotencyKey"=encode(sha256(convert_to('AUDIT_LOG_RECOVERY:'||p_record."requestId"||':'||p_record."payloadDigest",'UTF8')),'hex'))
+    ELSE jsonb_typeof(p_record."authorityProvenance")='object'
+      AND p_record."authorityProvenance"->'version'='1'::jsonb
+      AND CASE WHEN p_record."authorityProvenance"->>'origin'='legacy-recovery' THEN
+        (SELECT count(*) FROM jsonb_object_keys(CASE WHEN jsonb_typeof(p_record."authorityProvenance")='object' THEN p_record."authorityProvenance" ELSE '{}'::jsonb END))=8
+        AND p_record."authorityProvenance"->'originalDigestPresent'='false'::jsonb
+        AND p_record."authorityProvenance"->'recoveryDigestDerived'='true'::jsonb
+        AND p_record."authorityProvenance"->'originalIdentityPresent'='false'::jsonb
+        AND p_record."authorityProvenance"->>'recordId'=p_record.id
+        AND jsonb_typeof(p_record."authorityProvenance"->'recoveredAt')='string'
+      ELSE (SELECT count(*) FROM jsonb_object_keys(CASE WHEN jsonb_typeof(p_record."authorityProvenance")='object' THEN p_record."authorityProvenance" ELSE '{}'::jsonb END))=5
+        AND CASE WHEN p_record."authorityProvenance"->>'requestIdSource'='original-request' THEN
+          lower(p_record."authorityProvenance"->>'originalRequestId')=p_record."requestId"
+        ELSE p_record."authorityProvenance"->>'requestIdSource'='new-event-id' AND p_record."requestId"=p_record.id END END
+      AND p_record."authorityProvenance"->>'origin' IN ('producer','legacy-recovery')
+      AND p_record."authorityProvenance"->>'digestEncoding' IN ('stable-json-v1','jsonb-text-v1')
+      AND p_record."payloadDigest"=encode(sha256(convert_to(CASE WHEN p_record."authorityProvenance"->>'digestEncoding'='stable-json-v1'
+        THEN app_rls.b03_stable_json(p_record.payload) ELSE p_record.payload::text END,'UTF8')),'hex')
+      AND p_record."idempotencyKey"=encode(sha256(convert_to('AUDIT_LOG_RECOVERY:'||p_record."requestId"||':'||p_record."payloadDigest",'UTF8')),'hex') END,false)
+$fn$;
+
+REVOKE ALL ON FUNCTION app_rls.b03_stable_json(jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.b03_complete_audit_record() FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.b03_audit_record_valid(public."AuditLogOutbox") FROM PUBLIC;
+
 CREATE OR REPLACE FUNCTION app_rls.b03_bind_outbox_operation(p_operation text,p_row_id text,p_payload_digest text)
 RETURNS void LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
 BEGIN
@@ -12546,7 +12664,10 @@ BEGIN
   ON CONFLICT ("idempotencyKey") DO NOTHING RETURNING o.id INTO v_id;
   IF v_id IS NULL THEN
     SELECT o.id INTO v_id FROM public."AuditLogOutbox" o
-     WHERE o."idempotencyKey"=p_idempotency_key AND o."payloadDigest"=p_payload_digest;
+     WHERE o."idempotencyKey"=p_idempotency_key AND o."payloadDigest"=p_payload_digest
+       AND o."requestId"=p_request_id AND o."initiatingUserId" IS NOT DISTINCT FROM p_initiating_user_id
+       AND o."organizationId" IS NOT DISTINCT FROM p_organization_id AND o."licenseeId" IS NOT DISTINCT FROM p_licensee_id
+       AND o."manufacturerId" IS NOT DISTINCT FROM p_manufacturer_id;
     IF NOT FOUND THEN RAISE EXCEPTION 'B03_OUTBOX_REPLAY_MISMATCH' USING ERRCODE='23505'; END IF;
   END IF;
   RETURN QUERY SELECT v_id;
@@ -12556,13 +12677,64 @@ $fn$;
 CREATE OR REPLACE FUNCTION app_rls.claim_audit_log_outbox_slice(p_attempted_at timestamp without time zone,p_batch_size integer)
 RETURNS TABLE("id" text,"jobType" text,"requestId" text,"payloadDigest" text,"idempotencyKey" text,"organizationId" text,"licenseeId" text,"manufacturerId" text,"initiatingUserId" text,"expiresAt" timestamp without time zone,"attempt" integer)
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE legacy_record record; recovered_digest text; recovered_key text;
 BEGIN
   PERFORM app_rls.b03_bind_outbox_operation('audit-claim','',repeat('0',64));
   IF session_user<>'mscqr_rls_cert_worker' OR p_batch_size NOT BETWEEN 1 AND 250 OR abs(extract(epoch FROM (clock_timestamp()-p_attempted_at)))>60
   THEN RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501'; END IF;
+  -- Each normalised row remains the same durable record. SKIP LOCKED and
+  -- the surrounding worker transaction make concurrent recovery/claim atomic.
+  FOR legacy_record IN
+    SELECT q.id,q.payload,q."requestId",q."initiatingUserId",q."organizationId",q."licenseeId",q."manufacturerId" FROM public."AuditLogOutbox" q
+    WHERE q.status IN ('QUEUED','FAILED') AND q."authorityProvenance" IS NULL
+      AND q."payloadDigest" IS NULL AND q."idempotencyKey" IS NULL
+      AND coalesce(q."lastError",'') NOT IN ('B03_AUDIT_RECORD_DUPLICATE','B03_AUDIT_IDENTITY_COLLISION','B03_AUDIT_RECORD_UNRECONSTRUCTABLE')
+      AND q."expiresAt">p_attempted_at AND app_rls.b03_audit_record_valid(q)
+    ORDER BY q."createdAt",q.id FOR UPDATE SKIP LOCKED LIMIT p_batch_size
+  LOOP
+    recovered_digest:=encode(sha256(convert_to(legacy_record.payload::text,'UTF8')),'hex');
+    recovered_key:=encode(sha256(convert_to('AUDIT_LOG_RECOVERY:'||legacy_record."requestId"||':'||recovered_digest,'UTF8')),'hex');
+    -- Serialize only this identity. Hash collisions delay a retry, never merge records.
+    IF NOT pg_try_advisory_xact_lock(hashtextextended(recovered_key,0)) THEN CONTINUE; END IF;
+    IF EXISTS (SELECT 1 FROM public."AuditLogOutbox" q WHERE q."idempotencyKey"=recovered_key) THEN
+      UPDATE public."AuditLogOutbox" AS q SET "lastError"=CASE WHEN EXISTS (
+        SELECT 1 FROM public."AuditLogOutbox" existing WHERE existing."idempotencyKey"=recovered_key
+          AND existing."initiatingUserId" IS NOT DISTINCT FROM legacy_record."initiatingUserId"
+          AND existing."organizationId" IS NOT DISTINCT FROM legacy_record."organizationId"
+          AND existing."licenseeId" IS NOT DISTINCT FROM legacy_record."licenseeId"
+          AND existing."manufacturerId" IS NOT DISTINCT FROM legacy_record."manufacturerId")
+        THEN 'B03_AUDIT_RECORD_DUPLICATE' ELSE 'B03_AUDIT_IDENTITY_COLLISION' END WHERE q.id=legacy_record.id;
+      CONTINUE;
+    END IF;
+    BEGIN
+    UPDATE public."AuditLogOutbox" AS q SET "payloadDigest"=recovered_digest,"idempotencyKey"=recovered_key,
+      "authorityProvenance"=jsonb_build_object('version',1,'origin','legacy-recovery','digestEncoding','jsonb-text-v1',
+        'originalDigestPresent',false,'recoveryDigestDerived',true,'originalIdentityPresent',false,
+        'recordId',legacy_record.id,'recoveredAt',p_attempted_at),"updatedAt"=transaction_timestamp()
+      WHERE q.id=legacy_record.id;
+    EXCEPTION WHEN unique_violation THEN
+      UPDATE public."AuditLogOutbox" AS q SET "lastError"=CASE WHEN EXISTS (
+        SELECT 1 FROM public."AuditLogOutbox" existing WHERE existing."idempotencyKey"=recovered_key
+          AND existing."initiatingUserId" IS NOT DISTINCT FROM legacy_record."initiatingUserId"
+          AND existing."organizationId" IS NOT DISTINCT FROM legacy_record."organizationId"
+          AND existing."licenseeId" IS NOT DISTINCT FROM legacy_record."licenseeId"
+          AND existing."manufacturerId" IS NOT DISTINCT FROM legacy_record."manufacturerId")
+        THEN 'B03_AUDIT_RECORD_DUPLICATE' ELSE 'B03_AUDIT_IDENTITY_COLLISION' END WHERE q.id=legacy_record.id;
+    END;
+  END LOOP;
+  -- Invalid/expired records remain durable and visible; never mark SENT.
+  WITH invalid AS (
+    SELECT q.id FROM public."AuditLogOutbox" q WHERE q.status IN ('QUEUED','FAILED')
+      AND (NOT app_rls.b03_audit_record_valid(q) OR q."expiresAt"<=p_attempted_at)
+      AND q."lastError" IS DISTINCT FROM 'B03_AUDIT_RECORD_UNRECONSTRUCTABLE'
+    ORDER BY q."createdAt",q.id FOR UPDATE SKIP LOCKED LIMIT p_batch_size
+  ) UPDATE public."AuditLogOutbox" q SET "lastError"='B03_AUDIT_RECORD_UNRECONSTRUCTABLE'
+    FROM invalid i WHERE q.id=i.id;
   RETURN QUERY WITH candidates AS (
     SELECT o.id FROM public."AuditLogOutbox" o
-     WHERE o."jobType"='AUDIT_LOG_RECOVERY' AND o.status IN ('QUEUED','FAILED')
+     WHERE o."payloadDigest" IS NOT NULL AND o."idempotencyKey" IS NOT NULL
+       AND coalesce(o."lastError",'') NOT IN ('B03_AUDIT_RECORD_DUPLICATE','B03_AUDIT_IDENTITY_COLLISION','B03_AUDIT_RECORD_UNRECONSTRUCTABLE')
+       AND app_rls.b03_audit_record_valid(o) AND o."jobType"='AUDIT_LOG_RECOVERY' AND o.status IN ('QUEUED','FAILED')
        AND o."nextAttemptAt"<=p_attempted_at AND o."expiresAt">p_attempted_at AND o.attempts<10
        AND (o."claimLeaseExpiresAt" IS NULL OR o."claimLeaseExpiresAt"<=p_attempted_at)
      ORDER BY o."createdAt",o.id FOR UPDATE SKIP LOCKED LIMIT p_batch_size
@@ -12585,10 +12757,10 @@ BEGIN
   PERFORM app_rls.b03_bind_outbox_operation('audit-consume',p_job_id,p_payload_digest);
   IF session_user<>'mscqr_rls_cert_worker' THEN RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501'; END IF;
   SELECT q.id,q.payload,q."requestId",q."organizationId",q."licenseeId",q."manufacturerId",
-    q."initiatingUserId",q."expiresAt",q."claimLeaseExpiresAt",q.status,q."flushedAuditLogId"
+    q."initiatingUserId",q."expiresAt",q."claimLeaseExpiresAt",q.status,q."flushedAuditLogId",q."authorityProvenance", app_rls.b03_audit_record_valid(q) AS valid
     INTO o FROM public."AuditLogOutbox" q
     WHERE q.id=p_job_id AND q."payloadDigest"=p_payload_digest FOR UPDATE;
-  IF NOT FOUND OR o."expiresAt"<=p_attempted_at OR abs(extract(epoch FROM (clock_timestamp()-p_attempted_at)))>60
+  IF NOT FOUND OR NOT o.valid OR o."expiresAt"<=p_attempted_at OR abs(extract(epoch FROM (clock_timestamp()-p_attempted_at)))>60
   THEN RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501'; END IF;
   IF o.status='SENT' THEN RETURN QUERY SELECT o."flushedAuditLogId",true; RETURN; END IF;
   IF o."claimLeaseExpiresAt" IS NULL OR o."claimLeaseExpiresAt"<p_attempted_at OR jsonb_typeof(o.payload)<>'object'
@@ -12599,7 +12771,7 @@ BEGIN
           set_config('app.b03_audit_organization_id',coalesce(o."organizationId",''),true),
           set_config('app.b03_audit_licensee_id',coalesce(o."licenseeId",''),true);
   INSERT INTO public."AuditLog" (id,"userId","orgId","licenseeId",action,"entityType","entityId",details,"ipAddress","ipHash","userAgent")
-  VALUES (v_audit_id,o."initiatingUserId",o."organizationId",o."licenseeId",o.payload->>'action',o.payload->>'entityType',NULLIF(o.payload->>'entityId',''),o.payload->'details',NULLIF(o.payload->>'ipAddress',''),NULLIF(o.payload->>'ipHash',''),NULLIF(o.payload->>'userAgent',''));
+  VALUES (v_audit_id,o."initiatingUserId",o."organizationId",o."licenseeId",o.payload->>'action',o.payload->>'entityType',NULLIF(o.payload->>'entityId',''),CASE WHEN o."authorityProvenance"->>'origin'='legacy-recovery' THEN coalesce(o.payload->'details','{}'::jsonb)||jsonb_build_object('auditRecovery',o."authorityProvenance") ELSE o.payload->'details' END,NULLIF(o.payload->>'ipAddress',''),NULLIF(o.payload->>'ipHash',''),NULLIF(o.payload->>'userAgent',''));
   v_security_id:=gen_random_uuid()::text;
   v_security_payload:=jsonb_build_object(
     'id',v_audit_id,'action',o.payload->>'action','entityType',o.payload->>'entityType',
@@ -12741,6 +12913,20 @@ GRANT EXECUTE ON FUNCTION app_rls.complete_security_event_outbox(text,text,times
 GRANT EXECUTE ON FUNCTION app_rls.consume_audit_log_outbox(text,text,timestamp without time zone) TO "mscqr_rls_cert_worker";
 GRANT EXECUTE ON FUNCTION app_rls.fail_audit_log_outbox(text,text,timestamp without time zone,integer,text) TO "mscqr_rls_cert_worker";
 GRANT EXECUTE ON FUNCTION app_rls.fail_security_event_outbox(text,text,timestamp without time zone,integer,text) TO "mscqr_rls_cert_worker";
+GRANT EXECUTE ON FUNCTION app_rls.b03_complete_audit_record() TO "mscqr_rls_cert_owner";
+RESET ROLE;
+DO $$ BEGIN
+  IF NOT pg_has_role(session_user,'mscqr_rls_cert_owner','SET') THEN RAISE EXCEPTION 'administrative executor lacks SET authority for mscqr_rls_cert_owner'; END IF;
+END $$;
+SET ROLE "mscqr_rls_cert_owner";
+CREATE OR REPLACE TRIGGER b03_complete_audit_record BEFORE INSERT ON public."AuditLogOutbox"
+FOR EACH ROW EXECUTE FUNCTION app_rls.b03_complete_audit_record();
+RESET ROLE;
+DO $$ BEGIN
+  IF NOT pg_has_role(session_user,'mscqr_rls_cert_auth_owner','SET') THEN RAISE EXCEPTION 'administrative executor lacks SET authority for mscqr_rls_cert_auth_owner'; END IF;
+END $$;
+SET ROLE "mscqr_rls_cert_auth_owner";
+REVOKE EXECUTE ON FUNCTION app_rls.b03_complete_audit_record() FROM "mscqr_rls_cert_owner";
 RESET ROLE;
 DO $$ BEGIN
   IF NOT pg_has_role(session_user,'mscqr_rls_cert_owner','SET') THEN RAISE EXCEPTION 'administrative executor lacks SET authority for mscqr_rls_cert_owner'; END IF;

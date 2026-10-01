@@ -1750,6 +1750,7 @@ model CustomerTrustIntake {
 }
 
 model AuditLogOutbox {
+  authorityProvenance Json?
   id String @id @default(uuid())
 
   payload Json

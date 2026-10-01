@@ -560,9 +560,9 @@ const outboxSecurity = Object.freeze({
   searchPath: "pg_catalog,public", publicExecute: "revoked", runtimeExecuteGrantees: ["worker"],
   functionSource: outboxSource, rollbackDefinition: outboxRollback, deploymentPhase: "session-b-b03-outbox",
   ownerPrivileges: [
-    ["AuditLogOutbox","SELECT",["id","payload","jobType","requestId","payloadDigest","idempotencyKey","organizationId","licenseeId","manufacturerId","initiatingUserId","initiatingActorRoleSnapshot","expiresAt","claimedAt","claimLeaseExpiresAt","status","attempts","nextAttemptAt","lastError","flushedAuditLogId","createdAt","updatedAt"]],
-    ["AuditLogOutbox","INSERT",["id","payload","jobType","requestId","payloadDigest","idempotencyKey","organizationId","licenseeId","manufacturerId","initiatingUserId","initiatingActorRoleSnapshot","expiresAt","lastError","updatedAt"]],
-    ["AuditLogOutbox","UPDATE",["status","attempts","nextAttemptAt","lastError","flushedAuditLogId","claimedAt","claimLeaseExpiresAt","updatedAt"]],
+    ["AuditLogOutbox","SELECT",["authorityProvenance","id","payload","jobType","requestId","payloadDigest","idempotencyKey","organizationId","licenseeId","manufacturerId","initiatingUserId","initiatingActorRoleSnapshot","expiresAt","claimedAt","claimLeaseExpiresAt","status","attempts","nextAttemptAt","lastError","flushedAuditLogId","createdAt","updatedAt"]],
+    ["AuditLogOutbox","INSERT",["authorityProvenance","id","payload","jobType","requestId","payloadDigest","idempotencyKey","organizationId","licenseeId","manufacturerId","initiatingUserId","initiatingActorRoleSnapshot","expiresAt","lastError","updatedAt"]],
+    ["AuditLogOutbox","UPDATE",["authorityProvenance","payloadDigest","idempotencyKey","status","attempts","nextAttemptAt","lastError","flushedAuditLogId","claimedAt","claimLeaseExpiresAt","updatedAt"]],
     ["SecurityEventOutbox","SELECT",["id","eventType","payload","jobType","requestId","payloadDigest","idempotencyKey","organizationId","licenseeId","manufacturerId","initiatingUserId","expiresAt","claimedAt","claimLeaseExpiresAt","sinkEventId","status","attempts","nextAttemptAt","lastError","sentAt","createdAt","updatedAt"]],
     ["SecurityEventOutbox","INSERT",["id","eventType","payload","jobType","requestId","payloadDigest","idempotencyKey","organizationId","licenseeId","manufacturerId","initiatingUserId","expiresAt","updatedAt"]],
     ["SecurityEventOutbox","UPDATE",["status","attempts","nextAttemptAt","lastError","sentAt","claimedAt","claimLeaseExpiresAt","sinkEventId","updatedAt"]],
@@ -1427,6 +1427,21 @@ export const NAMED_SQL_FUNCTION_CONTRACTS = Object.freeze([
     canonicalWorkflowIds:["workflow-http-backend-src-controllers-auth-controller-ts-invite","workflow-http-backend-src-controllers-licensee-invite-controller-ts-resend-licensee-admin-invite"],
     repositoryCallers:["backend/src/rls-waves/session-b/b01/invitationRepository.ts:prepareInvitation"],inputAuthority:"verified capability and token-bound target relationships; actor, tenant, role and manufacturer inputs are selectors only",
     outputColumns:["actorDisplayName","actorEmail","actorUserId","inviteEmail","inviteExpiresAt","inviteId","inviteRole","licenseeName","linkAction","userEmail","userId","userLicenseeId","userName","userOrganizationId","userRole","userStatus","workspaceOrganizationId"],disposableProbes:["administration-mutation-postgres18"],
+  },
+  {
+    id:"b03-stable-json",schema:"app_rls",name:"b03_stable_json",signature:'jsonb',returnType:"text",identityArguments:'p_value jsonb',internalOnly:true,
+    definitionLocation:outboxSource,definitionKind:"checked-in-production-package",definitionStatus:"production-reviewed",security:{...outboxSecurity,runtimeExecuteGrantees:[]},
+    tableCommands:[["AuditLogOutbox","INSERT"]],context:"Private audit record integrity/compatibility helper; never a runtime authorization entrypoint.",canonicalWorkflowIds:[],repositoryCallers:["backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql"],inputAuthority:"existing attributed producer or persisted row under the claim RLS boundary",outputColumns:[],disposableProbes:["b03-outbox-postgres18"],
+  },
+  {
+    id:"b03-complete-audit-record",schema:"app_rls",name:"b03_complete_audit_record",signature:'',returnType:"trigger",identityArguments:'',internalOnly:true,
+    definitionLocation:outboxSource,definitionKind:"checked-in-production-package",definitionStatus:"production-reviewed",security:{...outboxSecurity,runtimeExecuteGrantees:[]},
+    tableCommands:[["AuditLogOutbox","INSERT"]],context:"Private audit record integrity/compatibility helper; never a runtime authorization entrypoint.",canonicalWorkflowIds:[],repositoryCallers:["backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql"],inputAuthority:"existing attributed producer or persisted row under the claim RLS boundary",outputColumns:[],disposableProbes:["b03-outbox-postgres18"],
+  },
+  {
+    id:"b03-audit-record-valid",schema:"app_rls",name:"b03_audit_record_valid",signature:'public."AuditLogOutbox"',returnType:"boolean",identityArguments:'p_record public."AuditLogOutbox"',internalOnly:true,
+    definitionLocation:outboxSource,definitionKind:"checked-in-production-package",definitionStatus:"production-reviewed",security:{...outboxSecurity,runtimeExecuteGrantees:[]},
+    tableCommands:[["AuditLogOutbox","INSERT"]],context:"Private audit record integrity/compatibility helper; never a runtime authorization entrypoint.",canonicalWorkflowIds:[],repositoryCallers:["backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql"],inputAuthority:"existing attributed producer or persisted row under the claim RLS boundary",outputColumns:[],disposableProbes:["b03-outbox-postgres18"],
   },
   {
     id:"b03-enqueue-audit-outbox",schema:"app_rls",name:"enqueue_audit_log_outbox",signature:"jsonb,text,text,text,text,text,text,text,text,timestamp without time zone,text",returnType:"TABLE(id text)",identityArguments:"p_payload jsonb, p_payload_digest text, p_idempotency_key text, p_request_id text, p_organization_id text, p_licensee_id text, p_manufacturer_id text, p_initiating_user_id text, p_initiating_actor_role text, p_expires_at timestamp without time zone, p_initial_error_code text",definitionLocation:outboxSource,definitionKind:"checked-in-production-package",definitionStatus:"production-reviewed",security:{...outboxSecurity,runtimeExecuteGrantees:["app"]},tableCommands:[["AuditLogOutbox","SELECT"],["AuditLogOutbox","INSERT"]],context:"Requires an already verified authenticated-session binding, freezes actor and tenant authority outside JSON and enqueues one digest-bound recovery record.",canonicalWorkflowIds:[auditQueueWorkflow],repositoryCallers:["backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:enqueueAuditLogOutbox"],inputAuthority:"verified session plus immutable digest and idempotency key",outputColumns:["id"],disposableProbes:["b03-outbox-postgres18"],

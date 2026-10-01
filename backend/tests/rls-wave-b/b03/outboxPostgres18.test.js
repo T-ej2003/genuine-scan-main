@@ -1,6 +1,8 @@
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const http = require("node:http");
+const fs = require("node:fs");
+const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 
 const enabled = process.env.MSCQR_B03_OUTBOX_POSTGRES18_TEST === "true";
@@ -67,7 +69,7 @@ async function main() {
     await tx.$queryRaw(Prisma.sql`SELECT * FROM app_auth.require_authenticated_session(${capability},${purpose},${requestId()})`);
     return callback(tx);
   });
-  const auditPayload = (suffix) => ({ userId: ids.user, orgId: ids.org, licenseeId: ids.licensee, action: `B03_${suffix}`, entityType: "Certification", entityId: suffix, details: { suffix } });
+  const auditPayload = (suffix) => ({ userId: ids.user, orgId: ids.org, licenseeId: ids.licensee, action: `B03_${suffix}`, entityType: "Certification", entityId: suffix, details: { suffix, at: new Date("2026-10-01T00:00:00.000Z"), omitted: undefined } });
 
   await assert.rejects(app.auditLogOutbox.findMany(), /permission denied/i);
   await assert.rejects(worker.auditLogOutbox.findMany(), /permission denied/i);
@@ -96,6 +98,88 @@ async function main() {
     throw new Error("B03_INJECTED_ROLLBACK");
   }), /B03_INJECTED_ROLLBACK/);
   assert.equal(Number(psql(bootstrapUrl, 'SELECT count(*) FROM public."AuditLogOutbox"')), rollbackBefore);
+
+  // Upgrade fixtures were written under the actual nullable pre-correction shape,
+  // before the current trigger was installed. Recovery must not invent authority.
+  const legacyId = "00000000-0000-4000-8000-000000006101";
+  const legacyDuplicate = "00000000-0000-4000-8000-000000006102";
+  assert.equal(psql(bootstrapUrl, `SELECT ("payloadDigest" IS NULL AND "authorityProvenance" IS NULL)::text FROM public."AuditLogOutbox" WHERE id='${legacyId}'`), "true");
+  await assert.rejects(worker.$transaction(async (tx) => {
+    await repository.claimAuditLogOutboxSlice(tx, { attemptedAt: new Date(), batchSize: 1 });
+    throw new Error("LEGACY_CLAIM_ROLLBACK");
+  }), /LEGACY_CLAIM_ROLLBACK/);
+  assert.equal(psql(bootstrapUrl, `SELECT ("payloadDigest" IS NULL)::text FROM public."AuditLogOutbox" WHERE id='${legacyId}'`), "true");
+  const [legacyA, legacyB] = await Promise.all([
+    worker.$transaction((tx) => repository.claimAuditLogOutboxSlice(tx, { attemptedAt: new Date(), batchSize: 1 })),
+    worker2.$transaction((tx) => repository.claimAuditLogOutboxSlice(tx, { attemptedAt: new Date(), batchSize: 1 })),
+  ]);
+  assert.equal(legacyA.length + legacyB.length, 1, "one durable legacy identity must win concurrent recovery");
+  const legacyClaim = [...legacyA, ...legacyB][0];
+  assert.equal(legacyClaim.id, legacyId);
+  await worker.$transaction((tx) => repository.claimAuditLogOutboxSlice(tx, { attemptedAt: new Date(), batchSize: 250 }));
+  assert.equal(psql(bootstrapUrl, `SELECT "lastError" FROM public."AuditLogOutbox" WHERE id='${legacyDuplicate}'`), "B03_AUDIT_RECORD_DUPLICATE");
+  assert.equal(psql(bootstrapUrl, `SELECT "lastError" FROM public."AuditLogOutbox" WHERE id='00000000-0000-4000-8000-000000006103'`), "B03_AUDIT_RECORD_UNRECONSTRUCTABLE");
+  assert.equal(psql(bootstrapUrl, `SELECT status FROM public."AuditLogOutbox" WHERE id='00000000-0000-4000-8000-000000006104'`), "SENT");
+  const recovered = JSON.parse(psql(bootstrapUrl, `SELECT "authorityProvenance" FROM public."AuditLogOutbox" WHERE id='${legacyId}'`));
+  assert.equal(recovered.origin, "legacy-recovery");
+  assert.equal(recovered.originalDigestPresent, false);
+  assert.equal(recovered.recoveryDigestDerived, true);
+  assert.equal(recovered.recordId, legacyId);
+  await assert.rejects(worker.$transaction(async (tx) => {
+    await repository.consumeAuditLogOutbox(tx, { jobId: legacyId, payloadDigest: legacyClaim.payloadDigest, attemptedAt: new Date() });
+    throw new Error("LEGACY_COMPLETION_ROLLBACK");
+  }), /LEGACY_COMPLETION_ROLLBACK/);
+  assert.equal(psql(bootstrapUrl, `SELECT status FROM public."AuditLogOutbox" WHERE id='${legacyId}'`), "QUEUED");
+  const legacyResult = await worker.$transaction((tx) => repository.consumeAuditLogOutbox(tx, { jobId: legacyId, payloadDigest: legacyClaim.payloadDigest, attemptedAt: new Date() }));
+  const legacyReplay = await worker.$transaction((tx) => repository.consumeAuditLogOutbox(tx, { jobId: legacyId, payloadDigest: legacyClaim.payloadDigest, attemptedAt: new Date() }));
+  assert.equal(legacyReplay.replayed, true);
+  assert.equal(legacyReplay.auditLogId, legacyResult.auditLogId);
+  const projected = JSON.parse(psql(bootstrapUrl, `SELECT details FROM public."AuditLog" WHERE id='${legacyResult.auditLogId}'`));
+  assert.equal(projected.auditRecovery.originalDigestPresent, false);
+  assert.equal(projected.auditRecovery.recoveryDigestDerived, true);
+
+  // SQL verifies the existing TypeScript digest byte-for-byte, including number
+  // notation, Unicode ordering, nested arrays and escaping.
+  for (const vector of [{ z: [1e-7, 1e21, -3.25e22, 0.000001], a: { "😀": "x", "\ue000": "y", "line": "a\nb" } }, { n: 1.2345678901234567e-20 }]) {
+    const json = JSON.stringify(vector).replaceAll("'", "''");
+    assert.equal(psql(bootstrapUrl, `SELECT encode(sha256(convert_to(app_rls.b03_stable_json('${json}'::jsonb),'UTF8')),'hex')`), repository.b03PayloadDigest(vector));
+  }
+  const tampered = auditPayload("TAMPERED");
+  await assert.rejects(authenticated("b03-audit-enqueue", (tx) => repository.enqueueAuditLogOutbox(tx, {
+    ...authority(requestId()), payload: tampered, payloadDigest: "f".repeat(64), idempotencyKey: "e".repeat(64),
+    expiresAt: new Date(Date.now() + 60_000), initialErrorCode: null,
+  })), /B03_AUDIT_DIGEST_MISMATCH|Unique constraint failed/);
+  assert.match(psql(bootstrapUrl, `INSERT INTO public."AuditLogOutbox" (id,payload,"authorityProvenance","updatedAt") VALUES ('${requestId()}','{"action":"FORGED","entityType":"Certification"}','{"version":1}',transaction_timestamp())`, true), /B03_AUDIT_RECORD_DENIED/);
+
+  // All 19 writes share one table trigger. Replay the three exact persistence
+  // shapes used by the 17 canonical SQL producers; business checks are unchanged.
+  const producerFiles = ["session-b/b01/b01PreAuthSecurityFunctions.sql", "session-b/b01/b01RefreshRotationFunctions.sql", "session-b/b01/b01AuthenticationClosureFunctions.sql", "session-b/b03/b03OutboxFunctions.sql", "session-b/b03/scheduledJobIdentityFunctions.sql", "session-c/c03/c03AuthenticatedBoundaries.sql"];
+  const producedIds = [];
+  for (const file of producerFiles) {
+    const source = fs.readFileSync(path.join(__dirname, "../../../src/rls-waves", file), "utf8");
+    for (const match of source.matchAll(/INSERT INTO public\."AuditLogOutbox"/g)) {
+      const name = [...source.slice(0, match.index).matchAll(/CREATE OR REPLACE FUNCTION ([^(]+)/g)].at(-1)[1];
+      const columns = source.slice(match.index, source.indexOf("VALUES", match.index));
+      const rowId = requestId(); producedIds.push(rowId);
+      const request = requestId();
+      const payload = JSON.stringify({ ...auditPayload(name), details: { producer: name } }).replaceAll("'", "''");
+      const full = columns.includes('"requestId"');
+      const suppliedDigest = columns.includes('"payloadDigest"');
+      const fields = full ? ',"requestId","organizationId","licenseeId","initiatingUserId","expiresAt"' : '';
+      const values = full ? `,'${request}','${ids.org}','${ids.licensee}','${ids.user}',transaction_timestamp()+interval '1 day'` : '';
+      const digestFields = suppliedDigest ? ',"payloadDigest","idempotencyKey"' : '';
+      const digestValue = `encode(sha256(convert_to('${payload}'::jsonb::text,'UTF8')),'hex')`;
+      const digestValues = suppliedDigest ? `,${digestValue},encode(sha256(convert_to('AUDIT_LOG_RECOVERY:${request}:'||${digestValue},'UTF8')),'hex')` : '';
+      psql(bootstrapUrl, `INSERT INTO public."AuditLogOutbox" (id,payload,"updatedAt"${fields}${digestFields}) VALUES ('${rowId}','${payload}',transaction_timestamp()${values}${digestValues})`);
+      assert.equal(psql(bootstrapUrl, `SELECT app_rls.b03_audit_record_valid(q)::text FROM public."AuditLogOutbox" q WHERE q.id='${rowId}'`), "true", name);
+    }
+  }
+  assert.equal(producedIds.length, 19);
+  const shapeClaims = await worker.$transaction((tx) => repository.claimAuditLogOutboxSlice(tx, { attemptedAt: new Date(), batchSize: 250 }));
+  assert.equal(shapeClaims.length, 19);
+  for (const claim of shapeClaims) {
+    await worker.$transaction((tx) => repository.consumeAuditLogOutbox(tx, { jobId: claim.id, payloadDigest: claim.payloadDigest, attemptedAt: new Date() }));
+  }
 
   const raceRequest = requestId();
   const raceId = await authenticated("b03-audit-enqueue", (tx) => auditOutbox.queueAuditLogOutbox(auditPayload("RACE"), undefined, tx, authority(raceRequest)));
@@ -128,6 +212,13 @@ async function main() {
   const [failureClaim] = await worker.$transaction((tx) => repository.claimAuditLogOutboxSlice(tx, { attemptedAt: new Date(), batchSize: 1 }));
   const failed = await worker.$transaction((tx) => repository.failAuditLogOutbox(tx, { jobId: failureClaim.id, payloadDigest: failureClaim.payloadDigest, attemptedAt: new Date(), attempt: failureClaim.attempt, errorCode: "CERTIFIED_FAILURE" }));
   assert.equal(failed.terminal, false);
+  psql(bootstrapUrl, `UPDATE public."AuditLogOutbox" SET "nextAttemptAt"=transaction_timestamp(),"claimLeaseExpiresAt"=NULL WHERE id='${failureClaim.id}'`);
+  const [retryClaim] = await worker.$transaction((tx) => repository.claimAuditLogOutboxSlice(tx, { attemptedAt: new Date(), batchSize: 1 }));
+  assert.equal(retryClaim.id, failureClaim.id);
+  assert.equal(retryClaim.attempt, 2);
+  await assert.rejects(worker.$transaction((tx) => repository.consumeAuditLogOutbox(tx, { jobId: retryClaim.id, payloadDigest: "f".repeat(64), attemptedAt: new Date() })), /B03_OUTBOX_DENIED/);
+  await worker.$transaction((tx) => repository.consumeAuditLogOutbox(tx, { jobId: retryClaim.id, payloadDigest: retryClaim.payloadDigest, attemptedAt: new Date() }));
+
 
   const serverEvents = [];
   const server = http.createServer((req, res) => {
@@ -150,19 +241,21 @@ async function main() {
     await new Promise((resolve) => server.close(resolve));
   }
 
-  const mismatchKey = sha("b03-fixed-key");
+  const fixedRequest = requestId();
   const firstPayload = { action: "FIRST", entityType: "Certification" };
+  const mismatchKey = sha(`AUDIT_LOG_RECOVERY:${fixedRequest}:${repository.b03PayloadDigest(firstPayload)}`);
   await authenticated("b03-audit-enqueue", (tx) => repository.enqueueAuditLogOutbox(tx, {
-    ...authority(requestId()), payload: firstPayload, payloadDigest: repository.b03PayloadDigest(firstPayload), idempotencyKey: mismatchKey,
+    ...authority(fixedRequest), payload: firstPayload, payloadDigest: repository.b03PayloadDigest(firstPayload), idempotencyKey: mismatchKey,
     expiresAt: new Date(Date.now() + 60_000), initialErrorCode: null,
   }));
   const secondPayload = { action: "SECOND", entityType: "Certification" };
   await assert.rejects(authenticated("b03-audit-enqueue", (tx) => repository.enqueueAuditLogOutbox(tx, {
-    ...authority(requestId()), payload: secondPayload, payloadDigest: repository.b03PayloadDigest(secondPayload), idempotencyKey: mismatchKey,
+    ...authority(fixedRequest), payload: secondPayload, payloadDigest: repository.b03PayloadDigest(secondPayload), idempotencyKey: mismatchKey,
     expiresAt: new Date(Date.now() + 60_000), initialErrorCode: null,
   })), /B03_OUTBOX_REPLAY_MISMATCH|Unique constraint/);
 
-  psql(bootstrapUrl, `INSERT INTO public."AuditLogOutbox" (id,payload,"jobType","requestId","payloadDigest","idempotencyKey","organizationId","licenseeId","initiatingUserId","expiresAt","updatedAt") VALUES ('${requestId()}', '{"action":"EXPIRED","entityType":"Certification"}', 'AUDIT_LOG_RECOVERY','${requestId()}','${sha("expired-payload")}','${sha("expired-key")}','${ids.org}','${ids.licensee}','${ids.user}',transaction_timestamp()-interval '1 minute',transaction_timestamp())`);
+  const expiredId = requestId();
+  psql(bootstrapUrl, `INSERT INTO public."AuditLogOutbox" (id,payload,"jobType","requestId","organizationId","licenseeId","initiatingUserId","expiresAt","updatedAt") VALUES ('${expiredId}', '{"action":"EXPIRED","entityType":"Certification"}', 'AUDIT_LOG_RECOVERY','${requestId()}','${ids.org}','${ids.licensee}','${ids.user}',transaction_timestamp()+interval '1 minute',transaction_timestamp()); UPDATE public."AuditLogOutbox" SET "expiresAt"=transaction_timestamp()-interval '1 minute' WHERE id='${expiredId}'`);
   const activeClaims = await worker.$transaction((tx) => repository.claimAuditLogOutboxSlice(tx, { attemptedAt: new Date(), batchSize: 250 }));
   assert(activeClaims.every(({ expiresAt }) => expiresAt.getTime() > Date.now() - 1000));
 

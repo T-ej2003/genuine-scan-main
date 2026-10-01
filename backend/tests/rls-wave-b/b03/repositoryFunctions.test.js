@@ -161,3 +161,10 @@ main().catch((error) => {
   console.error(error);
   process.exit(1);
 });
+
+// Digest the representation that PostgreSQL receives, not transient JS values.
+const digestRepository = require("../../../dist/rls-waves/session-b/b03/repositoryFunctions");
+const sourcePayload = { at: new Date("2026-10-01T00:00:00.000Z"), omitted: undefined, nested: [undefined, NaN] };
+assert.equal(digestRepository.b03PayloadDigest(sourcePayload), digestRepository.b03PayloadDigest(JSON.parse(JSON.stringify(sourcePayload))));
+assert.equal(digestRepository.b03PayloadDigest({ b: 2, a: 1 }), digestRepository.b03PayloadDigest({ a: 1, b: 2 }));
+assert.notEqual(digestRepository.b03PayloadDigest({ a: 1 }), digestRepository.b03PayloadDigest({ a: 2 }));

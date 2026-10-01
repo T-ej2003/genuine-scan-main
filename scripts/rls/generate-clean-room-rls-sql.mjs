@@ -1694,6 +1694,14 @@ ${setRole(roleNames.authOwner)}
 ${outboxFunctionSource}
 ${outboxAppSignatures.map((signature) => `GRANT EXECUTE ON FUNCTION ${signature} TO ${q(roleNames.app)};`).join("\n")}
 ${outboxWorkerSignatures.map((signature) => `GRANT EXECUTE ON FUNCTION ${signature} TO ${q(roleNames.worker)};`).join("\n")}
+GRANT EXECUTE ON FUNCTION app_rls.b03_complete_audit_record() TO ${q(roleNames.owner)};
+${resetRole}
+${setRole(roleNames.owner)}
+CREATE OR REPLACE TRIGGER b03_complete_audit_record BEFORE INSERT ON public."AuditLogOutbox"
+FOR EACH ROW EXECUTE FUNCTION app_rls.b03_complete_audit_record();
+${resetRole}
+${setRole(roleNames.authOwner)}
+REVOKE EXECUTE ON FUNCTION app_rls.b03_complete_audit_record() FROM ${q(roleNames.owner)};
 ${resetRole}
 ${setRole(roleNames.owner)}
 REVOKE CREATE ON SCHEMA app_rls FROM ${q(roleNames.authOwner)};
