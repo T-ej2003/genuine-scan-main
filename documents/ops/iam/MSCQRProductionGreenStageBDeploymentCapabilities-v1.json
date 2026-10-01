@@ -15663,6 +15663,30 @@
       "mutation": true
     },
     {
+      "id": "runtime-dynamodb-conditioncheckitem",
+      "phase": "runtime-activation-boundary",
+      "identity": "SERVICE_RUNTIME",
+      "executor": "lambda-or-ecs-role",
+      "sourceFile": "infra/aws/terraform/production-green-stage-b/main.tf",
+      "sourceFunction": "generated runtime IAM policy",
+      "action": "dynamodb:ConditionCheckItem",
+      "resources": [
+        "terraform-derived-runtime-resource"
+      ],
+      "context": {},
+      "classification": "SERVICE_RUNTIME_ACTION",
+      "probe": "structural",
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-b/main.tf",
+        "sid": "terraform-generated",
+        "livePolicyArn": "created-or-updated-by-stage-b",
+        "expectedVersion": "saved-plan",
+        "expectedPolicySha256": null
+      },
+      "required": false,
+      "mutation": true
+    },
+    {
       "id": "runtime-dynamodb-deleteitem",
       "phase": "runtime-activation-boundary",
       "identity": "SERVICE_RUNTIME",
