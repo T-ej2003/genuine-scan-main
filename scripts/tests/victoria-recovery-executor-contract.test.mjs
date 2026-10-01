@@ -11,6 +11,7 @@ const env = () => ({
   VICTORIA_RECOVERY_IMAGE: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-victoria-recovery@sha256:${"a".repeat(64)}`,
   VICTORIA_RDS_HOST: "mscqr-prod.cluster-abcdefghijkl.eu-west-2.rds.amazonaws.com",
   VICTORIA_RECOVERY_EVIDENCE_BUCKET: "mscqr-victoria-recovery-evidence",
+  VICTORIA_RECOVERY_EVIDENCE_KMS_KEY_ARN: "arn:aws:kms:eu-west-2:368992683803:key/123e4567-e89b-42d3-a456-426614174001",
   VICTORIA_RECOVERY_SIGNING_KEY_ARN: "arn:aws:kms:eu-west-2:368992683803:key/123e4567-e89b-42d3-a456-426614174000",
   VICTORIA_RECOVERY_LOG_GROUP: "/ecs/mscqr-production/victoria-recovery",
 });
@@ -35,6 +36,7 @@ test("task renderer rejects substituted image, roles, endpoint, evidence bucket,
     VICTORIA_RECOVERY_EXECUTION_ROLE_ARN: "arn:aws:iam::368992683803:role/admin",
     VICTORIA_RDS_HOST: "public.example.com",
     VICTORIA_RECOVERY_EVIDENCE_BUCKET: "OTHER_BUCKET",
+    VICTORIA_RECOVERY_EVIDENCE_KMS_KEY_ARN: "arn:aws:kms:us-east-1:111122223333:key/123e4567-e89b-42d3-a456-426614174001",
     VICTORIA_RECOVERY_SIGNING_KEY_ARN: "arn:aws:kms:us-east-1:111122223333:key/123e4567-e89b-42d3-a456-426614174000",
   })) assert.throws(() => renderTaskDefinition({ ...env(), [key]: value }), key);
 });
@@ -58,15 +60,19 @@ test("workflow and broker accept one fixed operation and always attempt authorit
   assert.match(broker, /\["PENDING", "RUNNING"\]/);
   assert.match(broker, /activeRecoveryTasks\(cluster\)/);
   assert.match(broker, /StopTaskCommand/);
-  assert.doesNotMatch(broker, /ListTasksCommand\(\{ cluster, startedBy: event\.nonce, /);
+  assert.doesNotMatch(broker, /ListTasksCommand\(\{ cluster, startedBy: event\.nonce, (?:family|desiredStatus):/);
   assert.match(broker, /AuthorizationNonce/);
   assert.match(broker, /SourceSha/);
   assert.match(broker, /cleanupStoppedTaskEvent/);
   assert.match(broker, /networkAuthorityRevoked, taskStopped/);
+  assert.match(broker, /noTaskLaunchProven: !runTaskAttempted/);
+  assert.ok(broker.indexOf("AuthorizeSecurityGroupIngressCommand({") > broker.indexOf("try {", broker.indexOf("let runTaskAttempted")),
+    "ingress creation must be inside the launch cleanup boundary");
+  assert.doesNotMatch(broker, /SecurityGroupRuleIds: \[ingress\.SecurityGroupRules\[0\]\.SecurityGroupRuleId\]/);
   assert.match(broker, /stopVictoriaRecoveryTasks/);
   assert.match(broker, /persistVictoriaRecoveryCleanup/);
   assert.doesNotMatch(broker, /ListTasksCommand\(\{ cluster, startedBy: event\.nonce, desiredStatus:/);
-  assert.match(taskCleanup, /listTasks\(\{ startedBy: nonce \}\)/);
+  assert.match(taskCleanup, /listTasks\(\{ cluster, startedBy: nonce \}\)/);
   assert.match(taskCleanup, /RECOVERY_CLEANUP_INCOMPLETE_EVIDENCE_PERSISTED/);
   assert.ok(taskCleanup.indexOf("await putEvidence(receipt)") < taskCleanup.indexOf("RECOVERY_CLEANUP_INCOMPLETE_EVIDENCE_PERSISTED"),
     "cleanup failure evidence is written before the broker fails");
@@ -81,6 +87,25 @@ test("workflow and broker accept one fixed operation and always attempt authorit
   assert.match(infrastructure, /resource "aws_vpc_security_group_egress_rule" "dns_tcp"/);
   assert.match(infrastructure, /\$\{cidrhost\(var\.vpc_cidr_block, 2\)\}\/32/);
   assert.doesNotMatch(infrastructure, /aws_vpc_security_group_ingress_rule/);
+});
+
+test("broker IAM permits only tag-on-RunTask for the fixed recovery task identity", () => {
+  const infrastructure = read("../../infra/aws/terraform/production-victoria-recovery/main.tf");
+  const broker = read("../../infra/aws/terraform/lambda/victoria-recovery-broker/index.mjs");
+  assert.match(broker, /new RunTaskCommand\(\{[\s\S]*?tags: \[\{ key: "Operation", value: OPERATION \}, \{ key: "AuthorizationNonce", value: event\.nonce \}, \{ key: "SourceSha", value: event\.sourceSha \}\]/);
+  assert.match(infrastructure, /Action = "ecs:TagResource", Resource = "arn:aws:ecs:eu-west-2:368992683803:task\/mscqr-prod-euw2-main\/\*"/);
+  assert.match(infrastructure, /"ecs:CreateAction" = "RunTask"/);
+  assert.match(infrastructure, /"aws:RequestTag\/Operation" = local\.common_tags\.Operation/);
+  assert.match(infrastructure, /"aws:TagKeys" = \["Operation", "AuthorizationNonce", "SourceSha"\]/);
+  assert.doesNotMatch(infrastructure, /Action = "ecs:TagResource", Resource = "\*"/);
+  assert.match(infrastructure, /s3:GetObject"[^\n]+\/authorizations\/\*"[^\n]+\/tasks\/\*"/);
+  assert.match(infrastructure, /Action = "ecs:DescribeTaskDefinition", Resource = "\*"/);
+  assert.doesNotMatch(infrastructure, /kms:Encrypt/);
+  assert.match(infrastructure, /s3:x-amz-server-side-encryption-aws-kms-key-id/);
+  for (const source of [broker, read("../../backend/scripts/victoria-failed-onboarding-recovery.mjs")]) {
+    assert.match(source, /ServerSideEncryption: "aws:kms", SSEKMSKeyId:/);
+  }
+  assert.match(read("../aws/publish-victoria-recovery-authorization.mjs"), /--ssekms-key-id/);
 });
 
 test("database failure and postcondition failure abort the Prisma serializable transaction", () => {
@@ -105,4 +130,6 @@ test("every source bound into the authorization checksum is present in the execu
   const executor = read("../../backend/scripts/victoria-failed-onboarding-recovery.mjs");
   assert.match(executor, /container\.Image !== image/);
   assert.match(executor, /\(\?:@\)\?sha256:/);
+  assert.match(executor, /4\[0-9a-f\]\{3\}-\[89ab\]\[0-9a-f\]\{3\}/);
+  assert.doesNotMatch(executor, /4\[0-9a-f\]\{4\}-\[89ab\]/);
 });

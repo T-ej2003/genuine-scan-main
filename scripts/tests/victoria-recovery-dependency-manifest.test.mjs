@@ -18,13 +18,15 @@ function modelRelations() {
       if (!relation) continue;
       const [, , target, args = ""] = relation;
       const column = args.match(/fields:\s*\[([^\]]+)\]/)?.[1]?.trim();
+      const parentColumn = args.match(/references:\s*\[([^\]]+)\]/)?.[1]?.trim();
       assert.ok(column, `relation ${table}.${relation[1]} must declare a scalar FK`);
+      assert.ok(parentColumn, `relation ${table}.${relation[1]} must declare its referenced parent column`);
       const scalar = body.split("\n").find((candidate) => new RegExp(`^\\s*${column}\\s+`).test(candidate));
       assert.ok(scalar, `scalar ${table}.${column} must exist`);
       const nullable = new RegExp(`^\\s*${column}\\s+\\w+\\?`).test(scalar);
       const explicitAction = args.match(/onDelete:\s*(\w+)/)?.[1];
       const action = explicitAction === "Cascade" ? "CASCADE" : explicitAction === "SetNull" ? "SET NULL" : explicitAction === "Restrict" ? "RESTRICT" : undefined;
-      relations.push({ table, column, target: `${target}.id`, nullable, onDelete: action || (nullable ? "SET NULL" : "RESTRICT") });
+      relations.push({ table, column, target: `${target}.${parentColumn}`, nullable, onDelete: action || (nullable ? "SET NULL" : "RESTRICT") });
     }
   }
   return relations.sort((a, b) => `${a.table}.${a.column}`.localeCompare(`${b.table}.${b.column}`));

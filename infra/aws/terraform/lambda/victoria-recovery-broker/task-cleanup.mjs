@@ -1,21 +1,36 @@
 const OPERATION = "VICTORIA_FAILED_ONBOARDING_RECOVERY_V1";
+const TARGET = "victoria@mscqr.com";
 const FAMILY = "mscqr-production-victoria-recovery";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA = /^[a-f0-9]{40}$/;
 const ACTIVE = new Set(["PROVISIONING", "PENDING", "ACTIVATING", "RUNNING"]);
 const STOPPING = new Set(["DEACTIVATING", "STOPPING", "DEPROVISIONING"]);
 
-export async function stopVictoriaRecoveryTasks({ cluster, nonce, sourceSha, knownTaskArns = [], listTasks, describeTasks, stopTask, waitStopped }) {
+export function victoriaRecoveryIngressRules(rules, { databaseSecurityGroup, recoverySecurityGroup, nonce, sourceSha }) {
+  const expectedTags = { Operation: OPERATION, Target: TARGET, AuthorizationNonce: nonce, SourceSha: sourceSha };
+  return (rules || []).filter((rule) => {
+    const tags = Object.fromEntries((rule.Tags || []).map(({ Key, Value }) => [Key, Value]));
+    return !rule.IsEgress && rule.GroupId === databaseSecurityGroup && rule.IpProtocol === "tcp"
+      && rule.FromPort === 5432 && rule.ToPort === 5432
+      && rule.ReferencedGroupInfo?.GroupId === recoverySecurityGroup
+      && rule.Tags?.length === Object.keys(expectedTags).length
+      && Object.keys(tags).length === Object.keys(expectedTags).length
+      && Object.entries(expectedTags).every(([key, value]) => tags[key] === value)
+      && typeof rule.SecurityGroupRuleId === "string";
+  });
+}
+
+export async function stopVictoriaRecoveryTasks({ cluster, nonce, sourceSha, knownTaskArns = [], noTaskLaunchProven = false, listTasks, describeTasks, stopTask, waitStopped }) {
   let failed = !cluster || !UUID.test(nonce || "") || !SHA.test(sourceSha || "");
   let listed = [];
   try {
-    const response = await listTasks({ startedBy: nonce });
+    const response = await listTasks({ cluster, startedBy: nonce });
     listed = response.taskArns || [];
     if (response.nextToken || listed.some((arn) => typeof arn !== "string")) failed = true;
   } catch { failed = true; }
   const taskArns = [...new Set([...knownTaskArns, ...listed])];
   if (taskArns.length > 100) return { taskStopped: false, taskCleanupFailed: true, stoppedTaskCount: 0 };
-  if (!taskArns.length) return { taskStopped: !failed, taskCleanupFailed: failed, stoppedTaskCount: 0 };
+  if (!taskArns.length) return { taskStopped: !failed && noTaskLaunchProven, taskCleanupFailed: failed || !noTaskLaunchProven, stoppedTaskCount: 0 };
 
   let response;
   try { response = await describeTasks({ cluster, tasks: taskArns, include: ["TAGS"] }); }

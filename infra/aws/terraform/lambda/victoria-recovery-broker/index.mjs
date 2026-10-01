@@ -3,7 +3,8 @@ import { EC2Client, AuthorizeSecurityGroupIngressCommand, DescribeSecurityGroupR
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { KMSClient, VerifyCommand } from "@aws-sdk/client-kms";
 import { verifyVictoriaRecoveryAuthorization, victoriaRecoveryImplementationSha256 } from "../../../../../scripts/aws/victoria-recovery-authorization.mjs";
-import { persistVictoriaRecoveryCleanup, stopVictoriaRecoveryTasks } from "./task-cleanup.mjs";
+import { validateVictoriaRecoveryBrokerCleanup, validateVictoriaRecoveryBrokerLaunch } from "../../../../../scripts/aws/victoria-recovery-result.mjs";
+import { persistVictoriaRecoveryCleanup, stopVictoriaRecoveryTasks, victoriaRecoveryIngressRules } from "./task-cleanup.mjs";
 
 const REGION = "eu-west-2";
 const ACCOUNT = "368992683803";
@@ -31,6 +32,7 @@ const readJson = async (bucket, key) => JSON.parse(await (await s3.send(new GetO
 
 export async function handler(event) {
   const bucket = required("EVIDENCE_BUCKET");
+  const evidenceKeyArn = required("EVIDENCE_KMS_KEY_ARN");
   if (event?.source === "aws.ecs" && event?.["detail-type"] === "ECS Task State Change") {
     return cleanupStoppedTaskEvent(event, bucket);
   }
@@ -53,7 +55,7 @@ export async function handler(event) {
   const authKey = `authorizations/${event.nonce}.json`;
   const authorization = await readJson(bucket, authKey);
   const taskDefinition = authorization.executorTaskDefinition;
-  const described = await ecs.send(new DescribeTaskDefinitionCommand({ taskDefinition, include: ["TAGS"] }));
+  const described = await ecs.send(new DescribeTaskDefinitionCommand({ taskDefinition }));
   const definition = described.taskDefinition;
   const container = definition?.containerDefinitions?.length === 1 ? definition.containerDefinitions[0] : null;
   const expectedEntryPoint = ["node", "/app/backend/scripts/victoria-failed-onboarding-recovery.mjs"];
@@ -68,6 +70,7 @@ export async function handler(event) {
       || JSON.stringify(container.environment) !== JSON.stringify([
         { name: "VICTORIA_RDS_HOST", value: databaseHost },
         { name: "VICTORIA_RECOVERY_EVIDENCE_BUCKET", value: bucket },
+        { name: "VICTORIA_RECOVERY_EVIDENCE_KMS_KEY_ARN", value: evidenceKeyArn },
         { name: "VICTORIA_RECOVERY_SIGNING_KEY_ARN", value: keyArn },
       ]) || JSON.stringify(definition.volumes) !== JSON.stringify([{ name: "tmp" }])) {
     throw new Error("RECOVERY_TASK_DEFINITION_BINDING_INVALID");
@@ -76,6 +79,7 @@ export async function handler(event) {
     KeyId: keyId, Message: message, MessageType: "RAW", Signature: signature, SigningAlgorithm: "RSASSA_PSS_SHA_256",
   }))).SignatureValid === true;
   const verified = await verifyVictoriaRecoveryAuthorization(authorization, {
+    nonce: event.nonce,
     sourceSha: event.sourceSha,
     implementationSha256: victoriaRecoveryImplementationSha256(),
     executorImage: container.image,
@@ -91,22 +95,26 @@ export async function handler(event) {
   const receipt = Buffer.from(JSON.stringify({ operation: OPERATION, sourceSha: event.sourceSha, nonce: event.nonce,
     implementationSha256: verified.implementationSha256, taskDefinition: definition.taskDefinitionArn, submittedAt: new Date().toISOString() }));
   await s3.send(new PutObjectCommand({ Bucket: bucket, Key: `invocations/${event.nonce}.json`, Body: receipt,
-    IfNoneMatch: "*", ServerSideEncryption: "aws:kms", ContentType: "application/json" }));
+    IfNoneMatch: "*", ServerSideEncryption: "aws:kms", SSEKMSKeyId: evidenceKeyArn, ContentType: "application/json" }));
   const existingRules = await ec2.send(new DescribeSecurityGroupRulesCommand({ Filters: [
     { Name: "group-id", Values: [databaseSecurityGroup] },
   ] }));
   if ((existingRules.SecurityGroupRules || []).some((rule) => !rule.IsEgress && rule.GroupId === databaseSecurityGroup
       && rule.IpProtocol === "tcp" && rule.FromPort === 5432 && rule.ToPort === 5432
       && rule.ReferencedGroupInfo?.GroupId === recoverySecurityGroup)) throw new Error("RECOVERY_NETWORK_RULE_ALREADY_PRESENT");
-  const ingress = await ec2.send(new AuthorizeSecurityGroupIngressCommand({
-    GroupId: databaseSecurityGroup,
-    IpPermissions: [{ IpProtocol: "tcp", FromPort: 5432, ToPort: 5432, UserIdGroupPairs: [{ GroupId: recoverySecurityGroup, Description: `Temporary ${OPERATION}` }] }],
-    TagSpecifications: [{ ResourceType: "security-group-rule", Tags: [{ Key: "Operation", Value: OPERATION }, { Key: "Target", Value: TARGET }, { Key: "AuthorizationNonce", Value: event.nonce }, { Key: "SourceSha", Value: event.sourceSha }] }],
-  }));
-  if (ingress.SecurityGroupRules?.length !== 1) throw new Error("RECOVERY_NETWORK_AUTHORITY_CREATE_FAILED");
   let response;
   let taskLaunched = false;
+  let runTaskAttempted = false;
   try {
+    const ingress = await ec2.send(new AuthorizeSecurityGroupIngressCommand({
+      GroupId: databaseSecurityGroup,
+      IpPermissions: [{ IpProtocol: "tcp", FromPort: 5432, ToPort: 5432, UserIdGroupPairs: [{ GroupId: recoverySecurityGroup, Description: `Temporary ${OPERATION}` }] }],
+      TagSpecifications: [{ ResourceType: "security-group-rule", Tags: [{ Key: "Operation", Value: OPERATION }, { Key: "Target", Value: TARGET }, { Key: "AuthorizationNonce", Value: event.nonce }, { Key: "SourceSha", Value: event.sourceSha }] }],
+    }));
+    if (ingress.SecurityGroupRules?.length !== 1 || typeof ingress.SecurityGroupRules[0].SecurityGroupRuleId !== "string") {
+      throw new Error("RECOVERY_NETWORK_AUTHORITY_CREATE_FAILED");
+    }
+    runTaskAttempted = true;
     response = await ecs.send(new RunTaskCommand({
     cluster, taskDefinition: definition.taskDefinitionArn, launchType: "FARGATE", count: 1,
     startedBy: event.nonce,
@@ -117,46 +125,50 @@ export async function handler(event) {
     }));
     taskLaunched = response.tasks?.length === 1 && Boolean(response.tasks[0].taskArn);
     if (taskLaunched) await s3.send(new PutObjectCommand({ Bucket: bucket, Key: `tasks/${event.nonce}.json`, Body: JSON.stringify({ operation: OPERATION,
-      sourceSha: event.sourceSha, nonce: event.nonce, taskArn: response.tasks[0].taskArn, taskDefinition: definition.taskDefinitionArn }),
-      IfNoneMatch: "*", ServerSideEncryption: "aws:kms", ContentType: "application/json" }));
+      sourceSha: event.sourceSha, nonce: event.nonce, status: "launched", taskArn: response.tasks[0].taskArn, taskDefinition: definition.taskDefinitionArn }),
+      IfNoneMatch: "*", ServerSideEncryption: "aws:kms", SSEKMSKeyId: evidenceKeyArn, ContentType: "application/json" }));
+    else if (response.failures?.length) await s3.send(new PutObjectCommand({ Bucket: bucket, Key: `tasks/${event.nonce}.json`, Body: JSON.stringify({ operation: OPERATION,
+      sourceSha: event.sourceSha, nonce: event.nonce, status: "not-launched", taskArn: null, taskDefinition: definition.taskDefinitionArn }),
+      IfNoneMatch: "*", ServerSideEncryption: "aws:kms", SSEKMSKeyId: evidenceKeyArn, ContentType: "application/json" }));
     if (!taskLaunched || response.failures?.length) throw new Error("RECOVERY_TASK_LAUNCH_FAILED");
   } catch (error) {
-    if (taskLaunched) {
-      try { await cleanup({ event, bucket, knownTaskArns: [response.tasks[0].taskArn] }); }
-      catch { throw new Error("RECOVERY_PARTIAL_LAUNCH_CLEANUP_FAILED_EVIDENCE_PERSISTED"); }
-      throw new Error("RECOVERY_PARTIAL_LAUNCH_CLEANED");
-    }
     try {
-      await ec2.send(new RevokeSecurityGroupIngressCommand({ GroupId: databaseSecurityGroup, SecurityGroupRuleIds: [ingress.SecurityGroupRules[0].SecurityGroupRuleId] }));
+      await cleanup({ event, bucket, knownTaskArns: taskLaunched ? [response.tasks[0].taskArn] : [],
+        noTaskLaunchProven: !runTaskAttempted || (!taskLaunched && Boolean(response?.failures?.length)) });
     } catch {
-      throw new Error("RECOVERY_LAUNCH_FAILED_NETWORK_CLEANUP_FAILED");
+      throw new Error("RECOVERY_PARTIAL_LAUNCH_CLEANUP_FAILED_EVIDENCE_PERSISTED");
     }
-    throw error;
+    throw new Error(taskLaunched ? "RECOVERY_PARTIAL_LAUNCH_CLEANED" : "RECOVERY_LAUNCH_FAILED_CLEANED", { cause: error });
   }
   const taskArn = response.tasks[0].taskArn;
-  return { operation: OPERATION, sourceSha: event.sourceSha, nonce: event.nonce, taskArn };
+  return validateVictoriaRecoveryBrokerLaunch({ operation: OPERATION, sourceSha: event.sourceSha, nonce: event.nonce, taskArn }, event);
 }
 
-async function cleanup({ event, bucket, knownTaskArns = [] }) {
+async function cleanup({ event, bucket, knownTaskArns = [], noTaskLaunchProven = false }) {
+  const evidenceKeyArn = required("EVIDENCE_KMS_KEY_ARN");
   const cluster = required("ECS_CLUSTER_ARN");
   const databaseSecurityGroup = required("DATABASE_SECURITY_GROUP_ID");
   const recoverySecurityGroup = required("RECOVERY_SECURITY_GROUP_ID");
   let taskState;
   try {
-    if (!knownTaskArns.length) {
+    if (!knownTaskArns.length && !noTaskLaunchProven) {
       try {
         const receipt = await readJson(bucket, `tasks/${event.nonce}.json`);
+        const launched = receipt.status === "launched" && typeof receipt.taskArn === "string"
+          && receipt.taskArn.startsWith(`${cluster.replace(":cluster/", ":task/")}/`);
+        const notLaunched = receipt.status === "not-launched" && receipt.taskArn === null;
         if (receipt.operation !== OPERATION || receipt.sourceSha !== event.sourceSha || receipt.nonce !== event.nonce
-            || typeof receipt.taskArn !== "string" || !receipt.taskArn.startsWith(`${cluster.replace(":cluster/", ":task/")}/`)) {
+            || (!launched && !notLaunched)) {
           throw new Error("RECOVERY_TASK_RECEIPT_INVALID");
         }
-        knownTaskArns = [receipt.taskArn];
+        knownTaskArns = launched ? [receipt.taskArn] : [];
+        noTaskLaunchProven = notLaunched;
       } catch (error) {
         if (error?.name !== "NoSuchKey") throw error;
       }
     }
     taskState = await stopVictoriaRecoveryTasks({
-      cluster, nonce: event.nonce, sourceSha: event.sourceSha, knownTaskArns,
+      cluster, nonce: event.nonce, sourceSha: event.sourceSha, knownTaskArns, noTaskLaunchProven,
       listTasks: (input) => ecs.send(new ListTasksCommand(input)),
       describeTasks: (input) => ecs.send(new DescribeTasksCommand(input)),
       stopTask: (input) => ecs.send(new StopTaskCommand(input)),
@@ -181,9 +193,9 @@ async function cleanup({ event, bucket, knownTaskArns = [] }) {
     const rules = await ec2.send(new DescribeSecurityGroupRulesCommand({ Filters: [
       { Name: "group-id", Values: [databaseSecurityGroup] },
     ] }));
-    const matches = (rules.SecurityGroupRules || []).filter((rule) => !rule.IsEgress && rule.GroupId === databaseSecurityGroup
-      && rule.IpProtocol === "tcp" && rule.FromPort === 5432 && rule.ToPort === 5432
-      && rule.ReferencedGroupInfo?.GroupId === recoverySecurityGroup);
+    const matches = victoriaRecoveryIngressRules(rules.SecurityGroupRules, {
+      databaseSecurityGroup, recoverySecurityGroup, nonce: event.nonce, sourceSha: event.sourceSha,
+    });
     if (matches.length > 1) taskCleanupFailed = true;
     if (matches.length) await ec2.send(new RevokeSecurityGroupIngressCommand({
       GroupId: databaseSecurityGroup, SecurityGroupRuleIds: matches.map(({ SecurityGroupRuleId }) => SecurityGroupRuleId),
@@ -191,9 +203,9 @@ async function cleanup({ event, bucket, knownTaskArns = [] }) {
     const after = await ec2.send(new DescribeSecurityGroupRulesCommand({ Filters: [
       { Name: "group-id", Values: [databaseSecurityGroup] },
     ] }));
-    networkAuthorityRevoked = !(after.SecurityGroupRules || []).some((rule) => !rule.IsEgress && rule.GroupId === databaseSecurityGroup
-      && rule.IpProtocol === "tcp" && rule.FromPort === 5432 && rule.ToPort === 5432
-      && rule.ReferencedGroupInfo?.GroupId === recoverySecurityGroup);
+    networkAuthorityRevoked = victoriaRecoveryIngressRules(after.SecurityGroupRules, {
+      databaseSecurityGroup, recoverySecurityGroup, nonce: event.nonce, sourceSha: event.sourceSha,
+    }).length === 0;
   } catch { taskCleanupFailed = true; }
   if (!networkAuthorityRevoked) taskCleanupFailed = true;
   const stoppedTaskCount = taskState.stoppedTaskCount;
@@ -202,9 +214,10 @@ async function cleanup({ event, bucket, knownTaskArns = [] }) {
     networkAuthorityRevoked, taskStopped, stoppedTaskCount, cleanedAt: new Date().toISOString() }));
   await persistVictoriaRecoveryCleanup({ receipt: JSON.parse(receipt), putEvidence: (value) => s3.send(new PutObjectCommand({
     Bucket: bucket, Key: `cleanups/${event.nonce}.json`, Body: JSON.stringify(value),
-    ServerSideEncryption: "aws:kms", ContentType: "application/json",
+    ServerSideEncryption: "aws:kms", SSEKMSKeyId: evidenceKeyArn, ContentType: "application/json",
   })) });
-  return { operation: OPERATION, sourceSha: event.sourceSha, nonce: event.nonce, networkAuthorityRevoked: true, taskStopped: true };
+  return validateVictoriaRecoveryBrokerCleanup({ operation: OPERATION, sourceSha: event.sourceSha, nonce: event.nonce,
+    networkAuthorityRevoked: true, taskStopped: true }, event);
 }
 
 async function cleanupStoppedTaskEvent(event, bucket) {

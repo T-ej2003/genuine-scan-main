@@ -83,5 +83,5 @@
     {"direction":"outgoing","table":"Invite","column":"acceptedByUserId","target":"User.id","onDelete":"SET NULL","nullable":true,"ownership":"invitation acceptance principal","security":"activation evidence","classification":"HARD_BLOCKER","delete":"covered by User.acceptedByUserId dependency"},
     {"direction":"incoming","table":"InviteActivationChallenge","column":"inviteId","target":"Invite.id","onDelete":"CASCADE","nullable":false,"ownership":"onboarding challenge belongs to one invitation","security":"activation verification","classification":"EPHEMERAL_ONBOARDING","delete":"delete-exact-id"}
   ],
-  "policy": "Any live relation not explicitly classified or any BUSINESS_STATE, SHARED_STATE, HARD_BLOCKER, or UNKNOWN occupancy rejects prune. IMMUTABLE_AUDIT rows survive only through their declared SET NULL FK action; no audit row is explicitly deleted."
+  "policy": "Any live relation not explicitly classified or any BUSINESS_STATE, SHARED_STATE, HARD_BLOCKER, or UNKNOWN occupancy rejects prune. IMMUTABLE_AUDIT occupancy also rejects prune so actor attribution is never rewritten; no audit row is explicitly deleted."
 }

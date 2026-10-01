@@ -12,6 +12,7 @@ export function renderTaskDefinition(env = process.env) {
     image: requiredEnv(env, "VICTORIA_RECOVERY_IMAGE"),
     database_host: requiredEnv(env, "VICTORIA_RDS_HOST"),
     evidence_bucket: requiredEnv(env, "VICTORIA_RECOVERY_EVIDENCE_BUCKET"),
+    evidence_kms_key_arn: requiredEnv(env, "VICTORIA_RECOVERY_EVIDENCE_KMS_KEY_ARN"),
     signing_key_arn: requiredEnv(env, "VICTORIA_RECOVERY_SIGNING_KEY_ARN"),
     log_group: requiredEnv(env, "VICTORIA_RECOVERY_LOG_GROUP"),
   };
@@ -20,6 +21,7 @@ export function renderTaskDefinition(env = process.env) {
       || !/^arn:aws:iam::368992683803:role\/mscqr-production-victoria-recovery-execution$/.test(bindings.execution_role_arn)
       || !/^[a-z0-9][a-z0-9.-]*\.eu-west-2\.rds\.amazonaws\.com$/.test(bindings.database_host)
       || !/^arn:aws:kms:eu-west-2:368992683803:key\/[a-f0-9-]{36}$/.test(bindings.signing_key_arn)
+      || !/^arn:aws:kms:eu-west-2:368992683803:key\/[a-f0-9-]{36}$/.test(bindings.evidence_kms_key_arn)
       || !/^[a-z0-9][a-z0-9-]{2,62}$/.test(bindings.evidence_bucket)
       || !/^\/ecs\/mscqr-production\/victoria-recovery$/.test(bindings.log_group)) throw new Error("RECOVERY_TASK_DEFINITION_BINDING_INVALID");
   const template = fs.readFileSync(path.join(root, "infra/aws/terraform/production-victoria-recovery/task-definition.json"), "utf8");

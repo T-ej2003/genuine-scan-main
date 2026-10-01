@@ -35,31 +35,59 @@ function auditRowCounts() {
   return tables.map((table) => `    SELECT ${quote(table)}::text AS table_name,count(*)::bigint AS row_count FROM public.${assertIdentifier(table)}`).join("\n    UNION ALL\n");
 }
 
+export function expectedDependencyCatalog(relations = manifest.liveRelations) {
+  return relations.map(({ table, column, target, onDelete, nullable }) => {
+    const parts = target.split(".");
+    if (parts.length !== 2 || parts.some((part) => !/^[A-Za-z][A-Za-z0-9_]*$/.test(part))) {
+      throw new Error(`Invalid dependency target: ${target}`);
+    }
+    return { childSchema: "public", childTable: table, childColumn: column, parentSchema: "public",
+      parentTable: parts[0], parentColumn: parts[1], deleteAction: onDelete, nullable };
+  });
+}
+
+export function dependencyCatalogDrift(actual, expected = expectedDependencyCatalog()) {
+  const key = (row) => JSON.stringify([row.childSchema, row.childTable, row.childColumn, row.parentSchema,
+    row.parentTable, row.parentColumn, row.deleteAction, row.nullable]);
+  const counts = (rows) => rows.reduce((map, row) => map.set(key(row), (map.get(key(row)) || 0) + 1), new Map());
+  const a = counts(actual), e = counts(expected);
+  return a.size !== e.size || [...new Set([...a.keys(), ...e.keys()])].some((value) => a.get(value) !== e.get(value));
+}
+
 function dependencyCatalogCheck() {
-  const expected = manifest.liveRelations.map(({ table, column, target, onDelete, nullable }) =>
-    `      (${quote(table)},${quote(column)},${quote(target.split(".")[0])},${quote(onDelete)},${nullable})`).join(",\n");
-  const targetCount = manifest.liveRelations.length;
-  return `IF (SELECT count(*) FROM pg_catalog.pg_constraint c WHERE c.contype='f'
-       AND c.confrelid IN ('public."User"'::regclass,'public."Invite"'::regclass)) <> ${targetCount}
-     OR EXISTS (
-       SELECT 1 FROM (VALUES
+  const expected = expectedDependencyCatalog().map((row) =>
+    `      (${quote(row.childSchema)},${quote(row.childTable)},${quote(row.childColumn)},${quote(row.parentSchema)},${quote(row.parentTable)},${quote(row.parentColumn)},${quote(row.deleteAction)},${row.nullable})`).join(",\n");
+  return `IF EXISTS (
+       SELECT 1 FROM pg_catalog.pg_constraint c
+       WHERE c.contype='f' AND c.confrelid IN ('public."User"'::regclass,'public."Invite"'::regclass)
+         AND (cardinality(c.conkey)<>1 OR cardinality(c.confkey)<>1)
+     ) OR EXISTS (
+       WITH expected(child_schema,child_table,child_column,parent_schema,parent_table,parent_column,delete_action,is_nullable) AS (VALUES
 ${expected}
-       ) AS expected(table_name,column_name,target_name,delete_action,is_nullable)
-       WHERE NOT EXISTS (
-         SELECT 1 FROM pg_catalog.pg_constraint c
+       ), actual AS (
+         SELECT child_ns.nspname,child.relname,child_attr.attname,parent_ns.nspname,parent.relname,parent_attr.attname,
+           CASE c.confdeltype WHEN 'c' THEN 'CASCADE' WHEN 'n' THEN 'SET NULL'
+             WHEN 'r' THEN 'RESTRICT' WHEN 'a' THEN 'NO ACTION' ELSE 'UNKNOWN' END,
+           NOT child_attr.attnotnull
+         FROM pg_catalog.pg_constraint c
          JOIN pg_catalog.pg_class child ON child.oid=c.conrelid
          JOIN pg_catalog.pg_namespace child_ns ON child_ns.oid=child.relnamespace
          JOIN pg_catalog.pg_class parent ON parent.oid=c.confrelid
          JOIN pg_catalog.pg_namespace parent_ns ON parent_ns.oid=parent.relnamespace
          JOIN pg_catalog.pg_attribute child_attr ON child_attr.attrelid=child.oid AND child_attr.attnum=c.conkey[1]
          JOIN pg_catalog.pg_attribute parent_attr ON parent_attr.attrelid=parent.oid AND parent_attr.attnum=c.confkey[1]
-         WHERE c.contype='f' AND child_ns.nspname='public' AND child.relname=expected.table_name
-           AND child_attr.attname=expected.column_name AND parent_ns.nspname='public' AND parent.relname=expected.target_name
+         WHERE c.contype='f' AND c.confrelid IN ('public."User"'::regclass,'public."Invite"'::regclass)
            AND cardinality(c.conkey)=1 AND cardinality(c.confkey)=1
-           AND (NOT child_attr.attnotnull)=expected.is_nullable
-           AND CASE c.confdeltype WHEN 'c' THEN 'CASCADE' WHEN 'n' THEN 'SET NULL'
-             WHEN 'r' THEN 'RESTRICT' WHEN 'a' THEN 'NO ACTION' ELSE 'UNKNOWN' END=expected.delete_action
+       ), differences AS (
+         (SELECT child_schema,child_table,child_column,parent_schema,parent_table,parent_column,delete_action,is_nullable FROM expected
+          EXCEPT ALL
+          SELECT child_schema,child_table,child_column,parent_schema,parent_table,parent_column,delete_action,is_nullable FROM actual)
+         UNION ALL
+         (SELECT child_schema,child_table,child_column,parent_schema,parent_table,parent_column,delete_action,is_nullable FROM actual
+          EXCEPT ALL
+          SELECT child_schema,child_table,child_column,parent_schema,parent_table,parent_column,delete_action,is_nullable FROM expected)
        )
+       SELECT 1 FROM differences
      ) THEN
     REVOKE EXECUTE ON FUNCTION app_ops.victoria_failed_onboarding_recovery_v1() FROM "mscqr_prod_victoria_recovery";
     RETURN jsonb_build_object('operation','VICTORIA_FAILED_ONBOARDING_RECOVERY_V1','targetEmail','victoria@mscqr.com',
@@ -79,6 +107,20 @@ function forcedRlsCheck() {
   END IF;`;
 }
 
+function mutationTriggerCheck() {
+  return `IF EXISTS (
+       SELECT 1 FROM pg_catalog.pg_trigger t
+       JOIN pg_catalog.pg_class c ON c.oid=t.tgrelid
+       JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+       WHERE NOT t.tgisinternal AND n.nspname='public'
+         AND c.relname IN ('User','Invite','InviteActivationChallenge','PasswordReset','EmailVerificationToken')
+     ) THEN
+    REVOKE EXECUTE ON FUNCTION app_ops.victoria_failed_onboarding_recovery_v1() FROM "mscqr_prod_victoria_recovery";
+    RETURN jsonb_build_object('operation','VICTORIA_FAILED_ONBOARDING_RECOVERY_V1','targetEmail','victoria@mscqr.com',
+      'targetDatabase','mscqr_production','pruneSafe',false,'pruneComplete',false,'reason','SCHEMA_TRIGGER_DRIFT');
+  END IF;`;
+}
+
 export function renderVictoriaRecoverySql() {
   const template = fs.readFileSync(templatePath, "utf8");
   if (manifest.operation !== "VICTORIA_FAILED_ONBOARDING_RECOVERY_V1" || manifest.targetEmail !== "victoria@mscqr.com"
@@ -88,6 +130,7 @@ export function renderVictoriaRecoverySql() {
   const rendered = template.replace("{{DEPENDENCY_COUNTS}}", dependencyCounts()).replaceAll("{{AUDIT_ROW_COUNTS}}", auditRowCounts())
     .replace("{{DEPENDENCY_CATALOG_CHECK}}", dependencyCatalogCheck())
     .replace("{{FORCED_RLS_CHECK}}", forcedRlsCheck())
+    .replace("{{MUTATION_TRIGGER_CHECK}}", mutationTriggerCheck())
     .replaceAll("{{VICTORIA_RECOVERY_ROLE}}", '"mscqr_prod_victoria_recovery"');
   if (/\{\{(?!AUTH_OWNER\}\})[A-Z_]+\}\}/.test(rendered) || /\bEXECUTE\s+(?:format|immediate)\b|\bformat\s*\(/i.test(rendered)) throw new Error("Generated recovery SQL contains an unresolved template or dynamic SQL.");
   return rendered;

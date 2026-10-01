@@ -2,7 +2,7 @@
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
-import { canonicalSha256 } from "./production-green-stage-b-contract.mjs";
+import { canonicalSha256 } from "./stage-b-task-definition-recovery-contract.mjs";
 
 export const PRODUCTION_ENVIRONMENT_APPROVAL = Object.freeze({
   kind: "GITHUB_PROTECTED_ENVIRONMENT_APPROVAL",

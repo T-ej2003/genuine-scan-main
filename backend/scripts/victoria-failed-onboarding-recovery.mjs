@@ -9,7 +9,7 @@ import { validateVictoriaRecoveryResult } from "../../scripts/aws/victoria-recov
 const REGION = "eu-west-2";
 const TASK_FAMILY = "mscqr-production-victoria-recovery";
 const { operation: OPERATION, email: TARGET_EMAIL, database: TARGET_DATABASE } = VICTORIA_RECOVERY_IDENTITY;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const required = (value, name) => {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${name}_MISSING`);
   return value.trim();
@@ -57,6 +57,7 @@ async function verifyKms({ keyId, message, signature }) {
 
 async function run() {
   const bucket = required(process.env.VICTORIA_RECOVERY_EVIDENCE_BUCKET, "VICTORIA_RECOVERY_EVIDENCE_BUCKET");
+  const evidenceKeyArn = required(process.env.VICTORIA_RECOVERY_EVIDENCE_KMS_KEY_ARN, "VICTORIA_RECOVERY_EVIDENCE_KMS_KEY_ARN");
   const key = required(process.env.VICTORIA_RECOVERY_AUTHORIZATION_KEY, "VICTORIA_RECOVERY_AUTHORIZATION_KEY");
   const signingKeyArn = required(process.env.VICTORIA_RECOVERY_SIGNING_KEY_ARN, "VICTORIA_RECOVERY_SIGNING_KEY_ARN");
   const sourceSha = required(process.env.GIT_SHA, "GIT_SHA");
@@ -66,6 +67,7 @@ async function run() {
   const authorization = await readAuthorization(aws, bucket, key);
   const identity = await taskIdentity();
   const verified = await verifyVictoriaRecoveryAuthorization(authorization, {
+    nonce: key.match(/^authorizations\/([^/]+)\.json$/)[1],
     sourceSha,
     implementationSha256: victoriaRecoveryImplementationSha256(),
     executorImage: identity.image,
@@ -79,7 +81,7 @@ async function run() {
   await consumeVictoriaRecoveryNonce(verified, {
     putIfAbsent: async ({ key, body }) => {
       try {
-        await aws.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, IfNoneMatch: "*", ServerSideEncryption: "aws:kms" }));
+        await aws.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, IfNoneMatch: "*", ServerSideEncryption: "aws:kms", SSEKMSKeyId: evidenceKeyArn }));
         return true;
       } catch (error) {
         if (error?.$metadata?.httpStatusCode === 412 || error?.name === "PreconditionFailed" || error?.name === "ConditionalRequestConflict") return false;
@@ -125,7 +127,7 @@ async function run() {
     temporaryAuthorityCleanup: cleanupError === null, result }));
   validateVictoriaRecoveryResult(JSON.parse(evidence), { sourceSha, nonce: verified.nonce, requireSuccess: false });
   await aws.send(new PutObjectCommand({ Bucket: bucket, Key: `results/${verified.nonce}.json`, Body: evidence,
-    ContentType: "application/json", IfNoneMatch: "*", ServerSideEncryption: "aws:kms" }));
+    ContentType: "application/json", IfNoneMatch: "*", ServerSideEncryption: "aws:kms", SSEKMSKeyId: evidenceKeyArn }));
   process.stdout.write(`${JSON.stringify({ operation: OPERATION, targetEmail: TARGET_EMAIL, targetDatabase: TARGET_DATABASE,
     pruneComplete: result?.pruneComplete === true, temporaryAuthorityCleanup: cleanupError === null,
     reason: cleanupError ? "TEMPORARY_AUTHORITY_CLEANUP_FAILED" : transactionError ? "DATABASE_OPERATION_FAILED" : result.reason,

@@ -37,6 +37,7 @@ DECLARE
   shared_state_conflicts integer := 0;
   hard_blockers integer := 0;
   unknown_dependencies integer := 0;
+  audit_history_conflicts integer := 0;
   audit_log_count bigint;
   audit_outbox_count bigint;
   deleted_challenges integer := 0;
@@ -58,6 +59,7 @@ BEGIN
 
 {{FORCED_RLS_CHECK}}
 {{DEPENDENCY_CATALOG_CHECK}}
+{{MUTATION_TRIGGER_CHECK}}
 
   SELECT count(*)::integer INTO user_count FROM public."User" u WHERE lower(btrim(u.email))=target_email;
   IF user_count > 1 THEN RAISE EXCEPTION 'VICTORIA_RECOVERY_DUPLICATE_USERS' USING ERRCODE='40001'; END IF;
@@ -65,9 +67,11 @@ BEGIN
     SELECT u.id,u.status::text,u.role::text,u."isActive",u."lastLoginAt",u."emailVerifiedAt" IS NOT NULL,
            u."disabledAt" IS NOT NULL,u."deletedAt" IS NOT NULL
       INTO user_id,user_status,user_role,user_is_active,last_login_at,email_verified,disabled,deleted
-      FROM public."User" u WHERE lower(btrim(u.email))=target_email;
+      FROM public."User" u WHERE lower(btrim(u.email))=target_email FOR UPDATE;
   END IF;
   PERFORM set_config('app.victoria_recovery_user_id', coalesce(user_id,''), true);
+
+  PERFORM 1 FROM public."Invite" i WHERE lower(btrim(i.email))=target_email ORDER BY i.id FOR UPDATE;
 
   SELECT COALESCE(array_agg(i.id ORDER BY i.id),ARRAY[]::text[]),count(*)::integer,
          count(*) FILTER (WHERE i."usedAt" IS NULL)::integer,
@@ -76,7 +80,7 @@ BEGIN
     INTO invite_ids,invite_count,unused_invite_count,valid_unused_invite,expired_unused_invite
     FROM public."Invite" i WHERE lower(btrim(i.email))=target_email;
   PERFORM set_config('app.victoria_recovery_invite_ids', array_to_string(invite_ids,','), true);
-  -- Deleting by exact IDs acquires row locks; the final User CAS decides races with activation.
+  -- The shared invite advisory lock plus exact User/Invite row locks keep inspection and prune coherent.
 
   SELECT EXISTS (SELECT 1 FROM public."RefreshToken" r WHERE r."userId"=user_id
     AND r."revokedAt" IS NULL AND (r."expiresAt">transaction_timestamp()
@@ -113,7 +117,7 @@ BEGIN
 
   SELECT count(*)::integer INTO blockers
     FROM jsonb_array_elements(dependencies) AS dependency(value)
-   WHERE (dependency.value->>'classification') IN ('BUSINESS_STATE','SHARED_STATE','HARD_BLOCKER','UNKNOWN')
+   WHERE (dependency.value->>'classification') IN ('BUSINESS_STATE','SHARED_STATE','HARD_BLOCKER','UNKNOWN','IMMUTABLE_AUDIT')
      AND (dependency.value->>'count')::integer>0;
   SELECT blockers + count(*)::integer INTO blockers FROM jsonb_array_elements(dependencies) AS dependency(value)
    WHERE dependency.value->>'classification'='AUTHENTICATION_SECURITY' AND (dependency.value->>'count')::integer>0
@@ -122,6 +126,9 @@ BEGIN
    WHERE dependency.value->>'classification'='HARD_BLOCKER' AND (dependency.value->>'count')::integer>0;
   SELECT count(*)::integer INTO unknown_dependencies FROM jsonb_array_elements(dependencies) AS dependency(value)
    WHERE dependency.value->>'classification'='UNKNOWN';
+  SELECT COALESCE(sum((dependency.value->>'count')::integer),0)::integer INTO audit_history_conflicts
+    FROM jsonb_array_elements(dependencies) AS dependency(value)
+   WHERE dependency.value->>'classification'='IMMUTABLE_AUDIT';
   SELECT COALESCE(sum((dependency.value->>'count')::integer) FILTER (WHERE dependency.value->>'classification'='BUSINESS_STATE'),0)::integer,
          COALESCE(sum((dependency.value->>'count')::integer) FILTER (WHERE dependency.value->>'classification'='SHARED_STATE'),0)::integer
     INTO business_state_conflicts,shared_state_conflicts
@@ -136,9 +143,12 @@ BEGIN
   IF user_count=0 AND invite_count=0 THEN
     REVOKE EXECUTE ON FUNCTION app_ops.victoria_failed_onboarding_recovery_v1() FROM "mscqr_prod_victoria_recovery";
     RETURN jsonb_build_object('operation','VICTORIA_FAILED_ONBOARDING_RECOVERY_V1','targetEmail',target_email,
-      'targetDatabase','mscqr_production','userExists',false,'inviteCount',0,'validUnusedInvite',false,
-      'successfulActivationNotFound',false,'pruneSafe',false,'pruneComplete',false,
-      'reason','HISTORICAL_ACTIVATION_UNVERIFIABLE','dependencies',dependencies);
+      'targetDatabase','mscqr_production','userExists',false,'activeAccountExists',false,'emailVerified',false,
+      'inviteCount',0,'validUnusedInvite',false,'successfulActivationNotFound',NOT activated,
+      'pruneSafe',NOT activated,'pruneComplete',NOT activated,
+      'reason',CASE WHEN activated THEN 'ACTIVATION_EVIDENCE_PRESENT' ELSE 'FAILED_ONBOARDING_ALREADY_CLEAN' END,
+      'otherUsersChanged',0,'otherInvitesChanged',0,'auditHistoryDeleted',0,'auditHistoryPreserved',true,
+      'dependencies',dependencies);
   END IF;
 
   IF (user_count=1 AND (user_status<>'INVITED' OR user_role<>'SUPER_ADMIN' OR user_is_active IS DISTINCT FROM true
@@ -163,7 +173,8 @@ BEGIN
       'expiredUnusedInvite',expired_unused_invite,'activeSessionsExist',active_sessions,'refreshStateExists',refresh_state,
       'mfaCredentialExists',mfa_credential,'successfulActivationNotFound',NOT activated,
       'businessStateConflicts',business_state_conflicts,'sharedStateConflicts',shared_state_conflicts,
-      'hardBlockers',hard_blockers,'unknownDependencies',unknown_dependencies,'pruneSafe',false,
+      'hardBlockers',hard_blockers,'unknownDependencies',unknown_dependencies,
+      'auditHistoryConflicts',audit_history_conflicts,'auditHistoryCanBePreserved',true,'pruneSafe',false,
       'pruneComplete',false,'reason',CASE
         WHEN user_count=1 AND (user_status<>'INVITED' OR user_role<>'SUPER_ADMIN' OR user_is_active IS DISTINCT FROM true OR disabled OR deleted) THEN 'USER_NOT_UNFINISHED_INVITATION'
         WHEN email_verified THEN 'EMAIL_VERIFIED'
@@ -175,6 +186,7 @@ BEGIN
         WHEN shared_state_conflicts>0 THEN 'SHARED_STATE_PRESENT'
         WHEN hard_blockers>0 THEN 'HARD_BLOCKER_PRESENT'
         WHEN unknown_dependencies>0 THEN 'UNKNOWN_DEPENDENCY_PRESENT'
+        WHEN audit_history_conflicts>0 THEN 'IMMUTABLE_AUDIT_HISTORY_PRESENT'
         WHEN blockers>0 THEN 'AUTHENTICATION_SECURITY_STATE_PRESENT'
         ELSE 'INVITE_STATE_CONFLICT' END,'dependencies',dependencies);
   END IF;

@@ -115,7 +115,8 @@ export async function verifyVictoriaRecoveryAuthorization(value, expected, { ver
       || value.executorImage !== expected.executorImage || value.executorTaskDefinition !== expected.executorTaskDefinition
       || value.signingKeyArn !== expected.signingKeyArn || value.operator !== expected.operator
       || value.approvedBy !== expected.approvedBy || value.approvalWorkflowRunId !== expected.approvalWorkflowRunId
-      || value.approvalWorkflowRunAttempt !== expected.approvalWorkflowRunAttempt) throw new Error("Authorization binding does not match the running executor.");
+      || value.approvalWorkflowRunAttempt !== expected.approvalWorkflowRunAttempt
+      || value.nonce !== expected.nonce) throw new Error("Authorization binding does not match the running executor.");
   const issued = Date.parse(value.issuedAt), expires = Date.parse(value.expiresAt);
   if (now.getTime() < issued || now.getTime() >= expires) throw new Error("Authorization is not currently valid.");
   let signature;

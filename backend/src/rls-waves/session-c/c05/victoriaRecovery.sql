@@ -37,6 +37,7 @@ DECLARE
   shared_state_conflicts integer := 0;
   hard_blockers integer := 0;
   unknown_dependencies integer := 0;
+  audit_history_conflicts integer := 0;
   audit_log_count bigint;
   audit_outbox_count bigint;
   deleted_challenges integer := 0;
@@ -64,87 +65,108 @@ IF (SELECT count(*) FROM pg_catalog.pg_class c
     RETURN jsonb_build_object('operation','VICTORIA_FAILED_ONBOARDING_RECOVERY_V1','targetEmail','victoria@mscqr.com',
       'targetDatabase','mscqr_production','pruneSafe',false,'pruneComplete',false,'reason','FORCED_RLS_STATE_INVALID');
   END IF;
-IF (SELECT count(*) FROM pg_catalog.pg_constraint c WHERE c.contype='f'
-       AND c.confrelid IN ('public."User"'::regclass,'public."Invite"'::regclass)) <> 56
-     OR EXISTS (
-       SELECT 1 FROM (VALUES
-      ('ManufacturerLicenseeLink','manufacturerId','User','CASCADE',false),
-      ('Batch','manufacturerId','User','SET NULL',true),
-      ('Batch','printPackDownloadedByUserId','User','SET NULL',true),
-      ('PrintJob','manufacturerId','User','RESTRICT',false),
-      ('PrintJob','approvedByUserId','User','SET NULL',true),
-      ('QRCode','printedByUserId','User','SET NULL',true),
-      ('PrintSession','manufacturerId','User','CASCADE',false),
-      ('PrintItemEvent','actorUserId','User','SET NULL',true),
-      ('PrinterRegistration','userId','User','CASCADE',false),
-      ('Printer','assignedUserId','User','SET NULL',true),
-      ('Printer','createdByUserId','User','SET NULL',true),
-      ('PrintReissueRequest','requestedByUserId','User','CASCADE',false),
-      ('PrintReissueRequest','approvedByUserId','User','SET NULL',true),
-      ('BatchPrintPackToken','createdByUserId','User','RESTRICT',false),
-      ('Invite','createdByUserId','User','SET NULL',true),
-      ('Invite','acceptedByUserId','User','SET NULL',true),
-      ('InviteActivationChallenge','userId','User','CASCADE',false),
-      ('PasswordReset','userId','User','CASCADE',false),
-      ('EmailVerificationToken','userId','User','CASCADE',false),
-      ('RefreshToken','userId','User','CASCADE',false),
-      ('AdminMfaCredential','userId','User','CASCADE',false),
-      ('AdminWebAuthnCredential','userId','User','CASCADE',false),
-      ('UserMfaFactor','userId','User','CASCADE',false),
-      ('UserBackupCode','userId','User','CASCADE',false),
-      ('MfaLoginChallenge','userId','User','CASCADE',false),
-      ('AuthMfaChallenge','userId','User','CASCADE',false),
-      ('AuthWebAuthnChallenge','userId','User','CASCADE',false),
-      ('AuthSessionRiskSignal','userId','User','CASCADE',false),
-      ('SensitiveActionApproval','requestedByUserId','User','CASCADE',false),
-      ('SensitiveActionApproval','reviewedByUserId','User','SET NULL',true),
-      ('SensitiveActionApproval','executedByUserId','User','SET NULL',true),
-      ('CompliancePackJob','startedByUserId','User','SET NULL',true),
-      ('QrAllocationRequest','requestedByUserId','User','RESTRICT',false),
-      ('QrAllocationRequest','approvedByUserId','User','SET NULL',true),
-      ('QrAllocationRequest','rejectedByUserId','User','SET NULL',true),
-      ('AllocationEvent','createdByUserId','User','SET NULL',true),
-      ('TraceEvent','manufacturerId','User','SET NULL',true),
-      ('TraceEvent','userId','User','SET NULL',true),
-      ('PolicyRule','createdByUserId','User','SET NULL',true),
-      ('PolicyAlert','manufacturerId','User','SET NULL',true),
-      ('PolicyAlert','acknowledgedByUserId','User','SET NULL',true),
-      ('Incident','assignedToUserId','User','SET NULL',true),
-      ('IncidentEvent','actorUserId','User','SET NULL',true),
-      ('IncidentEvidence','uploadedByUserId','User','SET NULL',true),
-      ('SupportTicket','assignedToUserId','User','SET NULL',true),
-      ('SupportTicketMessage','actorUserId','User','SET NULL',true),
-      ('RequestAccess','assignedToUserId','User','SET NULL',true),
-      ('RequestAccess','reviewedByUserId','User','SET NULL',true),
-      ('SupportIssueReport','reporterUserId','User','SET NULL',true),
-      ('SupportIssueReport','respondedByUserId','User','SET NULL',true),
-      ('Notification','userId','User','SET NULL',true),
-      ('TenantFeatureFlag','updatedByUserId','User','SET NULL',true),
-      ('EvidenceRetentionPolicy','updatedByUserId','User','SET NULL',true),
-      ('EvidenceRetentionJob','startedByUserId','User','SET NULL',true),
-      ('RouteTransitionMetric','userId','User','SET NULL',true),
-      ('InviteActivationChallenge','inviteId','Invite','CASCADE',false)
-       ) AS expected(table_name,column_name,target_name,delete_action,is_nullable)
-       WHERE NOT EXISTS (
-         SELECT 1 FROM pg_catalog.pg_constraint c
+IF EXISTS (
+       SELECT 1 FROM pg_catalog.pg_constraint c
+       WHERE c.contype='f' AND c.confrelid IN ('public."User"'::regclass,'public."Invite"'::regclass)
+         AND (cardinality(c.conkey)<>1 OR cardinality(c.confkey)<>1)
+     ) OR EXISTS (
+       WITH expected(child_schema,child_table,child_column,parent_schema,parent_table,parent_column,delete_action,is_nullable) AS (VALUES
+      ('public','ManufacturerLicenseeLink','manufacturerId','public','User','id','CASCADE',false),
+      ('public','Batch','manufacturerId','public','User','id','SET NULL',true),
+      ('public','Batch','printPackDownloadedByUserId','public','User','id','SET NULL',true),
+      ('public','PrintJob','manufacturerId','public','User','id','RESTRICT',false),
+      ('public','PrintJob','approvedByUserId','public','User','id','SET NULL',true),
+      ('public','QRCode','printedByUserId','public','User','id','SET NULL',true),
+      ('public','PrintSession','manufacturerId','public','User','id','CASCADE',false),
+      ('public','PrintItemEvent','actorUserId','public','User','id','SET NULL',true),
+      ('public','PrinterRegistration','userId','public','User','id','CASCADE',false),
+      ('public','Printer','assignedUserId','public','User','id','SET NULL',true),
+      ('public','Printer','createdByUserId','public','User','id','SET NULL',true),
+      ('public','PrintReissueRequest','requestedByUserId','public','User','id','CASCADE',false),
+      ('public','PrintReissueRequest','approvedByUserId','public','User','id','SET NULL',true),
+      ('public','BatchPrintPackToken','createdByUserId','public','User','id','RESTRICT',false),
+      ('public','Invite','createdByUserId','public','User','id','SET NULL',true),
+      ('public','Invite','acceptedByUserId','public','User','id','SET NULL',true),
+      ('public','InviteActivationChallenge','userId','public','User','id','CASCADE',false),
+      ('public','PasswordReset','userId','public','User','id','CASCADE',false),
+      ('public','EmailVerificationToken','userId','public','User','id','CASCADE',false),
+      ('public','RefreshToken','userId','public','User','id','CASCADE',false),
+      ('public','AdminMfaCredential','userId','public','User','id','CASCADE',false),
+      ('public','AdminWebAuthnCredential','userId','public','User','id','CASCADE',false),
+      ('public','UserMfaFactor','userId','public','User','id','CASCADE',false),
+      ('public','UserBackupCode','userId','public','User','id','CASCADE',false),
+      ('public','MfaLoginChallenge','userId','public','User','id','CASCADE',false),
+      ('public','AuthMfaChallenge','userId','public','User','id','CASCADE',false),
+      ('public','AuthWebAuthnChallenge','userId','public','User','id','CASCADE',false),
+      ('public','AuthSessionRiskSignal','userId','public','User','id','CASCADE',false),
+      ('public','SensitiveActionApproval','requestedByUserId','public','User','id','CASCADE',false),
+      ('public','SensitiveActionApproval','reviewedByUserId','public','User','id','SET NULL',true),
+      ('public','SensitiveActionApproval','executedByUserId','public','User','id','SET NULL',true),
+      ('public','CompliancePackJob','startedByUserId','public','User','id','SET NULL',true),
+      ('public','QrAllocationRequest','requestedByUserId','public','User','id','RESTRICT',false),
+      ('public','QrAllocationRequest','approvedByUserId','public','User','id','SET NULL',true),
+      ('public','QrAllocationRequest','rejectedByUserId','public','User','id','SET NULL',true),
+      ('public','AllocationEvent','createdByUserId','public','User','id','SET NULL',true),
+      ('public','TraceEvent','manufacturerId','public','User','id','SET NULL',true),
+      ('public','TraceEvent','userId','public','User','id','SET NULL',true),
+      ('public','PolicyRule','createdByUserId','public','User','id','SET NULL',true),
+      ('public','PolicyAlert','manufacturerId','public','User','id','SET NULL',true),
+      ('public','PolicyAlert','acknowledgedByUserId','public','User','id','SET NULL',true),
+      ('public','Incident','assignedToUserId','public','User','id','SET NULL',true),
+      ('public','IncidentEvent','actorUserId','public','User','id','SET NULL',true),
+      ('public','IncidentEvidence','uploadedByUserId','public','User','id','SET NULL',true),
+      ('public','SupportTicket','assignedToUserId','public','User','id','SET NULL',true),
+      ('public','SupportTicketMessage','actorUserId','public','User','id','SET NULL',true),
+      ('public','RequestAccess','assignedToUserId','public','User','id','SET NULL',true),
+      ('public','RequestAccess','reviewedByUserId','public','User','id','SET NULL',true),
+      ('public','SupportIssueReport','reporterUserId','public','User','id','SET NULL',true),
+      ('public','SupportIssueReport','respondedByUserId','public','User','id','SET NULL',true),
+      ('public','Notification','userId','public','User','id','SET NULL',true),
+      ('public','TenantFeatureFlag','updatedByUserId','public','User','id','SET NULL',true),
+      ('public','EvidenceRetentionPolicy','updatedByUserId','public','User','id','SET NULL',true),
+      ('public','EvidenceRetentionJob','startedByUserId','public','User','id','SET NULL',true),
+      ('public','RouteTransitionMetric','userId','public','User','id','SET NULL',true),
+      ('public','InviteActivationChallenge','inviteId','public','Invite','id','CASCADE',false)
+       ), actual AS (
+         SELECT child_ns.nspname,child.relname,child_attr.attname,parent_ns.nspname,parent.relname,parent_attr.attname,
+           CASE c.confdeltype WHEN 'c' THEN 'CASCADE' WHEN 'n' THEN 'SET NULL'
+             WHEN 'r' THEN 'RESTRICT' WHEN 'a' THEN 'NO ACTION' ELSE 'UNKNOWN' END,
+           NOT child_attr.attnotnull
+         FROM pg_catalog.pg_constraint c
          JOIN pg_catalog.pg_class child ON child.oid=c.conrelid
          JOIN pg_catalog.pg_namespace child_ns ON child_ns.oid=child.relnamespace
          JOIN pg_catalog.pg_class parent ON parent.oid=c.confrelid
          JOIN pg_catalog.pg_namespace parent_ns ON parent_ns.oid=parent.relnamespace
          JOIN pg_catalog.pg_attribute child_attr ON child_attr.attrelid=child.oid AND child_attr.attnum=c.conkey[1]
          JOIN pg_catalog.pg_attribute parent_attr ON parent_attr.attrelid=parent.oid AND parent_attr.attnum=c.confkey[1]
-         WHERE c.contype='f' AND child_ns.nspname='public' AND child.relname=expected.table_name
-           AND child_attr.attname=expected.column_name AND parent_ns.nspname='public' AND parent.relname=expected.target_name
+         WHERE c.contype='f' AND c.confrelid IN ('public."User"'::regclass,'public."Invite"'::regclass)
            AND cardinality(c.conkey)=1 AND cardinality(c.confkey)=1
-           AND (NOT child_attr.attnotnull)=expected.is_nullable
-           AND CASE c.confdeltype WHEN 'c' THEN 'CASCADE' WHEN 'n' THEN 'SET NULL'
-             WHEN 'r' THEN 'RESTRICT' WHEN 'a' THEN 'NO ACTION' ELSE 'UNKNOWN' END=expected.delete_action
+       ), differences AS (
+         (SELECT child_schema,child_table,child_column,parent_schema,parent_table,parent_column,delete_action,is_nullable FROM expected
+          EXCEPT ALL
+          SELECT child_schema,child_table,child_column,parent_schema,parent_table,parent_column,delete_action,is_nullable FROM actual)
+         UNION ALL
+         (SELECT child_schema,child_table,child_column,parent_schema,parent_table,parent_column,delete_action,is_nullable FROM actual
+          EXCEPT ALL
+          SELECT child_schema,child_table,child_column,parent_schema,parent_table,parent_column,delete_action,is_nullable FROM expected)
        )
+       SELECT 1 FROM differences
      ) THEN
     REVOKE EXECUTE ON FUNCTION app_ops.victoria_failed_onboarding_recovery_v1() FROM "mscqr_prod_victoria_recovery";
     RETURN jsonb_build_object('operation','VICTORIA_FAILED_ONBOARDING_RECOVERY_V1','targetEmail','victoria@mscqr.com',
       'targetDatabase','mscqr_production','pruneSafe',false,'pruneComplete',false,'reason','SCHEMA_DEPENDENCY_DRIFT',
       'unknownDependencies',1,'dependencies',jsonb_build_array());
+  END IF;
+IF EXISTS (
+       SELECT 1 FROM pg_catalog.pg_trigger t
+       JOIN pg_catalog.pg_class c ON c.oid=t.tgrelid
+       JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+       WHERE NOT t.tgisinternal AND n.nspname='public'
+         AND c.relname IN ('User','Invite','InviteActivationChallenge','PasswordReset','EmailVerificationToken')
+     ) THEN
+    REVOKE EXECUTE ON FUNCTION app_ops.victoria_failed_onboarding_recovery_v1() FROM "mscqr_prod_victoria_recovery";
+    RETURN jsonb_build_object('operation','VICTORIA_FAILED_ONBOARDING_RECOVERY_V1','targetEmail','victoria@mscqr.com',
+      'targetDatabase','mscqr_production','pruneSafe',false,'pruneComplete',false,'reason','SCHEMA_TRIGGER_DRIFT');
   END IF;
 
   SELECT count(*)::integer INTO user_count FROM public."User" u WHERE lower(btrim(u.email))=target_email;
@@ -153,9 +175,11 @@ IF (SELECT count(*) FROM pg_catalog.pg_constraint c WHERE c.contype='f'
     SELECT u.id,u.status::text,u.role::text,u."isActive",u."lastLoginAt",u."emailVerifiedAt" IS NOT NULL,
            u."disabledAt" IS NOT NULL,u."deletedAt" IS NOT NULL
       INTO user_id,user_status,user_role,user_is_active,last_login_at,email_verified,disabled,deleted
-      FROM public."User" u WHERE lower(btrim(u.email))=target_email;
+      FROM public."User" u WHERE lower(btrim(u.email))=target_email FOR UPDATE;
   END IF;
   PERFORM set_config('app.victoria_recovery_user_id', coalesce(user_id,''), true);
+
+  PERFORM 1 FROM public."Invite" i WHERE lower(btrim(i.email))=target_email ORDER BY i.id FOR UPDATE;
 
   SELECT COALESCE(array_agg(i.id ORDER BY i.id),ARRAY[]::text[]),count(*)::integer,
          count(*) FILTER (WHERE i."usedAt" IS NULL)::integer,
@@ -164,7 +188,7 @@ IF (SELECT count(*) FROM pg_catalog.pg_constraint c WHERE c.contype='f'
     INTO invite_ids,invite_count,unused_invite_count,valid_unused_invite,expired_unused_invite
     FROM public."Invite" i WHERE lower(btrim(i.email))=target_email;
   PERFORM set_config('app.victoria_recovery_invite_ids', array_to_string(invite_ids,','), true);
-  -- Deleting by exact IDs acquires row locks; the final User CAS decides races with activation.
+  -- The shared invite advisory lock plus exact User/Invite row locks keep inspection and prune coherent.
 
   SELECT EXISTS (SELECT 1 FROM public."RefreshToken" r WHERE r."userId"=user_id
     AND r."revokedAt" IS NULL AND (r."expiresAt">transaction_timestamp()
@@ -311,7 +335,7 @@ IF (SELECT count(*) FROM pg_catalog.pg_constraint c WHERE c.contype='f'
 
   SELECT count(*)::integer INTO blockers
     FROM jsonb_array_elements(dependencies) AS dependency(value)
-   WHERE (dependency.value->>'classification') IN ('BUSINESS_STATE','SHARED_STATE','HARD_BLOCKER','UNKNOWN')
+   WHERE (dependency.value->>'classification') IN ('BUSINESS_STATE','SHARED_STATE','HARD_BLOCKER','UNKNOWN','IMMUTABLE_AUDIT')
      AND (dependency.value->>'count')::integer>0;
   SELECT blockers + count(*)::integer INTO blockers FROM jsonb_array_elements(dependencies) AS dependency(value)
    WHERE dependency.value->>'classification'='AUTHENTICATION_SECURITY' AND (dependency.value->>'count')::integer>0
@@ -320,6 +344,9 @@ IF (SELECT count(*) FROM pg_catalog.pg_constraint c WHERE c.contype='f'
    WHERE dependency.value->>'classification'='HARD_BLOCKER' AND (dependency.value->>'count')::integer>0;
   SELECT count(*)::integer INTO unknown_dependencies FROM jsonb_array_elements(dependencies) AS dependency(value)
    WHERE dependency.value->>'classification'='UNKNOWN';
+  SELECT COALESCE(sum((dependency.value->>'count')::integer),0)::integer INTO audit_history_conflicts
+    FROM jsonb_array_elements(dependencies) AS dependency(value)
+   WHERE dependency.value->>'classification'='IMMUTABLE_AUDIT';
   SELECT COALESCE(sum((dependency.value->>'count')::integer) FILTER (WHERE dependency.value->>'classification'='BUSINESS_STATE'),0)::integer,
          COALESCE(sum((dependency.value->>'count')::integer) FILTER (WHERE dependency.value->>'classification'='SHARED_STATE'),0)::integer
     INTO business_state_conflicts,shared_state_conflicts
@@ -364,9 +391,12 @@ IF (SELECT count(*) FROM pg_catalog.pg_constraint c WHERE c.contype='f'
   IF user_count=0 AND invite_count=0 THEN
     REVOKE EXECUTE ON FUNCTION app_ops.victoria_failed_onboarding_recovery_v1() FROM "mscqr_prod_victoria_recovery";
     RETURN jsonb_build_object('operation','VICTORIA_FAILED_ONBOARDING_RECOVERY_V1','targetEmail',target_email,
-      'targetDatabase','mscqr_production','userExists',false,'inviteCount',0,'validUnusedInvite',false,
-      'successfulActivationNotFound',false,'pruneSafe',false,'pruneComplete',false,
-      'reason','HISTORICAL_ACTIVATION_UNVERIFIABLE','dependencies',dependencies);
+      'targetDatabase','mscqr_production','userExists',false,'activeAccountExists',false,'emailVerified',false,
+      'inviteCount',0,'validUnusedInvite',false,'successfulActivationNotFound',NOT activated,
+      'pruneSafe',NOT activated,'pruneComplete',NOT activated,
+      'reason',CASE WHEN activated THEN 'ACTIVATION_EVIDENCE_PRESENT' ELSE 'FAILED_ONBOARDING_ALREADY_CLEAN' END,
+      'otherUsersChanged',0,'otherInvitesChanged',0,'auditHistoryDeleted',0,'auditHistoryPreserved',true,
+      'dependencies',dependencies);
   END IF;
 
   IF (user_count=1 AND (user_status<>'INVITED' OR user_role<>'SUPER_ADMIN' OR user_is_active IS DISTINCT FROM true
@@ -391,7 +421,8 @@ IF (SELECT count(*) FROM pg_catalog.pg_constraint c WHERE c.contype='f'
       'expiredUnusedInvite',expired_unused_invite,'activeSessionsExist',active_sessions,'refreshStateExists',refresh_state,
       'mfaCredentialExists',mfa_credential,'successfulActivationNotFound',NOT activated,
       'businessStateConflicts',business_state_conflicts,'sharedStateConflicts',shared_state_conflicts,
-      'hardBlockers',hard_blockers,'unknownDependencies',unknown_dependencies,'pruneSafe',false,
+      'hardBlockers',hard_blockers,'unknownDependencies',unknown_dependencies,
+      'auditHistoryConflicts',audit_history_conflicts,'auditHistoryCanBePreserved',true,'pruneSafe',false,
       'pruneComplete',false,'reason',CASE
         WHEN user_count=1 AND (user_status<>'INVITED' OR user_role<>'SUPER_ADMIN' OR user_is_active IS DISTINCT FROM true OR disabled OR deleted) THEN 'USER_NOT_UNFINISHED_INVITATION'
         WHEN email_verified THEN 'EMAIL_VERIFIED'
@@ -403,6 +434,7 @@ IF (SELECT count(*) FROM pg_catalog.pg_constraint c WHERE c.contype='f'
         WHEN shared_state_conflicts>0 THEN 'SHARED_STATE_PRESENT'
         WHEN hard_blockers>0 THEN 'HARD_BLOCKER_PRESENT'
         WHEN unknown_dependencies>0 THEN 'UNKNOWN_DEPENDENCY_PRESENT'
+        WHEN audit_history_conflicts>0 THEN 'IMMUTABLE_AUDIT_HISTORY_PRESENT'
         WHEN blockers>0 THEN 'AUTHENTICATION_SECURITY_STATE_PRESENT'
         ELSE 'INVITE_STATE_CONFLICT' END,'dependencies',dependencies);
   END IF;

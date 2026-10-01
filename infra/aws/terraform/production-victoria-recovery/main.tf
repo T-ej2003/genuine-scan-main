@@ -59,6 +59,26 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "evidence" {
     }
   }
 }
+data "aws_iam_policy_document" "evidence_bucket" {
+  statement {
+    effect = "Deny"
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+    actions   = ["s3:PutObject"]
+    resources = ["${aws_s3_bucket.evidence.arn}/*"]
+    condition {
+      test     = "StringNotEquals"
+      variable = "s3:x-amz-server-side-encryption-aws-kms-key-id"
+      values   = [aws_kms_key.evidence.arn]
+    }
+  }
+}
+resource "aws_s3_bucket_policy" "evidence" {
+  bucket = aws_s3_bucket.evidence.id
+  policy = data.aws_iam_policy_document.evidence_bucket.json
+}
 resource "aws_kms_key" "evidence" {
   description             = "Encrypted evidence for the fixed Victoria onboarding recovery operation"
   deletion_window_in_days = 30
@@ -146,7 +166,7 @@ resource "aws_iam_role_policy" "task" {
   policy = jsonencode({ Version = "2012-10-17", Statement = [
     { Effect = "Allow", Action = "rds-db:connect", Resource = "arn:aws:rds-db:eu-west-2:368992683803:dbuser/${var.active_database_resource_id}/mscqr_prod_victoria_recovery" },
     { Effect = "Allow", Action = "kms:Verify", Resource = aws_kms_key.authorization.arn },
-    { Effect = "Allow", Action = ["kms:Decrypt", "kms:Encrypt", "kms:GenerateDataKey"], Resource = aws_kms_key.evidence.arn },
+    { Effect = "Allow", Action = ["kms:Decrypt", "kms:GenerateDataKey"], Resource = aws_kms_key.evidence.arn },
     { Effect = "Allow", Action = "s3:GetObject", Resource = "${aws_s3_bucket.evidence.arn}/authorizations/*" },
     { Effect = "Allow", Action = "s3:PutObject", Resource = ["${aws_s3_bucket.evidence.arn}/nonces/*", "${aws_s3_bucket.evidence.arn}/results/*"] },
   ] })
@@ -179,20 +199,21 @@ data "aws_iam_policy_document" "lambda_trust" {
 resource "aws_iam_role_policy" "broker" {
   role = aws_iam_role.broker.id
   policy = jsonencode({ Version = "2012-10-17", Statement = [
-    { Effect = "Allow", Action = "ecs:DescribeTaskDefinition", Resource = local.task_arn },
+    { Effect = "Allow", Action = "ecs:DescribeTaskDefinition", Resource = "*" },
     { Effect = "Allow", Action = "ecs:StopTask", Resource = "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/*", Condition = { ArnEquals = { "ecs:cluster" = local.cluster_arn } } },
-    { Effect = "Allow", Action = "ecs:RunTask", Resource = local.task_arn, Condition = { StringEquals = { "aws:RequestedRegion" = local.region, "ecs:enable-execute-command" = "false" }, ArnEquals = { "ecs:cluster" = local.cluster_arn } } },
+    { Effect = "Allow", Action = "ecs:RunTask", Resource = local.task_arn, Condition = { StringEquals = { "aws:RequestedRegion" = local.region, "ecs:enable-execute-command" = "false", "aws:RequestTag/Operation" = local.common_tags.Operation }, ArnEquals = { "ecs:cluster" = local.cluster_arn }, Null = { "aws:RequestTag/AuthorizationNonce" = "false", "aws:RequestTag/SourceSha" = "false" }, "ForAllValues:StringEquals" = { "aws:TagKeys" = ["Operation", "AuthorizationNonce", "SourceSha"] } } },
+    { Effect = "Allow", Action = "ecs:TagResource", Resource = "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/*", Condition = { StringEquals = { "ecs:CreateAction" = "RunTask", "aws:RequestTag/Operation" = local.common_tags.Operation }, Null = { "aws:RequestTag/AuthorizationNonce" = "false", "aws:RequestTag/SourceSha" = "false" }, "ForAllValues:StringEquals" = { "aws:TagKeys" = ["Operation", "AuthorizationNonce", "SourceSha"] } } },
     { Effect = "Allow", Action = "iam:PassRole", Resource = [aws_iam_role.task.arn, aws_iam_role.execution.arn], Condition = { StringEquals = { "iam:PassedToService" = "ecs-tasks.amazonaws.com" } } },
     { Effect = "Allow", Action = "kms:Verify", Resource = aws_kms_key.authorization.arn },
-    { Effect = "Allow", Action = ["kms:Decrypt", "kms:Encrypt", "kms:GenerateDataKey"], Resource = aws_kms_key.evidence.arn },
-    { Effect = "Allow", Action = "s3:GetObject", Resource = "${aws_s3_bucket.evidence.arn}/authorizations/*" },
+    { Effect = "Allow", Action = ["kms:Decrypt", "kms:GenerateDataKey"], Resource = aws_kms_key.evidence.arn },
+    { Effect = "Allow", Action = "s3:GetObject", Resource = ["${aws_s3_bucket.evidence.arn}/authorizations/*", "${aws_s3_bucket.evidence.arn}/tasks/*"] },
     { Effect = "Allow", Action = "s3:PutObject", Resource = ["${aws_s3_bucket.evidence.arn}/invocations/*", "${aws_s3_bucket.evidence.arn}/tasks/*", "${aws_s3_bucket.evidence.arn}/cleanups/*"] },
     { Effect = "Allow", Action = ["logs:CreateLogStream", "logs:PutLogEvents"], Resource = "${aws_cloudwatch_log_group.broker.arn}:*" },
     { Effect = "Allow", Action = "ecs:ListTasks", Resource = "*", Condition = { ArnEquals = { "ecs:cluster" = local.cluster_arn } } },
     { Effect = "Allow", Action = "ecs:DescribeTasks", Resource = "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/*", Condition = { ArnEquals = { "ecs:cluster" = local.cluster_arn } } },
     { Effect = "Allow", Action = "ec2:DescribeSecurityGroupRules", Resource = "*" },
     { Effect = "Allow", Action = "ec2:AuthorizeSecurityGroupIngress", Resource = "arn:aws:ec2:eu-west-2:368992683803:security-group/${var.active_database_security_group_id}" },
-    { Effect = "Allow", Action = "ec2:CreateTags", Resource = "arn:aws:ec2:eu-west-2:368992683803:security-group-rule/*", Condition = { StringEquals = { "ec2:CreateAction" = "AuthorizeSecurityGroupIngress", "aws:RequestTag/Operation" = local.common_tags.Operation, "aws:RequestTag/Target" = local.common_tags.Target }, "ForAllValues:StringEquals" = { "aws:TagKeys" = ["Operation", "Target", "AuthorizationNonce", "SourceSha"] } } },
+    { Effect = "Allow", Action = "ec2:CreateTags", Resource = "arn:aws:ec2:eu-west-2:368992683803:security-group-rule/*", Condition = { StringEquals = { "ec2:CreateAction" = "AuthorizeSecurityGroupIngress", "aws:RequestTag/Operation" = local.common_tags.Operation, "aws:RequestTag/Target" = local.common_tags.Target }, Null = { "aws:RequestTag/AuthorizationNonce" = "false", "aws:RequestTag/SourceSha" = "false" }, "ForAllValues:StringEquals" = { "aws:TagKeys" = ["Operation", "Target", "AuthorizationNonce", "SourceSha"] } } },
     { Effect = "Allow", Action = "ec2:RevokeSecurityGroupIngress", Resource = "arn:aws:ec2:eu-west-2:368992683803:security-group/${var.active_database_security_group_id}" },
   ] })
 }
@@ -304,6 +325,7 @@ resource "aws_lambda_function" "broker" {
   environment {
     variables = {
       EVIDENCE_BUCKET             = aws_s3_bucket.evidence.bucket
+      EVIDENCE_KMS_KEY_ARN        = aws_kms_key.evidence.arn
       SIGNING_KEY_ARN             = aws_kms_key.authorization.arn
       ACTIVE_DATABASE_HOST        = var.active_database_host
       DATABASE_SECURITY_GROUP_ID  = var.active_database_security_group_id

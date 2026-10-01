@@ -84,6 +84,7 @@ jobs:
           VICTORIA_RECOVERY_IMAGE: ${{ steps.image.outputs.uri }}
           VICTORIA_RDS_HOST: ${{ vars.VICTORIA_RECOVERY_RDS_HOST }}
           VICTORIA_RECOVERY_EVIDENCE_BUCKET: ${{ vars.VICTORIA_RECOVERY_EVIDENCE_BUCKET }}
+          VICTORIA_RECOVERY_EVIDENCE_KMS_KEY_ARN: ${{ vars.VICTORIA_RECOVERY_EVIDENCE_KMS_KEY_ARN }}
           VICTORIA_RECOVERY_SIGNING_KEY_ARN: ${{ vars.VICTORIA_RECOVERY_SIGNING_KEY_ARN }}
           VICTORIA_RECOVERY_TASK_ROLE_ARN: ${{ vars.VICTORIA_RECOVERY_TASK_ROLE_ARN }}
           VICTORIA_RECOVERY_EXECUTION_ROLE_ARN: ${{ vars.VICTORIA_RECOVERY_EXECUTION_ROLE_ARN }}
@@ -102,6 +103,7 @@ jobs:
           VICTORIA_RECOVERY_TASK_DEFINITION: ${{ steps.task.outputs.arn }}
           VICTORIA_RECOVERY_SIGNING_KEY_ARN: ${{ vars.VICTORIA_RECOVERY_SIGNING_KEY_ARN }}
           VICTORIA_RECOVERY_EVIDENCE_BUCKET: ${{ vars.VICTORIA_RECOVERY_EVIDENCE_BUCKET }}
+          VICTORIA_RECOVERY_EVIDENCE_KMS_KEY_ARN: ${{ vars.VICTORIA_RECOVERY_EVIDENCE_KMS_KEY_ARN }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
@@ -126,7 +128,7 @@ jobs:
           echo "result=$result" >> "$GITHUB_OUTPUT"
           printf '{"operation":"VICTORIA_FAILED_ONBOARDING_RECOVERY_V1","sourceSha":"%s","nonce":"%s"}' "$SOURCE_SHA" "$NONCE" > "$request"
           aws lambda invoke --region eu-west-2 --function-name "$BROKER_ARN" --cli-binary-format raw-in-base64-out --payload "fileb://$request" "$response" > /dev/null
-          task_arn="$(node -e 'const v=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));if(v.FunctionError||v.operation!=="VICTORIA_FAILED_ONBOARDING_RECOVERY_V1")process.exit(1);process.stdout.write(v.taskArn)' "$response")"
+          task_arn="$(node --input-type=module -e 'import fs from "node:fs";import {validateVictoriaRecoveryBrokerLaunch as validate} from "./scripts/aws/victoria-recovery-result.mjs";const v=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));if(v.FunctionError)process.exit(1);process.stdout.write(validate(v,{sourceSha:process.argv[2],nonce:process.argv[3]}).taskArn)' "$response" "$SOURCE_SHA" "$NONCE")"
           echo "task_arn=$task_arn" >> "$GITHUB_OUTPUT"
           for attempt in $(seq 1 120); do
             if aws s3api get-object --region eu-west-2 --bucket "$EVIDENCE_BUCKET" --key "results/$NONCE.json" "$result" >/dev/null 2>&1; then break; fi
@@ -147,7 +149,7 @@ jobs:
           response="$RUNNER_TEMP/victoria-recovery-cleanup-response.json"
           printf '{"operation":"VICTORIA_FAILED_ONBOARDING_RECOVERY_V1","phase":"cleanup","sourceSha":"%s","nonce":"%s"}' "$SOURCE_SHA" "$NONCE" > "$request"
           aws lambda invoke --region eu-west-2 --function-name "$BROKER_ARN" --cli-binary-format raw-in-base64-out --payload "fileb://$request" "$response" > /dev/null
-          node -e 'const v=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));if(v.FunctionError||v.operation!=="VICTORIA_FAILED_ONBOARDING_RECOVERY_V1"||v.nonce!==process.env.NONCE||v.networkAuthorityRevoked!==true)process.exit(1)' "$response"
+          node --input-type=module -e 'import fs from "node:fs";import {validateVictoriaRecoveryBrokerCleanup as validate} from "./scripts/aws/victoria-recovery-result.mjs";const v=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));if(v.FunctionError)process.exit(1);validate(v,{sourceSha:process.env.SOURCE_SHA,nonce:process.env.NONCE})' "$response"
           echo "network_authority_revoked=true" >> "$GITHUB_OUTPUT"
       - name: Preserve operation result evidence
         if: always() && steps.authorize.outputs.nonce != ''

@@ -50,6 +50,7 @@ export async function publishVictoriaRecoveryAuthorization(env = process.env) {
   assertProductionEnvironmentApprovalEvidence(approvalEvidence, approvalOptions);
   assertProductionEnvironmentActualReviewer(approvalEvidence, { sourceSha: env.SOURCE_SHA, repository: approvalOptions.repository, executionActor: env.GITHUB_ACTOR });
   const signingKeyArn = required("VICTORIA_RECOVERY_SIGNING_KEY_ARN");
+  const evidenceKeyArn = required("VICTORIA_RECOVERY_EVIDENCE_KMS_KEY_ARN");
   const bucket = required("VICTORIA_RECOVERY_EVIDENCE_BUCKET");
   const authorization = await createVictoriaRecoveryAuthorization({
     sourceSha: env.SOURCE_SHA,
@@ -65,7 +66,7 @@ export async function publishVictoriaRecoveryAuthorization(env = process.env) {
   try {
     fs.writeFileSync(authorizationPath, authorizationBytes, { mode: 0o600, flag: "wx" });
     runAws(["s3api", "put-object", "--region", "eu-west-2", "--bucket", bucket, "--key", `authorizations/${authorization.nonce}.json`,
-      "--body", authorizationPath, "--if-none-match", "*", "--server-side-encryption", "aws:kms"]);
+      "--body", authorizationPath, "--if-none-match", "*", "--server-side-encryption", "aws:kms", "--ssekms-key-id", evidenceKeyArn]);
     return Object.freeze({ nonce: authorization.nonce, authorizationKey: `authorizations/${authorization.nonce}.json`, authorizationSha256: authorizationHash });
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });

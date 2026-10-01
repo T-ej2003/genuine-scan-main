@@ -1,13 +1,29 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
-import { renderVictoriaRecoverySql } from "../security/victoria-recovery-sql.mjs";
+import { dependencyCatalogDrift, expectedDependencyCatalog, renderVictoriaRecoverySql } from "../security/victoria-recovery-sql.mjs";
 import { renderVictoriaRecoveryInstallationSql } from "../security/victoria-recovery-installation.mjs";
 
 const generatedPath = "backend/src/rls-waves/session-c/c05/victoriaRecovery.sql";
 
 test("generated recovery SQL is exactly reproducible from the complete dependency manifest", () => {
   assert.equal(fs.readFileSync(generatedPath, "utf8"), renderVictoriaRecoverySql());
+});
+
+test("complete FK identity drift fails closed", () => {
+  const expected = expectedDependencyCatalog();
+  assert.equal(dependencyCatalogDrift(expected), false);
+  const mutate = (index, changes) => expected.map((row, current) => current === index ? { ...row, ...changes } : row);
+  const userIndex = expected.findIndex(({ parentTable }) => parentTable === "User");
+  for (const actual of [
+    mutate(userIndex, { parentColumn: "email" }),
+    mutate(userIndex, { parentTable: "Invite" }),
+    mutate(userIndex, { childColumn: "otherUserId" }),
+    mutate(userIndex, { deleteAction: "NO ACTION" }),
+    expected.filter((_, index) => index !== userIndex),
+    [...expected, { ...expected[userIndex], childTable: "Unexpected" }],
+    [...expected, { ...expected[userIndex] }],
+  ]) assert.equal(dependencyCatalogDrift(actual), true);
 });
 
 test("database operation is target-fixed, argument-free, static SQL, and preserves forced RLS", () => {
@@ -27,7 +43,12 @@ test("database operation is target-fixed, argument-free, static SQL, and preserv
   assert.match(sql, /FORCED_RLS_STATE_INVALID/);
   assert.match(sql, /relrowsecurity AND c\.relforcerowsecurity/);
   assert.match(sql, /cardinality\(c\.conkey\)=1 AND cardinality\(c\.confkey\)=1/);
+  assert.match(sql, /parent_attr\.attname/);
+  assert.match(sql, /EXCEPT ALL/);
   assert.match(sql, /SCHEMA_DEPENDENCY_DRIFT/);
+  assert.match(sql, /pg_catalog\.pg_trigger/);
+  assert.match(sql, /NOT t\.tgisinternal/);
+  assert.match(sql, /SCHEMA_TRIGGER_DRIFT/);
   assert.match(sql, /OR active_sessions OR refresh_state OR activated OR mfa_credential/);
   assert.match(sql, /AUTHENTICATION_SECURITY[\s\S]+?removable' IS DISTINCT FROM 'true'/);
   assert.match(sql, /p\."usedAt" IS NOT NULL OR p\."expiresAt">transaction_timestamp\(\)/);
@@ -58,14 +79,16 @@ test("runtime gate rejects activation/security/business state and deletes only l
   assert.match(sql, /email_verified OR disabled OR deleted/);
   assert.match(sql, /active_sessions OR refresh_state OR activated OR mfa_credential/);
   assert.match(sql, /blockers>0 OR hard_blockers>0 OR unknown_dependencies>0/);
+  assert.match(sql, /'IMMUTABLE_AUDIT'\)/);
+  assert.match(sql, /IMMUTABLE_AUDIT_HISTORY_PRESENT/);
   assert.match(sql, /"acceptedByUserId" IS DISTINCT FROM user_id/);
   assert.match(sql, /p\."usedAt" IS NOT NULL OR p\."expiresAt">transaction_timestamp\(\)/);
   assert.match(sql, /t\."usedAt" IS NOT NULL OR t\."expiresAt">transaction_timestamp\(\)/);
   assert.match(sql, /DELETE FROM public\."Invite" i WHERE i\.id=ANY\(invite_ids\)/);
   assert.match(sql, /DELETE FROM public\."User" u WHERE u\.id=user_id AND lower\(btrim\(u\.email\)\)=target_email/);
   assert.match(sql, /VICTORIA_RECOVERY_USER_COMPARE_AND_SET_FAILED/);
-  assert.match(sql, /HISTORICAL_ACTIVATION_UNVERIFIABLE/);
-  assert.match(sql, /'successfulActivationNotFound',false,'pruneSafe',false,'pruneComplete',false/);
+  assert.match(sql, /FAILED_ONBOARDING_ALREADY_CLEAN/);
+  assert.match(sql, /'successfulActivationNotFound',NOT activated/);
   assert.match(sql, /VICTORIA_RECOVERY_POSTCONDITION_FAILED/);
   assert.match(sql, /VICTORIA_RECOVERY_AUDIT_PRESERVATION_FAILED/);
   assert.match(sql, /'validUnusedInviteBefore',valid_unused_invite/);

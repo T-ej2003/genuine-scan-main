@@ -21,6 +21,7 @@
       "environment": [
         { "name": "VICTORIA_RDS_HOST", "value": "${database_host}" },
         { "name": "VICTORIA_RECOVERY_EVIDENCE_BUCKET", "value": "${evidence_bucket}" },
+        { "name": "VICTORIA_RECOVERY_EVIDENCE_KMS_KEY_ARN", "value": "${evidence_kms_key_arn}" },
         { "name": "VICTORIA_RECOVERY_SIGNING_KEY_ARN", "value": "${signing_key_arn}" }
       ],
       "logConfiguration": {
