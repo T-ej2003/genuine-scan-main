@@ -57,11 +57,11 @@ const WEB_IMAGE_INPUTS = [
 ];
 const DOCUMENTATION = /(?:^|\/)(?:documents|README|CHANGELOG|.*\.md)(?:\/|$)/;
 const CI = /^\.github\/workflows\//;
-const TERRAFORM = /^infra\/aws\/terraform\/(?:production-green-stage-(?:a|b(?:-image-publisher|-publisher-bootstrap)?)|production-initial-activation-policy-reconciler|production-web-release|production-component-deployment-state|production-security-rebaseline-signer)\//;
+const TERRAFORM = /^infra\/aws\/terraform\/(?:production-green-stage-(?:a|b(?:-image-publisher|-publisher-bootstrap)?)|production-initial-activation-policy-reconciler|production-web-release|production-component-deployment-state|production-security-rebaseline-signer|production-victoria-recovery)\//;
 // This isolated root creates IAM permissions only and is absent from all
 // canonical Docker COPY inputs. Do not classify arbitrary neighboring files.
 const APP_ONLY_PERMISSION_SOURCE = /^infra\/aws\/terraform\/production-app-only-permissions\/(?:main\.tf\.json|\.terraform\.lock\.hcl)$/;
-const CONTROL_PLANE = /^infra\/aws\/terraform\/lambda\/production-rls-approval-broker\/(?:index\.mjs|ecs-task-definition-readback\.mjs|package\.json|package-lock\.json)$/;
+const CONTROL_PLANE = /^infra\/aws\/terraform\/lambda\/(?:production-rls-approval-broker\/(?:index\.mjs|ecs-task-definition-readback\.mjs|package\.json|package-lock\.json)|victoria-recovery-broker\/(?:index|task-cleanup)\.mjs)$/;
 const TEST = /(?:^|\/)(?:e2e|tests?|fixtures)(?:\/|\.)|\.test\.[^.]+$/;
 const TOOLING_ONLY = new Set([".gitleaks-baseline.json", ".gitleaksignore", ".security/rotation-evidence.schema.json", "docker-compose.yml", "docker-compose.asg-web.yml", "docker/nginx-root-entrypoint.sh"]);
 

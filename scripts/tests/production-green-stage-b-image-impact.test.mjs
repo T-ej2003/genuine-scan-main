@@ -210,6 +210,15 @@ test("Stage A Terraform changes are classified as infrastructure-only without im
   assert.equal(report.newImagesRequired, false);
 });
 
+test("fixed Victoria recovery broker and infrastructure changes do not affect application image builds", () => {
+  for (const file of ["infra/aws/terraform/lambda/victoria-recovery-broker/index.mjs",
+    "infra/aws/terraform/lambda/victoria-recovery-broker/task-cleanup.mjs"]) {
+    assert.deepEqual(classifyStageBImageReusePath(file), { file, category: "controlPlaneOnly", imageAffecting: false });
+  }
+  const file = "infra/aws/terraform/production-victoria-recovery/main.tf";
+  assert.deepEqual(classifyStageBImageReusePath(file), { file, category: "terraformOnly", imageAffecting: false });
+});
+
 test("isolated app-only IAM source is infrastructure-only without waiving neighboring image inputs", () => {
   const prefix = "infra/aws/terraform/production-app-only-permissions/";
   for (const name of ["main.tf.json", ".terraform.lock.hcl"]) {
