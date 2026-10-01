@@ -52,7 +52,7 @@ export async function prepareAbsentInventoryRecovery({ configPath, runRead, runS
     const signatureBase64 = json(runSign, ["kms", "sign", "--key-id", STAGE_B.approvalKmsKeyArn, "--message", `fileb://${messagePath}`, "--message-type", "RAW", "--signing-algorithm", "RSASSA_PSS_SHA_256"]).Signature;
     if (!await verifySignature({ keyId: STAGE_B.approvalKmsKeyArn, message: Buffer.from(canonicalJson(payload)), signature: Buffer.from(signatureBase64, "base64") })) throw new Error("Recovery signature did not verify.");
     const filePath = path.join(path.dirname(path.resolve(configPath)), "inventory-absent-claim-evidence.json");
-    writeStageBPrivateFileAtomic({ filePath, bytes: Buffer.from(`${JSON.stringify({ payload, signatureBase64 })}\n`), repositoryRoot: process.cwd(), label: "Absent inventory recovery evidence" });
+    writeStageBPrivateFileAtomic({ filePath, bytes: Buffer.from(`${JSON.stringify({ payload, signatureBase64 })}\n`), repositoryRoot: process.cwd(), overwrite: true, label: "Absent inventory recovery evidence" });
     return { filePath, configSha256: payload.configSha256, expiresAt: payload.expiresAt };
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 }

@@ -111,7 +111,10 @@ state/fixture/readiness files, no rotation replay rows or recovery reservation,
 exact historical approval signature, complete RunTask history, and complete
 failed-task logs. It writes only a private sibling
 `inventory-absent-claim-evidence.json`; the config and its hash are unchanged.
-No MFA token is included in the evidence or command.
+No MFA token is included in the evidence or command. An expired local attestation
+can be atomically replaced by rerunning this same producer: all absence checks
+run again before signing. Once the permanent recovery reservation exists, the
+producer refuses refresh; local evidence replacement never resets replay state.
 
 The normal prepare-overlap adapter reads this sibling, checks its exact config
 hash and state absence, and passes it to the broker. The broker independently

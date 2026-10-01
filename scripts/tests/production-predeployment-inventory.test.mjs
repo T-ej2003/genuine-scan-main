@@ -756,6 +756,9 @@ test("canonical absent-claim producer serializes a config-bound proof consumed b
     fs.writeFileSync(cfg.rotationStateFile, "{}", { mode: 0o600 });await assert.rejects(run());fs.unlinkSync(cfg.rotationStateFile);
     rows = [{}];await assert.rejects(run());rows = [];successorLaunch = true;await assert.rejects(run());successorLaunch = false;
     const produced = await run();assert.deepEqual(fs.readFileSync(configPath), configBytes);assert.equal(fs.statSync(produced.filePath).mode & 0o777, 0o600);
+    // Local evidence may expire before claiming. Refresh repeats every absence check;
+    // the permanent production reservation still prohibits a second recovery.
+    await run(); rows = [{ approvalMode: { S: "permanent-recovery-reservation" } }];await assert.rejects(run());rows = [];
     const certificate = JSON.parse(fs.readFileSync(produced.filePath));assert.equal(certificate.payload.configSha256, createHash("sha256").update(configBytes).digest("hex"));
     let received;
     const adapter = createProductionPreDeploymentInventoryAdapter({ sourceSha: head, imageReleaseSha, imageDigest: image, config: cfg, runtimeConfigSha256: produced.configSha256, run: args => {
