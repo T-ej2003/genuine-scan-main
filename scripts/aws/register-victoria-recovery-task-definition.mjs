@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export function renderTaskDefinition(env = process.env) {
@@ -37,14 +37,13 @@ function requiredEnv(env, name) {
 
 export function registerFixedTaskDefinition(env = process.env) {
   const task = renderTaskDefinition(env);
+  const runAws = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER, env });
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "victoria-recovery-taskdef-"));
   fs.chmodSync(directory, 0o700);
   const file = path.join(directory, "task-definition.json");
   try {
     fs.writeFileSync(file, JSON.stringify(task), { mode: 0o600, flag: "wx" });
-    const output = execFileSync("aws", ["ecs", "register-task-definition", "--region", "eu-west-2", "--cli-input-json", `file://${file}`], {
-      encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env,
-    });
+    const output = runAws(["ecs", "register-task-definition", "--region", "eu-west-2", "--cli-input-json", `file://${file}`]);
     const taskDefinition = JSON.parse(output).taskDefinition;
     if (taskDefinition?.family !== "mscqr-production-victoria-recovery" || !Number.isInteger(taskDefinition.revision)) throw new Error("RECOVERY_TASK_DEFINITION_REGISTER_FAILED");
     return { taskDefinitionArn: taskDefinition.taskDefinitionArn, revision: taskDefinition.revision };

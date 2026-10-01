@@ -2,10 +2,10 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { createVictoriaRecoveryAuthorization } from "./victoria-recovery-authorization.mjs";
 import { assertProductionEnvironmentActualReviewer, assertProductionEnvironmentApprovalEvidence } from "./production-github-environment-approval.mjs";
+import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 
 const required = (name) => {
   const value = process.env[name];
@@ -13,19 +13,19 @@ const required = (name) => {
   return value;
 };
 
-function aws(args, { json = true } = {}) {
-  const output = execFileSync("aws", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: process.env });
+function awsCall(runAws, args, { json = true } = {}) {
+  const output = runAws(args);
   return json ? JSON.parse(output) : output.trim();
 }
 
-function kmsSign(keyId) {
+function kmsSign(keyId, runAws) {
   return async ({ message }) => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "victoria-recovery-sign-"));
     fs.chmodSync(directory, 0o700);
     const file = path.join(directory, "message.bin");
     try {
       fs.writeFileSync(file, message, { mode: 0o600, flag: "wx" });
-      const response = aws(["kms", "sign", "--region", "eu-west-2", "--key-id", keyId, "--message", `fileb://${file}`,
+      const response = awsCall(runAws, ["kms", "sign", "--region", "eu-west-2", "--key-id", keyId, "--message", `fileb://${file}`,
         "--message-type", "RAW", "--signing-algorithm", "RSASSA_PSS_SHA_256"]);
       return Buffer.from(response.Signature, "base64");
     } finally {
@@ -46,6 +46,7 @@ export async function publishVictoriaRecoveryAuthorization(env = process.env) {
     workflowRunAttempt: env.GITHUB_RUN_ATTEMPT, executionActor: env.GITHUB_ACTOR,
     githubActions: env.GITHUB_ACTIONS,
   };
+  const runAws = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER, env });
   assertProductionEnvironmentApprovalEvidence(approvalEvidence, approvalOptions);
   assertProductionEnvironmentActualReviewer(approvalEvidence, { sourceSha: env.SOURCE_SHA, repository: approvalOptions.repository, executionActor: env.GITHUB_ACTOR });
   const signingKeyArn = required("VICTORIA_RECOVERY_SIGNING_KEY_ARN");
@@ -54,7 +55,7 @@ export async function publishVictoriaRecoveryAuthorization(env = process.env) {
     sourceSha: env.SOURCE_SHA,
     executorImage: required("VICTORIA_RECOVERY_IMAGE"),
     executorTaskDefinition: required("VICTORIA_RECOVERY_TASK_DEFINITION"),
-    signingKeyArn, approvalEvidence, validateApproval: () => {}, sign: kmsSign(signingKeyArn),
+    signingKeyArn, approvalEvidence, validateApproval: () => {}, sign: kmsSign(signingKeyArn, runAws),
   });
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "victoria-recovery-authorization-"));
   fs.chmodSync(directory, 0o700);
@@ -63,7 +64,7 @@ export async function publishVictoriaRecoveryAuthorization(env = process.env) {
   const authorizationHash = crypto.createHash("sha256").update(authorizationBytes).digest("hex");
   try {
     fs.writeFileSync(authorizationPath, authorizationBytes, { mode: 0o600, flag: "wx" });
-    aws(["s3api", "put-object", "--region", "eu-west-2", "--bucket", bucket, "--key", `authorizations/${authorization.nonce}.json`,
+    runAws(["s3api", "put-object", "--region", "eu-west-2", "--bucket", bucket, "--key", `authorizations/${authorization.nonce}.json`,
       "--body", authorizationPath, "--if-none-match", "*", "--server-side-encryption", "aws:kms"]);
     return Object.freeze({ nonce: authorization.nonce, authorizationKey: `authorizations/${authorization.nonce}.json`, authorizationSha256: authorizationHash });
   } finally {
