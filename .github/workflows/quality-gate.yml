@@ -75,6 +75,12 @@ jobs:
         working-directory: backend
       - run: npx --no-install prisma generate
         working-directory: backend
+      - name: Verify fixed Victoria recovery contracts and isolated Terraform
+        run: |
+          node --test scripts/tests/victoria-recovery-*.test.mjs scripts/tests/victoria-rds-iam-token.test.mjs scripts/tests/production-github-environment-approval.test.mjs
+          terraform fmt -check -recursive infra/aws/terraform/production-victoria-recovery
+          terraform -chdir=infra/aws/terraform/production-victoria-recovery init -backend=false -input=false
+          terraform -chdir=infra/aws/terraform/production-victoria-recovery validate -no-color
       - name: Install PostgreSQL client and start isolated harness
         run: |
           sudo apt-get update && sudo apt-get install -y postgresql-client

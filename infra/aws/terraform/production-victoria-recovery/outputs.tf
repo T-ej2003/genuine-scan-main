@@ -1,0 +1,13 @@
+output "operator_role_arn" { value = aws_iam_role.operator.arn }
+output "task_role_arn" { value = aws_iam_role.task.arn }
+output "execution_role_arn" { value = aws_iam_role.execution.arn }
+output "broker_arn" { value = aws_lambda_alias.broker.arn }
+output "authorization_key_arn" { value = aws_kms_key.authorization.arn }
+output "evidence_key_arn" { value = aws_kms_key.evidence.arn }
+output "evidence_bucket_name" { value = aws_s3_bucket.evidence.bucket }
+output "ecr_repository_url" { value = aws_ecr_repository.recovery.repository_url }
+output "recovery_security_group_id" { value = aws_security_group.recovery.id }
+output "production_cluster_arn" { value = local.cluster_arn }
+output "target_database" { value = "mscqr_production" }
+output "target_email" { value = "victoria@mscqr.com" }
+output "active_database_host" { value = var.active_database_host }

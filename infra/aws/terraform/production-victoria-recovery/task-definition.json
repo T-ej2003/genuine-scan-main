@@ -1,0 +1,36 @@
+{
+  "family": "mscqr-production-victoria-recovery",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "volumes": [{ "name": "tmp" }],
+  "executionRoleArn": "${execution_role_arn}",
+  "taskRoleArn": "${task_role_arn}",
+  "containerDefinitions": [
+    {
+      "name": "recovery",
+      "image": "${image}",
+      "essential": true,
+      "readonlyRootFilesystem": true,
+      "privileged": false,
+      "user": "1000",
+      "entryPoint": ["node", "/app/backend/scripts/victoria-failed-onboarding-recovery.mjs"],
+      "command": [],
+      "mountPoints": [{ "sourceVolume": "tmp", "containerPath": "/tmp", "readOnly": false }],
+      "environment": [
+        { "name": "VICTORIA_RDS_HOST", "value": "${database_host}" },
+        { "name": "VICTORIA_RECOVERY_EVIDENCE_BUCKET", "value": "${evidence_bucket}" },
+        { "name": "VICTORIA_RECOVERY_SIGNING_KEY_ARN", "value": "${signing_key_arn}" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "${log_group}",
+          "awslogs-region": "eu-west-2",
+          "awslogs-stream-prefix": "recovery"
+        }
+      }
+    }
+  ]
+}

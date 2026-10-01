@@ -2,7 +2,7 @@
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
-import { canonicalSha256 } from "./stage-b-task-definition-recovery-contract.mjs";
+import { canonicalSha256 } from "./production-green-stage-b-contract.mjs";
 
 export const PRODUCTION_ENVIRONMENT_APPROVAL = Object.freeze({
   kind: "GITHUB_PROTECTED_ENVIRONMENT_APPROVAL",
@@ -26,6 +26,8 @@ export const PRODUCTION_ENVIRONMENT_APPROVAL = Object.freeze({
   appOnlyProvisioningWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/provision-production-app-only-deployer.yml@refs/heads/main",
   appOnlyDeploymentWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/deploy-production-app-only.yml@refs/heads/main",
   backendLogDiagnosticWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-backend-log-diagnostic.yml@refs/heads/main",
+  victoriaRecoveryWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/execute-victoria-onboarding-recovery.yml@refs/heads/main",
+  victoriaRecoveryEnvironment: "production-victoria-recovery",
   staleRotationSupersessionWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-stale-rotation-supersession.yml@refs/heads/main",
   providerReadonlyPolicyReconciliationWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-provider-readonly-policy-reconciliation.yml@refs/heads/main",
   bootstrapOperatorPolicyReconciliationWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-bootstrap-operator-policy-reconciliation.yml@refs/heads/main",
@@ -65,6 +67,7 @@ const approvedWorkflowRefs = new Set([
   PRODUCTION_ENVIRONMENT_APPROVAL.appOnlyProvisioningWorkflowRef,
   PRODUCTION_ENVIRONMENT_APPROVAL.appOnlyDeploymentWorkflowRef,
   PRODUCTION_ENVIRONMENT_APPROVAL.backendLogDiagnosticWorkflowRef,
+  PRODUCTION_ENVIRONMENT_APPROVAL.victoriaRecoveryWorkflowRef,
   PRODUCTION_ENVIRONMENT_APPROVAL.staleRotationSupersessionWorkflowRef,
   PRODUCTION_ENVIRONMENT_APPROVAL.providerReadonlyPolicyReconciliationWorkflowRef,
   PRODUCTION_ENVIRONMENT_APPROVAL.bootstrapOperatorPolicyReconciliationWorkflowRef,
@@ -84,6 +87,8 @@ const approvedWorkflowRefs = new Set([
 const environmentForWorkflow = (workflowRef) => workflowRef === PRODUCTION_ENVIRONMENT_APPROVAL.bootstrapOperatorPolicyReconciliationWorkflowRef
   || workflowRef === PRODUCTION_ENVIRONMENT_APPROVAL.qrVersionSelectorResolutionWorkflowRef
   ? PRODUCTION_ENVIRONMENT_APPROVAL.bootstrapOperatorPolicyAuthorizationEnvironment
+  : workflowRef === PRODUCTION_ENVIRONMENT_APPROVAL.victoriaRecoveryWorkflowRef
+  ? PRODUCTION_ENVIRONMENT_APPROVAL.victoriaRecoveryEnvironment
   : workflowRef === PRODUCTION_ENVIRONMENT_APPROVAL.signerPolicyTransitionWorkflowRef
   ? PRODUCTION_ENVIRONMENT_APPROVAL.signerPolicyTransitionEnvironment
   : [PRODUCTION_ENVIRONMENT_APPROVAL.installationBootstrapWorkflowRef, PRODUCTION_ENVIRONMENT_APPROVAL.installationWorkflowRef, PRODUCTION_ENVIRONMENT_APPROVAL.reconcilerStateReconciliationWorkflowRef, PRODUCTION_ENVIRONMENT_APPROVAL.reconcilerStateReconciliationRecoveryWorkflowRef, PRODUCTION_ENVIRONMENT_APPROVAL.exactCompleteStateReconciliationWorkflowRef, PRODUCTION_ENVIRONMENT_APPROVAL.exactCompleteStateReconciliationRecoveryWorkflowRef, PRODUCTION_ENVIRONMENT_APPROVAL.signerStateReconciliationWorkflowRef, PRODUCTION_ENVIRONMENT_APPROVAL.signerStateReconciliationRecoveryWorkflowRef].includes(workflowRef)

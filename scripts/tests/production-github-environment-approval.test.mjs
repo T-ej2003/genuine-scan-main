@@ -31,6 +31,20 @@ test("GitHub API evidence proves the exact configured-reviewer governance", asyn
   assert.equal(result.canAdminsBypass, false);
 });
 
+test("Victoria recovery approval is bound to its dedicated protected production environment", () => {
+  const workflowRef = "T-ej2003/genuine-scan-main/.github/workflows/execute-victoria-onboarding-recovery.yml@refs/heads/main";
+  const environment = "production-victoria-recovery";
+  const environmentConfig = { id: 91, name: environment, can_admins_bypass: false,
+    protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 17, login: "bob" } }] }] };
+  const evidence = createProductionEnvironmentApprovalEvidence({ repository: context.repository, environment, sourceSha,
+    workflowRef, eventName: "workflow_dispatch", workflowRunId: "123456", workflowRunAttempt: "1", executionActor: "alice",
+    observedAt: now.toISOString(), environmentConfig, actualApproval: { state: "approved", environmentId: 91,
+      environmentName: environment, userId: 17, userLogin: "bob" } });
+  const dedicatedContext = { ...context, environment, workflowRef, workflowRunId: "123456", now };
+  assert.equal(assertProductionEnvironmentApprovalEvidence(evidence, dedicatedContext), evidence);
+  assert.throws(() => assertProductionEnvironmentApprovalEvidence(evidence, { ...dedicatedContext, environment: "production" }));
+});
+
 test("missing or malformed reviewers, admin bypass, and wrong environment fail closed", () => {
   for (const [environmentConfig, overrides, pattern] of [
     [config({ protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [] }] }), {}, /reviewer/],
