@@ -258,9 +258,16 @@ locals {
         }
       },
       {
+        Sid       = "AuthenticateOnlyArchivedInventoryOutcome"
+        Effect    = "Allow"
+        Action    = ["cloudtrail:LookupEvents"]
+        Resource  = "*"
+        Condition = { StringEquals = { "aws:RequestedRegion" = var.aws_region } }
+      },
+      {
         Sid      = "ClaimOnlyStageBReplayRows"
         Effect   = "Allow"
-        Action   = ["dynamodb:PutItem", "dynamodb:DeleteItem", "dynamodb:UpdateItem"]
+        Action   = ["dynamodb:PutItem", "dynamodb:DeleteItem", "dynamodb:UpdateItem", "dynamodb:GetItem", "dynamodb:TransactWriteItems"]
         Resource = aws_dynamodb_table.replay.arn
       },
       {

@@ -19,7 +19,7 @@
     "environment": [
       { "name": "RELEASE_GIT_SHA", "value": "{{RELEASE_SHA}}" },
       { "name": "ROTATION_INVENTORY_APPROVED", "value": "true" },
-      { "name": "ROTATION_INVENTORY_RLS_ROLE", "value": "{{ROTATION_INVENTORY_RLS_ROLE}}" }
+      { "name": "ROTATION_INVENTORY_OPERATION", "value": "{{ROTATION_INVENTORY_OPERATION}}" }
     ],
     "secrets": [
       { "name": "DATABASE_URL", "valueFrom": "{{DATABASE_URL}}" }

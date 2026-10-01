@@ -1182,6 +1182,17 @@ const operationalContract = ({id,name,signature,returnType,identityArguments,tab
 // contract, rollback and exact table-command evidence live together here.
 export const NAMED_SQL_FUNCTION_CONTRACTS = Object.freeze([
   {
+    id: "production-rotation-inventory", schema: "app_rls", name: "production_rotation_inventory",
+    signature: "", identityArguments: "", returnType: "json",
+    definitionLocation: "backend/src/rls-waves/session-a/productionRotationInventory.sql",
+    definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed",
+    security: { mode: "SECURITY DEFINER", ownerIdentity: "identity-owner", ownerRole: "owner", searchPath: "pg_catalog,public", publicExecute: "revoked", runtimeExecuteGrantees: ["app"], rollbackDefinition: "backend/src/rls-waves/session-a/productionRotationInventoryRollback.sql", deploymentPhase: "runtime-policy" },
+    tableCommands: ["RefreshToken", "User", "CustomerAuthSession", "CustomerVerificationSession", "Invite", "PasswordReset", "EmailVerificationToken", "QRCode", "CompliancePackJob"].map((table) => [table, "SELECT"]),
+    context: "Fixed aggregate inventory under the canonical app identity in a read-only transaction; no caller-controlled selectors or row results.",
+    canonicalWorkflowIds: [], repositoryCallers: ["scripts/security/production-rotation-state-inventory.mjs:executeProductionRotationInventory"],
+    inputAuthority: "no arguments; canonical app session and fixed operation", outputColumns: ["inventory"], disposableProbes: ["production-rotation-inventory-postgres"],
+  },
+  {
     id: "c04-bootstrap-configured-super-admin", schema: "app_ops", name: "bootstrap_configured_super_admin",
     signature: "text,text,text,boolean", returnType: "TABLE(status text, user_id uuid, email text, role text, auto_verified boolean, reason text, audit_event_id uuid)",
     identityArguments: "p_email text, p_password_hash text, p_name text, p_auto_verify boolean",

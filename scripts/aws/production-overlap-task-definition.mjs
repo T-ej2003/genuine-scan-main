@@ -24,7 +24,7 @@ const ROTATION_BINDING_SHAPES = Object.freeze({
   QR_SIGN_PUBLIC_KEY_PREVIOUS: ECS_VALUE_REF,
   QR_SIGN_PREVIOUS_KEY_VERSION: ECS_VALUE_REF,
 });
-const REQUIRED_BINDINGS = Object.freeze(["JWT_SECRET_CURRENT", "JWT_SECRET_PREVIOUS", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT", "QR_SIGN_ACTIVE_KEY_VERSION", "QR_SIGN_PUBLIC_KEY_PREVIOUS", "QR_SIGN_PREVIOUS_KEY_VERSION", "ARTIFACT_SIGN_PRIVATE_KEY_CURRENT", "ARTIFACT_SIGN_PUBLIC_KEY_CURRENT", "ARTIFACT_SIGN_ACTIVE_KEY_VERSION", "ARTIFACT_SIGN_PUBLIC_KEYS_JSON", "ROTATION_INVENTORY_RLS_ROLE"]);
+const REQUIRED_BINDINGS = Object.freeze(["JWT_SECRET_CURRENT", "JWT_SECRET_PREVIOUS", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT", "QR_SIGN_ACTIVE_KEY_VERSION", "QR_SIGN_PUBLIC_KEY_PREVIOUS", "QR_SIGN_PREVIOUS_KEY_VERSION", "ARTIFACT_SIGN_PRIVATE_KEY_CURRENT", "ARTIFACT_SIGN_PUBLIC_KEY_CURRENT", "ARTIFACT_SIGN_ACTIVE_KEY_VERSION", "ARTIFACT_SIGN_PUBLIC_KEYS_JSON", "ROTATION_INVENTORY_OPERATION"]);
 export const OVERLAP_TASK_MARKER = Object.freeze({ key: "MSCQRExecTarget", value: "production-backend" });
 export const OVERLAP_TASK_TEMPLATE_PATH = "infra/aws/terraform/production-green-stage-b/task-definitions/green-backend-rotation-candidate.json";
 
@@ -51,7 +51,7 @@ export function buildOverlapTaskDefinition({ backendImage, imageReleaseSha, back
   if (!DIGEST.test(backendImage || "") || !SHA.test(imageReleaseSha || "") || typeof backendLogGroup !== "string" || !backendLogGroup) throw new Error("Overlap task identity bindings are invalid.");
   if (!secretBindings || typeof secretBindings !== "object" || Array.isArray(secretBindings) || Object.keys(secretBindings).sort().join(",") !== [...REQUIRED_BINDINGS].sort().join(",")) throw new Error("Overlap task bindings are incomplete or contain an unreviewed target.");
   for (const name of REQUIRED_BINDINGS) {
-    if (name === "ROTATION_INVENTORY_RLS_ROLE") { if (!/^[A-Za-z_][A-Za-z0-9_]{0,62}$/.test(secretBindings[name] || "")) throw new Error("Runtime inventory role binding is invalid."); }
+    if (name === "ROTATION_INVENTORY_OPERATION") { if (secretBindings[name] !== STAGE_B.inventoryOperation) throw new Error("Runtime fixed inventory operation binding is invalid."); }
     else if (!SECRET_REF.test(secretBindings[name] || "")) throw new Error(`Overlap task secret binding is not an exact production reference: ${name}.`);
     else if (ROTATION_BINDING_SHAPES[name] && !((postPrepare && ["JWT_SECRET_CURRENT", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT"].includes(name) ? ECS_VALUE_REF : ROTATION_BINDING_SHAPES[name]).test(secretBindings[name]))) throw new Error(`Overlap task secret binding has the wrong SDK/ECS reference shape: ${name}.`);
   }
@@ -69,7 +69,7 @@ export function buildOverlapTaskDefinition({ backendImage, imageReleaseSha, back
   if (!backend || definition.executionRoleArn !== "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution" || definition.taskRoleArn !== "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task"
     || backend.image !== backendImage || backend.environment?.find(({ name }) => name === "RELEASE_GIT_SHA")?.value !== imageReleaseSha
     || backend.environment?.find(({ name }) => name === "ROTATION_INVENTORY_APPROVED")?.value !== "true"
-    || !/^[A-Za-z_][A-Za-z0-9_]{0,62}$/.test(backend.environment?.find(({ name }) => name === "ROTATION_INVENTORY_RLS_ROLE")?.value || "")
+    || backend.environment?.find(({ name }) => name === "ROTATION_INVENTORY_OPERATION")?.value !== STAGE_B.inventoryOperation
     || !["JWT_SECRET_CURRENT", "JWT_SECRET_PREVIOUS", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT", "QR_SIGN_ACTIVE_KEY_VERSION", "QR_SIGN_PUBLIC_KEY_PREVIOUS", "QR_SIGN_PREVIOUS_KEY_VERSION", "ARTIFACT_SIGN_PRIVATE_KEY_CURRENT", "ARTIFACT_SIGN_PUBLIC_KEY_CURRENT", "ARTIFACT_SIGN_ACTIVE_KEY_VERSION", "ARTIFACT_SIGN_PUBLIC_KEYS_JSON"].every((name) => backend.secrets?.some((secret) => secret.name === name && typeof secret.valueFrom === "string" && secret.valueFrom))) {
     throw new Error("Overlap task definition is missing a required rotation or artifact binding.");
   }

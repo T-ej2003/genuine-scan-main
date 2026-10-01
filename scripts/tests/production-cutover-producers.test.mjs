@@ -263,11 +263,11 @@ test("production inventory executes the corrected SQL through the psql boundary"
   let invocation;
   const inventory = { refreshSessions: { count: 0 }, qrArtifacts: { count: 0 }, artifactRecords: { count: 0 } };
   const result = executeProductionRotationInventory({
-    env: { DATABASE_URL: "postgresql://fixture.invalid/fixture", ROTATION_INVENTORY_APPROVED: "true", ROTATION_INVENTORY_RLS_ROLE: "mscqr_prod_rls" },
+    env: { DATABASE_URL: "postgresql://fixture.invalid/fixture", ROTATION_INVENTORY_APPROVED: "true", ROTATION_INVENTORY_OPERATION: "rotation-inventory-v1" },
     spawn: (file, args, options) => {
       invocation = { file, args, options };
-      assert.match(args[args.indexOf("--command") + 1], /max\(max_expiry\)/);
-      assert.match(args[args.indexOf("--command") + 1], /max\(max_finished_at\)/);
+      assert.match(args[args.indexOf("--command") + 1], /SELECT app_rls\.production_rotation_inventory\(\)/);
+      assert.doesNotMatch(args[args.indexOf("--command") + 1], /SET.*ROLE|FROM public/i);
       return { status: 0, stdout: `${JSON.stringify(inventory)}\n` };
     },
   });

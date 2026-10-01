@@ -1,3 +1,4 @@
+import { ROTATION_INVENTORY_TABLES, rotationInventoryFunctionSql, rotationInventoryPolicySql, rotationInventoryPolicyName } from "./lib/rotation-inventory-contract.mjs";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -1708,6 +1709,7 @@ ${setRole(roleNames.owner)}
 REVOKE CREATE ON SCHEMA app_rls FROM ${q(roleNames.authOwner)};
 ${resetRole}` : ""}
 ${setRole(roleNames.owner)}
+${rotationInventoryFunctionSql({ owner: roleNames.owner, app: roleNames.app })}
 ${bootstrapFunctionSource}
 REVOKE ALL ON FUNCTION app_ops.session_c04_assert_context(text,text,text,text[]) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_ops.session_c04_audit(text,text,text,text,jsonb) FROM PUBLIC;
@@ -2168,6 +2170,7 @@ for (const [table, command, rawPredicate] of b03AuthenticatedOwnerPolicies) {
   policyStatements.push(`CREATE POLICY ${q(policyName)} ON public.${q(table)} AS PERMISSIVE FOR ${command} TO ${q(roleNames.authOwner)} ${clause};`);
   policyStatements.push(`COMMENT ON POLICY ${q(policyName)} ON public.${q(table)} IS ${lit(JSON.stringify({ boundary: "b03-authenticated-notification-email", ownerIdentity: "identity-auth-function-owner", scope: "live capability plus operation-specific notification or incident selector" }))};`);
 }
+policyStatements.push(rotationInventoryPolicySql({ owner: roleNames.owner, app: roleNames.app }));
 const policiesSql = `\\set ON_ERROR_STOP on
 DO $$ BEGIN
 ${requirePackagePhaseSql("runtime-grants-installed", "policy package")}
@@ -2236,6 +2239,7 @@ const expectedDatabaseAclSelect = expectedRowsSelect([
 // misclassify the adjacent internal routine name as an app-auth credential.
 const restrictedRoutineSchema = ["app", "auth"].join("_");
 const expectedRoutineIdentities = [
+  ["app_rls", "production_rotation_inventory", ""],
   ["app_rls", "actor_scope_valid", ""],
   ["app_rls", "attributed_request", ""],
   ["app_rls", "authorize_dashboard_snapshot", "audit_id text, requested_licensee_id text, route_surface text"],
@@ -2335,6 +2339,12 @@ const expectedRoutineIdentities = [
 const routineIdentityColumns = [{ name: "schema_name", type: "text" }, { name: "routine_name", type: "text" }, { name: "identity_arguments", type: "text" }];
 const expectedRoutineIdentitySelect = expectedRowsSelect(expectedRoutineIdentities, routineIdentityColumns);
 const policyInventory = [
+  ...ROTATION_INVENTORY_TABLES.map((table) => ({
+    tableId: tables.find((entry) => entry.physicalTable === table)?.id, table, policyName: rotationInventoryPolicyName(table), command: "SELECT", roleKey: "owner", internalHelperOnly: true,
+    scopeType: "fixed-read-only-rotation-aggregate", scopePredicate: "canonical app session; read-only transaction; fixed inventory operation; empty actor/session context", columns: [], assurance: "source-rule-specific", certificationStatus: "pending",
+    sourceCommandRuleIds: commandSemantics.rules.filter((rule) => rule.tableId === tables.find((entry) => entry.physicalTable === table)?.id && rule.command === "SELECT" && rule.authorizationBoundary !== "prohibited").map((rule) => rule.id).sort(),
+    functionContractId: "production-rotation-inventory", workflowId: null, route: "fixed production predeployment inventory",
+  })),
   ...slices.map((slice) => ({
     profileId: slice.profileId,
     tableId: slice.tableId,

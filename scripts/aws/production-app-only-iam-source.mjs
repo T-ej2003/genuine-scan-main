@@ -10,7 +10,7 @@ import { writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 import { canonicalizeStageAProductionArtifactsPolicy } from "./production-stage-a-control-plane.mjs";
 import { ecsTaskTrustSha256, RUNTIME_CONSUMABILITY } from "./production-ecs-runtime-consumability.mjs";
-import { APP_ONLY_VERIFIER, appOnlyRuntimeSecretArns } from "./production-app-only-policy.mjs";
+import { APP_ONLY_STAGE_B_SOURCE_SHA256, APP_ONLY_VERIFIER, appOnlyRuntimeSecretArns } from "./production-app-only-policy.mjs";
 
 // Evaluate the actual protected Terraform policy expressions without loading
 // its backend, providers, resources or state. No parallel JS policy model.
@@ -26,7 +26,7 @@ export function evaluateAppOnlySourceIam({ repositoryRoot, databaseSecretArn }) 
   // This evaluator supports the reviewed Stage-B variable-to-policy wiring,
   // not arbitrary future HCL. A source change must extend and test this model;
   // otherwise it cannot assert that live IAM implements the new source.
-  assert.equal(canonicalSha256(source), "01ab0dd47e364c431ac69a6639265c3943baecc71d7d3fab62601c38a44a24aa", "Stage-B IAM source wiring is unreviewed by the app-only compatibility model");
+  assert.equal(canonicalSha256(source), APP_ONLY_STAGE_B_SOURCE_SHA256, "Stage-B IAM source wiring is unreviewed by the app-only compatibility model");
   const block = (name) => {
     const matches = [...source.matchAll(new RegExp(`^resource "aws_iam_role_policy" "${name}" \\{\\n([\\s\\S]*?)^\\}`, "gm"))];
     assert.equal(matches.length, 1, `Ambiguous source IAM resource ${name}`);

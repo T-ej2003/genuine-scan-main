@@ -157,7 +157,8 @@ export const STAGE_B_BROKER_POLICY_STATEMENTS = Object.freeze([
   Object.freeze(["ReadAndStopOnlyPreDeploymentInventory", Object.freeze(["ecs:DescribeTasks", "ecs:StopTask"])]),
   Object.freeze(["TagOnlyPreDeploymentInventoryTasks", Object.freeze(["ecs:TagResource"])]),
   Object.freeze(["PassOnlyApprovedTaskRoles", Object.freeze(["iam:PassRole"])]),
-  Object.freeze(["ClaimOnlyStageBReplayRows", Object.freeze(["dynamodb:PutItem", "dynamodb:DeleteItem", "dynamodb:UpdateItem"])]),
+  Object.freeze(["AuthenticateOnlyArchivedInventoryOutcome", Object.freeze(["cloudtrail:LookupEvents"])]),
+  Object.freeze(["ClaimOnlyStageBReplayRows", Object.freeze(["dynamodb:PutItem", "dynamodb:DeleteItem", "dynamodb:UpdateItem", "dynamodb:GetItem", "dynamodb:TransactWriteItems"])]),
   Object.freeze(["ReadOnlyStageAApproval", Object.freeze(["secretsmanager:GetSecretValue"])]),
   Object.freeze(["VerifyOnlyStageAApprovalKey", Object.freeze(["kms:Verify"])]),
   Object.freeze(["WriteOnlyBrokerReceipts", Object.freeze(["s3:PutObject"])]),
@@ -197,6 +198,7 @@ const brokerPolicyResources = Object.freeze({
   ReadAndStopOnlyPreDeploymentInventory: (resource) => Array.isArray(resource) && resource.length === 1 && resource[0] === `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task/mscqr-prod-euw2-main/*`,
   TagOnlyPreDeploymentInventoryTasks: (resource) => resource === `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task/mscqr-prod-euw2-main/*`,
   PassOnlyApprovedTaskRoles: (resource) => Array.isArray(resource) && JSON.stringify([...resource].sort()) === JSON.stringify([...brokerPassRoleArns].sort()),
+  AuthenticateOnlyArchivedInventoryOutcome: (resource) => resource === "*",
   ClaimOnlyStageBReplayRows: (resource) => resource === `arn:aws:dynamodb:${STAGE_B.region}:${STAGE_B.account}:table/${STAGE_B.replayTable}`,
   ReadOnlyStageAApproval: (resource) => resource === STAGE_B.approvalSecretArn,
   VerifyOnlyStageAApprovalKey: (resource) => resource === STAGE_B.approvalKmsKeyArn,
@@ -212,6 +214,7 @@ const brokerPolicyConditions = Object.freeze({
   ReadAndStopOnlyPreDeploymentInventory: null,
   TagOnlyPreDeploymentInventoryTasks: null,
   PassOnlyApprovedTaskRoles: { StringEquals: { "iam:PassedToService": "ecs-tasks.amazonaws.com" } },
+  AuthenticateOnlyArchivedInventoryOutcome: { StringEquals: { "aws:RequestedRegion": STAGE_B.region } },
   ClaimOnlyStageBReplayRows: null,
   ReadOnlyStageAApproval: null,
   VerifyOnlyStageAApprovalKey: null,
@@ -314,7 +317,7 @@ function normalizedPolicyShape(document) {
     if (!statement || statement.Effect !== "Allow" || !statement.Sid || !Array.isArray(statement.Action) || statement.NotAction || statement.NotResource) {
       throw new Error("Broker managed-policy document contains an unsupported statement.");
     }
-    if (statement.Resource === "*" && statement.Sid !== "DescribeOnlyPreDeploymentInventoryTaskDefinitions") {
+    if (statement.Resource === "*" && !["DescribeOnlyPreDeploymentInventoryTaskDefinitions", "AuthenticateOnlyArchivedInventoryOutcome"].includes(statement.Sid)) {
       throw new Error("Broker managed-policy document contains a wildcard resource.");
     }
     const actions = [...statement.Action].sort();
@@ -388,6 +391,7 @@ export function assertStageBTerraformBrokerPolicySource(terraformConfiguration, 
     ReadAndStopOnlyPreDeploymentInventory: "Resource = [\n          \"arn:aws:ecs:${var.aws_region}:${var.account_id}:task/${local.ecs_cluster_name}/*\",\n        ]",
     TagOnlyPreDeploymentInventoryTasks: "Resource = \"arn:aws:ecs:${var.aws_region}:${var.account_id}:task/${local.ecs_cluster_name}/*\"",
     PassOnlyApprovedTaskRoles: "Resource = [var.stage_a_executor_task_role_arn, aws_iam_role.execution[\"executor\"].arn, aws_iam_role.task[\"canary\"].arn, aws_iam_role.execution[\"canary\"].arn, aws_iam_role.task[\"backend\"].arn, aws_iam_role.execution[\"backend\"].arn]",
+    AuthenticateOnlyArchivedInventoryOutcome: 'Resource = "*"',
     ClaimOnlyStageBReplayRows: "Resource = aws_dynamodb_table.replay.arn",
     ReadOnlyStageAApproval: "Resource = var.approval_secret_arn",
     VerifyOnlyStageAApprovalKey: "Resource = var.approval_kms_key_arn",
@@ -410,7 +414,7 @@ export function assertStageBTerraformBrokerPolicySource(terraformConfiguration, 
     }
     if (!expectedCondition && /\bCondition\s*=/.test(statement)) throw new Error(`Broker managed-policy source contains an unexpected condition: ${sid}`);
   }
-  const sourceWithoutApprovedWildcard = source.replace(/Sid\s*=\s*"DescribeOnlyPreDeploymentInventoryTaskDefinitions"[\s\S]*?Resource\s*=\s*"\*"/, "");
+  const sourceWithoutApprovedWildcard = source.replace(/Sid\s*=\s*"(?:DescribeOnlyPreDeploymentInventoryTaskDefinitions|AuthenticateOnlyArchivedInventoryOutcome)"[\s\S]*?Resource\s*=\s*"\*"/g, "");
   if (/NotAction|NotResource|Resource\s*=\s*"\*"/.test(sourceWithoutApprovedWildcard)) throw new Error("Broker managed-policy source contains an unsupported wildcard contract.");
 }
 

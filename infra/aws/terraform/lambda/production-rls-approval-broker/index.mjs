@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { assertEcsTaskDefinitionReadback } from "./ecs-task-definition-readback.mjs";
-const { assertBrokerApprovalValidationRequest, assertBrokerRequest, assertStageBBrokerConfigurationBindings, assertStageBBrokerRuntimeBindings, assertStageBBrokerRuntimeVersion, assertStageBBrokerTaskDefinitionMap, canonicalJson, hasCompleteStageBTaskMaps, STAGE_B, validateStageBApproval } = await import(
+const { assertBrokerApprovalValidationRequest, assertBrokerRequest, assertStageBBrokerConfigurationBindings, assertStageBBrokerRuntimeBindings, assertStageBBrokerRuntimeVersion, assertStageBBrokerTaskDefinitionMap, canonicalJson, hasCompleteStageBTaskMaps, PRESERVED_INVENTORY_PREDECESSOR, STAGE_B, validateStageBApproval } = await import(
   process.env.AWS_LAMBDA_FUNCTION_NAME ? "./stage-b-contract.mjs" : "../../../../../scripts/aws/production-green-stage-b-contract.mjs"
 );
 
@@ -18,7 +18,7 @@ const inventoryTaskArnPattern = /^arn:aws:ecs:eu-west-2:368992683803:task-defini
 const inventoryTaskDefinitionTags = Object.freeze({ Component: "full-rls-green-stage-b", Environment: "production", ManagedBy: "Terraform", MSCQRPreDeploymentInventory: "rotation-inventory" });
 const inventoryTaskDefinitionFamily = "mscqr-production-rls-green-predeployment-inventory";
 const inventoryDatabaseUrlArn = "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/app-XNeSfh";
-const inventoryRlsRole = "mscqr_prod_rls_read";
+const inventoryOperation = STAGE_B.inventoryOperation;
 const inventoryTaskRoleArn = `arn:aws:iam::${STAGE_B.account}:role/mscqr-production-rls-green-backend-task`;
 const inventoryExecutionRoleArn = `arn:aws:iam::${STAGE_B.account}:role/mscqr-production-rls-green-backend-execution`;
 const exact = (left, right) => canonicalJson(left) === canonicalJson(right);
@@ -54,8 +54,8 @@ export function assertPreDeploymentReplayRow(row, identity) {
   const expected = createPreDeploymentOperationIdentity(identity);
   const version = row?.identityVersion === undefined ? 1 : row.identityVersion;
   if (![1, 2].includes(version) || (version === 1 && (row.identityVersion !== undefined || row.imageReleaseSha !== undefined))) throw new Error("Pre-deployment replay row version is invalid.");
-  const allowed = ["approvalMode", "approvalId", "releaseSha", "rotationId", "operation", "taskDefinitionArn", "imageDigest", "operationIdentitySha256", "approvalNonce", "launchState", "expiresAt", "taskArn", "taskArns", ...(version === 2 ? ["identityVersion", "imageReleaseSha"] : [])];
-  const required = allowed.filter((field) => !["taskArn", "taskArns"].includes(field));
+  const allowed = ["approvalMode", "approvalId", "releaseSha", "rotationId", "operation", "taskDefinitionArn", "imageDigest", "operationIdentitySha256", "approvalNonce", "launchState", "expiresAt", "taskArn", "taskArns", "predecessorOperationKey", "successorOperationKey", "recoveryEvidenceSha256", ...(version === 2 ? ["identityVersion", "imageReleaseSha"] : [])];
+  const required = allowed.filter((field) => !["taskArn", "taskArns", "predecessorOperationKey", "successorOperationKey", "recoveryEvidenceSha256"].includes(field));
   if (!row || typeof row !== "object" || Array.isArray(row) || Object.keys(row).some((field) => !allowed.includes(field)) || required.some((field) => row[field] === undefined)) throw new Error("Pre-deployment replay row fields are invalid.");
   for (const field of ["approvalId", "releaseSha", "rotationId", "operation", "taskDefinitionArn", "imageDigest"]) if (row[field] !== expected[field]) throw new Error("Pre-deployment replay row identity differs from the authorized operation.");
   if (row.approvalMode !== preDeploymentOperationKey(expected) || (version === 2 && row.imageReleaseSha !== expected.imageReleaseSha)) throw new Error("Pre-deployment replay row logical or image identity is invalid.");
@@ -63,9 +63,75 @@ export function assertPreDeploymentReplayRow(row, identity) {
   const hash = version === 2 ? preDeploymentOperationIdentitySha256(expected) : crypto.createHash("sha256").update(JSON.stringify(legacy)).digest("hex");
   const taskArn = /^arn:aws:ecs:eu-west-2:368992683803:task\/mscqr-prod-euw2-main\/[A-Za-z0-9_-]+$/;
   const taskArns = row.taskArns instanceof Set ? [...row.taskArns] : row.taskArns;
-  if (row.operationIdentitySha256 !== hash || typeof row.approvalNonce !== "string" || !row.approvalNonce || !["launching", "launched", "launch-uncertain", "succeeded"].includes(row.launchState) || !Number.isInteger(row.expiresAt)
+  if (row.operationIdentitySha256 !== hash || typeof row.approvalNonce !== "string" || !row.approvalNonce || !["launching", "launched", "launch-uncertain", "succeeded", "failed-recovered"].includes(row.launchState) || !Number.isInteger(row.expiresAt)
     || (row.taskArn !== undefined && !taskArn.test(row.taskArn)) || (taskArns !== undefined && (!Array.isArray(taskArns) || taskArns.length === 0 || taskArns.some((arn) => !taskArn.test(arn))))) throw new Error("Pre-deployment replay row proof is invalid.");
+  const link = row.predecessorOperationKey || row.successorOperationKey;
+  if ((link && (!new RegExp(`^${PREDEPLOYMENT_INVENTORY_REPLAY_MODE}#[a-f0-9]{64}$`).test(link) || !/^[a-f0-9]{64}$/.test(row.recoveryEvidenceSha256 || "")))
+      || (row.recoveryEvidenceSha256 && !link) || (row.predecessorOperationKey && row.successorOperationKey)
+      || (row.launchState === "failed-recovered" && !row.successorOperationKey)
+      || (row.successorOperationKey && row.launchState !== "failed-recovered")) throw new Error("Inventory replay recovery link is invalid.");
   return Object.freeze({ identityVersion: version, launchState: row.launchState, taskArn: row.taskArn });
+}
+
+// Recovery retains the original identity/hash. It never releases or resets a claim.
+export function assertFailedPreDeploymentPredecessor({ row, identity, task, logEvents }) {
+  const proof = assertPreDeploymentReplayRow(row, identity);
+  if (proof.launchState !== "launch-uncertain" || !proof.taskArn || task?.taskArn !== proof.taskArn
+      || task.taskDefinitionArn !== identity.taskDefinitionArn || task.lastStatus !== "STOPPED"
+      || task.stopCode !== "EssentialContainerExited" || task.clusterArn !== STAGE_B.clusterArn
+      || task.containers?.length !== 1 || task.containers[0].name !== "inventory" || task.containers[0].exitCode !== 1
+      || task.containers[0].image !== identity.imageDigest
+      || !exactTags(task.tags, { MSCQRPreDeploymentInventory: "rotation-inventory", ReleaseSha: identity.releaseSha, RotationId: identity.rotationId })) {
+    throw new Error("Inventory predecessor is not the exact authenticated failed task.");
+  }
+  if (!Array.isArray(logEvents) || !logEvents.length || logEvents.some((event) => typeof event?.message !== "string")
+      || !logEvents.some(({ message }) => message.includes("Error: read-only rotation inventory query failed"))
+      || logEvents.some(({ message }) => message.trim().startsWith("{"))) {
+    throw new Error("Inventory predecessor has successful or unknown output; recovery refused.");
+  }
+  return { taskArn: proof.taskArn, operationKey: preDeploymentOperationKey(identity), identitySha256: row.operationIdentitySha256 };
+}
+
+// ECS may forget stopped tasks. Authenticate its broker-issued StopTask response
+// from AWS CloudTrail and the immutable task's uncaught CLI failure from CloudWatch.
+export function assertArchivedFailedInventoryTask({ row, identity, cloudTrailEvent, logEvents }) {
+  const proof = assertPreDeploymentReplayRow(row, identity);
+  const event = cloudTrailEvent, task = event?.responseElements?.task;
+  if (proof.launchState !== "launch-uncertain" || !proof.taskArn || event?.eventSource !== "ecs.amazonaws.com" || event.eventName !== "StopTask"
+      || event.recipientAccountId !== STAGE_B.account || event.awsRegion !== STAGE_B.region || event.errorCode
+      || event.userIdentity?.sessionContext?.sessionIssuer?.arn !== STAGE_B.brokerRoleArn
+      || event.requestParameters?.task !== proof.taskArn || event.requestParameters?.cluster !== STAGE_B.clusterArn
+      || task?.taskArn !== proof.taskArn || task.taskDefinitionArn !== identity.taskDefinitionArn || task.clusterArn !== STAGE_B.clusterArn
+      || task.lastStatus !== "STOPPED" || task.stopCode !== "EssentialContainerExited" || !Number.isFinite(Date.parse(event.eventTime))
+      || !Number.isFinite(Date.parse(task.stoppedAt)) || Date.parse(event.eventTime) < Date.parse(task.stoppedAt)
+      || Date.parse(event.eventTime) > row.expiresAt * 1000 || !/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/.test(event.eventID || "")) {
+    throw new Error("Archived inventory task outcome is not authenticated.");
+  }
+  if (!Array.isArray(logEvents) || !logEvents.some(({ message }) => message === "Error: read-only rotation inventory query failed")
+      || !logEvents.some(({ message }) => typeof message === "string" && message.includes("at executeProductionRotationInventory (file:///app/scripts/production-rotation-state-inventory.mjs:"))
+      || logEvents.some(({ message }) => typeof message !== "string" || message.trim().startsWith("{"))) {
+    throw new Error("Archived inventory output is successful or unknown.");
+  }
+  return { taskArn: proof.taskArn, operationKey: preDeploymentOperationKey(identity), identitySha256: row.operationIdentitySha256, cloudTrailEventId: event.eventID };
+}
+
+export function preDeploymentRecoveryTransaction({ table, predecessor, successor, recoveryEvidenceSha256 }) {
+  const oldIdentity = createPreDeploymentOperationIdentity(predecessor.identity);
+  const newIdentity = createPreDeploymentOperationIdentity(successor);
+  assertPreDeploymentReplayRow(predecessor.row, oldIdentity);
+  if (predecessor.row.launchState !== "launch-uncertain" || !predecessor.row.taskArn
+      || oldIdentity.rotationId !== newIdentity.rotationId || oldIdentity.releaseSha === newIdentity.releaseSha
+      || !/^[a-f0-9]{64}$/.test(recoveryEvidenceSha256 || "")) throw new Error("Inventory recovery identity is invalid.");
+  const oldKey = preDeploymentOperationKey(oldIdentity);
+  const newKey = preDeploymentOperationKey(newIdentity);
+  if (successor.operationKey !== newKey || oldKey === newKey) throw new Error("Inventory successor must be a distinct authorized operation.");
+  return { TransactItems: [
+    { Update: { TableName: table, Key: { approvalMode: { S: oldKey } },
+      UpdateExpression: "SET launchState = :recovered, successorOperationKey = :successor, recoveryEvidenceSha256 = :evidence",
+      ConditionExpression: "launchState = :uncertain AND approvalNonce = :nonce AND operationIdentitySha256 = :identity AND taskArn = :task AND attribute_not_exists(successorOperationKey)",
+      ExpressionAttributeValues: { ":recovered": { S: "failed-recovered" }, ":uncertain": { S: "launch-uncertain" }, ":nonce": { S: predecessor.row.approvalNonce }, ":identity": { S: predecessor.row.operationIdentitySha256 }, ":task": { S: predecessor.row.taskArn }, ":successor": { S: newKey }, ":evidence": { S: recoveryEvidenceSha256 } } } },
+    { Put: { TableName: table, Item: { ...preDeploymentReplayItem(successor), predecessorOperationKey: { S: oldKey }, recoveryEvidenceSha256: { S: recoveryEvidenceSha256 } }, ConditionExpression: "attribute_not_exists(approvalMode)" } },
+  ] };
 }
 
 export function validateBrokerConfiguration(config) {
@@ -166,13 +232,13 @@ export function validatePreDeploymentInventoryConfiguration(config) {
       || config.inventoryTaskRoleArn !== inventoryTaskRoleArn
       || config.inventoryExecutionRoleArn !== inventoryExecutionRoleArn
       || config.inventoryDatabaseUrlArn !== inventoryDatabaseUrlArn
-      || config.inventoryRlsRole !== inventoryRlsRole
+      || config.inventoryOperation !== inventoryOperation
       || config.inventoryLogGroupName !== STAGE_B.inventoryLogGroupName
       || !/^[a-f0-9]{40}$/.test(config.inventoryImageReleaseSha || "")) throw new Error("Pre-deployment inventory broker configuration is outside the reviewed contract.");
   return config;
 }
 
-function assertExactInventoryTaskDefinition({ definition, taskDefinitionArn, imageReleaseSha, config }) {
+function assertExactInventoryTaskDefinition({ definition, taskDefinitionArn, imageReleaseSha, config, legacyRecovery = false }) {
   const container = definition?.containerDefinitions?.[0];
   const expected = {
     family: inventoryTaskDefinitionFamily,
@@ -195,7 +261,7 @@ function assertExactInventoryTaskDefinition({ definition, taskDefinitionArn, ima
       environment: [
         { name: "RELEASE_GIT_SHA", value: imageReleaseSha },
         { name: "ROTATION_INVENTORY_APPROVED", value: "true" },
-        { name: "ROTATION_INVENTORY_RLS_ROLE", value: inventoryRlsRole },
+        { name: legacyRecovery ? "ROTATION_INVENTORY_RLS_ROLE" : "ROTATION_INVENTORY_OPERATION", value: legacyRecovery ? "mscqr_prod_rls_read" : inventoryOperation },
       ],
       secrets: [{ name: "DATABASE_URL", valueFrom: inventoryDatabaseUrlArn }],
       logConfiguration: {
@@ -209,7 +275,7 @@ function assertExactInventoryTaskDefinition({ definition, taskDefinitionArn, ima
   return true;
 }
 
-export function createPreDeploymentInventoryHandler({ config, executingBrokerVersion, readApproval, verifySignature, claimPreDeploymentOperation = async () => {}, releasePreDeploymentOperation = async () => {}, markPreDeploymentLaunchUncertain = async () => {}, recordPreDeploymentTaskStarted = async () => {}, recordPreDeploymentCompleted = async () => {}, runTask, describeTaskDefinition, describeTasks, describeLogStreams, getLogEvents, stopTask, now = () => new Date(), monotonicNow = () => performance.now(), sleep = async (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)) }) {
+export function createPreDeploymentInventoryHandler({ config, executingBrokerVersion, readApproval, verifySignature, claimPreDeploymentOperation = async () => {}, releasePreDeploymentOperation = async () => {}, markPreDeploymentLaunchUncertain = async () => {}, recordPreDeploymentTaskStarted = async () => {}, recordPreDeploymentCompleted = async () => {}, readPreDeploymentOperation, recoverPreDeploymentOperation, lookupInventoryStopEvents, runTask, describeTaskDefinition, describeTasks, describeLogStreams, getLogEvents, stopTask, now = () => new Date(), monotonicNow = () => performance.now(), sleep = async (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)) }) {
   validatePreDeploymentInventoryConfiguration(config);
   const brokerVersion = assertStageBBrokerRuntimeVersion(executingBrokerVersion);
   return async (event, context = {}) => {
@@ -238,7 +304,7 @@ export function createPreDeploymentInventoryHandler({ config, executingBrokerVer
         clearTimeout(timer);
       }
     };
-    if (!event || typeof event !== "object" || Object.keys(event).sort().join(",") !== "approvalId,imageReleaseSha,operation,rotationId,sourceSha,taskDefinitionArn" || event.operation !== PREDEPLOYMENT_INVENTORY_OPERATION || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{5,127}$/.test(event.approvalId || "") || !/^[A-Za-z0-9._-]{8,128}$/.test(event.rotationId || "") || !/^[a-f0-9]{40}$/.test(event.sourceSha || "") || !/^[a-f0-9]{40}$/.test(event.imageReleaseSha || "") || !inventoryTaskArnPattern.test(event.taskDefinitionArn || "")) throw new Error("Pre-deployment inventory broker request is outside the reviewed contract.");
+    if (!event || typeof event !== "object" || Object.keys(event).filter((key) => key !== "failedPredecessor").sort().join(",") !== "approvalId,imageReleaseSha,operation,rotationId,sourceSha,taskDefinitionArn" || event.operation !== PREDEPLOYMENT_INVENTORY_OPERATION || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{5,127}$/.test(event.approvalId || "") || !/^[A-Za-z0-9._-]{8,128}$/.test(event.rotationId || "") || !/^[a-f0-9]{40}$/.test(event.sourceSha || "") || !/^[a-f0-9]{40}$/.test(event.imageReleaseSha || "") || !inventoryTaskArnPattern.test(event.taskDefinitionArn || "")) throw new Error("Pre-deployment inventory broker request is outside the reviewed contract.");
     const approval = await runWithinDeadline("approval authorization", async () => validateStageBApproval(await readApproval(config.approvalSecretArn), { ...config.approvalExpected, approvalId: event.approvalId, brokerVersion }, { now: now(), verifySignature }), operationDeadlineMs);
     if (approval.approval.releaseSha !== event.sourceSha || approval.approval.backendImageDigest !== config.inventoryImageDigest || event.imageReleaseSha !== config.inventoryImageReleaseSha) throw new Error("Pre-deployment inventory request is not bound to the signed release/image.");
     const definitionResponse = await runWithinDeadline("task-definition authorization", () => describeTaskDefinition(event.taskDefinitionArn), operationDeadlineMs);
@@ -248,7 +314,43 @@ export function createPreDeploymentInventoryHandler({ config, executingBrokerVer
     const operationIdentity = createPreDeploymentOperationIdentity({ approvalId: event.approvalId, releaseSha: event.sourceSha, imageReleaseSha: event.imageReleaseSha, rotationId: event.rotationId, operation: event.operation, taskDefinitionArn: event.taskDefinitionArn, imageDigest: config.inventoryImageDigest });
     const operationKey = preDeploymentOperationKey(operationIdentity);
     const replay = { ...operationIdentity, operationKey, nonce: approval.approval.nonce, expiresAt: approval.approval.expiresAt };
-    await runWithinDeadline("replay claim", () => claimPreDeploymentOperation(replay), operationDeadlineMs);
+    if (event.rotationId === PRESERVED_INVENTORY_PREDECESSOR.rotationId && !exact(event.failedPredecessor, PRESERVED_INVENTORY_PREDECESSOR)) throw new Error("Preserved failed inventory launch requires its exact forward recovery binding.");
+    if (event.failedPredecessor !== undefined) {
+      if (typeof readPreDeploymentOperation !== "function" || typeof recoverPreDeploymentOperation !== "function") throw new Error("Inventory forward recovery adapters are required.");
+      const identity = createPreDeploymentOperationIdentity(event.failedPredecessor);
+      if (!exact(identity, PRESERVED_INVENTORY_PREDECESSOR) || !exact(event.failedPredecessor, identity) || identity.rotationId !== event.rotationId || identity.releaseSha === event.sourceSha) throw new Error("Inventory predecessor identity differs from the reviewed successor.");
+      const row = await runWithinDeadline("predecessor claim readback", () => readPreDeploymentOperation(preDeploymentOperationKey(identity)), operationDeadlineMs);
+      const proof = assertPreDeploymentReplayRow(row, identity);
+      if (proof.launchState !== "launch-uncertain" || !proof.taskArn) throw new Error("Inventory predecessor is not recoverable.");
+      const oldDefinition = await runWithinDeadline("predecessor task definition", () => describeTaskDefinition(identity.taskDefinitionArn), operationDeadlineMs);
+      if (!exactTags(oldDefinition?.tags, inventoryTaskDefinitionTags)) throw new Error("Inventory predecessor task definition tags differ.");
+      assertExactInventoryTaskDefinition({ definition: oldDefinition.taskDefinition, taskDefinitionArn: identity.taskDefinitionArn, imageReleaseSha: identity.imageReleaseSha, config: { ...config, inventoryImageDigest: identity.imageDigest }, legacyRecovery: true });
+      const observed = await runWithinDeadline("predecessor task outcome", () => describeTasks({ cluster: config.clusterArn, tasks: [proof.taskArn], include: ["TAGS"] }), operationDeadlineMs);
+      const liveOutcomeAvailable = !observed.failures?.length && observed.tasks?.length === 1;
+      const stream = `predeployment-inventory/inventory/${proof.taskArn.split("/").pop()}`;
+      const logEvents = []; let token;
+      for (let page = 0; ; page++) {
+        if (page >= 20) throw new Error("Inventory predecessor log proof is incomplete.");
+        const logs = await runWithinDeadline("predecessor output proof", () => getLogEvents({ logGroupName: config.inventoryLogGroupName, logStreamName: stream, startFromHead: true, ...(token ? { nextToken: token } : {}) }), operationDeadlineMs);
+        logEvents.push(...(logs.events || []));
+        if (Buffer.byteLength(JSON.stringify(logEvents)) > 128 * 1024) throw new Error("Inventory predecessor log proof exceeds its bound.");
+        if (!logs.nextForwardToken || logs.nextForwardToken === token) break;
+        token = logs.nextForwardToken;
+      }
+      let failure;
+      if (liveOutcomeAvailable) failure = assertFailedPreDeploymentPredecessor({ row, identity, task: observed.tasks[0], logEvents });
+      else {
+        if (observed.tasks?.length || observed.failures?.length !== 1 || observed.failures[0].arn !== proof.taskArn || observed.failures[0].reason !== "MISSING" || typeof lookupInventoryStopEvents !== "function") throw new Error("Inventory predecessor outcome cannot be authenticated.");
+        const events = await runWithinDeadline("archived predecessor outcome", () => lookupInventoryStopEvents({ taskArn: proof.taskArn, expiresAt: row.expiresAt }), operationDeadlineMs);
+        const matched = events.filter((entry) => entry.requestParameters?.task === proof.taskArn);
+        if (matched.length !== 1) throw new Error("Archived inventory outcome is absent or ambiguous.");
+        failure = assertArchivedFailedInventoryTask({ row, identity, cloudTrailEvent: matched[0], logEvents });
+      }
+      const recoveryEvidenceSha256 = crypto.createHash("sha256").update(canonicalJson({ failure, successorIdentitySha256: preDeploymentOperationIdentitySha256(operationIdentity), task: observed.tasks[0], logEvents })).digest("hex");
+      await runWithinDeadline("atomic inventory forward recovery", () => recoverPreDeploymentOperation({ predecessor: { row, identity }, successor: replay, recoveryEvidenceSha256 }), operationDeadlineMs);
+    } else {
+      await runWithinDeadline("replay claim", () => claimPreDeploymentOperation(replay), operationDeadlineMs);
+    }
     const networkConfiguration = { awsvpcConfiguration: { subnets: [...config.inventoryPrivateSubnetIds].sort(), securityGroups: [...config.inventorySecurityGroupIds].sort(), assignPublicIp: "DISABLED" } };
     let launchMayHaveOccurred = false;
     let launchAttempted = false;
@@ -280,7 +382,7 @@ export function createPreDeploymentInventoryHandler({ config, executingBrokerVer
         launched = await runWithinDeadline("RunTask", () => runTask({ cluster: config.clusterArn, taskDefinition: event.taskDefinitionArn, launchType: "FARGATE", count: 1, networkConfiguration, tags: [{ key: "MSCQRPreDeploymentInventory", value: "rotation-inventory" }, { key: "ReleaseSha", value: event.sourceSha }, { key: "RotationId", value: event.rotationId }] }), operationDeadlineMs);
       } catch (error) {
         if (!launchAttempted) {
-          await runWithinDeadline("pre-launch claim release", () => releasePreDeploymentOperation(replay), requestDeadlineMs).catch(() => {});
+          await runWithinDeadline("pre-launch claim preservation", () => event.failedPredecessor ? markPreDeploymentLaunchUncertain(replay) : releasePreDeploymentOperation(replay), requestDeadlineMs).catch(() => {});
           launchMayHaveOccurred = false;
           throw error;
         }
@@ -293,7 +395,7 @@ export function createPreDeploymentInventoryHandler({ config, executingBrokerVer
           await runWithinDeadline("launch uncertainty record", () => markPreDeploymentLaunchUncertain({ ...replay, taskArns: launched.tasks.map(({ taskArn: arn }) => arn).filter(Boolean) }), requestDeadlineMs);
           uncertaintyRecorded = true;
         } else {
-          await runWithinDeadline("pre-launch claim release", () => releasePreDeploymentOperation(replay), requestDeadlineMs);
+          await runWithinDeadline("pre-launch claim preservation", () => event.failedPredecessor ? markPreDeploymentLaunchUncertain(replay) : releasePreDeploymentOperation(replay), requestDeadlineMs);
           launchMayHaveOccurred = false;
         }
         throw new Error("Pre-deployment inventory task did not start exactly once.");
@@ -359,7 +461,7 @@ export function createBrokerRuntimeConfig(env = process.env) {
     inventoryTaskRoleArn,
     inventoryExecutionRoleArn,
     inventoryDatabaseUrlArn,
-    inventoryRlsRole,
+    inventoryOperation,
     inventoryPrivateSubnetIds: privateSubnetIds,
     inventorySecurityGroupIds: [STAGE_B.executorSecurityGroupId],
     inventoryAssignPublicIp: "DISABLED",
@@ -371,8 +473,8 @@ export async function handler(event, context) {
   const config = createBrokerRuntimeConfig();
   const executingBrokerVersion = assertStageBBrokerRuntimeVersion(process.env.AWS_LAMBDA_FUNCTION_VERSION);
   assertStageBBrokerConfigurationBindings({ approvalExpected: config.approvalExpected, images: config.images, templateHashes: config.templateHashes });
-  const [{ ECSClient, RunTaskCommand, DescribeTaskDefinitionCommand, DescribeTasksCommand, StopTaskCommand }, { SecretsManagerClient, GetSecretValueCommand }, { KMSClient, VerifyCommand }, { DynamoDBClient, PutItemCommand, DeleteItemCommand, UpdateItemCommand }, { S3Client, PutObjectCommand }, { CloudWatchLogsClient, DescribeLogStreamsCommand, GetLogEventsCommand }] = await Promise.all([
-    import("@aws-sdk/client-ecs"), import("@aws-sdk/client-secrets-manager"), import("@aws-sdk/client-kms"), import("@aws-sdk/client-dynamodb"), import("@aws-sdk/client-s3"), import("@aws-sdk/client-cloudwatch-logs"),
+  const [{ ECSClient, RunTaskCommand, DescribeTaskDefinitionCommand, DescribeTasksCommand, StopTaskCommand }, { SecretsManagerClient, GetSecretValueCommand }, { KMSClient, VerifyCommand }, { DynamoDBClient, PutItemCommand, DeleteItemCommand, UpdateItemCommand, GetItemCommand, TransactWriteItemsCommand }, { S3Client, PutObjectCommand }, { CloudWatchLogsClient, DescribeLogStreamsCommand, GetLogEventsCommand }, { CloudTrailClient, LookupEventsCommand }] = await Promise.all([
+    import("@aws-sdk/client-ecs"), import("@aws-sdk/client-secrets-manager"), import("@aws-sdk/client-kms"), import("@aws-sdk/client-dynamodb"), import("@aws-sdk/client-s3"), import("@aws-sdk/client-cloudwatch-logs"), import("@aws-sdk/client-cloudtrail"),
   ]);
   const ecs = new ECSClient({ region: STAGE_B.region }); const secrets = new SecretsManagerClient({ region: STAGE_B.region });
   const kms = new KMSClient({ region: STAGE_B.region }); const dynamo = new DynamoDBClient({ region: STAGE_B.region }); const s3 = new S3Client({ region: STAGE_B.region });
@@ -382,6 +484,7 @@ export async function handler(event, context) {
       return response.SecretString;
   };
   const verifySignature = async ({ keyId, message, signature }) => (await kms.send(new VerifyCommand({ KeyId: keyId, Message: message, MessageType: "RAW", Signature: signature, SigningAlgorithm: "RSASSA_PSS_SHA_256" }))).SignatureValid === true;
+  const cloudTrail = new CloudTrailClient({ region: STAGE_B.region });
   const clients = {
     config,
     readApproval,
@@ -398,6 +501,27 @@ export async function handler(event, context) {
     recordTaskStarted: ({ approvalId, nonce, mode, taskArn }) => dynamo.send(new UpdateItemCommand({
       TableName: config.replayTable, Key: { approvalMode: { S: `${approvalId}#${mode}` } }, UpdateExpression: "SET launchState = :state, taskArn = :taskArn", ConditionExpression: "approvalNonce = :nonce AND launchState = :claimed", ExpressionAttributeValues: { ":nonce": { S: nonce }, ":claimed": { S: "claimed" }, ":state": { S: "started" }, ":taskArn": { S: taskArn } },
     })),
+    lookupInventoryStopEvents: async ({ taskArn, expiresAt }) => {
+      const events = []; let NextToken;
+      for (let page = 0; ; page++) {
+        if (page >= 20) throw new Error("Archived inventory outcome pagination is incomplete.");
+        const response = await cloudTrail.send(new LookupEventsCommand({ LookupAttributes: [{ AttributeKey: "EventName", AttributeValue: "StopTask" }], StartTime: new Date((expiresAt - 86400) * 1000), EndTime: new Date(expiresAt * 1000), MaxResults: 50, ...(NextToken ? { NextToken } : {}) }));
+        for (const entry of response.Events || []) {
+          const event = JSON.parse(entry.CloudTrailEvent);
+          if (event.requestParameters?.task === taskArn) events.push(event);
+        }
+        if (!response.NextToken) break;
+        if (response.NextToken === NextToken) throw new Error("Archived inventory pagination stalled.");
+        NextToken = response.NextToken;
+      }
+      return events;
+    },
+    readPreDeploymentOperation: async (key) => {
+      const response = await dynamo.send(new GetItemCommand({ TableName: config.replayTable, Key: { approvalMode: { S: key } }, ConsistentRead: true }));
+      if (!response.Item) throw new Error("Inventory predecessor replay claim is absent.");
+      return Object.fromEntries(Object.entries(response.Item).map(([name, value]) => [name, value.S ?? (value.N !== undefined ? Number(value.N) : value.SS)]));
+    },
+    recoverPreDeploymentOperation: (recovery) => dynamo.send(new TransactWriteItemsCommand(preDeploymentRecoveryTransaction({ table: config.replayTable, ...recovery }))),
     claimPreDeploymentOperation: (replay) => dynamo.send(new PutItemCommand({
       TableName: config.replayTable,
       Item: preDeploymentReplayItem(replay),

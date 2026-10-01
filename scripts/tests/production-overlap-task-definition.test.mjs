@@ -8,7 +8,7 @@ const taskDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/ms
 const valueReferenceBindings = new Set(["JWT_SECRET_PREVIOUS", "QR_SIGN_ACTIVE_KEY_VERSION", "QR_SIGN_PUBLIC_KEY_PREVIOUS", "QR_SIGN_PREVIOUS_KEY_VERSION"]);
 const secretBindings = Object.fromEntries([
   "JWT_SECRET_CURRENT", "JWT_SECRET_PREVIOUS", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT", "QR_SIGN_ACTIVE_KEY_VERSION", "QR_SIGN_PUBLIC_KEY_PREVIOUS", "QR_SIGN_PREVIOUS_KEY_VERSION", "ARTIFACT_SIGN_PRIVATE_KEY_CURRENT", "ARTIFACT_SIGN_PUBLIC_KEY_CURRENT", "ARTIFACT_SIGN_ACTIVE_KEY_VERSION", "ARTIFACT_SIGN_PUBLIC_KEYS_JSON",
-].map((name) => [name, `arn:aws:secretsmanager:eu-west-2:368992683803:secret:fixture/${name}${valueReferenceBindings.has(name) ? ":value::" : ""}`]).concat([["ROTATION_INVENTORY_RLS_ROLE", "mscqr_prod_rls_read"]]));
+].map((name) => [name, `arn:aws:secretsmanager:eu-west-2:368992683803:secret:fixture/${name}${valueReferenceBindings.has(name) ? ":value::" : ""}`]).concat([["ROTATION_INVENTORY_OPERATION", "rotation-inventory-v1"]]));
 const input = { backendImage, imageReleaseSha: sourceSha, backendLogGroup: "/ecs/mscqr-production/rls-green-backend", secretBindings };
 const awsReadback = (definition) => ({
   ...structuredClone(definition), taskDefinitionArn, revision: 9, status: "ACTIVE", enableFaultInjection: false,

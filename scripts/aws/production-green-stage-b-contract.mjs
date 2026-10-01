@@ -13,7 +13,7 @@ export const STAGE_B = Object.freeze({
   canaryLogGroupName: "/ecs/mscqr-production/rls-green-canary",
   inventoryTaskDefinitionFamily: "mscqr-production-rls-green-predeployment-inventory",
   inventoryDatabaseSecretArn: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/app-XNeSfh",
-  inventoryRlsRole: "mscqr_prod_rls_read",
+  inventoryOperation: "rotation-inventory-v1",
   receiptBucket: "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an",
   replayTable: "mscqr-production-rls-stage-b-replay",
   approvalSecretArn: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/approval-e0shho",
@@ -193,6 +193,16 @@ export function assertStageBBrokerConfigurationIdentity({ configuration, alias }
   };
 }
 
+// One preserved pre-upgrade failed launch. Recovery never changes its identity/hash.
+export const PRESERVED_INVENTORY_PREDECESSOR = Object.freeze({
+  approvalId: "APR-STAGE-B-2f296dfe5546765a4b762568cbaa7fc26af97660",
+  releaseSha: "2f296dfe5546765a4b762568cbaa7fc26af97660",
+  imageReleaseSha: "2f296dfe5546765a4b762568cbaa7fc26af97660",
+  rotationId: "rotation-20260913011819-98b062c4",
+  operation: "production-predeployment-rotation-inventory",
+  taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:3",
+  imageDigest: "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:3cbf8683f4072db322e4d09be9783e1804353fbc50a5b55020988665d2e3ef6e",
+});
 export const STAGE_B_MODES = Object.freeze([
   "full-rls-capability-preflight", "full-rls-admin-bootstrap", "full-rls-role-provision",
   "full-rls-role-verify", "full-rls-admin-ownership", "full-rls-runtime-policy",
