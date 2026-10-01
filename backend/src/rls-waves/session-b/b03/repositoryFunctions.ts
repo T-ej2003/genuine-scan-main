@@ -187,6 +187,7 @@ const uuid = (value: unknown) => {
   }
   return normalized;
 };
+export const b03RequestId = uuid;
 const authenticatedRequestId = (value: unknown) => {
   const normalized = text(value, "requestId", 128);
   if (!/^[\x21-\x7e]+$/.test(normalized)) {
@@ -236,7 +237,7 @@ export const b03PayloadDigest = (payload: unknown) =>
   // SHA-256 is intentional here: this is a deterministic JSON payload-integrity
   // digest, never a password or credential verifier.
   // codeql[js/insufficient-password-hash]
-  createHash("sha256").update(stableJson(payload)).digest("hex");
+  createHash("sha256").update(stableJson(JSON.parse(json(payload)))).digest("hex");
 const exactEnum = <T extends string>(value: unknown, label: string, allowed: readonly T[]) => {
   const normalized = String(value || "") as T;
   if (!allowed.includes(normalized)) throw new Error(`B03 repository rejects ${label}`);

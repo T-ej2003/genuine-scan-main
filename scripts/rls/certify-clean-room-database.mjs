@@ -902,6 +902,9 @@ const runSuccessfulCertification = ({ adminUrl, maintenanceDatabase, manifest, e
     provePrismaLedger(urls.migration, manifest.roles.migration, execution.prismaMigrations);
     assertNoBusinessRows(urls.bootstrap);
     runSqlFile(urls.migration, "50-certification-fixtures.sql", "load disposable certification fixtures before ownership transfer");
+    if (env.MSCQR_FULL_RLS_CERTIFICATION_FAMILY === "b03-durable-outbox") {
+      runPsql(urls.migration, ["-f", path.join(root, "backend/tests/rls-wave-b/b03/legacyAuditFixtures.sql")], "load pre-correction audit fixtures before installing new producer contract");
+    }
     runSqlFile(urls.administrator, "admin-ownership.sql", "run exact administrative ownership entrypoint");
     runSqlFile(urls.administrator, "runtime-policy.sql", "run exact runtime policy entrypoint");
     runSqlFile(urls.administrator, "verification.sql", "run exact verification entrypoint");
@@ -951,6 +954,18 @@ const runSuccessfulCertification = ({ adminUrl, maintenanceDatabase, manifest, e
         blueFingerprintUnchanged: true,
         semanticCertificationExecuted: false,
       };
+    }
+    if (env.MSCQR_FULL_RLS_CERTIFICATION_FAMILY === "b03-durable-outbox") {
+      const connections = { app: urls.app, bootstrap: urls.bootstrap, preauth: urls.preauth, worker: urls.worker };
+      const b03OutboxCertification = runB03OutboxCertification(connections, env);
+      const fixtureRows = Number(scalar(urls.bootstrap, 'SELECT count(*) FROM public."AuditLogOutbox"', "count audit certification fixtures"));
+      destroyAndProve({ urls, database, manifest, blueUrl, expectedBlueFingerprint, allowCertificationFixtures: true });
+      return { tablesCertified: 0, fixtureRows, applicationPathResults: [], catalogTamperResults: [],
+        b01Certification: null, b01PreAuthCertification: null, scheduledJobIdentityCertification: null,
+        b03OutboxCertification, c03Certification: null, printingLifecycleCertification: null,
+        currentRuntimeSuperAdminInvitationCertification: null, publicVerificationCertification: null,
+        qrSystemCertification: null, databaseResidueCount: 0, managedRoleResidueCount: 0,
+        blueFingerprintUnchanged: true, semanticCertificationExecuted: false };
     }
     const catalogTamperResults = certifyCatalogTamperDetection(urls.administrator, manifest, policies);
     const b01Certification = certifyB01RefreshRotation(urls, manifest);

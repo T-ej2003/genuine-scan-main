@@ -66,3 +66,49 @@ test("B03 schema migration preserves legacy rows and constrains durable authorit
   assert.match(migration, /claimLease_check/);
   assert.doesNotMatch(schema, /rawCapability|rawToken/);
 });
+
+test("every canonical SQL audit producer reaches the enforced persistence boundary", () => {
+  const producerFiles = [
+    "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+    "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
+    "backend/src/rls-waves/session-b/b01/b01AuthenticationClosureFunctions.sql",
+    "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+    "backend/src/rls-waves/session-b/b03/scheduledJobIdentityFunctions.sql",
+    "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
+  ];
+  const producers = new Set();
+  let inserts = 0;
+  for (const file of producerFiles) {
+    const source = read(file);
+    for (const match of source.matchAll(/INSERT INTO public\."AuditLogOutbox"/g)) {
+      producers.add([...source.slice(0, match.index).matchAll(/CREATE OR REPLACE FUNCTION ([^(]+)/g)].at(-1)[1]);
+      inserts++;
+    }
+  }
+  assert.equal(producers.size, 17);
+  assert.equal(inserts, 19);
+  const generated = read("scripts/rls/sql/generated/20-context-helpers.sql");
+  assert.match(generated, /CREATE OR REPLACE TRIGGER b03_complete_audit_record BEFORE INSERT ON public\."AuditLogOutbox"/);
+  for (const name of ["b03_stable_json", "b03_complete_audit_record", "b03_audit_record_valid"]) {
+    assert.doesNotMatch(generated, new RegExp(`GRANT EXECUTE ON FUNCTION app_rls\\.${name}\\([^;]*TO "mscqr_rls_cert_(app|worker|preauth|scheduled)"`));
+  }
+});
+
+test("legacy recovery retains provenance, fails closed, and is included in mandatory CI", () => {
+  const source = read("backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql");
+  assert.match(source, /originalDigestPresent',false,'recoveryDigestDerived',true/);
+  assert.match(source, /pg_try_advisory_xact_lock/);
+  assert.match(source, /B03_AUDIT_RECORD_DUPLICATE/);
+  assert.match(source, /B03_AUDIT_RECORD_UNRECONSTRUCTABLE/);
+  assert.match(source, /o\."payloadDigest" IS NOT NULL AND o\."idempotencyKey" IS NOT NULL/);
+  const workflow = read(".github/workflows/quality-gate.yml");
+  assert.match(workflow, /MSCQR_FULL_RLS_CERTIFICATION_FAMILY: b03-durable-outbox/);
+  assert.match(workflow, /docker compose -f docker-compose\.rls-certification\.yml up -d --wait rls-cert-postgres/);
+  assert.match(workflow, /MSCQR_FULL_RLS_CERTIFICATION_ADMIN_URL: postgresql:\/\/mscqr_rls_cert_admin@127\.0\.0\.1:55434\/mscqr_full_rls_admin/);
+  assert.match(read("package.json"), /full-database-rls-enforcement\.test\.mjs scripts\/tests\/b03-outbox-contract\.test\.mjs/);
+});
+
+test("audit producer, recovery and upgrade fixtures are source-bound", () => {
+  const inputs = JSON.parse(read("documents/security/rls-program/generated/checksums.json")).sourceContractInputs.map(({ path }) => path);
+  for (const file of ["backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql", "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts", "backend/tests/rls-wave-b/b03/legacyAuditFixtures.sql"]) assert(inputs.includes(file), file);
+});

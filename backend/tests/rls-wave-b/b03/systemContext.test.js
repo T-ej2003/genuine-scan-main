@@ -80,12 +80,15 @@ const main = async () => {
 
   const scheduledCalls = [];
   await withB03ScheduledContext(
-    { jobId: "schedule-job-1", requestId: REQUEST_ID },
+    { jobId: "schedule-job-1", requestId: REQUEST_ID, capability: "a".repeat(43) },
     async () => undefined,
     runnerFor("mscqr_test_scheduled", scheduledCalls)
   );
-  assert.equal(scheduledCalls[1].values[0], "identity-scheduled-job");
-  assert.equal(scheduledCalls[1].values[2], "SCHEDULED_COMPLIANCE_PACK");
+  assert.equal(scheduledCalls.length, 1);
+  assert.match(scheduledCalls[0].sql, /current_user/);
+  await assert.rejects(async () => withB03ScheduledContext(
+    { jobId: "schedule-job-1", requestId: REQUEST_ID }, async () => undefined,
+    runnerFor("mscqr_test_scheduled", [])), /database-verifiable capability/);
 
   const previousRole = process.env.MSCQR_WORKER_DATABASE_ROLE;
   delete process.env.MSCQR_WORKER_DATABASE_ROLE;

@@ -87,6 +87,17 @@ jobs:
           MSCQR_PRODUCTION_PACKAGE_POSTGRES18_TEST: "true"
           MSCQR_PRODUCTION_PACKAGE_POSTGRES18_ADMIN_URL: postgresql://mscqr_p2_test@127.0.0.1:55432/mscqr_p2_admin_test
         run: node --test scripts/tests/production-full-rls-package-postgres18.test.mjs
+      - name: Certify worker audit compatibility and legacy recovery on PostgreSQL 18
+        env:
+          MSCQR_FULL_RLS_CERTIFICATION_CONFIRM: MSCQR_RUN_LOCAL_FULL_RLS_CERTIFICATION
+          MSCQR_FULL_RLS_CERTIFICATION_ADMIN_URL: postgresql://mscqr_rls_cert_admin@127.0.0.1:55434/mscqr_full_rls_admin
+          MSCQR_FULL_RLS_CERTIFICATION_FAMILY: b03-durable-outbox
+        run: |
+          docker compose -f docker-compose.rls-certification.yml up -d --wait rls-cert-postgres
+          mkdir -m 700 "$RUNNER_TEMP/worker-audit-evidence"
+          export MSCQR_FULL_RLS_CERTIFICATION_EVIDENCE_PATH="$RUNNER_TEMP/worker-audit-evidence/result.json"
+          node scripts/rls/certify-clean-room-database.mjs
+          node --test backend/tests/rls-wave-b/b03/repositoryFunctions.test.js backend/tests/rls-wave-b/b03/systemContext.test.js backend/tests/rls-wave-b/b03/serviceActivation.test.js
       - name: Verify restored generated contracts and permission source
         run: |
           npm run rls:full-verify

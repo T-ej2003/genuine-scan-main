@@ -1,3 +1,4 @@
+DROP TRIGGER IF EXISTS b03_complete_audit_record ON public."AuditLogOutbox";
 DROP FUNCTION IF EXISTS app_rls.fail_security_event_outbox(text,text,timestamp without time zone,integer,text);
 DROP FUNCTION IF EXISTS app_rls.complete_security_event_outbox(text,text,timestamp without time zone,text);
 DROP FUNCTION IF EXISTS app_rls.claim_security_event_outbox_slice(timestamp without time zone,integer,text);
@@ -7,3 +8,7 @@ DROP FUNCTION IF EXISTS app_rls.consume_audit_log_outbox(text,text,timestamp wit
 DROP FUNCTION IF EXISTS app_rls.claim_audit_log_outbox_slice(timestamp without time zone,integer);
 DROP FUNCTION IF EXISTS app_rls.enqueue_audit_log_outbox(jsonb,text,text,text,text,text,text,text,text,timestamp without time zone,text);
 DROP FUNCTION IF EXISTS app_rls.b03_bind_outbox_operation(text,text,text);
+
+DROP FUNCTION IF EXISTS app_rls.b03_complete_audit_record();
+DROP FUNCTION IF EXISTS app_rls.b03_audit_record_valid(public."AuditLogOutbox");
+DROP FUNCTION IF EXISTS app_rls.b03_stable_json(jsonb);
