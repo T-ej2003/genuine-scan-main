@@ -42,6 +42,7 @@ test("task renderer rejects substituted image, roles, endpoint, evidence bucket,
 test("workflow and broker accept one fixed operation and always attempt authority cleanup", () => {
   const workflow = read("../../.github/workflows/execute-victoria-onboarding-recovery.yml");
   const broker = read("../../infra/aws/terraform/lambda/victoria-recovery-broker/index.mjs");
+  const taskCleanup = read("../../infra/aws/terraform/lambda/victoria-recovery-broker/task-cleanup.mjs");
   const infrastructure = read("../../infra/aws/terraform/production-victoria-recovery/main.tf");
   assert.match(infrastructure, /timeout\s+=\s+120/);
   assert.match(infrastructure, /aws_cloudwatch_event_rule" "task_stopped/);
@@ -57,18 +58,24 @@ test("workflow and broker accept one fixed operation and always attempt authorit
   assert.match(broker, /\["PENDING", "RUNNING"\]/);
   assert.match(broker, /activeRecoveryTasks\(cluster\)/);
   assert.match(broker, /StopTaskCommand/);
+  assert.doesNotMatch(broker, /ListTasksCommand\(\{ cluster, startedBy: event\.nonce, /);
   assert.match(broker, /AuthorizationNonce/);
   assert.match(broker, /SourceSha/);
-  assert.match(broker, /RECOVERY_CLEANUP_INCOMPLETE_EVIDENCE_PERSISTED/);
   assert.match(broker, /cleanupStoppedTaskEvent/);
   assert.match(broker, /networkAuthorityRevoked, taskStopped/);
-  assert.ok(broker.indexOf("cleanups/${event.nonce}.json") < broker.indexOf("RECOVERY_CLEANUP_INCOMPLETE_EVIDENCE_PERSISTED"),
+  assert.match(broker, /stopVictoriaRecoveryTasks/);
+  assert.match(broker, /persistVictoriaRecoveryCleanup/);
+  assert.doesNotMatch(broker, /ListTasksCommand\(\{ cluster, startedBy: event\.nonce, desiredStatus:/);
+  assert.match(taskCleanup, /listTasks\(\{ startedBy: nonce \}\)/);
+  assert.match(taskCleanup, /RECOVERY_CLEANUP_INCOMPLETE_EVIDENCE_PERSISTED/);
+  assert.ok(taskCleanup.indexOf("await putEvidence(receipt)") < taskCleanup.indexOf("RECOVERY_CLEANUP_INCOMPLETE_EVIDENCE_PERSISTED"),
     "cleanup failure evidence is written before the broker fails");
   assert.match(broker, /containerOverrides: \[\{ name: "recovery", environment:/);
   assert.doesNotMatch(broker, /containerOverrides: \[\{[^}]*command\s*:/s);
   assert.match(broker, /AuthorizeSecurityGroupIngressCommand/);
   assert.match(broker, /RevokeSecurityGroupIngressCommand/);
-  assert.match(broker, /const stopDeadline = Date\.now\(\) \+ 45_000/);
+  assert.match(workflow, /victoria-recovery-result\.mjs --result/);
+  assert.doesNotMatch(workflow, /r\.targetEmail|r\.targetDatabase|r\.pruneComplete/);
   assert.match(infrastructure, /ingress\s+=\s+\[\]\s+egress\s+=\s+\[\]/);
   assert.match(infrastructure, /resource "aws_vpc_security_group_egress_rule" "dns_udp"/);
   assert.match(infrastructure, /resource "aws_vpc_security_group_egress_rule" "dns_tcp"/);

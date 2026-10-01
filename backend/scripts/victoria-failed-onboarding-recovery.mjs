@@ -4,6 +4,7 @@ import { KMSClient, VerifyCommand } from "@aws-sdk/client-kms";
 import { pathToFileURL } from "node:url";
 import { signRdsIamToken, taskRoleCredentials } from "./victoria-rds-iam-token.mjs";
 import { consumeVictoriaRecoveryNonce, verifyVictoriaRecoveryAuthorization, victoriaRecoveryImplementationSha256, VICTORIA_RECOVERY_IDENTITY } from "../../scripts/aws/victoria-recovery-authorization.mjs";
+import { validateVictoriaRecoveryResult } from "../../scripts/aws/victoria-recovery-result.mjs";
 
 const REGION = "eu-west-2";
 const TASK_FAMILY = "mscqr-production-victoria-recovery";
@@ -122,6 +123,7 @@ async function run() {
     status: cleanupError ? "authority-cleanup-failed" : transactionError ? "transaction-failed" : result.pruneComplete ? "complete" : "stopped",
     reason: cleanupError ? "TEMPORARY_AUTHORITY_CLEANUP_FAILED" : transactionError ? "DATABASE_OPERATION_FAILED" : result.reason,
     temporaryAuthorityCleanup: cleanupError === null, result }));
+  validateVictoriaRecoveryResult(JSON.parse(evidence), { sourceSha, nonce: verified.nonce, requireSuccess: false });
   await aws.send(new PutObjectCommand({ Bucket: bucket, Key: `results/${verified.nonce}.json`, Body: evidence,
     ContentType: "application/json", IfNoneMatch: "*", ServerSideEncryption: "aws:kms" }));
   process.stdout.write(`${JSON.stringify({ operation: OPERATION, targetEmail: TARGET_EMAIL, targetDatabase: TARGET_DATABASE,

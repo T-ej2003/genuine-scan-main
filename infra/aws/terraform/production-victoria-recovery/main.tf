@@ -210,8 +210,16 @@ data "archive_file" "broker" {
     filename = "infra/aws/terraform/lambda/victoria-recovery-broker/index.mjs"
   }
   source {
+    content  = file("${path.module}/../lambda/victoria-recovery-broker/task-cleanup.mjs")
+    filename = "infra/aws/terraform/lambda/victoria-recovery-broker/task-cleanup.mjs"
+  }
+  source {
     content  = file("${path.module}/../../../../scripts/aws/victoria-recovery-authorization.mjs")
     filename = "scripts/aws/victoria-recovery-authorization.mjs"
+  }
+  source {
+    content  = file("${path.module}/../../../../scripts/aws/victoria-recovery-result.mjs")
+    filename = "scripts/aws/victoria-recovery-result.mjs"
   }
   source {
     content  = file("${path.module}/../../../../scripts/aws/publish-victoria-recovery-authorization.mjs")

@@ -12,6 +12,7 @@ export const VICTORIA_RECOVERY_IDENTITY = Object.freeze({
 });
 export const VICTORIA_RECOVERY_IMPLEMENTATION_FILES = Object.freeze([
   "scripts/aws/victoria-recovery-authorization.mjs",
+  "scripts/aws/victoria-recovery-result.mjs",
   "scripts/aws/publish-victoria-recovery-authorization.mjs",
   "scripts/aws/register-victoria-recovery-task-definition.mjs",
   "scripts/aws/production-github-environment-approval.mjs",
@@ -26,6 +27,7 @@ export const VICTORIA_RECOVERY_IMPLEMENTATION_FILES = Object.freeze([
   "infra/aws/terraform/production-victoria-recovery/task-definition.json",
   "infra/aws/terraform/production-victoria-recovery/Dockerfile",
   "infra/aws/terraform/lambda/victoria-recovery-broker/index.mjs",
+  "infra/aws/terraform/lambda/victoria-recovery-broker/task-cleanup.mjs",
   "infra/aws/terraform/production-victoria-recovery/main.tf",
   "infra/aws/terraform/production-victoria-recovery/variables.tf",
   "infra/aws/terraform/production-victoria-recovery/outputs.tf",

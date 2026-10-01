@@ -133,8 +133,7 @@ jobs:
             sleep 5
           done
           test -s "$result"
-          node -e 'const v=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));console.log(JSON.stringify({operation:v.operation,targetEmail:v.targetEmail,targetDatabase:v.targetDatabase,status:v.status,pruneComplete:v.pruneComplete,temporaryAuthorityCleanup:v.temporaryAuthorityCleanup,reason:v.reason}))' "$result" | tee -a "$GITHUB_STEP_SUMMARY"
-          node -e 'const v=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));if(v.operation!=="VICTORIA_FAILED_ONBOARDING_RECOVERY_V1"||v.targetEmail!=="victoria@mscqr.com"||v.targetDatabase!=="mscqr_production"||v.temporaryAuthorityCleanup!==true||v.pruneComplete!==true)process.exit(1)' "$result"
+          node scripts/aws/victoria-recovery-result.mjs --result "$result" --source-sha "$SOURCE_SHA" --nonce "$NONCE" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Revoke temporary database network authority
         id: cleanup
         if: always() && steps.authorize.outputs.nonce != ''
