@@ -301,7 +301,9 @@ BEGIN
     'mfaPreferredMethod',CASE WHEN 'WEBAUTHN'=ANY(methods) THEN 'WEBAUTHN' WHEN 'TOTP'=ANY(methods) THEN 'TOTP' ELSE NULL END);
   RETURN QUERY SELECT recent."createdIpHash",recent."createdUserAgent",recent."createdAt",actor_state FROM (
     SELECT rt."createdIpHash"::text,rt."createdUserAgent"::text,rt."createdAt" FROM public."RefreshToken" rt
-      WHERE rt."userId"=user_id ORDER BY rt."createdAt" DESC,rt.id LIMIT p_limit
+      WHERE rt."userId"=user_id AND rt."revokedAt" IS NULL AND rt."expiresAt">clock_timestamp()
+        AND (actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN','ORG_ADMIN') OR rt."mfaVerifiedAt" IS NOT NULL)
+      ORDER BY rt."createdAt" DESC,rt.id LIMIT p_limit
   ) recent;
   IF NOT FOUND THEN RETURN QUERY SELECT NULL::text,NULL::text,NULL::timestamp,actor_state; END IF;
 END

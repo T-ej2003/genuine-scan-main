@@ -406,13 +406,16 @@ const refreshE2EPrinterHeartbeat = async (page: Page) => {
 test.describe.serial("Enterprise smoke flows", () => {
   let capturedSupportTicketReference = "";
 
-  test("super admin login lands on the dashboard shell", async ({ page }) => {
+  test("super admin login lands on the dashboard shell", async ({ page }, testInfo) => {
     requireEnterpriseEnv(
       ["E2E_SUPERADMIN_EMAIL", env.superAdminEmail],
-      ["E2E_SUPERADMIN_PASSWORD", env.superAdminPassword]
+      ["E2E_SUPERADMIN_PASSWORD", env.superAdminPassword],
+      ["E2E_SUPERADMIN_MFA_BACKUP_CODES", env.superAdminMfaBackupCodes.join(",")]
     );
 
-    await login(page, env.superAdminEmail, env.superAdminPassword);
+    await login(page, env.superAdminEmail, env.superAdminPassword, {
+      mfaBackupCode: backupCodeForRetry(env.superAdminMfaBackupCodes, testInfo),
+    });
     await expect(page).toHaveURL(/\/dashboard$/);
     await expect(page.locator("main")).toBeVisible();
   });

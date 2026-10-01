@@ -66,6 +66,7 @@ export const assessAuthSessionRisk = async (input: {
   const reasons: string[] = [];
 
   let score = 0;
+  let environmentalStepUpRequired = false;
 
   if (isAdminRole(input.role)) {
     score += 10;
@@ -84,17 +85,20 @@ export const assessAuthSessionRisk = async (input: {
 
   if (recentSessions.length === 0) {
     score += 8;
+    environmentalStepUpRequired = true;
     reasons.push("First known session for this account");
   } else {
     const latest = recentSessions[0];
     if (latest?.createdIpHash && input.ipHash && latest.createdIpHash !== input.ipHash) {
       score += 35;
+      environmentalStepUpRequired = true;
       reasons.push("Source IP changed from recent session");
     }
 
     const latestUaHash = safeHash(latest?.createdUserAgent || null);
     if (latestUaHash && currentUserAgentHash && latestUaHash !== currentUserAgentHash) {
       score += 20;
+      environmentalStepUpRequired = true;
       reasons.push("User-agent changed from recent session");
     }
 
@@ -108,6 +112,7 @@ export const assessAuthSessionRisk = async (input: {
 
     if (distinctIpHashes.size >= 3) {
       score += 25;
+      environmentalStepUpRequired = true;
       reasons.push("Multiple source IP patterns in 24h");
     }
   }
@@ -121,6 +126,7 @@ export const assessAuthSessionRisk = async (input: {
     score,
     riskLevel,
     reasons,
+    environmentalStepUpRequired,
     shouldStepUp: score >= thresholds.stepUp,
     shouldBlock: score >= thresholds.block,
     actorState,

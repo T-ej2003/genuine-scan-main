@@ -63,6 +63,7 @@ const run = async () => {
   assert.equal(fallback.score, 18);
   assert.equal(fallback.shouldStepUp, false);
   assert.equal(fallback.shouldBlock, false);
+  assert.equal(fallback.environmentalStepUpRequired, true, "no valid session baseline requires stronger assurance for MFA roles");
   assert.equal((await withEnvPair("18", undefined, assess)).shouldStepUp, true);
   assert.equal((await withEnvPair(undefined, "18", assess)).shouldStepUp, true, "legacy key remains supported");
   assert.equal((await withEnvPair("18", "18", assess)).shouldStepUp, true);
@@ -96,6 +97,23 @@ const run = async () => {
   const newDevice = await assess({ ipHash: "new", userAgent: "new-agent" });
   const failedAttempts = await assess({ ipHash: "same", userAgent: "same-agent", failedLoginAttempts: 5 });
   assert.deepEqual([low.score, newIp.score, newAgent.score, newDevice.score, failedAttempts.score], [10, 45, 30, 65, 35]);
+  assert.equal(low.environmentalStepUpRequired, false);
+  assert.equal(newIp.environmentalStepUpRequired, true);
+  assert.equal(newAgent.environmentalStepUpRequired, true);
+  assert.equal(newDevice.environmentalStepUpRequired, true);
+  assert.equal(failedAttempts.environmentalStepUpRequired, false);
+
+  riskInputs = {
+    recentSessions: [
+      { createdAt: new Date(), createdIpHash: "same", createdUserAgent: "same-agent" },
+      { createdAt: new Date(), createdIpHash: "ip-2", createdUserAgent: "same-agent" },
+      { createdAt: new Date(), createdIpHash: "ip-3", createdUserAgent: "same-agent" },
+    ],
+    actorState: {},
+  };
+  const multipleRecentIps = await assess({ ipHash: "same", userAgent: "same-agent" });
+  assert.equal(multipleRecentIps.score, 35);
+  assert.equal(multipleRecentIps.environmentalStepUpRequired, true, "three recent IPs must require the existing MFA path");
   assert.equal(newDevice.shouldStepUp, true, "a normal new device must step up");
   assert.equal(newDevice.shouldBlock, false, "a normal new device must not hard block");
 };

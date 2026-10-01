@@ -218,6 +218,7 @@ async function main() {
     });
     assert.equal(initialLogin.response.status, 200, JSON.stringify(initialLogin.body));
     assert.equal(initialLogin.body.data.auth.sessionStage, "MFA_BOOTSTRAP");
+    assert.equal(psql(preauthUrl, `BEGIN; SELECT id FROM app_auth.lookup_password_user('${emails.adminB}'); SELECT count(*) FILTER (WHERE "createdAt" IS NOT NULL) FROM app_rls.load_recent_auth_session_risk_inputs(5); ROLLBACK`).split("\n").at(-1), "0", "unenrolled MFA bootstrap must not establish a trusted baseline");
     const passwordOnlyRawRefresh = "current-runtime-password-only-admin-refresh";
     const passwordOnlyRefreshHash = hashRefreshToken(passwordOnlyRawRefresh);
     assert(adminABefore.mfaFactors + adminABefore.mfaCredentials > 0, "password-only refresh proof requires an enrolled administrator");
@@ -264,6 +265,7 @@ async function main() {
     assert.equal(enrolled.response.status, 200, JSON.stringify(enrolled.body));
     assert.equal(enrolled.body.data.auth.sessionStage, "ACTIVE");
     assert.equal(enrolled.body.data.auth.authAssurance, "ADMIN_MFA");
+    assert.equal(psql(preauthUrl, `BEGIN; SELECT id FROM app_auth.lookup_password_user('${emails.adminB}'); SELECT count(*) FILTER (WHERE "createdAt" IS NOT NULL) FROM app_rls.load_recent_auth_session_risk_inputs(5); ROLLBACK`).split("\n").at(-1), "1", "successful MFA enrollment may establish the trusted baseline");
     const enrollmentReplay = await request("/api/auth/mfa/setup/confirm", {
       method: "POST", jar: bootstrapReplayJar, headers: { "x-csrf-token": bootstrapReplayJar.csrf() }, body: { code: validTotp },
     });
@@ -288,6 +290,37 @@ async function main() {
     const secondActiveSessionId = psql(bootstrap, `SELECT id FROM public."RefreshToken" WHERE "userId"='${adminBId}' AND "revokedAt" IS NULL ORDER BY "createdAt" DESC LIMIT 1`);
     assert.notEqual(secondActiveSessionId, firstActiveSessionId, "subsequent MFA-authenticated login must create an independent session");
     assert.notEqual(secondActiveSessionId, ids.adminASession, "Admin B login session must be independent from Admin A");
+
+    const changedAgent = "mscqr-unverified-bootstrap-regression";
+    psql(bootstrap, `UPDATE public."RefreshToken" SET "createdIpHash"='${crypto.createHash("sha256").update("previous-environment-ip").digest("hex")}',"createdUserAgent"='previous-environment-agent' WHERE id='${secondActiveSessionId}'`);
+    let pendingChallenge;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const jar = cookieJar();
+      const challenged = await request("/api/auth/login", {
+        method: "POST", jar, headers: { "user-agent": changedAgent },
+        body: { email: emails.adminB, password: passwordB },
+      });
+      assert.equal(challenged.response.status, 200, JSON.stringify(challenged.body));
+      assert.equal(challenged.body.data.auth.sessionStage, "MFA_BOOTSTRAP", `unverified bootstrap attempt ${attempt} must not make its own environment trusted`);
+      assert.equal(challenged.body.data.auth.authAssurance, "PASSWORD");
+      assert(challenged.body.data.auth.mfaChallenge?.ticket);
+      pendingChallenge = { jar, ticket: challenged.body.data.auth.mfaChallenge.ticket };
+    }
+    assert(pendingChallenge);
+    const completedChangedEnvironment = await request("/api/auth/mfa/challenge/complete", {
+      method: "POST", jar: pendingChallenge.jar,
+      headers: { "x-csrf-token": pendingChallenge.jar.csrf(), "user-agent": changedAgent },
+      body: { ticket: pendingChallenge.ticket, method: "totp", code: generateSync({ secret: totpSecret }) },
+    });
+    assert.equal(completedChangedEnvironment.response.status, 200, JSON.stringify(completedChangedEnvironment.body));
+    assert.equal(completedChangedEnvironment.body.data.auth.sessionStage, "ACTIVE");
+    assert.equal(completedChangedEnvironment.body.data.auth.authAssurance, "ADMIN_MFA");
+    const trustedChangedEnvironment = await request("/api/auth/login", {
+      method: "POST", jar: cookieJar(), headers: { "user-agent": changedAgent },
+      body: { email: emails.adminB, password: passwordB },
+    });
+    assert.equal(trustedChangedEnvironment.response.status, 200, JSON.stringify(trustedChangedEnvironment.body));
+    assert.equal(trustedChangedEnvironment.body.data.auth.sessionStage, "ACTIVE", "only the MFA-verified session may establish the changed-environment baseline");
 
     const me = await request("/api/auth/me", { jar: loginJar });
     assert.equal(me.response.status, 200, JSON.stringify(me.body));
