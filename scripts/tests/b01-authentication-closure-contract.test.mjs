@@ -118,14 +118,15 @@ test("login, logout and auth me no longer install caller-selected canonical cont
   assert(logout.indexOf("queueAuditLogOutbox") < logout.indexOf("revokeRefreshTokenById"), "logout audit must be queued before capability revocation");
 });
 
-test("login risk baseline uses only live refresh credentials", () => {
+test("login risk baseline uses only live refresh credentials at the role's required assurance", () => {
   const fn = source.slice(
     source.indexOf("CREATE OR REPLACE FUNCTION app_rls.load_recent_auth_session_risk_inputs"),
     source.indexOf("DROP FUNCTION IF EXISTS app_rls.record_auth_session_risk_signal"),
   );
   assert.match(fn, /rt\."revokedAt" IS NULL/);
   assert.match(fn, /rt\."expiresAt">clock_timestamp\(\)/);
+  assert.match(fn, /actor\.role NOT IN \('SUPER_ADMIN','PLATFORM_SUPER_ADMIN','ORG_ADMIN'\) OR rt\."mfaVerifiedAt" IS NOT NULL/);
   assert.match(fn, /ORDER BY rt\."createdAt" DESC,rt\.id LIMIT p_limit/);
   assert.doesNotMatch(fn, /DELETE FROM public\."RefreshToken"/);
-  assert.match(generated, /rt\."userId"=user_id AND rt\."revokedAt" IS NULL AND rt\."expiresAt">clock_timestamp\(\)/);
+  assert.match(generated, /rt\."userId"=user_id AND rt\."revokedAt" IS NULL AND rt\."expiresAt">clock_timestamp\(\)[\s\S]*?actor\.role NOT IN \('SUPER_ADMIN','PLATFORM_SUPER_ADMIN','ORG_ADMIN'\) OR rt\."mfaVerifiedAt" IS NOT NULL/);
 });

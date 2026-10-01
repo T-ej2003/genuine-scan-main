@@ -4,7 +4,7 @@
 
 This review used protected commit `6d5a48ce7c32b12ce8671731392f92ddfa625a88` in an isolated worktree. It made no production calls or writes. The initial-super-admin bootstrap was not invoked.
 
-The 2026-10-01 adaptive-authentication update changes the terminal platform-admin risk decision described below. Environmental changes now route roles that already require MFA through the existing MFA bootstrap/challenge flow. It also limits the trusted login baseline to unrevoked, unexpired refresh credentials without deleting historical rows.
+The 2026-10-01 adaptive-authentication update changes the terminal platform-admin risk decision described below. Environmental changes now route roles that already require MFA through the existing MFA bootstrap/challenge flow. The follow-up security correction limits the trusted login baseline to live refresh credentials that reached the assurance required for their current role, without deleting historical rows.
 
 ## Login decision
 
@@ -38,7 +38,7 @@ Scores in the step-up range were calculated but ignored; a recent 28-day MFA use
 
 Environmental changes and `risk.shouldStepUp` prevent the recent-MFA-cycle fast path for `SUPER_ADMIN`, `PLATFORM_SUPER_ADMIN`, and `ORG_ADMIN`. This includes a first valid session, changed source IP, changed user agent, and three or more current session IPs. A score at or above the block threshold also returns only the existing `MFA_BOOTSTRAP` response for those MFA-required roles; no active access or refresh token is returned before the bound MFA challenge succeeds. Roles without an existing MFA requirement keep their prior policy, including the fail-closed behavior for temporary-password-only roles.
 
-`app_rls.load_recent_auth_session_risk_inputs(5)` now derives the baseline only from refresh credentials whose `revokedAt` is null and whose `expiresAt` remains in the future. Revoked and expired rows remain stored for audit and investigation.
+`app_rls.load_recent_auth_session_risk_inputs(5)` now derives the baseline only from refresh credentials whose `revokedAt` is null and whose `expiresAt` remains in the future. For `SUPER_ADMIN`, `PLATFORM_SUPER_ADMIN`, and `ORG_ADMIN`, the row must also have a non-null `mfaVerifiedAt`, which is the existing evidence written by canonical ACTIVE-session promotion after required MFA. Pending, failed, expired, and revoked MFA-bootstrap rows remain stored for audit but cannot make their own IP or user agent trusted. Roles without a mandatory MFA policy retain live password-session baselines.
 
 The canonical setting is `AUTH_RISK_STEP_UP_THRESHOLD`. The legacy `AUTH_RISK_STEPUP_THRESHOLD` remains supported only when it is the sole supplied value or matches the canonical value. Invalid values, conflicting values, and `step-up >= block` fail closed. Defaults remain 55 and 85.
 
@@ -47,6 +47,7 @@ The canonical setting is `AUTH_RISK_STEP_UP_THRESHOLD`. The legacy `AUTH_RISK_ST
 - Environmental high risk for an MFA-required role records the existing risk evidence and bound MFA challenge atomically; a persistence failure denies login.
 - A risk-triggered MFA bootstrap has no full refresh token and uses the existing user-bound, session-bound, expiring, replay-protected MFA challenge flow.
 - Successful MFA uses the existing ACTIVE-session issuance path and revokes the bootstrap refresh/session capability as `STEP_UP_REPLACED`.
+- A password-only `MFA_BOOTSTRAP` row cannot enter the trusted environmental baseline for an MFA-required role; repeated password login continues to require MFA until canonical ACTIVE promotion writes an MFA-verified session.
 - Revoked refresh credentials and database-session capabilities remain invalid and remain stored; they do not become reusable when excluded from the future login baseline.
 - Two platform-admin users continue to have separate `User` identities. Every session, MFA credential/factor, challenge, refresh token, risk signal, and audit record is keyed by user ID.
 - Role authorization remains role-based: `SUPER_ADMIN` and `PLATFORM_SUPER_ADMIN` normalize to the frontend super-admin surface; no email is an authorization key.

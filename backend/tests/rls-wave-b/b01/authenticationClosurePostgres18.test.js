@@ -80,6 +80,16 @@ async function main() {
   `);
   assert.equal(last(preauth, `BEGIN; SELECT id FROM app_auth.lookup_password_user('auth-a@example.invalid'); SELECT count(*) FROM app_rls.load_recent_auth_session_risk_inputs(5); ROLLBACK`), "1");
   assert.equal(last(bootstrap, `SELECT count(*) FROM public."RefreshToken" WHERE "userId"='${ids.userA}'`), "3", "revoked and expired rows must remain available for audit");
+  psql(bootstrap, `
+    UPDATE public."User" SET role='SUPER_ADMIN',"orgId"=NULL,"licenseeId"=NULL WHERE id='${ids.userA}';
+    INSERT INTO public."RefreshToken" (id,"userId","tokenHash","expiresAt","createdAt","createdIpHash","createdUserAgent","authenticatedAt","mfaVerifiedAt") VALUES
+      ('10000000-0000-4000-8000-000000000303','${ids.userA}','${hash("verified-baseline")}',now()+interval '1 day',now()-interval '1 minute','verified-ip','verified-agent',now()-interval '1 minute',now()-interval '1 minute'),
+      ('10000000-0000-4000-8000-000000000304','${ids.userA}','${hash("pending-bootstrap")}',now()+interval '10 minutes',now(),'pending-ip','pending-agent',now(),NULL);
+  `);
+  assert.equal(last(preauth, `BEGIN; SELECT id FROM app_auth.lookup_password_user('auth-a@example.invalid'); SELECT string_agg("createdIpHash",',' ORDER BY "createdAt" DESC) FROM app_rls.load_recent_auth_session_risk_inputs(5); ROLLBACK`), "verified-ip", "an unverified MFA bootstrap must not become a SUPER_ADMIN risk baseline");
+  assert.equal(last(bootstrap, `SELECT count(*) FROM public."RefreshToken" WHERE id='10000000-0000-4000-8000-000000000304' AND "mfaVerifiedAt" IS NULL`), "1", "excluded bootstrap history must be retained");
+  psql(bootstrap, `UPDATE public."User" SET role='LICENSEE_ADMIN',"orgId"='${ids.orgA}',"licenseeId"='${ids.licenseeA}' WHERE id='${ids.userA}'`);
+  assert.equal(last(preauth, `BEGIN; SELECT id FROM app_auth.lookup_password_user('auth-a@example.invalid'); SELECT count(*) FROM app_rls.load_recent_auth_session_risk_inputs(5); ROLLBACK`), "3", "roles without mandatory MFA must retain valid password-session baselines");
   assert.equal(last(bootstrap, `SELECT count(*) FROM public."AuthSessionRiskSignal" WHERE "userId"='${ids.userA}'`), "1");
   assert.equal(last(bootstrap, `SELECT count(*) FROM public."AuthSessionRiskSignal" WHERE "userId"='${ids.userB}'`), "0");
   denied(preauth, `SELECT "recorded" FROM app_rls.record_auth_session_risk_signal(90,'CRITICAL',ARRAY['UNTRUSTED_NETWORK'],NULL,NULL,transaction_timestamp()::timestamp,NULL,NULL,NULL,NULL,NULL,true,'missing-password-subject')`, /AUTH_LOGIN_RISK_DENIED/);
