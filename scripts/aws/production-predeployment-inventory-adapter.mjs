@@ -1,6 +1,7 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { registerPreDeploymentInventoryTaskDefinition } from "./production-predeployment-inventory-task.mjs";
 import { canonicalBackendDatabaseSecretReference } from "./production-overlap-task-definition.mjs";
@@ -22,7 +23,7 @@ if (PREDEPLOYMENT_BROKER_CALLER_TIMEOUT_HEADROOM_SECONDS <= 0
 
 const parseJson = (run, args) => JSON.parse(run([...args, "--output", "json", "--no-cli-pager"]));
 
-export function createProductionPreDeploymentInventoryAdapter({ run, sourceSha, imageReleaseSha, imageDigest, config } = {}) {
+export function createProductionPreDeploymentInventoryAdapter({ run, sourceSha, imageReleaseSha, imageDigest, config, runtimeConfigSha256 } = {}) {
   if (typeof run !== "function" || !SHA.test(sourceSha || "") || !SHA.test(imageReleaseSha || "") || !config || !STAGE_B.brokerAliasArn) throw new Error("Pre-deployment inventory adapter configuration is required.");
   const inventorySecretArn = config.inventoryDatabaseSecretArn || config.overlapTaskInput?.databaseUrlSecretArn || canonicalBackendDatabaseSecretReference();
   const taskInput = {
@@ -65,6 +66,15 @@ export function createProductionPreDeploymentInventoryAdapter({ run, sourceSha, 
       const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-inventory-broker-"));
       const outputPath = path.join(directory, "broker-response.json");
       try {
+        const recoveryPath = path.join(path.dirname(config.rotationStateFile || ""), "inventory-absent-claim-evidence.json");
+        let absentClaimRecovery;
+        if (config.inventoryFailedPredecessor && existsSync(recoveryPath)) {
+          absentClaimRecovery = JSON.parse(readStageBPrivateFileBytes({ filePath: recoveryPath, label: "Absent inventory recovery evidence" }).bytes);
+          if (absentClaimRecovery.payload?.configSha256 !== runtimeConfigSha256) throw new Error("Absent inventory recovery config binding differs.");
+          for (const key of ["rotationStateFile", "rotationFixtureFile", "overlapRuntimeProofFile", "readinessEvidenceFile"]) {
+            if (!path.isAbsolute(config[key] || "") || existsSync(config[key])) throw new Error("Rotation or overlap state already exists or its location is ambiguous.");
+          }
+        }
         const brokerRequest = {
           approvalId: config.inventoryApprovalId,
           operation: "production-predeployment-rotation-inventory",
@@ -72,6 +82,7 @@ export function createProductionPreDeploymentInventoryAdapter({ run, sourceSha, 
           sourceSha,
           imageReleaseSha,
           taskDefinitionArn,
+          ...(absentClaimRecovery ? { absentClaimRecovery } : {}),
           ...(config.inventoryFailedPredecessor ? { failedPredecessor: config.inventoryFailedPredecessor } : {}),
         };
         const invocation = parseJson(run, ["lambda", "invoke", "--function-name", STAGE_B.brokerAliasArn, "--invocation-type", "RequestResponse", "--cli-binary-format", "raw-in-base64-out", "--cli-read-timeout", String(PREDEPLOYMENT_BROKER_CALLER_READ_TIMEOUT_SECONDS), "--payload", JSON.stringify(brokerRequest), outputPath]);
