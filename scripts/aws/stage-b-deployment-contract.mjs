@@ -158,7 +158,7 @@ export const STAGE_B_BROKER_POLICY_STATEMENTS = Object.freeze([
   Object.freeze(["TagOnlyPreDeploymentInventoryTasks", Object.freeze(["ecs:TagResource"])]),
   Object.freeze(["PassOnlyApprovedTaskRoles", Object.freeze(["iam:PassRole"])]),
   Object.freeze(["AuthenticateOnlyArchivedInventoryOutcome", Object.freeze(["cloudtrail:LookupEvents"])]),
-  Object.freeze(["ClaimOnlyStageBReplayRows", Object.freeze(["dynamodb:PutItem", "dynamodb:DeleteItem", "dynamodb:UpdateItem", "dynamodb:GetItem", "dynamodb:TransactWriteItems"])]),
+  Object.freeze(["ClaimOnlyStageBReplayRows", Object.freeze(["dynamodb:PutItem", "dynamodb:DeleteItem", "dynamodb:UpdateItem", "dynamodb:GetItem", "dynamodb:TransactWriteItems", "dynamodb:ConditionCheckItem"])]),
   Object.freeze(["ReadOnlyStageAApproval", Object.freeze(["secretsmanager:GetSecretValue"])]),
   Object.freeze(["VerifyOnlyStageAApprovalKey", Object.freeze(["kms:Verify"])]),
   Object.freeze(["WriteOnlyBrokerReceipts", Object.freeze(["s3:PutObject"])]),

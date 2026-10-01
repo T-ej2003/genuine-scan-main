@@ -267,7 +267,7 @@ locals {
       {
         Sid      = "ClaimOnlyStageBReplayRows"
         Effect   = "Allow"
-        Action   = ["dynamodb:PutItem", "dynamodb:DeleteItem", "dynamodb:UpdateItem", "dynamodb:GetItem", "dynamodb:TransactWriteItems"]
+        Action   = ["dynamodb:PutItem", "dynamodb:DeleteItem", "dynamodb:UpdateItem", "dynamodb:GetItem", "dynamodb:TransactWriteItems", "dynamodb:ConditionCheckItem"]
         Resource = aws_dynamodb_table.replay.arn
       },
       {
