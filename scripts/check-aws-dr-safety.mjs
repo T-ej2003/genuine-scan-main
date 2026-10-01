@@ -167,6 +167,12 @@ const mutationOperationNames = [
 
 const dangerousPatternExemptions = new Map([
   [
+    // Loopback-only inventory PostgreSQL18 upgrade test, fixed disposable admin;
+    // asserts target absence and drops only the database created by this test.
+    "scripts/tests/production-inventory-installation-postgres.test.mjs",
+    new Set(["drop-database"]),
+  ],
+  [
     "scripts/lib/disposable-rls-runtime-proof.mjs",
     new Set(["truncate-table"]),
   ],

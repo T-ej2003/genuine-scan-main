@@ -4,6 +4,8 @@ import { APP_ONLY } from "./production-app-only-contract.mjs";
 import { canonicalJson, canonicalSha256, STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { parseEcsSecretsManagerReference } from "./production-ecs-runtime-dependencies.mjs";
 
+export const APP_ONLY_STAGE_B_SOURCE_SHA256 = "b3f21fba81466f4d101ac9777e8d32095c21b9eee3608cad75924b0a49030f80";
+
 export const APP_ONLY_VERIFIER = Object.freeze({
   family: "mscqr-production-app-only-compatibility-verifier",
   roleName: "mscqr-production-app-only-verifier-launcher",
@@ -27,7 +29,7 @@ const allow = (Sid, Action, Resource, Condition = regional) => ({ Sid, Effect: "
 const passRoles = (roles) => allow("PassExactTaskRoles", "iam:PassRole", roles, { StringEquals: { "iam:PassedToService": "ecs-tasks.amazonaws.com" } });
 const stageBSource = new URL("../../infra/aws/terraform/production-green-stage-b/main.tf", import.meta.url);
 export function appOnlyRuntimeSecretArns(source = fs.readFileSync(stageBSource, "utf8")) {
-  assert.equal(canonicalSha256(source), "b3f21fba81466f4d101ac9777e8d32095c21b9eee3608cad75924b0a49030f80",
+  assert.equal(canonicalSha256(source), APP_ONLY_STAGE_B_SOURCE_SHA256,
     "Stage-B IAM source wiring is unreviewed by the app-only compatibility model");
   const matches = [...source.matchAll(/^  runtime_rotation_and_artifact_secret_arns = (\[[\s\S]*?^  \])$/gm)];
   assert.equal(matches.length, 1, "Ambiguous runtime rotation/artifact secret source");

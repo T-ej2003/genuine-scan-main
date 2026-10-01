@@ -80,3 +80,12 @@ reporting failure rather than repeating a consumed operation.
 
 The only stale role literal in executable source is the exact legacy task-definition
 authenticator for the preserved failed predecessor; it is never used by new tasks.
+
+Exact-head CI exposed two verification siblings: the second app-only source-IAM
+evaluator retained its predecessor Terraform digest, and the destructive-test
+scanner needed its existing narrowly scoped exception for the new disposable
+upgrade test. Both source-IAM evaluators now share one reviewed exact digest.
+Both new PostgreSQL tests reject non-loopback or unexpected fixture identities
+before SQL; the scanner exception applies only to this test's database cleanup.
+The source evaluator passed 4/4, guarded PostgreSQL18 proof passed 2/2, and the
+full source-security guardrail suite passed after these corrections.

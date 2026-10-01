@@ -9,6 +9,13 @@ const url = process.env.MSCQR_INVENTORY_INSTALL_TEST_DATABASE_URL;
 const admin = process.env.MSCQR_INVENTORY_INSTALL_TEST_ADMIN_URL;
 const sql = (connection, query) => execFileSync("psql", [connection, "-XAt", "-v", "ON_ERROR_STOP=1", "-c", query], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 test("actual production-shaped PostgreSQL18 contract install is atomic and refuses a blind retry", { skip: !url || !admin }, async () => {
+  const adminConnection = new URL(admin), installationConnection = new URL(url);
+  assert.equal(adminConnection.hostname, "127.0.0.1"); assert.equal(installationConnection.hostname, "127.0.0.1");
+  assert.equal(adminConnection.username, "inventory_test_admin"); assert.equal(adminConnection.pathname, "/postgres");
+  assert.equal(installationConnection.username, "mscqr_prod_admin");
+  assert.equal(adminConnection.port, installationConnection.port);
+  assert.equal(installationConnection.pathname, "/mscqr_production_rls_green_phase2");
+  assert.equal(sql(admin, "SELECT current_user"), "inventory_test_admin");
   const { PrismaClient } = requireBackend("@prisma/client");
   const contract = canonicalInventoryInstallation();
   assert.equal(sql(admin, "SELECT count(*) FROM pg_database WHERE datname='mscqr_production_rls_green_phase2'"), "0");

@@ -8,6 +8,7 @@ import { assertBoundedRotationInventory } from "../security/production-runtime-r
 const adminUrl = process.env.MSCQR_INVENTORY_BOUNDARY_TEST_DATABASE_URL;
 const sql = (url, command) => execFileSync("psql", [url, "-XAt", "-v", "ON_ERROR_STOP=1", "-c", command], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 test("PostgreSQL18 fixed aggregate boundary preserves app isolation and forced RLS", { skip: !adminUrl }, () => {
+  const disposable = new URL(adminUrl); assert.equal(disposable.hostname, "127.0.0.1"); assert.equal(disposable.username, "inventory_test_admin"); assert.equal(disposable.pathname, "/inventory_boundary_test");
   assert.equal(sql(adminUrl, "SELECT current_setting('server_version_num')::int/10000"), "18");
   assert.equal(sql(adminUrl, "SELECT count(*) FROM pg_class WHERE relnamespace='public'::regnamespace AND relkind='r'"), "0", "dedicated empty disposable database required");
   const owner = "inventory_fixture_owner", app = "inventory_fixture_app";
