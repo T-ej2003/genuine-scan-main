@@ -1,4 +1,5 @@
 import { Response } from "express";
+import { z } from "zod";
 import { AuthRequest } from "../middleware/auth";
 import prisma from "../config/database";
 import { Prisma, UserRole } from "@prisma/client";
@@ -6,7 +7,7 @@ import { compactDeviceLabel, reverseGeocode } from "../services/locationService"
 import { getQrTrackingAnalytics } from "../services/qrTrackingAnalyticsService";
 import { resolveScopedLicenseeAccess } from "../services/manufacturerScopeService";
 import { listScanLogsForReporting } from "../services/scanLogReportingService";
-import { readInventoryProjection } from "../rls-waves/session-c/c01/qrSystemRepository";
+import { readInventoryProjection, isQrBoundaryDenied } from "../rls-waves/session-c/c01/qrSystemRepository";
 
 export const getScanLogs = async (req: AuthRequest, res: Response) => {
   try {
@@ -162,44 +163,53 @@ export const getQrTrackingAnalyticsController = async (req: AuthRequest, res: Re
       return res.status(403).json({ success: false, error: "Access denied" });
     }
 
-    const parseDate = (value: unknown) => {
-      const raw = String(value || "").trim();
-      if (!raw) return undefined;
-      const date = new Date(raw);
-      return Number.isFinite(date.getTime()) ? date : undefined;
-    };
-
-    const limit = Math.min(parseInt(String(req.query.limit ?? "100"), 10) || 100, 500);
-    const offset = parseInt(String(req.query.offset ?? "0"), 10) || 0;
-    const scope = await resolveScopedLicenseeAccess(req.user, (req.query.licenseeId as string | undefined) || null);
-    const licenseeId = scope.scopeLicenseeId || undefined;
-
-    const statusRaw = String(req.query.status || "").trim().toUpperCase();
-    const validStatuses = new Set(["DORMANT", "ACTIVE", "ALLOCATED", "ACTIVATED", "PRINTED", "REDEEMED", "BLOCKED", "SCANNED"]);
-    const status = validStatuses.has(statusRaw) ? (statusRaw as any) : undefined;
-    const onlyFirstScanRaw = String(req.query.onlyFirstScan || "").trim().toLowerCase();
-    const firstScan = onlyFirstScanRaw === "true" ? true : onlyFirstScanRaw === "false" ? false : undefined;
-
-    const manufacturerId = req.user.role === UserRole.MANUFACTURER_ADMIN ? req.user.userId : undefined;
-
+    const parsed = z.object({
+      licenseeId: z.string().uuid().optional(),
+      batchQuery: z.string().trim().max(120).optional(),
+      batchId: z.string().uuid().optional(),
+      batchName: z.string().trim().max(120).optional(),
+      code: z.string().trim().max(200).optional(),
+      status: z.enum(["DORMANT","ACTIVE","ALLOCATED","ACTIVATED","PRINTED","REDEEMED","BLOCKED","SCANNED"]).optional(),
+      onlyFirstScan: z.enum(["true","false"]).optional(),
+      from: z.string().datetime({ offset: true }).optional(),
+      to: z.string().datetime({ offset: true }).optional(),
+      limit: z.coerce.number().int().min(1).max(200).default(100),
+      offset: z.coerce.number().int().min(0).max(10000).default(0),
+    }).strict().safeParse(req.query);
+    if (!parsed.success) return res.status(400).json({ success: false, error: "Invalid analytics filters" });
+    const filters = parsed.data;
+    const to = filters.to ? new Date(filters.to) : new Date();
+    const from = filters.from ? new Date(filters.from) : new Date(to.getTime() - 90 * 86400000);
+    if (to < from || to.getTime() - from.getTime() > 90 * 86400000) {
+      return res.status(400).json({ success: false, error: "Analytics window must be at most 90 days" });
+    }
+    // Auth hydration validates the selected manufacturer tenant and scope version.
+    // The database capability still independently checks live tenant membership.
+    const selectedLicenseeId = req.user.role === UserRole.LICENSEE_ADMIN || req.user.role === UserRole.MANUFACTURER_ADMIN
+      ? req.user.licenseeId : undefined;
     const data = await getQrTrackingAnalytics({
-      databaseSessionCapability:String(req.databaseSessionCapability || ""),
-      requestId:String((req as AuthRequest & {requestId?:string}).requestId || req.get("x-request-id") || ""),
-      licenseeId,
-      manufacturerId,
-      batchQuery: String(req.query.batchQuery || req.query.batchId || req.query.batchName || "").trim() || undefined,
-      code: String(req.query.code || "").trim() || undefined,
-      status,
-      firstScan,
-      from: parseDate(req.query.from),
-      to: parseDate(req.query.to),
-      limit,
-      offset,
+      databaseSessionCapability: String(req.databaseSessionCapability || ""),
+      requestId: String((req as AuthRequest & {requestId?:string}).requestId || ""),
+      licenseeId: filters.licenseeId || selectedLicenseeId || undefined,
+      manufacturerId: req.user.role === UserRole.MANUFACTURER_ADMIN ? req.user.userId : undefined,
+      batchQuery: filters.batchQuery || filters.batchId || filters.batchName || undefined,
+      code: filters.code || undefined,
+      status: filters.status,
+      firstScan: filters.onlyFirstScan === undefined ? undefined : filters.onlyFirstScan === "true",
+      from: filters.from ? from : undefined,
+      to: filters.to ? to : undefined,
+      limit: filters.limit,
+      offset: filters.offset,
     });
-
     return res.json({ success: true, data });
   } catch (error) {
     console.error("getQrTrackingAnalyticsController error:", error);
+    if (isQrBoundaryDenied(error) || (error as any)?.statusCode === 403) {
+      return res.status(403).json({ success: false, error: "Access denied" });
+    }
+    if (String((error as any)?.meta?.message || (error as any)?.message || "").includes("QR_INVALID_INPUT")) {
+      return res.status(400).json({ success: false, error: "Invalid analytics filters" });
+    }
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2021") {
       return res.json({
         success: true,

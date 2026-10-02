@@ -1,4 +1,5 @@
 import type { ApiResponse } from "@/lib/api/internal-client-core";
+import type { User } from "@/types";
 
 type FamilyParams = string | number | boolean | null | undefined | Record<string, unknown>;
 
@@ -35,6 +36,41 @@ const STORAGE_PREFIX = "mscqr:request-coordinator:v1:";
 const CHANNEL_NAME = "mscqr-request-coordinator";
 
 const states = new Map<string, ReadState<unknown>>();
+let securityScope = "";
+let scopeGeneration = 0;
+let scopeReady = true;
+const scopeListeners = new Set<() => void>();
+
+// Non-secret identity from the authenticated server projection, never a query selector.
+export const clientSecurityScope = (user: Partial<User> | null | undefined) => JSON.stringify(user ? [
+  user.id, (user.rawRole || user.role)?.toUpperCase(), user.orgId, user.licenseeId ?? user.licensee?.id, user.scopeVersion,
+  user.isActive ?? true, user.deletedAt, user.auth?.sessionId, user.auth?.sessionStage,
+  user.auth?.authAssurance, user.auth?.authenticatedAt, user.auth?.mfaVerifiedAt,
+  user.auth?.stepUpRequired, user.auth?.sessionExpiresAt,
+  user.linkedLicensees?.map(link => [link.id, link.orgId, link.scopeVersion, Boolean(link.isPrimary)]),
+] : null);
+export const getRequestCoordinatorScope = () => JSON.stringify([securityScope, scopeGeneration, scopeReady]);
+export const isRequestCoordinatorScopeReady = () => scopeReady;
+export const isRequestCoordinatorUserCurrent = (user: Partial<User> | null | undefined) => scopeReady && clientSecurityScope(user) === securityScope;
+export const onRequestCoordinatorScopeChange = (listener: () => void) => {
+  scopeListeners.add(listener);
+  return () => { scopeListeners.delete(listener); };
+};
+export const setRequestCoordinatorScope = (user: Partial<User> | null) => {
+  const next = clientSecurityScope(user);
+  if (next === securityScope && scopeReady) return;
+  const changed = next !== securityScope;
+  securityScope = next;
+  scopeReady = true;
+  clearRequestCoordinator();
+  if (changed) {
+    try {
+      const activeChannel = getChannel();
+      if (activeChannel) activeChannel.postMessage({ scopeIdentity: securityScope });
+      else if (canUseStorage()) window.localStorage.setItem(`${STORAGE_PREFIX}scope`, JSON.stringify({ scopeIdentity: securityScope, revision: crypto.randomUUID() }));
+    } catch { /* Cache coordination is best effort; never fail authentication. */ }
+  }
+};
 
 const now = () => Date.now();
 
@@ -49,16 +85,12 @@ const stableStringify = (value: unknown): string => {
     .join(",")}}`;
 };
 
-const normalizeKeyPart = (value: unknown) =>
-  String(value ?? "")
-    .trim()
-    .replace(/[^a-zA-Z0-9._:-]+/g, "_")
-    .slice(0, 240);
+const normalizeKeyPart = (value: unknown) => encodeURIComponent(String(value ?? "")).replace(/%3A/g, ":");
 
 export const buildRequestFamilyKey = (family: string, params?: FamilyParams) => {
   const normalizedFamily = normalizeKeyPart(family);
   const normalizedParams = normalizeKeyPart(stableStringify(params));
-  return normalizedParams ? `${normalizedFamily}:${normalizedParams}` : normalizedFamily;
+  return `${normalizedFamily}:${normalizedParams}:scope:${encodeURIComponent(getRequestCoordinatorScope())}`;
 };
 
 const storageKeyFor = (key: string) => `${STORAGE_PREFIX}${key}`;
@@ -96,15 +128,26 @@ const writePersisted = (key: string, state: ReadState<unknown>) => {
 };
 
 let channel: BroadcastChannel | null | undefined;
+const receiveScopeIdentity = (identity: unknown) => {
+  if (typeof identity !== "string" || (identity === securityScope && scopeReady)) return;
+  // Shared cookies may have changed; a broadcast is invalidation, not authority.
+  scopeReady = false;
+  clearRequestCoordinator();
+  window.dispatchEvent(new Event(identity === "null" ? "auth:logout" : "auth:scope-refresh"));
+};
 
 const getChannel = () => {
   if (channel !== undefined) return channel;
-  if (typeof BroadcastChannel === "undefined") {
+  if (typeof window === "undefined" || typeof window.BroadcastChannel === "undefined") {
     channel = null;
     return channel;
   }
-  channel = new BroadcastChannel(CHANNEL_NAME);
+  channel = new window.BroadcastChannel(CHANNEL_NAME);
   channel.onmessage = (event) => {
+    if (typeof event.data?.scopeIdentity === "string") {
+      receiveScopeIdentity(event.data.scopeIdentity);
+      return;
+    }
     const key = String(event.data?.key || "").trim();
     if (!key) return;
     const persisted = readPersisted(key);
@@ -221,6 +264,8 @@ export const coordinateProtectedRead = async <T>(
   options: CoordinatedReadOptions,
   fetcher: () => Promise<ApiResponse<T>>
 ): Promise<ApiResponse<T>> => {
+  if (!scopeReady) return { success: false, status: 409, code: "REQUEST_SCOPE_CHANGED", error: "Request scope is refreshing" };
+  const requestScope = getRequestCoordinatorScope();
   const key = buildRequestFamilyKey(options.family, options.params);
   const state = getState<T>(key);
   const timestamp = now();
@@ -245,6 +290,9 @@ export const coordinateProtectedRead = async <T>(
   state.lastAttemptAt = timestamp;
   state.inFlight = fetcher()
     .then((response) => {
+      if (requestScope !== getRequestCoordinatorScope() || states.get(key) !== state) {
+        return { success: false, status: 409, code: "REQUEST_SCOPE_CHANGED", error: "Request scope changed" };
+      }
       if (response.success) {
         state.lastGood = response;
         state.lastGoodAt = now();
@@ -286,7 +334,9 @@ export const coordinateProtectedRead = async <T>(
 export const clearRequestCoordinator = (prefixes?: string[]) => {
   clearPersisted(prefixes);
   if (!prefixes?.length) {
+    scopeGeneration += 1;
     states.clear();
+    scopeListeners.forEach(listener => listener());
     return;
   }
 
@@ -308,4 +358,8 @@ export const getRequestCoordinatorState = () =>
 
 if (typeof window !== "undefined") {
   window.addEventListener("auth:logout", () => clearRequestCoordinator());
+  window.addEventListener("storage", event => {
+    if (event.key !== `${STORAGE_PREFIX}scope` || !event.newValue) return;
+    try { receiveScopeIdentity(JSON.parse(event.newValue).scopeIdentity); } catch { /* Malformed cache signal. */ }
+  });
 }

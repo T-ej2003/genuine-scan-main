@@ -190,8 +190,10 @@ export const createLicenseeQrApi = (core: ApiClientCore) => ({
     return core.request("/qr/requests", { method: "POST", body: JSON.stringify(payload) });
   },
 
-  async getQrAllocationRequests(options?: { licenseeId?: string; status?: string }) {
+  async getQrAllocationRequests(options?: { licenseeId?: string; status?: string; limit?: number; offset?: number }) {
     const params = new URLSearchParams();
+    if (options?.limit !== undefined) params.set("limit", String(options.limit));
+    if (options?.offset !== undefined) params.set("offset", String(options.offset));
     if (options?.licenseeId) params.append("licenseeId", options.licenseeId);
     if (options?.status) params.append("status", options.status);
     const query = params.toString() ? `?${params.toString()}` : "";

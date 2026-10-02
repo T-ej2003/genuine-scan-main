@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='368de62f0a051565d9e66ad9009be98b9f4776a1d3d1f22d628ee96b810116de'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:368de62f0a051565d9e66ad9009be98b9f4776a1d3d1f22d628ee96b810116de'
+    AND source_contract_sha256='07673b057575f357f57ebe460ae3952f596a7e3fd3e93b0a8dd3a1c141f7c083'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:07673b057575f357f57ebe460ae3952f596a7e3fd3e93b0a8dd3a1c141f7c083'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:368de62f0a051565d9e66ad9009be98b9f4776a1d3d1f22d628ee96b810116de')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:07673b057575f357f57ebe460ae3952f596a7e3fd3e93b0a8dd3a1c141f7c083')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -6928,7 +6928,7 @@ CREATE OR REPLACE FUNCTION app_rls.qr_bind_actor(
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
 DECLARE actor record; target_org text; scope_ids text;
 BEGIN
-  IF p_purpose NOT IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-inventory-read','qr-audit-export')
+  IF p_purpose NOT IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-allocation-request-list','qr-allocation-request-create','qr-allocation-request-reject','qr-inventory-read','qr-scan-analytics','qr-audit-export')
      OR p_request_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
      OR (p_target_licensee_id IS NOT NULL AND p_target_licensee_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$')
   THEN RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
@@ -6985,6 +6985,244 @@ BEGIN
 END
 $fn$;
 
+CREATE OR REPLACE FUNCTION app_rls.qr_list_allocation_requests(
+  p_capability text,p_purpose text,p_request_id text,p_licensee_id text,p_status text,p_limit integer,p_offset integer
+) RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE actor record; tenant_id text; result jsonb;
+BEGIN
+  IF p_purpose IS DISTINCT FROM 'qr-allocation-request-list'
+     OR p_limit IS NULL OR p_limit NOT BETWEEN 1 AND 200 OR p_offset IS NULL OR p_offset NOT BETWEEN 0 AND 10000
+     OR (p_status IS NOT NULL AND p_status NOT IN ('PENDING','APPROVED','REJECTED'))
+  THEN RAISE EXCEPTION 'QR_INVALID_INPUT'; END IF;
+  SELECT * INTO STRICT actor FROM app_rls.qr_bind_actor(p_capability,p_purpose,p_request_id,NULL);
+  IF actor.role NOT IN ('LICENSEE_ADMIN','SUPER_ADMIN','PLATFORM_SUPER_ADMIN') THEN
+    RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501';
+  END IF;
+  tenant_id:=coalesce(p_licensee_id,CASE WHEN actor.role='LICENSEE_ADMIN' THEN actor."licenseeId" END);
+  IF actor.role='LICENSEE_ADMIN' AND tenant_id IS NULL THEN
+    RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501';
+  END IF;
+  SELECT * INTO STRICT actor FROM app_rls.qr_bind_actor(p_capability,p_purpose,p_request_id,tenant_id);
+  IF actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND current_setting('app.auth_assurance',true)<>'mfa-verified' THEN
+    RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501';
+  END IF;
+  SELECT coalesce((SELECT jsonb_agg(to_jsonb(x) ORDER BY x."createdAt" DESC,x.id DESC) FROM (
+    SELECT r.id,r."licenseeId",r."requestedByUserId",r.quantity,r."startNumber",r."endNumber",r."batchName",r.note,r.status,
+      r."approvedByUserId",r."approvedAt" AT TIME ZONE 'UTC' AS "approvedAt",r."rejectedByUserId",
+      r."rejectedAt" AT TIME ZONE 'UTC' AS "rejectedAt",r."decisionNote",
+      r."createdAt" AT TIME ZONE 'UTC' AS "createdAt",r."updatedAt" AT TIME ZONE 'UTC' AS "updatedAt",
+      jsonb_build_object('id',l.id,'name',l.name,'prefix',l.prefix) AS licensee
+    FROM public."QrAllocationRequest" r JOIN public."Licensee" l ON l.id=r."licenseeId"
+    WHERE (tenant_id IS NULL OR r."licenseeId"=tenant_id) AND (p_status IS NULL OR r.status::text=p_status)
+    ORDER BY r."createdAt" DESC,r.id DESC LIMIT p_limit OFFSET p_offset
+  ) x),'[]'::jsonb) INTO result;
+  -- Only actors referenced by this already-authorized, bounded page are readable.
+  PERFORM set_config('app.qr_target_user_ids',coalesce((SELECT string_agg(DISTINCT actor_id,',')
+    FROM jsonb_array_elements(result) row CROSS JOIN LATERAL
+      unnest(ARRAY[row->>'requestedByUserId',row->>'approvedByUserId',row->>'rejectedByUserId']) actor_id),''),true);
+  RETURN coalesce((SELECT jsonb_agg(row || jsonb_build_object(
+    'requestedByUser',(SELECT jsonb_build_object('id',u.id,'name',u.name,'email',u.email) FROM public."User" u WHERE u.id=row->>'requestedByUserId'),
+    'approvedByUser',(SELECT jsonb_build_object('id',u.id,'name',u.name) FROM public."User" u WHERE u.id=row->>'approvedByUserId'),
+    'rejectedByUser',(SELECT jsonb_build_object('id',u.id,'name',u.name) FROM public."User" u WHERE u.id=row->>'rejectedByUserId')) ORDER BY ordinal)
+    FROM jsonb_array_elements(result) WITH ORDINALITY page(row,ordinal)),'[]'::jsonb);
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.qr_create_allocation_request(
+  p_capability text,p_purpose text,p_request_id text,p_licensee_id text,p_quantity integer,p_batch_name text,p_note text
+) RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE actor record; tenant_id text; new_id text:=gen_random_uuid()::text; result jsonb;
+BEGIN
+  IF p_purpose IS DISTINCT FROM 'qr-allocation-request-create' OR p_quantity IS NULL OR p_quantity NOT BETWEEN 1 AND 200000
+     OR p_batch_name IS NULL OR length(btrim(p_batch_name)) NOT BETWEEN 2 AND 120 OR length(coalesce(p_note,''))>500
+  THEN RAISE EXCEPTION 'QR_INVALID_INPUT'; END IF;
+  SELECT * INTO STRICT actor FROM app_rls.qr_bind_actor(p_capability,p_purpose,p_request_id,NULL);
+  IF actor.role NOT IN ('LICENSEE_ADMIN','SUPER_ADMIN','PLATFORM_SUPER_ADMIN') THEN
+    RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501';
+  END IF;
+  tenant_id:=coalesce(p_licensee_id,CASE WHEN actor.role='LICENSEE_ADMIN' THEN actor."licenseeId" END);
+  IF tenant_id IS NULL THEN RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
+  SELECT * INTO STRICT actor FROM app_rls.qr_bind_actor(p_capability,p_purpose,p_request_id,tenant_id);
+  IF actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND current_setting('app.auth_assurance',true)<>'mfa-verified' THEN
+    RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501';
+  END IF;
+  PERFORM set_config('app.qr_target_request_id',new_id,true);
+  INSERT INTO public."QrAllocationRequest"(id,"licenseeId","requestedByUserId",quantity,"batchName",note,status,"updatedAt")
+    VALUES(new_id,tenant_id,actor."userId",p_quantity,btrim(p_batch_name),nullif(btrim(p_note),''),'PENDING',transaction_timestamp());
+  PERFORM app_rls.qr_write_audit(actor."userId",actor."organizationId",tenant_id,'CREATE_QR_ALLOCATION_REQUEST','QrAllocationRequest',new_id,
+    jsonb_build_object('quantity',p_quantity,'batchName',btrim(p_batch_name)));
+  SELECT jsonb_build_object('id',r.id,'licenseeId',r."licenseeId",'requestedByUserId',r."requestedByUserId",
+    'quantity',r.quantity,'batchName',r."batchName",'note',r.note,'status',r.status,'createdAt',r."createdAt")
+    INTO result FROM public."QrAllocationRequest" r WHERE r.id=new_id;
+  RETURN result;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.qr_reject_allocation_request(
+  p_capability text,p_purpose text,p_request_id text,p_allocation_request_id text,p_decision_note text
+) RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE actor record; request_row record; canonical_note text;
+BEGIN
+  IF p_purpose IS DISTINCT FROM 'qr-allocation-request-reject' OR p_allocation_request_id IS NULL
+     OR p_allocation_request_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+     OR length(coalesce(p_decision_note,''))>500 THEN RAISE EXCEPTION 'QR_INVALID_INPUT'; END IF;
+  -- Same whitespace set as JavaScript trim; plain text, never executable markup.
+  canonical_note:=nullif(btrim(regexp_replace(p_decision_note,U&'[\0001-\0008\000B\000C\000E-\001F\007F]','','g'),E' \t\n\r\f\013'||U&'\00A0\1680\2000\2001\2002\2003\2004\2005\2006\2007\2008\2009\200A\2028\2029\202F\205F\3000\FEFF'),'');
+  -- The HTTP schema's maximum is 500 UTF-16 code units, including astral Unicode.
+  IF length(regexp_replace(coalesce(canonical_note,''),U&'[\+010000-\+10FFFF]','xx','g'))>500 THEN RAISE EXCEPTION 'QR_INVALID_INPUT'; END IF;
+  SELECT * INTO STRICT actor FROM app_rls.qr_bind_actor(p_capability,p_purpose,p_request_id,NULL);
+  IF actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR current_setting('app.auth_assurance',true)<>'mfa-verified' THEN
+    RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501';
+  END IF;
+  PERFORM set_config('app.qr_target_request_id',p_allocation_request_id,true);
+  SELECT r.id,r."licenseeId",r."requestedByUserId",r.status INTO request_row
+    FROM public."QrAllocationRequest" r WHERE r.id=p_allocation_request_id FOR UPDATE;
+  IF NOT FOUND OR request_row."requestedByUserId"=actor."userId" THEN
+    RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501';
+  END IF;
+  IF request_row.status<>'PENDING' THEN RAISE EXCEPTION 'QR_REQUEST_ALREADY_PROCESSED'; END IF;
+  SELECT * INTO STRICT actor FROM app_rls.qr_bind_actor(p_capability,p_purpose,p_request_id,request_row."licenseeId");
+  PERFORM set_config('app.qr_target_request_id',request_row.id,true);
+  UPDATE public."QrAllocationRequest" SET status='REJECTED',"rejectedByUserId"=actor."userId",
+    "rejectedAt"=transaction_timestamp(),"decisionNote"=canonical_note,"updatedAt"=transaction_timestamp()
+    WHERE id=request_row.id;
+  PERFORM app_rls.qr_write_audit(actor."userId",actor."organizationId",request_row."licenseeId",'REJECT_QR_ALLOCATION_REQUEST',
+    'QrAllocationRequest',request_row.id,jsonb_build_object('decisionNote',canonical_note));
+  RETURN jsonb_build_object('id',request_row.id,'licenseeId',request_row."licenseeId",'requestedByUserId',request_row."requestedByUserId",
+    'status','REJECTED','decisionNote',canonical_note);
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.qr_scan_analytics(
+  p_capability text,p_purpose text,p_request_id text,p_licensee_id text,p_filters jsonb
+) RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE actor record; tenant_id text; maker_id text; from_at timestamp; to_at timestamp;
+  page_limit integer; page_offset integer; activity boolean; result jsonb;
+BEGIN
+  IF p_purpose IS DISTINCT FROM 'qr-scan-analytics' OR jsonb_typeof(p_filters) IS DISTINCT FROM 'object'
+     OR p_filters - ARRAY['manufacturerId','batchQuery','code','status','firstScan','from','to','limit','offset'] <> '{}'::jsonb
+  THEN RAISE EXCEPTION 'QR_INVALID_INPUT'; END IF;
+  BEGIN
+    page_limit:=coalesce((p_filters->>'limit')::integer,100);
+    page_offset:=coalesce((p_filters->>'offset')::integer,0);
+    to_at:=coalesce((p_filters->>'to')::timestamptz,clock_timestamp()) AT TIME ZONE 'UTC';
+    from_at:=coalesce((p_filters->>'from')::timestamptz,to_at AT TIME ZONE 'UTC'-interval '90 days') AT TIME ZONE 'UTC';
+  EXCEPTION WHEN invalid_text_representation OR invalid_datetime_format OR datetime_field_overflow OR numeric_value_out_of_range THEN
+    RAISE EXCEPTION 'QR_INVALID_INPUT';
+  END;
+  IF page_limit NOT BETWEEN 1 AND 200 OR page_offset NOT BETWEEN 0 AND 10000
+     OR NOT isfinite(from_at) OR NOT isfinite(to_at) OR to_at<from_at OR to_at-from_at>interval '90 days'
+     OR length(coalesce(p_filters->>'batchQuery',''))>120 OR length(coalesce(p_filters->>'code',''))>200
+     OR (p_filters ? 'firstScan' AND jsonb_typeof(p_filters->'firstScan')<>'boolean')
+     OR (p_filters ? 'status' AND p_filters->>'status' NOT IN ('DORMANT','ACTIVE','ALLOCATED','ACTIVATED','PRINTED','REDEEMED','BLOCKED','SCANNED'))
+  THEN RAISE EXCEPTION 'QR_INVALID_INPUT'; END IF;
+  SELECT * INTO STRICT actor FROM app_rls.qr_bind_actor(p_capability,p_purpose,p_request_id,NULL);
+  tenant_id:=coalesce(p_licensee_id,CASE WHEN actor.role='LICENSEE_ADMIN' THEN actor."licenseeId" END);
+  -- Platform analytics require an explicit tenant; manufacturer scope is bound to live ownership.
+  IF tenant_id IS NULL THEN
+    RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501';
+  END IF;
+  SELECT * INTO STRICT actor FROM app_rls.qr_bind_actor(p_capability,p_purpose,p_request_id,tenant_id);
+  IF actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND current_setting('app.auth_assurance',true)<>'mfa-verified' THEN
+    RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501';
+  END IF;
+  maker_id:=p_filters->>'manufacturerId';
+  IF actor.role='MANUFACTURER_ADMIN' THEN
+    IF maker_id IS NOT NULL AND maker_id<>actor."userId" THEN RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
+    maker_id:=actor."userId";
+  ELSIF maker_id IS NOT NULL AND actor.role='LICENSEE_ADMIN' THEN
+    RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501';
+  END IF;
+  IF maker_id IS NOT NULL AND maker_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' THEN RAISE EXCEPTION 'QR_INVALID_INPUT'; END IF;
+  activity:=p_filters ?| ARRAY['from','to','firstScan'];
+  WITH inventory AS MATERIALIZED (
+    SELECT q.id,q."displayCode",q."batchId",q."licenseeId",q.status,q."createdAt",
+      b.name,b."startCode",b."endCode",b."totalCodes",b."createdAt" AS "batchCreatedAt"
+    FROM public."QRCode" q LEFT JOIN public."Batch" b ON b.id=q."batchId" AND b."licenseeId"=q."licenseeId"
+    JOIN public."Licensee" l ON l.id=q."licenseeId" AND l."isActive" AND l."suspendedAt" IS NULL
+    WHERE (tenant_id IS NULL OR q."licenseeId"=tenant_id)
+      AND (maker_id IS NULL OR b."manufacturerId"=maker_id)
+      AND (p_filters->>'batchQuery' IS NULL OR b.id=p_filters->>'batchQuery' OR b.name ILIKE '%'||(p_filters->>'batchQuery')||'%')
+      AND (p_filters->>'code' IS NULL OR q."displayCode" ILIKE '%'||(p_filters->>'code')||'%')
+      AND (activity OR p_filters->>'status' IS NULL OR q.status::text=p_filters->>'status')
+  ), events AS MATERIALIZED (
+    SELECT s.id,s."qrCodeId",s."batchId",s.status,s."scannedAt",s."isFirstScan",
+      s."isTrustedOwnerContext",s.device,s."locationCountry",s."locationCity",s."locationName",q."displayCode",q.name
+    FROM public."QrScanLog" s JOIN inventory q ON q.id=s."qrCodeId" AND q."licenseeId"=s."licenseeId"
+      AND q."batchId" IS NOT DISTINCT FROM s."batchId"
+    WHERE s."scannedAt">=from_at AND s."scannedAt"<=to_at
+      AND (NOT activity OR p_filters->>'status' IS NULL OR s.status::text=p_filters->>'status')
+      AND (NOT p_filters ? 'firstScan' OR s."isFirstScan"=(p_filters->>'firstScan')::boolean)
+  ), scoped AS MATERIALIZED (
+    SELECT q.id,q."displayCode",q."batchId",q."licenseeId",
+      CASE WHEN activity THEN latest.status ELSE q.status END AS status,q."createdAt",
+      q.name,q."startCode",q."endCode",q."totalCodes",q."batchCreatedAt"
+    FROM inventory q LEFT JOIN LATERAL (
+      SELECT e.status FROM events e WHERE e."qrCodeId"=q.id ORDER BY e."scannedAt" DESC,e.id DESC LIMIT 1
+    ) latest ON activity
+    WHERE NOT activity OR latest.status IS NOT NULL
+  ), grouped AS (
+    SELECT "batchId",status,count(*) AS n FROM scoped GROUP BY "batchId",status
+  ), decisions AS NOT MATERIALIZED (
+    SELECT d.id,d."qrCodeId",d."batchId",d."createdAt",
+      jsonb_build_object('outcome',d.outcome,'riskBand',d."riskBand",'replacementStatus',d."replacementStatus",
+        'customerTrustReviewState',coalesce((SELECT t."reviewState"::text FROM public."CustomerTrustCredential" t
+          WHERE t."qrCodeId"=d."qrCodeId" ORDER BY t."updatedAt" DESC,t.id DESC LIMIT 1),'UNREVIEWED')) AS projection
+    FROM public."VerificationDecision" d JOIN inventory q ON q.id=d."qrCodeId"
+      AND q."licenseeId"=d."licenseeId" AND q."batchId" IS NOT DISTINCT FROM d."batchId"
+    WHERE d."licenseeId"=tenant_id
+  ), batch_rows AS (
+    SELECT q."batchId" AS id,min(q.name) AS name,min(q."licenseeId") AS "licenseeId",
+      min(q."startCode") AS "startCode",min(q."endCode") AS "endCode",
+      CASE WHEN activity THEN count(*) ELSE max(q."totalCodes") END AS "totalCodes",
+      max(q."totalCodes") AS "batchInventoryTotal",count(*) AS "scopeCodeCount",min(q."batchCreatedAt") AT TIME ZONE 'UTC' AS "createdAt",
+      (SELECT d.projection FROM decisions d WHERE d."batchId"=q."batchId" ORDER BY d."createdAt" DESC,d.id DESC LIMIT 1) AS "latestDecision",
+      (SELECT count(*) FROM events e WHERE e."batchId"=q."batchId") AS "scanEventCount",
+      (SELECT jsonb_object_agg(g.status,g.n) FROM grouped g WHERE g."batchId"=q."batchId") AS counts
+    FROM scoped q WHERE q."batchId" IS NOT NULL GROUP BY q."batchId" ORDER BY q."batchId" LIMIT page_limit OFFSET page_offset
+  ), log_rows AS (
+    SELECT e.id,e."qrCodeId",e."batchId",e.status,e."scannedAt" AT TIME ZONE 'UTC' AS "scannedAt",e."isFirstScan",e."displayCode" AS code,
+      (SELECT d.projection FROM decisions d WHERE d."qrCodeId"=e."qrCodeId" ORDER BY d."createdAt" DESC,d.id DESC LIMIT 1) AS "latestDecision",
+      jsonb_build_object('id',e."qrCodeId",'displayCode',e."displayCode",'batch',jsonb_build_object('id',e."batchId",'name',e.name)) AS "qrCode"
+    FROM events e ORDER BY e."scannedAt" DESC,e.id DESC LIMIT page_limit OFFSET page_offset
+  ), daily_codes AS (
+    SELECT DISTINCT date_trunc('day',e."scannedAt") AS day,q.id,e.status FROM events e JOIN scoped q ON q.id=e."qrCodeId" WHERE activity
+    UNION ALL SELECT date_trunc('day',q."createdAt"),q.id,q.status FROM scoped q WHERE NOT activity
+  ), days AS (
+    SELECT day FROM daily_codes UNION SELECT date_trunc('day',e."scannedAt") FROM events e
+  ), daily AS (
+    SELECT d.day,count(DISTINCT c.id) AS total,count(DISTINCT c.id) FILTER(WHERE c.status='DORMANT') AS dormant,
+      count(DISTINCT c.id) FILTER(WHERE c.status IN ('ACTIVE','ALLOCATED','ACTIVATED')) AS allocated,
+      count(DISTINCT c.id) FILTER(WHERE c.status='PRINTED') AS printed,count(DISTINCT c.id) FILTER(WHERE c.status IN ('REDEEMED','SCANNED')) AS redeemed,
+      count(DISTINCT c.id) FILTER(WHERE c.status='BLOCKED') AS blocked,
+      (SELECT count(*) FROM events e WHERE date_trunc('day',e."scannedAt")=d.day) AS "scanEvents"
+    FROM days d LEFT JOIN daily_codes c ON c.day=d.day GROUP BY d.day
+  )
+  SELECT jsonb_build_object(
+    'scope',jsonb_build_object('mode',CASE WHEN activity THEN 'activity' ELSE 'inventory' END,
+      'title',CASE WHEN activity THEN 'Scan activity scope' ELSE 'Inventory scope' END,
+      'description','Scan events are limited to the selected window (at most 90 days); event details exclude personal and security data.',
+      'from',from_at,'to',to_at,'quantities',jsonb_build_object('distinctCodes',(SELECT count(*) FROM scoped),
+        'scanEvents',(SELECT count(*) FROM events),'matchedBatches',(SELECT count(DISTINCT "batchId") FROM scoped))),
+    'totals',(SELECT jsonb_build_object('total',count(*),'created',count(*),
+      'dormant',count(*) FILTER(WHERE status='DORMANT'),'allocated',count(*) FILTER(WHERE status IN ('ACTIVE','ALLOCATED','ACTIVATED')),
+      'printed',count(*) FILTER(WHERE status='PRINTED'),'redeemed',count(*) FILTER(WHERE status IN ('REDEEMED','SCANNED')),
+      'blocked',count(*) FILTER(WHERE status='BLOCKED')) FROM scoped),
+    'eventSummary',(SELECT jsonb_build_object('totalScanEvents',count(*),'firstScanEvents',count(*) FILTER(WHERE "isFirstScan"),
+      'repeatScanEvents',count(*) FILTER(WHERE NOT "isFirstScan"),'blockedEvents',count(*) FILTER(WHERE status='BLOCKED'),
+      'trustedOwnerEvents',count(*) FILTER(WHERE "isTrustedOwnerContext"),'externalEvents',count(*) FILTER(WHERE NOT "isTrustedOwnerContext"),
+      'namedLocationEvents',count(*) FILTER(WHERE coalesce("locationName","locationCity","locationCountry",'')<>''),
+      'knownDeviceEvents',count(*) FILTER(WHERE coalesce(device,'')<>'')) FROM events),
+    'trend',coalesce((SELECT jsonb_agg((to_jsonb(d)-'day')||jsonb_build_object('label',to_char(day,'YYYY-MM-DD')) ORDER BY day) FROM daily d),'[]'::jsonb),
+    'batches',coalesce((SELECT jsonb_agg(to_jsonb(b)) FROM batch_rows b),'[]'::jsonb),
+    'logs',coalesce((SELECT jsonb_agg(to_jsonb(e)) FROM log_rows e),'[]'::jsonb),
+    'pagination',jsonb_build_object('total',(SELECT count(*) FROM events),'limit',page_limit,'offset',page_offset),
+    'supportedStatuses',jsonb_build_array('DORMANT','ACTIVE','ALLOCATED','ACTIVATED','PRINTED','REDEEMED','BLOCKED','SCANNED')
+  ) INTO result;
+  RETURN result;
+END
+$fn$;
+
 CREATE OR REPLACE FUNCTION app_rls.qr_approve_allocation_request(
   p_capability text,p_purpose text,p_request_id text,p_allocation_request_id text,p_decision_note text
 ) RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
@@ -7004,6 +7242,9 @@ BEGIN
     INTO request_row FROM public."QrAllocationRequest" r
     WHERE r.id=p_allocation_request_id FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
+  IF request_row."requestedByUserId"=actor."userId" OR current_setting('app.auth_assurance',true)<>'mfa-verified' THEN
+    RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501';
+  END IF;
   IF request_row.status<>'PENDING'::public."QrAllocationRequestStatus" THEN
     RAISE EXCEPTION 'QR_REQUEST_ALREADY_PROCESSED';
   END IF;
@@ -7773,11 +8014,15 @@ GRANT EXECUTE ON FUNCTION app_rls.qr_allocate_range(text,text,text,text,integer,
 GRANT EXECUTE ON FUNCTION app_rls.qr_approve_allocation_request(text,text,text,text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.qr_batch_command(text,text,text,text,jsonb) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.qr_bind_break_glass_tokens(text,text,text,text,jsonb) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.qr_create_allocation_request(text,text,text,text,integer,text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.qr_delete_codes(text,text,text,text[],text[]) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.qr_export_codes(text,text,text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.qr_get_code_scope(text,text,text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.qr_inventory_projection(text,text,text,text,text,text,text,text,integer,integer) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.qr_list_allocation_requests(text,text,text,text,text,integer,integer) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.qr_read_codes(text,text,text,text,text,text,integer,integer) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.qr_reject_allocation_request(text,text,text,text,text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.qr_scan_analytics(text,text,text,text,jsonb) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.qr_stats(text,text,text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.refresh_inventory_status_rollups(text) TO "mscqr_rls_cert_worker";
 GRANT EXECUTE ON FUNCTION app_rls.refresh_scan_metrics_hourly_rollups(text) TO "mscqr_rls_cert_worker";
@@ -7975,7 +8220,7 @@ DECLARE
 BEGIN
   IF p_purpose<>'printing-readiness'
      OR p_operation NOT IN ('BATCH','JOB','JOB_LIST','ATTENTION_QUEUE','RELEASE','REISSUE','REISSUE_REQUEST','REISSUE_LIST','PRINTABLE_ITEMS','PRINTER','PRINTER_LIST','PRINTER_STATUS','VALIDATION_EVIDENCE')
-     OR p_subject_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+     OR (p_operation<>'REISSUE_LIST' AND (p_subject_id IS NULL OR p_subject_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'))
      OR jsonb_typeof(coalesce(p_options,'{}'::jsonb))<>'object'
   THEN RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
 
@@ -7991,7 +8236,7 @@ BEGIN
     SELECT r."batchId" INTO STRICT target_batch_id FROM public."PrintReissueRequest" r WHERE r.id=p_subject_id;
   ELSIF p_operation IN ('PRINTER','PRINTER_LIST','PRINTER_STATUS') THEN
     target_batch_id:=p_options->>'batchId';
-  ELSIF p_operation NOT IN ('JOB_LIST','ATTENTION_QUEUE') THEN
+  ELSIF p_operation NOT IN ('JOB_LIST','ATTENTION_QUEUE','REISSUE_LIST') THEN
     target_batch_id:=p_subject_id;
   END IF;
   IF target_batch_id IS NOT NULL THEN
@@ -8418,13 +8663,19 @@ BEGIN
         ) AS "originalPrintJob"
         FROM public."PrintReissueRequest" r
         JOIN public."PrintJob" j ON j.id=r."originalPrintJobId"
-        JOIN public."Batch" b ON b.id=j."batchId"
+        JOIN public."Batch" b ON b.id=j."batchId" AND b.id=r."batchId" AND b."licenseeId"=r."licenseeId"
+        JOIN public."Licensee" l ON l.id=b."licenseeId" AND l."isActive" AND l."suspendedAt" IS NULL
+        JOIN public."Organization" o ON o.id=l."orgId" AND o."isActive"
         JOIN public."Printer" p ON p.id=j."printerId"
         WHERE (nullif(p_options->>'status','') IS NULL OR r.status::text=p_options->>'status')
           AND (
             actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
-            OR (actor.role='LICENSEE_ADMIN' AND r."licenseeId"=actor."licenseeId")
-            OR (actor.role='MANUFACTURER_ADMIN' AND r."requestedByUserId"=actor."userId")
+            OR (actor.role='LICENSEE_ADMIN' AND r."licenseeId"=actor."licenseeId" AND l."orgId"=actor."organizationId")
+            OR (actor.role='MANUFACTURER_ADMIN' AND r."requestedByUserId"=actor."userId"
+              AND b."manufacturerId"=actor."userId" AND EXISTS (
+                SELECT 1 FROM public."ManufacturerLicenseeLink" ml
+                WHERE ml."manufacturerId"=actor."userId" AND ml."licenseeId"=b."licenseeId"
+              ))
           )
         ORDER BY r."createdAt" DESC,r.id DESC
         LIMIT LEAST(GREATEST(coalesce(NULLIF(p_options->>'limit','')::integer,50),1),200)

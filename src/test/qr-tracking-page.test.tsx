@@ -1,16 +1,18 @@
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 
 import QRTracking from "@/pages/QRTracking";
+import QRRequests from "@/pages/QRRequests";
 import apiClient from "@/lib/api-client";
+import { createLicenseeQrApi } from "@/lib/api/internal-client-licensee-qr";
+import { clearRequestCoordinator, setRequestCoordinatorScope } from "@/lib/api/request-coordinator";
 
-vi.mock("@/contexts/AuthContext", () => ({
-  useAuth: () => ({
-    user: { id: "manufacturer-1", role: "manufacturer", name: "Factory User", email: "factory@example.com" },
-  }),
+const auth = vi.hoisted(() => ({
+  user: { id: "manufacturer-1", role: "manufacturer", name: "Factory User", email: "factory@example.invalid", licenseeId: "lic-1" },
 }));
+vi.mock("@/contexts/AuthContext", () => ({ useAuth: () => auth }));
 
 vi.mock("@/components/layout/DashboardLayout", () => ({
   DashboardLayout: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
@@ -44,12 +46,18 @@ vi.mock("@/lib/api-client", () => ({
   default: {
     getQrTrackingAnalytics: vi.fn(),
     getBatchAllocationMap: vi.fn(),
+    getQrAllocationRequests: vi.fn(),
+    getLicensees: vi.fn().mockResolvedValue({ success: true, data: [] }),
   },
 }));
 
 describe("QRTracking", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    auth.user.role = "manufacturer";
+    auth.user.licenseeId = "lic-1";
+    clearRequestCoordinator();
+    setRequestCoordinatorScope(auth.user as any);
 
     vi.mocked(apiClient.getQrTrackingAnalytics).mockResolvedValue({
       success: true,
@@ -153,6 +161,86 @@ describe("QRTracking", () => {
     } as any);
   });
 
+  it("hides allocation attribution and an open decision dialog when the authenticated actor changes", async () => {
+    auth.user.role = "super_admin";
+    setRequestCoordinatorScope(auth.user as any);
+    let finishB!: (value: any) => void;
+    vi.mocked(apiClient.getQrAllocationRequests)
+      .mockResolvedValueOnce({ success: true, data: [{ id: "request-A", quantity: 10, batchName: "PRIVATE-BATCH-A", status: "PENDING", createdAt: "2026-10-02T10:00:00Z", requestedByUser: { id: "maker", name: "PRIVATE-ACTOR-A", email: "fixture@example.invalid" } }] } as any)
+      .mockImplementationOnce(() => new Promise(resolve => { finishB = resolve; }));
+    const view = render(<MemoryRouter><QRRequests /></MemoryRouter>);
+    expect(await screen.findByText(/PRIVATE-BATCH-A/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    await act(async () => { auth.user.licenseeId = "lic-2"; setRequestCoordinatorScope(auth.user as any); });
+    view.rerender(<MemoryRouter><QRRequests /></MemoryRouter>);
+    expect(screen.queryByText(/PRIVATE-BATCH-A/)).not.toBeInTheDocument();
+    expect(screen.queryByText("PRIVATE-ACTOR-A")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(finishB).toBeDefined());
+    await act(async () => finishB({ success: false, status: 403 }));
+    expect(screen.queryByText(/PRIVATE-BATCH-A/)).not.toBeInTheDocument();
+  });
+
+  it("never paints a result while the React actor projection lags the authoritative HTTP scope", async () => {
+    const view = render(<MemoryRouter><QRTracking /></MemoryRouter>);
+    expect((await screen.findAllByText("AADS00000020037")).length).toBeGreaterThan(0);
+    const calls = vi.mocked(apiClient.getQrTrackingAnalytics).mock.calls.length;
+    await act(async () => setRequestCoordinatorScope({ ...auth.user, licenseeId: "lic-2" } as any));
+    view.rerender(<MemoryRouter><QRTracking /></MemoryRouter>);
+    expect(screen.queryAllByText("AADS00000020037")).toHaveLength(0);
+    expect(apiClient.getQrTrackingAnalytics).toHaveBeenCalledTimes(calls);
+  });
+
+  it.each(["manufacturer", "licensee_admin"])("hides cached %s A immediately while B fails, then safely remounts", async role => {
+    const baseline: any = await apiClient.getQrTrackingAnalytics();
+    const result = (code: string) => ({ ...baseline, data: { ...baseline.data, batches: [], logs: [{ id: code, code, status: "PRINTED", scannedAt: "2026-10-02T10:00:00Z", qrCode: { displayCode: code } }] } });
+    const core = { request: vi.fn().mockResolvedValueOnce(result("CACHED-A")) };
+    const real = createLicenseeQrApi(core as any);
+    vi.mocked(apiClient.getQrTrackingAnalytics).mockImplementation(real.getQrTrackingAnalytics);
+    auth.user.role = role;
+    setRequestCoordinatorScope(auth.user as any);
+    let view = render(<React.StrictMode><MemoryRouter><QRTracking /></MemoryRouter></React.StrictMode>);
+    expect(await screen.findByText("CACHED-A")).toBeInTheDocument();
+    let failB!: (value: any) => void;
+    core.request.mockImplementationOnce(() => new Promise(resolve => { failB = resolve; }));
+    await act(async () => { auth.user.licenseeId = "lic-2"; setRequestCoordinatorScope(auth.user as any); });
+    view.rerender(<React.StrictMode><MemoryRouter><QRTracking /></MemoryRouter></React.StrictMode>);
+    expect(screen.queryByText("CACHED-A")).not.toBeInTheDocument();
+    await waitFor(() => expect(failB).toBeDefined());
+    await act(async () => failB({ success: false, status: 500, error: "B unavailable" }));
+    expect(screen.queryByText("CACHED-A")).not.toBeInTheDocument();
+    view.unmount();
+    core.request.mockResolvedValueOnce(result("CURRENT-B"));
+    view = render(<MemoryRouter><QRTracking /></MemoryRouter>);
+    expect(await screen.findByText("CURRENT-B")).toBeInTheDocument();
+    expect(screen.queryByText("CACHED-A")).not.toBeInTheDocument();
+    expect(core.request.mock.calls.every(call => !String(call[0]).includes("licenseeId="))).toBe(true);
+    auth.user.role = "manufacturer";
+  });
+
+  it("suppresses both delayed previous generations during rapid A→B→A switching", async () => {
+    const baseline: any = await apiClient.getQrTrackingAnalytics();
+    const result = (code: string) => ({ ...baseline, data: { ...baseline.data, batches: [], logs: [{ id: code, code, status: "PRINTED", scannedAt: "2026-10-02T10:00:00Z", qrCode: { displayCode: code } }] } });
+    const pending: Array<(value: any) => void> = [];
+    const core = { request: vi.fn(() => new Promise(resolve => pending.push(resolve))) };
+    vi.mocked(apiClient.getQrTrackingAnalytics).mockImplementation(createLicenseeQrApi(core as any).getQrTrackingAnalytics);
+    const view = render(<MemoryRouter><QRTracking /></MemoryRouter>);
+    await waitFor(() => expect(pending).toHaveLength(1));
+    await act(async () => { auth.user.licenseeId = "lic-2"; setRequestCoordinatorScope(auth.user as any); });
+    view.rerender(<MemoryRouter><QRTracking /></MemoryRouter>);
+    await waitFor(() => expect(pending).toHaveLength(2));
+    await act(async () => { auth.user.licenseeId = "lic-1"; setRequestCoordinatorScope(auth.user as any); });
+    view.rerender(<MemoryRouter><QRTracking /></MemoryRouter>);
+    await waitFor(() => expect(pending).toHaveLength(3));
+    await act(async () => pending[2](result("LATEST-A")));
+    expect(await screen.findByText("LATEST-A")).toBeInTheDocument();
+    await act(async () => { pending[1](result("LATE-B")); pending[0](result("OLD-A")); });
+    expect(screen.queryByText("LATE-B")).not.toBeInTheDocument();
+    expect(screen.queryByText("OLD-A")).not.toBeInTheDocument();
+    expect(screen.getByText("LATEST-A")).toBeInTheDocument();
+  });
+
   it("shows scan event totals and scan context details instead of zeroed inventory-only tracking", async () => {
     render(
       <MemoryRouter>
@@ -163,6 +251,7 @@ describe("QRTracking", () => {
     await waitFor(() => {
       expect(vi.mocked(apiClient.getQrTrackingAnalytics)).toHaveBeenCalled();
     });
+    expect(vi.mocked(apiClient.getQrTrackingAnalytics).mock.calls[0][0]?.licenseeId).toBeUndefined();
 
     expect(await screen.findByText("4 repeat or outside scans")).toBeInTheDocument();
     expect(screen.getByText("3 known customer scans")).toBeInTheDocument();
@@ -180,5 +269,29 @@ describe("QRTracking", () => {
     expect(batchRow).toHaveTextContent("19");
     expect(batchRow).toHaveTextContent("23");
     expect(batchRow).toHaveTextContent("29");
+  });
+
+  it("renders sanitized events and ignores an older response after switching the selected tenant", async () => {
+    const baseline: any = await apiClient.getQrTrackingAnalytics();
+    const response = (code: string) => ({ ...baseline, data: { ...baseline.data, batches: [], logs: [
+      { id: code, code, status: "BLOCKED", scannedAt: "2026-10-02T10:00:00Z", isFirstScan: false,
+        qrCode: { id: code, displayCode: code }, latestDecision: { outcome: "BLOCKED", riskBand: "HIGH", replacementStatus: "NONE", customerTrustReviewState: "DISPUTED" } },
+    ] } });
+    vi.clearAllMocks();
+    let resolveFirst!: (value: any) => void;
+    vi.mocked(apiClient.getQrTrackingAnalytics)
+      .mockImplementationOnce(() => new Promise(resolve => { resolveFirst = resolve; }))
+      .mockResolvedValueOnce(response("SELECTED-B"));
+    const view = render(<MemoryRouter><QRTracking /></MemoryRouter>);
+    await waitFor(() => expect(resolveFirst).toBeDefined());
+    auth.user.licenseeId = "lic-2";
+    setRequestCoordinatorScope(auth.user as any);
+    view.rerender(<MemoryRouter><QRTracking /></MemoryRouter>);
+    expect(await screen.findByText("SELECTED-B")).toBeInTheDocument();
+    expect(screen.getByText("Context unavailable")).toBeInTheDocument();
+    expect(screen.getByText("Disputed")).toBeInTheDocument();
+    await act(async () => resolveFirst(response("STALE-A")));
+    expect(screen.queryByText("STALE-A")).not.toBeInTheDocument();
+    expect(screen.getByText("SELECTED-B")).toBeInTheDocument();
   });
 });

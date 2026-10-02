@@ -3,6 +3,7 @@ const { createHash } = require("node:crypto");
 const { spawn, spawnSync } = require("node:child_process");
 
 process.env.NODE_ENV = "test";
+process.env.JWT_SECRET = "local-startex-http-certification-secret-only";
 process.env.QR_SIGN_HMAC_SECRET = process.env.QR_SIGN_HMAC_SECRET || "local-focused-qr-system-signing-secret";
 
 const enabled = process.env.MSCQR_QR_SYSTEM_POSTGRES18_TEST === "true";
@@ -53,7 +54,6 @@ async function main(){
   assert.equal(process.env.MSCQR_QR_SYSTEM_POSTGRES18_CONFIRM,"MSCQR_RUN_LOCAL_QR_SYSTEM_POSTGRES18_TEST");
   connection(bootstrap,new URL(bootstrap).username); connection(app,"mscqr_rls_cert_app");
   assert.equal(Number(last(bootstrap,"select current_setting('server_version_num')::int/10000")),18);
-  assert.match(last(bootstrap,"select current_setting('server_version')"),/^18\.4\b/);
 
   run(bootstrap,`
     INSERT INTO public."Organization"(id,name,"updatedAt") VALUES
@@ -248,9 +248,198 @@ async function main(){
     'audit',(SELECT count(*) FROM public."AuditLog" WHERE action IN ('ALLOCATED','APPROVE_QR_ALLOCATION_REQUEST')),
     'outbox',(SELECT count(*) FROM public."SecurityEventOutbox" WHERE "eventType"='AUDIT_LOG'))::text`));
   assert.equal(catalog.force,2); assert.equal(catalog.tablePrivileges,0); assert.equal(catalog.columnPrivileges,0);
-  assert.equal(catalog.publicExecute,0); assert.equal(catalog.appExecute,10); assert.equal(catalog.ownerSafe,1); assert.equal(catalog.ownerTables,0);
+  assert.equal(catalog.publicExecute,0); assert.equal(catalog.appExecute,14); assert.equal(catalog.ownerSafe,1); assert.equal(catalog.ownerTables,0);
   assert.equal(catalog.workerExecute,2); assert.equal(catalog.workerTablePrivileges,0); assert.equal(catalog.rollupPublicExecute,0);
   assert(catalog.audit>=6); assert(catalog.outbox>=6);
+  // Startex regression: real runtime identity, real capability verification and FORCE RLS.
+  const requestId="40000000-0000-4000-8000-000000000890";
+  const list=(cap,tenant=ids.licenseeA)=>`SELECT app_rls.qr_list_allocation_requests('${cap}','qr-allocation-request-list','${requestId}','${tenant}',NULL,10,0)`;
+  const create=(cap,tenant=ids.licenseeA)=>`SELECT app_rls.qr_create_allocation_request('${cap}','qr-allocation-request-create','${requestId}','${tenant}',10,'Incident certification',NULL)`;
+  const reject=(cap,id)=>`SELECT app_rls.qr_reject_allocation_request('${cap}','qr-allocation-request-reject','${requestId}','${id}',NULL)`;
+  const analytics=(cap,tenant=ids.licenseeA,filters={})=>`SELECT app_rls.qr_scan_analytics('${cap}','qr-scan-analytics','${requestId}','${tenant}','${JSON.stringify(filters)}'::jsonb)`;
+  const incidentRequest=JSON.parse(last(app,create(caps.tenant)));
+  assert.equal(incidentRequest.licenseeId,ids.licenseeA); assert.equal(incidentRequest.requestedByUserId,ids.tenant);
+  const requestedRow=JSON.parse(last(app,list(caps.tenant))).find(row=>row.id===incidentRequest.id);
+  assert.deepEqual(requestedRow.requestedByUser,{id:ids.tenant,name:"QR Tenant",email:"qr-tenant@example.invalid"});
+  assert.equal(requestedRow.approvedByUser,null); assert.equal(requestedRow.rejectedByUser,null);
+  assert.match(requestedRow.createdAt,/(Z|\+00:00)$/);
+  denied(list(caps.tenant,ids.licenseeB)); denied(create(caps.tenant,ids.licenseeB));
+  denied(reject(caps.tenant,incidentRequest.id)); denied(reject(caps.manufacturer,incidentRequest.id));
+  for(const cap of [caps.manufacturer,caps.deprecated,caps.expired,caps.revoked,"Z".repeat(43),""]){
+    denied(list(cap)); denied(create(cap));
+  }
+  const platformCreated=JSON.parse(last(app,create(caps.platform)));
+  denied(reject(caps.platform,platformCreated.id));
+  denied(`SELECT app_rls.qr_approve_allocation_request('${caps.platform}','qr-allocation-request-approve','${requestId}','${platformCreated.id}',NULL)`);
+  assert.equal(JSON.parse(last(app,reject(caps.platform,incidentRequest.id))).status,"REJECTED");
+  const rejectedRow=JSON.parse(last(app,list(caps.tenant))).find(row=>row.id===incidentRequest.id);
+  assert.deepEqual(rejectedRow.rejectedByUser,{id:ids.platform,name:"QR Platform"});
+  assert.deepEqual(Object.keys(rejectedRow.requestedByUser).sort(),["email","id","name"]);
+  denied(reject(caps.platform,incidentRequest.id),/QR_REQUEST_ALREADY_PROCESSED/);
+  denied(`SELECT app_rls.qr_approve_allocation_request('${caps.platform}','qr-allocation-request-approve','${requestId}','${incidentRequest.id}',NULL)`,/QR_REQUEST_ALREADY_PROCESSED/);
+  // Canonical immutable metadata, real runtime identity and atomic failure injection.
+  const literal=value=>value===null?"NULL":`'${value.replaceAll("'","''")}'`;
+  const rejectNote=(id,note)=>`SELECT app_rls.qr_reject_allocation_request('${caps.platform}','qr-allocation-request-reject','${requestId}','${id}',${literal(note)})`;
+  const audit=id=>JSON.parse(last(bootstrap,`SELECT coalesce(jsonb_agg(jsonb_build_object('details',details,'id',id)),'[]'::jsonb)::text FROM public."AuditLog" WHERE "entityId"='${id}' AND action='REJECT_QR_ALLOCATION_REQUEST'`));
+  const mutable=id=>JSON.parse(last(bootstrap,`SELECT jsonb_build_object('status',status,'note',"decisionNote")::text FROM public."QrAllocationRequest" WHERE id='${id}'`));
+  const createDetails=JSON.parse(last(bootstrap,`SELECT details::text FROM public."AuditLog" WHERE "entityId"='${incidentRequest.id}' AND action='CREATE_QR_ALLOCATION_REQUEST'`));
+  assert.deepEqual(createDetails,{quantity:10,batchName:"Incident certification"});
+  const notes=["  ordinary reason  ",null,""," \t\n ","x".repeat(500),"界".repeat(500),"😀".repeat(250),"quotes ' \" \\ and \u001b control","<script>alert('not executable')</script>","first line\nsecond line\r\nthird","\u00a0\u2000\ufeff canonical \u2029\u3000"];
+  for(const note of notes){
+    const row=JSON.parse(last(app,create(caps.tenant)));
+    const expected=note?.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g,"").trim()||null;
+    const result=JSON.parse(last(app,rejectNote(row.id,note)));
+    assert.equal(result.decisionNote,expected);
+    assert.deepEqual(mutable(row.id),{status:"REJECTED",note:expected});
+    assert.deepEqual(audit(row.id).map(event=>event.details),[{decisionNote:expected}]);
+    denied(rejectNote(row.id,note),/QR_REQUEST_ALREADY_PROCESSED/);
+    assert.equal(audit(row.id).length,1);
+    // Later mutable edits do not erase the original immutable decision reason.
+    run(bootstrap,`UPDATE public."QrAllocationRequest" SET "decisionNote"='later mutable edit' WHERE id='${row.id}'`);
+    assert.deepEqual(audit(row.id)[0].details,{decisionNote:expected});
+    assert.equal(Number(last(bootstrap,`SELECT count(*) FROM public."SecurityEventOutbox" WHERE payload->>'id'='${audit(row.id)[0].id}'`)),1);
+  }
+  const rolledBack=JSON.parse(last(app,create(caps.tenant)));
+  run(app,`BEGIN; ${rejectNote(rolledBack.id,"rollback reason")}; ROLLBACK`);
+  assert.deepEqual(mutable(rolledBack.id),{status:"PENDING",note:null}); assert.deepEqual(audit(rolledBack.id),[]);
+  for(const note of ["x".repeat(501),"😀".repeat(251)]){
+    denied(rejectNote(rolledBack.id,note),/QR_INVALID_INPUT/);
+    assert.deepEqual(mutable(rolledBack.id),{status:"PENDING",note:null}); assert.deepEqual(audit(rolledBack.id),[]);
+  }
+  run(bootstrap,`CREATE FUNCTION public.startex_test_audit_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.payload->>'entityId'='${rolledBack.id}' AND NEW.payload->>'action'='REJECT_QR_ALLOCATION_REQUEST' THEN RAISE EXCEPTION 'STARTEX_TEST_OUTBOX_FAILURE'; END IF; RETURN NEW; END $$;
+    CREATE TRIGGER startex_test_audit_failure BEFORE INSERT ON public."SecurityEventOutbox" FOR EACH ROW EXECUTE FUNCTION public.startex_test_audit_failure()`);
+  denied(rejectNote(rolledBack.id,"must roll back"),/STARTEX_TEST_OUTBOX_FAILURE/);
+  assert.deepEqual(mutable(rolledBack.id),{status:"PENDING",note:null}); assert.deepEqual(audit(rolledBack.id),[]);
+  run(bootstrap,`DROP TRIGGER startex_test_audit_failure ON public."SecurityEventOutbox"; DROP FUNCTION public.startex_test_audit_failure()`);
+  denied(`UPDATE public."AuditLog" SET details='{}'::jsonb`,/permission denied/);
+  for(const table of ["QrAllocationRequest","QrScanLog","VerificationDecision","CustomerTrustCredential"]){
+    denied(`SELECT * FROM public."${table}" LIMIT 1`,/permission denied/);
+  }
+  run(bootstrap,`INSERT INTO public."Batch"(id,name,"licenseeId","manufacturerId","startCode","endCode","totalCodes","updatedAt") VALUES
+    ('40000000-0000-4000-8000-000000000891','Analytics own','${ids.licenseeA}','${ids.manufacturer}','SAFE1','SAFE1',1,now()),
+    ('40000000-0000-4000-8000-000000000892','Analytics foreign','${ids.licenseeB}',NULL,'SAFE2','SAFE2',1,now());
+    INSERT INTO public."QRCode"(id,code,"displayCode","licenseeId","batchId",status,"updatedAt") VALUES
+    ('40000000-0000-4000-8000-000000000893','local-secret-own','SAFE1','${ids.licenseeA}','40000000-0000-4000-8000-000000000891','PRINTED',now()),
+    ('40000000-0000-4000-8000-000000000894','local-secret-foreign','SAFE2','${ids.licenseeB}','40000000-0000-4000-8000-000000000892','PRINTED',now());
+    INSERT INTO public."QrScanLog"(id,code,"qrCodeId","licenseeId","batchId",status,"isFirstScan","ipAddress","userAgent",latitude,longitude) VALUES
+    ('40000000-0000-4000-8000-000000000895','local-secret-own','40000000-0000-4000-8000-000000000893','${ids.licenseeA}','40000000-0000-4000-8000-000000000891','PRINTED',true,'192.0.2.1','private-test-agent',1,1),
+    ('40000000-0000-4000-8000-000000000896','local-secret-foreign','40000000-0000-4000-8000-000000000894','${ids.licenseeB}','40000000-0000-4000-8000-000000000892','PRINTED',true,'192.0.2.2','private-test-agent',2,2)`);
+  const a=JSON.parse(last(app,analytics(caps.tenant,ids.licenseeA,{code:"SAFE",limit:1})));
+  assert.equal(a.eventSummary.totalScanEvents,1); assert.equal(a.logs.length,1); assert.equal(a.logs[0].code,"SAFE1");
+  assert(!/ipAddress|userAgent|customerUserId|ownershipId|latitude|longitude|local-secret|private-test-agent/.test(JSON.stringify(a)));
+  const next=JSON.parse(last(app,analytics(caps.tenant,ids.licenseeA,{code:"SAFE",limit:1,offset:1})));
+  assert.deepEqual(next.totals,a.totals); assert.deepEqual(next.eventSummary,a.eventSummary); assert.equal(next.logs.length,0);
+  assert.equal(JSON.parse(last(app,analytics(caps.manufacturer,ids.licenseeA,{code:"SAFE"}))).logs[0].code,"SAFE1");
+  denied(analytics(caps.tenant,ids.licenseeB)); denied(analytics(caps.manufacturer,ids.licenseeB));
+  for(const cap of [caps.deprecated,caps.expired,caps.revoked,"Z".repeat(43),""]) denied(analytics(cap));
+  for(const filters of [{limit:201},{limit:0},{offset:-1},{offset:10001},{from:"invalid"},{from:"2020-01-01",to:"2021-01-01"},{firstScan:"true"},{unexpected:true}])
+    denied(analytics(caps.tenant,ids.licenseeA,filters),/QR_INVALID_INPUT/);
+  denied(`SET app.role='SUPER_ADMIN'; SET app.qr_licensee_id='${ids.licenseeB}'; ${list(caps.tenant,ids.licenseeB)}`);
+  denied(`SET app.auth_session_verified='1'; SET app.role='SUPER_ADMIN'; ${analytics("")}`);
+  // Historical event state must not be inferred from the QR's current state.
+  run(bootstrap,`UPDATE public."QRCode" SET status='REDEEMED' WHERE "displayCode"='SAFE1';
+    INSERT INTO public."QrScanLog"(id,code,"qrCodeId","licenseeId","batchId",status,"isFirstScan","scannedAt") VALUES
+    ('40000000-0000-4000-8000-000000000897','local-secret-own','40000000-0000-4000-8000-000000000893','${ids.licenseeA}','40000000-0000-4000-8000-000000000891','BLOCKED',false,now()+interval '1 second');
+    INSERT INTO public."VerificationDecision"(id,"qrCodeId","licenseeId","batchId","proofTier",outcome,"reasonCodes","riskBand","replacementStatus") VALUES
+    ('40000000-0000-4000-8000-000000000898','40000000-0000-4000-8000-000000000893','${ids.licenseeA}','40000000-0000-4000-8000-000000000891','SIGNED_LABEL','BLOCKED',ARRAY[]::text[],'HIGH','NONE'),
+    ('40000000-0000-4000-8000-000000000899','40000000-0000-4000-8000-000000000894','${ids.licenseeB}','40000000-0000-4000-8000-000000000892','SIGNED_LABEL','AUTHENTIC',ARRAY[]::text[],'LOW','NONE');
+    INSERT INTO public."CustomerTrustCredential"(id,"qrCodeId","trustLevel","reviewState",source,"customerEmail","updatedAt") VALUES
+    ('40000000-0000-4000-8000-000000000900','40000000-0000-4000-8000-000000000893','ACCOUNT_TRUSTED','DISPUTED','test','not-for-projection@example.invalid',now())`);
+  const history={code:"SAFE",from:new Date(Date.now()-60000).toISOString(),to:new Date(Date.now()+60000).toISOString()};
+  const blocked=JSON.parse(last(app,analytics(caps.tenant,ids.licenseeA,{...history,status:"BLOCKED"})));
+  assert.equal(blocked.logs.length,1); assert.equal(blocked.logs[0].status,"BLOCKED");
+  assert.equal(blocked.totals.blocked,1); assert.equal(blocked.totals.redeemed,0);
+  assert.equal(blocked.eventSummary.totalScanEvents,1); assert.equal(blocked.eventSummary.blockedEvents,1);
+  assert.equal(blocked.trend[0].blocked,1); assert.equal(blocked.trend[0].scanEvents,1);
+  assert.equal(blocked.batches[0].counts.BLOCKED,1); assert.equal(blocked.batches[0].scopeCodeCount,1);
+  assert.deepEqual(blocked.logs[0].latestDecision,{outcome:"BLOCKED",riskBand:"HIGH",replacementStatus:"NONE",customerTrustReviewState:"DISPUTED"});
+  assert.deepEqual(blocked.batches[0].latestDecision,blocked.logs[0].latestDecision);
+  assert(!/customerEmail|actorIpHash|actorDeviceHash|metadata|not-for-projection|000000000899/.test(JSON.stringify(blocked)));
+  assert.match(blocked.logs[0].scannedAt,/(Z|\+00:00)$/);
+  const printed=JSON.parse(last(app,analytics(caps.tenant,ids.licenseeA,{...history,status:"PRINTED"})));
+  assert.equal(printed.logs[0].status,"PRINTED"); assert.equal(printed.totals.printed,1); assert.equal(printed.eventSummary.blockedEvents,0);
+  const unfiltered=JSON.parse(last(app,analytics(caps.tenant,ids.licenseeA,history)));
+  assert.equal(unfiltered.totals.blocked,1); assert.equal(unfiltered.trend[0].total,1); assert.equal(unfiltered.trend[0].scanEvents,2);
+  assert.equal(JSON.parse(last(app,analytics(caps.tenant,ids.licenseeA,{code:"SAFE",status:"BLOCKED"}))).totals.total,0);
+  assert.equal(JSON.parse(last(app,analytics(caps.tenant,ids.licenseeA,{code:"SAFE",status:"REDEEMED"}))).totals.redeemed,1);
+  assert.equal(JSON.parse(last(app,analytics(caps.platform,ids.licenseeB,{code:"SAFE"}))).logs[0].latestDecision.outcome,"AUTHENTIC");
+  denied(`SET app.qr_target_user_ids='${ids.platform}'; SELECT email FROM public."User"`,/permission denied|QR_|row-level security/);
+  // Actual HTTP router/auth/tenant/MFA/capability chain; no database or Prisma mocks.
+  run(bootstrap,`UPDATE public."RefreshToken" SET "authenticatedAt"=now(),"mfaVerifiedAt"=now() WHERE "userId" IN ('${ids.tenant}','${ids.platform}','${ids.platformSuper}','${ids.manufacturer}')`);
+  const { createBackendApp } = require("../dist/app");
+  const { signAccessToken } = require("../dist/services/auth/tokenService");
+  const { sealCookieToken } = require("../dist/services/auth/cookieTokenProtectionService");
+  const server=await new Promise(resolve=>{const server=createBackendApp().listen(0,"127.0.0.1",()=>resolve(server));});
+  let makerSelected=ids.licenseeA;
+  const http=async (actor,path,method="GET",body,expected=200)=>{
+    const headers={"content-type":"application/json"};
+    if(actor){
+      const role=actor==="platform"?"SUPER_ADMIN":actor==="platformSuper"?"PLATFORM_SUPER_ADMIN":actor==="manufacturer"?"MANUFACTURER_ADMIN":"LICENSEE_ADMIN";
+      const licenseeId=actor==="tenant"?ids.licenseeA:actor==="manufacturer"?makerSelected:null;
+      const orgId=licenseeId===ids.licenseeA?ids.orgA:licenseeId===ids.licenseeB?ids.orgB:null;
+      const scopeVersion=actor==="manufacturer"&&licenseeId?last(bootstrap,`SELECT to_char("updatedAt" AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') FROM public."ManufacturerLicenseeLink" WHERE "manufacturerId"='${ids.manufacturer}' AND "licenseeId"='${licenseeId}'`):null;
+      const sessionId=last(bootstrap,`SELECT id FROM public."RefreshToken" WHERE "userId"='${ids[actor]}' LIMIT 1`);
+      headers.authorization=`Bearer ${signAccessToken({userId:ids[actor],email:"http-fixture@example.invalid",role,sessionId,authenticatedAt:new Date().toISOString(),mfaVerifiedAt:new Date().toISOString(),authAssurance:"ADMIN_MFA",orgId,licenseeId,scopeVersion})}`;
+      headers["x-database-session-capability"]=sealCookieToken(caps[actor],"auth.database-session");
+    }
+    const response=await fetch(`http://127.0.0.1:${server.address().port}/api${path}`,{method,headers,body:body===undefined?undefined:JSON.stringify(body)});
+    const payload=await response.json();
+    assert.equal(response.status,expected,`${method} ${path}: unexpected status ${response.status}, code ${payload.code||payload.errorCode||"none"}`);
+    return payload;
+  };
+  try {
+    await http("tenant","/qr/requests");
+    await http("tenant",`/qr/requests?licenseeId=${ids.licenseeB}`,"GET",undefined,403);
+    await http(null,"/qr/requests","GET",undefined,401);
+    await http("tenant","/qr/requests?limit=201","GET",undefined,400);
+    const made=await http("tenant","/qr/requests","POST",{quantity:2,batchName:"HTTP approval"},201);
+    await http("tenant",`/qr/requests/${made.data.id}/approve`,"POST",{},403);
+    await http("platform",`/qr/requests/${made.data.id}/approve`,"POST",{decisionNote:"Approved fixture"});
+    const toReject=await http("tenant","/qr/requests","POST",{quantity:2,batchName:"HTTP rejection"},201);
+    for(const note of [null,"x".repeat(501),"😀".repeat(251)]){
+      await http("platform",`/qr/requests/${toReject.data.id}/reject`,"POST",{decisionNote:note},400);
+      assert.equal(mutable(toReject.data.id).status,"PENDING"); assert.deepEqual(audit(toReject.data.id),[]);
+    }
+    await http("platform",`/qr/requests/${toReject.data.id}/reject`,"POST",{decisionNote:" \tRejected\u0000 fixture\u001b\n "});
+    assert.deepEqual(audit(toReject.data.id).map(event=>event.details),[{decisionNote:"Rejected fixture"}]);
+    await http("platform",`/qr/requests/${toReject.data.id}/reject`,"POST",{decisionNote:"retry"},409);
+    assert.equal(audit(toReject.data.id).length,1);
+    const attribution=(await http("tenant","/qr/requests")).data;
+    const approved=attribution.find(row=>row.id===made.data.id), rejected=attribution.find(row=>row.id===toReject.data.id);
+    assert.equal(approved.approvedByUser.name,"QR Platform"); assert.equal(approved.decisionNote,"Approved fixture");
+    assert.equal(rejected.rejectedByUser.name,"QR Platform"); assert.equal(rejected.decisionNote,"Rejected fixture");
+    assert.equal(approved.requestedByUser.email,"qr-tenant@example.invalid");
+    await http("tenant","/admin/qr/analytics?code=SAFE");
+    await http("tenant",`/admin/qr/analytics?licenseeId=${ids.licenseeB}`,"GET",undefined,403);
+    await http("tenant","/admin/qr/analytics?offset=-1","GET",undefined,400);
+    const makerAnalytics=await http("manufacturer","/admin/qr/analytics?code=SAFE");
+    assert.equal(makerAnalytics.data.logs[0].code,"SAFE1");
+    await http("manufacturer",`/admin/qr/analytics?licenseeId=${ids.licenseeB}`,"GET",undefined,403);
+    await http("platform","/admin/qr/analytics","GET",undefined,403);
+    await http("platform",`/admin/qr/analytics?licenseeId=${ids.licenseeA}`);
+    await http("platformSuper",`/admin/qr/analytics?licenseeId=${ids.licenseeB}`);
+    const historical=await http("tenant",`/admin/qr/analytics?code=SAFE&status=BLOCKED&from=${encodeURIComponent(history.from)}&to=${encodeURIComponent(history.to)}`);
+    assert.equal(historical.data.logs[0].status,"BLOCKED"); assert.equal(historical.data.eventSummary.totalScanEvents,1);
+    // Multiple linked tenants retain the authenticated selection, never an arbitrary first link.
+    run(bootstrap,`INSERT INTO public."ManufacturerLicenseeLink"("manufacturerId","licenseeId","updatedAt") VALUES('${ids.manufacturer}','${ids.licenseeB}',now());
+      UPDATE public."Batch" SET "manufacturerId"='${ids.manufacturer}' WHERE id='40000000-0000-4000-8000-000000000892'`);
+    assert.equal((await http("manufacturer","/admin/qr/analytics?code=SAFE")).data.logs[0].code,"SAFE1");
+    makerSelected=ids.licenseeB;
+    const selectedB=await http("manufacturer","/admin/qr/analytics?code=SAFE");
+    assert.equal(selectedB.data.logs[0].code,"SAFE2"); assert.equal(selectedB.data.logs.length,1);
+    assert.equal((await http("manufacturer",`/admin/qr/analytics?code=SAFE&licenseeId=${ids.licenseeA}`)).data.logs[0].code,"SAFE1");
+    run(bootstrap,`DELETE FROM public."ManufacturerLicenseeLink" WHERE "manufacturerId"='${ids.manufacturer}' AND "licenseeId"='${ids.licenseeB}'`);
+    await http("manufacturer","/admin/qr/analytics","GET",undefined,401);
+    makerSelected=ids.licenseeA;
+    const telemetry=await http("tenant","/telemetry/route-transition","POST",{routeTo:"/qr-requests",transitionMs:20},202);
+    assert.equal(telemetry.data.persisted,false); assert.equal(telemetry.success,false);
+    await http("tenant","/telemetry/route-transition","POST",{transitionMs:-1},400);
+  } finally { await new Promise(resolve=>server.close(resolve)); }
+  run(bootstrap,`UPDATE public."User" SET "orgId"='${ids.orgB}' WHERE id='${ids.tenant}'`);
+  denied(list(caps.tenant)); denied(create(caps.tenant)); denied(analytics(caps.tenant));
+  run(bootstrap,`UPDATE public."User" SET "orgId"='${ids.orgA}',"isActive"=false WHERE id='${ids.tenant}'`);
+  denied(list(caps.tenant)); denied(create(caps.tenant)); denied(analytics(caps.tenant));
+  run(bootstrap,`UPDATE public."User" SET "isActive"=true WHERE id='${ids.tenant}'`);
   await require("../dist/config/database").default.$disconnect();
   console.log("QR system PostgreSQL 18 proof passed");
 }

@@ -2,6 +2,11 @@ DROP POLICY IF EXISTS qr_system_securityeventoutbox_insert ON public."SecurityEv
 DROP POLICY IF EXISTS qr_system_auditlog_insert ON public."AuditLog";
 DROP POLICY IF EXISTS qr_system_allocationevent_insert ON public."AllocationEvent";
 DROP POLICY IF EXISTS qr_system_qrallocationrequest_update ON public."QrAllocationRequest";
+DROP POLICY IF EXISTS qr_system_qrallocationrequest_insert ON public."QrAllocationRequest";
+DROP FUNCTION IF EXISTS app_rls.qr_list_allocation_requests(text,text,text,text,text,integer,integer);
+DROP FUNCTION IF EXISTS app_rls.qr_create_allocation_request(text,text,text,text,integer,text,text);
+DROP FUNCTION IF EXISTS app_rls.qr_reject_allocation_request(text,text,text,text,text);
+DROP FUNCTION IF EXISTS app_rls.qr_scan_analytics(text,text,text,text,jsonb);
 DROP POLICY IF EXISTS qr_system_qrallocationrequest_select ON public."QrAllocationRequest";
 DROP POLICY IF EXISTS qr_system_batch_delete ON public."Batch";
 DROP POLICY IF EXISTS qr_system_batch_update ON public."Batch";
@@ -26,6 +31,8 @@ DROP POLICY IF EXISTS qr_system_scanmetricshourlyrollup_update ON public."ScanMe
 DROP POLICY IF EXISTS qr_system_scanmetricshourlyrollup_insert ON public."ScanMetricsHourlyRollup";
 DROP POLICY IF EXISTS qr_system_scanmetricshourlyrollup_select ON public."ScanMetricsHourlyRollup";
 DROP POLICY IF EXISTS qr_system_qrscanlog_select ON public."QrScanLog";
+DROP POLICY IF EXISTS qr_system_verificationdecision_select ON public."VerificationDecision";
+DROP POLICY IF EXISTS qr_system_customertrustcredential_select ON public."CustomerTrustCredential";
 DROP POLICY IF EXISTS qr_system_inventorystatusrollup_update ON public."InventoryStatusRollup";
 DROP POLICY IF EXISTS qr_system_inventorystatusrollup_insert ON public."InventoryStatusRollup";
 DROP POLICY IF EXISTS qr_system_inventorystatusrollup_select ON public."InventoryStatusRollup";

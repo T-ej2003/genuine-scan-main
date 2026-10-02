@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='368de62f0a051565d9e66ad9009be98b9f4776a1d3d1f22d628ee96b810116de'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:368de62f0a051565d9e66ad9009be98b9f4776a1d3d1f22d628ee96b810116de'
+    AND source_contract_sha256='07673b057575f357f57ebe460ae3952f596a7e3fd3e93b0a8dd3a1c141f7c083'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:07673b057575f357f57ebe460ae3952f596a7e3fd3e93b0a8dd3a1c141f7c083'
     AND administrator_role='certification-administrator'
 
     AND phase='context-helpers-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:368de62f0a051565d9e66ad9009be98b9f4776a1d3d1f22d628ee96b810116de')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:07673b057575f357f57ebe460ae3952f596a7e3fd3e93b0a8dd3a1c141f7c083')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -225,8 +225,9 @@ GRANT SELECT ("id", "licenseeId", "name", "manufacturerId", "parentBatchId", "ro
 GRANT INSERT ("id", "name", "licenseeId", "manufacturerId", "parentBatchId", "rootBatchId", "startCode", "endCode", "totalCodes", "lifecycleState", "updatedAt") ON TABLE public."Batch" TO "mscqr_rls_cert_auth_owner";
 GRANT UPDATE ("name", "startCode", "endCode", "totalCodes", "updatedAt") ON TABLE public."Batch" TO "mscqr_rls_cert_auth_owner";
 GRANT DELETE ON TABLE public."Batch" TO "mscqr_rls_cert_auth_owner";
-GRANT SELECT ("id", "licenseeId", "requestedByUserId", "quantity", "startNumber", "endNumber", "batchName", "status") ON TABLE public."QrAllocationRequest" TO "mscqr_rls_cert_auth_owner";
-GRANT UPDATE ("status", "approvedByUserId", "approvedAt", "decisionNote", "startNumber", "endNumber", "quantity", "updatedAt") ON TABLE public."QrAllocationRequest" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "licenseeId", "requestedByUserId", "quantity", "startNumber", "endNumber", "batchName", "status", "note", "approvedByUserId", "approvedAt", "rejectedByUserId", "rejectedAt", "decisionNote", "createdAt", "updatedAt") ON TABLE public."QrAllocationRequest" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "licenseeId", "requestedByUserId", "quantity", "batchName", "note", "status", "updatedAt") ON TABLE public."QrAllocationRequest" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("status", "approvedByUserId", "approvedAt", "rejectedByUserId", "rejectedAt", "decisionNote", "startNumber", "endNumber", "quantity", "updatedAt") ON TABLE public."QrAllocationRequest" TO "mscqr_rls_cert_auth_owner";
 GRANT INSERT ("id", "licenseeId", "createdByUserId", "requestId", "source", "startCode", "endCode", "totalCodes") ON TABLE public."AllocationEvent" TO "mscqr_rls_cert_auth_owner";
 GRANT INSERT ("id", "userId", "orgId", "licenseeId", "action", "entityType", "entityId", "details", "createdAt") ON TABLE public."AuditLog" TO "mscqr_rls_cert_auth_owner";
 GRANT INSERT ("id", "eventType", "payload", "requestId", "organizationId", "licenseeId", "initiatingUserId", "updatedAt") ON TABLE public."SecurityEventOutbox" TO "mscqr_rls_cert_auth_owner";
@@ -235,7 +236,9 @@ GRANT SELECT ("id", "licenseeId", "alertType", "severity", "message", "score", "
 GRANT INSERT ("batchId", "licenseeId", "manufacturerId", "totalCodes", "dormant", "active", "activated", "allocated", "printed", "redeemed", "blocked", "scanned", "refreshedAt", "createdAt", "updatedAt") ON TABLE public."InventoryStatusRollup" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("batchId", "licenseeId", "manufacturerId", "totalCodes", "dormant", "active", "activated", "allocated", "printed", "redeemed", "blocked", "scanned", "refreshedAt", "createdAt", "updatedAt") ON TABLE public."InventoryStatusRollup" TO "mscqr_rls_cert_auth_owner";
 GRANT UPDATE ("licenseeId", "manufacturerId", "totalCodes", "dormant", "active", "activated", "allocated", "printed", "redeemed", "blocked", "scanned", "refreshedAt", "updatedAt") ON TABLE public."InventoryStatusRollup" TO "mscqr_rls_cert_auth_owner";
-GRANT SELECT ("qrCodeId", "licenseeId", "batchId", "status", "scannedAt", "isFirstScan", "isTrustedOwnerContext", "device", "locationName", "locationCountry", "locationCity") ON TABLE public."QrScanLog" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "qrCodeId", "licenseeId", "batchId", "status", "scannedAt", "isFirstScan", "isTrustedOwnerContext", "device", "locationName", "locationCountry", "locationCity") ON TABLE public."QrScanLog" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "qrCodeId", "batchId", "licenseeId", "outcome", "riskBand", "replacementStatus", "createdAt") ON TABLE public."VerificationDecision" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "qrCodeId", "reviewState", "updatedAt") ON TABLE public."CustomerTrustCredential" TO "mscqr_rls_cert_auth_owner";
 GRANT INSERT ("id", "bucketKey", "hourBucket", "licenseeId", "batchId", "manufacturerId", "totalScanEvents", "firstScanEvents", "repeatScanEvents", "blockedEvents", "trustedOwnerEvents", "externalEvents", "namedLocationEvents", "knownDeviceEvents", "uniqueQrCodes", "firstScannedAt", "lastScannedAt", "createdAt", "updatedAt") ON TABLE public."ScanMetricsHourlyRollup" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("bucketKey", "totalScanEvents", "firstScanEvents", "repeatScanEvents", "blockedEvents", "trustedOwnerEvents", "externalEvents", "namedLocationEvents", "knownDeviceEvents", "uniqueQrCodes", "firstScannedAt", "lastScannedAt", "updatedAt") ON TABLE public."ScanMetricsHourlyRollup" TO "mscqr_rls_cert_auth_owner";
 GRANT UPDATE ("totalScanEvents", "firstScanEvents", "repeatScanEvents", "blockedEvents", "trustedOwnerEvents", "externalEvents", "namedLocationEvents", "knownDeviceEvents", "uniqueQrCodes", "firstScannedAt", "lastScannedAt", "updatedAt") ON TABLE public."ScanMetricsHourlyRollup" TO "mscqr_rls_cert_auth_owner";
@@ -258,7 +261,7 @@ GRANT UPDATE ("printSessionId", "state", "pipelineState", "issueSequence", "atte
 GRANT INSERT ("id", "printItemId", "eventType", "previousState", "nextState", "details", "actorUserId", "createdAt") ON TABLE public."PrintItemEvent" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("id", "batchId", "printJobId", "qrCodeId", "eventType", "actorId", "metadata", "createdAt") ON TABLE public."PrintAuditEvent" TO "mscqr_rls_cert_auth_owner";
 GRANT INSERT ("id", "batchId", "printJobId", "qrCodeId", "eventType", "actorId", "metadata", "createdAt") ON TABLE public."PrintAuditEvent" TO "mscqr_rls_cert_auth_owner";
-GRANT SELECT ("id", "originalPrintJobId", "replacementPrintJobId", "requestedByUserId", "approvedByUserId", "licenseeId", "manufacturerId", "batchId", "requestedByRole", "targetApproverRole", "quantity", "affectedRangeStart", "affectedRangeEnd", "status", "reason", "decisionNote", "rejectionReason", "approvedAt", "rejectedAt", "executedAt", "createdAt", "updatedAt") ON TABLE public."PrintReissueRequest" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "originalPrintJobId", "replacementPrintJobId", "requestedByUserId", "approvedByUserId", "licenseeId", "manufacturerId", "batchId", "requestedByRole", "targetApproverRole", "quantity", "affectedRangeStart", "affectedRangeEnd", "status", "reason", "decisionNote", "approvalReferenceId", "rejectionReason", "approvedAt", "rejectedAt", "executedAt", "createdAt", "updatedAt") ON TABLE public."PrintReissueRequest" TO "mscqr_rls_cert_auth_owner";
 GRANT INSERT ("id", "originalPrintJobId", "requestedByUserId", "licenseeId", "manufacturerId", "batchId", "requestedByRole", "targetApproverRole", "quantity", "affectedRangeStart", "affectedRangeEnd", "status", "reason", "createdAt", "updatedAt") ON TABLE public."PrintReissueRequest" TO "mscqr_rls_cert_auth_owner";
 GRANT UPDATE ("replacementPrintJobId", "targetApproverRole", "status", "approvedByUserId", "approvedAt", "rejectedAt", "executedAt", "decisionNote", "rejectionReason", "updatedAt") ON TABLE public."PrintReissueRequest" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("id", "actionKey", "status", "requestedByUserId", "reviewedByUserId", "executedByUserId", "licenseeId", "entityType", "entityId", "payload", "summary", "expiresAt", "createdAt") ON TABLE public."SensitiveActionApproval" TO "mscqr_rls_cert_auth_owner";

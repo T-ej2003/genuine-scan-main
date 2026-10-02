@@ -11,7 +11,7 @@ export class QrBoundaryDenied extends Error {
 
 export const isQrBoundaryDenied = (error: unknown) =>
   error instanceof QrBoundaryDenied ||
-  /QR_BOUNDARY_DENIED|AUTH_SESSION_CAPABILITY_DENIED|42501/.test(
+  /QR_BOUNDARY_DENIED|AUTH_SESSION_CAPABILITY_DENIED/.test(
     String((error as any)?.meta?.message || (error as any)?.message || "")
   );
 
@@ -22,6 +22,47 @@ const required = (value: unknown, label: string) => {
 };
 
 const client = () => getB01AuthenticatedPrisma();
+type AllocationRequest = import("@prisma/client").QrAllocationRequest;
+
+export const readScanAnalytics = async (input: {
+  capability: string; requestId: string; licenseeId?: string; filters: Record<string, unknown>;
+}) => {
+  const rows = await client().$queryRaw<Array<{ result: Prisma.JsonObject }>>`
+    SELECT app_rls.qr_scan_analytics(${required(input.capability,"a capability")},${"qr-scan-analytics"},
+      ${required(input.requestId,"a request ID")},${input.licenseeId || null},${JSON.stringify(input.filters)}::jsonb) AS result`;
+  if (!rows[0]?.result?.scope) throw new Error("Invalid scan analytics result");
+  return rows[0].result;
+};
+
+export const listAllocationRequests = async (input: {
+  capability: string; requestId: string; licenseeId?: string; status?: string; limit: number; offset: number;
+}) => {
+  const rows = await client().$queryRaw<Array<{ result: AllocationRequest[] }>>`
+    SELECT app_rls.qr_list_allocation_requests(${required(input.capability,"a capability")},${"qr-allocation-request-list"},
+      ${required(input.requestId,"a request ID")},${input.licenseeId || null},${input.status || null},${input.limit}::integer,${input.offset}::integer) AS result`;
+  if (!Array.isArray(rows[0]?.result)) throw new Error("Invalid allocation list result");
+  return rows[0].result;
+};
+
+export const createAllocationRequest = async (input: {
+  capability: string; requestId: string; licenseeId?: string; quantity: number; batchName: string; note?: string;
+}) => {
+  const rows = await client().$queryRaw<Array<{ result: AllocationRequest }>>`
+    SELECT app_rls.qr_create_allocation_request(${required(input.capability,"a capability")},${"qr-allocation-request-create"},
+      ${required(input.requestId,"a request ID")},${input.licenseeId || null},${input.quantity}::integer,${input.batchName},${input.note || null}) AS result`;
+  if (!rows[0]?.result?.id) throw new Error("Invalid allocation create result");
+  return rows[0].result;
+};
+
+export const rejectAllocationRequest = async (input: {
+  capability: string; requestId: string; allocationRequestId: string; decisionNote?: string;
+}) => {
+  const rows = await client().$queryRaw<Array<{ result: AllocationRequest }>>`
+    SELECT app_rls.qr_reject_allocation_request(${required(input.capability,"a capability")},${"qr-allocation-request-reject"},
+      ${required(input.requestId,"a request ID")},${input.allocationRequestId},${input.decisionNote || null}) AS result`;
+  if (!rows[0]?.result?.id) throw new Error("Invalid allocation rejection result");
+  return rows[0].result;
+};
 type QrDb = Pick<Prisma.TransactionClient, "$queryRaw">;
 
 export const withQrBoundaryTransaction = <T>(

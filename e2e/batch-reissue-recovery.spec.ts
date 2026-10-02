@@ -448,10 +448,13 @@ test.describe("batch operations reissue recovery", () => {
     await expect.poll(() => state.requestCount).toBe(1);
     await expect(manufacturerPage.getByText(/Reissue request submitted/i).first()).toBeVisible();
 
-    const brandPage = await context.newPage();
+    // Different actors cannot share cookie/storage/BroadcastChannel session state.
+    const brandContext = await browser.newContext();
+    const brandPage = await brandContext.newPage();
     await installBatchReissueMocks(brandPage, "licensee_admin", state);
     await brandPage.goto("/batches");
-    await brandPage.getByText("Factory Recovery Batch").first().click();
+    // Brand workspaces group manufacturer allocations under their source batch.
+    await brandPage.getByText("Launch Source Batch").first().click();
     await brandPage.getByRole("tab", { name: "Operations" }).click();
     await expect(brandPage.getByText("Requested 5 labels")).toBeVisible();
     await expect(brandPage.getByText("Range QR-000006 to QR-000010", { exact: true }).first()).toBeVisible();
@@ -485,6 +488,7 @@ test.describe("batch operations reissue recovery", () => {
     await expect(replacementPage.getByText(/Replacement print started/i).first()).toBeVisible();
     await expect(replacementPage.getByText(/Physical confirmation still comes from the connector/i).first()).toBeVisible();
 
+    await brandContext.close();
     await context.close();
   });
 });

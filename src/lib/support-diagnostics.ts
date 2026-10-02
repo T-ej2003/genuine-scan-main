@@ -17,6 +17,16 @@ export type SupportRuntimeIssue = {
   message: string;
   stack?: string;
   source: "runtime" | "network";
+  endpoint?: string;
+  classification?: "business-critical" | "business" | "observability" | "expected-controlled";
+};
+
+export const classifySupportFailure = (endpoint?: string, status?: number | null): NonNullable<SupportRuntimeIssue["classification"]> => {
+  const path = sanitizeSupportUrl(endpoint || "").split(/[?#]/)[0].replace(/^\/api\//, "/").replace(/\/+$/, "");
+  if (path === "/telemetry/route-transition" || path === "/telemetry/route-transition/summary") return "observability";
+  if (status != null && status < 500) return "expected-controlled";
+  if (/^\/(qr|admin\/qr|manufacturer\/print)(\/|-|$)/.test(path)) return "business-critical";
+  return "business";
 };
 
 const MAX_NETWORK_LOGS = 60;
@@ -48,6 +58,8 @@ const COOKIE_RE = /\b(cookie|set-cookie|authorization|x-csrf-token|x-xsrf-token)
 const networkLogs: SupportNetworkLog[] = [];
 const runtimeIssues: SupportRuntimeIssue[] = [];
 const listeners = new Set<(issue: SupportRuntimeIssue) => void>();
+let pendingIssue: SupportRuntimeIssue | undefined;
+let issueTimer: ReturnType<typeof setTimeout> | undefined;
 
 const nextId = () =>
   `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
@@ -123,17 +135,25 @@ export const reportSupportRuntimeIssue = (entry: Omit<SupportRuntimeIssue, "id" 
     id: nextId(),
     at: new Date().toISOString(),
     source: entry.source,
+    endpoint: entry.endpoint ? sanitizeSupportUrl(entry.endpoint) : undefined,
+    classification: entry.classification || classifySupportFailure(entry.endpoint),
     message: redactSensitiveText(entry.message, MAX_DIAGNOSTIC_STRING_LENGTH),
     stack: entry.stack ? redactSensitiveText(entry.stack, MAX_DIAGNOSTIC_STACK_LENGTH) : undefined,
   };
   pushBounded(runtimeIssues, issue, MAX_RUNTIME_ISSUES);
-  listeners.forEach((listener) => {
-    try {
-      listener(issue);
-    } catch {
-      // no-op
-    }
-  });
+  if (issue.classification === "observability" || issue.classification === "expected-controlled") return;
+  // Coalesce simultaneous failures; retain every signal in bounded diagnostics.
+  // The launcher's existing cooldown limits subsequent popup storms.
+  if (!pendingIssue || issue.classification === "business-critical") pendingIssue = issue;
+  if (issueTimer) return;
+  issueTimer = setTimeout(() => {
+    const selected = pendingIssue!;
+    pendingIssue = undefined;
+    issueTimer = undefined;
+    listeners.forEach((listener) => {
+      try { listener(selected); } catch { /* diagnostics must not disrupt navigation */ }
+    });
+  }, 150);
 };
 
 export const onSupportIssue = (listener: (issue: SupportRuntimeIssue) => void) => {

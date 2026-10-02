@@ -98,6 +98,19 @@ jobs:
           export MSCQR_FULL_RLS_CERTIFICATION_EVIDENCE_PATH="$RUNNER_TEMP/worker-audit-evidence/result.json"
           node scripts/rls/certify-clean-room-database.mjs
           node --test backend/tests/rls-wave-b/b03/repositoryFunctions.test.js backend/tests/rls-wave-b/b03/systemContext.test.js backend/tests/rls-wave-b/b03/serviceActivation.test.js
+      - name: Certify Startex QR and printing application paths on PostgreSQL 18
+        env:
+          TZ: UTC
+          PGTZ: UTC
+          MSCQR_FULL_RLS_CERTIFICATION_CONFIRM: MSCQR_RUN_LOCAL_FULL_RLS_CERTIFICATION
+          MSCQR_FULL_RLS_CERTIFICATION_ADMIN_URL: postgresql://mscqr_rls_cert_admin@127.0.0.1:55434/mscqr_full_rls_admin
+        run: |
+          mkdir -m 700 "$RUNNER_TEMP/startex-evidence"
+          for family in qr-system printing-lifecycle; do
+            export MSCQR_FULL_RLS_CERTIFICATION_FAMILY="$family"
+            export MSCQR_FULL_RLS_CERTIFICATION_EVIDENCE_PATH="$RUNNER_TEMP/startex-evidence/$family.json"
+            node scripts/rls/certify-clean-room-database.mjs
+          done
       - name: Verify restored generated contracts and permission source
         run: |
           npm run rls:full-verify

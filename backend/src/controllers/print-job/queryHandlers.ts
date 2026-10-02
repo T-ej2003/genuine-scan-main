@@ -271,6 +271,9 @@ export const listManufacturerPrintReissueRequests = async (req: AuthRequest, res
     return res.json({ success: true, data: rows });
   } catch (error: any) {
     console.error("listManufacturerPrintReissueRequests error:", error);
+    if (/PRINTING_BOUNDARY_DENIED|AUTH_SESSION_CAPABILITY_DENIED/.test(String(error?.meta?.message || error?.message || ""))) {
+      return res.status(403).json({ success: false, error: "Access denied", code: "PRINTING_BOUNDARY_DENIED" });
+    }
     return handleUserSafeError(res, error, "Print reissue requests could not be loaded.");
   }
 };

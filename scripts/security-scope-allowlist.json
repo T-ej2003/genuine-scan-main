@@ -316,16 +316,6 @@
       "followUp": "Security owner: platform/backend. Replace this exact exception with a scoped repository/helper or a richer scanner proof when this file is next modified."
     },
     {
-      "path": "backend/src/services/qrTrackingAnalyticsService.ts",
-      "model": "batch",
-      "methods": [
-        "findMany"
-      ],
-      "reason": "Tracking analytics callers pass scoped filters before aggregation.",
-      "cannotWidenAccess": "Tracking analytics callers pass scoped filters before aggregation. This exception is bound to the exact file, Prisma model, and method list; it does not authorize client-provided tenant, platform, manufacturer, licensee, or user IDs to widen access beyond the route/service's authenticated scope or public sanitized response contract.",
-      "followUp": "Security owner: platform/backend. Replace this exact exception with a scoped repository/helper or a richer scanner proof when this file is next modified."
-    },
-    {
       "path": "backend/src/services/replacementChainService.ts",
       "model": "qRCode",
       "methods": [

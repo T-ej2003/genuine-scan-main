@@ -37,7 +37,7 @@ const startHtml503Server = async () => {
   };
 };
 
-const startMfaBootstrapServer = async () => {
+const startMfaBootstrapServer = async (failurePath = "") => {
   let submittedMfaCode = null;
   const server = http.createServer(async (req, res) => {
     const json = (status, payload) => {
@@ -75,6 +75,14 @@ const startMfaBootstrapServer = async () => {
     }
     if (req.url === "/api/dashboard/stats") return json(200, { success: true, data: {} });
     if (req.url === "/api/qr/stats") return json(200, { success: true, data: { total: 0, byStatus: {} } });
+    if (req.url === failurePath) return json(500, { success: false, code: "TEST_BUSINESS_FAILURE" });
+    if (["/api/manufacturers", "/api/qr/batches", "/api/qr/requests?limit=1", "/api/admin/qr/analytics?limit=1", "/api/manufacturer/print-jobs?limit=1", "/api/manufacturer/print-reissue-requests?limit=1"].includes(req.url)) {
+      return json(200, { success: true, data: [] });
+    }
+    if (req.url === "/api/telemetry/route-transition") {
+      req.resume();
+      return json(202, { success: false, code: "TELEMETRY_NOT_PERSISTED", data: { accepted: false, persisted: false } });
+    }
     if (req.url === "/api/internal/release") return json(403, { success: false, error: "admin only" });
     if (req.url === "/api/auth/logout" && req.method === "POST") {
       req.resume();
@@ -186,6 +194,21 @@ test("pull request smoke soft-skips MFA bootstrap when smoke MFA code is not con
   }
 });
 
+test("authenticated Licensee Admin smoke fails on each affected business 5xx", async () => {
+  for (const route of ["/api/qr/requests?limit=1", "/api/admin/qr/analytics?limit=1", "/api/manufacturer/print-reissue-requests?limit=1"]) {
+    const server = await startMfaBootstrapServer(route);
+    try {
+      const result = await runSmoke(server.baseUrl, {
+        SMOKE_REQUIRED: "true", SMOKE_AUTHENTICATED_REQUIRED: "true",
+        SMOKE_LOGIN_EMAIL: "fixture@example.invalid", SMOKE_LOGIN_PASSWORD: "local-fixture-only",
+        SMOKE_ADMIN_MFA_CODE: "654321",
+      });
+      assert.notEqual(result.status, 0, `business failure escaped smoke: ${route}`);
+      assert.match(result.stderr, /500/);
+    } finally { await server.close(); }
+  }
+});
+
 test("static MFA code overrides the TOTP secret", async () => {
   const server = await startMfaBootstrapServer();
   const malformedSecret = ["must", "not", "be", "decoded"].join("-");
@@ -200,6 +223,7 @@ test("static MFA code overrides the TOTP secret", async () => {
     });
 
     assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /PASS route telemetry failure isolation \(not persisted\)/);
     assert.equal(server.submittedMfaCode() === "654321", true);
     assert.equal(`${result.stdout}${result.stderr}`.includes(malformedSecret), false);
   } finally {
