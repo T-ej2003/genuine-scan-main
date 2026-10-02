@@ -98,8 +98,8 @@ export function assertStageBNormalDeploymentLivePredecessorReference(audit) {
     imageSourceSha: authenticated.backend.sourceSha,
     componentStateGeneration: reference.evidence.componentState.generation,
     componentStateSha256: authenticated.componentStateSha256,
-    deploymentWorkflow: reference.evidence.componentState.updatedByWorkflow,
-    deploymentRunId: String(reference.evidence.componentState.githubRunId),
+    deploymentWorkflow: authenticated.backendProvenance.workflow,
+    deploymentRunId: String(authenticated.backendProvenance.githubRunId),
   };
   const { evidence, ...actual } = reference || {};
   if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error("Stage B normal-deployment live-predecessor reference attestation is malformed or unbound.");

@@ -67,7 +67,7 @@ test("component deployment state, never workflow history, supplies component-spe
   const ranges = new Map([[`${b}..${d}`, ["backend/src/services/batchService.ts"]], [`${a}..${d}`, ["src/App.tsx"]]]);
   const plan = buildProductionNormalDeploymentPlan({ sourceSha: d, state, isAncestor: (left, right) => [a, b, c, d].indexOf(left) <= [a, b, c, d].indexOf(right), readRange: (left, right) => ranges.get(`${left}..${right}`) || [] });
   assert.equal(plan.classification.backend, true); assert.equal(plan.classification.frontend, true); assert.equal(plan.componentBaselines.backend, b); assert.equal(plan.componentBaselines.frontend, a);
-  assert.throws(() => buildProductionNormalDeploymentPlan({ sourceSha: d, state: { ...state, components: { ...state.components, backend: null } }, isAncestor: () => true, readRange: () => [] }), /bootstrapped/);
+  assert.throws(() => buildProductionNormalDeploymentPlan({ sourceSha: d, state: { ...state, components: { ...state.components, backend: null }, componentProvenance: Object.fromEntries(Object.entries(state.componentProvenance).filter(([name]) => name !== "backend")) }, isAncestor: () => true, readRange: () => [] }), /bootstrapped/);
   assert.throws(() => buildProductionNormalDeploymentPlan({ sourceSha: d, state, isAncestor: () => false, readRange: () => [] }), /ancestor/);
   assert.equal(typeof classifyProductionComponentRanges, "function");
 });
@@ -90,7 +90,7 @@ test("recorded security work does not deadlock an unrelated frontend release, bu
   const ranges = new Map([[`${a}..${b}`, ["backend/src/middleware/rbac.ts"]], [`${a}..${c}`, ["backend/src/middleware/rbac.ts", "src/App.tsx"]], [`${b}..${c}`, ["src/App.tsx"]]]);
   const plan = buildProductionNormalDeploymentPlan({ sourceSha: c, state, isAncestor: (left, right) => [a, b, c].indexOf(left) <= [a, b, c].indexOf(right), readRange: (left, right) => ranges.get(`${left}..${right}`) || [] });
   assert.equal(plan.classification.frontend, true); assert.equal(plan.classification.backend, false);
-  assert.throws(() => buildProductionNormalDeploymentPlan({ sourceSha: c, state: { ...state, components: { ...state.components, security: null } }, isAncestor: () => true, readRange: (left, right) => ranges.get(`${left}..${right}`) || [] }), /Sensitive|stronger-lane/);
+  assert.throws(() => buildProductionNormalDeploymentPlan({ sourceSha: c, state: { ...state, components: { ...state.components, security: null }, componentProvenance: Object.fromEntries(Object.entries(state.componentProvenance).filter(([name]) => name !== "security")) }, isAncestor: () => true, readRange: (left, right) => ranges.get(`${left}..${right}`) || [] }), /Sensitive|stronger-lane/);
 });
 
 test("completed recovery uses its reconciliation source while preserving the historical live image source", () => {

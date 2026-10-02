@@ -141,7 +141,9 @@ test("receipt CAS retries an unrelated generation change without losing it, but 
       if (!raced) {
         raced = true;
         const concurrent = f.state; concurrent.generation++;
+        concurrent.updatedAt = "2026-01-02T00:00:00.000Z"; concurrent.updatedByLane = "SECURITY_INFRASTRUCTURE"; concurrent.updatedByWorkflow = "security/workflow.yml@refs/heads/main"; concurrent.githubRunId = "789";
         concurrent.components[changedComponent] = changedComponent === "security" ? { sourceSha: sha("a"), releaseIdentity: "independent-verified-security" } : identity("backend", "c", 3);
+        concurrent.componentProvenance[changedComponent] = { lane: "SECURITY_INFRASTRUCTURE", workflow: concurrent.updatedByWorkflow, githubRunId: concurrent.githubRunId, generation: concurrent.generation, updatedAt: concurrent.updatedAt };
         f.state = concurrent;
         throw new Error("ConditionalCheckFailedException");
       }

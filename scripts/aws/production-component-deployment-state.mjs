@@ -6,15 +6,16 @@ import { assertNormalDeploymentReceipt, normalReceiptHash } from "./production-n
 export const PRODUCTION_COMPONENT_STATE = Object.freeze({ table: "mscqr-production-component-deployment-state", key: "production#T-ej2003/genuine-scan-main", account: "368992683803", region: "eu-west-2", repository: "T-ej2003/genuine-scan-main" });
 const SHA = /^[a-f0-9]{40}$/, DIGEST = /^sha256:[a-f0-9]{64}$/;
 const components = new Set(["backend", "frontend", "database", "security"]);
+const lanes = new Set(["BOOTSTRAP", "NORMAL_APPLICATION", "SECURITY_INFRASTRUCTURE", "EMERGENCY_RECOVERY"]);
 const canonical = (value) => JSON.stringify(value);
 const clone = (value) => structuredClone(value);
 const same = (left, right) => canonical(left) === canonical(right);
 const conditionalFailure = (error) => /ConditionalCheckFailedException/.test(`${error?.name || ""}\n${error?.code || ""}\n${error?.message || ""}\n${error?.stderr || ""}`);
 
 export function assertProductionComponentDeploymentState(value) {
-  assert.equal(value?.schemaVersion, 1); assert.equal(value.environment, "production"); assert.equal(value.repository, PRODUCTION_COMPONENT_STATE.repository);
+  assert.ok([1, 2].includes(value?.schemaVersion)); assert.equal(value.environment, "production"); assert.equal(value.repository, PRODUCTION_COMPONENT_STATE.repository);
   assert.ok(Number.isSafeInteger(value.generation) && value.generation >= 1); assert.match(value.updatedAt || "", /^\d{4}-\d\d-\d\dT/);
-  assert.ok(["BOOTSTRAP", "NORMAL_APPLICATION", "SECURITY_INFRASTRUCTURE", "EMERGENCY_RECOVERY"].includes(value.updatedByLane));
+  assert.ok(lanes.has(value.updatedByLane));
   assert.match(value.updatedByWorkflow || "", /^[A-Za-z0-9_.:/@-]{1,512}$/); assert.match(String(value.githubRunId || ""), /^(?:[1-9][0-9]*|bootstrap|local-test)$/);
   assert.deepEqual(Object.keys(value.components || {}).sort(), [...components].sort());
   if (value.normalDeploymentReceipt !== undefined) assertNormalDeploymentReceipt(value.normalDeploymentReceipt);
@@ -33,11 +34,29 @@ export function assertProductionComponentDeploymentState(value) {
     assert.match(component.sourceSha || "", SHA); assert.match(component.releaseIdentity || component.imageDigest || "", component.imageDigest ? DIGEST : /^.{1,512}$/);
     if (["backend", "frontend"].includes(name)) { assert.match(component.establishedThroughSha || "", SHA); assert.match(component.imageDigest || "", DIGEST); assert.match(component.taskDefinitionArn || "", /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/[^:]+:[1-9][0-9]*$/); assert.ok(Number.isSafeInteger(component.desiredCount) && component.desiredCount > 0, `${name} desired count malformed`); }
   }
+  if (value.schemaVersion === 1) assert.equal(value.componentProvenance, undefined, "Legacy component state cannot claim v2 provenance");
+  else {
+    assert.deepEqual(Object.keys(value.componentProvenance || {}).sort(), Object.entries(value.components).filter(([, component]) => component).map(([name]) => name).sort(), "Component provenance must cover exactly the deployed components");
+    for (const provenance of Object.values(value.componentProvenance)) {
+      assert.deepEqual(Object.keys(provenance).sort(), ["generation", "githubRunId", "lane", "updatedAt", "workflow"].sort());
+      assert.ok(lanes.has(provenance.lane)); assert.match(provenance.workflow || "", /^[A-Za-z0-9_.:/@-]{1,512}$/);
+      assert.match(String(provenance.githubRunId || ""), /^(?:[1-9][0-9]*|bootstrap|local-test)$/);
+      assert.ok(Number.isSafeInteger(provenance.generation) && provenance.generation >= 1 && provenance.generation <= value.generation);
+      assert.match(provenance.updatedAt || "", /^\d{4}-\d\d-\d\dT/);
+    }
+  }
   return value;
 }
 
+const aggregateProvenance = (state) => ({ lane: state.updatedByLane, workflow: state.updatedByWorkflow, githubRunId: String(state.githubRunId), generation: state.generation, updatedAt: state.updatedAt });
+export function componentDeploymentProvenance(state, name) {
+  assertProductionComponentDeploymentState(state); assert.ok(components.has(name)); assert.ok(state.components[name], `${name} component state is missing`);
+  return Object.freeze(clone(state.schemaVersion === 1 ? aggregateProvenance(state) : state.componentProvenance[name]));
+}
+
 export function createProductionComponentDeploymentState({ components: stateComponents, now = new Date().toISOString(), updatedByWorkflow = "local-test", githubRunId = "local-test" } = {}) {
-  return Object.freeze(assertProductionComponentDeploymentState({ schemaVersion: 1, environment: "production", repository: PRODUCTION_COMPONENT_STATE.repository, generation: 1, updatedAt: now, updatedByLane: "BOOTSTRAP", updatedByWorkflow, githubRunId: String(githubRunId), components: stateComponents }));
+  const provenance = { lane: "BOOTSTRAP", workflow: updatedByWorkflow, githubRunId: String(githubRunId), generation: 1, updatedAt: now };
+  return Object.freeze(assertProductionComponentDeploymentState({ schemaVersion: 2, environment: "production", repository: PRODUCTION_COMPONENT_STATE.repository, generation: 1, updatedAt: now, updatedByLane: "BOOTSTRAP", updatedByWorkflow, githubRunId: String(githubRunId), components: stateComponents, componentProvenance: Object.fromEntries(Object.entries(stateComponents).filter(([, component]) => component).map(([name]) => [name, { ...provenance }])) }));
 }
 
 export function advanceProductionComponentDeploymentState({ current, expectedGeneration, lane, changes, emergencyCompletion, normalReceiptSha256, now = new Date().toISOString(), recovery = false, isAncestor, authenticateRecovery, updatedByWorkflow = "local-test", githubRunId = "local-test" } = {}) {
@@ -70,7 +89,17 @@ export function advanceProductionComponentDeploymentState({ current, expectedGen
     }
   }
   const next = clone(current); next.generation++; next.updatedAt = now; next.updatedByLane = lane; next.updatedByWorkflow = updatedByWorkflow; next.githubRunId = String(githubRunId);
-  for (const [name, value] of Object.entries(changes)) next.components[name] = clone(value);
+  // Schema v1 recorded only the last aggregate writer. Its next authenticated
+  // mutation snapshots that legacy provenance per unchanged component, then v2
+  // updates provenance only for components changed by this operation.
+  next.componentProvenance = current.schemaVersion === 1
+    ? Object.fromEntries(Object.entries(current.components).filter(([, component]) => component).map(([name]) => [name, aggregateProvenance(current)]))
+    : clone(current.componentProvenance);
+  next.schemaVersion = 2;
+  for (const [name, value] of Object.entries(changes)) {
+    next.components[name] = clone(value);
+    next.componentProvenance[name] = { lane, workflow: updatedByWorkflow, githubRunId: String(githubRunId), generation: next.generation, updatedAt: now };
+  }
   if (normalReceiptSha256) delete next.normalDeploymentReceipt;
   else if (current.normalDeploymentReceipt && lane !== "NORMAL_APPLICATION") {
     const receipt = next.normalDeploymentReceipt;
@@ -129,7 +158,6 @@ export function advanceProductionComponentDeploymentStateWithRetry({ client, cur
   assert.ok(Number.isSafeInteger(maxRetries) && maxRetries >= 0 && maxRetries <= 5);
   assertProductionComponentDeploymentState(current);
   assert.ok(changes && typeof changes === "object" && Object.keys(changes).length > 0);
-  assertProductionComponentDeploymentState({ ...clone(current), components: { ...clone(current.components), ...changes } });
   // Terminal writers are retry-safe: after a successful conditional write the
   // exact same authenticated terminal may rerun without another state write.
   if (Object.entries(changes).every(([name, value]) => same(current.components[name], value))

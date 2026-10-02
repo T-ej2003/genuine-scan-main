@@ -5,7 +5,7 @@ import path from "node:path";
 import { mkdtempSync, readFileSync } from "node:fs";
 import test from "node:test";
 import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
-import { createProductionComponentDeploymentState } from "../aws/production-component-deployment-state.mjs";
+import { createProductionComponentDeploymentState, advanceProductionComponentDeploymentState } from "../aws/production-component-deployment-state.mjs";
 import { APP_ONLY } from "../aws/production-app-only-contract.mjs";
 import { authenticatedBackendRecoveryComponent, commitBackendRecoveryComponentState, assertCompletedBackendRecoveryEvidence } from "../aws/commit-production-component-recovery-state.mjs";
 import { completedBackendRecoveryEvidence } from "./fixtures/completed-backend-recovery-evidence.mjs";
@@ -18,6 +18,7 @@ import { commitSecurityComponentState } from "../aws/commit-production-component
 import { READY_FOR_OVERLAP_DEPLOYMENT_STAGES } from "../aws/production-overlap-readiness-contract.mjs";
 import { writeOverlapReadinessEvidence } from "../aws/produce-production-overlap-readiness-evidence.mjs";
 import { classifyNormalLiveComponentState } from "../aws/production-normal-release.mjs";
+import { NORMAL_RECEIPT_WORKFLOW } from "../aws/production-normal-receipt-contract.mjs";
 
 const source = "b".repeat(40), recoverySource = "c".repeat(40);
 const state = () => createProductionComponentDeploymentState({ components: {
@@ -27,9 +28,12 @@ const state = () => createProductionComponentDeploymentState({ components: {
 
 test("security terminal advances only the authenticated security component", () => {
   const body = { sourceSha: source, valid: true }; const authorization = { ...body, authorizationSha256: canonicalSha256(body) };
-  const initial = state(); let request;
+  const bootstrap = state();
+  const initial = advanceProductionComponentDeploymentState({ current: bootstrap, expectedGeneration: 1, lane: "NORMAL_APPLICATION", changes: { backend: { ...bootstrap.components.backend, sourceSha: source, establishedThroughSha: source } }, updatedByWorkflow: NORMAL_RECEIPT_WORKFLOW, githubRunId: "101" });
+  const backendProvenance = structuredClone(initial.componentProvenance.backend); let request;
   const result = commitSecurityComponentState({ sourceSha: source, authorization, client: { read: () => initial, advance: (_current, next) => { request = next; } }, isProtectedMainAncestor: () => true });
   assert.equal(result.state.components.security.sourceSha, source); assert.equal(result.state.components.backend.sourceSha, initial.components.backend.sourceSha); assert.equal(request.components.frontend.sourceSha, initial.components.frontend.sourceSha);
+  assert.deepEqual(result.state.componentProvenance.backend, backendProvenance); assert.equal(result.state.componentProvenance.security.lane, "SECURITY_INFRASTRUCTURE");
 });
 
 test("security terminal rejects forged authorization and non-main source", () => {

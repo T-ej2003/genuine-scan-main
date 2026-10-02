@@ -592,8 +592,8 @@ function authenticateNormalDeploymentLivePredecessorReference({ reader, services
     imageSourceSha: authenticated.backend.sourceSha,
     componentStateGeneration: componentState.generation,
     componentStateSha256: authenticated.componentStateSha256,
-    deploymentWorkflow: componentState.updatedByWorkflow,
-    deploymentRunId: String(componentState.githubRunId),
+    deploymentWorkflow: authenticated.backendProvenance.workflow,
+    deploymentRunId: String(authenticated.backendProvenance.githubRunId),
     evidence,
   });
 }

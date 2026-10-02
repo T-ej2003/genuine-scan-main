@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createProductionComponentDeploymentState, advanceProductionComponentDeploymentState, advanceProductionComponentDeploymentStateWithRetry, bootstrapProductionComponentDeploymentState, componentStateCasRequest, createProductionComponentDeploymentStateClient, PRODUCTION_COMPONENT_STATE } from "../aws/production-component-deployment-state.mjs";
+import { createProductionComponentDeploymentState, advanceProductionComponentDeploymentState, advanceProductionComponentDeploymentStateWithRetry, bootstrapProductionComponentDeploymentState, componentStateCasRequest, createProductionComponentDeploymentStateClient, PRODUCTION_COMPONENT_STATE, componentDeploymentProvenance } from "../aws/production-component-deployment-state.mjs";
+import { NORMAL_RECEIPT_WORKFLOW } from "../aws/production-normal-receipt-contract.mjs";
 const sha = (value) => value.repeat(40); const digest = (value) => `sha256:${value.repeat(64)}`;
 const component = (name, value) => ({ sourceSha: sha(value), establishedThroughSha: sha(value), imageDigest: digest(value), taskDefinitionArn: `arn:aws:ecs:eu-west-2:368992683803:task-definition/${name}:1`, desiredCount: 2 });
 const initial = () => createProductionComponentDeploymentState({ components: { backend: component("backend", "a"), frontend: component("frontend", "a"), database: null, security: null } });
@@ -10,6 +11,29 @@ test("component state CAS preserves unrelated live identities and rejects stale 
   assert.throws(() => advanceProductionComponentDeploymentState({ current: state, expectedGeneration: 2, lane: "NORMAL_APPLICATION", changes: { frontend: component("frontend", "b") } }));
   assert.throws(() => advanceProductionComponentDeploymentState({ current: state, expectedGeneration: 1, lane: "SECURITY_INFRASTRUCTURE", changes: {} }), /mutation set/);
   assert.equal(componentStateCasRequest({ current: state, next }).ConditionExpression, "#generation = :generation");
+});
+
+test("component provenance follows the operation that changed each component", () => {
+  const normal = advanceProductionComponentDeploymentState({ current: initial(), expectedGeneration: 1, lane: "NORMAL_APPLICATION", changes: { backend: component("backend", "b") }, updatedByWorkflow: NORMAL_RECEIPT_WORKFLOW, githubRunId: "101", now: "2026-01-01T00:00:00.000Z" });
+  const backendProvenance = componentDeploymentProvenance(normal, "backend");
+  assert.deepEqual(backendProvenance, { lane: "NORMAL_APPLICATION", workflow: NORMAL_RECEIPT_WORKFLOW, githubRunId: "101", generation: 2, updatedAt: "2026-01-01T00:00:00.000Z" });
+  const security = advanceProductionComponentDeploymentState({ current: normal, expectedGeneration: 2, lane: "SECURITY_INFRASTRUCTURE", changes: { security: { sourceSha: sha("c"), releaseIdentity: "f".repeat(64) } }, updatedByWorkflow: "security/workflow.yml@refs/heads/main", githubRunId: "202", now: "2026-01-02T00:00:00.000Z" });
+  assert.deepEqual(componentDeploymentProvenance(security, "backend"), backendProvenance);
+  assert.equal(componentDeploymentProvenance(security, "security").lane, "SECURITY_INFRASTRUCTURE");
+  const frontend = advanceProductionComponentDeploymentState({ current: security, expectedGeneration: 3, lane: "SECURITY_INFRASTRUCTURE", changes: { frontend: component("frontend", "c") }, updatedByWorkflow: "security/workflow.yml@refs/heads/main", githubRunId: "203" });
+  assert.deepEqual(componentDeploymentProvenance(frontend, "backend"), backendProvenance);
+});
+
+test("legacy state upgrades deterministically and v2 provenance fails closed when missing or tampered", () => {
+  const current = structuredClone(initial());
+  current.schemaVersion = 1; delete current.componentProvenance;
+  const upgraded = advanceProductionComponentDeploymentState({ current, expectedGeneration: 1, lane: "SECURITY_INFRASTRUCTURE", changes: { security: { sourceSha: sha("c"), releaseIdentity: "f".repeat(64) } }, updatedByWorkflow: "security/workflow.yml@refs/heads/main", githubRunId: "202" });
+  assert.equal(upgraded.schemaVersion, 2);
+  assert.deepEqual(componentDeploymentProvenance(upgraded, "backend"), { lane: "BOOTSTRAP", workflow: "local-test", githubRunId: "local-test", generation: 1, updatedAt: current.updatedAt });
+  const missing = structuredClone(upgraded); delete missing.componentProvenance.backend;
+  assert.throws(() => componentDeploymentProvenance(missing, "backend"), /cover exactly/);
+  const malformed = structuredClone(upgraded); malformed.componentProvenance.backend.workflow = "";
+  assert.throws(() => componentDeploymentProvenance(malformed, "backend"));
 });
 test("DynamoDB client fixes table/key and emits conditional initialize and update requests", () => {
   const calls = [], state = initial(); const client = createProductionComponentDeploymentStateClient({ run: (args) => { calls.push(args); return "{}"; } });

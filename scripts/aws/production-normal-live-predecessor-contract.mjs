@@ -1,15 +1,16 @@
 import assert from "node:assert/strict";
 import { APP_ONLY, assertAppOnlyDefinition } from "./production-app-only-contract.mjs";
-import { assertProductionComponentDeploymentState, stateHash } from "./production-component-deployment-state.mjs";
+import { assertProductionComponentDeploymentState, componentDeploymentProvenance, stateHash } from "./production-component-deployment-state.mjs";
 import { NORMAL_RECEIPT_WORKFLOW } from "./production-normal-receipt-contract.mjs";
 
 const SHA = /^[a-f0-9]{40}$/;
 
 export function assertNormalDeploymentLivePredecessor({ componentState, service, taskDefinition, repository, imageDetails } = {}) {
   assertProductionComponentDeploymentState(componentState);
-  assert.equal(componentState.updatedByLane, "NORMAL_APPLICATION");
-  assert.equal(componentState.updatedByWorkflow, NORMAL_RECEIPT_WORKFLOW);
-  assert.match(String(componentState.githubRunId), /^[1-9][0-9]*$/, "Normal deployment evidence requires a GitHub run identity");
+  const backendProvenance = componentDeploymentProvenance(componentState, "backend");
+  assert.equal(backendProvenance.lane, "NORMAL_APPLICATION");
+  assert.equal(backendProvenance.workflow, NORMAL_RECEIPT_WORKFLOW);
+  assert.match(String(backendProvenance.githubRunId), /^[1-9][0-9]*$/, "Normal deployment evidence requires a GitHub run identity");
   assert.equal(componentState.normalDeploymentReceipt, undefined, "Normal deployment receipt must be atomically committed into component state");
   const backend = componentState.components.backend;
   assert.ok(backend, "Normal deployment backend state is missing");
@@ -44,5 +45,5 @@ export function assertNormalDeploymentLivePredecessor({ componentState, service,
   assert.equal(imageDetails[0]?.imageDigest, backend.imageDigest);
   const sourceTags = (imageDetails[0]?.imageTags || []).filter((tag) => SHA.test(tag));
   assert.deepEqual(sourceTags, [backend.sourceSha], "Normal deployment image source identity is ambiguous or mismatched");
-  return Object.freeze({ backend, componentStateSha256: stateHash(componentState) });
+  return Object.freeze({ backend, backendProvenance, componentStateSha256: stateHash(componentState) });
 }
