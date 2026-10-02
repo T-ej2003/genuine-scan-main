@@ -1,16 +1,15 @@
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 
 import QRTracking from "@/pages/QRTracking";
 import apiClient from "@/lib/api-client";
 
-vi.mock("@/contexts/AuthContext", () => ({
-  useAuth: () => ({
-    user: { id: "manufacturer-1", role: "manufacturer", name: "Factory User", email: "factory@example.com" },
-  }),
+const auth = vi.hoisted(() => ({
+  user: { id: "manufacturer-1", role: "manufacturer", name: "Factory User", email: "factory@example.invalid", licenseeId: "lic-1" },
 }));
+vi.mock("@/contexts/AuthContext", () => ({ useAuth: () => auth }));
 
 vi.mock("@/components/layout/DashboardLayout", () => ({
   DashboardLayout: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
@@ -50,6 +49,7 @@ vi.mock("@/lib/api-client", () => ({
 describe("QRTracking", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    auth.user.licenseeId = "lic-1";
 
     vi.mocked(apiClient.getQrTrackingAnalytics).mockResolvedValue({
       success: true,
@@ -163,6 +163,7 @@ describe("QRTracking", () => {
     await waitFor(() => {
       expect(vi.mocked(apiClient.getQrTrackingAnalytics)).toHaveBeenCalled();
     });
+    expect(vi.mocked(apiClient.getQrTrackingAnalytics).mock.calls[0][0]?.licenseeId).toBeUndefined();
 
     expect(await screen.findByText("4 repeat or outside scans")).toBeInTheDocument();
     expect(screen.getByText("3 known customer scans")).toBeInTheDocument();
@@ -180,5 +181,28 @@ describe("QRTracking", () => {
     expect(batchRow).toHaveTextContent("19");
     expect(batchRow).toHaveTextContent("23");
     expect(batchRow).toHaveTextContent("29");
+  });
+
+  it("renders sanitized events and ignores an older response after switching the selected tenant", async () => {
+    const baseline: any = await apiClient.getQrTrackingAnalytics();
+    const response = (code: string) => ({ ...baseline, data: { ...baseline.data, batches: [], logs: [
+      { id: code, code, status: "BLOCKED", scannedAt: "2026-10-02T10:00:00Z", isFirstScan: false,
+        qrCode: { id: code, displayCode: code }, latestDecision: { outcome: "BLOCKED", riskBand: "HIGH", replacementStatus: "NONE", customerTrustReviewState: "DISPUTED" } },
+    ] } });
+    vi.clearAllMocks();
+    let resolveFirst!: (value: any) => void;
+    vi.mocked(apiClient.getQrTrackingAnalytics)
+      .mockImplementationOnce(() => new Promise(resolve => { resolveFirst = resolve; }))
+      .mockResolvedValueOnce(response("SELECTED-B"));
+    const view = render(<MemoryRouter><QRTracking /></MemoryRouter>);
+    await waitFor(() => expect(resolveFirst).toBeDefined());
+    auth.user.licenseeId = "lic-2";
+    view.rerender(<MemoryRouter><QRTracking /></MemoryRouter>);
+    expect(await screen.findByText("SELECTED-B")).toBeInTheDocument();
+    expect(screen.getByText("Context unavailable")).toBeInTheDocument();
+    expect(screen.getByText("Disputed")).toBeInTheDocument();
+    await act(async () => resolveFirst(response("STALE-A")));
+    expect(screen.queryByText("STALE-A")).not.toBeInTheDocument();
+    expect(screen.getByText("SELECTED-B")).toBeInTheDocument();
   });
 });

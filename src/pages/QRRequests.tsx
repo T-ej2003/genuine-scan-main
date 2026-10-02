@@ -51,8 +51,8 @@ type RequestRow = {
   approvedAt?: string | null;
   rejectedAt?: string | null;
   requestedByUser?: { id: string; name: string; email: string } | null;
-  approvedByUser?: { id: string; name: string; email: string } | null;
-  rejectedByUser?: { id: string; name: string; email: string } | null;
+  approvedByUser?: { id: string; name: string } | null;
+  rejectedByUser?: { id: string; name: string } | null;
   licensee?: { id: string; name: string; prefix: string } | null;
 };
 

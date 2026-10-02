@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='2d015b556d0e0d03ecc2f77218af82d78045bbd64448d70478638a3622592e56'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:2d015b556d0e0d03ecc2f77218af82d78045bbd64448d70478638a3622592e56'
+    AND source_contract_sha256='45714722f0f19266f47f1323483e3796734ea5ff5042057653ac73e171facf45'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:45714722f0f19266f47f1323483e3796734ea5ff5042057653ac73e171facf45'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:2d015b556d0e0d03ecc2f77218af82d78045bbd64448d70478638a3622592e56')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:45714722f0f19266f47f1323483e3796734ea5ff5042057653ac73e171facf45')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -6988,7 +6988,7 @@ $fn$;
 CREATE OR REPLACE FUNCTION app_rls.qr_list_allocation_requests(
   p_capability text,p_purpose text,p_request_id text,p_licensee_id text,p_status text,p_limit integer,p_offset integer
 ) RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
-DECLARE actor record; tenant_id text;
+DECLARE actor record; tenant_id text; result jsonb;
 BEGIN
   IF p_purpose IS DISTINCT FROM 'qr-allocation-request-list'
      OR p_limit IS NULL OR p_limit NOT BETWEEN 1 AND 200 OR p_offset IS NULL OR p_offset NOT BETWEEN 0 AND 10000
@@ -7006,14 +7006,25 @@ BEGIN
   IF actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND current_setting('app.auth_assurance',true)<>'mfa-verified' THEN
     RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501';
   END IF;
-  RETURN coalesce((SELECT jsonb_agg(to_jsonb(x) ORDER BY x."createdAt" DESC,x.id DESC) FROM (
+  SELECT coalesce((SELECT jsonb_agg(to_jsonb(x) ORDER BY x."createdAt" DESC,x.id DESC) FROM (
     SELECT r.id,r."licenseeId",r."requestedByUserId",r.quantity,r."startNumber",r."endNumber",r."batchName",r.note,r.status,
-      r."approvedByUserId",r."approvedAt",r."rejectedByUserId",r."rejectedAt",r."decisionNote",r."createdAt",r."updatedAt",
+      r."approvedByUserId",r."approvedAt" AT TIME ZONE 'UTC' AS "approvedAt",r."rejectedByUserId",
+      r."rejectedAt" AT TIME ZONE 'UTC' AS "rejectedAt",r."decisionNote",
+      r."createdAt" AT TIME ZONE 'UTC' AS "createdAt",r."updatedAt" AT TIME ZONE 'UTC' AS "updatedAt",
       jsonb_build_object('id',l.id,'name',l.name,'prefix',l.prefix) AS licensee
     FROM public."QrAllocationRequest" r JOIN public."Licensee" l ON l.id=r."licenseeId"
     WHERE (tenant_id IS NULL OR r."licenseeId"=tenant_id) AND (p_status IS NULL OR r.status::text=p_status)
     ORDER BY r."createdAt" DESC,r.id DESC LIMIT p_limit OFFSET p_offset
-  ) x),'[]'::jsonb);
+  ) x),'[]'::jsonb) INTO result;
+  -- Only actors referenced by this already-authorized, bounded page are readable.
+  PERFORM set_config('app.qr_target_user_ids',coalesce((SELECT string_agg(DISTINCT actor_id,',')
+    FROM jsonb_array_elements(result) row CROSS JOIN LATERAL
+      unnest(ARRAY[row->>'requestedByUserId',row->>'approvedByUserId',row->>'rejectedByUserId']) actor_id),''),true);
+  RETURN coalesce((SELECT jsonb_agg(row || jsonb_build_object(
+    'requestedByUser',(SELECT jsonb_build_object('id',u.id,'name',u.name,'email',u.email) FROM public."User" u WHERE u.id=row->>'requestedByUserId'),
+    'approvedByUser',(SELECT jsonb_build_object('id',u.id,'name',u.name) FROM public."User" u WHERE u.id=row->>'approvedByUserId'),
+    'rejectedByUser',(SELECT jsonb_build_object('id',u.id,'name',u.name) FROM public."User" u WHERE u.id=row->>'rejectedByUserId')) ORDER BY ordinal)
+    FROM jsonb_array_elements(result) WITH ORDINALITY page(row,ordinal)),'[]'::jsonb);
 END
 $fn$;
 
@@ -7129,39 +7140,57 @@ BEGIN
       AND (maker_id IS NULL OR b."manufacturerId"=maker_id)
       AND (p_filters->>'batchQuery' IS NULL OR b.id=p_filters->>'batchQuery' OR b.name ILIKE '%'||(p_filters->>'batchQuery')||'%')
       AND (p_filters->>'code' IS NULL OR q."displayCode" ILIKE '%'||(p_filters->>'code')||'%')
-      AND (p_filters->>'status' IS NULL OR q.status::text=p_filters->>'status')
+      AND (activity OR p_filters->>'status' IS NULL OR q.status::text=p_filters->>'status')
   ), events AS MATERIALIZED (
     SELECT s.id,s."qrCodeId",s."batchId",s.status,s."scannedAt",s."isFirstScan",
       s."isTrustedOwnerContext",s.device,s."locationCountry",s."locationCity",s."locationName",q."displayCode",q.name
     FROM public."QrScanLog" s JOIN inventory q ON q.id=s."qrCodeId" AND q."licenseeId"=s."licenseeId"
       AND q."batchId" IS NOT DISTINCT FROM s."batchId"
     WHERE s."scannedAt">=from_at AND s."scannedAt"<=to_at
+      AND (NOT activity OR p_filters->>'status' IS NULL OR s.status::text=p_filters->>'status')
       AND (NOT p_filters ? 'firstScan' OR s."isFirstScan"=(p_filters->>'firstScan')::boolean)
   ), scoped AS MATERIALIZED (
-    SELECT q.* FROM inventory q WHERE NOT activity OR EXISTS(SELECT 1 FROM events e WHERE e."qrCodeId"=q.id)
+    SELECT q.id,q."displayCode",q."batchId",q."licenseeId",
+      CASE WHEN activity THEN latest.status ELSE q.status END AS status,q."createdAt",
+      q.name,q."startCode",q."endCode",q."totalCodes",q."batchCreatedAt"
+    FROM inventory q LEFT JOIN LATERAL (
+      SELECT e.status FROM events e WHERE e."qrCodeId"=q.id ORDER BY e."scannedAt" DESC,e.id DESC LIMIT 1
+    ) latest ON activity
+    WHERE NOT activity OR latest.status IS NOT NULL
   ), grouped AS (
     SELECT "batchId",status,count(*) AS n FROM scoped GROUP BY "batchId",status
+  ), decisions AS NOT MATERIALIZED (
+    SELECT d.id,d."qrCodeId",d."batchId",d."createdAt",
+      jsonb_build_object('outcome',d.outcome,'riskBand',d."riskBand",'replacementStatus',d."replacementStatus",
+        'customerTrustReviewState',coalesce((SELECT t."reviewState"::text FROM public."CustomerTrustCredential" t
+          WHERE t."qrCodeId"=d."qrCodeId" ORDER BY t."updatedAt" DESC,t.id DESC LIMIT 1),'UNREVIEWED')) AS projection
+    FROM public."VerificationDecision" d JOIN inventory q ON q.id=d."qrCodeId"
+      AND q."licenseeId"=d."licenseeId" AND q."batchId" IS NOT DISTINCT FROM d."batchId"
+    WHERE d."licenseeId"=tenant_id
   ), batch_rows AS (
     SELECT q."batchId" AS id,min(q.name) AS name,min(q."licenseeId") AS "licenseeId",
-      min(q."startCode") AS "startCode",min(q."endCode") AS "endCode",max(q."totalCodes") AS "totalCodes",
-      max(q."totalCodes") AS "batchInventoryTotal",count(*) AS "scopeCodeCount",min(q."batchCreatedAt") AS "createdAt",
+      min(q."startCode") AS "startCode",min(q."endCode") AS "endCode",
+      CASE WHEN activity THEN count(*) ELSE max(q."totalCodes") END AS "totalCodes",
+      max(q."totalCodes") AS "batchInventoryTotal",count(*) AS "scopeCodeCount",min(q."batchCreatedAt") AT TIME ZONE 'UTC' AS "createdAt",
+      (SELECT d.projection FROM decisions d WHERE d."batchId"=q."batchId" ORDER BY d."createdAt" DESC,d.id DESC LIMIT 1) AS "latestDecision",
       (SELECT count(*) FROM events e WHERE e."batchId"=q."batchId") AS "scanEventCount",
       (SELECT jsonb_object_agg(g.status,g.n) FROM grouped g WHERE g."batchId"=q."batchId") AS counts
     FROM scoped q WHERE q."batchId" IS NOT NULL GROUP BY q."batchId" ORDER BY q."batchId" LIMIT page_limit OFFSET page_offset
   ), log_rows AS (
-    SELECT e.id,e."qrCodeId",e."batchId",e.status,e."scannedAt",e."isFirstScan",e."displayCode" AS code,
+    SELECT e.id,e."qrCodeId",e."batchId",e.status,e."scannedAt" AT TIME ZONE 'UTC' AS "scannedAt",e."isFirstScan",e."displayCode" AS code,
+      (SELECT d.projection FROM decisions d WHERE d."qrCodeId"=e."qrCodeId" ORDER BY d."createdAt" DESC,d.id DESC LIMIT 1) AS "latestDecision",
       jsonb_build_object('id',e."qrCodeId",'displayCode',e."displayCode",'batch',jsonb_build_object('id',e."batchId",'name',e.name)) AS "qrCode"
     FROM events e ORDER BY e."scannedAt" DESC,e.id DESC LIMIT page_limit OFFSET page_offset
   ), daily_codes AS (
-    SELECT DISTINCT date_trunc('day',e."scannedAt") AS day,q.id,q.status FROM events e JOIN scoped q ON q.id=e."qrCodeId" WHERE activity
+    SELECT DISTINCT date_trunc('day',e."scannedAt") AS day,q.id,e.status FROM events e JOIN scoped q ON q.id=e."qrCodeId" WHERE activity
     UNION ALL SELECT date_trunc('day',q."createdAt"),q.id,q.status FROM scoped q WHERE NOT activity
   ), days AS (
     SELECT day FROM daily_codes UNION SELECT date_trunc('day',e."scannedAt") FROM events e
   ), daily AS (
-    SELECT d.day,count(c.id) AS total,count(c.id) FILTER(WHERE c.status='DORMANT') AS dormant,
-      count(c.id) FILTER(WHERE c.status IN ('ACTIVE','ALLOCATED','ACTIVATED')) AS allocated,
-      count(c.id) FILTER(WHERE c.status='PRINTED') AS printed,count(c.id) FILTER(WHERE c.status IN ('REDEEMED','SCANNED')) AS redeemed,
-      count(c.id) FILTER(WHERE c.status='BLOCKED') AS blocked,
+    SELECT d.day,count(DISTINCT c.id) AS total,count(DISTINCT c.id) FILTER(WHERE c.status='DORMANT') AS dormant,
+      count(DISTINCT c.id) FILTER(WHERE c.status IN ('ACTIVE','ALLOCATED','ACTIVATED')) AS allocated,
+      count(DISTINCT c.id) FILTER(WHERE c.status='PRINTED') AS printed,count(DISTINCT c.id) FILTER(WHERE c.status IN ('REDEEMED','SCANNED')) AS redeemed,
+      count(DISTINCT c.id) FILTER(WHERE c.status='BLOCKED') AS blocked,
       (SELECT count(*) FROM events e WHERE date_trunc('day',e."scannedAt")=d.day) AS "scanEvents"
     FROM days d LEFT JOIN daily_codes c ON c.day=d.day GROUP BY d.day
   )

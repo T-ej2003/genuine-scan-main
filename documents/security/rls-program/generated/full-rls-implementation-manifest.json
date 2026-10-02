@@ -15,7 +15,7 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "2d015b556d0e0d03ecc2f77218af82d78045bbd64448d70478638a3622592e56",
+  "sourceContractSha256": "45714722f0f19266f47f1323483e3796734ea5ff5042057653ac73e171facf45",
   "migrationSetDigest": "b783cab33f40cddaa8aa9bf3bef3dbbbabb218af5891bbda36eb1724514f8dc9",
   "sourceContractInputs": [
     {
@@ -104,7 +104,7 @@
     },
     {
       "path": "scripts/rls/lib/named-sql-function-contracts.mjs",
-      "sha256": "1ce41898932c42de3fc2f4b233c3021148e3da2342890754ce52784b1ff01338"
+      "sha256": "3470d067d8fb788467eaea7928ac653b37196717ff713be37efc467fc5ae1bf9"
     },
     {
       "path": "scripts/rls/lib/restricted-owner-projection-contract.mjs",
@@ -140,7 +140,7 @@
     },
     {
       "path": "backend/tests/qrSystemPostgres18.test.js",
-      "sha256": "e57403a93b3df4c5309c6a19a798e32dcba90c3cedbe88042a679570161ad654"
+      "sha256": "45668f881a935af3c8bb826f04b25ca4528b54448af080934e7261c147ac6aba"
     },
     {
       "path": "documents/security/rls-program/staging-full-rls-executor-contract.json",
@@ -328,11 +328,11 @@
     },
     {
       "path": "backend/src/rls-waves/session-c/c01/qrSystem.sql",
-      "sha256": "0b474e0074f1369a579fecbf3ff68aa062c4de2faf9216855f6f896115a7f908"
+      "sha256": "13cabda935fab5a36d42713d61448943c6fc770c64f9cf7858b661431fd0f26b"
     },
     {
       "path": "backend/src/rls-waves/session-c/c01/qrSystemRollback.sql",
-      "sha256": "b8b31fb7289eaa58bbde5bcf55902f60b84b4ae004352ca22d92219bb656acc7"
+      "sha256": "be4e8302d24277c5f42ad59caa5dfb27c320ef689ae09f95ce7c3229c0256182"
     },
     {
       "path": "backend/src/rls-waves/session-c/c04/operatorProcedures.sql",
@@ -370,7 +370,7 @@
     "migrationOnly": 2,
     "certificationCandidateWorkflows": 14,
     "directPolicySlices": 18,
-    "generatedPolicies": 372,
+    "generatedPolicies": 374,
     "columnPrivilegeCells": 60,
     "prismaMigrations": 56,
     "prismaEnums": 58,
@@ -388,7 +388,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:2d015b556d0e0d03ecc2f77218af82d78045bbd64448d70478638a3622592e56",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:45714722f0f19266f47f1323483e3796734ea5ff5042057653ac73e171facf45",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,

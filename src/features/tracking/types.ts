@@ -13,7 +13,7 @@ export type BatchSummaryRow = {
   scanEventCount: number;
   createdAt: string;
   counts?: Record<string, number>;
-  latestDecision?: LatestDecision | null;
+  latestDecision?: Pick<LatestDecision, "outcome" | "riskBand" | "replacementStatus" | "customerTrustReviewState"> | null;
 };
 
 export type ScanLogRow = {
@@ -36,9 +36,9 @@ export type ScanLogRow = {
   ownershipId?: string | null;
   ownershipMatchMethod?: string | null;
   isTrustedOwnerContext?: boolean | null;
-  latestDecision?: LatestDecision | null;
+  latestDecision?: BatchSummaryRow["latestDecision"];
   licensee?: { id: string; name: string; prefix: string };
-  qrCode?: { id: string; code: string; status: string };
+  qrCode?: { id: string; code?: string; displayCode?: string; status?: string };
 };
 
 export type TrackingEventSummary = {
@@ -93,6 +93,7 @@ export const formatLocation = (log: ScanLogRow) => {
 };
 
 export const describeScanContext = (log: ScanLogRow) => {
+  if (log.isTrustedOwnerContext == null) return "Context unavailable";
   if (log.isTrustedOwnerContext) {
     if (log.ownershipMatchMethod === "user") return "Trusted owner account";
     if (log.ownershipMatchMethod === "device_token") return "Trusted claimed device";

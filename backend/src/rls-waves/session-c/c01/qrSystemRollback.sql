@@ -31,6 +31,8 @@ DROP POLICY IF EXISTS qr_system_scanmetricshourlyrollup_update ON public."ScanMe
 DROP POLICY IF EXISTS qr_system_scanmetricshourlyrollup_insert ON public."ScanMetricsHourlyRollup";
 DROP POLICY IF EXISTS qr_system_scanmetricshourlyrollup_select ON public."ScanMetricsHourlyRollup";
 DROP POLICY IF EXISTS qr_system_qrscanlog_select ON public."QrScanLog";
+DROP POLICY IF EXISTS qr_system_verificationdecision_select ON public."VerificationDecision";
+DROP POLICY IF EXISTS qr_system_customertrustcredential_select ON public."CustomerTrustCredential";
 DROP POLICY IF EXISTS qr_system_inventorystatusrollup_update ON public."InventoryStatusRollup";
 DROP POLICY IF EXISTS qr_system_inventorystatusrollup_insert ON public."InventoryStatusRollup";
 DROP POLICY IF EXISTS qr_system_inventorystatusrollup_select ON public."InventoryStatusRollup";

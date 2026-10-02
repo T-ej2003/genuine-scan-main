@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='2d015b556d0e0d03ecc2f77218af82d78045bbd64448d70478638a3622592e56'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:2d015b556d0e0d03ecc2f77218af82d78045bbd64448d70478638a3622592e56'
+    AND source_contract_sha256='45714722f0f19266f47f1323483e3796734ea5ff5042057653ac73e171facf45'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:45714722f0f19266f47f1323483e3796734ea5ff5042057653ac73e171facf45'
     AND administrator_role='certification-administrator'
 
     AND phase='context-helpers-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:2d015b556d0e0d03ecc2f77218af82d78045bbd64448d70478638a3622592e56')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:45714722f0f19266f47f1323483e3796734ea5ff5042057653ac73e171facf45')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -237,6 +237,8 @@ GRANT INSERT ("batchId", "licenseeId", "manufacturerId", "totalCodes", "dormant"
 GRANT SELECT ("batchId", "licenseeId", "manufacturerId", "totalCodes", "dormant", "active", "activated", "allocated", "printed", "redeemed", "blocked", "scanned", "refreshedAt", "createdAt", "updatedAt") ON TABLE public."InventoryStatusRollup" TO "mscqr_rls_cert_auth_owner";
 GRANT UPDATE ("licenseeId", "manufacturerId", "totalCodes", "dormant", "active", "activated", "allocated", "printed", "redeemed", "blocked", "scanned", "refreshedAt", "updatedAt") ON TABLE public."InventoryStatusRollup" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("id", "qrCodeId", "licenseeId", "batchId", "status", "scannedAt", "isFirstScan", "isTrustedOwnerContext", "device", "locationName", "locationCountry", "locationCity") ON TABLE public."QrScanLog" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "qrCodeId", "batchId", "licenseeId", "outcome", "riskBand", "replacementStatus", "createdAt") ON TABLE public."VerificationDecision" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "qrCodeId", "reviewState", "updatedAt") ON TABLE public."CustomerTrustCredential" TO "mscqr_rls_cert_auth_owner";
 GRANT INSERT ("id", "bucketKey", "hourBucket", "licenseeId", "batchId", "manufacturerId", "totalScanEvents", "firstScanEvents", "repeatScanEvents", "blockedEvents", "trustedOwnerEvents", "externalEvents", "namedLocationEvents", "knownDeviceEvents", "uniqueQrCodes", "firstScannedAt", "lastScannedAt", "createdAt", "updatedAt") ON TABLE public."ScanMetricsHourlyRollup" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("bucketKey", "totalScanEvents", "firstScanEvents", "repeatScanEvents", "blockedEvents", "trustedOwnerEvents", "externalEvents", "namedLocationEvents", "knownDeviceEvents", "uniqueQrCodes", "firstScannedAt", "lastScannedAt", "updatedAt") ON TABLE public."ScanMetricsHourlyRollup" TO "mscqr_rls_cert_auth_owner";
 GRANT UPDATE ("totalScanEvents", "firstScanEvents", "repeatScanEvents", "blockedEvents", "trustedOwnerEvents", "externalEvents", "namedLocationEvents", "knownDeviceEvents", "uniqueQrCodes", "firstScannedAt", "lastScannedAt", "updatedAt") ON TABLE public."ScanMetricsHourlyRollup" TO "mscqr_rls_cert_auth_owner";

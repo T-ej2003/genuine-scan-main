@@ -7591,6 +7591,70 @@
       ]
     },
     {
+      "table": "VerificationDecision",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "qrCodeId",
+        "batchId",
+        "licenseeId",
+        "outcome",
+        "riskBand",
+        "replacementStatus",
+        "createdAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "release-fix-4-allocate-range",
+        "release-fix-4-approve-allocation-request",
+        "release-fix-4-batch-command",
+        "release-fix-4-bind-break-glass-tokens",
+        "release-fix-4-create-allocation-request",
+        "release-fix-4-delete-codes",
+        "release-fix-4-audit-export",
+        "release-fix-4-get-code-scope",
+        "release-fix-4-inventory-projection",
+        "release-fix-4-list-allocation-requests",
+        "release-fix-4-read-codes",
+        "release-fix-4-reject-allocation-request",
+        "release-fix-4-scan-analytics",
+        "release-fix-4-stats",
+        "release-fix-4-refresh-inventory-rollups",
+        "release-fix-4-refresh-scan-rollups"
+      ]
+    },
+    {
+      "table": "CustomerTrustCredential",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "qrCodeId",
+        "reviewState",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "release-fix-4-allocate-range",
+        "release-fix-4-approve-allocation-request",
+        "release-fix-4-batch-command",
+        "release-fix-4-bind-break-glass-tokens",
+        "release-fix-4-create-allocation-request",
+        "release-fix-4-delete-codes",
+        "release-fix-4-audit-export",
+        "release-fix-4-get-code-scope",
+        "release-fix-4-inventory-projection",
+        "release-fix-4-list-allocation-requests",
+        "release-fix-4-read-codes",
+        "release-fix-4-reject-allocation-request",
+        "release-fix-4-scan-analytics",
+        "release-fix-4-stats",
+        "release-fix-4-refresh-inventory-rollups",
+        "release-fix-4-refresh-scan-rollups"
+      ]
+    },
+    {
       "table": "ScanMetricsHourlyRollup",
       "command": "INSERT",
       "columns": [

@@ -183,11 +183,14 @@ export const getQrTrackingAnalyticsController = async (req: AuthRequest, res: Re
     if (to < from || to.getTime() - from.getTime() > 90 * 86400000) {
       return res.status(400).json({ success: false, error: "Analytics window must be at most 90 days" });
     }
-    const scope = await resolveScopedLicenseeAccess(req.user, filters.licenseeId || null);
+    // Auth hydration validates the selected manufacturer tenant and scope version.
+    // The database capability still independently checks live tenant membership.
+    const selectedLicenseeId = req.user.role === UserRole.LICENSEE_ADMIN || req.user.role === UserRole.MANUFACTURER_ADMIN
+      ? req.user.licenseeId : undefined;
     const data = await getQrTrackingAnalytics({
       databaseSessionCapability: String(req.databaseSessionCapability || ""),
       requestId: String((req as AuthRequest & {requestId?:string}).requestId || ""),
-      licenseeId: filters.licenseeId || scope.scopeLicenseeId || undefined,
+      licenseeId: filters.licenseeId || selectedLicenseeId || undefined,
       manufacturerId: req.user.role === UserRole.MANUFACTURER_ADMIN ? req.user.userId : undefined,
       batchQuery: filters.batchQuery || filters.batchId || filters.batchName || undefined,
       code: filters.code || undefined,

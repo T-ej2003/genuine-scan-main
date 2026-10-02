@@ -63,7 +63,7 @@ export type TrackingAnalyticsBatchRow = {
   scanEventCount: number;
   createdAt: string;
   counts: Record<string, number>;
-  latestDecision?: InternalLatestDecision | null;
+  latestDecision?: Pick<InternalLatestDecision, "outcome" | "riskBand" | "replacementStatus" | "customerTrustReviewState"> | null;
 };
 
 export const getQrTrackingAnalytics = async (filters: TrackingAnalyticsFilters) => {

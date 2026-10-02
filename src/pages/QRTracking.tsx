@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { useAuth } from "@/contexts/AuthContext";
@@ -70,8 +70,10 @@ export default function QRTracking() {
 
   const isSuperAdmin = user?.role === "super_admin";
   const scopedLicenseeId = isSuperAdmin && filters.licenseeId !== "all" ? filters.licenseeId : undefined;
+  const loadSequence = useRef(0);
 
   const load = async (opts?: { silent?: boolean; override?: Partial<TrackingFilterState> }) => {
+    const sequence = ++loadSequence.current;
     if (!opts?.silent) {
       setLoading(true);
       setError(null);
@@ -94,6 +96,7 @@ export default function QRTracking() {
         limit: 200,
       });
 
+      if (sequence !== loadSequence.current) return;
       if (!response.success || !response.data) {
         throw new Error(response.error || "Failed to load tracking analytics");
       }
@@ -124,6 +127,7 @@ export default function QRTracking() {
         knownDeviceEvents: Number(payload.eventSummary?.knownDeviceEvents || 0),
       });
     } catch (nextError: any) {
+      if (sequence !== loadSequence.current) return;
       setError(nextError?.message || "Failed to load tracking data");
       setSummary([]);
       setLogs([]);
@@ -150,14 +154,14 @@ export default function QRTracking() {
         scanEvents: 0,
       });
     } finally {
-      if (!opts?.silent) setLoading(false);
+      if (sequence === loadSequence.current) setLoading(false);
     }
   };
 
   useEffect(() => {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [user?.role, user?.licenseeId]);
 
   useEffect(() => {
     if (!isSuperAdmin) return;

@@ -796,6 +796,7 @@ const qrRequest = `current_setting('app.qr_target_request_id',true)`;
 const qrScope = `string_to_array(current_setting('app.qr_scope_licensee_ids',true),',')`;
 const qrVisible = `(${qrRole} IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR (${qrRole}='LICENSEE_ADMIN' AND "licenseeId"=${qrLicensee}) OR (${qrRole}='MANUFACTURER_ADMIN' AND "licenseeId"=ANY(${qrScope})))`;
 const qrDeleteVisible = `(${qrRole} IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR (${qrRole}='LICENSEE_ADMIN' AND "licenseeId"=${qrLicensee}))`;
+const qrAnalyticsCodeVisible = `${qrSession} AND current_setting('app.qr_operation',true)='qr-scan-analytics' AND EXISTS (SELECT 1 FROM public."QRCode" decision_q WHERE decision_q.id="qrCodeId" AND decision_q."licenseeId"=${qrTargetLicensee} AND (${qrRole}<>'MANUFACTURER_ADMIN' OR EXISTS (SELECT 1 FROM public."Batch" decision_b WHERE decision_b.id=decision_q."batchId" AND decision_b."licenseeId"=decision_q."licenseeId" AND decision_b."manufacturerId"=${qrUser})))`;
 const qrSystemSecurity = Object.freeze({
   mode:"SECURITY DEFINER",ownerIdentity:"identity-auth-function-owner",ownerRole:"authOwner",
   searchPath:"pg_catalog,public",publicExecute:"revoked",runtimeExecuteGrantees:["app"],
@@ -829,6 +830,8 @@ const qrSystemSecurity = Object.freeze({
     ["InventoryStatusRollup","SELECT",["batchId","licenseeId","manufacturerId","totalCodes","dormant","active","activated","allocated","printed","redeemed","blocked","scanned","refreshedAt","createdAt","updatedAt"]],
     ["InventoryStatusRollup","UPDATE",["licenseeId","manufacturerId","totalCodes","dormant","active","activated","allocated","printed","redeemed","blocked","scanned","refreshedAt","updatedAt"]],
     ["QrScanLog","SELECT",["id","qrCodeId","licenseeId","batchId","status","scannedAt","isFirstScan","isTrustedOwnerContext","device","locationName","locationCountry","locationCity"]],
+    ["VerificationDecision","SELECT",["id","qrCodeId","batchId","licenseeId","outcome","riskBand","replacementStatus","createdAt"]],
+    ["CustomerTrustCredential","SELECT",["id","qrCodeId","reviewState","updatedAt"]],
     ["ScanMetricsHourlyRollup","INSERT",["id","bucketKey","hourBucket","licenseeId","batchId","manufacturerId","totalScanEvents","firstScanEvents","repeatScanEvents","blockedEvents","trustedOwnerEvents","externalEvents","namedLocationEvents","knownDeviceEvents","uniqueQrCodes","firstScannedAt","lastScannedAt","createdAt","updatedAt"]],
     ["ScanMetricsHourlyRollup","SELECT",["bucketKey","totalScanEvents","firstScanEvents","repeatScanEvents","blockedEvents","trustedOwnerEvents","externalEvents","namedLocationEvents","knownDeviceEvents","uniqueQrCodes","firstScannedAt","lastScannedAt","updatedAt"]],
     ["ScanMetricsHourlyRollup","UPDATE",["totalScanEvents","firstScanEvents","repeatScanEvents","blockedEvents","trustedOwnerEvents","externalEvents","namedLocationEvents","knownDeviceEvents","uniqueQrCodes","firstScannedAt","lastScannedAt","updatedAt"]],
@@ -840,7 +843,7 @@ const qrSystemSecurity = Object.freeze({
     ["Organization","SELECT",`${qrSession} AND id=current_setting('app.qr_target_organization_id',true) AND "isActive"`],
     ["Licensee","SELECT",`${qrSession} AND (${qrTargetLicensee}='' OR id=${qrTargetLicensee}) AND (${qrRole} IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR (${qrRole}='LICENSEE_ADMIN' AND id=${qrLicensee}) OR ${qrRole}='MANUFACTURER_ADMIN')`],
     ["ManufacturerLicenseeLink","SELECT",`${qrSession} AND ("manufacturerId"=${qrUser} OR (current_setting('app.qr_operation',true)='qr-batch-command' AND "manufacturerId"=current_setting('app.qr_target_manufacturer_id',true) AND "licenseeId"=${qrTargetLicensee}))`],
-    ["User","SELECT",`${qrSession} AND ((current_setting('app.qr_operation',true)='qr-batch-command' AND role='MANUFACTURER_ADMIN' AND "isActive" AND status='ACTIVE' AND "disabledAt" IS NULL AND "deletedAt" IS NULL AND id=current_setting('app.qr_target_manufacturer_id',true)) OR (current_setting('app.qr_operation',true)='qr-audit-export' AND (id=current_setting('app.qr_target_manufacturer_id',true) OR id=ANY(${qrUserIds}))))`],
+    ["User","SELECT",`${qrSession} AND ((current_setting('app.qr_operation',true)='qr-batch-command' AND role='MANUFACTURER_ADMIN' AND "isActive" AND status='ACTIVE' AND "disabledAt" IS NULL AND "deletedAt" IS NULL AND id=current_setting('app.qr_target_manufacturer_id',true)) OR (current_setting('app.qr_operation',true)='qr-audit-export' AND (id=current_setting('app.qr_target_manufacturer_id',true) OR id=ANY(${qrUserIds}))) OR (current_setting('app.qr_operation',true)='qr-allocation-request-list' AND id=ANY(${qrUserIds})))`],
     ["TraceEvent","SELECT",`${qrSession} AND current_setting('app.qr_operation',true)='qr-audit-export' AND "batchId"=${qrSourceBatch} AND "licenseeId"=${qrTargetLicensee}`],
     ["PolicyAlert","SELECT",`${qrSession} AND current_setting('app.qr_operation',true)='qr-audit-export' AND "batchId"=${qrSourceBatch} AND "licenseeId"=${qrTargetLicensee}`],
     ["QRRange","SELECT",`${qrSession} AND ${qrVisible}`],
@@ -863,6 +866,8 @@ const qrSystemSecurity = Object.freeze({
     ["InventoryStatusRollup","SELECT",`current_user={{AUTH_OWNER}} AND session_user={{WORKER_ROLE}} AND current_setting('app.analytics_rollup_operation',true)='inventory'`],
     ["InventoryStatusRollup","UPDATE",`current_user={{AUTH_OWNER}} AND session_user={{WORKER_ROLE}} AND current_setting('app.analytics_rollup_operation',true)='inventory'`],
     ["QrScanLog","SELECT",`(current_user={{AUTH_OWNER}} AND session_user={{WORKER_ROLE}} AND current_setting('app.analytics_rollup_operation',true)='scan-hourly') OR (${qrSession} AND current_setting('app.qr_operation',true)='qr-scan-analytics' AND "licenseeId"=${qrTargetLicensee} AND ${qrVisible})`],
+    ["VerificationDecision","SELECT",`${qrAnalyticsCodeVisible} AND "licenseeId"=${qrTargetLicensee}`],
+    ["CustomerTrustCredential","SELECT",qrAnalyticsCodeVisible],
     ["ScanMetricsHourlyRollup","INSERT",`current_user={{AUTH_OWNER}} AND session_user={{WORKER_ROLE}} AND current_setting('app.analytics_rollup_operation',true)='scan-hourly'`],
     ["ScanMetricsHourlyRollup","SELECT",`current_user={{AUTH_OWNER}} AND session_user={{WORKER_ROLE}} AND current_setting('app.analytics_rollup_operation',true)='scan-hourly'`],
     ["ScanMetricsHourlyRollup","UPDATE",`current_user={{AUTH_OWNER}} AND session_user={{WORKER_ROLE}} AND current_setting('app.analytics_rollup_operation',true)='scan-hourly'`],
@@ -1310,7 +1315,7 @@ export const NAMED_SQL_FUNCTION_CONTRACTS = Object.freeze([
       [["RefreshToken","SELECT"],["RefreshToken","UPDATE"],["User","SELECT"],["Organization","SELECT"],["Licensee","SELECT"],["ManufacturerLicenseeLink","SELECT"],["QrAllocationRequest","SELECT"],["QrAllocationRequest","UPDATE"],["QRRange","SELECT"],["QRRange","INSERT"],["QRCode","SELECT"],["QRCode","INSERT"],["Batch","SELECT"],["Batch","INSERT"],["AllocationEvent","INSERT"],["AuditLog","INSERT"],["SecurityEventOutbox","INSERT"]],
       "workflow-http-backend-src-controllers-qr-request-controller-ts-approve-qr-allocation-request","backend/src/rls-waves/session-c/c01/qrSystemRepository.ts:approveAllocationRequest"],
     ["scan-analytics","qr_scan_analytics","text,text,text,text,jsonb","p_capability text, p_purpose text, p_request_id text, p_licensee_id text, p_filters jsonb","jsonb",
-      [["RefreshToken","SELECT"],["User","SELECT"],["Organization","SELECT"],["Licensee","SELECT"],["ManufacturerLicenseeLink","SELECT"],["QRCode","SELECT"],["Batch","SELECT"],["QrScanLog","SELECT"]],
+      [["RefreshToken","SELECT"],["User","SELECT"],["Organization","SELECT"],["Licensee","SELECT"],["ManufacturerLicenseeLink","SELECT"],["QRCode","SELECT"],["Batch","SELECT"],["QrScanLog","SELECT"],["VerificationDecision","SELECT"],["CustomerTrustCredential","SELECT"]],
       "workflow-http-backend-src-controllers-qr-log-controller-ts-get-qr-tracking-analytics-controller","backend/src/rls-waves/session-c/c01/qrSystemRepository.ts:readScanAnalytics"],
     ["inventory-projection","qr_inventory_projection","text,text,text,text,text,text,text,text,integer,integer","p_capability text, p_purpose text, p_request_id text, p_licensee_id text, p_manufacturer_id text, p_batch_query text, p_code_query text, p_status text, p_limit integer, p_offset integer","TABLE(payload jsonb, total bigint)",
       [["RefreshToken","SELECT"],["RefreshToken","UPDATE"],["User","SELECT"],["Organization","SELECT"],["Licensee","SELECT"],["ManufacturerLicenseeLink","SELECT"],["QRCode","SELECT"],["Batch","SELECT"]],
