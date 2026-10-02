@@ -19,7 +19,7 @@ The credential-source contract is implemented in `scripts/aws/production-credent
 
 The direct production CLI roots are deliberately split by authority: root-admin evidence producers use named profile `default`; release planning, verification, and control-plane producers use `mscqr-production-release-deployer`; independent-checker approval producers require an inherited checker STS session; and the ECS verification CLI requires the separately derived verifier STS session. No production root may select a source implicitly or fall back from one source to another.
 
-The shared production command runner routes every reviewed AWS service namespace, including DynamoDB component-state reads, through the `aws` executable and the selected credential boundary. Its only approved local command is the current Node runtime, resolved through `process.execPath`, for the source-controlled signing-material coordinator. Every other command fails before process creation; a missing service routing entry never falls back to an ambient `PATH` executable.
+The shared production command runner routes every reviewed AWS service namespace, including DynamoDB component-state reads, through the `aws` executable and the selected credential boundary. Its approved local commands are the current Node runtime, resolved through `process.execPath`, for the source-controlled signing-material coordinator and Terraform for the version-locked Stage A adapter. Every other command fails before process creation; a missing service routing entry never falls back to an ambient `PATH` executable.
 
 ## AWS environment policy
 

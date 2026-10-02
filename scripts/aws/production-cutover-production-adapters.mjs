@@ -50,7 +50,7 @@ const ROTATION_EXECUTION_POLICY_ADDRESS = 'aws_iam_role_policy.execution["backen
 const ROTATION_EXECUTION_ROLE = "mscqr-production-rls-green-backend-execution";
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const AWS_SERVICE_COMMANDS = new Set(["dynamodb", "ec2", "ecs", "ecr", "iam", "kms", "lambda", "logs", "organizations", "rds", "s3", "s3api", "secretsmanager", "ssm", "sts"]);
-const APPROVED_LOCAL_COMMANDS = new Map([["node", process.execPath]]);
+const APPROVED_LOCAL_COMMANDS = new Map([["node", process.execPath], ["terraform", "terraform"]]);
 const MFA_PROMPTS = Object.freeze({ verifier: "Production verifier MFA code: ", onboarding: "Production strict-onboarding administrator MFA code: ", canary: "Production strict-onboarding tenant-canary MFA code: " });
 
 export class ProductionCommandRouteError extends Error {

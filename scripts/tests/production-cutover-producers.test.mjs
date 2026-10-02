@@ -130,7 +130,7 @@ test("artifact secret bindings are loaded only from reviewed IAM configuration",
   assert.throws(() => loadApprovedArtifactSigningBindings("/tmp/unreviewed-artifact-bindings.json", { expectedSourceSha: "a".repeat(40) }), /canonical external runtime path/);
 });
 
-test("production command runner routes only reviewed AWS services and the exact Node runtime", () => {
+test("production command runner routes only reviewed AWS services, Node, and Terraform", () => {
   const previous = Object.fromEntries(["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_DEFAULT_PROFILE"].map((name) => [name, process.env[name]]));
   Object.assign(process.env, { AWS_ACCESS_KEY_ID: "ambient", AWS_SECRET_ACCESS_KEY: "ambient", AWS_SESSION_TOKEN: "ambient", AWS_DEFAULT_PROFILE: "ambient" });
   const calls = [];
@@ -143,7 +143,8 @@ test("production command runner routes only reviewed AWS services and the exact 
     run(["ecs", "describe-services", "--cluster", "cluster", "--region", "eu-west-2"]);
     run(["aws", "iam", "get-role", "--role-name", "role"]);
     run(["node", "fixture.mjs"]);
-    assert.deepEqual(calls.map(({ file }) => file), ["aws", "aws", "aws", process.execPath]);
+    run(["terraform", "version", "-json"]);
+    assert.deepEqual(calls.map(({ file }) => file), ["aws", "aws", "aws", process.execPath, "terraform"]);
     assert.equal(calls[0].args.at(-1), "eu-west-2");
     assert.equal(calls[1].args.filter((arg) => arg === "--region").length, 1);
     assert.equal(calls[2].args[0], "iam");
@@ -171,7 +172,8 @@ test("production command routing rejects every unclassified command before proce
     ["DynamoDB", "get-item"], ["AWS", "dynamodb", "get-item"], ["aws "], ["aws"], ["aws", "dynamod", "get-item"],
     ["aws", "node", "fixture.mjs"], ["ecs;touch", "/tmp/pwned"], ["$(touch /tmp/pwned)"],
     ["sh", "-c", "id"], ["bash", "-c", "id"], ["env", "node"], ["python3", "fixture.py"],
-    ["terraform", "apply"], ["git", "status"], ["gh", "api", "user"],
+    ["tofu", "apply"], ["/usr/bin/terraform", "version"], ["./terraform", "version"], ["../terraform", "version"], ["Terraform", "version"],
+    ["git", "status"], ["gh", "api", "user"],
   ];
   for (const args of attacks) assert.throws(() => run(args), (error) => error instanceof ProductionCommandRouteError && error.code === "UNCLASSIFIED_PRODUCTION_COMMAND");
   for (const malformed of [null, undefined, "dynamodb", { command: "dynamodb" }, []]) assert.throws(() => run(malformed), /arguments are required/);
@@ -191,7 +193,8 @@ test("production command routing cannot be redirected by PATH or shell syntax", 
   run(["ecs", "describe-services", "--cluster", "fixture", "; touch /tmp/pwned"]);
   run(["kms", "verify", "--key-id", "fixture"]);
   run(["node", "fixture.mjs"]);
-  assert.deepEqual(calls.map(({ file }) => file), ["aws", "aws", "aws", process.execPath]);
+  run(["terraform", "version", "-json"]);
+  assert.deepEqual(calls.map(({ file }) => file), ["aws", "aws", "aws", process.execPath, "terraform"]);
   assert.equal(calls[0].args[0], "dynamodb");
   assert.equal(calls[1].args.includes("; touch /tmp/pwned"), true);
 });
@@ -216,6 +219,7 @@ test("production cutover adapters use the shared release-bound attestation verif
   assert.match(source, /createReleasePreflightCheckerTrustSignatureVerifier\(\{ releaseRun: commandRun \}\)/);
   assert.match(source, /verifyImageEvidenceSignature\(\{ \.\.\.options, run: \(args\) => commandRun\(args\) \}\)/);
   assert.match(source, /imageAuthorizationValidation: \{ verifyImageEvidence:/);
+  assert.match(source, /createTerraformStageAAdapter\(\{[^;]+run: commandRun/);
   for (const entrypoint of ["scripts/aws/prepare-production-cutover-runtime.mjs", "scripts/aws/run-production-cutover.mjs"]) {
     assert.match(fs.readFileSync(entrypoint, "utf8"), /createProductionCutoverRuntimeComposition/);
   }
