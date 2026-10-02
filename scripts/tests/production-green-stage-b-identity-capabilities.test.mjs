@@ -202,7 +202,18 @@ test("runtime S3 Get and List actions are classified as read-only", () => {
 test("generated capability graph is exhaustive, deterministic, and identity-exact", () => {
   const first = buildStageBDeploymentCapabilityGraph(); const second = buildStageBDeploymentCapabilityGraph();
   assert.deepEqual(first, second);
-  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 56, capabilities: 663, uniqueActions: 156, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
+  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 56, capabilities: 665, uniqueActions: 156, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
+  const normalState = first.capabilities.find(({ id }) => id === "reference-audit-normal-deployment-component-state");
+  assert.deepEqual(normalState && [normalState.action, normalState.resources, normalState.probeIds, normalState.mutation], [
+    "dynamodb:GetItem",
+    ["arn:aws:dynamodb:eu-west-2:368992683803:table/mscqr-production-component-deployment-state"],
+    ["audit-normal-deployment-component-state"],
+    false,
+  ]);
+  assert.deepEqual(RELEASE_READ_PROBES.find(({ id }) => id === "audit-normal-deployment-component-state")?.args, [
+    "dynamodb", "get-item", "--table-name", "mscqr-production-component-deployment-state", "--consistent-read",
+    "--key", JSON.stringify({ stateKey: { S: "production#T-ej2003/genuine-scan-main" } }),
+  ]);
   assert.equal(first.capabilities.filter(({ id, action }) => id === "app-only-permission-provisioning-updateexactappdeployertrust-iam-updateassumerolepolicy" && action === "iam:UpdateAssumeRolePolicy").length, 1);
   const stateReconciliation = first.capabilities.filter(({ phase }) => phase === "stage-b-exact-refresh-only-state-reconciliation");
   assert.deepEqual(stateReconciliation.filter(({ id }) => ["stage-b-state-reconciliation-identify", "stage-b-state-reconciliation-direct-read-state"].includes(id)).map(({ id, executor, classification, mutation }) => [id, executor, classification, mutation]), [["stage-b-state-reconciliation-direct-read-state", "aws-cli", "RELEASE_DIRECT_READ", false], ["stage-b-state-reconciliation-identify", "aws-cli", "RELEASE_DIRECT_READ", false]]);

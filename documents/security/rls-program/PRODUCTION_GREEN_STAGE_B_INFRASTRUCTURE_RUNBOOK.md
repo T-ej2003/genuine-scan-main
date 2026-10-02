@@ -159,6 +159,17 @@ families; create-only families are recorded explicitly and are not sent to
 Any unexpected prior ARN or live service, task, or broker reference for a create-only
 family fails closed; rollover-family reference checks remain unchanged.
 
+A backend predecessor created by the normal production application lane is accepted
+only when the audit reads the canonical component deployment state consistently from
+its IAM-protected DynamoDB key. That state must identify the normal protected-main
+workflow and its run, source SHA, exact task-definition ARN, immutable image digest,
+desired count, and CAS generation. Independent ECS service/task-definition and ECR
+readback must match every binding, including the production service, completed primary
+deployment, source metadata, immutable repository, and unique source tag. ECS state,
+mutable tags, and local receipt files are never sufficient by themselves. The resulting
+reference remains plan-bound and is revalidated by the normal Stage B plan validator;
+the historical B01 predecessor contract is unchanged.
+
 Retained history is validated per immutable generation key. Before the first successful
 read-only-canary creation, every retained generation contains exactly the eleven existing
 families; multiple complete eleven-family generations are valid. After read-only-canary

@@ -59,7 +59,13 @@ test("complete production dependency closure is exact across modes and failure p
     ["scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs", "s3:DeleteObject", "stage-a-artifacts-recovery-release-lock-release"],
   ]);
   assert.equal(report.newAwsCalls.filter(({ reachableMode }) => reachableMode.some((mode) => mode.startsWith("app-only-"))).length, 68);
-  assert.equal(report.newAwsCalls.length, 42 + stageAAdditions.length + 15 + 14 + 21 + 7 + 1 + 6 + 1 + 68 + 5 + 2); // Historical closure plus app-only calls, normal-deployer topology reads, and exact B01 image reads.
+  assert.equal(report.newAwsCalls.length, 42 + stageAAdditions.length + 15 + 14 + 21 + 7 + 1 + 6 + 1 + 68 + 5 + 2 + 1); // Historical closure plus app-only calls, normal-deployer topology reads, exact B01 image reads, and authenticated normal predecessor state.
+  assert.deepEqual(report.newAwsCalls.filter(({ capabilityId }) => capabilityId === "reference-audit-normal-deployment-component-state").map(({ action, resources, identity, reachableMode }) => ({ action, resources, identity, reachableMode })), [{
+    action: "dynamodb:GetItem",
+    resources: ["arn:aws:dynamodb:eu-west-2:368992683803:table/mscqr-production-component-deployment-state"],
+    identity: "RELEASE_DEPLOYER",
+    reachableMode: ["NORMAL"],
+  }]);
   assert.deepEqual(report.newAwsCalls
     .filter(({ sourceFile, action }) => sourceFile === "scripts/aws/production-green-stage-b-ecs-observations.mjs" && action.startsWith("ecr:"))
     .map(({ action, capabilityId, resources, identity }) => ({ action, capabilityId, resources, identity })), [
