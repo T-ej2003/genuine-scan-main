@@ -73,7 +73,7 @@ jobs:
             git merge-base --is-ancestor "$baseline_merge_sha" "$GITHUB_SHA"
             # The reviewed baseline lineage and both historical image digests
             # separate current deployment source from the one-time predecessor.
-            printf 'release_class=NORMAL_APPLICATION\nbackend=true\nfrontend=true\nbaseline=true\n' >> "$GITHUB_OUTPUT"
+            printf 'release_class=REVIEWED_BASELINE\nbackend=true\nfrontend=true\nbaseline=true\n' >> "$GITHUB_OUTPUT"
             echo "### One-time reviewed runtime baseline" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
@@ -90,7 +90,7 @@ jobs:
   deploy:
     name: Build, deploy, verify, and roll back on failure
     needs: classify
-    if: (needs.classify.outputs.release_class == 'NORMAL_APPLICATION' || needs.classify.outputs.release_class == 'PRIVILEGED_PREREQUISITE_BACKEND') && (needs.classify.outputs.backend == 'true' || needs.classify.outputs.frontend == 'true')
+    if: needs.classify.outputs.release_class == 'NORMAL_APPLICATION' || ((needs.classify.outputs.release_class == 'REVIEWED_BASELINE' || needs.classify.outputs.release_class == 'PRIVILEGED_PREREQUISITE_BACKEND') && (needs.classify.outputs.backend == 'true' || needs.classify.outputs.frontend == 'true'))
     runs-on: ubuntu-latest
     environment: production-normal-deploy
     permissions: { contents: read, id-token: write }
@@ -130,6 +130,14 @@ jobs:
           aws ecs describe-tasks --region "$AWS_REGION" --cluster mscqr-prod-euw2-main --tasks "$task_arn" > "$RUNNER_TEMP/b01-prerequisite-task.json"
           aws ecs describe-task-definition --region "$AWS_REGION" --task-definition "$task_definition_arn" > "$RUNNER_TEMP/b01-prerequisite-task-definition.json"
           node scripts/aws/verify-production-b01-prerequisite-handoff.mjs --deployment-source-sha "$GITHUB_SHA" --receipt "$RUNNER_TEMP/b01-prerequisite-receipt.json" --task "$RUNNER_TEMP/b01-prerequisite-task.json" --task-definition "$RUNNER_TEMP/b01-prerequisite-task-definition.json"
+      - name: Reconcile and prepare component-state transaction
+        if: needs.classify.outputs.release_class == 'NORMAL_APPLICATION' && needs.classify.outputs.baseline != 'true'
+        run: |
+          set -euo pipefail
+          node scripts/aws/production-normal-release.mjs --reconcile
+          node scripts/aws/prepare-production-normal-deployment.mjs --output="$RUNNER_TEMP/normal-component-deployment-plan.json"
+        env:
+          MSCQR_APP_ONLY_JOURNAL_DIR: '${{ runner.temp }}/normal-release-journal'
       - name: Authenticate live deployment baseline
         id: live
         env:
@@ -137,6 +145,7 @@ jobs:
           EXPECT_FRONTEND: ${{ needs.classify.outputs.frontend }}
           BASELINE_MODE: ${{ needs.classify.outputs.baseline }}
           PREREQUISITE_MODE: ${{ needs.classify.outputs.release_class == 'PRIVILEGED_PREREQUISITE_BACKEND' }}
+          TRANSACTION_MODE: ${{ needs.classify.outputs.release_class == 'NORMAL_APPLICATION' && needs.classify.outputs.baseline != 'true' }}
         run: |
           set -euo pipefail
           git fetch --no-tags origin main
@@ -144,6 +153,7 @@ jobs:
           aws ecs describe-services --region "$AWS_REGION" --cluster mscqr-prod-euw2-main --services mscqr-backend-servi-euw2 mscqr-frontend-servi-euw2 > "$RUNNER_TEMP/services.json"
           aws cloudwatch describe-alarms --region "$AWS_REGION" --alarm-names mscqr-production-backend-target-5xx mscqr-production-backend-unhealthy-hosts mscqr-production-frontend-target-5xx mscqr-production-frontend-unhealthy-hosts > "$RUNNER_TEMP/alarms.json"
           node scripts/aws/production-ecs-native-rollback.mjs --services="$RUNNER_TEMP/services.json" --alarms="$RUNNER_TEMP/alarms.json"
+          if [[ "$TRANSACTION_MODE" == "true" ]]; then exit 0; fi
           node --input-type=module - "$RUNNER_TEMP/services.json" "$GITHUB_OUTPUT" <<'NODE'
           import fs from 'node:fs';
           const [file, output] = process.argv.slice(2), response = JSON.parse(fs.readFileSync(file));
@@ -181,36 +191,55 @@ jobs:
           elif [[ "$PREREQUISITE_MODE" == "true" ]]; then
             test "$EXPECT_BACKEND" = "true"
             test "$EXPECT_FRONTEND" = "false"
-          else
-            node scripts/aws/classify-production-lane-a.mjs --backend-base="$(grep '^backend_base=' "$GITHUB_OUTPUT" | cut -d= -f2-)" --frontend-base="$(grep '^frontend_base=' "$GITHUB_OUTPUT" | cut -d= -f2-)" --target="$GITHUB_SHA" --github-output="$RUNNER_TEMP/live-classification"
-            grep -q "^backend=${EXPECT_BACKEND}$" "$RUNNER_TEMP/live-classification"
-            grep -q "^frontend=${EXPECT_FRONTEND}$" "$RUNNER_TEMP/live-classification"
           fi
+      - name: Bind authoritative deployment route
+        id: route
+        run: |
+          set -euo pipefail
+          if [[ "$RELEASE_CLASS" == "NORMAL_APPLICATION" && "$BASELINE_MODE" != "true" ]]; then
+            node --input-type=module - "$RUNNER_TEMP/normal-component-deployment-plan.json" "$GITHUB_OUTPUT" <<'NODE'
+          import fs from 'node:fs';
+          const [file, output] = process.argv.slice(2), plan = JSON.parse(fs.readFileSync(file, 'utf8'));
+          if (plan.schemaVersion !== 1 || plan.kind !== 'NORMAL_COMPONENT_DEPLOYMENT_PREPARATION' || plan.sourceSha !== process.env.GITHUB_SHA || plan.classification.releaseClass !== 'NORMAL_APPLICATION' || plan.classification.worker || plan.classification.database) throw new Error('Reconciled component-state route is not an exact-source normal application release.');
+          const { backend, frontend } = plan.classification;
+          fs.appendFileSync(output, `backend=${backend}\nfrontend=${frontend}\npending=${backend || frontend}\n`);
+          NODE
+          else
+            printf 'backend=%s\nfrontend=%s\npending=true\n' "$CLASSIFIED_BACKEND" "$CLASSIFIED_FRONTEND" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          RELEASE_CLASS: ${{ needs.classify.outputs.release_class }}
+          BASELINE_MODE: ${{ needs.classify.outputs.baseline }}
+          CLASSIFIED_BACKEND: ${{ needs.classify.outputs.backend }}
+          CLASSIFIED_FRONTEND: ${{ needs.classify.outputs.frontend }}
       - uses: aws-actions/amazon-ecr-login@v2
+        if: steps.route.outputs.pending == 'true'
       - uses: docker/setup-buildx-action@v4
+        if: steps.route.outputs.pending == 'true'
       - name: Publish immutable backend image
-        if: needs.classify.outputs.backend == 'true'
+        if: steps.route.outputs.backend == 'true'
         env: { REQUIRE_SOURCE_IMAGE_BINDING: "true", OUTPUT_FILE: '${{ runner.temp }}/backend.jsonl' }
         run: ./scripts/aws/publish-ecs-images.sh backend
       - name: Bind backend digest
-        if: needs.classify.outputs.backend == 'true'
+        if: steps.route.outputs.backend == 'true'
         id: backend
         run: |
           node --input-type=module - "$RUNNER_TEMP/backend.jsonl" "$GITHUB_OUTPUT" backend <<'NODE'
           import fs from 'node:fs'; const [file,out,service]=process.argv.slice(2); const rows=fs.readFileSync(file,'utf8').trim().split('\n').map(JSON.parse); if(rows.length!==1||rows[0].service!==service||rows[0].image_tag!==process.env.GITHUB_SHA||!rows[0].image_ref?.includes('@sha256:')) throw new Error('Invalid immutable image output.'); fs.appendFileSync(out,`image=${rows[0].image_ref}\n`);
           NODE
       - name: Publish immutable frontend image
-        if: needs.classify.outputs.frontend == 'true'
+        if: steps.route.outputs.frontend == 'true'
         env: { REQUIRE_SOURCE_IMAGE_BINDING: "true", OUTPUT_FILE: '${{ runner.temp }}/frontend.jsonl', FRONTEND_ECR_REPO: mscqr-web, FRONTEND_DOCKERFILE: Dockerfile.ecs-frontend, FRONTEND_BUILD_CONTEXT: . }
         run: ./scripts/aws/publish-ecs-images.sh frontend
       - name: Bind frontend digest
-        if: needs.classify.outputs.frontend == 'true'
+        if: steps.route.outputs.frontend == 'true'
         id: frontend
         run: |
           node --input-type=module - "$RUNNER_TEMP/frontend.jsonl" "$GITHUB_OUTPUT" frontend <<'NODE'
           import fs from 'node:fs'; const [file,out,service]=process.argv.slice(2); const rows=fs.readFileSync(file,'utf8').trim().split('\n').map(JSON.parse); if(rows.length!==1||rows[0].service!==service||rows[0].image_tag!==process.env.GITHUB_SHA||!rows[0].image_ref?.includes('@sha256:')) throw new Error('Invalid immutable image output.'); fs.appendFileSync(out,`image=${rows[0].image_ref}\n`);
           NODE
       - name: Scan published images
+        if: steps.route.outputs.pending == 'true'
         env: { BACKEND_IMAGE: '${{ steps.backend.outputs.image }}', FRONTEND_IMAGE: '${{ steps.frontend.outputs.image }}' }
         run: |
           set -euo pipefail
@@ -222,7 +251,9 @@ jobs:
             docker run --rm -v "$RUNNER_TEMP:/workspace:ro" aquasec/trivy:0.69.3 image --input "/workspace/${component}.tar" --scanners secret --exit-code 1
           done
       - uses: sigstore/cosign-installer@v4.1.2
+        if: steps.route.outputs.pending == 'true'
       - name: Sign and attest published images
+        if: steps.route.outputs.pending == 'true'
         env:
           BACKEND_IMAGE: ${{ steps.backend.outputs.image }}
           FRONTEND_IMAGE: ${{ steps.frontend.outputs.image }}
@@ -246,7 +277,7 @@ jobs:
             PROVENANCE_ATTESTATION_TYPE="$PROVENANCE_ATTESTATION_TYPE" ./scripts/aws/verify-release-artifacts.sh "$image"
           done
       - name: Deploy backend
-        if: needs.classify.outputs.backend == 'true'
+        if: steps.route.outputs.backend == 'true' && (needs.classify.outputs.baseline == 'true' || needs.classify.outputs.release_class == 'PRIVILEGED_PREREQUISITE_BACKEND')
         env:
           CLUSTER_NAME: mscqr-prod-euw2-main
           SERVICE_NAME: mscqr-backend-servi-euw2
@@ -261,7 +292,7 @@ jobs:
           MSCQR_NORMAL_APPLICATION_DEPLOYMENT: "true"
         run: ./scripts/aws/deploy-ecs-service.sh
       - name: Deploy frontend
-        if: needs.classify.outputs.frontend == 'true'
+        if: steps.route.outputs.frontend == 'true' && (needs.classify.outputs.baseline == 'true' || needs.classify.outputs.release_class == 'PRIVILEGED_PREREQUISITE_BACKEND')
         env:
           CLUSTER_NAME: mscqr-prod-euw2-main
           SERVICE_NAME: mscqr-frontend-servi-euw2
@@ -276,10 +307,19 @@ jobs:
           MSCQR_NORMAL_APPLICATION_DEPLOYMENT: "true"
         run: ./scripts/aws/deploy-ecs-service.sh
       - name: Verify production health and authenticated smoke
+        if: needs.classify.outputs.baseline == 'true' || needs.classify.outputs.release_class == 'PRIVILEGED_PREREQUISITE_BACKEND'
         env: { SMOKE_SYNTHETIC_REQUIRED: "true", SMOKE_SYNTHETIC_RUN_ID: 'production-${{ github.run_id }}-${{ github.run_attempt }}' }
         run: node scripts/smoke-release.mjs
+      - name: Execute coordinated normal component transaction
+        if: needs.classify.outputs.release_class == 'NORMAL_APPLICATION' && needs.classify.outputs.baseline != 'true' && steps.route.outputs.pending == 'true'
+        env:
+          BACKEND_IMAGE: ${{ steps.backend.outputs.image }}
+          FRONTEND_IMAGE: ${{ steps.frontend.outputs.image }}
+          PREPARATION_FILE: ${{ runner.temp }}/normal-component-deployment-plan.json
+          MSCQR_APP_ONLY_JOURNAL_DIR: ${{ runner.temp }}/normal-release-journal
+        run: node scripts/aws/production-normal-release.mjs --source-sha="${GITHUB_SHA}" --preparation-file="${PREPARATION_FILE}" --backend-image="${BACKEND_IMAGE}" --frontend-image="${FRONTEND_IMAGE}"
       - name: Roll back exact predecessors after failure
-        if: failure()
+        if: failure() && (needs.classify.outputs.baseline == 'true' || needs.classify.outputs.release_class == 'PRIVILEGED_PREREQUISITE_BACKEND')
         run: |
           set -euo pipefail
           rollback_failed=0
@@ -295,6 +335,14 @@ jobs:
             fi
           done
           exit "$rollback_failed"
+      - name: Preserve normal transaction journal
+        if: always() && needs.classify.outputs.release_class == 'NORMAL_APPLICATION' && needs.classify.outputs.baseline != 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: normal-release-journal-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/normal-release-journal
+          if-no-files-found: error
+          retention-days: 30
       - name: Deployment audit summary
         if: always()
         run: |

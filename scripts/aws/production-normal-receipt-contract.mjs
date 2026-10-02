@@ -6,6 +6,7 @@ export const normalReceiptHash = (value) => createHash("sha256").update(JSON.str
 export const sameNormalIdentity = (a, b) => ["sourceSha", "imageDigest", "taskDefinitionArn", "desiredCount"].every((key) => a?.[key] === b?.[key]);
 const SHA = /^[a-f0-9]{40}$/;
 const families = { backend: "mscqr-production-rls-green-backend-candidate", frontend: "mscqr-frontend" };
+export const NORMAL_DEPLOYABLE_COMPONENTS = Object.freeze(Object.keys(families));
 
 export function classifyNormalLiveComponentState({ live, predecessor, authenticatedReceipt, component } = {}) {
   if (sameNormalIdentity(live, predecessor)) return "LIVE_IS_PREDECESSOR";

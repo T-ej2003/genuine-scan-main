@@ -1,16 +1,121 @@
 # Normal production deployment
 
-Ordinary backend and frontend application changes deploy from protected `main` through `.github/workflows/production-deploy.yml`:
+Ordinary backend and frontend application changes deploy from protected `main` through `.github/workflows/production-deploy.yml` and the canonical component transaction:
 
-`PR -> required CI/security checks -> merge -> Lane A classification -> one production approval -> GitHub OIDC -> immutable ECR image -> ECS task definition/service -> stability -> authenticated smoke`
+`PR -> required CI/security checks -> merge -> Lane A eligibility -> one production approval -> GitHub OIDC -> reconcile durable transaction -> derive work from committed component state -> immutable ECR image -> durable deployment intent -> ECS task definition/service -> stability -> authenticated smoke -> component-state CAS`
 
-The protected `production-normal-deploy` environment requires explicit approval from GitHub User `T-ej2003` (`183396573`), allows self-review for the solo-operator model, disables administrator bypass, and permits only `main`. The job assumes only `mscqr-production-normal-deployer`; no local AWS profile, root session, MFA handoff, Terraform plan/apply, broker, transition ID, preparation artifact, authorization artifact, or Codex production session participates.
+The component-state bootstrap is the one-time CAS anchor. Every later ordinary deployment records its exact predecessor and candidate before service mutation and cannot complete without atomically replacing that receipt with component-scoped `NORMAL_APPLICATION` provenance. A missing state record, stale generation, unknown live predecessor, failed verification, or failed terminal write stops or reconciles the transaction; direct ECS state is never adopted as deployment evidence.
+
+The protected `production-normal-deploy` environment requires explicit approval from GitHub User `T-ej2003` (`183396573`), allows self-review for the solo-operator model, disables administrator bypass, and permits only `main`. The job assumes only `mscqr-production-normal-deployer`; no local AWS profile, root session, MFA handoff, Terraform plan/apply, broker, transition ID, operator-supplied preparation or authorization artifact, or Codex production session participates.
+
+## Canonical transaction state machine
+
+The exact-key DynamoDB component state is authoritative. Git history classifies work only after any stored receipt is reconciled; ECS and ECR are authenticated observations, never self-authorizing history. The states are:
+
+| State | Durable authority | Transition and retry behavior | Stage B visibility |
+| --- | --- | --- | --- |
+| S0 unbootstrapped | No component-state item | Only the governed bootstrap may create generation 1 from bounded live identities. Normal deployment stops. | Rejected. |
+| S1 committed baseline | Component identities and component-scoped provenance; no normal receipt | Reconciliation authenticates live ECS/ECR against the committed identities. Only then is protected-main history classified from each `establishedThroughSha`. | `BOOTSTRAP` is rejected; committed `NORMAL_APPLICATION` may qualify. |
+| S2 prepared | `PREPARED` receipt binds source, plan, exact predecessors, images, workflow and run | Generation CAS permits one preparation. A competing receipt or predecessor change stops. | Rejected because a receipt exists. |
+| S3 candidate recorded | The same receipt contains the exact registered task-definition ARN and digest | Candidate readback is authenticated before its ARN is persisted. A crash before service mutation is reconciled to the predecessor. | Rejected. |
+| S4 activation in progress | S3 receipt plus local append-only activation evidence | ECS may be predecessor, candidate, or temporarily non-stable. Reconciliation accepts only the exact receipt-bound identities; unknown identity stops. | Rejected. |
+| S5 candidate healthy | S3 receipt; live candidate has passed service stability and component health | A crash before whole-release verification rolls every recorded candidate back to its exact predecessor. | Rejected. |
+| S6 whole release verified | `VERIFIED` receipt binds all candidates and authenticated smoke | Reconciliation freshly verifies every live candidate. Failure rolls back; success advances to S7. | Rejected. |
+| S7 committed normal state | One CAS replaces all affected components with component-scoped `NORMAL_APPLICATION` provenance and removes the receipt | A lost response is resolved by strongly reading the exact-key item. Same terminal replay is idempotent. | Accepted when the reference audit authenticates the component provenance. |
+| S8 closed workflow | S7 plus non-authoritative runner journal/artifact | Process death here cannot change authority. A rerun starts by authenticating S7 and derives no work for the same source. | Same as S7. |
+
+At every interruption boundary the next invocation reconciles first. `PREPARED` work that is not fully verified returns to the exact predecessor; a fully `VERIFIED` candidate is reverified and committed; an unknown live identity, stale generation, malformed receipt, or unprovable outcome fails closed. The workflow never prepares or publishes new normal work from a transient candidate or retained image tag.
+
+### Complete committed-set reconciliation closure
+
+The normal live-component schema is the receipt contract's canonical deployable-component set. It currently contains `backend` and `frontend`; `database` and `security` are durable release identities rather than independently readable ECS services. Reconciliation derives the complete represented live-service set from that schema and the resulting component state, never from the receipt's affected subset. Extending the receipt schema therefore extends the required verification set automatically.
+
+Every successful reconciliation has one exit: verify the complete resulting live-service set, then return the authoritative state. Receipt commit and removal additionally verify the complete prospective set before their generation CAS, use no CAS retry, and verify the complete committed set again afterward. A generation race leaves the receipt for the next invocation. A managed service mutation is serialized by the shared `production-deploy` workflow concurrency group; state mutation is serialized by the DynamoDB generation CAS. An out-of-band service mutation cannot authorize itself: a mutation between the pre-CAS read and the CAS is caught by the post-CAS read, and a later mutation is rejected by the next normal invocation and by the consuming live-reference audit for that component.
+
+| Reconciliation path | Receipt | Prospective authority | Required live proof before closure | Closure/result |
+| --- | --- | --- | --- | --- |
+| No receipt / already committed rerun | none | current committed state | every represented live service | return only after full-set verification |
+| Prepared, no mutation | prepared | recorded predecessors plus unaffected committed components | complete predecessor baseline | clear by exact-generation CAS, then reverify all |
+| Predecessor still live / rollback | any non-committable receipt | recorded predecessors plus unaffected committed components | rollback exact candidates, then verify complete baseline | clear by exact-generation CAS, then reverify all |
+| Verified, all candidates live | verified | candidates plus unaffected committed components | complete prospective baseline | commit by exact-generation CAS, then reverify all |
+| Partial/mixed candidates | prepared or verified | predecessor baseline | exact recorded candidates may roll back; complete baseline must verify | clear only after full proof |
+| Malformed/stale/unknown live identity | any | none | impossible | throw; retain durable receipt/state |
+| CAS race or stale generation | any | none | prior proof is discarded | throw; reread and reverify next invocation |
+| Lost CAS response | any | strong read decides whether receipt remains | next invocation verifies the complete state | never repeat from process outcome alone |
+
+The multi-component hostile matrix is machine-checked in `production-normal-reconciliation.test.mjs`:
+
+| Cases | Expected result |
+| --- | --- |
+| A-B | Backend-only candidate with matching committed frontend is safe. |
+| C-E | Backend-only receipt with frontend task-definition drift, digest drift, or unreadable identity fails closed. |
+| F | Frontend-only candidate with matching committed backend is safe. |
+| G-I | Frontend-only receipt with backend task-definition drift, digest drift, or unreadable identity fails closed. |
+| J-L | Two-component candidates commit only when both are live; either partial candidate state rolls back. |
+| M-Q | Candidate, predecessor, and receipt-removal paths all reject drift outside the receipt. |
+| R-S | Same-commit and later-commit retries reconcile before classification and are idempotent. |
+| T-U | Drift during closure or immediately after verification is detected before success; the next invocation remains fail-closed. |
+| V-W | A closure CAS race is not retried with stale proof; the retained receipt is safely reconciled on retry. |
+| X | The canonical deployable-component schema determines the full set, preventing silent future-component omission. |
+| Y-Z | Receipt subsets cannot replace the complete baseline; a receipt component absent from committed state is rejected. |
+
+The protocol invariants are: one generation has at most one authoritative transition; mutation requires durable intent; workflow success requires durable state; reconciliation precedes classification; reruns are idempotent; unknown outcomes are reconciled; ECS cannot authorize itself; legacy evidence cannot override authenticated state; classification uses the verified committed baseline; stronger-lane work cannot enter Lane A; bootstrap cannot masquerade as normal provenance; Stage B rejects pending receipts; Stage B accepts only committed authenticated normal provenance; publication failure remains recoverable; concurrent invocations cannot both advance; reconciliation cannot close without verifying the complete resulting live-component set; and drift outside a receipt fails before new classification or preparation.
+
+The final attacker pass records the concrete counterexamples and their executable guards:
+
+| # | Counterexample | Blocking code / regression |
+| --- | --- | --- |
+| 1 | Backend receipt hides frontend task-definition drift | complete-set helper / backend-only `PREPARED` and `VERIFIED` drift tests |
+| 2 | Backend receipt hides frontend digest drift | complete-set helper / digest drift tests |
+| 3 | Backend receipt hides unreadable frontend | complete-set helper / missing-live test |
+| 4 | Frontend receipt hides backend task-definition drift | complete-set helper / frontend-only drift tests |
+| 5 | Frontend receipt hides backend digest drift | complete-set helper / digest drift tests |
+| 6 | Frontend receipt hides unreadable backend | complete-set helper / missing-live test |
+| 7 | Prepared receipt clears despite unrelated drift | pre-clear full verification / both receipt-phase tests |
+| 8 | Verified receipt commits despite unrelated drift | pre-commit full verification / both receipt-phase tests |
+| 9 | Unrelated service changes after receipt read | final full-set closure / between-read-and-closure test |
+| 10 | Unrelated service changes after pre-CAS verification | post-CAS full-set verification / post-verification drift test |
+| 11 | Both-service receipt has only backend candidate live | deterministic rollback / dual-component partial test |
+| 12 | Both-service receipt has only frontend candidate live | deterministic rollback / dual-component partial test |
+| 13 | Receipt names a component absent from committed state | predecessor equality / absent-component test |
+| 14 | Future deployable is omitted from verification | schema-derived component list / schema structural test |
+| 15 | Receipt-subset verification is reintroduced | one-return source contract / structural test |
+| 16 | Terminal commit retries proof across a generation race | zero-retry closure CAS / `VERIFIED_COMMIT` race test |
+| 17 | Receipt removal retries proof across a generation race | zero-retry closure CAS / `ROLLBACK_CLEAR` race test |
+| 18 | Verified-receipt persistence retries after state changes | zero-retry receipt CAS / transaction race test |
+| 19 | First-pass terminal commit retries after state changes | zero-retry terminal CAS / transaction race test |
+| 20 | First-pass deployment verifies only affected services | complete prospective set / single-component happy-path assertions |
+| 21 | Post-commit live drift is reported as success | final complete-set check / transaction drift test |
+| 22 | Same-commit rerun recomputes from transient ECS | reconciliation-before-plan / same-commit test and workflow contract |
+| 23 | Later commit skips an interrupted receipt | reconciliation-before-plan / A-B-C operator-flow test |
+| 24 | ECS-only identity becomes authority | receipt and component-state authentication / unknown-live test |
+| 25 | Stage B consumes an incomplete normal transaction | receipt absence and component provenance checks / Stage B reference-audit tests |
+
+The hostile interruption matrix is part of the deployment contract:
+
+| Cases | Required disposition |
+| --- | --- |
+| A, Y, Z | Clean bootstrap-to-normal and normal-to-normal releases persist intent, verify, and atomically commit component provenance. |
+| B, C, D, E, P | Death before service mutation leaves the exact predecessor authoritative. Reconciliation clears only authenticated prepared work; an unobserved task-definition registration cannot authorize ECS. |
+| F, G, H | A candidate or pending rollout is accepted only when bound by the stored receipt. Non-stable readback waits or fails; pre-verification candidates roll back. |
+| I, AI, AN | Candidate health without a durable verified/terminal state is not success. The verified receipt remains recoverable when the terminal write fails or is denied. |
+| J, K, AD, AO | A lost terminal response or same-commit rerun strongly reads state, reauthenticates live services, performs no duplicate mutation, and derives an empty work set. |
+| L, AE | A later normal commit reconciles first, then derives only the range after the committed candidate. |
+| M, O | Exact receipt-bound candidate or predecessor observations reconcile deterministically to commit or rollback. |
+| N, Q, AQ | Unknown ECS identity or disagreement with authenticated state fails closed; legacy evidence cannot override state. |
+| R, S, AL, AM | Generation CAS and exact predecessor comparison allow one authoritative writer; same-component and competing receipts are rejected. |
+| T, U, V, W, X | Replayed or cross-source, digest, task-definition, component, service, or environment evidence is rejected by receipt/state identity checks. |
+| AA, AB, AT | Stage B shares the production deployment concurrency group, rejects any pending receipt and `BOOTSTRAP` provenance, and accepts only committed component-scoped `NORMAL_APPLICATION` provenance. |
+| AC, AS | Classification is regenerated after reconciliation from committed component baselines; stronger-lane or changed classifications stop before mutation. |
+| AF, AG, AH | `establishedThroughSha` controls history. Image source is identity evidence only; stale, ambiguous, or missing ECR metadata fails authentication. |
+| AJ, AK | Cancellation or timeout is treated as an unknown outcome. The stored receipt and exact live readback decide the next action; the workflow does not infer success from process exit. |
+| AP, AR | Malformed state and an absent bootstrap anchor reject normal deployment. ECS cannot bootstrap or authorize itself. |
 
 ## Lane A
 
 Lane A accepts source-owned backend/frontend application paths only. It builds only affected services, pushes a full-Git-SHA tag to immutable `mscqr-backend` or `mscqr-web`, deploys the returned digest reference, waits for ECS stability, verifies the backend release SHA when applicable, and runs public plus authenticated smoke checks. A failed deployment or smoke check restores each exact predecessor task definition in reverse order; rollback refuses an unrelated concurrent service target.
 
-Before publishing, the protected job resolves each live image digest back to exactly one 40-character ECR source tag and classifies the complete live-source-to-candidate range. This prevents an earlier undeployed infrastructure, RLS, schema, worker, security, recovery, or ambiguous change from riding along with a later application commit.
+Before publishing, the protected job reconciles any incomplete normal receipt, authenticates live ECS/ECR against the committed component identities, and classifies each committed `establishedThroughSha` to the candidate. This prevents an earlier undeployed infrastructure, RLS, schema, worker, security, recovery, or ambiguous change from riding along with a later application commit. The legacy live-image range check remains only for the reviewed baseline and bounded B01 prerequisite paths, which do not have normal component-transaction authority.
 
 ## Lane B
 
@@ -78,9 +183,7 @@ A permanent public-verification fixture must use the normal QR lifecycle: the de
 
 ## Retirement inventory
 
-- **KEEP:** protected-main CI/security checks, ECR repositories, ECS cluster/services/task roles, production smoke tests, GitHub OIDC provider, `production-normal-deploy`, and historical recovery evidence.
-- **DEPRECATE:** custom component deployment-state planning, normal-release intents/receipts/journals, and duplicate normal-deployment approval stages.
-- **RETIRE_AFTER_NEW_LANE_PROVEN:** normal-deployment DynamoDB writer access and deployment-only broker/reconciler/Stage-B workflow surfaces, through a separate reviewed deletion change after one successful deploy and rollback proof.
+- **KEEP:** protected-main CI/security checks, ECR repositories, ECS cluster/services/task roles, production smoke tests, GitHub OIDC provider, `production-normal-deploy`, historical recovery evidence, component deployment-state planning, normal-release intents/receipts/journals, and exact-key DynamoDB CAS authority. The latter make ECS mutation and authenticated component provenance one fail-closed transaction.
 - **HISTORICAL_ONLY:** completed broker generations, successor closures, failed recovery transitions, and their immutable evidence. Do not rewrite or delete them as part of application deployment.
 
 ## Operator response
