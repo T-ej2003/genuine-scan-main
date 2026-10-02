@@ -488,7 +488,6 @@ test.describe.serial("Enterprise smoke flows", () => {
 
     await expect(page.getByTestId("batches-search-input")).toBeVisible({ timeout: 30_000 });
     await page.getByTestId("batches-search-input").fill(env.manufacturerBatchQuery);
-    await closeTransientDialogs(page);
     const targetBatchRow = page.locator("tbody tr", { hasText: env.manufacturerBatchQuery }).first();
     await expect(targetBatchRow).toBeVisible({ timeout: 30_000 });
     const createPrintJobButton = targetBatchRow.getByTestId("manufacturer-create-print-job").first();
@@ -516,6 +515,7 @@ test.describe.serial("Enterprise smoke flows", () => {
         .toMatch(/^(dismissed|completed)$/);
     }).toPass({ timeout: 20_000 });
     await expect(printerOnboarding).toBeHidden();
+    await closeTransientDialogs(page);
     await createPrintJobButton.click();
 
     await expect(page.getByTestId("create-print-job-dialog")).toBeVisible();
