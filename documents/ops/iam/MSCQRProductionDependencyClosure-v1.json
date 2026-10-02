@@ -2214,6 +2214,25 @@
       "negativeTestPresent": true
     },
     {
+      "sourceFile": "scripts/aws/production-green-stage-b-identity-capabilities.mjs",
+      "action": "dynamodb:GetItem",
+      "capabilityId": "reference-audit-normal-deployment-component-state",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "arn:aws:dynamodb:eu-west-2:368992683803:table/mscqr-production-component-deployment-state"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
       "sourceFile": "scripts/aws/production-normal-backend-activation.mjs",
       "action": "ecr:DescribeImages",
       "capabilityId": "manifest-backend-health-recovery-describe-images",
