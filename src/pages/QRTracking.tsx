@@ -80,6 +80,9 @@ export default function QRTracking() {
     const current = { ...filters, ...(opts?.override || {}) };
 
     try {
+      if (isSuperAdmin && current.licenseeId === "all") {
+        throw new Error("Select a licensee to view tenant-scoped QR analytics.");
+      }
       const response = await apiClient.getQrTrackingAnalytics({
         licenseeId: isSuperAdmin && current.licenseeId !== "all" ? current.licenseeId : undefined,
         code: current.code.trim() || undefined,

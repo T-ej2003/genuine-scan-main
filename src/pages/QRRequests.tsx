@@ -67,6 +67,7 @@ export default function QRRequests() {
 
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState<RequestRow[]>([]);
+  const [page, setPage] = useState(0);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [licensees, setLicensees] = useState<LicenseeOption[]>([]);
   const [licenseeFilter, setLicenseeFilter] = useState<string>("");
@@ -95,6 +96,8 @@ export default function QRRequests() {
     setLoading(true);
     try {
       const res = await apiClient.getQrAllocationRequests({
+        limit: 100,
+        offset: page * 100,
         status: statusFilter === "all" ? undefined : statusFilter,
         licenseeId: isSuper ? licenseeFilter || undefined : undefined,
       });
@@ -117,7 +120,7 @@ export default function QRRequests() {
   useEffect(() => {
     loadRequests();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFilter, licenseeFilter]);
+  }, [statusFilter, licenseeFilter, page]);
 
   useEffect(() => {
     const off = onMutationEvent(() => {
@@ -125,7 +128,7 @@ export default function QRRequests() {
     });
     return off;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [statusFilter, licenseeFilter, page]);
 
   const submitRequest = async () => {
     if (!isLicensee) return;
@@ -265,7 +268,7 @@ export default function QRRequests() {
           <div className="flex flex-col gap-3 md:flex-row md:items-center">
 	            <div className="space-y-1">
 	              <Label className="text-xs">Status</Label>
-	              <Select value={statusFilter} onValueChange={setStatusFilter}>
+	              <Select value={statusFilter} onValueChange={(value) => { setPage(0); setStatusFilter(value); }}>
 	                <SelectTrigger className="w-full md:w-[180px]">
 	                  <SelectValue placeholder="Status" />
 	                </SelectTrigger>
@@ -281,7 +284,7 @@ export default function QRRequests() {
             {isSuper && (
 	              <div className="space-y-1">
 	                <Label className="text-xs">Brand</Label>
-	                <Select value={licenseeFilter || "all"} onValueChange={(value) => setLicenseeFilter(value === "all" ? "" : value)}>
+	                <Select value={licenseeFilter || "all"} onValueChange={(value) => { setPage(0); setLicenseeFilter(value === "all" ? "" : value); }}>
 	                  <SelectTrigger className="w-full md:w-[240px]">
 	                    <SelectValue placeholder="Brand" />
 	                  </SelectTrigger>
@@ -488,6 +491,11 @@ export default function QRRequests() {
                   )}
                 </TableBody>
               </Table>
+            </div>
+            <div className="flex items-center justify-end gap-3 pt-3">
+              <Button variant="outline" disabled={loading || page === 0} onClick={() => setPage(page - 1)}>Previous</Button>
+              <span>Page {page + 1}</span>
+              <Button variant="outline" disabled={loading || rows.length < 100 || page >= 100} onClick={() => setPage(page + 1)}>Next</Button>
             </div>
             </CardContent>
           </Card>

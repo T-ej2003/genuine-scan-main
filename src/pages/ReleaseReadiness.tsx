@@ -184,6 +184,7 @@ export default function ReleaseReadiness() {
         setRouteTelemetry(telemetryRes.value.data || null);
       } else {
         failures.push("route telemetry");
+        setRouteTelemetry(null);
       }
 
       if (rateLimitAnalyticsRes.status === "fulfilled" && rateLimitAnalyticsRes.value.success) {
@@ -293,6 +294,10 @@ export default function ReleaseReadiness() {
     }
 
     const verifyFunnelDrops = routeTelemetry?.verifyFunnel?.dropped || 0;
+    if (!routeTelemetry) {
+      items.push({ tone: "warning", title: "Route telemetry unavailable",
+        body: "Route-transition persistence is unavailable. Telemetry health and funnel alignment have not been verified." });
+    }
     if (verifyFunnelDrops > 0) {
       items.push({
         tone: "warning",
@@ -310,7 +315,7 @@ export default function ReleaseReadiness() {
     }
 
     return items;
-  }, [alertTone, compliance?.controlSummary?.ATTENTION, latestComplianceJob, rateLimitAlerts?.alerts, releaseMetadata, routeTelemetry?.verifyFunnel?.dropped]);
+  }, [alertTone, compliance?.controlSummary?.ATTENTION, latestComplianceJob, rateLimitAlerts?.alerts, releaseMetadata, routeTelemetry]);
 
   return (
     <DashboardLayout>
@@ -445,8 +450,8 @@ export default function ReleaseReadiness() {
                 </div>
                 <div className="rounded-lg border border-slate-200 bg-white p-3">
                   <div className="text-xs uppercase tracking-wide text-slate-500">Verify drops</div>
-                  <div className="mt-1 text-2xl font-semibold text-slate-900">{routeTelemetry?.verifyFunnel?.dropped || 0}</div>
-                  <div className="text-xs text-slate-600">Avg {Math.round(Number(routeTelemetry?.verifyFunnel?.avgTransitionMs || 0))}ms</div>
+                  <div className="mt-1 text-2xl font-semibold text-slate-900">{routeTelemetry?.verifyFunnel?.dropped ?? "Unavailable"}</div>
+                  <div className="text-xs text-slate-600">{routeTelemetry ? `Avg ${Math.round(Number(routeTelemetry.verifyFunnel?.avgTransitionMs || 0))}ms` : "Not verified"}</div>
                 </div>
               </div>
               <div className="rounded-lg border border-slate-200 bg-white p-3">

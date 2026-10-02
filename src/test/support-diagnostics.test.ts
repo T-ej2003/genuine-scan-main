@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   buildSupportDiagnosticsPayload,
@@ -9,6 +9,34 @@ import {
   sanitizeSupportUrl,
   serializeSupportDiagnosticsPayload,
 } from "@/lib/support-diagnostics";
+
+describe("incident failure isolation", () => {
+  it("retains telemetry evidence without a popup and selects a simultaneous critical business failure", async () => {
+    vi.resetModules();
+    vi.useFakeTimers();
+    const diagnostics = await import("@/lib/support-diagnostics");
+    const listener = vi.fn();
+    const off = diagnostics.onSupportIssue(listener);
+    try {
+      for (const endpoint of ["/telemetry/route-transition", "/api/telemetry/route-transition?token=private"]) {
+        diagnostics.reportSupportRuntimeIssue({ source: "network", endpoint, message: "Telemetry unavailable" });
+      }
+      vi.runAllTimers();
+      expect(listener).not.toHaveBeenCalled();
+      expect(diagnostics.getSupportRuntimeIssues()).toHaveLength(2);
+      expect(JSON.stringify(diagnostics.getSupportRuntimeIssues())).not.toContain("private");
+      diagnostics.reportSupportRuntimeIssue({ source: "network", endpoint: "/notifications", message: "Business failure" });
+      diagnostics.reportSupportRuntimeIssue({ source: "network", endpoint: "/qr/requests", message: "QR failure" });
+      vi.runAllTimers();
+      expect(listener).toHaveBeenCalledTimes(1);
+      expect(listener.mock.calls[0][0].classification).toBe("business-critical");
+      expect(listener.mock.calls[0][0].message).toBe("QR failure");
+      expect(diagnostics.getSupportRuntimeIssues()).toHaveLength(4);
+      expect(diagnostics.classifySupportFailure("/qr/requests", 403)).toBe("expected-controlled");
+      expect(diagnostics.classifySupportFailure("/qr/requests", 500)).toBe("business-critical");
+    } finally { off(); vi.useRealTimers(); }
+  });
+});
 
 describe("formatSupportIssueSubmissionError", () => {
   it("turns nginx 413 html into a concise user-facing message", () => {

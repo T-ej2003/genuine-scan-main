@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "deploymentModel": "clean-room-blue-green",
-  "sourceContractSha256": "368de62f0a051565d9e66ad9009be98b9f4776a1d3d1f22d628ee96b810116de",
+  "sourceContractSha256": "2b6c9f74f2d3bb9c0b81e58f8f6c7eae0180d1a5a88aea70c7c576b0c9c42bec",
   "migrationSetDigest": "b783cab33f40cddaa8aa9bf3bef3dbbbabb218af5891bbda36eb1724514f8dc9",
   "sourceContractInputs": [
     {
@@ -90,7 +90,7 @@
     },
     {
       "path": "scripts/rls/lib/named-sql-function-contracts.mjs",
-      "sha256": "100f13f9894437e2596622d2677d94f61132763b670c8c1e617256269cfadf8a"
+      "sha256": "1ce41898932c42de3fc2f4b233c3021148e3da2342890754ce52784b1ff01338"
     },
     {
       "path": "scripts/rls/lib/restricted-owner-projection-contract.mjs",
@@ -126,7 +126,7 @@
     },
     {
       "path": "backend/tests/qrSystemPostgres18.test.js",
-      "sha256": "8713ab330f1c20cb0f4f7b2c69c342f7164212bcf4196a60fc10bd72990600d3"
+      "sha256": "14e18e52bc7dccc823f1b5c78220b5855f2b198b9853bf2849e2b7abef6edc19"
     },
     {
       "path": "documents/security/rls-program/staging-full-rls-executor-contract.json",
@@ -234,7 +234,7 @@
     },
     {
       "path": "scripts/smoke-release.mjs",
-      "sha256": "fa0321b2052abc56d4ea2a1e5bf63b73be078fefd44ab77ccb3f94d274ded469"
+      "sha256": "ea55f75a8e5194d21309097c63ea16da6e322621525862b68e5078f61f8abc03"
     },
     {
       "path": "scripts/lib/staging-smoke-totp.mjs",
@@ -314,11 +314,11 @@
     },
     {
       "path": "backend/src/rls-waves/session-c/c01/qrSystem.sql",
-      "sha256": "878695a9890fc896cbaf635f03c0e9849f491b3aaad69d5f43d2f92de439de42"
+      "sha256": "0b474e0074f1369a579fecbf3ff68aa062c4de2faf9216855f6f896115a7f908"
     },
     {
       "path": "backend/src/rls-waves/session-c/c01/qrSystemRollback.sql",
-      "sha256": "c8e614df73b97baad766204b07a7f94aac5ffec3ebbfbdf73d39ce80620c2bb8"
+      "sha256": "b8b31fb7289eaa58bbde5bcf55902f60b84b4ae004352ca22d92219bb656acc7"
     },
     {
       "path": "backend/src/rls-waves/session-c/c04/operatorProcedures.sql",
@@ -2075,7 +2075,7 @@
         "release-fix-4-qr-system"
       ],
       "scopeType": "security-definer-owner-capability-and-row-local-qr-scope",
-      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-inventory-read','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.qr_operation',true)='qr-range-allocate' AND \"licenseeId\"=current_setting('app.qr_target_licensee_id',true) AND \"createdByUserId\"=current_setting('app.qr_user_id',true)",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-allocation-request-list','qr-allocation-request-create','qr-allocation-request-reject','qr-inventory-read','qr-scan-analytics','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.qr_operation',true)='qr-range-allocate' AND \"licenseeId\"=current_setting('app.qr_target_licensee_id',true) AND \"createdByUserId\"=current_setting('app.qr_user_id',true)",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:release-fix-4-allocate-range:AllocationEvent:INSERT",
@@ -2679,13 +2679,15 @@
         "release-fix-4-qr-system"
       ],
       "scopeType": "security-definer-owner-capability-and-row-local-qr-scope",
-      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-inventory-read','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND id=current_setting('app.qr_audit_id',true) AND \"userId\"=current_setting('app.qr_user_id',true)",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-allocation-request-list','qr-allocation-request-create','qr-allocation-request-reject','qr-inventory-read','qr-scan-analytics','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND id=current_setting('app.qr_audit_id',true) AND \"userId\"=current_setting('app.qr_user_id',true)",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:release-fix-4-allocate-range:AuditLog:INSERT",
         "contract:release-fix-4-approve-allocation-request:AuditLog:INSERT",
         "contract:release-fix-4-batch-command:AuditLog:INSERT",
-        "contract:release-fix-4-delete-codes:AuditLog:INSERT"
+        "contract:release-fix-4-create-allocation-request:AuditLog:INSERT",
+        "contract:release-fix-4-delete-codes:AuditLog:INSERT",
+        "contract:release-fix-4-reject-allocation-request:AuditLog:INSERT"
       ],
       "workflowId": null,
       "route": "Release Fix 4 exact QR boundary",
@@ -3468,7 +3470,7 @@
         "release-fix-4-qr-system"
       ],
       "scopeType": "security-definer-owner-capability-and-row-local-qr-scope",
-      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-inventory-read','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.qr_operation',true)='qr-batch-command' AND (current_setting('app.qr_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR (current_setting('app.qr_role',true)='LICENSEE_ADMIN' AND \"licenseeId\"=current_setting('app.qr_licensee_id',true)) OR (current_setting('app.qr_role',true)='MANUFACTURER_ADMIN' AND \"licenseeId\"=ANY(string_to_array(current_setting('app.qr_scope_licensee_ids',true),',')))) AND (id=current_setting('app.qr_source_batch_id',true) OR id=ANY(string_to_array(current_setting('app.qr_target_batch_ids',true),',')))",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-allocation-request-list','qr-allocation-request-create','qr-allocation-request-reject','qr-inventory-read','qr-scan-analytics','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.qr_operation',true)='qr-batch-command' AND (current_setting('app.qr_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR (current_setting('app.qr_role',true)='LICENSEE_ADMIN' AND \"licenseeId\"=current_setting('app.qr_licensee_id',true)) OR (current_setting('app.qr_role',true)='MANUFACTURER_ADMIN' AND \"licenseeId\"=ANY(string_to_array(current_setting('app.qr_scope_licensee_ids',true),',')))) AND (id=current_setting('app.qr_source_batch_id',true) OR id=ANY(string_to_array(current_setting('app.qr_target_batch_ids',true),',')))",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:release-fix-4-batch-command:Batch:DELETE"
@@ -3493,7 +3495,7 @@
         "release-fix-4-qr-system"
       ],
       "scopeType": "security-definer-owner-capability-and-row-local-qr-scope",
-      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-inventory-read','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-batch-command') AND \"licenseeId\"=current_setting('app.qr_target_licensee_id',true) AND id=current_setting('app.qr_target_batch_id',true)",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-allocation-request-list','qr-allocation-request-create','qr-allocation-request-reject','qr-inventory-read','qr-scan-analytics','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-batch-command') AND \"licenseeId\"=current_setting('app.qr_target_licensee_id',true) AND id=current_setting('app.qr_target_batch_id',true)",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:release-fix-4-allocate-range:Batch:INSERT",
@@ -3520,7 +3522,7 @@
         "release-fix-4-qr-system"
       ],
       "scopeType": "security-definer-owner-capability-and-row-local-qr-scope",
-      "scopePredicate": "((current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-inventory-read','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND (current_setting('app.qr_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR (current_setting('app.qr_role',true)='LICENSEE_ADMIN' AND \"licenseeId\"=current_setting('app.qr_licensee_id',true)) OR (current_setting('app.qr_role',true)='MANUFACTURER_ADMIN' AND \"licenseeId\"=ANY(string_to_array(current_setting('app.qr_scope_licensee_ids',true),','))))) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user={{WORKER_ROLE}} AND current_setting('app.analytics_rollup_operation',true) IN ('inventory','scan-hourly'))",
+      "scopePredicate": "((current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-allocation-request-list','qr-allocation-request-create','qr-allocation-request-reject','qr-inventory-read','qr-scan-analytics','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND (current_setting('app.qr_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR (current_setting('app.qr_role',true)='LICENSEE_ADMIN' AND \"licenseeId\"=current_setting('app.qr_licensee_id',true)) OR (current_setting('app.qr_role',true)='MANUFACTURER_ADMIN' AND \"licenseeId\"=ANY(string_to_array(current_setting('app.qr_scope_licensee_ids',true),','))))) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user={{WORKER_ROLE}} AND current_setting('app.analytics_rollup_operation',true) IN ('inventory','scan-hourly'))",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:release-fix-4-allocate-range:Batch:SELECT",
@@ -3530,7 +3532,8 @@
         "contract:release-fix-4-inventory-projection:Batch:SELECT",
         "contract:release-fix-4-read-codes:Batch:SELECT",
         "contract:release-fix-4-refresh-inventory-rollups:Batch:SELECT",
-        "contract:release-fix-4-refresh-scan-rollups:Batch:SELECT"
+        "contract:release-fix-4-refresh-scan-rollups:Batch:SELECT",
+        "contract:release-fix-4-scan-analytics:Batch:SELECT"
       ],
       "workflowId": null,
       "route": "Release Fix 4 exact QR boundary",
@@ -3552,7 +3555,7 @@
         "release-fix-4-qr-system"
       ],
       "scopeType": "security-definer-owner-capability-and-row-local-qr-scope",
-      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-inventory-read','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.qr_operation',true)='qr-batch-command' AND (current_setting('app.qr_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR (current_setting('app.qr_role',true)='LICENSEE_ADMIN' AND \"licenseeId\"=current_setting('app.qr_licensee_id',true)) OR (current_setting('app.qr_role',true)='MANUFACTURER_ADMIN' AND \"licenseeId\"=ANY(string_to_array(current_setting('app.qr_scope_licensee_ids',true),',')))) AND id=current_setting('app.qr_source_batch_id',true)",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-allocation-request-list','qr-allocation-request-create','qr-allocation-request-reject','qr-inventory-read','qr-scan-analytics','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.qr_operation',true)='qr-batch-command' AND (current_setting('app.qr_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR (current_setting('app.qr_role',true)='LICENSEE_ADMIN' AND \"licenseeId\"=current_setting('app.qr_licensee_id',true)) OR (current_setting('app.qr_role',true)='MANUFACTURER_ADMIN' AND \"licenseeId\"=ANY(string_to_array(current_setting('app.qr_scope_licensee_ids',true),',')))) AND id=current_setting('app.qr_source_batch_id',true)",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:release-fix-4-batch-command:Batch:UPDATE"
@@ -6014,7 +6017,7 @@
         "release-fix-4-qr-system"
       ],
       "scopeType": "security-definer-owner-capability-and-row-local-qr-scope",
-      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-inventory-read','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND (current_setting('app.qr_target_licensee_id',true)='' OR id=current_setting('app.qr_target_licensee_id',true)) AND (current_setting('app.qr_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR (current_setting('app.qr_role',true)='LICENSEE_ADMIN' AND id=current_setting('app.qr_licensee_id',true)) OR current_setting('app.qr_role',true)='MANUFACTURER_ADMIN')",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-allocation-request-list','qr-allocation-request-create','qr-allocation-request-reject','qr-inventory-read','qr-scan-analytics','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND (current_setting('app.qr_target_licensee_id',true)='' OR id=current_setting('app.qr_target_licensee_id',true)) AND (current_setting('app.qr_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR (current_setting('app.qr_role',true)='LICENSEE_ADMIN' AND id=current_setting('app.qr_licensee_id',true)) OR current_setting('app.qr_role',true)='MANUFACTURER_ADMIN')",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:release-fix-4-allocate-range:Licensee:SELECT",
@@ -6022,10 +6025,14 @@
         "contract:release-fix-4-audit-export:Licensee:SELECT",
         "contract:release-fix-4-batch-command:Licensee:SELECT",
         "contract:release-fix-4-bind-break-glass-tokens:Licensee:SELECT",
+        "contract:release-fix-4-create-allocation-request:Licensee:SELECT",
         "contract:release-fix-4-delete-codes:Licensee:SELECT",
         "contract:release-fix-4-get-code-scope:Licensee:SELECT",
         "contract:release-fix-4-inventory-projection:Licensee:SELECT",
+        "contract:release-fix-4-list-allocation-requests:Licensee:SELECT",
         "contract:release-fix-4-read-codes:Licensee:SELECT",
+        "contract:release-fix-4-reject-allocation-request:Licensee:SELECT",
+        "contract:release-fix-4-scan-analytics:Licensee:SELECT",
         "contract:release-fix-4-stats:Licensee:SELECT"
       ],
       "workflowId": null,
@@ -6522,7 +6529,7 @@
         "release-fix-4-qr-system"
       ],
       "scopeType": "security-definer-owner-capability-and-row-local-qr-scope",
-      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-inventory-read','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND (\"manufacturerId\"=current_setting('app.qr_user_id',true) OR (current_setting('app.qr_operation',true)='qr-batch-command' AND \"manufacturerId\"=current_setting('app.qr_target_manufacturer_id',true) AND \"licenseeId\"=current_setting('app.qr_target_licensee_id',true)))",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-allocation-request-list','qr-allocation-request-create','qr-allocation-request-reject','qr-inventory-read','qr-scan-analytics','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND (\"manufacturerId\"=current_setting('app.qr_user_id',true) OR (current_setting('app.qr_operation',true)='qr-batch-command' AND \"manufacturerId\"=current_setting('app.qr_target_manufacturer_id',true) AND \"licenseeId\"=current_setting('app.qr_target_licensee_id',true)))",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:release-fix-4-allocate-range:ManufacturerLicenseeLink:SELECT",
@@ -6534,6 +6541,7 @@
         "contract:release-fix-4-get-code-scope:ManufacturerLicenseeLink:SELECT",
         "contract:release-fix-4-inventory-projection:ManufacturerLicenseeLink:SELECT",
         "contract:release-fix-4-read-codes:ManufacturerLicenseeLink:SELECT",
+        "contract:release-fix-4-scan-analytics:ManufacturerLicenseeLink:SELECT",
         "contract:release-fix-4-stats:ManufacturerLicenseeLink:SELECT"
       ],
       "workflowId": null,
@@ -7191,7 +7199,7 @@
         "release-fix-4-qr-system"
       ],
       "scopeType": "security-definer-owner-capability-and-row-local-qr-scope",
-      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-inventory-read','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND id=current_setting('app.qr_target_organization_id',true) AND \"isActive\"",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-allocation-request-list','qr-allocation-request-create','qr-allocation-request-reject','qr-inventory-read','qr-scan-analytics','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND id=current_setting('app.qr_target_organization_id',true) AND \"isActive\"",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:release-fix-4-allocate-range:Organization:SELECT",
@@ -7199,10 +7207,14 @@
         "contract:release-fix-4-audit-export:Organization:SELECT",
         "contract:release-fix-4-batch-command:Organization:SELECT",
         "contract:release-fix-4-bind-break-glass-tokens:Organization:SELECT",
+        "contract:release-fix-4-create-allocation-request:Organization:SELECT",
         "contract:release-fix-4-delete-codes:Organization:SELECT",
         "contract:release-fix-4-get-code-scope:Organization:SELECT",
         "contract:release-fix-4-inventory-projection:Organization:SELECT",
+        "contract:release-fix-4-list-allocation-requests:Organization:SELECT",
         "contract:release-fix-4-read-codes:Organization:SELECT",
+        "contract:release-fix-4-reject-allocation-request:Organization:SELECT",
+        "contract:release-fix-4-scan-analytics:Organization:SELECT",
         "contract:release-fix-4-stats:Organization:SELECT"
       ],
       "workflowId": null,
@@ -7656,7 +7668,7 @@
         "release-fix-4-qr-system"
       ],
       "scopeType": "security-definer-owner-capability-and-row-local-qr-scope",
-      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-inventory-read','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.qr_operation',true)='qr-audit-export' AND \"batchId\"=current_setting('app.qr_source_batch_id',true) AND \"licenseeId\"=current_setting('app.qr_target_licensee_id',true)",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-allocation-request-list','qr-allocation-request-create','qr-allocation-request-reject','qr-inventory-read','qr-scan-analytics','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.qr_operation',true)='qr-audit-export' AND \"batchId\"=current_setting('app.qr_source_batch_id',true) AND \"licenseeId\"=current_setting('app.qr_target_licensee_id',true)",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:release-fix-4-audit-export:PolicyAlert:SELECT"
@@ -8584,6 +8596,31 @@
     {
       "tableId": "table-qr-allocation-request",
       "table": "QrAllocationRequest",
+      "policyName": "qr_system_qrallocationrequest_insert",
+      "command": "INSERT",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-4-qr-system"
+      ],
+      "scopeType": "security-definer-owner-capability-and-row-local-qr-scope",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-allocation-request-list','qr-allocation-request-create','qr-allocation-request-reject','qr-inventory-read','qr-scan-analytics','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.qr_operation',true)='qr-allocation-request-create' AND current_setting('app.qr_role',true) IN ('LICENSEE_ADMIN','SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND id=current_setting('app.qr_target_request_id',true) AND \"licenseeId\"=current_setting('app.qr_target_licensee_id',true) AND \"requestedByUserId\"=current_setting('app.qr_user_id',true) AND status='PENDING'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-4-create-allocation-request:QrAllocationRequest:INSERT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 4 exact QR boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-qr-allocation-request",
+      "table": "QrAllocationRequest",
       "policyName": "qr_system_qrallocationrequest_select",
       "command": "SELECT",
       "actors": [
@@ -8596,10 +8633,13 @@
         "release-fix-4-qr-system"
       ],
       "scopeType": "security-definer-owner-capability-and-row-local-qr-scope",
-      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-inventory-read','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.qr_operation',true)='qr-allocation-request-approve' AND current_setting('app.qr_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND id=current_setting('app.qr_target_request_id',true)",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-allocation-request-list','qr-allocation-request-create','qr-allocation-request-reject','qr-inventory-read','qr-scan-analytics','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND ((current_setting('app.qr_operation',true) IN ('qr-allocation-request-approve','qr-allocation-request-reject') AND current_setting('app.qr_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND id=current_setting('app.qr_target_request_id',true)) OR (current_setting('app.qr_operation',true)='qr-allocation-request-list' AND (current_setting('app.qr_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR (current_setting('app.qr_role',true)='LICENSEE_ADMIN' AND \"licenseeId\"=current_setting('app.qr_licensee_id',true))) AND (current_setting('app.qr_target_licensee_id',true)='' OR \"licenseeId\"=current_setting('app.qr_target_licensee_id',true))) OR (current_setting('app.qr_operation',true)='qr-allocation-request-create' AND id=current_setting('app.qr_target_request_id',true) AND \"licenseeId\"=current_setting('app.qr_target_licensee_id',true) AND \"requestedByUserId\"=current_setting('app.qr_user_id',true)))",
       "columns": [],
       "sourceCommandRuleIds": [
-        "contract:release-fix-4-approve-allocation-request:QrAllocationRequest:SELECT"
+        "contract:release-fix-4-approve-allocation-request:QrAllocationRequest:SELECT",
+        "contract:release-fix-4-create-allocation-request:QrAllocationRequest:SELECT",
+        "contract:release-fix-4-list-allocation-requests:QrAllocationRequest:SELECT",
+        "contract:release-fix-4-reject-allocation-request:QrAllocationRequest:SELECT"
       ],
       "workflowId": null,
       "route": "Release Fix 4 exact QR boundary",
@@ -8621,10 +8661,11 @@
         "release-fix-4-qr-system"
       ],
       "scopeType": "security-definer-owner-capability-and-row-local-qr-scope",
-      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-inventory-read','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.qr_operation',true)='qr-allocation-request-approve' AND current_setting('app.qr_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND id=current_setting('app.qr_target_request_id',true)",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-allocation-request-list','qr-allocation-request-create','qr-allocation-request-reject','qr-inventory-read','qr-scan-analytics','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.qr_operation',true) IN ('qr-allocation-request-approve','qr-allocation-request-reject') AND current_setting('app.qr_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND id=current_setting('app.qr_target_request_id',true)",
       "columns": [],
       "sourceCommandRuleIds": [
-        "contract:release-fix-4-approve-allocation-request:QrAllocationRequest:UPDATE"
+        "contract:release-fix-4-approve-allocation-request:QrAllocationRequest:UPDATE",
+        "contract:release-fix-4-reject-allocation-request:QrAllocationRequest:UPDATE"
       ],
       "workflowId": null,
       "route": "Release Fix 4 exact QR boundary",
@@ -8892,7 +8933,7 @@
         "release-fix-4-qr-system"
       ],
       "scopeType": "security-definer-owner-capability-and-row-local-qr-scope",
-      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-inventory-read','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.qr_operation',true)='qr-code-delete' AND (current_setting('app.qr_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR (current_setting('app.qr_role',true)='LICENSEE_ADMIN' AND \"licenseeId\"=current_setting('app.qr_licensee_id',true)))",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-allocation-request-list','qr-allocation-request-create','qr-allocation-request-reject','qr-inventory-read','qr-scan-analytics','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.qr_operation',true)='qr-code-delete' AND (current_setting('app.qr_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR (current_setting('app.qr_role',true)='LICENSEE_ADMIN' AND \"licenseeId\"=current_setting('app.qr_licensee_id',true)))",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:release-fix-4-delete-codes:QRCode:DELETE"
@@ -8917,7 +8958,7 @@
         "release-fix-4-qr-system"
       ],
       "scopeType": "security-definer-owner-capability-and-row-local-qr-scope",
-      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-inventory-read','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.qr_operation',true)='qr-range-allocate' AND \"licenseeId\"=current_setting('app.qr_target_licensee_id',true) AND \"batchId\"=current_setting('app.qr_target_batch_id',true)",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-allocation-request-list','qr-allocation-request-create','qr-allocation-request-reject','qr-inventory-read','qr-scan-analytics','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.qr_operation',true)='qr-range-allocate' AND \"licenseeId\"=current_setting('app.qr_target_licensee_id',true) AND \"batchId\"=current_setting('app.qr_target_batch_id',true)",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:release-fix-4-allocate-range:QRCode:INSERT",
@@ -8943,7 +8984,7 @@
         "release-fix-4-qr-system"
       ],
       "scopeType": "security-definer-owner-capability-and-row-local-qr-scope",
-      "scopePredicate": "((current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-inventory-read','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND (current_setting('app.qr_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR (current_setting('app.qr_role',true)='LICENSEE_ADMIN' AND \"licenseeId\"=current_setting('app.qr_licensee_id',true)) OR (current_setting('app.qr_role',true)='MANUFACTURER_ADMIN' AND \"licenseeId\"=ANY(string_to_array(current_setting('app.qr_scope_licensee_ids',true),','))))) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user={{WORKER_ROLE}} AND current_setting('app.analytics_rollup_operation',true)='inventory')",
+      "scopePredicate": "((current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-allocation-request-list','qr-allocation-request-create','qr-allocation-request-reject','qr-inventory-read','qr-scan-analytics','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND (current_setting('app.qr_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR (current_setting('app.qr_role',true)='LICENSEE_ADMIN' AND \"licenseeId\"=current_setting('app.qr_licensee_id',true)) OR (current_setting('app.qr_role',true)='MANUFACTURER_ADMIN' AND \"licenseeId\"=ANY(string_to_array(current_setting('app.qr_scope_licensee_ids',true),','))))) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user={{WORKER_ROLE}} AND current_setting('app.analytics_rollup_operation',true)='inventory')",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:release-fix-4-allocate-range:QRCode:SELECT",
@@ -8956,6 +8997,7 @@
         "contract:release-fix-4-inventory-projection:QRCode:SELECT",
         "contract:release-fix-4-read-codes:QRCode:SELECT",
         "contract:release-fix-4-refresh-inventory-rollups:QRCode:SELECT",
+        "contract:release-fix-4-scan-analytics:QRCode:SELECT",
         "contract:release-fix-4-stats:QRCode:SELECT"
       ],
       "workflowId": null,
@@ -8978,7 +9020,7 @@
         "release-fix-4-qr-system"
       ],
       "scopeType": "security-definer-owner-capability-and-row-local-qr-scope",
-      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-inventory-read','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND ((current_setting('app.qr_operation',true)='qr-code-token-bind' AND \"licenseeId\"=current_setting('app.qr_target_licensee_id',true)) OR (current_setting('app.qr_operation',true)='qr-batch-command' AND (current_setting('app.qr_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR (current_setting('app.qr_role',true)='LICENSEE_ADMIN' AND \"licenseeId\"=current_setting('app.qr_licensee_id',true)) OR (current_setting('app.qr_role',true)='MANUFACTURER_ADMIN' AND \"licenseeId\"=ANY(string_to_array(current_setting('app.qr_scope_licensee_ids',true),',')))) AND ((current_setting('app.qr_batch_action',true)='CREATE_BATCH' AND \"batchId\" IS NULL AND \"licenseeId\"=current_setting('app.qr_target_licensee_id',true)) OR id=ANY(string_to_array(current_setting('app.qr_target_code_ids',true),',')) OR \"batchId\"=ANY(string_to_array(current_setting('app.qr_target_batch_ids',true),',')) OR \"batchId\"=current_setting('app.qr_source_batch_id',true))))",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-allocation-request-list','qr-allocation-request-create','qr-allocation-request-reject','qr-inventory-read','qr-scan-analytics','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND ((current_setting('app.qr_operation',true)='qr-code-token-bind' AND \"licenseeId\"=current_setting('app.qr_target_licensee_id',true)) OR (current_setting('app.qr_operation',true)='qr-batch-command' AND (current_setting('app.qr_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR (current_setting('app.qr_role',true)='LICENSEE_ADMIN' AND \"licenseeId\"=current_setting('app.qr_licensee_id',true)) OR (current_setting('app.qr_role',true)='MANUFACTURER_ADMIN' AND \"licenseeId\"=ANY(string_to_array(current_setting('app.qr_scope_licensee_ids',true),',')))) AND ((current_setting('app.qr_batch_action',true)='CREATE_BATCH' AND \"batchId\" IS NULL AND \"licenseeId\"=current_setting('app.qr_target_licensee_id',true)) OR id=ANY(string_to_array(current_setting('app.qr_target_code_ids',true),',')) OR \"batchId\"=ANY(string_to_array(current_setting('app.qr_target_batch_ids',true),',')) OR \"batchId\"=current_setting('app.qr_source_batch_id',true))))",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:release-fix-4-batch-command:QRCode:UPDATE",
@@ -9135,7 +9177,7 @@
         "release-fix-4-qr-system"
       ],
       "scopeType": "security-definer-owner-capability-and-row-local-qr-scope",
-      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-inventory-read','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.qr_operation',true)='qr-range-allocate' AND \"licenseeId\"=current_setting('app.qr_target_licensee_id',true)",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-allocation-request-list','qr-allocation-request-create','qr-allocation-request-reject','qr-inventory-read','qr-scan-analytics','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.qr_operation',true)='qr-range-allocate' AND \"licenseeId\"=current_setting('app.qr_target_licensee_id',true)",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:release-fix-4-allocate-range:QRRange:INSERT",
@@ -9161,7 +9203,7 @@
         "release-fix-4-qr-system"
       ],
       "scopeType": "security-definer-owner-capability-and-row-local-qr-scope",
-      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-inventory-read','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND (current_setting('app.qr_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR (current_setting('app.qr_role',true)='LICENSEE_ADMIN' AND \"licenseeId\"=current_setting('app.qr_licensee_id',true)) OR (current_setting('app.qr_role',true)='MANUFACTURER_ADMIN' AND \"licenseeId\"=ANY(string_to_array(current_setting('app.qr_scope_licensee_ids',true),','))))",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-allocation-request-list','qr-allocation-request-create','qr-allocation-request-reject','qr-inventory-read','qr-scan-analytics','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND (current_setting('app.qr_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR (current_setting('app.qr_role',true)='LICENSEE_ADMIN' AND \"licenseeId\"=current_setting('app.qr_licensee_id',true)) OR (current_setting('app.qr_role',true)='MANUFACTURER_ADMIN' AND \"licenseeId\"=ANY(string_to_array(current_setting('app.qr_scope_licensee_ids',true),','))))",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:release-fix-4-allocate-range:QRRange:SELECT",
@@ -9307,10 +9349,11 @@
         "release-fix-4-qr-system"
       ],
       "scopeType": "security-definer-owner-capability-and-row-local-qr-scope",
-      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user={{WORKER_ROLE}} AND current_setting('app.analytics_rollup_operation',true)='scan-hourly'",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user={{WORKER_ROLE}} AND current_setting('app.analytics_rollup_operation',true)='scan-hourly') OR ((current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-allocation-request-list','qr-allocation-request-create','qr-allocation-request-reject','qr-inventory-read','qr-scan-analytics','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.qr_operation',true)='qr-scan-analytics' AND \"licenseeId\"=current_setting('app.qr_target_licensee_id',true) AND (current_setting('app.qr_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR (current_setting('app.qr_role',true)='LICENSEE_ADMIN' AND \"licenseeId\"=current_setting('app.qr_licensee_id',true)) OR (current_setting('app.qr_role',true)='MANUFACTURER_ADMIN' AND \"licenseeId\"=ANY(string_to_array(current_setting('app.qr_scope_licensee_ids',true),',')))))",
       "columns": [],
       "sourceCommandRuleIds": [
-        "contract:release-fix-4-refresh-scan-rollups:QrScanLog:SELECT"
+        "contract:release-fix-4-refresh-scan-rollups:QrScanLog:SELECT",
+        "contract:release-fix-4-scan-analytics:QrScanLog:SELECT"
       ],
       "workflowId": null,
       "route": "Release Fix 4 exact QR boundary",
@@ -10449,13 +10492,15 @@
         "release-fix-4-qr-system"
       ],
       "scopeType": "security-definer-owner-capability-and-row-local-qr-scope",
-      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-inventory-read','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND id=current_setting('app.qr_outbox_id',true) AND \"initiatingUserId\"=current_setting('app.qr_user_id',true)",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-allocation-request-list','qr-allocation-request-create','qr-allocation-request-reject','qr-inventory-read','qr-scan-analytics','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND id=current_setting('app.qr_outbox_id',true) AND \"initiatingUserId\"=current_setting('app.qr_user_id',true)",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:release-fix-4-allocate-range:SecurityEventOutbox:INSERT",
         "contract:release-fix-4-approve-allocation-request:SecurityEventOutbox:INSERT",
         "contract:release-fix-4-batch-command:SecurityEventOutbox:INSERT",
-        "contract:release-fix-4-delete-codes:SecurityEventOutbox:INSERT"
+        "contract:release-fix-4-create-allocation-request:SecurityEventOutbox:INSERT",
+        "contract:release-fix-4-delete-codes:SecurityEventOutbox:INSERT",
+        "contract:release-fix-4-reject-allocation-request:SecurityEventOutbox:INSERT"
       ],
       "workflowId": null,
       "route": "Release Fix 4 exact QR boundary",
@@ -11087,7 +11132,7 @@
         "release-fix-4-qr-system"
       ],
       "scopeType": "security-definer-owner-capability-and-row-local-qr-scope",
-      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-inventory-read','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.qr_operation',true)='qr-audit-export' AND \"batchId\"=current_setting('app.qr_source_batch_id',true) AND \"licenseeId\"=current_setting('app.qr_target_licensee_id',true)",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-allocation-request-list','qr-allocation-request-create','qr-allocation-request-reject','qr-inventory-read','qr-scan-analytics','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.qr_operation',true)='qr-audit-export' AND \"batchId\"=current_setting('app.qr_source_batch_id',true) AND \"licenseeId\"=current_setting('app.qr_target_licensee_id',true)",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:release-fix-4-audit-export:TraceEvent:SELECT"
@@ -11789,7 +11834,7 @@
         "release-fix-4-qr-system"
       ],
       "scopeType": "security-definer-owner-capability-and-row-local-qr-scope",
-      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-inventory-read','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND ((current_setting('app.qr_operation',true)='qr-batch-command' AND role='MANUFACTURER_ADMIN' AND \"isActive\" AND status='ACTIVE' AND \"disabledAt\" IS NULL AND \"deletedAt\" IS NULL AND id=current_setting('app.qr_target_manufacturer_id',true)) OR (current_setting('app.qr_operation',true)='qr-audit-export' AND (id=current_setting('app.qr_target_manufacturer_id',true) OR id=ANY(string_to_array(current_setting('app.qr_target_user_ids',true),',')))))",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-allocation-request-list','qr-allocation-request-create','qr-allocation-request-reject','qr-inventory-read','qr-scan-analytics','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND ((current_setting('app.qr_operation',true)='qr-batch-command' AND role='MANUFACTURER_ADMIN' AND \"isActive\" AND status='ACTIVE' AND \"disabledAt\" IS NULL AND \"deletedAt\" IS NULL AND id=current_setting('app.qr_target_manufacturer_id',true)) OR (current_setting('app.qr_operation',true)='qr-audit-export' AND (id=current_setting('app.qr_target_manufacturer_id',true) OR id=ANY(string_to_array(current_setting('app.qr_target_user_ids',true),',')))))",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:release-fix-4-allocate-range:User:SELECT",
@@ -11797,10 +11842,14 @@
         "contract:release-fix-4-audit-export:User:SELECT",
         "contract:release-fix-4-batch-command:User:SELECT",
         "contract:release-fix-4-bind-break-glass-tokens:User:SELECT",
+        "contract:release-fix-4-create-allocation-request:User:SELECT",
         "contract:release-fix-4-delete-codes:User:SELECT",
         "contract:release-fix-4-get-code-scope:User:SELECT",
         "contract:release-fix-4-inventory-projection:User:SELECT",
+        "contract:release-fix-4-list-allocation-requests:User:SELECT",
         "contract:release-fix-4-read-codes:User:SELECT",
+        "contract:release-fix-4-reject-allocation-request:User:SELECT",
+        "contract:release-fix-4-scan-analytics:User:SELECT",
         "contract:release-fix-4-stats:User:SELECT"
       ],
       "workflowId": null,
@@ -12366,55 +12415,55 @@
       "key": "owner",
       "name": "mscqr_rls_cert_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:368de62f0a051565d9e66ad9009be98b9f4776a1d3d1f22d628ee96b810116de"
+      "marker": "mscqr-full-rls-clean-room:certification:2b6c9f74f2d3bb9c0b81e58f8f6c7eae0180d1a5a88aea70c7c576b0c9c42bec"
     },
     {
       "key": "authOwner",
       "name": "mscqr_rls_cert_auth_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:368de62f0a051565d9e66ad9009be98b9f4776a1d3d1f22d628ee96b810116de"
+      "marker": "mscqr-full-rls-clean-room:certification:2b6c9f74f2d3bb9c0b81e58f8f6c7eae0180d1a5a88aea70c7c576b0c9c42bec"
     },
     {
       "key": "app",
       "name": "mscqr_rls_cert_app",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:368de62f0a051565d9e66ad9009be98b9f4776a1d3d1f22d628ee96b810116de"
+      "marker": "mscqr-full-rls-clean-room:certification:2b6c9f74f2d3bb9c0b81e58f8f6c7eae0180d1a5a88aea70c7c576b0c9c42bec"
     },
     {
       "key": "read",
       "name": "mscqr_rls_cert_read",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:368de62f0a051565d9e66ad9009be98b9f4776a1d3d1f22d628ee96b810116de"
+      "marker": "mscqr-full-rls-clean-room:certification:2b6c9f74f2d3bb9c0b81e58f8f6c7eae0180d1a5a88aea70c7c576b0c9c42bec"
     },
     {
       "key": "preauth",
       "name": "mscqr_rls_cert_preauth",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:368de62f0a051565d9e66ad9009be98b9f4776a1d3d1f22d628ee96b810116de"
+      "marker": "mscqr-full-rls-clean-room:certification:2b6c9f74f2d3bb9c0b81e58f8f6c7eae0180d1a5a88aea70c7c576b0c9c42bec"
     },
     {
       "key": "worker",
       "name": "mscqr_rls_cert_worker",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:368de62f0a051565d9e66ad9009be98b9f4776a1d3d1f22d628ee96b810116de"
+      "marker": "mscqr-full-rls-clean-room:certification:2b6c9f74f2d3bb9c0b81e58f8f6c7eae0180d1a5a88aea70c7c576b0c9c42bec"
     },
     {
       "key": "scheduled",
       "name": "mscqr_rls_cert_scheduled",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:368de62f0a051565d9e66ad9009be98b9f4776a1d3d1f22d628ee96b810116de"
+      "marker": "mscqr-full-rls-clean-room:certification:2b6c9f74f2d3bb9c0b81e58f8f6c7eae0180d1a5a88aea70c7c576b0c9c42bec"
     },
     {
       "key": "operator",
       "name": "mscqr_rls_cert_operator",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:368de62f0a051565d9e66ad9009be98b9f4776a1d3d1f22d628ee96b810116de"
+      "marker": "mscqr-full-rls-clean-room:certification:2b6c9f74f2d3bb9c0b81e58f8f6c7eae0180d1a5a88aea70c7c576b0c9c42bec"
     },
     {
       "key": "migration",
       "name": "mscqr_rls_cert_migration",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:368de62f0a051565d9e66ad9009be98b9f4776a1d3d1f22d628ee96b810116de"
+      "marker": "mscqr-full-rls-clean-room:certification:2b6c9f74f2d3bb9c0b81e58f8f6c7eae0180d1a5a88aea70c7c576b0c9c42bec"
     }
   ]
 }

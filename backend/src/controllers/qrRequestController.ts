@@ -1,11 +1,9 @@
 import { Response } from "express";
 import { z } from "zod";
 import { NotificationAudience, NotificationChannel, QrAllocationRequestStatus, UserRole } from "@prisma/client";
-import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
-import { createAuditLog } from "../services/auditService";
 import { createRoleNotifications, createUserNotification } from "../services/notificationService";
-import { approveAllocationRequest } from "../rls-waves/session-c/c01/qrSystemRepository";
+import { approveAllocationRequest, createAllocationRequest, listAllocationRequests, rejectAllocationRequest, isQrBoundaryDenied } from "../rls-waves/session-c/c01/qrSystemRepository";
 import { b03BoundaryForRequest } from "../rls-waves/session-b/b03/requestBoundary";
 
 const createRequestSchema = z
@@ -36,6 +34,23 @@ const ensureAuth = (req: AuthRequest) => {
   return { role, userId };
 };
 
+const boundary = (req: AuthRequest) => ({
+  capability: req.databaseSessionCapability || "",
+  requestId: (req as AuthRequest & { requestId?: string }).requestId || "",
+});
+const requestFailure = (res: Response, error: unknown) => {
+  if (isQrBoundaryDenied(error)) return res.status(403).json({ success: false, error: "Access denied" });
+  const message = String((error as any)?.meta?.message || (error as any)?.message || "");
+  if (message.includes("QR_REQUEST_ALREADY_PROCESSED")) return res.status(409).json({ success: false, error: "Request already processed" });
+  if (message.includes("QR_INVALID_INPUT")) return res.status(400).json({ success: false, error: "Invalid request" });
+  return res.status(500).json({ success: false, error: "Unable to process QR request" });
+};
+const notifyAfterCommit = async (notifications: Promise<unknown>[]) => {
+  const results = await Promise.allSettled(notifications);
+  const failed = results.filter(result => result.status === "rejected").length;
+  if (failed) console.warn("[qr-allocation] committed operation has undelivered notifications", { failed });
+};
+
 export const createQrAllocationRequest = async (req: AuthRequest, res: Response) => {
   try {
     const auth = ensureAuth(req);
@@ -43,7 +58,6 @@ export const createQrAllocationRequest = async (req: AuthRequest, res: Response)
 
     if (
       auth.role !== UserRole.LICENSEE_ADMIN &&
-      auth.role !== UserRole.ORG_ADMIN &&
       auth.role !== UserRole.SUPER_ADMIN &&
       auth.role !== UserRole.PLATFORM_SUPER_ADMIN
     ) {
@@ -64,33 +78,10 @@ export const createQrAllocationRequest = async (req: AuthRequest, res: Response)
       return res.status(403).json({ success: false, error: "No licensee association" });
     }
 
-    const created = await prisma.qrAllocationRequest.create({
-      data: {
-        licenseeId,
-        requestedByUserId: auth.userId,
-        quantity: parsed.data.quantity,
-        startNumber: null,
-        endNumber: null,
-        batchName: parsed.data.batchName.trim(),
-        note: parsed.data.note?.trim() || null,
-        status: QrAllocationRequestStatus.PENDING,
-      },
-    });
+    const created = await createAllocationRequest({ ...boundary(req), ...parsed.data,
+      licenseeId: parsed.data.licenseeId || licenseeId });
 
-    await createAuditLog({
-      userId: auth.userId,
-      licenseeId,
-      action: "CREATE_QR_ALLOCATION_REQUEST",
-      entityType: "QrAllocationRequest",
-      entityId: created.id,
-      details: {
-        quantity: created.quantity,
-        batchName: created.batchName || null,
-      },
-      ipAddress: req.ip,
-    });
-
-    await Promise.all([
+    await notifyAfterCommit([
       createRoleNotifications({
         databaseBoundary: b03BoundaryForRequest(req, "notification-write"),
         audience: NotificationAudience.SUPER_ADMIN,
@@ -129,7 +120,7 @@ export const createQrAllocationRequest = async (req: AuthRequest, res: Response)
     return res.status(201).json({ success: true, data: created });
   } catch (e: any) {
     console.error("createQrAllocationRequest error:", e);
-    return res.status(400).json({ success: false, error: e?.message || "Bad request" });
+    return requestFailure(res, e);
   }
 };
 
@@ -140,43 +131,25 @@ export const getQrAllocationRequests = async (req: AuthRequest, res: Response) =
 
     if (
       auth.role !== UserRole.LICENSEE_ADMIN &&
-      auth.role !== UserRole.ORG_ADMIN &&
       auth.role !== UserRole.SUPER_ADMIN &&
       auth.role !== UserRole.PLATFORM_SUPER_ADMIN
     ) {
       return res.status(403).json({ success: false, error: "Access denied" });
     }
 
-    const status = (req.query.status as QrAllocationRequestStatus | undefined) || undefined;
-    const qLicenseeId = (req.query.licenseeId as string | undefined) || undefined;
-
-    const where: any = {};
-    if (status) where.status = status;
-
-    if (auth.role === UserRole.SUPER_ADMIN || auth.role === UserRole.PLATFORM_SUPER_ADMIN) {
-      if (qLicenseeId) where.licenseeId = qLicenseeId;
-    } else {
-      if (!req.user?.licenseeId) {
-        return res.status(403).json({ success: false, error: "No licensee association" });
-      }
-      where.licenseeId = req.user.licenseeId;
-    }
-
-    const rows = await prisma.qrAllocationRequest.findMany({
-      where,
-      orderBy: { createdAt: "desc" },
-      include: {
-        licensee: { select: { id: true, name: true, prefix: true } },
-        requestedByUser: { select: { id: true, name: true, email: true } },
-        approvedByUser: { select: { id: true, name: true, email: true } },
-        rejectedByUser: { select: { id: true, name: true, email: true } },
-      },
-    });
+    const parsed = z.object({
+      status: z.nativeEnum(QrAllocationRequestStatus).optional(),
+      licenseeId: z.string().uuid().optional(),
+      limit: z.coerce.number().int().min(1).max(200).default(100),
+      offset: z.coerce.number().int().min(0).max(10000).default(0),
+    }).strict().safeParse(req.query);
+    if (!parsed.success) return res.status(400).json({ success: false, error: "Invalid request filters" });
+    const rows = await listAllocationRequests({ ...boundary(req), ...parsed.data });
 
     return res.json({ success: true, data: rows });
   } catch (e) {
     console.error("getQrAllocationRequests error:", e);
-    return res.status(500).json({ success: false, error: "Internal server error" });
+    return requestFailure(res, e);
   }
 };
 
@@ -216,7 +189,7 @@ export const approveQrAllocationRequest = async (req: AuthRequest, res: Response
     const requestRow = result.request;
     const quantityRequested = requestRow.quantity;
 
-    await Promise.all([
+    await notifyAfterCommit([
       createRoleNotifications({
         databaseBoundary: b03BoundaryForRequest(req, "notification-write"),
         audience: NotificationAudience.SUPER_ADMIN,
@@ -276,7 +249,7 @@ export const approveQrAllocationRequest = async (req: AuthRequest, res: Response
     if (String(msg).includes("BATCH_BUSY") || String(msg).toLowerCase().includes("concurrency issue")) {
       return res.status(409).json({ success: false, error: "Please retry — batch busy." });
     }
-    return res.status(400).json({ success: false, error: msg });
+    return requestFailure(res, e);
   }
 };
 
@@ -298,33 +271,10 @@ export const rejectQrAllocationRequest = async (req: AuthRequest, res: Response)
       return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid request id" });
     }
     const id = paramsParsed.data.id;
-    const requestRow = await prisma.qrAllocationRequest.findUnique({ where: { id } });
-    if (!requestRow) return res.status(404).json({ success: false, error: "Request not found" });
-    if (requestRow.status !== QrAllocationRequestStatus.PENDING) {
-      return res.status(409).json({ success: false, error: "Request already processed" });
-    }
+    const updated = await rejectAllocationRequest({ ...boundary(req), allocationRequestId: id, ...parsed.data });
+    const requestRow = updated;
 
-    const updated = await prisma.qrAllocationRequest.update({
-      where: { id },
-      data: {
-        status: QrAllocationRequestStatus.REJECTED,
-        rejectedByUserId: auth.userId,
-        rejectedAt: new Date(),
-        decisionNote: parsed.data.decisionNote?.trim() || null,
-      },
-    });
-
-    await createAuditLog({
-      userId: auth.userId,
-      licenseeId: requestRow.licenseeId,
-      action: "REJECT_QR_ALLOCATION_REQUEST",
-      entityType: "QrAllocationRequest",
-      entityId: id,
-      details: { decisionNote: parsed.data.decisionNote?.trim() || null },
-      ipAddress: req.ip,
-    });
-
-    await Promise.all([
+    await notifyAfterCommit([
       createRoleNotifications({
         databaseBoundary: b03BoundaryForRequest(req, "notification-write"),
         audience: NotificationAudience.SUPER_ADMIN,
@@ -377,6 +327,6 @@ export const rejectQrAllocationRequest = async (req: AuthRequest, res: Response)
     return res.json({ success: true, data: updated });
   } catch (e: any) {
     console.error("rejectQrAllocationRequest error:", e);
-    return res.status(400).json({ success: false, error: e?.message || "Bad request" });
+    return requestFailure(res, e);
   }
 };

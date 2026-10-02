@@ -545,6 +545,7 @@ export function createApiClientCore(): ApiClientCore {
         if (response.status >= 500) {
           reportSupportRuntimeIssue({
             source: "network",
+            endpoint,
             message: `Server error (${response.status}) on ${method} ${endpoint}`,
           });
         }
@@ -560,7 +561,8 @@ export function createApiClientCore(): ApiClientCore {
         };
       }
 
-      pushNetworkLog({ status: response.status, ok: true });
+      pushNetworkLog({ status: response.status, ok: payload?.success !== false,
+        error: payload?.success === false ? payload.errorCode || payload.code || "Controlled unsuccessful response" : undefined });
       endpointCooldowns.delete(cooldownKey);
 
       if (payload && typeof payload === "object" && "success" in payload) {
@@ -587,6 +589,7 @@ export function createApiClientCore(): ApiClientCore {
       pushNetworkLog({ status: null, ok: false, error: message });
       reportSupportRuntimeIssue({
         source: "network",
+        endpoint,
         message: `${method} ${endpoint}: ${message}`,
       });
       return {

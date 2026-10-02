@@ -405,6 +405,71 @@ async function main() {
   denied(worker, `SELECT app_rls.printing_test_label_job(NULL,'${requestId()}','CLAIM','${ids.printer}','{}'::jsonb,'{}'::jsonb)`);
   assert.doesNotThrow(() => psql(worker, `SELECT app_rls.printing_worker_reconcile('RECONCILE_BATCHES','${requestId()}',10)`));
 
+  // A non-subject list must reach its unchanged tenant/actor authorization branch.
+  const reissueId="50000000-0000-4000-8000-000000000901";
+  psql(admin, `INSERT INTO public."PrintReissueRequest"(id,"originalPrintJobId","requestedByUserId","licenseeId","manufacturerId","batchId","requestedByRole","targetApproverRole",reason,"updatedAt")
+    VALUES('${reissueId}','${created.job.id}','${ids.maker}','${ids.licenseeA}','${ids.maker}','${ids.batch}','MANUFACTURER_ADMIN','LICENSEE_ADMIN','Local list certification',now())`);
+  const listSql=(cap,subject="NULL",options="{}")=>`SELECT app_rls.printing_readiness('${cap}','printing-readiness','${requestId()}','REISSUE_LIST',${subject},'${options}'::jsonb)`;
+  assert(json(app,listSql(caps.checker)).some(row=>row.id===reissueId));
+  assert(json(app,listSql(caps.maker)).some(row=>row.id===reissueId));
+  assert.deepEqual(json(app,listSql(caps.outsider)),[]);
+  psql(admin,`UPDATE public."User" SET "orgId"='${ids.orgB}' WHERE id='${ids.checker}'`);
+  assert.deepEqual(json(app,listSql(caps.checker)),[]);
+  psql(admin,`UPDATE public."User" SET "orgId"='${ids.orgA}' WHERE id='${ids.checker}'; UPDATE public."Licensee" SET "isActive"=false WHERE id='${ids.licenseeA}'`);
+  assert.deepEqual(json(app,listSql(caps.checker)),[]);
+  assert.deepEqual(json(app,listSql(caps.maker)),[]);
+  psql(admin,`UPDATE public."Licensee" SET "isActive"=true WHERE id='${ids.licenseeA}'`);
+  assert(json(app,listSql(caps.checker,"'00000000-0000-4000-8000-000000000000'")).some(row=>row.id===reissueId));
+  assert.deepEqual(json(app,`SET app.role='SUPER_ADMIN'; SET app.printing_licensee_id='${ids.licenseeA}'; ${listSql(caps.outsider)}`),[]);
+  denied(app,listSql("")); denied(app,listSql("Z".repeat(43)));
+  denied(app,`SET app.auth_session_verified='1'; SET app.printing_role='SUPER_ADMIN'; ${listSql("")}`);
+  denied(app,`SELECT * FROM public."PrintReissueRequest" LIMIT 1`);
+  psql(admin,`UPDATE public."User" SET role='MANUFACTURER_ADMIN' WHERE id='${ids.outsider}'`);
+  assert.deepEqual(json(app,listSql(caps.outsider)),[]);
+  psql(admin,`UPDATE public."User" SET role='ORG_ADMIN' WHERE id='${ids.outsider}'`);
+  denied(app,listSql(caps.outsider));
+  psql(admin,`UPDATE public."User" SET role='LICENSEE_ADMIN' WHERE id='${ids.outsider}'`);
+  for(const role of ['SUPER_ADMIN','PLATFORM_SUPER_ADMIN']) {
+    psql(admin,`UPDATE public."User" SET role='${role}' WHERE id='${ids.checker}'`);
+    assert(json(app,listSql(caps.checker,"NULL",'{"limit":1}')).some(row=>row.id===reissueId));
+    assert(json(app,listSql(caps.checker,"NULL",'{"limit":10000}')).length<=200);
+  }
+  psql(admin,`UPDATE public."User" SET role='LICENSEE_ADMIN',"isActive"=false WHERE id='${ids.checker}'`);
+  denied(app,listSql(caps.checker));
+  psql(admin,`UPDATE public."User" SET "isActive"=true WHERE id='${ids.checker}'; UPDATE public."RefreshToken" SET "sessionCapabilityRevokedAt"=now() WHERE id='${ids.checkerRefresh}'`);
+  denied(app,listSql(caps.checker));
+  psql(admin,`UPDATE public."RefreshToken" SET "sessionCapabilityRevokedAt"=NULL WHERE id='${ids.checkerRefresh}'`);
+
+  process.env.NODE_ENV="test";
+  process.env.JWT_SECRET="local-printing-http-certification-secret-only";
+  process.env.DATABASE_URL=app;
+  const { createBackendApp }=require("../../../dist/app");
+  const { signAccessToken }=require("../../../dist/services/auth/tokenService");
+  const { sealCookieToken }=require("../../../dist/services/auth/cookieTokenProtectionService");
+  const server=await new Promise(resolve=>{const server=createBackendApp().listen(0,"127.0.0.1",()=>resolve(server));});
+  const httpList=async(name,expected,extraHeaders={})=>{
+    const role=name==="maker"?"MANUFACTURER_ADMIN":"LICENSEE_ADMIN";
+    const scopeVersion=name==="maker"?psql(admin,`SELECT to_char("updatedAt" AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') FROM public."ManufacturerLicenseeLink" WHERE "manufacturerId"='${ids.maker}' AND "licenseeId"='${ids.licenseeA}'`):null;
+    const headers=name?{
+      authorization:`Bearer ${signAccessToken({userId:ids[name],email:"printing-http@example.invalid",role,sessionId:ids[`${name}Refresh`],orgId:name==="outsider"?ids.orgB:ids.orgA,licenseeId:name==="outsider"?ids.licenseeB:ids.licenseeA,scopeVersion})}`,
+      "x-database-session-capability":sealCookieToken(caps[name],"auth.database-session"),...extraHeaders,
+    }:extraHeaders;
+    const response=await fetch(`http://127.0.0.1:${server.address().port}/api/manufacturer/print-reissue-requests`,{headers});
+    assert.equal(response.status,expected,`printing list HTTP status ${response.status}`);
+    return response.json();
+  };
+  try {
+    assert((await httpList("checker",200)).data.some(row=>row.id===reissueId));
+    assert((await httpList("maker",200)).data.some(row=>row.id===reissueId));
+    await httpList("checker",403,{"x-request-id":"not-a-uuid"});
+    assert.deepEqual((await httpList("outsider",200)).data,[]);
+    await httpList(null,401);
+    await httpList("checker",401,{"x-database-session-capability":"invalid"});
+    psql(admin,`UPDATE public."User" SET "isActive"=false WHERE id='${ids.checker}'`);
+    await httpList("checker",401);
+    psql(admin,`UPDATE public."User" SET "isActive"=true WHERE id='${ids.checker}'`);
+  } finally { await new Promise(resolve=>server.close(resolve)); }
+
   const catalog = json(admin, `SELECT jsonb_build_object(
     'force',(SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
       WHERE n.nspname='public' AND c.relname IN ('Batch','QRCode','PrintJob','PrintSession','PrintItem','Printer','PrinterRegistration')

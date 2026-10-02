@@ -175,7 +175,7 @@ DECLARE
 BEGIN
   IF p_purpose<>'printing-readiness'
      OR p_operation NOT IN ('BATCH','JOB','JOB_LIST','ATTENTION_QUEUE','RELEASE','REISSUE','REISSUE_REQUEST','REISSUE_LIST','PRINTABLE_ITEMS','PRINTER','PRINTER_LIST','PRINTER_STATUS','VALIDATION_EVIDENCE')
-     OR p_subject_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+     OR (p_operation<>'REISSUE_LIST' AND (p_subject_id IS NULL OR p_subject_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'))
      OR jsonb_typeof(coalesce(p_options,'{}'::jsonb))<>'object'
   THEN RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
 
@@ -191,7 +191,7 @@ BEGIN
     SELECT r."batchId" INTO STRICT target_batch_id FROM public."PrintReissueRequest" r WHERE r.id=p_subject_id;
   ELSIF p_operation IN ('PRINTER','PRINTER_LIST','PRINTER_STATUS') THEN
     target_batch_id:=p_options->>'batchId';
-  ELSIF p_operation NOT IN ('JOB_LIST','ATTENTION_QUEUE') THEN
+  ELSIF p_operation NOT IN ('JOB_LIST','ATTENTION_QUEUE','REISSUE_LIST') THEN
     target_batch_id:=p_subject_id;
   END IF;
   IF target_batch_id IS NOT NULL THEN
@@ -618,12 +618,14 @@ BEGIN
         ) AS "originalPrintJob"
         FROM public."PrintReissueRequest" r
         JOIN public."PrintJob" j ON j.id=r."originalPrintJobId"
-        JOIN public."Batch" b ON b.id=j."batchId"
+        JOIN public."Batch" b ON b.id=j."batchId" AND b.id=r."batchId" AND b."licenseeId"=r."licenseeId"
+        JOIN public."Licensee" l ON l.id=b."licenseeId" AND l."isActive" AND l."suspendedAt" IS NULL
+        JOIN public."Organization" o ON o.id=l."orgId" AND o."isActive"
         JOIN public."Printer" p ON p.id=j."printerId"
         WHERE (nullif(p_options->>'status','') IS NULL OR r.status::text=p_options->>'status')
           AND (
             actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
-            OR (actor.role='LICENSEE_ADMIN' AND r."licenseeId"=actor."licenseeId")
+            OR (actor.role='LICENSEE_ADMIN' AND r."licenseeId"=actor."licenseeId" AND l."orgId"=actor."organizationId")
             OR (actor.role='MANUFACTURER_ADMIN' AND r."requestedByUserId"=actor."userId")
           )
         ORDER BY r."createdAt" DESC,r.id DESC
