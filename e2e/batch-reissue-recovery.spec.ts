@@ -453,7 +453,8 @@ test.describe("batch operations reissue recovery", () => {
     const brandPage = await brandContext.newPage();
     await installBatchReissueMocks(brandPage, "licensee_admin", state);
     await brandPage.goto("/batches");
-    await brandPage.getByText("Factory Recovery Batch").first().click();
+    // Brand workspaces group manufacturer allocations under their source batch.
+    await brandPage.getByText("Launch Source Batch").first().click();
     await brandPage.getByRole("tab", { name: "Operations" }).click();
     await expect(brandPage.getByText("Requested 5 labels")).toBeVisible();
     await expect(brandPage.getByText("Range QR-000006 to QR-000010", { exact: true }).first()).toBeVisible();

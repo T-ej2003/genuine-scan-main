@@ -486,6 +486,16 @@ test.describe.serial("Enterprise smoke flows", () => {
     await expect(targetBatchRow).toBeVisible({ timeout: 30_000 });
     const createPrintJobButton = targetBatchRow.getByTestId("manufacturer-create-print-job").first();
     await expect(createPrintJobButton).toBeVisible();
+    // Onboarding can open after the batch rows load; dismiss it through its UI.
+    const printerOnboarding = page.getByRole("dialog", { name: "Set up printing on this computer" });
+    await expect(async () => {
+      if (await printerOnboarding.isVisible()) {
+        await printerOnboarding.getByRole("button", { name: "Close for now" }).click();
+        await expect(printerOnboarding).toBeHidden();
+      }
+      // Trial action checks the overlay without creating/replaying a print job.
+      await createPrintJobButton.click({ trial: true, timeout: 1_000 });
+    }).toPass({ timeout: 20_000 });
     await createPrintJobButton.click();
 
     await expect(page.getByTestId("create-print-job-dialog")).toBeVisible();
