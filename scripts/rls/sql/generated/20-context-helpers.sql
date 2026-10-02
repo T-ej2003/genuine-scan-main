@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='45714722f0f19266f47f1323483e3796734ea5ff5042057653ac73e171facf45'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:45714722f0f19266f47f1323483e3796734ea5ff5042057653ac73e171facf45'
+    AND source_contract_sha256='07673b057575f357f57ebe460ae3952f596a7e3fd3e93b0a8dd3a1c141f7c083'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:07673b057575f357f57ebe460ae3952f596a7e3fd3e93b0a8dd3a1c141f7c083'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:45714722f0f19266f47f1323483e3796734ea5ff5042057653ac73e171facf45')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:07673b057575f357f57ebe460ae3952f596a7e3fd3e93b0a8dd3a1c141f7c083')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -7050,7 +7050,7 @@ BEGIN
   INSERT INTO public."QrAllocationRequest"(id,"licenseeId","requestedByUserId",quantity,"batchName",note,status,"updatedAt")
     VALUES(new_id,tenant_id,actor."userId",p_quantity,btrim(p_batch_name),nullif(btrim(p_note),''),'PENDING',transaction_timestamp());
   PERFORM app_rls.qr_write_audit(actor."userId",actor."organizationId",tenant_id,'CREATE_QR_ALLOCATION_REQUEST','QrAllocationRequest',new_id,
-    jsonb_build_object('quantity',p_quantity));
+    jsonb_build_object('quantity',p_quantity,'batchName',btrim(p_batch_name)));
   SELECT jsonb_build_object('id',r.id,'licenseeId',r."licenseeId",'requestedByUserId',r."requestedByUserId",
     'quantity',r.quantity,'batchName',r."batchName",'note',r.note,'status',r.status,'createdAt',r."createdAt")
     INTO result FROM public."QrAllocationRequest" r WHERE r.id=new_id;
@@ -7061,11 +7061,15 @@ $fn$;
 CREATE OR REPLACE FUNCTION app_rls.qr_reject_allocation_request(
   p_capability text,p_purpose text,p_request_id text,p_allocation_request_id text,p_decision_note text
 ) RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
-DECLARE actor record; request_row record;
+DECLARE actor record; request_row record; canonical_note text;
 BEGIN
   IF p_purpose IS DISTINCT FROM 'qr-allocation-request-reject' OR p_allocation_request_id IS NULL
      OR p_allocation_request_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
      OR length(coalesce(p_decision_note,''))>500 THEN RAISE EXCEPTION 'QR_INVALID_INPUT'; END IF;
+  -- Same whitespace set as JavaScript trim; plain text, never executable markup.
+  canonical_note:=nullif(btrim(regexp_replace(p_decision_note,U&'[\0001-\0008\000B\000C\000E-\001F\007F]','','g'),E' \t\n\r\f\013'||U&'\00A0\1680\2000\2001\2002\2003\2004\2005\2006\2007\2008\2009\200A\2028\2029\202F\205F\3000\FEFF'),'');
+  -- The HTTP schema's maximum is 500 UTF-16 code units, including astral Unicode.
+  IF length(regexp_replace(coalesce(canonical_note,''),U&'[\+010000-\+10FFFF]','xx','g'))>500 THEN RAISE EXCEPTION 'QR_INVALID_INPUT'; END IF;
   SELECT * INTO STRICT actor FROM app_rls.qr_bind_actor(p_capability,p_purpose,p_request_id,NULL);
   IF actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR current_setting('app.auth_assurance',true)<>'mfa-verified' THEN
     RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501';
@@ -7080,12 +7084,12 @@ BEGIN
   SELECT * INTO STRICT actor FROM app_rls.qr_bind_actor(p_capability,p_purpose,p_request_id,request_row."licenseeId");
   PERFORM set_config('app.qr_target_request_id',request_row.id,true);
   UPDATE public."QrAllocationRequest" SET status='REJECTED',"rejectedByUserId"=actor."userId",
-    "rejectedAt"=transaction_timestamp(),"decisionNote"=nullif(btrim(p_decision_note),''),"updatedAt"=transaction_timestamp()
+    "rejectedAt"=transaction_timestamp(),"decisionNote"=canonical_note,"updatedAt"=transaction_timestamp()
     WHERE id=request_row.id;
   PERFORM app_rls.qr_write_audit(actor."userId",actor."organizationId",request_row."licenseeId",'REJECT_QR_ALLOCATION_REQUEST',
-    'QrAllocationRequest',request_row.id,'{}'::jsonb);
+    'QrAllocationRequest',request_row.id,jsonb_build_object('decisionNote',canonical_note));
   RETURN jsonb_build_object('id',request_row.id,'licenseeId',request_row."licenseeId",'requestedByUserId',request_row."requestedByUserId",
-    'status','REJECTED','decisionNote',nullif(btrim(p_decision_note),''));
+    'status','REJECTED','decisionNote',canonical_note);
 END
 $fn$;
 

@@ -277,6 +277,41 @@ async function main(){
   assert.deepEqual(Object.keys(rejectedRow.requestedByUser).sort(),["email","id","name"]);
   denied(reject(caps.platform,incidentRequest.id),/QR_REQUEST_ALREADY_PROCESSED/);
   denied(`SELECT app_rls.qr_approve_allocation_request('${caps.platform}','qr-allocation-request-approve','${requestId}','${incidentRequest.id}',NULL)`,/QR_REQUEST_ALREADY_PROCESSED/);
+  // Canonical immutable metadata, real runtime identity and atomic failure injection.
+  const literal=value=>value===null?"NULL":`'${value.replaceAll("'","''")}'`;
+  const rejectNote=(id,note)=>`SELECT app_rls.qr_reject_allocation_request('${caps.platform}','qr-allocation-request-reject','${requestId}','${id}',${literal(note)})`;
+  const audit=id=>JSON.parse(last(bootstrap,`SELECT coalesce(jsonb_agg(jsonb_build_object('details',details,'id',id)),'[]'::jsonb)::text FROM public."AuditLog" WHERE "entityId"='${id}' AND action='REJECT_QR_ALLOCATION_REQUEST'`));
+  const mutable=id=>JSON.parse(last(bootstrap,`SELECT jsonb_build_object('status',status,'note',"decisionNote")::text FROM public."QrAllocationRequest" WHERE id='${id}'`));
+  const createDetails=JSON.parse(last(bootstrap,`SELECT details::text FROM public."AuditLog" WHERE "entityId"='${incidentRequest.id}' AND action='CREATE_QR_ALLOCATION_REQUEST'`));
+  assert.deepEqual(createDetails,{quantity:10,batchName:"Incident certification"});
+  const notes=["  ordinary reason  ",null,""," \t\n ","x".repeat(500),"界".repeat(500),"😀".repeat(250),"quotes ' \" \\ and \u001b control","<script>alert('not executable')</script>","first line\nsecond line\r\nthird","\u00a0\u2000\ufeff canonical \u2029\u3000"];
+  for(const note of notes){
+    const row=JSON.parse(last(app,create(caps.tenant)));
+    const expected=note?.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g,"").trim()||null;
+    const result=JSON.parse(last(app,rejectNote(row.id,note)));
+    assert.equal(result.decisionNote,expected);
+    assert.deepEqual(mutable(row.id),{status:"REJECTED",note:expected});
+    assert.deepEqual(audit(row.id).map(event=>event.details),[{decisionNote:expected}]);
+    denied(rejectNote(row.id,note),/QR_REQUEST_ALREADY_PROCESSED/);
+    assert.equal(audit(row.id).length,1);
+    // Later mutable edits do not erase the original immutable decision reason.
+    run(bootstrap,`UPDATE public."QrAllocationRequest" SET "decisionNote"='later mutable edit' WHERE id='${row.id}'`);
+    assert.deepEqual(audit(row.id)[0].details,{decisionNote:expected});
+    assert.equal(Number(last(bootstrap,`SELECT count(*) FROM public."SecurityEventOutbox" WHERE payload->>'id'='${audit(row.id)[0].id}'`)),1);
+  }
+  const rolledBack=JSON.parse(last(app,create(caps.tenant)));
+  run(app,`BEGIN; ${rejectNote(rolledBack.id,"rollback reason")}; ROLLBACK`);
+  assert.deepEqual(mutable(rolledBack.id),{status:"PENDING",note:null}); assert.deepEqual(audit(rolledBack.id),[]);
+  for(const note of ["x".repeat(501),"😀".repeat(251)]){
+    denied(rejectNote(rolledBack.id,note),/QR_INVALID_INPUT/);
+    assert.deepEqual(mutable(rolledBack.id),{status:"PENDING",note:null}); assert.deepEqual(audit(rolledBack.id),[]);
+  }
+  run(bootstrap,`CREATE FUNCTION public.startex_test_audit_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.payload->>'entityId'='${rolledBack.id}' AND NEW.payload->>'action'='REJECT_QR_ALLOCATION_REQUEST' THEN RAISE EXCEPTION 'STARTEX_TEST_OUTBOX_FAILURE'; END IF; RETURN NEW; END $$;
+    CREATE TRIGGER startex_test_audit_failure BEFORE INSERT ON public."SecurityEventOutbox" FOR EACH ROW EXECUTE FUNCTION public.startex_test_audit_failure()`);
+  denied(rejectNote(rolledBack.id,"must roll back"),/STARTEX_TEST_OUTBOX_FAILURE/);
+  assert.deepEqual(mutable(rolledBack.id),{status:"PENDING",note:null}); assert.deepEqual(audit(rolledBack.id),[]);
+  run(bootstrap,`DROP TRIGGER startex_test_audit_failure ON public."SecurityEventOutbox"; DROP FUNCTION public.startex_test_audit_failure()`);
+  denied(`UPDATE public."AuditLog" SET details='{}'::jsonb`,/permission denied/);
   for(const table of ["QrAllocationRequest","QrScanLog","VerificationDecision","CustomerTrustCredential"]){
     denied(`SELECT * FROM public."${table}" LIMIT 1`,/permission denied/);
   }
@@ -361,7 +396,14 @@ async function main(){
     await http("tenant",`/qr/requests/${made.data.id}/approve`,"POST",{},403);
     await http("platform",`/qr/requests/${made.data.id}/approve`,"POST",{decisionNote:"Approved fixture"});
     const toReject=await http("tenant","/qr/requests","POST",{quantity:2,batchName:"HTTP rejection"},201);
-    await http("platform",`/qr/requests/${toReject.data.id}/reject`,"POST",{decisionNote:"Rejected fixture"});
+    for(const note of [null,"x".repeat(501),"😀".repeat(251)]){
+      await http("platform",`/qr/requests/${toReject.data.id}/reject`,"POST",{decisionNote:note},400);
+      assert.equal(mutable(toReject.data.id).status,"PENDING"); assert.deepEqual(audit(toReject.data.id),[]);
+    }
+    await http("platform",`/qr/requests/${toReject.data.id}/reject`,"POST",{decisionNote:" \tRejected\u0000 fixture\u001b\n "});
+    assert.deepEqual(audit(toReject.data.id).map(event=>event.details),[{decisionNote:"Rejected fixture"}]);
+    await http("platform",`/qr/requests/${toReject.data.id}/reject`,"POST",{decisionNote:"retry"},409);
+    assert.equal(audit(toReject.data.id).length,1);
     const attribution=(await http("tenant","/qr/requests")).data;
     const approved=attribution.find(row=>row.id===made.data.id), rejected=attribution.find(row=>row.id===toReject.data.id);
     assert.equal(approved.approvedByUser.name,"QR Platform"); assert.equal(approved.decisionNote,"Approved fixture");

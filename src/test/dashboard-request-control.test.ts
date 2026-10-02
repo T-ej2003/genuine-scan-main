@@ -48,7 +48,7 @@ describe("dashboard request control", () => {
       minRefreshMs: 0,
       bypassCache: true,
     });
-    const state = getDashboardRequestControlState().find((entry) => entry.key === "audit:logs:test");
+    const state = getDashboardRequestControlState().find((entry) => entry.key.startsWith("audit:logs:test:"));
 
     expect(first.success).toBe(true);
     expect(second.success).toBe(true);

@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { clientSecurityScope, getRequestCoordinatorScope, isRequestCoordinatorUserCurrent, onRequestCoordinatorScopeChange } from "@/lib/api/request-coordinator";
 
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { useAuth } from "@/contexts/AuthContext";
@@ -70,10 +71,18 @@ export default function QRTracking() {
 
   const isSuperAdmin = user?.role === "super_admin";
   const scopedLicenseeId = isSuperAdmin && filters.licenseeId !== "all" ? filters.licenseeId : undefined;
+  const securityScope = useSyncExternalStore(onRequestCoordinatorScopeChange, getRequestCoordinatorScope, getRequestCoordinatorScope);
+  const effectiveScope = JSON.stringify([securityScope, clientSecurityScope(user), isSuperAdmin ? filters.licenseeId : null]);
+  const currentScope = useRef(effectiveScope);
+  currentScope.current = effectiveScope;
+  const [resultScope, setResultScope] = useState("");
+  const [mapScope, setMapScope] = useState("");
+  const scopeIsCurrent = resultScope === effectiveScope && isRequestCoordinatorUserCurrent(user);
   const loadSequence = useRef(0);
 
   const load = async (opts?: { silent?: boolean; override?: Partial<TrackingFilterState> }) => {
     const sequence = ++loadSequence.current;
+    if (!user || !isRequestCoordinatorUserCurrent(user) || securityScope !== getRequestCoordinatorScope()) return;
     if (!opts?.silent) {
       setLoading(true);
       setError(null);
@@ -96,12 +105,13 @@ export default function QRTracking() {
         limit: 200,
       });
 
-      if (sequence !== loadSequence.current) return;
+      if (sequence !== loadSequence.current || currentScope.current !== effectiveScope || securityScope !== getRequestCoordinatorScope()) return;
       if (!response.success || !response.data) {
         throw new Error(response.error || "Failed to load tracking analytics");
       }
 
       const payload: any = response.data;
+      setResultScope(effectiveScope);
       setSummary(Array.isArray(payload.batches) ? payload.batches : []);
       setLogs(Array.isArray(payload.logs) ? payload.logs : []);
       setAnalyticsTotals({
@@ -127,7 +137,8 @@ export default function QRTracking() {
         knownDeviceEvents: Number(payload.eventSummary?.knownDeviceEvents || 0),
       });
     } catch (nextError: any) {
-      if (sequence !== loadSequence.current) return;
+      if (sequence !== loadSequence.current || currentScope.current !== effectiveScope || securityScope !== getRequestCoordinatorScope()) return;
+      setResultScope(effectiveScope);
       setError(nextError?.message || "Failed to load tracking data");
       setSummary([]);
       setLogs([]);
@@ -160,16 +171,19 @@ export default function QRTracking() {
 
   useEffect(() => {
     void load();
+    return () => { loadSequence.current += 1; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.role, user?.licenseeId]);
+  }, [effectiveScope]);
 
   useEffect(() => {
+    setLicensees([]);
     if (!isSuperAdmin) return;
     apiClient.getLicensees().then((response) => {
+      if (securityScope !== getRequestCoordinatorScope()) return;
       if (!response.success) return;
       setLicensees((response.data as any[]) || []);
     });
-  }, [isSuperAdmin]);
+  }, [isSuperAdmin, securityScope]);
 
   useEffect(() => {
     const off = onMutationEvent(() => {
@@ -177,7 +191,7 @@ export default function QRTracking() {
     });
     return off;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters, isSuperAdmin]);
+  }, [filters, effectiveScope]);
 
   const batchNameById = useMemo(() => {
     const map = new Map<string, string>();
@@ -220,21 +234,24 @@ export default function QRTracking() {
   }, [error]);
 
   const openAllocationMap = async (batchId: string) => {
+    setMapScope(effectiveScope);
     setAllocationMapOpen(true);
     setAllocationMapLoading(true);
     setAllocationMap(null);
     try {
       if (isSuperAdmin && !scopedLicenseeId) throw new Error("Select a brand before opening its allocation map.");
       const response = await apiClient.getBatchAllocationMap(batchId, scopedLicenseeId);
+      if (currentScope.current !== effectiveScope || securityScope !== getRequestCoordinatorScope()) return;
       if (!response.success || !response.data) {
         throw new Error(response.error || "Could not load allocation details.");
       }
       setAllocationMap(response.data);
     } catch (nextError: any) {
+      if (currentScope.current !== effectiveScope || securityScope !== getRequestCoordinatorScope()) return;
       setAllocationMapOpen(false);
       setError(nextError?.message || "Could not load allocation details.");
     } finally {
-      setAllocationMapLoading(false);
+      if (currentScope.current === effectiveScope) setAllocationMapLoading(false);
     }
   };
 
@@ -242,28 +259,28 @@ export default function QRTracking() {
     <DashboardLayout>
       <TrackingWorkspace
         role={user?.role || null}
-        loading={loading}
-        error={error}
-        friendlyError={friendlyError}
-        blockedLogCount={eventSummary.blockedEvents}
-        firstScanCount={eventSummary.firstScanEvents}
-        eventSummary={eventSummary}
-        analyticsTotals={analyticsTotals}
-        analyticsTrend={analyticsTrend}
-        scopeMeta={scopeMeta}
+        loading={loading || (!!user && !scopeIsCurrent)}
+        error={scopeIsCurrent ? error : null}
+        friendlyError={scopeIsCurrent ? friendlyError : ""}
+        blockedLogCount={scopeIsCurrent ? eventSummary.blockedEvents : 0}
+        firstScanCount={scopeIsCurrent ? eventSummary.firstScanEvents : 0}
+        eventSummary={scopeIsCurrent ? eventSummary : { totalScanEvents: 0, firstScanEvents: 0, repeatScanEvents: 0, blockedEvents: 0, trustedOwnerEvents: 0, externalEvents: 0, namedLocationEvents: 0, knownDeviceEvents: 0 }}
+        analyticsTotals={scopeIsCurrent ? analyticsTotals : { total: 0, dormant: 0, allocated: 0, printed: 0, redeemed: 0, blocked: 0, created: 0, scanEvents: 0 }}
+        analyticsTrend={scopeIsCurrent ? analyticsTrend : []}
+        scopeMeta={scopeIsCurrent ? scopeMeta : null}
         filters={filters}
         onFiltersChange={setFilters}
         onLoad={load}
         isSuperAdmin={isSuperAdmin}
         scopedLicenseeId={scopedLicenseeId}
         licensees={licensees}
-        summary={filteredSummary}
-        logs={filteredLogs}
+        summary={scopeIsCurrent ? filteredSummary : []}
+        logs={scopeIsCurrent ? filteredLogs : []}
         batchNameById={batchNameById}
         onOpenAllocationMap={openAllocationMap}
-        allocationMapOpen={allocationMapOpen}
+        allocationMapOpen={allocationMapOpen && mapScope === effectiveScope}
         allocationMapLoading={allocationMapLoading}
-        allocationMap={allocationMap}
+        allocationMap={mapScope === effectiveScope ? allocationMap : null}
         onAllocationMapOpenChange={(open) => {
           setAllocationMapOpen(open);
           if (!open) {

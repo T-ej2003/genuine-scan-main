@@ -65,3 +65,56 @@ The historical repository reader is `scripts/aws/production-backend-log-diagnost
 Deploy only through governed Lane B for the database/security changes, then the protected application path. Require full certification, required CI/review, and tenant-authenticated production smoke before customer retest. Do not infer success from ECS health.
 
 Separate follow-up: governed security-preparation upload-artifact digest normalization mismatch. Not changed in this incident. Recommended release hardening: certify reachable protected-table business paths and require authenticated smoke of these exact routes; do not substitute broad privileges or suppress business failures.
+
+## Exact-head closure: a9058584 review counterexamples
+
+### Effective client scope and immutable reason contracts
+
+The request coordinator previously keyed only HTTP parameters, truncated keys at 240 characters and replaced punctuation. Manufacturer-derived tenants therefore shared a cache/dedup entry; long queries could also collide. The existing coordinator now includes the authenticated server projection (actor, raw role, organization, selected licensee, tenant/link versions, active state and non-secret session/assurance identity), a monotonic invalidation generation and losslessly encoded query identity. This also repairs the same affected-path defect in QR stats, batches, dashboard stats and licensee lists. Useful same-scope caching, cooldown and deduplication remain enabled.
+
+Authoritative auth reads cannot themselves use a cached projection. AuthProvider retains its existing refresh throttle/in-flight guard. Login/logout and trusted identity changes invalidate cached and pending reads. Cross-tab messages/storage markers invalidate but never authorize: shared-cookie identity must be refreshed through `/auth/me`. HTTP 304 caching and cooldowns are scope-bound; an authorization-changing refresh cannot automatically replay a previous-scope mutation. Scope is checked after headers **and** asynchronous body parsing. Pages gate rendered data/dialogs by current scope before effects complete; sequence/generation checks suppress obsolete responses, including A→B→A, unmount/remount and StrictMode. Draft decisions are cleared before a new authenticated scope paints. Backend capability/RLS remains authoritative; no client selector grants authority.
+
+Historical rejection details were `{decisionNote: canonicalNoteOrNull}`. Request middleware removes C0 controls (except tab/newline/carriage return), then the schema trims JavaScript whitespace and permits at most 500 UTF-16 code units. Omission is permitted; explicit HTTP null is rejected; the database's optional note is nullable. SQL now applies the same control removal/trim/UTF-16 bound and uses the same canonical value for mutation and immutable audit/outbox. Ordinary Unicode, quotes, backslashes, multiline text and HTML-like text remain inert JSON/plain text, not executable HTML. Existing code had no secret-content redaction policy for decision reasons; this change does not invent one or add authentication fields. PostgreSQL cannot represent NUL; HTTP middleware removes it before SQL. CREATE also restores its historical `{quantity,batchName}` audit details. Existing APPROVE metadata and maker/checker semantics are unchanged. No duplicate controller audit is reintroduced.
+
+### Pass 1 — failure/concurrency injection
+
+Machine tests cover tenant cache hits/misses, delayed/reordered responses, rapid A→B→A, failed/rate-limited B without A fallback, default/explicit manufacturer selection, Licensee Admin, platform selectors, logout and actor/role/org/link/session changes, concurrent scopes, cache expiry/revalidation, remount and StrictMode. They also test the gap between authoritative HTTP scope and React state, cookie-auth 304 reuse, and mutation replay following an identity-changing refresh.
+
+PostgreSQL 18 tests exercise ordinary/null/empty/max-length/Unicode/quoted/control/HTML/multiline notes; invalid HTTP and database notes; exact immutable JSON; later mutable-row edits; retry/duplicate denial; explicit rollback; and injected outbox failure after audit insertion. Successful mutation/audit/outbox commit together; failure preserves neither decision nor audit. Real HTTP proves exactly one rejection event, existing approval, sanitized attribution, manufacturer defaults/multiple selected tenants, activity history, authorization denials and telemetry isolation.
+
+### Pass 2 — fresh attacker review of the complete PR
+
+Every attempt below is blocked by the final code and named executable regression contract; no material counterexample remains unresolved locally.
+
+| # | Attempt | BLOCKED_BY |
+| --- | --- | --- |
+| 1 | Manufacturer B reads cached analytics A without a selector | scoped coordinator; `request-coordinator.test.ts` |
+| 2 | Old A response wins after A→B→A | generation/state ownership + page sequence; coordinator/page tests |
+| 3 | Late B overwrites current A | page scope/reference checks; rapid-switch page test |
+| 4 | React paints A while trusted scope has advanced to B | scope-current render gate; projection-lag page test |
+| 5 | Failed/429 B falls back to A | per-scope last-good state; coordinator/page tests |
+| 6 | Primary/default manufacturer link changes but query does not | link/version identity; default-scope coordinator test |
+| 7 | Platform A/B concurrent selectors dedup together | lossless query identity; concurrent platform client test |
+| 8 | Logout/new user reuses previous cache or pending work | epoch + actor/session identity; coordinator/core tests |
+| 9 | Role/org/active/session/link change retains privileged cached data | authenticated scope dimensions; parameterized coordinator tests |
+| 10 | Long/punctuation-different queries collide | untruncated URI encoding; coordinator key test |
+| 11 | Revalidation or expiry changes tenant identity | scope-bound TTL/force refresh; coordinator test |
+| 12 | StrictMode or remount resurrects stale response | cleanup sequence + scope gate; page tests |
+| 13 | Cookie-auth 304 returns A under B | scoped HTTP cache; core 304 test |
+| 14 | Auth refresh changes actor then replays old mutation | post-refresh scope guard; core mutation-replay test |
+| 15 | Forged cross-tab marker installs foreign authority | invalidate-only marker + authoritative refresh; storage-marker test |
+| 16 | Foreign selector/GUC bypasses capability or ownership | actual runtime identity, live links and FORCE RLS; QR PostgreSQL tests |
+| 17 | Raw control/quoted/script-like reason changes audit structure | shared canonicalization + JSONB construction; note matrix |
+| 18 | Later mutable reason edit erases decision history | original immutable event; PostgreSQL edit-after-rejection tests |
+| 19 | Outbox failure leaves unaudited rejected state | one SQL transaction; injected failure/rollback tests |
+| 20 | Retry or controller duplicates rejection audit | lifecycle lock/state denial, SQL-only audit; real HTTP and SQL counts |
+| 21 | Maker rejects/approves own request or loses MFA | existing separated roles/MFA; QR PostgreSQL lifecycle denials |
+| 22 | Anonymous/inactive/wrong-org/expired/revoked actor reads tenant data | authenticated capability and live actor binding; PostgreSQL denials |
+| 23 | Telemetry suppression hides real QR/printing business failures | narrow classification; support and telemetry tests |
+| 24 | Subject-free reissue listing widens printing role/tenant scope | unchanged role matrix + list ownership predicates; printing PostgreSQL tests |
+
+### Final local evidence and release boundary
+
+QR and printing clean-room PostgreSQL 18.6 UTC certification both passed under the production-equivalent runtime identity. QR evidence contract hash: `07673b057575f357f57ebe460ae3952f596a7e3fd3e93b0a8dd3a1c141f7c083`. Frontend/API/auth/support: 49 tests passed; focused backend auth/tenant/printing/QR/CSRF/telemetry/security suites passed; generated RLS/capability contracts: 24 tests passed. These local results supersede the earlier incomplete-dependency/build observations above; dependencies/versions/lockfiles were not changed for this correction.
+
+Recommendation: retain these invariant regressions in required CI and require fresh review of the exact published head. Bounded caching/pagination remain the scaling mechanism; no new infrastructure is warranted. This phase authorizes only updating PR #613 and requesting review: **no merge, AWS mutation, production database/RLS execution or deployment**. Local certification is not production incident closure.

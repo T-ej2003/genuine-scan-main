@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createApiClientCore } from "@/lib/api/internal-client-core";
+import { setRequestCoordinatorScope } from "@/lib/api/request-coordinator";
 
 const originalFetch = globalThis.fetch;
 const originalDomParser = globalThis.DOMParser;
@@ -10,9 +11,43 @@ describe("internal client core HTML error handling", () => {
     globalThis.fetch = originalFetch;
     globalThis.DOMParser = originalDomParser;
     vi.restoreAllMocks();
+    setRequestCoordinatorScope(null);
+  });
+
+  it("cannot resurrect cookie-auth A through a B HTTP 304 cache hit", async () => {
+    const client = createApiClientCore();
+    setRequestCoordinatorScope({ id: "actor", licenseeId: "A" });
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, data: "A" }), { headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(null, { status: 304 }));
+    expect((await client.request("/admin/qr/analytics")).data).toBe("A");
+    setRequestCoordinatorScope({ id: "actor", licenseeId: "B" });
+    expect((await client.request("/admin/qr/analytics")).success).toBe(false);
+  });
+
+  it("rejects a previous scope even when it changes during asynchronous JSON parsing", async () => {
+    setRequestCoordinatorScope({ id: "actor", licenseeId: "A" });
+    let finish!: (value: any) => void;
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, status: 200, headers: new Headers({ "content-type": "application/json" }), json: () => new Promise(resolve => { finish = resolve; }) });
+    const pending = createApiClientCore().request("/auth/me");
+    await vi.waitFor(() => expect(finish).toBeDefined());
+    setRequestCoordinatorScope({ id: "actor", licenseeId: "B" });
+    finish({ success: true, data: { user: { id: "actor", licenseeId: "A" } } });
+    expect((await pending).code).toBe("REQUEST_SCOPE_CHANGED");
+  });
+
+  it("does not replay an A mutation automatically after auth refresh establishes B", async () => {
+    setRequestCoordinatorScope({ id: "A" });
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ success: false }), { status: 401, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, data: { user: { id: "B" } } }), { headers: { "content-type": "application/json" } }));
+    const response = await createApiClientCore().request("/qr/requests/id/reject", { method: "POST", body: "{}" });
+    expect(response.code).toBe("REQUEST_SCOPE_CHANGED");
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
   });
 
   it("uses the selected canonical idempotency header for multipart and retains it on auth retry", async () => {
+    setRequestCoordinatorScope({ id: "fixture" });
     globalThis.fetch = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ success: false }), { status: 401, headers: { "content-type": "application/json" } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, data: { user: { id: "fixture" } } }), { headers: { "content-type": "application/json" } }))
@@ -152,6 +187,7 @@ describe("internal client core HTML error handling", () => {
   });
 
   it("refreshes after a 401 even when refresh cookies are HttpOnly and invisible to document.cookie", async () => {
+    setRequestCoordinatorScope({ id: "user-1", auth: { sessionStage: "ACTIVE" } } as any);
     Object.defineProperty(document, "cookie", {
       configurable: true,
       writable: true,
@@ -225,6 +261,7 @@ describe("internal client core HTML error handling", () => {
   });
 
   it("clears stale bearer state before retrying a protected request after session restore", async () => {
+    setRequestCoordinatorScope({ id: "user-1", auth: { sessionStage: "ACTIVE" } } as any);
     Object.defineProperty(document, "cookie", {
       configurable: true,
       writable: true,

@@ -4,7 +4,7 @@ import { useLocation } from "react-router";
 import { shouldBootstrapCurrentUser } from "@/contexts/auth-bootstrap";
 import apiClient from "@/lib/api-client";
 import { isActivePrintSessionSuppressed } from "@/lib/active-print-session";
-import { clearRequestCoordinator } from "@/lib/api/request-coordinator";
+import { clearRequestCoordinator, getRequestCoordinatorScope, setRequestCoordinatorScope } from "@/lib/api/request-coordinator";
 import type { AuthState, PendingAuthSession, User } from "@/types";
 
 interface AuthContextType {
@@ -44,6 +44,7 @@ function normalizeUser(u: any): User {
           brandName: entry.brandName ?? null,
           orgId: entry.orgId ?? null,
           isPrimary: Boolean(entry.isPrimary),
+          scopeVersion: entry.scopeVersion ?? null,
         }))
     : undefined;
 
@@ -57,6 +58,7 @@ function normalizeUser(u: any): User {
     pendingEmail: u.pendingEmail ?? null,
     pendingEmailRequestedAt: u.pendingEmailRequestedAt ?? null,
     licenseeId,
+    scopeVersion: u.scopeVersion ?? null,
     orgId: u.orgId ?? null,
     licensee: u.licensee
       ? {
@@ -85,6 +87,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const lastRefreshSuccessAtRef = useRef(0);
 
   const clearSession = () => {
+    setRequestCoordinatorScope(null);
     setUser(null);
     setPendingAuth(null);
     setAuthBootstrapStatus("unauthenticated");
@@ -99,7 +102,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     setPendingAuth(null);
-    setUser(normalizeUser({ ...payload.user, auth: payload.auth || payload.user?.auth || null }));
+    const normalized = normalizeUser({ ...payload.user, auth: payload.auth || payload.user?.auth || null });
+    setRequestCoordinatorScope(normalized);
+    setUser(normalized);
     setAuthBootstrapStatus("authenticated");
   };
 
@@ -113,6 +118,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const normalized = normalizeUser({ ...payload.user, auth });
 
     if (auth?.sessionStage === "MFA_BOOTSTRAP") {
+      setRequestCoordinatorScope(null);
       setUser(null);
       setPendingAuth({ user: normalized, auth });
       setAuthBootstrapStatus("unauthenticated");
@@ -120,6 +126,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     setPendingAuth(null);
+    setRequestCoordinatorScope(normalized);
     setUser(normalized);
     setAuthBootstrapStatus("authenticated");
     return true;
@@ -170,9 +177,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const onAuthLogout = () => clearSession();
+    const onScopeRefresh = () => {
+      apiClient.setToken(null);
+      const scope = getRequestCoordinatorScope();
+      void apiClient.getCurrentUser().then(response => {
+        if (response.code === "REQUEST_SCOPE_CHANGED") return;
+        if (!response.success || !setAuthStateFromPayload(authPayloadFromResponseData(response.data))) clearSession();
+      }).catch(() => { if (scope === getRequestCoordinatorScope()) clearSession(); });
+    };
     window.addEventListener("auth:logout", onAuthLogout);
+    window.addEventListener("auth:scope-refresh", onScopeRefresh);
 
-    return () => window.removeEventListener("auth:logout", onAuthLogout);
+    return () => {
+      window.removeEventListener("auth:logout", onAuthLogout);
+      window.removeEventListener("auth:scope-refresh", onScopeRefresh);
+    };
   }, []);
 
   useEffect(() => {

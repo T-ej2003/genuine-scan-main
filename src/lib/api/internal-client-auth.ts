@@ -1,5 +1,4 @@
 import { type ApiClientCore, type ApiResponse } from "@/lib/api/internal-client-core";
-import { coordinateProtectedRead } from "@/lib/api/request-coordinator";
 import type { AuthState } from "@/types";
 
 export const createAuthApi = (core: ApiClientCore) => ({
@@ -29,15 +28,9 @@ export const createAuthApi = (core: ApiClientCore) => ({
   },
 
   async getCurrentUser() {
-    return coordinateProtectedRead(
-      {
-        family: "auth:me",
-        ttlMs: 60_000,
-        minRefreshMs: 30_000,
-        cooldownMessage: "Session refresh is cooling down. Keeping the current session state.",
-      },
-      () => core.request("/auth/me")
-    );
+    // This authoritative projection establishes the cache scope; it cannot use
+    // that scope's cached identity. AuthProvider retains its in-flight/throttle guard.
+    return core.request("/auth/me");
   },
 
   async refreshSession() {

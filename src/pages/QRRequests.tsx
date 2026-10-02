@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { clientSecurityScope, getRequestCoordinatorScope, isRequestCoordinatorUserCurrent, onRequestCoordinatorScopeChange } from "@/lib/api/request-coordinator";
 import { useNavigate } from "react-router";
 import { APP_PATHS } from "@/app/route-metadata";
 import { OperationProgressDialog } from "@/components/feedback/OperationProgressDialog";
@@ -71,6 +72,12 @@ export default function QRRequests() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [licensees, setLicensees] = useState<LicenseeOption[]>([]);
   const [licenseeFilter, setLicenseeFilter] = useState<string>("");
+  const securityScope = useSyncExternalStore(onRequestCoordinatorScopeChange, getRequestCoordinatorScope, getRequestCoordinatorScope);
+  const queryScope = JSON.stringify([securityScope, clientSecurityScope(user), licenseeFilter, statusFilter, page]);
+  const currentScope = useRef(queryScope);
+  currentScope.current = queryScope;
+  const loadSequence = useRef(0);
+  const [resultScope, setResultScope] = useState("");
 
   // create request form (brand admin)
   const [quantity, setQuantity] = useState<number>(1000);
@@ -82,17 +89,27 @@ export default function QRRequests() {
   const [rejectOpen, setRejectOpen] = useState(false);
   const [activeReq, setActiveReq] = useState<RequestRow | null>(null);
   const [decisionNote, setDecisionNote] = useState("");
+  const [decisionScope, setDecisionScope] = useState("");
+
+  useLayoutEffect(() => {
+    // Drafts and decision dialogs belong to the authenticated scope too.
+    setBatchName(""); setNote(""); setDecisionNote(""); setActiveReq(null);
+    setApproveOpen(false); setRejectOpen(false);
+  }, [securityScope]);
 
   const loadLicensees = async () => {
+    setLicensees([]);
     if (!isSuper) return;
     const res = await apiClient.getLicensees();
-    if (res.success) {
+    if (res.success && securityScope === getRequestCoordinatorScope()) {
       const list = (res.data as any[]) || [];
       setLicensees(list.map((l) => ({ id: l.id, name: l.name, prefix: l.prefix })));
     }
   };
 
   const loadRequests = async () => {
+    const sequence = ++loadSequence.current;
+    if (!user || !isRequestCoordinatorUserCurrent(user) || securityScope !== getRequestCoordinatorScope()) return;
     setLoading(true);
     try {
       const res = await apiClient.getQrAllocationRequests({
@@ -101,6 +118,8 @@ export default function QRRequests() {
         status: statusFilter === "all" ? undefined : statusFilter,
         licenseeId: isSuper ? licenseeFilter || undefined : undefined,
       });
+      if (sequence !== loadSequence.current || currentScope.current !== queryScope || securityScope !== getRequestCoordinatorScope()) return;
+      setResultScope(queryScope);
       if (!res.success) {
         setRows([]);
         toast({ title: "Could not load requests", description: "Please refresh and try again.", variant: "destructive" });
@@ -108,19 +127,20 @@ export default function QRRequests() {
       }
       setRows((Array.isArray(res.data) ? res.data : []) as RequestRow[]);
     } finally {
-      setLoading(false);
+      if (sequence === loadSequence.current) setLoading(false);
     }
   };
 
   useEffect(() => {
     loadLicensees();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isSuper]);
+  }, [isSuper, securityScope]);
 
   useEffect(() => {
     loadRequests();
+    return () => { loadSequence.current += 1; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFilter, licenseeFilter, page]);
+  }, [queryScope]);
 
   useEffect(() => {
     const off = onMutationEvent(() => {
@@ -128,10 +148,10 @@ export default function QRRequests() {
     });
     return off;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFilter, licenseeFilter, page]);
+  }, [queryScope]);
 
   const submitRequest = async () => {
-    if (!isLicensee) return;
+    if (!isLicensee || !isRequestCoordinatorUserCurrent(user) || securityScope !== getRequestCoordinatorScope()) return;
 
     if (!quantity || quantity <= 0 || quantity > 200_000) {
       toast({ title: "Invalid quantity", description: "Enter between 1 and 200,000 QR labels.", variant: "destructive" });
@@ -149,6 +169,7 @@ export default function QRRequests() {
         batchName: batchName.trim(),
         note: note.trim() || undefined,
       });
+      if (securityScope !== getRequestCoordinatorScope()) return;
       if (!res.success) {
         toast({ title: "Request failed", description: "Please check the request details and try again.", variant: "destructive" });
         return;
@@ -164,19 +185,21 @@ export default function QRRequests() {
   };
 
   const openApprove = (r: RequestRow) => {
+    setDecisionScope(queryScope);
     setActiveReq(r);
     setDecisionNote("");
     setApproveOpen(true);
   };
 
   const openReject = (r: RequestRow) => {
+    setDecisionScope(queryScope);
     setActiveReq(r);
     setDecisionNote("");
     setRejectOpen(true);
   };
 
   const submitApprove = async () => {
-    if (!activeReq) return;
+    if (!activeReq || decisionScope !== queryScope || securityScope !== getRequestCoordinatorScope()) return;
     const qty = requestQuantity(activeReq);
     const showApprovalProgress = qty >= LARGE_REQUEST_APPROVAL_THRESHOLD;
 
@@ -196,6 +219,7 @@ export default function QRRequests() {
       const res = await apiClient.approveQrAllocationRequest(activeReq.id, {
         decisionNote: decisionNote.trim() || undefined,
       });
+      if (currentScope.current !== queryScope || securityScope !== getRequestCoordinatorScope()) return;
       if (!res.success) {
         if (showApprovalProgress) progress.close();
         const raw = (res.error || "").toLowerCase();
@@ -226,12 +250,13 @@ export default function QRRequests() {
   };
 
   const submitReject = async () => {
-    if (!activeReq) return;
+    if (!activeReq || decisionScope !== queryScope || securityScope !== getRequestCoordinatorScope()) return;
     setLoading(true);
     try {
       const res = await apiClient.rejectQrAllocationRequest(activeReq.id, {
         decisionNote: decisionNote.trim() || undefined,
       });
+      if (currentScope.current !== queryScope || securityScope !== getRequestCoordinatorScope()) return;
       if (!res.success) {
         toast({ title: "Reject failed", description: "The request could not be rejected. Please retry.", variant: "destructive" });
         return;
@@ -245,7 +270,7 @@ export default function QRRequests() {
     }
   };
 
-  const filtered = useMemo(() => rows, [rows]);
+  const filtered = useMemo(() => resultScope === queryScope && isRequestCoordinatorUserCurrent(user) ? rows : [], [rows, resultScope, queryScope, user]);
   const requestQuantity = (r: RequestRow) => (r.quantity && r.quantity > 0 ? r.quantity : 0);
 
   return (
@@ -495,14 +520,14 @@ export default function QRRequests() {
             <div className="flex items-center justify-end gap-3 pt-3">
               <Button variant="outline" disabled={loading || page === 0} onClick={() => setPage(page - 1)}>Previous</Button>
               <span>Page {page + 1}</span>
-              <Button variant="outline" disabled={loading || rows.length < 100 || page >= 100} onClick={() => setPage(page + 1)}>Next</Button>
+              <Button variant="outline" disabled={loading || filtered.length < 100 || page >= 100} onClick={() => setPage(page + 1)}>Next</Button>
             </div>
             </CardContent>
           </Card>
         </PageSection>
 
         {/* Approve Dialog */}
-        <Dialog open={approveOpen} onOpenChange={setApproveOpen}>
+        <Dialog open={approveOpen && decisionScope === queryScope} onOpenChange={setApproveOpen}>
           <DialogContent className="sm:max-w-[520px]">
             <DialogHeader>
               <DialogTitle>Approve QR request</DialogTitle>
@@ -549,7 +574,7 @@ export default function QRRequests() {
         </Dialog>
 
         {/* Reject Dialog */}
-        <Dialog open={rejectOpen} onOpenChange={setRejectOpen}>
+        <Dialog open={rejectOpen && decisionScope === queryScope} onOpenChange={setRejectOpen}>
           <DialogContent className="sm:max-w-[520px]">
             <DialogHeader>
               <DialogTitle>Reject QR request</DialogTitle>

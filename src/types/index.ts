@@ -47,6 +47,7 @@ export interface User {
   pendingEmail?: string | null;
   pendingEmailRequestedAt?: string | null;
   licenseeId?: string;
+  scopeVersion?: string | null;
   orgId?: string | null;
   licensee?: {
     id: string;
@@ -61,6 +62,7 @@ export interface User {
     brandName?: string | null;
     orgId?: string | null;
     isPrimary?: boolean;
+    scopeVersion?: string | null;
   }>;
   createdAt: string;
   isActive: boolean;

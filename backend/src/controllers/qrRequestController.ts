@@ -15,12 +15,13 @@ const createRequestSchema = z
   })
   .strict();
 
+const decisionNoteSchema = z.string().trim().max(500).refine(value => !value.includes("\u0000"), "Invalid decision note").optional();
 const approveSchema = z.object({
-  decisionNote: z.string().trim().max(500).optional(),
+  decisionNote: decisionNoteSchema,
 }).strict();
 
 const rejectSchema = z.object({
-  decisionNote: z.string().trim().max(500).optional(),
+  decisionNote: decisionNoteSchema,
 }).strict();
 
 const requestIdParamSchema = z.object({
