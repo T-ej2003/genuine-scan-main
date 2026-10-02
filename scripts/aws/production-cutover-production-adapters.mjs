@@ -49,8 +49,17 @@ const STAGE_B_STATE_URI = `s3://${STATE_BUCKET}/env:/production/mscqr/production
 const ROTATION_EXECUTION_POLICY_ADDRESS = 'aws_iam_role_policy.execution["backend"]';
 const ROTATION_EXECUTION_ROLE = "mscqr-production-rls-green-backend-execution";
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
-const AWS_SERVICE_COMMANDS = new Set(["ec2", "ecs", "ecr", "iam", "kms", "lambda", "logs", "organizations", "rds", "s3", "s3api", "secretsmanager", "ssm", "sts"]);
+const AWS_SERVICE_COMMANDS = new Set(["dynamodb", "ec2", "ecs", "ecr", "iam", "kms", "lambda", "logs", "organizations", "rds", "s3", "s3api", "secretsmanager", "ssm", "sts"]);
+const APPROVED_LOCAL_COMMANDS = new Map([["node", process.execPath], ["terraform", "terraform"]]);
 const MFA_PROMPTS = Object.freeze({ verifier: "Production verifier MFA code: ", onboarding: "Production strict-onboarding administrator MFA code: ", canary: "Production strict-onboarding tenant-canary MFA code: " });
+
+export class ProductionCommandRouteError extends Error {
+  constructor() {
+    super("Production command route is not explicitly approved.");
+    this.name = "ProductionCommandRouteError";
+    this.code = "UNCLASSIFIED_PRODUCTION_COMMAND";
+  }
+}
 
 export function createConditionalMfaResolvers({ env = process.env, interactiveMfaCodeProvider = promptProductionMfaCode, resolveTenantMfaCode = resolveSmokeAdminMfaCode } = {}) {
   if (!env || typeof env !== "object" || typeof interactiveMfaCodeProvider !== "function" || typeof resolveTenantMfaCode !== "function") throw new Error("Conditional MFA provider configuration is invalid.");
@@ -77,11 +86,14 @@ export function createProductionCommandRunner({ credentialSource, profile, regio
   const environment = credentialEnvironment({ credentialSource, profile, env: parentEnvironment, injected: credentialSource === PRODUCTION_AWS_CREDENTIAL_SOURCE.INJECTED_TEST && exec !== execFileSync });
   return (args, { encoding = "utf8", maxBuffer, input } = {}) => {
     if (!Array.isArray(args) || args.length === 0) throw new Error("Production command arguments are required.");
-    const command = args[0] === "aws" ? args.slice(1) : [...args];
+    if (!args.every((value) => typeof value === "string")) throw new ProductionCommandRouteError();
+    const awsPrefixed = args[0] === "aws";
+    const command = awsPrefixed ? args.slice(1) : [...args];
     const isAwsService = AWS_SERVICE_COMMANDS.has(command[0]);
-    const normalized = isAwsService && !command.includes("--region") ? [...command, "--region", region] : command;
-    const executable = isAwsService ? "aws" : normalized[0];
-    return exec(executable, normalized.slice(isAwsService ? 0 : 1), { cwd: process.cwd(), env: environment, encoding, stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"], ...(input === undefined ? {} : { input }), ...(maxBuffer === undefined ? {} : { maxBuffer }) });
+    const localExecutable = !awsPrefixed && APPROVED_LOCAL_COMMANDS.get(command[0]);
+    if (!isAwsService && !localExecutable) throw new ProductionCommandRouteError();
+    const normalized = isAwsService && !command.includes("--region") ? [...command, "--region", region] : command.slice(1);
+    return exec(isAwsService ? "aws" : localExecutable, normalized, { cwd: process.cwd(), env: environment, encoding, stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"], ...(input === undefined ? {} : { input }), ...(maxBuffer === undefined ? {} : { maxBuffer }) });
   };
 }
 

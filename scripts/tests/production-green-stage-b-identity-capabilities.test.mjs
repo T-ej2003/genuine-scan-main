@@ -117,7 +117,7 @@ test("reconciliation raw backend-state CAS is an exact AWS CLI capability", () =
   }
 });
 
-test("release preflight routes every S3 and Lambda probe through the credential-bound AWS runner", () => {
+test("release preflight routes every DynamoDB, S3, and Lambda probe through the credential-bound AWS runner", () => {
   const calls = [];
   const run = createProductionCommandRunner({
     credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE,
@@ -132,22 +132,24 @@ test("release preflight routes every S3 and Lambda probe through the credential-
     },
   });
   const report = runRelease({ outputDirectory: temp(), run });
-  const affected = calls.filter(({ args }) => ["s3api", "lambda"].includes(args[0]));
+  const affected = calls.filter(({ args }) => ["dynamodb", "s3api", "lambda"].includes(args[0]));
 
   assert.equal(report.status, "valid");
   assert.deepEqual(affected.map(({ file, args }) => [file, args[0], args[1]]), [
     ["aws", "s3api", "get-bucket-location"],
     ["aws", "s3api", "get-object"],
     ["aws", "s3api", "get-object"],
+    ["aws", "dynamodb", "get-item"],
     ["aws", "lambda", "get-function-configuration"],
     ["aws", "lambda", "get-alias"],
   ]);
+  assert.equal(calls.filter(({ file }) => file === "dynamodb").length, 0);
   assert.equal(calls.filter(({ file }) => file === "s3api").length, 0);
   assert.equal(calls.filter(({ file }) => file === "lambda").length, 0);
   assert.equal(affected.every(({ options }) => options.env.AWS_PROFILE === "mscqr-production-release-deployer"), true);
 
-  run(["node", "fixture.mjs"]);
-  assert.equal(calls.at(-1).file, "node");
+  assert.throws(() => run(["dynamod", "get-item"]), (error) => error?.code === "UNCLASSIFIED_PRODUCTION_COMMAND");
+  assert.equal(calls.filter(({ file }) => file !== "aws").length, 0);
 });
 
 test("identity matrix assigns IAM simulation only to administrator", () => {
