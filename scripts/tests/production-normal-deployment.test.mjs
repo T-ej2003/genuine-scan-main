@@ -396,7 +396,7 @@ test("one-time baseline retains exact historical backend and frontend image guar
   const workflow = yaml.load(fs.readFileSync(".github/workflows/production-deploy.yml", "utf8"));
   const step = workflow.jobs.deploy.steps.find(({ name }) => name === "Authenticate live deployment baseline");
   const start = step.run.indexOf('if [[ "$BASELINE_MODE" == "true" ]]; then');
-  const end = step.run.indexOf("\nelse\n", start);
+  const end = step.run.indexOf("\nelif ", start);
   const guard = start >= 0 && end > start ? `set -euo pipefail\n${step.run.slice(start, end)}\nfi` : "";
   assert.ok(guard);
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-baseline-images-"));

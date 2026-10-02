@@ -34,7 +34,14 @@ export function replaceNormalDeploymentReceipt({ client, expected, receipt, writ
 export async function reconcileNormalDeployment({ client, sourceSha, isAncestor, readLive, authenticateCandidate, verify, rollback, writerContext, writeJournal = async () => {} }) {
   let state = assertProductionComponentDeploymentState(client.read());
   const receipt = state.normalDeploymentReceipt;
-  if (!receipt) return state;
+  if (!receipt) {
+    // Committed component state is the normal lane's baseline authority. Prove
+    // the live services still match it before classifying or preparing new work;
+    // mutable image tags and workflow-event ranges cannot supersede this state.
+    const committed = Object.fromEntries(["backend", "frontend"].filter((name) => state.components[name]).map((name) => [name, state.components[name]]));
+    await verify(committed);
+    return state;
+  }
   assertNormalDeploymentReceipt(receipt);
   assert.equal(isAncestor(receipt.sourceSha, sourceSha), true, "Receipt is not current protected-main history");
   const live = {};

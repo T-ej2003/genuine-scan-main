@@ -103,6 +103,32 @@ test("unknown live identity is never adopted, including current-main source with
   assert.equal(f.calls.includes("state-commit"), false);
 });
 
+test("committed component state is authenticated against live services before new classification", async () => {
+  const f = fixture();
+  await f.reconcile("b");
+  assert.deepEqual(f.calls, ["verified"]);
+  f.live.backend = identity("backend", "b", 2);
+  await assert.rejects(f.reconcile("b"));
+  assert.equal(f.state.normalDeploymentReceipt, undefined);
+  assert.deepEqual(f.state.components.backend, identity("backend", "a", 1));
+});
+
+test("same-commit rerun reconciles a verified candidate before deriving an empty authoritative work set", async () => {
+  const f = fixture(["backend"]); f.fail("definite");
+  await assert.rejects(deploy(f, ["backend"]));
+  f.fail(undefined);
+  await f.reconcile("b");
+  const ranges = [];
+  const plan = buildProductionNormalDeploymentPlan({ sourceSha: sha("b"), state: f.state, isAncestor,
+    readRange: (base, target) => { ranges.push([base, target]); return []; } });
+  assert.ok(ranges.some(([base, target]) => base === sha("b") && target === sha("b")));
+  assert.ok(ranges.some(([base, target]) => base === sha("a") && target === sha("b")));
+  assert.equal(plan.classification.backend, false);
+  assert.equal(plan.classification.frontend, false);
+  assert.equal(plan.componentBaselines.backend, sha("b"));
+  assert.equal(f.calls.filter((call) => call === "state-commit").length, 1);
+});
+
 for (const field of ["sourceSha", "imageDigest", "taskDefinitionArn", "desiredCount"]) test(`verified intermediate receipt rejects live ${field} mismatch`, async () => {
   const f = fixture(); f.fail("definite"); await assert.rejects(deploy(f)); f.fail(undefined);
   f.live.backend[field] = field === "desiredCount" ? 3 : "unknown";
