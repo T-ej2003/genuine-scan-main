@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { verifyArtifactSigningDomain } from "../aws/production-artifact-signing-domain.mjs";
 import { createProductionRuntimeInventoryAdapter, PRODUCTION_RUNTIME_INVENTORY_COMMAND } from "../aws/production-runtime-inventory-adapter.mjs";
-import { createConditionalMfaResolvers, createProductionCommandRunner, createProductionOverlapDeploymentAdapter, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "../aws/production-cutover-production-adapters.mjs";
+import { createConditionalMfaResolvers, createProductionCommandRunner, createProductionOverlapDeploymentAdapter, ProductionCommandRouteError, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "../aws/production-cutover-production-adapters.mjs";
 import { loadApprovedArtifactSigningBindings } from "../aws/production-artifact-signing-secrets-adapter.mjs";
 import { assertNoOnboardingEvidenceLeak } from "../security/production-strict-onboarding.mjs";
 import { createProductionInteractiveEcsExecRunner } from "../aws/production-ecs-exec-command.mjs";
@@ -130,7 +130,7 @@ test("artifact secret bindings are loaded only from reviewed IAM configuration",
   assert.throws(() => loadApprovedArtifactSigningBindings("/tmp/unreviewed-artifact-bindings.json", { expectedSourceSha: "a".repeat(40) }), /canonical external runtime path/);
 });
 
-test("production AWS command runner executes service operations through aws", () => {
+test("production command runner routes only reviewed AWS services and the exact Node runtime", () => {
   const previous = Object.fromEntries(["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_DEFAULT_PROFILE"].map((name) => [name, process.env[name]]));
   Object.assign(process.env, { AWS_ACCESS_KEY_ID: "ambient", AWS_SECRET_ACCESS_KEY: "ambient", AWS_SESSION_TOKEN: "ambient", AWS_DEFAULT_PROFILE: "ambient" });
   const calls = [];
@@ -143,7 +143,7 @@ test("production AWS command runner executes service operations through aws", ()
     run(["ecs", "describe-services", "--cluster", "cluster", "--region", "eu-west-2"]);
     run(["aws", "iam", "get-role", "--role-name", "role"]);
     run(["node", "fixture.mjs"]);
-    assert.deepEqual(calls.map(({ file }) => file), ["aws", "aws", "aws", "node"]);
+    assert.deepEqual(calls.map(({ file }) => file), ["aws", "aws", "aws", process.execPath]);
     assert.equal(calls[0].args.at(-1), "eu-west-2");
     assert.equal(calls[1].args.filter((arg) => arg === "--region").length, 1);
     assert.equal(calls[2].args[0], "iam");
@@ -153,6 +153,61 @@ test("production AWS command runner executes service operations through aws", ()
     assert.deepEqual(calls[0].options.stdio, ["ignore", "pipe", "pipe"]);
   } finally {
     for (const [name, value] of Object.entries(previous)) value === undefined ? delete process.env[name] : process.env[name] = value;
+  }
+});
+
+test("production command routing rejects every unclassified command before process creation", () => {
+  let spawnCount = 0;
+  const run = createProductionCommandRunner({
+    credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE,
+    profile: "mscqr-test",
+    env: { PATH: "/attacker/bin", AWS_ACCESS_KEY_ID: "ambient", AWS_SECRET_ACCESS_KEY: "ambient", AWS_SESSION_TOKEN: "ambient" },
+    exec: () => { spawnCount += 1; return "{}"; },
+  });
+  const attacks = [
+    [""], ["   "], ["dynamod", "get-item"], ["cloudwatch", "get-metric-data"],
+    ["nodejs", "fixture.mjs"], ["/usr/bin/node", "fixture.mjs"], ["./node", "fixture.mjs"], ["../node", "fixture.mjs"],
+    ["/usr/bin/aws", "dynamodb", "get-item"], ["./dynamodb", "get-item"], ["../dynamodb", "get-item"],
+    ["DynamoDB", "get-item"], ["AWS", "dynamodb", "get-item"], ["aws "], ["aws"], ["aws", "dynamod", "get-item"],
+    ["aws", "node", "fixture.mjs"], ["ecs;touch", "/tmp/pwned"], ["$(touch /tmp/pwned)"],
+    ["sh", "-c", "id"], ["bash", "-c", "id"], ["env", "node"], ["python3", "fixture.py"],
+    ["terraform", "apply"], ["git", "status"], ["gh", "api", "user"],
+  ];
+  for (const args of attacks) assert.throws(() => run(args), (error) => error instanceof ProductionCommandRouteError && error.code === "UNCLASSIFIED_PRODUCTION_COMMAND");
+  for (const malformed of [null, undefined, "dynamodb", { command: "dynamodb" }, []]) assert.throws(() => run(malformed), /arguments are required/);
+  for (const malformed of [[null], [{ command: "dynamodb" }]]) assert.throws(() => run(malformed), (error) => error instanceof ProductionCommandRouteError);
+  assert.equal(spawnCount, 0);
+});
+
+test("production command routing cannot be redirected by PATH or shell syntax", () => {
+  const calls = [];
+  const run = createProductionCommandRunner({
+    credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE,
+    profile: "mscqr-test",
+    env: { PATH: "/attacker/bin" },
+    exec: (file, args) => { calls.push({ file, args }); return "{}"; },
+  });
+  run(["dynamodb", "get-item", "--table-name", "fixture"]);
+  run(["ecs", "describe-services", "--cluster", "fixture", "; touch /tmp/pwned"]);
+  run(["kms", "verify", "--key-id", "fixture"]);
+  run(["node", "fixture.mjs"]);
+  assert.deepEqual(calls.map(({ file }) => file), ["aws", "aws", "aws", process.execPath]);
+  assert.equal(calls[0].args[0], "dynamodb");
+  assert.equal(calls[1].args.includes("; touch /tmp/pwned"), true);
+});
+
+test("production credential runners contain no unclassified executable fallback", () => {
+  const commandRunner = fs.readFileSync("scripts/aws/production-cutover-production-adapters.mjs", "utf8");
+  assert.doesNotMatch(commandRunner, /exec\([^,]*\[0\]/);
+  assert.doesNotMatch(commandRunner, /:\s*normalized\[0\]/);
+  for (const file of [
+    "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
+    "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
+  ]) {
+    const source = fs.readFileSync(file, "utf8");
+    assert.doesNotMatch(source, /execFileSync\(args\[0\]/);
+    assert.match(source, /executable !== "terraform"/);
+    assert.match(source, /execFileSync\("terraform", args/);
   }
 });
 

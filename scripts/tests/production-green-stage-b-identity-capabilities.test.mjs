@@ -148,8 +148,8 @@ test("release preflight routes every DynamoDB, S3, and Lambda probe through the 
   assert.equal(calls.filter(({ file }) => file === "lambda").length, 0);
   assert.equal(affected.every(({ options }) => options.env.AWS_PROFILE === "mscqr-production-release-deployer"), true);
 
-  run(["node", "fixture.mjs"]);
-  assert.equal(calls.at(-1).file, "node");
+  assert.throws(() => run(["dynamod", "get-item"]), (error) => error?.code === "UNCLASSIFIED_PRODUCTION_COMMAND");
+  assert.equal(calls.filter(({ file }) => file !== "aws").length, 0);
 });
 
 test("identity matrix assigns IAM simulation only to administrator", () => {
