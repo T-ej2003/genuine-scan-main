@@ -41,6 +41,9 @@ import { findTerraformCliArgEnvKeys } from "./plan-staging-terraform.mjs";
 import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./aws/production-cutover-production-adapters.mjs";
 import { createProductionAwsCredentialEnvironment } from "./aws/production-credential-source-contract.mjs";
 import { classifyStageBReservationAwsResult, classifyStageBReservationReadback, createStageBApplyAttemptReservation, createStageBApplyAttemptTransition } from "./aws/stage-b-apply-attempt-reconciliation-contract.mjs";
+import { createAwsReader } from "./aws/production-green-stage-b-ecs-observations.mjs";
+import { revalidateBootstrapForwardLivePredecessorReference } from "./aws/generate-production-green-stage-b-reference-audit.mjs";
+import { createProductionComponentDeploymentStateClient } from "./aws/production-component-deployment-state.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const terraformRoot = "infra/aws/terraform/production-green-stage-b";
@@ -398,7 +401,7 @@ export function runApply({ argv = process.argv.slice(2), env = process.env, deps
   const artifacts = parseCli(argv);
   const releaseRun = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer" });
   const governedEnvironment = { ...createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer" }), TF_DATA_DIR: env.TF_DATA_DIR, TF_WORKSPACE: env.TF_WORKSPACE, MSCQR_STAGE_B_APPLY_ENABLED: env.MSCQR_STAGE_B_APPLY_ENABLED, MSCQR_STAGE_B_APPLY_CONFIRM: env.MSCQR_STAGE_B_APPLY_CONFIRM };
-  const defaultDeps = { getCaller: () => JSON.parse(releaseRun(["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"])).Arn, showPlan: (planPath) => showSavedPlan(planPath, { env: governedEnvironment }), validatePlan: assertStageBPlan, getBackendMetadata: readInitializedBackendMetadata, verifyPermissionSignature: (options) => verifyPermissionReportSignature({ ...options, run: (args) => releaseRun(args) }), verifyImageEvidence: (options) => verifyImageEvidenceSignature({ ...options, run: (args) => releaseRun(args) }), apply: (planPath) => spawnSync("terraform", [`-chdir=${terraformRoot}`, "apply", "-input=false", "-no-color", planPath], { cwd: root, env: governedEnvironment, encoding: "utf8", stdio: "inherit" }) };
+  const defaultDeps = { getCaller: () => JSON.parse(releaseRun(["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"])).Arn, showPlan: (planPath) => showSavedPlan(planPath, { env: governedEnvironment }), validatePlan: assertStageBPlan, getBackendMetadata: readInitializedBackendMetadata, verifyPermissionSignature: (options) => verifyPermissionReportSignature({ ...options, run: (args) => releaseRun(args) }), verifyImageEvidence: (options) => verifyImageEvidenceSignature({ ...options, run: (args) => releaseRun(args) }), revalidateBootstrapReference: (reference, toolingSha) => { const reader = createAwsReader({ region: "eu-west-2", clusterArn: "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main", run: releaseRun }); reader.readProductionComponentDeploymentState = createProductionComponentDeploymentStateClient({ run: releaseRun }).read; return revalidateBootstrapForwardLivePredecessorReference({ reference, reader, toolingSha }); }, apply: (planPath) => spawnSync("terraform", [`-chdir=${terraformRoot}`, "apply", "-input=false", "-no-color", planPath], { cwd: root, env: governedEnvironment, encoding: "utf8", stdio: "inherit" }) };
   const effectiveDeps = { ...defaultDeps, ...deps };
   const callerArn = effectiveDeps.getCaller();
   if (typeof deps.showPlan !== "function" && typeof deps.getBackendMetadata !== "function") {
@@ -430,6 +433,7 @@ export function runApply({ argv = process.argv.slice(2), env = process.env, deps
   const finalBindings = stageBApplyBindings({ artifacts, verified, backendMetadata: finalBackendMetadata, env });
   const executableAuditSha256 = stageBApplyArtifactSetIdentity(finalBindings);
   if (executableAuditSha256 !== initialArtifactSetIdentity) throw new Error("Stage B executable artifact-set identity changed at the mutation boundary.");
+  effectiveDeps.revalidateBootstrapReference(verified.audit?.bootstrapForwardLivePredecessorReference, verified.deploymentIdentity.toolingSha);
   const effectiveOperatorHome = effectiveDeps.getEffectiveOperatorHome?.() || stageBEffectiveOperatorHome();
   const applyAttemptPath = stageBApplyAttemptPath({ artifactSetIdentity: executableAuditSha256, effectiveOperatorHome });
   if (fs.lstatSync(applyAttemptPath, { throwIfNoEntry: false })) throw new Error("Stage B local apply-attempt evidence already exists; Terraform apply is unreachable.");

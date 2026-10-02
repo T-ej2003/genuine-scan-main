@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
 import { assertStageBBrokerAliasArn, assertStageBBrokerConfigurationIdentity, STAGE_B, STAGE_B_BROKER_TASK_DEFINITION_FAMILIES, STAGE_B_MODES } from "./production-green-stage-b-contract.mjs";
 import {
   assertStageBReferenceAuditFreshness,
@@ -26,6 +27,8 @@ import { assertB01LivePredecessor, B01_PREREQUISITE } from "./production-b01-pre
 import { assertNormalDeploymentLivePredecessor } from "./production-normal-live-predecessor-contract.mjs";
 import { createProductionComponentDeploymentStateClient } from "./production-component-deployment-state.mjs";
 import { APP_ONLY } from "./production-app-only-contract.mjs";
+import { WEB_RELEASE } from "./production-web-release-contract.mjs";
+import { assertBootstrapStageBLivePredecessor, bootstrapStageBSourceRange, BOOTSTRAP_STAGE_B_REFERENCE_KIND } from "./production-bootstrap-stage-b-predecessor-contract.mjs";
 
 export { batch, createAwsReader } from "./production-green-stage-b-ecs-observations.mjs";
 
@@ -598,6 +601,90 @@ function authenticateNormalDeploymentLivePredecessorReference({ reader, services
   });
 }
 
+const gitChangedFiles = (fromSha, toSha) => {
+  execFileSync("git", ["merge-base", "--is-ancestor", fromSha, toSha], { cwd: repositoryRoot, stdio: "ignore" });
+  return execFileSync("git", ["diff", "--name-only", `${fromSha}..${toSha}`], { cwd: repositoryRoot, encoding: "utf8" }).trim().split("\n").filter(Boolean);
+};
+
+function authenticateBootstrapForwardLivePredecessorReference({ reader, services, allowedLiveArnsByFamily, auditedAt, toolingSha, readChangedFiles = gitChangedFiles }) {
+  const family = STAGE_B_TASK_DEFINITION_FAMILIES['aws_ecs_task_definition.candidate["backend"]'];
+  const candidates = services.filter((service) => service.serviceName === APP_ONLY.service
+    && familyFromArn(service.taskDefinition, "bootstrap forward live predecessor").family === family
+    && !allowedLiveArnsByFamily.get(family).has(service.taskDefinition));
+  if (candidates.length === 0) return undefined;
+  if (candidates.length !== 1 || typeof reader.readProductionComponentDeploymentState !== "function") return undefined;
+  const componentState = reader.readProductionComponentDeploymentState();
+  if (!componentState || componentState.updatedByLane !== "BOOTSTRAP") return undefined;
+  const readComponent = (name, contract) => {
+    const state = componentState.components?.[name];
+    if (!state) throw new Error(`Bootstrap ${name} component state is missing.`);
+    const described = requireObject(reader.describeServices([contract.serviceArn]), `bootstrap ${name} service description`);
+    const describedServices = requireArray(described.services, `bootstrap ${name} services`);
+    if (describedServices.length !== 1 || requireArray(described.failures, `bootstrap ${name} service failures`).length !== 0) throw new Error(`Bootstrap ${name} service observation is incomplete.`);
+    const taskDefinition = requireObject(reader.describeTaskDefinition(state.taskDefinitionArn), `bootstrap ${name} task definition`).taskDefinition;
+    return { service: describedServices[0], taskDefinition };
+  };
+  const evidence = {
+    componentState,
+    backend: readComponent("backend", { serviceArn: APP_ONLY.serviceArn }),
+    frontend: readComponent("frontend", { serviceArn: `arn:aws:ecs:${WEB_RELEASE.region}:${WEB_RELEASE.account}:service/${WEB_RELEASE.cluster}/${WEB_RELEASE.serviceName}` }),
+  };
+  const sourceRanges = Object.fromEntries(["backend", "frontend"].map((component) => {
+    const fromSha = componentState.components[component].establishedThroughSha;
+    return [component, bootstrapStageBSourceRange({ component, fromSha, toSha: toolingSha, files: readChangedFiles(fromSha, toolingSha) })];
+  }));
+  const authenticated = assertBootstrapStageBLivePredecessor({ ...evidence, sourceRanges, toolingSha });
+  return Object.freeze({
+    schemaVersion: 1,
+    kind: BOOTSTRAP_STAGE_B_REFERENCE_KIND,
+    authenticatedAt: auditedAt,
+    auditSourceSha: toolingSha,
+    account: APP_ONLY.account,
+    region: APP_ONLY.region,
+    serviceArn: APP_ONLY.serviceArn,
+    taskDefinitionArn: authenticated.components.backend.taskDefinitionArn,
+    family,
+    imageDigest: authenticated.components.backend.imageDigest,
+    imageSourceSha: authenticated.components.backend.sourceSha,
+    componentStateGeneration: componentState.generation,
+    componentStateSha256: authenticated.componentStateSha256,
+    sourceRanges,
+    evidence,
+  });
+}
+
+export function revalidateBootstrapForwardLivePredecessorReference({ reference, reader, toolingSha, readChangedFiles = gitChangedFiles } = {}) {
+  if (reference === undefined) return true;
+  if (!reader || typeof reader.readProductionComponentDeploymentState !== "function") throw new Error("Bootstrap-forward revalidation requires the canonical live-state reader.");
+  const componentState = reader.readProductionComponentDeploymentState();
+  const readComponent = (name, contract) => {
+    const state = componentState?.components?.[name];
+    if (!state) throw new Error(`Bootstrap ${name} component state is missing during mutation-boundary revalidation.`);
+    const described = requireObject(reader.describeServices([contract.serviceArn]), `bootstrap ${name} service revalidation`);
+    const services = requireArray(described.services, `bootstrap ${name} revalidation services`);
+    if (services.length !== 1 || requireArray(described.failures, `bootstrap ${name} revalidation failures`).length !== 0) throw new Error(`Bootstrap ${name} mutation-boundary service observation is incomplete.`);
+    return {
+      service: services[0],
+      taskDefinition: requireObject(reader.describeTaskDefinition(state.taskDefinitionArn), `bootstrap ${name} task-definition revalidation`).taskDefinition,
+    };
+  };
+  const sourceRanges = Object.fromEntries(["backend", "frontend"].map((component) => {
+    const fromSha = componentState?.components?.[component]?.establishedThroughSha;
+    return [component, bootstrapStageBSourceRange({ component, fromSha, toSha: toolingSha, files: readChangedFiles(fromSha, toolingSha) })];
+  }));
+  const authenticated = assertBootstrapStageBLivePredecessor({
+    componentState,
+    toolingSha,
+    sourceRanges,
+    backend: readComponent("backend", { serviceArn: APP_ONLY.serviceArn }),
+    frontend: readComponent("frontend", { serviceArn: `arn:aws:ecs:${WEB_RELEASE.region}:${WEB_RELEASE.account}:service/${WEB_RELEASE.cluster}/${WEB_RELEASE.serviceName}` }),
+  });
+  if (reference.componentStateSha256 !== authenticated.componentStateSha256 || JSON.stringify(reference.sourceRanges) !== JSON.stringify(sourceRanges)
+    || reference.taskDefinitionArn !== authenticated.components.backend.taskDefinitionArn || reference.imageDigest !== authenticated.components.backend.imageDigest
+    || reference.imageSourceSha !== authenticated.components.backend.sourceSha) throw new Error("Bootstrap-forward predecessor changed after Stage B approval.");
+  return true;
+}
+
 export function generateReferenceAudit({
   plan,
   planBytes,
@@ -612,6 +699,7 @@ export function generateReferenceAudit({
   recoveryAttestationSha256,
   auditedAt = new Date().toISOString(),
   now = new Date(),
+  readChangedFiles,
 }) {
   if (!reader) throw new Error("Read-only AWS reader is required.");
   if (region !== "eu-west-2") throw new Error("Stage B requires AWS region eu-west-2.");
@@ -710,6 +798,8 @@ export function generateReferenceAudit({
   const stageBTransitionalTasks = transitionalTasks.filter((task) => task.stageBScoped);
   const b01LivePredecessorReference = authenticateB01LivePredecessorReference({ reader, services: stageBServices, auditedAt, toolingSha: deploymentIdentity.toolingSha });
   if (b01LivePredecessorReference) allowedLiveArnsByFamily.get(b01LivePredecessorReference.family).add(b01LivePredecessorReference.taskDefinitionArn);
+  const bootstrapForwardLivePredecessorReference = authenticateBootstrapForwardLivePredecessorReference({ reader, services: stageBServices, allowedLiveArnsByFamily, auditedAt, toolingSha: deploymentIdentity.toolingSha, ...(readChangedFiles ? { readChangedFiles } : {}) });
+  if (bootstrapForwardLivePredecessorReference) allowedLiveArnsByFamily.get(bootstrapForwardLivePredecessorReference.family).add(bootstrapForwardLivePredecessorReference.taskDefinitionArn);
   const normalDeploymentLivePredecessorReference = authenticateNormalDeploymentLivePredecessorReference({ reader, services: stageBServices, allowedLiveArnsByFamily, auditedAt, toolingSha: deploymentIdentity.toolingSha });
   if (normalDeploymentLivePredecessorReference) allowedLiveArnsByFamily.get(normalDeploymentLivePredecessorReference.family).add(normalDeploymentLivePredecessorReference.taskDefinitionArn);
   const {
@@ -882,6 +972,7 @@ export function generateReferenceAudit({
     plannedAtomicPackageChecksumTransition,
     planJsonSha256: planSha,
     ...(b01LivePredecessorReference ? { b01LivePredecessorReference } : {}),
+    ...(bootstrapForwardLivePredecessorReference ? { bootstrapForwardLivePredecessorReference } : {}),
     ...(normalDeploymentLivePredecessorReference ? { normalDeploymentLivePredecessorReference } : {}),
     ...(recoveryAttestationSha256 ? { recoveryAttestationSha256 } : {}),
   };

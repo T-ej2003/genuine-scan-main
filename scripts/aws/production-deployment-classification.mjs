@@ -39,6 +39,7 @@ const securityInfrastructure = [
   /^backend\/prisma\//,
   /^backend\/src\/(?:app\.ts$|index\.ts$|auth\/|rls-waves\/|workers\/|security\/|middleware\/|routes\/(?:index\.ts$|modules\/authRoutes\.ts$)|controllers\/(?:auth(?:AdminSecurity|Session)?Controller(?:Shared)?\.ts$|verify\/)|config\/database\.ts)/i,
   /^backend\/src\/services\/(?:accessControlService|auth\/|customerVerify|mfa|session|invitation|role|risk|tenant)/i,
+  /^backend\/src\/services\/auditLogOutboxService\.ts$/,
   /^backend\/src\/utils\/(?:security|clientIp|mtlsFingerprintHeader|secretConfig|cookies|ipAddress|publicIntegrityGuard|prismaStorageGuard)\.ts$/,
   /^src\/(?:contexts\/|components\/auth\/|features\/(?:auth|mfa|security|account-settings|verify|licensees|manufacturers)\/|pages\/(?:AcceptInvite|ForgotPassword|Login|ResetPassword|Settings|VerifyEmail)|lib\/(?:api(?:\/|\.ts$)|api-client\.ts|browser-storage-cleanup\.ts|secure-printer-readiness\.ts|verification-decision\.ts|webauthn\.ts)|app\/route-metadata)/i,
   /\.sql$/i,
@@ -52,6 +53,7 @@ const emergencyRecovery = [
   /(?:^|\/)(?:recovery|rebaseline|bootstrap|cutover|rotation)(?:\/|\.|-)/i,
   /(?:^|\/)(?:stage-b|initial-activation)(?:\/|\.|-)/i,
   /^scripts\/aws\/.*(?:recover|rebaseline|bootstrap|cutover|rotation)/i,
+  /^scripts\/plan-production-green-stage-b\.mjs$/,
 ];
 
 const validPath = (value) => {
@@ -70,7 +72,7 @@ export function classifyProductionChanges(paths) {
   if (changed.some((file) => matches(securityInfrastructure, file))) {
     return Object.freeze({ releaseClass: PRODUCTION_RELEASE_CLASS.SECURITY_INFRASTRUCTURE, files: changed, backend: false, frontend: false, worker: false, database: changed.some((file) => /^backend\/prisma\//.test(file) || /\.sql$/.test(file)) });
   }
-  const unknown = changed.filter((file) => !matches(normalApplication, file) && !/^scripts\/tests?\//.test(file) && !/^backend\/tests?\//.test(file) && !/^src\/test\//.test(file) && !/\.md$/.test(file));
+  const unknown = changed.filter((file) => !matches(normalApplication, file) && !/^scripts\/tests?\//.test(file) && !/^backend\/tests?\//.test(file) && !/^src\/test\//.test(file) && !/^e2e\//.test(file) && !/\.md$/.test(file));
   assert.equal(unknown.length, 0, `Ambiguous production change paths: ${unknown.join(", ")}`);
   const image = changed.map(classifyStageBImageReusePath);
   const backendAffecting = image.some(({ file, imageAffecting }) => imageAffecting && (/^backend\//.test(file) || /^shared\//.test(file) || file === ".dockerignore"));
