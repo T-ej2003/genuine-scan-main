@@ -54,7 +54,6 @@ async function main(){
   assert.equal(process.env.MSCQR_QR_SYSTEM_POSTGRES18_CONFIRM,"MSCQR_RUN_LOCAL_QR_SYSTEM_POSTGRES18_TEST");
   connection(bootstrap,new URL(bootstrap).username); connection(app,"mscqr_rls_cert_app");
   assert.equal(Number(last(bootstrap,"select current_setting('server_version_num')::int/10000")),18);
-  assert.match(last(bootstrap,"select current_setting('server_version')"),/^18\.4\b/);
 
   run(bootstrap,`
     INSERT INTO public."Organization"(id,name,"updatedAt") VALUES

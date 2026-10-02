@@ -412,6 +412,13 @@ async function main() {
   const listSql=(cap,subject="NULL",options="{}")=>`SELECT app_rls.printing_readiness('${cap}','printing-readiness','${requestId()}','REISSUE_LIST',${subject},'${options}'::jsonb)`;
   assert(json(app,listSql(caps.checker)).some(row=>row.id===reissueId));
   assert(json(app,listSql(caps.maker)).some(row=>row.id===reissueId));
+  psql(admin,`UPDATE public."Batch" SET "manufacturerId"='${ids.outsider}' WHERE id='${ids.batch}'`);
+  assert.deepEqual(json(app,listSql(caps.maker)),[]);
+  psql(admin,`UPDATE public."Batch" SET "manufacturerId"='${ids.maker}' WHERE id='${ids.batch}'; DELETE FROM public."ManufacturerLicenseeLink" WHERE "manufacturerId"='${ids.maker}' AND "licenseeId"='${ids.licenseeA}'; INSERT INTO public."ManufacturerLicenseeLink"("manufacturerId","licenseeId","isPrimary","updatedAt") VALUES('${ids.maker}','${ids.licenseeB}',true,now())`);
+  assert.deepEqual(json(app,listSql(caps.maker)),[]);
+  assert.deepEqual(json(app,`SET app.printing_licensee_id='${ids.licenseeA}'; ${listSql(caps.maker)}`),[]);
+  psql(admin,`DELETE FROM public."ManufacturerLicenseeLink" WHERE "manufacturerId"='${ids.maker}'; INSERT INTO public."ManufacturerLicenseeLink"("manufacturerId","licenseeId","isPrimary","updatedAt") VALUES('${ids.maker}','${ids.licenseeA}',true,now())`);
+  assert(json(app,listSql(caps.maker)).some(row=>row.id===reissueId));
   assert.deepEqual(json(app,listSql(caps.outsider)),[]);
   psql(admin,`UPDATE public."User" SET "orgId"='${ids.orgB}' WHERE id='${ids.checker}'`);
   assert.deepEqual(json(app,listSql(caps.checker)),[]);

@@ -22,8 +22,8 @@ export type SupportRuntimeIssue = {
 };
 
 export const classifySupportFailure = (endpoint?: string, status?: number | null): NonNullable<SupportRuntimeIssue["classification"]> => {
-  const path = sanitizeSupportUrl(endpoint || "").split("?")[0].replace(/^\/api\//, "/");
-  if (path === "/telemetry/route-transition") return "observability";
+  const path = sanitizeSupportUrl(endpoint || "").split(/[?#]/)[0].replace(/^\/api\//, "/").replace(/\/+$/, "");
+  if (path === "/telemetry/route-transition" || path === "/telemetry/route-transition/summary") return "observability";
   if (status != null && status < 500) return "expected-controlled";
   if (/^\/(qr|admin\/qr|manufacturer\/print)(\/|-|$)/.test(path)) return "business-critical";
   return "business";

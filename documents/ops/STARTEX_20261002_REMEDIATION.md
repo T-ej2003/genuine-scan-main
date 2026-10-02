@@ -23,6 +23,12 @@ Historical actor and exact production printing predicate remain unknown. The sou
 
 Review scope: changed SQL functions, generated owner privileges/policies, HTTP validation/error mapping, UI diagnostics, and their regression tests. Parameterized SQL, fixed search paths, authoritative capability binding, bounded selectors, atomic lifecycle/audit operations, and no PUBLIC/runtime table grants are retained. Runtime security conclusions require PostgreSQL certification; source review alone is not clearance to deploy.
 
+## Fresh PR review and CI corrections
+
+PR #613 review found two genuine issues, both corrected: manufacturer reissue listings now re-check current batch ownership and tenant membership (including revoked-link/forged-context regressions), and telemetry summary outages are classified as observability, including trailing slashes and query strings. No role was added. The obsolete analytics Prisma `batch.findMany` exception was removed rather than weakening its guardrail. CI's existing database uses PostgreSQL 18.6; QR certification retains its strict major-18 assertion and no longer requires an obsolete 18.4 patch number.
+
+After corrections, printing certification passed on PostgreSQL 18.6 UTC at `/var/folders/tc/k7yqlkj13mv8ftdf0gs_yjc80000gn/T/mscqr-startex-native-proof-lFRrfA/printing-lifecycle.json`; QR certification passed on PostgreSQL 18.6 UTC at `/var/folders/tc/k7yqlkj13mv8ftdf0gs_yjc80000gn/T/mscqr-startex-native-proof-g1ljyp/qr-system.json`. Both include actual HTTP and hostile database-identity cases. Support tests passed again. Initial PR frontend CI passed with clean locked dependencies; final-head CI/review remains required.
+
 ## Verification status
 
 - Backend TypeScript build: passed.

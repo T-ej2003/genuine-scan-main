@@ -626,7 +626,11 @@ BEGIN
           AND (
             actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
             OR (actor.role='LICENSEE_ADMIN' AND r."licenseeId"=actor."licenseeId" AND l."orgId"=actor."organizationId")
-            OR (actor.role='MANUFACTURER_ADMIN' AND r."requestedByUserId"=actor."userId")
+            OR (actor.role='MANUFACTURER_ADMIN' AND r."requestedByUserId"=actor."userId"
+              AND b."manufacturerId"=actor."userId" AND EXISTS (
+                SELECT 1 FROM public."ManufacturerLicenseeLink" ml
+                WHERE ml."manufacturerId"=actor."userId" AND ml."licenseeId"=b."licenseeId"
+              ))
           )
         ORDER BY r."createdAt" DESC,r.id DESC
         LIMIT LEAST(GREATEST(coalesce(NULLIF(p_options->>'limit','')::integer,50),1),200)

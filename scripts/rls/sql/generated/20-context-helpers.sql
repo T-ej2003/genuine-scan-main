@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='2b6c9f74f2d3bb9c0b81e58f8f6c7eae0180d1a5a88aea70c7c576b0c9c42bec'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:2b6c9f74f2d3bb9c0b81e58f8f6c7eae0180d1a5a88aea70c7c576b0c9c42bec'
+    AND source_contract_sha256='2d015b556d0e0d03ecc2f77218af82d78045bbd64448d70478638a3622592e56'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:2d015b556d0e0d03ecc2f77218af82d78045bbd64448d70478638a3622592e56'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:2b6c9f74f2d3bb9c0b81e58f8f6c7eae0180d1a5a88aea70c7c576b0c9c42bec')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:2d015b556d0e0d03ecc2f77218af82d78045bbd64448d70478638a3622592e56')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -8638,7 +8638,11 @@ BEGIN
           AND (
             actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
             OR (actor.role='LICENSEE_ADMIN' AND r."licenseeId"=actor."licenseeId" AND l."orgId"=actor."organizationId")
-            OR (actor.role='MANUFACTURER_ADMIN' AND r."requestedByUserId"=actor."userId")
+            OR (actor.role='MANUFACTURER_ADMIN' AND r."requestedByUserId"=actor."userId"
+              AND b."manufacturerId"=actor."userId" AND EXISTS (
+                SELECT 1 FROM public."ManufacturerLicenseeLink" ml
+                WHERE ml."manufacturerId"=actor."userId" AND ml."licenseeId"=b."licenseeId"
+              ))
           )
         ORDER BY r."createdAt" DESC,r.id DESC
         LIMIT LEAST(GREATEST(coalesce(NULLIF(p_options->>'limit','')::integer,50),1),200)
