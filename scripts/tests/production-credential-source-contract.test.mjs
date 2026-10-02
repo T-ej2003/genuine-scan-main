@@ -68,6 +68,25 @@ test("app-only identities use isolated OIDC sessions and cannot fall back to loc
   }
 });
 
+test("the shared AWS-only runner preserves service identity and enforces one exact production region", () => {
+  const calls = [];
+  const run = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.INJECTED_TEST, injected: true, env: {},
+    exec: (file, args, options) => { calls.push({ file, args, options }); return "{}"; } });
+  run(["dynamodb", "get-item"]);
+  run(["dynamodb", "get-item", "--region", "eu-west-2"]);
+  assert.deepEqual(calls.map(({ args }) => args), [
+    ["dynamodb", "get-item", "--region", "eu-west-2"],
+    ["dynamodb", "get-item", "--region", "eu-west-2"],
+  ]);
+  assert(calls.every(({ file }) => file === "aws"));
+  for (const args of [
+    ["dynamodb", "get-item", "--region", "us-east-1"],
+    ["dynamodb", "get-item", "--region", "eu-west-2", "--region", "eu-west-2"],
+    ["dynamodb", "get-item", "--region=eu-west-2"],
+  ]) assert.throws(() => run(args), /AWS (?:command region|region arguments)/);
+  assert.equal(calls.length, 2);
+});
+
 test("GitHub release-gate composition preserves only the OIDC session and never selects a profile", () => {
   const calls = [];
   const run = createProductionCommandRunner({
