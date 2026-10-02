@@ -28,6 +28,8 @@ import {
 } from "../aws/stage-b-reference-audit-contract.mjs";
 import { assertStageBFreshImageReferenceAuditBinding, assertStageBPlanApprovalReport, assertStageBPlanCaptureReport, createStageBPlanApprovalReport, createStageBPlanCaptureReport, stageBPlanHashes } from "../aws/stage-b-plan-approval-contract.mjs";
 import { B01_PREREQUISITE } from "../aws/production-b01-prerequisite-contract.mjs";
+import { APP_ONLY } from "../aws/production-app-only-contract.mjs";
+import { NORMAL_RECEIPT_WORKFLOW } from "../aws/production-normal-receipt-contract.mjs";
 
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const planSha256 = "a".repeat(64);
@@ -327,6 +329,76 @@ function makeB01LivePredecessorFixture({ liveTaskDefinitionArn = B01_PREREQUISIT
     fixture.reader.describeRepositories = () => ({ repositories: [{ repositoryArn: "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend", repositoryName: "mscqr-backend", registryId: B01_PREREQUISITE.account, imageTagMutability: "IMMUTABLE" }] });
     fixture.reader.describeImages = () => ({ imageDetails: [{ imageDigest: B01_PREREQUISITE.executorImage.split("@")[1], imageTags: [B01_PREREQUISITE.predecessorSourceSha, "production"] }] });
   }
+  fixture.planBytes = Buffer.from(JSON.stringify(fixture.plan));
+  fixture.planJsonSha256 = sha256(fixture.planBytes);
+  return fixture;
+}
+
+function makeNormalDeploymentLivePredecessorFixture({ mutateState, mutateService, mutateTaskDefinition, mutateRepository, mutateImageDetails, includeState = true } = {}) {
+  const fixture = makeAtomicBrokerFixture({ appendOnly: true });
+  const family = STAGE_B_TASK_DEFINITION_FAMILIES[backendAddress];
+  const liveTaskDefinitionArn = `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:24`;
+  const sourceSha = "1".repeat(40);
+  const imageDigest = `sha256:${"2".repeat(64)}`;
+  const backend = fixture.plan.resource_changes.find((change) => change.address === backendAddress);
+  backend.change.after.arn = `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:14`;
+  const retained = fixture.plan.resource_changes.find((change) => change.address === retainedAddressFor(backendAddress));
+  retained.change.before.arn = `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:13`;
+  fixture.plan.prior_state.values.root_module.resources.find((resource) => resource.address === retained.address).values.arn = retained.change.before.arn;
+  const componentState = {
+    schemaVersion: 1,
+    environment: "production",
+    repository: "T-ej2003/genuine-scan-main",
+    generation: 7,
+    updatedAt: "2026-07-31T13:55:00.000Z",
+    updatedByLane: "NORMAL_APPLICATION",
+    updatedByWorkflow: NORMAL_RECEIPT_WORKFLOW,
+    githubRunId: "123456789",
+    components: {
+      backend: { sourceSha, establishedThroughSha: sourceSha, imageDigest, taskDefinitionArn: liveTaskDefinitionArn, desiredCount: 2 },
+      frontend: null,
+      database: null,
+      security: null,
+    },
+  };
+  mutateState?.(componentState);
+  const service = {
+    serviceArn: APP_ONLY.serviceArn,
+    serviceName: APP_ONLY.service,
+    clusterArn: APP_ONLY.clusterArn,
+    status: "ACTIVE",
+    taskDefinition: liveTaskDefinitionArn,
+    desiredCount: 2,
+    runningCount: 2,
+    pendingCount: 0,
+    deployments: [{ id: "ecs-svc/123456789", status: "PRIMARY", taskDefinition: liveTaskDefinitionArn, rolloutState: "COMPLETED" }],
+  };
+  mutateService?.(service);
+  const taskDefinition = {
+    taskDefinitionArn: liveTaskDefinitionArn,
+    family,
+    revision: 24,
+    status: "ACTIVE",
+    networkMode: "awsvpc",
+    executionRoleArn: APP_ONLY.executionRoleArn,
+    taskRoleArn: APP_ONLY.taskRoleArn,
+    runtimePlatform: STAGE_B.taskRuntimePlatform,
+    containerDefinitions: [{ name: APP_ONLY.container, image: `${APP_ONLY.backendRepository}@${imageDigest}`, environment: [{ name: "RELEASE_GIT_SHA", value: sourceSha }] }],
+  };
+  mutateTaskDefinition?.(taskDefinition);
+  const repository = { repositoryName: "mscqr-backend", registryId: APP_ONLY.account, imageTagMutability: "IMMUTABLE" };
+  mutateRepository?.(repository);
+  const imageDetails = [{ imageDigest, imageTags: [sourceSha] }];
+  mutateImageDetails?.(imageDetails);
+  fixture.reader.listServices = () => [APP_ONLY.serviceArn];
+  fixture.reader.describeServices = () => ({ services: [structuredClone(service)], failures: [] });
+  const originalDescribeTaskDefinition = fixture.reader.describeTaskDefinition;
+  fixture.reader.describeTaskDefinition = (reference) => reference === liveTaskDefinitionArn
+    ? { taskDefinition: structuredClone(taskDefinition) }
+    : originalDescribeTaskDefinition(reference);
+  if (includeState) fixture.reader.readProductionComponentDeploymentState = () => structuredClone(componentState);
+  fixture.reader.describeRepositories = () => ({ repositories: [structuredClone(repository)] });
+  fixture.reader.describeImages = () => ({ imageDetails: structuredClone(imageDetails) });
   fixture.planBytes = Buffer.from(JSON.stringify(fixture.plan));
   fixture.planJsonSha256 = sha256(fixture.planBytes);
   return fixture;
@@ -1433,6 +1505,51 @@ test("B01 attestation cannot authorize an absent, substituted, or arbitrary unre
   const crossSource = generate(fixture);
   crossSource.b01LivePredecessorReference = { ...crossSource.b01LivePredecessorReference, auditSourceSha: "0".repeat(40) };
   assert.throws(() => validateBrokerPlan(fixture, crossSource), /malformed or unbound/);
+});
+
+test("authenticated normal deployment state authorizes its exact live predecessor", () => {
+  const fixture = makeNormalDeploymentLivePredecessorFixture();
+  const audit = generate(fixture);
+  assert.equal(audit.normalDeploymentLivePredecessorReference.taskDefinitionArn, fixture.reader.readProductionComponentDeploymentState().components.backend.taskDefinitionArn);
+  assert.equal(audit.normalDeploymentLivePredecessorReference.deploymentWorkflow, NORMAL_RECEIPT_WORKFLOW);
+  validateBrokerPlan(fixture, audit);
+});
+
+for (const [name, mutate, expected] of [
+  ["tampered deployment evidence", (fixture) => { fixture.reader.readProductionComponentDeploymentState = () => { const state = makeNormalDeploymentLivePredecessorFixture().reader.readProductionComponentDeploymentState(); state.components.backend.sourceSha = "3".repeat(40); state.components.backend.establishedThroughSha = "3".repeat(40); return state; }; }, /strictly equal|source identity/],
+  ["wrong source SHA", (fixture) => { const original = fixture.reader.readProductionComponentDeploymentState; fixture.reader.readProductionComponentDeploymentState = () => { const state = original(); state.components.backend.sourceSha = "3".repeat(40); state.components.backend.establishedThroughSha = "3".repeat(40); return state; }; }, /strictly equal/],
+  ["wrong task-definition ARN", (fixture) => { const original = fixture.reader.readProductionComponentDeploymentState; fixture.reader.readProductionComponentDeploymentState = () => { const state = original(); state.components.backend.taskDefinitionArn = state.components.backend.taskDefinitionArn.replace(":24", ":25"); return state; }; }, /strictly equal/],
+  ["image digest mismatch", (fixture) => { const original = fixture.reader.readProductionComponentDeploymentState; fixture.reader.readProductionComponentDeploymentState = () => { const state = original(); state.components.backend.imageDigest = `sha256:${"4".repeat(64)}`; return state; }; }, /strictly equal/],
+  ["wrong environment", (fixture) => { const original = fixture.reader.readProductionComponentDeploymentState; fixture.reader.readProductionComponentDeploymentState = () => ({ ...original(), environment: "staging" }); }, /strictly equal/],
+  ["wrong deployment lane", (fixture) => { const original = fixture.reader.readProductionComponentDeploymentState; fixture.reader.readProductionComponentDeploymentState = () => ({ ...original(), updatedByLane: "SECURITY_INFRASTRUCTURE" }); }, /strictly equal/],
+  ["unauthenticated deployment run", (fixture) => { const original = fixture.reader.readProductionComponentDeploymentState; fixture.reader.readProductionComponentDeploymentState = () => ({ ...original(), githubRunId: "local-test" }); }, /GitHub run identity/],
+  ["uncommitted normal receipt", (fixture) => { const original = fixture.reader.readProductionComponentDeploymentState; fixture.reader.readProductionComponentDeploymentState = () => ({ ...original(), normalDeploymentReceipt: {} }); }, /strictly equal|schemaVersion/],
+  ["concurrent ECS deployment", (fixture) => { const original = fixture.reader.describeServices; fixture.reader.describeServices = (...args) => { const response = original(...args); response.services[0].deployments.push({ status: "ACTIVE", taskDefinition: response.services[0].taskDefinition }); return response; }; }, /one completed deployment/],
+  ["wrong service", (fixture) => { const original = fixture.reader.describeServices; fixture.reader.describeServices = (...args) => { const response = original(...args); response.services[0].serviceArn = response.services[0].serviceArn.replace("mscqr-backend", "other-backend"); return response; }; }, /unexpected service|strictly equal/],
+  ["another release evidence", (fixture) => { const original = fixture.reader.readProductionComponentDeploymentState; fixture.reader.readProductionComponentDeploymentState = () => { const state = original(); state.components.backend.sourceSha = "5".repeat(40); state.components.backend.establishedThroughSha = "5".repeat(40); state.components.backend.imageDigest = `sha256:${"6".repeat(64)}`; return state; }; }, /strictly equal/],
+]) test(`normal deployment predecessor rejects ${name}`, () => {
+  const fixture = makeNormalDeploymentLivePredecessorFixture();
+  mutate(fixture);
+  assert.throws(() => generate(fixture), expected);
+});
+
+test("normal deployment predecessor rejects missing authenticated evidence and ECS-only identity", () => {
+  assert.throws(() => generate(makeNormalDeploymentLivePredecessorFixture({ includeState: false })), /unrecorded task-definition ARN|Create-only task-definition family remains referenced/);
+});
+
+test("normal deployment predecessor audit binding rejects removal and substitution", () => {
+  const fixture = makeNormalDeploymentLivePredecessorFixture();
+  const absent = generate(fixture);
+  delete absent.normalDeploymentLivePredecessorReference;
+  assert.throws(() => validateBrokerPlan(fixture, absent), /unrecorded task-definition ARN/);
+
+  const substituted = structuredClone(generate(fixture));
+  substituted.normalDeploymentLivePredecessorReference.taskDefinitionArn = substituted.normalDeploymentLivePredecessorReference.taskDefinitionArn.replace(":24", ":25");
+  assert.throws(() => validateBrokerPlan(fixture, substituted), /malformed or unbound/);
+
+  const forged = structuredClone(generate(fixture));
+  forged.normalDeploymentLivePredecessorReference.evidence.componentState.updatedByWorkflow = "untrusted/workflow";
+  assert.throws(() => validateBrokerPlan(fixture, forged));
 });
 
 for (const status of ["ACTIVATING", "DEACTIVATING", "STOPPING"]) {

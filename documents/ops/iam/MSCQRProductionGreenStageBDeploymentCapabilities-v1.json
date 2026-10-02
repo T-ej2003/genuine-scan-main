@@ -14832,6 +14832,42 @@
       "mutation": true
     },
     {
+      "id": "reference-audit-normal-deployment-component-state",
+      "phase": "reference-audit",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/generate-production-green-stage-b-reference-audit.mjs",
+      "sourceFunction": "authenticateNormalDeploymentLivePredecessorReference",
+      "action": "dynamodb:GetItem",
+      "resources": [
+        "arn:aws:dynamodb:eu-west-2:368992683803:table/mscqr-production-component-deployment-state"
+      ],
+      "context": {
+        "ForAllValues:StringEquals": {
+          "dynamodb:LeadingKeys": [
+            "production#T-ej2003/genuine-scan-main"
+          ]
+        },
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "audit-normal-deployment-component-state"
+      ],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-component-deployment-state/release-terminal-state-policy.json",
+        "sid": "ReadAndAdvanceExactComponentStateAtSuccessfulTerminal",
+        "livePolicyArn": "inline-role-policy:arn:aws:iam::368992683803:role/mscqr-production-release-deployer/MSCQRProductionComponentStateTerminalWriter",
+        "expectedVersion": "installed",
+        "expectedPolicySha256": "62f4ae6799c61878485813ff3ad8d6b52b95da97e904cb8e5638955b00e16023"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
       "id": "release-identify",
       "phase": "release-direct-read-preflight",
       "identity": "RELEASE_DEPLOYER",
@@ -21457,6 +21493,42 @@
       "mutation": false
     },
     {
+      "id": "stage-b-state-reconciliation-release-preflight-reference-audit-normal-deployment-component-state",
+      "phase": "stage-b-exact-refresh-only-state-reconciliation",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/produce-production-green-stage-b-release-preflight.mjs",
+      "sourceFunction": "reference-audit-normal-deployment-component-state",
+      "action": "dynamodb:GetItem",
+      "resources": [
+        "arn:aws:dynamodb:eu-west-2:368992683803:table/mscqr-production-component-deployment-state"
+      ],
+      "context": {
+        "ForAllValues:StringEquals": {
+          "dynamodb:LeadingKeys": [
+            "production#T-ej2003/genuine-scan-main"
+          ]
+        },
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "audit-normal-deployment-component-state"
+      ],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-component-deployment-state/release-terminal-state-policy.json",
+        "sid": "ReadAndAdvanceExactComponentStateAtSuccessfulTerminal",
+        "livePolicyArn": "inline-role-policy:arn:aws:iam::368992683803:role/mscqr-production-release-deployer/MSCQRProductionComponentStateTerminalWriter",
+        "expectedVersion": "installed",
+        "expectedPolicySha256": "62f4ae6799c61878485813ff3ad8d6b52b95da97e904cb8e5638955b00e16023"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
       "id": "stage-b-state-reconciliation-release-preflight-release-identify",
       "phase": "stage-b-exact-refresh-only-state-reconciliation",
       "identity": "RELEASE_DEPLOYER",
@@ -21705,6 +21777,10 @@
     {
       "id": "audit-task-definition",
       "action": "ecs:DescribeTaskDefinition"
+    },
+    {
+      "id": "audit-normal-deployment-component-state",
+      "action": "dynamodb:GetItem"
     },
     {
       "id": "recovery-backend-revisions",
@@ -22697,6 +22773,10 @@
     {
       "sourceFile": "scripts/aws/production-green-stage-b-ecs-observations.mjs",
       "action": "sts:GetCallerIdentity"
+    },
+    {
+      "sourceFile": "scripts/aws/production-green-stage-b-identity-capabilities.mjs",
+      "action": "dynamodb:GetItem"
     },
     {
       "sourceFile": "scripts/aws/production-green-stage-b-identity-capabilities.mjs",

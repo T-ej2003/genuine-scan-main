@@ -23,6 +23,9 @@ import { assertStageBDeploymentIdentity } from "./stage-b-deployment-identity.mj
 import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
 import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { assertB01LivePredecessor, B01_PREREQUISITE } from "./production-b01-prerequisite-contract.mjs";
+import { assertNormalDeploymentLivePredecessor } from "./production-normal-live-predecessor-contract.mjs";
+import { createProductionComponentDeploymentStateClient } from "./production-component-deployment-state.mjs";
+import { APP_ONLY } from "./production-app-only-contract.mjs";
 
 export { batch, createAwsReader } from "./production-green-stage-b-ecs-observations.mjs";
 
@@ -557,6 +560,44 @@ function authenticateB01LivePredecessorReference({ reader, services, auditedAt, 
   });
 }
 
+function authenticateNormalDeploymentLivePredecessorReference({ reader, services, allowedLiveArnsByFamily, auditedAt, toolingSha }) {
+  const family = STAGE_B_TASK_DEFINITION_FAMILIES['aws_ecs_task_definition.candidate["backend"]'];
+  const candidates = services.filter((service) => service.serviceName === APP_ONLY.service
+    && familyFromArn(service.taskDefinition, "normal deployment live predecessor").family === family
+    && !allowedLiveArnsByFamily.get(family).has(service.taskDefinition));
+  if (candidates.length === 0) return undefined;
+  if (candidates.length !== 1 || typeof reader.readProductionComponentDeploymentState !== "function") return undefined;
+  const componentState = reader.readProductionComponentDeploymentState();
+  if (!componentState) throw new Error("Normal deployment live predecessor is missing authenticated component-state evidence.");
+  const described = requireObject(reader.describeServices([APP_ONLY.serviceArn]), "normal deployment predecessor service description");
+  const describedServices = requireArray(described.services, "normal deployment predecessor services");
+  if (describedServices.length !== 1 || requireArray(described.failures, "normal deployment predecessor service failures").length !== 0) throw new Error("Normal deployment predecessor service observation is incomplete.");
+  const taskDefinition = requireObject(reader.describeTaskDefinition(candidates[0].taskDefinition), "normal deployment predecessor task definition").taskDefinition;
+  const repositories = requireArray(requireObject(reader.describeRepositories(["mscqr-backend"]), "normal deployment predecessor repository description").repositories, "normal deployment predecessor repositories");
+  const imageDigest = componentState.components?.backend?.imageDigest;
+  const imageDetails = requireArray(requireObject(reader.describeImages("mscqr-backend", imageDigest), "normal deployment predecessor image description").imageDetails, "normal deployment predecessor image details");
+  const evidence = { componentState, service: describedServices[0], taskDefinition, repository: repositories[0], imageDetails };
+  const authenticated = assertNormalDeploymentLivePredecessor(evidence);
+  return Object.freeze({
+    schemaVersion: 1,
+    kind: "STAGE_B_NORMAL_DEPLOYMENT_LIVE_PREDECESSOR_REFERENCE",
+    authenticatedAt: auditedAt,
+    auditSourceSha: toolingSha,
+    account: APP_ONLY.account,
+    region: APP_ONLY.region,
+    serviceArn: APP_ONLY.serviceArn,
+    taskDefinitionArn: authenticated.backend.taskDefinitionArn,
+    family,
+    imageDigest: authenticated.backend.imageDigest,
+    imageSourceSha: authenticated.backend.sourceSha,
+    componentStateGeneration: componentState.generation,
+    componentStateSha256: authenticated.componentStateSha256,
+    deploymentWorkflow: componentState.updatedByWorkflow,
+    deploymentRunId: String(componentState.githubRunId),
+    evidence,
+  });
+}
+
 export function generateReferenceAudit({
   plan,
   planBytes,
@@ -669,6 +710,8 @@ export function generateReferenceAudit({
   const stageBTransitionalTasks = transitionalTasks.filter((task) => task.stageBScoped);
   const b01LivePredecessorReference = authenticateB01LivePredecessorReference({ reader, services: stageBServices, auditedAt, toolingSha: deploymentIdentity.toolingSha });
   if (b01LivePredecessorReference) allowedLiveArnsByFamily.get(b01LivePredecessorReference.family).add(b01LivePredecessorReference.taskDefinitionArn);
+  const normalDeploymentLivePredecessorReference = authenticateNormalDeploymentLivePredecessorReference({ reader, services: stageBServices, allowedLiveArnsByFamily, auditedAt, toolingSha: deploymentIdentity.toolingSha });
+  if (normalDeploymentLivePredecessorReference) allowedLiveArnsByFamily.get(normalDeploymentLivePredecessorReference.family).add(normalDeploymentLivePredecessorReference.taskDefinitionArn);
   const {
     summary: broker,
     referencesByFamily: brokerReferencesByFamily,
@@ -839,6 +882,7 @@ export function generateReferenceAudit({
     plannedAtomicPackageChecksumTransition,
     planJsonSha256: planSha,
     ...(b01LivePredecessorReference ? { b01LivePredecessorReference } : {}),
+    ...(normalDeploymentLivePredecessorReference ? { normalDeploymentLivePredecessorReference } : {}),
     ...(recoveryAttestationSha256 ? { recoveryAttestationSha256 } : {}),
   };
 }
@@ -877,7 +921,9 @@ export async function runCli(argv = process.argv.slice(2)) {
   ensureStageBPrivateDirectory({ directory: path.dirname(outputPath), repositoryRoot, create: true });
   const planBytes = fs.readFileSync(options.planJsonPath);
   const plan = parseJson(planBytes.toString("utf8"), "Terraform plan JSON");
-  const reader = createAwsReader({ ...options, run: createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer" }) });
+  const run = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer" });
+  const reader = createAwsReader({ ...options, run });
+  reader.readProductionComponentDeploymentState = createProductionComponentDeploymentStateClient({ run }).read;
   const terraformConfiguration = fs.readFileSync(stageBTerraformConfigurationPath, "utf8");
   const audit = generateReferenceAudit({ ...options, plan, planBytes, reader, terraformConfiguration });
   writeStageBPrivateFileAtomic({ filePath: outputPath, bytes: Buffer.from(`${JSON.stringify(audit, null, 2)}\n`), repositoryRoot, label: "Stage B reference audit" });

@@ -10,6 +10,7 @@ import { ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPriva
 import { CHECKER_SOURCE_ROLE_NAME, assertRoleATrustResponse } from "./production-checker-chain-contract.mjs";
 import { assertEcrRepositoryPolicyResponse, isEcrRepositoryPolicyNotFound } from "./production-ecs-runtime-consumability.mjs";
 import { STAGE_B_PLAN_IMAGE_BINDINGS } from "./production-green-stage-b-image-evidence.mjs";
+import { PRODUCTION_COMPONENT_STATE } from "./production-component-deployment-state.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const IDENTITY_CAPABILITY_MATRIX_PATH = "documents/ops/iam/MSCQRProductionGreenStageBDeploymentCapabilities-v1.json";
@@ -42,6 +43,7 @@ export const RELEASE_READ_PROBES = Object.freeze([
   ["audit-services", "ecs:ListServices", ["ecs", "list-services", "--cluster", STAGE_B.clusterArn]],
   ["audit-tasks", "ecs:ListTasks", ["ecs", "list-tasks", "--cluster", STAGE_B.clusterArn]],
   ["audit-task-definition", "ecs:DescribeTaskDefinition", ["ecs", "describe-task-definition", "--task-definition", STAGE_B.frontendTaskDefinition]],
+  ["audit-normal-deployment-component-state", "dynamodb:GetItem", ["dynamodb", "get-item", "--table-name", PRODUCTION_COMPONENT_STATE.table, "--consistent-read", "--key", JSON.stringify({ stateKey: { S: PRODUCTION_COMPONENT_STATE.key } })]],
   ["recovery-backend-revisions", "ecs:ListTaskDefinitions", ["ecs", "list-task-definitions", "--family-prefix", "mscqr-production-rls-green-backend-candidate", "--status", "ACTIVE", "--sort", "DESC"]],
   ["backend-health-recovery-images", "ecr:DescribeImages", ["ecr", "describe-images", "--repository-name", "mscqr-backend", "--max-results", "1"]],
   ["backend-health-recovery-repository", "ecr:DescribeRepositories", ["ecr", "describe-repositories", "--repository-names", "mscqr-backend"]],

@@ -5,6 +5,8 @@ import { assertStageBDeploymentEvidenceFreshness, STAGE_B_DEPLOYMENT_EVIDENCE_CL
 import { ECS_EXEC_OPERATOR_TASK_TAG_KEY, ECS_EXEC_OPERATOR_TASK_TAG_VALUE } from "./production-ecs-exec-operator-contract.mjs";
 import { STAGE_B_BACKEND_PORT_MAPPING } from "./production-green-stage-b-task-definitions.mjs";
 import { assertB01LivePredecessor, B01_PREREQUISITE } from "./production-b01-prerequisite-contract.mjs";
+import { assertNormalDeploymentLivePredecessor } from "./production-normal-live-predecessor-contract.mjs";
+import { APP_ONLY } from "./production-app-only-contract.mjs";
 
 export const STAGE_B_TASK_DEFINITION_FAMILIES = Object.freeze({
   'aws_ecs_task_definition.candidate["backend"]': "mscqr-production-rls-green-backend-candidate",
@@ -74,6 +76,38 @@ export function assertStageBB01LivePredecessorReference(audit) {
   if (service.length !== 1 || service[0].taskDefinition !== expected.taskDefinitionArn || taskDefinition.length !== 1
     || taskDefinition[0].family !== expected.family || taskDefinition[0].revision !== 19 || taskDefinition[0].status !== "ACTIVE" || taskDefinition[0].stageBScoped !== true) {
     throw new Error("Stage B B01 live-predecessor reference does not match authoritative runtime observations.");
+  }
+  return reference;
+}
+
+export function assertStageBNormalDeploymentLivePredecessorReference(audit) {
+  const reference = audit?.normalDeploymentLivePredecessorReference;
+  if (reference === undefined) return undefined;
+  const authenticated = assertNormalDeploymentLivePredecessor(reference.evidence);
+  const expected = {
+    schemaVersion: 1,
+    kind: "STAGE_B_NORMAL_DEPLOYMENT_LIVE_PREDECESSOR_REFERENCE",
+    authenticatedAt: audit.auditedAt,
+    auditSourceSha: audit.toolingSha,
+    account: APP_ONLY.account,
+    region: APP_ONLY.region,
+    serviceArn: APP_ONLY.serviceArn,
+    taskDefinitionArn: authenticated.backend.taskDefinitionArn,
+    family: STAGE_B_TASK_DEFINITION_FAMILIES['aws_ecs_task_definition.candidate["backend"]'],
+    imageDigest: authenticated.backend.imageDigest,
+    imageSourceSha: authenticated.backend.sourceSha,
+    componentStateGeneration: reference.evidence.componentState.generation,
+    componentStateSha256: authenticated.componentStateSha256,
+    deploymentWorkflow: reference.evidence.componentState.updatedByWorkflow,
+    deploymentRunId: String(reference.evidence.componentState.githubRunId),
+  };
+  const { evidence, ...actual } = reference || {};
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error("Stage B normal-deployment live-predecessor reference attestation is malformed or unbound.");
+  const services = (audit.services || []).filter((entry) => entry?.serviceName === APP_ONLY.service);
+  const definitions = (audit.taskDefinitions || []).filter((entry) => entry?.taskDefinitionArn === expected.taskDefinitionArn);
+  if (services.length !== 1 || services[0].taskDefinition !== expected.taskDefinitionArn || definitions.length !== 1
+    || definitions[0].family !== expected.family || definitions[0].status !== "ACTIVE" || definitions[0].stageBScoped !== true) {
+    throw new Error("Stage B normal-deployment live-predecessor reference does not match authoritative runtime observations.");
   }
   return reference;
 }

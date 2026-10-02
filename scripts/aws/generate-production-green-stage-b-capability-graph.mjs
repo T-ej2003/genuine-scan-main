@@ -22,6 +22,7 @@ import { BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION, LEGACY_BOOTSTRAP_TRANSITION_S
 import { MIXED_DUAL_SLOT_RECOVERY_EXECUTION_POLICY_ARN, MIXED_DUAL_SLOT_RECOVERY_EXECUTION_POLICY_PATH, MIXED_DUAL_SLOT_RECOVERY_EXECUTION_ROLE_ARN, MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES } from "./production-mixed-dual-slot-recovery-contract.mjs";
 import { APP_ONLY } from "./production-app-only-contract.mjs";
 import { APP_ONLY_VERIFIER, APP_ONLY_PROVISIONING, appOnlyDeployerPolicy, appOnlyVerifierLauncherPolicy, appOnlyPermissionProvisionerPolicy } from "./production-app-only-policy.mjs";
+import { PRODUCTION_COMPONENT_STATE } from "./production-component-deployment-state.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const CAPABILITY_GRAPH_PATH = "documents/ops/iam/MSCQRProductionGreenStageBDeploymentCapabilities-v1.json";
@@ -37,6 +38,7 @@ const STAGE_A_RECOVERY_RAW_STATE_READ_COMMAND = '["s3api", "get-object", "--buck
 const rootAttestationPolicyPath = "infra/aws/terraform/production-green-stage-b-publisher-bootstrap/main.tf";
 const bootstrapOperatorPolicyPath = BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.sourcePath;
 const normalDeployerPolicyPath = "infra/aws/terraform/production-component-deployment-state/normal-deployer-policy.json";
+const releaseTerminalStatePolicyPath = "infra/aws/terraform/production-component-deployment-state/release-terminal-state-policy.json";
 const awsCliSourceFiles = [
   "scripts/aws/run-production-app-only-bootstrap.mjs", "scripts/aws/run-production-app-only-verifier.mjs",
   "scripts/aws/run-production-app-only-deployment.mjs", "scripts/aws/prepare-production-app-only-verifier.mjs",
@@ -788,6 +790,21 @@ export function buildStageBDeploymentCapabilityGraph() {
       context: { account: "368992683803", region: "eu-west-2", ...(bootstrapAssumeRole ? { mfaRequired: true } : {}) }, classification: actionClass, probe: actionClass === "RELEASE_DIRECT_READ" ? "direct" : actionClass === "ADMIN_SIMULATION" ? "administrator-simulation" : "structural", probeIds: probesByAction.get(action) || [],
       policy: bootstrapAssumeRole ? assertBootstrapOperatorAssumeRoleAuthority(id) : { sourceFile: identity === "RELEASE_DEPLOYER" ? manifestPath : sourceFile, sid: "identity-boundary", livePolicyArn: identity === "RELEASE_DEPLOYER" ? "signed-administrator-evidence" : null, expectedVersion: "source-bound", expectedPolicySha256: null }, required: true, mutation: ["ADMIN_SIGN", "ADMIN_IAM_MUTATION", "GITHUB_IMAGE_MUTATION"].includes(actionClass) };
   });
+  const terminalStatePolicy = readJson(releaseTerminalStatePolicyPath);
+  const terminalStateStatement = terminalStatePolicy.Statement.find(({ Sid }) => Sid === "ReadAndAdvanceExactComponentStateAtSuccessfulTerminal");
+  if (!asArray(terminalStateStatement?.Action).includes("dynamodb:GetItem")
+    || terminalStateStatement.Resource !== `arn:aws:dynamodb:${PRODUCTION_COMPONENT_STATE.region}:${PRODUCTION_COMPONENT_STATE.account}:table/${PRODUCTION_COMPONENT_STATE.table}`
+    || canonicalizeJson(terminalStateStatement.Condition) !== canonicalizeJson({ "ForAllValues:StringEquals": { "dynamodb:LeadingKeys": [PRODUCTION_COMPONENT_STATE.key] }, StringEquals: { "aws:RequestedRegion": PRODUCTION_COMPONENT_STATE.region } })) {
+    throw new Error("Normal deployment component-state reference authority is not exact.");
+  }
+  const normalDeploymentStateReference = {
+    id: "reference-audit-normal-deployment-component-state", phase: "reference-audit", identity: "RELEASE_DEPLOYER", executor: "aws-cli",
+    sourceFile: "scripts/aws/generate-production-green-stage-b-reference-audit.mjs", sourceFunction: "authenticateNormalDeploymentLivePredecessorReference",
+    action: "dynamodb:GetItem", resources: [terminalStateStatement.Resource], context: terminalStateStatement.Condition,
+    classification: "RELEASE_DIRECT_READ", probe: "direct", probeIds: ["audit-normal-deployment-component-state"],
+    policy: { sourceFile: releaseTerminalStatePolicyPath, sid: terminalStateStatement.Sid, livePolicyArn: `inline-role-policy:arn:aws:iam::${PRODUCTION_COMPONENT_STATE.account}:role/mscqr-production-release-deployer/MSCQRProductionComponentStateTerminalWriter`, expectedVersion: "installed", expectedPolicySha256: sha256(Buffer.from(canonicalizeJson(terminalStatePolicy))) },
+    required: true, mutation: false,
+  };
   const normalActivation = NORMAL_ACTIVATION_CAPABILITIES.map(([id, phase, identity, action, resources, mutation]) => {
     const policy = identity === "ADMINISTRATOR" || action === "ecs:UpdateService"
       ? { sourceFile: "scripts/aws/production-normal-backend-activation-policy.mjs", sid: id, livePolicyArn: action === "ecs:UpdateService" ? NORMAL_ACTIVATION.policyArn : null, expectedVersion: "state-derived-exact-revision", expectedPolicySha256: null }
@@ -903,6 +920,7 @@ export function buildStageBDeploymentCapabilityGraph() {
     ...manifestCapabilities.filter(({ identity, probeIds }) => identity === "RELEASE_DEPLOYER" && probeIds.length),
     ...recovery.filter(({ action }) => action === "ecs:ListTaskDefinitions"),
     ...fixed.filter(({ id }) => ["release-identify", "release-verify-signature"].includes(id)),
+    normalDeploymentStateReference,
     ...rootAttestationRelease,
   ].map((capability) => ({
     ...capability, id: `stage-b-state-reconciliation-release-preflight-${capability.id}`,
@@ -913,7 +931,7 @@ export function buildStageBDeploymentCapabilityGraph() {
   }));
   const runtime = terraformRuntimeActions().map((action) => ({ id: `runtime-${action.replace(/[^A-Za-z0-9]+/g, "-").toLowerCase()}`, phase: "runtime-activation-boundary", identity: "SERVICE_RUNTIME", executor: "lambda-or-ecs-role", sourceFile: terraformPath, sourceFunction: "generated runtime IAM policy", action, resources: ["terraform-derived-runtime-resource"], context: {}, classification: "SERVICE_RUNTIME_ACTION", probe: "structural", policy: { sourceFile: terraformPath, sid: "terraform-generated", livePolicyArn: "created-or-updated-by-stage-b", expectedVersion: "saved-plan", expectedPolicySha256: null }, required: false, mutation: isRuntimeMutationAction(action) }));
   const runtimeAdmin = RUNTIME_ADMIN_CAPABILITIES.map(([id, phase, action, resources, mutation]) => ({ id, phase, identity: "ADMINISTRATOR", executor: "aws-cli", sourceFile: phase === "runtime-consumability-convergence" ? "scripts/aws/converge-production-ecs-runtime-policy.mjs" : "scripts/aws/prepare-production-ecs-runtime-consumability.mjs", sourceFunction: id, action, resources, context: { account: STAGE_B.account, region: STAGE_B.region }, classification: mutation ? "ADMIN_IAM_OR_SIGNING_MUTATION" : "ADMIN_RUNTIME_CLOSURE_READ", probe: action === "iam:SimulatePrincipalPolicy" ? "administrator-simulation" : "administrator-live-read", probeIds: [], policy: { sourceFile: phase === "runtime-consumability-convergence" ? "scripts/aws/converge-production-ecs-runtime-policy.mjs" : "scripts/aws/production-ecs-runtime-consumability.mjs", sid: id, livePolicyArn: null, expectedVersion: "protected-main-source", expectedPolicySha256: null }, required: true, mutation }));
-  const capabilities = [...fixed, ...normalActivation, ...normalDeploymentDiscovery, ...initialActivationPolicyReconciliation, ...initialActivationPreparation, ...providerReadonlyReconciliation, ...providerReadonlyPreparation, ...bootstrapOperatorPolicyReconciliation, ...mixedRecoveryIamPreflight, mixedRecoveryIamAttestationSigning, ...mixedRecoveryExecution, ...stageAProductionArtifacts, ROOT_DROP_SIGNING, ...rootAttestationRelease, ...recovery, ...forwardRecovery, ...stateReconciliationDirect, ...stateReconciliation, ...prerequisiteProducerReads, ...releasePreflightProducerReads, ...stateReconciliationProviderReads, ...publisher, ...manifestCapabilities, ...checkerCapabilities, ...operatorCapabilities, ...runtimeAdmin, ...runtime].sort((a, b) => a.id.localeCompare(b.id));
+  const capabilities = [...fixed, normalDeploymentStateReference, ...normalActivation, ...normalDeploymentDiscovery, ...initialActivationPolicyReconciliation, ...initialActivationPreparation, ...providerReadonlyReconciliation, ...providerReadonlyPreparation, ...bootstrapOperatorPolicyReconciliation, ...mixedRecoveryIamPreflight, mixedRecoveryIamAttestationSigning, ...mixedRecoveryExecution, ...stageAProductionArtifacts, ROOT_DROP_SIGNING, ...rootAttestationRelease, ...recovery, ...forwardRecovery, ...stateReconciliationDirect, ...stateReconciliation, ...prerequisiteProducerReads, ...releasePreflightProducerReads, ...stateReconciliationProviderReads, ...publisher, ...manifestCapabilities, ...checkerCapabilities, ...operatorCapabilities, ...runtimeAdmin, ...runtime].sort((a, b) => a.id.localeCompare(b.id));
   return {
     schemaVersion: 1, deployment: "production-green-stage-b", account: "368992683803", region: "eu-west-2",
     phases: PHASES.map(([id, sourceFile], index) => ({ order: index + 1, id, sourceFile })),
