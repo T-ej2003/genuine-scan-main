@@ -73,7 +73,7 @@ jobs:
             git merge-base --is-ancestor "$baseline_merge_sha" "$GITHUB_SHA"
             # The reviewed baseline lineage and both historical image digests
             # separate current deployment source from the one-time predecessor.
-            printf 'release_class=NORMAL_APPLICATION\nbackend=true\nfrontend=true\nbaseline=true\n' >> "$GITHUB_OUTPUT"
+            printf 'release_class=REVIEWED_BASELINE\nbackend=true\nfrontend=true\nbaseline=true\n' >> "$GITHUB_OUTPUT"
             echo "### One-time reviewed runtime baseline" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
@@ -90,7 +90,7 @@ jobs:
   deploy:
     name: Build, deploy, verify, and roll back on failure
     needs: classify
-    if: (needs.classify.outputs.release_class == 'NORMAL_APPLICATION' || needs.classify.outputs.release_class == 'PRIVILEGED_PREREQUISITE_BACKEND') && (needs.classify.outputs.backend == 'true' || needs.classify.outputs.frontend == 'true')
+    if: (needs.classify.outputs.release_class == 'NORMAL_APPLICATION' || needs.classify.outputs.release_class == 'REVIEWED_BASELINE' || needs.classify.outputs.release_class == 'PRIVILEGED_PREREQUISITE_BACKEND') && (needs.classify.outputs.backend == 'true' || needs.classify.outputs.frontend == 'true')
     runs-on: ubuntu-latest
     environment: production-normal-deploy
     permissions: { contents: read, id-token: write }
@@ -186,6 +186,21 @@ jobs:
             grep -q "^backend=${EXPECT_BACKEND}$" "$RUNNER_TEMP/live-classification"
             grep -q "^frontend=${EXPECT_FRONTEND}$" "$RUNNER_TEMP/live-classification"
           fi
+      - name: Reconcile and prepare component-state transaction
+        if: needs.classify.outputs.release_class == 'NORMAL_APPLICATION' && needs.classify.outputs.baseline != 'true'
+        run: |
+          set -euo pipefail
+          node scripts/aws/production-normal-release.mjs --reconcile
+          node scripts/aws/prepare-production-normal-deployment.mjs --output="$RUNNER_TEMP/normal-component-deployment-plan.json"
+          node --input-type=module - "$RUNNER_TEMP/normal-component-deployment-plan.json" <<'NODE'
+          import fs from 'node:fs';
+          const plan = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          if (plan.classification.releaseClass !== 'NORMAL_APPLICATION' || plan.classification.worker || plan.classification.backend !== (process.env.EXPECT_BACKEND === 'true') || plan.classification.frontend !== (process.env.EXPECT_FRONTEND === 'true')) throw new Error('Component-state classification differs from the protected-main routing decision.');
+          NODE
+        env:
+          MSCQR_APP_ONLY_JOURNAL_DIR: '${{ runner.temp }}/normal-release-journal'
+          EXPECT_BACKEND: ${{ needs.classify.outputs.backend }}
+          EXPECT_FRONTEND: ${{ needs.classify.outputs.frontend }}
       - uses: aws-actions/amazon-ecr-login@v2
       - uses: docker/setup-buildx-action@v4
       - name: Publish immutable backend image
@@ -246,7 +261,7 @@ jobs:
             PROVENANCE_ATTESTATION_TYPE="$PROVENANCE_ATTESTATION_TYPE" ./scripts/aws/verify-release-artifacts.sh "$image"
           done
       - name: Deploy backend
-        if: needs.classify.outputs.backend == 'true'
+        if: needs.classify.outputs.backend == 'true' && (needs.classify.outputs.baseline == 'true' || needs.classify.outputs.release_class == 'PRIVILEGED_PREREQUISITE_BACKEND')
         env:
           CLUSTER_NAME: mscqr-prod-euw2-main
           SERVICE_NAME: mscqr-backend-servi-euw2
@@ -261,7 +276,7 @@ jobs:
           MSCQR_NORMAL_APPLICATION_DEPLOYMENT: "true"
         run: ./scripts/aws/deploy-ecs-service.sh
       - name: Deploy frontend
-        if: needs.classify.outputs.frontend == 'true'
+        if: needs.classify.outputs.frontend == 'true' && (needs.classify.outputs.baseline == 'true' || needs.classify.outputs.release_class == 'PRIVILEGED_PREREQUISITE_BACKEND')
         env:
           CLUSTER_NAME: mscqr-prod-euw2-main
           SERVICE_NAME: mscqr-frontend-servi-euw2
@@ -276,10 +291,19 @@ jobs:
           MSCQR_NORMAL_APPLICATION_DEPLOYMENT: "true"
         run: ./scripts/aws/deploy-ecs-service.sh
       - name: Verify production health and authenticated smoke
+        if: needs.classify.outputs.baseline == 'true' || needs.classify.outputs.release_class == 'PRIVILEGED_PREREQUISITE_BACKEND'
         env: { SMOKE_SYNTHETIC_REQUIRED: "true", SMOKE_SYNTHETIC_RUN_ID: 'production-${{ github.run_id }}-${{ github.run_attempt }}' }
         run: node scripts/smoke-release.mjs
+      - name: Execute coordinated normal component transaction
+        if: needs.classify.outputs.release_class == 'NORMAL_APPLICATION' && needs.classify.outputs.baseline != 'true'
+        env:
+          BACKEND_IMAGE: ${{ steps.backend.outputs.image }}
+          FRONTEND_IMAGE: ${{ steps.frontend.outputs.image }}
+          PREPARATION_FILE: ${{ runner.temp }}/normal-component-deployment-plan.json
+          MSCQR_APP_ONLY_JOURNAL_DIR: ${{ runner.temp }}/normal-release-journal
+        run: node scripts/aws/production-normal-release.mjs --source-sha="${GITHUB_SHA}" --preparation-file="${PREPARATION_FILE}" --backend-image="${BACKEND_IMAGE}" --frontend-image="${FRONTEND_IMAGE}"
       - name: Roll back exact predecessors after failure
-        if: failure()
+        if: failure() && (needs.classify.outputs.baseline == 'true' || needs.classify.outputs.release_class == 'PRIVILEGED_PREREQUISITE_BACKEND')
         run: |
           set -euo pipefail
           rollback_failed=0
@@ -295,6 +319,14 @@ jobs:
             fi
           done
           exit "$rollback_failed"
+      - name: Preserve normal transaction journal
+        if: always() && needs.classify.outputs.release_class == 'NORMAL_APPLICATION' && needs.classify.outputs.baseline != 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: normal-release-journal-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/normal-release-journal
+          if-no-files-found: error
+          retention-days: 30
       - name: Deployment audit summary
         if: always()
         run: |

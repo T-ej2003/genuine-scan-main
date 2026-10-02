@@ -1,10 +1,12 @@
 # Normal production deployment
 
-Ordinary backend and frontend application changes deploy from protected `main` through `.github/workflows/production-deploy.yml`:
+Ordinary backend and frontend application changes deploy from protected `main` through `.github/workflows/production-deploy.yml` and the canonical component transaction:
 
-`PR -> required CI/security checks -> merge -> Lane A classification -> one production approval -> GitHub OIDC -> immutable ECR image -> ECS task definition/service -> stability -> authenticated smoke`
+`PR -> required CI/security checks -> merge -> Lane A classification -> one production approval -> GitHub OIDC -> durable deployment intent -> immutable ECR image -> ECS task definition/service -> stability -> authenticated smoke -> component-state CAS`
 
-The protected `production-normal-deploy` environment requires explicit approval from GitHub User `T-ej2003` (`183396573`), allows self-review for the solo-operator model, disables administrator bypass, and permits only `main`. The job assumes only `mscqr-production-normal-deployer`; no local AWS profile, root session, MFA handoff, Terraform plan/apply, broker, transition ID, preparation artifact, authorization artifact, or Codex production session participates.
+The component-state bootstrap is the one-time CAS anchor. Every later ordinary deployment records its exact predecessor and candidate before service mutation and cannot complete without atomically replacing that receipt with component-scoped `NORMAL_APPLICATION` provenance. A missing state record, stale generation, unknown live predecessor, failed verification, or failed terminal write stops or reconciles the transaction; direct ECS state is never adopted as deployment evidence.
+
+The protected `production-normal-deploy` environment requires explicit approval from GitHub User `T-ej2003` (`183396573`), allows self-review for the solo-operator model, disables administrator bypass, and permits only `main`. The job assumes only `mscqr-production-normal-deployer`; no local AWS profile, root session, MFA handoff, Terraform plan/apply, broker, transition ID, operator-supplied preparation or authorization artifact, or Codex production session participates.
 
 ## Lane A
 
@@ -78,9 +80,7 @@ A permanent public-verification fixture must use the normal QR lifecycle: the de
 
 ## Retirement inventory
 
-- **KEEP:** protected-main CI/security checks, ECR repositories, ECS cluster/services/task roles, production smoke tests, GitHub OIDC provider, `production-normal-deploy`, and historical recovery evidence.
-- **DEPRECATE:** custom component deployment-state planning, normal-release intents/receipts/journals, and duplicate normal-deployment approval stages.
-- **RETIRE_AFTER_NEW_LANE_PROVEN:** normal-deployment DynamoDB writer access and deployment-only broker/reconciler/Stage-B workflow surfaces, through a separate reviewed deletion change after one successful deploy and rollback proof.
+- **KEEP:** protected-main CI/security checks, ECR repositories, ECS cluster/services/task roles, production smoke tests, GitHub OIDC provider, `production-normal-deploy`, historical recovery evidence, component deployment-state planning, normal-release intents/receipts/journals, and exact-key DynamoDB CAS authority. The latter make ECS mutation and authenticated component provenance one fail-closed transaction.
 - **HISTORICAL_ONLY:** completed broker generations, successor closures, failed recovery transitions, and their immutable evidence. Do not rewrite or delete them as part of application deployment.
 
 ## Operator response

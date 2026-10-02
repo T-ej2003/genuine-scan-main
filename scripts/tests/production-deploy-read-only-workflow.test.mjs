@@ -23,7 +23,7 @@ test("normal deployment has one protected mutation job and leaves stronger lanes
   const bootstrap = yaml.load(fs.readFileSync(".github/workflows/bootstrap-production-component-deployment-state.yml", "utf8"));
   const activation = yaml.load(fs.readFileSync(".github/workflows/authorize-component-infrastructure-activation.yml", "utf8"));
   for (const [job, environment, command] of [
-    [workflow.jobs.deploy, "production-normal-deploy", "deploy-ecs-service.sh"],
+    [workflow.jobs.deploy, "production-normal-deploy", "production-normal-release.mjs"],
     [bootstrap.jobs.bootstrap, "production-component-state-bootstrap", "bootstrap-production-component-deployment-state.mjs"],
   ]) {
     // GitHub evaluates required reviewers before starting any environment job,
@@ -39,6 +39,13 @@ test("normal deployment has one protected mutation job and leaves stronger lanes
   assert.equal(workflow.jobs.classify.environment, undefined);
   assert(workflow.jobs.deploy.needs.includes("classify"));
   assert(workflow.jobs.deploy.if.includes("needs.classify.outputs.release_class == 'NORMAL_APPLICATION'"));
+  const coordinated = workflow.jobs.deploy.steps.find(({ name }) => name === "Execute coordinated normal component transaction");
+  assert.equal(coordinated.if, "needs.classify.outputs.release_class == 'NORMAL_APPLICATION' && needs.classify.outputs.baseline != 'true'");
+  const directOnly = "needs.classify.outputs.baseline == 'true' || needs.classify.outputs.release_class == 'PRIVILEGED_PREREQUISITE_BACKEND'";
+  assert.equal(workflow.jobs.deploy.steps.find(({ name }) => name === "Deploy backend").if, `needs.classify.outputs.backend == 'true' && (${directOnly})`);
+  assert.equal(workflow.jobs.deploy.steps.find(({ name }) => name === "Deploy frontend").if, `needs.classify.outputs.frontend == 'true' && (${directOnly})`);
+  assert.equal(workflow.jobs.deploy.steps.find(({ name }) => name === "Verify production health and authenticated smoke").if, directOnly);
+  assert.equal(workflow.jobs.deploy.steps.find(({ name }) => name === "Roll back exact predecessors after failure").if, `failure() && (${directOnly})`);
   assert.equal(activation.jobs.authorize.environment, "production-component-infrastructure-activation");
   assert.equal(activation.jobs.authorize.if, "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'");
   assert.deepEqual(activation.permissions, { contents: "read" });
@@ -70,17 +77,20 @@ test("workflow is OIDC-only, serialized, and uses fixed production boundaries", 
   assert.match(workflowText, /368992683803/);
   assert.match(workflowText, /eu-west-2/);
   assert.match(workflowText, /environment: production/);
-  assert.doesNotMatch(workflowText, /actions\/upload-artifact@v7/);
+  assert.match(workflowText, /actions\/upload-artifact@v7/);
 });
 
-test("normal workflow has no custom preparation, authorization, or journal protocol", () => {
-  assert.doesNotMatch(workflowText, /preparation|authorization artifact|MSCQR_APP_ONLY_JOURNAL_DIR|component-deployment-state/i);
+test("normal workflow uses the canonical component transaction and no parallel authorization protocol", () => {
+  assert.match(workflowText, /prepare-production-normal-deployment\.mjs/);
+  assert.match(workflowText, /production-normal-release\.mjs/);
+  assert.match(workflowText, /MSCQR_APP_ONLY_JOURNAL_DIR/);
+  assert.doesNotMatch(workflowText, /authorization artifact/i);
 });
 
 test("live baseline authentication precedes publication and rollback is failure-only", () => {
   const steps = workflow.jobs.deploy.steps;
   assert.ok(steps.findIndex(({ name }) => name === "Authenticate live deployment baseline") < steps.findIndex(({ name }) => name === "Publish immutable backend image"));
-  assert.equal(steps.find(({ name }) => name === "Roll back exact predecessors after failure").if, "failure()");
+  assert.match(steps.find(({ name }) => name === "Roll back exact predecessors after failure").if, /^failure\(\).*PRIVILEGED_PREREQUISITE_BACKEND/);
   assert.match(steps.find(({ name }) => name === "Sign and attest published images").env.COSIGN_CERT_IDENTITY_REGEXP, /production-deploy\.yml/);
   assert.equal(workflow.jobs.deploy.environment, "production-normal-deploy");
   assert.equal(workflow.jobs.deploy.env.SMOKE_AUTHENTICATED_REQUIRED, "true");
@@ -177,8 +187,7 @@ test("deployment mode is an executable kill switch", () => {
 
 test("normal workflow has authenticated smoke and preserves the read-only orchestrator as a separate tool", () => {
   assert.match(workflowText, /node scripts\/smoke-release\.mjs/);
-  assert.match(workflowText, /deploy-ecs-service\.sh/);
-  assert.match(workflowText, /rollback-ecs-service\.sh/);
+  assert.match(workflowText, /production-normal-release\.mjs/);
   assert.match(workflowText, /SMOKE_AUTHENTICATED_REQUIRED: "true"/);
   assert.doesNotMatch(workflowText, /scripts\/ci\/production-readiness-orchestrator\.mjs/);
 });

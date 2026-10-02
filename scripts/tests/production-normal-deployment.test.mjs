@@ -270,6 +270,8 @@ test("combined component transaction rolls every mutated service back before sta
   const frontend = { deploy: async (_, { recordCandidate }) => { const candidateTaskDefinitionArn = taskArn.replace(":20", ":21"); await recordCandidate(candidateTaskDefinitionArn); return { result: { candidateTaskDefinitionArn, imageRef: frontendImage }, rollback: async () => events.push("frontend-rollback") }; }, rollback: async (value) => value.rollback() };
   const complete = await executeNormalComponentTransaction({ plan, sourceSha: candidate, state, ...context, backend, frontend, smoke: async () => true, isAncestor: () => true });
   assert.equal(committed, true); assert.equal(complete.componentState.components.backend.sourceSha, candidate); assert.equal(complete.componentState.components.backend.establishedThroughSha, candidate); assert.equal(complete.componentState.components.frontend.sourceSha, candidate); assert.equal(complete.componentState.components.frontend.establishedThroughSha, candidate);
+  assert.equal(complete.componentState.componentProvenance.backend.lane, "NORMAL_APPLICATION");
+  assert.equal(complete.componentState.componentProvenance.frontend.lane, "NORMAL_APPLICATION");
 });
 
 test("live source equality without a durable receipt never authorizes reconciliation", () => {
@@ -322,20 +324,21 @@ test("normal production workflow is fixed, OIDC-only, gated by main, and smoke-t
   assert.match(workflow, /SMOKE_EXPECTED_LICENSEE_ID: 75b80c75-98dd-44d2-a4b6-c091a12a4fb8/);
   assert.match(workflow, /classify-production-lane-a\.mjs/);
   assert.match(workflow, /publish-ecs-images\.sh/);
-  assert.match(workflow, /deploy-ecs-service\.sh/);
-  assert.match(workflow, /rollback-ecs-service\.sh/);
+  assert.match(workflow, /production-normal-release\.mjs --reconcile/);
+  assert.match(workflow, /prepare-production-normal-deployment\.mjs/);
+  assert.match(workflow, /Execute coordinated normal component transaction/);
   assert.match(workflow, /docker save "\$image" -o "\$RUNNER_TEMP\/\$\{component\}\.tar"/);
   assert.match(workflow, /--scanners vuln --severity CRITICAL --ignore-unfixed --exit-code 1/);
   assert.match(workflow, /--scanners secret --exit-code 1/);
   assert.doesNotMatch(workflow, /--scanners vuln,secret/);
   assert.doesNotMatch(workflow, /\/var\/run\/docker\.sock/);
-  assert.doesNotMatch(workflow, /production-normal-release|prepare-production-normal-deployment|normal-component-deployment-plan|DynamoDB/i);
+  assert.match(workflow, /normal-component-deployment-plan\.json/);
   assert.match(workflow, /mscqr-production-normal-deployer/);
   assert.match(workflow, /environment: production-normal-deploy/);
   const normalEnvironmentUsers = fs.readdirSync(".github/workflows").filter((file) => file.endsWith(".yml") && fs.readFileSync(`.github/workflows/${file}`, "utf8").match(/environment:\s*production-normal-deploy/));
   assert.deepEqual(normalEnvironmentUsers, ["production-deploy.yml"]);
   assert.equal((workflow.match(/environment: production-normal-deploy/g) || []).length, 1);
-  assert.match(workflow, /Roll back exact predecessors after failure[\s\S]*if: failure\(\)/);
+  assert.match(workflow, /Roll back exact predecessors after failure[\s\S]*if: failure\(\).*PRIVILEGED_PREREQUISITE_BACKEND/);
   assert.match(workflow, /rollback_failed=0[\s\S]*if ! CLUSTER_NAME=[\s\S]*rollback_failed=1[\s\S]*exit "\$rollback_failed"/);
   assert.match(fs.readFileSync("scripts/aws/publish-ecs-images.sh", "utf8"), /await import\(process\.env\.NORMAL_IMAGE_CONTRACT\)/);
   assert.match(workflow, /node scripts\/smoke-release\.mjs/);
@@ -347,7 +350,7 @@ test("normal production workflow is fixed, OIDC-only, gated by main, and smoke-t
   assert.match(workflow, /backend_digest=sha256:d2a6f641f44e27454a80d502914a9e168c61cdace1201f9d7af9d85a87ea208c/);
   assert.match(workflow, /frontend_base=d355a77675d4320c2bfa975ebf3682995ba54a2f/);
   assert.match(workflow, /frontend_digest=sha256:5053d6a6481b3bcacb414adf82c41d7504c4a91a93c8c52dd3b11aae0e01c277/);
-  assert.doesNotMatch(workflow, /terraform|broker|component-deployment-state/i);
+  assert.doesNotMatch(workflow, /terraform|broker/i);
 });
 
 test("one-time baseline separates current protected main from its reviewed historical lineage", (t) => {
@@ -381,7 +384,7 @@ printf '%s\\n' "$FIXTURE_HISTORICAL_SHA"
   fs.chmodSync(path.join(directory, "git"), 0o700); fs.chmodSync(path.join(directory, "gh"), 0o700);
 
   assert.doesNotThrow(() => run());
-  assert.match(fs.readFileSync(output, "utf8"), /release_class=NORMAL_APPLICATION[\s\S]*baseline=true/);
+  assert.match(fs.readFileSync(output, "utf8"), /release_class=REVIEWED_BASELINE[\s\S]*baseline=true/);
   assert.throws(() => run({ protectedSha: "c".repeat(40) }));
   assert.throws(() => run({ githubSha: historical, checkoutSha: historical }));
   assert.throws(() => run({ historicalSha: current }));
