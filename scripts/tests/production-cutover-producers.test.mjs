@@ -6,7 +6,8 @@ import os from "node:os";
 import path from "node:path";
 import { verifyArtifactSigningDomain } from "../aws/production-artifact-signing-domain.mjs";
 import { createProductionRuntimeInventoryAdapter, PRODUCTION_RUNTIME_INVENTORY_COMMAND } from "../aws/production-runtime-inventory-adapter.mjs";
-import { createConditionalMfaResolvers, createProductionCommandRunner, createProductionOverlapDeploymentAdapter, ProductionCommandRouteError, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "../aws/production-cutover-production-adapters.mjs";
+import { createConditionalMfaResolvers, createProductionCommandRunner, createProductionOverlapDeploymentAdapter, ProductionCommandRouteError, PRODUCTION_AWS_CREDENTIAL_SOURCE, PRODUCTION_COMMAND_AWS_SERVICES } from "../aws/production-cutover-production-adapters.mjs";
+import { createProductionComponentDeploymentStateClient } from "../aws/production-component-deployment-state.mjs";
 import { loadApprovedArtifactSigningBindings } from "../aws/production-artifact-signing-secrets-adapter.mjs";
 import { assertNoOnboardingEvidenceLeak } from "../security/production-strict-onboarding.mjs";
 import { createProductionInteractiveEcsExecRunner } from "../aws/production-ecs-exec-command.mjs";
@@ -147,6 +148,7 @@ test("production command runner routes only reviewed AWS services, Node, and Ter
     assert.deepEqual(calls.map(({ file }) => file), ["aws", "aws", "aws", process.execPath, "terraform"]);
     assert.equal(calls[0].args.at(-1), "eu-west-2");
     assert.equal(calls[1].args.filter((arg) => arg === "--region").length, 1);
+    assert.equal(calls[1].args[0], "ecs");
     assert.equal(calls[2].args[0], "iam");
     assert.equal(calls[0].options.env.AWS_PROFILE, "mscqr-test");
     assert.equal(calls[0].options.env.AWS_DEFAULT_REGION, "eu-west-2");
@@ -155,6 +157,63 @@ test("production command runner routes only reviewed AWS services, Node, and Ter
   } finally {
     for (const [name, value] of Object.entries(previous)) value === undefined ? delete process.env[name] : process.env[name] = value;
   }
+});
+
+test("every approved AWS namespace preserves its service token for implicit and explicit production regions", () => {
+  const calls = [];
+  const run = createProductionCommandRunner({
+    credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.INJECTED_TEST,
+    env: {},
+    exec: (file, args) => { calls.push({ file, args }); return "{}"; },
+  });
+  for (const service of PRODUCTION_COMMAND_AWS_SERVICES) {
+    run([service, "operation"]);
+    run([service, "operation", "--region", "eu-west-2"]);
+  }
+  assert.equal(new Set(PRODUCTION_COMMAND_AWS_SERVICES).size, PRODUCTION_COMMAND_AWS_SERVICES.length);
+  assert.equal(calls.length, PRODUCTION_COMMAND_AWS_SERVICES.length * 2);
+  for (let index = 0; index < calls.length; index += 1) {
+    const service = PRODUCTION_COMMAND_AWS_SERVICES[Math.floor(index / 2)];
+    assert.equal(calls[index].file, "aws");
+    assert.equal(calls[index].args[0], service);
+    assert.equal(calls[index].args.filter((value) => value === service).length, 1);
+    assert.deepEqual(calls[index].args.slice(-2), ["--region", "eu-west-2"]);
+  }
+});
+
+test("production command routing rejects malformed, duplicate, and non-production region syntax before process creation", () => {
+  let spawnCount = 0;
+  const run = createProductionCommandRunner({
+    credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.INJECTED_TEST,
+    env: {},
+    exec: () => { spawnCount += 1; return "{}"; },
+  });
+  for (const args of [
+    ["dynamodb"],
+    ["dynamodb", "dynamodb", "get-item"],
+    ["dynamodb", "get-item", "--region"],
+    ["dynamodb", "get-item", "--region", ""],
+    ["dynamodb", "get-item", "--region", "us-east-1"],
+    ["dynamodb", "get-item", "--region", "eu-west-2", "--region", "eu-west-2"],
+    ["dynamodb", "get-item", "--region", "eu-west-2", "--region", "us-east-1"],
+    ["dynamodb", "get-item", "--region=eu-west-2"],
+  ]) assert.throws(() => run(args), /AWS (?:command arguments|service and operation|command region|region arguments)/);
+  assert.equal(spawnCount, 0);
+});
+
+test("canonical component-state read preserves DynamoDB namespace and cannot use a PATH-shadowed local executable", () => {
+  const calls = [];
+  const run = createProductionCommandRunner({
+    credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.INJECTED_TEST,
+    env: { PATH: "/attacker/bin" },
+    exec: (file, args, options) => { calls.push({ file, args, options }); return "{}"; },
+  });
+  assert.equal(createProductionComponentDeploymentStateClient({ run }).read(), null);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].file, "aws");
+  assert.equal(calls[0].args[0], "dynamodb");
+  assert.equal(calls[0].args.filter((value) => value === "dynamodb").length, 1);
+  assert.deepEqual(calls[0].args.slice(calls[0].args.indexOf("--region"), calls[0].args.indexOf("--region") + 2), ["--region", "eu-west-2"]);
 });
 
 test("production command routing rejects every unclassified command before process creation", () => {
@@ -191,12 +250,18 @@ test("production command routing cannot be redirected by PATH or shell syntax", 
   });
   run(["dynamodb", "get-item", "--table-name", "fixture"]);
   run(["ecs", "describe-services", "--cluster", "fixture", "; touch /tmp/pwned"]);
+  run(["ecs", "describe-services", "dynamodb-like=value"]);
+  run(["dynamodb", "ecs", "--table-name", "fixture"]);
   run(["kms", "verify", "--key-id", "fixture"]);
+  run(["iam", "get-role", "--role-name", "iam"]);
   run(["node", "fixture.mjs"]);
   run(["terraform", "version", "-json"]);
-  assert.deepEqual(calls.map(({ file }) => file), ["aws", "aws", "aws", process.execPath, "terraform"]);
+  assert.deepEqual(calls.map(({ file }) => file), ["aws", "aws", "aws", "aws", "aws", "aws", process.execPath, "terraform"]);
   assert.equal(calls[0].args[0], "dynamodb");
   assert.equal(calls[1].args.includes("; touch /tmp/pwned"), true);
+  assert.deepEqual(calls[2].args.slice(0, 3), ["ecs", "describe-services", "dynamodb-like=value"]);
+  assert.deepEqual(calls[3].args.slice(0, 2), ["dynamodb", "ecs"]);
+  assert.deepEqual(calls[5].args.slice(0, 4), ["iam", "get-role", "--role-name", "iam"]);
 });
 
 test("production credential runners contain no unclassified executable fallback", () => {

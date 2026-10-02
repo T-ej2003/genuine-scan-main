@@ -32,7 +32,7 @@ import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 import { canonicalJson, PRODUCTION_ACTIVATION_LIFECYCLE } from "./production-green-stage-b-contract.mjs";
 import { authenticateReleasePreflightCheckerTrustEvidence, createReleasePreflightCheckerTrustSignatureVerifier } from "./production-release-preflight-checker-attestation.mjs";
 import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
-import { createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import { createProductionAwsCredentialEnvironment, normalizeProductionAwsCommandArguments, productionAwsExecutable, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { assertPartialRebaselineRecoveryAuthorization, assertProductionDualSlotRebaselineAuthorization, assertRebaselineRotationBindings, verifyLiveProductionDualSlotRebaselineWithRunner } from "./production-dual-slot-rebaseline-contract.mjs";
 
 export { PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
@@ -49,7 +49,8 @@ const STAGE_B_STATE_URI = `s3://${STATE_BUCKET}/env:/production/mscqr/production
 const ROTATION_EXECUTION_POLICY_ADDRESS = 'aws_iam_role_policy.execution["backend"]';
 const ROTATION_EXECUTION_ROLE = "mscqr-production-rls-green-backend-execution";
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
-const AWS_SERVICE_COMMANDS = new Set(["dynamodb", "ec2", "ecs", "ecr", "iam", "kms", "lambda", "logs", "organizations", "rds", "s3", "s3api", "secretsmanager", "ssm", "sts"]);
+export const PRODUCTION_COMMAND_AWS_SERVICES = Object.freeze(["dynamodb", "ec2", "ecs", "ecr", "iam", "kms", "lambda", "logs", "organizations", "rds", "s3", "s3api", "secretsmanager", "ssm", "sts"]);
+const AWS_SERVICE_COMMANDS = new Set(PRODUCTION_COMMAND_AWS_SERVICES);
 const APPROVED_LOCAL_COMMANDS = new Map([["node", process.execPath], ["terraform", "terraform"]]);
 const MFA_PROMPTS = Object.freeze({ verifier: "Production verifier MFA code: ", onboarding: "Production strict-onboarding administrator MFA code: ", canary: "Production strict-onboarding tenant-canary MFA code: " });
 
@@ -84,6 +85,7 @@ const credentialEnvironment = ({ credentialSource, profile, env = process.env, i
 
 export function createProductionCommandRunner({ credentialSource, profile, region = REGION, env: parentEnvironment = process.env, exec = execFileSync } = {}) {
   const environment = credentialEnvironment({ credentialSource, profile, env: parentEnvironment, injected: credentialSource === PRODUCTION_AWS_CREDENTIAL_SOURCE.INJECTED_TEST && exec !== execFileSync });
+  const resolveAwsExecutable = exec === execFileSync ? productionAwsExecutable : () => "aws";
   return (args, { encoding = "utf8", maxBuffer, input } = {}) => {
     if (!Array.isArray(args) || args.length === 0) throw new Error("Production command arguments are required.");
     if (!args.every((value) => typeof value === "string")) throw new ProductionCommandRouteError();
@@ -92,8 +94,8 @@ export function createProductionCommandRunner({ credentialSource, profile, regio
     const isAwsService = AWS_SERVICE_COMMANDS.has(command[0]);
     const localExecutable = !awsPrefixed && APPROVED_LOCAL_COMMANDS.get(command[0]);
     if (!isAwsService && !localExecutable) throw new ProductionCommandRouteError();
-    const normalized = isAwsService && !command.includes("--region") ? [...command, "--region", region] : command.slice(1);
-    return exec(isAwsService ? "aws" : localExecutable, normalized, { cwd: process.cwd(), env: environment, encoding, stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"], ...(input === undefined ? {} : { input }), ...(maxBuffer === undefined ? {} : { maxBuffer }) });
+    const normalized = isAwsService ? normalizeProductionAwsCommandArguments(command, region) : command.slice(1);
+    return exec(isAwsService ? resolveAwsExecutable() : localExecutable, normalized, { cwd: process.cwd(), env: environment, encoding, stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"], ...(input === undefined ? {} : { input }), ...(maxBuffer === undefined ? {} : { maxBuffer }) });
   };
 }
 
