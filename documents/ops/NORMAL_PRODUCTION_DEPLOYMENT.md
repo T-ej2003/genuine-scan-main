@@ -26,6 +26,71 @@ The exact-key DynamoDB component state is authoritative. Git history classifies 
 
 At every interruption boundary the next invocation reconciles first. `PREPARED` work that is not fully verified returns to the exact predecessor; a fully `VERIFIED` candidate is reverified and committed; an unknown live identity, stale generation, malformed receipt, or unprovable outcome fails closed. The workflow never prepares or publishes new normal work from a transient candidate or retained image tag.
 
+### Complete committed-set reconciliation closure
+
+The normal live-component schema is the receipt contract's canonical deployable-component set. It currently contains `backend` and `frontend`; `database` and `security` are durable release identities rather than independently readable ECS services. Reconciliation derives the complete represented live-service set from that schema and the resulting component state, never from the receipt's affected subset. Extending the receipt schema therefore extends the required verification set automatically.
+
+Every successful reconciliation has one exit: verify the complete resulting live-service set, then return the authoritative state. Receipt commit and removal additionally verify the complete prospective set before their generation CAS, use no CAS retry, and verify the complete committed set again afterward. A generation race leaves the receipt for the next invocation. A managed service mutation is serialized by the shared `production-deploy` workflow concurrency group; state mutation is serialized by the DynamoDB generation CAS. An out-of-band service mutation cannot authorize itself: a mutation between the pre-CAS read and the CAS is caught by the post-CAS read, and a later mutation is rejected by the next normal invocation and by the consuming live-reference audit for that component.
+
+| Reconciliation path | Receipt | Prospective authority | Required live proof before closure | Closure/result |
+| --- | --- | --- | --- | --- |
+| No receipt / already committed rerun | none | current committed state | every represented live service | return only after full-set verification |
+| Prepared, no mutation | prepared | recorded predecessors plus unaffected committed components | complete predecessor baseline | clear by exact-generation CAS, then reverify all |
+| Predecessor still live / rollback | any non-committable receipt | recorded predecessors plus unaffected committed components | rollback exact candidates, then verify complete baseline | clear by exact-generation CAS, then reverify all |
+| Verified, all candidates live | verified | candidates plus unaffected committed components | complete prospective baseline | commit by exact-generation CAS, then reverify all |
+| Partial/mixed candidates | prepared or verified | predecessor baseline | exact recorded candidates may roll back; complete baseline must verify | clear only after full proof |
+| Malformed/stale/unknown live identity | any | none | impossible | throw; retain durable receipt/state |
+| CAS race or stale generation | any | none | prior proof is discarded | throw; reread and reverify next invocation |
+| Lost CAS response | any | strong read decides whether receipt remains | next invocation verifies the complete state | never repeat from process outcome alone |
+
+The multi-component hostile matrix is machine-checked in `production-normal-reconciliation.test.mjs`:
+
+| Cases | Expected result |
+| --- | --- |
+| A-B | Backend-only candidate with matching committed frontend is safe. |
+| C-E | Backend-only receipt with frontend task-definition drift, digest drift, or unreadable identity fails closed. |
+| F | Frontend-only candidate with matching committed backend is safe. |
+| G-I | Frontend-only receipt with backend task-definition drift, digest drift, or unreadable identity fails closed. |
+| J-L | Two-component candidates commit only when both are live; either partial candidate state rolls back. |
+| M-Q | Candidate, predecessor, and receipt-removal paths all reject drift outside the receipt. |
+| R-S | Same-commit and later-commit retries reconcile before classification and are idempotent. |
+| T-U | Drift during closure or immediately after verification is detected before success; the next invocation remains fail-closed. |
+| V-W | A closure CAS race is not retried with stale proof; the retained receipt is safely reconciled on retry. |
+| X | The canonical deployable-component schema determines the full set, preventing silent future-component omission. |
+| Y-Z | Receipt subsets cannot replace the complete baseline; a receipt component absent from committed state is rejected. |
+
+The protocol invariants are: one generation has at most one authoritative transition; mutation requires durable intent; workflow success requires durable state; reconciliation precedes classification; reruns are idempotent; unknown outcomes are reconciled; ECS cannot authorize itself; legacy evidence cannot override authenticated state; classification uses the verified committed baseline; stronger-lane work cannot enter Lane A; bootstrap cannot masquerade as normal provenance; Stage B rejects pending receipts; Stage B accepts only committed authenticated normal provenance; publication failure remains recoverable; concurrent invocations cannot both advance; reconciliation cannot close without verifying the complete resulting live-component set; and drift outside a receipt fails before new classification or preparation.
+
+The final attacker pass records the concrete counterexamples and their executable guards:
+
+| # | Counterexample | Blocking code / regression |
+| --- | --- | --- |
+| 1 | Backend receipt hides frontend task-definition drift | complete-set helper / backend-only `PREPARED` and `VERIFIED` drift tests |
+| 2 | Backend receipt hides frontend digest drift | complete-set helper / digest drift tests |
+| 3 | Backend receipt hides unreadable frontend | complete-set helper / missing-live test |
+| 4 | Frontend receipt hides backend task-definition drift | complete-set helper / frontend-only drift tests |
+| 5 | Frontend receipt hides backend digest drift | complete-set helper / digest drift tests |
+| 6 | Frontend receipt hides unreadable backend | complete-set helper / missing-live test |
+| 7 | Prepared receipt clears despite unrelated drift | pre-clear full verification / both receipt-phase tests |
+| 8 | Verified receipt commits despite unrelated drift | pre-commit full verification / both receipt-phase tests |
+| 9 | Unrelated service changes after receipt read | final full-set closure / between-read-and-closure test |
+| 10 | Unrelated service changes after pre-CAS verification | post-CAS full-set verification / post-verification drift test |
+| 11 | Both-service receipt has only backend candidate live | deterministic rollback / dual-component partial test |
+| 12 | Both-service receipt has only frontend candidate live | deterministic rollback / dual-component partial test |
+| 13 | Receipt names a component absent from committed state | predecessor equality / absent-component test |
+| 14 | Future deployable is omitted from verification | schema-derived component list / schema structural test |
+| 15 | Receipt-subset verification is reintroduced | one-return source contract / structural test |
+| 16 | Terminal commit retries proof across a generation race | zero-retry closure CAS / `VERIFIED_COMMIT` race test |
+| 17 | Receipt removal retries proof across a generation race | zero-retry closure CAS / `ROLLBACK_CLEAR` race test |
+| 18 | Verified-receipt persistence retries after state changes | zero-retry receipt CAS / transaction race test |
+| 19 | First-pass terminal commit retries after state changes | zero-retry terminal CAS / transaction race test |
+| 20 | First-pass deployment verifies only affected services | complete prospective set / single-component happy-path assertions |
+| 21 | Post-commit live drift is reported as success | final complete-set check / transaction drift test |
+| 22 | Same-commit rerun recomputes from transient ECS | reconciliation-before-plan / same-commit test and workflow contract |
+| 23 | Later commit skips an interrupted receipt | reconciliation-before-plan / A-B-C operator-flow test |
+| 24 | ECS-only identity becomes authority | receipt and component-state authentication / unknown-live test |
+| 25 | Stage B consumes an incomplete normal transaction | receipt absence and component provenance checks / Stage B reference-audit tests |
+
 The hostile interruption matrix is part of the deployment contract:
 
 | Cases | Required disposition |

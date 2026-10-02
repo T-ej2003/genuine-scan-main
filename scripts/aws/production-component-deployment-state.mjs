@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { COMPLETED_EMERGENCY_PATHS } from "./production-completed-emergency-work.mjs";
-import { assertNormalDeploymentReceipt, normalReceiptHash } from "./production-normal-receipt-contract.mjs";
+import { assertNormalDeploymentReceipt, normalReceiptHash, NORMAL_DEPLOYABLE_COMPONENTS } from "./production-normal-receipt-contract.mjs";
 
 export const PRODUCTION_COMPONENT_STATE = Object.freeze({ table: "mscqr-production-component-deployment-state", key: "production#T-ej2003/genuine-scan-main", account: "368992683803", region: "eu-west-2", repository: "T-ej2003/genuine-scan-main" });
 const SHA = /^[a-f0-9]{40}$/, DIGEST = /^sha256:[a-f0-9]{64}$/;
-const components = new Set(["backend", "frontend", "database", "security"]);
+const components = new Set([...NORMAL_DEPLOYABLE_COMPONENTS, "database", "security"]);
 const lanes = new Set(["BOOTSTRAP", "NORMAL_APPLICATION", "SECURITY_INFRASTRUCTURE", "EMERGENCY_RECOVERY"]);
 const canonical = (value) => JSON.stringify(value);
 const clone = (value) => structuredClone(value);
@@ -32,7 +32,7 @@ export function assertProductionComponentDeploymentState(value) {
     assert.ok(component === null || typeof component === "object", `${name} state malformed`);
     if (!component) continue;
     assert.match(component.sourceSha || "", SHA); assert.match(component.releaseIdentity || component.imageDigest || "", component.imageDigest ? DIGEST : /^.{1,512}$/);
-    if (["backend", "frontend"].includes(name)) { assert.match(component.establishedThroughSha || "", SHA); assert.match(component.imageDigest || "", DIGEST); assert.match(component.taskDefinitionArn || "", /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/[^:]+:[1-9][0-9]*$/); assert.ok(Number.isSafeInteger(component.desiredCount) && component.desiredCount > 0, `${name} desired count malformed`); }
+    if (NORMAL_DEPLOYABLE_COMPONENTS.includes(name)) { assert.match(component.establishedThroughSha || "", SHA); assert.match(component.imageDigest || "", DIGEST); assert.match(component.taskDefinitionArn || "", /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/[^:]+:[1-9][0-9]*$/); assert.ok(Number.isSafeInteger(component.desiredCount) && component.desiredCount > 0, `${name} desired count malformed`); }
   }
   if (value.schemaVersion === 1) assert.equal(value.componentProvenance, undefined, "Legacy component state cannot claim v2 provenance");
   else {
@@ -54,6 +54,22 @@ export function componentDeploymentProvenance(state, name) {
   return Object.freeze(clone(state.schemaVersion === 1 ? aggregateProvenance(state) : state.componentProvenance[name]));
 }
 
+// Normal reconciliation is component-scoped, but its authority is the whole
+// committed live-service baseline. Derive that set from the canonical schema,
+// never from the receipt subset being reconciled.
+export function normalDeploymentLiveComponents(state, changes = {}) {
+  assertProductionComponentDeploymentState(state);
+  assert.ok(changes && typeof changes === "object" && !Array.isArray(changes));
+  for (const [name, component] of Object.entries(changes)) {
+    assert.ok(NORMAL_DEPLOYABLE_COMPONENTS.includes(name), `${name} is not a normal deployable component`);
+    assert.ok(component && typeof component === "object" && !Array.isArray(component), `${name} normal deployment identity is malformed`);
+  }
+  return Object.freeze(Object.fromEntries(NORMAL_DEPLOYABLE_COMPONENTS
+    .map((name) => [name, Object.hasOwn(changes, name) ? changes[name] : state.components[name]])
+    .filter(([, component]) => component)
+    .map(([name, component]) => [name, clone(component)])));
+}
+
 export function createProductionComponentDeploymentState({ components: stateComponents, now = new Date().toISOString(), updatedByWorkflow = "local-test", githubRunId = "local-test" } = {}) {
   const provenance = { lane: "BOOTSTRAP", workflow: updatedByWorkflow, githubRunId: String(githubRunId), generation: 1, updatedAt: now };
   return Object.freeze(assertProductionComponentDeploymentState({ schemaVersion: 2, environment: "production", repository: PRODUCTION_COMPONENT_STATE.repository, generation: 1, updatedAt: now, updatedByLane: "BOOTSTRAP", updatedByWorkflow, githubRunId: String(githubRunId), components: stateComponents, componentProvenance: Object.fromEntries(Object.entries(stateComponents).filter(([, component]) => component).map(([name]) => [name, { ...provenance }])) }));
@@ -72,7 +88,7 @@ export function advanceProductionComponentDeploymentState({ current, expectedGen
   } else assert.equal(normalReceiptSha256, undefined, "Normal receipt is unavailable to this terminal");
   for (const [name, next] of Object.entries(changes)) {
     assert.ok(components.has(name)); assert.ok(next && typeof next === "object"); assert.match(next.sourceSha || "", SHA);
-    if (lane === "NORMAL_APPLICATION") { assert.ok(current.components[name], "Normal deployment requires bootstrapped component state"); assert.equal(recovery, false); if (["backend", "frontend"].includes(name)) assert.equal(next.establishedThroughSha, next.sourceSha, "Normal deployment must establish the deployed candidate source"); }
+    if (lane === "NORMAL_APPLICATION") { assert.ok(current.components[name], "Normal deployment requires bootstrapped component state"); assert.equal(recovery, false); if (NORMAL_DEPLOYABLE_COMPONENTS.includes(name)) assert.equal(next.establishedThroughSha, next.sourceSha, "Normal deployment must establish the deployed candidate source"); }
     if (current.components[name]) {
       const sameSource = next.sourceSha === current.components[name].sourceSha;
       if (sameSource) {

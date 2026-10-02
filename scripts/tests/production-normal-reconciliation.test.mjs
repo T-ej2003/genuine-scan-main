@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createProductionComponentDeploymentState, createProductionComponentDeploymentStateClient, advanceProductionComponentDeploymentState, PRODUCTION_COMPONENT_STATE } from "../aws/production-component-deployment-state.mjs";
-import { assertNormalDeploymentReceipt, NORMAL_RECEIPT_WORKFLOW } from "../aws/production-normal-receipt-contract.mjs";
+import { createProductionComponentDeploymentState, createProductionComponentDeploymentStateClient, advanceProductionComponentDeploymentState, normalDeploymentLiveComponents, PRODUCTION_COMPONENT_STATE } from "../aws/production-component-deployment-state.mjs";
+import { assertNormalDeploymentReceipt, NORMAL_DEPLOYABLE_COMPONENTS, NORMAL_RECEIPT_WORKFLOW } from "../aws/production-normal-receipt-contract.mjs";
 import { reconcileNormalDeployment, replaceNormalDeploymentReceipt } from "../aws/production-normal-reconciliation.mjs";
 import { buildNormalReleasePlan, executeNormalComponentTransaction, createNormalReconciliationAdapters } from "../aws/production-normal-release.mjs";
 import { buildProductionNormalDeploymentPlan } from "../aws/prepare-production-normal-deployment.mjs";
@@ -16,7 +16,7 @@ const isAncestor = (a, b) => a <= b;
 
 function fixture(affected = names) {
   let stored = createProductionComponentDeploymentState({ components: { backend: identity("backend", "a", 1), frontend: identity("frontend", "a", 1), database: null, security: null } });
-  const live = structuredClone(stored.components), calls = [], candidates = Object.fromEntries(affected.map((name) => [name, identity(name, "b", 2)]));
+  const live = structuredClone(stored.components), calls = [], verifiedSets = [], candidates = Object.fromEntries(affected.map((name) => [name, identity(name, "b", 2)]));
   let failure;
   // Exercise the production client, including actual low-level DynamoDB shapes.
   const client = createProductionComponentDeploymentStateClient({ run(args) {
@@ -44,14 +44,14 @@ function fixture(affected = names) {
   const adapters = {
     readLive: async (name) => structuredClone(live[name]),
     authenticateCandidate: async (name, predecessor, candidate) => { assert.deepEqual(candidate, candidates[name]); assert.deepEqual(predecessor, identity(name, "a", 1)); },
-    verify: async (expected) => { for (const [name, value] of Object.entries(expected)) assert.deepEqual(live[name], value); calls.push("verified"); },
+    verify: async (expected) => { verifiedSets.push(Object.keys(expected).sort()); for (const [name, value] of Object.entries(expected)) assert.deepEqual(live[name], value); calls.push("verified"); },
     rollback: async (name, predecessor, candidate) => { assert.deepEqual(live[name], candidate); live[name] = structuredClone(predecessor); calls.push(`rollback-${name}`); },
   };
-  return { client, live, calls, candidates, receipt, adapters, get state() { return structuredClone(stored); }, set state(value) { stored = structuredClone(value); }, fail(value) { failure = value; },
+  return { client, live, calls, verifiedSets, candidates, receipt, adapters, get state() { return structuredClone(stored); }, set state(value) { stored = structuredClone(value); }, fail(value) { failure = value; },
     reconcile: (source = "c") => reconcileNormalDeployment({ client, sourceSha: sha(source), isAncestor, ...adapters, writerContext: context }) };
 }
 
-async function deploy(f, affected = names) {
+async function deploy(f, affected = names, stateClient = f.client) {
   const sourceSha = f.candidates[affected[0]].sourceSha;
   const plan = buildNormalReleasePlan({ sourceSha, changedFiles: affected.map((name) => name === "backend" ? "backend/src/services/batchService.ts" : "src/App.tsx"), images: f.receipt.images });
   const component = (name) => ({ deploy: async (_, { recordCandidate }) => {
@@ -60,7 +60,7 @@ async function deploy(f, affected = names) {
     f.live[name] = structuredClone(f.candidates[name]); f.calls.push(`mutate-${name}`);
     return name === "backend" ? { candidateTaskDefinition: f.candidates[name].taskDefinitionArn, deployedBackendDigest: f.candidates[name].imageDigest } : { candidateTaskDefinitionArn: f.candidates[name].taskDefinitionArn, imageRef: f.receipt.images[name] };
   }, rollback: async () => { f.live[name] = identity(name, "a", 1); f.calls.push(`rollback-${name}`); } });
-  return executeNormalComponentTransaction({ plan, sourceSha, state: f.state, stateClient: f.client, backend: component("backend"), frontend: component("frontend"), smoke: async () => f.calls.push("smoke"), verifyCandidates: f.adapters.verify, isAncestor, writerContext: context });
+  return executeNormalComponentTransaction({ plan, sourceSha, state: f.state, stateClient, backend: component("backend"), frontend: component("frontend"), smoke: async () => f.calls.push("smoke"), verifyCandidates: f.adapters.verify, isAncestor, writerContext: context });
 }
 
 for (const affected of [["backend"], ["frontend"], names]) {
@@ -70,6 +70,7 @@ for (const affected of [["backend"], ["frontend"], names]) {
     for (const name of names) assert.equal(f.state.components[name].sourceSha, sha(affected.includes(name) ? "b" : "a"));
     assert.ok(f.calls.indexOf("receipt-write") < f.calls.indexOf(`mutate-${affected[0]}`));
     assert.ok(f.calls.indexOf("smoke") < f.calls.indexOf("state-commit"));
+    assert.ok(f.verifiedSets.every((set) => JSON.stringify(set) === JSON.stringify(names)), "Every successful verification covers the complete live-component set");
   });
   for (const failure of ["definite", "ambiguous"]) test(`${affected.join("+")} ${failure} terminal: current main D reconciles B without another ECS mutation`, async () => {
     const f = fixture(affected); f.fail(failure); await assert.rejects(deploy(f, affected));
@@ -111,6 +112,121 @@ test("committed component state is authenticated against live services before ne
   await assert.rejects(f.reconcile("b"));
   assert.equal(f.state.normalDeploymentReceipt, undefined);
   assert.deepEqual(f.state.components.backend, identity("backend", "a", 1));
+});
+
+test("live component schema is the single source for complete-set verification", () => {
+  const f = fixture(["backend"]);
+  assert.deepEqual(NORMAL_DEPLOYABLE_COMPONENTS, names);
+  assert.deepEqual(Object.keys(normalDeploymentLiveComponents(f.state)), names);
+  assert.deepEqual(normalDeploymentLiveComponents(f.state, { backend: f.candidates.backend }), { backend: f.candidates.backend, frontend: identity("frontend", "a", 1) });
+  assert.throws(() => normalDeploymentLiveComponents(f.state, { worker: {} }), /not a normal deployable component/);
+  const source = reconcileNormalDeployment.toString();
+  assert.equal((source.match(/\breturn\b/g) || []).length, 1, "Reconciliation must retain one verified success exit");
+  assert.match(source, /await verify\(normalDeploymentLiveComponents\(state\)\);[\s\S]*return state;/);
+  assert.doesNotMatch(source, /verify\(receipt\.(?:candidates|predecessors)\)/, "Receipt subsets cannot authorize reconciliation closure");
+});
+
+const unrelatedDriftCases = [
+  ["backend", "frontend", "taskDefinitionArn", identity("frontend", "c", 3).taskDefinitionArn],
+  ["backend", "frontend", "imageDigest", `sha256:${"c".repeat(64)}`],
+  ["backend", "frontend", "missing", null],
+  ["frontend", "backend", "taskDefinitionArn", identity("backend", "c", 3).taskDefinitionArn],
+  ["frontend", "backend", "imageDigest", `sha256:${"c".repeat(64)}`],
+  ["frontend", "backend", "missing", null],
+];
+
+for (const [affected, unrelated, drift, value] of unrelatedDriftCases) {
+  for (const receiptPhase of ["PREPARED", "VERIFIED"]) test(`${affected}-only ${receiptPhase} reconciliation fails closed on unrelated ${unrelated} ${drift}`, async () => {
+    const f = fixture([affected]);
+    if (receiptPhase === "VERIFIED") { f.fail("definite"); await assert.rejects(deploy(f, [affected])); f.fail(undefined); }
+    else replaceNormalDeploymentReceipt({ client: f.client, expected: undefined, receipt: f.receipt, writerContext: context });
+    if (drift === "missing") f.live[unrelated] = null;
+    else f.live[unrelated][drift] = value;
+    await assert.rejects(f.reconcile(), /Expected values to be strictly deep-equal/);
+    assert.ok(f.state.normalDeploymentReceipt, "Unrelated drift must retain recoverable transaction state");
+  });
+}
+
+test("a component outside the receipt changing between receipt read and closure fails closed", async () => {
+  const f = fixture(["backend"]); f.fail("definite"); await assert.rejects(deploy(f, ["backend"])); f.fail(undefined);
+  const authenticate = f.adapters.authenticateCandidate;
+  f.adapters.authenticateCandidate = async (...args) => { await authenticate(...args); f.live.frontend = identity("frontend", "c", 3); };
+  await assert.rejects(f.reconcile(), /Expected values to be strictly deep-equal/);
+  assert.ok(f.state.normalDeploymentReceipt);
+});
+
+test("live drift after full-set verification is caught after receipt commit and blocks the next rerun", async () => {
+  const f = fixture(["backend"]); f.fail("definite"); await assert.rejects(deploy(f, ["backend"])); f.fail(undefined);
+  const verify = f.adapters.verify; let first = true;
+  f.adapters.verify = async (values) => { await verify(values); if (first) { first = false; f.live.frontend = identity("frontend", "c", 3); } };
+  await assert.rejects(f.reconcile(), /Expected values to be strictly deep-equal/);
+  assert.equal(f.state.normalDeploymentReceipt, undefined, "The exact candidate CAS may commit, but the invocation must fail on post-CAS drift");
+  await assert.rejects(f.reconcile(), /Expected values to be strictly deep-equal/);
+});
+
+for (const phase of ["VERIFIED_COMMIT", "ROLLBACK_CLEAR"]) test(`${phase} loses a generation race instead of carrying verification across it`, async () => {
+  const f = fixture(["backend"]);
+  if (phase === "VERIFIED_COMMIT") { f.fail("definite"); await assert.rejects(deploy(f, ["backend"])); f.fail(undefined); }
+  else replaceNormalDeploymentReceipt({ client: f.client, expected: undefined, receipt: f.receipt, writerContext: context });
+  let raced = false;
+  const client = { read: f.client.read, advance(current, next) {
+    if (!raced && !next.normalDeploymentReceipt) {
+      raced = true;
+      f.state = advanceProductionComponentDeploymentState({ current: f.state, expectedGeneration: f.state.generation, lane: "SECURITY_INFRASTRUCTURE",
+        changes: { security: { sourceSha: sha("a"), releaseIdentity: "concurrent-security" } }, ...context });
+      throw new Error("ConditionalCheckFailedException");
+    }
+    return f.client.advance(current, next);
+  } };
+  await assert.rejects(reconcileNormalDeployment({ client, sourceSha: sha("c"), isAncestor, ...f.adapters, writerContext: context }), /ConditionalCheckFailedException/);
+  assert.ok(f.state.normalDeploymentReceipt, "A closure CAS race must remain explicitly reconcilable");
+  await f.reconcile();
+  assert.equal(f.state.normalDeploymentReceipt, undefined);
+});
+
+test("normal transaction catches live drift introduced after pre-CAS verification", async () => {
+  const f = fixture(["backend"]); const verify = f.adapters.verify; let candidateVerified = false;
+  f.adapters.verify = async (values) => {
+    await verify(values);
+    if (values.backend?.sourceSha === sha("b") && !candidateVerified) { candidateVerified = true; f.live.frontend = identity("frontend", "c", 3); }
+  };
+  await assert.rejects(deploy(f, ["backend"]), /Expected values to be strictly deep-equal/);
+  assert.equal(f.state.normalDeploymentReceipt, undefined, "The terminal CAS may linearize before external live drift is observed");
+  await assert.rejects(f.reconcile(), /Expected values to be strictly deep-equal/, "Post-CAS drift must remain fail-closed on the next invocation");
+});
+
+for (const stillPredecessor of names) test(`dual-component verified receipt with only ${stillPredecessor} at predecessor rolls all candidates back`, async () => {
+  const f = fixture(); f.fail("definite"); await assert.rejects(deploy(f)); f.fail(undefined);
+  f.live[stillPredecessor] = identity(stillPredecessor, "a", 1);
+  await f.reconcile();
+  assert.deepEqual(names.map((name) => f.state.components[name].sourceSha), [sha("a"), sha("a")]);
+  assert.equal(f.state.normalDeploymentReceipt, undefined);
+});
+
+test("a receipt component absent from committed state fails before any reconciliation mutation", async () => {
+  const f = fixture(["backend"]);
+  replaceNormalDeploymentReceipt({ client: f.client, expected: undefined, receipt: f.receipt, writerContext: context });
+  const malformed = f.state; malformed.components.backend = null; delete malformed.componentProvenance.backend; f.state = malformed;
+  await assert.rejects(f.reconcile(), /predecessor is stale/);
+  assert.ok(f.state.normalDeploymentReceipt);
+});
+
+for (const boundary of ["VERIFIED_RECEIPT", "TERMINAL_COMMIT"]) test(`normal transaction ${boundary} CAS race retains a reconcilable receipt`, async () => {
+  const f = fixture(["backend"]); let raced = false;
+  const client = { read: f.client.read, advance(current, next) {
+    const atBoundary = boundary === "VERIFIED_RECEIPT" ? next.normalDeploymentReceipt?.phase === "VERIFIED" : !next.normalDeploymentReceipt && next.components.backend.sourceSha === sha("b");
+    if (!raced && atBoundary) {
+      raced = true;
+      f.state = advanceProductionComponentDeploymentState({ current: f.state, expectedGeneration: f.state.generation, lane: "SECURITY_INFRASTRUCTURE",
+        changes: { security: { sourceSha: sha("a"), releaseIdentity: `race-${boundary}` } }, ...context });
+      throw new Error("ConditionalCheckFailedException");
+    }
+    return f.client.advance(current, next);
+  } };
+  await assert.rejects(deploy(f, ["backend"], client), /ConditionalCheckFailedException/);
+  assert.ok(f.state.normalDeploymentReceipt);
+  await f.reconcile();
+  assert.equal(f.state.normalDeploymentReceipt, undefined);
 });
 
 test("same-commit rerun reconciles a verified candidate before deriving an empty authoritative work set", async () => {
