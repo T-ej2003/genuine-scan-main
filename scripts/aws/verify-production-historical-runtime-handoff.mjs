@@ -5,7 +5,7 @@ import fs from "node:fs";
 import { pathToFileURL } from "node:url";
 import { historicalWorkerTasks } from "./production-historical-runtime-contract.mjs";
 import { canonicalSha256, STAGE_B } from "./production-green-stage-b-contract.mjs";
-import { createProductionComponentDeploymentStateClient, stateHash } from "./production-component-deployment-state.mjs";
+import { assertProductionComponentDeploymentState, createProductionComponentDeploymentStateClient, stateHash } from "./production-component-deployment-state.mjs";
 import { authenticateHistoricalRuntimeEvidence, authenticateRetainedHistoricalRuntime, verifyHistoricalRuntimeInventory } from "./production-historical-runtime-evidence.mjs";
 import { createAwsReader } from "./production-green-stage-b-ecs-observations.mjs";
 import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
@@ -33,6 +33,16 @@ export function verifyHistoricalRuntimeHandoff({ evidence, state, reader, source
   assert.equal(stateHash(state), reference.bootstrap.componentStateSha256); assert.equal(String(state.githubRunId), reference.bootstrap.githubRunId); assert.equal(state.updatedByWorkflow, reference.bootstrap.workflow);
   verifyHistoricalRuntimeInventory({ reference, reader });
   return reference;
+}
+
+// Shared by approval collection and broker execution; conflicting signed claims
+// cannot override the authenticated durable retention record.
+export function resolveHistoricalRuntimeAuthority(options) {
+  if (options.state) assertProductionComponentDeploymentState(options.state);
+  const reference = options.state || options.reader
+    ? verifyHistoricalRuntimeHandoff(options)
+    : options.evidence ? authenticateHistoricalRuntimeEvidence(options) : undefined;
+  return reference?.referenceSha256;
 }
 
 export function readHistoricalRuntimeTransport({ bytes, expectedSha256 }) {

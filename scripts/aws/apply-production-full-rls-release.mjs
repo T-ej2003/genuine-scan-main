@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import crypto from "node:crypto";
-import { assertHistoricalRuntimeReference } from "./production-historical-runtime-contract.mjs";
-import { readHistoricalRuntimeTransport } from "./verify-production-historical-runtime-handoff.mjs";
+import { readHistoricalRuntimeTransport, resolveHistoricalRuntimeAuthority } from "./verify-production-historical-runtime-handoff.mjs";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -10,7 +9,9 @@ import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { PRODUCTION_GREEN } from "../../backend/scripts/production-full-rls-green-executor.mjs";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
-import { createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import { createProductionComponentDeploymentStateClient } from "./production-component-deployment-state.mjs";
+import { createAwsReader } from "./production-green-stage-b-ecs-observations.mjs";
+import { createProductionAwsCommandRunner, createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 
 const ACCOUNT = STAGE_B.account;
 const REGION = STAGE_B.region;
@@ -26,11 +27,9 @@ const APPLY_MODES = Object.freeze([
 ]);
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 
-export function validateProductionReleaseEnvironment(env = process.env) {
-  const historical = env.HISTORICAL_RUNTIME_EVIDENCE_JSON || env.HISTORICAL_RUNTIME_EVIDENCE_SHA256
-    ? readHistoricalRuntimeTransport({ bytes: Buffer.from(env.HISTORICAL_RUNTIME_EVIDENCE_JSON || ""), expectedSha256: env.HISTORICAL_RUNTIME_EVIDENCE_SHA256 }) : undefined;
+export function validateProductionReleaseEnvironment(env = process.env, historicalRuntimeReferenceSha256) {
   const config = {
-    ...(historical ? { historicalRuntimeReferenceSha256: assertHistoricalRuntimeReference(historical.reference).referenceSha256 } : {}),
+    ...(historicalRuntimeReferenceSha256 ? { historicalRuntimeReferenceSha256 } : {}),
     releaseSha: env.RELEASE_GIT_SHA,
     sourceContractSha256: env.MSCQR_FULL_RLS_SOURCE_CONTRACT_SHA256,
     migrationSetDigest: env.MSCQR_FULL_RLS_MIGRATION_SET_DIGEST,
@@ -139,10 +138,20 @@ export async function applyProductionFullRlsRelease({
   env = process.env,
   aws,
   credentialSource,
+  historicalRuntimeDeps,
   outputPath = env.PRODUCTION_RLS_RELEASE_RECEIPT_PATH,
 } = {}) {
   aws ||= createProductionFullRlsReleaseAws({ credentialSource, env });
-  const config = validateProductionReleaseEnvironment(env);
+  // Validate static inputs before reads; no broker mutation precedes authority resolution.
+  validateProductionReleaseEnvironment(env);
+  if (!historicalRuntimeDeps) {
+    const run = createProductionAwsCommandRunner({ credentialSource, env });
+    historicalRuntimeDeps = { stateClient: createProductionComponentDeploymentStateClient({ run }), reader: createAwsReader({ run, region: REGION, clusterArn: CLUSTER_ARN }) };
+  }
+  const evidence = env.HISTORICAL_RUNTIME_EVIDENCE_JSON || env.HISTORICAL_RUNTIME_EVIDENCE_SHA256
+    ? readHistoricalRuntimeTransport({ bytes: Buffer.from(env.HISTORICAL_RUNTIME_EVIDENCE_JSON || ""), expectedSha256: env.HISTORICAL_RUNTIME_EVIDENCE_SHA256 }) : undefined;
+  const historicalRuntimeReferenceSha256 = resolveHistoricalRuntimeAuthority({ evidence, state: historicalRuntimeDeps.stateClient.read(), reader: historicalRuntimeDeps.reader, sourceSha: env.RELEASE_GIT_SHA, verify: historicalRuntimeDeps.verify, now: historicalRuntimeDeps.now });
+  const config = validateProductionReleaseEnvironment(env, historicalRuntimeReferenceSha256);
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-production-rls-"));
   const receipts = [];
   let mutationStarted = false;

@@ -6,7 +6,7 @@ import test from "node:test";
 import { canonicalSha256, canonicalJson, canonicalStageBApproval } from "../aws/production-green-stage-b-contract.mjs";
 import { historicalWorkerTasks, classifyHistoricalWorkerWorkload, prepareHistoricalRuntimeReference, assertHistoricalRuntimeReference, verifyHistoricalRuntimeLive, assertHistoricalRuntimeRetention } from "../aws/production-historical-runtime-contract.mjs";
 import { authenticateHistoricalRuntimeEvidence, authenticateRetainedHistoricalRuntime, historicalRuntimeRetention, verifyHistoricalRuntimeInventory } from "../aws/production-historical-runtime-evidence.mjs";
-import { verifyHistoricalRuntimeHandoff, verifyStageBHistoricalRuntime, readHistoricalRuntimeTransport } from "../aws/verify-production-historical-runtime-handoff.mjs";
+import { resolveHistoricalRuntimeAuthority, verifyHistoricalRuntimeHandoff, verifyStageBHistoricalRuntime, readHistoricalRuntimeTransport } from "../aws/verify-production-historical-runtime-handoff.mjs";
 import { stateHash, componentStateCasRequest, advanceProductionComponentDeploymentState, assertProductionComponentDeploymentState } from "../aws/production-component-deployment-state.mjs";
 import { commitSecurityComponentState } from "../aws/commit-production-component-security-state.mjs";
 import { executeNormalComponentTransaction, buildNormalReleasePlan } from "../aws/production-normal-release.mjs";
@@ -148,6 +148,8 @@ test("backend then frontend canonical normal transactions preserve retained runt
     assert.equal(canonicalJson(state.historicalRuntimeRetention), original);
     assert.equal(state.normalDeploymentReceipt, undefined);
     assert.equal(authenticateRetainedHistoricalRuntime({ state, reader: f.reader, verify: f.verify }).runtime.taskArn, f.taskArn);
+    // A later source needs neither the old environment transport nor renewed provenance.
+    assert.equal(resolveHistoricalRuntimeAuthority({ state, reader: f.reader, sourceSha, verify: f.verify }), f.reference.referenceSha256);
   }
 });
 
@@ -323,4 +325,18 @@ test("projected overrides cannot substitute or mutate the retained exact identit
   assert.equal(verifyHistoricalRuntimeLive({ reference: f.reference, reader: f.reader }), true);
   f.task.overrides = observed.overrides;
   assert.throws(() => verifyHistoricalRuntimeLive({ reference: f.reference, reader: f.reader }));
+});
+
+for (const scenario of ["initial", "retained", "both", "conflict", "malformed", "unsigned", "deleted", "neither"]) test(`shared broker/approval authority resolver: ${scenario}`, () => {
+  const f = historicalRuntimeFixture();
+  const state = scenario === "initial" || scenario === "neither" ? f.state : structuredClone(committed(f));
+  let evidence = ["initial", "both", "conflict"].includes(scenario) ? structuredClone(f.evidence) : undefined;
+  const options = { state, evidence, reader: f.reader, sourceSha: f.release, verify: f.verify, now: f.now };
+  if (scenario === "conflict") { evidence.reference.runtime.privateIp = "10.0.2.1"; rehashReference(evidence.reference); }
+  if (scenario === "malformed") state.generation = 0;
+  if (scenario === "unsigned") state.historicalRuntimeRetention.authority.signatureBase64 = Buffer.from("unsigned").toString("base64");
+  if (scenario === "deleted") delete state.historicalRuntimeRetention;
+  if (scenario === "neither") f.tasks.splice(0);
+  if (["conflict", "malformed", "unsigned", "deleted"].includes(scenario)) assert.throws(() => resolveHistoricalRuntimeAuthority(options));
+  else assert.equal(resolveHistoricalRuntimeAuthority(options), scenario === "neither" ? undefined : f.reference.referenceSha256);
 });

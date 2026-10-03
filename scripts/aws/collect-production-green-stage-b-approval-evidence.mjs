@@ -1,6 +1,5 @@
-import { verifyHistoricalRuntimeHandoff } from "./verify-production-historical-runtime-handoff.mjs";
+import { resolveHistoricalRuntimeAuthority } from "./verify-production-historical-runtime-handoff.mjs";
 import crypto from "node:crypto";
-import { authenticateHistoricalRuntimeEvidence } from "./production-historical-runtime-evidence.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertImageAuthorization } from "./production-cutover-control-plane.mjs";
@@ -120,9 +119,9 @@ export function collectProductionGreenStageBApprovalEvidence({ sourceSha, imageA
   const taskDefinitionContentSha256 = authenticateBrokerTaskDefinitions({ taskDefinitionArns, liveTaskDefinitions: live.taskDefinitions, imageReleaseSha: imageAuthorization.imageReleaseSha, contracts, images: { executorImageDigest: report.images.executor.imageReference, canaryImageDigest: report.images.canary.imageReference } });
   const observedAt = live.observedAt;
   assertStageBDeploymentEvidenceFreshness(observedAt, { now, evidenceType: "Stage B approval live observation" });
-  const historicalRuntimeReference = historicalRuntimeState ? verifyHistoricalRuntimeHandoff({ evidence: historicalRuntimeEvidence, state: historicalRuntimeState, reader: historicalRuntimeReader, sourceSha, now, verify: verifyHistoricalRuntimeSignature }) : historicalRuntimeEvidence ? authenticateHistoricalRuntimeEvidence({ evidence: historicalRuntimeEvidence, sourceSha, now, verify: verifyHistoricalRuntimeSignature }) : undefined;
+  const historicalRuntimeReferenceSha256 = resolveHistoricalRuntimeAuthority({ evidence: historicalRuntimeEvidence, state: historicalRuntimeState, reader: historicalRuntimeReader, sourceSha, now, verify: verifyHistoricalRuntimeSignature });
   const evidence = Object.freeze({
-    ...(historicalRuntimeReference ? { historicalRuntimeReferenceSha256: historicalRuntimeReference.referenceSha256 } : {}),
+    ...(historicalRuntimeReferenceSha256 ? { historicalRuntimeReferenceSha256 } : {}),
     schemaVersion: STAGE_B_APPROVAL_EVIDENCE_SCHEMA_VERSION,
     producer: STAGE_B_APPROVAL_EVIDENCE_PRODUCER,
     observedAt,

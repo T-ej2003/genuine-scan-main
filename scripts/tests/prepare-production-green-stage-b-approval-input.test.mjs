@@ -471,6 +471,8 @@ test("future checker approval binds persisted runtime authority without renewing
   assert.equal(collected.historicalRuntimeReferenceSha256, f.reference.referenceSha256);
   const prepared = await prepareProductionGreenStageBApprovalInput({ evidence: collected, protectedSourceSha: releaseSha, operator: { ticketId: "CHG-20990101-001" }, now });
   assert.equal(prepared.input.historicalRuntimeReferenceSha256, f.reference.referenceSha256);
+  const { resolveHistoricalRuntimeAuthority } = await import("../aws/verify-production-historical-runtime-handoff.mjs");
+  assert.equal(resolveHistoricalRuntimeAuthority({ state, reader: f.reader, sourceSha: releaseSha, verify: f.verify }), prepared.input.historicalRuntimeReferenceSha256);
   assert.equal(retention.reference.historicalGovernedDeploymentProvenance, false);
   f.task.lastStatus = "STOPPED";
   assert.throws(() => evidence({ historical: { historicalRuntimeState: state, historicalRuntimeReader: f.reader, verifyHistoricalRuntimeSignature: f.verify } }));
