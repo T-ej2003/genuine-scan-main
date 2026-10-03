@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import crypto from "node:crypto";
+import { verifyStageBHistoricalRuntime } from "./aws/verify-production-historical-runtime-handoff.mjs";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -434,6 +435,12 @@ export function runApply({ argv = process.argv.slice(2), env = process.env, deps
   const executableAuditSha256 = stageBApplyArtifactSetIdentity(finalBindings);
   if (executableAuditSha256 !== initialArtifactSetIdentity) throw new Error("Stage B executable artifact-set identity changed at the mutation boundary.");
   effectiveDeps.revalidateBootstrapReference(verified.audit?.bootstrapForwardLivePredecessorReference, verified.deploymentIdentity.toolingSha);
+  const revalidateHistoricalRuntime = effectiveDeps.revalidateHistoricalRuntime || (() => verifyStageBHistoricalRuntime({
+    reference: verified.audit?.historicalRuntimeReference, permissionReport: verified.permissionReport,
+    state: createProductionComponentDeploymentStateClient({ run: releaseRun }).read(),
+    reader: createAwsReader({ region: "eu-west-2", clusterArn: "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main", run: releaseRun }),
+  }));
+  revalidateHistoricalRuntime();
   const effectiveOperatorHome = effectiveDeps.getEffectiveOperatorHome?.() || stageBEffectiveOperatorHome();
   const applyAttemptPath = stageBApplyAttemptPath({ artifactSetIdentity: executableAuditSha256, effectiveOperatorHome });
   if (fs.lstatSync(applyAttemptPath, { throwIfNoEntry: false })) throw new Error("Stage B local apply-attempt evidence already exists; Terraform apply is unreachable.");

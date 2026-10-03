@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { verifyStageBHistoricalRuntime } from "./verify-production-historical-runtime-handoff.mjs";
+import { createProductionComponentDeploymentStateClient } from "./production-component-deployment-state.mjs";
+import { createAwsReader } from "./production-green-stage-b-ecs-observations.mjs";
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -101,6 +104,7 @@ if (mode === "production") {
   assertPermissionEvaluationBindings(permissionReport, permissionManifest, { plan: selectedPlan, permissionProfile: permissionReport.permissionProfile, terraformConfiguration });
   assertReleasePolicyEvidence(permissionReport.policyEvidence);
   verifyPermissionReportSignature({ report: permissionReport, signatureArtifact: permissionSignature, reportBytes: permissionReportBytes, signatureBytes: permissionSignatureBytes, expectedReportFileSha256: process.env.STAGE_B_PERMISSION_REPORT_SHA256, expectedSignatureFileSha256: process.env.STAGE_B_PERMISSION_REPORT_SIGNATURE_SHA256, run: (args) => releaseRun(args) });
+  verifyStageBHistoricalRuntime({ reference: closureAudit.historicalRuntimeReference, permissionReport, state: createProductionComponentDeploymentStateClient({ run: releaseRun }).read(), reader: createAwsReader({ region: "eu-west-2", clusterArn: "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main", run: releaseRun }) });
 }
 if (mode === "production" || tfvarsPath || bindingReportPath) {
   if (!tfvarsPath || !bindingReportPath || !process.env.STAGE_B_TFVARS_BINDING_REPORT_SHA256 || !process.env.STAGE_B_TOOLING_TREE_SHA256 || !process.env.STAGE_B_IMAGE_RELEASE_SHA || !process.env.STAGE_B_IMAGE_EVIDENCE_SHA256) throw new Error("Production Stage B closure requires canonical tfvars provenance and complete deployment identity.");

@@ -281,8 +281,10 @@ export function assertStageBBrokerRuntimeVersion(value) {
   return version;
 }
 
+export const stageBApprovalFields = (approval) => [...STAGE_B_APPROVAL_FIELDS, ...(Object.hasOwn(approval || {}, "historicalRuntimeReferenceSha256") ? ["historicalRuntimeReferenceSha256"] : [])];
+
 export const canonicalStageBApproval = (approval) => canonicalJson(Object.fromEntries(
-  STAGE_B_APPROVAL_FIELDS.map((key) => [key, approval[key]])
+  stageBApprovalFields(approval).map((key) => [key, approval[key]])
 ));
 export const stageBApprovalSha256 = (approval) => sha256(canonicalStageBApproval(approval));
 
@@ -478,9 +480,11 @@ export async function validateStageBApproval(raw, expected, { now = new Date(), 
   let artifact;
   try { artifact = typeof raw === "string" ? JSON.parse(raw) : raw; } catch { throw new Error("Stage B approval is not valid JSON."); }
   if (!artifact || typeof artifact !== "object" || Array.isArray(artifact)
-      || !strictKeys(artifact, [...STAGE_B_APPROVAL_FIELDS, "signatureBase64"])) {
+      || !strictKeys(artifact, [...stageBApprovalFields(artifact), "signatureBase64"])) {
     throw new Error("Stage B approval fields do not match schema version 2.");
   }
+  if (Object.hasOwn(artifact, "historicalRuntimeReferenceSha256") && !isDigest(artifact.historicalRuntimeReferenceSha256)) throw new Error("Historical runtime approval hash is malformed");
+  if (expected?.historicalRuntimeReferenceSha256 !== undefined && artifact.historicalRuntimeReferenceSha256 !== expected.historicalRuntimeReferenceSha256) throw new Error("Historical runtime approval binding changed or was omitted");
   const issuedAt = Date.parse(artifact.issuedAt);
   const expiresAt = Date.parse(artifact.expiresAt);
   const withinRollbackGrace = allowExpiredRollback && requestedMode === "full-rls-rollback"
@@ -523,7 +527,7 @@ export async function validateStageBApproval(raw, expected, { now = new Date(), 
     message: Buffer.from(canonicalStageBApproval(artifact)),
     signature: Buffer.from(artifact.signatureBase64, "base64"),
   })) throw new Error("Stage B approval signature verification failed.");
-  return { approval: Object.fromEntries(STAGE_B_APPROVAL_FIELDS.map((field) => [field, artifact[field]])), approvalContractSha256: stageBApprovalSha256(artifact) };
+  return { approval: Object.fromEntries(stageBApprovalFields(artifact).map((field) => [field, artifact[field]])), approvalContractSha256: stageBApprovalSha256(artifact) };
 }
 
 export async function validateStageBApprovalPayload(payload, expected, options = {}) {
@@ -535,10 +539,11 @@ export async function validateStageBApprovalPayload(payload, expected, options =
 }
 
 export const assertBrokerRequest = (event) => {
-  if (!event || typeof event !== "object" || Array.isArray(event) || !strictKeys(event, ["approvalId", "mode"])
+  if (!event || typeof event !== "object" || Array.isArray(event) || !strictKeys(event, ["approvalId", "mode", ...(Object.hasOwn(event, "historicalRuntimeReferenceSha256") ? ["historicalRuntimeReferenceSha256"] : [])])
       || !STAGE_B_MODES.includes(event.mode) || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{5,127}$/.test(event.approvalId || "")) {
     throw new Error("Stage B broker request is outside the reviewed contract.");
   }
+  if (Object.hasOwn(event, "historicalRuntimeReferenceSha256") && !isDigest(event.historicalRuntimeReferenceSha256)) throw new Error("Stage B broker historical runtime binding is malformed");
   return event;
 };
 

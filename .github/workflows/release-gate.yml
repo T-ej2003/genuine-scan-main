@@ -649,6 +649,44 @@ jobs:
           echo "package_checksum_sha256=$package_checksum" >> "$GITHUB_OUTPUT"
           echo "approval_id=$approval_id" >> "$GITHUB_OUTPUT"
 
+      - name: Decode existing release evidence transport
+        if: ${{ inputs.release_mode == 'normal' || inputs.release_mode == 'rotation-overlap' || inputs.release_mode == 'rotation-cleanup' }}
+        env:
+          RELEASE_TRANSPORT_JSON: ${{ inputs.normal_image_authorization_json }}
+          RELEASE_TRANSPORT_SHA256: ${{ inputs.normal_image_authorization_sha256 }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          import crypto from "node:crypto";
+          import { unpackReleaseEvidenceTransport } from "./scripts/aws/production-release-dispatch-contract.mjs";
+          if (process.env.RELEASE_TRANSPORT_JSON) {
+            const value = unpackReleaseEvidenceTransport({ json: process.env.RELEASE_TRANSPORT_JSON, sha256: process.env.RELEASE_TRANSPORT_SHA256 });
+            for (const [name, body] of Object.entries({ RELEASE_IMAGE_AUTHORIZATION_JSON: value.authorizationJson, RELEASE_IMAGE_AUTHORIZATION_SHA256: value.authorizationSha256, HISTORICAL_RUNTIME_EVIDENCE_JSON: value.historicalRuntimeJson || "", HISTORICAL_RUNTIME_EVIDENCE_SHA256: value.historicalRuntimeSha256 || "" })) {
+              const delimiter = crypto.randomBytes(32).toString("hex");
+              fs.appendFileSync(process.env.GITHUB_ENV, `${name}<<${delimiter}\n${body}\n${delimiter}\n`);
+            }
+          }
+          NODE
+
+      - name: Authenticate historical runtime evidence handoff
+        if: ${{ inputs.release_mode == 'normal' || inputs.release_mode == 'rotation-overlap' || inputs.release_mode == 'rotation-cleanup' }}
+        env:
+          MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-release-deployer
+          SOURCE_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
+          HISTORICAL_RUNTIME_EVIDENCE_JSON: ${{ env.HISTORICAL_RUNTIME_EVIDENCE_JSON }}
+          HISTORICAL_RUNTIME_EVIDENCE_SHA256: ${{ env.HISTORICAL_RUNTIME_EVIDENCE_SHA256 }}
+        run: |
+          set -euo pipefail
+          args=(--source-sha "$SOURCE_SHA")
+          if [ -n "${HISTORICAL_RUNTIME_EVIDENCE_JSON:-}${HISTORICAL_RUNTIME_EVIDENCE_SHA256:-}" ]; then
+            evidence_file="$RUNNER_TEMP/historical-runtime-evidence.json"
+            printf '%s' "$HISTORICAL_RUNTIME_EVIDENCE_JSON" > "$evidence_file"
+            chmod 600 "$evidence_file"
+            args+=(--evidence "$evidence_file" --evidence-sha256 "$HISTORICAL_RUNTIME_EVIDENCE_SHA256")
+          fi
+          node scripts/aws/verify-production-historical-runtime-handoff.mjs "${args[@]}"
+
       - name: Resolve image metadata
         id: image-meta
         if: ${{ inputs.release_mode == 'normal' }}
@@ -665,8 +703,8 @@ jobs:
         id: images
         if: ${{ inputs.release_mode == 'normal' }}
         env:
-          IMAGE_AUTHORIZATION_JSON: ${{ inputs.normal_image_authorization_json }}
-          IMAGE_AUTHORIZATION_SHA256: ${{ inputs.normal_image_authorization_sha256 }}
+          IMAGE_AUTHORIZATION_JSON: ${{ env.RELEASE_IMAGE_AUTHORIZATION_JSON }}
+          IMAGE_AUTHORIZATION_SHA256: ${{ env.RELEASE_IMAGE_AUTHORIZATION_SHA256 }}
           WEB_IMAGE_AUTHORIZATION_JSON: ${{ inputs.web_image_authorization_json }}
           SOURCE_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
         run: |
@@ -767,7 +805,7 @@ jobs:
             --workflow-run-id "$GITHUB_RUN_ID" \
             --release-train-run-id "$RELEASE_TRAIN_RUN_ID" \
             --image-authorization "${{ steps.images.outputs.authorization_file }}" \
-            --image-authorization-sha256 "${{ inputs.normal_image_authorization_sha256 }}" \
+            --image-authorization-sha256 "${{ env.RELEASE_IMAGE_AUTHORIZATION_SHA256 }}" \
             "${activation_args[@]}" \
             --binding-out "$BINDING_FILE"
           echo "binding_file=$BINDING_FILE" >> "$GITHUB_OUTPUT"
@@ -832,7 +870,7 @@ jobs:
               --reserve-downstream-lifetime \
               --source-sha "$SOURCE_SHA" \
               --stage-b-authorization "${{ steps.images.outputs.authorization_file }}" \
-              --stage-b-authorization-sha256 "${{ inputs.normal_image_authorization_sha256 }}" \
+              --stage-b-authorization-sha256 "${{ env.RELEASE_IMAGE_AUTHORIZATION_SHA256 }}" \
               --web-authorization "$WEB_AUTHORIZATION_FILE" \
               --web-authorization-sha256 "$WEB_AUTHORIZATION_SHA256" \
               --output "$RUNNER_TEMP/coordinated-web-authorization-reservation.json"
@@ -845,7 +883,7 @@ jobs:
             --workflow-run-id "$GITHUB_RUN_ID" \
             --release-train-run-id "$RELEASE_TRAIN_RUN_ID" \
             --image-authorization "${{ steps.images.outputs.authorization_file }}" \
-            --image-authorization-sha256 "${{ inputs.normal_image_authorization_sha256 }}" \
+            --image-authorization-sha256 "${{ env.RELEASE_IMAGE_AUTHORIZATION_SHA256 }}" \
             --binding "$ACTIVATION_BINDING_FILE" \
             --binding-sha256 "$ACTIVATION_BINDING_SHA256"
           node scripts/aws/apply-production-full-rls-release.mjs --credential-source github-oidc-release-deployer
@@ -864,6 +902,8 @@ jobs:
         if: ${{ inputs.release_mode == 'normal' }}
         env:
           SOURCE_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
+          HISTORICAL_RUNTIME_EVIDENCE_JSON: ${{ env.HISTORICAL_RUNTIME_EVIDENCE_JSON }}
+          HISTORICAL_RUNTIME_EVIDENCE_SHA256: ${{ env.HISTORICAL_RUNTIME_EVIDENCE_SHA256 }}
           RLS_RECEIPT: ${{ runner.temp }}/production-rls-release-receipt.json
           RELEASE_TRAIN_RUN_ID: ${{ inputs.release_train_run_id }}
         run: |
@@ -877,7 +917,7 @@ jobs:
             --workflow-run-id "$GITHUB_RUN_ID" \
             --release-train-run-id "$RELEASE_TRAIN_RUN_ID" \
             --image-authorization "${{ steps.images.outputs.authorization_file }}" \
-            --image-authorization-sha256 "${{ inputs.normal_image_authorization_sha256 }}" \
+            --image-authorization-sha256 "${{ env.RELEASE_IMAGE_AUTHORIZATION_SHA256 }}" \
             --binding "${{ steps.backend-activation.outputs.binding_file }}" \
             --binding-sha256 "${{ steps.backend-activation.outputs.binding_sha256 }}" \
             --release-receipt "$RLS_RECEIPT" \
@@ -1109,8 +1149,16 @@ jobs:
           ROTATION_READINESS: ${{ runner.temp }}/rotation-readiness.json
           ROTATION_READINESS_SHA256: ${{ inputs.rotation_readiness_evidence_sha256 }}
           ROTATION_MODE: ${{ inputs.release_mode }}
+          HISTORICAL_RUNTIME_EVIDENCE_JSON: ${{ env.HISTORICAL_RUNTIME_EVIDENCE_JSON }}
+          HISTORICAL_RUNTIME_EVIDENCE_SHA256: ${{ env.HISTORICAL_RUNTIME_EVIDENCE_SHA256 }}
           ROTATION_DEPLOYMENT_SHA256: ${{ steps.rotation-deployment.outputs.sha256 }}
-        run: node scripts/aws/commit-production-component-rotation-state.mjs --mode="$ROTATION_MODE" --source-sha="$SOURCE_SHA" --rotation-id="$ROTATION_ID" --rotation-state-sha256="$ROTATION_STATE_SHA256" --readiness="$ROTATION_READINESS" --readiness-sha256="$ROTATION_READINESS_SHA256" --deployment="$RUNNER_TEMP/rotation-deployment-result.json" --deployment-sha256="$ROTATION_DEPLOYMENT_SHA256"
+        run: |
+          set -euo pipefail
+          args=()
+          if [ -n "${HISTORICAL_RUNTIME_EVIDENCE_JSON:-}${HISTORICAL_RUNTIME_EVIDENCE_SHA256:-}" ]; then
+            args+=(--historical-runtime-evidence="$RUNNER_TEMP/historical-runtime-evidence.json" --historical-runtime-evidence-sha256="$HISTORICAL_RUNTIME_EVIDENCE_SHA256")
+          fi
+          node scripts/aws/commit-production-component-rotation-state.mjs "${args[@]}" --mode="$ROTATION_MODE" --source-sha="$SOURCE_SHA" --rotation-id="$ROTATION_ID" --rotation-state-sha256="$ROTATION_STATE_SHA256" --readiness="$ROTATION_READINESS" --readiness-sha256="$ROTATION_READINESS_SHA256" --deployment="$RUNNER_TEMP/rotation-deployment-result.json" --deployment-sha256="$ROTATION_DEPLOYMENT_SHA256"
 
       - name: Activate authenticated frontend image
         id: frontend-activation
@@ -1126,7 +1174,7 @@ jobs:
           result="$(node scripts/aws/run-production-web-activation.mjs \
             --source-sha "$SOURCE_SHA" \
             --stage-b-authorization "${{ steps.images.outputs.authorization_file }}" \
-            --stage-b-authorization-sha256 "${{ inputs.normal_image_authorization_sha256 }}" \
+            --stage-b-authorization-sha256 "${{ env.RELEASE_IMAGE_AUTHORIZATION_SHA256 }}" \
             --web-authorization "$WEB_AUTHORIZATION_FILE" \
             --web-authorization-sha256 "$WEB_AUTHORIZATION_SHA256" \
             --backend-activation-evidence "$BACKEND_METADATA_FILE" \
@@ -1209,7 +1257,9 @@ jobs:
           MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-release-deployer
           SOURCE_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
           AUTHORIZATION_FILE: ${{ steps.images.outputs.authorization_file }}
-          AUTHORIZATION_SHA256: ${{ inputs.normal_image_authorization_sha256 }}
+          AUTHORIZATION_SHA256: ${{ env.RELEASE_IMAGE_AUTHORIZATION_SHA256 }}
+          HISTORICAL_RUNTIME_EVIDENCE_JSON: ${{ env.HISTORICAL_RUNTIME_EVIDENCE_JSON }}
+          HISTORICAL_RUNTIME_EVIDENCE_SHA256: ${{ env.HISTORICAL_RUNTIME_EVIDENCE_SHA256 }}
           RLS_RECEIPT: ${{ runner.temp }}/production-rls-release-receipt.json
           BACKEND_METADATA: ${{ steps.image-meta.outputs.backend_metadata_file }}
           WEB_REQUIRED: ${{ steps.images.outputs.web_required }}
@@ -1221,5 +1271,8 @@ jobs:
           if [ "$WEB_REQUIRED" = true ]; then
             test -n "$FRONTEND_ACTIVATION" && test -n "$FRONTEND_ACTIVATION_SHA256"
             args+=(--frontend-activation="$FRONTEND_ACTIVATION" --frontend-activation-sha256="$FRONTEND_ACTIVATION_SHA256")
+          fi
+          if [ -n "${HISTORICAL_RUNTIME_EVIDENCE_JSON:-}${HISTORICAL_RUNTIME_EVIDENCE_SHA256:-}" ]; then
+            args+=(--historical-runtime-evidence="$RUNNER_TEMP/historical-runtime-evidence.json" --historical-runtime-evidence-sha256="$HISTORICAL_RUNTIME_EVIDENCE_SHA256")
           fi
           node scripts/aws/commit-production-component-security-state.mjs "${args[@]}"

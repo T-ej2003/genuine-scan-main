@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import crypto from "node:crypto";
+import { assertHistoricalRuntimeReference } from "./production-historical-runtime-contract.mjs";
+import { readHistoricalRuntimeTransport } from "./verify-production-historical-runtime-handoff.mjs";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -25,7 +27,10 @@ const APPLY_MODES = Object.freeze([
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 
 export function validateProductionReleaseEnvironment(env = process.env) {
+  const historical = env.HISTORICAL_RUNTIME_EVIDENCE_JSON || env.HISTORICAL_RUNTIME_EVIDENCE_SHA256
+    ? readHistoricalRuntimeTransport({ bytes: Buffer.from(env.HISTORICAL_RUNTIME_EVIDENCE_JSON || ""), expectedSha256: env.HISTORICAL_RUNTIME_EVIDENCE_SHA256 }) : undefined;
   const config = {
+    ...(historical ? { historicalRuntimeReferenceSha256: assertHistoricalRuntimeReference(historical.reference).referenceSha256 } : {}),
     releaseSha: env.RELEASE_GIT_SHA,
     sourceContractSha256: env.MSCQR_FULL_RLS_SOURCE_CONTRACT_SHA256,
     migrationSetDigest: env.MSCQR_FULL_RLS_MIGRATION_SET_DIGEST,
@@ -72,7 +77,7 @@ export const createProductionFullRlsReleaseAws = ({ credentialSource, env = proc
 const invokeBroker = (mode, config, aws, directory) => {
   const requestPath = path.join(directory, `${mode}-broker-request.json`);
   const responsePath = path.join(directory, `${mode}-broker-response.json`);
-  fs.writeFileSync(requestPath, JSON.stringify({ mode, approvalId: config.approvalId }), { mode: 0o600, flag: "wx" });
+  fs.writeFileSync(requestPath, JSON.stringify({ mode, approvalId: config.approvalId, ...(config.historicalRuntimeReferenceSha256 ? { historicalRuntimeReferenceSha256: config.historicalRuntimeReferenceSha256 } : {}) }), { mode: 0o600, flag: "wx" });
   const invoked = aws([
     "lambda", "invoke",
     "--function-name", STAGE_B.brokerFunctionArn,

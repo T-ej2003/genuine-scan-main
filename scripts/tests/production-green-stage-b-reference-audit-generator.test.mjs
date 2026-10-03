@@ -2952,3 +2952,28 @@ test("AWS reader uses argv arrays and only read-only commands", () => {
     run: () => JSON.stringify({ serviceArns: [] }),
   }), /exact production region and cluster/);
 });
+
+test("canonical reference audit permits only the exact bootstrap historical runtime, without trusting its family", async () => {
+  const { historicalRuntimeFixture } = await import("./fixtures/historical-runtime.mjs");
+  const fixture = makeBootstrapForwardLivePredecessorFixture(), runtime = historicalRuntimeFixture();
+  runtime.task.createdAt = runtime.launch.eventTime = "2026-07-30T10:00:00.000Z";
+  runtime.definition.registeredAt = runtime.registration.eventTime = "2026-07-30T09:00:00.000Z";
+  const original = { ...fixture.reader };
+  Object.assign(fixture.reader, {
+    listTasks: (status) => [...original.listTasks(status), ...(status === "RUNNING" ? runtime.tasks.map(({ taskArn }) => taskArn) : [])],
+    describeTasks: (arns) => ({ tasks: [...original.describeTasks(arns.filter((arn) => !runtime.tasks.some((task) => task.taskArn === arn))).tasks, ...runtime.reader.describeTasks(arns).tasks], failures: [] }),
+    describeTaskDefinition: (arn) => arn === runtime.definitionArn ? runtime.reader.describeTaskDefinition(arn) : original.describeTaskDefinition(arn),
+    describeImages: (name, digest) => name === "mscqr-worker" ? runtime.reader.describeImages(name, digest) : original.describeImages(name, digest),
+    describeRepositories: (names) => names.includes("mscqr-worker") ? runtime.reader.describeRepositories(names) : original.describeRepositories(names),
+    describeNetworkInterfaces: runtime.reader.describeNetworkInterfaces, lookupEvents: runtime.reader.lookupEvents,
+    isProtectedSource: () => true,
+  });
+  const options = { historicalRuntimeTaskArn: runtime.taskArn, readToolingTreeSha256: () => "f".repeat(64) };
+  const audit = generate(fixture, options);
+  assert.equal(audit.historicalRuntimeReference.runtime.taskArn, runtime.taskArn);
+  assert.equal(audit.historicalRuntimeReference.historicalGovernedDeploymentProvenance, false);
+  assert.equal(audit.historicalRuntimeReference.bootstrap.componentStateSha256, audit.bootstrapForwardLivePredecessorReference.componentStateSha256);
+  validateBrokerPlan(fixture, audit);
+  runtime.tasks.push({ ...runtime.task, taskArn: runtime.taskArn.replace(/1/g, "2") });
+  assert.throws(() => generate(fixture, options), /additional workers/);
+});

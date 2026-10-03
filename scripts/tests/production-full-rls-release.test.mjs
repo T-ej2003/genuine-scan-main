@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { historicalRuntimeFixture } from "./fixtures/historical-runtime.mjs";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -134,9 +135,12 @@ test("production release uses only the approval broker, runs canaries, and write
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const outputPath = path.join(directory, "release-receipt.json");
   const modes = [];
+  const historical = historicalRuntimeFixture();
+  const historicalJson = JSON.stringify(historical.evidence);
   const aws = (args) => {
     if (args[0] === "lambda" && args[1] === "invoke") {
       const request = JSON.parse(fs.readFileSync(args.find((item) => item.startsWith("fileb://")).slice(8), "utf8"));
+      assert.equal(request.historicalRuntimeReferenceSha256, historical.reference.referenceSha256);
       modes.push(request.mode);
       fs.writeFileSync(args.at(-1), JSON.stringify({
         status: "started",
@@ -182,7 +186,7 @@ test("production release uses only the approval broker, runs canaries, and write
     }
     throw new Error(`Unexpected AWS test call: ${args.join(" ")}`);
   };
-  const bundle = await applyProductionFullRlsRelease({ env, aws, outputPath });
+  const bundle = await applyProductionFullRlsRelease({ env: { ...env, HISTORICAL_RUNTIME_EVIDENCE_JSON: historicalJson, HISTORICAL_RUNTIME_EVIDENCE_SHA256: sha256(historicalJson) }, aws, outputPath });
   assert.deepEqual(modes, [
     "full-rls-capability-preflight",
     "full-rls-admin-bootstrap",

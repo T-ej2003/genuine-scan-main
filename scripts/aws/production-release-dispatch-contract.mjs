@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import crypto from "node:crypto";
+import { readHistoricalRuntimeTransport } from "./verify-production-historical-runtime-handoff.mjs";
+import { authenticateHistoricalRuntimeEvidence } from "./production-historical-runtime-evidence.mjs";
 import fs from "node:fs";
 import { pathToFileURL } from "node:url";
 import { IMAGE_AUTHORIZATION_SCHEMA_VERSION, imageAuthorizationSha256 } from "./production-image-authorization.mjs";
@@ -7,6 +9,26 @@ import { canonicalSha256 } from "./production-green-stage-b-contract.mjs";
 
 const SHA = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
+
+// Existing release transport carries two independently authenticated proofs.
+// Wrapping changes only the transport checksum, never either signed artifact.
+export function packReleaseEvidenceTransport({ authorizationJson, authorizationSha256, historicalRuntimeJson, historicalRuntimeSha256 }) {
+  if (!historicalRuntimeJson && !historicalRuntimeSha256) return { json: authorizationJson, sha256: authorizationSha256 };
+  readHistoricalRuntimeTransport({ bytes: Buffer.from(historicalRuntimeJson || ""), expectedSha256: historicalRuntimeSha256 });
+  if (crypto.createHash("sha256").update(authorizationJson).digest("hex") !== authorizationSha256) throw new Error("Image transport checksum changed");
+  const json = JSON.stringify({ schemaVersion: 1, imageAuthorizationJson: authorizationJson, imageAuthorizationSha256: authorizationSha256, historicalRuntimeJson, historicalRuntimeSha256 });
+  return { json, sha256: crypto.createHash("sha256").update(json).digest("hex") };
+}
+
+export function unpackReleaseEvidenceTransport({ json, sha256 }) {
+  if (crypto.createHash("sha256").update(json).digest("hex") !== sha256) throw new Error("Release transport checksum changed");
+  const value = JSON.parse(json);
+  if (!Object.hasOwn(value, "imageAuthorizationJson")) return { authorizationJson: json, authorizationSha256: sha256 };
+  if (JSON.stringify(Object.keys(value).sort()) !== JSON.stringify(["historicalRuntimeJson", "historicalRuntimeSha256", "imageAuthorizationJson", "imageAuthorizationSha256", "schemaVersion"])) throw new Error("Release transport envelope malformed");
+  if (value.schemaVersion !== 1) throw new Error("Release transport schema invalid");
+  packReleaseEvidenceTransport({ authorizationJson: value.imageAuthorizationJson, authorizationSha256: value.imageAuthorizationSha256, historicalRuntimeJson: value.historicalRuntimeJson, historicalRuntimeSha256: value.historicalRuntimeSha256 });
+  return { authorizationJson: value.imageAuthorizationJson, authorizationSha256: value.imageAuthorizationSha256, historicalRuntimeJson: value.historicalRuntimeJson, historicalRuntimeSha256: value.historicalRuntimeSha256 };
+}
 
 function parseBoundWebAuthorization({ sourceSha, authorizationBytes, expectedSha256, required }) {
   if (!required && authorizationBytes === undefined && expectedSha256 === undefined) return undefined;
@@ -42,8 +64,16 @@ function required(argv, name) {
 }
 
 export function runCli(argv = process.argv.slice(2)) {
-  if (![6, 8].includes(argv.length)) throw new Error("Normal release dispatch contract accepts three Stage-B options and an optional web authorization file.");
-  const sourceSha = required(argv, "--source-sha"); const authorizationBytes = fs.readFileSync(required(argv, "--authorization")); const authorization = JSON.parse(authorizationBytes);
+  if (![6, 8, 10, 12].includes(argv.length)) throw new Error("Normal release dispatch contract accepts three Stage-B options and an optional web authorization file.");
+  const allowed = new Set(["--source-sha", "--authorization", "--authorization-sha256", "--web-authorization", "--historical-runtime-evidence", "--historical-runtime-evidence-sha256"]);
+  for (let i = 0; i < argv.length; i += 2) if (!allowed.has(argv[i])) throw new Error("Unknown release transport option");
+  const sourceSha = required(argv, "--source-sha");
+  if (argv.includes("--historical-runtime-evidence") || argv.includes("--historical-runtime-evidence-sha256")) {
+    const evidence = readHistoricalRuntimeTransport({ bytes: fs.readFileSync(required(argv, "--historical-runtime-evidence")), expectedSha256: required(argv, "--historical-runtime-evidence-sha256") });
+    // Retained authority may originate in an older release. Gate independently
+    // requires that exact proof already persisted, or a fresh current-source grant.
+    authenticateHistoricalRuntimeEvidence({ evidence, retained: true });
+  } const authorizationBytes = fs.readFileSync(required(argv, "--authorization")); const authorization = JSON.parse(authorizationBytes);
   const webAuthorizationBytes = argv.includes("--web-authorization") ? fs.readFileSync(required(argv, "--web-authorization")) : undefined;
   return assertNormalReleaseAuthorizationTransport({ sourceSha, authorizationBytes, expectedSha256: required(argv, "--authorization-sha256"), webPublicationRequired: authorization.imageReuseEvidence?.webPublicationRequired, ...(webAuthorizationBytes ? { webAuthorizationBytes, webExpectedSha256: crypto.createHash("sha256").update(webAuthorizationBytes).digest("hex") } : {}) });
 }

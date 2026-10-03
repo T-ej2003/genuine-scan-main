@@ -1,10 +1,13 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
+import { historicalRuntimeRetention as createHistoricalRuntimeRetention, authenticateRetainedHistoricalRuntime, verifyHistoricalRuntimeInventory } from "./production-historical-runtime-evidence.mjs";
+import { verifyHistoricalRuntimeHandoff } from "./verify-production-historical-runtime-handoff.mjs";
+import { createAwsReader } from "./production-green-stage-b-ecs-observations.mjs";
 import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { advanceProductionComponentDeploymentStateWithRetry, createProductionComponentDeploymentStateClient, PRODUCTION_COMPONENT_STATE } from "./production-component-deployment-state.mjs";
+import { advanceProductionComponentDeploymentStateWithRetry, createProductionComponentDeploymentStateClient, PRODUCTION_COMPONENT_STATE, stateHash } from "./production-component-deployment-state.mjs";
 import { readAndAssertReadyForOverlapDeployment } from "./production-overlap-readiness-contract.mjs";
 import { readBoundStageBPrivateJson } from "./stage-b-artifact-contract.mjs";
 import { createAppOnlyEcsReaders } from "./production-app-only-adapters.mjs";
@@ -16,13 +19,18 @@ const SHA = /^[a-f0-9]{40}$/, HASH = /^[a-f0-9]{64}$/;
 const hash = (value) => crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex");
 export const rotationReleaseIdentity = ({ mode, sourceSha, rotationId, rotationStateSha256, readinessSha256, readiness, expectedCurrentTaskDefinitionArn }) => hash({ mode, sourceSha, rotationId, rotationStateSha256, readinessSha256, readiness, expectedCurrentTaskDefinitionArn });
 
-export function commitRotationComponentState({ mode, sourceSha, rotationId, rotationStateSha256, readinessFile, readinessSha256, deployment, readers, client, isProtectedMainAncestor, writerContext } = {}) {
+export function commitRotationComponentState({ mode, sourceSha, rotationId, rotationStateSha256, readinessFile, readinessSha256, deployment, readers, client, isProtectedMainAncestor, writerContext, historicalRuntimeEvidence, runtimeReader, verifyRuntimeSignature, now } = {}) {
   assert.ok(["rotation-overlap", "rotation-cleanup"].includes(mode)); assert.match(sourceSha || "", SHA); assert.match(rotationStateSha256 || "", HASH); assert.match(readinessSha256 || "", HASH);
   const readiness = readAndAssertReadyForOverlapDeployment({ filePath: readinessFile, evidenceSha256: readinessSha256, sourceSha, rotationId, rotationStateSha256 });
   assert.equal(isProtectedMainAncestor(sourceSha), true, "Rotation source is not protected-main history.");
   assert.match(writerContext?.githubRunId || "", /^[1-9][0-9]*$/);
   assert.match(writerContext?.githubRunAttempt || "", /^[1-9][0-9]*$/);
   const current = client.read(); assert.ok(current, "Production component deployment state is not bootstrapped.");
+  if (runtimeReader) verifyHistoricalRuntimeHandoff({ evidence: historicalRuntimeEvidence, state: current, reader: runtimeReader, sourceSha, verify: verifyRuntimeSignature, now });
+  let retention = current.historicalRuntimeRetention;
+  if (retention) authenticateRetainedHistoricalRuntime({ state: current, reader: runtimeReader, verify: verifyRuntimeSignature });
+  if (historicalRuntimeEvidence) retention = createHistoricalRuntimeRetention({ evidence: historicalRuntimeEvidence, sourceSha, current, componentStateSha256: stateHash(current), reader: runtimeReader, verify: verifyRuntimeSignature, writerContext, now });
+  if (retention) verifyHistoricalRuntimeInventory({ reference: retention.reference, reader: runtimeReader });
   for (const [key, expected] of Object.entries({ sourceSha, transitionMode: mode, rotationId, rotationStateSha256, readinessSha256, workflowRunId: writerContext.githubRunId, workflowRunAttempt: writerContext.githubRunAttempt }))
     assert.equal(deployment?.[key], expected, `Rotation deployment ${key} mismatch`);
   assert.equal(deployment.terminalState, mode === "rotation-overlap" ? "DEPLOYED_PENDING_VERIFICATION" : "DEPLOYED");
@@ -40,19 +48,27 @@ export function commitRotationComponentState({ mode, sourceSha, rotationId, rota
   const reconciled = authenticateRotationReconciliation({ readiness: readiness.evidence, current, readers, expectedCurrentTaskDefinitionArn: metadata.previousTaskDefinitionArn, taskDefinitionArn: deployment.taskDefinitionArn, imageDigest: metadata.expectedImageDigest, releaseIdentity, mode, isProtectedMainAncestor });
   assert.equal(reconciled.disposition, "ALREADY_APPLIED");
   assert.deepEqual(reconciled.backend, backend);
-  return advanceProductionComponentDeploymentStateWithRetry({ client, current, lane: "SECURITY_INFRASTRUCTURE", changes: { security: { sourceSha, releaseIdentity }, backend }, emergencyCompletion: { mode, sourceSha, evidenceSha256: releaseIdentity }, ...writerContext });
+  if (retention) verifyHistoricalRuntimeInventory({ reference: retention.reference, reader: runtimeReader });
+  const result = advanceProductionComponentDeploymentStateWithRetry({ client, current, ...(retention ? { historicalRuntimeRetention: retention, maxRetries: 0 } : {}), lane: "SECURITY_INFRASTRUCTURE", changes: { security: { sourceSha, releaseIdentity }, backend }, emergencyCompletion: { mode, sourceSha, evidenceSha256: releaseIdentity }, ...writerContext });
+  if (retention) verifyHistoricalRuntimeInventory({ reference: retention.reference, reader: runtimeReader });
+  return result;
 }
 
 function main() {
   const values = Object.fromEntries(process.argv.slice(2).map((value) => value.split("=", 2)).filter(([key, value]) => key && value).map(([key, value]) => [key.replace(/^--/, ""), value]));
-  assert.deepEqual(Object.keys(values).sort(), ["deployment", "deployment-sha256", "mode", "readiness", "readiness-sha256", "rotation-id", "rotation-state-sha256", "source-sha"]);
+  const historical = values["historical-runtime-evidence"] !== undefined || values["historical-runtime-evidence-sha256"] !== undefined;
+  assert.deepEqual(Object.keys(values).sort(), ["deployment", "deployment-sha256", "mode", "readiness", "readiness-sha256", "rotation-id", "rotation-state-sha256", "source-sha", ...(historical ? ["historical-runtime-evidence", "historical-runtime-evidence-sha256"] : [])].sort());
   assert.ok(path.isAbsolute(values.readiness)); assertGithubOidcReleaseDeployerEnvironment();
   assert.match(process.env.GITHUB_WORKFLOW_REF || "", /^T-ej2003\/genuine-scan-main\/.github\/workflows\/release-gate\.yml@refs\/heads\/main$/); assert.match(process.env.GITHUB_RUN_ID || "", /^[1-9][0-9]*$/);
   const run = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER, region: PRODUCTION_COMPONENT_STATE.region });
   const caller = JSON.parse(run(["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"])); assert.equal(String(caller.Account), PRODUCTION_COMPONENT_STATE.account); assert.match(caller.Arn || "", /^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\/[^/]+$/);
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
   const deployment = readBoundStageBPrivateJson({ filePath: values.deployment, expectedSha256: values["deployment-sha256"], label: "Rotation deployment result" });
-  const result = commitRotationComponentState({ mode: values.mode, sourceSha: values["source-sha"], rotationId: values["rotation-id"], rotationStateSha256: values["rotation-state-sha256"], readinessFile: values.readiness, readinessSha256: values["readiness-sha256"], deployment, readers: createAppOnlyEcsReaders(run, { assertDefinitionArn: assertRotationBackendTaskArn }), client: createProductionComponentDeploymentStateClient({ run }), writerContext: { updatedByWorkflow: process.env.GITHUB_WORKFLOW_REF, githubRunId: process.env.GITHUB_RUN_ID, githubRunAttempt: process.env.GITHUB_RUN_ATTEMPT }, isProtectedMainAncestor: (source) => {
+  const runtimeReader = createAwsReader({ region: PRODUCTION_COMPONENT_STATE.region, clusterArn: "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main", run });
+  const historicalRuntimeEvidence = historical ? readBoundStageBPrivateJson({ filePath: values["historical-runtime-evidence"], expectedSha256: values["historical-runtime-evidence-sha256"], label: "Historical runtime evidence" }) : undefined;
+  const client = createProductionComponentDeploymentStateClient({ run });
+  verifyHistoricalRuntimeHandoff({ evidence: historicalRuntimeEvidence, state: client.read(), reader: runtimeReader, sourceSha: values["source-sha"] });
+  const result = commitRotationComponentState({ historicalRuntimeEvidence, runtimeReader, mode: values.mode, sourceSha: values["source-sha"], rotationId: values["rotation-id"], rotationStateSha256: values["rotation-state-sha256"], readinessFile: values.readiness, readinessSha256: values["readiness-sha256"], deployment, readers: createAppOnlyEcsReaders(run, { assertDefinitionArn: assertRotationBackendTaskArn }), client: createProductionComponentDeploymentStateClient({ run }), writerContext: { updatedByWorkflow: process.env.GITHUB_WORKFLOW_REF, githubRunId: process.env.GITHUB_RUN_ID, githubRunAttempt: process.env.GITHUB_RUN_ATTEMPT }, isProtectedMainAncestor: (source) => {
     try { execFileSync("git", ["merge-base", "--is-ancestor", source, "refs/remotes/origin/main"], { cwd: root, stdio: "ignore" }); return true; } catch { return false; }
   } });
   process.stdout.write(`${JSON.stringify({ generation: result.state.generation, component: "security", sourceSha: result.state.components.security.sourceSha })}\n`);

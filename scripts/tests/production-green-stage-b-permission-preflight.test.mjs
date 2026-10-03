@@ -2030,6 +2030,7 @@ const validRealApplyInput = (fixture, checkoutReads = [fixture.protectedMainChec
       },
       showPlan: () => fixture.shownBytes,
       validatePlan: () => {},
+      revalidateHistoricalRuntime: () => true,
       verifyPermissionSignature: () => true,
       verifyImageEvidence: fixture.verifyImageEvidence,
       getBackendMetadata: () => structuredClone(initializedBackendMetadata),
@@ -2699,6 +2700,7 @@ test("apply wrapper validates the canonical alias for any broker mutation regard
       callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test",
       showPlan: () => fixture.shownBytes,
       validatePlan: () => {},
+      revalidateHistoricalRuntime: () => true,
       verifyPermissionSignature: () => true,
     });
   };

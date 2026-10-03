@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import { assertHistoricalRuntimeReference, matchesHistoricalRuntimeTask } from "./aws/production-historical-runtime-contract.mjs";
 import crypto from "node:crypto";
 import path from "node:path";
 import {
@@ -553,6 +554,13 @@ function assertAppendOnlyReferenceAuditBinding(plan, classification, referenceAu
   const normalDeploymentLivePredecessorReference = assertStageBNormalDeploymentLivePredecessorReference(referenceAudit);
   if (normalDeploymentLivePredecessorReference) executionArnsByFamily.get(normalDeploymentLivePredecessorReference.family).add(normalDeploymentLivePredecessorReference.taskDefinitionArn);
   if (!Array.isArray(referenceAudit.services) || !Array.isArray(referenceAudit.runningTasks) || !Array.isArray(referenceAudit.pendingTasks) || !Array.isArray(referenceAudit.transitionalTasks) || !Array.isArray(referenceAudit.taskDefinitions)) throw new Error("Stage B append-only reference audit service/task evidence is missing.");
+  const historicalRuntimeReference = referenceAudit.historicalRuntimeReference;
+  if (historicalRuntimeReference) {
+    assertHistoricalRuntimeReference(historicalRuntimeReference);
+    const workers = [...referenceAudit.runningTasks, ...referenceAudit.pendingTasks, ...referenceAudit.transitionalTasks].filter((item) => item.taskDefinitionArn?.includes(":task-definition/mscqr-production-rls-green-worker-candidate:"));
+    if (workers.length !== 1 || !matchesHistoricalRuntimeTask(historicalRuntimeReference, workers[0])) throw new Error("Historical runtime reference does not authorize this worker inventory");
+    if (!referenceAudit.historicalRuntimeRetention && historicalRuntimeReference.recoverySourceSha !== referenceAudit.toolingSha) throw new Error("Historical runtime initial reference is bound to another recovery source");
+  }
   const checkReferences = (items, arnKey, name) => {
     const seen = new Set();
     for (const item of items) {
@@ -563,7 +571,7 @@ function assertAppendOnlyReferenceAuditBinding(plan, classification, referenceAu
       const expectedStageBScoped = identity[1].startsWith("mscqr-production-");
       if (item.stageBScoped !== expectedStageBScoped) throw new Error(`Stage B append-only reference audit ${name} classification is invalid.`);
       seen.add(observationKey);
-      if (expectedStageBScoped && !executionArnsByFamily.get(identity[1])?.has(identity[0])) {
+      if (expectedStageBScoped && !matchesHistoricalRuntimeTask(historicalRuntimeReference, item) && !executionArnsByFamily.get(identity[1])?.has(identity[0])) {
         throw new Error(`Stage B append-only reference audit ${name} contains an unrecorded task-definition ARN.`);
       }
     }

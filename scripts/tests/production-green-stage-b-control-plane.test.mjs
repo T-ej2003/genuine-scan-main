@@ -189,3 +189,28 @@ test("closure evidence upload preserves the primary failure when the producer em
   assert.match(qualityGate.slice(upload, upload + 500), /env\.STAGE_B_IMAGE_IMPACT_ARTIFACT_EXISTS == 'true'/);
   assert.match(qualityGate.slice(record, upload), /primary closure failure remains authoritative/);
 });
+
+
+test("checker approval signs the exact historical runtime hash and rejects omission or substitution", async () => {
+  const hash = "1".repeat(64), value = artifact({ historicalRuntimeReferenceSha256: hash });
+  const bound = { ...expected, historicalRuntimeReferenceSha256: hash };
+  await assert.doesNotReject(() => validateStageBApproval(value, bound, { now, verifySignature }));
+  await assert.rejects(() => validateStageBApproval(artifact(), bound, { now, verifySignature }), /omitted/);
+  await assert.rejects(() => validateStageBApproval(artifact({ historicalRuntimeReferenceSha256: "2".repeat(64) }), bound, { now, verifySignature }), /binding changed/);
+  await assert.rejects(() => validateStageBApproval(artifact({ historicalRuntimeReferenceSha256: "invalid" }), bound, { now, verifySignature }), /malformed/);
+  assert.notEqual(canonicalStageBApproval(value), canonicalStageBApproval(artifact({ historicalRuntimeReferenceSha256: "2".repeat(64) })));
+});
+
+for (const [approvalHash, requestHash] of [["1".repeat(64), undefined], ["1".repeat(64), "2".repeat(64)], [undefined, "1".repeat(64)], ["1".repeat(64), "invalid"]]) test(`broker rejects mismatched historical execution binding ${approvalHash}/${requestHash} before claiming authorization`, async () => {
+  const handler = createHandler({ config, executingBrokerVersion: "1", readApproval: async () => JSON.stringify(artifact(approvalHash ? { historicalRuntimeReferenceSha256: approvalHash } : {})), verifySignature, now: () => now,
+    claimApproval: async () => assert.fail("invalid runtime reference must not consume authorization"), runTask: async () => assert.fail("invalid runtime reference must not launch") });
+  await assert.rejects(() => handler({ approvalId: stageBApprovalIdForReleaseSha(releaseSha), mode: "full-rls-verification", ...(requestHash ? { historicalRuntimeReferenceSha256: requestHash } : {}) }), /historical runtime/);
+});
+
+test("broker accepts the exact signed historical execution binding", async () => {
+  const referenceSha256 = "1".repeat(64); let claimed = 0;
+  const handler = createHandler({ config, executingBrokerVersion: "1", readApproval: async () => JSON.stringify(artifact({ historicalRuntimeReferenceSha256: referenceSha256 })), verifySignature, now: () => now,
+    claimApproval: async () => { claimed++; }, runTask: async () => ({ failures: [], tasks: [{ taskArn: "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/fixed" }] }) });
+  await handler({ approvalId: stageBApprovalIdForReleaseSha(releaseSha), mode: "full-rls-verification", historicalRuntimeReferenceSha256: referenceSha256 });
+  assert.equal(claimed, 1);
+});

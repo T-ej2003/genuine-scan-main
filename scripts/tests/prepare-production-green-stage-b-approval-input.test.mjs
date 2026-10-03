@@ -67,7 +67,7 @@ function signedPreflightTrust(reportValue = preflight(), source = releaseSha) {
 function evidence(overrides = {}) {
   const selectedPreflight = { ...preflight(overrides.preflight), stageBApprovalLiveObservation: live(overrides.live) };
   const trust = overrides.trust || signedPreflightTrust(overrides.trustReport || selectedPreflight, overrides.trustSource || releaseSha);
-  return collectProductionGreenStageBApprovalEvidence({ sourceSha: releaseSha, imageAuthorization: authorization, tfvarsPath: "/secure/t.tfvars", bindingReportPath: "/secure/t.json", releasePreflightPath: "/secure/preflight.json", checkerIdentity, now, validateImageAuthorization: () => {}, validateTfvarsBinding: () => ({ ...report, ...(overrides.report || {}) }), deriveContracts: () => ({ sourceContractSha256: digest("a"), migrationSetDigest: digest("b"), packageChecksumSha256: digest("c") }), readTfvarsBinding: () => ({ tfvarsBytes, bindingReportBytes }), readPreflight: () => selectedPreflight, releasePreflightTrustEvidence: trust, verifyReleasePreflightAttestationSignature: () => true }).evidence;
+  return collectProductionGreenStageBApprovalEvidence({ sourceSha: releaseSha, imageAuthorization: authorization, tfvarsPath: "/secure/t.tfvars", bindingReportPath: "/secure/t.json", releasePreflightPath: "/secure/preflight.json", checkerIdentity, now, validateImageAuthorization: () => {}, validateTfvarsBinding: () => ({ ...report, ...(overrides.report || {}) }), deriveContracts: () => ({ sourceContractSha256: digest("a"), migrationSetDigest: digest("b"), packageChecksumSha256: digest("c") }), readTfvarsBinding: () => ({ tfvarsBytes, bindingReportBytes }), readPreflight: () => selectedPreflight, releasePreflightTrustEvidence: trust, verifyReleasePreflightAttestationSignature: () => true, ...(overrides.historical || {}) }).evidence;
 }
 
 test("approval-input authenticates the release runner before root-attestation verification", async () => {
@@ -443,4 +443,35 @@ test("review output failure rolls back the input", async () => {
   const input = path.join(directory, "input.json"); const review = path.join(directory, "review.txt"); const fake = { ...fs, renameSync(from, to) { if (to === review) throw new Error("simulated review commit failure"); return fs.renameSync(from, to); } };
   assert.throws(() => writeProductionGreenStageBApprovalInput({ result, outputPath: input, reviewOutputPath: review, fsOps: fake }), /simulated/);
   assert.equal(fs.existsSync(input), false); assert.equal(fs.existsSync(review), false); fs.rmSync(directory, { recursive: true, force: true });
+});
+
+
+test("future checker approval binds persisted runtime authority without renewing historical provenance", async () => {
+  const { historicalRuntimeFixture } = await import("./fixtures/historical-runtime.mjs");
+  const { historicalRuntimeRetention } = await import("../aws/production-historical-runtime-evidence.mjs");
+  const { stateHash } = await import("../aws/production-component-deployment-state.mjs");
+  const f = historicalRuntimeFixture();
+  f.state = structuredClone(f.state);
+  f.state.updatedAt = "2026-08-30T10:00:00.000Z";
+  for (const provenance of Object.values(f.state.componentProvenance)) provenance.updatedAt = f.state.updatedAt;
+  f.task.createdAt = f.reference.runtime.createdAt = "2026-08-29T10:00:00.000Z";
+  f.reference.registration.eventTime = "2026-08-29T09:00:00.000Z";
+  f.reference.launch.eventTime = f.task.createdAt;
+  f.reference.bootstrap.componentStateSha256 = stateHash(f.state);
+  const { rehashReference } = await import("./fixtures/historical-runtime.mjs");
+  rehashReference(f.reference);
+  f.now = "2026-08-30T11:00:00.000Z";
+  f.report.historicalRuntimeAuthority.referenceSha256 = f.reference.referenceSha256;
+  f.report.historicalRuntimeAuthority.approvedAt = f.now;
+  const { historicalRuntimeEvidence } = await import("../aws/production-historical-runtime-evidence.mjs");
+  f.evidence = historicalRuntimeEvidence({ reference: f.reference, report: f.report, signatureArtifact: signPermissionReport(f.report, { sign: f.sign, now: f.now }) });
+  const retention = historicalRuntimeRetention({ evidence: f.evidence, sourceSha: f.release, current: f.state, componentStateSha256: stateHash(f.state), reader: f.reader, verify: f.verify, writerContext: f.writerContext, now: f.now });
+  const state = { ...f.state, updatedAt: now.toISOString(), generation: 9, historicalRuntimeRetention: retention };
+  const collected = evidence({ historical: { historicalRuntimeState: state, historicalRuntimeReader: f.reader, verifyHistoricalRuntimeSignature: f.verify } });
+  assert.equal(collected.historicalRuntimeReferenceSha256, f.reference.referenceSha256);
+  const prepared = await prepareProductionGreenStageBApprovalInput({ evidence: collected, protectedSourceSha: releaseSha, operator: { ticketId: "CHG-20990101-001" }, now });
+  assert.equal(prepared.input.historicalRuntimeReferenceSha256, f.reference.referenceSha256);
+  assert.equal(retention.reference.historicalGovernedDeploymentProvenance, false);
+  f.task.lastStatus = "STOPPED";
+  assert.throws(() => evidence({ historical: { historicalRuntimeState: state, historicalRuntimeReader: f.reader, verifyHistoricalRuntimeSignature: f.verify } }));
 });

@@ -1078,6 +1078,63 @@
       "capabilityGraphPresent": true
     },
     {
+      "sourceFile": "scripts/aws/production-green-stage-b-ecs-observations.mjs",
+      "action": "ec2:DescribeNetworkInterfaces",
+      "capabilityId": "manifest-refresh-stage-a-vpc-endpoint-interfaces",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "*"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-green-stage-b-ecs-observations.mjs",
+      "action": "cloudtrail:LookupEvents",
+      "capabilityId": "admin-cloudtrail-denials",
+      "identity": "ADMINISTRATOR",
+      "resources": [
+        "reviewed-exact-resource"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "ADMINISTRATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-green-stage-b-identity-capabilities.mjs",
+      "action": "ec2:DescribeNetworkInterfaces",
+      "capabilityId": "manifest-refresh-stage-a-vpc-endpoint-interfaces",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "*"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
       "sourceFile": "scripts/aws/produce-production-green-stage-b-prerequisite-bundle.mjs",
       "action": "s3:GetObject",
       "capabilityId": "stage-b-state-reconciliation-producer-collect-stage-a-prerequisite-state",

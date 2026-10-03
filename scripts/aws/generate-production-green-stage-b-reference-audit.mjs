@@ -1,5 +1,10 @@
 #!/usr/bin/env node
 import crypto from "node:crypto";
+import assert from "node:assert/strict";
+import { deriveStageBToolingInputTreeSha256 } from "./validate-stage-b-image-reuse.mjs";
+import { prepareHistoricalRuntimeReference, matchesHistoricalRuntimeTask, historicalWorkerTasks } from "./production-historical-runtime-contract.mjs";
+import { authenticateRetainedHistoricalRuntime, verifyHistoricalRuntimeInventory } from "./production-historical-runtime-evidence.mjs";
+import { stateHash } from "./production-component-deployment-state.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,6 +34,8 @@ import { createProductionComponentDeploymentStateClient } from "./production-com
 import { APP_ONLY } from "./production-app-only-contract.mjs";
 import { WEB_RELEASE } from "./production-web-release-contract.mjs";
 import { assertBootstrapStageBLivePredecessor, bootstrapStageBSourceRange, BOOTSTRAP_STAGE_B_REFERENCE_KIND } from "./production-bootstrap-stage-b-predecessor-contract.mjs";
+
+import { createPermissionReportKmsVerifier } from "./validate-production-green-stage-b-permissions.mjs";
 
 export { batch, createAwsReader } from "./production-green-stage-b-ecs-observations.mjs";
 
@@ -700,6 +707,8 @@ export function generateReferenceAudit({
   auditedAt = new Date().toISOString(),
   now = new Date(),
   readChangedFiles,
+  historicalRuntimeTaskArn,
+  readToolingTreeSha256 = deriveStageBToolingInputTreeSha256,
 }) {
   if (!reader) throw new Error("Read-only AWS reader is required.");
   if (region !== "eu-west-2") throw new Error("Stage B requires AWS region eu-west-2.");
@@ -712,7 +721,17 @@ export function generateReferenceAudit({
   const deploymentIdentity = assertStageBDeploymentIdentity({ plan });
   const planSha = ensurePlanHash(planBytes, planJsonSha256);
   if (recoveryAttestationSha256 !== undefined && !/^[a-f0-9]{64}$/.test(recoveryAttestationSha256)) throw new Error("Recovery attestation SHA256 is malformed.");
-  if (plan?.variables?.stage_b_recovery_only?.value === true) return generateRecoveryOnlyReferenceAudit({ plan, planBytes, planJsonSha256, reader, callerArn, auditedAt, now, recoveryAttestationSha256 });
+  if (plan?.variables?.stage_b_recovery_only?.value === true) {
+    assert.equal(historicalRuntimeTaskArn, undefined, "Initial historical baseline requires the complete bootstrap-forward plan");
+    const recoveryAudit = generateRecoveryOnlyReferenceAudit({ plan, planBytes, planJsonSha256, reader, callerArn, auditedAt, now, recoveryAttestationSha256 });
+    const state = reader.readProductionComponentDeploymentState?.();
+    if (state?.historicalRuntimeRetention) {
+      const reference = authenticateRetainedHistoricalRuntime({ state, reader, verify: reader.verifyHistoricalRuntimeSignature });
+      verifyHistoricalRuntimeInventory({ reference, reader });
+      return { ...recoveryAudit, historicalRuntimeReference: reference, historicalRuntimeRetention: state.historicalRuntimeRetention };
+    }
+    return recoveryAudit;
+  }
   const {
     rolloverByAddress,
     createOnlyByAddress,
@@ -792,6 +811,19 @@ export function generateReferenceAudit({
   const oldArns = [...oldDefinitions, ...retainedDefinitions].map((entry) => entry.oldArn);
 
   const { services, runningTasks, pendingTasks, transitionalTasks, taskDefinitions } = observeStageBEcs({ reader, region, clusterArn });
+  const componentState = reader.readProductionComponentDeploymentState?.();
+  let historicalRuntimeReference = componentState?.historicalRuntimeRetention
+    ? authenticateRetainedHistoricalRuntime({ state: componentState, reader, verify: reader.verifyHistoricalRuntimeSignature }) : undefined;
+  if (historicalRuntimeTaskArn) {
+    assert.equal(historicalRuntimeReference, undefined, "An established retention cannot be replaced by a new initial authorization");
+    historicalRuntimeReference = prepareHistoricalRuntimeReference({ reader, taskArn: historicalRuntimeTaskArn, componentState, componentStateSha256: stateHash(componentState), recoverySourceSha: deploymentIdentity.toolingSha, recoveryTreeSha256: readToolingTreeSha256(deploymentIdentity.toolingSha),
+      isProtectedSource: reader.isProtectedSource || ((sourceSha, targetSha) => { try { execFileSync("git", ["merge-base", "--is-ancestor", sourceSha, targetSha], { cwd: repositoryRoot, stdio: "ignore" }); return true; } catch { return false; } }) });
+  }
+  if (historicalRuntimeReference) {
+    const workerTasks = historicalWorkerTasks({ tasks: [...runningTasks, ...pendingTasks, ...transitionalTasks], reader });
+    assert.equal(workerTasks.length, 1, "Historical retention never authorizes additional workers");
+    assert.equal(matchesHistoricalRuntimeTask(historicalRuntimeReference, workerTasks[0]), true);
+  }
   const stageBServices = services.filter((service) => service.stageBScoped);
   const stageBRunningTasks = runningTasks.filter((task) => task.stageBScoped);
   const stageBPendingTasks = pendingTasks.filter((task) => task.stageBScoped);
@@ -839,7 +871,7 @@ export function generateReferenceAudit({
   }
   for (const arn of deposedArns) if (brokerReferencesByArn.has(arn) && ![...brokerPredecessorsByMode.values()].some((entry) => entry.classification === "DEPOSED" && entry.taskDefinitionArn === arn)) throw new Error(`Deposed task definition remains referenced by the broker outside the reviewed recovery relation: ${arn}`);
   assertStageBLiveReferences(stageBServices, allowedLiveArnsByFamily, createOnlyFamilies, "taskDefinition", "serviceName");
-  assertStageBLiveReferences(stageBRunningTasks, allowedLiveArnsByFamily, createOnlyFamilies, "taskDefinitionArn", "taskArn");
+  assertStageBLiveReferences(stageBRunningTasks.filter((task) => !matchesHistoricalRuntimeTask(historicalRuntimeReference, task)), allowedLiveArnsByFamily, createOnlyFamilies, "taskDefinitionArn", "taskArn");
   assertStageBLiveReferences(stageBPendingTasks, allowedLiveArnsByFamily, createOnlyFamilies, "taskDefinitionArn", "taskArn");
   assertStageBLiveReferences(stageBTransitionalTasks, allowedLiveArnsByFamily, createOnlyFamilies, "taskDefinitionArn", "taskArn");
   const unretainedCreateOnlyFamilies = new Set([...createOnlyFamilies].filter((family) => !newestRetainedByFamily.has(family)));
@@ -971,6 +1003,7 @@ export function generateReferenceAudit({
     plannedAtomicBrokerRollovers,
     plannedAtomicPackageChecksumTransition,
     planJsonSha256: planSha,
+    ...(historicalRuntimeReference ? { historicalRuntimeReference, ...(componentState.historicalRuntimeRetention ? { historicalRuntimeRetention: componentState.historicalRuntimeRetention } : {}) } : {}),
     ...(b01LivePredecessorReference ? { b01LivePredecessorReference } : {}),
     ...(bootstrapForwardLivePredecessorReference ? { bootstrapForwardLivePredecessorReference } : {}),
     ...(normalDeploymentLivePredecessorReference ? { normalDeploymentLivePredecessorReference } : {}),
@@ -1002,7 +1035,7 @@ export function parseCli(argv) {
   if (!path.isAbsolute(planJsonPath) || !path.isAbsolute(outputPath)) throw new Error("Plan and output paths must be absolute.");
   const recoveryAttestationSha256 = readOption(argv, "--recovery-attestation-sha256");
   if (recoveryAttestationSha256 !== undefined && !/^[a-f0-9]{64}$/.test(recoveryAttestationSha256)) throw new Error("Recovery attestation SHA256 is malformed.");
-  return { planJsonPath, planJsonSha256, outputPath, region, clusterArn, brokerAliasArn: STAGE_B.brokerAliasArn, expectedPackageChecksumSha256, recoveryAttestationSha256, auditedAt: readOption(argv, "--audited-at") || new Date().toISOString() };
+  return { historicalRuntimeTaskArn: readOption(argv, "--historical-runtime-task-arn"), planJsonPath, planJsonSha256, outputPath, region, clusterArn, brokerAliasArn: STAGE_B.brokerAliasArn, expectedPackageChecksumSha256, recoveryAttestationSha256, auditedAt: readOption(argv, "--audited-at") || new Date().toISOString() };
 }
 
 export async function runCli(argv = process.argv.slice(2)) {
@@ -1013,7 +1046,10 @@ export async function runCli(argv = process.argv.slice(2)) {
   const planBytes = fs.readFileSync(options.planJsonPath);
   const plan = parseJson(planBytes.toString("utf8"), "Terraform plan JSON");
   const run = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer" });
-  const reader = createAwsReader({ ...options, run });
+  const attributionRun = options.historicalRuntimeTaskArn ? createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "default" }) : undefined;
+  const reader = createAwsReader({ ...options, run, attributionRun });
+  if (attributionRun) reader.historicalImageReader = createAwsReader({ ...options, run: attributionRun });
+  reader.verifyHistoricalRuntimeSignature = createPermissionReportKmsVerifier({ run });
   reader.readProductionComponentDeploymentState = createProductionComponentDeploymentStateClient({ run }).read;
   const terraformConfiguration = fs.readFileSync(stageBTerraformConfigurationPath, "utf8");
   const audit = generateReferenceAudit({ ...options, plan, planBytes, reader, terraformConfiguration });
