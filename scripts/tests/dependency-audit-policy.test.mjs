@@ -102,3 +102,11 @@ test("Tailwind compiler/plugin and braces are build-only, not runtime dependency
   assert.doesNotMatch(runtime, /node_modules|npm |node:/);
   assert.equal(run().status, 0, "Audit reports with build dependencies omitted must pass without a waiver");
 });
+
+test("lockfile retains optional WASM dependency records required by Linux npm ci", () => {
+  const lock = JSON.parse(readFileSync(path.join(root, "package-lock.json"), "utf8"));
+  for (const name of ["@emnapi/core", "@emnapi/runtime"]) {
+    assert.ok(lock.packages[`node_modules/${name}`], name);
+    assert.match(lock.packages[`node_modules/${name}`].integrity, /^sha512-/);
+  }
+});
