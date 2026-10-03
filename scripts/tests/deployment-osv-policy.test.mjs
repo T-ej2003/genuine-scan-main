@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { realpathSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -47,8 +47,8 @@ for (const [name, source] of [
 ]) test(`${name} vulnerability fails`, async () => {
   await withBuild(source, (dir, browser) => assert.throws(() => enforceRuntimeFindings(report(dir), browser, dir)));
 });
-test("build-only dev dependency absent from fresh browser graph passes", async () => {
-  await withBuild(idle, (dir, browser) => assert.equal(enforceRuntimeFindings(report(dir), browser, dir).length, 1));
+test("absence from browser graph is not proof of build-only execution", async () => {
+  await withBuild(idle, (dir, browser) => assert.throws(() => enforceRuntimeFindings(report(dir), browser, dir), /UNKNOWN/));
 });
 test("browser worker dependency is included in the census", async () => {
   const dir = fixture();
@@ -149,7 +149,7 @@ test("source maps and chunk names do not control runtime attribution", async () 
     assert.throws(() => enforceRuntimeFindings(report(dir), browser, dir));
   }, { build: { sourcemap: false, rolldownOptions: { output: { entryFileNames: "opaque.js", chunkFileNames: "hidden-[hash].js" } } } });
 });
-test("PostCSS build-only execution does not imply browser execution", async () => {
+test("PostCSS execution alone does not prove complete final-artifact provenance", async () => {
   const dir = fixture();
   try {
     writeFileSync(path.join(dir, "main.js"), 'import "./main.css"; document.body.textContent = "ok";');
@@ -157,7 +157,7 @@ test("PostCSS build-only execution does not imply browser execution", async () =
     writeFileSync(path.join(dir, "vite.config.mjs"), `import unsafe from '${packageName}'; export default {css:{postcss:{plugins:[{postcssPlugin:"build-only",Once(){unsafe();}}]}}};`);
     const browser = await buildBrowserClosure(dir, { logLevel: "silent" });
     assert.equal(browser.packages.includes(`${packageName}@1.0.0`), false);
-    assert.equal(enforceRuntimeFindings(report(dir), browser, dir).length, 1);
+    assert.throws(() => enforceRuntimeFindings(report(dir), browser, dir), /UNKNOWN/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -179,6 +179,32 @@ test("OSV dev group cannot override a runtime lockfile instance", async () => {
     const lock = JSON.parse(readFileSync(path.join(dir, "package-lock.json")));
     delete lock.packages[`node_modules/${packageName}`].dev;
     writeFileSync(path.join(dir, "package-lock.json"), JSON.stringify(lock));
-    assert.throws(() => enforceRuntimeFindings(report(dir), browser, dir), /non-dev/);
+    assert.throws(() => enforceRuntimeFindings(report(dir), browser, dir), /UNKNOWN/);
   });
+});
+
+// Package code copied by plugins has no package module ID. It must remain
+// UNKNOWN, never an absence-based build-only exemption.
+for (const hook of ["transform", "virtual", "renderChunk", "generateBundle"]) test(`plugin ${hook} package-code injection fails despite no package module ID`, async () => {
+  const dir = fixture();
+  try {
+    writeFileSync(path.join(dir, `node_modules/${packageName}/browser.js`), "globalThis.n = 42;");
+    writeFileSync(path.join(dir, "main.js"), `${hook === "virtual" ? 'import "virtual:unsafe";' : ""}globalThis.appReady = true;`);
+    const code = readFileSync(path.join(dir, `node_modules/${packageName}/browser.js`), "utf8");
+    let artifact = "";
+    const plugin = { name: "fixture-code-copy", writeBundle(_opts, bundle) { artifact = Object.values(bundle).filter(v => v.type === "chunk").map(v => v.code).join("\n"); } };
+    if (hook === "transform") plugin.transform = (original, id) => id === path.join(realpathSync(dir), "main.js") ? { code: original + code, map: null } : null;
+    if (hook === "virtual") { plugin.resolveId = id => id === "virtual:unsafe" ? "\0injected" : null; plugin.load = id => id === "\0injected" ? code : null; }
+    if (hook === "renderChunk") plugin.renderChunk = original => ({ code: original + code, map: null });
+    if (hook === "generateBundle") plugin.generateBundle = (_opts, bundle) => { for (const item of Object.values(bundle)) if (item.type === "chunk") item.code += code; };
+    const browser = await buildBrowserClosure(dir, { configFile: false, logLevel: "silent", plugins: [plugin], build: { minify: false, lib: { entry: path.join(dir, "main.js"), name: "Fixture", formats: ["iife"] } } });
+    const vm = await import("node:vm"); const sandbox = {}; vm.runInNewContext(artifact, sandbox);
+    assert.equal(sandbox.n, 42, "package-derived code really executes");
+    assert.equal(browser.packages.includes(`${packageName}@1.0.0`), false);
+    assert.equal(browser.executableProvenance, "INCOMPLETE");
+    assert.throws(() => enforceRuntimeFindings(report(dir), browser, dir), /UNKNOWN/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+test("clean reports still pass without claiming complete artifact provenance", async () => {
+  await withBuild(idle, (dir, browser) => assert.deepEqual(enforceRuntimeFindings({ results: [] }, browser, dir), []));
 });

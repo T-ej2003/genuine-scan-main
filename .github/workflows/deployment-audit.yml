@@ -184,7 +184,7 @@ jobs:
         run: npm ci
 
       - name: Verify OSV runtime boundary
-        run: node --test scripts/tests/deployment-osv-policy.test.mjs
+        run: node --test scripts/tests/deployment-osv-policy.test.mjs scripts/tests/osv-non-runtime-acceptance.test.mjs scripts/tests/dependency-audit-policy.test.mjs
 
       - name: Report OSV source vulnerabilities (including dev)
         # Findings remain visible in the uploaded audit artifact. Scanner errors

@@ -1,3 +1,4 @@
+import { reachabilityInputsSha256, validateNonRuntimeAcceptance } from "./lib/osv-non-runtime-acceptance.mjs";
 import assert from "node:assert/strict";
 import { realpathSync, readFileSync, mkdtempSync, rmSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -11,6 +12,7 @@ const readJson = file => JSON.parse(readFileSync(file, "utf8"));
 
 export async function buildBrowserClosure(root, options = {}) {
   root = realpathSync(root);
+  const inputsSha256 = reachabilityInputsSha256(root);
   const outDir = mkdtempSync(path.join(os.tmpdir(), "mscqr-browser-closure-"));
   const modules = new Set();
   const chunks = new Set();
@@ -72,7 +74,8 @@ export async function buildBrowserClosure(root, options = {}) {
       assert.equal(lock.packages?.[relative]?.version, metadata.version, `Runtime package missing/mismatched in lockfile: ${relative}`);
       packages.add(`${metadata.name}@${metadata.version}`);
     }
-    return { completed: true, packages: [...packages].sort(), chunks: [...chunks].sort(), moduleCount: modules.size };
+    assert.equal(reachabilityInputsSha256(root), inputsSha256, "Inputs changed during production build");
+    return { completed: true, inputsSha256, canonicalBuild: Object.keys(options).length === 0, executableProvenance: "INCOMPLETE", packages: [...packages].sort(), chunks: [...chunks].sort(), moduleCount: modules.size };
   } finally { rmSync(outDir, { recursive: true, force: true }); }
 }
 
@@ -91,35 +94,46 @@ export function assertRuntimePackaging(root) {
   assert.match(readFileSync(path.join(root, "scripts/aws/publish-ecs-images.sh"), "utf8"), /backend\|worker\) printf 'runtime'/);
 }
 
-export function enforceRuntimeFindings(report, browser, root) {
+export function enforceRuntimeFindings(report, browser, root, { acceptance = { schemaVersion: 1, entries: [] }, today = new Date().toISOString().slice(0, 10) } = {}) {
   assert.ok(browser?.completed && Array.isArray(browser.packages) && browser.chunks?.length && browser.moduleCount > 0, "Missing browser runtime evidence");
   assert.ok(Array.isArray(report?.results), "Invalid unfiltered OSV report");
+  assert.equal(acceptance.schemaVersion, 1);
+  assert.ok(Array.isArray(acceptance.entries), "Missing acceptance entries");
+  const keys = new Set();
+  for (const entry of acceptance.entries) {
+    validateNonRuntimeAcceptance(entry, browser, root, today);
+    const key = `${entry.scope}/${entry.package}/${entry.affectedVersion}/${entry.advisory.toUpperCase()}`;
+    assert.ok(!keys.has(key), "Duplicate acceptance"); keys.add(key);
+  }
+  const used = new Set();
+  const accepted = [];
   const failures = [];
-  const buildOnly = [];
   for (const result of report.results) {
     assert.ok(typeof result.source?.path === "string" && Array.isArray(result.packages), "Incomplete OSV source evidence");
     for (const finding of result.packages) {
-    assert.ok(Array.isArray(finding.vulnerabilities), "Incomplete OSV vulnerability evidence");
-    if (!finding.vulnerabilities.length) continue;
-    assert.ok(typeof finding.package?.name === "string" && finding.package.name && typeof finding.package.version === "string" && finding.package.version, "Incomplete OSV package identity");
-    const name = finding.package?.name;
-    const version = finding.package?.version;
-    const source = path.resolve(result.source?.path || "");
-    const lock = source === path.join(root, "package-lock.json") || source === path.join(root, "backend/package-lock.json");
-    const devOnly = finding.package?.ecosystem === "npm" && finding.dependency_groups?.length === 1 && finding.dependency_groups[0] === "dev";
-    const inBrowser = browser.packages.includes(`${name}@${version}`);
-    // Keep existing source policy for normal dependencies and all other/nested
-    // ecosystems. Only proven non-runtime npm development closures can pass.
-    if (!lock || !devOnly || inBrowser) failures.push(`${source}: ${name}@${version}`);
-    else {
-      const instances = Object.entries(readJson(source).packages || {}).filter(([key, value]) => key.endsWith(`node_modules/${name}`) && value.version === version);
-      assert.ok(instances.length && instances.every(([, value]) => value.dev === true), `Unknown/non-dev lockfile reachability: ${name}@${version}`);
-      buildOnly.push(`${source}: ${name}@${version}`);
-    }
+      assert.ok(Array.isArray(finding.vulnerabilities), "Incomplete OSV vulnerability evidence");
+      if (!finding.vulnerabilities.length) continue;
+      assert.ok(typeof finding.package?.name === "string" && finding.package.name && typeof finding.package.version === "string" && finding.package.version, "Incomplete OSV package identity");
+      const { name, version } = finding.package;
+      const source = path.resolve(result.source.path);
+      for (const vulnerability of finding.vulnerabilities) {
+        assert.ok(typeof vulnerability.id === "string" && vulnerability.id, "Missing OSV advisory identity");
+        assert.ok(vulnerability.aliases === undefined || Array.isArray(vulnerability.aliases), "Malformed OSV aliases");
+        const ids = [vulnerability.id, ...(vulnerability.aliases || [])];
+        assert.ok(ids.every(id => typeof id === "string" && id), "Malformed OSV alias identity");
+        const entry = acceptance.entries.find(entry => entry.package === name && entry.affectedVersion === version && ids.some(id => id.toUpperCase() === entry.advisory.toUpperCase()) && ids.some(id => id.toUpperCase() === entry.cve.toUpperCase()));
+        const buildScope = source === path.join(root, "package-lock.json") && finding.package.ecosystem === "npm" && finding.dependency_groups?.length === 1 && finding.dependency_groups[0] === "dev";
+        const patchAvailable = vulnerability.affected?.some(affected => affected.ranges?.some(range => range.events?.some(event => event.fixed)));
+        if (entry && buildScope && !patchAvailable) {
+          used.add(entry);
+          accepted.push({ package: name, version, advisory: vulnerability.id, aliases: ids, severity: vulnerability.database_specific?.severity || "UNSPECIFIED", patched: false, disposition: "TIME_BOUNDED_NON_RUNTIME_ACCEPTANCE", owner: entry.owner, expiresOn: entry.expiresOn });
+        } else failures.push(`${source}: ${name}@${version} (${browser.packages.includes(`${name}@${version}`) ? "YES: browser module present" : "UNKNOWN: executable provenance incomplete"})`);
+      }
     }
   }
+  for (const entry of acceptance.entries) assert.ok(used.has(entry), `Stale acceptance: ${entry.package}/${entry.advisory}`);
   assert.equal(failures.length, 0, `Production runtime/unknown vulnerabilities: ${failures.join(", ")}`);
-  return buildOnly;
+  return accepted;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -127,7 +141,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   assertRuntimePackaging(repository);
   const browser = await buildBrowserClosure(repository);
   const report = readJson(path.resolve(process.argv[2]));
-  const buildOnly = enforceRuntimeFindings(report, browser, repository);
+  const acceptance = readJson(path.join(repository, "documents/security/osv-non-runtime-acceptance.json"));
+  const buildOnly = enforceRuntimeFindings(report, browser, repository, { acceptance });
+  for (const entry of buildOnly) console.log(JSON.stringify(entry));
   writeFileSync(path.join(path.dirname(path.resolve(process.argv[2])), "browser-runtime-closure.json"), JSON.stringify({ browser, buildOnly }, null, 2));
-  console.log(`OSV runtime gate passed; ${buildOnly.length} proven build-only finding(s), ${browser.packages.length} browser packages.`);
+  console.log(`OSV runtime gate passed; ${buildOnly.length} visible time-bounded accepted finding(s), ${browser.packages.length} browser packages.`);
 }

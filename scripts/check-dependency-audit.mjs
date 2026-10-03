@@ -1,3 +1,4 @@
+import { validateException } from "./lib/dependency-risk-acceptance.mjs";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -73,18 +74,6 @@ const loadAllowlist = (allowlistPath) => {
     throw new Error(`Invalid dependency audit exception file at ${allowlistPath}`);
   }
   return parsed;
-};
-
-const validateException = (entry, today) => {
-  const required = ["scope", "package", "advisory", "rationale", "owner", "expiresOn"];
-  const missing = required.find((key) => !String(entry?.[key] || "").trim());
-  if (missing) return `missing ${missing}`;
-  if (!["root", "backend"].includes(entry.scope)) return "scope must be root or backend";
-  if (/[*?]/.test(entry.package) || /[*?]/.test(entry.advisory)) return "wildcards are forbidden";
-  if (!/^(?:GHSA-[A-Z0-9-]+|npm:\d+)$/i.test(entry.advisory)) return "advisory must be an exact GHSA or npm ID";
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(entry.expiresOn)) return "expiresOn must be YYYY-MM-DD";
-  if (entry.expiresOn < today) return `expired on ${entry.expiresOn}`;
-  return null;
 };
 
 const today = new Date().toISOString().slice(0, 10);
