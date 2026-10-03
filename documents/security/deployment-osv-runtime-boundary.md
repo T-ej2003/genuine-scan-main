@@ -187,3 +187,19 @@ The evidence artifact includes the accepted finding and fresh build snapshot.
 Security debt: prefer a compatible patched braces/Tailwind dependency path when
 available. Otherwise review Tailwind 4 separately, including UI animations and
 browser compatibility. This PR changes neither framework nor application behavior.
+
+
+### Deployment-time expiry revalidation
+
+Exact-head review of 642a853 found a delayed-release P2: a successful audit before
+midnight could otherwise be replayed after expiry. The fix binds the deadline to
+the immutable target commit's acceptance blob. Final required-gate sanity reads
+that exact Git object after authenticating the successful target workflow runs.
+The production runner repeats this check after environment approval and at every
+subsequent shell-step boundary. No branch/environment deadline can override it.
+A new step cannot begin after expiry, even when the prior audit conclusion was
+success. Operations already in progress are not forcibly killed at midnight;
+after expiry the next step blocks and needs reviewed remediation/renewal. This
+changes only time-window enforcement, not release, worker or component authority.
+The permanent regression simulates November 1 success followed by November 2
+production dispatch and verifies zero mutation callbacks.
