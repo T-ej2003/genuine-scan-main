@@ -1,7 +1,0 @@
-# Production source gate: npm development/build groups are not runtime inputs.
-# The unfiltered source report is retained by Deployment Audit; packaging tests
-# must pass before this policy is applied. No advisory or severity exceptions.
-[[PackageOverrides]]
-ecosystem = "npm"
-group = "dev"
-vulnerability.ignore = true

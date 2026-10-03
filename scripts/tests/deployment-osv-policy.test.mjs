@@ -2,87 +2,183 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
 import test from "node:test";
+import { buildBrowserClosure, enforceRuntimeFindings, assertRuntimePackaging } from "../check-osv-runtime.mjs";
 
 const root = path.resolve(new URL("../..", import.meta.url).pathname);
-const policy = path.join(root, ".security/osv-production.toml");
-const scanner = process.env.OSV_SCANNER && path.resolve(process.env.OSV_SCANNER);
-
-// Deliberately constrain the current recipes, rather than infer arbitrary Docker
-// programs. A packaging change must re-establish this boundary before filtering.
-function assertPackaging({ frontend, backend }) {
-  for (const dockerfile of frontend) {
-    const runtime = dockerfile.split(/^FROM nginx:[^\n]+$/m)[1];
-    assert.ok(runtime, "frontend must use the static Nginx runtime");
-    assert.doesNotMatch(runtime, /node_modules|\bnpm\b|\bnode\b/);
-    assert.deepEqual(runtime.match(/^COPY --from=.*$/gm), ["COPY --from=builder /app/dist /usr/share/nginx/html"]);
-  }
-  const builder = backend.split("FROM deps AS builder")[1]?.split("FROM node:24-bookworm-slim AS runtime")[0];
-  assert.ok(builder, "backend builder must be recognized");
-  assert.match(builder, /npm prune --omit=dev --no-audit --no-fund\s*$/);
-  assert.equal((backend.match(/npm ci/g) || []).length, 1);
-  assert.doesNotMatch(backend.split("AS runtime")[1], /COPY --from=deps|npm (?:ci|install)(?! --global)/);
-  const publisher = readFileSync(path.join(root, "scripts/aws/publish-ecs-images.sh"), "utf8");
-  assert.match(publisher, /backend\|worker\) printf 'runtime'/);
+const packageName = "unsafe-runtime-fixture";
+const report = (dir, { dev = true, source = "package-lock.json", ecosystem = "npm" } = {}) => ({ results: [{
+  source: { path: path.join(dir, source), type: "lockfile" },
+  packages: [{ package: { name: packageName, version: "1.0.0", ecosystem }, dependency_groups: dev ? ["dev"] : [],
+    vulnerabilities: [{ id: "OSV-TEST-HIGH", database_specific: { severity: "HIGH" } }] }],
+}] });
+function fixture() {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "mscqr-browser-security-"));
+  mkdirSync(path.join(dir, "node_modules", packageName), { recursive: true });
+  writeFileSync(path.join(dir, "node_modules", packageName, "package.json"), JSON.stringify({ name: packageName, version: "1.0.0", type: "module", main: "index.js" }));
+  writeFileSync(path.join(dir, "node_modules", packageName, "index.js"), 'export default () => "runtime";');
+  writeFileSync(path.join(dir, "package.json"), JSON.stringify({ type: "module", devDependencies: { [packageName]: "1.0.0" } }));
+  writeFileSync(path.join(dir, "package-lock.json"), JSON.stringify({ lockfileVersion: 3, packages: {
+    "": { devDependencies: { [packageName]: "1.0.0" } }, [`node_modules/${packageName}`]: { version: "1.0.0", dev: true },
+  } }));
+  writeFileSync(path.join(dir, "index.html"), '<script type="module" src="/main.js"></script>');
+  return dir;
 }
-const packaging = () => ({
-  frontend: ["Dockerfile", "Dockerfile.ecs-frontend"].map(file => readFileSync(path.join(root, file), "utf8")),
-  backend: readFileSync(path.join(root, "backend/Dockerfile"), "utf8"),
-});
-
-test("production packaging excludes dev dependencies before OSV filtering", () => assertPackaging(packaging()));
-test("manifest dev classification cannot hide dependencies copied into runtime", () => {
-  const current = packaging();
-  assert.throws(() => assertPackaging({ ...current, backend: current.backend.replace("npm prune --omit=dev", "npm prune") }));
-  assert.throws(() => assertPackaging({ ...current, frontend: current.frontend.map(file => file + "\nCOPY --from=builder /app/node_modules /app/node_modules\n") }));
-});
-test("OSV policy is a general dev-group rule, with no advisory/severity exceptions", () => {
-  const config = readFileSync(policy, "utf8").replace(/^#.*$/gm, "").trim();
-  assert.equal(config, '[[PackageOverrides]]\necosystem = "npm"\ngroup = "dev"\nvulnerability.ignore = true');
-  const workflow = readFileSync(path.join(root, ".github/workflows/deployment-audit.yml"), "utf8");
-  assert.ok(workflow.indexOf("Verify OSV runtime boundary") < workflow.indexOf("Run OSV Scanner"));
-  assert.match(workflow, /--recursive --no-resolve --config=\.security\/osv-production\.toml \./);
-  assert.match(workflow, /--format=json --output-file=audit-artifacts\/osv-source.json/);
-  assert.match(workflow, /test "\$status" -eq 0 \|\| test "\$status" -eq 1/);
-  assert.doesNotMatch(config, /GHSA|IgnoredVulns|severity/i);
-});
-
-// Exercise the official scanner itself, not a second implementation of grouping.
-// CI supplies the installed binary; local integration uses the same v2.6.0 build.
-function scan(groups, filtered = true, transitive = false) {
-  const dir = mkdtempSync(path.join(os.tmpdir(), "mscqr-osv-policy-"));
+async function withBuild(source, fn, options = {}) {
+  const dir = fixture();
   try {
-    groups.forEach((dev, index) => {
-      const folder = path.join(dir, String(index));
-      mkdirSync(folder);
-      const file = path.join(folder, "package-lock.json");
-      writeFileSync(file, JSON.stringify({ name: "osv-boundary-fixture", lockfileVersion: 3, packages: {
-        "": { name: "osv-boundary-fixture", [dev ? "devDependencies" : "dependencies"]: transitive ? { "fixture-parent": "1.0.0" } : { braces: "3.0.3" } },
-        ...(transitive ? { "node_modules/fixture-parent": { version: "1.0.0", dependencies: { braces: "3.0.3" } } } : {}),
-        "node_modules/braces": { version: "3.0.3", ...(dev ? { dev: true } : {}) },
-      } }));
-    });
-    const files = groups.flatMap((_, index) => ["--lockfile", path.join(dir, String(index), "package-lock.json")]);
-    const result = spawnSync(scanner, ["--no-resolve", ...(filtered ? [`--config=${policy}`] : []), ...files], { encoding: "utf8", timeout: 120000 });
-    assert.equal(result.error, undefined);
-    return result;
-  } finally { rmSync(dir, { recursive: true }); }
+    writeFileSync(path.join(dir, "main.js"), source);
+    const browser = await buildBrowserClosure(dir, { configFile: false, logLevel: "silent", ...options });
+    await fn(dir, browser);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 }
-for (const [name, groups, expected] of [
-  ["high dev-only vulnerability does not block production", [true], 0],
-  ["high frontend runtime vulnerability blocks", [false], 1],
-  ["high backend runtime vulnerability blocks", [false], 1],
-  ["high worker runtime vulnerability blocks", [false], 1],
-  ["high transitive runtime vulnerability blocks", [false], 1],
-  ["same advisory in dev and runtime closures still blocks", [true, false], 1],
-]) test(name, { skip: !scanner }, () => {
-  const result = scan(groups, true, name.includes("transitive"));
-  assert.equal(result.status, expected, result.stdout + result.stderr);
-  if (expected) assert.match(result.stdout + result.stderr, /GHSA-vfj7-8cjw-p6xm/i);
+const idle = 'document.body.textContent = "ok";';
+
+test("P1 reproduction: a dev dependency is executable in a browser bundle despite no runtime node_modules", async () => {
+  await withBuild(`import unsafe from '${packageName}'; document.body.textContent = unsafe();`, (dir, browser) => {
+    assert.ok(browser.packages.includes(`${packageName}@1.0.0`));
+    assert.throws(() => enforceRuntimeFindings(report(dir), browser, dir), /Production runtime/);
+  });
 });
-test("unfiltered report preserves dev vulnerability visibility", { skip: !scanner }, () => {
-  const result = scan([true], false);
-  assert.equal(result.status, 1, result.stdout + result.stderr);
-  assert.match(result.stdout + result.stderr, /braces \(dev\)/);
+for (const [name, source] of [
+  ["static dev dependency", `import unsafe from '${packageName}'; window.result = unsafe();`],
+  ["dynamic dev dependency", `import('${packageName}').then(m => window.result = m.default());`],
+  ["lazy chunk", `window.load = () => import('${packageName}');`],
+]) test(`${name} vulnerability fails`, async () => {
+  await withBuild(source, (dir, browser) => assert.throws(() => enforceRuntimeFindings(report(dir), browser, dir)));
+});
+test("build-only dev dependency absent from fresh browser graph passes", async () => {
+  await withBuild(idle, (dir, browser) => assert.equal(enforceRuntimeFindings(report(dir), browser, dir).length, 1));
+});
+test("browser worker dependency is included in the census", async () => {
+  const dir = fixture();
+  try {
+    writeFileSync(path.join(dir, "main.js"), 'new Worker(new URL("./worker.js", import.meta.url), {type:"module"});');
+    writeFileSync(path.join(dir, "worker.js"), `import unsafe from '${packageName}'; postMessage(unsafe());`);
+    const browser = await buildBrowserClosure(dir, { configFile: false, logLevel: "silent" });
+    assert.ok(browser.packages.includes(`${packageName}@1.0.0`));
+    assert.throws(() => enforceRuntimeFindings(report(dir), browser, dir));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+for (const label of ["backend", "worker", "transitive", "frontend normal dependency"]) test(`${label} runtime findings cannot be exempted`, async () => {
+  await withBuild(idle, (dir, browser) => assert.throws(() => enforceRuntimeFindings(report(dir, { dev: false, source: label === "frontend normal dependency" ? "package-lock.json" : "backend/package-lock.json" }), browser, dir)));
+});
+test("same advisory in dev and runtime closures fails", async () => {
+  await withBuild(idle, (dir, browser) => {
+    const mixed = { results: [...report(dir).results, ...report(dir, { dev: false, source: "backend/package-lock.json" }).results] };
+    assert.throws(() => enforceRuntimeFindings(mixed, browser, dir));
+  });
+});
+test("unknown nested lockfile and unknown ecosystem fail closed", async () => {
+  await withBuild(idle, (dir, browser) => {
+    assert.throws(() => enforceRuntimeFindings(report(dir, { source: "nested/package-lock.json" }), browser, dir));
+    assert.throws(() => enforceRuntimeFindings(report(dir, { ecosystem: "PyPI" }), browser, dir));
+  });
+});
+test("missing evidence and malformed scanner report fail closed", () => {
+  assert.throws(() => enforceRuntimeFindings({ results: [] }, undefined, root));
+  assert.throws(() => enforceRuntimeFindings({}, { completed: true, packages: [], chunks: ["main.js"], moduleCount: 1 }, root));
+});
+test("failed build cannot produce passing evidence or inspect stale dist", async () => {
+  const dir = fixture();
+  try {
+    mkdirSync(path.join(dir, "dist")); writeFileSync(path.join(dir, "dist/index.js"), "stale");
+    writeFileSync(path.join(dir, "main.js"), 'import "missing-package";');
+    await assert.rejects(buildBrowserClosure(dir, { configFile: false, logLevel: "silent" }));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+test("unresolved dynamic imports fail closed", async () => {
+  await assert.rejects(withBuild('window.load = name => import(/* @vite-ignore */ name);', () => assert.fail("must not build")));
+});
+test("external executable imports fail closed", async () => {
+  await assert.rejects(withBuild(`import unsafe from '${packageName}'; window.result = unsafe();`, () => assert.fail("must not build"), { build: { rolldownOptions: { external: [packageName] } } }));
+});
+test("unattributed public executable assets fail closed", async () => {
+  const dir = fixture();
+  try {
+    writeFileSync(path.join(dir, "main.js"), idle); mkdirSync(path.join(dir, "public")); writeFileSync(path.join(dir, "public/vendor.js"), "alert('unattributed')");
+    await assert.rejects(buildBrowserClosure(dir, { configFile: false, logLevel: "silent" }), /Unattributed/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+test("lock/install mismatch cannot hide a browser dependency", async () => {
+  const dir = fixture();
+  try {
+    writeFileSync(path.join(dir, "main.js"), `import unsafe from '${packageName}'; window.result = unsafe();`);
+    writeFileSync(path.join(dir, "package-lock.json"), JSON.stringify({ packages: {} }));
+    await assert.rejects(buildBrowserClosure(dir, { configFile: false, logLevel: "silent" }), /missing\/mismatched/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+test("actual production packaging still prunes server dependencies", () => assertRuntimePackaging(root));
+test("workflow uses unfiltered report and the same behaviorally-tested gate", () => {
+  const workflow = readFileSync(path.join(root, ".github/workflows/deployment-audit.yml"), "utf8");
+  assert.match(workflow, /node scripts\/check-osv-runtime.mjs audit-artifacts\/osv-source.json/);
+  assert.doesNotMatch(workflow, /osv-production.toml|--ignore-dev/);
+});
+
+test("transitive dev dependency reached through a parent is detected", async () => {
+  const dir = fixture();
+  try {
+    mkdirSync(path.join(dir, "node_modules/fixture-parent"));
+    writeFileSync(path.join(dir, "node_modules/fixture-parent/package.json"), JSON.stringify({ name: "fixture-parent", version: "1.0.0", type: "module", main: "index.js" }));
+    writeFileSync(path.join(dir, "node_modules/fixture-parent/index.js"), `export {default} from '${packageName}';`);
+    const lock = JSON.parse(readFileSync(path.join(dir, "package-lock.json")));
+    lock.packages["node_modules/fixture-parent"] = { version: "1.0.0", dev: true, dependencies: { [packageName]: "1.0.0" } };
+    writeFileSync(path.join(dir, "package-lock.json"), JSON.stringify(lock));
+    writeFileSync(path.join(dir, "main.js"), 'import unsafe from "fixture-parent"; window.result = unsafe();');
+    const browser = await buildBrowserClosure(dir, { configFile: false, logLevel: "silent" });
+    assert.throws(() => enforceRuntimeFindings(report(dir), browser, dir));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+test("empty browser evidence is not authority", () => {
+  assert.throws(() => enforceRuntimeFindings({ results: [] }, { completed: true, packages: [], chunks: [], moduleCount: 0 }, root));
+});
+test("multiple dependency groups cannot qualify as build-only", async () => {
+  await withBuild(idle, (dir, browser) => {
+    const mixed = report(dir); mixed.results[0].packages[0].dependency_groups = ["dev", "runtime"];
+    assert.throws(() => enforceRuntimeFindings(mixed, browser, dir));
+  });
+});
+test("medium findings retain the previous source-gate behavior", async () => {
+  await withBuild(idle, (dir, browser) => {
+    const medium = report(dir, { dev: false }); medium.results[0].packages[0].vulnerabilities[0].database_specific.severity = "MEDIUM";
+    assert.throws(() => enforceRuntimeFindings(medium, browser, dir));
+  });
+});
+test("source maps and chunk names do not control runtime attribution", async () => {
+  await withBuild(`import unsafe from '${packageName}'; window.result = unsafe();`, (dir, browser) => {
+    assert.throws(() => enforceRuntimeFindings(report(dir), browser, dir));
+  }, { build: { sourcemap: false, rolldownOptions: { output: { entryFileNames: "opaque.js", chunkFileNames: "hidden-[hash].js" } } } });
+});
+test("PostCSS build-only execution does not imply browser execution", async () => {
+  const dir = fixture();
+  try {
+    writeFileSync(path.join(dir, "main.js"), 'import "./main.css"; document.body.textContent = "ok";');
+    writeFileSync(path.join(dir, "main.css"), "body { color: red; }");
+    writeFileSync(path.join(dir, "vite.config.mjs"), `import unsafe from '${packageName}'; export default {css:{postcss:{plugins:[{postcssPlugin:"build-only",Once(){unsafe();}}]}}};`);
+    const browser = await buildBrowserClosure(dir, { logLevel: "silent" });
+    assert.equal(browser.packages.includes(`${packageName}@1.0.0`), false);
+    assert.equal(enforceRuntimeFindings(report(dir), browser, dir).length, 1);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("inline code injected by build tooling cannot bypass attribution", async () => {
+  await assert.rejects(withBuild(idle, () => assert.fail("must not pass"), { plugins: [{ name: "unattributed-injection", transformIndexHtml: html => html + "<script>alert('unattributed')</script>" }] }), /Unattributed inline/);
+});
+test("external script tags cannot bypass attribution", async () => {
+  await assert.rejects(withBuild(idle, () => assert.fail("must not pass"), { plugins: [{ name: "external-injection", transformIndexHtml: html => html + '<script src="https://example.invalid/vendor.js"></script>' }] }), /Unattributed inline\/external/);
+});
+
+test("incomplete finding identities cannot be called build-only", async () => {
+  await withBuild(idle, (dir, browser) => {
+    const incomplete = report(dir); delete incomplete.results[0].packages[0].package.name;
+    assert.throws(() => enforceRuntimeFindings(incomplete, browser, dir), /Incomplete/);
+  });
+});
+test("OSV dev group cannot override a runtime lockfile instance", async () => {
+  await withBuild(idle, (dir, browser) => {
+    const lock = JSON.parse(readFileSync(path.join(dir, "package-lock.json")));
+    delete lock.packages[`node_modules/${packageName}`].dev;
+    writeFileSync(path.join(dir, "package-lock.json"), JSON.stringify(lock));
+    assert.throws(() => enforceRuntimeFindings(report(dir), browser, dir), /non-dev/);
+  });
 });

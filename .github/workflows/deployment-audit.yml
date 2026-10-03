@@ -175,9 +175,15 @@ jobs:
           curl -sSfL https://github.com/google/osv-scanner/releases/download/v2.6.0/osv-scanner_linux_amd64 -o osv-scanner
           chmod +x osv-scanner
 
+      - name: Setup Node for runtime audit
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Install locked frontend build dependencies
+        run: npm ci
+
       - name: Verify OSV runtime boundary
-        env:
-          OSV_SCANNER: ./osv-scanner
         run: node --test scripts/tests/deployment-osv-policy.test.mjs
 
       - name: Report OSV source vulnerabilities (including dev)
@@ -185,13 +191,13 @@ jobs:
         # still fail; only the documented findings exit code is non-blocking here.
         run: |
           status=0
-          ./osv-scanner --recursive --no-resolve --format=json --output-file=audit-artifacts/osv-source.json . || status=$?
+          ./osv-scanner --recursive --no-resolve --config=/dev/null --format=json --output-file=audit-artifacts/osv-source.json . || status=$?
           test "$status" -eq 0 || test "$status" -eq 1
 
       - name: Run OSV Scanner
-        # Source dependency groups are safe to filter only while the packaging
-        # contract above proves dev dependencies are excluded from runtime.
-        run: ./osv-scanner --recursive --no-resolve --config=.security/osv-production.toml .
+        # Consume the unfiltered report and a fresh production browser build.
+        # Manifest dev grouping cannot override positive or unknown runtime use.
+        run: node scripts/check-osv-runtime.mjs audit-artifacts/osv-source.json
 
       - name: Pull Gitleaks
         run: docker pull ghcr.io/gitleaks/gitleaks:v8.24.2
