@@ -283,3 +283,44 @@ test("an unreadable or incomplete additional service definition fails closed", (
   f.reader.describeTaskDefinition = arn => arn === extra.taskDefinitionArn ? { taskDefinition: { taskDefinitionArn: arn } } : original(arn);
   assert.throws(() => verifyHistoricalRuntimeInventory({ reference: f.reference, reader: f.reader }), /incomplete/);
 });
+
+// Exercise the actual projection, not a reconstructed task passed to the census.
+for (const [name, group, overrides, expected] of [
+  ["standalone role override", "family:unrelated", { taskRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-rls-green-worker-task" }, "WORKER"],
+  ["standalone command override", "family:unrelated", { containerOverrides: [{ name: "backend", command: ["node", "dist/worker.js"] }] }, "WORKER"],
+  ["service role override", "service:unrelated", { taskRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-rls-green-worker-task" }, "WORKER"],
+  ["service command override", "service:unrelated", { containerOverrides: [{ name: "backend", command: ["node", "dist/worker.js"] }] }, "WORKER"],
+  ["entrypoint override", "service:unrelated", { containerOverrides: [{ name: "backend", entryPoint: ["node", "dist/worker.js"] }] }, "WORKER"],
+  ["ambiguous container override", "service:unrelated", { containerOverrides: [{ name: "worker" }] }, "AMBIGUOUS_WORKER_IDENTITY"],
+  ["unrelated override", "family:unrelated", { containerOverrides: [{ name: "backend", environment: [{ name: "MODE", value: "normal" }] }] }, "DEFINITELY_NON_WORKER"],
+  ["backend command override", "service:backend", { containerOverrides: [{ name: "backend", command: ["node", "dist/server.js"] }] }, "DEFINITELY_NON_WORKER"],
+  ["frontend override", "service:frontend", { containerOverrides: [{ name: "frontend", command: ["nginx"] }] }, "DEFINITELY_NON_WORKER"],
+  ["no overrides", "service:unrelated", undefined, "DEFINITELY_NON_WORKER"],
+  ["empty overrides", "service:unrelated", {}, "DEFINITELY_NON_WORKER"],
+  ["empty container overrides", "service:unrelated", { containerOverrides: [] }, "DEFINITELY_NON_WORKER"],
+]) test(`projection preserves census semantics: ${name}`, async () => {
+  const { observeStageBEcs } = await import("../aws/production-green-stage-b-ecs-observations.mjs");
+  const f = historicalRuntimeFixture();
+  const definition = { ...f.definition, family: "unrelated", taskDefinitionArn: f.definitionArn.replace("mscqr-production-rls-green-worker-candidate", "unrelated"), taskRoleArn: "arn:aws:iam::368992683803:role/backend", containerDefinitions: [{ name: "backend", image: "example/non-worker", command: ["node", "dist/server.js"] }] };
+  const task = { ...f.task, group, taskDefinitionArn: definition.taskDefinitionArn };
+  if (overrides === undefined) delete task.overrides; else task.overrides = structuredClone(overrides);
+  const reader = { listServices: () => [], listTasks: () => [task.taskArn], describeTasks: () => ({ tasks: [task], failures: [] }), describeTaskDefinition: () => ({ taskDefinition: definition }) };
+  const observed = observeStageBEcs({ reader }).runningTasks[0];
+  for (const field of ["taskArn", "taskDefinitionArn", "group", "lastStatus", "desiredStatus", "overrides"]) assert.deepEqual(observed[field], task[field]);
+  assert.equal(classifyHistoricalWorkerWorkload({ task, definition }), expected);
+  assert.equal(classifyHistoricalWorkerWorkload({ task: observed, definition }), expected);
+  if (task.overrides) {
+    observed.overrides.containerOverrides = [{ name: "tampered" }];
+    assert.deepEqual(task.overrides, overrides, "Observation must not mutate the raw identity");
+  }
+});
+
+test("projected overrides cannot substitute or mutate the retained exact identity", async () => {
+  const { observeStageBEcs } = await import("../aws/production-green-stage-b-ecs-observations.mjs");
+  const f = historicalRuntimeFixture();
+  const observed = observeStageBEcs({ reader: { ...f.reader, listServices: () => [] } }).runningTasks[0];
+  observed.overrides.taskRoleArn = "arn:aws:iam::368992683803:role/other";
+  assert.equal(verifyHistoricalRuntimeLive({ reference: f.reference, reader: f.reader }), true);
+  f.task.overrides = observed.overrides;
+  assert.throws(() => verifyHistoricalRuntimeLive({ reference: f.reference, reader: f.reader }));
+});

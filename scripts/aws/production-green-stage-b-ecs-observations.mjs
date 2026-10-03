@@ -126,6 +126,8 @@ function describeTasks(reader, taskArns) {
     lastStatus: task.lastStatus,
     desiredStatus: task.desiredStatus,
     group: task.group,
+    // Runtime overrides can change workload identity independently of its definition.
+    ...(task.overrides === undefined ? {} : { overrides: structuredClone(task.overrides) }),
   }));
 }
 

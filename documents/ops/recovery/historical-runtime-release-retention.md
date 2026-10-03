@@ -146,3 +146,39 @@ The six policy-split assertions and one backend-recovery `jszip` isolation asser
 - The seven specifically reproduced base assertions fail on both exact base and head (8 selected tests: 1 pass, 7 fail). The source guardrails reach and fail at the unchanged dependency audit after their preceding guards pass. No PR regression was demonstrated in these failures.
 
 Adversarial diff review checked service/family renaming, independent role/image/entrypoint/command signals, role/command/container overrides, mutable/foreign images, weak display-name signals, unreadable definitions, retained service substitution, unrelated services, shared generator/closure routing and unchanged exact-object matching. These tests prove this classifier boundary; they do not waive required CI or authorize production.
+
+## Override projection P1 closure
+
+Reviewed head: `12bc56b0333ce71df467e27714f1ba1bfe21fa8e`. Before editing, both renamed-standalone role-override and command-override reproducers classified raw ECS data as `WORKER` but `observeStageBEcs` output as `DEFINITELY_NON_WORKER`. The task projection discarded `overrides` before the shared census. This was information loss, not a classifier rule defect.
+
+The projection now carries a detached copy of the existing ECS override structure, preserving all fields consumed by the canonical classifier (role, container name, command and entrypoint). Missing overrides remain missing. No alternate schema, classifier or worker authority was introduced. Overrides identify additional worker-capable tasks for rejection; they never authenticate the retained historical object. Signed reference/audit bindings cover the generated observations through the existing evidence chain.
+
+### Bounded identity field audit
+
+`historicalWorkerTasks` has two input routes: generator → `observeStageBEcs` → projected tasks; handoff/apply/closure → raw `describeTasks`. Both fetch full definitions directly from `describeTaskDefinition` inside the same census. Exact-object preparation/revalidation independently fetches the bound task and definition; it never consumes the reduced observation as a substitute for immutable/runtime identity.
+
+| Field | Raw ECS available | Reference census | Apply verification | Terminal/closure |
+|---|---|---|---|---|
+| taskArn, taskDefinitionArn | Yes | Preserved | Raw read | Raw read |
+| group, lastStatus, desiredStatus | Yes | Preserved | Raw read | Raw read |
+| startedBy | If present | Not consumed by classifier or exact matching | Raw; not authority | Raw; not authority |
+| overrides.taskRoleArn | If present | Preserved | Raw read | Raw read |
+| overrides.containerOverrides[].name/command/entryPoint | If present | Preserved | Raw read | Raw read |
+| Other override fields, including environment/executionRoleArn | If present | Complete overrides preserved; exact identity independently re-read | Raw, validated/hashed | Raw, validated/hashed |
+| definition.taskRoleArn | Yes | Direct full definition read | Direct full definition read | Direct full definition read |
+| definition.executionRoleArn | Yes | Not a census signal; direct exact-identity read | Validated and hashed | Validated and hashed |
+| definition.containerDefinitions (image, command, entryPoint, name) | Yes | Direct full definition read | Direct full definition read | Direct full definition read |
+| Complete definition content/environment/secret references | Yes | Exact identity independently read and hashed | Independently read and hashed | Independently read and hashed |
+| task.clusterArn, launchType, platformVersion, createdAt | Yes | Exact identity independently read | Validated/hashed as contracted | Validated/hashed as contracted |
+| task.containers[].imageDigest | Yes | Exact identity independently read | Validated | Validated |
+| task.attachments + ENI subnet/IP/groups/public-IP | Yes | Exact identity + ENI independently read | Independently read and validated | Independently read and validated |
+
+No other required census field was found lost. Deliberately absent display/metadata fields are not promoted to authority. Pending/transitional census tasks pass through the same task projection and override preservation.
+
+Regression coverage adds twelve raw/projected semantic-equivalence cases (standalone/service role and command, entrypoint, ambiguous name, unrelated/backend/frontend overrides, absent/empty overrides), preserves raw identity against projected-object mutation, and extends actual generator-versus-terminal inventory checks with nine override variants. Existing retained-object override/source/command tampering tests still fail closed. No application, printing, worker lifecycle, IAM, dependency or production changes are part of this correction.
+
+Recommendation: keep this field-preservation regression whenever census inputs change. Required dependency audit remains a separate unwaived blocker; do not merge until required CI and fresh exact-head review pass.
+
+Override-fix validation: focused historical/runtime-generator 311/311 pass; canonical Stage B 927/927 pass (plus the final detached-retained-identity test in the focused run); closure/bootstrap/component-state/reconciliation 269/269 pass; normal deployment 146/146 pass plus startup/client-IP prerequisites. Artifact contracts 23/23 and full RLS verification 24/24 pass. Workflow YAML: 95 valid; graph: 666 capabilities, 213 classified AWS calls, zero violations. No manifest/lock changes or dependency remediation. Counts overlap and are not unique-test totals.
+
+Final diff review verified full override preservation before every active-task status split, shared census use by reference/terminal paths, raw exact-identity re-read at apply/closure, independent copied observations, absent/empty compatibility and signed audit binding. No new AWS call, capability or production authority was added.

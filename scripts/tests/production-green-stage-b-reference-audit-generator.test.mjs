@@ -2977,7 +2977,7 @@ test("canonical reference audit permits only the exact bootstrap historical runt
   runtime.tasks.push({ ...runtime.task, taskArn: runtime.taskArn.replace(/1/g, "2") });
   assert.throws(() => generate(fixture, options), /additional workers/);
   const { verifyHistoricalRuntimeInventory } = await import("../aws/production-historical-runtime-evidence.mjs");
-  for (const signal of ["role", "image", "command", "ambiguous", "backend", "frontend"]) {
+  for (const signal of ["role", "image", "command", "ambiguous", "backend", "frontend", "standalone-role-override", "standalone-command-override", "service-role-override", "service-command-override", "service-entrypoint-override", "ambiguous-override", "backend-overrides", "empty-overrides", "no-overrides"]) {
     const definitionArn = runtime.definitionArn.replace("mscqr-production-rls-green-worker-candidate", "renamed-service");
     const definition = { ...runtime.definition, family: "renamed-service", taskDefinitionArn: definitionArn,
       taskRoleArn: `arn:aws:iam::368992683803:role/mscqr-${signal}-task`,
@@ -2986,10 +2986,19 @@ test("canonical reference audit permits only the exact bootstrap historical runt
     if (signal === "image") definition.containerDefinitions[0].image = runtime.definition.containerDefinitions[0].image;
     if (signal === "command") definition.containerDefinitions[0].command = ["node", "dist/worker.js"];
     if (signal === "ambiguous") definition.containerDefinitions[0].name = "worker";
-    runtime.tasks.splice(1, runtime.tasks.length, { ...runtime.task, taskArn: runtime.taskArn.replace(/1/g, "2"), taskDefinitionArn: definitionArn, group: "service:renamed-service", overrides: {} });
+    const extra = { ...runtime.task, taskArn: runtime.taskArn.replace(/1/g, "2"), taskDefinitionArn: definitionArn,
+      group: signal.startsWith("standalone-") ? "family:renamed-service" : "service:renamed-service", overrides: {} };
+    if (signal.endsWith("role-override")) extra.overrides.taskRoleArn = runtime.definition.taskRoleArn;
+    if (signal.endsWith("command-override")) extra.overrides.containerOverrides = [{ name: signal, command: ["node", "dist/worker.js"] }];
+    if (signal === "service-entrypoint-override") extra.overrides.containerOverrides = [{ name: signal, entryPoint: ["node", "dist/worker.js"] }];
+    if (signal === "ambiguous-override") extra.overrides.containerOverrides = [{ name: "worker" }];
+    if (signal === "backend-overrides") extra.overrides = { taskRoleArn: definition.taskRoleArn, containerOverrides: [{ name: signal, command: ["node", "dist/server.js"] }] };
+    if (signal === "empty-overrides") extra.overrides.containerOverrides = [];
+    if (signal === "no-overrides") delete extra.overrides;
+    runtime.tasks.splice(1, runtime.tasks.length, extra);
     fixture.reader.describeTaskDefinition = arn => arn === definitionArn ? { taskDefinition: definition } : arn === runtime.definitionArn ? runtime.reader.describeTaskDefinition(arn) : original.describeTaskDefinition(arn);
     const closure = () => verifyHistoricalRuntimeInventory({ reference: audit.historicalRuntimeReference, reader: fixture.reader });
-    if (["backend", "frontend"].includes(signal)) {
+    if (["backend", "frontend", "backend-overrides", "empty-overrides", "no-overrides"].includes(signal)) {
       assert.ok(generate(fixture, options).historicalRuntimeReference);
       assert.equal(closure(), true);
     } else {
