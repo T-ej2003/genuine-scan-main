@@ -87,3 +87,62 @@ Final hostile review checked omission/replay of evidence, self-rehashed bodies, 
 The complete changed-path set still classifies as EMERGENCY_RECOVERY through unchanged classification rules; no normal-lane bypass was introduced.
 
 No governed worker-successor proof exists. Supersession stays unavailable rather than being inferred from generic receipts or task disappearance. No remaining implementation gap was demonstrated in the tested retention vertical slice; live release readiness remains conditional on fresh exact-main evidence, bounded approval freshness, IAM readback, broker/configuration convergence, signing-key/rotation inventory, RLS/runtime receipts and protected human authorization. Existing unrelated base-test failures must be resolved or dispositioned by their owners before any gate requiring them can pass.
+
+## PR #618 bounded CI and service-worker review closure
+
+Reviewed head: `5f59efa0272854cdb59170c9fe9bb350fe43827e`. Before editing, a mocked inventory containing the exact historical worker and a renamed-family RUNNING service worker returned one worker and passed retention verification. Service membership was incorrectly used to exclude workload identity. It describes ECS management, not whether a task executes worker code.
+
+The shared census now resolves every task definition before workload exclusion. Canonical worker role, immutable worker repository image and worker entrypoint/command (including effective task overrides) identify worker-capable tasks. Weaker worker-like signals are ambiguous and fail closed; unreadable/incomplete definitions also fail closed. Family/container names never authenticate a runtime. Service names do not classify workloads. Reference generation and terminal closure use the same census; the exact retained object still must match its signed standalone identity. No service worker is implicitly trusted.
+
+New regressions cover 17 workload/override combinations, retained service-membership substitution and unreadable/incomplete service definitions. The actual reference generator and terminal inventory are exercised against the same renamed-service role/image/command/ambiguous and unrelated backend/frontend cases. Additional workers are rejected before package acceptance, and ambiguous definitions cannot disappear from inventory. This changes no printing, worker lifecycle or production resources.
+
+### Required CI root-cause inventory
+
+Five failed check instances (four names) share one first failing command: `npm run check:dependency-audit`. Release Candidate `rc-trust-critical`, Deployment Audit `quality-gates`, and AWS DR `validate` reach it through their source guardrails; both push/PR Quality Gate `security` jobs invoke the same gate. The exact gate fails identically on archived untouched base `a32d2cc8cf56914425ce49ac867569e7470dfd7a` and reviewed head; their root lockfiles are identical. No required checks were pending at this initial snapshot.
+
+| Required check | Initial status | Evidence |
+|---|---|---|
+| audit | SKIPPED | [job](https://github.com/T-ej2003/genuine-scan-main/actions/runs/37086374607/job/111097593945) |
+| rc-release-checklist | SUCCESS | [job](https://github.com/T-ej2003/genuine-scan-main/actions/runs/37086374582/job/111097567781) |
+| docker | SUCCESS | [job](https://github.com/T-ej2003/genuine-scan-main/actions/runs/37086374693/job/111097432620) |
+| rc-staging-smoke | SKIPPED | [job](https://github.com/T-ej2003/genuine-scan-main/actions/runs/37086374582/job/111097568507) |
+| db-backed-auth-security | SUCCESS | [job](https://github.com/T-ej2003/genuine-scan-main/actions/runs/37086374599/job/111097431781) |
+| Terraform staging validate | SUCCESS | [job](https://github.com/T-ej2003/genuine-scan-main/actions/runs/37086374560/job/111097431908) |
+| rc-governance | SUCCESS | [job](https://github.com/T-ej2003/genuine-scan-main/actions/runs/37086374582/job/111097431980) |
+| docker | SUCCESS | [job](https://github.com/T-ej2003/genuine-scan-main/actions/runs/37086334282/job/111097318273) |
+| frontend | SUCCESS | [job](https://github.com/T-ej2003/genuine-scan-main/actions/runs/37086334282/job/111097318195) |
+| rc-trust-critical | FAILURE | [job](https://github.com/T-ej2003/genuine-scan-main/actions/runs/37086374582/job/111097431708) |
+| frontend | SUCCESS | [job](https://github.com/T-ej2003/genuine-scan-main/actions/runs/37086374693/job/111097432347) |
+| gitleaks | SUCCESS | [job](https://github.com/T-ej2003/genuine-scan-main/actions/runs/37086374573/job/111097431562) |
+| validate | FAILURE | [job](https://github.com/T-ej2003/genuine-scan-main/actions/runs/37086374703/job/111097431660) |
+| integration | SUCCESS | [job](https://github.com/T-ej2003/genuine-scan-main/actions/runs/37086374693/job/111097432569) |
+| Staging IAM policy lint | SUCCESS | [job](https://github.com/T-ej2003/genuine-scan-main/actions/runs/37086374560/job/111097431680) |
+| security | FAILURE | [job](https://github.com/T-ej2003/genuine-scan-main/actions/runs/37086374693/job/111097432371) |
+| quality-gates | FAILURE | [job](https://github.com/T-ej2003/genuine-scan-main/actions/runs/37086374607/job/111097431822) |
+| backend | SUCCESS | [job](https://github.com/T-ej2003/genuine-scan-main/actions/runs/37086374693/job/111097432337) |
+| integration | SUCCESS | [job](https://github.com/T-ej2003/genuine-scan-main/actions/runs/37086334282/job/111097318250) |
+| db-backed-auth-security | SUCCESS | [job](https://github.com/T-ej2003/genuine-scan-main/actions/runs/37086334156/job/111097317685) |
+| security | FAILURE | [job](https://github.com/T-ej2003/genuine-scan-main/actions/runs/37086334282/job/111097318142) |
+| gitleaks | SUCCESS | [job](https://github.com/T-ej2003/genuine-scan-main/actions/runs/37086334149/job/111097317616) |
+| backend | SUCCESS | [job](https://github.com/T-ej2003/genuine-scan-main/actions/runs/37086334282/job/111097318304) |
+
+### Dependency remediation stop condition
+
+The actual production dependency tree has one directly vulnerable installed `braces` instance and one advisory, [GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm), high severity (nested brace-pattern stack exhaustion). The audit reports five affected package names through these paths:
+
+- Direct `tailwindcss@3.4.19` → `chokidar@3.6.0` → `braces@3.0.3`.
+- `tailwindcss@3.4.19` → `micromatch@4.0.8` → `braces@3.0.3`.
+- `tailwindcss@3.4.19` → `fast-glob@3.3.3` → `micromatch@4.0.8` → `braces@3.0.3`.
+
+All five root-lock entries are production dependencies; the vulnerable pattern parser is reached by Tailwind's file-pattern tooling. A build/watch exposure does not justify suppressing the production audit. The advisory has no patched braces release; npm registry latest remains 3.0.3. npm's offered Tailwind 4.3.3 remedy is a major migration, outside this bounded authorization. There is no compatible lockfile-only patch. Package manifests and lockfiles therefore remain unchanged. No waiver, ignore, audit threshold change or release bypass was added. Required CI stays blocked pending an upstream patch or separately authorized compatible removal/migration. Recommendation: review this isolated P1 correction, then scope dependency remediation separately; do not merge while required checks remain red.
+
+The six policy-split assertions and one backend-recovery `jszip` isolation assertion are independent base failures, not dependency-advisory aliases. Re-running the same files on base and head does not justify weakening assertions. They were not the first failures of current required jobs and are left unchanged in this bounded correction.
+
+### P1 correction validation
+
+- Focused historical-runtime plus actual reference-generator tests: 298/298 pass (87 identity/retention tests, 211 generator tests); 19 new named regressions plus six generator/closure consistency combinations.
+- Canonical Stage B control-plane suite: 915/915 pass; closure/bootstrap/component-state/reconciliation/release-workflow selection: 269/269 pass; normal-deployment suite: 146/146 pass plus backend startup/client-IP prerequisites. Counts overlap and are not summed as unique tests.
+- Artifact contracts: 23/23 pass; full RLS verification: 24/24 pass. Workflow YAML: 95 valid; capability graph: 666 capabilities and 213 classified calls, zero violations. Branch-secret-diff and whitespace checks pass.
+- The seven specifically reproduced base assertions fail on both exact base and head (8 selected tests: 1 pass, 7 fail). The source guardrails reach and fail at the unchanged dependency audit after their preceding guards pass. No PR regression was demonstrated in these failures.
+
+Adversarial diff review checked service/family renaming, independent role/image/entrypoint/command signals, role/command/container overrides, mutable/foreign images, weak display-name signals, unreadable definitions, retained service substitution, unrelated services, shared generator/closure routing and unchanged exact-object matching. These tests prove this classifier boundary; they do not waive required CI or authorize production.

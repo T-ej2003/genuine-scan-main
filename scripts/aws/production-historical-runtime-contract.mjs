@@ -6,6 +6,7 @@ const SHA = /^[a-f0-9]{40}$/;
 const HASH = /^[a-f0-9]{64}$/;
 const family = "mscqr-production-rls-green-worker-candidate";
 const taskPattern = /^arn:aws:ecs:eu-west-2:368992683803:task\/mscqr-prod-euw2-main\/[a-f0-9]{32}$/;
+const workerImagePattern = /^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/mscqr-worker@(sha256:[a-f0-9]{64})$/;
 const definitionPattern = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/mscqr-production-rls-green-worker-candidate:[1-9][0-9]*$/;
 const keys = (value, expected) => assert.deepEqual(Object.keys(value || {}).sort(), expected.sort());
 
@@ -54,7 +55,7 @@ export function readHistoricalRuntimeIdentity({ reader, taskArn, authenticatePub
   assert.equal(definition.networkMode, "awsvpc"); assert.equal(task.launchType, "FARGATE");
   assert.deepEqual(worker[0].entryPoint, ["node", "dist/worker.js"]);
   assert.equal(worker[0].essential, true); assert.notEqual(worker[0].privileged, true);
-  const match = /^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/mscqr-worker@(sha256:[a-f0-9]{64})$/.exec(worker[0].image); assert.ok(match, "Historical worker requires an immutable image");
+  const match = workerImagePattern.exec(worker[0].image); assert.ok(match, "Historical worker requires an immutable image");
   const containers = task.containers?.filter(({ name }) => name === "worker"); assert.equal(containers?.length, 1); assert.equal(containers[0].imageDigest, match[1]);
   const environment = new Map(worker[0].environment?.map(({ name, value }) => [name, value]));
   const sourceSha = environment.get("RELEASE_GIT_SHA") || environment.get("GIT_SHA"); assert.match(sourceSha || "", SHA);
@@ -123,22 +124,31 @@ export function verifyHistoricalRuntimeLive({ reference, reader }) {
   return true;
 }
 
-// A family rename cannot hide a second worker from the exact-object census.
-// Only standalone tasks need this purpose check; service identities retain
-// their existing deployment verification contract.
+// ECS group/family describes management, not workload authority. Resolve every
+// definition, including service tasks, before excluding it from the worker census.
+export function classifyHistoricalWorkerWorkload({ task, definition }) {
+  assert.equal(definition?.taskDefinitionArn, task.taskDefinitionArn);
+  assert.ok(Array.isArray(definition.containerDefinitions) && definition.containerDefinitions.length, "Workload definition is incomplete");
+  const workerRole = `arn:aws:iam::${STAGE_B.account}:role/mscqr-production-rls-green-worker-task`;
+  const roles = [definition.taskRoleArn, task.overrides?.taskRoleArn].filter(Boolean);
+  const overrides = task.overrides?.containerOverrides || [];
+  const commands = [...definition.containerDefinitions, ...overrides].flatMap(container => [...(container.entryPoint || []), ...(container.command || [])]);
+  if (roles.includes(workerRole)
+      || definition.containerDefinitions.some(container => workerImagePattern.test(container.image || ""))
+      || commands.some(argument => /^(?:.*\/)?dist\/worker\.js$/.test(argument))) return "WORKER";
+  const possibleWorker = task.taskDefinitionArn.includes(`:task-definition/${family}:`)
+    || roles.some(role => /worker-task$/.test(role))
+    || [...definition.containerDefinitions, ...overrides].some(container => container.name === "worker" || /\/mscqr-worker(?:[@:]|$)/.test(container.image || ""));
+  return possibleWorker ? "AMBIGUOUS_WORKER_IDENTITY" : "DEFINITELY_NON_WORKER";
+}
+
 export function historicalWorkerTasks({ tasks, reader }) {
   const definitions = new Map();
-  return tasks.filter((task) => {
-    if (task.taskDefinitionArn?.includes(`:task-definition/${family}:`)) return true;
-    if (String(task.group).startsWith("service:")) return false;
-    if (!definitions.has(task.taskDefinitionArn)) {
-      const definition = reader.describeTaskDefinition(task.taskDefinitionArn).taskDefinition;
-      assert.equal(definition.taskDefinitionArn, task.taskDefinitionArn);
-      definitions.set(task.taskDefinitionArn, definition);
-    }
-    const definition = definitions.get(task.taskDefinitionArn);
-    return definition.taskRoleArn === `arn:aws:iam::${STAGE_B.account}:role/mscqr-production-rls-green-worker-task`
-      || definition.containerDefinitions?.some((container) => container.name === "worker" || String(container.image).includes("/mscqr-worker") || [...(container.entryPoint || []), ...(container.command || [])].includes("dist/worker.js"));
+  return tasks.filter(task => {
+    if (!definitions.has(task.taskDefinitionArn)) definitions.set(task.taskDefinitionArn, reader.describeTaskDefinition(task.taskDefinitionArn).taskDefinition);
+    const workload = classifyHistoricalWorkerWorkload({ task, definition: definitions.get(task.taskDefinitionArn) });
+    assert.notEqual(workload, "AMBIGUOUS_WORKER_IDENTITY", "Ambiguous worker identity cannot be excluded from historical runtime inventory");
+    return workload === "WORKER";
   });
 }
 

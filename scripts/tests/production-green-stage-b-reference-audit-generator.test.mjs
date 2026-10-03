@@ -2976,4 +2976,25 @@ test("canonical reference audit permits only the exact bootstrap historical runt
   validateBrokerPlan(fixture, audit);
   runtime.tasks.push({ ...runtime.task, taskArn: runtime.taskArn.replace(/1/g, "2") });
   assert.throws(() => generate(fixture, options), /additional workers/);
+  const { verifyHistoricalRuntimeInventory } = await import("../aws/production-historical-runtime-evidence.mjs");
+  for (const signal of ["role", "image", "command", "ambiguous", "backend", "frontend"]) {
+    const definitionArn = runtime.definitionArn.replace("mscqr-production-rls-green-worker-candidate", "renamed-service");
+    const definition = { ...runtime.definition, family: "renamed-service", taskDefinitionArn: definitionArn,
+      taskRoleArn: `arn:aws:iam::368992683803:role/mscqr-${signal}-task`,
+      containerDefinitions: [{ name: signal, image: "example/non-worker@sha256:" + "a".repeat(64), command: ["node", "dist/server.js"] }] };
+    if (signal === "role") definition.taskRoleArn = runtime.definition.taskRoleArn;
+    if (signal === "image") definition.containerDefinitions[0].image = runtime.definition.containerDefinitions[0].image;
+    if (signal === "command") definition.containerDefinitions[0].command = ["node", "dist/worker.js"];
+    if (signal === "ambiguous") definition.containerDefinitions[0].name = "worker";
+    runtime.tasks.splice(1, runtime.tasks.length, { ...runtime.task, taskArn: runtime.taskArn.replace(/1/g, "2"), taskDefinitionArn: definitionArn, group: "service:renamed-service", overrides: {} });
+    fixture.reader.describeTaskDefinition = arn => arn === definitionArn ? { taskDefinition: definition } : arn === runtime.definitionArn ? runtime.reader.describeTaskDefinition(arn) : original.describeTaskDefinition(arn);
+    const closure = () => verifyHistoricalRuntimeInventory({ reference: audit.historicalRuntimeReference, reader: fixture.reader });
+    if (["backend", "frontend"].includes(signal)) {
+      assert.ok(generate(fixture, options).historicalRuntimeReference);
+      assert.equal(closure(), true);
+    } else {
+      assert.throws(() => generate(fixture, options), /additional workers|Ambiguous worker identity/, signal);
+      assert.throws(closure, /second worker|Ambiguous worker identity/, signal);
+    }
+  }
 });

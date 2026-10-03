@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import test from "node:test";
 import { canonicalSha256, canonicalJson, canonicalStageBApproval } from "../aws/production-green-stage-b-contract.mjs";
-import { prepareHistoricalRuntimeReference, assertHistoricalRuntimeReference, verifyHistoricalRuntimeLive, assertHistoricalRuntimeRetention } from "../aws/production-historical-runtime-contract.mjs";
+import { historicalWorkerTasks, classifyHistoricalWorkerWorkload, prepareHistoricalRuntimeReference, assertHistoricalRuntimeReference, verifyHistoricalRuntimeLive, assertHistoricalRuntimeRetention } from "../aws/production-historical-runtime-contract.mjs";
 import { authenticateHistoricalRuntimeEvidence, authenticateRetainedHistoricalRuntime, historicalRuntimeRetention, verifyHistoricalRuntimeInventory } from "../aws/production-historical-runtime-evidence.mjs";
 import { verifyHistoricalRuntimeHandoff, verifyStageBHistoricalRuntime, readHistoricalRuntimeTransport } from "../aws/verify-production-historical-runtime-handoff.mjs";
 import { stateHash, componentStateCasRequest, advanceProductionComponentDeploymentState, assertProductionComponentDeploymentState } from "../aws/production-component-deployment-state.mjs";
@@ -234,4 +234,52 @@ for (const field of ["updatedByLane", "updatedByWorkflow", "githubRunId"]) test(
   const f = historicalRuntimeFixture(), next = structuredClone(committed(f));
   next[field] = field === "updatedByLane" ? "NORMAL_APPLICATION" : field === "githubRunId" ? "999" : "unrelated-workflow";
   assert.throws(() => componentStateCasRequest({ current: f.state, next }));
+});
+
+const additionalWorkloads = [
+  ["service worker role", "service:renamed-service", "WORKER", definition => { definition.taskRoleArn = "arn:aws:iam::368992683803:role/mscqr-production-rls-green-worker-task"; }],
+  ["service worker image", "service:renamed-service", "WORKER", (definition, task, f) => { definition.containerDefinitions[0].image = f.definition.containerDefinitions[0].image; }],
+  ["service worker entrypoint", "service:renamed-service", "WORKER", definition => { definition.containerDefinitions[0].entryPoint = ["node", "dist/worker.js"]; }],
+  ["service worker command", "service:renamed-service", "WORKER", definition => { definition.containerDefinitions[0].command = ["node", "dist/worker.js"]; }],
+  ["service multiple worker signals", "service:renamed-service", "WORKER", (definition, task, f) => { Object.assign(definition, structuredClone(f.definition), { taskDefinitionArn: task.taskDefinitionArn, family: "renamed-family" }); }],
+  ["backend service", "service:backend", "DEFINITELY_NON_WORKER", () => {}],
+  ["frontend service", "service:frontend", "DEFINITELY_NON_WORKER", definition => { definition.taskRoleArn = "arn:aws:iam::368992683803:role/mscqr-ecs-task-role"; definition.containerDefinitions[0] = { name: "frontend", image: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-web@sha256:${"d".repeat(64)}`, entryPoint: ["nginx"] }; }],
+  ["display service named worker", "service:worker", "DEFINITELY_NON_WORKER", () => {}],
+  ["renamed non-worker service", "service:unrelated", "DEFINITELY_NON_WORKER", () => {}],
+  ["ambiguous worker container", "service:renamed-service", "AMBIGUOUS_WORKER_IDENTITY", definition => { definition.containerDefinitions[0].name = "worker"; }],
+  ["mutable worker image", "service:renamed-service", "AMBIGUOUS_WORKER_IDENTITY", definition => { definition.containerDefinitions[0].image = "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-worker:latest"; }],
+  ["foreign worker image", "service:renamed-service", "AMBIGUOUS_WORKER_IDENTITY", definition => { definition.containerDefinitions[0].image = `000000000000.dkr.ecr.eu-west-2.amazonaws.com/mscqr-worker@sha256:${"d".repeat(64)}`; }],
+  ["invalid definition in worker family", "service:unrelated", "AMBIGUOUS_WORKER_IDENTITY", (definition, task, f) => { task.taskDefinitionArn = f.definitionArn.replace(/:7$/, ":8"); definition.taskDefinitionArn = task.taskDefinitionArn; }],
+  ["standalone renamed worker", "family:renamed-family", "WORKER", definition => { definition.containerDefinitions[0].entryPoint = ["node", "dist/worker.js"]; }],
+  ["service role override", "service:renamed-service", "WORKER", (definition, task, f) => { task.overrides = { taskRoleArn: f.definition.taskRoleArn }; }],
+  ["service command override", "service:renamed-service", "WORKER", (definition, task) => { task.overrides = { containerOverrides: [{ name: "backend", command: ["node", "dist/worker.js"] }] }; }],
+  ["ambiguous override identity", "service:renamed-service", "AMBIGUOUS_WORKER_IDENTITY", (definition, task) => { task.overrides = { containerOverrides: [{ name: "worker" }] }; }],
+];
+for (const [name, group, expected, configure] of additionalWorkloads) test(`complete workload census: ${name}`, () => {
+  const f = historicalRuntimeFixture(), extra = { taskArn: f.taskArn.replace(/1$/, "2"), taskDefinitionArn: f.definitionArn.replace("mscqr-production-rls-green-worker-candidate", "renamed-family").replace(/:7$/, ":8"), group, lastStatus: "RUNNING", desiredStatus: "RUNNING" };
+  const definition = { taskDefinitionArn: extra.taskDefinitionArn, family: "renamed-family", taskRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task", containerDefinitions: [{ name: "backend", image: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:${"d".repeat(64)}`, entryPoint: ["node", "dist/server.js"] }] };
+  configure(definition, extra, f); f.tasks.push(extra);
+  const original = f.reader.describeTaskDefinition; let extraReads = 0;
+  f.reader.describeTaskDefinition = arn => { if (arn !== extra.taskDefinitionArn) return original(arn); extraReads++; return { taskDefinition: definition }; };
+  assert.equal(classifyHistoricalWorkerWorkload({ task: extra, definition }), expected);
+  if (expected === "DEFINITELY_NON_WORKER") assert.equal(verifyHistoricalRuntimeInventory({ reference: f.reference, reader: f.reader }), true);
+  else {
+    if (expected === "WORKER") assert.equal(historicalWorkerTasks({ tasks: f.tasks, reader: f.reader }).length, 2);
+    assert.throws(() => verifyHistoricalRuntimeInventory({ reference: f.reference, reader: f.reader }), /second worker|Ambiguous worker/);
+  }
+  assert.ok(extraReads > 0, "Service membership must never skip definition inspection");
+});
+
+test("retained exact task cannot acquire service membership", () => {
+  const f = historicalRuntimeFixture(); f.task.group = "service:renamed-service";
+  assert.throws(() => verifyHistoricalRuntimeInventory({ reference: f.reference, reader: f.reader }));
+});
+
+test("an unreadable or incomplete additional service definition fails closed", () => {
+  const f = historicalRuntimeFixture(); const extra = { ...f.task, taskArn: f.taskArn.replace(/1$/, "2"), taskDefinitionArn: f.definitionArn.replace(/:7$/, ":8"), group: "service:unrelated" }; f.tasks.push(extra);
+  const original = f.reader.describeTaskDefinition;
+  f.reader.describeTaskDefinition = arn => { if (arn === extra.taskDefinitionArn) throw new Error("read denied"); return original(arn); };
+  assert.throws(() => verifyHistoricalRuntimeInventory({ reference: f.reference, reader: f.reader }), /read denied/);
+  f.reader.describeTaskDefinition = arn => arn === extra.taskDefinitionArn ? { taskDefinition: { taskDefinitionArn: arn } } : original(arn);
+  assert.throws(() => verifyHistoricalRuntimeInventory({ reference: f.reference, reader: f.reader }), /incomplete/);
 });
