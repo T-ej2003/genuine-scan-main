@@ -455,3 +455,79 @@ test("executor policy is exact and grants no deletion, default setter, or arbitr
   assert.equal(readJournal.Resource, `arn:aws:s3:::${CONTRACT.journalBucket}/${CONTRACT.journalPrefix}*`);
   assert.equal(writeJournal.Resource, readJournal.Resource);
 });
+
+const stagedState = (change = {}) => state({ document: desired.stagedPredecessorDocument, ...change });
+const stagedPreparation = () => createProviderReadonlyPreparation({ sourceSha, liveState: stagedState(), preparedAt: now.toISOString() });
+test("staged inventory transition binds the exact five semantic changes and existing role actions", () => {
+  const prep = stagedPreparation();
+  assert.equal(prep.currentDefaultDocumentSha256, "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade");
+  assert.equal(prep.desiredDocumentSha256, "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5");
+  assert.equal(prep.semanticDelta.add.length, 2); assert.equal(prep.semanticDelta.change.length, 3);
+  const roles = prep.semanticDelta.change.find(s => s.sid === "ReadExactStageBRoles");
+  assert.ok(roles.before.Action.includes("iam:ListRolePolicies"));
+  assert.deepEqual(roles.before.Action, roles.after.Action);
+  assert.deepEqual(roles.after.Resource.filter(r => !roles.before.Resource.includes(r)), [CONTRACT.releaseRoleArn]);
+  assertProviderReadonlyAuthorization(authorization(prep), prep, { sourceSha, now });
+});
+const changeStatement = (doc, sid) => doc.Statement.find(s => s.Sid === sid);
+const hostilePolicyChanges = [
+  ["extra role ARN", d => changeStatement(d, "ReadExactStageBRoles").Resource.push("arn:aws:iam::368992683803:role/other")],
+  ["wildcard role", d => changeStatement(d, "ReadExactStageBRoles").Resource = "*"],
+  ["ListRolePolicies absent predecessor", d => changeStatement(d, "ReadExactStageBRoles").Action = changeStatement(d, "ReadExactStageBRoles").Action.filter(a => a !== "iam:ListRolePolicies")],
+  ["wrong account", d => changeStatement(d, "ReadExactStageBRoles").Resource[0] = "arn:aws:iam::000000000000:role/other"],
+  ["extra Lambda action", d => changeStatement(d, "ReadExactStageBBrokerFunction").Action.push("lambda:ListTags")],
+  ["wrong broker", d => changeStatement(d, "ReadExactStageBBrokerFunction").Resource += "-other"],
+  ["wrong version scope", d => changeStatement(d, "ReadExactStageBBrokerAlias").Resource.push("arn:aws:lambda:eu-west-2:368992683803:function:other:*")],
+  ["condition removed", d => delete changeStatement(d, "ReadExactStageBBrokerFunction").Condition],
+  ["region changed", d => changeStatement(d, "ReadExactStageBBrokerFunction").Condition.StringEquals["aws:RequestedRegion"] = "us-east-1"],
+  ["condition weakened", d => changeStatement(d, "ReadExactStageBBrokerFunction").Condition.StringEquals["aws:RequestedRegion"] = "*"],
+  ["sixth change", d => d.Statement.push({ Sid: "Extra", Effect: "Allow", Action: "iam:GetRole", Resource: CONTRACT.releaseRoleArn })],
+  ["statement deleted", d => d.Statement.pop()],
+  ...["lambda:UpdateAlias", "iam:CreatePolicyVersion", "iam:PassRole"].map(action => [action, d => changeStatement(d, "ReadExactStageBRoles").Action.push(action)]),
+];
+for (const [name, mutate] of hostilePolicyChanges) test(`staged predecessor rejects ${name}`, () => {
+  const document = structuredClone(desired.stagedPredecessorDocument); mutate(document);
+  assert.throws(() => createProviderReadonlyPreparation({ sourceSha, liveState: stagedState({ document }), preparedAt: now.toISOString() }));
+});
+const hostileTargets = [
+  ...hostilePolicyChanges,
+  ["four of five changes", d => d.Statement = d.Statement.filter(s => s.Sid !== "ListRegionalBrokerEventMappings")],
+  ["event region absent", d => delete changeStatement(d, "ListRegionalBrokerEventMappings").Condition],
+  ["event region wrong", d => changeStatement(d, "ListRegionalBrokerEventMappings").Condition.StringEquals["aws:RequestedRegion"] = "us-east-1"],
+  ["eleven policy ARNs", d => changeStatement(d, "ReadExactStagedBrokerCallerPolicies").Resource.push("arn:aws:iam::368992683803:policy/other")],
+  ["nine policy ARNs", d => changeStatement(d, "ReadExactStagedBrokerCallerPolicies").Resource.pop()],
+  ["wildcard policy ARN", d => changeStatement(d, "ReadExactStagedBrokerCallerPolicies").Resource = "arn:aws:iam::368992683803:policy/*"],
+  ["missing expected action", d => changeStatement(d, "ReadExactStageBBrokerFunction").Action.pop()],
+];
+for (const [name, mutate] of hostileTargets) test(`canonical target rejects ${name}`, () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "readonly-target-"));
+  try {
+    const document = structuredClone(desired.document); mutate(document);
+    const file = path.join(directory, CONTRACT.sourcePath); fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(document));
+    assert.throws(() => readProviderReadonlyDesiredPolicy({ repositoryRoot: directory }));
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+test("caller-supplied target and alternate policy resource cannot gain authority", () => {
+  assert.throws(() => createProviderReadonlyPreparation({ sourceSha, liveState: stagedState(), desired: { ...desired, sourcePolicySha256: "b".repeat(64) }, preparedAt: now.toISOString() }));
+  assert.throws(() => createProviderReadonlyPreparation({ sourceSha, liveState: stagedState({ policyArn: CONTRACT.policyArn + "-other" }), preparedAt: now.toISOString() }));
+});
+test("staged preparation semantic delta and predecessor cannot be substituted even with recomputed hashes", () => {
+  const prep = structuredClone(stagedPreparation());
+  prep.semanticDelta.change.pop(); prep.semanticDeltaSha256 = hash(prep.semanticDelta);
+  const { preparationSha256, ...body } = prep; prep.preparationSha256 = hash(body);
+  assert.throws(() => authorization(prep));
+  const changed = structuredClone(stagedPreparation()); changed.currentDefaultDocumentSha256 = "a".repeat(64);
+  assert.throws(() => authorization(changed));
+});
+test("staged transition live predecessor CAS rejects a changed snapshot before writing", async () => {
+  const prep = stagedPreparation(), auth = authorization(prep); let writes = 0;
+  await assert.rejects(() => executeProviderReadonlyReconciliation({ sourceSha, preparation: prep, authorization: auth, provenance: provenance(auth), journal: memoryJournal().journal, reauthenticateSource: () => true, now: () => now, readLiveState: async () => state(), createPolicyVersion: async () => { writes++; }, sleep: async () => {} }), /CAS changed/);
+  assert.equal(writes, 0);
+});
+test("staged transition preserves exact post-state and replay never writes twice", async () => {
+  const prep = stagedPreparation(), auth = authorization(prep), store = memoryJournal(); let live = stagedState(), writes = 0;
+  const args = { sourceSha, preparation: prep, authorization: auth, provenance: provenance(auth), journal: store.journal, reauthenticateSource: () => true, now: () => now, sleep: async () => {}, readLiveState: async () => live, createPolicyVersion: async () => { writes++; live = postState(); return { PolicyVersion: { VersionId: "v4" } }; } };
+  assert.equal((await executeProviderReadonlyReconciliation(args)).status, "COMPLETED");
+  assert.equal((await executeProviderReadonlyReconciliation(args)).status, "CONSUMED");
+  assert.equal(writes, 1);
+});
