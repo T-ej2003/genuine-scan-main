@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import crypto from "node:crypto";
+import { BROKER_POLICY_OWNERSHIP_KEY } from './stage-b-broker-policy-ownership.mjs';
 import { assertHistoricalRuntimeReference } from "./production-historical-runtime-contract.mjs";
 import fs from "node:fs";
 import os from "node:os";
@@ -422,6 +423,7 @@ function sameStringSet(left, right) {
 }
 
 export const REVIEWED_SIMULATION_CONTEXT_REGISTRY = Object.freeze([
+  { key: "dynamodb:LeadingKeys", type: "stringList", values: Object.freeze([BROKER_POLICY_OWNERSHIP_KEY]) },
   { key: "aws:RequestTag/Component", type: "string", values: Object.freeze(["full-rls-green-stage-a", "full-rls-green-stage-b"]) },
   { key: "aws:RequestTag/Environment", type: "string", values: Object.freeze(["production"]) },
   { key: "aws:RequestTag/ManagedBy", type: "string", values: Object.freeze(["Terraform"]) },

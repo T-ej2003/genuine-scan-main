@@ -11,6 +11,7 @@ const context = (input, purpose) => {
 async function authenticate(preparation, authorization, deps) {
   const digest = await assertBrokerAuthorization(authorization, preparation, { verify: deps.verifyAuthorization, now: deps.now?.() || new Date() });
   equal(await deps.readCheckout(), { sourceSha: preparation.sourceSha, treeSha256: preparation.treeSha256 }, "Checkout authority changed");
+  if (preparation.prerequisiteChain) await deps.authenticatePrerequisiteChain(preparation.prerequisiteChain);
   equal(brokerPrerequisiteIdentity(await deps.readPrerequisites()), preparation.prerequisites, "Broker prerequisite changed");
   equal(await deps.readStateIdentity(), preparation.state, "State predecessor changed");
   return digest;
@@ -25,11 +26,13 @@ export async function executeBrokerPublication({ preparation, authorization }, d
   const p = context(preparation, BROKER_PUBLICATION), auth = structuredClone(authorization);
   const authorizationSha256 = await authenticate(p, auth, deps);
   const artifacts = await deps.readPlan(); assertPlanArtifacts(p, artifacts);
-  assertBrokerPublicationPlan(artifacts.plan, { sourceSha: p.sourceSha, prerequisites: p.prerequisites, canonicalAddresses: p.canonicalAddresses });
+  assertBrokerPublicationPlan(artifacts.plan, p);
   const fn = artifacts.plan.resource_changes.find(c => c.address === "aws_lambda_function.broker");
   equal(fn.change.after.environment[0].variables, p.configuration);
   assert.equal(fn.change.after.source_code_hash, Buffer.from(p.packageSha256, "hex").toString("base64"));
-  const predecessor = brokerTargetIdentity(await deps.getVersion(p.alias.FunctionVersion), p.packageSha256);
+  const predecessorPackageSha256 = Buffer.from(fn.change.before.source_code_hash, 'base64').toString('hex');
+  assert.match(predecessorPackageSha256, /^[a-f0-9]{64}$/);
+  const predecessor = brokerTargetIdentity(await deps.getVersion(p.alias.FunctionVersion), predecessorPackageSha256);
   equal(predecessor.configuration.Environment.Variables, fn.change.before.environment[0].variables, "Publication predecessor configuration changed");
   assert.equal(fn.change.before.version, p.alias.FunctionVersion, "Unapproved publication precedes target plan");
   equal(brokerAliasIdentity(await deps.getAlias()), p.alias, "Alias predecessor changed before publication");
@@ -60,6 +63,7 @@ export async function prepareBrokerCutover({ publicationPreparation, publication
   assert.equal(publicationResult.status, "PUBLISHED"); assert.equal(publicationResult.authorizationSha256, authHash);
   assert.equal(publicationResult.preparationSha256, brokerDigest(old)); assert.equal(publicationResult.savedPlanSha256, old.savedPlanSha256);
   await deps.authenticatePublicationResult(publicationResult, authHash);
+  if (old.prerequisiteChain) await deps.authenticatePrerequisiteChain(old.prerequisiteChain);
   const target = brokerTargetIdentity(await deps.getVersion(publicationResult.target.version), old.packageSha256);
   equal(target, publicationResult.target); equal(target.configuration.Environment.Variables, old.configuration);
   equal(brokerAliasIdentity(await deps.getAlias()), old.alias, "Publication predecessor no longer current");

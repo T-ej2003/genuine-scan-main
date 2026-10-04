@@ -1,0 +1,121 @@
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import { canonicalJson, STAGE_B } from './production-green-stage-b-contract.mjs';
+import { createAssumedRoleSessionEnvironment, createProductionAwsCommandRunner, createProductionAwsCredentialEnvironment, productionAwsExecutable, PRODUCTION_AWS_CREDENTIAL_SOURCE } from './production-credential-source-contract.mjs';
+
+const ROLE = 'arn:aws:iam::368992683803:role/mscqr-production-release-deployer';
+const PROFILE = 'mscqr-production-release-deployer';
+const digest = value => createHash('sha256').update(value).digest('hex');
+const equal = (a, b) => assert.equal(canonicalJson(a), canonicalJson(b));
+const assumptions = ['AssumeRole', 'AssumeRoleWithWebIdentity', 'AssumeRoleWithSAML'];
+const parseIssuance = bytes => { try { return JSON.parse(bytes); } catch { throw new Error('Invalid CloudTrail issuance response'); } };
+function timestamp(value, awsExpiration = false) {
+  assert.equal(typeof value, 'string');
+  const milliseconds = Date.parse(awsExpiration && !/(?:Z|GMT|UTC|[+-]\d\d:\d\d)$/.test(value) ? `${value} UTC` : value);
+  assert.ok(Number.isFinite(milliseconds), 'Invalid AWS session timestamp'); return milliseconds;
+}
+export function assertBrokerWriterSession(session) {
+  assert.deepEqual(Object.keys(session).sort(), ['accessKeyIdSha256', 'callerArn', 'callerUserId', 'eventId', 'expiresAt', 'issuedAt'].sort());
+  assert.match(session.accessKeyIdSha256, /^[a-f0-9]{64}$/);
+  assert.match(session.callerArn, /^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\/[\w+=,.@-]{2,64}$/);
+  assert.match(session.callerUserId, /^AROA[A-Z0-9]+:[\w+=,.@-]{2,64}$/);
+  assert.equal(session.callerUserId.split(':')[1], session.callerArn.split('/').at(-1));
+  assert.match(session.eventId, /^[a-f0-9-]{36}$/);
+  const duration = timestamp(session.expiresAt) - timestamp(session.issuedAt);
+  assert.ok(duration >= 900000 && duration <= 43200000, 'Unbounded role session');
+  return session;
+}
+export function authenticateBrokerSessionIssuance(events, identity) {
+  const matches = events.filter(event => digest(event.responseElements?.credentials?.accessKeyId || '') === identity.accessKeyIdSha256);
+  assert.equal(matches.length, 1, 'Missing/ambiguous independently authenticated STS issuance');
+  const event = matches[0];
+  assert.equal(event.eventSource, 'sts.amazonaws.com'); assert.ok(assumptions.includes(event.eventName));
+  assert.equal(event.awsRegion, STAGE_B.region); assert.equal(event.recipientAccountId, STAGE_B.account);
+  assert.equal(event.errorCode, undefined); assert.equal(event.errorMessage, undefined);
+  assert.equal(event.requestParameters.roleArn, ROLE);
+  equal(event.responseElements.assumedRoleUser, { arn: identity.callerArn, assumedRoleId: identity.callerUserId });
+  assert.equal(event.requestParameters.roleSessionName, identity.callerArn.split('/').at(-1));
+  return assertBrokerWriterSession({ ...identity, eventId: event.eventID, issuedAt: new Date(timestamp(event.eventTime)).toISOString(),
+    expiresAt: new Date(timestamp(event.responseElements.credentials.expiration, true)).toISOString() });
+}
+
+// Only AWS-returned events enter this function in production. Reduce them before
+// persisting anything: CloudTrail can contain session tokens; never log raw events.
+export function readBrokerSessionIssuance(run, identity) {
+  const events = new Map();
+  for (const eventName of assumptions) {
+    let token; const seen = new Set();
+    for (let page = 0; page < 100; page++) {
+      const result = parseIssuance(run(['cloudtrail', 'lookup-events', '--lookup-attributes', `AttributeKey=EventName,AttributeValue=${eventName}`,
+        '--max-results', '50', '--no-paginate', ...(token ? ['--next-token', token] : []), '--region', STAGE_B.region, '--output', 'json', '--no-cli-pager']));
+      assert.ok(Array.isArray(result.Events));
+      for (const item of result.Events) {
+        const event = parseIssuance(item.CloudTrailEvent);
+        if (digest(event.responseElements?.credentials?.accessKeyId || '') !== identity.accessKeyIdSha256) continue;
+        assert.equal(item.EventId, event.eventID);
+        if (events.has(event.eventID)) assert.ok(canonicalJson(events.get(event.eventID)) === canonicalJson(event), 'Conflicting CloudTrail issuance event');
+        events.set(event.eventID, event);
+      }
+      token = result.NextToken;
+      if (!token) break;
+      assert.equal(typeof token, 'string'); assert.ok(!seen.has(token), 'Repeated CloudTrail cursor'); seen.add(token);
+      assert.ok(page < 99, 'CloudTrail issuance search incomplete');
+    }
+  }
+  return authenticateBrokerSessionIssuance([...events.values()], identity);
+}
+export async function readBrokerRecoveryAwsClock(fetcher = fetch) {
+  // Same regional STS authority that issued the credential. No signed operation,
+  // credential, local clock, cached file, or caller-selected endpoint is used.
+  const response = await fetcher('https://sts.eu-west-2.amazonaws.com/', { method: 'HEAD', redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(10000) });
+  assert.ok([200, 400, 403, 405].includes(response.status));
+  assert.equal(response.url, 'https://sts.eu-west-2.amazonaws.com/');
+  const date = response.headers.get('date'); assert.ok(date, 'Missing authenticated AWS clock');
+  assert.equal(response.headers.get('age'), null, 'Cached clock is not authority');
+  return new Date(timestamp(date)).toISOString();
+}
+export async function proveBrokerWriterUnusable(owner, { readIssuance, readClock }) {
+  assert.ok(owner.writerSession, 'Legacy/unbound ownership cannot be recovered automatically');
+  assertBrokerWriterSession(owner.writerSession);
+  const authenticated = await readIssuance(owner.writerSession);
+  equal(authenticated, owner.writerSession); // Never trust a claimed shorter expiry.
+  const observedAt = await readClock();
+  assert.ok(timestamp(observedAt) > timestamp(authenticated.expiresAt), 'Previous writer credentials remain usable');
+  return { mechanism: 'AWS_STS_AUTHENTICATED_EXPIRY', ownerSha256: digest(canonicalJson(owner)), session: authenticated, observedAt,
+    previousWriterCannotContinue: true, processTerminationProven: false };
+}
+export function createBrokerWriterSessionBoundary({ env = process.env, exec = execFileSync, independentRun } = {}) {
+  const administrator = independentRun || createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: 'mscqr-ops-admin', env, exec });
+  const authenticateReader = () => {
+    const caller = JSON.parse(administrator(['sts', 'get-caller-identity', '--output', 'json', '--no-cli-pager']));
+    assert.equal(caller.Account, STAGE_B.account);
+    assert.ok(caller.Arn === 'arn:aws:iam::368992683803:user/mscqr-ops-admin' || /^arn:aws:sts::368992683803:assumed-role\/mscqr-ops-admin\/[^/]+$/.test(caller.Arn), 'Independent CloudTrail reader required');
+  };
+  return {
+    pin() {
+      authenticateReader();
+      let credentials;
+      try {
+        credentials = JSON.parse(exec(exec === execFileSync ? productionAwsExecutable() : 'aws', ['configure', 'export-credentials', '--profile', PROFILE, '--format', 'process'],
+          { env: createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: PROFILE, env }), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
+      } catch { throw new Error('Cannot resolve one bounded broker writer session'); }
+      assert.ok(/^ASIA[A-Z0-9]{16}$/.test(credentials.AccessKeyId || ''), 'Temporary writer credential required'); assert.ok(credentials.SessionToken);
+      const frozenEnvironment = createAssumedRoleSessionEnvironment({ credentials, env });
+      const frozenRun = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_CHECKER_SESSION, env: frozenEnvironment, exec: (command, args, options) => exec(command, args, { ...options, env: { ...options.env, AWS_MAX_ATTEMPTS: '1', AWS_RETRY_MODE: 'standard' } }) });
+      const run = args => {
+        assert.ok(args[0] !== 'configure' && (args[0] !== 'sts' || args[1] === 'get-caller-identity'), 'Pinned writer cannot acquire another session');
+        assert.ok(!args.some(arg => /^(?:--profile|--endpoint-url|--no-verify-ssl)(?:=|$)/.test(arg)), 'Pinned credential authority cannot be redirected');
+        return frozenRun(args);
+      };
+      const caller = JSON.parse(run(['sts', 'get-caller-identity', '--output', 'json', '--no-cli-pager']));
+      assert.equal(caller.Account, STAGE_B.account);
+      const session = readBrokerSessionIssuance(administrator, { accessKeyIdSha256: digest(credentials.AccessKeyId), callerArn: caller.Arn, callerUserId: caller.UserId });
+      // No profile/provider is left in the writer's environment. Expiry cannot
+      // trigger CLI/provider refresh; a later invocation cannot replay its journal.
+      return { session, run, environment: frozenEnvironment };
+    },
+    prove: owner => { authenticateReader(); return proveBrokerWriterUnusable(owner, { readIssuance: session => readBrokerSessionIssuance(administrator,
+      { accessKeyIdSha256: session.accessKeyIdSha256, callerArn: session.callerArn, callerUserId: session.callerUserId }), readClock: readBrokerRecoveryAwsClock }); },
+  };
+}

@@ -23,6 +23,7 @@ import { MIXED_DUAL_SLOT_RECOVERY_EXECUTION_POLICY_ARN, MIXED_DUAL_SLOT_RECOVERY
 import { APP_ONLY } from "./production-app-only-contract.mjs";
 import { APP_ONLY_VERIFIER, APP_ONLY_PROVISIONING, appOnlyDeployerPolicy, appOnlyVerifierLauncherPolicy, appOnlyPermissionProvisionerPolicy } from "./production-app-only-policy.mjs";
 import { PRODUCTION_COMPONENT_STATE } from "./production-component-deployment-state.mjs";
+import { BROKER_POLICY_OWNERSHIP_KEY } from './stage-b-broker-policy-ownership.mjs';
 import { STAGE_B_BROKER_POLICY } from "./stage-b-deployment-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -41,6 +42,8 @@ const bootstrapOperatorPolicyPath = BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.sou
 const normalDeployerPolicyPath = "infra/aws/terraform/production-component-deployment-state/normal-deployer-policy.json";
 const releaseTerminalStatePolicyPath = "infra/aws/terraform/production-component-deployment-state/release-terminal-state-policy.json";
 const awsCliSourceFiles = [
+  "scripts/aws/stage-b-broker-policy-ownership.mjs",
+  "scripts/aws/stage-b-broker-writer-session.mjs",
   'scripts/aws/stage-b-staged-broker-authorization.mjs',
   'scripts/aws/stage-b-staged-broker-executor.mjs',
   'scripts/aws/stage-b-staged-broker-observations.mjs',
@@ -730,11 +733,14 @@ export function appOnlyCapabilityNodes() {
 
 export const STAGED_BROKER_CALLS = Object.freeze({
   'scripts/aws/stage-b-staged-broker-authorization.mjs': ['kms:Sign', 'kms:Verify', 'sts:GetCallerIdentity'],
-  'scripts/aws/stage-b-staged-broker-executor.mjs': ['s3:GetObject', 'sts:GetCallerIdentity', 'lambda:GetAlias', 'lambda:GetFunctionConfiguration', 'lambda:UpdateAlias', 'lambda:ListVersionsByFunction'],
+  'scripts/aws/stage-b-staged-broker-executor.mjs': ['s3:GetObject', 'sts:GetCallerIdentity', 'lambda:GetAlias', 'lambda:GetFunctionConfiguration', 'lambda:UpdateAlias', 'lambda:ListVersionsByFunction', 'ecs:DescribeTaskDefinition', 'iam:CreatePolicyVersion', 'iam:DeletePolicyVersion'],
+  'scripts/aws/stage-b-broker-writer-session.mjs': ['sts:GetCallerIdentity', 'cloudtrail:LookupEvents'],
+  'scripts/aws/stage-b-broker-policy-ownership.mjs': ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem'],
   'scripts/aws/stage-b-staged-broker-closure.mjs': ['s3:GetObject', 'lambda:GetAlias', 'lambda:GetFunctionConfiguration', 'lambda:ListVersionsByFunction'],
-  'scripts/aws/stage-b-staged-broker-observations.mjs': ['iam:GetPolicy', 'iam:GetPolicyVersion', 'iam:GetRole', 'iam:ListAttachedRolePolicies', 'iam:ListRolePolicies', 'iam:GetRolePolicy', 'lambda:ListAliases', 'lambda:GetFunctionConfiguration', 'lambda:ListVersionsByFunction', 'lambda:GetPolicy', 'lambda:ListFunctionUrlConfigs', 'lambda:ListEventSourceMappings', 'lambda:GetAlias'],
+  'scripts/aws/stage-b-staged-broker-observations.mjs': ['iam:GetPolicy', 'iam:GetPolicyVersion', 'iam:ListPolicyVersions', 'iam:GetRole', 'iam:ListAttachedRolePolicies', 'iam:ListRolePolicies', 'iam:GetRolePolicy', 'lambda:ListAliases', 'lambda:GetFunctionConfiguration', 'lambda:ListVersionsByFunction', 'lambda:GetPolicy', 'lambda:ListFunctionUrlConfigs', 'lambda:ListEventSourceMappings', 'lambda:GetAlias'],
 });
 export function stagedBrokerExecutionIdentities(sourceFile, action) {
+  if (sourceFile.endsWith('stage-b-broker-writer-session.mjs')) return action === 'cloudtrail:LookupEvents' ? ['ADMINISTRATOR'] : ['ADMINISTRATOR', 'RELEASE_DEPLOYER'];
   return sourceFile.endsWith('-authorization.mjs')
     ? action === 'kms:Verify' ? ['INDEPENDENT_CHECKER', 'RELEASE_DEPLOYER'] : ['INDEPENDENT_CHECKER']
     : ['RELEASE_DEPLOYER'];
@@ -743,22 +749,25 @@ export function stagedBrokerCapabilityNodes(policies = sourcePolicies()) {
   return Object.entries(STAGED_BROKER_CALLS).flatMap(([sourceFile, actions]) => actions.flatMap(action => {
     const identities = stagedBrokerExecutionIdentities(sourceFile, action);
     const resources = action.startsWith('kms:') ? [STAGE_B.approvalKmsKeyArn]
-      : action === 'sts:GetCallerIdentity' || action === 'lambda:ListEventSourceMappings' ? ['*']
+      : action === 'cloudtrail:LookupEvents' || action === 'sts:GetCallerIdentity' || action === 'lambda:ListEventSourceMappings' || action === 'ecs:DescribeTaskDefinition' ? ['*']
+      : action.startsWith('dynamodb:') ? [`arn:aws:dynamodb:${STAGE_B.region}:${STAGE_B.account}:table/${PRODUCTION_COMPONENT_STATE.table}`]
       : action === 's3:GetObject' ? [STAGE_B_TERRAFORM_BACKEND.stateArn, STAGE_B_TERRAFORM_BACKEND.applyAttemptPrefixArn]
       : ['iam:GetPolicy', 'iam:GetPolicyVersion'].includes(action) ? [...RELEASE_POLICY_SOURCES.map(p => p.arn), STAGE_B_BROKER_POLICY.arn]
+      : ['iam:ListPolicyVersions', 'iam:CreatePolicyVersion', 'iam:DeletePolicyVersion'].includes(action) ? [STAGE_B_BROKER_POLICY.arn]
       : action.startsWith('iam:') ? [STAGE_B.brokerRoleArn, ...(action === 'iam:GetRole' ? [] : ['arn:aws:iam::368992683803:role/mscqr-production-release-deployer'])]
       : action === 'lambda:GetAlias' ? [STAGE_B.brokerAliasArn]
       : ['lambda:GetFunctionConfiguration', 'lambda:GetPolicy'].includes(action) ? [STAGE_B.brokerFunctionArn, `${STAGE_B.brokerFunctionArn}:*`]
       : [STAGE_B.brokerFunctionArn];
     return identities.flatMap(identity => resources.map(resource => {
-      const checker = identity === 'INDEPENDENT_CHECKER';
+      const checker = identity === 'INDEPENDENT_CHECKER', administrator = identity === 'ADMINISTRATOR';
       const entry = { id: `${sourceFile}:${action}`, action, resources: [resource] };
-      const mutation = action === 'lambda:UpdateAlias' || action === 'kms:Sign';
-      return { id: `staged-broker-${sha256(sourceFile+action+resource+identity).slice(0,16)}`, phase: checker ? 'staged-broker-cutover-approval' : mutation ? 'staged-broker-alias-cas' : 'staged-broker-publication',
+      const mutation = action === 'lambda:UpdateAlias' || action === 'kms:Sign' || ['iam:CreatePolicyVersion', 'iam:DeletePolicyVersion'].includes(action) || ['dynamodb:PutItem', 'dynamodb:UpdateItem'].includes(action);
+      return { id: `staged-broker-${sha256(sourceFile+action+resource+identity).slice(0,16)}`, phase: action.startsWith('dynamodb:') || ['iam:CreatePolicyVersion', 'iam:DeletePolicyVersion'].includes(action) ? 'staged-broker-policy-ownership' : checker ? 'staged-broker-cutover-approval' : mutation ? 'staged-broker-alias-cas' : 'staged-broker-publication',
         sourceFile, sourceFunction: action, identity, executor: 'aws-cli', action, resources: [resource],
-        context: { account: STAGE_B.account, region: STAGE_B.region, authority: mutation ? 'purpose-bound-one-use-phase-approval' : 'read-only-prerequisite' },
-        classification: mutation ? 'STAGED_BROKER_GOVERNED_MUTATION' : 'RELEASE_DIRECT_READ', probe: 'administrator-simulation', probeIds: [],
-        policy: action === 'sts:GetCallerIdentity' ? { sourceFile: 'scripts/aws/production-credential-source-contract.mjs', sid: 'identity-boundary', livePolicyArn: null, expectedVersion: 'source-bound', expectedPolicySha256: null } : checker ? { ...checkerAuthority(entry), sid: 'SignExactStageBApproval' } : authority(entry, false, policies), required: true, mutation };
+        context: { account: STAGE_B.account, region: STAGE_B.region, authority: mutation ? 'purpose-bound-one-use-phase-approval' : 'read-only-prerequisite',
+          ...(action.startsWith('dynamodb:') ? { leadingKeys: [BROKER_POLICY_OWNERSHIP_KEY], ttl: false, stealing: false } : {}) },
+        classification: administrator ? 'ADMIN_DIRECT_READ' : mutation ? 'STAGED_BROKER_GOVERNED_MUTATION' : 'RELEASE_DIRECT_READ', probe: 'administrator-simulation', probeIds: [],
+        policy: administrator ? { sourceFile, sid: 'IndependentSessionIssuanceRead', livePolicyArn: null, expectedVersion: 'source-bound', expectedPolicySha256: null } : action === 'sts:GetCallerIdentity' ? { sourceFile: 'scripts/aws/production-credential-source-contract.mjs', sid: 'identity-boundary', livePolicyArn: null, expectedVersion: 'source-bound', expectedPolicySha256: null } : checker ? { ...checkerAuthority(entry), sid: 'SignExactStageBApproval' } : authority(entry, false, policies), required: true, mutation };
     }));
   }));
 }

@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { writerSession } from './fixtures/broker-writer-session.mjs';
+import { proveBrokerWriterUnusable } from '../aws/stage-b-broker-writer-session.mjs';
 import { preparation, authorization, configuration, ready, sourceSha, alias } from './fixtures/staged-broker-runtime.mjs';
 import { brokerDigest, brokerTargetIdentity, brokerStateReservation, assertBrokerClosurePlan } from '../aws/stage-b-staged-broker-contract.mjs';
 import { createStagedBrokerExecutor, stagedBrokerArtifactSet, readStagedBrokerSourceAuthority, stagedBrokerSourceReservation } from '../aws/stage-b-staged-broker-executor.mjs';
@@ -12,6 +14,7 @@ import { STAGE_B_TERRAFORM_BACKEND_CONFIG, stageBApplyAttemptS3Key, stageBAttemp
 import { assertBrokerCallerPolicy, readStagedBrokerPrerequisites } from '../aws/stage-b-staged-broker-observations.mjs';
 import { classifyStageBPlan } from '../aws/stage-b-deployment-contract.mjs';
 import { publicationPlan, cutoverPlan } from './fixtures/staged-broker-runtime.mjs';
+import { BROKER_POLICY_CONVERGENCE, deriveBrokerPolicy } from '../aws/stage-b-release-prerequisites.mjs';
 const root = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'staged-broker-native-test-')); fs.chmodSync(directory, 0o700);
 test.after(() => fs.rmSync(directory, { recursive: true }));
@@ -179,4 +182,91 @@ test('complete stable traffic census authenticates the canonical prerequisite', 
 });
 for (const drift of ['policy', 'url', 'event', 'version']) test(`end-of-scan traffic guard rejects concurrent ${drift}`, () => {
   assert.throws(() => readStagedBrokerPrerequisites(prerequisiteReader(drift)));
+});
+for (const failure of [null, 'uncertain', 'wrong-successor', 'release-crash']) test(`native owned IAM convergence ${failure || 'success'} preserves one-write/state-only boundary`, async () => {
+  await native(); // Reuse the private canonical package/backend fixture.
+  const p = preparation(); p.schemaVersion = 2; p.purpose = BROKER_POLICY_CONVERGENCE;
+  p.packageSha256 = brokerDigest(fs.readFileSync(files.package));
+  const taskMap = Object.fromEntries(Object.entries(p.prerequisites.taskMap).map(([mode, arn]) => [mode, arn.replace(/:[0-9]+$/, ':43')]));
+  p.target = { policy: deriveBrokerPolicy(p.prerequisites.policy, taskMap) };
+  p.prerequisiteChain = { registration: { result: { taskMap } } };
+  p.canonicalAddresses.push('aws_iam_policy.broker');
+  const before = { arn: p.prerequisites.policyArn, policy: JSON.stringify(p.prerequisites.policy) }, after = { ...before, policy: JSON.stringify(p.target.policy) };
+  const change = { address: 'aws_iam_policy.broker', type: 'aws_iam_policy', mode: 'managed', change: { actions: ['update'], before, after, after_unknown: {} } };
+  const plan = { variables: { tooling_sha: { value: sourceSha } }, complete: false, errored: false, resource_changes: [change] };
+  const planPath = path.join(directory, `owned-policy-${failure}.tfplan`), bytes = Buffer.from(`owned-${failure}`); fs.writeFileSync(planPath, bytes, { mode: 0o600 });
+  p.savedPlanSha256 = brokerDigest(bytes); p.logicalPlanSha256 = brokerDigest(plan); p.artifactSetSha256 = stagedBrokerArtifactSet(files, root, p);
+  const auth = authorization(p), now = Date.now(); auth.issuedAt = new Date(now-1000).toISOString(); auth.expiresAt = new Date(now+600000).toISOString();
+  const objects = new Map(), plans = new Map(); let item, writes = 0, refreshed = false, recovered = false, policy = p.prerequisites.policy;
+  const reader = prerequisiteReader();
+  const runAws = args => {
+    const [service, op] = args, value = flag => args[args.indexOf(flag)+1];
+    if (service === 'kms') return JSON.stringify({ SignatureValid: true });
+    if (service === 's3api') {
+      if (op === 'put-object') { const key = value('--key'); assert.ok(!objects.has(key)); objects.set(key, fs.readFileSync(value('--body'))); }
+      else if (value('--key') === 'env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate') {
+        fs.writeFileSync(args.find(a => a.startsWith(`${directory}/state-read`)), JSON.stringify({ resources: [{ mode: 'managed', type: 'aws_iam_policy', name: 'broker', instances: [{ attributes: { policy: after.policy } }] }] }));
+      } else { const output = args.find(a => a.startsWith(directory+'/')); assert.ok(objects.has(value('--key'))); fs.writeFileSync(output, objects.get(value('--key'))); }
+      return '{}';
+    }
+    if (service === 'dynamodb') {
+      if (op === 'get-item') return JSON.stringify(item ? { Item: item } : {});
+      if (op === 'put-item') { assert.equal(item, undefined); item = JSON.parse(value('--item')); }
+      else { const vals = JSON.parse(value('--expression-attribute-values')); assert.equal(item.state.S, vals[':current'].S); if (failure === 'release-crash' && JSON.parse(vals[':next'].S).status === 'RELEASED' && !recovered) throw new Error('crash before release'); item.state = vals[':next']; return JSON.stringify({ Attributes: item }); }
+      return '{}';
+    }
+    if (service === 'iam') {
+      if (op === 'get-policy') return JSON.stringify({ Policy: { Arn: before.arn, DefaultVersionId: writes ? 'v13' : 'v12' } });
+      if (op === 'get-policy-version') return JSON.stringify({ PolicyVersion: { VersionId: writes ? 'v13' : 'v12', IsDefaultVersion: true, Document: policy } });
+      if (op === 'list-policy-versions') return JSON.stringify({ Versions: [{ VersionId: 'v11', IsDefaultVersion: false }, { VersionId: 'v12', IsDefaultVersion: !writes }, ...(writes ? [{ VersionId: 'v13', IsDefaultVersion: true }] : [])] });
+      if (op === 'create-policy-version') {
+        assert.equal(JSON.parse(item.state.S).status, 'HELD'); assert.equal(value('--policy-arn'), before.arn); assert.ok(args.includes('--set-as-default'));
+        assert.equal(writes++, 0); policy = failure === 'wrong-successor' ? p.prerequisites.policy : JSON.parse(fs.readFileSync(value('--policy-document').slice(7)));
+        if (failure === 'uncertain') throw new Error('timeout after write');
+        return JSON.stringify({ PolicyVersion: { VersionId: 'v13', IsDefaultVersion: true } });
+      }
+    }
+    return reader(args);
+  };
+  const exec = (command, args) => {
+    assert.equal(command, 'terraform');
+    if (args.includes('show')) return JSON.stringify(plans.get(args.at(-1)) || plan);
+    if (args.includes('plan')) {
+      const file = args.find(a => a.startsWith('-out=')).slice(5), c = structuredClone(change);
+      c.change = { actions: ['no-op'], before: structuredClone(after), after: structuredClone(after), after_unknown: {} };
+      const result = { ...plan, resource_changes: [c], resource_drift: args.includes('-refresh-only') ? [change] : [] };
+      plans.set(file, result); fs.writeFileSync(file, `saved-${file}`); return '';
+    }
+    assert.ok(plans.get(args.at(-1))?.resource_drift.length === 1); refreshed = true; return '';
+  };
+  const adapter = createStagedBrokerExecutor({ phase: 'POLICY', preparation: p, authorization: auth, planPath, files, directory, terraformDataDir: directory,
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, TF_WORKSPACE: 'default' }, exec, runAws, writerSessionBoundary: { pin: () => ({ session: writerSession, run: runAws, environment: { PATH: process.env.PATH } }) } });
+  adapter.readCheckout = async () => ({ sourceSha, treeSha256: p.treeSha256 }); adapter.readStateIdentity = async () => p.state;
+  adapter.readPrerequisites = async () => p.prerequisites; adapter.authenticatePrerequisiteChain = async () => {};
+  if (failure === 'release-crash') {
+    await assert.rejects(() => adapter.executeBrokerPolicyConvergence());
+    assert.equal(JSON.parse(item.state.S).status, 'HELD'); assert.ok(JSON.parse(item.state.S).terminal);
+    recovered = true;
+    const recovery = createStagedBrokerExecutor({ phase: 'POLICY_RECOVERY', preparation: p, authorization: auth, planPath, files, directory, terraformDataDir: directory,
+      env: { PATH: process.env.PATH, HOME: process.env.HOME, TF_WORKSPACE: 'default' }, exec, runAws,
+      writerSessionBoundary: { prove: held => proveBrokerWriterUnusable(held, { readIssuance: s => s, readClock: () => '2026-10-04T01:00:01.000Z' }) } });
+    recovery.readCheckout = adapter.readCheckout; recovery.readStateIdentity = adapter.readStateIdentity; recovery.authenticatePrerequisiteChain = adapter.authenticatePrerequisiteChain;
+    await recovery.recoverBrokerPolicyOwnership(); assert.equal(JSON.parse(item.state.S).status, 'RELEASED'); assert.equal(writes, 1);
+    await assert.rejects(() => recovery.recoverBrokerPolicyOwnership());
+  } else if (failure) {
+    await assert.rejects(() => adapter.executeBrokerPolicyConvergence()); assert.equal(JSON.parse(item.state.S).status, 'HELD');
+    await assert.rejects(() => adapter.executeBrokerPolicyConvergence()); assert.equal(writes, 1); assert.equal(refreshed, false);
+  } else {
+    await adapter.executeBrokerPolicyConvergence(); assert.equal(writes, 1); assert.equal(refreshed, true); assert.equal(JSON.parse(item.state.S).status, 'RELEASED');
+  }
+});
+
+for (const substitution of ['registration', 'target']) test(`physical prerequisite chain rejects ${substitution} receipt substitution`, async () => {
+  const r = await native('PUBLICATION');
+  const registration = { result: { taskMap: { execution: 'authenticated' } } };
+  const chain = { registration, policy: { preparation: { prerequisiteChain: { registration: structuredClone(registration) }, target: { policy: { exact: true } } }, result: { policy: { exact: true } } } };
+  if (substitution === 'registration') chain.policy.preparation.prerequisiteChain.registration.result.taskMap.execution = 'another-release';
+  else chain.policy.result.policy = { broader: true };
+  r.adapter.readCheckout = () => { assert.fail('Receipt substitution must fail before any downstream authority'); };
+  await assert.rejects(() => r.adapter.authenticatePrerequisiteChain(chain));
 });

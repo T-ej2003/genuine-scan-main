@@ -5,6 +5,17 @@ import { brokerPrerequisiteIdentity } from './stage-b-staged-broker-contract.mjs
 import { RELEASE_POLICY_SOURCES } from './validate-production-green-stage-b-permissions.mjs';
 const equal = (a, b) => assert.equal(canonicalJson(a), canonicalJson(b));
 const matches = (pattern, value) => new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`).test(value);
+export function readBrokerPolicyInventory(run) {
+  const json = args => JSON.parse(run([...args, '--output', 'json', '--no-cli-pager']));
+  const metadata = json(['iam', 'get-policy', '--policy-arn', STAGE_B_BROKER_POLICY.arn]).Policy;
+  assert.equal(metadata.Arn, STAGE_B_BROKER_POLICY.arn);
+  const version = json(['iam', 'get-policy-version', '--policy-arn', metadata.Arn, '--version-id', metadata.DefaultVersionId]).PolicyVersion;
+  assert.equal(version.VersionId, metadata.DefaultVersionId); assert.equal(version.IsDefaultVersion, true);
+  const inventory = json(['iam', 'list-policy-versions', '--policy-arn', metadata.Arn]);
+  assert.ok(!inventory.Marker && !inventory.IsTruncated);
+  const policy = typeof version.Document === 'string' ? JSON.parse(decodeURIComponent(version.Document)) : version.Document;
+  return { policy, version: version.VersionId, versions: inventory.Versions };
+}
 export function assertBrokerCallerPolicy(document) {
   assert.ok(Array.isArray(document.Statement));
   for (const s of document.Statement) {
@@ -24,7 +35,7 @@ export function assertBrokerCallerPolicy(document) {
   }
 }
 
-export function readStagedBrokerPrerequisites(run) {
+export function readStagedBrokerPrerequisites(run, { authenticatedTaskMap } = {}) {
   const json = args => JSON.parse(run([...args, '--output', 'json', '--no-cli-pager']));
   const complete = response => { assert.ok(!response.NextMarker && !response.NextToken && !response.Marker && !response.IsTruncated, 'Incomplete invocation/role census'); return response; };
   const policy = json(['iam', 'get-policy', '--policy-arn', STAGE_B_BROKER_POLICY.arn]).Policy;
@@ -75,7 +86,7 @@ export function readStagedBrokerPrerequisites(run) {
   const trafficSnapshot = readTraffic();
   const { aliases, urls, events } = trafficSnapshot;
   const configuration = json(['lambda', 'get-function-configuration', '--function-name', STAGE_B.brokerFunctionArn, '--qualifier', aliases[0].FunctionVersion]);
-  const taskMap = JSON.parse(configuration.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON);
+  const taskMap = authenticatedTaskMap || JSON.parse(configuration.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON);
   // Guard the snapshot against an alias move during the inventory.
   const finalAlias = json(['lambda', 'get-alias', '--function-name', STAGE_B.brokerFunctionArn, '--name', STAGE_B.brokerAliasQualifier]);
   assert.equal(finalAlias.FunctionVersion, aliases[0].FunctionVersion); assert.equal(finalAlias.RevisionId, aliases[0].RevisionId);
