@@ -80,3 +80,21 @@ test('uncertain state-only reconciliation cannot reuse approval with a different
  const capture = r.deps.captureRefreshOnlyPlan; r.deps.captureRefreshOnlyPlan = async () => ({ ...(await capture()), bytes: Buffer.from('different-refresh-binary') });
  await assert.rejects(() => reconcileBrokerAlias({ ...r, casResult }, r.deps)); assert.equal(writes,1);
 });
+
+import { signBrokerAuthorization } from '../aws/stage-b-staged-broker-authorization.mjs';
+for (const purpose of ['publication', 'cutover']) test(`${purpose} signing authenticates the maker before KMS Sign`, async () => {
+  const r = purpose === 'cutover' ? await ready() : { p: preparation() };
+  const maker = 'arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/authenticated-maker';
+  const checker = 'arn:aws:sts::368992683803:assumed-role/mscqr-production-rls-independent-checker/authenticated-checker';
+  let signs = 0, makerReads = 0;
+  const options = { makerIdentity: maker, humanReviewId: 'review-123', makerCaller: async () => { makerReads++; return { Account: '368992683803', Arn: maker }; }, caller: async () => ({ Arn: checker }), sign: async () => { signs++; return 'c2ln'; }, verify: async () => true, now };
+  for (const mutate of [
+    x => x.makerIdentity = maker.replace('authenticated-maker', 'invented-maker'),
+    x => delete x.makerCaller,
+    x => x.makerCaller = async () => ({ Account: 'other', Arn: maker }),
+    x => x.makerCaller = async () => ({ Account: '368992683803', Arn: checker }),
+  ]) { const bad = { ...options }; mutate(bad); await assert.rejects(() => signBrokerAuthorization(r.p, bad)); }
+  assert.equal(signs, 0);
+  const signed = await signBrokerAuthorization(r.p, options);
+  assert.equal(signed.review.makerIdentity, maker); assert.equal(signs, 1); assert.ok(makerReads >= 2);
+});

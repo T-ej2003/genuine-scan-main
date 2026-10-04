@@ -78,7 +78,7 @@ export async function runStagedBrokerRequest(request, { adapterFactory = createS
       equal(await deps.getAlias(), preparation.alias);
       equal(brokerTargetIdentity(await deps.getVersion(preparation.target.version), preparation.packageSha256), preparation.target);
     }
-    return signBrokerAuthorization(preparation, { makerIdentity: request.makerIdentity, humanReviewId: request.humanReviewId, ...checker() });
+    return signBrokerAuthorization(preparation, { ...checker(), makerCaller: deps.readMakerCaller, makerIdentity: request.makerIdentity, humanReviewId: request.humanReviewId });
   }
   if (operation === 'publish') return executeBrokerPublication({ preparation, authorization }, deps);
   if (operation === 'prepare-cutover') {

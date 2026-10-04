@@ -1,6 +1,6 @@
 {
-  "inputsSha256": "7c538eb846606d7971a60aeef13862fecb68060e69d2bc4e2c78ac2ce6bd8c51",
-  "changedInputCount": 32,
+  "inputsSha256": "e39ae7f5a60a203c7a345a188de898121cb082851a34df0d94c4d8e902dcfe8f",
+  "changedInputCount": 33,
   "version": "3.0.3",
   "patterns": [
     "./app/**/*.{ts,tsx}",
@@ -516,6 +516,12 @@
   "broadBoundaryUnchanged": true,
   "changedInputs": [
     {
+      "path": "package.json",
+      "status": "modified",
+      "before": "1a6de18db9f26ccb0554d1bbbb3e980ab400e42d93ef4418830977a6fca15cc3",
+      "after": "b151ced39dfc8e0c989df205a0477ac175b8f1ddb08abf6839e90ac978d869ad"
+    },
+    {
       "path": "scripts/apply-production-green-stage-b.mjs",
       "status": "modified",
       "before": "f0ac4c118169ce5dd18d7762daf50fe63524fd8bbeb237cba4e4d1453f27a5ce",
@@ -549,7 +555,7 @@
       "path": "scripts/aws/run-stage-b-staged-broker.mjs",
       "status": "added",
       "before": null,
-      "after": "92a2ba2886101850170adb0df8aca9dd86ec02297465653335259f16d47e22e6"
+      "after": "1178d354898781845bf43398ac650688bbee8ce2ad673a1f56ef1d6bfe0dc28d"
     },
     {
       "path": "scripts/aws/stage-b-deployment-contract.mjs",
@@ -561,7 +567,7 @@
       "path": "scripts/aws/stage-b-staged-broker-authorization.mjs",
       "status": "added",
       "before": null,
-      "after": "e1ced92b9243a2a5c7e14e823d62f011b9b86b6c7e8a1b2e1d56fd6e1d7102fb"
+      "after": "463d1f7b104a96d3a4713a673ea67a1958b8f1d7465465dcb2f67934b4897c14"
     },
     {
       "path": "scripts/aws/stage-b-staged-broker-closure.mjs",
@@ -579,7 +585,7 @@
       "path": "scripts/aws/stage-b-staged-broker-executor.mjs",
       "status": "added",
       "before": null,
-      "after": "0e0846fd3c78e1455b78362b73c1e58513935bdbe1501be44875211b1b151de1"
+      "after": "7aadba9ae1200ce9812e0e5cab9af3af176288cc00fddbe6e565b8a73eafdad2"
     },
     {
       "path": "scripts/aws/stage-b-staged-broker-observations.mjs",
@@ -705,7 +711,7 @@
       "path": "scripts/tests/stage-b-staged-broker.test.mjs",
       "status": "added",
       "before": null,
-      "after": "c3d950542202abefd67b856d2a7bbf30175c18b84e825e4063a987de783138b0"
+      "after": "30bace375fb6d7d5ce041a9e4dfe00ec8ea2d25bb129d5a9f231716e538df320"
     }
   ],
   "calls": [

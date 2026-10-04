@@ -6,9 +6,9 @@ broker candidate, not a new risk acceptance or a claim of universal plugin prove
 
 - Base: `be45d6bf0dc79e81f7ecd5db7a71eeeedf9e395e`.
 - Prior broad input hash: `e791d60f13ea0003fab57455cf5f032f86fd17267050e03ae015518edc0e750d`.
-- Revalidated broad input hash: `7c538eb846606d7971a60aeef13862fecb68060e69d2bc4e2c78ac2ce6bd8c51`.
-- Existing boundary unchanged: 1,913 prior files, 1,925 candidate files; 32 changed
-  inputs (20 modified, 12 added), no removed input. The six changed/new documents
+- Revalidated broad input hash: `e39ae7f5a60a203c7a345a188de898121cb082851a34df0d94c4d8e902dcfe8f`.
+- Existing boundary unchanged: 1,913 prior files, 1,925 candidate files; 33 changed
+  inputs (21 modified, 12 added), no removed input. The six changed/new documents
   and IAM/capability artifacts under documents/ are outside the existing boundary;
   they have also been inspected and do not change compiler/packaging behavior.
 - Acceptance advisory/package/version/scope/rationale/owner/expiry are unchanged.
@@ -165,7 +165,7 @@ The same stale package caused Stage B closure failure. Gitleaks v8.24.2 also
 classified a long named import as a generic API key; multiline formatting corrects
 the false positive without an ignore or scanner-policy change. Fresh instrumented
 compilation after both corrections observed the same four trusted patterns and
-identical executable browser artifacts. All 32 broad-boundary changed inputs are
+identical executable browser artifacts. All 33 broad-boundary changed inputs are
 reviewed above, including eight generated SQL binding artifacts.
 
 ### Exact-head review correction
@@ -216,3 +216,11 @@ The final historical-runtime ordering assertion now matches the authenticated tw
 The previous reader falsely accepted new version policies, function URLs, event mappings and published versions created during its census. All four attacks were reproduced against the prior exact head. A shared complete traffic census now runs again before returning authority, with role/configuration consistency readbacks. Behavioral tests reject every concurrent route/census change. Terminal readback accepts validated later backend/frontend generations only while the committed security component, its provenance and historical retention remain exact; same-generation document equality remains required. This preserves the real security CAS without failing after unrelated successful writes. The 100 focused tests pass. Fresh instrumented production compilation after the complete correction observes identical four trusted patterns and executable artifacts; all changed inputs remain outside compiler execution. Acceptance metadata and broad boundary remain unchanged.
 
 The ordinary production executor now performs its shared pure census check immediately after saved-artifact authentication, before verification-ready status, reservation or spawn uncertainty. Physical execution checks again. Mocked apply stubs only exercise reservation mechanics and provide no CLI bypass. The default-executor regression proves broker rejection creates zero reservation entries; 154 permission/apply tests pass. Fresh compilation after this correction retains all observed input patterns and artifact hashes; the final broad binding covers these changes.
+
+### Authenticated maker signing correction
+
+The signing boundary now requires the real release-profile STS caller in addition to the independently authenticated checker. A claimed maker must equal that authenticated account/role/session; the handler supplies the governed executor reader rather than trusting request fields. Both publication and cutover reject forged, missing, wrong-account and checker-role maker identities before KMS Sign. All 102 focused tests pass; capability coverage remains exact without new permissions. Fresh instrumented compilation after the correction retains the same four repository-controlled patterns, affected-library version and browser executable hashes. No staged approval or metadata input reaches brace evaluation, and the existing scope/expiry/broad boundary remain unchanged.
+
+### Required-CI regression integration
+
+`package.json` is the additional broad-boundary input: only the existing Stage B control-plane test command gains the three new staged-broker suites. Dependencies, lockfile, production build command and runtime package semantics remain identical to the reviewed tree. The actual production build was rerun after this final manifest edit; every executable artifact hash and all four trusted brace patterns remain exact. This brings the complete reviewed changed-input census to 33, including this root-manifest test-command edit. The acceptance remains exact, visible and expiring.

@@ -11,8 +11,13 @@ export const brokerAuthorizationMessage = ({ signature, ...body }) => Buffer.fro
 
 // Same checker, key and algorithm as the existing Stage B approvals; distinct
 // purpose prevents a runtime/RLS approval from authorizing infrastructure.
-export async function signBrokerAuthorization(preparation, { makerIdentity, humanReviewId, caller, sign, verify, now = new Date() }) {
+export async function signBrokerAuthorization(preparation, { makerIdentity, humanReviewId, makerCaller, caller, sign, verify, now = new Date() }) {
   assertBrokerPreparation(preparation);
+  assert.equal(typeof makerCaller, 'function', 'Authenticated maker caller is required');
+  const maker = await makerCaller();
+  assert.equal(maker.Account, STAGE_B.account);
+  assert.match(maker.Arn, /^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\/[^/]+$/);
+  assert.equal(makerIdentity, maker.Arn, 'Requested maker differs from authenticated release caller');
   const checkerIdentity = (await caller()).Arn;
   const body = { schemaVersion: 1, purpose: preparation.purpose, preparationSha256: brokerDigest(preparation), sourceSha: preparation.sourceSha,
     nonce: randomBytes(32).toString('hex'), issuedAt: now.toISOString(), expiresAt: new Date(now.getTime() + 30 * 60000).toISOString(), review: { makerIdentity, checkerIdentity, humanReviewId } };

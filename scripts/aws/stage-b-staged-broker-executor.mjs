@@ -134,14 +134,19 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
     fs.chmodSync(file, 0o600); const bytes = fs.readFileSync(file), plan = JSON.parse(terraform(['show', '-json', file]));
     return { file, bytes, plan };
   };
+  const readMakerCaller = async () => {
+    const caller = json(['sts', 'get-caller-identity']);
+    assert.equal(caller.Account, STAGE_B.account);
+    assert.match(caller.Arn, /^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\/[^/]+$/);
+    return caller;
+  };
   let capturedRefresh;
   const adapter = {
     verifyAuthorization: kms.verify,
+    readMakerCaller,
     readCheckout: async () => {
       const checkout = readStageBProtectedMainCheckout({ cwd: root, fetchOriginMain: true, expectedSourceSha: preparation?.sourceSha, requireCanonicalRepository: true });
-      const caller = json(['sts', 'get-caller-identity']);
-      assert.equal(caller.Account, STAGE_B.account);
-      assert.match(caller.Arn, /^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\/[^/]+$/);
+      await readMakerCaller();
       const treeSha256 = deriveStageBToolingInputTreeSha256(checkout.currentHead);
       return { sourceSha: checkout.currentHead, treeSha256 };
     },
