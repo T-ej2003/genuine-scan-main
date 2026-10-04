@@ -12,6 +12,9 @@ import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { createProductionComponentDeploymentStateClient } from "./production-component-deployment-state.mjs";
 import { createAwsReader } from "./production-green-stage-b-ecs-observations.mjs";
 import { createProductionAwsCommandRunner, createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import { readStagedBrokerClosure } from "./stage-b-staged-broker-closure.mjs";
+import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
+import { deriveStageBToolingInputTreeSha256 } from "./validate-stage-b-image-reuse.mjs";
 
 const ACCOUNT = STAGE_B.account;
 const REGION = STAGE_B.region;
@@ -139,6 +142,7 @@ export async function applyProductionFullRlsRelease({
   aws,
   credentialSource,
   historicalRuntimeDeps,
+  stagedBrokerDeps,
   outputPath = env.PRODUCTION_RLS_RELEASE_RECEIPT_PATH,
 } = {}) {
   aws ||= createProductionFullRlsReleaseAws({ credentialSource, env });
@@ -152,6 +156,16 @@ export async function applyProductionFullRlsRelease({
     ? readHistoricalRuntimeTransport({ bytes: Buffer.from(env.HISTORICAL_RUNTIME_EVIDENCE_JSON || ""), expectedSha256: env.HISTORICAL_RUNTIME_EVIDENCE_SHA256 }) : undefined;
   const historicalRuntimeReferenceSha256 = resolveHistoricalRuntimeAuthority({ evidence, state: historicalRuntimeDeps.stateClient.read(), reader: historicalRuntimeDeps.reader, sourceSha: env.RELEASE_GIT_SHA, verify: historicalRuntimeDeps.verify, now: historicalRuntimeDeps.now });
   const config = validateProductionReleaseEnvironment(env, historicalRuntimeReferenceSha256);
+  const brokerClosure = await (stagedBrokerDeps?.readClosure || (async sourceSha => {
+    const run = createProductionAwsCommandRunner({ credentialSource, env });
+    return readStagedBrokerClosure({ sourceSha, run, readCheckout: () => {
+      const checkout = readStageBProtectedMainCheckout({ cwd: process.cwd(), fetchOriginMain: true, expectedSourceSha: sourceSha, requireCanonicalRepository: true });
+      return { sourceSha: checkout.currentHead, treeSha256: deriveStageBToolingInputTreeSha256(checkout.currentHead) };
+    } });
+  }))(config.releaseSha);
+  // A published or cutover-only source must never enter Full-RLS. Ordinary
+  // releases without a staged source reservation keep their existing path.
+  if (brokerClosure) await brokerClosure.revalidate();
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-production-rls-"));
   const receipts = [];
   let mutationStarted = false;

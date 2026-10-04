@@ -163,7 +163,7 @@ test("machine contract: same canonical reference travels through both existing t
     const source = fs.readFileSync(`scripts/aws/${file}`, "utf8");
     assert.ok(source.includes("createHistoricalRuntimeRetention({")); assert.ok(source.includes("historicalRuntimeRetention: retention")); assert.ok(source.includes("verifyHistoricalRuntimeInventory({"));
   }
-  const apply = fs.readFileSync("scripts/apply-production-green-stage-b.mjs", "utf8"); assert.ok(apply.indexOf("revalidateHistoricalRuntime();") < apply.indexOf("effectiveDeps.apply(artifacts.planPath)"));
+  const apply = fs.readFileSync("scripts/apply-production-green-stage-b.mjs", "utf8"); assert.ok(apply.indexOf("revalidateHistoricalRuntime();") < apply.indexOf("effectiveDeps.apply(artifacts.planPath, verified.plan)"));
   assert.ok(!/stop-task|run-task|StopTask|RunTask/.test(fs.readFileSync("scripts/aws/production-historical-runtime-evidence.mjs", "utf8")));
 });
 

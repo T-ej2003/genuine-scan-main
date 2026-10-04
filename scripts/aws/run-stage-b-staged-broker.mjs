@@ -1,0 +1,111 @@
+#!/usr/bin/env node
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_FUNCTION, BROKER_ALIAS, brokerDigest, brokerPrerequisiteIdentity, brokerTargetIdentity, assertBrokerPreparation, assertBrokerPublicationPlan, assertBrokerCutoverPlan } from './stage-b-staged-broker-contract.mjs';
+import { executeBrokerPublication, prepareBrokerCutover, executeBrokerAliasCas, reconcileBrokerAlias } from './stage-b-staged-broker.mjs';
+import { createStagedBrokerExecutor, stagedBrokerArtifactSet } from './stage-b-staged-broker-executor.mjs';
+import { signBrokerAuthorization, createBrokerCheckerAuthorizationBoundary } from './stage-b-staged-broker-authorization.mjs';
+import { assertStageBStaticConfigurationCoverage } from './stage-b-plan-semantic-contract.mjs';
+import { assertStageBPlanResourceChange, classifyStageBPlan } from './stage-b-deployment-contract.mjs';
+import { assertStageBPrivateFile, ensureStageBPrivateDirectory } from './stage-b-artifact-contract.mjs';
+import { readPlanningInputs, assertStageBPlanningBackendMetadata } from '../plan-production-green-stage-b.mjs';
+import { readStageBProtectedMainCheckout } from './stage-b-deployment-identity.mjs';
+
+const root = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
+const equal = (a, b) => assert.equal(brokerDigest(a), brokerDigest(b));
+const MODES = { 'prepare-publication': 'PREPARATION', 'authorize-publication': 'PREPARATION', 'publish': 'PUBLICATION', 'prepare-cutover': 'PREPARATION', 'authorize-cutover': 'PREPARATION', 'cutover': 'CUTOVER', 'reconcile': 'RECONCILIATION' };
+const read = (file, sha256) => {
+  assertStageBPrivateFile({ filePath: file, repositoryRoot: root, label: 'Staged broker input' });
+  const bytes = fs.readFileSync(file); assert.equal(brokerDigest(bytes), sha256); return JSON.parse(bytes);
+};
+function staticPlan(plan) {
+  const source = fs.readFileSync(path.join(root, 'infra/aws/terraform/production-green-stage-b/main.tf'), 'utf8');
+  assertStageBStaticConfigurationCoverage(plan, { terraformConfiguration: source });
+  for (const c of plan.resource_changes) assertStageBPlanResourceChange(c, { strict: true, validateActions: false, terraformConfiguration: source, plan });
+}
+
+export async function runStagedBrokerRequest(request, { adapterFactory = createStagedBrokerExecutor, checker = createBrokerCheckerAuthorizationBoundary, planningInputs = readPlanningInputs } = {}) {
+  const { operation, files, directory, terraformDataDir, preparation, authorization, planPath } = request;
+  assert.ok(Object.hasOwn(MODES, operation), 'Unknown staged operation');
+  const allowed = ['operation', 'files', 'directory', 'terraformDataDir', 'preparation', 'authorization', 'planPath', 'planningOptions', 'publicationPreparation', 'publicationAuthorization', 'publicationResult', 'casResult', 'humanReviewId', 'makerIdentity'];
+  assert.ok(Object.keys(request).every(k => allowed.includes(k)), 'Unknown staged request field');
+  ensureStageBPrivateDirectory({ directory, repositoryRoot: root, create: false, label: 'Staged broker artifacts' });
+  const deps = adapterFactory({ phase: MODES[operation], preparation, authorization, planPath, files, directory, terraformDataDir });
+  const checkout = await deps.readCheckout();
+  const prerequisites = brokerPrerequisiteIdentity(await deps.readPrerequisites());
+  if (operation === 'prepare-publication') {
+    // Reuse exact tfvars/package/image/refresh authority before capturing this
+    // narrower plan. A stale/recovery-mode input cannot authorize this profile.
+    const protectedCheckout = readStageBProtectedMainCheckout({ cwd: root, expectedSourceSha: checkout.sourceSha, requireCanonicalRepository: true });
+    const backendMetadata = assertStageBPlanningBackendMetadata({ env: { TF_DATA_DIR: terraformDataDir }, repositoryRoot: root });
+    assert.equal(fs.realpathSync(files.backendMetadata), fs.realpathSync(backendMetadata.backendMetadataPath));
+    const inputs = planningInputs(files.tfvars, request.planningOptions, protectedCheckout, { backendMetadata });
+    assert.equal(inputs.recoveryMode, 'NORMAL'); assert.equal(inputs.toolingTreeSha256, checkout.treeSha256);
+    const state = await deps.readStateIdentity();
+    assert.equal(inputs.bindingReport.stateLineage, state.lineage); assert.equal(inputs.bindingReport.stateSerial, state.serial);
+    const diagnostic = await deps.captureCutoverPlan(); staticPlan(diagnostic.plan);
+    const mutations = diagnostic.plan.resource_changes.filter(c => JSON.stringify(c.change.actions) !== '["no-op"]');
+    if (!mutations.length) {
+      const alias = await deps.getAlias(), fn = diagnostic.plan.resource_changes.find(c => c.address === BROKER_FUNCTION);
+      assert.equal(fn.change.after.version, alias.FunctionVersion);
+      assert.equal(JSON.parse(fn.change.after.environment[0].variables.BROKER_APPROVAL_EXPECTED_JSON).releaseSha, checkout.sourceSha);
+      return { status: 'NOT_REQUIRED', sourceSha: checkout.sourceSha };
+    }
+    equal(mutations.map(c => c.address).sort(), [BROKER_FUNCTION, BROKER_ALIAS].sort());
+    const captured = await deps.capturePublicationPlan(); staticPlan(captured.plan);
+    const p = { schemaVersion: 1, purpose: BROKER_PUBLICATION, sourceSha: checkout.sourceSha, treeSha256: checkout.treeSha256,
+      savedPlanSha256: brokerDigest(captured.bytes), logicalPlanSha256: brokerDigest(captured.plan), artifactSetSha256: stagedBrokerArtifactSet(files, root), state,
+      packageSha256: brokerDigest(fs.readFileSync(files.package)), alias: await deps.getAlias(), prerequisites,
+      configuration: captured.plan.resource_changes.find(c => c.address === BROKER_FUNCTION).change.after.environment[0].variables,
+      canonicalAddresses: diagnostic.plan.resource_changes.map(c => c.address).sort(), publication: null, target: null };
+    assertBrokerPreparation(p); classifyStageBPlan(captured.plan, { stagedBroker: p });
+    equal(await deps.readStateIdentity(), state); equal(await deps.readCheckout(), checkout); equal(await deps.readPrerequisites(), prerequisites);
+    return { preparation: p, planPath: captured.file };
+  }
+  if (operation === 'authorize-publication' || operation === 'authorize-cutover') {
+    assertBrokerPreparation(preparation);
+    assert.equal(preparation.purpose, operation === 'authorize-publication' ? BROKER_PUBLICATION : BROKER_CUTOVER);
+    equal(checkout, { sourceSha: preparation.sourceSha, treeSha256: preparation.treeSha256 });
+    equal(prerequisites, preparation.prerequisites); equal(await deps.readStateIdentity(), preparation.state);
+    const artifacts = await deps.readPlan(); assert.equal(brokerDigest(artifacts.bytes), preparation.savedPlanSha256); assert.equal(brokerDigest(artifacts.plan), preparation.logicalPlanSha256); assert.equal(artifacts.artifactSetSha256, preparation.artifactSetSha256);
+    staticPlan(artifacts.plan);
+    if (operation === 'authorize-publication') assertBrokerPublicationPlan(artifacts.plan, preparation);
+    else {
+      assertBrokerCutoverPlan(artifacts.plan, preparation);
+      await deps.authenticatePublicationResult(preparation.publication, preparation.publication.authorizationSha256);
+      equal(await deps.getAlias(), preparation.alias);
+      equal(brokerTargetIdentity(await deps.getVersion(preparation.target.version), preparation.packageSha256), preparation.target);
+    }
+    return signBrokerAuthorization(preparation, { ...checker(), makerCaller: deps.readMakerCaller, makerIdentity: request.makerIdentity, humanReviewId: request.humanReviewId });
+  }
+  if (operation === 'publish') return executeBrokerPublication({ preparation, authorization }, deps);
+  if (operation === 'prepare-cutover') {
+    const old = request.publicationPreparation; assertBrokerPreparation(old);
+    equal(checkout, { sourceSha: old.sourceSha, treeSha256: old.treeSha256 }); equal(prerequisites, old.prerequisites);
+    const captured = await deps.captureCutoverPlan(); staticPlan(captured.plan);
+    const p = await prepareBrokerCutover({ publicationPreparation: old, publicationAuthorization: request.publicationAuthorization, publicationResult: request.publicationResult,
+      plan: captured.plan, bytes: captured.bytes, state: await deps.readStateIdentity(), artifactSetSha256: stagedBrokerArtifactSet(files, root) }, deps);
+    classifyStageBPlan(captured.plan, { stagedBroker: p });
+    return { preparation: p, planPath: captured.file };
+  }
+  if (operation === 'cutover') return executeBrokerAliasCas({ preparation, authorization }, deps);
+  if (operation === 'reconcile') return reconcileBrokerAlias({ preparation, authorization, casResult: request.casResult }, deps);
+  throw new Error('Unreachable phase');
+}
+
+export async function runStagedBrokerCli(argv = process.argv.slice(2)) {
+  assert.equal(argv.length, 6);
+  const values = Object.fromEntries([0, 2, 4].map(i => [argv[i], argv[i + 1]]));
+  assert.deepEqual(Object.keys(values).sort(), ['--input', '--input-sha256', '--output']);
+  const request = read(values['--input'], values['--input-sha256']);
+  assert.ok(path.isAbsolute(values['--output'])); assert.equal(fs.existsSync(values['--output']), false);
+  assert.equal(path.dirname(values['--output']), request.directory);
+  const result = await runStagedBrokerRequest(request);
+  fs.writeFileSync(values['--output'], `${JSON.stringify(result, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
+  return { status: result.status || 'PREPARED', resultSha256: brokerDigest(fs.readFileSync(values['--output'])) };
+}
+if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
+  runStagedBrokerCli().then(result => console.log(JSON.stringify(result))).catch(error => { console.error(error.message); process.exitCode = 1; });
+}

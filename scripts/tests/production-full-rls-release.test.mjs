@@ -204,7 +204,7 @@ for (const authority of ["initial transport", "retained without transport", "mat
     }
     throw new Error(`Unexpected AWS test call: ${args.join(" ")}`);
   };
-  const bundle = await applyProductionFullRlsRelease({ env: { ...env, RELEASE_GIT_SHA: invocationSha, ...(authority.startsWith("retained") ? {} : { HISTORICAL_RUNTIME_EVIDENCE_JSON: historicalJson, HISTORICAL_RUNTIME_EVIDENCE_SHA256: sha256(historicalJson) }) }, aws, historicalRuntimeDeps: { stateClient: { read: () => state }, reader: historical.reader, verify: historical.verify, now: historical.now }, outputPath });
+  const bundle = await applyProductionFullRlsRelease({ stagedBrokerDeps: { readClosure: async () => null }, env: { ...env, RELEASE_GIT_SHA: invocationSha, ...(authority.startsWith("retained") ? {} : { HISTORICAL_RUNTIME_EVIDENCE_JSON: historicalJson, HISTORICAL_RUNTIME_EVIDENCE_SHA256: sha256(historicalJson) }) }, aws, historicalRuntimeDeps: { stateClient: { read: () => state }, reader: historical.reader, verify: historical.verify, now: historical.now }, outputPath });
   assert.deepEqual(modes, [
     "full-rls-capability-preflight",
     "full-rls-admin-bootstrap",

@@ -17,11 +17,24 @@ import { captureAppOnlyPredecessor } from "./production-app-only-contract.mjs";
 import { serviceDefinition } from "./bootstrap-production-component-deployment-state.mjs";
 import { WEB_RELEASE } from "./production-web-release-contract.mjs";
 import { assertGithubOidcReleaseDeployerEnvironment, createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import { assertStagedBrokerProof, assertStagedBrokerTerminal, readStagedBrokerClosure } from "./stage-b-staged-broker-closure.mjs";
+import { deriveStageBToolingInputTreeSha256 } from "./validate-stage-b-image-reuse.mjs";
+import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 
 const SHA = /^[a-f0-9]{40}$/;
 const HASH = /^[a-f0-9]{64}$/;
 
-export function commitSecurityComponentState({ sourceSha, authorization, releaseReceipt, backendActivation, backendLive, backendImageSource, frontendActivation, frontendLive, frontendImageSource, client, historicalRuntimeEvidence, runtimeReader, verifyRuntimeSignature, historicalRuntimeRequired = false, now, isProtectedMainAncestor = () => true, writerContext } = {}) {
+export function commitSecurityComponentState(options = {}) {
+  if (!options.stagedBrokerProof) return commitSecurityState(options);
+  const proof = options.stagedBrokerProof; assertStagedBrokerProof(proof, options.sourceSha);
+  return (async () => {
+    await proof.revalidate();
+    const { previousGeneration, ...result } = commitSecurityState(options);
+    await proof.revalidate();
+    return { ...result, stagedBroker: assertStagedBrokerTerminal(proof, { client: options.client, result, previousGeneration }) };
+  })();
+}
+function commitSecurityState({ sourceSha, authorization, releaseReceipt, backendActivation, backendLive, backendImageSource, frontendActivation, frontendLive, frontendImageSource, client, historicalRuntimeEvidence, runtimeReader, verifyRuntimeSignature, historicalRuntimeRequired = false, now, isProtectedMainAncestor = () => true, writerContext, stagedBrokerProof } = {}) {
   assert.match(sourceSha || "", SHA); assert.match(authorization?.sourceSha || "", SHA); assert.equal(authorization.sourceSha, sourceSha);
   assert.match(authorization.authorizationSha256 || "", HASH); assert.equal(canonicalSha256((({ authorizationSha256, ...body }) => body)(authorization)), authorization.authorizationSha256, "Security authorization integrity is invalid");
   assert.equal(isProtectedMainAncestor(sourceSha), true, "Security release source is not protected-main history.");
@@ -38,6 +51,7 @@ export function commitSecurityComponentState({ sourceSha, authorization, release
     verifyHistoricalRuntimeInventory({ reference: retention.reference, reader: runtimeReader });
   }
   const changes = { security: { sourceSha, releaseIdentity: authorization.authorizationSha256 } };
+  if (stagedBrokerProof) { assertStagedBrokerProof(stagedBrokerProof, sourceSha); changes.security.stagedBrokerEvidenceSha256 = stagedBrokerProof.evidenceSha256; }
   if (releaseReceipt || backendActivation || backendLive || backendImageSource) {
     assert.ok(releaseReceipt && backendActivation && backendLive && backendImageSource, "Security terminal live component evidence is incomplete.");
     assertImageAuthorization(authorization, sourceSha); assertProductionRlsReleaseReceipt(releaseReceipt, { sourceSha, imageDigest: authorizedBackendDigest(authorization) });
@@ -58,12 +72,12 @@ export function commitSecurityComponentState({ sourceSha, authorization, release
     changes.frontend = { ...frontendLive, establishedThroughSha: sourceSha };
   }
   if (retention) verifyHistoricalRuntimeInventory({ reference: retention.reference, reader: runtimeReader });
-  const result = advanceProductionComponentDeploymentStateWithRetry({ client, current, ...(retention ? { historicalRuntimeRetention: retention, maxRetries: 0 } : {}), lane: "SECURITY_INFRASTRUCTURE", changes, ...writerContext });
+  const result = advanceProductionComponentDeploymentStateWithRetry({ client, current, ...(retention ? { historicalRuntimeRetention: retention, maxRetries: 0 } : {}), ...(stagedBrokerProof ? { maxRetries: 0 } : {}), lane: "SECURITY_INFRASTRUCTURE", changes, ...writerContext });
   if (retention) verifyHistoricalRuntimeInventory({ reference: retention.reference, reader: runtimeReader });
-  return result;
+  return stagedBrokerProof ? { ...result, previousGeneration: current.generation } : result;
 }
 
-function main() {
+async function main() {
   const values = Object.fromEntries(process.argv.slice(2).map((value) => value.split("=", 2)).filter(([key, value]) => key && value).map(([key, value]) => [key.replace(/^--/, ""), value]));
   const historical = values["historical-runtime-evidence"] !== undefined || values["historical-runtime-evidence-sha256"] !== undefined;
   const historicalOptions = historical ? ["historical-runtime-evidence", "historical-runtime-evidence-sha256"] : [];
@@ -85,10 +99,14 @@ function main() {
     historicalRuntimeRequired ||= described.tasks.some((task) => task.taskDefinitionArn?.includes(":task-definition/mscqr-production-rls-green-worker-candidate:"));
   }
   const historicalRuntimeEvidence = historical ? readBoundJson(values["historical-runtime-evidence"], values["historical-runtime-evidence-sha256"], "Historical runtime evidence") : undefined;
-  const result = commitSecurityComponentState({ historicalRuntimeRequired, historicalRuntimeEvidence, runtimeReader, sourceSha: values["source-sha"], authorization, releaseReceipt, backendActivation, backendLive, backendImageSource, frontendActivation, frontendLive, frontendImageSource: frontendLive?.sourceSha, client: createProductionComponentDeploymentStateClient({ run }), writerContext: { updatedByWorkflow: process.env.GITHUB_WORKFLOW_REF, githubRunId: process.env.GITHUB_RUN_ID }, isProtectedMainAncestor: (sourceSha) => {
+  const stagedBrokerProof = await readStagedBrokerClosure({ sourceSha: values["source-sha"], run, readCheckout: () => {
+    const checkout = readStageBProtectedMainCheckout({ cwd: root, fetchOriginMain: true, expectedSourceSha: values["source-sha"], requireCanonicalRepository: true });
+    return { sourceSha: checkout.currentHead, treeSha256: deriveStageBToolingInputTreeSha256(checkout.currentHead) };
+  } });
+  const result = await commitSecurityComponentState({ stagedBrokerProof, historicalRuntimeRequired, historicalRuntimeEvidence, runtimeReader, sourceSha: values["source-sha"], authorization, releaseReceipt, backendActivation, backendLive, backendImageSource, frontendActivation, frontendLive, frontendImageSource: frontendLive?.sourceSha, client: createProductionComponentDeploymentStateClient({ run }), writerContext: { updatedByWorkflow: process.env.GITHUB_WORKFLOW_REF, githubRunId: process.env.GITHUB_RUN_ID }, isProtectedMainAncestor: (sourceSha) => {
     try { execFileSync("git", ["merge-base", "--is-ancestor", sourceSha, "refs/remotes/origin/main"], { cwd: root, stdio: "ignore" }); return true; } catch { return false; }
   } });
   process.stdout.write(`${JSON.stringify({ generation: result.state.generation, component: "security", sourceSha: result.state.components.security.sourceSha })}\n`);
 }
 
-if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) main();
+if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) main().catch(error => { console.error(error.message); process.exitCode = 1; });

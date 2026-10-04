@@ -396,13 +396,30 @@ function stageBApplyBindings({ artifacts, verified, backendMetadata, env }) {
   return bindings;
 }
 
+// The physical Terraform executor must never publish/repoint a broker outside
+// the separately authorized staged protocol. Mocking an apply in artifact tests
+// does not replace this production mutation boundary.
+export function assertOrdinaryStageBApplyCensus(plan) {
+  if (!Array.isArray(plan?.resource_changes)) throw new Error("An authenticated saved-plan census is required before Terraform apply.");
+  for (const { address, type, change } of plan.resource_changes) {
+    if (["aws_lambda_function", "aws_lambda_alias"].includes(type) || ["aws_lambda_function.broker", "aws_lambda_alias.reviewed"].includes(address)) {
+      if (JSON.stringify(change?.actions) !== JSON.stringify(["no-op"])) throw new Error("Broker function/alias mutations require the staged publication and native alias CAS protocol; normal Terraform apply is forbidden.");
+    }
+  }
+}
+
+export function applyStageBInfrastructurePlan({ planPath, plan, env, spawn = spawnSync }) {
+  assertOrdinaryStageBApplyCensus(plan);
+  return spawn("terraform", [`-chdir=${terraformRoot}`, "apply", "-input=false", "-no-color", planPath], { cwd: root, env, encoding: "utf8", stdio: "inherit" });
+}
+
 export function runApply({ argv = process.argv.slice(2), env = process.env, deps = {} } = {}) {
   if (env.MSCQR_STAGE_B_APPLY_ENABLED !== "true" || env.MSCQR_STAGE_B_APPLY_CONFIRM !== requiredConfirmation) throw new Error("Stage B apply gate is not enabled.");
   assertStageBApplyTerraformEnvironment(env);
   const artifacts = parseCli(argv);
   const releaseRun = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer" });
   const governedEnvironment = { ...createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer" }), TF_DATA_DIR: env.TF_DATA_DIR, TF_WORKSPACE: env.TF_WORKSPACE, MSCQR_STAGE_B_APPLY_ENABLED: env.MSCQR_STAGE_B_APPLY_ENABLED, MSCQR_STAGE_B_APPLY_CONFIRM: env.MSCQR_STAGE_B_APPLY_CONFIRM };
-  const defaultDeps = { getCaller: () => JSON.parse(releaseRun(["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"])).Arn, showPlan: (planPath) => showSavedPlan(planPath, { env: governedEnvironment }), validatePlan: assertStageBPlan, getBackendMetadata: readInitializedBackendMetadata, verifyPermissionSignature: (options) => verifyPermissionReportSignature({ ...options, run: (args) => releaseRun(args) }), verifyImageEvidence: (options) => verifyImageEvidenceSignature({ ...options, run: (args) => releaseRun(args) }), revalidateBootstrapReference: (reference, toolingSha) => { const reader = createAwsReader({ region: "eu-west-2", clusterArn: "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main", run: releaseRun }); reader.readProductionComponentDeploymentState = createProductionComponentDeploymentStateClient({ run: releaseRun }).read; return revalidateBootstrapForwardLivePredecessorReference({ reference, reader, toolingSha }); }, apply: (planPath) => spawnSync("terraform", [`-chdir=${terraformRoot}`, "apply", "-input=false", "-no-color", planPath], { cwd: root, env: governedEnvironment, encoding: "utf8", stdio: "inherit" }) };
+  const defaultDeps = { getCaller: () => JSON.parse(releaseRun(["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"])).Arn, showPlan: (planPath) => showSavedPlan(planPath, { env: governedEnvironment }), validatePlan: assertStageBPlan, getBackendMetadata: readInitializedBackendMetadata, verifyPermissionSignature: (options) => verifyPermissionReportSignature({ ...options, run: (args) => releaseRun(args) }), verifyImageEvidence: (options) => verifyImageEvidenceSignature({ ...options, run: (args) => releaseRun(args) }), revalidateBootstrapReference: (reference, toolingSha) => { const reader = createAwsReader({ region: "eu-west-2", clusterArn: "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main", run: releaseRun }); reader.readProductionComponentDeploymentState = createProductionComponentDeploymentStateClient({ run: releaseRun }).read; return revalidateBootstrapForwardLivePredecessorReference({ reference, reader, toolingSha }); }, apply: (planPath, plan) => applyStageBInfrastructurePlan({ planPath, plan, env: governedEnvironment }) };
   const effectiveDeps = { ...defaultDeps, ...deps };
   const callerArn = effectiveDeps.getCaller();
   if (typeof deps.showPlan !== "function" && typeof deps.getBackendMetadata !== "function") {
@@ -415,6 +432,9 @@ export function runApply({ argv = process.argv.slice(2), env = process.env, deps
       ? buildStageBProtectedMainCheckoutEvidence({ toolingSha: artifacts.toolingSha, currentHead: effectiveDeps.currentHead(), originMainHead: artifacts.toolingSha, isAncestor: true, porcelainStatus: "", repositoryState: { remoteDefaultBranch: "main", shallow: false, mergeInProgress: false, rebaseInProgress: false, cherryPickInProgress: false }, mode: "production" })
       : readStageBProtectedMainCheckout({ cwd: root, fetchOriginMain: true });
   const verified = assertApplyArtifacts({ ...artifacts, callerArn, protectedMainCheckout, currentHead: protectedMainCheckout.currentHead, showPlan: effectiveDeps.showPlan, validatePlan: effectiveDeps.validatePlan, verifyPermissionSignature: effectiveDeps.verifyPermissionSignature, verifyImageEvidence: effectiveDeps.verifyImageEvidence });
+  // Check the real Terraform executor before reservation or spawn-uncertainty
+  // writes. Injected apply stubs have no physical mutation authority.
+  if (effectiveDeps.apply === defaultDeps.apply) assertOrdinaryStageBApplyCensus(verified.plan);
   const backendMetadata = effectiveDeps.getBackendMetadata(env);
   assertStageBTerraformInitializedBackendMetadata(backendMetadata);
   const initialBindings = stageBApplyBindings({ artifacts, verified, backendMetadata, env });
@@ -463,7 +483,7 @@ export function runApply({ argv = process.argv.slice(2), env = process.env, deps
   const spawnUncertainReserved = reserveAttemptTransition({ attemptId: spawnUncertain.attemptId, sequence: spawnUncertain.sequence, bytes: spawnUncertainBytes, privateDirectory: path.dirname(applyAttemptPath), run: (args) => releaseRun(args) });
   if (spawnUncertainReserved?.status !== "reserved" || spawnUncertainReserved.key !== stageBAttemptStepS3ObjectKey(spawnUncertain.attemptId, spawnUncertain.sequence)) throw new Error("Stage B apply-spawn uncertainty marker was not authenticated; Terraform apply is unreachable.");
   let result;
-  try { result = effectiveDeps.apply(artifacts.planPath); }
+  try { result = effectiveDeps.apply(artifacts.planPath, verified.plan); }
   catch (error) {
     const unknown = createStageBApplyAttemptTransition(spawnUncertain, { status: "UNKNOWN", operationResult: { classification: "UNKNOWN_RESULT", readback: "UNKNOWN" }, applyStarted: { status: "UNKNOWN", evidenceSha256: sha256(Buffer.from(`${callerArn}\n${finalBindings.protectedMainSha}\n${finalBindings.savedPlanSha256}\nunknown`)) }, applyResult: { status: "UNKNOWN", evidenceSha256: null } });
     const unknownBytes = Buffer.from(`${JSON.stringify(unknown, null, 2)}\n`);
@@ -481,5 +501,10 @@ export function runApply({ argv = process.argv.slice(2), env = process.env, deps
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  try { console.log(JSON.stringify(runApply(), null, 2)); } catch (error) { console.error(error.message); process.exitCode = 1; }
+  try {
+    const result = process.argv[2] === '--staged-broker'
+      ? await (await import('./aws/run-stage-b-staged-broker.mjs')).runStagedBrokerCli(process.argv.slice(3))
+      : runApply();
+    console.log(JSON.stringify(result, null, 2));
+  } catch (error) { console.error(error.message); process.exitCode = 1; }
 }

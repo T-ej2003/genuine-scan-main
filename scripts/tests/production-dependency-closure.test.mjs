@@ -59,7 +59,7 @@ test("complete production dependency closure is exact across modes and failure p
     ["scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs", "s3:DeleteObject", "stage-a-artifacts-recovery-release-lock-release"],
   ]);
   assert.equal(report.newAwsCalls.filter(({ reachableMode }) => reachableMode.some((mode) => mode.startsWith("app-only-"))).length, 68);
-  assert.equal(report.newAwsCalls.length, 42 + stageAAdditions.length + 15 + 14 + 21 + 7 + 1 + 6 + 1 + 68 + 5 + 2 + 1 + 3); // Historical closure plus app-only calls, normal-deployer topology reads, exact B01 image reads, and authenticated normal predecessor state.
+  assert.equal(report.newAwsCalls.length, 42 + stageAAdditions.length + 15 + 14 + 21 + 7 + 1 + 6 + 1 + 68 + 5 + 2 + 1 + 3 + 27); // Historical closure plus app-only calls, normal-deployer topology reads, exact B01 image reads, and authenticated normal predecessor state.
   assert.deepEqual(report.newAwsCalls.filter(({ capabilityId }) => capabilityId === "reference-audit-normal-deployment-component-state").map(({ action, resources, identity, reachableMode }) => ({ action, resources, identity, reachableMode })), [{
     action: "dynamodb:GetItem",
     resources: ["arn:aws:dynamodb:eu-west-2:368992683803:table/mscqr-production-component-deployment-state"],
@@ -305,5 +305,16 @@ test("rotation closure cannot borrow legacy backend recovery mutation authority"
     assert.match(capabilityList, /manifest-activate-exact-ecs-service/);
     assert.match(capabilityList, /manifest-rollback-exact-ecs-service/);
     assert.doesNotMatch(capabilityList, /manifest-backend-health-recovery-update-service/);
+  }
+});
+
+test("staged KMS verification closure includes and requires both principals", () => {
+  const report = buildProductionDependencyClosure();
+  const verify = report.newAwsCalls.filter(({ sourceFile, action }) => sourceFile === "scripts/aws/stage-b-staged-broker-authorization.mjs" && action === "kms:Verify");
+  assert.deepEqual(verify.map(({ executionPrincipal }) => executionPrincipal).sort(), ["INDEPENDENT_CHECKER", "RELEASE_DEPLOYER"]);
+  for (const identity of ["INDEPENDENT_CHECKER", "RELEASE_DEPLOYER"]) {
+    const missing = structuredClone(graph());
+    missing.capabilities = missing.capabilities.filter(node => !(node.sourceFile === "scripts/aws/stage-b-staged-broker-authorization.mjs" && node.action === "kms:Verify" && node.identity === identity));
+    assert.throws(() => assertChangedAwsCallClosure(discoverAwsCliActions(), missing), /exact reviewed IAM authority/);
   }
 });

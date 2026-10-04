@@ -388,9 +388,18 @@ function assertStageBBrokerLambdaDefaults(configuration, expected) {
   return normalizeStageBBrokerRuntimeVersionConfig(configuration.RuntimeVersionConfig);
 }
 
-export function assertStageBBrokerLambdaConfiguration({ configuration, alias, brokerPackageRawSha256 } = {}) {
+export function assertStageBBrokerLambdaConfiguration({ configuration, alias, brokerPackageRawSha256, publishedVersion } = {}) {
   assertStageBBrokerLambdaResponseShape(configuration);
-  const broker = assertStageBBrokerConfigurationIdentity({ configuration, alias });
+  let broker;
+  if (publishedVersion !== undefined) {
+    if (alias !== undefined || !/^[1-9][0-9]*$/.test(publishedVersion)
+        || configuration.Version !== publishedVersion
+        || configuration.FunctionArn !== `${STAGE_B.brokerFunctionArn}:${publishedVersion}`) {
+      throw new Error("Published broker configuration requires an exact independently read qualified version.");
+    }
+    broker = { functionArn: STAGE_B.brokerFunctionArn, configurationFunctionArn: configuration.FunctionArn,
+      configurationVersion: publishedVersion, resolvedVersionArn: configuration.FunctionArn };
+  } else broker = assertStageBBrokerConfigurationIdentity({ configuration, alias });
   const expected = STAGE_B.brokerLambdaConfiguration;
   const codeSha256 = configuration?.CodeSha256;
   if (!/^[a-f0-9]{64}$/.test(brokerPackageRawSha256 || "") || typeof codeSha256 !== "string" || !/^[A-Za-z0-9+/]{43}=$/.test(codeSha256)
