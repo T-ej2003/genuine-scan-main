@@ -2952,3 +2952,58 @@ test("AWS reader uses argv arrays and only read-only commands", () => {
     run: () => JSON.stringify({ serviceArns: [] }),
   }), /exact production region and cluster/);
 });
+
+test("canonical reference audit permits only the exact bootstrap historical runtime, without trusting its family", async () => {
+  const { historicalRuntimeFixture } = await import("./fixtures/historical-runtime.mjs");
+  const fixture = makeBootstrapForwardLivePredecessorFixture(), runtime = historicalRuntimeFixture();
+  runtime.task.createdAt = runtime.launch.eventTime = "2026-07-30T10:00:00.000Z";
+  runtime.definition.registeredAt = runtime.registration.eventTime = "2026-07-30T09:00:00.000Z";
+  const original = { ...fixture.reader };
+  Object.assign(fixture.reader, {
+    listTasks: (status) => [...original.listTasks(status), ...(status === "RUNNING" ? runtime.tasks.map(({ taskArn }) => taskArn) : [])],
+    describeTasks: (arns) => ({ tasks: [...original.describeTasks(arns.filter((arn) => !runtime.tasks.some((task) => task.taskArn === arn))).tasks, ...runtime.reader.describeTasks(arns).tasks], failures: [] }),
+    describeTaskDefinition: (arn) => arn === runtime.definitionArn ? runtime.reader.describeTaskDefinition(arn) : original.describeTaskDefinition(arn),
+    describeImages: (name, digest) => name === "mscqr-worker" ? runtime.reader.describeImages(name, digest) : original.describeImages(name, digest),
+    describeRepositories: (names) => names.includes("mscqr-worker") ? runtime.reader.describeRepositories(names) : original.describeRepositories(names),
+    describeNetworkInterfaces: runtime.reader.describeNetworkInterfaces, lookupEvents: runtime.reader.lookupEvents,
+    isProtectedSource: () => true,
+  });
+  const options = { historicalRuntimeTaskArn: runtime.taskArn, readToolingTreeSha256: () => "f".repeat(64) };
+  const audit = generate(fixture, options);
+  assert.equal(audit.historicalRuntimeReference.runtime.taskArn, runtime.taskArn);
+  assert.equal(audit.historicalRuntimeReference.historicalGovernedDeploymentProvenance, false);
+  assert.equal(audit.historicalRuntimeReference.bootstrap.componentStateSha256, audit.bootstrapForwardLivePredecessorReference.componentStateSha256);
+  validateBrokerPlan(fixture, audit);
+  runtime.tasks.push({ ...runtime.task, taskArn: runtime.taskArn.replace(/1/g, "2") });
+  assert.throws(() => generate(fixture, options), /additional workers/);
+  const { verifyHistoricalRuntimeInventory } = await import("../aws/production-historical-runtime-evidence.mjs");
+  for (const signal of ["role", "image", "command", "ambiguous", "backend", "frontend", "standalone-role-override", "standalone-command-override", "service-role-override", "service-command-override", "service-entrypoint-override", "ambiguous-override", "backend-overrides", "empty-overrides", "no-overrides"]) {
+    const definitionArn = runtime.definitionArn.replace("mscqr-production-rls-green-worker-candidate", "renamed-service");
+    const definition = { ...runtime.definition, family: "renamed-service", taskDefinitionArn: definitionArn,
+      taskRoleArn: `arn:aws:iam::368992683803:role/mscqr-${signal}-task`,
+      containerDefinitions: [{ name: signal, image: "example/non-worker@sha256:" + "a".repeat(64), command: ["node", "dist/server.js"] }] };
+    if (signal === "role") definition.taskRoleArn = runtime.definition.taskRoleArn;
+    if (signal === "image") definition.containerDefinitions[0].image = runtime.definition.containerDefinitions[0].image;
+    if (signal === "command") definition.containerDefinitions[0].command = ["node", "dist/worker.js"];
+    if (signal === "ambiguous") definition.containerDefinitions[0].name = "worker";
+    const extra = { ...runtime.task, taskArn: runtime.taskArn.replace(/1/g, "2"), taskDefinitionArn: definitionArn,
+      group: signal.startsWith("standalone-") ? "family:renamed-service" : "service:renamed-service", overrides: {} };
+    if (signal.endsWith("role-override")) extra.overrides.taskRoleArn = runtime.definition.taskRoleArn;
+    if (signal.endsWith("command-override")) extra.overrides.containerOverrides = [{ name: signal, command: ["node", "dist/worker.js"] }];
+    if (signal === "service-entrypoint-override") extra.overrides.containerOverrides = [{ name: signal, entryPoint: ["node", "dist/worker.js"] }];
+    if (signal === "ambiguous-override") extra.overrides.containerOverrides = [{ name: "worker" }];
+    if (signal === "backend-overrides") extra.overrides = { taskRoleArn: definition.taskRoleArn, containerOverrides: [{ name: signal, command: ["node", "dist/server.js"] }] };
+    if (signal === "empty-overrides") extra.overrides.containerOverrides = [];
+    if (signal === "no-overrides") delete extra.overrides;
+    runtime.tasks.splice(1, runtime.tasks.length, extra);
+    fixture.reader.describeTaskDefinition = arn => arn === definitionArn ? { taskDefinition: definition } : arn === runtime.definitionArn ? runtime.reader.describeTaskDefinition(arn) : original.describeTaskDefinition(arn);
+    const closure = () => verifyHistoricalRuntimeInventory({ reference: audit.historicalRuntimeReference, reader: fixture.reader });
+    if (["backend", "frontend", "backend-overrides", "empty-overrides", "no-overrides"].includes(signal)) {
+      assert.ok(generate(fixture, options).historicalRuntimeReference);
+      assert.equal(closure(), true);
+    } else {
+      assert.throws(() => generate(fixture, options), /additional workers|Ambiguous worker identity/, signal);
+      assert.throws(closure, /second worker|Ambiguous worker identity/, signal);
+    }
+  }
+});

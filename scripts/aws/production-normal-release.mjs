@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
+import { verifyHistoricalRuntimeHandoff } from "./verify-production-historical-runtime-handoff.mjs";
+import { createAwsReader } from "./production-green-stage-b-ecs-observations.mjs";
 import { spawnSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -340,7 +342,16 @@ export function createNormalReconciliationAdapters({ run, repositoryRoot }) {
       assertFrontendCandidateReadback({ definition: next, taskDefinitionArn: candidate.taskDefinitionArn, candidate: expected });
     }
   };
+  const verifyRetainedRuntime = () => {
+    const state = createProductionComponentDeploymentStateClient({ run }).read();
+    assert.ok(state, "Committed component state is missing");
+    const reader = createAwsReader({ region: NORMAL_RELEASE.region, clusterArn: `arn:aws:ecs:${NORMAL_RELEASE.region}:${NORMAL_RELEASE.account}:cluster/${NORMAL_RELEASE.cluster}`, run });
+    // Also detect removal of retention: a live historical worker never gains
+    // authority merely because its record was omitted from component state.
+    verifyHistoricalRuntimeHandoff({ state, reader });
+  };
   const verify = async (identities) => {
+    verifyRetainedRuntime();
     for (const [name, expected] of Object.entries(identities)) {
       const serviceName = name === "backend" ? NORMAL_RELEASE.backendService : NORMAL_RELEASE.frontendService;
       run(["ecs", "wait", "services-stable", "--cluster", NORMAL_RELEASE.cluster, "--services", serviceName]);
@@ -370,6 +381,7 @@ export function createNormalReconciliationAdapters({ run, repositoryRoot }) {
       }
     }
     runNormalSmoke(repositoryRoot);
+    verifyRetainedRuntime();
     for (const [name, expected] of Object.entries(identities)) assert.ok(sameNormalIdentity(await readLive(name), expected), "Normal live identity changed during smoke");
   };
   const rollback = async (name, previous, candidate) => {

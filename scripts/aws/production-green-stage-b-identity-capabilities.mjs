@@ -32,6 +32,7 @@ export const RELEASE_DIGEST_VERIFICATION_BINDINGS = Object.freeze([...new Map(Ob
 
 export const RELEASE_READ_PROBES = Object.freeze([
   ["caller", "sts:GetCallerIdentity", ["sts", "get-caller-identity"]],
+  ["historical-runtime-network", "ec2:DescribeNetworkInterfaces", ["ec2", "describe-network-interfaces", "--filters", `Name=subnet-id,Values=${STAGE_B.privateSubnetIds.join(",")}`]],
   ["stage-a-subnets", "ec2:DescribeSubnets", ["ec2", "describe-subnets", "--subnet-ids", ...STAGE_B.privateSubnetIds]],
   ["stage-a-route-tables", "ec2:DescribeRouteTables", ["ec2", "describe-route-tables"]],
   ["stage-a-security-groups", "ec2:DescribeSecurityGroups", ["ec2", "describe-security-groups", "--group-ids", STAGE_B.databaseSecurityGroupId, STAGE_B.executorSecurityGroupId]],

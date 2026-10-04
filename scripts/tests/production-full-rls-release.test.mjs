@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { historicalRuntimeFixture } from "./fixtures/historical-runtime.mjs";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -20,6 +21,10 @@ import {
   validateCanaryEnvironment,
 } from "../../backend/scripts/production-green-canary-provision.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
+import { historicalRuntimeRetention } from "../aws/production-historical-runtime-evidence.mjs";
+import { stateHash, advanceProductionComponentDeploymentState, componentStateCasRequest } from "../aws/production-component-deployment-state.mjs";
+import { executeNormalComponentTransaction, buildNormalReleasePlan } from "../aws/production-normal-release.mjs";
+import { NORMAL_RECEIPT_WORKFLOW } from "../aws/production-normal-receipt-contract.mjs";
 
 const releaseSha = "a".repeat(40);
 const sourceContractSha256 = "b".repeat(64);
@@ -129,14 +134,31 @@ test("production release rejects mutable images and incomplete broker bindings",
   ]) assert.throws(() => validateProductionReleaseEnvironment({ ...env, ...candidate }), /release binding|immutable ECR/);
 });
 
-test("production release uses only the approval broker, runs canaries, and writes one receipt bundle", async (t) => {
+for (const authority of ["initial transport", "retained without transport", "matching transport and retention", "retained after backend/frontend transactions"]) test(`production release uses the approval broker with ${authority}`, async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-production-release-test-"));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const outputPath = path.join(directory, "release-receipt.json");
   const modes = [];
+  const historical = historicalRuntimeFixture();
+  const historicalJson = JSON.stringify(historical.evidence);
+  const retention = historicalRuntimeRetention({ evidence: historical.evidence, sourceSha: historical.release, current: historical.state, componentStateSha256: stateHash(historical.state), reader: historical.reader, verify: historical.verify, writerContext: historical.writerContext, now: historical.now });
+  let state = authority === "initial transport" ? historical.state : advanceProductionComponentDeploymentState({ current: historical.state, expectedGeneration: 1, lane: "SECURITY_INFRASTRUCTURE", changes: { security: { sourceSha: historical.release, releaseIdentity: "reviewed-release" } }, historicalRuntimeRetention: retention, ...historical.writerContext });
+  if (authority === "retained after backend/frontend transactions") {
+    const client = { read: () => structuredClone(state), advance: (current, next) => { componentStateCasRequest({ current, next }); state = structuredClone(next); } };
+    for (const name of ["backend", "frontend"]) {
+      const sourceSha = (name === "backend" ? "c" : "e").repeat(40), candidate = state.components[name].taskDefinitionArn.replace(/:[0-9]+$/, ":8");
+      const imageRef = image(name === "backend" ? "mscqr-backend" : "mscqr-web", "f");
+      const plan = buildNormalReleasePlan({ sourceSha, componentFiles: { backendFiles: name === "backend" ? ["backend/src/services/batchService.ts"] : [], frontendFiles: name === "frontend" ? ["src/App.tsx"] : [], databaseFiles: [], securityFiles: [] }, images: { [name]: imageRef } });
+      const adapter = { deploy: async (_, { recordCandidate }) => { await recordCandidate(candidate); return { result: name === "backend" ? { candidateTaskDefinition: candidate, candidateDeploymentId: "ecs-svc/8", deployedBackendDigest: imageRef.split("@")[1] } : { candidateTaskDefinitionArn: candidate, imageRef }, rollback: async () => {} }; }, rollback: async () => {} };
+      await executeNormalComponentTransaction({ plan, sourceSha, state, stateClient: client, [name]: adapter, smoke: async () => true, verifyCandidates: async () => true, isAncestor: () => true, writerContext: { updatedByWorkflow: NORMAL_RECEIPT_WORKFLOW, githubRunId: "303" } });
+    }
+    assert.ok(state.generation > 2); assert.equal(state.normalDeploymentReceipt, undefined);
+  }
+  const invocationSha = authority === "retained after backend/frontend transactions" ? "f".repeat(40) : historical.release;
   const aws = (args) => {
     if (args[0] === "lambda" && args[1] === "invoke") {
       const request = JSON.parse(fs.readFileSync(args.find((item) => item.startsWith("fileb://")).slice(8), "utf8"));
+      assert.equal(request.historicalRuntimeReferenceSha256, historical.reference.referenceSha256);
       modes.push(request.mode);
       fs.writeFileSync(args.at(-1), JSON.stringify({
         status: "started",
@@ -162,7 +184,7 @@ test("production release uses only the approval broker, runs canaries, and write
         deploymentId: PRODUCTION_GREEN.deploymentId,
         mode,
         status: "passed",
-        releaseSha,
+        releaseSha: invocationSha,
         sourceContractSha256,
         migrationSetDigest,
         packageChecksumSha256,
@@ -182,7 +204,7 @@ test("production release uses only the approval broker, runs canaries, and write
     }
     throw new Error(`Unexpected AWS test call: ${args.join(" ")}`);
   };
-  const bundle = await applyProductionFullRlsRelease({ env, aws, outputPath });
+  const bundle = await applyProductionFullRlsRelease({ env: { ...env, RELEASE_GIT_SHA: invocationSha, ...(authority.startsWith("retained") ? {} : { HISTORICAL_RUNTIME_EVIDENCE_JSON: historicalJson, HISTORICAL_RUNTIME_EVIDENCE_SHA256: sha256(historicalJson) }) }, aws, historicalRuntimeDeps: { stateClient: { read: () => state }, reader: historical.reader, verify: historical.verify, now: historical.now }, outputPath });
   assert.deepEqual(modes, [
     "full-rls-capability-preflight",
     "full-rls-admin-bootstrap",
@@ -247,4 +269,21 @@ test("production operator, scoped executor egress, and RDS-managed-secret contra
   assert.match(stageA, /executor_s3/);
   assert.match(stageA, /executor_dns_(?:udp|tcp)/);
   assert.doesNotMatch(stageA, /0\.0\.0\.0\/0|::\/0/);
+});
+
+for (const failure of ["unsigned retention", "malformed state", "missing retention", "conflicting transport", "state read failure"]) test(`full-RLS rejects ${failure} before broker invocation`, async () => {
+  const f = historicalRuntimeFixture();
+  const retention = historicalRuntimeRetention({ evidence: f.evidence, sourceSha: f.release, current: f.state, componentStateSha256: stateHash(f.state), reader: f.reader, verify: f.verify, writerContext: f.writerContext, now: f.now });
+  const state = structuredClone(advanceProductionComponentDeploymentState({ current: f.state, expectedGeneration: 1, lane: "SECURITY_INFRASTRUCTURE", changes: { security: { sourceSha: f.release, releaseIdentity: "reviewed-release" } }, historicalRuntimeRetention: retention, ...f.writerContext }));
+  let transport = {};
+  if (failure === "unsigned retention") state.historicalRuntimeRetention.authority.signatureBase64 = Buffer.from("unsigned").toString("base64");
+  if (failure === "malformed state") state.generation = 0;
+  if (failure === "missing retention") delete state.historicalRuntimeRetention;
+  if (failure === "conflicting transport") {
+    const evidence = structuredClone(f.evidence); evidence.reference.referenceSha256 = "0".repeat(64);
+    const json = JSON.stringify(evidence); transport = { HISTORICAL_RUNTIME_EVIDENCE_JSON: json, HISTORICAL_RUNTIME_EVIDENCE_SHA256: sha256(json) };
+  }
+  let brokerCalls = 0;
+  await assert.rejects(applyProductionFullRlsRelease({ env: { ...env, RELEASE_GIT_SHA: f.release, ...transport }, aws: () => { brokerCalls++; throw new Error("Must not invoke"); }, historicalRuntimeDeps: { stateClient: { read: () => { if (failure === "state read failure") throw new Error("Unavailable state"); return state; } }, reader: f.reader, verify: f.verify, now: f.now } }));
+  assert.equal(brokerCalls, 0);
 });

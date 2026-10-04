@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "entries": [
+    {
+      "scope": "frontend-build-only/non-runtime",
+      "package": "braces",
+      "affectedVersion": "3.0.3",
+      "advisory": "GHSA-vfj7-8cjw-p6xm",
+      "cve": "CVE-2026-93687",
+      "rationale": "Tailwind 3 build dependency. Vulnerable braces execution observed only during trusted production compilation using repository-controlled content globs. No execution in backend, worker, Nginx runtime or inspected browser artifact. Production users cannot control the patterns supplied to braces.",
+      "owner": "@T-ej2003",
+      "createdAt": "2026-10-03",
+      "expiresOn": "2026-11-02",
+      "reachability": {
+        "inputsSha256": "91f48e97caf1fd0c26ec7cc9e32d3450b60591eae4a7fc4bef79669a8a45e9cf",
+        "execution": {
+          "backend": "NO",
+          "worker": "NO",
+          "frontendServer": "NO",
+          "browser": "NO"
+        },
+        "productionAttackerControlsPattern": "NO"
+      }
+    }
+  ]
+}

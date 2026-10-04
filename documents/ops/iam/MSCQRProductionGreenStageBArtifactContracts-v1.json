@@ -1358,6 +1358,28 @@
       "rollback": "remove-committed-or-restore-backups"
     },
     {
+      "id": "historical-runtime-reference",
+      "kind": "file",
+      "producer": "scripts/aws/validate-production-green-stage-b-permissions.mjs:runCli",
+      "consumers": [
+        "scripts/aws/prepare-production-green-stage-b-approval-input.mjs",
+        "scripts/aws/production-release-dispatch-contract.mjs",
+        "scripts/aws/verify-production-historical-runtime-handoff.mjs",
+        "scripts/aws/commit-production-component-rotation-state.mjs",
+        "scripts/aws/commit-production-component-security-state.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "permission-report",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
       "id": "production-environment-approval",
       "kind": "file",
       "producer": "scripts/aws/production-github-environment-approval.mjs:runCli",

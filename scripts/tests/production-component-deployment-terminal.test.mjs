@@ -1,3 +1,7 @@
+import { historicalRuntimeFixture, rehashReference } from "./fixtures/historical-runtime.mjs";
+import { historicalRuntimeEvidence } from "../aws/production-historical-runtime-evidence.mjs";
+import { signPermissionReport } from "../aws/validate-production-green-stage-b-permissions.mjs";
+import { stateHash } from "../aws/production-component-deployment-state.mjs";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import os from "node:os";
@@ -175,6 +179,26 @@ test("overlap and cleanup atomically record the live backend for the next normal
     } };
     await assert.rejects(() => runReconciledRotationDeployment({ ...transitionInput, readers: wrongDigestReaders }), /digest/);
     assert.equal(classifyNormalLiveComponentState({ live, predecessor: initial.components.backend, candidate: { sourceSha: recoverySource, imageDigest: `sha256:${"4".repeat(64)}` } }), "LIVE_IS_UNKNOWN");
+    // The overlap writer is the first component CAS in initial recovery: carry
+    // the same signed reference through it, rather than losing generation 1.
+    const historical = historicalRuntimeFixture();
+    const bootstrapInitial = { ...initial, updatedByWorkflow: historical.state.updatedByWorkflow, githubRunId: historical.state.githubRunId };
+    historical.reference.bootstrap.componentStateSha256 = stateHash(bootstrapInitial);
+    historical.reference.bootstrap.workflow = bootstrapInitial.updatedByWorkflow;
+    historical.reference.bootstrap.githubRunId = String(bootstrapInitial.githubRunId);
+    historical.reference.recoverySourceSha = source;
+    rehashReference(historical.reference);
+    historical.report.historicalRuntimeAuthority.sourceSha = source;
+    historical.report.historicalRuntimeAuthority.referenceSha256 = historical.reference.referenceSha256;
+    const signature = signPermissionReport(historical.report, { sign: historical.sign, now: historical.now });
+    const proof = historicalRuntimeEvidence({ reference: historical.reference, report: historical.report, signatureArtifact: signature });
+    let durableRetention;
+    const retentionOptions = { ...options, historicalRuntimeEvidence: proof, runtimeReader: historical.reader, verifyRuntimeSignature: historical.verify, now: historical.now, writerContext: { ...historical.writerContext, githubRunId: "123", githubRunAttempt: "1" }, client: { read: () => bootstrapInitial, advance: (_, next) => { durableRetention = next; } } };
+    const retained = commitRotationComponentState(retentionOptions);
+    assert.equal(retained.state.historicalRuntimeRetention.reference.referenceSha256, proof.reference.referenceSha256);
+    assert.equal(durableRetention.generation, 2);
+    assert.equal(durableRetention.historicalRuntimeRetention.reference.historicalGovernedDeploymentProvenance, false);
+    assert.throws(() => commitRotationComponentState({ ...retentionOptions, historicalRuntimeEvidence: { ...proof, signatureBase64: "ZmFrZQ==" } }), /signature/);
     const result = commitRotationComponentState(options);
     assert.equal(writes, 1); assert.deepEqual(result.state.components.backend, { ...live, establishedThroughSha: source });
     assert.deepEqual(result.state.completedEmergencyWork[mode], { sourceSha: source, evidenceSha256: result.state.components.security.releaseIdentity });

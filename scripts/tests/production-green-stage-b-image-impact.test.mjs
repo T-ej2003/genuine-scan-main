@@ -395,3 +395,10 @@ test("canonical compatibility JSON and Markdown describe the same reviewed bound
   assert.equal(markdown.includes("trusted-workflow proof"), false);
   assert.equal(markdown.includes("publicationInputFingerprint"), false);
 });
+
+test("dependency classification changes still require fresh frontend images", () => {
+  const report = imageImpactReportFor({ imageReleaseSha: "a".repeat(40), toolingSha: "b".repeat(40), toolingInputTreeSha256: "c".repeat(64), changedFiles: ["package.json", "package-lock.json"] });
+  assert.equal(report.newImagesRequired, true);
+  assert.equal(report.webPublicationRequired, true);
+  assert.deepEqual(report.webAffectingFiles, ["package-lock.json", "package.json"]);
+});

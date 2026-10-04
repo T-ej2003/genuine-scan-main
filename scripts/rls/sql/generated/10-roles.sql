@@ -49,23 +49,23 @@ DO $$ DECLARE database_owner text; BEGIN
   EXECUTE 'CREATE ROLE "mscqr_rls_cert_migration" LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS';
 END $$;
 GRANT "mscqr_rls_cert_owner" TO "certification-administrator" WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
-COMMENT ON ROLE "mscqr_rls_cert_owner" IS 'mscqr-full-rls-clean-room:certification:f14f7ff120b5ecefbcfb6f4797971cffa658f125f01187df44d5b7cc8dc770db';
+COMMENT ON ROLE "mscqr_rls_cert_owner" IS 'mscqr-full-rls-clean-room:certification:2e4683dec990f33c223cfbdf081c4a896d0af7975ec5e4d765bbfe2be7e5c04e';
 GRANT "mscqr_rls_cert_auth_owner" TO "certification-administrator" WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
-COMMENT ON ROLE "mscqr_rls_cert_auth_owner" IS 'mscqr-full-rls-clean-room:certification:f14f7ff120b5ecefbcfb6f4797971cffa658f125f01187df44d5b7cc8dc770db';
+COMMENT ON ROLE "mscqr_rls_cert_auth_owner" IS 'mscqr-full-rls-clean-room:certification:2e4683dec990f33c223cfbdf081c4a896d0af7975ec5e4d765bbfe2be7e5c04e';
 GRANT "mscqr_rls_cert_app" TO "certification-administrator" WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
-COMMENT ON ROLE "mscqr_rls_cert_app" IS 'mscqr-full-rls-clean-room:certification:f14f7ff120b5ecefbcfb6f4797971cffa658f125f01187df44d5b7cc8dc770db';
+COMMENT ON ROLE "mscqr_rls_cert_app" IS 'mscqr-full-rls-clean-room:certification:2e4683dec990f33c223cfbdf081c4a896d0af7975ec5e4d765bbfe2be7e5c04e';
 GRANT "mscqr_rls_cert_read" TO "certification-administrator" WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
-COMMENT ON ROLE "mscqr_rls_cert_read" IS 'mscqr-full-rls-clean-room:certification:f14f7ff120b5ecefbcfb6f4797971cffa658f125f01187df44d5b7cc8dc770db';
+COMMENT ON ROLE "mscqr_rls_cert_read" IS 'mscqr-full-rls-clean-room:certification:2e4683dec990f33c223cfbdf081c4a896d0af7975ec5e4d765bbfe2be7e5c04e';
 GRANT "mscqr_rls_cert_preauth" TO "certification-administrator" WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
-COMMENT ON ROLE "mscqr_rls_cert_preauth" IS 'mscqr-full-rls-clean-room:certification:f14f7ff120b5ecefbcfb6f4797971cffa658f125f01187df44d5b7cc8dc770db';
+COMMENT ON ROLE "mscqr_rls_cert_preauth" IS 'mscqr-full-rls-clean-room:certification:2e4683dec990f33c223cfbdf081c4a896d0af7975ec5e4d765bbfe2be7e5c04e';
 GRANT "mscqr_rls_cert_worker" TO "certification-administrator" WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
-COMMENT ON ROLE "mscqr_rls_cert_worker" IS 'mscqr-full-rls-clean-room:certification:f14f7ff120b5ecefbcfb6f4797971cffa658f125f01187df44d5b7cc8dc770db';
+COMMENT ON ROLE "mscqr_rls_cert_worker" IS 'mscqr-full-rls-clean-room:certification:2e4683dec990f33c223cfbdf081c4a896d0af7975ec5e4d765bbfe2be7e5c04e';
 GRANT "mscqr_rls_cert_scheduled" TO "certification-administrator" WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
-COMMENT ON ROLE "mscqr_rls_cert_scheduled" IS 'mscqr-full-rls-clean-room:certification:f14f7ff120b5ecefbcfb6f4797971cffa658f125f01187df44d5b7cc8dc770db';
+COMMENT ON ROLE "mscqr_rls_cert_scheduled" IS 'mscqr-full-rls-clean-room:certification:2e4683dec990f33c223cfbdf081c4a896d0af7975ec5e4d765bbfe2be7e5c04e';
 GRANT "mscqr_rls_cert_operator" TO "certification-administrator" WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
-COMMENT ON ROLE "mscqr_rls_cert_operator" IS 'mscqr-full-rls-clean-room:certification:f14f7ff120b5ecefbcfb6f4797971cffa658f125f01187df44d5b7cc8dc770db';
+COMMENT ON ROLE "mscqr_rls_cert_operator" IS 'mscqr-full-rls-clean-room:certification:2e4683dec990f33c223cfbdf081c4a896d0af7975ec5e4d765bbfe2be7e5c04e';
 GRANT "mscqr_rls_cert_migration" TO "certification-administrator" WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
-COMMENT ON ROLE "mscqr_rls_cert_migration" IS 'mscqr-full-rls-clean-room:certification:f14f7ff120b5ecefbcfb6f4797971cffa658f125f01187df44d5b7cc8dc770db';
+COMMENT ON ROLE "mscqr_rls_cert_migration" IS 'mscqr-full-rls-clean-room:certification:2e4683dec990f33c223cfbdf081c4a896d0af7975ec5e4d765bbfe2be7e5c04e';
 CREATE SCHEMA mscqr_rls_install AUTHORIZATION "certification-administrator";
 REVOKE ALL ON SCHEMA mscqr_rls_install FROM PUBLIC;
 CREATE TABLE mscqr_rls_install.state (
@@ -122,7 +122,7 @@ INSERT INTO mscqr_rls_install.state(
   release_sha,migration_set_digest,approval_contract_sha256,approval_id,ticket_id,independent_checker_identity,approval_expires_at,phase
 )
 VALUES (
-  'certification','cert',current_database(),'f14f7ff120b5ecefbcfb6f4797971cffa658f125f01187df44d5b7cc8dc770db','mscqr-full-rls-clean-room:certification:f14f7ff120b5ecefbcfb6f4797971cffa658f125f01187df44d5b7cc8dc770db',current_user,
+  'certification','cert',current_database(),'2e4683dec990f33c223cfbdf081c4a896d0af7975ec5e4d765bbfe2be7e5c04e','mscqr-full-rls-clean-room:certification:2e4683dec990f33c223cfbdf081c4a896d0af7975ec5e4d765bbfe2be7e5c04e',current_user,
   NULL,
   NULL,
   NULL,

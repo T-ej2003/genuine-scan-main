@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import crypto from "node:crypto";
+import { assertHistoricalRuntimeReference } from "./production-historical-runtime-contract.mjs";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -1142,7 +1143,7 @@ export function signPermissionReport(report, {
 }
 
 export function buildPermissionReportBinding({ report, canonicalPayloadSha256, reportFileSha256, keyArn = PERMISSION_REPORT_SIGNING_KEY_ARN, signingAlgorithm = PERMISSION_REPORT_SIGNING_ALGORITHM, accountId = ACCOUNT, region = REGION } = {}) {
-  return { domain: PERMISSION_REPORT_BINDING_DOMAIN, schemaVersion: PERMISSION_REPORT_BINDING_SCHEMA_VERSION, evidenceKind: report?.evidenceKind, phase: report?.phase, purpose: report?.purpose, canonicalPayloadSha256, reportFileSha256, accountId, region, keyArn, signingAlgorithm };
+  return { ...(report?.historicalRuntimeAuthority ? { historicalRuntimeAuthority: report.historicalRuntimeAuthority } : {}), domain: PERMISSION_REPORT_BINDING_DOMAIN, schemaVersion: PERMISSION_REPORT_BINDING_SCHEMA_VERSION, evidenceKind: report?.evidenceKind, phase: report?.phase, purpose: report?.purpose, canonicalPayloadSha256, reportFileSha256, accountId, region, keyArn, signingAlgorithm };
 }
 
 export const signedPermissionReportBindingSha256 = (bindingPayload) => sha256(Buffer.from(canonicalizeJson(bindingPayload)));
@@ -1282,7 +1283,19 @@ export function runPermissionPreflight({
     toolingSha: authenticatedDeploymentIdentity.toolingSha,
     terraformConfiguration,
   }) : undefined;
+  if (referenceAudit?.historicalRuntimeReference && !referenceAudit.historicalRuntimeRetention) {
+    const reference = assertHistoricalRuntimeReference(referenceAudit.historicalRuntimeReference);
+    if (reference.recoverySourceSha !== authenticatedDeploymentIdentity.toolingSha || reference.recoveryTreeSha256 !== planApprovalReport.toolingTreeSha256) throw new Error("Historical runtime reference has different protected source/tree authority");
+    if (referenceAudit.bootstrapForwardLivePredecessorReference?.componentStateSha256 !== reference.bootstrap.componentStateSha256) throw new Error("Historical runtime reference must share the authenticated bootstrap predecessor");
+  }
   const report = {
+    ...(referenceAudit?.historicalRuntimeReference ? { historicalRuntimeAuthority: {
+      referenceSha256: assertHistoricalRuntimeReference(referenceAudit.historicalRuntimeReference).referenceSha256,
+      sourceSha: authenticatedDeploymentIdentity.toolingSha,
+      planApprovalReportSha256,
+      referenceAuditSha256: planApprovalReport.referenceAuditSha256,
+      approvedAt: planApprovalReport.approvedAt,
+    } } : {}),
     schemaVersion: PERMISSION_PREFLIGHT_SCHEMA_VERSION,
     evidenceKind: planBound ? PLAN_BOUND_PERMISSION_EVIDENCE_KIND : INITIAL_ADMINISTRATOR_CAPABILITY_EVIDENCE_KIND,
     phase,
@@ -1415,6 +1428,7 @@ export function runCli(argv = process.argv.slice(2), dependencies = {}) {
   writeStageBPrivateFilesAtomic({ repositoryRoot: stageBRoot, files: [
     { filePath: outputPath, bytes: reportBytes, label: "Stage B permission report" },
     { filePath: signatureOutputPath, bytes: signatureBytes, label: "Stage B permission-report signature" },
+    ...(referenceAudit?.historicalRuntimeReference && !referenceAudit.historicalRuntimeRetention ? [{ filePath: `${outputPath}.historical-runtime.json`, bytes: Buffer.from(`${JSON.stringify({ schemaVersion: 1, reference: referenceAudit.historicalRuntimeReference, binding: buildPermissionReportBinding({ report, canonicalPayloadSha256: signatureArtifact.canonicalPayloadSha256, reportFileSha256: signatureArtifact.reportFileSha256 }), signatureBase64: signatureArtifact.signatureBase64 }, null, 2)}\n`), label: "Stage B authenticated historical runtime handoff" }] : []),
   ] });
   assertPermissionReportHashDomains({ report, signatureArtifact, reportBytes: fs.readFileSync(outputPath), signatureBytes: fs.readFileSync(signatureOutputPath) });
   return report;
