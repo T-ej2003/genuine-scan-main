@@ -77,8 +77,17 @@ export function createBrokerPolicyOwnershipClient({ run }) {
 
 // The caller authenticates signed saved-plan authority before entry. Both policy
 // convergence and separately approved pruning must use this critical section.
-export async function executeOwnedBrokerPolicyMutation({ ownership, operation, authenticate, readPolicy, mutate, persistReceipt }) {
-  const owner = ownership.acquire(operation);
+export async function executeOwnedBrokerPolicyMutation({ ownership, operation, reserve, authenticate, readPolicy, mutate, persistReceipt }) {
+  // One-use authority is consumed without IAM writes before any new generation.
+  // A failed/uncertain acquisition retains that reservation; never retry it.
+  assert.equal(typeof reserve, 'function');
+  await reserve();
+  let owner;
+  try { owner = ownership.acquire(operation); }
+  catch (cause) {
+    throw Object.assign(new Error('Authority reserved; ownership acquisition failed; read-only diagnosis required', { cause }),
+      { reservationConsumed: true, operationIdentity: operation.operationIdentity, ownership: cause.ownership, recoveryRequired: true });
+  }
   try {
     const approved = await authenticate(owner); ownership.assertHeld(owner);
     same(await readPolicy(), approved.predecessor);

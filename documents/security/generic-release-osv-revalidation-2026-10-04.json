@@ -1,8 +1,8 @@
 {
-  "checkedAt": "2026-10-04T22:48:09.404Z",
+  "checkedAt": "2026-10-04T23:14:35.569Z",
   "baseline": "d6f515fe393e0bcfda76e248aa8b3f2f3aae10e4",
-  "inputsSha256": "deaed0e4c0bac06cbe6a8e0dd982c56af7b56502b5cb57c660bd191986b7066e",
-  "previousInputsSha256": "299452356ab992b2e1bae44affb9812b70d594506b4ebac33ad0e6445b0e5f65",
+  "inputsSha256": "8f07fedd754f2b88af97d34b295b20b94c4c714b44030e3558631c1a39edeb5c",
+  "previousInputsSha256": "deaed0e4c0bac06cbe6a8e0dd982c56af7b56502b5cb57c660bd191986b7066e",
   "changedInputs": [
     "package.json",
     "scripts/apply-production-green-stage-b.mjs",
@@ -47,7 +47,7 @@
     },
     {
       "file": "scripts/aws/stage-b-broker-policy-ownership.mjs",
-      "classification": "Governed deployment/control-plane code; exact identity, JSON and stdlib processing; no glob/braces dependency or data path"
+      "classification": "Governed deployment/control-plane code; exact identity, JSON and stdlib processing; no glob/braces dependency or data path; replay reservation, canonical inventory comparison and read-only receipt recovery introduce no braces evaluation"
     },
     {
       "file": "scripts/aws/stage-b-broker-writer-session.mjs",
@@ -67,7 +67,7 @@
     },
     {
       "file": "scripts/aws/stage-b-staged-broker-executor.mjs",
-      "classification": "Governed deployment/control-plane code; exact identity, JSON and stdlib processing; no glob/braces dependency or data path"
+      "classification": "Governed deployment/control-plane code; exact identity, JSON and stdlib processing; no glob/braces dependency or data path; replay reservation, canonical inventory comparison and read-only receipt recovery introduce no braces evaluation"
     },
     {
       "file": "scripts/aws/stage-b-staged-broker-observations.mjs",
@@ -1135,5 +1135,12 @@
     }
   ],
   "baselineInputsSha256": "2071a78692c0379a3799984eed742cbac1b22a7899a59c019014a54d53de21df",
-  "finalCleanup": "Removed trailing blank line from task-rotation test fixture; repeated actual instrumentation/browser/runtime verification before rebinding."
+  "revalidatedFromCommit": "39163780fa8c79f34460ff766315a87df3913b62",
+  "revalidationChangedInputs": [
+    "scripts/aws/stage-b-broker-policy-ownership.mjs",
+    "scripts/aws/stage-b-staged-broker-executor.mjs",
+    "scripts/tests/stage-b-broker-policy-ownership.test.mjs",
+    "scripts/tests/stage-b-staged-broker-executor.test.mjs"
+  ],
+  "revalidationPurpose": "PR 622 consumed-approval replay and uncertain successful pruning recovery corrections"
 }

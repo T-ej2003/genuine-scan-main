@@ -41,6 +41,8 @@ Object.assign(SEQUENCES, { BROKER_POLICY_PRUNING_INTENT: 1, BROKER_POLICY_PRUNED
 const stateStep = status => ['STATE_REFRESH_INTENT', 'STATE_REFRESH_UNKNOWN', 'RECONCILED_PENDING_RELEASE_CAS'].includes(status);
 const receiptId = (id, status, value) => stateStep(status) ? brokerStateReservation(id) : id;
 const equal = (a, b) => assert.equal(canonicalJson(a), canonicalJson(b));
+const normalizePolicyInventory = snapshot => ({ policy: snapshot.policy, version: snapshot.version,
+  versions: snapshot.versions.map(v => ({ VersionId: v.VersionId, IsDefaultVersion: v.IsDefaultVersion })).sort((a, b) => a.VersionId.localeCompare(b.VersionId)) });
 export function readStagedBrokerReceipt({ run, id, status, directory, expected }) {
   assert.match(id || '', /^[a-f0-9]{64}$/); assert.ok(STEPS.includes(status));
   const file = path.join(directory, `receipt-${brokerDigest({ id, status })}-${randomUUID()}.json`);
@@ -352,13 +354,13 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
       };
       await executeOwnedBrokerPolicyMutation({ ownership,
         operation: { policyArn: STAGE_B_BROKER_POLICY.arn, sourceSha: preparation.sourceSha, operationIdentity: id, writerSession: session },
+        reserve: () => adapter.reserve(id, { purpose: preparation.purpose, nonce: authorization.nonce, preparationSha256: brokerDigest(preparation) }),
         authenticate: async () => {
           await adapter.authenticatePrerequisiteAuthorization(preparation, authorization);
           equal(preparation.target.policy, deriveBrokerPolicy(preparation.prerequisites.policy, preparation.prerequisiteChain.registration.result.taskMap));
           const artifacts = await adapter.readPlan(); assert.equal(brokerDigest(artifacts.bytes), preparation.savedPlanSha256);
           assert.equal(brokerDigest(artifacts.plan), preparation.logicalPlanSha256); assertPrerequisitePlan(artifacts.plan, preparation);
           assert.ok(readBrokerPolicyInventory(runAws).versions.length < 5, 'Separately approved pruning is required; do not auto-prune');
-          await adapter.reserve(id, { purpose: preparation.purpose, nonce: authorization.nonce, preparationSha256: brokerDigest(preparation) });
           return { predecessor: preparation.prerequisites.policy, successor: preparation.target.policy };
         },
         readPolicy,
@@ -405,17 +407,16 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
     executeBrokerPolicyPruning: async () => {
       assert.equal(phase, 'POLICY'); const session = pinPolicyWriter(); const id = await requireAuthorization(BROKER_POLICY_PRUNING);
       const ownership = createBrokerPolicyOwnershipClient({ run: args => runAws(args) });
-      const normalize = snapshot => ({ policy: snapshot.policy, version: snapshot.version, versions: snapshot.versions.map(v => ({ VersionId: v.VersionId, IsDefaultVersion: v.IsDefaultVersion })).sort((a, b) => a.VersionId.localeCompare(b.VersionId)) });
       await executeOwnedBrokerPolicyMutation({ ownership, operation: { policyArn: STAGE_B_BROKER_POLICY.arn, sourceSha: preparation.sourceSha, operationIdentity: id, writerSession: session },
+        reserve: () => adapter.reserve(id, { purpose: preparation.purpose, nonce: authorization.nonce, preparationSha256: brokerDigest(preparation) }),
         authenticate: async () => {
           await adapter.authenticatePrerequisiteAuthorization(preparation, authorization);
           const artifacts = await adapter.readPlan(); assert.equal(brokerDigest(artifacts.bytes), preparation.savedPlanSha256); assert.equal(brokerDigest(artifacts.plan), preparation.logicalPlanSha256);
           assertBrokerPolicyPruningPlan(artifacts.plan, preparation);
-          await adapter.reserve(id, { purpose: preparation.purpose, nonce: authorization.nonce, preparationSha256: brokerDigest(preparation) });
-          const predecessor = normalize({ policy: preparation.prerequisites.policy, version: preparation.prerequisites.policyVersion, versions: preparation.target.inventory });
+          const predecessor = normalizePolicyInventory({ policy: preparation.prerequisites.policy, version: preparation.prerequisites.policyVersion, versions: preparation.target.inventory });
           return { predecessor, successor: { ...predecessor, versions: predecessor.versions.filter(v => v.VersionId !== preparation.target.versionId) } };
         },
-        readPolicy: () => normalize(readBrokerPolicyInventory(runAws)),
+        readPolicy: () => normalizePolicyInventory(readBrokerPolicyInventory(runAws)),
         mutate: async (_, owner) => {
           const authorizedAt = new Date().toISOString(); await adapter.record(id, 'BROKER_POLICY_PRUNING_INTENT', { owner, authorizedAt, versionId: preparation.target.versionId });
           await adapter.authenticatePrerequisiteAuthorization(preparation, authorization); ownership.assertHeld(owner); consumeMutation(id);
@@ -459,18 +460,30 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
           if (preparation.prerequisiteChain) await adapter.authenticatePrerequisiteChain(preparation.prerequisiteChain);
           equal(await getAlias(), preparation.alias);
           const snapshot = readBrokerPolicyInventory(runAws);
+          let pruningPredecessor, pruningSuccessor;
+          if (pruning) {
+            const artifacts = await adapter.readPlan();
+            assert.equal(artifacts.artifactSetSha256, preparation.artifactSetSha256);
+            assert.equal(brokerDigest(artifacts.bytes), preparation.savedPlanSha256); assert.equal(brokerDigest(artifacts.plan), preparation.logicalPlanSha256);
+            assertBrokerPolicyPruningPlan(artifacts.plan, preparation); assert.equal(intent.versionId, preparation.target.versionId);
+            pruningPredecessor = normalizePolicyInventory({ policy: preparation.prerequisites.policy, version: preparation.prerequisites.policyVersion, versions: preparation.target.inventory });
+            pruningSuccessor = { ...pruningPredecessor, versions: pruningPredecessor.versions.filter(v => v.VersionId !== preparation.target.versionId) };
+          }
           terminal = maybeReceipt(pruning ? 'BROKER_POLICY_PRUNED' : 'BROKER_POLICY_CONVERGED');
           if (terminal) {
             equal(terminal.owner, owner); assert.equal(terminal.authorizationSha256, id);
             assert.equal(terminal.preparationSha256, brokerDigest(preparation)); assert.equal(terminal.sourceSha, preparation.sourceSha);
             successor = pruning ? terminal.successor : terminal.policy;
-            if (pruning) {
-              equal(successor.policy, preparation.prerequisites.policy); assert.equal(successor.version, preparation.prerequisites.policyVersion);
-              equal(successor.versions, preparation.target.inventory.filter(v => v.VersionId !== preparation.target.versionId).map(v => ({ VersionId: v.VersionId, IsDefaultVersion: v.IsDefaultVersion })).sort((a,b) => a.VersionId.localeCompare(b.VersionId)));
-            } else equal(successor, preparation.target.policy);
+            if (pruning) { equal(successor, pruningSuccessor); equal(normalizePolicyInventory(snapshot), pruningSuccessor); }
+            else equal(successor, preparation.target.policy);
+          } else if (pruning && canonicalJson(normalizePolicyInventory(snapshot)) === canonicalJson(pruningSuccessor)) {
+            successor = pruningSuccessor;
+            terminal = { status: 'BROKER_POLICY_PRUNED', sourceSha: preparation.sourceSha, preparationSha256: brokerDigest(preparation), authorizationSha256: id,
+              owner, successor, authorizedAt: intent.authorizedAt };
           } else if (canonicalJson(snapshot.policy) === canonicalJson(preparation.prerequisites.policy) && snapshot.version === preparation.prerequisites.policyVersion) {
             const expected = pruning ? preparation.target.inventory : intent.predecessorInventory;
-            assert.ok(expected, 'No authenticated predecessor inventory; retain ownership'); equal(snapshot.versions, expected);
+            assert.ok(expected, 'No authenticated predecessor inventory; retain ownership');
+            if (pruning) equal(normalizePolicyInventory(snapshot), pruningPredecessor); else equal(snapshot.versions, expected);
             terminal = { status: 'RECOVERED_NO_WRITE', sourceSha: preparation.sourceSha, preparationSha256: brokerDigest(preparation), authorizationSha256: id,
               owner, successor: snapshot, termination };
             successor = snapshot.policy;
@@ -500,14 +513,14 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
               equal(JSON.parse(stateResource('aws_iam_policy.broker').policy), preparation.target.policy);
             }
           }
-          successor = { policy: snapshot.policy, version: snapshot.version, versions: snapshot.versions.map(v => ({ VersionId: v.VersionId, IsDefaultVersion: v.IsDefaultVersion })).sort((a,b) => a.VersionId.localeCompare(b.VersionId)) };
+          successor = normalizePolicyInventory(snapshot);
           ownedReservations.add(id); // Authenticated existing reservation; no new mutation authority.
           return { previousExecutionCannotContinue: true, authorizationConsumed: true,
             outcome: terminal.status === 'RECOVERED_NO_WRITE' ? 'RECOVERED_NO_WRITE' : 'SUCCEEDED', expectedPolicy: successor, receiptSha256: brokerDigest(terminal) };
         },
         readPolicy: () => {
           const snapshot = readBrokerPolicyInventory(runAws);
-          return { policy: snapshot.policy, version: snapshot.version, versions: snapshot.versions.map(v => ({ VersionId: v.VersionId, IsDefaultVersion: v.IsDefaultVersion })).sort((a,b) => a.VersionId.localeCompare(b.VersionId)) };
+          return normalizePolicyInventory(snapshot);
         },
         persistReceipt: async () => {
           const status = terminal.status === 'RECOVERED_NO_WRITE' ? 'BROKER_POLICY_RECOVERED_NO_WRITE' : pruning ? 'BROKER_POLICY_PRUNED' : 'BROKER_POLICY_CONVERGED';

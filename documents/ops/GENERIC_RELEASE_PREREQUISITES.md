@@ -32,6 +32,14 @@ Pruning uses `prepare-pruning`, `authorize-pruning`, and `prune`, with an explic
 
 The guarantee is **no concurrent authorized automation writer** after successful acquisition. Root and `mscqr-ops-admin` remain administrative exceptions. Observed administrative drift fails closed; do not automatically rebaseline. Snapshot hashes cannot guarantee detection of an administrator mutating and restoring the original state.
 
+## One-use reservation and pruning recovery
+
+Convergence and pruning authenticate signed authority, then atomically reserve its existing S3 one-use journal **before** acquiring policy ownership. Reservation performs no IAM mutation. A consumed approval cannot create another ownership generation; concurrent copies have only one reservation winner. The subsequent owner binds that authorization digest as its operation identity, and the mutation intent binds the exact owner/generation.
+
+If reservation succeeds but acquisition fails, the executor reports `reservationConsumed` and read-only diagnosis required. The reservation remains consumed; no IAM mutation is attempted and no competing owner is released. An uncertain acquisition preserves its attempted ownership identity for diagnosis. Inspect the original reservation and consistent ownership record; never reuse the approval, infer an unlock, or retry acquisition blindly. Any future mutation needs fresh authority after the existing ownership/recovery boundary is satisfied.
+
+Uncertain pruning recovery validates the original saved pruning plan and intent's exact target. It compares canonical version inventories as collections. Success requires the predecessor inventory minus only the approved non-default version, the same default version and the same operative policy document. An exact predecessor is `RECOVERED_NO_WRITE`; every other state retains ownership. Exact successful recovery persists/authenticates one terminal receipt and completes/releases only the original generation, without calling `DeletePolicyVersion` again.
+
 ## Prior-writer proof and recovery
 
 The actual staged executor uses the named `mscqr-production-release-deployer` profile. The operator profile assumes that exact role from `mscqr-production-bootstrap-mfa`; its session name is operator configuration, not a workflow/job identity binding. No duration override was observed during the investigation. The canonical infrastructure runbook requests 3,600 seconds for the release role. Its maximum duration is externally managed, not established by this source-only validation. Recovery never infers expiration from either value.
@@ -69,7 +77,7 @@ AWS documents [STS session duration and identity](https://docs.aws.amazon.com/ST
 
 `npm run test:production-green-stage-b-control-plane` includes ownership, generic prerequisite, staged broker, reference-audit, historical-runtime, and terminal closure tests. Future-release fixtures use the same framework with three different source/image identities and returned revisions 17, 42, and 103; revision arithmetic is not authority. Additional tests exercise single native IAM mutation, uncertainty, refresh-only reconciliation, and cross-receipt substitution.
 
-The broad OSV reviewed-input boundary remains unchanged. After the implementation was final, the authorized security-owner revalidation independently reviewed all 23 changed boundary inputs, traced four real braces@3.0.3 build calls to the same repository-controlled Tailwind globs, checked the canonical browser module census and diagnostic source maps, and rechecked unchanged runtime packaging. Only the reviewed-input hash was rebound to `deaed0e4c0bac06cbe6a8e0dd982c56af7b56502b5cb57c660bd191986b7066e`. The raw HIGH/unpatched advisory remains visible. Scope, owner, advisory, version and expiry (2026-11-02) are unchanged. Evidence is in `documents/security/generic-release-osv-revalidation-2026-10-04.json`. No production execution or AWS mutation was performed.
+The broad OSV reviewed-input boundary remains unchanged. After the implementation was final, the authorized security-owner revalidation independently reviewed all 23 changed boundary inputs, traced four real braces@3.0.3 build calls to the same repository-controlled Tailwind globs, checked the canonical browser module census and diagnostic source maps, and rechecked unchanged runtime packaging. Only the reviewed-input hash was rebound to `8f07fedd754f2b88af97d34b295b20b94c4c714b44030e3558631c1a39edeb5c`. The raw HIGH/unpatched advisory remains visible. Scope, owner, advisory, version and expiry (2026-11-02) are unchanged. Evidence is in `documents/security/generic-release-osv-revalidation-2026-10-04.json`. No production execution or AWS mutation was performed.
 
 Recommendation: retain one fixed ownership domain for this one policy. Parallelism belongs between independent release components, never between writers of this shared policy; additional lock infrastructure is unnecessary.
 
@@ -86,3 +94,9 @@ Recommendation: retain one fixed ownership domain for this one policy. Paralleli
 - Full hosted Deployment Audit has not run for this uncommitted tree. The local fresh OSV runtime gate passes. PR readiness is local, not merge approval.
 
 The source-only operational handoff is review of the final local diff and these test/evidence results. Keep expired-session diagnosis separate from any future mutation authorization; a fresh session never revives consumed approval.
+
+## PR 622 P1 correction validation (2026-10-05)
+
+Both fresh P1 findings were reproduced before correction. One-use replay now fails before ownership acquisition; uncertain pruning success is authenticated against the exact approved successor inventory. The final broad-input security revalidation reviewed the four changed executable inputs against the prior reviewed head, repeated actual braces instrumentation and the canonical production browser census, and preserved every acceptance field except its input hash. No production mutation occurred.
+
+Validation: focused ownership/session/prerequisite/executor 112/112; Stage B 1,160/1,160; additional regressions 345/345; artifact contracts 23/23; capability graph valid (740 capabilities, 250 AWS calls); workflow YAML 95 valid. Future A/B/C fixtures remain green. Additional workflow contracts remain 39/40 with the unchanged protected-main delegation failure above. Fresh OSV runtime gate passes with the visible HIGH/unpatched finding; final secret scan and hostile self-review are clean.

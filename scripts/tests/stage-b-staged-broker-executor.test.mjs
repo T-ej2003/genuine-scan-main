@@ -14,7 +14,7 @@ import { STAGE_B_TERRAFORM_BACKEND_CONFIG, stageBApplyAttemptS3Key, stageBAttemp
 import { assertBrokerCallerPolicy, readStagedBrokerPrerequisites } from '../aws/stage-b-staged-broker-observations.mjs';
 import { classifyStageBPlan } from '../aws/stage-b-deployment-contract.mjs';
 import { publicationPlan, cutoverPlan } from './fixtures/staged-broker-runtime.mjs';
-import { BROKER_POLICY_CONVERGENCE, deriveBrokerPolicy } from '../aws/stage-b-release-prerequisites.mjs';
+import { BROKER_POLICY_CONVERGENCE, BROKER_POLICY_PRUNING, deriveBrokerPolicy } from '../aws/stage-b-release-prerequisites.mjs';
 const root = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'staged-broker-native-test-')); fs.chmodSync(directory, 0o700);
 test.after(() => fs.rmSync(directory, { recursive: true }));
@@ -258,6 +258,8 @@ for (const failure of [null, 'uncertain', 'wrong-successor', 'release-crash']) t
     await assert.rejects(() => adapter.executeBrokerPolicyConvergence()); assert.equal(writes, 1); assert.equal(refreshed, false);
   } else {
     await adapter.executeBrokerPolicyConvergence(); assert.equal(writes, 1); assert.equal(refreshed, true); assert.equal(JSON.parse(item.state.S).status, 'RELEASED');
+    const acquired = JSON.parse(item.state.S).identity;
+    await assert.rejects(() => adapter.executeBrokerPolicyConvergence()); assert.equal(writes, 1); assert.equal(JSON.parse(item.state.S).status, 'RELEASED'); assert.deepEqual(JSON.parse(item.state.S).identity, acquired);
   }
 });
 
@@ -269,4 +271,107 @@ for (const substitution of ['registration', 'target']) test(`physical prerequisi
   else chain.policy.result.policy = { broader: true };
   r.adapter.readCheckout = () => { assert.fail('Receipt substitution must fail before any downstream authority'); };
   await assert.rejects(() => r.adapter.authenticatePrerequisiteChain(chain));
+});
+
+async function pruningRecoveryFixture(state = 'successor') {
+  await native();
+  const p = preparation(); p.schemaVersion = 2; p.purpose = BROKER_POLICY_PRUNING; p.prerequisiteChain = null;
+  p.packageSha256 = brokerDigest(fs.readFileSync(files.package)); p.prerequisites.policyVersion = 'v5';
+  const inventory = ['v1','v2','v3','v4','v5'].map(VersionId => ({ VersionId, IsDefaultVersion: VersionId === 'v5' }));
+  p.target = { versionId: 'v2', inventory };
+  const plan = { purpose: p.purpose, sourceSha, policyArn: p.prerequisites.policyArn, defaultVersionId: 'v5', versionId: 'v2', inventory, mutation: 'iam:DeletePolicyVersion' };
+  const planPath = path.join(directory, `pruning-${state}.json`); fs.writeFileSync(planPath, JSON.stringify(plan), { mode: 0o600 });
+  p.savedPlanSha256 = brokerDigest(fs.readFileSync(planPath)); p.logicalPlanSha256 = brokerDigest(plan); p.artifactSetSha256 = stagedBrokerArtifactSet(files, root, p);
+  const auth = authorization(p), now = Date.now(); auth.issuedAt = new Date(now-1000).toISOString(); auth.expiresAt = new Date(now+600000).toISOString();
+  const objects = new Map(), calls = []; let item, writes = 0, versions = structuredClone(inventory), policy = p.prerequisites.policy, version = 'v5', failCompletion = false;
+  const reader = prerequisiteReader();
+  const runAws = args => {
+    calls.push(args); const [service, op] = args, value = flag => args[args.indexOf(flag)+1];
+    if (service === 'kms') return JSON.stringify({ SignatureValid: true });
+    if (service === 's3api') {
+      const key = value('--key');
+      if (op === 'put-object') { assert.ok(args.includes('--if-none-match')); assert.ok(!objects.has(key), 'consumed reservation'); objects.set(key, fs.readFileSync(value('--body'))); }
+      else { if (!objects.has(key)) throw Object.assign(new Error('missing'), { stderr: '(NoSuchKey)' }); fs.writeFileSync(args.find(a => a.startsWith(directory+'/')), objects.get(key)); }
+      return '{}';
+    }
+    if (service === 'dynamodb') {
+      if (op === 'get-item') return JSON.stringify(item ? { Item: item } : {});
+      if (op === 'put-item') { assert.equal(item, undefined); item = JSON.parse(value('--item')); }
+      else { const vals = JSON.parse(value('--expression-attribute-values')); assert.equal(item.state.S, vals[':current'].S);
+        if (failCompletion && JSON.parse(vals[':next'].S).terminal) { failCompletion = false; throw new Error('crash after receipt'); }
+        item.state = vals[':next']; return JSON.stringify({ Attributes: item }); }
+      return '{}';
+    }
+    if (service === 'iam') {
+      if (op === 'get-policy') return JSON.stringify({ Policy: { Arn: p.prerequisites.policyArn, DefaultVersionId: version } });
+      if (op === 'get-policy-version') return JSON.stringify({ PolicyVersion: { VersionId: version, IsDefaultVersion: true, Document: policy } });
+      if (op === 'list-policy-versions') return JSON.stringify({ Versions: versions });
+      if (op === 'delete-policy-version') {
+        assert.equal(JSON.parse(item.state.S).status, 'HELD'); assert.equal(value('--version-id'), 'v2'); assert.equal(writes++, 0);
+        if (state !== 'predecessor') versions = versions.filter(v => v.VersionId !== 'v2').reverse();
+        if (state === 'missing-other') versions = versions.filter(v => v.VersionId !== 'v3');
+        if (state === 'added') versions.push({ VersionId: 'v6', IsDefaultVersion: false });
+        if (state === 'default') { version = 'v4'; versions = versions.map(v => ({ ...v, IsDefaultVersion: v.VersionId === 'v4' })); }
+        if (state === 'policy') policy = { Version: '2012-10-17', Statement: [] };
+        throw new Error('uncertain deletion result');
+      }
+    }
+    return reader(args);
+  };
+  const make = phase => {
+    const adapter = createStagedBrokerExecutor({ phase, preparation: p, authorization: auth, planPath, files, directory, terraformDataDir: directory,
+      env: { PATH: process.env.PATH, HOME: process.env.HOME, TF_WORKSPACE: 'default' }, exec: () => assert.fail('Pruning must not run Terraform'), runAws,
+      writerSessionBoundary: { pin: () => ({ session: writerSession, run: runAws, environment: { PATH: process.env.PATH } }),
+        prove: held => proveBrokerWriterUnusable(held, { readIssuance: s => s, readClock: () => '2026-10-04T01:00:01.000Z' }) } });
+    adapter.readCheckout = async () => ({ sourceSha, treeSha256: p.treeSha256 }); adapter.readStateIdentity = async () => p.state;
+    adapter.readPrerequisites = async () => p.prerequisites; return adapter;
+  };
+  return { execute: make('POLICY'), recovery: make('POLICY_RECOVERY'), p, plan, planPath, auth, objects, calls, crashAfterReceipt: () => { failCompletion = true; }, state: () => ({ owner: item && JSON.parse(item.state.S), writes }) };
+}
+for (const state of ['successor','predecessor','missing-other','added','default','policy']) test(`uncertain pruning recovery authenticates exact ${state} inventory without delete replay`, async () => {
+  const r = await pruningRecoveryFixture(state);
+  await assert.rejects(() => r.execute.executeBrokerPolicyPruning()); assert.equal(r.state().owner.status, 'HELD');
+  if (['successor','predecessor'].includes(state)) {
+    const result = await r.recovery.recoverBrokerPolicyOwnership();
+    assert.equal(result.status, state === 'successor' ? 'SUCCEEDED' : 'RECOVERED_NO_WRITE'); assert.equal(r.state().owner.status, 'RELEASED');
+    const terminals = [...r.objects.values()].map(b => JSON.parse(b)).filter(v => ['BROKER_POLICY_PRUNED','BROKER_POLICY_RECOVERED_NO_WRITE'].includes(v.status));
+    assert.equal(terminals.length, 1);
+    if (state === 'successor') assert.deepEqual(terminals[0].value.successor.versions.map(v => v.VersionId), ['v1','v3','v4','v5']);
+    await assert.rejects(() => r.recovery.recoverBrokerPolicyOwnership());
+    await assert.rejects(() => r.execute.executeBrokerPolicyPruning()); assert.equal(r.state().owner.status, 'RELEASED'); assert.equal(r.state().owner.identity.generation, 1);
+  } else { await assert.rejects(() => r.recovery.recoverBrokerPolicyOwnership()); assert.equal(r.state().owner.status, 'HELD'); }
+  assert.equal(r.state().writes, 1); assert.equal(r.calls.filter(a => a[1] === 'delete-policy-version').length, 1);
+});
+
+for (const substitution of ['default-target','wrong-target','intent-target']) test(`pruning rejects authenticated ${substitution} substitution`, async () => {
+  const r = await pruningRecoveryFixture();
+  if (substitution === 'intent-target') {
+    await assert.rejects(() => r.execute.executeBrokerPolicyPruning());
+    const key = stageBAttemptStepS3ObjectKey(brokerDigest(r.auth), 1), intent = JSON.parse(r.objects.get(key));
+    intent.value.versionId = 'v3'; r.objects.set(key, Buffer.from(JSON.stringify(intent)));
+    await assert.rejects(() => r.recovery.recoverBrokerPolicyOwnership()); assert.equal(r.state().owner.status, 'HELD');
+  } else {
+    r.plan.versionId = substitution === 'default-target' ? 'v5' : 'v9';
+    fs.writeFileSync(r.planPath, JSON.stringify(r.plan), { mode: 0o600 });
+    r.p.target.versionId = r.plan.versionId; r.p.savedPlanSha256 = brokerDigest(fs.readFileSync(r.planPath)); r.p.logicalPlanSha256 = brokerDigest(r.plan);
+    r.auth.preparationSha256 = brokerDigest(r.p);
+    await assert.rejects(() => r.execute.executeBrokerPolicyPruning()); assert.equal(r.state().writes, 0);
+  }
+  assert.ok(r.state().writes <= 1);
+});
+test('native same pruning authorization races: one reservation, one owner, one uncertain delete', async () => {
+  const r = await pruningRecoveryFixture();
+  const result = await Promise.allSettled([r.execute.executeBrokerPolicyPruning(), r.execute.executeBrokerPolicyPruning()]);
+  assert.equal(result.filter(v => v.status === 'rejected').length, 2);
+  assert.equal(r.calls.filter(a => a[1] === 'put-item').length, 1); assert.equal(r.state().writes, 1);
+  await r.recovery.recoverBrokerPolicyOwnership(); assert.equal(r.state().owner.status, 'RELEASED'); assert.equal(r.state().writes, 1);
+});
+
+test('uncertain successful pruning persists terminal receipt once across a completion crash', async () => {
+  const r = await pruningRecoveryFixture(); await assert.rejects(() => r.execute.executeBrokerPolicyPruning());
+  r.crashAfterReceipt(); await assert.rejects(() => r.recovery.recoverBrokerPolicyOwnership());
+  assert.equal(r.state().owner.status, 'HELD');
+  const puts = r.calls.filter(a => a[1] === 'put-object').length;
+  const result = await r.recovery.recoverBrokerPolicyOwnership(); assert.equal(result.status, 'SUCCEEDED');
+  assert.equal(r.calls.filter(a => a[1] === 'put-object').length, puts); assert.equal(r.state().owner.status, 'RELEASED'); assert.equal(r.state().writes, 1);
 });
