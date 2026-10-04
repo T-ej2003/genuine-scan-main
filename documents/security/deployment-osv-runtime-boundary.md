@@ -203,3 +203,36 @@ after expiry the next step blocks and needs reviewed remediation/renewal. This
 changes only time-window enforcement, not release, worker or component authority.
 The permanent regression simulates November 1 success followed by November 2
 production dispatch and verifies zero mutation callbacks.
+
+
+### ProviderReadOnly reconciler security-owner revalidation (2026-10-04)
+
+The owner authorized fresh revalidation of the complete focused reconciler
+candidate based on protected main 1df1d48015440ca13e6ebbe87a0192543438b039.
+The unchanged broad boundary independently reproduces previous hash
+`e39ae7f5a60a203c7a345a188de898121cb082851a34df0d94c4d8e902dcfe8f`
+and candidate hash
+`2071a78692c0379a3799984eed742cbac1b22a7899a59c019014a54d53de21df`.
+Exactly two covered inputs changed: the ProviderReadOnly reconciliation contract
+and its tests. Operations/security documentation lies outside this boundary.
+
+A fresh instrumented production build observed four braces 3.0.3 calls with
+exactly the four repository-controlled globs documented above. Neither changed
+input loaded in the build. Inspection of 1,606 source-map sources found no braces
+library/affected recursive-walker implementation. Backend/worker lockfile has no
+braces instance; canonical packaging retains their separate pruned dependency
+closure and the frontend's Nginx/static artifact runtime. Build configuration,
+plugins, dependency locks and runtime packaging are unchanged.
+
+The reconciler consumes policy/evidence/AWS data through JSON normalization,
+canonical serialization, hashes, exact comparisons and explicit CLI arguments.
+Its new logic only reverses enumerated policy statement additions. No reconciler
+value becomes a Tailwind glob or reaches braces/micromatch/fast-glob evaluation.
+HTTP, QR, database, queue, runtime environment and approval inputs do not become
+content-discovery configuration or trigger runtime Tailwind compilation.
+There is no new braces call site, input source or attacker-controlled pattern.
+
+This revalidates the specific CVE reachability decision, not universal browser
+plugin provenance. The finding remains HIGH and unpatched. Only the acceptance
+input hash is rebound; owner, scope, rationale, advisory, version and exclusive
+2026-11-02 expiry remain unchanged. Future source changes still invalidate it.

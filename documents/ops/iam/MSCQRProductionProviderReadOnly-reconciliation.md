@@ -105,3 +105,29 @@ Before proposing or executing the contract, run
 `npm run stage-b:deployment-closure:pull-request`. This aggregate check includes
 `rls:full-verify`, so changes to authoritative deployment inputs cannot leave
 the generated Full-RLS package stale while narrower IAM tests remain green.
+
+## Enumerated staged-broker inventory transition
+
+The reconciler also recognizes the exact five-statement inventory evolution
+from policy hash `7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade`
+to canonical target `f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5`.
+It reconstructs and authenticates the predecessor by reversing exactly:
+
+- The release-deployer ARN added to the existing five role-read actions.
+  `iam:ListRolePolicies` already exists; only its exact resource scope grows.
+- `lambda:ListAliases` and `lambda:ListFunctionUrlConfigs` on the broker function.
+- The canonical qualified broker scope for existing `GetAlias`/`GetPolicy` reads.
+- Regional `ListEventSourceMappings`, restricted to eu-west-2.
+- `GetPolicy`/`GetPolicyVersion` on the ten canonical caller-policy ARNs.
+
+Preparation records these exact before/after statements, not a generic read-only
+policy diff. Subsets, supersets, changed conditions or arbitrary targets fail
+closed. The earlier exact worker-image transition remains supported. Both use
+the same predecessor-bound approval, version/attachment CAS and durable journal.
+Replay authenticates consumed status without another write.
+
+Postwrite verification proves policy hash, version inventory, attachment topology
+and journal consumption. The executor does not run Access Analyzer or IAM
+simulations. After separately authorized execution, run the existing Stage-B
+permission preflight independently to prove required reads and forbidden actions.
+Merging this correction does not authorize or execute an IAM change.
