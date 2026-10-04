@@ -3007,3 +3007,98 @@ test("canonical reference audit permits only the exact bootstrap historical runt
     }
   }
 });
+
+function makeConvergedBrokerNoOpFixture() {
+  const fixture = makeAtomicBrokerFixture({ brokerActions: ["no-op"] });
+  for (const change of fixture.plan.resource_changes.filter((item) => Object.hasOwn(STAGE_B_TASK_DEFINITION_FAMILIES, item.address))) {
+    change.change.actions = ["no-op"];
+    change.change.before = structuredClone(change.change.after);
+    delete change.change.replace_paths;
+    fixture.plan.planned_values.root_module.resources.find((item) => item.address === change.address).values = structuredClone(change.change.after);
+  }
+  const configuration = fixture.reader.getFunctionConfiguration();
+  const targets = Object.fromEntries(STAGE_B_MODES.map((mode) => [mode, newArnFor(familyForMode(mode))]));
+  configuration.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON = JSON.stringify(targets);
+  fixture.reader.getFunctionConfiguration = () => structuredClone(configuration);
+  const broker = fixture.plan.resource_changes.find((item) => item.address === "aws_lambda_function.broker");
+  broker.change.before = { environment: [{ variables: structuredClone(configuration.Environment.Variables) }] };
+  broker.change.after = structuredClone(broker.change.before);
+  delete broker.change.after_unknown;
+  fixture.plan.prior_state.values.root_module.resources.filter((item) => Object.hasOwn(STAGE_B_TASK_DEFINITION_FAMILIES, item.address)).forEach((item) => {
+    item.values = structuredClone(fixture.plan.resource_changes.find((change) => change.address === item.address).change.before);
+  });
+  return rebindNoOpFixture(fixture);
+}
+
+function rebindNoOpFixture(fixture) {
+  fixture.planBytes = Buffer.from(JSON.stringify(fixture.plan));
+  fixture.planJsonSha256 = sha256(fixture.planBytes);
+  return fixture;
+}
+
+test("converged broker current exact references with a no-op plan pass without invented rollovers", () => {
+  const fixture = makeConvergedBrokerNoOpFixture(), audit = generate(fixture);
+  assert.equal(audit.plannedAtomicBrokerRollovers.length, 0);
+  assert.equal(audit.currentTaskDefinitions.currentNoOps, 12);
+  validateBrokerPlan(fixture, audit);
+});
+
+for (const mode of STAGE_B_MODES) {
+  test(`converged broker rejects stale no-op reference for ${mode}`, () => {
+    const fixture = makeConvergedBrokerNoOpFixture();
+    const original = fixture.reader.getFunctionConfiguration;
+    fixture.reader.getFunctionConfiguration = () => {
+      const config = original(), targets = JSON.parse(config.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON);
+      targets[mode] = oldArnFor(familyForMode(mode));
+      config.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON = JSON.stringify(targets);
+      return config;
+    };
+    assert.throws(() => generate(fixture), /superseded|no-op planned references/);
+  });
+}
+
+test("converged broker rejects unknown no-op reference", () => {
+  const fixture = makeConvergedBrokerNoOpFixture(), original = fixture.reader.getFunctionConfiguration;
+  fixture.reader.getFunctionConfiguration = () => {
+    const config = original(), targets = JSON.parse(config.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON);
+    targets["full-rls-admin-bootstrap"] = newArnFor(familyForMode("full-rls-admin-bootstrap")).replace(":2", ":999");
+    config.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON = JSON.stringify(targets);
+    return config;
+  };
+  assert.throws(() => generate(fixture), /not an explicitly retained or current no-op revision/);
+});
+
+for (const side of ["before", "after"]) {
+  test(`converged broker rejects conflicting ${side} no-op target`, () => {
+    const fixture = makeConvergedBrokerNoOpFixture();
+    const broker = fixture.plan.resource_changes.find((item) => item.address === "aws_lambda_function.broker");
+    const targets = JSON.parse(broker.change[side].environment[0].variables.BROKER_TASK_DEFINITIONS_JSON);
+    targets["full-rls-admin-bootstrap"] = oldArnFor(familyForMode("full-rls-admin-bootstrap"));
+    broker.change[side].environment[0].variables.BROKER_TASK_DEFINITIONS_JSON = JSON.stringify(targets);
+    assert.throws(() => generate(rebindNoOpFixture(fixture)), /planned references must equal/);
+  });
+}
+
+for (const mutation of ["broker", "definition", "planned-arn", "environment", "missing-map", "malformed-map", "unknown-map", "unknown-broker"]) {
+  test(`converged broker rejects ambiguous or incomplete ${mutation} authority`, () => {
+    const fixture = makeConvergedBrokerNoOpFixture();
+    const broker = fixture.plan.resource_changes.find((item) => item.address === "aws_lambda_function.broker");
+    const definition = fixture.plan.resource_changes.find((item) => item.address === executorAddressForMode("full-rls-admin-bootstrap"));
+    if (mutation === "broker") fixture.plan.resource_changes.push(structuredClone(broker));
+    if (mutation === "definition") fixture.plan.resource_changes.push(structuredClone(definition));
+    if (mutation === "planned-arn") definition.change.after.arn = definition.change.after.arn.replace(":2", ":3");
+    if (mutation === "environment") broker.change.after.environment.push(structuredClone(broker.change.after.environment[0]));
+    if (mutation === "missing-map") delete broker.change.after.environment[0].variables.BROKER_TASK_DEFINITIONS_JSON;
+    if (mutation === "malformed-map") broker.change.after.environment[0].variables.BROKER_TASK_DEFINITIONS_JSON = "{";
+    if (mutation === "unknown-map") broker.change.after_unknown = { environment: [{ variables: true }] };
+    if (mutation === "unknown-broker") broker.change.after_unknown = true;
+    assert.throws(() => generate(rebindNoOpFixture(fixture)), /one exact|duplicate|planned ARN|environment must be exact|missing|malformed|unknown|no-op has drift/i);
+  });
+}
+
+test("converged broker no-op still rejects stale source/image content", () => {
+  const fixture = makeConvergedBrokerNoOpFixture();
+  const definition = fixture.plan.resource_changes.find((item) => item.address === executorAddressForMode("full-rls-admin-bootstrap"));
+  for (const side of ["before", "after"]) definition.change[side].container_definitions = definition.change[side].container_definitions.replace(releaseSha, "0".repeat(40));
+  assert.throws(() => generate(rebindNoOpFixture(fixture)), /provenance is stale|planned value drift/);
+});
