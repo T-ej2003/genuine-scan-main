@@ -47,30 +47,35 @@ export function readStagedBrokerPrerequisites(run) {
   }
   const callerInlineDocuments = callerInline.map(name => [name, json(['iam', 'get-role-policy', '--role-name', callerRole, '--policy-name', name]).PolicyDocument]);
   for (const [, content] of callerInlineDocuments) assertBrokerCallerPolicy(content);
-  const aliases = complete(json(['lambda', 'list-aliases', '--function-name', STAGE_B.brokerFunctionArn])).Aliases;
-  assert.equal(aliases.length, 1); assert.equal(aliases[0].AliasArn, STAGE_B.brokerAliasArn);
+  const readTraffic = () => {
+    const aliases = complete(json(['lambda', 'list-aliases', '--function-name', STAGE_B.brokerFunctionArn])).Aliases;
+    assert.equal(aliases.length, 1); assert.equal(aliases[0].AliasArn, STAGE_B.brokerAliasArn);
+    const versions = complete(json(['lambda', 'list-versions-by-function', '--function-name', STAGE_B.brokerFunctionArn])).Versions;
+    assert.ok(versions.length > 0);
+    // No resource-based invocation authority may reach $LATEST or an unreviewed
+    // qualified version. Absence must be AWS's explicit NotFound, never any error.
+    for (const version of versions) {
+      assert.match(version.Version, /^(?:\$LATEST|[1-9][0-9]*)$/);
+      try {
+        json(['lambda', 'get-policy', '--function-name', STAGE_B.brokerFunctionArn, ...(version.Version === '$LATEST' ? [] : ['--qualifier', version.Version])]);
+      } catch (error) {
+        if (/\(ResourceNotFoundException\)/.test(String(error.stderr))) continue;
+        throw error;
+      }
+      throw new Error('Unreviewed version has invocation policy');
+    }
+    const reviewed = json(['lambda', 'get-policy', '--function-name', STAGE_B.brokerFunctionArn, '--qualifier', STAGE_B.brokerAliasQualifier]);
+    const reviewedPolicy = JSON.parse(reviewed.Policy);
+    equal(reviewedPolicy.Statement, [{ Sid: 'OnlyProtectedReleaseRoleMayInvokeReviewedAlias', Effect: 'Allow', Principal: { AWS: `arn:aws:iam::${STAGE_B.account}:role/mscqr-production-release-deployer` }, Action: 'lambda:InvokeFunction', Resource: STAGE_B.brokerAliasArn }]);
+    const urls = complete(json(['lambda', 'list-function-url-configs', '--function-name', STAGE_B.brokerFunctionArn])).FunctionUrlConfigs;
+    const events = complete(json(['lambda', 'list-event-source-mappings', '--function-name', STAGE_B.brokerFunctionArn])).EventSourceMappings;
+    assert.ok(Array.isArray(urls) && urls.length === 0); assert.ok(Array.isArray(events) && events.length === 0);
+    return { aliases, versions, reviewedPolicy, urls, events };
+  };
+  const trafficSnapshot = readTraffic();
+  const { aliases, urls, events } = trafficSnapshot;
   const configuration = json(['lambda', 'get-function-configuration', '--function-name', STAGE_B.brokerFunctionArn, '--qualifier', aliases[0].FunctionVersion]);
   const taskMap = JSON.parse(configuration.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON);
-  const versions = complete(json(['lambda', 'list-versions-by-function', '--function-name', STAGE_B.brokerFunctionArn])).Versions;
-  assert.ok(versions.length > 0);
-  // No resource-based invocation authority may reach $LATEST or an unreviewed
-  // qualified version. Absence must be AWS's explicit NotFound, never any error.
-  for (const version of versions) {
-    assert.match(version.Version, /^(?:\$LATEST|[1-9][0-9]*)$/);
-    try {
-      json(['lambda', 'get-policy', '--function-name', STAGE_B.brokerFunctionArn, ...(version.Version === '$LATEST' ? [] : ['--qualifier', version.Version])]);
-    } catch (error) {
-      if (/\(ResourceNotFoundException\)/.test(String(error.stderr))) continue;
-      throw error;
-    }
-    throw new Error('Unreviewed version has invocation policy');
-  }
-  const reviewed = json(['lambda', 'get-policy', '--function-name', STAGE_B.brokerFunctionArn, '--qualifier', STAGE_B.brokerAliasQualifier]);
-  const reviewedPolicy = JSON.parse(reviewed.Policy);
-  equal(reviewedPolicy.Statement, [{ Sid: 'OnlyProtectedReleaseRoleMayInvokeReviewedAlias', Effect: 'Allow', Principal: { AWS: `arn:aws:iam::${STAGE_B.account}:role/mscqr-production-release-deployer` }, Action: 'lambda:InvokeFunction', Resource: STAGE_B.brokerAliasArn }]);
-  const urls = complete(json(['lambda', 'list-function-url-configs', '--function-name', STAGE_B.brokerFunctionArn])).FunctionUrlConfigs;
-  const events = complete(json(['lambda', 'list-event-source-mappings', '--function-name', STAGE_B.brokerFunctionArn])).EventSourceMappings;
-  assert.ok(Array.isArray(urls) && urls.length === 0); assert.ok(Array.isArray(events) && events.length === 0);
   // Guard the snapshot against an alias move during the inventory.
   const finalAlias = json(['lambda', 'get-alias', '--function-name', STAGE_B.brokerFunctionArn, '--name', STAGE_B.brokerAliasQualifier]);
   assert.equal(finalAlias.FunctionVersion, aliases[0].FunctionVersion); assert.equal(finalAlias.RevisionId, aliases[0].RevisionId);
@@ -83,6 +88,11 @@ export function readStagedBrokerPrerequisites(run) {
     equal(json(['iam', 'get-policy-version', '--policy-arn', arn, '--version-id', versionId]).PolicyVersion.Document, content);
   }
   for (const [name, content] of callerInlineDocuments) equal(json(['iam', 'get-role-policy', '--role-name', callerRole, '--policy-name', name]).PolicyDocument, content);
+  equal(readTraffic(), trafficSnapshot);
+  equal(json(['iam', 'get-role', '--role-name', STAGE_B_BROKER_POLICY.roleName]).Role, role);
+  equal(complete(json(['iam', 'list-attached-role-policies', '--role-name', STAGE_B_BROKER_POLICY.roleName])).AttachedPolicies, attachments);
+  equal(complete(json(['iam', 'list-role-policies', '--role-name', STAGE_B_BROKER_POLICY.roleName])).PolicyNames, inline);
+  equal(json(['lambda', 'get-function-configuration', '--function-name', STAGE_B.brokerFunctionArn, '--qualifier', aliases[0].FunctionVersion]), configuration);
   return brokerPrerequisiteIdentity({ policyArn: policy.Arn, policyVersion: policy.DefaultVersionId, policy: document.Document,
     role: { Arn: role.Arn, RoleId: role.RoleId, trust: role.AssumeRolePolicyDocument, attachedPolicies: attachments.map(p => p.PolicyArn).sort(), inlinePolicies: inline.sort(), permissionsBoundary: role.PermissionsBoundary || null }, taskMap,
     traffic: { reviewedAliasOnly: true, unqualifiedRoutes: [], otherVersionRoutes: [], functionUrls: urls, eventSourceMappings: events } });

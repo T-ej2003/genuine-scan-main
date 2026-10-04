@@ -9,7 +9,7 @@ import { createBrokerKmsAuthorizationBoundary } from './stage-b-staged-broker-au
 import { readStagedBrokerReceipt, readStagedBrokerSourceAuthority, stagedBrokerSourceReservation, normalizeBrokerAlias } from './stage-b-staged-broker-executor.mjs';
 import { readStagedBrokerPrerequisites } from './stage-b-staged-broker-observations.mjs';
 import { STAGE_B_TERRAFORM_BACKEND, readStageBTerraformStateIdentity } from './stage-b-terraform-backend-contract.mjs';
-import { stateHash } from './production-component-deployment-state.mjs';
+import { stateHash, assertProductionComponentDeploymentState, componentDeploymentProvenance } from './production-component-deployment-state.mjs';
 
 const verified = new WeakSet();
 const equal = (a, b, message) => assert.equal(brokerDigest(a), brokerDigest(b), message);
@@ -71,7 +71,12 @@ export function assertStagedBrokerTerminal(proof, { client, result, previousGene
   assertStagedBrokerProof(proof, result.state.components.security.sourceSha);
   assert.equal(result.state.generation, previousGeneration + (result.alreadyCurrent ? 0 : 1));
   assert.equal(result.state.components.security.stagedBrokerEvidenceSha256, proof.evidenceSha256);
-  assert.equal(stateHash(client.read()), stateHash(result.state), 'Component-state CAS readback differs');
+  const current = assertProductionComponentDeploymentState(client.read());
+  assert.ok(current.generation >= result.state.generation, 'Component-state generation regressed');
+  equal(current.components.security, result.state.components.security, 'Committed security component changed');
+  equal(componentDeploymentProvenance(current, 'security'), componentDeploymentProvenance(result.state, 'security'), 'Security provenance changed');
+  equal(current.historicalRuntimeRetention ?? null, result.state.historicalRuntimeRetention ?? null, 'Historical retention changed');
+  if (current.generation === result.state.generation) assert.equal(stateHash(current), stateHash(result.state), 'Same-generation state differs');
   return { status: 'COMMITTED', evidenceSha256: proof.evidenceSha256, componentStateSha256: stateHash(result.state), generation: result.state.generation };
 }
 

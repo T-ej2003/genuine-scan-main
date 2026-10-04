@@ -4,7 +4,7 @@ import { ready, sourceSha, now, configuration } from './fixtures/staged-broker-r
 import { executeBrokerAliasCas, reconcileBrokerAlias } from '../aws/stage-b-staged-broker.mjs';
 import { authenticateStagedBrokerClosure, assertStagedBrokerProof, assertStagedBrokerTerminal } from '../aws/stage-b-staged-broker-closure.mjs';
 import { brokerDigest } from '../aws/stage-b-staged-broker-contract.mjs';
-import { createProductionComponentDeploymentState } from '../aws/production-component-deployment-state.mjs';
+import { createProductionComponentDeploymentState, advanceProductionComponentDeploymentState } from '../aws/production-component-deployment-state.mjs';
 import { canonicalSha256 } from '../aws/production-green-stage-b-contract.mjs';
 import { commitSecurityComponentState } from '../aws/commit-production-component-security-state.mjs';
 
@@ -34,7 +34,18 @@ test('verified four-phase closure requires a real component-state CAS readback',
   const body = { sourceSha, valid: true }, authorization = { ...body, authorizationSha256: canonicalSha256(body) };
   const result = await commitSecurityComponentState({ sourceSha, authorization, client, stagedBrokerProof: proof });
   assert.equal(result.stagedBroker.status, 'COMMITTED'); assert.equal(current.generation, 2);
-  assert.throws(() => assertStagedBrokerTerminal(proof, { client: { read: () => ({ ...current, generation: 3 }) }, result, previousGeneration: 1 }));
+  const priorApplication = { sourceSha: 'c'.repeat(40), establishedThroughSha: 'c'.repeat(40), imageDigest: `sha256:${'b'.repeat(64)}`, taskDefinitionArn: 'arn:aws:ecs:eu-west-2:368992683803:task-definition/example:1', desiredCount: 1 };
+  let later = advanceProductionComponentDeploymentState({ current, expectedGeneration: current.generation, lane: 'SECURITY_INFRASTRUCTURE', changes: { backend: priorApplication, frontend: priorApplication }, updatedByWorkflow: 'local-test', githubRunId: 'local-test' });
+  for (const component of ['backend', 'frontend']) {
+    later = advanceProductionComponentDeploymentState({ current: later, expectedGeneration: later.generation, lane: 'NORMAL_APPLICATION', changes: { [component]: { sourceSha, establishedThroughSha: sourceSha, imageDigest: `sha256:${'c'.repeat(64)}`, taskDefinitionArn: 'arn:aws:ecs:eu-west-2:368992683803:task-definition/example:1', desiredCount: 1 } }, updatedByWorkflow: 'local-test', githubRunId: 'local-test' });
+    assert.equal(assertStagedBrokerTerminal(proof, { client: { read: () => later }, result, previousGeneration: 1 }).status, 'COMMITTED');
+  }
+  for (const mutated of [
+    { ...current, generation: 1 },
+    { ...current, generation: 3, components: { ...current.components, security: { ...current.components.security, stagedBrokerEvidenceSha256: '0'.repeat(64) } } },
+    { ...current, generation: 3, componentProvenance: { ...current.componentProvenance, security: { ...current.componentProvenance.security, generation: 3 } } },
+    { ...current, generation: 3, repository: 'untrusted' },
+  ]) assert.throws(() => assertStagedBrokerTerminal(proof, { client: { read: () => mutated }, result, previousGeneration: 1 }));
 });
 test('terminal generation comes from the same authenticated read used by the CAS', async () => {
   const r = await terminal(), proof = await authenticateStagedBrokerClosure({ sourceSha, deps: r.deps });

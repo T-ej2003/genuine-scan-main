@@ -9,7 +9,7 @@ import { brokerDigest, brokerTargetIdentity, brokerStateReservation, assertBroke
 import { createStagedBrokerExecutor, stagedBrokerArtifactSet, readStagedBrokerSourceAuthority, stagedBrokerSourceReservation } from '../aws/stage-b-staged-broker-executor.mjs';
 import { packageStageBBroker } from '../aws/package-production-green-stage-b-broker.mjs';
 import { STAGE_B_TERRAFORM_BACKEND_CONFIG, stageBApplyAttemptS3Key, stageBAttemptStepS3ObjectKey } from '../aws/stage-b-terraform-backend-contract.mjs';
-import { assertBrokerCallerPolicy } from '../aws/stage-b-staged-broker-observations.mjs';
+import { assertBrokerCallerPolicy, readStagedBrokerPrerequisites } from '../aws/stage-b-staged-broker-observations.mjs';
 import { classifyStageBPlan } from '../aws/stage-b-deployment-contract.mjs';
 import { publicationPlan, cutoverPlan } from './fixtures/staged-broker-runtime.mjs';
 const root = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
@@ -141,4 +141,42 @@ test('native reconciliation applies only validated refresh saved plan, then capt
   assert.equal(plans.length,2); assert.ok(plans[0].args.includes('-refresh-only')); assert.ok(!plans[1].args.includes('-refresh-only'));
   assert.equal(r.calls.filter(c => c.command === 'terraform' && c.args.includes('apply')).length,1);
   assert.equal(r.calls.filter(c => c.args[1] === 'update-alias').length,0);
+});
+
+// Mutations happen after the first traffic census, immediately before its final
+// consistency guard. A fixed alias cannot hide a newly created invocation route.
+function prerequisiteReader(drift = null) {
+  const p = preparation().prerequisites;
+  let changed = false;
+  return args => {
+    const [service, operation] = args, value = flag => args[args.indexOf(flag) + 1];
+    let result;
+    if (service === 'iam') {
+      if (operation === 'get-policy') result = { Policy: { Arn: p.policyArn, DefaultVersionId: p.policyVersion } };
+      else if (operation === 'get-policy-version') result = { PolicyVersion: { VersionId: p.policyVersion, IsDefaultVersion: true, Document: p.policy } };
+      else if (operation === 'get-role') result = { Role: { Arn: p.role.Arn, RoleId: p.role.RoleId, AssumeRolePolicyDocument: p.role.trust } };
+      else if (operation === 'list-attached-role-policies') result = { AttachedPolicies: value('--role-name') === 'mscqr-production-release-deployer' ? [] : [{ PolicyArn: p.policyArn }] };
+      else if (operation === 'list-role-policies') result = { PolicyNames: [] };
+    } else if (service === 'lambda') {
+      if (operation === 'get-alias') { changed = true; result = alias; }
+      else if (operation === 'list-aliases') result = { Aliases: [alias] };
+      else if (operation === 'get-function-configuration') result = configuration('12');
+      else if (operation === 'list-versions-by-function') result = { Versions: [{ Version: '$LATEST' }, { Version: '12' }, ...(changed && drift === 'version' ? [{ Version: '13' }] : [])] };
+      else if (operation === 'get-policy') {
+        if (value('--qualifier') !== 'reviewed') {
+          if (changed && drift === 'policy') result = { Policy: '{}' };
+          else throw Object.assign(new Error('Not found'), { stderr: '(ResourceNotFoundException)' });
+        } else result = { Policy: JSON.stringify({ Statement: [{ Sid: 'OnlyProtectedReleaseRoleMayInvokeReviewedAlias', Effect: 'Allow', Principal: { AWS: 'arn:aws:iam::368992683803:role/mscqr-production-release-deployer' }, Action: 'lambda:InvokeFunction', Resource: alias.AliasArn }] }) };
+      } else if (operation === 'list-function-url-configs') result = { FunctionUrlConfigs: changed && drift === 'url' ? [{ FunctionUrl: 'https://unexpected.example' }] : [] };
+      else if (operation === 'list-event-source-mappings') result = { EventSourceMappings: changed && drift === 'event' ? [{ UUID: 'unexpected' }] : [] };
+    }
+    assert.ok(result, `Unexpected mocked read: ${service} ${operation}`);
+    return JSON.stringify(result);
+  };
+}
+test('complete stable traffic census authenticates the canonical prerequisite', () => {
+  assert.deepEqual(readStagedBrokerPrerequisites(prerequisiteReader()), preparation().prerequisites);
+});
+for (const drift of ['policy', 'url', 'event', 'version']) test(`end-of-scan traffic guard rejects concurrent ${drift}`, () => {
+  assert.throws(() => readStagedBrokerPrerequisites(prerequisiteReader(drift)));
 });

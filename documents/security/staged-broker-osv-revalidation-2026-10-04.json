@@ -1,5 +1,5 @@
 {
-  "inputsSha256": "c4919a282c2f531fd6a3c4f9b386289c93c3147db41f4b18f0158f0bc13f3d54",
+  "inputsSha256": "16e97f0a7279ea02b94493a4a5858a526f23d899af6d2e8a922865df0d56ba92",
   "changedInputCount": 32,
   "version": "3.0.3",
   "patterns": [
@@ -567,7 +567,7 @@
       "path": "scripts/aws/stage-b-staged-broker-closure.mjs",
       "status": "added",
       "before": null,
-      "after": "b76cf7843fef46abaf604fb773dd18e829fb601df060db7a3218df7a9cce7659"
+      "after": "ff758b46ff555b2c8561a5cceafe6045062c703346463ecc693bfe5dff7349bf"
     },
     {
       "path": "scripts/aws/stage-b-staged-broker-contract.mjs",
@@ -585,7 +585,7 @@
       "path": "scripts/aws/stage-b-staged-broker-observations.mjs",
       "status": "added",
       "before": null,
-      "after": "e6bde9cde9c7d3649b3b779e2064cb0fa5f799e5fd897b05c2fb53e22047bc39"
+      "after": "dd3cc7cc42f034cd5621ec173f8d00a00252bb9b96a758f4be863934e95af0a6"
     },
     {
       "path": "scripts/aws/stage-b-staged-broker.mjs",
@@ -693,13 +693,13 @@
       "path": "scripts/tests/stage-b-staged-broker-closure.test.mjs",
       "status": "added",
       "before": null,
-      "after": "c5712eb11ee20026a56dd8797511d376b88ceb5ac3eaa6ab2fbc9eaf240db9d0"
+      "after": "78541f5abc57485f2995f62d24d93f98736d5da47610a16ec531b2aff295dd49"
     },
     {
       "path": "scripts/tests/stage-b-staged-broker-executor.test.mjs",
       "status": "added",
       "before": null,
-      "after": "98d770ed29fcbb4155feae4732ad409a13441ed14a84e1d1e70b2420c4beda11"
+      "after": "731edb9666bbe035a263ed088921b46c82a99e68240af5a903c6a4a392ea8b90"
     },
     {
       "path": "scripts/tests/stage-b-staged-broker.test.mjs",
