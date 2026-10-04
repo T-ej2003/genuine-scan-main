@@ -183,7 +183,7 @@ test('complete stable traffic census authenticates the canonical prerequisite', 
 for (const drift of ['policy', 'url', 'event', 'version']) test(`end-of-scan traffic guard rejects concurrent ${drift}`, () => {
   assert.throws(() => readStagedBrokerPrerequisites(prerequisiteReader(drift)));
 });
-for (const failure of [null, 'uncertain', 'wrong-successor', 'release-crash']) test(`native owned IAM convergence ${failure || 'success'} preserves one-write/state-only boundary`, async () => {
+async function convergenceRecoveryFixture(failure = null, fault) {
   await native(); // Reuse the private canonical package/backend fixture.
   const p = preparation(); p.schemaVersion = 2; p.purpose = BROKER_POLICY_CONVERGENCE;
   p.packageSha256 = brokerDigest(fs.readFileSync(files.package));
@@ -199,14 +199,14 @@ for (const failure of [null, 'uncertain', 'wrong-successor', 'release-crash']) t
   const auth = authorization(p), now = Date.now(); auth.issuedAt = new Date(now-1000).toISOString(); auth.expiresAt = new Date(now+600000).toISOString();
   const objects = new Map(), plans = new Map(); let item, writes = 0, refreshed = false, recovered = false, policy = p.prerequisites.policy;
   const reader = prerequisiteReader();
-  const runAws = args => {
+  const rawAws = args => {
     const [service, op] = args, value = flag => args[args.indexOf(flag)+1];
     if (service === 'kms') return JSON.stringify({ SignatureValid: true });
     if (service === 's3api') {
       if (op === 'put-object') { const key = value('--key'); assert.ok(!objects.has(key)); objects.set(key, fs.readFileSync(value('--body'))); }
       else if (value('--key') === 'env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate') {
-        fs.writeFileSync(args.find(a => a.startsWith(`${directory}/state-read`)), JSON.stringify({ resources: [{ mode: 'managed', type: 'aws_iam_policy', name: 'broker', instances: [{ attributes: { policy: after.policy } }] }] }));
-      } else { const output = args.find(a => a.startsWith(directory+'/')); assert.ok(objects.has(value('--key'))); fs.writeFileSync(output, objects.get(value('--key'))); }
+        fs.writeFileSync(args.find(a => a.startsWith(`${directory}/state-read`)), JSON.stringify({ resources: [{ mode: 'managed', type: 'aws_iam_policy', name: 'broker', instances: [{ attributes: { policy: refreshed ? after.policy : before.policy } }] }] }));
+      } else { const output = args.find(a => a.startsWith(directory+'/')); if (!objects.has(value('--key'))) throw Object.assign(new Error('missing'), { stderr: '(NoSuchKey)' }); fs.writeFileSync(output, objects.get(value('--key'))); }
       return '{}';
     }
     if (service === 'dynamodb') {
@@ -228,13 +228,14 @@ for (const failure of [null, 'uncertain', 'wrong-successor', 'release-crash']) t
     }
     return reader(args);
   };
+  const runAws = args => { fault?.(args, 'before', objects, item); const result = rawAws(args); fault?.(args, 'after', objects, item); return result; };
   const exec = (command, args) => {
     assert.equal(command, 'terraform');
     if (args.includes('show')) return JSON.stringify(plans.get(args.at(-1)) || plan);
     if (args.includes('plan')) {
       const file = args.find(a => a.startsWith('-out=')).slice(5), c = structuredClone(change);
       c.change = { actions: ['no-op'], before: structuredClone(after), after: structuredClone(after), after_unknown: {} };
-      const result = { ...plan, resource_changes: [c], resource_drift: args.includes('-refresh-only') ? [change] : [] };
+      const result = { ...plan, resource_changes: [c], resource_drift: args.includes('-refresh-only') || writes && !refreshed ? [change] : [] };
       plans.set(file, result); fs.writeFileSync(file, `saved-${file}`); return '';
     }
     assert.ok(plans.get(args.at(-1))?.resource_drift.length === 1); refreshed = true; return '';
@@ -243,23 +244,25 @@ for (const failure of [null, 'uncertain', 'wrong-successor', 'release-crash']) t
     env: { PATH: process.env.PATH, HOME: process.env.HOME, TF_WORKSPACE: 'default' }, exec, runAws, writerSessionBoundary: { pin: () => ({ session: writerSession, run: runAws, environment: { PATH: process.env.PATH } }) } });
   adapter.readCheckout = async () => ({ sourceSha, treeSha256: p.treeSha256 }); adapter.readStateIdentity = async () => p.state;
   adapter.readPrerequisites = async () => p.prerequisites; adapter.authenticatePrerequisiteChain = async () => {};
+  const recovery = createStagedBrokerExecutor({ phase: 'POLICY_RECOVERY', preparation: p, authorization: auth, planPath, files, directory, terraformDataDir: directory,
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, TF_WORKSPACE: 'default' }, exec, runAws,
+    writerSessionBoundary: { prove: held => proveBrokerWriterUnusable(held, { readIssuance: () => writerSession, readClock: () => '2026-10-04T01:00:01.000Z' }) } });
+  recovery.readCheckout = adapter.readCheckout; recovery.readStateIdentity = adapter.readStateIdentity; recovery.authenticatePrerequisiteChain = adapter.authenticatePrerequisiteChain;
+  return { execute: adapter, recovery, p, auth, objects, runAws, planPath, markRecovered: () => { recovered = true; }, reconcileFixtureState: () => { refreshed = true; }, alterOwner: change => { const row = JSON.parse(item.state.S); change(row); item.state.S = JSON.stringify(row); }, state: () => ({ owner: item && JSON.parse(item.state.S), writes, refreshed }) };
+}
+for (const failure of [null, 'uncertain', 'wrong-successor', 'release-crash']) test(`native owned IAM convergence ${failure || 'success'} preserves one-write/state-only boundary`, async () => {
+  const r = await convergenceRecoveryFixture(failure);
   if (failure === 'release-crash') {
-    await assert.rejects(() => adapter.executeBrokerPolicyConvergence());
-    assert.equal(JSON.parse(item.state.S).status, 'HELD'); assert.ok(JSON.parse(item.state.S).terminal);
-    recovered = true;
-    const recovery = createStagedBrokerExecutor({ phase: 'POLICY_RECOVERY', preparation: p, authorization: auth, planPath, files, directory, terraformDataDir: directory,
-      env: { PATH: process.env.PATH, HOME: process.env.HOME, TF_WORKSPACE: 'default' }, exec, runAws,
-      writerSessionBoundary: { prove: held => proveBrokerWriterUnusable(held, { readIssuance: s => s, readClock: () => '2026-10-04T01:00:01.000Z' }) } });
-    recovery.readCheckout = adapter.readCheckout; recovery.readStateIdentity = adapter.readStateIdentity; recovery.authenticatePrerequisiteChain = adapter.authenticatePrerequisiteChain;
-    await recovery.recoverBrokerPolicyOwnership(); assert.equal(JSON.parse(item.state.S).status, 'RELEASED'); assert.equal(writes, 1);
-    await assert.rejects(() => recovery.recoverBrokerPolicyOwnership());
+    await assert.rejects(() => r.execute.executeBrokerPolicyConvergence()); assert.equal(r.state().owner.status, 'HELD'); assert.ok(r.state().owner.terminal);
+    r.markRecovered(); await r.recovery.recoverBrokerPolicyOwnership(); assert.equal(r.state().owner.status, 'RELEASED'); assert.equal(r.state().writes, 1);
+    await assert.rejects(() => r.recovery.recoverBrokerPolicyOwnership());
   } else if (failure) {
-    await assert.rejects(() => adapter.executeBrokerPolicyConvergence()); assert.equal(JSON.parse(item.state.S).status, 'HELD');
-    await assert.rejects(() => adapter.executeBrokerPolicyConvergence()); assert.equal(writes, 1); assert.equal(refreshed, false);
+    await assert.rejects(() => r.execute.executeBrokerPolicyConvergence()); assert.equal(r.state().owner.status, 'HELD');
+    await assert.rejects(() => r.execute.executeBrokerPolicyConvergence()); assert.equal(r.state().writes, 1); assert.equal(r.state().refreshed, false);
   } else {
-    await adapter.executeBrokerPolicyConvergence(); assert.equal(writes, 1); assert.equal(refreshed, true); assert.equal(JSON.parse(item.state.S).status, 'RELEASED');
-    const acquired = JSON.parse(item.state.S).identity;
-    await assert.rejects(() => adapter.executeBrokerPolicyConvergence()); assert.equal(writes, 1); assert.equal(JSON.parse(item.state.S).status, 'RELEASED'); assert.deepEqual(JSON.parse(item.state.S).identity, acquired);
+    await r.execute.executeBrokerPolicyConvergence(); assert.equal(r.state().writes, 1); assert.equal(r.state().refreshed, true); assert.equal(r.state().owner.status, 'RELEASED');
+    const acquired = r.state().owner.identity;
+    await assert.rejects(() => r.execute.executeBrokerPolicyConvergence()); assert.equal(r.state().writes, 1); assert.equal(r.state().owner.status, 'RELEASED'); assert.deepEqual(r.state().owner.identity, acquired);
   }
 });
 
@@ -273,7 +276,7 @@ for (const substitution of ['registration', 'target']) test(`physical prerequisi
   await assert.rejects(() => r.adapter.authenticatePrerequisiteChain(chain));
 });
 
-async function pruningRecoveryFixture(state = 'successor') {
+async function pruningRecoveryFixture(state = 'successor', fault) {
   await native();
   const p = preparation(); p.schemaVersion = 2; p.purpose = BROKER_POLICY_PRUNING; p.prerequisiteChain = null;
   p.packageSha256 = brokerDigest(fs.readFileSync(files.package)); p.prerequisites.policyVersion = 'v5';
@@ -285,7 +288,7 @@ async function pruningRecoveryFixture(state = 'successor') {
   const auth = authorization(p), now = Date.now(); auth.issuedAt = new Date(now-1000).toISOString(); auth.expiresAt = new Date(now+600000).toISOString();
   const objects = new Map(), calls = []; let item, writes = 0, versions = structuredClone(inventory), policy = p.prerequisites.policy, version = 'v5', failCompletion = false;
   const reader = prerequisiteReader();
-  const runAws = args => {
+  const rawAws = args => {
     calls.push(args); const [service, op] = args, value = flag => args[args.indexOf(flag)+1];
     if (service === 'kms') return JSON.stringify({ SignatureValid: true });
     if (service === 's3api') {
@@ -313,20 +316,22 @@ async function pruningRecoveryFixture(state = 'successor') {
         if (state === 'added') versions.push({ VersionId: 'v6', IsDefaultVersion: false });
         if (state === 'default') { version = 'v4'; versions = versions.map(v => ({ ...v, IsDefaultVersion: v.VersionId === 'v4' })); }
         if (state === 'policy') policy = { Version: '2012-10-17', Statement: [] };
+        if (state === 'normal') return '{}';
         throw new Error('uncertain deletion result');
       }
     }
     return reader(args);
   };
+  const runAws = args => { fault?.(args, 'before', objects, item); const result = rawAws(args); fault?.(args, 'after', objects, item); return result; };
   const make = phase => {
     const adapter = createStagedBrokerExecutor({ phase, preparation: p, authorization: auth, planPath, files, directory, terraformDataDir: directory,
       env: { PATH: process.env.PATH, HOME: process.env.HOME, TF_WORKSPACE: 'default' }, exec: () => assert.fail('Pruning must not run Terraform'), runAws,
       writerSessionBoundary: { pin: () => ({ session: writerSession, run: runAws, environment: { PATH: process.env.PATH } }),
-        prove: held => proveBrokerWriterUnusable(held, { readIssuance: s => s, readClock: () => '2026-10-04T01:00:01.000Z' }) } });
+        prove: held => proveBrokerWriterUnusable(held, { readIssuance: () => writerSession, readClock: () => '2026-10-04T01:00:01.000Z' }) } });
     adapter.readCheckout = async () => ({ sourceSha, treeSha256: p.treeSha256 }); adapter.readStateIdentity = async () => p.state;
     adapter.readPrerequisites = async () => p.prerequisites; return adapter;
   };
-  return { execute: make('POLICY'), recovery: make('POLICY_RECOVERY'), p, plan, planPath, auth, objects, calls, crashAfterReceipt: () => { failCompletion = true; }, state: () => ({ owner: item && JSON.parse(item.state.S), writes }) };
+  return { execute: make('POLICY'), recovery: make('POLICY_RECOVERY'), p, plan, planPath, auth, objects, calls, alterOwner: change => { const row = JSON.parse(item.state.S); change(row); item.state.S = JSON.stringify(row); }, crashAfterReceipt: () => { failCompletion = true; }, state: () => ({ owner: item && JSON.parse(item.state.S), writes }) };
 }
 for (const state of ['successor','predecessor','missing-other','added','default','policy']) test(`uncertain pruning recovery authenticates exact ${state} inventory without delete replay`, async () => {
   const r = await pruningRecoveryFixture(state);
@@ -374,4 +379,96 @@ test('uncertain successful pruning persists terminal receipt once across a compl
   const puts = r.calls.filter(a => a[1] === 'put-object').length;
   const result = await r.recovery.recoverBrokerPolicyOwnership(); assert.equal(result.status, 'SUCCEEDED');
   assert.equal(r.calls.filter(a => a[1] === 'put-object').length, puts); assert.equal(r.state().owner.status, 'RELEASED'); assert.equal(r.state().writes, 1);
+});
+
+function policyFaultLabel(args, item) {
+  const [service, operation] = args, value = flag => args[args.indexOf(flag)+1];
+  if (service === 's3api' && operation === 'put-object') {
+    const entry = JSON.parse(fs.readFileSync(value('--body')));
+    if (entry.kind === 'STAGED_BROKER_RESERVATION') return 'reservation';
+    if (entry.status.endsWith('_INTENT')) return 'intent';
+    return 'terminal';
+  }
+  if (service === 'dynamodb') {
+    if (operation === 'put-item') return 'acquire';
+    if (operation === 'update-item') {
+      const values = JSON.parse(value('--expression-attribute-values')), next = JSON.parse(values[':next'].S), current = JSON.parse(values[':current'].S);
+      return next.status === 'RELEASED' ? 'release' : next.terminal ? 'completion' : !current.mutation && next.mutation ? 'commit' : undefined;
+    }
+  }
+  if (service === 'iam') {
+    if (['create-policy-version','delete-policy-version'].includes(operation)) return 'iam';
+    if (operation === 'get-policy' && item) return JSON.parse(item.state.S).mutation ? 'successor' : 'predecessor';
+  }
+}
+const nativePolicyWindows = ['reservation-before','reservation-after','acquire-before','acquire-after','authentication-before','authentication-after',
+  'predecessor-before','predecessor-after','intent-before','intent-after','commit-before','commit-after','iam-before','iam-after',
+  'successor-before','successor-after','terminal-before','terminal-after','completion-before','completion-after','release-before','release-after'];
+for (const purpose of ['convergence','pruning']) for (const window of nativePolicyWindows) test(`native ${purpose} crash ${window} closes only an authenticated outcome`, async () => {
+  let fired = false;
+  const fault = (args, side, objects, item) => { if (!fired && `${policyFaultLabel(args,item)}-${side}` === window) { fired = true; throw new Error(`exit ${window}`); } };
+  const r = purpose === 'convergence' ? await convergenceRecoveryFixture(null, fault) : await pruningRecoveryFixture('normal', fault);
+  const authenticate = r.execute.authenticatePrerequisiteAuthorization;
+  r.execute.authenticatePrerequisiteAuthorization = async (...args) => {
+    if (!fired && window === 'authentication-before') { fired = true; throw new Error('exit before authentication'); }
+    const value = await authenticate(...args);
+    if (!fired && window === 'authentication-after') { fired = true; throw new Error('exit after authentication'); }
+    return value;
+  };
+  const execute = () => purpose === 'convergence' ? r.execute.executeBrokerPolicyConvergence() : r.execute.executeBrokerPolicyPruning();
+  await assert.rejects(execute); assert.equal(fired, true); const before = r.state(); assert.ok(before.writes <= 1);
+  if (before.owner?.status === 'HELD') {
+    if (purpose === 'convergence' && before.writes && !before.refreshed) {
+      await assert.rejects(() => r.recovery.recoverBrokerPolicyOwnership()); assert.equal(r.state().owner.status, 'HELD');
+      // Fixture supplies independently authenticated state-only reconciliation,
+      // never an IAM retry. Recovery still demands the exact normal no-op state.
+      r.reconcileFixtureState();
+    }
+    const result = await r.recovery.recoverBrokerPolicyOwnership();
+    assert.equal(result.status, before.writes ? 'SUCCEEDED' : 'RECOVERED_NO_WRITE'); assert.equal(r.state().owner.status, 'RELEASED');
+    await assert.rejects(execute); assert.equal(r.state().owner.identity.generation, before.owner.identity.generation);
+  } else if (before.owner) assert.equal(before.owner.status, 'RELEASED');
+  assert.equal(r.state().writes, before.writes);
+});
+for (const purpose of ['convergence','pruning']) test(`native ${purpose} no-write receipt survives a second recovery crash without replacement`, async () => {
+  let fired = false;
+  const fault = (args, side, objects, item) => { if (!fired && policyFaultLabel(args,item) === 'intent' && side === 'before') { fired = true; throw new Error('before intent'); } };
+  const r = purpose === 'convergence' ? await convergenceRecoveryFixture(null, fault) : await pruningRecoveryFixture('normal', fault);
+  await assert.rejects(() => purpose === 'convergence' ? r.execute.executeBrokerPolicyConvergence() : r.execute.executeBrokerPolicyPruning());
+  const record = r.recovery.record; r.recovery.record = async (...args) => { await record(...args); throw new Error('crash after persisted recovery receipt'); };
+  await assert.rejects(() => r.recovery.recoverBrokerPolicyOwnership()); assert.equal(r.state().owner.status, 'HELD');
+  const existing = [...r.objects.values()].find(bytes => JSON.parse(bytes).status === 'BROKER_POLICY_RECOVERED_NO_WRITE'); assert.ok(existing);
+  r.recovery.record = () => assert.fail('Cannot replace durable no-write receipt');
+  await r.recovery.recoverBrokerPolicyOwnership(); assert.equal(r.state().owner.status, 'RELEASED'); assert.equal(r.state().writes, 0);
+});
+for (const field of ['operation','policy','generation','session','source','reservation','acquisition','intent','predecessor','terminal','target','successor']) test(`native recovery rejects ${field} substitution`, async () => {
+  let fired = false;
+  const fault = (args, side, objects, item) => { if (!fired && policyFaultLabel(args,item) === 'commit' && side === 'after') { fired = true; throw new Error('committed but not invoked'); } };
+  const r = await pruningRecoveryFixture('normal', fault); await assert.rejects(() => r.execute.executeBrokerPolicyPruning());
+  const mutateObject = (key, mutate) => { const entry = JSON.parse(r.objects.get(key)); mutate(entry); r.objects.set(key, Buffer.from(JSON.stringify(entry))); };
+  if (field === 'operation') r.alterOwner(row => row.identity.operationIdentity = '0'.repeat(64));
+  else if (field === 'policy') r.alterOwner(row => row.identity.policyArn += '-other');
+  else if (field === 'generation') r.alterOwner(row => row.identity.generation++);
+  else if (field === 'session') r.alterOwner(row => row.identity.writerSession.accessKeyIdSha256 = '0'.repeat(64));
+  else if (field === 'source') r.alterOwner(row => row.identity.sourceSha = '0'.repeat(40));
+  else if (field === 'acquisition') r.alterOwner(row => row.acquisition.preparationSha256 = '0'.repeat(64));
+  else if (field === 'reservation') mutateObject(stageBApplyAttemptS3Key(brokerDigest(r.auth)), entry => entry.value.nonce = '0'.repeat(64));
+  else if (field === 'intent') mutateObject(stageBAttemptStepS3ObjectKey(brokerDigest(r.auth),1), entry => entry.value.owner.owner = '0'.repeat(36));
+  else if (field === 'predecessor' || field === 'target') { r.p.target[field === 'target' ? 'versionId' : 'inventory'] = field === 'target' ? 'v3' : []; }
+  else {
+    const record = r.recovery.record; r.recovery.record = async (...args) => { await record(...args); throw new Error('receipt committed'); };
+    await assert.rejects(() => r.recovery.recoverBrokerPolicyOwnership());
+    mutateObject(stageBAttemptStepS3ObjectKey(brokerDigest(r.auth),2), entry => {
+      if (field === 'terminal') entry.value.owner.generation++;
+      else entry.value.successor.versions.pop();
+    }); r.recovery.record = record;
+  }
+  await assert.rejects(() => r.recovery.recoverBrokerPolicyOwnership()); assert.equal(r.state().owner.status, 'HELD'); assert.equal(r.state().writes, 0);
+});
+test('two native recoveries cannot both persist or complete a pre-intent generation', async () => {
+  let fired = false;
+  const fault = (args, side, objects, item) => { if (!fired && policyFaultLabel(args,item) === 'intent' && side === 'before') { fired = true; throw new Error('before intent'); } };
+  const r = await pruningRecoveryFixture('normal', fault); await assert.rejects(() => r.execute.executeBrokerPolicyPruning());
+  const results = await Promise.allSettled([r.recovery.recoverBrokerPolicyOwnership(), r.recovery.recoverBrokerPolicyOwnership()]);
+  assert.equal(results.filter(v => v.status === 'fulfilled').length, 1); assert.equal(r.state().owner.status, 'RELEASED'); assert.equal(r.state().writes, 0);
 });
