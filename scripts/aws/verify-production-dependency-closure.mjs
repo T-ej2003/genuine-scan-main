@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ARTIFACT_SIGNING_BINDINGS } from "./production-artifact-signing-domain.mjs";
-import { CAPABILITY_GRAPH_PATH, assertStageBDeploymentCapabilityGraph, discoverAwsCliActions } from "./generate-production-green-stage-b-capability-graph.mjs";
+import { CAPABILITY_GRAPH_PATH, assertStageBDeploymentCapabilityGraph, discoverAwsCliActions, STAGED_BROKER_CALLS, stagedBrokerExecutionIdentities } from "./generate-production-green-stage-b-capability-graph.mjs";
 import { canonicalizeJson } from "./validate-production-green-stage-b-permissions.mjs";
 import { STAGE_A_TERRAFORM_BACKEND, STAGE_A_TERRAFORM_LOCK_ARN } from "./production-stage-a-root-drop-orphan-recovery.mjs";
 import { STAGE_B_TERRAFORM_BACKEND } from "./stage-b-terraform-backend-contract.mjs";
@@ -360,6 +360,17 @@ export function buildProductionDependencyClosure() {
 }
 
 export function assertChangedAwsCallClosure(scanned, graph) {
+  const staged = [];
+  for (const [sourceFile, actions] of Object.entries(STAGED_BROKER_CALLS)) {
+    const calls = scanned.filter(c => c.sourceFile === sourceFile);
+    if (!same(calls.map(c => c.action).sort(), [...actions].sort())) throw new Error('Unknown staged broker AWS action');
+    for (const call of calls) for (const identity of stagedBrokerExecutionIdentities(sourceFile, call.action)) {
+      const caps = graph.capabilities.filter(c => c.sourceFile === sourceFile && c.action === call.action && c.identity === identity);
+      if (!caps.length || caps.some(c => !c.policy?.sourceFile)) throw new Error('Staged broker call has no exact reviewed IAM authority');
+      staged.push({ ...call, identity, capabilityIds: caps.map(c => c.id), reachableMode: ['NORMAL'], executionPrincipal: identity, sourcePolicyPresent: true, generatedManifestPresent: true, capabilityGraphPresent: true });
+    }
+  }
+  scanned = scanned.filter(c => !Object.hasOwn(STAGED_BROKER_CALLS, c.sourceFile));
   const appOnly = assertAppOnlyAwsCallClosure(scanned, graph);
   scanned = scanned.filter(({ sourceFile }) => !Object.hasOwn(APP_ONLY_CALLS, sourceFile));
   const identityBound = (sourceFile) => ["scripts/aws/production-stage-a-production-artifacts-journal.mjs", "scripts/aws/production-root-attestation-signer.mjs", "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "scripts/aws/production-initial-activation-policy-reconciliation.mjs", "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs", "scripts/aws/reconcile-production-provider-readonly-policy.mjs", "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs", "scripts/aws/recover-production-mixed-dual-slot-topology.mjs"].includes(sourceFile);
@@ -375,7 +386,7 @@ export function assertChangedAwsCallClosure(scanned, graph) {
   if (baseline.length !== BASE_CALL_COUNT || sha256(JSON.stringify(baseline)) !== BASE_CALL_SHA256) throw new Error("Unknown production AWS call requires capability classification.");
 
   const capabilityById = new Map(graph.capabilities.map((capability) => [capability.id, capability]));
-  return [...appOnly, ...CALLS.map((contract) => {
+  return [...staged, ...appOnly, ...CALLS.map((contract) => {
     const capability = capabilityById.get(contract.capabilityId);
     const stageAModes = STAGE_A_CAPABILITY_MODES[contract.capabilityId];
     const resourcesCompatible = stageAModes ? same(capability?.resources, contract.resources) : contract.resources.every((resource) => capability?.resources?.includes(resource)

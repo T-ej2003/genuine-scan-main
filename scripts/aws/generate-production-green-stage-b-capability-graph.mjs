@@ -23,6 +23,7 @@ import { MIXED_DUAL_SLOT_RECOVERY_EXECUTION_POLICY_ARN, MIXED_DUAL_SLOT_RECOVERY
 import { APP_ONLY } from "./production-app-only-contract.mjs";
 import { APP_ONLY_VERIFIER, APP_ONLY_PROVISIONING, appOnlyDeployerPolicy, appOnlyVerifierLauncherPolicy, appOnlyPermissionProvisionerPolicy } from "./production-app-only-policy.mjs";
 import { PRODUCTION_COMPONENT_STATE } from "./production-component-deployment-state.mjs";
+import { STAGE_B_BROKER_POLICY } from "./stage-b-deployment-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const CAPABILITY_GRAPH_PATH = "documents/ops/iam/MSCQRProductionGreenStageBDeploymentCapabilities-v1.json";
@@ -40,6 +41,10 @@ const bootstrapOperatorPolicyPath = BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.sou
 const normalDeployerPolicyPath = "infra/aws/terraform/production-component-deployment-state/normal-deployer-policy.json";
 const releaseTerminalStatePolicyPath = "infra/aws/terraform/production-component-deployment-state/release-terminal-state-policy.json";
 const awsCliSourceFiles = [
+  'scripts/aws/stage-b-staged-broker-authorization.mjs',
+  'scripts/aws/stage-b-staged-broker-executor.mjs',
+  'scripts/aws/stage-b-staged-broker-observations.mjs',
+  'scripts/aws/stage-b-staged-broker-closure.mjs',
   "scripts/aws/run-production-app-only-bootstrap.mjs", "scripts/aws/run-production-app-only-verifier.mjs",
   "scripts/aws/run-production-app-only-deployment.mjs", "scripts/aws/prepare-production-app-only-verifier.mjs",
   "scripts/aws/prepare-production-app-only-deployment.mjs", "scripts/aws/production-app-only-preparation.mjs",
@@ -126,6 +131,10 @@ const PHASES = Object.freeze([
   ["plan-bound-permission-report", "scripts/aws/validate-production-green-stage-b-permissions.mjs"],
   ["production-closure", "scripts/aws/validate-stage-b-deployment-closure.mjs"],
   ["validator", "scripts/plan-production-green-stage-b.mjs"],
+  ['staged-broker-publication', 'scripts/aws/run-stage-b-staged-broker.mjs'],
+  ['staged-broker-cutover-approval', 'scripts/aws/stage-b-staged-broker-authorization.mjs'],
+  ['staged-broker-alias-cas', 'scripts/aws/stage-b-staged-broker-executor.mjs'],
+  ['staged-broker-state-reconciliation', 'scripts/aws/stage-b-staged-broker-closure.mjs'],
   ["wrapper-verify-only", "scripts/apply-production-green-stage-b.mjs"],
   ["wrapper-apply", "scripts/apply-production-green-stage-b.mjs"],
   ["post-apply-verification", "scripts/aws/verify-production-green-stage-b-ecs-observations.mjs"],
@@ -576,11 +585,13 @@ export function discoverAwsCliActions() {
       : new RegExp(`\\[\\s*["'](${serviceNames})["']\\s*,\\s*["']([a-z0-9-]+)["']`, "g");
     for (const match of source.matchAll(pattern)) {
       const service = match[1] === "s3api" ? "s3" : match[1] === "elbv2" ? "elasticloadbalancing" : match[1];
-      const operation = match[2].split("-").map((part) => part[0].toUpperCase() + part.slice(1)).join("").replaceAll("Db", "DB").replaceAll("Vpc", "VPC").replaceAll("Url", "URL").replace("Mfa", "MFA").replace("OpenIdConnect", "OpenIDConnect");
+      const operation = match[2].split("-").map((part) => part[0].toUpperCase() + part.slice(1)).join("").replaceAll("Db", "DB").replaceAll("Vpc", "VPC").replaceAll("Url", service === 'lambda' ? 'Url' : 'URL').replace("Mfa", "MFA").replace("OpenIdConnect", "OpenIDConnect");
       const action = service === "s3" && operation === "ListObjectsV2" ? "s3:ListBucket"
         : service === "ecs" && operation === "Wait" ? "ecs:DescribeServices"
         : `${service}:${service === "lambda" && operation === "Invoke" ? "InvokeFunction" : operation}`;
-      if (sourceFile === "scripts/aws/production-stage-a-production-artifacts-journal.mjs" && ["s3:GetObject", "s3:ListBucket", "s3:PutObject"].includes(action)) {
+      if (sourceFile === 'scripts/aws/stage-b-staged-broker-authorization.mjs' && ['kms:Sign', 'sts:GetCallerIdentity'].includes(action)) {
+        calls.push({ sourceFile, action, identity: 'INDEPENDENT_CHECKER' });
+      } else if (sourceFile === "scripts/aws/production-stage-a-production-artifacts-journal.mjs" && ["s3:GetObject", "s3:ListBucket", "s3:PutObject"].includes(action)) {
         calls.push({ sourceFile, action, identity: "RELEASE_DEPLOYER" }, { sourceFile, action, identity: "ROOT_OPERATOR" });
       } else if (sourceFile === "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs") {
         calls.push(...classifyStageARecoveryAwsCliAction({ action, source, offset: match.index }).map((entry) => ({ sourceFile, action, ...entry })));
@@ -715,6 +726,41 @@ export function appOnlyCapabilityNodes() {
     probe: "structural", probeIds: [], policy: { sourceFile: "infra/aws/terraform/production-app-only-permissions/main.tf.json",
       sid: "exact-saved-plan-and-protected-approval", livePolicyArn: null, expectedVersion: "authenticated-saved-plan", expectedPolicySha256: null }, required: true, mutation,
   }))];
+}
+
+export const STAGED_BROKER_CALLS = Object.freeze({
+  'scripts/aws/stage-b-staged-broker-authorization.mjs': ['kms:Sign', 'kms:Verify', 'sts:GetCallerIdentity'],
+  'scripts/aws/stage-b-staged-broker-executor.mjs': ['s3:GetObject', 'sts:GetCallerIdentity', 'lambda:GetAlias', 'lambda:GetFunctionConfiguration', 'lambda:UpdateAlias', 'lambda:ListVersionsByFunction'],
+  'scripts/aws/stage-b-staged-broker-closure.mjs': ['s3:GetObject', 'lambda:GetAlias', 'lambda:GetFunctionConfiguration', 'lambda:ListVersionsByFunction'],
+  'scripts/aws/stage-b-staged-broker-observations.mjs': ['iam:GetPolicy', 'iam:GetPolicyVersion', 'iam:GetRole', 'iam:ListAttachedRolePolicies', 'iam:ListRolePolicies', 'iam:GetRolePolicy', 'lambda:ListAliases', 'lambda:GetFunctionConfiguration', 'lambda:ListVersionsByFunction', 'lambda:GetPolicy', 'lambda:ListFunctionUrlConfigs', 'lambda:ListEventSourceMappings', 'lambda:GetAlias'],
+});
+export function stagedBrokerExecutionIdentities(sourceFile, action) {
+  return sourceFile.endsWith('-authorization.mjs')
+    ? action === 'kms:Verify' ? ['INDEPENDENT_CHECKER', 'RELEASE_DEPLOYER'] : ['INDEPENDENT_CHECKER']
+    : ['RELEASE_DEPLOYER'];
+}
+export function stagedBrokerCapabilityNodes(policies = sourcePolicies()) {
+  return Object.entries(STAGED_BROKER_CALLS).flatMap(([sourceFile, actions]) => actions.flatMap(action => {
+    const identities = stagedBrokerExecutionIdentities(sourceFile, action);
+    const resources = action.startsWith('kms:') ? [STAGE_B.approvalKmsKeyArn]
+      : action === 'sts:GetCallerIdentity' || action === 'lambda:ListEventSourceMappings' ? ['*']
+      : action === 's3:GetObject' ? [STAGE_B_TERRAFORM_BACKEND.stateArn, STAGE_B_TERRAFORM_BACKEND.applyAttemptPrefixArn]
+      : ['iam:GetPolicy', 'iam:GetPolicyVersion'].includes(action) ? [...RELEASE_POLICY_SOURCES.map(p => p.arn), STAGE_B_BROKER_POLICY.arn]
+      : action.startsWith('iam:') ? [STAGE_B.brokerRoleArn, ...(action === 'iam:GetRole' ? [] : ['arn:aws:iam::368992683803:role/mscqr-production-release-deployer'])]
+      : action === 'lambda:GetAlias' ? [STAGE_B.brokerAliasArn]
+      : ['lambda:GetFunctionConfiguration', 'lambda:GetPolicy'].includes(action) ? [STAGE_B.brokerFunctionArn, `${STAGE_B.brokerFunctionArn}:*`]
+      : [STAGE_B.brokerFunctionArn];
+    return identities.flatMap(identity => resources.map(resource => {
+      const checker = identity === 'INDEPENDENT_CHECKER';
+      const entry = { id: `${sourceFile}:${action}`, action, resources: [resource] };
+      const mutation = action === 'lambda:UpdateAlias' || action === 'kms:Sign';
+      return { id: `staged-broker-${sha256(sourceFile+action+resource+identity).slice(0,16)}`, phase: checker ? 'staged-broker-cutover-approval' : mutation ? 'staged-broker-alias-cas' : 'staged-broker-publication',
+        sourceFile, sourceFunction: action, identity, executor: 'aws-cli', action, resources: [resource],
+        context: { account: STAGE_B.account, region: STAGE_B.region, authority: mutation ? 'purpose-bound-one-use-phase-approval' : 'read-only-prerequisite' },
+        classification: mutation ? 'STAGED_BROKER_GOVERNED_MUTATION' : 'RELEASE_DIRECT_READ', probe: 'administrator-simulation', probeIds: [],
+        policy: action === 'sts:GetCallerIdentity' ? { sourceFile: 'scripts/aws/production-credential-source-contract.mjs', sid: 'identity-boundary', livePolicyArn: null, expectedVersion: 'source-bound', expectedPolicySha256: null } : checker ? { ...checkerAuthority(entry), sid: 'SignExactStageBApproval' } : authority(entry, false, policies), required: true, mutation };
+    }));
+  }));
 }
 
 export function buildStageBDeploymentCapabilityGraph() {
@@ -931,7 +977,7 @@ export function buildStageBDeploymentCapabilityGraph() {
   }));
   const runtime = terraformRuntimeActions().map((action) => ({ id: `runtime-${action.replace(/[^A-Za-z0-9]+/g, "-").toLowerCase()}`, phase: "runtime-activation-boundary", identity: "SERVICE_RUNTIME", executor: "lambda-or-ecs-role", sourceFile: terraformPath, sourceFunction: "generated runtime IAM policy", action, resources: ["terraform-derived-runtime-resource"], context: {}, classification: "SERVICE_RUNTIME_ACTION", probe: "structural", policy: { sourceFile: terraformPath, sid: "terraform-generated", livePolicyArn: "created-or-updated-by-stage-b", expectedVersion: "saved-plan", expectedPolicySha256: null }, required: false, mutation: isRuntimeMutationAction(action) }));
   const runtimeAdmin = RUNTIME_ADMIN_CAPABILITIES.map(([id, phase, action, resources, mutation]) => ({ id, phase, identity: "ADMINISTRATOR", executor: "aws-cli", sourceFile: phase === "runtime-consumability-convergence" ? "scripts/aws/converge-production-ecs-runtime-policy.mjs" : "scripts/aws/prepare-production-ecs-runtime-consumability.mjs", sourceFunction: id, action, resources, context: { account: STAGE_B.account, region: STAGE_B.region }, classification: mutation ? "ADMIN_IAM_OR_SIGNING_MUTATION" : "ADMIN_RUNTIME_CLOSURE_READ", probe: action === "iam:SimulatePrincipalPolicy" ? "administrator-simulation" : "administrator-live-read", probeIds: [], policy: { sourceFile: phase === "runtime-consumability-convergence" ? "scripts/aws/converge-production-ecs-runtime-policy.mjs" : "scripts/aws/production-ecs-runtime-consumability.mjs", sid: id, livePolicyArn: null, expectedVersion: "protected-main-source", expectedPolicySha256: null }, required: true, mutation }));
-  const capabilities = [...fixed, normalDeploymentStateReference, ...normalActivation, ...normalDeploymentDiscovery, ...initialActivationPolicyReconciliation, ...initialActivationPreparation, ...providerReadonlyReconciliation, ...providerReadonlyPreparation, ...bootstrapOperatorPolicyReconciliation, ...mixedRecoveryIamPreflight, mixedRecoveryIamAttestationSigning, ...mixedRecoveryExecution, ...stageAProductionArtifacts, ROOT_DROP_SIGNING, ...rootAttestationRelease, ...recovery, ...forwardRecovery, ...stateReconciliationDirect, ...stateReconciliation, ...prerequisiteProducerReads, ...releasePreflightProducerReads, ...stateReconciliationProviderReads, ...publisher, ...manifestCapabilities, ...checkerCapabilities, ...operatorCapabilities, ...runtimeAdmin, ...runtime].sort((a, b) => a.id.localeCompare(b.id));
+  const capabilities = [...stagedBrokerCapabilityNodes(policies), ...fixed, normalDeploymentStateReference, ...normalActivation, ...normalDeploymentDiscovery, ...initialActivationPolicyReconciliation, ...initialActivationPreparation, ...providerReadonlyReconciliation, ...providerReadonlyPreparation, ...bootstrapOperatorPolicyReconciliation, ...mixedRecoveryIamPreflight, mixedRecoveryIamAttestationSigning, ...mixedRecoveryExecution, ...stageAProductionArtifacts, ROOT_DROP_SIGNING, ...rootAttestationRelease, ...recovery, ...forwardRecovery, ...stateReconciliationDirect, ...stateReconciliation, ...prerequisiteProducerReads, ...releasePreflightProducerReads, ...stateReconciliationProviderReads, ...publisher, ...manifestCapabilities, ...checkerCapabilities, ...operatorCapabilities, ...runtimeAdmin, ...runtime].sort((a, b) => a.id.localeCompare(b.id));
   return {
     schemaVersion: 1, deployment: "production-green-stage-b", account: "368992683803", region: "eu-west-2",
     phases: PHASES.map(([id, sourceFile], index) => ({ order: index + 1, id, sourceFile })),

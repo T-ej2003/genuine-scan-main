@@ -157,7 +157,7 @@ test("identity matrix assigns IAM simulation only to administrator", () => {
   assert(matrix.calls.some(({ identity, action }) => identity === "ADMINISTRATOR" && action === "iam:SimulatePrincipalPolicy"));
   assert(!matrix.calls.some(({ identity, action }) => identity === "RELEASE_DEPLOYER" && action === "iam:SimulatePrincipalPolicy"));
   assert(matrix.calls.some(({ identity, action }) => identity === "ROOT_OPERATOR" && action === "iam:SimulatePrincipalPolicy"));
-  assert.equal(matrix.phases.length, 56);
+  assert.equal(matrix.phases.length, 60);
 });
 
 test("bootstrap AssumeRole capabilities are bound to their exact MFA-gated inline-policy statements", () => {
@@ -204,7 +204,7 @@ test("runtime S3 Get and List actions are classified as read-only", () => {
 test("generated capability graph is exhaustive, deterministic, and identity-exact", () => {
   const first = buildStageBDeploymentCapabilityGraph(); const second = buildStageBDeploymentCapabilityGraph();
   assert.deepEqual(first, second);
-  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 56, capabilities: 666, uniqueActions: 156, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
+  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 60, capabilities: 730, uniqueActions: 160, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
   const normalState = first.capabilities.find(({ id }) => id === "reference-audit-normal-deployment-component-state");
   assert.deepEqual(normalState && [normalState.action, normalState.resources, normalState.probeIds, normalState.mutation], [
     "dynamodb:GetItem",
@@ -754,4 +754,13 @@ test("administrator cannot promote an unsigned readiness report", () => {
       "--identity", "administrator", "--phase", "readiness", "--output", path.join(directory, "readiness.json"),
     ], { caller: () => "arn:aws:iam::368992683803:root" }), /phase initial/);
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("staged authorization verification has both exact execution principals", () => {
+  const graph = buildStageBDeploymentCapabilityGraph();
+  const verification = graph.capabilities.filter(({ sourceFile, action }) => sourceFile === "scripts/aws/stage-b-staged-broker-authorization.mjs" && action === "kms:Verify");
+  assert.deepEqual(verification.map(({ identity }) => identity).sort(), ["INDEPENDENT_CHECKER", "RELEASE_DEPLOYER"]);
+  assert.equal(new Set(verification.map(({ id }) => id)).size, 2);
+  assert(verification.every(({ mutation, resources }) => !mutation && resources.length === 1));
+  assert.equal(graph.capabilities.some(({ sourceFile, action, identity }) => sourceFile === "scripts/aws/stage-b-staged-broker-authorization.mjs" && action === "kms:Sign" && identity !== "INDEPENDENT_CHECKER"), false);
 });
