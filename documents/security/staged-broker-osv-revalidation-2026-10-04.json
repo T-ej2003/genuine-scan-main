@@ -1,5 +1,5 @@
 {
-  "inputsSha256": "16e97f0a7279ea02b94493a4a5858a526f23d899af6d2e8a922865df0d56ba92",
+  "inputsSha256": "7c538eb846606d7971a60aeef13862fecb68060e69d2bc4e2c78ac2ce6bd8c51",
   "changedInputCount": 32,
   "version": "3.0.3",
   "patterns": [
@@ -519,7 +519,7 @@
       "path": "scripts/apply-production-green-stage-b.mjs",
       "status": "modified",
       "before": "f0ac4c118169ce5dd18d7762daf50fe63524fd8bbeb237cba4e4d1453f27a5ce",
-      "after": "bd4ab6bc76474cea1ab5b0c2e610abdea5b9b3aed926496f10307acf2ed3cef8"
+      "after": "8622ffdf7f8a3147b970f8f16b5518bbed53820e1154e34ac525dc0d15a2ebe0"
     },
     {
       "path": "scripts/aws/apply-production-full-rls-release.mjs",
@@ -681,7 +681,7 @@
       "path": "scripts/tests/production-green-stage-b-permission-preflight.test.mjs",
       "status": "modified",
       "before": "074afb964c2d281ad89e051f98a1da9dfea4771679ac06c63e5072a11835f82f",
-      "after": "2ff1aaa31de8121687559b2e682b6bf3273ff537f03011bd9a5b92863d2efdcc"
+      "after": "644c4a26e616d2e170ddd641eff95097328b71d6773d456edf3d9b4856e8ff64"
     },
     {
       "path": "scripts/tests/stage-b-administrator-phase-split.test.mjs",

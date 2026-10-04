@@ -6,7 +6,7 @@ broker candidate, not a new risk acceptance or a claim of universal plugin prove
 
 - Base: `be45d6bf0dc79e81f7ecd5db7a71eeeedf9e395e`.
 - Prior broad input hash: `e791d60f13ea0003fab57455cf5f032f86fd17267050e03ae015518edc0e750d`.
-- Revalidated broad input hash: `16e97f0a7279ea02b94493a4a5858a526f23d899af6d2e8a922865df0d56ba92`.
+- Revalidated broad input hash: `7c538eb846606d7971a60aeef13862fecb68060e69d2bc4e2c78ac2ce6bd8c51`.
 - Existing boundary unchanged: 1,913 prior files, 1,925 candidate files; 32 changed
   inputs (20 modified, 12 added), no removed input. The six changed/new documents
   and IAM/capability artifacts under documents/ are outside the existing boundary;
@@ -214,3 +214,5 @@ The final historical-runtime ordering assertion now matches the authenticated tw
 ### Final traffic-census and terminal-readback review corrections
 
 The previous reader falsely accepted new version policies, function URLs, event mappings and published versions created during its census. All four attacks were reproduced against the prior exact head. A shared complete traffic census now runs again before returning authority, with role/configuration consistency readbacks. Behavioral tests reject every concurrent route/census change. Terminal readback accepts validated later backend/frontend generations only while the committed security component, its provenance and historical retention remain exact; same-generation document equality remains required. This preserves the real security CAS without failing after unrelated successful writes. The 100 focused tests pass. Fresh instrumented production compilation after the complete correction observes identical four trusted patterns and executable artifacts; all changed inputs remain outside compiler execution. Acceptance metadata and broad boundary remain unchanged.
+
+The ordinary production executor now performs its shared pure census check immediately after saved-artifact authentication, before verification-ready status, reservation or spawn uncertainty. Physical execution checks again. Mocked apply stubs only exercise reservation mechanics and provide no CLI bypass. The default-executor regression proves broker rejection creates zero reservation entries; 154 permission/apply tests pass. Fresh compilation after this correction retains all observed input patterns and artifact hashes; the final broad binding covers these changes.

@@ -399,13 +399,17 @@ function stageBApplyBindings({ artifacts, verified, backendMetadata, env }) {
 // The physical Terraform executor must never publish/repoint a broker outside
 // the separately authorized staged protocol. Mocking an apply in artifact tests
 // does not replace this production mutation boundary.
-export function applyStageBInfrastructurePlan({ planPath, plan, env, spawn = spawnSync }) {
+export function assertOrdinaryStageBApplyCensus(plan) {
   if (!Array.isArray(plan?.resource_changes)) throw new Error("An authenticated saved-plan census is required before Terraform apply.");
   for (const { address, type, change } of plan.resource_changes) {
     if (["aws_lambda_function", "aws_lambda_alias"].includes(type) || ["aws_lambda_function.broker", "aws_lambda_alias.reviewed"].includes(address)) {
       if (JSON.stringify(change?.actions) !== JSON.stringify(["no-op"])) throw new Error("Broker function/alias mutations require the staged publication and native alias CAS protocol; normal Terraform apply is forbidden.");
     }
   }
+}
+
+export function applyStageBInfrastructurePlan({ planPath, plan, env, spawn = spawnSync }) {
+  assertOrdinaryStageBApplyCensus(plan);
   return spawn("terraform", [`-chdir=${terraformRoot}`, "apply", "-input=false", "-no-color", planPath], { cwd: root, env, encoding: "utf8", stdio: "inherit" });
 }
 
@@ -428,6 +432,9 @@ export function runApply({ argv = process.argv.slice(2), env = process.env, deps
       ? buildStageBProtectedMainCheckoutEvidence({ toolingSha: artifacts.toolingSha, currentHead: effectiveDeps.currentHead(), originMainHead: artifacts.toolingSha, isAncestor: true, porcelainStatus: "", repositoryState: { remoteDefaultBranch: "main", shallow: false, mergeInProgress: false, rebaseInProgress: false, cherryPickInProgress: false }, mode: "production" })
       : readStageBProtectedMainCheckout({ cwd: root, fetchOriginMain: true });
   const verified = assertApplyArtifacts({ ...artifacts, callerArn, protectedMainCheckout, currentHead: protectedMainCheckout.currentHead, showPlan: effectiveDeps.showPlan, validatePlan: effectiveDeps.validatePlan, verifyPermissionSignature: effectiveDeps.verifyPermissionSignature, verifyImageEvidence: effectiveDeps.verifyImageEvidence });
+  // Check the real Terraform executor before reservation or spawn-uncertainty
+  // writes. Injected apply stubs have no physical mutation authority.
+  if (effectiveDeps.apply === defaultDeps.apply) assertOrdinaryStageBApplyCensus(verified.plan);
   const backendMetadata = effectiveDeps.getBackendMetadata(env);
   assertStageBTerraformInitializedBackendMetadata(backendMetadata);
   const initialBindings = stageBApplyBindings({ artifacts, verified, backendMetadata, env });

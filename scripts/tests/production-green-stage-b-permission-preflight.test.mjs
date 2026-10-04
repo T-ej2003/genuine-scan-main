@@ -2105,12 +2105,14 @@ test("ordinary Terraform executor blocks every broker mutation without spawning"
   assert.equal(spawns, 1);
 });
 
-test("ordinary saved-plan apply hands its authenticated census to the guarded Terraform executor", () => {
+test("ordinary saved-plan broker rejection occurs before any reservation or uncertainty write", () => {
   const fixture = createValidStageBApplyFixture(), input = validRealApplyInput(fixture);
-  let spawns = 0;
-  input.deps.apply = (planPath, authenticatedPlan) => applyStageBInfrastructurePlan({ planPath, plan: authenticatedPlan, spawn: () => { spawns++; return { status: 0 }; } });
+  // Use the actual default executor, not a fake injected apply.
+  delete input.deps.apply;
+  assert.equal(fixture.sharedReservations.size, 0);
   assert.throws(() => runApply(input), /staged publication and native alias CAS/);
-  assert.equal(spawns, 0);
+  assert.equal(fixture.sharedReservations.size, 0);
+  assert.equal(input.applyCalls.length, 0);
 });
 
 test("valid Stage B apply fixture reaches ready-to-apply before checkout mutation", () => {
