@@ -68,3 +68,71 @@ authentication attempt was made during this code correction.
 
 Recommendation: finish this narrow review/merge, then resume fresh preparation and
 stop at the Full-RLS approval boundary. No new recovery mechanism is needed.
+
+## Security-owner reachability revalidation, 2026-10-04
+
+The security owner explicitly authorized revalidation of the existing braces
+non-runtime acceptance against clean PR #619 head
+`f16d9cff3e26b9640a8e37f3d5e2da251e56221c`. This revalidates the existing risk
+decision; it does not narrow the broad input boundary or extend the acceptance.
+
+The canonical implementation and an independent filesystem/hash implementation
+both computed 1,913 inputs and hash
+`e791d60f13ea0003fab57455cf5f032f86fd17267050e03ae015518edc0e750d`.
+The previous binding was
+`91f48e97caf1fd0c26ec7cc9e32d3450b60591eae4a7fc4bef79669a8a45e9cf`.
+Only the reference-audit generator and its Node test changed within that input
+set. The hashing paths, algorithm, unknown-input behavior, runtime enforcement,
+and vulnerability thresholds remain unchanged.
+
+An independently instrumented `npm run build` observed braces **3.0.3** executing
+four calls with precisely these configured, repository-controlled patterns:
+
+- `./pages/**/*.{ts,tsx}`
+- `./components/**/*.{ts,tsx}`
+- `./app/**/*.{ts,tsx}`
+- `./src/**/*.{ts,tsx}`
+
+The fresh canonical production output contained 96 executable JavaScript artifacts.
+A separate fresh diagnostic build exposed 1,606 mapped sources. Inspection found
+neither braces library sources nor the affected compile/expand/stringify recursive
+walker implementations. AST property-signature detectors were first checked
+against the installed affected implementations, then applied to the canonical
+JavaScript and diagnostic mapped sources. The canonical artifact manifest
+SHA256 was `87f6d02a501ea97c88fd08fb0b86277127d1be9a4bdb34c9638d46255c2f57aa`
+(SHA256 of the ordered JSON file/digest/match records). This corroborates the
+specific inspected CVE decision; it is not complete generic plugin provenance.
+
+The changed generator/test are not imported by the current Vite or Tailwind
+configuration, selected by the frontend Vitest configuration, present in the
+build-loaded module trace, or mapped into browser output. Tailwind content globs
+do not select them. Frontend Dockerfiles copy scripts into the builder but invoke
+the Vite build, not these scripts; Nginx receives only the resulting `dist`.
+Backend/worker use the separate backend dependency closure, pruned with
+`npm prune --omit=dev`; their lockfile contains no braces. The backend Dockerfile
+does not copy either changed file into its runtime. The publisher still selects
+that same runtime stage for backend and worker. Production requests do not set
+Tailwind patterns or invoke this compilation path.
+
+Fresh OSV Scanner **2.6.0** used the existing recursive, unfiltered command with
+`--no-resolve --config=/dev/null --format=json`. It still detected
+**GHSA-vfj7-8cjw-p6xm / CVE-2026-93687**, **braces 3.0.3**, **HIGH**, in the
+root lockfile's dev group, with no fixed-version event. The finding remains
+visible; the unchanged enforcement separately reports
+`TIME_BOUNDED_NON_RUNTIME_ACCEPTANCE`.
+
+Only the acceptance's `reachability.inputsSha256` was rebound after these checks.
+Scope `frontend-build-only/non-runtime`, advisory/CVE, version, rationale, owner
+`@T-ej2003`, creation date and expiry **2026-11-02 (exclusive)** are identical to
+the previously authorized record. Automatic expiry and contradictory-runtime
+rejection remain enforced. No package, build, runtime, AWS, infrastructure, worker,
+printing, checker-MFA or provenance-system changes are part of this revalidation.
+
+Local validation after rebinding passed: 89 OSV/acceptance/expiry/dependency-policy
+tests, 966 Stage B control-plane tests, 260 state/normal-deployment/historical-runtime/
+closure tests, and 29 workflow contracts. Production dependency audit and the
+unfiltered OSV enforcement passed. The fresh production build, 95 workflow YAML
+files, and capability/dependency graph (666 capabilities, 213 AWS calls, zero
+violations) passed. Complete-diff self-review verified the exact one-field
+acceptance change and unchanged build/enforcement/packaging code. Merge still
+requires fresh exact-head Codex review and all required CI.
