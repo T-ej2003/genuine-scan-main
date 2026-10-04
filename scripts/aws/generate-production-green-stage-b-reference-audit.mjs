@@ -42,6 +42,7 @@ export { batch, createAwsReader } from "./production-green-stage-b-ecs-observati
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const taskDefinitionArnPattern = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/([A-Za-z0-9_-]+):([1-9][0-9]*)$/;
 const assumedReleaseRolePattern = /^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\/[A-Za-z0-9+=,.@_-]{2,64}$/;
+const containsUnknown = (value) => value === true || (value !== null && typeof value === "object" && Object.values(value).some(containsUnknown));
 const sorted = (items, key) => [...items].sort((left, right) => String(key(left)).localeCompare(String(key(right))));
 const stageBTerraformConfigurationPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../infra/aws/terraform/production-green-stage-b/main.tf");
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -392,6 +393,26 @@ function validateBrokerConfiguration(config, alias, brokerAliasArn, expectedPack
     const currentNoOpArns = currentNoOpByFamily.get(identity.family) || new Set();
     const observed = brokerPredecessorsByMode.get(mode);
     if (!rollover) continue;
+    if (rollover.classification === "currentNoOp" && currentNoOpArns.has(identity.arn)) {
+      assert.equal(currentNoOpArns.size, 1, "Current broker reference must be unambiguous");
+      const definition = plan.resource_changes.filter((change) => change.address === rollover.address && !Object.hasOwn(change, "deposed"));
+      assert.equal(definition.length, 1, "Current broker reference requires one exact task-definition change");
+      const desired = assertStageBCurrentTaskDefinitionNoOp(definition[0], plan, new Set([...retainedArnSetByFamily.values()].flatMap((arns) => [...arns])));
+      assert.equal(desired.currentArn, identity.arn, "Live broker reference must match the authenticated desired reference");
+      const brokerChanges = plan.resource_changes.filter((change) => change.address === "aws_lambda_function.broker");
+      assert.equal(brokerChanges.length, 1, "Current broker reference requires one exact broker change");
+      const brokerChange = brokerChanges[0].change;
+      if (JSON.stringify(brokerChange.actions) === '["no-op"]') {
+        assert.equal(brokerChange.after_unknown === true || containsUnknown(brokerChange.after_unknown?.environment), false, "Current broker no-op reference must not be unknown");
+        for (const side of ["before", "after"]) {
+          const environments = brokerChange[side]?.environment;
+          assert.equal(environments?.length, 1, "Current broker no-op environment must be exact");
+          const targets = requireObject(parseJson(environments[0].variables?.BROKER_TASK_DEFINITIONS_JSON, "Planned current broker task-definition map"), "Planned current broker task-definition map");
+          assert.deepEqual(targets, taskDefinitions, "Broker no-op planned references must equal authenticated live references");
+        }
+        continue;
+      }
+    }
     if (observed?.classification === "DEPOSED") {
       try {
         plannedAtomicBrokerRollovers.push(proveAtomicBrokerReference(plan, mode, atomicByAddress, planSha256, terraformConfiguration, observed));
