@@ -1,8 +1,8 @@
 {
-  "checkedAt": "2026-10-05T00:11:56.160Z",
+  "checkedAt": "2026-10-05T00:25:54.652Z",
   "baseline": "d6f515fe393e0bcfda76e248aa8b3f2f3aae10e4",
-  "inputsSha256": "0dba71e0be8d1b37d7ba9cd00ffa78a4052269f6bc961da6758ef298d4de1f7f",
-  "previousInputsSha256": "4cd6ca697ab7268ae3be481d9d973ea24e49849b06ddf5f834d878c7349dd37d",
+  "inputsSha256": "c167232b2b892236c60cbcd761880cdebc1d0cf4344611cb0a708866a0cf94af",
+  "previousInputsSha256": "0dba71e0be8d1b37d7ba9cd00ffa78a4052269f6bc961da6758ef298d4de1f7f",
   "changedInputs": [
     "package.json",
     "scripts/apply-production-green-stage-b.mjs",
@@ -1140,16 +1140,10 @@
     }
   ],
   "baselineInputsSha256": "2071a78692c0379a3799984eed742cbac1b22a7899a59c019014a54d53de21df",
-  "revalidatedFromCommit": "689ecd78fb63d81b05e9426ccdf299e942971a3a",
-  "purpose": "Phase-wide exact-successor post-commit receipt recovery security revalidation",
+  "revalidatedFromCommit": "6e89a1f9bd1471eee5850e63f59a2a4a30c1ea91",
+  "purpose": "Exact no-op broker policy successor revalidation security binding",
   "revalidationChangedInputs": [
-    "scripts/aws/run-stage-b-staged-broker.mjs",
-    "scripts/aws/stage-b-broker-writer-session.mjs",
-    "scripts/aws/stage-b-release-prerequisites.mjs",
     "scripts/aws/stage-b-staged-broker-executor.mjs",
-    "scripts/aws/stage-b-staged-broker.mjs",
-    "scripts/tests/stage-b-release-prerequisites.test.mjs",
-    "scripts/tests/stage-b-staged-broker-executor.test.mjs",
-    "scripts/tests/stage-b-staged-broker.test.mjs"
+    "scripts/tests/stage-b-staged-broker-executor.test.mjs"
   ]
 }

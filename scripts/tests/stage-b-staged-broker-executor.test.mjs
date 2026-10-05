@@ -189,12 +189,13 @@ async function convergenceRecoveryFixture(failure = null, fault) {
   await native(); // Reuse the private canonical package/backend fixture.
   const p = preparation(); p.schemaVersion = 2; p.purpose = BROKER_POLICY_CONVERGENCE;
   p.packageSha256 = brokerDigest(fs.readFileSync(files.package));
-  const taskMap = Object.fromEntries(Object.entries(p.prerequisites.taskMap).map(([mode, arn]) => [mode, arn.replace(/:[0-9]+$/, ':43')]));
+  const taskMap = failure === 'no-op' ? structuredClone(p.prerequisites.taskMap) : Object.fromEntries(Object.entries(p.prerequisites.taskMap).map(([mode, arn]) => [mode, arn.replace(/:[0-9]+$/, ':43')]));
+  if (failure === 'no-op') p.prerequisites.policy = deriveBrokerPolicy(p.prerequisites.policy, taskMap);
   p.target = { policy: deriveBrokerPolicy(p.prerequisites.policy, taskMap) };
   p.prerequisiteChain = { registration: { result: { taskMap } } };
   p.canonicalAddresses.push('aws_iam_policy.broker');
   const before = { arn: p.prerequisites.policyArn, policy: JSON.stringify(p.prerequisites.policy) }, after = { ...before, policy: JSON.stringify(p.target.policy) };
-  const change = { address: 'aws_iam_policy.broker', type: 'aws_iam_policy', mode: 'managed', change: { actions: ['update'], before, after, after_unknown: {} } };
+  const change = { address: 'aws_iam_policy.broker', type: 'aws_iam_policy', mode: 'managed', change: { actions: [failure === 'no-op' ? 'no-op' : 'update'], before, after, after_unknown: {} } };
   const plan = { variables: { tooling_sha: { value: sourceSha } }, complete: false, errored: false, resource_changes: [change] };
   const planPath = path.join(directory, `owned-policy-${failure}.tfplan`), bytes = Buffer.from(`owned-${failure}`); fs.writeFileSync(planPath, bytes, { mode: 0o600 });
   p.savedPlanSha256 = brokerDigest(bytes); p.logicalPlanSha256 = brokerDigest(plan); p.artifactSetSha256 = stagedBrokerArtifactSet(files, root, p);
@@ -513,4 +514,27 @@ test('publication recovery selects exact state version and independently verifie
   const changed=structuredClone(attrs);mutate(changed);set(changed);await assert.rejects(()=>adapter.readPublicationResult(input));
  }
  assert.equal(r.calls.filter(c=>c.command==='terraform'&&c.args.includes('apply')).length,0);assert.equal(r.calls.filter(c=>c.args[1]==='update-alias').length,0);
+});
+
+test('no-op policy receipt rejects a concurrent successor observed after authorization, without acquiring ownership or mutating IAM',async()=>{
+ const r=await convergenceRecoveryFixture('no-op');let reads=0;
+ r.execute.readPrerequisites=async()=>++reads===3?{...r.p.prerequisites,policyVersion:'v99',policy:deriveBrokerPolicy(r.p.prerequisites.policy,Object.fromEntries(Object.entries(r.p.prerequisites.taskMap).map(([mode,arn])=>[mode,arn.replace(/:[0-9]+$/,':99')])))}:r.p.prerequisites;
+ await assert.rejects(()=>r.execute.executeBrokerPolicyConvergence());assert.equal(r.state().writes,0);assert.equal(r.state().owner,undefined);
+ assert.ok(!r.objects.has(stageBAttemptStepS3ObjectKey(brokerDigest(r.auth),2)),'No contradictory terminal receipt');
+});
+
+test('exact no-op policy produces a coherent receipt without ownership/IAM mutation and remains one-use',async()=>{
+ const r=await convergenceRecoveryFixture('no-op'),result=await r.execute.executeBrokerPolicyConvergence();
+ assert.deepEqual(result.policy,result.successorIdentity.policy);assert.deepEqual(result.successorIdentity,r.p.prerequisites);assert.equal(result.owner,null);assert.equal(r.state().owner,undefined);assert.equal(r.state().writes,0);
+ await assert.rejects(()=>r.execute.executeBrokerPolicyConvergence());assert.equal(r.state().owner,undefined);assert.equal(r.state().writes,0);
+});
+for(const [name,mutate] of [['version',p=>p.policyVersion='v99'],['role',p=>p.role.RoleId='another'],['map',p=>p.taskMap['full-rls-preflight']+='wrong'],['traffic',p=>p.traffic.functionUrls=['unexpected']]])test(`no-op policy refuses concurrent ${name} prerequisite drift before terminal receipt`,async()=>{
+ const r=await convergenceRecoveryFixture('no-op');let reads=0;
+ r.execute.readPrerequisites=async()=>{const p=structuredClone(r.p.prerequisites);if(++reads===3)mutate(p);return p;};
+ await assert.rejects(()=>r.execute.executeBrokerPolicyConvergence());assert.equal(r.state().writes,0);assert.equal(r.state().owner,undefined);assert.ok(!r.objects.has(stageBAttemptStepS3ObjectKey(brokerDigest(r.auth),2)));
+});
+test('no-op policy refuses changed state after its authorized prerequisite read',async()=>{
+ const r=await convergenceRecoveryFixture('no-op');let reads=0;
+ r.execute.readStateIdentity=async()=>++reads===3?{...r.p.state,serial:r.p.state.serial+1}:r.p.state;
+ await assert.rejects(()=>r.execute.executeBrokerPolicyConvergence());assert.equal(r.state().writes,0);assert.ok(!r.objects.has(stageBAttemptStepS3ObjectKey(brokerDigest(r.auth),2)));
 });

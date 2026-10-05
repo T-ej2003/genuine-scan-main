@@ -398,10 +398,15 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
         const authorizedAt = new Date().toISOString();
         await adapter.record(id, 'BROKER_POLICY_INTENT', { savedPlanSha256: preparation.savedPlanSha256, authorizedAt, noOp: true });
         await adapter.authenticatePrerequisiteAuthorization(preparation, authorization);
+        const successorIdentity = await adapter.readPrerequisites();
+        equal(successorIdentity, preparation.prerequisites); equal(successorIdentity.policy, preparation.target.policy);
+        equal(await adapter.readStateIdentity(), preparation.state);
+        equal(await adapter.readCheckout(), { sourceSha: preparation.sourceSha, treeSha256: preparation.treeSha256 });
+        equal(await getAlias(), preparation.alias);
         const receipt = { schemaVersion: 1, status: 'BROKER_POLICY_CONVERGED_NONTERMINAL', sourceSha: preparation.sourceSha,
           treeSha256: preparation.treeSha256, preparationSha256: brokerDigest(preparation), authorizationSha256: id,
           savedPlanSha256: preparation.savedPlanSha256, authorizedAt, policy: preparation.target.policy, owner: null,
-          successorIdentity: await adapter.readPrerequisites(), reconciliation: { noOp: true, normalPlanSha256: brokerDigest(initial.plan) } };
+          successorIdentity, reconciliation: { noOp: true, normalPlanSha256: brokerDigest(initial.plan) } };
         await adapter.record(id, 'BROKER_POLICY_CONVERGED', receipt); return receipt;
       }
       let predecessorInventory, successorIdentity;
