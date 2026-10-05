@@ -57,6 +57,7 @@ export type B03SiemClaim = B03DurableClaim & {
   jobType: "AUDIT_LOG" | "CSP_VIOLATION";
   eventType: "AUDIT_LOG" | "CSP_VIOLATION";
   eventPayload: unknown;
+  projectionCompleted: boolean;
   createdAt: Date;
 };
 
@@ -371,7 +372,7 @@ export const claimSecurityEventOutboxSlice = async (
     SELECT claim."id", claim."jobType", claim."requestId", claim."payloadDigest",
       claim."idempotencyKey", claim."organizationId", claim."licenseeId",
       claim."manufacturerId", claim."initiatingUserId", claim."expiresAt", claim."attempt",
-      claim."eventType", claim."eventPayload", claim."createdAt"
+      claim."eventType", claim."eventPayload", claim."createdAt", claim."projectionCompleted"
     FROM app_rls.claim_security_event_outbox_slice(
       CAST(${attemptedAt} AS timestamp without time zone), CAST(${batchSize} AS integer),
       ${exactEnum(input.jobType, "jobType", ["AUDIT_LOG", "CSP_VIOLATION"])}::text
@@ -381,6 +382,7 @@ export const claimSecurityEventOutboxSlice = async (
     validateClaim(row, ["AUDIT_LOG", "CSP_VIOLATION"]);
     exactEnum(row.eventType, "eventType", ["AUDIT_LOG", "CSP_VIOLATION"]);
     timestamp(row.createdAt, "createdAt");
+    if (typeof row.projectionCompleted !== "boolean") throw new Error("Invalid internal projection receipt");
     return row;
   });
 };

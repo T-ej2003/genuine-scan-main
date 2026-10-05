@@ -2785,6 +2785,7 @@
         "entityType",
         "entityId",
         "details",
+        "ipHash",
         "createdAt"
       ],
       "grantee": "mscqr_rls_cert_auth_owner",

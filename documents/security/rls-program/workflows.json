@@ -12277,73 +12277,73 @@
       "supportingEvidence": [
         {
           "accessId": "access-1b32300f7407fe28",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:593",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:595",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_attention_queue_projection"
         },
         {
           "accessId": "access-23773597d75a4fb6",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:593",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:595",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_attention_queue_projection"
         },
         {
           "accessId": "access-29f5a68ad6d39cbd",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:593",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:595",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_attention_queue_projection"
         },
         {
           "accessId": "access-4d9effaed7892d00",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:593",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:595",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_attention_queue_projection"
         },
         {
           "accessId": "access-8bb1400feb13c684",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:593",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:595",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_attention_queue_projection"
         },
         {
           "accessId": "access-aadf8c8d7089f85a",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:593",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:595",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_attention_queue_projection"
         },
         {
           "accessId": "access-ac76a44eac79c925",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:593",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:595",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_attention_queue_projection"
         },
         {
           "accessId": "access-dc49dca45de664e7",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:593",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:595",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_attention_queue_projection"
         },
         {
           "accessId": "access-e83016d0e0bf9de2",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:593",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:595",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_attention_queue_projection"
         },
         {
           "accessId": "access-ebf3fc4a00865860",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:593",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:595",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_attention_queue_projection"
         },
         {
           "accessId": "access-f0961d5a00f87102",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:593",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:595",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_attention_queue_projection"
         },
         {
           "accessId": "access-fc852d695843b699",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:593",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:595",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_attention_queue_projection"
         }
@@ -21653,31 +21653,31 @@
       "supportingEvidence": [
         {
           "accessId": "access-5d85f8adbe19d291",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:788",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:790",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_add_support_ticket_message"
         },
         {
           "accessId": "access-64811e3097ae50ba",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:788",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:790",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_add_support_ticket_message"
         },
         {
           "accessId": "access-783d68a5358b4648",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:788",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:790",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_add_support_ticket_message"
         },
         {
           "accessId": "access-7ca4f60de903420a",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:788",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:790",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_add_support_ticket_message"
         },
         {
           "accessId": "access-c69628c52bd96ba2",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:788",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:790",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_add_support_ticket_message"
         }
@@ -21796,37 +21796,37 @@
       "supportingEvidence": [
         {
           "accessId": "access-204e743effe542d5",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:753",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:755",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_get_support_ticket"
         },
         {
           "accessId": "access-23714d791a78ffd2",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:753",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:755",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_get_support_ticket"
         },
         {
           "accessId": "access-2426e63eb1075da8",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:753",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:755",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_get_support_ticket"
         },
         {
           "accessId": "access-a00676e6c7b9d233",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:753",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:755",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_get_support_ticket"
         },
         {
           "accessId": "access-ce6d5f7719541477",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:753",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:755",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_get_support_ticket"
         },
         {
           "accessId": "access-f6b186d1aa2a5013",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:753",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:755",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_get_support_ticket"
         }
@@ -21938,31 +21938,31 @@
       "supportingEvidence": [
         {
           "accessId": "access-2137d9d7149d6eff",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:731",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:733",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_list_support_tickets"
         },
         {
           "accessId": "access-27ec8fd15ab0a5ba",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:731",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:733",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_list_support_tickets"
         },
         {
           "accessId": "access-92a1ca96eba3fb18",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:731",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:733",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_list_support_tickets"
         },
         {
           "accessId": "access-97a41442a8d214fd",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:731",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:733",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_list_support_tickets"
         },
         {
           "accessId": "access-adfa9278f0f9d1ff",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:731",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:733",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_list_support_tickets"
         }
@@ -22091,49 +22091,49 @@
       "supportingEvidence": [
         {
           "accessId": "access-066e861a4b0beae4",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:771",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:773",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_update_support_ticket"
         },
         {
           "accessId": "access-5f44b9187115847f",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:771",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:773",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_update_support_ticket"
         },
         {
           "accessId": "access-66431922faed7c2f",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:771",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:773",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_update_support_ticket"
         },
         {
           "accessId": "access-95e6cd8892704711",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:771",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:773",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_update_support_ticket"
         },
         {
           "accessId": "access-e5a28885001e6673",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:771",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:773",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_update_support_ticket"
         },
         {
           "accessId": "access-eef23ac92c7d8f4d",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:771",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:773",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_update_support_ticket"
         },
         {
           "accessId": "access-f093caf19408b93f",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:771",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:773",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_update_support_ticket"
         },
         {
           "accessId": "access-fac704cda245c867",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:771",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:773",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_update_support_ticket"
         }
@@ -29008,13 +29008,13 @@
       "supportingEvidence": [
         {
           "accessId": "access-593984076ed3e2fc",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:296",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:297",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.enqueue_audit_log_outbox"
         },
         {
           "accessId": "access-847e757341deb4bd",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:296",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:297",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.enqueue_audit_log_outbox"
         }
@@ -37955,13 +37955,13 @@
       "supportingEvidence": [
         {
           "accessId": "access-3db24208057399a1",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:471",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:473",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_superadmin_alert_emails"
         },
         {
           "accessId": "access-f662448d5b7c40ff",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:471",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:473",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_superadmin_alert_emails"
         }
@@ -38107,121 +38107,121 @@
       "supportingEvidence": [
         {
           "accessId": "access-215aedaf2fe422e3",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:657",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:659",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_claim_incident_email_delivery"
         },
         {
           "accessId": "access-3ca9407500d79c82",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:696",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:698",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_complete_incident_email_delivery"
         },
         {
           "accessId": "access-4088339c95e1ea91",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:657",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:659",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_claim_incident_email_delivery"
         },
         {
           "accessId": "access-4dde6114c0d8a24f",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:480",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:482",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_resolve_incident_email_actor"
         },
         {
           "accessId": "access-5a1a00ec6d570706",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:480",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:482",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_resolve_incident_email_actor"
         },
         {
           "accessId": "access-5d3a4020e0e0562c",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:657",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:659",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_claim_incident_email_delivery"
         },
         {
           "accessId": "access-6b734448dccb1857",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:657",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:659",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_claim_incident_email_delivery"
         },
         {
           "accessId": "access-8cd5c971d453a7be",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:696",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:698",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_complete_incident_email_delivery"
         },
         {
           "accessId": "access-9530530678885259",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:657",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:659",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_claim_incident_email_delivery"
         },
         {
           "accessId": "access-9547a144f80064e7",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:696",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:698",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_complete_incident_email_delivery"
         },
         {
           "accessId": "access-a6674b3adffb3ce5",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:696",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:698",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_complete_incident_email_delivery"
         },
         {
           "accessId": "access-a8ff3b7fc05a8b3a",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:696",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:698",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_complete_incident_email_delivery"
         },
         {
           "accessId": "access-ad8fa62fe92b9170",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:696",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:698",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_complete_incident_email_delivery"
         },
         {
           "accessId": "access-b8e073b06895fc2a",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:463",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:465",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_primary_superadmin_email"
         },
         {
           "accessId": "access-bc090384fc6b6d47",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:463",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:465",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_primary_superadmin_email"
         },
         {
           "accessId": "access-c6591659c70af905",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:696",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:698",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_complete_incident_email_delivery"
         },
         {
           "accessId": "access-d9f7bc15e6834cd2",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:657",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:659",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_claim_incident_email_delivery"
         },
         {
           "accessId": "access-de27fda974c2dfa1",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:696",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:698",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_complete_incident_email_delivery"
         },
         {
           "accessId": "access-f32cf695726ce16e",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:696",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:698",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_complete_incident_email_delivery"
         },
         {
           "accessId": "access-ff0dabe66f28cd0e",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:657",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:659",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_claim_incident_email_delivery"
         }
@@ -39915,43 +39915,43 @@
       "supportingEvidence": [
         {
           "accessId": "access-3d2a9187dbfdc9c0",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:501",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:503",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_create_role_notifications"
         },
         {
           "accessId": "access-648266c9b6902671",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:501",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:503",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_create_role_notifications"
         },
         {
           "accessId": "access-67259342f873bef4",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:501",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:503",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_create_role_notifications"
         },
         {
           "accessId": "access-6ccdc3e22d05a833",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:501",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:503",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_create_role_notifications"
         },
         {
           "accessId": "access-924b408a3336f186",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:501",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:503",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_create_role_notifications"
         },
         {
           "accessId": "access-c65a6c8c6df1f6f1",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:501",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:503",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_create_role_notifications"
         },
         {
           "accessId": "access-d13f69def202b592",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:501",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:503",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_create_role_notifications"
         }
@@ -40081,67 +40081,67 @@
       "supportingEvidence": [
         {
           "accessId": "access-132e3c9d98ee48fd",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:528",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:530",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_create_user_notification"
         },
         {
           "accessId": "access-5181e1549e9fd458",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:555",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:557",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_mark_notification_emailed"
         },
         {
           "accessId": "access-81f584a5f5b2cec2",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:528",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:530",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_create_user_notification"
         },
         {
           "accessId": "access-9437838bf307c013",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:528",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:530",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_create_user_notification"
         },
         {
           "accessId": "access-a88e86eb580d2f08",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:528",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:530",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_create_user_notification"
         },
         {
           "accessId": "access-addbac084774c8b3",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:528",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:530",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_create_user_notification"
         },
         {
           "accessId": "access-b8dc5aee4f794958",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:555",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:557",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_mark_notification_emailed"
         },
         {
           "accessId": "access-e5490475d58d0a23",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:528",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:530",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_create_user_notification"
         },
         {
           "accessId": "access-ea3fdec00d534ad8",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:555",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:557",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_mark_notification_emailed"
         },
         {
           "accessId": "access-f5490d9bffc3343a",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:528",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:530",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_create_user_notification"
         },
         {
           "accessId": "access-f863e2fa1da38e0f",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:555",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:557",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_mark_notification_emailed"
         }
@@ -40244,25 +40244,25 @@
       "supportingEvidence": [
         {
           "accessId": "access-116f0e7e00e689bc",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:569",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:571",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_list_notifications_for_user"
         },
         {
           "accessId": "access-773b3c0db4ab4268",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:569",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:571",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_list_notifications_for_user"
         },
         {
           "accessId": "access-8336cf68ad522415",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:569",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:571",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_list_notifications_for_user"
         },
         {
           "accessId": "access-c26d03ffb840fa8d",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:569",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:571",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_list_notifications_for_user"
         }
@@ -40351,19 +40351,19 @@
       "supportingEvidence": [
         {
           "accessId": "access-2d644769d91d121a",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:632",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:634",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_mark_all_notifications_read"
         },
         {
           "accessId": "access-3afbcbe63d4e458b",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:632",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:634",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_mark_all_notifications_read"
         },
         {
           "accessId": "access-b3748c0e170bb92d",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:632",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:634",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_mark_all_notifications_read"
         }
@@ -40454,25 +40454,25 @@
       "supportingEvidence": [
         {
           "accessId": "access-7a0b791f71b48e08",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:617",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:619",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_mark_notification_read"
         },
         {
           "accessId": "access-b0d4084fc18a15f0",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:617",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:619",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_mark_notification_read"
         },
         {
           "accessId": "access-b6e13ec415706687",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:617",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:619",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_mark_notification_read"
         },
         {
           "accessId": "access-c0088a7cc88cd89d",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:617",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:619",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_mark_notification_read"
         }
@@ -40588,37 +40588,37 @@
       "supportingEvidence": [
         {
           "accessId": "access-0a00522419fdfa43",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:643",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:645",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_resolve_incident_notification_scope"
         },
         {
           "accessId": "access-4ae01331e7047466",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:643",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:645",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_resolve_incident_notification_scope"
         },
         {
           "accessId": "access-7d21a53709eba49d",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:643",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:645",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_resolve_incident_notification_scope"
         },
         {
           "accessId": "access-a3aa6646423680dd",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:643",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:645",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_resolve_incident_notification_scope"
         },
         {
           "accessId": "access-afe959bd3a5256a5",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:643",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:645",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_resolve_incident_notification_scope"
         },
         {
           "accessId": "access-ba572c8015d6bf1e",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:643",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:645",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.b03_resolve_incident_notification_scope"
         }
@@ -45524,13 +45524,13 @@
       "supportingEvidence": [
         {
           "accessId": "access-bc65a1ef54db1c5b",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:310",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:311",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.enqueue_security_event_outbox"
         },
         {
           "accessId": "access-c820c3e1fe97fbfd",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:310",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:311",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.enqueue_security_event_outbox"
         }
@@ -46810,19 +46810,19 @@
       "supportingEvidence": [
         {
           "accessId": "access-00c89a3a75b75f51",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:418",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:420",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.claim_compliance_pack_slice"
         },
         {
           "accessId": "access-07196e109a7342b1",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:418",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:420",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.claim_compliance_pack_slice"
         },
         {
           "accessId": "access-099e95ca92af0614",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:418",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:420",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.claim_compliance_pack_slice"
         },
@@ -46852,13 +46852,13 @@
         },
         {
           "accessId": "access-11251a442e92c5d0",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:418",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:420",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.claim_compliance_pack_slice"
         },
         {
           "accessId": "access-11d7c2457981b51a",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:455",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:457",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.scheduled_fail_compliance_pack_job"
         },
@@ -46882,7 +46882,7 @@
         },
         {
           "accessId": "access-1de6dc82999d9303",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:445",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:447",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.scheduled_complete_compliance_pack_job"
         },
@@ -46906,7 +46906,7 @@
         },
         {
           "accessId": "access-2cade4cfeaa70ab6",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:455",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:457",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.scheduled_fail_compliance_pack_job"
         },
@@ -46918,7 +46918,7 @@
         },
         {
           "accessId": "access-318988733caae620",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:418",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:420",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.claim_compliance_pack_slice"
         },
@@ -46960,7 +46960,7 @@
         },
         {
           "accessId": "access-3ab25e4a8036aaef",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:418",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:420",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.claim_compliance_pack_slice"
         },
@@ -46972,7 +46972,7 @@
         },
         {
           "accessId": "access-3f737e27f5518271",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:418",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:420",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.claim_compliance_pack_slice"
         },
@@ -47014,7 +47014,7 @@
         },
         {
           "accessId": "access-50a6c6b0ac368896",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:418",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:420",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.claim_compliance_pack_slice"
         },
@@ -47080,13 +47080,13 @@
         },
         {
           "accessId": "access-6cfe7e148329053d",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:445",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:447",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.scheduled_complete_compliance_pack_job"
         },
         {
           "accessId": "access-7390c02b92e0d080",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:445",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:447",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.scheduled_complete_compliance_pack_job"
         },
@@ -47098,7 +47098,7 @@
         },
         {
           "accessId": "access-7dbc2e3cdc3e4067",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:418",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:420",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.claim_compliance_pack_slice"
         },
@@ -47164,13 +47164,13 @@
         },
         {
           "accessId": "access-ad1d12fcc43f34bd",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:418",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:420",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.claim_compliance_pack_slice"
         },
         {
           "accessId": "access-b0f6241615e4bbb9",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:455",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:457",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.scheduled_fail_compliance_pack_job"
         },
@@ -47218,7 +47218,7 @@
         },
         {
           "accessId": "access-cb0748b29ae527f9",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:445",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:447",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.scheduled_complete_compliance_pack_job"
         },
@@ -47230,7 +47230,7 @@
         },
         {
           "accessId": "access-cf32378a00047c94",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:418",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:420",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.claim_compliance_pack_slice"
         },
@@ -47248,7 +47248,7 @@
         },
         {
           "accessId": "access-da77c5ccb594ab05",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:455",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:457",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.scheduled_fail_compliance_pack_job"
         },
@@ -47260,13 +47260,13 @@
         },
         {
           "accessId": "access-e4b70cf6a0e71595",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:418",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:420",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.claim_compliance_pack_slice"
         },
         {
           "accessId": "access-e4ec7875daa1a449",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:418",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:420",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.claim_compliance_pack_slice"
         },
@@ -47278,19 +47278,19 @@
         },
         {
           "accessId": "access-eea5bee4dd9750ad",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:455",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:457",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.scheduled_fail_compliance_pack_job"
         },
         {
           "accessId": "access-ef7bb11f9aa90609",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:418",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:420",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.claim_compliance_pack_slice"
         },
         {
           "accessId": "access-f23cdc2dac9af391",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:445",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:447",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.scheduled_complete_compliance_pack_job"
         },
@@ -47767,49 +47767,49 @@
       "supportingEvidence": [
         {
           "accessId": "access-409d820baab99d60",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:328",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:329",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.claim_audit_log_outbox_slice"
         },
         {
           "accessId": "access-4498407f45168a2b",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:354",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:355",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.fail_audit_log_outbox"
         },
         {
           "accessId": "access-80bc6b3491453e4a",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:328",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:329",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.claim_audit_log_outbox_slice"
         },
         {
           "accessId": "access-868ac480f3575a23",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:343",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:344",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.consume_audit_log_outbox"
         },
         {
           "accessId": "access-a20f59ec8484da73",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:343",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:344",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.consume_audit_log_outbox"
         },
         {
           "accessId": "access-d0b75da99bc397c6",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:343",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:344",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.consume_audit_log_outbox"
         },
         {
           "accessId": "access-d9ab8ebbd2d0b55b",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:343",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:344",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.consume_audit_log_outbox"
         },
         {
           "accessId": "access-df788005ebb1e26a",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:354",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:355",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.fail_audit_log_outbox"
         }
@@ -47914,37 +47914,37 @@
       "supportingEvidence": [
         {
           "accessId": "access-2648c7a6585e94a8",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:391",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:393",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.complete_security_event_outbox"
         },
         {
           "accessId": "access-557ed35b0d76b56a",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:391",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:393",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.complete_security_event_outbox"
         },
         {
           "accessId": "access-803ef2771e28b65c",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:403",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:405",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.fail_security_event_outbox"
         },
         {
           "accessId": "access-885348dc72781781",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:403",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:405",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.fail_security_event_outbox"
         },
         {
           "accessId": "access-9b48b4f7d77c1bb5",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:370",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:371",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.claim_security_event_outbox_slice"
         },
         {
           "accessId": "access-aee41e8c445d5244",
-          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:370",
+          "source": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:371",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.claim_security_event_outbox_slice"
         }

@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='d86f49e84fa5d2d3c5fc811a8f3842fbc8aa462f313b8775fd634ffe56196e0f'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:d86f49e84fa5d2d3c5fc811a8f3842fbc8aa462f313b8775fd634ffe56196e0f'
+    AND source_contract_sha256='0a01b1b35e8ae6af95d4fb64440c851af6252a7be21d7175f8d301d4b5671635'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:0a01b1b35e8ae6af95d4fb64440c851af6252a7be21d7175f8d301d4b5671635'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:d86f49e84fa5d2d3c5fc811a8f3842fbc8aa462f313b8775fd634ffe56196e0f')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:0a01b1b35e8ae6af95d4fb64440c851af6252a7be21d7175f8d301d4b5671635')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -7029,7 +7029,7 @@ END
 $fn$;
 
 CREATE OR REPLACE FUNCTION app_rls.qr_create_allocation_request(
-  p_capability text,p_purpose text,p_request_id text,p_licensee_id text,p_quantity integer,p_batch_name text,p_note text
+  p_capability text,p_purpose text,p_request_id text,p_licensee_id text,p_quantity integer,p_batch_name text,p_note text,p_ip_hash text DEFAULT NULL
 ) RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
 DECLARE actor record; tenant_id text; new_id text:=gen_random_uuid()::text; result jsonb;
 BEGIN
@@ -7049,8 +7049,8 @@ BEGIN
   PERFORM set_config('app.qr_target_request_id',new_id,true);
   INSERT INTO public."QrAllocationRequest"(id,"licenseeId","requestedByUserId",quantity,"batchName",note,status,"updatedAt")
     VALUES(new_id,tenant_id,actor."userId",p_quantity,btrim(p_batch_name),nullif(btrim(p_note),''),'PENDING',transaction_timestamp());
-  PERFORM app_rls.qr_write_audit(actor."userId",actor."organizationId",tenant_id,'CREATE_QR_ALLOCATION_REQUEST','QrAllocationRequest',new_id,
-    jsonb_build_object('quantity',p_quantity,'batchName',btrim(p_batch_name)));
+  PERFORM app_rls.qr_write_audit(actor."userId",current_setting('app.qr_target_organization_id',true),tenant_id,'CREATE_QR_ALLOCATION_REQUEST','QrAllocationRequest',new_id,
+    jsonb_build_object('quantity',p_quantity,'batchName',btrim(p_batch_name)),p_ip_hash);
   SELECT jsonb_build_object('id',r.id,'licenseeId',r."licenseeId",'requestedByUserId',r."requestedByUserId",
     'quantity',r.quantity,'batchName',r."batchName",'note',r.note,'status',r.status,'createdAt',r."createdAt")
     INTO result FROM public."QrAllocationRequest" r WHERE r.id=new_id;
@@ -7059,7 +7059,7 @@ END
 $fn$;
 
 CREATE OR REPLACE FUNCTION app_rls.qr_reject_allocation_request(
-  p_capability text,p_purpose text,p_request_id text,p_allocation_request_id text,p_decision_note text
+  p_capability text,p_purpose text,p_request_id text,p_allocation_request_id text,p_decision_note text,p_ip_hash text DEFAULT NULL
 ) RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
 DECLARE actor record; request_row record; canonical_note text;
 BEGIN
@@ -7086,8 +7086,8 @@ BEGIN
   UPDATE public."QrAllocationRequest" SET status='REJECTED',"rejectedByUserId"=actor."userId",
     "rejectedAt"=transaction_timestamp(),"decisionNote"=canonical_note,"updatedAt"=transaction_timestamp()
     WHERE id=request_row.id;
-  PERFORM app_rls.qr_write_audit(actor."userId",actor."organizationId",request_row."licenseeId",'REJECT_QR_ALLOCATION_REQUEST',
-    'QrAllocationRequest',request_row.id,jsonb_build_object('decisionNote',canonical_note));
+  PERFORM app_rls.qr_write_audit(actor."userId",current_setting('app.qr_target_organization_id',true),request_row."licenseeId",'REJECT_QR_ALLOCATION_REQUEST',
+    'QrAllocationRequest',request_row.id,jsonb_build_object('decisionNote',canonical_note),p_ip_hash);
   RETURN jsonb_build_object('id',request_row.id,'licenseeId',request_row."licenseeId",'requestedByUserId',request_row."requestedByUserId",
     'status','REJECTED','decisionNote',canonical_note);
 END
@@ -7287,18 +7287,18 @@ END
 $fn$;
 
 CREATE OR REPLACE FUNCTION app_rls.qr_write_audit(
-  p_actor_id text,p_org_id text,p_licensee_id text,p_action text,p_entity_type text,p_entity_id text,p_details jsonb
+  p_actor_id text,p_org_id text,p_licensee_id text,p_action text,p_entity_type text,p_entity_id text,p_details jsonb,p_ip_hash text DEFAULT NULL
 ) RETURNS void LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
 DECLARE audit_id text:=gen_random_uuid()::text; outbox_id text:=gen_random_uuid()::text; now_at timestamp without time zone:=transaction_timestamp(); payload jsonb; payload_digest text;
 BEGIN
-  IF p_action !~ '^[A-Z0-9_]{1,120}$' OR p_entity_type NOT IN ('QRRange','QRCode','Batch','QrAllocationRequest') THEN
+  IF (p_ip_hash IS NOT NULL AND p_ip_hash !~ '^[0-9a-f]{12}:[0-9a-f]{64}$') OR p_action !~ '^[A-Z0-9_]{1,120}$' OR p_entity_type NOT IN ('QRRange','QRCode','Batch','QrAllocationRequest') THEN
     RAISE EXCEPTION 'QR_INVALID_AUDIT';
   END IF;
   PERFORM set_config('app.qr_audit_id',audit_id,true),set_config('app.qr_outbox_id',outbox_id,true);
-  INSERT INTO public."AuditLog"(id,"userId","orgId","licenseeId",action,"entityType","entityId",details,"createdAt")
-  VALUES(audit_id,p_actor_id,p_org_id,p_licensee_id,p_action,p_entity_type,p_entity_id,p_details,now_at);
+  INSERT INTO public."AuditLog"(id,"userId","orgId","licenseeId",action,"entityType","entityId",details,"ipHash","createdAt")
+  VALUES(audit_id,p_actor_id,p_org_id,p_licensee_id,p_action,p_entity_type,p_entity_id,p_details,p_ip_hash,now_at);
   payload:=jsonb_build_object('id',audit_id,'action',p_action,'entityType',p_entity_type,
-    'entityId',p_entity_id,'userId',p_actor_id,'orgId',p_org_id,'licenseeId',p_licensee_id,'details',p_details,'createdAt',now_at AT TIME ZONE 'UTC');
+    'entityId',p_entity_id,'userId',p_actor_id,'orgId',p_org_id,'licenseeId',p_licensee_id,'details',p_details,'ipHash',p_ip_hash,'createdAt',now_at AT TIME ZONE 'UTC');
   payload_digest:=encode(sha256(convert_to(app_rls.b03_stable_json(payload),'UTF8')),'hex');
   -- Reuse the attributed, replay-safe outbox consumed by the existing B03 worker.
   PERFORM app_rls.enqueue_security_event_outbox('AUDIT_LOG',payload,payload_digest,
@@ -8017,14 +8017,14 @@ GRANT EXECUTE ON FUNCTION app_rls.qr_allocate_range(text,text,text,text,integer,
 GRANT EXECUTE ON FUNCTION app_rls.qr_approve_allocation_request(text,text,text,text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.qr_batch_command(text,text,text,text,jsonb) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.qr_bind_break_glass_tokens(text,text,text,text,jsonb) TO "mscqr_rls_cert_app";
-GRANT EXECUTE ON FUNCTION app_rls.qr_create_allocation_request(text,text,text,text,integer,text,text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.qr_create_allocation_request(text,text,text,text,integer,text,text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.qr_delete_codes(text,text,text,text[],text[]) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.qr_export_codes(text,text,text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.qr_get_code_scope(text,text,text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.qr_inventory_projection(text,text,text,text,text,text,text,text,integer,integer) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.qr_list_allocation_requests(text,text,text,text,text,integer,integer) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.qr_read_codes(text,text,text,text,text,text,integer,integer) TO "mscqr_rls_cert_app";
-GRANT EXECUTE ON FUNCTION app_rls.qr_reject_allocation_request(text,text,text,text,text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.qr_reject_allocation_request(text,text,text,text,text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.qr_scan_analytics(text,text,text,text,jsonb) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.qr_stats(text,text,text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.refresh_inventory_status_rollups(text) TO "mscqr_rls_cert_worker";
@@ -13088,7 +13088,7 @@ END
 $fn$;
 
 CREATE OR REPLACE FUNCTION app_rls.claim_security_event_outbox_slice(p_attempted_at timestamp without time zone,p_batch_size integer,p_job_type text)
-RETURNS TABLE("id" text,"jobType" text,"requestId" text,"payloadDigest" text,"idempotencyKey" text,"organizationId" text,"licenseeId" text,"manufacturerId" text,"initiatingUserId" text,"expiresAt" timestamp without time zone,"attempt" integer,"eventType" text,"eventPayload" jsonb,"createdAt" timestamp without time zone)
+RETURNS TABLE("id" text,"jobType" text,"requestId" text,"payloadDigest" text,"idempotencyKey" text,"organizationId" text,"licenseeId" text,"manufacturerId" text,"initiatingUserId" text,"expiresAt" timestamp without time zone,"attempt" integer,"eventType" text,"eventPayload" jsonb,"createdAt" timestamp without time zone,"projectionCompleted" boolean)
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
 BEGIN
   PERFORM app_rls.b03_bind_outbox_operation('security-claim','',repeat('0',64));
@@ -13098,6 +13098,7 @@ BEGIN
   RETURN QUERY WITH candidates AS (
     SELECT o.id FROM public."SecurityEventOutbox" o
     WHERE o."jobType"=p_job_type AND o.status IN ('QUEUED','FAILED')
+      AND o."lastError" IS DISTINCT FROM 'SIEM_SINK_DISABLED'
       AND o."nextAttemptAt"<=p_attempted_at AND o."expiresAt">p_attempted_at
       AND o.attempts<10 AND (o."claimLeaseExpiresAt" IS NULL OR o."claimLeaseExpiresAt"<=p_attempted_at)
     ORDER BY o."createdAt",o.id FOR UPDATE SKIP LOCKED LIMIT p_batch_size
@@ -13108,11 +13109,11 @@ BEGIN
     FROM candidates c WHERE o.id=c.id
     RETURNING o.id,o."jobType",o."requestId",o."payloadDigest",o."idempotencyKey",
       o."organizationId",o."licenseeId",o."manufacturerId",o."initiatingUserId",
-      o."expiresAt",o.attempts,o."eventType",o.payload,o."createdAt"
+      o."expiresAt",o.attempts,o."eventType",o.payload,o."createdAt",o."sinkEventId"='projection:'||o.id AS "projectionCompleted"
   )
   SELECT c.id,c."jobType",c."requestId",c."payloadDigest",c."idempotencyKey",
     c."organizationId",c."licenseeId",c."manufacturerId",c."initiatingUserId",
-    c."expiresAt",c.attempts,c."eventType",c.payload,c."createdAt"
+    c."expiresAt",c.attempts,c."eventType",c.payload,c."createdAt",coalesce(c."projectionCompleted",false)
   FROM claimed c;
 END
 $fn$;
@@ -13122,18 +13123,40 @@ RETURNS TABLE("completed" boolean,"replayed" boolean) LANGUAGE plpgsql VOLATILE 
 DECLARE o record;
 BEGIN
   PERFORM app_rls.b03_bind_outbox_operation('security-complete',p_job_id,p_payload_digest);
-  IF session_user<>'mscqr_rls_cert_worker' OR length(p_sink_event_id) NOT BETWEEN 1 AND 191
+  IF session_user<>'mscqr_rls_cert_worker' OR p_sink_event_id IS NULL OR length(p_sink_event_id) NOT BETWEEN 1 AND 191
      OR abs(extract(epoch FROM (clock_timestamp()-p_attempted_at)))>60
   THEN RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501'; END IF;
-  SELECT q.id,q.status,q."sinkEventId",q."claimLeaseExpiresAt"
+  SELECT q.id,q.status,q."sinkEventId",q."claimLeaseExpiresAt",q."lastError",q."eventType",q.payload
     INTO o FROM public."SecurityEventOutbox" q
     WHERE q.id=p_job_id AND q."payloadDigest"=p_payload_digest FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501'; END IF;
-  IF o.status='SENT' THEN
+  IF o.status='SENT' OR o."lastError"='SIEM_SINK_DISABLED' THEN
     IF o."sinkEventId" IS DISTINCT FROM p_sink_event_id THEN RAISE EXCEPTION 'B03_OUTBOX_REPLAY_MISMATCH' USING ERRCODE='23505'; END IF;
     RETURN QUERY SELECT true,true; RETURN;
   END IF;
   IF o."claimLeaseExpiresAt" IS NULL OR o."claimLeaseExpiresAt"<p_attempted_at THEN RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501'; END IF;
+  -- Existing fields distinguish internal completion from actual external delivery.
+  IF p_sink_event_id='projection:'||p_job_id THEN
+    IF o."eventType" IS DISTINCT FROM 'AUDIT_LOG' OR o.payload->>'entityType' IS DISTINCT FROM 'QrAllocationRequest'
+       OR coalesce(o.payload->>'action','') NOT IN ('CREATE_QR_ALLOCATION_REQUEST','REJECT_QR_ALLOCATION_REQUEST')
+    THEN RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501'; END IF;
+    UPDATE public."SecurityEventOutbox" SET "sinkEventId"=p_sink_event_id,"updatedAt"=transaction_timestamp() WHERE id=p_job_id;
+    RETURN QUERY SELECT true,coalesce(o."sinkEventId"=p_sink_event_id,false); RETURN;
+  END IF;
+  IF p_sink_event_id='disabled:'||p_job_id THEN
+    IF o.payload->>'action' IN ('CREATE_QR_ALLOCATION_REQUEST','REJECT_QR_ALLOCATION_REQUEST')
+       AND o."sinkEventId" IS DISTINCT FROM 'projection:'||p_job_id
+    THEN RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501'; END IF;
+    UPDATE public."SecurityEventOutbox" SET status='FAILED',"sentAt"=NULL,"sinkEventId"=p_sink_event_id,
+      "lastError"='SIEM_SINK_DISABLED',"claimLeaseExpiresAt"=NULL,"updatedAt"=transaction_timestamp() WHERE id=p_job_id;
+    RETURN QUERY SELECT true,false; RETURN;
+  END IF;
+  IF p_sink_event_id LIKE 'projection:%' OR p_sink_event_id LIKE 'disabled:%' THEN
+    RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501';
+  END IF;
+  IF o.payload->>'action' IN ('CREATE_QR_ALLOCATION_REQUEST','REJECT_QR_ALLOCATION_REQUEST')
+     AND o."sinkEventId" IS DISTINCT FROM 'projection:'||p_job_id
+  THEN RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501'; END IF;
   UPDATE public."SecurityEventOutbox" SET status='SENT',"sentAt"=p_attempted_at,"sinkEventId"=p_sink_event_id,"lastError"=NULL,"claimLeaseExpiresAt"=NULL,"updatedAt"=transaction_timestamp() WHERE id=p_job_id;
   RETURN QUERY SELECT true,false;
 END
@@ -13148,7 +13171,7 @@ BEGIN
      OR abs(extract(epoch FROM (clock_timestamp()-p_attempted_at)))>60
   THEN RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501'; END IF;
   v_terminal:=p_attempt>=10; v_next:=CASE WHEN v_terminal THEN p_attempted_at ELSE p_attempted_at+make_interval(secs=>least(300,greatest(5,power(2,p_attempt)::integer))) END;
-  UPDATE public."SecurityEventOutbox" SET status='FAILED',"lastError"=p_error_code,"nextAttemptAt"=v_next,"claimLeaseExpiresAt"=NULL,"updatedAt"=transaction_timestamp() WHERE id=p_job_id AND "payloadDigest"=p_payload_digest AND status<>'SENT' AND attempts=p_attempt;
+  UPDATE public."SecurityEventOutbox" SET status='FAILED',"lastError"=p_error_code,"nextAttemptAt"=v_next,"claimLeaseExpiresAt"=NULL,"updatedAt"=transaction_timestamp() WHERE id=p_job_id AND "payloadDigest"=p_payload_digest AND status<>'SENT' AND "lastError" IS DISTINCT FROM 'SIEM_SINK_DISABLED' AND attempts=p_attempt;
   IF NOT FOUND THEN RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501'; END IF;
   RETURN QUERY SELECT v_terminal,v_next;
 END

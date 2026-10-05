@@ -4,6 +4,7 @@ import { NotificationAudience, NotificationChannel, QrAllocationRequestStatus, U
 import { AuthRequest } from "../middleware/auth";
 import { createRoleNotifications, createUserNotification } from "../services/notificationService";
 import { approveAllocationRequest, createAllocationRequest, listAllocationRequests, rejectAllocationRequest, isQrBoundaryDenied } from "../rls-waves/session-c/c01/qrSystemRepository";
+import { hashIp } from "../utils/security";
 import { b03BoundaryForRequest } from "../rls-waves/session-b/b03/requestBoundary";
 
 const createRequestSchema = z
@@ -80,7 +81,7 @@ export const createQrAllocationRequest = async (req: AuthRequest, res: Response)
     }
 
     const created = await createAllocationRequest({ ...boundary(req), ...parsed.data,
-      licenseeId: parsed.data.licenseeId || licenseeId });
+      licenseeId: parsed.data.licenseeId || licenseeId, ipHash: hashIp(req.ip) });
 
     await notifyAfterCommit([
       createRoleNotifications({
@@ -272,7 +273,7 @@ export const rejectQrAllocationRequest = async (req: AuthRequest, res: Response)
       return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid request id" });
     }
     const id = paramsParsed.data.id;
-    const updated = await rejectAllocationRequest({ ...boundary(req), allocationRequestId: id, ...parsed.data });
+    const updated = await rejectAllocationRequest({ ...boundary(req), allocationRequestId: id, ...parsed.data, ipHash: hashIp(req.ip) });
     const requestRow = updated;
 
     await notifyAfterCommit([

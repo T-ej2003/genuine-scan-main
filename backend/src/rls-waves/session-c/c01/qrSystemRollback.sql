@@ -4,8 +4,8 @@ DROP POLICY IF EXISTS qr_system_allocationevent_insert ON public."AllocationEven
 DROP POLICY IF EXISTS qr_system_qrallocationrequest_update ON public."QrAllocationRequest";
 DROP POLICY IF EXISTS qr_system_qrallocationrequest_insert ON public."QrAllocationRequest";
 DROP FUNCTION IF EXISTS app_rls.qr_list_allocation_requests(text,text,text,text,text,integer,integer);
-DROP FUNCTION IF EXISTS app_rls.qr_create_allocation_request(text,text,text,text,integer,text,text);
-DROP FUNCTION IF EXISTS app_rls.qr_reject_allocation_request(text,text,text,text,text);
+DROP FUNCTION IF EXISTS app_rls.qr_create_allocation_request(text,text,text,text,integer,text,text,text);
+DROP FUNCTION IF EXISTS app_rls.qr_reject_allocation_request(text,text,text,text,text,text);
 DROP FUNCTION IF EXISTS app_rls.qr_scan_analytics(text,text,text,text,jsonb);
 DROP POLICY IF EXISTS qr_system_qrallocationrequest_select ON public."QrAllocationRequest";
 DROP POLICY IF EXISTS qr_system_batch_delete ON public."Batch";
@@ -49,5 +49,5 @@ DROP FUNCTION IF EXISTS app_rls.qr_inventory_projection(text,text,text,text,text
 DROP FUNCTION IF EXISTS app_rls.qr_stats(text,text,text,text);
 DROP FUNCTION IF EXISTS app_rls.qr_read_codes(text,text,text,text,text,text,integer,integer);
 DROP FUNCTION IF EXISTS app_rls.qr_allocate_range(text,text,text,text,integer,integer,text,text);
-DROP FUNCTION IF EXISTS app_rls.qr_write_audit(text,text,text,text,text,text,jsonb);
+DROP FUNCTION IF EXISTS app_rls.qr_write_audit(text,text,text,text,text,text,jsonb,text);
 DROP FUNCTION IF EXISTS app_rls.qr_bind_actor(text,text,text,text);

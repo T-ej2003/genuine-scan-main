@@ -284,6 +284,8 @@ async function main(){
   const mutable=id=>JSON.parse(last(bootstrap,`SELECT jsonb_build_object('status',status,'note',"decisionNote")::text FROM public."QrAllocationRequest" WHERE id='${id}'`));
   const createDetails=JSON.parse(last(bootstrap,`SELECT details::text FROM public."AuditLog" WHERE "entityId"='${incidentRequest.id}' AND action='CREATE_QR_ALLOCATION_REQUEST'`));
   assert.deepEqual(createDetails,{quantity:10,batchName:"Incident certification"});
+  assert.equal(last(bootstrap,`SELECT coalesce("ipHash",'absent') FROM public."AuditLog" WHERE "entityId"='${incidentRequest.id}' AND action='CREATE_QR_ALLOCATION_REQUEST'`),'absent');
+  denied(`SELECT app_rls.qr_create_allocation_request('${caps.tenant}','qr-allocation-request-create','${requestId}','${ids.licenseeA}',10,'Invalid hash',NULL,'192.0.2.1')`,/QR_INVALID_AUDIT/);
   const notes=["  ordinary reason  ",null,""," \t\n ","x".repeat(500),"界".repeat(500),"😀".repeat(250),"quotes ' \" \\ and \u001b control","<script>alert('not executable')</script>","first line\nsecond line\r\nthird","\u00a0\u2000\ufeff canonical \u2029\u3000"];
   for(const note of notes){
     const row=JSON.parse(last(app,create(caps.tenant)));
@@ -405,15 +407,23 @@ async function main(){
     await http("tenant",`/qr/requests?licenseeId=${ids.licenseeB}`,"GET",undefined,403);
     await http(null,"/qr/requests","GET",undefined,401);
     await http("tenant","/qr/requests?limit=201","GET",undefined,400);
+    for(const field of [{ipHash:"client-fake"},{ipAddress:"198.51.100.23"}])
+      await http("tenant","/qr/requests","POST",{quantity:2,batchName:"Forged attribution",...field},400);
     const made=await http("tenant","/qr/requests","POST",{quantity:2,batchName:"HTTP approval"},201);
+    const expectedIpHash=require("../dist/utils/security").hashIp("127.0.0.1");
+    const auditAttribution=(id,action)=>JSON.parse(last(bootstrap,`SELECT jsonb_build_object('ipHash',"ipHash",'ipAddress',"ipAddress",'orgId',"orgId",'userId',"userId",'licenseeId',"licenseeId")::text FROM public."AuditLog" WHERE "entityId"='${id}' AND action='${action}'`));
+    assert.deepEqual(auditAttribution(made.data.id,'CREATE_QR_ALLOCATION_REQUEST'),{ipHash:expectedIpHash,ipAddress:null,orgId:ids.orgA,userId:ids.tenant,licenseeId:ids.licenseeA});
     await http("tenant",`/qr/requests/${made.data.id}/approve`,"POST",{},403);
     await http("platform",`/qr/requests/${made.data.id}/approve`,"POST",{decisionNote:"Approved fixture"});
     const toReject=await http("tenant","/qr/requests","POST",{quantity:2,batchName:"HTTP rejection"},201);
+    for(const field of [{ipHash:"client-fake"},{ipAddress:"198.51.100.23"}])
+      await http("platform",`/qr/requests/${toReject.data.id}/reject`,"POST",field,400);
     for(const note of [null,"x".repeat(501),"😀".repeat(251)]){
       await http("platform",`/qr/requests/${toReject.data.id}/reject`,"POST",{decisionNote:note},400);
       assert.equal(mutable(toReject.data.id).status,"PENDING"); assert.deepEqual(audit(toReject.data.id),[]);
     }
     await http("platform",`/qr/requests/${toReject.data.id}/reject`,"POST",{decisionNote:" \tRejected\u0000 fixture\u001b\n "});
+    assert.deepEqual(auditAttribution(toReject.data.id,'REJECT_QR_ALLOCATION_REQUEST'),{ipHash:expectedIpHash,ipAddress:null,orgId:ids.orgA,userId:ids.platform,licenseeId:ids.licenseeA});
     assert.deepEqual(audit(toReject.data.id).map(event=>event.details),[{decisionNote:"Rejected fixture"}]);
     await http("platform",`/qr/requests/${toReject.data.id}/reject`,"POST",{decisionNote:"retry"},409);
     assert.equal(audit(toReject.data.id).length,1);

@@ -45,21 +45,21 @@ export const listAllocationRequests = async (input: {
 };
 
 export const createAllocationRequest = async (input: {
-  capability: string; requestId: string; licenseeId?: string; quantity: number; batchName: string; note?: string;
+  capability: string; requestId: string; licenseeId?: string; quantity: number; batchName: string; note?: string; ipHash?: string | null;
 }) => {
   const rows = await client().$queryRaw<Array<{ result: AllocationRequest }>>`
     SELECT app_rls.qr_create_allocation_request(${required(input.capability,"a capability")},${"qr-allocation-request-create"},
-      ${required(input.requestId,"a request ID")},${input.licenseeId || null},${input.quantity}::integer,${input.batchName},${input.note || null}) AS result`;
+      ${required(input.requestId,"a request ID")},${input.licenseeId || null},${input.quantity}::integer,${input.batchName},${input.note || null},${input.ipHash ?? null}) AS result`;
   if (!rows[0]?.result?.id) throw new Error("Invalid allocation create result");
   return rows[0].result;
 };
 
 export const rejectAllocationRequest = async (input: {
-  capability: string; requestId: string; allocationRequestId: string; decisionNote?: string;
+  capability: string; requestId: string; allocationRequestId: string; decisionNote?: string; ipHash?: string | null;
 }) => {
   const rows = await client().$queryRaw<Array<{ result: AllocationRequest }>>`
     SELECT app_rls.qr_reject_allocation_request(${required(input.capability,"a capability")},${"qr-allocation-request-reject"},
-      ${required(input.requestId,"a request ID")},${input.allocationRequestId},${input.decisionNote || null}) AS result`;
+      ${required(input.requestId,"a request ID")},${input.allocationRequestId},${input.decisionNote || null},${input.ipHash ?? null}) AS result`;
   if (!rows[0]?.result?.id) throw new Error("Invalid allocation rejection result");
   return rows[0].result;
 };

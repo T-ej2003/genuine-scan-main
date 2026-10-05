@@ -328,7 +328,7 @@ END
 $fn$;
 
 CREATE OR REPLACE FUNCTION app_rls.claim_security_event_outbox_slice(p_attempted_at timestamp without time zone,p_batch_size integer,p_job_type text)
-RETURNS TABLE("id" text,"jobType" text,"requestId" text,"payloadDigest" text,"idempotencyKey" text,"organizationId" text,"licenseeId" text,"manufacturerId" text,"initiatingUserId" text,"expiresAt" timestamp without time zone,"attempt" integer,"eventType" text,"eventPayload" jsonb,"createdAt" timestamp without time zone)
+RETURNS TABLE("id" text,"jobType" text,"requestId" text,"payloadDigest" text,"idempotencyKey" text,"organizationId" text,"licenseeId" text,"manufacturerId" text,"initiatingUserId" text,"expiresAt" timestamp without time zone,"attempt" integer,"eventType" text,"eventPayload" jsonb,"createdAt" timestamp without time zone,"projectionCompleted" boolean)
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
 BEGIN
   PERFORM app_rls.b03_bind_outbox_operation('security-claim','',repeat('0',64));
@@ -338,6 +338,7 @@ BEGIN
   RETURN QUERY WITH candidates AS (
     SELECT o.id FROM public."SecurityEventOutbox" o
     WHERE o."jobType"=p_job_type AND o.status IN ('QUEUED','FAILED')
+      AND o."lastError" IS DISTINCT FROM 'SIEM_SINK_DISABLED'
       AND o."nextAttemptAt"<=p_attempted_at AND o."expiresAt">p_attempted_at
       AND o.attempts<10 AND (o."claimLeaseExpiresAt" IS NULL OR o."claimLeaseExpiresAt"<=p_attempted_at)
     ORDER BY o."createdAt",o.id FOR UPDATE SKIP LOCKED LIMIT p_batch_size
@@ -348,11 +349,11 @@ BEGIN
     FROM candidates c WHERE o.id=c.id
     RETURNING o.id,o."jobType",o."requestId",o."payloadDigest",o."idempotencyKey",
       o."organizationId",o."licenseeId",o."manufacturerId",o."initiatingUserId",
-      o."expiresAt",o.attempts,o."eventType",o.payload,o."createdAt"
+      o."expiresAt",o.attempts,o."eventType",o.payload,o."createdAt",o."sinkEventId"='projection:'||o.id AS "projectionCompleted"
   )
   SELECT c.id,c."jobType",c."requestId",c."payloadDigest",c."idempotencyKey",
     c."organizationId",c."licenseeId",c."manufacturerId",c."initiatingUserId",
-    c."expiresAt",c.attempts,c."eventType",c.payload,c."createdAt"
+    c."expiresAt",c.attempts,c."eventType",c.payload,c."createdAt",coalesce(c."projectionCompleted",false)
   FROM claimed c;
 END
 $fn$;
@@ -362,18 +363,40 @@ RETURNS TABLE("completed" boolean,"replayed" boolean) LANGUAGE plpgsql VOLATILE 
 DECLARE o record;
 BEGIN
   PERFORM app_rls.b03_bind_outbox_operation('security-complete',p_job_id,p_payload_digest);
-  IF session_user<>{{WORKER_ROLE}} OR length(p_sink_event_id) NOT BETWEEN 1 AND 191
+  IF session_user<>{{WORKER_ROLE}} OR p_sink_event_id IS NULL OR length(p_sink_event_id) NOT BETWEEN 1 AND 191
      OR abs(extract(epoch FROM (clock_timestamp()-p_attempted_at)))>60
   THEN RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501'; END IF;
-  SELECT q.id,q.status,q."sinkEventId",q."claimLeaseExpiresAt"
+  SELECT q.id,q.status,q."sinkEventId",q."claimLeaseExpiresAt",q."lastError",q."eventType",q.payload
     INTO o FROM public."SecurityEventOutbox" q
     WHERE q.id=p_job_id AND q."payloadDigest"=p_payload_digest FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501'; END IF;
-  IF o.status='SENT' THEN
+  IF o.status='SENT' OR o."lastError"='SIEM_SINK_DISABLED' THEN
     IF o."sinkEventId" IS DISTINCT FROM p_sink_event_id THEN RAISE EXCEPTION 'B03_OUTBOX_REPLAY_MISMATCH' USING ERRCODE='23505'; END IF;
     RETURN QUERY SELECT true,true; RETURN;
   END IF;
   IF o."claimLeaseExpiresAt" IS NULL OR o."claimLeaseExpiresAt"<p_attempted_at THEN RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501'; END IF;
+  -- Existing fields distinguish internal completion from actual external delivery.
+  IF p_sink_event_id='projection:'||p_job_id THEN
+    IF o."eventType" IS DISTINCT FROM 'AUDIT_LOG' OR o.payload->>'entityType' IS DISTINCT FROM 'QrAllocationRequest'
+       OR coalesce(o.payload->>'action','') NOT IN ('CREATE_QR_ALLOCATION_REQUEST','REJECT_QR_ALLOCATION_REQUEST')
+    THEN RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501'; END IF;
+    UPDATE public."SecurityEventOutbox" SET "sinkEventId"=p_sink_event_id,"updatedAt"=transaction_timestamp() WHERE id=p_job_id;
+    RETURN QUERY SELECT true,coalesce(o."sinkEventId"=p_sink_event_id,false); RETURN;
+  END IF;
+  IF p_sink_event_id='disabled:'||p_job_id THEN
+    IF o.payload->>'action' IN ('CREATE_QR_ALLOCATION_REQUEST','REJECT_QR_ALLOCATION_REQUEST')
+       AND o."sinkEventId" IS DISTINCT FROM 'projection:'||p_job_id
+    THEN RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501'; END IF;
+    UPDATE public."SecurityEventOutbox" SET status='FAILED',"sentAt"=NULL,"sinkEventId"=p_sink_event_id,
+      "lastError"='SIEM_SINK_DISABLED',"claimLeaseExpiresAt"=NULL,"updatedAt"=transaction_timestamp() WHERE id=p_job_id;
+    RETURN QUERY SELECT true,false; RETURN;
+  END IF;
+  IF p_sink_event_id LIKE 'projection:%' OR p_sink_event_id LIKE 'disabled:%' THEN
+    RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501';
+  END IF;
+  IF o.payload->>'action' IN ('CREATE_QR_ALLOCATION_REQUEST','REJECT_QR_ALLOCATION_REQUEST')
+     AND o."sinkEventId" IS DISTINCT FROM 'projection:'||p_job_id
+  THEN RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501'; END IF;
   UPDATE public."SecurityEventOutbox" SET status='SENT',"sentAt"=p_attempted_at,"sinkEventId"=p_sink_event_id,"lastError"=NULL,"claimLeaseExpiresAt"=NULL,"updatedAt"=transaction_timestamp() WHERE id=p_job_id;
   RETURN QUERY SELECT true,false;
 END
@@ -388,7 +411,7 @@ BEGIN
      OR abs(extract(epoch FROM (clock_timestamp()-p_attempted_at)))>60
   THEN RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501'; END IF;
   v_terminal:=p_attempt>=10; v_next:=CASE WHEN v_terminal THEN p_attempted_at ELSE p_attempted_at+make_interval(secs=>least(300,greatest(5,power(2,p_attempt)::integer))) END;
-  UPDATE public."SecurityEventOutbox" SET status='FAILED',"lastError"=p_error_code,"nextAttemptAt"=v_next,"claimLeaseExpiresAt"=NULL,"updatedAt"=transaction_timestamp() WHERE id=p_job_id AND "payloadDigest"=p_payload_digest AND status<>'SENT' AND attempts=p_attempt;
+  UPDATE public."SecurityEventOutbox" SET status='FAILED',"lastError"=p_error_code,"nextAttemptAt"=v_next,"claimLeaseExpiresAt"=NULL,"updatedAt"=transaction_timestamp() WHERE id=p_job_id AND "payloadDigest"=p_payload_digest AND status<>'SENT' AND "lastError" IS DISTINCT FROM 'SIEM_SINK_DISABLED' AND attempts=p_attempt;
   IF NOT FOUND THEN RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501'; END IF;
   RETURN QUERY SELECT v_terminal,v_next;
 END
