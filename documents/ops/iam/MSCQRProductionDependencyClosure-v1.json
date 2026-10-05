@@ -4,6 +4,38 @@
   "status": "PASS",
   "newAwsCalls": [
     {
+      "sourceFile": "scripts/aws/production-receipt-read.mjs",
+      "action": "s3:GetObject",
+      "identity": "RELEASE_DEPLOYER",
+      "capabilityIds": [
+        "staged-broker-27dc6cc344ffe52e",
+        "staged-broker-36ece5ab8b6a75b1"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-receipt-read.mjs",
+      "action": "s3:ListBucket",
+      "identity": "RELEASE_DEPLOYER",
+      "capabilityIds": [
+        "staged-broker-1620d83247a01b2d",
+        "staged-broker-3d5ea73e34c17781"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
       "sourceFile": "scripts/aws/stage-b-staged-broker-authorization.mjs",
       "action": "kms:Sign",
       "identity": "INDEPENDENT_CHECKER",

@@ -172,7 +172,7 @@ for (const authority of ["initial transport", "retained without transport", "mat
     if (args[0] === "ecs" && args[1] === "describe-tasks") return { tasks: [{ containers: [{ exitCode: 0 }] }] };
     if (args[0] === "s3api" && args[1] === "list-objects-v2") {
       const prefix = args[args.indexOf("--prefix") + 1];
-      return { Contents: [{ Key: `${prefix}fixture.json`, LastModified: new Date().toISOString() }] };
+      return { KeyCount: 1, IsTruncated: false, Contents: [{ Key: `${prefix}fixture.json`, LastModified: new Date().toISOString() }] };
     }
     if (args[0] === "s3api" && args[1] === "get-object") {
       const key = args[args.indexOf("--key") + 1];

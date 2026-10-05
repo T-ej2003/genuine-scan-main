@@ -1,3 +1,4 @@
+import { readProductionReceiptObject, receiptAbsentError } from './production-receipt-read.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -62,7 +63,7 @@ export function readStagedBrokerReceipt({ run, id, status, directory, expected, 
   assert.match(id || '', /^[a-f0-9]{64}$/); assert.ok(STEPS.includes(status));
   const file = path.join(directory, `receipt-${brokerDigest({ id, status })}-${randomUUID()}.json`);
   try {
-    run(['s3api', 'get-object', '--bucket', STAGE_B_TERRAFORM_BACKEND.bucketName, '--key', stageBAttemptStepS3ObjectKey(receiptId(id, status, expected), SEQUENCES[status]), '--expected-bucket-owner', STAGE_B.account, file]);
+    if (!readProductionReceiptObject({ run, bucket: STAGE_B_TERRAFORM_BACKEND.bucketName, key: stageBAttemptStepS3ObjectKey(receiptId(id, status, expected), SEQUENCES[status]), file })) throw receiptAbsentError();
     fs.chmodSync(file, 0o600); const entry = JSON.parse(fs.readFileSync(file));
     assert.deepEqual(Object.keys(entry).sort(), ['id', 'kind', 'status', 'value']);
     assert.equal(entry.kind, 'STAGED_BROKER_STEP'); assert.equal(entry.id, id);
@@ -81,8 +82,7 @@ export const stagedBrokerSourceReservation = sourceSha => {
 export function readStagedBrokerSourceAuthority({ run, sourceSha, directory }) {
   const id = stagedBrokerSourceReservation(sourceSha), file = path.join(directory, `source-${randomUUID()}.json`);
   try {
-    try { run(['s3api', 'get-object', '--bucket', STAGE_B_TERRAFORM_BACKEND.bucketName, '--key', stageBApplyAttemptS3Key(id), '--expected-bucket-owner', STAGE_B.account, file]); }
-    catch (error) { if (/\(NoSuchKey\)/.test(String(error.stderr))) return null; throw error; }
+    if (!readProductionReceiptObject({ run, bucket: STAGE_B_TERRAFORM_BACKEND.bucketName, key: stageBApplyAttemptS3Key(id), file })) return null;
     fs.chmodSync(file, 0o600); const entry = JSON.parse(fs.readFileSync(file));
     assert.deepEqual(Object.keys(entry).sort(), ['authorization', 'kind', 'preparation', 'sourceSha']);
     assert.equal(entry.kind, 'STAGED_BROKER_SOURCE'); assert.equal(entry.sourceSha, sourceSha);
@@ -110,7 +110,7 @@ export function stagedBrokerArtifactSet(files, root, preparation) {
 // Extends the existing governed runner/reservations, with a fixed phase census.
 // The normal cutover plan is diagnostic evidence and is never applyable here.
 export function assertRegistrationRecoveryReadCommand(args) {
-  const reads = ['sts:get-caller-identity', 'kms:verify', 's3api:get-object',
+  const reads = ['sts:get-caller-identity', 'kms:verify', 's3api:get-object', 's3api:list-objects-v2',
     'ecs:describe-task-definition', 'iam:get-policy', 'iam:get-policy-version', 'iam:get-role',
     'iam:get-role-policy', 'iam:list-policy-versions', 'iam:list-attached-role-policies', 'iam:list-role-policies',
     'lambda:get-alias', 'lambda:get-policy', 'lambda:list-aliases', 'lambda:list-versions-by-function',
@@ -397,7 +397,7 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
       ownedReservations.add(reservationId); return { id, authorizedAt };
     },
     readRecoveryReceipt: async (id, status) => {
-      try { return readReceipt(id, status); } catch (error) { if (/\(NoSuchKey\)/.test(String(error.stderr))) return null; throw error; }
+      try { return readReceipt(id, status); } catch (error) { if (error.code === 'RECEIPT_ABSENT') return null; throw error; }
     },
     authenticateRegistrationState: async plan => {
       assert.ok(['REGISTRATION_RECOVERY', 'PUBLICATION_RECOVERY'].includes(phase));
@@ -559,7 +559,7 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
       assert.equal(owner.operationIdentity, id); assert.equal(owner.sourceSha, preparation.sourceSha);
       const maybeReceipt = (status, allowPolicyNoWrite = false) => {
         try { return readStagedBrokerReceipt({ run: runAws, id, status, directory, allowPolicyNoWrite }); }
-        catch (error) { if (/\(NoSuchKey\)/.test(String(error.stderr))) return null; throw error; }
+        catch (error) { if (error.code === 'RECEIPT_ABSENT') return null; throw error; }
       };
       let terminal, successor;
       return recoverOwnedBrokerPolicyMutation({ ownership, owner,

@@ -22,13 +22,13 @@ const conditionsMatch = (condition = {}, evaluation) => {
       const actual = context.get(key);
       if (operator === "StringEquals" && (!actual || actual.length !== 1 || !expected.includes(actual[0]))) return false;
       if (operator === "ArnEquals" && (!actual || actual.length !== 1 || !expected.includes(actual[0]))) return false;
-      if (operator === "ArnLike" && (!actual || actual.length !== 1 || !expected.some((pattern) => matches(pattern, actual[0])))) return false;
+      if (["ArnLike", "StringLike"].includes(operator) && (!actual || actual.length !== 1 || !expected.some((pattern) => matches(pattern, actual[0])))) return false;
       if (operator === "StringEqualsIfExists" && actual && (actual.length !== expected.length || !actual.every((value) => expected.includes(value)))) return false;
       if (operator === "ForAllValues:StringEquals" && (!actual || !actual.every((value) => expected.includes(value)))) return false;
       if (operator === "Bool" && (!actual || actual.length !== 1 || actual[0].toLowerCase() !== expected[0].toLowerCase())) return false;
       if (operator === "NumericEquals" && (!actual || actual.length !== expected.length || !actual.every((value) => expected.some((candidate) => Number(candidate) === Number(value))))) return false;
       if (operator === "Null" && String(!actual) !== expected[0]) return false;
-      if (!["StringEquals", "ArnEquals", "ArnLike", "StringEqualsIfExists", "ForAllValues:StringEquals", "Bool", "NumericEquals", "Null"].includes(operator)) throw new Error(`Unsupported IAM condition operator: ${operator}.`);
+      if (!["StringEquals", "ArnEquals", "ArnLike", "StringLike", "StringEqualsIfExists", "ForAllValues:StringEquals", "Bool", "NumericEquals", "Null"].includes(operator)) throw new Error(`Unsupported IAM condition operator: ${operator}.`);
     }
   }
   return true;
@@ -124,7 +124,7 @@ test("production-shaped required and forbidden resources reconcile to the source
   const plan = read("scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json");
   validateManifest(manifest);
   const evaluations = deriveRequiredEvaluations(plan, manifest);
-  assert.equal(evaluations.required.length, 258);
+  assert.equal(evaluations.required.length, 261);
   assert.equal(evaluations.forbidden.length, 38);
   assert.deepEqual(evaluations.required.filter((evaluation) => !allows(evaluation)).map(({ id }) => id), []);
   assert.deepEqual(evaluations.forbidden.filter(allows).map(({ id }) => id), []);

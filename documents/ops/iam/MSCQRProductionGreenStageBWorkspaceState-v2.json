@@ -33,6 +33,34 @@
       "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate"
     },
     {
+      "Sid": "ListStageBReceiptNamespace",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": "env:/production/mscqr/production/rls-green/stage-b/apply-attempts/*"
+        }
+      }
+    },
+    {
+      "Sid": "ReadFullRlsExecutorReceipts",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/rls-receipts/*"
+    },
+    {
+      "Sid": "ListFullRlsExecutorReceipts",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": "rls-receipts/*"
+        }
+      }
+    },
+    {
       "Sid": "ReadStageBApplyAttempts",
       "Effect": "Allow",
       "Action": "s3:GetObject",

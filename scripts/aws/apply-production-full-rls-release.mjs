@@ -16,6 +16,8 @@ import { readStagedBrokerClosure } from "./stage-b-staged-broker-closure.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 import { deriveStageBToolingInputTreeSha256 } from "./validate-stage-b-image-reuse.mjs";
 
+import { listProductionReceiptObjects } from './production-receipt-read.mjs';
+
 const ACCOUNT = STAGE_B.account;
 const REGION = STAGE_B.region;
 const CLUSTER_ARN = STAGE_B.clusterArn;
@@ -109,7 +111,7 @@ const waitForTask = (taskArn, config, aws) => {
 
 const readReceipt = (mode, config, aws, directory, startedAt) => {
   const prefix = `rls-receipts/${config.releaseSha}/${mode}/`;
-  const listed = aws(["s3api", "list-objects-v2", "--bucket", config.receiptBucket, "--prefix", prefix]);
+  const listed = { Contents: listProductionReceiptObjects({ run: aws, bucket: config.receiptBucket, prefix }) };
   const item = [...(listed.Contents || [])].sort((left, right) => String(right.LastModified).localeCompare(String(left.LastModified)))[0];
   if (!item?.Key?.startsWith(prefix)) throw new Error("Production executor receipt is missing.");
   const file = path.join(directory, `${mode}-receipt.json`);

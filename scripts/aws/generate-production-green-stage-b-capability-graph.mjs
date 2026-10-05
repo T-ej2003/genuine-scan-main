@@ -42,6 +42,7 @@ const bootstrapOperatorPolicyPath = BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.sou
 const normalDeployerPolicyPath = "infra/aws/terraform/production-component-deployment-state/normal-deployer-policy.json";
 const releaseTerminalStatePolicyPath = "infra/aws/terraform/production-component-deployment-state/release-terminal-state-policy.json";
 const awsCliSourceFiles = [
+  "scripts/aws/production-receipt-read.mjs",
   "scripts/aws/stage-b-broker-policy-ownership.mjs",
   "scripts/aws/stage-b-broker-writer-session.mjs",
   'scripts/aws/stage-b-staged-broker-authorization.mjs',
@@ -732,6 +733,7 @@ export function appOnlyCapabilityNodes() {
 }
 
 export const STAGED_BROKER_CALLS = Object.freeze({
+  'scripts/aws/production-receipt-read.mjs': ['s3:GetObject', 's3:ListBucket'],
   'scripts/aws/stage-b-staged-broker-authorization.mjs': ['kms:Sign', 'kms:Verify', 'sts:GetCallerIdentity'],
   'scripts/aws/stage-b-staged-broker-executor.mjs': ['s3:GetObject', 'sts:GetCallerIdentity', 'lambda:GetAlias', 'lambda:GetFunctionConfiguration', 'lambda:UpdateAlias', 'lambda:ListVersionsByFunction', 'ecs:DescribeTaskDefinition', 'iam:CreatePolicyVersion', 'iam:DeletePolicyVersion'],
   'scripts/aws/stage-b-broker-writer-session.mjs': ['sts:GetCallerIdentity', 'cloudtrail:LookupEvents'],
@@ -751,7 +753,8 @@ export function stagedBrokerCapabilityNodes(policies = sourcePolicies()) {
     const resources = action.startsWith('kms:') ? [STAGE_B.approvalKmsKeyArn]
       : action === 'cloudtrail:LookupEvents' || action === 'sts:GetCallerIdentity' || action === 'lambda:ListEventSourceMappings' || action === 'ecs:DescribeTaskDefinition' ? ['*']
       : action.startsWith('dynamodb:') ? [`arn:aws:dynamodb:${STAGE_B.region}:${STAGE_B.account}:table/${PRODUCTION_COMPONENT_STATE.table}`]
-      : action === 's3:GetObject' ? [STAGE_B_TERRAFORM_BACKEND.stateArn, STAGE_B_TERRAFORM_BACKEND.applyAttemptPrefixArn]
+      : action === 's3:ListBucket' ? [STAGE_B_TERRAFORM_BACKEND.bucketArn, `arn:aws:s3:::${STAGE_B.receiptBucket}`]
+      : action === 's3:GetObject' ? (sourceFile.endsWith('production-receipt-read.mjs') ? [STAGE_B_TERRAFORM_BACKEND.applyAttemptPrefixArn, `arn:aws:s3:::${STAGE_B.receiptBucket}/rls-receipts/*`] : [STAGE_B_TERRAFORM_BACKEND.stateArn, STAGE_B_TERRAFORM_BACKEND.applyAttemptPrefixArn])
       : ['iam:GetPolicy', 'iam:GetPolicyVersion'].includes(action) ? [...RELEASE_POLICY_SOURCES.map(p => p.arn), STAGE_B_BROKER_POLICY.arn]
       : ['iam:ListPolicyVersions', 'iam:CreatePolicyVersion', 'iam:DeletePolicyVersion'].includes(action) ? [STAGE_B_BROKER_POLICY.arn]
       : action.startsWith('iam:') ? [STAGE_B.brokerRoleArn, ...(action === 'iam:GetRole' ? [] : ['arn:aws:iam::368992683803:role/mscqr-production-release-deployer'])]

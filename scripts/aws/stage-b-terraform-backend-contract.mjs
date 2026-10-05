@@ -176,6 +176,13 @@ export const STAGE_B_TERRAFORM_BACKEND_POLICY = Object.freeze({
       Action: "s3:DeleteObject",
       Resource: `${bucketArn}/${stateKey}`,
     }),
+    Object.freeze({ Sid: "ListStageBReceiptNamespace", Effect: "Allow", Action: "s3:ListBucket", Resource: bucketArn,
+      Condition: { StringLike: { "s3:prefix": `${applyAttemptPrefix}/*` } } }),
+    Object.freeze({ Sid: "ReadFullRlsExecutorReceipts", Effect: "Allow", Action: "s3:GetObject",
+      Resource: "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/rls-receipts/*" }),
+    Object.freeze({ Sid: "ListFullRlsExecutorReceipts", Effect: "Allow", Action: "s3:ListBucket",
+      Resource: "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an",
+      Condition: { StringLike: { "s3:prefix": "rls-receipts/*" } } }),
     Object.freeze({
       Sid: "ReadStageBApplyAttempts",
       Effect: "Allow",
