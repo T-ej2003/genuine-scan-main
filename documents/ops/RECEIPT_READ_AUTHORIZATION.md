@@ -19,3 +19,20 @@ Forty IAM `?` wildcards do not validate hexadecimal SHA identity. Full-RLS read 
 The release role is explicitly denied TagRole/UntagRole on itself. Its existing canonical MFA/OIDC trust grants no TagSession, so governed callers cannot override this administrative tag with session tags; no new identity, STS flow, profile, key or MFA mechanism is introduced. Before S3 reads, the shared reader authenticates the exact role, canonical trust and exact tag value. Full-RLS checks clean current-main identity and this authority before the first task invocation. Missing/stale tags, noncanonical trust, duplicates or source substitution fail closed. Administrative/root intervention remains out of band, not part of the routine automation guarantee.
 
 The six hosted failures were duplicate push/PR executions of three jobs with one shared stale generated RLS source-contract root cause. Canonical generation refreshes the derived package after receipt-controller security inputs change. No SQL business capability, acceptance scope or production database is changed by local generation.
+
+## Receipt trust source-binding closure
+
+The receipt boundary binds these repository inputs into the canonical clean-room source contract:
+
+| Input | Receipt security responsibility |
+| --- | --- |
+| `scripts/aws/production-receipt-read.mjs` | Exact role/tag checks, location validation, complete pagination and authenticated absence. |
+| `scripts/aws/production-green-stage-b-contract.mjs` | Exact account, artifact bucket and canonical receipt modes. |
+| `scripts/aws/stage-b-terraform-backend-contract.mjs` | State receipt namespace, binding-tag identity and exact-release IAM read/list policy. |
+| `scripts/aws/stage-b-deployment-identity.mjs` | Fresh protected-main identity, ancestry, canonical repository and clean checkout. |
+| `scripts/aws/production-release-oidc-contract.mjs` | Exact role identity and canonical trust excluding caller-controlled TagSession. |
+| `scripts/aws/iam-policy-document.mjs` | Trust-document parsing before exact canonical comparison. |
+
+The last three were previously unbound. Disposable-fixture proof reproduced unchanged source hashes after materially weakening their decisions. Regression coverage now modifies each dependency, verifies a changed source hash and runs the actual package verifier to reject stale generated evidence. A fixture trust change that permits TagSession is explicitly covered. Canonical generation alone updates derived SQL/checksums; no production resource or database is touched.
+
+The backend contract also imports artifact-file helpers for unrelated backup/private-file operations. Those functions do not participate in the receipt namespace, identity or absence decisions and are not added merely because they are imported. The OIDC module's YAML/workflow helpers likewise do not participate in its exact trust classifier. No additional unbound repository dependency was found on the receipt trust call paths.

@@ -21,7 +21,7 @@ DO $$ DECLARE existing_count integer; rec record; BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:de116ec27f5e426e9d0b8e6d13895cea84b681fb032f1f21b5e75a00272c7c31') THEN RAISE EXCEPTION 'role cleanup refuses an unmarked or drifted role'; END IF;
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:999c5ad783725ded02b7f025844c411368b04c170683819ddc9b25c9dfaa5aea') THEN RAISE EXCEPTION 'role cleanup refuses an unmarked or drifted role'; END IF;
 
   IF false THEN
     IF (SELECT count(*) FROM pg_auth_members m JOIN pg_roles parent ON parent.oid=m.roleid WHERE parent.rolname IN ('mscqr_rls_cert_owner', 'mscqr_rls_cert_auth_owner', 'mscqr_rls_cert_app', 'mscqr_rls_cert_read', 'mscqr_rls_cert_preauth', 'mscqr_rls_cert_worker', 'mscqr_rls_cert_scheduled', 'mscqr_rls_cert_operator', 'mscqr_rls_cert_migration'))<>9
