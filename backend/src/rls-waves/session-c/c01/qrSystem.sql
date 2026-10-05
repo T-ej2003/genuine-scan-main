@@ -268,8 +268,8 @@ BEGIN
   ), days AS (
     SELECT day FROM daily_codes UNION SELECT date_trunc('day',e."scannedAt") FROM events e
   ), daily AS (
-    SELECT d.day,count(DISTINCT c.id) AS total,count(DISTINCT c.id) FILTER(WHERE c.status='DORMANT') AS dormant,
-      count(DISTINCT c.id) FILTER(WHERE c.status IN ('ACTIVE','ALLOCATED','ACTIVATED')) AS allocated,
+    SELECT d.day,count(DISTINCT c.id) AS total,count(DISTINCT c.id) FILTER(WHERE c.status IN ('DORMANT','ACTIVE')) AS dormant,
+      count(DISTINCT c.id) FILTER(WHERE c.status IN ('ALLOCATED','ACTIVATED')) AS allocated,
       count(DISTINCT c.id) FILTER(WHERE c.status='PRINTED') AS printed,count(DISTINCT c.id) FILTER(WHERE c.status IN ('REDEEMED','SCANNED')) AS redeemed,
       count(DISTINCT c.id) FILTER(WHERE c.status='BLOCKED') AS blocked,
       (SELECT count(*) FROM events e WHERE date_trunc('day',e."scannedAt")=d.day) AS "scanEvents"
@@ -282,7 +282,7 @@ BEGIN
       'from',from_at,'to',to_at,'quantities',jsonb_build_object('distinctCodes',(SELECT count(*) FROM scoped),
         'scanEvents',(SELECT count(*) FROM events),'matchedBatches',(SELECT count(DISTINCT "batchId") FROM scoped))),
     'totals',(SELECT jsonb_build_object('total',count(*),'created',count(*),
-      'dormant',count(*) FILTER(WHERE status='DORMANT'),'allocated',count(*) FILTER(WHERE status IN ('ACTIVE','ALLOCATED','ACTIVATED')),
+      'dormant',count(*) FILTER(WHERE status IN ('DORMANT','ACTIVE')),'allocated',count(*) FILTER(WHERE status IN ('ALLOCATED','ACTIVATED')),
       'printed',count(*) FILTER(WHERE status='PRINTED'),'redeemed',count(*) FILTER(WHERE status IN ('REDEEMED','SCANNED')),
       'blocked',count(*) FILTER(WHERE status='BLOCKED')) FROM scoped),
     'eventSummary',(SELECT jsonb_build_object('totalScanEvents',count(*),'firstScanEvents',count(*) FILTER(WHERE "isFirstScan"),

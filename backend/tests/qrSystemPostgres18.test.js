@@ -402,6 +402,28 @@ async function main(){
   assert.equal(JSON.parse(last(app,analytics(caps.tenant,ids.licenseeA,{code:"SAFE",status:"REDEEMED"}))).totals.redeemed,1);
   assert.equal(JSON.parse(last(app,analytics(caps.platform,ids.licenseeB,{code:"SAFE"}))).logs[0].latestDecision.outcome,"AUTHENTIC");
   denied(`SET app.qr_target_user_ids='${ids.platform}'; SELECT email FROM public."User"`,/permission denied|QR_|row-level security/);
+  // Canonical lifecycle buckets must agree in totals and daily trends.
+  const bucketStatuses=["DORMANT","ACTIVE","ALLOCATED","ACTIVATED"];
+  bucketStatuses.forEach((status,index)=>run(bootstrap,`INSERT INTO public."QRCode"(id,code,"displayCode","licenseeId",status,"createdAt","updatedAt") VALUES
+    ('40000000-0000-4000-8000-0000000009${71+index}','local-bucket-${status}','BUCKET-${status}','${ids.licenseeA}','${status}','2026-01-15T12:00:00Z',now())`));
+  const buckets=JSON.parse(last(app,analytics(caps.tenant,ids.licenseeA,{code:"BUCKET-"})));
+  for(const row of [buckets.totals,...buckets.trend]){
+    assert.equal(row.total,4); assert.equal(row.dormant,2); assert.equal(row.allocated,2);
+    assert.equal(row.dormant+row.allocated,row.total);
+    assert.equal(row.printed+row.redeemed+row.blocked,0);
+  }
+  assert.equal(buckets.trend.length,1);
+  for(const status of bucketStatuses){
+    const result=JSON.parse(last(app,analytics(caps.tenant,ids.licenseeA,{code:"BUCKET-",status})));
+    assert.equal(result.trend.length,1);
+    for(const row of [result.totals,result.trend[0]]){
+      assert.equal(row.total,1);
+      assert.equal(row.dormant,["DORMANT","ACTIVE"].includes(status)?1:0);
+      assert.equal(row.allocated,["ALLOCATED","ACTIVATED"].includes(status)?1:0);
+      assert.equal(row.dormant+row.allocated,1);
+    }
+  }
+
   // Five batches exceed a two-row page; UUID order disagrees with recency.
   const batchId=n=>`40000000-0000-4000-8000-${String(9500+n).padStart(12,'0')}`;
   const codeId=n=>`40000000-0000-4000-8000-${String(9600+n).padStart(12,'0')}`;

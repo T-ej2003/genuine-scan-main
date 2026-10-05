@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='366954c34804455476e8505f91b7713f0aeb8942241cc1ae07c891332c9ec566'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:366954c34804455476e8505f91b7713f0aeb8942241cc1ae07c891332c9ec566'
+    AND source_contract_sha256='d3efa8d03948724b5fdd9eee4e4d6ddeb8f72e7276544c3af912bf5f4488b21e'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:d3efa8d03948724b5fdd9eee4e4d6ddeb8f72e7276544c3af912bf5f4488b21e'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:366954c34804455476e8505f91b7713f0aeb8942241cc1ae07c891332c9ec566')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:d3efa8d03948724b5fdd9eee4e4d6ddeb8f72e7276544c3af912bf5f4488b21e')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -7192,8 +7192,8 @@ BEGIN
   ), days AS (
     SELECT day FROM daily_codes UNION SELECT date_trunc('day',e."scannedAt") FROM events e
   ), daily AS (
-    SELECT d.day,count(DISTINCT c.id) AS total,count(DISTINCT c.id) FILTER(WHERE c.status='DORMANT') AS dormant,
-      count(DISTINCT c.id) FILTER(WHERE c.status IN ('ACTIVE','ALLOCATED','ACTIVATED')) AS allocated,
+    SELECT d.day,count(DISTINCT c.id) AS total,count(DISTINCT c.id) FILTER(WHERE c.status IN ('DORMANT','ACTIVE')) AS dormant,
+      count(DISTINCT c.id) FILTER(WHERE c.status IN ('ALLOCATED','ACTIVATED')) AS allocated,
       count(DISTINCT c.id) FILTER(WHERE c.status='PRINTED') AS printed,count(DISTINCT c.id) FILTER(WHERE c.status IN ('REDEEMED','SCANNED')) AS redeemed,
       count(DISTINCT c.id) FILTER(WHERE c.status='BLOCKED') AS blocked,
       (SELECT count(*) FROM events e WHERE date_trunc('day',e."scannedAt")=d.day) AS "scanEvents"
@@ -7206,7 +7206,7 @@ BEGIN
       'from',from_at,'to',to_at,'quantities',jsonb_build_object('distinctCodes',(SELECT count(*) FROM scoped),
         'scanEvents',(SELECT count(*) FROM events),'matchedBatches',(SELECT count(DISTINCT "batchId") FROM scoped))),
     'totals',(SELECT jsonb_build_object('total',count(*),'created',count(*),
-      'dormant',count(*) FILTER(WHERE status='DORMANT'),'allocated',count(*) FILTER(WHERE status IN ('ACTIVE','ALLOCATED','ACTIVATED')),
+      'dormant',count(*) FILTER(WHERE status IN ('DORMANT','ACTIVE')),'allocated',count(*) FILTER(WHERE status IN ('ALLOCATED','ACTIVATED')),
       'printed',count(*) FILTER(WHERE status='PRINTED'),'redeemed',count(*) FILTER(WHERE status IN ('REDEEMED','SCANNED')),
       'blocked',count(*) FILTER(WHERE status='BLOCKED')) FROM scoped),
     'eventSummary',(SELECT jsonb_build_object('totalScanEvents',count(*),'firstScanEvents',count(*) FILTER(WHERE "isFirstScan"),
