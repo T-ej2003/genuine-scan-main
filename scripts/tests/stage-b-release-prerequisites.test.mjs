@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import test from 'node:test';
 import { taskChange, rotationVariables } from './fixtures/stage-b-task-rotation.mjs';
 import { canonicalBrokerPolicy } from './fixtures/staged-broker.mjs';
-import { TASK_REGISTRATION, BROKER_POLICY_PRUNING, TASK_REGISTRATION_ADDRESSES, assertPrerequisitePlan, authenticateRegisteredDefinition, executeTaskRegistration, deriveBrokerPolicy, assertBrokerPolicyReconciliation, assertBrokerPolicyPruningPlan } from '../aws/stage-b-release-prerequisites.mjs';
+import { TASK_REGISTRATION, BROKER_POLICY_PRUNING, TASK_REGISTRATION_ADDRESSES, assertPrerequisitePlan, authenticateRegisteredDefinition, assertRegisteredTaskDefinitionState, taskMapFromRegisteredDefinitions, executeTaskRegistration, deriveBrokerPolicy, assertBrokerPolicyReconciliation, assertBrokerPolicyPruningPlan } from '../aws/stage-b-release-prerequisites.mjs';
 import { brokerDigest, assertBrokerPublicationPlan } from '../aws/stage-b-staged-broker-contract.mjs';
 import { preparation as brokerPreparation, publicationPlan, rig as brokerRig, configuration, authorization as brokerAuthorization, cutoverPlan } from './fixtures/staged-broker-runtime.mjs';
 import { executeBrokerPublication, prepareBrokerCutover, executeBrokerAliasCas, reconcileBrokerAlias } from '../aws/stage-b-staged-broker.mjs';
@@ -224,4 +225,110 @@ test('registration receipt commits before lost response: exact receipt is reused
  r.deps.record=async(...args)=>{await record(...args);if(args[1]==='TASK_REGISTERED'&&!lost){lost=true;throw Error('receipt response lost');}};
  await assert.rejects(r.recover);const recovered=await r.recover();assert.ok(recovered);assert.equal(r.writes(),1);
  await assert.rejects(()=>executeTaskRegistration({preparation:r.p,authorization:r.auth},r.deps));assert.equal(r.writes(),1);
+});
+
+function fixture(address = TASK_REGISTRATION_ADDRESSES[0], revision = 42) {
+  const desired = taskChange(address, 1).change.after;
+  desired.arn = null; desired.revision = null; desired.ipc_mode = null; desired.pid_mode = null;
+  desired.container_definitions = JSON.stringify([{ ...JSON.parse(desired.container_definitions)[0],
+    environment: [{ name: 'ONE', value: '1' }, { name: 'TWO', value: '2' }],
+    secrets: [{ name: 'ONE', valueFrom: 'approved-one' }, { name: 'TWO', valueFrom: 'approved-two' }],
+    command: ['run', 'one'], entryPoint: ['node'], mountPoints: null }]);
+  const identity = `arn:aws:ecs:eu-west-2:368992683803:task-definition/${desired.family}`;
+  const state = { ...structuredClone(desired), arn: `${identity}:${revision}`, arn_without_revision: identity, id: desired.family, revision,
+    enable_fault_injection: false, ipc_mode: '', pid_mode: '', volume: desired.volume.map(v => ({ ...v, configure_at_launch: false })) };
+  const containers = JSON.parse(state.container_definitions);
+  for (const c of containers) Object.assign(c, { mountPoints: [], portMappings: [], systemControls: [], volumesFrom: [] });
+  state.container_definitions = JSON.stringify(containers);
+  const observed = { taskDefinitionArn: state.arn, revision, status: 'ACTIVE', family: desired.family,
+    taskRoleArn: desired.task_role_arn, executionRoleArn: desired.execution_role_arn, networkMode: desired.network_mode,
+    cpu: desired.cpu, memory: desired.memory, requiresCompatibilities: desired.requires_compatibilities,
+    runtimePlatform: { operatingSystemFamily: desired.runtime_platform.operating_system_family, cpuArchitecture: desired.runtime_platform.cpu_architecture },
+    volumes: desired.volume.map(v => ({ name: v.name, host: {} })), containerDefinitions: structuredClone(containers),
+    tags: Object.entries(desired.tags).map(([key, value]) => ({ key, value })), enableFaultInjection: false };
+  for (const c of observed.containerDefinitions) { c.cpu = 0; c.environment.reverse(); c.secrets.reverse(); }
+  return { address, desired, state, observed, after_unknown: { arn: true, arn_without_revision: true, id: true, revision: true,
+    enable_fault_injection: true, requires_compatibilities: [false], runtime_platform: [{}], tags: {},
+    volume: desired.volume.map(() => ({ configure_at_launch: true, docker_volume_configuration: [] })) } };
+}
+const normal = r => authenticateRegisteredDefinition(r);
+const recoveryState = r => assertRegisteredTaskDefinitionState(r.desired, r.state, r.after_unknown);
+for (const address of TASK_REGISTRATION_ADDRESSES) test(`normal and recovery share bounded provider equivalences: ${address}`, () => {
+  const r = fixture(address); normal(r); recoveryState(r);
+  const absent = structuredClone(r); absent.observed.volumes.forEach(v => delete v.host); absent.observed.containerDefinitions.forEach(c => delete c.cpu);
+  normal(absent);
+});
+
+const containerChange = (r, field, value) => {
+  const c = JSON.parse(r.state.container_definitions); c[0][field] = value;
+  r.state.container_definitions = JSON.stringify(c); r.observed.containerDefinitions[0][field] = value;
+};
+const volumeChange = (r, tf, aws) => { Object.assign(r.state.volume[0], tf); Object.assign(r.observed.volumes[0], aws); };
+const negatives = [
+  ['host sourcePath', r => volumeChange(r, { host_path: '/tmp/anything' }, { host: { sourcePath: '/tmp/anything' } })],
+  ['unknown host field', r => volumeChange(r, { unknown: true }, { host: { unknown: true } })],
+  ['EFS', r => volumeChange(r, { efs_volume_configuration: [{ file_system_id: 'other' }] }, { efsVolumeConfiguration: { fileSystemId: 'other' } })],
+  ['Docker', r => volumeChange(r, { docker_volume_configuration: [{ scope: 'shared' }] }, { dockerVolumeConfiguration: { scope: 'shared' } })],
+  ['FSx', r => volumeChange(r, { fsx_windows_file_server_volume_configuration: [{}] }, { fsxWindowsFileServerVolumeConfiguration: {} })],
+  ['S3 files', r => volumeChange(r, { s3files_volume_configuration: [{}] }, { s3filesVolumeConfiguration: {} })],
+  ['configure at launch', r => volumeChange(r, { configure_at_launch: true }, { configureAtLaunch: true })],
+  ['unexpected volume', r => { r.state.volume[0].name = 'other'; r.observed.volumes[0].name = 'other'; }],
+  ['missing volume', r => { r.state.volume = []; r.observed.volumes = []; }],
+  ['duplicate volume', r => { r.state.volume.push(structuredClone(r.state.volume[0])); r.observed.volumes.push(structuredClone(r.observed.volumes[0])); }],
+  ['enabled fault injection', r => { r.state.enable_fault_injection = true; r.observed.enableFaultInjection = true; }],
+  ['nonboolean fault injection', r => r.state.enable_fault_injection = 'false'],
+  ['ipc mode', r => { r.state.ipc_mode = 'host'; r.observed.ipcMode = 'host'; }],
+  ['pid mode', r => { r.state.pid_mode = 'host'; r.observed.pidMode = 'host'; }],
+  ['image digest', r => containerChange(r, 'image', 'registry/image@sha256:' + 'e'.repeat(64))],
+  ['command', r => containerChange(r, 'command', ['different'])],
+  ['command order', r => containerChange(r, 'command', ['one', 'run'])],
+  ['entrypoint', r => containerChange(r, 'entryPoint', ['different'])],
+  ['environment', r => containerChange(r, 'environment', [{ name: 'ONE', value: 'different' }])],
+  ['duplicate environment', r => containerChange(r, 'environment', [{ name: 'ONE', value: '1' }, { name: 'ONE', value: '2' }])],
+  ['secrets', r => containerChange(r, 'secrets', [{ name: 'ONE', valueFrom: 'different' }])],
+  ['mount', r => containerChange(r, 'mountPoints', [{ sourceVolume: 'other', containerPath: '/etc' }])],
+  ['privileged', r => containerChange(r, 'privileged', true)],
+  ['container CPU', r => containerChange(r, 'cpu', 100)],
+  ['unknown container field', r => containerChange(r, 'unknownProviderField', [])],
+  ['execution role', r => { r.state.execution_role_arn += '-other'; r.observed.executionRoleArn += '-other'; }],
+  ['task role', r => { r.state.task_role_arn += '-other'; r.observed.taskRoleArn += '-other'; }],
+  ['unknown provider field', r => { r.state.unknownProviderField = false; r.after_unknown.unknownProviderField = true; }],
+  ['unknown computed security field', r => r.after_unknown.container_definitions = true],
+  ['unknown nested computed field', r => r.after_unknown.volume[0].host_path = true],
+  ['wrong identity output', r => r.state.arn_without_revision += '-other'],
+];
+for (const [name, mutate] of negatives) for (const [mode, verify] of [['normal', normal], ['recovery', recoveryState]]) {
+  if (mode === 'normal' && name.startsWith('unknown computed') || mode === 'normal' && name === 'unknown nested computed field') continue;
+  test(`${mode} rejects ${name}`, () => { const r = fixture(); mutate(r); assert.throws(() => verify(r)); });
+}
+for (const host of [{ sourcePath: '' }, [], null, { unknown: null }]) test(`ECS host must be structurally empty: ${JSON.stringify(host)}`, () => {
+  const r = fixture(); r.observed.volumes[0].host = host; assert.throws(() => normal(r));
+});
+
+function recoverRows(rows, full) {
+  const authorization = { test: 'original-consumed-authority' }, id = brokerDigest(authorization), authorizedAt = '2026-01-01T00:00:00.000Z';
+  const plan = full?.plan || { complete: false, errored: false, variables: { tooling_sha: { value: 'a'.repeat(40) } }, resource_changes: rows.map(r => ({ address: r.address, type: 'aws_ecs_task_definition', mode: 'managed', change: { before: { ...r.desired, skip_destroy: true, arn: r.state.arn.replace(/:[0-9]+$/, ':1') }, after: { ...r.desired, skip_destroy: true }, actions: ['create', 'delete'], after_unknown: r.after_unknown } })) };
+  // Real/synthetic approved-plan validation is exercised by assertPrerequisitePlan
+  // in existing tests. Recovery uses the original complete plan when provided.
+  const p = { purpose: 'STAGE_B_TASK_REGISTRATION', sourceSha: plan.variables.tooling_sha.value, treeSha256: 'b'.repeat(64),
+    savedPlanSha256: brokerDigest(Buffer.from('original-saved-plan')), logicalPlanSha256: brokerDigest(plan), artifactSetSha256: 'c'.repeat(64),
+    canonicalAddresses: plan.resource_changes.map(c => c.address), state: { lineage: 'original', serial: 1 }, alias: {}, prerequisites: {} };
+  let receipt; const deps = { authenticateRecoveryIntent: async () => ({ id, authorizedAt }),
+    readPlan: async () => ({ plan, bytes: Buffer.from('original-saved-plan'), artifactSetSha256: p.artifactSetSha256 }),
+    readCheckout: async () => ({ sourceSha: p.sourceSha, treeSha256: p.treeSha256 }), getAlias: async () => p.alias, readPrerequisites: async () => p.prerequisites,
+    readStateIdentity: async () => ({ lineage: 'original', serial: 2 }), authenticateRegistrationState: async () => rows.forEach(recoveryState),
+    readRegisteredTaskDefinition: async address => rows.find(r => r.address === address).state,
+    describeTaskDefinition: async arn => rows.find(r => r.state.arn === arn).observed,
+    readRecoveryReceipt: async () => receipt || null, record: async (key, status, value) => { assert.equal(key, id); assert.equal(status, 'TASK_REGISTERED'); receipt = value; },
+    applyTaskRegistration: async () => assert.fail('Recovery must not apply or register') };
+  return recoverTaskRegistration({ preparation: p, authorization }, deps);
+}
+
+const realPath = process.env.MSCQR_REGISTRATION_VERIFIER_FIXTURE;
+test('twelve captured production successors authenticate normally and in read-only recovery', { skip: !realPath }, async () => {
+  const full = JSON.parse(fs.readFileSync(realPath)); assert.equal(full.rows.length, 12);
+  const normalDefinitions = Object.fromEntries(full.rows.map(r => [r.address, normal(r)])); full.rows.forEach(recoveryState);
+  const result = await recoverRows(full.rows, full);
+  assert.deepEqual(result.definitions, normalDefinitions);
+  assert.deepEqual(result.taskMap, taskMapFromRegisteredDefinitions(normalDefinitions));
 });

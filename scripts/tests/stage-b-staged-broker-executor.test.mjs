@@ -538,3 +538,39 @@ test('no-op policy refuses changed state after its authorized prerequisite read'
  r.execute.readStateIdentity=async()=>++reads===3?{...r.p.state,serial:r.p.state.serial+1}:r.p.state;
  await assert.rejects(()=>r.execute.executeBrokerPolicyConvergence());assert.equal(r.state().writes,0);assert.ok(!r.objects.has(stageBAttemptStepS3ObjectKey(brokerDigest(r.auth),2)));
 });
+
+test('registration recovery checks the same bounded canonical state without applying', async () => {
+  const { taskChange } = await import('./fixtures/stage-b-task-rotation.mjs');
+  const { TASK_REGISTRATION_ADDRESSES } = await import('../aws/stage-b-release-prerequisites.mjs');
+  const r = await native('PUBLICATION'), adapter = r.makeAdapter('REGISTRATION_RECOVERY');
+  const changes = TASK_REGISTRATION_ADDRESSES.map((address, i) => taskChange(address, i + 1));
+  const resources = changes.map(c => ({ address: c.address, type: c.type, mode: c.mode, values: structuredClone(c.change.before) }));
+  const current = resources.map((resource, i) => {
+    const c = changes[i]; c.change.after.arn = null; c.change.after.revision = null;
+    c.change.after.ipc_mode = null; c.change.after.pid_mode = null;
+    c.change.after_unknown = { arn: true, arn_without_revision: true, id: true, revision: true, enable_fault_injection: true,
+      requires_compatibilities: [false], volume: [{ configure_at_launch: true }] };
+    const prefix = `arn:aws:ecs:eu-west-2:368992683803:task-definition/${c.change.after.family}`;
+    return { ...resource, values: { ...structuredClone(c.change.after), arn: `${prefix}:42`, arn_without_revision: prefix,
+      id: c.change.after.family, revision: 42, enable_fault_injection: false, ipc_mode: '', pid_mode: '',
+      volume: c.change.after.volume.map(v => ({ ...v, configure_at_launch: false })) } };
+  });
+  const plan = { resource_changes: changes, prior_state: { values: { root_module: { resources } } } }, show = { values: { root_module: { resources: current } } };
+  r.setShow(show); await adapter.authenticateRegistrationState(plan);
+  for (const mutate of [v => v.enable_fault_injection = true, v => v.ipc_mode = 'host', v => v.pid_mode = 'host',
+    v => v.execution_role_arn += '-other', v => v.volume[0].host_path = '/tmp/anything', v => v.unapproved = false]) {
+    const changed = structuredClone(show); mutate(changed.values.root_module.resources[0].values); r.setShow(changed);
+    await assert.rejects(() => adapter.authenticateRegistrationState(plan));
+  }
+  assert.equal(r.calls.filter(c => c.command === 'terraform' && c.args.includes('apply')).length, 0);
+});
+
+test('native registration recovery authenticates the captured complete production state read-only', {
+  skip: !process.env.MSCQR_REGISTRATION_VERIFIER_FIXTURE,
+}, async () => {
+  const full = JSON.parse(fs.readFileSync(process.env.MSCQR_REGISTRATION_VERIFIER_FIXTURE));
+  const r = await native('PUBLICATION'), adapter = r.makeAdapter('REGISTRATION_RECOVERY');
+  r.setShow({ values: { root_module: full.current } });
+  await adapter.authenticateRegistrationState(full.plan);
+  assert.equal(r.calls.filter(c => c.command === 'terraform' && c.args.includes('apply')).length, 0);
+});
